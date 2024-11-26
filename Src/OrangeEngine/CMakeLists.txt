@@ -21,6 +21,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_INCLUDE_DIR})
 target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PRIVATE)
 
+target_compile_definitions(${PROJECT_NAME} PUBLIC -DPLATFORM_WINDOWS)
+
 # 设置输出目录
 set_target_properties(${PROJECT_NAME} PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
