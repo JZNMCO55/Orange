@@ -7,7 +7,7 @@ extern Orange::Application* Orange::CreateApplication();
 
 int main(int argc, char** argv)
 {
-    std::cout << "Orange Engine" << std::endl;
+    spdlog::info("Orange Engine");
     auto app = Orange::CreateApplication();
     app->Run();
     delete app;
