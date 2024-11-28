@@ -7,7 +7,9 @@ extern Orange::Application* Orange::CreateApplication();
 
 int main(int argc, char** argv)
 {
-    spdlog::info("Orange Engine");
+    Orange::Log::Init();
+
+    Orange::Log::GetOrangeLogger()->warn("Engine starting up...");
     auto app = Orange::CreateApplication();
     app->Run();
     delete app;
