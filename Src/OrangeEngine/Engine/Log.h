@@ -23,8 +23,8 @@ private:
     static std::shared_ptr<spdlog::logger> msClientLogger;
 };
 
-std::shared_ptr<spdlog::logger> Log::msOrangeLogger; // 正确定义静态成员变量
-std::shared_ptr<spdlog::logger> Log::msClientLogger; // 正确定义静态成员变量
+std::shared_ptr<spdlog::logger> Log::msOrangeLogger;
+std::shared_ptr<spdlog::logger> Log::msClientLogger;
 }
 #endif // LOG_H
 

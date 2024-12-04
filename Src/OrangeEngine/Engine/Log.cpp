@@ -26,12 +26,10 @@ namespace Orange
 
     inline std::shared_ptr<spdlog::logger>& Log::GetOrangeLogger()
     {
-        std::cout<<"GetOrangeLogger()"<<std::endl;
         return msOrangeLogger;
     }
     inline std::shared_ptr<spdlog::logger>& Log::GetClientLogger()
     {
-        std::cout<<"GetClientLogger()"<<std::endl;
         return msClientLogger;
     }
 }
