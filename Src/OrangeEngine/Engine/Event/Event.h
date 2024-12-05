@@ -2,10 +2,7 @@
 #define EVENT_H
 
 #include "OrangeExport.h"
-
-#include <string>
-#include <functional>
-#include <sstream>
+#include "../pch.h"
 
 namespace Orange
 {

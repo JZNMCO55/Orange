@@ -2,9 +2,7 @@
 #define APPLICATION_H
 
 #include "OrangeExport.h"
-#include <string>
-#include <functional>
-#include <sstream>
+#include "../pch.h"
 namespace Orange
 {
     class ORANGE_EXPORT Application

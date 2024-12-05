@@ -2,9 +2,7 @@
 #define APPLICATION_EVENT_H
 
 #include "Event.h"
-#include <string>
-#include <functional>
-#include <sstream>
+#include "../pch.h"
 namespace Orange
 {
     class ORANGE_EXPORT WindowResizeEvent : public Event
