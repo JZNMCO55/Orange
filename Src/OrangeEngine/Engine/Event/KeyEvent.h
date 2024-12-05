@@ -2,7 +2,9 @@
 #define KEY_EVENT_H
 
 #include "Event.h"
-
+#include <string>
+#include <functional>
+#include <sstream>
 namespace Orange
 {
     class ORANGE_EXPORT KeyEvent : public Event

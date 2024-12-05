@@ -14,8 +14,3 @@ add_executable(${PROJECT_NAME} ${GAME_SOURCES})
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/Src/OrangeEngine)
 target_link_directories(${PROJECT_NAME} PUBLIC ${ORANGEENGINE_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PUBLIC OrangeEngine)
-
-# 设置输出目录
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-)

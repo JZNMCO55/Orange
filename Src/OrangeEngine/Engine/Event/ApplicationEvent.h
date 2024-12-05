@@ -2,7 +2,9 @@
 #define APPLICATION_EVENT_H
 
 #include "Event.h"
-
+#include <string>
+#include <functional>
+#include <sstream>
 namespace Orange
 {
     class ORANGE_EXPORT WindowResizeEvent : public Event
@@ -28,7 +30,7 @@ namespace Orange
 
     class ORANGE_EXPORT WindowCloseEvent : public Event
     {
-    public:
+    public: 
         WindowCloseEvent() = default;
 
         EVENT_CLASS_TYPE(WindowClose)
