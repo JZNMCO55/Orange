@@ -17,6 +17,7 @@ namespace Orange
         while (mbRunning)
         {
             glClearColor(1.0f, 0.f, 0.f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
             mpWindow->OnUpdate();
         }
     }
