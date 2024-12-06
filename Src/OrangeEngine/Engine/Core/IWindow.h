@@ -21,6 +21,7 @@ namespace Orange
 
     };
 
+    // Window interface to support diffrent window libraries in different platforms i
     class ORANGE_API IWindow
     {
     public:
