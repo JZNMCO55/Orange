@@ -11,6 +11,9 @@ file(GLOB_RECURSE ORANGEENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 # 搜索头文件
 file(GLOB_RECURSE ORANGEENGINE_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
 
+# 查找OpenGL库
+find_package(OpenGL REQUIRED)
+
 # 创建动态库目标
 add_library(${PROJECT_NAME} SHARED ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
 
@@ -25,6 +28,7 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
 
 # 指定编译选项
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DPLATFORM_WINDOWS)
+target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_ENABLE_ASSERTS)
 
 # 指定头文件路径
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -40,4 +44,5 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PRIVATE 
                         glfw3
+                        ${OPENGL_LIBRARIES}
                      )

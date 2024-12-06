@@ -22,9 +22,6 @@ private:
     static std::shared_ptr<spdlog::logger> msOrangeLogger;
     static std::shared_ptr<spdlog::logger> msClientLogger;
 };
-
-std::shared_ptr<spdlog::logger> Log::msOrangeLogger;
-std::shared_ptr<spdlog::logger> Log::msClientLogger;
 }
 #endif // LOG_H
 

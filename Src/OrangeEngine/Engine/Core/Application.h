@@ -15,6 +15,7 @@ namespace Orange
 
     private:
         std::unique_ptr<IWindow> mpWindow{ nullptr };
+        bool mbRunning{ true };
     };
 
     Application* CreateApplication();

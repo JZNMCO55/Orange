@@ -4,6 +4,8 @@
 
 namespace Orange
 {
+    std::shared_ptr<spdlog::logger> Log::msOrangeLogger;
+    std::shared_ptr<spdlog::logger> Log::msClientLogger;
     Log::Log()
     {
     }

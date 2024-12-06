@@ -17,6 +17,7 @@ namespace Orange
     {
         // 这里可以添加更新窗口的代码
         glfwPollEvents();
+        glfwSwapBuffers(mpWindow);
     }
 
     void WinWindow::SetVSync(bool enabled)
@@ -38,20 +39,18 @@ namespace Orange
         mData.mTitle = props.mTitle;
         mData.mWidth = props.mWidth;
         mData.mHeight = props.mHeight;
+        static bool sbGLFWInitialized = false;
 
-        if (!glfwInit())
+        if (!sbGLFWInitialized)
         {
-            // 初始化失败处理
-            throw std::runtime_error("Failed to initialize GLFW");
+            int success = glfwInit();
+            ORANGE_CORE_ASSERT(success, "Failed to initialize GLFW");
+            sbGLFWInitialized = true;
         }
 
         mpWindow = glfwCreateWindow((int)props.mWidth, (int)props.mHeight, props.mTitle.c_str(), nullptr, nullptr);
-        if (!mpWindow)
-        {
-            // 创建窗口失败处理
-            glfwTerminate();
-            throw std::runtime_error("Failed to create GLFW window");
-        }
+        glfwMakeContextCurrent(mpWindow);
+        SetVSync(true);
     }
 
     void WinWindow::Shutdown()
