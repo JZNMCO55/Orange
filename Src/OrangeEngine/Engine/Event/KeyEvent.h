@@ -5,7 +5,7 @@
 #include "../pch.h"
 namespace Orange
 {
-    class ORANGE_EXPORT KeyEvent : public Event
+    class ORANGE_API KeyEvent : public Event
     {
     public:
         inline int GetKeyCode() const { return mKeyCode; }
@@ -18,7 +18,7 @@ namespace Orange
         int mKeyCode;
     };
 
-    class ORANGE_EXPORT KeyPressedEvent : public KeyEvent
+    class ORANGE_API KeyPressedEvent : public KeyEvent
     {
     public:
         KeyPressedEvent(int keyCode, int repeatCount)
@@ -38,7 +38,7 @@ namespace Orange
         int mRepeatCount;
     };
 
-    class ORANGE_EXPORT KeyReleasedEvent : public KeyEvent
+    class ORANGE_API KeyReleasedEvent : public KeyEvent
     {
     public:
         KeyReleasedEvent(int keyCode)
@@ -54,7 +54,7 @@ namespace Orange
         EVENT_CLASS_TYPE(KeyReleased)
     };
 
-    class ORANGE_EXPORT KeyTypedEvent : public KeyEvent
+    class ORANGE_API KeyTypedEvent : public KeyEvent
     {
     public: 
         KeyTypedEvent(int keyCode)

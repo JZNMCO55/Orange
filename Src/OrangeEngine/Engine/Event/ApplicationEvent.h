@@ -5,7 +5,7 @@
 #include "../pch.h"
 namespace Orange
 {
-    class ORANGE_EXPORT WindowResizeEvent : public Event
+    class ORANGE_API WindowResizeEvent : public Event
     {
     public:
         WindowResizeEvent(unsigned int width, unsigned int height)
@@ -26,7 +26,7 @@ namespace Orange
         unsigned int mWidth, mHeight;
     };
 
-    class ORANGE_EXPORT WindowCloseEvent : public Event
+    class ORANGE_API WindowCloseEvent : public Event
     {
     public: 
         WindowCloseEvent() = default;
@@ -35,7 +35,7 @@ namespace Orange
         EVENT_CLASS_CATEGORY(EventCategoryApplication)
     };
 
-    class ORANGE_EXPORT AppTickEvent : public Event
+    class ORANGE_API AppTickEvent : public Event
     {
     public:
         AppTickEvent() = default;
@@ -44,7 +44,7 @@ namespace Orange
         EVENT_CLASS_CATEGORY(EventCategoryApplication)
     };
 
-    class ORANGE_EXPORT AppUpdateEvent : public Event
+    class ORANGE_API AppUpdateEvent : public Event
     {
     public:
         AppUpdateEvent() = default;
@@ -53,7 +53,7 @@ namespace Orange
         EVENT_CLASS_CATEGORY(EventCategoryApplication)
     };
 
-    class ORANGE_EXPORT AppRenderEvent : public Event
+    class ORANGE_API AppRenderEvent : public Event
     {
     public:
         AppRenderEvent() = default;

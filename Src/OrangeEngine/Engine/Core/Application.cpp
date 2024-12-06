@@ -4,6 +4,7 @@ namespace Orange
 {
     Application::Application()
     {
+
     }
 
     Application::~Application()

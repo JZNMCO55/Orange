@@ -7,4 +7,10 @@
 #include <memory>
 #include <sstream>
 
+#ifdef ORANGE_ENABLE_ASSERT
+
+#else
+
+#endif // ORANGE_ENABLE_ASSERT
+
 #endif //PCH_H

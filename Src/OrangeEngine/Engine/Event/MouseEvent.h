@@ -4,7 +4,7 @@
 #include "Event.h"
 namespace Orange
 {
-    class ORANGE_EXPORT MouseMoveEvent : public Event
+    class ORANGE_API MouseMoveEvent : public Event
     {
     public:
         MouseMoveEvent(float x, float y)
@@ -26,7 +26,7 @@ namespace Orange
         float mMouseX, mMouseY;
     };
 
-    class ORANGE_EXPORT MouseButtonEvent : public Event
+    class ORANGE_API MouseButtonEvent : public Event
     {
     public:
         MouseButtonEvent(int button)
@@ -47,7 +47,7 @@ namespace Orange
         int mButton;
     };
 
-    class ORANGE_EXPORT MouseButtonReleasedEvent : public MouseButtonEvent
+    class ORANGE_API MouseButtonReleasedEvent : public MouseButtonEvent
     {
     public:
         MouseButtonReleasedEvent(int button)
@@ -63,7 +63,7 @@ namespace Orange
         EVENT_CLASS_TYPE(MouseButtonReleased)
     };
 
-    class ORANGE_EXPORT MouseButtonPressedEvent : public MouseButtonEvent
+    class ORANGE_API MouseButtonPressedEvent : public MouseButtonEvent
     {
     public:
         MouseButtonPressedEvent(int button)

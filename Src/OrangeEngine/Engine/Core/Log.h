@@ -7,7 +7,7 @@
 namespace Orange 
 {
 
-class ORANGE_EXPORT Log
+class ORANGE_API Log
 {
 public:
     Log();
