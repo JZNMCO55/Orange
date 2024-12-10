@@ -44,5 +44,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PRIVATE 
                         glfw3
+                        glad
                         ${OPENGL_LIBRARIES}
                      )

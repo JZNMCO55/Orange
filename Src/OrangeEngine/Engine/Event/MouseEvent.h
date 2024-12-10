@@ -47,6 +47,28 @@ namespace Orange
         int mButton;
     };
 
+    class ORANGE_API MouseScrolledEvent : public Event
+    {
+    public:
+        MouseScrolledEvent(float xOffset, float yOffset)
+            : mXOffset(xOffset), mYOffset(yOffset) {}   
+
+        float GetXOffset() const { return mXOffset; }
+        float GetYOffset() const { return mYOffset; }
+
+        std::string ToString() const override
+        {
+            std::stringstream ss;
+            ss << "MouseScrolledEvent: " << mXOffset << ", " << mYOffset;
+            return ss.str();
+        }
+
+        EVENT_CLASS_TYPE(MouseScrolled)
+        EVENT_CLASS_CATEGORY(EventCategoryMouse | EventCategoryInput)
+    private:
+        float mXOffset, mYOffset;
+    };
+
     class ORANGE_API MouseButtonReleasedEvent : public MouseButtonEvent
     {
     public:

@@ -3,6 +3,7 @@
 
 #include "pch.h"
 #include "Application.h" 
+#include "Layer.h"
 #include "Log.h"
 // -------------Entry Point-----------------
 #include "EntryPoint.h"

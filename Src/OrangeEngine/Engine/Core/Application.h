@@ -3,6 +3,11 @@
 
 #include "OrangeExport.h"
 #include "IWindow.h"
+#include "LayerStack.h"
+
+class WindowCloseEvent;
+class Layer;
+
 namespace Orange
 {
     class ORANGE_API Application
@@ -13,7 +18,16 @@ namespace Orange
 
         void Run();
 
+        void OnEvent(Event& e);
+
+        void PushLayer(Layer* layer);
+        void PopLayer(Layer* layer);
+
     private:
+        bool OnWindowClose(WindowCloseEvent& e);
+
+    private:
+        LayerStack mLayerStack;
         std::unique_ptr<IWindow> mpWindow{ nullptr };
         bool mbRunning{ true };
     };
