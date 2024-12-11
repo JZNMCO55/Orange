@@ -13,7 +13,6 @@ namespace Orange
     class ORANGE_API Application
     {
     public:
-        Application();
         virtual ~Application();
 
         void Run();
@@ -21,15 +20,25 @@ namespace Orange
         void OnEvent(Event& e);
 
         void PushLayer(Layer* layer);
-        void PopLayer(Layer* layer);
+        void PushOverlay(Layer* layer);
+
+        inline IWindow& GetWindow() { return *mpWindow; }
+        
+        static Application* GetInstance();
+    protected:
+        Application();
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);
+        Application(const Application&) = delete;
+        Application(const Application&&) = delete;
+        Application& operator=(const Application&) = delete;
 
     private:
         LayerStack mLayerStack;
         std::unique_ptr<IWindow> mpWindow{ nullptr };
         bool mbRunning{ true };
+        static Application* spInstance;
     };
 
     Application* CreateApplication();

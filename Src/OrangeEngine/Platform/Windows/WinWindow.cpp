@@ -5,6 +5,7 @@
 #include "KeyEvent.h"
 #include "MouseEvent.h" 
 
+
 namespace Orange
 {
     static void GLFWErrorCallback(int error, const char* description)
@@ -59,10 +60,15 @@ namespace Orange
 
         mpWindow = glfwCreateWindow((int)props.mWidth, (int)props.mHeight, props.mTitle.c_str(), nullptr, nullptr);
         glfwMakeContextCurrent(mpWindow);
+        int status = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+        ORANGE_CORE_ASSERT(status, "Failed to initialize Glad");
         glfwSetWindowUserPointer(mpWindow, &mData);
         SetVSync(true);
 
         // Set GLFW callbacks
+        // Set GLFW error callback
+        glfwSetErrorCallback(GLFWErrorCallback);
+
         // WindowResizeEvent
         glfwSetWindowSizeCallback(mpWindow, [](GLFWwindow* tpWindow, int width, int height)
         {

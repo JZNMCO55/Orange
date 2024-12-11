@@ -1,8 +1,8 @@
 #ifndef WIN_WINDOW_H
 #define WIN_WINDOW_H
 
+#include "pch.h"
 #include "IWindow.h"
-#include "GLFW/glfw3.h"
 #include "OrangeExport.h"
 
 namespace Orange

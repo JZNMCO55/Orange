@@ -7,6 +7,8 @@
 #include <memory>
 #include <sstream>
 
+#include "glad/glad.h"
+#include "GLFW/glfw3.h"
 #include "Log.h"
 
 #ifdef ORANGE_ENABLE_ASSERTS

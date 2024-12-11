@@ -33,7 +33,9 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_ENABLE_ASSERTS)
 # 指定头文件路径
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${THIRDPARTY_INCLUDE_DIR}
+    ${THIRDPARTY_INCLUDE_DIR}/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/OpenGL
     ${CMAKE_CURRENT_SOURCE_DIR}/Platform
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Core
@@ -45,5 +47,6 @@ target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PRIVATE 
                         glfw3
                         glad
+                        imgui
                         ${OPENGL_LIBRARIES}
                      )

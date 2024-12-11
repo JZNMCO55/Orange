@@ -2,17 +2,24 @@
 #include "Windows/WinWindow.h"
 #include "ApplicationEvent.h"
 #include "Application.h"
+#include "glad/glad.h"
 #include "GLFW/glfw3.h"
 
 
 namespace Orange
 {
 #define BIND_EVENT_FN(x) std::bind(&Application::x, this, std::placeholders::_1)
+    Application* Application::spInstance = nullptr;
+    Application* Application::GetInstance()
+    {
+        return spInstance;
+    }
 
     Application::Application()
     {
         mpWindow = WinWindow::Create();
         mpWindow->SetEventCallback(BIND_EVENT_FN(OnEvent));
+        spInstance = this;
     }
 
     Application::~Application()
@@ -52,11 +59,13 @@ namespace Orange
     void Application::PushLayer(Layer* layer)
     {
         mLayerStack.PushLayer(layer);
+        layer->OnAttach();
     }
 
-    void Application::PopLayer(Layer* layer)
+    void Application::PushOverlay(Layer* layer)
     {
-        mLayerStack.PopLayer(layer);
+        mLayerStack.PushOverlay(layer);
+        layer->OnAttach();
     }
 
     bool Application::OnWindowClose(WindowCloseEvent& e)
