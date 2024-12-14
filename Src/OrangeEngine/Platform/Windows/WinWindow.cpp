@@ -116,6 +116,15 @@ namespace Orange
             }
         });
 
+        // CharEvent
+        glfwSetCharCallback(mpWindow, [](GLFWwindow* tpWindow, unsigned int keycode)
+        {
+            WindowData& data = *(WindowData*)glfwGetWindowUserPointer(tpWindow);
+
+            KeyTypedEvent event(keycode);
+            data.mEventCallback(event);
+        });
+
         // MouseButtonEvent
         glfwSetMouseButtonCallback(mpWindow, [](GLFWwindow* tpWindow, int button, int action, int mods)
         {

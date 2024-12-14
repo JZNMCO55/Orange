@@ -19,6 +19,8 @@ namespace Orange
 
         inline const std::string& GetName() const { return mDebugName; }
     protected:
+        //virtual void OnMouseButtonPressedEvent(MouseButtonPressedEvent& event) {}
+    protected:
         std::string mDebugName;
     };
 }
