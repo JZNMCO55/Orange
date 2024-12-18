@@ -11,7 +11,7 @@ file(GLOB_RECURSE ORANGEENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 # 搜索头文件
 file(GLOB_RECURSE ORANGEENGINE_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
 
-# 查找OpenGL库
+# 搜索依赖库
 find_package(OpenGL REQUIRED)
 
 # 创建动态库目标
@@ -48,5 +48,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
                         glfw3
                         glad
                         imgui
+                        glm
                         ${OPENGL_LIBRARIES}
                      )

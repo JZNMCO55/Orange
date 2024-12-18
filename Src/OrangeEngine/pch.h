@@ -9,6 +9,7 @@
 
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
+#include "glm/glm.hpp"
 #include "Log.h"
 
 #ifdef ORANGE_ENABLE_ASSERTS
