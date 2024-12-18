@@ -2,9 +2,7 @@
 #include "Windows/WinWindow.h"
 #include "ApplicationEvent.h"
 #include "Application.h"
-#include "glad/glad.h"
-#include "GLFW/glfw3.h"
-
+#include "Input.h"
 
 namespace Orange
 {
@@ -32,6 +30,7 @@ namespace Orange
         {
             glClearColor(1.0f, 0.f, 0.f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
+
             for (const auto& layer : mLayerStack)
             {
                 layer->OnUpdate();

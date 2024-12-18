@@ -14,12 +14,10 @@ public:
 
     void OnUpdate() override
     {
-        //std::cout << "ExampleLayer::Update" << std::endl;
     }
 
     void OnEvent(Orange::Event& event) override
     {
-        //std::cout << "ExampleLayer::Event" << std::endl;
     }   
 };
 class Sandbox : public Orange::Application
