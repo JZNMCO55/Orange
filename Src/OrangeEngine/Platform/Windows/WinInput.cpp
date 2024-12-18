@@ -1,7 +1,6 @@
 #include "pch.h"
-#include "WinInput.h"
-
 #include "Application.h"
+#include "WinInput.h"
 
 namespace Orange
 {

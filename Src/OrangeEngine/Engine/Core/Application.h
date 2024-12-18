@@ -4,7 +4,6 @@
 #include "OrangeExport.h"
 #include "IWindow.h"
 #include "LayerStack.h"
-
 class WindowCloseEvent;
 class Layer;
 
