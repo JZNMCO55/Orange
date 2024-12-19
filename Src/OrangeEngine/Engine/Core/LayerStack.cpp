@@ -5,7 +5,6 @@ namespace Orange
 {
     LayerStack::LayerStack()
     {
-        mLayerInsert = mLayers.begin();
     }
 
     LayerStack::~LayerStack()
@@ -18,7 +17,7 @@ namespace Orange
 
     void LayerStack::PushLayer(Layer* layer)
     {
-        mLayers.emplace(mLayerInsert, layer);
+        mLayers.emplace(mLayers.begin() + mLayerInsertIndex, layer);
     }
 
     void LayerStack::PushOverlay(Layer* overlay)
@@ -32,7 +31,7 @@ namespace Orange
         if (it != mLayers.end())
         {
             mLayers.erase(it);
-            mLayerInsert--;
+            mLayerInsertIndex--;
         }
     }
 

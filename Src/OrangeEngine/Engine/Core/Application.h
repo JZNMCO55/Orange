@@ -4,11 +4,13 @@
 #include "OrangeExport.h"
 #include "IWindow.h"
 #include "LayerStack.h"
-class WindowCloseEvent;
-class Layer;
 
 namespace Orange
 {
+    class WindowCloseEvent;
+    class Layer;
+    class ImGuiLayer;
+
     class ORANGE_API Application
     {
     public:
@@ -36,6 +38,7 @@ namespace Orange
     private:
         LayerStack mLayerStack;
         std::unique_ptr<IWindow> mpWindow{ nullptr };
+        std::unique_ptr<ImGuiLayer> mpImGuiLayer{ nullptr };
         bool mbRunning{ true };
         static Application* spInstance;
     };

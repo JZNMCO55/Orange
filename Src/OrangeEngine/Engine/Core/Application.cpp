@@ -3,6 +3,7 @@
 #include "ApplicationEvent.h"
 #include "Application.h"
 #include "Input.h"
+#include "imgui/ImGuiLayer.h"
 
 namespace Orange
 {
@@ -18,6 +19,9 @@ namespace Orange
         mpWindow = WinWindow::Create();
         mpWindow->SetEventCallback(BIND_EVENT_FN(OnEvent));
         spInstance = this;
+
+        mpImGuiLayer = std::make_unique<ImGuiLayer>();
+        PushOverlay(mpImGuiLayer.get());
     }
 
     Application::~Application()
@@ -34,6 +38,13 @@ namespace Orange
             {
                 layer->OnUpdate();
             }
+
+            mpImGuiLayer->Begin();
+            for (const auto& layer : mLayerStack)
+            {
+                layer->OnImGuiRender();
+            }
+            mpImGuiLayer->End();
             mpWindow->OnUpdate();
         }
     }
