@@ -3,6 +3,7 @@
 
 #include "Application.h" 
 #include "Layer.h"
+#include "Input.h"
 #include "Log.h"
 
 #include "KeyCodes.h"
