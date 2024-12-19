@@ -15,26 +15,13 @@ namespace Orange
         ImGuiLayer();
         ~ImGuiLayer();
 
-        void OnAttach() override;
-        void OnDetach() override;
-        void OnUpdate() override;
-        void OnEvent(Event& event) override;
-    private:
-        bool OnMouseButtonPressEvent(MouseButtonPressedEvent& e);
+        virtual void OnAttach() override;
+        virtual void OnDetach() override;
+        virtual void OnUpdate() override;
 
-        bool OnMouseButtonReleaseEvent(MouseButtonReleasedEvent& e);
+        void Begin();
+        void End();
 
-        bool OnMouseMovedEvent(MouseMoveEvent& e);
-
-        bool OnMouseScrolledEvent(MouseScrolledEvent& e);
-
-        bool OnKeyPressedEvent(KeyPressedEvent& e);
-
-        bool OnKeyReleasedEvent(KeyReleasedEvent& e);
-
-        bool OnKeyTypedEvent(KeyTypedEvent& e);
-
-        bool OnWindowResizeEvent(WindowResizeEvent& e);
 
     private:
         float mTime = 0.0f;
