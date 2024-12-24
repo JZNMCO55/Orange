@@ -26,12 +26,5 @@ namespace Orange
         msClientLogger->set_level(spdlog::level::trace);
     }
 
-    inline std::shared_ptr<spdlog::logger>& Log::GetOrangeLogger()
-    {
-        return msOrangeLogger;
-    }
-    inline std::shared_ptr<spdlog::logger>& Log::GetClientLogger()
-    {
-        return msClientLogger;
-    }
+
 }

@@ -14,8 +14,14 @@ file(GLOB_RECURSE ORANGEENGINE_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
 # 搜索依赖库
 find_package(OpenGL REQUIRED)
 
-# 创建动态库目标
-add_library(${PROJECT_NAME} SHARED ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
+# 添加库
+if(BUILD_SHARED_LIBS)
+    add_library(${PROJECT_NAME} SHARED ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE -DORANGE_EXPORTS)
+else()         
+    add_library(${PROJECT_NAME} STATIC ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_STATIC)
+endif()
 
 set(ALL_SOURCE_FILE
     ${ORANGEENGINE_HEADERS}
@@ -29,7 +35,6 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
 # 指定编译选项
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DPLATFORM_WINDOWS)
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_ENABLE_ASSERTS)
-target_compile_definitions(${PROJECT_NAME} PRIVATE -DORANGE_EXPORTS)
 
 # 指定头文件路径
 target_include_directories(${PROJECT_NAME} PUBLIC
