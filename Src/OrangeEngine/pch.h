@@ -7,12 +7,13 @@
 #include <memory>
 #include <sstream>
 
+#include "Log.h"
+
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
 #include "ImGuiBackend/ImGuiOpengl/imgui_impl_opengl3.h"
 #include "ImGuiBackend/ImGuiGlfw/imgui_impl_glfw.h"
 #include "glm/glm.hpp"
-#include "Log.h"
 
 #ifdef ORANGE_ENABLE_ASSERTS
 #define ORANGE_ASSERT(x, ...) { if(!(x)) { CLIENT_LOG_ERROR("Assertion Failed: {0}", __VA_ARGS__); __debugbreak(); } }

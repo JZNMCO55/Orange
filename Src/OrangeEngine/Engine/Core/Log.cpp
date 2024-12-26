@@ -20,7 +20,7 @@ namespace Orange
         spdlog::set_pattern("%^[%T] %n: %v%$");
 
         msOrangeLogger = spdlog::stdout_color_mt("Orange");
-        msOrangeLogger->set_level(spdlog::level::trace);
+        msOrangeLogger->set_level(spdlog::level::trace); 
 
         msClientLogger = spdlog::stdout_color_mt("Client");
         msClientLogger->set_level(spdlog::level::trace);

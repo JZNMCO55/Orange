@@ -35,6 +35,9 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
 # 指定编译选项
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DPLATFORM_WINDOWS)
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_ENABLE_ASSERTS)
+if(MSVC)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
 
 # 指定头文件路径
 target_include_directories(${PROJECT_NAME} PUBLIC

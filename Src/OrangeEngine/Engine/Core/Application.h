@@ -10,6 +10,7 @@ namespace Orange
     class WindowCloseEvent;
     class Layer;
     class ImGuiLayer;
+    class Shader;
 
     class ORANGE_API Application
     {
@@ -37,6 +38,7 @@ namespace Orange
 
     private:
         LayerStack mLayerStack;
+        std::unique_ptr<Shader> mpShader{ nullptr };
         std::unique_ptr<IWindow> mpWindow{ nullptr };
         std::unique_ptr<ImGuiLayer> mpImGuiLayer{ nullptr };
         bool mbRunning{ true };

@@ -4,7 +4,14 @@
 #include "ApplicationEvent.h"
 #include "KeyEvent.h"
 #include "MouseEvent.h" 
-
+#define REGIST_TREE_OPERATION(class_name) \
+    class class_name##OperationHelperP{public:\
+    class_name##OperationHelper()\
+    {emTree::Instance()->addTreeOperation(New class_name());\
+    if(emTree::Instance()->registTreeOperation();)};\
+    ~class_name##OperationHelper(){};\
+    };\
+    static class_name##OperationHelperP class_name##OperationHelper;
 
 namespace Orange
 {
