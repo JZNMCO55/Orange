@@ -11,6 +11,8 @@ namespace Orange
     class Layer;
     class ImGuiLayer;
     class Shader;
+    class VertexBuffer;
+    class IndexBuffer;
 
     class ORANGE_API Application
     {
@@ -38,10 +40,14 @@ namespace Orange
 
     private:
         LayerStack mLayerStack;
-        std::unique_ptr<Shader> mpShader{ nullptr };
         std::unique_ptr<IWindow> mpWindow{ nullptr };
         std::unique_ptr<ImGuiLayer> mpImGuiLayer{ nullptr };
+        std::unique_ptr<Shader> mpShader{ nullptr };
+        std::unique_ptr<VertexBuffer> mpVertexBuffer{ nullptr };
+        std::unique_ptr<IndexBuffer> mpIndexBuffer{ nullptr };
         bool mbRunning{ true };
+        unsigned int mVertexArray;
+
         static Application* spInstance;
     };
 
