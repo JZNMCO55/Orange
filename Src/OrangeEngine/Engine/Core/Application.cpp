@@ -29,9 +29,7 @@ namespace Orange
         mpImGuiLayer = std::make_unique<ImGuiLayer>();
         PushOverlay(mpImGuiLayer.get());
 
-        glGenVertexArrays(1, &mVertexArray);
-        glBindVertexArray(mVertexArray);
-
+        //Triangle
         float vertices[3 * 7] = {
             -0.5f, -0.5f, 0.0f, 0.8f, 0.2f, 0.8f, 1.0f,
              0.5f, -0.5f, 0.0f, 0.2f, 0.3f, 0.8f, 1.0f,
@@ -47,48 +45,97 @@ namespace Orange
         };
 
         tpVertexBuffer->SetLayout(layout);
-        
-
-        uint32_t index = 0;
-        const auto& layout = tpVertexBuffer->GetLayout();
-
+        mpVertexArray->AddVertexBuffer(tpVertexBuffer);
 
         uint32_t indices[3] = { 0, 1, 2 };
-        mpIndexBuffer.reset(IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
+        std::shared_ptr<IndexBuffer> tpIndexBuffer;
+        tpIndexBuffer.reset(IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
+        mpVertexArray->SetIndexBuffer(tpIndexBuffer);
+
+        // Squares
+        mpBlueVertexArray.reset(VertexArray::Create());
+        float squareVertices[3 * 4] = {
+            -0.75f, -0.75f, 0.0f,
+             0.75f, -0.75f, 0.0f,
+             0.75f,  0.75f, 0.0f,
+            -0.75f,  0.75f, 0.0f
+        };
+
+        std::shared_ptr<VertexBuffer> squareVB;
+        squareVB.reset(VertexBuffer::Create(squareVertices, sizeof(squareVertices)));
+        squareVB->SetLayout({
+            { EShaderDataType::Float3, "a_Position" }
+            });
+        mpBlueVertexArray->AddVertexBuffer(squareVB);
+
+        uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
+        std::shared_ptr<IndexBuffer> squareIB;
+        squareIB.reset(IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t)));
+        mpBlueVertexArray->SetIndexBuffer(squareIB);
 
         std::string vertexSrc = R"(
-			#version 330 core
-			
-			layout(location = 0) in vec3 a_Position;
-			layout(location = 1) in vec4 a_Color;
+            #version 330 core
+            
+            layout(location = 0) in vec3 a_Position;
+            layout(location = 1) in vec4 a_Color;
 
-			out vec3 v_Position;
-			out vec4 v_Color;
+            out vec3 v_Position;
+            out vec4 v_Color;
 
-			void main()
-			{
-				v_Position = a_Position;
-				v_Color = a_Color;
-				gl_Position = vec4(a_Position, 1.0);	
-			}
-		)";
+            void main()
+            {
+                v_Position = a_Position;
+                v_Color = a_Color;
+                gl_Position = vec4(a_Position, 1.0);    
+            }
+        )";
 
         std::string fragmentSrc = R"(
-			#version 330 core
-			
-			layout(location = 0) out vec4 color;
+            #version 330 core
+            
+            layout(location = 0) out vec4 color;
 
-			in vec3 v_Position;
-			in vec4 v_Color;
+            in vec3 v_Position;
+            in vec4 v_Color;
 
-			void main()
-			{
-				color = vec4(v_Position * 0.5 + 0.5, 1.0);
-				color = v_Color;
-			}
-		)";
+            void main()
+            {
+                color = vec4(v_Position * 0.5 + 0.5, 1.0);
+                color = v_Color;
+            }
+        )";
 
         mpShader = std::make_unique<Shader>(vertexSrc, fragmentSrc);
+
+        std::string blueShaderVertexSrc = R"(
+            #version 330 core
+            
+            layout(location = 0) in vec3 a_Position;
+
+            out vec3 v_Position;
+
+            void main()
+            {
+                v_Position = a_Position;
+                gl_Position = vec4(a_Position, 1.0);    
+            }
+        )";
+
+        std::string blueShaderFragmentSrc = R"(
+            #version 330 core
+            
+            layout(location = 0) out vec4 color;
+
+            in vec3 v_Position;
+
+            void main()
+            {
+                color = vec4(0.2, 0.3, 0.8, 1.0);
+            }
+        )";
+
+        mpBlueShader = std::make_unique<Shader>(blueShaderVertexSrc, blueShaderFragmentSrc);
+
     }
 
     Application::~Application()
@@ -101,10 +148,14 @@ namespace Orange
         {
             glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
+            
+            mpBlueShader->Bind();
+            mpBlueVertexArray->Bind();
+            glDrawElements(GL_TRIANGLES, mpBlueVertexArray->GetIndexBuffer()->GetCount(), GL_UNSIGNED_INT, nullptr);
 
             mpShader->Bind();
-            glBindVertexArray(mVertexArray);
-            glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, nullptr);
+            mpVertexArray->Bind();
+            glDrawElements(GL_TRIANGLES, mpVertexArray->GetIndexBuffer()->GetCount(), GL_UNSIGNED_INT, nullptr);
 
             for (const auto& layer : mLayerStack)
             {

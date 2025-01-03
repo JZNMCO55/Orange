@@ -46,11 +46,11 @@ namespace Orange
         
         std::shared_ptr<Shader> mpShader{ nullptr };
         std::shared_ptr<VertexArray> mpVertexArray{ nullptr };
-        std::shared_ptr<Shader> mBlueShader { nullptr };
-        std::shared_ptr<VertexArray> mBlueVertexArray { nullptr };
+
+        std::shared_ptr<Shader> mpBlueShader { nullptr };
+        std::shared_ptr<VertexArray> mpBlueVertexArray { nullptr };
         
         bool mbRunning{ true };
-        unsigned int mVertexArray;
 
         static Application* spInstance;
     };
