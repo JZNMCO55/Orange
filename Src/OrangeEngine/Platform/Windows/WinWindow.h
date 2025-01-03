@@ -1,7 +1,7 @@
 #ifndef WIN_WINDOW_H
 #define WIN_WINDOW_H
 
-#include "pch.h"
+#include "OpenGL/OpenGLPch.h"
 #include "IWindow.h"
 #include "OrangeExport.h"
 

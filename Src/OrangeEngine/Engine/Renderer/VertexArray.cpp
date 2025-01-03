@@ -10,11 +10,11 @@ namespace Orange
     {
         switch (Renderer::GetAPI())
         {
-        case RendererAPI::OpenGL:
+        case RendererAPI::API::OpenGL:
         {
             return new OpenGLVertexArray();
         }
-        case RendererAPI::None:
+        case RendererAPI::API::None:
             break;
         default:
             break;

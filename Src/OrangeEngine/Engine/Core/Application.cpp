@@ -6,6 +6,7 @@
 #include "Renderer/Shader.h"
 #include "Renderer/Buffer.h"
 #include "Renderer/VertexArray.h"
+#include "Renderer/Renderer.h"
 #include "Application.h"
 
 namespace Orange
@@ -146,16 +147,16 @@ namespace Orange
     {
         while (mbRunning)
         {
-            glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
+            RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
+            RenderCommand::Clear();
             
+            Renderer::BeginScene();
             mpBlueShader->Bind();
-            mpBlueVertexArray->Bind();
-            glDrawElements(GL_TRIANGLES, mpBlueVertexArray->GetIndexBuffer()->GetCount(), GL_UNSIGNED_INT, nullptr);
+            Renderer::Submit(mpBlueVertexArray);
 
             mpShader->Bind();
-            mpVertexArray->Bind();
-            glDrawElements(GL_TRIANGLES, mpVertexArray->GetIndexBuffer()->GetCount(), GL_UNSIGNED_INT, nullptr);
+            Renderer::Submit(mpVertexArray);
+            Renderer::EndScene();
 
             for (const auto& layer : mLayerStack)
             {
