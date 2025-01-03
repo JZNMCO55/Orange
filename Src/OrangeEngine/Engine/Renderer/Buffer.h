@@ -82,12 +82,14 @@ namespace Orange
             CalculateOffsetsAndStride();
         }
 
+        inline uint32_t GetStride() const { return mStride; }
+        inline const std::vector<BufferElement>& GetElements() const { return mElements; }
+
         std::vector<BufferElement>::iterator begin() { return mElements.begin(); }
         std::vector<BufferElement>::iterator end() { return mElements.end(); }
         std::vector<BufferElement>::const_iterator begin() const { return mElements.begin(); }
         std::vector<BufferElement>::const_iterator end() const { return mElements.end(); }
 
-        uint32_t GetStride() const { return mStride; }
     private:
         void CalculateOffsetsAndStride()
         {

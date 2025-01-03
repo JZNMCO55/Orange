@@ -5,6 +5,7 @@
 #include "imgui/ImGuiLayer.h"
 #include "Renderer/Shader.h"
 #include "Renderer/Buffer.h"
+#include "Renderer/VertexArray.h"
 #include "Application.h"
 
 namespace Orange
@@ -16,27 +17,6 @@ namespace Orange
     Application* Application::GetInstance()
     {
         return spInstance;
-    }
-
-    static GLenum ShaderDataTypeToOpenGLBaseType(EShaderDataType type)
-    {
-        switch (type)
-        {
-        case EShaderDataType::Float:    return GL_FLOAT;
-        case EShaderDataType::Float2:   return GL_FLOAT;
-        case EShaderDataType::Float3:   return GL_FLOAT;
-        case EShaderDataType::Float4:   return GL_FLOAT;
-        case EShaderDataType::Mat3:     return GL_FLOAT;
-        case EShaderDataType::Mat4:     return GL_FLOAT;
-        case EShaderDataType::Int:      return GL_INT;
-        case EShaderDataType::Int2:     return GL_INT;
-        case EShaderDataType::Int3:     return GL_INT;
-        case EShaderDataType::Int4:     return GL_INT;
-        case EShaderDataType::Bool:     return GL_BOOL;
-        }
-
-        ORANGE_CORE_ASSERT(false, "Unknown ShaderDataType!");
-        return 0;
     }
 
     Application::Application()
@@ -58,31 +38,20 @@ namespace Orange
              0.0f,  0.5f, 0.0f, 0.8f, 0.8f, 0.2f, 1.0f
         };
 
-        mpVertexBuffer.reset(VertexBuffer::Create(vertices, sizeof(vertices)));
+        mpVertexArray.reset(VertexArray::Create());
+        std::shared_ptr<VertexBuffer> tpVertexBuffer(VertexBuffer::Create(vertices, sizeof(vertices)));
+        
+        BufferLayout layout = {
+            {EShaderDataType::Float3, "a_Position"},
+            {EShaderDataType::Float4, "a_Color"}
+        };
 
-        {
-            BufferLayout layout = {
-                {EShaderDataType::Float3, "a_Position"},
-                {EShaderDataType::Float4, "a_Color"}
-            };
-
-            mpVertexBuffer->SetLayout(layout);
-        }
+        tpVertexBuffer->SetLayout(layout);
+        
 
         uint32_t index = 0;
-        const auto& layout = mpVertexBuffer->GetLayout();
+        const auto& layout = tpVertexBuffer->GetLayout();
 
-        for (const auto& element : layout)
-        {
-            glEnableVertexAttribArray(index);
-            glVertexAttribPointer(index, 
-                element.GetComponentCount(), 
-                ShaderDataTypeToOpenGLBaseType(element.Type),
-                GL_FALSE,
-                layout.GetStride(),
-                (const void*)element.Offset);
-            index++;
-        }
 
         uint32_t indices[3] = { 0, 1, 2 };
         mpIndexBuffer.reset(IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
