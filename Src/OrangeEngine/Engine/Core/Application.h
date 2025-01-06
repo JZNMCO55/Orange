@@ -14,6 +14,7 @@ namespace Orange
     class VertexBuffer;
     class IndexBuffer;
     class VertexArray;
+    class OrthographicCamera;
 
     class ORANGE_API Application
     {
@@ -49,6 +50,8 @@ namespace Orange
 
         std::shared_ptr<Shader> mpBlueShader { nullptr };
         std::shared_ptr<VertexArray> mpBlueVertexArray { nullptr };
+        std::shared_ptr<OrthographicCamera> mpCamera;
+
         
         bool mbRunning{ true };
 
