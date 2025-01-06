@@ -124,36 +124,36 @@ public:
     {
         if (Orange::Input::IsKeyPressed(ORG_KEY_LEFT))
         {
-            mCameraPosition.x -= mCameraMoveSpeed * ts;
+            mCameraPosition.x += mCameraMoveSpeed * ts;
         }
         else if(Orange::Input::IsKeyPressed(ORG_KEY_RIGHT))
         {
-            mCameraPosition.x += mCameraMoveSpeed * ts;
+            mCameraPosition.x -= mCameraMoveSpeed * ts;
         }
 
         if (Orange::Input::IsKeyPressed(ORG_KEY_UP))
         {
-            mCameraPosition.y += mCameraMoveSpeed * ts;
+            mCameraPosition.y -= mCameraMoveSpeed * ts;
         }
         else if (Orange::Input::IsKeyPressed(ORG_KEY_DOWN))
         {
-            mCameraPosition.y -= mCameraMoveSpeed * ts;
+            mCameraPosition.y += mCameraMoveSpeed * ts;
         }
 
         if (Orange::Input::IsKeyPressed(ORG_KEY_A))
         {
-            mCameraRotation += mCameraRotationSpeed * ts;
+            mCameraRotation -= mCameraRotationSpeed * ts;
         }
         else if (Orange::Input::IsKeyPressed(ORG_KEY_D))
         {
-            mCameraRotation -= mCameraRotationSpeed * ts;
+            mCameraRotation += mCameraRotationSpeed * ts;
         }
 
         Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
         Orange::RenderCommand::Clear();
 
-        mpCamera->SetPosition({ 0.5f, 0.5f, 0.0f });
-        mpCamera->SetRotation(45.f);
+        mpCamera->SetPosition(mCameraPosition);
+        mpCamera->SetRotation(mCameraRotation);
 
         Orange::Renderer::BeginScene(mpCamera);
         mpBlueShader->Bind();
