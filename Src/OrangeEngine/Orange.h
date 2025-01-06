@@ -1,15 +1,27 @@
 #ifndef ORANGE_H
 #define ORANGE_H
 
-#include "Application.h" 
+#include "OrangeExport.h"
+#include "Application.h"
+#include "Core/Timestep.h"
 #include "Layer.h"
-#include "Input.h"
 #include "Log.h"
 
+#include "Input.h"
 #include "KeyCodes.h"
 #include "MouseButtonCodes.h"
 
 #include "ImGui/ImGuiLayer.h"
+
+// -----------------Renderer-------------------
+#include "Renderer/Renderer.h"
+#include "Renderer/RenderCommand.h"
+#include "Renderer/Buffer.h"
+#include "Renderer/Shader.h"
+#include "Renderer/VertexArray.h"
+#include "Renderer/OrthographicCamera.h"
+
+
 // -------------Entry Point-----------------
 #include "EntryPoint.h"
 // -----------------------------------------

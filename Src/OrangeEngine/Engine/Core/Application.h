@@ -45,14 +45,7 @@ namespace Orange
         std::unique_ptr<IWindow> mpWindow{ nullptr };
         std::unique_ptr<ImGuiLayer> mpImGuiLayer{ nullptr };
         
-        std::shared_ptr<Shader> mpShader{ nullptr };
-        std::shared_ptr<VertexArray> mpVertexArray{ nullptr };
-
-        std::shared_ptr<Shader> mpBlueShader { nullptr };
-        std::shared_ptr<VertexArray> mpBlueVertexArray { nullptr };
-        std::shared_ptr<OrthographicCamera> mpCamera;
-
-        
+        float mLastFrameTime{ 0.0f };
         bool mbRunning{ true };
 
         static Application* spInstance;
