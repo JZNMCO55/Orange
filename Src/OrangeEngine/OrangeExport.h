@@ -1,6 +1,7 @@
 #ifndef ORANGEEXPORT_H
 #define ORANGEEXPORT_H
 
+#include <memory>
 #ifdef ORANGE_STATIC
 #define ORANGE_API
 #else
@@ -13,5 +14,14 @@
 #define BIT(x) (1 << x)
 
 #define ORANGE_BIND_EVENT_FN(fn) std::bind(&fn, this, std::placeholders::_1)
+
+namespace Orange
+{
+    template<typename T>
+    using Ref = std::shared_ptr<T>;
+
+    template<typename T>
+    using Scope = std::unique_ptr<T>;
+}
 
 #endif // ORANGEEXPORT_H

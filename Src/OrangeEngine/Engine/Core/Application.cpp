@@ -66,7 +66,7 @@ namespace Orange
     {
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<WindowCloseEvent>(BIND_EVENT_FN(OnWindowClose));
-        ORANGE_LOG_INFO("Event: {0}", e.ToString());
+        //ORANGE_LOG_INFO("Event: {0}", e.ToString());
 
         for (auto it = mLayerStack.end(); it != mLayerStack.begin(); )
         {

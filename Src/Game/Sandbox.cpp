@@ -1,4 +1,5 @@
 #include <iostream>
+#include "imgui/imgui.h"
 #include "Orange.h"
 #include "OpenGL/OpenGLShader.h"
 
@@ -18,7 +19,7 @@ public:
         };
 
         mpVertexArray.reset(Orange::VertexArray::Create());
-        std::shared_ptr<Orange::VertexBuffer> tpVertexBuffer(Orange::VertexBuffer::Create(vertices, sizeof(vertices)));
+        Orange::Ref<Orange::VertexBuffer> tpVertexBuffer(Orange::VertexBuffer::Create(vertices, sizeof(vertices)));
 
         Orange::BufferLayout layout = {
             {Orange::EShaderDataType::Float3, "a_Position"},
@@ -29,28 +30,29 @@ public:
         mpVertexArray->AddVertexBuffer(tpVertexBuffer);
 
         uint32_t indices[3] = { 0, 1, 2 };
-        std::shared_ptr<Orange::IndexBuffer> tpIndexBuffer;
+        Orange::Ref<Orange::IndexBuffer> tpIndexBuffer;
         tpIndexBuffer.reset(Orange::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
         mpVertexArray->SetIndexBuffer(tpIndexBuffer);
 
         // Squares
         mpBlueVertexArray.reset(Orange::VertexArray::Create());
-        float squareVertices[3 * 4] = {
-            -0.5f, -0.5f, 0.0f,
-             0.5f, -0.5f, 0.0f,
-             0.5f,  0.5f, 0.0f,
-            -0.5f,  0.5f, 0.0f
+        float squareVertices[5 * 4] = {
+            -0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
+             0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
+             0.5f,  0.5f, 0.0f, 1.0f, 1.0f,
+            -0.5f,  0.5f, 0.0f, 0.0f, 1.0f
         };
 
-        std::shared_ptr<Orange::VertexBuffer> squareVB;
+        Orange::Ref<Orange::VertexBuffer> squareVB;
         squareVB.reset(Orange::VertexBuffer::Create(squareVertices, sizeof(squareVertices)));
         squareVB->SetLayout({
-            { Orange::EShaderDataType::Float3, "a_Position" }
+            { Orange::EShaderDataType::Float3, "a_Position" },
+            { Orange::EShaderDataType::Float2, "a_TexCoord" }
             });
         mpBlueVertexArray->AddVertexBuffer(squareVB);
 
         uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
-        std::shared_ptr<Orange::IndexBuffer> squareIB;
+        Orange::Ref<Orange::IndexBuffer> squareIB;
         squareIB.reset(Orange::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t)));
         mpBlueVertexArray->SetIndexBuffer(squareIB);
 
@@ -90,10 +92,11 @@ public:
 
         mpShader.reset(Orange::Shader::Create(vertexSrc, fragmentSrc));
 
-        std::string blueShaderVertexSrc = R"(
+        std::string flatColorShaderVertexSrc = R"(
             #version 330 core
             
             layout(location = 0) in vec3 a_Position;
+
             uniform mat4 u_ViewProjection;
             uniform mat4 u_Transform;
 
@@ -102,24 +105,67 @@ public:
             void main()
             {
                 v_Position = a_Position;
-                gl_Position = u_ViewProjection * u_Transform * vec4(a_Position, 1.0);
+                gl_Position = u_ViewProjection * u_Transform * vec4(a_Position, 1.0);    
             }
         )";
 
-        std::string blueShaderFragmentSrc = R"(
+        std::string flatColorShaderFragmentSrc = R"(
             #version 330 core
             
             layout(location = 0) out vec4 color;
 
             in vec3 v_Position;
+            
+            uniform vec3 u_Color;
 
             void main()
             {
-                color = vec4(0.2, 0.3, 0.8, 1.0);
+                color = vec4(u_Color, 1.0);
             }
         )";
 
-        mpBlueShader.reset(Orange::Shader::Create(blueShaderVertexSrc, blueShaderFragmentSrc));
+
+        mpFlatShader.reset(Orange::Shader::Create(flatColorShaderVertexSrc, flatColorShaderFragmentSrc));
+
+        std::string textureShaderVertexSrc = R"(
+            #version 330 core
+            
+            layout(location = 0) in vec3 a_Position;
+            layout(location = 1) in vec2 a_TexCoord;
+
+            uniform mat4 u_ViewProjection;
+            uniform mat4 u_Transform;
+
+            out vec2 v_TexCoord;
+
+            void main()
+            {
+                v_TexCoord = a_TexCoord;
+                gl_Position = u_ViewProjection * u_Transform * vec4(a_Position, 1.0);    
+            }
+        )";
+
+        std::string textureShaderFragmentSrc = R"(
+            #version 330 core
+            
+            layout(location = 0) out vec4 color;
+
+            in vec2 v_TexCoord;
+            
+            uniform sampler2D u_Texture;
+
+            void main()
+            {
+                color = texture(u_Texture, v_TexCoord);
+            }
+        )";
+
+        mpTextureShader.reset(Orange::Shader::Create(textureShaderVertexSrc, textureShaderFragmentSrc));
+
+        mpTexture = Orange::Texture2D::Create(R"(D:\ForStudy\Render\GameEngine\Orange\Resource\Textures\Checkerboard.png)");
+
+        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->Bind();
+        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->UploadUniformInt("u_Texture", 0);
 
     }
     ~ExampleLayer() {}
@@ -162,6 +208,8 @@ public:
         Orange::Renderer::BeginScene(mpCamera);
         
         glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
+        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->Bind();
+        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->UploadUniformFloat3("u_Color", mSquareColor);
 
         for (int y = 0; y < 20; y++)
         {
@@ -169,12 +217,23 @@ public:
             {
                 glm::vec3 pos(x * 0.11f, y * 0.11f, 0.0f);
                 glm::mat4 transform = glm::translate(glm::mat4(1.0f), pos) * scale;
-                Orange::Renderer::Submit(mpBlueShader, mpBlueVertexArray, transform);
+                Orange::Renderer::Submit(mpFlatShader, mpBlueVertexArray, transform);
             }
         }
 
-        Orange::Renderer::Submit(mpShader, mpVertexArray);
+        mpTexture->Bind();
+        Orange::Renderer::Submit(mpTextureShader, mpBlueVertexArray);
+        
+        // triangle
+        //Orange::Renderer::Submit(mpShader, mpVertexArray);
         Orange::Renderer::EndScene();
+    }
+
+    void OnImGuiRender() override
+    {
+        ImGui::Begin("Settings");
+        ImGui::ColorEdit3("Square Color", glm::value_ptr(mSquareColor));
+        ImGui::End();
     }
 
     void OnEvent(Orange::Event& event) override
@@ -183,13 +242,16 @@ public:
     }   
 
 private:
-    std::shared_ptr<Orange::Shader> mpShader{ nullptr };
-    std::shared_ptr<Orange::VertexArray> mpVertexArray{ nullptr };
-    std::shared_ptr<Orange::Shader> mpBlueShader{ nullptr };
-    std::shared_ptr<Orange::VertexArray> mpBlueVertexArray{ nullptr };
-    std::shared_ptr<Orange::OrthographicCamera> mpCamera;
+    Orange::Ref<Orange::Shader> mpShader{ nullptr };
+    Orange::Ref<Orange::VertexArray> mpVertexArray{ nullptr };
+    Orange::Ref<Orange::Shader> mpFlatShader{ nullptr };
+    Orange::Ref<Orange::VertexArray> mpBlueVertexArray{ nullptr };
+    Orange::Ref<Orange::Shader> mpTextureShader{ nullptr };
+    Orange::Ref<Orange::OrthographicCamera> mpCamera;
+    Orange::Ref<Orange::Texture2D> mpTexture{ nullptr };
 
     glm::vec3 mCameraPosition;
+    glm::vec3 mSquareColor;
     float mCameraMoveSpeed = 5.0f;
     float mCameraRotation = 0.0f;
     float mCameraRotationSpeed = 180.0f;
