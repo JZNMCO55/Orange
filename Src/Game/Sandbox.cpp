@@ -1,5 +1,6 @@
 #include <iostream>
 #include "Orange.h"
+#include "OpenGL/OpenGLShader.h"
 
 class ExampleLayer : public Orange::Layer
 {
@@ -87,7 +88,7 @@ public:
             }
         )";
 
-        mpShader = std::make_unique<Orange::Shader>(vertexSrc, fragmentSrc);
+        mpShader.reset(Orange::Shader::Create(vertexSrc, fragmentSrc));
 
         std::string blueShaderVertexSrc = R"(
             #version 330 core
@@ -118,7 +119,7 @@ public:
             }
         )";
 
-        mpBlueShader = std::make_unique<Orange::Shader>(blueShaderVertexSrc, blueShaderFragmentSrc);
+        mpBlueShader.reset(Orange::Shader::Create(blueShaderVertexSrc, blueShaderFragmentSrc));
 
     }
     ~ExampleLayer() {}

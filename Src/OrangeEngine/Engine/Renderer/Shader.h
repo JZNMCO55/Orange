@@ -8,14 +8,12 @@ namespace Orange
     class ORANGE_API Shader
     {
     public:
-        Shader(const std::string& verSrc, const std::string& fragSrc);
         virtual ~Shader();
 
-        void Bind() const;
-        void Unbind() const;
+        virtual void Bind() const = 0;
+        virtual void Unbind() const = 0;
 
-        void UploadUniformMat4(const std::string& name, const glm::mat4& matrix) const;
-
+        static Shader* Create(const std::string& vertexShader, const std::string& fragmentShader);
     private:
         unsigned int mRendererID;
     };

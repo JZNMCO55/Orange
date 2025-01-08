@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "Renderer.h"
 #include "OrthographicCamera.h"
-#include "Shader.h"
+#include "OpenGL/OpenGLShader.h"
 
 namespace Orange
 {
@@ -21,8 +21,8 @@ namespace Orange
         const glm::mat4& transform)
     {
         shader->Bind();
-        shader->UploadUniformMat4("u_ViewProjection", mpSceneData->ViewProjectionMatrix);
-        shader->UploadUniformMat4("u_Transform", transform);
+        std::dynamic_pointer_cast<OpenGLShader>(shader)->UploadUniformMat4("u_ViewProjection", mpSceneData->ViewProjectionMatrix);
+        std::dynamic_pointer_cast<OpenGLShader>(shader)->UploadUniformMat4("u_Transform", transform);
         vertexArray->Bind();
         RenderCommand::DrawIndexed(vertexArray);
     }
