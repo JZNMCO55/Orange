@@ -46,7 +46,6 @@ cd /d %BUILD_DIR%
 :: 运行 CMake 配置，并指定构建目录和输出目录
 echo Running CMake to configure the project...
 cmake -G "Visual Studio 17 2022" -A x64 ^
-    -DCMAKE_BUILD_TYPE=%CONFIGURATION% ^
     -DBUILD_SHARED_LIBS=%SHARED_LIBRARY% ^
     -DCMAKE_BINARY_DIR=%BUILD_DIR% ^
     -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=%OUTPUT_DIR%\lib ^

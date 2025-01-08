@@ -2,6 +2,7 @@
 #include "imgui/imgui.h"
 #include "Orange.h"
 #include "OpenGL/OpenGLShader.h"
+#include <filesystem>
 
 class ExampleLayer : public Orange::Layer
 {
@@ -161,8 +162,11 @@ public:
         )";
 
         mpTextureShader.reset(Orange::Shader::Create(textureShaderVertexSrc, textureShaderFragmentSrc));
+        std::filesystem::path currentPath = std::filesystem::current_path();
 
-        mpTexture = Orange::Texture2D::Create(R"(D:\ForStudy\Render\GameEngine\Orange\Resource\Textures\Checkerboard.png)");
+        // 打印当前工作目录
+        std::cout << "Current working directory: " << currentPath << std::endl;
+        mpTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
 
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->Bind();
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->UploadUniformInt("u_Texture", 0);
