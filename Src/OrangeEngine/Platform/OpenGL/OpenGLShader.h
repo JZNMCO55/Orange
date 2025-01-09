@@ -9,6 +9,7 @@ namespace Orange
     class ORANGE_API OpenGLShader : public Shader
     {
     public:
+        OpenGLShader(const std::string& filepath);
         OpenGLShader(const std::string& vertexShader, const std::string& fragmentShader);
         virtual ~OpenGLShader();
 
@@ -22,6 +23,12 @@ namespace Orange
         void UploadUniformFloat4(const std::string& name, const glm::vec4& value) const;
         void UploadUniformMat3(const std::string& name, const glm::mat3& matrix) const;
         void UploadUniformMat4(const std::string& name, const glm::mat4& matrix) const;
+
+    private:
+        std::string ReadFile(const std::string& filepath);
+        std::unordered_map<unsigned int, std::string> PreProcess(const std::string& source);
+
+        void Compile(const std::unordered_map<unsigned int, std::string>& shaderSources);
     private:
         uint32_t mRendererID;
     };

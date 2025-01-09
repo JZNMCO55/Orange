@@ -2,10 +2,12 @@
 #define PCH_H
 
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <functional>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 
 #include "Log.h"
 
