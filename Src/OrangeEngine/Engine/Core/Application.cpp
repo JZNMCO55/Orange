@@ -28,10 +28,10 @@ namespace Orange
         mpWindow = WinWindow::Create();
         mpWindow->SetEventCallback(BIND_EVENT_FN(OnEvent));
 
+        Renderer::Init();
+
         mpImGuiLayer = std::make_unique<ImGuiLayer>();
         PushOverlay(mpImGuiLayer.get());
-
-
     }
 
     Application::~Application()

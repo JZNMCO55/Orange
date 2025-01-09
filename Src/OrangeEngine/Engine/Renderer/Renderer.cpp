@@ -7,6 +7,11 @@ namespace Orange
 {
     Renderer::SceneData* Renderer::mpSceneData = new Renderer::SceneData;
 
+    void Renderer::Init()
+    {
+        RenderCommand::Init();
+    }
+
     void Renderer::BeginScene(std::shared_ptr<OrthographicCamera>& camera)
     {
         mpSceneData->ViewProjectionMatrix = camera->GetViewProjectionMatrix();

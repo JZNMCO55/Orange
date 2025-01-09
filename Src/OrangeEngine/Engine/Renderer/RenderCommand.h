@@ -8,6 +8,11 @@ namespace Orange
     class ORANGE_API RenderCommand
     {
     public:
+        inline static void Init()
+        {
+            spRendererAPI->Init();
+        }
+
         inline static void SetClearColor(const glm::vec4& color)
         {
             spRendererAPI->SetClearColor(color);

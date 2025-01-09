@@ -165,8 +165,8 @@ public:
         std::filesystem::path currentPath = std::filesystem::current_path();
 
         // 打印当前工作目录
-        std::cout << "Current working directory: " << currentPath << std::endl;
         mpTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
+        mpLogoTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Logo.png)");
 
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->Bind();
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->UploadUniformInt("u_Texture", 0);
@@ -227,7 +227,10 @@ public:
 
         mpTexture->Bind();
         Orange::Renderer::Submit(mpTextureShader, mpBlueVertexArray);
-        
+
+        //Logo
+        mpLogoTexture->Bind();
+        Orange::Renderer::Submit(mpTextureShader, mpBlueVertexArray);
         // triangle
         //Orange::Renderer::Submit(mpShader, mpVertexArray);
         Orange::Renderer::EndScene();
@@ -253,6 +256,7 @@ private:
     Orange::Ref<Orange::Shader> mpTextureShader{ nullptr };
     Orange::Ref<Orange::OrthographicCamera> mpCamera;
     Orange::Ref<Orange::Texture2D> mpTexture{ nullptr };
+    Orange::Ref<Orange::Texture2D> mpLogoTexture{ nullptr };
 
     glm::vec3 mCameraPosition;
     glm::vec3 mSquareColor;

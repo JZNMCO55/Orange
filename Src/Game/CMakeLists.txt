@@ -24,3 +24,6 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${RESOURCE_SOURCE_DIR} ${RESOURCE_OUTPUT_DIR}
 )
+
+# 将 Game 设置为 Visual Studio 启动项目
+set_target_properties(${PROJECT_NAME} PROPERTIES VS_STARTUP_PROJECT YES)
