@@ -9,9 +9,8 @@ class ExampleLayer : public Orange::Layer
 public:
     ExampleLayer()
         : Layer("Example")
-        ,mCameraPosition(0.f)
     {
-        mpCamera = std::make_shared<Orange::OrthographicCamera>(-1.6f, 1.6f, -0.9f, 0.9f);
+        mpCameraControler = std::make_shared<Orange::OrthographicCameraControler>(1280.0f / 720.0f);
         //Triangle
         float vertices[3 * 7] = {
             -0.5f, -0.5f, 0.0f, 0.8f, 0.2f, 0.8f, 1.0f,
@@ -144,40 +143,13 @@ public:
 
     void OnUpdate(Orange::Timestep ts) override
     {
-        if (Orange::Input::IsKeyPressed(ORG_KEY_LEFT))
-        {
-            mCameraPosition.x += mCameraMoveSpeed * ts;
-        }
-        else if(Orange::Input::IsKeyPressed(ORG_KEY_RIGHT))
-        {
-            mCameraPosition.x -= mCameraMoveSpeed * ts;
-        }
-
-        if (Orange::Input::IsKeyPressed(ORG_KEY_UP))
-        {
-            mCameraPosition.y -= mCameraMoveSpeed * ts;
-        }
-        else if (Orange::Input::IsKeyPressed(ORG_KEY_DOWN))
-        {
-            mCameraPosition.y += mCameraMoveSpeed * ts;
-        }
-
-        if (Orange::Input::IsKeyPressed(ORG_KEY_A))
-        {
-            mCameraRotation -= mCameraRotationSpeed * ts;
-        }
-        else if (Orange::Input::IsKeyPressed(ORG_KEY_D))
-        {
-            mCameraRotation += mCameraRotationSpeed * ts;
-        }
 
         Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
         Orange::RenderCommand::Clear();
 
-        mpCamera->SetPosition(mCameraPosition);
-        mpCamera->SetRotation(mCameraRotation);
+        mpCameraControler->OnUpdate(ts);
 
-        Orange::Renderer::BeginScene(mpCamera);
+        Orange::Renderer::BeginScene(mpCameraControler->GetCamera());
         
         glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->Bind();
@@ -213,7 +185,7 @@ public:
 
     void OnEvent(Orange::Event& event) override
     {
-
+        mpCameraControler->OnEvent(event);
     }   
 
 private:
@@ -222,15 +194,11 @@ private:
     Orange::Ref<Orange::Shader> mpFlatShader{ nullptr };
     Orange::Ref<Orange::VertexArray> mpBlueVertexArray{ nullptr };
     Orange::Ref<Orange::Shader> mpTextureShader{ nullptr };
-    Orange::Ref<Orange::OrthographicCamera> mpCamera;
     Orange::Ref<Orange::Texture2D> mpTexture{ nullptr };
     Orange::Ref<Orange::Texture2D> mpLogoTexture{ nullptr };
+    Orange::Ref<Orange::OrthographicCameraControler> mpCameraControler;
 
-    glm::vec3 mCameraPosition;
     glm::vec3 mSquareColor;
-    float mCameraMoveSpeed = 5.0f;
-    float mCameraRotation = 0.0f;
-    float mCameraRotationSpeed = 180.0f;
 };
 class Sandbox : public Orange::Application
 {

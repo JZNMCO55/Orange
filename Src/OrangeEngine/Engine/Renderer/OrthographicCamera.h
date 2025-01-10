@@ -13,11 +13,13 @@ namespace Orange
         void SetPosition(const glm::vec3& position) { mPosition = position; RecalculateViewMatrix(); }
         float GetRotation() const { return mRotation; }
         void SetRotation(float rotation) { mRotation = rotation; RecalculateViewMatrix(); }
+        void SetProjection(float left, float right, float bottom, float top);
         const glm::mat4& GetProjectionMatrix() const { return mProjectionMatrix; }
         const glm::mat4& GetViewMatrix() const { return mViewMatrix; }
         const glm::mat4& GetViewProjectionMatrix() const { return mViewProjectionMatrix; }
     private:
         void RecalculateViewMatrix();
+        // TODO: Add MarkDirty() function to update view matrix only when needed
     private:
         glm::mat4 mProjectionMatrix;
         glm::mat4 mViewMatrix;
