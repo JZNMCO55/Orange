@@ -91,7 +91,7 @@ public:
             }
         )";
 
-        mpShader.reset(Orange::Shader::Create(vertexSrc, fragmentSrc));
+        mpShader = Orange::Shader::Create("VertexColor", vertexSrc, fragmentSrc);
 
         std::string flatColorShaderVertexSrc = R"(
             #version 330 core
@@ -126,10 +126,10 @@ public:
         )";
 
 
-        mpFlatShader.reset(Orange::Shader::Create(flatColorShaderVertexSrc, flatColorShaderFragmentSrc));
+        mpFlatShader= Orange::Shader::Create("FlatColor",flatColorShaderVertexSrc, flatColorShaderFragmentSrc);
 
 
-        mpTextureShader.reset(Orange::Shader::Create(R"(../../Resource/Shaders/Texture.glsl)"));
+        mpTextureShader = Orange::Shader::Create(R"(../../Resource/Shaders/Texture.glsl)");
         std::filesystem::path currentPath = std::filesystem::current_path();
 
         // 打印当前工作目录

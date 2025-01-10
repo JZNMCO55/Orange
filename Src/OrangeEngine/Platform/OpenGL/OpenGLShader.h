@@ -10,7 +10,7 @@ namespace Orange
     {
     public:
         OpenGLShader(const std::string& filepath);
-        OpenGLShader(const std::string& vertexShader, const std::string& fragmentShader);
+        OpenGLShader(const std::string& name, const std::string& vertexShader, const std::string& fragmentShader);
         virtual ~OpenGLShader();
 
         virtual void Bind() const override;
@@ -24,6 +24,7 @@ namespace Orange
         void UploadUniformMat3(const std::string& name, const glm::mat3& matrix) const;
         void UploadUniformMat4(const std::string& name, const glm::mat4& matrix) const;
 
+        virtual const std::string& GetName() const override { return mName; }
     private:
         std::string ReadFile(const std::string& filepath);
         std::unordered_map<unsigned int, std::string> PreProcess(const std::string& source);
@@ -31,6 +32,7 @@ namespace Orange
         void Compile(const std::unordered_map<unsigned int, std::string>& shaderSources);
     private:
         uint32_t mRendererID;
+        std::string mName;
     };
 }
 
