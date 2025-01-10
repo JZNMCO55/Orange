@@ -8,6 +8,7 @@
 namespace Orange
 {
     class WindowCloseEvent;
+    class WindowResizeEvent;
     class Layer;
     class ImGuiLayer;
     class Shader;
@@ -36,6 +37,7 @@ namespace Orange
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);
+        bool OnWindowResize(WindowResizeEvent& e);
         Application(const Application&) = delete;
         Application(const Application&&) = delete;
         Application& operator=(const Application&) = delete;
@@ -47,6 +49,7 @@ namespace Orange
         
         float mLastFrameTime{ 0.0f };
         bool mbRunning{ true };
+        bool mbMinimized{ false };
 
         static Application* spInstance;
     };

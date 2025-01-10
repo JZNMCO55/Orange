@@ -46,9 +46,12 @@ namespace Orange
             Timestep timestep = time - mLastFrameTime;
             mLastFrameTime = time;
 
-            for (const auto& layer : mLayerStack)
+            if (!mbMinimized)
             {
-                layer->OnUpdate(timestep);
+                for (const auto& layer : mLayerStack)
+                {
+                    layer->OnUpdate(timestep);
+                }
             }
 
             mpImGuiLayer->Begin();
@@ -66,6 +69,7 @@ namespace Orange
     {
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<WindowCloseEvent>(BIND_EVENT_FN(OnWindowClose));
+        dispatcher.Dispatch<WindowResizeEvent>(BIND_EVENT_FN(OnWindowResize));
         //ORANGE_LOG_INFO("Event: {0}", e.ToString());
 
         for (auto it = mLayerStack.end(); it != mLayerStack.begin(); )
@@ -95,5 +99,19 @@ namespace Orange
         mbRunning = false;
 
         return true;
+    }
+
+    bool Application::OnWindowResize(WindowResizeEvent& e)
+    {
+        if (e.GetWidth() == 0 || e.GetHeight() == 0)
+        {
+            mbMinimized = true;
+            return false;
+        }
+
+        mbMinimized = false;
+        Renderer::OnWindowResize(e.GetWidth(), e.GetHeight());
+
+        return false;
     }
 }

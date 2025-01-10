@@ -23,6 +23,11 @@ namespace Orange
             spRendererAPI->Clear();
         }
 
+        inline static void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+        {
+            spRendererAPI->SetViewport(x, y, width, height);
+        }
+
         inline static void DrawIndexed(const std::shared_ptr<VertexArray>& vertexArray)
         {
             spRendererAPI->DrawIndexed(vertexArray);
