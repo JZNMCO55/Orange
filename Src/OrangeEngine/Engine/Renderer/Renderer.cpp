@@ -34,8 +34,8 @@ namespace Orange
         const glm::mat4& transform)
     {
         shader->Bind();
-        std::dynamic_pointer_cast<OpenGLShader>(shader)->UploadUniformMat4("u_ViewProjection", mpSceneData->ViewProjectionMatrix);
-        std::dynamic_pointer_cast<OpenGLShader>(shader)->UploadUniformMat4("u_Transform", transform);
+        std::dynamic_pointer_cast<OpenGLShader>(shader)->SetMat4("u_ViewProjection", mpSceneData->ViewProjectionMatrix);
+        std::dynamic_pointer_cast<OpenGLShader>(shader)->SetMat4("u_Transform", transform);
         vertexArray->Bind();
         RenderCommand::DrawIndexed(vertexArray);
     }

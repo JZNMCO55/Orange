@@ -14,22 +14,26 @@ Sandbox2D::~Sandbox2D()
 
 void Sandbox2D::OnAttach()
 {
+    mpCheckerboardTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
 }
 
 void Sandbox2D::OnDetach()
 {
-    
+
 }
 
 void Sandbox2D::OnUpdate(Orange::Timestep ts)
 {
     mpCameraController->OnUpdate(ts);
     
-    Orange::RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1.0f });
+    Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
     Orange::RenderCommand::Clear();
-    
+
     Orange::Renderer2D::BeginScene(mpCameraController->GetCamera());
-    Orange::Renderer2D::DrawQuad({ 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f }, mSquareColor);
+    Orange::Renderer2D::DrawQuad({ -1.0f, 0.0f }, { 0.8f, 0.8f }, { 0.8f, 0.2f, 0.3f, 1.0f });
+    Orange::Renderer2D::DrawQuad({ 0.5f, -0.5f }, { 0.5f, 0.75f }, { 0.2f, 0.3f, 0.8f, 1.0f });
+    Orange::Renderer2D::DrawQuad({ 0.0f, 0.0f, -0.1f }, { 10.0f, 10.0f }, mpCheckerboardTexture);
+    
     Orange::Renderer2D::EndScene();
 }
 

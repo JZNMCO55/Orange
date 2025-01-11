@@ -138,7 +138,7 @@ public:
         mpLogoTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Logo.png)");
 
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->Bind();
-        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->UploadUniformInt("u_Texture", 0);
+        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpTextureShader)->SetInt("u_Texture", 0);
 
     }
     ~ExampleLayer() {}
@@ -155,7 +155,7 @@ public:
         
         glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
         std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->Bind();
-        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->UploadUniformFloat3("u_Color", mSquareColor);
+        std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->SetFloat3("u_Color", mSquareColor);
 
         for (int y = 0; y < 20; y++)
         {
