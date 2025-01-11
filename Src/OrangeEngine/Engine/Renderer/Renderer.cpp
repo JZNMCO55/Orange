@@ -3,6 +3,7 @@
 #include "OrthographicCamera.h"
 #include "OpenGL/OpenGLShader.h"
 #include "RenderCommand.h"
+#include "Renderer2D.h"
 
 namespace Orange
 {
@@ -11,6 +12,7 @@ namespace Orange
     void Renderer::Init()
     {
         RenderCommand::Init();
+        Renderer2D::Init();
     }
 
     void Renderer::BeginScene(std::shared_ptr<OrthographicCamera>& camera)

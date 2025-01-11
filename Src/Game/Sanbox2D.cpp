@@ -10,36 +10,15 @@ Sandbox2D::Sandbox2D()
 
 Sandbox2D::~Sandbox2D()
 {
-
 }
 
 void Sandbox2D::OnAttach()
 {
-    mpVertexArray = Orange::VertexArray::Create();
-
-    float squareVertices[5 * 4] = {
-        -0.5f, -0.5f, 0.0f,
-         0.5f, -0.5f, 0.0f,
-         0.5f,  0.5f, 0.0f,
-        -0.5f,  0.5f, 0.0f
-    };
-
-    Orange::Ref<Orange::VertexBuffer> squareVB;
-    squareVB.reset(Orange::VertexBuffer::Create(squareVertices, sizeof(squareVertices)));
-    squareVB->SetLayout({
-        { Orange::EShaderDataType::Float3, "a_Position" }
-        });
-    mpVertexArray->AddVertexBuffer(squareVB);
-    uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
-    Orange::Ref<Orange::IndexBuffer> squareIB;
-    squareIB.reset(Orange::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t)));
-    mpVertexArray->SetIndexBuffer(squareIB);
-    mpFlatShader = Orange::Shader::Create(R"(../../Resource/Shaders/FlatShader.glsl)");;
 }
 
 void Sandbox2D::OnDetach()
 {
-
+    
 }
 
 void Sandbox2D::OnUpdate(Orange::Timestep ts)
@@ -48,16 +27,10 @@ void Sandbox2D::OnUpdate(Orange::Timestep ts)
     
     Orange::RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1.0f });
     Orange::RenderCommand::Clear();
-
-    Orange::Renderer::BeginScene(mpCameraController->GetCamera());
-
-    std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->Bind();
-    std::dynamic_pointer_cast<Orange::OpenGLShader>(mpFlatShader)->UploadUniformFloat4("u_Color", mSquareColor);
-
-    Orange::Renderer::Submit(mpFlatShader, mpVertexArray,
-        glm::scale(glm::mat4(1.0f), glm::vec3(1.5f)));
-
-    Orange::Renderer::EndScene();
+    
+    Orange::Renderer2D::BeginScene(mpCameraController->GetCamera());
+    Orange::Renderer2D::DrawQuad({ 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f }, mSquareColor);
+    Orange::Renderer2D::EndScene();
 }
 
 void Sandbox2D::OnImGuiRender()
