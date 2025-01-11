@@ -3,6 +3,8 @@
 #include "Orange.h"
 #include "OpenGL/OpenGLShader.h"
 #include <filesystem>
+#include "EntryPoint.h"
+#include "Sanbox2D.h"
 
 class ExampleLayer : public Orange::Layer
 {
@@ -18,7 +20,7 @@ public:
              0.0f,  0.5f, 0.0f, 0.8f, 0.8f, 0.2f, 1.0f
         };
 
-        mpVertexArray.reset(Orange::VertexArray::Create());
+        mpVertexArray = Orange::VertexArray::Create();
         Orange::Ref<Orange::VertexBuffer> tpVertexBuffer(Orange::VertexBuffer::Create(vertices, sizeof(vertices)));
 
         Orange::BufferLayout layout = {
@@ -35,7 +37,7 @@ public:
         mpVertexArray->SetIndexBuffer(tpIndexBuffer);
 
         // Squares
-        mpBlueVertexArray.reset(Orange::VertexArray::Create());
+        mpBlueVertexArray = Orange::VertexArray::Create();
         float squareVertices[5 * 4] = {
             -0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
              0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
@@ -205,7 +207,7 @@ class Sandbox : public Orange::Application
     public:
         Sandbox()
         {
-             PushLayer(new ExampleLayer());
+             PushLayer(new Sandbox2D());
         }
         
         ~Sandbox()

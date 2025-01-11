@@ -24,8 +24,4 @@
 #include "Renderer/OrthographicCamera.h"
 #include "Renderer/Texture.h"
 
-
-// -------------Entry Point-----------------
-#include "EntryPoint.h"
-// -----------------------------------------
 #endif // ORANGE_H
