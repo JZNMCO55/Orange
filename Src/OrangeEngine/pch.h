@@ -10,12 +10,12 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "Log.h"
-
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "Log.h"
+#include "Debug/Instrumentor.h"
 
 #ifdef ORANGE_ENABLE_ASSERTS
 #define ORANGE_ASSERT(x, ...) { if(!(x)) { CLIENT_LOG_ERROR("Assertion Failed: {0}", __VA_ARGS__); __debugbreak(); } }

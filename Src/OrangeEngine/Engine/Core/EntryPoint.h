@@ -9,10 +9,15 @@ int main(int argc, char** argv)
 {
     Orange::Log::Init();
 
-    Orange::Log::GetOrangeLogger()->warn("Engine starting up...");
+    ORG_PROFILE_BEGIN_SESSION("Startup", "OrangeProfile-Startup.json");
     auto app = Orange::CreateApplication();
+    ORG_PROFILE_END_SESSION();
+    ORG_PROFILE_BEGIN_SESSION("Runtime", "OrangeProfile-Runtime.json");
     app->Run();
+    ORG_PROFILE_END_SESSION();
+    ORG_PROFILE_BEGIN_SESSION("Startup", "OrangeProfile-Shutdown.json");
     delete app;
+    ORG_PROFILE_END_SESSION();
 }
 
 #endif // PLATFORM_WINDOWS
