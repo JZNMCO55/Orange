@@ -4,14 +4,6 @@
 #include "ApplicationEvent.h"
 #include "KeyEvent.h"
 #include "MouseEvent.h" 
-#define REGIST_TREE_OPERATION(class_name) \
-    class class_name##OperationHelperP{public:\
-    class_name##OperationHelper()\
-    {emTree::Instance()->addTreeOperation(New class_name());\
-    if(emTree::Instance()->registTreeOperation();)};\
-    ~class_name##OperationHelper(){};\
-    };\
-    static class_name##OperationHelperP class_name##OperationHelper;
 
 namespace Orange
 {
@@ -22,16 +14,22 @@ namespace Orange
 
     WinWindow::WinWindow(const WindowProps& data)
     {
+        ORG_PROFILE_FUNCTION();
+
         Init(data);
     }
 
     WinWindow::~WinWindow()
     {
+        ORG_PROFILE_FUNCTION();
+
         Shutdown();
     }
 
     void WinWindow::OnUpdate()
     {
+        ORG_PROFILE_FUNCTION();
+
         // 这里可以添加更新窗口的代码
         glfwPollEvents();
         glfwSwapBuffers(mpWindow);
@@ -39,6 +37,8 @@ namespace Orange
 
     void WinWindow::SetVSync(bool enabled)
     {
+        ORG_PROFILE_FUNCTION();
+
         if (mpWindow != nullptr)
         {
             glfwSwapInterval(enabled ? 1 : 0);
@@ -53,6 +53,8 @@ namespace Orange
 
     void WinWindow::Init(const WindowProps& props)
     {
+        ORG_PROFILE_FUNCTION();
+
         mData.mTitle = props.mTitle;
         mData.mWidth = props.mWidth;
         mData.mHeight = props.mHeight;
@@ -60,21 +62,23 @@ namespace Orange
 
         if (!sbGLFWInitialized)
         {
+            ORG_PROFILE_SCOPE("glfwInit");
             int success = glfwInit();
             ORANGE_CORE_ASSERT(success, "Failed to initialize GLFW");
             sbGLFWInitialized = true;
+            glfwSetErrorCallback(GLFWErrorCallback);
         }
 
-        mpWindow = glfwCreateWindow((int)props.mWidth, (int)props.mHeight, props.mTitle.c_str(), nullptr, nullptr);
+        {
+            ORG_PROFILE_SCOPE("glfwCreateWindow");
+            mpWindow = glfwCreateWindow((int)props.mWidth, (int)props.mHeight, props.mTitle.c_str(), nullptr, nullptr);
+        }
         glfwMakeContextCurrent(mpWindow);
         int status = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
         ORANGE_CORE_ASSERT(status, "Failed to initialize Glad");
         glfwSetWindowUserPointer(mpWindow, &mData);
         SetVSync(true);
 
-        // Set GLFW callbacks
-        // Set GLFW error callback
-        glfwSetErrorCallback(GLFWErrorCallback);
 
         // WindowResizeEvent
         glfwSetWindowSizeCallback(mpWindow, [](GLFWwindow* tpWindow, int width, int height)
@@ -175,6 +179,8 @@ namespace Orange
 
     void WinWindow::Shutdown()
     {
+        ORG_PROFILE_FUNCTION();
+
         if (mpWindow)
         {
             glfwDestroyWindow(mpWindow);

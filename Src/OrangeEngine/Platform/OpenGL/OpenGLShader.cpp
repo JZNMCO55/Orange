@@ -21,6 +21,8 @@ namespace Orange
 
     OpenGLShader::OpenGLShader(const std::string& filepath)
     {
+        ORG_PROFILE_FUNCTION();
+
         std::string source = ReadFile(filepath);
         auto shaderSources = PreProcess(source);
         Compile(shaderSources);
@@ -36,6 +38,8 @@ namespace Orange
     OpenGLShader::OpenGLShader(const std::string& name, const std::string& vertexSrc, const std::string& fragmentSrc)
         : mName(name)
     {
+        ORG_PROFILE_FUNCTION();
+
         std::unordered_map<GLenum, std::string> shaderSources;
         shaderSources[GL_VERTEX_SHADER] = vertexSrc;
         shaderSources[GL_FRAGMENT_SHADER] = fragmentSrc;
@@ -44,21 +48,29 @@ namespace Orange
     
     OpenGLShader::~OpenGLShader()
     {
+        ORG_PROFILE_FUNCTION();
+
         glDeleteProgram(mRendererID);
     }
 
     void OpenGLShader::Bind() const
     {
+        ORG_PROFILE_FUNCTION();
+
         glUseProgram(mRendererID);
     }
 
     void OpenGLShader::Unbind() const
     {
+        ORG_PROFILE_FUNCTION();
+
         glUseProgram(0);
     }
 
     void OpenGLShader::SetInt(const std::string& name, int value) const
     {
+        ORG_PROFILE_FUNCTION();
+
         UploadUniformInt(name, value);
     }
 
@@ -74,11 +86,15 @@ namespace Orange
 
     void OpenGLShader::SetFloat3(const std::string& name, const glm::vec3& value) const
     {
+        ORG_PROFILE_FUNCTION();
+
         UploadUniformFloat3(name, value);
     }
 
     void OpenGLShader::SetFloat4(const std::string& name, const glm::vec4& value) const
     {
+        ORG_PROFILE_FUNCTION();
+
         UploadUniformFloat4(name, value);
     }
 
@@ -89,6 +105,8 @@ namespace Orange
 
     void OpenGLShader::SetMat4(const std::string& name, const glm::mat4& matrix) const
     {
+        ORG_PROFILE_FUNCTION();
+
         UploadUniformMat4(name, matrix);
     }
 
@@ -136,6 +154,8 @@ namespace Orange
 
     std::string OpenGLShader::ReadFile(const std::string& filepath)
     {
+        ORG_PROFILE_FUNCTION();
+
         std::string result;
         std::ifstream in(filepath, std::ios::in | std::ios::binary);
         if (in)
@@ -156,6 +176,8 @@ namespace Orange
     
     std::unordered_map<GLenum, std::string> OpenGLShader::PreProcess(const std::string& source)
     {
+        ORG_PROFILE_FUNCTION();
+
         std::unordered_map<GLenum, std::string> shaderSources;
 
         const char* typeToken = "#type";
@@ -178,6 +200,8 @@ namespace Orange
     
     void OpenGLShader::Compile(const std::unordered_map<GLenum, std::string>& shaderSources)
     {
+        ORG_PROFILE_FUNCTION();
+
         GLuint program = glCreateProgram();
         ORANGE_CORE_ASSERT(shaderSources.size() <= 2, "Only support 2 shaders for now");
         std::array<GLenum, 2> glShaderIDs;

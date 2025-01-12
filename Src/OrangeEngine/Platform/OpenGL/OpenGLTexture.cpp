@@ -8,6 +8,8 @@ namespace Orange
     OpenGLTexture2D::OpenGLTexture2D(uint32_t width, uint32_t height)
     : mWidth(width), mHeight(height)
     {
+        ORG_PROFILE_FUNCTION();
+
         mInternalFormat = GL_RGBA8;
         mDataFormat = GL_RGBA;
         glCreateTextures(GL_TEXTURE_2D, 1, &mRendererID);
@@ -20,9 +22,17 @@ namespace Orange
 
     OpenGLTexture2D::OpenGLTexture2D(const std::string& path)
     {
+        ORG_PROFILE_FUNCTION();
+
         int width, height, channels;
         stbi_set_flip_vertically_on_load(1);
-        stbi_uc* data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+        stbi_uc* data;
+        
+        {
+            ORG_PROFILE_SCOPE("stbi_load-OpenGLTexture2D::OpenGLTexture2D(const std::string& path)");
+            data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+
+        }
 
         ORANGE_CORE_ASSERT(data, "Failed to load image {0}", path);
 
@@ -61,16 +71,22 @@ namespace Orange
 
     OpenGLTexture2D::~OpenGLTexture2D()
     {
+        ORG_PROFILE_FUNCTION();
+
         glDeleteTextures(1, &mRendererID);
     }
 
     void OpenGLTexture2D::Bind(uint32_t slot) const
     {
+        ORG_PROFILE_FUNCTION();
+
         glBindTextureUnit(slot, mRendererID);
     }
 
     void OpenGLTexture2D::SetData(void* data, uint32_t size)
     {
+        ORG_PROFILE_FUNCTION();
+
         uint32_t bpp = mDataFormat == GL_RGBA ? 4 : 3;
         ORANGE_CORE_ASSERT(size == mWidth * mHeight * bpp, "Data must be entire texture!");
         glTextureSubImage2D(mRendererID, 0, 0, 0, mWidth, mHeight, mDataFormat, GL_UNSIGNED_BYTE, data);

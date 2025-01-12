@@ -21,6 +21,8 @@ namespace Orange
 
     void Renderer2D::Init()
     {
+        ORG_PROFILE_FUNCTION();
+
         spData = new Renderer2DStorage();
         spData->mpQuadVertexArray = VertexArray::Create();
 
@@ -60,12 +62,15 @@ namespace Orange
 
     void Renderer2D::BeginScene(const Ref<OrthographicCamera>& camera)
     {
+        ORG_PROFILE_FUNCTION();
+
         spData->mpTextureShader->Bind();
         spData->mpTextureShader->SetMat4("u_ViewProjection", camera->GetViewProjectionMatrix());
     }
 
     void Renderer2D::EndScene()
     {
+        ORG_PROFILE_FUNCTION();
 
     }
 
@@ -76,6 +81,8 @@ namespace Orange
 
     void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color)
     {
+        ORG_PROFILE_FUNCTION();
+
         spData->mpTextureShader->SetFloat4("u_Color", color);
         spData->mpWhiteTexture->Bind();
         glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
@@ -91,6 +98,8 @@ namespace Orange
 
     void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<Texture2D>& texture)
     {
+        ORG_PROFILE_FUNCTION();
+
         spData->mpTextureShader->SetFloat4("u_Color", glm::vec4(1.0f));
         texture->Bind();
         glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });

@@ -11,6 +11,8 @@ namespace Orange
 
     void Renderer::Init()
     {
+        ORG_PROFILE_FUNCTION();
+
         RenderCommand::Init();
         Renderer2D::Init();
     }
@@ -38,5 +40,9 @@ namespace Orange
         std::dynamic_pointer_cast<OpenGLShader>(shader)->SetMat4("u_Transform", transform);
         vertexArray->Bind();
         RenderCommand::DrawIndexed(vertexArray);
+    }
+    void Renderer::ShutDown()
+    {
+        Renderer2D::Shutdown();
     }
 }

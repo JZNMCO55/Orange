@@ -23,6 +23,8 @@ namespace Orange
 
     Application::Application()
     {
+        ORG_PROFILE_FUNCTION();
+
         ORANGE_CORE_ASSERT(!spInstance, "Application already exists!");
         spInstance = this;
         mpWindow = WinWindow::Create();
@@ -36,30 +38,44 @@ namespace Orange
 
     Application::~Application()
     {
+        ORG_PROFILE_FUNCTION();
+
+        //Renderer::Shutdown();
     }
 
     void Application::Run()
     {
+        ORG_PROFILE_FUNCTION();
+
         while (mbRunning)
         {
+            ORG_PROFILE_SCOPE("Run Loop");
             float time = (float)glfwGetTime();
             Timestep timestep = time - mLastFrameTime;
             mLastFrameTime = time;
 
             if (!mbMinimized)
             {
-                for (const auto& layer : mLayerStack)
                 {
-                    layer->OnUpdate(timestep);
+                    ORG_PROFILE_SCOPE("LayerStack OnUpdate");
+                    for (const auto& layer : mLayerStack)
+                    {
+                        layer->OnUpdate(timestep);
+                    }
                 }
+
+                {
+                    ORG_PROFILE_SCOPE("LayerStack OnImGuiRender");
+                    mpImGuiLayer->Begin();
+                    for (const auto& layer : mLayerStack)
+                    {
+                        layer->OnImGuiRender();
+                    }
+                    mpImGuiLayer->End();
+                }
+
             }
 
-            mpImGuiLayer->Begin();
-            for (const auto& layer : mLayerStack)
-            {
-                layer->OnImGuiRender();
-            }
-            mpImGuiLayer->End();
 
             mpWindow->OnUpdate();
         }
@@ -67,6 +83,8 @@ namespace Orange
 
     void Application::OnEvent(Event& e)
     {
+        ORG_PROFILE_FUNCTION();
+
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<WindowCloseEvent>(BIND_EVENT_FN(OnWindowClose));
         dispatcher.Dispatch<WindowResizeEvent>(BIND_EVENT_FN(OnWindowResize));
@@ -84,12 +102,16 @@ namespace Orange
 
     void Application::PushLayer(Layer* layer)
     {
+        ORG_PROFILE_FUNCTION();
+
         mLayerStack.PushLayer(layer);
         layer->OnAttach();
     }
 
     void Application::PushOverlay(Layer* layer)
     {
+        ORG_PROFILE_FUNCTION();
+
         mLayerStack.PushOverlay(layer);
         layer->OnAttach();
     }
@@ -103,6 +125,7 @@ namespace Orange
 
     bool Application::OnWindowResize(WindowResizeEvent& e)
     {
+        ORG_PROFILE_FUNCTION();
         if (e.GetWidth() == 0 || e.GetHeight() == 0)
         {
             mbMinimized = true;

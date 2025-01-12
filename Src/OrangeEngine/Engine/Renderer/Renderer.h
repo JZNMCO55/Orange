@@ -20,6 +20,7 @@ namespace Orange
             const std::shared_ptr<VertexArray>& vertexArray ,
             const glm::mat4& transform = glm::mat4(1.0f));
 
+        static void ShutDown();
         inline static RendererAPI::API GetAPI() { return RendererAPI::GetAPI(); }
 
     private:

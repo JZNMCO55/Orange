@@ -22,6 +22,8 @@ namespace Orange
 
     void OrthographicCameraControler::OnUpdate(Timestep ts)
     {
+        ORG_PROFILE_FUNCTION();
+
         if (Orange::Input::IsKeyPressed(ORG_KEY_A))
         {
             mCameraPosition.x += mCameraMoveSpeed * ts;
@@ -58,6 +60,8 @@ namespace Orange
 
     void OrthographicCameraControler::OnEvent(Event& e)
     {
+        ORG_PROFILE_FUNCTION();
+
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<MouseScrolledEvent>(ORANGE_BIND_EVENT_FN(OrthographicCameraControler::OnMouseScrolled));
         dispatcher.Dispatch<WindowResizeEvent>(ORANGE_BIND_EVENT_FN(OrthographicCameraControler::OnWindowResize));
@@ -65,6 +69,8 @@ namespace Orange
 
     bool OrthographicCameraControler::OnMouseScrolled(MouseScrolledEvent& e)
     {
+        ORG_PROFILE_FUNCTION();
+
         mZoomLevel -= e.GetYOffset() * 0.25f;
         mZoomLevel = std::max(mZoomLevel, 0.25f);
         mpCamera->SetProjection(-mAspectRatio * mZoomLevel, mAspectRatio * mZoomLevel, -mZoomLevel, mZoomLevel);
@@ -73,6 +79,8 @@ namespace Orange
 
     bool OrthographicCameraControler::OnWindowResize(WindowResizeEvent& e)
     {
+        ORG_PROFILE_FUNCTION();
+
         mAspectRatio = (float)e.GetWidth() / (float)e.GetHeight();
         mpCamera->SetProjection(-mAspectRatio * mZoomLevel, mAspectRatio * mZoomLevel, -mZoomLevel, mZoomLevel);
         return false;
