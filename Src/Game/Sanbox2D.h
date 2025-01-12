@@ -15,7 +15,13 @@ public:
     void OnUpdate(Orange::Timestep ts) override;
     void OnImGuiRender() override;
     void OnEvent(Orange::Event& event) override;
-
+private:
+    struct ProfileResult
+    {
+        const char* Name;
+        float Time;
+    };
+    std::vector<ProfileResult> mProfileResults;
 private:
     Orange::Ref<Orange::OrthographicCameraControler> mpCameraController;
 
