@@ -43,6 +43,7 @@ void Sandbox2D::OnUpdate(Orange::Timestep ts)
     {
         ORG_PROFILE_SCOPE("Renderer2D Draw");
         Orange::Renderer2D::BeginScene(mpCameraController->GetCamera());
+
         Orange::Renderer2D::DrawQuad({ -1.0f, 0.0f }, { 0.8f, 0.8f }, { 0.8f, 0.2f, 0.3f, 1.0f });
         Orange::Renderer2D::DrawQuad({ 0.5f, -0.5f }, { 0.5f, 0.75f }, mSquareColor);
         Orange::Renderer2D::DrawQuad({ 0.0f, 0.0f, -0.1f }, { 10.0f, 10.0f }, mpCheckerboardTexture);
