@@ -33,7 +33,7 @@ public:
 
         uint32_t indices[3] = { 0, 1, 2 };
         Orange::Ref<Orange::IndexBuffer> tpIndexBuffer;
-        tpIndexBuffer.reset(Orange::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t)));
+        tpIndexBuffer = Orange::IndexBuffer::Create(indices, sizeof(indices) / sizeof(uint32_t));
         mpVertexArray->SetIndexBuffer(tpIndexBuffer);
 
         // Squares
@@ -46,7 +46,7 @@ public:
         };
 
         Orange::Ref<Orange::VertexBuffer> squareVB;
-        squareVB.reset(Orange::VertexBuffer::Create(squareVertices, sizeof(squareVertices)));
+        squareVB = Orange::VertexBuffer::Create(squareVertices, sizeof(squareVertices));
         squareVB->SetLayout({
             { Orange::EShaderDataType::Float3, "a_Position" },
             { Orange::EShaderDataType::Float2, "a_TexCoord" }
@@ -55,7 +55,7 @@ public:
 
         uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
         Orange::Ref<Orange::IndexBuffer> squareIB;
-        squareIB.reset(Orange::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t)));
+        squareIB = Orange::IndexBuffer::Create(squareIndices, sizeof(squareIndices) / sizeof(uint32_t));
         mpBlueVertexArray->SetIndexBuffer(squareIB);
 
         std::string vertexSrc = R"(
