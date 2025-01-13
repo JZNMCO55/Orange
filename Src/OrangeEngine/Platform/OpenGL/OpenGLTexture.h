@@ -19,6 +19,11 @@ namespace Orange
         virtual void Bind(uint32_t slot = 0) const override;
 
         virtual void SetData(void* data, uint32_t size);
+
+        virtual bool operator==(const Texture& other) const override
+        {
+            return mRendererID == ((OpenGLTexture2D&)other).mRendererID;
+        }
     private:
         std::string mPath;
         uint32_t mWidth;
