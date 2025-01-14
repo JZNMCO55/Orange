@@ -22,9 +22,9 @@ namespace Orange
 
     struct Renderer2DData
     {
-        const uint32_t MaxQuads = 10000;
-        const uint32_t MaxVertices = MaxQuads * 4;
-        const uint32_t MaxIndices = MaxQuads * 6;
+        static const uint32_t MaxQuads = 10000;
+        static const uint32_t MaxVertices = MaxQuads * 4;
+        static const uint32_t MaxIndices = MaxQuads * 6;
         static const uint32_t MaxTextureSlots = 32;
 
         Ref<VertexArray> mpQuadVertexArray;
@@ -42,6 +42,8 @@ namespace Orange
         uint32_t TextureSlotIndex = 1;
 
         glm::vec4 QuadVertexPositions[4];
+
+        Renderer2D::Statistics Stats;
     };
 
     static Renderer2DData sData;
@@ -235,6 +237,11 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
+        if (sData.QuadIndexCount >= sData.MaxIndices)
+        {
+            FlushAndReset();
+        }
+
         sData.QuadVertexBufferPtr->mPosition = position;
         sData.QuadVertexBufferPtr->mColor = color;
         sData.QuadVertexBufferPtr->mTexCoord = { 0.0f, 0.0f };
@@ -263,6 +270,18 @@ namespace Orange
         sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
         sData.QuadVertexBufferPtr++;
         sData.QuadIndexCount += 6;
+
+        sData.Stats.QuadCount++;
+    }
+
+    void Renderer2D::ResetStats()
+    {
+        memset(&sData.Stats, 0, sizeof(Statistics));
+    }
+
+    Renderer2D::Statistics Renderer2D::GetStats()
+    {
+        return sData.Stats;
     }
 
     void Renderer2D::CreateRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
@@ -270,6 +289,10 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
+        if (sData.QuadIndexCount >= sData.MaxIndices)
+        {
+            FlushAndReset();
+        }
         glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
             glm::rotate(glm::mat4(1.0f), glm::radians(rotation), { 0.0f, 0.0f, 1.0f }) *
             glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
@@ -302,6 +325,16 @@ namespace Orange
         sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
         sData.QuadVertexBufferPtr++;
         sData.QuadIndexCount += 6;
+
+        sData.Stats.QuadCount++;
     }
 
+    void Renderer2D::FlushAndReset()
+    {
+        EndScene();
+
+        sData.QuadIndexCount = 0;
+        sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
+        sData.TextureSlotIndex = 1;
+    }
 }
