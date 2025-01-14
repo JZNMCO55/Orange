@@ -46,7 +46,8 @@ void Sandbox2D::OnUpdate(Orange::Timestep ts)
 
         Orange::Renderer2D::DrawQuad({ -1.0f, 0.0f }, { 0.8f, 0.8f }, { 0.8f, 0.2f, 0.3f, 1.0f });
         Orange::Renderer2D::DrawQuad({ 0.5f, -0.5f }, { 0.5f, 0.75f }, mSquareColor);
-        Orange::Renderer2D::DrawQuad({ 0.0f, 0.0f, -0.1f }, { 10.0f, 10.0f }, mpCheckerboardTexture, 10.0f);
+        Orange::Renderer2D::DrawQuad({ -5.f, -5.f, -0.1f }, { 10.0f, 10.0f }, mpCheckerboardTexture, 10.0f);
+        Orange::Renderer2D::DrawRotatedQuad({ 0.0f, 0.0f, 0.1f }, { 1.0f, 1.0f }, 45.0f, mSquareColor);
     
         Orange::Renderer2D::EndScene();
     }
