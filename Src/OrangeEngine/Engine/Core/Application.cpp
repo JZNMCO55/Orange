@@ -43,6 +43,11 @@ namespace Orange
         //Renderer::Shutdown();
     }
 
+    void Application::Close()
+    {
+        mbRunning = false;
+    }
+
     void Application::Run()
     {
         ORG_PROFILE_FUNCTION();

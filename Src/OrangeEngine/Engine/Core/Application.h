@@ -30,6 +30,8 @@ namespace Orange
         void PushOverlay(Layer* layer);
 
         inline IWindow& GetWindow() { return *mpWindow; }
+
+        void Close();
         
         static Application* GetInstance();
     protected:
