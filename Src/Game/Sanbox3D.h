@@ -3,11 +3,11 @@
 
 #include "Orange.h"
 
-class Sandbox2D : public Orange::Layer
+class Sandbox3D : public Orange::Layer
 {
 public:
-    Sandbox2D();
-    ~Sandbox2D();
+    Sandbox3D();
+    ~Sandbox3D();
 
     void OnAttach() override;
     void OnDetach() override;
@@ -22,6 +22,8 @@ private:
     Orange::Ref<Orange::VertexArray> mpVertexArray;
     Orange::Ref<Orange::Shader> mpFlatShader;
     Orange::Ref<Orange::Texture2D> mpCheckerboardTexture;
+    Orange::Ref<Orange::Mesh> mpMesh;
+    Orange::Ref<Orange::RendererObject> mpRendererObject;
     glm::vec4 mSquareColor = { 0.2f, 0.3f, 0.8f, 1.0f };
 };
 

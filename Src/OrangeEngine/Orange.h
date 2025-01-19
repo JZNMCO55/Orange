@@ -18,11 +18,14 @@
 // -----------------Renderer-------------------
 #include "Renderer/Renderer.h"
 #include "Renderer/Renderer2D.h"
+#include "Renderer/Renderer3D.h"
 #include "Renderer/RenderCommand.h"
 #include "Renderer/Buffer.h"
 #include "Renderer/Shader.h"
 #include "Renderer/VertexArray.h"
 #include "Renderer/OrthographicCamera.h"
 #include "Renderer/Texture.h"
+#include "Renderer/Geometry/Mesh.h"
+#include "Renderer/Geometry/RendererObject.h"
 
 #endif // ORANGE_H

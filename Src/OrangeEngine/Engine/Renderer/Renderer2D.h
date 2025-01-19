@@ -59,7 +59,6 @@ namespace Orange
 
         static void CreateRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const glm::vec4& color,float textureIndex, float tilingFactor);
 
-
         static void FlushAndReset();
     };
 }

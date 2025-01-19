@@ -9,6 +9,16 @@ set(RESOURCE_OUTPUT_DIR ${CMAKE_BINARY_DIR}/Resource)
 
 # 指定源文件
 file(GLOB_RECURSE GAME_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file(GLOB_RECURSE GAME_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
+
+set(ALL_SOURCE_FILE
+    ${GAME_SOURCES}
+    ${GAME_HEADERS}
+)
+
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
+    FILES ${ALL_SOURCE_FILE}
+)
 
 # 添加可执行文件
 add_executable(${PROJECT_NAME} ${GAME_SOURCES})
@@ -24,6 +34,3 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${RESOURCE_SOURCE_DIR} ${RESOURCE_OUTPUT_DIR}
 )
-
-# 将 Game 设置为 Visual Studio 启动项目
-set_target_properties(${PROJECT_NAME} PROPERTIES VS_STARTUP_PROJECT YES)

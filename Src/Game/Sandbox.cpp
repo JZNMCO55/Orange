@@ -4,7 +4,7 @@
 #include "OpenGL/OpenGLShader.h"
 #include <filesystem>
 #include "EntryPoint.h"
-#include "Sanbox2D.h"
+#include "Sanbox3D.h"
 
 class ExampleLayer : public Orange::Layer
 {
@@ -207,14 +207,13 @@ class Sandbox : public Orange::Application
     public:
         Sandbox()
         {
-             PushLayer(new Sandbox2D());
+             PushLayer(new Sandbox3D());
         }
         
         ~Sandbox()
         {
 
         }
-        
 };
 
 Orange::Application* Orange::CreateApplication()

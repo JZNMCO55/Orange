@@ -6,8 +6,6 @@
 #include "Renderer2D.h"
 #include "Texture.h"
 
-#include "OpenGL/OpenGLShader.h"
-
 namespace Orange
 {
     struct QuadVertex

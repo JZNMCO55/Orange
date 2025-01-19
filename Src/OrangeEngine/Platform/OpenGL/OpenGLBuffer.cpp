@@ -26,6 +26,15 @@ namespace Orange
         glBufferData(GL_ARRAY_BUFFER, size, vertices, GL_STATIC_DRAW);
     }
 
+    OpenGLVertexBuffer::OpenGLVertexBuffer(const std::vector<float>& vertices, uint32_t size)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        glCreateBuffers(1, &mRendererID);
+        glBindBuffer(GL_ARRAY_BUFFER, mRendererID);
+        glBufferData(GL_ARRAY_BUFFER, size, vertices.data(), GL_STATIC_DRAW);
+    }
+
     OpenGLVertexBuffer::~OpenGLVertexBuffer()
     {
         ORG_PROFILE_FUNCTION();
@@ -84,6 +93,10 @@ namespace Orange
         ORG_PROFILE_FUNCTION();
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    }
+    uint32_t OpenGLIndexBuffer::GetCount() const
+    {
+        return mCount;
     }
 #pragma endregion
 }

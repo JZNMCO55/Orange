@@ -10,6 +10,7 @@ namespace Orange
     public:
         OpenGLVertexBuffer(uint32_t size);
         OpenGLVertexBuffer(float* vertices, uint32_t size);
+        OpenGLVertexBuffer(const std::vector<float>& vertices, uint32_t size);
         virtual ~OpenGLVertexBuffer();
 
         virtual void Bind() const override;
@@ -34,7 +35,7 @@ namespace Orange
         virtual void Bind() const;
         virtual void Unbind() const;
 
-        virtual uint32_t GetCount() const { return mCount; }
+        virtual uint32_t GetCount() const;
     private:
         uint32_t mRendererID;
         uint32_t mCount;
