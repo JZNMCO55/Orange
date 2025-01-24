@@ -104,6 +104,7 @@ namespace Orange
         bool m_Stopped;
     };
 }
+
 #define ORG_PROFILE 0 
 #if ORG_PROFILE
 #define ORG_PROFILE_BEGIN_SESSION(name, filepath) ::Orange::Instrumentor::Get().BeginSession(name, filepath)

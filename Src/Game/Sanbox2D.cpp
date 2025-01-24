@@ -17,6 +17,11 @@ void Sandbox2D::OnAttach()
     ORG_PROFILE_FUNCTION();
 
     mpCheckerboardTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
+
+    Orange::FrameBufferSpecification fbSpec;
+    fbSpec.width = 1280;
+    fbSpec.height = 720;
+    mpFrameBuffer = Orange::FrameBuffer::Create(fbSpec);
 }
 
 void Sandbox2D::OnDetach()
@@ -37,6 +42,7 @@ void Sandbox2D::OnUpdate(Orange::Timestep ts)
     // Render
     {
         ORG_PROFILE_SCOPE("Render2D Preparation");
+        mpFrameBuffer->Bind();
         Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
         Orange::RenderCommand::Clear();
     }
@@ -62,6 +68,7 @@ void Sandbox2D::OnUpdate(Orange::Timestep ts)
             }
         }
         Orange::Renderer2D::EndScene();
+        mpFrameBuffer->Unbind();
     }
 }
 
@@ -144,8 +151,8 @@ void Sandbox2D::OnImGuiRender()
 
         ImGui::ColorEdit4("Square Color", glm::value_ptr(mSquareColor));
 
-        uint32_t textureID = mpCheckerboardTexture->GetRendererID();
-        ImGui::Image(textureID, ImVec2{ 256.0f, 256.0f });
+        uint32_t textureID = mpFrameBuffer->GetColorAttachmentRendererID();
+        ImGui::Image(textureID, ImVec2{ 1280.0f, 720.0f });
         ImGui::End();
 
         ImGui::End();
@@ -164,7 +171,7 @@ void Sandbox2D::OnImGuiRender()
         ImGui::ColorEdit4("Square Color", glm::value_ptr(mSquareColor));
 
         uint32_t textureID = mpCheckerboardTexture->GetRendererID();
-        ImGui::Image(textureID, ImVec2{ 256.0f, 256.0f });
+        ImGui::Image(textureID, ImVec2{ 1280.0f, 720.0f });
         ImGui::End();
     }
 }

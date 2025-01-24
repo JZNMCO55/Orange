@@ -24,5 +24,6 @@
 #include "Renderer/VertexArray.h"
 #include "Renderer/OrthographicCamera.h"
 #include "Renderer/Texture.h"
+#include "Renderer/FrameBuffer.h"
 
 #endif // ORANGE_H

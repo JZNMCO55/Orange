@@ -22,6 +22,8 @@ private:
     Orange::Ref<Orange::VertexArray> mpVertexArray;
     Orange::Ref<Orange::Shader> mpFlatShader;
     Orange::Ref<Orange::Texture2D> mpCheckerboardTexture;
+    Orange::Ref<Orange::FrameBuffer> mpFrameBuffer;
+
     glm::vec4 mSquareColor = { 0.2f, 0.3f, 0.8f, 1.0f };
 };
 
