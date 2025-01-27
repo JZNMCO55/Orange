@@ -41,4 +41,24 @@ namespace Orange
         auto [x, y] = GetMousePositionImpl();
         return y;
     }
+    std::pair<float, float> WinInput::GetWindowSizeImpl()
+    {
+        auto tpWindow = static_cast<GLFWwindow*>(Application::GetInstance()->GetWindow().GetNativeWindow());
+        int width, height;
+        glfwGetWindowSize(tpWindow, &width, &height);
+
+        return { (float)width, (float)height };
+    }
+
+    float WinInput::GetWindowWidthImpl()
+    {
+        auto [width, height] = GetWindowSizeImpl();
+        return width;
+    }
+
+    float WinInput::GetWindowHeightImpl()
+    {
+        auto [width, height] = GetWindowSizeImpl();
+        return height;
+    }
 }

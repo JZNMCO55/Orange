@@ -10,6 +10,7 @@ namespace Orange
     class Event;
     class MouseScrolledEvent;
     class WindowResizeEvent;
+    class MouseMoveEvent;
 
     class ORANGE_API OrthographicCameraControler
     {
@@ -26,9 +27,10 @@ namespace Orange
         void SetZoomLevel(float zoomLevel) { mZoomLevel = zoomLevel; }
         const float GetZoomLevel() const { return mZoomLevel; }
 
-    private:
+    protected:
         bool OnMouseScrolled(MouseScrolledEvent& e);
         bool OnWindowResize(WindowResizeEvent& e);
+        bool OnMouseMove(MouseMoveEvent& e);
     private:
         bool mbRotationEnabled;
         float mAspectRatio;

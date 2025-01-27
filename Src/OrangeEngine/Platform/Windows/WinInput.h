@@ -18,6 +18,10 @@ namespace Orange
 
         virtual float GetMouseYImpl() override;
 
+        virtual std::pair<float, float> GetWindowSizeImpl () override;
+        virtual float GetWindowWidthImpl() override;
+        virtual float GetWindowHeightImpl() override;
+
     };
 }
 

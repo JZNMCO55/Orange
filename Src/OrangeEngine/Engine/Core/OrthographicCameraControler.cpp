@@ -2,8 +2,10 @@
 #include "Renderer/OrthographicCamera.h"
 #include "ApplicationEvent.h"
 #include "MouseEvent.h"
+
 #include "Timestep.h"
 #include "KeyCodes.h"
+#include "MouseButtonCodes.h"
 #include "Input.h"
 #include "OrthographicCameraControler.h"
 
@@ -14,6 +16,7 @@ namespace Orange
         , mbRotationEnabled(rotationEnabled)
         , mpCamera(std::make_shared<OrthographicCamera>(-mAspectRatio * mZoomLevel, mAspectRatio * mZoomLevel, -mZoomLevel, mZoomLevel))
     {
+        mCameraPosition = mpCamera->GetPosition();
     }
 
     OrthographicCameraControler::~OrthographicCameraControler()
@@ -23,7 +26,6 @@ namespace Orange
     void OrthographicCameraControler::OnUpdate(Timestep ts)
     {
         ORG_PROFILE_FUNCTION();
-
         if (Orange::Input::IsKeyPressed(ORG_KEY_A))
         {
             mCameraPosition.x += mCameraMoveSpeed * ts;
@@ -54,17 +56,18 @@ namespace Orange
             }
         }
 
-        mpCamera->SetPosition(mCameraPosition);
+        //mpCamera->SetPosition(mCameraPosition);
         mCameraMoveSpeed = mZoomLevel;
     }
 
     void OrthographicCameraControler::OnEvent(Event& e)
-    {
+    {   
         ORG_PROFILE_FUNCTION();
 
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<MouseScrolledEvent>(ORANGE_BIND_EVENT_FN(OrthographicCameraControler::OnMouseScrolled));
         dispatcher.Dispatch<WindowResizeEvent>(ORANGE_BIND_EVENT_FN(OrthographicCameraControler::OnWindowResize));
+        dispatcher.Dispatch<MouseMoveEvent>(ORANGE_BIND_EVENT_FN(OrthographicCameraControler::OnMouseMove));
     }
 
     bool OrthographicCameraControler::OnMouseScrolled(MouseScrolledEvent& e)
@@ -83,6 +86,33 @@ namespace Orange
 
         mAspectRatio = (float)e.GetWidth() / (float)e.GetHeight();
         mpCamera->SetProjection(-mAspectRatio * mZoomLevel, mAspectRatio * mZoomLevel, -mZoomLevel, mZoomLevel);
+        return false;
+    }
+
+    bool OrthographicCameraControler::OnMouseMove(MouseMoveEvent& e)
+    {
+        static float lastX = 0.0f;
+        static float lastY = 0.0f;
+        static bool firstMouse = true;
+
+        if (firstMouse)
+        {
+            lastX = e.GetX();
+            lastY = e.GetY();
+            firstMouse = false;
+        }
+
+        float deltaX = e.GetX() - lastX;
+        float deltaY = lastY - e.GetY();
+
+        lastX = e.GetX();
+        lastY = e.GetY();
+
+        if (Input::IsMouseButtonPressed(ORG_MOUSE_BUTTON_MIDDLE))
+        {
+            auto [winX, winY] = Orange::Input::GetWindowSize();
+            mpCamera->PanCamera(deltaX, deltaY, winX, winY);
+        }
         return false;
     }
 }

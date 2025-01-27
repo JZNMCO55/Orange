@@ -19,6 +19,12 @@ namespace Orange
 
         inline static float GetMouseY() {return spInstance->GetMouseYImpl(); }
 
+        inline static std::pair<float, float> GetWindowSize() {return spInstance->GetWindowSizeImpl(); }
+
+        inline static float GetWindowWidth() {return spInstance->GetWindowWidthImpl(); }
+
+        inline static float GetWindowHeight() {return spInstance->GetWindowHeightImpl(); }
+
     protected:
         virtual bool IsKeyPressedImpl(int keycode) = 0;
 
@@ -29,6 +35,12 @@ namespace Orange
         virtual float GetMouseXImpl() = 0;
 
         virtual float GetMouseYImpl() = 0;
+
+        virtual std::pair<float, float> GetWindowSizeImpl() = 0;
+
+        virtual float GetWindowWidthImpl() = 0;
+
+        virtual float GetWindowHeightImpl() = 0;
     private:
         static Input* spInstance;
     };

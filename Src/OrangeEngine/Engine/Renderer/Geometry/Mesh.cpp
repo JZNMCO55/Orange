@@ -73,7 +73,7 @@ namespace Orange
     {
         if (mbBuffersDirty)
         {
-            mpVertexBuffer = VertexBuffer::Create(mVertices.data(), mVertices.size());
+            mpVertexBuffer = VertexBuffer::Create(mVertices.data(), sizeof(float) * mVertices.size());
             mpIndexBuffer = IndexBuffer::Create(mIndices.data(), mIndices.size());
             mpVertexBuffer->SetLayout(mVerticesLayout);
             ClearBuffersDirty();

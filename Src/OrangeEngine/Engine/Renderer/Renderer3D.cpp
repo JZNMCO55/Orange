@@ -28,7 +28,8 @@ namespace Orange
     void Renderer3D::BeginScene(const Ref<OrthographicCamera>& camera)
     {
         sData.mpFlatShader->Bind();
-        sData.mpFlatShader->SetMat4("u_ViewProjection", glm::mat4(1.0f));
+        auto vpMatrix = camera->GetViewProjectionMatrix();
+        sData.mpFlatShader->SetMat4("u_ViewProjection", vpMatrix);
     }
 
     void Renderer3D::EndScene()
