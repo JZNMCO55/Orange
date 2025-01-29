@@ -113,6 +113,10 @@ namespace Orange
             auto [winX, winY] = Orange::Input::GetWindowSize();
             mpCamera->PanCamera(deltaX, deltaY, winX, winY);
         }
+        else if (Input::IsMouseButtonPressed(ORG_MOUSE_BUTTON_LEFT) && mbRotationEnabled)
+        {
+            mpCamera->RotateCamera(deltaX, deltaY);
+        }
         return false;
     }
 }

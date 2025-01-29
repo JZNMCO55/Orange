@@ -19,7 +19,6 @@ namespace Orange
         const glm::vec3& GetFocusPoint() const { return mFocusPoint; }
 
         // Set Camera Up Vector
-        void SetUp(const glm::vec3& up);
         const glm::vec3& GetUp() const { return mUp; }
 
         void SetProjection(float left, float right, float bottom, float top);
@@ -28,11 +27,14 @@ namespace Orange
         const glm::mat4& GetViewProjectionMatrix();
 
         void PanCamera(float deltaX, float deltaY, float windowWidth, float windowHeight);
+
+        void RotateCamera(float deltaX, float deltaY, float sensitivity = 0.25f);
     private:
         // lazy evaluation
         void MarkDirty();
         void ClearDirty();
         void RecalculateViewMatrix();
+
     private:
         glm::mat4 mProjectionMatrix;
         glm::mat4 mViewMatrix;
@@ -40,8 +42,12 @@ namespace Orange
         glm::vec3 mPosition;
         glm::vec3 mFocusPoint;
         glm::vec3 mUp;
+        glm::vec3 mForward;
+        glm::vec3 mRightVec;
         float mLeft, mRight, mBottom, mTop;
         bool mbDirty;
+        glm::quat mRotation;
+        float mDistance;
     };
 }
 

@@ -15,7 +15,7 @@ namespace Orange
     class ORANGE_API OrthographicCameraControler
     {
     public:
-        OrthographicCameraControler(float aspectRatio, bool rotationEnabled = false);
+        OrthographicCameraControler(float aspectRatio, bool rotationEnabled = true);
         ~OrthographicCameraControler();
 
         void OnUpdate(Timestep ts);
