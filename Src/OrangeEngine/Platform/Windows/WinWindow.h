@@ -19,6 +19,8 @@ namespace Orange
         unsigned int GetWidth() const override { return mData.mWidth; }
         unsigned int GetHeight() const override { return mData.mHeight; }
 
+        virtual float GetTime() const override;
+
         // Window attributes
         void SetEventCallback(const EventCallbackFn& callback) override { mData.mEventCallback = callback; }
         void SetVSync(bool enabled) override;
@@ -26,7 +28,6 @@ namespace Orange
 
         void* GetNativeWindow() const override { return mpWindow; }
 
-        static std::unique_ptr<IWindow> Create(const WindowProps& props = WindowProps());
     private:
         void Init(const WindowProps& props);
         void Shutdown();

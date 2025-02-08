@@ -9,23 +9,20 @@ namespace Orange
 
     LayerStack::~LayerStack()
     {
-        for (Layer* layer : mLayers)
-        {
-            delete layer;
-        }
+        mLayers.clear();
     }
 
-    void LayerStack::PushLayer(Layer* layer)
+    void LayerStack::PushLayer(const Ref<Layer>& layer)
     {
         mLayers.emplace(mLayers.begin() + mLayerInsertIndex, layer);
     }
 
-    void LayerStack::PushOverlay(Layer* overlay)
+    void LayerStack::PushOverlay(const Ref<Layer>& overlay)
     {
         mLayers.emplace_back(overlay);
     }
 
-    void LayerStack::PopLayer(Layer* layer)
+    void LayerStack::PopLayer(const Ref<Layer>& layer)
     {
         auto it = std::find(mLayers.begin(), mLayers.end(), layer);
         if (it != mLayers.end())
@@ -35,7 +32,7 @@ namespace Orange
         }
     }
 
-    void LayerStack::PopOverlay(Layer* overlay)
+    void LayerStack::PopOverlay(const Ref<Layer>& overlay)
     {
         auto it = std::find(mLayers.begin(), mLayers.end(), overlay);
         if (it != mLayers.end())

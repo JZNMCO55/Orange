@@ -20,14 +20,15 @@ namespace Orange
     class ORANGE_API Application
     {
     public:
+        Application(const std::string& name = "Orange App");
         virtual ~Application();
 
         void Run();
 
         void OnEvent(Event& e);
 
-        void PushLayer(Layer* layer);
-        void PushOverlay(Layer* layer);
+        void PushLayer(const Ref<Layer>& layer);
+        void PushOverlay(const Ref<Layer>& layer);
 
         inline IWindow& GetWindow() { return *mpWindow; }
 
@@ -35,7 +36,6 @@ namespace Orange
         
         static Application* GetInstance();
     protected:
-        Application();
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);
@@ -47,7 +47,7 @@ namespace Orange
     private:
         LayerStack mLayerStack;
         std::unique_ptr<IWindow> mpWindow{ nullptr };
-        std::unique_ptr<ImGuiLayer> mpImGuiLayer{ nullptr };
+        Ref<ImGuiLayer> mpImGuiLayer{ nullptr };
         
         float mLastFrameTime{ 0.0f };
         bool mbRunning{ true };

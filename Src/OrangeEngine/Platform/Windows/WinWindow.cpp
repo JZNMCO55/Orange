@@ -35,6 +35,11 @@ namespace Orange
         glfwSwapBuffers(mpWindow);
     }
 
+    float WinWindow::GetTime() const
+    {
+        return (float)glfwGetTime();
+    }
+
     void WinWindow::SetVSync(bool enabled)
     {
         ORG_PROFILE_FUNCTION();
@@ -44,11 +49,6 @@ namespace Orange
             glfwSwapInterval(enabled ? 1 : 0);
             mData.mVSync = enabled;
         }
-    }
-
-    std::unique_ptr<IWindow> WinWindow::Create(const WindowProps& props)
-    {
-        return std::make_unique<WinWindow>(props);
     }
 
     void WinWindow::Init(const WindowProps& props)

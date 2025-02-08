@@ -207,7 +207,8 @@ class Sandbox : public Orange::Application
     public:
         Sandbox()
         {
-             PushLayer(new Sandbox2D());
+            auto tpLayer = Orange::CreateRef<Sandbox2D>();
+            PushLayer(tpLayer);
         }
         
         ~Sandbox()

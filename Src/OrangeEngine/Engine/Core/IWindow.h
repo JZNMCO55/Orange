@@ -33,6 +33,8 @@ namespace Orange
         virtual uint32_t GetWidth() const = 0;
         virtual uint32_t GetHeight() const = 0;
 
+        virtual float GetTime() const = 0;
+
         // Window attributes
         virtual void SetEventCallback(const EventCallbackFn& callback) = 0;
         virtual void SetVSync(bool enabled) = 0;
@@ -40,7 +42,7 @@ namespace Orange
 
         virtual void* GetNativeWindow() const = 0;
 
-        static std::unique_ptr<IWindow> Create(const WindowProps& props = WindowProps());
+        static Scope<IWindow> Create(const WindowProps& props = WindowProps());
     };
 }
 

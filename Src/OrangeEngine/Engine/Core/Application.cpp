@@ -1,14 +1,10 @@
 #include "pch.h"
-#include "Windows/WinWindow.h"
 #include "ApplicationEvent.h"
 #include "Input.h"
 #include "imgui/ImGuiLayer.h"
-#include "Renderer/Shader.h"
-#include "Renderer/Buffer.h"
-#include "Renderer/VertexArray.h"
 #include "Renderer/Renderer.h"
+#include "IWindow.h"
 #include "Application.h"
-#include "Renderer/OrthographicCamera.h"
 
 namespace Orange
 {
@@ -21,19 +17,19 @@ namespace Orange
         return spInstance;
     }
 
-    Application::Application()
+    Application::Application(const std::string& name)
     {
         ORG_PROFILE_FUNCTION();
 
         ORANGE_CORE_ASSERT(!spInstance, "Application already exists!");
         spInstance = this;
-        mpWindow = WinWindow::Create();
+        mpWindow = IWindow::Create();
         mpWindow->SetEventCallback(BIND_EVENT_FN(OnEvent));
 
         Renderer::Init();
 
-        mpImGuiLayer = std::make_unique<ImGuiLayer>();
-        PushOverlay(mpImGuiLayer.get());
+        mpImGuiLayer = CreateRef<ImGuiLayer>();
+        PushOverlay(mpImGuiLayer);
     }
 
     Application::~Application()
@@ -55,7 +51,7 @@ namespace Orange
         while (mbRunning)
         {
             ORG_PROFILE_SCOPE("Run Loop");
-            float time = (float)glfwGetTime();
+            float time = mpWindow->GetTime();
             Timestep timestep = time - mLastFrameTime;
             mLastFrameTime = time;
 
@@ -81,7 +77,6 @@ namespace Orange
 
             }
 
-
             mpWindow->OnUpdate();
         }
     }
@@ -105,7 +100,7 @@ namespace Orange
         }
     }
 
-    void Application::PushLayer(Layer* layer)
+    void Application::PushLayer(const Ref<Layer>& layer)
     {
         ORG_PROFILE_FUNCTION();
 
@@ -113,7 +108,7 @@ namespace Orange
         layer->OnAttach();
     }
 
-    void Application::PushOverlay(Layer* layer)
+    void Application::PushOverlay(const Ref<Layer>& layer)
     {
         ORG_PROFILE_FUNCTION();
 
