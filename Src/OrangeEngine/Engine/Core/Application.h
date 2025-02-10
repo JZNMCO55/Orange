@@ -31,6 +31,7 @@ namespace Orange
         void PushOverlay(const Ref<Layer>& layer);
 
         inline IWindow& GetWindow() { return *mpWindow; }
+        inline Ref<ImGuiLayer> GetImGuiLayer() { return mpImGuiLayer; }
 
         void Close();
         

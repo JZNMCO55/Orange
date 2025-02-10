@@ -17,11 +17,16 @@ namespace Orange
 
         virtual void OnAttach() override;
         virtual void OnDetach() override;
+        virtual void OnEvent(Event& event) override;
 
         void Begin();
         void End();
+
+        void BlockEvents(bool block) { mBlockEvents = block; }
     private:
+        bool mBlockEvents = true;
         float mTime = 0.0f;
+
     };
 }
 

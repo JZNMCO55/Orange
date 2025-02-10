@@ -53,6 +53,7 @@ namespace Orange
         virtual int GetCategoryFlags() const = 0;
         virtual std::string ToString() const { return GetName(); }
         virtual bool IsHandled() const { return mbHandled; }
+        virtual void SetHandled(bool handled) { mbHandled = handled; }
 
         inline bool IsInCategory(EEventCategory category) const
         {

@@ -30,7 +30,12 @@ namespace Orange
         ORG_PROFILE_FUNCTION();
 
         //ORG_PROFILE_SCOPE("CameraController::OnUpdate");
-        mCameraControler.OnUpdate(ts);
+
+        if (mViewportFocused)
+        {
+            mCameraControler.OnUpdate(ts);
+        }
+
 
         Orange::Renderer2D::ResetStats();
 
@@ -135,8 +140,12 @@ namespace Orange
         ImGui::End();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0, 0 });
         ImGui::Begin("Viewport");
+        mViewportFocused = ImGui::IsWindowFocused();
+        mViewportHovered = ImGui::IsWindowHovered();
+        Orange::Application::GetInstance()->GetImGuiLayer()->BlockEvents(!mViewportFocused || !mViewportHovered);
         ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
     
+
         if ((mViewportSize != *((glm::vec2*)&viewportPanelSize)) && viewportPanelSize.x > 0 && viewportPanelSize.y > 0)
         {
             mpFrameBuffer->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);

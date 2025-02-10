@@ -57,6 +57,20 @@ namespace Orange
         ImGui::DestroyContext();
     }
 
+    
+    void ImGuiLayer::OnEvent(Event& event)
+    {
+        if (mBlockEvents)
+        {
+            bool handled = event.IsHandled();
+            ImGuiIO& io = ImGui::GetIO();
+            handled |= event.IsInCategory(EventCategoryMouse) & io.WantCaptureMouse;
+            handled |= event.IsInCategory(EventCategoryKeyboard) & io.WantCaptureKeyboard;
+            event.SetHandled(handled);
+        }
+    }
+
+
     void ImGuiLayer::Begin()
     {
         ORG_PROFILE_FUNCTION();
@@ -87,5 +101,4 @@ namespace Orange
         }
     }
 
-  
 }
