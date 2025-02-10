@@ -27,7 +27,7 @@ namespace Orange
         Ref<FrameBuffer> mpFrameBuffer;
 
         Ref<Texture2D> mpCheckerboardTexture;
-
+        glm::vec2 mViewportSize = { 0.0f, 0.0f };
         glm::vec4 mSquareColor = { 0.2f, 0.3f, 0.8f, 1.0f };
     };
 }

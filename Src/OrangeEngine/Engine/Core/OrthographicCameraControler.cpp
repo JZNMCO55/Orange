@@ -67,6 +67,12 @@ namespace Orange
         dispatcher.Dispatch<WindowResizeEvent>(ORANGE_BIND_EVENT_FN(OrthographicCameraControler::OnWindowResize));
     }
 
+    void OrthographicCameraControler::OnResize(uint32_t width, uint32_t height)
+    {
+        mAspectRatio = (float)width / (float)height;
+        mpCamera->SetProjection(-mAspectRatio * mZoomLevel, mAspectRatio * mZoomLevel, -mZoomLevel, mZoomLevel);
+    }
+
     bool OrthographicCameraControler::OnMouseScrolled(MouseScrolledEvent& e)
     {
         ORG_PROFILE_FUNCTION();

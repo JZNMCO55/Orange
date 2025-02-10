@@ -21,6 +21,8 @@ namespace Orange
 
         void OnEvent(Event& e);
 
+        void OnResize(uint32_t width, uint32_t height);
+
         Ref<OrthographicCamera> GetCamera() const { return mpCamera; }
 
         void SetZoomLevel(float zoomLevel) { mZoomLevel = zoomLevel; }
