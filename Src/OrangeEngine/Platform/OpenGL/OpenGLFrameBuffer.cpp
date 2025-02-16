@@ -3,6 +3,7 @@
 
 namespace Orange
 {
+    static const uint32_t sMaxFramebufferSize = 8192;
     OpenGLFrameBuffer::OpenGLFrameBuffer(const FrameBufferSpecification& spec)
         : mSpecification(spec)
     {
@@ -62,6 +63,11 @@ namespace Orange
 
     void OpenGLFrameBuffer::Resize(uint32_t width, uint32_t height)
     {
+        if (width == 0 || height == 0 || width > sMaxFramebufferSize || height > sMaxFramebufferSize)
+        {
+            ORANGE_LOG_WARN("Attempted to resize framebuffer to {0}, {1}", width, height);
+            return;
+        }
         mSpecification.width = width;
         mSpecification.height = height;
         Invalidate();

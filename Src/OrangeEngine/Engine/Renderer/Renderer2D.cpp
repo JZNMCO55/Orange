@@ -153,8 +153,14 @@ namespace Orange
 
         const float textureIndex = 0.0f;
         const float tilingFactor = 1.0f;
+        const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
 
-        CreateQuad(position, size, color, textureIndex, tilingFactor);
+        //CreateQuad(position, size, color, textureIndex, tilingFactor);
+
+        glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
+            glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
+
+        CreateQuad(transform, color, textureIndex, tilingFactor, textureCoords);
     }
 
     void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
@@ -181,7 +187,13 @@ namespace Orange
             sData.TextureSlotIndex++;
         }
 
-        CreateQuad(position, size, tintColor, textureIndex, tilingFactor);
+        const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
+        glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
+            glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
+
+        CreateQuad(transform, tintColor, textureIndex, tilingFactor, textureCoords);
+        // Old Renderer
+        //CreateQuad(position, size, tintColor, textureIndex, tilingFactor);
 
 #ifdef Old_Renderer
         sData.mpTextureShader->SetFloat4("u_Color", tintColor);
@@ -195,6 +207,19 @@ namespace Orange
 #endif // Old_Renderer
     }
 
+    void Renderer2D::DrawQuad(const glm::mat4& transform, const glm::vec4& color)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        const float textureIndex = 0.0f;
+        const float tilingFactor = 1.0f;
+        const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
+
+
+        CreateQuad(transform, color, textureIndex, tilingFactor, textureCoords);
+    }
+    
+
     void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation, const glm::vec4& color)
     {
         DrawRotatedQuad({ position.x, position.y, 0.0f }, size, rotation, color);
@@ -202,7 +227,16 @@ namespace Orange
 
     void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const glm::vec4& color)
     {
-        CreateRotatedQuad(position, size, rotation, color, 0.0f, 1.0f);
+        //CreateRotatedQuad(position, size, rotation, color, 0.0f, 1.0f);
+        const float textureIndex = 0.0f;
+        const float tilingFactor = 1.0f;
+        const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
+
+        glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
+            glm::rotate(glm::mat4(1.0f), glm::radians(rotation), { 0.0f, 0.0f, 1.0f }) *
+            glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });  
+
+        CreateQuad(transform, color, textureIndex, tilingFactor, textureCoords);
     }
 
     void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
@@ -229,46 +263,36 @@ namespace Orange
             sData.TextureSlotIndex++;
         }
 
-        CreateRotatedQuad(position, size, rotation, tintColor, textureIndex, tilingFactor);
-    }
+        //CreateRotatedQuad(position, size, rotation, tintColor, textureIndex, tilingFactor);
+        const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
+
+        glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
+            glm::rotate(glm::mat4(1.0f), glm::radians(rotation), { 0.0f, 0.0f, 1.0f }) *
+            glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
+
+        CreateQuad(transform, tintColor, textureIndex, tilingFactor, textureCoords);
+    } 
 
     void Renderer2D::CreateQuad(const glm::vec3& position, const glm::vec2& size, 
         const glm::vec4& color, float textureIndex, float tilingFactor)
     {
         ORG_PROFILE_FUNCTION();
 
+        constexpr size_t quadVertexCount = 4;
+        constexpr glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
         if (sData.QuadIndexCount >= sData.MaxIndices)
         {
             FlushAndReset();
         }
-
-        sData.QuadVertexBufferPtr->mPosition = position;
-        sData.QuadVertexBufferPtr->mColor = color;
-        sData.QuadVertexBufferPtr->mTexCoord = { 0.0f, 0.0f };
-        sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
-        sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
-        sData.QuadVertexBufferPtr++;
-
-        sData.QuadVertexBufferPtr->mPosition = { position.x + size.x, position.y, 0.0f };
-        sData.QuadVertexBufferPtr->mColor = color;
-        sData.QuadVertexBufferPtr->mTexCoord = { 1.0f, 0.0f };
-        sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
-        sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
-        sData.QuadVertexBufferPtr++;
-
-        sData.QuadVertexBufferPtr->mPosition = { position.x + size.x, position.y + size.y, 0.0f };
-        sData.QuadVertexBufferPtr->mColor = color;
-        sData.QuadVertexBufferPtr->mTexCoord = { 1.0f, 1.0f };
-        sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
-        sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
-        sData.QuadVertexBufferPtr++;
-
-        sData.QuadVertexBufferPtr->mPosition = { position.x, position.y + size.y, 0.0f };
-        sData.QuadVertexBufferPtr->mColor = color;
-        sData.QuadVertexBufferPtr->mTexCoord = { 0.0f, 1.0f };
-        sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
-        sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
-        sData.QuadVertexBufferPtr++;
+        for(int i = 0; i < quadVertexCount; i++)
+        {
+          sData.QuadVertexBufferPtr->mPosition = position;
+          sData.QuadVertexBufferPtr->mColor = color;
+          sData.QuadVertexBufferPtr->mTexCoord = textureCoords[i];
+          sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
+          sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
+          sData.QuadVertexBufferPtr++;
+        }
         sData.QuadIndexCount += 6;
 
         sData.Stats.QuadCount++;
@@ -328,6 +352,30 @@ namespace Orange
 
         sData.Stats.QuadCount++;
     }
+
+    void Renderer2D::CreateQuad(const glm::mat4& transform, const glm::vec4& color, float textureIndex, float tilingFactor, const glm::vec2 textureCoords[])
+    {
+      ORG_PROFILE_FUNCTION();
+      
+      if (sData.QuadIndexCount >= sData.MaxIndices)
+      {
+        FlushAndReset();
+      }
+
+      constexpr size_t quadVertexCount = 4;
+      for(int i = 0; i < quadVertexCount; i++)
+      {
+        sData.QuadVertexBufferPtr->mPosition = transform * sData.QuadVertexPositions[i];
+        sData.QuadVertexBufferPtr->mColor = color;
+        sData.QuadVertexBufferPtr->mTexCoord = textureCoords[i];
+        sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
+        sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
+        sData.QuadVertexBufferPtr++;
+      }
+      sData.QuadIndexCount += 6;
+
+      sData.Stats.QuadCount++;
+    } 
 
     void Renderer2D::FlushAndReset()
     {

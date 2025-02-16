@@ -26,6 +26,9 @@ namespace Orange
         Ref<Shader> mFlatColorShader;
         Ref<FrameBuffer> mpFrameBuffer;
 
+        Ref<Scene> mpActiveScene;
+        entt::entity mSquareEntity;
+
         Ref<Texture2D> mpCheckerboardTexture;
 
         bool mViewportFocused = false;
