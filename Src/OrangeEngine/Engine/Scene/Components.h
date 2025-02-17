@@ -7,7 +7,17 @@
 
 namespace Orange
 {
-    struct ORANGE_API TransformComponent
+    struct TagComponent
+    {
+        std::string Tag;
+
+        TagComponent() = default;
+        TagComponent(const TagComponent&) = default;
+        TagComponent(const std::string& tag)
+            : Tag(tag) {}
+    };
+
+    struct TransformComponent
     {
         glm::mat4 Transform{ 1.0f };
 
@@ -19,7 +29,7 @@ namespace Orange
         operator glm::mat4() const { return Transform; }
     };
 
-    struct ORANGE_API SpriteRendererComponent
+    struct SpriteRendererComponent
     {
         glm::vec4 Color{ 1.0f, 1.0f, 1.0f, 1.0f };
 

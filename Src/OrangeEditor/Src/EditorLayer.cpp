@@ -21,9 +21,9 @@ namespace Orange
 
         mpActiveScene = CreateRef<Scene>();
 
-        auto squareEntity = mpActiveScene->CreateEntity();
-        mpActiveScene->GetRegistry().emplace<TransformComponent>(squareEntity);
-        mpActiveScene->GetRegistry().emplace<SpriteRendererComponent>(squareEntity, glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
+        // Create a square entity
+        auto squareEntity = mpActiveScene->CreateEntity("Square");
+        squareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
 
         mSquareEntity = squareEntity;
     }
@@ -39,6 +39,13 @@ namespace Orange
 
         //ORG_PROFILE_SCOPE("CameraController::OnUpdate");
 
+        if (Orange::FrameBufferSpecification spec = mpFrameBuffer->GetSpecification();
+            mViewportSize.x > 0 && mViewportSize.y > 0 &&
+            (spec.width != mViewportSize.x || spec.height != mViewportSize.y))
+        {
+            mpFrameBuffer->Resize(mViewportSize.x, mViewportSize.y);
+            mCameraControler.OnResize(mViewportSize.x, mViewportSize.y);
+        }
         if (mViewportFocused)
         {
             mCameraControler.OnUpdate(ts);
@@ -59,29 +66,6 @@ namespace Orange
             Orange::Renderer2D::EndScene();
         }
 
-
-        //{
-        //    ORG_PROFILE_SCOPE("Renderer2D Draw");
-        //    Orange::Renderer2D::BeginScene(mCameraControler.GetCamera());
-
-        //    Orange::Renderer2D::DrawQuad({ -1.0f, 0.0f }, { 0.8f, 0.8f }, { 0.8f, 0.2f, 0.3f, 1.0f });
-        //    Orange::Renderer2D::DrawQuad({ 0.5f, -0.5f }, { 0.5f, 0.75f }, mSquareColor);
-        //    Orange::Renderer2D::DrawQuad({ -5.f, -5.f, -0.1f }, { 20.0f, 20.0f }, mpCheckerboardTexture, 10.0f);
-        //    Orange::Renderer2D::DrawRotatedQuad({ 0.0f, 0.0f, 0.1f }, { 1.0f, 1.0f }, 45.0f, mSquareColor);
-
-        //    Orange::Renderer2D::EndScene();
-
-        //    Orange::Renderer2D::BeginScene(mCameraControler.GetCamera());
-        //    for (float y = -5.0f; y < 5.0f; y += 0.05f)
-        //    {
-        //        for (float x = -5.0f; x < 5.0f; x += 0.05f)
-        //        {
-        //            glm::vec4 color = { (x + 5.0f) / 10.0f, 0.4f, (y + 5.0f) / 10.0f, 0.7f };
-        //            Orange::Renderer2D::DrawQuad({ x, y }, { 0.45f, 0.45f }, color);
-        //        }
-        //    }
-        //    Orange::Renderer2D::EndScene();
-        //}
         mpFrameBuffer->Unbind();
     }
 
@@ -149,8 +133,15 @@ namespace Orange
         ImGui::Text("Vertices: %d", stats.GetTotalVertexCount());
         ImGui::Text("Indices: %d", stats.GetTotalIndexCount());
 
-        auto& squreColor = mpActiveScene->GetRegistry().get<SpriteRendererComponent>(mSquareEntity).Color;
-        ImGui::ColorEdit4("Square Color", glm::value_ptr(squreColor));
+        if(mSquareEntity)
+        {
+            ImGui::Separator();
+            auto& tag = mSquareEntity.GetComponent<TagComponent>().Tag;
+            ImGui::Text(tag.c_str());
+            auto& squareColor = mSquareEntity.GetComponent<SpriteRendererComponent>().Color;
+            ImGui::ColorEdit4("Square Color", glm::value_ptr(squareColor));
+            ImGui::Separator();
+        }
         ImGui::End();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0, 0 });
         ImGui::Begin("Viewport");
@@ -158,15 +149,8 @@ namespace Orange
         mViewportHovered = ImGui::IsWindowHovered();
         Orange::Application::GetInstance()->GetImGuiLayer()->BlockEvents(!mViewportFocused || !mViewportHovered);
         ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+        mViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
     
-
-        if ((mViewportSize != *((glm::vec2*)&viewportPanelSize)) && viewportPanelSize.x > 0 && viewportPanelSize.y > 0)
-        {
-            mpFrameBuffer->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
-            mViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
-            mCameraControler.OnResize(viewportPanelSize.x, viewportPanelSize.y);
-        }
-
         uint32_t textureID = mpFrameBuffer->GetColorAttachmentRendererID();
         ImGui::Image(textureID, ImVec2{ mViewportSize.x, mViewportSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
         ImGui::End();

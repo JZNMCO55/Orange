@@ -27,7 +27,7 @@ namespace Orange
         Ref<FrameBuffer> mpFrameBuffer;
 
         Ref<Scene> mpActiveScene;
-        entt::entity mSquareEntity;
+        Entity mSquareEntity;
 
         Ref<Texture2D> mpCheckerboardTexture;
 

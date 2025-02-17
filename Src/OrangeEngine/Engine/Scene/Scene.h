@@ -1,17 +1,19 @@
 #ifndef SCENE_H
 #define SCENE_H
 
-#include "entt/entt.hpp"
+#include "OrangeExport.h"
 #include "Timestep.h"
+
 namespace Orange
 {
-   class ORANGE_API Scene
+   class Entity;
+   class ORANGE_API Scene : public std::enable_shared_from_this<Scene>
    {
    public:
       Scene();
       ~Scene();
 
-      entt::entity CreateEntity();
+      Entity CreateEntity(const std::string& tag = std::string());
 
       entt::registry& GetRegistry() { return mRegistry; }
 

@@ -1,7 +1,8 @@
-#include "pch.h "
+#include "pch.h"
 #include "Scene.h"
 #include "Components.h"
 #include "Renderer/Renderer2D.h"
+#include "Entity.h"
 
 namespace Orange
 {
@@ -36,19 +37,24 @@ namespace Orange
    {
    }
 
-   entt::entity Scene::CreateEntity()
+   Entity Scene::CreateEntity(const std::string& tag)
    {
-    return mRegistry.create();
+        Entity entity = { mRegistry.create(), shared_from_this() };
+        entity.AddComponent<TransformComponent>();
+		    auto& tagComponent = entity.AddComponent<TagComponent>();
+		    tagComponent.Tag = tag.empty() ? "Entity" : tag;
+        return entity;
    }
 
    void Scene::OnUpdate(Timestep ts)
    {
-    auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-    for (auto entity : group)
-    {
-      auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-      
-      Renderer2D::DrawQuad(transform.Transform, sprite.Color);
-    } 
+        // Update scripts
+        auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+        for (auto entity : group)
+        {
+          auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+          
+          Renderer2D::DrawQuad(transform.Transform, sprite.Color);
+        } 
    }
 }
