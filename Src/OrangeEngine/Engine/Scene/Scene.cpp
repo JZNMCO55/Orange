@@ -77,4 +77,21 @@ namespace Orange
             Renderer2D::EndScene();
         }
    }
+
+   void Scene::OnViewportResize(uint32_t width, uint32_t height)
+   {
+      mViewportWidth = width;
+      mViewportHeight = height;
+
+      auto view = mRegistry.view<CameraComponent>();  
+      for (auto entity : view)
+      {
+         auto& cameraComponent = view.get<CameraComponent>(entity);
+         if(!cameraComponent.FixedAspectRatio)
+         {
+            cameraComponent.Camera.SetViewportSize(width, height);
+         }
+      }
+   }
+
 }

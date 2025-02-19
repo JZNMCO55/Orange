@@ -3,7 +3,10 @@
 
 namespace Orange
 {
-   Camera::Camera(const glm::mat4& projectionMatrix)
+    Camera::Camera()
+    {
+    }
+    Camera::Camera(const glm::mat4& projectionMatrix)
       : mProjectionMatrix(projectionMatrix)
    {
    }

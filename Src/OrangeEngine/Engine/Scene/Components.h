@@ -3,7 +3,7 @@
 
 #include "pch.h"
 #include "entt/entt.hpp"
-#include "Renderer/Camera.h"
+#include "SceneCamera.h"
 
 
 namespace Orange
@@ -41,12 +41,11 @@ namespace Orange
 
     struct CameraComponent
     {
-        Orange::Camera Camera;
+        SceneCamera Camera;
         bool Primary = true;
+        bool FixedAspectRatio = false;
         CameraComponent() = default;
         CameraComponent(const CameraComponent&) = default;
-        CameraComponent(const glm::mat4& projection)
-            : Camera(projection) {}
     };
 }
 

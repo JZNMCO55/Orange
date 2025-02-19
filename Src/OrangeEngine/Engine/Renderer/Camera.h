@@ -8,11 +8,13 @@ namespace Orange
    class ORANGE_API Camera
    {
    public:
+      Camera();
+      virtual ~Camera() = default;
       Camera(const glm::mat4& projectionMatrix = glm::mat4(1.0f));
 
       const glm::mat4& GetProjectionMatrix() const { return mProjectionMatrix; }
 
-   private:
+   protected:
       glm::mat4 mProjectionMatrix;
    };
 }

@@ -26,9 +26,9 @@ namespace Orange
         squareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
         mSquareEntity = squareEntity;
         mCameraEntity = mpActiveScene->CreateEntity("CameraEntity");
-        mCameraEntity.AddComponent<CameraComponent>(glm::ortho(-16.0f, 16.0f, -9.0f, 9.0f, -1.0f, 1.0f));
+        mCameraEntity.AddComponent<CameraComponent>();
         mSecondCamera = mpActiveScene->CreateEntity("Clip-Plane Entity");
-        auto& cc = mSecondCamera.AddComponent<CameraComponent>(glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f));
+        auto& cc = mSecondCamera.AddComponent<CameraComponent>();
         cc.Primary = false;
 
     }
@@ -50,6 +50,7 @@ namespace Orange
         {
             mpFrameBuffer->Resize(mViewportSize.x, mViewportSize.y);
             mCameraControler.OnResize(mViewportSize.x, mViewportSize.y);
+            mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
         }
         if (mViewportFocused)
         {
@@ -150,6 +151,15 @@ namespace Orange
         {
             mCameraEntity.GetComponent<CameraComponent>().Primary = mPrimaryCamera;
             mSecondCamera.GetComponent<CameraComponent>().Primary = !mPrimaryCamera;
+        }
+        {
+			auto& camera = mSecondCamera.GetComponent<CameraComponent>().Camera;
+			float orthoSize = camera.GetOrthographicSize();
+			if (ImGui::DragFloat("Second Camera Ortho Size", &orthoSize))
+            {
+                mSecondCamera.GetComponent<CameraComponent>().Camera.SetOrthographicSize(orthoSize);
+            }
+
         }
         ImGui::End();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0, 0 });

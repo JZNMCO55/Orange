@@ -19,8 +19,10 @@ namespace Orange
 
       void OnUpdate(Timestep ts);
 
+      void OnViewportResize(uint32_t width, uint32_t height);
    private:
       entt::registry mRegistry;
+      uint32_t mViewportWidth = 0, mViewportHeight = 0;
    }; 
 }
 
