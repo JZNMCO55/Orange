@@ -7,6 +7,7 @@ namespace Orange
 {
     class OrthographicCamera;
     class Texture2D;
+    class Camera;
     class ORANGE_API Renderer2D
     {
     public:
@@ -24,6 +25,8 @@ namespace Orange
         static void Shutdown();
 
         static void BeginScene(const Ref<OrthographicCamera>& camera);
+
+        static void BeginScene(const Ref<Camera>& camera, const glm::mat4& transform);
 
         static void EndScene();
 

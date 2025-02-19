@@ -5,7 +5,7 @@
 #include "RenderCommand.h"
 #include "Renderer2D.h"
 #include "Texture.h"
-
+#include "Camera.h"
 #include "OpenGL/OpenGLShader.h"
 
 namespace Orange
@@ -107,6 +107,20 @@ namespace Orange
     void Renderer2D::Shutdown()
     {
 
+    }
+
+    void Renderer2D::BeginScene(const Ref<Camera>& camera, const glm::mat4& transform)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        glm::mat4 viewProj = camera->GetProjectionMatrix() * glm::inverse(transform);
+
+        sData.mpTextureShader->Bind();
+        sData.mpTextureShader->SetMat4("u_ViewProjection", viewProj);
+
+        sData.QuadIndexCount = 0;   
+        sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
+        sData.TextureSlotIndex = 1;
     }
 
     void Renderer2D::BeginScene(const Ref<OrthographicCamera>& camera)

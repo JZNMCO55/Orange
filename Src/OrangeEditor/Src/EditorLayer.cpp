@@ -24,8 +24,13 @@ namespace Orange
         // Create a square entity
         auto squareEntity = mpActiveScene->CreateEntity("Square");
         squareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
-
         mSquareEntity = squareEntity;
+        mCameraEntity = mpActiveScene->CreateEntity("CameraEntity");
+        mCameraEntity.AddComponent<CameraComponent>(glm::ortho(-16.0f, 16.0f, -9.0f, 9.0f, -1.0f, 1.0f));
+        mSecondCamera = mpActiveScene->CreateEntity("Clip-Plane Entity");
+        auto& cc = mSecondCamera.AddComponent<CameraComponent>(glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f));
+        cc.Primary = false;
+
     }
 
     void EditorLayer::OnDetach()
@@ -61,9 +66,7 @@ namespace Orange
             Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
             Orange::RenderCommand::Clear();
 
-            Orange::Renderer2D::BeginScene(mCameraControler.GetCamera()); 
             mpActiveScene->OnUpdate(ts);
-            Orange::Renderer2D::EndScene();
         }
 
         mpFrameBuffer->Unbind();
@@ -141,6 +144,12 @@ namespace Orange
             auto& squareColor = mSquareEntity.GetComponent<SpriteRendererComponent>().Color;
             ImGui::ColorEdit4("Square Color", glm::value_ptr(squareColor));
             ImGui::Separator();
+        }
+        ImGui::DragFloat3("Camera Position", glm::value_ptr(mCameraEntity.GetComponent<TransformComponent>().Transform[3]));
+        if(ImGui::Checkbox("Primary Camera", &mPrimaryCamera))
+        {
+            mCameraEntity.GetComponent<CameraComponent>().Primary = mPrimaryCamera;
+            mSecondCamera.GetComponent<CameraComponent>().Primary = !mPrimaryCamera;
         }
         ImGui::End();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0, 0 });

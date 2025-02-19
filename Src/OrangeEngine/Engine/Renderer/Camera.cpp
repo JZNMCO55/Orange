@@ -1,0 +1,10 @@
+#include "pch.h"
+#include "Camera.h"
+
+namespace Orange
+{
+   Camera::Camera(const glm::mat4& projectionMatrix)
+      : mProjectionMatrix(projectionMatrix)
+   {
+   }
+}

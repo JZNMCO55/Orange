@@ -3,6 +3,7 @@
 
 #include "pch.h"
 #include "entt/entt.hpp"
+#include "Renderer/Camera.h"
 
 
 namespace Orange
@@ -36,6 +37,16 @@ namespace Orange
         SpriteRendererComponent() = default;
         SpriteRendererComponent(const SpriteRendererComponent&) = default;
         SpriteRendererComponent(const glm::vec4& color) : Color{ color } {}
+    };
+
+    struct CameraComponent
+    {
+        Orange::Camera Camera;
+        bool Primary = true;
+        CameraComponent() = default;
+        CameraComponent(const CameraComponent&) = default;
+        CameraComponent(const glm::mat4& projection)
+            : Camera(projection) {}
     };
 }
 

@@ -49,12 +49,32 @@ namespace Orange
    void Scene::OnUpdate(Timestep ts)
    {
         // Update scripts
-        auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-        for (auto entity : group)
+        Ref<Camera> mainCamera = nullptr;
+        glm::mat4* cameraTransform = nullptr;
         {
-          auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-          
-          Renderer2D::DrawQuad(transform.Transform, sprite.Color);
-        } 
+            auto view = mRegistry.view<TransformComponent, CameraComponent>();
+            for (auto entity : view)
+            {
+                auto&[transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
+                if(camera.Primary)
+                {
+                    mainCamera = CreateRef<Camera>(camera.Camera);
+                    cameraTransform = &transform.Transform;
+                    break;
+                }
+            }  
+        }
+
+        if(mainCamera)
+        {
+            Renderer2D::BeginScene(mainCamera, *cameraTransform);
+            auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+            for (auto entity : group)
+            {
+                auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+                Renderer2D::DrawQuad(transform.Transform, sprite.Color);
+            }
+            Renderer2D::EndScene();
+        }
    }
 }

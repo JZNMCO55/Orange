@@ -28,6 +28,10 @@ namespace Orange
 
         Ref<Scene> mpActiveScene;
         Entity mSquareEntity;
+        Entity mCameraEntity;
+        Entity mSecondCamera;
+
+        bool mPrimaryCamera = true;
 
         Ref<Texture2D> mpCheckerboardTexture;
 
