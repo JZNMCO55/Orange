@@ -4,6 +4,8 @@
 #include "pch.h"
 #include "entt/entt.hpp"
 #include "SceneCamera.h"
+#include "ScriptableEntity.h"
+#include "Timestep.h"
 
 
 namespace Orange
@@ -46,6 +48,29 @@ namespace Orange
         bool FixedAspectRatio = false;
         CameraComponent() = default;
         CameraComponent(const CameraComponent&) = default;
+    };
+
+    struct NativeScriptComponent
+    {
+        ScriptableEntity* Instance = nullptr;
+
+        std::function<void()> InstantiateScript;
+        std::function<void()> DestroyScript;
+
+        std::function<void(ScriptableEntity*)> OnCreateFunction;
+        std::function<void(ScriptableEntity*)> OnDestroyFunction;
+        std::function<void(ScriptableEntity*, Timestep)> OnUpdateFunction;
+
+        template<typename T>
+        void Bind()
+        {
+            InstantiateScript = [&]() { Instance = new T(); };
+			DestroyScript = [&]() { delete (T*)Instance; Instance = nullptr; };
+
+			OnCreateFunction = [](ScriptableEntity* instance) { ((T*)instance)->OnCreate(); };
+			OnDestroyFunction = [](ScriptableEntity* instance) { ((T*)instance)->OnDestroy(); };
+			OnUpdateFunction = [](ScriptableEntity* instance, Timestep ts) { ((T*)instance)->OnUpdate(ts); };
+        }
     };
 }
 

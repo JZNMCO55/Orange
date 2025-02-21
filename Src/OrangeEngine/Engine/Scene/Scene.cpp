@@ -9,27 +9,27 @@ namespace Orange
    Scene::Scene()
    {
 #ifdef ORANGE_EXAMPLE
-		entt::entity entity = mRegistry.create();
-		mRegistry.emplace<TransformComponent>(entity, glm::mat4(1.0f));
+        entt::entity entity = mRegistry.create();
+        mRegistry.emplace<TransformComponent>(entity, glm::mat4(1.0f));
 
-		mRegistry.on_construct<TransformComponent>().connect<&OnTransformConstruct>();
-
-
-		if (mRegistry.has<TransformComponent>(entity))
-			TransformComponent& transform = mRegistry.get<TransformComponent>(entity);
+        mRegistry.on_construct<TransformComponent>().connect<&OnTransformConstruct>();
 
 
-		auto view = mRegistry.view<TransformComponent>();
-		for (auto entity : view)
-		{
-			TransformComponent& transform = view.get<TransformComponent>(entity);
-		} 
+        if (mRegistry.has<TransformComponent>(entity))
+            TransformComponent& transform = mRegistry.get<TransformComponent>(entity);
 
-		auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-		for (auto entity : group)
-		{
-			auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-		}
+
+        auto view = mRegistry.view<TransformComponent>();
+        for (auto entity : view)
+        {
+            TransformComponent& transform = view.get<TransformComponent>(entity);
+        } 
+
+        auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+        for (auto entity : group)
+        {
+            auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+        }
 #endif
    }
 
@@ -41,14 +41,36 @@ namespace Orange
    {
         Entity entity = { mRegistry.create(), shared_from_this() };
         entity.AddComponent<TransformComponent>();
-		    auto& tagComponent = entity.AddComponent<TagComponent>();
-		    tagComponent.Tag = tag.empty() ? "Entity" : tag;
+            auto& tagComponent = entity.AddComponent<TagComponent>();
+            tagComponent.Tag = tag.empty() ? "Entity" : tag;
         return entity;
    }
 
    void Scene::OnUpdate(Timestep ts)
    {
         // Update scripts
+
+        {
+            mRegistry.view<NativeScriptComponent>().each([=](auto entity, auto& nsc)
+            {
+                if (!nsc.Instance)
+                {
+                    nsc.InstantiateScript();
+                    nsc.Instance->mEntity = Entity{ entity, shared_from_this()};
+
+                    if (nsc.OnCreateFunction)
+                    {
+                        nsc.OnCreateFunction(nsc.Instance);
+                    }
+                }
+
+                if (nsc.OnUpdateFunction)
+                {
+                    nsc.OnUpdateFunction(nsc.Instance, ts);
+                }
+            });
+          }
+        // Render 2D
         Ref<Camera> mainCamera = nullptr;
         glm::mat4* cameraTransform = nullptr;
         {
