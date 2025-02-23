@@ -8,29 +8,7 @@ namespace Orange
 {
    Scene::Scene()
    {
-#ifdef ORANGE_EXAMPLE
-        entt::entity entity = mRegistry.create();
-        mRegistry.emplace<TransformComponent>(entity, glm::mat4(1.0f));
 
-        mRegistry.on_construct<TransformComponent>().connect<&OnTransformConstruct>();
-
-
-        if (mRegistry.has<TransformComponent>(entity))
-            TransformComponent& transform = mRegistry.get<TransformComponent>(entity);
-
-
-        auto view = mRegistry.view<TransformComponent>();
-        for (auto entity : view)
-        {
-            TransformComponent& transform = view.get<TransformComponent>(entity);
-        } 
-
-        auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-        for (auto entity : group)
-        {
-            auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-        }
-#endif
    }
 
    Scene::~Scene()
@@ -55,19 +33,11 @@ namespace Orange
             {
                 if (!nsc.Instance)
                 {
-                    nsc.InstantiateScript();
+                    nsc.Instance = nsc.InstantiateScript();
                     nsc.Instance->mEntity = Entity{ entity, shared_from_this()};
-
-                    if (nsc.OnCreateFunction)
-                    {
-                        nsc.OnCreateFunction(nsc.Instance);
-                    }
+                    nsc.Instance->OnCreate();
                 }
-
-                if (nsc.OnUpdateFunction)
-                {
-                    nsc.OnUpdateFunction(nsc.Instance, ts);
-                }
+                nsc.Instance->OnUpdate(ts);
             });
           }
         // Render 2D
@@ -77,7 +47,7 @@ namespace Orange
             auto view = mRegistry.view<TransformComponent, CameraComponent>();
             for (auto entity : view)
             {
-                auto&[transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
+                auto [transform, camera] = view.get<TransformComponent, CameraComponent>(entity);
                 if(camera.Primary)
                 {
                     mainCamera = CreateRef<Camera>(camera.Camera);
@@ -93,7 +63,7 @@ namespace Orange
             auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
             for (auto entity : group)
             {
-                auto&[transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+                auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
                 Renderer2D::DrawQuad(transform.Transform, sprite.Color);
             }
             Renderer2D::EndScene();
