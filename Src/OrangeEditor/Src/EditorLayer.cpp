@@ -31,36 +31,36 @@ namespace Orange
         auto& cc = mSecondCamera.AddComponent<CameraComponent>();
         cc.Primary = false;
 
-		class CameraController : public ScriptableEntity
-		{
-		public:
-			void OnCreate()
-			{
+        class CameraController : public ScriptableEntity
+        {
+        public:
+            virtual void OnCreate() override
+            {
                 auto& transform = GetComponent<TransformComponent>().Transform;
                 transform[3][0] = rand() % 10 - 5.0f;
-			}
+            }
 
-			void OnDestroy()
-			{
-			}
+            virtual void OnDestroy() override
+            {
+            }
 
-			void OnUpdate(Timestep ts)
-			{
-				auto& transform = GetComponent<TransformComponent>().Transform;
-				float speed = 5.0f;
+            virtual void OnUpdate(Timestep ts) override
+            {
+                auto& transform = GetComponent<TransformComponent>().Transform;
+                float speed = 5.0f;
 
-				if (Input::IsKeyPressed(ORG_KEY_A))
-					transform[3][0] += speed * ts;
-				if (Input::IsKeyPressed(ORG_KEY_D))
-					transform[3][0] -= speed * ts;
-				if (Input::IsKeyPressed(ORG_KEY_W))
-					transform[3][1] -= speed * ts;
-				if (Input::IsKeyPressed(ORG_KEY_S))
-					transform[3][1] += speed * ts;
-			}
-		};
+                if (Input::IsKeyPressed(ORG_KEY_A))
+                    transform[3][0] += speed * ts;
+                if (Input::IsKeyPressed(ORG_KEY_D))
+                    transform[3][0] -= speed * ts;
+                if (Input::IsKeyPressed(ORG_KEY_W))
+                    transform[3][1] -= speed * ts;
+                if (Input::IsKeyPressed(ORG_KEY_S))
+                    transform[3][1] += speed * ts;
+            }
+        };
 
-		mCameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
+        mCameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
         mSecondCamera.AddComponent<NativeScriptComponent>().Bind<CameraController>();
 
         mSceneHierachyPanel.SetContext(mpActiveScene);
@@ -189,9 +189,9 @@ namespace Orange
             mSecondCamera.GetComponent<CameraComponent>().Primary = !mPrimaryCamera;
         }
         {
-			auto& camera = mSecondCamera.GetComponent<CameraComponent>().Camera;
-			float orthoSize = camera.GetOrthographicSize();
-			if (ImGui::DragFloat("Second Camera Ortho Size", &orthoSize))
+            auto& camera = mSecondCamera.GetComponent<CameraComponent>().Camera;
+            float orthoSize = camera.GetOrthographicSize();
+            if (ImGui::DragFloat("Second Camera Ortho Size", &orthoSize))
             {
                 mSecondCamera.GetComponent<CameraComponent>().Camera.SetOrthographicSize(orthoSize);
             }

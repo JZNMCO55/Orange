@@ -3,6 +3,7 @@
 
 #include "OrangeExport.h"
 #include "Entity.h"
+#include "Timestep.h"
 namespace Orange
 {
     class ORANGE_API ScriptableEntity
@@ -19,7 +20,7 @@ namespace Orange
     protected:
         virtual void OnCreate() {}
         virtual void OnDestroy() {}
-        virtual void OnUpdate(float deltaTime) {}
+        virtual void OnUpdate(Timestep ts) {}
 
     protected:
         Entity mEntity;
