@@ -62,6 +62,8 @@ namespace Orange
 
 		mCameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
         mSecondCamera.AddComponent<NativeScriptComponent>().Bind<CameraController>();
+
+        mSceneHierachyPanel.SetContext(mpActiveScene);
     }
 
     void EditorLayer::OnDetach()
@@ -160,6 +162,9 @@ namespace Orange
             }
             ImGui::EndMenuBar();
         }
+
+        mSceneHierachyPanel.OnImGuiRender();
+
         ImGui::Begin("Settings");
         auto stats = Orange::Renderer2D::GetStats();
         ImGui::Text("Renderer2D Stats:");
