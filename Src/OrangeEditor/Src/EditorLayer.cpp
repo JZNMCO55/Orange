@@ -24,6 +24,11 @@ namespace Orange
         // Create a square entity
         auto squareEntity = mpActiveScene->CreateEntity("Square");
         squareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
+
+        // Create a red square entity
+        auto redSquare = mpActiveScene->CreateEntity("Square");
+        redSquare.AddComponent<SpriteRendererComponent>(glm::vec4{ 1.0f, 0.0f, 0.0f, 1.0f });
+
         mSquareEntity = squareEntity;
         mCameraEntity = mpActiveScene->CreateEntity("CameraEntity");
         mCameraEntity.AddComponent<CameraComponent>();
