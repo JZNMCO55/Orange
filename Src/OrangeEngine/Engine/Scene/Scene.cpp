@@ -42,7 +42,7 @@ namespace Orange
           }
         // Render 2D
         Ref<Camera> mainCamera = nullptr;
-        glm::mat4* cameraTransform = nullptr;
+        glm::mat4 cameraTransform;
         {
             auto view = mRegistry.view<TransformComponent, CameraComponent>();
             for (auto entity : view)
@@ -51,7 +51,7 @@ namespace Orange
                 if(camera.Primary)
                 {
                     mainCamera = CreateRef<Camera>(camera.Camera);
-                    cameraTransform = &transform.Transform;
+                    cameraTransform = transform.GetTransform();
                     break;
                 }
             }  
@@ -59,12 +59,12 @@ namespace Orange
 
         if(mainCamera)
         {
-            Renderer2D::BeginScene(mainCamera, *cameraTransform);
+            Renderer2D::BeginScene(mainCamera, cameraTransform);
             auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
             for (auto entity : group)
             {
                 auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-                Renderer2D::DrawQuad(transform.Transform, sprite.Color);
+                Renderer2D::DrawQuad(transform.GetTransform(), sprite.Color);
             }
             Renderer2D::EndScene();
         }
