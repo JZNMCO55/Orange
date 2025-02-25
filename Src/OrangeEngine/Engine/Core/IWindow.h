@@ -13,8 +13,8 @@ namespace Orange
         uint32_t mHeight;
 
         WindowProps(const std::string& title = "Orange Engine",
-                    uint32_t width = 1280,
-                    uint32_t height = 720)
+                    uint32_t width = 1600,
+                    uint32_t height = 900)
             : mTitle(title), mWidth(width), mHeight(height)
         {
         }

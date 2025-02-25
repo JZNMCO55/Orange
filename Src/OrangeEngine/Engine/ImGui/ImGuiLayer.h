@@ -23,6 +23,9 @@ namespace Orange
         void End();
 
         void BlockEvents(bool block) { mBlockEvents = block; }
+
+    private:
+        void SetDarkThemeColors();
     private:
         bool mBlockEvents = true;
         float mTime = 0.0f;
