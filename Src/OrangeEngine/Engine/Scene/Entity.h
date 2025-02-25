@@ -17,7 +17,10 @@ namespace Orange
         T& AddComponent(Args&&... args)
         {
             ORANGE_CORE_ASSERT(!HasComponent<T>(), "Entity already has component!");
-            return mpScene.lock()->GetRegistry().emplace<T>(mEntityHandle, std::forward<Args>(args)...);
+            T& component = mpScene.lock()->GetRegistry().emplace<T>(mEntityHandle, std::forward<Args>(args)...);
+            mpScene.lock()->OnComponentAdded<T>(*this, component);
+
+            return component;
         }
 
         template<typename T>
@@ -36,11 +39,14 @@ namespace Orange
         template<typename T>
         void RemoveComponent()
         {
-            ORG_CORE_ASSERT(HasComponent<T>(), "Entity does not have component!");
+            ORANGE_CORE_ASSERT(HasComponent<T>(), "Entity does not have component!");
             mpScene.lock()->GetRegistry().remove<T>(mEntityHandle);
         }
         
         operator bool() const { return mEntityHandle != entt::null; }
+
+        operator entt::entity() const { return mEntityHandle; };
+
         operator uint32_t() const { return (uint32_t)mEntityHandle; }
         
         bool operator==(const Entity& other) const
@@ -56,6 +62,7 @@ namespace Orange
     private:
         entt::entity mEntityHandle = entt::null;
         std::weak_ptr<Scene> mpScene;
+        //friend class Scene;
     };
 }
 #endif // ENTITY_H

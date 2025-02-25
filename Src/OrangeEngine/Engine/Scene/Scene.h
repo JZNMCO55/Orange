@@ -14,6 +14,7 @@ namespace Orange
       ~Scene();
 
       Entity CreateEntity(const std::string& tag = std::string());
+      void DestroyEntity(Entity entity);
 
       entt::registry& GetRegistry() { return mRegistry; }
 
@@ -21,8 +22,12 @@ namespace Orange
 
       void OnViewportResize(uint32_t width, uint32_t height);
    private:
+       template<typename T>
+       void OnComponentAdded(Entity entity, T& component);
+   private:
       entt::registry mRegistry;
       uint32_t mViewportWidth = 0, mViewportHeight = 0;
+      friend class Entity;
    }; 
 }
 
