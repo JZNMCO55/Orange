@@ -172,13 +172,13 @@ namespace Orange
                 if (ImGui::MenuItem("Serialize"))
                 {
                     SceneSerializer serializer(mpActiveScene);
-                    serializer.Serialize("assets/scenes/Example.hazel");
+                    serializer.Serialize("..\..\Resource\Example.org");
                 }
 
                 if (ImGui::MenuItem("Deserialize"))
                 {
                     SceneSerializer serializer(mpActiveScene);
-                    serializer.Deserialize("assets/scenes/Example.hazel");
+                    serializer.Deserialize("..\..\Resource\Example.org");
                 }
 
                 if (ImGui::MenuItem("Exit"))
