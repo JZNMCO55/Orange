@@ -53,10 +53,11 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 # 链接静态库
 target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
-target_link_libraries(${PROJECT_NAME} PRIVATE 
+target_link_libraries(${PROJECT_NAME} PUBLIC 
                         glfw3
                         glad
                         imgui
                         glm
+                        yaml-cpp
                         ${OPENGL_LIBRARIES}
                      )
