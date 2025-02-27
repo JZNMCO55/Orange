@@ -1,4 +1,4 @@
-# Set Project Name
+# 设置项目名称
 project(OrangeEngine)
 
 # 搜索头文件和库路径
@@ -18,7 +18,7 @@ find_package(OpenGL REQUIRED)
 if(BUILD_SHARED_LIBS)
     add_library(${PROJECT_NAME} SHARED ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
     target_compile_definitions(${PROJECT_NAME} PRIVATE -DORANGE_EXPORTS)
-else()         
+else()
     add_library(${PROJECT_NAME} STATIC ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
     target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_STATIC)
 endif()
@@ -33,6 +33,7 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # 指定编译选项
+target_compile_definitions(${PROJECT_NAME} PRIVATE -DYAML_CPP_STATIC_DEFINE)
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DPLATFORM_WINDOWS)
 target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_ENABLE_ASSERTS)
 if(MSVC)
@@ -51,13 +52,20 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Event
 )
 
+# 根据构建类型选择链接的库
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(3rdLibs yaml-cpp)
+else()
+    set(3rdLibs yaml-cppd)
+endif()
+
 # 链接静态库
 target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
-target_link_libraries(${PROJECT_NAME} PUBLIC 
+target_link_libraries(${PROJECT_NAME} PUBLIC
                         glfw3
                         glad
                         imgui
                         glm
-                        yaml-cpp
                         ${OPENGL_LIBRARIES}
-                     )
+                        ${3rdLibs}
+)
