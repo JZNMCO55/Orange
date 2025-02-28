@@ -2,6 +2,7 @@
 #include "imgui/imgui.h"
 
 #include "Scene/SceneSerializer.h"
+#include "Utils/PlatformUtils.h"
 
 namespace Orange
 {
@@ -169,16 +170,19 @@ namespace Orange
                 // which we can't undo at the moment without finer window depth/z control.
                 //ImGui::MenuItem("Fullscreen", NULL, &opt_fullscreen_persistant);
 
-                if (ImGui::MenuItem("Serialize"))
+                if (ImGui::MenuItem("New", "Ctrl+N"))
                 {
-                    SceneSerializer serializer(mpActiveScene);
-                    serializer.Serialize("..\..\Resource\Example.org");
+                    NewScene();
                 }
 
-                if (ImGui::MenuItem("Deserialize"))
+                if (ImGui::MenuItem("Open...", "Ctrl+O"))
                 {
-                    SceneSerializer serializer(mpActiveScene);
-                    serializer.Deserialize("..\..\Resource\Example.org");
+                    OpenScene();
+                }
+
+                if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S"))
+                {
+                    SaveSceneAs();
                 }
 
                 if (ImGui::MenuItem("Exit"))
@@ -219,5 +223,85 @@ namespace Orange
     void EditorLayer::OnEvent(Event& event)
     {
         mCameraControler.OnEvent(event);
+    }
+
+    bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
+    {
+        // shortcuts
+        if (e.GetRepeatCount() > 0)
+        {
+            return false;
+        }
+
+        bool bControl = Input::IsKeyPressed(ORG_KEY_LEFT_CONTROL || ORG_KEY_RIGHT_CONTROL);
+        bool bShift = Input::IsKeyPressed(ORG_KEY_LEFT_SHIFT || ORG_KEY_RIGHT_SHIFT);
+
+        switch (e.GetKeyCode())
+        {
+            case ORG_KEY_N:
+            {
+                if (bControl)
+                {
+                    NewScene();
+                    break;
+                }
+            }
+            case ORG_KEY_O:
+            {
+                if (bControl)
+                {
+                    OpenScene();
+                    break;
+                }
+            }
+            case ORG_KEY_S:
+            {
+                if (bControl && bShift)
+                {
+                    SaveSceneAs();
+                    break;
+                }
+            }
+            default:
+                break;
+        }
+    }
+
+    void EditorLayer::NewScene()
+    {
+        mpActiveScene = CreateRef<Scene>();
+        mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
+        mSceneHierachyPanel.SetContext(mpActiveScene);
+    }
+
+    void EditorLayer::OpenScene()
+    {
+        std::string filepath = FileDialog::OpenFile("Scene (*.oescn)*.oescn");
+
+        if(!filepath.empty())
+        {
+            mpActiveScene = CreateRef<Scene>();
+            mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
+            mSceneHierachyPanel.SetContext(mpActiveScene);
+
+            SceneSerializer serializer(mpActiveScene);
+            serializer.Deserialize(filepath);
+        }
+    }
+
+    void EditorLayer::SaveSceneAs()
+    {
+        std::string filepath = FileDialog::SaveFile("Scene (*.oescn)\\0*.oescn\\0");
+
+        if (!filepath.empty())
+        {
+            // check extension
+            if (filepath.size() < 6 || filepath.substr(filepath.size() - 6) != ".oescn")
+            {
+                filepath += ".oescn";
+            }
+            SceneSerializer serializer(mpActiveScene);
+            serializer.Serialize(filepath);
+        }
     }
 }
