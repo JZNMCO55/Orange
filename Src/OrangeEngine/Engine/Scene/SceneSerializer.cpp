@@ -1,4 +1,8 @@
 #include "pch.h"
+
+#include <random>
+#include <chrono>
+
 #include "Scene.h"
 #include "Entity.h"
 #include "Components.h"
@@ -58,6 +62,12 @@ namespace YAML
     };
 }
 
+static uint64_t GenerateUUID()
+{
+    static std::mt19937_64 rng(std::chrono::steady_clock::now().time_since_epoch().count());
+    return rng();
+}
+
 namespace Orange
 {
     YAML::Emitter& operator<<(YAML::Emitter& out, const glm::vec3& v)
@@ -77,7 +87,8 @@ namespace Orange
     static void SerializeEntity(YAML::Emitter& out, Entity entity)
     {
         out << YAML::BeginMap; // Entity
-        out << YAML::Key << "Entity" << YAML::Value << "0123456789";
+        auto uuid = GenerateUUID();
+        out << YAML::Key << "Entity" << YAML::Value << std::to_string(uuid);
 
         // Map TagComponent
         if (entity.HasComponent<TagComponent>())
@@ -143,7 +154,7 @@ namespace Orange
             out << YAML::EndMap; // SpriteRendererComponent
         }
 
-        YAML::EndMap; // Entity
+        out << YAML::EndMap; // Entity
     }
 
     SceneSerializer::SceneSerializer(const std::weak_ptr<Scene>& scene)

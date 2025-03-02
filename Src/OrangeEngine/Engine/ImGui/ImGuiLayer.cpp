@@ -1,6 +1,7 @@
 #include "OpenGL/OpenGLPch.h"
 #include "ImGuiLayer.h"
 #include "Application.h"
+#include "ImGuizmo/ImGuizmo.h"
 
 namespace Orange
 {
@@ -83,6 +84,7 @@ namespace Orange
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
     }
 
     void ImGuiLayer::End()

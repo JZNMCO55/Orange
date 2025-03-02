@@ -35,9 +35,6 @@ namespace Orange
         Ref<FrameBuffer> mpFrameBuffer;
 
         Ref<Scene> mpActiveScene;
-        Entity mSquareEntity;
-        Entity mCameraEntity;
-        Entity mSecondCamera;
 
         bool mPrimaryCamera = true;
 
@@ -47,6 +44,8 @@ namespace Orange
         bool mViewportHovered = false;
         glm::vec2 mViewportSize = { 0.0f, 0.0f };
         glm::vec4 mSquareColor = { 0.2f, 0.3f, 0.8f, 1.0f };
+
+        int mGizmoType = -1;
 
         SceneHierachyPanel mSceneHierachyPanel;;
     };

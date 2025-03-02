@@ -11,6 +11,13 @@ namespace Orange
 {
     class ORANGE_API ImGuiLayer : public Layer
     {
+    //public:
+    //    enum class ImGuiSkin
+    //    {
+    //        Dark,
+    //        Light
+    //        // ...
+    //    };
     public:
         ImGuiLayer();
         ~ImGuiLayer();
@@ -24,14 +31,16 @@ namespace Orange
 
         void BlockEvents(bool block) { mBlockEvents = block; }
 
+        // Todo: Set ImGui Skin
+        // void SetImGuiSkin(ImGuiSkin skin);
+
     private:
         void SetDarkThemeColors();
     private:
         bool mBlockEvents = true;
         float mTime = 0.0f;
-
     };
 }
 
 
-#endif // !
+#endif // !IMGUI_LAYER_H

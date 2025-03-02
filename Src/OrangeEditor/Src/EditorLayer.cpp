@@ -3,6 +3,42 @@
 
 #include "Scene/SceneSerializer.h"
 #include "Utils/PlatformUtils.h"
+#include "ImGui/ImGuizmo/ImGuizmo.h"
+#include "Math/Math.h"
+
+#define BIND_EDITOR_EVENT_FN(x) std::bind(&EditorLayer::x, this, std::placeholders::_1)
+
+static void ShowGizmo()
+{
+    // 假设这是你的相机视图矩阵和投影矩阵
+    glm::mat4 cameraView = glm::lookAt(glm::vec3(0, 0, 5), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+    glm::mat4 cameraProjection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+
+    // 这是你要操作的对象的变换矩阵
+    static glm::mat4 objectTransform = glm::mat4(1.0f);
+
+    // 设置 ImGuizmo 的绘制区域（通常与 ImGui 窗口一致）
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+
+    // 选择 Gizmo 的操作类型（平移、旋转、缩放）
+    static ImGuizmo::OPERATION gizmoOperation = ImGuizmo::TRANSLATE;
+
+    // 选择 Gizmo 的模式（局部或全局）
+    static ImGuizmo::MODE gizmoMode = ImGuizmo::LOCAL;
+
+    // 显示 Gizmo
+    ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection), gizmoOperation, gizmoMode, glm::value_ptr(objectTransform));
+
+    // 检查 Gizmo 是否正在被使用
+    if (ImGuizmo::IsUsing())
+    {
+        // 如果 Gizmo 正在被使用，你可以在这里处理对象的变换
+        glm::vec3 translation, rotation, scale;
+        Orange::Math::DecomposeTransform(objectTransform, translation, rotation, scale);
+        // 更新你的对象状态
+    }
+}
 
 namespace Orange
 {
@@ -25,52 +61,6 @@ namespace Orange
 
         mpActiveScene = CreateRef<Scene>();
 
-        // Create a square entity
-        auto squareEntity = mpActiveScene->CreateEntity("Green Square");
-        squareEntity.AddComponent<SpriteRendererComponent>(glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f });
-
-        // Create a red square entity
-        auto redSquare = mpActiveScene->CreateEntity("Red Square");
-        redSquare.AddComponent<SpriteRendererComponent>(glm::vec4{ 1.0f, 0.0f, 0.0f, 1.0f });
-
-        mSquareEntity = squareEntity;
-        mCameraEntity = mpActiveScene->CreateEntity("CameraA");
-        mCameraEntity.AddComponent<CameraComponent>();
-        mSecondCamera = mpActiveScene->CreateEntity("CameraB");
-        auto& cc = mSecondCamera.AddComponent<CameraComponent>();
-        cc.Primary = false;
-
-        class CameraController : public ScriptableEntity
-        {
-        public:
-            virtual void OnCreate() override
-            {
-                auto& translation = GetComponent<TransformComponent>().Translation;
-                translation.x = rand() % 10 - 5.0f;
-            }
-
-            virtual void OnDestroy() override
-            {
-            }
-
-            virtual void OnUpdate(Timestep ts) override
-            {
-                auto& translation = GetComponent<TransformComponent>().Translation;
-                float speed = 5.0f;
-
-                if (Input::IsKeyPressed(ORG_KEY_A))
-                    translation.x += speed * ts;
-                if (Input::IsKeyPressed(ORG_KEY_D))
-                    translation.x -= speed * ts;
-                if (Input::IsKeyPressed(ORG_KEY_W))
-                    translation.y -= speed * ts;
-                if (Input::IsKeyPressed(ORG_KEY_S))
-                    translation.y += speed * ts;
-            }
-        };
-
-        mCameraEntity.AddComponent<NativeScriptComponent>().Bind<CameraController>();
-        mSecondCamera.AddComponent<NativeScriptComponent>().Bind<CameraController>();
 
         mSceneHierachyPanel.SetContext(mpActiveScene);
     }
@@ -196,7 +186,7 @@ namespace Orange
 
         mSceneHierachyPanel.OnImGuiRender();
 
-        ImGui::Begin("Settings");
+        ImGui::Begin("Statuts");
         auto stats = Orange::Renderer2D::GetStats();
         ImGui::Text("Renderer2D Stats:");
         ImGui::Text("Draw Calls: %d", stats.DrawCalls);
@@ -209,12 +199,62 @@ namespace Orange
         ImGui::Begin("Viewport");
         mViewportFocused = ImGui::IsWindowFocused();
         mViewportHovered = ImGui::IsWindowHovered();
-        Orange::Application::GetInstance()->GetImGuiLayer()->BlockEvents(!mViewportFocused || !mViewportHovered);
+
+        Orange::Application::GetInstance()->GetImGuiLayer()->BlockEvents(!mViewportFocused && !mViewportHovered);
         ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
         mViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
     
         uint32_t textureID = mpFrameBuffer->GetColorAttachmentRendererID();
         ImGui::Image(textureID, ImVec2{ mViewportSize.x, mViewportSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+
+        // Gizmos
+        Entity selectedEntity = mSceneHierachyPanel.GetSelectedEntity();
+        if (selectedEntity && mGizmoType != -1)
+        {
+            ImGuizmo::Enable(true);
+            ImGuizmo::SetOrthographic(false);
+            ImGuizmo::SetDrawlist();
+
+            float windowWidth = (float)ImGui::GetWindowWidth();
+            float windowHeight = (float)ImGui::GetWindowHeight();
+            ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, windowWidth, windowHeight);
+
+            ImGuizmo::SetGizmoSizeClipSpace(.15f);
+            // Camera
+            auto cameraEntity = mpActiveScene->GetPrimaryCameraEntity();
+            const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+            const glm::mat4& cameraProjection = camera.GetProjectionMatrix();
+            glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
+
+            // Entity transform
+            auto& tc = selectedEntity.GetComponent<TransformComponent>();
+            glm::mat4 transform = tc.GetTransform();
+
+            // Snapping
+            bool snap = Input::IsKeyPressed(ORG_KEY_LEFT_CONTROL);
+            float snapValue = 0.5f; // Snap to 0.5m for translation/scale
+            // Snap to 45 degrees for rotation
+            if (mGizmoType == ImGuizmo::OPERATION::ROTATE)
+                snapValue = 45.0f;
+
+            float snapValues[3] = { snapValue, snapValue, snapValue };
+
+            ImGuizmo::Manipulate(glm::value_ptr(cameraView), glm::value_ptr(cameraProjection),
+                (ImGuizmo::OPERATION)mGizmoType, ImGuizmo::LOCAL, glm::value_ptr(transform),
+                nullptr, snap ? snapValues : nullptr);
+
+            if (ImGuizmo::IsUsing())
+            {
+                glm::vec3 translation, rotation, scale;
+                Math::DecomposeTransform(transform, translation, rotation, scale);
+
+                glm::vec3 deltaRotation = rotation - tc.Rotation;
+                tc.Translation = translation;
+                tc.Rotation += deltaRotation;
+                tc.Scale = scale;
+            }
+        }
+
         ImGui::End();
         ImGui::PopStyleVar();
         ImGui::End();
@@ -223,6 +263,9 @@ namespace Orange
     void EditorLayer::OnEvent(Event& event)
     {
         mCameraControler.OnEvent(event);
+
+        EventDispatcher dispatcher(event);
+        dispatcher.Dispatch<KeyPressedEvent>(BIND_EDITOR_EVENT_FN(EditorLayer::OnKeyPressed));
     }
 
     bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
@@ -233,34 +276,67 @@ namespace Orange
             return false;
         }
 
-        bool bControl = Input::IsKeyPressed(ORG_KEY_LEFT_CONTROL || ORG_KEY_RIGHT_CONTROL);
-        bool bShift = Input::IsKeyPressed(ORG_KEY_LEFT_SHIFT || ORG_KEY_RIGHT_SHIFT);
+        bool bControl = Input::IsKeyPressed(ORG_KEY_LEFT_CONTROL) || Input::IsKeyPressed(ORG_KEY_RIGHT_CONTROL);
+        bool bShift = Input::IsKeyPressed(ORG_KEY_LEFT_SHIFT) || Input::IsKeyPressed(ORG_KEY_RIGHT_SHIFT);
 
-        switch (e.GetKeyCode())
+        auto keyCode = e.GetKeyCode();
+        switch (keyCode)
         {
             case ORG_KEY_N:
             {
                 if (bControl)
                 {
                     NewScene();
-                    break;
                 }
+                break;
             }
             case ORG_KEY_O:
             {
                 if (bControl)
                 {
                     OpenScene();
-                    break;
                 }
+                break;
             }
             case ORG_KEY_S:
             {
                 if (bControl && bShift)
                 {
                     SaveSceneAs();
-                    break;
                 }
+                break;
+            }
+            case ORG_KEY_Q:
+            {
+                if (bControl)
+                {
+                    mGizmoType = -1;
+                }
+                break;
+            }
+            case ORG_KEY_W:
+            {
+                if (bControl)
+                {
+                    mGizmoType = ImGuizmo::OPERATION::TRANSLATE;
+                }
+                break;
+            }
+            case ORG_KEY_E:
+            {
+                if (bControl)
+                {
+                    mGizmoType = ImGuizmo::OPERATION::ROTATE;
+                }
+                break;
+            }
+            case ORG_KEY_R:
+            {
+                if (bControl)
+                {
+                    mGizmoType = ImGuizmo::OPERATION::SCALE;
+                }
+                break;
             }
             default:
                 break;
