@@ -30,5 +30,7 @@
 #include "Renderer/OrthographicCamera.h"
 #include "Renderer/Texture.h"
 #include "Renderer/FrameBuffer.h"
+#include "Renderer/Camera.h"
+#include "Renderer/EditorCamera.h"
 
 #endif // ORANGE_H

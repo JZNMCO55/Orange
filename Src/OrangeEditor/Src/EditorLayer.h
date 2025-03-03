@@ -37,6 +37,7 @@ namespace Orange
         Ref<Scene> mpActiveScene;
 
         bool mPrimaryCamera = true;
+        Ref<EditorCamera> mpEditorCamera;
 
         Ref<Texture2D> mpCheckerboardTexture;
 

@@ -6,6 +6,7 @@
 #include "Renderer2D.h"
 #include "Texture.h"
 #include "Camera.h"
+#include "EditorCamera.h"
 #include "OpenGL/OpenGLShader.h"
 
 namespace Orange
@@ -118,9 +119,7 @@ namespace Orange
         sData.mpTextureShader->Bind();
         sData.mpTextureShader->SetMat4("u_ViewProjection", viewProj);
 
-        sData.QuadIndexCount = 0;   
-        sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
-        sData.TextureSlotIndex = 1;
+        StartBatch();
     }
 
     void Renderer2D::BeginScene(const Ref<OrthographicCamera>& camera)
@@ -130,9 +129,19 @@ namespace Orange
         sData.mpTextureShader->Bind();
         sData.mpTextureShader->SetMat4("u_ViewProjection", camera->GetViewProjectionMatrix());
 
-        sData.QuadIndexCount = 0;
-        sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
-        sData.TextureSlotIndex = 1;
+        StartBatch();
+    }
+
+    void Renderer2D::BeginScene(const Ref<EditorCamera>& camera)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        glm::mat4 viewProj = camera->GetViewProjection();
+
+        sData.mpTextureShader->Bind();
+        sData.mpTextureShader->SetMat4("u_ViewProjection", viewProj);
+
+        StartBatch();
     }
 
     void Renderer2D::EndScene()
@@ -149,11 +158,20 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
+        if (sData.QuadIndexCount == 0)
+        {
+            return;
+        }
+
+        uint32_t dataSize = (uint8_t*)sData.QuadVertexBufferPtr - (uint8_t*)sData.QuadVertexBufferBase;
+        sData.mpQuadVertexBuffer->SetData(sData.QuadVertexBufferBase, dataSize);
+
         for (uint32_t i = 0; i < sData.TextureSlotIndex; i++)
         {
             sData.TextureSlots[i]->Bind(i);
         }
         RenderCommand::DrawIndexed(sData.mpQuadVertexArray, sData.QuadIndexCount);
+        sData.Stats.DrawCalls++;
     }
 
     void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const glm::vec4& color)
@@ -296,7 +314,7 @@ namespace Orange
         constexpr glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
         if (sData.QuadIndexCount >= sData.MaxIndices)
         {
-            FlushAndReset();
+            NextBatch();
         }
         for(int i = 0; i < quadVertexCount; i++)
         {
@@ -322,6 +340,19 @@ namespace Orange
         return sData.Stats;
     }
 
+    void Renderer2D::StartBatch()
+    {
+        sData.QuadIndexCount = 0;
+        sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
+        sData.TextureSlotIndex = 1;
+    }
+
+    void Renderer2D::NextBatch()
+    {
+        Flush();
+        StartBatch();
+    }
+
     void Renderer2D::CreateRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
         const glm::vec4& color, float textureIndex, float tilingFactor)
     {
@@ -329,7 +360,7 @@ namespace Orange
 
         if (sData.QuadIndexCount >= sData.MaxIndices)
         {
-            FlushAndReset();
+            NextBatch();
         }
         glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
             glm::rotate(glm::mat4(1.0f), glm::radians(rotation), { 0.0f, 0.0f, 1.0f }) *
@@ -373,7 +404,7 @@ namespace Orange
       
       if (sData.QuadIndexCount >= sData.MaxIndices)
       {
-        FlushAndReset();
+          NextBatch();
       }
 
       constexpr size_t quadVertexCount = 4;
@@ -391,12 +422,4 @@ namespace Orange
       sData.Stats.QuadCount++;
     } 
 
-    void Renderer2D::FlushAndReset()
-    {
-        EndScene();
-
-        sData.QuadIndexCount = 0;
-        sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
-        sData.TextureSlotIndex = 1;
-    }
 }

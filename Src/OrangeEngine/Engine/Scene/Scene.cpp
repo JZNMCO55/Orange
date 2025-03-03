@@ -29,7 +29,7 @@ namespace Orange
        mRegistry.destroy(entity);
    }
 
-   void Scene::OnUpdate(Timestep ts)
+   void Scene::OnUpdateRuntime(Timestep ts)
    {
         // Update scripts
 
@@ -89,6 +89,20 @@ namespace Orange
             cameraComponent.Camera.SetViewportSize(width, height);
          }
       }
+   }
+
+   void Scene::OnUpdateEditor(Timestep ts, const Ref<EditorCamera>& camera)
+   {
+       Renderer2D::BeginScene(camera);
+
+       auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+       for (auto entity : group)
+       {
+           auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+           Renderer2D::DrawQuad(transform.GetTransform(), sprite.Color);
+       }
+
+       Renderer2D::EndScene();
    }
 
    Entity Scene::GetPrimaryCameraEntity()

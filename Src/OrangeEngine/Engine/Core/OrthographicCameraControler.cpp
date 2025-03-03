@@ -24,31 +24,31 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        if (Orange::Input::IsKeyPressed(ORG_KEY_A))
+        if (Orange::Input::IsKeyPressed(OrgKeyCodes::A))
         {
             mCameraPosition.x += mCameraMoveSpeed * ts;
         }
-        else if (Orange::Input::IsKeyPressed(ORG_KEY_D))
+        else if (Orange::Input::IsKeyPressed(OrgKeyCodes::D))
         {
             mCameraPosition.x -= mCameraMoveSpeed * ts;
         }
 
-        if (Orange::Input::IsKeyPressed(ORG_KEY_W))
+        if (Orange::Input::IsKeyPressed(OrgKeyCodes::W))
         {
             mCameraPosition.y -= mCameraMoveSpeed * ts;
         }
-        else if (Orange::Input::IsKeyPressed(ORG_KEY_S))
+        else if (Orange::Input::IsKeyPressed(OrgKeyCodes::S))
         {
             mCameraPosition.y += mCameraMoveSpeed * ts;
         }
 
         if (mbRotationEnabled)
         {
-            if (Orange::Input::IsKeyPressed(ORG_KEY_Q))
+            if (Orange::Input::IsKeyPressed(OrgKeyCodes::Q))
             {
                 mCameraRotation += mCameraRotationSpeed * ts;
             }
-            else if (Orange::Input::IsKeyPressed(ORG_KEY_E))
+            else if (Orange::Input::IsKeyPressed(OrgKeyCodes::E))
             {
                 mCameraRotation -= mCameraRotationSpeed * ts;
             }

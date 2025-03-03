@@ -60,7 +60,8 @@ namespace Orange
         mpFrameBuffer = Orange::FrameBuffer::Create(fbSpec);
 
         mpActiveScene = CreateRef<Scene>();
-
+        
+        mpEditorCamera = CreateRef<EditorCamera>(30.0f, 1.778f, 0.1f, 1000.0f);
 
         mSceneHierachyPanel.SetContext(mpActiveScene);
     }
@@ -82,13 +83,16 @@ namespace Orange
         {
             mpFrameBuffer->Resize(mViewportSize.x, mViewportSize.y);
             mCameraControler.OnResize(mViewportSize.x, mViewportSize.y);
+            mpEditorCamera->SetViewportSize(mViewportSize.x, mViewportSize.y);
             mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
         }
+
+        // Update
         if (mViewportFocused)
         {
             mCameraControler.OnUpdate(ts);
+            mpEditorCamera->OnUpdate(ts);
         }
-
 
         Orange::Renderer2D::ResetStats();
 
@@ -99,7 +103,8 @@ namespace Orange
             Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
             Orange::RenderCommand::Clear();
 
-            mpActiveScene->OnUpdate(ts);
+            mpActiveScene->OnUpdateEditor(ts, mpEditorCamera);
+            //mpActiveScene->OnUpdateRuntime(ts);
         }
 
         mpFrameBuffer->Unbind();
@@ -221,17 +226,15 @@ namespace Orange
 
             ImGuizmo::SetGizmoSizeClipSpace(.15f);
             // Camera
-            auto cameraEntity = mpActiveScene->GetPrimaryCameraEntity();
-            const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
-            const glm::mat4& cameraProjection = camera.GetProjectionMatrix();
-            glm::mat4 cameraView = glm::inverse(cameraEntity.GetComponent<TransformComponent>().GetTransform());
+            const glm::mat4& cameraProjection = mpEditorCamera->GetProjectionMatrix();
+            glm::mat4 cameraView = mpEditorCamera->GetViewMatrix();
 
             // Entity transform
             auto& tc = selectedEntity.GetComponent<TransformComponent>();
             glm::mat4 transform = tc.GetTransform();
 
             // Snapping
-            bool snap = Input::IsKeyPressed(ORG_KEY_LEFT_CONTROL);
+            bool snap = Input::IsKeyPressed(OrgKeyCodes::LeftControl);
             float snapValue = 0.5f; // Snap to 0.5m for translation/scale
             // Snap to 45 degrees for rotation
             if (mGizmoType == ImGuizmo::OPERATION::ROTATE)
@@ -263,6 +266,7 @@ namespace Orange
     void EditorLayer::OnEvent(Event& event)
     {
         mCameraControler.OnEvent(event);
+        mpEditorCamera->OnEvent(event);
 
         EventDispatcher dispatcher(event);
         dispatcher.Dispatch<KeyPressedEvent>(BIND_EDITOR_EVENT_FN(EditorLayer::OnKeyPressed));
@@ -276,13 +280,13 @@ namespace Orange
             return false;
         }
 
-        bool bControl = Input::IsKeyPressed(ORG_KEY_LEFT_CONTROL) || Input::IsKeyPressed(ORG_KEY_RIGHT_CONTROL);
-        bool bShift = Input::IsKeyPressed(ORG_KEY_LEFT_SHIFT) || Input::IsKeyPressed(ORG_KEY_RIGHT_SHIFT);
+        bool bControl = Input::IsKeyPressed(OrgKeyCodes::LeftControl) || Input::IsKeyPressed(OrgKeyCodes::RightControl);
+        bool bShift = Input::IsKeyPressed(OrgKeyCodes::LeftShift) || Input::IsKeyPressed(OrgKeyCodes::RightShift);
 
         auto keyCode = e.GetKeyCode();
-        switch (keyCode)
+        switch (OrgKeyCodes(keyCode))
         {
-            case ORG_KEY_N:
+            case OrgKeyCodes::N:
             {
                 if (bControl)
                 {
@@ -290,15 +294,14 @@ namespace Orange
                 }
                 break;
             }
-            case ORG_KEY_O:
+            case OrgKeyCodes::O:
             {
                 if (bControl)
                 {
                     OpenScene();
                 }
                 break;
-            }
-            case ORG_KEY_S:
+            case OrgKeyCodes::S:
             {
                 if (bControl && bShift)
                 {
@@ -306,7 +309,7 @@ namespace Orange
                 }
                 break;
             }
-            case ORG_KEY_Q:
+            case OrgKeyCodes::Q:
             {
                 if (bControl)
                 {
@@ -314,7 +317,7 @@ namespace Orange
                 }
                 break;
             }
-            case ORG_KEY_W:
+            case OrgKeyCodes::W:
             {
                 if (bControl)
                 {
@@ -322,7 +325,7 @@ namespace Orange
                 }
                 break;
             }
-            case ORG_KEY_E:
+            case OrgKeyCodes::E:
             {
                 if (bControl)
                 {
@@ -330,7 +333,7 @@ namespace Orange
                 }
                 break;
             }
-            case ORG_KEY_R:
+            case OrgKeyCodes::R:
             {
                 if (bControl)
                 {
@@ -340,6 +343,7 @@ namespace Orange
             }
             default:
                 break;
+            }
         }
     }
 

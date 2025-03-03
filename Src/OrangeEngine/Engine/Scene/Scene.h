@@ -7,6 +7,7 @@
 namespace Orange
 {
    class Entity;
+   class EditorCamera;
    class ORANGE_API Scene : public std::enable_shared_from_this<Scene>
    {
    public:
@@ -18,8 +19,9 @@ namespace Orange
 
       entt::registry& GetRegistry() { return mRegistry; }
 
-      void OnUpdate(Timestep ts);
-
+      void OnUpdateRuntime(Timestep ts);
+      void OnUpdateEditor(Timestep ts, const Ref<EditorCamera>& camera);
+      
       void OnViewportResize(uint32_t width, uint32_t height);
 
       Entity GetPrimaryCameraEntity();

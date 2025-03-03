@@ -12,10 +12,10 @@ namespace Orange
       virtual ~Camera() = default;
       Camera(const glm::mat4& projectionMatrix = glm::mat4(1.0f));
 
-      const glm::mat4& GetProjectionMatrix() const { return mProjectionMatrix; }
+      const glm::mat4& GetProjectionMatrix() const { return mProjection; }
 
    protected:
-      glm::mat4 mProjectionMatrix;
+      glm::mat4 mProjection;
    };
 }
 

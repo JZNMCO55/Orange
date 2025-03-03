@@ -116,7 +116,7 @@ namespace Orange
         {
         case ProjectionType::Perspective:
         {
-            mProjectionMatrix = glm::perspective(mPerspectiveFOV, mAspectRatio, mPerspectiveNear, mPerspectiveFar);
+            mProjection = glm::perspective(mPerspectiveFOV, mAspectRatio, mPerspectiveNear, mPerspectiveFar);
         }
             break;
         case ProjectionType::Orthographic:
@@ -126,7 +126,7 @@ namespace Orange
             float orthoBottom = -mOrthographicSize * 0.5f;
             float orthoTop = mOrthographicSize * 0.5f;
 
-            mProjectionMatrix = glm::ortho(orthoLeft, orthoRight, orthoBottom, orthoTop, mOrthographicNear, mOrthographicFar);
+            mProjection = glm::ortho(orthoLeft, orthoRight, orthoBottom, orthoTop, mOrthographicNear, mOrthographicFar);
         }
             break;
         default:
