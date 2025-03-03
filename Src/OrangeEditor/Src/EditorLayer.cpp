@@ -57,6 +57,7 @@ namespace Orange
         Orange::FrameBufferSpecification fbSpec;
         fbSpec.width = 1280;
         fbSpec.height = 720;
+        fbSpec.attachment = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::Depth };
         mpFrameBuffer = Orange::FrameBuffer::Create(fbSpec);
 
         mpActiveScene = CreateRef<Scene>();
