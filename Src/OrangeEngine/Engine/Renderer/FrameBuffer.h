@@ -12,6 +12,8 @@ namespace Orange
         // Color
         RGBA8,
 
+        RED_INTEGER,
+
         // Depth/stencil
         DEPTH24STENCIL8,
 
@@ -58,6 +60,8 @@ namespace Orange
         virtual const uint32_t GetColorAttachmentRendererID(uint32_t index = 0) const = 0;
 
         virtual const FrameBufferSpecification& GetSpecification() const = 0;
+
+        virtual int ReadPixel(uint32_t attachmentIndex, int x, int y) const = 0;
 
         static Ref<FrameBuffer> Create(const FrameBufferSpecification& spec);
     };

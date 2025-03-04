@@ -20,6 +20,7 @@ namespace Orange
         virtual void Resize(uint32_t width, uint32_t height) override;
 
         virtual const uint32_t GetColorAttachmentRendererID(uint32_t index = 0) const override;
+        virtual int ReadPixel(uint32_t attachmentIndex, int x, int y) const override;
 
         virtual const FrameBufferSpecification& GetSpecification() const override { return mSpecification; }
 

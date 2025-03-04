@@ -21,16 +21,16 @@ namespace Orange
             glBindTexture(TextureTarget(multisampled), id);
         }
 
-        static void AttachColorTexture(uint32_t id, int samples, GLenum format, uint32_t width, uint32_t height, int index)
+        static void AttachColorTexture(uint32_t id, int samples, GLenum internalFormat, GLenum format, uint32_t width, uint32_t height, int index)
         {
             bool multisampled = samples > 1;
             if (multisampled)
             {
-                glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, format, width, height, GL_FALSE);
+                glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, internalFormat, width, height, GL_FALSE);
             }
             else
             {
-                glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+                glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, GL_UNSIGNED_BYTE, nullptr);
 
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -133,7 +133,10 @@ namespace Orange
                 switch (mColorAttachmentSpecifications[i].TextureFormat)
                 {
                 case FramebufferTextureFormat::RGBA8:
-                    Utils::AttachColorTexture(mColorAttachment[i], mSpecification.samples, GL_RGBA8, mSpecification.width, mSpecification.height, i);
+                    Utils::AttachColorTexture(mColorAttachment[i], mSpecification.samples, GL_RGBA8, GL_RGBA, mSpecification.width, mSpecification.height, i);
+                    break;
+                case FramebufferTextureFormat::RED_INTEGER:
+                    Utils::AttachColorTexture(mColorAttachment[i], mSpecification.samples, GL_R32I, GL_RED_INTEGER, mSpecification.width, mSpecification.height, i);
                     break;
                 }
             }
@@ -174,6 +177,7 @@ namespace Orange
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
+    // note : avoid calling this function frequently, it is expensive
     void OpenGLFrameBuffer::Resize(uint32_t width, uint32_t height)
     {
         if (width == 0 || height == 0 || width > sMaxFramebufferSize || height > sMaxFramebufferSize)
@@ -192,5 +196,14 @@ namespace Orange
         return mColorAttachment[index];
     }
 
+    int OpenGLFrameBuffer::ReadPixel(uint32_t attachmentIndex, int x, int y) const
+    {
+        ORANGE_CORE_ASSERT(attachmentIndex < mColorAttachment.size(), "Index {0} is out of range", attachmentIndex);
+
+        glReadBuffer(GL_COLOR_ATTACHMENT0 + attachmentIndex);
+        int pixelData;
+        glReadPixels(x, y, 1, 1, GL_RED_INTEGER, GL_INT, &pixelData);
+        return pixelData;
+    }
 
 }

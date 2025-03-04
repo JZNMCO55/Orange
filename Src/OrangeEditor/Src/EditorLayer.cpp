@@ -57,7 +57,7 @@ namespace Orange
         Orange::FrameBufferSpecification fbSpec;
         fbSpec.width = 1280;
         fbSpec.height = 720;
-        fbSpec.attachment = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::Depth };
+        fbSpec.attachment = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::RED_INTEGER, FramebufferTextureFormat::Depth };
         mpFrameBuffer = Orange::FrameBuffer::Create(fbSpec);
 
         mpActiveScene = CreateRef<Scene>();
@@ -106,6 +106,20 @@ namespace Orange
 
             mpActiveScene->OnUpdateEditor(ts, mpEditorCamera);
             //mpActiveScene->OnUpdateRuntime(ts);
+        }
+
+        auto [mx, my] = ImGui::GetMousePos();
+        mx -= mViewportBounds[0].x;
+        my -= mViewportBounds[0].y;
+        glm::vec2 viewportSize = mViewportBounds[1] - mViewportBounds[0];
+        my = viewportSize.y - my;
+        int mouseX = (int)mx;
+        int mouseY = (int)my;
+
+        if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSize.x && mouseY < (int)viewportSize.y)
+        {
+            int pixelData = mpFrameBuffer->ReadPixel(1, mouseX, mouseY);
+            ORANGE_LOG_WARN("Pixel data = {0}", pixelData);
         }
 
         mpFrameBuffer->Unbind();
@@ -203,6 +217,8 @@ namespace Orange
         ImGui::End();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ 0, 0 });
         ImGui::Begin("Viewport");
+        auto viewportOffset = ImGui::GetCursorPos();
+
         mViewportFocused = ImGui::IsWindowFocused();
         mViewportHovered = ImGui::IsWindowHovered();
 
@@ -212,6 +228,15 @@ namespace Orange
     
         uint32_t textureID = mpFrameBuffer->GetColorAttachmentRendererID();
         ImGui::Image(textureID, ImVec2{ mViewportSize.x, mViewportSize.y }, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+
+        auto windowSize = ImGui::GetWindowSize();
+        ImVec2 minBound = ImGui::GetWindowPos();
+        minBound.x += viewportOffset.x;
+        minBound.y += viewportOffset.y;
+
+        ImVec2 maxBound = { minBound.x + windowSize.x, minBound.y + windowSize.y };
+        mViewportBounds[0] = { minBound.x, minBound.y };
+        mViewportBounds[1] = { maxBound.x, maxBound.y };
 
         // Gizmos
         Entity selectedEntity = mSceneHierachyPanel.GetSelectedEntity();
