@@ -41,6 +41,8 @@ namespace Orange
 
         Ref<Texture2D> mpCheckerboardTexture;
 
+        Entity mHoveredEntity;
+
         bool mViewportFocused = false;
         bool mViewportHovered = false;
         glm::vec2 mViewportSize = { 0.0f, 0.0f };

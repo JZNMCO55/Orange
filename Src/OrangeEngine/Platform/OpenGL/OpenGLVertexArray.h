@@ -21,6 +21,7 @@ namespace Orange
         virtual const std::shared_ptr<IndexBuffer>& GetIndexBuffer() const { return mpIndexBuffer; }
     private:
         uint32_t mRendererID;
+        uint32_t mVertexBufferIndex = 0;
         std::vector<std::shared_ptr<VertexBuffer>> mpVertexBuffers;
         std::shared_ptr<IndexBuffer> mpIndexBuffer;
     };

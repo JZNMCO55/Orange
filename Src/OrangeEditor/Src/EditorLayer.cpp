@@ -114,7 +114,7 @@ namespace Orange
         auto [mx, my] = ImGui::GetMousePos();
         mx -= mViewportBounds[0].x;
         my -= mViewportBounds[0].y;
-        glm::vec2 viewportSize = mViewportBounds[1] - mViewportBounds[0];
+        glm::vec2 viewportSize = mViewportSize;
         my = viewportSize.y - my;
         int mouseX = (int)mx;
         int mouseY = (int)my;
@@ -122,7 +122,14 @@ namespace Orange
         if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSize.x && mouseY < (int)viewportSize.y)
         {
             int pixelData = mpFrameBuffer->ReadPixel(1, mouseX, mouseY);
-            ORANGE_LOG_WARN("Pixel data = {0}", pixelData);
+            if (pixelData != -1)
+            {
+                mHoveredEntity = Entity((entt::entity)pixelData, mpActiveScene);
+            }
+            else
+            {
+                mHoveredEntity = Entity();
+            }
         }
 
         mpFrameBuffer->Unbind();
@@ -210,6 +217,12 @@ namespace Orange
         mSceneHierachyPanel.OnImGuiRender();
 
         ImGui::Begin("Statuts");
+        std::string name = "None";
+        if (mHoveredEntity)
+        {
+            name = mHoveredEntity.GetComponent<TagComponent>().Tag;
+        }
+        ImGui::Text("Hovered Entity: %s", name.c_str());
         auto stats = Orange::Renderer2D::GetStats();
         ImGui::Text("Renderer2D Stats:");
         ImGui::Text("Draw Calls: %d", stats.DrawCalls);

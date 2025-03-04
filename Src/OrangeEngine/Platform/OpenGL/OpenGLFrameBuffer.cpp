@@ -83,7 +83,7 @@ namespace Orange
                 }
                 case FramebufferTextureFormat::RED_INTEGER:    
                 {
-                    return GL_R32I;
+                    return GL_RED_INTEGER;;
                 }
                 case FramebufferTextureFormat::DEPTH24STENCIL8: 
                 {

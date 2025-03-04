@@ -20,7 +20,7 @@ namespace Orange
         case EShaderDataType::Bool:     return GL_BOOL;
         }
 
-        ORANGE_CORE_ASSERT(false, "Unknown ShaderDataType!");
+        ORANGE_CORE_ASSERT(false, "Unknown EShaderDataType!");
         return 0;
     }
 
@@ -67,14 +67,59 @@ namespace Orange
         const auto& layout = tpVertexBuffer->GetLayout();
         for (const auto& element : layout)
         {
-            glEnableVertexAttribArray(index);
-            glVertexAttribPointer(index,
-                element.GetComponentCount(),
-                ShaderDataTypeToOpenGLBaseType(element.Type),
-                GL_FALSE,
-                layout.GetStride(),
-                (const void*)element.Offset);
-            index++;
+            switch (element.Type)
+            {
+            case EShaderDataType::Float:
+            case EShaderDataType::Float2:
+            case EShaderDataType::Float3:
+            case EShaderDataType::Float4:
+            {
+                glEnableVertexAttribArray(mVertexBufferIndex);
+                glVertexAttribPointer(mVertexBufferIndex,
+                    element.GetComponentCount(),
+                    ShaderDataTypeToOpenGLBaseType(element.Type),
+                    element.Normalized ? GL_TRUE : GL_FALSE,
+                    layout.GetStride(),
+                    (const void*)element.Offset);
+                mVertexBufferIndex++;
+                break;
+            }
+            case EShaderDataType::Int:
+            case EShaderDataType::Int2:
+            case EShaderDataType::Int3:
+            case EShaderDataType::Int4:
+            case EShaderDataType::Bool:
+            {
+                glEnableVertexAttribArray(mVertexBufferIndex);
+                glVertexAttribIPointer(mVertexBufferIndex,
+                    element.GetComponentCount(),
+                    ShaderDataTypeToOpenGLBaseType(element.Type),
+                    layout.GetStride(),
+                    (const void*)element.Offset);
+                mVertexBufferIndex++;
+                break;
+            }
+            case EShaderDataType::Mat3:
+            case EShaderDataType::Mat4:
+            {
+                uint8_t count = element.GetComponentCount();
+                for (uint8_t i = 0; i < count; i++)
+                {
+                    glEnableVertexAttribArray(mVertexBufferIndex);
+                    glVertexAttribPointer(mVertexBufferIndex,
+                        count,
+                        ShaderDataTypeToOpenGLBaseType(element.Type),
+                        element.Normalized ? GL_TRUE : GL_FALSE,
+                        layout.GetStride(),
+                        (const void*)(element.Offset + sizeof(float) * count * i));
+                    glVertexAttribDivisor(mVertexBufferIndex, 1);
+                    mVertexBufferIndex++;
+                }
+                break;
+            }
+            default:
+                ORANGE_CORE_ASSERT(false, "Unknown EShaderDataType!");
+            }
         }
 
         mpVertexBuffers.push_back(tpVertexBuffer);

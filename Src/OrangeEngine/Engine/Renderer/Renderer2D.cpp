@@ -3,11 +3,12 @@
 #include "VertexArray.h"
 #include "Shader.h"
 #include "RenderCommand.h"
-#include "Renderer2D.h"
 #include "Texture.h"
 #include "Camera.h"
 #include "EditorCamera.h"
 #include "OpenGL/OpenGLShader.h"
+#include "Scene/Components.h"
+#include "Renderer2D.h"
 
 namespace Orange
 {
@@ -19,6 +20,8 @@ namespace Orange
 
         float mTexIndex;
         float mTilingFactor;
+
+        int mEntityID;
     };
 
     struct Renderer2DData
@@ -61,7 +64,8 @@ namespace Orange
             {EShaderDataType::Float4, "a_Color"},
             {EShaderDataType::Float2, "a_TexCoord"},
             {EShaderDataType::Float, "a_TexIndex"},
-            {EShaderDataType::Float, "a_TilingFactor"}
+            {EShaderDataType::Float, "a_TilingFactor"},
+            {EShaderDataType::Int, "a_EntityID"}
             });
         
         sData.mpQuadVertexArray->AddVertexBuffer(sData.mpQuadVertexBuffer);
@@ -174,6 +178,7 @@ namespace Orange
         sData.Stats.DrawCalls++;
     }
 
+
     void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const glm::vec4& color)
     {
         DrawQuad({ position.x, position.y, 0.0f }, size, color);
@@ -239,7 +244,7 @@ namespace Orange
 #endif // Old_Renderer
     }
 
-    void Renderer2D::DrawQuad(const glm::mat4& transform, const glm::vec4& color)
+    void Renderer2D::DrawQuad(const glm::mat4& transform, const glm::vec4& color, int entityId)
     {
         ORG_PROFILE_FUNCTION();
 
@@ -248,7 +253,7 @@ namespace Orange
         const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
 
 
-        CreateQuad(transform, color, textureIndex, tilingFactor, textureCoords);
+        CreateQuad(transform, color, textureIndex, tilingFactor, textureCoords, entityId);
     }
     
 
@@ -303,10 +308,17 @@ namespace Orange
             glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
 
         CreateQuad(transform, tintColor, textureIndex, tilingFactor, textureCoords);
-    } 
+    }
+    void Renderer2D::DrawSprite(const glm::mat4& transform, SpriteRendererComponent& spriteRendererComponent, int entityId)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        DrawQuad(transform, spriteRendererComponent.Color, entityId);
+    }
+
 
     void Renderer2D::CreateQuad(const glm::vec3& position, const glm::vec2& size, 
-        const glm::vec4& color, float textureIndex, float tilingFactor)
+        const glm::vec4& color, float textureIndex, float tilingFactor, int entityId)
     {
         ORG_PROFILE_FUNCTION();
 
@@ -323,6 +335,7 @@ namespace Orange
           sData.QuadVertexBufferPtr->mTexCoord = textureCoords[i];
           sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
           sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
+          sData.QuadVertexBufferPtr->mEntityID = entityId;
           sData.QuadVertexBufferPtr++;
         }
         sData.QuadIndexCount += 6;
@@ -398,7 +411,8 @@ namespace Orange
         sData.Stats.QuadCount++;
     }
 
-    void Renderer2D::CreateQuad(const glm::mat4& transform, const glm::vec4& color, float textureIndex, float tilingFactor, const glm::vec2 textureCoords[])
+    void Renderer2D::CreateQuad(const glm::mat4& transform, const glm::vec4& color, float textureIndex, 
+        float tilingFactor, const glm::vec2 textureCoords[], int entityId)
     {
       ORG_PROFILE_FUNCTION();
       
@@ -415,6 +429,7 @@ namespace Orange
         sData.QuadVertexBufferPtr->mTexCoord = textureCoords[i];
         sData.QuadVertexBufferPtr->mTexIndex = textureIndex;
         sData.QuadVertexBufferPtr->mTilingFactor = tilingFactor;
+        sData.QuadVertexBufferPtr->mEntityID = entityId;
         sData.QuadVertexBufferPtr++;
       }
       sData.QuadIndexCount += 6;

@@ -9,6 +9,8 @@ namespace Orange
     class EditorCamera;
     class Texture2D;
     class Camera;
+
+    struct SpriteRendererComponent;
     class ORANGE_API Renderer2D
     {
     public:
@@ -45,7 +47,7 @@ namespace Orange
         static void DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<Texture2D>& texture,
             float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f));
 
-        static void DrawQuad(const glm::mat4& transform, const glm::vec4& color);
+        static void DrawQuad(const glm::mat4& transform, const glm::vec4& color, int entityId = -1);
 
         //static void DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture,
         //    float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f)); 
@@ -61,6 +63,8 @@ namespace Orange
         static void DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
             const Ref<Texture2D>& texture, float tilingFactor = 1.0f, const glm::vec4& tintColor = glm::vec4(1.0f));
 
+        static void DrawSprite(const glm::mat4& transform, SpriteRendererComponent& spriteRendererComponent, int entityId = -1);
+
         static void ResetStats();
 
         static Statistics GetStats();
@@ -70,12 +74,12 @@ namespace Orange
 
         // ToDo: Combind all the draw functions into one function to reduce function calls and improve performance
         [[deprecated("Use Transform instead")]]
-        static void CreateQuad(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color,float textureIndex, float tilingFactor) ;
+        static void CreateQuad(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color,float textureIndex, float tilingFactor, int entityId = -1) ;
 
         [[deprecated("Use Transform instead")]]
           static void CreateRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const glm::vec4& color,float textureIndex, float tilingFactor);
 
-        static void CreateQuad(const glm::mat4& transform, const glm::vec4& color, float textureIndex, float tilingFactor, const glm::vec2 textureCoords[]);
+        static void CreateQuad(const glm::mat4& transform, const glm::vec4& color, float textureIndex, float tilingFactor, const glm::vec2 textureCoords[], int entityId = -1);
     };
 }
 
