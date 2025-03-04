@@ -62,6 +62,7 @@ namespace Orange
         virtual const FrameBufferSpecification& GetSpecification() const = 0;
 
         virtual int ReadPixel(uint32_t attachmentIndex, int x, int y) const = 0;
+        virtual void ClearAttachment(uint32_t attachmentIndex, int value) = 0;
 
         static Ref<FrameBuffer> Create(const FrameBufferSpecification& spec);
     };

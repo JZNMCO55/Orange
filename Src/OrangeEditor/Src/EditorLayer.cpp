@@ -104,6 +104,9 @@ namespace Orange
             Orange::RenderCommand::SetClearColor({ 0.2f, 0.3f, 0.3f, 1.0f });
             Orange::RenderCommand::Clear();
 
+            // clear the entity ID attachment to -1
+            mpFrameBuffer->ClearAttachment(1, -1);
+
             mpActiveScene->OnUpdateEditor(ts, mpEditorCamera);
             //mpActiveScene->OnUpdateRuntime(ts);
         }

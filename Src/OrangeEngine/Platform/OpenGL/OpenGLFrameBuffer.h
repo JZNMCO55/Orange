@@ -22,6 +22,8 @@ namespace Orange
         virtual const uint32_t GetColorAttachmentRendererID(uint32_t index = 0) const override;
         virtual int ReadPixel(uint32_t attachmentIndex, int x, int y) const override;
 
+        virtual void ClearAttachment(uint32_t attachmentIndex, int value) override;
+
         virtual const FrameBufferSpecification& GetSpecification() const override { return mSpecification; }
 
     private:

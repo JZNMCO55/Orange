@@ -73,6 +73,27 @@ namespace Orange
             return false;
         }
 
+        static GLenum OrangeFBTextureFormatToOpenGL(FramebufferTextureFormat format)
+        {
+            switch (format)
+            {
+                case FramebufferTextureFormat::RGBA8:
+                {
+                    return GL_RGBA8; 
+                }
+                case FramebufferTextureFormat::RED_INTEGER:    
+                {
+                    return GL_R32I;
+                }
+                case FramebufferTextureFormat::DEPTH24STENCIL8: 
+                {
+                    return GL_DEPTH24_STENCIL8; 
+                }
+            }
+
+            ORANGE_CORE_ASSERT(false, "FramebufferTextureFormat not supported");
+            return 0;
+        }
     }
 
     static const uint32_t sMaxFramebufferSize = 8192;
@@ -204,6 +225,15 @@ namespace Orange
         int pixelData;
         glReadPixels(x, y, 1, 1, GL_RED_INTEGER, GL_INT, &pixelData);
         return pixelData;
+    }
+
+    void OpenGLFrameBuffer::ClearAttachment(uint32_t attachmentIndex, int value)
+    {
+        ORANGE_CORE_ASSERT(attachmentIndex < mColorAttachment.size(), "Index {0} is out of range", attachmentIndex);
+
+        auto& spec = mColorAttachmentSpecifications[attachmentIndex];
+        glClearTexImage(mColorAttachment[attachmentIndex], 0,
+            Utils::OrangeFBTextureFormatToOpenGL(spec.TextureFormat), GL_INT, &value);
     }
 
 }
