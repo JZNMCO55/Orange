@@ -15,4 +15,20 @@
 #define ORG_MOUSE_BUTTON_RIGHT     ORG_MOUSE_BUTTON_2
 #define ORG_MOUSE_BUTTON_MIDDLE    ORG_MOUSE_BUTTON_3
 
+namespace Orange
+{
+    enum MouseButton
+    {
+        LeftButton = 0,
+        RightButton = 1,
+        MiddleButton = 2,
+        Button4 = 3,
+        Button5 = 4,
+        Button6 = 5,
+        Button7 = 6,
+        Button8 = 7,
+        LastButton = Button8
+    };
+}
+
 #endif // MOUSE_BUTTON_CODES_H

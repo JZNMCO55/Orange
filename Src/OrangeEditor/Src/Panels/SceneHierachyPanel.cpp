@@ -171,6 +171,11 @@ namespace Orange
         ImGui::End();
     }
 
+    void SceneHierachyPanel::SetSelectedEntity(Entity entity)
+    {
+        mSelectionContext = entity;
+    }
+
     void SceneHierachyPanel::DrawEntityNode(Entity entity)
     {
         auto& tag = entity.GetComponent<TagComponent>().Tag;
