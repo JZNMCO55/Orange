@@ -17,7 +17,8 @@ namespace Orange
         return spInstance;
     }
 
-    Application::Application(const std::string& name)
+    Application::Application(const std::string& name, ApplicationCommandLineArgs args)
+        : mCommandLineArgs(args)
     {
         ORG_PROFILE_FUNCTION();
 

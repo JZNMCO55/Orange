@@ -8,8 +8,8 @@ namespace Orange
     class OrangeEditor : public Application
     {
     public:
-        OrangeEditor()
-            : Application("Orange Editor")
+        OrangeEditor(ApplicationCommandLineArgs args)
+            : Application("Orange Editor", args)
         {
             auto tpLayer = CreateRef<EditorLayer>();
             PushLayer(tpLayer);
@@ -18,8 +18,8 @@ namespace Orange
         ~OrangeEditor() = default;
     };
 
-    Application* CreateApplication()
+    Application* CreateApplication(ApplicationCommandLineArgs args)
     {
-        return new OrangeEditor();
+        return new OrangeEditor(args);
     }
 }

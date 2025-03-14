@@ -11,5 +11,5 @@ endif()
 
 # 添加子目录
 add_subdirectory(Src/OrangeEngine)
-add_subdirectory(Src/Game)
+#add_subdirectory(Src/Game)
 add_subdirectory(Src/OrangeEditor)

@@ -1,3 +1,5 @@
 .vs/
 out/
 build/
+script/__pycache__/
+3rdParty/Vulkan/

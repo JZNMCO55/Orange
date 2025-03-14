@@ -54,13 +54,28 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 # 根据构建类型选择链接的库
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(3rdLibs yaml-cpp)
+    set(3rdLibs 
+        yaml-cpp
+        shaderc_shared
+        spirv-cross-core
+        spirv-cross-glsl
+        SPIRV-Tools
+    )
 else()
-    set(3rdLibs yaml-cppd)
+    set(3rdLibs 
+        yaml-cppd
+        shaderc_sharedd
+        spirv-cross-cored
+        spirv-cross-glsld
+        SPIRV-Toolsd
+        )
 endif()
 
 # 链接静态库
-target_link_directories(${PROJECT_NAME} PUBLIC ${THIRDPARTY_LIB_DIR})
+target_link_directories(${PROJECT_NAME} PUBLIC 
+                        ${THIRDPARTY_LIB_DIR}
+                        ${THIRDPARTY_LIB_DIR}/Vulkan
+                        )
 target_link_libraries(${PROJECT_NAME} PUBLIC
                         glfw3
                         glad

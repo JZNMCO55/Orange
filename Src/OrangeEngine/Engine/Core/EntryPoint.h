@@ -3,14 +3,15 @@
 
 #ifdef PLATFORM_WINDOWS
 
-extern Orange::Application* Orange::CreateApplication();
+#include "Application.h"
+extern Orange::Application* Orange::CreateApplication(ApplicationCommandLineArgs args);
 
 int main(int argc, char** argv)
 {
     Orange::Log::Init();
 
     ORG_PROFILE_BEGIN_SESSION("Startup", "OrangeProfile-Startup.json");
-    auto app = Orange::CreateApplication();
+    auto app = Orange::CreateApplication({ argc, argv });
     ORG_PROFILE_END_SESSION();
     ORG_PROFILE_BEGIN_SESSION("Runtime", "OrangeProfile-Runtime.json");
     app->Run();

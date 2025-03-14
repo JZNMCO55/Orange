@@ -11,6 +11,7 @@ namespace Orange
 
     void SceneCamera::SetViewportSize(uint32_t width, uint32_t height)
     {
+        ORANGE_CORE_ASSERT(width > 0 && height > 0, "Invalid viewport size");
         mAspectRatio = (float)width / (float)height;
         RecalculateProjection();
     }

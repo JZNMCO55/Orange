@@ -9,6 +9,7 @@
 #include "OpenGL/OpenGLShader.h"
 #include "Scene/Components.h"
 #include "Renderer2D.h"
+#include "UniformBuffer.h"
 
 namespace Orange
 {
@@ -48,6 +49,14 @@ namespace Orange
         glm::vec4 QuadVertexPositions[4];
 
         Renderer2D::Statistics Stats;
+
+        struct CameraData
+        {
+            glm::mat4 ViewProjectionMatrix;
+        };
+
+        CameraData CameraBuffer;
+        Ref<UniformBuffer> CameraUniformBuffer;
     };
 
     static Renderer2DData sData;
@@ -107,6 +116,8 @@ namespace Orange
         sData.QuadVertexPositions[1] = {  0.5f, -0.5f, 0.0f, 1.0f };
         sData.QuadVertexPositions[2] = {  0.5f,  0.5f, 0.0f, 1.0f };
         sData.QuadVertexPositions[3] = { -0.5f,  0.5f, 0.0f, 1.0f };
+
+        sData.CameraUniformBuffer = UniformBuffer::Create(sizeof(Renderer2DData::CameraData), 0);
     }
 
     void Renderer2D::Shutdown()
@@ -118,10 +129,8 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        glm::mat4 viewProj = camera->GetProjectionMatrix() * glm::inverse(transform);
-
-        sData.mpTextureShader->Bind();
-        sData.mpTextureShader->SetMat4("u_ViewProjection", viewProj);
+        sData.CameraBuffer.ViewProjectionMatrix = camera->GetProjectionMatrix() * glm::inverse(transform);
+        sData.CameraUniformBuffer->SetData(&sData.CameraBuffer, sizeof(Renderer2DData::CameraData));
 
         StartBatch();
     }
@@ -140,10 +149,8 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        glm::mat4 viewProj = camera->GetViewProjection();
-
-        sData.mpTextureShader->Bind();
-        sData.mpTextureShader->SetMat4("u_ViewProjection", viewProj);
+        sData.CameraBuffer.ViewProjectionMatrix = camera->GetProjectionMatrix();
+        sData.CameraUniformBuffer->SetData(&sData.CameraBuffer, sizeof(Renderer2DData::CameraData));
 
         StartBatch();
     }
@@ -174,6 +181,7 @@ namespace Orange
         {
             sData.TextureSlots[i]->Bind(i);
         }
+        sData.mpTextureShader->Bind();
         RenderCommand::DrawIndexed(sData.mpQuadVertexArray, sData.QuadIndexCount);
         sData.Stats.DrawCalls++;
     }

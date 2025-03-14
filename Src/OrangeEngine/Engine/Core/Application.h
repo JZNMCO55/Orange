@@ -17,10 +17,22 @@ namespace Orange
     class VertexArray;
     class OrthographicCamera;
 
+    struct ApplicationCommandLineArgs
+    {
+        int Count = 0;
+        char** Args = nullptr;
+
+        const char* operator[](int index) const
+        {
+            ORANGE_CORE_ASSERT(index < Count, "");
+            return Args[index];
+        }
+    };
+
     class ORANGE_API Application
     {
     public:
-        Application(const std::string& name = "Orange App");
+        Application(const std::string& name = "Orange App", ApplicationCommandLineArgs args = ApplicationCommandLineArgs());
         virtual ~Application();
 
         void Run();
@@ -36,6 +48,8 @@ namespace Orange
         void Close();
         
         static Application* GetInstance();
+
+        const ApplicationCommandLineArgs GetCommandLineArgs() const { return mCommandLineArgs; };
     protected:
 
     private:
@@ -46,6 +60,7 @@ namespace Orange
         Application& operator=(const Application&) = delete;
 
     private:
+        ApplicationCommandLineArgs mCommandLineArgs;
         LayerStack mLayerStack;
         std::unique_ptr<IWindow> mpWindow{ nullptr };
         Ref<ImGuiLayer> mpImGuiLayer{ nullptr };
@@ -57,7 +72,7 @@ namespace Orange
         static Application* spInstance;
     };
 
-    Application* CreateApplication();
+    Application* CreateApplication(ApplicationCommandLineArgs args);
 }
 
 #endif // APPLICATION_H

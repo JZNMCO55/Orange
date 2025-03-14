@@ -30,6 +30,14 @@ namespace Orange
 
         mpActiveScene = CreateRef<Scene>();
         
+        auto commandLineArgs = Application::GetInstance()->GetCommandLineArgs();
+        if (commandLineArgs.Count > 1)
+        {
+            auto sceneFilePath = commandLineArgs[1];
+            SceneSerializer serializer(mpActiveScene);
+            serializer.Deserialize(sceneFilePath);
+        }
+
         mpEditorCamera = CreateRef<EditorCamera>(30.0f, 1.778f, 0.1f, 1000.0f);
 
         mSceneHierachyPanel.SetContext(mpActiveScene);

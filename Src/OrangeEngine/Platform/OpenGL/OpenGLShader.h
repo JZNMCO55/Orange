@@ -2,6 +2,7 @@
 #define OPENGL_SHADER_H
 
 #include "OrangeExport.h"
+#include "OpenGLpch.h"
 #include "Renderer/Shader.h"
 
 namespace Orange
@@ -39,10 +40,22 @@ namespace Orange
         std::string ReadFile(const std::string& filepath);
         std::unordered_map<unsigned int, std::string> PreProcess(const std::string& source);
 
+        [[deprecated("Use VulkanShader instead")]]
         void Compile(const std::unordered_map<unsigned int, std::string>& shaderSources);
+
+        void CompileOrGetVulkanBinaries(const std::unordered_map<GLenum, std::string>& shaderSources);
+        void CompileOrGetOpenGLBinaries();
+        void CreateProgram();
+        void Reflect(GLenum stage, const std::vector<uint32_t>& shaderBinary);
     private:
         uint32_t mRendererID;
+        std::string mFilePath;
         std::string mName;
+
+        std::unordered_map<GLenum, std::vector<uint32_t>> mVulkanSPIRV;
+        std::unordered_map<GLenum, std::vector<uint32_t>> mOpenGLSPIRV;
+
+        std::unordered_map<GLenum, std::string> mOpenGLSourceCode;
     };
 }
 

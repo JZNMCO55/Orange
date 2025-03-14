@@ -22,8 +22,8 @@ else:
 
 # 配置相关路径
 VULKAN_SDK = os.environ.get('VULKAN_SDK')
-VULKAN_SDK_INSTALLER_URL = 'https://sdk.lunarg.com/sdk/download/1.2.170.0/windows/vulkan_sdk.exe'
-Orange_VULKAN_VERSION = '1.2.170.0'
+VULKAN_SDK_INSTALLER_URL = 'https://sdk.lunarg.com/sdk/download/1.4.304.0/windows/vulkan_sdk.exe'
+Orange_VULKAN_VERSION = '1.4.304.0'
 # 将 Vulkan SDK 安装包放在 3rdParty/Vulkan 目录下
 VULKAN_SDK_EXE_PATH = os.path.join(vulkan_dir, "VulkanSDK.exe")
 
@@ -60,7 +60,7 @@ def CheckVulkanSDK():
     print(f"Correct Vulkan SDK located at {VULKAN_SDK}")
     return True
 
-VulkanSDKDebugLibsURL = 'https://files.lunarg.com/SDK-1.2.170.0/VulkanSDK-1.2.170.0-DebugLibs.zip'
+VulkanSDKDebugLibsURL = 'https://files.lunarg.com/SDK-1.4.304.0/VulkanSDK-1.4.304.0-DebugLibs.zip'
 
 def CheckVulkanSDKDebugLibs():
     shadercdLib = Path(os.path.join(OutputDirectory, "Lib", "shaderc_sharedd.lib"))
