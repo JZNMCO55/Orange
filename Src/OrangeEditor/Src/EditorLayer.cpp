@@ -191,6 +191,7 @@ namespace Orange
         }
 
         mSceneHierachyPanel.OnImGuiRender();
+        mContentBrowserPannel.OnImGuiRender();
 
         ImGui::Begin("Statuts");
         std::string name = "None";

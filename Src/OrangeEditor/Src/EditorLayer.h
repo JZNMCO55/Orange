@@ -4,6 +4,7 @@
 #include "OrangeExport.h"
 #include "Orange.h"
 #include "Panels/SceneHierachyPanel.h"
+#include "Panels/ContentBrowserPanel.h"
 
 namespace Orange
 {
@@ -52,7 +53,8 @@ namespace Orange
 
         int mGizmoType = -1;
 
-        SceneHierachyPanel mSceneHierachyPanel;;
+        SceneHierachyPanel mSceneHierachyPanel;
+        ContentBrowserPannel mContentBrowserPannel;
     };
 }
 
