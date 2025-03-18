@@ -10,6 +10,7 @@
 
 namespace Orange
 {
+    extern std::filesystem::path gAssetDirectory;
     EditorLayer::EditorLayer() : Layer("EditorLayer"),
         mCameraControler(1280.0f / 720.0)
     {
@@ -231,6 +232,15 @@ namespace Orange
         mViewportBounds[0] = { minBound.x, minBound.y };
         mViewportBounds[1] = { maxBound.x, maxBound.y };
 
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+            {
+                const wchar_t* path = (const wchar_t*)payload->Data;
+                OpenScene(gAssetDirectory / path);
+            }
+        }
+
         // Gizmos
         Entity selectedEntity = mSceneHierachyPanel.GetSelectedEntity();
         if (selectedEntity && mGizmoType != -1)
@@ -392,13 +402,18 @@ namespace Orange
 
         if(!filepath.empty())
         {
-            mpActiveScene = CreateRef<Scene>();
-            mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
-            mSceneHierachyPanel.SetContext(mpActiveScene);
-
-            SceneSerializer serializer(mpActiveScene);
-            serializer.Deserialize(filepath);
+            OpenScene(filepath);
         }
+    }
+
+    void EditorLayer::OpenScene(const std::filesystem::path& path)
+    {
+        mpActiveScene = CreateRef<Scene>();
+        mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
+        mSceneHierachyPanel.SetContext(mpActiveScene);
+
+        SceneSerializer serializer(mpActiveScene);
+        serializer.Deserialize(path.string());
     }
 
     void EditorLayer::SaveSceneAs()

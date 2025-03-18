@@ -4,10 +4,10 @@
 
 namespace Orange
 {
-    static std::filesystem::path sAssetDirectory = "../../Resource";
+    extern std::filesystem::path gAssetDirectory = "../../Resource";
 
     ContentBrowserPannel::ContentBrowserPannel()
-        : mCurrentDirectory(sAssetDirectory)
+        : mCurrentDirectory(gAssetDirectory)
     {
         mpFileIcon = Texture2D::Create(R"(../../Resource/Icons/FileIcon.png)");
         mpFolderIcon = Texture2D::Create(R"(../../Resource/Icons/FoldIcon.png)");
@@ -17,7 +17,7 @@ namespace Orange
     {
         ImGui::Begin("Content Browser");
 
-        if (mCurrentDirectory != std::filesystem::path(sAssetDirectory))
+        if (mCurrentDirectory != std::filesystem::path(gAssetDirectory))
         {
             if (ImGui::Button("<-"))
             {
@@ -41,12 +41,23 @@ namespace Orange
         for (auto& dirctoryEntry : std::filesystem::directory_iterator(mCurrentDirectory))
         {
             const auto& path = dirctoryEntry.path();
-            auto relativPath = std::filesystem::relative(path, sAssetDirectory);
+            auto relativPath = std::filesystem::relative(path, gAssetDirectory);
             std::string fileName = relativPath.filename().string();
 
+            ImGui::PushID(fileName.c_str());
             Ref<Texture2D> tpIcon = dirctoryEntry.is_directory()? mpFolderIcon : mpFileIcon;
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
             ImGui::ImageButton(fileName.c_str(), (ImTextureID)tpIcon->GetRendererID(),
                 { thumbnailSize, thumbnailSize }, { 0, 1 }, { 1, 0 });
+            
+            if (ImGui::BeginDragDropSource())
+            {
+                const wchar_t* itemPath = relativPath.c_str();
+                ImGui::SetDragDropPayload("CONTENT_BROWSER_ITEM", itemPath, (wcslen(itemPath) + 1) * sizeof(wchar_t));
+                ImGui::EndDragDropSource();
+            }
+
+            ImGui::PopStyleColor();
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 if (dirctoryEntry.is_directory())
@@ -57,6 +68,7 @@ namespace Orange
             ImGui::TextWrapped(fileName.c_str());
 
             ImGui::NextColumn();
+            ImGui::PopID();
         }
 
         ImGui::Columns(1);
