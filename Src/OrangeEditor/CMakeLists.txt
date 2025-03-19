@@ -33,5 +33,12 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 target_link_directories(${PROJECT_NAME} PUBLIC ${ORANGEENGINE_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PUBLIC OrangeEngine)
 
+# 添加自定义命令以复制资源文件
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${RESOURCE_SOURCE_DIR} ${RESOURCE_OUTPUT_DIR}
+)
+
 # 将 Game 设置为 Visual Studio 启动项目
 set_target_properties(${PROJECT_NAME} PROPERTIES VS_STARTUP_PROJECT YES)

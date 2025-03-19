@@ -8,6 +8,7 @@
 
 namespace Orange
 {
+    extern std::filesystem::path gAssetDirectory;
     static void DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 100.0f)
     {
         ImGuiIO& io = ImGui::GetIO();
@@ -346,6 +347,18 @@ namespace Orange
         DrawComponent<SpriteRendererComponent>("Sprite Renderer", entity, [](auto& spriteRendererComponent)
             {
                 ImGui::ColorEdit4("Color", glm::value_ptr(spriteRendererComponent.Color));
+                
+                ImGui::Button("Texture", ImVec2(100.0f, 0.0f));
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+                    {
+                        const wchar_t* path = (const wchar_t*)payload->Data;
+                        std::filesystem::path texturePath = std::filesystem::path(gAssetDirectory) / path;
+
+                        spriteRendererComponent.Texture = Texture2D::Create(texturePath.string());
+                    }
+                }
             });
         
         

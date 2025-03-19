@@ -149,7 +149,7 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        sData.CameraBuffer.ViewProjectionMatrix = camera->GetProjectionMatrix();
+        sData.CameraBuffer.ViewProjectionMatrix = camera->GetViewProjection();
         sData.CameraUniformBuffer->SetData(&sData.CameraBuffer, sizeof(Renderer2DData::CameraData));
 
         StartBatch();
@@ -210,10 +210,12 @@ namespace Orange
 
     void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
     {
-        DrawQuad({ position.x, position.y, 0.0f }, size, texture, tilingFactor, tintColor);
+        auto transform = glm::translate(glm::mat4(1.0f), { position.x, position.y, 0.0f }) * 
+            glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
+        DrawQuad(transform, texture, tilingFactor, tintColor);
     }
 
-    void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
+    void Renderer2D::DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
     {
         float textureIndex = 0.0f;
         for (uint32_t i = 1; i < sData.TextureSlotIndex; i++)
@@ -233,8 +235,6 @@ namespace Orange
         }
 
         const glm::vec2 textureCoords[] = { {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f} };
-        glm::mat4 transform = glm::translate(glm::mat4(1.0f), position) *
-            glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
 
         CreateQuad(transform, tintColor, textureIndex, tilingFactor, textureCoords);
         // Old Renderer
@@ -320,7 +320,11 @@ namespace Orange
     void Renderer2D::DrawSprite(const glm::mat4& transform, SpriteRendererComponent& spriteRendererComponent, int entityId)
     {
         ORG_PROFILE_FUNCTION();
-
+        if (spriteRendererComponent.Texture)
+        {
+            DrawQuad(transform, spriteRendererComponent.Texture,
+                spriteRendererComponent.TilingFactor, spriteRendererComponent.Color);
+        }
         DrawQuad(transform, spriteRendererComponent.Color, entityId);
     }
 
