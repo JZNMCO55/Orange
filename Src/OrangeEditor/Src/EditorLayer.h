@@ -10,6 +10,11 @@ namespace Orange
 {
     class ORANGE_API EditorLayer : public Layer
     {
+    private:
+        enum class SceneState
+        {
+            Edit = 0, Play = 1
+        };
     public:
         EditorLayer();
         virtual ~EditorLayer() = default;
@@ -28,6 +33,12 @@ namespace Orange
         void OpenScene();
         void OpenScene(const std::filesystem::path& path);
         void SaveSceneAs();
+
+        void OnScenePlay();
+        void OnSceneStop();
+
+        // UI Panels
+        void UIToolbar();
 
     private:
         OrthographicCameraControler mCameraControler;
@@ -56,6 +67,12 @@ namespace Orange
 
         SceneHierachyPanel mSceneHierachyPanel;
         ContentBrowserPannel mContentBrowserPannel;
+
+        SceneState mSceneState = SceneState::Edit;
+
+        // Editor Resources
+        Ref<Texture2D> mpIconPlay{ nullptr };
+        Ref<Texture2D> mpIconStop{ nullptr };
     };
 }
 

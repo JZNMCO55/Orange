@@ -22,6 +22,8 @@ namespace Orange
         ORG_PROFILE_FUNCTION();
 
         mpCheckerboardTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
+        mpIconPlay = Orange::Texture2D::Create(R"(..\..\Resource\Icons\PlayButton.png)");
+        mpIconStop = Orange::Texture2D::Create(R"(..\..\Resource\Icons\StopButton.png)");
 
         Orange::FrameBufferSpecification fbSpec;
         fbSpec.width = 1280;
@@ -83,6 +85,28 @@ namespace Orange
 
             // clear the entity ID attachment to -1
             mpFrameBuffer->ClearAttachment(1, -1);
+
+            switch (mSceneState)
+            {
+            case SceneState::Edit:
+            {
+                if (mViewportFocused)
+                {
+                    mCameraControler.OnUpdate(ts);
+                }
+
+                mpEditorCamera->OnUpdate(ts);
+                mpActiveScene->OnUpdateEditor(ts, mpEditorCamera);
+                break;
+            }
+            case SceneState::Play:
+            {
+                mpActiveScene->OnUpdateRuntime(ts);
+                break;
+            }
+            default:
+                break;
+            }
 
             mpActiveScene->OnUpdateEditor(ts, mpEditorCamera);
             //mpActiveScene->OnUpdateRuntime(ts);
@@ -289,6 +313,9 @@ namespace Orange
 
         ImGui::End();
         ImGui::PopStyleVar();
+
+        UIToolbar();
+
         ImGui::End();
     }
 
@@ -431,4 +458,48 @@ namespace Orange
             serializer.Serialize(filepath);
         }
     }
+
+    void EditorLayer::OnScenePlay()
+    {
+        mSceneState = SceneState::Play;
+    }
+
+    void EditorLayer::OnSceneStop()
+    {
+        mSceneState = SceneState::Edit;
+    }
+
+    void EditorLayer::UIToolbar()
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 2));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        auto& colors = ImGui::GetStyle().Colors;
+        const auto& buttonHovered = colors[ImGuiCol_ButtonHovered];
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(buttonHovered.x, buttonHovered.y, buttonHovered.z, 0.5f));
+        const auto& buttonActive = colors[ImGuiCol_ButtonActive];
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(buttonActive.x, buttonActive.y, buttonActive.z, 0.5f));
+
+        ImGui::Begin("##toolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        float size = ImGui::GetWindowHeight() - 4.0f;
+        Ref<Texture2D> icon = mSceneState == SceneState::Edit ? mpIconPlay : mpIconStop;
+        std::string buttonName = mSceneState == SceneState::Edit ? "Play" : "Stop";
+        ImGui::SetCursorPosX((ImGui::GetWindowContentRegionMax().x * 0.5f) - (size * 0.5f));
+        if (ImGui::ImageButton(buttonName.c_str(),(ImTextureID)icon->GetRendererID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1)))
+        {
+            if (mSceneState == SceneState::Edit)
+            {
+                OnScenePlay();
+            }
+            else if (mSceneState == SceneState::Play)
+            {
+                OnSceneStop();
+            }
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(3);
+        ImGui::End();
+    }
+
 }
