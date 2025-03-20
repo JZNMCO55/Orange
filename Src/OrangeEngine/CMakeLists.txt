@@ -60,6 +60,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         spirv-cross-core
         spirv-cross-glsl
         SPIRV-Tools
+        box2d
     )
 else()
     set(3rdLibs 
@@ -68,6 +69,7 @@ else()
         spirv-cross-cored
         spirv-cross-glsld
         SPIRV-Toolsd
+        box2dd
         )
 endif()
 
