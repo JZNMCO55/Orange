@@ -16,7 +16,7 @@ namespace Orange
             case Rigidbody2DComponent::BodyType::Static:    return b2_staticBody;
             case Rigidbody2DComponent::BodyType::Dynamic:   return b2_dynamicBody;
             case Rigidbody2DComponent::BodyType::Kinematic: return b2_kinematicBody;
-            default:
+            default:break;
         }
 
         ORANGE_CORE_ASSERT(false, "Unknow body type");
@@ -64,6 +64,29 @@ namespace Orange
            bodyDef.type = Rigibody2DTypeToBox2DBody(rb2d.Type);
            bodyDef.position = { transform.Translation.x, transform.Translation.y };
            bodyDef.rotation = b2MakeRot(transform.Rotation.z);
+
+           auto bodyId = b2CreateBody(mPhysicsWorldId, &bodyDef);
+           b2Body_SetFixedRotation(bodyId, rb2d.FixedRotation);
+           rb2d.index1 = bodyId.index1;
+           rb2d.world0 = bodyId.world0;
+           rb2d.generation = bodyId.generation;
+
+           if (entity.HasComponent<BoxCollider2DComponent>())
+           {
+               auto& bc2d = entity.GetComponent<BoxCollider2DComponent>();
+
+               // 创建多边形形状
+               b2Polygon box = b2MakeBox(bc2d.Size.x * transform.Scale.x, bc2d.Size.y * transform.Scale.y);
+
+               // 定义形状属性
+               b2ShapeDef shapeDef = b2DefaultShapeDef();
+               shapeDef.density = bc2d.Density;
+               shapeDef.friction = bc2d.Friction;
+               shapeDef.restitution = bc2d.Restitution;
+
+               // 创建形状并附加到刚体
+               b2ShapeId shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &box);
+           }
        }
    }
 
@@ -89,6 +112,37 @@ namespace Orange
                 nsc.Instance->OnUpdate(ts);
             });
           }
+
+        // Physics
+        {
+            const float timeStep = ts; // 时间步长
+            const int32_t subStepCount = 4; // 子步数，推荐值为 4
+            b2World_Step(mPhysicsWorldId, timeStep, subStepCount);
+
+            // 从 Box2D 中获取变换信息
+            auto view = mRegistry.view<Rigidbody2DComponent>();
+            for (auto e : view)
+            {
+                Entity entity = { e, shared_from_this()};
+                auto& transform = entity.GetComponent<TransformComponent>();
+                auto& rb2d = entity.GetComponent<Rigidbody2DComponent>();
+
+                // 获取刚体的 ID
+                b2BodyId bodyId;
+                bodyId.generation = rb2d.generation;
+                bodyId.index1 = rb2d.index1;
+                bodyId.world0 = rb2d.world0;
+
+                // 获取刚体的位置和角度
+                b2Vec2 position = b2Body_GetPosition(bodyId);
+                b2Rot rotation = b2Body_GetRotation(bodyId);
+
+                // 更新实体的变换信息
+                transform.Translation.x = position.x;
+                transform.Translation.y = position.y;
+                transform.Rotation.z = b2Rot_GetAngle(rotation);
+            }
+        }
         // Render 2D
         Ref<Camera> mainCamera = nullptr;
         glm::mat4 cameraTransform;
@@ -200,6 +254,16 @@ namespace Orange
    void Scene::OnComponentAdded<NativeScriptComponent>(Entity entity, NativeScriptComponent& component)
    {
        // Do nothing for now
+   }
+
+   template<>
+   void Scene::OnComponentAdded<Rigidbody2DComponent>(Entity entity, Rigidbody2DComponent& component)
+   {
+   }
+
+   template<>
+   void Scene::OnComponentAdded<BoxCollider2DComponent>(Entity entity, BoxCollider2DComponent& component)
+   {
    }
 
 }

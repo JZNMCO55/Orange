@@ -462,11 +462,13 @@ namespace Orange
     void EditorLayer::OnScenePlay()
     {
         mSceneState = SceneState::Play;
+        mpActiveScene->OnRuntimeStart();
     }
 
     void EditorLayer::OnSceneStop()
     {
         mSceneState = SceneState::Edit;
+        mpActiveScene->OnRuntimeStop();
     }
 
     void EditorLayer::UIToolbar()

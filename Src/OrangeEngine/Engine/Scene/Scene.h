@@ -4,8 +4,6 @@
 #include "OrangeExport.h"
 #include "Timestep.h"
 
-class b2WorldId;
-
 namespace Orange
 {
    class Entity;
@@ -37,8 +35,6 @@ namespace Orange
       entt::registry mRegistry;
       uint32_t mViewportWidth = 0, mViewportHeight = 0;
       
-      b2WorldId* mpPhysicsWorldID = nullptr;
-
       friend class Entity;
    }; 
 }

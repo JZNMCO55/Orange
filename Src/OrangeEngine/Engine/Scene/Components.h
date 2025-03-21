@@ -90,7 +90,9 @@ namespace Orange
         bool FixedRotation = false;
 
         // Storage for runtime
-        void* RuntimeBody = nullptr;
+        int32_t index1;
+        uint16_t world0;
+        uint16_t generation;
         Rigidbody2DComponent() = default;
         Rigidbody2DComponent(const Rigidbody2DComponent&) = default;
     };
@@ -104,8 +106,6 @@ namespace Orange
         float Density = 1.0f;
         float Friction = 0.5f;
         float Restitution = 0.0f;
-        float RestitutionTreshold = 0.5f;
-
 
         void* RuntimeFixture = nullptr;
 
