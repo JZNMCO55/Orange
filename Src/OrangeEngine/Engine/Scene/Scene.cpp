@@ -4,8 +4,24 @@
 #include "Renderer/Renderer2D.h"
 #include "Entity.h"
 
+#include <box2d/box2d.h>
+
 namespace Orange
 {
+    static b2WorldId mPhysicsWorldId;
+    static b2BodyType Rigibody2DTypeToBox2DBody(Rigidbody2DComponent::BodyType bodytype)
+    {
+        switch (bodytype)
+        {
+            case Rigidbody2DComponent::BodyType::Static:    return b2_staticBody;
+            case Rigidbody2DComponent::BodyType::Dynamic:   return b2_dynamicBody;
+            case Rigidbody2DComponent::BodyType::Kinematic: return b2_kinematicBody;
+            default:
+        }
+
+        ORANGE_CORE_ASSERT(false, "Unknow body type");
+    }
+
    Scene::Scene()
    {
 
@@ -27,6 +43,34 @@ namespace Orange
    void Scene::DestroyEntity(Entity entity)
    {
        mRegistry.destroy(entity);
+   }
+
+   void Scene::OnRuntimeStart()
+   {
+       // 物理世界初始化（新版）
+       b2WorldDef worldDef = b2DefaultWorldDef();
+       worldDef.gravity = { 0.0f, -9.8f }; // 设置重力
+       mPhysicsWorldId = b2CreateWorld(&worldDef); // 返回b2WorldId
+
+       auto view = mRegistry.view<Rigidbody2DComponent>();
+       for (auto e : view)
+       {
+           Entity entity = { e,shared_from_this() };
+           auto& transform = entity.GetComponent<TransformComponent>();
+           auto& rb2d = entity.GetComponent<Rigidbody2DComponent>();
+
+           // 配置刚体定义
+           b2BodyDef bodyDef = b2DefaultBodyDef();
+           bodyDef.type = Rigibody2DTypeToBox2DBody(rb2d.Type);
+           bodyDef.position = { transform.Translation.x, transform.Translation.y };
+           bodyDef.rotation = b2MakeRot(transform.Rotation.z);
+       }
+   }
+
+   void Scene::OnRuntimeStop()
+   {
+       // 销毁物理世界（新版）
+       b2DestroyWorld(mPhysicsWorldId);
    }
 
    void Scene::OnUpdateRuntime(Timestep ts)
