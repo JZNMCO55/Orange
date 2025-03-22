@@ -64,6 +64,8 @@ namespace Orange
            bodyDef.type = Rigibody2DTypeToBox2DBody(rb2d.Type);
            bodyDef.position = { transform.Translation.x, transform.Translation.y };
            bodyDef.rotation = b2MakeRot(transform.Rotation.z);
+
+
        }
    }
 
