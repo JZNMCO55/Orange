@@ -3,6 +3,7 @@
 
 #include "OrangeExport.h"
 #include "Timestep.h"
+#include "UUID.h"
 
 namespace Orange
 {
@@ -14,7 +15,10 @@ namespace Orange
       Scene();
       ~Scene();
 
+      static Ref<Scene> Copy(Ref<Scene> other);
+
       Entity CreateEntity(const std::string& tag = std::string());
+      Entity CreateEntityWithUUID(UUID uuid, const std::string& tag = std::string());
       void DestroyEntity(Entity entity);
 
       void OnRuntimeStart();
@@ -26,6 +30,8 @@ namespace Orange
       void OnUpdateEditor(Timestep ts, const Ref<EditorCamera>& camera);
       
       void OnViewportResize(uint32_t width, uint32_t height);
+
+      void DuplicateEntity(Entity entity);
 
       Entity GetPrimaryCameraEntity();
    private:

@@ -104,7 +104,7 @@ namespace Orange
             CompileOrGetOpenGLBinaries();
             CreateProgram();
 
-            ORANGE_LOG_WARN("Shader compilation took {0}ms", timer.Elapsed());
+            ORANGE_LOG_WARN("Shader compilation took {0}ms", timer.EplapsedMillis());
         }
 
         // Extract name from filepath

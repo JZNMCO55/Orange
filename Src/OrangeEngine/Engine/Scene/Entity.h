@@ -2,9 +2,9 @@
 #define ENTITY_H
 
 #include "OrangeExport.h"
-
 namespace Orange
 {
+    class UUID;
     class Scene;
     class ORANGE_API Entity
     {
@@ -43,12 +43,24 @@ namespace Orange
             mpScene.lock()->GetRegistry().remove<T>(mEntityHandle);
         }
         
+        template<typename T, typename... Args>
+        T& AddOrgReplaceComponenet(Args&&... args)
+        {
+            T& component = mpScene.lock()->GetRegistry().replace<T>(mEntityHandle, std::forward<Args>(args)...);
+            mpScene.lock()->OnComponentAdded<T>(*this, component);
+            return component;
+        }
+
         operator bool() const { return mEntityHandle != entt::null; }
 
         operator entt::entity() const { return mEntityHandle; };
 
         operator uint32_t() const { return (uint32_t)mEntityHandle; }
         
+        UUID GetUUID();
+
+        const std::string GetName();
+
         bool operator==(const Entity& other) const
         {
             return mEntityHandle == other.mEntityHandle && mpScene.lock() == other.mpScene.lock(); 
@@ -62,7 +74,6 @@ namespace Orange
     private:
         entt::entity mEntityHandle = entt::null;
         std::weak_ptr<Scene> mpScene;
-        //friend class Scene;
     };
 }
 #endif // ENTITY_H

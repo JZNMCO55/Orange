@@ -32,10 +32,15 @@ namespace Orange
         void NewScene();
         void OpenScene();
         void OpenScene(const std::filesystem::path& path);
+        void SaveScene();
         void SaveSceneAs();
+
+        void SerilizeScene(Ref<Scene> tpScene, const std::filesystem::path& path);
 
         void OnScenePlay();
         void OnSceneStop();
+
+        void OnDuplicateEntity();
 
         // UI Panels
         void UIToolbar();
@@ -49,6 +54,8 @@ namespace Orange
         Ref<FrameBuffer> mpFrameBuffer;
 
         Ref<Scene> mpActiveScene;
+        Ref<Scene> mpEditorScene;
+        std::filesystem::path mEditorScenePath;
 
         bool mPrimaryCamera = true;
         Ref<EditorCamera> mpEditorCamera;

@@ -7,10 +7,19 @@
 #include "ScriptableEntity.h"
 #include "Timestep.h"
 #include "Renderer/Texture.h"
+#include "UUID.h"
 
 
 namespace Orange
 {
+    struct IDComponent
+    {
+        UUID ID;
+
+        IDComponent() = default;
+        IDComponent(const IDComponent&) = default;
+    };
+
     struct TagComponent
     {
         std::string Tag;
@@ -61,6 +70,8 @@ namespace Orange
         CameraComponent() = default;
         CameraComponent(const CameraComponent&) = default;
     };
+
+    class ScriptableEntity;
 
     struct NativeScriptComponent
     {

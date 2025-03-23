@@ -31,7 +31,8 @@ namespace Orange
         fbSpec.attachment = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::RED_INTEGER, FramebufferTextureFormat::Depth };
         mpFrameBuffer = Orange::FrameBuffer::Create(fbSpec);
 
-        mpActiveScene = CreateRef<Scene>();
+        mpEditorScene = CreateRef<Scene>();
+        mpActiveScene = mpEditorScene;
         
         auto commandLineArgs = Application::GetInstance()->GetCommandLineArgs();
         if (commandLineArgs.Count > 1)
@@ -44,6 +45,8 @@ namespace Orange
         mpEditorCamera = CreateRef<EditorCamera>(30.0f, 1.778f, 0.1f, 1000.0f);
 
         mSceneHierachyPanel.SetContext(mpActiveScene);
+
+        mEditorScenePath = std::filesystem::path();
     }
 
     void EditorLayer::OnDetach()
@@ -360,10 +363,11 @@ namespace Orange
                 break;
             case OrgKeyCodes::S:
             {
-                if (bControl && bShift)
+                if (bControl)
                 {
-                    SaveSceneAs();
+                    bShift ? SaveSceneAs() : SaveScene();
                 }
+                
                 break;
             }
             case OrgKeyCodes::Q:
@@ -371,6 +375,14 @@ namespace Orange
                 if (bControl)
                 {
                     mGizmoType = -1;
+                }
+                break;
+            }
+            case OrgKeyCodes::D:
+            {
+                if (bControl)
+                {
+                    OnDuplicateEntity();
                 }
                 break;
             }
@@ -435,12 +447,35 @@ namespace Orange
 
     void EditorLayer::OpenScene(const std::filesystem::path& path)
     {
-        mpActiveScene = CreateRef<Scene>();
-        mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
-        mSceneHierachyPanel.SetContext(mpActiveScene);
+        if (mSceneState != SceneState::Edit)
+        {
+            OnSceneStop();
+        }
 
-        SceneSerializer serializer(mpActiveScene);
-        serializer.Deserialize(path.string());
+        Ref<Scene> newScene = CreateRef<Scene>();
+
+        SceneSerializer serializer(newScene);
+        if (serializer.Deserialize(path.string()))
+        {
+            mpEditorScene = newScene;
+            mpEditorScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
+            mSceneHierachyPanel.SetContext(mpEditorScene);
+
+            mpActiveScene = mpEditorScene;
+            mEditorScenePath = path;
+        }
+    }
+
+    void EditorLayer::SaveScene()
+    {
+        if (!mEditorScenePath.empty())
+        {
+            SerilizeScene(mpActiveScene, mEditorScenePath);
+        }
+        else
+        {
+            SaveSceneAs();
+        }
     }
 
     void EditorLayer::SaveSceneAs()
@@ -454,21 +489,47 @@ namespace Orange
             {
                 filepath += ".oescn";
             }
-            SceneSerializer serializer(mpActiveScene);
-            serializer.Serialize(filepath);
+            SerilizeScene(mpActiveScene, filepath);
+            mEditorScenePath = filepath;
         }
+    }
+
+    void EditorLayer::SerilizeScene(Ref<Scene> tpScene, const std::filesystem::path& path)
+    {
+        SceneSerializer serializer(tpScene);
+        serializer.Serialize(path.string());
     }
 
     void EditorLayer::OnScenePlay()
     {
         mSceneState = SceneState::Play;
+
+        mpActiveScene = Scene::Copy(mpEditorScene);
         mpActiveScene->OnRuntimeStart();
+
+        mSceneHierachyPanel.SetContext(mpActiveScene);
     }
 
     void EditorLayer::OnSceneStop()
     {
         mSceneState = SceneState::Edit;
         mpActiveScene->OnRuntimeStop();
+        mpActiveScene = mpEditorScene;
+        mSceneHierachyPanel.SetContext(mpActiveScene);
+    }
+
+    void EditorLayer::OnDuplicateEntity()
+    {
+        if (mSceneState != SceneState::Edit)
+        {
+            return;
+        }
+
+        Entity selectedEntity = mSceneHierachyPanel.GetSelectedEntity();
+        if (selectedEntity)
+        {
+            mpEditorScene->DuplicateEntity(selectedEntity);
+        }
     }
 
     void EditorLayer::UIToolbar()

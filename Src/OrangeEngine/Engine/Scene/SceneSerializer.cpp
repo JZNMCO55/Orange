@@ -3,6 +3,7 @@
 #include <random>
 #include <chrono>
 
+#include "UUID.h"
 #include "Scene.h"
 #include "Entity.h"
 #include "Components.h"
@@ -85,12 +86,6 @@ namespace YAML
     };
 }
 
-static uint64_t GenerateUUID()
-{
-    static std::mt19937_64 rng(std::chrono::steady_clock::now().time_since_epoch().count());
-    return rng();
-}
-
 namespace Orange
 {
     YAML::Emitter& operator<<(YAML::Emitter& out, const glm::vec2& v)
@@ -139,9 +134,9 @@ namespace Orange
 
     static void SerializeEntity(YAML::Emitter& out, Entity entity)
     {
+        ORANGE_CORE_ASSERT(entity.HasComponent<IDComponent>(), "Invalid entity");
         out << YAML::BeginMap; // Entity
-        auto uuid = GenerateUUID();
-        out << YAML::Key << "Entity" << YAML::Value << std::to_string(uuid);
+        out << YAML::Key << "Entity" << YAML::Value << entity.GetUUID();
 
         // Map TagComponent
         if (entity.HasComponent<TagComponent>())
@@ -303,7 +298,7 @@ namespace Orange
 
                 ORANGE_LOG_INFO("Deserializing entity with Id = {0}, name '{1}'", uuid, name);
 
-                Entity deserializedEntity = mpScene.lock()->CreateEntity(name);
+                Entity deserializedEntity = mpScene.lock()->CreateEntityWithUUID(uuid,name);
 
                 auto transformComponent = entity["TransformComponent"];
                 if (transformComponent)

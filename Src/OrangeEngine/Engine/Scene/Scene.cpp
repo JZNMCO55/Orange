@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Scene.h"
 #include "Components.h"
+#include "ScriptableEntity.h"
 #include "Renderer/Renderer2D.h"
 #include "Entity.h"
 
@@ -22,6 +23,32 @@ namespace Orange
         ORANGE_CORE_ASSERT(false, "Unknow body type");
     }
 
+    template <typename Component>
+    static void CopyComponent(entt::registry& dst, entt::registry& src,
+        const std::unordered_map<UUID, entt::entity>& enttMap)
+    {
+        auto view = src.view<Component>();
+
+        for (auto e : view)
+        {
+            auto uuid = src.get<IDComponent>(e).ID;
+            ORANGE_CORE_ASSERT(enttMap.find(uuid) != enttMap.end(), "Entity not found in map");
+            entt::entity dstEntity = enttMap.at(uuid);
+
+            auto& component = src.get<Component>(e);
+            dst.emplace_or_replace<Component>(dstEntity, component);
+        }
+    }
+
+    template<typename Component>
+    static void CopyComponentIfExists(Entity dst, Entity src)
+    {
+        if (src.HasComponent<Component>())
+        {
+            dst.AddOrgReplaceComponenet<Component>(src.GetComponent<Component>());
+        }
+    }
+
    Scene::Scene()
    {
 
@@ -31,13 +58,52 @@ namespace Orange
    {
    }
 
+   Ref<Scene> Scene::Copy(Ref<Scene> other)
+   {
+       Ref<Scene> newScene = CreateRef<Scene>();
+
+       newScene->mViewportWidth = other->mViewportWidth;
+       newScene->mViewportHeight = other->mViewportHeight;
+
+       auto& srcRegistry = other->mRegistry;
+       auto& dstRegistry = newScene->mRegistry;
+       std::unordered_map<UUID, entt::entity> enttMap;
+
+       // Create entities in new scene
+       auto idView = srcRegistry.view<IDComponent>();
+       for (auto e : idView)
+       {
+           UUID uuid = srcRegistry.get<IDComponent>(e).ID;
+
+           const auto& name = srcRegistry.get<TagComponent>(e).Tag;
+           Entity newEntity = newScene->CreateEntityWithUUID(uuid, name);
+           enttMap[uuid] = (entt::entity)newEntity;
+       }
+
+       // Copy components (except IDComponent and TagComponent)
+       CopyComponent<TransformComponent>(dstRegistry, srcRegistry, enttMap);
+       CopyComponent<CameraComponent>(dstRegistry, srcRegistry, enttMap);
+       CopyComponent<SpriteRendererComponent>(dstRegistry, srcRegistry, enttMap);
+       CopyComponent<Rigidbody2DComponent>(dstRegistry, srcRegistry, enttMap);
+       CopyComponent<BoxCollider2DComponent>(dstRegistry, srcRegistry, enttMap);
+       CopyComponent<NativeScriptComponent>(dstRegistry, srcRegistry, enttMap);
+
+       return newScene;
+   }
+
    Entity Scene::CreateEntity(const std::string& tag)
    {
-        Entity entity = { mRegistry.create(), shared_from_this() };
-        entity.AddComponent<TransformComponent>();
-            auto& tagComponent = entity.AddComponent<TagComponent>();
-            tagComponent.Tag = tag.empty() ? "Entity" : tag;
-        return entity;
+       return CreateEntityWithUUID(UUID(), tag);
+   }
+
+   Entity Scene::CreateEntityWithUUID(UUID uuid, const std::string& tag)
+   {
+       Entity entity = { mRegistry.create(), shared_from_this() };
+       entity.AddComponent<IDComponent>(uuid);
+       entity.AddComponent<TransformComponent>();
+       auto& tagComponent = entity.AddComponent<TagComponent>();
+       tagComponent.Tag = tag.empty() ? "Entity" : tag;
+       return entity;
    }
 
    void Scene::DestroyEntity(Entity entity)
@@ -189,6 +255,19 @@ namespace Orange
       }
    }
 
+   void Scene::DuplicateEntity(Entity entity)
+   {
+       std::string name = entity.GetName();
+       Entity newEntity = CreateEntity(name);
+
+       CopyComponentIfExists<TransformComponent>(newEntity, entity);
+       CopyComponentIfExists<CameraComponent>(newEntity, entity);
+       CopyComponentIfExists<SpriteRendererComponent>(newEntity, entity);
+       CopyComponentIfExists<Rigidbody2DComponent>(newEntity, entity);
+       CopyComponentIfExists<BoxCollider2DComponent>(newEntity, entity);
+       CopyComponentIfExists<NativeScriptComponent>(newEntity, entity);
+   }
+
    void Scene::OnUpdateEditor(Timestep ts, const Ref<EditorCamera>& camera)
    {
        Renderer2D::BeginScene(camera);
@@ -221,6 +300,12 @@ namespace Orange
    void Scene::OnComponentAdded(Entity entity, T& component)
    {
        static_assert(false);
+   }
+
+   template<>
+   void Scene::OnComponentAdded<IDComponent>(Entity entity, IDComponent& component)
+   {
+       // Do nothing for now
    }
 
    template<>

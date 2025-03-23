@@ -9,7 +9,7 @@ namespace Orange
     class ORANGE_API Timer
     {
     public:
-        Timer() {}
+        Timer() { Reset(); }
 
         void Timer::Reset()
         {
