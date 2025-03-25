@@ -84,6 +84,7 @@ namespace Orange
        CopyComponent<TransformComponent>(dstRegistry, srcRegistry, enttMap);
        CopyComponent<CameraComponent>(dstRegistry, srcRegistry, enttMap);
        CopyComponent<SpriteRendererComponent>(dstRegistry, srcRegistry, enttMap);
+       CopyComponent<CircleRendererComponent>(dstRegistry, srcRegistry, enttMap);
        CopyComponent<Rigidbody2DComponent>(dstRegistry, srcRegistry, enttMap);
        CopyComponent<BoxCollider2DComponent>(dstRegistry, srcRegistry, enttMap);
        CopyComponent<NativeScriptComponent>(dstRegistry, srcRegistry, enttMap);
@@ -229,12 +230,29 @@ namespace Orange
         if(mainCamera)
         {
             Renderer2D::BeginScene(mainCamera, cameraTransform);
-            auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-            for (auto entity : group)
+
+            // Draw sprites
             {
-                auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-                Renderer2D::DrawSprite(transform.GetTransform(), sprite, int(entity));
+                auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+                for (auto entity : group)
+                {
+                    auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+                    Renderer2D::DrawSprite(transform.GetTransform(), sprite, int(entity));
+                }
             }
+
+            // Draw circles
+            {
+                auto view = mRegistry.view<TransformComponent, CircleRendererComponent>();
+                for (auto entity : view)
+                {
+                    auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
+
+                    Renderer2D::DrawCircle(transform.GetTransform(), circle.Color, 
+                        circle.Thickness, circle.Fade, static_cast<int>(entity));
+                }
+            }
+            
             Renderer2D::EndScene();
         }
    }
@@ -262,6 +280,7 @@ namespace Orange
 
        CopyComponentIfExists<TransformComponent>(newEntity, entity);
        CopyComponentIfExists<CameraComponent>(newEntity, entity);
+       CopyComponentIfExists<CircleRendererComponent>(newEntity, entity);
        CopyComponentIfExists<SpriteRendererComponent>(newEntity, entity);
        CopyComponentIfExists<Rigidbody2DComponent>(newEntity, entity);
        CopyComponentIfExists<BoxCollider2DComponent>(newEntity, entity);
@@ -272,11 +291,26 @@ namespace Orange
    {
        Renderer2D::BeginScene(camera);
 
-       auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
-       for (auto entity : group)
+       // Draw sprites
        {
-           auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
-           Renderer2D::DrawSprite(transform.GetTransform(), sprite, int(entity));
+           auto group = mRegistry.group<TransformComponent>(entt::get<SpriteRendererComponent>);
+           for (auto entity : group)
+           {
+               auto [transform, sprite] = group.get<TransformComponent, SpriteRendererComponent>(entity);
+               Renderer2D::DrawSprite(transform.GetTransform(), sprite, int(entity));
+           }
+       }
+
+       // Draw circles
+       {
+           auto view = mRegistry.view<TransformComponent, CircleRendererComponent>();
+           for (auto entity : view)
+           {
+               auto [transform, circle] = view.get<TransformComponent, CircleRendererComponent>(entity);
+
+               Renderer2D::DrawCircle(transform.GetTransform(), circle.Color,
+                   circle.Thickness, circle.Fade, static_cast<int>(entity));
+           }
        }
 
        Renderer2D::EndScene();
@@ -327,6 +361,12 @@ namespace Orange
    void Scene::OnComponentAdded<SpriteRendererComponent>(Entity entity, SpriteRendererComponent& component)
    {
        // Do nothing for now
+   }
+
+   template<>
+   void Scene::OnComponentAdded<CircleRendererComponent>(Entity entity, CircleRendererComponent& component)
+   {
+
    }
 
    template<>

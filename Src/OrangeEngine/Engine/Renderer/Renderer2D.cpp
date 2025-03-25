@@ -25,6 +25,18 @@ namespace Orange
         int mEntityID;
     };
 
+    struct CirclVertex
+    {
+        glm::vec3 WorldPosition;
+        glm::vec3 LocalPosition;
+        glm::vec4 Color;
+        float Thickness;
+        float Fade;
+
+        // Editor-only
+        int EntityID;
+    };
+
     struct Renderer2DData
     {
         static const uint32_t MaxQuads = 10000;
@@ -32,14 +44,24 @@ namespace Orange
         static const uint32_t MaxIndices = MaxQuads * 6;
         static const uint32_t MaxTextureSlots = 32;
 
+        // Quad data
         Ref<VertexArray> mpQuadVertexArray;
         Ref<VertexBuffer> mpQuadVertexBuffer;
-        Ref<Shader> mpTextureShader;
+        Ref<Shader> mpQuadShader;
         Ref<Texture2D> mpWhiteTexture;
 
         uint32_t QuadIndexCount = 0;
         QuadVertex* QuadVertexBufferBase = nullptr;
         QuadVertex* QuadVertexBufferPtr = nullptr;
+
+        // Circle data
+        Ref<VertexArray> mpCircleVertexArray;
+        Ref<VertexBuffer> mpCircleVertexBuffer;
+        Ref<Shader> mpCircleShader;
+
+        uint32_t CircleIndexCount = 0;
+        CirclVertex* CircleVertexBufferBase = nullptr;
+        CirclVertex* CircleVertexBufferPtr = nullptr;
 
         std::array<Ref<Texture2D>, MaxTextureSlots> TextureSlots;
         
@@ -65,6 +87,7 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
+        // Quad data
         sData.mpQuadVertexArray = VertexArray::Create();
         sData.mpQuadVertexBuffer = VertexBuffer::Create(sData.MaxVertices * sizeof(QuadVertex));
 
@@ -97,6 +120,23 @@ namespace Orange
         Ref<IndexBuffer> quadIB = IndexBuffer::Create(quadIndices.data(), sData.MaxIndices);
         sData.mpQuadVertexArray->SetIndexBuffer(quadIB);
 
+        // Circle data
+        sData.mpCircleVertexArray = VertexArray::Create();
+        sData.mpCircleVertexBuffer = VertexBuffer::Create(sData.MaxVertices * sizeof(CirclVertex));
+
+        sData.mpCircleVertexBuffer->SetLayout({
+            {EShaderDataType::Float3, "a_WorldPosition"},
+            {EShaderDataType::Float3, "a_LocalPosition"},
+            {EShaderDataType::Float4, "a_Color"},
+            {EShaderDataType::Float, "a_Thickness"},
+            {EShaderDataType::Float, "a_Fade"},
+            {EShaderDataType::Int, "a_EntityID"}
+            });
+
+        sData.mpCircleVertexArray->AddVertexBuffer(sData.mpCircleVertexBuffer);
+        sData.mpCircleVertexArray->SetIndexBuffer(quadIB); // Use the same index buffer as the quad
+        sData.CircleVertexBufferBase = new CirclVertex[sData.MaxVertices];
+
         sData.mpWhiteTexture = Texture2D::Create(1, 1);
         uint32_t whiteTextureData = 0xffffffff;
         sData.mpWhiteTexture->SetData(&whiteTextureData, sizeof(uint32_t));
@@ -107,9 +147,9 @@ namespace Orange
             samplers[i] = i;
         }
 
-        sData.mpTextureShader = Shader::Create(R"(../../Resource/Shaders/Texture.glsl)");
-        sData.mpTextureShader->Bind();
-        sData.mpTextureShader->SetIntArray("u_Textures", samplers, sData.MaxTextureSlots);
+        sData.mpQuadShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Quad.glsl)");
+        sData.mpCircleShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Circle.glsl)");
+
         sData.TextureSlots[0] = sData.mpWhiteTexture;
 
         sData.QuadVertexPositions[0] = { -0.5f, -0.5f, 0.0f, 1.0f };
@@ -139,8 +179,8 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        sData.mpTextureShader->Bind();
-        sData.mpTextureShader->SetMat4("u_ViewProjection", camera->GetViewProjectionMatrix());
+        sData.mpQuadShader->Bind();
+        sData.mpQuadShader->SetMat4("u_ViewProjection", camera->GetViewProjectionMatrix());
 
         StartBatch();
     }
@@ -159,9 +199,6 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        uint32_t dataSize = (uint8_t*)sData.QuadVertexBufferPtr - (uint8_t*)sData.QuadVertexBufferBase;
-        sData.mpQuadVertexBuffer->SetData(sData.QuadVertexBufferBase, dataSize);
-
         Flush();
     }
 
@@ -169,21 +206,32 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        if (sData.QuadIndexCount == 0)
+        if (sData.QuadIndexCount)
         {
-            return;
+            uint32_t dataSize = (uint8_t*)sData.QuadVertexBufferPtr - (uint8_t*)sData.QuadVertexBufferBase;
+            sData.mpQuadVertexBuffer->SetData(sData.QuadVertexBufferBase, dataSize);
+
+            // Bind textures
+
+            for (uint32_t i = 0; i < sData.TextureSlotIndex; i++)
+            {
+                sData.TextureSlots[i]->Bind(i);
+            }
+            sData.mpQuadShader->Bind();
+            RenderCommand::DrawIndexed(sData.mpQuadVertexArray, sData.QuadIndexCount);
+            sData.Stats.DrawCalls++;
         }
 
-        uint32_t dataSize = (uint8_t*)sData.QuadVertexBufferPtr - (uint8_t*)sData.QuadVertexBufferBase;
-        sData.mpQuadVertexBuffer->SetData(sData.QuadVertexBufferBase, dataSize);
-
-        for (uint32_t i = 0; i < sData.TextureSlotIndex; i++)
+        if (sData.CircleIndexCount)
         {
-            sData.TextureSlots[i]->Bind(i);
+            uint32_t dataSize = (uint32_t)((uint8_t*)sData.CircleVertexBufferPtr - (uint8_t*)sData.CircleVertexBufferBase);
+            sData.mpCircleVertexBuffer->SetData(sData.CircleVertexBufferBase, dataSize);
+
+            sData.mpCircleShader->Bind();
+            RenderCommand::DrawIndexed(sData.mpCircleVertexArray, sData.CircleIndexCount);
+            sData.Stats.DrawCalls++;
         }
-        sData.mpTextureShader->Bind();
-        RenderCommand::DrawIndexed(sData.mpQuadVertexArray, sData.QuadIndexCount);
-        sData.Stats.DrawCalls++;
+
     }
 
 
@@ -328,6 +376,25 @@ namespace Orange
         DrawQuad(transform, spriteRendererComponent.Color, entityId);
     }
 
+    void Renderer2D::DrawCircle(const glm::mat4& transform, const glm::vec4& color, float thickness, float fade, int entityID)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        for (size_t i = 0; i < 4; i++)
+        {
+            sData.CircleVertexBufferPtr->WorldPosition = transform * sData.QuadVertexPositions[i];
+            sData.CircleVertexBufferPtr->LocalPosition = sData.QuadVertexPositions[i] * 2.0f;
+            sData.CircleVertexBufferPtr->Color = color;
+            sData.CircleVertexBufferPtr->Thickness = thickness;
+            sData.CircleVertexBufferPtr->Fade = fade;
+            sData.CircleVertexBufferPtr->EntityID = entityID;
+            sData.CircleVertexBufferPtr++;
+        }
+
+        sData.CircleIndexCount += 6;
+        sData.Stats.QuadCount++;
+    }
+
 
     void Renderer2D::CreateQuad(const glm::vec3& position, const glm::vec2& size, 
         const glm::vec4& color, float textureIndex, float tilingFactor, int entityId)
@@ -369,6 +436,10 @@ namespace Orange
     {
         sData.QuadIndexCount = 0;
         sData.QuadVertexBufferPtr = sData.QuadVertexBufferBase;
+
+        sData.CircleIndexCount = 0;
+        sData.CircleVertexBufferPtr = sData.CircleVertexBufferBase;
+
         sData.TextureSlotIndex = 1;
     }
 
