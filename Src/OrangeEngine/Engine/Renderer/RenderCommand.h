@@ -33,6 +33,16 @@ namespace Orange
             spRendererAPI->DrawIndexed(vertexArray, count);
         }
 
+        static void DrawLines(const Ref<VertexArray>& vertexArray, uint32_t vertexCount)
+        {
+            spRendererAPI->DrawLines(vertexArray, vertexCount);
+        }
+
+        static void SetLineWidth(float width)
+        {
+            spRendererAPI->SetLineWidth(width);
+        }
+
     private:
         static RendererAPI* spRendererAPI;
     };

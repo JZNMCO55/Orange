@@ -37,6 +37,15 @@ namespace Orange
         int EntityID;
     };
 
+    struct LineVertex
+    {
+        glm::vec3 Position;
+        glm::vec4 Color;
+
+        // Editor-only
+        int EntityID;
+    };
+
     struct Renderer2DData
     {
         static const uint32_t MaxQuads = 10000;
@@ -62,6 +71,16 @@ namespace Orange
         uint32_t CircleIndexCount = 0;
         CirclVertex* CircleVertexBufferBase = nullptr;
         CirclVertex* CircleVertexBufferPtr = nullptr;
+
+        // Line data
+        Ref<VertexArray> mpLineVertexArray;
+        Ref<VertexBuffer> mpLineVertexBuffer;
+        Ref<Shader> mpLineShader;
+
+        uint32_t LineIndexCount = 0;
+        float LineWidth = 2.0f;
+        LineVertex* LineVertexBufferBase = nullptr;
+        LineVertex* LineVertexBufferPtr = nullptr;
 
         std::array<Ref<Texture2D>, MaxTextureSlots> TextureSlots;
         
@@ -137,6 +156,17 @@ namespace Orange
         sData.mpCircleVertexArray->SetIndexBuffer(quadIB); // Use the same index buffer as the quad
         sData.CircleVertexBufferBase = new CirclVertex[sData.MaxVertices];
 
+        // Line data
+        sData.mpLineVertexArray = VertexArray::Create();
+        sData.mpLineVertexBuffer = VertexBuffer::Create(sData.MaxVertices * sizeof(LineVertex));
+        sData.mpLineVertexBuffer->SetLayout({
+            {EShaderDataType::Float3, "a_Position"},
+            {EShaderDataType::Float4, "a_Color"},
+            {EShaderDataType::Int, "a_EntityID"}
+            });
+        sData.mpLineVertexArray->AddVertexBuffer(sData.mpLineVertexBuffer);
+        sData.LineVertexBufferBase = new LineVertex[sData.MaxVertices];
+
         sData.mpWhiteTexture = Texture2D::Create(1, 1);
         uint32_t whiteTextureData = 0xffffffff;
         sData.mpWhiteTexture->SetData(&whiteTextureData, sizeof(uint32_t));
@@ -149,6 +179,7 @@ namespace Orange
 
         sData.mpQuadShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Quad.glsl)");
         sData.mpCircleShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Circle.glsl)");
+        sData.mpCircleShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Line.glsl)");
 
         sData.TextureSlots[0] = sData.mpWhiteTexture;
 
@@ -229,6 +260,17 @@ namespace Orange
 
             sData.mpCircleShader->Bind();
             RenderCommand::DrawIndexed(sData.mpCircleVertexArray, sData.CircleIndexCount);
+            sData.Stats.DrawCalls++;
+        }
+
+        if (sData.LineIndexCount)
+        {
+            uint32_t dataSize = (uint32_t)((uint8_t*)sData.LineVertexBufferPtr - (uint8_t*)sData.LineVertexBufferBase);
+            sData.mpLineVertexBuffer->SetData(sData.LineVertexBufferBase, dataSize);
+
+            sData.mpLineShader->Bind();
+            RenderCommand::SetLineWidth(sData.LineWidth);
+            RenderCommand::DrawLines(sData.mpLineVertexArray, sData.LineIndexCount);
             sData.Stats.DrawCalls++;
         }
 
@@ -395,6 +437,55 @@ namespace Orange
         sData.Stats.QuadCount++;
     }
 
+    void Renderer2D::DrawLine(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        sData.LineVertexBufferPtr->Position = p0;
+        sData.LineVertexBufferPtr->Color = color;
+        sData.LineVertexBufferPtr->EntityID = entityID;
+
+        sData.LineVertexBufferPtr++;
+
+        sData.LineVertexBufferPtr->Position = p1;
+        sData.LineVertexBufferPtr->Color = color;
+        sData.LineVertexBufferPtr->EntityID = entityID;
+
+        sData.LineVertexBufferPtr++;
+
+        sData.LineIndexCount += 2;
+    }
+
+    void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, int entityID)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        glm::vec3 p0 = glm::vec3(position.x - size.x * 0.5f, position.y - size.y * 0.5f, position.z);
+        glm::vec3 p1 = glm::vec3(position.x + size.x * 0.5f, position.y - size.y * 0.5f, position.z);
+        glm::vec3 p2 = glm::vec3(position.x + size.x * 0.5f, position.y + size.y * 0.5f, position.z);
+        glm::vec3 p3 = glm::vec3(position.x - size.x * 0.5f, position.y + size.y * 0.5f, position.z);
+
+        DrawLine(p0, p1, color);
+        DrawLine(p1, p2, color);
+        DrawLine(p2, p3, color);
+        DrawLine(p3, p0, color);
+    }
+
+    void Renderer2D::DrawRect(const glm::mat4& transform, const glm::vec4& color, int entityID)
+    {
+        ORG_PROFILE_FUNCTION();
+
+        glm::vec3 lineVertices[4];
+        for (size_t i = 0; i < 4; i++)
+        {
+            lineVertices[i] = transform * sData.QuadVertexPositions[i];
+        }
+
+        DrawLine(lineVertices[0], lineVertices[1], color);
+        DrawLine(lineVertices[1], lineVertices[2], color);
+        DrawLine(lineVertices[2], lineVertices[3], color);
+        DrawLine(lineVertices[3], lineVertices[0], color);
+    }
 
     void Renderer2D::CreateQuad(const glm::vec3& position, const glm::vec2& size, 
         const glm::vec4& color, float textureIndex, float tilingFactor, int entityId)
@@ -439,6 +530,9 @@ namespace Orange
 
         sData.CircleIndexCount = 0;
         sData.CircleVertexBufferPtr = sData.CircleVertexBufferBase;
+
+        sData.LineIndexCount = 0;
+        sData.LineVertexBufferPtr = sData.LineVertexBufferBase;
 
         sData.TextureSlotIndex = 1;
     }
