@@ -154,6 +154,23 @@ namespace Orange
                // 创建形状并附加到刚体
                b2ShapeId shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &box);
            }
+
+           if (entity.HasComponent<CircleCollider2DComponent>())
+           {
+               auto& cc2d = entity.GetComponent<CircleCollider2DComponent>();
+
+               // 创建圆形形状
+               b2Circle circle = { {0, 0}, cc2d.Radius * transform.Scale.x };
+
+               // 定义形状属性
+               b2ShapeDef shapeDef = b2DefaultShapeDef();
+               shapeDef.density = cc2d.Density;
+               shapeDef.friction = cc2d.Friction;
+               shapeDef.restitution = cc2d.Restitution;
+
+               // 创建形状并附加到刚体
+               b2ShapeId shapeId = b2CreateCircleShape(bodyId, &shapeDef, &circle);
+           }
        }
    }
 
@@ -284,6 +301,7 @@ namespace Orange
        CopyComponentIfExists<SpriteRendererComponent>(newEntity, entity);
        CopyComponentIfExists<Rigidbody2DComponent>(newEntity, entity);
        CopyComponentIfExists<BoxCollider2DComponent>(newEntity, entity);
+       CopyComponentIfExists<CircleCollider2DComponent>(newEntity, entity);
        CopyComponentIfExists<NativeScriptComponent>(newEntity, entity);
    }
 
@@ -388,6 +406,11 @@ namespace Orange
 
    template<>
    void Scene::OnComponentAdded<BoxCollider2DComponent>(Entity entity, BoxCollider2DComponent& component)
+   {
+   }
+
+   template<>
+   void Scene::OnComponentAdded<CircleCollider2DComponent>(Entity entity, CircleCollider2DComponent& component)
    {
    }
 
