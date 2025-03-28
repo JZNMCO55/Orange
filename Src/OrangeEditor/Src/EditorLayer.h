@@ -29,6 +29,8 @@ namespace Orange
         bool OnKeyPressed(KeyPressedEvent& e);
         bool OnMouseButtonPressed(MouseButtonPressedEvent& e);
 
+        void OnOverlayRender();
+
         void NewScene();
         void OpenScene();
         void OpenScene(const std::filesystem::path& path);
@@ -58,6 +60,7 @@ namespace Orange
         std::filesystem::path mEditorScenePath;
 
         bool mPrimaryCamera = true;
+        bool mbShowPhysicsColliders = false;
         Ref<EditorCamera> mpEditorCamera;
 
         Ref<Texture2D> mpCheckerboardTexture;

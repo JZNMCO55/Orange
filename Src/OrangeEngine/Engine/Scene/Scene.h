@@ -34,6 +34,12 @@ namespace Orange
       void DuplicateEntity(Entity entity);
 
       Entity GetPrimaryCameraEntity();
+
+      template<typename ... Components>
+      auto GetAllEntitiesWith()
+      {
+         return mRegistry.view<Components...>();
+      }
    private:
        template<typename T>
        void OnComponentAdded(Entity entity, T& component);

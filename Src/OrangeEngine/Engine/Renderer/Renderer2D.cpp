@@ -179,7 +179,7 @@ namespace Orange
 
         sData.mpQuadShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Quad.glsl)");
         sData.mpCircleShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Circle.glsl)");
-        sData.mpCircleShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Line.glsl)");
+        sData.mpLineShader = Shader::Create(R"(../../Resource/Shaders/Renderer2D_Line.glsl)");
 
         sData.TextureSlots[0] = sData.mpWhiteTexture;
 
