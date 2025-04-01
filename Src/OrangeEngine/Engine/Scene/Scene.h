@@ -24,10 +24,14 @@ namespace Orange
       void OnRuntimeStart();
       void OnRuntimeStop();
 
+      void OnSimulationStart();
+      void OnSimulationStop();
+
       entt::registry& GetRegistry() { return mRegistry; }
 
       void OnUpdateRuntime(Timestep ts);
       void OnUpdateEditor(Timestep ts, const Ref<EditorCamera>& camera);
+      void OnUpdateSimulation(Timestep ts, const Ref<EditorCamera>& camera);
       
       void OnViewportResize(uint32_t width, uint32_t height);
 
@@ -43,6 +47,11 @@ namespace Orange
    private:
        template<typename T>
        void OnComponentAdded(Entity entity, T& component);
+
+       void OnPhysics2DStart();
+       void OnPhysics2DStop();
+
+       void RenderScene(const Ref<EditorCamera>& camera);
    private:
       entt::registry mRegistry;
       uint32_t mViewportWidth = 0, mViewportHeight = 0;

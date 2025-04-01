@@ -24,6 +24,7 @@ namespace Orange
         mpCheckerboardTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
         mpIconPlay = Orange::Texture2D::Create(R"(..\..\Resource\Icons\PlayButton.png)");
         mpIconStop = Orange::Texture2D::Create(R"(..\..\Resource\Icons\StopButton.png)");
+        mpIconSimulate = Orange::Texture2D::Create(R"(..\..\Resource\Icons\SimulateButton.png)");
 
         Orange::FrameBufferSpecification fbSpec;
         fbSpec.width = 1280;
@@ -44,7 +45,7 @@ namespace Orange
 
         mpEditorCamera = CreateRef<EditorCamera>(30.0f, 1.778f, 0.1f, 1000.0f);
 
-        mSceneHierachyPanel.SetContext(mpActiveScene);
+        mSceneHierarchyPanel.SetContext(mpActiveScene);
 
         mEditorScenePath = std::filesystem::path();
     }
@@ -105,6 +106,12 @@ namespace Orange
             case SceneState::Play:
             {
                 mpActiveScene->OnUpdateRuntime(ts);
+                break;
+            }
+            case SceneState::Simulate:
+            {
+                mpEditorCamera->OnUpdate(ts);
+                mpActiveScene->OnUpdateSimulation(ts, mpEditorCamera);
                 break;
             }
             default:
@@ -220,7 +227,7 @@ namespace Orange
             ImGui::EndMenuBar();
         }
 
-        mSceneHierachyPanel.OnImGuiRender();
+        mSceneHierarchyPanel.OnImGuiRender();
         mContentBrowserPannel.OnImGuiRender();
 
         ImGui::Begin("Statuts");
@@ -276,7 +283,7 @@ namespace Orange
         }
 
         // Gizmos
-        Entity selectedEntity = mSceneHierachyPanel.GetSelectedEntity();
+        Entity selectedEntity = mSceneHierarchyPanel.GetSelectedEntity();
         if (selectedEntity && mGizmoType != -1)
         {
             ImGuizmo::Enable(true);
@@ -429,7 +436,7 @@ namespace Orange
         {
             if (mViewportHovered && !ImGui::IsWindowHovered() && !Input::IsKeyPressed(OrgKeyCodes::LeftAlt))
             {
-                mSceneHierachyPanel.SetSelectedEntity(mHoveredEntity);
+                mSceneHierarchyPanel.SetSelectedEntity(mHoveredEntity);
             }
         }
         return false;
@@ -439,9 +446,13 @@ namespace Orange
     {
         if (mSceneState == SceneState::Play)
         {
-            Entity camera = mpActiveScene->GetPrimaryCameraEntity();
-            Renderer2D::BeginScene(CreateRef<SceneCamera>(camera.GetComponent<CameraComponent>().Camera),
-                camera.GetComponent<TransformComponent>().GetTransform());
+            auto& tpCamera = mpActiveScene->GetPrimaryCameraEntity();
+            
+            if (tpCamera)
+            {
+                Renderer2D::BeginScene(CreateRef<SceneCamera>(tpCamera.GetComponent<CameraComponent>().Camera),
+                    tpCamera.GetComponent<TransformComponent>().GetTransform());
+            }
         }
         else
         {
@@ -492,7 +503,7 @@ namespace Orange
     {
         mpActiveScene = CreateRef<Scene>();
         mpActiveScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
-        mSceneHierachyPanel.SetContext(mpActiveScene);
+        mSceneHierarchyPanel.SetContext(mpActiveScene);
     }
 
     void EditorLayer::OpenScene()
@@ -519,7 +530,7 @@ namespace Orange
         {
             mpEditorScene = newScene;
             mpEditorScene->OnViewportResize(mViewportSize.x, mViewportSize.y);
-            mSceneHierachyPanel.SetContext(mpEditorScene);
+            mSceneHierarchyPanel.SetContext(mpEditorScene);
 
             mpActiveScene = mpEditorScene;
             mEditorScenePath = path;
@@ -562,20 +573,45 @@ namespace Orange
 
     void EditorLayer::OnScenePlay()
     {
+        if (mSceneState == SceneState::Simulate)
+        {
+            OnSceneStop();
+        }
         mSceneState = SceneState::Play;
 
         mpActiveScene = Scene::Copy(mpEditorScene);
         mpActiveScene->OnRuntimeStart();
 
-        mSceneHierachyPanel.SetContext(mpActiveScene);
+        mSceneHierarchyPanel.SetContext(mpActiveScene);
+    }
+
+    void EditorLayer::OnSceneSimulate()
+    {
+        if (mSceneState == SceneState::Play)
+            OnSceneStop();
+
+        mSceneState = SceneState::Simulate;
+
+        mpActiveScene = Scene::Copy(mpEditorScene);
+        mpActiveScene->OnSimulationStart();
+
+        mSceneHierarchyPanel.SetContext(mpActiveScene);
     }
 
     void EditorLayer::OnSceneStop()
     {
+        if (mSceneState == SceneState::Play)
+        {
+            mpActiveScene->OnRuntimeStop();
+        }
+        else if (mSceneState == SceneState::Simulate)
+        {
+            mpActiveScene->OnSimulationStop();
+        }
+
         mSceneState = SceneState::Edit;
-        mpActiveScene->OnRuntimeStop();
         mpActiveScene = mpEditorScene;
-        mSceneHierachyPanel.SetContext(mpActiveScene);
+        mSceneHierarchyPanel.SetContext(mpActiveScene);
     }
 
     void EditorLayer::OnDuplicateEntity()
@@ -585,7 +621,7 @@ namespace Orange
             return;
         }
 
-        Entity selectedEntity = mSceneHierachyPanel.GetSelectedEntity();
+        Entity selectedEntity = mSceneHierarchyPanel.GetSelectedEntity();
         if (selectedEntity)
         {
             mpEditorScene->DuplicateEntity(selectedEntity);
@@ -604,14 +640,20 @@ namespace Orange
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(buttonActive.x, buttonActive.y, buttonActive.z, 0.5f));
 
         ImGui::Begin("##toolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        bool toolbarEnabled = (bool)mpActiveScene;
 
+        ImVec4 tintColor = ImVec4(1, 1, 1, 1);
+        if (!toolbarEnabled)
+        {
+            tintColor.w = 0.5f;
+        }
         float size = ImGui::GetWindowHeight() - 4.0f;
-        Ref<Texture2D> icon = mSceneState == SceneState::Edit ? mpIconPlay : mpIconStop;
+        Ref<Texture2D> icon = (mSceneState == SceneState::Edit || mSceneState == SceneState::Simulate) ? mpIconPlay : mpIconStop;
         std::string buttonName = mSceneState == SceneState::Edit ? "Play" : "Stop";
         ImGui::SetCursorPosX((ImGui::GetWindowContentRegionMax().x * 0.5f) - (size * 0.5f));
-        if (ImGui::ImageButton(buttonName.c_str(),(ImTextureID)icon->GetRendererID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1)))
+        if (ImGui::ImageButton(buttonName.c_str(),(ImTextureID)icon->GetRendererID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1)) && toolbarEnabled)
         {
-            if (mSceneState == SceneState::Edit)
+            if (mSceneState == SceneState::Edit || mSceneState == SceneState::Simulate)
             {
                 OnScenePlay();
             }
@@ -620,6 +662,27 @@ namespace Orange
                 OnSceneStop();
             }
         }
+
+        ImGui::SameLine();
+
+        {
+            Ref<Texture2D> icon = (mSceneState == SceneState::Edit || mSceneState==SceneState::Play)
+               ? mpIconSimulate : mpIconStop;
+
+            if (ImGui::ImageButton("Simulate", (ImTextureID)icon->GetRendererID(), ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1)) && toolbarEnabled)
+            {
+                if (mSceneState == SceneState::Edit || mSceneState == SceneState::Play)
+                {
+                    OnSceneSimulate();
+                }
+                else if (mSceneState == SceneState::Simulate)
+                {
+                    OnSceneStop();
+                }
+            }
+        }
+
+
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor(3);
         ImGui::End();

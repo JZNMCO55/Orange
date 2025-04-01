@@ -13,7 +13,7 @@ namespace Orange
     private:
         enum class SceneState
         {
-            Edit = 0, Play = 1
+            Edit = 0, Play = 1, Simulate = 2
         };
     public:
         EditorLayer();
@@ -40,6 +40,7 @@ namespace Orange
         void SerilizeScene(Ref<Scene> tpScene, const std::filesystem::path& path);
 
         void OnScenePlay();
+        void OnSceneSimulate();
         void OnSceneStop();
 
         void OnDuplicateEntity();
@@ -75,7 +76,7 @@ namespace Orange
 
         int mGizmoType = -1;
 
-        SceneHierachyPanel mSceneHierachyPanel;
+        SceneHierachyPanel mSceneHierarchyPanel;
         ContentBrowserPannel mContentBrowserPannel;
 
         SceneState mSceneState = SceneState::Edit;
@@ -83,6 +84,7 @@ namespace Orange
         // Editor Resources
         Ref<Texture2D> mpIconPlay{ nullptr };
         Ref<Texture2D> mpIconStop{ nullptr };
+        Ref<Texture2D> mpIconSimulate{ nullptr };
     };
 }
 
