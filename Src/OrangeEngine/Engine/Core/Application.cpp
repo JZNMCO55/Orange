@@ -5,6 +5,7 @@
 #include "Renderer/Renderer.h"
 #include "IWindow.h"
 #include "Application.h"
+#include "Scripting/ScriptEngine.h"
 
 namespace Orange
 {
@@ -28,6 +29,7 @@ namespace Orange
         mpWindow->SetEventCallback(BIND_EVENT_FN(OnEvent));
 
         Renderer::Init();
+        ScriptEngine::Init();
 
         mpImGuiLayer = CreateRef<ImGuiLayer>();
         PushOverlay(mpImGuiLayer);
@@ -37,7 +39,8 @@ namespace Orange
     {
         ORG_PROFILE_FUNCTION();
 
-        //Renderer::Shutdown();
+        ScriptEngine::Shutdown();
+        Renderer::ShutDown();
     }
 
     void Application::Close()

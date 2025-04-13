@@ -61,6 +61,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         spirv-cross-glsl
         SPIRV-Tools
         box2d
+        libmono-static-sgen
+        mono-2.0-sgen
+        MonoPosixHelper
     )
 else()
     set(3rdLibs 
@@ -70,6 +73,9 @@ else()
         spirv-cross-glsld
         SPIRV-Toolsd
         box2dd
+        libmono-static-sgen
+        mono-2.0-sgen
+        MonoPosixHelper
         )
 endif()
 
@@ -77,12 +83,17 @@ endif()
 target_link_directories(${PROJECT_NAME} PUBLIC 
                         ${THIRDPARTY_LIB_DIR}
                         ${THIRDPARTY_LIB_DIR}/Vulkan
+                        ${THIRDPARTY_LIB_DIR}/Mono
                         )
 target_link_libraries(${PROJECT_NAME} PUBLIC
                         glfw3
                         glad
                         imgui
                         glm
+                        Ws2_32
+                        Winmm
+                        Bcrypt
+                        Version
                         ${OPENGL_LIBRARIES}
                         ${3rdLibs}
 )
