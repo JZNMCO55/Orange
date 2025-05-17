@@ -9,7 +9,7 @@ set PROJECT_DIR=%SCRIPT_DIR:~0,-7%
 
 :: 获取构建配置（默认为 Release）
 set CONFIGURATION=Release
-if "%1"=="debug" set CONFIGURATION=Debug
+if "%1"=="Debug" set CONFIGURATION=Debug
 if "%1"=="Release" set CONFIGURATION=Release
 
 :: 设置静态库和动态库选项
@@ -48,6 +48,7 @@ echo Running CMake to configure the project...
 cmake -G "Visual Studio 17 2022" -A x64 ^
     -DBUILD_SHARED_LIBS=%SHARED_LIBRARY% ^
     -DCMAKE_CONFIGURATION_TYPES=%CONFIGURATION% ^
+    -DCMAKE_BUILD_TYPE=%CONFIGURATION% ^
     -DCMAKE_BINARY_DIR=%BUILD_DIR% ^
     -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=%OUTPUT_DIR%\lib ^
     -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=%OUTPUT_DIR%\lib ^

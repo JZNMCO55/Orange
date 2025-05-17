@@ -1,36 +1,18 @@
 #ifndef ORANGE_H
 #define ORANGE_H
 
-#include "pch.h"
+/* =============================================
+ * =============Layer1==========================
+ * ============================================= */
 
-#include "OrangeExport.h"
-#include "Application.h"
-#include "Core/Timestep.h"
-#include "Layer.h"
-#include "Log.h"
+/******************** Core ********************/
+#include "Layer1/Core/Debug/Logger.h"
+#include "Layer1/Core/UnitTesting/test.h"
 
-#include "Input.h"
-#include "KeyCodes.h"
-#include "MouseButtonCodes.h"
-#include "OrthographicCameraControler.h"
-#include "ImGui/ImGuiLayer.h"
+/******************** Platform ****************/
 
-#include "Scene/Scene.h"
-#include "Scene/Entity.h"
-#include "Scene/ScriptableEntity.h"
-#include "Scene/Components.h"
-
-// -----------------Renderer-------------------
-#include "Renderer/Renderer.h"
-#include "Renderer/Renderer2D.h"
-#include "Renderer/RenderCommand.h"
-#include "Renderer/Buffer.h"
-#include "Renderer/Shader.h"
-#include "Renderer/VertexArray.h"
-#include "Renderer/OrthographicCamera.h"
-#include "Renderer/Texture.h"
-#include "Renderer/FrameBuffer.h"
-#include "Renderer/Camera.h"
-#include "Renderer/EditorCamera.h"
+/* =============================================
+ * Layer2
+ * ============================================= */
 
 #endif // ORANGE_H

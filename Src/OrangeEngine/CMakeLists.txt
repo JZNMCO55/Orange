@@ -3,97 +3,76 @@ project(OrangeEngine)
 
 # 搜索头文件和库路径
 set(THIRDPARTY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty/include)
-set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR}/3rdparty/lib)
+set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR} /3rdparty/lib)
 
 # 搜索源文件
 file(GLOB_RECURSE ORANGEENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
 # 搜索头文件
-file(GLOB_RECURSE ORANGEENGINE_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
-
-# 搜索依赖库
-find_package(OpenGL REQUIRED)
-
-# 添加库
-if(BUILD_SHARED_LIBS)
-    add_library(${PROJECT_NAME} SHARED ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
-    target_compile_definitions(${PROJECT_NAME} PRIVATE -DORANGE_EXPORTS)
-else()
-    add_library(${PROJECT_NAME} STATIC ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS})
-    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_STATIC)
-endif()
-
+file(GLOB_RECURSE ORANGEENGINE_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp")
+    
 set(ALL_SOURCE_FILE
     ${ORANGEENGINE_HEADERS}
     ${ORANGEENGINE_SOURCES}
 )
 
+add_library(${PROJECT_NAME} STATIC ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADERS}) 
+
+# 编译版本
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_RELEASE)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_DEBUG)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Dist")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_DIST)
+endif()
+
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
     FILES ${ALL_SOURCE_FILE}
 )
 
-# 指定编译选项
-target_compile_definitions(${PROJECT_NAME} PRIVATE -DYAML_CPP_STATIC_DEFINE)
-target_compile_definitions(${PROJECT_NAME} PUBLIC -DPLATFORM_WINDOWS)
-target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_ENABLE_ASSERTS)
-if(MSVC)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
-endif()
+Set(ORANGE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/
+    ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/Core/UnitTesting
+)
 
 # 指定头文件路径
-target_include_directories(${PROJECT_NAME} PUBLIC
+target_include_directories(${PROJECT_NAME}
+    PUBLIC   # 公开给依赖项目
+    ${ORANGE_INCLUDE_DIR}
+    PRIVATE  # 仅内部使用
     ${THIRDPARTY_INCLUDE_DIR}
-    ${THIRDPARTY_INCLUDE_DIR}/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/OpenGL
-    ${CMAKE_CURRENT_SOURCE_DIR}/Platform
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Core
-    ${CMAKE_CURRENT_SOURCE_DIR}/Engine/Event
 )
 
 # 根据构建类型选择链接的库
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(3rdLibs 
-        yaml-cpp
-        shaderc_shared
-        spirv-cross-core
-        spirv-cross-glsl
-        SPIRV-Tools
-        box2d
-        libmono-static-sgen
-        mono-2.0-sgen
-        MonoPosixHelper
+
     )
 else()
     set(3rdLibs 
-        yaml-cppd
-        shaderc_sharedd
-        spirv-cross-cored
-        spirv-cross-glsld
-        SPIRV-Toolsd
-        box2dd
-        libmono-static-sgen
-        mono-2.0-sgen
-        MonoPosixHelper
+
         )
 endif()
 
 # 链接静态库
-target_link_directories(${PROJECT_NAME} PUBLIC 
+target_link_directories(${PROJECT_NAME} PRIVATE 
                         ${THIRDPARTY_LIB_DIR}
-                        ${THIRDPARTY_LIB_DIR}/Vulkan
-                        ${THIRDPARTY_LIB_DIR}/Mono
                         )
-target_link_libraries(${PROJECT_NAME} PUBLIC
+target_link_libraries(${PROJECT_NAME} PRIVATE
                         glfw3
-                        glad
-                        imgui
                         glm
-                        Ws2_32
-                        Winmm
-                        Bcrypt
-                        Version
-                        ${OPENGL_LIBRARIES}
                         ${3rdLibs}
 )
+
+# 确保静态库完全封装符号
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CXX_VISIBILITY_PRESET hidden          # GCC/Clang
+    VISIBILITY_INLINES_HIDDEN ON
+    INTERFACE_LINK_LIBRARIES ""  # 清空接口依赖
+)
+
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE "/EXPORT:NONE")  # Windows特殊处理
+endif()
