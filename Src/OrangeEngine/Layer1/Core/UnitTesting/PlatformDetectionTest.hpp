@@ -1,4 +1,4 @@
-#include "Layer1/Platform/Dettection/PlatformDetection.h"
+#include "Layer1/Platform/Detection/PlatformDetection.h"
 #include <iostream>
 
 static bool PrintPlatformInfo()
@@ -76,5 +76,10 @@ static bool PrintPlatformInfo()
     std::cout << "Executable Extension: " << PlatformDetection::GetExecutableExtension() << "\n";
     std::cout << "Dynamic Library Extension: " << PlatformDetection::GetDynamicLibraryExtension() << "\n";
     std::cout << "Static Library Extension: " << PlatformDetection::GetStaticLibraryExtension() << "\n";
+
+    // 可执行文件路径
+    std::cout << "Executable Path: " << PlatformDetection::GetExecutablePath() << "\n";
+    // 可执行文件目录
+    std::cout << "Executable Directory: " << PlatformDetection::GetExecutableDirectory() << "\n";
     return true;
 }

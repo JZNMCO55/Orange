@@ -71,6 +71,12 @@ namespace Orange
 
             // 获取平台特定的静态库扩展名
             static std::string GetStaticLibraryExtension();
+
+            // 获取当前可执行文件的绝对路径
+            static std::string GetExecutablePath();
+
+            // 获取当前可执行文件的目录
+            static std::string GetExecutableDirectory();
         };
 
     } // namespace Platform

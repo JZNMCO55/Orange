@@ -283,5 +283,42 @@ namespace Orange
 #endif
         }
 
+        std::string PlatformDetection::GetExecutablePath()
+        {
+#if defined(_WIN32)
+            char buffer[MAX_PATH];
+            DWORD len = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+            if (len > 0 && len < MAX_PATH)
+                return std::string(buffer);
+            return "";
+
+#elif defined(__linux__)
+            char buffer[PATH_MAX];
+            ssize_t count = readlink("/proc/self/exe", buffer, PATH_MAX);
+            if (count > 0 && count < PATH_MAX)
+                return std::string(buffer, count);
+            return "";
+
+#elif defined(__APPLE__)
+            char buffer[PATH_MAX];
+            uint32_t size = sizeof(buffer);
+            if (_NSGetExecutablePath(buffer, &size) == 0)
+                return std::string(buffer);
+            return "";
+
+#else
+            return "";
+#endif
+        }
+
+        std::string PlatformDetection::GetExecutableDirectory()
+        {
+            std::string path = GetExecutablePath();
+            size_t pos = path.find_last_of("/\\"); // 支持 Windows 和 POSIX 分隔符
+            if (pos != std::string::npos)
+                return path.substr(0, pos);
+            return "";
+        }
+
     } // namespace Platform
 } // namespace OrangeEngine
