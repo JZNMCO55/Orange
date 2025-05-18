@@ -35,7 +35,8 @@ namespace Orange
 
     TEST(PlatformDetectionTest, LineEnding)
     {
-        EXPECT_EQ(Platform::PlatformDetection::GetLineEnding(), "\r\n");
+        std::string lineEnding = Platform::PlatformDetection::GetLineEnding();
+        EXPECT_STREQ(lineEnding.c_str(), "\r\n");
     }
 
     TEST(PlatformDetectionTest, TempDirectory)

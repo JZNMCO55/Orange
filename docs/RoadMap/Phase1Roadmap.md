@@ -6,9 +6,13 @@
 ## 📂 项目结构
 ```
 OrangeEngine/
-├── Core/           # 核心功能模块
-├── Runtime/        # 运行时功能模块
-└── Tests/          # 测试项目
+├── Layer1/
+│   ├── Core/
+|   |   |──Debug/
+│   ├── Platform/
+|   |   |──Detection/
+├── Layer2/       
+└── Layer3/         
 ```
 
 ## 📚 开发阶段

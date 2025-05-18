@@ -10,7 +10,7 @@ set GTEST_DIR=%THIRDPARTY_DIR%\googletest
 set BUILD_TYPE=%~1
 
 :: 设置安装目录（与主项目保持一致）
-set INSTALL_DIR=%BASE_DIR%\out\%BUILD_TYPE%
+set INSTALL_DIR=%BASE_DIR%\build\%BUILD_TYPE%
 
 echo [INFO] Setting up Google Test...
 
@@ -25,7 +25,7 @@ if exist "%GTEST_DIR%" (
     )
 ) else (
     echo [INFO] Cloning googletest repository...
-    git clone https://github.com/google/googletest.git "%GTEST_DIR%"
+    git clone git@github.com:JZNMCO55/googletest.git "%GTEST_DIR%"
     if errorlevel 1 (
         echo [ERROR] Failed to clone googletest repository.
         exit /b 1
