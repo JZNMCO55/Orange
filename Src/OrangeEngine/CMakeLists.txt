@@ -1,6 +1,9 @@
 # 设置项目名称
 project(OrangeEngine)
 
+# 设置 CMake 模块路径
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/install/${CMAKE_BUILD_TYPE}")
+
 # 搜索头文件和库路径
 set(THIRDPARTY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty/include)
 set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR} /3rdparty/lib)
@@ -53,7 +56,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 else()
     set(3rdLibs 
 
-        )
+    )
 endif()
 
 # 链接静态库
@@ -74,3 +77,17 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/EXPORT:NONE")  # Windows特殊处理
 endif()
+
+# 安装规则
+install(TARGETS ${PROJECT_NAME}
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+
+# 安装头文件
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+    DESTINATION include/${PROJECT_NAME}
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    PATTERN "Layer1/*" PATTERN "Layer2/*"
+)

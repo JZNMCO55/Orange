@@ -19,7 +19,6 @@ if "%2"=="static" set SHARED_LIBRARY=OFF
 
 :: 设置构建目录和输出目录
 set BUILD_DIR=%PROJECT_DIR%\build\%CONFIGURATION%
-set OUTPUT_DIR=%PROJECT_DIR%\out\%CONFIGURATION%
 
 :: 输出正在使用的构建配置
 echo Using %CONFIGURATION% configuration.
@@ -36,10 +35,6 @@ if not exist %BUILD_DIR% (
     mkdir %BUILD_DIR%
 )
 
-:: 创建输出目录
-echo Creating output directory...
-mkdir %OUTPUT_DIR%
-
 :: 进入构建目录
 cd /d %BUILD_DIR%
 
@@ -50,9 +45,10 @@ cmake -G "Visual Studio 17 2022" -A x64 ^
     -DCMAKE_CONFIGURATION_TYPES=%CONFIGURATION% ^
     -DCMAKE_BUILD_TYPE=%CONFIGURATION% ^
     -DCMAKE_BINARY_DIR=%BUILD_DIR% ^
-    -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=%OUTPUT_DIR%\lib ^
-    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=%OUTPUT_DIR%\lib ^
-    -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=%OUTPUT_DIR%\bin ^
+    -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=%BUILD_DIR%\lib ^
+    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=%BUILD_DIR%\lib ^
+    -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=%BUILD_DIR%\bin ^
+    -DCMAKE_INSTALL_PREFIX=%BUILD_DIR% ^
     %PROJECT_DIR%
 
 echo Build complete!

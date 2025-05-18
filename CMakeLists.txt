@@ -12,3 +12,10 @@ endif()
 # 添加子目录
 add_subdirectory(Src/OrangeEngine)
 add_subdirectory(Src/OrangeEditor)
+# 编译版本
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_subdirectory(Src/OrangeTest)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_subdirectory(Src/OrangeTest)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Dist")
+endif()

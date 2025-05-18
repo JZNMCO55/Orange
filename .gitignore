@@ -4,4 +4,4 @@ out/
 build/
 script/__pycache__/
 3rdparty/
-Src/OrangeScripts/obj/
+install/
