@@ -28,9 +28,9 @@ OrangeEngine/
   - [ ] 内存池实现
   - [ ] 内存泄漏检测
 
-- [ ] 日志系统
+- [x] 日志系统
   - [x] 多级别日志支持
-  - [ ] 日志文件输出
+  - [X] 日志文件输出
   - [x] 控制台输出
 
 - [ ] 文件系统
@@ -140,11 +140,13 @@ OrangeEngine/
 - IDE: Visual Studio 2022
 
 ### 依赖库
-- DirectX SDK
+- Vulkan SDK
 - Windows SDK
 - Google Test (单元测试)
 - spdlog (日志系统)
-
+- GLFW (窗口管理)
+- GLM (数学库)
+- ImGui (GUI)
 ## 注意事项
 
 ### 代码规范

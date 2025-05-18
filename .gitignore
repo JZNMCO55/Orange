@@ -3,5 +3,5 @@
 out/
 build/
 script/__pycache__/
-3rdParty/Vulkan/
+3rdparty/
 Src/OrangeScripts/obj/

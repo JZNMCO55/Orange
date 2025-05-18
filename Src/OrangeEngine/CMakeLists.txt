@@ -61,8 +61,6 @@ target_link_directories(${PROJECT_NAME} PRIVATE
                         ${THIRDPARTY_LIB_DIR}
                         )
 target_link_libraries(${PROJECT_NAME} PRIVATE
-                        glfw3
-                        glm
                         ${3rdLibs}
 )
 
