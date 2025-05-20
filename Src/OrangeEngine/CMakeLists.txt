@@ -5,8 +5,8 @@ project(OrangeEngine)
 list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/install/${CMAKE_BUILD_TYPE}")
 
 # 搜索头文件和库路径
-set(THIRDPARTY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty/include)
-set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR} /3rdparty/lib)
+set(THIRDPARTY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty)
+set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR}/3rdparty/lib)
 
 # 搜索源文件
 file(GLOB_RECURSE ORANGEENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
@@ -34,57 +34,64 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
     FILES ${ALL_SOURCE_FILE}
 )
 
-Set(ORANGE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/
-    ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/Core/UnitTesting
+# 使用相对路径定义include目录
+set(ORANGE_INCLUDE_DIRS 
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Layer1"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Layer1/Core/UnitTesting"
 )
 
+# 查找依赖库
 find_package(fmt REQUIRED)
+find_package(glm REQUIRED)
+find_package(spdlog REQUIRED)
 
-# 指定头文件路径
+# 设置包含目录
 target_include_directories(${PROJECT_NAME}
-    PUBLIC   # 公开给依赖项目
-    ${ORANGE_INCLUDE_DIR}
-    PRIVATE  # 仅内部使用
-    ${THIRDPARTY_INCLUDE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    # 公共头文件目录
+    PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+    
+    # 私有头文件目录
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/Core/UnitTesting
+    ${CMAKE_CURRENT_SOURCE_DIR}/Layer1
+    ${THIRDPARTY_INCLUDE_DIR}/fmt/include
+    ${THIRDPARTY_INCLUDE_DIR}/spdlog/include
+    ${THIRDPARTY_INCLUDE_DIR}/glm/include
 )
 
-# 根据构建类型选择链接的库
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(3rdLibs 
-        fmt::fmt
-    )
-else()
-    set(3rdLibs 
-        fmt::fmt
-    )
-endif()
-
-# 链接静态库
-target_link_directories(${PROJECT_NAME} PRIVATE 
-                        ${THIRDPARTY_LIB_DIR}
-                        )
-target_link_libraries(${PROJECT_NAME} PRIVATE
-                        ${3rdLibs}
+# 链接库 - 所有依赖都是PRIVATE，完全封装第三方库
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+    fmt::fmt
+    spdlog::spdlog
+    glm::glm
 )
 
-# 确保静态库完全封装符号
+# 对于OrangeTest项目需要使用logger相关代码
+# 通过修改OrangeTest的CMakeLists.txt，让它直接链接fmt和spdlog
+
+# 调整静态库的符号可见性设置
 set_target_properties(${PROJECT_NAME} PROPERTIES
-    CXX_VISIBILITY_PRESET hidden          # GCC/Clang
+    CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
-    INTERFACE_LINK_LIBRARIES ""  # 清空接口依赖
 )
-
-if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE "/EXPORT:NONE")  # Windows特殊处理
-endif()
 
 # 安装规则
 install(TARGETS ${PROJECT_NAME}
+    EXPORT OrangeEngineTargets
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
+)
+
+# 导出依赖关系
+install(EXPORT OrangeEngineTargets
+    NAMESPACE OrangeEngine::
+    FILE OrangeEngineTargets.cmake
+    DESTINATION lib/cmake/OrangeEngine
 )
 
 # 安装头文件

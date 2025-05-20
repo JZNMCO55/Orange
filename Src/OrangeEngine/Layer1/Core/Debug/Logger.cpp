@@ -23,7 +23,7 @@ namespace Orange
             console_sink->set_pattern("[%T] [%^%l%$] %v");
             file_sink->set_pattern("[%Y-%m-%d %T] [%l] %v");
 
-            std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
+            std::vector<spdlog::sink_ptr> sinks{ console_sink, file_sink };
 
             Logger = std::make_shared<spdlog::logger>("Orange", sinks.begin(), sinks.end());
             Logger->set_level(spdlog::level::trace);
@@ -34,32 +34,32 @@ namespace Orange
         {
         }
 
-        void LogError(const std::string &message)
+        void LogError(const std::string& message)
         {
             Logger->error(message);
         }
 
-        void LogWarn(const std::string &message)
+        void LogWarn(const std::string& message)
         {
             Logger->warn(message);
         }
 
-        void LogInfo(const std::string &message)
+        void LogInfo(const std::string& message)
         {
             Logger->info(message);
         }
 
-        void LogDebug(const std::string &message)
+        void LogDebug(const std::string& message)
         {
             Logger->debug(message);
         }
 
-        void LogTrace(const std::string &message)
+        void LogTrace(const std::string& message)
         {
             Logger->trace(message);
         }
 
-        void LogCritical(const std::string &message)
+        void LogCritical(const std::string& message)
         {
             Logger->critical(message);
         }
@@ -76,32 +76,32 @@ namespace Orange
         impl = std::make_unique<LogImpl>();
     }
 
-    void Logger::LogError(const std::string &message)
+    void Logger::LogError(const std::string& message)
     {
         impl->LogError(message);
     }
 
-    void Logger::LogWarn(const std::string &message)
+    void Logger::LogWarn(const std::string& message)
     {
         impl->LogWarn(message);
     }
 
-    void Logger::LogInfo(const std::string &message)
+    void Logger::LogInfo(const std::string& message)
     {
         impl->LogInfo(message);
     }
 
-    void Logger::LogDebug(const std::string &message)
+    void Logger::LogDebug(const std::string& message)
     {
         impl->LogDebug(message);
     }
 
-    void Logger::LogTrace(const std::string &message)
+    void Logger::LogTrace(const std::string& message)
     {
         impl->LogTrace(message);
     }
 
-    void Logger::LogCritical(const std::string &message)
+    void Logger::LogCritical(const std::string& message)
     {
         impl->LogCritical(message);
     }

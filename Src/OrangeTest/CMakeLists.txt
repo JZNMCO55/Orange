@@ -24,7 +24,7 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
     FILES ${ORANGETEST_SOURCES}
 )
 
-# 链接 Google Test 的库
+# 链接库 - 只需要链接OrangeEngine和GTest
 target_link_libraries(OrangeTest
     GTest::GTest
     OrangeEngine

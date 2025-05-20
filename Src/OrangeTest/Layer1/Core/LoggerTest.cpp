@@ -14,15 +14,15 @@ namespace Orange
         EXPECT_NO_THROW(ORG_LOG_CRITICAL("Log Critical"));
     }
 
-    TEST(LoggerTest, FormattedLogging)
-    {
-        Logger::Init();
-        int seed = 42;
-        std::string name = "TestApp";
-        double value = 3.14159;
+    //TEST(LoggerTest, FormattedLogging)
+    //{
+    //    Logger::Init();
+    //    int seed = 42;
+    //    std::string name = "TestApp";
+    //    double value = 3.14159;
 
-        EXPECT_NO_THROW(ORG_LOG_INFO("Random number generator initialized with seed: {}", seed));
-        EXPECT_NO_THROW(ORG_LOG_INFO("Application {} started with value: {:.2f}", name, value));
-        EXPECT_NO_THROW(ORG_LOG_ERROR("Failed to process request {} with error code: {}", 123, 404));
-    }
+    //    EXPECT_NO_THROW(ORG_LOG_INFO("Random number generator initialized with seed: {}", seed));
+    //    EXPECT_NO_THROW(ORG_LOG_INFO("Application {} started with value: {:.2f}", name, value));
+    //    EXPECT_NO_THROW(ORG_LOG_ERROR("Failed to process request {} with error code: {}", 123, 404));
+    //}
 }

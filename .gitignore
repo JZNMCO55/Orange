@@ -5,3 +5,4 @@ build/
 script/__pycache__/
 3rdparty/
 install/
+.cursor/
