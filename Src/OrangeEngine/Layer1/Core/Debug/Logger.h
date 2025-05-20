@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <string>
+#include <format>
 
 namespace Orange
 {
@@ -12,12 +13,50 @@ namespace Orange
         // 需要在程序启动时添加到初始化列表
         static void Init();
 
-        static void LogError(const std::string& message);
-        static void LogWarn(const std::string& message);
-        static void LogInfo(const std::string& message);
-        static void LogDebug(const std::string& message);
-        static void LogTrace(const std::string& message);
-        static void LogCritical(const std::string& message);
+        // 编译时格式检查接口
+        template <typename... Args>
+        static void LogError(std::format_string<Args...> fmt, Args &&...args)
+        {
+            InternalLogError(std::format(fmt, std::forward<Args>(args)...));
+        }
+
+        template <typename... Args>
+        static void LogWarn(std::format_string<Args...> fmt, Args &&...args)
+        {
+            InternalLogWarn(std::format(fmt, std::forward<Args>(args)...));
+        }
+
+        template <typename... Args>
+        static void LogInfo(std::format_string<Args...> fmt, Args &&...args)
+        {
+            InternalLogInfo(std::format(fmt, std::forward<Args>(args)...));
+        }
+
+        template <typename... Args>
+        static void LogDebug(std::format_string<Args...> fmt, Args &&...args)
+        {
+            InternalLogDebug(std::format(fmt, std::forward<Args>(args)...));
+        }
+
+        template <typename... Args>
+        static void LogTrace(std::format_string<Args...> fmt, Args &&...args)
+        {
+            InternalLogTrace(std::format(fmt, std::forward<Args>(args)...));
+        }
+
+        template <typename... Args>
+        static void LogCritical(std::format_string<Args...> fmt, Args &&...args)
+        {
+            InternalLogCritical(std::format(fmt, std::forward<Args>(args)...));
+        }
+
+    public:
+        static void InternalLogError(const std::string &message);
+        static void InternalLogWarn(const std::string &message);
+        static void InternalLogInfo(const std::string &message);
+        static void InternalLogDebug(const std::string &message);
+        static void InternalLogTrace(const std::string &message);
+        static void InternalLogCritical(const std::string &message);
     };
 }
 
