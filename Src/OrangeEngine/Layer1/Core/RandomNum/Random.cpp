@@ -1,4 +1,5 @@
 #include "Random.h"
+#include "../Debug/Logger.h"
 #include <chrono>
 
 namespace Orange
@@ -20,6 +21,7 @@ namespace Orange
                     std::chrono::high_resolution_clock::now().time_since_epoch().count());
             }
             m_seed = seed;
+            ORG_LOG_INFO("Random number generator initialized with seed: {}", seed);
             m_engine.seed(seed);
         }
 

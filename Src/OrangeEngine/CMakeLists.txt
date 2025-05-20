@@ -39,6 +39,8 @@ Set(ORANGE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/Core/UnitTesting
 )
 
+find_package(fmt REQUIRED)
+
 # 指定头文件路径
 target_include_directories(${PROJECT_NAME}
     PUBLIC   # 公开给依赖项目
@@ -51,11 +53,11 @@ target_include_directories(${PROJECT_NAME}
 # 根据构建类型选择链接的库
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(3rdLibs 
-
+        fmt::fmt
     )
 else()
     set(3rdLibs 
-
+        fmt::fmt
     )
 endif()
 

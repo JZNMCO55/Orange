@@ -20,7 +20,7 @@ if not exist "%THIRDPARTY_DIR%" (
 )
 
 :: 定义三方库列表
-set LIBRARIES=googletest 
+set LIBRARIES=googletest fmt
 
 :: 遍历每个库
 for %%L in (%LIBRARIES%) do (
@@ -39,7 +39,7 @@ for %%L in (%LIBRARIES%) do (
         if not exist "%LIB_DIR%" mkdir "%LIB_DIR%"
 
         :: 调用库的下载和构建脚本（使用完整路径）
-        call "%~dp0setup_%%L.bat" "%CONFIGURATION%"
+        call "%~dp03rdPartyScripts\setup_%%L.bat" "%CONFIGURATION%"
         if errorlevel 1 (
             echo [ERROR] Failed to setup library %%L.
             exit /b 1
