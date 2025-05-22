@@ -45,6 +45,7 @@ set(ORANGE_INCLUDE_DIRS
 find_package(fmt REQUIRED)
 find_package(glm REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(glfw3 3.5 REQUIRED)
 
 # 设置包含目录
 target_include_directories(${PROJECT_NAME}
@@ -60,6 +61,7 @@ target_include_directories(${PROJECT_NAME}
     ${THIRDPARTY_INCLUDE_DIR}/fmt/include
     ${THIRDPARTY_INCLUDE_DIR}/spdlog/include
     ${THIRDPARTY_INCLUDE_DIR}/glm/include
+    ${THIRDPARTY_INCLUDE_DIR}/glfw/include
 )
 
 # 链接库 - 所有依赖都是PRIVATE，完全封装第三方库
@@ -68,6 +70,7 @@ target_link_libraries(${PROJECT_NAME}
     fmt::fmt
     spdlog::spdlog
     glm::glm
+    glfw
 )
 
 # 对于OrangeTest项目需要使用logger相关代码
