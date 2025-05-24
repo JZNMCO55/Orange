@@ -45,13 +45,13 @@ namespace Orange
              * @brief 开始记录命令
              * @return 是否成功开始记录
              */
-            virtual bool Begin() = 0;
+            virtual bool Begin() { return false; };
 
             /**
              * @brief 结束记录命令
              * @return 是否成功结束记录
              */
-            virtual bool End() = 0;
+            virtual bool End() { return false; };
 
             /**
              * @brief 提交命令到GPU执行
@@ -62,13 +62,13 @@ namespace Orange
              */
             virtual bool Submit(const std::vector<ISemaphore *> &waitSemaphores = {},
                                 const std::vector<ISemaphore *> &signalSemaphores = {},
-                                IFence *fence = nullptr) = 0;
+                                IFence *fence = nullptr) {}
 
             /**
              * @brief 重置上下文状态，准备下一帧使用
              * @return 是否成功重置
              */
-            virtual bool Reset() = 0;
+            virtual bool Reset() {}
 
             /**
              * @brief 开始渲染通道
@@ -80,18 +80,18 @@ namespace Orange
             virtual void BeginRenderPass(IRenderPass *renderPass,
                                          IFramebuffer *framebuffer,
                                          const std::vector<Color4f> &clearValues,
-                                         const Rect2D &renderArea) = 0;
+                                         const Rect2D &renderArea) {};
 
             /**
              * @brief 结束渲染通道
              */
-            virtual void EndRenderPass() = 0;
+            virtual void EndRenderPass() {};
 
             /**
              * @brief 绑定图形管线
              * @param pipeline 图形管线
              */
-            virtual void BindPipeline(IRenderPipeline *pipeline) = 0;
+            virtual void BindPipeline(IRenderPipeline *pipeline) {};
 
             /**
              * @brief 绑定顶点缓冲区
@@ -99,7 +99,7 @@ namespace Orange
              * @param binding 绑定点
              * @param offset 偏移量
              */
-            virtual void BindVertexBuffer(IRenderBuffer *buffer, uint32_t binding, uint64_t offset = 0) = 0;
+            virtual void BindVertexBuffer(IRenderBuffer *buffer, uint32_t binding, uint64_t offset = 0) {}
 
             /**
              * @brief 绑定索引缓冲区
@@ -107,7 +107,7 @@ namespace Orange
              * @param indexType 索引类型（16位或32位）
              * @param offset 偏移量
              */
-            virtual void BindIndexBuffer(IRenderBuffer *buffer, uint32_t indexType, uint64_t offset = 0) = 0;
+            virtual void BindIndexBuffer(IRenderBuffer *buffer, uint32_t indexType, uint64_t offset = 0) {}
 
             /**
              * @brief 绑定描述符集
@@ -119,25 +119,25 @@ namespace Orange
             virtual void BindDescriptorSet(IPipelineLayout *layout,
                                            IDescriptorSet *descriptorSet,
                                            uint32_t setIndex,
-                                           const std::vector<uint32_t> &dynamicOffsets = {}) = 0;
+                                           const std::vector<uint32_t> &dynamicOffsets = {}) {}
 
             /**
              * @brief 设置视口
              * @param viewports 视口数组
              */
-            virtual void SetViewports(const std::vector<Viewport> &viewports) = 0;
+            virtual void SetViewports(const std::vector<Viewport> &viewports) {}
 
             /**
              * @brief 设置裁剪矩形
              * @param scissors 裁剪矩形数组
              */
-            virtual void SetScissors(const std::vector<Rect2D> &scissors) = 0;
+            virtual void SetScissors(const std::vector<Rect2D> &scissors) {}
 
             /**
              * @brief 设置线宽
              * @param lineWidth 线宽
              */
-            virtual void SetLineWidth(float lineWidth) = 0;
+            virtual void SetLineWidth(float lineWidth) {}
 
             /**
              * @brief 设置深度偏移
@@ -145,19 +145,19 @@ namespace Orange
              * @param clamp 钳制值
              * @param slopeFactor 斜率因子
              */
-            virtual void SetDepthBias(float constantFactor, float clamp, float slopeFactor) = 0;
+            virtual void SetDepthBias(float constantFactor, float clamp, float slopeFactor) {}
 
             /**
              * @brief 设置混合常量
              * @param blendConstants 混合常量数组
              */
-            virtual void SetBlendConstants(const float blendConstants[4]) = 0;
+            virtual void SetBlendConstants(const float blendConstants[4]) {}
 
             /**
              * @brief 设置模板参考值
              * @param reference 参考值
              */
-            virtual void SetStencilReference(uint32_t reference) = 0;
+            virtual void SetStencilReference(uint32_t reference) {}
 
             /**
              * @brief 推送常量
@@ -171,7 +171,7 @@ namespace Orange
                                        ShaderStageFlag stageFlags,
                                        uint32_t offset,
                                        uint32_t size,
-                                       const void *data) = 0;
+                                       const void *data) {}
 
             /**
              * @brief 绘制
@@ -183,7 +183,7 @@ namespace Orange
             virtual void Draw(uint32_t vertexCount,
                               uint32_t instanceCount = 1,
                               uint32_t firstVertex = 0,
-                              uint32_t firstInstance = 0) = 0;
+                              uint32_t firstInstance = 0) {}
 
             /**
              * @brief 索引绘制
@@ -197,7 +197,7 @@ namespace Orange
                                      uint32_t instanceCount = 1,
                                      uint32_t firstIndex = 0,
                                      int32_t vertexOffset = 0,
-                                     uint32_t firstInstance = 0) = 0;
+                                     uint32_t firstInstance = 0) {}
 
             /**
              * @brief 间接绘制
@@ -209,7 +209,7 @@ namespace Orange
             virtual void DrawIndirect(IRenderBuffer *buffer,
                                       uint64_t offset,
                                       uint32_t drawCount,
-                                      uint32_t stride) = 0;
+                                      uint32_t stride) {}
 
             /**
              * @brief 间接索引绘制
@@ -221,7 +221,7 @@ namespace Orange
             virtual void DrawIndexedIndirect(IRenderBuffer *buffer,
                                              uint64_t offset,
                                              uint32_t drawCount,
-                                             uint32_t stride) = 0;
+                                             uint32_t stride) {}
 
             /**
              * @brief 执行计算着色器
@@ -231,7 +231,7 @@ namespace Orange
              */
             virtual void Dispatch(uint32_t groupCountX,
                                   uint32_t groupCountY,
-                                  uint32_t groupCountZ) = 0;
+                                  uint32_t groupCountZ) {}
 
             /**
              * @brief 间接执行计算着色器
@@ -239,7 +239,7 @@ namespace Orange
              * @param offset 偏移量
              */
             virtual void DispatchIndirect(IRenderBuffer *buffer,
-                                          uint64_t offset) = 0;
+                                          uint64_t offset) {}
 
             /**
              * @brief 复制缓冲区
@@ -249,7 +249,7 @@ namespace Orange
              */
             virtual void CopyBuffer(IRenderBuffer *srcBuffer,
                                     IRenderBuffer *dstBuffer,
-                                    const std::vector<BufferCopyRegion> &regions) = 0;
+                                    const std::vector<BufferCopyRegion> &regions) {}
 
             /**
              * @brief 复制缓冲区到纹理
@@ -261,7 +261,7 @@ namespace Orange
             virtual void CopyBufferToTexture(IRenderBuffer *srcBuffer,
                                              IRenderTexture *dstTexture,
                                              ResourceState dstLayout,
-                                             const std::vector<BufferTextureCopyRegion> &regions) = 0;
+                                             const std::vector<BufferTextureCopyRegion> &regions) {}
 
             /**
              * @brief 复制纹理到缓冲区
@@ -273,7 +273,7 @@ namespace Orange
             virtual void CopyTextureToBuffer(IRenderTexture *srcTexture,
                                              ResourceState srcLayout,
                                              IRenderBuffer *dstBuffer,
-                                             const std::vector<BufferTextureCopyRegion> &regions) = 0;
+                                             const std::vector<BufferTextureCopyRegion> &regions) {}
 
             /**
              * @brief 复制纹理
@@ -287,7 +287,7 @@ namespace Orange
                                      ResourceState srcLayout,
                                      IRenderTexture *dstTexture,
                                      ResourceState dstLayout,
-                                     const std::vector<TextureCopyRegion> &regions) = 0;
+                                     const std::vector<TextureCopyRegion> &regions) {}
 
             /**
              * @brief 资源屏障（状态转换）
@@ -297,7 +297,7 @@ namespace Orange
              */
             virtual void TextureBarrier(IRenderTexture *texture,
                                         ResourceState oldState,
-                                        ResourceState newState) = 0;
+                                        ResourceState newState) {}
 
             /**
              * @brief 资源屏障（状态转换）
@@ -307,7 +307,7 @@ namespace Orange
              */
             virtual void BufferBarrier(IRenderBuffer *buffer,
                                        ResourceState oldState,
-                                       ResourceState newState) = 0;
+                                       ResourceState newState) {}
 
             /**
              * @brief 生成纹理mipmap
@@ -317,39 +317,39 @@ namespace Orange
              */
             virtual void GenerateMipmaps(IRenderTexture *texture,
                                          ResourceState oldState,
-                                         ResourceState newState) = 0;
+                                         ResourceState newState) {}
 
             /**
              * @brief 开始调试标记
              * @param name 标记名称
              * @param color 标记颜色（RGBA格式，每个分量为0-255）
              */
-            virtual void BeginDebugMarker(const char *name, uint32_t color = 0xFFFFFFFF) = 0;
+            virtual void BeginDebugMarker(const char *name, uint32_t color = 0xFFFFFFFF) {}
 
             /**
              * @brief 结束调试标记
              */
-            virtual void EndDebugMarker() = 0;
+            virtual void EndDebugMarker() {}
 
             /**
              * @brief 插入调试标记
              * @param name 标记名称
              * @param color 标记颜色（RGBA格式，每个分量为0-255）
              */
-            virtual void InsertDebugMarker(const char *name, uint32_t color = 0xFFFFFFFF) = 0;
+            virtual void InsertDebugMarker(const char *name, uint32_t color = 0xFFFFFFFF) {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备指针
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
 
             /**
              * @brief 获取原生命令缓冲区句柄
              * @return 原生命令缓冲区句柄（如VkCommandBuffer、ID3D12GraphicsCommandList等）
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeCommandBuffer() const = 0;
+            virtual void *GetNativeCommandBuffer() const {}
         };
 
     } // namespace Graphics

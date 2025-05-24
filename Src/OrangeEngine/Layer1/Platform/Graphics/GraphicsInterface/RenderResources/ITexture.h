@@ -34,62 +34,62 @@ namespace Orange
              * @brief 获取视图类型
              * @return 视图类型
              */
-            virtual TextureViewType GetType() const = 0;
+            virtual TextureViewType GetType() const {}
 
             /**
              * @brief 获取像素格式
              * @return 像素格式
              */
-            virtual PixelFormat GetFormat() const = 0;
+            virtual PixelFormat GetFormat() const {}
 
             /**
              * @brief 获取基础Mip级别
              * @return 基础Mip级别
              */
-            virtual uint32_t GetBaseMipLevel() const = 0;
+            virtual uint32_t GetBaseMipLevel() const {}
 
             /**
              * @brief 获取Mip级别数量
              * @return Mip级别数量
              */
-            virtual uint32_t GetLevelCount() const = 0;
+            virtual uint32_t GetLevelCount() const {}
 
             /**
              * @brief 获取基础数组层
              * @return 基础数组层
              */
-            virtual uint32_t GetBaseArrayLayer() const = 0;
+            virtual uint32_t GetBaseArrayLayer() const {}
 
             /**
              * @brief 获取数组层数量
              * @return 数组层数量
              */
-            virtual uint32_t GetLayerCount() const = 0;
+            virtual uint32_t GetLayerCount() const {}
 
             /**
              * @brief 获取纹理
              * @return 纹理
              */
-            virtual class ITexture *GetTexture() const = 0;
+            virtual class ITexture *GetTexture() const {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
 
             /**
              * @brief 获取原生纹理视图句柄
              * @return 原生纹理视图句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeTextureView() const = 0;
+            virtual void *GetNativeTextureView() const {}
 
             /**
              * @brief 获取绑定信息
              * @return 资源绑定描述
              */
-            virtual ResourceBindingDesc GetBindingDesc() const = 0;
+            virtual ResourceBindingDesc GetBindingDesc() const {}
         };
 
         /**
@@ -109,86 +109,86 @@ namespace Orange
              * @brief 获取纹理类型
              * @return 纹理类型
              */
-            virtual TextureType GetType() const = 0;
+            virtual TextureType GetType() const {}
 
             /**
              * @brief 获取像素格式
              * @return 像素格式
              */
-            virtual PixelFormat GetFormat() const = 0;
+            virtual PixelFormat GetFormat() const {}
 
             /**
              * @brief 获取宽度
              * @return 宽度
              */
-            virtual uint32_t GetWidth() const = 0;
+            virtual uint32_t GetWidth() const {}
 
             /**
              * @brief 获取高度
              * @return 高度
              */
-            virtual uint32_t GetHeight() const = 0;
+            virtual uint32_t GetHeight() const {}
 
             /**
              * @brief 获取深度
              * @return 深度
              */
-            virtual uint32_t GetDepth() const = 0;
+            virtual uint32_t GetDepth() const {}
 
             /**
              * @brief 获取Mip级别数量
              * @return Mip级别数量
              */
-            virtual uint32_t GetMipLevels() const = 0;
+            virtual uint32_t GetMipLevels() const {}
 
             /**
              * @brief 获取数组层数
              * @return 数组层数
              */
-            virtual uint32_t GetArrayLayers() const = 0;
+            virtual uint32_t GetArrayLayers() const {}
 
             /**
              * @brief 获取采样数
              * @return 采样数
              */
-            virtual uint32_t GetSampleCount() const = 0;
+            virtual uint32_t GetSampleCount() const {}
 
             /**
              * @brief 获取纹理用途
              * @return 纹理用途标志
              */
-            virtual TextureUsageFlags GetUsage() const = 0;
+            virtual TextureUsageFlags GetUsage() const {}
 
             /**
              * @brief 检查是否是立方体纹理
              * @return 是否是立方体纹理
              */
-            virtual bool IsCubemap() const = 0;
+            virtual bool IsCubemap() const {}
 
             /**
              * @brief 检查是否可以用作渲染目标
              * @return 是否可以用作渲染目标
              */
-            virtual bool IsRenderTarget() const = 0;
+            virtual bool IsRenderTarget() const {}
 
             /**
              * @brief 检查是否是深度模板纹理
              * @return 是否是深度模板纹理
              */
-            virtual bool IsDepthStencil() const = 0;
+            virtual bool IsDepthStencil() const {}
 
             /**
              * @brief 创建纹理视图
              * @param createInfo 纹理视图创建信息
              * @return 新创建的纹理视图，失败返回nullptr
              */
-            virtual ITextureView *CreateView(const TextureViewCreateInfo &createInfo) = 0;
+            virtual ITextureView *CreateView(const TextureViewCreateInfo &createInfo) {}
 
             /**
              * @brief 获取默认视图
              * @return 默认纹理视图
              */
-            virtual ITextureView *GetDefaultView() const = 0;
+            virtual ITextureView *GetDefaultView() const {}
 
             /**
              * @brief 获取特定子资源的默认视图
@@ -196,7 +196,7 @@ namespace Orange
              * @param arrayLayer 数组层
              * @return 子资源视图
              */
-            virtual ITextureView *GetSubresourceView(uint32_t mipLevel, uint32_t arrayLayer) = 0;
+            virtual ITextureView *GetSubresourceView(uint32_t mipLevel, uint32_t arrayLayer) {}
 
             /**
              * @brief 更新纹理数据
@@ -205,13 +205,13 @@ namespace Orange
              * @param subresource 子资源描述
              * @return 是否成功更新
              */
-            virtual bool Update(const void *data, uint64_t dataSize, const TextureSubresourceDesc &subresource) = 0;
+            virtual bool Update(const void *data, uint64_t dataSize, const TextureSubresourceDesc &subresource) {}
 
             /**
              * @brief 获取当前纹理的内存状态
              * @return 资源状态
              */
-            virtual ResourceState GetState() const = 0;
+            virtual ResourceState GetState() const {}
 
             /**
              * @brief 转换纹理状态
@@ -219,33 +219,33 @@ namespace Orange
              * @param immediate 是否立即执行转换
              * @return 是否成功转换
              */
-            virtual bool TransitionState(ResourceState newState, bool immediate = true) = 0;
+            virtual bool TransitionState(ResourceState newState, bool immediate = true) {}
 
             /**
              * @brief 生成Mipmap
              * @param immediate 是否立即执行
              * @return 是否成功生成
              */
-            virtual bool GenerateMipmaps(bool immediate = true) = 0;
+            virtual bool GenerateMipmaps(bool immediate = true) {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
 
             /**
              * @brief 获取原生纹理句柄
              * @return 原生纹理句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeTexture() const = 0;
+            virtual void *GetNativeTexture() const {}
 
             /**
              * @brief 获取绑定信息
              * @return 资源绑定描述
              */
-            virtual ResourceBindingDesc GetBindingDesc() const = 0;
+            virtual ResourceBindingDesc GetBindingDesc() const {}
         };
 
         /**
@@ -268,7 +268,7 @@ namespace Orange
             bool cubemap = false;                                                  ///< 是否为立方体纹理
             bool generateMips = false;                                             ///< 是否生成Mipmap
             const void *initialData = nullptr;                                     ///< 初始数据
-            uint64_t initialDataSize = 0;                                          ///< 初始数据大小
+            uint64_t initialDataSize {}                                            ///< 初始数据大小
             const char *debugName = nullptr;                                       ///< 调试名称
 
             /**

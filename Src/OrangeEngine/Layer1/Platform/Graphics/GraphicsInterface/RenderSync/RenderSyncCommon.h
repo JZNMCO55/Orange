@@ -69,8 +69,8 @@ namespace Orange
          */
         struct SemaphoreCreateInfo
         {
-            SemaphoreType type = static_cast<SemaphoreType>(SemaphoreType::Binary); ///< 信号量类型
-            uint64_t initialValue = 0;                                              ///< 初始值（仅用于时间线信号量）
+            SemaphoreType type = SemaphoreType::Binary; ///< 信号量类型
+            uint64_t initialValue = 0;                                                ///< 初始值（仅用于时间线信号量）
             const char *debugName = nullptr;                                        ///< 调试名称
         };
 
@@ -100,10 +100,10 @@ namespace Orange
          */
         struct SyncPointDesc
         {
-            SyncPointType type = static_cast<SyncPointType>(SyncPointType::Submit); ///< 同步点类型
-            uint32_t queueFamilyIndex = 0;                                          ///< 队列族索引
-            uint32_t queueIndex = 0;                                                ///< 队列索引
-            uint64_t value = 1;                                                     ///< 同步值（用于时间线信号量）
+            SyncPointType type = SyncPointType::Submit; ///< 同步点类型
+            uint32_t queueFamilyIndex = 0;              ///< 队列族索引
+            uint32_t queueIndex = 0;                    ///< 队列索引
+            uint64_t value = 1;                         ///< 同步值（用于时间线信号量）
         };
 
         /**

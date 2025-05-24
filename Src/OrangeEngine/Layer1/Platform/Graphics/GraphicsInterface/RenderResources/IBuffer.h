@@ -33,25 +33,25 @@ namespace Orange
              * @brief 获取缓冲区大小
              * @return 缓冲区大小（字节）
              */
-            virtual uint64_t GetSize() const = 0;
+            virtual uint64_t GetSize() const {}
 
             /**
              * @brief 获取缓冲区类型
              * @return 缓冲区类型
              */
-            virtual BufferType GetType() const = 0;
+            virtual BufferType GetType() const {}
 
             /**
              * @brief 获取缓冲区用途
              * @return 缓冲区用途标志
              */
-            virtual BufferUsageFlags GetUsage() const = 0;
+            virtual BufferUsageFlags GetUsage() const {}
 
             /**
              * @brief 获取是否为主机可见
              * @return 是否为主机可见
              */
-            virtual bool IsHostVisible() const = 0;
+            virtual bool IsHostVisible() const {}
 
             /**
              * @brief 映射缓冲区内存
@@ -59,12 +59,12 @@ namespace Orange
              * @param size 大小，0表示映射整个缓冲区
              * @return 映射的内存指针，失败返回nullptr
              */
-            virtual void *Map(uint64_t offset = 0, uint64_t size = 0) = 0;
+            virtual void *Map(uint64_t offset = 0, uint64_t size = 0) {}
 
             /**
              * @brief 解除缓冲区内存映射
              */
-            virtual void Unmap() = 0;
+            virtual void Unmap() {}
 
             /**
              * @brief 更新缓冲区数据
@@ -73,27 +73,27 @@ namespace Orange
              * @param offset 目标偏移量
              * @return 是否成功更新
              */
-            virtual bool Update(const void *data, uint64_t size, uint64_t offset = 0) = 0;
+            virtual bool Update(const void *data, uint64_t size, uint64_t offset = 0) {}
 
             /**
              * @brief 刷新映射内存（对于某些平台需要）
              * @param offset 偏移量
              * @param size 大小，0表示整个缓冲区
              */
-            virtual void FlushMappedMemory(uint64_t offset = 0, uint64_t size = 0) = 0;
+            virtual void FlushMappedMemory(uint64_t offset = 0, uint64_t size = 0) {}
 
             /**
              * @brief 使映射内存失效（对于某些平台需要）
              * @param offset 偏移量
              * @param size 大小，0表示整个缓冲区
              */
-            virtual void InvalidateMappedMemory(uint64_t offset = 0, uint64_t size = 0) = 0;
+            virtual void InvalidateMappedMemory(uint64_t offset = 0, uint64_t size = 0) {}
 
             /**
              * @brief 获取当前缓冲区的内存状态
              * @return 资源状态
              */
-            virtual ResourceState GetState() const = 0;
+            virtual ResourceState GetState() const {}
 
             /**
              * @brief 转换缓冲区状态
@@ -101,38 +101,38 @@ namespace Orange
              * @param immediate 是否立即执行转换
              * @return 是否成功转换
              */
-            virtual bool TransitionState(ResourceState newState, bool immediate = true) = 0;
+            virtual bool TransitionState(ResourceState newState, bool immediate = true) {}
 
             /**
              * @brief 获取设备地址（仅在支持的平台上）
              * @return 设备地址，不支持则返回0
              */
-            virtual uint64_t GetDeviceAddress() const = 0;
+            virtual uint64_t GetDeviceAddress() const {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
 
             /**
              * @brief 获取原生缓冲区句柄
              * @return 原生缓冲区句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeBuffer() const = 0;
+            virtual void *GetNativeBuffer() const {}
 
             /**
              * @brief 获取绑定信息
              * @return 资源绑定描述
              */
-            virtual ResourceBindingDesc GetBindingDesc() const = 0;
+            virtual ResourceBindingDesc GetBindingDesc() const {}
 
             /**
              * @brief 获取是否支持间接绘制
              * @return 是否支持间接绘制
              */
-            virtual bool SupportsIndirectDrawing() const = 0;
+            virtual bool SupportsIndirectDrawing() const {}
 
             /**
              * @brief 创建缓冲区视图
@@ -140,7 +140,7 @@ namespace Orange
              * @param range 视图范围
              * @return 缓冲区视图描述
              */
-            virtual BufferViewDesc CreateView(uint64_t offset, uint64_t range) const = 0;
+            virtual BufferViewDesc CreateView(uint64_t offset, uint64_t range) const {}
         };
 
         /**
@@ -148,7 +148,7 @@ namespace Orange
          */
         struct BufferCreateDesc
         {
-            uint64_t size = 0;                                                     ///< 缓冲区大小（字节）
+            uint64_t size {}                                                       ///< 缓冲区大小（字节）
             BufferType type = BufferType::Vertex;                                  ///< 缓冲区类型
             BufferUsageFlags usage = BufferUsageFlagBits::TransferDst;             ///< 缓冲区用途
             MemoryPropertyFlags memoryFlags = MemoryPropertyFlagBits::DeviceLocal; ///< 内存属性

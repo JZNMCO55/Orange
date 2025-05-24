@@ -32,13 +32,13 @@ namespace Orange
              * @brief 获取信号量类型
              * @return 信号量类型
              */
-            virtual SemaphoreType GetType() const = 0;
+            virtual SemaphoreType GetType() const {}
 
             /**
              * @brief 获取信号量的当前值（仅用于时间线信号量）
              * @return 当前值，非时间线信号量返回0
              */
-            virtual uint64_t GetCounterValue() const = 0;
+            virtual uint64_t GetCounterValue() const {}
 
             /**
              * @brief 等待信号量达到指定值（仅用于时间线信号量）
@@ -47,7 +47,7 @@ namespace Orange
              * @return 是否成功等待（超时返回false）
              * @note 仅支持时间线信号量
              */
-            virtual bool Wait(uint64_t value, uint64_t timeout = UINT64_MAX) = 0;
+            virtual bool Wait(uint64_t value, uint64_t timeout = UINT64_MAX) {}
 
             /**
              * @brief 信号触发（仅用于时间线信号量）
@@ -55,32 +55,32 @@ namespace Orange
              * @return 是否成功触发
              * @note 仅支持时间线信号量，二进制信号量必须通过命令队列提交触发
              */
-            virtual bool Signal(uint64_t value) = 0;
+            virtual bool Signal(uint64_t value) {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
 
             /**
              * @brief 获取原生信号量句柄
              * @return 原生信号量句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeSemaphore() const = 0;
+            virtual void *GetNativeSemaphore() const {}
 
             /**
              * @brief 设置名称
              * @param name 名称
              */
-            virtual void SetName(const char *name) = 0;
+            virtual void SetName(const char *name) {}
 
             /**
              * @brief 获取名称
              * @return 名称
              */
-            virtual const char *GetName() const = 0;
+            virtual const char *GetName() const {}
         };
 
         /**
@@ -99,13 +99,13 @@ namespace Orange
              * @param createInfo 创建信息
              * @return 信号量，失败返回nullptr
              */
-            virtual IRenderSemaphore *CreateSemaphore(const SemaphoreCreateInfo &createInfo) = 0;
+            virtual IRenderSemaphore *CreateSemaphore(const SemaphoreCreateInfo &createInfo) {}
 
             /**
              * @brief 销毁信号量
              * @param semaphore 要销毁的信号量
              */
-            virtual void DestroySemaphore(IRenderSemaphore *semaphore) = 0;
+            virtual void DestroySemaphore(IRenderSemaphore *semaphore) {}
 
             /**
              * @brief 等待多个时间线信号量
@@ -117,7 +117,7 @@ namespace Orange
              * @return 是否成功等待（超时返回false）
              * @note 仅支持时间线信号量
              */
-            virtual bool WaitSemaphores(IRenderSemaphore **semaphores, const uint64_t *values, uint32_t semaphoreCount, bool waitAll, uint64_t timeout = UINT64_MAX) = 0;
+            virtual bool WaitSemaphores(IRenderSemaphore **semaphores, const uint64_t *values, uint32_t semaphoreCount, bool waitAll, uint64_t timeout = UINT64_MAX) {}
 
             /**
              * @brief 信号触发多个时间线信号量
@@ -127,7 +127,7 @@ namespace Orange
              * @return 是否成功触发
              * @note 仅支持时间线信号量
              */
-            virtual bool SignalSemaphores(IRenderSemaphore **semaphores, const uint64_t *values, uint32_t semaphoreCount) = 0;
+            virtual bool SignalSemaphores(IRenderSemaphore **semaphores, const uint64_t *values, uint32_t semaphoreCount) {}
         };
 
     } // namespace Graphics

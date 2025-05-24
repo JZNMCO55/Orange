@@ -74,69 +74,69 @@ namespace Orange
              * @brief 获取着色器类型
              * @return 着色器类型
              */
-            virtual ShaderType GetType() const = 0;
+            virtual ShaderType GetType() const {}
 
             /**
              * @brief 获取着色器源代码语言
              * @return 着色器语言
              */
-            virtual ShaderLanguage GetLanguage() const = 0;
+            virtual ShaderLanguage GetLanguage() const {}
 
             /**
              * @brief 获取着色器入口点
              * @return 着色器入口点
              */
-            virtual const std::string &GetEntryPoint() const = 0;
+            virtual const std::string &GetEntryPoint() const {}
 
             /**
              * @brief 获取着色器源代码
              * @return 着色器源代码
              */
-            virtual const std::string &GetSource() const = 0;
+            virtual const std::string &GetSource() const {}
 
             /**
              * @brief 获取着色器编译后的字节码
              * @return 着色器字节码
              */
-            virtual const std::vector<uint8_t> &GetBytecode() const = 0;
+            virtual const std::vector<uint8_t> &GetBytecode() const {}
 
             /**
              * @brief 是否有效
              * @return 是否有效
              */
-            virtual bool IsValid() const = 0;
+            virtual bool IsValid() const {}
 
             /**
              * @brief 获取编译错误信息
              * @return 编译错误信息
              */
-            virtual const std::string &GetErrorMessage() const = 0;
+            virtual const std::string &GetErrorMessage() const {}
 
             /**
              * @brief 获取着色器反射信息
              * @return 着色器反射信息
              */
-            virtual const ShaderReflection &GetReflection() const = 0;
+            virtual const ShaderReflection &GetReflection() const {}
 
             /**
              * @brief 重新编译着色器
              * @param source 新的源代码（如果为空则使用现有源代码）
              * @return 是否成功编译
              */
-            virtual bool Recompile(const std::string &source = "") = 0;
+            virtual bool Recompile(const std::string &source = "") {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
 
             /**
              * @brief 获取原生着色器模块句柄
              * @return 原生着色器模块句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeShaderModule() const = 0;
+            virtual void *GetNativeShaderModule() const {}
         };
 
         /**
@@ -284,39 +284,39 @@ namespace Orange
              * @param shader 着色器
              * @return 是否成功添加
              */
-            virtual bool AddShader(IShader *shader) = 0;
+            virtual bool AddShader(IShader *shader) {}
 
             /**
              * @brief 获取特定类型的着色器
              * @param type 着色器类型
              * @return 着色器，如果不存在则返回nullptr
              */
-            virtual IShader *GetShader(ShaderType type) const = 0;
+            virtual IShader *GetShader(ShaderType type) const {}
 
             /**
              * @brief 获取所有着色器
              * @return 着色器映射表（类型到着色器）
              */
-            virtual const std::unordered_map<ShaderType, IShader *> &GetShaders() const = 0;
+            virtual const std::unordered_map<ShaderType, IShader *> &GetShaders() const {}
 
             /**
              * @brief 检查程序是否有效
              * @param errorMessage 如果无效，输出错误信息
              * @return 是否有效
              */
-            virtual bool IsValid(std::string *errorMessage = nullptr) const = 0;
+            virtual bool IsValid(std::string *errorMessage = nullptr) const {}
 
             /**
              * @brief 获取程序反射信息
              * @return 程序反射信息
              */
-            virtual const ShaderReflection &GetReflection() const = 0;
+            virtual const ShaderReflection &GetReflection() const {}
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const = 0;
+            virtual IRenderDevice *GetDevice() const {}
         };
 
         /**
