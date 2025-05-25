@@ -36,58 +36,58 @@ namespace Orange
              * @brief 获取图像数量
              * @return 图像数量
              */
-            virtual uint32_t GetImageCount() const {}
+            virtual uint32_t GetImageCount() const { return 0; }
 
             /**
              * @brief 获取当前图像索引
              * @return 当前图像索引
              */
-            virtual uint32_t GetCurrentImageIndex() const {}
+            virtual uint32_t GetCurrentImageIndex() const { return 0; }
 
             /**
              * @brief 获取宽度
              * @return 宽度
              */
-            virtual uint32_t GetWidth() const {}
+            virtual uint32_t GetWidth() const { return 0; }
 
             /**
              * @brief 获取高度
              * @return 高度
              */
-            virtual uint32_t GetHeight() const {}
+            virtual uint32_t GetHeight() const { return 0; }
 
             /**
              * @brief 获取格式
              * @return 像素格式
              */
-            virtual PixelFormat GetFormat() const {}
+            virtual PixelFormat GetFormat() const { return PixelFormat::UNKNOWN; }
 
             /**
              * @brief 获取交换链图像
              * @param index 图像索引
              * @return 交换链图像
              */
-            virtual IRenderTexture *GetImage(uint32_t index) const {}
+            virtual IRenderTexture *GetImage(uint32_t index) const { return nullptr; }
 
             /**
              * @brief 获取当前图像
              * @return 当前图像
              */
-            virtual IRenderTexture *GetCurrentImage() const {}
+            virtual IRenderTexture *GetCurrentImage() const { return nullptr; }
 
             /**
              * @brief 获取下一个可用图像索引
              * @param signalSemaphore 信号量，在图像可用时触发
              * @return 下一个图像索引，失败返回UINT32_MAX
              */
-            virtual uint32_t AcquireNextImage(ISemaphore *signalSemaphore) {}
+            virtual uint32_t AcquireNextImage(ISemaphore *signalSemaphore) { return UINT32_MAX; }
 
             /**
              * @brief 呈现当前图像
              * @param waitSemaphores 等待的信号量列表
              * @return 是否成功呈现
              */
-            virtual bool Present(const std::vector<ISemaphore *> &waitSemaphores = {}) {}
+            virtual bool Present(const std::vector<ISemaphore *> &waitSemaphores = {}) { return false; }
 
             /**
              * @brief 调整交换链大小
@@ -95,13 +95,13 @@ namespace Orange
              * @param height 新高度
              * @return 是否成功调整大小
              */
-            virtual bool Resize(uint32_t width, uint32_t height) {}
+            virtual bool Resize(uint32_t width, uint32_t height) { return false; }
 
             /**
              * @brief 获取垂直同步状态
              * @return 是否启用垂直同步
              */
-            virtual bool IsVSyncEnabled() const {}
+            virtual bool IsVSyncEnabled() const { return false; }
 
             /**
              * @brief 设置垂直同步状态
@@ -113,21 +113,21 @@ namespace Orange
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生交换链句柄
              * @return 原生交换链句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeSwapChain() const {}
+            virtual void *GetNativeSwapChain() const { return nullptr; }
 
             /**
              * @brief 获取原生表面句柄
              * @return 原生表面句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeSurface() const {}
+            virtual void *GetNativeSurface() const { return nullptr; }
         };
 
     } // namespace Graphics

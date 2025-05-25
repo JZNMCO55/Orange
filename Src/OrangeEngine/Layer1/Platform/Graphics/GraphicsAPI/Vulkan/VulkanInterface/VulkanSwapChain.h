@@ -9,6 +9,7 @@
 #include "../../../GraphicsInterface/RenderInterface/ISwapChain.h"
 #include "../VulkanCommon/VulkanCommon.h"
 #include <vector>
+#include <memory>
 
 namespace Orange
 {
@@ -17,6 +18,7 @@ namespace Orange
         namespace Vulkan
         {
             class VulkanDevice;
+            class VulkanTexture;
 
             /**
              * @brief Vulkan交换链实现
@@ -24,7 +26,7 @@ namespace Orange
             class VulkanSwapChain : public ISwapChain
             {
             public:
-                VulkanSwapChain(VulkanDevice *device);
+                VulkanSwapChain(VulkanDevice* device);
                 virtual ~VulkanSwapChain();
 
                 // ISwapChain接口实现
@@ -33,12 +35,17 @@ namespace Orange
                 virtual uint32_t GetWidth() const override { return m_extent.width; }
                 virtual uint32_t GetHeight() const override { return m_extent.height; }
                 virtual PixelFormat GetFormat() const override { return m_format; }
-                virtual IRenderTexture *GetImage(uint32_t index) const override;
-                virtual uint32_t AcquireNextImage(ISemaphore *signalSemaphore) override;
-                virtual bool Present(const std::vector<ISemaphore *> &waitSemaphores = {}) override;
+                virtual IRenderTexture* GetImage(uint32_t index) const override;
+                virtual IRenderTexture* GetCurrentImage() const override;
+                virtual uint32_t AcquireNextImage(ISemaphore* signalSemaphore) override;
+                virtual bool Present(const std::vector<ISemaphore*>& waitSemaphores = {}) override;
                 virtual bool Resize(uint32_t width, uint32_t height) override;
                 virtual bool IsVSyncEnabled() const override { return m_vsyncEnabled; }
                 virtual void SetVSyncEnabled(bool enabled) override;
+                virtual IRenderDevice* GetDevice() const override;
+            
+                virtual void *GetNativeSwapChain() const override { return (void *)m_swapChain; }
+                virtual void *GetNativeSurface() const override { return (void *)m_surface; }
 
                 // Vulkan特定方法
                 VkSwapchainKHR GetVkSwapChain() const { return m_swapChain; }
@@ -56,7 +63,7 @@ namespace Orange
 
                 std::vector<VkImage> m_swapChainImages;
                 std::vector<VkImageView> m_swapChainImageViews;
-                std::vector<IRenderTexture *> m_renderTextures;
+                std::vector<std::unique_ptr<VulkanTexture>> m_renderTextures;
 
                 VkFormat m_swapChainImageFormat;
                 VkExtent2D m_extent;

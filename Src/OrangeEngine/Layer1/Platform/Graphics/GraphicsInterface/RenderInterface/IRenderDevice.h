@@ -49,7 +49,7 @@ namespace Orange
              * @param createInfo 设备创建信息
              * @return 是否成功初始化
              */
-            virtual bool Initialize(const DeviceCreateInfo &createInfo) {}
+            virtual bool Initialize(const DeviceCreateInfo &createInfo) { return false; }
 
             /**
              * @brief 关闭渲染设备并释放资源
@@ -61,7 +61,7 @@ namespace Orange
              * @param feature 要检查的渲染特性
              * @return 是否支持该特性
              */
-            virtual bool SupportsFeature(RenderFeature feature) const {}
+            virtual bool SupportsFeature(RenderFeature feature) const { return false; }
 
             /**
              * @brief 获取设备属性
@@ -78,97 +78,97 @@ namespace Orange
              * @brief 创建渲染上下文
              * @return 新创建的渲染上下文指针，失败返回nullptr
              */
-            virtual IRenderContext *CreateContext() {}
+            virtual IRenderContext *CreateContext() { return nullptr; }
 
             /**
              * @brief 创建交换链
              * @param createInfo 交换链创建信息
              * @return 新创建的交换链指针，失败返回nullptr
              */
-            virtual ISwapChain *CreateSwapChain(const SwapChainCreateInfo &createInfo) {}
+            virtual ISwapChain *CreateSwapChain(const SwapChainCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建缓冲区
              * @param createInfo 缓冲区创建信息
              * @return 新创建的缓冲区指针，失败返回nullptr
              */
-            virtual IRenderBuffer *CreateBuffer(const BufferCreateInfo &createInfo) {}
+            virtual IRenderBuffer *CreateBuffer(const BufferCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建纹理
              * @param createInfo 纹理创建信息
              * @return 新创建的纹理指针，失败返回nullptr
              */
-            virtual IRenderTexture *CreateTexture(const TextureCreateInfo &createInfo) {}
+            virtual IRenderTexture *CreateTexture(const TextureCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建采样器
              * @param createInfo 采样器创建信息
              * @return 新创建的采样器指针，失败返回nullptr
              */
-            virtual IRenderSampler *CreateSampler(const SamplerCreateInfo &createInfo) {}
+            virtual IRenderSampler *CreateSampler(const SamplerCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建着色器模块
              * @param createInfo 着色器创建信息
              * @return 新创建的着色器模块指针，失败返回nullptr
              */
-            virtual IShaderModule *CreateShaderModule(const ShaderCreateInfo &createInfo) {}
+            virtual IShaderModule *CreateShaderModule(const ShaderCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建描述符集布局
              * @param createInfo 描述符集布局创建信息
              * @return 新创建的描述符集布局指针，失败返回nullptr
              */
-            virtual IDescriptorSetLayout *CreateDescriptorSetLayout(const DescriptorSetLayoutCreateInfo &createInfo) {}
+            virtual IDescriptorSetLayout *CreateDescriptorSetLayout(const DescriptorSetLayoutCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建管线布局
              * @param createInfo 管线布局创建信息
              * @return 新创建的管线布局指针，失败返回nullptr
              */
-            virtual IPipelineLayout *CreatePipelineLayout(const PipelineLayoutCreateInfo &createInfo) {}
+            virtual IPipelineLayout *CreatePipelineLayout(const PipelineLayoutCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建图形渲染管线
              * @param createInfo 图形管线创建信息
              * @return 新创建的渲染管线指针，失败返回nullptr
              */
-            virtual IRenderPipeline *CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &createInfo) {}
+            virtual IRenderPipeline *CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建计算渲染管线
              * @param createInfo 计算管线创建信息
              * @return 新创建的渲染管线指针，失败返回nullptr
              */
-            virtual IRenderPipeline *CreateComputePipeline(const ComputePipelineCreateInfo &createInfo) {}
+            virtual IRenderPipeline *CreateComputePipeline(const ComputePipelineCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建渲染通道
              * @param createInfo 渲染通道创建信息
              * @return 新创建的渲染通道指针，失败返回nullptr
              */
-            virtual IRenderPass *CreateRenderPass(const RenderPassCreateInfo &createInfo) {}
+            virtual IRenderPass *CreateRenderPass(const RenderPassCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建描述符池
              * @param createInfo 描述符池创建信息
              * @return 新创建的描述符池指针，失败返回nullptr
              */
-            virtual IDescriptorPool *CreateDescriptorPool(const DescriptorPoolCreateInfo &createInfo) {}
+            virtual IDescriptorPool *CreateDescriptorPool(const DescriptorPoolCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 创建栅栏（用于CPU-GPU同步）
              * @param signaled 初始状态是否为已触发
              * @return 新创建的栅栏指针，失败返回nullptr
              */
-            virtual IFence *CreateFence(bool signaled = false) {}
+            virtual IFence *CreateFence(bool signaled = false) { return nullptr; }
 
             /**
              * @brief 创建信号量（用于GPU-GPU同步）
              * @return 新创建的信号量指针，失败返回nullptr
              */
-            virtual ISemaphore *CreateSemaphore() {}
+            virtual ISemaphore *CreateSemaphore() { return nullptr; }
 
             /**
              * @brief 获取GPU内存统计信息
@@ -181,20 +181,20 @@ namespace Orange
              * @return 原生设备句柄（如VkDevice、ID3D12Device等）
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeDevice() const {}
+            virtual void *GetNativeDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生API物理设备句柄
              * @return 原生物理设备句柄（如VkPhysicalDevice等）
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativePhysicalDevice() const {}
+            virtual void *GetNativePhysicalDevice() const { return nullptr; }
 
             /**
              * @brief 获取渲染API类型
              * @return 渲染API枚举值
              */
-            virtual RenderAPI GetRenderAPI() const {}
+            virtual RenderAPI GetRenderAPI() const { return RenderAPI::Vulkan; }
 
             /**
              * @brief 设置调试名称

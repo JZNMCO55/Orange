@@ -58,6 +58,8 @@ namespace Orange
 
                 // 工具方法
                 uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+                VkCommandBuffer BeginSingleTimeCommands();
+                void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
             };
 
         } // namespace Vulkan

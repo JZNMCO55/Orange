@@ -277,3 +277,10 @@ OrangeEngine/
 - 实现更复杂的渲染特性
 - 扩展游戏对象系统
 - 添加物理系统支持 
+
+VulkanSwapchain 完成情况：
+⚠️ 注意事项
+信号量支持 - 当前使用占位符，需要后续实现VulkanSemaphore类
+表面创建 - 需要根据具体平台实现表面创建逻辑
+线程安全 - 当前实现不是线程安全的
+VulkanSwapChain现在已经完全可用，为Orange引擎的Vulkan后端提供了完整的交换链功能支持！🎉

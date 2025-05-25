@@ -35,10 +35,17 @@ namespace Orange
 
                 // 资源创建方法（核心）
                 virtual IRenderBuffer *CreateBuffer(const BufferCreateInfo &createInfo) override;
+                virtual IRenderTexture *CreateTexture(const TextureCreateInfo &createInfo) override;
+                virtual IRenderSampler *CreateSampler(const SamplerCreateInfo &createInfo) override;
                 virtual IShaderModule *CreateShaderModule(const ShaderCreateInfo &createInfo) override;
                 virtual IRenderPipeline *CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &createInfo) override;
                 virtual IRenderPass *CreateRenderPass(const RenderPassCreateInfo &createInfo) override;
                 virtual ISwapChain *CreateSwapChain(const SwapChainCreateInfo &createInfo) override;
+                virtual IFence *CreateFence(bool signaled = false) override;
+                virtual ISemaphore *CreateSemaphore() override;
+
+                // 上下文创建
+                virtual IRenderContext *CreateContext() override;
 
                 // Vulkan特定方法
                 VkDevice GetVkDevice() const { return m_device; }

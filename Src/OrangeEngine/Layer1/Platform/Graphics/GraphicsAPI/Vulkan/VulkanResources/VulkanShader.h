@@ -10,6 +10,7 @@
 #include "../VulkanCommon/VulkanCommon.h"
 #include <vector>
 #include <string>
+#include <memory>
 
 namespace Orange
 {
@@ -40,6 +41,11 @@ namespace Orange
                 bool Initialize(const ShaderCreateInfo &createInfo);
                 void Shutdown();
 
+                // 静态工具方法
+                static std::shared_ptr<VulkanShader> LoadFromSPIRVFile(VulkanDevice *device, const std::string &filename, ShaderType type, const std::string &entryPoint = "main");
+                static std::shared_ptr<VulkanShader> LoadFromGLSLFile(VulkanDevice *device, const std::string &filename, ShaderType type, const std::string &entryPoint = "main");
+                static std::shared_ptr<VulkanShader> CreateFromSPIRV(VulkanDevice *device, const std::vector<uint8_t> &spirvCode, ShaderType type, const std::string &entryPoint = "main");
+
             private:
                 VulkanDevice *m_device;
                 VkShaderModule m_shaderModule = VK_NULL_HANDLE;
@@ -50,6 +56,9 @@ namespace Orange
                 // 工具方法
                 bool CreateShaderModuleFromCode(const std::vector<uint8_t> &code);
                 std::vector<uint8_t> LoadShaderFromFile(const std::string &filename);
+                std::string LoadGLSLFromFile(const std::string &filename);
+                std::vector<uint8_t> CompileGLSLToSPIRV(const std::string &glslCode, ShaderType type, const std::string &entryPoint);
+                VkShaderStageFlagBits ConvertShaderTypeToVulkanStage(ShaderType type) const;
             };
 
         } // namespace Vulkan

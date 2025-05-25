@@ -32,6 +32,8 @@ namespace Orange
                 virtual void *GetDescriptorSetLayout(uint32_t index) const override;
                 virtual uint32_t GetPushConstantRangeCount() const override { return static_cast<uint32_t>(m_pushConstantRanges.size()); }
                 virtual PushConstantRange GetPushConstantRange(uint32_t index) const override;
+                virtual IRenderDevice *GetDevice() const override;
+                virtual void *GetNativePipelineLayout() const override { return m_pipelineLayout; }
 
                 // Vulkan特定方法
                 VkPipelineLayout GetVkPipelineLayout() const { return m_pipelineLayout; }
@@ -58,7 +60,11 @@ namespace Orange
 
                 // IRenderPipeline接口实现
                 virtual PipelineType GetType() const override { return m_type; }
+                virtual IPipelineLayout *GetLayout() const override { return m_pipelineLayout; }
+                virtual IRenderPass *GetRenderPass() const override { return m_renderPass; }
                 virtual uint32_t GetSubpass() const override { return m_subpass; }
+                virtual IRenderDevice *GetDevice() const override;
+                virtual void *GetNativePipeline() const override { return m_pipeline; }
 
                 // Vulkan特定方法
                 VkPipeline GetVkPipeline() const { return m_pipeline; }
@@ -73,6 +79,7 @@ namespace Orange
                 VulkanDevice *m_device;
                 VkPipeline m_pipeline = VK_NULL_HANDLE;
                 VulkanPipelineLayout *m_pipelineLayout = nullptr;
+                IRenderPass *m_renderPass = nullptr;
                 PipelineType m_type = PipelineType::Graphics;
                 uint32_t m_subpass = 0;
 

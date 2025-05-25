@@ -35,19 +35,19 @@ namespace Orange
              * @brief 获取缓冲区大小
              * @return 缓冲区大小（字节）
              */
-            virtual uint64_t GetSize() const {}
+            virtual uint64_t GetSize() const { return 0; }
 
             /**
              * @brief 获取缓冲区类型
              * @return 缓冲区类型
              */
-            virtual BufferType GetType() const {}
+            virtual BufferType GetType() const { return BufferType::Vertex; }
 
             /**
              * @brief 获取是否为主机可见
              * @return 是否为主机可见
              */
-            virtual bool IsHostVisible() const {}
+            virtual bool IsHostVisible() const { return false; }
 
             /**
              * @brief 映射缓冲区内存
@@ -55,7 +55,7 @@ namespace Orange
              * @param size 大小，0表示映射整个缓冲区
              * @return 映射的内存指针，失败返回nullptr
              */
-            virtual void *Map(uint64_t offset = 0, uint64_t size = 0) {}
+            virtual void *Map(uint64_t offset = 0, uint64_t size = 0) { return nullptr; }
 
             /**
              * @brief 解除缓冲区内存映射
@@ -80,20 +80,20 @@ namespace Orange
              * @brief 获取设备地址（仅在支持的平台上）
              * @return 设备地址，不支持则返回0
              */
-            virtual uint64_t GetDeviceAddress() const {}
+            virtual uint64_t GetDeviceAddress() const { return 0; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生缓冲区句柄
              * @return 原生缓冲区句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeBuffer() const {}
+            virtual void *GetNativeBuffer() const { return nullptr; }
         };
 
         /**
@@ -113,93 +113,93 @@ namespace Orange
              * @brief 获取纹理类型
              * @return 纹理类型
              */
-            virtual TextureType GetType() const {}
+            virtual TextureType GetType() const { return TextureType::Texture2D; }
 
             /**
              * @brief 获取像素格式
              * @return 像素格式
              */
-            virtual PixelFormat GetFormat() const {}
+            virtual PixelFormat GetFormat() const { return PixelFormat::UNKNOWN; }
 
             /**
              * @brief 获取宽度
              * @return 宽度
              */
-            virtual uint32_t GetWidth() const {}
+            virtual uint32_t GetWidth() const { return 0; }
 
             /**
              * @brief 获取高度
              * @return 高度
              */
-            virtual uint32_t GetHeight() const {}
+            virtual uint32_t GetHeight() const { return 0; }
 
             /**
              * @brief 获取深度
              * @return 深度
              */
-            virtual uint32_t GetDepth() const {}
+            virtual uint32_t GetDepth() const { return 0; }
 
             /**
              * @brief 获取Mip级别数量
              * @return Mip级别数量
              */
-            virtual uint32_t GetMipLevels() const {}
+            virtual uint32_t GetMipLevels() const { return 0; }
 
             /**
              * @brief 获取数组层数
              * @return 数组层数
              */
-            virtual uint32_t GetArrayLayers() const {}
+            virtual uint32_t GetArrayLayers() const { return 0; }
 
             /**
              * @brief 获取采样数
              * @return 采样数
              */
-            virtual uint32_t GetSampleCount() const {}
+            virtual uint32_t GetSampleCount() const { return 0; }
 
             /**
              * @brief 检查是否是立方体纹理
              * @return 是否是立方体纹理
              */
-            virtual bool IsCubemap() const {}
+            virtual bool IsCubemap() const { return false; }
 
             /**
              * @brief 检查是否可以用作渲染目标
              * @return 是否可以用作渲染目标
              */
-            virtual bool IsRenderTarget() const {}
+            virtual bool IsRenderTarget() const { return false; }
 
             /**
              * @brief 检查是否是深度模板纹理
              * @return 是否是深度模板纹理
              */
-            virtual bool IsDepthStencil() const {}
+            virtual bool IsDepthStencil() const { return false; }
 
             /**
              * @brief 创建纹理视图
              * @param createInfo 纹理视图创建信息
              * @return 新创建的纹理视图，失败返回nullptr
              */
-            virtual IRenderTextureView *CreateView(const TextureViewCreateInfo &createInfo) {}
+            virtual IRenderTextureView *CreateView(const TextureViewCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 获取默认视图
              * @return 默认纹理视图
              */
-            virtual IRenderTextureView *GetDefaultView() const {}
+            virtual IRenderTextureView *GetDefaultView() const { return nullptr; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生纹理句柄
              * @return 原生纹理句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeTexture() const {}
+            virtual void *GetNativeTexture() const { return nullptr; }
         };
 
         /**
@@ -219,56 +219,56 @@ namespace Orange
              * @brief 获取视图类型
              * @return 视图类型
              */
-            virtual TextureViewType GetType() const {}
+            virtual TextureViewType GetType() const { return TextureViewType::View2D; }
 
             /**
              * @brief 获取像素格式
              * @return 像素格式
              */
-            virtual PixelFormat GetFormat() const {}
+            virtual PixelFormat GetFormat() const { return PixelFormat::UNKNOWN; }
 
             /**
              * @brief 获取基础Mip级别
              * @return 基础Mip级别
              */
-            virtual uint32_t GetBaseMipLevel() const {}
+            virtual uint32_t GetBaseMipLevel() const { return 0; }
 
             /**
              * @brief 获取Mip级别数量
              * @return Mip级别数量
              */
-            virtual uint32_t GetLevelCount() const {}
+            virtual uint32_t GetLevelCount() const { return 0; }
 
             /**
              * @brief 获取基础数组层
              * @return 基础数组层
              */
-            virtual uint32_t GetBaseArrayLayer() const {}
+            virtual uint32_t GetBaseArrayLayer() const { return 0; }
 
             /**
              * @brief 获取数组层数量
              * @return 数组层数量
              */
-            virtual uint32_t GetLayerCount() const {}
+            virtual uint32_t GetLayerCount() const { return 0; }
 
             /**
              * @brief 获取纹理
              * @return 纹理
              */
-            virtual IRenderTexture *GetTexture() const {}
+            virtual IRenderTexture *GetTexture() const { return nullptr; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生纹理视图句柄
              * @return 原生纹理视图句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeTextureView() const {}
+            virtual void *GetNativeTextureView() const { return nullptr; }
         };
 
         /**
@@ -288,98 +288,98 @@ namespace Orange
              * @brief 获取放大过滤模式
              * @return 放大过滤模式
              */
-            virtual TextureFilterMode GetMagFilter() const {}
+            virtual TextureFilterMode GetMagFilter() const { return TextureFilterMode::Linear; }
 
             /**
              * @brief 获取缩小过滤模式
              * @return 缩小过滤模式
              */
-            virtual TextureFilterMode GetMinFilter() const {}
+            virtual TextureFilterMode GetMinFilter() const { return TextureFilterMode::Linear; }
 
             /**
              * @brief 获取Mipmap过滤模式
              * @return Mipmap过滤模式
              */
-            virtual MipmapFilterMode GetMipmapMode() const {}
+            virtual MipmapFilterMode GetMipmapMode() const { return MipmapFilterMode::Linear; }
 
             /**
              * @brief 获取U寻址模式
              * @return U寻址模式
              */
-            virtual TextureAddressMode GetAddressModeU() const {}
+            virtual TextureAddressMode GetAddressModeU() const { return TextureAddressMode::Repeat; }
 
             /**
              * @brief 获取V寻址模式
              * @return V寻址模式
              */
-            virtual TextureAddressMode GetAddressModeV() const {}
+            virtual TextureAddressMode GetAddressModeV() const { return TextureAddressMode::Repeat; }
 
             /**
              * @brief 获取W寻址模式
              * @return W寻址模式
              */
-            virtual TextureAddressMode GetAddressModeW() const {}
+            virtual TextureAddressMode GetAddressModeW() const { return TextureAddressMode::Repeat; }
 
             /**
              * @brief 获取Mip LOD偏移
              * @return Mip LOD偏移
              */
-            virtual float GetMipLodBias() const {}
+            virtual float GetMipLodBias() const { return 0.0f; }
 
             /**
              * @brief 获取是否启用各向异性过滤
              * @return 是否启用各向异性过滤
              */
-            virtual bool IsAnisotropyEnabled() const {}
+            virtual bool IsAnisotropyEnabled() const { return false; }
 
             /**
              * @brief 获取最大各向异性
              * @return 最大各向异性
              */
-            virtual float GetMaxAnisotropy() const {}
+            virtual float GetMaxAnisotropy() const { return 0.0f; }
 
             /**
              * @brief 获取是否启用比较
              * @return 是否启用比较
              */
-            virtual bool IsCompareEnabled() const {}
+            virtual bool IsCompareEnabled() const { return false; }
 
             /**
              * @brief 获取比较操作
              * @return 比较操作
              */
-            virtual CompareOp GetCompareOp() const {}
+            virtual CompareOp GetCompareOp() const { return CompareOp::Never; }
 
             /**
              * @brief 获取最小LOD
              * @return 最小LOD
              */
-            virtual float GetMinLod() const {}
+            virtual float GetMinLod() const { return 0.0f; }
 
             /**
              * @brief 获取最大LOD
              * @return 最大LOD
              */
-            virtual float GetMaxLod() const {}
+            virtual float GetMaxLod() const { return 0.0f; }
 
             /**
              * @brief 获取边框颜色
              * @return 边框颜色
              */
-            virtual Color4f GetBorderColor() const {}
+            virtual Color4f GetBorderColor() const { return Color4f(0.0f, 0.0f, 0.0f, 0.0f); }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生采样器句柄
              * @return 原生采样器句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeSampler() const {}
+            virtual void *GetNativeSampler() const { return nullptr; }
         };
 
         /**
@@ -399,26 +399,26 @@ namespace Orange
              * @brief 获取着色器类型
              * @return 着色器类型
              */
-            virtual ShaderType GetType() const {}
+            virtual ShaderType GetType() const { return ShaderType::Vertex; }
 
             /**
              * @brief 获取着色器入口点
              * @return 着色器入口点
              */
-            virtual const std::string &GetEntryPoint() const {}
+            virtual const std::string &GetEntryPoint() const { return ""; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生着色器模块句柄
              * @return 原生着色器模块句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeShaderModule() const {}
+            virtual void *GetNativeShaderModule() const { return nullptr; }
         };
 
         /**
@@ -437,32 +437,32 @@ namespace Orange
              * @param timeoutNs 超时时间（纳秒），0表示立即返回，UINT64_MAX表示无限等待
              * @return 是否成功（超时返回false）
              */
-            virtual bool Wait(uint64_t timeoutNs = UINT64_MAX) {}
+            virtual bool Wait(uint64_t timeoutNs = UINT64_MAX) { return false; }
 
             /**
              * @brief 重置栅栏状态
              * @return 是否成功重置
              */
-            virtual bool Reset() {}
+            virtual bool Reset() { return false; }
 
             /**
              * @brief 检查栅栏是否已触发
              * @return 是否已触发
              */
-            virtual bool IsSignaled() const {}
+            virtual bool IsSignaled() const { return false; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生栅栏句柄
              * @return 原生栅栏句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeFence() const {}
+            virtual void *GetNativeFence() const { return nullptr; }
         };
 
         /**
@@ -480,14 +480,14 @@ namespace Orange
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生信号量句柄
              * @return 原生信号量句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeSemaphore() const {}
+            virtual void *GetNativeSemaphore() const { return nullptr; }
         };
 
     } // namespace Graphics

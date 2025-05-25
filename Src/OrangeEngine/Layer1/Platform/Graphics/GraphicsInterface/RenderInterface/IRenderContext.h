@@ -62,13 +62,13 @@ namespace Orange
              */
             virtual bool Submit(const std::vector<ISemaphore *> &waitSemaphores = {},
                                 const std::vector<ISemaphore *> &signalSemaphores = {},
-                                IFence *fence = nullptr) {}
+                                IFence *fence = nullptr) { return false; }
 
             /**
              * @brief 重置上下文状态，准备下一帧使用
              * @return 是否成功重置
              */
-            virtual bool Reset() {}
+            virtual bool Reset() { return false; }
 
             /**
              * @brief 开始渲染通道
@@ -80,18 +80,18 @@ namespace Orange
             virtual void BeginRenderPass(IRenderPass *renderPass,
                                          IFramebuffer *framebuffer,
                                          const std::vector<Color4f> &clearValues,
-                                         const Rect2D &renderArea) {};
+                                         const Rect2D &renderArea) {}
 
             /**
              * @brief 结束渲染通道
              */
-            virtual void EndRenderPass() {};
+            virtual void EndRenderPass() {}
 
             /**
              * @brief 绑定图形管线
              * @param pipeline 图形管线
              */
-            virtual void BindPipeline(IRenderPipeline *pipeline) {};
+            virtual void BindPipeline(IRenderPipeline *pipeline) {}
 
             /**
              * @brief 绑定顶点缓冲区
@@ -342,14 +342,14 @@ namespace Orange
              * @brief 获取所属渲染设备
              * @return 渲染设备指针
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生命令缓冲区句柄
              * @return 原生命令缓冲区句柄（如VkCommandBuffer、ID3D12GraphicsCommandList等）
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeCommandBuffer() const {}
+            virtual void *GetNativeCommandBuffer() const { return nullptr; }
         };
 
     } // namespace Graphics

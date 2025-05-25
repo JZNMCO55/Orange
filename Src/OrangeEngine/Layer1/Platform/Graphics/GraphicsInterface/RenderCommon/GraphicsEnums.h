@@ -56,6 +56,7 @@ namespace Orange
             RG16_UINT,
             RG16_SINT,
             RG16_FLOAT,
+            RGB8_UNORM,
             RGBA8_UNORM,
             RGBA8_SNORM,
             RGBA8_UINT,
@@ -73,6 +74,8 @@ namespace Orange
             RGBA16_UINT,
             RGBA16_SINT,
             RGBA16_FLOAT,
+
+            RGB32_FLOAT,
 
             // 128位格式
             RGBA32_UINT,
@@ -455,6 +458,9 @@ namespace Orange
             All = AllGraphics | Compute | AllRayTracing | Task | Mesh
         };
 
+        // 定义类型别名以保持兼容性
+        using ShaderStageFlags = uint16_t;
+
         // 位运算操作符重载
         inline ShaderStageFlag operator|(ShaderStageFlag a, ShaderStageFlag b)
         {
@@ -535,6 +541,17 @@ namespace Orange
         {
             a = a & b;
             return a;
+        }
+
+        // 添加与uint32_t的位运算操作符重载
+        inline bool operator&(uint32_t a, CreateFlag b)
+        {
+            return (a & static_cast<uint32_t>(b)) != 0;
+        }
+
+        inline bool operator&(CreateFlag a, uint32_t b)
+        {
+            return (static_cast<uint32_t>(a) & b) != 0;
         }
 
     } // namespace Graphics

@@ -89,6 +89,31 @@ namespace Orange
                 std::vector<IRenderTexture *> m_attachments;
             };
 
+            // ================================
+            // 工具函数声明
+            // ================================
+
+            /**
+             * @brief 将ResourceState转换为VkImageLayout
+             * @param state 资源状态
+             * @return Vulkan图像布局
+             */
+            VkImageLayout ConvertResourceStateToImageLayout(ResourceState state);
+
+            /**
+             * @brief 将ResourceState转换为VkPipelineStageFlags
+             * @param state 资源状态
+             * @return Vulkan管线阶段标志
+             */
+            VkPipelineStageFlags ConvertResourceStateToPipelineStage(ResourceState state);
+
+            /**
+             * @brief 将ResourceState转换为VkAccessFlags
+             * @param state 资源状态
+             * @return Vulkan访问标志
+             */
+            VkAccessFlags ConvertResourceStateToAccessFlags(ResourceState state);
+
         } // namespace Vulkan
     } // namespace Graphics
 } // namespace Orange

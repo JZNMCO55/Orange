@@ -6,8 +6,6 @@
 #ifndef ORANGE_VULKAN_COMMON_H
 #define ORANGE_VULKAN_COMMON_H
 
-#ifdef ORANGE_VULKAN_ENABLED
-
 #include <vulkan/vulkan.h>
 #include "../../../GraphicsInterface/RenderCommon/RenderCommon.h"
 #include <stdexcept>
@@ -32,6 +30,15 @@ namespace Orange
             throw std::runtime_error("Vulkan错误: " + std::to_string(res)); \
         }                                                                   \
     } while (0)
+
+/**
+ * @brief Vulkan调试错误检查宏（仅在Debug模式下生效）
+ */
+#ifdef _DEBUG
+#define VK_DEBUG_CHECK(result) VK_CHECK(result)
+#else
+#define VK_DEBUG_CHECK(result) (result)
+#endif
 
             /**
              * @brief 队列族索引结构
@@ -70,11 +77,6 @@ namespace Orange
             VkBufferUsageFlags ToVulkanBufferUsage(BufferType type);
 
             /**
-             * @brief 转换Orange着色器阶段到Vulkan阶段
-             */
-            VkShaderStageFlagBits ToVulkanShaderStage(ShaderStageFlagBits stage);
-
-            /**
              * @brief 查找队列族
              */
             QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface);
@@ -92,7 +94,5 @@ namespace Orange
         } // namespace Vulkan
     } // namespace Graphics
 } // namespace Orange
-
-#endif // ORANGE_VULKAN_ENABLED
 
 #endif // ORANGE_VULKAN_COMMON_H

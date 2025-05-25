@@ -7,6 +7,9 @@
 #define ORANGE_RENDER_COMMON_H
 
 #include <stdint.h>
+#include "GraphicsEnums.h"
+#include "GraphicsStructs.h"
+#include "GraphicsTypes.h"
 
 namespace Orange
 {
@@ -15,14 +18,14 @@ namespace Orange
 /**
  * @brief 定义枚举标志位运算符
  */
-#define DEFINE_ENUM_FLAG_OPERATORS(T, TType) \
-    inline TType operator|(T a, T b) { return static_cast<TType>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); } \
-    inline TType operator&(T a, T b) { return static_cast<TType>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b)); } \
-    inline TType operator^(T a, T b) { return static_cast<TType>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b)); } \
-    inline TType operator~(T a) { return static_cast<TType>(~static_cast<uint32_t>(a)); } \
-    inline TType& operator|=(TType& a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); } \
-    inline TType& operator&=(TType& a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b)); } \
-    inline TType& operator^=(TType& a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b)); } 
+#define DEFINE_ENUM_FLAG_OPERATORS(T, TType)                                                                                        \
+    inline TType operator|(T a, T b) { return static_cast<TType>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); }            \
+    inline TType operator&(T a, T b) { return static_cast<TType>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b)); }            \
+    inline TType operator^(T a, T b) { return static_cast<TType>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b)); }            \
+    inline TType operator~(T a) { return static_cast<TType>(~static_cast<uint32_t>(a)); }                                           \
+    inline TType &operator|=(TType &a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); } \
+    inline TType &operator&=(TType &a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b)); } \
+    inline TType &operator^=(TType &a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b)); }
 
         /**
          * @brief 渲染后端类型
@@ -221,57 +224,6 @@ namespace Orange
         };
 
         /**
-         * @brief 缓冲区复制区域
-         */
-        struct BufferCopyRegion
-        {
-            uint64_t srcOffset = 0; ///< 源偏移
-            uint64_t dstOffset = 0; ///< 目标偏移
-            uint64_t size = 0;      ///< 大小
-        };
-
-        /**
-         * @brief 纹理复制区域
-         */
-        struct TextureCopyRegion
-        {
-            uint32_t srcMipLevel = 0;       ///< 源Mip级别
-            uint32_t srcBaseArrayLayer = 0; ///< 源基础数组层
-            uint32_t srcLayerCount = 1;     ///< 源数组层数量
-            int32_t srcX = 0;               ///< 源X坐标
-            int32_t srcY = 0;               ///< 源Y坐标
-            int32_t srcZ = 0;               ///< 源Z坐标
-            uint32_t dstMipLevel = 0;       ///< 目标Mip级别
-            uint32_t dstBaseArrayLayer = 0; ///< 目标基础数组层
-            uint32_t dstLayerCount = 1;     ///< 目标数组层数量
-            int32_t dstX = 0;               ///< 目标X坐标
-            int32_t dstY = 0;               ///< 目标Y坐标
-            int32_t dstZ = 0;               ///< 目标Z坐标
-            uint32_t width = 0;             ///< 宽度
-            uint32_t height = 0;            ///< 高度
-            uint32_t depth = 1;             ///< 深度
-        };
-
-        /**
-         * @brief 缓冲区纹理复制区域
-         */
-        struct BufferTextureCopyRegion
-        {
-            uint64_t bufferOffset = 0;      ///< 缓冲区偏移
-            uint32_t bufferRowLength = 0;   ///< 缓冲区行长度
-            uint32_t bufferImageHeight = 0; ///< 缓冲区图像高度
-            uint32_t mipLevel = 0;          ///< Mip级别
-            uint32_t baseArrayLayer = 0;    ///< 基础数组层
-            uint32_t layerCount = 1;        ///< 数组层数量
-            int32_t imageOffsetX = 0;       ///< 图像X偏移
-            int32_t imageOffsetY = 0;       ///< 图像Y偏移
-            int32_t imageOffsetZ = 0;       ///< 图像Z偏移
-            uint32_t imageExtentWidth = 0;  ///< 图像宽度
-            uint32_t imageExtentHeight = 0; ///< 图像高度
-            uint32_t imageExtentDepth = 1;  ///< 图像深度
-        };
-
-        /**
          * @brief 纹理解析区域
          */
         struct TextureResolveRegion
@@ -317,97 +269,6 @@ namespace Orange
         DEFINE_ENUM_FLAG_OPERATORS(StencilFaceFlagBits, StencilFaceFlags);
 
         /**
-         * @brief 视口
-         */
-        struct Viewport
-        {
-            float x = 0.0f;        ///< X坐标
-            float y = 0.0f;        ///< Y坐标
-            float width = 0.0f;    ///< 宽度
-            float height = 0.0f;   ///< 高度
-            float minDepth = 0.0f; ///< 最小深度
-            float maxDepth = 1.0f; ///< 最大深度
-        };
-
-        /**
-         * @brief 矩形
-         */
-        struct Rect2D
-        {
-            int32_t x = 0;       ///< X坐标
-            int32_t y = 0;       ///< Y坐标
-            uint32_t width = 0;  ///< 宽度
-            uint32_t height = 0; ///< 高度
-        };
-
-        /**
-         * @brief 像素格式
-         */
-        enum class PixelFormat
-        {
-            Undefined = 0,
-            R8Unorm = 1,
-            R8Snorm = 2,
-            R8Uint = 3,
-            R8Sint = 4,
-            R16Unorm = 5,
-            R16Snorm = 6,
-            R16Uint = 7,
-            R16Sint = 8,
-            R16Float = 9,
-            RG8Unorm = 10,
-            RG8Snorm = 11,
-            RG8Uint = 12,
-            RG8Sint = 13,
-            R32Uint = 14,
-            R32Sint = 15,
-            R32Float = 16,
-            RG16Unorm = 17,
-            RG16Snorm = 18,
-            RG16Uint = 19,
-            RG16Sint = 20,
-            RG16Float = 21,
-            RGB8Unorm = 22,
-            RGB8Snorm = 23,
-            RGB8Uint = 24,
-            RGB8Sint = 25,
-            BGR8Unorm = 26,
-            BGRA8Unorm = 27,
-            RGBA8Unorm = 28,
-            RGBA8Snorm = 29,
-            RGBA8Uint = 30,
-            RGBA8Sint = 31,
-            RGB10A2Unorm = 32,
-            RG32Uint = 33,
-            RG32Sint = 34,
-            RG32Float = 35,
-            RGB32Uint = 36,
-            RGB32Sint = 37,
-            RGB32Float = 38,
-            RGBA16Unorm = 39,
-            RGBA16Snorm = 40,
-            RGBA16Uint = 41,
-            RGBA16Sint = 42,
-            RGBA16Float = 43,
-            RGBA32Uint = 44,
-            RGBA32Sint = 45,
-            RGBA32Float = 46,
-            D16Unorm = 47,
-            D32Float = 48,
-            S8Uint = 49,
-            D24UnormS8Uint = 50,
-            D32FloatS8Uint = 51,
-            BC1RGBUnorm = 52,
-            BC1RGBAUnorm = 53,
-            BC2Unorm = 54,
-            BC3Unorm = 55,
-            BC4Unorm = 56,
-            BC5Unorm = 57,
-            BC6HUfloat = 58,
-            BC7Unorm = 59
-        };
-
-        /**
          * @brief 清除值
          */
         struct ClearValue
@@ -422,25 +283,6 @@ namespace Orange
                 } depthStencil;
             };
         };
-
-        /**
-         * @brief 着色器阶段标志
-         */
-        enum class ShaderStageFlagBits : uint32_t
-        {
-            None = 0,
-            Vertex = 0x00000001,
-            TessellationControl = 0x00000002,
-            TessellationEvaluation = 0x00000004,
-            Geometry = 0x00000008,
-            Fragment = 0x00000010,
-            Compute = 0x00000020,
-            AllGraphics = 0x0000001F,
-            All = 0x7FFFFFFF
-        };
-        // 定义类型别名
-        using ShaderStageFlags = uint32_t;
-        DEFINE_ENUM_FLAG_OPERATORS(ShaderStageFlagBits, ShaderStageFlags);
 
         /**
          * @brief 缓冲区用途标志
@@ -485,8 +327,8 @@ namespace Orange
          */
         enum class SharingMode
         {
-            Exclusive = 0,
-            Concurrent = 1
+            Exclusive, ///< 独占模式
+            Concurrent ///< 并发模式
         };
 
         /**
