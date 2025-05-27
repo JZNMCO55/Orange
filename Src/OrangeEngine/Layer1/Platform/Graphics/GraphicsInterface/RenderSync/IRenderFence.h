@@ -33,38 +33,38 @@ namespace Orange
              * @param timeout 超时时间（纳秒），UINT64_MAX表示无限等待
              * @return 是否成功等待（超时返回false）
              */
-            virtual bool Wait(uint64_t timeout = UINT64_MAX) {}
+            virtual bool Wait(uint64_t timeout = UINT64_MAX) { return false; }
 
             /**
              * @brief 重置围栏状态为未触发
              * @return 是否成功重置
              */
-            virtual bool Reset() {}
+            virtual bool Reset() { return false; }
 
             /**
              * @brief 获取围栏状态
              * @return true表示已触发，false表示未触发
              */
-            virtual bool GetStatus() const {}
+            virtual bool GetStatus() const { return false; }
 
             /**
              * @brief 获取围栏创建标志
              * @return 围栏创建标志
              */
-            virtual FenceCreateFlags GetFlags() const {}
+            virtual FenceCreateFlags GetFlags() const { return static_cast<FenceCreateFlags>(FenceCreateFlagBits::None); }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生围栏句柄
              * @return 原生围栏句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeFence() const {}
+            virtual void *GetNativeFence() const { return nullptr; }
 
             /**
              * @brief 设置名称
@@ -76,7 +76,7 @@ namespace Orange
              * @brief 获取名称
              * @return 名称
              */
-            virtual const char *GetName() const {}
+            virtual const char *GetName() const { return nullptr; }
         };
 
         /**
@@ -95,7 +95,7 @@ namespace Orange
              * @param createInfo 创建信息
              * @return 围栏，失败返回nullptr
              */
-            virtual IRenderFence *CreateFence(const FenceCreateInfo &createInfo) {}
+            virtual IRenderFence *CreateFence(const FenceCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 销毁围栏
@@ -111,7 +111,7 @@ namespace Orange
              * @param timeout 超时时间（纳秒），UINT64_MAX表示无限等待
              * @return 是否成功等待（超时返回false）
              */
-            virtual bool WaitForFences(IRenderFence **fences, uint32_t fenceCount, bool waitAll, uint64_t timeout = UINT64_MAX) {}
+            virtual bool WaitForFences(IRenderFence **fences, uint32_t fenceCount, bool waitAll, uint64_t timeout = UINT64_MAX) { return false; }
 
             /**
              * @brief 重置多个围栏
@@ -119,7 +119,7 @@ namespace Orange
              * @param fenceCount 围栏数量
              * @return 是否成功重置
              */
-            virtual bool ResetFences(IRenderFence **fences, uint32_t fenceCount) {}
+            virtual bool ResetFences(IRenderFence** fences, uint32_t fenceCount) { return false; }
         };
 
     } // namespace Graphics

@@ -7,6 +7,8 @@
 #define ORANGE_IRENDER_DEVICE_H
 
 #include "../RenderCommon/RenderCommon.h"
+#include "../RenderSync/IRenderFence.h"
+#include "../RenderSync/IRenderSemaphore.h"
 
 namespace Orange
 {
@@ -26,8 +28,6 @@ namespace Orange
         class IDescriptorPool;
         class IDescriptorSet;
         class IPipelineLayout;
-        class IFence;
-        class ISemaphore;
 
         /**
          * @brief 渲染设备接口
@@ -162,13 +162,13 @@ namespace Orange
              * @param signaled 初始状态是否为已触发
              * @return 新创建的栅栏指针，失败返回nullptr
              */
-            virtual IFence *CreateFence(bool signaled = false) { return nullptr; }
+            virtual IRenderFence *CreateFence(bool signaled = false) { return nullptr; }
 
             /**
              * @brief 创建信号量（用于GPU-GPU同步）
              * @return 新创建的信号量指针，失败返回nullptr
              */
-            virtual ISemaphore *CreateSemaphore() { return nullptr; }
+            virtual IRenderSemaphore *CreateSemaphore() { return nullptr; }
 
             /**
              * @brief 获取GPU内存统计信息

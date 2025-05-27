@@ -8,7 +8,7 @@
 
 #include "RenderCommon/RenderCommon.h"
 #include "RenderCommand/RenderCommand.h"
-#include "RenderSync/RendererSync.h"
+#include "RenderSync/RenderSync.h"
 #include "RenderMemory/RenderMemory.h"
 
 namespace Orange

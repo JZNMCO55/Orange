@@ -12,7 +12,7 @@
 #include "../VulkanResources/VulkanSampler.h"
 #include "../VulkanResources/VulkanShader.h"
 #include "../VulkanInterface/VulkanPipeline.h"
-#include "../VulkanSync/VulkanSync.h"
+#include "../VulkanSync/VulkanSyncAll.h"
 #include <iostream>
 #include <set>
 #include <cstring>
@@ -220,7 +220,7 @@ namespace Orange
                 return swapChain;
             }
 
-            IFence *VulkanDevice::CreateFence(bool signaled)
+            IRenderFence*VulkanDevice::CreateFence(bool signaled)
             {
                 auto fence = new VulkanFence(this);
                 if (!fence->Initialize(signaled))
@@ -231,7 +231,7 @@ namespace Orange
                 return fence;
             }
 
-            ISemaphore *VulkanDevice::CreateSemaphore()
+            IRenderSemaphore *VulkanDevice::CreateSemaphore()
             {
                 auto semaphore = new VulkanSemaphore(this);
                 if (!semaphore->Initialize())

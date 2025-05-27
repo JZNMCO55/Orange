@@ -41,8 +41,8 @@ namespace Orange
                 virtual IRenderPipeline *CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &createInfo) override;
                 virtual IRenderPass *CreateRenderPass(const RenderPassCreateInfo &createInfo) override;
                 virtual ISwapChain *CreateSwapChain(const SwapChainCreateInfo &createInfo) override;
-                virtual IFence *CreateFence(bool signaled = false) override;
-                virtual ISemaphore *CreateSemaphore() override;
+                virtual IRenderFence*CreateFence(bool signaled = false) override;
+                virtual IRenderSemaphore*CreateSemaphore() override;
 
                 // 上下文创建
                 virtual IRenderContext *CreateContext() override;

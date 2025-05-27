@@ -7,6 +7,9 @@
 #define ORANGE_IRENDER_RESOURCES_H
 
 #include "../RenderCommon/RenderCommon.h"
+#include "../RenderSync/IRenderFence.h"
+#include "../RenderSync/IRenderSemaphore.h"
+#include "../RenderSync/IRenderEvent.h"
 
 namespace Orange
 {
@@ -419,75 +422,6 @@ namespace Orange
              * @note 仅用于高级用法，应避免直接使用
              */
             virtual void *GetNativeShaderModule() const { return nullptr; }
-        };
-
-        /**
-         * @brief 栅栏接口（用于CPU-GPU同步）
-         */
-        class IFence
-        {
-        public:
-            /**
-             * @brief 虚析构函数
-             */
-            virtual ~IFence() = default;
-
-            /**
-             * @brief 等待栅栏触发
-             * @param timeoutNs 超时时间（纳秒），0表示立即返回，UINT64_MAX表示无限等待
-             * @return 是否成功（超时返回false）
-             */
-            virtual bool Wait(uint64_t timeoutNs = UINT64_MAX) { return false; }
-
-            /**
-             * @brief 重置栅栏状态
-             * @return 是否成功重置
-             */
-            virtual bool Reset() { return false; }
-
-            /**
-             * @brief 检查栅栏是否已触发
-             * @return 是否已触发
-             */
-            virtual bool IsSignaled() const { return false; }
-
-            /**
-             * @brief 获取所属渲染设备
-             * @return 渲染设备
-             */
-            virtual IRenderDevice *GetDevice() const { return nullptr; }
-
-            /**
-             * @brief 获取原生栅栏句柄
-             * @return 原生栅栏句柄
-             * @note 仅用于高级用法，应避免直接使用
-             */
-            virtual void *GetNativeFence() const { return nullptr; }
-        };
-
-        /**
-         * @brief 信号量接口（用于GPU-GPU同步）
-         */
-        class ISemaphore
-        {
-        public:
-            /**
-             * @brief 虚析构函数
-             */
-            virtual ~ISemaphore() = default;
-
-            /**
-             * @brief 获取所属渲染设备
-             * @return 渲染设备
-             */
-            virtual IRenderDevice *GetDevice() const { return nullptr; }
-
-            /**
-             * @brief 获取原生信号量句柄
-             * @return 原生信号量句柄
-             * @note 仅用于高级用法，应避免直接使用
-             */
-            virtual void *GetNativeSemaphore() const { return nullptr; }
         };
 
     } // namespace Graphics

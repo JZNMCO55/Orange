@@ -67,7 +67,7 @@
 **文件**: `VulkanSync.h/cpp`
 
 **功能**:
-- 实现`ISemaphore`接口
+- 实现`IRenderSemaphore`接口
 - GPU-GPU同步
 - 用于命令缓冲区和队列同步
 
@@ -79,7 +79,7 @@
 **文件**: `VulkanSync.h/cpp`
 
 **功能**:
-- 实现`IFence`接口
+- 实现`IRenderFence`接口
 - CPU-GPU同步
 - 用于等待GPU操作完成
 

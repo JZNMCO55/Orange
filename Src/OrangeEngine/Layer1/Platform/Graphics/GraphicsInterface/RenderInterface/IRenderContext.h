@@ -7,6 +7,9 @@
 #define ORANGE_IRENDER_CONTEXT_H
 
 #include "../RenderCommon/RenderCommon.h"
+#include "../RenderSync/IRenderFence.h"
+#include "../RenderSync/IRenderSemaphore.h"
+#include <vector>
 
 namespace Orange
 {
@@ -24,8 +27,6 @@ namespace Orange
         class IDescriptorSet;
         class IPipelineLayout;
         class IFramebuffer;
-        class IFence;
-        class ISemaphore;
 
         /**
          * @brief 渲染上下文接口
@@ -60,9 +61,9 @@ namespace Orange
              * @param fence 完成时触发的栅栏
              * @return 是否成功提交
              */
-            virtual bool Submit(const std::vector<ISemaphore *> &waitSemaphores = {},
-                                const std::vector<ISemaphore *> &signalSemaphores = {},
-                                IFence *fence = nullptr) { return false; }
+            virtual bool Submit(const std::vector<IRenderSemaphore *> &waitSemaphores = {},
+                                const std::vector<IRenderSemaphore *> &signalSemaphores = {},
+                                IRenderFence *fence = nullptr) { return false; }
 
             /**
              * @brief 重置上下文状态，准备下一帧使用

@@ -7,6 +7,8 @@
 #define ORANGE_ISWAP_CHAIN_H
 
 #include "../RenderCommon/RenderCommon.h"
+#include "../RenderSync/IRenderFence.h"
+#include "../RenderSync/IRenderSemaphore.h"
 
 namespace Orange
 {
@@ -16,7 +18,6 @@ namespace Orange
         // 前向声明
         class IRenderDevice;
         class IRenderTexture;
-        class ISemaphore;
 
         /**
          * @brief 交换链接口
@@ -80,14 +81,14 @@ namespace Orange
              * @param signalSemaphore 信号量，在图像可用时触发
              * @return 下一个图像索引，失败返回UINT32_MAX
              */
-            virtual uint32_t AcquireNextImage(ISemaphore *signalSemaphore) { return UINT32_MAX; }
+            virtual uint32_t AcquireNextImage(IRenderSemaphore *signalSemaphore) { return UINT32_MAX; }
 
             /**
              * @brief 呈现当前图像
              * @param waitSemaphores 等待的信号量列表
              * @return 是否成功呈现
              */
-            virtual bool Present(const std::vector<ISemaphore *> &waitSemaphores = {}) { return false; }
+            virtual bool Present(const std::vector<IRenderSemaphore *> &waitSemaphores = {}) { return false; }
 
             /**
              * @brief 调整交换链大小

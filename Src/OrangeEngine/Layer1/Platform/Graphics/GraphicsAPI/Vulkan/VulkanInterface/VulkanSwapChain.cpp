@@ -87,12 +87,12 @@ namespace Orange
                 return GetImage(m_currentImageIndex);
             }
 
-            uint32_t VulkanSwapChain::AcquireNextImage(ISemaphore *signalSemaphore)
+            uint32_t VulkanSwapChain::AcquireNextImage(IRenderSemaphore *signalSemaphore)
             {
                 VkSemaphore vkSemaphore = VK_NULL_HANDLE;
                 if (signalSemaphore)
                 {
-                    // 这里需要从ISemaphore获取VkSemaphore，暂时使用nullptr
+                    // 这里需要从IRenderSemaphore获取VkSemaphore，暂时使用nullptr
                     // 在实际实现中需要添加VulkanSemaphore类
                 }
 
@@ -118,14 +118,14 @@ namespace Orange
                 return m_currentImageIndex;
             }
 
-            bool VulkanSwapChain::Present(const std::vector<ISemaphore *> &waitSemaphores)
+            bool VulkanSwapChain::Present(const std::vector<IRenderSemaphore *> &waitSemaphores)
             {
                 std::vector<VkSemaphore> vkWaitSemaphores;
                 for (auto semaphore : waitSemaphores)
                 {
                     if (semaphore)
                     {
-                        // 这里需要从ISemaphore获取VkSemaphore
+                        // 这里需要从IRenderSemaphore获取VkSemaphore
                         // 暂时跳过
                     }
                 }

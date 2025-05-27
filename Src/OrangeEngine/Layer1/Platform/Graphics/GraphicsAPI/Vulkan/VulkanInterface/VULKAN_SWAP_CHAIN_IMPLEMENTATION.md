@@ -24,8 +24,8 @@ VulkanSwapChain是Orange引擎中Vulkan后端的交换链实现，负责管理�
 #### 核心方法
 - `Initialize(const SwapChainCreateInfo &createInfo)` - 初始化交换链
 - `Shutdown()` - 清理资源
-- `AcquireNextImage(ISemaphore *signalSemaphore)` - 获取下一个可用图像
-- `Present(const std::vector<ISemaphore *> &waitSemaphores)` - 呈现当前图像
+- `AcquireNextImage(IRenderSemaphore *signalSemaphore)` - 获取下一个可用图像
+- `Present(const std::vector<IRenderSemaphore *> &waitSemaphores)` - 呈现当前图像
 - `Resize(uint32_t width, uint32_t height)` - 调整交换链大小
 
 #### 属性访问

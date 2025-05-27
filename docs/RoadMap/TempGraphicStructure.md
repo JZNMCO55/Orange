@@ -16,8 +16,8 @@
                 │   ├── ISampler.h           // 采样器接口
                 │   └── IShader.h            // 着色器接口
                 ├── RenderSync/
-                │   ├── IFence.h             // 栅栏接口
-                │   ├── ISemaphore.h         // 信号量接口
+                │   ├── IRenderFence.h             // 栅栏接口
+                │   ├── IRenderSemaphore.h         // 信号量接口
                 │   └── IEvent.h             // 事件接口
                 ├── RenderGPUMemory/               // 明确指定为GPU内存管理
                 │   ├── IGPUMemoryAllocator.h // GPU内存分配器接口

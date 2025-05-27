@@ -37,8 +37,8 @@ namespace Orange
                 virtual PixelFormat GetFormat() const override { return m_format; }
                 virtual IRenderTexture* GetImage(uint32_t index) const override;
                 virtual IRenderTexture* GetCurrentImage() const override;
-                virtual uint32_t AcquireNextImage(ISemaphore* signalSemaphore) override;
-                virtual bool Present(const std::vector<ISemaphore*>& waitSemaphores = {}) override;
+                virtual uint32_t AcquireNextImage(IRenderSemaphore* signalSemaphore) override;
+                virtual bool Present(const std::vector<IRenderSemaphore*>& waitSemaphores = {}) override;
                 virtual bool Resize(uint32_t width, uint32_t height) override;
                 virtual bool IsVSyncEnabled() const override { return m_vsyncEnabled; }
                 virtual void SetVSyncEnabled(bool enabled) override;

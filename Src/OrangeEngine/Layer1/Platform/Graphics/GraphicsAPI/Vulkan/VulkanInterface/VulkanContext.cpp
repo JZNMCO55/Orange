@@ -9,7 +9,7 @@
 #include "VulkanPipeline.h"
 #include "../VulkanResources/VulkanBuffer.h"
 #include "../VulkanResources/VulkanTexture.h"
-#include "../VulkanSync/VulkanSync.h"
+#include "../VulkanSync/VulkanSyncAll.h"
 #include <iostream>
 #include <algorithm>
 
@@ -105,9 +105,9 @@ namespace Orange
                 return true;
             }
 
-            bool VulkanContext::Submit(const std::vector<ISemaphore *> &waitSemaphores,
-                                       const std::vector<ISemaphore *> &signalSemaphores,
-                                       IFence *fence)
+            bool VulkanContext::Submit(const std::vector<IRenderSemaphore *> &waitSemaphores,
+                                       const std::vector<IRenderSemaphore *> &signalSemaphores,
+                                       IRenderFence *fence)
             {
                 if (m_isRecording)
                 {

@@ -30,9 +30,9 @@ namespace Orange
                 // IRenderContext接口实现
                 virtual bool Begin() override;
                 virtual bool End() override;
-                virtual bool Submit(const std::vector<ISemaphore *> &waitSemaphores = {},
-                                    const std::vector<ISemaphore *> &signalSemaphores = {},
-                                    IFence *fence = nullptr) override;
+                virtual bool Submit(const std::vector<IRenderSemaphore *> &waitSemaphores = {},
+                                    const std::vector<IRenderSemaphore *> &signalSemaphores = {},
+                                    IRenderFence *fence = nullptr) override;
                 virtual bool Reset() override;
 
                 // 渲染通道控制
