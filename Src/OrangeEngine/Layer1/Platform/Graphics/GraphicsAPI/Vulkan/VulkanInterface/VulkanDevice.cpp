@@ -220,10 +220,20 @@ namespace Orange
                 return swapChain;
             }
 
-            IRenderFence*VulkanDevice::CreateFence(bool signaled)
+            IRenderFence *VulkanDevice::CreateFence(bool signaled)
             {
                 auto fence = new VulkanFence(this);
-                if (!fence->Initialize(signaled))
+                FenceCreateInfo createInfo{};
+                if (signaled)
+                {
+                    createInfo.flags = static_cast<FenceCreateFlags>(FenceCreateFlagBits::Signaled);
+                }
+                else
+                {
+                    createInfo.flags = static_cast<FenceCreateFlags>(FenceCreateFlagBits::None);
+                }
+
+                if (!fence->Initialize(createInfo))
                 {
                     delete fence;
                     return nullptr;
@@ -234,7 +244,11 @@ namespace Orange
             IRenderSemaphore *VulkanDevice::CreateSemaphore()
             {
                 auto semaphore = new VulkanSemaphore(this);
-                if (!semaphore->Initialize())
+
+                SemaphoreCreateInfo createInfo{};
+                createInfo.type = SemaphoreType::Binary;
+
+                if (!semaphore->Initialize(createInfo))
                 {
                     delete semaphore;
                     return nullptr;

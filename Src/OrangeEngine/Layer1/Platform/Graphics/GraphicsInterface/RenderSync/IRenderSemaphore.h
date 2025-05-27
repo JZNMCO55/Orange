@@ -99,7 +99,7 @@ namespace Orange
              * @param createInfo 创建信息
              * @return 信号量，失败返回nullptr
              */
-            virtual IRenderSemaphore *CreateSemaphore(const SemaphoreCreateInfo &createInfo) {}
+            virtual IRenderSemaphore *CreateSemaphore(const SemaphoreCreateInfo &createInfo) { return nullptr; }
 
             /**
              * @brief 销毁信号量
