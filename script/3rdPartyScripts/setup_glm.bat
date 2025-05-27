@@ -55,6 +55,7 @@ cd /d "%BUILD_DIR%"
 cmake .. -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
          -DCMAKE_INSTALL_PREFIX=%INSTALL_DIR% ^
          -DGLM_TEST_ENABLE=OFF ^
+         -DGLM_BUILD_LIBRARY=OFF ^
          -G "Visual Studio 17 2022" -A x64
 if errorlevel 1 (
     echo [ERROR] CMake generation failed.
