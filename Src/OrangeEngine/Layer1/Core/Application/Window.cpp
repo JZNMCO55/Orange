@@ -1,4 +1,5 @@
 #include "Window.h"
+#include "../Event/Events.h"
 #include <GLFW/glfw3.h>
 #include <iostream>
 
@@ -64,8 +65,8 @@ namespace Orange
                     WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
                     if (windowImp && windowImp->eventCallback)
                     {
-                        // 这里可以定义具体的事件结构体，暂时传递nullptr
-                        windowImp->eventCallback(nullptr);
+                        WindowCloseEvent event;
+                        windowImp->eventCallback(event);
                     } });
 
                 // 窗口大小改变回调
@@ -74,8 +75,8 @@ namespace Orange
                     WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
                     if (windowImp && windowImp->eventCallback)
                     {
-                        // 这里可以定义具体的事件结构体，暂时传递nullptr
-                        windowImp->eventCallback(nullptr);
+                        WindowResizeEvent event(width, height);
+                        windowImp->eventCallback(event);
                     } });
 
                 // 键盘输入回调
@@ -84,8 +85,37 @@ namespace Orange
                     WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
                     if (windowImp && windowImp->eventCallback)
                     {
-                        // 这里可以定义具体的事件结构体，暂时传递nullptr
-                        windowImp->eventCallback(nullptr);
+                        switch (action)
+                        {
+                            case GLFW_PRESS:
+                            {
+                                KeyPressedEvent event(key, false);
+                                windowImp->eventCallback(event);
+                                break;
+                            }
+                            case GLFW_RELEASE:
+                            {
+                                KeyReleasedEvent event(key);
+                                windowImp->eventCallback(event);
+                                break;
+                            }
+                            case GLFW_REPEAT:
+                            {
+                                KeyPressedEvent event(key, true);
+                                windowImp->eventCallback(event);
+                                break;
+                            }
+                        }
+                    } });
+
+                // 字符输入回调
+                glfwSetCharCallback(window, [](GLFWwindow* window, unsigned int keycode)
+                                   {
+                    WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
+                    if (windowImp && windowImp->eventCallback)
+                    {
+                        KeyTypedEvent event(keycode);
+                        windowImp->eventCallback(event);
                     } });
 
                 // 鼠标按钮回调
@@ -94,8 +124,21 @@ namespace Orange
                     WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
                     if (windowImp && windowImp->eventCallback)
                     {
-                        // 这里可以定义具体的事件结构体，暂时传递nullptr
-                        windowImp->eventCallback(nullptr);
+                        switch (action)
+                        {
+                            case GLFW_PRESS:
+                            {
+                                MouseButtonPressedEvent event(button);
+                                windowImp->eventCallback(event);
+                                break;
+                            }
+                            case GLFW_RELEASE:
+                            {
+                                MouseButtonReleasedEvent event(button);
+                                windowImp->eventCallback(event);
+                                break;
+                            }
+                        }
                     } });
 
                 // 鼠标移动回调
@@ -104,8 +147,8 @@ namespace Orange
                     WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
                     if (windowImp && windowImp->eventCallback)
                     {
-                        // 这里可以定义具体的事件结构体，暂时传递nullptr
-                        windowImp->eventCallback(nullptr);
+                        MouseMovedEvent event(static_cast<float>(xpos), static_cast<float>(ypos));
+                        windowImp->eventCallback(event);
                     } });
 
                 // 鼠标滚轮回调
@@ -114,8 +157,36 @@ namespace Orange
                     WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
                     if (windowImp && windowImp->eventCallback)
                     {
-                        // 这里可以定义具体的事件结构体，暂时传递nullptr
-                        windowImp->eventCallback(nullptr);
+                        MouseScrolledEvent event(static_cast<float>(xoffset), static_cast<float>(yoffset));
+                        windowImp->eventCallback(event);
+                    } });
+
+                // 窗口焦点回调
+                glfwSetWindowFocusCallback(window, [](GLFWwindow* window, int focused)
+                                          {
+                    WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
+                    if (windowImp && windowImp->eventCallback)
+                    {
+                        if (focused)
+                        {
+                            WindowFocusEvent event;
+                            windowImp->eventCallback(event);
+                        }
+                        else
+                        {
+                            WindowLostFocusEvent event;
+                            windowImp->eventCallback(event);
+                        }
+                    } });
+
+                // 窗口位置回调
+                glfwSetWindowPosCallback(window, [](GLFWwindow* window, int xpos, int ypos)
+                                        {
+                    WindowImp* windowImp = static_cast<WindowImp*>(glfwGetWindowUserPointer(window));
+                    if (windowImp && windowImp->eventCallback)
+                    {
+                        WindowMovedEvent event(xpos, ypos);
+                        windowImp->eventCallback(event);
                     } });
             }
         };

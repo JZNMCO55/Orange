@@ -5,8 +5,17 @@
 #include <memory>
 #include <functional>
 
+// 前向声明
+namespace Orange
+{
+    namespace Core
+    {
+        class Event;
+    }
+}
+
 // 事件回调函数类型定义
-using EventCallbackFn = std::function<void(void *)>;
+using EventCallbackFn = std::function<void(Orange::Core::Event&)>;
 
 namespace Orange
 {
