@@ -3,13 +3,13 @@
  * @brief Vulkan着色器实现
  */
 
-#ifdef ORANGE_VULKAN_ENABLED
-
 #include "VulkanShader.h"
 #include "../VulkanInterface/VulkanDevice.h"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <cstring>
+#include <shaderc/shaderc.hpp>
 
 namespace Orange
 {
@@ -168,19 +168,129 @@ namespace Orange
 
             std::vector<uint8_t> VulkanShader::CompileGLSLToSPIRV(const std::string &glslCode, ShaderType type, const std::string &entryPoint)
             {
-                // 简化版本：这里应该使用glslang或其他GLSL编译器来编译GLSL到SPIR-V
-                // 现在返回空向量，表示编译失败
-                // 在实际项目中，你需要集成glslang库或使用预编译的SPIR-V代码
+                // 使用shaderc进行GLSL到SPIR-V编译
+                shaderc::Compiler compiler;
+                shaderc::CompileOptions options;
 
-                std::cerr << "GLSL到SPIR-V编译尚未实现。请使用预编译的SPIR-V代码或集成glslang库。" << std::endl;
-                std::cerr << "着色器类型: " << static_cast<int>(type) << ", 入口点: " << entryPoint << std::endl;
+                // 设置编译选项
+                options.SetOptimizationLevel(shaderc_optimization_level_performance);
+                options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
+                options.SetTargetSpirv(shaderc_spirv_version_1_0);
 
-                // 作为临时解决方案，你可以：
-                // 1. 使用外部工具（如glslc）预编译GLSL到SPIR-V
-                // 2. 集成glslang库进行运行时编译
-                // 3. 直接提供SPIR-V字节码
+                // 转换着色器类型
+                shaderc_shader_kind shaderKind = ConvertShaderTypeToShadercKind(type);
 
-                return std::vector<uint8_t>();
+                // 编译GLSL到SPIR-V
+                shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
+                    glslCode, shaderKind, "shader", entryPoint.c_str(), options);
+
+                if (result.GetCompilationStatus() != shaderc_compilation_status_success)
+                {
+                    std::cerr << "GLSL编译错误: " << result.GetErrorMessage() << std::endl;
+                    return std::vector<uint8_t>();
+                }
+
+                // 转换结果为字节数组
+                std::vector<uint32_t> spirvData(result.cbegin(), result.cend());
+                std::vector<uint8_t> spirvBytes;
+                spirvBytes.resize(spirvData.size() * sizeof(uint32_t));
+                std::memcpy(spirvBytes.data(), spirvData.data(), spirvBytes.size());
+
+                std::cout << "GLSL编译成功，生成了 " << spirvBytes.size() << " 字节的SPIR-V代码" << std::endl;
+                return spirvBytes;
+            }
+
+            std::vector<uint8_t> VulkanShader::CompileGLSLToSPIRV(const std::string &glslCode, ShaderType type, const std::string &entryPoint, const ShaderCompileOptions &options)
+            {
+                // 使用shaderc进行GLSL到SPIR-V编译
+                shaderc::Compiler compiler;
+                shaderc::CompileOptions compileOptions;
+
+                // 设置基本编译选项
+                if (options.optimize)
+                {
+                    compileOptions.SetOptimizationLevel(shaderc_optimization_level_performance);
+                }
+                else
+                {
+                    compileOptions.SetOptimizationLevel(shaderc_optimization_level_zero);
+                }
+
+                if (options.generateDebugInfo)
+                {
+                    compileOptions.SetGenerateDebugInfo();
+                }
+
+                compileOptions.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
+                compileOptions.SetTargetSpirv(shaderc_spirv_version_1_0);
+
+                // 添加宏定义
+                for (const auto &macro : options.macroDefinitions)
+                {
+                    compileOptions.AddMacroDefinition(macro.first, macro.second);
+                }
+
+                // 设置包含路径（这里需要实现include resolver，暂时跳过）
+                // TODO: 实现include resolver
+
+                // 转换着色器类型
+                shaderc_shader_kind shaderKind = ConvertShaderTypeToShadercKind(type);
+
+                // 编译GLSL到SPIR-V
+                shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
+                    glslCode, shaderKind, options.sourceFileName.c_str(), entryPoint.c_str(), compileOptions);
+
+                if (result.GetCompilationStatus() != shaderc_compilation_status_success)
+                {
+                    std::cerr << "GLSL编译错误 (" << options.sourceFileName << "): " << result.GetErrorMessage() << std::endl;
+                    return std::vector<uint8_t>();
+                }
+
+                // 转换结果为字节数组
+                std::vector<uint32_t> spirvData(result.cbegin(), result.cend());
+                std::vector<uint8_t> spirvBytes;
+                spirvBytes.resize(spirvData.size() * sizeof(uint32_t));
+                std::memcpy(spirvBytes.data(), spirvData.data(), spirvBytes.size());
+
+                std::cout << "GLSL编译成功 (" << options.sourceFileName << ")，生成了 " << spirvBytes.size() << " 字节的SPIR-V代码" << std::endl;
+                return spirvBytes;
+            }
+
+            shaderc_shader_kind VulkanShader::ConvertShaderTypeToShadercKind(ShaderType type) const
+            {
+                switch (type)
+                {
+                case ShaderType::Vertex:
+                    return shaderc_vertex_shader;
+                case ShaderType::TessControl:
+                    return shaderc_tess_control_shader;
+                case ShaderType::TessEvaluation:
+                    return shaderc_tess_evaluation_shader;
+                case ShaderType::Geometry:
+                    return shaderc_geometry_shader;
+                case ShaderType::Fragment:
+                    return shaderc_fragment_shader;
+                case ShaderType::Compute:
+                    return shaderc_compute_shader;
+                case ShaderType::RayGen:
+                    return shaderc_raygen_shader;
+                case ShaderType::AnyHit:
+                    return shaderc_anyhit_shader;
+                case ShaderType::ClosestHit:
+                    return shaderc_closesthit_shader;
+                case ShaderType::Miss:
+                    return shaderc_miss_shader;
+                case ShaderType::Intersection:
+                    return shaderc_intersection_shader;
+                case ShaderType::Callable:
+                    return shaderc_callable_shader;
+                case ShaderType::Task:
+                    return shaderc_task_shader;
+                case ShaderType::Mesh:
+                    return shaderc_mesh_shader;
+                default:
+                    return shaderc_vertex_shader;
+                }
             }
 
             VkShaderStageFlagBits VulkanShader::ConvertShaderTypeToVulkanStage(ShaderType type) const
@@ -288,8 +398,76 @@ namespace Orange
                 return shader;
             }
 
+            // 静态工具函数：编译GLSL代码创建着色器
+            std::shared_ptr<VulkanShader> VulkanShader::CompileFromGLSL(VulkanDevice *device, const std::string &glslCode, ShaderType type, const std::string &entryPoint, const ShaderCompileOptions &options)
+            {
+                auto shader = std::make_shared<VulkanShader>(device);
+
+                // 编译GLSL到SPIR-V
+                std::vector<uint8_t> spirvCode = shader->CompileGLSLToSPIRV(glslCode, type, entryPoint, options);
+                if (spirvCode.empty())
+                {
+                    return nullptr;
+                }
+
+                ShaderCreateInfo createInfo{};
+                createInfo.type = type;
+                createInfo.language = ShaderLanguage::SPIRV;
+                createInfo.code = spirvCode;
+                createInfo.entryPoint = entryPoint;
+                createInfo.name = options.sourceFileName;
+
+                if (!shader->Initialize(createInfo))
+                {
+                    return nullptr;
+                }
+
+                return shader;
+            }
+
+            // 静态工具函数：从GLSL文件编译创建着色器
+            std::shared_ptr<VulkanShader> VulkanShader::CompileFromGLSLFile(VulkanDevice *device, const std::string &filename, ShaderType type, const std::string &entryPoint, const ShaderCompileOptions &options)
+            {
+                auto shader = std::make_shared<VulkanShader>(device);
+
+                // 加载GLSL文件
+                std::string glslCode = shader->LoadGLSLFromFile(filename);
+                if (glslCode.empty())
+                {
+                    std::cerr << "无法加载GLSL文件: " << filename << std::endl;
+                    return nullptr;
+                }
+
+                // 设置源文件名
+                ShaderCompileOptions compileOptions = options;
+                if (compileOptions.sourceFileName == "shader")
+                {
+                    compileOptions.sourceFileName = filename;
+                }
+
+                // 编译GLSL到SPIR-V
+                std::vector<uint8_t> spirvCode = shader->CompileGLSLToSPIRV(glslCode, type, entryPoint, compileOptions);
+                if (spirvCode.empty())
+                {
+                    return nullptr;
+                }
+
+                ShaderCreateInfo createInfo{};
+                createInfo.type = type;
+                createInfo.language = ShaderLanguage::SPIRV;
+                createInfo.code = spirvCode;
+                createInfo.entryPoint = entryPoint;
+                createInfo.filePath = filename;
+                createInfo.name = compileOptions.sourceFileName;
+
+                if (!shader->Initialize(createInfo))
+                {
+                    return nullptr;
+                }
+
+                return shader;
+            }
+
         } // namespace Vulkan
     } // namespace Graphics
 } // namespace Orange
-
-#endif // ORANGE_VULKAN_ENABLED

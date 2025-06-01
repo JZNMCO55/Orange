@@ -3,10 +3,12 @@ project(OrangeEngine)
 
 # 设置 CMake 模块路径
 list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/install/${CMAKE_BUILD_TYPE}")
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}")
 
 # 搜索头文件和库路径
 set(THIRDPARTY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty)
 set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR}/3rdparty/lib)
+set(BUILD_INSTALL_DIR ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE})
 
 # 搜索源文件
 file(GLOB_RECURSE ORANGEENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
@@ -55,6 +57,7 @@ if(Vulkan_FOUND)
 else()
     message(WARNING "未找到Vulkan SDK，Vulkan后端将被禁用")
 endif()
+
 # 设置包含目录
 target_include_directories(${PROJECT_NAME}
     # 公共头文件目录
@@ -71,6 +74,7 @@ target_include_directories(${PROJECT_NAME}
     ${THIRDPARTY_INCLUDE_DIR}/glm/include
     ${THIRDPARTY_INCLUDE_DIR}/glfw/include
     ${Vulkan_INCLUDE_DIRS}
+    ${BUILD_INSTALL_DIR}/include
 )
 
 # 链接库 - 所有依赖都是PRIVATE，完全封装第三方库
@@ -79,11 +83,9 @@ target_link_libraries(${PROJECT_NAME}
     fmt::fmt
     spdlog::spdlog
     glfw
+    ${3rdLibs}
     ${Vulkan_LIBRARIES}
 )
-
-# 对于OrangeTest项目需要使用logger相关代码
-# 通过修改OrangeTest的CMakeLists.txt，让它直接链接fmt和spdlog
 
 # 调整静态库的符号可见性设置
 set_target_properties(${PROJECT_NAME} PROPERTIES
