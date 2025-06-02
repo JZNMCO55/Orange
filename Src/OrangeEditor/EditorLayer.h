@@ -6,11 +6,8 @@
 #ifndef ORANGE_EDITOR_LAYER_H
 #define ORANGE_EDITOR_LAYER_H
 
-#include "Orange.h"
-#include "Layer1/Platform/Graphics/GraphicsInterface/GraphicsSystem.h"
-#include "Layer1/Platform/Graphics/GraphicsInterface/RenderInterface/RenderInterface.h"
-#include "Layer1/Platform/Graphics/GraphicsInterface/RenderSync/RenderSync.h"
-#include "Layer1/Core/Application/Layer.h"
+#include <Orange.h>
+#include <cstdint>
 
 namespace Orange
 {
@@ -26,7 +23,7 @@ namespace Orange
 
         /**
          * @brief 初始化编辑器层
-         * @return 是否成功初始化
+         * @return 是否成功
          */
         bool Initialize();
 
@@ -39,18 +36,16 @@ namespace Orange
          * @brief 更新编辑器层
          * @param deltaTime 帧时间间隔
          */
-        void OnUpdate() override;
+        virtual void OnUpdate() override;
 
-        /**
-         * @brief 渲染编辑器层
-         */
-        void OnRender();
+        virtual void OnAttach() override;
+        virtual void OnDetach() override;
 
         /**
          * @brief 处理事件
          * @param event 事件对象
          */
-        void OnEvent(Core::Event& event);
+        virtual void OnEvent(Core::Event &event) override;
 
     private:
         /**
@@ -76,18 +71,6 @@ namespace Orange
         void CleanupGraphicsResources();
 
     private:
-        // 图形系统相关
-        Graphics::IRenderDevice *m_renderDevice = nullptr;
-        Graphics::IRenderContext *m_renderContext = nullptr;
-        Graphics::IRenderFenceFactory *m_fenceFactory = nullptr;
-        Graphics::IRenderSemaphoreFactory *m_semaphoreFactory = nullptr;
-        Graphics::IMemoryManager *m_memoryManager = nullptr;
-
-        // 三角形渲染资源
-        Graphics::IRenderBuffer *m_triangleVertexBuffer = nullptr;
-        Graphics::IRenderFence *m_renderFence = nullptr;
-        Graphics::IRenderSemaphore *m_renderSemaphore = nullptr;
-
         // 状态
         bool m_initialized = false;
         uint32_t m_frameCount = 0;

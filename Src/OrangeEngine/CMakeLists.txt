@@ -59,7 +59,7 @@ set(ORANGE_INCLUDE_DIRS
 # 查找依赖库
 find_package(fmt REQUIRED)
 find_package(glm REQUIRED)
-find_package(spdlog REQUIRED)
+# find_package(spdlog REQUIRED)  # 暂时注释掉
 find_package(glfw3 3.5 REQUIRED)
 # 检查Vulkan支持
 find_package(Vulkan REQUIRED)
@@ -67,6 +67,8 @@ find_package(Vulkan REQUIRED)
 # 设置编译选项
 if(Vulkan_FOUND)
     message(STATUS "找到Vulkan SDK: ${Vulkan_VERSION}")
+    # 启用Vulkan编译宏
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_VULKAN_ENABLED)
 else()
     message(WARNING "未找到Vulkan SDK，Vulkan后端将被禁用")
 endif()
@@ -83,7 +85,7 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/Layer1/Core/UnitTesting
     ${CMAKE_CURRENT_SOURCE_DIR}/Layer1
     ${THIRDPARTY_INCLUDE_DIR}/fmt/include
-    ${THIRDPARTY_INCLUDE_DIR}/spdlog/include
+    # ${THIRDPARTY_INCLUDE_DIR}/spdlog/include  # 暂时注释掉
     ${THIRDPARTY_INCLUDE_DIR}/glm/include
     ${THIRDPARTY_INCLUDE_DIR}/glfw/include
     ${Vulkan_INCLUDE_DIRS}
@@ -99,7 +101,7 @@ target_link_directories(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
     fmt::fmt
-    spdlog::spdlog
+    # spdlog::spdlog  # 暂时注释掉
     glfw
     shaderc::shaderc
     ${Vulkan_LIBRARIES}
