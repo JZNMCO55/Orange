@@ -8,6 +8,13 @@
 
 #include <Orange.h>
 #include <cstdint>
+#include <memory>
+
+// 前向声明
+namespace Orange::RenderCore
+{
+    class Camera;
+}
 
 namespace Orange
 {
@@ -61,19 +68,25 @@ namespace Orange
         bool CreateTriangleResources();
 
         /**
-         * @brief 渲染三角形
-         */
-        void RenderTriangle();
-
-        /**
          * @brief 清理图形资源
          */
         void CleanupGraphicsResources();
+
+        /**
+         * @brief 测试Camera系统功能
+         */
+        void TestCameraFunctionality();
 
     private:
         // 状态
         bool m_initialized = false;
         uint32_t m_frameCount = 0;
+
+        // 从Application获取图形系统，不再自己管理
+        // Graphics::IGraphicsSystem *m_graphicsSystem = nullptr; // 移除
+
+        // Camera系统测试
+        std::unique_ptr<RenderCore::Camera> m_testCamera;
     };
 
 } // namespace Orange

@@ -20,7 +20,7 @@ if not exist "%THIRDPARTY_DIR%" (
 )
 
 :: 定义三方库列表
-set LIBRARIES=googletest fmt glm spdlog glfw shaderc
+set LIBRARIES=googletest fmt glm spdlog glfw shaderc stb_image assimp
 
 :: 遍历每个库
 for %%L in (%LIBRARIES%) do (

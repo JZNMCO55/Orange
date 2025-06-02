@@ -23,9 +23,16 @@ namespace Orange
 
             /**
              * @brief 初始化图形系统
-             * @return 成功返回true，失败返回false
+             * @return 是否初始化成功
              */
             virtual bool Initialize() = 0;
+
+            /**
+             * @brief 初始化图形系统（使用外部窗口）
+             * @param windowHandle 外部窗口句柄 (GLFWwindow*)
+             * @return 是否初始化成功
+             */
+            virtual bool Initialize(void *windowHandle) = 0;
 
             /**
              * @brief 关闭图形系统

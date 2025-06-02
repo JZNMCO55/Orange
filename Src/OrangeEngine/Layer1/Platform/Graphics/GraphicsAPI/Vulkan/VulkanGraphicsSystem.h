@@ -74,6 +74,7 @@ namespace Orange::Graphics::Vulkan
 
         // IGraphicsSystem接口实现
         bool Initialize() override;
+        bool Initialize(void *windowHandle) override;
         void Shutdown() override;
         void BeginFrame() override;
         void EndFrame() override;

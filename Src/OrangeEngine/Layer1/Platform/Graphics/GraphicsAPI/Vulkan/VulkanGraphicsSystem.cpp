@@ -123,6 +123,76 @@ namespace Orange::Graphics::Vulkan
         }
     }
 
+    bool VulkanGraphicsSystem::Initialize(void *windowHandle)
+    {
+        if (m_initialized)
+        {
+            return true;
+        }
+
+        // 使用外部窗口句柄
+        m_window = static_cast<GLFWwindow *>(windowHandle);
+        if (!m_window)
+        {
+            ORG_LOG_ERROR("Invalid window handle provided to VulkanGraphicsSystem");
+            return false;
+        }
+
+        // 获取窗口尺寸
+        int width, height;
+        glfwGetFramebufferSize(m_window, &width, &height);
+        m_windowWidth = static_cast<uint32_t>(width);
+        m_windowHeight = static_cast<uint32_t>(height);
+
+        try
+        {
+            // 跳过CreateWindow()，直接从CreateInstance()开始
+            if (!CreateInstance())
+                return false;
+            if (!SetupDebugMessenger())
+                return false;
+            if (!CreateSurface())
+                return false;
+            if (!PickPhysicalDevice())
+                return false;
+            if (!CreateLogicalDevice())
+                return false;
+            if (!CreateSwapchain())
+                return false;
+            if (!CreateImageViews())
+                return false;
+            if (!CreateRenderPass())
+                return false;
+            if (!CreateDescriptorSetLayout())
+                return false;
+            if (!CreateGraphicsPipeline())
+                return false;
+            if (!CreateFramebuffers())
+                return false;
+            if (!CreateCommandPool())
+                return false;
+            if (!CreateVertexBuffer())
+                return false;
+            if (!CreateCommandBuffers())
+                return false;
+            if (!CreateSyncObjects())
+                return false;
+
+            // 创建子系统
+            m_renderDevice = std::make_unique<VulkanRenderDevice>(this);
+            m_shaderCompiler = std::make_unique<VulkanShaderCompiler>();
+
+            m_initialized = true;
+            ORG_LOG_INFO("Vulkan Graphics System initialized successfully");
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            ORG_LOG_ERROR("Failed to initialize Vulkan Graphics System: {}", e.what());
+            return false;
+        }
+    }
+
     void VulkanGraphicsSystem::Shutdown()
     {
         if (!m_initialized)
@@ -189,8 +259,9 @@ namespace Orange::Graphics::Vulkan
         // 销毁实例
         vkDestroyInstance(m_instance, nullptr);
 
-        // 销毁窗口
-        glfwDestroyWindow(m_window);
+        // 不要销毁窗口，由Application的Window管理
+        // glfwDestroyWindow(m_window);
+        m_window = nullptr;
 
         m_initialized = false;
         ORG_LOG_INFO("Vulkan Graphics System shutdown complete");

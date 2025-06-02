@@ -1843,26 +1843,44 @@ public:
 
 ## 项目开发计划
 
-### 第一阶段：核心框架 (2-3周)
-- [x] 基础Vulkan包装层
-- [x] 资源管理系统
-- [x] 简单渲染管线
-- [ ] 基础着色器系统
-- [ ] 窗口和输入系统
+### 🏗️ **架构层次重新设计** 
 
-### 第二阶段：渲染基础 (3-4周)
-- [ ] 相机系统
-- [ ] 网格渲染
-- [ ] 纹理系统
-- [ ] 基础光照
-- [ ] 简单材质系统
+#### **Layer1 (Platform Abstraction Layer) - 已完成** ✅
+```cpp
+// 平台抽象层 - 保持不变
+Src/OrangeEngine/Layer1/Platform/Graphics/
+├── GraphicsInterface/           # 图形接口抽象
+├── GraphicsAPI/Vulkan/         # Vulkan底层实现
+└── VulkanShaderCompiler        # 着色器编译服务 (保留在Layer1)
+```
 
-### 第三阶段：高级渲染 (4-5周)
-- [ ] PBR材质系统
-- [ ] 阴影渲染
-- [ ] 后处理管线
-- [ ] 粒子系统
-- [ ] LOD系统
+#### **Layer2 (Low-Level Renderer Layer) - 当前开发重点** 🎯
+```cpp
+// 新建：底层渲染器层
+Src/OrangeEngine/Layer2/RenderCore/
+├── Camera/                     # 相机系统
+│   ├── Camera.h/.cpp          # 视图/投影矩阵，视锥体计算
+│   └── CameraController.h/.cpp # FPS/轨道相机控制
+├── Material/                   # 材质与着色器管理 (Layer2职责)
+│   ├── Material.h/.cpp        # 材质属性和渲染状态
+│   ├── Shader.h/.cpp          # 高级着色器管理 (基于Layer1编译器)
+│   ├── ShaderLibrary.h/.cpp   # 着色器资源管理
+├── Geometry/                   # 几何体与网格
+│   ├── Mesh.h/.cpp            # 顶点/索引数据，VAO/VBO管理
+│   ├── MeshGenerator.h/.cpp   # 立方体、球体、平面生成器
+│   └── VertexBuffer.h/.cpp    # 顶点数据封装
+├── Texture/                    # 纹理与表面管理
+│   ├── Texture2D.h/.cpp       # 纹理资源生命周期
+│   ├── TextureManager.h/.cpp  # 纹理缓存和流式加载
+│   └── TextureLoader.h/.cpp   # PNG/JPG等格式加载
+├── Rendering/                  # 图元提交系统
+│   ├── Renderer.h/.cpp        # 核心渲染器
+│   ├── RenderQueue.h/.cpp     # 渲染队列和批处理
+│   └── RenderCommand.h/.cpp   # 渲染命令封装
+└── Viewport/                   # 视口与虚拟屏幕
+    ├── Viewport.h/.cpp        # 视口管理
+    └── RenderTarget.h/.cpp    # 渲染目标管理
+```
 
 ### 第四阶段：性能优化 (2-3周)
 - [ ] GPU-driven渲染
@@ -2036,9 +2054,231 @@ public:
 
 ---
 
+
+## 下一阶段开发规划
+
+### 🏗️ **架构层次重新设计** 
+
+#### **Layer1 (Platform Abstraction Layer) - 已完成** ✅
+```cpp
+// 平台抽象层 - 保持不变
+Src/OrangeEngine/Layer1/Platform/Graphics/
+├── GraphicsInterface/           # 图形接口抽象
+├── GraphicsAPI/Vulkan/         # Vulkan底层实现
+└── VulkanShaderCompiler        # 着色器编译服务 (保留在Layer1)
+```
+
+#### **Layer2 (Low-Level Renderer Layer) - 当前开发重点** 🎯
+```cpp
+// 新建：底层渲染器层
+Src/OrangeEngine/Layer2/RenderCore/
+├── Camera/                     # 相机系统
+│   ├── Camera.h/.cpp          # 视图/投影矩阵，视锥体计算
+│   └── CameraController.h/.cpp # FPS/轨道相机控制
+├── Material/                   # 材质与着色器管理 (Layer2职责)
+│   ├── Material.h/.cpp        # 材质属性和渲染状态
+│   ├── Shader.h/.cpp          # 高级着色器管理 (基于Layer1编译器)
+│   ├── ShaderLibrary.h/.cpp   # 着色器资源管理
+├── Geometry/                   # 几何体与网格
+│   ├── Mesh.h/.cpp            # 顶点/索引数据，VAO/VBO管理
+│   ├── MeshGenerator.h/.cpp   # 立方体、球体、平面生成器
+│   └── VertexBuffer.h/.cpp    # 顶点数据封装
+├── Texture/                    # 纹理与表面管理
+│   ├── Texture2D.h/.cpp       # 纹理资源生命周期
+│   ├── TextureManager.h/.cpp  # 纹理缓存和流式加载
+│   └── TextureLoader.h/.cpp   # PNG/JPG等格式加载
+├── Rendering/                  # 图元提交系统
+│   ├── Renderer.h/.cpp        # 核心渲染器
+│   ├── RenderQueue.h/.cpp     # 渲染队列和批处理
+│   └── RenderCommand.h/.cpp   # 渲染命令封装
+└── Viewport/                   # 视口与虚拟屏幕
+    ├── Viewport.h/.cpp        # 视口管理
+    └── RenderTarget.h/.cpp    # 渲染目标管理
+```
+
+#### **Mid-Level Functional Systems Layer - 未来开发** 🔮
+```cpp
+// 中层功能系统 (基于Layer2构建的高级功能)
+Src/OrangeEngine/Layer3/Systems/
+├── SkeletalAnimation/         # 骨骼动画系统
+├── SceneGraph/               # 场景图与裁剪优化  
+├── VisualEffects/            # 视觉特效 (HDR, 粒子, 后处理)
+├── ProfilingDebugging/       # 性能分析与调试
+├── OcclusionPVS/            # 遮挡与潜在可见集
+├── LODSystem/               # 细节层次系统
+└── AnimationIK/             # 动画IK与插值
+```
+
+---
+
+### 🎯 **Layer2 RenderCore开发计划 (8-10周完成)**
+
+#### **第1阶段：RenderCore基础架构** (2-3周)
+
+##### **Week 1-2: 相机与几何体系统**
+```cpp
+✅ 优先级1: Camera System
+├── Camera类 - 视图/投影矩阵计算
+├── CameraController类 - FPS风格控制
+├── 视锥体计算 (为后续裁剪准备)
+└── 相机动画支持
+
+✅ 优先级2: Geometry System  
+├── Mesh类 - 顶点/索引数据管理
+├── 标准Vertex结构体设计
+├── MeshGenerator - 基础几何体生成
+└── 包围盒计算
+```
+
+##### **Week 3: 材质与着色器管理**
+```cpp
+🎯 优先级3: Material & Shader Management
+├── Shader类 - 基于Layer1编译器的高级封装
+├── ShaderLibrary - 着色器资源管理和缓存
+├── Material类 - PBR材质属性管理
+└── 渲染状态管理
+```
+
+#### **第2阶段：纹理与渲染管线** (3-4周)
+
+##### **Week 4-5: 纹理系统**
+```cpp
+📋 优先级4: Texture Management
+├── Texture2D类 - 纹理资源生命周期
+├── TextureLoader - PNG/JPG/TGA格式支持
+├── TextureManager - 缓存和异步加载
+└── Mipmap生成和纹理压缩
+```
+
+##### **Week 6-7: 渲染系统完善**
+```cpp
+📋 优先级5: Rendering Pipeline
+├── Renderer类 - 统一渲染接口
+├── RenderQueue - 渲染排序和批处理
+├── RenderCommand - 命令模式封装
+└── Viewport管理 - 多视口支持
+```
+
+#### **第3阶段：统一缓冲区与优化** (2-3周)
+
+##### **Week 8-9: UBO系统与优化**
+```cpp
+📋 优先级6: Uniform Buffer Objects
+├── CameraUBO - 相机数据统一管理
+├── ObjectUBO - 物体变换数据
+├── MaterialUBO - 材质参数缓冲区
+└── 动态UBO更新机制
+
+📋 优先级7: 渲染优化
+├── 实例化渲染支持
+├── 渲染状态缓存
+├── 绘制调用合并
+└── GPU性能分析集成
+```
+
+---
+
+### 🎯 **架构职责明确区分**
+
+#### **Layer2 (RenderCore) 职责范围**:
+- ✅ **相机系统**: 视图投影矩阵，视锥体计算
+- ✅ **材质着色器**: 着色器管理，材质属性，渲染状态
+- ✅ **几何网格**: 顶点数据，基础几何体，网格管理
+- ✅ **纹理管理**: 纹理加载，缓存，资源生命周期
+- ✅ **图元提交**: 渲染队列，批处理，渲染命令
+- ✅ **视口管理**: 渲染目标，多视口支持
+
+#### **Mid-Level Layer 职责范围** (未来开发):
+- 🔮 **骨骼动画**: 动画播放，混合，状态机
+- 🔮 **场景图**: 空间层次，裁剪优化，遮挡剔除  
+- 🔮 **视觉特效**: HDR，粒子系统，后处理效果
+- 🔮 **LOD系统**: 细节层次，动态切换
+- 🔮 **性能工具**: 分析器，调试可视化
+
+---
+
+### 🎯 **近期实施计划 (基于Layer2架构)**
+
+#### **本周目标 (第1周)**
+- [x] ✅ 动态着色器编译系统 (Layer1)
+- [x] ✅ 文件系统统一接口 (Layer1)
+- [x] ✅ Visual Studio集成 (Layer1)
+- [ ] 🔄 **创建Layer2目录结构** (RenderCore)
+- [ ] 🔄 **Camera系统基础实现** (Layer2/Camera)
+
+#### **下周目标 (第2周)**  
+- [ ] 📋 **完善相机控制器** (Layer2/Camera)
+- [ ] 📋 **Mesh和几何体系统** (Layer2/Geometry)
+- [ ] 📋 **MeshGenerator实现** (Layer2/Geometry)
+- [ ] 📋 **基础Vertex结构体** (Layer2/Geometry)
+
+#### **第3-4周目标**
+- [ ] 📋 **Material系统实现** (Layer2/Material)
+- [ ] 📋 **Shader高级管理** (Layer2/Material)
+- [ ] 📋 **Texture2D系统** (Layer2/Texture)
+- [ ] 📋 **TextureLoader实现** (Layer2/Texture)
+
+#### **第5-6周目标**
+- [ ] 📋 **Renderer核心系统** (Layer2/Rendering)
+- [ ] 📋 **RenderQueue实现** (Layer2/Rendering)
+- [ ] 📋 **UBO系统完善** (Layer2)
+- [ ] 📋 **Viewport管理** (Layer2/Viewport)
+
+---
+
+### 🚨 **架构决策说明**
+
+#### **为什么使用RenderCore而不是Render？**
+- **避免命名冲突**: 与Mid-Level的高级渲染功能区分
+- **明确职责范围**: 强调这是底层渲染基础设施
+- **架构清晰性**: RenderCore → 基础，VisualEffects → 高级
+
+#### **为什么着色器分层管理？**
+- **Layer1**: VulkanShaderCompiler - 纯粹的GLSL→SPIR-V编译服务  
+- **Layer2**: Shader + ShaderLibrary - 着色器资源管理和材质绑定
+- **分离关注点**: 编译 vs 管理，平台服务 vs 渲染功能
+
+#### **输入系统归属问题**
+输入系统应该在**Layer4 (Human Interface Device Layer)**，不在Layer2：
+```cpp
+Layer4: 人机接口层
+├── Physical Device I/O      # 设备输入处理
+├── Character Controls       # 角色控制
+├── Camera Control          # 相机控制输入 (调用Layer2 Camera)
+└── Game-Specific Interface # 游戏特定接口
+```
+
+---
+
+### 🎮 **里程碑目标**
+
+#### **MVP版本** (6周后): 基础几何体渲染 ✨
+- **相机系统**: 透视/正交投影，FPS控制器
+- **几何体渲染**: 立方体、球体、平面等基础形状
+- **材质系统**: 基础PBR材质，法线贴图
+- **纹理系统**: PNG/JPG加载，Mipmap生成
+
+#### **Alpha版本** (12周后): 完整PBR渲染管线 🚀
+- **高级材质**: 金属度/粗糙度工作流
+- **光照系统**: 方向光、点光源、聚光灯
+- **阴影渲染**: 基础阴影映射
+- **渲染优化**: 实例化渲染，批处理
+
+#### **Beta版本** (18周后): Mid-Level系统集成 🎯
+- **场景图**: 空间层次管理，裁剪优化
+- **动画系统**: 骨骼动画，关键帧插值
+- **视觉特效**: 粒子系统，后处理效果
+- **编辑器**: 场景编辑，材质编辑
+
+#### **Release版本** (24周后): 生产就绪 🏆
+- **性能优化**: GPU-driven渲染，多线程
+- **调试工具**: 性能分析器，内存监控
+- **文档完善**: API文档，使用指南
+- **测试覆盖**: 单元测试，集成测试
+
 ## 开发日志
 
-### 2024年12月 - 下午工作总结
+### 2025年6月2日 - 下午工作总结
 
 #### ✅ 已完成的核心功能
 
@@ -2108,227 +2348,36 @@ public:
 - **文档状态**: ✅ 架构文档完善
 
 ---
+### 2025年6月2日晚 - Camera系统验证完成 & EditorLayer渲染集成
 
-## 下一阶段开发规划
+#### ✅ **主要成就**
+- **Camera系统100%验证通过**: 位置设置、视图/投影矩阵、视锥体剔除、屏幕射线转换全部功能正常
+- **三角形渲染集成EditorLayer**: 从独立测试程序迁移到Layer架构中，实现更好的代码组织
+- **完整渲染管线验证**: Application → EditorLayer → VulkanGraphicsSystem 架构链路打通
 
-### 🎯 第一优先级：几何渲染系统 (预计1-2周)
+#### 🔧 **技术实现**
+- **Math库兼容性修复**: 解决了Vec4→Vec3转换和Matrix4访问问题，使用XYZ()和Get(row,col)方法
+- **EditorLayer渲染集成**: 在EditorLayer中创建图形系统实例，实现完整的渲染生命周期管理
+- **资源管理优化**: 实现RAII模式的图形资源自动清理
 
-#### 1.1 相机系统实现
-```cpp
-// 优先实现功能
-class Camera {
-    - 透视投影/正交投影切换
-    - 视图矩阵计算
-    - 视锥体计算(用于后续剔除)
-    - 鼠标/键盘控制
-};
-
-class CameraController {
-    - FPS风格相机控制
-    - 轨道相机控制  
-    - 平滑插值移动
-};
+#### 📊 **验证结果**
+```
+✅ Camera Position Test: Set(1,2,3) → Got(1,2,3)
+✅ View/Projection Matrix: 计算成功  
+✅ Frustum Culling: 点/球体/包围盒剔除正常
+✅ Screen-to-Ray: 屏幕坐标(400,300) → 射线转换正常
+✅ Triangle Rendering: 在EditorLayer中正常渲染
+✅ Window System: 事件响应和关闭正常
 ```
 
-#### 1.2 基础几何体渲染
-```cpp
-// 目标几何体
-- 立方体 (Cube)
-- 球体 (Sphere) 
-- 平面 (Plane)
-- 圆柱体 (Cylinder)
-- 程序化网格生成
-```
+#### 🎯 **架构状态**
+- **Priority 1 - Camera系统**: ✅ **完成** (位置控制、矩阵计算、视锥体剔除)
+- **基础渲染管线**: ✅ **验证通过** (三角形渲染集成EditorLayer)
+- **Layer2 RenderCore**: ✅ **架构就绪** (为Geometry系统开发做好准备)
 
-#### 1.3 网格数据结构
-```cpp
-struct Vertex {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 texCoord;
-    glm::vec3 tangent;    // 为后续法线贴图准备
-};
-
-class Mesh {
-    - 顶点缓冲区管理
-    - 索引缓冲区管理
-    - 包围盒计算
-    - LOD支持预留
-};
-```
-
-### 🎯 第二优先级：纹理和材质系统 (预计1-2周)
-
-#### 2.1 纹理加载系统
-```cpp
-- 支持格式: PNG, JPG, TGA, DDS
-- 纹理压缩格式支持
-- Mipmap自动生成
-- 纹理缓存管理
-```
-
-#### 2.2 基础材质系统
-```cpp
-struct MaterialProperties {
-    glm::vec3 albedo;
-    float metallic;
-    float roughness; 
-    std::shared_ptr<Texture> albedoMap;
-    std::shared_ptr<Texture> normalMap;
-};
-```
-
-#### 2.3 统一缓冲区 (UBO) 系统
-```cpp
-// 相机数据UBO
-struct CameraUBO {
-    glm::mat4 view;
-    glm::mat4 projection;
-    glm::mat4 viewProjection;
-    glm::vec3 cameraPos;
-};
-
-// 物体变换UBO  
-struct ObjectUBO {
-    glm::mat4 model;
-    glm::mat4 normalMatrix;
-};
-```
-
-### 🎯 第三优先级：光照系统 (预计2-3周)
-
-#### 3.1 基础光照模型
-```cpp
-- Blinn-Phong光照模型实现
-- 方向光 (Directional Light)
-- 点光源 (Point Light)  
-- 聚光灯 (Spot Light)
-```
-
-#### 3.2 延迟渲染管线准备
-```cpp
-- G-Buffer设计
-- 几何阶段渲染
-- 光照阶段计算
-- 透明物体前向渲染
-```
-
-### 🎯 第四优先级：输入和交互系统 (预计1周)
-
-#### 4.1 输入系统架构
-```cpp
-class InputManager {
-    - 键盘输入处理
-    - 鼠标输入处理
-    - 事件分发机制
-    - 输入映射系统
-};
-```
-
-#### 4.2 场景交互
-```cpp
-- 鼠标拾取 (Picking)
-- 对象选择高亮
-- 变换工具 (移动/旋转/缩放)
-- 网格线渲染
-```
-
-### 🎯 第五优先级：性能优化和工具 (预计1-2周)
-
-#### 5.1 性能分析工具
-```cpp
-- GPU时间测量
-- CPU性能统计
-- 内存使用监控
-- 绘制调用统计
-```
-
-#### 5.2 调试可视化
-```cpp
-- 线框模式切换
-- 包围盒显示
-- 法线可视化
-- 坐标轴显示
-```
+#### 📋 **下一步计划**
+- **Priority 2 - Geometry系统**: Mesh类、MeshGenerator、基础几何体(立方体/球体/平面)
+- **Vertex结构体设计**: 为PBR渲染准备标准顶点格式
+- **包围盒计算**: 为视锥体剔除优化做准备
 
 ---
-
-## 具体实施计划
-
-### 本周目标 (第1周)
-- [x] ✅ 动态着色器编译系统
-- [x] ✅ 文件系统统一接口
-- [x] ✅ Visual Studio集成
-- [ ] 🔄 相机系统基础实现
-- [ ] 🔄 立方体几何体渲染
-
-### 下周目标 (第2周)  
-- [ ] 📋 完善相机控制器
-- [ ] 📋 多种几何体实现
-- [ ] 📋 基础纹理加载
-- [ ] 📋 简单材质系统
-
-### 第3-4周目标
-- [ ] 📋 UBO系统实现
-- [ ] 📋 基础光照模型
-- [ ] 📋 输入系统架构
-- [ ] 📋 场景交互功能
-
-### 第5-6周目标
-- [ ] 📋 延迟渲染管线
-- [ ] 📋 性能优化工具
-- [ ] 📋 调试可视化功能
-- [ ] 📋 编辑器界面框架
-
----
-
-## 技术债务和风险评估
-
-### 🚨 需要关注的技术风险
-
-1. **内存管理复杂性**
-   - Vulkan手动内存管理容易出错
-   - 建议：实现统一的内存分配器
-   - 预期工作量：3-5天
-
-2. **多线程渲染复杂性**  
-   - Vulkan多线程命令缓冲区记录
-   - 建议：先实现单线程版本，后续优化
-   - 预期影响：性能优化阶段
-
-3. **着色器管理复杂性**
-   - 大量着色器变体管理
-   - 建议：实现着色器变体系统
-   - 预期工作量：1-2周
-
-### 💡 架构优化建议
-
-1. **组件化实体系统 (ECS)**
-   - 当前场景图过于简单
-   - 建议在第3-4周引入ECS架构
-   - 好处：更好的性能和扩展性
-
-2. **资源异步加载**
-   - 当前同步加载会阻塞渲染
-   - 建议实现资源流加载系统
-   - 预期工作量：1周
-
-3. **GPU驱动渲染**
-   - 当前CPU端剔除效率低
-   - 建议在性能优化阶段实现
-   - 预期性能提升：50-100%
-
----
-
-## 总结
-
-今天下午的工作成功建立了一个**坚实的渲染框架基础**，主要成就包括：
-
-✅ **完整的着色器编译管线** - 支持开发时动态编译和发布时预编译  
-✅ **统一的文件系统接口** - 为后续资源管理打下基础  
-✅ **Visual Studio完美集成** - 开发体验大幅提升  
-✅ **验证的Vulkan渲染管线** - 核心渲染功能正常工作  
-
-接下来的开发将专注于**几何体渲染、相机系统、纹理材质**等核心功能，预计在4-6周内完成一个功能完整的**实时渲染引擎MVP版本**。
-
-这个进度符合我们之前制定的**24周完整引擎开发计划**，目前处于第一阶段的收尾和第二阶段的开始，进度良好！ 🚀

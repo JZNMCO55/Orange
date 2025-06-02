@@ -12,9 +12,18 @@
 #include "Layer1/Core/UnitTesting/test.h"
 #include "Layer1/Core/Event/Events.h"
 #include "Layer1/Core/FileSystem/FileSystem.h"
+#include "Layer1/Core/Math/Math.h"
 
 /******************** Platform ****************/
 #include "Layer1/Platform/Graphics/GraphicsInterface/Graphics.h"
+
+/* =============================================
+ * =============Layer2==========================
+ * ============================================= */
+
+/****************** RenderCore ****************/
+#include "Layer2/RenderCore/Camera/Camera.h"
+#include "Layer2/RenderCore/Camera/CameraController.h"
 
 /* =============================================
  * Layer2

@@ -26,6 +26,13 @@ namespace Orange
      */
     namespace Math
     {
+        // 类型别名 - 简化常用类型名称
+        using Vec2 = Vector2;
+        using Vec3 = Vector3;
+        using Vec4 = Vector4;
+        using Mat4 = Matrix4;
+        using Quat = Quaternion;
+
         // 数学常量
         constexpr float PI = 3.14159265358979323846f;
         constexpr float TWO_PI = 6.28318530717958647692f;
@@ -43,6 +50,27 @@ namespace Orange
 
         template <typename T>
         constexpr T Lerp(T a, T b, float t) { return a + t * (b - a); }
+
+        // 向量操作函数（直接使用别名类型的方法）
+        inline float Length(const Vec3 &v) { return v.Length(); }
+        inline Vec3 Normalize(const Vec3 &v) { return v.Normalized(); }
+        inline float Dot(const Vec3 &a, const Vec3 &b) { return a.Dot(b); }
+        inline Vec3 Cross(const Vec3 &a, const Vec3 &b) { return a.Cross(b); }
+
+        // 矩阵操作函数（使用Matrix4的静态方法）
+        inline Mat4 LookAt(const Vec3 &eye, const Vec3 &center, const Vec3 &up)
+        {
+            return Matrix4::LookAt(eye, center, up);
+        }
+        inline Mat4 Perspective(float fovy, float aspect, float near, float far)
+        {
+            return Matrix4::Perspective(fovy, aspect, near, far);
+        }
+        inline Mat4 Ortho(float left, float right, float bottom, float top, float near, float far)
+        {
+            return Matrix4::Orthographic(left, right, bottom, top, near, far);
+        }
+        inline Mat4 Inverse(const Mat4 &m) { return m.Inverse(); }
 
         // 其他通用数学工具函数...
     }

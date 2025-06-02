@@ -14,6 +14,11 @@ namespace Orange
         class WindowCloseEvent;
         class WindowResizeEvent;
     }
+
+    namespace Graphics
+    {
+        class IGraphicsSystem;
+    }
 }
 
 namespace Orange
@@ -30,18 +35,24 @@ namespace Orange
             void Close();
 
             // 事件处理函数
-            virtual void OnEvent(Event& e);
+            virtual void OnEvent(Event &e);
 
-            void PushLayer(const std::shared_ptr<Layer>& layer);
-            void PushOverlay(const std::shared_ptr<Layer>& overlay);
+            void PushLayer(const std::shared_ptr<Layer> &layer);
+            void PushOverlay(const std::shared_ptr<Layer> &overlay);
+
+            // 新增：访问器接口
+            Graphics::IGraphicsSystem *GetGraphicsSystem() const { return m_graphicsSystem.get(); }
+            Window *GetWindow() const { return m_window.get(); }
 
         private:
-            bool OnWindowClose(WindowCloseEvent& e);
-            bool OnWindowResize(WindowResizeEvent& e);
+            bool OnWindowClose(WindowCloseEvent &e);
+            bool OnWindowResize(WindowResizeEvent &e);
+            bool InitializeGraphicsSystem();
 
         private:
             LayerStack m_LayerStack;
             std::unique_ptr<Window> m_window;
+            std::unique_ptr<Graphics::IGraphicsSystem> m_graphicsSystem;
             bool m_running = true;
         };
     }
