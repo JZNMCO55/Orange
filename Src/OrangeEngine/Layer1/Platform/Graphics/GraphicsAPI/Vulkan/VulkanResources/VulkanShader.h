@@ -12,7 +12,6 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
-#include <shaderc/shaderc.hpp>
 
 namespace Orange
 {
@@ -88,8 +87,7 @@ namespace Orange
                 std::vector<uint8_t> CompileGLSLToSPIRV(const std::string &glslCode, ShaderType type, const std::string &entryPoint, const ShaderCompileOptions &options);
                 VkShaderStageFlagBits ConvertShaderTypeToVulkanStage(ShaderType type) const;
 
-                // Shaderc特定的转换函数
-                shaderc_shader_kind ConvertShaderTypeToShadercKind(ShaderType type) const;
+
             };
 
         } // namespace Vulkan

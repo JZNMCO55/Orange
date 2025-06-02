@@ -3,8 +3,6 @@
  * @brief Vulkan缓冲区实现
  */
 
-#ifdef ORANGE_VULKAN_ENABLED
-
 #include "VulkanBuffer.h"
 #include "../VulkanInterface/VulkanDevice.h"
 #include <cstring>
@@ -334,5 +332,3 @@ namespace Orange
         } // namespace Vulkan
     } // namespace Graphics
 } // namespace Orange
-
-#endif // ORANGE_VULKAN_ENABLED

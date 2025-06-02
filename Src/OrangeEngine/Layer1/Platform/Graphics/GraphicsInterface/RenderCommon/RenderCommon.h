@@ -28,17 +28,6 @@ namespace Orange
     inline TType &operator^=(TType &a, T b) { return a = static_cast<TType>(static_cast<uint32_t>(a) ^ static_cast<uint32_t>(b)); }
 
         /**
-         * @brief 渲染后端类型
-         */
-        enum class RenderBackend
-        {
-            None,      ///< 无后端
-            Vulkan,    ///< Vulkan后端
-            DirectX12, ///< DirectX 12后端
-            Metal      ///< Metal后端
-        };
-
-        /**
          * @brief 设备特性标志位
          */
         enum class DeviceFeatureFlagBits : uint32_t

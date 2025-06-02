@@ -3,8 +3,6 @@
  * @brief Vulkan渲染管线实现
  */
 
-#ifdef ORANGE_VULKAN_ENABLED
-
 #include "VulkanPipeline.h"
 #include "VulkanDevice.h"
 #include "../VulkanResources/VulkanShader.h"
@@ -424,7 +422,7 @@ namespace Orange
                 case CullMode::Back:
                     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
                     break;
-                case CullMode::FrontAndBack:
+                case CullMode::All:
                     rasterizer.cullMode = VK_CULL_MODE_FRONT_AND_BACK;
                     break;
                 default:
@@ -570,5 +568,3 @@ namespace Orange
         } // namespace Vulkan
     } // namespace Graphics
 } // namespace Orange
-
-#endif // ORANGE_VULKAN_ENABLED

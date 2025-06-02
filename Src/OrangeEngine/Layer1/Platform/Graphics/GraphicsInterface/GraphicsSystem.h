@@ -23,13 +23,16 @@ namespace Orange
         class IRenderCommandBufferFactory;
         class IRenderCommandQueue;
         class IMemoryManager;
+        class IRenderFenceFactory;
+        class IRenderSemaphoreFactory;
+        class IRenderEventFactory;
 
         /**
          * @brief 图形系统配置
          */
         struct GraphicsSystemConfig
         {
-            RenderBackend preferredBackend = RenderBackend::Vulkan;                                             ///< 首选渲染后端
+            RenderAPI preferredBackend = RenderAPI::Vulkan;                                                     ///< 首选渲染后端
             bool enableValidation = true;                                                                       ///< 是否启用验证层
             bool enableDebugMarkers = true;                                                                     ///< 是否启用调试标记
             uint32_t maxFramesInFlight = 2;                                                                     ///< 最大同时处理帧数
@@ -75,7 +78,7 @@ namespace Orange
              * @brief 获取活跃的渲染后端
              * @return 渲染后端
              */
-            static RenderBackend GetActiveBackend();
+            static RenderAPI GetActiveBackend();
 
             /**
              * @brief 获取渲染设备
@@ -124,6 +127,24 @@ namespace Orange
              * @return 内存管理器
              */
             static IMemoryManager *GetMemoryManager();
+
+            /**
+             * @brief 获取围栏工厂
+             * @return 围栏工厂
+             */
+            static IRenderFenceFactory *GetFenceFactory();
+
+            /**
+             * @brief 获取信号量工厂
+             * @return 信号量工厂
+             */
+            static IRenderSemaphoreFactory *GetSemaphoreFactory();
+
+            /**
+             * @brief 获取事件工厂
+             * @return 事件工厂
+             */
+            static IRenderEventFactory *GetEventFactory();
 
             /**
              * @brief 获取系统配置

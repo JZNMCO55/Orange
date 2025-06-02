@@ -17,6 +17,7 @@ namespace Orange
         class IRenderDevice;
         class IPipelineLayout;
         class IRenderPass;
+        class IDescriptorSet;
 
         /**
          * @brief 渲染管线接口
@@ -36,38 +37,38 @@ namespace Orange
              * @brief 获取管线类型
              * @return 管线类型（图形/计算）
              */
-            virtual PipelineType GetType() const {}
+            virtual PipelineType GetType() const { return PipelineType::Graphics; }
 
             /**
              * @brief 获取管线布局
              * @return 管线布局
              */
-            virtual IPipelineLayout *GetLayout() const {}
+            virtual IPipelineLayout *GetLayout() const { return nullptr; }
 
             /**
              * @brief 获取渲染通道（仅图形管线）
              * @return 渲染通道
              */
-            virtual IRenderPass *GetRenderPass() const {}
+            virtual IRenderPass *GetRenderPass() const { return nullptr; }
 
             /**
              * @brief 获取子通道索引（仅图形管线）
              * @return 子通道索引
              */
-            virtual uint32_t GetSubpass() const {}
+            virtual uint32_t GetSubpass() const { return 0; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生管线句柄
              * @return 原生管线句柄（如VkPipeline、ID3D12PipelineState等）
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativePipeline() const {}
+            virtual void *GetNativePipeline() const { return nullptr; }
         };
 
         /**
@@ -87,40 +88,40 @@ namespace Orange
              * @brief 获取描述符集布局数量
              * @return 描述符集布局数量
              */
-            virtual uint32_t GetDescriptorSetLayoutCount() const {}
+            virtual uint32_t GetDescriptorSetLayoutCount() const { return 0; }
 
             /**
              * @brief 获取描述符集布局
              * @param index 索引
              * @return 描述符集布局
              */
-            virtual void *GetDescriptorSetLayout(uint32_t index) const {}
+            virtual void *GetDescriptorSetLayout(uint32_t index) const { return nullptr; }
 
             /**
              * @brief 获取推送常量范围数量
              * @return 推送常量范围数量
              */
-            virtual uint32_t GetPushConstantRangeCount() const {}
+            virtual uint32_t GetPushConstantRangeCount() const { return 0; }
 
             /**
              * @brief 获取推送常量范围
              * @param index 索引
              * @return 推送常量范围
              */
-            virtual PushConstantRange GetPushConstantRange(uint32_t index) const {}
+            virtual PushConstantRange GetPushConstantRange(uint32_t index) const { return {}; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生管线布局句柄
              * @return 原生管线布局句柄（如VkPipelineLayout、ID3D12RootSignature等）
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativePipelineLayout() const {}
+            virtual void *GetNativePipelineLayout() const { return nullptr; }
         };
 
         /**
@@ -140,27 +141,27 @@ namespace Orange
              * @brief 获取绑定数量
              * @return 绑定数量
              */
-            virtual uint32_t GetBindingCount() const {}
+            virtual uint32_t GetBindingCount() const { return 0; }
 
             /**
              * @brief 获取绑定
              * @param index 索引
              * @return 描述符绑定
              */
-            virtual DescriptorBinding GetBinding(uint32_t index) const {}
+            virtual DescriptorBinding GetBinding(uint32_t index) const { return {}; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生描述符集布局句柄
              * @return 原生描述符集布局句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeDescriptorSetLayout() const {}
+            virtual void *GetNativeDescriptorSetLayout() const { return nullptr; }
         };
 
         /**
@@ -181,33 +182,33 @@ namespace Orange
              * @param allocateInfo 分配信息
              * @return 新分配的描述符集，失败返回nullptr
              */
-            virtual IDescriptorSet *AllocateDescriptorSet(const DescriptorSetAllocateInfo &allocateInfo) {}
+            virtual IDescriptorSet *AllocateDescriptorSet(const DescriptorSetAllocateInfo &allocateInfo) { return nullptr; }
 
             /**
              * @brief 释放描述符集
              * @param descriptorSet 要释放的描述符集
              * @return 是否成功释放
              */
-            virtual bool FreeDescriptorSet(IDescriptorSet *descriptorSet) {}
+            virtual bool FreeDescriptorSet(IDescriptorSet *descriptorSet) { return false; }
 
             /**
              * @brief 重置描述符池
              * @return 是否成功重置
              */
-            virtual bool Reset() {}
+            virtual bool Reset() { return false; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生描述符池句柄
              * @return 原生描述符池句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeDescriptorPool() const {}
+            virtual void *GetNativeDescriptorPool() const { return nullptr; }
         };
 
         /**
@@ -265,26 +266,26 @@ namespace Orange
              * @brief 获取描述符集布局
              * @return 描述符集布局
              */
-            virtual IDescriptorSetLayout *GetLayout() const {}
+            virtual IDescriptorSetLayout *GetLayout() const { return nullptr; }
 
             /**
              * @brief 获取描述符池
              * @return 描述符池
              */
-            virtual IDescriptorPool *GetPool() const {}
+            virtual IDescriptorPool *GetPool() const { return nullptr; }
 
             /**
              * @brief 获取所属渲染设备
              * @return 渲染设备
              */
-            virtual IRenderDevice *GetDevice() const {}
+            virtual IRenderDevice *GetDevice() const { return nullptr; }
 
             /**
              * @brief 获取原生描述符集句柄
              * @return 原生描述符集句柄
              * @note 仅用于高级用法，应避免直接使用
              */
-            virtual void *GetNativeDescriptorSet() const {}
+            virtual void *GetNativeDescriptorSet() const { return nullptr; }
         };
 
     } // namespace Graphics

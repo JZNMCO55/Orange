@@ -17,6 +17,43 @@ namespace Orange
     {
         namespace Vulkan
         {
+            // Shaderc特定的转换函数
+            static shaderc_shader_kind ConvertShaderTypeToShadercKind(ShaderType type)
+            {
+                switch (type)
+                {
+                case ShaderType::Vertex:
+                    return shaderc_vertex_shader;
+                case ShaderType::TessControl:
+                    return shaderc_tess_control_shader;
+                case ShaderType::TessEvaluation:
+                    return shaderc_tess_evaluation_shader;
+                case ShaderType::Geometry:
+                    return shaderc_geometry_shader;
+                case ShaderType::Fragment:
+                    return shaderc_fragment_shader;
+                case ShaderType::Compute:
+                    return shaderc_compute_shader;
+                case ShaderType::RayGen:
+                    return shaderc_raygen_shader;
+                case ShaderType::AnyHit:
+                    return shaderc_anyhit_shader;
+                case ShaderType::ClosestHit:
+                    return shaderc_closesthit_shader;
+                case ShaderType::Miss:
+                    return shaderc_miss_shader;
+                case ShaderType::Intersection:
+                    return shaderc_intersection_shader;
+                case ShaderType::Callable:
+                    return shaderc_callable_shader;
+                case ShaderType::Task:
+                    return shaderc_task_shader;
+                case ShaderType::Mesh:
+                    return shaderc_mesh_shader;
+                default:
+                    return shaderc_vertex_shader;
+                }
+            }
 
             VulkanShader::VulkanShader(VulkanDevice *device)
                 : m_device(device), m_shaderModule(VK_NULL_HANDLE), m_type(ShaderType::Vertex), m_entryPoint("main")
@@ -254,43 +291,6 @@ namespace Orange
 
                 std::cout << "GLSL编译成功 (" << options.sourceFileName << ")，生成了 " << spirvBytes.size() << " 字节的SPIR-V代码" << std::endl;
                 return spirvBytes;
-            }
-
-            shaderc_shader_kind VulkanShader::ConvertShaderTypeToShadercKind(ShaderType type) const
-            {
-                switch (type)
-                {
-                case ShaderType::Vertex:
-                    return shaderc_vertex_shader;
-                case ShaderType::TessControl:
-                    return shaderc_tess_control_shader;
-                case ShaderType::TessEvaluation:
-                    return shaderc_tess_evaluation_shader;
-                case ShaderType::Geometry:
-                    return shaderc_geometry_shader;
-                case ShaderType::Fragment:
-                    return shaderc_fragment_shader;
-                case ShaderType::Compute:
-                    return shaderc_compute_shader;
-                case ShaderType::RayGen:
-                    return shaderc_raygen_shader;
-                case ShaderType::AnyHit:
-                    return shaderc_anyhit_shader;
-                case ShaderType::ClosestHit:
-                    return shaderc_closesthit_shader;
-                case ShaderType::Miss:
-                    return shaderc_miss_shader;
-                case ShaderType::Intersection:
-                    return shaderc_intersection_shader;
-                case ShaderType::Callable:
-                    return shaderc_callable_shader;
-                case ShaderType::Task:
-                    return shaderc_task_shader;
-                case ShaderType::Mesh:
-                    return shaderc_mesh_shader;
-                default:
-                    return shaderc_vertex_shader;
-                }
             }
 
             VkShaderStageFlagBits VulkanShader::ConvertShaderTypeToVulkanStage(ShaderType type) const

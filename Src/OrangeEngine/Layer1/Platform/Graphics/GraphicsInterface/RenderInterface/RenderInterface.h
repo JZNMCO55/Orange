@@ -12,6 +12,7 @@
 #include "IRenderPass.h"
 #include "IRenderResources.h"
 #include "ISwapChain.h"
+#include <vector>
 
 namespace Orange
 {
@@ -55,6 +56,33 @@ namespace Orange
          * @brief 关闭渲染系统
          */
         void ShutdownRenderSystem();
+
+        /**
+         * @brief 销毁渲染设备
+         * @param device 渲染设备
+         */
+        void DestroyRenderDevice(IRenderDevice *device);
+
+        /**
+         * @brief 获取渲染API名称
+         * @param api 渲染API
+         * @return API名称
+         */
+        const char *GetRenderAPIName(RenderAPI api);
+
+        /**
+         * @brief 获取渲染API版本
+         * @param api 渲染API
+         * @return API版本
+         */
+        uint32_t GetRenderAPIVersion(RenderAPI api);
+
+        /**
+         * @brief 验证设备创建信息
+         * @param createInfo 创建信息
+         * @return 是否有效
+         */
+        bool ValidateDeviceCreateInfo(const DeviceCreateInfo &createInfo);
 
     } // namespace Graphics
 } // namespace Orange

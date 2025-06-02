@@ -8,6 +8,7 @@
 /******************** Core ********************/
 #include "Layer1/Core/Debug/Logger.h"
 #include "Layer1/Core/UnitTesting/test.h"
+#include "Layer1/Core/Event/Events.h"
 
 /******************** Platform ****************/
 
