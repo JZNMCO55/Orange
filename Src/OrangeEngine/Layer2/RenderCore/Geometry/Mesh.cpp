@@ -13,13 +13,15 @@ namespace Orange
 
         void BoundingBox::Expand(const Math::Vec3 &point)
         {
-            min.x = std::min(min.x, point.x);
-            min.y = std::min(min.y, point.y);
-            min.z = std::min(min.z, point.z);
+            min = Math::Vec3(
+                std::min(min.X(), point.X()),
+                std::min(min.Y(), point.Y()),
+                std::min(min.Z(), point.Z()));
 
-            max.x = std::max(max.x, point.x);
-            max.y = std::max(max.y, point.y);
-            max.z = std::max(max.z, point.z);
+            max = Math::Vec3(
+                std::max(max.X(), point.X()),
+                std::max(max.Y(), point.Y()),
+                std::max(max.Z(), point.Z()));
         }
 
         void BoundingBox::Expand(const BoundingBox &other)
@@ -27,13 +29,15 @@ namespace Orange
             if (!other.IsValid())
                 return;
 
-            min.x = std::min(min.x, other.min.x);
-            min.y = std::min(min.y, other.min.y);
-            min.z = std::min(min.z, other.min.z);
+            min = Math::Vec3(
+                std::min(min.X(), other.min.X()),
+                std::min(min.Y(), other.min.Y()),
+                std::min(min.Z(), other.min.Z()));
 
-            max.x = std::max(max.x, other.max.x);
-            max.y = std::max(max.y, other.max.y);
-            max.z = std::max(max.z, other.max.z);
+            max = Math::Vec3(
+                std::max(max.X(), other.max.X()),
+                std::max(max.Y(), other.max.Y()),
+                std::max(max.Z(), other.max.Z()));
         }
 
         void BoundingBox::Reset()
@@ -44,7 +48,7 @@ namespace Orange
 
         bool BoundingBox::IsValid() const
         {
-            return min.x <= max.x && min.y <= max.y && min.z <= max.z;
+            return min.X() <= max.X() && min.Y() <= max.Y() && min.Z() <= max.Z();
         }
 
         // ==================== Mesh Implementation ====================
@@ -272,11 +276,11 @@ namespace Orange
             // 简单的顶点哈希函数
             auto vertexHash = [](const Vertex &v) -> size_t
             {
-                size_t h1 = std::hash<float>{}(v.position.x);
-                size_t h2 = std::hash<float>{}(v.position.y);
-                size_t h3 = std::hash<float>{}(v.position.z);
-                size_t h4 = std::hash<float>{}(v.texCoord.x);
-                size_t h5 = std::hash<float>{}(v.texCoord.y);
+                size_t h1 = std::hash<float>{}(v.position.X());
+                size_t h2 = std::hash<float>{}(v.position.Y());
+                size_t h3 = std::hash<float>{}(v.position.Z());
+                size_t h4 = std::hash<float>{}(v.texCoord.X());
+                size_t h5 = std::hash<float>{}(v.texCoord.Y());
                 return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
             };
 

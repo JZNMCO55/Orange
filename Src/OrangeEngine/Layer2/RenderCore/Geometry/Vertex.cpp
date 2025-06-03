@@ -19,15 +19,17 @@ namespace Orange
             Math::Vec2 deltaUV2 = v2.texCoord - v0.texCoord;
 
             // 计算切线空间的基向量
-            float f = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
+            float f = 1.0f / (deltaUV1.X() * deltaUV2.Y() - deltaUV2.X() * deltaUV1.Y());
 
-            tangent.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
-            tangent.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
-            tangent.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+            tangent = Math::Vec3(
+                f * (deltaUV2.Y() * edge1.X() - deltaUV1.Y() * edge2.X()),
+                f * (deltaUV2.Y() * edge1.Y() - deltaUV1.Y() * edge2.Y()),
+                f * (deltaUV2.Y() * edge1.Z() - deltaUV1.Y() * edge2.Z()));
 
-            bitangent.x = f * (-deltaUV2.x * edge1.x + deltaUV1.x * edge2.x);
-            bitangent.y = f * (-deltaUV2.x * edge1.y + deltaUV1.x * edge2.y);
-            bitangent.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
+            bitangent = Math::Vec3(
+                f * (-deltaUV2.X() * edge1.X() + deltaUV1.X() * edge2.X()),
+                f * (-deltaUV2.X() * edge1.Y() + deltaUV1.X() * edge2.Y()),
+                f * (-deltaUV2.X() * edge1.Z() + deltaUV1.X() * edge2.Z()));
 
             // 标准化向量
             tangent = Math::Normalize(tangent);
@@ -56,13 +58,13 @@ namespace Orange
                 CalculateTangents(v0, v1, v2, tangent, bitangent);
 
                 // 累积切线向量
-                tangentAccum[i0] += tangent;
-                tangentAccum[i1] += tangent;
-                tangentAccum[i2] += tangent;
+                tangentAccum[i0] = tangentAccum[i0] + tangent;
+                tangentAccum[i1] = tangentAccum[i1] + tangent;
+                tangentAccum[i2] = tangentAccum[i2] + tangent;
 
-                bitangentAccum[i0] += bitangent;
-                bitangentAccum[i1] += bitangent;
-                bitangentAccum[i2] += bitangent;
+                bitangentAccum[i0] = bitangentAccum[i0] + bitangent;
+                bitangentAccum[i1] = bitangentAccum[i1] + bitangent;
+                bitangentAccum[i2] = bitangentAccum[i2] + bitangent;
 
                 tangentCount[i0]++;
                 tangentCount[i1]++;
@@ -74,18 +76,18 @@ namespace Orange
             {
                 if (tangentCount[i] > 0)
                 {
-                    vertices[i].tangent = Math::Normalize(tangentAccum[i] / static_cast<float>(tangentCount[i]));
-                    vertices[i].bitangent = Math::Normalize(bitangentAccum[i] / static_cast<float>(tangentCount[i]));
+                    vertices[i].tangent = Math::Normalize(tangentAccum[i] * (1.0f / static_cast<float>(tangentCount[i])));
+                    vertices[i].bitangent = Math::Normalize(bitangentAccum[i] * (1.0f / static_cast<float>(tangentCount[i])));
 
                     // 使用Gram-Schmidt正交化过程确保切线向量垂直于法线
                     vertices[i].tangent = Math::Normalize(vertices[i].tangent -
-                                                          Math::Dot(vertices[i].tangent, vertices[i].normal) * vertices[i].normal);
+                                                          vertices[i].normal * Math::Dot(vertices[i].tangent, vertices[i].normal));
 
                     // 确保切线空间是右手坐标系
                     Math::Vec3 cross = Math::Cross(vertices[i].normal, vertices[i].tangent);
                     if (Math::Dot(cross, vertices[i].bitangent) < 0.0f)
                     {
-                        vertices[i].tangent = -vertices[i].tangent;
+                        vertices[i].tangent = Math::Vec3(0.0f) - vertices[i].tangent;
                     }
 
                     // 重新计算副切线确保正交性
@@ -100,10 +102,10 @@ namespace Orange
 
             return Math::Length(position - other.position) < epsilon &&
                    Math::Length(normal - other.normal) < epsilon &&
-                   Math::Length(Math::Vec3(texCoord.x - other.texCoord.x, texCoord.y - other.texCoord.y, 0.0f)) < epsilon &&
+                   Math::Length(Math::Vec3(texCoord.X() - other.texCoord.X(), texCoord.Y() - other.texCoord.Y(), 0.0f)) < epsilon &&
                    Math::Length(tangent - other.tangent) < epsilon &&
                    Math::Length(bitangent - other.bitangent) < epsilon &&
-                   Math::Length(color - other.color) < epsilon;
+                   Math::Length(Math::Vec3(color.X() - other.color.X(), color.Y() - other.color.Y(), color.Z() - other.color.Z())) < epsilon;
         }
 
         void VertexInputLayout::AddAttribute(uint32_t location, uint32_t offset, uint32_t size,

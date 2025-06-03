@@ -74,10 +74,10 @@ namespace Orange
         // 例如UI更新、场景管理等，但不需要管理渲染帧
 
         // 每1000帧输出一次统计信息
-        if (m_frameCount % 1000 == 0)
-        {
-            ORG_LOG_INFO("EditorLayer: Frame {}", m_frameCount);
-        }
+        //if (m_frameCount % 1000 == 0)
+        //{
+        //    ORG_LOG_INFO("EditorLayer: Frame {}", m_frameCount);
+        //}
     }
 
     void EditorLayer::OnAttach()
