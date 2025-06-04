@@ -40,9 +40,12 @@ namespace Orange
             void PushLayer(const std::shared_ptr<Layer> &layer);
             void PushOverlay(const std::shared_ptr<Layer> &overlay);
 
-            // 新增：访问器接口
+            // 访问器接口
             Graphics::IGraphicsSystem *GetGraphicsSystem() const { return m_graphicsSystem.get(); }
             Window *GetWindow() const { return m_window.get(); }
+
+            // 单例访问
+            static Application &GetInstance() { return *s_instance; }
 
         private:
             bool OnWindowClose(WindowCloseEvent &e);
@@ -54,6 +57,9 @@ namespace Orange
             std::unique_ptr<Window> m_window;
             std::unique_ptr<Graphics::IGraphicsSystem> m_graphicsSystem;
             bool m_running = true;
+
+            // 单例实例
+            static Application *s_instance;
         };
     }
 }

@@ -9,7 +9,7 @@
 #include <array>
 #include <string>
 
-// 顶点数据结构
+// 简单顶点数据结构（用于三角形）
 struct Vertex
 {
     std::array<float, 2> pos;
@@ -37,6 +37,39 @@ struct Vertex
         attributeDescriptions[1].location = 1;
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
+
+// 立方体顶点数据结构（3D位置 + 颜色）
+struct CubeVertex
+{
+    std::array<float, 3> pos;   // 3D位置
+    std::array<float, 3> color; // RGB颜色
+
+    static VkVertexInputBindingDescription getBindingDescription()
+    {
+        VkVertexInputBindingDescription bindingDescription{};
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(CubeVertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        return bindingDescription;
+    }
+
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
+    {
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[0].offset = offsetof(CubeVertex, pos);
+
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(CubeVertex, color);
 
         return attributeDescriptions;
     }
@@ -96,6 +129,11 @@ namespace Orange::Graphics::Vulkan
 
         // 三角形渲染
         void DrawTriangle();
+
+        // 立方体渲染
+        void DrawCube();
+        bool InitializeCubeRendering();
+        void CleanupCubeRendering();
 
     private:
         // 初始化步骤
@@ -212,6 +250,14 @@ namespace Orange::Graphics::Vulkan
         // 着色器SPIR-V数据
         std::vector<uint32_t> m_vertexShaderSpirv;
         std::vector<uint32_t> m_fragmentShaderSpirv;
+
+        // 立方体渲染资源
+        VkBuffer m_cubeVertexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_cubeVertexBufferMemory = VK_NULL_HANDLE;
+        VkBuffer m_cubeIndexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_cubeIndexBufferMemory = VK_NULL_HANDLE;
+        VkPipeline m_cubePipeline = VK_NULL_HANDLE;
+        bool m_cubeRenderingInitialized = false;
 
         // 验证层和扩展
         const std::vector<const char *> m_validationLayers = {

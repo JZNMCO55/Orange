@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 #include <iostream>
 #include "Layer2/RenderCore/RenderCore.h"
+#include "Layer2/RenderCore/Geometry/MeshGenerator.h"
 
 namespace Orange
 {
@@ -34,16 +35,23 @@ namespace Orange
         {
             using namespace Orange::RenderCore;
             m_testCamera = std::make_unique<Camera>();
-            m_testCamera->SetPerspective(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+
+            ORG_LOG_INFO("Camera系统测试开始...");
             TestCameraFunctionality();
-            ORG_LOG_INFO("Camera系统测试成功完成");
+            ORG_LOG_INFO("Camera系统测试完成");
+
+            // 启用几何体系统测试
+            ORG_LOG_INFO("几何体系统测试开始...");
+            TestGeometryRendering();
+            ORG_LOG_INFO("几何体系统测试完成");
+
+            ORG_LOG_INFO("=== Layer2 RenderCore 验证完成 ===");
         }
         catch (const std::exception &e)
         {
             ORG_LOG_ERROR("Camera系统测试失败: {}", e.what());
+            return false;
         }
-
-        ORG_LOG_INFO("=== 基础验证完成 ===");
 
         m_initialized = true;
         return true;
@@ -73,8 +81,23 @@ namespace Orange
         // 可以在这里添加EditorLayer特定的更新逻辑
         // 例如UI更新、场景管理等，但不需要管理渲染帧
 
+        // 更新测试摄像机（如果需要）
+        if (m_testCamera)
+        {
+            // 简单的相机更新逻辑
+        }
+
+        // 设置清除颜色为深蓝色，确认渲染正在工作
+        auto &app = Orange::Core::Application::GetInstance();
+        auto graphics = app.GetGraphicsSystem();
+        if (graphics)
+        {
+            // 设置深蓝色背景，确认渲染系统正常
+            graphics->SetClearColor(0.1f, 0.2f, 0.4f, 1.0f);
+        }
+
         // 每1000帧输出一次统计信息
-        //if (m_frameCount % 1000 == 0)
+        // if (m_frameCount % 1000 == 0)
         //{
         //    ORG_LOG_INFO("EditorLayer: Frame {}", m_frameCount);
         //}
@@ -90,16 +113,22 @@ namespace Orange
         {
             using namespace Orange::RenderCore;
             m_testCamera = std::make_unique<Camera>();
-            m_testCamera->SetPerspective(45.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+
+            ORG_LOG_INFO("Camera系统测试开始...");
             TestCameraFunctionality();
-            ORG_LOG_INFO("Camera系统测试成功完成");
+            ORG_LOG_INFO("Camera系统测试完成");
+
+            // 启用几何体系统测试
+            ORG_LOG_INFO("几何体系统测试开始...");
+            TestGeometryRendering();
+            ORG_LOG_INFO("几何体系统测试完成");
+
+            ORG_LOG_INFO("=== Layer2 RenderCore 验证完成 ===");
         }
         catch (const std::exception &e)
         {
             ORG_LOG_ERROR("Camera系统测试失败: {}", e.what());
         }
-
-        ORG_LOG_INFO("=== 基础验证完成 ===");
     }
 
     void EditorLayer::OnDetach()
@@ -135,6 +164,11 @@ namespace Orange
 
     void EditorLayer::CleanupGraphicsResources()
     {
+        // 清理几何体测试对象
+        m_testCube.reset();
+        m_testSphere.reset();
+        m_testPlane.reset();
+
         // Application负责清理图形系统
         ORG_LOG_INFO("图形资源清理完成");
     }
@@ -199,7 +233,114 @@ namespace Orange
                      ray.origin.X(), ray.origin.Y(), ray.origin.Z(),
                      ray.direction.X(), ray.direction.Y(), ray.direction.Z());
 
-        ORG_LOG_INFO("=== Camera Test Complete ===");
+        ORG_LOG_INFO("=== Camera System Test Completed ===");
+    }
+
+    void EditorLayer::TestGeometryRendering()
+    {
+        ORG_LOG_INFO("=== 几何体生成与渲染测试 ===");
+
+        if (!CreateTestMeshes())
+        {
+            ORG_LOG_ERROR("几何体生成失败");
+            return;
+        }
+
+        // 验证几何体数据的完整性
+        if (m_testCube)
+        {
+            auto &vertices = m_testCube->GetVertices();
+            auto &indices = m_testCube->GetIndices();
+            auto bbox = m_testCube->GetBoundingBox();
+
+            ORG_LOG_INFO("✅ 立方体生成成功: {}顶点, {}索引, {}三角形",
+                         vertices.size(), indices.size(), indices.size() / 3);
+            ORG_LOG_INFO("   包围盒: ({},{},{}) 到 ({},{},{})",
+                         bbox.min.X(), bbox.min.Y(), bbox.min.Z(),
+                         bbox.max.X(), bbox.max.Y(), bbox.max.Z());
+        }
+
+        if (m_testSphere)
+        {
+            auto &vertices = m_testSphere->GetVertices();
+            auto &indices = m_testSphere->GetIndices();
+            auto bbox = m_testSphere->GetBoundingBox();
+
+            ORG_LOG_INFO("✅ 球体生成成功: {}顶点, {}索引, {}三角形",
+                         vertices.size(), indices.size(), indices.size() / 3);
+            ORG_LOG_INFO("   包围盒: ({},{},{}) 到 ({},{},{})",
+                         bbox.min.X(), bbox.min.Y(), bbox.min.Z(),
+                         bbox.max.X(), bbox.max.Y(), bbox.max.Z());
+        }
+
+        if (m_testPlane)
+        {
+            auto &vertices = m_testPlane->GetVertices();
+            auto &indices = m_testPlane->GetIndices();
+            auto bbox = m_testPlane->GetBoundingBox();
+
+            ORG_LOG_INFO("✅ 平面生成成功: {}顶点, {}索引, {}三角形",
+                         vertices.size(), indices.size(), indices.size() / 3);
+            ORG_LOG_INFO("   包围盒: ({},{},{}) 到 ({},{},{})",
+                         bbox.min.X(), bbox.min.Y(), bbox.min.Z(),
+                         bbox.max.X(), bbox.max.Y(), bbox.max.Z());
+        }
+
+        ORG_LOG_INFO("=== 几何体渲染将由VulkanGraphicsSystem处理 ===");
+        m_geometryTestCompleted = true;
+    }
+
+    bool EditorLayer::CreateTestMeshes()
+    {
+        using namespace Orange::RenderCore;
+
+        try
+        {
+            // 创建立方体
+            ORG_LOG_INFO("创建测试立方体...");
+            m_testCube = MeshGenerator::CreateCube(Math::Vec3(2.0f, 2.0f, 2.0f));
+            if (!m_testCube)
+            {
+                ORG_LOG_ERROR("立方体创建失败");
+                return false;
+            }
+            ORG_LOG_INFO("立方体创建成功: {}", m_testCube->GetName());
+
+            // 创建球体
+            ORG_LOG_INFO("创建测试球体...");
+            m_testSphere = MeshGenerator::CreateSphere(1.5f, 32, 16);
+            if (!m_testSphere)
+            {
+                ORG_LOG_ERROR("球体创建失败");
+                return false;
+            }
+            ORG_LOG_INFO("球体创建成功: {}", m_testSphere->GetName());
+
+            // 创建平面
+            ORG_LOG_INFO("创建测试平面...");
+            m_testPlane = MeshGenerator::CreatePlane(Math::Vec2(4.0f, 4.0f), 2);
+            if (!m_testPlane)
+            {
+                ORG_LOG_ERROR("平面创建失败");
+                return false;
+            }
+            ORG_LOG_INFO("平面创建成功: {}", m_testPlane->GetName());
+
+            // 验证所有几何体是否有效
+            if (!m_testCube->IsValid() || !m_testSphere->IsValid() || !m_testPlane->IsValid())
+            {
+                ORG_LOG_ERROR("某些几何体数据无效");
+                return false;
+            }
+
+            ORG_LOG_INFO("所有测试几何体创建成功并通过验证");
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            ORG_LOG_ERROR("创建测试几何体时发生异常: {}", e.what());
+            return false;
+        }
     }
 
 } // namespace Orange

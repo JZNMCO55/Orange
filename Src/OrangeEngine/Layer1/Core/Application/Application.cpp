@@ -8,8 +8,14 @@ namespace Orange
 {
     namespace Core
     {
+        // 单例实例定义
+        Application *Application::s_instance = nullptr;
+
         Application::Application()
         {
+            // 设置单例实例
+            s_instance = this;
+
             // 创建窗口
             WindowProps props("Orange Engine", 1280, 720);
             m_window = std::make_unique<Window>(props);

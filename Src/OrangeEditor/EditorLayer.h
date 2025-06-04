@@ -14,6 +14,12 @@
 namespace Orange::RenderCore
 {
     class Camera;
+    class Mesh;
+}
+
+namespace Orange::Graphics
+{
+    class IBuffer;
 }
 
 namespace Orange
@@ -77,6 +83,26 @@ namespace Orange
          */
         void TestCameraFunctionality();
 
+        /**
+         * @brief 测试几何体生成和渲染
+         */
+        void TestGeometryRendering();
+
+        /**
+         * @brief 创建测试用几何体
+         */
+        bool CreateTestMeshes();
+
+        /**
+         * @brief 初始化立方体渲染资源
+         */
+        bool InitializeCubeRendering();
+
+        /**
+         * @brief 清理立方体渲染资源
+         */
+        void CleanupCubeRendering();
+
     private:
         // 状态
         bool m_initialized = false;
@@ -87,6 +113,17 @@ namespace Orange
 
         // Camera系统测试
         std::unique_ptr<RenderCore::Camera> m_testCamera;
+
+        // 几何体测试
+        std::unique_ptr<RenderCore::Mesh> m_testCube;
+        std::unique_ptr<RenderCore::Mesh> m_testSphere;
+        std::unique_ptr<RenderCore::Mesh> m_testPlane;
+        bool m_geometryTestCompleted = false;
+
+        // 立方体渲染资源
+        std::unique_ptr<Graphics::IBuffer> m_cubeVertexBuffer;
+        std::unique_ptr<Graphics::IBuffer> m_cubeIndexBuffer;
+        bool m_cubeRenderingInitialized = false;
     };
 
 } // namespace Orange

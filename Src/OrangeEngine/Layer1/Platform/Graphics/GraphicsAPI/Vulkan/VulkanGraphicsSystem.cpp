@@ -112,6 +112,12 @@ namespace Orange::Graphics::Vulkan
             m_renderDevice = std::make_unique<VulkanRenderDevice>(this);
             m_shaderCompiler = std::make_unique<VulkanShaderCompiler>();
 
+            // 初始化立方体渲染
+            if (!InitializeCubeRendering())
+            {
+                ORG_LOG_WARN("Failed to initialize cube rendering, but continuing...");
+            }
+
             m_initialized = true;
             ORG_LOG_INFO("Vulkan Graphics System initialized successfully");
             return true;
@@ -182,6 +188,12 @@ namespace Orange::Graphics::Vulkan
             m_renderDevice = std::make_unique<VulkanRenderDevice>(this);
             m_shaderCompiler = std::make_unique<VulkanShaderCompiler>();
 
+            // 初始化立方体渲染
+            if (!InitializeCubeRendering())
+            {
+                ORG_LOG_WARN("Failed to initialize cube rendering, but continuing...");
+            }
+
             m_initialized = true;
             ORG_LOG_INFO("Vulkan Graphics System initialized successfully");
             return true;
@@ -213,6 +225,9 @@ namespace Orange::Graphics::Vulkan
             vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
         }
+
+        // 清理立方体渲染资源
+        CleanupCubeRendering();
 
         // 销毁顶点缓冲区
         vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
@@ -319,8 +334,8 @@ namespace Orange::Graphics::Vulkan
 
         vkCmdBeginRenderPass(m_commandBuffers[m_currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // 绘制三角形
-        DrawTriangle();
+        // 绘制立方体 (替代三角形)
+        DrawCube();
     }
 
     void VulkanGraphicsSystem::EndFrame()
@@ -488,6 +503,180 @@ namespace Orange::Graphics::Vulkan
         vkCmdBindPipeline(m_commandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
         vkCmdBindVertexBuffers(m_commandBuffers[m_currentFrame], 0, 1, vertexBuffers, offsets);
         vkCmdDraw(m_commandBuffers[m_currentFrame], 3, 1, 0, 0);
+    }
+
+    // 立方体渲染实现
+    void VulkanGraphicsSystem::DrawCube()
+    {
+        if (!m_cubeRenderingInitialized)
+        {
+            return;
+        }
+
+        VkBuffer vertexBuffers[] = {m_cubeVertexBuffer};
+        VkDeviceSize offsets[] = {0};
+
+        vkCmdBindPipeline(m_commandBuffers[m_currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, m_cubePipeline);
+        vkCmdBindVertexBuffers(m_commandBuffers[m_currentFrame], 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(m_commandBuffers[m_currentFrame], m_cubeIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+        // 绘制立方体 (36个索引，12个三角形)
+        vkCmdDrawIndexed(m_commandBuffers[m_currentFrame], 36, 1, 0, 0, 0);
+    }
+
+    bool VulkanGraphicsSystem::InitializeCubeRendering()
+    {
+        if (m_cubeRenderingInitialized)
+        {
+            return true;
+        }
+
+        ORG_LOG_INFO("Initializing cube rendering...");
+
+        // 创建立方体顶点数据 (8个顶点，6种颜色)
+        const std::vector<CubeVertex> cubeVertices = {
+            // 前面 (红色系)
+            {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}}, // 0: 左下前
+            {{0.5f, -0.5f, 0.5f}, {1.0f, 0.5f, 0.0f}},  // 1: 右下前
+            {{0.5f, 0.5f, 0.5f}, {1.0f, 1.0f, 0.0f}},   // 2: 右上前
+            {{-0.5f, 0.5f, 0.5f}, {0.5f, 1.0f, 0.0f}},  // 3: 左上前
+
+            // 后面 (蓝色系)
+            {{-0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}}, // 4: 左下后
+            {{0.5f, -0.5f, -0.5f}, {0.0f, 0.5f, 1.0f}},  // 5: 右下后
+            {{0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},   // 6: 右上后
+            {{-0.5f, 0.5f, -0.5f}, {0.5f, 0.0f, 1.0f}}   // 7: 左上后
+        };
+
+        // 立方体索引数据 (12个三角形)
+        const std::vector<uint32_t> cubeIndices = {
+            // 前面
+            0, 1, 2, 2, 3, 0,
+            // 后面
+            4, 6, 5, 6, 4, 7,
+            // 左面
+            4, 0, 3, 3, 7, 4,
+            // 右面
+            1, 5, 6, 6, 2, 1,
+            // 底面
+            4, 5, 1, 1, 0, 4,
+            // 顶面
+            3, 2, 6, 6, 7, 3};
+
+        // 创建顶点缓冲区
+        VkBufferCreateInfo vertexBufferInfo{};
+        vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        vertexBufferInfo.size = sizeof(cubeVertices[0]) * cubeVertices.size();
+        vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(m_device, &vertexBufferInfo, nullptr, &m_cubeVertexBuffer) != VK_SUCCESS)
+        {
+            ORG_LOG_ERROR("Failed to create cube vertex buffer");
+            return false;
+        }
+
+        VkMemoryRequirements vertexMemRequirements;
+        vkGetBufferMemoryRequirements(m_device, m_cubeVertexBuffer, &vertexMemRequirements);
+
+        VkMemoryAllocateInfo vertexAllocInfo{};
+        vertexAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        vertexAllocInfo.allocationSize = vertexMemRequirements.size;
+        vertexAllocInfo.memoryTypeIndex = FindMemoryType(vertexMemRequirements.memoryTypeBits,
+                                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(m_device, &vertexAllocInfo, nullptr, &m_cubeVertexBufferMemory) != VK_SUCCESS)
+        {
+            ORG_LOG_ERROR("Failed to allocate cube vertex buffer memory");
+            return false;
+        }
+
+        vkBindBufferMemory(m_device, m_cubeVertexBuffer, m_cubeVertexBufferMemory, 0);
+
+        // 上传顶点数据
+        void *vertexData;
+        vkMapMemory(m_device, m_cubeVertexBufferMemory, 0, vertexBufferInfo.size, 0, &vertexData);
+        memcpy(vertexData, cubeVertices.data(), (size_t)vertexBufferInfo.size);
+        vkUnmapMemory(m_device, m_cubeVertexBufferMemory);
+
+        // 创建索引缓冲区
+        VkBufferCreateInfo indexBufferInfo{};
+        indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        indexBufferInfo.size = sizeof(cubeIndices[0]) * cubeIndices.size();
+        indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        indexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(m_device, &indexBufferInfo, nullptr, &m_cubeIndexBuffer) != VK_SUCCESS)
+        {
+            ORG_LOG_ERROR("Failed to create cube index buffer");
+            return false;
+        }
+
+        VkMemoryRequirements indexMemRequirements;
+        vkGetBufferMemoryRequirements(m_device, m_cubeIndexBuffer, &indexMemRequirements);
+
+        VkMemoryAllocateInfo indexAllocInfo{};
+        indexAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        indexAllocInfo.allocationSize = indexMemRequirements.size;
+        indexAllocInfo.memoryTypeIndex = FindMemoryType(indexMemRequirements.memoryTypeBits,
+                                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(m_device, &indexAllocInfo, nullptr, &m_cubeIndexBufferMemory) != VK_SUCCESS)
+        {
+            ORG_LOG_ERROR("Failed to allocate cube index buffer memory");
+            return false;
+        }
+
+        vkBindBufferMemory(m_device, m_cubeIndexBuffer, m_cubeIndexBufferMemory, 0);
+
+        // 上传索引数据
+        void *indexData;
+        vkMapMemory(m_device, m_cubeIndexBufferMemory, 0, indexBufferInfo.size, 0, &indexData);
+        memcpy(indexData, cubeIndices.data(), (size_t)indexBufferInfo.size);
+        vkUnmapMemory(m_device, m_cubeIndexBufferMemory);
+
+        // 创建立方体渲染管线 (暂时复用现有的管线布局)
+        // TODO: 实际应该创建专门的立方体管线，支持MVP矩阵等
+        m_cubePipeline = m_graphicsPipeline; // 暂时复用三角形管线
+
+        m_cubeRenderingInitialized = true;
+        ORG_LOG_INFO("Cube rendering initialized successfully");
+        return true;
+    }
+
+    void VulkanGraphicsSystem::CleanupCubeRendering()
+    {
+        if (!m_cubeRenderingInitialized)
+        {
+            return;
+        }
+
+        if (m_cubeVertexBuffer != VK_NULL_HANDLE)
+        {
+            vkDestroyBuffer(m_device, m_cubeVertexBuffer, nullptr);
+            m_cubeVertexBuffer = VK_NULL_HANDLE;
+        }
+
+        if (m_cubeVertexBufferMemory != VK_NULL_HANDLE)
+        {
+            vkFreeMemory(m_device, m_cubeVertexBufferMemory, nullptr);
+            m_cubeVertexBufferMemory = VK_NULL_HANDLE;
+        }
+
+        if (m_cubeIndexBuffer != VK_NULL_HANDLE)
+        {
+            vkDestroyBuffer(m_device, m_cubeIndexBuffer, nullptr);
+            m_cubeIndexBuffer = VK_NULL_HANDLE;
+        }
+
+        if (m_cubeIndexBufferMemory != VK_NULL_HANDLE)
+        {
+            vkFreeMemory(m_device, m_cubeIndexBufferMemory, nullptr);
+            m_cubeIndexBufferMemory = VK_NULL_HANDLE;
+        }
+
+        m_cubeRenderingInitialized = false;
+        ORG_LOG_INFO("Cube rendering resources cleaned up");
     }
 
     bool VulkanGraphicsSystem::CreateDescriptorSetLayout()
