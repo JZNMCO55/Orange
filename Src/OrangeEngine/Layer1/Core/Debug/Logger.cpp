@@ -1,59 +1,67 @@
 #include "Logger.h"
-#include <iostream>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
-
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/spdlog.h>
+#include "Platform/Detection/PlatformDetection.h"
 namespace Orange
 {
     struct LogImpl
     {
+        std::shared_ptr<spdlog::logger> Logger;
         LogImpl()
         {
-            // 简化的初始化
+            auto fileName = Platform::PlatformDetection::GetExecutableDirectory() + "/logs/Orange.log";
+            // 创建 sink
+            auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fileName, true);
+
+            // 可选：设置 sink 的日志级别
+            console_sink->set_level(spdlog::level::trace);
+            file_sink->set_level(spdlog::level::trace);
+
+            // 设置统一的格式
+            console_sink->set_pattern("[%T] [%^%l%$] %v");
+            file_sink->set_pattern("[%Y-%m-%d %T] [%l] %v");
+
+            std::vector<spdlog::sink_ptr> sinks{ console_sink, file_sink };
+
+            Logger = std::make_shared<spdlog::logger>("Orange", sinks.begin(), sinks.end());
+            Logger->set_level(spdlog::level::trace);
+            // Logger->flush_on(spdlog::level::warn); // 遇到 warn 或更严重时立即 flush
         }
 
         ~LogImpl()
         {
         }
 
-        std::string GetTimestamp()
+        void LogError(const std::string& message)
         {
-            auto now = std::chrono::system_clock::now();
-            auto time_t = std::chrono::system_clock::to_time_t(now);
-            std::stringstream ss;
-            ss << std::put_time(std::localtime(&time_t), "%H:%M:%S");
-            return ss.str();
+            Logger->error(message);
         }
 
-        void LogError(const std::string &message)
+        void LogWarn(const std::string& message)
         {
-            std::cerr << "[" << GetTimestamp() << "] [ERROR] " << message << std::endl;
+            Logger->warn(message);
         }
 
-        void LogWarn(const std::string &message)
+        void LogInfo(const std::string& message)
         {
-            std::cout << "[" << GetTimestamp() << "] [WARN] " << message << std::endl;
+            Logger->info(message);
         }
 
-        void LogInfo(const std::string &message)
+        void LogDebug(const std::string& message)
         {
-            std::cout << "[" << GetTimestamp() << "] [INFO] " << message << std::endl;
+            Logger->debug(message);
         }
 
-        void LogDebug(const std::string &message)
+        void LogTrace(const std::string& message)
         {
-            std::cout << "[" << GetTimestamp() << "] [DEBUG] " << message << std::endl;
+            Logger->trace(message);
         }
 
-        void LogTrace(const std::string &message)
+        void LogCritical(const std::string& message)
         {
-            std::cout << "[" << GetTimestamp() << "] [TRACE] " << message << std::endl;
-        }
-
-        void LogCritical(const std::string &message)
-        {
-            std::cerr << "[" << GetTimestamp() << "] [CRITICAL] " << message << std::endl;
+            Logger->critical(message);
         }
     };
 
@@ -68,45 +76,33 @@ namespace Orange
         impl = std::make_unique<LogImpl>();
     }
 
-    void Logger::InternalLogError(const std::string &message)
+    void Logger::InternalLogError(const std::string& message)
     {
-        if (!impl)
-            Init();
         impl->LogError(message);
     }
 
-    void Logger::InternalLogWarn(const std::string &message)
+    void Logger::InternalLogWarn(const std::string& message)
     {
-        if (!impl)
-            Init();
         impl->LogWarn(message);
     }
 
-    void Logger::InternalLogInfo(const std::string &message)
+    void Logger::InternalLogInfo(const std::string& message)
     {
-        if (!impl)
-            Init();
         impl->LogInfo(message);
     }
 
-    void Logger::InternalLogDebug(const std::string &message)
+    void Logger::InternalLogDebug(const std::string& message)
     {
-        if (!impl)
-            Init();
         impl->LogDebug(message);
     }
 
-    void Logger::InternalLogTrace(const std::string &message)
+    void Logger::InternalLogTrace(const std::string& message)
     {
-        if (!impl)
-            Init();
         impl->LogTrace(message);
     }
 
-    void Logger::InternalLogCritical(const std::string &message)
+    void Logger::InternalLogCritical(const std::string& message)
     {
-        if (!impl)
-            Init();
         impl->LogCritical(message);
     }
 }

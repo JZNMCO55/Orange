@@ -29,26 +29,21 @@ for %%L in (%LIBRARIES%) do (
     echo [INFO] Checking library: %%L
     echo [INFO] Library directory: !LIB_DIR!
 
-    :: 如果库目录存在且已完成构建，则跳过
-    if exist "!LIB_DIR!" (
-        echo [INFO] Library %%L already installed. Skipping.
-    ) else (
-        echo [INFO] Library %%L not found. Starting setup...
+    echo [INFO] Library %%L. Starting setup...
 
-        :: 确保库目录存在
-        if not exist "%LIB_DIR%" mkdir "%LIB_DIR%"
+    :: 确保库目录存在
+    if not exist "%LIB_DIR%" mkdir "%LIB_DIR%"
 
-        :: 调用库的下载和构建脚本（使用完整路径）
-        call "%~dp03rdPartyScripts\setup_%%L.bat" "%CONFIGURATION%"
-        if errorlevel 1 (
-            echo [ERROR] Failed to setup library %%L.
-            exit /b 1
-        )
-
-        :: 创建标记文件，表示库已构建完成
-        echo Done > "!LIB_DIR!\.done"
-        echo [INFO] Library %%L setup completed.
+    :: 调用库的下载和构建脚本（使用完整路径）
+    call "%~dp03rdPartyScripts\setup_%%L.bat" "%CONFIGURATION%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to setup library %%L.
+        exit /b 1
     )
+
+    :: 创建标记文件，表示库已构建完成
+    echo Done > "!LIB_DIR!\.done"
+    echo [INFO] Library %%L setup completed.
 )
 
 echo [INFO] All third-party libraries are ready!

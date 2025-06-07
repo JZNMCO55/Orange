@@ -19,7 +19,7 @@ namespace Orange::RenderCore
 
 namespace Orange::Graphics
 {
-    class IBuffer;
+    class Buffer;
 }
 
 namespace Orange
@@ -109,7 +109,7 @@ namespace Orange
         uint32_t m_frameCount = 0;
 
         // 从Application获取图形系统，不再自己管理
-        // Graphics::IGraphicsSystem *m_graphicsSystem = nullptr; // 移除
+        // Graphics::GraphicsSystem *m_graphicsSystem = nullptr; // 移除
 
         // Camera系统测试
         std::unique_ptr<RenderCore::Camera> m_testCamera;
@@ -121,8 +121,8 @@ namespace Orange
         bool m_geometryTestCompleted = false;
 
         // 立方体渲染资源
-        std::unique_ptr<Graphics::IBuffer> m_cubeVertexBuffer;
-        std::unique_ptr<Graphics::IBuffer> m_cubeIndexBuffer;
+        std::unique_ptr<Graphics::Buffer> m_cubeVertexBuffer;
+        std::unique_ptr<Graphics::Buffer> m_cubeIndexBuffer;
         bool m_cubeRenderingInitialized = false;
     };
 

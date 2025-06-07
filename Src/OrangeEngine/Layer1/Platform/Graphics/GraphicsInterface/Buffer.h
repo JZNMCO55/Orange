@@ -1,5 +1,5 @@
-#ifndef ORANGE_GRAPHICS_IBUFFER_H
-#define ORANGE_GRAPHICS_IBUFFER_H
+#ifndef ORANGE_GRAPHICS_BUFFER_H
+#define ORANGE_GRAPHICS_BUFFER_H
 
 #include <cstdint>
 #include <cstddef>
@@ -13,10 +13,10 @@ namespace Orange
          * @brief 缓冲区接口
          * 提供GPU缓冲区的基本操作功能
          */
-        class IBuffer
+        class Buffer
         {
         public:
-            virtual ~IBuffer() = default;
+            virtual ~Buffer() = default;
 
             /**
              * @brief 映射缓冲区内存到CPU地址空间
@@ -84,4 +84,4 @@ namespace Orange
     }
 }
 
-#endif // ORANGE_GRAPHICS_IBUFFER_H
+#endif // ORANGE_GRAPHICS_BUFFER_H

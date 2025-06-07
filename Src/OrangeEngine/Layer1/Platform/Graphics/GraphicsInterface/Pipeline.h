@@ -1,5 +1,5 @@
-#ifndef ORANGE_GRAPHICS_IPIPELINE_H
-#define ORANGE_GRAPHICS_IPIPELINE_H
+#ifndef ORANGE_GRAPHICS_PIPELINE_H
+#define ORANGE_GRAPHICS_PIPELINE_H
 
 #include <cstdint>
 #include <string>
@@ -11,10 +11,10 @@ namespace Orange::Graphics
      * @brief 渲染管线接口
      * 提供图形渲染管线的基本操作功能
      */
-    class IPipeline
+    class Pipeline
     {
     public:
-        virtual ~IPipeline() = default;
+        virtual ~Pipeline() = default;
 
         /**
          * @brief 绑定管线到当前渲染上下文
@@ -65,14 +65,14 @@ namespace Orange::Graphics
          * @param slot 纹理插槽
          * @param texture 纹理指针
          */
-        virtual void BindTexture(uint32_t slot, class ITexture *texture) = 0;
+        virtual void BindTexture(uint32_t slot, class Texture *texture) = 0;
 
         /**
          * @brief 绑定缓冲区到指定插槽
          * @param slot 缓冲区插槽
          * @param buffer 缓冲区指针
          */
-        virtual void BindBuffer(uint32_t slot, class IBuffer *buffer) = 0;
+        virtual void BindBuffer(uint32_t slot, class Buffer *buffer) = 0;
 
         /**
          * @brief 绘制图元
@@ -118,4 +118,4 @@ namespace Orange::Graphics
 
 } // namespace Orange::Graphics
 
-#endif // ORANGE_GRAPHICS_IPIPELINE_H
+#endif // ORANGE_GRAPHICS_PIPELINE_H

@@ -51,6 +51,9 @@ cmake -G "Visual Studio 17 2022" -A x64 ^
     -DCMAKE_INSTALL_PREFIX=%BUILD_DIR% ^
     %PROJECT_DIR%
 
+:: 编译
+cmake --build . --config %CONFIGURATION% --target install
+
 echo Build complete!
 endlocal
 pause

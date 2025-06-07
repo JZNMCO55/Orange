@@ -51,12 +51,12 @@ namespace Orange
         }
 
     public:
-        static void InternalLogError(const std::string &message);
-        static void InternalLogWarn(const std::string &message);
-        static void InternalLogInfo(const std::string &message);
-        static void InternalLogDebug(const std::string &message);
-        static void InternalLogTrace(const std::string &message);
-        static void InternalLogCritical(const std::string &message);
+        static void InternalLogError(const std::string& message);
+        static void InternalLogWarn(const std::string& message);
+        static void InternalLogInfo(const std::string& message);
+        static void InternalLogDebug(const std::string& message);
+        static void InternalLogTrace(const std::string& message);
+        static void InternalLogCritical(const std::string& message);
     };
 }
 

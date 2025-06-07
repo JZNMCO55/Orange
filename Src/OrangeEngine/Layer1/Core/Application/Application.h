@@ -17,7 +17,7 @@ namespace Orange
 
     namespace Graphics
     {
-        class IGraphicsSystem;
+        class GraphicsSystem;
     }
 }
 
@@ -41,7 +41,7 @@ namespace Orange
             void PushOverlay(const std::shared_ptr<Layer> &overlay);
 
             // 访问器接口
-            Graphics::IGraphicsSystem *GetGraphicsSystem() const { return m_graphicsSystem.get(); }
+            Graphics::GraphicsSystem *GetGraphicsSystem() const { return m_graphicsSystem.get(); }
             Window *GetWindow() const { return m_window.get(); }
 
             // 单例访问
@@ -55,7 +55,7 @@ namespace Orange
         private:
             LayerStack m_LayerStack;
             std::unique_ptr<Window> m_window;
-            std::unique_ptr<Graphics::IGraphicsSystem> m_graphicsSystem;
+            std::unique_ptr<Graphics::GraphicsSystem> m_graphicsSystem;
             bool m_running = true;
 
             // 单例实例

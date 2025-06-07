@@ -1,9 +1,9 @@
-#ifndef ORANGE_GRAPHICS_ITEXTURE_H
-#define ORANGE_GRAPHICS_ITEXTURE_H
+#ifndef ORANGE_GRAPHICS_TEXTURE_H
+#define ORANGE_GRAPHICS_TEXTURE_H
 
 #include <cstdint>
 #include <string>
-#include "IRenderDevice.h" // 为了使用TextureFormat等枚举
+#include "RenderDevice.h" // 为了使用TextureFormat等枚举
 
 namespace Orange::Graphics
 {
@@ -12,10 +12,10 @@ namespace Orange::Graphics
      * @brief 纹理接口
      * 提供纹理资源的基本操作功能
      */
-    class ITexture
+    class Texture
     {
     public:
-        virtual ~ITexture() = default;
+        virtual ~Texture() = default;
 
         /**
          * @brief 获取纹理宽度
@@ -114,4 +114,4 @@ namespace Orange::Graphics
 
 } // namespace Orange::Graphics
 
-#endif // ORANGE_GRAPHICS_ITEXTURE_H
+#endif // ORANGE_GRAPHICS_TEXTURE_H

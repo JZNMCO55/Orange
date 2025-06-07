@@ -2,7 +2,7 @@
 #define ORANGE_RENDERCORE_MESH_H
 
 #include "Vertex.h"
-#include "Layer1/Platform/Graphics/GraphicsInterface/IBuffer.h"
+#include "Layer1/Platform/Graphics/GraphicsInterface/Buffer.h"
 #include "Layer1/Core/Math/Math.h"
 #include <vector>
 #include <memory>
@@ -214,8 +214,8 @@ namespace Orange
             std::vector<Vertex> m_vertices;  // CPU顶点数据
             std::vector<uint32_t> m_indices; // CPU索引数据
 
-            std::unique_ptr<Graphics::IBuffer> m_vertexBuffer; // GPU顶点缓冲区
-            std::unique_ptr<Graphics::IBuffer> m_indexBuffer;  // GPU索引缓冲区
+            std::unique_ptr<Graphics::Buffer> m_vertexBuffer; // GPU顶点缓冲区
+            std::unique_ptr<Graphics::Buffer> m_indexBuffer;  // GPU索引缓冲区
 
             BoundingBox m_boundingBox;  // 包围盒
             std::string m_name;         // 网格名称

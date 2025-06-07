@@ -1,0 +1,25 @@
+---
+description: 生成代码选项
+globs: 
+alwaysApply: false
+---
+1. **头文件保护**  
+   - 使用 `#ifndef` + `#define` + `#endif`  
+   - 宏名称格式：`[FILENAME_UPPERCASE]_H_`  
+
+2. **命名规范**  
+   - 成员函数：`UpperCamelCase`（如 `GetName()`）  
+   - 成员变量：  
+     - 非指针 → `mValue`  
+     - 指针 → `mpNode`  
+   - 接口函数：必须添加 `/// @brief` 文档注释  
+
+3. **禁止项**  
+   - `#pragma once`  
+   - 成员变量中的下划线（如 `m_`、`mp_`）
+
+4. **开发注意事项**  
+   - 开始开发前，请务必先阅读以下文档：
+        - [OrangeEngine.md](mdc:docs/Technical Documentation/OrangeDocs/OrangeEngine.md)  
+        - [工作日志.md](mdc:docs/工作日志.md) 
+   - 若需要构建编译，则执行 GenerateWithDebugStatic.bat 脚本或运行 ./generate.bat Debug(推荐使用第二种方式)

@@ -1,5 +1,5 @@
 #include "Mesh.h"
-#include "Layer1/Platform/Graphics/GraphicsInterface/IGraphicsSystem.h"
+#include "Layer1/Platform/Graphics/GraphicsInterface/GraphicsSystem.h"
 #include "Layer1/Core/Application/Application.h"
 #include <algorithm>
 #include <unordered_map>

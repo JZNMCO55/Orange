@@ -1,11 +1,11 @@
-#ifndef ORANGE_GRAPHICS_ISHADERCOMPILER_H
-#define ORANGE_GRAPHICS_ISHADERCOMPILER_H
+#ifndef ORANGE_GRAPHICS_SHADERCOMPILER_H
+#define ORANGE_GRAPHICS_SHADERCOMPILER_H
 
 #include <vector>
 #include <string>
 #include <cstdint>
 #include <unordered_map>
-#include "IRenderDevice.h" // 为了使用ShaderStage枚举
+#include "RenderDevice.h" // 为了使用ShaderStage枚举
 
 namespace Orange::Graphics
 {
@@ -39,10 +39,10 @@ namespace Orange::Graphics
      * @brief 着色器编译器接口
      * 提供着色器编译功能，将GLSL/HLSL编译为SPIR-V字节码
      */
-    class IShaderCompiler
+    class ShaderCompiler
     {
     public:
-        virtual ~IShaderCompiler() = default;
+        virtual ~ShaderCompiler() = default;
 
         /**
          * @brief 从文件编译着色器
@@ -133,4 +133,4 @@ namespace Orange::Graphics
 
 } // namespace Orange::Graphics
 
-#endif // ORANGE_GRAPHICS_ISHADERCOMPILER_H
+#endif // ORANGE_GRAPHICS_ShaderCompiler_H

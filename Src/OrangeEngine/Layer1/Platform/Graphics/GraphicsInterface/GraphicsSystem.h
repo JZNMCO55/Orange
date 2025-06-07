@@ -1,5 +1,5 @@
-#ifndef ORANGE_GRAPHICS_IGRAPHICSSYSTEM_H
-#define ORANGE_GRAPHICS_IGRAPHICSSYSTEM_H
+#ifndef ORANGE_GRAPHICS_GRAPHICSSYSTEM_H
+#define ORANGE_GRAPHICS_GRAPHICSSYSTEM_H
 
 #include <cstdint>
 
@@ -8,18 +8,18 @@ namespace Orange
     namespace Graphics
     {
         // 前向声明
-        class IRenderDevice;
-        class IShaderCompiler;
+        class RenderDevice;
+        class ShaderCompiler;
 
         /**
          * @brief 图形系统接口
          *
          * 定义了图形系统的基本功能，包括初始化、渲染循环控制等
          */
-        class IGraphicsSystem
+        class GraphicsSystem
         {
         public:
-            virtual ~IGraphicsSystem() = default;
+            virtual ~GraphicsSystem() = default;
 
             /**
              * @brief 初始化图形系统
@@ -84,15 +84,15 @@ namespace Orange
              * @brief 获取渲染设备接口
              * @return 渲染设备指针，如果未初始化则返回nullptr
              */
-            virtual class IRenderDevice *GetRenderDevice() = 0;
+            virtual class RenderDevice *GetRenderDevice() = 0;
 
             /**
              * @brief 获取着色器编译器接口
              * @return 着色器编译器指针，如果未初始化则返回nullptr
              */
-            virtual class IShaderCompiler *GetShaderCompiler() = 0;
+            virtual class ShaderCompiler *GetShaderCompiler() = 0;
         };
     }
 }
 
-#endif // ORANGE_GRAPHICS_IGRAPHICSSYSTEM_H
+#endif // ORANGE_GRAPHICS_GRAPHICSSYSTEM_H

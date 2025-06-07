@@ -1,5 +1,5 @@
-#ifndef ORANGE_GRAPHICS_IRENDERDEVICE_H
-#define ORANGE_GRAPHICS_IRENDERDEVICE_H
+#ifndef ORANGE_GRAPHICS_RENDERDEVICE_H
+#define ORANGE_GRAPHICS_RENDERDEVICE_H
 
 #include <memory>
 #include <string>
@@ -10,9 +10,9 @@ namespace Orange::Graphics
 {
 
     // 前向声明
-    class IBuffer;
-    class ITexture;
-    class IPipeline;
+    class Buffer;
+    class Texture;
+    class Pipeline;
 
     /**
      * @brief 缓冲区使用类型
@@ -109,31 +109,31 @@ namespace Orange::Graphics
      * @brief 渲染设备接口
      * 负责管理和创建各种渲染资源
      */
-    class IRenderDevice
+    class RenderDevice
     {
     public:
-        virtual ~IRenderDevice() = default;
+        virtual ~RenderDevice() = default;
 
         /**
          * @brief 创建缓冲区
          * @param info 缓冲区创建信息
          * @return 缓冲区智能指针，失败返回nullptr
          */
-        virtual std::unique_ptr<IBuffer> CreateBuffer(const BufferCreateInfo &info) = 0;
+        virtual std::unique_ptr<Buffer> CreateBuffer(const BufferCreateInfo &info) = 0;
 
         /**
          * @brief 创建纹理
          * @param info 纹理创建信息
          * @return 纹理智能指针，失败返回nullptr
          */
-        virtual std::unique_ptr<ITexture> CreateTexture(const TextureCreateInfo &info) = 0;
+        virtual std::unique_ptr<Texture> CreateTexture(const TextureCreateInfo &info) = 0;
 
         /**
          * @brief 创建渲染管线
          * @param info 管线创建信息
          * @return 管线智能指针，失败返回nullptr
          */
-        virtual std::unique_ptr<IPipeline> CreatePipeline(const PipelineCreateInfo &info) = 0;
+        virtual std::unique_ptr<Pipeline> CreatePipeline(const PipelineCreateInfo &info) = 0;
 
         /**
          * @brief 等待设备空闲
@@ -181,4 +181,4 @@ namespace Orange::Graphics
 
 } // namespace Orange::Graphics
 
-#endif // ORANGE_GRAPHICS_IRENDERDEVICE_H
+#endif // ORANGE_GRAPHICS_RENDERDEVICE_H

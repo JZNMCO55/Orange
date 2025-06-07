@@ -1,7 +1,7 @@
 #ifndef ORANGE_VULKAN_VULKANGRAPHICSSYSTEM_H
 #define ORANGE_VULKAN_VULKANGRAPHICSSYSTEM_H
 
-#include "../../GraphicsInterface/IGraphicsSystem.h"
+#include "../../GraphicsInterface/GraphicsSystem.h"
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <memory>
@@ -99,21 +99,21 @@ namespace Orange::Graphics::Vulkan
     /**
      * @brief Vulkan图形系统实现
      */
-    class VulkanGraphicsSystem : public IGraphicsSystem
+    class VulkanGraphicsSystem : public GraphicsSystem
     {
     public:
         VulkanGraphicsSystem();
         ~VulkanGraphicsSystem() override;
 
-        // IGraphicsSystem接口实现
+        // GraphicsSystem接口实现
         bool Initialize() override;
         bool Initialize(void *windowHandle) override;
         void Shutdown() override;
         void BeginFrame() override;
         void EndFrame() override;
         void Present() override;
-        IRenderDevice *GetRenderDevice() override;
-        IShaderCompiler *GetShaderCompiler() override;
+        RenderDevice *GetRenderDevice() override;
+        ShaderCompiler *GetShaderCompiler() override;
         uint32_t GetBackbufferWidth() const override;
         uint32_t GetBackbufferHeight() const override;
         void SetClearColor(float r, float g, float b, float a = 1.0f) override;

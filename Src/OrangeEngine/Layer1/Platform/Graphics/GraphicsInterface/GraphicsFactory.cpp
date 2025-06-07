@@ -5,7 +5,7 @@
 namespace Orange::Graphics
 {
 
-    std::unique_ptr<IGraphicsSystem> GraphicsFactory::CreateGraphicsSystem(GraphicsAPI api)
+    std::unique_ptr<GraphicsSystem> GraphicsFactory::CreateGraphicsSystem(GraphicsAPI api)
     {
         switch (api)
         {

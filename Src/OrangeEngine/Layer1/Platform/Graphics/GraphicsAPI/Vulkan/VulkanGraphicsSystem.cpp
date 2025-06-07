@@ -400,12 +400,12 @@ namespace Orange::Graphics::Vulkan
         m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    IRenderDevice *VulkanGraphicsSystem::GetRenderDevice()
+    RenderDevice *VulkanGraphicsSystem::GetRenderDevice()
     {
         return m_renderDevice.get();
     }
 
-    IShaderCompiler *VulkanGraphicsSystem::GetShaderCompiler()
+    ShaderCompiler *VulkanGraphicsSystem::GetShaderCompiler()
     {
         return m_shaderCompiler.get();
     }

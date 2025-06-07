@@ -1,7 +1,7 @@
 #ifndef ORANGE_VULKAN_VULKANSHADERCOMPILER_H
 #define ORANGE_VULKAN_VULKANSHADERCOMPILER_H
 
-#include "../../GraphicsInterface/IShaderCompiler.h"
+#include "../../GraphicsInterface/ShaderCompiler.h"
 #include "Layer1/Core/FileSystem/FileSystem.h"
 #include <shaderc/shaderc.hpp>
 #include <memory>
@@ -13,13 +13,13 @@ namespace Orange::Graphics::Vulkan
      * @brief Vulkan着色器编译器实现
      * 使用Shaderc库将GLSL编译为SPIR-V字节码
      */
-    class VulkanShaderCompiler : public IShaderCompiler
+    class VulkanShaderCompiler : public ShaderCompiler
     {
     public:
         VulkanShaderCompiler();
         ~VulkanShaderCompiler() override;
 
-        // IShaderCompiler接口实现
+        // ShaderCompiler接口实现
         ShaderCompileResult CompileFromFile(
             const std::string &filePath,
             const ShaderCompileOptions &options) override;

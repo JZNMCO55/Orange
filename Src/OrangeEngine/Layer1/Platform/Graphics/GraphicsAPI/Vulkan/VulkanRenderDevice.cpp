@@ -23,19 +23,19 @@ namespace Orange::Graphics::Vulkan
         ORG_LOG_INFO("VulkanRenderDevice destroyed");
     }
 
-    std::unique_ptr<IBuffer> VulkanRenderDevice::CreateBuffer(const BufferCreateInfo &info)
+    std::unique_ptr<Buffer> VulkanRenderDevice::CreateBuffer(const BufferCreateInfo &info)
     {
         ORG_LOG_DEBUG("CreateBuffer called (not implemented yet)");
         return nullptr;
     }
 
-    std::unique_ptr<ITexture> VulkanRenderDevice::CreateTexture(const TextureCreateInfo &info)
+    std::unique_ptr<Texture> VulkanRenderDevice::CreateTexture(const TextureCreateInfo &info)
     {
         ORG_LOG_DEBUG("CreateTexture called (not implemented yet)");
         return nullptr;
     }
 
-    std::unique_ptr<IPipeline> VulkanRenderDevice::CreatePipeline(const PipelineCreateInfo &info)
+    std::unique_ptr<Pipeline> VulkanRenderDevice::CreatePipeline(const PipelineCreateInfo &info)
     {
         ORG_LOG_DEBUG("CreatePipeline called (not implemented yet)");
         return nullptr;
