@@ -17,9 +17,3 @@ alwaysApply: false
 3. **禁止项**  
    - `#pragma once`  
    - 成员变量中的下划线（如 `m_`、`mp_`）
-
-4. **开发注意事项**  
-   - 开始开发前，请务必先阅读以下文档：
-        - [OrangeEngine.md](mdc:docs/Technical Documentation/OrangeDocs/OrangeEngine.md)  
-        - [工作日志.md](mdc:docs/工作日志.md) 
-   - 若需要构建编译，则执行 GenerateWithDebugStatic.bat 脚本或运行 ./generate.bat Debug(推荐使用第二种方式)

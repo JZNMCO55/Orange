@@ -10,19 +10,6 @@ set(THIRDPARTY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty)
 set(THIRDPARTY_LIB_DIR ${CMAKE_SOURCE_DIR}/3rdparty/lib)
 set(BUILD_INSTALL_DIR ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE})
 
-# Shaderc 库路径配置 - 使用安装目录中的库
-set(SHADERC_INCLUDE_DIR ${BUILD_INSTALL_DIR}/include)
-set(SHADERC_LIB_DIR ${BUILD_INSTALL_DIR}/lib)
-
-# 创建 Shaderc 导入目标 - 使用组合静态库
-if(NOT TARGET shaderc::shaderc)
-    add_library(shaderc::shaderc STATIC IMPORTED)
-    set_target_properties(shaderc::shaderc PROPERTIES
-        IMPORTED_LOCATION "${SHADERC_LIB_DIR}/shaderc_combined.lib"
-        INTERFACE_INCLUDE_DIRECTORIES "${SHADERC_INCLUDE_DIR}"
-    )
-endif()
-
 # 搜索源文件
 file(GLOB_RECURSE ORANGEENGINE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
@@ -103,7 +90,6 @@ target_link_libraries(${PROJECT_NAME}
     fmt::fmt
     spdlog::spdlog 
     glfw
-    shaderc::shaderc
     ${Vulkan_LIBRARIES}
 )
 

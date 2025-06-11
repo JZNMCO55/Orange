@@ -1,0 +1,6 @@
+#ifndef ORANGE_BUFFER_H
+#define ORANGE_BUFFER_H
+
+
+
+#endif // ORANGE_BUFFER_H
