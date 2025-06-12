@@ -7,17 +7,17 @@
         },
         {
             "name": "tracy",
-            "type": "HeaderOnly",
+            "type": "library",
             "url": "git@github.com:JZNMCO55/tracy.git"
         },
         {
             "name": "glm",
-            "type": "HeaderOnly",
+            "type": "library", 
             "url": "git@github.com:JZNMCO55/glm.git"
         },
         {
             "name": "fmt",
-            "type": "HeaderOnly",
+            "type": "library",
             "url": "git@github.com:JZNMCO55/fmt.git"
         },
         {
@@ -29,11 +29,6 @@
             "name": "VulkanSDK",
             "type": "SDK",
             "url": "https://vulkan.lunarg.com/sdk/home"
-        },
-        {
-            "name": "fmt",
-            "type": "library",
-            "url": "git@github.com:JZNMCO55/fmt.git"
         }
     ]
 }
