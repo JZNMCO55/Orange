@@ -25,11 +25,11 @@ add_library(${PROJECT_NAME} STATIC ${ORANGEENGINE_SOURCES} ${ORANGEENGINE_HEADER
 
 # 编译版本
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_RELEASE)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORG_RELEASE)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_DEBUG)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORG_DEBUG)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Dist")
-    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORANGE_DIST)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC -DORG_DIST)
 endif()
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -77,6 +77,7 @@ target_include_directories(${PROJECT_NAME}
     ${THIRDPARTY_INCLUDE_DIR}/glfw/include
     ${Vulkan_INCLUDE_DIRS}
     ${BUILD_INSTALL_DIR}/include
+    ${BUILD_INSTALL_DIR}/include/tracy
 )
 
 target_link_directories(${PROJECT_NAME}

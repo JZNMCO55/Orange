@@ -16,6 +16,12 @@
 #include "../Base/Logger.h"
 #include "../Debug/Profiler.h"
 
+#ifdef ORG_ENABLE_PROFILING
+
+#include <tracy/Tracy.hpp>
+
+#endif
+
 #include <mutex>
 
 namespace Orange

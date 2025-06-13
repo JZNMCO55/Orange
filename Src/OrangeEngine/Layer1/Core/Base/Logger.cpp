@@ -107,7 +107,6 @@ namespace Orange
             switch (level)
             {
                 case Logger::Level::Trace:    return "TRACE";
-                case Logger::Level::Debug:    return "DEBUG";
                 case Logger::Level::Info:     return "INFO";
                 case Logger::Level::Warn:     return "WARN";
                 case Logger::Level::Error:    return "ERROR";
@@ -245,7 +244,6 @@ namespace Orange
     Logger::Level Logger::LevelFromString(const std::string& string)
     {
         if (string == "Trace" || string == "TRACE")    return Level::Trace;
-        if (string == "Debug" || string == "DEBUG")    return Level::Debug;
         if (string == "Info" || string == "INFO")      return Level::Info;
         if (string == "Warn" || string == "WARN")      return Level::Warn;
         if (string == "Error" || string == "ERROR")    return Level::Error;
