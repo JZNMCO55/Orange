@@ -53,6 +53,7 @@ namespace Orange
     {
     public:
         virtual ~RefCounted() = default;
+        RefCounted() = default;
 
         /**
          * @brief 增加引用计数

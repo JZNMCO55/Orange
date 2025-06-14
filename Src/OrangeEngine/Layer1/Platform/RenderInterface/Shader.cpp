@@ -74,7 +74,7 @@ namespace Orange
         if (!m_ShaderPack->IsLoaded())
         {
             m_ShaderPack = nullptr;
-            ORG_CORE_ERROR("Could not load shader pack: {}", path.string());
+            ORG_CORE_ERROR("Could not load shader pack: " + path.string());
         }
     }
 

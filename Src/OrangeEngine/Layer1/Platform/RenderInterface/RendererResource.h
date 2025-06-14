@@ -45,7 +45,7 @@ namespace Orange
      * - VulkanImage、VulkanBuffer等（Vulkan实现）
      * - D3D12Image、D3D12Buffer等（DirectX 12实现）
      */
-    class RendererResource : RefCounted //: public Asset
+    class RendererResource : public RefCounted //: public Asset
     // TODO: 添加Asset基类
     {
     public:

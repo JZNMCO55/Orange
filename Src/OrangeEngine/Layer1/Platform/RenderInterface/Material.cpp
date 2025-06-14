@@ -38,5 +38,6 @@ namespace Orange
             // material = CreateRef<VulkanMaterial>(other, name);
         }
         }
+        return material;
     }
 }
