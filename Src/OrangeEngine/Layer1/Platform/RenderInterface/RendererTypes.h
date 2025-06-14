@@ -2,7 +2,7 @@
  * @file RendererTypes.h
  * @brief 渲染器基础类型定义
  * @details 定义了渲染器模块中使用的基础数据类型和类型别名
- * @author Hazel Engine Team
+ * @author Orange Engine Team
  */
 
 #ifndef ORANGE_RENDERER_TYPES_H
@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-namespace Orange 
+namespace Orange
 {
 
     /**
