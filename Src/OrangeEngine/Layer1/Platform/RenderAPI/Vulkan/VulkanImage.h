@@ -4,7 +4,7 @@
 #include "Platform/RenderInterface/Image.h"
 #include "Vulkan.h"
 #include "VulkanContext.h"
-#include "VulkanMemoryAllocator/vk_mem_alloc.h"
+#include "vk_mem_alloc.h"
 
 namespace Orange
 {

@@ -259,7 +259,7 @@ namespace Orange
         // 获取物理设备内存属性
         const auto &memoryProps = VulkanContext::GetCurrentDevice()->GetPhysicalDevice()->GetMemoryProperties();
         std::vector<VmaBudget> budgets(memoryProps.memoryHeapCount);
-        vmaGetBudget(s_Data->Allocator, budgets.data());
+        vmaGetHeapBudgets(s_Data->Allocator, budgets.data());
 
         // 输出每个内存堆的预算信息
         ORG_CORE_WARN("-----------------------------------");
@@ -278,7 +278,7 @@ namespace Orange
         // 获取物理设备内存属性
         const auto &memoryProps = VulkanContext::GetCurrentDevice()->GetPhysicalDevice()->GetMemoryProperties();
         std::vector<VmaBudget> budgets(memoryProps.memoryHeapCount);
-        vmaGetBudget(s_Data->Allocator, budgets.data());
+        vmaGetHeapBudgets(s_Data->Allocator, budgets.data());
 
         // 计算总预算
         uint64_t budget = 0;
@@ -322,7 +322,7 @@ namespace Orange
     void VulkanAllocator::Init(Ref<VulkanDevice> device)
     {
         // 创建分配器数据实例
-        s_Data = hnew VulkanAllocatorData();
+        s_Data = onew VulkanAllocatorData();
 
         // 初始化VulkanMemoryAllocator
         VmaAllocatorCreateInfo allocatorInfo = {};

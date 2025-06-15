@@ -7,6 +7,7 @@
 #include "Vulkan.h"
 #include "VulkanDevice.h"
 #include "VulkanAllocator.h"
+#include <GLFW/glfw3.h>
 
 #include <vector>
 

@@ -48,6 +48,7 @@ find_package(fmt REQUIRED)
 find_package(glm REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(glfw3 3.5 REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 # 检查Vulkan支持
 find_package(Vulkan REQUIRED)
 
@@ -92,6 +93,7 @@ target_link_libraries(${PROJECT_NAME}
     spdlog::spdlog 
     glfw
     ${Vulkan_LIBRARIES}
+    GPUOpen::VulkanMemoryAllocator
 )
 
 # 安装规则

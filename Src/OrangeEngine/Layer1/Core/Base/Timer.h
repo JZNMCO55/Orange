@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include "Logger.h"
+#include "Base.h"
 
 namespace Orange
 {

@@ -10,7 +10,6 @@
 
 #include "Core/Debug/Profiler.h"
 
-#include <GLFW/glfw3.h>
 
 #include <format>
 

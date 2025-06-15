@@ -24,7 +24,7 @@
 
 #include "VulkanAPI.h"
 #include "VulkanContext.h"
-#include "VulkanRenderer.h"
+// #include "VulkanRenderer.h"
 
 #include <format>
 
@@ -91,37 +91,38 @@ namespace Orange
 
         // 复制资源信息，避免在lambda中访问可能已销毁的对象
         const VulkanImageInfo &info = m_Info;
+#ifdef TODO // From VulkanRenderer
         Renderer::SubmitResourceFree([info, mipViews = m_PerMipImageViews, layerViews = m_PerLayerImageViews]() mutable
                                      {
-			const auto vulkanDevice = VulkanContext::GetCurrentDevice()->GetVulkanDevice();
+            const auto vulkanDevice = VulkanContext::GetCurrentDevice()->GetVulkanDevice();
 
-			// 销毁默认图像视图
-			vkDestroyImageView(vulkanDevice, info.ImageView, nullptr);
+            // 销毁默认图像视图
+            vkDestroyImageView(vulkanDevice, info.ImageView, nullptr);
 
-			// 销毁采样器
-			Vulkan::DestroySampler(info.Sampler);
+            // 销毁采样器
+            Vulkan::DestroySampler(info.Sampler);
 
-			// 销毁所有Mip级别视图
-			for (auto& view : mipViews)
-			{
-				if (view.second)
-					vkDestroyImageView(vulkanDevice, view.second, nullptr);
-			}
+            // 销毁所有Mip级别视图
+            for (auto& view : mipViews)
+            {
+                if (view.second)
+                    vkDestroyImageView(vulkanDevice, view.second, nullptr);
+            }
 
-			// 销毁所有层视图
-			for (auto& view : layerViews)
-			{
-				if (view)
-					vkDestroyImageView(vulkanDevice, view, nullptr);
-			}
+            // 销毁所有层视图
+            for (auto& view : layerViews)
+            {
+                if (view)
+                    vkDestroyImageView(vulkanDevice, view, nullptr);
+            }
 
-			// 释放图像和内存
-			VulkanAllocator allocator("VulkanImage2D");
-			allocator.DestroyImage(info.Image, info.MemoryAlloc);
+            // 释放图像和内存
+            VulkanAllocator allocator("VulkanImage2D");
+            allocator.DestroyImage(info.Image, info.MemoryAlloc);
 
-			// 从全局引用映射中移除
-			s_ImageReferences.erase(info.Image); });
-
+            // 从全局引用映射中移除
+            s_ImageReferences.erase(info.Image); });
+#endif
         // 清空本地句柄，防止重复释放
         m_Info.Image = nullptr;
         m_Info.ImageView = nullptr;
@@ -307,14 +308,14 @@ namespace Orange
             subresourceRange.baseMipLevel = 0;
             subresourceRange.levelCount = m_Specification.Mips;
             subresourceRange.layerCount = m_Specification.Layers;
-
+#ifdef TODO // From VulkanRenderer
             // 插入内存屏障，将图像从UNDEFINED转换到GENERAL布局
             Utils::InsertImageMemoryBarrier(commandBuffer, m_Info.Image,
                                             0, 0,
                                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                             subresourceRange);
-
+#endif
             VulkanContext::GetCurrentDevice()->FlushCommandBuffer(commandBuffer);
         }
         else if (m_Specification.Usage == ImageUsage::HostRead)
@@ -327,13 +328,13 @@ namespace Orange
             subresourceRange.baseMipLevel = 0;
             subresourceRange.levelCount = m_Specification.Mips;
             subresourceRange.layerCount = m_Specification.Layers;
-
+#ifdef TODO // From VulkanRenderer
             Utils::InsertImageMemoryBarrier(commandBuffer, m_Info.Image,
                                             0, 0,
                                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                             subresourceRange);
-
+#endif
             VulkanContext::GetCurrentDevice()->FlushCommandBuffer(commandBuffer);
         }
 
@@ -342,9 +343,11 @@ namespace Orange
 
     void VulkanImage2D::CreatePerLayerImageViews()
     {
+#ifdef TODO // From VulkanRenderer
         Ref<VulkanImage2D> instance = this;
         Renderer::Submit([instance]() mutable
                          { instance->RT_CreatePerLayerImageViews(); });
+#endif
     }
 
     void VulkanImage2D::RT_CreatePerLayerImageViews()
@@ -381,6 +384,7 @@ namespace Orange
 
     VkImageView VulkanImage2D::GetMipImageView(uint32_t mip)
     {
+#ifdef TODO // From VulkanRenderer
         if (m_PerMipImageViews.find(mip) == m_PerMipImageViews.end())
         {
             Ref<VulkanImage2D> instance = this;
@@ -388,6 +392,7 @@ namespace Orange
                              { instance->RT_GetMipImageView(mip); });
             return nullptr;
         }
+#endif
 
         return m_PerMipImageViews.at(mip);
     }
@@ -571,32 +576,33 @@ namespace Orange
                 &bufferCopyRegion);
 
 #if 0
-			// Once the data has been uploaded we transfer to the texture image to the shader read layout, so it can be sampled from
-			imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-			imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            // Once the data has been uploaded we transfer to the texture image to the shader read layout, so it can be sampled from
+            imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-			// Insert a memory dependency at the proper pipeline stages that will execute the image layout transition 
-			// Source pipeline stage stage is copy command exection (VK_PIPELINE_STAGE_TRANSFER_BIT)
-			// Destination pipeline stage fragment shader access (VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
-			vkCmdPipelineBarrier(
-				copyCmd,
-				VK_PIPELINE_STAGE_TRANSFER_BIT,
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				0,
-				0, nullptr,
-				0, nullptr,
-				1, &imageMemoryBarrier);
+            // Insert a memory dependency at the proper pipeline stages that will execute the image layout transition 
+            // Source pipeline stage stage is copy command exection (VK_PIPELINE_STAGE_TRANSFER_BIT)
+            // Destination pipeline stage fragment shader access (VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+            vkCmdPipelineBarrier(
+                copyCmd,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0,
+                0, nullptr,
+                0, nullptr,
+                1, &imageMemoryBarrier);
 
 #endif
 
+#ifdef TODO // From VulkanRenderer
             Utils::InsertImageMemoryBarrier(copyCmd, m_Info.Image,
                                             VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_DescriptorImageInfo.imageLayout,
                                             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                                             subresourceRange);
-
+#endif
             device->FlushCommandBuffer(copyCmd);
 
             // Clean up staging resources
@@ -642,11 +648,13 @@ namespace Orange
         subresourceRange.levelCount = mipCount;
         subresourceRange.layerCount = 1;
 
+#ifdef TODO // From VulkanRenderer
         Utils::InsertImageMemoryBarrier(copyCmd, m_Info.Image,
                                         VK_ACCESS_TRANSFER_READ_BIT, 0,
                                         m_DescriptorImageInfo.imageLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                                         subresourceRange);
+#endif
 
         uint64_t mipDataOffset = 0;
         for (uint32_t mip = 0; mip < mipCount; mip++)
@@ -675,12 +683,13 @@ namespace Orange
             mipHeight /= 2;
         }
 
+#ifdef TODO // From VulkanRenderer
         Utils::InsertImageMemoryBarrier(copyCmd, m_Info.Image,
                                         VK_ACCESS_TRANSFER_READ_BIT, 0,
                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_DescriptorImageInfo.imageLayout,
                                         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                         subresourceRange);
-
+#endif
         device->FlushCommandBuffer(copyCmd);
 
         // Copy data from staging buffer
@@ -700,21 +709,24 @@ namespace Orange
 
     VulkanImageView::~VulkanImageView()
     {
+#ifdef TODO // From VulkanRenderer
         Renderer::SubmitResourceFree([imageView = m_ImageView]() mutable
                                      {
-			auto device = VulkanContext::GetCurrentDevice();
-			VkDevice vulkanDevice = device->GetVulkanDevice();
+            auto device = VulkanContext::GetCurrentDevice();
+            VkDevice vulkanDevice = device->GetVulkanDevice();
 
-			vkDestroyImageView(vulkanDevice, imageView, nullptr); });
-
+            vkDestroyImageView(vulkanDevice, imageView, nullptr); });
+#endif
         m_ImageView = nullptr;
     }
 
     void VulkanImageView::Invalidate()
     {
+#ifdef TODO // From VulkanRenderer
         Ref<VulkanImageView> instance = this;
         Renderer::Submit([instance]() mutable
                          { instance->RT_Invalidate(); });
+#endif
     }
 
     void VulkanImageView::RT_Invalidate()
@@ -749,5 +761,4 @@ namespace Orange
         m_DescriptorImageInfo = vulkanImage->GetDescriptorInfoVulkan();
         m_DescriptorImageInfo.imageView = m_ImageView;
     }
-
 }

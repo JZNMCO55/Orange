@@ -240,7 +240,7 @@ namespace Orange
         {
 #ifdef ORG_PLATFORM_WINDOWS
             // Windows平台显示消息框
-            MessageBox(nullptr, L"Incompatible Vulkan driver version.\nUpdate your GPU drivers!", L"Orange Error", MB_OK | MB_ICONERROR);
+            MessageBox(nullptr, "Incompatible Vulkan driver version.\nUpdate your GPU drivers!", "Orange Error", MB_OK | MB_ICONERROR);
 #else
             // 其他平台输出错误信息
             ORG_CORE_ERROR("Incompatible Vulkan driver version.\nUpdate your GPU drivers!");

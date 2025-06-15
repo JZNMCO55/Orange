@@ -11,7 +11,12 @@
 #define ORG_PROFILE_MARK_FRAME			FrameMark;
 // NOTE(Peter): Use ORG_PROFILE_FUNC ONLY at the top of a function
 //				Use ORG_PROFILE_SCOPE / ORG_PROFILE_SCOPE_DYNAMIC for an inner scope
-#define ORG_PROFILE_FUNC(...)			ZoneScoped##__VA_OPT__(N(__VA_ARGS__))
+// 基础版本
+#define ORG_PROFILE_FUNC() ZoneScoped
+// 带自定义名称
+#define ORG_PROFILE_FUNC_NAME(name) ZoneScopedN(name)
+// 带名称和颜色
+#define ORG_PROFILE_FUNC_NAME_COLOR(name, color) ZoneScopedNC(name, color)
 #define ORG_PROFILE_SCOPE(...)			ORG_PROFILE_FUNC(__VA_ARGS__)
 #define ORG_PROFILE_SCOPE_DYNAMIC(NAME)  ZoneScoped; ZoneName(NAME, strlen(NAME))
 #define ORG_PROFILE_THREAD(...)          tracy::SetThreadName(__VA_ARGS__)

@@ -19,7 +19,7 @@ namespace Orange
 
     void *RenderCommandQueue::Allocate(RenderCommandFn func, uint32_t size)
     {
-        *(RenderCommandFn *)m_CommandBufferPtr = fn;
+        *(RenderCommandFn *)m_CommandBufferPtr = func;
         m_CommandBufferPtr += alignof(RenderCommandFn);
 
         *(uint32_t *)m_CommandBufferPtr = size;

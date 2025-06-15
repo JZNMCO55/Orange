@@ -5,6 +5,10 @@
 #include <string>
 #include <map>
 
+// spdlog includes fmt internally, so we can use it
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/spdlog.h>
+
 // Forward declarations
 namespace spdlog
 {
@@ -144,6 +148,29 @@ namespace Orange
         static void PrintMessageTag(Type type, Level level, const std::string &tag, const std::string &message);
 
         /**
+         * @brief 记录带标签的格式化日志消息
+         * @tparam Args 格式化参数类型
+         * @param type 日志记录器类型
+         * @param level 日志级别
+         * @param tag 日志标签
+         * @param format 格式化字符串
+         * @param args 格式化参数
+         */
+        template <typename... Args>
+        static void PrintMessageTagFormatted(Type type, Level level, const std::string &tag, const std::string &format, Args &&...args);
+
+        /**
+         * @brief 记录格式化日志消息
+         * @tparam Args 格式化参数类型
+         * @param type 日志记录器类型
+         * @param level 日志级别
+         * @param format 格式化字符串
+         * @param args 格式化参数
+         */
+        template <typename... Args>
+        static void PrintMessageFormatted(Type type, Level level, const std::string &format, Args &&...args);
+
+        /**
          * @brief 记录断言失败消息
          * @param type 日志记录器类型
          * @param prefix 断言前缀
@@ -262,6 +289,70 @@ namespace Orange
 
 /** @} */
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 格式化日志宏定义（支持多参数）                                                                                    //
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * @defgroup FormattedCoreLogs 核心格式化日志宏
+ * @brief 引擎核心系统使用的格式化日志宏，支持多参数
+ * @{
+ */
+
+/// @brief 核心跟踪级别格式化日志
+#define ORG_CORE_TRACE_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Trace, format, __VA_ARGS__)
+/// @brief 核心信息级别格式化日志
+#define ORG_CORE_INFO_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Info, format, __VA_ARGS__)
+/// @brief 核心警告级别格式化日志
+#define ORG_CORE_WARN_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Warn, format, __VA_ARGS__)
+/// @brief 核心错误级别格式化日志
+#define ORG_CORE_ERROR_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Error, format, __VA_ARGS__)
+/// @brief 核心严重级别格式化日志
+#define ORG_CORE_CRITICAL_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Critical, format, __VA_ARGS__)
+
+/// @brief 核心跟踪级别标签格式化日志
+#define ORG_CORE_TRACE_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Trace, tag, format, __VA_ARGS__)
+/// @brief 核心信息级别标签格式化日志
+#define ORG_CORE_INFO_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Info, tag, format, __VA_ARGS__)
+/// @brief 核心警告级别标签格式化日志
+#define ORG_CORE_WARN_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Warn, tag, format, __VA_ARGS__)
+/// @brief 核心错误级别标签格式化日志
+#define ORG_CORE_ERROR_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Error, tag, format, __VA_ARGS__)
+/// @brief 核心严重级别标签格式化日志
+#define ORG_CORE_CRITICAL_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Core, ::Orange::Logger::Level::Critical, tag, format, __VA_ARGS__)
+
+/** @} */
+
+/**
+ * @defgroup FormattedClientLogs 客户端格式化日志宏
+ * @brief 客户端应用使用的格式化日志宏，支持多参数
+ * @{
+ */
+
+/// @brief 客户端跟踪级别格式化日志
+#define ORG_TRACE_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Trace, format, __VA_ARGS__)
+/// @brief 客户端信息级别格式化日志
+#define ORG_INFO_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Info, format, __VA_ARGS__)
+/// @brief 客户端警告级别格式化日志
+#define ORG_WARN_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Warn, format, __VA_ARGS__)
+/// @brief 客户端错误级别格式化日志
+#define ORG_ERROR_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Error, format, __VA_ARGS__)
+/// @brief 客户端严重级别格式化日志
+#define ORG_CRITICAL_F(format, ...) ::Orange::Logger::PrintMessageFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Critical, format, __VA_ARGS__)
+
+/// @brief 客户端跟踪级别标签格式化日志
+#define ORG_TRACE_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Trace, tag, format, __VA_ARGS__)
+/// @brief 客户端信息级别标签格式化日志
+#define ORG_INFO_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Info, tag, format, __VA_ARGS__)
+/// @brief 客户端警告级别标签格式化日志
+#define ORG_WARN_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Warn, tag, format, __VA_ARGS__)
+/// @brief 客户端错误级别标签格式化日志
+#define ORG_ERROR_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Error, tag, format, __VA_ARGS__)
+/// @brief 客户端严重级别标签格式化日志
+#define ORG_CRITICAL_TAG_F(tag, format, ...) ::Orange::Logger::PrintMessageTagFormatted(::Orange::Logger::Type::Client, ::Orange::Logger::Level::Critical, tag, format, __VA_ARGS__)
+
+/** @} */
+
 // 条件编译优化：根据构建配置启用/禁用不同级别的日志
 #if defined(ORG_DEBUG)
 // Debug模式：启用所有日志级别
@@ -315,5 +406,101 @@ namespace Orange
 #define ORG_WARN_TAG(tag, message)
 #define ORG_ERROR_TAG(tag, message)
 #endif
+
+// =================================================================
+// 模板函数实现
+// =================================================================
+
+namespace Orange
+{
+    template <typename... Args>
+    void Logger::PrintMessageTagFormatted(Type type, Level level, const std::string &tag, const std::string &format, Args &&...args)
+    {
+        // 检查标签是否启用
+        if (!HasTag(tag))
+            return;
+
+        // 检查级别过滤
+        auto &enabledTags = EnabledTags();
+        auto it = enabledTags.find(tag);
+        if (it != enabledTags.end() && level < it->second.mLevelFilter)
+            return;
+
+        // 获取对应的logger
+        auto &logger = (type == Type::Core) ? GetCoreLogger() : GetClientLogger();
+
+        // 使用spdlog的格式化功能
+        std::string formattedMessage;
+        try
+        {
+            formattedMessage = fmt::vformat(format, fmt::make_format_args(args...));
+        }
+        catch (const std::exception &)
+        {
+            formattedMessage = format; // 如果格式化失败，使用原始字符串
+        }
+
+        // 添加标签前缀
+        std::string taggedMessage = "[" + tag + "] " + formattedMessage;
+
+        // 根据级别调用相应的spdlog函数
+        switch (level)
+        {
+        case Level::Trace:
+            logger->trace(taggedMessage);
+            break;
+        case Level::Info:
+            logger->info(taggedMessage);
+            break;
+        case Level::Warn:
+            logger->warn(taggedMessage);
+            break;
+        case Level::Error:
+            logger->error(taggedMessage);
+            break;
+        case Level::Critical:
+            logger->critical(taggedMessage);
+            break;
+        }
+    }
+
+    template <typename... Args>
+    void Logger::PrintMessageFormatted(Type type, Level level, const std::string &format, Args &&...args)
+    {
+        // 获取对应的logger
+        auto &logger = (type == Type::Core) ? GetCoreLogger() : GetClientLogger();
+
+        // 使用spdlog的格式化功能
+        std::string formattedMessage;
+        try
+        {
+            formattedMessage = fmt::vformat(format, fmt::make_format_args(args...));
+        }
+        catch (const std::exception &)
+        {
+            formattedMessage = format; // 如果格式化失败，使用原始字符串
+        }
+
+        // 根据级别调用相应的spdlog函数
+        switch (level)
+        {
+        case Level::Trace:
+            logger->trace(formattedMessage);
+            break;
+        case Level::Info:
+            logger->info(formattedMessage);
+            break;
+        case Level::Warn:
+            logger->warn(formattedMessage);
+            break;
+        case Level::Error:
+            logger->error(formattedMessage);
+            break;
+        case Level::Critical:
+            logger->critical(formattedMessage);
+            break;
+        }
+    }
+}
 
 #endif // ORANGE_ENGINE_LOGGER_H_
