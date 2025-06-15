@@ -147,6 +147,13 @@ class DependencyManager:
                 "-DTRACY_ENABLE_TRACY_CLIENT=OFF",
                 "-DTRACY_ENABLE_TRACY_CLIENT_PYTHON=OFF"
             ])
+        elif name == "VulkanMemoryAllocator":
+            cmake_args.extend([
+                "-DVKMA_BUILD_TESTS=OFF",
+                "-DVKMA_BUILD_EXAMPLES=OFF",
+                "-DVKMA_BUILD_DOCS=OFF",
+                "-DVKMA_INSTALL=ON"
+            ])
         
         # 添加额外参数
         if extra_args:

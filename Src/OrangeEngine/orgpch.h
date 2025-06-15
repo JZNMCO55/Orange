@@ -25,5 +25,8 @@
 #include <filesystem>
 #include <thread>
 
+#include "Core/Base/Logger.h"
+#include "Core/Base/Timer.h"
+
 
 #endif // ORG_PCH_H
