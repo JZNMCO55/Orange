@@ -300,29 +300,6 @@ struct ImVec2
     constexpr ImVec2(float _x, float _y)    : x(_x), y(_y) { }
     float& operator[] (size_t idx)          { IM_ASSERT(idx == 0 || idx == 1); return ((float*)(void*)(char*)this)[idx]; } // We very rarely use this [] operator, so the assert overhead is fine.
     float  operator[] (size_t idx) const    { IM_ASSERT(idx == 0 || idx == 1); return ((const float*)(const void*)(const char*)this)[idx]; }
-    // 加法
-    ImVec2 operator+(const ImVec2& rhs) const { return ImVec2(x + rhs.x, y + rhs.y); }
-    ImVec2& operator+=(const ImVec2& rhs) { x += rhs.x; y += rhs.y; return *this; }
-
-    // 减法
-    ImVec2 operator-(const ImVec2& rhs) const { return ImVec2(x - rhs.x, y - rhs.y); }
-    ImVec2& operator-=(const ImVec2& rhs) { x -= rhs.x; y -= rhs.y; return *this; }
-
-    // 标量乘法（向量与标量）
-    ImVec2 operator*(float scalar) const { return ImVec2(x * scalar, y * scalar); }
-    ImVec2& operator*=(float scalar) { x *= scalar; y *= scalar; return *this; }
-
-    // 标量除法（向量与标量）
-    ImVec2 operator/(float scalar) const { return ImVec2(x / scalar, y / scalar); }
-    ImVec2& operator/=(float scalar) { x /= scalar; y /= scalar; return *this; }
-
-    // 逐分量乘法（向量与向量）
-    ImVec2 operator*(const ImVec2& rhs) const { return ImVec2(x * rhs.x, y * rhs.y); }
-    ImVec2& operator*=(const ImVec2& rhs) { x *= rhs.x; y *= rhs.y; return *this; }
-
-    // 逐分量除法（向量与向量）
-    ImVec2 operator/(const ImVec2& rhs) const { return ImVec2(x / rhs.x, y / rhs.y); }
-    ImVec2& operator/=(const ImVec2& rhs) { x /= rhs.x; y /= rhs.y; return *this; }
 #ifdef IM_VEC2_CLASS_EXTRA
     IM_VEC2_CLASS_EXTRA     // Define additional constructors and implicit cast operators in imconfig.h to convert back and forth between your math types and ImVec2.
 #endif

@@ -3,6 +3,7 @@
 #include "Scene/Entity.h"
 #include "Scene/Scene.h"
 #include "SceneHierachyPanel.h"
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui/imgui_internal.h>
 #include <imgui/imgui.h>
 
