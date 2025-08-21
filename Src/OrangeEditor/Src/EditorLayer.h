@@ -26,6 +26,8 @@ namespace Orange
         void NewScene();
         void OpenScene();
         void SaveSceneAs();
+        
+        void DrawHistogram();
 
     private:
         OrthographicCameraControler mCameraControler;

@@ -4,9 +4,82 @@
 #include "Scene/SceneSerializer.h"
 #include "Utils/PlatformUtils.h"
 #include "ImGui/ImGuizmo/ImGuizmo.h"
+#include <ImGui/ImPlot/implot.h>
+#include "Panels/ImGraphs.h"
 #include "Math/Math.h"
 
 #define BIND_EDITOR_EVENT_FN(x) std::bind(&EditorLayer::x, this, std::placeholders::_1)
+
+namespace 
+{
+    void DrawHistogram() 
+    {
+        ImGui::Begin("Histogram");
+        srand(0);
+        static float xs1[100], ys1[100];
+        for (int i = 0; i < 100; ++i) {
+            xs1[i] = i * 0.01f;
+            ys1[i] = xs1[i] + 0.1f * ((float)rand() / (float)RAND_MAX);
+        }
+        static float xs2[50], ys2[50];
+        for (int i = 0; i < 50; i++) {
+            xs2[i] = 0.25f + 0.2f * ((float)rand() / (float)RAND_MAX);
+            ys2[i] = 0.75f + 0.2f * ((float)rand() / (float)RAND_MAX);
+        }
+
+        if (ImPlot::BeginPlot("Scatter Plot")) {
+            ImPlot::PlotScatter("Data 1", xs1, ys1, 100);
+            ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, 0.25f);
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Square, 6, ImPlot::GetColormapColor(1), IMPLOT_AUTO, ImPlot::GetColormapColor(1));
+            ImPlot::PlotScatter("Data 2", xs2, ys2, 50);
+            ImPlot::PopStyleVar();
+            ImPlot::EndPlot();
+        }
+        ImGui::End();
+    }
+
+    void Demo_BarGroups() 
+    {
+        ImGui::Begin("BarGroup");
+        static ImS8  data[30] = { 83, 67, 23, 89, 83, 78, 91, 82, 85, 90,  // midterm
+                                 80, 62, 56, 99, 55, 78, 88, 78, 90, 100, // final
+                                 80, 69, 52, 92, 72, 78, 75, 76, 89, 95 }; // course
+
+        static const char* ilabels[] = { "Midterm Exam","Final Exam","Course Grade" };
+        static const char* glabels[] = { "S1","S2","S3","S4","S5","S6","S7","S8","S9","S10" };
+        static const double positions[] = { 0,1,2,3,4,5,6,7,8,9 };
+
+        static int items = 3;
+        static int groups = 10;
+        static float size = 0.67f;
+
+        static ImPlotBarGroupsFlags flags = 0;
+        static bool horz = false;
+
+        ImGui::CheckboxFlags("Stacked", (unsigned int*)&flags, ImPlotBarGroupsFlags_Stacked);
+        ImGui::SameLine();
+        ImGui::Checkbox("Horizontal", &horz);
+
+        ImGui::SliderInt("Items", &items, 1, 3);
+        ImGui::SliderFloat("Size", &size, 0, 1);
+
+        if (ImPlot::BeginPlot("Bar Group")) {
+            ImPlot::SetupLegend(ImPlotLocation_East, ImPlotLegendFlags_Outside);
+            if (horz) {
+                ImPlot::SetupAxes("Score", "Student", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+                ImPlot::SetupAxisTicks(ImAxis_Y1, positions, groups, glabels);
+                ImPlot::PlotBarGroups(ilabels, data, items, groups, size, 0, flags | ImPlotBarGroupsFlags_Horizontal);
+            }
+            else {
+                ImPlot::SetupAxes("Student", "Score", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+                ImPlot::SetupAxisTicks(ImAxis_X1, positions, groups, glabels);
+                ImPlot::PlotBarGroups(ilabels, data, items, groups, size, 0, flags);
+            }
+            ImPlot::EndPlot();
+        }
+        ImGui::End();
+    }
+}
 
 namespace Orange
 {
@@ -19,7 +92,7 @@ namespace Orange
     void EditorLayer::OnAttach()
     {
         ORG_PROFILE_FUNCTION();
-
+        ImPlot::CreateContext();
         mpCheckerboardTexture = Orange::Texture2D::Create(R"(..\..\Resource\Textures\Checkerboard.png)");
 
         Orange::FrameBufferSpecification fbSpec;
@@ -38,6 +111,7 @@ namespace Orange
     void EditorLayer::OnDetach()
     {
         ORG_PROFILE_FUNCTION();
+        ImPlot::DestroyContext();
     }
 
     void EditorLayer::OnUpdate(Timestep ts)
@@ -270,6 +344,9 @@ namespace Orange
 
         ImGui::End();
         ImGui::PopStyleVar();
+
+        ImGraphs::DrawGraphs();
+
         ImGui::End();
     }
 
