@@ -35,7 +35,8 @@
 # consumption is responsible for bumping its dep from QUIET to REQUIRED
 # in this file.
 #
-# REQUIRED today (Phase 1 / Task 05):  OrangeRender, glm, nlohmann_json
+# REQUIRED today (Phase 1 / Task 06):  OrangeRender, glm, nlohmann_json,
+#                                      glfw3
 # QUIET-deferred:                      EnTT (-> Phase 2 / Task 04)
 #                                      box2d (-> Phase 4 / Task 06)
 #                                      imgui (-> Phase 6)
@@ -79,6 +80,18 @@ find_package(EnTT CONFIG QUIET)
 find_package(nlohmann_json 3 CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
+# Required: glfw3 (Phase 1 / Task 06 — Platform::Window)
+#
+# Today this target is also imported transitively by OrangeRender, so the
+# explicit find_package is technically redundant. We declare it anyway:
+# OrangeRender plans to privatise its glfw link interface (vendor/.../
+# OrangeRenderConfig.cmake notes "Task 13-04 will privatise glfw / volk /
+# VMA"), at which point the engine still needs its own resolution since
+# `src/platform/glfw/Window.cpp` consumes <GLFW/glfw3.h> directly.
+# ---------------------------------------------------------------------------
+find_package(glfw3 CONFIG REQUIRED)
+
+# ---------------------------------------------------------------------------
 # Optional gates
 # ---------------------------------------------------------------------------
 # Default OFF for both. spdlog flips ON once Phase 1 / Task 04 (Core::Log)
@@ -117,6 +130,7 @@ else ()
     message(STATUS "  EnTT            : not installed (becomes REQUIRED at Phase 2 / Task 04)")
 endif ()
 message(STATUS "  nlohmann_json   : found (Core::Serialization, Task 05)")
+message(STATUS "  glfw3           : found (Platform::Window, Task 06)")
 message(STATUS "  spdlog gate     : ${ORANGE_ENGINE_WITH_SPDLOG}")
 message(STATUS "  tracy gate      : ${ORANGE_ENGINE_WITH_TRACY}")
 if (TARGET box2d::box2d)

@@ -941,7 +941,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：序列化原语自洽；后续 Phase 任意模块读 / 写 JSON 都走这一层
 - Critical Path：是
 
-#### Task 06：实现 Platform::Window
+#### Task 06：实现 Platform::Window ✅
 - 描述：建立 `Window` 抽象，GLFW 实现细节藏在 `src/platform/glfw/`，公共头不暴露 `GLFWwindow*`。
 - 输入：Core 就绪
 - 输出：

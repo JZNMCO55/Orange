@@ -50,6 +50,10 @@ add_library(orange_engine STATIC
     src/core/Config.cpp
     src/core/SchemaVersion.cpp
     src/core/Serialization.cpp
+
+    # Phase 1 / Task 06 — Platform::Window (GLFW backend)
+    src/platform/PlatformHeaderCheck.cpp
+    src/platform/glfw/Window.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -151,6 +155,11 @@ endif ()
 # target is guaranteed to exist here. Linkage is PRIVATE so the type does
 # not leak through OrangeEngine's public headers.
 target_link_libraries(orange_engine PRIVATE nlohmann_json::nlohmann_json)
+
+# Phase 1 / Task 06 — glfw3 wraps the Win32 window/input pump. PRIVATE so
+# the GLFWwindow* type never escapes OrangeEngine's public headers; the
+# `Platform::Window` API exposes only opaque void* native handles.
+target_link_libraries(orange_engine PRIVATE glfw)
 
 if (ORANGE_ENGINE_WITH_SPDLOG)
     target_link_libraries(orange_engine PUBLIC spdlog::spdlog)

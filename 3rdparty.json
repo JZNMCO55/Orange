@@ -28,6 +28,13 @@
             "purpose": "Math types (Vec2/3/4, Mat3/4, Quat) appearing in public engine API"
         },
         {
+            "name": "glfw",
+            "type": "library",
+            "url": "https://github.com/glfw/glfw.git",
+            "linkage": "PRIVATE",
+            "purpose": "Window + raw input device backend. Wrapped by Platform::Window in src/platform/glfw/. Public engine API never exposes GLFWwindow*. (Also pulled in transitively via OrangeRender today; declaring it here so engine survives OrangeRender's future privatisation of its glfw link interface.)"
+        },
+        {
             "name": "EnTT",
             "type": "library",
             "url": "https://github.com/skypjack/entt.git",
