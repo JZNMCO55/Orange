@@ -5,4 +5,7 @@ build/
 script/__pycache__/
 3rdparty/
 install/
-vendor/
+
+# `vendor/` itself is tracked (each subentry is a git submodule registered in
+# `.gitmodules`). Build artifacts inside vendored sub-repos are ignored by
+# the sub-repo's own .gitignore, so we don't repeat them here.

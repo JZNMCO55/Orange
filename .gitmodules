@@ -1,0 +1,8 @@
+[submodule "vendor/OrangeRender"]
+	path = vendor/OrangeRender
+	url = https://github.com/JZNMCO55/OrangeRender.git
+
+[submodule "vendor/Orange-Wiki"]
+	path = vendor/Orange-Wiki
+	url = https://github.com/JZNMCO55/Orange-Wiki.git
+	branch = Orange-Render-Wiki

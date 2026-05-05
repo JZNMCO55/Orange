@@ -1,0 +1,227 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games (first product: an Ori-like 平台跳跃 with a fluid/slime protagonist that swallows boss forms). It is delivered as a static library `OrangeEngine::orange_engine` (switchable to dll via `BUILD_SHARED_LIBS=ON`) intended for third-party integration through `find_package(OrangeEngine CONFIG)`. The engine owns scene representation, asset management, animation runtimes, physics, audio, input, and the application main loop; it does **not** own gameplay, narrative, level data, or game-specific systems (those live in the consumer game repository).
+
+The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference.
+
+- Current version: `0.1.0` (Unreleased; 0.x ABI is **not** stable)
+- Status: **pre-Phase-1**. Architecture documents are complete; implementation has not started. The legacy `Src/` skeleton (GEA-style 4-layer cathedral) is scheduled for removal in Phase 1 / Task 01. Until then, the only authoritative artifact is `docs/`.
+- Authoritative documents (read these first):
+  - `docs/design-plan.md` — architecture, module breakdown, Phase 1 task table, Phase 2–5.5 task outlines
+  - `docs/roadmap.md` — Phase 6+ long-term roadmap
+  - `docs/extension-points.md` — public API extension surface and project-level invariants
+  - `docs/coding-standards.md` — naming, guards, API macro (delta vs OrangeRender)
+  - `docs/case-studies/character-forms.md` — first-game design note (NOT engine spec; will migrate to game repo when forked)
+
+## Toolchain
+
+- Windows 11, MSVC 2022, CMake 3.28+, C++20 (extensions OFF).
+- Renderer dependency: `OrangeRender 0.1.x` via `find_package(OrangeRender CONFIG REQUIRED)`. OrangeRender is checked out at `vendor/OrangeRender/`.
+- Knowledge-base dependency: `Orange-Wiki` at `vendor/Orange-Wiki/` — **must be on branch `Orange-Render-Wiki`** (default `main` does not contain the engine wiki content).
+- Required third-party (resolved via `find_package`, expected under a single prefix such as `D:\3rdparty`):
+  - Inherited transitively from OrangeRender: `Vulkan`, `glfw3`, `glm`, `volk`, `VulkanMemoryAllocator`
+  - Engine-direct PUBLIC: `EnTT`, `nlohmann_json`
+  - Engine-direct PRIVATE: `Box2D` (3.x), `miniaudio`, `stb_image`, `stb_truetype`, `Dear ImGui`, DragonBones C++ runtime
+- Optional: `spdlog` (gated by `ORANGE_ENGINE_WITH_SPDLOG`, default OFF until Phase 1 / Task 04 wires Core::Log against it), `tracy` (gated by `ORANGE_ENGINE_WITH_TRACY`, default OFF).
+- The LunarG Vulkan SDK must be installed with `VULKAN_SDK` set (transitively required by OrangeRender).
+
+## Common commands
+
+> **Note**: Until Phase 1 / Task 02 lands, there is no top-level `CMakeLists.txt` for the new structure. The legacy `CMakeLists.txt` references empty skeletons under `Src/` and is **not** the engine build entry. Do not invoke it. The commands below describe the **target** state after Phase 1 / Task 02.
+
+Bootstrap third-party deps (target state — script does not exist yet, will arrive in Phase 1 / Task 03):
+
+```
+python scripts/fetch_and_build_3rdparty.py                 # default prefix D:\3rdparty
+python scripts/fetch_and_build_3rdparty.py --prefix E:\deps --jobs 16
+```
+
+Manual configure / build once deps are installed:
+
+```
+cmake -S . -B build -DCMAKE_PREFIX_PATH="D:/3rdparty;D:/sdk/orange-render"
+cmake --build build --config Debug -j
+```
+
+Run the minimal sample (verifies window + main loop):
+
+```
+build/bin/Debug/01_minimal_window.exe
+```
+
+Tests live under `tests/` and are gated behind `ORANGE_ENGINE_BUILD_TESTS` (default OFF):
+
+```
+cmake -S . -B build -DCMAKE_PREFIX_PATH="..." -DORANGE_ENGINE_BUILD_TESTS=ON
+cmake --build build --config Debug -j
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+## Architecture
+
+The engine is organized **horizontally by module**, not as a vertical pyramid. Strict invariants govern which module may import which third-party headers.
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  Game repository (find_package(OrangeEngine))             │
+│   game-side components / systems / shaders / assets       │
+└───────────────────────────────────────────────────────────┘
+                           │ uses public API
+                           ▼
+┌───────────────────────────────────────────────────────────┐
+│  OrangeEngine (this repository)                           │
+│   include/orange/engine/...    Public API                 │
+│   src/...                      Private implementation     │
+│   src/render/                  ★ ONLY directory allowed   │
+│                                  to #include <orange/...> │
+│   src/animation/dragonbones/   ★ ONLY DragonBones region  │
+│   src/physics/box2d/           ★ ONLY Box2D region        │
+│   src/audio/miniaudio/         ★ ONLY miniaudio region    │
+└───────────────────────────────────────────────────────────┘
+                           │ find_package(OrangeRender)
+                           ▼
+┌───────────────────────────────────────────────────────────┐
+│  OrangeRender (vendor/OrangeRender)                       │
+│   Application / RenderFramework / RenderGraph / RHI       │
+│   Vulkan backend (volk + VMA)                             │
+└───────────────────────────────────────────────────────────┘
+```
+
+### Modules
+
+- **Core** (`include/orange/engine/core/`): Result / Handle / Time / Hash / Log / `Serialization` (JsonReader/Writer + BinaryReader/Writer + SchemaVersion) / `Config`.
+- **Platform** (`include/orange/engine/platform/`): Window (GLFW wrapped — public API never exposes `GLFWwindow*`) / FileSystem / Clock / raw input.
+- **App** (`include/orange/engine/app/`): AppHost / Layer / LayerStack / FrameContext / AppConfig.
+- **Asset** (`include/orange/engine/asset/`): AssetHandle / AssetRegistry / IAssetLoader / built-in loaders for Mesh / Texture / Shader / Skeleton / Sound / Font.
+- **Scene** (`include/orange/engine/scene/`): World (EnTT registry wrapper) / Entity / TransformComponent / HierarchyComponent / NameComponent / ISystem.
+- **Render** (`include/orange/engine/render/`): Camera / RenderableComponent / LightComponent / Material / MaterialInstance / MaterialSystem / Pipeline / PostProcessChain / VfxSystem. **The only module that may consume OrangeRender headers**.
+- **Animation** (`include/orange/engine/animation/`): IAnimator (abstract) / SkeletalAnimator (DragonBones backend) / ProceduralAnimator (shader-uniform driven) / AnimationStateMachine / AnimatorRegistry. Dual-backend by design from the start.
+- **Physics** (`include/orange/engine/physics/`): PhysicsWorld / RigidBodyComponent / ColliderComponent / ColliderDesc + `ReplaceFixture` runtime API.
+- **Audio** (`include/orange/engine/audio/`): AudioEngine (miniaudio wrapped) / Sound / SoundInstance.
+- **Input** (`include/orange/engine/input/`): Action / ActionMap / InputContext (stack-based).
+- **Save** (`include/orange/engine/save/`, **Phase 5.5**): SaveGameRegistry / SaveGameSystem.
+
+### Phase discipline
+
+Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.md`). **Do not implement Phase N+1 features while Phase N is incomplete.** Each Phase has a demonstrable milestone (typically a `samples/` executable). Phase status as of this writing:
+
+- **Phase 1** (engine skeleton + minimal main loop): not started
+- Phases 2–5.5: not started; outlines only
+
+When working on a task, locate it in `docs/design-plan.md` Task Breakdown. Implement only the listed outputs; reject scope creep.
+
+## Coding conventions (enforced)
+
+The full rule set is OrangeRender's `coding-standards.md` (linked from `vendor/OrangeRender/docs/coding-standards.md`). OrangeEngine differences are documented in `docs/coding-standards.md`. Highlights:
+
+- Namespace everything in **`Orange::Engine`** (nested per module: `Orange::Engine::Render`, `Orange::Engine::Scene`, `Orange::Engine::Animation`, `Orange::Engine::Physics`, etc.). Top-level common types (`AppHost`, `World`, `Entity`, `Layer`, `FrameContext`) live in `Orange::Engine` directly.
+- Functions and types: PascalCase. Locals/params: camelCase.
+- Member data: `m` + camelCase (`mFrameIndex`). Member pointers: `mp` + camelCase (`mpDevice`).
+- Static class data: `s` + camelCase; static class pointer members: `sp` + camelCase. File-scope / function-local statics also use `s` prefix.
+- Non-member pointers: `p` + camelCase (`pData`, `pNext`).
+- Every header uses `#ifndef`/`#define`/`#endif` guards named `ORANGE_ENGINE_<UPPER_PATH>_H` (e.g. `include/orange/engine/scene/World.h` → `ORANGE_ENGINE_SCENE_WORLD_H`). Do not use `#pragma once`.
+- Public exported types use `ORANGE_ENGINE_API` (analogous to OrangeRender's `ORANGE_API`).
+- Brace style: opening brace on its own line, aligned with the declaration (matches OrangeRender's examples).
+
+## Design guardrails (project-level invariants)
+
+These are not suggestions. Violating them is treated as an architectural bug.
+
+### Header isolation
+- **Public headers** (`include/orange/engine/**/*.h`) must NOT include any of:
+  - `<orange/...>` (OrangeRender RHI / RenderGraph headers)
+  - `<box2d/...>`, `<box2d.h>`
+  - `<dragonBones/...>`
+  - `"miniaudio.h"`
+  - `<vulkan/...>`, `<volk.h>`, `<vk_mem_alloc.h>`
+- **`<orange/...>` is allowed only in `src/render/**`**. If you need OrangeRender from another module, you are doing it wrong — route through Render's public API.
+- **`<box2d/...>` is allowed only in `src/physics/box2d/**`**.
+- **`<dragonBones/...>` is allowed only in `src/animation/dragonbones/**`**.
+- **`"miniaudio.h"` is allowed only in `src/audio/miniaudio/**`**.
+
+### Game-specific concepts forbidden in engine
+- Engine code must not contain identifiers like `Slime`, `Boss`, `Player`, `Form`, or any other first-game term. If a feature is needed only for the first game, it belongs in the game repository as a custom component / system / shader, consumed via the engine's extension points.
+
+### Serialization and reflection
+- **No reflection libraries.** Phase 1–6 forbids `entt::meta`, RTTR, cereal-with-reflection, or any AST codegen. All `Read` / `Write` functions are hand-written.
+- **No bare `nlohmann::json` calls.** All serialization must go through `Core::Serialization` (`JsonReader` / `JsonWriter` / `BinaryReader` / `BinaryWriter`). The public API does not expose `nlohmann::json` types.
+- **Every serializable type declares `SchemaVersion`.** The read path validates version before parsing.
+- **A schema version that has shipped to a player or to the game repo never changes.** Add a new version + migrator instead.
+
+### Phase scope
+- The Render module's `Pipeline::InsertPass` exists from Phase 3 but is `assert(false, "not implemented before Phase 5")` until Phase 5 actually wires it.
+- VFX, scene serialization, save game, GPU particles, custom shader hot reload are all post-Phase-3. Do not stub them in earlier.
+
+### OrangeRender public API discipline
+- The renderer is consumed via its public API (`Orange::Rhi::*` and the `OrangeRender::orange_render` target). Do not reach into `vendor/OrangeRender/src/` from this repo. If OrangeRender lacks something you need, file an issue / patch in the OrangeRender repo, not a workaround here.
+
+## Knowledge base: Orange-Wiki
+
+The wiki at `vendor/Orange-Wiki/` is a curated, incrementally-built knowledge base on game engine construction. It is mounted as a Claude Code skill via `vendor/Orange-Wiki/SKILL.md`. **It is the project's authoritative reference for engine implementation decisions.**
+
+### When to consult it
+- Implementing or designing any engine subsystem (rendering, ECS, physics, animation, audio, asset, scheduling)
+- Choosing an algorithm (culling strategy, shadow technique, allocator, scheduling model)
+- Architectural tradeoffs (archetype vs sparse-set ECS, immediate vs retained mode, push vs pull constants, etc.)
+- Cross-engine reference questions ("how does Unreal/Unity/Bevy/Godot do X")
+
+### How to consult it
+1. Always start with `vendor/Orange-Wiki/wiki/index.md` — it catalogs every page.
+2. Pick candidate pages (subsystem / concept / technique / engine / comparison / pattern).
+3. Read self-contained summaries first to filter relevance.
+4. Follow `prerequisites` and `see_also` frontmatter for related context.
+5. **In answers to the user, cite specific wiki pages with relative paths**: e.g., "按 `vendor/Orange-Wiki/wiki/concepts/ecs/archetype-storage.md`，archetype 在 add component 时整行迁移……"
+
+### What NOT to do
+- **Do not modify wiki content** from this repository as a side effect of consumer queries. Wiki maintenance is governed by `vendor/Orange-Wiki/CLAUDE.md` and happens in that repo's own session.
+- Do not skip the wiki and answer from training-set knowledge for engine-construction topics.
+- Do not assume a topic is covered — if `index.md` does not list a relevant page, say so explicitly and recommend ingesting a source rather than fabricating details.
+
+### Branch
+- The wiki must be on branch `Orange-Render-Wiki`. The default `main` branch does not contain the ingested content. Verify with `git -C vendor/Orange-Wiki branch --show-current`.
+
+## Working in this repo: practical guidance
+
+When given a task in this repo, default to this workflow:
+
+1. **Read `docs/design-plan.md`** to confirm which Phase the task belongs to and what its outputs are. Reject scope that crosses Phase boundaries.
+2. **Read `docs/extension-points.md`** if the task touches any extension surface (custom components / shaders / asset types / render passes / animator backends / save game).
+3. **Consult `vendor/Orange-Wiki/`** for algorithmic / architectural decisions. Cite specific pages.
+4. **Check the invariants in this file** before adding any `#include`. The header isolation rules are checked in code review.
+5. **Match OrangeRender's coding conventions**. Header guards, naming, brace style, namespace nesting — all aligned.
+6. **Add a sample** to `samples/` if the task introduces new public API. The sample is the canonical "does it still run end-to-end" check.
+
+When uncertain whether something is engine-level vs game-level: **default to game-level**. The engine should remain genuinely reusable for hypothetical future games, not specialized for the first one.
+
+## File layout reference
+
+```
+CMakeLists.txt                          # top-level build (Phase 1 / Task 02)
+include/orange/engine/                  # public API; namespace Orange::Engine
+  OrangeEngine.h                          # umbrella header
+  OrangeEngineExport.h                    # ORANGE_ENGINE_API macro
+  OrangeEngineVersion.h                   # generated
+  core/  platform/  app/  asset/  scene/
+  render/  animation/  physics/  audio/  input/
+  save/                                   # Phase 5.5
+src/                                    # private implementation
+  core/  platform/  app/  asset/  scene/
+  render/                                 # ★ unique OrangeRender consumer
+  animation/dragonbones/                  # ★ unique DragonBones consumer
+  physics/box2d/                          # ★ unique Box2D consumer
+  audio/miniaudio/                        # ★ unique miniaudio consumer
+  input/  save/
+samples/                                # end-to-end demos, one per Phase milestone
+tests/                                  # ctest suite
+cmake/                                  # toolchain + Config template
+docs/                                   # authoritative architecture / roadmap / standards
+vendor/
+  OrangeRender/                         # vendored renderer (find_package source)
+  Orange-Wiki/                          # knowledge base (branch: Orange-Render-Wiki)
+```
+
+`docs/Technical Documentation/` is a **historical archive** of the abandoned GEA-style 4-layer architecture from a year ago. Do not read it as authoritative; do not delete it (preserved for history). All current architecture lives in `docs/design-plan.md` and its companion files.

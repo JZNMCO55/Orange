@@ -1,0 +1,30 @@
+#ifndef ORANGE_ENGINE_ORANGE_ENGINE_VERSION_H
+#define ORANGE_ENGINE_ORANGE_ENGINE_VERSION_H
+
+// ---------------------------------------------------------------------------
+// Phase 1 / Task 02 — version macros, generated from CMake.
+//
+// Configured by the top-level CMakeLists.txt at configure time; the canonical
+// source of truth is the `project(VERSION ...)` argument. Consumers that want
+// to gate code on a specific OrangeEngine release should #include this header
+// and check `ORANGE_ENGINE_VERSION`, which is a packed integer of the form
+// (major * 10000 + minor * 100 + patch) — easy to compare against numeric
+// literals such as `010203` for 1.2.3.
+//
+// String form is `ORANGE_ENGINE_VERSION_STRING` (e.g. "0.1.0"); the
+// individual fields are also exposed so SemVer-aware tooling does not need
+// to parse the string.
+// ---------------------------------------------------------------------------
+
+#define ORANGE_ENGINE_VERSION_MAJOR @OrangeEngine_VERSION_MAJOR@
+#define ORANGE_ENGINE_VERSION_MINOR @OrangeEngine_VERSION_MINOR@
+#define ORANGE_ENGINE_VERSION_PATCH @OrangeEngine_VERSION_PATCH@
+
+#define ORANGE_ENGINE_VERSION  \
+    (ORANGE_ENGINE_VERSION_MAJOR * 10000 \
+   + ORANGE_ENGINE_VERSION_MINOR * 100   \
+   + ORANGE_ENGINE_VERSION_PATCH)
+
+#define ORANGE_ENGINE_VERSION_STRING "@OrangeEngine_VERSION@"
+
+#endif  // ORANGE_ENGINE_ORANGE_ENGINE_VERSION_H

@@ -1,39 +1,111 @@
 {
+    "_comment": "Engine third-party dependency manifest. Inherited deps (Vulkan SDK, glm, glfw, volk, VMA) are listed for completeness but they are also installed as part of OrangeRender's bootstrap; engine-direct deps below are added by Phase 1 / Task 03.",
+
     "dependencies": [
         {
             "name": "spdlog",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/spdlog.git"
+            "url": "git@github.com:JZNMCO55/spdlog.git",
+            "linkage": "PUBLIC",
+            "optional": true,
+            "gate": "ORANGE_ENGINE_WITH_SPDLOG",
+            "purpose": "Logging backend for Core::Log"
         },
         {
             "name": "tracy",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/tracy.git"
+            "url": "git@github.com:JZNMCO55/tracy.git",
+            "linkage": "PRIVATE",
+            "optional": true,
+            "gate": "ORANGE_ENGINE_WITH_TRACY",
+            "purpose": "Performance profiler"
         },
         {
             "name": "glm",
-            "type": "library", 
-            "url": "git@github.com:JZNMCO55/glm.git"
+            "type": "library",
+            "url": "git@github.com:JZNMCO55/glm.git",
+            "linkage": "PUBLIC",
+            "purpose": "Math types (Vec2/3/4, Mat3/4, Quat) appearing in public engine API"
         },
         {
             "name": "fmt",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/fmt.git"
+            "url": "git@github.com:JZNMCO55/fmt.git",
+            "linkage": "PRIVATE",
+            "optional": true,
+            "purpose": "Used transitively by spdlog if it does not bundle its own copy"
         },
         {
             "name": "glfw",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/glfw.git"
+            "url": "git@github.com:JZNMCO55/glfw.git",
+            "linkage": "PRIVATE",
+            "purpose": "Window + input device backend (also pulled in transitively by OrangeRender)"
         },
         {
             "name": "VulkanSDK",
             "type": "SDK",
-            "url": "https://vulkan.lunarg.com/sdk/home"
+            "url": "https://vulkan.lunarg.com/sdk/home",
+            "linkage": "PRIVATE",
+            "purpose": "Vulkan headers, glslangValidator, glslc, SPIRV-Cross. Pulled in transitively via OrangeRender; engine itself does not consume Vulkan headers directly."
         },
         {
             "name": "VulkanMemoryAllocator",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/VulkanMemoryAllocator.git"
+            "url": "git@github.com:JZNMCO55/VulkanMemoryAllocator.git",
+            "linkage": "PRIVATE",
+            "purpose": "Pulled in transitively via OrangeRender"
+        },
+
+        {
+            "name": "EnTT",
+            "type": "library",
+            "url": "https://github.com/skypjack/entt.git",
+            "linkage": "PUBLIC",
+            "purpose": "ECS registry. Component types appear in public engine API because the game registers its own components."
+        },
+        {
+            "name": "nlohmann_json",
+            "type": "library",
+            "url": "https://github.com/nlohmann/json.git",
+            "linkage": "PRIVATE",
+            "purpose": "JSON backend for Core::Serialization::JsonReader / JsonWriter. Public API does not expose nlohmann::json types — see越界禁令 in docs/extension-points.md."
+        },
+        {
+            "name": "Box2D",
+            "type": "library",
+            "url": "https://github.com/erincatto/box2d.git",
+            "version": "3.x",
+            "linkage": "PRIVATE",
+            "purpose": "2D physics backend. Allowed only in src/physics/box2d/."
+        },
+        {
+            "name": "miniaudio",
+            "type": "library",
+            "url": "https://github.com/mackron/miniaudio.git",
+            "linkage": "PRIVATE",
+            "purpose": "Cross-platform audio backend. Allowed only in src/audio/miniaudio/."
+        },
+        {
+            "name": "stb",
+            "type": "library",
+            "url": "https://github.com/nothings/stb.git",
+            "linkage": "PRIVATE",
+            "purpose": "stb_image (texture decode), stb_truetype (font rasterization). Single-header inclusion."
+        },
+        {
+            "name": "Dear ImGui",
+            "type": "library",
+            "url": "https://github.com/ocornut/imgui.git",
+            "linkage": "PRIVATE",
+            "purpose": "Immediate-mode GUI for editor / debug overlays. Phase 6 feature; integrated via GLFW + Vulkan backends."
+        },
+        {
+            "name": "DragonBonesCPP",
+            "type": "library",
+            "url": "https://github.com/DragonBones/DragonBonesCPP.git",
+            "linkage": "PRIVATE",
+            "purpose": "2D skeletal animation runtime. Allowed only in src/animation/dragonbones/. C++ runtime maintenance is a known risk; abstraction layer in include/orange/engine/animation/IAnimator.h preserves the option to swap backends."
         }
     ]
 }
