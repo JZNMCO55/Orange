@@ -40,6 +40,11 @@ include(cmake/Dependencies.cmake)
 # ---------------------------------------------------------------------------
 add_library(orange_engine STATIC
     src/EngineStub.cpp
+
+    # Phase 1 / Task 04 — Core
+    src/core/CoreHeaderCheck.cpp
+    src/core/Log.cpp
+    src/core/Result.cpp
 )
 
 # ---------------------------------------------------------------------------

@@ -846,7 +846,7 @@ Removed: Src/                              (整目录，src/ 替换)
 
 ### Phase 1：引擎骨架与最小可运行路径
 
-#### Task 01：清理旧骨架并建立新目录结构
+#### Task 01：清理旧骨架并建立新目录结构 ✅
 - 描述：删除 `Src/OrangeEngine/Layer1`、`Layer2`、`OrangeEditor`、`Orange.h`、`orgpch.h` 等历史文件，建立 `include/orange/engine/`、`src/`、`samples/`、`tests/`、`cmake/` 顶层目录。
 - 输入：当前仓库（仅含旧 Src/ 骨架）
 - 输出：
@@ -865,7 +865,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：旧 `Src/` 完全移除；新顶层目录就位
 - Critical Path：是
 
-#### Task 02：建立顶层 CMake 与 `ORANGE_ENGINE_API` 宏机制
+#### Task 02：建立顶层 CMake 与 `ORANGE_ENGINE_API` 宏机制 ✅
 - 描述：编写顶层 `CMakeLists.txt`，定义 `OrangeEngine::orange_engine` 静态库目标，接入 `find_package(OrangeRender 0.1 CONFIG REQUIRED)`，提供 `ORANGE_ENGINE_API` dllexport/dllimport 切换。
 - 输入：Task 01 输出的目录结构
 - 输出：
@@ -884,7 +884,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：可生成 VS2022 解决方案；`orange_engine` 目标存在但暂无源
 - Critical Path：是
 
-#### Task 03：第三方依赖接入与 vendor submodule 化
+#### Task 03：第三方依赖接入与 vendor submodule 化 ✅
 - 描述：把 `vendor/OrangeRender` 与 `vendor/Orange-Wiki` 注册为 git submodule（Wiki 跟踪 `Orange-Render-Wiki` 分支）；更新 `3rdparty.json` 增加 EnTT / Box2D / miniaudio / stb_image / stb_truetype / nlohmann_json / Dear ImGui / DragonBones C++ runtime；提供 `cmake/Dependencies.cmake` 走 `find_package` 解析。
 - 输入：Task 02 输出
 - 输出：
@@ -901,7 +901,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：依赖图正确；PRIVATE 依赖不出现在 `OrangeEngineConfig.cmake.in`
 - Critical Path：是
 
-#### Task 04：定义 Core 基础类型
+#### Task 04：定义 Core 基础类型 ✅
 - 描述：实现 `ResultCode` / `Result<T>` / `TypedHandle<Tag>` / `Time` / `Hash` / `Id` 等基础设施。
 - 输入：CMake 与依赖就绪
 - 输出：

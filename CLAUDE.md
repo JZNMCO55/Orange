@@ -197,6 +197,25 @@ When given a task in this repo, default to this workflow:
 
 When uncertain whether something is engine-level vs game-level: **default to game-level**. The engine should remain genuinely reusable for hypothetical future games, not specialized for the first one.
 
+### Task completion marking
+
+After a task's outputs are landed and its acceptance criteria are met, append `✅` to the task heading in `docs/design-plan.md` (or `docs/roadmap.md` for Phase 6+ tasks). This matches OrangeRender's own convention and gives a quick visual scan of where the engine stands.
+
+```markdown
+#### Task 01：清理旧骨架并建立新目录结构 ✅
+#### Task 02：建立顶层 CMake 与 `ORANGE_ENGINE_API` 宏机制 ✅
+#### Task 03：第三方依赖接入与 vendor submodule 化 ✅
+#### Task 04：定义 Core 基础类型
+```
+
+Rules:
+
+- The mark goes on the task **heading line** only — never inside the task body, never on Phase headings (a Phase is "done" only when every Critical-Path task in it carries ✅).
+- Only mark a task done when its **outputs exist on disk** (or are correctly staged) **and** its **验收标准 / 验证方式** has been observed (build green / sample runs / test passes). A staged file alone is not completion.
+- If a task is partially done (e.g. files written but verification deferred because deps are missing), do **not** mark it ✅ yet. Use the chat / commit message to describe the deferred state and apply the mark once verification clears.
+- When a previously-marked task gets reverted or its acceptance breaks, **remove the ✅** in the same change so the doc reflects current truth.
+- Phase 1 task numbering shifted once (Task 05 was inserted as Core Serialization & Config, pushing the old 05–10 to 06–11). If similar restructurings happen, the ✅ marks must be migrated to the new numbering — do not let stale marks linger.
+
 ## File layout reference
 
 ```

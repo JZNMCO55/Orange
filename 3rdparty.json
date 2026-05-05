@@ -1,5 +1,5 @@
 {
-    "_comment": "Engine third-party dependency manifest. Inherited deps (Vulkan SDK, glm, glfw, volk, VMA) are listed for completeness but they are also installed as part of OrangeRender's bootstrap; engine-direct deps below are added by Phase 1 / Task 03.",
+    "_comment": "Engine third-party dependency manifest. Only engine-direct dependencies are listed. Vulkan SDK / volk / VulkanMemoryAllocator / glfw3 / fmt are intentionally NOT listed because they are pulled in transitively (Vulkan stack via OrangeRender's find_dependency, fmt via spdlog's bundled copy) and the engine itself does not consume their headers directly outside of the dedicated isolated source trees that already document each rule.",
 
     "dependencies": [
         {
@@ -9,7 +9,7 @@
             "linkage": "PUBLIC",
             "optional": true,
             "gate": "ORANGE_ENGINE_WITH_SPDLOG",
-            "purpose": "Logging backend for Core::Log"
+            "purpose": "Logging backend for Core::Log. Public headers do NOT include spdlog — the gate only switches the implementation in src/core/Log.cpp."
         },
         {
             "name": "tracy",
@@ -27,36 +27,6 @@
             "linkage": "PUBLIC",
             "purpose": "Math types (Vec2/3/4, Mat3/4, Quat) appearing in public engine API"
         },
-        {
-            "name": "fmt",
-            "type": "library",
-            "url": "git@github.com:JZNMCO55/fmt.git",
-            "linkage": "PRIVATE",
-            "optional": true,
-            "purpose": "Used transitively by spdlog if it does not bundle its own copy"
-        },
-        {
-            "name": "glfw",
-            "type": "library",
-            "url": "git@github.com:JZNMCO55/glfw.git",
-            "linkage": "PRIVATE",
-            "purpose": "Window + input device backend (also pulled in transitively by OrangeRender)"
-        },
-        {
-            "name": "VulkanSDK",
-            "type": "SDK",
-            "url": "https://vulkan.lunarg.com/sdk/home",
-            "linkage": "PRIVATE",
-            "purpose": "Vulkan headers, glslangValidator, glslc, SPIRV-Cross. Pulled in transitively via OrangeRender; engine itself does not consume Vulkan headers directly."
-        },
-        {
-            "name": "VulkanMemoryAllocator",
-            "type": "library",
-            "url": "git@github.com:JZNMCO55/VulkanMemoryAllocator.git",
-            "linkage": "PRIVATE",
-            "purpose": "Pulled in transitively via OrangeRender"
-        },
-
         {
             "name": "EnTT",
             "type": "library",
