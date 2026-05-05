@@ -45,6 +45,11 @@ add_library(orange_engine STATIC
     src/core/CoreHeaderCheck.cpp
     src/core/Log.cpp
     src/core/Result.cpp
+
+    # Phase 1 / Task 05 — Core::Serialization + Config
+    src/core/Config.cpp
+    src/core/SchemaVersion.cpp
+    src/core/Serialization.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -142,9 +147,10 @@ if (TARGET EnTT::EnTT)
     target_link_libraries(orange_engine PUBLIC EnTT::EnTT)
 endif ()
 
-if (TARGET nlohmann_json::nlohmann_json)
-    target_link_libraries(orange_engine PRIVATE nlohmann_json::nlohmann_json)
-endif ()
+# Phase 1 / Task 05 — nlohmann_json is REQUIRED via Dependencies.cmake; the
+# target is guaranteed to exist here. Linkage is PRIVATE so the type does
+# not leak through OrangeEngine's public headers.
+target_link_libraries(orange_engine PRIVATE nlohmann_json::nlohmann_json)
 
 if (ORANGE_ENGINE_WITH_SPDLOG)
     target_link_libraries(orange_engine PUBLIC spdlog::spdlog)

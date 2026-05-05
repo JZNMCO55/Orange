@@ -35,9 +35,8 @@
 # consumption is responsible for bumping its dep from QUIET to REQUIRED
 # in this file.
 #
-# REQUIRED today (Phase 1 / Task 03):  OrangeRender, glm
+# REQUIRED today (Phase 1 / Task 05):  OrangeRender, glm, nlohmann_json
 # QUIET-deferred:                      EnTT (-> Phase 2 / Task 04)
-#                                      nlohmann_json (-> Phase 1 / Task 05)
 #                                      box2d (-> Phase 4 / Task 06)
 #                                      imgui (-> Phase 6)
 #                                      stb / miniaudio / DragonBones
@@ -75,9 +74,9 @@ endif ()
 find_package(EnTT CONFIG QUIET)
 
 # ---------------------------------------------------------------------------
-# Soft: nlohmann_json (becomes REQUIRED at Phase 1 / Task 05 — Serialization)
+# Required: nlohmann_json (Phase 1 / Task 05 — Core::Serialization)
 # ---------------------------------------------------------------------------
-find_package(nlohmann_json 3 CONFIG QUIET)
+find_package(nlohmann_json 3 CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Optional gates
@@ -117,11 +116,7 @@ if (TARGET EnTT::EnTT)
 else ()
     message(STATUS "  EnTT            : not installed (becomes REQUIRED at Phase 2 / Task 04)")
 endif ()
-if (TARGET nlohmann_json::nlohmann_json)
-    message(STATUS "  nlohmann_json   : found (used from Phase 1 / Task 05)")
-else ()
-    message(STATUS "  nlohmann_json   : not installed (becomes REQUIRED at Phase 1 / Task 05)")
-endif ()
+message(STATUS "  nlohmann_json   : found (Core::Serialization, Task 05)")
 message(STATUS "  spdlog gate     : ${ORANGE_ENGINE_WITH_SPDLOG}")
 message(STATUS "  tracy gate      : ${ORANGE_ENGINE_WITH_TRACY}")
 if (TARGET box2d::box2d)

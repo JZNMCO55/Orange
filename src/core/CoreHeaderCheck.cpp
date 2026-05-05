@@ -13,10 +13,13 @@
 // `include/orange/engine/core/`.
 // ---------------------------------------------------------------------------
 
+#include "orange/engine/core/Config.h"
 #include "orange/engine/core/Hash.h"
 #include "orange/engine/core/Handle.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Result.h"
+#include "orange/engine/core/SchemaVersion.h"
+#include "orange/engine/core/Serialization.h"
 #include "orange/engine/core/Time.h"
 
 namespace Orange::Engine::Core

@@ -920,7 +920,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：Core 公共头自包含
 - Critical Path：是
 
-#### Task 05：实现 Core 序列化原语与启动配置
+#### Task 05：实现 Core 序列化原语与启动配置 ✅
 - 描述：实现 `JsonReader` / `JsonWriter` / `BinaryReader` / `BinaryWriter` / `SchemaVersion` 工具集，以及 `Config` / `ConfigLoader`。所有后续 Phase 的 read/write 必须基于这套原语，禁止裸 `nlohmann::json` 调用。
 - 输入：Core 基础类型（Result / Handle / Log）
 - 输出：

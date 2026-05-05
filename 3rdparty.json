@@ -5,7 +5,7 @@
         {
             "name": "spdlog",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/spdlog.git",
+            "url": "https://github.com/gabime/spdlog.git",
             "linkage": "PUBLIC",
             "optional": true,
             "gate": "ORANGE_ENGINE_WITH_SPDLOG",
@@ -14,7 +14,7 @@
         {
             "name": "tracy",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/tracy.git",
+            "url": "https://github.com/wolfpld/tracy.git",
             "linkage": "PRIVATE",
             "optional": true,
             "gate": "ORANGE_ENGINE_WITH_TRACY",
@@ -23,7 +23,7 @@
         {
             "name": "glm",
             "type": "library",
-            "url": "git@github.com:JZNMCO55/glm.git",
+            "url": "https://github.com/g-truc/glm.git",
             "linkage": "PUBLIC",
             "purpose": "Math types (Vec2/3/4, Mat3/4, Quat) appearing in public engine API"
         },
