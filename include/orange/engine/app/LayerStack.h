@@ -2,27 +2,23 @@
 #define ORANGE_ENGINE_APP_LAYER_STACK_H
 
 // ---------------------------------------------------------------------------
-// LayerStack: ordered storage for the Layers that AppHost ticks each frame.
+// LayerStack —— AppHost 每帧 tick 的 Layer 容器。
 //
-// The container is conceptually two zones laid out in a single contiguous
-// vector:
+// 概念上是同一段连续 vector 中的两个分区：
 //
-//   [ regular layers ... ][ overlays ... ]
-//                         ^
-//                         mLayerInsertIndex — first overlay slot
+//   [ 普通 layer ... ][ overlay ... ]
+//                     ^
+//                     mLayerInsertIndex —— 第一个 overlay 槽位
 //
-// Why one vector, not two? Iteration is the hot path. AppHost walks the
-// whole stack in order for OnUpdate (front-to-back, regular layers first
-// so overlays render last) and in reverse for OnEvent (overlays first so
-// they get the chance to consume an event before regular layers see it).
-// A single vector keeps both walks branch-free.
+// 为什么用单个 vector 而不是两个？因为遍历是热点：AppHost 在 OnUpdate
+// 时按 front-to-back 跑（普通 layer 在前、overlay 在后渲染），在
+// OnEvent 时按 reverse 跑（overlay 优先拿到事件）。单 vector 让两条
+// 路径都不需要分支判断当前在哪一段。
 //
-// Ownership:
-//   LayerStack owns its layers via unique_ptr. Push* takes ownership and
-//   returns a non-owning pointer for the caller to keep around (so that
-//   later Pop* calls can reference the layer by identity). Detach is
-//   driven from the destructor in reverse insertion order, mirroring the
-//   construction sequence.
+// 所有权：
+//   LayerStack 用 unique_ptr 持有 Layer 的所有权。Push* 拿走所有权，
+//   返回一个非拥有指针给调用方做后续 Pop* 的身份引用。析构时按反向
+//   插入顺序 detach，与构造时序对称。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>

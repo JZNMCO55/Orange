@@ -1,14 +1,11 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 06 — Platform::Window GLFW backend
+// Platform::Window —— GLFW backend
 //
-// The single TU permitted to consume <GLFW/glfw3.h> in this engine.
-// Other modules go through the public Platform::Window API.
+// 整个引擎中唯一允许 include <GLFW/glfw3.h> 的 TU。其他模块走 public
+// Platform::Window API，看不到任何 GLFW 类型。
 //
-// Lifecycle: a process-wide reference count gates glfwInit / glfwTerminate.
-// Each successful Window::Create increments it; ~Window decrements. The
-// counter sits in an anonymous namespace to keep symbol scope local to
-// this TU.
-// ---------------------------------------------------------------------------
+// 生命周期：进程级的 init 计数器控制 glfwInit / glfwTerminate。每次
+// Window::Create 成功 +1，~Window -1。计数器放在匿名 namespace 里，
+// 把符号作用域限制在本 TU 内。当前的契约假设引擎启动是单线程的。
 
 #define GLFW_INCLUDE_NONE
 
@@ -30,9 +27,8 @@ namespace Orange::Engine::Platform
 namespace
 {
 
-// Process-wide GLFW init refcount. The plan calls for a "sInitialized
-// counter" in an anonymous namespace; this is it. Single-threaded boot is
-// the assumed contract for Phase 1.
+// 进程级 GLFW init 引用计数。设计文档要求一个匿名 namespace 中的
+// "sInitialized 计数器"，就是这里。当前实现假设启动过程是单线程的。
 int sGlfwInitCount = 0;
 
 bool EnsureGlfwInit() noexcept
@@ -99,7 +95,7 @@ struct Window::Impl
     std::uint32_t         width{0};
     std::uint32_t         height{0};
     Window::EventCallback callback;
-    Window*               pOwner{nullptr};  // back-pointer for callback dispatch
+    Window*               pOwner{nullptr};  // 回调分发用的反向指针
 };
 
 namespace
@@ -204,7 +200,7 @@ Result<std::unique_ptr<Window>, ResultCode> Window::Create(const WindowDesc& des
         return ResultCode::NotInitialized;
     }
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // Vulkan rendering owns the surface
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // Vulkan 由渲染器自己拿 surface
     glfwWindowHint(GLFW_RESIZABLE, desc.resizable ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_VISIBLE,   desc.visible   ? GLFW_TRUE : GLFW_FALSE);
 
@@ -316,7 +312,7 @@ void* Window::GetNativeWindowHandle() const noexcept
 
 void* Window::GetNativeDisplayHandle() const noexcept
 {
-    return nullptr;  // Win32 has no separate display handle.
+    return nullptr;  // Win32 平台没有独立的 display handle
 }
 
 }  // namespace Orange::Engine::Platform

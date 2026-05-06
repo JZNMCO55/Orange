@@ -1,10 +1,9 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 05 — Core::Serialization implementation
+// Core::Serialization 实现
 //
-// nlohmann::json is wrapped here exclusively. Every JSON-touching engine
-// path routes through these classes; direct includes of <nlohmann/json.hpp>
-// outside this TU are rejected at code review (see CLAUDE.md guardrails).
-// ---------------------------------------------------------------------------
+// nlohmann::json 被严格限制在本 TU 内部使用：所有触及 JSON 的引擎路径
+// 都通过这里的 reader / writer 类。在本 TU 外直接 include
+// <nlohmann/json.hpp> 视为越界，code review 阶段拒绝（详见 CLAUDE.md
+// 中的 "Serialization and reflection" 一节）。
 
 #include "orange/engine/core/Serialization.h"
 #include "orange/engine/core/SchemaVersion.h"
@@ -24,8 +23,8 @@ namespace
 
 using Json = nlohmann::json;
 
-// Splits "a/b/c" into ["a", "b", "c"]. Empty string -> empty vector.
-// '/' inside keys is not supported in Phase 1.
+// 把 "a/b/c" 拆成 ["a", "b", "c"]。空字符串返回空 vector。当前不支持
+// 在 key 中出现 '/'。
 std::vector<std::string_view> SplitPath(std::string_view path) noexcept
 {
     std::vector<std::string_view> parts;
@@ -69,8 +68,8 @@ const Json* FindByPath(const Json& root, std::string_view path) noexcept
     return node;
 }
 
-// Walks `root`, creating nested objects as needed, and returns a reference
-// to the leaf node so the caller can assign a value into it.
+// 沿路径走 `root`，按需创建中间对象节点；返回叶节点的引用，调用方可
+// 直接赋值进去。
 Json& EnsureByPath(Json& root, std::string_view path)
 {
     auto parts = SplitPath(path);

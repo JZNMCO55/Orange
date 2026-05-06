@@ -2,17 +2,15 @@
 #define ORANGE_ENGINE_CORE_HANDLE_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::TypedHandle
+// Core::TypedHandle —— 强类型 64-bit handle。
 //
-// Strongly-typed 64-bit handle. The `Tag` template parameter is a phantom
-// type — its only role is to make `TypedHandle<MeshTag>` and
-// `TypedHandle<TextureTag>` mutually incompatible at the type system, so
-// the compiler refuses to silently swap a mesh handle for a texture one.
+// 模板参数 `Tag` 是 phantom type：唯一作用是让
+// `TypedHandle<MeshTag>` 与 `TypedHandle<TextureTag>` 在类型系统层面互不
+// 兼容，编译器拒绝把一个 mesh handle 悄悄当作 texture handle 传递。
 //
-// 64 bits is split convention-wise into 32 bits index + 32 bits generation
-// by the storage layer (e.g. AssetRegistry), but Core deliberately keeps
-// the representation opaque — only the storage that minted a handle knows
-// how to crack it. Consumers MUST treat the value as an opaque token.
+// 64 位的 layout 习惯切成 32 位 index + 32 位 generation，由具体的存储
+// 层（如 AssetRegistry）来约定；Core 这一层刻意保持不透明——只有铸出
+// handle 的存储自己知道怎么解读它。消费者必须把这个值视为 opaque token。
 // ---------------------------------------------------------------------------
 
 #include <cstddef>

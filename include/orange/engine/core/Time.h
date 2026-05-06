@@ -2,17 +2,15 @@
 #define ORANGE_ENGINE_CORE_TIME_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::Time
+// Core::Time —— 仅有数据类型，不实现时钟后端。
 //
-// Pure data types only. No clock backend lives here — Platform::Clock owns
-// the high-resolution wall clock and feeds these types from the App main
-// loop (see Phase 1 / Task 06 for the Window/Clock backend, Task 08 for the
-// loop wiring).
+// 真正的高精度 wall clock 由 Platform::Clock 拥有，再由 App 主循环把测量
+// 值喂进这里的 TimeStamp / FixedStepAccumulator。
 //
-// `DeltaSeconds` is float, not double: gameplay code overwhelmingly wants
-// 32-bit math, and a frame's worth of seconds (~16.6 ms) sits well inside
-// float precision. Where high-precision accumulation matters, accumulate
-// in fixed-step ticks instead of in seconds.
+// `DeltaSeconds` 选 float 而非 double：gameplay 代码绝大多数情况下使用
+// 32 位浮点数学，而一帧时长（约 16.6 ms）远在 float 精度的安全范围内。
+// 若某处确实需要高精度积分，应改在 fixed-step ticks 上累加，而不是在
+// seconds 上累加。
 // ---------------------------------------------------------------------------
 
 #include <cstdint>
@@ -30,8 +28,8 @@ struct TimeStamp
     FrameIndex   frameIndex{0};
 };
 
-// FixedStepAccumulator drives deterministic update loops (physics, fixed
-// gameplay tick). Pattern:
+// FixedStepAccumulator 用于推动确定性的更新循环（如 physics、固定 tick
+// gameplay）。典型用法：
 //
 //   accumulator.Add(frame.deltaSeconds);
 //   while (accumulator.ShouldStep())
@@ -40,9 +38,8 @@ struct TimeStamp
 //       accumulator.ConsumeStep();
 //   }
 //
-// The accumulator is intentionally NOT capped here — clamping the maximum
-// number of steps per frame is a policy decision that belongs to the
-// caller (e.g. Physics module's "spiral of death" guard).
+// 这里刻意不对单帧最大步数设上限——所谓 "spiral of death" 的限制是策略
+// 决定，应由调用方（如 Physics 模块）持有。
 class FixedStepAccumulator
 {
 public:

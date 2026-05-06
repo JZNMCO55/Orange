@@ -2,22 +2,17 @@
 #define ORANGE_ENGINE_CORE_LOG_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::Log
+// Core::Log —— 日志门面。公共头不依赖任何第三方：
+// * spdlog（在 ORANGE_ENGINE_WITH_SPDLOG=ON 时是默认 backend）只在
+//   src/core/Log.cpp 中包含；公共消费者看不到 spdlog 的任何符号。
+// * 格式化走 std::format（C++20）——与 fmtlib 同语法，公共头无需新增依赖。
 //
-// Logging facade. Public header is third-party-free by design:
-// * spdlog (the default backend when ORANGE_ENGINE_WITH_SPDLOG=ON) is wrapped
-//   only in src/core/Log.cpp. Public consumers see no spdlog symbols.
-// * Format strings flow through std::format (C++20) — same syntax as
-//   fmtlib, no extra dependency on the public header.
+// 调用日志请用 ORANGE_LOG_* 宏，而不是直接调用 Log::Format：
+// 宏对 early-out 友好，并保留了未来在调用点注入 source location 的余地，
+// 改 backend 时不必修改调用现场。
 //
-// Use the ORANGE_LOG_* macros rather than calling Log::Format directly:
-// the macros are early-out friendly and let the impl side hook in
-// per-call-site source location later (Phase 6 line-info patch) without
-// touching call sites.
-//
-// Initialization is lazy — the first Write() auto-initializes the backend.
-// Calling Log::Initialize() explicitly only matters when an embedder wants
-// to control sink configuration before any log line is emitted.
+// 初始化是 lazy 的——首次 Write() 会自动初始化 backend。只有 embedder
+// 想在第一行日志输出前控制 sink 配置时，才需要显式调用 Log::Initialize()。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -47,7 +42,7 @@ ORANGE_ENGINE_API void  SetLevel(Level level) noexcept;
 ORANGE_ENGINE_API Level GetLevel() noexcept;
 ORANGE_ENGINE_API bool  IsEnabled(Level level) noexcept;
 
-// Low-level sink. Prefer the ORANGE_LOG_* macros / Format().
+// 底层 sink。一般请使用 ORANGE_LOG_* 宏 / Format()。
 ORANGE_ENGINE_API void Write(Level level, std::string_view message) noexcept;
 
 template <typename... Args>

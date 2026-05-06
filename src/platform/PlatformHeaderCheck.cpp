@@ -1,13 +1,9 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 06 — Platform public-header self-containment check.
+// Platform 公共头自包含性检查。
 //
-// Every Platform public header is included from this single TU, in
-// isolation from any other engine code. Mirrors the Core equivalent in
-// `src/core/CoreHeaderCheck.cpp`. If any Platform public header leaks a
-// GLFW type, fails to be self-contained, or grows an accidental
-// dependency on a sibling private header, the build fails here rather
-// than in some downstream consumer.
-// ---------------------------------------------------------------------------
+// 所有 Platform 公共头都在这个单独 TU 中被 include，与任何其他引擎
+// 代码隔离。镜像 Core 的同名 TU。任一公共头若泄漏 GLFW 类型、不能
+// 自包含、或长出对兄弟私有头的依赖，编译都会在这里失败，而不是在下
+// 游消费者处才暴露。
 
 #include "orange/engine/platform/Window.h"
 #include "orange/engine/platform/WindowEvent.h"

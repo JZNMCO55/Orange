@@ -1,10 +1,8 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 05 — Core::SchemaVersion implementation
+// Core::SchemaVersion 实现
 //
-// Out-of-line because the constructor stores both the original namespace
-// string AND its FNV-1a hash; keeping the hash computation in a TU avoids
-// pulling Hash.h's constexpr machinery into every consumer of the class.
-// ---------------------------------------------------------------------------
+// 之所以脱内联到这里，是因为构造函数同时保存原始 namespace 字符串与
+// 对应的 FNV-1a hash；把 hash 计算放在 TU 中，可以避免把 Hash.h 的
+// constexpr 装置带给本类的每一个消费者。
 
 #include "orange/engine/core/SchemaVersion.h"
 

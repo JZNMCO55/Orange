@@ -1,17 +1,15 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::Log implementation
+// Core::Log 实现
 //
-// Backend selection is compile-time:
-//   * ORANGE_ENGINE_WITH_SPDLOG defined  → route through a single
-//     `spdlog::stdout_color_mt("orange_engine")` logger.
-//   * otherwise                          → minimal stderr fallback. Keeps
-//     the engine usable in environments where spdlog is not installed
-//     (e.g. CI bootstraps, header-only smoke checks).
+// Backend 的选择在编译期：
+//   * 定义了 ORANGE_ENGINE_WITH_SPDLOG → 经由唯一一个
+//     `spdlog::stdout_color_mt("orange_engine")` logger 输出。
+//   * 否则                              → 极简的 stderr 兜底。让引擎在
+//     未安装 spdlog 的环境（CI bootstrap、header-only smoke check）也
+//     能用。
 //
-// Both paths share the same `sLevel` atomic so `SetLevel` semantics are
-// consistent across builds. The stderr fallback is intentionally tiny —
-// log formatting performance is not a goal until spdlog is wired in.
-// ---------------------------------------------------------------------------
+// 两条路径共享同一个 `sLevel` atomic，使 `SetLevel` 的语义在不同 build
+// 下保持一致。stderr 兜底刻意写得很小——日志格式化性能不在目标范围内，
+// 真要追性能就走 spdlog。
 
 #include "orange/engine/core/Log.h"
 

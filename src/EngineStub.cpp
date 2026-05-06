@@ -1,16 +1,12 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 02 — placeholder translation unit for the orange_engine
-// static library.
+// orange_engine 静态库的占位 TU。
 //
-// CMake's `add_library(<name> STATIC ...)` requires at least one source file
-// to drive archiver invocation. This TU exists solely to satisfy that
-// requirement while the engine is still being scaffolded; it will remain
-// here as a low-cost anchor (real implementation files are added module by
-// module starting at Phase 1 / Task 04).
+// CMake 的 `add_library(<name> STATIC ...)` 至少需要一个源文件来触发
+// archiver。当前引擎还在骨架阶段，这个 TU 仅是为了满足该约束；它会作
+// 为低成本的锚点保留下来，真正的实现会按模块逐步落到各自的
+// `src/<module>/` 目录。
 //
-// Do not put real engine code here. New subsystems live under their own
-// `src/<module>/` directories.
-// ---------------------------------------------------------------------------
+// 不要把真实引擎代码放在这里。新子系统应在各自的 `src/<module>/`
+// 目录下落地。
 
 namespace Orange::Engine
 {

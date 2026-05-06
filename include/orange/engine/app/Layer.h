@@ -2,28 +2,25 @@
 #define ORANGE_ENGINE_APP_LAYER_H
 
 // ---------------------------------------------------------------------------
-// Layer: the single extension point through which game-side and tool-side
-// code injects logic into the engine main loop. AppHost owns a LayerStack;
-// each frame it walks the stack, dispatching events top-down and update
-// bottom-up.
+// Layer —— 游戏侧 / 工具侧把逻辑挂进引擎主循环的唯一扩展点。AppHost 拥
+// 有一个 LayerStack；每帧由它依序遍历整个 stack：事件自上而下分发，更
+// 新自下而上调用。
 //
-// Lifecycle:
-//   OnAttach          — called once when the layer enters the stack
-//   OnUpdate(frame)   — called every frame; layers should not block here
-//   OnEvent(event)    — called for every platform event; return true to
-//                       stop propagation to lower-priority layers
-//   OnDetach          — called once when the layer leaves the stack
+// 生命周期：
+//   OnAttach          —— Layer 进入 stack 时调用一次
+//   OnUpdate(frame)   —— 每帧调用；Layer 不应在这里阻塞
+//   OnEvent(event)    —— 每个平台事件都会调用；返回 true 表示已消费、
+//                       不再向更低优先级的 Layer 传递
+//   OnDetach          —— Layer 离开 stack 时调用一次
 //
-// Layers are non-copyable, non-movable. Stable identity matters because
-// LayerStack::Pop takes the raw pointer that PushLayer returned, and
-// because layers may register callbacks elsewhere keyed on `this`.
+// Layer 不可拷贝、不可移动。稳定的对象身份很重要，因为 LayerStack::Pop
+// 接收的是 PushLayer 当时返回的裸指针，而且 Layer 自身可能在外部以
+// `this` 为 key 注册了回调。
 //
-// Event propagation:
-//   Returning `true` from OnEvent means "I handled this event, do not
-//   forward it". Returning `false` (the default) lets the LayerStack
-//   continue dispatching downward. This matches the spec's invariant
-//   that overlays sit *above* layers and may consume events before
-//   layers see them.
+// 事件传播：
+//   OnEvent 返回 `true` 表示 "我已经处理了这个事件，不要继续转发"；
+//   返回 `false`（默认）则让 LayerStack 继续往下分发。这与 "overlay
+//   永远处在 layer 之上、可以在 layer 看到事件之前先消费" 的契约一致。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>

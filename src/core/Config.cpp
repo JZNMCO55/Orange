@@ -1,11 +1,8 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 05 — Core::Config implementation
+// Core::Config 实现
 //
-// Config wraps a JsonReader internally — the reader already handles the
-// slashed-path traversal and missing-key fallback semantics, so Config
-// only needs to express the read-only public surface. ConfigLoader is the
-// construction funnel.
-// ---------------------------------------------------------------------------
+// Config 内部包了一个 JsonReader——slashed-path 寻址与 key 缺失时的
+// 回落语义都由 reader 处理好了，因此 Config 只需把"只读公共表面"暴
+// 露出来即可。ConfigLoader 是构造的唯一入口。
 
 #include "orange/engine/core/Config.h"
 

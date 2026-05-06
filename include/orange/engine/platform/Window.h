@@ -2,29 +2,24 @@
 #define ORANGE_ENGINE_PLATFORM_WINDOW_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 06 — Platform::Window
+// Platform::Window —— 一个薄的 GLFW wrapper。承担：
+//   * 拥有 OS window 的生命周期（create / destroy）；
+//   * 通过 PollEvents() 抽取平台事件；
+//   * 暴露 `ShouldClose()` 给主循环判断退出；
+//   * 把所有平台事件经一个 type-erased
+//     `EventCallback = std::function<void(const WindowEvent&)>` 转发出去。
 //
-// Thin GLFW wrapper. Responsibilities:
-//   * own the OS window lifetime (create / destroy);
-//   * pump platform events via PollEvents();
-//   * expose `ShouldClose()` so the main loop can break;
-//   * forward platform events to a single, type-erased
-//     `EventCallback = std::function<void(const WindowEvent&)>`.
+// 不属于本层的职责：
+//   * Presenting / swap-chain —— 由 OrangeRender 的 RHI 拥有；
+//   * Input 语义（action map、KeyCode 枚举）—— 留给后续 Input 模块；
+//   * Timing / fixed-step accumulation —— 由 Core::Time 负责。
 //
-// Explicitly NOT this layer's job:
-//   * presenting / swap-chain — owned by OrangeRender's RHI.
-//   * input semantics (action maps, KeyCode enum) — owned by the future
-//     Input module.
-//   * timing / fixed-step accumulation — owned by Core::Time.
-//
-// Header isolation guarantee:
-// * No GLFW types in any signature here. The native HWND is exposed only
-//   as `void*` via `GetNativeWindowHandle()` for the renderer to feed into
-//   its swap-chain factory.
-// * The Window itself is heap-pinned (move/copy deleted) so that GLFW's
-//   user-pointer slot can hold a stable `Window*` for callback dispatch.
-//   Consumers always own a `std::unique_ptr<Window>` and never relocate
-//   the underlying object.
+// 头隔离保证：
+// * 公共签名中不出现任何 GLFW 类型。原生 HWND 仅以 `void*` 形式
+//   通过 `GetNativeWindowHandle()` 暴露给渲染器构 swap-chain 用。
+// * Window 本身被 heap-pin（move/copy 都禁用），这样 GLFW 的 user-pointer
+//   slot 可以稳定地保存一个 `Window*` 用于回调分发。消费者一律持有
+//   `std::unique_ptr<Window>`，不会迁移底层对象。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -54,12 +49,10 @@ class ORANGE_ENGINE_API Window
 public:
     using EventCallback = std::function<void(const WindowEvent&)>;
 
-    // Forward declaration only — full definition lives in
-    // src/platform/glfw/Window.cpp and stays a private implementation
-    // detail. Promoted to `public` for one practical reason: the GLFW
-    // callback shims in that TU need to refer to `Window::Impl*` from
-    // file scope to dispatch events without going through the class.
-    // Holding a pointer to an opaque incomplete type is not a leak.
+    // 这里只前向声明；完整定义在 src/platform/glfw/Window.cpp 中，是
+    // 私有实现细节。之所以提到 `public`，是因为该 TU 中的 GLFW 回调
+    // shim 需要在文件作用域里引用 `Window::Impl*` 来分发事件，而不必
+    // 走类内方法。持有一个不完整类型的指针并不算泄漏。
     struct Impl;
 
     static Result<std::unique_ptr<Window>, ResultCode> Create(const WindowDesc& desc);
@@ -71,8 +64,8 @@ public:
 
     ~Window();
 
-    // Drains every platform event for every Window in the process.
-    // Maps directly to glfwPollEvents(); idempotent within a frame.
+    // 抽干进程内每一个 Window 上累积的平台事件。语义上等同
+    // glfwPollEvents()；同一帧内重复调用是幂等的。
     static void PollEvents() noexcept;
 
     bool ShouldClose() const noexcept;
@@ -82,17 +75,17 @@ public:
     std::uint32_t      GetHeight() const noexcept;
     const std::string& GetTitle() const noexcept;
 
-    // Framebuffer dimensions in pixels. Differs from GetWidth/Height on
-    // HiDPI displays; the renderer should size its swap-chain to this.
+    // 像素单位的 framebuffer 尺寸。HiDPI 显示器上和 GetWidth/Height
+    // 不一致；渲染器应按这个尺寸去开 swap-chain。
     void GetFramebufferSize(std::uint32_t& width, std::uint32_t& height) const noexcept;
 
     void SetTitle(std::string_view title);
     void SetEventCallback(EventCallback callback);
 
-    // Native handles for the renderer's surface factory.
-    // * `GetNativeWindowHandle()` returns HWND on Windows, cast to void*.
-    // * `GetNativeDisplayHandle()` is reserved for X11/Wayland; on Win32
-    //   it is always nullptr.
+    // 给渲染器 surface factory 用的 native handle。
+    // * `GetNativeWindowHandle()` 在 Windows 上返回 HWND 转 void*。
+    // * `GetNativeDisplayHandle()` 给 X11/Wayland 预留；Win32 上恒为
+    //   nullptr。
     void* GetNativeWindowHandle() const noexcept;
     void* GetNativeDisplayHandle() const noexcept;
 

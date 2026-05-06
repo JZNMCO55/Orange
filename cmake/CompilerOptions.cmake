@@ -1,7 +1,7 @@
-# Provides orange_engine_set_compiler_options(<target>) to apply project-wide
-# compiler warnings and language conformance flags. Mirrors the convention
-# established by OrangeRender's cmake/CompilerOptions.cmake (orange_set_*),
-# kept as a separate prefix so the two libraries can coexist in one build.
+# 提供 orange_engine_set_compiler_options(<target>)，用于给目标统一
+# 应用项目级编译警告与语言一致性 flag。命名沿用 OrangeRender 的
+# orange_set_* 习惯，但前缀分开（orange_engine_set_*），让两个库可以
+# 在同一个 build 里并存而不冲突。
 
 option(ORANGE_ENGINE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 

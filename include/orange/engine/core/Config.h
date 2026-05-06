@@ -2,18 +2,15 @@
 #define ORANGE_ENGINE_CORE_CONFIG_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 05 — Core::Config
+// Core::Config —— app 启动时从 JSON 加载、之后只读不可变的 key-value
+// snapshot。Key 是斜杠分隔的路径，与 JsonReader 的语法一致（如
+// "window/size/x"、"renderer/vsync"）。Key 缺失时的读取直接回落到调用方
+// 提供的默认值；Config 永远不抛异常、getter 也不返回错误——以"部分缺失
+// / 完全缺失 config 文件"启动是受支持的兜底路径。
 //
-// Read-only, immutable key-value snapshot loaded from a JSON file at app
-// boot. Keys are slash-separated paths matching JsonReader's syntax (e.g.
-// "window/size/x", "renderer/vsync"). Missing-key reads return the
-// caller-provided default; the Config never throws and never returns an
-// error from a getter — booting on a partial / absent config file is a
-// supported fallback path.
-//
-// `ConfigLoader` is the only construction surface. The Config itself
-// can't be mutated after load — modules that need runtime overrides do so
-// via their own settings / debug UI, not by reaching back into Config.
+// `ConfigLoader` 是唯一的构造入口。Config 一旦加载完成就不可修改——若
+// 模块需要运行时覆盖，应通过自身的 settings / debug UI 实现，不应
+// "回写" Config。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -64,9 +61,8 @@ private:
 class ORANGE_ENGINE_API ConfigLoader
 {
 public:
-    // Returns an empty Config — every getter falls back to the
-    // caller-provided default. Useful when no config file ships and
-    // every value comes from compile-time defaults.
+    // 返回一个空 Config——任何 getter 都会回落到调用方提供的默认值。
+    // 适用于不发布 config 文件、所有取值都来自编译期默认的场景。
     static Config Empty();
 
     static Result<Config, ParseError> LoadFromFile(std::string_view path);

@@ -2,25 +2,23 @@
 #define ORANGE_ENGINE_CORE_SERIALIZATION_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 05 — Core::Serialization
+// Core::Serialization —— 引擎自有数据所有读 / 写的唯一入口。
 //
-// Single chokepoint for every read/write of engine-owned data. Direct use
-// of `nlohmann::json` is forbidden outside this layer (see "Serialization
-// and reflection" guardrails in CLAUDE.md); modules go through these
-// readers/writers instead.
+// 在这一层之外直接使用 `nlohmann::json` 是被禁止的（详见 CLAUDE.md 中
+// "Serialization and reflection" 一节）；其他模块统一通过这里的 reader /
+// writer 来交互。
 //
-// Two formats, two reader/writer pairs:
-//   * JsonReader / JsonWriter   — text payloads (configs, schemas, tools).
-//   * BinaryReader / BinaryWriter — packed asset blobs (little-endian,
-//                                   byte-aligned, no padding leakage).
+// 两种格式，两组 reader / writer：
+//   * JsonReader / JsonWriter   —— 文本载荷（config、schema、tools）。
+//   * BinaryReader / BinaryWriter —— 紧凑 asset blob（little-endian、
+//                                     字节对齐、不带 padding 泄漏）。
 //
-// Path syntax for JSON access uses '/' as a separator (`window/size/x`).
-// Phase 1 does not support array indexing inside paths; arrays are read /
-// written via dedicated WriteIntArray / ReadIntArray helpers added on
-// demand by later phases.
+// JSON 路径语法用 '/' 作分隔符（如 `window/size/x`）。当前不支持在路径
+// 中做数组下标；数组的读 / 写走专用的 ReadFloatArray / WriteFloatArray
+// 之类辅助函数，按需在后续 phase 增加。
 //
-// All readers / writers PIMPL the nlohmann::json type so that
-// Serialization.h itself stays third-party-free in its public surface.
+// 所有 reader / writer 通过 PIMPL 隐藏 nlohmann::json 类型，保证
+// Serialization.h 自身的公共表面对第三方完全干净。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -43,8 +41,8 @@ namespace Orange::Engine
 struct ParseError
 {
     ResultCode  code{ResultCode::Unknown};
-    std::string path;     // dotted-or-slashed JSON path of the offending field
-    std::string message;  // human-readable, includes line/byte offset when available
+    std::string path;     // 出错字段在 JSON 中的点号 / 斜杠路径
+    std::string message;  // 人类可读，带行号 / 字节偏移（若可得）
 };
 
 // ---------------------------------------------------------------------------
@@ -66,27 +64,25 @@ public:
 
     bool Has(std::string_view path) const;
 
-    // Strict reads — return false when the key is missing OR the type is
-    // wrong. The output reference stays untouched on failure so callers
-    // who pre-seed with a default still hold that default.
+    // 严格读取——key 缺失或类型不对都返回 false。失败时不修改 out
+    // 引用，因此调用方预先填好的默认值仍然保留。
     bool ReadBool(std::string_view path, bool& out) const;
     bool ReadInt(std::string_view path, std::int64_t& out) const;
     bool ReadFloat(std::string_view path, double& out) const;
     bool ReadString(std::string_view path, std::string& out) const;
 
-    // Convenience defaults.
+    // 带默认值的便利接口。
     bool         GetBool(std::string_view path, bool defaultValue) const;
     std::int64_t GetInt(std::string_view path, std::int64_t defaultValue) const;
     double       GetFloat(std::string_view path, double defaultValue) const;
     std::string  GetString(std::string_view path, std::string defaultValue) const;
 
-    // Numeric arrays — kept compact for Vec2/Vec3/Vec4 / per-frame keys.
+    // 数值数组——为 Vec2/Vec3/Vec4 / 帧关键帧等紧凑场景设计。
     bool ReadFloatArray(std::string_view path, float* out, std::size_t count) const;
 
-    // Pulls a `{ "namespace": "...", "major": N, "minor": M }` triplet out
-    // of `path`. Returns InvalidArgument if the triplet is missing or
-    // malformed; caller still holds the responsibility for compatibility
-    // checking via SchemaVersion::CanRead.
+    // 从 `path` 处读取 `{ "namespace": "...", "major": N, "minor": M }`
+    // 三元组。缺失或格式错误返回 InvalidArgument；调用方仍需自行通过
+    // SchemaVersion::CanRead 做兼容性判断。
     Result<SchemaVersion, ResultCode> ReadSchemaVersion(std::string_view path) const;
 
 private:
@@ -125,11 +121,10 @@ private:
 // ---------------------------------------------------------------------------
 // Binary
 //
-// Engine binary format is fixed little-endian byte stream with no padding.
-// The `Read<T>` / `Write<T>` templates only accept trivially copyable
-// arithmetic / fixed-length POD; richer types must serialize themselves
-// field by field. This avoids accidentally bit-blitting struct padding /
-// pointers across the wire.
+// 引擎二进制格式固定为 little-endian、无 padding 的字节流。`Read<T>` /
+// `Write<T>` 模板只接受 trivially copyable 的算术类型 / 定长 POD；更
+// 丰富的类型必须自己逐字段序列化。这样能避免不小心把 struct padding /
+// 指针整段 memcpy 到磁盘上。
 // ---------------------------------------------------------------------------
 
 class ORANGE_ENGINE_API BinaryWriter
@@ -143,9 +138,9 @@ public:
     void Write(const T& value)
     {
         static_assert(std::is_trivially_copyable_v<T>,
-                      "BinaryWriter::Write<T>: T must be trivially copyable.");
+                      "BinaryWriter::Write<T>: T 必须是 trivially copyable。");
         static_assert(!std::is_pointer_v<T>,
-                      "BinaryWriter::Write<T>: refusing to serialize a raw pointer.");
+                      "BinaryWriter::Write<T>: 不允许序列化裸指针。");
         WriteBytes(&value, sizeof(T));
     }
 
@@ -174,9 +169,9 @@ public:
     bool Read(T& out) noexcept
     {
         static_assert(std::is_trivially_copyable_v<T>,
-                      "BinaryReader::Read<T>: T must be trivially copyable.");
+                      "BinaryReader::Read<T>: T 必须是 trivially copyable。");
         static_assert(!std::is_pointer_v<T>,
-                      "BinaryReader::Read<T>: refusing to deserialize a raw pointer.");
+                      "BinaryReader::Read<T>: 不允许反序列化裸指针。");
         return ReadBytes(&out, sizeof(T));
     }
 
@@ -190,13 +185,12 @@ private:
     std::size_t         mCursor{0};
 };
 
-// Compile-time assertion: the host must be little-endian. The wire format
-// is fixed little-endian; running on a big-endian host would require a
-// byte-swap shim that Phase 1 does not ship. (Windows / MSVC is x86_64
-// little-endian, so this is a tripwire for future ports rather than a
-// runtime check.)
+// 编译期断言：宿主必须是 little-endian。线缆格式固定 little-endian；
+// big-endian 宿主需要一个 byte-swap shim，目前不提供。Windows / MSVC
+// 是 x86_64 little-endian，所以这里更像是给未来移植预留的 tripwire，
+// 而非运行时检查。
 static_assert(static_cast<std::uint32_t>(0x01020304u) == 0x01020304u,
-              "OrangeEngine binary serialization assumes a little-endian host.");
+              "OrangeEngine 二进制序列化假设宿主是 little-endian。");
 
 }  // namespace Orange::Engine
 

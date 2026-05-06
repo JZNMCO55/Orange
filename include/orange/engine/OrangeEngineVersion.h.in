@@ -2,18 +2,16 @@
 #define ORANGE_ENGINE_ORANGE_ENGINE_VERSION_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 02 — version macros, generated from CMake.
+// 由 CMake 生成的版本宏。
 //
-// Configured by the top-level CMakeLists.txt at configure time; the canonical
-// source of truth is the `project(VERSION ...)` argument. Consumers that want
-// to gate code on a specific OrangeEngine release should #include this header
-// and check `ORANGE_ENGINE_VERSION`, which is a packed integer of the form
-// (major * 10000 + minor * 100 + patch) — easy to compare against numeric
-// literals such as `010203` for 1.2.3.
+// 由顶层 CMakeLists.txt 在 configure 时 configure_file 出来；唯一权威
+// 来源是 `project(VERSION ...)` 参数。需要按 OrangeEngine 版本做条件
+// 编译的消费者，应 include 本头并比较 `ORANGE_ENGINE_VERSION`——它
+// 是一个紧凑整数 (major * 10000 + minor * 100 + patch)，可直接和形如
+// `010203` 的数字面量比较（即 1.2.3）。
 //
-// String form is `ORANGE_ENGINE_VERSION_STRING` (e.g. "0.1.0"); the
-// individual fields are also exposed so SemVer-aware tooling does not need
-// to parse the string.
+// 字符串形式是 `ORANGE_ENGINE_VERSION_STRING`（如 "0.1.0"）；单独字段
+// 也对外暴露，避免有 SemVer 处理需求的工具去解析字符串。
 // ---------------------------------------------------------------------------
 
 #define ORANGE_ENGINE_VERSION_MAJOR @OrangeEngine_VERSION_MAJOR@

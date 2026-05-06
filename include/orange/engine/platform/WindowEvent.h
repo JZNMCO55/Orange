@@ -2,20 +2,17 @@
 #define ORANGE_ENGINE_PLATFORM_WINDOW_EVENT_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 06 — Platform::WindowEvent
+// Platform::WindowEvent —— 从 `Window` 回调流出的、不依赖任何第三方的
+// 唯一事件载体。variant 的备选项与 GLFW 在平台层暴露的事件面对齐；更
+// 高层语义（action mapping、key 名查询、按键 repeat 去重）属于未来的
+// Input 模块，本层刻意不做。
 //
-// `WindowEvent` is the single, third-party-free shape that flows out of
-// `Window`'s callback. The variant alternatives mirror the event surface
-// GLFW gives us at the platform layer; richer semantics (action mapping,
-// key-name lookup, repeat de-duplication) belong to a future Input module
-// task and are deliberately NOT done here.
-//
-// Notes on `key` / `rawButton`:
-// * Phase 1 passes through GLFW key codes / button indices verbatim. They
-//   are documented as "raw integer codes" — consumers that need symbolic
-//   `KeyCode::Escape` must wait for the Input module, which will own the
-//   translation table. The Window layer's job is plumbing, not semantics.
-// * Modifier bitmasks ARE passed through similarly (GLFW_MOD_* values).
+// 关于 `key` / `rawButton`：
+// * 当前直接透传 GLFW 的 key code / button 索引。文档上写明它们是
+//   "原始整数代码"——需要 `KeyCode::Escape` 这种符号化常量的消费者
+//   要等 Input 模块上线，那一层会拥有翻译表。Window 这一层只做管线，
+//   不做语义。
+// * 修饰键 mods 同样透传 GLFW 的位掩码（GLFW_MOD_*）。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -58,10 +55,10 @@ struct WindowFocusEvent
 
 struct KeyEvent
 {
-    std::int32_t key{0};       // raw GLFW key code (Input module wraps later)
+    std::int32_t key{0};       // GLFW 原始 key code（后续由 Input 模块包装）
     std::int32_t scancode{0};
     KeyAction    action{KeyAction::Press};
-    std::int32_t mods{0};      // raw GLFW mod bitmask (GLFW_MOD_*)
+    std::int32_t mods{0};      // GLFW 原始 mod 位掩码（GLFW_MOD_*）
 };
 
 struct CharEvent

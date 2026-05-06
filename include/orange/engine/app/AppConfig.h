@@ -2,14 +2,12 @@
 #define ORANGE_ENGINE_APP_APP_CONFIG_H
 
 // ---------------------------------------------------------------------------
-// AppConfig: the parameter object handed to AppHost::Create. Kept as a
-// plain aggregate so that callers can configure with designated
-// initializers and so that adding a field later does not break ABI for
-// existing call sites.
+// AppConfig —— 给 AppHost::Create 用的参数包。刻意保持为 plain
+// aggregate：调用方可以用 designated initializer 配置；后续添加字段
+// 也不会破坏既有调用点的 ABI。
 //
-// Phase scope: only the fields the engine actually consumes today are
-// declared. Fixed-step physics dt, profiler controls, and asset-search
-// roots will land alongside the modules that consume them.
+// 当前只声明引擎实际消费的字段。固定步长物理 dt、profiler 控制、
+// asset 搜索根目录等会随对应模块上线时再补，不在这里预先占位。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -22,10 +20,9 @@ struct AppConfig
 {
     Platform::WindowDesc window{};
 
-    // Cap presentation rate to the display refresh. Phase 1 has no
-    // alternative pacing mode, so this defaults true and is effectively
-    // descriptive; the renderer will honour it once the swap-chain wires
-    // through in Phase 2.
+    // 把呈现帧率限制在显示器刷新率上。当前没有别的 pacing 模式，所以
+    // 这个字段更像是描述性配置；待 swap-chain 在渲染器侧接通后会实际
+    // 生效。
     bool vsync{true};
 };
 

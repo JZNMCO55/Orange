@@ -2,19 +2,15 @@
 #define ORANGE_ENGINE_CORE_HASH_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::Hash
+// Core::Hash —— 编译期 FNV-1a (64-bit)，以及构筑其上的 StringId / Id。
 //
-// Compile-time FNV-1a (64-bit) and the StringId / Id wrappers built on top.
-//
-// Design notes:
-// * FNV-1a is chosen for its constexpr-friendliness, not collision strength.
-//   Collisions in 2^64 with engine-scale string sets are negligible; if a
-//   subsystem needs guaranteed uniqueness it must keep its own table.
-// * StringId stores ONLY the hash, never the original string. Debug-build
-//   symbol tables (Phase 6+) can be reintroduced as a separate facility
-//   without changing StringId's ABI.
-// * The user-defined literal `_sid` enables `"player.spawn"_sid` ergonomics
-//   while preserving constexpr evaluation.
+// 设计要点：
+// * 选 FNV-1a 是因为它对 constexpr 友好，并不为了 collision strength。
+//   2^64 hash 空间下，引擎规模的字符串集合发生碰撞的概率可以忽略；某子
+//   系统若需要可证唯一，应自己维护查找表。
+// * StringId 只存 hash，不保留原始字符串。Debug build 下的符号表
+//   （后续 phase）可以作为独立机制叠加，不会影响 StringId 的 ABI。
+// * 用户字面量 `_sid` 让 `"player.spawn"_sid` 写法保持 constexpr 求值。
 // ---------------------------------------------------------------------------
 
 #include <cstddef>

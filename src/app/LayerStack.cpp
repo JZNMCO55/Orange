@@ -13,8 +13,8 @@ LayerStack::LayerStack() = default;
 
 LayerStack::~LayerStack()
 {
-    // Tear layers down in reverse insertion order so that overlays detach
-    // before the regular layers they were stacked on top of.
+    // 按反向插入顺序拆 layer：让 overlay 先 detach，再 detach 它们
+    // 叠在其上的普通 layer。
     while (!mLayers.empty())
     {
         LayerPtr last = std::move(mLayers.back());

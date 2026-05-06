@@ -1,62 +1,57 @@
-# Dependencies.cmake — Phase 1 / Task 03
+# Dependencies.cmake
 #
-# Single source of truth for resolving OrangeEngine's third-party packages
-# via `find_package`. Included by the top-level CMakeLists.txt; it must
-# leave behind a set of imported targets that are linked further down
-# (PUBLIC vs PRIVATE per docs/design-plan.md "Header isolation" rules).
+# OrangeEngine 第三方依赖通过 `find_package` 解析的唯一入口。被顶层
+# CMakeLists.txt include；执行完后会留下一组 imported target 给主
+# CMakeLists 的 `target_link_libraries` 使用（PUBLIC vs PRIVATE 策略
+# 见 docs/design-plan.md 中的 "Header isolation" 一节）。
 #
-# Layout policy
-# --------------
-# * `OrangeRender::orange_render`  → PUBLIC link (engine code links it; only
-#                                     `src/render/` may #include <orange/...>)
-# * `EnTT::EnTT`                   → PUBLIC link (ECS registry types appear
-#                                     in public engine API once Phase 2 / Task 03
-#                                     defines `Orange::Engine::World`)
-# * `glm::glm`                     → PUBLIC link (math types in public API,
-#                                     also pulled in via OrangeRender)
-# * `nlohmann_json::nlohmann_json` → PRIVATE link (Core::Serialization wraps
-#                                     it; public headers must not expose
-#                                     nlohmann::json types)
-# * `box2d::box2d`                 → PRIVATE link (allowed only in
-#                                     src/physics/box2d/)
-# * `imgui::imgui`                 → PRIVATE link (editor / overlay only)
-# * `stb` headers                  → PRIVATE include (header-only)
-# * `miniaudio.h`                  → PRIVATE include (header-only;
-#                                     allowed only in src/audio/miniaudio/)
-# * `dragonBones`                  → PRIVATE link (allowed only in
-#                                     src/animation/dragonbones/)
+# 链接策略
+# --------
+# * `OrangeRender::orange_render`  → PUBLIC（引擎代码链接它；只有
+#                                     `src/render/` 允许 #include
+#                                     <orange/...>）
+# * `EnTT::EnTT`                   → PUBLIC（World 在公共 API 暴露
+#                                     EnTT 类型）
+# * `glm::glm`                     → PUBLIC（数学类型出现在公共 API，
+#                                     OrangeRender 也会传递性带过来）
+# * `nlohmann_json::nlohmann_json` → PRIVATE（Core::Serialization 包
+#                                     裹它；公共头不允许暴露
+#                                     nlohmann::json 类型）
+# * `box2d::box2d`                 → PRIVATE（仅允许出现在
+#                                     src/physics/box2d/）
+# * `imgui::imgui`                 → PRIVATE（编辑器 / overlay 用）
+# * `stb` 头                       → PRIVATE include（header-only）
+# * `miniaudio.h`                  → PRIVATE include（header-only；只
+#                                     允许出现在 src/audio/miniaudio/）
+# * `dragonBones`                  → PRIVATE（仅允许出现在
+#                                     src/animation/dragonbones/）
 #
-# Required-vs-soft policy (Phase 1 / Task 03 starting position)
-# -------------------------------------------------------------
-# To keep the bootstrap surface minimal as Phase 1 walks tasks one by one,
-# packages are searched with REQUIRED only when the engine *currently*
-# consumes them. Soft (QUIET) packages get a status line but do not block
-# configure when not installed — each subsequent task that introduces
-# consumption is responsible for bumping its dep from QUIET to REQUIRED
-# in this file.
+# REQUIRED vs soft（QUIET）策略
+# -----------------------------
+# 为了让骨架阶段的 bootstrap 表面尽量小，引擎当前真正消费哪个包，那
+# 个包就以 REQUIRED 搜索；尚未消费的包以 QUIET 搜索——找到就给一行
+# 状态信息，找不到也不阻塞 configure。某个包从 soft 升 REQUIRED，由
+# 真正开始消费它的那次改动负责在本文件里改掉。
 #
-# REQUIRED today (Phase 1 / Task 06):  OrangeRender, glm, nlohmann_json,
-#                                      glfw3
-# QUIET-deferred:                      EnTT (-> Phase 2 / Task 04)
-#                                      box2d (-> Phase 4 / Task 06)
-#                                      imgui (-> Phase 6)
-#                                      stb / miniaudio / DragonBones
-#                                          (in-tree headers; not searched
-#                                           with find_package)
+# 当前 REQUIRED：    OrangeRender、glm、nlohmann_json、glfw3
+# 当前 QUIET：       EnTT（待 ECS World 上线时升 REQUIRED）
+#                    box2d（待物理模块上线）
+#                    imgui（待编辑器 / overlay 上线）
+#                    stb / miniaudio / DragonBones（in-tree 头，
+#                        不参与 find_package）
 #
-# Optional gates: spdlog (ORANGE_ENGINE_WITH_SPDLOG, default OFF until
-# Core::Log lands at Phase 1 / Task 04), tracy (ORANGE_ENGINE_WITH_TRACY,
-# default OFF).
+# 可选开关：spdlog（ORANGE_ENGINE_WITH_SPDLOG，默认 OFF）、tracy
+# （ORANGE_ENGINE_WITH_TRACY，默认 OFF）。
 
 include_guard(GLOBAL)
 
 # ---------------------------------------------------------------------------
-# Required: OrangeRender (consumed by Phase 1 / Task 02)
+# Required：OrangeRender
 # ---------------------------------------------------------------------------
 find_package(OrangeRender 0.1 CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Required: glm (re-affirmed; comes transitively from OrangeRender too)
+# Required：glm（OrangeRender 也会传递性带；这里再次显式声明）
 # ---------------------------------------------------------------------------
 find_package(glm CONFIG REQUIRED)
 set(ORANGE_ENGINE_GLM_TARGET "")
@@ -66,36 +61,36 @@ elseif (TARGET glm::glm-header-only)
     set(ORANGE_ENGINE_GLM_TARGET glm::glm-header-only)
 else ()
     message(FATAL_ERROR
-        "glm: neither glm::glm nor glm::glm-header-only is defined after find_package.")
+        "glm: find_package 之后既没有 glm::glm，也没有 glm::glm-header-only target。")
 endif ()
 
 # ---------------------------------------------------------------------------
-# Soft: EnTT (becomes REQUIRED at Phase 2 / Task 04)
+# Soft：EnTT
 # ---------------------------------------------------------------------------
 find_package(EnTT CONFIG QUIET)
 
 # ---------------------------------------------------------------------------
-# Required: nlohmann_json (Phase 1 / Task 05 — Core::Serialization)
+# Required：nlohmann_json（Core::Serialization 使用）
 # ---------------------------------------------------------------------------
 find_package(nlohmann_json 3 CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Required: glfw3 (Phase 1 / Task 06 — Platform::Window)
+# Required：glfw3（Platform::Window 的 GLFW backend 使用）
 #
-# Today this target is also imported transitively by OrangeRender, so the
-# explicit find_package is technically redundant. We declare it anyway:
-# OrangeRender plans to privatise its glfw link interface (vendor/.../
-# OrangeRenderConfig.cmake notes "Task 13-04 will privatise glfw / volk /
-# VMA"), at which point the engine still needs its own resolution since
-# `src/platform/glfw/Window.cpp` consumes <GLFW/glfw3.h> directly.
+# 当前这个 target 也会通过 OrangeRender 传递性导入，所以本文件里的
+# find_package 在严格意义上算冗余。仍然显式声明的原因：OrangeRender
+# 计划把 glfw / volk / VMA 等设为 PRIVATE 链接（参见 vendor 仓库的
+# OrangeRenderConfig.cmake 里的备注）。一旦那次切换发生，引擎仍需自
+# 己解析 glfw3，因为 `src/platform/glfw/Window.cpp` 直接 include 了
+# <GLFW/glfw3.h>。
 # ---------------------------------------------------------------------------
 find_package(glfw3 CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Optional gates
+# 可选开关
 # ---------------------------------------------------------------------------
-# Default OFF for both. spdlog flips ON once Phase 1 / Task 04 (Core::Log)
-# starts depending on it; tracy is opt-in for performance work.
+# 二者均默认 OFF。spdlog 在 Core::Log 真正切到它时改默认；tracy 用于
+# 性能分析，按需打开。
 option(ORANGE_ENGINE_WITH_SPDLOG "Link spdlog as the Core::Log backend" OFF)
 option(ORANGE_ENGINE_WITH_TRACY  "Link Tracy as the profiler backend" OFF)
 
@@ -108,38 +103,38 @@ if (ORANGE_ENGINE_WITH_TRACY)
 endif ()
 
 # ---------------------------------------------------------------------------
-# Soft (deferred): box2d / imgui
+# Soft（延后）：box2d / imgui
 # ---------------------------------------------------------------------------
 find_package(box2d CONFIG QUIET)
 find_package(imgui CONFIG QUIET)
 
-# stb / miniaudio / DragonBones are consumed as in-tree headers/sources;
-# they have no CMake config to find. The bootstrap script copies them to
-# `${ORANGE_ENGINE_3RDPARTY_PREFIX}/include/` and the consuming source
-# adds the include path locally.
+# stb / miniaudio / DragonBones 以 in-tree 头 / 源码方式消费，没有可
+# 以 find_package 的 config。bootstrap 脚本会把它们拷到
+# `${ORANGE_ENGINE_3RDPARTY_PREFIX}/include/`，消费它们的源码自行加
+# 本地 include 路径。
 
 # ---------------------------------------------------------------------------
-# Diagnostic summary
+# 状态摘要
 # ---------------------------------------------------------------------------
 message(STATUS "OrangeEngine dependencies:")
 message(STATUS "  OrangeRender    : found (${OrangeRender_DIR})")
 message(STATUS "  glm target      : ${ORANGE_ENGINE_GLM_TARGET}")
 if (TARGET EnTT::EnTT)
-    message(STATUS "  EnTT            : found (used from Phase 2 / Task 04)")
+    message(STATUS "  EnTT            : found")
 else ()
-    message(STATUS "  EnTT            : not installed (becomes REQUIRED at Phase 2 / Task 04)")
+    message(STATUS "  EnTT            : not installed (deferred soft dep)")
 endif ()
-message(STATUS "  nlohmann_json   : found (Core::Serialization, Task 05)")
-message(STATUS "  glfw3           : found (Platform::Window, Task 06)")
+message(STATUS "  nlohmann_json   : found")
+message(STATUS "  glfw3           : found")
 message(STATUS "  spdlog gate     : ${ORANGE_ENGINE_WITH_SPDLOG}")
 message(STATUS "  tracy gate      : ${ORANGE_ENGINE_WITH_TRACY}")
 if (TARGET box2d::box2d)
-    message(STATUS "  box2d           : found (used from Phase 4 / Task 06)")
+    message(STATUS "  box2d           : found")
 else ()
-    message(STATUS "  box2d           : not installed (becomes REQUIRED at Phase 4 / Task 06)")
+    message(STATUS "  box2d           : not installed (deferred soft dep)")
 endif ()
 if (TARGET imgui::imgui)
-    message(STATUS "  imgui           : found (used from Phase 6)")
+    message(STATUS "  imgui           : found")
 else ()
-    message(STATUS "  imgui           : not installed (becomes REQUIRED at Phase 6)")
+    message(STATUS "  imgui           : not installed (deferred soft dep)")
 endif ()

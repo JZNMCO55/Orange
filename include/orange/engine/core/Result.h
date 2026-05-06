@@ -2,17 +2,15 @@
 #define ORANGE_ENGINE_CORE_RESULT_H
 
 // ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::Result
+// Core::Result —— 通用的成功 / 错误返回类型。
 //
-// Discriminated success/error return type. Used by every fallible engine API
-// (asset load, schema validation, physics fixture replacement, ...). The
-// design choice is intentionally minimal: no monadic chaining helpers in
-// Phase 1, no exception interop. Callers branch on `IsOk()` / `IsErr()`.
+// 所有可能失败的引擎 API（asset load、schema 校验、physics fixture 替换……）
+// 统一通过 Result<T, E> 返回。设计刻意保持极简：不提供 monadic chaining，
+// 也不和 C++ exception 互通。调用方一律以 IsOk() / IsErr() 分支判断。
 //
-// `ResultCode` is the canonical engine-wide error enum. Modules MAY define
-// their own richer `E` types, but `ResultCode` is the default — keep new
-// codes coarse-grained; granular diagnostics belong in attached log lines,
-// not in the enum.
+// ResultCode 是引擎默认错误枚举。模块如有需要可以定义自己的更丰富的 E
+// 类型；但 ResultCode 应保持 coarse-grained——细粒度诊断信息走日志，
+// 不要塞进枚举里。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -53,7 +51,7 @@ public:
     using ErrorType = E;
 
     static_assert(!std::is_same_v<T, E>,
-                  "Result<T, E>: T and E must be distinct types so the variant can disambiguate.");
+                  "Result<T, E>: T 与 E 必须是不同类型，否则 variant 无法消歧。");
 
     constexpr Result(const T& value) : mStorage(std::in_place_index<0>, value) {}
     constexpr Result(T&& value) : mStorage(std::in_place_index<0>, std::move(value)) {}

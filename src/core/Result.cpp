@@ -1,10 +1,8 @@
-// ---------------------------------------------------------------------------
-// Phase 1 / Task 04 — Core::Result implementation
+// Core::Result 实现
 //
-// Only out-of-line piece is `ToString(ResultCode)`. Kept in its own TU so
-// subsequent error-code additions are a single-file edit and so consumers
-// of Result.h don't pull in a string table at every include site.
-// ---------------------------------------------------------------------------
+// 唯一脱内联到这里的部分是 `ToString(ResultCode)`。单独放一个 TU 是为
+// 了：之后新增错误码时只动这一个文件；并且让 Result.h 的消费者每次
+// include 时不必牵扯字符串表。
 
 #include "orange/engine/core/Result.h"
 

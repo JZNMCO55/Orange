@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
 
 # ---------------------------------------------------------------------------
-# Phase 1 / Task 02 — single source of truth for the OrangeEngine semantic
-# version. Bump here when cutting a release; the generated
-# `OrangeEngineVersion.h` (see `configure_file` below) carries the same
-# numbers into C++ code as integer + string macros, and Phase 1 / Task 11's
-# `OrangeEngineConfigVersion.cmake` will read them back via the standard
-# `${PROJECT_VERSION}` variables CMake derives from this declaration.
+# OrangeEngine 语义版本号的唯一权威来源。发版时改这里；下面
+# `configure_file` 生成的 `OrangeEngineVersion.h` 会把同一组数字带到
+# C++ 端（整型 + 字符串宏），后续的 `OrangeEngineConfigVersion.cmake`
+# 也通过 CMake 自动派生的 `${PROJECT_VERSION}` 变量回读这里的值。
 # ---------------------------------------------------------------------------
 project(OrangeEngine VERSION 0.1.0 LANGUAGES CXX)
 
@@ -15,62 +13,61 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
-# Unified output directories
+# 统一的输出目录
 # ---------------------------------------------------------------------------
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # ---------------------------------------------------------------------------
-# Compiler options
+# 编译选项
 # ---------------------------------------------------------------------------
 include(cmake/CompilerOptions.cmake)
 
 # ---------------------------------------------------------------------------
-# Dependencies
+# 依赖
 #
-# Phase 1 / Task 03 — all third-party `find_package` calls live in
-# `cmake/Dependencies.cmake`; the same file documents PUBLIC vs PRIVATE
-# linkage and is the single source of truth for what the engine consumes.
+# 所有第三方 `find_package` 调用都集中在 `cmake/Dependencies.cmake`；
+# 该文件同时记录 PUBLIC / PRIVATE 链接策略，是引擎依赖关系的唯一权
+# 威来源。
 # ---------------------------------------------------------------------------
 include(cmake/Dependencies.cmake)
 
 # ---------------------------------------------------------------------------
-# OrangeEngine static library
+# OrangeEngine 静态库
 # ---------------------------------------------------------------------------
 add_library(orange_engine STATIC
     src/EngineStub.cpp
 
-    # Phase 1 / Task 04 — Core
+    # Core
     src/core/CoreHeaderCheck.cpp
     src/core/Log.cpp
     src/core/Result.cpp
 
-    # Phase 1 / Task 05 — Core::Serialization + Config
+    # Core：Serialization + Config
     src/core/Config.cpp
     src/core/SchemaVersion.cpp
     src/core/Serialization.cpp
 
-    # Phase 1 / Task 06 — Platform::Window (GLFW backend)
+    # Platform：Window（GLFW backend）
     src/platform/PlatformHeaderCheck.cpp
     src/platform/glfw/Window.cpp
 
-    # App — Layer / LayerStack / FrameContext / AppConfig
+    # App：Layer / LayerStack / FrameContext / AppConfig
     src/app/AppHeaderCheck.cpp
     src/app/Layer.cpp
     src/app/LayerStack.cpp
 )
 
 # ---------------------------------------------------------------------------
-# Phase 1 / Task 02 — generate `orange/engine/OrangeEngineVersion.h`.
+# 生成 `orange/engine/OrangeEngineVersion.h`。
 #
-# Lives in the build tree under `${CMAKE_BINARY_DIR}/generated/orange/engine/`
-# so the source tree stays clean (the .in template is the only versioned
-# file). The generated directory is added as a PUBLIC include path so
-# consumers of orange_engine — samples, tests, and downstream find_package
-# users — see the header at the same `<orange/engine/...>` path as
-# everything else, and we add `@ONLY` to prevent CMake from interpreting
-# any unrelated `${...}` substitutions inside the template body.
+# 输出落在 build tree 的 `${CMAKE_BINARY_DIR}/generated/orange/engine/`，
+# 让源码树保持干净（仓库里只保留 .in 模板）。生成目录以 PUBLIC 形式
+# 加进 include 路径，使 orange_engine 的下游（samples、tests、安装
+# 后通过 find_package 接入的工程）看到的版本头与其他公共头一样位于
+# `<orange/engine/...>` 下。`@ONLY` 用来阻止 CMake 把模板里无关的
+# `${...}` 当作变量替换。
 # ---------------------------------------------------------------------------
 set(ORANGE_ENGINE_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
 configure_file(
@@ -80,26 +77,22 @@ configure_file(
 )
 
 # ---------------------------------------------------------------------------
-# Phase 1 / Task 02 — `ORANGE_ENGINE_API` visibility macro.
+# `ORANGE_ENGINE_API` 可见性宏
 #
-# `generate_export_header` writes a header that defines `ORANGE_ENGINE_API`
-# as:
-#   - empty whenever `ORANGE_ENGINE_STATIC_DEFINE` is set (static-build path),
-#   - `__declspec(dllexport)` when CMake's auto-defined
-#     `orange_engine_EXPORTS` is in effect (compiling orange_engine itself
-#     as a SHARED library), and
-#   - `__declspec(dllimport)` otherwise (consumers of a SHARED build).
+# `generate_export_header` 写出的头会把 `ORANGE_ENGINE_API` 定义为：
+#   - 当 `ORANGE_ENGINE_STATIC_DEFINE` 被定义时为空（静态库 build）；
+#   - 当 CMake 自动注入的 `orange_engine_EXPORTS` 起作用时为
+#     `__declspec(dllexport)`（即 SHARED 编译 orange_engine 自身）；
+#   - 其它情况下为 `__declspec(dllimport)`（消费 SHARED build 的下游）。
 #
-# Today `BUILD_SHARED_LIBS` defaults to OFF and `add_library(... STATIC ...)`
-# is hard-coded above, so the macro stays empty everywhere — no ABI cost,
-# no consumer-visible change. The point is to seed every public class with
-# the macro slot now, so flipping to a SHARED build later is a one-line
-# CMake change rather than a per-header sweep.
+# 当前 `BUILD_SHARED_LIBS` 默认 OFF、上面 `add_library` 直接写死
+# STATIC，所以宏处处展开为空——对 ABI 没影响、对消费者也无感。这样
+# 做的目的是先把宏槽位铺到所有公共类上，将来切到 SHARED build 只需
+# 改 CMake 一行，不用再翻所有头文件。
 #
-# `STATIC_DEFINE` is propagated PUBLIC and via `INSTALL_INTERFACE` so
-# consumers of an installed static SDK see the macro as empty too — without
-# this, a consumer compiling against an installed static-built orange_engine
-# would default to `dllimport` and trip linker errors.
+# `STATIC_DEFINE` 通过 PUBLIC 与 `INSTALL_INTERFACE` 同时传播：让安
+# 装后消费 static SDK 的下游也看到同样为空的宏；否则下游会默认走
+# `dllimport` 然后链接出错。
 # ---------------------------------------------------------------------------
 include(GenerateExportHeader)
 generate_export_header(orange_engine
@@ -113,11 +106,11 @@ target_compile_definitions(orange_engine PUBLIC
 )
 
 # ---------------------------------------------------------------------------
-# Include paths
+# Include 路径
 #
-# `include/` is the public surface; `src/` is private. `${ORANGE_ENGINE_GENERATED_INCLUDE_DIR}`
-# ships with PUBLIC visibility so consumers see the generated version /
-# export headers under `<orange/engine/...>`.
+# `include/` 是公共表面；`src/` 是私有实现。
+# `${ORANGE_ENGINE_GENERATED_INCLUDE_DIR}` 以 PUBLIC 暴露，让下游也
+# 能在 `<orange/engine/...>` 下看到生成出来的版本头与 export 头。
 # ---------------------------------------------------------------------------
 target_include_directories(orange_engine
     PUBLIC
@@ -129,19 +122,17 @@ target_include_directories(orange_engine
 )
 
 # ---------------------------------------------------------------------------
-# Linkage
+# 链接策略
 #
-# PUBLIC vs PRIVATE policy is documented in cmake/Dependencies.cmake. The
-# rules in brief:
-#   * OrangeRender / EnTT / glm appear in public engine API surface, so
-#     they are linked PUBLIC and consumers inherit them.
-#   * nlohmann_json wraps Core::Serialization and must NOT leak through
-#     the public headers — PRIVATE linkage.
-#   * spdlog (optional) is wrapped by Core::Log; PUBLIC propagation lets
-#     consumers reuse the same logger instance if they want, mirroring
-#     OrangeRender's policy.
-#   * Box2D / DragonBones / miniaudio / ImGui / stb stay PRIVATE — see
-#     越界禁令 in docs/extension-points.md.
+# PUBLIC vs PRIVATE 详细策略写在 cmake/Dependencies.cmake。简述：
+#   * OrangeRender / EnTT / glm 出现在公共 API 表面，PUBLIC 链接，
+#     消费者继承；
+#   * nlohmann_json 仅在 Core::Serialization 内部使用，必须不漏到公
+#     共头——PRIVATE 链接；
+#   * spdlog（可选）由 Core::Log 包裹；PUBLIC 传播让消费者愿意的话
+#     可以复用同一个 logger 实例，与 OrangeRender 的策略对齐；
+#   * Box2D / DragonBones / miniaudio / ImGui / stb 一律 PRIVATE——
+#     越界禁令见 docs/extension-points.md。
 # ---------------------------------------------------------------------------
 target_link_libraries(orange_engine
     PUBLIC
@@ -149,21 +140,20 @@ target_link_libraries(orange_engine
         ${ORANGE_ENGINE_GLM_TARGET}
 )
 
-# Soft / deferred deps — link only when their imported targets actually
-# exist. Phase 2 / Task 04 will bump EnTT to a hard requirement (and remove
-# this conditional); Phase 1 / Task 05 will do the same for nlohmann_json.
+# Soft / 延后依赖——只有 imported target 实际存在时才链。EnTT 在 ECS
+# World 落地时会在 Dependencies.cmake 里升 REQUIRED，到时再删除这里
+# 的条件分支。
 if (TARGET EnTT::EnTT)
     target_link_libraries(orange_engine PUBLIC EnTT::EnTT)
 endif ()
 
-# Phase 1 / Task 05 — nlohmann_json is REQUIRED via Dependencies.cmake; the
-# target is guaranteed to exist here. Linkage is PRIVATE so the type does
-# not leak through OrangeEngine's public headers.
+# nlohmann_json 在 Dependencies.cmake 里以 REQUIRED 解析，target 必然
+# 存在。链接为 PRIVATE，避免类型从公共头泄漏出去。
 target_link_libraries(orange_engine PRIVATE nlohmann_json::nlohmann_json)
 
-# Phase 1 / Task 06 — glfw3 wraps the Win32 window/input pump. PRIVATE so
-# the GLFWwindow* type never escapes OrangeEngine's public headers; the
-# `Platform::Window` API exposes only opaque void* native handles.
+# glfw3 包裹 Win32 的 window / input 抽取。PRIVATE，让 GLFWwindow*
+# 不要逃出 OrangeEngine 的公共头；`Platform::Window` 对外只暴露
+# opaque void* native handle。
 target_link_libraries(orange_engine PRIVATE glfw)
 
 if (ORANGE_ENGINE_WITH_SPDLOG)
@@ -178,41 +168,38 @@ endif ()
 
 orange_engine_set_compiler_options(orange_engine)
 
-# Namespaced alias so consumers in the same build tree (samples, tests) link
-# `OrangeEngine::orange_engine` — matches the post-install
-# `find_package(OrangeEngine)` interface and prevents accidental drift.
+# 命名空间别名，让在同一个 build tree 内的 samples / tests 直接链
+# `OrangeEngine::orange_engine`——和安装后通过 find_package(OrangeEngine)
+# 看到的目标一致，避免接口偷偷漂移。
 add_library(OrangeEngine::orange_engine ALIAS orange_engine)
 
 # ---------------------------------------------------------------------------
-# Install rules
+# 安装规则
 #
-# Phase 1 / Task 02 declares the option only; Task 11 fills in the
-# `install(TARGETS ...)` / `OrangeEngineConfig.cmake` machinery. Defaulting
-# ON at the top level + OFF when consumed via `add_subdirectory()` matches
-# OrangeRender's policy.
+# 此处先声明 option；真正的 `install(TARGETS ...)` /
+# `OrangeEngineConfig.cmake` 由后续步骤补齐。顶层 build 默认 ON，作为
+# `add_subdirectory()` 嵌入时默认 OFF——和 OrangeRender 的策略一致。
 # ---------------------------------------------------------------------------
 option(ORANGE_ENGINE_INSTALL "Generate install rules for OrangeEngine" "${PROJECT_IS_TOP_LEVEL}")
 
 # ---------------------------------------------------------------------------
-# Tests
+# 测试
 #
-# Default OFF: a downstream consumer of OrangeEngine does not need the
-# in-tree unit / smoke tests; gating them keeps the consumer's build clean
-# and skips test compile cost. Flip ON when iterating on the engine itself.
-# Tests directory is a stub today; populated starting at Phase 1 / Task 10.
+# 默认 OFF：作为下游 SDK 被消费时，引擎自身的 unit / smoke test 没
+# 有理由跟着 build。引擎自己迭代时打开它即可。tests 目录目前只是
+# stub，待测试入口落地后再 add_subdirectory。
 # ---------------------------------------------------------------------------
 option(ORANGE_ENGINE_BUILD_TESTS "Build OrangeEngine unit / smoke tests" OFF)
 
 if (ORANGE_ENGINE_BUILD_TESTS)
     enable_testing()
-    # add_subdirectory(tests)  # Activated at Task 10
+    # add_subdirectory(tests)  # 待测试入口任务激活
 endif ()
 
 # ---------------------------------------------------------------------------
 # Samples
 #
-# Sample sub-projects are added module by module; the first one
-# (`samples/01_minimal_window`) lands at Phase 1 / Task 09. Until then the
-# directory exists but holds only a .gitkeep, so we do not add it.
+# Sample 子工程随各阶段里程碑逐个加入。等 minimal-window sample 落
+# 地后再 add_subdirectory；当前目录只放 .gitkeep。
 # ---------------------------------------------------------------------------
-# add_subdirectory(samples)  # Activated at Task 09
+# add_subdirectory(samples)  # 待 minimal-window sample 激活
