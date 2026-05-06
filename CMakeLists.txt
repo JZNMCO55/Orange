@@ -128,10 +128,10 @@ function(orange_engine_compile_builtin_shader src_relative out_var)
 endfunction()
 
 orange_engine_compile_builtin_shader(
-    "src/render/builtin_shaders/minimal_mesh.vert.glsl"
+    "src/render/builtin_shaders/textured_mesh.vert.glsl"
     ORANGE_ENGINE_BUILTIN_VS_SPV)
 orange_engine_compile_builtin_shader(
-    "src/render/builtin_shaders/minimal_mesh.frag.glsl"
+    "src/render/builtin_shaders/textured_mesh.frag.glsl"
     ORANGE_ENGINE_BUILTIN_FS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL

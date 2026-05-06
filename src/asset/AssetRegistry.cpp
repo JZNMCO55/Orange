@@ -232,6 +232,79 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
     return ResultCode::Ok;
 }
 
+ResultCode AssetRegistry::InsertErased(const std::type_info& type,
+                                       std::string_view path,
+                                       void* assetRaw,
+                                       AssetDeleter assetDeleter,
+                                       std::uint64_t& outHandle)
+{
+    outHandle = 0;
+    if (assetRaw == nullptr || assetDeleter == nullptr)
+    {
+        if (assetRaw && assetDeleter)
+        {
+            assetDeleter(assetRaw);
+        }
+        return ResultCode::InvalidArgument;
+    }
+
+    const std::type_index key{type};
+    auto& table = mpImpl->tables[key];
+
+    // 同 T 的 deleter 必然一致；多次 Insert 重复设 deleter 等于幂等
+    // 覆盖。设 deleter 让 Registry 析构时能正确释放该 type 的资源。
+    table.assetDeleter = assetDeleter;
+
+    const std::string pathKey{path};
+
+    // 已存在 path：先释放旧资源，复用其 slot；保持 handle 稳定。
+    if (auto cacheIt = table.pathToHandle.find(pathKey);
+        cacheIt != table.pathToHandle.end())
+    {
+        const std::uint64_t cached = cacheIt->second;
+        const std::size_t idx = static_cast<std::size_t>(cached - 1);
+        if (idx < table.slots.size() && table.slots[idx].live)
+        {
+            auto& slot = table.slots[idx];
+            if (slot.asset)
+            {
+                assetDeleter(slot.asset);
+            }
+            slot.asset = assetRaw;
+            // path 不变；live 保持 true。
+            outHandle = cached;
+            return ResultCode::Ok;
+        }
+        table.pathToHandle.erase(cacheIt);
+    }
+
+    std::uint64_t slotIndex = 0;
+    if (!table.freeList.empty())
+    {
+        slotIndex = table.freeList.back();
+        table.freeList.pop_back();
+        auto& slot = table.slots[static_cast<std::size_t>(slotIndex)];
+        slot.path  = pathKey;
+        slot.asset = assetRaw;
+        slot.live  = true;
+    }
+    else
+    {
+        slotIndex = static_cast<std::uint64_t>(table.slots.size());
+        AssetSlot slot{};
+        slot.path  = pathKey;
+        slot.asset = assetRaw;
+        slot.live  = true;
+        table.slots.emplace_back(std::move(slot));
+    }
+
+    const std::uint64_t handleValue = slotIndex + 1;
+    table.pathToHandle.emplace(pathKey, handleValue);
+    outHandle = handleValue;
+    ++mpImpl->liveAssets;
+    return ResultCode::Ok;
+}
+
 const void* AssetRegistry::GetErased(const std::type_info& type,
                                      std::uint64_t handleValue) const noexcept
 {

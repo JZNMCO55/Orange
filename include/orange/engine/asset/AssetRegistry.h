@@ -96,6 +96,34 @@ public:
         return AssetHandle<T>{handleValue};
     }
 
+    // 把一个已经在内存里的 T 直接登记到 registry。语义：
+    //   * `path` 仅作为身份键参与 dedup —— 不要求文件真存在；
+    //   * 已存在 path 时旧 entry 被替换、handle 沿用旧值；
+    //   * 不需要事先 RegisterLoader<T>——deleter 由 Insert 自带传入。
+    //
+    // 适用场景：sample / 工具流水线 / 编辑器需要把"程序式构造"的资
+    // 源直接挂到 registry 上，而无需先把它写到磁盘 .orme / .ortx 再
+    // Load 一次。
+    template <typename T>
+    Result<AssetHandle<T>, ResultCode> Insert(std::string_view path, std::unique_ptr<T> asset)
+    {
+        if (!asset)
+        {
+            return ResultCode::InvalidArgument;
+        }
+        T* released = asset.release();
+        std::uint64_t handleValue = 0;
+        ResultCode rc = InsertErased(
+            typeid(T), path, released,
+            [](void* p) noexcept { delete static_cast<T*>(p); },
+            handleValue);
+        if (rc != ResultCode::Ok)
+        {
+            return rc;
+        }
+        return AssetHandle<T>{handleValue};
+    }
+
     // 通过 handle 取只读资源。无效 / 已卸载 handle 返回 nullptr，绝
     // 不抛。返回值的生存期由 Registry 保证：直至 Unload 或 Registry
     // 析构。
@@ -141,6 +169,12 @@ private:
     ResultCode LoadErased(const std::type_info& type,
                           std::string_view path,
                           std::uint64_t& outHandle);
+
+    ResultCode InsertErased(const std::type_info& type,
+                            std::string_view path,
+                            void* assetRaw,
+                            AssetDeleter assetDeleter,
+                            std::uint64_t& outHandle);
 
     const void* GetErased(const std::type_info& type,
                           std::uint64_t handleValue) const noexcept;

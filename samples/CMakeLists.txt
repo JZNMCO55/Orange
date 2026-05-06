@@ -3,3 +3,4 @@
 
 add_subdirectory(01_minimal_window)
 add_subdirectory(02_ecs_basics)
+add_subdirectory(03_textured_quad)

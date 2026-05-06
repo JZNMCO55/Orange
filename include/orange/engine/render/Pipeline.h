@@ -28,6 +28,11 @@ namespace Orange::Engine
 class World;
 }
 
+namespace Orange::Engine::Asset
+{
+class AssetRegistry;
+}
+
 namespace Orange::Engine::Platform
 {
 class Window;
@@ -49,10 +54,14 @@ public:
     Pipeline& operator=(Pipeline&&) noexcept;
 
     // 在指定 window 上初始化 OrangeRender 渲染栈：RenderDevice、
-    // Renderer（双缓冲 in-flight）、内置 GraphicsPipeline、minimal-
-    // mesh shader。重复 Initialize 返回 AlreadyInitialized。`window`
-    // 的生存期必须长于 Pipeline。
-    Result<void, ResultCode> Initialize(::Orange::Engine::Platform::Window& window);
+    // Renderer（双缓冲 in-flight）、内置 GraphicsPipeline、textured-
+    // mesh shader、UploadContext（mesh 顶点 / 索引上传用）。
+    //
+    // `assets` 用于在 Render() 时按 AssetHandle 反查 MeshAsset 的
+    // CPU 数据；其生存期必须长于 Pipeline 的活跃期。重复 Initialize
+    // 返回 AlreadyInitialized。`window` 的生存期同样必须长于 Pipeline。
+    Result<void, ResultCode> Initialize(::Orange::Engine::Platform::Window&        window,
+                                        ::Orange::Engine::Asset::AssetRegistry&    assets);
 
     // 释放 OrangeRender 资源。在调用 Window 析构之前必须调用——
     // RenderDevice 会先 WaitIdle 再释放 swap-chain 上挂的资源。

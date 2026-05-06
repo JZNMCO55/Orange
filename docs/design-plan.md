@@ -1242,6 +1242,39 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：sample 可被 build + 运行；输出符合上述断点；现有 9/9 ctest 不受影响。
 - Critical Path：否（本 sample 是教学材料，Phase 2 milestone 不依赖它本身可视化）
 
+#### Task 09：完成 `samples/03_textured_quad`（带贴图四边形） ✅
+- 描述：Phase 2 milestone 的视觉验证节点——把 ECS → AssetRegistry → Pipeline → OrangeRender 的完整数据流串到位，让一个 quad mesh 真上屏。
+- 输入：Phase 2 / Task 07（Pipeline 已通 OrangeRender 帧生命周期）+ Task 08（前置 sample 验证 ECS API）
+- 输出：
+  - `Modified: include/orange/engine/asset/MeshAsset.h`（加可选 UV 字段，三参数构造重载，HasUVs() 查询；不破 MeshLoader v1 binary 格式）
+  - `Modified: include/orange/engine/asset/AssetRegistry.h` + `src/asset/AssetRegistry.cpp`（加 `Insert<T>` / `InsertErased`，允许把已构造好的 unique_ptr<T> 直接注册——sample 程序式生成 mesh 时省掉"先写 .orme 再 Load"的中间步）
+  - `Modified: include/orange/engine/platform/Window.h` + `src/platform/glfw/Window.cpp`（加 `GetGlfwWindowHandle()` 返回 GLFWwindow* 透成 void*；公共头继续不依赖 GLFW 类型）
+  - `Proposed: src/render/builtin_shaders/textured_mesh.vert.glsl`（pos+uv vertex layout + push-constant MVP）
+  - `Proposed: src/render/builtin_shaders/textured_mesh.frag.glsl`（uv 程序式合成 8×8 棋盘 + uv 渐变 tint，作为"贴图存在"的视觉证据）
+  - `Removed: src/render/builtin_shaders/minimal_mesh.{vert,frag}.glsl`（被 textured_mesh 取代）
+  - `Modified: include/orange/engine/render/Pipeline.h`（Initialize 接 `(Window&, AssetRegistry&)`）
+  - `Modified: src/render/Pipeline.cpp`（重写：UploadContext + mesh GPU 缓存 + push-constant MVP + 真正按 RenderScene::Drawables() 驱动 SubmitItem；shader 路径改为 .exe-相对解析，避免 CWD ≠ exe 目录时 LoadSpirv 失败）
+  - `Modified: CMakeLists.txt`（编译 textured_mesh shader 取代 minimal_mesh）
+  - `Proposed: samples/03_textured_quad/main.cpp` + `CMakeLists.txt`
+  - `Modified: samples/CMakeLists.txt`
+- 影响路径/模块：Asset、Platform、Render、Samples、构建系统
+- 前置依赖：Task 07、Task 08
+- 实现要点：
+  - **范围决策**：当前 OrangeRender 的 RHI 还没暴露 sampler / descriptor-set 路径——它自己的 `textured_mesh` sample 也走"fragment shader 从 uv 程序式合成 checker 当贴图"的同思路。本 task 沿用这个思路：vertex layout、UV、push-constant MVP、drawable-driven 渲染全部走真实路径；只把"采样真 TextureAsset"那一段延后到 OrangeRender RHI 升级。
+  - **MeshAsset UV 字段是内存路径专属**：MeshLoader v1 binary 格式不变（pos + indices）；UV 仅存在于"程序式 / `Insert` 路径"上。后续要把 UV 写入 .orme 时升 schema_version + 加 attribute mask 即可，不破公共 API。
+  - **`AssetRegistry::Insert` 不依赖 RegisterLoader**：deleter 由 Insert 自己传入，让 sample / 工具流不必为程序式生成的资源再走"注册一个 dummy loader"的圈。同 path 重复 Insert 等于幂等覆盖（释放旧 asset、handle 沿用）。
+  - **`Window::GetGlfwWindowHandle()`**：OrangeRender 的 `RendererDesc::mpNativeWindowHandle` 期望 `GLFWwindow*`（注释写明），不是 HWND——之前 Task 07 的实现误传 HWND 导致 03_textured_quad 第一次跑直接段错误。修：加一个新方法专门透 GLFW handle，原 `GetNativeWindowHandle()` 仍返回 HWND 给将来需要 D3D 路径的消费者。
+  - **shader 路径用 .exe-相对解析**：用 `GetModuleFileNameW` 拿到 .exe 自身目录、再拼 `shaders/orange_engine/...spv`。跑 sample 的 CWD 不一定与 .exe 目录重合（从 repo 根直接 `build/bin/Debug/...exe` 跑就不重合），exe-相对路径把 SPIR-V 加载稳稳锚定。
+  - **mesh GPU cache**：`unordered_map<u64 handleValue, MeshGpu>`，首次见到某 mesh handle 时通过 `Resource::UploadContext::UploadBuffer` 把 interleaved 顶点 + uint32 索引推 GPU；后续帧命中缓存直接重用。MeshGpu 持有 `unique_ptr<RHIBuffer>` 两个，Pipeline::Shutdown 在 WaitIdle 之后 clear 整张表完成回收。
+  - **Sample 用 `AssetRegistry::Insert` 程序式造 quad**：4 顶点 (pos+uv) + 6 索引，覆盖 ortho [-1,1]² 中央。RenderLayer 在 OnUpdate 里调 Pipeline.Render；Pipeline.Shutdown() 必须早于 host 析构（Window 还活时释放渲染资源）。
+- 验证方式：
+  1. cmake build 通过——shader 编出 SPIR-V、orange_engine 链通、消费者 `find_package` (config_smoke) 不退化。
+  2. ctest 9/9 通过——核心 + asset + scene + render + install/config smoke 全绿。
+  3. 跑 03_textured_quad.exe，截屏：窗口正中显示橙 + 深蓝 8×8 棋盘 + 一点 uv 渐变 tint，背景为 swap-chain 清色（黑）；这是 ECS（quad entity + camera）→ RenderScene → Pipeline → OrangeRender RenderGraph → swap-chain 整条数据流的真实视觉证据。
+  4. 关闭窗口 → exit code 0：Pipeline.Shutdown 与 OrangeRender 资源反向释放路径正确。
+- 验收标准：上述 4 条全部成立。Phase 2 milestone（"屏幕显示一个由 ECS 实体驱动的带贴图 mesh"）的"由 ECS 驱动 + mesh 上屏"两半已经成立；剩"真贴图 sampler 化"等 OrangeRender RHI 路径打通后再补一刀。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口

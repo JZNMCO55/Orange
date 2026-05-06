@@ -83,11 +83,17 @@ public:
     void SetEventCallback(EventCallback callback);
 
     // 给渲染器 surface factory 用的 native handle。
-    // * `GetNativeWindowHandle()` 在 Windows 上返回 HWND 转 void*。
+    // * `GetNativeWindowHandle()` 在 Windows 上返回 HWND 转 void*——
+    //   Win32 原生路径，Direct3D / 第三方 D3D 拓扑要的是它。
     // * `GetNativeDisplayHandle()` 给 X11/Wayland 预留；Win32 上恒为
     //   nullptr。
+    // * `GetGlfwWindowHandle()` 把底层 `GLFWwindow*` 以 void* 透出去。
+    //   OrangeRender / 任何用 GLFW 帮忙建 Vulkan surface 的消费者要
+    //   的是这个。返回 void* 是刻意为之的类型擦除——公共头不暴露
+    //   GLFW 类型，调用方自己 reinterpret 回 `GLFWwindow*`。
     void* GetNativeWindowHandle() const noexcept;
     void* GetNativeDisplayHandle() const noexcept;
+    void* GetGlfwWindowHandle() const noexcept;
 
 private:
     Window();

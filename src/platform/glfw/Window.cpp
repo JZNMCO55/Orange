@@ -315,4 +315,12 @@ void* Window::GetNativeDisplayHandle() const noexcept
     return nullptr;  // Win32 平台没有独立的 display handle
 }
 
+void* Window::GetGlfwWindowHandle() const noexcept
+{
+    // GLFWwindow* 透成 void*，让公共头继续不依赖 GLFW 类型。消费者
+    // 自行 reinterpret_cast 回 `GLFWwindow*` 使用（典型路径：把它喂
+    // 给 OrangeRender 的 RendererDesc::mpNativeWindowHandle）。
+    return mpImpl->pHandle;
+}
+
 }  // namespace Orange::Engine::Platform
