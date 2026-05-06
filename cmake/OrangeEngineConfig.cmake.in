@@ -15,18 +15,14 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(OrangeRender 0.1 CONFIG)
 find_dependency(glm CONFIG)
+find_dependency(EnTT 3.13 CONFIG)
 find_dependency(nlohmann_json 3 CONFIG)
 find_dependency(glfw3 CONFIG)
 
-# 可选依赖：是否需要由 build 时的实际 link 接口决定，避免消费者侧
-# 强制要求一个引擎根本没用到的 dep。两个 flag 由顶层 CMakeLists.txt
-# 在 configure_package_config_file 之前根据当时的 build 状态填写。
-set(_ORANGE_ENGINE_NEEDS_ENTT   "@ORANGE_ENGINE_PUBLIC_HAS_ENTT@")
+# spdlog 仍是可选——是否在 link 接口里出现取决于 build 时的 gate；
+# 由顶层 CMakeLists.txt 在 configure_package_config_file 之前根据当
+# 时状态填写。
 set(_ORANGE_ENGINE_NEEDS_SPDLOG "@ORANGE_ENGINE_PUBLIC_HAS_SPDLOG@")
-
-if (_ORANGE_ENGINE_NEEDS_ENTT)
-    find_dependency(EnTT CONFIG)
-endif ()
 if (_ORANGE_ENGINE_NEEDS_SPDLOG)
     find_dependency(spdlog CONFIG)
 endif ()

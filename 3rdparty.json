@@ -38,6 +38,10 @@
             "name": "EnTT",
             "type": "library",
             "url": "https://github.com/skypjack/entt.git",
+            "version": "v3.13.2",
+            "cmake_extra": [
+                "-DENTT_INSTALL=ON"
+            ],
             "linkage": "PUBLIC",
             "purpose": "ECS registry. Component types appear in public engine API because the game registers its own components."
         },

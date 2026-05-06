@@ -152,14 +152,8 @@ target_link_libraries(orange_engine
     PUBLIC
         OrangeRender::orange_render
         ${ORANGE_ENGINE_GLM_TARGET}
+        EnTT::EnTT
 )
-
-# Soft / 延后依赖——只有 imported target 实际存在时才链。EnTT 在 ECS
-# World 落地时会在 Dependencies.cmake 里升 REQUIRED，到时再删除这里
-# 的条件分支。
-if (TARGET EnTT::EnTT)
-    target_link_libraries(orange_engine PUBLIC EnTT::EnTT)
-endif ()
 
 # nlohmann_json 在 Dependencies.cmake 里以 REQUIRED 解析，target 必然
 # 存在。链接为 PRIVATE，避免类型从公共头泄漏出去。
@@ -272,16 +266,11 @@ if (ORANGE_ENGINE_INSTALL)
     # 接受 0.1.x，但拒绝 0.2.x——pre-1.0 阶段 minor bump 仍允许 ABI 变
     # 动，这一档兼容性最稳妥。
     #
-    # 把 EnTT / spdlog 这两个可选依赖的"是否实际进入 link 接口"作为
-    # 模板变量写到生成的 OrangeEngineConfig.cmake 里：消费者只在引
-    # 擎确实链入时才被要求 find_dependency 它们，避免因 soft dep 缺
-    # 失误伤所有消费者。
+    # spdlog 这个可选依赖的"是否实际进入 link 接口"作为模板变量写到
+    # 生成的 OrangeEngineConfig.cmake 里：消费者只在引擎确实链入时
+    # 才被要求 find_dependency，避免因 soft dep 缺失误伤所有消费者。
+    # EnTT 已经在 Dependencies.cmake 升为 REQUIRED，无需开关。
     # -----------------------------------------------------------------------
-    if (TARGET EnTT::EnTT)
-        set(ORANGE_ENGINE_PUBLIC_HAS_ENTT TRUE)
-    else ()
-        set(ORANGE_ENGINE_PUBLIC_HAS_ENTT FALSE)
-    endif ()
     set(ORANGE_ENGINE_PUBLIC_HAS_SPDLOG ${ORANGE_ENGINE_WITH_SPDLOG})
 
     include(CMakePackageConfigHelpers)

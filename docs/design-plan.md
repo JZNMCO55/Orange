@@ -1049,7 +1049,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - Task 01：定义 `Asset` 公共接口（AssetHandle / AssetRegistry / IAssetLoader）
 - Task 02：实现 Mesh / Texture / Shader 三个内置 loader（同步加载 + 简单缓存）
 - Task 03：定义 Scene 公共接口（World / Entity / ISystem / Transform / Hierarchy）
-- Task 04：实现 EnTT 包装（World 的 PIMPL 后端）
+- Task 04：实现 EnTT 包装（World 的后端）
 - Task 05：定义 Render 模块公共接口（Camera / RenderableComponent / Pipeline）
 - Task 06：实现 RenderScene 收集（World → drawable list）
 - Task 07：实现最小 Pipeline（接通 OrangeRender RenderGraph，绘制单个 mesh）
@@ -1128,6 +1128,32 @@ Removed: Src/                              (整目录，src/ 替换)
   - `World` 当前内部用最小 sparse-set（vector<generation> + vector<bool> alive + freeIndices）实现实体生命周期；Task 04 引入 EnTT 时整体替换 Impl。
 - 验证方式：`SceneHeaderCheck.cpp` 在隔离环境下能 include 五个公共头并通过编译；`orange_engine` 静态库链通；现有 6 个 ctest case 不受影响。
 - 验收标准：Scene 模块的公共表面就绪；Render 模块（Task 05+）可以把 World 当作 drawable 来源；EnTT 接通可纯实现路径推进。
+- Critical Path：是
+
+#### Task 04：实现 EnTT 包装（World 的后端） ✅
+- 描述：把 EnTT 从 soft dep 升 REQUIRED；用 entt::registry 替换 Task 03 的临时 sparse-set；接通 World 的组件 CRUD 模板路径；提供 entt::registry 的逃生舱口供 Render / Physics / 序列化层使用。
+- 输入：Phase 2 / Task 03（Scene 公共接口骨架）
+- 输出：
+  - `Modified: 3rdparty.json`（EnTT 加 version `v3.13.2` 与 `cmake_extra: ["-DENTT_INSTALL=ON"]`）
+  - `Proposed: scripts/fetch_and_build_3rdparty.py`（JSON 驱动的依赖拉取 + 构建 + 安装脚本，与 OrangeRender 同一思路但表从 `3rdparty.json` 读）
+  - `Modified: cmake/Dependencies.cmake`（EnTT 升 REQUIRED）
+  - `Modified: CMakeLists.txt`（EnTT 无条件 PUBLIC 链接；移除 Task 03 时的 `if(TARGET EnTT::EnTT)` 条件块）
+  - `Modified: cmake/OrangeEngineConfig.cmake.in`（`find_dependency(EnTT 3.13 CONFIG)` 无条件加入；删除 `_ORANGE_ENGINE_NEEDS_ENTT` gate）
+  - `Modified: include/orange/engine/scene/World.h`（公共 API 暴露 `entt::registry&`；模板 CRUD inline body 走 entt::registry 接口；`ToEntt` / `FromEntt` 静态转换）
+  - `Modified: src/scene/World.cpp`（替换为 entt::registry 后端；保留 `mLiveCount` 手动计数维持 `Size()` 精确）
+  - `Modified: tests/CMakeLists.txt` + `tests/install/config_smoke.cmake`（forward `EnTT_DIR` 给消费者）
+  - `Proposed: tests/scene/SceneWorldTest.cpp`（生命周期 + 组件 CRUD + Hierarchy 链 + entt::registry view）
+- 影响路径/模块：Scene、构建系统、tests
+- 前置依赖：Task 03
+- 实现要点：
+  - **EnTT 升 REQUIRED**：`3rdparty.json` 加 `version` / `cmake_extra` 字段；新增 `scripts/fetch_and_build_3rdparty.py`，可被 `python scripts/fetch_and_build_3rdparty.py --only EnTT` 一键安装到 `D:/3rdparty/install`。脚本走 git clone + cmake configure / build / install，不引入 vcpkg。
+  - **entt::registry 暴露公共**：与 3rdparty.json 中"EnTT linkage = PUBLIC"对齐——游戏侧要能 emplace 自己的 component 类型，必须能 #include `<entt/entt.hpp>`。原本计划的 PIMPL 在保持等同 EnTT 零开销的前提下做不到，且 0.x 阶段不承诺 ABI 稳定，PIMPL 的成本不值得。
+  - **`ToEntt` / `FromEntt`**：Entity 内部用 64-bit 数值，把 entt::entity 的位模式直接放低 32 位（高 32 位留 0），不解读 entt 内部的 index/version 拆分。
+  - **`AddComponent` 用 `emplace_or_replace`**：让"对同一实体重复 add"成为幂等覆盖语义，而不是 EnTT 默认 `emplace` 的 "已存在则 abort"——更符合 Phase 1 工程化中的容错风格。
+  - **`Size()` 手动计数**：v3.13 的 `storage<entt::entity>` 迭代会把 tombstone 也吐出来，`free_list()` 又是返回实体而非计数；不如在 World 自己的 Create / Destroy 路径上 ±1 一个 `mLiveCount`。代价：通过 `Registry()` 逃生舱口直接 create/destroy 会绕开本计数——这点在 World.h 的注释里写明白。
+  - **config_smoke 转发 `EnTT_DIR`**：消费者侧的 `find_dependency(EnTT)` 需要被告知 cmake config 路径；和 OrangeRender_DIR / glm_DIR / nlohmann_json_DIR / glfw3_DIR 同模式追加一行。
+- 验证方式：`tests/scene/SceneWorldTest.cpp` 通过 ctest，覆盖 5 条路径：实体 CRUD、组件 CRUD、Destroy 联带卸载组件、Hierarchy 双向链常见操作（O(1) 摘除中间节点）、`Registry()` 逃生舱口跑 EnTT view。`config_smoke` 复测确认从零消费者侧 find_package(OrangeEngine) → find_dependency(EnTT) 链路完整。
+- 验收标准：7/7 ctest 全过；World 可被任何模块当作组件存储 + view 入口使用；EnTT 在 Dependencies.cmake / Config.cmake.in / 顶层 CMakeLists.txt 三处一致表达为 REQUIRED PUBLIC。
 - Critical Path：是
 
 ### Phase 3：Ori 视觉基线

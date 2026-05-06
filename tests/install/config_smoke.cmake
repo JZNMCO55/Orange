@@ -80,6 +80,7 @@ set(_consumer_args
 foreach (_pair IN ITEMS
         "OrangeRender_DIR=${ORANGE_ENGINE_ORANGERENDER_DIR}"
         "glm_DIR=${ORANGE_ENGINE_GLM_DIR}"
+        "EnTT_DIR=${ORANGE_ENGINE_ENTT_DIR}"
         "nlohmann_json_DIR=${ORANGE_ENGINE_NLOHMANN_JSON_DIR}"
         "glfw3_DIR=${ORANGE_ENGINE_GLFW3_DIR}"
         "Vulkan_INCLUDE_DIR=${ORANGE_ENGINE_VULKAN_INCLUDE_DIR}"

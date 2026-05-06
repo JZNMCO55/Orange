@@ -22,6 +22,7 @@ orange_engine_add_test(core_result_test         core/ResultTest.cpp)
 orange_engine_add_test(core_handle_test         core/HandleTest.cpp)
 orange_engine_add_test(core_serialization_test  core/SerializationTest.cpp)
 orange_engine_add_test(asset_registry_test      asset/AssetRegistryTest.cpp)
+orange_engine_add_test(scene_world_test         scene/SceneWorldTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
@@ -56,6 +57,7 @@ if (ORANGE_ENGINE_INSTALL)
             "-DORANGE_ENGINE_PARENT_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
             "-DORANGE_ENGINE_ORANGERENDER_DIR=${OrangeRender_DIR}"
             "-DORANGE_ENGINE_GLM_DIR=${glm_DIR}"
+            "-DORANGE_ENGINE_ENTT_DIR=${EnTT_DIR}"
             "-DORANGE_ENGINE_NLOHMANN_JSON_DIR=${nlohmann_json_DIR}"
             "-DORANGE_ENGINE_GLFW3_DIR=${glfw3_DIR}"
             "-DORANGE_ENGINE_VULKAN_INCLUDE_DIR=${Vulkan_INCLUDE_DIR}"

@@ -33,9 +33,8 @@
 # 状态信息，找不到也不阻塞 configure。某个包从 soft 升 REQUIRED，由
 # 真正开始消费它的那次改动负责在本文件里改掉。
 #
-# 当前 REQUIRED：    OrangeRender、glm、nlohmann_json、glfw3
-# 当前 QUIET：       EnTT（待 ECS World 上线时升 REQUIRED）
-#                    box2d（待物理模块上线）
+# 当前 REQUIRED：    OrangeRender、glm、nlohmann_json、glfw3、EnTT
+# 当前 QUIET：       box2d（待物理模块上线）
 #                    imgui（待编辑器 / overlay 上线）
 #                    stb / miniaudio / DragonBones（in-tree 头，
 #                        不参与 find_package）
@@ -65,9 +64,9 @@ else ()
 endif ()
 
 # ---------------------------------------------------------------------------
-# Soft：EnTT
+# Required：EnTT（ECS registry，World 公共 API 暴露 entt::registry）
 # ---------------------------------------------------------------------------
-find_package(EnTT CONFIG QUIET)
+find_package(EnTT 3.13 CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Required：nlohmann_json（Core::Serialization 使用）
@@ -119,11 +118,7 @@ find_package(imgui CONFIG QUIET)
 message(STATUS "OrangeEngine dependencies:")
 message(STATUS "  OrangeRender    : found (${OrangeRender_DIR})")
 message(STATUS "  glm target      : ${ORANGE_ENGINE_GLM_TARGET}")
-if (TARGET EnTT::EnTT)
-    message(STATUS "  EnTT            : found")
-else ()
-    message(STATUS "  EnTT            : not installed (deferred soft dep)")
-endif ()
+message(STATUS "  EnTT            : found")
 message(STATUS "  nlohmann_json   : found")
 message(STATUS "  glfw3           : found")
 message(STATUS "  spdlog gate     : ${ORANGE_ENGINE_WITH_SPDLOG}")
