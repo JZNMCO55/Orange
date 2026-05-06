@@ -19,12 +19,18 @@
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
+#include <orange/engine/core/Result.h>
 
 #include <memory>
 
 namespace Orange::Engine
 {
 class World;
+}
+
+namespace Orange::Engine::Platform
+{
+class Window;
 }
 
 namespace Orange::Engine::Render
@@ -42,13 +48,29 @@ public:
     Pipeline(Pipeline&&) noexcept;
     Pipeline& operator=(Pipeline&&) noexcept;
 
+    // 在指定 window 上初始化 OrangeRender 渲染栈：RenderDevice、
+    // Renderer（双缓冲 in-flight）、内置 GraphicsPipeline、minimal-
+    // mesh shader。重复 Initialize 返回 AlreadyInitialized。`window`
+    // 的生存期必须长于 Pipeline。
+    Result<void, ResultCode> Initialize(::Orange::Engine::Platform::Window& window);
+
+    // 释放 OrangeRender 资源。在调用 Window 析构之前必须调用——
+    // RenderDevice 会先 WaitIdle 再释放 swap-chain 上挂的资源。
+    // 幂等：未初始化或重复调用都是 no-op。
+    void Shutdown();
+
+    bool IsInitialized() const noexcept;
+
     // 渲染一帧。Phase 2 当前阶段：
-    //   * Task 05 仅提供空 body 占位；
-    //   * Task 06 在内部实现 RenderScene 收集（World → drawable list）；
-    //   * Task 07 接 OrangeRender RenderGraph 下发实际绘制。
+    //   * Task 06 实现 RenderScene 收集（World → drawable list）；
+    //   * Task 07 接通 OrangeRender RenderGraph：每帧 BeginFrame +
+    //     提交一个内置 minimal-mesh draw（gl_VertexIndex 走的硬编码
+    //     triangle）+ EndFrame。drawable list 已收集，但当前内置
+    //     pipeline 不读其几何——后续 task 把 mesh upload 路径接进
+    //     来时再切到按 drawable 驱动。
     //
-    // 按约定：`world` 中应至少存在一个挂有 `Render::Camera` 组件的
-    // 实体；当前实现选第一个命中的相机作为本帧 view/projection 来源。
+    // 未 Initialize 时 Render 是 no-op；让"在 main loop 顶层无脑
+    // 调一发"成为受支持的退化状态。
     void Render(::Orange::Engine::World& world);
 
 private:

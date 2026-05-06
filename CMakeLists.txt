@@ -73,12 +73,74 @@ add_library(orange_engine STATIC
     src/scene/World.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
-    # + RenderScene 收集（World → drawable list；OrangeRender 接通
-    # 在后续 task）
+    # + RenderScene 收集（World → drawable list）+ Pipeline 接通
+    # OrangeRender RenderGraph
     src/render/RenderHeaderCheck.cpp
     src/render/Pipeline.cpp
     src/render/RenderScene.cpp
 )
+
+# ---------------------------------------------------------------------------
+# 内置 shader 编译
+#
+# 把 src/render/builtin_shaders/*.glsl 用 glslangValidator 编成 SPIR-V，
+# 落到 ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/orange_engine/。Pipeline
+# 在 Initialize 时按 "shaders/orange_engine/<name>.spv" 的相对路径加
+# 载——所有 sample / 测试可执行体（与 orange_engine 共用同一个 RUNTIME
+# 输出目录）从工作目录起就能找到。
+#
+# glslangValidator 由 LunarG Vulkan SDK 提供；找不到时直接 FATAL_ERROR——
+# Render 模块强依赖它，没有就连内置 pipeline 都构不出来。
+# ---------------------------------------------------------------------------
+find_program(ORANGE_ENGINE_GLSLANG_VALIDATOR
+    NAMES glslangValidator
+    HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin"
+)
+if (NOT ORANGE_ENGINE_GLSLANG_VALIDATOR)
+    message(FATAL_ERROR
+        "OrangeEngine: 没在 VULKAN_SDK 下找到 glslangValidator。"
+        "Render 模块需要它把内置 shader 编成 SPIR-V。请安装 LunarG "
+        "Vulkan SDK 并设置环境变量 VULKAN_SDK。")
+endif ()
+
+# 多配置生成器（VS / Xcode）会自动在 RUNTIME_OUTPUT_DIRECTORY 后附加
+# /Debug、/Release 等子目录；shader 落点要跟着 $<CONFIG>，否则
+# 运行时按 "shaders/orange_engine/*.spv" 相对 .exe 目录解析时会扑空。
+# 单配置生成器（Ninja / Make）下 $<CONFIG> 会展开为空，路径不变。
+set(ORANGE_ENGINE_BUILTIN_SHADER_OUTPUT_DIR
+    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/shaders/orange_engine")
+
+function(orange_engine_compile_builtin_shader src_relative out_var)
+    set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${src_relative}")
+    get_filename_component(_full_name "${src_relative}" NAME)
+    string(REGEX REPLACE "\\.glsl$" "" _stem "${_full_name}")          # minimal_mesh.vert.glsl → minimal_mesh.vert
+    set(_out "${ORANGE_ENGINE_BUILTIN_SHADER_OUTPUT_DIR}/${_stem}.spv")
+    add_custom_command(
+        OUTPUT  "${_out}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "${ORANGE_ENGINE_BUILTIN_SHADER_OUTPUT_DIR}"
+        COMMAND "${ORANGE_ENGINE_GLSLANG_VALIDATOR}" -V "${_src}" -o "${_out}"
+        DEPENDS "${_src}"
+        COMMENT "OrangeEngine: 编译内置 SPIR-V → ${_stem}.spv"
+        VERBATIM
+    )
+    set(${out_var} "${_out}" PARENT_SCOPE)
+endfunction()
+
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/minimal_mesh.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/minimal_mesh.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_FS_SPV)
+
+add_custom_target(orange_engine_builtin_shaders ALL
+    DEPENDS
+        "${ORANGE_ENGINE_BUILTIN_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_FS_SPV}")
+
+# 让 orange_engine 在 link 阶段保证 shaders 已经就位。
+add_dependencies(orange_engine orange_engine_builtin_shaders)
 
 # ---------------------------------------------------------------------------
 # 生成 `orange/engine/OrangeEngineVersion.h`。

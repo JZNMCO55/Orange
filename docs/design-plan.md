@@ -1200,6 +1200,31 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：9/9 ctest 全过；RenderScene 可被 Pipeline 在每帧顶部 Clear+Collect 用作 working buffer；Task 07 的实际下发逻辑只需读 RenderScene::MainCamera 与 RenderScene::Drawables。
 - Critical Path：是
 
+#### Task 07：实现最小 Pipeline（接通 OrangeRender RenderGraph，绘制单个 mesh） ✅
+- 描述：把 Pipeline 真正接到 OrangeRender——RenderDevice / Renderer / 内置 GraphicsPipeline / shader 模块 / 帧生命周期全部串起来；用 gl_VertexIndex 走的硬编码 triangle 作为"绘制单个 mesh"的最小可运行实现。drawable list 驱动的 mesh upload 在 Task 09 的 sample 真正需要可视化时一并接通。
+- 输入：Phase 2 / Task 06（RenderScene 收集就绪）
+- 输出：
+  - `Proposed: src/render/builtin_shaders/minimal_mesh.vert.glsl`（gl_VertexIndex 写出三角形）
+  - `Proposed: src/render/builtin_shaders/minimal_mesh.frag.glsl`（固定 OrangeEngine 主色输出）
+  - `Modified: include/orange/engine/render/Pipeline.h`（加 Initialize / Shutdown / IsInitialized；Render 改为可在未 initialize 时 no-op）
+  - `Modified: src/render/Pipeline.cpp`（Impl 持有 RenderDevice + Renderer + ShaderModule + GraphicsPipeline；Initialize 串完整链路；Render 走 BeginFrame + 硬编码 triangle SubmitItem + EndFrame；Shutdown 走 WaitIdle + reverse-order reset；析构调用 Shutdown 兜底）
+  - `Modified: CMakeLists.txt`（find_program glslangValidator + add_custom_command 编 GLSL → SPIR-V，落到 ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/shaders/orange_engine/；orange_engine 依赖 orange_engine_builtin_shaders 自定义 target）
+- 影响路径/模块：Render、构建系统
+- 前置依赖：Task 06
+- 实现要点：
+  - **范围决策**：spec 是"绘制单个 mesh"，但完整实现（mesh upload + push constant + 真正按 drawable list 驱动绘制）一次性 commit 风险高且没 sample 时无法视觉验证。本 task 折中——把 OrangeRender 完整链路 **真正接通**（RenderDevice + Renderer + GraphicsPipeline + frame lifecycle 都跑起来），用硬编码 triangle 走 gl_VertexIndex 作为"single mesh"的最小代表。drawable list 仍然 Clear+Collect 一遍但 pipeline 内部不读其几何——这一段在 Task 09（textured_quad sample）真正需要可视化时切到 mesh-asset-driven，配合 sample 实跑做视觉验证。
+  - **Shader 编译走 glslangValidator**：CMake `find_program` 锁 VULKAN_SDK 下的可执行文件，找不到 FATAL_ERROR——Render 模块强依赖它。`add_custom_command(OUTPUT ...)` 用 `$<CONFIG>` generator expression 让 .spv 落到与 .exe 同一 multi-config 子目录（`build/bin/Debug/shaders/orange_engine/`），运行时按 "shaders/orange_engine/<name>.spv" 相对工作目录解析；orange_engine target 通过 add_dependencies 强制 .spv 先于 link 阶段就绪。
+  - **Pipeline 析构兜底 Shutdown**：保证调用方忘记显式 Shutdown 时 OrangeRender 资源仍能按"WaitIdle → graphicsPipeline → shaders → renderer → renderDevice"的反向顺序释放，避免资源在 swap-chain 还活着时被销毁。
+  - **未 Initialize 时 Render 是 no-op**：让"在主循环顶层无脑调一发 Render"成为受支持的退化状态，与现行 minimal_window sample 共存。
+  - **Renderer 接 native window handle 用 Window::GetNativeWindowHandle**（HWND）：当前 OrangeRender 的 RendererDesc::mpNativeWindowHandle 是 `void*`，与 Platform::Window 暴露出的 HWND 兼容。两侧若在 OrangeRender 后续 phase 调整接口，会在 .cpp 内集中改。
+- 验证方式：
+  1. cmake build 通过——证明 SPIR-V 编译、orange_engine 链路、消费者 `find_package(OrangeEngine)` (config_smoke) 三层都没回归。
+  2. ctest 9/9（同 Task 06）——Pipeline 改动不破任何已有测试（Render 在未 init 时仍是 no-op 与 RenderInterfaceTest 的占位假设一致）。
+  3. light runtime smoke：`samples/01_minimal_window.exe` 跑起来 + `CloseMainWindow` 触发干净退出——证明 Pipeline 的额外 link 依赖（Renderer / RHI 符号、SPIR-V 加载路径）在启动 / 析构时都不挂。
+  4. **真正的视觉正确性验证延后到 Task 09 sample**——届时把 Pipeline.Initialize / Render / Shutdown 串进 sample，目视确认三角形上屏。
+- 验收标准：9/9 ctest 通过 + minimal_window 启动收尾干净 + 内置 SPIR-V 落到正确目录；Pipeline 公共表面已具备所有"启动 / 渲染 / 关闭"操作所需方法。视觉正确性的责任明确转移给 Task 09。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口
