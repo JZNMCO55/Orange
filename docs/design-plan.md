@@ -1179,6 +1179,27 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：8/8 ctest 全过；Render 模块的公共表面就绪——Pipeline 可被 sample / Layer / 任何调用方持有并 Render；具体绘制逻辑由 Task 06 / 07 在保持公共面不变的前提下填充。
 - Critical Path：是
 
+#### Task 06：实现 RenderScene 收集（World → drawable list） ✅
+- 描述：把 ECS 的"主相机 + 可见 Renderable"翻成扁平 drawable 列表；让 Task 07 的真实下发只关心 mesh / texture / world matrix，不再触碰 World / Component。
+- 输入：Phase 2 / Task 05（Render 公共接口骨架）
+- 输出：
+  - `Proposed: include/orange/engine/render/RenderScene.h`（Drawable POD + RenderScene 类；公共面无 entt 类型）
+  - `Proposed: src/render/RenderScene.cpp`（用 entt::view 扫两类组件、TRS 合成 world matrix）
+  - `Modified: src/render/Pipeline.cpp`（Impl 持有 RenderScene；Render(world) 走 Clear + Collect）
+  - `Modified: src/render/RenderHeaderCheck.cpp`（追加 RenderScene.h）
+  - `Proposed: tests/render/RenderSceneTest.cpp`
+- 影响路径/模块：Render、tests
+- 前置依赖：Task 05
+- 实现要点：
+  - **Camera 取首个**：用 `entt::view::front()` 显式拿首个挂 Camera 组件的实体；多相机 / 主相机选择留待引入 `ActiveCameraTag` marker component（不在本 task 范围）。
+  - **Drawable 收集**：`view<TransformComponent, RenderableComponent>()`；`visible=false` 在循环内 continue 过滤；只有 Transform 没 Renderable / 只有 Renderable 没 Transform 的实体不会出现在 drawable list（view 只命中两者皆有）。
+  - **TRS world matrix 合成**：`T * mat4_cast(R) * S`，列向量惯例对应 `worldVec = M * localVec`。Hierarchy 父子链的复合矩阵**不在本 task 范围**——Phase 2 sample 都是单层实体，flat=local 即可；引入复合 matrix 路径会同时拉进"depth-first 还是按拓扑序"、"是否缓存计算结果"等设计问题，留给 Phase 4 关卡复杂化时一并解决。
+  - **`Collect` 接受 `const World&` 但内部 const_cast 拿 mutable registry**：entt::view 的迭代需要 mutable registry 引用，但本实现保证只读；语义上对调用方仍是"World 不被修改"。
+  - **MSVC C4702 规避**：`for + break` 在 MSVC `/W4 /WX` 下偶发被误判为 unreachable；改用 `if (auto e = view.front(); e != entt::null)` 的早退分支更稳。
+- 验证方式：`tests/render/RenderSceneTest.cpp` 通过 ctest，覆盖 5 条路径：空 World 无相机无 drawable；仅 Camera 的 World（HasCamera + 0 drawable）；Camera+多种 Renderable（visible=false 与缺 Transform 都被滤掉）；TRS world matrix 关键元素（平移列 [3] + 缩放对角）；Clear+Recollect 不残留状态、不重复叠加 drawable。
+- 验收标准：9/9 ctest 全过；RenderScene 可被 Pipeline 在每帧顶部 Clear+Collect 用作 working buffer；Task 07 的实际下发逻辑只需读 RenderScene::MainCamera 与 RenderScene::Drawables。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口

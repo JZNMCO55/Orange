@@ -73,9 +73,11 @@ add_library(orange_engine STATIC
     src/scene/World.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
-    # （Pipeline 内部接 OrangeRender RenderGraph 在后续 task）
+    # + RenderScene 收集（World → drawable list；OrangeRender 接通
+    # 在后续 task）
     src/render/RenderHeaderCheck.cpp
     src/render/Pipeline.cpp
+    src/render/RenderScene.cpp
 )
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 
 #include "orange/engine/render/Camera.h"
 #include "orange/engine/render/Pipeline.h"
+#include "orange/engine/render/RenderScene.h"
 #include "orange/engine/render/RenderableComponent.h"
 
 namespace Orange::Engine::Render
