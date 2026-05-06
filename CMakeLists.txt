@@ -200,7 +200,7 @@ endif ()
 # ---------------------------------------------------------------------------
 # Samples
 #
-# Sample 子工程随各阶段里程碑逐个加入。等 minimal-window sample 落
-# 地后再 add_subdirectory；当前目录只放 .gitkeep。
+# Sample 子工程随各阶段里程碑逐个加入；samples/CMakeLists.txt 内部
+# 按顺序 add_subdirectory 每一个 sample。
 # ---------------------------------------------------------------------------
-# add_subdirectory(samples)  # 待 minimal-window sample 激活
+add_subdirectory(samples)

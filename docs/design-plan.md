@@ -976,7 +976,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：App 接口声明完整
 - Critical Path：是
 
-#### Task 08：实现 AppHost 主循环
+#### Task 08：实现 AppHost 主循环 ✅
 - 描述：`AppHost::Run` 串起 Window poll → LayerStack OnEvent → LayerStack OnUpdate → Render（占位）→ present。
 - 输入：Layer / Window 就绪
 - 输出：
@@ -992,7 +992,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：主循环跑得起来，能正常退出
 - Critical Path：是
 
-#### Task 09：完成 `samples/01_minimal_window`
+#### Task 09：完成 `samples/01_minimal_window` ✅
 - 描述：最小 sample：构造 AppConfig、构造 AppHost、Run。
 - 输入：AppHost 就绪
 - 输出：
