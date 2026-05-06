@@ -194,7 +194,7 @@ option(ORANGE_ENGINE_BUILD_TESTS "Build OrangeEngine unit / smoke tests" OFF)
 
 if (ORANGE_ENGINE_BUILD_TESTS)
     enable_testing()
-    # add_subdirectory(tests)  # 待测试入口任务激活
+    add_subdirectory(tests)
 endif ()
 
 # ---------------------------------------------------------------------------

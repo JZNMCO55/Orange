@@ -1007,7 +1007,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：Phase 1 首个里程碑
 - Critical Path：是
 
-#### Task 10：建立测试入口
+#### Task 10：建立测试入口 ✅
 - 描述：`tests/CMakeLists.txt` + 最小 ctest case（Result / Handle / Serialization 单元测试）。
 - 输入：Core 已就绪
 - 输出：
