@@ -1346,6 +1346,35 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：cmake build 通过 + 10/10 ctest 全过（之前 9 个 + material_interface_test 一个新增）+ install_smoke / config_smoke 不退化。Material 模块的公共表面就绪——Task 02 起可以把 "build 内置 toon + rim light template" 当作纯实现路径推进。
 - Critical Path：是
 
+#### Task 02：MaterialTemplate 内置（卡通 + rim light） ✅
+- 描述：交付两套内置 MaterialTemplate（卡通 cel-shading + rim/fresnel light）的全部"模板侧"产物——GLSL 源 + 编译产出的 SPIR-V + `BuiltinMaterials::LoadXxx` 工厂返回完整可用的 `Material`（含已注册 ShaderAsset handle + uniform 布局 + texture 槽布局）。**Pipeline 真正按 MaterialInstance 路由 push-constant / 描述符走绘制是 Phase 3 / Task 04 起的工作**——Task 02 不动 Pipeline.cpp、不改 RenderableComponent、不接 Material 到 RenderScene。这样把 "模板可消费" 与 "渲染管线消费模板" 这两件相互正交的事拆成各自可验证的增量。
+- 输入：Phase 3 / Task 01（Material / MaterialInstance 公共面）
+- 输出：
+  - `Proposed: src/render/builtin_shaders/toon.vert.glsl` + `toon.frag.glsl`（顶点 layout = pos+uv 与 textured_mesh 同；单 push-constant block 打包所有 uniform，≤128 字节，dFdx/dFdy 推 face normal、避免引入 vertex normal attribute）
+  - `Proposed: src/render/builtin_shaders/rim_light.vert.glsl` + `rim_light.frag.glsl`（同 layout 同 push-constant 风格；rim 用 fresnel = pow(1 - dot(N, V), uRimPower) * uRimColor * uRimIntensity）
+  - `Modified: CMakeLists.txt`（新增 4 个 `orange_engine_compile_builtin_shader` 调用 + `orange_engine_builtin_shaders` 自定义 target 依赖列表追加；orange_engine 源列表加 `src/render/BuiltinMaterials.cpp`）
+  - `Proposed: include/orange/engine/render/BuiltinMaterials.h`（namespace `Orange::Engine::Render::BuiltinMaterials`：`Material LoadToon(Asset::AssetRegistry&)` / `Material LoadRimLight(Asset::AssetRegistry&)`）
+  - `Proposed: src/render/BuiltinMaterials.cpp`（.exe-相对路径解析复用 Pipeline 的 GetExecutableDir 套路；按 path 走 `registry.Load<ShaderAsset>` 的标准 dedup 缓存——同一 path 重复调用幂等返回同一 handle）
+  - `Modified: src/render/RenderHeaderCheck.cpp`（追加 BuiltinMaterials.h）
+  - `Proposed: tests/render/BuiltinMaterialsTest.cpp`
+  - `Modified: tests/CMakeLists.txt`（注册 builtin_materials_test）
+- 影响路径/模块：Render（仅新增模板侧）、tests、构建系统
+- 前置依赖：Task 01
+- 实现要点：
+  - **Push-constant only，全打 ≤128 字节**：Vulkan 最低保证 128 字节 push constant；toon = uMVP(64) + uColorWarm(16) + uColorCool(16) + uLightDir(16) + uShadowThreshold(4) = 116 B；rim_light = uMVP(64) + uViewPos(16) + uRimColor(16) + uRimPower(4) + uRimIntensity(4) = 104 B。两者都不需要 UBO / 描述符集，与 Phase 2 Pipeline 走的纯 push-constant 路径一致。Task 04 把 MaterialInstance 覆盖打包成 push-constant bytes 时，按 Material.uniforms 列表的顺序 + std430 对齐就行——schema 已经提前对齐好。
+  - **dFdx / dFdy 推 face normal**：MeshAsset 当前没 vertex normal 字段（PHASE 2 范围只有 pos+uv+indices）；toon / rim_light 都用 `cross(dFdx(vWorldPos), dFdy(vWorldPos))` 在 fragment 阶段推 flat face normal——视觉上够用，且不需要在 Task 02 顺手扩 MeshAsset schema。Phase 3 后续 task 引入 vertex normal 时把 shader 切到 attribute-driven normal 即可，uniform 布局不变。
+  - **shader 走 AssetRegistry，不 fopen**：与 extension-points "shader 文件路径走 Asset 系统加载" 约定一致。BuiltinMaterials::LoadXxx 假定调用方已 `RegisterLoader<ShaderAsset>`——这与"内置 loader 注册不在 AssetRegistry 构造时自动完成"（Phase 2 / Task 02 写明）的契约对齐；test 在 setup 阶段显式 RegisterLoader。**没在 BuiltinMaterials 里 RegisterLoader-if-missing**：那会给 AssetRegistry 加新查询面（HasLoader<T>），Task 02 不做这层 API 扩展。
+  - **path resolution 复用 .exe-相对方案**：与 Pipeline.cpp 的 GetExecutableDir 同思路（GetModuleFileNameW），让 .spv 不论 CWD 如何都从 .exe 同目录的 `shaders/orange_engine/<name>.spv` 起解析。当前直接复制一份 helper 到 BuiltinMaterials.cpp——单独提到 Platform 层是后续 task 的事，未到"3+ 处复用"的阈值不动。
+  - **Material 字段填全**：`name`（"toon" / "rim_light"）、`vertexShader` / `fragmentShader` 两个 ShaderAsset handle、`uniforms` 列表（按 push-constant 出现顺序）、`textureSlots` 留空（两个内置 shader 当前都是程序式着色，不采样贴图——等 Phase 3 后续 task 把贴图真接上时再填）。
+  - **不动 RenderableComponent / Pipeline / RenderScene**：Task 02 仅在 Render 模块里增项；不破任何已有 ECS / 渲染路径，所有现存 ctest 与 sample 行为不变。
+- 验证方式：`tests/render/BuiltinMaterialsTest.cpp` 通过 ctest，覆盖 4 条路径：
+  1. LoadToon 返回 Material：name="toon"、两个 shader handle 有效、uniforms 非空且类型布局符合预期、textureSlots 为空；
+  2. LoadRimLight 同上，uniforms 集合不同（验证两个模板 schema 不串）；
+  3. 重复调用 LoadToon dedup 命中（同一 path → 同一 handle，registry 不重新跑 loader）；
+  4. MaterialInstance 绑 toon 模板时只能 SetUniform 在 toon 的 uniform 名上（rim_light 的 uniform 名 `uRimColor` 在 toon instance 上是 no-op）——验证 Task 01 的 silent-ignore 与 Task 02 的 schema 真实分离。
+- 验收标准：cmake build 通过（4 个新 SPIR-V 编出）+ 11/11 ctest 全过（之前 10 + builtin_materials_test 新增）+ install_smoke / config_smoke 不退化 + 现有 03/04 sample 行为不变。Material 模块的"内置模板"侧就绪——Phase 3 / Task 03（PostProcessChain）、Task 04（自定义 shader 注入）可以并行/顺序推进；Phase 3 / Task 06 升级 sample 时直接消费 BuiltinMaterials::LoadToon。
+- Critical Path：是
+
 ### Phase 4：可玩性
 
 - Task 01：Animation 模块公共接口（IAnimator / AnimationStateMachine）

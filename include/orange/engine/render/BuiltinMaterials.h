@@ -1,0 +1,51 @@
+#ifndef ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H
+#define ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H
+
+// ---------------------------------------------------------------------------
+// BuiltinMaterials —— 引擎内置 Material 模板的工厂。
+//
+// Phase 3 / Task 02 起，引擎内置两个 Material 模板：
+//   * `toon`      —— 二阶 cel-shading（warm / cool 双色 + 法线驱动 banding）；
+//   * `rim_light` —— fresnel 风格 rim glow（边沿发光）。
+//
+// LoadXxx 负责：
+//   1. 把对应 SPIR-V 注册到 AssetRegistry（按 .exe-相对路径作 dedup
+//      key——重复调用幂等，handle 沿用）；
+//   2. 返回 Material 描述符——name、两个 ShaderAsset handle、uniform 布
+//      局、texture 槽布局都填好，开箱即用。
+//
+// **调用前置**：调用方需要先 `RegisterLoader<Asset::ShaderAsset>(loader)`，
+// 与 "AssetRegistry 不在构造时自动注册任何 loader" 的契约对齐。重复调
+// 用 LoadXxx 不会再注册 loader（Asset 层 dedup 保证 .spv 文件只读一次）。
+//
+// **当前阶段限制**：Pipeline 的真实 Material 路由（按 MaterialInstance
+// 覆盖打 push-constant / 描述符）由 Phase 3 / Task 04 起接通；Task 02
+// 仅交付 "Material 数据可被消费"——descriptor 已稳定、Task 04 起在不破
+// 公共面的前提下把渲染管线接上。
+// ---------------------------------------------------------------------------
+
+#include <orange/engine/OrangeEngineExport.h>
+#include <orange/engine/render/Material.h>
+
+namespace Orange::Engine::Asset
+{
+class AssetRegistry;
+}  // namespace Orange::Engine::Asset
+
+namespace Orange::Engine::Render::BuiltinMaterials
+{
+
+// 加载内置 toon 模板，返回完整可用的 Material（含已注册的 ShaderAsset
+// handle）。同 registry 上重复调用幂等，handle 沿用。
+//
+// 失败语义：SPIR-V 不存在 / 解析失败时返回的 Material 仍保留 uniform
+// + textureSlot 描述符，但 vertexShader / fragmentShader 字段为无效
+// handle。调用方按 `material.vertexShader.IsValid()` 判定。
+ORANGE_ENGINE_API Material LoadToon(Asset::AssetRegistry& registry);
+
+// 加载内置 rim-light 模板。语义同 LoadToon。
+ORANGE_ENGINE_API Material LoadRimLight(Asset::AssetRegistry& registry);
+
+}  // namespace Orange::Engine::Render::BuiltinMaterials
+
+#endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

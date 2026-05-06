@@ -3,6 +3,7 @@
 // "Header isolation" 不变量），构建会在这里立刻失败。新增
 // `include/orange/engine/render/` 下的头文件时，记得追加一行 include。
 
+#include "orange/engine/render/BuiltinMaterials.h"
 #include "orange/engine/render/Camera.h"
 #include "orange/engine/render/Material.h"
 #include "orange/engine/render/MaterialInstance.h"

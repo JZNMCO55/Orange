@@ -75,7 +75,9 @@ add_library(orange_engine STATIC
     # Render：Camera / RenderableComponent / Pipeline 公共接口
     # + RenderScene 收集（World → drawable list）+ Pipeline 接通
     # OrangeRender RenderGraph + Material / MaterialInstance 公共接口
+    # + BuiltinMaterials（toon / rim_light）
     src/render/RenderHeaderCheck.cpp
+    src/render/BuiltinMaterials.cpp
     src/render/MaterialInstance.cpp
     src/render/Pipeline.cpp
     src/render/RenderScene.cpp
@@ -134,11 +136,27 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/textured_mesh.frag.glsl"
     ORANGE_ENGINE_BUILTIN_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/toon.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_TOON_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/toon.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_TOON_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/rim_light.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_RIM_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/rim_light.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_RIM_FS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
         "${ORANGE_ENGINE_BUILTIN_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_FS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_TOON_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_TOON_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_RIM_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_RIM_FS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)
