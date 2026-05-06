@@ -1225,6 +1225,23 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：9/9 ctest 通过 + minimal_window 启动收尾干净 + 内置 SPIR-V 落到正确目录；Pipeline 公共表面已具备所有"启动 / 渲染 / 关闭"操作所需方法。视觉正确性的责任明确转移给 Task 09。
 - Critical Path：是
 
+#### Task 08：完成 `samples/02_ecs_basics`（实体/组件 CRUD） ✅
+- 描述：控制台 sample——纯 ECS 演示，不开窗口、不接 Pipeline。让"实体-组件-查询"这套心智模型独立呈现，给对引擎不熟的读者最小学习材料。
+- 输入：Phase 2 / Task 04（World 接通 EnTT）
+- 输出：
+  - `Proposed: samples/02_ecs_basics/main.cpp`（控制台程序，stdout 打印每步结果）
+  - `Proposed: samples/02_ecs_basics/CMakeLists.txt`
+  - `Modified: samples/CMakeLists.txt`（add_subdirectory 02_ecs_basics）
+- 影响路径/模块：Samples
+- 前置依赖：Task 04
+- 实现要点：
+  - **控制台模式而非窗口模式**：本 sample 强调 ECS 与 Pipeline / 渲染的解耦——World 可独立存在并被操作。窗口模式 sample 在 Task 09 / 10 出场。
+  - **演示路径覆盖**：World 创建 / 实体生命周期（Create / Destroy / IsValid） / 组件 CRUD（Add / Has / Get / Remove） / Hierarchy 双向链构造（parent + firstChild + prev/nextSibling）/ EnTT 视图遍历（`world.Registry().view<T>()`）/ DestroyEntity 联带卸载组件。
+  - **每步 stdout**：每个操作打印前后状态，让读者能 `cmake --build && build/bin/Debug/02_ecs_basics.exe` 直接观察 API 行为；新加的 `DumpEntity` / `DumpHierarchy` 局部辅助函数把"打印"和"操作"分离，主流程读起来像教程。
+- 验证方式：build + 跑 `02_ecs_basics.exe`，目视确认 7 个段落（World 初始化 / 创建 + AddComponent / Has 查询 / Hierarchy 链 / view 遍历 / RemoveComponent / DestroyEntity）输出与预期一致；World::Size 在 Add / Destroy 之后变化正确；DestroyEntity(shield) 之后 IsValid(shield) 返回 false。
+- 验收标准：sample 可被 build + 运行；输出符合上述断点；现有 9/9 ctest 不受影响。
+- Critical Path：否（本 sample 是教学材料，Phase 2 milestone 不依赖它本身可视化）
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口
