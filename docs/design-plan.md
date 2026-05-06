@@ -1275,6 +1275,32 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：上述 4 条全部成立。Phase 2 milestone（"屏幕显示一个由 ECS 实体驱动的带贴图 mesh"）的"由 ECS 驱动 + mesh 上屏"两半已经成立；剩"真贴图 sampler 化"等 OrangeRender RHI 路径打通后再补一刀。
 - Critical Path：是
 
+#### Task 10：完成 `samples/04_3d_mesh`（旋转 3D mesh，无 bloom） ✅
+- 描述：Phase 2 收尾的 3D 视觉验证节点——把 perspective camera + 立方体 mesh + 每帧 TransformComponent 旋转串到位，确认引擎已具备"3D 实体在 3D 投影下旋转上屏"的全链路能力。无 bloom / 无后处理（这些由 Phase 3 引入）。
+- 输入：Phase 2 / Task 09（textured-mesh pipeline + AssetRegistry::Insert + drawable-driven Render）
+- 输出：
+  - `Modified: src/render/Pipeline.cpp`（rasterizer state 切到 `CullMode::Back` + `FrontFace::CounterClockwise` 默认值——3D 实体没背面剔除会有严重 overdraw）
+  - `Modified: samples/03_textured_quad/main.cpp`（quad 索引从 `(0,1,2,0,2,3)` 翻成 `(0,2,1,0,3,2)`，让 world-CCW 输入经 Y-flip projection 后在 framebuffer space 中变成 CCW = front-facing，与 OrangeRender procedural_scene 的约定对齐）
+  - `Proposed: samples/04_3d_mesh/main.cpp`（24 顶点立方体 + per-face UV [0,1]² + perspective camera + Layer::OnUpdate 改 TransformComponent.rotation）
+  - `Proposed: samples/04_3d_mesh/CMakeLists.txt`
+  - `Modified: samples/CMakeLists.txt`（add_subdirectory 04_3d_mesh）
+- 影响路径/模块：Render（一行 rasterizer state）、Samples、构建系统
+- 前置依赖：Task 09
+- 实现要点：
+  - **Cube 是 24 顶点而非 8 顶点**：8 顶点共享角点会导致每个面没法独立 UV [0,1]²，checker shader 会扭曲。24 顶点（每面 4 个）让 textured_mesh shader 复用即可——每面看起来都是干净的 8×8 棋盘，转动时三个可见面之间的边界清晰可读，是"3D 实体真的在转"的直观证据。
+  - **背面剔除约定**：OrangeRender 默认 rasterizer 是 `FrontFace::CounterClockwise + CullMode::Back`，"front face = CCW in framebuffer space (Vulkan Y-down NDC)"。Camera 工厂的 projection 内置 `p[1][1] = -f` Y-flip，会把"输入 world-CCW"翻成"NDC-CW"——直接 CullMode::Back 就把所有外向面都剔了。修：本 task 起规定 sample / engine 内置 mesh 的索引按 `(0, 2, 1, 0, 3, 2)` 等"world-CW = NDC-CCW after Y-flip" 编排，与 OrangeRender procedural_scene 的注释里写的同一约定。03_textured_quad 的 quad 索引随 pipeline 切到 Back-cull 一并翻一刀，回归测试同时确认 03 仍正确上屏。
+  - **没 depth buffer 也不写 depth**：OrangeRender 的 BeginFrame/SubmitItem/EndFrame 路径目前只挂 swapchain color attachment，VkRenderingInfo 没 depth attachment。所以 Pipeline 仍 `mDepthTestEnable=false`/`mDepthWriteEnable=false`，3D 凸体（cube）只靠背面剔除做"显隐"——任意旋转下，相机能看到的只有 1–3 个外向面，互不重叠，视觉上等价于深度正确的 cube。深度路径（depth attachment 接通 + Pipeline 升 `DepthTestEnable=true`）等 OrangeRender 暴露 depth 接口或 Phase 3 自定义 RenderTarget 路径打通后再补，本 task 不在 Render 模块重新铺设这条线。
+  - **Camera 用 `Camera::Perspective` + 手动 view matrix**：Camera struct 当前只对 `projection` 提供工厂；view 留给调用方填。Sample 用 `glm::lookAt(eye, center, up)` 从 (2.5, 1.7, 3.0) 看向原点——拿出三个面（+X、+Y、+Z）让 checker 可读。aspect 用窗口尺寸算，fovY=45°，near=0.1，far=100。本 task 不给 Camera 加 LookAt 工厂——单 sample 用 `glm::lookAt` 一行写完，提抽象层为时尚早；多个 sample 都要时再统一设计。
+  - **旋转动画走 OnUpdate 改 TransformComponent.rotation**：`RenderLayer` 持有 cube entity，每帧从 `FrameContext::time.totalSeconds` 算角度，更新 `TransformComponent::rotation`（quat），再调 `Pipeline::Render(world)`。RenderScene::Collect 已经按 `T * R * S` 合成 worldMatrix，旋转自动随 quat 走。轴向选 `normalize(0.4, 1.0, 0.2)`——非主轴让三个面交替露出来，看着比单纯绕 Y 轴更"3D"。
+  - **AssetRegistry::Insert 复用 03 路径**：cube 是程序式构造，沿用 Task 09 加的 `Insert<MeshAsset>`；不引入 .orme 资源文件、不动 MeshLoader v1 binary 格式。
+- 验证方式：
+  1. cmake build 通过——orange_engine 链通、shader 不变、消费者 `find_package` (config_smoke) 不退化。
+  2. ctest 9/9 通过——pipeline rasterizer 调整对 RenderInterfaceTest / RenderSceneTest 的占位调用是透明的（这些测试不验证视觉、只验证 API 形状）。
+  3. 跑 03_textured_quad.exe 回归确认（索引翻转 + Cull::Back 后仍正确上屏，棋盘居中、颜色不变、关闭窗口干净退出）。
+  4. 跑 04_3d_mesh.exe，目视确认：屏幕中央有立方体绕斜轴匀速旋转；同时可见 1–3 个面（每面 8×8 橙/深蓝棋盘）；面与面之间的接缝随旋转自然推移；无明显 z-fighting / 内面穿透 / 闪烁；窗口可关闭，exit code 0。
+- 验收标准：上述 4 条全部成立。Phase 2 整阶段（"ECS → Asset → Render → OrangeRender 全链路 + 2D 与 3D 两类视觉证据"）收口完成；可向 Phase 3 推进材质 / 后处理 / 自定义 shader 注入。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口

@@ -264,7 +264,14 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
     pipelineDesc.mVertexInput.mAttributes.push_back(attrUV);
 
     pipelineDesc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
-    pipelineDesc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::None;
+    // 背面剔除 + Vulkan 默认 CCW front-face：与 OrangeRender procedural_scene
+    // 同一约定（"front = CCW in framebuffer space"）。Camera 工厂的 projection
+    // 内置 Y-flip，所以 sample / 内置 mesh 应按 "world-CW = NDC-CCW after Y-flip"
+    // 编排索引（典型 quad 索引：(0, 2, 1, 0, 3, 2)）。3D 实体没背面剔除会有
+    // 严重 overdraw；OrangeRender BeginFrame/SubmitItem 路径目前只挂 color
+    // attachment，没 depth buffer，所以 cube 只靠背面剔除做显隐。
+    pipelineDesc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;
+    pipelineDesc.mRasterizer.mFrontFace   = Orange::Rhi::FrontFace::CounterClockwise;
     pipelineDesc.mDepthStencil.mDepthTestEnable  = false;
     pipelineDesc.mDepthStencil.mDepthWriteEnable = false;
     pipelineDesc.mColorBlend.mAttachments.push_back({});

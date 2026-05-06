@@ -60,9 +60,12 @@ std::unique_ptr<MeshAsset> MakeQuadMesh()
         {1.0f, 1.0f},
         {0.0f, 1.0f},
     };
+    // 索引按 "world-CW = NDC-CCW after projection Y-flip" 约定编排，与
+    // Pipeline 的 FrontFace::CCW + CullMode::Back 默认状态对齐。详见
+    // src/render/Pipeline.cpp 中 rasterizer state 注释。
     std::vector<std::uint32_t> indices = {
-        0, 1, 2,
-        0, 2, 3,
+        0, 2, 1,
+        0, 3, 2,
     };
     return std::make_unique<MeshAsset>(std::move(positions), std::move(uvs), std::move(indices));
 }
