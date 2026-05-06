@@ -156,6 +156,17 @@ These are not suggestions. Violating them is treated as an architectural bug.
 - The Render module's `Pipeline::InsertPass` exists from Phase 3 but is `assert(false, "not implemented before Phase 5")` until Phase 5 actually wires it.
 - VFX, scene serialization, save game, GPU particles, custom shader hot reload are all post-Phase-3. Do not stub them in earlier.
 
+### No task references in code
+- Source files (headers and `.cpp`) must NOT reference task numbers, phase numbers, or planning artifacts in comments — no "Phase 1 / Task 07", no "see Task 09", no "added by Task NN", no "Critical Path" annotations. Existing task-referencing banners in earlier files were a one-off pattern and are not to be propagated to new work.
+- Task / phase metadata belongs in `docs/design-plan.md`, `docs/roadmap.md`, commit messages, and PR descriptions — not in code, where it rots as task numbers shift (Phase 1 already renumbered once).
+- Code comments are still welcome when they explain a non-obvious *why* (a constraint, an invariant, a workaround). They just may not anchor that *why* to a task identifier.
+
+### 代码注释使用中文
+- 新增或修改的源文件（头文件、`.cpp`）注释一律使用**中文**书写。专业术语（PBR、frustum culling、archetype、job system、unique_ptr、RAII、cache locality 等）保留英文，不强行翻译；中文术语首次出现时可括注英文，后续直接用英文术语。
+- 不主动重写历史文件里现存的英文注释（既存代码维持原样，避免无意义 diff）；只有在实际改动到那段代码、注释本身需要更新时，才顺手把该处改为中文。
+- 代码标识符（类名、函数名、变量名、命名空间）仍按 `coding-standards.md` 全部使用英文 PascalCase / camelCase；本规约只约束注释文本。
+- 字符串字面量、日志消息默认仍用英文（避免编码与跨平台终端显示问题），除非该字符串是面向中文用户的 UI 文案。
+
 ### OrangeRender public API discipline
 - The renderer is consumed via its public API (`Orange::Rhi::*` and the `OrangeRender::orange_render` target). Do not reach into `vendor/OrangeRender/src/` from this repo. If OrangeRender lacks something you need, file an issue / patch in the OrangeRender repo, not a workaround here.
 

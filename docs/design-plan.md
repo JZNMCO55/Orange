@@ -958,7 +958,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：Window 能创建、销毁、响应关闭事件
 - Critical Path：是
 
-#### Task 07：定义 App 层（Layer / LayerStack / FrameContext）
+#### Task 07：定义 App 层（Layer / LayerStack / FrameContext） ✅
 - 描述：建立主循环框架；Layer 接口允许游戏侧注入逻辑；LayerStack 管理多 Layer 顺序。
 - 输入：Window 就绪
 - 输出：

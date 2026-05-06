@@ -54,6 +54,11 @@ add_library(orange_engine STATIC
     # Phase 1 / Task 06 — Platform::Window (GLFW backend)
     src/platform/PlatformHeaderCheck.cpp
     src/platform/glfw/Window.cpp
+
+    # App — Layer / LayerStack / FrameContext / AppConfig
+    src/app/AppHeaderCheck.cpp
+    src/app/Layer.cpp
+    src/app/LayerStack.cpp
 )
 
 # ---------------------------------------------------------------------------
