@@ -1106,6 +1106,30 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：6/6 ctest 全过；Asset 模块可被 Phase 2 / Task 07 的 Pipeline 当作"路径 → 数据"的 single source of truth 使用。
 - Critical Path：是
 
+#### Task 03：定义 Scene 公共接口（World / Entity / ISystem / Transform / Hierarchy） ✅
+- 描述：把 Scene 模块的"用户面"先定义出来——Entity 标识、TransformComponent / HierarchyComponent 两个内置组件、ISystem 抽象、World 公共声明。Phase 2 / Task 04 起把 World 真正接到 EnTT 后端。
+- 输入：Phase 2 / Task 02 收尾（Asset 模块独立可用；Core::Time 提供 FrameContext）
+- 输出：
+  - `Proposed: include/orange/engine/scene/Entity.h`（顶层 `Orange::Engine::Entity`）
+  - `Proposed: include/orange/engine/scene/TransformComponent.h`（`glm::vec3` + `glm::quat` TRS）
+  - `Proposed: include/orange/engine/scene/HierarchyComponent.h`（parent / firstChild / next/prevSibling 双向兄弟链）
+  - `Proposed: include/orange/engine/scene/ISystem.h`（`Orange::Engine::Scene::ISystem`，OnAttach/OnDetach/OnUpdate(World&, FrameContext&)）
+  - `Proposed: include/orange/engine/scene/World.h`（顶层 `Orange::Engine::World`，PIMPL；CRUD 模板仅声明）
+  - `Proposed: src/scene/World.cpp`（PIMPL 骨架 + 自研 sparse-set 实体生命周期）
+  - `Proposed: src/scene/SceneHeaderCheck.cpp`
+- 影响路径/模块：Scene
+- 前置依赖：Task 02
+- 实现要点：
+  - **Entity** 是 nominal class（非 alias）：opaque 64-bit，调用方不解读高低位拆分；专属 `std::hash` 特化便于直接做 unordered_map key。
+  - **HierarchyComponent** 用 `parent + firstChild + next/prevSibling` 而非 `children` 数组——保持定长字段、不破 archetype SoA；双向兄弟链支持 O(1) 摘除。
+  - **TransformComponent** 只存本地 TRS；世界矩阵不在组件上缓存，由 Render 模块在收集 drawable list 时按需合成。
+  - **World** 公共面分两层：非模板生命周期（CreateEntity / DestroyEntity / IsValid / Size / Empty）现在就实现，让 sample 可以构 World 并 round-trip 实体；模板组件 CRUD 只声明，body 留给 Task 04 接 EnTT 时连同 erased 入口一起写。
+  - 公共头**不**暴露任何 EnTT 类型——保留后端切换余地，也避免在 EnTT soft dep 期把整个引擎绑死。
+  - `World` 当前内部用最小 sparse-set（vector<generation> + vector<bool> alive + freeIndices）实现实体生命周期；Task 04 引入 EnTT 时整体替换 Impl。
+- 验证方式：`SceneHeaderCheck.cpp` 在隔离环境下能 include 五个公共头并通过编译；`orange_engine` 静态库链通；现有 6 个 ctest case 不受影响。
+- 验收标准：Scene 模块的公共表面就绪；Render 模块（Task 05+）可以把 World 当作 drawable 来源；EnTT 接通可纯实现路径推进。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口

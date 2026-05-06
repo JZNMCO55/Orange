@@ -66,6 +66,11 @@ add_library(orange_engine STATIC
     src/asset/MeshLoader.cpp
     src/asset/TextureLoader.cpp
     src/asset/ShaderLoader.cpp
+
+    # Scene：Entity / Transform / Hierarchy / ISystem / World（公共
+    # 接口 + 实体 sparse-set 骨架；EnTT 接通在后续 task）
+    src/scene/SceneHeaderCheck.cpp
+    src/scene/World.cpp
 )
 
 # ---------------------------------------------------------------------------
