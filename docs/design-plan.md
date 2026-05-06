@@ -1057,6 +1057,26 @@ Removed: Src/                              (整目录，src/ 替换)
 - Task 09：完成 `samples/03_textured_quad`（带贴图四边形）
 - Task 10：完成 `samples/04_3d_mesh`（旋转 3D mesh，无 bloom）
 
+#### Task 01：定义 `Asset` 公共接口 ✅
+- 描述：把 Asset 模块的"用户面"先定义出来——AssetHandle 标识、IAssetLoader 抽象、AssetRegistry 公共声明。Phase 2 Task 02 起把 loader 与 registry 内部存储真正实现。
+- 输入：Phase 1 收尾（Core::Result / Core::Handle / Core::Serialization 已就绪）
+- 输出：
+  - `Proposed: include/orange/engine/asset/AssetHandle.h`
+  - `Proposed: include/orange/engine/asset/IAssetLoader.h`
+  - `Proposed: include/orange/engine/asset/AssetRegistry.h`
+  - `Proposed: src/asset/AssetRegistry.cpp`（PIMPL 骨架；Load / Get / Unload 体留给 Task 02）
+  - `Proposed: src/asset/AssetHeaderCheck.cpp`
+- 影响路径/模块：Asset
+- 前置依赖：Phase 1 全部任务
+- 实现要点：
+  - `AssetHandle<T>` 直接 `using` 重用 Core 的 `TypedHandle<T>`——assets 只需身份 + invalid sentinel + std::hash 已经具备的能力，没必要复制一份。
+  - `IAssetLoader<T>` 是 template-virtual：`virtual Result<std::unique_ptr<T>, ResultCode> Load(std::string_view) = 0`。每种 asset type 一个 loader 实现。
+  - `AssetRegistry` 走 PIMPL，公共 API 是 template 方法（Load / Get / Unload / RegisterLoader）。Task 01 只把它们 declare 出来；template 实现体由 Task 02 在 header 内填充，借助 `std::type_index` 路由到 Impl 的非模板存储。
+  - 命名空间统一 `Orange::Engine::Asset`，公共类用 `ORANGE_ENGINE_API`。
+- 验证方式：`AssetHeaderCheck.cpp` 在隔离环境下能 include 三个公共头并通过编译；`orange_engine` 静态库继续 link 通；现有 5 个 ctest case 不受影响。
+- 验收标准：Asset 模块的公共表面就绪，使 Task 02 可以纯实现路径推进。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口

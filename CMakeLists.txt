@@ -58,6 +58,11 @@ add_library(orange_engine STATIC
     src/app/AppHost.cpp
     src/app/Layer.cpp
     src/app/LayerStack.cpp
+
+    # Asset：AssetHandle / IAssetLoader / AssetRegistry（接口；
+    # registry 内部存储与 loader dispatch 在后续 task 落地）
+    src/asset/AssetHeaderCheck.cpp
+    src/asset/AssetRegistry.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -177,6 +182,16 @@ orange_engine_set_compiler_options(orange_engine)
 target_compile_options(orange_engine PUBLIC
     "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
 )
+
+# Visual Studio 的 Solution Explorer 默认把所有源文件平铺到一个组里。
+# source_group(TREE ...) 让它按源树原结构展开（src/core / src/platform/
+# glfw / src/app …），减少在大型工程下找文件的摩擦。FILES 取自 target
+# 已记录的 SOURCES，因此后续 add_library 增删都自动跟随，无需在两处
+# 维护清单。
+get_target_property(_orange_engine_sources orange_engine SOURCES)
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
+    PREFIX  "Source Files"
+    FILES   ${_orange_engine_sources})
 
 # 命名空间别名，让在同一个 build tree 内的 samples / tests 直接链
 # `OrangeEngine::orange_engine`——和安装后通过 find_package(OrangeEngine)
