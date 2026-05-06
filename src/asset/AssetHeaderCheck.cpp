@@ -6,6 +6,12 @@
 #include "orange/engine/asset/AssetHandle.h"
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/asset/IAssetLoader.h"
+#include "orange/engine/asset/MeshAsset.h"
+#include "orange/engine/asset/MeshLoader.h"
+#include "orange/engine/asset/ShaderAsset.h"
+#include "orange/engine/asset/ShaderLoader.h"
+#include "orange/engine/asset/TextureAsset.h"
+#include "orange/engine/asset/TextureLoader.h"
 
 namespace Orange::Engine::Asset
 {

@@ -21,6 +21,7 @@ endfunction()
 orange_engine_add_test(core_result_test         core/ResultTest.cpp)
 orange_engine_add_test(core_handle_test         core/HandleTest.cpp)
 orange_engine_add_test(core_serialization_test  core/SerializationTest.cpp)
+orange_engine_add_test(asset_registry_test      asset/AssetRegistryTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke

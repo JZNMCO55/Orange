@@ -1077,6 +1077,35 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：Asset 模块的公共表面就绪，使 Task 02 可以纯实现路径推进。
 - Critical Path：是
 
+#### Task 02：实现 Mesh / Texture / Shader 三个内置 loader ✅
+- 描述：把 Asset 模块的 dispatch 与 dedup 缓存接通，并交付三个内置 loader——同步路径、简单 LRU-style cache，未来 Phase 5 异步流式上线再分裂出 streaming 子系统。
+- 输入：Phase 2 / Task 01（Asset 公共接口）
+- 输出：
+  - `Proposed: include/orange/engine/asset/MeshAsset.h`
+  - `Proposed: include/orange/engine/asset/TextureAsset.h`
+  - `Proposed: include/orange/engine/asset/ShaderAsset.h`
+  - `Proposed: include/orange/engine/asset/MeshLoader.h`
+  - `Proposed: include/orange/engine/asset/TextureLoader.h`
+  - `Proposed: include/orange/engine/asset/ShaderLoader.h`
+  - `Proposed: src/asset/MeshLoader.cpp`
+  - `Proposed: src/asset/TextureLoader.cpp`
+  - `Proposed: src/asset/ShaderLoader.cpp`
+  - `Modified: include/orange/engine/asset/AssetRegistry.h`（template 方法的 inline body + 4 个非模板 erased 入口）
+  - `Modified: src/asset/AssetRegistry.cpp`（Impl 加 typeid → loader 表 + typeid → AssetTable）
+  - `Proposed: tests/asset/AssetRegistryTest.cpp`
+- 影响路径/模块：Asset、tests
+- 前置依赖：Task 01
+- 实现要点：
+  - **Mesh** 走自有 binary 格式（magic `ORME` + version + vertexCount + indexCount + positions + indices），`Core::BinaryReader` 解析，避免 Task 02 上线时同时引入 OBJ/glTF parser。
+  - **Texture** 走自有 binary 格式（magic `ORTX` + version + w/h/format + RGBA8 像素），同样规避 stb_image 在 3rdparty 上的 vendoring 子任务。
+  - **Shader** 直接读 .spv 字节为 SPIR-V word 流；`ShaderStage` 由文件名后缀（.vert.spv / .frag.spv / .comp.spv）映射，不在 Asset 层解析 OpEntryPoint——那是 Render 模块创建 pipeline 时本来就要走的反射步骤。
+  - **AssetRegistry** 走 type-erasure：公共 `Load<T>` / `Get<T>` / `Unload<T>` / `RegisterLoader<T>` 是 template 方法，body 在 header 内 forward 到 4 个非模板私有入口；Impl 用 `std::unordered_map<std::type_index, ...>` 持有 LoaderEntry 与 AssetTable。AssetTable 用 vector<Slot> + freelist，handle = slot_index + 1。
+  - **dedup** 通过 `unordered_map<path, handle>` 在每个 AssetTable 内部维护：同 path Load → 直接返回缓存 handle，loader 不重入。
+  - 内置 loader 注册不在 AssetRegistry 构造时自动完成；调用方按需 `RegisterLoader<...>`，保留 hot-swap 弹性。
+- 验证方式：`tests/asset/AssetRegistryTest.cpp` 通过 ctest，覆盖 6 条路径：mesh load/get/unload、texture load、shader load+stage 推断、dedup + unload 后重新触发 loader、错误路径（Unsupported / IoError / SchemaMismatch / InvalidArgument）、跨类型多 loader 共存。
+- 验收标准：6/6 ctest 全过；Asset 模块可被 Phase 2 / Task 07 的 Pipeline 当作"路径 → 数据"的 single source of truth 使用。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口

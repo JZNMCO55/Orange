@@ -59,10 +59,13 @@ add_library(orange_engine STATIC
     src/app/Layer.cpp
     src/app/LayerStack.cpp
 
-    # Asset：AssetHandle / IAssetLoader / AssetRegistry（接口；
-    # registry 内部存储与 loader dispatch 在后续 task 落地）
+    # Asset：AssetHandle / IAssetLoader / AssetRegistry + 三个内置
+    # loader（Mesh / Texture / Shader，custom binary / .spv 同步加载）
     src/asset/AssetHeaderCheck.cpp
     src/asset/AssetRegistry.cpp
+    src/asset/MeshLoader.cpp
+    src/asset/TextureLoader.cpp
+    src/asset/ShaderLoader.cpp
 )
 
 # ---------------------------------------------------------------------------
