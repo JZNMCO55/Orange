@@ -68,9 +68,14 @@ add_library(orange_engine STATIC
     src/asset/ShaderLoader.cpp
 
     # Scene：Entity / Transform / Hierarchy / ISystem / World（公共
-    # 接口 + 实体 sparse-set 骨架；EnTT 接通在后续 task）
+    # 接口 + entt::registry 后端）
     src/scene/SceneHeaderCheck.cpp
     src/scene/World.cpp
+
+    # Render：Camera / RenderableComponent / Pipeline 公共接口
+    # （Pipeline 内部接 OrangeRender RenderGraph 在后续 task）
+    src/render/RenderHeaderCheck.cpp
+    src/render/Pipeline.cpp
 )
 
 # ---------------------------------------------------------------------------

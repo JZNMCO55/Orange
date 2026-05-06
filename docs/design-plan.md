@@ -1156,6 +1156,29 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：7/7 ctest 全过；World 可被任何模块当作组件存储 + view 入口使用；EnTT 在 Dependencies.cmake / Config.cmake.in / 顶层 CMakeLists.txt 三处一致表达为 REQUIRED PUBLIC。
 - Critical Path：是
 
+#### Task 05：定义 Render 模块公共接口（Camera / RenderableComponent / Pipeline） ✅
+- 描述：交付 Render 模块的"用户面"——Camera 数据壳、RenderableComponent 关联组件、Pipeline 公共声明。Pipeline 内部接 OrangeRender RenderGraph 由 Task 06 / 07 落地。
+- 输入：Phase 2 / Task 04（World 接通 EnTT）
+- 输出：
+  - `Proposed: include/orange/engine/render/Camera.h`（header-only struct + inline 工厂；Vulkan NDC y-down + z 0..1，矩阵手写不依赖 GLM_FORCE_*）
+  - `Proposed: include/orange/engine/render/RenderableComponent.h`（mesh handle + texture handle + visible 开关）
+  - `Proposed: include/orange/engine/render/Pipeline.h`（PIMPL 类；`Render(World&)` 单一驱动方法；公共头**不**包含 `<orange/...>`）
+  - `Proposed: src/render/Pipeline.cpp`（PIMPL 骨架 + Render() 占位 no-op；OrangeRender 接通延后到 Task 06/07）
+  - `Proposed: src/render/RenderHeaderCheck.cpp`
+  - `Proposed: tests/render/RenderInterfaceTest.cpp`（Camera 矩阵关键元素 + RenderableComponent CRUD + Pipeline 占位调用）
+- 影响路径/模块：Render、tests
+- 前置依赖：Task 04
+- 实现要点：
+  - **Camera 是 value-type，不是 component-of-camera**：与 RenderableComponent 同类，可直接 AddComponent 到 entity 上；Pipeline::Render 在每帧从 World 中取出第一个挂 Camera 组件的实体作为本帧视图来源。
+  - **Camera 工厂内部手写矩阵**：Vulkan NDC y-down + z ∈ [0,1] 由 OrangeRender 同样的约定决定；不靠 `glm::perspective` / `glm::ortho` 的 GLM_FORCE_* 配置——保持调用点的数学行为可见、可移植。和 OrangeRender particle_field sample 的 MakeOrthoVulkan 同一思路。
+  - **RenderableComponent 持有 AssetHandle 而非裸指针**：资源生命周期由 AssetRegistry 管；handle 可在序列化路径上原样写入；跨实体复用同一 mesh 时 registry 的 dedup 缓存自动生效。
+  - **Pipeline 走 PIMPL**：依据 CLAUDE.md "Header isolation" 不变量，`<orange/...>` 只允许出现在 `src/render/**`；公共 Pipeline.h 通过 `unique_ptr<Impl>` 把 OrangeRender RHI / RenderGraph 类型完全藏在 .cpp。
+  - **Render() 当前空 body**：让 sample / 测试 / AppHost 现在就能把 Pipeline 串进主循环——不报错、不假装在做实际渲染。Task 06 加 RenderScene 收集逻辑、Task 07 接 OrangeRender 真正下发。
+  - **`InsertPass` 不提前 stub**：CLAUDE.md 写明 InsertPass 在 Phase 3 起出现、Phase 5 才接通；当前 task 不放占位接口污染公共面。
+- 验证方式：`tests/render/RenderInterfaceTest.cpp` 通过 ctest，覆盖 4 条路径：Camera::Orthographic 矩阵元素正确（Y-flip + z 0..1）、Camera::Perspective 关键元素（f / aspect、Y-flip、w 输出）、RenderableComponent 在 World 里 CRUD 一遍 + 默认 visible=true、Pipeline::Render(world) 在空 World / 多组件 World / 重复调用三种情况下不崩。
+- 验收标准：8/8 ctest 全过；Render 模块的公共表面就绪——Pipeline 可被 sample / Layer / 任何调用方持有并 Render；具体绘制逻辑由 Task 06 / 07 在保持公共面不变的前提下填充。
+- Critical Path：是
+
 ### Phase 3：Ori 视觉基线
 
 - Task 01：Material / MaterialInstance 公共接口
