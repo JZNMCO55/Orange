@@ -169,6 +169,15 @@ endif ()
 
 orange_engine_set_compiler_options(orange_engine)
 
+# 头文件中含中文注释；MSVC 默认按系统代码页（中文 Windows 上常见
+# code page 936 / GBK）读取源文件，会在 include 我们公共头时把多字
+# 节序列误判为常量内换行（C2001 / C1075）。`/utf-8` 必须以 PUBLIC
+# 形式传播给下游，让 `find_package(OrangeEngine)` 的消费者也强制按
+# UTF-8 解码。BUILD_/INSTALL_INTERFACE 两侧同时生效。
+target_compile_options(orange_engine PUBLIC
+    "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
+)
+
 # 命名空间别名，让在同一个 build tree 内的 samples / tests 直接链
 # `OrangeEngine::orange_engine`——和安装后通过 find_package(OrangeEngine)
 # 看到的目标一致，避免接口偷偷漂移。
@@ -177,11 +186,101 @@ add_library(OrangeEngine::orange_engine ALIAS orange_engine)
 # ---------------------------------------------------------------------------
 # 安装规则
 #
-# 此处先声明 option；真正的 `install(TARGETS ...)` /
-# `OrangeEngineConfig.cmake` 由后续步骤补齐。顶层 build 默认 ON，作为
-# `add_subdirectory()` 嵌入时默认 OFF——和 OrangeRender 的策略一致。
+# 顶层 build 默认 ON，作为 `add_subdirectory()` 嵌入时默认 OFF——和
+# OrangeRender 的策略一致：父工程嵌入引擎源码时，install 树由父工程
+# 自己掌控。
+#
+# 安装版图按 GNUInstallDirs：
+#   <prefix>/lib/                          —— orange_engine 静态归档
+#   <prefix>/include/orange/engine/...     —— 公共头（源树 + 生成）
+#   <prefix>/lib/cmake/OrangeEngine/       —— Targets / Config / 版本文件
+#
+# 公共依赖在 OrangeEngineConfig.cmake 通过 find_dependency 重新解析；
+# 当前 STATIC 构建下，引擎链入的所有 PRIVATE 依赖（nlohmann_json /
+# glfw3）也需要消费者侧解析得到，所以一并写进 config 模板。
 # ---------------------------------------------------------------------------
 option(ORANGE_ENGINE_INSTALL "Generate install rules for OrangeEngine" "${PROJECT_IS_TOP_LEVEL}")
+
+if (ORANGE_ENGINE_INSTALL)
+    include(GNUInstallDirs)
+    set(ORANGE_ENGINE_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/OrangeEngine")
+
+    install(TARGETS orange_engine
+        EXPORT  OrangeEngineTargets
+        ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+
+    # 源树公共头：保留 `<orange/engine/...>` 的 layout。FILES_MATCHING
+    # 模式把 .in 模板挡在外面，消费者只看到 configure 之后的产物。
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/orange"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        FILES_MATCHING
+            PATTERN "*.h"
+            PATTERN "*.hpp"
+    )
+
+    # 生成出来的版本头与 export 头：与源树头放同一个目录，让
+    # `#include <orange/engine/OrangeEngineVersion.h>` /
+    # `#include <orange/engine/OrangeEngineExport.h>` 在 in-tree 与
+    # post-install 两种语境下解析一致。
+    install(FILES
+            "${ORANGE_ENGINE_GENERATED_INCLUDE_DIR}/orange/engine/OrangeEngineVersion.h"
+            "${ORANGE_ENGINE_GENERATED_INCLUDE_DIR}/orange/engine/OrangeEngineExport.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/orange/engine"
+    )
+
+    install(EXPORT OrangeEngineTargets
+        FILE        OrangeEngineTargets.cmake
+        NAMESPACE   OrangeEngine::
+        DESTINATION "${ORANGE_ENGINE_INSTALL_CMAKE_DIR}"
+    )
+
+    # -----------------------------------------------------------------------
+    # OrangeEngineConfig.cmake + 版本文件
+    #
+    # configure_package_config_file 走 @PACKAGE_INIT@ 展开，让
+    # `find_package(OrangeEngine CONFIG)` 不论消费者把 SDK 放在哪都能
+    # 自洽解析。
+    #
+    # SameMinorVersion：消费者 `find_package(OrangeEngine 0.1 ...)`
+    # 接受 0.1.x，但拒绝 0.2.x——pre-1.0 阶段 minor bump 仍允许 ABI 变
+    # 动，这一档兼容性最稳妥。
+    #
+    # 把 EnTT / spdlog 这两个可选依赖的"是否实际进入 link 接口"作为
+    # 模板变量写到生成的 OrangeEngineConfig.cmake 里：消费者只在引
+    # 擎确实链入时才被要求 find_dependency 它们，避免因 soft dep 缺
+    # 失误伤所有消费者。
+    # -----------------------------------------------------------------------
+    if (TARGET EnTT::EnTT)
+        set(ORANGE_ENGINE_PUBLIC_HAS_ENTT TRUE)
+    else ()
+        set(ORANGE_ENGINE_PUBLIC_HAS_ENTT FALSE)
+    endif ()
+    set(ORANGE_ENGINE_PUBLIC_HAS_SPDLOG ${ORANGE_ENGINE_WITH_SPDLOG})
+
+    include(CMakePackageConfigHelpers)
+
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/OrangeEngineConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEngineConfig.cmake"
+        INSTALL_DESTINATION "${ORANGE_ENGINE_INSTALL_CMAKE_DIR}"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEngineConfigVersion.cmake"
+        VERSION       ${PROJECT_VERSION}
+        COMPATIBILITY SameMinorVersion
+    )
+
+    install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEngineConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEngineConfigVersion.cmake"
+        DESTINATION "${ORANGE_ENGINE_INSTALL_CMAKE_DIR}"
+    )
+endif ()
 
 # ---------------------------------------------------------------------------
 # 测试

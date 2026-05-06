@@ -1025,7 +1025,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：测试入口建立
 - Critical Path：否
 
-#### Task 11：发布 install 与 `OrangeEngineConfig.cmake`
+#### Task 11：发布 install 与 `OrangeEngineConfig.cmake` ✅
 - 描述：让外部工程可通过 `find_package(OrangeEngine 0.1 CONFIG REQUIRED)` 链接。
 - 输入：所有 Phase 1 task 完成
 - 输出：

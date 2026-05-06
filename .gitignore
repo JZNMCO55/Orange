@@ -6,6 +6,11 @@ script/__pycache__/
 3rdparty/
 install/
 
+# install/ 的 ignore 用于挡住临时 install 输出，但 tests/install/
+# 是 install_smoke / config_smoke 的源码目录，必须跟踪。
+!tests/install/
+!tests/install/**
+
 # `vendor/` itself is tracked (each subentry is a git submodule registered in
 # `.gitmodules`). Build artifacts inside vendored sub-repos are ignored by
 # the sub-repo's own .gitignore, so we don't repeat them here.
