@@ -4,6 +4,7 @@
 // `include/orange/engine/app/` 下的头文件，记得在这里追加一行 include。
 
 #include "orange/engine/app/AppConfig.h"
+#include "orange/engine/app/AppHost.h"
 #include "orange/engine/app/FrameContext.h"
 #include "orange/engine/app/Layer.h"
 #include "orange/engine/app/LayerStack.h"

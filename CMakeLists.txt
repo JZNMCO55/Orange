@@ -53,8 +53,9 @@ add_library(orange_engine STATIC
     src/platform/PlatformHeaderCheck.cpp
     src/platform/glfw/Window.cpp
 
-    # App：Layer / LayerStack / FrameContext / AppConfig
+    # App：Layer / LayerStack / FrameContext / AppConfig / AppHost
     src/app/AppHeaderCheck.cpp
+    src/app/AppHost.cpp
     src/app/Layer.cpp
     src/app/LayerStack.cpp
 )
