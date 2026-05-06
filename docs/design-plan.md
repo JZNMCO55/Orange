@@ -1303,6 +1303,8 @@ Removed: Src/                              (整目录，src/ 替换)
 
 ### Phase 3：Ori 视觉基线
 
+> 任务模板沿用 Phase 2 风格，详细字段在落地各 Task 时填充。Phase 3 起的 Task 列表先列要点，详细 Task Breakdown 在 Phase 2 收尾后产出 increment patch。
+
 - Task 01：Material / MaterialInstance 公共接口
 - Task 02：MaterialTemplate 内置（卡通 + rim light）
 - Task 03：PostProcessChain 接口与默认链（HDR → Bloom → Tonemap → LUT）
@@ -1311,6 +1313,38 @@ Removed: Src/                              (整目录，src/ 替换)
 - Task 06：升级 `samples/04_3d_mesh_with_bloom` 显示 Ori 风格
 - Task 07：`samples/07_full_pipeline` 雏形（带后处理的综合演示）
 - Task 08：自定义 shader sample（验证游戏侧能不改引擎注册新 shader）
+
+#### Task 01：定义 Material / MaterialInstance 公共接口 ✅
+- 描述：交付 Material 模块的"用户面"——`MaterialUniformType` 枚举与描述符、`Material`（值类型 template，描述 shader + uniform 布局 + texture 槽）、`MaterialInstance`（PIMPL，每实例 uniform / texture 覆盖）。Phase 3 / Task 02 把内置卡通 + rim-light template 真正铺出来；Phase 3 / Task 04 引入 `MaterialSystem::RegisterTemplate` 走自定义 shader 注入路径。Task 01 不接 RHI、不动 RenderableComponent、不引入 MaterialSystem——纯类型表面。
+- 输入：Phase 2 收尾（Asset / Render 公共面 + Pipeline 已接通 OrangeRender）
+- 输出：
+  - `Proposed: include/orange/engine/render/MaterialTypes.h`（`MaterialUniformType` 枚举：Float/Vec2/Vec3/Vec4/Int/Mat4；`MaterialUniformDesc { name, type }`；`MaterialTextureSlotDesc { binding, name }`）
+  - `Proposed: include/orange/engine/render/Material.h`（`struct Material`：name + 顶点/片段 ShaderAsset handle + uniforms 描述符列表 + texture 槽描述符列表；纯数据，无 PIMPL）
+  - `Proposed: include/orange/engine/render/MaterialInstance.h`（`class MaterialInstance`：构造时绑定 `const Material*`；`SetUniform(name, value)` / `SetTexture(binding, handle)` / `HasUniformOverride` / `HasTextureOverride`；PIMPL 隐藏 override 存储）
+  - `Proposed: src/render/MaterialInstance.cpp`（PIMPL 实现：unordered_map<string, UniformValue> + unordered_map<uint32_t, AssetHandle<TextureAsset>>；UniformValue = type tag + 64-byte 对齐 blob；SetUniform 在 Material 描述符里查 name + 比对 type，不匹配 → 直接 no-op）
+  - `Modified: src/render/RenderHeaderCheck.cpp`（追加新三个公共头）
+  - `Modified: CMakeLists.txt`（orange_engine 源列表加 MaterialInstance.cpp）
+  - `Proposed: tests/render/MaterialInterfaceTest.cpp`
+  - `Modified: tests/CMakeLists.txt`（注册 material_interface_test）
+- 影响路径/模块：Render、tests、构建系统
+- 前置依赖：Phase 2 全部任务（Asset 模块的 ShaderAsset / TextureAsset handle 已稳定，Render 公共面已接通 OrangeRender 真实下发路径）
+- 实现要点：
+  - **Material 是 plain struct，不走 PIMPL**：它只是 "shader + uniform 布局 + texture 槽" 的描述记录——把这层 PIMPL 化没收益、还把字段 visibility 弄复杂。MaterialInstance 才有动态状态（per-instance uniform value blob），那一边走 PIMPL 把 type-erased 存储藏到 .cpp。
+  - **MaterialInstance 绑 `const Material*` 而非 shared_ptr**：Task 01 不规定 Material 的所有权策略（Asset 风格 / MaterialSystem 风格 / 局部值都可能）——把 ownership 决策推迟到 Phase 3 / Task 02 / 04 真正铺存储时。当前调用方负责让 Material 活到所有引用它的 instance 都析构完。这是 0.x 阶段可以接受的契约，等 Task 04 引入 MaterialSystem 后会被替换为 system-managed 引用。
+  - **uniform type 检查在 SetUniform 内做**：在 Material.uniforms 里查 name；找不到 → no-op；type 不匹配 → no-op。**no-op 而不是 abort**——uniform schema 演化（template 加新字段、调用方还在传旧值）是工程现实，silently 忽略比让游戏崩溃更稳。Phase 3 / Task 02 引入第一个内置 template 时，如果发现 silent-ignore 隐藏了真 bug，再加可选 ORANGE_LOG_WARN。
+  - **uniform value 存储用 64-byte 对齐 blob + type tag**：Mat4 是 64 字节，是当前所有支持类型里最大的；用 std::array<byte, 64> + MaterialUniformType tag 做存储，避免在公共头暴露 std::variant<glm 多类型>。Task 02 起把这个 blob 翻成 push-constant / UBO bytes 时复用同一布局，无 schema churn。
+  - **不在 Task 01 加 SetUniformXxx getter**：Pipeline / MaterialSystem 真正消费 override 时（Task 02 起）会按需要决定是公开 read-back API 还是 friend 一个 internal accessor。Task 01 提交的 `HasUniformOverride` / `HasTextureOverride` 仅作为单元测试 visible 的 query，业务路径不依赖它。
+  - **不动 RenderableComponent**：Phase 2 Task 05 的 RenderableComponent 注释里已经预告 "Phase 3 接入 Material 系统后 texture 槽会被 AssetHandle<MaterialInstance> 取代"——但那一刀属于 Task 02（第一个真用 MaterialInstance 的 sample 出现时）。Task 01 不引入 ECS schema 变更，避免给 EnTT 的 archetype 制造无用迁移。
+  - **公共头继续不漏 OrangeRender / Vulkan 类型**：Material 里只有 std::string + AssetHandle + std::vector + 自定义 POD 描述符；MaterialInstance 通过 PIMPL 把 unordered_map 也藏到 .cpp。RenderHeaderCheck.cpp 在 ctest 路径上守卫 isolation 不变量。
+- 验证方式：`tests/render/MaterialInterfaceTest.cpp` 通过 ctest，覆盖 6 条路径：
+  1. Material 默认构造的 uniforms / textureSlots 为空、HasUVs 等查询行为合理；
+  2. Material 显式构造（含两个 uniform + 一个 texture 槽）后字段读回正确；
+  3. MaterialInstance 绑定 Material 后 GetMaterial 返回原指针、HasUniformOverride / HasTextureOverride 全为 false；
+  4. SetUniform 对已声明且 type 匹配的 name 生效（HasUniformOverride 转 true）；
+  5. SetUniform 对未声明 name 是 no-op；type 不匹配也是 no-op；
+  6. SetTexture 对任意 binding 生效；MaterialInstance 移动构造后 override 状态保留。
+- 验收标准：cmake build 通过 + 10/10 ctest 全过（之前 9 个 + material_interface_test 一个新增）+ install_smoke / config_smoke 不退化。Material 模块的公共表面就绪——Task 02 起可以把 "build 内置 toon + rim light template" 当作纯实现路径推进。
+- Critical Path：是
 
 ### Phase 4：可玩性
 

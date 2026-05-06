@@ -4,6 +4,9 @@
 // `include/orange/engine/render/` 下的头文件时，记得追加一行 include。
 
 #include "orange/engine/render/Camera.h"
+#include "orange/engine/render/Material.h"
+#include "orange/engine/render/MaterialInstance.h"
+#include "orange/engine/render/MaterialTypes.h"
 #include "orange/engine/render/Pipeline.h"
 #include "orange/engine/render/RenderScene.h"
 #include "orange/engine/render/RenderableComponent.h"

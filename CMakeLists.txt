@@ -74,8 +74,9 @@ add_library(orange_engine STATIC
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
     # + RenderScene 收集（World → drawable list）+ Pipeline 接通
-    # OrangeRender RenderGraph
+    # OrangeRender RenderGraph + Material / MaterialInstance 公共接口
     src/render/RenderHeaderCheck.cpp
+    src/render/MaterialInstance.cpp
     src/render/Pipeline.cpp
     src/render/RenderScene.cpp
 )

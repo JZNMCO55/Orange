@@ -25,6 +25,7 @@ orange_engine_add_test(asset_registry_test      asset/AssetRegistryTest.cpp)
 orange_engine_add_test(scene_world_test         scene/SceneWorldTest.cpp)
 orange_engine_add_test(render_interface_test    render/RenderInterfaceTest.cpp)
 orange_engine_add_test(render_scene_test        render/RenderSceneTest.cpp)
+orange_engine_add_test(material_interface_test  render/MaterialInterfaceTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
