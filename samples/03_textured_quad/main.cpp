@@ -20,6 +20,7 @@
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -81,6 +82,15 @@ public:
     void OnUpdate(const FrameContext& /*frame*/) override
     {
         mPipeline.Render(mWorld);
+    }
+
+    bool OnEvent(const Platform::WindowEvent& event) override
+    {
+        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        {
+            mPipeline.OnResize(resize->width, resize->height);
+        }
+        return false;
     }
 
 private:

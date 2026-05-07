@@ -377,6 +377,19 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
 
 }  // namespace
 
+void Pipeline::OnResize(std::uint32_t width, std::uint32_t height)
+{
+    auto& impl = *mpImpl;
+    if (!impl.initialized || !impl.renderer)
+    {
+        return;
+    }
+    // OrangeRender 把重建延迟到下一次 BeginFrame 顶部统一执行；这里
+    // 仅记 dirty 标记，无 thread / frame 状态约束。framebuffer 0×0
+    // 也允许（OrangeRender 内部会跳过重建并保留 dirty）。
+    impl.renderer->OnResize(width, height);
+}
+
 void Pipeline::Render(Orange::Engine::World& world)
 {
     auto& impl = *mpImpl;

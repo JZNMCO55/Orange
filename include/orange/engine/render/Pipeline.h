@@ -21,6 +21,7 @@
 #include <orange/engine/OrangeEngineExport.h>
 #include <orange/engine/core/Result.h>
 
+#include <cstdint>
 #include <memory>
 
 namespace Orange::Engine
@@ -69,6 +70,16 @@ public:
     void Shutdown();
 
     bool IsInitialized() const noexcept;
+
+    // 通知渲染器宿主窗口可绘制区域发生变化（resize / DPI 切换 / 显示器切
+    // 换）。消费者应在 Platform 层的 WindowResizeEvent 路径上调一次。
+    // 重建是延迟的（OrangeRender 内部在下一次 BeginFrame 顶部统一执行），
+    // 所以调用方不需要担心 thread / frame 状态。
+    //
+    // 未 Initialize 时 OnResize 是 no-op；framebuffer 0×0（窗口最小化）
+    // 同样允许——OrangeRender 那侧会在 extent 退化时跳过重建、把 dirty
+    // 标记保留到下次有效 extent 出现。
+    void OnResize(std::uint32_t width, std::uint32_t height);
 
     // 渲染一帧。Phase 2 当前阶段：
     //   * Task 06 实现 RenderScene 收集（World → drawable list）；

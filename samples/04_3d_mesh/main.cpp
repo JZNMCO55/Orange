@@ -24,6 +24,7 @@
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -165,6 +166,18 @@ public:
             xf->rotation = glm::angleAxis(angle, axis);
         }
         mPipeline.Render(mWorld);
+    }
+
+    // 接住 framebuffer-resize：让 Pipeline 喂给 OrangeRender 触发
+    // swap-chain 重建，避免拖拽窗口后下一帧死锁。返回 false 让事件继
+    // 续向后传给其它 layer / overlay。
+    bool OnEvent(const Platform::WindowEvent& event) override
+    {
+        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        {
+            mPipeline.OnResize(resize->width, resize->height);
+        }
+        return false;
     }
 
 private:
