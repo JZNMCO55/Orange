@@ -120,22 +120,26 @@ auto handle = app.GetAssetRegistry().Load<DialogueAsset>("dialogues/intro.dialog
 namespace Orange::Engine::Render
 {
 
-struct ShaderSourceDesc
+struct ShaderTemplateDesc
 {
-    std::string mName;
-    std::filesystem::path mVertexPath;
-    std::filesystem::path mFragmentPath;
-    std::vector<UniformDesc> mUniforms;
-    std::vector<TextureSlotDesc> mTextureSlots;
+    std::string                          name;
+    std::filesystem::path                vertexSpirvPath;    // 预编译 .spv，不接受 GLSL source
+    std::filesystem::path                fragmentSpirvPath;
+    std::vector<MaterialUniformDesc>     uniforms;
+    std::vector<MaterialTextureSlotDesc> textureSlots;
 };
 
 class MaterialSystem
 {
 public:
-    void RegisterTemplate(const std::string& name, const ShaderSourceDesc& desc);
-    MaterialTemplate* FindTemplate(const std::string& name);
+    explicit MaterialSystem(Asset::AssetRegistry& registry);
 
-    std::shared_ptr<MaterialInstance> CreateInstance(const std::string& templateName);
+    Result<void, ResultCode>          RegisterTemplate(const ShaderTemplateDesc& desc);
+    const Material*                   FindTemplate(std::string_view name) const;
+    std::unique_ptr<MaterialInstance> CreateInstance(std::string_view name);
+
+    // 便利方法：内部调 BuiltinMaterials::LoadToon / LoadRimLight
+    Result<void, ResultCode> RegisterBuiltins();
 };
 
 }  // namespace Orange::Engine::Render
@@ -143,30 +147,41 @@ public:
 
 ### 游戏侧使用
 ```cpp
-ShaderSourceDesc desc;
-desc.mName = "SlimeFresnel";
-desc.mVertexPath = "assets/shaders/slime.vert";
-desc.mFragmentPath = "assets/shaders/slime.frag";
-desc.mUniforms = {
-    {"uTime", UniformType::Float},
-    {"uNoiseAmplitude", UniformType::Float},
-    {"uRimColor", UniformType::Vec3},
+// MaterialSystem 是值构造的类，由调用方持有（典型场景：sample / 游戏 main 里建一个）。
+Asset::AssetRegistry registry;
+registry.RegisterLoader<Asset::ShaderAsset>(std::make_unique<Asset::ShaderLoader>());
+
+Render::MaterialSystem matSys(registry);
+matSys.RegisterBuiltins();  // 注册 toon + rim_light
+
+Render::ShaderTemplateDesc desc;
+desc.name              = "slime_fresnel";
+desc.vertexSpirvPath   = "assets/shaders/slime.vert.spv";    // 游戏侧自己用 glslangValidator 预编 .spv
+desc.fragmentSpirvPath = "assets/shaders/slime.frag.spv";
+desc.uniforms = {
+    {"uTime",           Render::MaterialUniformType::Float},
+    {"uNoiseAmplitude", Render::MaterialUniformType::Float},
+    {"uRimColor",       Render::MaterialUniformType::Vec3},
 };
-desc.mTextureSlots = {
+desc.textureSlots = {
     {0, "uInnerNoise"},
 };
 
-app.GetMaterialSystem().RegisterTemplate("slime_fresnel", desc);
+matSys.RegisterTemplate(desc);
 
-auto inst = app.GetMaterialSystem().CreateInstance("slime_fresnel");
-inst->SetUniform("uRimColor", Vec3{0.4f, 0.8f, 1.0f});
+auto inst = matSys.CreateInstance("slime_fresnel");
+inst->SetUniform("uRimColor", glm::vec3{0.4f, 0.8f, 1.0f});
 inst->SetTexture(0, innerNoiseTextureHandle);
+
+// Pipeline 借非拥有引用（Pipeline::SetMaterialSystem(&matSys)）；matSys 必须活到 Pipeline 析构。
 ```
 
 ### 约束
-- ShaderSourceDesc 必须显式声明 uniform 与纹理槽——引擎不在运行时反射 SPIR-V 自动生成
+- ShaderTemplateDesc 必须显式声明 uniform 与纹理槽——引擎不在运行时反射 SPIR-V 自动生成
+- shader 文件**只接受 SPIR-V 路径**（.spv）；GLSL source 由游戏侧在自己的 build 里用 glslangValidator 预编。运行时 GLSL 编译 / hot-reload 留给 Phase 6
 - shader 文件路径走 Asset 系统加载，不直接 fopen
 - 每个 MaterialTemplate 编译为一个 RHI Pipeline（OrangeRender PipelineDesc）；切换 MaterialInstance 不重新编译
+- 自定义 shader 必须把 descriptor set 0 binding 0/1 留给引擎 light UBO + shadow sampler（与内置 toon / rim_light 同 layout）——这条在 Phase 3 / Task 07 起生效，让自定义 shader 也能消费 frame-level light + shadow 数据
 
 ---
 

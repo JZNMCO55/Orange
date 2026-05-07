@@ -76,10 +76,18 @@ add_library(orange_engine STATIC
     # + RenderScene 收集（World → drawable list）+ Pipeline 接通
     # OrangeRender RenderGraph + Material / MaterialInstance 公共接口
     # + BuiltinMaterials（toon / rim_light）
+    # + PostProcessChain（HDR / Bloom / Tonemap / LUT 默认链描述符）
+    # + MaterialSystem（自定义 shader 注入扩展点）
+    # + BuiltinShadowShaders（shadow_caster shader pair 工厂）
     src/render/RenderHeaderCheck.cpp
     src/render/BuiltinMaterials.cpp
+    src/render/BuiltinPostProcessChain.cpp
+    src/render/BuiltinShadowShaders.cpp
     src/render/MaterialInstance.cpp
+    src/render/MaterialSystem.cpp
     src/render/Pipeline.cpp
+    src/render/PostProcessChain.cpp
+    src/render/PostProcessPasses.cpp
     src/render/RenderScene.cpp
 )
 
@@ -113,6 +121,13 @@ endif ()
 set(ORANGE_ENGINE_BUILTIN_SHADER_OUTPUT_DIR
     "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/shaders/orange_engine")
 
+# shader 源里可以 #include "include/shadow_pcf.glsl.inc" 之类的辅助片
+# 段；glslangValidator 通过 -I 接受 include search path（这里指向
+# src/render/builtin_shaders/，让 .inc 头能被解析）。.inc 文件本身不
+# 编译为独立 .spv——只是源代码片段。
+set(ORANGE_ENGINE_BUILTIN_SHADER_INCLUDE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/render/builtin_shaders")
+
 function(orange_engine_compile_builtin_shader src_relative out_var)
     set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${src_relative}")
     get_filename_component(_full_name "${src_relative}" NAME)
@@ -122,7 +137,9 @@ function(orange_engine_compile_builtin_shader src_relative out_var)
         OUTPUT  "${_out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory
                 "${ORANGE_ENGINE_BUILTIN_SHADER_OUTPUT_DIR}"
-        COMMAND "${ORANGE_ENGINE_GLSLANG_VALIDATOR}" -V "${_src}" -o "${_out}"
+        COMMAND "${ORANGE_ENGINE_GLSLANG_VALIDATOR}" -V
+                "-I${ORANGE_ENGINE_BUILTIN_SHADER_INCLUDE_DIR}"
+                "${_src}" -o "${_out}"
         DEPENDS "${_src}"
         COMMENT "OrangeEngine: 编译内置 SPIR-V → ${_stem}.spv"
         VERBATIM
@@ -148,6 +165,12 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/rim_light.frag.glsl"
     ORANGE_ENGINE_BUILTIN_RIM_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/shadow_caster.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_SHADOW_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/shadow_caster.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_SHADOW_FS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
@@ -156,7 +179,9 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_TOON_VS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_TOON_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_RIM_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_RIM_FS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_RIM_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_SHADOW_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_SHADOW_FS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)

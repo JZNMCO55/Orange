@@ -1308,7 +1308,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - Task 01：Material / MaterialInstance 公共接口
 - Task 02：MaterialTemplate 内置（卡通 + rim light）
 - Task 03：PostProcessChain 接口与默认链（HDR → Bloom → Tonemap → LUT）
-- Task 04：自定义 shader 注入接口（MaterialSystem::RegisterShader）
+- Task 04：自定义 shader 注入接口（MaterialSystem::RegisterTemplate）
 - Task 05：软阴影实现（PCF）
 - Task 06：升级 `samples/04_3d_mesh_with_bloom` 显示 Ori 风格
 - Task 07：`samples/07_full_pipeline` 雏形（带后处理的综合演示）
@@ -1373,6 +1373,197 @@ Removed: Src/                              (整目录，src/ 替换)
   3. 重复调用 LoadToon dedup 命中（同一 path → 同一 handle，registry 不重新跑 loader）；
   4. MaterialInstance 绑 toon 模板时只能 SetUniform 在 toon 的 uniform 名上（rim_light 的 uniform 名 `uRimColor` 在 toon instance 上是 no-op）——验证 Task 01 的 silent-ignore 与 Task 02 的 schema 真实分离。
 - 验收标准：cmake build 通过（4 个新 SPIR-V 编出）+ 11/11 ctest 全过（之前 10 + builtin_materials_test 新增）+ install_smoke / config_smoke 不退化 + 现有 03/04 sample 行为不变。Material 模块的"内置模板"侧就绪——Phase 3 / Task 03（PostProcessChain）、Task 04（自定义 shader 注入）可以并行/顺序推进；Phase 3 / Task 06 升级 sample 时直接消费 BuiltinMaterials::LoadToon。
+- Critical Path：是
+
+#### Task 03：PostProcessChain 接口与默认链（HDR → Bloom → Tonemap → LUT） ✅
+- 描述：交付 PostProcessChain 模块的"用户面"——`IPostProcessPass` 抽象基类（plugin 风格，与 extension-points 写明的 IRenderPass 路径对齐）、`PostProcessChain` 容器（CRUD + 顺序遍历）、`BuiltinPostProcessChain::CreateDefault()` 工厂返回 4-pass 链（HDR → Bloom → Tonemap → LUT）。**Pipeline 真跑链 / GLSL shader / HDR off-screen target / descriptor-set 接通全部延后**——Task 03 与 Task 01/02 同节奏，仅交付"接口 + 描述符"，Pipeline 整合走 Task 04 起的渐进路径，HDR / 实际 pass shader 在 Task 06 sample 升级时再补。
+- 输入：Phase 3 / Task 02（BuiltinMaterials 模板侧已稳定）
+- 输出：
+  - `Proposed: include/orange/engine/render/IPostProcessPass.h`（`IPostProcessPass` 抽象类：`Name()` / `Setup(PostProcessSetupContext&)` / `Execute(PostProcessExecuteContext&)`；两个 context 当前是空 struct，Phase 5 RenderGraph 接通时补字段，签名不破）
+  - `Proposed: include/orange/engine/render/PostProcessChain.h`（`PostProcessChain`：`AddPass` / `RemoveAt` / `Clear` / `PassCount` / `PassAt` / `FindByName`；走 `std::vector<std::unique_ptr<IPostProcessPass>>` 顺序存储——后处理链是顺序敏感的，map 不是合适的存储）
+  - `Proposed: include/orange/engine/render/PostProcessPasses.h`（4 个内置 pass 具体类：`HdrPass`（无参）/ `BloomPass`（threshold + intensity）/ `TonemapPass`（exposure）/ `LutPass`（lut handle + strength）。每类继承 IPostProcessPass，方法体在 .cpp 给空 stub）
+  - `Proposed: include/orange/engine/render/BuiltinPostProcessChain.h`（namespace `BuiltinPostProcessChain::CreateDefault()` 返回按 HDR→Bloom→Tonemap→LUT 顺序填好的 PostProcessChain）
+  - `Proposed: src/render/PostProcessChain.cpp`（容器 CRUD 实现）
+  - `Proposed: src/render/PostProcessPasses.cpp`（4 个 pass 的 Name() / Setup / Execute，Setup/Execute 当前是空 stub）
+  - `Proposed: src/render/BuiltinPostProcessChain.cpp`（4 行 `chain.AddPass(make_unique<XxxPass>())`）
+  - `Modified: src/render/RenderHeaderCheck.cpp`（追加新 4 个公共头）
+  - `Modified: CMakeLists.txt`（orange_engine 源列表加 3 个 .cpp）
+  - `Proposed: tests/render/PostProcessChainTest.cpp`
+  - `Modified: tests/CMakeLists.txt`（注册 postprocess_chain_test）
+- 影响路径/模块：Render（仅新增 PostProcess 子面）、tests、构建系统
+- 前置依赖：Task 02
+- 实现要点：
+  - **D1 = 接口 + 默认链描述符（不接 Pipeline、不写 GLSL、不接 OrangeRender 新路径）**：用户决策。理由——OrangeRender 的 BeginFrame/SubmitItem 路径目前只挂 swapchain color attachment，要让 PostProcessChain 真跑得引擎层先接全套 render-graph 边带（HDR off-screen target + ping-pong + descriptor set），一个 task 装不下。把"接口可用 + 默认链描述就位"先抽出来，下游 Pipeline / Sample 集成 task 各自有清晰边界。
+  - **D2 = plugin 风格（IPostProcessPass 抽象基类 + Setup/Execute）**：用户决策。与 docs/extension-points.md "RenderPass 注入" 的 IRenderPass 抽象一致——后处理本质是渲染 pass 的子集，复用同一个心智模型。data-driven 描述符风格虽然序列化友好，但默认链所有 pass 都是引擎自家提供的具体类，不需要先经过 desc → impl 的 dispatch。等到 Phase 5 序列化场景配置时再考虑加 desc 层。
+  - **D3 = CreateDefault 给可改的链（不锁死开关）**：用户决策。`BuiltinPostProcessChain::CreateDefault()` 返回完整 4-pass chain，调用方可以 `chain.RemoveAt` / `chain.AddPass` / `chain.PassAt(i)->As<BloomPass>()` 自由调整——不在 chain / pass 上加 enable bool flag，"是否跑某 pass" 由是否在 chain 里决定。这条与 ECS 把 component-storage 当 single source of truth 的风格一致，避免 `enable=false` 与 "remove 掉" 两种禁用方式并存导致语义模糊。
+  - **Setup / Execute 空 context 占位**：当前两个 context 是空 struct，签名却已经定下。Phase 5 RenderGraph 接通时，给 SetupContext 加 `RenderGraphBuilder& builder`、给 ExecuteContext 加 `Orange::Renderer::IRenderer& renderer`、当前帧 uniform / 输入输出 texture view 等字段。子类实现签名不变，新字段只是给具体 pass impl 补可读取的输入——这层稳定性是 Task 03 选 plugin 风格的核心收益。
+  - **PassAt 返回 IPostProcessPass\***：用户取得后用 dynamic_cast 落到具体类（`PassAt(1) -> dynamic_cast<BloomPass*>`）；不在 IPostProcessPass 上加 As<T> 模板 helper（那会绑死 RTTI 风格 + 增加 surface area）。0.x 阶段 dynamic_cast 是可接受的成本。
+  - **HdrPass 当前是空 marker**：HDR 真正生效需要 Pipeline 在 SubmitItem 路径上额外开一张 RGBA16F off-screen color target；那是后续 task 的事。本 task 把 HdrPass 留作 chain 头节点的 marker——Phase 3 / Task 06 真接 Pipeline 时识别 chain[0] 是 HdrPass 就切到 HDR 渲染目标。
+  - **LutPass 持 `AssetHandle<TextureAsset>`**：与 RenderableComponent 的 texture handle 同模式，未来切到真正的 3D LUT texture（17×17×17 unrolled to 2D atlas，Phase 3 / Task 06 与 sample 一并接入）时不破公共面。
+  - **不动 Pipeline / RenderableComponent / sample**：所有现存 ctest 与 sample 行为不变。
+- 验证方式：`tests/render/PostProcessChainTest.cpp` 通过 ctest，覆盖 5 条路径：
+  1. `PostProcessChain` 默认空 + AddPass / PassCount 行为；
+  2. `RemoveAt` / `Clear` 后 PassCount 归零、原指针失效；
+  3. `FindByName` 命中 + 不命中 → nullptr；
+  4. `BuiltinPostProcessChain::CreateDefault()` 返回 4-pass chain，顺序为 hdr / bloom / tonemap / lut；每个 pass 的 Name() 与具体类型（dynamic_cast）匹配；
+  5. 取出 `BloomPass*` / `TonemapPass*` 后修改其 public 参数（threshold / intensity / exposure）能持久——验证 D3 的"可改链"承诺。
+- 验收标准：cmake build 通过 + 12/12 ctest 全过（之前 11 + postprocess_chain_test 新增）+ install_smoke / config_smoke 不退化 + 现有 03/04 sample 行为不变。后处理模块的公共表面就绪——Task 04 起的自定义 shader 注入、Task 05 起的软阴影、Task 06 起的 sample 升级都可以引用这个 chain。
+- Critical Path：是
+
+#### Task 04：MaterialSystem 自定义 shader 注入接口 ✅
+- 描述：交付 `MaterialSystem`——把 Material 模板的注册 / 查询 / 实例化集中到一个值构造的容器类。`ShaderTemplateDesc` 描述（name + 顶点/片段 SPIR-V 路径 + uniform 列表 + 纹理槽列表）；`RegisterTemplate` 通过 AssetRegistry 加载 SPIR-V 落到 ShaderAsset handle 并把 Material 存进系统内表；`FindTemplate` 按名取 `const Material*`；`CreateInstance` 返回 `unique_ptr<MaterialInstance>` 绑到对应模板。**Pipeline 真按 MaterialInstance 路由 push-constant / 描述符是 Task 06 sample 升级的工作**——Task 04 与 Task 01/02/03 同节奏，仅交付"接口可用 + 注册路径打通"。
+- 输入：Phase 3 / Task 02（BuiltinMaterials 已稳定，可作为内置 template 注册路径示例）+ Task 03（PostProcessChain 公共面）
+- 输出：
+  - `Proposed: include/orange/engine/render/MaterialSystem.h`（`struct ShaderTemplateDesc { name, vertexSpirvPath, fragmentSpirvPath, uniforms, textureSlots }`；`class MaterialSystem`：`explicit MaterialSystem(Asset::AssetRegistry&)` / `Result<void, ResultCode> RegisterTemplate(const ShaderTemplateDesc&)` / `const Material* FindTemplate(std::string_view) const` / `std::unique_ptr<MaterialInstance> CreateInstance(std::string_view)` / `std::size_t TemplateCount() const` / `Result<void, ResultCode> RegisterBuiltins()`）
+  - `Proposed: src/render/MaterialSystem.cpp`（PIMPL：`std::unordered_map<std::string, Material>` + `Asset::AssetRegistry&` 引用；RegisterTemplate 走 `registry.Load<ShaderAsset>` 加载 SPIR-V → 构造 Material → 存入 map）
+  - `Modified: src/render/RenderHeaderCheck.cpp`（追加 MaterialSystem.h）
+  - `Modified: CMakeLists.txt`（orange_engine 源列表加 src/render/MaterialSystem.cpp）
+  - `Modified: docs/extension-points.md`（更新示例：去掉 `app.GetMaterialSystem()` 形式，改为 `MaterialSystem matSys(registry); matSys.RegisterTemplate(desc);`）
+  - `Proposed: tests/render/MaterialSystemTest.cpp`
+  - `Modified: tests/CMakeLists.txt`（注册 material_system_test）
+- 影响路径/模块：Render（仅新增 MaterialSystem 子面）、tests、构建系统、docs/extension-points
+- 前置依赖：Task 03
+- 实现要点：
+  - **D1 = ownership 走实例化模式（值类型，非 AppHost-managed、非 singleton）**：用户决策。MaterialSystem 由调用方自己持有（典型场景：sample / 游戏代码在 main 里建一个、给 Pipeline 借引用），与 PostProcessChain 同节奏；理由——0.x 阶段不强制 AppHost 拥抱所有子系统，需要时升级到 `app.GetMaterialSystem()` 不破公共面，且实例化模式对单元测试更友好。docs/extension-points.md 同步去掉旧的 `app.GetMaterialSystem()` 示例。
+  - **D2 = shader 输入走 SPIR-V 路径，不接运行时 GLSL 编译**：用户决策。`ShaderTemplateDesc` 的 `vertexSpirvPath` / `fragmentSpirvPath` 是 .spv 文件路径，与内置 toon/rim_light 同走 `AssetRegistry::Load<ShaderAsset>`；游戏侧自己用 glslangValidator 编 .spv 喂给 RegisterTemplate。运行时编译 / hot-reload 留给 Phase 6。
+  - **D3 = 不接 Pipeline，与 Task 03 同节奏**：用户决策。Task 04 仅"建表"，Pipeline 仍走 Phase 2 / Task 07 的硬编码 push-constant 路径不动；Task 06 sample 升级时把 Pipeline 接通 MaterialInstance 路由——RenderableComponent 的当前 texture 槽与硬编码 shader 在 Task 06 一并替换为 MaterialInstance 引用。Task 04 不动 RenderableComponent / Pipeline / RenderScene，所有现存 ctest / sample 行为不变。
+  - **持 `AssetRegistry&` 引用而非每次传参**：MaterialSystem 构造时绑定 registry 引用并存为成员；调用方负责让 registry 活到 system 析构。这与 Pipeline::Initialize 持有的 registry 引用同模式——子系统需要长期访问 AssetRegistry 时就在构造时绑定，避免每个 RegisterTemplate 调用都重新传参。
+  - **RegisterTemplate 失败语义**：返回 `Result<void, ResultCode>`；name 重复 → AlreadyExists；SPIR-V 加载失败 → 仍把 template 落地（Material 字段填全、shader handle 用无效 handle，与 BuiltinMaterials::LoadToon 同语义）但返回错误码，调用方可以 ignore。这与 BuiltinMaterials 的"加载失败也填 schema"策略对齐——0.x 阶段允许"半残 template"作为可观测中间态。
+  - **`RegisterBuiltins()` helper**：单独一个方法内部调用 `BuiltinMaterials::LoadToon` / `LoadRimLight` 把两个内置 template 注册进 system，避免每个 sample / test 重复"建 system + 注册内置"样板。Task 02 的 BuiltinMaterials 函数仍独立可用，RegisterBuiltins 只是 system 上的便利包装。
+  - **CreateInstance 返回 `std::unique_ptr<MaterialInstance>`**：MaterialInstance 已 Task 01 走 PIMPL move-only；用 unique_ptr 让调用方持有所有权，绑定的 `const Material*` 由 system 表保活——只要 system 活着，所有由它创建的 instance 都安全。Material 在 unordered_map 里地址稳定（节点存储、不像 vector 因 rehash 失效），新 RegisterTemplate 不会让旧引用失效。
+  - **MaterialSystem 走 PIMPL**：`unordered_map<string, Material>` 在公共头里会传染 std::unordered_map / std::string 的复合类型；与 MaterialInstance 同思路把存储藏到 .cpp。公共头继续不漏 OrangeRender / Vulkan 类型。
+- 验证方式：`tests/render/MaterialSystemTest.cpp` 通过 ctest，覆盖 6 条路径：
+  1. 默认 MaterialSystem 构造后 TemplateCount == 0、FindTemplate("toon") == nullptr；
+  2. RegisterBuiltins() 后 TemplateCount == 2、FindTemplate("toon") / FindTemplate("rim_light") 都命中且 name 字段对；
+  3. 自定义 ShaderTemplateDesc 注册（用内置 toon.spv 路径作为占位 shader、自取一个新 name "test_template" + 若干 uniform）→ FindTemplate 命中、uniforms 数量与 desc 一致；
+  4. 重复 RegisterTemplate 同名返回 AlreadyExists、表内 template 不被覆盖；
+  5. CreateInstance("toon") 返回非 nullptr，绑定的 `Material->name == "toon"`；CreateInstance("nonexistent") 返回 nullptr；
+  6. 通过 CreateInstance 拿到的 MaterialInstance 上 SetUniform 命中 toon 的 uniform 名（验证 Task 01 silent-ignore 与 Task 04 system-managed Material 引用真正贯通）。
+- 验收标准：cmake build 通过 + 13/13 ctest 全过（之前 12 + material_system_test 新增）+ install_smoke / config_smoke 不退化 + 现有 03/04 sample 行为不变 + docs/extension-points.md 示例已同步至实例化模式。Material 模块的"注入扩展点"侧就绪——Task 06 升级 sample 时直接消费 MaterialSystem 走 MaterialInstance 路由。
+- Critical Path：是
+
+#### Task 05：软阴影 LightComponent + ShadowConfig + 着色侧产物 ✅
+- 描述：交付软阴影的"公共面 + 着色侧"——`DirectionalLight` ECS component（方向 + 颜色 + 强度 + 是否投影）+ `ShadowConfig`（map 分辨率 / PCF kernel / depth bias / normal bias）+ depth-only `shadow_caster` shader pair + 通用 PCF GLSL include 头（可被 toon/rim_light/自定义 shader 共用）+ `BuiltinShadowShaders::LoadShadowCaster` 工厂。**Pipeline 真接通 shadow pass / shadow map 资源管理 / 主 pass 采样 shadow map 推到 Task 07**（与 multi-entity demo 一并接）——Task 05 与 Task 04 同节奏，仅交付"数据 / 着色侧 + 单元测试"。
+- 输入：Phase 3 / Task 04（MaterialSystem 已可注册 template）
+- 输出：
+  - `Proposed: include/orange/engine/render/LightComponent.h`（`struct DirectionalLight { glm::vec3 direction; glm::vec3 color; float intensity; bool castsShadow; }` —— ECS component；运行时 light view / proj 由 Pipeline 在 ShadowPass 实时计算，不存进 component）
+  - `Proposed: include/orange/engine/render/ShadowConfig.h`（`struct ShadowConfig { uint32_t mapResolution = 1024; uint32_t pcfKernelRadius = 1; float depthBias = 0.005f; float normalBias = 0.01f; }` —— per-pipeline 全局配置，Task 07 接 Pipeline 时由 `Pipeline::SetShadowConfig` 消费）
+  - `Proposed: src/render/builtin_shaders/shadow_caster.vert.glsl`（顶点 layout = pos；push-constant block = uLightViewProj(64) + uModel(64)；输出 gl_Position）
+  - `Proposed: src/render/builtin_shaders/shadow_caster.frag.glsl`（空 main —— 只写 depth attachment，Vulkan 默认 GL_LESS 接管）
+  - `Proposed: src/render/builtin_shaders/include/shadow_pcf.glsl.inc`（`float SamplePcfShadow(sampler2D shadowMap, vec3 worldPos, mat4 lightViewProj, int kernelRadius, float depthBias)` —— 3x3 / 5x5 box filter PCF；调用方用 `#include "include/shadow_pcf.glsl.inc"` 拉进自己 fragment shader）
+  - `Proposed: include/orange/engine/render/BuiltinShadowShaders.h`（`namespace BuiltinShadowShaders`：`struct ShaderPair { Asset::AssetHandle<Asset::ShaderAsset> vertex; Asset::AssetHandle<Asset::ShaderAsset> fragment; };` + `ShaderPair LoadShadowCaster(Asset::AssetRegistry&)`）
+  - `Proposed: src/render/BuiltinShadowShaders.cpp`（与 BuiltinMaterials.cpp 同模式：.exe-相对路径 + AssetRegistry dedup）
+  - `Modified: CMakeLists.txt`（追加 2 个 `orange_engine_compile_builtin_shader` 调用：shadow_caster.vert / shadow_caster.frag；shadow_pcf.glsl.inc 不直接编 SPIR-V，由 glslangValidator 通过 `-I src/render/builtin_shaders` include path 拉进来）
+  - `Modified: src/render/RenderHeaderCheck.cpp`（追加 LightComponent.h / ShadowConfig.h / BuiltinShadowShaders.h）
+  - `Modified: CMakeLists.txt`（orange_engine 源列表加 BuiltinShadowShaders.cpp）
+  - `Proposed: tests/render/LightAndShadowTest.cpp`
+  - `Modified: tests/CMakeLists.txt`（注册 light_and_shadow_test）
+- 影响路径/模块：Render（新增 light/shadow 子面）、tests、构建系统
+- 前置依赖：Task 04
+- 实现要点：
+  - **D4 = 不接 Pipeline，与 Task 04 同节奏**：用户决策。Pipeline 真跑 shadow pass = 第一遍 depth-only 用 light view/proj 渲场景到 shadow map → 主 pass 把 shadow map 作描述符喂给 fragment shader；这两件事放到 Task 07 一起接通（届时 Pipeline 还会顺带加 shadow render target / sampler / descriptor-set 一整套）。Task 05 不动 Pipeline.cpp / RenderScene.cpp。
+  - **算法 = PCF（Phase 3 核心任务列表既定）**：选 PCF 而非 VSM——PCF 实现简单 / 与 Vulkan depth sampler 自然对齐 / 不需要单独的 moment-computation pass / 与卡通照明的"硬边阴影 + 微羽化"美术目标契合。VSM 留给 Phase 6 视觉调优时再评估。
+  - **DirectionalLight 不存 light view / light proj 矩阵**：light view 由 light direction + scene bounding box 在 Pipeline shadow pass 实时算，不是 ECS data；component 只存方向 + 颜色 + 强度 + 是否投影——ECS schema 紧凑、避免 player 修改 component 字段时把 view 矩阵设错。
+  - **不修改 toon / rim_light frag shader**：让 sample 03/04 行为完全不变是 Task 05 的硬约束——一旦 frag 引入 light UBO / shadow map 描述符，Pipeline 不绑就是 undefined behavior（validation layer 会爆）。toon / rim_light 接 light + shadow 的 shader 改动放到 Task 07，与 Pipeline 接通描述符同 patch。
+  - **shadow_pcf.glsl.inc 是 #include 头，不是独立 ShaderAsset**：glslangValidator 在编译 .frag.glsl 时通过 `-I src/render/builtin_shaders` include path 拉进来；与"shader 走 AssetRegistry 加载，不裸 fopen"约束不冲突——所有展开都在编译期、运行时仍然只加载完整 SPIR-V。
+  - **shadow_caster push-constant 仅放 uLightViewProj + uModel**：Vulkan 最低 128 B 容得下两个 mat4 = 128 B 整好，不需要 UBO。Pipeline 在 Task 07 接通 shadow pass 时按 per-draw 设置 uModel、按 per-frame 设置 uLightViewProj——shadow_caster 不需要描述符集，最朴素的 depth-only pass。
+  - **shadow_caster.frag 是空 main**：Vulkan 允许 fragment shader 完全省略，但留一个空 main 让 SPIR-V pipeline 默认行为可预测（不依赖 driver fallback）；深度写由 depth attachment 默认接管。
+  - **ShadowConfig 是值结构体**：与 PostProcessChain 默认参数同思路，开箱即用 default 合理（1024 阴影图 + 3x3 PCF + 0.005 depth bias 是卡通/PCG 类游戏的常见基线）。Task 07 `Pipeline::SetShadowConfig` 消费时直接 by-value 拷贝。
+  - **BuiltinShadowShaders 与 BuiltinMaterials 平行**：单独一个 namespace 而不是塞进 BuiltinMaterials——shadow_caster 不是 Material（没 uniform 描述符 / 没 texture 槽，是 Pipeline-managed shader pair），强行套进 Material 会让 Material 的语义模糊。Task 07 Pipeline 接 shadow pass 时直接拿 ShaderPair 的 handle 不经过 MaterialSystem。
+- 验证方式：`tests/render/LightAndShadowTest.cpp` 通过 ctest，覆盖 4 条路径：
+  1. DirectionalLight 默认构造字段合理（方向是单位向量 / 颜色白 / 强度 1 / castsShadow false）；
+  2. ShadowConfig 默认值合理（1024 / 1 / 0.005 / 0.01）+ 字段独立可改且不串；
+  3. World 里挂一个带 DirectionalLight 的 entity → 通过 `world.View<DirectionalLight>()`（或等价 EnTT 查询）能查询出来，验证 component 类型可用作 ECS component；
+  4. `BuiltinShadowShaders::LoadShadowCaster` 返回的 vertex / fragment handle 都有效；重复调用同一 registry 上 dedup 命中（与 BuiltinMaterials 同语义）。
+- 验收标准：cmake build 通过（toon/rim_light/shadow_caster 共 6 个 SPIR-V 编出，shadow_pcf.glsl.inc 通过 include path 解析）+ 14/14 ctest 全过（之前 13 + light_and_shadow_test 新增）+ install_smoke / config_smoke 不退化 + 现有 03/04 sample 行为完全不变（toon/rim_light frag 没碰）。Light + Shadow 模块的着色侧就绪——Task 07 Pipeline 接通时引用这套 component / shader / config 即可。
+- Critical Path：是
+
+#### Task 06：升级 `samples/04_3d_mesh_with_bloom`（Pipeline 接通 MaterialInstance + PostProcessChain 真路径）
+- 描述：把 Task 03（PostProcessChain 接口）+ Task 04（MaterialSystem 注册）的 stub 真正跑起来——Pipeline 加 HDR off-screen color target（RGBA16F）+ bloom mip-chain（downsample 6 levels + upsample 6 levels + composite）+ tonemap fullscreen pass + LUT pass（handle 无效时 no-op bypass）；Pipeline 按 RenderableComponent 上的 MaterialInstance 反查 Material → 编 RHI Pipeline state → 按 instance 覆盖打 push-constant；RenderableComponent 的 `materialInstance`（替代当前的 hardcoded texture handle）作为新 ECS schema。新增 sample `04_3d_mesh_with_bloom` 用 BuiltinMaterials::LoadToon + BuiltinPostProcessChain::CreateDefault，演示一个旋转立方体在 HDR 卡通照明 + bloom + tonemap 下的视觉。**Shadow pass 不在本 task 范围**——见 Task 07。
+- 输入：Phase 3 / Task 03 + Task 04 + Task 05（Task 05 完成后 BuiltinShadowShaders 可用，但 Task 06 不消费 shadow 路径）
+- 输出：
+  - `Proposed: src/render/builtin_shaders/bloom_downsample.vert.glsl` + `bloom_downsample.frag.glsl`（fullscreen triangle + 13-tap downsample，Karis 平均防 fireflies）
+  - `Proposed: src/render/builtin_shaders/bloom_upsample.vert.glsl` + `bloom_upsample.frag.glsl`（fullscreen triangle + 9-tap tent filter upsample + add）
+  - `Proposed: src/render/builtin_shaders/tonemap.vert.glsl` + `tonemap.frag.glsl`（fullscreen triangle + ACES Narkowicz fit 算子，按 push-constant 喂 exposure）
+  - `Modified: include/orange/engine/render/RenderableComponent.h`（替换硬编码 texture handle 字段为 `MaterialInstance* materialInstance`——MaterialInstance 由 sample / 游戏代码持有；component 只存非拥有指针，避免在 ECS schema 里嵌 PIMPL 类型）
+  - `Modified: include/orange/engine/render/Pipeline.h`（追加 `void SetPostProcessChain(PostProcessChain* chain)`、`void SetMaterialSystem(MaterialSystem* system)` —— 两个非拥有指针，Pipeline 在 Render 时按它们路由）
+  - `Modified: src/render/Pipeline.cpp`（大改：HDR target 创建 + bloom chain 资源 + tonemap pass + MaterialInstance 路由 + per-MaterialTemplate RHI Pipeline 缓存——`unordered_map<const Material*, RhiPipeline>` 第一次见 template 时编 Pipeline、之后复用）
+  - `Modified: src/render/PostProcessPasses.cpp`（HdrPass / BloomPass / TonemapPass / LutPass 的 Setup / Execute 真填内容；与 PostProcessSetupContext / ExecuteContext 一并扩字段——见下面实现要点）
+  - `Modified: include/orange/engine/render/IPostProcessPass.h`（PostProcessSetupContext / ExecuteContext 由空 struct 升级为含 RenderGraphBuilder 引用 / Renderer 引用 / 输入输出 texture view 的有内容 struct；接口签名不破，子类 Setup/Execute 仍是同样原型）
+  - `Proposed: samples/04_3d_mesh_with_bloom/CMakeLists.txt` + `samples/04_3d_mesh_with_bloom/main.cpp`（与 04_3d_mesh 同骨架：World + Pipeline + MaterialSystem + PostProcessChain；旋转立方体挂 toon MaterialInstance）
+  - `Modified: samples/CMakeLists.txt`（注册新 sample）
+  - `Modified: src/render/RenderScene.cpp`（drawable 收集时把 RenderableComponent.materialInstance 一并带进 drawable 描述）
+- 影响路径/模块：Render（重写绘制路径）、samples、构建系统
+- 前置依赖：Task 03 / 04 / 05
+- 实现要点：
+  - **此 task 是 Phase 3 范围最大的一项**：Pipeline 改动跨 HDR target / bloom mip-chain / tonemap / MaterialInstance 路由四件事——出现 scope creep（例如想顺手接 shadow pass）时优先把 LUT 真路径推给 Task 07，本 task LUT 维持"handle 无效时 no-op"。Shadow pass 已经被 D4 决策推给 Task 07，本 task 不接。
+  - **MaterialInstance 路由 = per-template Pipeline 缓存**：Pipeline 内部维护 `unordered_map<const Material*, RhiPipelineDesc>`——第一次见到某 Material 时按它的 vertexShader / fragmentShader / uniform 布局编 RHI Pipeline、之后切 MaterialInstance 不重编。这与 extension-points "每个 MaterialTemplate 编译为一个 RHI Pipeline；切换 MaterialInstance 不重新编译"约定一致。
+  - **RenderableComponent 持非拥有 MaterialInstance\***：MaterialInstance 由 sample / 游戏代码持有（典型：用 std::vector<std::unique_ptr<MaterialInstance>> 在 main 里管），component 只存裸指针。理由——MaterialInstance 是 PIMPL move-only 类型，嵌入 EnTT archetype 会触发整行迁移成本；非拥有指针让 component 仍是 trivially-copyable 的小数据。生命周期约束：sample 析构 MaterialInstance 前必须先析构 World 或清掉所有引用——加文档但不在运行时强制。
+  - **HDR target 选 RGBA16F**：与 OrangeRender 主线 swap-chain 兼容；在主 pass 写到 RGBA16F off-screen color、bloom chain 的 mip 也用 RGBA16F、tonemap 时把 RGBA16F 读出来 ACES → 写到 swap-chain 的 LDR target。LUT pass handle 无效时 tonemap 直接写 swap-chain（chain 里检测到 LutPass.lut 无效就跳过）。
+  - **PostProcessSetupContext / ExecuteContext 字段扩展**：SetupContext 加 `RenderGraphBuilder& builder`、`HandleResource hdrColor`（链头）、`HandleResource swapchainColor`（链尾）；ExecuteContext 加 `IRenderer& renderer`、`uint32_t frameIndex`、当前 pass 的输入输出 view。这两个 context 的具体字段在 Task 06 实现时确定——只要 IPostProcessPass 子类签名（`virtual void Setup(PostProcessSetupContext&)`）不变，扩 context 字段不破。
+  - **bloom 算法 = COD AW 风格 mip-chain**：6 levels downsample + 6 levels upsample，Karis 平均做 luminance-weighted 防 fireflies、tent filter 上采，BloomPass.threshold / intensity 按 push-constant 喂。这条算法在 Phase 6 视觉调优时可能换；当前选它的理由是实现简单 + 移动端友好 + 广泛验证过。
+  - **tonemap 算子 = ACES Narkowicz fit**：单步 ALU 算子（5 行 GLSL），不需要 LUT。LutPass 的真正色彩分级（3D LUT 17×17×17 unrolled）等到 Task 07 / Phase 6 资产管线就绪再接。
+  - **不动 03_textured_quad / 02_ecs_basics / 01_minimal_window**：sample 03 当前用硬编码 textured shader，Task 06 改 RenderableComponent 后 sample 03 必须同步迁移到 MaterialInstance（或者先保留旧硬编码路径走 fallback）—— 决策：sample 03 顺手迁移到 MaterialSystem 注册的 "textured" template（用现有 textured_mesh.vert/frag SPIR-V），让 Pipeline 不需要保留两条绘制路径。这条迁移在 Task 06 内部完成。sample 04（旧的）也同步迁移；新 sample `04_3d_mesh_with_bloom` 与旧 04 不冲突——名字不同的两个 .exe 共存。
+  - **Pipeline::SetPostProcessChain / SetMaterialSystem 是非拥有指针**：与 RenderableComponent 持 MaterialInstance\* 同思路。Pipeline 不接管 chain / system 的生命周期，调用方按 main 函数作用域管。
+- 验证方式：
+  1. cmake build 通过（新增 6 个 SPIR-V：bloom_downsample/up + tonemap × vert/frag = 6；加上 shadow 的 2 个 = 8 个新；toon/rim_light 4 个不变 = 总 12 个 .spv）；
+  2. `04_3d_mesh_with_bloom.exe` 启动后窗口内显示一个 toon 着色的旋转立方体，bloom + tonemap 视觉与 reference 截图（PR review 时附）一致；
+  3. 现有 ctest 12 个不退化（Task 04 的 13 + Task 05 的 14）+ install_smoke / config_smoke 不退化；
+  4. 现有 03_textured_quad / 04_3d_mesh sample 迁移到 MaterialInstance 路径后视觉等价——按现有 PR review 的截图对比验证。
+- 验收标准：上述 4 条 + 新 sample 在 PR 审核时附运行截图。Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 视觉基线达到"单 mesh + 后处理"水平；Task 07 起在此基础上加 shadow + multi-entity demo。
+- Critical Path：是
+
+#### Task 07：`samples/07_full_pipeline` 雏形（Pipeline 接通 shadow pass + multi-entity 综合演示）
+- 描述：把 Task 05 的 Light/Shadow 公共面接通 Pipeline——shadow render target（depth attachment）+ shadow pass（用 `BuiltinShadowShaders::LoadShadowCaster` 渲场景到 shadow map）+ 主 pass 加 light UBO + shadow sampler 描述符；toon / rim_light fragment shader 改为 `#include "include/shadow_pcf.glsl.inc"` 后乘 PCF 阴影系数。新增 sample `07_full_pipeline`：多 entity（≥3 个 mesh，分别挂 toon / rim_light / 一个 textured material）+ 一个 DirectionalLight + 完整 PostProcessChain，演示 Phase 3 视觉基线综合。
+- 输入：Phase 3 / Task 06（Pipeline 已接 PostProcessChain / MaterialInstance 真路径）
+- 输出：
+  - `Modified: include/orange/engine/render/Pipeline.h`（追加 `void SetShadowConfig(const ShadowConfig&)`；可选 `void SetDirectionalLight(...)` 或者由 Pipeline 自己 `world.View<DirectionalLight>()` 取——见下面实现要点）
+  - `Modified: src/render/Pipeline.cpp`（shadow pass 实现：depth-only target / per-frame light UBO / 第一遍 shadow_caster 绘 scene / 主 pass 绑 shadow sampler 给 fragment shader）
+  - `Modified: src/render/builtin_shaders/toon.frag.glsl`（push-constant 仍 ≤ 128 B；新增 descriptor set 0 binding 0 = shadow sampler、binding 1 = light UBO（uLightViewProj + uLightDir + uLightColor + uLightIntensity）；`#include "include/shadow_pcf.glsl.inc"` + 乘 PCF 阴影系数）
+  - `Modified: src/render/builtin_shaders/rim_light.frag.glsl`（同 toon 改动）
+  - `Modified: include/orange/engine/render/BuiltinMaterials.h`（如果 Material.uniforms 需要因 push-constant 重排而调整 desc，则同步）
+  - `Modified: src/render/BuiltinMaterials.cpp`（同上）
+  - `Proposed: samples/07_full_pipeline/CMakeLists.txt` + `samples/07_full_pipeline/main.cpp`
+  - `Modified: samples/CMakeLists.txt`（注册新 sample）
+- 影响路径/模块：Render（Pipeline + 内置 shader 双侧）、samples、构建系统
+- 前置依赖：Task 06
+- 实现要点：
+  - **D5 = 07_full_pipeline 当多 entity + 多 material 拼 demo 关卡**：用户决策。Task 06 已经是"单 mesh + 后处理"的视觉基线；Task 07 的差异化产出是 ≥3 entity / ≥2 material template / DirectionalLight + shadow / 完整 PostProcessChain 的综合演示，作为 Phase 3 的真正里程碑。
+  - **shadow pass 接通由 Task 07 一次性做完**：Task 05 已经把 shadow_caster shader / shadow_pcf .inc / DirectionalLight component / ShadowConfig 都准备好了——Task 07 只需在 Pipeline 加 depth render target、按每帧 DirectionalLight 算 light view-proj、跑第一遍 shadow_caster、把 shadow map 作 sampler 喂给主 pass。
+  - **toon / rim_light frag 改动是 Task 07 范围**：Task 05 留下来不动是为了让 sample 03/04 不退化；Task 07 改动后 sample 03/04 / 04_3d_mesh_with_bloom 也都跟着进入 shadowed 主 pass——Pipeline 在没有 DirectionalLight 时仍要绑一张 1×1 的"全亮 dummy shadow map"作 fallback，让 fragment shader 不需要分支 `#ifdef HAS_SHADOW`。
+  - **light 来源 = Pipeline 主动 World::View 取**：Pipeline.cpp 内部 `world.View<DirectionalLight>()` 取第一个（或用 `IsPrimary` 标记，0.x 阶段先取 first），不需要在 Pipeline 上加 SetDirectionalLight API——这与 Pipeline 已经 `world.View<RenderableComponent>` 收集 drawable 同模式，多 light 的 priority / count limits 等 API 留给 Phase 6。
+  - **light UBO = per-frame，不 per-draw**：light UBO 在 Pipeline 主 pass 起点写一次、所有 drawable 共用同一描述符 binding。push-constant 仍只放 per-draw 数据（uMVP + 颜色等）——Task 02/05 写过的"两者都不需要 UBO"在 Task 07 正式打破，但只引入一个 frame-level UBO，不 per-draw。
+  - **样本范围**：07_full_pipeline 至少展示 3 个 entity（toon 立方体 / rim_light 球 / textured 平面），1 个 DirectionalLight 做投影，PostProcessChain 默认 4-pass，光源转动让 shadow 跟着变化——验证 shadow pass 真的随帧重渲。
+  - **不动 04_3d_mesh_with_bloom**：Task 06 sample 走完后由 Task 07 的 toon.frag 改动连带迁移到 shadowed 路径——视觉上多了软阴影（如果场景里没 light，走 dummy shadow map = 等价于 Task 06 视觉）。无 light 场景仍能跑是 Pipeline 兼容性的硬约束。
+- 验证方式：
+  1. cmake build 通过（toon/rim_light frag 重编后 SPIR-V 数不变；shadow_caster 在 Task 05 已就位）；
+  2. `07_full_pipeline.exe` 启动后窗口内 ≥3 个 mesh 显示，1 个 entity 投影另一 entity 在地面/平面上、随光源转动阴影位移；
+  3. 现有 sample 03_textured_quad / 04_3d_mesh / 04_3d_mesh_with_bloom 行为等价（视觉上多软阴影，但场景结构不退化）；
+  4. ctest 14 不退化、install_smoke / config_smoke 不退化。
+- 验收标准：上述 4 条 + 新 sample 在 PR 审核时附运行截图（重点对比 light 转动时的 shadow 跟随）。Phase 3 完成标准的"软阴影"项兑现——Phase 3 收尾后只剩 Task 08 自定义 shader sample 验证 MaterialSystem 扩展点。
+- Critical Path：是
+
+#### Task 08：自定义 shader sample（验证 MaterialSystem::RegisterTemplate 扩展点）
+- 描述：交付 `samples/08_custom_shader`——一个独立 sample 演示游戏侧不修改引擎源码、用 MaterialSystem::RegisterTemplate 注册自己的 shader（一个简化的 fresnel / dissolve / 流光风格 shader）+ 一个挂着这个自定义 MaterialInstance 的 entity。这是 Phase 3 完成标准里"自定义 shader 注入 API 通过 sample 验证"的兑现项；同时是 Phase 3 收尾里程碑（Phase 3 完成所有六任务后视觉基线稳定，Phase 4 起开 Animation / Physics）。
+- 输入：Phase 3 / Task 04（MaterialSystem）+ Task 06（Pipeline 真按 MaterialInstance 路由）+ Task 07（toon/rim_light 已迁到 shadowed 路径）
+- 输出：
+  - `Proposed: samples/08_custom_shader/shaders/fresnel.vert.glsl` + `fresnel.frag.glsl`（顶点 layout pos+uv 与内置一致，push-constant uMVP + uFresnelColor + uFresnelPower + uPulseSpeed；fragment 用 fresnel = pow(1 - dot(N, V), uFresnelPower) 加时间脉动；与 toon/rim_light 走同样 descriptor set 0 的 light UBO + shadow sampler binding，验证"游戏侧自定义 shader 也能享受 shadow"）
+  - `Proposed: samples/08_custom_shader/CMakeLists.txt`（在 sample 目录里调用 glslangValidator 编 fresnel.vert/frag .spv 落到 sample 的 RUNTIME 输出目录，不在 orange_engine_compile_builtin_shader 里——**自定义 shader 的编译归 sample / 游戏侧负责**，extension-points 也是这么写的）
+  - `Proposed: samples/08_custom_shader/main.cpp`（建 World + AssetRegistry + MaterialSystem(registry) + matSys.RegisterBuiltins() + 用 ShaderTemplateDesc 注册 fresnel template + matSys.CreateInstance("fresnel") + entity 挂 MaterialInstance + 一个 DirectionalLight + 完整 PostProcessChain；摄像机绕 entity 旋转）
+  - `Modified: samples/CMakeLists.txt`（注册 08_custom_shader）
+- 影响路径/模块：samples、构建系统（仅 sample 一侧；引擎不动）
+- 前置依赖：Task 04 / 06 / 07
+- 实现要点：
+  - **核心承诺：sample 不 #include 任何 src/ 内部头**：自定义 shader sample 必须只通过公共 include/orange/engine/ 头消费引擎，验证 extension-points "游戏需要能不修改引擎源码地注册自己的 shader" 不是空话。
+  - **shader 编译归 sample 自己**：sample CMakeLists 自己 add_custom_command 调 glslangValidator——与 extension-points 已写明的"shader 文件路径走 Asset 系统加载"一致。引擎只负责加载 .spv，不负责编 .glsl→.spv。
+  - **fresnel shader 走与内置一致的 descriptor set 0**：light UBO + shadow sampler binding 和 toon/rim_light 同 layout——这是 sample 的隐性合同，验证"自定义 shader 也能消费引擎 frame-level uniform"。文档化：`docs/extension-points.md` 加一条"自定义 shader 必须把 descriptor set 0 binding 0/1 留给引擎 light UBO + shadow sampler"。
+  - **uniform / texture 槽显式声明**：`ShaderTemplateDesc.uniforms` 列出 uFresnelColor / uFresnelPower / uPulseSpeed 三项，与 push-constant block 的字段顺序对齐。这条与 extension-points "ShaderSourceDesc 必须显式声明 uniform 与纹理槽——引擎不在运行时反射 SPIR-V 自动生成"一致。
+  - **不为 sample 单独写 ctest**：08_custom_shader 是视觉验证 sample，验证靠 PR 截图 + 启动不崩；ctest 不增加（与 03/04 sample 同策略）。如果未来发现 RegisterTemplate 路径有 silent failure，回 Task 04 的 material_system_test 加路径而不是给 sample 加 ctest。
+- 验证方式：
+  1. cmake build 通过（sample 的 glslangValidator 调用产出 fresnel.vert.spv / frag.spv 到 `${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/shaders/sample_08/`）；
+  2. `08_custom_shader.exe` 启动后窗口内 entity 显示 fresnel rim 效果 + 时间脉动 + DirectionalLight 投影正常；
+  3. ctest 14 个不退化、install_smoke / config_smoke 不退化、其它 sample 不退化。
+- 验收标准：上述 3 条 + 新 sample 在 PR 审核时附运行截图。Phase 3 完成标准全部兑现：① Material 系统支持 uniform 块 + 纹理槽 + 自定义 shader；② PostProcessChain 至少串通 Bloom + Tonemap 两个 pass；③ 自定义 shader 注入 API 通过 sample 验证。Phase 4 可以开始。
 - Critical Path：是
 
 ### Phase 4：可玩性

@@ -27,6 +27,9 @@ orange_engine_add_test(render_interface_test    render/RenderInterfaceTest.cpp)
 orange_engine_add_test(render_scene_test        render/RenderSceneTest.cpp)
 orange_engine_add_test(material_interface_test  render/MaterialInterfaceTest.cpp)
 orange_engine_add_test(builtin_materials_test   render/BuiltinMaterialsTest.cpp)
+orange_engine_add_test(postprocess_chain_test   render/PostProcessChainTest.cpp)
+orange_engine_add_test(material_system_test     render/MaterialSystemTest.cpp)
+orange_engine_add_test(light_and_shadow_test    render/LightAndShadowTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
