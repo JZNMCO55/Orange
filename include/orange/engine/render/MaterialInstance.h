@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 namespace Orange::Engine::Render
@@ -72,11 +73,27 @@ public:
     void SetTexture(std::uint32_t binding,
                     Asset::AssetHandle<Asset::TextureAsset> handle);
 
-    // 单元测试 / Pipeline 内部用的存在性查询。Phase 3 / Task 02 起会再
-    // 加 read-back 接口（取覆盖值用于 push-constant / UBO 写入）；当前
-    // 阶段的最小 surface 只暴露 has-/no- 二态。
+    // 存在性查询，用于单元测试 / Pipeline 走 fast-path 跳过未覆盖的
+    // uniform 槽。
     bool HasUniformOverride(std::string_view name) const noexcept;
     bool HasTextureOverride(std::uint32_t binding) const noexcept;
+
+    // 读回 API —— Pipeline 在按 MaterialInstance 路由 push-constant /
+    // 描述符时按 Material.uniforms 列表逐项 GetUniformXxx；返回的
+    // optional 表示是否有 per-instance 覆盖（无覆盖时调用方应回退到
+    // Material 的默认值——0.x 阶段 Material 不存默认值，调用方按 zero
+    // 处理）。type 与签名不匹配时同样返回 nullopt。
+    std::optional<float>          GetUniformFloat(std::string_view name) const noexcept;
+    std::optional<std::int32_t>   GetUniformInt(std::string_view name) const noexcept;
+    std::optional<glm::vec2>      GetUniformVec2(std::string_view name) const noexcept;
+    std::optional<glm::vec3>      GetUniformVec3(std::string_view name) const noexcept;
+    std::optional<glm::vec4>      GetUniformVec4(std::string_view name) const noexcept;
+    std::optional<glm::mat4>      GetUniformMat4(std::string_view name) const noexcept;
+
+    // 取得 binding 对应槽位的覆盖纹理 handle。无覆盖时返回 default-init
+    // 的无效 handle（IsValid() == false）；调用方按 IsValid() 判定。
+    Asset::AssetHandle<Asset::TextureAsset>
+        GetTextureBinding(std::uint32_t binding) const noexcept;
 
 private:
     struct Impl;

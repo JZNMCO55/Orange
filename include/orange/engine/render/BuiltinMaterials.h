@@ -4,7 +4,10 @@
 // ---------------------------------------------------------------------------
 // BuiltinMaterials —— 引擎内置 Material 模板的工厂。
 //
-// Phase 3 / Task 02 起，引擎内置两个 Material 模板：
+// 引擎内置三个 Material 模板：
+//   * `textured`  —— 复用 Pipeline 既有的 textured_mesh shader 对，作为
+//                    "把 RenderableComponent 接入 MaterialInstance schema"
+//                    的最小过渡模板（程序式 checker，不真采样贴图）；
 //   * `toon`      —— 二阶 cel-shading（warm / cool 双色 + 法线驱动 banding）；
 //   * `rim_light` —— fresnel 风格 rim glow（边沿发光）。
 //
@@ -34,6 +37,13 @@ class AssetRegistry;
 
 namespace Orange::Engine::Render::BuiltinMaterials
 {
+
+// 加载内置 textured 模板。复用 Pipeline 既有的 textured_mesh shader 对：
+// 顶点 layout = pos+uv，push-constant block 仅 uMVP(mat4)，textureSlots
+// 声明 binding 0 = "uTexture"——当前 fragment shader 是程序式 checker，
+// 不实际采样这张贴图，但 schema 已对齐，等到 OrangeRender 暴露真 sampler
+// 路径时直接接入即可。语义同 LoadToon。
+ORANGE_ENGINE_API Material LoadTextured(Asset::AssetRegistry& registry);
 
 // 加载内置 toon 模板，返回完整可用的 Material（含已注册的 ShaderAsset
 // handle）。同 registry 上重复调用幂等，handle 沿用。

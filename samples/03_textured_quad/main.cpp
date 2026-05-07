@@ -3,15 +3,19 @@
 // 走通 ECS → Pipeline → OrangeRender 的完整数据流：
 //   1. 程序式构造一个 quad MeshAsset（4 顶点、6 索引、pos+uv）；
 //   2. 通过 AssetRegistry::Insert 注册到资源表，拿到 handle；
-//   3. ECS 里建一个 entity 挂 TransformComponent + RenderableComponent
-//      引用该 mesh handle；再建一个挂 Camera 的 entity 作为主相机；
-//   4. AppHost 主循环里，自定义 Layer 在 OnUpdate 时调 Pipeline.Render
+//   3. 建 MaterialSystem，注册内置 textured 模板，并 CreateInstance
+//      拿到 MaterialInstance；
+//   4. ECS 里建一个 entity 挂 TransformComponent + RenderableComponent
+//      引用该 mesh handle 与 MaterialInstance；再建一个挂 Camera 的
+//      entity 作为主相机；
+//   5. AppHost 主循环里，自定义 Layer 在 OnUpdate 时调 Pipeline.Render
 //      把这一帧画上屏。
 //
 // 当前 OrangeRender 的 RHI 还没把 sampler / descriptor-set 上线，
 // 所以 fragment shader 从 uv 程序式合成 checker 当 "贴图" 用——视
-// 觉效果是 8x8 棋盘 + 一点 uv 渐变。等 OrangeRender 暴露 sampler 路
-// 径后再切到真实 TextureAsset 采样。
+// 觉效果是 8x8 棋盘 + 一点 uv 渐变。textured Material 的 binding 0
+// 槽位已声明，等 fragment shader 真切到 sampler 采样时无需 schema
+// 改动。
 
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
@@ -20,8 +24,12 @@
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/asset/ShaderAsset.h>
+#include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/MaterialInstance.h>
+#include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -35,9 +43,13 @@ using namespace Orange::Engine;
 using Orange::Engine::Asset::AssetHandle;
 using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::MeshAsset;
+using Orange::Engine::Asset::ShaderAsset;
+using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::Camera;
+using Orange::Engine::Render::MaterialInstance;
+using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Scene::TransformComponent;
@@ -118,6 +130,15 @@ int main()
     auto host = std::move(hostResult).Value();
 
     AssetRegistry assets;
+    if (auto reg = assets.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "AssetRegistry::RegisterLoader<ShaderAsset> failed (code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+        return 1;
+    }
+
     auto meshHandleResult = assets.Insert<MeshAsset>("builtin/quad", MakeQuadMesh());
     if (meshHandleResult.IsErr())
     {
@@ -128,13 +149,32 @@ int main()
     }
     AssetHandle<MeshAsset> meshHandle = meshHandleResult.Value();
 
+    // MaterialSystem 注册内置模板（textured + toon + rim_light）；
+    // 拿出 textured 实例承载 Drawable.materialInstance。当前 Pipeline
+    // 仍走 hardcoded textured pipeline，instance 仅起 schema 贯通作用。
+    MaterialSystem materials(assets);
+    if (auto rb = materials.RegisterBuiltins(); rb.IsErr())
+    {
+        std::fprintf(stderr,
+                     "MaterialSystem::RegisterBuiltins failed (code=%u)\n",
+                     static_cast<unsigned>(rb.Error()));
+        return 1;
+    }
+    auto quadInstance = materials.CreateInstance("textured");
+    if (!quadInstance)
+    {
+        std::fprintf(stderr, "MaterialSystem::CreateInstance(\"textured\") returned null\n");
+        return 1;
+    }
+
     World world;
 
     auto quadEntity = world.CreateEntity();
     world.AddComponent(quadEntity, TransformComponent{});  // 默认放原点
     {
         RenderableComponent r;
-        r.mesh = meshHandle;
+        r.mesh             = meshHandle;
+        r.materialInstance = quadInstance.get();
         world.AddComponent(quadEntity, r);
     }
 

@@ -10,7 +10,6 @@
 
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/MeshAsset.h>
-#include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -24,7 +23,6 @@ using Orange::Engine::Entity;
 using Orange::Engine::World;
 using Orange::Engine::Asset::AssetHandle;
 using Orange::Engine::Asset::MeshAsset;
-using Orange::Engine::Asset::TextureAsset;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::RenderableComponent;
@@ -80,24 +78,24 @@ void TestRenderableComponentInWorld()
     Entity e = world.CreateEntity();
 
     RenderableComponent r;
-    r.mesh    = AssetHandle<MeshAsset>{42};
-    r.texture = AssetHandle<TextureAsset>{17};
-    r.visible = false;
+    r.mesh             = AssetHandle<MeshAsset>{42};
+    r.materialInstance = nullptr;  // 显式 nullptr 表示走 Pipeline fallback
+    r.visible          = false;
 
     world.AddComponent(e, r);
     auto* fetched = world.GetComponent<RenderableComponent>(e);
     assert(fetched != nullptr);
     assert(fetched->mesh.Value() == 42);
-    assert(fetched->texture.Value() == 17);
+    assert(fetched->materialInstance == nullptr);
     assert(fetched->visible == false);
 
-    // 默认构造的 visible 应为 true。
+    // 默认构造的 visible 应为 true，materialInstance 应为 nullptr。
     Entity e2 = world.CreateEntity();
     world.AddComponent(e2, RenderableComponent{});
     auto* defaulted = world.GetComponent<RenderableComponent>(e2);
     assert(defaulted->visible == true);
     assert(!defaulted->mesh.IsValid());
-    assert(!defaulted->texture.IsValid());
+    assert(defaulted->materialInstance == nullptr);
 
     world.RemoveComponent<RenderableComponent>(e);
     assert(world.GetComponent<RenderableComponent>(e) == nullptr);

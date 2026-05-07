@@ -144,20 +144,24 @@ Result<void, ResultCode> MaterialSystem::RegisterBuiltins()
         return true;
     };
 
-    Material toon = BuiltinMaterials::LoadToon(mpImpl->registry);
-    Material rim  = BuiltinMaterials::LoadRimLight(mpImpl->registry);
+    Material textured = BuiltinMaterials::LoadTextured(mpImpl->registry);
+    Material toon     = BuiltinMaterials::LoadToon(mpImpl->registry);
+    Material rim      = BuiltinMaterials::LoadRimLight(mpImpl->registry);
 
+    const bool texturedShaderOk =
+        textured.vertexShader.IsValid() && textured.fragmentShader.IsValid();
     const bool toonShaderOk = toon.vertexShader.IsValid() && toon.fragmentShader.IsValid();
     const bool rimShaderOk  = rim.vertexShader.IsValid()  && rim.fragmentShader.IsValid();
 
-    const bool toonNew = storeIfNew(std::move(toon));
-    const bool rimNew  = storeIfNew(std::move(rim));
+    const bool texturedNew = storeIfNew(std::move(textured));
+    const bool toonNew     = storeIfNew(std::move(toon));
+    const bool rimNew      = storeIfNew(std::move(rim));
 
-    if (!toonNew || !rimNew)
+    if (!texturedNew || !toonNew || !rimNew)
     {
         return ResultCode::AlreadyExists;
     }
-    if (!toonShaderOk || !rimShaderOk)
+    if (!texturedShaderOk || !toonShaderOk || !rimShaderOk)
     {
         return ResultCode::IoError;
     }

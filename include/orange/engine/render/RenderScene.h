@@ -24,7 +24,6 @@
 #include <orange/engine/OrangeEngineExport.h>
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/MeshAsset.h>
-#include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/render/Camera.h>
 
 #include <glm/mat4x4.hpp>
@@ -40,11 +39,15 @@ class World;
 namespace Orange::Engine::Render
 {
 
+class MaterialInstance;
+
 struct Drawable
 {
-    glm::mat4 worldMatrix{1.0f};
-    Asset::AssetHandle<Asset::MeshAsset>    mesh{};
-    Asset::AssetHandle<Asset::TextureAsset> texture{};
+    glm::mat4                            worldMatrix{1.0f};
+    Asset::AssetHandle<Asset::MeshAsset> mesh{};
+    // 非拥有 MaterialInstance 指针，由 RenderableComponent 透传。Pipeline
+    // 后续按本字段路由 per-template Pipeline 缓存；nullptr 走 fallback。
+    MaterialInstance*                    materialInstance{nullptr};
 };
 
 class ORANGE_ENGINE_API RenderScene

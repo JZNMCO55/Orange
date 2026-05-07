@@ -24,8 +24,12 @@
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/asset/ShaderAsset.h>
+#include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/MaterialInstance.h>
+#include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
@@ -46,9 +50,13 @@ using namespace Orange::Engine;
 using Orange::Engine::Asset::AssetHandle;
 using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::MeshAsset;
+using Orange::Engine::Asset::ShaderAsset;
+using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::Camera;
+using Orange::Engine::Render::MaterialInstance;
+using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Scene::TransformComponent;
@@ -206,6 +214,15 @@ int main()
     auto host = std::move(hostResult).Value();
 
     AssetRegistry assets;
+    if (auto reg = assets.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "AssetRegistry::RegisterLoader<ShaderAsset> failed (code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+        return 1;
+    }
+
     auto meshHandleResult = assets.Insert<MeshAsset>("builtin/cube", MakeCubeMesh());
     if (meshHandleResult.IsErr())
     {
@@ -216,13 +233,33 @@ int main()
     }
     AssetHandle<MeshAsset> meshHandle = meshHandleResult.Value();
 
+    // MaterialSystem 注册内置模板（textured + toon + rim_light），拿一
+    // 个 textured instance 喂给 RenderableComponent.materialInstance。
+    // Pipeline 当前阶段仍走 hardcoded textured pipeline，instance 只起
+    // schema 贯通作用，下一子任务起切到 per-template Pipeline 缓存。
+    MaterialSystem materials(assets);
+    if (auto rb = materials.RegisterBuiltins(); rb.IsErr())
+    {
+        std::fprintf(stderr,
+                     "MaterialSystem::RegisterBuiltins failed (code=%u)\n",
+                     static_cast<unsigned>(rb.Error()));
+        return 1;
+    }
+    auto cubeInstance = materials.CreateInstance("textured");
+    if (!cubeInstance)
+    {
+        std::fprintf(stderr, "MaterialSystem::CreateInstance(\"textured\") returned null\n");
+        return 1;
+    }
+
     World world;
 
     Entity cubeEntity = world.CreateEntity();
     world.AddComponent(cubeEntity, TransformComponent{});  // 默认放原点；rotation 在 OnUpdate 里更新
     {
         RenderableComponent r;
-        r.mesh = meshHandle;
+        r.mesh             = meshHandle;
+        r.materialInstance = cubeInstance.get();
         world.AddComponent(cubeEntity, r);
     }
 

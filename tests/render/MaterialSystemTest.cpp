@@ -92,7 +92,7 @@ void TestEmptyConstruction()
     std::fprintf(stdout, "  [PASS] MaterialSystem 空表与 FindTemplate 默认行为\n");
 }
 
-// 2. RegisterBuiltins 注册 toon + rim_light
+// 2. RegisterBuiltins 注册 textured + toon + rim_light
 void TestRegisterBuiltins()
 {
     AssetRegistry registry;
@@ -102,24 +102,32 @@ void TestRegisterBuiltins()
     MaterialSystem matSys(registry);
     auto result = matSys.RegisterBuiltins();
     assert(result.IsOk());
-    assert(matSys.TemplateCount() == 2);
+    assert(matSys.TemplateCount() == 3);
 
-    const Material* toon = matSys.FindTemplate("toon");
-    const Material* rim  = matSys.FindTemplate("rim_light");
-    assert(toon != nullptr);
-    assert(rim  != nullptr);
-    assert(toon->name == "toon");
-    assert(rim->name  == "rim_light");
+    const Material* textured = matSys.FindTemplate("textured");
+    const Material* toon     = matSys.FindTemplate("toon");
+    const Material* rim      = matSys.FindTemplate("rim_light");
+    assert(textured != nullptr);
+    assert(toon     != nullptr);
+    assert(rim      != nullptr);
+    assert(textured->name == "textured");
+    assert(toon->name     == "toon");
+    assert(rim->name      == "rim_light");
+    assert(textured->vertexShader.IsValid());
+    assert(textured->fragmentShader.IsValid());
     assert(toon->vertexShader.IsValid());
     assert(toon->fragmentShader.IsValid());
     assert(rim->vertexShader.IsValid());
     assert(rim->fragmentShader.IsValid());
 
-    // toon / rim_light schema 真实分离——uniform 数量都是 5（Task 02 写明）
+    // textured 只一个 uniform（uMVP）+ 一个纹理槽；toon / rim_light 都
+    // 是 5 个 uniform、textureSlots 为空。schema 真实分离。
+    assert(textured->uniforms.size()     == 1);
+    assert(textured->textureSlots.size() == 1);
     assert(toon->uniforms.size() == 5);
     assert(rim->uniforms.size()  == 5);
 
-    std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 toon + rim_light\n");
+    std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light\n");
 }
 
 // 3. 自定义 ShaderTemplateDesc 注册
@@ -186,7 +194,7 @@ void TestDuplicateNameRejected()
     auto result = matSys.RegisterTemplate(dupDesc);
     assert(result.IsErr());
     assert(result.Error() == ResultCode::AlreadyExists);
-    assert(matSys.TemplateCount() == 2);  // 仍是原来 toon + rim_light
+    assert(matSys.TemplateCount() == 3);  // 仍是原来 textured + toon + rim_light
 
     const Material* toon = matSys.FindTemplate("toon");
     assert(toon != nullptr);

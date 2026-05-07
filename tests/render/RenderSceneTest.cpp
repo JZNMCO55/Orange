@@ -6,8 +6,9 @@
 
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/MeshAsset.h>
-#include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/Material.h>
+#include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/RenderScene.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -21,9 +22,10 @@ using Orange::Engine::Entity;
 using Orange::Engine::World;
 using Orange::Engine::Asset::AssetHandle;
 using Orange::Engine::Asset::MeshAsset;
-using Orange::Engine::Asset::TextureAsset;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::Drawable;
+using Orange::Engine::Render::Material;
+using Orange::Engine::Render::MaterialInstance;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::RenderScene;
 using Orange::Engine::Scene::TransformComponent;
@@ -78,11 +80,17 @@ void TestCameraAndRenderables()
     world.AddComponent(a, TransformComponent{});
     world.AddComponent(a, RenderableComponent{});
 
+    // 给 b 关一个真实的 MaterialInstance（绑空 Material 也行——Drawable
+    // 收集只透传指针，不解引用）；用栈上 dummy material + instance 让
+    // Drawable.materialInstance 拿到非 null 指针、可以在循环里识别。
+    Material             bMaterial;
+    MaterialInstance     bInstance(&bMaterial);
+
     Entity b = world.CreateEntity();
     world.AddComponent(b, TransformComponent{});
     RenderableComponent br;
-    br.mesh    = AssetHandle<MeshAsset>{42};
-    br.texture = AssetHandle<TextureAsset>{17};
+    br.mesh             = AssetHandle<MeshAsset>{42};
+    br.materialInstance = &bInstance;
     world.AddComponent(b, br);
 
     Entity c = world.CreateEntity();
@@ -101,17 +109,26 @@ void TestCameraAndRenderables()
     assert(scene.HasCamera());
     assert(scene.DrawableCount() == 2);  // a + b，c (invisible) / d (no transform) 被滤掉
 
-    // 找到 b 对应的 drawable（通过 mesh handle 值）
+    // 找到 b 对应的 drawable（通过 mesh handle 值）；
+    // Drawable.materialInstance 应被 Collect 透传过来，与 RenderableComponent
+    // 的指针字面相等。a 那条 drawable 的 materialInstance 应仍为 nullptr。
     bool foundB = false;
+    bool foundA = false;
     for (const Drawable& dw : scene.Drawables())
     {
         if (dw.mesh.Value() == 42)
         {
-            assert(dw.texture.Value() == 17);
+            assert(dw.materialInstance == &bInstance);
             foundB = true;
+        }
+        else
+        {
+            assert(dw.materialInstance == nullptr);
+            foundA = true;
         }
     }
     assert(foundB);
+    assert(foundA);
 
     std::fprintf(stdout, "  [PASS] camera + filtered renderables\n");
 }

@@ -79,9 +79,9 @@ void RenderScene::Collect(const Orange::Engine::World& world)
         const auto& xform = drawView.get<Scene::TransformComponent>(e);
 
         Drawable d;
-        d.worldMatrix = ComposeWorldMatrix(xform);
-        d.mesh        = renderable.mesh;
-        d.texture     = renderable.texture;
+        d.worldMatrix      = ComposeWorldMatrix(xform);
+        d.mesh             = renderable.mesh;
+        d.materialInstance = renderable.materialInstance;
         mDrawables.emplace_back(d);
     }
 }

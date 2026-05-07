@@ -30,6 +30,7 @@ orange_engine_add_test(builtin_materials_test   render/BuiltinMaterialsTest.cpp)
 orange_engine_add_test(postprocess_chain_test   render/PostProcessChainTest.cpp)
 orange_engine_add_test(material_system_test     render/MaterialSystemTest.cpp)
 orange_engine_add_test(light_and_shadow_test    render/LightAndShadowTest.cpp)
+orange_engine_add_test(material_schema_test     render/MaterialSchemaTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke

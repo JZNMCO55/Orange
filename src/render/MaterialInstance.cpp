@@ -188,4 +188,78 @@ bool MaterialInstance::HasTextureOverride(std::uint32_t binding) const noexcept
     return mpImpl->textureOverrides.find(binding) != mpImpl->textureOverrides.end();
 }
 
+namespace
+{
+
+// 通用读回：按 name 查 uniformOverrides；命中且 type 与请求一致 → 拷贝
+// blob 到 T；否则返回 nullopt。SetUniform 已经在写入路径上保证 type 与
+// blob 内容匹配，这里读回直接 memcpy 回 T。
+template <typename T>
+std::optional<T> ReadUniform(const MaterialInstance::Impl* pImpl,
+                             std::string_view              name,
+                             MaterialUniformType           expectedType) noexcept
+{
+    if (pImpl == nullptr)
+    {
+        return std::nullopt;
+    }
+    auto it = pImpl->uniformOverrides.find(std::string(name));
+    if (it == pImpl->uniformOverrides.end() || it->second.type != expectedType)
+    {
+        return std::nullopt;
+    }
+    T value{};
+    static_assert(sizeof(T) <= sizeof(UniformValue::bytes),
+                  "读回类型超过 64-byte blob 容量");
+    std::memcpy(&value, it->second.bytes.data(), sizeof(T));
+    return value;
+}
+
+}  // namespace
+
+std::optional<float> MaterialInstance::GetUniformFloat(std::string_view name) const noexcept
+{
+    return ReadUniform<float>(mpImpl.get(), name, MaterialUniformType::Float);
+}
+
+std::optional<std::int32_t> MaterialInstance::GetUniformInt(std::string_view name) const noexcept
+{
+    return ReadUniform<std::int32_t>(mpImpl.get(), name, MaterialUniformType::Int);
+}
+
+std::optional<glm::vec2> MaterialInstance::GetUniformVec2(std::string_view name) const noexcept
+{
+    return ReadUniform<glm::vec2>(mpImpl.get(), name, MaterialUniformType::Vec2);
+}
+
+std::optional<glm::vec3> MaterialInstance::GetUniformVec3(std::string_view name) const noexcept
+{
+    return ReadUniform<glm::vec3>(mpImpl.get(), name, MaterialUniformType::Vec3);
+}
+
+std::optional<glm::vec4> MaterialInstance::GetUniformVec4(std::string_view name) const noexcept
+{
+    return ReadUniform<glm::vec4>(mpImpl.get(), name, MaterialUniformType::Vec4);
+}
+
+std::optional<glm::mat4> MaterialInstance::GetUniformMat4(std::string_view name) const noexcept
+{
+    return ReadUniform<glm::mat4>(mpImpl.get(), name, MaterialUniformType::Mat4);
+}
+
+Asset::AssetHandle<Asset::TextureAsset>
+MaterialInstance::GetTextureBinding(std::uint32_t binding) const noexcept
+{
+    if (!mpImpl)
+    {
+        return {};
+    }
+    auto it = mpImpl->textureOverrides.find(binding);
+    if (it == mpImpl->textureOverrides.end())
+    {
+        return {};
+    }
+    return it->second;
+}
+
 }  // namespace Orange::Engine::Render

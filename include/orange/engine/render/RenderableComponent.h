@@ -4,13 +4,19 @@
 // ---------------------------------------------------------------------------
 // RenderableComponent —— 实体 → "可被渲染的几何 + 表面" 的关联组件。
 //
-// Phase 2 的最小形态：一个 mesh handle + 一个可选 texture handle +
-// visibility 开关。Phase 3 接入 Material 系统后，texture 槽会被一个
-// `Asset::AssetHandle<MaterialInstance>`（或类似）取代——届时本组件
-// 的 schema 升级 + 加 SchemaVersion（参见 Phase 1 的 Core::Serialization
-// 约定）。
+// 当前形态：mesh handle + 非拥有 MaterialInstance 指针 + visibility 开关。
+// MaterialInstance 由 sample / 游戏代码侧持有（典型：在 main 里持
+// `std::vector<std::unique_ptr<MaterialInstance>>`），component 仅承载
+// 一个裸指针——保持组件 trivially-copyable，避免 EnTT archetype 因
+// move-only PIMPL 触发整行迁移。生命周期约束：MaterialInstance 必须活
+// 到 World 析构之后；典型做法是先析构 World，再析构 instance 容器。
 //
-// 选择 handle 而非裸指针：
+// `materialInstance == nullptr` 是受支持的退化态——Pipeline 在该路径下
+// 走 fallback（典型：当前阶段的 hardcoded textured pipeline，下一子任
+// 务起切到 textured template Pipeline 缓存）。这样 sample 在过渡期间
+// 既可以使用 MaterialSystem，也可以临时不挂 instance 用最简形态跑通。
+//
+// 选 handle 持有 mesh：
 //   * 资源生命周期由 AssetRegistry 持有，不能被本组件意外延寿；
 //   * handle 可在序列化路径上原样写入 / 读取，不依赖运行时指针；
 //   * 跨实体复用同一 mesh 时，registry 的 dedup 缓存自动生效。
@@ -18,16 +24,17 @@
 
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/MeshAsset.h>
-#include <orange/engine/asset/TextureAsset.h>
 
 namespace Orange::Engine::Render
 {
 
+class MaterialInstance;
+
 struct RenderableComponent
 {
-    Asset::AssetHandle<Asset::MeshAsset>    mesh{};
-    Asset::AssetHandle<Asset::TextureAsset> texture{};
-    bool visible{true};
+    Asset::AssetHandle<Asset::MeshAsset> mesh{};
+    MaterialInstance*                    materialInstance{nullptr};
+    bool                                 visible{true};
 };
 
 }  // namespace Orange::Engine::Render

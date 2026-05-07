@@ -96,6 +96,30 @@ Material BuildMaterial(Asset::AssetRegistry& registry,
 
 }  // namespace
 
+Material LoadTextured(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "textured";
+
+    // textured_mesh shader 的 push-constant block 仅 uMVP(mat4) = 64 字节。
+    // 与 Pipeline 已有的 hardcoded textured pipeline 对齐——当前 06.01 子任
+    // 务保持视觉等价，靠的是 Pipeline 仍走 hardcoded 路径；这里 schema 提
+    // 前对齐，06.02 切到 per-template Pipeline 缓存时无 schema churn。
+    desc.uniforms = {
+        {"uMVP", MaterialUniformType::Mat4},
+    };
+    // binding 0 是程序式 fragment shader 当前未采样的"占位 sampler"槽——
+    // 把"贴图存在"以 MaterialInstance::SetTexture 喂进来，等到 fragment
+    // shader 真切到 `texture(sampler2D(uTexture), vUV)` 时无 schema 改动。
+    desc.textureSlots = {
+        {0, "uTexture"},
+    };
+
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/textured_mesh.vert.spv",
+                         "shaders/orange_engine/textured_mesh.frag.spv");
+}
+
 Material LoadToon(Asset::AssetRegistry& registry)
 {
     Material desc;
