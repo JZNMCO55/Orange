@@ -1613,7 +1613,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 4 条 + 新 sample 在 PR 审核时附运行截图（重点对比 light 转动时的 shadow 跟随）。Phase 3 完成标准的"软阴影"项兑现——Phase 3 收尾后只剩 Task 08 自定义 shader sample 验证 MaterialSystem 扩展点。
 - Critical Path：是
 
-#### Task 08：自定义 shader sample（验证 MaterialSystem::RegisterTemplate 扩展点）
+#### Task 08：自定义 shader sample（验证 MaterialSystem::RegisterTemplate 扩展点） ✅
 - 描述：交付 `samples/08_custom_shader`——一个独立 sample 演示游戏侧不修改引擎源码、用 MaterialSystem::RegisterTemplate 注册自己的 shader（一个简化的 fresnel / dissolve / 流光风格 shader）+ 一个挂着这个自定义 MaterialInstance 的 entity。这是 Phase 3 完成标准里"自定义 shader 注入 API 通过 sample 验证"的兑现项；同时是 Phase 3 收尾里程碑（Phase 3 完成所有六任务后视觉基线稳定，Phase 4 起开 Animation / Physics）。
 - 输入：Phase 3 / Task 04（MaterialSystem）+ Task 06（Pipeline 真按 MaterialInstance 路由）+ Task 07（toon/rim_light 已迁到 shadowed 路径）
 - 输出：

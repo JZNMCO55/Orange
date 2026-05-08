@@ -382,10 +382,15 @@ struct Pipeline::Impl
         glm::vec4 lightColor;         // xyz = rgb, w = unused
         glm::vec4 shadowParams;       // x = pcfKernelRadius, y = depthBias, z/w pad
         glm::vec4 cameraWorldPos;     // xyz = camera worldPos（rim/spec 类 shader 取 viewDir）, w = unused
+        glm::vec4 frameInfo;          // x = time（seconds），y/z/w 预留（deltaTime / frameCount / vsyncFps）
     };
-    static_assert(sizeof(LightUboData) == 64 + 16 * 4,
-                  "LightUboData std140 size mismatch (expected 128 bytes)");
+    static_assert(sizeof(LightUboData) == 64 + 16 * 5,
+                  "LightUboData std140 size mismatch (expected 144 bytes)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
+
+    // 当前帧时间（seconds，单调递增）。Pipeline::SetFrameTime 设置，
+    // UpdateLightUbo 写到 LightUbo.frameInfo.x；不会触发 reinit。
+    float frameTime{0.0f};
 
     // Main pass descriptor set —— 所有 per-template pipeline 共用 set 0：
     //   binding 0 = sampler2D shadowMap
@@ -1280,6 +1285,16 @@ void Pipeline::SetShadowConfig(const ShadowConfig& config) noexcept
     // mapResolution 切换会让 EnsureShadowMap 在下一帧重建 shadow target。
 }
 
+void Pipeline::SetFrameTime(float seconds) noexcept
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    mpImpl->frameTime = seconds;
+    // 仅缓存；实际写入 LightUbo 发生在 Render() 内的 UpdateLightUbo。
+}
+
 // Helpers expecting Pipeline::Impl access live as friend free functions
 // declared inside the class — keep this anonymous namespace empty.
 namespace
@@ -1636,6 +1651,7 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
                                   shadowConfig.depthBias,
                                   0.0f, 0.0f);
     data.cameraWorldPos = glm::vec4(cameraWorldPos, 0.0f);
+    data.frameInfo      = glm::vec4(frameTime, 0.0f, 0.0f, 0.0f);
 
     void* mapped = lightUbo->Map();
     if (mapped == nullptr)

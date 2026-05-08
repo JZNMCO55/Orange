@@ -110,6 +110,13 @@ public:
     // drawable.materialInstance == nullptr 时落到内置 textured Material。
     void SetMaterialSystem(MaterialSystem* system) noexcept;
 
+    // 设置当前帧时间（seconds，单调递增）。Pipeline 把它写进 light UBO
+    // 的 uFrameInfo.x，shader 端用于 time-pulse / dissolve / 流光等
+    // 跨帧持续效果。调用方应在 Render() 之前每帧调一次（典型路径：
+    // RenderLayer::OnUpdate 拿 FrameContext.time.totalSeconds 喂进来）。
+    // 未调用时 Pipeline 维持上一次值（构造时为 0）；不会触发 reinit。
+    void SetFrameTime(float seconds) noexcept;
+
     // 安装 shadow 配置（by-value 拷贝）。chain 还没有装载或场景里没
     // DirectionalLight 时仍可调用——配置只在真正跑 shadow pass（Render
     // 看见 castsShadow == true 的 DirectionalLight）时生效；mapResolution

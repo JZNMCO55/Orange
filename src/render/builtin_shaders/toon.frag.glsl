@@ -28,6 +28,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
     vec4 uLightColor;        //  80  16  (xyz = rgb, w 未用)
     vec4 uShadowParams;      //  96  16  (x = pcfKernelRadius, y = depthBias, z/w 未用)
     vec4 uCameraWorldPos;    // 112  16  (xyz = camera worldPos, w 未用) —— toon 不用
+    vec4 uFrameInfo;         // 128  16  (x = time seconds, y/z/w 预留) —— toon 不用
 } light;
 
 layout(location = 0) in vec2 vUV;

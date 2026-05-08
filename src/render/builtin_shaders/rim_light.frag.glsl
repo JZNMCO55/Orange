@@ -19,6 +19,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
     vec4 uLightColor;
     vec4 uShadowParams;
     vec4 uCameraWorldPos;     // xyz = camera worldPos, w 未用
+    vec4 uFrameInfo;          // x = time seconds, y/z/w 预留 —— rim_light 不用
 } light;
 
 layout(location = 0) in vec2 vUV;
