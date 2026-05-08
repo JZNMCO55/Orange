@@ -56,7 +56,7 @@
             "name": "Box2D",
             "type": "library",
             "url": "https://github.com/erincatto/box2d.git",
-            "version": "3.x",
+            "version": "v3.1.1",
             "linkage": "PRIVATE",
             "purpose": "2D physics backend. Allowed only in src/physics/box2d/."
         },
@@ -65,7 +65,7 @@
             "type": "library",
             "url": "https://github.com/mackron/miniaudio.git",
             "linkage": "PRIVATE",
-            "purpose": "Cross-platform audio backend. Allowed only in src/audio/miniaudio/."
+            "purpose": "Cross-platform audio backend. Allowed only in src/audio/miniaudio/. Source repo provides CMakeLists which installs the single header — fetch 脚本走标准 cmake_install。"
         },
         {
             "name": "stb",
@@ -85,8 +85,10 @@
             "name": "DragonBonesCPP",
             "type": "library",
             "url": "https://github.com/DragonBones/DragonBonesCPP.git",
+            "mode": "submodule",
+            "vendor_dest": "vendor/DragonBones",
             "linkage": "PRIVATE",
-            "purpose": "2D skeletal animation runtime. Allowed only in src/animation/dragonbones/. C++ runtime maintenance is a known risk; abstraction layer in include/orange/engine/animation/IAnimator.h preserves the option to swap backends."
+            "purpose": "2D skeletal animation runtime. 仓根没 CMakeLists（多平台子目录形态），走 in-tree 源码集成：注册为 git submodule（.gitmodules），由 orange_engine 自己编 vendor/DragonBones/DragonBones/src/dragonBones/*.cpp 进静态库。fetch 脚本走 git submodule update --init 同步。Allowed only in src/animation/dragonbones/. C++ runtime maintenance is a known risk; abstraction layer in include/orange/engine/animation/IAnimator.h preserves the option to swap backends."
         }
     ]
 }

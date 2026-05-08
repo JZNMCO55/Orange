@@ -48,6 +48,16 @@ class DepSpec:
     tag: str | None
     cmake_extra: tuple[str, ...] = field(default_factory=tuple)
     optional: bool = False
+    # 接入模式：
+    #   "cmake_install"（默认）—— 仓根有 CMakeLists，cmake -S/-B + build + install
+    #     到 <prefix>/install，消费者通过 find_package(<name>) 引用；
+    #   "submodule" —— 已在 .gitmodules 中注册的 git submodule（如 DragonBonesCPP）；
+    #     脚本走 `git submodule update --init <vendor_dest>` 同步，**不**跑 cmake。
+    #     orange_engine 顶层 CMakeLists 自己 add_library 把 .cpp 编进去。
+    #   "vendor_clone" —— 直接 clone 到 vendor_dest（仓库相对路径），不走 submodule
+    #     机制、不跑 cmake；适合"我就要 vendored 但不想注册成 submodule"的边缘情况。
+    mode: str = "cmake_install"
+    vendor_dest: str | None = None  # mode == "submodule" / "vendor_clone" 时有效
 
 
 def _read_manifest() -> list[DepSpec]:
@@ -66,6 +76,8 @@ def _read_manifest() -> list[DepSpec]:
             tag=entry.get("version"),
             cmake_extra=tuple(entry.get("cmake_extra", []) or []),
             optional=bool(entry.get("optional", False)),
+            mode=entry.get("mode") or "cmake_install",
+            vendor_dest=entry.get("vendor_dest"),
         ))
     return deps
 
@@ -97,8 +109,10 @@ def _default_generator() -> str:
 
 
 def _ensure_clone(git: str, dest: Path, url: str, tag: str | None) -> None:
-    if dest.exists() and (dest / ".git").is_dir():
-        # 已有本地仓库：fetch 然后切到目标 tag（若给了 tag）。
+    # `.git` 既可能是 dir（普通 clone）也可能是 file（submodule 的 gitlink），
+    # 用 .exists() 一并接受。
+    if dest.exists() and (dest / ".git").exists():
+        # 已有本地仓库 / 已注册为 submodule：fetch 然后切到目标 tag。
         _run([git, "-C", str(dest), "fetch", "origin", "--tags"])
         if tag:
             _run([git, "-C", str(dest), "checkout", tag])
@@ -165,11 +179,41 @@ def _build_dep(
     jobs: int,
     config: str,
 ) -> None:
+    label = dep.tag or "default-branch"
+    print(f"\n=== 依赖: {dep.name} @ {label} (mode={dep.mode}) ===", flush=True)
+
+    if dep.mode == "submodule":
+        # 已注册为 git submodule（.gitmodules 中）。脚本走 update --init 同步。
+        if not dep.vendor_dest:
+            raise ValueError(f"{dep.name}: mode=submodule 但缺 vendor_dest 字段")
+        dest = (REPO_ROOT / dep.vendor_dest).resolve()
+        _run([git, "-C", str(REPO_ROOT), "submodule", "update", "--init", dep.vendor_dest])
+        if dep.tag:
+            # 用户指定了 tag / branch，切到该 ref
+            _run([git, "-C", str(dest), "fetch", "origin", "--tags"])
+            _run([git, "-C", str(dest), "checkout", dep.tag])
+        print(f"[info] {dep.name} submodule 已就位 @ {dest}", flush=True)
+        return
+
+    if dep.mode == "vendor_clone":
+        # in-tree 源码集成：clone 到仓库相对路径，**不跑 cmake**。
+        # 由消费方（OrangeEngine 顶层 CMakeLists）把 .cpp 加进 add_library。
+        if not dep.vendor_dest:
+            raise ValueError(f"{dep.name}: mode=vendor_clone 但缺 vendor_dest 字段")
+        dest = (REPO_ROOT / dep.vendor_dest).resolve()
+        _ensure_clone(git, dest, dep.git_url, dep.tag)
+        print(f"[info] {dep.name} 已落到 {dest}（in-tree，不跑 cmake）", flush=True)
+        return
+
+    if dep.mode != "cmake_install":
+        raise ValueError(
+            f"{dep.name}: 未知 mode '{dep.mode}'，"
+            "请用 'cmake_install' / 'submodule' / 'vendor_clone'"
+        )
+
     src = prefix / "src" / dep.name
     bld = prefix / "build" / dep.name
     install_root = prefix / "install"
-    label = dep.tag or "default-branch"
-    print(f"\n=== 依赖: {dep.name} @ {label} ===", flush=True)
     _ensure_clone(git, src, dep.git_url, dep.tag)
     multi = _is_multi_config_generator(generator)
     _cmake_configure(
@@ -208,7 +252,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         for d in deps:
             tag = d.tag or "(no version pinned)"
-            print(f"{d.name:<20} {tag:<14} {d.git_url}")
+            mode = d.mode if d.mode != "cmake_install" else ""
+            mode_col = f"[{mode}]" if mode else ""
+            print(f"{d.name:<20} {tag:<14} {mode_col:<18} {d.git_url}")
         return 0
 
     selected: list[DepSpec]
@@ -232,7 +278,9 @@ def main(argv: list[str] | None = None) -> int:
     git   = _which("git")
 
     for dep in selected:
-        if dep.tag is None:
+        if dep.tag is None and dep.mode != "submodule":
+            # submodule 由父仓 .gitmodules + 父仓提交里的 gitlink 自动 pin commit；
+            # 缺 version 仅对 cmake_install / vendor_clone 模式是真问题。
             print(f"[warn] {dep.name} 在 manifest 中未指定 version，将拉取默认分支；建议在 3rdparty.json 中加 version 字段。",
                   flush=True)
         _build_dep(
