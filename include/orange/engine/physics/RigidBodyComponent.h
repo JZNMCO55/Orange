@@ -42,6 +42,13 @@ struct RigidBodyComponent
 {
     BodyType  type{BodyType::Dynamic};
 
+    // body 在 PhysicsWorld 中的初始位置 / 朝向。Box2D 文档明示：在原点
+    // 创建 body 再 SetTransform 移到目标位置，几乎让 body 创建成本翻倍；
+    // 因此 RigidBodyComponent 在 AddBody 之前必须把 initial 字段填成
+    // 期望值（典型路径：从 ECS TransformComponent 投影 xy 平面拷过来）。
+    glm::vec2 initialPosition{0.0f, 0.0f};
+    float     initialAngle{0.0f};  // 弧度
+
     glm::vec2 linearVelocity{0.0f, 0.0f};
     float     angularVelocity{0.0f};
 

@@ -18,6 +18,7 @@ find_dependency(glm CONFIG)
 find_dependency(EnTT 3.13 CONFIG)
 find_dependency(nlohmann_json 3 CONFIG)
 find_dependency(glfw3 CONFIG)
+find_dependency(box2d CONFIG)
 
 # spdlog 仍是可选——是否在 link 接口里出现取决于 build 时的 gate；
 # 由顶层 CMakeLists.txt 在 configure_package_config_file 之前根据当

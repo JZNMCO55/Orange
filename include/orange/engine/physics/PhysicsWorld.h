@@ -42,6 +42,15 @@ struct PhysicsWorldDesc
     std::uint32_t substepCount{4};
 };
 
+// PhysicsWorld 查询 / 写入 body 状态用的简单 POD pair。
+// 与 ECS TransformComponent 解耦：Physics 只关心 2D xy 平面 + 弧度
+// 朝向，3D Z 维度由消费方在 ECS 端自己保留 / 同步。
+struct BodyTransform
+{
+    glm::vec2 position{0.0f, 0.0f};
+    float     angle{0.0f};   // 弧度
+};
+
 class ORANGE_ENGINE_API PhysicsWorld
 {
 public:
@@ -76,6 +85,22 @@ public:
 
     // handle 是否仍指向 world 中已注册的 body。
     bool IsValid(BodyHandle handle) const noexcept;
+
+    // 读取 body 当前位置 + 朝向（每帧 Step 之后更新；ECS sync 路径在
+    // 主循环末尾扫一遍 dynamic body 把这里的值写回 TransformComponent）。
+    // handle 无效 / 已 Remove → 返回零初始 BodyTransform。
+    BodyTransform GetBodyTransform(BodyHandle handle) const noexcept;
+
+    // 写入 body 位置 + 朝向（kinematic / 强制位移用）。
+    // handle 无效 → no-op。
+    void SetBodyTransform(BodyHandle handle, const BodyTransform& xf);
+
+    // 读取 body 当前线性速度（自由落体 / 可玩验收的关键查询）。
+    // handle 无效 → 返回零 vec2。
+    glm::vec2 GetLinearVelocity(BodyHandle handle) const noexcept;
+
+    // 写入 body 线性速度。handle 无效 → no-op。
+    void SetLinearVelocity(BodyHandle handle, glm::vec2 velocity);
 
     // 当前已注册 body 数（诊断 / 单测用）。
     std::size_t BodyCount() const noexcept;

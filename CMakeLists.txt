@@ -96,10 +96,11 @@ add_library(orange_engine STATIC
     src/animation/AnimationStateMachine.cpp
     src/animation/AnimatorRegistry.cpp
 
-    # Physics：PhysicsWorld / RigidBody / Collider 公共接口（Phase 4 / Task 05）。
-    # 本期是 stub，Task 06 把 src/physics/PhysicsWorld.cpp 替换为 Box2D 后端
-    # 真实现，公共面不动。
+    # Physics：PhysicsWorld / RigidBody / Collider 公共接口（Phase 4 / Task 05）
+    # + Box2D 3.x 后端（Phase 4 / Task 06）。Box2D 头只在 src/physics/box2d/
+    # 与 src/physics/PhysicsWorld.cpp 内出现，公共 include/ 零 b2 依赖。
     src/physics/PhysicsWorld.cpp
+    src/physics/box2d/Box2DBridge.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -318,6 +319,10 @@ target_link_libraries(orange_engine PRIVATE nlohmann_json::nlohmann_json)
 # 不要逃出 OrangeEngine 的公共头；`Platform::Window` 对外只暴露
 # opaque void* native handle。
 target_link_libraries(orange_engine PRIVATE glfw)
+
+# Box2D 3.x：Physics 后端。PRIVATE，b2 类型只在 src/physics/box2d/ +
+# src/physics/PhysicsWorld.cpp 内出现，公共头零暴露。
+target_link_libraries(orange_engine PRIVATE box2d::box2d)
 
 if (ORANGE_ENGINE_WITH_SPDLOG)
     target_link_libraries(orange_engine PUBLIC spdlog::spdlog)

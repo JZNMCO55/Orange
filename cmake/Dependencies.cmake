@@ -102,9 +102,13 @@ if (ORANGE_ENGINE_WITH_TRACY)
 endif ()
 
 # ---------------------------------------------------------------------------
-# Soft（延后）：box2d / imgui
+# Hard：box2d（Phase 4 / Task 06 起 Physics 模块强依赖；3.x ABI）
 # ---------------------------------------------------------------------------
-find_package(box2d CONFIG QUIET)
+find_package(box2d CONFIG REQUIRED)
+
+# ---------------------------------------------------------------------------
+# Soft（延后）：imgui
+# ---------------------------------------------------------------------------
 find_package(imgui CONFIG QUIET)
 
 # stb / miniaudio / DragonBones 以 in-tree 头 / 源码方式消费，没有可
@@ -123,11 +127,7 @@ message(STATUS "  nlohmann_json   : found")
 message(STATUS "  glfw3           : found")
 message(STATUS "  spdlog gate     : ${ORANGE_ENGINE_WITH_SPDLOG}")
 message(STATUS "  tracy gate      : ${ORANGE_ENGINE_WITH_TRACY}")
-if (TARGET box2d::box2d)
-    message(STATUS "  box2d           : found")
-else ()
-    message(STATUS "  box2d           : not installed (deferred soft dep)")
-endif ()
+message(STATUS "  box2d           : found (${box2d_DIR})")
 if (TARGET imgui::imgui)
     message(STATUS "  imgui           : found")
 else ()

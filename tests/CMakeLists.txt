@@ -39,8 +39,10 @@ orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(animation_state_machine_test animation/AnimationStateMachineTest.cpp)
 orange_engine_add_test(animator_registry_test       animation/AnimatorRegistryTest.cpp)
 
-# Physics：World / RigidBody / Collider 公共接口（Phase 4 / Task 05，stub 实现）
+# Physics：World / RigidBody / Collider 公共接口（Phase 4 / Task 05）+
+# Box2D 后端步进语义验收（Phase 4 / Task 06，自由落体 / 地面碰撞 / 写读 transform）
 orange_engine_add_test(physics_interface_test       physics/PhysicsInterfaceTest.cpp)
+orange_engine_add_test(box2d_step_test              physics/Box2DStepTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
@@ -78,6 +80,7 @@ if (ORANGE_ENGINE_INSTALL)
             "-DORANGE_ENGINE_ENTT_DIR=${EnTT_DIR}"
             "-DORANGE_ENGINE_NLOHMANN_JSON_DIR=${nlohmann_json_DIR}"
             "-DORANGE_ENGINE_GLFW3_DIR=${glfw3_DIR}"
+            "-DORANGE_ENGINE_BOX2D_DIR=${box2d_DIR}"
             "-DORANGE_ENGINE_VULKAN_INCLUDE_DIR=${Vulkan_INCLUDE_DIR}"
             "-DORANGE_ENGINE_VULKAN_LIBRARY=${Vulkan_LIBRARY}"
             "-DORANGE_ENGINE_VOLK_DIR=${volk_DIR}"

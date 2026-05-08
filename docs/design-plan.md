@@ -1761,7 +1761,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 3 条。
 - Critical Path：是
 
-#### Task 06：Box2D 3.x 集成（`src/physics/box2d/`）
+#### Task 06：Box2D 3.x 集成（`src/physics/box2d/`） ✅
 - 描述：把 Box2D 3.x 通过 `find_package(box2d CONFIG REQUIRED)` 接入，PhysicsWorld PIMPL 内实现真 b2World 创建 / 步进 / body / fixture 管理。Box2D 3.x 的 API 与 2.x 不兼容（`b2BodyId` 句柄替代 `b2Body*`、`b2WorldDef` / `b2BodyDef` 走结构体 init），集成层吃这个差异、不让上层感知。
 - 输入：Task 05；Box2D 3.x 装到 D:/3rdparty/install
 - 输出：
