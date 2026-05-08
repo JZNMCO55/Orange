@@ -89,6 +89,12 @@ add_library(orange_engine STATIC
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
     src/render/RenderScene.cpp
+
+    # Animation：IAnimator / AnimationStateMachine / AnimatorComponent /
+    # AnimatorRegistry 公共接口（Phase 4 / Task 01）。Skeletal /
+    # Procedural 后端实现见 src/animation/dragonbones / Task 03 / 04。
+    src/animation/AnimationStateMachine.cpp
+    src/animation/AnimatorRegistry.cpp
 )
 
 # ---------------------------------------------------------------------------

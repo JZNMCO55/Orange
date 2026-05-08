@@ -242,10 +242,10 @@ app.GetPipeline().InsertPass(PipelineStage::Transparent, std::make_unique<WaterP
 
 ---
 
-## 5. Animation 后端注册
+## 5. Animation 后端注册（Phase 4 / Task 01 启用）
 
 ### 设计思路
-引擎内置 Skeletal（DragonBones）+ Procedural 两个后端。游戏（或者将来引入的 Spine 商用授权后）可以注册新后端，例如 Live2D、自写 mesh deformation、3D skeletal（极远）。
+引擎内置 Skeletal（DragonBones）+ Procedural 两个后端。游戏侧（例如未来引入 Spine、Live2D、自写 mesh deformation 等）通过 `AnimatorRegistry::RegisterBackend` 不修改引擎源码地接入自己的 backend。
 
 ### API
 ```cpp
@@ -257,20 +257,28 @@ class IAnimator
 {
 public:
     virtual ~IAnimator() = default;
-    virtual void Update(float deltaTime) = 0;
-    virtual void BindToEntity(Entity entity) = 0;
+    virtual void             Tick(float dt)                      = 0;
+    virtual bool             IsFinished() const noexcept         = 0;
+    virtual std::string_view BackendName() const noexcept        = 0;
 };
+
+}
+
+// include/orange/engine/animation/AnimatorRegistry.h
+namespace Orange::Engine::Animation
+{
 
 class AnimatorRegistry
 {
 public:
-    using AnimatorFactory = std::function<std::unique_ptr<IAnimator>(const AnimatorConfig&)>;
+    using FactoryFn = std::function<std::unique_ptr<IAnimator>()>;
 
-    void Register(const std::string& kind, AnimatorFactory factory);
-    std::unique_ptr<IAnimator> Create(const std::string& kind, const AnimatorConfig& config);
+    Result<void, ResultCode> RegisterBackend(std::string_view name, FactoryFn factory);
+    std::unique_ptr<IAnimator> Create(std::string_view name) const;
+    bool                       HasBackend(std::string_view name) const noexcept;
 };
 
-}  // namespace Orange::Engine::Animation
+}
 ```
 
 ### 游戏侧使用
@@ -278,19 +286,28 @@ public:
 // 假设 Phase 4 之后游戏决定加入 Spine
 class SpineAnimator : public Orange::Engine::Animation::IAnimator
 {
-    // ...
+public:
+    explicit SpineAnimator(const SkeletonAsset& asset) { /* ... */ }
+    void             Tick(float dt) override            { /* ... */ }
+    bool             IsFinished() const noexcept override { return false; }
+    std::string_view BackendName() const noexcept override { return "spine"; }
 };
 
-app.GetAnimatorRegistry().Register("spine", [](const auto& config) {
-    return std::make_unique<SpineAnimator>(config);
+Animation::AnimatorRegistry registry;
+registry.RegisterBackend("spine", [&] {
+    return std::make_unique<SpineAnimator>(spineSkeletonAsset);
 });
 
-auto pAnimator = app.GetAnimatorRegistry().Create("spine", config);
+auto inst = registry.Create("spine");
+// 挂到 entity 上：
+world.AddComponent(entity, Animation::AnimatorComponent{ std::move(inst) });
 ```
 
 ### 约束
-- IAnimator 抽象不暴露任何具体后端类型
-- AnimatorConfig 是引擎定义的中立配置（资产路径、初始动画名、状态机定义等），不是后端 specific
+- `IAnimator` 抽象**不**规定 pose / uniform 输出 API——Skeletal backend 通过 SkeletonAsset palette + Render 模块的 SkinningMatrixPalette uniform 路径，Procedural backend 通过 `MaterialInstance::SetUniform`，两条路径**通过 ECS 自然解耦**
+- backend factory 需要参数（资产 / 初始动画名）时由调用方在闭包里 capture，registry 不增加 args 形参——避免 `std::any` 之类传染性类型走到公共面
+- 同名重复注册返回 `ResultCode::AlreadyExists`，表内不被覆盖
+- AnimationStateMachine（与 backend 解耦的 flat-weighted FSM）由调用方独立持有，状态切换时在 OnEnter 回调里调 backend 的 Play(animName) 即可——不需要在 IAnimator 上加 state-machine 字段
 
 ---
 

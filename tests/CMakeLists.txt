@@ -35,6 +35,10 @@ orange_engine_add_test(pipeline_template_cache_test render/PipelineTemplateCache
 orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.cpp)
 orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 
+# Animation：FSM + Backend Registry（Phase 4 / Task 01 公共接口）
+orange_engine_add_test(animation_state_machine_test animation/AnimationStateMachineTest.cpp)
+orange_engine_add_test(animator_registry_test       animation/AnimatorRegistryTest.cpp)
+
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
 #

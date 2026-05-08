@@ -1638,17 +1638,258 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 
 ### Phase 4：可玩性
 
-- Task 01：Animation 模块公共接口（IAnimator / AnimationStateMachine）
-- Task 02：DragonBones runtime 集成（`src/animation/dragonbones/`）
-- Task 03：SkeletalAnimator 实现
-- Task 04：ProceduralAnimator 实现（shader uniform 驱动）
-- Task 05：Physics 模块公共接口（PhysicsWorld / RigidBody / Collider）
-- Task 06：Box2D 3.x 集成（`src/physics/box2d/`）
-- Task 07：Fixture 替换 API（运行时碰撞器变形支持）
-- Task 08：Input 模块（Action / ActionMap / InputContext，JSON 加载）
-- Task 09：Audio 模块（miniaudio 集成）
-- Task 10：`samples/05_skeletal_animation`、`samples/06_physics_platformer`
-- Task 11：`samples/07_full_pipeline` 升级为可玩 demo
+> Phase 4 引入 Animation / Physics / Input / Audio 四个模块。**关键架构决定**：Animation 第一版即承认 Skeletal + Procedural 双后端（按 `vendor/Orange-Wiki/wiki/techniques/animation/animation-state-machine.md` 的"分层 ASM + blend tree"思路设计公共面，但 Phase 4 只交付 flat-weighted-average 的最简 FSM，blend tree 留 Phase 6）。Physics 走 Box2D 3.x（2D 平台跳跃刚好够），公共面把 Box2D 类型完全藏在 PIMPL，3.x 接口与 2.x 不兼容由集成层吃。Input 走 GLFW 原生事件 + JSON 配置 ActionMap。Audio 用 miniaudio 单头集成。
+>
+> Phase 4 内任务有强弱依赖：**01 / 05 / 08（公共接口）零外部依赖**，可在外部库未就位时先做；**02 / 06 / 09（后端集成）+ 03 / 04 / 07（功能实现）**必须等对应 dep 装机器才能跑通；**10 / 11 是 sample 收尾**，必须最后做。建议推进顺序：先把 01/05/08 公共面合并、再按 dep 就位顺序逐个起后端。
+
+#### Task 01：Animation 公共接口（IAnimator / AnimationStateMachine / AnimatorRegistry） ✅
+- 描述：交付 Animation 模块的零依赖公共面：`IAnimator`（PIMPL 风格抽象基类）+ `AnimationStateMachine`（flat-weighted FSM，状态名 + 过渡条件 + 进入/退出回调）+ `AnimatorComponent`（ECS 组件）+ `AnimatorRegistry`（按名注册 backend factory，与 MaterialSystem 同节奏）。**不**实现 SkeletalAnimator / ProceduralAnimator 的具体内容（那是 Task 03/04），但要确保两条后端路径通过本期接口能落地——不出现"接口不够用要回头扩"的破坏性变更。
+- 输入：Phase 3 收尾（World / RenderableComponent 的组件挂载惯例已稳）
+- 输出：
+  - `Proposed: include/orange/engine/animation/IAnimator.h`（抽象基类：`virtual void Tick(float dt) = 0;` `virtual bool IsFinished() const noexcept = 0;` `virtual std::string_view BackendName() const noexcept = 0;`）
+  - `Proposed: include/orange/engine/animation/AnimationStateMachine.h`（轻量 FSM：`AddState(name, on_enter, on_exit)` / `AddTransition(from, to, condition_fn)` / `Tick(dt, ctx)` / `CurrentState() const`）
+  - `Proposed: include/orange/engine/animation/AnimatorComponent.h`（ECS 组件，持 `std::unique_ptr<IAnimator>`，与 MaterialInstance 类似的"游戏侧持有所有权 + ECS 仅引用"模式——但 Animator 比 Material 更状态化，本期就做拥有式即 unique_ptr 进 component）
+  - `Proposed: include/orange/engine/animation/AnimatorRegistry.h`（注册 backend factory：`RegisterBackend(name, std::function<unique_ptr<IAnimator>(args)>)` + `Create(name, args)`，与 MaterialSystem::RegisterTemplate 同形态）
+  - `Proposed: src/animation/AnimationStateMachine.cpp`（FSM 实现）
+  - `Proposed: src/animation/AnimatorRegistry.cpp`（registry 实现）
+  - `Proposed: tests/animation/AnimationStateMachineTest.cpp`（覆盖：3 状态 / 2 过渡 / on_enter / on_exit 调用顺序 / 条件不成立时不 transition / 多帧 Tick 累计）
+  - `Proposed: tests/animation/AnimatorRegistryTest.cpp`（覆盖：RegisterBackend / Create / 重复注册返回 AlreadyExists / 未知 name 返回 nullptr）
+  - `Modified: CMakeLists.txt`（添加 src/animation 子目录 + 注册两条 ctest）
+  - `Modified: docs/extension-points.md`（在 §3 之后加 §4：Custom Animator backend 注册——RegisterBackend(name, factory)）
+- 影响路径/模块：Animation（新模块）、tests、CMake
+- 前置依赖：无外部 dep（纯 std + EnTT）
+- 实现要点：
+  - **IAnimator 不暴露 pose / uniform 输出 API**：本期接口不规定"动画如何把结果交给 Render"。Skeletal 后端（Task 03）通过 Render 模块自有的 SkinningMatrixPalette uniform 路径，Procedural 后端（Task 04）通过 MaterialInstance::SetUniform——两条路径**通过 ECS 自然解耦**，不需要在 IAnimator 上再加一层。`Tick()` 是唯一驱动入口。
+  - **AnimationStateMachine 走 flat weighted-average，不实现 blend tree**：Phase 4 范围只做"切换状态时 cross-fade 一段时间"的最简 FSM——状态本身的 blend 由 backend 自管（DragonBones 里就是切 anim name + 设 fade 时长）。Blend tree 留 Phase 6。这条与 wiki "Flat WA"路径对齐。
+  - **过渡条件用 `std::function<bool(const StateContext&)>`**：StateContext = `{currentStateName, elapsedSeconds, transitionTriggers}`，调用方按需读。**不**引入任何专用 condition DSL（与"无反射"原则一致）。
+  - **AnimatorRegistry 与 MaterialSystem 镜像但更轻**：MaterialSystem 内部要 SPIR-V 加载 + Pipeline 缓存；AnimatorRegistry 只是个 `std::unordered_map<string, factory>`，不持 GPU 资源。
+  - **不预先建 AnimationClip / AnimationAsset**：clip 是 backend 内部细节（DragonBones 自己读 .json/.dbbin、ProceduralAnimator 没有 clip 概念）。本期不在 Asset 层引入新 AssetType。Phase 5 / Task 03（SkeletalAnimator）按需在 src/animation/dragonbones 自己处理资源加载。
+- 验证方式：
+  1. cmake build 通过，Animation 头文件能 include；
+  2. ctest 19/20（新增 2 条：animation_state_machine_test / animator_registry_test）全过；
+  3. install_smoke 不退化、config_smoke 不退化；
+  4. 头隔离不变量：`include/orange/engine/animation/**` 不 include 任何 src/ / vendor/dragonbones/ 内部头。
+- 验收标准：上述 4 条 + AnimatorRegistry 公共面能注册一个"echo backend"（Tick 累计计数 / IsFinished 永假）单测过，证明扩展点字面可用。
+- Critical Path：是
+
+#### Task 02：DragonBones C++ runtime 集成（`src/animation/dragonbones/`）
+- 描述：把 DragonBones C++ runtime（GitHub 上有官方 cpp port）按 in-tree 源码方式集成到 `src/animation/dragonbones/`，让本仓库的 build 能直接编它的 `.cpp`、链进 orange_engine。runtime 头不暴露到 `include/orange/engine/`——它的存在仅供 Task 03 SkeletalAnimator 消费。
+- 输入：Task 01（Animation 公共面）
+- 输出：
+  - `Proposed: vendor/DragonBones/`（git submodule 或 clone-without-history 在树里）
+  - `Proposed: src/animation/dragonbones/DragonBonesContext.{h,cpp}`（runtime 的 EventDispatcher / ResourceProvider / SoundEventManager 桩——给 runtime 不需要的回调走 no-op）
+  - `Modified: CMakeLists.txt`（add_library(orange_engine_dragonbones STATIC vendor/DragonBones/...sources... ) + 链接给 orange_engine PRIVATE）
+  - `Modified: cmake/Dependencies.cmake`（runtime 走 in-tree，不需 find_package；状态摘要输出 "DragonBones: in-tree (vendor/DragonBones)"）
+- 影响路径/模块：vendor、src/animation/dragonbones、CMake
+- 前置依赖：Task 01；vendor/DragonBones/ 源码就位
+- 实现要点：
+  - **runtime 用 in-tree 源码，不 find_package**：DragonBones C++ runtime 没有 CMake config，没有 find_package 端点；标准做法是把它的 `cpp/dragonBones/` 目录拉进自己的 build。
+  - **EventDispatcher / SoundEventManager 桩为 no-op**：runtime 的事件回调供游戏接 UI / SFX；Phase 4 内只挂空实现，Task 09 Audio 上线后再让 SoundEventManager 转发到 AudioEngine。
+  - **运行时坐标系约定固定 2D**：DragonBones 是 2D 骨架运行时，Z 维不参与；与 OrangeEngine"2D / 2.5D"定位一致。
+  - **dragonbones 头隔离**：`#include <dragonBones/...>` 仅出现在 `src/animation/dragonbones/**`（CLAUDE.md 不变量）。
+- 验证方式：
+  1. cmake build 通过，DragonBones 编译 0 警告（warnings-as-errors 关掉 dragonbones 子库 / 单独 push/pop）；
+  2. 加一条 smoke ctest：`tests/animation/dragonbones_runtime_smoke.cpp` —— include <dragonBones/DragonBonesHeaders.h> + 实例化一个空 EventDispatcher 不崩；
+  3. 既有 ctest 不退化。
+- 验收标准：上述 3 条 + runtime 与 orange_engine 一同安装成功（installed lib 能跑 install_smoke）。
+- Critical Path：是
+
+#### Task 03：SkeletalAnimator 实现（DragonBones 后端 + matrix palette 输出）
+- 描述：实现 IAnimator 的 SkeletalAnimator 后端：`SkeletalAnimator(SkeletonAsset, ArmatureName)` 构造；`Tick(dt)` 推进 DragonBones armature 动画；`Pose() const` 返回 `std::span<const glm::mat4>` matrix palette（per-joint world transform）；`Play(animName, fadeIn)` API。SkeletonAsset 由 AssetRegistry 加载 .json + .dbbin（DragonBones 双文件资源）。Render 模块在 Phase 4 内**先不接** matrix palette 进 vertex shader——Task 03 范围只到 CPU 端 pose 计算正确，渲染端把 palette 上传 GPU + skinning vertex shader 留 Phase 6 / 配合 Material UBO 完整化。
+- 输入：Task 01 / Task 02
+- 输出：
+  - `Proposed: include/orange/engine/animation/SkeletalAnimator.h`（公共面：构造、Play、Tick、Pose）
+  - `Proposed: include/orange/engine/asset/SkeletonAsset.h`（资源类型：joints layout + DragonBones runtime 内部句柄；payload PIMPL 藏 dragonbones types）
+  - `Proposed: src/animation/dragonbones/SkeletalAnimator.cpp`
+  - `Proposed: src/animation/dragonbones/SkeletonLoader.cpp`（IAssetLoader<SkeletonAsset>：读 .json + 配套 .dbbin，喂 dragonbones runtime 的 ArmatureFactory）
+  - `Proposed: tests/animation/SkeletalAnimatorTest.cpp`（覆盖：Tick 推进 elapsedTime / Play 切 anim / 非循环 anim 走完 IsFinished == true）
+- 影响路径/模块：Animation、Asset、tests
+- 前置依赖：Task 01 / 02
+- 实现要点：
+  - **Pose() 返回 span<const mat4>，调用方不持有所有权**：SkeletalAnimator 内部按当前帧重算 palette；调用方下一次 Tick 之前消费完。这与 EnTT 视图同生命周期模式。
+  - **DragonBones armature 树形 → 扁平 palette**：DragonBones 给 per-bone local transform，本类负责按 bone hierarchy 做累乘（Tj_world = Tj_local × Tparent_world）输出 flat palette。
+  - **Skin 上传留 Phase 6**：本期 Pose() 给出 CPU 数据即结束。Render 端如何消费（per-skeleton uniform buffer / push constant 装填）等 Material UBO 上线后再说——Task 03 不动 Render 模块。
+- 验证方式：
+  1. cmake build 通过；
+  2. ctest 新增 1 条 SkeletalAnimatorTest 全过；
+  3. 用 DragonBones 官方测试资源加载 + Play 一个 anim，10 帧 Tick 后 Pose() 元素个数 == bone count、首 bone 的 translation 在已知曲线上；
+  4. 既有 ctest 不退化。
+- 验收标准：上述 4 条。
+- Critical Path：是
+
+#### Task 04：ProceduralAnimator 实现（shader uniform 驱动）
+- 描述：实现 IAnimator 的 ProceduralAnimator 后端：通过若干 `Channel<T>(name, fn)` 把"时间 → uniform 值"的曲线 / 噪声驱动函数挂到 MaterialInstance 上——每 Tick 调用 fn(elapsedTime) 算出当前值，调 `MaterialInstance::SetUniform(name, value)`。这是"史莱姆 noise 振幅 / dissolve 进度"这类 procedural shader 效果的基础。**重要**：本路径**依赖 Material UBO 让 SetUniform 真接通到 push-constant**——但 Phase 4 阶段 Material UBO 还没上线（Phase 6 落地），Task 04 在本期只做 CPU 端"算出值并存进 MaterialInstance 内表"，能否真出现在 GPU shader 等 Material UBO 上线。本期 ctest 验证 SetUniform 调用计数即可。
+- 输入：Task 01；MaterialInstance（Phase 3 已落）
+- 输出：
+  - `Proposed: include/orange/engine/animation/ProceduralAnimator.h`（公共面：构造、AddChannel<T>(name, fn)、SetTarget(MaterialInstance*)）
+  - `Proposed: src/animation/ProceduralAnimator.cpp`
+  - `Proposed: tests/animation/ProceduralAnimatorTest.cpp`（覆盖：AddChannel<float> 时间驱动 / Tick 后 MaterialInstance.GetUniformFloat == 预期 / 多 channel 互不干扰）
+- 影响路径/模块：Animation、tests
+- 前置依赖：Task 01
+- 实现要点：
+  - **Channel 用模板 + virtual 实现**：`Channel<T>(name, std::function<T(float)>)`——在 .cpp 里实例化 T = float / vec2 / vec3 / vec4 / mat4 与 MaterialInstance::SetUniform 重载对齐。
+  - **不绑 Render 模块**：不直接调 Render，仅通过 MaterialInstance；与 IAnimator "不输出 pose / uniform" 原则一致——一切走 ECS + Material 解耦。
+  - **noise 函数自带还是调用方提供**：本期 fn 由调用方自己写（包括 simplex / Perlin）；Phase 6 引入 utility 库再说。
+- 验证方式：
+  1. cmake build 通过；
+  2. ctest 新增 1 条 ProceduralAnimatorTest 全过；
+  3. 调用方传 `[](float t) { return std::sin(t * 2.0f); }` 作为 channel，Tick 1 秒后值 ≈ sin(2.0)；
+  4. 既有 ctest 不退化。
+- 验收标准：上述 4 条。Phase 6 Material UBO 上线后 Task 04 不需重做——本期 SetUniform 的内表已经写对了，到时只需让 Pipeline 把内表读出来 push 到 GPU 即可。
+- Critical Path：否（不阻塞 Phase 5 起跑；Material UBO 上线前没法在 sample 里看到效果，但接口可用）
+
+#### Task 05：Physics 公共接口（PhysicsWorld / RigidBody / Collider 组件）
+- 描述：交付 Physics 模块的零依赖公共面：`PhysicsWorld`（PIMPL，全 Box2D 类型藏在 .cpp）+ `RigidBodyComponent`（type、mass、velocity 等）+ `ColliderComponent`（shape desc + material props）+ `ColliderDesc`（圆 / 盒 / 多边形 / 链）。**不**集成 Box2D（Task 06）；本期接口设计要让 Box2D 切到其他 2D physics（如 Chipmunk）也无破坏性改动。
+- 输入：Phase 3 World
+- 输出：
+  - `Proposed: include/orange/engine/physics/PhysicsWorld.h`（PIMPL：构造 + Step(dt) + AddBody / RemoveBody）
+  - `Proposed: include/orange/engine/physics/RigidBodyComponent.h`（trivially-copyable，含 BodyType enum：Static / Kinematic / Dynamic + linearDamping / angularDamping）
+  - `Proposed: include/orange/engine/physics/ColliderComponent.h`（trivially-copyable 描述符，shape variant + density / friction / restitution）
+  - `Proposed: include/orange/engine/physics/ColliderDesc.h`（CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc 几何 desc）
+  - `Proposed: src/physics/PhysicsWorld.cpp`（PIMPL stub：Step no-op、AddBody / RemoveBody 维护内表，等 Task 06 接 Box2D 后端）
+  - `Proposed: tests/physics/PhysicsInterfaceTest.cpp`（覆盖：World 构造析构 / AddBody-RemoveBody 不崩 / Step 无 body 不崩）
+- 影响路径/模块：Physics（新模块）、tests
+- 前置依赖：Phase 3 World
+- 实现要点：
+  - **公共面没有任何 b2 类型**：CLAUDE.md "Header isolation" 要求 `<box2d/...>` 只在 `src/physics/box2d/**`——本期接口设计要严守。
+  - **PhysicsWorld 持 BodyHandle 表**：AddBody 返回不透明 BodyHandle（uint64_t typed wrapper）。Task 06 把这表的 entry 关联到真 b2Body*。本期是占位 stub，Step 走个 no-op 就行。
+  - **ColliderComponent 用 std::variant**：`std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc>`——比 enum + union 更现代，trivially-copyable 仍维持（所有 desc 都是 POD）。
+- 验证方式：
+  1. cmake build 通过；
+  2. ctest 新增 1 条 PhysicsInterfaceTest 全过；
+  3. install_smoke 不退化、头隔离不变量：`include/orange/engine/physics/**` 不 include `<box2d/...>`。
+- 验收标准：上述 3 条。
+- Critical Path：是
+
+#### Task 06：Box2D 3.x 集成（`src/physics/box2d/`）
+- 描述：把 Box2D 3.x 通过 `find_package(box2d CONFIG REQUIRED)` 接入，PhysicsWorld PIMPL 内实现真 b2World 创建 / 步进 / body / fixture 管理。Box2D 3.x 的 API 与 2.x 不兼容（`b2BodyId` 句柄替代 `b2Body*`、`b2WorldDef` / `b2BodyDef` 走结构体 init），集成层吃这个差异、不让上层感知。
+- 输入：Task 05；Box2D 3.x 装到 D:/3rdparty/install
+- 输出：
+  - `Modified: cmake/Dependencies.cmake`（box2d 从 QUIET 转为 REQUIRED）
+  - `Modified: src/physics/PhysicsWorld.cpp`（替换 Task 05 stub，转走 b2WorldDef / b2CreateWorld / b2World_Step / b2DestroyWorld）
+  - `Proposed: src/physics/box2d/Box2DBridge.{h,cpp}`（ColliderDesc → b2ShapeDef 转换 / RigidBodyComponent → b2BodyDef 转换）
+  - `Proposed: tests/physics/Box2DStepTest.cpp`（覆盖：自由落体 ball 1 秒后 y ≈ -0.5*g*t² 误差 < 1%）
+- 影响路径/模块：Physics、cmake
+- 前置依赖：Task 05；Box2D 3.x 已装
+- 实现要点：
+  - **3.x 句柄模式**：`b2BodyId` 是 versioned ID 而非 pointer，PhysicsWorld 内表存 `BodyHandle → b2BodyId` 映射，对外仍返 `BodyHandle`。
+  - **ECS Transform ↔ b2 同步**：Step() 之后扫所有 Dynamic body，从 b2 取 position/rotation 写回 ECS TransformComponent；Static / Kinematic 反向（ECS 改值 → 下一 Step 前推到 b2）。Phase 4 范围只做 2D x-y 平面同步，Z 不动。
+  - **Box2D 头只在 src/physics/box2d/ 出现**：CLAUDE.md 头隔离不变量。
+- 验证方式：
+  1. cmake build 通过、box2d 链接成功；
+  2. Box2DStepTest 全过；
+  3. PhysicsInterfaceTest 不退化（接口语义一致）；
+  4. validation 静默 / install_smoke 不退化。
+- 验收标准：上述 4 条。
+- Critical Path：是
+
+#### Task 07：Fixture 替换 API（运行时碰撞器变形支持）
+- 描述：在 PhysicsWorld 加 `ReplaceFixture(BodyHandle, ColliderDesc)`：原子地把已挂在 body 上的 collider 换成新 desc——这是史莱姆"swallowing boss form"路径上"角色形状中途变化"的 must-have 入口（虽是首游戏需求，但**接口本身是引擎中性的**——任何 2D 平台跳跃在变形 / 拾取大件物品 / 状态变身时都会用到，不算游戏特化）。
+- 输入：Task 06
+- 输出：
+  - `Modified: include/orange/engine/physics/PhysicsWorld.h`（增 ReplaceFixture API）
+  - `Modified: src/physics/PhysicsWorld.cpp`（Box2D 3.x 走 b2DestroyShape + b2CreatePolygonShape / b2CreateCircleShape 替换；同帧不冲突取决于 physics 解算时点，Step() 之外调用安全）
+  - `Proposed: tests/physics/FixtureReplaceTest.cpp`（覆盖：dynamic body 半径 1 → 0.3 替换后 contact filtering 正确 / mass 重算）
+- 影响路径/模块：Physics、tests
+- 前置依赖：Task 06
+- 实现要点：
+  - **替换在 Step() 调用之外**：调用时点应在帧的"逻辑阶段"完成，物理 Step 取最新形状；与 b2 文档一致。
+  - **mass 自动重算**：Box2D 3.x 自动处理 ApplyMassFromShapes（如果 dynamic）；本 API 不需要调用方手动算。
+- 验证方式：
+  1. ctest 新增 1 条 FixtureReplaceTest 全过；
+  2. 既有 ctest 不退化。
+- 验收标准：上述 2 条。
+- Critical Path：否（首游戏会用，但 Phase 4 sample 不展示——留 Task 11 综合 demo 时再展示）
+
+#### Task 08：Input 模块（Action / ActionMap / InputContext + JSON 加载）
+- 描述：交付 Input 模块：`Action`（trigger 类型 + dead zone 等）+ `ActionMap`（Action 列表，按名查 / 按物理 binding 触发）+ `InputContext`（栈式上下文，暂存 ActionMap + 优先级；UI / 菜单切到不同 context 不打扰主玩法）。底层走 GLFW 原生 key / mouse / gamepad 事件。`*.actions.json` 加载 ActionMap 描述。
+- 输入：Phase 1 / 2 已落 Window 与 GLFW
+- 输出：
+  - `Proposed: include/orange/engine/input/Action.h`
+  - `Proposed: include/orange/engine/input/ActionMap.h`
+  - `Proposed: include/orange/engine/input/InputContext.h`
+  - `Proposed: include/orange/engine/input/InputDevice.h`（key / mouse / gamepad button enums）
+  - `Proposed: src/input/InputContext.cpp` + 配套 JSON loader（走 Core::JsonReader 不暴露 nlohmann）
+  - `Proposed: assets/configs/default.actions.json`（示例 / sample 用）
+  - `Proposed: tests/input/ActionMapTest.cpp` + `tests/input/InputContextStackTest.cpp`
+- 影响路径/模块：Input（新模块）、Asset（无新 type，但用 Core::JsonReader）
+- 前置依赖：Phase 1 GLFW 已就位
+- 实现要点：
+  - **底层物理事件桥**：GLFW key callback → InputContext::PostKeyEvent；context 栈顶的 ActionMap 把 key code → Action name + state（pressed / held / released）。
+  - **Schema 走 Core::JsonReader**：与 docs/extension-points.md "JSON 都走 JsonReader / JsonWriter" 一致。Schema：actions[].name / actions[].bindings[]。
+  - **不引入 reflection / 自动绑定**：每个 binding 字段在 loader 内手写 read。
+- 验证方式：
+  1. ctest 新增 2 条全过；
+  2. 加载 default.actions.json + 模拟 key event 触发 Action::Triggered 状态正确；
+  3. install_smoke / config_smoke 不退化。
+- 验收标准：上述 3 条 + extension-points.md 加 §5：Custom Input bindings（说明 JSON schema + 游戏侧自加 actions 的路径）。
+- Critical Path：是
+
+#### Task 09：Audio 模块（miniaudio 集成）
+- 描述：把 miniaudio（单头库）集成到 `src/audio/miniaudio/`，公共面 `AudioEngine`（init / shutdown）+ `Sound`（资源句柄）+ `SoundInstance`（播放控制：Play / Pause / Stop / SetVolume）。`SoundAsset` 通过 AssetRegistry 加载（wav / mp3 / flac，走 miniaudio 内置 decoder）。
+- 输入：Phase 1 Asset / 2 Core
+- 输出：
+  - `Proposed: vendor/miniaudio/miniaudio.h`（单头）
+  - `Proposed: include/orange/engine/audio/AudioEngine.h`
+  - `Proposed: include/orange/engine/audio/Sound.h` / `SoundInstance.h`
+  - `Proposed: include/orange/engine/asset/SoundAsset.h`
+  - `Proposed: src/audio/miniaudio/AudioEngine.cpp`（define MINIAUDIO_IMPLEMENTATION 在唯一 TU）
+  - `Proposed: src/audio/miniaudio/SoundLoader.cpp`（IAssetLoader<SoundAsset>）
+  - `Proposed: tests/audio/AudioEngineSmokeTest.cpp`（init / shutdown 不崩；不放真声音文件，CI 友好）
+  - `Modified: CMakeLists.txt`（add vendor/miniaudio include path PRIVATE BUILD_INTERFACE）
+- 影响路径/模块：Audio（新模块）、Asset、CMake
+- 前置依赖：Phase 1 / 2；vendor/miniaudio/miniaudio.h 就位
+- 实现要点：
+  - **miniaudio 头隔离**：`#include "miniaudio.h"` 仅在 `src/audio/miniaudio/**`（CLAUDE.md 不变量）。
+  - **MA_NO_DECODING / MA_NO_ENCODING 不开**：默认带 wav / flac / mp3 decoder；游戏侧最常见格式都覆盖。
+  - **CI 友好**：smoke ctest 不真播放声音（CI 没声卡可能崩），仅验证 ma_engine_init / ma_engine_uninit 路径。
+- 验证方式：
+  1. cmake build 通过；
+  2. AudioEngineSmokeTest 全过；
+  3. 既有 ctest 不退化。
+- 验收标准：上述 3 条。
+- Critical Path：是
+
+#### Task 10：`samples/05_skeletal_animation` + `samples/06_physics_platformer`
+- 描述：交付两个 sample：`05_skeletal_animation` 加载 DragonBones 官方测试资源（如 mecha_1002_101d 或类似 free demo skeleton）、Play 一个 walk anim、屏幕上看到骨骼带蒙皮 mesh 动起来；`06_physics_platformer` 一个 dynamic ball 受重力下落、撞到 plane 反弹 / 滑动，DirectionalLight + 完整 PostProcessChain 沿用 sample 07/08 视觉基线。
+- 输入：Task 03（SkeletalAnimator）/ Task 06（Box2D）/ Phase 3 视觉基线
+- 输出：
+  - `Proposed: samples/05_skeletal_animation/{CMakeLists.txt, main.cpp, assets/mecha/...}`
+  - `Proposed: samples/06_physics_platformer/{CMakeLists.txt, main.cpp}`
+  - `Modified: samples/CMakeLists.txt`
+- 影响路径/模块：samples、构建系统
+- 前置依赖：Task 03 / 06
+- 实现要点：
+  - **Skeletal sample 不接 GPU skinning**：Phase 4 范围 SkeletalAnimator.Pose() 只在 CPU 算 palette，sample 端可以用 imgui debug 把 palette 文本输出 / 或在 plane 上画几个 dot 表示 joint 位置——视觉验收"动起来"即可，等 Phase 6 GPU skinning 上线再让 mesh 真变形。
+  - **Physics sample 用 sphere mesh + plane**：与 sample 07/08 视觉风格对齐。
+  - **shadow / bloom 不变**：直接复用 Phase 3 的 PostProcessChain。
+- 验证方式：
+  1. cmake build 通过；
+  2. 两个 sample 启动不崩；
+  3. 截图 sample 05 看到 joint 位移、sample 06 看到 ball 下落 + 弹跳；
+  4. ctest 不退化、install_smoke 不退化。
+- 验收标准：上述 4 条。
+- Critical Path：是
+
+#### Task 11：`samples/07_full_pipeline` 升级为可玩 demo（Animation + Physics + Input 综合）
+- 描述：把 sample 07_full_pipeline 升级：把 cube 换成"由骨骼动画驱动的 mecha + Box2D dynamic body"，键盘 A/D 走（InputContext + ActionMap）、空格跳；DirectionalLight + shadow + bloom 全保留。**这条是 Phase 4 收尾里程碑**——证明 Animation + Physics + Input 在 Phase 3 视觉基线上能合得起来。
+- 输入：Task 03 / 06 / 07 / 08 / 09
+- 输出：
+  - `Modified: samples/07_full_pipeline/main.cpp`（替换 cube → 动画 character + 物理 body + Input）
+  - `Modified: samples/07_full_pipeline/CMakeLists.txt`（新加 *.actions.json copy）
+  - `Proposed: samples/07_full_pipeline/configs/default.actions.json`
+- 影响路径/模块：samples
+- 前置依赖：Task 03 / 06 / 07 / 08 / 09
+- 实现要点：
+  - **音效在 Task 09 上线后挂上**：跳跃 / 落地音效——验证 SoundEventManager 能从 DragonBones runtime 转发到 AudioEngine。
+  - **首游戏特化保持引擎中性**：character 走"通用 mecha" 资源，不用 slime / boss form——避免与 game-specific 概念混淆（CLAUDE.md "Game-specific 禁忌"原则）。
+- 验证方式：
+  1. cmake build 通过；
+  2. 启动后键盘控制角色走 + 跳，动画切换 idle/walk/jump，影子跟着角色动；
+  3. 跳跃 / 落地有音效；
+  4. ctest 不退化。
+- 验收标准：上述 4 条。Phase 4 完成标准全部兑现：DragonBones 接通 + ProceduralAnimator + Box2D 步进 + Action JSON 加载 + sample 07 综合演示。Phase 5（生产化）可启动。
+- Critical Path：是
 
 ### Phase 5：生产化
 
