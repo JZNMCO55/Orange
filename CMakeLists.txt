@@ -95,6 +95,11 @@ add_library(orange_engine STATIC
     # Procedural 后端实现见 src/animation/dragonbones / Task 03 / 04。
     src/animation/AnimationStateMachine.cpp
     src/animation/AnimatorRegistry.cpp
+
+    # Physics：PhysicsWorld / RigidBody / Collider 公共接口（Phase 4 / Task 05）。
+    # 本期是 stub，Task 06 把 src/physics/PhysicsWorld.cpp 替换为 Box2D 后端
+    # 真实现，公共面不动。
+    src/physics/PhysicsWorld.cpp
 )
 
 # ---------------------------------------------------------------------------

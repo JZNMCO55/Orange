@@ -1738,7 +1738,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 4 条。Phase 6 Material UBO 上线后 Task 04 不需重做——本期 SetUniform 的内表已经写对了，到时只需让 Pipeline 把内表读出来 push 到 GPU 即可。
 - Critical Path：否（不阻塞 Phase 5 起跑；Material UBO 上线前没法在 sample 里看到效果，但接口可用）
 
-#### Task 05：Physics 公共接口（PhysicsWorld / RigidBody / Collider 组件）
+#### Task 05：Physics 公共接口（PhysicsWorld / RigidBody / Collider 组件） ✅
 - 描述：交付 Physics 模块的零依赖公共面：`PhysicsWorld`（PIMPL，全 Box2D 类型藏在 .cpp）+ `RigidBodyComponent`（type、mass、velocity 等）+ `ColliderComponent`（shape desc + material props）+ `ColliderDesc`（圆 / 盒 / 多边形 / 链）。**不**集成 Box2D（Task 06）；本期接口设计要让 Box2D 切到其他 2D physics（如 Chipmunk）也无破坏性改动。
 - 输入：Phase 3 World
 - 输出：

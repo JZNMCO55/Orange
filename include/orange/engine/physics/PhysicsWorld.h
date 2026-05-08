@@ -1,0 +1,98 @@
+#ifndef ORANGE_ENGINE_PHYSICS_PHYSICS_WORLD_H
+#define ORANGE_ENGINE_PHYSICS_PHYSICS_WORLD_H
+
+// ---------------------------------------------------------------------------
+// PhysicsWorld —— "World → 一帧物理步进"的根入口（PIMPL）。
+//
+// 公共面**不**含任何 b2 类型——CLAUDE.md "Header isolation" 不变量约束
+// `<box2d/...>` 只允许出现在 `src/physics/box2d/**`。Phase 4 / Task 05 是
+// 接口阶段，.cpp 走 stub 实现（AddBody / RemoveBody 维护内表 + 反写 handle，
+// Step 是 no-op）；Task 06 / Box2D 集成时把 .cpp 整体替换为真 b2World 路径，
+// 公共面不动。
+//
+// 设计决策：让接口对 Box2D 之外的 2D physics（Chipmunk / Jolt 2D）也无破坏
+// 性改动——所以
+//   * BodyHandle 是不透明强类型，后端如何编码（e.g. b2BodyId 的 index +
+//     generation）由后端自管；
+//   * RigidBodyComponent / ColliderComponent 字段语义对齐 Box2D 3.x（因为它
+//     是首选后端），但都是中性物理概念，其它 2D physics 也认；
+//   * AddBody 一次提交"body + 单 collider"——多 collider per body 是 Box2D
+//     特性，0.x 阶段 ECS 不下放（见 ColliderComponent 注释）。
+// ---------------------------------------------------------------------------
+
+#include <orange/engine/OrangeEngineExport.h>
+#include <orange/engine/physics/BodyHandle.h>
+#include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/RigidBodyComponent.h>
+
+#include <glm/vec2.hpp>
+
+#include <cstddef>
+#include <memory>
+
+namespace Orange::Engine::Physics
+{
+
+struct PhysicsWorldDesc
+{
+    glm::vec2 gravity{0.0f, -9.81f};
+
+    // Box2D 3.x 用 substep（替换 2.x 的 velocity / position iterations）。
+    // 4 是 b2 推荐入门值；高速碰撞 / 高质量比场景需要调到 8。
+    std::uint32_t substepCount{4};
+};
+
+class ORANGE_ENGINE_API PhysicsWorld
+{
+public:
+    PhysicsWorld();
+    explicit PhysicsWorld(const PhysicsWorldDesc& desc);
+    ~PhysicsWorld();
+
+    PhysicsWorld(const PhysicsWorld&)            = delete;
+    PhysicsWorld& operator=(const PhysicsWorld&) = delete;
+
+    PhysicsWorld(PhysicsWorld&&) noexcept;
+    PhysicsWorld& operator=(PhysicsWorld&&) noexcept;
+
+    // 推进一帧物理。dt = 本帧时间步（秒）。Phase 4 / Task 05 stub：本帧
+    // 内置 step 计数 +1，body 状态不变；Task 06 接 b2World_Step 后真模拟。
+    // dt < 0 当 0 处理；过大 dt 由后端自管（Box2D 内部不会自动 sub-clamp）。
+    void Step(float dt);
+
+    // 把一个 body + collider 注册进 world。返回值：
+    //   * 成功 → 新分配的 BodyHandle（后续 RemoveBody / 查询用）；
+    //   * 失败 → BodyHandle::Invalid()（descriptor 形态不合法，例如 polygon
+    //     count == 0 / chain count < 2 等；本期 stub 不主动校验，永远成功）。
+    // body / collider 按值拷一份进 world 内表；调用方原 component 不被修改
+    // （RigidBodyComponent.handle 反写由调用方自己做：拿到返回值后 set 进
+    // ECS component）——这条与 EnTT view 内"const &"取 component 的访问模
+    // 式一致，避免 PhysicsWorld 暗中持有 ECS 句柄。
+    BodyHandle AddBody(const RigidBodyComponent& body,
+                       const ColliderComponent&  collider);
+
+    // 移除 handle 对应的 body。idempotent：handle 无效 / 已被 remove → no-op。
+    void RemoveBody(BodyHandle handle);
+
+    // handle 是否仍指向 world 中已注册的 body。
+    bool IsValid(BodyHandle handle) const noexcept;
+
+    // 当前已注册 body 数（诊断 / 单测用）。
+    std::size_t BodyCount() const noexcept;
+
+    // PhysicsWorldDesc 访问。Task 06 起 b2World 重力 / substep 用此值；
+    // Task 05 仅按值存储。
+    const PhysicsWorldDesc& Desc() const noexcept;
+
+    // 已发生的 Step 次数（诊断 / 单测用——证明 Step 真被调用，等 Task 06
+    // 替换 stub 后用于"step 真发到 b2World 了吗"的回归测试）。
+    std::size_t StepCount() const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> mpImpl;
+};
+
+}  // namespace Orange::Engine::Physics
+
+#endif  // ORANGE_ENGINE_PHYSICS_PHYSICS_WORLD_H

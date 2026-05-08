@@ -39,6 +39,9 @@ orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(animation_state_machine_test animation/AnimationStateMachineTest.cpp)
 orange_engine_add_test(animator_registry_test       animation/AnimatorRegistryTest.cpp)
 
+# Physics：World / RigidBody / Collider 公共接口（Phase 4 / Task 05，stub 实现）
+orange_engine_add_test(physics_interface_test       physics/PhysicsInterfaceTest.cpp)
+
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
 #
