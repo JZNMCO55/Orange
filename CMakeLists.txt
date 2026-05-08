@@ -186,6 +186,12 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/passthrough_combine.frag.glsl"
     ORANGE_ENGINE_BUILTIN_PASSTHROUGH_COMBINE_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/tonemap.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_TONEMAP_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/tonemap.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_TONEMAP_FS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
@@ -201,7 +207,9 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_BLOOM_DOWN_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_BLOOM_UP_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_COMBINE_FS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_COMBINE_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_TONEMAP_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_TONEMAP_FS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)

@@ -343,10 +343,13 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIShaderModule> bloomDownsampleFs;
     std::unique_ptr<Orange::Rhi::RHIShaderModule> bloomUpsampleFs;
     std::unique_ptr<Orange::Rhi::RHIShaderModule> passthroughCombineFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> tonemapVs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> tonemapFs;
 
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomDownsamplePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomUpsamplePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline> tonemapPipeline;
 
     // -----------------------------------------------------------------
 
@@ -496,6 +499,10 @@ struct Pipeline::Impl
     // 检测当前 chain 是否含 BloomPass + 取其参数。chain==nullptr / 没找
     // 到 → 返回 nullptr。
     const BloomPass* FindActiveBloomPass() const noexcept;
+
+    // 同上，TonemapPass。chain 含 TonemapPass 时由 Pipeline 在 stage B 用
+    // tonemap 路径写出 swap-chain（替代 06.03 / 06.04 的 passthrough 收尾）。
+    const TonemapPass* FindActiveTonemapPass() const noexcept;
 
     // 创建 / 重建 bloom 6 张 mip + 描述符 set（首次激活、HDR 尺寸变化、
     // chain 切到含 BloomPass 时触发）。失败返回 false。
@@ -785,18 +792,21 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         }
     }
     {
-        auto downCode    = LoadSpirv("shaders/orange_engine/bloom_downsample.frag.spv");
-        auto upCode      = LoadSpirv("shaders/orange_engine/bloom_upsample.frag.spv");
-        auto combineCode = LoadSpirv("shaders/orange_engine/passthrough_combine.frag.spv");
-        if (downCode.empty() || upCode.empty() || combineCode.empty())
+        auto downCode      = LoadSpirv("shaders/orange_engine/bloom_downsample.frag.spv");
+        auto upCode        = LoadSpirv("shaders/orange_engine/bloom_upsample.frag.spv");
+        auto combineCode   = LoadSpirv("shaders/orange_engine/passthrough_combine.frag.spv");
+        auto tonemapVsCode = LoadSpirv("shaders/orange_engine/tonemap.vert.spv");
+        auto tonemapFsCode = LoadSpirv("shaders/orange_engine/tonemap.frag.spv");
+        if (downCode.empty() || upCode.empty() || combineCode.empty()
+            || tonemapVsCode.empty() || tonemapFsCode.empty())
         {
             Shutdown();
             return ResultCode::IoError;
         }
 
         Orange::Rhi::ShaderModuleDesc sm{};
-        sm.mStage = Orange::Rhi::ShaderStage::Fragment;
 
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
         sm.mpCode      = downCode.data();
         sm.mCodeSize   = downCode.size() * sizeof(std::uint32_t);
         sm.mpDebugName = "orange_engine.bloom_downsample.frag";
@@ -812,9 +822,22 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         sm.mpDebugName = "orange_engine.passthrough_combine.frag";
         impl.passthroughCombineFs = rhi.CreateShaderModule(sm);
 
-        if (!impl.bloomDownsampleFs || !impl.bloomUpsampleFs || !impl.passthroughCombineFs)
+        sm.mStage      = Orange::Rhi::ShaderStage::Vertex;
+        sm.mpCode      = tonemapVsCode.data();
+        sm.mCodeSize   = tonemapVsCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.tonemap.vert";
+        impl.tonemapVs = rhi.CreateShaderModule(sm);
+
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = tonemapFsCode.data();
+        sm.mCodeSize   = tonemapFsCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.tonemap.frag";
+        impl.tonemapFs = rhi.CreateShaderModule(sm);
+
+        if (!impl.bloomDownsampleFs || !impl.bloomUpsampleFs || !impl.passthroughCombineFs
+            || !impl.tonemapVs || !impl.tonemapFs)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom shader 模块创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / tonemap shader 模块创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -894,10 +917,35 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         d.mpDebugName = "orange_engine.passthrough_combine";
         impl.passthroughCombinePipeline = rhi.CreateGraphicsPipeline(d);
     }
-    if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
-        !impl.passthroughCombinePipeline)
     {
-        ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / combine pipeline 创建失败");
+        // tonemap pipeline (BGRA8Unorm swap-chain target，combineLayout
+        // 双 binding，push constant uExposure + uBloomIntensity + 8B pad)
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.tonemapVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.tonemapFs.get(), "main"});
+        d.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});
+        d.mRenderTargets.mColorFormats.push_back(kSwapchainColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.combineLayout.get());
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 16;
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.tonemap";
+        impl.tonemapPipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
+        !impl.passthroughCombinePipeline || !impl.tonemapPipeline)
+    {
+        ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / combine / tonemap pipeline 创建失败");
         Shutdown();
         return ResultCode::InternalError;
     }
@@ -932,9 +980,12 @@ void Pipeline::Shutdown()
     impl.shaderModules.clear();
 
     impl.ReleaseBloomResources();
+    impl.tonemapPipeline.reset();
     impl.passthroughCombinePipeline.reset();
     impl.bloomUpsamplePipeline.reset();
     impl.bloomDownsamplePipeline.reset();
+    impl.tonemapFs.reset();
+    impl.tonemapVs.reset();
     impl.passthroughCombineFs.reset();
     impl.bloomUpsampleFs.reset();
     impl.bloomDownsampleFs.reset();
@@ -1213,6 +1264,24 @@ const BloomPass* Pipeline::Impl::FindActiveBloomPass() const noexcept
         if (const BloomPass* bp = dynamic_cast<const BloomPass*>(p))
         {
             return bp;
+        }
+    }
+    return nullptr;
+}
+
+const TonemapPass* Pipeline::Impl::FindActiveTonemapPass() const noexcept
+{
+    if (postProcessChain == nullptr)
+    {
+        return nullptr;
+    }
+    const std::size_t count = postProcessChain->PassCount();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const IPostProcessPass* p = postProcessChain->PassAt(i);
+        if (const TonemapPass* tp = dynamic_cast<const TonemapPass*>(p))
+        {
+            return tp;
         }
     }
     return nullptr;
@@ -1501,9 +1570,23 @@ void Pipeline::Render(Orange::Engine::World& world)
     // 回 false，Pipeline 仍跑 Renderer.BeginFrame/EndFrame 但跳过 stage A。
     const bool hdrReady = impl.EnsureHdrTarget();
 
-    // 检测 chain 里的 BloomPass —— 决定是否在 stage A 末尾追加 bloom mip
-    // chain，并决定 stage B 走 passthrough 还是 passthrough_combine。
-    const BloomPass* activeBloom = impl.FindActiveBloomPass();
+    // 检测 chain 里的 BloomPass / TonemapPass。
+    //
+    // - BloomPass 在 → stage A 末尾追加 bloom mip-chain；
+    // - TonemapPass 在 + Bloom 也在 → stage B 走 tonemap 路径（替代
+    //   passthrough_combine 完成 swap-chain 写出，HDR + bloom 经 ACES
+    //   映射后写到 BGRA8Unorm）；
+    // - 仅 Bloom（无 Tonemap）→ stage B 仍走 06.04 的 passthrough_combine
+    //   做加权合成，但不做 HDR → LDR 算子；
+    // - 都没有（chain 空 / 仅 HdrPass / 仅 LutPass invalid handle）→
+    //   stage B 回到 06.03 的纯 HDR passthrough。
+    //
+    // Tonemap 没有 Bloom 的搭配（tonemap layout 仍要 binding 1）当前不
+    // 在 0.x 支持范围——TonemapPass 期望 bloomCombineSet 已经准备好。
+    // 设计上需要时由游戏侧自己把 BloomPass 一并加进 chain；建议默认走
+    // BuiltinPostProcessChain::CreateDefault()。
+    const BloomPass*   activeBloom   = impl.FindActiveBloomPass();
+    const TonemapPass* activeTonemap = impl.FindActiveTonemapPass();
     if (activeBloom != nullptr && hdrReady)
     {
         if (!impl.EnsureBloomResources())
@@ -1515,6 +1598,12 @@ void Pipeline::Render(Orange::Engine::World& world)
     {
         // chain 切回不含 BloomPass —— 释放 bloom 资源避免占内存。
         impl.ReleaseBloomResources();
+    }
+    // Tonemap 需要 bloomCombineSet（双 binding），活动 tonemap 但 bloom
+    // 路径未就绪时回退到不上 tonemap，stage B 走 06.03 / 06.04 fallback。
+    if (activeTonemap != nullptr && (activeBloom == nullptr || !impl.bloomMipsReady))
+    {
+        activeTonemap = nullptr;
     }
 
     // 1. mesh GPU 上传必须在自管 cmd 之外完成（UploadContext 内部 transient
@@ -1591,9 +1680,28 @@ void Pipeline::Render(Orange::Engine::World& world)
         item.mDraw.mVertexCount   = 3;        // big-triangle
         item.mDraw.mInstanceCount = 1;
 
-        if (activeBloom != nullptr && impl.bloomMipsReady)
+        if (activeTonemap != nullptr)
         {
-            // Bloom 路径：passthrough_combine + 双 binding (HDR + bloom)
+            // Tonemap 路径：tonemap pipeline + 双 binding (HDR + bloom)
+            // → ACES Narkowicz → swap-chain。activeTonemap 非空已经隐含
+            // activeBloom 非空 + bloomMipsReady（在上面的过滤里保证），
+            // 所以 bloomCombineSet 一定可用。
+            item.mpPipeline          = impl.tonemapPipeline.get();
+            item.mpDescriptorSets[0] = impl.bloomCombineSet.get();
+            item.mDescriptorSetCount = 1;
+
+            struct PushTonemap { float exposure; float bloomIntensity; float pad0, pad1; };
+            PushTonemap pcData{};
+            pcData.exposure       = activeTonemap->exposure;
+            pcData.bloomIntensity = activeBloom ? activeBloom->intensity : 0.0f;
+            std::memcpy(item.mPushConstantData.data(), &pcData, sizeof(pcData));
+            item.mPushConstantSize   = static_cast<std::uint32_t>(sizeof(pcData));
+            item.mPushConstantOffset = 0;
+            item.mPushConstantStage  = Orange::Rhi::ShaderStage::Fragment;
+        }
+        else if (activeBloom != nullptr && impl.bloomMipsReady)
+        {
+            // 06.04 fallback：HDR + bloom 加权合成，无 tonemap
             item.mpPipeline          = impl.passthroughCombinePipeline.get();
             item.mpDescriptorSets[0] = impl.bloomCombineSet.get();
             item.mDescriptorSetCount = 1;

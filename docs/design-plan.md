@@ -1543,7 +1543,7 @@ Removed: Src/                              (整目录，src/ 替换)
   3. 新增 ctest：`tests/render/PipelineHdrTargetTest.cpp` 覆盖 HDR target 生命周期 + OnResize 重建；validation layer 静默。
 - Critical Path：是
 
-###### Task 06.04 · Bloom mip-chain（downsample + upsample）
+###### Task 06.04 · Bloom mip-chain（downsample + upsample） ✅
 - 输出：
   - `Proposed: src/render/builtin_shaders/bloom_downsample.vert.glsl` + `bloom_downsample.frag.glsl`：fullscreen + 13-tap 采样 + Karis 平均；mip0 跳应用 `BloomPass.threshold` 做 bright-pass。
   - `Proposed: src/render/builtin_shaders/bloom_upsample.vert.glsl` + `bloom_upsample.frag.glsl`：fullscreen + 9-tap tent filter + add 上层结果。
