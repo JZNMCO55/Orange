@@ -173,6 +173,21 @@ public:
         // 把当前帧时间喂给 Pipeline，让 LightUbo.frameInfo.x = time，
         // fresnel.frag 据此跑脉动。
         mPipeline.SetFrameTime(frame.time.totalSeconds);
+
+        // 每 0.5 秒落一张 PNG 到 captures/sample_08/000.png 起编号 ——
+        // debug-only：fresnel pulseSpeed = 1.8 rad/s，full pulse 周期 ≈ 3.5 s，
+        // 0.5 s 步长能采到一个周期内 7 个均匀相位（每张差大约 51° 相位）。
+        constexpr float kCaptureInterval = 0.5f;
+        if (frame.time.totalSeconds >= mNextCaptureTime)
+        {
+            char fileName[64];
+            std::snprintf(fileName, sizeof(fileName),
+                          "captures/sample_08/%03u.png", mCaptureIndex);
+            mPipeline.RequestCapture(fileName);
+            ++mCaptureIndex;
+            mNextCaptureTime = frame.time.totalSeconds + kCaptureInterval;
+        }
+
         mPipeline.Render(mWorld);
     }
 
@@ -186,9 +201,11 @@ public:
     }
 
 private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-    Entity    mLight;
+    Pipeline&     mPipeline;
+    World&        mWorld;
+    Entity        mLight;
+    float         mNextCaptureTime{0.0f};   // 第 1 张在 t≈0 时刻
+    std::uint32_t mCaptureIndex{0};
 };
 
 }  // namespace
@@ -347,6 +364,17 @@ int main()
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
     pipeline.SetShadowConfig(ShadowConfig{});
+
+    // RequestCapture 落盘的父目录必须已存在；提前 mkdir 一次。
+    std::error_code mkErr;
+    std::filesystem::create_directories("captures/sample_08", mkErr);
+    if (mkErr)
+    {
+        std::fprintf(stderr,
+                     "create_directories(captures/sample_08) failed: %s — capture 路径会落空\n",
+                     mkErr.message().c_str());
+        // 不退出：sample 仍可跑，capture 失败由 Pipeline 内 ORANGE_LOG_ERROR 报告。
+    }
 
     host->PushLayer(std::make_unique<RenderLayer>(pipeline, world, lightEntity));
 

@@ -274,6 +274,9 @@ target_include_directories(orange_engine
         "$<INSTALL_INTERFACE:include>"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        # vendor/stb：单头实现（stb_image_write.h），仅 src/render 的截图
+        # 路径消费——头不暴露到公共面，BUILD_INTERFACE only。
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb>"
 )
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@
 #include <orange/engine/core/Result.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 
 namespace Orange::Engine
@@ -109,6 +110,24 @@ public:
     // 等需要 system 协作的路径）。nullptr 时 Pipeline 走 fallback：
     // drawable.materialInstance == nullptr 时落到内置 textured Material。
     void SetMaterialSystem(MaterialSystem* system) noexcept;
+
+    // 请求把下一帧的离屏 HDR 渲染结果落盘成 PNG。下一次 Render() 会在
+    // bloom mip-chain 完成、tonemap 之前追加一次 GPU readback 到 host-
+    // visible buffer，再在 CPU 端做 ACES Narkowicz tonemap、用 stb_image_write
+    // 编 PNG 写到 outPath；写完后请求自动清空（不会重复触发）。
+    //
+    // 路径覆盖：HDR scene color（含 shadow / 主光衰减），但**不含 bloom**——
+    // bloom 在 GPU 端 tonemap pass 内与 HDR 合成，本路径未参与该合成。
+    // 这是 debug-only 的"够用"型截图，与屏幕看到的最终画面在 bloom halo
+    // 上有差异，但场景结构 / 阴影 / 光照方向完全一致。
+    //
+    // outPath 父目录必须已存在（不自动 mkdir）；本调用幂等：本帧已经收
+    // 到一次请求时第二次调用会覆盖前一个 outPath，仅最后一次生效。
+    //
+    // 仅 debug 用：本路径引入一次 GPU stall（额外 transition + copy +
+    // wait fence）+ 一段 CPU 编码时间（~30 ms / 1280×720 量级），不要
+    // 在生产 / release 路径上每帧调。
+    void RequestCapture(const std::filesystem::path& outPath);
 
     // 设置当前帧时间（seconds，单调递增）。Pipeline 把它写进 light UBO
     // 的 uFrameInfo.x，shader 端用于 time-pulse / dissolve / 流光等
