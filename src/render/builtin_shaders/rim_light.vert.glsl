@@ -1,31 +1,29 @@
 #version 450
 
-// 内置 rim-light 顶点 shader：透传 uv 与 model-space position（fragment
-// 阶段用 dFdx / dFdy 推 face normal 用）。push-constant 与 fragment 阶
-// 段共用同一 block——std430 字段顺序与 Material 描述符里 uniforms 列
-// 表一一对应。
-//
-// 顶点输入布局必须与 src/render/Pipeline.cpp 中 VertexInputLayoutDesc
-// 的两个 attribute 一一对应（location 0: float3 pos, location 1:
-// float2 uv，stride 20 bytes）。
+// 内置 rim-light 顶点 shader（Task 07 重构版）—— 与 toon.vert 同形态：
+// push-constant {uMVP, uModel} = 128 B；输出 vUV / vWorldPos / vModelPos
+// （rim 计算需要 view direction = camera - worldPos，但当前阶段 view
+// position 不在 push constant 里，frag 端用 vModelPos 当 view-pos 的
+// 退化解，保持与 06.04 之前的视觉等价）。
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
 
 layout(location = 0) out vec2 vUV;
-layout(location = 1) out vec3 vModelPos;
+layout(location = 1) out vec3 vWorldPos;
+layout(location = 2) out vec3 vModelPos;
 
-layout(push_constant, std430) uniform RimLight {
-    mat4  uMVP;            //   0  64
-    vec3  uViewPos;        //  64  16
-    vec3  uRimColor;       //  80  16
-    float uRimPower;       //  96   4
-    float uRimIntensity;   // 100   4
+layout(push_constant, std430) uniform Push
+{
+    mat4 uMVP;     //   0  64
+    mat4 uModel;   //  64  64
 } pc;
 
 void main()
 {
-    gl_Position = pc.uMVP * vec4(inPosition, 1.0);
-    vUV         = inUV;
-    vModelPos   = inPosition;
+    vec4 worldPos4 = pc.uModel * vec4(inPosition, 1.0);
+    vWorldPos      = worldPos4.xyz;
+    vModelPos      = inPosition;
+    vUV            = inUV;
+    gl_Position    = pc.uMVP * vec4(inPosition, 1.0);
 }

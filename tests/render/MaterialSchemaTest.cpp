@@ -68,10 +68,12 @@ void TestLoadTexturedDescriptor(AssetRegistry& registry)
     assert(textured.vertexShader.IsValid());
     assert(textured.fragmentShader.IsValid());
 
-    // 仅一个 push-constant uMVP(mat4)，与 textured_mesh.vert.glsl 对齐。
-    assert(textured.uniforms.size() == 1);
-    const auto* uMVP = FindUniformType(textured, "uMVP");
-    assert(uMVP && *uMVP == MaterialUniformType::Mat4);
+    // Task 07 起 textured 与 toon / rim_light 同 push schema = {uMVP, uModel}。
+    assert(textured.uniforms.size() == 2);
+    const auto* uMVP   = FindUniformType(textured, "uMVP");
+    const auto* uModel = FindUniformType(textured, "uModel");
+    assert(uMVP   && *uMVP   == MaterialUniformType::Mat4);
+    assert(uModel && *uModel == MaterialUniformType::Mat4);
 
     // 一个纹理槽 binding=0，name="uTexture"。当前 fragment shader 不实
     // 际采样它，但 schema 已经稳定。

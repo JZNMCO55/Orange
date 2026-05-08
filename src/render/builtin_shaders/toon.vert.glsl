@@ -1,32 +1,38 @@
 #version 450
 
-// 内置 toon-shading 顶点 shader：透传 uv，把 model-space position 也透
-// 给 fragment 用作 face normal 推算（dFdx / dFdy）。push-constant 与
-// fragment 阶段共用同一 block——std430 layout 与 Material 描述符里的
-// uniform 顺序一一对应（Phase 3 / Task 04 起 Pipeline 把 MaterialInstance
-// 覆盖按这个顺序打包写入）。
+// 内置 toon-shading 顶点 shader（Task 07 重构版）：
+//   * push-constant 变为 {uMVP, uModel} = 128 B（Vertex 阶段使用），
+//     uModel 让 fragment 端能拿到 worldPos 跑 shadow_pcf；
+//   * 输出 vUV / vWorldPos —— vModelPos 不再需要（face normal 仍可由
+//     dFdx/dFdy 推算，但用 worldPos 推更稳，因为 worldPos 不会随
+//     模型坐标变小而精度劣化）。
 //
-// 顶点输入布局必须与 src/render/Pipeline.cpp 中 VertexInputLayoutDesc
-// 的两个 attribute 一一对应（location 0: float3 pos, location 1:
-// float2 uv，stride 20 bytes）。
+// 其他原 push-constant 字段（uColorWarm / uColorCool / uLightDir /
+// uShadowThreshold）按 Phase 3 / Task 07 设计决策迁移：
+//   * uLightDir / uLightColor / uLightIntensity → 主 pass 的 light UBO
+//     (descriptor set 0 binding 1)，per-frame；
+//   * uColorWarm / uColorCool / uShadowThreshold → 暂时 hardcode 进
+//     fragment shader（per-instance 自定义留待 Phase 6 引入 Material UBO）。
+//
+// 顶点输入 layout 与 textured_mesh / shadow_caster 一致：location 0 =
+// pos, location 1 = uv，stride 20 字节（Pipeline 的 InterleavedVertex）。
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
 
 layout(location = 0) out vec2 vUV;
-layout(location = 1) out vec3 vModelPos;
+layout(location = 1) out vec3 vWorldPos;
 
-layout(push_constant, std430) uniform Toon {
-    mat4  uMVP;             //   0  64
-    vec3  uColorWarm;        //  64  16  (vec3 + 4B 尾 pad)
-    vec3  uColorCool;        //  80  16
-    vec3  uLightDir;         //  96  16
-    float uShadowThreshold;  // 112   4
+layout(push_constant, std430) uniform Push
+{
+    mat4 uMVP;     //   0  64
+    mat4 uModel;   //  64  64
 } pc;
 
 void main()
 {
-    gl_Position = pc.uMVP * vec4(inPosition, 1.0);
-    vUV         = inUV;
-    vModelPos   = inPosition;
+    vec4 worldPos4 = pc.uModel * vec4(inPosition, 1.0);
+    vWorldPos      = worldPos4.xyz;
+    vUV            = inUV;
+    gl_Position    = pc.uMVP * vec4(inPosition, 1.0);
 }

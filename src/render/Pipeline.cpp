@@ -40,12 +40,16 @@
 #include "orange/engine/core/Log.h"
 #include "orange/engine/platform/Window.h"
 #include "orange/engine/render/BuiltinMaterials.h"
+#include "orange/engine/render/BuiltinShadowShaders.h"
+#include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/Material.h"
 #include "orange/engine/render/MaterialInstance.h"
 #include "orange/engine/render/MaterialTypes.h"
 #include "orange/engine/render/PostProcessChain.h"
 #include "orange/engine/render/PostProcessPasses.h"
 #include "orange/engine/render/RenderScene.h"
+#include "orange/engine/render/ShadowConfig.h"
+#include "orange/engine/scene/World.h"
 
 #include "orange/renderer/RenderDevice.h"
 #include "orange/renderer/Renderer.h"
@@ -58,6 +62,7 @@
 #include "orange/rhi/RHITexture.h"
 
 #include <glm/mat4x4.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <array>
@@ -351,6 +356,47 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> tonemapPipeline;
 
+    // ---- Shadow pass + Light UBO 资源（Task 07）-----------------------
+    // Pipeline 持本地 ShadowConfig 拷贝；外部 SetShadowConfig 时复写。
+    ShadowConfig shadowConfig{};
+
+    // Shadow map：D32Float depth target，同时作 sampled image 给主 pass
+    // descriptor 喂给 fragment shader。尺寸 = ShadowConfig.mapResolution。
+    std::unique_ptr<Orange::Rhi::RHITexture> shadowMap;
+    std::uint32_t                            shadowMapResolution{0};
+    bool                                     shadowMapLayoutShaderReadOnly{false};
+
+    // shadow caster pipeline 复用 BuiltinShadowShaders 编出来；shadow_caster
+    // 的 vertex / fragment shader handle 与其他 shader 模块共用 shaderModules
+    // 缓存。
+    Asset::AssetHandle<Asset::ShaderAsset> shadowCasterVsHandle;
+    Asset::AssetHandle<Asset::ShaderAsset> shadowCasterFsHandle;
+    std::unique_ptr<Orange::Rhi::RHIPipeline> shadowCasterPipeline;
+
+    // Light UBO：per-frame 写一次（layout = std140，对齐 16 字节）。
+    // CpuToGpu 内存让 host 直接 Map/memcpy/Unmap 更新。
+    struct LightUboData
+    {
+        glm::mat4 lightViewProj;
+        glm::vec4 lightDirIntensity;  // xyz = direction, w = intensity
+        glm::vec4 lightColor;         // xyz = rgb, w = unused
+        glm::vec4 shadowParams;       // x = pcfKernelRadius, y = depthBias, z/w pad
+        glm::vec4 cameraWorldPos;     // xyz = camera worldPos（rim/spec 类 shader 取 viewDir）, w = unused
+    };
+    static_assert(sizeof(LightUboData) == 64 + 16 * 4,
+                  "LightUboData std140 size mismatch (expected 128 bytes)");
+    std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
+
+    // Main pass descriptor set —— 所有 per-template pipeline 共用 set 0：
+    //   binding 0 = sampler2D shadowMap
+    //   binding 1 = uniform LightUbo
+    // textured 的 fragment 不引用这 2 个 binding，但 pipeline layout 仍
+    // 然声明（无副作用，shader 不读即可）。
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> mainDescLayout;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      mainDescPool;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       mainDescSet;
+    bool                                                  mainDescBound{false};
+
     // -----------------------------------------------------------------
 
     const Material* EnsureBuiltinTexturedMaterial()
@@ -450,6 +496,16 @@ struct Pipeline::Impl
         // 离屏 HDR 目标 = RGBA16F；与 BeginRendering 喂的 attachment 一致。
         desc.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
 
+        // Task 07：所有 per-template pipeline 都声明 set 0 = main desc layout
+        // （shadow sampler + light UBO）。textured fragment 不读这两个
+        // binding，shader / pipeline 都接受不引用的声明（Vulkan 只检查
+        // shader-USED ⊆ layout-DECLARED）。统一声明让 SetDescriptorSet 在
+        // 所有 drawable 上都合法。
+        if (mainDescLayout)
+        {
+            desc.mDescriptorSetLayouts.push_back(mainDescLayout.get());
+        }
+
         FillPushConstantRanges(desc, ComputePushConstantSize(mat));
 
         desc.mpDebugName = nullptr;
@@ -510,6 +566,32 @@ struct Pipeline::Impl
 
     // 释放 bloom 资源（chain 切回不含 BloomPass、Shutdown 时调用）。
     void ReleaseBloomResources();
+
+    // 创建 / 重建 shadow map（按 ShadowConfig.mapResolution）。返回
+    // false 表示资源未就绪，调用方按 fallback 走（绑 dummy 1×1 shadow map
+    // —— 但当前实现用同一张 shadow target 清成"远深度"，让 shadow_pcf
+    // 的"光锥外 / depth>1.0"分支返回 1.0 即"全亮"）。
+    bool EnsureShadowMap();
+
+    // 把场景从 light 视角渲到 shadow map（depth-only）。caller 已经 Begin
+    // offscreenCmd；本函数追加 transition / BeginRendering / 每 drawable
+    // 一次 SetPushConstants(uLightViewProj+uModel) / Draw / EndRendering /
+    // transition 到 ShaderReadOnly。light == nullptr / castsShadow == false
+    // 时跳过实际绘制，仅 transition shadow target 到 ShaderReadOnly（带远
+    // 深度 1.0 的清空数据，shadow_pcf 取出来 = 全亮）。
+    bool RecordShadowPass(const DirectionalLight* light, const glm::mat4& lightViewProj);
+
+    // 把 light 数据写入 lightUbo（CpuToGpu Map/memcpy/Unmap）。无 light
+    // 时写 "neutral light"：identity lightViewProj、单位强度、单位色，
+    // 让 toon / rim_light fragment 在没真光场景下仍显示合理的 base 着色。
+    void UpdateLightUbo(const DirectionalLight* light,
+                        const glm::mat4&        lightViewProj,
+                        const glm::vec3&        cameraWorldPos);
+
+    // 计算 light view-proj：方向投影 + scene 包围盒 fitted ortho 视锥
+    // 投影。scene 包围盒当前 hardcode 为 ±10 单位的立方体（足够覆盖
+    // sample 的 plane + cube + sphere；后续可由 RenderScene 给 bbox）。
+    glm::mat4 ComputeLightViewProj(const DirectionalLight& light) const;
 
     // 创建 / 重建 HDR off-screen target；descriptor set 同步重写指向新
     // view。size == 0 时跳过——窗口最小化、initialize 早期的 windows 没
@@ -950,6 +1032,123 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         return ResultCode::InternalError;
     }
 
+    // 7.6 Main pass descriptor set + light UBO + shadow caster pipeline
+    {
+        // Main desc layout: set 0
+        //   binding 0 = sampler2D shadowMap (Fragment 阶段)
+        //   binding 1 = uniform LightUbo (Fragment 阶段)
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0,
+                                 Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1,
+                                 Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.main.layout";
+        impl.mainDescLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        // Light UBO：CpuToGpu 内存 + Map/memcpy/Unmap，per-frame 写一次。
+        // 大小取 sizeof(LightUboData) = 112 B 即可，对齐由后端补到 256 B
+        // 之类的 std140 / minUboAlignment——上层不关心。
+        Orange::Rhi::BufferDesc bufDesc{};
+        bufDesc.mSize        = sizeof(Pipeline::Impl::LightUboData);
+        bufDesc.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        bufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.lightUbo = rhi.CreateBuffer(bufDesc);
+
+        // Main desc pool: 1 set，1 个 sampler + 1 个 UBO
+        Orange::Rhi::DescriptorPoolDesc pool{};
+        pool.mMaxSets = 1;
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 1});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 1});
+        pool.mpDebugName = "orange_engine.main.pool";
+        impl.mainDescPool = rhi.CreateDescriptorPool(pool);
+
+        if (!impl.mainDescLayout || !impl.lightUbo || !impl.mainDescPool)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        impl.mainDescSet = rhi.AllocateDescriptorSet(*impl.mainDescPool, *impl.mainDescLayout);
+        if (!impl.mainDescSet)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc set 分配失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        // 立刻把 binding 1 (lightUbo) 写进 desc set；binding 0 (shadow
+        // sampler) 等 EnsureShadowMap 创建出 shadowMap 后再写。
+        Orange::Rhi::DescriptorWrite write{};
+        write.mBinding             = 1;
+        write.mType                = Orange::Rhi::DescriptorType::UniformBuffer;
+        write.mBufferInfo.mpBuffer = impl.lightUbo.get();
+        write.mBufferInfo.mOffset  = 0;
+        write.mBufferInfo.mRange   = sizeof(Pipeline::Impl::LightUboData);
+        rhi.UpdateDescriptorSet(*impl.mainDescSet, &write, 1);
+    }
+    {
+        // shadow caster pipeline：depth-only target (D32Float)，push constant
+        // 128 B (uLightViewProj + uModel)。
+        BuiltinShadowShaders::ShaderPair shadowPair = BuiltinShadowShaders::LoadShadowCaster(*impl.assets);
+        if (!shadowPair.vertex.IsValid() || !shadowPair.fragment.IsValid())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: shadow_caster shader handle 无效");
+            Shutdown();
+            return ResultCode::IoError;
+        }
+        impl.shadowCasterVsHandle = shadowPair.vertex;
+        impl.shadowCasterFsHandle = shadowPair.fragment;
+
+        auto* vsModule = impl.GetOrCreateShaderModule(shadowPair.vertex,
+                                                     Orange::Rhi::ShaderStage::Vertex,
+                                                     "orange_engine.shadow_caster.vert");
+        auto* fsModule = impl.GetOrCreateShaderModule(shadowPair.fragment,
+                                                     Orange::Rhi::ShaderStage::Fragment,
+                                                     "orange_engine.shadow_caster.frag");
+        if (vsModule == nullptr || fsModule == nullptr)
+        {
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,   vsModule, "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment, fsModule, "main"});
+
+        FillVertexInputLayout(d);
+
+        d.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        // Shadow caster：背面剔除关掉避免 light back-facing 被剪掉；
+        // 与 OrangeRender 主 pass 的 CCW 约定保持一致由顶点 winding 决定。
+        d.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        d.mRasterizer.mFrontFace         = Orange::Rhi::FrontFace::CounterClockwise;
+        d.mDepthStencil.mDepthTestEnable  = true;
+        d.mDepthStencil.mDepthWriteEnable = true;
+        d.mDepthStencil.mDepthCompareOp   = Orange::Rhi::CompareOp::LessOrEqual;
+        // 深度 only —— 不挂 color attachment。
+        d.mRenderTargets.mDepthStencilFormat = Orange::Rhi::TextureFormat::D32Float;
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Vertex;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 128;  // mat4 uLightViewProj + mat4 uModel
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.shadow_caster";
+        impl.shadowCasterPipeline = rhi.CreateGraphicsPipeline(d);
+        if (!impl.shadowCasterPipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: shadow caster pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+
     // 8. 初始 HDR target —— 按 window 当前 framebuffer extent 建一张。
     impl.SeedExtentFromWindow();
     if (impl.pendingWidth > 0 && impl.pendingHeight > 0)
@@ -980,6 +1179,16 @@ void Pipeline::Shutdown()
     impl.shaderModules.clear();
 
     impl.ReleaseBloomResources();
+    impl.shadowCasterPipeline.reset();
+    impl.shadowMap.reset();
+    impl.shadowMapResolution = 0;
+    impl.shadowMapLayoutShaderReadOnly = false;
+    impl.mainDescSet.reset();
+    impl.mainDescPool.reset();
+    impl.mainDescLayout.reset();
+    impl.lightUbo.reset();
+    impl.shadowCasterVsHandle = {};
+    impl.shadowCasterFsHandle = {};
     impl.tonemapPipeline.reset();
     impl.passthroughCombinePipeline.reset();
     impl.bloomUpsamplePipeline.reset();
@@ -1059,6 +1268,16 @@ void Pipeline::SetMaterialSystem(MaterialSystem* system) noexcept
     {
         mpImpl->materialSystem = system;
     }
+}
+
+void Pipeline::SetShadowConfig(const ShadowConfig& config) noexcept
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    mpImpl->shadowConfig = config;
+    // mapResolution 切换会让 EnsureShadowMap 在下一帧重建 shadow target。
 }
 
 // Helpers expecting Pipeline::Impl access live as friend free functions
@@ -1151,15 +1370,40 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
         {
             cmd.BindGraphicsPipeline(*rhiPipeline);
             pLastPipeline = rhiPipeline;
+
+            // 主 pass 每次 BindGraphicsPipeline 后必须重新 SetDescriptorSet
+            // —— pipeline 切换可能让上一次绑定失效（layout 不兼容时）。
+            // mainDescSet 一旦绑过 binding 0/1，跨 drawable 内容稳定。
+            if (mainDescSet)
+            {
+                cmd.SetDescriptorSet(0, *mainDescSet);
+            }
         }
 
-        // Push constant：仍只发 64 字节 uMVP 给 vertex 阶段。后续子任
-        // 务接通 MaterialInstance 覆盖打包时再扩到完整 size + 双 stage。
+        // Task 07：push constant 按 Material.uniforms 推算的尺寸打包。
+        //   * 64 B → uMVP 单独（textured）；
+        //   * 128 B → uMVP + uModel（toon / rim_light）。
+        // 其他尺寸为半残 schema，按 64 B 处理。
         const glm::mat4 mvp = viewProj * drawable.worldMatrix;
-        cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
-                             /*offset=*/0,
-                             static_cast<std::uint32_t>(sizeof(glm::mat4)),
-                             &mvp);
+        const std::uint32_t pcSize = ComputePushConstantSize(*mat);
+        if (pcSize >= 128)
+        {
+            struct PushMvpModel { glm::mat4 mvp; glm::mat4 model; };
+            PushMvpModel data{};
+            data.mvp   = mvp;
+            data.model = drawable.worldMatrix;
+            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                 /*offset=*/0,
+                                 /*size=*/128,
+                                 &data);
+        }
+        else
+        {
+            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                 /*offset=*/0,
+                                 static_cast<std::uint32_t>(sizeof(glm::mat4)),
+                                 &mvp);
+        }
 
         const auto& gpu = cacheIt->second;
         cmd.BindVertexBuffer(0, *gpu.vertexBuffer, /*offset=*/0);
@@ -1285,6 +1529,208 @@ const TonemapPass* Pipeline::Impl::FindActiveTonemapPass() const noexcept
         }
     }
     return nullptr;
+}
+
+bool Pipeline::Impl::EnsureShadowMap()
+{
+    const std::uint32_t targetRes = shadowConfig.mapResolution > 0
+                                        ? shadowConfig.mapResolution : 1024u;
+    if (shadowMap && shadowMapResolution == targetRes)
+    {
+        return true;
+    }
+    if (renderDevice == nullptr)
+    {
+        return false;
+    }
+    renderDevice->WaitIdle();
+    shadowMap.reset();
+
+    Orange::Rhi::TextureDesc t{};
+    t.mWidth     = targetRes;
+    t.mHeight    = targetRes;
+    t.mFormat    = Orange::Rhi::TextureFormat::D32Float;
+    t.mUsage     = Orange::Rhi::TextureUsage::DepthStencil
+                 | Orange::Rhi::TextureUsage::Sampled;
+    auto tex = renderDevice->GetRhiDevice().CreateTexture(t);
+    if (!tex)
+    {
+        ORANGE_LOG_ERROR("Pipeline: shadow map CreateTexture 失败 ({}x{} D32Float)",
+                         targetRes, targetRes);
+        return false;
+    }
+    shadowMap                      = std::move(tex);
+    shadowMapResolution            = targetRes;
+    shadowMapLayoutShaderReadOnly  = false;
+
+    // 把 main desc set 的 binding 0 重新指向新 shadow view。binding 1 已
+    // 在 EnsureMainDescriptorSetBinding 时绑过 lightUbo。
+    if (mainDescSet && hdrSampler)
+    {
+        Orange::Rhi::DescriptorWrite write{};
+        write.mBinding             = 0;
+        write.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        write.mImageInfo.mpTexture = shadowMap.get();
+        write.mImageInfo.mpSampler = hdrSampler.get();  // 与 HDR sampler 共用一个 linear sampler
+        renderDevice->GetRhiDevice().UpdateDescriptorSet(*mainDescSet, &write, 1);
+    }
+    return true;
+}
+
+glm::mat4 Pipeline::Impl::ComputeLightViewProj(const DirectionalLight& light) const
+{
+    // 0.x 简化：scene bbox 假定为 ±10 单位的立方体（足够覆盖 sample
+    // 的 plane + cube + sphere）。后续接 RenderScene 提供的 bbox。
+    const glm::vec3 lightDir = glm::normalize(light.direction);
+    const glm::vec3 sceneCenter(0.0f);
+    constexpr float kHalfExtent = 10.0f;
+
+    // 把"光源位置"放在 sceneCenter - lightDir * 2 * halfExtent，让 view
+    // 看向 sceneCenter；ortho 视锥按 ±halfExtent 包住整个 scene。
+    const glm::vec3 lightPos = sceneCenter - lightDir * (2.0f * kHalfExtent);
+    glm::vec3       up       = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (std::abs(lightDir.y) > 0.99f)
+    {
+        // 光照接近垂直 → 切到 Z 轴避免奇异。
+        up = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+    const glm::mat4 view = glm::lookAt(lightPos, sceneCenter, up);
+
+    // 手写 Vulkan-style ortho（与 Camera::Orthographic 同公式）：z ∈ [0, 1]、
+    // y-flip。glm::ortho 的 z 输出是 OpenGL [-1, 1]，会被 Vulkan 近平面 z=0
+    // 裁掉一半 frustum，shadow caster 写不进 shadow map → plane 上看不到
+    // 任何阴影。这里直接构造正确矩阵。
+    constexpr float zNear = 0.1f;
+    constexpr float zFar  = 4.0f * kHalfExtent;
+    glm::mat4 proj(1.0f);
+    proj[0][0] =  1.0f / kHalfExtent;
+    proj[1][1] = -1.0f / kHalfExtent;       // y-flip 到 Vulkan NDC
+    proj[2][2] =  1.0f / (zNear - zFar);    // z ∈ [0, 1]（near 远 → 0）
+    proj[3][2] =  zNear / (zNear - zFar);
+    return proj * view;
+}
+
+void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
+                                    const glm::mat4&        lightViewProj,
+                                    const glm::vec3&        cameraWorldPos)
+{
+    if (!lightUbo)
+    {
+        return;
+    }
+    LightUboData data{};
+    data.lightViewProj = lightViewProj;
+    if (light != nullptr)
+    {
+        data.lightDirIntensity = glm::vec4(light->direction, light->intensity);
+        data.lightColor        = glm::vec4(light->color, 0.0f);
+    }
+    else
+    {
+        // neutral light：方向斜下、白光、单位强度。toon / rim_light 在
+        // 没真光的场景仍能给出"基线"光照（与 sample 03/04 视觉一致）。
+        data.lightDirIntensity = glm::vec4(0.3f, -1.0f, 0.4f, 1.0f);
+        data.lightColor        = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
+    }
+    data.shadowParams = glm::vec4(static_cast<float>(shadowConfig.pcfKernelRadius),
+                                  shadowConfig.depthBias,
+                                  0.0f, 0.0f);
+    data.cameraWorldPos = glm::vec4(cameraWorldPos, 0.0f);
+
+    void* mapped = lightUbo->Map();
+    if (mapped == nullptr)
+    {
+        ORANGE_LOG_ERROR("Pipeline: lightUbo Map 失败");
+        return;
+    }
+    std::memcpy(mapped, &data, sizeof(data));
+    lightUbo->Unmap();
+}
+
+bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
+                                      const glm::mat4& lightViewProj)
+{
+    if (!shadowMap || offscreenCmd == nullptr)
+    {
+        return false;
+    }
+    auto& cmd = *offscreenCmd;
+
+    const auto fromLayout = shadowMapLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+    cmd.TransitionTexture(*shadowMap, fromLayout,
+                          Orange::Rhi::TextureLayout::DepthStencilAttachment);
+
+    Orange::Rhi::DepthStencilAttachment depth{};
+    depth.mpView          = shadowMap->GetDefaultView();
+    depth.mDepthLoadOp    = Orange::Rhi::LoadOp::Clear;
+    depth.mDepthStoreOp   = Orange::Rhi::StoreOp::Store;
+    depth.mClear.mDepth   = 1.0f;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = shadowMapResolution;
+    rd.mRenderArea.mHeight = shadowMapResolution;
+    rd.mDepthStencil       = depth;
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(shadowMapResolution);
+    vp.mHeight   = static_cast<float>(shadowMapResolution);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = shadowMapResolution;
+    sc.mHeight = shadowMapResolution;
+    cmd.SetScissor(sc);
+
+    // 光源不投影 / 缺失时——清完深度 = 1.0 即"远深度"，shadow_pcf 取
+    // currentDepth <= 1.0 → 总是 1（全亮），等价于"无阴影"。
+    const bool runCaster = (light != nullptr && light->castsShadow && shadowCasterPipeline);
+    if (runCaster)
+    {
+        cmd.BindGraphicsPipeline(*shadowCasterPipeline);
+
+        for (const auto& drawable : scene.Drawables())
+        {
+            if (!drawable.castsShadow)
+            {
+                continue;  // 主 pass 仍会绘，只是不进 shadow map
+            }
+            if (!drawable.mesh.IsValid())
+            {
+                continue;
+            }
+            auto cacheIt = meshCache.find(drawable.mesh.Value());
+            if (cacheIt == meshCache.end())
+            {
+                continue;
+            }
+            const auto& gpu = cacheIt->second;
+
+            // shadow_caster 的 push constant：uLightViewProj(64) + uModel(64) = 128 B
+            struct ShadowCasterPush { glm::mat4 lightVP; glm::mat4 model; };
+            ShadowCasterPush data{};
+            data.lightVP = lightViewProj;
+            data.model   = drawable.worldMatrix;
+            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                 0, static_cast<std::uint32_t>(sizeof(data)),
+                                 &data);
+
+            cmd.BindVertexBuffer(0, *gpu.vertexBuffer, 0);
+            cmd.BindIndexBuffer(*gpu.indexBuffer, 0, Orange::Rhi::IndexFormat::UInt32);
+            cmd.DrawIndexed(gpu.indexCount, 1, 0, 0, 0);
+        }
+    }
+
+    cmd.EndRendering();
+
+    cmd.TransitionTexture(*shadowMap,
+                          Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    shadowMapLayoutShaderReadOnly = true;
+    return true;
 }
 
 void Pipeline::Impl::ReleaseBloomResources()
@@ -1613,6 +2059,31 @@ void Pipeline::Render(Orange::Engine::World& world)
         impl.EnsureMeshGpuCache();
     }
 
+    // 1.5 Shadow / Light 准备：找 DirectionalLight + 计算 lightViewProj +
+    // 写 light UBO + 确保 shadow map 已建好。无 light 场景 light 仍设为
+    // 中性默认（toon / rim_light fragment 才有合理 base 着色），shadow map
+    // 走"远深度清零 + 不画 caster"路径，PCF 取 1.0 = 全亮。
+    const DirectionalLight* activeLight = nullptr;
+    if (hdrReady && impl.scene.HasCamera())
+    {
+        auto& reg  = world.Registry();
+        auto  view = reg.view<DirectionalLight>();
+        if (!view.empty())
+        {
+            const auto entity = view.front();
+            activeLight = &view.get<DirectionalLight>(entity);
+        }
+        impl.EnsureShadowMap();
+        const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(*activeLight)
+                                              : glm::mat4(1.0f);
+        // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
+        // 取 inverse 后的第 4 列即为相机在 world 中的位置。供 rim_light
+        // / 后续 specular 类 fragment 取真 viewDir。
+        const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
+        const glm::vec3 cameraPos(invView[3]);
+        impl.UpdateLightUbo(activeLight, lightVP, cameraPos);
+    }
+
     // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /
     // 无 HDR target 时跳过；所有离屏工作进入同一 cmd list / 同一 Submit /
     // 一次 WaitIdle。
@@ -1630,7 +2101,20 @@ void Pipeline::Render(Orange::Engine::World& world)
         {
             const glm::mat4 viewProj =
                 impl.scene.MainCamera().projection * impl.scene.MainCamera().view;
-            offscreenOk = impl.RecordOffscreenPass(viewProj);
+            const glm::mat4 lightVP =
+                activeLight ? impl.ComputeLightViewProj(*activeLight) : glm::mat4(1.0f);
+
+            // Shadow 预 pass：在主 pass 之前把场景从 light 视角渲到
+            // shadow map（depth-only）。无 light 时跳过实际绘制，只清深度。
+            if (impl.shadowMap)
+            {
+                offscreenOk = impl.RecordShadowPass(activeLight, lightVP);
+            }
+
+            if (offscreenOk)
+            {
+                offscreenOk = impl.RecordOffscreenPass(viewProj);
+            }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)
             {

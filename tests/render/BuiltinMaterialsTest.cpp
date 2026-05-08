@@ -56,19 +56,13 @@ void TestLoadToon(AssetRegistry& registry)
     assert(toon.vertexShader.IsValid());
     assert(toon.fragmentShader.IsValid());
 
-    // 五个 uniform，与 src/render/builtin_shaders/toon.{vert,frag}.glsl 的
-    // push_constant block 字段顺序一致。
-    assert(toon.uniforms.size() == 5);
-    const auto* uMVP             = FindUniformType(toon, "uMVP");
-    const auto* uColorWarm       = FindUniformType(toon, "uColorWarm");
-    const auto* uColorCool       = FindUniformType(toon, "uColorCool");
-    const auto* uLightDir        = FindUniformType(toon, "uLightDir");
-    const auto* uShadowThreshold = FindUniformType(toon, "uShadowThreshold");
-    assert(uMVP             && *uMVP             == MaterialUniformType::Mat4);
-    assert(uColorWarm       && *uColorWarm       == MaterialUniformType::Vec3);
-    assert(uColorCool       && *uColorCool       == MaterialUniformType::Vec3);
-    assert(uLightDir        && *uLightDir        == MaterialUniformType::Vec3);
-    assert(uShadowThreshold && *uShadowThreshold == MaterialUniformType::Float);
+    // Task 07 重构：toon push-constant 收缩为 {uMVP, uModel} = 128 B；
+    // 颜色 / threshold / light dir 等参数迁到 light UBO 或 hardcode。
+    assert(toon.uniforms.size() == 2);
+    const auto* uMVP   = FindUniformType(toon, "uMVP");
+    const auto* uModel = FindUniformType(toon, "uModel");
+    assert(uMVP   && *uMVP   == MaterialUniformType::Mat4);
+    assert(uModel && *uModel == MaterialUniformType::Mat4);
 
     assert(toon.textureSlots.empty());
 
@@ -83,23 +77,21 @@ void TestLoadRimLight(AssetRegistry& registry)
     assert(rim.vertexShader.IsValid());
     assert(rim.fragmentShader.IsValid());
 
-    assert(rim.uniforms.size() == 5);
-    const auto* uMVP          = FindUniformType(rim, "uMVP");
-    const auto* uViewPos      = FindUniformType(rim, "uViewPos");
-    const auto* uRimColor     = FindUniformType(rim, "uRimColor");
-    const auto* uRimPower     = FindUniformType(rim, "uRimPower");
-    const auto* uRimIntensity = FindUniformType(rim, "uRimIntensity");
-    assert(uMVP          && *uMVP          == MaterialUniformType::Mat4);
-    assert(uViewPos      && *uViewPos      == MaterialUniformType::Vec3);
-    assert(uRimColor     && *uRimColor     == MaterialUniformType::Vec3);
-    assert(uRimPower     && *uRimPower     == MaterialUniformType::Float);
-    assert(uRimIntensity && *uRimIntensity == MaterialUniformType::Float);
+    // Task 07 重构：rim_light 与 toon 同形态，push-constant {uMVP, uModel}。
+    assert(rim.uniforms.size() == 2);
+    const auto* uMVP   = FindUniformType(rim, "uMVP");
+    const auto* uModel = FindUniformType(rim, "uModel");
+    assert(uMVP   && *uMVP   == MaterialUniformType::Mat4);
+    assert(uModel && *uModel == MaterialUniformType::Mat4);
 
     assert(rim.textureSlots.empty());
 
-    // toon 与 rim_light schema 真实分离——toon 没有 uRimColor。
+    // toon 与 rim_light 当前 schema 一致；schema 隔离体现在 fragment
+    // shader 内部参数 hardcode（warm/cool 配色 vs rim glow），与
+    // BuiltinMaterials 描述符无关。下面这行验证两者旧字段都不再出现
+    // —— 确保迁移彻底。
     Material toon = BuiltinMaterials::LoadToon(registry);
-    assert(FindUniformType(toon, "uRimColor") == nullptr);
+    assert(FindUniformType(toon, "uRimColor")  == nullptr);
     assert(FindUniformType(rim,  "uColorWarm") == nullptr);
 
     std::fprintf(stdout, "  [PASS] BuiltinMaterials::LoadRimLight descriptor + schema isolation\n");
@@ -122,15 +114,19 @@ void TestSchemaIsolationOnInstance(AssetRegistry& registry)
     Material toon = BuiltinMaterials::LoadToon(registry);
     MaterialInstance inst(&toon);
 
-    // toon 的 uniform → 命中
-    inst.SetUniform("uShadowThreshold", 0.5f);
-    assert(inst.HasUniformOverride("uShadowThreshold"));
+    // toon 的 uniform → 命中（uMVP / uModel 都是 Pipeline 推送的，调用
+    // 方一般不会 SetUniform 走 instance 覆盖；这里仅验证 silent-ignore
+    // 之外的"name 命中即写入" 路径仍然好使）。
+    inst.SetUniform("uMVP", glm::mat4(1.0f));
+    assert(inst.HasUniformOverride("uMVP"));
 
-    // rim_light 的 uniform 名 → 在 toon instance 上是 no-op
-    inst.SetUniform("uRimColor",     glm::vec3(1.0f));
-    inst.SetUniform("uRimIntensity", 1.0f);
+    // 旧字段 / rim_light 字段 → 不在 toon schema 里，silent no-op。
+    inst.SetUniform("uColorWarm",   glm::vec3(1.0f));
+    inst.SetUniform("uRimColor",    glm::vec3(1.0f));
+    inst.SetUniform("uRimPower",    1.0f);
+    assert(!inst.HasUniformOverride("uColorWarm"));
     assert(!inst.HasUniformOverride("uRimColor"));
-    assert(!inst.HasUniformOverride("uRimIntensity"));
+    assert(!inst.HasUniformOverride("uRimPower"));
 
     std::fprintf(stdout, "  [PASS] MaterialInstance enforces template schema\n");
 }

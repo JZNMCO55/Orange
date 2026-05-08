@@ -120,12 +120,13 @@ void TestRegisterBuiltins()
     assert(rim->vertexShader.IsValid());
     assert(rim->fragmentShader.IsValid());
 
-    // textured 只一个 uniform（uMVP）+ 一个纹理槽；toon / rim_light 都
-    // 是 5 个 uniform、textureSlots 为空。schema 真实分离。
-    assert(textured->uniforms.size()     == 1);
+    // Task 07 重构：textured / toon / rim_light push-constant 全部收为
+    // {uMVP, uModel} = 2 项；其余参数迁到 light UBO 或 hardcode（详见
+    // BuiltinMaterials.cpp 注释）。textured 多带一个 textureSlot 占位。
+    assert(textured->uniforms.size()     == 2);
     assert(textured->textureSlots.size() == 1);
-    assert(toon->uniforms.size() == 5);
-    assert(rim->uniforms.size()  == 5);
+    assert(toon->uniforms.size() == 2);
+    assert(rim->uniforms.size()  == 2);
 
     std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light\n");
 }
@@ -198,7 +199,7 @@ void TestDuplicateNameRejected()
 
     const Material* toon = matSys.FindTemplate("toon");
     assert(toon != nullptr);
-    assert(toon->uniforms.size() == 5);  // 没被 dupDesc 覆盖
+    assert(toon->uniforms.size() == 2);  // 没被 dupDesc 覆盖（Task 07 后 schema = uMVP+uModel）
 
     std::fprintf(stdout, "  [PASS] 重名注册返回 AlreadyExists 且不覆盖原表\n");
 }
@@ -247,13 +248,16 @@ void TestInstanceUniformRouting()
     auto inst = matSys.CreateInstance("toon");
     assert(inst != nullptr);
 
-    // toon 的 uniform → 命中
-    inst->SetUniform("uShadowThreshold", 0.5f);
-    assert(inst->HasUniformOverride("uShadowThreshold"));
+    // toon 的 uniform → 命中（Task 07 后 schema 收缩为 uMVP / uModel）
+    inst->SetUniform("uMVP", glm::mat4(1.0f));
+    assert(inst->HasUniformOverride("uMVP"));
 
-    // rim_light 的 uniform 名 → 在 toon instance 上是 no-op
-    inst->SetUniform("uRimColor",     glm::vec3(1.0f));
-    inst->SetUniform("uRimIntensity", 1.0f);
+    // 不在 schema 里的字段（旧 toon 字段 / rim_light 字段）→ 在 toon
+    // instance 上是 no-op
+    inst->SetUniform("uShadowThreshold", 0.5f);
+    inst->SetUniform("uRimColor",        glm::vec3(1.0f));
+    inst->SetUniform("uRimIntensity",    1.0f);
+    assert(!inst->HasUniformOverride("uShadowThreshold"));
     assert(!inst->HasUniformOverride("uRimColor"));
     assert(!inst->HasUniformOverride("uRimIntensity"));
 

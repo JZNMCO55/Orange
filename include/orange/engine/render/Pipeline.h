@@ -44,6 +44,7 @@ namespace Orange::Engine::Render
 
 class MaterialSystem;
 class PostProcessChain;
+struct ShadowConfig;
 
 class ORANGE_ENGINE_API Pipeline
 {
@@ -108,6 +109,13 @@ public:
     // 等需要 system 协作的路径）。nullptr 时 Pipeline 走 fallback：
     // drawable.materialInstance == nullptr 时落到内置 textured Material。
     void SetMaterialSystem(MaterialSystem* system) noexcept;
+
+    // 安装 shadow 配置（by-value 拷贝）。chain 还没有装载或场景里没
+    // DirectionalLight 时仍可调用——配置只在真正跑 shadow pass（Render
+    // 看见 castsShadow == true 的 DirectionalLight）时生效；mapResolution
+    // 切换会触发 shadow target 重建。未调用时使用 ShadowConfig 的默认
+    // 值（1024 / 3×3 PCF / 0.005 depthBias / 0.01 normalBias）。
+    void SetShadowConfig(const ShadowConfig& config) noexcept;
 
     // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
     // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material

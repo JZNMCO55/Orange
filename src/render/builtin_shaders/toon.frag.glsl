@@ -1,40 +1,77 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
-// 内置 toon-shading 片元 shader：用 dFdx / dFdy 在 fragment 阶段推 flat
-// face normal（避开 Phase 2 MeshAsset 没 vertex normal attribute 的限
-// 制），按 N·L 与 uShadowThreshold 做二阶 cel banding，warm / cool 两
-// 色 mix。
+// 内置 toon-shading 片元 shader（Task 07 重构版）：
+//   * NdotL 走 light UBO 提供的 uLightDir + 颜色；
+//   * shadow factor 走 shadow_pcf.glsl.inc，按 ShadowConfig 的 PCF 半径
+//     与 depth bias 采样 set 0 binding 0 的 shadow map；
+//   * 二阶 cel banding 阈值 hardcode 为 0.5（per-instance 调参留给
+//     Phase 6 Material UBO）；
+//   * warm / cool 双色 hardcode 为 OrangeEngine 主色阶（以前在 push
+//     constant 里）；颜色定制留给后续 Material UBO。
 //
-// 当前 Pipeline 还没按 Material 路由 push-constant（Phase 3 / Task 04
-// 才上）——本 shader 只是把模板的 uniform schema 落成可编译的 SPIR-V，
-// Material 描述符里列出的 uniform 与这里 push_constant block 的字段
-// 一一对应。
+// 顶点 shader 已经把 worldPos 算好透过 vWorldPos 传进来（Task 07 起
+// uModel 进 push constant），fragment 端不需要 uModel。
+//
+// shadow_pcf.glsl.inc 走 sampler2D + textureLod 路径，与 sampler2DShadow
+// 兼容——Pipeline 的 shadow sampler 当前是普通 linear sampler（非
+// compare-mode），shader 自己做 currentDepth <= closestDepth 比较。
+
+#include "include/shadow_pcf.glsl.inc"
+
+layout(set = 0, binding = 0) uniform sampler2D uShadowMap;
+
+layout(set = 0, binding = 1, std140) uniform LightUbo
+{
+    mat4 uLightViewProj;     //   0  64
+    vec4 uLightDirIntensity; //  64  16  (xyz = direction, w = intensity)
+    vec4 uLightColor;        //  80  16  (xyz = rgb, w 未用)
+    vec4 uShadowParams;      //  96  16  (x = pcfKernelRadius, y = depthBias, z/w 未用)
+    vec4 uCameraWorldPos;    // 112  16  (xyz = camera worldPos, w 未用) —— toon 不用
+} light;
 
 layout(location = 0) in vec2 vUV;
-layout(location = 1) in vec3 vModelPos;
+layout(location = 1) in vec3 vWorldPos;
 
 layout(location = 0) out vec4 outColor;
 
-layout(push_constant, std430) uniform Toon {
-    mat4  uMVP;
-    vec3  uColorWarm;
-    vec3  uColorCool;
-    vec3  uLightDir;
-    float uShadowThreshold;
-} pc;
-
 void main()
 {
-    // model-space face normal —— flat 着色，曲面 / 平面边界都能稳定取
-    // 出 face direction。引入 vertex normal attribute 后切到 attribute-
-    // driven smooth normal，本 push-constant block 不变。
-    vec3 dx = dFdx(vModelPos);
-    vec3 dy = dFdy(vModelPos);
-    vec3 normal = normalize(cross(dx, dy));
+    // world-space face normal —— 用 fragment 内置的 dFdx / dFdy 推 flat
+    // face normal（Phase 2 MeshAsset 没 vertex normal attribute）。注意
+    // cross 顺序：Vulkan 屏幕 +Y 朝下，`cross(dFdx, dFdy)` 在右手坐标系
+    // 下指向 inward；用 `cross(dFdy, dFdx)` 取反得到 outward normal。
+    vec3 dx     = dFdx(vWorldPos);
+    vec3 dy     = dFdy(vWorldPos);
+    vec3 normal = normalize(cross(dy, dx));
 
-    float NdotL = max(dot(normal, normalize(pc.uLightDir)), 0.0);
-    float band  = step(pc.uShadowThreshold, NdotL);
-    vec3  color = mix(pc.uColorCool, pc.uColorWarm, band);
+    // -uLightDir 是 "从表面指向光源" 的方向；NdotL 越大代表越正对光。
+    vec3  lightDir = normalize(-light.uLightDirIntensity.xyz);
+    float NdotL    = max(dot(normal, lightDir), 0.0);
 
-    outColor = vec4(color, 1.0);
+    // 阴影系数：1 = 完全照亮，0 = 完全阴影。
+    float shadow = SamplePcfShadow(uShadowMap, vWorldPos,
+                                   light.uLightViewProj,
+                                   int(light.uShadowParams.x),
+                                   light.uShadowParams.y);
+
+    // 三阶 cel banding：阈值 0.25 / 0.65 把 litness 划成 cool / mid / warm
+    // 三段。比单阈 step(0.5) 多出一段中间色，cube 的多个面在常见光照
+    // 角度下能形成清晰的"亮 / 半 / 暗"过渡，方向感更易读，但仍保留
+    // toon 的硬阶过渡感。改色 / 改阈值留给 Phase 6 Material UBO。
+    float litness = NdotL * shadow;
+    float band    = step(0.25, litness) + step(0.65, litness);  // 0 / 1 / 2
+    band         *= 0.5;                                          // → 0 / 0.5 / 1
+
+    const vec3 kWarm = vec3(1.00, 0.55, 0.20);
+    const vec3 kMid  = vec3(0.45, 0.32, 0.30);
+    const vec3 kCool = vec3(0.10, 0.18, 0.32);
+    vec3 base = (band < 0.25) ? kCool
+              : (band < 0.75) ? kMid
+              :                 kWarm;
+
+    // 主光颜色 / 强度调制——与 Phase 3 视觉基线对齐：在 cool 区也保留
+    // 一定主光色调。
+    vec3 lit  = base * (light.uLightColor.rgb * light.uLightDirIntensity.w);
+    outColor  = vec4(lit, 1.0);
 }

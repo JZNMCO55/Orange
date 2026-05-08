@@ -1478,7 +1478,7 @@ Removed: Src/                              (整目录，src/ 替换)
 - 验收标准：cmake build 通过（toon/rim_light/shadow_caster 共 6 个 SPIR-V 编出，shadow_pcf.glsl.inc 通过 include path 解析）+ 14/14 ctest 全过（之前 13 + light_and_shadow_test 新增）+ install_smoke / config_smoke 不退化 + 现有 03/04 sample 行为完全不变（toon/rim_light frag 没碰）。Light + Shadow 模块的着色侧就绪——Task 07 Pipeline 接通时引用这套 component / shader / config 即可。
 - Critical Path：是
 
-#### Task 06：升级 `samples/04_3d_mesh_with_bloom`（Pipeline 接通 MaterialInstance + PostProcessChain 真路径）
+#### Task 06：升级 `samples/04_3d_mesh_with_bloom`（Pipeline 接通 MaterialInstance + PostProcessChain 真路径） ✅
 
 > **阻塞 trail（已全部解除）**：
 > - **2026-05-07 第一次阻塞登记**：触达"渲染到 off-screen RGBA16F → 在后续 pass 里采样它"全链路，依赖 OrangeRender 公共 RHI 缺失的 B2/B3/B4。登记 `FEATURE-2026-05-07-rhi-render-pass-and-bindings`，✅ 落地（B4 + B5 部分扩枚举 + `RHITexture::GetDefaultView()`；B2/B3 经评审确认 Phase 6 早已闭环）。
@@ -1556,7 +1556,7 @@ Removed: Src/                              (整目录，src/ 替换)
   3. 新增 ctest：`tests/render/BloomChainTest.cpp` 覆盖 bloom 6 张 mip 资源生命周期 + OnResize 同步重建。
 - Critical Path：是
 
-###### Task 06.05 · Tonemap + LUT bypass + 新 sample `04_3d_mesh_with_bloom`
+###### Task 06.05 · Tonemap + LUT bypass + 新 sample `04_3d_mesh_with_bloom` ✅
 - 输出：
   - `Proposed: src/render/builtin_shaders/tonemap.vert.glsl` + `tonemap.frag.glsl`：fullscreen + ACES Narkowicz fit，按 push-constant 喂 exposure。
   - `Modified: src/render/PostProcessPasses.cpp`：`TonemapPass::Execute` 走 `IRenderer::SubmitItem` + `mpDescriptorSets[0]=HDR+bloom combined`；`LutPass::Execute` 当 `lut.IsValid() == false` → 直接早退；handle 有效路径仍 stub，Phase 6 真接 3D LUT 时再做。
@@ -1583,7 +1583,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 
 - Critical Path：是（伞节点；5 子任务全部 critical path）。
 
-#### Task 07：`samples/07_full_pipeline` 雏形（Pipeline 接通 shadow pass + multi-entity 综合演示）
+#### Task 07：`samples/07_full_pipeline` 雏形（Pipeline 接通 shadow pass + multi-entity 综合演示） ✅
 - 描述：把 Task 05 的 Light/Shadow 公共面接通 Pipeline——shadow render target（depth attachment）+ shadow pass（用 `BuiltinShadowShaders::LoadShadowCaster` 渲场景到 shadow map）+ 主 pass 加 light UBO + shadow sampler 描述符；toon / rim_light fragment shader 改为 `#include "include/shadow_pcf.glsl.inc"` 后乘 PCF 阴影系数。新增 sample `07_full_pipeline`：多 entity（≥3 个 mesh，分别挂 toon / rim_light / 一个 textured material）+ 一个 DirectionalLight + 完整 PostProcessChain，演示 Phase 3 视觉基线综合。
 - 输入：Phase 3 / Task 06（Pipeline 已接 PostProcessChain / MaterialInstance 真路径）
 - 输出：

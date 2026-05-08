@@ -82,6 +82,7 @@ void RenderScene::Collect(const Orange::Engine::World& world)
         d.worldMatrix      = ComposeWorldMatrix(xform);
         d.mesh             = renderable.mesh;
         d.materialInstance = renderable.materialInstance;
+        d.castsShadow      = renderable.castsShadow;
         mDrawables.emplace_back(d);
     }
 }

@@ -101,16 +101,16 @@ Material LoadTextured(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "textured";
 
-    // textured_mesh shader 的 push-constant block 仅 uMVP(mat4) = 64 字节。
-    // 与 Pipeline 已有的 hardcoded textured pipeline 对齐——当前 06.01 子任
-    // 务保持视觉等价，靠的是 Pipeline 仍走 hardcoded 路径；这里 schema 提
-    // 前对齐，06.02 切到 per-template Pipeline 缓存时无 schema churn。
+    // Task 07 重构：textured 与 toon / rim_light 同模式——push-constant
+    // {uMVP, uModel} = 128 B；fragment 端用 vWorldPos + light UBO + shadow
+    // map 接通"接收阴影"路径，让 plane 这类用 textured 的 entity 也能
+    // 看到 cube / sphere 投下来的 shadow。
     desc.uniforms = {
-        {"uMVP", MaterialUniformType::Mat4},
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
     };
-    // binding 0 是程序式 fragment shader 当前未采样的"占位 sampler"槽——
-    // 把"贴图存在"以 MaterialInstance::SetTexture 喂进来，等到 fragment
-    // shader 真切到 `texture(sampler2D(uTexture), vUV)` 时无 schema 改动。
+    // binding 0 是 sampler 占位槽（未来真接 sampler 时替换 fragment 内
+    // checker 程序合成）。
     desc.textureSlots = {
         {0, "uTexture"},
     };
@@ -125,17 +125,19 @@ Material LoadToon(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "toon";
 
-    // uniform 顺序与 src/render/builtin_shaders/toon.{vert,frag}.glsl 中
-    // push_constant block 的字段顺序一一对应。
+    // Task 07 重构：push-constant 收缩为 {uMVP, uModel} = 128 B（Pipeline
+    // 上限 + 极简）。颜色 / threshold / light 方向都迁出 push constant：
+    //   * uLightDir / uLightColor / uLightIntensity / shadow params →
+    //     主 pass 的 light UBO（descriptor set 0 binding 1，per-frame）；
+    //   * uColorWarm / uColorCool / uShadowThreshold → 暂时 hardcode 进
+    //     toon.frag.glsl，per-instance 自定义留给 Phase 6 Material UBO。
+    //
+    // Material.uniforms 仅保留 Pipeline 实际 push 的两个字段——这是
+    // Pipeline 路由时计算 push-constant size 的依据。
     desc.uniforms = {
-        {"uMVP",             MaterialUniformType::Mat4 },
-        {"uColorWarm",       MaterialUniformType::Vec3 },
-        {"uColorCool",       MaterialUniformType::Vec3 },
-        {"uLightDir",        MaterialUniformType::Vec3 },
-        {"uShadowThreshold", MaterialUniformType::Float},
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
     };
-    // toon 当前不采样贴图——纯程序式 cel banding。后续 Phase 3 task 把
-    // base color texture 接上时再追加 textureSlot。
     desc.textureSlots = {};
 
     return BuildMaterial(registry, std::move(desc),
@@ -148,14 +150,12 @@ Material LoadRimLight(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "rim_light";
 
-    // uniform 顺序与 src/render/builtin_shaders/rim_light.{vert,frag}.glsl
-    // 中 push_constant block 的字段顺序一一对应。
+    // Task 07 重构：与 LoadToon 同模式——push-constant 收缩为 {uMVP, uModel}，
+    // 其余 rim 参数（uRimColor / uRimPower / uRimIntensity / uViewPos）
+    // hardcode 进 rim_light.frag.glsl。
     desc.uniforms = {
-        {"uMVP",          MaterialUniformType::Mat4 },
-        {"uViewPos",      MaterialUniformType::Vec3 },
-        {"uRimColor",     MaterialUniformType::Vec3 },
-        {"uRimPower",     MaterialUniformType::Float},
-        {"uRimIntensity", MaterialUniformType::Float},
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
     };
     desc.textureSlots = {};
 
