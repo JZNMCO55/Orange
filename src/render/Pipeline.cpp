@@ -43,6 +43,8 @@
 #include "orange/engine/render/Material.h"
 #include "orange/engine/render/MaterialInstance.h"
 #include "orange/engine/render/MaterialTypes.h"
+#include "orange/engine/render/PostProcessChain.h"
+#include "orange/engine/render/PostProcessPasses.h"
 #include "orange/engine/render/RenderScene.h"
 
 #include "orange/renderer/RenderDevice.h"
@@ -57,6 +59,8 @@
 
 #include <glm/mat4x4.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -236,6 +240,11 @@ std::vector<std::uint32_t> LoadSpirv(const char* relativePath)
 constexpr Orange::Rhi::TextureFormat kHdrColorFormat      = Orange::Rhi::TextureFormat::RGBA16Float;
 constexpr Orange::Rhi::TextureFormat kSwapchainColorFormat = Orange::Rhi::TextureFormat::BGRA8Unorm;
 
+// Bloom mip-chain：6 张 RGBA16F，从 HDR/2 一路下采到 HDR/64。下采 6 次
+// 喂出 6 张 mip；上采 5 次按 mip[N+1] tent → additive blend 累加进 mip[N]；
+// 最终 mip[0] 作为"bloom 末态"喂给 stage B 的 passthrough_combine。
+constexpr std::size_t kBloomMipCount = 6;
+
 }  // namespace
 
 struct Pipeline::Impl
@@ -305,6 +314,39 @@ struct Pipeline::Impl
     // 非拥有指针；当前阶段仅持有，下游子任务真正消费。
     PostProcessChain* postProcessChain{nullptr};
     MaterialSystem*   materialSystem{nullptr};
+
+    // ---- Bloom mip-chain 资源 ------------------------------------------
+    // chain 含 BloomPass 时按 HDR target 尺寸建 6 张 RGBA16F；HDR 重建 /
+    // chain 切换 / Pipeline 重建时同步重建。
+    struct BloomMip
+    {
+        std::unique_ptr<Orange::Rhi::RHITexture> texture;
+        std::uint32_t width{0};
+        std::uint32_t height{0};
+        bool layoutShaderReadOnly{false};
+    };
+    std::array<BloomMip, kBloomMipCount> bloomMips;
+    bool bloomMipsReady{false};
+
+    // bloom layout & pool 与 stage B 的 passthrough 各自独立，避免 set
+    // 数与 binding 数互相挤压。
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> bloomLayout;       // 1 binding
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> combineLayout;     // 2 bindings
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      bloomPool;
+    // 6 个 downsample set + 5 个 upsample set + 1 个 combine set = 12
+    // sets。每个 down/up set 1 个 CombinedImageSampler；combine set 2 个。
+    // Pool 总量按 12 sets / 13 CombinedImageSampler 预算。
+    std::array<std::unique_ptr<Orange::Rhi::RHIDescriptorSet>, kBloomMipCount>     bloomDownsampleSets;
+    std::array<std::unique_ptr<Orange::Rhi::RHIDescriptorSet>, kBloomMipCount - 1> bloomUpsampleSets;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>                                  bloomCombineSet;
+
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> bloomDownsampleFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> bloomUpsampleFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> passthroughCombineFs;
+
+    std::unique_ptr<Orange::Rhi::RHIPipeline> bloomDownsamplePipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline> bloomUpsamplePipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
 
     // -----------------------------------------------------------------
 
@@ -446,6 +488,22 @@ struct Pipeline::Impl
     // 调用方应跳过 Stage B 的 SubmitItem。
     bool RecordOffscreenPass(const glm::mat4& viewProj);
 
+    // 在已经 Begin 的 offscreenCmd 上追加 6 round downsample + 5 round
+    // upsample。预期调用顺序：主 pass 已 transition HDR 到 ShaderReadOnly。
+    // 失败 → 返回 false，调用方跳过 stage B 的 combine。
+    bool RecordBloomChain(const BloomPass& bloomDesc);
+
+    // 检测当前 chain 是否含 BloomPass + 取其参数。chain==nullptr / 没找
+    // 到 → 返回 nullptr。
+    const BloomPass* FindActiveBloomPass() const noexcept;
+
+    // 创建 / 重建 bloom 6 张 mip + 描述符 set（首次激活、HDR 尺寸变化、
+    // chain 切到含 BloomPass 时触发）。失败返回 false。
+    bool EnsureBloomResources();
+
+    // 释放 bloom 资源（chain 切回不含 BloomPass、Shutdown 时调用）。
+    void ReleaseBloomResources();
+
     // 创建 / 重建 HDR off-screen target；descriptor set 同步重写指向新
     // view。size == 0 时跳过——窗口最小化、initialize 早期的 windows 没
     // framebuffer extent 都走这一路。
@@ -494,6 +552,13 @@ struct Pipeline::Impl
         w.mImageInfo.mpTexture = hdrColor.get();
         w.mImageInfo.mpSampler = hdrSampler.get();
         renderDevice->GetRhiDevice().UpdateDescriptorSet(*passthroughSet, &w, 1);
+
+        // HDR 重建 → bloom mip 全部失效（descriptor set 里 binding 0
+        // 还指向旧 hdrColor）。下一次 EnsureBloomResources 触发完整重建。
+        if (bloomMipsReady)
+        {
+            ReleaseBloomResources();
+        }
         return true;
     }
 };
@@ -687,6 +752,156 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         return ResultCode::InternalError;
     }
 
+    // 7.5 Bloom layouts + shaders + pipelines (chain 真激活前不创建 mip 资源；
+    //     mip 资源由 EnsureBloomResources 在第一次 Render 时按需创建)。
+    {
+        // bloom 单 binding layout
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0,
+                                 Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.bloom.layout";
+        impl.bloomLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        // combine 双 binding layout (HDR + bloom)
+        Orange::Rhi::DescriptorSetLayoutDesc lay2{};
+        lay2.mBindings.push_back({0,
+                                  Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                  1,
+                                  Orange::Rhi::ShaderStage::Fragment});
+        lay2.mBindings.push_back({1,
+                                  Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                  1,
+                                  Orange::Rhi::ShaderStage::Fragment});
+        lay2.mpDebugName = "orange_engine.bloom.combine.layout";
+        impl.combineLayout = rhi.CreateDescriptorSetLayout(lay2);
+
+        if (!impl.bloomLayout || !impl.combineLayout)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom DescriptorSetLayout 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
+        auto downCode    = LoadSpirv("shaders/orange_engine/bloom_downsample.frag.spv");
+        auto upCode      = LoadSpirv("shaders/orange_engine/bloom_upsample.frag.spv");
+        auto combineCode = LoadSpirv("shaders/orange_engine/passthrough_combine.frag.spv");
+        if (downCode.empty() || upCode.empty() || combineCode.empty())
+        {
+            Shutdown();
+            return ResultCode::IoError;
+        }
+
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage = Orange::Rhi::ShaderStage::Fragment;
+
+        sm.mpCode      = downCode.data();
+        sm.mCodeSize   = downCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.bloom_downsample.frag";
+        impl.bloomDownsampleFs = rhi.CreateShaderModule(sm);
+
+        sm.mpCode      = upCode.data();
+        sm.mCodeSize   = upCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.bloom_upsample.frag";
+        impl.bloomUpsampleFs = rhi.CreateShaderModule(sm);
+
+        sm.mpCode      = combineCode.data();
+        sm.mCodeSize   = combineCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.passthrough_combine.frag";
+        impl.passthroughCombineFs = rhi.CreateShaderModule(sm);
+
+        if (!impl.bloomDownsampleFs || !impl.bloomUpsampleFs || !impl.passthroughCombineFs)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom shader 模块创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
+        // bloom downsample pipeline (RGBA16F target，无 blend，1 binding sampler，
+        // push constant uThreshold + 12B pad)
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.bloomDownsampleFs.get(), "main"});
+        d.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});  // 无 blend
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.bloomLayout.get());
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 16;  // float threshold + 3 float pad
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.bloom.downsample";
+        impl.bloomDownsamplePipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    {
+        // bloom upsample pipeline —— additive blend
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.bloomUpsampleFs.get(), "main"});
+        d.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        Orange::Rhi::ColorBlendAttachmentDesc blend{};
+        blend.mBlendEnable         = true;
+        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+        d.mColorBlend.mAttachments.push_back(blend);
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.bloomLayout.get());
+        d.mpDebugName = "orange_engine.bloom.upsample";
+        impl.bloomUpsamplePipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    {
+        // passthrough_combine pipeline (BGRA8Unorm swap-chain target，
+        // 2 binding 描述符，push constant uIntensity + 12B pad)
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.passthroughCombineFs.get(), "main"});
+        d.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});
+        d.mRenderTargets.mColorFormats.push_back(kSwapchainColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.combineLayout.get());
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 16;
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.passthrough_combine";
+        impl.passthroughCombinePipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
+        !impl.passthroughCombinePipeline)
+    {
+        ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / combine pipeline 创建失败");
+        Shutdown();
+        return ResultCode::InternalError;
+    }
+
     // 8. 初始 HDR target —— 按 window 当前 framebuffer extent 建一张。
     impl.SeedExtentFromWindow();
     if (impl.pendingWidth > 0 && impl.pendingHeight > 0)
@@ -715,6 +930,16 @@ void Pipeline::Shutdown()
     impl.meshCache.clear();
     impl.templatePipelines.clear();
     impl.shaderModules.clear();
+
+    impl.ReleaseBloomResources();
+    impl.passthroughCombinePipeline.reset();
+    impl.bloomUpsamplePipeline.reset();
+    impl.bloomDownsamplePipeline.reset();
+    impl.passthroughCombineFs.reset();
+    impl.bloomUpsampleFs.reset();
+    impl.bloomDownsampleFs.reset();
+    impl.combineLayout.reset();
+    impl.bloomLayout.reset();
 
     impl.passthroughPipeline.reset();
     impl.passthroughFs.reset();
@@ -800,12 +1025,9 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
 {
     auto& impl = *this;
     auto& cmd = *impl.offscreenCmd;
-    if (Orange::Failed(cmd.Begin()))
-    {
-        ORANGE_LOG_ERROR("Pipeline::Render: offscreen cmd Begin 失败 (frame={})",
-                         impl.frameIndex);
-        return false;
-    }
+    // Caller (Render) 已经 cmd.Begin() —— 这里只录制主 pass + transition，
+    // 后续 bloom 链 / End / Submit 由 Render 顶层负责，让所有 GPU 工作进
+    // 入同一 cmd list 同一 Submit。
 
     const auto fromLayout = impl.hdrLayoutShaderReadOnly
         ? Orange::Rhi::TextureLayout::ShaderReadOnly
@@ -902,27 +1124,6 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
     cmd.TransitionTexture(*impl.hdrColor,
                           Orange::Rhi::TextureLayout::ColorAttachment,
                           Orange::Rhi::TextureLayout::ShaderReadOnly);
-
-    if (Orange::Failed(cmd.End()))
-    {
-        ORANGE_LOG_ERROR("Pipeline::Render: offscreen cmd End 失败 (frame={})",
-                         impl.frameIndex);
-        return false;
-    }
-    if (Orange::Failed(impl.renderDevice->GetRhiDevice().SubmitCommandList(cmd)))
-    {
-        ORANGE_LOG_ERROR("Pipeline::Render: offscreen SubmitCommandList 失败 (frame={})",
-                         impl.frameIndex);
-        return false;
-    }
-    // 0.x 兜底：等 GPU 跑完再让 stage B 采样 hdrColor。Phase 6 切到
-    // timeline semaphore。
-    if (Orange::Failed(impl.renderDevice->WaitIdle()))
-    {
-        ORANGE_LOG_ERROR("Pipeline::Render: WaitIdle 失败 (frame={})",
-                         impl.frameIndex);
-        return false;
-    }
     impl.hdrLayoutShaderReadOnly = true;
     return true;
 }
@@ -999,6 +1200,290 @@ void Pipeline::Impl::EnsureMeshGpuCache()
     }
 }
 
+const BloomPass* Pipeline::Impl::FindActiveBloomPass() const noexcept
+{
+    if (postProcessChain == nullptr)
+    {
+        return nullptr;
+    }
+    const std::size_t count = postProcessChain->PassCount();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const IPostProcessPass* p = postProcessChain->PassAt(i);
+        if (const BloomPass* bp = dynamic_cast<const BloomPass*>(p))
+        {
+            return bp;
+        }
+    }
+    return nullptr;
+}
+
+void Pipeline::Impl::ReleaseBloomResources()
+{
+    if (renderDevice)
+    {
+        renderDevice->WaitIdle();
+    }
+    bloomCombineSet.reset();
+    for (auto& s : bloomUpsampleSets) s.reset();
+    for (auto& s : bloomDownsampleSets) s.reset();
+    bloomPool.reset();
+    for (auto& mip : bloomMips)
+    {
+        mip.texture.reset();
+        mip.width = 0;
+        mip.height = 0;
+        mip.layoutShaderReadOnly = false;
+    }
+    bloomMipsReady = false;
+}
+
+bool Pipeline::Impl::EnsureBloomResources()
+{
+    if (renderDevice == nullptr || hdrColor == nullptr || hdrWidth == 0 || hdrHeight == 0)
+    {
+        return false;
+    }
+
+    // 计算第一张 mip 的尺寸（HDR/2，向下取整 + 至少 1 像素）；后续按 /2
+    // 依次推到 mip[5]。
+    const std::uint32_t expectedMip0W = std::max<std::uint32_t>(hdrWidth  / 2, 1);
+    const std::uint32_t expectedMip0H = std::max<std::uint32_t>(hdrHeight / 2, 1);
+
+    if (bloomMipsReady && bloomMips[0].width == expectedMip0W && bloomMips[0].height == expectedMip0H)
+    {
+        return true;  // 已建好且尺寸一致
+    }
+
+    // 任一条件不满足都重建（HDR resize / chain 切到 BloomPass 的初次激活）。
+    ReleaseBloomResources();
+
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    // 1. 创建 6 张 RGBA16F mip texture
+    std::uint32_t w = expectedMip0W;
+    std::uint32_t h = expectedMip0H;
+    for (std::size_t i = 0; i < kBloomMipCount; ++i)
+    {
+        Orange::Rhi::TextureDesc t{};
+        t.mWidth  = w;
+        t.mHeight = h;
+        t.mFormat = kHdrColorFormat;
+        t.mUsage  = Orange::Rhi::TextureUsage::RenderTarget
+                  | Orange::Rhi::TextureUsage::Sampled;
+        auto tex = rhi.CreateTexture(t);
+        if (!tex)
+        {
+            ORANGE_LOG_ERROR("Pipeline: bloom mip {} CreateTexture 失败 ({}x{})",
+                             i, w, h);
+            ReleaseBloomResources();
+            return false;
+        }
+        bloomMips[i].texture              = std::move(tex);
+        bloomMips[i].width                = w;
+        bloomMips[i].height               = h;
+        bloomMips[i].layoutShaderReadOnly = false;
+
+        w = std::max<std::uint32_t>(w / 2, 1);
+        h = std::max<std::uint32_t>(h / 2, 1);
+    }
+
+    // 2. Pool —— 6 down + 5 up + 1 combine = 12 sets，13 个 CombinedImageSampler。
+    Orange::Rhi::DescriptorPoolDesc poolDesc{};
+    poolDesc.mMaxSets   = static_cast<std::uint32_t>(kBloomMipCount * 2);  // 12
+    poolDesc.mPoolSizes = {{Orange::Rhi::DescriptorType::CombinedImageSampler,
+                            static_cast<std::uint32_t>(kBloomMipCount * 2 + 1)}};  // 13
+    poolDesc.mpDebugName = "orange_engine.bloom.pool";
+    bloomPool = rhi.CreateDescriptorPool(poolDesc);
+    if (!bloomPool)
+    {
+        ORANGE_LOG_ERROR("Pipeline: bloom DescriptorPool 创建失败");
+        ReleaseBloomResources();
+        return false;
+    }
+
+    // 3. 6 个 downsample set —— set[0] 采样 HDR；set[i>=1] 采样 mip[i-1]
+    for (std::size_t i = 0; i < kBloomMipCount; ++i)
+    {
+        auto set = rhi.AllocateDescriptorSet(*bloomPool, *bloomLayout);
+        if (!set)
+        {
+            ORANGE_LOG_ERROR("Pipeline: bloom downsample set {} 分配失败", i);
+            ReleaseBloomResources();
+            return false;
+        }
+        Orange::Rhi::DescriptorWrite write{};
+        write.mBinding             = 0;
+        write.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        write.mImageInfo.mpTexture = (i == 0) ? hdrColor.get()
+                                              : bloomMips[i - 1].texture.get();
+        write.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*set, &write, 1);
+        bloomDownsampleSets[i] = std::move(set);
+    }
+
+    // 4. 5 个 upsample set —— set[i] 采样 mip[i+1]，目标是 mip[i] (i = 0..4)
+    for (std::size_t i = 0; i < kBloomMipCount - 1; ++i)
+    {
+        auto set = rhi.AllocateDescriptorSet(*bloomPool, *bloomLayout);
+        if (!set)
+        {
+            ORANGE_LOG_ERROR("Pipeline: bloom upsample set {} 分配失败", i);
+            ReleaseBloomResources();
+            return false;
+        }
+        Orange::Rhi::DescriptorWrite write{};
+        write.mBinding             = 0;
+        write.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        write.mImageInfo.mpTexture = bloomMips[i + 1].texture.get();
+        write.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*set, &write, 1);
+        bloomUpsampleSets[i] = std::move(set);
+    }
+
+    // 5. combine set —— binding 0 = HDR，binding 1 = bloom_mip[0]
+    bloomCombineSet = rhi.AllocateDescriptorSet(*bloomPool, *combineLayout);
+    if (!bloomCombineSet)
+    {
+        ORANGE_LOG_ERROR("Pipeline: bloom combine set 分配失败");
+        ReleaseBloomResources();
+        return false;
+    }
+    {
+        std::array<Orange::Rhi::DescriptorWrite, 2> writes{};
+        writes[0].mBinding             = 0;
+        writes[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        writes[0].mImageInfo.mpTexture = hdrColor.get();
+        writes[0].mImageInfo.mpSampler = hdrSampler.get();
+
+        writes[1].mBinding             = 1;
+        writes[1].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        writes[1].mImageInfo.mpTexture = bloomMips[0].texture.get();
+        writes[1].mImageInfo.mpSampler = hdrSampler.get();
+
+        rhi.UpdateDescriptorSet(*bloomCombineSet, writes.data(),
+                                static_cast<std::uint32_t>(writes.size()));
+    }
+
+    bloomMipsReady = true;
+    return true;
+}
+
+bool Pipeline::Impl::RecordBloomChain(const BloomPass& bloomDesc)
+{
+    if (!bloomMipsReady || offscreenCmd == nullptr)
+    {
+        return false;
+    }
+    auto& cmd = *offscreenCmd;
+
+    // ---- 6 round downsample（HDR → mip[0]; mip[i-1] → mip[i] for i=1..5）
+    for (std::size_t i = 0; i < kBloomMipCount; ++i)
+    {
+        auto& mip = bloomMips[i];
+
+        const auto fromLayout = mip.layoutShaderReadOnly
+            ? Orange::Rhi::TextureLayout::ShaderReadOnly
+            : Orange::Rhi::TextureLayout::Undefined;
+        cmd.TransitionTexture(*mip.texture, fromLayout,
+                              Orange::Rhi::TextureLayout::ColorAttachment);
+
+        Orange::Rhi::ColorAttachment att{};
+        att.mpView   = mip.texture->GetDefaultView();
+        att.mLoadOp  = Orange::Rhi::LoadOp::Clear;
+        att.mStoreOp = Orange::Rhi::StoreOp::Store;
+        att.mClear.mColor[0] = 0.0f;
+        att.mClear.mColor[1] = 0.0f;
+        att.mClear.mColor[2] = 0.0f;
+        att.mClear.mColor[3] = 1.0f;
+
+        Orange::Rhi::RenderingDesc rd{};
+        rd.mRenderArea.mWidth  = mip.width;
+        rd.mRenderArea.mHeight = mip.height;
+        rd.mColorAttachments.push_back(att);
+        cmd.BeginRendering(rd);
+
+        Orange::Rhi::RHIViewport vp{};
+        vp.mWidth    = static_cast<float>(mip.width);
+        vp.mHeight   = static_cast<float>(mip.height);
+        vp.mMinDepth = 0.0f;
+        vp.mMaxDepth = 1.0f;
+        cmd.SetViewport(vp);
+        Orange::Rhi::RHIScissor sc{};
+        sc.mWidth  = mip.width;
+        sc.mHeight = mip.height;
+        cmd.SetScissor(sc);
+
+        cmd.BindGraphicsPipeline(*bloomDownsamplePipeline);
+        cmd.SetDescriptorSet(0, *bloomDownsampleSets[i]);
+
+        // mip[0] 跳走 bright-pass，喂 BloomPass.threshold；后续跳传 0。
+        struct PushDown { float threshold; float pad0, pad1, pad2; };
+        PushDown pcData{};
+        pcData.threshold = (i == 0) ? bloomDesc.threshold : 0.0f;
+        cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment,
+                             0, static_cast<std::uint32_t>(sizeof(pcData)), &pcData);
+
+        cmd.Draw(3, 1, 0, 0);  // big-triangle
+        cmd.EndRendering();
+
+        cmd.TransitionTexture(*mip.texture,
+                              Orange::Rhi::TextureLayout::ColorAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        mip.layoutShaderReadOnly = true;
+    }
+
+    // ---- 5 round upsample —— additive blend 累加到 mip[i] 已有内容上
+    for (std::size_t step = 0; step < kBloomMipCount - 1; ++step)
+    {
+        // 从 mip[5] 向 mip[0] 推进：先写 mip[4]，再写 mip[3]，...，最后 mip[0]。
+        const std::size_t i = (kBloomMipCount - 2) - step;  // 4, 3, 2, 1, 0
+        auto& mip = bloomMips[i];
+
+        // 把目标 mip 从 ShaderReadOnly 切回 ColorAttachment 准备写入。
+        cmd.TransitionTexture(*mip.texture,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly,
+                              Orange::Rhi::TextureLayout::ColorAttachment);
+        mip.layoutShaderReadOnly = false;
+
+        Orange::Rhi::ColorAttachment att{};
+        att.mpView   = mip.texture->GetDefaultView();
+        att.mLoadOp  = Orange::Rhi::LoadOp::Load;     // 保留 downsample 写入的内容
+        att.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+        Orange::Rhi::RenderingDesc rd{};
+        rd.mRenderArea.mWidth  = mip.width;
+        rd.mRenderArea.mHeight = mip.height;
+        rd.mColorAttachments.push_back(att);
+        cmd.BeginRendering(rd);
+
+        Orange::Rhi::RHIViewport vp{};
+        vp.mWidth    = static_cast<float>(mip.width);
+        vp.mHeight   = static_cast<float>(mip.height);
+        vp.mMinDepth = 0.0f;
+        vp.mMaxDepth = 1.0f;
+        cmd.SetViewport(vp);
+        Orange::Rhi::RHIScissor sc{};
+        sc.mWidth  = mip.width;
+        sc.mHeight = mip.height;
+        cmd.SetScissor(sc);
+
+        cmd.BindGraphicsPipeline(*bloomUpsamplePipeline);
+        // upsample set i 采样 mip[i+1]
+        cmd.SetDescriptorSet(0, *bloomUpsampleSets[i]);
+        cmd.Draw(3, 1, 0, 0);
+        cmd.EndRendering();
+
+        // 写完之后再 transition 回 ShaderReadOnly，让下次 sample 安全。
+        cmd.TransitionTexture(*mip.texture,
+                              Orange::Rhi::TextureLayout::ColorAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        mip.layoutShaderReadOnly = true;
+    }
+
+    return true;
+}
+
 void Pipeline::Render(Orange::Engine::World& world)
 {
     auto& impl = *mpImpl;
@@ -1016,6 +1501,22 @@ void Pipeline::Render(Orange::Engine::World& world)
     // 回 false，Pipeline 仍跑 Renderer.BeginFrame/EndFrame 但跳过 stage A。
     const bool hdrReady = impl.EnsureHdrTarget();
 
+    // 检测 chain 里的 BloomPass —— 决定是否在 stage A 末尾追加 bloom mip
+    // chain，并决定 stage B 走 passthrough 还是 passthrough_combine。
+    const BloomPass* activeBloom = impl.FindActiveBloomPass();
+    if (activeBloom != nullptr && hdrReady)
+    {
+        if (!impl.EnsureBloomResources())
+        {
+            activeBloom = nullptr;  // bloom 资源建不出来 → 退回纯 HDR 路径
+        }
+    }
+    else if (activeBloom == nullptr && impl.bloomMipsReady)
+    {
+        // chain 切回不含 BloomPass —— 释放 bloom 资源避免占内存。
+        impl.ReleaseBloomResources();
+    }
+
     // 1. mesh GPU 上传必须在自管 cmd 之外完成（UploadContext 内部 transient
     // cmd 与我们的 offscreenCmd 不能嵌套）。
     if (hdrReady && impl.scene.HasCamera())
@@ -1023,15 +1524,49 @@ void Pipeline::Render(Orange::Engine::World& world)
         impl.EnsureMeshGpuCache();
     }
 
-    // 2. Stage A —— 离屏 HDR 主 pass。无相机 / 无 HDR target 时跳过。
+    // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /
+    // 无 HDR target 时跳过；所有离屏工作进入同一 cmd list / 同一 Submit /
+    // 一次 WaitIdle。
+    bool offscreenOk = true;
     if (hdrReady && impl.scene.HasCamera())
     {
-        const glm::mat4 viewProj =
-            impl.scene.MainCamera().projection * impl.scene.MainCamera().view;
-        if (!impl.RecordOffscreenPass(viewProj))
+        auto& cmd = *impl.offscreenCmd;
+        if (Orange::Failed(cmd.Begin()))
         {
-            // 离屏失败也继续走 Stage B —— swap-chain 还是要 BeginFrame /
-            // EndFrame 收尾，否则 Renderer 内部状态会失序。
+            ORANGE_LOG_ERROR("Pipeline::Render: offscreen cmd Begin 失败 (frame={})",
+                             impl.frameIndex);
+            offscreenOk = false;
+        }
+        else
+        {
+            const glm::mat4 viewProj =
+                impl.scene.MainCamera().projection * impl.scene.MainCamera().view;
+            offscreenOk = impl.RecordOffscreenPass(viewProj);
+
+            if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)
+            {
+                offscreenOk = impl.RecordBloomChain(*activeBloom);
+            }
+
+            if (Orange::Failed(cmd.End()))
+            {
+                ORANGE_LOG_ERROR("Pipeline::Render: offscreen cmd End 失败 (frame={})",
+                                 impl.frameIndex);
+                offscreenOk = false;
+            }
+            if (offscreenOk &&
+                Orange::Failed(impl.renderDevice->GetRhiDevice().SubmitCommandList(cmd)))
+            {
+                ORANGE_LOG_ERROR("Pipeline::Render: offscreen SubmitCommandList 失败 (frame={})",
+                                 impl.frameIndex);
+                offscreenOk = false;
+            }
+            if (offscreenOk && Orange::Failed(impl.renderDevice->WaitIdle()))
+            {
+                ORANGE_LOG_ERROR("Pipeline::Render: WaitIdle 失败 (frame={})",
+                                 impl.frameIndex);
+                offscreenOk = false;
+            }
         }
     }
 
@@ -1053,14 +1588,35 @@ void Pipeline::Render(Orange::Engine::World& world)
     if (hdrReady && impl.hdrLayoutShaderReadOnly)
     {
         Orange::Renderer::RenderItem item{};
-        item.mpPipeline           = impl.passthroughPipeline.get();
         item.mDraw.mVertexCount   = 3;        // big-triangle
         item.mDraw.mInstanceCount = 1;
-        item.mpDescriptorSets[0]  = impl.passthroughSet.get();
-        item.mDescriptorSetCount  = 1;
-        item.mPushConstantSize    = 0;
+
+        if (activeBloom != nullptr && impl.bloomMipsReady)
+        {
+            // Bloom 路径：passthrough_combine + 双 binding (HDR + bloom)
+            item.mpPipeline          = impl.passthroughCombinePipeline.get();
+            item.mpDescriptorSets[0] = impl.bloomCombineSet.get();
+            item.mDescriptorSetCount = 1;
+
+            struct PushCombine { float intensity; float pad0, pad1, pad2; };
+            PushCombine pcData{};
+            pcData.intensity = activeBloom->intensity;
+            std::memcpy(item.mPushConstantData.data(), &pcData, sizeof(pcData));
+            item.mPushConstantSize   = static_cast<std::uint32_t>(sizeof(pcData));
+            item.mPushConstantOffset = 0;
+            item.mPushConstantStage  = Orange::Rhi::ShaderStage::Fragment;
+        }
+        else
+        {
+            // 06.03 fallback：纯 HDR passthrough
+            item.mpPipeline          = impl.passthroughPipeline.get();
+            item.mpDescriptorSets[0] = impl.passthroughSet.get();
+            item.mDescriptorSetCount = 1;
+            item.mPushConstantSize   = 0;
+        }
         impl.renderer->SubmitItem(item);
     }
+    (void)offscreenOk;  // 离屏失败也继续走 stage B —— renderer 状态机要 Begin/EndFrame 配对
 
     if (Orange::Failed(impl.renderer->EndFrame()))
     {
@@ -1090,6 +1646,29 @@ void Pipeline::GetHdrTargetSize(std::uint32_t& width, std::uint32_t& height) con
     }
     width  = mpImpl->hdrWidth;
     height = mpImpl->hdrHeight;
+}
+
+std::size_t Pipeline::BloomMipCount() const noexcept
+{
+    if (!mpImpl || !mpImpl->bloomMipsReady)
+    {
+        return 0;
+    }
+    return kBloomMipCount;
+}
+
+void Pipeline::GetBloomMipSize(std::size_t mipIndex,
+                               std::uint32_t& width,
+                               std::uint32_t& height) const noexcept
+{
+    width  = 0;
+    height = 0;
+    if (!mpImpl || !mpImpl->bloomMipsReady || mipIndex >= kBloomMipCount)
+    {
+        return;
+    }
+    width  = mpImpl->bloomMips[mipIndex].width;
+    height = mpImpl->bloomMips[mipIndex].height;
 }
 
 }  // namespace Orange::Engine::Render

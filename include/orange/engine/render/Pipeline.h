@@ -124,6 +124,17 @@ public:
     // 落地时被替代）。
     void GetHdrTargetSize(std::uint32_t& width, std::uint32_t& height) const noexcept;
 
+    // 当前 bloom mip-chain 资源数量。chain 不含 BloomPass / 未 Render 过
+    // 时返回 0；含 BloomPass 且 EnsureBloomResources 成功后返回 6（与
+    // Pipeline 内部 kBloomMipCount 一致）。诊断 + ctest 用。
+    std::size_t BloomMipCount() const noexcept;
+
+    // 第 mipIndex 张 bloom mip 的尺寸（mipIndex < BloomMipCount() 时
+    // 有效）；越界返回 (0, 0)。诊断 + ctest 用。
+    void GetBloomMipSize(std::size_t mipIndex,
+                         std::uint32_t& width,
+                         std::uint32_t& height) const noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> mpImpl;

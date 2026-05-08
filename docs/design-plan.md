@@ -1479,39 +1479,109 @@ Removed: Src/                              (整目录，src/ 替换)
 - Critical Path：是
 
 #### Task 06：升级 `samples/04_3d_mesh_with_bloom`（Pipeline 接通 MaterialInstance + PostProcessChain 真路径）
-- 描述：把 Task 03（PostProcessChain 接口）+ Task 04（MaterialSystem 注册）的 stub 真正跑起来——Pipeline 加 HDR off-screen color target（RGBA16F）+ bloom mip-chain（downsample 6 levels + upsample 6 levels + composite）+ tonemap fullscreen pass + LUT pass（handle 无效时 no-op bypass）；Pipeline 按 RenderableComponent 上的 MaterialInstance 反查 Material → 编 RHI Pipeline state → 按 instance 覆盖打 push-constant；RenderableComponent 的 `materialInstance`（替代当前的 hardcoded texture handle）作为新 ECS schema。新增 sample `04_3d_mesh_with_bloom` 用 BuiltinMaterials::LoadToon + BuiltinPostProcessChain::CreateDefault，演示一个旋转立方体在 HDR 卡通照明 + bloom + tonemap 下的视觉。**Shadow pass 不在本 task 范围**——见 Task 07。
-- 输入：Phase 3 / Task 03 + Task 04 + Task 05（Task 05 完成后 BuiltinShadowShaders 可用，但 Task 06 不消费 shadow 路径）
+
+> **阻塞 trail（已全部解除）**：
+> - **2026-05-07 第一次阻塞登记**：触达"渲染到 off-screen RGBA16F → 在后续 pass 里采样它"全链路，依赖 OrangeRender 公共 RHI 缺失的 B2/B3/B4。登记 `FEATURE-2026-05-07-rhi-render-pass-and-bindings`，✅ 落地（B4 + B5 部分扩枚举 + `RHITexture::GetDefaultView()`；B2/B3 经评审确认 Phase 6 早已闭环）。
+> - **2026-05-07 第二次阻塞登记**：第一条解除后复盘发现 tonemap → swap-chain 还差一脚——`RenderItem` 不带 descriptor-set、`RecordRenderItems` 不发 `SetDescriptorSet`。登记 `FEATURE-2026-05-07-renderitem-descriptor-sets`，✅ 落地（`RenderItem.mpDescriptorSets[4] + mDescriptorSetCount` + `RecordRenderItems` 自动发 + dedup + 单测 + sample `--via-renderer` 双栈 + `api_guide.md` §6.6 追加）。
+> - **当前**：B2 + B3 + B4 + RenderItem.descriptorSets 四件套齐全；OrangeEngine 走 windowed `IRenderer` 路径有 `mpNativeWindowHandle` 可用，T3 风险确认里"headless 走不通 SubmitItem"的限制对引擎不构成阻塞。
+>
+> **拆解决策**（2026-05-07）：本 task 工作量大（HDR target / 6+6 bloom mip / 8 个新 SPIR-V / MaterialInstance 路由 / per-template Pipeline 缓存 / `RenderableComponent` schema 迁移 / sample 03/04 迁移 / 新 sample），按 5 子任务串行交付——见下方"子任务拆解"段。每条独立 commit / PR、各自有验收门槛。
+
+- 描述：把 Task 03（PostProcessChain 接口）+ Task 04（MaterialSystem 注册）+ Task 05（Light/Shadow 公共面 + BuiltinShadowShaders）的 stub 真正跑起来——Pipeline 加 HDR off-screen color target（RGBA16F）+ bloom mip-chain（downsample 6 levels + upsample 6 levels + composite）+ tonemap fullscreen pass + LUT pass（handle 无效时 no-op bypass）；Pipeline 按 RenderableComponent 上的 MaterialInstance 反查 Material → 编 RHI Pipeline state → 按 instance 覆盖打 push-constant；RenderableComponent 的 `materialInstance`（替代当前的 hardcoded texture handle）作为新 ECS schema。新增 sample `04_3d_mesh_with_bloom` 用 `BuiltinMaterials::LoadToon` + `BuiltinPostProcessChain::CreateDefault`，演示一个旋转立方体在 HDR 卡通照明 + bloom + tonemap 下的视觉。**Shadow pass 不在本 task 范围**——见 Task 07。
+- 前置依赖：Task 03 / 04 / 05；vendor/OrangeRender 已 bump 到含 `FEATURE-2026-05-07-rhi-render-pass-and-bindings` + `FEATURE-2026-05-07-renderitem-descriptor-sets` 的 commit。
+- 影响路径/模块：Render（重写绘制路径，跨 5 子任务 + 双段 frame 流程）、samples、构建系统。
+- 设计决策（跨子任务通用）：
+  - **MaterialInstance 路由 = per-template Pipeline 缓存**：`unordered_map<const Material*, RhiPipeline>`，第一次见到某 Material 时按其 `vertexShader / fragmentShader / uniforms` 编 `GraphicsPipelineDesc`、之后切 instance 不重编。与 extension-points "每个 MaterialTemplate 编译为一个 RHI Pipeline" 约定一致。
+  - **RenderableComponent 持非拥有 `MaterialInstance*`**：instance 由 sample / 游戏代码持有（典型：`std::vector<std::unique_ptr<MaterialInstance>>` 在 main 里管），component 仍是 trivially-copyable 的小数据；理由 = MaterialInstance PIMPL move-only，嵌 EnTT archetype 触发整行迁移。生命周期约束：析构 instance 前先析构 World，加文档不强制。
+  - **HDR target 选 RGBA16F**：主 pass 写 off-screen RGBA16F；bloom chain mip 也 RGBA16F；tonemap 读 RGBA16F → ACES → 写 swap-chain LDR。
+  - **bloom 资源 = 6 张独立 `RHITexture`，不用 sub-resource view**：Karis 风格 mip-chain 每跳要求 "写 mip[N] 时绑 mip[N] 为 RT、读 mip[N-1] 时把它喂为 sampled view"。当前 `RHITexture` 公共面只有 `GetDefaultView()`，没 mip view 工厂；本 task 用 6 张独立 RHITexture（mip0=1/2 … mip5=1/64）绕过——比 sub-resource view 浪费 ~33% 内存，但避免向 OrangeRender 提第三轮需求；Phase 6 性能调优时再换。
+  - **bloom 算法 = COD AW 风格 mip-chain**：6 levels downsample + 6 levels upsample，Karis 平均防 fireflies、tent filter 上采，`BloomPass.threshold / intensity` 按 push-constant 喂。
+  - **tonemap 算子 = ACES Narkowicz fit**：单步 ALU 算子（5 行 GLSL），不需要 LUT。`LutPass` 真正色彩分级（3D LUT 17×17×17 unrolled）等到 Phase 6 资产管线就绪再接，本 task 仅做 "handle 无效 → bypass" 的 stub。
+  - **双段 frame 流程**：Pipeline.Render 改为 ① **离屏段**（自管 cmd list）：`device.CreateCommandList(Graphics)` → transition + `BeginRendering(HDR/bloom mips)` + drawables/fullscreen quad + `EndRendering` + transition `ShaderReadOnly` → `device.SubmitCommandList` → `device.WaitIdle()` 兜底（Phase 6 切 timeline semaphore）；② **swap-chain 段**（`IRenderer`）：`renderer.BeginFrame` → `SubmitItem(fullscreen tonemap quad with mpDescriptorSets[0]=HDR+bloom CIS set)` → `renderer.EndFrame`。
+  - **`Pipeline::SetPostProcessChain / SetMaterialSystem` 是非拥有指针**：Pipeline 不接管生命周期；空 chain / 空 system 走 fallback 路径（passthrough / hardcoded），保证 sample 03/04 在每个子任务节点都能跑。
+  - **Shadow pass 不在本 task 范围**：D4 决策推给 Task 07，本 task 不接。
+
+##### 子任务拆解
+
+每条以 `Task 06.0X` 命名，commit / PR title 引用此编号；按 01 → 02 → 03 → 04 → 05 严格串行（每条改了下条要用的状态）。每条都有独立验证手段、blast radius 受控；中间状态保证 sample 03/04 不退化，是跨子任务的硬约束。
+
+###### Task 06.01 · 数据 schema：MaterialInstance 在 ECS 上贯通 ✅
 - 输出：
-  - `Proposed: src/render/builtin_shaders/bloom_downsample.vert.glsl` + `bloom_downsample.frag.glsl`（fullscreen triangle + 13-tap downsample，Karis 平均防 fireflies）
-  - `Proposed: src/render/builtin_shaders/bloom_upsample.vert.glsl` + `bloom_upsample.frag.glsl`（fullscreen triangle + 9-tap tent filter upsample + add）
-  - `Proposed: src/render/builtin_shaders/tonemap.vert.glsl` + `tonemap.frag.glsl`（fullscreen triangle + ACES Narkowicz fit 算子，按 push-constant 喂 exposure）
-  - `Modified: include/orange/engine/render/RenderableComponent.h`（替换硬编码 texture handle 字段为 `MaterialInstance* materialInstance`——MaterialInstance 由 sample / 游戏代码持有；component 只存非拥有指针，避免在 ECS schema 里嵌 PIMPL 类型）
-  - `Modified: include/orange/engine/render/Pipeline.h`（追加 `void SetPostProcessChain(PostProcessChain* chain)`、`void SetMaterialSystem(MaterialSystem* system)` —— 两个非拥有指针，Pipeline 在 Render 时按它们路由）
-  - `Modified: src/render/Pipeline.cpp`（大改：HDR target 创建 + bloom chain 资源 + tonemap pass + MaterialInstance 路由 + per-MaterialTemplate RHI Pipeline 缓存——`unordered_map<const Material*, RhiPipeline>` 第一次见 template 时编 Pipeline、之后复用）
-  - `Modified: src/render/PostProcessPasses.cpp`（HdrPass / BloomPass / TonemapPass / LutPass 的 Setup / Execute 真填内容；与 PostProcessSetupContext / ExecuteContext 一并扩字段——见下面实现要点）
-  - `Modified: include/orange/engine/render/IPostProcessPass.h`（PostProcessSetupContext / ExecuteContext 由空 struct 升级为含 RenderGraphBuilder 引用 / Renderer 引用 / 输入输出 texture view 的有内容 struct；接口签名不破，子类 Setup/Execute 仍是同样原型）
-  - `Proposed: samples/04_3d_mesh_with_bloom/CMakeLists.txt` + `samples/04_3d_mesh_with_bloom/main.cpp`（与 04_3d_mesh 同骨架：World + Pipeline + MaterialSystem + PostProcessChain；旋转立方体挂 toon MaterialInstance）
-  - `Modified: samples/CMakeLists.txt`（注册新 sample）
-  - `Modified: src/render/RenderScene.cpp`（drawable 收集时把 RenderableComponent.materialInstance 一并带进 drawable 描述）
-- 影响路径/模块：Render（重写绘制路径）、samples、构建系统
-- 前置依赖：Task 03 / 04 / 05
-- 实现要点：
-  - **此 task 是 Phase 3 范围最大的一项**：Pipeline 改动跨 HDR target / bloom mip-chain / tonemap / MaterialInstance 路由四件事——出现 scope creep（例如想顺手接 shadow pass）时优先把 LUT 真路径推给 Task 07，本 task LUT 维持"handle 无效时 no-op"。Shadow pass 已经被 D4 决策推给 Task 07，本 task 不接。
-  - **MaterialInstance 路由 = per-template Pipeline 缓存**：Pipeline 内部维护 `unordered_map<const Material*, RhiPipelineDesc>`——第一次见到某 Material 时按它的 vertexShader / fragmentShader / uniform 布局编 RHI Pipeline、之后切 MaterialInstance 不重编。这与 extension-points "每个 MaterialTemplate 编译为一个 RHI Pipeline；切换 MaterialInstance 不重新编译"约定一致。
-  - **RenderableComponent 持非拥有 MaterialInstance\***：MaterialInstance 由 sample / 游戏代码持有（典型：用 std::vector<std::unique_ptr<MaterialInstance>> 在 main 里管），component 只存裸指针。理由——MaterialInstance 是 PIMPL move-only 类型，嵌入 EnTT archetype 会触发整行迁移成本；非拥有指针让 component 仍是 trivially-copyable 的小数据。生命周期约束：sample 析构 MaterialInstance 前必须先析构 World 或清掉所有引用——加文档但不在运行时强制。
-  - **HDR target 选 RGBA16F**：与 OrangeRender 主线 swap-chain 兼容；在主 pass 写到 RGBA16F off-screen color、bloom chain 的 mip 也用 RGBA16F、tonemap 时把 RGBA16F 读出来 ACES → 写到 swap-chain 的 LDR target。LUT pass handle 无效时 tonemap 直接写 swap-chain（chain 里检测到 LutPass.lut 无效就跳过）。
-  - **PostProcessSetupContext / ExecuteContext 字段扩展**：SetupContext 加 `RenderGraphBuilder& builder`、`HandleResource hdrColor`（链头）、`HandleResource swapchainColor`（链尾）；ExecuteContext 加 `IRenderer& renderer`、`uint32_t frameIndex`、当前 pass 的输入输出 view。这两个 context 的具体字段在 Task 06 实现时确定——只要 IPostProcessPass 子类签名（`virtual void Setup(PostProcessSetupContext&)`）不变，扩 context 字段不破。
-  - **bloom 算法 = COD AW 风格 mip-chain**：6 levels downsample + 6 levels upsample，Karis 平均做 luminance-weighted 防 fireflies、tent filter 上采，BloomPass.threshold / intensity 按 push-constant 喂。这条算法在 Phase 6 视觉调优时可能换；当前选它的理由是实现简单 + 移动端友好 + 广泛验证过。
-  - **tonemap 算子 = ACES Narkowicz fit**：单步 ALU 算子（5 行 GLSL），不需要 LUT。LutPass 的真正色彩分级（3D LUT 17×17×17 unrolled）等到 Task 07 / Phase 6 资产管线就绪再接。
-  - **不动 03_textured_quad / 02_ecs_basics / 01_minimal_window**：sample 03 当前用硬编码 textured shader，Task 06 改 RenderableComponent 后 sample 03 必须同步迁移到 MaterialInstance（或者先保留旧硬编码路径走 fallback）—— 决策：sample 03 顺手迁移到 MaterialSystem 注册的 "textured" template（用现有 textured_mesh.vert/frag SPIR-V），让 Pipeline 不需要保留两条绘制路径。这条迁移在 Task 06 内部完成。sample 04（旧的）也同步迁移；新 sample `04_3d_mesh_with_bloom` 与旧 04 不冲突——名字不同的两个 .exe 共存。
-  - **Pipeline::SetPostProcessChain / SetMaterialSystem 是非拥有指针**：与 RenderableComponent 持 MaterialInstance\* 同思路。Pipeline 不接管 chain / system 的生命周期，调用方按 main 函数作用域管。
+  - `Modified: include/orange/engine/render/BuiltinMaterials.h` + `src/render/BuiltinMaterials.cpp`：新增 `BuiltinMaterials::LoadTextured`，复用现 `textured_mesh.vert/frag`，`uniforms` = uMVP push-constant，`textureSlots` = binding 0 SampledImage + 可选 binding 1 Sampler。
+  - `Modified: include/orange/engine/render/MaterialSystem.h` + `src/render/MaterialSystem.cpp`：`RegisterBuiltins` 同步注册 `textured` template，与 toon / rim_light 并列。
+  - `Modified: include/orange/engine/render/MaterialInstance.h` + `src/render/MaterialInstance.cpp`：增读回 API（`std::optional<glm::vec4> GetUniformVec4(name) const` / `AssetHandle<TextureAsset> GetTextureBinding(binding) const noexcept` 等），只暴露 Pipeline 路由要消费的类型，不把 `std::variant` 传染到公共面。
+  - `Modified: include/orange/engine/render/RenderableComponent.h`：`texture` 字段移除；新增 `Render::MaterialInstance* materialInstance{nullptr}`（非拥有）；保留 `mesh` + `visible`。
+  - `Modified: include/orange/engine/render/RenderScene.h` + `src/render/RenderScene.cpp`：`Drawable` 加 `Render::MaterialInstance* materialInstance{nullptr}`；`Collect` 同步带过去。
+  - `Modified: samples/03_textured_quad/main.cpp` + `samples/04_3d_mesh/main.cpp`：迁移到 `MaterialSystem(registry).RegisterBuiltins() + matSys.CreateInstance("textured")`；程序式生成 checker `TextureAsset` → `instance->SetTexture(0, handle)`；`world.AddComponent(e, RenderableComponent{mesh, instance.get()})`。
+  - `Modified: src/render/Pipeline.cpp`：路径接通——`drawable.materialInstance == nullptr` 时仍走原 hardcoded textured pipeline；非 null 时 Pipeline 内部本子任务仍走 hardcoded textured pipeline、不切 per-template 路径，保证视觉等价（per-template 路径下条 task 切）。
 - 验证方式：
-  1. cmake build 通过（新增 6 个 SPIR-V：bloom_downsample/up + tonemap × vert/frag = 6；加上 shadow 的 2 个 = 8 个新；toon/rim_light 4 个不变 = 总 12 个 .spv）；
-  2. `04_3d_mesh_with_bloom.exe` 启动后窗口内显示一个 toon 着色的旋转立方体，bloom + tonemap 视觉与 reference 截图（PR review 时附）一致；
-  3. 现有 ctest 12 个不退化（Task 04 的 13 + Task 05 的 14）+ install_smoke / config_smoke 不退化；
-  4. 现有 03_textured_quad / 04_3d_mesh sample 迁移到 MaterialInstance 路径后视觉等价——按现有 PR review 的截图对比验证。
-- 验收标准：上述 4 条 + 新 sample 在 PR 审核时附运行截图。Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 视觉基线达到"单 mesh + 后处理"水平；Task 07 起在此基础上加 shadow + multi-entity demo。
+  1. cmake build 通过；ctest 不退化；install_smoke / config_smoke 不退化；
+  2. `03_textured_quad.exe` / `04_3d_mesh.exe` 视觉与本 task 之前等价；
+  3. 新增最小单测：`tests/render/MaterialSchemaTest.cpp` 覆盖 `BuiltinMaterials::LoadTextured` + `MaterialInstance::GetUniformVec4 / GetTextureBinding` 读回正确性。
 - Critical Path：是
+
+###### Task 06.02 · Pipeline 路由：per-template `RhiPipeline` 缓存 ✅
+- 输出：
+  - `Modified: src/render/Pipeline.cpp`：核心改动——`std::unordered_map<const Material*, std::unique_ptr<Rhi::RHIPipeline>> mTemplatePipelines`；helper `GetOrCompilePipeline(const Material&)` 按 Material shader handle + uniform 布局组装 `GraphicsPipelineDesc`；drawable 提交按 `drawable.materialInstance->GetMaterial()` 路由；删除原 hardcoded textured pipeline + 内联 SPIR-V 加载——textured template 编出的 RhiPipeline 直接接管 sample 03/04。
+  - `Modified: src/render/Pipeline.cpp`：fallback——`drawable.materialInstance == nullptr` 时按 "无 instance 视为 textured 默认 instance" 走，从 MaterialSystem 拿 textured template 编出的 pipeline；MaterialSystem 未挂时 Pipeline 自己懒加载内置 textured，避免 sample 必须挂 MaterialSystem。
+- 验证方式：
+  1. cmake build 通过；ctest 不退化；
+  2. `03_textured_quad.exe` / `04_3d_mesh.exe` 视觉与 06.01 完成态等价（textured template pipeline 替代 hardcoded pipeline 后字节级一致）；
+  3. 新增 ctest：`tests/render/PipelineTemplateCacheTest.cpp` 覆盖 "同 Material 多 instance 只编一次 pipeline" + "不同 Material 编出独立 pipeline"。
+- Critical Path：是
+
+###### Task 06.03 · 双段 frame 流程：HDR off-screen + passthrough 收尾 ✅
+- 输出：
+  - `Proposed: src/render/builtin_shaders/fullscreen.vert.glsl` + `passthrough.frag.glsl`：big-triangle 全屏覆盖 + 采样 HDR view 写 swap-chain（无 tonemap）。
+  - `Modified: include/orange/engine/render/Pipeline.h`：追加 `void SetPostProcessChain(PostProcessChain*)` + `void SetMaterialSystem(MaterialSystem*)`（非拥有指针）。
+  - `Modified: src/render/Pipeline.cpp`：创建 / 销毁 / `OnResize` 重建 RGBA16F HDR target；`Render` 改双段——自管 cmd list 跑离屏主 pass + `SubmitCommandList` + `WaitIdle`；`renderer.BeginFrame` + `SubmitItem(passthrough fullscreen quad, mpDescriptorSets[0]=HDR-CIS-set)` + `renderer.EndFrame`。
+  - `Modified: include/orange/engine/render/IPostProcessPass.h`：`PostProcessSetupContext` 升级字段（`Renderer::IRenderer& renderer / Rhi::RHIDevice& device / Rhi::RHITextureView* hdrColor / Rhi::RHITextureView* swapchainColor`）；`PostProcessExecuteContext` 升级（同上 + `Rhi::RHICommandList& offscreenCmd / uint32_t frameIndex / Rhi::RHIDescriptorPool& sharedPool`）。子类 `Setup/Execute` 签名不破。
+  - `Modified: src/render/PostProcessPasses.cpp`：HdrPass 仍空 marker；其余 3 pass 仍空 stub——Bloom / Tonemap / LUT 真填内容由 06.04 / 06.05 上线。
+- 验证方式：
+  1. cmake build 通过（新增 2 个 SPIR-V：fullscreen.vert + passthrough.frag）；ctest 不退化；
+  2. `03_textured_quad.exe` / `04_3d_mesh.exe` 视觉与 06.02 完成态等价（HDR 中转无损 passthrough，clamp 在 [0,1] 时字节级一致）；
+  3. 新增 ctest：`tests/render/PipelineHdrTargetTest.cpp` 覆盖 HDR target 生命周期 + OnResize 重建；validation layer 静默。
+- Critical Path：是
+
+###### Task 06.04 · Bloom mip-chain（downsample + upsample）
+- 输出：
+  - `Proposed: src/render/builtin_shaders/bloom_downsample.vert.glsl` + `bloom_downsample.frag.glsl`：fullscreen + 13-tap 采样 + Karis 平均；mip0 跳应用 `BloomPass.threshold` 做 bright-pass。
+  - `Proposed: src/render/builtin_shaders/bloom_upsample.vert.glsl` + `bloom_upsample.frag.glsl`：fullscreen + 9-tap tent filter + add 上层结果。
+  - `Modified: src/render/Pipeline.cpp`：持 6 张独立 RGBA16F bloom mip texture + view；`OnResize` 重建；离屏段在主 pass 后追加 6 round downsample + 6 round upsample，每跳一对 BeginRendering/EndRendering。
+  - `Modified: src/render/PostProcessPasses.cpp`：`BloomPass::Setup` 声明 chain；本子任务决策 = Pipeline 直接拥有 bloom 资源 + 直接驱动 mip-chain 调度，pass 仅承载 `threshold / intensity` 给 push-constant，不在 Execute 里独立组装资源（避免 chain[1] 内部嵌一个子 chain 状态机）。
+  - `Modified: src/render/Pipeline.cpp`：passthrough 收尾改读 `HDR + bloom 末态` 两个 sampler 做 add；当 chain 不含 BloomPass 时仍走 06.03 的纯 HDR passthrough。
+- 验证方式：
+  1. cmake build 通过（新增 4 个 SPIR-V）；ctest 不退化；
+  2. 临时启用 BloomPass（在 sample 内 chain 注入）显示亮区光晕；sample 03/04 默认 chain 空时视觉等价；
+  3. 新增 ctest：`tests/render/BloomChainTest.cpp` 覆盖 bloom 6 张 mip 资源生命周期 + OnResize 同步重建。
+- Critical Path：是
+
+###### Task 06.05 · Tonemap + LUT bypass + 新 sample `04_3d_mesh_with_bloom`
+- 输出：
+  - `Proposed: src/render/builtin_shaders/tonemap.vert.glsl` + `tonemap.frag.glsl`：fullscreen + ACES Narkowicz fit，按 push-constant 喂 exposure。
+  - `Modified: src/render/PostProcessPasses.cpp`：`TonemapPass::Execute` 走 `IRenderer::SubmitItem` + `mpDescriptorSets[0]=HDR+bloom combined`；`LutPass::Execute` 当 `lut.IsValid() == false` → 直接早退；handle 有效路径仍 stub，Phase 6 真接 3D LUT 时再做。
+  - `Modified: src/render/Pipeline.cpp`：移除 06.03 临时 passthrough 收尾——chain 满载 Bloom + Tonemap 时由 TonemapPass 完成 swap-chain 写出；chain 为空 / 仅 HdrPass / 含 LutPass 但 lut handle 无效时 fallback 到 06.03 的 passthrough，保证调试 / 测试场景不退化。
+  - `Proposed: samples/04_3d_mesh_with_bloom/CMakeLists.txt` + `samples/04_3d_mesh_with_bloom/main.cpp`：与 04_3d_mesh 同骨架（World + Pipeline + MaterialSystem + PostProcessChain）；旋转立方体挂 toon `MaterialInstance`；chain = `BuiltinPostProcessChain::CreateDefault()` = HDR + Bloom + Tonemap + LUT(no-op)。
+  - `Modified: samples/CMakeLists.txt`：注册 `04_3d_mesh_with_bloom`。
+- 验证方式：
+  1. cmake build 通过（新增 2 个 SPIR-V：tonemap.vert + tonemap.frag；本 task 总新增 SPIR-V = 06.03 的 2 + 06.04 的 4 + 06.05 的 2 = 8 个）；
+  2. `04_3d_mesh_with_bloom.exe` 启动后窗口内显示一个 toon 着色的旋转立方体，bloom + tonemap 视觉与 reference 截图（PR review 时附）一致；
+  3. 现有 `03_textured_quad` / `04_3d_mesh` 行为不退化（chain 空 = passthrough）；
+  4. 现有 ctest 不退化 + install_smoke / config_smoke 不退化。
+- Critical Path：是
+
+##### 整体验收
+
+跨 5 子任务全部 ✅ 后视为 Task 06 完成：
+1. cmake build 通过（总新增 SPIR-V 8 个：fullscreen.vert + passthrough.frag + bloom_down/up × vert/frag = 4 + tonemap × vert/frag = 2，加 06.01 不新增 = 总 8）；
+2. `04_3d_mesh_with_bloom.exe` 视觉与 reference 截图一致；
+3. `03_textured_quad` / `04_3d_mesh` 在每个子任务节点视觉等价（中间状态硬约束）；
+4. ctest 总数增量 ≥ 4（schema / Pipeline cache / HDR target / bloom chain）；install_smoke / config_smoke 不退化；
+5. PR review 时按 5 子任务分别附运行截图。
+
+Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 视觉基线达到 "单 mesh + 后处理" 水平；Task 07 起在此基础上加 shadow + multi-entity demo。
+
+- Critical Path：是（伞节点；5 子任务全部 critical path）。
 
 #### Task 07：`samples/07_full_pipeline` 雏形（Pipeline 接通 shadow pass + multi-entity 综合演示）
 - 描述：把 Task 05 的 Light/Shadow 公共面接通 Pipeline——shadow render target（depth attachment）+ shadow pass（用 `BuiltinShadowShaders::LoadShadowCaster` 渲场景到 shadow map）+ 主 pass 加 light UBO + shadow sampler 描述符；toon / rim_light fragment shader 改为 `#include "include/shadow_pcf.glsl.inc"` 后乘 PCF 阴影系数。新增 sample `07_full_pipeline`：多 entity（≥3 个 mesh，分别挂 toon / rim_light / 一个 textured material）+ 一个 DirectionalLight + 完整 PostProcessChain，演示 Phase 3 视觉基线综合。
