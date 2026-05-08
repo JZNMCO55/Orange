@@ -42,6 +42,9 @@ class Window;
 namespace Orange::Engine::Render
 {
 
+class MaterialSystem;
+class PostProcessChain;
+
 class ORANGE_ENGINE_API Pipeline
 {
 public:
@@ -93,6 +96,19 @@ public:
     // 调一发"成为受支持的退化状态。
     void Render(::Orange::Engine::World& world);
 
+    // 安装 / 卸载 PostProcessChain（非拥有指针；nullptr 走 fallback：
+    // chain 缺失时 Pipeline 内置一条 passthrough fullscreen pass，把离
+    // 屏 HDR 直接采样到 swap-chain，与 06.02 完成态在 LDR 域字节级一致）。
+    // chain 必须活到 Pipeline 析构 / 下次 SetPostProcessChain 之前。
+    void SetPostProcessChain(PostProcessChain* chain) noexcept;
+
+    // 安装 / 卸载 MaterialSystem（非拥有指针）。当前阶段（06.02 / 06.03）
+    // Pipeline 不消费 system——drawable 直接持 MaterialInstance* 自己路
+    // 由；本接口预留给后续子任务（per-frame uniform / shadow descriptor
+    // 等需要 system 协作的路径）。nullptr 时 Pipeline 走 fallback：
+    // drawable.materialInstance == nullptr 时落到内置 textured Material。
+    void SetMaterialSystem(MaterialSystem* system) noexcept;
+
     // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
     // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material
     // 路由到一条 RHI Pipeline；同一 Material 多次出现只会编译一次。本
@@ -101,6 +117,12 @@ public:
     //
     // 未 Initialize / 尚未渲染过任何 drawable 时返回 0。
     std::size_t TemplatePipelineCount() const noexcept;
+
+    // 当前帧 HDR off-screen target 的尺寸。`width / height` 通过 out
+    // 参数返回；未 Initialize / 窗口最小化时两者都置 0。诊断 + ctest 用，
+    // 与 TemplatePipelineCount 同语义（轻量 introspection，未来 PipelineStats
+    // 落地时被替代）。
+    void GetHdrTargetSize(std::uint32_t& width, std::uint32_t& height) const noexcept;
 
 private:
     struct Impl;

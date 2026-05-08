@@ -32,6 +32,7 @@ orange_engine_add_test(material_system_test     render/MaterialSystemTest.cpp)
 orange_engine_add_test(light_and_shadow_test    render/LightAndShadowTest.cpp)
 orange_engine_add_test(material_schema_test     render/MaterialSchemaTest.cpp)
 orange_engine_add_test(pipeline_template_cache_test render/PipelineTemplateCacheTest.cpp)
+orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke
