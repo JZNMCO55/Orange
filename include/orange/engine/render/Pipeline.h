@@ -93,6 +93,15 @@ public:
     // 调一发"成为受支持的退化状态。
     void Render(::Orange::Engine::World& world);
 
+    // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
+    // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material
+    // 路由到一条 RHI Pipeline；同一 Material 多次出现只会编译一次。本
+    // 方法主要供 ctest 与诊断用——0.x 阶段允许这种轻量 introspection，
+    // 未来引入更正式的 PipelineStats 时会被它替代。
+    //
+    // 未 Initialize / 尚未渲染过任何 drawable 时返回 0。
+    std::size_t TemplatePipelineCount() const noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> mpImpl;
