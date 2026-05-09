@@ -36,13 +36,56 @@ orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.
 orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 
 # Animation：FSM + Backend Registry（Phase 4 / Task 01 公共接口）
+# + ProceduralAnimator 后端（Task 04，shader-uniform 驱动）
 orange_engine_add_test(animation_state_machine_test animation/AnimationStateMachineTest.cpp)
 orange_engine_add_test(animator_registry_test       animation/AnimatorRegistryTest.cpp)
+orange_engine_add_test(procedural_animator_test     animation/ProceduralAnimatorTest.cpp)
+
+# Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
+# 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path
+# 才能 include "animation/dragonbones/DragonBonesContext.h"——后者是
+# 引擎内部头（不在公共 include/ 下）。CLAUDE.md "Header isolation" 仍
+# 然成立：该测试**不**直接 #include <dragonBones/...>，runtime 头只
+# 通过 DragonBonesContext.cpp 单点引用。
+add_executable(dragonbones_runtime_smoke animation/DragonBonesRuntimeSmoke.cpp)
+target_link_libraries(dragonbones_runtime_smoke PRIVATE OrangeEngine::orange_engine)
+target_include_directories(dragonbones_runtime_smoke PRIVATE
+    "${CMAKE_SOURCE_DIR}/src"
+)
+orange_engine_set_compiler_options(dragonbones_runtime_smoke)
+add_test(NAME dragonbones_runtime_smoke COMMAND dragonbones_runtime_smoke)
+
+# Animation：SkeletalAnimator + SkeletonLoader 端到端（Phase 4 / Task 03）。
+# 测试用 vendor/DragonBones/Cocos2DX_3.x/Demos/Resources/bullet_01/ 内
+# 的 .json 作为已知曲线 fixture——通过 ORANGE_ENGINE_TEST_DATA_DIR 编
+# 译期注入路径。同样需要 src/ include 才能拿 DragonBonesContext。
+add_executable(skeletal_animator_test animation/SkeletalAnimatorTest.cpp)
+target_link_libraries(skeletal_animator_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(skeletal_animator_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(skeletal_animator_test PRIVATE
+    "ORANGE_ENGINE_TEST_DATA_DIR=\"${CMAKE_SOURCE_DIR}/vendor/DragonBones/Cocos2DX_3.x/Demos/Resources/bullet_01\""
+)
+orange_engine_set_compiler_options(skeletal_animator_test)
+add_test(NAME skeletal_animator_test COMMAND skeletal_animator_test)
 
 # Physics：World / RigidBody / Collider 公共接口（Phase 4 / Task 05）+
 # Box2D 后端步进语义验收（Phase 4 / Task 06，自由落体 / 地面碰撞 / 写读 transform）
+# + 运行时 collider 替换（Phase 4 / Task 07，半径 1 → 0.3 mass / 静止位置都跟变）
 orange_engine_add_test(physics_interface_test       physics/PhysicsInterfaceTest.cpp)
 orange_engine_add_test(box2d_step_test              physics/Box2DStepTest.cpp)
+orange_engine_add_test(fixture_replace_test         physics/FixtureReplaceTest.cpp)
+
+# Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）
+orange_engine_add_test(action_map_test         input/ActionMapTest.cpp)
+orange_engine_add_test(input_context_stack_test input/InputContextStackTest.cpp)
+target_compile_definitions(action_map_test PRIVATE
+    "ORANGE_ENGINE_INPUT_TEST_DATA_DIR=\"${CMAKE_SOURCE_DIR}/assets/configs\""
+)
+
+# Audio：AudioEngine init/shutdown smoke + SoundInstance 边界（Phase 4 / Task 09）
+orange_engine_add_test(audio_engine_smoke_test  audio/AudioEngineSmokeTest.cpp)
 
 # ---------------------------------------------------------------------------
 # install_smoke / config_smoke

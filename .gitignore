@@ -15,3 +15,4 @@ install/
 # `.gitmodules`). Build artifacts inside vendored sub-repos are ignored by
 # the sub-repo's own .gitignore, so we don't repeat them here.
 memory/
+screenshots/

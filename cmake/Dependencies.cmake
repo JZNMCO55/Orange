@@ -116,6 +116,19 @@ find_package(imgui CONFIG QUIET)
 # `${ORANGE_ENGINE_3RDPARTY_PREFIX}/include/`，消费它们的源码自行加
 # 本地 include 路径。
 
+# miniaudio：单头库，安装在 ${prefix}/include/miniaudio/miniaudio.h。
+# Audio 模块（Phase 4 / Task 09）走 find_path 在 CMAKE_PREFIX_PATH 上
+# 解析。仅 src/audio/miniaudio/** PRIVATE 消费，公共头零暴露。
+find_path(ORANGE_ENGINE_MINIAUDIO_INCLUDE_DIR
+    NAMES miniaudio/miniaudio.h
+    PATH_SUFFIXES include
+)
+if (NOT ORANGE_ENGINE_MINIAUDIO_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "OrangeEngine: 在 CMAKE_PREFIX_PATH 下没找到 miniaudio/miniaudio.h。"
+        " 请确认 3rdparty bootstrap 已经把 miniaudio 装到 install/include/。")
+endif ()
+
 # ---------------------------------------------------------------------------
 # 状态摘要
 # ---------------------------------------------------------------------------
@@ -128,6 +141,8 @@ message(STATUS "  glfw3           : found")
 message(STATUS "  spdlog gate     : ${ORANGE_ENGINE_WITH_SPDLOG}")
 message(STATUS "  tracy gate      : ${ORANGE_ENGINE_WITH_TRACY}")
 message(STATUS "  box2d           : found (${box2d_DIR})")
+message(STATUS "  DragonBones     : in-tree (vendor/DragonBones/DragonBones/src)")
+message(STATUS "  miniaudio       : found (${ORANGE_ENGINE_MINIAUDIO_INCLUDE_DIR})")
 if (TARGET imgui::imgui)
     message(STATUS "  imgui           : found")
 else ()

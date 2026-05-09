@@ -102,6 +102,27 @@ public:
     // 写入 body 线性速度。handle 无效 → no-op。
     void SetLinearVelocity(BodyHandle handle, glm::vec2 velocity);
 
+    // 原子地把 handle 对应 body 上的 collider 整体换成新 desc。
+    //   * 旧 shape（含 chain segment）全部销毁；
+    //   * 新 shape 按 collider 重新创建；
+    //   * dynamic body 的 mass 自动重算（从新形状 + density 推出）。
+    // 典型用法：角色变形 / 拾取大件物品 / 状态变身（"swallowing form"等）
+    //         需要 collider 中途切换的场景。
+    //
+    // 调用时点：必须在 Step() 之外（"逻辑阶段"），不要在物理子步中途调；
+    // Box2D 文档对此有同样要求。
+    //
+    // 返回 true 表示替换成功；handle 无效 / 新 shape 形态不合法（参考
+    // CreateShapeFor 失败原因）→ 返回 false，body 上的 shape 状态在失败
+    // 路径下"已清空但未重建"，此时 body 不参与任何碰撞——调用方需在
+    // 失败后 RemoveBody 或重新 ReplaceFixture 一次。
+    bool ReplaceFixture(BodyHandle handle, const ColliderComponent& collider);
+
+    // 读取 body 当前总质量（kg）。dynamic body 由 collider density × 形状
+    // 面积聚合而来；static / kinematic body 返回 0。handle 无效 → 返回 0。
+    // 主要用于诊断 / 单测验证 ReplaceFixture 是否真触发了 mass 重算。
+    float GetMass(BodyHandle handle) const noexcept;
+
     // 当前已注册 body 数（诊断 / 单测用）。
     std::size_t BodyCount() const noexcept;
 

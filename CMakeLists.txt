@@ -95,6 +95,33 @@ add_library(orange_engine STATIC
     # Procedural 后端实现见 src/animation/dragonbones / Task 03 / 04。
     src/animation/AnimationStateMachine.cpp
     src/animation/AnimatorRegistry.cpp
+    src/animation/ProceduralAnimator.cpp
+
+    # Animation：DragonBones runtime 接入层（Phase 4 / Task 02 + 03）。
+    # 这一组 .cpp 是 OrangeEngine 内唯一直接 include <dragonBones/...> 的
+    # 位置；runtime 自身的 .cpp 编进 orange_engine_dragonbones OBJECT 库
+    # 后随 orange_engine.lib 一同发布。
+    src/animation/dragonbones/DragonBonesContext.cpp
+    src/animation/dragonbones/HeadlessFactory.cpp
+    src/animation/dragonbones/SkeletonLoader.cpp
+    src/animation/dragonbones/SkeletalAnimator.cpp
+
+    # Asset：SkeletonAsset 值类型 dtor / 移动 / span helper（公共面，纯
+    # std 类型；无 dragonbones 依赖）。Loader 在 src/animation/dragonbones/。
+    src/asset/SkeletonAsset.cpp
+
+    # Input：ActionMap / InputContext + JSON loader（Phase 4 / Task 08）。
+    # nlohmann::json 通过 Core::JsonReader 间接消费——本 .cpp 不直接 include
+    # nlohmann，公共 input/ 头零暴露。
+    src/input/InputContext.cpp
+
+    # Audio：AudioEngine + SoundInstance（miniaudio 后端，Phase 4 / Task 09）。
+    # AudioEngine.cpp 是唯一 #define MINIAUDIO_IMPLEMENTATION 的 TU；
+    # miniaudio.h 仅在 src/audio/miniaudio/** 内出现（CLAUDE.md 不变量）。
+    # SoundLoader 不消费 miniaudio，但按任务约定放在 src/audio/miniaudio/ 内
+    # 与 audio 层共目录，便于日后做声音元数据探测。
+    src/audio/miniaudio/AudioEngine.cpp
+    src/audio/miniaudio/SoundLoader.cpp
 
     # Physics：PhysicsWorld / RigidBody / Collider 公共接口（Phase 4 / Task 05）
     # + Box2D 3.x 后端（Phase 4 / Task 06）。Box2D 头只在 src/physics/box2d/
@@ -289,6 +316,10 @@ target_include_directories(orange_engine
         # vendor/stb：单头实现（stb_image_write.h），仅 src/render 的截图
         # 路径消费——头不暴露到公共面，BUILD_INTERFACE only。
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb>"
+        # miniaudio：单头库，仅 src/audio/miniaudio/** PRIVATE 消费。路径
+        # 由 Dependencies.cmake 的 find_path 解出来；BUILD_INTERFACE only，
+        # install 端不发任何 miniaudio 头给消费者。
+        "$<BUILD_INTERFACE:${ORANGE_ENGINE_MINIAUDIO_INCLUDE_DIR}>"
 )
 
 # ---------------------------------------------------------------------------
@@ -323,6 +354,72 @@ target_link_libraries(orange_engine PRIVATE glfw)
 # Box2D 3.x：Physics 后端。PRIVATE，b2 类型只在 src/physics/box2d/ +
 # src/physics/PhysicsWorld.cpp 内出现，公共头零暴露。
 target_link_libraries(orange_engine PRIVATE box2d::box2d)
+
+# ---------------------------------------------------------------------------
+# DragonBones C++ runtime（Phase 4 / Task 02）——in-tree 源码集成
+#
+# DragonBones 上游没有 CMake config / 没有 find_package 端点。标准做法
+# 是把 vendor/DragonBones/DragonBones/src/dragonBones/ 这一支拉进自己
+# 的 build。这里走 OBJECT 库：
+#   * 源文件以 .obj 形式被 orange_engine.lib 吸收，消费者无需多链一
+#     个 lib，install 路径也只发 orange_engine.lib；
+#   * include 路径以 PUBLIC 暴露给本 OBJECT 库，再由 PRIVATE 链回
+#     orange_engine——`#include <dragonBones/...>` 在
+#     src/animation/dragonbones/DragonBonesContext.cpp 内就能解析，但
+#     不传播到 orange_engine 的公共 INTERFACE，更不传播到 install 端。
+#
+# 警告策略：runtime 是第三方 2018 期代码，按 /W4 + /WX 会爆出大量
+# old-style cast / signed-unsigned mismatch / unreferenced parameter——
+# 这些不是我们维护范围。OBJECT 库单独压成 /W0（GCC/Clang 用 -w），并
+# 显式不调 orange_engine_set_compiler_options（避免 /WX 把 runtime 编
+# 译炸掉）。
+# ---------------------------------------------------------------------------
+file(GLOB ORANGE_ENGINE_DRAGONBONES_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/animation/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/armature/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/core/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/event/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/factory/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/geom/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/model/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src/dragonBones/parser/*.cpp"
+)
+add_library(orange_engine_dragonbones OBJECT ${ORANGE_ENGINE_DRAGONBONES_SOURCES})
+target_include_directories(orange_engine_dragonbones PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/DragonBones/src>"
+    # rapidjson 是 DragonBones JSONDataParser 的强依赖——runtime 把
+    # rapidjson/document.h 直接 include 在 parser/JSONDataParser.h 里，
+    # 任何 include DragonBonesHeaders.h 的 TU（含 src/animation/
+    # dragonbones/DragonBonesContext.cpp）都会被传染。上游约定把它放
+    # 在 vendor/DragonBones/3rdParty/rapidjson/。
+    # BUILD_INTERFACE 内 PUBLIC：路径继承到 orange_engine 自身的编译，
+    # 但 install 端不继承（rapidjson 不发到 SDK，consumer 公共头从未引
+    # 用 rapidjson 类型）。
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/DragonBones/3rdParty>"
+)
+set_target_properties(orange_engine_dragonbones PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD              20
+    CXX_STANDARD_REQUIRED     ON
+    CXX_EXTENSIONS            OFF
+    FOLDER                    "Vendor"
+)
+if (MSVC)
+    # /W0 关警告；/utf-8 与父工程一致避免源码代码页警告；显式 /wd... 名单
+    # 仅在改 /W0 不够时才加。
+    target_compile_options(orange_engine_dragonbones PRIVATE /W0 /utf-8)
+else ()
+    target_compile_options(orange_engine_dragonbones PRIVATE -w)
+endif ()
+
+# OBJECT 库 → PRIVATE 链回 orange_engine：
+#   * 编出来的 .obj 拼到 orange_engine 静态归档里（消费者只需 .lib 一份）；
+#   * runtime 头的 PUBLIC include 路径继承到 orange_engine 自身的编译，
+#     允许 src/animation/dragonbones/*.cpp 解析 <dragonBones/...>；
+#   * 因为是 PRIVATE 链接 + BUILD_INTERFACE-only include，consumer 看不
+#     到 dragonBones 头，公共 API 表面不被污染。
+target_link_libraries(orange_engine PRIVATE orange_engine_dragonbones)
 
 if (ORANGE_ENGINE_WITH_SPDLOG)
     target_link_libraries(orange_engine PUBLIC spdlog::spdlog)
@@ -382,7 +479,13 @@ if (ORANGE_ENGINE_INSTALL)
     include(GNUInstallDirs)
     set(ORANGE_ENGINE_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/OrangeEngine")
 
-    install(TARGETS orange_engine
+    # orange_engine_dragonbones 也加进 export：它是 OBJECT 库，没有
+    # 独立 archive 产物（.obj 已被 orange_engine.lib 吸收），但 CMake
+    # 要求被 export 的 target 链到的所有 target 都在同一 export set 里。
+    # OBJECT 库进 install 不发任何文件，仅在 OrangeEngineTargets.cmake
+    # 里登记 target name；消费者拿 OrangeEngine::orange_engine 时不会
+    # 也无需直接看到这个 OBJECT target。
+    install(TARGETS orange_engine orange_engine_dragonbones
         EXPORT  OrangeEngineTargets
         ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"

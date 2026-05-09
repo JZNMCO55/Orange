@@ -64,6 +64,19 @@ public:
 
     bool Has(std::string_view path) const;
 
+    // 数组节点的元素个数。path 不存在 / 不指向数组 → 0。配合数字下标
+    // 路径段（"actions/0/name" 等）即可遍历对象数组：
+    //
+    //     for (std::size_t i = 0; i < r.ArraySize("actions"); ++i)
+    //     {
+    //         std::string name;
+    //         std::string key = "actions/" + std::to_string(i) + "/name";
+    //         r.ReadString(key, name);
+    //     }
+    //
+    // 路径分隔符仍然是 '/'；纯数字路径段在数组节点上当作下标。
+    std::size_t ArraySize(std::string_view path) const;
+
     // 严格读取——key 缺失或类型不对都返回 false。失败时不修改 out
     // 引用，因此调用方预先填好的默认值仍然保留。
     bool ReadBool(std::string_view path, bool& out) const;

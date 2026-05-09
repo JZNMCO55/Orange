@@ -43,6 +43,23 @@ std::vector<std::string_view> SplitPath(std::string_view path) noexcept
     return parts;
 }
 
+// 判 part 是不是纯数字（用作 JSON 数组下标）。空 string_view 返回 false。
+bool IsAllDigits(std::string_view part) noexcept
+{
+    if (part.empty())
+    {
+        return false;
+    }
+    for (char c : part)
+    {
+        if (c < '0' || c > '9')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 const Json* FindByPath(const Json& root, std::string_view path) noexcept
 {
     auto parts = SplitPath(path);
@@ -53,17 +70,35 @@ const Json* FindByPath(const Json& root, std::string_view path) noexcept
     const Json* node = &root;
     for (auto part : parts)
     {
-        if (!node->is_object())
+        if (node->is_object())
         {
+            std::string key{part};
+            auto it = node->find(key);
+            if (it == node->end())
+            {
+                return nullptr;
+            }
+            node = &(*it);
+        }
+        else if (node->is_array() && IsAllDigits(part))
+        {
+            // path 段是纯数字 → 当作数组下标。越界返 nullptr。
+            std::size_t idx = 0;
+            for (char c : part)
+            {
+                idx = idx * 10 + static_cast<std::size_t>(c - '0');
+            }
+            if (idx >= node->size())
+            {
+                return nullptr;
+            }
+            node = &(*node)[idx];
+        }
+        else
+        {
+            // node 不是 object 也不是数组（或数组但 part 非数字） → 路径无效。
             return nullptr;
         }
-        std::string key{part};
-        auto it = node->find(key);
-        if (it == node->end())
-        {
-            return nullptr;
-        }
-        node = &(*it);
     }
     return node;
 }
@@ -141,6 +176,16 @@ Result<JsonReader, ParseError> JsonReader::FromFile(std::string_view path)
 bool JsonReader::Has(std::string_view path) const
 {
     return FindByPath(mpImpl->root, path) != nullptr;
+}
+
+std::size_t JsonReader::ArraySize(std::string_view path) const
+{
+    const Json* node = FindByPath(mpImpl->root, path);
+    if (node == nullptr || !node->is_array())
+    {
+        return 0;
+    }
+    return node->size();
 }
 
 bool JsonReader::ReadBool(std::string_view path, bool& out) const

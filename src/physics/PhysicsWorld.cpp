@@ -223,6 +223,49 @@ void PhysicsWorld::SetLinearVelocity(BodyHandle handle, glm::vec2 velocity)
     b2Body_SetLinearVelocity(it->second, Box2DBridge::ToB2(velocity));
 }
 
+bool PhysicsWorld::ReplaceFixture(BodyHandle handle, const ColliderComponent& collider)
+{
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return false;
+    }
+    auto it = mpImpl->bodies.find(handle.Value());
+    if (it == mpImpl->bodies.end())
+    {
+        return false;
+    }
+    const b2BodyId bodyId = it->second;
+
+    // 顺序：先销毁旧 shape（updateBodyMass=false 让中间帧 mass 不抖动），
+    // 再创建新 shape，最后显式 ApplyMassFromShapes 把 mass / inertia
+    // 一次性算到位。
+    Box2DBridge::DestroyAllShapesOnBody(bodyId);
+    if (!Box2DBridge::CreateShapeFor(bodyId, collider))
+    {
+        // 失败：旧已清、新没建——body 上当前无 shape。调用方应判断返回值
+        // 决定是 RemoveBody 还是再试一次 ReplaceFixture。这里 ApplyMass 仍
+        // 调一次让 mass 归零（避免 dynamic body 残留旧 mass / inertia）。
+        b2Body_ApplyMassFromShapes(bodyId);
+        return false;
+    }
+    b2Body_ApplyMassFromShapes(bodyId);
+    return true;
+}
+
+float PhysicsWorld::GetMass(BodyHandle handle) const noexcept
+{
+    if (!mpImpl)
+    {
+        return 0.0f;
+    }
+    auto it = mpImpl->bodies.find(handle.Value());
+    if (it == mpImpl->bodies.end())
+    {
+        return 0.0f;
+    }
+    return b2Body_GetMass(it->second);
+}
+
 std::size_t PhysicsWorld::BodyCount() const noexcept
 {
     return mpImpl ? mpImpl->bodies.size() : 0;

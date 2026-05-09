@@ -1,0 +1,14 @@
+{
+    "schema_version": {
+        "namespace": "input.action_map",
+        "major": 1,
+        "minor": 0
+    },
+    "actions": [
+        { "name": "move_left",  "bindings": ["key:A", "key:Left"] },
+        { "name": "move_right", "bindings": ["key:D", "key:Right"] },
+        { "name": "jump",       "bindings": ["key:Space", "gamepad:South"] },
+        { "name": "attack",     "bindings": ["mouse:Left", "key:J"] },
+        { "name": "pause",      "bindings": ["key:Escape"] }
+    ]
+}

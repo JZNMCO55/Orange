@@ -2,7 +2,9 @@
 
 #include <box2d/collision.h>
 
+#include <algorithm>
 #include <variant>
+#include <vector>
 
 namespace Orange::Engine::Physics::Box2DBridge
 {
@@ -122,6 +124,69 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
             return false;  // 未知 alternative —— variant 完备性兜底
         }
     }, col.shape);
+}
+
+void DestroyAllShapesOnBody(b2BodyId bodyId)
+{
+    if (!B2_IS_NON_NULL(bodyId))
+    {
+        return;
+    }
+
+    // 第一步：枚举 shape，挑出归属 chain 的 segment，去重收集 b2ChainId。
+    // chain 持有自己的 segment shape，必须从 chain 入口销毁（直接 b2DestroyShape
+    // 一个 chain segment 是非法操作）。独立 shape（非 chain segment）单独清。
+    const int shapeCount = b2Body_GetShapeCount(bodyId);
+    if (shapeCount > 0)
+    {
+        std::vector<b2ShapeId> shapes(static_cast<std::size_t>(shapeCount));
+        const int gotShapes = b2Body_GetShapes(bodyId, shapes.data(), shapeCount);
+
+        std::vector<b2ChainId> chains;
+        chains.reserve(static_cast<std::size_t>(gotShapes));
+
+        for (int i = 0; i < gotShapes; ++i)
+        {
+            const b2ChainId cid = b2Shape_GetParentChain(shapes[static_cast<std::size_t>(i)]);
+            if (!B2_IS_NON_NULL(cid))
+            {
+                continue;
+            }
+            // 用 (index1, generation, world0) 三元组判等。b2 的 ID 都是值类型，
+            // 没有运算符，手动比较。
+            const auto same = [&cid](const b2ChainId& other) noexcept
+            {
+                return other.index1 == cid.index1
+                    && other.generation == cid.generation
+                    && other.world0 == cid.world0;
+            };
+            if (std::find_if(chains.begin(), chains.end(), same) == chains.end())
+            {
+                chains.push_back(cid);
+            }
+        }
+
+        // 先清 chain（连同它的 segment shape），再清剩余的独立 shape。
+        for (const b2ChainId& cid : chains)
+        {
+            b2DestroyChain(cid);
+        }
+    }
+
+    // 重新拉一遍剩余 shape——chain 销毁后这一遍只会剩独立 shape。
+    const int remaining = b2Body_GetShapeCount(bodyId);
+    if (remaining <= 0)
+    {
+        return;
+    }
+    std::vector<b2ShapeId> rest(static_cast<std::size_t>(remaining));
+    const int gotRest = b2Body_GetShapes(bodyId, rest.data(), remaining);
+    for (int i = 0; i < gotRest; ++i)
+    {
+        // updateBodyMass=false：销毁阶段不让 b2 中途算 mass，由 ReplaceFixture
+        // 调用方在新 shape 创建后统一 b2Body_ApplyMassFromShapes。
+        b2DestroyShape(rest[static_cast<std::size_t>(i)], /*updateBodyMass=*/false);
+    }
 }
 
 }  // namespace Orange::Engine::Physics::Box2DBridge

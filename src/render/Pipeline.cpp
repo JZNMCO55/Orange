@@ -309,6 +309,11 @@ struct Pipeline::Impl
     // 离屏 HDR scene color。每次 OnResize / 首帧前按 framebuffer extent
     // 重建。
     std::unique_ptr<Orange::Rhi::RHITexture> hdrColor;
+    // 主 pass 的 scene depth attachment——D32Float、跟 hdrColor 同生命
+    // 周期。没有它主 pass 会按 draw call 顺序覆盖（不做 depth test），重
+    // 叠几何只能"后绘者赢"，导致球 / plane 这类 z 重叠场景出现"前后错
+    // 乱"假象。Phase 4 / Task 11 收尾时补。
+    std::unique_ptr<Orange::Rhi::RHITexture> sceneDepth;
     std::uint32_t                            hdrWidth{0};
     std::uint32_t                            hdrHeight{0};
     bool                                     hdrLayoutShaderReadOnly{false};
@@ -523,11 +528,20 @@ struct Pipeline::Impl
         desc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
         desc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;
         desc.mRasterizer.mFrontFace   = Orange::Rhi::FrontFace::CounterClockwise;
-        desc.mDepthStencil.mDepthTestEnable  = false;
-        desc.mDepthStencil.mDepthWriteEnable = false;
+        // 主 pass 的 depth test：从 Phase 4 / Task 11 起接通 sceneDepth
+        // attachment。没有 depth test 时 z 重叠几何走"后绘者赢"——sample
+        // 06 那种 ball + plane 在 z=0 处贴合的场景就会出现"plane 误画在
+        // ball 前"的视觉错乱。
+        // CompareOp 用 LessOrEqual 与 OrangeRender 默认 viewport
+        // (minDepth=0, maxDepth=1) 一致——透视投影输出 z ∈ [0, 1]，越小
+        // 越近，"近的写在前"。
+        desc.mDepthStencil.mDepthTestEnable  = true;
+        desc.mDepthStencil.mDepthWriteEnable = true;
+        desc.mDepthStencil.mDepthCompareOp   = Orange::Rhi::CompareOp::LessOrEqual;
         desc.mColorBlend.mAttachments.push_back({});
         // 离屏 HDR 目标 = RGBA16F；与 BeginRendering 喂的 attachment 一致。
         desc.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        desc.mRenderTargets.mDepthStencilFormat = Orange::Rhi::TextureFormat::D32Float;
 
         // Task 07：所有 per-template pipeline 都声明 set 0 = main desc layout
         // （shadow sampler + light UBO）。textured fragment 不读这两个
@@ -682,6 +696,22 @@ struct Pipeline::Impl
         hdrHeight = pendingHeight;
         hdrLayoutShaderReadOnly = false;  // 新建出来层 = Undefined
         hdrDirty = false;
+
+        // 同步重建 scene depth：D32Float、跟 hdrColor 同 extent。每帧主
+        // pass 用它做 depth test + write，避免 z 重叠几何的"后绘者赢"假象。
+        Orange::Rhi::TextureDesc dt{};
+        dt.mWidth  = pendingWidth;
+        dt.mHeight = pendingHeight;
+        dt.mFormat = Orange::Rhi::TextureFormat::D32Float;
+        dt.mUsage  = Orange::Rhi::TextureUsage::DepthStencil;
+        auto newDepth = renderDevice->GetRhiDevice().CreateTexture(dt);
+        if (!newDepth)
+        {
+            ORANGE_LOG_ERROR("Pipeline: CreateTexture (scene depth) 失败 ({}x{} D32Float)",
+                             pendingWidth, pendingHeight);
+            return false;
+        }
+        sceneDepth = std::move(newDepth);
 
         // 把 descriptor set 指向新 view。
         Orange::Rhi::DescriptorWrite w{};
@@ -1258,6 +1288,7 @@ void Pipeline::Shutdown()
     impl.passthroughLayout.reset();
     impl.hdrSampler.reset();
     impl.hdrColor.reset();
+    impl.sceneDepth.reset();
     impl.captureBuffer.reset();
     impl.captureBufferCapacity = 0;
     impl.pendingCapturePath.reset();
@@ -1376,6 +1407,12 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
         : Orange::Rhi::TextureLayout::Undefined;
     cmd.TransitionTexture(*impl.hdrColor, fromLayout,
                           Orange::Rhi::TextureLayout::ColorAttachment);
+    // sceneDepth 每帧 transition 自 Undefined → DepthStencilAttachment（旧
+    // 内容直接丢）；本侧不让 depth 跨帧持久化——每帧 Clear 一次，几何
+    // 顺序无关性靠 depth test 保证。
+    cmd.TransitionTexture(*impl.sceneDepth,
+                          Orange::Rhi::TextureLayout::Undefined,
+                          Orange::Rhi::TextureLayout::DepthStencilAttachment);
 
     Orange::Rhi::ColorAttachment att{};
     att.mpView          = impl.hdrColor->GetDefaultView();
@@ -1386,10 +1423,17 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
     att.mClear.mColor[2] = 0.10f;
     att.mClear.mColor[3] = 1.0f;
 
+    Orange::Rhi::DepthStencilAttachment depthAtt{};
+    depthAtt.mpView        = impl.sceneDepth->GetDefaultView();
+    depthAtt.mDepthLoadOp  = Orange::Rhi::LoadOp::Clear;
+    depthAtt.mDepthStoreOp = Orange::Rhi::StoreOp::DontCare;   // depth 不跨帧消费
+    depthAtt.mClear.mDepth = 1.0f;                              // far plane
+
     Orange::Rhi::RenderingDesc rd{};
     rd.mRenderArea.mWidth  = impl.hdrWidth;
     rd.mRenderArea.mHeight = impl.hdrHeight;
     rd.mColorAttachments.push_back(att);
+    rd.mDepthStencil       = depthAtt;
 
     cmd.BeginRendering(rd);
 

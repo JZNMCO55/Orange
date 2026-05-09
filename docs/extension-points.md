@@ -311,7 +311,83 @@ world.AddComponent(entity, Animation::AnimatorComponent{ std::move(inst) });
 
 ---
 
-## 6. 模块按需启用（EngineConfig::modules）
+## 6. 自定义 Input 绑定（Phase 4 / Task 08 启用）
+
+### 设计思路
+游戏侧需要按自己的语义命名动作（"jump" / "shoot" / "dash"），并用配置文件而非代码定义键位绑定，让玩家 / QA 能改键不重编。引擎只提供"Action 状态机 + 物理事件路由 + JSON loader"骨架；具体动作清单全部由游戏 / 关卡 / UI 上下文决定。
+
+### JSON Schema（v1）
+```json
+{
+    "schema_version": {
+        "namespace": "input.action_map",
+        "major": 1,
+        "minor": 0
+    },
+    "actions": [
+        { "name": "move_left",  "bindings": ["key:A", "key:Left"] },
+        { "name": "jump",       "bindings": ["key:Space", "gamepad:South"] },
+        { "name": "attack",     "bindings": ["mouse:Left", "key:J"] },
+        { "name": "pause",      "bindings": ["key:Escape"] }
+    ]
+}
+```
+
+`bindings[]` 字符串语法：
+| 前缀 | 取值 |
+| --- | --- |
+| `key:<Name>` | `KeyCode` 枚举名（不区分大小写）：`Space` / `A`–`Z` / `Num0`–`Num9` / `F1`–`F12` / `Left` / `Right` / `Up` / `Down` / `Escape` / `Enter` / `Tab` / `Backspace` / `LeftShift` / `LeftControl` / `LeftAlt` / `RightShift` / `RightControl` / `RightAlt` / `Apostrophe` / `Comma` / `Minus` / `Period` / `Slash` / `Semicolon` / `Equal` 等 |
+| `mouse:<Button>` | `Left` / `Right` / `Middle` |
+| `gamepad:<Button>` | `South` / `East` / `West` / `North` / `LB` / `RB` / `Back` / `Start`（占位——Phase 4 / Task 08 内不消费 polling，绑定记录但不会触发；真正接通 GLFW gamepad polling 等后续 task） |
+
+`schema_version.namespace` 必须为 `"input.action_map"`，`major` 当前固定 1；major 升级走 schema 演化路径（额外 reader 实例 + migrator）。
+
+### 游戏侧使用
+```cpp
+#include <orange/engine/input/InputContext.h>
+
+// 加载配置 + 压栈
+auto map = Orange::Engine::Input::LoadActionMapFromFile(
+    "assets/configs/main_gameplay.actions.json");
+if (map.IsErr()) { /* fallback */ }
+ctx.Push(std::move(map.Value()));
+
+// 主循环：
+ctx.BeginFrame();                    // 推进栈顶状态机：Pressed→Held / Released→Idle
+// glfw key callback → ctx.PostKeyEvent(KeyCode::Space, isDown);
+//                     ctx.PostMouseButton(MouseButton::Left, isDown);
+
+const auto& top = *ctx.Top();
+if (Input::IsTriggered(top.GetState("jump"))) {
+    // 按下那一帧：开始跳跃
+}
+if (Input::IsHeld(top.GetState("move_right"))) {
+    // 持续按住：移动
+}
+```
+
+子语境（菜单 / 暂停）：
+```cpp
+auto pauseMap = LoadActionMapFromFile("assets/configs/pause_menu.actions.json").Value();
+ctx.Push(std::move(pauseMap));   // 主玩法 ActionMap 被冻结、不再收事件
+// ... 菜单交互 ...
+ctx.Pop();                       // 回到主玩法；Pop 自动 Reset 主玩法 map，避免按键卡住
+```
+
+### 约束
+- `Action` 当前类型只有 `Button`——`Axis` / `Vector2`（手柄摇杆 / 鼠标增量）留 Phase 5；游戏侧目前不要假定 Action 能承载连续值
+- `bindings` 内的字符串解析失败 / 整个 schema 缺 `schema_version` → loader 直接返回 `ResultCode::InvalidArgument`，不 silent fallback
+- 引擎**只**提供物理事件 → Action state 的路由；具体动作清单 / 上下文优先级由游戏侧定，引擎不引入 "Player" / "Boss" / "Inventory" 等具名上下文
+- `nlohmann::json` 不出现在 Input 任何模块——loader 透过 `Core::JsonReader` 间接消费（与 §7 数据驱动配置同一原则）
+
+### 游戏侧不应做的事
+- 不要绕过 `InputContext` 直接读 GLFW；把所有 key callback 都接到 `PostKeyEvent`，让一帧一次的状态机推进（`BeginFrame`）保留语义统一
+- 不要用 ActionMap 表达 "目录 / 菜单选择" 这类高频短暂上下文——为这些上下文 Push 一个独立 ActionMap，离开时 Pop，让"按键卡住"问题由栈语义自动消解
+- 不要假定同一 Action 的多 binding 之间有优先级——本期实现是"任一命中即触发"，多 binding 等价
+
+---
+
+## 7. 模块按需启用（EngineConfig::modules）
 
 ### 设计思路
 不是所有应用都需要全部模块。编辑器工具可能不需要 Audio；纯渲染 demo 可能不需要 Physics。让模块通过 flag 选择性启用。
@@ -358,7 +434,7 @@ Orange::Engine::AppHost app(cfg);
 
 ---
 
-## 7. 数据驱动配置
+## 8. 数据驱动配置
 
 ### Action 配置（Phase 4 启用）
 ```jsonc
@@ -396,7 +472,7 @@ JSON schema 化，schema_version 字段；引擎只反序列化内置组件，�
 
 ---
 
-## 8. Save Game 注册（Phase 5.5 启用）
+## 9. Save Game 注册（Phase 5.5 启用）
 
 ### 设计思路
 存档系统专门解决"玩家产出 + 跨引擎升级兼容"问题，与 Scene 序列化（关卡 content，跟随版本走）解耦。游戏侧手写每个可参与存档的 component 的 read/write 函数，注册到 `SaveGameRegistry`。引擎负责原子写入、CRC 校验、平台路径解析、跨版本 migrator 调度。

@@ -1,5 +1,83 @@
 # OrangeEngine 设计与实施规划
 
+## 目录
+
+- [Current State and Assumptions](#current-state-and-assumptions)
+  - [当前仓库状态](#当前仓库状态)
+  - [明确假设](#明确假设)
+  - [关键风险](#关键风险)
+- [Design Doc](#design-doc)
+  - [架构目标](#架构目标)
+  - [与 OrangeRender 的边界](#与-orangerender-的边界)
+  - [分层结构](#分层结构)
+  - [分层职责](#分层职责)
+  - [数据流](#数据流)
+  - [反射与序列化策略](#反射与序列化策略)
+  - [核心 API 边界](#核心-api-边界)
+  - [最小 API 草案](#最小-api-草案)
+  - [模块划分](#模块划分)
+  - [建议目录结构](#建议目录结构)
+  - [文件级起步建议](#文件级起步建议)
+- [Roadmap](#roadmap)
+  - [Phase 1：引擎骨架与最小可运行路径](#phase-1引擎骨架与最小可运行路径)
+  - [Phase 2：数据流贯通](#phase-2数据流贯通)
+  - [Phase 3：Ori 视觉基线 + 自定义 shader 接入](#phase-3ori-视觉基线--自定义-shader-接入)
+  - [Phase 4：可玩性](#phase-4可玩性)
+  - [Phase 5：生产化与游戏 fork 时机](#phase-5生产化与游戏-fork-时机)
+  - [Phase 5.5：Save Game 系统](#phase-55save-game-系统)
+  - [Phase 6+：长期演进](#phase-6长期演进)
+- [Task Breakdown](#task-breakdown)
+  - [Phase 1：引擎骨架与最小可运行路径](#phase-1引擎骨架与最小可运行路径-1)
+    - [Task 01：清理旧骨架并建立新目录结构 ✅](#task-01清理旧骨架并建立新目录结构-)
+    - [Task 02：建立顶层 CMake 与 `ORANGE_ENGINE_API` 宏机制 ✅](#task-02建立顶层-cmake-与-orange_engine_api-宏机制-)
+    - [Task 03：第三方依赖接入与 vendor submodule 化 ✅](#task-03第三方依赖接入与-vendor-submodule-化-)
+    - [Task 04：定义 Core 基础类型 ✅](#task-04定义-core-基础类型-)
+    - [Task 05：实现 Core 序列化原语与启动配置 ✅](#task-05实现-core-序列化原语与启动配置-)
+    - [Task 06：实现 Platform::Window ✅](#task-06实现-platformwindow-)
+    - [Task 07：定义 App 层（Layer / LayerStack / FrameContext） ✅](#task-07定义-app-层layer--layerstack--framecontext-)
+    - [Task 08：实现 AppHost 主循环 ✅](#task-08实现-apphost-主循环-)
+    - [Task 09：完成 `samples/01_minimal_window` ✅](#task-09完成-samples01_minimal_window-)
+    - [Task 10：建立测试入口 ✅](#task-10建立测试入口-)
+    - [Task 11：发布 install 与 `OrangeEngineConfig.cmake` ✅](#task-11发布-install-与-orangeengineconfigcmake-)
+  - [Phase 2：数据流贯通](#phase-2数据流贯通-1)
+    - [Task 01：定义 `Asset` 公共接口 ✅](#task-01定义-asset-公共接口-)
+    - [Task 02：实现 Mesh / Texture / Shader 三个内置 loader ✅](#task-02实现-mesh--texture--shader-三个内置-loader-)
+    - [Task 03：定义 Scene 公共接口（World / Entity / ISystem / Transform / Hierarchy） ✅](#task-03定义-scene-公共接口world--entity--isystem--transform--hierarchy-)
+    - [Task 04：实现 EnTT 包装（World 的后端） ✅](#task-04实现-entt-包装world-的后端-)
+    - [Task 05：定义 Render 模块公共接口（Camera / RenderableComponent / Pipeline） ✅](#task-05定义-render-模块公共接口camera--renderablecomponent--pipeline-)
+    - [Task 06：实现 RenderScene 收集（World → drawable list） ✅](#task-06实现-renderscene-收集world--drawable-list-)
+    - [Task 07：实现最小 Pipeline（接通 OrangeRender RenderGraph，绘制单个 mesh） ✅](#task-07实现最小-pipeline接通-orangerender-rendergraph绘制单个-mesh-)
+    - [Task 08：完成 `samples/02_ecs_basics`（实体/组件 CRUD） ✅](#task-08完成-samples02_ecs_basics实体组件-crud-)
+    - [Task 09：完成 `samples/03_textured_quad`（带贴图四边形） ✅](#task-09完成-samples03_textured_quad带贴图四边形-)
+    - [Task 10：完成 `samples/04_3d_mesh`（旋转 3D mesh，无 bloom） ✅](#task-10完成-samples04_3d_mesh旋转-3d-mesh无-bloom-)
+  - [Phase 3：Ori 视觉基线](#phase-3ori-视觉基线)
+    - [Task 01：定义 Material / MaterialInstance 公共接口 ✅](#task-01定义-material--materialinstance-公共接口-)
+    - [Task 02：MaterialTemplate 内置（卡通 + rim light） ✅](#task-02materialtemplate-内置卡通--rim-light-)
+    - [Task 03：PostProcessChain 接口与默认链（HDR → Bloom → Tonemap → LUT） ✅](#task-03postprocesschain-接口与默认链hdr--bloom--tonemap--lut-)
+    - [Task 04：MaterialSystem 自定义 shader 注入接口 ✅](#task-04materialsystem-自定义-shader-注入接口-)
+    - [Task 05：软阴影 LightComponent + ShadowConfig + 着色侧产物 ✅](#task-05软阴影-lightcomponent--shadowconfig--着色侧产物-)
+    - [Task 06：升级 `samples/04_3d_mesh_with_bloom` ✅](#task-06升级-samples04_3d_mesh_with_bloompipeline-接通-materialinstance--postprocesschain-真路径-)
+    - [Task 07：`samples/07_full_pipeline` 雏形 ✅](#task-07samples07_full_pipeline-雏形pipeline-接通-shadow-pass--multi-entity-综合演示-)
+    - [Task 08：自定义 shader sample ✅](#task-08自定义-shader-sample验证-materialsystemregistertemplate-扩展点-)
+  - [Phase 4：可玩性](#phase-4可玩性-1)
+    - [Task 01：Animation 公共接口 ✅](#task-01animation-公共接口ianimator--animationstatemachine--animatorregistry-)
+    - [Task 02：DragonBones C++ runtime 集成 ✅](#task-02dragonbones-c-runtime-集成srcanimationdragonbones-)
+    - [Task 03：SkeletalAnimator 实现 ✅](#task-03skeletalanimator-实现dragonbones-后端--matrix-palette-输出-)
+    - [Task 04：ProceduralAnimator 实现 ✅](#task-04proceduralanimator-实现shader-uniform-驱动-)
+    - [Task 05：Physics 公共接口 ✅](#task-05physics-公共接口physicsworld--rigidbody--collider-组件-)
+    - [Task 06：Box2D 3.x 集成 ✅](#task-06box2d-3x-集成srcphysicsbox2d-)
+    - [Task 07：Fixture 替换 API ✅](#task-07fixture-替换-api运行时碰撞器变形支持-)
+    - [Task 08：Input 模块 ✅](#task-08input-模块action--actionmap--inputcontext--json-加载-)
+    - [Task 09：Audio 模块 ✅](#task-09audio-模块miniaudio-集成-)
+    - [Task 10：`samples/05_skeletal_animation` + `samples/06_physics_platformer` ✅](#task-10samples05_skeletal_animation--samples06_physics_platformer-)
+    - [Task 11：`samples/07_full_pipeline` 升级为可玩 demo ✅](#task-11samples07_full_pipeline-升级为可玩-demoanimation--physics--input-综合-)
+  - [Phase 5：生产化](#phase-5生产化)
+  - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
+- [Self-Check](#self-check)
+- [后续篇章](#后续篇章)
+
+---
+
 ## Current State and Assumptions
 
 ### 当前仓库状态
@@ -1672,7 +1750,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 4 条 + AnimatorRegistry 公共面能注册一个"echo backend"（Tick 累计计数 / IsFinished 永假）单测过，证明扩展点字面可用。
 - Critical Path：是
 
-#### Task 02：DragonBones C++ runtime 集成（`src/animation/dragonbones/`）
+#### Task 02：DragonBones C++ runtime 集成（`src/animation/dragonbones/`） ✅
 - 描述：把 DragonBones C++ runtime（GitHub 上有官方 cpp port）按 in-tree 源码方式集成到 `src/animation/dragonbones/`，让本仓库的 build 能直接编它的 `.cpp`、链进 orange_engine。runtime 头不暴露到 `include/orange/engine/`——它的存在仅供 Task 03 SkeletalAnimator 消费。
 - 输入：Task 01（Animation 公共面）
 - 输出：
@@ -1694,7 +1772,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 3 条 + runtime 与 orange_engine 一同安装成功（installed lib 能跑 install_smoke）。
 - Critical Path：是
 
-#### Task 03：SkeletalAnimator 实现（DragonBones 后端 + matrix palette 输出）
+#### Task 03：SkeletalAnimator 实现（DragonBones 后端 + matrix palette 输出） ✅
 - 描述：实现 IAnimator 的 SkeletalAnimator 后端：`SkeletalAnimator(SkeletonAsset, ArmatureName)` 构造；`Tick(dt)` 推进 DragonBones armature 动画；`Pose() const` 返回 `std::span<const glm::mat4>` matrix palette（per-joint world transform）；`Play(animName, fadeIn)` API。SkeletonAsset 由 AssetRegistry 加载 .json + .dbbin（DragonBones 双文件资源）。Render 模块在 Phase 4 内**先不接** matrix palette 进 vertex shader——Task 03 范围只到 CPU 端 pose 计算正确，渲染端把 palette 上传 GPU + skinning vertex shader 留 Phase 6 / 配合 Material UBO 完整化。
 - 输入：Task 01 / Task 02
 - 输出：
@@ -1717,7 +1795,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 4 条。
 - Critical Path：是
 
-#### Task 04：ProceduralAnimator 实现（shader uniform 驱动）
+#### Task 04：ProceduralAnimator 实现（shader uniform 驱动） ✅
 - 描述：实现 IAnimator 的 ProceduralAnimator 后端：通过若干 `Channel<T>(name, fn)` 把"时间 → uniform 值"的曲线 / 噪声驱动函数挂到 MaterialInstance 上——每 Tick 调用 fn(elapsedTime) 算出当前值，调 `MaterialInstance::SetUniform(name, value)`。这是"史莱姆 noise 振幅 / dissolve 进度"这类 procedural shader 效果的基础。**重要**：本路径**依赖 Material UBO 让 SetUniform 真接通到 push-constant**——但 Phase 4 阶段 Material UBO 还没上线（Phase 6 落地），Task 04 在本期只做 CPU 端"算出值并存进 MaterialInstance 内表"，能否真出现在 GPU shader 等 Material UBO 上线。本期 ctest 验证 SetUniform 调用计数即可。
 - 输入：Task 01；MaterialInstance（Phase 3 已落）
 - 输出：
@@ -1783,7 +1861,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 4 条。
 - Critical Path：是
 
-#### Task 07：Fixture 替换 API（运行时碰撞器变形支持）
+#### Task 07：Fixture 替换 API（运行时碰撞器变形支持） ✅
 - 描述：在 PhysicsWorld 加 `ReplaceFixture(BodyHandle, ColliderDesc)`：原子地把已挂在 body 上的 collider 换成新 desc——这是史莱姆"swallowing boss form"路径上"角色形状中途变化"的 must-have 入口（虽是首游戏需求，但**接口本身是引擎中性的**——任何 2D 平台跳跃在变形 / 拾取大件物品 / 状态变身时都会用到，不算游戏特化）。
 - 输入：Task 06
 - 输出：
@@ -1801,7 +1879,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 2 条。
 - Critical Path：否（首游戏会用，但 Phase 4 sample 不展示——留 Task 11 综合 demo 时再展示）
 
-#### Task 08：Input 模块（Action / ActionMap / InputContext + JSON 加载）
+#### Task 08：Input 模块（Action / ActionMap / InputContext + JSON 加载） ✅
 - 描述：交付 Input 模块：`Action`（trigger 类型 + dead zone 等）+ `ActionMap`（Action 列表，按名查 / 按物理 binding 触发）+ `InputContext`（栈式上下文，暂存 ActionMap + 优先级；UI / 菜单切到不同 context 不打扰主玩法）。底层走 GLFW 原生 key / mouse / gamepad 事件。`*.actions.json` 加载 ActionMap 描述。
 - 输入：Phase 1 / 2 已落 Window 与 GLFW
 - 输出：
@@ -1825,7 +1903,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 3 条 + extension-points.md 加 §5：Custom Input bindings（说明 JSON schema + 游戏侧自加 actions 的路径）。
 - Critical Path：是
 
-#### Task 09：Audio 模块（miniaudio 集成）
+#### Task 09：Audio 模块（miniaudio 集成） ✅
 - 描述：把 miniaudio（单头库）集成到 `src/audio/miniaudio/`，公共面 `AudioEngine`（init / shutdown）+ `Sound`（资源句柄）+ `SoundInstance`（播放控制：Play / Pause / Stop / SetVolume）。`SoundAsset` 通过 AssetRegistry 加载（wav / mp3 / flac，走 miniaudio 内置 decoder）。
 - 输入：Phase 1 Asset / 2 Core
 - 输出：
@@ -1850,7 +1928,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 3 条。
 - Critical Path：是
 
-#### Task 10：`samples/05_skeletal_animation` + `samples/06_physics_platformer`
+#### Task 10：`samples/05_skeletal_animation` + `samples/06_physics_platformer` ✅
 - 描述：交付两个 sample：`05_skeletal_animation` 加载 DragonBones 官方测试资源（如 mecha_1002_101d 或类似 free demo skeleton）、Play 一个 walk anim、屏幕上看到骨骼带蒙皮 mesh 动起来；`06_physics_platformer` 一个 dynamic ball 受重力下落、撞到 plane 反弹 / 滑动，DirectionalLight + 完整 PostProcessChain 沿用 sample 07/08 视觉基线。
 - 输入：Task 03（SkeletalAnimator）/ Task 06（Box2D）/ Phase 3 视觉基线
 - 输出：
@@ -1871,7 +1949,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 4 条。
 - Critical Path：是
 
-#### Task 11：`samples/07_full_pipeline` 升级为可玩 demo（Animation + Physics + Input 综合）
+#### Task 11：`samples/07_full_pipeline` 升级为可玩 demo（Animation + Physics + Input 综合） ✅
 - 描述：把 sample 07_full_pipeline 升级：把 cube 换成"由骨骼动画驱动的 mecha + Box2D dynamic body"，键盘 A/D 走（InputContext + ActionMap）、空格跳；DirectionalLight + shadow + bloom 全保留。**这条是 Phase 4 收尾里程碑**——证明 Animation + Physics + Input 在 Phase 3 视觉基线上能合得起来。
 - 输入：Task 03 / 06 / 07 / 08 / 09
 - 输出：
