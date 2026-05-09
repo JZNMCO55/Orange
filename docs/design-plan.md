@@ -74,7 +74,7 @@
   - [Phase 5：生产化](#phase-5生产化)
     - [Task 01a：Scene 序列化骨架 + Transform/Hierarchy/Name 三件套 ✅](#task-01ascene-序列化骨架--transformhierarchyname-三件套-)
     - [Task 01b：Renderable / Camera / Light 组件序列化 ✅](#task-01brenderable--camera--light-组件序列化-)
-    - [Task 01c：RigidBody / Collider / Animator 组件序列化](#task-01crigidbody--collider--animator-组件序列化)
+    - [Task 01c：RigidBody / Collider / Animator 组件序列化 ✅](#task-01crigidbody--collider--animator-组件序列化-)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -2045,7 +2045,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：渲染类组件能完整 round-trip；scene 文件可被人工编辑器（VSCode）改 mesh path 后重新加载生效。
 - Critical Path：是
 
-#### Task 01c：RigidBody / Collider / Animator 组件序列化
+#### Task 01c：RigidBody / Collider / Animator 组件序列化 ✅
 - 描述：把涉及 backend 句柄的组件接入。**关键区分**：本 task 序列化的是关卡 content（"实体出生时的初始状态"），**不是**玩家当前的运行时状态——后者归 Phase 5.5 Save Game。Load 时按 desc 重新构造 backend 资源（Box2D body / DragonBones armature / shader uniform set），不持久化运行时句柄。
 - 输入：Phase 5 / Task 01b
 - 输出（Proposed）：

@@ -7,8 +7,14 @@
 //   * schemaVersion 缺失 / mismatch → 拒绝读，World 保持原状
 //   * 损坏 JSON → 拒绝读，World 保持原状
 
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/AnimatorRegistry.h>
+#include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/PhysicsWorld.h>
+#include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
@@ -29,8 +35,19 @@
 using Orange::Engine::Entity;
 using Orange::Engine::ResultCode;
 using Orange::Engine::World;
+using Orange::Engine::Animation::AnimatorComponent;
+using Orange::Engine::Animation::AnimatorRegistry;
+using Orange::Engine::Animation::IAnimator;
 using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::MeshAsset;
+using Orange::Engine::Physics::BodyType;
+using Orange::Engine::Physics::BoxDesc;
+using Orange::Engine::Physics::CircleDesc;
+using Orange::Engine::Physics::ColliderComponent;
+using Orange::Engine::Physics::EdgeChainDesc;
+using Orange::Engine::Physics::PhysicsWorld;
+using Orange::Engine::Physics::PolygonDesc;
+using Orange::Engine::Physics::RigidBodyComponent;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Scene::HierarchyComponent;
@@ -396,7 +413,9 @@ void TestRenderableRoundTripWithRegistry()
     r.castsShadow = false;
     source.AddComponent(e, r);
 
-    auto saveResult = SceneSerialization::Save(source, path.string(), &srcReg);
+    auto saveResult = SceneSerialization::Save(
+        source, path.string(),
+        SceneSerialization::SaveOptions{.assetRegistry = &srcReg});
     assert(saveResult.IsOk());
 
     // Load 端用一个新的 registry——验证"路径 → 重新 Insert"链路。
@@ -407,7 +426,9 @@ void TestRenderableRoundTripWithRegistry()
     (void)preloaded;
 
     World loaded;
-    auto loadResult = SceneSerialization::Load(path.string(), loaded, &dstReg);
+    auto loadResult = SceneSerialization::Load(
+        path.string(), loaded,
+        SceneSerialization::LoadOptions{.assetRegistry = &dstReg});
     assert(loadResult.IsOk());
     assert(loaded.Size() == 1);
 
@@ -452,13 +473,13 @@ void TestRenderableWithoutRegistryGraceful()
     source.AddComponent(e, r);
 
     // Save 不传 registry → mesh 字段写空 path（warn）；scene 仍能保存。
-    auto saveResult = SceneSerialization::Save(source, path.string(), nullptr);
+    auto saveResult = SceneSerialization::Save(source, path.string());
     assert(saveResult.IsOk());
 
     // Load 不传 registry → 即使 path 被写空也照常 attach RenderableComponent，
     // 只是 handle 留空。pure-data 字段（visible / castsShadow）不受影响。
     World loaded;
-    auto loadResult = SceneSerialization::Load(path.string(), loaded, nullptr);
+    auto loadResult = SceneSerialization::Load(path.string(), loaded);
     assert(loadResult.IsOk());
     assert(loaded.Size() == 1);
 
@@ -525,6 +546,297 @@ void TestDirectionalLightRoundTrip()
     std::fprintf(stdout, "  [PASS] directional light round-trip\n");
 }
 
+// ---------------------------------------------------------------------------
+// Backend-dependent components 测试辅助
+// ---------------------------------------------------------------------------
+
+// 一个最小 IAnimator 桩 backend——验证 AnimatorRegistry::Create 路径被
+// 触发就足够。无需接 DragonBones / ProceduralAnimator 真实现。
+class StubAnimator final : public IAnimator
+{
+public:
+    explicit StubAnimator(std::string_view name) : mBackendName{std::string{name}} {}
+    void             Tick(float) override {}
+    bool             IsFinished() const noexcept override { return false; }
+    std::string_view BackendName() const noexcept override { return mBackendName; }
+private:
+    std::string mBackendName;
+};
+
+void TestRigidBodyColliderRoundTripWithPhysicsWorld()
+{
+    const auto path = MakeTempScenePath("rigidbody_collider");
+
+    World source;
+    Entity e = source.CreateEntity();
+
+    RigidBodyComponent rb;
+    rb.type             = BodyType::Dynamic;
+    rb.initialPosition  = {3.0f, 4.0f};
+    rb.initialAngle     = 0.5f;
+    rb.linearDamping    = 0.1f;
+    rb.angularDamping   = 0.05f;
+    rb.fixedRotation    = true;
+    rb.gravityScale     = 0.8f;
+    source.AddComponent(e, rb);
+
+    ColliderComponent col;
+    col.shape       = CircleDesc{2.5f, glm::vec2{0.1f, -0.2f}};
+    col.density     = 1.5f;
+    col.friction    = 0.4f;
+    col.restitution = 0.2f;
+    col.isSensor    = false;
+    source.AddComponent(e, col);
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    World loaded;
+    PhysicsWorld pw;
+    auto loadResult = SceneSerialization::Load(
+        path.string(), loaded,
+        SceneSerialization::LoadOptions{.physicsWorld = &pw});
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+    assert(pw.BodyCount() == 1);
+
+    auto& reg = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<RigidBodyComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+
+    const auto* loadedRb = loaded.GetComponent<RigidBodyComponent>(loadedE);
+    assert(loadedRb != nullptr);
+    assert(loadedRb->type == BodyType::Dynamic);
+    assert(FloatEq(loadedRb->initialPosition.x, 3.0f));
+    assert(FloatEq(loadedRb->initialPosition.y, 4.0f));
+    assert(FloatEq(loadedRb->initialAngle, 0.5f));
+    assert(FloatEq(loadedRb->linearDamping, 0.1f));
+    assert(FloatEq(loadedRb->angularDamping, 0.05f));
+    assert(loadedRb->fixedRotation == true);
+    assert(FloatEq(loadedRb->gravityScale, 0.8f));
+    // PhysicsWorld 提供 → handle 应被反写为有效。
+    assert(loadedRb->handle.IsValid());
+    assert(pw.IsValid(loadedRb->handle));
+
+    const auto* loadedCol = loaded.GetComponent<ColliderComponent>(loadedE);
+    assert(loadedCol != nullptr);
+    assert(std::holds_alternative<CircleDesc>(loadedCol->shape));
+    const auto& circle = std::get<CircleDesc>(loadedCol->shape);
+    assert(FloatEq(circle.radius, 2.5f));
+    assert(FloatEq(circle.center.x, 0.1f));
+    assert(FloatEq(circle.center.y, -0.2f));
+    assert(FloatEq(loadedCol->density, 1.5f));
+    assert(FloatEq(loadedCol->friction, 0.4f));
+    assert(FloatEq(loadedCol->restitution, 0.2f));
+    assert(loadedCol->isSensor == false);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] rigidbody+collider round-trip with PhysicsWorld\n");
+}
+
+void TestRigidBodyColliderWithoutPhysicsWorldGraceful()
+{
+    const auto path = MakeTempScenePath("physics_no_world");
+
+    World source;
+    Entity e = source.CreateEntity();
+    source.AddComponent(e, RigidBodyComponent{.type = BodyType::Static,
+                                              .initialPosition = {1.0f, 2.0f}});
+    ColliderComponent col;
+    col.shape = BoxDesc{glm::vec2{1.0f, 0.5f}, glm::vec2{0.0f, 0.0f}};
+    source.AddComponent(e, col);
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    // 无 PhysicsWorld → desc 仍 attach 但 backend body 不建立。
+    World loaded;
+    auto loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto& reg = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<RigidBodyComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+    const auto* loadedRb = loaded.GetComponent<RigidBodyComponent>(loadedE);
+    assert(loadedRb != nullptr);
+    assert(loadedRb->type == BodyType::Static);
+    assert(!loadedRb->handle.IsValid());  // 无 PhysicsWorld → handle 留空
+    const auto* loadedCol = loaded.GetComponent<ColliderComponent>(loadedE);
+    assert(loadedCol != nullptr);
+    assert(std::holds_alternative<BoxDesc>(loadedCol->shape));
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] rigidbody+collider graceful when no PhysicsWorld\n");
+}
+
+void TestPolygonAndEdgeChainShapesRoundTrip()
+{
+    const auto path = MakeTempScenePath("polygon_edge");
+
+    World source;
+
+    // entity 0：Polygon（3 顶点）
+    Entity ePoly = source.CreateEntity();
+    source.AddComponent<NameComponent>(ePoly, {"poly"});
+    source.AddComponent(ePoly, RigidBodyComponent{.type = BodyType::Static});
+    {
+        ColliderComponent col;
+        PolygonDesc poly;
+        poly.count = 3;
+        poly.vertices[0] = {0.0f, 0.0f};
+        poly.vertices[1] = {1.0f, 0.0f};
+        poly.vertices[2] = {0.0f, 1.0f};
+        col.shape = poly;
+        col.density = 2.0f;
+        source.AddComponent(ePoly, col);
+    }
+
+    // entity 1：EdgeChain（4 顶点，loop）
+    Entity eChain = source.CreateEntity();
+    source.AddComponent<NameComponent>(eChain, {"chain"});
+    source.AddComponent(eChain, RigidBodyComponent{.type = BodyType::Static});
+    {
+        ColliderComponent col;
+        EdgeChainDesc chain;
+        chain.count = 4;
+        chain.vertices[0] = {-1.0f, 0.0f};
+        chain.vertices[1] = { 1.0f, 0.0f};
+        chain.vertices[2] = { 1.0f, 1.0f};
+        chain.vertices[3] = {-1.0f, 1.0f};
+        chain.isLoop = true;
+        col.shape = chain;
+        source.AddComponent(eChain, col);
+    }
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    World loaded;
+    PhysicsWorld pw;
+    auto loadResult = SceneSerialization::Load(
+        path.string(), loaded,
+        SceneSerialization::LoadOptions{.physicsWorld = &pw});
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 2);
+
+    // 按 Name 反向定位。
+    auto& reg = loaded.Registry();
+    Entity polyE = Entity::Invalid();
+    Entity chainE = Entity::Invalid();
+    for (auto ent : reg.view<NameComponent>())
+    {
+        const auto& nc = reg.get<NameComponent>(ent);
+        if      (nc.name == "poly")  polyE  = World::FromEntt(ent);
+        else if (nc.name == "chain") chainE = World::FromEntt(ent);
+    }
+    assert(polyE.IsValid() && chainE.IsValid());
+
+    const auto* polyCol = loaded.GetComponent<ColliderComponent>(polyE);
+    assert(polyCol != nullptr);
+    assert(std::holds_alternative<PolygonDesc>(polyCol->shape));
+    const auto& poly = std::get<PolygonDesc>(polyCol->shape);
+    assert(poly.count == 3);
+    assert(FloatEq(poly.vertices[2].y, 1.0f));
+
+    const auto* chainCol = loaded.GetComponent<ColliderComponent>(chainE);
+    assert(chainCol != nullptr);
+    assert(std::holds_alternative<EdgeChainDesc>(chainCol->shape));
+    const auto& chain = std::get<EdgeChainDesc>(chainCol->shape);
+    assert(chain.count == 4);
+    assert(chain.isLoop == true);
+    assert(FloatEq(chain.vertices[3].x, -1.0f));
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] polygon + edge-chain shape round-trip\n");
+}
+
+void TestAnimatorBackendNameRoundTrip()
+{
+    const auto path = MakeTempScenePath("animator");
+
+    World source;
+    Entity e = source.CreateEntity();
+    AnimatorComponent ac;
+    ac.animator = std::make_unique<StubAnimator>("test_stub");
+    source.AddComponent(e, std::move(ac));
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    // 注册同名 backend factory，让 Load 能 Create 出 IAnimator 实例。
+    AnimatorRegistry animReg;
+    auto regResult = animReg.RegisterBackend(
+        "test_stub", []() -> std::unique_ptr<IAnimator> {
+            return std::make_unique<StubAnimator>("test_stub");
+        });
+    assert(regResult.IsOk());
+
+    World loaded;
+    auto loadResult = SceneSerialization::Load(
+        path.string(), loaded,
+        SceneSerialization::LoadOptions{.animatorRegistry = &animReg});
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto& reg = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<AnimatorComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+    const auto* loadedAc = loaded.GetComponent<AnimatorComponent>(loadedE);
+    assert(loadedAc != nullptr);
+    assert(loadedAc->animator != nullptr);
+    assert(loadedAc->animator->BackendName() == "test_stub");
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] animator backend name round-trip\n");
+}
+
+void TestAnimatorWithoutRegistryGraceful()
+{
+    const auto path = MakeTempScenePath("animator_no_registry");
+
+    World source;
+    Entity e = source.CreateEntity();
+    AnimatorComponent ac;
+    ac.animator = std::make_unique<StubAnimator>("test_stub");
+    source.AddComponent(e, std::move(ac));
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    // 不传 registry → component attach 但 animator unique_ptr 留 nullptr。
+    World loaded;
+    auto loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto& reg = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<AnimatorComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+    const auto* loadedAc = loaded.GetComponent<AnimatorComponent>(loadedE);
+    assert(loadedAc != nullptr);
+    assert(loadedAc->animator == nullptr);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] animator graceful when no AnimatorRegistry supplied\n");
+}
+
 }  // namespace
 
 int main()
@@ -540,6 +852,11 @@ int main()
     TestRenderableRoundTripWithRegistry();
     TestRenderableWithoutRegistryGraceful();
     TestDirectionalLightRoundTrip();
+    TestRigidBodyColliderRoundTripWithPhysicsWorld();
+    TestRigidBodyColliderWithoutPhysicsWorldGraceful();
+    TestPolygonAndEdgeChainShapesRoundTrip();
+    TestAnimatorBackendNameRoundTrip();
+    TestAnimatorWithoutRegistryGraceful();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
     return 0;
 }

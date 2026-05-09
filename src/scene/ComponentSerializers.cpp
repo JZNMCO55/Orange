@@ -11,10 +11,14 @@
 
 #include "scene/ComponentSerializers.h"
 
+#include "orange/engine/animation/AnimatorComponent.h"
+#include "orange/engine/animation/IAnimator.h"
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/asset/MeshAsset.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Serialization.h"
+#include "orange/engine/physics/ColliderComponent.h"
+#include "orange/engine/physics/RigidBodyComponent.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/scene/HierarchyComponent.h"
@@ -25,6 +29,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <variant>
+#include <vector>
 
 namespace Orange::Engine::Scene
 {
@@ -425,16 +431,432 @@ bool ReadDirectionalLight(const JsonReader& reader,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// RigidBodyComponent
+//
+// 序列化 body 的"初始 desc"——type / initialPosition / initialAngle /
+// 阻尼 / fixedRotation / gravityScale。**不**写运行时 velocity / 当前
+// transform / handle——那些属于"runtime player state"，由 Save Game
+// 子系统单独处理。
+//
+// Load 路径不在这里 attach component：见 SceneSerialization Pass 2。
+// ---------------------------------------------------------------------------
+
+const char* BodyTypeToString(Physics::BodyType type) noexcept
+{
+    switch (type)
+    {
+    case Physics::BodyType::Static:    return "Static";
+    case Physics::BodyType::Kinematic: return "Kinematic";
+    case Physics::BodyType::Dynamic:   return "Dynamic";
+    }
+    return "Dynamic";
+}
+
+bool BodyTypeFromString(std::string_view s, Physics::BodyType& out)
+{
+    if      (s == "Static")    { out = Physics::BodyType::Static;    return true; }
+    else if (s == "Kinematic") { out = Physics::BodyType::Kinematic; return true; }
+    else if (s == "Dynamic")   { out = Physics::BodyType::Dynamic;   return true; }
+    return false;
+}
+
+bool HasRigidBody(const World& world, Entity entity)
+{
+    return world.HasComponent<Physics::RigidBodyComponent>(entity);
+}
+
+void WriteRigidBody(JsonWriter& writer,
+                    std::string_view componentPath,
+                    Entity entity,
+                    const SaveContext& ctx)
+{
+    const auto* rb = ctx.world.GetComponent<Physics::RigidBodyComponent>(entity);
+    if (rb == nullptr)
+    {
+        return;
+    }
+
+    writer.WriteString(Join(componentPath, "type"), BodyTypeToString(rb->type));
+
+    const float pos[2] = {rb->initialPosition.x, rb->initialPosition.y};
+    writer.WriteFloatArray(Join(componentPath, "initialPosition"), pos, 2);
+    writer.WriteFloat(Join(componentPath, "initialAngle"),    rb->initialAngle);
+
+    writer.WriteFloat(Join(componentPath, "linearDamping"),   rb->linearDamping);
+    writer.WriteFloat(Join(componentPath, "angularDamping"),  rb->angularDamping);
+    writer.WriteBool( Join(componentPath, "fixedRotation"),   rb->fixedRotation);
+    writer.WriteFloat(Join(componentPath, "gravityScale"),    rb->gravityScale);
+
+    // velocity / handle 刻意不写——前者属于 runtime state（Save Game 范围），
+    // 后者是 backend 句柄，Load 时由 PhysicsWorld::AddBody 重新分配。
+}
+
+// ---------------------------------------------------------------------------
+// ColliderComponent
+//
+// shape 是 std::variant<Circle, Box, Polygon, EdgeChain>——序列化用
+// 字符串 "kind" 字段做 discriminator + per-kind 数据字段。Polygon /
+// EdgeChain 的顶点用扁平化 float 数组（[x0,y0,x1,y1,...]），与 JsonReader
+// 的纯数字路径段语义对齐。
+// ---------------------------------------------------------------------------
+
+void WriteCircleShape(JsonWriter& writer, std::string_view shapePath, const Physics::CircleDesc& d)
+{
+    writer.WriteString(Join(shapePath, "kind"), "Circle");
+    writer.WriteFloat( Join(shapePath, "radius"), d.radius);
+    const float c[2] = {d.center.x, d.center.y};
+    writer.WriteFloatArray(Join(shapePath, "center"), c, 2);
+}
+
+void WriteBoxShape(JsonWriter& writer, std::string_view shapePath, const Physics::BoxDesc& d)
+{
+    writer.WriteString(Join(shapePath, "kind"), "Box");
+    const float he[2] = {d.halfExtents.x, d.halfExtents.y};
+    writer.WriteFloatArray(Join(shapePath, "halfExtents"), he, 2);
+    const float c[2] = {d.center.x, d.center.y};
+    writer.WriteFloatArray(Join(shapePath, "center"), c, 2);
+}
+
+void WritePolygonShape(JsonWriter& writer, std::string_view shapePath, const Physics::PolygonDesc& d)
+{
+    writer.WriteString(Join(shapePath, "kind"), "Polygon");
+    std::vector<float> flat;
+    flat.reserve(static_cast<std::size_t>(d.count) * 2u);
+    for (std::uint32_t i = 0; i < d.count; ++i)
+    {
+        flat.push_back(d.vertices[i].x);
+        flat.push_back(d.vertices[i].y);
+    }
+    writer.WriteFloatArray(Join(shapePath, "vertices"), flat.data(), flat.size());
+}
+
+void WriteEdgeChainShape(JsonWriter& writer, std::string_view shapePath, const Physics::EdgeChainDesc& d)
+{
+    writer.WriteString(Join(shapePath, "kind"), "EdgeChain");
+    std::vector<float> flat;
+    flat.reserve(static_cast<std::size_t>(d.count) * 2u);
+    for (std::uint32_t i = 0; i < d.count; ++i)
+    {
+        flat.push_back(d.vertices[i].x);
+        flat.push_back(d.vertices[i].y);
+    }
+    writer.WriteFloatArray(Join(shapePath, "vertices"), flat.data(), flat.size());
+    writer.WriteBool(Join(shapePath, "isLoop"), d.isLoop);
+}
+
+bool HasCollider(const World& world, Entity entity)
+{
+    return world.HasComponent<Physics::ColliderComponent>(entity);
+}
+
+void WriteCollider(JsonWriter& writer,
+                   std::string_view componentPath,
+                   Entity entity,
+                   const SaveContext& ctx)
+{
+    const auto* col = ctx.world.GetComponent<Physics::ColliderComponent>(entity);
+    if (col == nullptr)
+    {
+        return;
+    }
+
+    const std::string shapePath = Join(componentPath, "shape");
+    std::visit(
+        [&](const auto& shape)
+        {
+            using T = std::decay_t<decltype(shape)>;
+            if constexpr (std::is_same_v<T, Physics::CircleDesc>)
+            {
+                WriteCircleShape(writer, shapePath, shape);
+            }
+            else if constexpr (std::is_same_v<T, Physics::BoxDesc>)
+            {
+                WriteBoxShape(writer, shapePath, shape);
+            }
+            else if constexpr (std::is_same_v<T, Physics::PolygonDesc>)
+            {
+                WritePolygonShape(writer, shapePath, shape);
+            }
+            else if constexpr (std::is_same_v<T, Physics::EdgeChainDesc>)
+            {
+                WriteEdgeChainShape(writer, shapePath, shape);
+            }
+        },
+        col->shape);
+
+    writer.WriteFloat(Join(componentPath, "density"),     col->density);
+    writer.WriteFloat(Join(componentPath, "friction"),    col->friction);
+    writer.WriteFloat(Join(componentPath, "restitution"), col->restitution);
+    writer.WriteBool( Join(componentPath, "isSensor"),    col->isSensor);
+}
+
+// ---------------------------------------------------------------------------
+// AnimatorComponent
+//
+// 当前阶段 Animator 的"重建数据"只是 backend 名字。SkeletalAnimator
+// 需要 DragonBonesContext + SkeletonAsset + armatureName，ProceduralAnimator
+// 需要任意闭包 channel——这些都不在 IAnimator 公共面、也无法纯数据
+// 化。Load 时调 AnimatorRegistry::Create(name)，由游戏端在注册 factory
+// 时 capture 好相关参数。
+//
+// 因此 scene 序列化对 Animator 的承诺仅限于"哪个 entity 有 Animator
+// 以及是哪个 backend"——具体的播放状态 / channel 配置不在范围内。
+// ---------------------------------------------------------------------------
+
+bool HasAnimator(const World& world, Entity entity)
+{
+    return world.HasComponent<Animation::AnimatorComponent>(entity);
+}
+
+void WriteAnimator(JsonWriter& writer,
+                   std::string_view componentPath,
+                   Entity entity,
+                   const SaveContext& ctx)
+{
+    const auto* ac = ctx.world.GetComponent<Animation::AnimatorComponent>(entity);
+    if (ac == nullptr || ac->animator == nullptr)
+    {
+        return;
+    }
+
+    writer.WriteString(Join(componentPath, "backend"), ac->animator->BackendName());
+}
+
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Backend-dependent helper read 接口（由 SceneSerialization Pass 2 调用）
+// ---------------------------------------------------------------------------
+
+bool ReadRigidBodyDesc(const JsonReader& reader,
+                       std::string_view  componentPath,
+                       Physics::RigidBodyComponent& out)
+{
+    Physics::RigidBodyComponent rb{};
+
+    std::string typeStr;
+    if (!reader.ReadString(Join(componentPath, "type"), typeStr))
+    {
+        return false;
+    }
+    if (!BodyTypeFromString(typeStr, rb.type))
+    {
+        return false;
+    }
+
+    float pos[2] = {0.0f, 0.0f};
+    if (!reader.ReadFloatArray(Join(componentPath, "initialPosition"), pos, 2))
+    {
+        return false;
+    }
+    rb.initialPosition = {pos[0], pos[1]};
+
+    double angle = 0.0;
+    if (!reader.ReadFloat(Join(componentPath, "initialAngle"), angle))
+    {
+        return false;
+    }
+    rb.initialAngle = static_cast<float>(angle);
+
+    // 阻尼 / fixedRotation / gravityScale 走"缺字段→默认值"语义——便于
+    // minor schema 升级时新增字段不破老存档。
+    rb.linearDamping  = static_cast<float>(reader.GetFloat(Join(componentPath, "linearDamping"),  0.0));
+    rb.angularDamping = static_cast<float>(reader.GetFloat(Join(componentPath, "angularDamping"), 0.0));
+    rb.fixedRotation  = reader.GetBool(Join(componentPath, "fixedRotation"), false);
+    rb.gravityScale   = static_cast<float>(reader.GetFloat(Join(componentPath, "gravityScale"), 1.0));
+
+    // velocity / handle 不读——前者是 runtime state、后者由 AddBody 反写。
+    out = rb;
+    return true;
+}
+
+namespace
+{
+
+bool ReadCircleShape(const JsonReader& reader, std::string_view shapePath, Physics::CircleDesc& out)
+{
+    Physics::CircleDesc d{};
+    double radius = 1.0;
+    if (!reader.ReadFloat(Join(shapePath, "radius"), radius))
+    {
+        return false;
+    }
+    d.radius = static_cast<float>(radius);
+    float c[2] = {0.0f, 0.0f};
+    if (reader.Has(Join(shapePath, "center")))
+    {
+        if (!reader.ReadFloatArray(Join(shapePath, "center"), c, 2))
+        {
+            return false;
+        }
+    }
+    d.center = {c[0], c[1]};
+    out = d;
+    return true;
+}
+
+bool ReadBoxShape(const JsonReader& reader, std::string_view shapePath, Physics::BoxDesc& out)
+{
+    Physics::BoxDesc d{};
+    float he[2] = {0.5f, 0.5f};
+    if (!reader.ReadFloatArray(Join(shapePath, "halfExtents"), he, 2))
+    {
+        return false;
+    }
+    d.halfExtents = {he[0], he[1]};
+    float c[2] = {0.0f, 0.0f};
+    if (reader.Has(Join(shapePath, "center")))
+    {
+        if (!reader.ReadFloatArray(Join(shapePath, "center"), c, 2))
+        {
+            return false;
+        }
+    }
+    d.center = {c[0], c[1]};
+    out = d;
+    return true;
+}
+
+bool ReadPolygonShape(const JsonReader& reader, std::string_view shapePath, Physics::PolygonDesc& out)
+{
+    const std::string verticesPath = Join(shapePath, "vertices");
+    const std::size_t flatSize = reader.ArraySize(verticesPath);
+    if (flatSize == 0 || (flatSize % 2u) != 0u)
+    {
+        return false;
+    }
+    const std::size_t count = flatSize / 2u;
+    if (count > Physics::PolygonDesc::kMaxVertices)
+    {
+        return false;
+    }
+
+    std::vector<float> flat(flatSize, 0.0f);
+    if (!reader.ReadFloatArray(verticesPath, flat.data(), flatSize))
+    {
+        return false;
+    }
+
+    Physics::PolygonDesc d{};
+    d.count = static_cast<std::uint32_t>(count);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        d.vertices[i] = {flat[i * 2], flat[i * 2 + 1]};
+    }
+    out = d;
+    return true;
+}
+
+bool ReadEdgeChainShape(const JsonReader& reader, std::string_view shapePath, Physics::EdgeChainDesc& out)
+{
+    const std::string verticesPath = Join(shapePath, "vertices");
+    const std::size_t flatSize = reader.ArraySize(verticesPath);
+    if (flatSize == 0 || (flatSize % 2u) != 0u)
+    {
+        return false;
+    }
+    const std::size_t count = flatSize / 2u;
+    if (count > Physics::EdgeChainDesc::kMaxVertices)
+    {
+        return false;
+    }
+
+    std::vector<float> flat(flatSize, 0.0f);
+    if (!reader.ReadFloatArray(verticesPath, flat.data(), flatSize))
+    {
+        return false;
+    }
+
+    Physics::EdgeChainDesc d{};
+    d.count = static_cast<std::uint32_t>(count);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        d.vertices[i] = {flat[i * 2], flat[i * 2 + 1]};
+    }
+    d.isLoop = reader.GetBool(Join(shapePath, "isLoop"), false);
+    out = d;
+    return true;
+}
+
+}  // namespace
+
+bool ReadColliderDesc(const JsonReader& reader,
+                      std::string_view  componentPath,
+                      Physics::ColliderComponent& out)
+{
+    Physics::ColliderComponent col{};
+
+    const std::string shapePath = Join(componentPath, "shape");
+    std::string kind;
+    if (!reader.ReadString(Join(shapePath, "kind"), kind))
+    {
+        return false;
+    }
+
+    if (kind == "Circle")
+    {
+        Physics::CircleDesc d{};
+        if (!ReadCircleShape(reader, shapePath, d)) return false;
+        col.shape = d;
+    }
+    else if (kind == "Box")
+    {
+        Physics::BoxDesc d{};
+        if (!ReadBoxShape(reader, shapePath, d)) return false;
+        col.shape = d;
+    }
+    else if (kind == "Polygon")
+    {
+        Physics::PolygonDesc d{};
+        if (!ReadPolygonShape(reader, shapePath, d)) return false;
+        col.shape = d;
+    }
+    else if (kind == "EdgeChain")
+    {
+        Physics::EdgeChainDesc d{};
+        if (!ReadEdgeChainShape(reader, shapePath, d)) return false;
+        col.shape = d;
+    }
+    else
+    {
+        // 未知 shape kind → 视为格式坏。新增 shape 类型必然伴随 schema
+        // major bump（Reader 在主调度处先拦掉），不在这里 graceful 跳过。
+        return false;
+    }
+
+    col.density     = static_cast<float>(reader.GetFloat(Join(componentPath, "density"),     1.0));
+    col.friction    = static_cast<float>(reader.GetFloat(Join(componentPath, "friction"),    0.3));
+    col.restitution = static_cast<float>(reader.GetFloat(Join(componentPath, "restitution"), 0.0));
+    col.isSensor    = reader.GetBool(Join(componentPath, "isSensor"), false);
+
+    out = col;
+    return true;
+}
+
+bool ReadAnimatorBackendName(const JsonReader& reader,
+                             std::string_view  componentPath,
+                             std::string&      outBackendName)
+{
+    return reader.ReadString(Join(componentPath, "backend"), outBackendName);
+}
 
 const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
 {
     static const std::vector<ComponentSerializerEntry> kEntries = {
-        {"Transform",        &HasTransform,        &WriteTransform,        &ReadTransform},
-        {"Hierarchy",        &HasHierarchy,        &WriteHierarchy,        &ReadHierarchy},
-        {"Name",             &HasName,             &WriteName,             &ReadName},
-        {"Renderable",       &HasRenderable,       &WriteRenderable,       &ReadRenderable},
-        {"DirectionalLight", &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
+        // Pure-data：Pass 1 直接 Read 即可 attach。
+        {"Transform",        ComponentKind::PureData,         &HasTransform,        &WriteTransform,        &ReadTransform},
+        {"Hierarchy",        ComponentKind::PureData,         &HasHierarchy,        &WriteHierarchy,        &ReadHierarchy},
+        {"Name",             ComponentKind::PureData,         &HasName,             &WriteName,             &ReadName},
+        {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
+        {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
+
+        // Backend-dependent：Pass 2 由 SceneSerialization 主流程按 entity
+        // 配对调用 PhysicsWorld::AddBody / AnimatorRegistry::Create；这里
+        // Read 字段保持 nullptr，主流程不会经由 dispatch 调它。
+        {"RigidBody",        ComponentKind::BackendDependent, &HasRigidBody, &WriteRigidBody, nullptr},
+        {"Collider",         ComponentKind::BackendDependent, &HasCollider,  &WriteCollider,  nullptr},
+        {"Animator",         ComponentKind::BackendDependent, &HasAnimator,  &WriteAnimator,  nullptr},
     };
     return kEntries;
 }

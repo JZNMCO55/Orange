@@ -9,8 +9,14 @@
 
 #include "orange/engine/scene/SceneSerialization.h"
 
+#include "orange/engine/animation/AnimatorComponent.h"
+#include "orange/engine/animation/AnimatorRegistry.h"
+#include "orange/engine/animation/IAnimator.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Serialization.h"
+#include "orange/engine/physics/ColliderComponent.h"
+#include "orange/engine/physics/PhysicsWorld.h"
+#include "orange/engine/physics/RigidBodyComponent.h"
 #include "orange/engine/scene/Entity.h"
 #include "orange/engine/scene/World.h"
 
@@ -22,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace Orange::Engine::Scene
@@ -69,7 +76,7 @@ std::string ComponentPath(const std::string& entityBase, std::string_view compon
 
 Result<void, ResultCode> Save(const World& world,
                               std::string_view path,
-                              const Asset::AssetRegistry* assetRegistry)
+                              const SaveOptions& options)
 {
     // 1) 收集所有 live entity，按 view 顺序分配 0..N-1 持久 ID。
     //    EnTT view<entt::entity>() 在 3.13 上即"所有活实体"的迭代源。
@@ -91,7 +98,7 @@ Result<void, ResultCode> Save(const World& world,
         }
     }
 
-    const SaveContext ctx{world, idMap, assetRegistry};
+    const SaveContext ctx{world, idMap, options.assetRegistry};
 
     // 2) 组装 JSON。
     JsonWriter writer;
@@ -107,6 +114,8 @@ Result<void, ResultCode> Save(const World& world,
 
         writer.WriteInt(base + "/id", static_cast<std::int64_t>(i));
 
+        // Save 不分 PureData / BackendDependent——所有有组件的 entity 都
+        // 把字段写进 JSON。Pass 2 是 Load 才需要的特殊路径。
         for (const auto& entry : serializers)
         {
             if (entry.Has(world, entity))
@@ -151,7 +160,7 @@ void RollbackCreatedEntities(World& world, const std::vector<Entity>& created)
 
 Result<void, ResultCode> Load(std::string_view path,
                               World& world,
-                              Asset::AssetRegistry* assetRegistry)
+                              const LoadOptions& options)
 {
     // 1) 打开并解析 JSON。
     auto readerResult = JsonReader::FromFile(path);
@@ -204,14 +213,16 @@ Result<void, ResultCode> Load(std::string_view path,
         idTable.push_back(e);
     }
 
-    const LoadContext ctx{world, idTable, assetRegistry};
+    const LoadContext ctx{world, idTable,
+                          options.assetRegistry,
+                          options.physicsWorld,
+                          options.animatorRegistry};
 
-    // 4) 第一遍：pure-data 组件 attach（当前注册的内置组件全部如此）。
-    //    后续追加需要先建 backend 资源（Box2D body / DragonBones armature
-    //    等）才能 attach 的组件时，把这里拆成两遍调度——pure-data 一遍、
-    //    backend-dependent 一遍——是预留的演进路径，不在当前代码里做。
     const auto& serializers = GetBuiltinComponentSerializers();
 
+    // 4) Pass 1：PureData 组件——按 dispatch 表逐个 Read 并 attach。
+    //    Hierarchy 引用 / Renderable 的 mesh path / DirectionalLight 字段
+    //    都不依赖 backend，可以直接落地。
     for (std::size_t i = 0; i < entityCount; ++i)
     {
         const std::string base   = EntityBasePath(i);
@@ -219,6 +230,10 @@ Result<void, ResultCode> Load(std::string_view path,
 
         for (const auto& entry : serializers)
         {
+            if (entry.kind != ComponentKind::PureData)
+            {
+                continue;
+            }
             const std::string componentPath = ComponentPath(base, entry.name);
             if (!reader.Has(componentPath))
             {
@@ -236,6 +251,114 @@ Result<void, ResultCode> Load(std::string_view path,
         // warn + skip。当前 JsonReader 没有"列出对象 key"接口，所以仅
         // 做"跳过"行为，不发 warning——后续若需要逐个识别未知字段，
         // 再扩 reader API。
+    }
+
+    // 5) Pass 2：Backend-dependent 组件。
+    //    * RigidBody + Collider：必须配对提交给 PhysicsWorld::AddBody 才
+    //      能拿到 BodyHandle。先把两边 desc 都读到本地 var，再走 AddBody
+    //      并把 handle 反写到 RigidBody.handle，最后 attach 双 component。
+    //    * Animator：只持久化 backend name；通过 AnimatorRegistry::Create
+    //      取得新 IAnimator 实例。具体 backend 的初始化参数由 game 端在
+    //      RegisterBackend 时 capture，scene 不下钻。
+    //    各 registry / world 指针为空时分别走 graceful 退化（component
+    //    attach 但 backend 字段留空 / nullptr）。
+    for (std::size_t i = 0; i < entityCount; ++i)
+    {
+        const std::string base   = EntityBasePath(i);
+        const Entity      entity = idTable[i];
+
+        const std::string rigidPath    = ComponentPath(base, "RigidBody");
+        const std::string colliderPath = ComponentPath(base, "Collider");
+        const std::string animPath     = ComponentPath(base, "Animator");
+
+        const bool hasRigid    = reader.Has(rigidPath);
+        const bool hasCollider = reader.Has(colliderPath);
+        const bool hasAnimator = reader.Has(animPath);
+
+        Physics::RigidBodyComponent rigid{};
+        Physics::ColliderComponent  collider{};
+        bool readRigid    = false;
+        bool readCollider = false;
+
+        if (hasRigid)
+        {
+            if (!ReadRigidBodyDesc(reader, rigidPath, rigid))
+            {
+                RollbackCreatedEntities(world, created);
+                return ResultCode::InvalidArgument;
+            }
+            readRigid = true;
+        }
+        if (hasCollider)
+        {
+            if (!ReadColliderDesc(reader, colliderPath, collider))
+            {
+                RollbackCreatedEntities(world, created);
+                return ResultCode::InvalidArgument;
+            }
+            readCollider = true;
+        }
+
+        if (readRigid && readCollider)
+        {
+            if (options.physicsWorld != nullptr)
+            {
+                rigid.handle = options.physicsWorld->AddBody(rigid, collider);
+            }
+            else
+            {
+                ORANGE_LOG_WARN(
+                    "Scene load: entity has RigidBody+Collider but no PhysicsWorld supplied; "
+                    "BodyHandle will be left invalid.");
+            }
+        }
+        else if (readRigid != readCollider)
+        {
+            // 一个有一个无：当前架构下 AddBody 必须配对，单方 attach 时
+            // 不绑定 backend——但 component 仍然 attach（保留 desc）。
+            ORANGE_LOG_WARN(
+                "Scene load: entity has only one of RigidBody / Collider; "
+                "AddBody requires both, leaving body unbound.");
+        }
+
+        if (readRigid)
+        {
+            world.AddComponent(entity, rigid);
+        }
+        if (readCollider)
+        {
+            world.AddComponent(entity, collider);
+        }
+
+        if (hasAnimator)
+        {
+            std::string backendName;
+            if (!ReadAnimatorBackendName(reader, animPath, backendName))
+            {
+                RollbackCreatedEntities(world, created);
+                return ResultCode::InvalidArgument;
+            }
+
+            Animation::AnimatorComponent ac{};
+            if (options.animatorRegistry != nullptr)
+            {
+                ac.animator = options.animatorRegistry->Create(backendName);
+                if (ac.animator == nullptr)
+                {
+                    ORANGE_LOG_WARN(
+                        "Scene load: animator backend '{}' not registered with "
+                        "AnimatorRegistry; component will hold a null animator.",
+                        backendName);
+                }
+            }
+            else
+            {
+                ORANGE_LOG_WARN(
+                    "Scene load: AnimatorComponent present but no AnimatorRegistry "
+                    "supplied; component will hold a null animator.");
+            }
+            world.AddComponent(entity, std::move(ac));
+        }
     }
 
     return Result<void, ResultCode>{};

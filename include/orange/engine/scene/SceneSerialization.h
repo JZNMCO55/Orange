@@ -67,25 +67,68 @@ class AssetRegistry;
 
 }  // namespace Orange::Engine::Asset
 
+namespace Orange::Engine::Physics
+{
+
+class PhysicsWorld;
+
+}  // namespace Orange::Engine::Physics
+
+namespace Orange::Engine::Animation
+{
+
+class AnimatorRegistry;
+
+}  // namespace Orange::Engine::Animation
+
 namespace Orange::Engine::Scene
 {
 
-// 把 `world` 写到 `path`。覆盖目标文件。
+// Save / Load 的可选依赖打包。每条都是"持有 AssetHandle / backend 资源
+// 的组件需要时才用得到"——传空时序列化层对相应组件走 graceful 退化，
+// 不视为 fatal（详见各字段注释）。
 //
-// `assetRegistry` 可空：仅当有组件持有 AssetHandle（譬如 Renderable 的
-// mesh）时才需要——序列化层用 registry 反查"handle → 资源路径"。传
-// nullptr 时这类组件落空 path 并 warn，整 scene 仍可保存。
+// 用 designated initializer（C++20）调用：
+//
+//     auto opt = LoadOptions{
+//         .assetRegistry    = &reg,
+//         .physicsWorld     = &world,
+//         .animatorRegistry = &animReg,
+//     };
+//     Scene::Load(path, world, opt);
+struct SaveOptions
+{
+    // 反查"AssetHandle → 资源路径"。空 → 持有 AssetHandle 的组件落
+    // 空字符串 + warn。
+    const Asset::AssetRegistry* assetRegistry{nullptr};
+};
+
+struct LoadOptions
+{
+    // 解析"资源路径 → AssetHandle"（典型：RenderableComponent.mesh）。
+    // 空 → 相关 handle 留空 + warn。
+    Asset::AssetRegistry* assetRegistry{nullptr};
+
+    // 反序列化 RigidBody + Collider 时，用它注册 backend body（一次性
+    // 把 rigid + collider 一并提交给 PhysicsWorld::AddBody）。空 → 组
+    // 件仍 attach 但不绑定 backend，BodyHandle 留 Invalid。
+    Physics::PhysicsWorld* physicsWorld{nullptr};
+
+    // 反序列化 AnimatorComponent 时按 backend name 调 Create() 拿 IAnimator
+    // 实例。空 / 未注册 → component 仍 attach 但 animator unique_ptr 为
+    // nullptr。注：scene 仅持久化 backend 名字，具体的 skeleton / channel
+    // 配置由 game 端在注册 factory 时 capture，不下钻到 schema。
+    const Animation::AnimatorRegistry* animatorRegistry{nullptr};
+};
+
+// 把 `world` 写到 `path`。覆盖目标文件。
 ORANGE_ENGINE_API Result<void, ResultCode> Save(const World& world,
                                                 std::string_view path,
-                                                const Asset::AssetRegistry* assetRegistry = nullptr);
+                                                const SaveOptions& options = {});
 
 // 从 `path` 读取 scene 数据，把所有实体 + 组件追加到 `world` 上。
 // 不清空 world——调用方若需要"完全替换当前关卡"，自己先构造一个新
 // World 再把读取结果合进去。
-//
-// `assetRegistry` 可空：用于把 scene 文件里的资源路径解析回 AssetHandle。
-// 传 nullptr 时持有 AssetHandle 的组件被装上空 handle 并 warn，仍正
-// 常 attach 到 entity——entity / hierarchy 等 pure-data 字段不受影响。
 //
 // 失败语义：
 //   * 文件不存在 / IO 错误     → IoError
@@ -96,7 +139,7 @@ ORANGE_ENGINE_API Result<void, ResultCode> Save(const World& world,
 // 未识别的 component 名 → 仅记录 warning 后继续（forward-compat）。
 ORANGE_ENGINE_API Result<void, ResultCode> Load(std::string_view path,
                                                 World& world,
-                                                Asset::AssetRegistry* assetRegistry = nullptr);
+                                                const LoadOptions& options = {});
 
 }  // namespace Orange::Engine::Scene
 
