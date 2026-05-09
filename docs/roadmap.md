@@ -15,11 +15,27 @@
 
 **闭环后解锁**：游戏 content 生产从"程序员手写 JSON"过渡到"编辑器交互式编辑"。
 
-### Task 06-01 · 提取 `tools/OrangeEditor` target
+### Task 06-01 · 提取 `tools/OrangeEditor` target ✅
 - 描述：从 `samples/07_full_pipeline` 复制基础结构到 `tools/OrangeEditor`，独立 CMake target；`samples/` 仅保留作引擎 API 演示，编辑器走自己的演化路径
 - 前置：Phase 5 完成
 - 实现要点：编辑器通过 `find_package(OrangeEngine)` 依赖引擎，不直接吃源；这是引擎 API 自身可消费性的最强验证
 - Critical Path：是
+- **落地状态**（2026-05-09）：v0.0 scaffold 完成 —— 一个能开窗 + Esc 退出的最小可执行体。Sample 07 体量过大（737 行 + 内部 src/ 头依赖），不适合作为编辑器起点；改成参考 sample 01_minimal_window 形态，只接 `AppHost` + `EscQuitLayer`。
+  - **Existing**：
+    - `tools/OrangeEditor/CMakeLists.txt`（顶级独立 CMake 工程，`find_package(OrangeEngine 0.1 CONFIG REQUIRED)`，与 sample / 引擎同档 warning 级别）
+    - `tools/OrangeEditor/main.cpp`（~80 行：AppConfig + AppHost + EscQuitLayer + Run loop；Esc raw key code 256 直接对比，不引入 InputContext 整套栈）
+    - `tools/OrangeEditor/README.md`（两阶段 build 流程文档：先 `cmake --install build` 装引擎，再用 `-DCMAKE_PREFIX_PATH` 配编辑器；CI 验证路径）
+    - `tests/install/editor_build_smoke.cmake`（与 `config_smoke.cmake` 同模式：install + configure + build editor 三步走，证明 `find_package` 消费链通；不 run，CI 一般无 GPU）
+    - `tests/CMakeLists.txt` 注册 `editor_build_smoke` 为第 41 个 ctest case
+  - **验证**：
+    - `cmake --build build --config Debug` 引擎主仓 build 干净
+    - `ctest -R editor_build_smoke` 通过，全套 41/41 无回归
+    - 手动跑 `build/editor_build_smoke_consumer/Debug/OrangeEditor.exe` 能开窗 + 控制台显示 scaffold 启动文案 + Esc 触发"请求退出"日志后干净 quit
+  - **Out-of-scope（明确推迟）**：
+    - 渲染场景预览（viewport 内画 cube / 加载 builtin shader）→ Task 06-04 真要画 viewport 时再解决"内置 SPV 部署到 editor exe 旁边"的问题
+    - ImGui 接入 → Task 06-02
+    - 实体树 / 检视器 / 资源浏览器 → Task 06-03 起
+    - 把 `samples/07_full_pipeline` 的物理 / 动画 / 粒子真实接入 → 编辑器自身演化路径上视需要再做，sample 07 仍保留作引擎 API demo
 
 ### Task 06-02 · ImGui 集成与 dock space
 - 描述：默认窗口布局：场景视图 / 实体树 / 检视器 / 资源浏览器 / 控制台
@@ -185,6 +201,25 @@
 - Task 12-02 · OrangeRender Metal 后端启用（同上）
 - Task 12-03 · Linux 平台层（GLFW 已支持，主要是 file watcher / clock 等细节）
 - Task 12-04 · Console SDK 集成（PS5 / Xbox / Switch，每个都是单独的法务和工程包）
+
+---
+
+## Phase 13 · 自然场景与地形（按编辑器需求拉动）
+
+**触发条件**：游戏关卡需要"自然环境"内容——地形 / 水体 / 山体 / 植被等程序化或半程序化场景元素。第一款 2.5D 平台跳跃 demo 不一定需要；若游戏向"开放区域 / 自然场景"扩展则启用。
+
+**当前状态**（2026-05-09 记录）：引擎完全不具备地形 / 水体 / 程序化自然场景能力。Phase 1-5.5 全部聚焦在通用 ECS / 渲染 / 物理 / 动画 / 存档 / 输入等基础设施；`Phase 10 · 渲染深化` 中的"屏幕空间反射 (10-02)"和"大气散射 (10-06)"是渲染效果而非内容创作；`extension-points.md` 中的 `WaterPass` 仅是"如何写自定义 IRenderPass"的示例代码，不是引擎 feature。
+
+**预期内容**（按需在游戏侧反馈拉动时展开为完整 Task Breakdown）：
+- Task 13-01 · `TerrainComponent` + heightmap asset 格式（与 `MeshAsset` 解耦，按 patch / chunk 切分以支持 LOD）
+- Task 13-02 · 编辑器 terrain sculpting 工具（笔刷 raise / lower / smooth / flatten / stamp）
+- Task 13-03 · `WaterSurfaceComponent` + 着色器（顶点波浪 + 折射 / 反射；可与 Task 10-02 SSR 联动）
+- Task 13-04 · 植被 / 散物 instancing（`InstancedRenderableComponent`，支持 GPU 数万实例 + frustum cull）
+- Task 13-05 · 编辑器植被 painting + 分布工具（密度笔刷 / mesh scatter / 风格化噪声）
+- Task 13-06 · 程序化辅助库（noise / curl / Voronoi 等基础 utility，给 game 端做地形 / 水流 procedural authoring 用）
+
+**前置**：Phase 6 编辑器（13-02 / 13-05 是编辑器交互工具）；与 Phase 10 渲染深化可并行；可与 Phase 13 自身各 Task 乱序推进。
+**Critical Path**：否（仅在游戏明确需求时启动；Phase 13 整体可与 Phase 11 / 12 并行排布）
 
 ---
 

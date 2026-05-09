@@ -141,4 +141,31 @@ if (ORANGE_ENGINE_INSTALL)
             "-DORANGE_ENGINE_VMA_DIR=${VulkanMemoryAllocator_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/install/config_smoke.cmake"
     )
+
+    # editor_build_smoke —— Phase 6 / Task 06-01：证明 tools/OrangeEditor
+    # 这个独立 CMake 工程能仅靠 find_package(OrangeEngine) 从零搭起来。
+    # 与 config_smoke 同模式（install + configure + build），仅 src 路
+    # 径换成 tools/OrangeEditor。
+    add_test(
+        NAME editor_build_smoke
+        COMMAND "${CMAKE_COMMAND}"
+            "-DORANGE_ENGINE_BUILD_DIR=${CMAKE_BINARY_DIR}"
+            "-DORANGE_ENGINE_INSTALL_DIR=${CMAKE_BINARY_DIR}/editor_build_smoke_install"
+            "-DORANGE_ENGINE_CONSUMER_SRC_DIR=${CMAKE_SOURCE_DIR}/tools/OrangeEditor"
+            "-DORANGE_ENGINE_CONSUMER_BUILD_DIR=${CMAKE_BINARY_DIR}/editor_build_smoke_consumer"
+            "-DORANGE_ENGINE_CONFIG=$<CONFIG>"
+            "-DORANGE_ENGINE_GENERATOR=${CMAKE_GENERATOR}"
+            "-DORANGE_ENGINE_PARENT_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+            "-DORANGE_ENGINE_ORANGERENDER_DIR=${OrangeRender_DIR}"
+            "-DORANGE_ENGINE_GLM_DIR=${glm_DIR}"
+            "-DORANGE_ENGINE_ENTT_DIR=${EnTT_DIR}"
+            "-DORANGE_ENGINE_NLOHMANN_JSON_DIR=${nlohmann_json_DIR}"
+            "-DORANGE_ENGINE_GLFW3_DIR=${glfw3_DIR}"
+            "-DORANGE_ENGINE_BOX2D_DIR=${box2d_DIR}"
+            "-DORANGE_ENGINE_VULKAN_INCLUDE_DIR=${Vulkan_INCLUDE_DIR}"
+            "-DORANGE_ENGINE_VULKAN_LIBRARY=${Vulkan_LIBRARY}"
+            "-DORANGE_ENGINE_VOLK_DIR=${volk_DIR}"
+            "-DORANGE_ENGINE_VMA_DIR=${VulkanMemoryAllocator_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/install/editor_build_smoke.cmake"
+    )
 endif ()
