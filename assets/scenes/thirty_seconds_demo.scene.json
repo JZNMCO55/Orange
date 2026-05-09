@@ -1,0 +1,213 @@
+{
+  "schemaVersion": { "namespace": "scene/world", "major": 1, "minor": 0 },
+  "entities": [
+    {
+      "id": 0,
+      "components": {
+        "Name": { "name": "player" },
+        "Transform": {
+          "position": [-6.0, 1.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [0.8, 0.8, 0.8]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        },
+        "RigidBody": {
+          "type":            "Dynamic",
+          "initialPosition": [-6.0, 1.0],
+          "initialAngle":    0.0,
+          "linearDamping":   0.05,
+          "angularDamping":  0.0,
+          "fixedRotation":   true,
+          "gravityScale":    1.0
+        },
+        "Collider": {
+          "shape": {
+            "kind":        "Box",
+            "halfExtents": [0.4, 0.4],
+            "center":      [0.0, 0.0]
+          },
+          "density":     1.5,
+          "friction":    0.6,
+          "restitution": 0.0,
+          "isSensor":    false
+        }
+      }
+    },
+    {
+      "id": 1,
+      "components": {
+        "Name": { "name": "ground" },
+        "Transform": {
+          "position": [0.0, -1.5, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [16.0, 0.4, 1.0]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        },
+        "RigidBody": {
+          "type":            "Static",
+          "initialPosition": [0.0, -1.5],
+          "initialAngle":    0.0
+        },
+        "Collider": {
+          "shape": {
+            "kind":        "Box",
+            "halfExtents": [8.0, 0.2],
+            "center":      [0.0, 0.0]
+          },
+          "density":     0.0,
+          "friction":    0.7,
+          "restitution": 0.0,
+          "isSensor":    false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "components": {
+        "Name": { "name": "platform_a" },
+        "Transform": {
+          "position": [-2.5, 0.4, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [2.4, 0.3, 1.0]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        },
+        "RigidBody": {
+          "type":            "Static",
+          "initialPosition": [-2.5, 0.4],
+          "initialAngle":    0.0
+        },
+        "Collider": {
+          "shape": {
+            "kind":        "Box",
+            "halfExtents": [1.2, 0.15],
+            "center":      [0.0, 0.0]
+          },
+          "density":     0.0,
+          "friction":    0.6,
+          "restitution": 0.0,
+          "isSensor":    false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "components": {
+        "Name": { "name": "platform_b" },
+        "Transform": {
+          "position": [1.0, 1.4, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [2.0, 0.3, 1.0]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        },
+        "RigidBody": {
+          "type":            "Static",
+          "initialPosition": [1.0, 1.4],
+          "initialAngle":    0.0
+        },
+        "Collider": {
+          "shape": {
+            "kind":        "Box",
+            "halfExtents": [1.0, 0.15],
+            "center":      [0.0, 0.0]
+          },
+          "density":     0.0,
+          "friction":    0.6,
+          "restitution": 0.0,
+          "isSensor":    false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "components": {
+        "Name": { "name": "platform_c" },
+        "Transform": {
+          "position": [4.2, 2.4, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [2.0, 0.3, 1.0]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        },
+        "RigidBody": {
+          "type":            "Static",
+          "initialPosition": [4.2, 2.4],
+          "initialAngle":    0.0
+        },
+        "Collider": {
+          "shape": {
+            "kind":        "Box",
+            "halfExtents": [1.0, 0.15],
+            "center":      [0.0, 0.0]
+          },
+          "density":     0.0,
+          "friction":    0.6,
+          "restitution": 0.0,
+          "isSensor":    false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "components": {
+        "Name": { "name": "goal" },
+        "Transform": {
+          "position": [4.2, 3.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [0.5, 0.5, 0.5]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
+        },
+        "RigidBody": {
+          "type":            "Static",
+          "initialPosition": [4.2, 3.0],
+          "initialAngle":    0.0
+        },
+        "Collider": {
+          "shape": {
+            "kind":        "Box",
+            "halfExtents": [0.25, 0.25],
+            "center":      [0.0, 0.0]
+          },
+          "density":     0.0,
+          "friction":    0.0,
+          "restitution": 0.0,
+          "isSensor":    true
+        }
+      }
+    },
+    {
+      "id": 6,
+      "components": {
+        "Name": { "name": "sun" },
+        "DirectionalLight": {
+          "direction":   [0.3, -1.0, 0.4],
+          "color":       [1.0, 0.96, 0.85],
+          "intensity":   1.4,
+          "castsShadow": true
+        }
+      }
+    }
+  ]
+}

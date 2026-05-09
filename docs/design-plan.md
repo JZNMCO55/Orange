@@ -80,6 +80,7 @@
     - [Task 03：体积光（screen-space god rays） ✅](#task-03体积光screen-space-god-rays-)
     - [Task 04：自定义 RenderPass 注入正式启用 ✅](#task-04自定义-renderpass-注入正式启用-)
     - [Task 05：异步资源加载 ✅](#task-05异步资源加载-)
+    - [Task 06：30 秒可玩关卡 demo ✅](#task-0630-秒可玩关卡-demo-)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -2231,6 +2232,43 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
   3. （可选）samples/06_physics_platformer 加一段 dev-time 自检：把 mesh 通过 LoadAsync 加载，主循环每帧 IsLoaded → 拿到后挂 RenderableComponent。该 sample 现在用 sync Load 立即就绪，仍然合法；async 路径目视确认是"先空场景后入物体"的渐进 loading 视觉。该 sample 改动不强制，0.x 优先 ctest 验证。
 - 验收标准：上述 1-2 条全过；`LoadAsync` / `IsLoaded` / `WaitFor` 公共 API 就位，第一款游戏的"loading screen 时批量 LoadAsync 全资源 + 进度条"路径可一行调用走通；Editor 起步阶段切场景时不再阻塞主线程几秒。
 - Critical Path：否（视觉 / 性能优化路径 / 不阻塞 Phase 5.5 Save Game / 不阻塞 Editor 起步——sync Load 在小关卡场景下仍然好使）
+
+#### Task 06：30 秒可玩关卡 demo ✅
+- 描述：把 Phase 1–5 已交付的能力组装成一段 ~30 秒的端到端可玩 demo（启动 → JSON scene 加载 → 玩家走完一小段平台 → 触发"目标"胜利）。这是 Phase 5 的收尾里程碑，也是引擎 fork 出游戏仓库前的最后一次"自家 dogfood"——用 sample 的视角把"asset 异步加载 / scene 序列化反序列化 / physics platforming / 自定义 IRenderPass / 视觉 polish"五件事真在同一进程里跑通。新 demo 不再像 07_full_pipeline 那样硬编码 World，而是从磁盘 .scene.json 加载——这一项是 fork 时刻"非工程师也能改关卡"承诺的最低线。
+- 输入：Phase 5 / Task 01-05 全部完成（scene 序列化 / VFX / god rays / InsertPass / 异步 asset）+ Phase 4 / Task 06–11（physics + input + audio + sample 06_physics_platformer 的玩家控制范式）
+- 输出（Proposed）：
+  - `Proposed: assets/scenes/thirty_seconds_demo.scene.json`（手写 scene 文件：1 个玩家方块 / 3-5 块平台 / 1 个目标方块；entity 持久 ID + Transform + Hierarchy(空) + Name + RigidBody + Collider，按 Phase 5 / Task 01a-c 的 schema 写）
+  - `Proposed: samples/10_thirty_seconds_demo/main.cpp`（主文件：startup 异步 Load 资源 + 等齐 → SceneSerialization::Load 读 .scene.json → 接 Input + 物理推进 + 自家定义的 GoalTriggerLayer 检测胜利）
+  - `Proposed: samples/10_thirty_seconds_demo/CMakeLists.txt`
+  - `Proposed: samples/10_thirty_seconds_demo/shaders/`（如有自定义 IRenderPass shader 需要）
+  - `Modified: samples/CMakeLists.txt`（add_subdirectory）
+- 影响模块：仅 sample 与 assets；引擎本身零改动（这正是 Phase 5 收尾的核心承诺：能力都已就位，演示靠 sample 拼装）。如果 sample 实测出引擎缺口需要补，单独建 incoming-feature 卡，不混入本 task。
+- 前置依赖：Phase 5 / Task 01-05
+- 实现要点：
+  - **Scene 内容（最小但够 3 机制）**：
+    - 玩家：1 个 dynamic RigidBody + Box collider，初始位置左下；带 NameComponent="player" 用于 sample 端反查 entity；带 RenderableComponent 走 toon material（视觉醒目）。
+    - 静态平台：3-5 个 static RigidBody + Box collider 拼出"上 → 上 → 上"三段跳跃路径。带 RenderableComponent 走 textured material（深色基底）。
+    - 目标方块：1 个 static RigidBody + Box collider（isSensor=true，玩家穿过触发胜利不阻挡）+ 走 emissive material（HDR 发光，bloom 自动拾取产出明显的"目标"视觉）。带 NameComponent="goal"。
+    - 主光源：DirectionalLight 进 scene + 照亮平台。Camera 进 scene 看向玩家初始位置 + 关卡尽头。
+  - **三个机制**：
+    1. **跳跃 + 走平台**（Mechanic 1）：玩家按住 A/D 水平移动 → 通过 PhysicsWorld::SetLinearVelocity 写入；空格触发跳 → 给 RigidBody 一个上向 impulse（用 SetLinearVelocity 把 y 分量设为 jump speed，sample 端记 isOnGround flag 防止空中二段跳）。
+    2. **物理碰撞**（Mechanic 2）：玩家与平台碰撞由 Box2D 自动处理；sample 端只需保证 RigidBody.handle 在 SceneLoad 后被 attach 到 PhysicsWorld（这是 Task 01c 已 wired up 的路径——LoadOptions.physicsWorld 非空即可）。
+    3. **目标 trigger 触发胜利**（Mechanic 3）：sample 端写 `GoalTriggerLayer`，每帧查玩家与目标的 xy 距离 < 阈值（0.6 米）→ log 一条 "Victory!" + AppHost::RequestExit。trigger 用 distance check 而不是 Box2D contact callback，是为了避开"engine 还没暴露 contact event"这个口径——后续 Phase 6+ 再补真 contact event 不破本 sample。
+  - **Async startup**：`AssetRegistry::LoadAsync` 起 3-4 个资源（player mesh / platform mesh / goal mesh / 内置 shader 不需要 Load 因为它们是 RegisterTemplate 路径），然后 `WaitFor` 一并等齐再调 SceneSerialization::Load。这一段证明 Task 05 的 LoadAsync + WaitFor 真在 sample 路径上可用。
+  - **可选 IRenderPass 视觉 polish**：sample 内嵌一个简单的 `HudPass` 走 AfterPostProcess stage 在 swap-chain 上画一条"30s 倒计时进度条"。0.x 简化方案：用与 09_vfx_demo / TintOverlayPass 同模式的 fullscreen 加性 quad，按 elapsed 时间 / 30s 控制条的填充 uv 范围。这一项是可选，不强制——若 sample 整体长度已经超 600 LoC 就推后到 Phase 6+ 编辑器 ImGui 接通后做。
+  - **退出策略**：触发胜利 / 30s 时间到都 RequestExit。让 sample 在没有玩家干预下也能在 ~30s 内自然结束——CI / CapturePass 截屏路径不死循环。
+  - **Out-of-scope（明确推迟）**：
+    - 不接 SkeletalAnimator —— 玩家用纯 cube + textured，DragonBones 走 sample 05 的可玩 demo 已演示，本 task 不再叠加；
+    - 不接 ProceduralAnimator dissolve —— 同 02b 验证；
+    - 不接 Audio AudioEngine —— Phase 4 / Task 09 + sample 06 已验证；本 sample 不强求音效；
+    - 不引入 ImGui dock space —— 等 Editor 启动时再做；
+    - Save Game 不在本 task 范围（Phase 5.5）。
+- 验证：
+  1. 本 task 不加新 ctest（既有 33/32 测试已覆盖各模块；Task 06 是组合验证，其失败模式在各子模块单测中已 surface 过）。
+  2. ctest 全过——确认 sample 新加的 CMake target 不破现有 test pipeline。
+  3. `samples/10_thirty_seconds_demo` 启动 + 截屏：第一帧能看到玩家 + 平台 + 发光目标块；30s 时间内程序按手动操作（W/A/S/D + 空格）跑到目标 → 控制台 log "Victory!" + 干净退出。无操作时 30s 后超时自动退出。`--capture` 路径在第 60 帧截屏验证视觉正常。
+- 验收标准：上述 3 条全过；Phase 5 整体闭环——引擎可以从 .scene.json 加载关卡 + 跑物理 + 玩家可控制 + 目标 trigger 胜利。fork 出游戏仓库的全部基础已就位（剩余 Phase 5 / Task 07 是 fork 工序本身、Phase 5.5 是 Save Game 单独的子系统）。
+- Critical Path：是（Phase 5 收尾里程碑 + 游戏 fork 前置）
 
 ### Phase 5.5：Save Game 系统
 
