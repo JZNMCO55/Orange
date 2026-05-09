@@ -45,6 +45,7 @@ namespace Orange::Engine::Render
 
 class MaterialSystem;
 class PostProcessChain;
+class VfxSystem;
 struct ShadowConfig;
 
 class ORANGE_ENGINE_API Pipeline
@@ -110,6 +111,16 @@ public:
     // 等需要 system 协作的路径）。nullptr 时 Pipeline 走 fallback：
     // drawable.materialInstance == nullptr 时落到内置 textured Material。
     void SetMaterialSystem(MaterialSystem* system) noexcept;
+
+    // 安装 / 卸载 VfxSystem（非拥有指针）。安装后 Render() 在主 pass 与
+    // bloom 之间插一段 instanced additive billboard pass，把 VfxSystem
+    // 当前所有 emitter 的粒子绘制到 HDR target——粒子颜色 a > 1 时自动
+    // 喂到 bloom。`system` 必须活到 Pipeline 析构 / 下次 SetVfxSystem
+    // 之前；nullptr 跳过粒子 pass，sample 不 break。
+    //
+    // 调用方仍需要自己每帧调 `VfxSystem::Tick(world, dt)` 推进 sim—
+    // Pipeline 不接管 sim，避免把 frame budget 耦合到 sim 时序。
+    void SetVfxSystem(VfxSystem* system) noexcept;
 
     // 请求把下一帧的离屏 HDR 渲染结果落盘成 PNG。下一次 Render() 会在
     // bloom mip-chain 完成、tonemap 之前追加一次 GPU readback 到 host-

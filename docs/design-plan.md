@@ -75,6 +75,8 @@
     - [Task 01a：Scene 序列化骨架 + Transform/Hierarchy/Name 三件套 ✅](#task-01ascene-序列化骨架--transformhierarchyname-三件套-)
     - [Task 01b：Renderable / Camera / Light 组件序列化 ✅](#task-01brenderable--camera--light-组件序列化-)
     - [Task 01c：RigidBody / Collider / Animator 组件序列化 ✅](#task-01crigidbody--collider--animator-组件序列化-)
+    - [Task 02a：VfxSystem 粒子系统骨架 ✅](#task-02avfxsystem-粒子系统骨架-)
+    - [Task 02b：Dissolve + Emissive 内置 Material 模板](#task-02bdissolve--emissive-内置-material-模板)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -1977,7 +1979,8 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - Task 01a：Scene 序列化骨架 + Transform/Hierarchy/Name 三件套（含新建 NameComponent）
 - Task 01b：Renderable / Camera / Light 组件序列化（AssetHandle 路径化）
 - Task 01c：RigidBody / Collider / Animator 组件序列化（backend handle 重建；不含 runtime state）
-- Task 02：VFX 完整化（粒子系统 + dissolve shader + emission）
+- Task 02a：VfxSystem 粒子系统骨架（CPU 池 sim + 实例化 additive billboard 绘制）
+- Task 02b：Dissolve + Emissive 内置 Material 模板（接通 bloom 自动拾取发光面）
 - Task 03：体积光（screen-space god rays）
 - Task 04：自定义 RenderPass 注入正式启用
 - Task 05：异步资源加载
@@ -2066,6 +2069,60 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
   - 验证 Load 失败时 World 不留半状态（譬如 Animator skeleton 路径错误时，前述 entity 已 create 的部分要回滚或保留容错——本 task 选择"容错保留 + warning"，与 01b AssetHandle 失败策略一致）
 - 验收标准：Phase 5 / Task 01 整体闭环——任意现有 sample 的 World 都可 Save → Load 还原；Phase 6 编辑器可直接基于 `Scene::Save` / `Scene::Load` 启动场景编辑工作流。
 - Critical Path：是
+
+#### Task 02a：VfxSystem 粒子系统骨架 ✅
+- 描述：交付 VFX 子系统的骨架——`ParticleEmitterComponent` 描述发射器参数、`VfxSystem` 拥有每发射器的 CPU 粒子池并每帧 sim、Pipeline 在 main pass 之后 / postprocess 之前插入一条 instanced additive billboard pass 把所有粒子一次提交。Phase 10-04 才把 sim 迁到 GPU compute；本 task 锁定 CPU 路径并把"实例化绘制 + push-constant 动画时间"打通。
+- 输入：Phase 5 / Task 01c（Scene 序列化已就绪）+ Phase 3 / Task 03（PostProcessChain + bloom 已接通——这样发射器粒子的高 HDR 颜色能自动喂到 bloom）
+- 输出（Proposed）：
+  - `Proposed: include/orange/engine/render/ParticleEmitterComponent.h`（公共 ECS 组件 + `ParticleEmitterDesc` POD）
+  - `Proposed: include/orange/engine/render/VfxSystem.h`（公共 API：`Initialize` / `Shutdown` / `Tick(World&, dt)` / opaque `DrawParticles` 给 Pipeline 调用）
+  - `Proposed: src/render/VfxSystem.cpp`（PIMPL：发射器→粒子池映射、CPU sim、per-frame instance buffer FIF slicing、单 draw call 提交）
+  - `Proposed: src/render/BuiltinParticleShaders.cpp`（内置 additive billboard shader：vertex synth gl_VertexIndex → quad，per-instance pos/size/color，push-constant 装 viewProj）
+  - `Modified: src/render/Pipeline.cpp`（`SetVfxSystem(VfxSystem*)` + Render() 在 main pass 之后调 `VfxSystem::DrawParticles`）
+  - `Modified: include/orange/engine/render/Pipeline.h`（加 `SetVfxSystem` API）
+  - `Modified: src/scene/ComponentSerializers.{h,cpp}`（新增 `ParticleEmitter` 调度项，PureData——desc 全字段 JSON 化）
+  - `Proposed: tests/render/VfxSystemTest.cpp`
+  - `Proposed: samples/09_vfx_demo/{CMakeLists.txt, main.cpp}`（一个发射器 sample，验证粒子上屏 + Pipeline 正确串联）
+- 影响模块：Render（核心改动）、Scene（仅追加 ComponentSerializer 项）、Asset（仅消费 ShaderAsset loader 加载内置 .spv）
+- 前置依赖：Phase 5 / Task 01c
+- 实现要点：
+  - **粒子池所有权**：`VfxSystem` 内部 `unordered_map<Entity, ParticlePool>`；component 只持 desc + `bool emitting` 双字段，保持 trivially-copyable。Tick 第一次见到 entity 时自动建池，无须显式 RegisterEmitter——一站式调用。Entity 销毁后池靠 `Tick` 时校验 `world.IsValid(e)` 自动回收。
+  - **CPU sim 模型**：每个粒子 `{ glm::vec2 position, glm::vec2 velocity, float age, float lifetime, glm::vec4 color, float size }`（AoS）。每 Tick：先 spawn（按 emissionRate × dt 累加器），再 age++/applyGravity/colorLerp/sizeLerp，最后清理 age >= lifetime。单 emitter 上限 `desc.maxParticles`，溢出新 spawn 直接 drop（不抢占老粒子——更可预期）。
+  - **实例 buffer**：参考 OrangeRender `samples/particle_field` 的 FIF slicing 模式——单 CpuToGpu buffer 切 N 块（framesInFlight），每帧写 GPU 不在读的那块；`vkCmdBindVertexBuffer` 用 offset 切。Per-instance layout = `{ vec2 position, float size, float pad, vec4 color }`（packed 32 字节）；vertex 用 gl_VertexIndex (0..3) 合成 quad 角点，无 per-vertex stream。
+  - **Shader**：`additive_billboard.vert` 把 `viewProj * (position + size * cornerOffset)` 投到 NDC，`color` passthrough；`additive_billboard.frag` 输出 `color`，blendOp = additive。Push constant = `mat4 viewProj`（与 main pass 共用 camera）。Shader 走与 toon/rim_light 相同的 `BuiltinParticleShaders` 工厂，注册到 AssetRegistry。
+  - **Pipeline 接入**：Pipeline 持 `VfxSystem* mpVfx`（非拥有），`Render()` 在 main pass 结束后 / postprocess 链开始前调 `mpVfx->DrawParticles(renderer, viewProj)`——粒子写到与 main pass 同一 HDR target，自然喂给 bloom。`mpVfx == nullptr` 时跳过这条 pass，不 break 既有 sample。
+  - **Scene 序列化**：`ParticleEmitter` 列在 ComponentSerializers 表里 = PureData（粒子池本身是 runtime state，不持久化；只 round-trip desc 与 emitting flag）。schema 字段 1:1 对应 desc 全字段 + emitting。
+  - **Out-of-scope（明确推迟）**：3D billboard towards camera（当前是 screen-aligned quad；3D 朝向留至 GPU 粒子时一并做）；曲线 / spline 颜色 / size 插值（当前仅 start/end 线性插值，曲线表等编辑器接 ImGui curve editor 时再加）；多粒子 texture atlas（仅纯色 quad）；particle 之间 sort（additive blending 与顺序无关，不排序）。
+- 验证：
+  1. `tests/render/VfxSystemTest.cpp` ≥4 case：发射器 spawn 计数随 emissionRate × time 单调；粒子超 lifetime 被回收；`maxParticles` 上限不被突破；scene Save/Load round-trip desc 完整。
+  2. ctest 全过。
+  3. `samples/09_vfx_demo` 启动后屏幕中央能看到一个明显的粒子流（fountain 形态，随时间）。Bloom 接通时 HDR 颜色 > 1 的粒子自动产生 bloom 光晕——肉眼验收不强求精确度，能看到"亮粒子带光晕"即可。
+- 验收标准：上述 3 条全过；VfxSystem 公共面就绪、Task 02b 在不破公共面的前提下追加 dissolve / emissive 模板。
+- Critical Path：是
+
+#### Task 02b：Dissolve + Emissive 内置 Material 模板
+- 描述：把两个 sample 常用的 shader 效果以 `BuiltinMaterials::LoadDissolve()` / `LoadEmissive()` 形态进引擎——dissolve 用 noise 阈值 + alpha discard + 边缘高亮，emissive 直接输出 HDR > 1 让既有 bloom pass 自动拾取。结构与 toon / rim_light 同构（同一 `Material` 描述符 + .spv 加载流程），让"加新内置 shader 模板"的成本下降到 ~150 行 GLSL + 一处 BuiltinMaterials 工厂注册。
+- 输入：Phase 5 / Task 02a（VfxSystem + samples/09_vfx_demo 已就绪）
+- 输出（Proposed）：
+  - `Modified: include/orange/engine/render/BuiltinMaterials.h`（加 `LoadDissolve` / `LoadEmissive` 两个工厂）
+  - `Modified: src/render/BuiltinMaterials.cpp`
+  - `Proposed: assets/shaders/builtin/dissolve.{vert,frag}` + 编译产物 `.spv`（vert 直接 forward 现有 textured 顶点 layout；frag 用 noise(uv * uNoiseScale) + uDissolveT 阈值做 discard，边缘 abs(dist - threshold) < uEdgeWidth 区域输出 uEdgeColor 高亮）
+  - `Proposed: assets/shaders/builtin/emissive.{vert,frag}` + `.spv`（frag 直接输出 `vec4(uEmissiveColor.rgb * uIntensity, 1.0)`，不计算光照）
+  - `Modified: tests/render/BuiltinMaterialsTest.cpp`（覆盖新模板加载 + uniform schema 正确）
+  - `Modified: samples/09_vfx_demo/main.cpp`（在原粒子 sample 基础上加：一个旋转 mesh 走 dissolve 模板 + ProceduralAnimator 驱 dissolveT；一个 mesh 走 emissive 模板，验证 bloom 拾取）
+- 影响模块：Render（仅追加 BuiltinMaterials 工厂）、Animation（仅消费现有 ProceduralAnimator）
+- 前置依赖：Task 02a
+- 实现要点：
+  - **dissolve shader**：输入 `uDissolveT`（0..1，0 = 完整可见、1 = 完全消失）+ `uNoiseScale`（控制 noise 频率）+ `uEdgeWidth` + `uEdgeColor`（边缘高亮颜色，HDR > 1 让 bloom 拾取）。Noise 函数用 hash-based 简易 noise（`fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453)`），不接 simplex / Perlin 库——保持依赖最小。Sample 端用 ProceduralAnimator 加 channel `dissolve_t = clamp(elapsed / 2.0, 0, 1)` 演示 2 秒消融。
+  - **emissive shader**：极简——frag 输出 `uEmissiveColor.rgb * uIntensity`，无光照计算。`uIntensity > 1` 时颜色超出 HDR 阈值，自动被 bloom pass 的 threshold extract 拾取——这是与 toon/rim_light 的关键差别，不需要 Pipeline 任何改动就能验证 bloom 联动。
+  - **顶点 shader 复用**：dissolve 与 emissive 的 vert 都直接复用现有 textured-mesh vertex layout（pos+uv），仅 frag 不同。这样两个新模板就是"复用 vert + 各自一个 frag" = 半个文件量。
+  - **uniform 描述符**：Material descriptor 列出全部 push-constant 字段；`MaterialInstance::SetUniform("dissolve_t", t)` 即可在 Pipeline 已有路径上 push 到 GPU——不引入新 binding 类型。
+- 验证：
+  1. `BuiltinMaterialsTest.cpp` 加 dissolve / emissive 加载 case，verify uniform / push-constant schema 与 GLSL 一致。
+  2. ctest 全过。
+  3. `samples/09_vfx_demo` 启动后能看到：粒子流 + 一个 mesh 在 ~2 秒内消融（边缘高亮过渡）+ 一个发光 mesh 自带 bloom 光晕。三者同屏。
+- 验收标准：上述 3 条全过；Phase 5 / Task 02 整体闭环——VFX 子系统骨架 + 两个 shader 模板就位，第一款游戏的"流体角色 dissolve / 发光眼 / 粒子尾迹"等典型 VFX 都可由游戏侧 ProceduralAnimator + 内置模板 + 自定义粒子 desc 直接实现，不再需要引擎改动。
+- Critical Path：否（VFX 系统骨架 02a 是 Critical Path，模板补全为可玩 demo 服务但不阻塞 Task 03 / Editor 起步）
 
 ### Phase 5.5：Save Game 系统
 

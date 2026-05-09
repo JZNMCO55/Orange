@@ -48,6 +48,7 @@
 #include "orange/engine/render/PostProcessChain.h"
 #include "orange/engine/render/PostProcessPasses.h"
 #include "orange/engine/render/RenderScene.h"
+#include "orange/engine/render/VfxSystem.h"
 #include "orange/engine/render/ShadowConfig.h"
 #include "orange/engine/scene/World.h"
 
@@ -63,6 +64,7 @@
 
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 // stb_image_write 仅 Pipeline::RequestCapture 路径用 PNG 落盘。stb 单头
 // 惯例：在唯一一个 TU 里 #define IMPLEMENTATION 把符号定义生进来。include
@@ -342,6 +344,8 @@ struct Pipeline::Impl
     // 非拥有指针；当前阶段仅持有，下游子任务真正消费。
     PostProcessChain* postProcessChain{nullptr};
     MaterialSystem*   materialSystem{nullptr};
+    // VfxSystem 也是非拥有指针——nullptr 时跳过粒子 pass。
+    VfxSystem*        vfxSystem{nullptr};
 
     // ---- Bloom mip-chain 资源 ------------------------------------------
     // chain 含 BloomPass 时按 HDR target 尺寸建 6 张 RGBA16F；HDR 重建 /
@@ -1350,6 +1354,32 @@ void Pipeline::SetMaterialSystem(MaterialSystem* system) noexcept
     if (mpImpl)
     {
         mpImpl->materialSystem = system;
+    }
+}
+
+void Pipeline::SetVfxSystem(VfxSystem* system) noexcept
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    mpImpl->vfxSystem = system;
+
+    // sample 端心智成本最低化：只要 Pipeline 已 Initialize、AssetRegistry
+    // 也在手，SetVfxSystem 顺手把 VfxSystem 的 GPU 资源建好。失败时落
+    // 一条 error log 并清空挂载——粒子 pass 自然 fallback 为 no-op。
+    if (system != nullptr && !system->IsInitialized()
+        && mpImpl->renderDevice != nullptr && mpImpl->assets != nullptr)
+    {
+        auto r = system->Initialize(mpImpl->renderDevice.get(),
+                                    /*framesInFlight=*/2u,
+                                    *mpImpl->assets);
+        if (r.IsErr())
+        {
+            ORANGE_LOG_ERROR("Pipeline::SetVfxSystem: 自动 Initialize 失败 (code={})",
+                             static_cast<unsigned>(r.Error()));
+            mpImpl->vfxSystem = nullptr;
+        }
     }
 }
 
@@ -2404,6 +2434,23 @@ void Pipeline::Render(Orange::Engine::World& world)
             if (offscreenOk)
             {
                 offscreenOk = impl.RecordOffscreenPass(viewProj);
+            }
+
+            // 粒子 pass 插在主 pass 与 bloom 之间——粒子写到同一 HDR
+            // target，颜色 a > 1 自动喂 bloom。VfxSystem 自管 HDR 的
+            // ShaderReadOnly ↔ ColorAttachment 翻转，对调用方无副作用。
+            if (offscreenOk && impl.vfxSystem != nullptr
+                && impl.vfxSystem->IsInitialized()
+                && impl.hdrColor)
+            {
+                impl.vfxSystem->DrawParticles(
+                    impl.offscreenCmd.get(),
+                    impl.hdrColor->GetDefaultView(),
+                    /*pDepthView=*/nullptr,
+                    glm::value_ptr(viewProj),
+                    impl.frameIndex,
+                    impl.hdrWidth,
+                    impl.hdrHeight);
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)

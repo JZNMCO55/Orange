@@ -13,12 +13,14 @@
 #include "orange/engine/render/MaterialInstance.h"
 #include "orange/engine/render/MaterialSystem.h"
 #include "orange/engine/render/MaterialTypes.h"
+#include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/Pipeline.h"
 #include "orange/engine/render/PostProcessChain.h"
 #include "orange/engine/render/PostProcessPasses.h"
 #include "orange/engine/render/RenderScene.h"
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/render/ShadowConfig.h"
+#include "orange/engine/render/VfxSystem.h"
 
 namespace Orange::Engine::Render
 {

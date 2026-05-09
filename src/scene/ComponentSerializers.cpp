@@ -20,6 +20,7 @@
 #include "orange/engine/physics/ColliderComponent.h"
 #include "orange/engine/physics/RigidBodyComponent.h"
 #include "orange/engine/render/LightComponent.h"
+#include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/NameComponent.h"
@@ -592,6 +593,125 @@ void WriteCollider(JsonWriter& writer,
 }
 
 // ---------------------------------------------------------------------------
+// ParticleEmitterComponent —— Render 模块的 PureData 组件，desc + emitting
+// flag 1:1 落 JSON。运行时粒子池由 VfxSystem 拥有，不持久化（属于
+// runtime state，归 Save Game）。
+// ---------------------------------------------------------------------------
+
+bool HasParticleEmitter(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::ParticleEmitterComponent>(entity);
+}
+
+void WriteParticleEmitter(JsonWriter& writer,
+                          std::string_view componentPath,
+                          Entity entity,
+                          const SaveContext& ctx)
+{
+    const auto* pe = ctx.world.GetComponent<Render::ParticleEmitterComponent>(entity);
+    if (pe == nullptr)
+    {
+        return;
+    }
+    const auto& d = pe->desc;
+
+    writer.WriteFloat(Join(componentPath, "emissionRate"), d.emissionRate);
+    writer.WriteFloat(Join(componentPath, "lifetimeMin"),  d.lifetimeMin);
+    writer.WriteFloat(Join(componentPath, "lifetimeMax"),  d.lifetimeMax);
+
+    const float spawnMin[2] = {d.spawnOffsetMin.x, d.spawnOffsetMin.y};
+    const float spawnMax[2] = {d.spawnOffsetMax.x, d.spawnOffsetMax.y};
+    writer.WriteFloatArray(Join(componentPath, "spawnOffsetMin"), spawnMin, 2);
+    writer.WriteFloatArray(Join(componentPath, "spawnOffsetMax"), spawnMax, 2);
+
+    const float velMin[2] = {d.initialVelocityMin.x, d.initialVelocityMin.y};
+    const float velMax[2] = {d.initialVelocityMax.x, d.initialVelocityMax.y};
+    writer.WriteFloatArray(Join(componentPath, "initialVelocityMin"), velMin, 2);
+    writer.WriteFloatArray(Join(componentPath, "initialVelocityMax"), velMax, 2);
+
+    const float gravity[2] = {d.gravity.x, d.gravity.y};
+    writer.WriteFloatArray(Join(componentPath, "gravity"), gravity, 2);
+
+    const float colorStart[4] = {d.colorStart.r, d.colorStart.g, d.colorStart.b, d.colorStart.a};
+    const float colorEnd[4]   = {d.colorEnd.r,   d.colorEnd.g,   d.colorEnd.b,   d.colorEnd.a};
+    writer.WriteFloatArray(Join(componentPath, "colorStart"), colorStart, 4);
+    writer.WriteFloatArray(Join(componentPath, "colorEnd"),   colorEnd,   4);
+
+    writer.WriteFloat(Join(componentPath, "sizeStart"), d.sizeStart);
+    writer.WriteFloat(Join(componentPath, "sizeEnd"),   d.sizeEnd);
+    writer.WriteInt(  Join(componentPath, "maxParticles"),
+                      static_cast<std::int64_t>(d.maxParticles));
+
+    writer.WriteBool(Join(componentPath, "emitting"), pe->emitting);
+}
+
+bool ReadParticleEmitter(const JsonReader& reader,
+                         std::string_view componentPath,
+                         Entity entity,
+                         const LoadContext& ctx)
+{
+    Render::ParticleEmitterComponent pe{};
+    auto& d = pe.desc;
+
+    // 数值字段都走"缺字段→默认值"语义；需要的硬要求只是 colorStart/End
+    // 与 spawn / velocity 区间是 vec 数组，类型不匹配视为格式坏。
+    d.emissionRate = static_cast<float>(reader.GetFloat(Join(componentPath, "emissionRate"),
+                                                       d.emissionRate));
+    d.lifetimeMin  = static_cast<float>(reader.GetFloat(Join(componentPath, "lifetimeMin"),
+                                                       d.lifetimeMin));
+    d.lifetimeMax  = static_cast<float>(reader.GetFloat(Join(componentPath, "lifetimeMax"),
+                                                       d.lifetimeMax));
+
+    auto readVec2 = [&](const std::string& path, glm::vec2& out) -> bool
+    {
+        if (!reader.Has(path))
+        {
+            return true;
+        }
+        float buf[2] = {out.x, out.y};
+        if (!reader.ReadFloatArray(path, buf, 2))
+        {
+            return false;
+        }
+        out = {buf[0], buf[1]};
+        return true;
+    };
+    auto readVec4 = [&](const std::string& path, glm::vec4& out) -> bool
+    {
+        if (!reader.Has(path))
+        {
+            return true;
+        }
+        float buf[4] = {out.x, out.y, out.z, out.w};
+        if (!reader.ReadFloatArray(path, buf, 4))
+        {
+            return false;
+        }
+        out = {buf[0], buf[1], buf[2], buf[3]};
+        return true;
+    };
+
+    if (!readVec2(Join(componentPath, "spawnOffsetMin"),     d.spawnOffsetMin)) return false;
+    if (!readVec2(Join(componentPath, "spawnOffsetMax"),     d.spawnOffsetMax)) return false;
+    if (!readVec2(Join(componentPath, "initialVelocityMin"), d.initialVelocityMin)) return false;
+    if (!readVec2(Join(componentPath, "initialVelocityMax"), d.initialVelocityMax)) return false;
+    if (!readVec2(Join(componentPath, "gravity"),            d.gravity))         return false;
+    if (!readVec4(Join(componentPath, "colorStart"),         d.colorStart))      return false;
+    if (!readVec4(Join(componentPath, "colorEnd"),           d.colorEnd))        return false;
+
+    d.sizeStart = static_cast<float>(reader.GetFloat(Join(componentPath, "sizeStart"), d.sizeStart));
+    d.sizeEnd   = static_cast<float>(reader.GetFloat(Join(componentPath, "sizeEnd"),   d.sizeEnd));
+    d.maxParticles = static_cast<std::uint32_t>(
+        reader.GetInt(Join(componentPath, "maxParticles"),
+                      static_cast<std::int64_t>(d.maxParticles)));
+
+    pe.emitting = reader.GetBool(Join(componentPath, "emitting"), pe.emitting);
+
+    ctx.world.AddComponent(entity, pe);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // AnimatorComponent
 //
 // 当前阶段 Animator 的"重建数据"只是 backend 名字。SkeletalAnimator
@@ -850,6 +970,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Name",             ComponentKind::PureData,         &HasName,             &WriteName,             &ReadName},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
+        {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
 
         // Backend-dependent：Pass 2 由 SceneSerialization 主流程按 entity
         // 配对调用 PhysicsWorld::AddBody / AnimatorRegistry::Create；这里

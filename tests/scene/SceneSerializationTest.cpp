@@ -16,6 +16,7 @@
 #include <orange/engine/physics/PhysicsWorld.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
@@ -49,6 +50,8 @@ using Orange::Engine::Physics::PhysicsWorld;
 using Orange::Engine::Physics::PolygonDesc;
 using Orange::Engine::Physics::RigidBodyComponent;
 using Orange::Engine::Render::DirectionalLight;
+using Orange::Engine::Render::ParticleEmitterComponent;
+using Orange::Engine::Render::ParticleEmitterDesc;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Scene::HierarchyComponent;
 using Orange::Engine::Scene::NameComponent;
@@ -803,6 +806,63 @@ void TestAnimatorBackendNameRoundTrip()
     std::fprintf(stdout, "  [PASS] animator backend name round-trip\n");
 }
 
+void TestParticleEmitterRoundTrip()
+{
+    const auto path = MakeTempScenePath("particle_emitter");
+
+    World source;
+    Entity e = source.CreateEntity();
+
+    ParticleEmitterDesc desc{};
+    desc.emissionRate       = 75.0f;
+    desc.lifetimeMin        = 0.4f;
+    desc.lifetimeMax        = 1.2f;
+    desc.spawnOffsetMin     = {-0.2f, 0.0f};
+    desc.spawnOffsetMax     = { 0.2f, 0.05f};
+    desc.initialVelocityMin = {-1.0f, 1.5f};
+    desc.initialVelocityMax = { 1.0f, 3.5f};
+    desc.gravity            = { 0.0f, -4.5f};
+    desc.colorStart         = { 1.0f, 0.7f, 0.2f, 2.0f};   // alpha > 1 → bloom
+    desc.colorEnd           = { 0.4f, 0.05f, 0.0f, 0.0f};
+    desc.sizeStart          = 0.06f;
+    desc.sizeEnd            = 0.18f;
+    desc.maxParticles       = 192;
+    source.AddComponent<ParticleEmitterComponent>(e, {desc, /*emitting=*/false});
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    World loaded;
+    auto loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto& reg = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<ParticleEmitterComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+    const auto* pe = loaded.GetComponent<ParticleEmitterComponent>(loadedE);
+    assert(pe != nullptr);
+    assert(FloatEq(pe->desc.emissionRate, 75.0f));
+    assert(FloatEq(pe->desc.lifetimeMin, 0.4f));
+    assert(FloatEq(pe->desc.lifetimeMax, 1.2f));
+    assert(FloatEq(pe->desc.spawnOffsetMax.y, 0.05f));
+    assert(FloatEq(pe->desc.initialVelocityMax.y, 3.5f));
+    assert(FloatEq(pe->desc.gravity.y, -4.5f));
+    assert(FloatEq(pe->desc.colorStart.a, 2.0f));
+    assert(FloatEq(pe->desc.colorEnd.r, 0.4f));
+    assert(FloatEq(pe->desc.sizeStart, 0.06f));
+    assert(FloatEq(pe->desc.sizeEnd, 0.18f));
+    assert(pe->desc.maxParticles == 192);
+    assert(pe->emitting == false);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] particle emitter round-trip\n");
+}
+
 void TestAnimatorWithoutRegistryGraceful()
 {
     const auto path = MakeTempScenePath("animator_no_registry");
@@ -857,6 +917,7 @@ int main()
     TestPolygonAndEdgeChainShapesRoundTrip();
     TestAnimatorBackendNameRoundTrip();
     TestAnimatorWithoutRegistryGraceful();
+    TestParticleEmitterRoundTrip();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
     return 0;
 }
