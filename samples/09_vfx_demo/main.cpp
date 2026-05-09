@@ -28,6 +28,7 @@
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/BuiltinPostProcessChain.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/IRenderPass.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/MaterialSystem.h>
@@ -35,8 +36,18 @@
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
 #include <orange/engine/render/PostProcessPasses.h>
+#include <orange/engine/render/RenderPassContext.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/VfxSystem.h>
+
+// game-side IRenderPass 直接使用 OrangeRender RHI——design-plan 把
+// "IRenderPass 不接 OrangeRender" 限制写在了引擎公共头那侧（context 透
+// 不透明 void* / 公共面），但 game 实现允许在自己的 .cpp 内 #include
+// 完整 RHI 头去调成员。这条与 CLAUDE.md 的 "src/render/** 是唯一可以
+// 引入 <orange/...> 的引擎模块" 不冲突——sample/game 仓自己的 .cpp
+// 不在 src/render/** 隔离规则范围。
+#include <orange/renderer/RenderDevice.h>
+#include <orange/rhi/RHI.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
@@ -49,8 +60,15 @@
 
 #include <array>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <utility>
+
+#if defined(_WIN32)
+    #define NOMINMAX
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+#endif
 
 using namespace Orange::Engine;
 using Orange::Engine::Asset::AssetHandle;
@@ -64,13 +82,17 @@ using Orange::Engine::Render::BloomPass;
 using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
+using Orange::Engine::Render::IRenderPass;
 using Orange::Engine::Render::MaterialInstance;
 using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::ParticleEmitterComponent;
 using Orange::Engine::Render::ParticleEmitterDesc;
 using Orange::Engine::Render::Pipeline;
+using Orange::Engine::Render::PipelineStage;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Render::RenderGraphBuilder;
+using Orange::Engine::Render::RenderPassContext;
 using Orange::Engine::Render::VfxSystem;
 using Orange::Engine::Scene::TransformComponent;
 
@@ -144,6 +166,169 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
                                        std::move(uvs),
                                        std::move(indices));
 }
+
+// 把"shaders/<x>.spv"相对路径锚定到 .exe 同目录——CWD 与 .exe 目录可
+// 能不一致（典型：从 repo 根 cd 进 /tmp 跑 build/bin/Debug/...exe）。
+// 与 src/render/BuiltinMaterials.cpp 内的 GetExecutableDir 同思路。
+std::filesystem::path GetSampleExecutableDir()
+{
+#if defined(_WIN32)
+    wchar_t buffer[MAX_PATH];
+    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len == MAX_PATH)
+    {
+        return std::filesystem::current_path();
+    }
+    return std::filesystem::path(std::wstring(buffer, len)).parent_path();
+#else
+    return std::filesystem::current_path();
+#endif
+}
+
+std::string ResolveSampleShaderPath(const char* relative)
+{
+    return (GetSampleExecutableDir() / relative).string();
+}
+
+// 自定义 IRenderPass 演示——往 HDR 顶部细带处加性写一条 cyan 光带，
+// 证明 Pipeline::InsertPass 真把 game-side pass 串进帧路径。pass 自管
+// HDR 的 layout 翻转（与 GodRaysPass 同模式：ShaderReadOnly →
+// ColorAttachment → 写一段 → 翻回 ShaderReadOnly）。
+class TintOverlayPass : public IRenderPass
+{
+public:
+    explicit TintOverlayPass(AssetRegistry& assets) : mpAssets(&assets) {}
+
+    const char* Name() const noexcept override { return "tint_overlay"; }
+
+    void Setup(RenderGraphBuilder& builder) override
+    {
+        if (builder.pDevice == nullptr)
+        {
+            return;  // Pipeline 尚未 Initialize 时 graceful 退化
+        }
+        if (mPipeline)
+        {
+            return;  // 已建好，幂等 Setup（resize 不重建——pipeline 与
+                     // viewport 解耦，BeginRendering 时按 ctx.width 写）
+        }
+        auto& rhi = *builder.pDevice;
+
+        // 顶点 shader 复用引擎的 fullscreen.vert.spv（big-triangle）。
+        // 路径锚定到 .exe 目录——CWD 可能与 .exe 目录不一致。
+        const std::string vsPath = ResolveSampleShaderPath("shaders/orange_engine/fullscreen.vert.spv");
+        const std::string fsPath = ResolveSampleShaderPath("shaders/sample_09/tint_overlay.frag.spv");
+
+        auto vsLoad = mpAssets->Load<ShaderAsset>(vsPath);
+        auto fsLoad = mpAssets->Load<ShaderAsset>(fsPath);
+        if (vsLoad.IsErr() || fsLoad.IsErr())
+        {
+            std::fprintf(stderr,
+                         "TintOverlayPass: 加载 SPIR-V 失败 (vs=%d / fs=%d)\n",
+                         vsLoad.IsErr() ? 1 : 0, fsLoad.IsErr() ? 1 : 0);
+            return;
+        }
+        const auto* vs = mpAssets->Get(vsLoad.Value());
+        const auto* fs = mpAssets->Get(fsLoad.Value());
+        if (vs == nullptr || fs == nullptr || vs->Empty() || fs->Empty())
+        {
+            return;
+        }
+
+        Orange::Rhi::ShaderModuleDesc smv{};
+        smv.mStage      = Orange::Rhi::ShaderStage::Vertex;
+        smv.mpCode      = vs->SpirV().data();
+        smv.mCodeSize   = vs->ByteSize();
+        smv.mpDebugName = "sample_09.tint_overlay.vs";
+        mVs = rhi.CreateShaderModule(smv);
+
+        Orange::Rhi::ShaderModuleDesc smf{};
+        smf.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        smf.mpCode      = fs->SpirV().data();
+        smf.mCodeSize   = fs->ByteSize();
+        smf.mpDebugName = "sample_09.tint_overlay.fs";
+        mFs = rhi.CreateShaderModule(smf);
+        if (!mVs || !mFs)
+        {
+            return;
+        }
+
+        Orange::Rhi::GraphicsPipelineDesc pd{};
+        pd.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,   mVs.get(), "main"});
+        pd.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment, mFs.get(), "main"});
+        pd.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        pd.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        pd.mDepthStencil.mDepthTestEnable  = false;
+        pd.mDepthStencil.mDepthWriteEnable = false;
+        // 加性 blend：tint 按 srcAlpha=ONE/dstAlpha=ONE 累加到既有 HDR。
+        Orange::Rhi::ColorBlendAttachmentDesc blend{};
+        blend.mBlendEnable         = true;
+        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+        blend.mColorWriteMask      = Orange::Rhi::ColorWriteMask::All;
+        pd.mColorBlend.mAttachments.push_back(blend);
+        pd.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::RGBA16Float);
+        pd.mpDebugName = "sample_09.tint_overlay";
+        mPipeline = rhi.CreateGraphicsPipeline(pd);
+    }
+
+    void Execute(RenderPassContext& ctx) override
+    {
+        if (!mPipeline || ctx.pCmdList == nullptr || ctx.pHdrColorView == nullptr)
+        {
+            return;
+        }
+        auto& cmd = *ctx.pCmdList;
+        auto& hdrTex = ctx.pHdrColorView->GetTexture();
+
+        // AfterMainPass 阶段进入时 HDR 在 ShaderReadOnly（粒子 pass 末
+        // 尾翻回的）。pass 翻回 ColorAttachment 写自己的 tint，再翻回
+        // ShaderReadOnly 维持调用方 invariant。
+        cmd.TransitionTexture(hdrTex,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly,
+                              Orange::Rhi::TextureLayout::ColorAttachment);
+
+        Orange::Rhi::ColorAttachment att{};
+        att.mpView   = ctx.pHdrColorView;
+        att.mLoadOp  = Orange::Rhi::LoadOp::Load;
+        att.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+        Orange::Rhi::RenderingDesc rd{};
+        rd.mRenderArea.mWidth  = ctx.width;
+        rd.mRenderArea.mHeight = ctx.height;
+        rd.mColorAttachments.push_back(att);
+        cmd.BeginRendering(rd);
+
+        Orange::Rhi::RHIViewport vp{};
+        vp.mWidth    = static_cast<float>(ctx.width);
+        vp.mHeight   = static_cast<float>(ctx.height);
+        vp.mMinDepth = 0.0f;
+        vp.mMaxDepth = 1.0f;
+        cmd.SetViewport(vp);
+        Orange::Rhi::RHIScissor sc{};
+        sc.mWidth  = ctx.width;
+        sc.mHeight = ctx.height;
+        cmd.SetScissor(sc);
+
+        cmd.BindGraphicsPipeline(*mPipeline);
+        cmd.Draw(3, 1, 0, 0);
+        cmd.EndRendering();
+
+        cmd.TransitionTexture(hdrTex,
+                              Orange::Rhi::TextureLayout::ColorAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+    }
+
+private:
+    AssetRegistry*                                mpAssets{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> mVs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> mFs;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>     mPipeline;
+};
 
 class VfxLayer : public Layer
 {
@@ -368,6 +553,12 @@ int main(int argc, char** argv)
 
     VfxSystem vfx;
     pipeline.SetVfxSystem(&vfx);
+
+    // 注册 game-side 自定义 IRenderPass —— 演示 Pipeline::InsertPass 扩
+    // 展点的端到端走通。pass 在 AfterMainPass 阶段被 Pipeline 调一次，
+    // 写一条屏顶 cyan band 到 HDR target，bloom + tonemap 后仍可见。
+    pipeline.InsertPass(PipelineStage::AfterMainPass,
+                        std::make_unique<TintOverlayPass>(assets));
 
     if (!captureCli.outPath.empty())
     {

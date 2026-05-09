@@ -78,6 +78,7 @@
     - [Task 02a：VfxSystem 粒子系统骨架 ✅](#task-02avfxsystem-粒子系统骨架-)
     - [Task 02b：Dissolve + Emissive 内置 Material 模板 ✅](#task-02bdissolve--emissive-内置-material-模板-)
     - [Task 03：体积光（screen-space god rays） ✅](#task-03体积光screen-space-god-rays-)
+    - [Task 04：自定义 RenderPass 注入正式启用 ✅](#task-04自定义-renderpass-注入正式启用-)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -2168,6 +2169,37 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
   3. `samples/09_vfx_demo` 启动 + 截屏：屏幕能看到从太阳方向（屏内）发散的光柱；粒子流 / emissive cube 周围的 god rays 比 dissolve cube 强（前两者像素在 far plane，god rays 通过；dissolve cube 写 depth → 遮挡光柱）。
 - 验收标准：上述 3 条全过；GodRaysPass 在 PostProcessChain 中作为可选 pass 就位，第一款游戏的"洞穴 / 森林 / 室内透光"等场景可由游戏侧把 sunWorldDir + density 调好直接拿到 god rays 视觉，不再需要引擎改动。
 - Critical Path：否（视觉提升 / 不阻塞 Editor / Task 04 / Save Game）
+
+#### Task 04：自定义 RenderPass 注入正式启用 ✅
+- 描述：把 docs/extension-points.md §4 写明的"游戏侧不修改引擎源码地往 Pipeline 编排里插一段自定义 pass"路径真接通——交付 `IRenderPass` 抽象接口、`RenderPassContext` / `RenderGraphBuilder` 隔离层、`Pipeline::InsertPass(stage, std::unique_ptr<IRenderPass>)` 公共 API 与对应 `PipelineStage` 枚举，并在 Pipeline.cpp 主流程的固定 hook 点把已注册 pass 串进帧。Phase 3 起留的"`InsertPass` assert(false)"占位由本 task 替换为真功能实现；CLAUDE.md "InsertPass 不提前 stub" 这条历史记录到此终结。
+- 输入：Phase 5 / Task 03（god rays 接通后 Pipeline 主流程的"主 pass / particle / bloom / godrays / tonemap"五段编排已稳定，作为 InsertPass 的固定锚点）
+- 输出（Proposed）:
+  - `Proposed: include/orange/engine/render/IRenderPass.h`（公共面：`PipelineStage` 枚举 + `IRenderPass` 抽象基类 + `RenderGraphBuilder` / `RenderPassContext` 前向声明）
+  - `Proposed: include/orange/engine/render/RenderPassContext.h`（Setup / Execute 上下文 struct，与 `IPostProcessPass` 的两个 context 同思路：opaque `void*` 透传 OrangeRender RHI 类型，避免公共面感染 `<orange/...>`）
+  - `Modified: include/orange/engine/render/Pipeline.h`（加 `InsertPass(stage, pass)` + `RemovePassesAt(stage)` + `ClearInsertedPasses()` 三方法）
+  - `Modified: src/render/Pipeline.cpp`（每个 stage 的 hook 点调用对应已注册 pass 的 Execute；新加 pass 时 lazy Setup；Shutdown / OnResize 时重新 Setup 让 pass 能跟踪 HDR 重建）
+  - `Proposed: tests/render/InsertPassTest.cpp`（公共面测试：注册 N 个 pass、查询 PassCount、不同 stage 互相隔离、Clear 路径；不接 GPU——具体绘制行为由 sample 验证）
+  - `Modified: samples/09_vfx_demo/main.cpp`（注册一个最小自定义 pass 演示——譬如 AfterMainPass 阶段往 HDR 加一条对角线 tint 条带，screenshot 能看到游戏侧 pass 真接进帧路径）
+- 影响模块：Render（核心改动）；其它模块零接触
+- 前置依赖：Phase 5 / Task 03
+- 实现要点：
+  - **PipelineStage 枚举（首版三档）**：`AfterShadow` / `AfterMainPass` / `AfterPostProcess`。覆盖最常见的扩展点：shadow caster 注入（譬如 fog-volume shadow）→ AfterShadow；transparent / 水面 / 屏幕扭曲 → AfterMainPass（在 main pass 与 bloom 之间，HDR target 处于 ColorAttachment）；ImGui / debug overlay → AfterPostProcess（stage B 收尾后，sample 端通过 renderer.SubmitItem 路径）。design-plan 文档原计划 5 档（Shadow / Opaque / Transparent / PostProcess / UI），0.x 收为 3 档够用——后续按需扩展不破公共面。
+  - **IRenderPass 接口**：`Name()` / `Setup(RenderGraphBuilder&)` / `Execute(RenderPassContext&)` 三方法。Setup 在 InsertPass 时被 Pipeline 调一次（让 pass 建 GPU 资源——pipeline / descriptor / uniform buffer 等）；Execute 每帧按 stage hook 顺序调一次。`Name()` 给 debug label / FindPass 查找用。
+  - **RenderGraphBuilder（占位接口）**：当前 Pipeline.cpp 不做自动 barrier / 依赖分析（沿用 Phase 3 的"手写 transition"模式），但公共面就把 `Read(handle)` / `Write(handle)` 两个声明留出来——具体 handle 类型仅前向声明，Pipeline 实现端忽略调用。这条让 game 端 pass 写 setup 时就按"声明依赖"风格组织代码，将来 Pipeline 真接 RenderGraph 自动调度时不破调用方。
+  - **RenderPassContext**：`pCmdList` / `pHdrColorView` / `pSceneDepthView` / `pRenderer` / `viewProjMatrixData` (16 floats) / `frameIndex` / `hdrWidth, hdrHeight`。AfterMainPass / AfterShadow 的 cmd list 来自 Pipeline 的 offscreenCmd（在 BeginRendering 段内）；AfterPostProcess 阶段 cmd list 为 nullptr，pass 通过 `pRenderer->SubmitItem` 提交 fullscreen item。
+  - **Pipeline 内部存储**：`std::vector<std::unique_ptr<IRenderPass>>` × `kStageCount` 数组；InsertPass 后 push 到对应 stage 的 vec 末尾、调 Setup。Render 路径在每个 stage hook 点调 `for (auto& p : stages[stage]) p->Execute(ctx);`。pass 的析构在 Pipeline 析构 / ClearInsertedPasses 时；没有显式按 ID 移除（vector pop 端点足够—— 0.x 不引入 handle/registry 表）。
+  - **Lifecycle 与 HDR resize**：HDR target 重建时 Pipeline 给所有已注册 pass 重调一次 Setup，让 pass 能更新 per-resolution 资源（fullscreen pipeline / descriptor 写到 hdrView 等）。pass 自己用 `RenderGraphBuilder::IsResize` 之类的 hint flag 区分首次 vs resize（0.x 不强制；pass 自己的 Setup 应该幂等）。
+  - **Out-of-scope（明确推迟）**：
+    - 真 RenderGraph 自动 barrier / aliasing / cull 不连通的 pass —— Phase 6+ 编辑器 / 工具链阶段再做；
+    - 跨 pass 的 transient 资源管理（FrameGraph 风格）——0.x pass 自管 GPU 资源；
+    - PassRegistry name-based factory + scene 序列化里指定要 enable 哪些 pass（这是 Phase 6 编辑器场景的事情）；
+    - PipelineStage 中的 Opaque / Transparent / UI 三档（0.x 仅 3 档，覆盖 80% 用例；按需扩展）。
+- 验证：
+  1. `tests/render/InsertPassTest.cpp` ≥4 case：默认空、InsertPass 后 PassCount 正确、不同 stage 互不串扰、ClearInsertedPasses 后归零。
+  2. ctest 全过——确认 Pipeline.cpp 重构后既有 sample / 测试不破。
+  3. `samples/09_vfx_demo` 启动 + 截屏：屏幕上能看到 game 侧自定义 pass 写出的视觉痕迹（如对角 tint 条带），证明 pass 真被 Pipeline 调进帧路径。
+- 验收标准：上述 3 条全过；`Pipeline::InsertPass` 公共 API 就位，第一款游戏的"水面 / 屏幕扭曲 / 自定义 debug overlay"等扩展可以零引擎改动直接接入。Editor 起步阶段的 ImGui dock space 路径同样通过 AfterPostProcess 这个 stage 接通，不再需要引擎侧"占位 ImGui"的临时路径。
+- Critical Path：是（Editor 起步 + 游戏侧自定义渲染扩展的关键解锁）
 
 ### Phase 5.5：Save Game 系统
 

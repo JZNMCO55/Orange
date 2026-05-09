@@ -47,6 +47,8 @@
 #include "orange/engine/render/MaterialTypes.h"
 #include "orange/engine/render/PostProcessChain.h"
 #include "orange/engine/render/PostProcessPasses.h"
+#include "orange/engine/render/IRenderPass.h"
+#include "orange/engine/render/RenderPassContext.h"
 #include "orange/engine/render/RenderScene.h"
 #include "orange/engine/render/VfxSystem.h"
 #include "orange/engine/render/ShadowConfig.h"
@@ -350,6 +352,12 @@ struct Pipeline::Impl
     MaterialSystem*   materialSystem{nullptr};
     // VfxSystem 也是非拥有指针——nullptr 时跳过粒子 pass。
     VfxSystem*        vfxSystem{nullptr};
+
+    // 游戏侧自定义 IRenderPass 注册表 —— 每个 PipelineStage 一个 vector。
+    // InsertPass 时 push_back 到对应 vec；Render 路径在 stage hook 点
+    // 按顺序调 Execute；Pipeline 析构 / ClearInsertedPasses 时整体释放。
+    static constexpr std::size_t kPipelineStageCount = 3;  // 与 PipelineStage 枚举对齐
+    std::array<std::vector<std::unique_ptr<IRenderPass>>, kPipelineStageCount> insertedPasses;
 
     // ---- Bloom mip-chain 资源 ------------------------------------------
     // chain 含 BloomPass 时按 HDR target 尺寸建 6 张 RGBA16F；HDR 重建 /
@@ -1342,6 +1350,13 @@ void Pipeline::Shutdown()
     impl.templatePipelines.clear();
     impl.shaderModules.clear();
 
+    // 先释放 game-side InsertPass —— 它们的析构可能依赖 RHI 句柄
+    // （pipeline / descriptor 等），必须在 renderDevice 还活着时跑。
+    for (auto& v : impl.insertedPasses)
+    {
+        v.clear();
+    }
+
     impl.ReleaseBloomResources();
     impl.godRaysSet.reset();
     impl.godRaysPool.reset();
@@ -1441,6 +1456,83 @@ void Pipeline::SetMaterialSystem(MaterialSystem* system) noexcept
     {
         mpImpl->materialSystem = system;
     }
+}
+
+namespace
+{
+
+constexpr std::size_t StageIndex(PipelineStage stage) noexcept
+{
+    return static_cast<std::size_t>(stage);
+}
+
+}  // namespace
+
+void Pipeline::InsertPass(PipelineStage stage, std::unique_ptr<IRenderPass> pass)
+{
+    if (!mpImpl || !pass)
+    {
+        return;
+    }
+    const std::size_t idx = StageIndex(stage);
+    if (idx >= mpImpl->insertedPasses.size())
+    {
+        ORANGE_LOG_ERROR("Pipeline::InsertPass: 无效 stage 编号 {}",
+                         static_cast<unsigned>(idx));
+        return;
+    }
+
+    // 立即调一次 Setup，让 pass 建 GPU 资源（pipeline / descriptor 等）。
+    // 即使 Pipeline 自己尚未 Initialize，Setup 也会被触发——pass 自己
+    // 负责对 nullptr device 等情况兜底。这条让"先 InsertPass 后
+    // Initialize Pipeline" 与"先 Initialize Pipeline 后 InsertPass"
+    // 两条路径都合法，调用方不必关心顺序。
+    RenderGraphBuilder builder{};
+    builder.SetKind(RenderGraphBuilder::SetupKind::Initial);
+    builder.pRenderer = mpImpl->renderer.get();
+    builder.pDevice   = mpImpl->renderDevice ? &mpImpl->renderDevice->GetRhiDevice() : nullptr;
+    pass->Setup(builder);
+
+    mpImpl->insertedPasses[idx].emplace_back(std::move(pass));
+}
+
+void Pipeline::RemovePassesAt(PipelineStage stage)
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    const std::size_t idx = StageIndex(stage);
+    if (idx < mpImpl->insertedPasses.size())
+    {
+        mpImpl->insertedPasses[idx].clear();
+    }
+}
+
+void Pipeline::ClearInsertedPasses()
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    for (auto& v : mpImpl->insertedPasses)
+    {
+        v.clear();
+    }
+}
+
+std::size_t Pipeline::InsertedPassCount(PipelineStage stage) const noexcept
+{
+    if (!mpImpl)
+    {
+        return 0;
+    }
+    const std::size_t idx = StageIndex(stage);
+    if (idx >= mpImpl->insertedPasses.size())
+    {
+        return 0;
+    }
+    return mpImpl->insertedPasses[idx].size();
 }
 
 void Pipeline::SetVfxSystem(VfxSystem* system) noexcept
@@ -2727,6 +2819,29 @@ void Pipeline::Render(Orange::Engine::World& world)
                 offscreenOk = impl.RecordShadowPass(activeLight, lightVP);
             }
 
+            // game-side AfterShadow inserted passes —— shadow map 已写完，
+            // 主 pass 还没开始。pass 自管 hdrColor / sceneDepth 的 layout
+            // transitions（典型用例：往 shadow map 上叠加额外 caster）。
+            if (offscreenOk)
+            {
+                auto& v = impl.insertedPasses[StageIndex(PipelineStage::AfterShadow)];
+                if (!v.empty())
+                {
+                    RenderPassContext ctx{};
+                    ctx.pRenderer       = impl.renderer.get();
+                    ctx.pDevice         = &impl.renderDevice->GetRhiDevice();
+                    ctx.pCmdList        = impl.offscreenCmd.get();
+                    ctx.pHdrColorView   = impl.hdrColor   ? impl.hdrColor->GetDefaultView()   : nullptr;
+                    ctx.pSceneDepthView = impl.sceneDepth ? impl.sceneDepth->GetDefaultView() : nullptr;
+                    ctx.pSharedPool     = nullptr;
+                    ctx.pViewProjData   = glm::value_ptr(viewProj);
+                    ctx.width           = impl.hdrWidth;
+                    ctx.height          = impl.hdrHeight;
+                    ctx.frameIndex      = impl.frameIndex;
+                    for (auto& p : v) { p->Execute(ctx); }
+                }
+            }
+
             if (offscreenOk)
             {
                 offscreenOk = impl.RecordOffscreenPass(viewProj);
@@ -2747,6 +2862,33 @@ void Pipeline::Render(Orange::Engine::World& world)
                     impl.frameIndex,
                     impl.hdrWidth,
                     impl.hdrHeight);
+            }
+
+            // game-side AfterMainPass inserted passes —— main + particle 已
+            // 写完 HDR、bloom / godrays 还没跑。HDR target 当前在
+            // ShaderReadOnly（粒子 pass 末尾翻回的）；pass 想写就自己
+            // transition 回 ColorAttachment + BeginRendering(Load) + 写 +
+            // EndRendering + 翻回 ShaderReadOnly（与 GodRaysPass 同模式）。
+            // sceneDepth 当前在 DepthStencilAttachment（主 pass 末尾未翻），
+            // pass 若需采样 depth 自己负责 transition。
+            if (offscreenOk)
+            {
+                auto& v = impl.insertedPasses[StageIndex(PipelineStage::AfterMainPass)];
+                if (!v.empty())
+                {
+                    RenderPassContext ctx{};
+                    ctx.pRenderer       = impl.renderer.get();
+                    ctx.pDevice         = &impl.renderDevice->GetRhiDevice();
+                    ctx.pCmdList        = impl.offscreenCmd.get();
+                    ctx.pHdrColorView   = impl.hdrColor   ? impl.hdrColor->GetDefaultView()   : nullptr;
+                    ctx.pSceneDepthView = impl.sceneDepth ? impl.sceneDepth->GetDefaultView() : nullptr;
+                    ctx.pSharedPool     = nullptr;
+                    ctx.pViewProjData   = glm::value_ptr(viewProj);
+                    ctx.width           = impl.hdrWidth;
+                    ctx.height          = impl.hdrHeight;
+                    ctx.frameIndex      = impl.frameIndex;
+                    for (auto& p : v) { p->Execute(ctx); }
+                }
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)
@@ -2878,6 +3020,30 @@ void Pipeline::Render(Orange::Engine::World& world)
         impl.renderer->SubmitItem(item);
     }
     (void)offscreenOk;  // 离屏失败也继续走 stage B —— renderer 状态机要 Begin/EndFrame 配对
+
+    // game-side AfterPostProcess inserted passes —— stage B 已收尾，swap-
+    // chain 上现已是 LDR final image。pCmdList 为 nullptr —— 此阶段
+    // OrangeRender 还没暴露 swap-chain 直 RHI，pass 通过 renderer-
+    // >SubmitItem 提交自己的 fullscreen item（典型 ImGui dock space /
+    // debug overlay）。
+    {
+        auto& v = impl.insertedPasses[StageIndex(PipelineStage::AfterPostProcess)];
+        if (!v.empty())
+        {
+            RenderPassContext ctx{};
+            ctx.pRenderer       = impl.renderer.get();
+            ctx.pDevice         = impl.renderDevice ? &impl.renderDevice->GetRhiDevice() : nullptr;
+            ctx.pCmdList        = nullptr;  // 此阶段 cmd 由 renderer 私有 swap-chain pass 持有
+            ctx.pHdrColorView   = nullptr;  // HDR 已 retire
+            ctx.pSceneDepthView = nullptr;
+            ctx.pSharedPool     = nullptr;
+            ctx.pViewProjData   = nullptr;
+            ctx.width           = impl.hdrWidth;
+            ctx.height          = impl.hdrHeight;
+            ctx.frameIndex      = impl.frameIndex;
+            for (auto& p : v) { p->Execute(ctx); }
+        }
+    }
 
     if (Orange::Failed(impl.renderer->EndFrame()))
     {

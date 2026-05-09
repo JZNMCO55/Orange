@@ -36,6 +36,7 @@ orange_engine_add_test(pipeline_template_cache_test render/PipelineTemplateCache
 orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.cpp)
 orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(vfx_system_test             render/VfxSystemTest.cpp)
+orange_engine_add_test(insert_pass_test            render/InsertPassTest.cpp)
 
 # Animation：FSM + Backend Registry（Phase 4 / Task 01 公共接口）
 # + ProceduralAnimator 后端（Task 04，shader-uniform 驱动）

@@ -20,6 +20,7 @@
 
 #include <orange/engine/OrangeEngineExport.h>
 #include <orange/engine/core/Result.h>
+#include <orange/engine/render/IRenderPass.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -121,6 +122,31 @@ public:
     // 调用方仍需要自己每帧调 `VfxSystem::Tick(world, dt)` 推进 sim—
     // Pipeline 不接管 sim，避免把 frame budget 耦合到 sim 时序。
     void SetVfxSystem(VfxSystem* system) noexcept;
+
+    // 把游戏侧自定义 IRenderPass 挂到指定 stage 的 hook 点上。Pipeline
+    // 立即调一次 pass 的 Setup（让 pass 建 GPU 资源），之后每帧到达该
+    // stage 时按 Insert 顺序逐个调 Execute。
+    //
+    // 同 stage 多次 InsertPass → 按调用顺序排队（第一次 Insert 的 pass
+    // 第一个 Execute）。
+    //
+    // pass 必须非空；nullptr silent-ignore——与 PostProcessChain::AddPass
+    // 同行为，避免调用方 forgot-init 时 crash。
+    //
+    // 详见 docs/extension-points.md §4 与 IRenderPass.h。
+    void InsertPass(PipelineStage stage, std::unique_ptr<IRenderPass> pass);
+
+    // 清掉某个 stage 上所有已注册 pass。pass 的 unique_ptr 析构发生在
+    // 本调用内（通常会触发 pass 的 destructor 释放 GPU 资源）。
+    void RemovePassesAt(PipelineStage stage);
+
+    // 清掉所有 stage 上的所有 pass。Pipeline::Shutdown 会自动做这件事，
+    // 调用方一般不需要手动调；提供入口主要给 hot-reload / 编辑器
+    // 切换 chain 等场景。
+    void ClearInsertedPasses();
+
+    // 当前 stage 上已注册的 pass 数（诊断 / 测试用）。
+    std::size_t InsertedPassCount(PipelineStage stage) const noexcept;
 
     // 请求把下一帧的离屏 HDR 渲染结果落盘成 PNG。下一次 Render() 会在
     // bloom mip-chain 完成、tonemap 之前追加一次 GPU readback 到 host-
