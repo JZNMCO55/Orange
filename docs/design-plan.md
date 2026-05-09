@@ -910,13 +910,13 @@ Removed: Src/                              (整目录，src/ 替换)
 - 至少一个 sample / 测试覆盖：保存 → 重启 → 加载 → 状态匹配
 
 #### Task Breakdown（要点级）
-- Task 01：`SaveGameRegistry` 公共接口与 component 注册流程
-- Task 02：`SaveGameSystem::Save` / `Load` 主流程（原子写入 + CRC + schema 校验）
-- Task 03：平台路径解析（Windows `SHGetKnownFolderPath` 包装）
-- Task 04：Slot 元信息 + autosave 调度
-- Task 05：Migrator hook 接口 + 至少一个版本迁移示例
+- Task 01：`SaveGameRegistry` 公共接口与 component 注册流程 ✅
+- Task 02：`SaveGameSystem::Save` / `Load` 主流程（原子写入 + CRC + schema 校验） ✅
+- Task 03：平台路径解析（Windows `SHGetKnownFolderPath` 包装） ✅
+- Task 04：Slot 元信息 + autosave 调度 ✅
+- Task 05：Migrator hook 接口 + 至少一个版本迁移示例 ✅
 - Task 06：损坏与错误路径测试覆盖
-- Task 07：Sample 关卡集成存档 / 加载流程
+- Task 07：Sample 关卡集成存档 / 加载流程 ✅
 
 ### Phase 6+：长期演进
 
@@ -2272,13 +2272,286 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 
 ### Phase 5.5：Save Game 系统
 
-- Task 01：`SaveGameRegistry` 公共接口与 component 注册流程
-- Task 02：`SaveGameSystem::Save` / `Load` 主流程（原子写入 + CRC + schema 校验）
-- Task 03：平台路径解析（Windows `SHGetKnownFolderPath` 包装；Linux/Mac 接口预留）
-- Task 04：Slot 元信息 + autosave 调度
-- Task 05：Migrator hook 接口 + 至少一个版本迁移示例
-- Task 06：损坏存档与错误路径测试覆盖
-- Task 07：Sample 关卡集成存档 / 加载流程
+#### Task 01：`SaveGameRegistry` 公共接口与 component 注册流程 ✅
+- 描述：把"玩家进度"存档子系统的注册容器先建起来。引擎只提供注册门面与 type-erased 调度入口，**不内置**任何 component；游戏侧为每个可入存档的 component 类型 TComp 手写 `write` / `read` 两个 callback，调 `Register<TComp>(name, version, write, read)` 接入。注册表本身只做"有序存储 + 按名查询"，不知道哪些 entity 算"可入存档"——该策略由 Task 02 主流程决定，让两层后续各自演化时不互相牵连。
+- 输入：Phase 5（Scene 序列化基础设施 + `Core::Serialization` JsonReader/Writer + `Core::SchemaVersion`）已就绪
+- 输出（Existing）：
+  - `Existing: include/orange/engine/save/SaveGameRegistry.h`（公共 API：`SaveGameRegistry` 容器 + 模板 `Register<TComp>` + `Find` / `Entries` / `Size` / `Empty`；`SaveGameComponentEntry` type-erased entry）
+  - `Existing: src/save/SaveGameRegistry.cpp`（重名检查 + 表追加；模板包装层在 .h 内 inline）
+  - `Existing: tests/save/SaveGameRegistryTest.cpp`（6 个 case：empty / 单注册 / 输入校验 / 重名拒绝 / 注册顺序稳定 / type-erased entry 端到端 roundtrip）
+- 影响模块：Save（新增）、Core / Scene（仅复用 World / Entity / Serialization / SchemaVersion，不动）
+- 前置依赖：Phase 5 全部任务（依赖 Scene 序列化已稳定的 World / Entity / JsonReader / JsonWriter / SchemaVersion 类型）
+- 实现要点：
+  - **公共面只见 `JsonReader` / `JsonWriter` / `SchemaVersion`**——不暴露 nlohmann::json，与项目级"序列化必须走 Core::Serialization"约束一致。
+  - **完全手写反射**——不引入任何反射 / codegen（CLAUDE.md "Serialization and reflection"）。游戏侧每个可入存档 component 手写两个 callback：`void write(JsonWriter&, path, const TComp&)` / `bool read(const JsonReader&, path, TComp&)`。返回 false = 数据格式坏（缺字段 / 类型错），调用方应整体回滚 Load。
+  - **每条注册带独立 `SchemaVersion`**——同一存档文件里不同 component 的 schema 各自演化。Save 写入 `name + version + payload` 三件套；Load 时 reader 用注册侧 version 与文件里 version 配对，触发 migrator（Task 05）或 fail-fast（major 不匹配）。
+  - **`SaveGameComponentEntry` 用 `std::function`** 而非裸函数指针：模板包装层要捕获 typed callbacks 来 type-erase 成操作 `(World&, Entity)` 的形态，裸函数指针无法承载 capture。Save / Load 是低频路径（每存档一次），间接调用开销可忽略；换来公共面简洁。
+  - **字段命名与 Scene 序列化对齐**——`Has` / `Write` / `Read` 三件套，签名匹配 `src/scene/ComponentSerializers.h::ComponentSerializerEntry`，让 Task 02 主流程能复用同一种"对每个 entity 跑一遍 entries"的循环范式。
+  - **注册顺序稳定**——`Entries()` 顺序 = 注册顺序。Save 主流程按这个顺序产出 JSON，让落地的字段排列稳定（diff 友好）。
+  - **失败语义**：name 空 / version 无效 / callback 空 → `InvalidArgument`；同名 component 已注册 → `AlreadyExists`（原 entry 不被替换）。
+  - **Out-of-scope（明确推迟）**：
+    - Save / Load 主流程 → Task 02
+    - "哪些 entity 算可入存档"的策略（典型方案：tag component） → Task 02
+    - 平台路径解析、slot 元信息、autosave、migrator → Task 03 / 04 / 05
+    - 损坏存档错误路径测试覆盖 → Task 06
+- 验证：
+  1. `tests/save/SaveGameRegistryTest` 6 case 全过：空 registry / 单次注册 / 输入校验失败（4 路径）/ 重名拒绝 / 注册顺序稳定 / type-erased entry 端到端 roundtrip（含半数据 read 失败路径）
+  2. ctest 全过——确认新增 test 不破现有 33 个 test（实际 34/34 全过）
+  3. `cmake --build build --config Debug --target orange_engine` 无 warning
+- 验收标准：上述 3 条全部满足；`SaveGameRegistry` 公共 API 就位且对 Task 02 主流程接入保持稳定（`Find` / `Entries` 是 Task 02 唯一需要的入口）。
+- Critical Path：是（Phase 5.5 后续所有 Task 都依赖此 registry 形态）
+
+#### Task 02：`SaveGameSystem::Save` / `Load` 主流程（原子写入 + CRC + schema 校验） ✅
+- 描述：把存档子系统的"读 / 写到磁盘"主流程建起来。提供 `SaveGameSystem` service（不是 ECS system，是手动调用门面）和 `SaveableComponent` tag（标记"可入存档"实体）；定义 `.save` 文件格式（16 字节 binary header + JSON payload）；落地原子写入（`<path>.tmp` → `FlushFileBuffers` → `std::filesystem::rename`）+ IEEE 802.3 CRC32 校验 + 顶层 / 每组件 `SchemaVersion::CanRead` 严格检查 + 失败回滚（World 不部分修改）。Task 01 的 `SaveGameRegistry` 在此 Task 接入，只走其 `Find` / `Entries` 两个公共入口。
+- 输入：Phase 5（Scene 序列化、`Core::Serialization::JsonReader/Writer`、`Core::SchemaVersion::CanRead`）+ Task 01 `SaveGameRegistry`
+- 输出（Existing）：
+  - `Existing: include/orange/engine/save/SaveableComponent.h`（空 tag 结构体；attach 它的 entity 才入存档；非 attach 实体由 Scene 序列化负责）
+  - `Existing: include/orange/engine/save/SaveGameSystem.h`（公共 API：`SaveGameSystem` 持有 `const SaveGameRegistry&`；`Save(World, path)` / `Load(path, World)` 两个返回 `Result<void, ResultCode>` 的成员函数）
+  - `Existing: src/save/SaveGameSystem.cpp`（CRC32 表驱动实现 + 16 字节 header 编/解码 + 原子 rename + Win32 `FlushFileBuffers` 真 fsync + 顶层 / 每组件 schema 校验 + 失败回滚）
+  - `Existing: tests/save/SaveGameSystemTest.cpp`（9 个 case：空 World round-trip / 单 entity 单 component / 多 entity 多 component / forward-compat 未知 component skip / CRC 损坏 / header magic 损坏 / 顶层 schema 不兼容 / 单 component schema 不兼容回滚 / 文件不存在）
+- 影响模块：Save（核心改动）、Core / Scene（仅复用 World / Entity / Serialization / SchemaVersion，不动）
+- 前置依赖：Phase 5 全部任务 + Task 01
+- 实现要点：
+  - **文件格式（16 字节 binary header + JSON payload）**：
+    ```
+    +------+------+------+------+------+------+------+------+
+    |  'O' |  'S' |  'A' |  'V' |       formatVersion u32   |   8 B
+    +------+------+------+------+------+------+------+------+
+    |     payloadCrc32 u32      |     payloadLength u32     |   8 B
+    +------+------+------+------+------+------+------+------+
+    |              JSON payload (UTF-8) ...                 |
+    +-------------------------------------------------------+
+    ```
+    Header 自身格式与 payload schema 是两个独立演化轴：header bump 视为硬墙拒绝（fail-fast IoError），payload schema bump 走 `SchemaVersion::CanRead`。
+  - **顶层 JSON schema（namespace="save/game", major=1, minor=0）**：
+    ```json
+    {
+      "schemaVersion": { "namespace": "save/game", "major": 1, "minor": 0 },
+      "entities": [
+        {
+          "id": <持久 int, 0-based>,
+          "components": {
+            "<componentName>": {
+              "version": { "namespace": "...", "major": N, "minor": M },
+              "data":    { ...游戏侧 typed write 落地的字段... }
+            }
+          }
+        }
+      ]
+    }
+    ```
+    `version` 与 `data` 子树隔开，让 schema 变更与字段读写不耦合。
+  - **CRC32**：IEEE 802.3 多项式 `0xEDB88320`、初值 `0xFFFFFFFF`、最终 XOR `0xFFFFFFFF`，表驱动实现，表在首次调用时一次性生成。覆盖 payload 字节（不含 header 自身）；不当作真正反作弊，仅"防小白手改"。
+  - **原子写入**：`<path>.tmp` 写入 → `ofstream` 关闭 → `Win32 CreateFileA + FlushFileBuffers + CloseHandle` 强制刷盘 → `std::filesystem::rename(tmp, final)`。Windows 上 `std::filesystem::rename` 内部走 `MoveFileExA + MOVEFILE_REPLACE_EXISTING`，对同卷 NTFS 是原子的。任何中间步骤失败时尽力清理 `.tmp`，原文件保持原样。
+  - **"哪些 entity 算可入存档"**：由 `SaveableComponent` 标记决定。Save 端 `view<const SaveableComponent>` 只遍历挂着该 tag 的 entity；Load 端创建新 entity 后自动 attach `SaveableComponent`，让"加载完再 Save"对称。空 tag 类型让 EnTT 走存储优化（每 entity 不占字节）；`World::AddComponent` 模板对空类型的 `T&` 返回不兼容，绕开走 `Registry().emplace_or_replace` 直接接 entt。
+  - **Save 主流程**：收集 Saveable entity → 按 view 顺序分配持久 ID → `WriteSchemaVersion` 顶层 → 对每个 entity 按 `registry.Entries()` 顺序遍历 → `entry.Has` 命中则 `WriteSchemaVersion(.../version)` + `entry.Write(.../data)`。注册顺序 = JSON 字段顺序，让 diff 友好。
+  - **Load 主流程**：`BinaryReader::LoadFile` → 解 header（magic / formatVersion / payloadLen 任一失配 → IoError）→ 校 CRC（失配 → InvalidArgument）→ JSON 解析（失败 → InvalidArgument）→ 顶层 `CanRead`（失配 → SchemaMismatch）→ 遍历 entities：对每个 entity `world.CreateEntity()` + attach `SaveableComponent` + 跟踪到 `created` 列表 → 对 `registry.Entries()` 中每个 entry，如果 `reader.Has(componentBase)` 则校 per-component schema（失配 → SchemaMismatch + 回滚）→ `entry.Read(.../data)`（false → InvalidArgument + 回滚）。
+  - **失败回滚**：Load 端跟踪本次 call 创建的所有 entity；任何中间步骤失败时 `world.DestroyEntity` 全部回滚 → World 维持调用前状态。Load 不清空 World（追加语义，与 Scene::Load 对称）。
+  - **Forward-compat**：JSON 里出现但 registry 没注册的 component name → silent skip（与 SceneSerialization 同模式；JsonReader 当前没有"列出对象 key"接口，无法逐个 warn 未识别字段，留待 reader API 扩展后再补）。
+  - **Out-of-scope（明确推迟）**：
+    - 平台路径解析（`%APPDATA%/OrangeEngine/<game>/saves/`）→ Task 03
+    - Slot 元信息 + autosave 调度 → Task 04
+    - Migrator hook（per-component schemaVersion 不匹配时路由到迁移函数）→ Task 05
+    - 加密（XOR / AES 弱保护）→ 视 Task 04 设计决定是否做
+    - Sample 关卡集成 → Task 07
+- 验证：
+  1. `tests/save/SaveGameSystemTest` 9 case 全过：空 World / 单 entity 单 component / 多 entity 多 component / forward-compat / CRC 损坏 / header magic 损坏 / 顶层 schema 不兼容 / 单 component schema 不兼容回滚 / 文件不存在
+  2. ctest 全过——35/35（含新增 1 个），无回归
+  3. `cmake --build build --config Debug --target orange_engine` 无 warning（warning-as-errors）
+- 验收标准：上述 3 条全部满足；`SaveGameSystem` 公共 API 就位且 World 在 Load 失败路径下不部分污染；存档文件格式（OSAV header + payload）冻结，后续 Task 03 / 04 / 05 仅在文件之外做扩展（路径解析 / slot 元信息 / migrator 路由），不动文件 layout。
+- Critical Path：是（Phase 5.5 后续 Task 03 / 04 / 05 / 07 都依赖 Save / Load 主流程能跑通）
+
+#### Task 03：平台路径解析（Windows `SHGetKnownFolderPath` 包装；Linux/Mac 接口预留） ✅
+- 描述：把"存档文件应该落在哪里"的平台细节封住，让 game 侧只描述 vendor / game / subfolder 三件套即可拿到一个绝对路径喂给 `SaveGameSystem::Save`。Windows 走 `SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE)`；其它平台返回 `Unsupported`，接口预留供后续按需补 Linux（`$XDG_DATA_HOME` / `~/.local/share`）/ macOS（`~/Library/Application Support`）。`ResolveSaveDirectory` / `ResolveSaveSlotPath` 调用时附带 `mkdir -p`，让上层不必自己 `create_directories`。
+- 输入：Phase 5.5 Task 02（`SaveGameSystem` 主流程已就绪，需要绝对路径输入）
+- 输出（Existing）：
+  - `Existing: include/orange/engine/save/SavePath.h`（公共 API：`SavePathOptions{vendor, game, subfolder}` + `ResolveUserDataRoot()` + `ResolveSaveDirectory(options)` + `ResolveSaveSlotPath(options, slotName)`）
+  - `Existing: src/save/SavePath.cpp`（Windows: `Shlobj.h` + `SHGetKnownFolderPath` + `CoTaskMemFree`；通过 `#pragma comment(lib, "Shell32.lib"/"Ole32.lib")` auto-link，CMakeLists 不必改）
+  - `Existing: tests/save/SavePathTest.cpp`（6 case：`ResolveUserDataRoot` 平台行为 / `ResolveSaveDirectory` 创建目录 / `ResolveSaveDirectory` 输入校验 5 路径 / `ResolveSaveSlotPath` 拼 ".save" 后缀 / `ResolveSaveSlotPath` 输入校验 / 端到端 `ResolveSaveSlotPath → SaveGameSystem.Save → Load` 字段一致；测试用 PID-tag 化 vendor 名 + main() 收尾 `remove_all` 清干净 %APPDATA% 残留）
+- 影响模块：Save（核心改动）、Core（不动）
+- 前置依赖：Phase 5.5 Task 02
+- 实现要点：
+  - **典型路径形态**：`<APPDATA>/<vendor>/<game>/<subfolder>/<slotName>.save`，例 `C:\Users\<user>\AppData\Roaming\OrangeEngine\OriClone\saves\slot1.save`。
+  - **路径片段安全校验** `IsSafePathSegment`：vendor / game / subfolder / slotName 都被当作"目录名片段"使用——含 `/` `\` 的字符串、`.` / `..`（防越权写入用户其它目录）、控制字符（含 NUL）一律 reject 为 `InvalidArgument`。
+  - **`game` 字段必填**：vendor 默认 `OrangeEngine`、subfolder 默认 `saves`，但 game 不给默认 —— 同 vendor 下不同 game 必须用 game 字段隔离，没默认能避免 game 侧忘填时把存档全堆到 `OrangeEngine/<empty>/saves/`。
+  - **Windows 实现**：`SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &raw)` → `std::filesystem::path(raw)` → `CoTaskMemFree(raw)`。即使返回错误码也按文档 free 掉 raw。`KF_FLAG_CREATE` 让 OS 在该目录不存在时帮忙建好（罕见，新装系统兜底）。
+  - **`ResolveSaveDirectory` mkdir -p**：用 `std::filesystem::create_directories(dir, ec)`。已存在不报错；权限不足 / 路径冲突 → `IoError`。让上层 `SaveGameSystem::Save` 拿到路径后直接写不需要再补 `create_directories`。
+  - **`ResolveSaveSlotPath`**：`ResolveSaveDirectory(options)` 之后追加 `<slotName>.save`。文件**不**预创建，仅保证父目录存在。`.save` 后缀让玩家 / 工具识别更直观，`SaveGameSystem` 自身不依赖后缀。
+  - **库依赖**：`Shell32.lib` + `Ole32.lib` 通过 `#pragma comment(lib, ...)` auto-link（MSVC 特性），CMakeLists 不必显式 `target_link_libraries`。
+  - **非 Windows**：整个 `ResolveUserDataRoot` 返 `ResultCode::Unsupported`，`ResolveSaveDirectory` / `ResolveSaveSlotPath` 透传该错误码 —— Linux / macOS 实现按需后补，本 Task 仅锁公共 API 形态。
+  - **Out-of-scope（明确推迟）**：Linux / macOS 实现 → 视后续平台扩展决定；slot 列表枚举 → Task 04 的元信息工作；存档文件名校验是否撞 OS 保留名（`CON`、`PRN` 等）→ 当前由 game 侧自律，引擎不做（避免引入 Windows 专用 deny list 污染跨平台代码）。
+- 验证：
+  1. `tests/save/SavePathTest` 6 case 全过：`ResolveUserDataRoot` 在 Windows 下返回有效绝对路径 / `ResolveSaveDirectory` 实际创建目录 / `ResolveSaveDirectory` 输入校验 5 路径（game 空 / vendor 含分隔符 / `..` / `.` / 控制字符）/ `ResolveSaveSlotPath` 拼 `.save` 后缀 / `ResolveSaveSlotPath` 输入校验 3 路径 / 端到端 path → Save → Load 字段一致
+  2. ctest 全过——36/36（含新增 1 个），无回归
+  3. 测试 main() 末尾 `remove_all(<APPDATA>/<vendor>)` 清掉残留，重复跑测不污染 %APPDATA%
+- 验收标准：上述 3 条全部满足；`SavePath` 公共 API 就位；后续 Task 04 的 slot 元信息工作可以基于 `ResolveSaveDirectory` 拿到 slot 列表所在目录直接 `directory_iterator`。
+- Critical Path：是（Task 04 / 07 都依赖能从平台层拿到一个稳定的存档目录）
+
+#### Task 04：Slot 元信息 + autosave 调度 ✅
+- 描述：在 `SaveGameSystem` + `SavePath` 之上做"多存档槽 + 自动存档"的高层视角。交付 `SlotManager`（按 slot 名管理 N 个存档 + 每个 slot 配套的 sidecar `<slot>.meta.json` 元数据 + `ListSlots` 一次性枚举给 UI 喂数据 + 删除）和 `AutosaveScheduler`（帧驱动的间隔触发 + 节流 + 手动请求挂起队列；纯时间逻辑，无 IO）。同时把 `SaveGameSystem.cpp` 内的 `WriteAtomic` 抽到内部共享 header `src/save/AtomicWrite.h/cpp`，让 SlotManager 写 sidecar 时复用同一原子写入语义而不是各自实现一遍。
+- 输入：Phase 5.5 Task 02（`SaveGameSystem`）+ Task 03（`SavePath`）
+- 输出（Existing）：
+  - `Existing: src/save/AtomicWrite.h` / `Existing: src/save/AtomicWrite.cpp`（内部共享 header；`Save::Detail::WriteFileAtomic`：`<path>.tmp` → fsync → `std::filesystem::rename`，由 SaveGameSystem + SlotManager 共用）
+  - `Existing: include/orange/engine/save/SlotManager.h`（公共 API：`SlotMetadata` POD struct + `class SlotManager{Save / ReadMetadata / ListSlots / DeleteSlot / SlotExists / ResolveSavePath / ResolveMetadataPath}`）
+  - `Existing: src/save/SlotManager.cpp`（sidecar `<slot>.meta.json` schema "save/slot_metadata" v1.0；ListSlots 退化路径 + 排序）
+  - `Existing: include/orange/engine/save/AutosaveScheduler.h`（公共 API：`AutosaveScheduler::Config{intervalSeconds, minSecondsBetween}` + `Update(deltaSeconds)` + `RequestAutosave` + `Reset` + 状态查询）
+  - `Existing: src/save/AutosaveScheduler.cpp`
+  - `Existing: tests/save/SlotManagerTest.cpp`（6 case：空目录 / Save 双文件 / 字段还原 + 内部覆写 / ListSlots 多 slot 退化 + orphan 跳过 + .tmp 跳过 + 排序 / DeleteSlot 幂等 / 输入校验）
+  - `Existing: tests/save/AutosaveSchedulerTest.cpp`（8 case：初始状态 / 定时触发 + 触发后清零 / 节流挡定时 / Request 立刻触发 / Request 挂起 + 多次等价单次 / Reset / interval=0 关闭 / 异常 deltaSeconds）
+- 影响模块：Save（核心改动）；SaveGameSystem.cpp 重构使用共享 AtomicWrite（行为不变）
+- 前置依赖：Phase 5.5 Task 02、Task 03
+- 实现要点：
+  - **AtomicWrite 抽取动机**：sidecar `.meta.json` 也需要原子写入语义——读取端 `ListSlots` 枚举时若碰到半写文件，JSON 解析直接拒掉、用户体验不连贯。一处实现，将来要补 POSIX `fsync(2)` / 跨卷 rename fallback 时只改一处。
+  - **AtomicWrite 命名空间**：`Orange::Engine::Save::Detail`，刻意打 Detail 标记表明是 src 内部 helper，**不**进公共 install。Game 侧若要原子写入应自己用 `std::filesystem`，不该绑定到引擎内部 helper。
+  - **文件布局**：`<dir>/<slot>.save`（SaveGameSystem 主体）+ `<dir>/<slot>.meta.json`（SlotManager sidecar）。`<dir>` 来自 `ResolveSaveDirectory(options)`。
+  - **sidecar JSON schema**（namespace="save/slot_metadata", major=1, minor=0）：`slotName` / `displayName` / `summary` / `savedAtUnixSeconds` / `playTimeSeconds` / `engineSaveFormatVersion` / `isAutosave`。**一旦发到玩家硬盘即冻结**；major / minor 只增不改。
+  - **SlotMetadata 字段语义**：
+    - `slotName`：Save 时被 SlotManager 用入参覆写，避免 metadata 与文件名不一致；
+    - `displayName` / `summary`：完全 game 自定义，引擎不解读，空字符串视为"未设置"；
+    - `savedAtUnixSeconds`：Save 时若入参为 0 则用当前 system_clock 填，否则尊重 game 提供的值（让测试可以注入固定时间）；
+    - `playTimeSeconds`：game 累计的游戏时长（不是 wall clock），引擎不维护；
+    - `engineSaveFormatVersion`：Save 时被 SlotManager 内部覆写为当前 SaveGameSystem header 版本（game 不必填）；
+    - `isAutosave`：纯 UI 标记，引擎不强制 "autosave 槽" 是哪一个。
+  - **Save 失败语义**：`.save` 失败直接返、metadata 不写；`.save` 成功但 metadata 失败 → 返 `IoError` + warn，但**不**回滚 `.save`（slot 仍可加载，仅 ListSlots 退化到 placeholder）。这个权衡来自"sidecar 是装饰物，丢了仍能玩"。
+  - **ListSlots 退化路径**：仅 `.save` 存在判定为有效 slot；orphan `.meta.json` 跳过；`<slot>.save.tmp`（被中断写入的残留）跳过；`.meta.json` 缺失 / 损坏时回退到 placeholder（slotName + 文件 mtime + 其它字段 default），warn 一次；首次启动目录不存在 → 返空 vector（不视为错误）。
+  - **ListSlots 排序**：`savedAtUnixSeconds` 降序（最近的存档排前），`stable_sort` 保证同时间戳下 directory_iterator 顺序稳定（让重复调用结果一致）。
+  - **DeleteSlot 幂等**：`.save` 不存在视为 Ok（无操作）；`.meta.json` 删失败仅 warn（orphan sidecar 不影响数据，下次 ListSlots 会跳过）。
+  - **filesystem mtime → unix seconds 转换**：C++17 没规定 `file_time_type` 的 epoch；用"`file_clock::now()` 与 `system_clock::now()` 的 delta 套到目标 ftime"的近似算法。误差对"读档列表展示给玩家"完全可接受。
+  - **AutosaveScheduler 设计要点**：
+    - **不读系统时钟**——game 自己每帧调 `Update(deltaSeconds)`。这样暂停游戏 / 时间缩放等场景下行为可预测；
+    - **interval = 0 关闭定时触发**，仅响应 RequestAutosave，给"只想要手动触发但要节流"的场景；
+    - **throttle (`minSecondsBetween`)**：两次触发之间的最小间隔，对定时和手动 request 一视同仁，防止短时间内连发；
+    - **PendingRequest 挂起**：throttle 窗口内的 RequestAutosave 不丢弃，挂起到下次 throttle 解除时触发；多次 request 等价于一次（latest wins，不累计）；
+    - **Reset()**：手动存档完成时由 game 调，避免手动存盘后立刻又被 autosave；
+    - **触发后先清状态再调 callback**：否则 callback 内部触发 `RequestAutosave` 时 pending flag 会被错误清掉；
+    - **deltaSeconds 极大值**：游戏挂起恢复 / debugger 单步等场景下，同一 Update 最多触发一次（避免 callback 在一帧内被连发）；
+    - 不与 SaveGameSystem / SlotManager 强耦合——纯时间逻辑，game 在 callback 内自己决定调啥。
+  - **Out-of-scope（明确推迟）**：
+    - 加密（XOR / AES 弱保护）→ 视后续需要决定，本 task 不做（CLAUDE.md 也没列硬约束）；
+    - thumbnail 截图 → game 自己写到 `<dir>/<slot>.png` 走 SavePath 即可，引擎不掺和；
+    - autosave 失败重试逻辑 → game 在 callback 内自己处理，scheduler 不感知 callback 成败；
+    - migrator hook（per-component schema 不匹配时路由到迁移函数）→ Task 05；
+    - sample 关卡集成 → Task 07。
+- 验证：
+  1. `tests/save/SlotManagerTest` 6 case 全过：空目录 / Save 双文件 / 字段还原 + 内部覆写 / ListSlots 多 slot 退化 + orphan 跳过 + .tmp 跳过 + 排序 / DeleteSlot 幂等 / 输入校验
+  2. `tests/save/AutosaveSchedulerTest` 8 case 全过：初始状态 / 定时触发 / 节流挡定时 / Request 立刻 / Request 挂起 + 多次等价 / Reset / interval=0 关闭 / 异常 deltaSeconds
+  3. SaveGameSystem / SaveGameRegistry / SavePath 既有 3 个 test 在 AtomicWrite 抽取后仍全过（refactor 不改行为）
+  4. ctest 全过——38/38（含新增 2 个），无回归
+- 验收标准：上述 4 条全部满足；`SlotManager` + `AutosaveScheduler` 公共 API 就位；sidecar 文件格式（"save/slot_metadata" v1.0）冻结，后续 game UI 可基于 `ListSlots` 直接喂数据；AtomicWrite 抽取让 SaveGameSystem 行为完全不变（既有测试通过即证明）。
+- Critical Path：是（Task 07 sample 集成会同时用到 SlotManager 和 AutosaveScheduler）
+
+#### Task 05：Migrator hook 接口 + 至少一个版本迁移示例 ✅
+- 描述：在 `SaveGameRegistry` + `SaveGameSystem` 上加"per-component schema 迁移链"。每条 migrator 跨一档 major bump（v1→v2），多条串成完整链（v1→v2→v3）；游戏侧通过 `SaveGameRegistry::RegisterMigrator(componentName, from, to, fn)` 把 JSON 变换函数挂上去。`SaveGameSystem::Load` 在 per-component schema 不匹配时按链逐跳走（找 from == 当前版本 → apply → 把 dst dump+reparse 当下次输入），直到到达 `entry.version` 或链断（→ SchemaMismatch）。全部纯 JSON 层操作，不涉及 TComp 类型。
+- 输入：Phase 5.5 Task 02（SaveGameSystem Load 主流程 + per-component schema 校验已就绪）
+- 输出（Existing）：
+  - `Existing: include/orange/engine/save/SaveGameRegistry.h` 扩展：`SaveGameComponentEntry` 内嵌 `Migrator` struct + `migrators` vector；`SaveGameRegistry::RegisterMigrator` 公共方法
+  - `Existing: src/save/SaveGameRegistry.cpp` 扩展：`RegisterMigrator` 实现（输入校验 + 同 (component, from) 重复拒绝）
+  - `Existing: src/save/SaveGameSystem.cpp` 扩展：`FindMigratorFrom` helper + `kMaxMigrationHops=32` cycle guard；Load 主流程内 per-component schema 不匹配分支重写为"CanRead 直读 / migrator chain 二选一"
+  - `Existing: tests/save/SaveGameMigratorTest.cpp`（7 case：RegisterMigrator 输入校验 / 单跳 v1→v2 / 多跳 v1→v2→v3 / 无 migrator → SchemaMismatch / migrator 返 false → InvalidArgument 回滚 / 环形 v1↔v2 触发 hops cap → SchemaMismatch / minor bump 走 CanRead 直通不触发 migrator）
+- 影响模块：Save（核心改动）；既有 SaveGameSystemTest case 8（无 migrator → SchemaMismatch）行为不变（migrator 不存在时回退到 Task 02 既有路径）
+- 前置依赖：Phase 5.5 Task 02
+- 实现要点：
+  - **Migrator 签名 4 参** `bool fn(const JsonReader& src, std::string_view srcPath, JsonWriter& dst, std::string_view dstPath)` —— 纯 JSON 层操作，与 component 类型完全解耦。这与 `Register<TComp>` 的 typed 路径不同：迁移是数据搬运，不需要 TComp 介入。
+  - **每次迁移产新 reader**：migrator 写到 fresh JsonWriter → `Dump()` 成字符串 → `JsonReader::FromString` 解析回新 reader。第二次迁移用新 reader 作输入。Per-component 数据小（几百字节量级），dump+reparse 开销可忽略。
+  - **首跳与后续跳的 path 区别**：第一次迭代输入是文件 reader 在 `<componentBase>/data` 子树；后续迭代固定路径 `"data"`（migrator 在自己的 fresh writer 里写到 `data/...`）。引擎透传给 migrator 的 `srcPath` / `dstPath` 各自正确。
+  - **链查找 O(N) 线性扫描**：`FindMigratorFrom` 在 `entry.migrators` vector 里找 `from == cur` 的记录。典型每 component 2-5 条 migrator，map 不必要。
+  - **Cycle guard `kMaxMigrationHops=32`**：`from == to` 已在 RegisterMigrator 阶段 reject，正常 chain 不循环；但跨 namespace 迁移容易写出 `v1@nsA → v2@nsB → v1@nsA` 类回环。32 跳上限作为最后防线，触发 → SchemaMismatch + ERROR log。
+  - **migrator dump 失败的处理**：理论上不可能（JsonWriter 写出来的 JSON 必然合法），写到 `InternalError` 并 rollback —— invariant 破裂时 fail-fast 而不是 silent corruption。
+  - **CanRead 直读路径不触发 migrator**：`entry.version.CanRead(fileCompSchema)` 为 true 时（包括 minor bump 场景）直接走原有 `entry.Read` 路径，不进 chain；migrator 仅 major bump 才需要。test case 7 显式验证这一点。
+  - **fail 路径全部 rollback**：链中任意 hop 的 fn 返 false / 无可用 migrator / hops 超 cap / dump-reparse 失败 → 都触发 `RollbackCreatedEntities` 让 World 回到调用前状态，与 Task 02 的失败回滚约定一致。
+  - **跨 namespace 允许**：from / to 不强制同 namespace —— 留给"component 重命名"场景（旧 component "OldName" v1.0 迁到新 component "NewName" v1.0 的 schema）。
+  - **顶层 `save/game` schema migration**：本 Task **不**做。当前顶层 schema 仍 v1.0，未发版升级；将来真要 bump 时单独加 SaveGameSystem 级别的 hook，不放进 SaveGameRegistry。
+  - **Out-of-scope（明确推迟）**：
+    - 顶层 schema migration → 真 bump 时再做
+    - migrator 串行化文档化（让 game 侧可以从 .save 文件追溯曾经走过哪些 migrator）→ 视将来需要决定，当前不写
+    - Sample 关卡集成 → Task 07
+- 验证：
+  1. `tests/save/SaveGameMigratorTest` 7 case 全过：RegisterMigrator 输入校验 / 单跳迁移 / 多跳迁移 / 无 migrator → SchemaMismatch / migrator false → InvalidArgument 回滚 / 环形 v1↔v2 触发 cap / minor bump 不触发 migrator
+  2. ctest 全过——39/39（含新增 1 个），无回归。Task 02 / 03 / 04 既有 4 个 save 测试不被破坏（migrator 不存在时回退到原路径）
+  3. `cmake --build build --config Debug --target orange_engine` 无 warning（warning-as-errors）
+- 验收标准：上述 3 条全部满足；`SaveGameRegistry::RegisterMigrator` 公共 API 就位；migrator chain 在 `SaveGameSystem::Load` 内透明执行；既有"无 migrator → SchemaMismatch"行为保留（即 Task 02 既有契约不破）；Task 06 的"损坏存档 + 错误路径"测试覆盖可以基于本 Task 的 5/6 case（migrator 返 false / 环形）增量补全，不必重做 migrator 路径覆盖。
+- Critical Path：是（Phase 5.5 完整闭环里"跨引擎升级兼容"的核心机制；Task 06 / 07 都假设此机制就位）
+
+#### Task 06：损坏存档与错误路径测试覆盖 ✅
+- 描述：把 Phase 5.5 各模块的"故意损坏 / 边角错误"路径集中到一个新 test 文件 `tests/save/SaveCorruptionTest.cpp` 里增量覆盖。Task 02-05 各 test 已经覆盖了主流程 + 简单失败路径；本 Task 专门把损坏文件 / 损坏 sidecar / 缺字段 / typed read 失败等"会让真玩家踩到"的路径补全。每条失败路径都验证：(1) 引擎返回明确 ResultCode 而非崩溃 / silent corrupt；(2) World / 文件系统不被部分修改（与 Task 02 / 04 的回滚约定一致）。
+- 输入：Phase 5.5 Task 02-05 全部 ✅
+- 输出（Existing）：
+  - `Existing: tests/save/SaveCorruptionTest.cpp`（13 case，平台无关 9 + Windows-only sidecar 4）
+- 影响模块：仅测试；Save / Core 等模块零代码改动（既有错误处理路径已覆盖足够，本 Task 不修补 bug，只补测）
+- 前置依赖：Phase 5.5 Task 02-05
+- 实现要点：
+  - **A. SaveGameSystem 文件层面错误（6 case，平台无关）**：
+    1. < 16 字节文件（连 header 都装不下）→ IoError
+    2. 完全空文件（0 字节）→ IoError
+    3. header `formatVersion = 99`（≠ 当前 1）→ IoError
+    4. payload 长度声明小于实际（trailing garbage）→ InvalidArgument
+    5. payload 长度声明大于实际（截断）→ InvalidArgument
+    6. payload 是合法字节但不是 JSON → InvalidArgument
+  - **B. SaveGameSystem JSON 层面错误（3 case，平台无关）**：
+    7. 顶层 `schemaVersion` 字段完全缺失 → InvalidArgument
+    8. per-component `version` 子字段缺失 → InvalidArgument + 回滚（验证预存 entity 不被影响）
+    9. typed read 返 false（schema 合法但读字段失败，注册一个 read 总是返 false 的 component）→ InvalidArgument + 回滚
+  - **C. SlotManager sidecar 错误（4 case，仅 Windows）**：
+    10. sidecar JSON 完全损坏 → `ReadMetadata` 返 InvalidArgument；`ListSlots` 退化到 placeholder（slot 仍出现，displayName 空 + mtime 兜底）
+    11. sidecar `schemaVersion` 不兼容（namespace `save/wrong_ns`）→ `ReadMetadata` SchemaMismatch
+    12. ListSlots 目录里只有 sidecar 无 `.save` → 空 vector（orphan 不算 slot，与 Task 04 规约一致）
+    13. `DeleteSlot` 只有 sidecar 无 .save → 仍 Ok 且 sidecar 被清（`.save` 不存在视为幂等无操作；sidecar 是 best effort 删）
+  - **手工拼装 OSAV 文件**：写一个本地 `WriteOsavFile(path, formatVersion, crc, payloadLen, payloadBytes)` helper —— 4 个字段全部由调用方控制，让每个 corruption test 仅在它想损坏的字段失败、其它字段保持合法，避免错误码被误判。
+  - **CRC32 重新计算**：本测试有自己的 `Crc32` 实现（与 SaveGameSystem 内的等价），让 corruption test 在故意损坏某字段后能为剩余 payload 算合法 CRC，否则会被 CRC 校验先短路掉，测不到目标错误路径。
+  - **`AlwaysFails` component**：注册一个 read 永远返 false 的 component，给 case 9 用。本来想用空 struct，但 EnTT 对空类型走存储优化让 `World::AddComponent` 的 `T&` 返回不兼容 —— 给一个占位 `int64_t marker{0}` 字段绕开（与 SaveableComponent 走 `Registry().emplace_or_replace` 的解决方式不同；这里用占位字段更简单）。
+  - **Windows-only 测试 vendor 隔离**：sidecar tests 用 PID-tag 化的 vendor 名（`OrangeEngineTest_Corrupt_<pid>`）+ main() 收尾 `remove_all` 清干净 %APPDATA% 残留，与 SavePathTest / SlotManagerTest 同模式，让重复 / 并发跑测互不踩。
+  - **未补的失败路径（明确不做）**：
+    - SHGetKnownFolderPath 失败（Windows 上正常环境总成功，无法稳定模拟）
+    - WriteFileAtomic 的 rename 失败（同卷 NTFS 上需要权限收回 / 路径冲突等极端环境）
+    - JsonWriter 写出来后 dump 失败（`Core::Serialization` 不变量；走到该路径意味着 JsonWriter 内部 bug，非 SaveGameSystem 责任）
+    - Save 时 `payload > 4 GiB`（uint32 length 上限；玩家进度永远到不了这个量级）
+- 验证：
+  1. `tests/save/SaveCorruptionTest` 全过：Windows 上 13/13、非 Windows 9/9（sidecar tests 自动 skip）
+  2. ctest 全过 —— 40/40（含新增 1 个），无回归
+  3. `cmake --build build --config Debug --target orange_engine` 无 warning（warning-as-errors）
+- 验收标准：上述 3 条全部满足；Phase 5.5 全部"会让玩家踩到"的失败路径都有显式 test 锁住；引擎在所有损坏路径上返回明确 ResultCode 不崩溃；Load 失败时 World 不被部分修改（rollback 约定全覆盖）。
+- Critical Path：是（设计文档"完成标准"明确要求"损坏存档不导致进程崩溃，仅返回错误"，本 Task 锁住该约束）
+
+#### Task 07：Sample 关卡集成存档 / 加载流程 ✅
+- 描述：Phase 5.5 收尾 sample —— 把 `SaveGameRegistry` / `SaveGameSystem` / `SlotManager` / `SavePath` / `AutosaveScheduler` 全部串成一个完整的"玩家进度存取"闭环 demo。新建 `samples/11_save_load_demo`，包含一个 PlayerProgress component（tokensCollected + playerX/Y），3 个可收集 token，玩家用 WASD 平移，F5 / F9 手动 save / load slot1，F1 列出 slot 元数据，autosave 每 30s 写 "autosave" slot；启动时若 slot1 存在则自动加载恢复进度，否则 fresh start。
+- 输入：Phase 5.5 Task 01-06 全部 ✅（注册 + 主流程 + 平台路径 + slot/autosave + migrator + 错误路径覆盖）
+- 输出（Existing）：
+  - `Existing: assets/scenes/save_load_demo.scene.json`（scene v1 schema：ground / player / 3 token / sun，全部纯视觉无 RigidBody）
+  - `Existing: assets/configs/save_load_demo.actions.json`（input action_map v1：move_left/right/up/down + save_quick(F5) + load_quick(F9) + list_slots(F1)）
+  - `Existing: samples/11_save_load_demo/main.cpp`（~430 行：cube mesh 工厂 / PlayerProgress 注册 / LoadOrCreateProgressEntity / SyncProgressFromWorld + ApplyProgressToWorld / GameplayLayer 三件套 + AutosaveScheduler）
+  - `Existing: samples/11_save_load_demo/CMakeLists.txt`
+  - `Modified: samples/CMakeLists.txt`（add_subdirectory）
+- 影响模块：sample 新增；Save / Core / Render / Scene 等模块零代码改动
+- 前置依赖：Phase 5.5 Task 01-06
+- 实现要点：
+  - **PlayerProgress schema**：`{tokensCollected: int32, playerX: float, playerY: float}` + `SchemaVersion{"game/PlayerProgress", 1, 0}`。简单 POD，体现"游戏侧自定义 component + 手写 read/write 接入 SaveGameRegistry"的典型模式。
+  - **顶视 / 无物理**：玩家走纯 transform 操作，省去 PhysicsWorld + RigidBody/Collider 配置。Sample focus 全放在 save/load 上，避免被物理 / 跳跃逻辑稀释。
+  - **token 收集走"距离 + 顺序"约束**：玩家与第 N 个未收集 token 距离 < 0.6m 时才计为收集，且只接受当前最低 index（i == tokensCollected）—— 让"按顺序拾取"的语义在 sample 里清晰，避免乱序导致 progress 字段语义不明。
+  - **`LoadOrCreateProgressEntity` 函数**：启动 + F9 共享同一路径——先 `DestroyAllSaveableEntities` 清掉现有 saveable，再尝试 `SaveGameSystem.Load(slot1Path)`；成功则取 loaded entity 返回，失败 / slot 不存在则 `CreateEntity + emplace_or_replace<SaveableComponent> + AddComponent<PlayerProgress>{}` fresh-start。把 startup 与 manual reload 的语义对齐：每次按 F9 都把世界拉回某个一致状态。
+  - **Save 后 `mAutosave.Reset()`**：手动 F5 存档后立刻 reset autosave 计时器，避免手动存盘后又被 autosave 覆写一次。Reset 同时清 pending request flag。
+  - **SlotMetadata 填字段**：F5 时 `displayName="Quick Save"` + `summary="tokens X/3"`；autosave 时 `displayName="Autosave"` + `isAutosave=true`。`SlotManager.Save` 内部覆写 `slotName` / `engineSaveFormatVersion` / 自动填 `savedAtUnixSeconds`，game 端只填语义字段。
+  - **F-key 在 ActionMap 已支持**：`InputContext.cpp` 的 key 名解析里早就有 F1-F12，新 action map 直接 `key:F5` / `key:F9` 即可。
+  - **Save 文件位置**：`%APPDATA%/OrangeEngine/SaveLoadDemo/saves/slot1.save` + `slot1.meta.json` + `autosave.save` + `autosave.meta.json`，自动创建目录（`SlotManager.Save` 内部 `mkdir -p`）。
+  - **平台兜底**：非 Windows 平台 `ResolveSavePath` 返 `Unsupported`，sample 启动时检测到该错误码直接 exit 1 + console 提示，不走崩溃路径。
+  - **Pipeline / PostProcessChain**：与 sample 10 同模板（CreateDefault + bloom 0.8 / 0.55），让 emissive token 出微眩光视觉上"可拾取"。
+  - **C4702 unreachable code 规避**：MSVC 把 `for (auto e : view) return ...;` 的 ++iter 步当不可达。`FindProgressEntity` 用 `view.begin() != view.end()` 判定 + 解引用，与 SaveGameSystemTest 修复同模式。
+  - **CaptureLayer 兼容**：与其它 sample 同模式接入 `--capture <path> --frames N`，让 CI 能跑"启动不崩 + 截屏"smoke。`--frames N`（N < 1800）跑完不会触发 autosave（30s wall clock）→ CI 不污染 `%APPDATA%`。
+  - **Out-of-scope（明确不做）**：
+    - 自动化 save → restart → load round-trip 测试 → engine API 已被 Task 02-06 累计 40+ case 反复覆盖；sample 自身的 round-trip 验证按设计文档约定走"手动启动 → 收集 → F5 → 退出 → 重启 → 看到状态恢复"
+    - 多个并发 slot UI（"slot1/2/3 + autosave"切换面板）→ 留给真游戏接入时按 UI 风格自由实现
+    - 截图缩略图（`<slot>.png`）→ Task 04 已说 game 自己写，sample 不掺
+    - 加密 → CLAUDE.md 没列硬约束，本 task 不做
+- 验证：
+  1. `cmake --build build --config Debug --target 11_save_load_demo` 编译干净（无 warning）
+  2. 启动 `--capture` 模式抓首帧截图：能看到 ground checker + 玩家 + 3 个 emissive token；console log 显示 `slot1 path: ...` 与 `fresh start（slot1 不存在）`
+  3. ctest 全过 —— 40/40，Sample 11 接入未破任何既有 test
+  4. **Manual 验收**（按设计文档约定）：
+     a. 启动 sample；走到第一个 token 旁直到 console 出 "收集到 token 0"；按 F5；console 出 "[F5] slot1 已保存"
+     b. 关闭窗口
+     c. 重新启动 sample；console 应出 "[save_load_demo] 加载 slot1 成功" 而不是 "fresh start"
+     d. 玩家位置应回到第一个 token 附近，且 token 0 已隐藏
+- 验收标准：上述 4 条全部满足；Phase 5.5 各模块在 sample 中证明可串成完整闭环；新 sample 与既有 10 个 sample 风格一致（CaptureLayer 接入、scene/actions JSON 配置、cube mesh 工厂复用模式）；engine 模块零改动。
+- Critical Path：是（Phase 5.5 收尾里程碑；本 Task ✅ 后 Phase 5.5 整体可视为完成）
 
 ---
 

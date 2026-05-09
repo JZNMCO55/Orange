@@ -1,0 +1,97 @@
+{
+  "schemaVersion": { "namespace": "scene/world", "major": 1, "minor": 0 },
+  "entities": [
+    {
+      "id": 0,
+      "components": {
+        "Name": { "name": "ground" },
+        "Transform": {
+          "position": [0.0, -1.5, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [16.0, 0.6, 1.4]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        }
+      }
+    },
+    {
+      "id": 1,
+      "components": {
+        "Name": { "name": "player" },
+        "Transform": {
+          "position": [-5.0, 0.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [0.8, 0.8, 0.8]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": true
+        }
+      }
+    },
+    {
+      "id": 2,
+      "components": {
+        "Name": { "name": "token_0" },
+        "Transform": {
+          "position": [-2.5, -0.3, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [0.4, 0.4, 0.4]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "components": {
+        "Name": { "name": "token_1" },
+        "Transform": {
+          "position": [0.5, -0.3, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [0.4, 0.4, 0.4]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "components": {
+        "Name": { "name": "token_2" },
+        "Transform": {
+          "position": [3.5, -0.3, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [0.4, 0.4, 0.4]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "components": {
+        "Name": { "name": "sun" },
+        "DirectionalLight": {
+          "direction":   [-0.45, -0.8, -0.35],
+          "color":       [1.0, 0.92, 0.78],
+          "intensity":   1.7,
+          "castsShadow": true
+        }
+      }
+    }
+  ]
+}

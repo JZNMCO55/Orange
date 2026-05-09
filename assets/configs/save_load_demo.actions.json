@@ -1,0 +1,16 @@
+{
+    "schema_version": {
+        "namespace": "input.action_map",
+        "major": 1,
+        "minor": 0
+    },
+    "actions": [
+        { "name": "move_left",  "bindings": ["key:A", "key:Left"] },
+        { "name": "move_right", "bindings": ["key:D", "key:Right"] },
+        { "name": "move_up",    "bindings": ["key:W", "key:Up"] },
+        { "name": "move_down",  "bindings": ["key:S", "key:Down"] },
+        { "name": "save_quick", "bindings": ["key:F5"] },
+        { "name": "load_quick", "bindings": ["key:F9"] },
+        { "name": "list_slots", "bindings": ["key:F1"] }
+    ]
+}

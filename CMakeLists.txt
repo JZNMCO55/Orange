@@ -133,6 +133,26 @@ add_library(orange_engine STATIC
     # 与 src/physics/PhysicsWorld.cpp 内出现，公共 include/ 零 b2 依赖。
     src/physics/PhysicsWorld.cpp
     src/physics/box2d/Box2DBridge.cpp
+
+    # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
+    # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
+    # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。
+    # SaveGameSystem —— Save / Load 主流程：原子写入 (.tmp + fsync + rename)
+    # + 16 字节 binary header + IEEE 802.3 CRC32 + 顶层 / 每组件 schema 校验。
+    # SavePath —— 平台相关 user-data 根目录解析（Windows: SHGetKnownFolderPath
+    # FOLDERID_RoamingAppData；其它平台返回 Unsupported）+ vendor/game/subfolder
+    # 拼装 + mkdir -p。
+    # AtomicWrite —— 内部共享原语：".tmp + fsync + rename" 三步原子写入，
+    # 由 SaveGameSystem 与 SlotManager 共用。
+    # SlotManager —— 多存档槽 + sidecar `.meta.json` 元数据；上层 UI 读档
+    # 列表的入口。
+    # AutosaveScheduler —— 帧驱动的间隔触发 + 节流 + 手动请求队列。
+    src/save/AtomicWrite.cpp
+    src/save/AutosaveScheduler.cpp
+    src/save/SaveGameRegistry.cpp
+    src/save/SaveGameSystem.cpp
+    src/save/SavePath.cpp
+    src/save/SlotManager.cpp
 )
 
 # ---------------------------------------------------------------------------
