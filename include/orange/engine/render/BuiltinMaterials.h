@@ -56,6 +56,17 @@ ORANGE_ENGINE_API Material LoadToon(Asset::AssetRegistry& registry);
 // 加载内置 rim-light 模板。语义同 LoadToon。
 ORANGE_ENGINE_API Material LoadRimLight(Asset::AssetRegistry& registry);
 
+// 加载内置 dissolve 模板：noise(uv) + 时间驱动阈值 alpha discard，阈值
+// 附近 ±kEdgeWidth 区间输出 HDR > 1 的发光边沿色。dissolve_t 在 frag
+// 内部由 light UBO 的 uFrameInfo.x 自驱（pingpong 0..1..0），调用方无
+// 须手动驱动；per-instance 调速 / 调色等到 Material UBO 接通后再补。
+ORANGE_ENGINE_API Material LoadDissolve(Asset::AssetRegistry& registry);
+
+// 加载内置 emissive 模板：直接输出 HDR > 1 的常量色（带轻微 vignette），
+// 不计算光照——表面"自发光"，颜色超出 LDR 阈值由既有 bloom pass 自动
+// 拾取产出光晕。颜色 / 强度参数 hardcode 同 toon / rim_light。
+ORANGE_ENGINE_API Material LoadEmissive(Asset::AssetRegistry& registry);
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
 
 #endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

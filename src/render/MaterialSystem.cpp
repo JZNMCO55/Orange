@@ -147,21 +147,30 @@ Result<void, ResultCode> MaterialSystem::RegisterBuiltins()
     Material textured = BuiltinMaterials::LoadTextured(mpImpl->registry);
     Material toon     = BuiltinMaterials::LoadToon(mpImpl->registry);
     Material rim      = BuiltinMaterials::LoadRimLight(mpImpl->registry);
+    Material dissolve = BuiltinMaterials::LoadDissolve(mpImpl->registry);
+    Material emissive = BuiltinMaterials::LoadEmissive(mpImpl->registry);
 
     const bool texturedShaderOk =
         textured.vertexShader.IsValid() && textured.fragmentShader.IsValid();
     const bool toonShaderOk = toon.vertexShader.IsValid() && toon.fragmentShader.IsValid();
     const bool rimShaderOk  = rim.vertexShader.IsValid()  && rim.fragmentShader.IsValid();
+    const bool dissolveShaderOk =
+        dissolve.vertexShader.IsValid() && dissolve.fragmentShader.IsValid();
+    const bool emissiveShaderOk =
+        emissive.vertexShader.IsValid() && emissive.fragmentShader.IsValid();
 
     const bool texturedNew = storeIfNew(std::move(textured));
     const bool toonNew     = storeIfNew(std::move(toon));
     const bool rimNew      = storeIfNew(std::move(rim));
+    const bool dissolveNew = storeIfNew(std::move(dissolve));
+    const bool emissiveNew = storeIfNew(std::move(emissive));
 
-    if (!texturedNew || !toonNew || !rimNew)
+    if (!texturedNew || !toonNew || !rimNew || !dissolveNew || !emissiveNew)
     {
         return ResultCode::AlreadyExists;
     }
-    if (!texturedShaderOk || !toonShaderOk || !rimShaderOk)
+    if (!texturedShaderOk || !toonShaderOk || !rimShaderOk
+        || !dissolveShaderOk || !emissiveShaderOk)
     {
         return ResultCode::IoError;
     }

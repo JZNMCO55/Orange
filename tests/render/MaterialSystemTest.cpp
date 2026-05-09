@@ -102,23 +102,34 @@ void TestRegisterBuiltins()
     MaterialSystem matSys(registry);
     auto result = matSys.RegisterBuiltins();
     assert(result.IsOk());
-    assert(matSys.TemplateCount() == 3);
+    // textured / toon / rim_light / dissolve / emissive 五件内置模板。
+    assert(matSys.TemplateCount() == 5);
 
     const Material* textured = matSys.FindTemplate("textured");
     const Material* toon     = matSys.FindTemplate("toon");
     const Material* rim      = matSys.FindTemplate("rim_light");
+    const Material* dissolve = matSys.FindTemplate("dissolve");
+    const Material* emissive = matSys.FindTemplate("emissive");
     assert(textured != nullptr);
     assert(toon     != nullptr);
     assert(rim      != nullptr);
+    assert(dissolve != nullptr);
+    assert(emissive != nullptr);
     assert(textured->name == "textured");
     assert(toon->name     == "toon");
     assert(rim->name      == "rim_light");
+    assert(dissolve->name == "dissolve");
+    assert(emissive->name == "emissive");
     assert(textured->vertexShader.IsValid());
     assert(textured->fragmentShader.IsValid());
     assert(toon->vertexShader.IsValid());
     assert(toon->fragmentShader.IsValid());
     assert(rim->vertexShader.IsValid());
     assert(rim->fragmentShader.IsValid());
+    assert(dissolve->vertexShader.IsValid());
+    assert(dissolve->fragmentShader.IsValid());
+    assert(emissive->vertexShader.IsValid());
+    assert(emissive->fragmentShader.IsValid());
 
     // Task 07 重构：textured / toon / rim_light push-constant 全部收为
     // {uMVP, uModel} = 2 项；其余参数迁到 light UBO 或 hardcode（详见
@@ -195,7 +206,8 @@ void TestDuplicateNameRejected()
     auto result = matSys.RegisterTemplate(dupDesc);
     assert(result.IsErr());
     assert(result.Error() == ResultCode::AlreadyExists);
-    assert(matSys.TemplateCount() == 3);  // 仍是原来 textured + toon + rim_light
+    // textured + toon + rim_light + dissolve + emissive 五件内置模板。
+    assert(matSys.TemplateCount() == 5);
 
     const Material* toon = matSys.FindTemplate("toon");
     assert(toon != nullptr);

@@ -1,27 +1,41 @@
-// samples/09_vfx_demo —— VfxSystem 粒子骨架的视觉验收。
+// samples/09_vfx_demo —— VFX 子系统视觉验收（粒子 + dissolve + emissive）。
 //
-// 屏幕中央一个 fountain 发射器：粒子带 HDR 颜色（alpha > 1）从 entity
-// 原点向上喷出，受重力下拉、寿命中颜色从黄红渐变到深红，alpha 衰减
-// 到 0。Pipeline 在主 pass 之后 / bloom 之前调一次 VfxSystem::DrawParticles，
-// 把粒子写到 HDR target——bloom pass 自动拾取超亮像素生成光晕。
+// 屏幕内容：
+//   * 中央偏下：fountain 发射器，粒子带 HDR 颜色（alpha > 1）从原点向
+//     上喷出、受重力下拉，颜色从黄红渐变到深红。Pipeline 在主 pass 后 /
+//     bloom 前调一次 VfxSystem::DrawParticles，粒子写到同一 HDR target
+//     自然喂 bloom；
+//   * 左侧：旋转 cube 走 dissolve 模板——shader 内部用 light UBO 的
+//     uFrameInfo.x 自驱 dissolve_t（pingpong 0..1..0），呈现"逐格消融
+//     + 边沿发光"循环；
+//   * 右侧：静止 cube 走 emissive 模板——直接输出 HDR > 1 的暖白色，
+//     bloom pass 自动给出光晕。
 //
-// 后续若加内置 dissolve / emissive 模板，会在同 sample 里追加一个走
-// dissolve 的旋转 mesh + 一个 emissive mesh，做完整 VFX 视觉收尾。
+// 这三个子项是 VFX 子系统对游戏侧"史莱姆 dissolve / 发光眼 / 粒子尾迹"
+// 等典型效果的 building block。per-instance 调参（dissolve 速度 / emissive
+// 颜色等）等 Material UBO 路径上线后再补，本 sample 用内置 hardcode 值
+// 即可视觉到位。
 
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
 #include <orange/engine/app/FrameContext.h>
 #include <orange/engine/app/Layer.h>
+#include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/BuiltinPostProcessChain.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/MaterialInstance.h>
+#include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
 #include <orange/engine/render/PostProcessPasses.h>
+#include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/VfxSystem.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -31,40 +45,132 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
+#include <array>
 #include <cstdio>
 #include <memory>
 #include <utility>
 
 using namespace Orange::Engine;
+using Orange::Engine::Asset::AssetHandle;
 using Orange::Engine::Asset::AssetRegistry;
+using Orange::Engine::Asset::MeshAsset;
 using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
+using Orange::Engine::Asset::VertexPosition3;
+using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
 using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
+using Orange::Engine::Render::DirectionalLight;
+using Orange::Engine::Render::MaterialInstance;
+using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::ParticleEmitterComponent;
 using Orange::Engine::Render::ParticleEmitterDesc;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
+using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::VfxSystem;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
+// 立方体几何——与 04_3d_mesh_with_bloom 同布局：6 面 × 4 顶点，每面
+// 自带本地 UV (0,0)..(1,1)。dissolve / emissive 都按 UV 采样阈值 / 强度。
+struct CubeFace
+{
+    std::array<VertexPosition3, 4> positions;
+};
+
+constexpr std::array<CubeFace, 6> kCubeFaces = {{
+    {{{{ 0.5f, -0.5f,  0.5f},
+       { 0.5f, -0.5f, -0.5f},
+       { 0.5f,  0.5f, -0.5f},
+       { 0.5f,  0.5f,  0.5f}}}},
+    {{{{-0.5f, -0.5f, -0.5f},
+       {-0.5f, -0.5f,  0.5f},
+       {-0.5f,  0.5f,  0.5f},
+       {-0.5f,  0.5f, -0.5f}}}},
+    {{{{-0.5f,  0.5f,  0.5f},
+       { 0.5f,  0.5f,  0.5f},
+       { 0.5f,  0.5f, -0.5f},
+       {-0.5f,  0.5f, -0.5f}}}},
+    {{{{-0.5f, -0.5f, -0.5f},
+       { 0.5f, -0.5f, -0.5f},
+       { 0.5f, -0.5f,  0.5f},
+       {-0.5f, -0.5f,  0.5f}}}},
+    {{{{-0.5f, -0.5f,  0.5f},
+       { 0.5f, -0.5f,  0.5f},
+       { 0.5f,  0.5f,  0.5f},
+       {-0.5f,  0.5f,  0.5f}}}},
+    {{{{ 0.5f, -0.5f, -0.5f},
+       {-0.5f, -0.5f, -0.5f},
+       {-0.5f,  0.5f, -0.5f},
+       { 0.5f,  0.5f, -0.5f}}}},
+}};
+
+constexpr std::array<VertexUV2, 4> kFaceUVs = {{
+    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+}};
+
+std::unique_ptr<MeshAsset> MakeCubeMesh()
+{
+    std::vector<VertexPosition3> positions;
+    std::vector<VertexUV2>       uvs;
+    std::vector<std::uint32_t>   indices;
+    positions.reserve(24);
+    uvs.reserve(24);
+    indices.reserve(36);
+
+    for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
+    {
+        const std::uint32_t base = face * 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            positions.push_back(kCubeFaces[face].positions[i]);
+            uvs.push_back(kFaceUVs[i]);
+        }
+        indices.push_back(base + 0);
+        indices.push_back(base + 2);
+        indices.push_back(base + 1);
+        indices.push_back(base + 0);
+        indices.push_back(base + 3);
+        indices.push_back(base + 2);
+    }
+
+    return std::make_unique<MeshAsset>(std::move(positions),
+                                       std::move(uvs),
+                                       std::move(indices));
+}
+
 class VfxLayer : public Layer
 {
 public:
-    VfxLayer(Pipeline& pipeline, VfxSystem& vfx, World& world)
-        : Layer("VfxLayer"), mPipeline(pipeline), mVfx(vfx), mWorld(world)
+    VfxLayer(Pipeline& pipeline, VfxSystem& vfx, World& world, Entity dissolveCube)
+        : Layer("VfxLayer")
+        , mPipeline(pipeline)
+        , mVfx(vfx)
+        , mWorld(world)
+        , mDissolveCube(dissolveCube)
     {
     }
 
     void OnUpdate(const FrameContext& frame) override
     {
-        // Sim 在 Pipeline.Render 之前推进——VfxSystem 不接管 sim 时序，
-        // 让调用方把 Tick 安排在希望的"逻辑相位"。
+        // dissolve cube 慢转一下，让消融纹理在不同朝向上都能看到。
+        if (auto* xf = mWorld.GetComponent<TransformComponent>(mDissolveCube))
+        {
+            const float angle = static_cast<float>(frame.time.totalSeconds) * 0.6f;
+            xf->rotation = glm::angleAxis(angle, glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f)));
+        }
+
+        // 把 elapsed 时间喂给 Pipeline——dissolve frag 通过 light UBO 的
+        // uFrameInfo.x 读到，自驱 dissolve_t pingpong。
+        mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
+
+        // Sim 在 Render 之前推进——VfxSystem 不接管 sim 时序。
         mVfx.Tick(mWorld, static_cast<float>(frame.time.deltaSeconds));
         mPipeline.Render(mWorld);
     }
@@ -82,6 +188,7 @@ private:
     Pipeline&  mPipeline;
     VfxSystem& mVfx;
     World&     mWorld;
+    Entity     mDissolveCube;
 };
 
 }  // namespace
@@ -114,14 +221,69 @@ int main(int argc, char** argv)
                      static_cast<unsigned>(reg.Error()));
         return 1;
     }
+    auto meshHandleResult = assets.Insert<MeshAsset>("builtin/cube", MakeCubeMesh());
+    if (meshHandleResult.IsErr())
+    {
+        std::fprintf(stderr,
+                     "AssetRegistry::Insert<MeshAsset> failed (code=%u)\n",
+                     static_cast<unsigned>(meshHandleResult.Error()));
+        return 1;
+    }
+    AssetHandle<MeshAsset> meshHandle = meshHandleResult.Value();
 
-    // 世界：一个相机 + 一个 fountain 发射器。
+    MaterialSystem materials(assets);
+    if (auto rb = materials.RegisterBuiltins(); rb.IsErr())
+    {
+        std::fprintf(stderr,
+                     "MaterialSystem::RegisterBuiltins failed (code=%u)\n",
+                     static_cast<unsigned>(rb.Error()));
+        return 1;
+    }
+    auto dissolveInstance = materials.CreateInstance("dissolve");
+    auto emissiveInstance = materials.CreateInstance("emissive");
+    if (!dissolveInstance || !emissiveInstance)
+    {
+        std::fprintf(stderr,
+                     "MaterialSystem::CreateInstance(dissolve/emissive) returned null\n");
+        return 1;
+    }
+
     World world;
 
+    // dissolve cube：左侧、旋转、走 dissolve 模板
+    Entity dissolveCube = world.CreateEntity();
+    {
+        TransformComponent tx{};
+        tx.position = glm::vec3(-2.2f, 0.0f, 0.0f);
+        world.AddComponent(dissolveCube, tx);
+
+        RenderableComponent r;
+        r.mesh             = meshHandle;
+        r.materialInstance = dissolveInstance.get();
+        world.AddComponent(dissolveCube, r);
+    }
+
+    // emissive cube：右侧、静止、走 emissive 模板
+    Entity emissiveCube = world.CreateEntity();
+    {
+        TransformComponent tx{};
+        tx.position = glm::vec3(2.2f, 0.0f, 0.0f);
+        // 给 emissive cube 一个固定朝向，让能多看到几个面而不是正方
+        // 形剪影；emissive 模板按 UV 做 vignette，正方形面看起来更立体。
+        tx.rotation = glm::angleAxis(0.6f, glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f)));
+        world.AddComponent(emissiveCube, tx);
+
+        RenderableComponent r;
+        r.mesh             = meshHandle;
+        r.materialInstance = emissiveInstance.get();
+        world.AddComponent(emissiveCube, r);
+    }
+
+    // fountain 发射器：屏幕下方、HDR 粒子流
     Entity emitterEntity = world.CreateEntity();
     {
         TransformComponent tx{};
-        tx.position = glm::vec3(0.0f, -1.5f, 0.0f);  // 屏幕下方一点
+        tx.position = glm::vec3(0.0f, -1.5f, 0.0f);
         world.AddComponent(emitterEntity, tx);
 
         ParticleEmitterDesc desc{};
@@ -143,12 +305,25 @@ int main(int argc, char** argv)
         world.AddComponent<ParticleEmitterComponent>(emitterEntity, {desc, true});
     }
 
+    // 主光：dissolve / emissive frag 都声明了 light UBO（set 0 binding 1）
+    // 即使 emissive 不读 NdotL，light UBO 也得有合法内容，避免 fragment
+    // 取到未初始化值。这条与其它 builtin sample 同模式。
+    Entity lightEntity = world.CreateEntity();
+    {
+        DirectionalLight dl{};
+        dl.direction   = glm::normalize(glm::vec3(0.3f, -1.0f, 0.4f));
+        dl.color       = glm::vec3(1.0f, 0.97f, 0.92f);
+        dl.intensity   = 1.2f;
+        dl.castsShadow = false;
+        world.AddComponent(lightEntity, dl);
+    }
+
     Entity camEntity = world.CreateEntity();
     {
         const float aspect = static_cast<float>(cfg.window.width)
                            / static_cast<float>(cfg.window.height);
         Camera cam = Camera::Perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f),
+        cam.view = glm::lookAt(glm::vec3(0.0f, 0.5f, 6.5f),
                                glm::vec3(0.0f, 0.0f, 0.0f),
                                glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
@@ -167,23 +342,22 @@ int main(int argc, char** argv)
     PostProcessChain chain = CreateDefault();
     if (auto* bp = dynamic_cast<BloomPass*>(chain.FindByName("bloom")))
     {
-        bp->threshold = 0.6f;   // 低阈值 + 高粒子 alpha → halo 显著
+        bp->threshold = 0.6f;
         bp->intensity = 1.0f;
     }
     pipeline.SetPostProcessChain(&chain);
+    pipeline.SetMaterialSystem(&materials);
 
     VfxSystem vfx;
-    pipeline.SetVfxSystem(&vfx);   // 自动 Initialize VfxSystem 的 GPU 资源
+    pipeline.SetVfxSystem(&vfx);
 
     if (!captureCli.outPath.empty())
     {
-        // CaptureLayer 必须在 RenderLayer 之前 push（先请求 capture，
-        // 同帧 RenderLayer 触发 readback）。
         host->PushLayer(std::make_unique<OrangeSamples::CaptureLayer>(
             pipeline, *host, captureCli.outPath, captureCli.captureFrame));
     }
 
-    host->PushLayer(std::make_unique<VfxLayer>(pipeline, vfx, world));
+    host->PushLayer(std::make_unique<VfxLayer>(pipeline, vfx, world, dissolveCube));
 
     const int rc = host->Run();
 

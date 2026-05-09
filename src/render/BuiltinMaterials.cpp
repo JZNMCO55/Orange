@@ -164,4 +164,44 @@ Material LoadRimLight(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/rim_light.frag.spv");
 }
 
+Material LoadDissolve(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "dissolve";
+
+    // 与 toon / rim_light 同模式：push constant 仅 {uMVP, uModel}；其余
+    // dissolve 参数（noise scale / edge width / edge color）hardcode 进
+    // dissolve.frag.glsl，dissolve_t 由 frag 端读 light UBO 的
+    // uFrameInfo.x 自驱（pingpong 0..1..0）。per-instance 调参等
+    // Material UBO 路径接通后再补。
+    desc.uniforms = {
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
+    };
+    desc.textureSlots = {};
+
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/dissolve.vert.spv",
+                         "shaders/orange_engine/dissolve.frag.spv");
+}
+
+Material LoadEmissive(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "emissive";
+
+    // 与 dissolve / toon 同模式：push constant {uMVP, uModel}；emissive
+    // color / intensity hardcode 进 emissive.frag.glsl，HDR > 1 触发既
+    // 有 bloom pass。
+    desc.uniforms = {
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
+    };
+    desc.textureSlots = {};
+
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/emissive.vert.spv",
+                         "shaders/orange_engine/emissive.frag.spv");
+}
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials

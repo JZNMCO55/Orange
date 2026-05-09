@@ -76,7 +76,7 @@
     - [Task 01b：Renderable / Camera / Light 组件序列化 ✅](#task-01brenderable--camera--light-组件序列化-)
     - [Task 01c：RigidBody / Collider / Animator 组件序列化 ✅](#task-01crigidbody--collider--animator-组件序列化-)
     - [Task 02a：VfxSystem 粒子系统骨架 ✅](#task-02avfxsystem-粒子系统骨架-)
-    - [Task 02b：Dissolve + Emissive 内置 Material 模板](#task-02bdissolve--emissive-内置-material-模板)
+    - [Task 02b：Dissolve + Emissive 内置 Material 模板 ✅](#task-02bdissolve--emissive-内置-material-模板-)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -2100,7 +2100,7 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 验收标准：上述 3 条全过；VfxSystem 公共面就绪、Task 02b 在不破公共面的前提下追加 dissolve / emissive 模板。
 - Critical Path：是
 
-#### Task 02b：Dissolve + Emissive 内置 Material 模板
+#### Task 02b：Dissolve + Emissive 内置 Material 模板 ✅
 - 描述：把两个 sample 常用的 shader 效果以 `BuiltinMaterials::LoadDissolve()` / `LoadEmissive()` 形态进引擎——dissolve 用 noise 阈值 + alpha discard + 边缘高亮，emissive 直接输出 HDR > 1 让既有 bloom pass 自动拾取。结构与 toon / rim_light 同构（同一 `Material` 描述符 + .spv 加载流程），让"加新内置 shader 模板"的成本下降到 ~150 行 GLSL + 一处 BuiltinMaterials 工厂注册。
 - 输入：Phase 5 / Task 02a（VfxSystem + samples/09_vfx_demo 已就绪）
 - 输出（Proposed）：
@@ -2113,10 +2113,11 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - 影响模块：Render（仅追加 BuiltinMaterials 工厂）、Animation（仅消费现有 ProceduralAnimator）
 - 前置依赖：Task 02a
 - 实现要点：
-  - **dissolve shader**：输入 `uDissolveT`（0..1，0 = 完整可见、1 = 完全消失）+ `uNoiseScale`（控制 noise 频率）+ `uEdgeWidth` + `uEdgeColor`（边缘高亮颜色，HDR > 1 让 bloom 拾取）。Noise 函数用 hash-based 简易 noise（`fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453)`），不接 simplex / Perlin 库——保持依赖最小。Sample 端用 ProceduralAnimator 加 channel `dissolve_t = clamp(elapsed / 2.0, 0, 1)` 演示 2 秒消融。
-  - **emissive shader**：极简——frag 输出 `uEmissiveColor.rgb * uIntensity`，无光照计算。`uIntensity > 1` 时颜色超出 HDR 阈值，自动被 bloom pass 的 threshold extract 拾取——这是与 toon/rim_light 的关键差别，不需要 Pipeline 任何改动就能验证 bloom 联动。
-  - **顶点 shader 复用**：dissolve 与 emissive 的 vert 都直接复用现有 textured-mesh vertex layout（pos+uv），仅 frag 不同。这样两个新模板就是"复用 vert + 各自一个 frag" = 半个文件量。
-  - **uniform 描述符**：Material descriptor 列出全部 push-constant 字段；`MaterialInstance::SetUniform("dissolve_t", t)` 即可在 Pipeline 已有路径上 push 到 GPU——不引入新 binding 类型。
+  - **架构现状（影响参数路径）**：当前 Pipeline.cpp 主 pass 硬编码 push constant 为 `{uMVP}` 或 `{uMVP, uModel}`，**不**把 `MaterialInstance::SetUniform` 写的 override 表 push 到 GPU（ProceduralAnimator.h 也已点明"Phase 6 Material UBO 落地前看不到效果"）。本 task 不动 Pipeline 路径，按 toon/rim_light 同模式把可调参数 hardcode 进 shader；per-instance 自定义（ProceduralAnimator 驱 dissolve_t、material instance 调 emissive 颜色等）等 Material UBO 上线后再补。
+  - **dissolve shader**：fragment 端读 light UBO 的 `uFrameInfo.x`（elapsed seconds，已被 toon.frag 等使用）→ 用 `(1 - cos(time)) * 0.5` 给出 0..1..0 pingpong 的 dissolve_t；按 `noise(uv * kNoiseScale) < dissolve_t` 做 alpha discard；阈值附近 ±kEdgeWidth 区间输出 HDR > 1 的 `kEdgeColor`，自动喂 bloom 出"消融边沿发光"。Noise 用 hash-based 简易实现（`fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453)`），不接 simplex / Perlin 库——保持依赖最小。
+  - **emissive shader**：极简——frag 直接输出 `kEmissiveColor.rgb * kIntensity`，无光照计算。`kIntensity > 1` 时颜色超出 HDR 阈值，自动被 bloom pass 的 threshold extract 拾取——这是与 toon/rim_light 的关键差别，不需要 Pipeline 任何改动就能验证 bloom 联动。
+  - **顶点 shader 复用**：dissolve 与 emissive 都复用现有 textured-mesh vertex layout（pos+uv），各自带一个 vert（输出 vUV / vWorldPos）+ 一个 frag。push constant 仍 `{uMVP, uModel}` 与 toon / rim_light 同。
+  - **Material descriptor**：仅列 `{uMVP, uModel}` 两个 push 字段（Pipeline 当前路由限制）。具体 shader 内的 dissolve / emissive 参数 hardcode；将来 Material UBO 上线后追加 instance-side uniforms 描述符即可，不破公共面。
 - 验证：
   1. `BuiltinMaterialsTest.cpp` 加 dissolve / emissive 加载 case，verify uniform / push-constant schema 与 GLSL 一致。
   2. ctest 全过。

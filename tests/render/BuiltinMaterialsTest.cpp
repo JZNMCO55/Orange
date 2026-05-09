@@ -131,6 +131,56 @@ void TestSchemaIsolationOnInstance(AssetRegistry& registry)
     std::fprintf(stdout, "  [PASS] MaterialInstance enforces template schema\n");
 }
 
+void TestLoadDissolve(AssetRegistry& registry)
+{
+    Material dissolve = BuiltinMaterials::LoadDissolve(registry);
+
+    assert(dissolve.name == "dissolve");
+    assert(dissolve.vertexShader.IsValid());
+    assert(dissolve.fragmentShader.IsValid());
+
+    // 与 toon / rim_light 同模式：push-constant {uMVP, uModel}；其余
+    // dissolve 参数（noise scale / edge width / edge color / dissolveT）
+    // 全部 hardcode 在 fragment shader 内（dissolveT 由 light UBO 的
+    // uFrameInfo.x 驱动）。
+    assert(dissolve.uniforms.size() == 2);
+    const auto* uMVP   = FindUniformType(dissolve, "uMVP");
+    const auto* uModel = FindUniformType(dissolve, "uModel");
+    assert(uMVP   && *uMVP   == MaterialUniformType::Mat4);
+    assert(uModel && *uModel == MaterialUniformType::Mat4);
+
+    assert(dissolve.textureSlots.empty());
+
+    std::fprintf(stdout, "  [PASS] BuiltinMaterials::LoadDissolve descriptor\n");
+}
+
+void TestLoadEmissive(AssetRegistry& registry)
+{
+    Material emissive = BuiltinMaterials::LoadEmissive(registry);
+
+    assert(emissive.name == "emissive");
+    assert(emissive.vertexShader.IsValid());
+    assert(emissive.fragmentShader.IsValid());
+
+    // 与 dissolve 同形态：仅 push-constant {uMVP, uModel}；颜色 / intensity
+    // hardcode 进 emissive.frag.glsl，HDR > 1 由 bloom 拾取。
+    assert(emissive.uniforms.size() == 2);
+    const auto* uMVP   = FindUniformType(emissive, "uMVP");
+    const auto* uModel = FindUniformType(emissive, "uModel");
+    assert(uMVP   && *uMVP   == MaterialUniformType::Mat4);
+    assert(uModel && *uModel == MaterialUniformType::Mat4);
+
+    assert(emissive.textureSlots.empty());
+
+    // 验证 dissolve / emissive 的 vertex / fragment shader handle 是各
+    // 自不同的——不是所有 builtin 模板都共享同一份 SPIR-V（避免误把
+    // emissive 编译成走 dissolve frag 的"看似能跑"路径）。
+    Material dissolve = BuiltinMaterials::LoadDissolve(registry);
+    assert(emissive.fragmentShader.Value() != dissolve.fragmentShader.Value());
+
+    std::fprintf(stdout, "  [PASS] BuiltinMaterials::LoadEmissive descriptor + shader isolation\n");
+}
+
 }  // namespace
 
 int main()
@@ -151,6 +201,8 @@ int main()
     TestLoadRimLight(registry);
     TestDedup(registry);
     TestSchemaIsolationOnInstance(registry);
+    TestLoadDissolve(registry);
+    TestLoadEmissive(registry);
 
     std::fprintf(stdout, "[BuiltinMaterialsTest] all tests passed.\n");
     return 0;

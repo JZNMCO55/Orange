@@ -242,6 +242,18 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/additive_billboard.frag.glsl"
     ORANGE_ENGINE_BUILTIN_PARTICLE_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/dissolve.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_DISSOLVE_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/dissolve.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_DISSOLVE_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/emissive.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_EMISSIVE_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/emissive.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
@@ -261,7 +273,11 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_TONEMAP_VS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_TONEMAP_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PARTICLE_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PARTICLE_FS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_PARTICLE_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_DISSOLVE_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_DISSOLVE_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_EMISSIVE_VS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)
