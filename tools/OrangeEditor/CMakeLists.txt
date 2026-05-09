@@ -17,7 +17,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(OrangeEditor
-    VERSION   0.0.1
+    VERSION   0.0.2
     LANGUAGES CXX
     DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器（Phase 6 起）")
 
@@ -37,8 +37,77 @@ if (NOT TARGET OrangeEngine::orange_engine)
         "OrangeEngineTargets.cmake 可能损坏。")
 endif ()
 
+# OrangeRender 由 OrangeEngine 的 find_dependency 拉进来；编辑器 ImGui
+# 接入需要走 Orange::Renderer::Interop 公共面拿 VkInstance / VkDevice
+# 等 raw Vulkan handle，因此显式确认 Renderer 公共头可见 + 绑定 namespaced
+# target 到 link line（已经被 OrangeEngine 公共依赖间接传播，这里 explicit
+# 一下让 build 错误更清晰）。
+find_package(OrangeRender 0.1 CONFIG REQUIRED)
+
+# Vulkan SDK headers —— ImGui Vulkan backend 直接 #include <vulkan/vulkan.h>，
+# 编辑器自己也需要 cast Interop::* void* 回 VkInstance 等。OrangeRender
+# 的 transitive link 会带 vulkan_loader，但 include path 需要单独 find。
+find_package(Vulkan REQUIRED)
+
+# ---------------------------------------------------------------------------
+# ImGui (docking branch) —— Phase 6 / Task 06-02：编辑器整套 UI 走 ImGui。
+# 用 FetchContent 拉取，pin 一个稳定的 docking-branch commit，避免编辑器
+# 集成跟随上游 mainline 漂移。
+# ---------------------------------------------------------------------------
+
+include(FetchContent)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    # docking 分支的稳定 tag —— v1.91.5-docking。pin 具体 sha 让 build 可重复
+    GIT_TAG        v1.91.5-docking
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+# ImGui 仓没自带 CMakeLists，手工把 core + impl_glfw + impl_vulkan 编成
+# 一个静态 lib。加 IMGUI_IMPL_VULKAN_USE_VOLK=0 让 impl_vulkan 直接用
+# vulkan-1.lib 的符号（OrangeRender 内部用 volk 但其符号是 PRIVATE，
+# 编辑器拿不到；自己直接 link vulkan-1.lib 最干净）。
+add_library(orange_editor_imgui STATIC
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+)
+target_include_directories(orange_editor_imgui PUBLIC
+    "${imgui_SOURCE_DIR}"
+    "${imgui_SOURCE_DIR}/backends"
+)
+target_link_libraries(orange_editor_imgui PUBLIC Vulkan::Vulkan)
+# ImGui core 本身不需要 OrangeEngine —— 只 impl_glfw 需要 GLFW headers。
+# GLFW 是 OrangeRender 的 PRIVATE 依赖；编辑器自己也开窗（AppHost 内
+# 部用 GLFW，编辑器跟它共享同一 GLFWwindow*）所以需要直接 find。
+find_package(glfw3 CONFIG REQUIRED)
+target_link_libraries(orange_editor_imgui PUBLIC glfw)
+
+# 关掉 ImGui 自身的 warning（避免编辑器的 /WX /Werror 把 ImGui 内部
+# 警告升级为 error）。
+if (MSVC)
+    target_compile_options(orange_editor_imgui PRIVATE /W0)
+else ()
+    target_compile_options(orange_editor_imgui PRIVATE -w)
+endif ()
+
+# ---------------------------------------------------------------------------
+# OrangeEditor exe
+# ---------------------------------------------------------------------------
+
 add_executable(OrangeEditor main.cpp)
-target_link_libraries(OrangeEditor PRIVATE OrangeEngine::orange_engine)
+# OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
+# link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。
+target_link_libraries(OrangeEditor PRIVATE
+    OrangeEngine::orange_engine
+    orange_editor_imgui
+    glfw)
 
 # 与 sample / engine 同档的编译器 warning 级别 —— 编辑器作为长期演化
 # 的 first-class target，不享受任何"宽松 warning"豁免。
@@ -50,6 +119,6 @@ else ()
 endif ()
 
 # Visual Studio 调试时把 working directory 锚到 .exe 同目录，让将来
-# 接入资源加载（Task 06-02 起）时相对路径解析与 Release 行为一致。
+# 接入资源加载时相对路径解析与 Release 行为一致。
 set_target_properties(OrangeEditor PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:OrangeEditor>")
