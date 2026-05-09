@@ -79,6 +79,7 @@
     - [Task 02b：Dissolve + Emissive 内置 Material 模板 ✅](#task-02bdissolve--emissive-内置-material-模板-)
     - [Task 03：体积光（screen-space god rays） ✅](#task-03体积光screen-space-god-rays-)
     - [Task 04：自定义 RenderPass 注入正式启用 ✅](#task-04自定义-renderpass-注入正式启用-)
+    - [Task 05：异步资源加载 ✅](#task-05异步资源加载-)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -2200,6 +2201,36 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
   3. `samples/09_vfx_demo` 启动 + 截屏：屏幕上能看到 game 侧自定义 pass 写出的视觉痕迹（如对角 tint 条带），证明 pass 真被 Pipeline 调进帧路径。
 - 验收标准：上述 3 条全过；`Pipeline::InsertPass` 公共 API 就位，第一款游戏的"水面 / 屏幕扭曲 / 自定义 debug overlay"等扩展可以零引擎改动直接接入。Editor 起步阶段的 ImGui dock space 路径同样通过 AfterPostProcess 这个 stage 接通，不再需要引擎侧"占位 ImGui"的临时路径。
 - Critical Path：是（Editor 起步 + 游戏侧自定义渲染扩展的关键解锁）
+
+#### Task 05：异步资源加载 ✅
+- 描述：把 AssetRegistry 的"同步阻塞 `Load<T>`"扩展为"可选 `LoadAsync<T>`，返回立即可用的 handle，资源在后台 worker 线程加载完成后自动写入"。Phase 2 / Task 02 留下的 sync API 全部保留向后兼容；`LoadAsync` 与 `Load` 共用同一个 dedup 表 + handle 空间，调用方按需选 sync / async，不需要二选一切换全 sample。
+- 输入：Phase 5 / Task 04（Pipeline 现已稳定，所有内置 sample 用 sync `Load` 跑通）
+- 输出（Proposed）:
+  - `Modified: include/orange/engine/asset/AssetRegistry.h`（加 `LoadAsync<T>` / `IsLoaded<T>` / `WaitFor<T>` 三个公共方法 + 4 个对应 erased 入口）
+  - `Modified: src/asset/AssetRegistry.cpp`（Impl 加 worker thread + job queue + slot status 字段；老 Load 路径在持锁状态下完成；新 LoadAsync 路径仅入队 + 通知，立即返回）
+  - `Proposed: tests/asset/AsyncAssetTest.cpp`（覆盖：LoadAsync 立即返回 + Get 初始 nullptr / 后台完成后 Get 命中 / dedup（async + sync 同 path）/ WaitFor 阻塞至完成 / 析构 racing 中的 worker 不死锁）
+- 影响模块：Asset（核心改动）；其它模块仅在确实想用异步时改成 LoadAsync——0.x 可选启用，既有 sample 保持 sync。
+- 前置依赖：Phase 5 / Task 04
+- 实现要点：
+  - **Slot 状态机**：`AssetSlot` 加 `enum LoadStatus { Pending, Ready, Failed }` 字段。dedup 命中时读 status：Ready → 返回；Pending → 也返回该 handle（调用方稍后 Get 拿到 nullptr 自然轮询）；Failed → 也返回 handle（Get 返回 nullptr，调用方按 IsLoaded == false 处理）。
+  - **Worker 线程**：单 worker（FIFO 队列）覆盖 80% 用例；多线程并行加载留 Phase 6+。Impl 加 `std::thread mWorker` + `std::mutex mTablesMutex` + `std::condition_variable mJobsCv` + `std::deque<JobDesc> mJobs` + `std::atomic<bool> mShutdown`。析构时 `mShutdown = true; mJobsCv.notify_all(); mWorker.join();`——pending job 在析构期间被丢弃（slot 直接 erase）。
+  - **Lock 粒度**：表写操作（dedup map / slot status / 新建 slot）持 mTablesMutex；worker 调 `loader.invoker(path)` 时**释放**锁——loader I/O 不应阻塞主线程的其它 Load。loader 完成后重新持锁写 slot.asset + status=Ready。
+  - **Sync `Load` 与 async LoadAsync 互通**：sync 命中 dedup 中 Pending 的 slot → block on cv 等到该 slot 变 Ready 再返回（最多等一个 worker job 时长）；async 命中 dedup 中 Ready / Pending 的 slot → 立即返回 handle，不重排队。这条让 sample 既可以全 sync 也可以混用，无需切换。
+  - **`IsLoaded<T>(handle)`**：查 slot.status == Ready。常量时间，仅持锁极短。
+  - **`WaitFor<T>(handle, timeout)`**：阻塞调用方至 slot 变 Ready / Failed（或超时），返回是否成功。给"启动期想批量 LoadAsync 大资源、再统一等齐"的 sample 提供干净的"等齐 + 进入主循环"路径。timeout = `std::chrono::duration_cast<...>` 类型；0 = 永等。
+  - **失败处理**：loader 返回 ResultCode::Error → slot.status = Failed + slot.asset = nullptr。后续 Get 返回 nullptr；IsLoaded 返回 false；想拿到错误码可以查 `LoadResult<T>(handle)`（额外 helper，返回 Result<const T*, ResultCode>）—— 0.x 不强求暴露错误码，调用方自己 retry / log。
+  - **Out-of-scope（明确推迟）**：
+    - 多 worker 线程并行加载（IO bound 时单线程已够；Phase 6+ 编辑器 hot-reload 大批量再考虑 thread pool）；
+    - Priority queue（紧急资源插队）—— 仅 streaming 系统需要；
+    - 取消 / abort 已入队 job—— 复杂度 vs 价值不匹配，0.x 不开；
+    - 内存预算 / LRU eviction（Phase 6+ streaming 一并做）；
+    - Progress callback / event—— 调用方用 IsLoaded 轮询 80% 场景够用，event 留给 Phase 6+。
+- 验证：
+  1. `tests/asset/AsyncAssetTest.cpp` ≥5 case：LoadAsync 立即返回 + Get 初始 nullptr / 后台完成后 Get 命中 / IsLoaded 状态正确 / sync Load 命中 async pending dedup 时 block 等齐 / WaitFor 超时与成功 / Registry 析构期间有 pending job 不死锁。
+  2. ctest 全过——尤其确认引入的 std::thread + mutex 不破现有 asset_registry_test 的同步语义。
+  3. （可选）samples/06_physics_platformer 加一段 dev-time 自检：把 mesh 通过 LoadAsync 加载，主循环每帧 IsLoaded → 拿到后挂 RenderableComponent。该 sample 现在用 sync Load 立即就绪，仍然合法；async 路径目视确认是"先空场景后入物体"的渐进 loading 视觉。该 sample 改动不强制，0.x 优先 ctest 验证。
+- 验收标准：上述 1-2 条全过；`LoadAsync` / `IsLoaded` / `WaitFor` 公共 API 就位，第一款游戏的"loading screen 时批量 LoadAsync 全资源 + 进度条"路径可一行调用走通；Editor 起步阶段切场景时不再阻塞主线程几秒。
+- Critical Path：否（视觉 / 性能优化路径 / 不阻塞 Phase 5.5 Save Game / 不阻塞 Editor 起步——sync Load 在小关卡场景下仍然好使）
 
 ### Phase 5.5：Save Game 系统
 

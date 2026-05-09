@@ -31,6 +31,7 @@
 #include <orange/engine/asset/IAssetLoader.h>
 #include <orange/engine/core/Result.h>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -148,6 +149,57 @@ public:
         return UnloadErased(typeid(T), handle.Value());
     }
 
+    // 异步加载——立即返回一枚 "loading" 状态的 handle，资源由 worker
+    // 线程在后台加载。dedup 与 sync `Load` 共享：同 path 已存在 Ready
+    // / Pending slot 时返回老 handle，不重排队。
+    //
+    // Get<T>(handle) 在 Pending 阶段返回 nullptr；调用方按需用
+    // IsLoaded / WaitFor 等 Ready 后再消费资源。
+    //
+    // 失败语义：
+    //   * 没注册过 T 的 loader → 返回 ResultCode::Unsupported（与 sync
+    //     Load 一致）；handle 不入表，调用方拿不到等齐入口；
+    //   * loader 自身错误 → handle 入表但状态 Failed；IsLoaded 返回
+    //     false，Get 返回 nullptr。
+    template <typename T>
+    Result<AssetHandle<T>, ResultCode> LoadAsync(std::string_view path)
+    {
+        std::uint64_t handleValue = 0;
+        ResultCode rc = LoadAsyncErased(typeid(T), path, handleValue);
+        if (rc != ResultCode::Ok)
+        {
+            return rc;
+        }
+        return AssetHandle<T>{handleValue};
+    }
+
+    // 该 handle 是否已加载完成（Ready）。Pending / Failed / 无效 handle
+    // 都返回 false。常量时间，不阻塞。
+    template <typename T>
+    bool IsLoaded(AssetHandle<T> handle) const noexcept
+    {
+        if (!handle.IsValid())
+        {
+            return false;
+        }
+        return IsLoadedErased(typeid(T), handle.Value());
+    }
+
+    // 阻塞当前线程至 handle 状态变为非 Pending（Ready 或 Failed）或超
+    // 时。timeoutMs == 0 表示永等。返回值：
+    //   * true  —— handle 不再 Pending（可能 Ready 也可能 Failed；用
+    //               IsLoaded 进一步判定）；
+    //   * false —— 超时仍 Pending，或 handle 不在表中。
+    template <typename T>
+    bool WaitFor(AssetHandle<T> handle, std::chrono::milliseconds timeout) const noexcept
+    {
+        if (!handle.IsValid())
+        {
+            return false;
+        }
+        return WaitForErased(typeid(T), handle.Value(), timeout.count());
+    }
+
     // 反查：给定 handle 取出当时 Load / Insert 时使用的 path。无效或
     // 已卸载的 handle 返回空字符串。返回 string_view 的生存期与
     // registry 持有该 entry 的生存期一致——通常调用方应当立即拷贝
@@ -201,6 +253,23 @@ private:
 
     std::string_view PathOfErased(const std::type_info& type,
                                   std::uint64_t handleValue) const noexcept;
+
+    // 异步加载入口——把 (type, path) 翻成 handleValue + 入队 worker job。
+    // 返回 ResultCode::Unsupported 表示该类型没注册 loader（与 sync
+    // LoadErased 一致）；返回 Ok 时 handleValue 是即时可用的 "loading"
+    // handle。
+    ResultCode LoadAsyncErased(const std::type_info& type,
+                               std::string_view path,
+                               std::uint64_t& outHandle);
+
+    // 查 slot.status == Ready。Pending / Failed / 无效 handle → false。
+    bool IsLoadedErased(const std::type_info& type,
+                        std::uint64_t handleValue) const noexcept;
+
+    // 阻塞至 slot 不再是 Pending 或超时。timeoutMs == 0 = 永等。
+    bool WaitForErased(const std::type_info& type,
+                       std::uint64_t handleValue,
+                       std::int64_t timeoutMs) const noexcept;
 
     struct Impl;
     std::unique_ptr<Impl> mpImpl;

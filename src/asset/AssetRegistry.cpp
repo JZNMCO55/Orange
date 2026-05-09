@@ -12,8 +12,14 @@
 
 #include "orange/engine/asset/AssetRegistry.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <typeindex>
 #include <unordered_map>
 #include <utility>
@@ -36,11 +42,26 @@ struct LoaderEntry
     void (*assetDeleter)(void*) noexcept{nullptr};
 };
 
+// Async 加载状态机：
+//   * Pending —— slot 已分配 path、handle 已发出，但 asset 还在 worker
+//     线程加载中；Get 返回 nullptr，IsLoaded == false。
+//   * Ready   —— asset 已写入 slot.asset，正常可消费。
+//   * Failed  —— loader 返回错误；slot.asset == nullptr，IsLoaded ==
+//     false（与 Pending 区别仅在"是否还在等"——sync waiters 看到
+//     Failed 不再等下去）。
+enum class LoadStatus : std::uint8_t
+{
+    Pending,
+    Ready,
+    Failed,
+};
+
 struct AssetSlot
 {
     std::string path;
     void*       asset{nullptr};
     bool        live{false};
+    LoadStatus  status{LoadStatus::Ready};
 };
 
 struct AssetTable
@@ -51,19 +72,172 @@ struct AssetTable
     void (*assetDeleter)(void*) noexcept{nullptr};
 };
 
+// Worker thread 任务条目——type + handle 唯一定位 slot；path 在 worker
+// 释放锁后调 loader 时复用（不再回头查表）。
+struct AsyncJob
+{
+    std::type_index type;
+    std::uint64_t   handleValue;
+    std::string     path;
+};
+
 }  // namespace
 
 struct AssetRegistry::Impl
 {
+    // 单一 mutex 覆盖 loaders / tables / liveAssets / jobs 全部表写操作。
+    // worker 调 loader 期间释放锁——loader 的 IO 不应阻塞主线程的其它
+    // Load / Get / Insert 路径。GetErased / IsLoadedErased / WaitForErased
+    // 也持锁——0.x 内 Get 频次不高（mesh GPU 上传只在新 entity 添加时），
+    // 单一 mutex 足够；后续若成 hot path 再换 reader-writer / lockfree。
+    mutable std::mutex                               tablesMutex;
+    // 注：mJobsCv 与 mReadyCv 共享 tablesMutex，避免维护两个独立锁的
+    // ABA 与持锁顺序难题。jobs 上有任务时 worker 醒；slot status 变化
+    // 时 sync waiters 醒。
+    std::condition_variable                          jobsCv;
+    std::condition_variable                          readyCv;
+
     std::unordered_map<std::type_index, LoaderEntry> loaders;
     std::unordered_map<std::type_index, AssetTable>  tables;
-    std::size_t liveAssets{0};
+    std::size_t                                      liveAssets{0};
 
-    ~Impl() noexcept
+    // Async worker 任务队列 + 控制信号。
+    std::deque<AsyncJob> jobs;
+    std::atomic<bool>    shutdown{false};
+    std::thread          worker;
+
+    void Start();
+    void StopAndJoin() noexcept;
+    void WorkerLoop();
+};
+
+void AssetRegistry::Impl::Start()
+{
+    shutdown.store(false);
+    worker = std::thread([this]() { WorkerLoop(); });
+}
+
+void AssetRegistry::Impl::StopAndJoin() noexcept
+{
     {
-        // 析构顺序：先逐 table 释放 asset，再逐 loader 释放 loader 实
-        // 例。两次都用各自的 deleter——避免依赖 T 在此 TU 是否完整。
-        for (auto& [type, table] : tables)
+        std::lock_guard<std::mutex> lock(tablesMutex);
+        shutdown.store(true);
+    }
+    jobsCv.notify_all();
+    if (worker.joinable())
+    {
+        worker.join();
+    }
+    // 析构期间没消费完的 job —— pending slot 留给 Impl 析构里 path/asset
+    // 走默认释放路径；async waiters 在 readyCv 上的等待应已经在 stop 之
+    // 前由调用方自己 join / wait 完成（registry 析构 = 全套 shut-down，
+    // 此时还在 Wait 的代码本身就是 use-after-free 风险，不是本路径要兜
+    // 底的问题）。
+    jobs.clear();
+}
+
+void AssetRegistry::Impl::WorkerLoop()
+{
+    for (;;)
+    {
+        std::unique_lock<std::mutex> lock(tablesMutex);
+        jobsCv.wait(lock, [this] { return shutdown.load() || !jobs.empty(); });
+
+        if (shutdown.load() && jobs.empty())
+        {
+            return;
+        }
+
+        AsyncJob job = std::move(jobs.front());
+        jobs.pop_front();
+
+        // 拷一份 loader 信息——执行 invoker 之前会释放锁，loader 表
+        // 间隔被 hot-swap 的概率虽低，但保留快照避免 use-after-modify。
+        auto loaderIt = loaders.find(job.type);
+        if (loaderIt == loaders.end())
+        {
+            // loader 被卸了？slot 标 Failed 让 waiters 早退。
+            auto tableIt = tables.find(job.type);
+            if (tableIt != tables.end())
+            {
+                auto& tab = tableIt->second;
+                const std::size_t idx = static_cast<std::size_t>(job.handleValue - 1);
+                if (idx < tab.slots.size() && tab.slots[idx].live)
+                {
+                    tab.slots[idx].status = LoadStatus::Failed;
+                }
+            }
+            readyCv.notify_all();
+            continue;
+        }
+        const LoaderEntry loaderSnapshot = loaderIt->second;
+
+        // 释放锁跑 loader——IO 不阻塞主线程的其它 Load / Get。
+        lock.unlock();
+        void* assetRaw = nullptr;
+        const ResultCode rc =
+            loaderSnapshot.invoker(loaderSnapshot.loader, job.path, &assetRaw);
+        lock.lock();
+
+        auto tableIt = tables.find(job.type);
+        if (tableIt == tables.end())
+        {
+            // 极端：tables 被擦了（理论上 0.x 不会发生；只在 registry
+            // 析构期间才可能擦表，那时 shutdown 也已 true）。释放产物。
+            if (assetRaw && loaderSnapshot.assetDeleter)
+            {
+                loaderSnapshot.assetDeleter(assetRaw);
+            }
+            continue;
+        }
+        auto& tab = tableIt->second;
+        const std::size_t idx = static_cast<std::size_t>(job.handleValue - 1);
+        if (idx >= tab.slots.size() || !tab.slots[idx].live)
+        {
+            // slot 在 IO 期间被 Unload —— 资源孤儿了，释放并 drop。
+            if (assetRaw && loaderSnapshot.assetDeleter)
+            {
+                loaderSnapshot.assetDeleter(assetRaw);
+            }
+            continue;
+        }
+        auto& slot = tab.slots[idx];
+
+        if (rc != ResultCode::Ok || assetRaw == nullptr)
+        {
+            if (assetRaw && loaderSnapshot.assetDeleter)
+            {
+                loaderSnapshot.assetDeleter(assetRaw);
+            }
+            slot.status = LoadStatus::Failed;
+        }
+        else
+        {
+            slot.asset  = assetRaw;
+            slot.status = LoadStatus::Ready;
+            ++liveAssets;
+        }
+        readyCv.notify_all();
+    }
+}
+
+AssetRegistry::AssetRegistry() : mpImpl(std::make_unique<Impl>())
+{
+    mpImpl->Start();
+}
+
+AssetRegistry::~AssetRegistry()
+{
+    if (mpImpl)
+    {
+        // 析构顺序：先停 worker（可能还在 mJobsCv 上等），再清表。
+        // worker join 之前不能动表——worker 可能正在持锁修 slot。
+        mpImpl->StopAndJoin();
+
+        // 再走原路径释放：先逐 table 释放 asset，再逐 loader 释放
+        // loader 实例。两次都用各自的 deleter——避免依赖 T 在此 TU
+        // 是否完整。
+        for (auto& [type, table] : mpImpl->tables)
         {
             for (auto& slot : table.slots)
             {
@@ -73,31 +247,30 @@ struct AssetRegistry::Impl
                 }
             }
         }
-        tables.clear();
+        mpImpl->tables.clear();
 
-        for (auto& [type, entry] : loaders)
+        for (auto& [type, entry] : mpImpl->loaders)
         {
             if (entry.loader && entry.loaderDeleter)
             {
                 entry.loaderDeleter(entry.loader);
             }
         }
-        loaders.clear();
+        mpImpl->loaders.clear();
     }
-};
-
-AssetRegistry::AssetRegistry() : mpImpl(std::make_unique<Impl>())
-{
 }
-
-AssetRegistry::~AssetRegistry() = default;
 
 AssetRegistry::AssetRegistry(AssetRegistry&&) noexcept            = default;
 AssetRegistry& AssetRegistry::operator=(AssetRegistry&&) noexcept = default;
 
 std::size_t AssetRegistry::Size() const noexcept
 {
-    return mpImpl ? mpImpl->liveAssets : 0;
+    if (!mpImpl)
+    {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
+    return mpImpl->liveAssets;
 }
 
 bool AssetRegistry::Empty() const noexcept
@@ -123,6 +296,7 @@ Result<void, ResultCode> AssetRegistry::RegisterLoaderErased(
         return ResultCode::InvalidArgument;
     }
 
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
     const std::type_index key{type};
 
     // 替换路径：先释放旧 loader 再塞新的；旧 loader 已加载的 asset
@@ -164,16 +338,17 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
 {
     outHandle = 0;
     const std::type_index key{type};
+    const std::string     pathKey{path};
 
+    std::unique_lock<std::mutex> lock(mpImpl->tablesMutex);
     auto& table = mpImpl->tables[key];
 
-    // dedup：path 命中已加载的 slot → 直接返回老 handle。
+    // dedup：path 命中已加载的 slot → 看 slot 状态决定走哪条。
     //
     // 这一步刻意排在"loader 是否注册"检查之前——Insert 路径先于
     // RegisterLoader 把资源挂到 pathToHandle 是合法用法（程序式构造
     // 资源、scene 序列化前注入资源等），此时 Load 同 path 同类型应直
     // 接命中 cache，不应该因为缺 loader 而报 Unsupported。
-    const std::string pathKey{path};
     if (auto cacheIt = table.pathToHandle.find(pathKey);
         cacheIt != table.pathToHandle.end())
     {
@@ -181,6 +356,16 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
         const std::size_t idx = static_cast<std::size_t>(cached - 1);
         if (idx < table.slots.size() && table.slots[idx].live)
         {
+            // Pending 状态：等 worker 完成。Failed 状态：直接返回 handle，
+            // 调用方按 IsLoaded == false 处理（不在这里自动 retry，避免
+            // 隐式重新 IO 把 sync caller 卡住——retry 留给调用方主动
+            // Unload+Load）。
+            if (table.slots[idx].status == LoadStatus::Pending)
+            {
+                mpImpl->readyCv.wait(lock, [&]() {
+                    return table.slots[idx].status != LoadStatus::Pending;
+                });
+            }
             outHandle = cached;
             return ResultCode::Ok;
         }
@@ -193,47 +378,64 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
     {
         return ResultCode::Unsupported;
     }
+    const LoaderEntry loaderSnapshot = loaderIt->second;
 
-    void* assetRaw = nullptr;
-    ResultCode rc = loaderIt->second.invoker(loaderIt->second.loader, path, &assetRaw);
-    if (rc != ResultCode::Ok)
-    {
-        if (assetRaw && loaderIt->second.assetDeleter)
-        {
-            loaderIt->second.assetDeleter(assetRaw);
-        }
-        return rc;
-    }
-    if (assetRaw == nullptr)
-    {
-        // loader 报 Ok 但没产物——视为内部错误，避免后续走空指针。
-        return ResultCode::InternalError;
-    }
-
+    // 先分配 Pending slot 并把 path 挂进 dedup 表——之后释放锁跑 IO，
+    // 同 path 的并发 Load / LoadAsync 看到 Pending 会等而不是重复跑。
     std::uint64_t slotIndex = 0;
     if (!table.freeList.empty())
     {
         slotIndex = table.freeList.back();
         table.freeList.pop_back();
         auto& slot = table.slots[static_cast<std::size_t>(slotIndex)];
-        slot.path  = pathKey;
-        slot.asset = assetRaw;
-        slot.live  = true;
+        slot.path   = pathKey;
+        slot.asset  = nullptr;
+        slot.live   = true;
+        slot.status = LoadStatus::Pending;
     }
     else
     {
         slotIndex = static_cast<std::uint64_t>(table.slots.size());
         AssetSlot slot{};
-        slot.path  = pathKey;
-        slot.asset = assetRaw;
-        slot.live  = true;
+        slot.path   = pathKey;
+        slot.asset  = nullptr;
+        slot.live   = true;
+        slot.status = LoadStatus::Pending;
         table.slots.emplace_back(std::move(slot));
     }
-
     const std::uint64_t handleValue = slotIndex + 1;
     table.pathToHandle.emplace(pathKey, handleValue);
-    outHandle = handleValue;
+
+    // 释放锁跑 loader IO——同 path 并发 Load 会等本 slot 变 Ready；其
+    // 它 path / 其它类型不受阻塞。
+    lock.unlock();
+    void* assetRaw = nullptr;
+    ResultCode rc = loaderSnapshot.invoker(loaderSnapshot.loader, path, &assetRaw);
+    lock.lock();
+
+    auto& slotAfter = mpImpl->tables[key].slots[static_cast<std::size_t>(slotIndex)];
+    if (rc != ResultCode::Ok)
+    {
+        if (assetRaw && loaderSnapshot.assetDeleter)
+        {
+            loaderSnapshot.assetDeleter(assetRaw);
+        }
+        slotAfter.status = LoadStatus::Failed;
+        mpImpl->readyCv.notify_all();
+        return rc;
+    }
+    if (assetRaw == nullptr)
+    {
+        slotAfter.status = LoadStatus::Failed;
+        mpImpl->readyCv.notify_all();
+        return ResultCode::InternalError;
+    }
+
+    slotAfter.asset  = assetRaw;
+    slotAfter.status = LoadStatus::Ready;
     ++mpImpl->liveAssets;
+    mpImpl->readyCv.notify_all();
+    outHandle = handleValue;
     return ResultCode::Ok;
 }
 
@@ -253,6 +455,7 @@ ResultCode AssetRegistry::InsertErased(const std::type_info& type,
         return ResultCode::InvalidArgument;
     }
 
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
     const std::type_index key{type};
     auto& table = mpImpl->tables[key];
 
@@ -275,8 +478,11 @@ ResultCode AssetRegistry::InsertErased(const std::type_info& type,
             {
                 assetDeleter(slot.asset);
             }
-            slot.asset = assetRaw;
-            // path 不变；live 保持 true。
+            slot.asset  = assetRaw;
+            slot.status = LoadStatus::Ready;  // Insert 提供现成资源
+            // path 不变；live 保持 true。Insert 完成可能解锁等 Pending
+            // 的 Load（虽然 Pending → Insert 同 path 是不太自然的用法）。
+            mpImpl->readyCv.notify_all();
             outHandle = cached;
             return ResultCode::Ok;
         }
@@ -289,17 +495,19 @@ ResultCode AssetRegistry::InsertErased(const std::type_info& type,
         slotIndex = table.freeList.back();
         table.freeList.pop_back();
         auto& slot = table.slots[static_cast<std::size_t>(slotIndex)];
-        slot.path  = pathKey;
-        slot.asset = assetRaw;
-        slot.live  = true;
+        slot.path   = pathKey;
+        slot.asset  = assetRaw;
+        slot.live   = true;
+        slot.status = LoadStatus::Ready;
     }
     else
     {
         slotIndex = static_cast<std::uint64_t>(table.slots.size());
         AssetSlot slot{};
-        slot.path  = pathKey;
-        slot.asset = assetRaw;
-        slot.live  = true;
+        slot.path   = pathKey;
+        slot.asset  = assetRaw;
+        slot.live   = true;
+        slot.status = LoadStatus::Ready;
         table.slots.emplace_back(std::move(slot));
     }
 
@@ -317,6 +525,7 @@ const void* AssetRegistry::GetErased(const std::type_info& type,
     {
         return nullptr;
     }
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
     const std::type_index key{type};
     auto it = mpImpl->tables.find(key);
     if (it == mpImpl->tables.end())
@@ -330,7 +539,9 @@ const void* AssetRegistry::GetErased(const std::type_info& type,
         return nullptr;
     }
     const auto& slot = table.slots[idx];
-    if (!slot.live)
+    // Pending / Failed 状态不暴露 asset：consumer 按 nullptr 处理（与
+    // 既有 Get 的"无效 / 已卸载 → nullptr"路径对齐）。
+    if (!slot.live || slot.status != LoadStatus::Ready)
     {
         return nullptr;
     }
@@ -344,6 +555,7 @@ bool AssetRegistry::UnloadErased(const std::type_info& type,
     {
         return false;
     }
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
     const std::type_index key{type};
     auto tableIt = mpImpl->tables.find(key);
     if (tableIt == mpImpl->tables.end())
@@ -386,6 +598,7 @@ std::string_view AssetRegistry::PathOfErased(const std::type_info& type,
     {
         return {};
     }
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
     const std::type_index key{type};
     auto it = mpImpl->tables.find(key);
     if (it == mpImpl->tables.end())
@@ -404,8 +617,150 @@ std::string_view AssetRegistry::PathOfErased(const std::type_info& type,
         return {};
     }
     // path 持有 std::string；返回它的 view 即可。生存期由 slot 决定，
-    // 与 Get 返回的 const T* 一致——Unload 后失效。
+    // 与 Get 返回的 const T* 一致——Unload 后失效。Pending 状态下 path
+    // 仍然合法（async 入队时已写入），返回不阻塞。
     return slot.path;
+}
+
+ResultCode AssetRegistry::LoadAsyncErased(const std::type_info& type,
+                                          std::string_view path,
+                                          std::uint64_t& outHandle)
+{
+    outHandle = 0;
+    const std::type_index key{type};
+    const std::string     pathKey{path};
+
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
+    auto& table = mpImpl->tables[key];
+
+    // dedup：路径已在表（Pending / Ready / Failed 任一状态）→ 复用。
+    // 不重排队避免重复 IO；调用方按 IsLoaded / WaitFor 等齐。
+    if (auto cacheIt = table.pathToHandle.find(pathKey);
+        cacheIt != table.pathToHandle.end())
+    {
+        const std::uint64_t cached = cacheIt->second;
+        const std::size_t idx = static_cast<std::size_t>(cached - 1);
+        if (idx < table.slots.size() && table.slots[idx].live)
+        {
+            outHandle = cached;
+            return ResultCode::Ok;
+        }
+        table.pathToHandle.erase(cacheIt);
+    }
+
+    // 必须有 loader 注册——async 没法跨线程 fall-through 到 Insert 兜底。
+    auto loaderIt = mpImpl->loaders.find(key);
+    if (loaderIt == mpImpl->loaders.end())
+    {
+        return ResultCode::Unsupported;
+    }
+
+    // 分配 Pending slot + 入 dedup 表。
+    std::uint64_t slotIndex = 0;
+    if (!table.freeList.empty())
+    {
+        slotIndex = table.freeList.back();
+        table.freeList.pop_back();
+        auto& slot = table.slots[static_cast<std::size_t>(slotIndex)];
+        slot.path   = pathKey;
+        slot.asset  = nullptr;
+        slot.live   = true;
+        slot.status = LoadStatus::Pending;
+    }
+    else
+    {
+        slotIndex = static_cast<std::uint64_t>(table.slots.size());
+        AssetSlot slot{};
+        slot.path   = pathKey;
+        slot.asset  = nullptr;
+        slot.live   = true;
+        slot.status = LoadStatus::Pending;
+        table.slots.emplace_back(std::move(slot));
+    }
+    const std::uint64_t handleValue = slotIndex + 1;
+    table.pathToHandle.emplace(pathKey, handleValue);
+
+    // 入队 worker job + 唤醒 worker。
+    AsyncJob job{key, handleValue, pathKey};
+    mpImpl->jobs.emplace_back(std::move(job));
+    mpImpl->jobsCv.notify_one();
+
+    outHandle = handleValue;
+    return ResultCode::Ok;
+}
+
+bool AssetRegistry::IsLoadedErased(const std::type_info& type,
+                                   std::uint64_t handleValue) const noexcept
+{
+    if (handleValue == 0)
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mpImpl->tablesMutex);
+    const std::type_index key{type};
+    auto it = mpImpl->tables.find(key);
+    if (it == mpImpl->tables.end())
+    {
+        return false;
+    }
+    const auto& table = it->second;
+    const std::size_t idx = static_cast<std::size_t>(handleValue - 1);
+    if (idx >= table.slots.size())
+    {
+        return false;
+    }
+    const auto& slot = table.slots[idx];
+    return slot.live && slot.status == LoadStatus::Ready;
+}
+
+bool AssetRegistry::WaitForErased(const std::type_info& type,
+                                  std::uint64_t handleValue,
+                                  std::int64_t timeoutMs) const noexcept
+{
+    if (handleValue == 0)
+    {
+        return false;
+    }
+    std::unique_lock<std::mutex> lock(mpImpl->tablesMutex);
+    const std::type_index key{type};
+    auto it = mpImpl->tables.find(key);
+    if (it == mpImpl->tables.end())
+    {
+        return false;
+    }
+    auto& table = it->second;
+    const std::size_t idx = static_cast<std::size_t>(handleValue - 1);
+    if (idx >= table.slots.size() || !table.slots[idx].live)
+    {
+        return false;
+    }
+    auto& slot = table.slots[idx];
+    if (slot.status != LoadStatus::Pending)
+    {
+        return true;  // 已经 Ready / Failed
+    }
+
+    auto pred = [&]() {
+        return slot.status != LoadStatus::Pending || mpImpl->shutdown.load();
+    };
+
+    if (timeoutMs <= 0)
+    {
+        // 永等
+        mpImpl->readyCv.wait(lock, pred);
+    }
+    else
+    {
+        const auto until = std::chrono::steady_clock::now()
+                         + std::chrono::milliseconds(timeoutMs);
+        if (!mpImpl->readyCv.wait_until(lock, until, pred))
+        {
+            return false;  // 超时仍 Pending
+        }
+    }
+    // shutdown 触发的也算"不再 Pending"；调用方拿到 false 时是从
+    // IsLoaded 判定 Ready/Failed。
+    return slot.status != LoadStatus::Pending;
 }
 
 }  // namespace Orange::Engine::Asset
