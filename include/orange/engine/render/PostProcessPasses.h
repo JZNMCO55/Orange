@@ -18,6 +18,8 @@
 #include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/render/IPostProcessPass.h>
 
+#include <glm/vec3.hpp>
+
 namespace Orange::Engine::Render
 {
 
@@ -74,6 +76,65 @@ public:
     // LUT 与原 color 的混合强度。1.0 = 完全用 LUT 输出，0.0 = 完全保留
     // 原 color。
     float strength{1.0f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
+// 屏幕空间 god rays（Mitchell 2007 径向模糊）。可选 pass —— `enabled`
+// 默认 false 让既有 sample 视觉不变；调用方主动开启再调参。Pipeline
+// 在 bloom 之后 / tonemap 之前调一次本 pass，把"沿 sun 方向沉积的体积
+// 光柱"加性写到 HDR target，再交给 tonemap 一并 ACES 压回 LDR。
+//
+// occlusion 来源：Pipeline 已维护的 sceneDepth (D32Float)。Pipeline 在
+// 进入本 pass 前把 sceneDepth transition 到 ShaderReadOnly，shader 端
+// 用 `depth ≈ 1.0 (far plane) → sun-visible` 作判定——天空 / 粒子云 /
+// emissive 等不写 depth 的几何天然成为光柱穿透物，写 depth 的几何成为
+// 遮挡物。
+//
+// **已知限制（沿用屏幕空间 god rays 的天然 trade-off）**：
+//   * sun 投影到屏幕外时 sample loop 几乎处处采到非 far depth → 视觉上
+//     god rays 自然消失（参考 vendor/Orange-Wiki/wiki/techniques/rendering/
+//     volumetric-lighting.md "屏幕空间 god rays 角度太掠"那条限制）；
+//   * 不含真正的 volumetric shadow / 异质介质——更高质量路径留给极线
+//     采样 / Froxel 等后续 task。
+class ORANGE_ENGINE_API GodRaysPass final : public IPostProcessPass
+{
+public:
+    // 整体开关。false 时 Pipeline 跳过本 pass，与 chain 里没挂这个
+    // pass 同效果——避免调用方为"临时关 god rays"频繁拆装 chain。
+    bool enabled{false};
+
+    // 主光源传播方向（指向"光的去处"，与 DirectionalLight.direction 同
+    // 约定）。Pipeline 把它取负 + 映到屏幕 NDC 算 sunScreenPos，越接近
+    // 屏幕中心光柱越正面，越偏屏幕边缘光柱越斜。投到屏外 → god rays
+    // 自然消失（见类注释里的已知限制）。
+    glm::vec3 sunWorldDir{0.3f, -1.0f, 0.4f};
+
+    // 光柱颜色——通常与 DirectionalLight.color 一致或稍偏暖。频域累加
+    // 后再乘 density × exposure，所以 sunColor.rgb 不需要预乘强度。
+    glm::vec3 sunColor{1.0f, 0.95f, 0.80f};
+
+    // 整体亮度乘子。粒子流 / emissive cube 等 HDR 像素本身可能就够亮，
+    // density > 1 让 god rays 视觉上压住它们；< 1 则克制。
+    float density{1.2f};
+
+    // 沿 ray 每跳的能量衰减。<1 让远端 sample 贡献递减，给出"光柱前
+    // 端最亮、远端淡出"的感觉。decay = 1 给均匀 ray，0.95 是常用值。
+    float decay{0.97f};
+
+    // 单 tap 的累加权重。numSamples × weight ≈ 整体放大倍率—— numSamples
+    // 调大时同步降 weight 保持视觉量级稳定。
+    float weight{0.04f};
+
+    // 累加结果在 HDR 输出前再乘的倍率，与 BloomPass.intensity / Tonemap.
+    // exposure 同思路——给调参留个独立旋钮。
+    float exposure{1.0f};
+
+    // ray sample 数量。32 / 64 / 128 三档常用：32 视觉略硬、64 默认、
+    // 128 在 1080p+ 上更平滑。GPU 受 numSamples × resolution 影响。
+    std::int32_t numSamples{64};
 
     const char* Name() const noexcept override;
     void        Setup(PostProcessSetupContext& ctx) override;

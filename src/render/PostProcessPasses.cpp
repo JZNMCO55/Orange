@@ -87,4 +87,24 @@ void LutPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 做 lerp。lut handle 无效时 pass 应早退（no-op LUT）。
 }
 
+// ---------- GodRaysPass ------------------------------------------------------
+
+const char* GodRaysPass::Name() const noexcept
+{
+    return "god_rays";
+}
+
+void GodRaysPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 真录制走 Pipeline.cpp 内部 RecordGodRaysPass —— 与 BloomPass 同模
+    // 式（Pipeline 自管 cmd list、需要直接接 sceneDepth 与 HDR target，
+    // 不走 IPostProcessPass 通用 Setup/Execute 通道）。
+}
+
+void GodRaysPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 见 Setup 注释：实际录制由 Pipeline 主流程持。本函数保持空 stub，
+    // 让 PostProcessChain 的"逐 pass 调 Execute"循环不漏调任何 pass。
+}
+
 }  // namespace Orange::Engine::Render

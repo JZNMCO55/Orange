@@ -77,6 +77,7 @@
     - [Task 01c：RigidBody / Collider / Animator 组件序列化 ✅](#task-01crigidbody--collider--animator-组件序列化-)
     - [Task 02a：VfxSystem 粒子系统骨架 ✅](#task-02avfxsystem-粒子系统骨架-)
     - [Task 02b：Dissolve + Emissive 内置 Material 模板 ✅](#task-02bdissolve--emissive-内置-material-模板-)
+    - [Task 03：体积光（screen-space god rays） ✅](#task-03体积光screen-space-god-rays-)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -2124,6 +2125,49 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
   3. `samples/09_vfx_demo` 启动后能看到：粒子流 + 一个 mesh 在 ~2 秒内消融（边缘高亮过渡）+ 一个发光 mesh 自带 bloom 光晕。三者同屏。
 - 验收标准：上述 3 条全过；Phase 5 / Task 02 整体闭环——VFX 子系统骨架 + 两个 shader 模板就位，第一款游戏的"流体角色 dissolve / 发光眼 / 粒子尾迹"等典型 VFX 都可由游戏侧 ProceduralAnimator + 内置模板 + 自定义粒子 desc 直接实现，不再需要引擎改动。
 - Critical Path：否（VFX 系统骨架 02a 是 Critical Path，模板补全为可玩 demo 服务但不阻塞 Task 03 / Editor 起步）
+
+#### Task 03：体积光（screen-space god rays） ✅
+- 描述：交付内置 `GodRaysPass`（IPostProcessPass 派生），用 Mitchell 2007 / 屏幕空间径向模糊算法把"主光源屏内可见时的 god rays / 光柱"作为可选 post-process 接进现有 PostProcessChain。算法极简（fullscreen 一发 fragment 沿"屏幕中心 → 太阳"径向 32–64 tap 累积）+ 用既有 sceneDepth 作 occlusion proxy（depth ≈ far → "背景 / 天空" → 该像素被太阳照亮，sun-direction radiance 累加；depth < far → 有几何遮挡 → 该 sample 不贡献）。属于"廉价 god rays"档（参考 vendor/Orange-Wiki/wiki/techniques/rendering/volumetric-lighting.md §3）；Yusov 极线 / Imhof 半空间 / Froxel 通用法等更高质量路径留给 Phase 10+ 视游戏需求决定。
+- 输入：Phase 5 / Task 02b（VFX 三件套已就位）+ Phase 3 / Task 03（PostProcessChain 接口 + bloom 接通，证明 IPostProcessPass 整条接入路径走得通）
+- 输出（Proposed）:
+  - `Modified: include/orange/engine/render/PostProcessPasses.h`（加 `GodRaysPass final : public IPostProcessPass`，公共字段：`glm::vec3 sunWorldDir / glm::vec3 sunColor / float density / float decay / float weight / int numSamples / float exposure`）
+  - `Modified: src/render/PostProcessPasses.cpp`（GodRaysPass 的 Name() / Setup() / Execute() —— Setup 留 stub 与其它 pass 一致，真录制走 Pipeline.cpp 内部 RecordGodRaysPass，原因同 BloomPass）
+  - `Modified: include/orange/engine/render/BuiltinPostProcessChain.h` + `.cpp`（默认链可选追加 GodRaysPass，默认关闭——保持既有 sample 视觉不变；调用方 `chain.FindByName("god_rays")` 拿到再 dynamic_cast 启用 / 调参）
+  - `Proposed: src/render/builtin_shaders/god_rays.frag.glsl`（fullscreen frag，复用现有 `fullscreen.vert` 大三角；push-constant 装 sunScreenPos + density / decay / weight / sample count + exposure；采样 sceneDepth 做 occlusion，按 Mitchell 公式累积）
+  - `Modified: src/render/Pipeline.cpp`（加 `FindActiveGodRaysPass` + `RecordGodRaysPass`：在 bloom 之后 / tonemap 之前插一段；transition sceneDepth → ShaderReadOnly + HDR → ColorAttachment / LoadOp::Load → 录制 fullscreen 加性 draw → HDR 翻回 ShaderReadOnly。同时把 main pass 的 depth StoreOp 从 DontCare 改 Store，保证 god rays 能采样到主 pass 的 depth 值——这条改动有跨 sample 的风险面，需要 ctest 全过校验。)
+  - `Proposed: tests/render/GodRaysPassTest.cpp`（GodRaysPass 字段默认值 + 名字 + 默认 numSamples ≥ 32 等基础不变量；不接 GPU 路径——同 BloomPassTest / PostProcessChainTest 同模式）
+  - `Modified: samples/09_vfx_demo/main.cpp`（在 chain 里 push 一个 GodRaysPass + 给个明显的太阳方向 + 提高 density / weight，让粒子流 + emissive cube 的明亮像素自然产生 god rays）
+- 影响模块：Render（核心）；不动 Scene / Asset / Animation / Physics
+- 前置依赖：Phase 5 / Task 02b
+- 实现要点：
+  - **Occlusion mask 来源**：用 sceneDepth 而不是单独建"sun-only mask target"——Pipeline.cpp 已经维护 sceneDepth (D32Float)，把 main pass 的 depth StoreOp 从 `DontCare` 改 `Store` 后即可让 god rays 段采样它。判定逻辑：sample 处 `gl_FragCoord` 对应深度 ≈ 1.0（far plane）即视为"sun-visible"——粒子云、emissive cube 这类不写 depth 的几何天然落在 far plane 后面，所以会被 god rays 当作发光体处理（这正是想要的"光柱穿透粒子流"效果）。
+  - **径向 sample loop**：
+    ```glsl
+    vec2 ray   = uv - sunScreenPos;
+    vec2 step  = ray / float(numSamples);
+    vec2 pos   = uv;
+    float illum = 1.0;
+    vec3  accum = vec3(0.0);
+    for (int i = 0; i < numSamples; ++i) {
+        pos -= step;
+        float d = texture(uDepth, pos).r;
+        float visible = step(0.999, d);  // depth ≈ 1 → 1, 否则 0
+        accum += sunColor * visible * illum * weight;
+        illum *= decay;
+    }
+    outColor = vec4(accum * density * exposure, 1.0);
+    ```
+    输出经 additive blending 加到 HDR target；颜色 a > 1 自动喂 bloom（与粒子 / emissive 同思路）。
+  - **sunScreenPos 计算**：CPU 端用 `viewProj * vec4(-sunWorldDir * kFarDistance, 1.0)` 投到 NDC，再 `* 0.5 + 0.5` 翻成 [0,1] uv；当 sun 在 frustum 之外时 sunScreenPos 越界，sample loop 仍能跑但 visible == 0 几乎处处成立 → 视觉上 god rays 自然消失（与 wiki 说的"屏幕空间 god rays 角度太掠 → 完全看不到"一致，这是已知限制）。
+  - **Pipeline 接入位置**：bloom 之后、tonemap 之前。这样 god rays 累积到 HDR + bloom 已合成的 target 上，tonemap 把整体（含 god rays）一并 ACES 压回 LDR。如果走 bloom 之前则 god rays 自身也会 bloom，会产生"双重模糊"过度发散——视觉验收下不如 bloom-after 干净。
+  - **降采样可选优化**：教学版的 Mitchell 实现是 full-res 走 64 tap 累积，每像素 64 次 depth 采样。1280×720 = 5900 万次。GeForce 5070 Ti 跑得动；如果 sample 端反馈太贵，加可选半分辨率 god rays target（Phase 10+ 决定）。本 task 锁定 full-res 简单路径。
+  - **Out-of-scope（明确推迟）**：极线采样（Yusov）/ Imhof 半空间 / Froxel 通用法等高级体积光路径；屏幕外光源补偿；时域累积抖动（消 banding 时再加噪声偏移）。
+- 验证：
+  1. `tests/render/GodRaysPassTest.cpp` ≥3 case：默认字段值 / Name 唯一 / chain.FindByName + dynamic_cast 拿出 GodRaysPass 后调字段不破其它 pass。
+  2. ctest 全过——尤其确认 main pass depth StoreOp 改动不破其它 sample / shadow / bloom 路径。
+  3. `samples/09_vfx_demo` 启动 + 截屏：屏幕能看到从太阳方向（屏内）发散的光柱；粒子流 / emissive cube 周围的 god rays 比 dissolve cube 强（前两者像素在 far plane，god rays 通过；dissolve cube 写 depth → 遮挡光柱）。
+- 验收标准：上述 3 条全过；GodRaysPass 在 PostProcessChain 中作为可选 pass 就位，第一款游戏的"洞穴 / 森林 / 室内透光"等场景可由游戏侧把 sunWorldDir + density 调好直接拿到 god rays 视觉，不再需要引擎改动。
+- Critical Path：否（视觉提升 / 不阻塞 Editor / Task 04 / Save Game）
 
 ### Phase 5.5：Save Game 系统
 

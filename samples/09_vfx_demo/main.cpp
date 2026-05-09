@@ -345,6 +345,24 @@ int main(int argc, char** argv)
         bp->threshold = 0.6f;
         bp->intensity = 1.0f;
     }
+    // 启用 god rays —— sunWorldDir 选一个让 sun 投影落在屏内的方向：
+    // 太阳本身（-sunDir 方向）应该出现在 camera frustum 内，否则屏幕
+    // 空间径向模糊采不到 sun disk → 视觉上 god rays 不可见（与
+    // PostProcessPasses.h 文档里"屏幕空间 god rays 的天然限制"一致）。
+    // 这里调成 (0.3, -0.15, 0.6) → 太阳投影到 ~uv (0.25, 0.21)，屏幕
+    // 左上区域，光柱朝右下扩散经过粒子流 + emissive cube。
+    if (auto* gp = dynamic_cast<Orange::Engine::Render::GodRaysPass*>(
+            chain.FindByName("god_rays")))
+    {
+        gp->enabled     = true;
+        gp->sunWorldDir = glm::normalize(glm::vec3(0.3f, -0.15f, 0.6f));
+        gp->sunColor    = glm::vec3(1.0f, 0.92f, 0.75f);
+        gp->density     = 1.4f;
+        gp->decay       = 0.97f;
+        gp->weight      = 0.045f;
+        gp->exposure    = 1.0f;
+        gp->numSamples  = 96;
+    }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
 

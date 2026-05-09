@@ -316,6 +316,10 @@ struct Pipeline::Impl
     // 叠几何只能"后绘者赢"，导致球 / plane 这类 z 重叠场景出现"前后错
     // 乱"假象。Phase 4 / Task 11 收尾时补。
     std::unique_ptr<Orange::Rhi::RHITexture> sceneDepth;
+    // sceneDepth 跨段 layout 跟踪——主 pass 输出 DepthStencilAttachment，
+    // god rays pass 走 ShaderReadOnly 采样它，下一帧主 pass 再翻回 DSA。
+    // false 表示当前在 DepthStencilAttachment（或首次 = Undefined）。
+    bool                                     sceneDepthLayoutShaderReadOnly{false};
     std::uint32_t                            hdrWidth{0};
     std::uint32_t                            hdrHeight{0};
     bool                                     hdrLayoutShaderReadOnly{false};
@@ -379,6 +383,19 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIShaderModule> tonemapFs;
 
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomDownsamplePipeline;
+
+    // ---- GodRaysPass GPU 资源 ------------------------------------------
+    // 屏幕空间径向模糊：复用 fullscreenVs + 1 binding (sceneDepth) layout
+    // = bloomLayout。pipeline 走 RGBA16F 加性 blend（与 bloomUpsample 同
+    // 配置但 push constant 大小不同：mat-free，64B 装 sun_uv + density /
+    // decay / weight / exposure / numSamples + pad）。
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> godRaysFs;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>     godRaysPipeline;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool> godRaysPool;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>  godRaysSet;
+    // 最近一次写进 godRaysSet 的 sceneDepth 对象指针——sceneDepth 重建
+    // 时（OnResize / 首帧）需要重写 set 的 binding 0。
+    Orange::Rhi::RHITexture*                         godRaysSetBoundDepth{nullptr};
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomUpsamplePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> tonemapPipeline;
@@ -611,6 +628,21 @@ struct Pipeline::Impl
     // tonemap 路径写出 swap-chain（替代 06.03 / 06.04 的 passthrough 收尾）。
     const TonemapPass* FindActiveTonemapPass() const noexcept;
 
+    // 同上，GodRaysPass。enabled == false 视为"未启用"，等同于 chain 里
+    // 没挂这个 pass——sample 端 toggle 时不需要拆 chain。
+    const GodRaysPass* FindActiveGodRaysPass() const noexcept;
+
+    // 在 sceneDepth 重建（OnResize / 首次）后把 godRaysSet 的 binding 0
+    // 重新指向当前 sceneDepth view。返回 false 仅在 RHI 层 alloc / write
+    // 失败时；正常路径都返回 true，调用方据此跳过本帧 god rays pass。
+    bool EnsureGodRaysSet();
+
+    // 录制一次 god rays 加性 pass：transition sceneDepth → ShaderReadOnly
+    // + HDR → ColorAttachment + LoadOp::Load → fullscreen draw → 翻回。
+    // viewProj 用主相机的（与 RecordOffscreenPass 同一个），让 sun 投影
+    // 到 NDC 的位置与主 pass 几何位置一致。
+    bool RecordGodRaysPass(const GodRaysPass& gr, const glm::mat4& viewProj);
+
     // 创建 / 重建 bloom 6 张 mip + 描述符 set（首次激活、HDR 尺寸变化、
     // chain 切到含 BloomPass 时触发）。失败返回 false。
     bool EnsureBloomResources();
@@ -703,11 +735,14 @@ struct Pipeline::Impl
 
         // 同步重建 scene depth：D32Float、跟 hdrColor 同 extent。每帧主
         // pass 用它做 depth test + write，避免 z 重叠几何的"后绘者赢"假象。
+        // Sampled 让 GodRaysPass 等 post-process 能把 depth 当 sampler 用做
+        // occlusion proxy（屏幕空间径向模糊采样 depth ≈ 1 判定 sun-visible）。
         Orange::Rhi::TextureDesc dt{};
         dt.mWidth  = pendingWidth;
         dt.mHeight = pendingHeight;
         dt.mFormat = Orange::Rhi::TextureFormat::D32Float;
-        dt.mUsage  = Orange::Rhi::TextureUsage::DepthStencil;
+        dt.mUsage  = Orange::Rhi::TextureUsage::DepthStencil
+                   | Orange::Rhi::TextureUsage::Sampled;
         auto newDepth = renderDevice->GetRhiDevice().CreateTexture(dt);
         if (!newDepth)
         {
@@ -962,8 +997,10 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         auto combineCode   = LoadSpirv("shaders/orange_engine/passthrough_combine.frag.spv");
         auto tonemapVsCode = LoadSpirv("shaders/orange_engine/tonemap.vert.spv");
         auto tonemapFsCode = LoadSpirv("shaders/orange_engine/tonemap.frag.spv");
+        auto godRaysCode   = LoadSpirv("shaders/orange_engine/god_rays.frag.spv");
         if (downCode.empty() || upCode.empty() || combineCode.empty()
-            || tonemapVsCode.empty() || tonemapFsCode.empty())
+            || tonemapVsCode.empty() || tonemapFsCode.empty()
+            || godRaysCode.empty())
         {
             Shutdown();
             return ResultCode::IoError;
@@ -999,10 +1036,16 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         sm.mpDebugName = "orange_engine.tonemap.frag";
         impl.tonemapFs = rhi.CreateShaderModule(sm);
 
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = godRaysCode.data();
+        sm.mCodeSize   = godRaysCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.god_rays.frag";
+        impl.godRaysFs = rhi.CreateShaderModule(sm);
+
         if (!impl.bloomDownsampleFs || !impl.bloomUpsampleFs || !impl.passthroughCombineFs
-            || !impl.tonemapVs || !impl.tonemapFs)
+            || !impl.tonemapVs || !impl.tonemapFs || !impl.godRaysFs)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / tonemap shader 模块创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / tonemap / god_rays shader 模块创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -1107,10 +1150,48 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         d.mpDebugName = "orange_engine.tonemap";
         impl.tonemapPipeline = rhi.CreateGraphicsPipeline(d);
     }
-    if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
-        !impl.passthroughCombinePipeline || !impl.tonemapPipeline)
     {
-        ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / combine / tonemap pipeline 创建失败");
+        // god rays pipeline —— RGBA16F target，加性 blend（与 bloomUpsample
+        // 同 blend）；descriptor 布局复用 bloomLayout（1 binding sampler，
+        // 这里绑 sceneDepth）；push constant 64 字节装 sun_uv + 各浮点参
+        // 数 + numSamples，与 src/render/builtin_shaders/god_rays.frag.glsl
+        // 的 push_constant block 字节布局严格对齐。
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.godRaysFs.get(), "main"});
+        d.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        Orange::Rhi::ColorBlendAttachmentDesc blend{};
+        blend.mBlendEnable         = true;
+        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+        d.mColorBlend.mAttachments.push_back(blend);
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.bloomLayout.get());
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 64;  // 与 god_rays.frag.glsl push_constant block 一致
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.god_rays";
+        impl.godRaysPipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
+        !impl.passthroughCombinePipeline || !impl.tonemapPipeline ||
+        !impl.godRaysPipeline)
+    {
+        ORANGE_LOG_ERROR(
+            "Pipeline::Initialize: bloom / combine / tonemap / god_rays pipeline 创建失败");
         Shutdown();
         return ResultCode::InternalError;
     }
@@ -1262,6 +1343,11 @@ void Pipeline::Shutdown()
     impl.shaderModules.clear();
 
     impl.ReleaseBloomResources();
+    impl.godRaysSet.reset();
+    impl.godRaysPool.reset();
+    impl.godRaysPipeline.reset();
+    impl.godRaysFs.reset();
+    impl.godRaysSetBoundDepth = nullptr;
     impl.shadowCasterPipeline.reset();
     impl.shadowMap.reset();
     impl.shadowMapResolution = 0;
@@ -1437,12 +1523,17 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
         : Orange::Rhi::TextureLayout::Undefined;
     cmd.TransitionTexture(*impl.hdrColor, fromLayout,
                           Orange::Rhi::TextureLayout::ColorAttachment);
-    // sceneDepth 每帧 transition 自 Undefined → DepthStencilAttachment（旧
-    // 内容直接丢）；本侧不让 depth 跨帧持久化——每帧 Clear 一次，几何
-    // 顺序无关性靠 depth test 保证。
+    // sceneDepth 每帧 transition → DepthStencilAttachment（每帧 Clear，
+    // 几何顺序无关性靠 depth test 保证）。GodRaysPass 启用时上一帧末尾
+    // 把它翻到 ShaderReadOnly（采样作 occlusion proxy），未启用时还是
+    // 上一帧的 DSA / 首次 Undefined。
+    const auto fromDepthLayout = impl.sceneDepthLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
     cmd.TransitionTexture(*impl.sceneDepth,
-                          Orange::Rhi::TextureLayout::Undefined,
+                          fromDepthLayout,
                           Orange::Rhi::TextureLayout::DepthStencilAttachment);
+    impl.sceneDepthLayoutShaderReadOnly = false;
 
     Orange::Rhi::ColorAttachment att{};
     att.mpView          = impl.hdrColor->GetDefaultView();
@@ -1456,7 +1547,12 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
     Orange::Rhi::DepthStencilAttachment depthAtt{};
     depthAtt.mpView        = impl.sceneDepth->GetDefaultView();
     depthAtt.mDepthLoadOp  = Orange::Rhi::LoadOp::Clear;
-    depthAtt.mDepthStoreOp = Orange::Rhi::StoreOp::DontCare;   // depth 不跨帧消费
+    // depth 用 Store 而不是 DontCare —— GodRaysPass 在主 pass 之后采样
+    // sceneDepth 作 occlusion proxy（depth ≈ 1 → sun-visible），需要主
+    // pass 写出来的 depth 值在 EndRendering 之后仍可读。GodRaysPass 没
+    // 启用时这条 Store 等同于"白白保留一份 depth 数据"，对主 pass 没
+    // 实际副作用。
+    depthAtt.mDepthStoreOp = Orange::Rhi::StoreOp::Store;
     depthAtt.mClear.mDepth = 1.0f;                              // far plane
 
     Orange::Rhi::RenderingDesc rd{};
@@ -1672,6 +1768,25 @@ const TonemapPass* Pipeline::Impl::FindActiveTonemapPass() const noexcept
         if (const TonemapPass* tp = dynamic_cast<const TonemapPass*>(p))
         {
             return tp;
+        }
+    }
+    return nullptr;
+}
+
+const GodRaysPass* Pipeline::Impl::FindActiveGodRaysPass() const noexcept
+{
+    if (postProcessChain == nullptr)
+    {
+        return nullptr;
+    }
+    const std::size_t count = postProcessChain->PassCount();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const IPostProcessPass* p = postProcessChain->PassAt(i);
+        if (const GodRaysPass* gp = dynamic_cast<const GodRaysPass*>(p))
+        {
+            // enabled = false 等同于"chain 里没挂"——避免调用方拆 chain。
+            return gp->enabled ? gp : nullptr;
         }
     }
     return nullptr;
@@ -2319,6 +2434,186 @@ bool Pipeline::Impl::RecordBloomChain(const BloomPass& bloomDesc)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// GodRaysPass 录制 + 描述符 set 维护
+// ---------------------------------------------------------------------------
+
+bool Pipeline::Impl::EnsureGodRaysSet()
+{
+    if (renderDevice == nullptr || sceneDepth == nullptr || hdrSampler == nullptr
+        || godRaysPipeline == nullptr || bloomLayout == nullptr)
+    {
+        return false;
+    }
+
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    // 池只建一次（只有 1 个 set，长寿命）。后续仅刷新 binding。
+    if (!godRaysPool)
+    {
+        Orange::Rhi::DescriptorPoolDesc poolDesc{};
+        poolDesc.mMaxSets = 1;
+        Orange::Rhi::DescriptorPoolSize sz{};
+        sz.mType  = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        sz.mCount = 1;
+        poolDesc.mPoolSizes.push_back(sz);
+        poolDesc.mpDebugName = "orange_engine.god_rays.pool";
+        godRaysPool = rhi.CreateDescriptorPool(poolDesc);
+        if (!godRaysPool)
+        {
+            ORANGE_LOG_ERROR("Pipeline: god rays CreateDescriptorPool 失败");
+            return false;
+        }
+    }
+
+    // sceneDepth 重建后（OnResize / 首次） → 重新分配 set 并写 binding。
+    if (godRaysSet == nullptr || godRaysSetBoundDepth != sceneDepth.get())
+    {
+        godRaysSet.reset();
+        auto set = rhi.AllocateDescriptorSet(*godRaysPool, *bloomLayout);
+        if (!set)
+        {
+            ORANGE_LOG_ERROR("Pipeline: god rays AllocateDescriptorSet 失败");
+            return false;
+        }
+        Orange::Rhi::DescriptorWrite w{};
+        w.mBinding             = 0;
+        w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w.mImageInfo.mpTexture = sceneDepth.get();
+        w.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*set, &w, 1);
+
+        godRaysSet           = std::move(set);
+        godRaysSetBoundDepth = sceneDepth.get();
+    }
+    return true;
+}
+
+bool Pipeline::Impl::RecordGodRaysPass(const GodRaysPass& gr,
+                                       const glm::mat4&   viewProj)
+{
+    if (offscreenCmd == nullptr || hdrColor == nullptr || sceneDepth == nullptr
+        || godRaysPipeline == nullptr)
+    {
+        return false;
+    }
+    if (!EnsureGodRaysSet())
+    {
+        return false;
+    }
+
+    auto& cmd = *offscreenCmd;
+
+    // 1. sceneDepth：DepthStencilAttachment → ShaderReadOnly（让 frag
+    //    采样它做 occlusion proxy）。下一帧主 pass 会翻回 DSA。
+    if (!sceneDepthLayoutShaderReadOnly)
+    {
+        cmd.TransitionTexture(*sceneDepth,
+                              Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        sceneDepthLayoutShaderReadOnly = true;
+    }
+
+    // 2. HDR：调用此函数时 hdrLayoutShaderReadOnly == true（RecordOffscreenPass
+    //    末尾 + 粒子 pass 末尾 + bloom pass 末尾都会留在 ShaderReadOnly）。
+    //    god rays 要写 HDR 故 transition 回 ColorAttachment。
+    cmd.TransitionTexture(*hdrColor,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly,
+                          Orange::Rhi::TextureLayout::ColorAttachment);
+
+    Orange::Rhi::ColorAttachment att{};
+    att.mpView   = hdrColor->GetDefaultView();
+    att.mLoadOp  = Orange::Rhi::LoadOp::Load;
+    att.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = hdrWidth;
+    rd.mRenderArea.mHeight = hdrHeight;
+    rd.mColorAttachments.push_back(att);
+
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(hdrWidth);
+    vp.mHeight   = static_cast<float>(hdrHeight);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = hdrWidth;
+    sc.mHeight = hdrHeight;
+    cmd.SetScissor(sc);
+
+    cmd.BindGraphicsPipeline(*godRaysPipeline);
+    cmd.SetDescriptorSet(0, *godRaysSet);
+
+    // 计算 sun 屏幕 uv：把 -sunWorldDir × kFar 这个"远点"投到 NDC，再
+    // 翻成 uv。sun 在 frustum 之外时 sunUV 越界 → frag 仍能跑，但 visibility
+    // 几乎处处 0 → 视觉上 god rays 自然消失（已知限制）。
+    glm::vec3 sunDir = gr.sunWorldDir;
+    if (glm::dot(sunDir, sunDir) > 1e-6f)
+    {
+        sunDir = glm::normalize(sunDir);
+    }
+    else
+    {
+        sunDir = glm::vec3(0.0f, -1.0f, 0.0f);
+    }
+    constexpr float kFarPos     = 1000.0f;
+    const glm::vec3  sunPosWorld = -sunDir * kFarPos;
+    const glm::vec4  ndc4        = viewProj * glm::vec4(sunPosWorld, 1.0f);
+    const float      invW        = (ndc4.w != 0.0f) ? (1.0f / ndc4.w) : 1.0f;
+    const float      sunNdcX     = ndc4.x * invW;
+    const float      sunNdcY     = ndc4.y * invW;
+    const glm::vec2  sunUv(sunNdcX * 0.5f + 0.5f, sunNdcY * 0.5f + 0.5f);
+
+    // push constant 布局必须与 god_rays.frag.glsl 的 push_constant block
+    // 字节布局严格对齐；任一处改了，另一处必须同步。
+    struct GodRaysPush
+    {
+        glm::vec2 sunUV;
+        float     density;
+        float     decay;
+
+        glm::vec3 sunColor;
+        float     weight;
+
+        float     exposure;
+        float     pad0;
+        float     pad1;
+        float     pad2;
+
+        std::int32_t numSamples;
+        std::int32_t padI0;
+        std::int32_t padI1;
+        std::int32_t padI2;
+    };
+    static_assert(sizeof(GodRaysPush) == 64,
+                  "GodRaysPush must match god_rays.frag push_constant block (64 B).");
+
+    GodRaysPush push{};
+    push.sunUV      = sunUv;
+    push.density    = gr.density;
+    push.decay      = gr.decay;
+    push.sunColor   = gr.sunColor;
+    push.weight     = gr.weight;
+    push.exposure   = gr.exposure;
+    push.numSamples = std::max(gr.numSamples, 1);
+
+    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment, 0,
+                         sizeof(GodRaysPush), &push);
+
+    cmd.Draw(3, 1, 0, 0);
+    cmd.EndRendering();
+
+    // 3. HDR 翻回 ShaderReadOnly：下一段（capture / tonemap stage B）按
+    //    "HDR 在 ShaderReadOnly"假设跑。
+    cmd.TransitionTexture(*hdrColor,
+                          Orange::Rhi::TextureLayout::ColorAttachment,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    return true;
+}
+
 void Pipeline::Render(Orange::Engine::World& world)
 {
     auto& impl = *mpImpl;
@@ -2353,6 +2648,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     // BuiltinPostProcessChain::CreateDefault()。
     const BloomPass*   activeBloom   = impl.FindActiveBloomPass();
     const TonemapPass* activeTonemap = impl.FindActiveTonemapPass();
+    const GodRaysPass* activeGodRays = impl.FindActiveGodRaysPass();
     if (activeBloom != nullptr && hdrReady)
     {
         if (!impl.EnsureBloomResources())
@@ -2456,6 +2752,15 @@ void Pipeline::Render(Orange::Engine::World& world)
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)
             {
                 offscreenOk = impl.RecordBloomChain(*activeBloom);
+            }
+
+            // god rays 插在 bloom 之后、tonemap 之前——god rays 直接累积
+            // 到 HDR target，tonemap 把"HDR + bloom + god rays"整体 ACES
+            // 一并压回 LDR。如果放在 bloom 之前 god rays 自身也会被 bloom
+            // 二次模糊，过度发散；这里选 bloom-after 视觉更干净。
+            if (offscreenOk && activeGodRays != nullptr && impl.scene.HasCamera())
+            {
+                offscreenOk = impl.RecordGodRaysPass(*activeGodRays, viewProj);
             }
 
             // RequestCapture 路径：bloom 后 hdrColor 已 ShaderReadOnly，

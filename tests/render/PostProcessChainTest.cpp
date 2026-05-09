@@ -24,6 +24,7 @@
 #include <string_view>
 
 using Orange::Engine::Render::BloomPass;
+using Orange::Engine::Render::GodRaysPass;
 using Orange::Engine::Render::HdrPass;
 using Orange::Engine::Render::IPostProcessPass;
 using Orange::Engine::Render::LutPass;
@@ -115,25 +116,29 @@ void TestFindByName()
 void TestCreateDefault()
 {
     PostProcessChain chain = BuiltinPostProcessChain::CreateDefault();
-    assert(chain.PassCount() == 4);
+    // hdr / bloom / god_rays / tonemap / lut 五件内置 pass。
+    assert(chain.PassCount() == 5);
 
     IPostProcessPass* p0 = chain.PassAt(0);
     IPostProcessPass* p1 = chain.PassAt(1);
     IPostProcessPass* p2 = chain.PassAt(2);
     IPostProcessPass* p3 = chain.PassAt(3);
-    assert(p0 && p1 && p2 && p3);
+    IPostProcessPass* p4 = chain.PassAt(4);
+    assert(p0 && p1 && p2 && p3 && p4);
 
     // Name() 与文档一致。
     assert(std::string_view(p0->Name()) == "hdr");
     assert(std::string_view(p1->Name()) == "bloom");
-    assert(std::string_view(p2->Name()) == "tonemap");
-    assert(std::string_view(p3->Name()) == "lut");
+    assert(std::string_view(p2->Name()) == "god_rays");
+    assert(std::string_view(p3->Name()) == "tonemap");
+    assert(std::string_view(p4->Name()) == "lut");
 
     // 具体类型 dynamic_cast 落得到。
     assert(dynamic_cast<HdrPass*>(p0) != nullptr);
     assert(dynamic_cast<BloomPass*>(p1) != nullptr);
-    assert(dynamic_cast<TonemapPass*>(p2) != nullptr);
-    assert(dynamic_cast<LutPass*>(p3) != nullptr);
+    assert(dynamic_cast<GodRaysPass*>(p2) != nullptr);
+    assert(dynamic_cast<TonemapPass*>(p3) != nullptr);
+    assert(dynamic_cast<LutPass*>(p4) != nullptr);
 
     // 类型不匹配返回 nullptr。
     assert(dynamic_cast<BloomPass*>(p0) == nullptr);
@@ -144,10 +149,11 @@ void TestDefaultChainParametersMutable()
 {
     PostProcessChain chain = BuiltinPostProcessChain::CreateDefault();
 
-    auto* bloom = dynamic_cast<BloomPass*>(chain.PassAt(1));
-    auto* tonemap = dynamic_cast<TonemapPass*>(chain.PassAt(2));
-    auto* lut = dynamic_cast<LutPass*>(chain.PassAt(3));
-    assert(bloom && tonemap && lut);
+    auto* bloom    = dynamic_cast<BloomPass*>(chain.PassAt(1));
+    auto* godRays  = dynamic_cast<GodRaysPass*>(chain.PassAt(2));
+    auto* tonemap  = dynamic_cast<TonemapPass*>(chain.PassAt(3));
+    auto* lut      = dynamic_cast<LutPass*>(chain.PassAt(4));
+    assert(bloom && godRays && tonemap && lut);
 
     // 默认值与 PostProcessPasses.h 注释一致。
     assert(bloom->threshold == 1.0f);
@@ -156,23 +162,59 @@ void TestDefaultChainParametersMutable()
     assert(lut->strength == 1.0f);
     assert(!lut->lut.IsValid());
 
+    // GodRaysPass 默认 enabled=false—— sample 主动开启再调参，避免
+    // 既有 sample 视觉漂移；其他默认值保留 PostProcessPasses.h 头文件
+    // 注释里写的合理值。
+    assert(godRays->enabled == false);
+    assert(godRays->numSamples == 64);
+    assert(godRays->density == 1.2f);
+    assert(godRays->decay == 0.97f);
+    assert(godRays->weight == 0.04f);
+    assert(godRays->exposure == 1.0f);
+
     // 改完后再次取出同一 pass，参数应持久（验证 chain 持有 pass 而不
     // 是返回拷贝）。
-    bloom->threshold = 0.8f;
-    bloom->intensity = 0.7f;
-    tonemap->exposure = 2.0f;
-    lut->strength = 0.25f;
+    bloom->threshold     = 0.8f;
+    bloom->intensity     = 0.7f;
+    tonemap->exposure    = 2.0f;
+    lut->strength        = 0.25f;
+    godRays->enabled     = true;
+    godRays->density     = 2.0f;
+    godRays->numSamples  = 128;
 
-    auto* bloom2 = dynamic_cast<BloomPass*>(chain.PassAt(1));
-    auto* tonemap2 = dynamic_cast<TonemapPass*>(chain.PassAt(2));
-    auto* lut2 = dynamic_cast<LutPass*>(chain.PassAt(3));
+    auto* bloom2   = dynamic_cast<BloomPass*>(chain.PassAt(1));
+    auto* godRays2 = dynamic_cast<GodRaysPass*>(chain.PassAt(2));
+    auto* tonemap2 = dynamic_cast<TonemapPass*>(chain.PassAt(3));
+    auto* lut2     = dynamic_cast<LutPass*>(chain.PassAt(4));
     assert(bloom2 == bloom);
+    assert(godRays2 == godRays);
     assert(tonemap2 == tonemap);
     assert(lut2 == lut);
     assert(bloom2->threshold == 0.8f);
     assert(bloom2->intensity == 0.7f);
     assert(tonemap2->exposure == 2.0f);
     assert(lut2->strength == 0.25f);
+    assert(godRays2->enabled == true);
+    assert(godRays2->density == 2.0f);
+    assert(godRays2->numSamples == 128);
+}
+
+// 6. GodRaysPass 在 chain 里查找 + 与 BloomPass 类型隔离。
+void TestGodRaysFindAndIsolation()
+{
+    PostProcessChain chain = BuiltinPostProcessChain::CreateDefault();
+
+    IPostProcessPass* p = chain.FindByName("god_rays");
+    assert(p != nullptr);
+    assert(std::string_view(p->Name()) == "god_rays");
+
+    GodRaysPass* gr = dynamic_cast<GodRaysPass*>(p);
+    assert(gr != nullptr);
+
+    // BloomPass / TonemapPass 等其它 pass 不会被错认成 GodRaysPass。
+    auto* bloom = chain.FindByName("bloom");
+    assert(bloom != nullptr);
+    assert(dynamic_cast<GodRaysPass*>(bloom) == nullptr);
 }
 
 }  // namespace
@@ -184,6 +226,7 @@ int main()
     TestFindByName();
     TestCreateDefault();
     TestDefaultChainParametersMutable();
+    TestGodRaysFindAndIsolation();
     std::printf("postprocess_chain_test: OK\n");
     return 0;
 }
