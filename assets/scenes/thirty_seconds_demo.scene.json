@@ -44,7 +44,7 @@
         "Transform": {
           "position": [0.0, -1.5, 0.0],
           "rotation": [0.0, 0.0, 0.0, 1.0],
-          "scale":    [16.0, 0.4, 1.0]
+          "scale":    [16.0, 0.6, 1.4]
         },
         "Renderable": {
           "mesh":        "builtin/cube",
@@ -59,7 +59,7 @@
         "Collider": {
           "shape": {
             "kind":        "Box",
-            "halfExtents": [8.0, 0.2],
+            "halfExtents": [8.0, 0.3],
             "center":      [0.0, 0.0]
           },
           "density":     0.0,
@@ -74,9 +74,9 @@
       "components": {
         "Name": { "name": "platform_a" },
         "Transform": {
-          "position": [-2.5, 0.4, 0.0],
+          "position": [-2.8, 0.5, 0.0],
           "rotation": [0.0, 0.0, 0.0, 1.0],
-          "scale":    [2.4, 0.3, 1.0]
+          "scale":    [2.4, 0.5, 1.2]
         },
         "Renderable": {
           "mesh":        "builtin/cube",
@@ -85,13 +85,13 @@
         },
         "RigidBody": {
           "type":            "Static",
-          "initialPosition": [-2.5, 0.4],
+          "initialPosition": [-2.8, 0.5],
           "initialAngle":    0.0
         },
         "Collider": {
           "shape": {
             "kind":        "Box",
-            "halfExtents": [1.2, 0.15],
+            "halfExtents": [1.2, 0.25],
             "center":      [0.0, 0.0]
           },
           "density":     0.0,
@@ -106,9 +106,9 @@
       "components": {
         "Name": { "name": "platform_b" },
         "Transform": {
-          "position": [1.0, 1.4, 0.0],
+          "position": [0.6, 1.3, 0.0],
           "rotation": [0.0, 0.0, 0.0, 1.0],
-          "scale":    [2.0, 0.3, 1.0]
+          "scale":    [2.0, 0.5, 1.2]
         },
         "Renderable": {
           "mesh":        "builtin/cube",
@@ -117,13 +117,13 @@
         },
         "RigidBody": {
           "type":            "Static",
-          "initialPosition": [1.0, 1.4],
+          "initialPosition": [0.6, 1.3],
           "initialAngle":    0.0
         },
         "Collider": {
           "shape": {
             "kind":        "Box",
-            "halfExtents": [1.0, 0.15],
+            "halfExtents": [1.0, 0.25],
             "center":      [0.0, 0.0]
           },
           "density":     0.0,
@@ -138,9 +138,9 @@
       "components": {
         "Name": { "name": "platform_c" },
         "Transform": {
-          "position": [4.2, 2.4, 0.0],
+          "position": [3.8, 2.2, 0.0],
           "rotation": [0.0, 0.0, 0.0, 1.0],
-          "scale":    [2.0, 0.3, 1.0]
+          "scale":    [2.0, 0.5, 1.2]
         },
         "Renderable": {
           "mesh":        "builtin/cube",
@@ -149,13 +149,13 @@
         },
         "RigidBody": {
           "type":            "Static",
-          "initialPosition": [4.2, 2.4],
+          "initialPosition": [3.8, 2.2],
           "initialAngle":    0.0
         },
         "Collider": {
           "shape": {
             "kind":        "Box",
-            "halfExtents": [1.0, 0.15],
+            "halfExtents": [1.0, 0.25],
             "center":      [0.0, 0.0]
           },
           "density":     0.0,
@@ -170,9 +170,9 @@
       "components": {
         "Name": { "name": "goal" },
         "Transform": {
-          "position": [4.2, 3.0, 0.0],
+          "position": [3.8, 2.95, 0.0],
           "rotation": [0.0, 0.0, 0.0, 1.0],
-          "scale":    [0.5, 0.5, 0.5]
+          "scale":    [0.7, 0.7, 0.7]
         },
         "Renderable": {
           "mesh":        "builtin/cube",
@@ -181,13 +181,13 @@
         },
         "RigidBody": {
           "type":            "Static",
-          "initialPosition": [4.2, 3.0],
+          "initialPosition": [3.8, 2.95],
           "initialAngle":    0.0
         },
         "Collider": {
           "shape": {
             "kind":        "Box",
-            "halfExtents": [0.25, 0.25],
+            "halfExtents": [0.35, 0.35],
             "center":      [0.0, 0.0]
           },
           "density":     0.0,
@@ -202,10 +202,58 @@
       "components": {
         "Name": { "name": "sun" },
         "DirectionalLight": {
-          "direction":   [0.3, -1.0, 0.4],
-          "color":       [1.0, 0.96, 0.85],
-          "intensity":   1.4,
+          "direction":   [-0.45, -0.8, -0.35],
+          "color":       [1.0, 0.92, 0.78],
+          "intensity":   1.7,
           "castsShadow": true
+        }
+      }
+    },
+    {
+      "id": 7,
+      "components": {
+        "Name": { "name": "platform_a_top" },
+        "Transform": {
+          "position": [-2.8, 0.785, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [2.36, 0.06, 1.16]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "components": {
+        "Name": { "name": "platform_b_top" },
+        "Transform": {
+          "position": [0.6, 1.585, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.96, 0.06, 1.16]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "components": {
+        "Name": { "name": "platform_c_top" },
+        "Transform": {
+          "position": [3.8, 2.485, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.96, 0.06, 1.16]
+        },
+        "Renderable": {
+          "mesh":        "builtin/cube",
+          "visible":     true,
+          "castsShadow": false
         }
       }
     }

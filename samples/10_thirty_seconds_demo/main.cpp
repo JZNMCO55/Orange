@@ -168,7 +168,7 @@ Entity FindEntityByName(World& world, std::string_view name)
 // xy 到 entity transform → 帧末 input.BeginFrame()。
 
 constexpr float kWalkSpeed       = 4.5f;
-constexpr float kJumpVelocity    = 6.0f;
+constexpr float kJumpVelocity    = 8.0f;
 constexpr float kGroundedYThresh = 0.5f;
 constexpr float kVictoryDistance = 0.6f;
 constexpr float kDemoTimeoutSeconds = 30.0f;
@@ -392,12 +392,20 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "RegisterBuiltins failed\n");
         return 1;
     }
+    // 视觉分工：player 用 toon（warm/mid/cool 三档形成清晰立体感，比 rim
+    // _light 在深色背景下更易读）；ground 用 textured（程序式 checker 当
+    // 地砖纹理）；3 个跳跃平台用 toon 复用同一个 instance；3 条 platform
+    // 顶面高光条复用 goalMat 的 emissive，做成"踩面提示 + 微 bloom"；
+    // goal 自身 emissive 体积更大触发更强 bloom。背景刻意不放 backdrop
+    // entity——Pipeline 默认 clear color 是深蓝 (0.05, 0.07, 0.10)，作为
+    // 夜空既能与 emissive 形成强对比，又不与 toon 的暖色调撞色。
     auto playerMat   = materials.CreateInstance("toon");
-    auto platformMat = materials.CreateInstance("textured");
+    auto groundMat   = materials.CreateInstance("textured");
+    auto platformMat = materials.CreateInstance("toon");
     auto goalMat     = materials.CreateInstance("emissive");
-    if (!playerMat || !platformMat || !goalMat)
+    if (!playerMat || !groundMat || !platformMat || !goalMat)
     {
-        std::fprintf(stderr, "CreateInstance(toon/textured/emissive) returned null\n");
+        std::fprintf(stderr, "CreateInstance(toon/textured/toon/emissive) returned null\n");
         return 1;
     }
 
@@ -459,20 +467,31 @@ int main(int argc, char** argv)
         }
     };
     attachMaterial(playerEntity, playerMat.get());
-    attachMaterial(groundEntity, platformMat.get());
+    attachMaterial(groundEntity, groundMat.get());
     attachMaterial(platAEntity,  platformMat.get());
     attachMaterial(platBEntity,  platformMat.get());
     attachMaterial(platCEntity,  platformMat.get());
     attachMaterial(goalEntity,   goalMat.get());
+
+    // 平台顶面高光条（仅 Transform + Renderable，不进物理）—— 借 emissive
+    // 模板做"踩面提示"，让玩家从相机视角一眼看出哪条边是落脚平面。
+    // 名字必须与 scene.json 一致，缺失则 attachMaterial 因 IsValid()
+    // == false 直接跳过，不报错。
+    attachMaterial(FindEntityByName(world, "platform_a_top"), goalMat.get());
+    attachMaterial(FindEntityByName(world, "platform_b_top"), goalMat.get());
+    attachMaterial(FindEntityByName(world, "platform_c_top"), goalMat.get());
 
     // ---- Camera entity（schema v1 暂不把 Camera 当 component） ----
     Entity camEntity = world.CreateEntity();
     {
         const float aspect = static_cast<float>(cfg.window.width)
                            / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(-1.0f, 1.5f, 9.0f),
-                               glm::vec3(0.5f, 1.0f, 0.0f),
+        // 50° FOV + 稍高稍近的位置：广角下相机看出来的"平台向左下倾斜"
+        // 透视失真在 50° 收敛回正；锚点对着关卡中部偏上 (-0.5, 1.6)，让
+        // 起点 (-6,1) 与终点 (3.8, 2.95) 都落在画面里且不挤压。
+        Camera cam = Camera::Perspective(glm::radians(50.0f), aspect, 0.1f, 100.0f);
+        cam.view = glm::lookAt(glm::vec3(-0.5f, 2.4f, 9.5f),
+                               glm::vec3(-0.5f, 1.6f, 0.0f),
                                glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
@@ -487,8 +506,12 @@ int main(int argc, char** argv)
     PostProcessChain chain = CreateDefault();
     if (auto* bp = dynamic_cast<BloomPass*>(chain.FindByName("bloom")))
     {
-        bp->threshold = 0.85f;  // 让 emissive goal 显著触发 bloom
-        bp->intensity = 0.7f;
+        // emissive 模板片元 hardcode kIntensity=4.0，本身就远超 1.0 → 默
+        // 认 0.85 阈值已经触发；这里把阈值压到 0.8 让边沿微暗的高光条也
+        // 进 bloom，强度抬到 0.55（从 0.7 微调）让 goal 出明显光晕但不至
+        // 于把 3 条 platform 顶面高光条糊成一片。
+        bp->threshold = 0.8f;
+        bp->intensity = 0.55f;
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
