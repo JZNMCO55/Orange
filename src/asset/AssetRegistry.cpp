@@ -165,15 +165,14 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
     outHandle = 0;
     const std::type_index key{type};
 
-    auto loaderIt = mpImpl->loaders.find(key);
-    if (loaderIt == mpImpl->loaders.end())
-    {
-        return ResultCode::Unsupported;
-    }
-
     auto& table = mpImpl->tables[key];
 
     // dedup：path 命中已加载的 slot → 直接返回老 handle。
+    //
+    // 这一步刻意排在"loader 是否注册"检查之前——Insert 路径先于
+    // RegisterLoader 把资源挂到 pathToHandle 是合法用法（程序式构造
+    // 资源、scene 序列化前注入资源等），此时 Load 同 path 同类型应直
+    // 接命中 cache，不应该因为缺 loader 而报 Unsupported。
     const std::string pathKey{path};
     if (auto cacheIt = table.pathToHandle.find(pathKey);
         cacheIt != table.pathToHandle.end())
@@ -187,6 +186,12 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
         }
         // path 在表里但 slot 已释放——擦掉旧映射，重新走加载路径。
         table.pathToHandle.erase(cacheIt);
+    }
+
+    auto loaderIt = mpImpl->loaders.find(key);
+    if (loaderIt == mpImpl->loaders.end())
+    {
+        return ResultCode::Unsupported;
     }
 
     void* assetRaw = nullptr;
@@ -372,6 +377,35 @@ bool AssetRegistry::UnloadErased(const std::type_info& type,
         --mpImpl->liveAssets;
     }
     return true;
+}
+
+std::string_view AssetRegistry::PathOfErased(const std::type_info& type,
+                                             std::uint64_t handleValue) const noexcept
+{
+    if (handleValue == 0)
+    {
+        return {};
+    }
+    const std::type_index key{type};
+    auto it = mpImpl->tables.find(key);
+    if (it == mpImpl->tables.end())
+    {
+        return {};
+    }
+    const auto& table = it->second;
+    const std::size_t idx = static_cast<std::size_t>(handleValue - 1);
+    if (idx >= table.slots.size())
+    {
+        return {};
+    }
+    const auto& slot = table.slots[idx];
+    if (!slot.live)
+    {
+        return {};
+    }
+    // path 持有 std::string；返回它的 view 即可。生存期由 slot 决定，
+    // 与 Get 返回的 const T* 一致——Unload 后失效。
+    return slot.path;
 }
 
 }  // namespace Orange::Engine::Asset

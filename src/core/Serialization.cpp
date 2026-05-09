@@ -105,17 +105,41 @@ const Json* FindByPath(const Json& root, std::string_view path) noexcept
 
 // 沿路径走 `root`，按需创建中间对象节点；返回叶节点的引用，调用方可
 // 直接赋值进去。
+//
+// 数组语义：当当前节点已经是数组、且下一段是纯数字时，把它当作下标
+// 处理（越界则用空对象补齐到该下标）。这条分支让 `BeginArray` 之后
+// 的 "arr/0/name" 这类路径能往同一个数组里继续写。如果当前节点既不
+// 是 object 也不是匹配的数组（例如把一个标量当成中间节点继续下钻），
+// 仍按原有语义重置为 object——这与 Phase 1 / Task 05 落地时"路径
+// 自动建对象树"的承诺保持一致。
 Json& EnsureByPath(Json& root, std::string_view path)
 {
     auto parts = SplitPath(path);
     Json* node = &root;
     for (auto part : parts)
     {
-        std::string key{part};
+        if (node->is_array() && IsAllDigits(part))
+        {
+            std::size_t idx = 0;
+            for (char c : part)
+            {
+                idx = idx * 10 + static_cast<std::size_t>(c - '0');
+            }
+            if (idx >= node->size())
+            {
+                node->insert(node->end(),
+                             idx + 1 - node->size(),
+                             Json::object());
+            }
+            node = &((*node)[idx]);
+            continue;
+        }
+
         if (!node->is_object())
         {
             *node = Json::object();
         }
+        std::string key{part};
         node = &((*node)[key]);
     }
     return *node;
@@ -342,6 +366,16 @@ void JsonWriter::WriteFloatArray(std::string_view path, const float* data, std::
     for (std::size_t i = 0; i < count; ++i)
     {
         node.push_back(data[i]);
+    }
+}
+
+void JsonWriter::BeginArray(std::string_view path, std::size_t count)
+{
+    Json& node = EnsureByPath(mpImpl->root, path);
+    node = Json::array();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        node.push_back(Json::object());
     }
 }
 

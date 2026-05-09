@@ -121,6 +121,18 @@ public:
     void WriteString(std::string_view path, std::string_view value);
     void WriteFloatArray(std::string_view path, const float* data, std::size_t count);
 
+    // 在 `path` 处建立一个长度为 `count` 的数组，每个元素初始化为空对象。
+    // 之后即可通过纯数字路径段下钻填充：
+    //
+    //     writer.BeginArray("entities", 3);
+    //     writer.WriteInt("entities/0/id", 0);
+    //     writer.WriteString("entities/0/name", "root");
+    //     writer.WriteInt("entities/1/id", 1);
+    //     ...
+    //
+    // 当 `path` 处已有数据时整段覆盖。`count == 0` 写出空数组 `[]`。
+    void BeginArray(std::string_view path, std::size_t count);
+
     void WriteSchemaVersion(std::string_view path, const SchemaVersion& version);
 
     std::string Dump(int indent = 2) const;

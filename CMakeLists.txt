@@ -67,10 +67,14 @@ add_library(orange_engine STATIC
     src/asset/TextureLoader.cpp
     src/asset/ShaderLoader.cpp
 
-    # Scene：Entity / Transform / Hierarchy / ISystem / World（公共
-    # 接口 + entt::registry 后端）
+    # Scene：Entity / Transform / Hierarchy / Name / ISystem / World
+    # （公共接口 + entt::registry 后端）+ SceneSerialization（顶层 schema
+    # 调度 + entity 持久 ID 重映射）+ ComponentSerializers（各内置组件
+    # 的 free-function Read / Write）
     src/scene/SceneHeaderCheck.cpp
     src/scene/World.cpp
+    src/scene/SceneSerialization.cpp
+    src/scene/ComponentSerializers.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
     # + RenderScene 收集（World → drawable list）+ Pipeline 接通

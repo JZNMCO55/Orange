@@ -6,6 +6,8 @@
 #include "orange/engine/scene/Entity.h"
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/ISystem.h"
+#include "orange/engine/scene/NameComponent.h"
+#include "orange/engine/scene/SceneSerialization.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 

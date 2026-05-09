@@ -72,6 +72,9 @@
     - [Task 10：`samples/05_skeletal_animation` + `samples/06_physics_platformer` ✅](#task-10samples05_skeletal_animation--samples06_physics_platformer-)
     - [Task 11：`samples/07_full_pipeline` 升级为可玩 demo ✅](#task-11samples07_full_pipeline-升级为可玩-demoanimation--physics--input-综合-)
   - [Phase 5：生产化](#phase-5生产化)
+    - [Task 01a：Scene 序列化骨架 + Transform/Hierarchy/Name 三件套 ✅](#task-01ascene-序列化骨架--transformhierarchyname-三件套-)
+    - [Task 01b：Renderable / Camera / Light 组件序列化 ✅](#task-01brenderable--camera--light-组件序列化-)
+    - [Task 01c：RigidBody / Collider / Animator 组件序列化](#task-01crigidbody--collider--animator-组件序列化)
   - [Phase 5.5：Save Game 系统](#phase-55save-game-系统-1)
 - [Self-Check](#self-check)
 - [后续篇章](#后续篇章)
@@ -752,7 +755,7 @@ Removed: Src/                              (整目录，src/ 替换)
 
 #### 本阶段引入的持久化 schema
 - `*.asset.json` 资源 sidecar（声明类型 / loader 参数 / 依赖资源）
-- 内置 component 的手写 `Read` / `Write`（`TransformComponent` / `HierarchyComponent` / `NameComponent` / `RenderableComponent`），全部基于 Phase 1 的 `JsonReader` / `JsonWriter` 原语
+- （注：原计划在本阶段同步交付内置 component 的手写 `Read` / `Write`，实际推迟到 Phase 5 / Task 01a–01c 与 scene-level schema 一并设计；Phase 2 仅完成 component 数据结构本身。）
 
 #### 依赖
 - 依赖 Phase 1
@@ -1971,13 +1974,98 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 
 ### Phase 5：生产化
 
-- Task 01：Scene 序列化（JSON schema + 版本字段）
+- Task 01a：Scene 序列化骨架 + Transform/Hierarchy/Name 三件套（含新建 NameComponent）
+- Task 01b：Renderable / Camera / Light 组件序列化（AssetHandle 路径化）
+- Task 01c：RigidBody / Collider / Animator 组件序列化（backend handle 重建；不含 runtime state）
 - Task 02：VFX 完整化（粒子系统 + dissolve shader + emission）
 - Task 03：体积光（screen-space god rays）
 - Task 04：自定义 RenderPass 注入正式启用
 - Task 05：异步资源加载
 - Task 06：30 秒可玩关卡 demo
 - Task 07：游戏仓库雏形（独立仓库；引擎 0.5 release）
+
+#### Task 01a：Scene 序列化骨架 + Transform/Hierarchy/Name 三件套 ✅
+- 描述：把 Scene 的"读/写到磁盘"路径首段建立起来——定义 `.scene.json` 顶层 schema、entity 持久 ID 方案、把 `TransformComponent` / `HierarchyComponent` 接入 Read/Write，并新建 `NameComponent`（CLAUDE.md 模块清单点名但前期未落地的最后一块），跑通 World → file → World 的 round-trip。01b / 01c 在保持顶层 schema 与调度路径不变的前提下，按组件批次往里加。
+- 输入：Phase 4 收尾（World 接通 EnTT 已稳定；`Core::Serialization` 与 `Core::SchemaVersion` 已就绪）
+- 输出（Proposed）：
+  - `Proposed: include/orange/engine/scene/NameComponent.h`
+  - `Proposed: include/orange/engine/scene/SceneSerialization.h`（公共 API：`Save(const World&, std::filesystem::path) -> Result<void>` / `Load(std::filesystem::path, World&) -> Result<void>` 两个自由函数；不暴露 nlohmann/json 类型）
+  - `Proposed: src/scene/SceneSerialization.cpp`（顶层 schema 解析 + entity 持久 ID 重映射 + 组件调度表骨架）
+  - `Proposed: src/scene/ComponentSerializers.cpp`（集中存放每个内置组件的 free-function Read/Write；01a 先注册 Transform / Hierarchy / Name 三项）
+  - `Proposed: tests/SceneSerializationTest.cpp`
+- 影响模块：Scene（核心改动）、Core（仅复用 `Serialization` / `SchemaVersion`，不动）
+- 前置依赖：Phase 4 全部任务
+- 实现要点：
+  - **Scene schema v1**：
+    ```json
+    {
+      "schemaVersion": 1,
+      "entities": [
+        {
+          "id": <持久 int, 0-based 顺序分配>,
+          "components": {
+            "Transform": { ... },
+            "Hierarchy": { "parent": <id 或 -1>, "children": [<id>...] },
+            "Name": "..."
+          }
+        }
+      ]
+    }
+    ```
+  - **持久 entity ID**：序列化时给每个 EnTT entity 分配 0-based 顺序 ID（与 EnTT 内部 `entt::entity` 解耦），存入 JSON；Load 时建立 persistent ID → 新 EnTT entity 的双向映射，先 `CreateEntity` 全部，再回填 Hierarchy 的 parent / children——保证 Hierarchy ID 引用永远指向已存在 entity。这一约束让 01c 处理 backend-dependent 组件时也能复用同一 ID 表。
+  - **NameComponent**：`struct NameComponent { std::string name; };` + `static constexpr SchemaVersion kSchemaVersion{1};`。空字符串视为"未命名"，编辑器 UI 显示 fallback `Entity #<id>`。
+  - **组件 Read/Write 风格**：每个组件在 `ComponentSerializers.cpp` 内提供 free function `void Write(JsonWriter&, const T&)` 与 `Result<T> Read(const JsonReader&)`。组件头文件**不**引入 `Serialization.h`，避免污染公共面。
+  - **调度表**：`SceneSerialization.cpp` 内部维护 `std::unordered_map<std::string, ComponentSerializerEntry>`，key 是 schema 里的 component 名（"Transform" 等），value 是 type-erased 的 `(write_fn, read_fn, attach_fn)` 三元组。01a 注册 3 个；01b / 01c 在同一调度表里追加，不改 SceneSerialization 主流程。
+  - **未识别 component 容错**：Read 路径遇到调度表里没有的 component key → 记 warning + skip，不视为 fatal——支持 forward-compat（旧版引擎读新版 scene 不崩）。
+  - **Schema version mismatch**：scene-level `schemaVersion` 不匹配当前期望版本 → 返回 `Result::Error` 且 World 保持原状（不部分写入）。
+  - **Out-of-scope（明确推迟）**：Renderable / Camera / Light 留 01b；RigidBody / Collider / Animator 留 01c；migrator hook 留 Task 05 / Phase 5.5 视需要再起。
+- 验证：
+  1. `tests/SceneSerializationTest` 至少 5 case：空 World 往返 / 单 entity 三件套往返 / 含 Hierarchy 父子链往返 / schema version mismatch 返回 Error 且 World 不变 / 损坏 JSON 返回 Error 且 World 不变
+  2. ctest 全过
+  3. 在 `samples/02_ecs_basics` 末尾加一段 dev-time 自检（写到 temp 文件 → 读回 → 比较 entity 数量 + Name 列表），不强制改 sample 本意
+- 验收标准：上述 3 条全部满足；`Scene::Save` / `Scene::Load` 公共 API 就位且对 01b / 01c 后续追加保持不破坏。
+- Critical Path：是
+
+#### Task 01b：Renderable / Camera / Light 组件序列化 ✅
+- 描述：把 pure-data 的渲染类组件接入 01a 的调度表。涉及 `AssetHandle` 的"路径化"序列化策略——不写 handle 内部数值，写资源相对路径，Load 时通过 `AssetRegistry::Load<T>` 重新分发。
+- 输入：Phase 5 / Task 01a
+- 输出（Proposed）：
+  - `Modified: src/scene/ComponentSerializers.cpp`（新增 `RenderableComponent` / `LightComponent` 的 Read/Write + 调度表注册；Camera 处理见实现要点）
+  - `Modified: tests/SceneSerializationTest.cpp`（补 round-trip case）
+- 影响模块：Scene（仅追加调度项）、Render（不改公共面）、Asset（仅以现有 API 消费）
+- 前置依赖：Task 01a
+- 实现要点：
+  - **AssetHandle 序列化**：JSON 里写 `"mesh": "meshes/character.mesh"` 这样的相对路径字符串；Read 时调 `AssetRegistry::Load<Mesh>(path)`。Load 失败 → handle 留空 + 记 warning，不阻断整 scene 加载（让编辑器能开损坏的 scene 修复）。
+  - **Camera 是组件还是值类型**：当前 `Camera.h` 是值类型由 Pipeline 持有，不属于 ECS World。本 task 暂不强行把它转成 component——01b 不写 Camera 序列化，留作 Pipeline 配置 sidecar 边带；待 Phase 5 / Task 04（自定义 RenderPass 注入）落地后再决定 Camera 究竟是 component-form 还是 pipeline-config 形态。**决策记录**：本 task 范围内 Camera 跳过。
+  - **LightComponent**：序列化 `direction` / `color` / `intensity` / `castShadow` / `shadowConfig` 全字段。Phase 3 / Task 05 已锁字段，1:1 写出即可。
+  - **RenderableComponent**：mesh handle + material handle + visible flag。material 走同样的"路径化"策略。
+- 验证：
+  - tests round-trip case：含 Renderable + Light 的 scene 写出 → 重启 AssetRegistry → 读回 → 比对 mesh / material path 与 light 数值字段
+  - `samples/04_3d_mesh_with_bloom` 末尾加 dev-time round-trip 自检
+- 验收标准：渲染类组件能完整 round-trip；scene 文件可被人工编辑器（VSCode）改 mesh path 后重新加载生效。
+- Critical Path：是
+
+#### Task 01c：RigidBody / Collider / Animator 组件序列化
+- 描述：把涉及 backend 句柄的组件接入。**关键区分**：本 task 序列化的是关卡 content（"实体出生时的初始状态"），**不是**玩家当前的运行时状态——后者归 Phase 5.5 Save Game。Load 时按 desc 重新构造 backend 资源（Box2D body / DragonBones armature / shader uniform set），不持久化运行时句柄。
+- 输入：Phase 5 / Task 01b
+- 输出（Proposed）：
+  - `Modified: src/scene/ComponentSerializers.cpp`（新增 `RigidBodyComponent` / `ColliderComponent` / `AnimatorComponent` 的 Read/Write + 调度表注册）
+  - `Modified: src/scene/SceneSerialization.cpp`（Load 路径加入"组件分两遍 attach"调度——pure-data 一遍，backend-dependent 一遍）
+  - `Modified: tests/SceneSerializationTest.cpp`（补 round-trip + backend 重建验证）
+- 影响模块：Scene（仅追加调度项 + Load 顺序）、Physics（仅以现有 API 消费）、Animation（仅以现有 API 消费）
+- 前置依赖：Task 01b、Phase 4 所有任务
+- 实现要点：
+  - **RigidBodyComponent**：序列化 body type（static / dynamic / kinematic）/ initial position / initial rotation / mass override / linearDamping / angularDamping / fixedRotation。**不**序列化运行时 velocity / awake state / sleeping——那是 Save Game 范围。Load 时调 `PhysicsWorld::CreateBody(desc)`。
+  - **ColliderComponent**：序列化 `ColliderDesc` 全字段（shape kind / 几何参数 / friction / restitution / density / isSensor / category mask / collision mask）。多 collider per body 用数组。Load 走"初次 attach"路径，不复用 Phase 4 / Task 07 的 ReplaceFixture（后者是运行时变形语义）。
+  - **AnimatorComponent**：序列化 backend kind（Skeletal / Procedural）+ skeleton 资源路径（仅 Skeletal）+ initial state name + uniform set 名（仅 Procedural）。**不**序列化 state machine 当前帧 / playback time——那是 Save Game 范围。Load 时按 backend 调 `SkeletalAnimator::Init` / `ProceduralAnimator::Init`。
+  - **Load 顺序敏感**：`PhysicsWorld` / `AnimatorRegistry` 先存在 → 全 entity create → 第一遍 attach pure-data 组件（Transform / Hierarchy / Name / Renderable / Light）→ 第二遍 attach backend-dependent 组件（RigidBody → Collider → Animator）。两遍调度表里组件标 `kind = pure_data` / `backend_dependent`，主流程按 kind 分批。
+  - **持久 ID 跨 phase 不变**：01a 建立的 entity 持久 ID 表在两遍 attach 之间继续生效，让 RigidBody / Collider / Animator 在第二遍仍能用同一 ID 引用 backend 不需要的字段（譬如 sensor 触发的 target entity）。
+- 验证：
+  - tests round-trip：含一个 dynamic body + 两个 collider + 一个 skeletal animator 的 scene
+  - `samples/06_physics_platformer` 加 dev-time round-trip 自检（写出 → 读回 → 步进若干帧后视觉一致）
+  - 验证 Load 失败时 World 不留半状态（譬如 Animator skeleton 路径错误时，前述 entity 已 create 的部分要回滚或保留容错——本 task 选择"容错保留 + warning"，与 01b AssetHandle 失败策略一致）
+- 验收标准：Phase 5 / Task 01 整体闭环——任意现有 sample 的 World 都可 Save → Load 还原；Phase 6 编辑器可直接基于 `Scene::Save` / `Scene::Load` 启动场景编辑工作流。
+- Critical Path：是
 
 ### Phase 5.5：Save Game 系统
 

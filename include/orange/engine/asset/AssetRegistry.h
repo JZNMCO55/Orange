@@ -148,6 +148,23 @@ public:
         return UnloadErased(typeid(T), handle.Value());
     }
 
+    // 反查：给定 handle 取出当时 Load / Insert 时使用的 path。无效或
+    // 已卸载的 handle 返回空字符串。返回 string_view 的生存期与
+    // registry 持有该 entry 的生存期一致——通常调用方应当立即拷贝
+    // 走，不要跨过 Unload 调用持有。
+    //
+    // 主要使用场景：scene 序列化把"AssetHandle"翻成"资源路径"以便落
+    // 盘；编辑器 inspector 显示资源来源；运行时 dump 诊断。
+    template <typename T>
+    std::string_view PathOf(AssetHandle<T> handle) const noexcept
+    {
+        if (!handle.IsValid())
+        {
+            return {};
+        }
+        return PathOfErased(typeid(T), handle.Value());
+    }
+
     // 已加载资源总数（跨所有类型）。诊断用，不进热路径。
     std::size_t Size() const noexcept;
     bool        Empty() const noexcept;
@@ -181,6 +198,9 @@ private:
 
     bool UnloadErased(const std::type_info& type,
                       std::uint64_t handleValue);
+
+    std::string_view PathOfErased(const std::type_info& type,
+                                  std::uint64_t handleValue) const noexcept;
 
     struct Impl;
     std::unique_ptr<Impl> mpImpl;
