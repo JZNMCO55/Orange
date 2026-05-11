@@ -35,11 +35,21 @@
 #include <orange/engine/app/Layer.h>
 #include <orange/engine/platform/Window.h>
 #include <orange/engine/platform/WindowEvent.h>
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/ColliderDesc.h>
+#include <orange/engine/physics/RigidBodyComponent.h>
+#include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+
+#include <glm/gtc/quaternion.hpp>
+#include <glm/trigonometric.hpp>
+#include <glm/vec3.hpp>
 
 #include <orange/renderer/RenderDevice.h>
 #include <orange/renderer/Renderer.h>
@@ -179,9 +189,10 @@ struct EditorState
     char                   renameBuffer[256] = {};
     bool                   renameJustStarted = false;
 
-    // 树状结构上的破坏性操作（destroy / reparent）不能在递归 draw 中即
-    // 时执行 —— 会破坏当前遍历的 sibling 链。先在面板里记下"本帧应执行
-    // 什么"，draw 结束后统一 apply。
+    // 树状结构上的破坏性 / 增加操作不能在递归 draw 中即时执行 —— 会破
+    // 坏当前遍历的 sibling 链 / EnTT view 迭代器（CreateEntity 会修改
+    // entity storage）。先在面板里记下"本帧应执行什么"，draw 结束后统
+    // 一 apply。
     Orange::Engine::Entity pendingDelete = Orange::Engine::Entity::Invalid();
     struct PendingReparent
     {
@@ -189,6 +200,20 @@ struct EditorState
         Orange::Engine::Entity newParent;  // Invalid 表示提到 root
         bool                   valid = false;
     } pendingReparent;
+    struct PendingCreate
+    {
+        Orange::Engine::Entity parent;  // Invalid = 创建为 root；否则挂为该 parent 末子
+        bool                   valid = false;
+    } pendingCreate;
+
+    // Transform rotation 编辑的 Euler 角缓存（degrees）。原因：UI 用 Euler
+    // 输入比 quat 4 字段直观，但 quat→Euler 在 gimbal lock 附近不连续，
+    // 用户在 DragFloat3 上滑动时显示值会跳。所以编辑期把 Euler 缓存到
+    // EditorState，每次 selectedEntity 切换才从 quat 重新算一次；DragFloat3
+    // 写 cache，cache 改了再把 quat 重算回 component。
+    Orange::Engine::Entity transformEulerCacheEntity =
+        Orange::Engine::Entity::Invalid();
+    glm::vec3              transformEulerCache{0.0f, 0.0f, 0.0f};
 };
 
 // ---- Hierarchy 维护工具 ------------------------------------------------
@@ -336,6 +361,12 @@ inline void SeedDemoWorld(Orange::Engine::World& world)
     using ::Orange::Engine::Entity;
     using ::Orange::Engine::Scene::NameComponent;
     using ::Orange::Engine::Scene::TransformComponent;
+    using ::Orange::Engine::Render::DirectionalLight;
+    using ::Orange::Engine::Render::RenderableComponent;
+    using ::Orange::Engine::Physics::BodyType;
+    using ::Orange::Engine::Physics::ColliderComponent;
+    using ::Orange::Engine::Physics::BoxDesc;
+    using ::Orange::Engine::Physics::RigidBodyComponent;
 
     auto make = [&](const char* name) {
         Entity e = world.CreateEntity();
@@ -352,6 +383,33 @@ inline void SeedDemoWorld(Orange::Engine::World& world)
     Entity wall     = make("Wall");
     Entity misc     = make("Misc Sibling");
 
+    // 给 demo 实体挂代表性 component，让 Inspector 在不同选中下能展示
+    // 不同组件区块 —— 否则只有 Name / Transform / Hierarchy 三段永远在，
+    // 看不到 Renderable / RigidBody / Light 等的编辑控件长什么样。
+    world.AddComponent<DirectionalLight>(light, DirectionalLight{});
+
+    RenderableComponent rcFloor{};  // mesh handle / materialInstance 留默认 Invalid / nullptr
+    rcFloor.visible     = true;
+    rcFloor.castsShadow = false;    // 地面通常不投自己阴影
+    world.AddComponent<RenderableComponent>(floor, rcFloor);
+
+    RigidBodyComponent rbFloor{};
+    rbFloor.type            = BodyType::Static;
+    rbFloor.fixedRotation   = true;
+    rbFloor.gravityScale    = 0.0f;
+    world.AddComponent<RigidBodyComponent>(floor, rbFloor);
+
+    ColliderComponent ccFloor{};
+    ccFloor.shape       = BoxDesc{glm::vec2{5.0f, 0.5f}};  // 半宽 / 半高
+    ccFloor.density     = 0.0f;
+    ccFloor.friction    = 0.5f;
+    world.AddComponent<ColliderComponent>(floor, ccFloor);
+
+    RenderableComponent rcWall{};
+    rcWall.visible     = true;
+    rcWall.castsShadow = true;
+    world.AddComponent<RenderableComponent>(wall, rcWall);
+
     EditorHierarchy::LinkAsLastChild(world, root,     camera);
     EditorHierarchy::LinkAsLastChild(world, root,     light);
     EditorHierarchy::LinkAsLastChild(world, root,     geometry);
@@ -360,6 +418,61 @@ inline void SeedDemoWorld(Orange::Engine::World& world)
     // root 和 misc 自身是 root level —— 不挂任何 parent，HierarchyComponent
     // 也可以不加（树视图按"无 HC 或 parent invalid 视为 root"处理）。
     (void)misc;
+}
+
+// 三色 X/Y/Z 标签 + 3 个 DragFloat 的组合控件，对齐 Unity Transform 的
+// 配色（X 红 / Y 绿 / Z 蓝）。比裸 DragFloat3 多视觉占用：每分量前一
+// 个有色 Button 当 label —— Button 是装饰，点击吃掉但无副作用（不进
+// 入键盘焦点队列）。
+//
+// 用 PushID(label) 隔离三个内部 DragFloat 的 ImGui ID；外层调用方按需
+// 再包 PushID（Inspector 同一 Window 内同名字段不出现，目前不必）。
+//
+// 返回值：任一分量被改 → true，调用方一般写回 component 字段即可。
+inline bool DragVec3Colored(const char* label, float v[3],
+                            float speed = 0.1f,
+                            float vMin  = 0.0f,
+                            float vMax  = 0.0f,
+                            const char* fmt = "%.3f")
+{
+    constexpr ImVec4 kRedX  {0.70f, 0.18f, 0.18f, 1.0f};
+    constexpr ImVec4 kGrnY  {0.27f, 0.55f, 0.27f, 1.0f};
+    constexpr ImVec4 kBluZ  {0.18f, 0.36f, 0.70f, 1.0f};
+
+    bool changed = false;
+    ImGui::PushID(label);
+
+    const ImGuiStyle& s = ImGui::GetStyle();
+    const float btnH    = ImGui::GetFrameHeight();
+    // CalcItemWidth：当前 column 下默认 item 宽度（ImGui 自适应窗口宽）
+    const float total   = ImGui::CalcItemWidth();
+    const float dragW   = (total - 3.0f * (btnH + s.ItemInnerSpacing.x)) / 3.0f;
+
+    auto axis = [&](int idx, const char* name, ImVec4 color) {
+        ImGui::PushStyleColor(ImGuiCol_Button,        color);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  color);
+        ImGui::Button(name, ImVec2(btnH, btnH));
+        ImGui::PopStyleColor(3);
+        ImGui::SameLine(0.0f, s.ItemInnerSpacing.x);
+        ImGui::SetNextItemWidth(dragW);
+        char id[8];
+        std::snprintf(id, sizeof(id), "##%s", name);
+        if (ImGui::DragFloat(id, &v[idx], speed, vMin, vMax, fmt)) {
+            changed = true;
+        }
+    };
+
+    axis(0, "X", kRedX);
+    ImGui::SameLine(0.0f, s.ItemInnerSpacing.x);
+    axis(1, "Y", kGrnY);
+    ImGui::SameLine(0.0f, s.ItemInnerSpacing.x);
+    axis(2, "Z", kBluZ);
+    ImGui::SameLine(0.0f, s.ItemInnerSpacing.x);
+    ImGui::TextUnformatted(label);
+
+    ImGui::PopID();
+    return changed;
 }
 
 // 编辑器侧需要在每帧 BeginFrame 之前调 ImGui::NewFrame 等。把这件事
@@ -584,6 +697,19 @@ private:
             }
         }
 
+        // 面板背景右键菜单 —— 空白处 RMB 弹出"Create Entity (root)"。
+        // NoOpenOverItems：避免与 TreeNode 上的右键菜单（DrawEntityNodeRecursive
+        // 内 BeginPopupContextItem）打架。
+        if (ImGui::BeginPopupContextWindow(
+                "##tree_bg_ctx",
+                  ImGuiPopupFlags_MouseButtonRight
+                | ImGuiPopupFlags_NoOpenOverItems)) {
+            if (ImGui::MenuItem("Create Entity (root)")) {
+                mState.pendingCreate = {Orange::Engine::Entity::Invalid(), true};
+            }
+            ImGui::EndPopup();
+        }
+
         ImGui::End();
 
         // 帧末统一 apply pending 结构性操作 ——
@@ -611,6 +737,27 @@ private:
             {
                 EditorHierarchy::ReparentTo(*mState.pWorld, src, dst);
             }
+        }
+        if (mState.pendingCreate.valid) {
+            const Orange::Engine::Entity parent = mState.pendingCreate.parent;
+            mState.pendingCreate.valid = false;
+            Orange::Engine::Entity e = mState.pWorld->CreateEntity();
+            // 默认 component：Name + Transform —— 跟 SeedDemoWorld 里
+            // make() lambda 行为一致，让新创建实体在 Inspector 里至少
+            // 有这两段可看。其它组件（Renderable / RigidBody / Light）
+            // 等用户主动需要时加 —— Task 06-04 不提供 "+ Add Component"
+            // 按钮，留给后续 task。
+            mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
+                e, Orange::Engine::Scene::NameComponent{"New Entity"});
+            mState.pWorld->AddComponent<Orange::Engine::Scene::TransformComponent>(
+                e, Orange::Engine::Scene::TransformComponent{});
+            if (parent.IsValid()) {
+                EditorHierarchy::LinkAsLastChild(*mState.pWorld, parent, e);
+            }
+            mState.selectedEntity = e;
+            // 自动进入 rename 模式：刚建出来用户最有可能想做的下一步是命
+            // 名，省一次 F2。
+            BeginRename(e);
         }
     }
 
@@ -698,6 +845,25 @@ private:
                 ImGui::EndDragDropSource();
             }
         }
+        // 节点上的右键菜单 —— "Create Child" 把新实体挂为本节点末子；
+        // Rename / Delete 把 F2 / Del 快捷键的等价入口挂上菜单。打开菜
+        // 单会先让节点 "becomes hovered/clicked"，所以同时也会写
+        // selectedEntity（统一通过 ImGui::IsItemClicked 路径处理）。
+        if (!renaming && ImGui::BeginPopupContextItem("##node_ctx")) {
+            mState.selectedEntity = entity;
+            if (ImGui::MenuItem("Create Child")) {
+                mState.pendingCreate = {entity, true};
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Rename", "F2")) {
+                BeginRename(entity);
+            }
+            if (ImGui::MenuItem("Delete", "Del")) {
+                mState.pendingDelete = entity;
+            }
+            ImGui::EndPopup();
+        }
+
         // DnD target —— 无论是否重命名都可接受 drop，把别的节点挂到本节点下
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* p =
@@ -761,6 +927,13 @@ private:
     // DnD payload type 标识。ImGui 用这个字符串区分不同类型的 drag payload。
     static constexpr const char* kEntityPayload = "ORANGE_EDITOR_ENTITY";
 
+    // Inspector 入口：选中实体的 entity id + 所有"已挂着的内置 component"
+    // 各起一个 CollapsingHeader 段。每段 if HasComponent → DrawXxx。
+    //
+    // 组件类型表是**硬编码**的（task 描述就是"内置组件"列表）。引擎仍处
+    // 在 Phase 1–6 阶段禁止 entt::meta / 反射，所以游戏侧自定义 component
+    // 暂时只能不显示 —— Phase 6 后续真要扩展时走"编辑器扩展点 API 让游
+    // 戏注册自己的 inspector callback"路径，不在本 task 范围内。
     void DrawInspectorPanel()
     {
         ImGui::Begin("Inspector");
@@ -769,20 +942,325 @@ private:
             ImGui::End();
             return;
         }
-        // Task 06-03 阶段 Inspector 仅显示 entity id + name —— 真组件检
-        // 视器是 Task 06-04。这里现在就显示一行是为了"选中态"在 UI 上
-        // 可见，便于验证 Entity Tree 的 select 行为。
-        const auto* name = mState.pWorld->GetComponent<
-            Orange::Engine::Scene::NameComponent>(mState.selectedEntity);
+
+        const Orange::Engine::Entity e = mState.selectedEntity;
         ImGui::Text("Entity #%u",
-                    static_cast<unsigned>(static_cast<std::uint32_t>(
-                        mState.selectedEntity.Value())));
-        ImGui::Text("Name: %s",
-                    (name != nullptr && !name->name.empty())
-                        ? name->name.c_str() : "(unnamed)");
+                    static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
         ImGui::Separator();
-        ImGui::TextDisabled("component inspector — Task 06-04");
+
+        DrawInspectorName(e);
+        DrawInspectorTransform(e);
+        DrawInspectorHierarchy(e);
+        DrawInspectorDirectionalLight(e);
+        DrawInspectorRenderable(e);
+        DrawInspectorRigidBody(e);
+        DrawInspectorCollider(e);
+        DrawInspectorAnimator(e);
+
+        // ---- + Add Component -----------------------------------------
+        // 列出尚未挂在本实体上的内置可添加组件。Animator 跳过 —— 需要具
+        // 体 IAnimator 子类实例，不能用空 unique_ptr 默认构造。Hierarchy
+        // 跳过 —— DnD 管理，手动 add 会出现 "孤立 HC"（parent invalid
+        // 且不挂在任何父链上）。
+        ImGui::Separator();
+        if (ImGui::Button("+ Add Component")) {
+            ImGui::OpenPopup("##add_component");
+        }
+        if (ImGui::BeginPopup("##add_component")) {
+            using namespace Orange::Engine::Scene;
+            using namespace Orange::Engine::Render;
+            using namespace Orange::Engine::Physics;
+            auto& w = *mState.pWorld;
+            if (!w.HasComponent<TransformComponent>(e)
+                && ImGui::MenuItem("Transform")) {
+                w.AddComponent<TransformComponent>(e, TransformComponent{});
+            }
+            if (!w.HasComponent<DirectionalLight>(e)
+                && ImGui::MenuItem("Directional Light")) {
+                w.AddComponent<DirectionalLight>(e, DirectionalLight{});
+            }
+            if (!w.HasComponent<RenderableComponent>(e)
+                && ImGui::MenuItem("Renderable")) {
+                w.AddComponent<RenderableComponent>(e, RenderableComponent{});
+            }
+            if (!w.HasComponent<RigidBodyComponent>(e)
+                && ImGui::MenuItem("RigidBody")) {
+                w.AddComponent<RigidBodyComponent>(e, RigidBodyComponent{});
+            }
+            if (!w.HasComponent<ColliderComponent>(e)
+                && ImGui::MenuItem("Collider")) {
+                w.AddComponent<ColliderComponent>(e, ColliderComponent{});
+            }
+            ImGui::EndPopup();
+        }
+
         ImGui::End();
+    }
+
+    // CollapsingHeader 包装 —— 多一个 "右键 → Remove Component" 上下文菜
+    // 单。outRemove 表示用户本帧请求了移除；调用方在 fields 渲染完后据
+    // 此调 RemoveComponent。把 remove 写在 fields 之后是为了让该帧的
+    // field 控件仍正常渲染，不会因为半途 remove 而 GetComponent 拿到野
+    // 指针。
+    //
+    // 不暴露 Name / Hierarchy 的 remove —— Name 总在让 Entity Tree 有
+    // 名字显示；Hierarchy 是 DnD 维护的结构性数据，手动 remove 会让自
+    // 身脱离父链且子节点变成孤儿。这两段调用方直接用裸 CollapsingHeader。
+    static bool ComponentHeader(const char* label, bool* outRemove,
+                                bool defaultOpen = true)
+    {
+        *outRemove = false;
+        const bool open = ImGui::CollapsingHeader(
+            label, defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Remove Component")) { *outRemove = true; }
+            ImGui::EndPopup();
+        }
+        return open;
+    }
+
+    // ---- 各 component 段 -------------------------------------------------
+    //
+    // 每个 DrawInspectorXxx 的统一模式：
+    //   1. 先 HasComponent 检查 —— 不挂就整段不显示
+    //   2. CollapsingHeader（默认展开），点 header 可折叠
+    //   3. ImGui::DragFloat / Checkbox / Combo 等控件直接读写 component 字段
+    //   4. 编辑修改后不需要显式 commit，下一帧就会反映到 ECS（组件就是这
+    //      行数据）
+    //
+    // 没必要在每段中包 PushID —— ImGui 的控件 label（"##xxx"）+ 当前 ID
+    // stack（DrawInspectorPanel 在一个 Window 内，没多重并发同名 entity）
+    // 已经足够区分。
+
+    void DrawInspectorName(Orange::Engine::Entity e)
+    {
+        using NameComponent = Orange::Engine::Scene::NameComponent;
+        if (!mState.pWorld->HasComponent<NameComponent>(e)) { return; }
+        if (!ImGui::CollapsingHeader("Name", ImGuiTreeNodeFlags_DefaultOpen)) {
+            return;
+        }
+        auto* nc = mState.pWorld->GetComponent<NameComponent>(e);
+        // 直接复用 mState.renameBuffer 容量大小的本地缓冲，避免对
+        // std::string 内存的实时 resize。每帧从 component 拷贝进 buf，
+        // 编辑后写回 —— 这样多个面板（树 InputText / Inspector InputText）
+        // 同时观察一份 NameComponent 时不会跟 mState.renameBuffer 串味。
+        char buf[256];
+        const std::size_t n = std::min(nc->name.size(), sizeof(buf) - 1);
+        std::memcpy(buf, nc->name.data(), n);
+        buf[n] = '\0';
+        if (ImGui::InputText("##name", buf, sizeof(buf))) {
+            nc->name = buf;
+        }
+    }
+
+    void DrawInspectorTransform(Orange::Engine::Entity e)
+    {
+        using TransformComponent = Orange::Engine::Scene::TransformComponent;
+        if (!mState.pWorld->HasComponent<TransformComponent>(e)) { return; }
+        bool remove = false;
+        const bool open = ComponentHeader("Transform", &remove);
+        if (!open) {
+            if (remove) {
+                mState.pWorld->RemoveComponent<TransformComponent>(e);
+                mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+            }
+            return;
+        }
+        auto* t = mState.pWorld->GetComponent<TransformComponent>(e);
+
+        DragVec3Colored("Position", &t->position.x, 0.05f);
+
+        // Euler 缓存：换实体了 → 重置 cache（从 quat 推 Euler）；同一实体
+        // 持续编辑 → 用 cache 保证 DragFloat3 在 gimbal lock 附近不抖。
+        if (mState.transformEulerCacheEntity != e) {
+            const glm::vec3 eulerRad = glm::eulerAngles(t->rotation);
+            mState.transformEulerCache       = glm::degrees(eulerRad);
+            mState.transformEulerCacheEntity = e;
+        }
+        if (DragVec3Colored("Rotation (°)", &mState.transformEulerCache.x, 0.5f)) {
+            t->rotation = glm::quat(glm::radians(mState.transformEulerCache));
+        }
+
+        DragVec3Colored("Scale", &t->scale.x, 0.05f);
+
+        if (remove) {
+            mState.pWorld->RemoveComponent<TransformComponent>(e);
+            mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        }
+    }
+
+    void DrawInspectorHierarchy(Orange::Engine::Entity e)
+    {
+        using HC = Orange::Engine::Scene::HierarchyComponent;
+        if (!mState.pWorld->HasComponent<HC>(e)) { return; }
+        if (!ImGui::CollapsingHeader("Hierarchy")) { return; }
+        const auto* h = mState.pWorld->GetComponent<HC>(e);
+
+        auto idTextOf = [](Orange::Engine::Entity x) -> std::string {
+            if (!x.IsValid()) { return "(none)"; }
+            char tmp[32];
+            std::snprintf(tmp, sizeof(tmp), "#%u",
+                          static_cast<unsigned>(
+                              static_cast<std::uint32_t>(x.Value())));
+            return tmp;
+        };
+        // 全只读 —— 父子关系的编辑入口是 Entity Tree 面板的 DnD（Task 06-03）。
+        // 在这里再加一遍 reparent 控件会让两套修改路径竞争状态。
+        ImGui::Text("Parent       : %s", idTextOf(h->parent).c_str());
+        ImGui::Text("First child  : %s", idTextOf(h->firstChild).c_str());
+        ImGui::Text("Prev sibling : %s", idTextOf(h->prevSibling).c_str());
+        ImGui::Text("Next sibling : %s", idTextOf(h->nextSibling).c_str());
+        ImGui::TextDisabled("(edit by drag-drop in Entity Tree)");
+    }
+
+    void DrawInspectorDirectionalLight(Orange::Engine::Entity e)
+    {
+        using DirectionalLight = Orange::Engine::Render::DirectionalLight;
+        if (!mState.pWorld->HasComponent<DirectionalLight>(e)) { return; }
+        bool remove = false;
+        const bool open = ComponentHeader("Directional Light", &remove);
+        if (!open) {
+            if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
+            return;
+        }
+        auto* l = mState.pWorld->GetComponent<DirectionalLight>(e);
+        // direction 约定为单位向量；UI 不强制 normalize（用户拖中间态可能
+        // 临时变长度），但 Pipeline 自己在着色阶段会按需 normalize。这里
+        // 加一个 "Normalize" 按钮让用户随时归一化。
+        DragVec3Colored("Direction", &l->direction.x, 0.01f);
+        if (ImGui::SmallButton("Normalize Direction")) {
+            const float len = glm::length(l->direction);
+            if (len > 0.0f) { l->direction /= len; }
+        }
+        ImGui::ColorEdit3("Color", &l->color.x);
+        ImGui::DragFloat("Intensity", &l->intensity, 0.05f, 0.0f, 1000.0f);
+        ImGui::Checkbox("Casts Shadow", &l->castsShadow);
+
+        if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
+    }
+
+    void DrawInspectorRenderable(Orange::Engine::Entity e)
+    {
+        using RC = Orange::Engine::Render::RenderableComponent;
+        if (!mState.pWorld->HasComponent<RC>(e)) { return; }
+        bool remove = false;
+        const bool open = ComponentHeader("Renderable", &remove);
+        if (!open) {
+            if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
+            return;
+        }
+        auto* r = mState.pWorld->GetComponent<RC>(e);
+        // mesh / materialInstance 是 handle / 裸指针 —— 编辑得通过 Asset
+        // 浏览器（Phase 6 后续 task）才有意义。这里只读显示。
+        ImGui::Text("Mesh handle      : %llu",
+                    static_cast<unsigned long long>(r->mesh.Value()));
+        ImGui::Text("MaterialInstance : %p",
+                    reinterpret_cast<void*>(r->materialInstance));
+        ImGui::Checkbox("Visible",      &r->visible);
+        ImGui::Checkbox("Casts Shadow", &r->castsShadow);
+
+        if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
+    }
+
+    void DrawInspectorRigidBody(Orange::Engine::Entity e)
+    {
+        using RB = Orange::Engine::Physics::RigidBodyComponent;
+        using BT = Orange::Engine::Physics::BodyType;
+        if (!mState.pWorld->HasComponent<RB>(e)) { return; }
+        bool remove = false;
+        const bool open = ComponentHeader("RigidBody", &remove);
+        if (!open) {
+            if (remove) { mState.pWorld->RemoveComponent<RB>(e); }
+            return;
+        }
+        auto* b = mState.pWorld->GetComponent<RB>(e);
+
+        const char* kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
+        int typeIdx = static_cast<int>(b->type);
+        if (ImGui::Combo("Type", &typeIdx, kBodyTypeNames, 3)) {
+            b->type = static_cast<BT>(typeIdx);
+        }
+        ImGui::DragFloat2("Initial Position", &b->initialPosition.x, 0.05f);
+        ImGui::DragFloat("Initial Angle (rad)", &b->initialAngle, 0.01f);
+        ImGui::DragFloat2("Linear Velocity",  &b->linearVelocity.x,  0.05f);
+        ImGui::DragFloat("Angular Velocity",  &b->angularVelocity,   0.05f);
+        ImGui::DragFloat("Linear Damping",    &b->linearDamping,     0.01f, 0.0f, 100.0f);
+        ImGui::DragFloat("Angular Damping",   &b->angularDamping,    0.01f, 0.0f, 100.0f);
+        ImGui::Checkbox("Fixed Rotation",     &b->fixedRotation);
+        ImGui::DragFloat("Gravity Scale",     &b->gravityScale,      0.05f);
+        // handle 是 PhysicsWorld::AddBody 反写的运行时引用，编辑器不该动；
+        // 但显示一下让用户知道 body 是否已注册。
+        ImGui::Separator();
+        ImGui::TextDisabled("handle (runtime) : %llu",
+                            static_cast<unsigned long long>(b->handle.Value()));
+
+        if (remove) { mState.pWorld->RemoveComponent<RB>(e); }
+    }
+
+    void DrawInspectorCollider(Orange::Engine::Entity e)
+    {
+        using CC = Orange::Engine::Physics::ColliderComponent;
+        using ::Orange::Engine::Physics::CircleDesc;
+        using ::Orange::Engine::Physics::BoxDesc;
+        using ::Orange::Engine::Physics::PolygonDesc;
+        using ::Orange::Engine::Physics::EdgeChainDesc;
+        if (!mState.pWorld->HasComponent<CC>(e)) { return; }
+        bool remove = false;
+        const bool open = ComponentHeader("Collider", &remove);
+        if (!open) {
+            if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+            return;
+        }
+        auto* c = mState.pWorld->GetComponent<CC>(e);
+
+        // shape 是 std::variant —— 显示 shape 类型 + 各自的简单数值。
+        // 切换 shape 类型（assign 一个不同 alternative）会重置数据，
+        // 比起 Inspector 一行 Combo 误操作风险大，这里**不**提供切换
+        // 控件，留给 Task 06-05 / 后续 collider 编辑专用 UI。
+        if (std::holds_alternative<CircleDesc>(c->shape)) {
+            auto& s = std::get<CircleDesc>(c->shape);
+            ImGui::Text("Shape: Circle");
+            ImGui::DragFloat("Radius", &s.radius, 0.01f, 0.0f, 0.0f);
+            ImGui::DragFloat2("Center", &s.center.x, 0.01f);
+        } else if (std::holds_alternative<BoxDesc>(c->shape)) {
+            auto& s = std::get<BoxDesc>(c->shape);
+            ImGui::Text("Shape: Box");
+            ImGui::DragFloat2("Half Extents", &s.halfExtents.x, 0.01f);
+            ImGui::DragFloat2("Center",       &s.center.x,      0.01f);
+        } else if (std::holds_alternative<PolygonDesc>(c->shape)) {
+            const auto& s = std::get<PolygonDesc>(c->shape);
+            ImGui::Text("Shape: Polygon (%u verts)",
+                        static_cast<unsigned>(s.count));
+            ImGui::TextDisabled("(polygon vertex editing — later task)");
+        } else if (std::holds_alternative<EdgeChainDesc>(c->shape)) {
+            const auto& s = std::get<EdgeChainDesc>(c->shape);
+            ImGui::Text("Shape: EdgeChain (%u verts, loop=%s)",
+                        static_cast<unsigned>(s.count),
+                        s.isLoop ? "yes" : "no");
+            ImGui::TextDisabled("(edge chain editing — later task)");
+        }
+        ImGui::Separator();
+        ImGui::DragFloat("Density",     &c->density,     0.01f, 0.0f, 0.0f);
+        ImGui::DragFloat("Friction",    &c->friction,    0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Restitution", &c->restitution, 0.01f, 0.0f, 1.0f);
+        ImGui::Checkbox("Is Sensor",    &c->isSensor);
+
+        if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+    }
+
+    void DrawInspectorAnimator(Orange::Engine::Entity e)
+    {
+        using AC = Orange::Engine::Animation::AnimatorComponent;
+        if (!mState.pWorld->HasComponent<AC>(e)) { return; }
+        if (!ImGui::CollapsingHeader("Animator")) { return; }
+        const auto* a = mState.pWorld->GetComponent<AC>(e);
+        // AnimatorComponent 持 unique_ptr<IAnimator>，是 move-only 抽象类指
+        // 针，运行时 "换 backend" 不是 inspector 一行 combo 能搞定的。这里
+        // 仅显示是否挂着 + 指针地址；详细参数交给 Task 06-04 之后的动画
+        // 子模式。
+        ImGui::Text("Animator (runtime) : %p",
+                    reinterpret_cast<const void*>(a->animator.get()));
+        ImGui::TextDisabled("(animator backend editing — later task)");
     }
 
     static void DrawAssetsPanel()

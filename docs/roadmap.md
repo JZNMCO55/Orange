@@ -95,11 +95,41 @@
     - Undo / Redo → Phase 7 才考虑
     - Entity 排序稳定性（EnTT view 遍历顺序非创建顺序，同根实体两帧间可能换位）→ 真需要时加 SortIndex 组件
 
-### Task 06-04 · 组件检视器
+### Task 06-04 · 组件检视器 ✅
 - 描述：选中实体后展示其全部 component，提供 `Transform` / `Renderable` / `RigidBody` / `Collider` / `Animator` 等内置组件的可视化编辑控件
 - 前置：06-03
 - 实现要点：内置组件用 hard-coded inspector；将来用反射/编辑器扩展 API 让游戏组件也能显示（Phase 6 不实现）
 - Critical Path：是
+- **落地状态**（2026-05-11）：
+  - **Existing**（全部在 `tools/OrangeEditor/main.cpp`）：
+    - Inspector 主体 `DrawInspectorPanel` 拆成八个 `DrawInspectorXxx`：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / Animator。统一模式：HasComponent → CollapsingHeader 段 → 字段控件直接读写 component 字段（修改下一帧反映到 ECS）。组件类型表硬编码（Phase 1–6 禁止 entt::meta / 反射，游戏侧自定义组件留给 Phase 6 后续的"编辑器扩展点 API"）
+    - `ComponentHeader` 包装 `CollapsingHeader` + 右键 `Remove Component` 上下文菜单。Name / Hierarchy 不接 ComponentHeader —— Name 总在让 Entity Tree 有名字显示，Hierarchy 是 DnD 维护的结构性数据，手动 remove 会让自身脱离父链 + 子节点孤儿
+    - `+ Add Component` 按钮在 Inspector 底，弹 popup 列实体**还没挂**的可添加内置组件：Transform / DirectionalLight / Renderable / RigidBody / Collider。Animator 跳过 —— 它持 `unique_ptr<IAnimator>`，空指针默认构造无意义，需要具体 backend 实例。Hierarchy 跳过 —— DnD 管理
+    - `DragVec3Colored(label, v, speed)` 三色 X/Y/Z DragFloat 组合控件（Unity 风格）：X 红 (0.70, 0.18, 0.18) / Y 绿 (0.27, 0.55, 0.27) / Z 蓝 (0.18, 0.36, 0.70)。各分量前一个有色 Button 当 label，Button 装饰、点击无副作用。Transform 三段 + DirectionalLight Direction 都换成它
+    - Transform rotation 编辑用 Euler 缓存 (`EditorState::transformEulerCache` + `transformEulerCacheEntity`)：换选中实体才从 quat 推 Euler；同实体连续 DragFloat3 编辑期间用 cache 保证 gimbal lock 附近不抖。Remove Transform 同步清缓存
+    - DirectionalLight 段额外 "Normalize Direction" SmallButton —— UI 允许拖中间态非单位向量，按钮归一化
+    - RigidBody 段：BodyType (Combo: Static / Kinematic / Dynamic) + initial position / angle / velocity / damping / fixedRotation / gravityScale；`handle` 字段只读显示（是 `PhysicsWorld::AddBody` 反写的运行时引用）
+    - Collider 段：std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc> 显示当前 shape 类型 + 各自字段（Circle radius / center；Box halfExtents / center；Polygon、EdgeChain 仅显示顶点数 + 占位）。**不**提供切换 shape 类型控件 —— 切换 = 重新 assign variant alternative，会丢字段；留给 06-05 / 后续 collider 专用 UI
+    - 实体创建：Entity Tree 面板背景右键 → `Create Entity (root)`；节点右键 → `Create Child` + Rename(F2) + Delete(Del) 菜单。`EditorState::pendingCreate` 帧末统一 apply（CreateEntity 会修改 entity storage，不能在 EnTT view 迭代中即时 mutate）。新建实体默认带 NameComponent + TransformComponent，自动选中 + 自动进 BeginRename，省一次 F2
+    - 节点右键菜单弹出会顺手 select 当前节点
+    - rename 进行中**屏蔽**节点右键菜单 —— 避免 InputText 与 ContextItem 输入冲突
+    - SeedDemoWorld 扩：给 Light 挂 DirectionalLight；Floor 挂 Renderable + RigidBody(Static) + Collider(Box halfExtents 5.0 × 0.5)；Wall 挂 Renderable —— 让 Inspector 在不同选中下能展示不同组件区块
+  - **验证**：
+    - `cmake --build build --config Debug --target OrangeEditor` 干净
+    - 手动跑：
+      - 选 Light → Inspector 显示 Name / Transform / Hierarchy / Directional Light 四段
+      - 选 Floor → 再多 Renderable / RigidBody / Collider 三段
+      - Transform position / rotation / scale 三组 DragFloat 显示红绿蓝 X/Y/Z 标签
+      - Rotation 拖动稳定（gimbal lock 附近不抖），换选中实体后值刷新
+      - 右键 component header → Remove Component（Name / Hierarchy 没有此菜单）
+      - `+ Add Component` 弹菜单只列实体还没挂的组件；点 "Directional Light" → 立即出现 header；可继续编辑字段
+      - 空白右键 → Create Entity 创建 root 实体；节点右键 → Create Child 创建子实体，两种情况都自动选中并进 rename
+  - **Out-of-scope（移交后续 task）**：
+    - 游戏侧自定义组件 inspector → Phase 6 后续 / 反射方案出来后
+    - Collider shape 类型切换 + 多边形顶点编辑 → 06-05 或 collider 专用子模式
+    - Animator backend 切换 + 动画状态机编辑 → animation 子模式（Phase 6 后续）
+    - mesh handle / materialInstance 编辑（需 Asset 浏览器先做）→ Phase 6 后续
+    - Inspector 多选编辑 → Phase 7+
 
 ### Task 06-05 · 粒子编辑器子模式
 - 描述：可视化调整粒子发射器参数（emission rate / lifetime / velocity / curve），实时预览
