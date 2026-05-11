@@ -47,6 +47,7 @@
 #include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
@@ -1211,6 +1212,7 @@ private:
         DrawInspectorRenderable(e);
         DrawInspectorRigidBody(e);
         DrawInspectorCollider(e);
+        DrawInspectorParticleEmitter(e);
         DrawInspectorAnimator(e);
 
         // ---- + Add Component -----------------------------------------
@@ -1246,6 +1248,11 @@ private:
             if (!w.HasComponent<ColliderComponent>(e)
                 && ImGui::MenuItem("Collider")) {
                 w.AddComponent<ColliderComponent>(e, ColliderComponent{});
+            }
+            if (!w.HasComponent<ParticleEmitterComponent>(e)
+                && ImGui::MenuItem("Particle Emitter")) {
+                w.AddComponent<ParticleEmitterComponent>(e,
+                    ParticleEmitterComponent{});
             }
             ImGui::EndPopup();
         }
@@ -1502,6 +1509,61 @@ private:
         ImGui::Checkbox("Is Sensor",    &c->isSensor);
 
         if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+    }
+
+    void DrawInspectorParticleEmitter(Orange::Engine::Entity e)
+    {
+        using PEC = Orange::Engine::Render::ParticleEmitterComponent;
+        if (!mState.pWorld->HasComponent<PEC>(e)) { return; }
+        bool remove = false;
+        const bool open = ComponentHeader("Particle Emitter", &remove);
+        if (!open) {
+            if (remove) { mState.pWorld->RemoveComponent<PEC>(e); }
+            return;
+        }
+        auto* p = mState.pWorld->GetComponent<PEC>(e);
+        auto& d = p->desc;
+
+        ImGui::Checkbox("Emitting", &p->emitting);
+        ImGui::DragFloat("Emission Rate (/s)", &d.emissionRate, 0.5f, 0.0f, 0.0f);
+
+        ImGui::SeparatorText("Lifetime");
+        ImGui::DragFloat("Lifetime Min (s)", &d.lifetimeMin, 0.01f, 0.0f, 0.0f);
+        ImGui::DragFloat("Lifetime Max (s)", &d.lifetimeMax, 0.01f, 0.0f, 0.0f);
+
+        ImGui::SeparatorText("Spawn Offset (entity local)");
+        ImGui::DragFloat2("Offset Min", &d.spawnOffsetMin.x, 0.01f);
+        ImGui::DragFloat2("Offset Max", &d.spawnOffsetMax.x, 0.01f);
+
+        ImGui::SeparatorText("Initial Velocity (m/s, worldspace)");
+        ImGui::DragFloat2("Velocity Min", &d.initialVelocityMin.x, 0.05f);
+        ImGui::DragFloat2("Velocity Max", &d.initialVelocityMax.x, 0.05f);
+
+        ImGui::SeparatorText("Forces");
+        ImGui::DragFloat2("Gravity (m/s²)", &d.gravity.x, 0.05f);
+
+        ImGui::SeparatorText("Color curve (linear lerp start→end by age01)");
+        // 颜色 RGB + alpha 分开 —— alpha > 1 触发 bloom 拾取，需要 DragFloat
+        // 而非 ColorEdit 的 [0,1] clamp。所以 RGB 给 ColorEdit3，alpha 单独
+        // DragFloat。
+        ImGui::ColorEdit3("Color Start RGB", &d.colorStart.x);
+        ImGui::DragFloat("Color Start Alpha", &d.colorStart.w, 0.01f, 0.0f, 0.0f);
+        ImGui::ColorEdit3("Color End RGB",   &d.colorEnd.x);
+        ImGui::DragFloat("Color End Alpha",   &d.colorEnd.w,   0.01f, 0.0f, 0.0f);
+
+        ImGui::SeparatorText("Size curve");
+        ImGui::DragFloat("Size Start", &d.sizeStart, 0.005f, 0.0f, 0.0f);
+        ImGui::DragFloat("Size End",   &d.sizeEnd,   0.005f, 0.0f, 0.0f);
+
+        ImGui::SeparatorText("Pool");
+        int maxP = static_cast<int>(d.maxParticles);
+        if (ImGui::DragInt("Max Particles", &maxP, 1.0f, 0, 65536)) {
+            d.maxParticles = static_cast<std::uint32_t>(std::max(0, maxP));
+        }
+
+        ImGui::TextDisabled("(real-time preview pending Task 06-08 viewport)");
+
+        if (remove) { mState.pWorld->RemoveComponent<PEC>(e); }
     }
 
     void DrawInspectorAnimator(Orange::Engine::Entity e)

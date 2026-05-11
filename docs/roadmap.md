@@ -131,10 +131,18 @@
     - mesh handle / materialInstance 编辑（需 Asset 浏览器先做）→ Phase 6 后续
     - Inspector 多选编辑 → Phase 7+
 
-### Task 06-05 · 粒子编辑器子模式
+### Task 06-05 · 粒子编辑器子模式 ✅（参数编辑部分；实时预览跟 06-08 绑定）
 - 描述：可视化调整粒子发射器参数（emission rate / lifetime / velocity / curve），实时预览
 - 前置：06-04、Phase 5 VFX
 - Critical Path：否
+- **落地状态**（2026-05-11）：
+  - **In-scope（参数编辑）已完成**：
+    - 新增 `DrawInspectorParticleEmitter` 段，与其它 Inspector 段同 ComponentHeader 模式：emitting 开关 / emissionRate / lifetime 范围 / spawn offset 范围 / initial velocity 范围 / gravity / 颜色 start-end（RGB ColorEdit3 + Alpha 单独 DragFloat 因为 a>1 允许 bloom 拾取超出 [0,1]）/ size start-end / maxParticles（DragInt 转 uint32 + std::max clamp 0）
+    - "+ Add Component" 菜单加上 "Particle Emitter"（之前漏了，现在补）
+    - Inspector 段尾显式 TextDisabled "(real-time preview pending Task 06-08 viewport)" 说明 preview 状态
+  - **Out-of-scope（移交 06-08）**：
+    - 真实时预览 —— 需要 Scene 视口渲染（06-08）+ VfxSystem tick + 粒子 pass 接通；编辑器目前完全不渲染 3D，连静态 mesh 都画不出
+    - dedicated "粒子编辑器子模式"独立窗口 / 时间线 —— 当前参数编辑借 Inspector 段做覆盖了 task 描述里的 emission rate / lifetime / velocity / curve 四项，独立窗口算"美化"，留给 Phase 6 后续微调
 
 ### Task 06-06 · 材质编辑器子模式
 - 描述：MaterialTemplate 选择 + uniform 调参 + 纹理槽指派；保存为 `.material` 资源
