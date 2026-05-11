@@ -43,10 +43,18 @@
 #include <orange/engine/platform/Window.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/asset/AssetHandle.h>
+#include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/asset/ShaderAsset.h>
+#include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/MaterialInstance.h>
+#include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
@@ -56,6 +64,7 @@
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
+#include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
 #include <glm/gtc/quaternion.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
@@ -319,6 +328,32 @@ struct EditorState
     Orange::Engine::Entity transformEulerCacheEntity =
         Orange::Engine::Entity::Invalid();
     glm::vec3              transformEulerCache{0.0f, 0.0f, 0.0f};
+
+    // ---- 编辑器自管 AssetRegistry + MaterialSystem ----------------------
+    // Phase 6 / Task 06-08 S2：SeedDemoWorld 给 Floor / Wall 实体挂真 mesh
+    // + textured material，让 S4 接通 Scene 视口后立刻能看到几何。AssetRegistry
+    // 与 MaterialSystem 由编辑器持有所有权 —— 它们的生命周期必须长于任何
+    // 引用其中 mesh handle / material instance 的 World，因此放进 EditorState。
+    //
+    // 注意：场景 Save / Load（06-07）当前不串联 AssetRegistry，存盘的 scene
+    // JSON 里的 mesh / material 引用对应的是 *本次启动* 创建的内置 handle，
+    // 跨进程加载语义还需要后续 task 把 AssetRegistry 也参与序列化；S2 不
+    // 做这件事，新开场景 / load 老存档时 RenderableComponent 的 mesh 会
+    // 变成 Invalid（与 06-07 之前同语义），不引入新回归。
+    std::unique_ptr<Orange::Engine::Asset::AssetRegistry>   pAssets;
+    std::unique_ptr<Orange::Engine::Render::MaterialSystem> pMaterials;
+
+    // 内置 mesh handle —— SeedDemoWorld 给 Floor 用 plane / Wall 用 cube。
+    Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
+        cubeMeshHandle  {};
+    Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
+        planeMeshHandle {};
+
+    // SeedDemoWorld 用的 textured material 实例 —— Floor / Wall 各一个
+    // （地址要稳定供 RenderableComponent::materialInstance 持有），生命周期
+    // 跟着 EditorState 走。
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pFloorMaterial;
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pWallMaterial;
 };
 
 // ---- Hierarchy 维护工具 ------------------------------------------------
@@ -461,11 +496,130 @@ inline void DestroySubtree(World& world, Entity e)
 //       └── Wall
 //   Misc Sibling      （第二棵根，验证多根显示）
 //
-inline void SeedDemoWorld(Orange::Engine::World& world)
+// 内置 plane mesh（XZ 平面 4 顶点 / 2 三角形，朝上）—— SeedDemoWorld 给
+// Floor 实体用。halfSize = 2.5 → 边长 5。与 samples/07_full_pipeline 内同
+// 名 helper 字段顺序一致，方便比对。
+inline std::unique_ptr<Orange::Engine::Asset::MeshAsset>
+MakePlaneMesh(float halfSize)
+{
+    using ::Orange::Engine::Asset::MeshAsset;
+    using ::Orange::Engine::Asset::VertexPosition3;
+    using ::Orange::Engine::Asset::VertexUV2;
+
+    std::vector<VertexPosition3> positions = {
+        {-halfSize, 0.0f, -halfSize},
+        { halfSize, 0.0f, -halfSize},
+        { halfSize, 0.0f,  halfSize},
+        {-halfSize, 0.0f,  halfSize},
+    };
+    std::vector<VertexUV2> uvs = {
+        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+    };
+    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+    return std::make_unique<MeshAsset>(std::move(positions),
+                                       std::move(uvs),
+                                       std::move(indices));
+}
+
+// 内置 cube mesh（6 面 × 4 顶点，共 24 vertices / 12 triangles）。每面单独
+// 一组顶点是为了让 UV 在 face 边界不连续 —— textured material 在 face 间
+// 看起来才正常（共享 8 顶点的方案 UV 必然拉伸 / 接缝错位）。
+inline std::unique_ptr<Orange::Engine::Asset::MeshAsset>
+MakeCubeMesh(float halfSize)
+{
+    using ::Orange::Engine::Asset::MeshAsset;
+    using ::Orange::Engine::Asset::VertexPosition3;
+    using ::Orange::Engine::Asset::VertexUV2;
+
+    const float h = halfSize;
+    std::vector<VertexPosition3> positions;
+    std::vector<VertexUV2>       uvs;
+    std::vector<std::uint32_t>   indices;
+    positions.reserve(24);
+    uvs.reserve(24);
+    indices.reserve(36);
+
+    auto addFace = [&](VertexPosition3 a, VertexPosition3 b,
+                       VertexPosition3 c, VertexPosition3 d) {
+        const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
+        positions.push_back(a); positions.push_back(b);
+        positions.push_back(c); positions.push_back(d);
+        uvs.push_back({0.0f, 0.0f}); uvs.push_back({1.0f, 0.0f});
+        uvs.push_back({1.0f, 1.0f}); uvs.push_back({0.0f, 1.0f});
+        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 1);
+        indices.push_back(base + 0); indices.push_back(base + 3); indices.push_back(base + 2);
+    };
+
+    // +X / -X / +Y / -Y / +Z / -Z；winding 与既有 sample 的 plane 同顺
+    // （CCW 朝外），避免与 shadow caster / 主 pass 的 CullMode 假设打架。
+    addFace({ h,-h, h}, { h,-h,-h}, { h, h,-h}, { h, h, h});  // +X
+    addFace({-h,-h,-h}, {-h,-h, h}, {-h, h, h}, {-h, h,-h});  // -X
+    addFace({-h, h, h}, { h, h, h}, { h, h,-h}, {-h, h,-h});  // +Y (top)
+    addFace({-h,-h,-h}, { h,-h,-h}, { h,-h, h}, {-h,-h, h});  // -Y (bottom)
+    addFace({-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h});  // +Z
+    addFace({ h,-h,-h}, {-h,-h,-h}, {-h, h,-h}, { h, h,-h});  // -Z
+
+    return std::make_unique<MeshAsset>(std::move(positions),
+                                       std::move(uvs),
+                                       std::move(indices));
+}
+
+// 编辑器侧的"AssetRegistry / MaterialSystem 一次性建好"——main() 在
+// SeedDemoWorld 首次调用之前调一次。失败会让 SeedDemoWorld 仍能工作
+// （RenderableComponent 退化到无 mesh / nullptr material 状态），只是 Scene
+// 面板视口（S4）看不到几何 —— 编辑器本身仍正常运转。
+inline void InitializeEditorAssets(EditorState& state)
+{
+    using Orange::Engine::Asset::AssetRegistry;
+    using Orange::Engine::Asset::MeshAsset;
+    using Orange::Engine::Asset::ShaderAsset;
+    using Orange::Engine::Asset::ShaderLoader;
+    using Orange::Engine::Render::MaterialSystem;
+
+    state.pAssets = std::make_unique<AssetRegistry>();
+    if (auto reg = state.pAssets->RegisterLoader<ShaderAsset>(
+            std::make_unique<ShaderLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "[OrangeEditor] AssetRegistry::RegisterLoader<ShaderAsset> 失败 "
+                     "(code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+    }
+
+    if (auto h = state.pAssets->Insert<MeshAsset>("editor/cube", MakeCubeMesh(0.5f));
+        h.IsOk())
+    {
+        state.cubeMeshHandle = h.Value();
+    }
+    if (auto h = state.pAssets->Insert<MeshAsset>("editor/plane", MakePlaneMesh(2.5f));
+        h.IsOk())
+    {
+        state.planeMeshHandle = h.Value();
+    }
+
+    state.pMaterials = std::make_unique<MaterialSystem>(*state.pAssets);
+    if (auto rb = state.pMaterials->RegisterBuiltins(); rb.IsErr())
+    {
+        // 通常意味着 shaders/orange_engine/*.spv 不在 .exe 同目录 —— in-tree
+        // build 由 CMake 把 SPV 拷到 build/bin/$<CONFIG>/shaders/orange_engine/，
+        // standalone install 还没有官方流程时这里会报，但不阻止编辑器启动。
+        std::fprintf(stderr,
+                     "[OrangeEditor] MaterialSystem::RegisterBuiltins 失败 "
+                     "(code=%u) —— Scene 视口稍后可能不显示几何\n",
+                     static_cast<unsigned>(rb.Error()));
+    }
+
+    state.pFloorMaterial = state.pMaterials->CreateInstance("textured");
+    state.pWallMaterial  = state.pMaterials->CreateInstance("textured");
+}
+
+inline void SeedDemoWorld(EditorState& state)
 {
     using ::Orange::Engine::Entity;
     using ::Orange::Engine::Scene::NameComponent;
     using ::Orange::Engine::Scene::TransformComponent;
+    using ::Orange::Engine::Render::Camera;
     using ::Orange::Engine::Render::DirectionalLight;
     using ::Orange::Engine::Render::RenderableComponent;
     using ::Orange::Engine::Physics::BodyType;
@@ -473,6 +627,7 @@ inline void SeedDemoWorld(Orange::Engine::World& world)
     using ::Orange::Engine::Physics::BoxDesc;
     using ::Orange::Engine::Physics::RigidBodyComponent;
 
+    auto& world = *state.pWorld;
     auto make = [&](const char* name) {
         Entity e = world.CreateEntity();
         world.AddComponent<NameComponent>(e, NameComponent{name});
@@ -488,32 +643,71 @@ inline void SeedDemoWorld(Orange::Engine::World& world)
     Entity wall     = make("Wall");
     Entity misc     = make("Misc Sibling");
 
-    // 给 demo 实体挂代表性 component，让 Inspector 在不同选中下能展示
-    // 不同组件区块 —— 否则只有 Name / Transform / Hierarchy 三段永远在，
-    // 看不到 Renderable / RigidBody / Light 等的编辑控件长什么样。
-    world.AddComponent<DirectionalLight>(light, DirectionalLight{});
+    // Camera：透视投影 + lookAt 从前上方看向原点，让 Floor / Wall 都在视
+    // 野里。aspect 用 1:1（Scene 视口默认尺寸先按方形），S3 / S4 接通
+    // viewport resize 后由编辑器相机系统按实际尺寸覆盖 projection。
+    {
+        Camera cam = Camera::Perspective(glm::radians(50.0f),
+                                         /*aspect=*/1.0f,
+                                         /*zNear=*/0.1f,
+                                         /*zFar=*/100.0f);
+        cam.view = glm::lookAt(glm::vec3(3.0f, 2.5f, 5.0f),
+                               glm::vec3(0.0f, 0.5f, 0.0f),
+                               glm::vec3(0.0f, 1.0f, 0.0f));
+        world.AddComponent<Camera>(camera, cam);
+    }
 
-    RenderableComponent rcFloor{};  // mesh handle / materialInstance 留默认 Invalid / nullptr
-    rcFloor.visible     = true;
-    rcFloor.castsShadow = false;    // 地面通常不投自己阴影
-    world.AddComponent<RenderableComponent>(floor, rcFloor);
+    // Light：默认朝下方略偏前的方向 —— 让 Wall 在 Floor 上投出可见阴影。
+    {
+        DirectionalLight dl{};
+        // direction 字段语义随引擎默认（DirectionalLight 默认值是合理朝下）；
+        // S2 不重写，避免与 Inspector 编辑入口的默认值表现不一致。
+        world.AddComponent<DirectionalLight>(light, dl);
+    }
 
-    RigidBodyComponent rbFloor{};
-    rbFloor.type            = BodyType::Static;
-    rbFloor.fixedRotation   = true;
-    rbFloor.gravityScale    = 0.0f;
-    world.AddComponent<RigidBodyComponent>(floor, rbFloor);
+    // Floor：plane mesh + textured material；地面通常不投自己阴影。
+    {
+        // 调整 Floor transform：略下移让 cube 站在地面上（cube 中心在 y=0
+        // 时 -Y 面落在 y=-0.5；地面 y=-0.5 与 cube 底齐）。
+        auto* floorT = world.GetComponent<TransformComponent>(floor);
+        if (floorT != nullptr)
+        {
+            floorT->position.y = -0.5f;
+        }
+        RenderableComponent rcFloor{};
+        rcFloor.mesh             = state.planeMeshHandle;
+        rcFloor.materialInstance = state.pFloorMaterial.get();
+        rcFloor.visible          = true;
+        rcFloor.castsShadow      = false;
+        world.AddComponent<RenderableComponent>(floor, rcFloor);
 
-    ColliderComponent ccFloor{};
-    ccFloor.shape       = BoxDesc{glm::vec2{5.0f, 0.5f}};  // 半宽 / 半高
-    ccFloor.density     = 0.0f;
-    ccFloor.friction    = 0.5f;
-    world.AddComponent<ColliderComponent>(floor, ccFloor);
+        RigidBodyComponent rbFloor{};
+        rbFloor.type            = BodyType::Static;
+        rbFloor.fixedRotation   = true;
+        rbFloor.gravityScale    = 0.0f;
+        world.AddComponent<RigidBodyComponent>(floor, rbFloor);
 
-    RenderableComponent rcWall{};
-    rcWall.visible     = true;
-    rcWall.castsShadow = true;
-    world.AddComponent<RenderableComponent>(wall, rcWall);
+        ColliderComponent ccFloor{};
+        ccFloor.shape       = BoxDesc{glm::vec2{5.0f, 0.5f}};  // 半宽 / 半高
+        ccFloor.density     = 0.0f;
+        ccFloor.friction    = 0.5f;
+        world.AddComponent<ColliderComponent>(floor, ccFloor);
+    }
+
+    // Wall：cube mesh + textured material；偏左一点站在 Floor 上方。
+    {
+        auto* wallT = world.GetComponent<TransformComponent>(wall);
+        if (wallT != nullptr)
+        {
+            wallT->position = glm::vec3(-1.0f, 0.0f, 0.0f);  // cube 底面正好坐在 Floor 上
+        }
+        RenderableComponent rcWall{};
+        rcWall.mesh             = state.cubeMeshHandle;
+        rcWall.materialInstance = state.pWallMaterial.get();
+        rcWall.visible          = true;
+        rcWall.castsShadow      = true;
+        world.AddComponent<RenderableComponent>(wall, rcWall);
+    }
 
     EditorHierarchy::LinkAsLastChild(world, root,     camera);
     EditorHierarchy::LinkAsLastChild(world, root,     light);
@@ -821,7 +1015,7 @@ private:
         switch (op) {
             case SceneOp::New: {
                 mState.pWorld = std::make_unique<Orange::Engine::World>();
-                SeedDemoWorld(*mState.pWorld);  // 与启动期一致；后续真要"空场景"再做"New Empty"
+                SeedDemoWorld(mState);  // 与启动期一致；后续真要"空场景"再做"New Empty"
                 mState.currentScenePath.clear();
                 ResetEntityLocalState();
                 std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
@@ -1852,9 +2046,14 @@ int main()
     // Misc Sibling）让 Entity Tree / Inspector 立刻有东西可看。File →
     // New 会重新执行同样的 seed —— 真要"空场景"等后续 task 加 "New Empty"
     // 入口再分。
+    //
+    // 资产初始化必须发生在 SeedDemoWorld 之前 —— 否则 Floor / Wall 的
+    // RenderableComponent.mesh 会拿到 Invalid handle，Scene 视口（S4）
+    // 接通后就什么都画不出来。
     EditorState editorState;
     editorState.pWorld = std::make_unique<Orange::Engine::World>();
-    SeedDemoWorld(*editorState.pWorld);
+    InitializeEditorAssets(editorState);
+    SeedDemoWorld(editorState);
 
     // ---- Layer 注入 -----------------------------------------------------
     host->PushLayer(std::make_unique<EditorRenderLayer>(*host, *pRenderer,
