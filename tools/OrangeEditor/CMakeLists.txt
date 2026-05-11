@@ -133,7 +133,11 @@ endif ()
 # OrangeEditor exe
 # ---------------------------------------------------------------------------
 
-add_executable(OrangeEditor main.cpp)
+add_executable(OrangeEditor
+    main.cpp
+    EditorHierarchy.cpp
+    VulkanLoaderShim.cpp
+)
 # OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
 # link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。
 target_link_libraries(OrangeEditor PRIVATE

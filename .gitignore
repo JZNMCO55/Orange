@@ -16,3 +16,6 @@ install/
 # the sub-repo's own .gitignore, so we don't repeat them here.
 memory/
 screenshots/
+
+# ImGui 运行时 dock layout 状态文件（编辑器 / sample 在 cwd 落盘）
+imgui.ini
