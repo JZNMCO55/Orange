@@ -1,24 +1,30 @@
-// OrangeEditor —— Phase 6 / Task 06-02：ImGui dock space + multi-viewport。
+// OrangeEditor —— ImGui dock space + multi-viewport 起步骨架。
 //
-// 架构选择（Task 06-02 范围内）：
+// 架构选择：
 //   * AppHost / LayerStack —— 来自 OrangeEngine，提供窗口 + 事件分发 +
 //     主循环
 //   * RenderDevice + IRenderer —— 编辑器自管，**不**用 engine Pipeline。
 //     原因：编辑器当前只渲染 ImGui，不渲染 3D scene；engine Pipeline 是
 //     给 game 渲染场景用的，强行套上反而要做"自定义 RenderPass 注入 +
-//     overlay 回调"两层中转。等 Task 06-04（组件检视器需要 scene viewport
-//     预览）时再桥接 Pipeline → off-screen RT → ImGui::Image
+//     overlay 回调"两层中转。后续若组件检视器需要 scene viewport 预览，
+//     再桥接 Pipeline → off-screen RT → ImGui::Image
 //   * ImGui Vulkan / GLFW backend —— vendored via FetchContent (docking
-//     branch v1.91.5)；通过 OrangeRender 新交付的 Interop opt-in 头
-//     (FEATURE-2026-05-09-vulkan-interop-handles) 拿 raw Vulkan handle 喂
-//     ImGui_ImplVulkan_InitInfo
+//     branch v1.91.5)
+//   * Vulkan loader 路径统一 —— ImGui 静态库以 IMGUI_IMPL_VULKAN_NO_PROTOTYPES
+//     编译，启动期通过 `Interop::GetVulkanGetInstanceProcAddr()` 取
+//     OrangeRender 内 volk 已加载的 loader fn 喂给 ImGui_ImplVulkan_LoadFunctions；
+//     编辑器自身需要的 vk* 解析（descriptor pool 创建 / 销毁）也走这条
+//     loader。原因详见 OrangeRender `docs/api_guide.md §6.8.1` 与
+//     FEATURE-2026-05-10-vulkan-loader-export 的 CHANGELOG 条目。所有
+//     Vulkan handle 仍由 `Interop::GetVulkanDeviceHandles` /
+//     `Interop::GetVulkanSwapchainInfo` 提供
 //   * 多视口（窗口可拖拽悬停成独立 native window）—— 启用 ImGuiConfigFlags
 //     _DockingEnable + ViewportsEnable；ImGui 自带的 multi-viewport
 //     platform / renderer interface 接管额外 viewport 的窗口 / swapchain
 //     创建 + 渲染
 //
 // 当前 UI 内容：dock space + ImGui demo window + 一个"about OrangeEditor"
-// 小窗口。Task 06-03 起填实体树 / 检视器 / 资源浏览器 / 控制台。
+// 小窗口。后续迭代填实体树 / 检视器 / 资源浏览器 / 控制台。
 
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
@@ -51,13 +57,26 @@ namespace
 
 constexpr std::int32_t kEscapeKeyRaw = 256;  // GLFW_KEY_ESCAPE，与 Input::KeyCode::Escape 同值
 
-// ImGui 把 ImGui_ImplVulkan_LoaderFunc 用作 vkGet*Addr 的解析入口；不喂
-// 它就 panic。我们没用 volk，直接走 vulkan-1.lib 静态符号。提供一个
-// 简单 loader 转发到 vkGetInstanceProcAddr。
+// ImGui 在 NO_PROTOTYPES 编译下不再 extern 引用 vulkan-1.lib 的静态 vkXxx
+// 符号，启动期通过 `ImGui_ImplVulkan_LoadFunctions(loader, userData)` 让
+// loader 把它内部需要的 ~30 个 vk 函数指针逐个 resolve 出来。loader 必须
+// 拿"真 VkInstance"才能解析 instance/device 级函数（passing NULL 仅对
+// 4 个 global 函数有保证）。打包 (pfn, instance) 为 user_data。
+//
+// pfn 取自 `Interop::GetVulkanGetInstanceProcAddr()`——OrangeRender 内
+// volk 已加载的 loader entry；VkInstance 取自 `Interop::GetVulkanDeviceHandles`。
+// 这样 ImGui 与 OrangeRender 共用同一个 loader 解析路径，避免两条独立路径
+// 让 instance dispatch 状态错位。
+struct ImguiVulkanLoaderCtx
+{
+    PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr;
+    VkInstance                vkInstance;
+};
+
 PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData)
 {
-    auto* instance = reinterpret_cast<VkInstance>(userData);
-    return vkGetInstanceProcAddr(instance, funcName);
+    const auto* ctx = static_cast<const ImguiVulkanLoaderCtx*>(userData);
+    return ctx->pfnGetInstanceProcAddr(ctx->vkInstance, funcName);
 }
 
 // 编辑器侧需要在每帧 BeginFrame 之前调 ImGui::NewFrame 等。把这件事
@@ -182,24 +201,27 @@ private:
     VkDevice                      mDevice;
 };
 
-VkDescriptorPool MakeImguiDescriptorPool(VkInstance instance, VkDevice device)
+// 创建 ImGui Vulkan backend 用的 descriptor pool。
+//
+// 通过 OrangeRender 暴露的 loader fn (`Interop::GetVulkanGetInstanceProcAddr`)
+// 级联解 `vkGetDeviceProcAddr` → `vkCreateDescriptorPool`，与 ImGui 共用同
+// 一条 loader 解析路径；不再调静态 vulkan-1.lib stub 的 `vkGetInstanceProcAddr`。
+VkDescriptorPool MakeImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr,
+                                          VkInstance               instance,
+                                          VkDevice                 device)
 {
-    // 通过 loader 解析 vkCreateDescriptorPool —— 编辑器 exe 不直接 link
-    // vulkan-1.lib（避免与 OrangeRender 内部 volk loader 路径冲突），
-    // 也就拿不到静态 dispatch stub；走 vkGetDeviceProcAddr 拿 device-
-    // specific function pointer 是最干净的路径。
     auto vkGetDeviceProcAddrFn =
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
-            vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
+            pfnGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
     if (vkGetDeviceProcAddrFn == nullptr) {
-        std::fprintf(stderr, "[OrangeEditor] vkGetInstanceProcAddr(vkGetDeviceProcAddr) failed\n");
+        std::fprintf(stderr, "[OrangeEditor] resolve vkGetDeviceProcAddr failed\n");
         return VK_NULL_HANDLE;
     }
     auto vkCreateDescriptorPoolFn =
         reinterpret_cast<PFN_vkCreateDescriptorPool>(
             vkGetDeviceProcAddrFn(device, "vkCreateDescriptorPool"));
     if (vkCreateDescriptorPoolFn == nullptr) {
-        std::fprintf(stderr, "[OrangeEditor] vkGetDeviceProcAddr(vkCreateDescriptorPool) failed\n");
+        std::fprintf(stderr, "[OrangeEditor] resolve vkCreateDescriptorPool failed\n");
         return VK_NULL_HANDLE;
     }
 
@@ -219,14 +241,16 @@ VkDescriptorPool MakeImguiDescriptorPool(VkInstance instance, VkDevice device)
     return pool;
 }
 
-// 与 MakeImguiDescriptorPool 同模式 —— 走 loader 拿 vkDestroyDescriptorPool
-// fn ptr 用于关停期清理。
-void DestroyImguiDescriptorPool(VkInstance instance, VkDevice device, VkDescriptorPool pool)
+// 对应 MakeImguiDescriptorPool 的关停期清理；同样走 OrangeRender 的 loader。
+void DestroyImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr,
+                                 VkInstance               instance,
+                                 VkDevice                 device,
+                                 VkDescriptorPool         pool)
 {
     if (pool == VK_NULL_HANDLE) { return; }
     auto vkGetDeviceProcAddrFn =
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
-            vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
+            pfnGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
     if (vkGetDeviceProcAddrFn == nullptr) { return; }
     auto vkDestroyDescriptorPoolFn =
         reinterpret_cast<PFN_vkDestroyDescriptorPool>(
@@ -276,8 +300,20 @@ int main()
         return 1;
     }
 
-    // ---- 取 OrangeRender 透出的 Vulkan handle（FEATURE-2026-05-09）-----
+    // ---- 取 OrangeRender 透出的 Vulkan handle + loader fn ---------------
+    // handles 来自 FEATURE-2026-05-09；loader fn 来自 FEATURE-2026-05-10。
+    // loader fn 是 OrangeRender 内 volk 已加载的 vkGetInstanceProcAddr，
+    // 编辑器 ImGui + descriptor pool 创建全部走这一份 loader，与 OrangeRender
+    // 共用 instance dispatch 状态。
     const auto handles = Orange::Renderer::Interop::GetVulkanDeviceHandles(*pRenderDevice);
+    auto pfnGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        Orange::Renderer::Interop::GetVulkanGetInstanceProcAddr());
+    if (pfnGetInstanceProcAddr == nullptr) {
+        std::fprintf(stderr,
+                     "[OrangeEditor] Interop::GetVulkanGetInstanceProcAddr 返回 null —— "
+                     "非 Vulkan 后端或 RenderDevice 尚未 Initialize\n");
+        return 1;
+    }
     // 跑一帧让 swap-chain ready，再取 swap-chain info（min/count + format）
     {
         Orange::Renderer::FrameTimeInfo dummy{};
@@ -328,11 +364,18 @@ int main()
         return 1;
     }
 
-    // ImGui Vulkan backend —— v1.91.5-docking 的 LoadFunctions 签名是
-    // (loader_fn, user_data)，不带 api_version 参数。
-    ImGui_ImplVulkan_LoadFunctions(&ImguiVulkanLoader, vkInstance);
+    // ImGui Vulkan backend —— ImGui 在 NO_PROTOTYPES 下需要先用 LoadFunctions
+    // 把内部 ~30 个 vkXxx 指针逐个 resolve；user_data 必须同时携带 loader fn
+    // 与一个真 VkInstance，否则 instance/device 级函数无法解析。LoadFunctions
+    // 仅在调用期间读 user_data，本地栈对象生命周期足够。
+    ImguiVulkanLoaderCtx loaderCtx{pfnGetInstanceProcAddr, vkInstance};
+    if (!ImGui_ImplVulkan_LoadFunctions(&ImguiVulkanLoader, &loaderCtx)) {
+        std::fprintf(stderr, "[OrangeEditor] ImGui_ImplVulkan_LoadFunctions failed\n");
+        return 1;
+    }
 
-    VkDescriptorPool imguiDescPool = MakeImguiDescriptorPool(vkInstance, vkDevice);
+    VkDescriptorPool imguiDescPool =
+        MakeImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice);
     if (imguiDescPool == VK_NULL_HANDLE) { return 1; }
 
     ImGui_ImplVulkan_InitInfo vkInfo{};
@@ -352,7 +395,7 @@ int main()
     vkInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFmt;
     if (!ImGui_ImplVulkan_Init(&vkInfo)) {
         std::fprintf(stderr, "[OrangeEditor] ImGui_ImplVulkan_Init failed\n");
-        DestroyImguiDescriptorPool(vkInstance, vkDevice, imguiDescPool);
+        DestroyImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice, imguiDescPool);
         return 1;
     }
 
@@ -372,7 +415,7 @@ int main()
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    DestroyImguiDescriptorPool(vkInstance, vkDevice, imguiDescPool);
+    DestroyImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice, imguiDescPool);
     pRenderer->Shutdown();
     pRenderer.reset();
     pRenderDevice.reset();

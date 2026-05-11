@@ -3,35 +3,29 @@
 OrangeEngine 的关卡 / 粒子 / 材质编辑器，目标是把 game content 生产从
 "程序员手写 JSON" 过渡到"美术 / 关卡设计师交互式编辑"。
 
-**当前状态（Phase 6 / Task 06-02 进行中）**：v0.0.2 scaffold + ImGui + Vulkan
-集成 + multi-viewport 编排已就位（编译干净 + Vulkan 设备/swap-chain 全
-部就绪），但**运行时阻塞**在编辑器自己的 Vulkan loader stub 与 OrangeRender
-内部 volk-loaded loader 路径冲突 —— 编辑器拿到 OrangeRender 的 VkInstance
-后，调编辑器侧 vulkan-1.lib 静态 stub 的 `vkGetInstanceProcAddr` 会
-access violation（两个 loader 实例不共享 instance handle 的 dispatch 表）。
+**当前状态**：v0.0.2 scaffold + ImGui + Vulkan 集成 + multi-viewport 编排
+已就位。Vulkan loader 路径统一已落地——ImGui 静态库以 `IMGUI_IMPL_VULKAN_NO_PROTOTYPES`
+编译，启动期通过 `Interop::GetVulkanGetInstanceProcAddr()`（OrangeRender
+`FEATURE-2026-05-10-vulkan-loader-export`）取 volk 已加载的 loader fn 喂
+给 `ImGui_ImplVulkan_LoadFunctions`；descriptor pool 创建 / 销毁也走同一
+loader，与 OrangeRender 共用 instance dispatch 状态。
 
-**下一步路径**（next session）：在 OrangeRender 加一个 `Interop::GetVulkan
-GetInstanceProcAddr() → void*` helper（3 行实现），让编辑器全部 vk\* 解
-析都走 OrangeRender 的同一个 volk loader。编辑器不再链 vulkan-1.lib 的
-任何静态符号（IMGUI_IMPL_VULKAN_NO_PROTOTYPES + 用 OrangeRender 提供的
-loader 喂 ImGui_ImplVulkan_LoadFunctions）。
-
-**已就绪**（不需要再动）：
+**已就绪**：
 - `tools/OrangeEditor/CMakeLists.txt`：FetchContent ImGui v1.91.5-docking
-  + 静态 lib + impl_glfw + impl_vulkan + Vulkan/GLFW 链接
+  + 静态 lib + impl_glfw + impl_vulkan，`IMGUI_IMPL_VULKAN_NO_PROTOTYPES`
+  + Vulkan/GLFW 链接
 - `tools/OrangeEditor/main.cpp`：完整 ImGui 初始化骨架（ImGui::CreateContext
   → DockingEnable + ViewportsEnable → ImGui_ImplGlfw_InitForVulkan →
-  ImGui_ImplVulkan_LoadFunctions → MakeImguiDescriptorPool → ImGui_ImplVulkan
-  _Init），EditorRenderLayer 内 NewFrame → DockSpace + Demo + About →
-  Render → engine BeginFrame/EndFrame（overlay callback 内 ImGui_ImplVulkan
-  _RenderDrawData）→ 多视口 UpdatePlatformWindows + RenderPlatformWindowsDefault
-- `editor_build_smoke` ctest：build 链 100% 干净（FetchContent 拉 ImGui →
+  ImGui_ImplVulkan_LoadFunctions(loader, &ctx) → MakeImguiDescriptorPool →
+  ImGui_ImplVulkan_Init），EditorRenderLayer 内 NewFrame → DockSpace + Demo
+  + About → Render → engine BeginFrame/EndFrame（overlay callback 内
+  ImGui_ImplVulkan_RenderDrawData）→ 多视口 UpdatePlatformWindows +
+  RenderPlatformWindowsDefault
+- `editor_build_smoke` ctest：build 链干净（FetchContent 拉 ImGui →
   编译 ImGui 静态库 → 链编辑器 exe）
 
-**没就绪**（需要 next session 解决）：
-- 运行时 vk loader 冲突 → 需要 OrangeRender 加 GetVulkanGetInstanceProcAddr
-- 编辑器侧切到 IMGUI_IMPL_VULKAN_NO_PROTOTYPES + 走 OrangeRender 的 loader
-- 视觉验证：实际看到 ImGui demo window + dock + 拖出主窗口成 native window
+**待视觉验证**：实际看到 ImGui demo window + dock + 拖出主窗口成 native
+window。CI 无 GPU + display，需要本地手跑。
 
 ## 架构约束
 

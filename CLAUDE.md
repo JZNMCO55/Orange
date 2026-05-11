@@ -169,6 +169,8 @@ These are not suggestions. Violating them is treated as an architectural bug.
 
 ### OrangeRender public API discipline
 - The renderer is consumed via its public API (`Orange::Rhi::*` and the `OrangeRender::orange_render` target). Do not reach into `vendor/OrangeRender/src/` from this repo. If OrangeRender lacks something you need, file an issue / patch in the OrangeRender repo, not a workaround here.
+- **绝对不允许在同一个 session 内既向 OrangeRender 提 feature、又在本仓库消费 / 处理该 feature。** 提 feature（在 OrangeRender 仓库新增需求、改动其公共 API、bump 其版本以引入新能力）和在 OrangeEngine 这一侧基于该 feature 写代码，必须拆成两个独立的 session：先在一个 session 把 OrangeRender 的改动落地、合并、tag/commit 固化；再在新的 session 里 bump `vendor/OrangeRender` 并消费。原因：同 session 双向操作会把"渲染器还没真正稳定的 API"当成既成事实写进引擎，下游一旦回退就会留下半成品；并且容易绕过 OrangeRender 自己的 review / wiki / 版本纪律。遇到"engine 这边发现 OrangeRender 缺东西"的情况，本 session 的正确动作是：停下当前 engine 任务，仅把需求记录下来（commit message / issue / 临时笔记），结束本 session，下次开新 session 再处理。
+- **需求 / bug 提交入口**：发现 OrangeRender 缺能力 → 追加到 `vendor/OrangeRender/docs/incoming_feature.md`；发现 OrangeRender bug → 追加到 `vendor/OrangeRender/docs/incoming_bugs.md`。条目命名约定 `## FEATURE-<日期>-<slug>` / `## BUG-<日期>-<slug>`，便于后续 commit / PR title 引用。OrangeRender 维护者按其仓内 `CLAUDE.md` 的"外部需求 / Bug 处理工作流"评审 + 拆解 + 落地 + 归档，整个评审过程会就地在该条目内留痕；OrangeEngine 这边 **不要**直接编辑别人写的评审记录，也不要在落地前抢先 bump vendor。需求落地 + tag 后，OrangeEngine 在新 session 里 bump `vendor/OrangeRender` 指针并开始消费。
 
 ## Knowledge base: Orange-Wiki
 

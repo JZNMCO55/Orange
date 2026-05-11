@@ -66,9 +66,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(imgui)
 
 # ImGui 仓没自带 CMakeLists，手工把 core + impl_glfw + impl_vulkan 编成
-# 一个静态 lib。加 IMGUI_IMPL_VULKAN_USE_VOLK=0 让 impl_vulkan 直接用
-# vulkan-1.lib 的符号（OrangeRender 内部用 volk 但其符号是 PRIVATE，
-# 编辑器拿不到；自己直接 link vulkan-1.lib 最干净）。
+# 一个静态 lib。
+#
+# 关键编译宏 IMGUI_IMPL_VULKAN_NO_PROTOTYPES：让 impl_vulkan 不再 extern
+# 引用 vulkan-1.lib 的静态 vkXxx 符号，转为模块内函数指针变量；启动期
+# `ImGui_ImplVulkan_LoadFunctions` 通过一个 loader callback 把所有 vkXxx
+# 解析到运行时函数指针。这样 ImGui 跟 OrangeRender 共用同一个 volk loader
+# 解析路径，避免"消费者侧静态 vulkan-1.lib stub 与 OrangeRender 内部 volk
+# 已加载的 loader entry 是两条独立解析路径"的 dispatch 状态错位。
+# 配套的 loader callback + Interop::GetVulkanGetInstanceProcAddr() 在
+# main.cpp 内串起来。
 add_library(orange_editor_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp"
     "${imgui_SOURCE_DIR}/imgui_demo.cpp"
@@ -82,6 +89,15 @@ target_include_directories(orange_editor_imgui PUBLIC
     "${imgui_SOURCE_DIR}"
     "${imgui_SOURCE_DIR}/backends"
 )
+# PRIVATE 即可——头文件 imgui_impl_vulkan.h 不会因为消费者侧没定义
+# NO_PROTOTYPES 而 ABI 漂移（仅 struct 定义 + 函数声明，不含 inline 调
+# 用 vkXxx 的代码）。把宏放 PRIVATE 让 main.cpp 仍能 include vulkan.h
+# 拿到 PFN_* / Vk* 类型，但不会再链 vulkan-1.lib 的 vkXxx 静态 stub。
+target_compile_definitions(orange_editor_imgui PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
+# Vulkan::Vulkan 提供 vulkan.h 的 include path；vulkan-1.lib 的链接在
+# NO_PROTOTYPES 下不再被 ImGui TU 引用（主 exe 也不直接调 vk*，全部走
+# Interop::GetVulkanGetInstanceProcAddr() 解析出的运行时指针），剩下的
+# 静态链是无害死重，留着以免破坏 include path 的传递。
 target_link_libraries(orange_editor_imgui PUBLIC Vulkan::Vulkan)
 # ImGui core 本身不需要 OrangeEngine —— 只 impl_glfw 需要 GLFW headers。
 # GLFW 是 OrangeRender 的 PRIVATE 依赖；编辑器自己也开窗（AppHost 内
