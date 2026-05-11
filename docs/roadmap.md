@@ -60,11 +60,40 @@
     - 编辑器侧日志系统（接 Core::Log，目前 Console 面板只显示帧统计）→ Phase 6 后续
     - 多窗口布局保存 / 加载多个 layout preset → Phase 6 后续
 
-### Task 06-03 · 实体树视图
+### Task 06-03 · 实体树视图 ✅
 - 描述：可视化 ECS World，支持 select / 重命名 / 删除 / 拖拽改父子关系
 - 前置：06-02
 - 实现要点：通过 `World::GetNativeRegistry()` 直通访问 EnTT；不引入新公共 API
 - Critical Path：是
+- **落地状态**（2026-05-11）：
+  - **Existing**（全部在 `tools/OrangeEditor/main.cpp` 内，不进引擎 include/）：
+    - `EditorState` 跨面板共享结构：`pWorld` / `selectedEntity` / 内联重命名状态（`renamingEntity` + `renameBuffer` + `renameJustStarted`）/ 帧末 pending 结构性操作（`pendingDelete` + `pendingReparent`）。layer 持引用，main 拥有实例
+    - `EditorHierarchy` namespace 工具集 —— 编辑器侧 hierarchy 维护，引擎 `HierarchyComponent` 是裸数据（parent + 双向 sibling chain），刻意不提供 reparent / link / unlink helper（task 描述明确"不引入新公共 API"），所以这一层放在编辑器本地：
+      - `LinkAsLastChild` —— 挂到 parent 子链末尾
+      - `Detach` —— 从父子链上摘下（保留自身子树），变 root
+      - `IsAncestorOf` —— DnD 防环用
+      - `ReparentTo` —— Detach + LinkAsLastChild 组合
+      - `DestroySubtree` —— 收集 children 快照（不能边遍历边 destroy）+ 递归销毁
+    - `SeedDemoWorld` 启动期种 7 个实体两棵根（Root → Camera/Light/Geometry → Floor/Wall + Misc Sibling），Task 06-07 接真实场景加载后退化为占位 fallback
+    - `DrawEntityTreePanel` 真实实现：`reg.view<entt::entity>()` 找 root（EnTT 3.13 已删 `registry.each`，跟引擎序列化层一致用 view 形式遍历），递归 `DrawEntityNodeRecursive`；面板底空白区当 "drop here to unparent" drop target；帧末统一 apply pendingDelete / pendingReparent
+    - `DrawEntityNodeRecursive` 单节点：`TreeNodeEx` + OpenOnArrow / OpenOnDoubleClick / SpanAvailWidth / DefaultOpen / AllowOverlap；选中点击 → 写 `selectedEntity`；双击 entry-body → `BeginRename`；自身既是 DnD source 也是 target，payload 类型 `"ORANGE_EDITOR_ENTITY"` 携带 `Entity` 值
+    - 内联重命名：rename 期间 TreeNode label 给空串、SameLine 一个 `InputText` 接管 label 区域；首帧 `SetKeyboardFocusHere` 抢焦点；`EnterReturnsTrue` 区分 Enter（commit）/ 失焦（cancel via `IsItemDeactivated`）
+    - 全局快捷键：Entity Tree panel focused 且未在 rename 中时，`F2` → BeginRename(selected)、`Del` → mark pendingDelete
+    - DnD 防御：`src != dst` + `!IsAncestorOf(src, dst)`（自挂自 / 挂进自己子树 → 拒）
+    - `DrawInspectorPanel` 顺手升级为读 `selectedEntity` —— 显示 `Entity #N` + name（Task 06-04 才真做组件检视，本 task 仅作"选中态在 UI 上可见"的反馈）
+  - **验证**：
+    - `cmake --build build --config Debug --target OrangeEditor` 干净
+    - 手动跑 `build/bin/Debug/OrangeEditor.exe`：
+      - 默认看到 Root（展开 Camera / Light / Geometry（展开 Floor / Wall））和 Misc Sibling 两棵根
+      - 点击节点 → Inspector 显示对应 entity id + name
+      - F2 / 双击 → 内联 InputText 抢焦，输入新名 Enter 提交；Esc 取消
+      - Del → 整子树销毁，selected 清空
+      - 拖一个节点到另一节点 → reparent；拖到面板底空白 → 提到 root；自挂自 / 挂进自己子树 → 静默拒绝
+  - **Out-of-scope（移交后续 task）**：
+    - 组件检视器真实组件编辑（Transform / Renderable / RigidBody 等）→ 06-04
+    - 多选 / Shift / Ctrl 多选 → Phase 6 后续
+    - Undo / Redo → Phase 7 才考虑
+    - Entity 排序稳定性（EnTT view 遍历顺序非创建顺序，同根实体两帧间可能换位）→ 真需要时加 SortIndex 组件
 
 ### Task 06-04 · 组件检视器
 - 描述：选中实体后展示其全部 component，提供 `Transform` / `Renderable` / `RigidBody` / `Collider` / `Animator` 等内置组件的可视化编辑控件

@@ -35,6 +35,11 @@
 #include <orange/engine/app/Layer.h>
 #include <orange/engine/platform/Window.h>
 #include <orange/engine/platform/WindowEvent.h>
+#include <orange/engine/scene/Entity.h>
+#include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/World.h>
 
 #include <orange/renderer/RenderDevice.h>
 #include <orange/renderer/Renderer.h>
@@ -51,10 +56,13 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -146,6 +154,214 @@ PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData)
     return ctx->pfnGetInstanceProcAddr(ctx->vkInstance, funcName);
 }
 
+// EditorState —— 跨面板共享的编辑器状态：world 引用、当前选中实体。
+//
+// 持有指针 / 引用而非值，理由：
+//   * World 体量比较大（包 entt::registry），按值带容易拖累 EditorRenderLayer
+//     的构造期；
+//   * main 拥有 world，layer 析构后 world 还要存活（关停时 world 先于
+//     ImGui shutdown 安全析构）；
+//   * 多个面板（Entity Tree / Inspector / Scene viewport）将读写同一份
+//     selectedEntity —— 引用传递天然让所有面板看到同一份状态。
+//
+// 后续 task 加 rename buffer / clipboard / undo stack 等 UI-side 状态时，
+// 全部往这个结构里追加；不应进 engine 公共 API。
+struct EditorState
+{
+    Orange::Engine::World* pWorld         = nullptr;
+    Orange::Engine::Entity selectedEntity = Orange::Engine::Entity::Invalid();
+
+    // 内联重命名状态：renamingEntity 标记当前正在重命名哪个 entity，
+    // renameBuffer 是 InputText 编辑缓冲。renameJustStarted 让首帧自动
+    // 抢键盘焦点（SetKeyboardFocusHere），之后归 false 让用户能正常点击
+    // 撤销编辑。
+    Orange::Engine::Entity renamingEntity    = Orange::Engine::Entity::Invalid();
+    char                   renameBuffer[256] = {};
+    bool                   renameJustStarted = false;
+
+    // 树状结构上的破坏性操作（destroy / reparent）不能在递归 draw 中即
+    // 时执行 —— 会破坏当前遍历的 sibling 链。先在面板里记下"本帧应执行
+    // 什么"，draw 结束后统一 apply。
+    Orange::Engine::Entity pendingDelete = Orange::Engine::Entity::Invalid();
+    struct PendingReparent
+    {
+        Orange::Engine::Entity child;
+        Orange::Engine::Entity newParent;  // Invalid 表示提到 root
+        bool                   valid = false;
+    } pendingReparent;
+};
+
+// ---- Hierarchy 维护工具 ------------------------------------------------
+//
+// 引擎层 HierarchyComponent 是裸数据（parent + 双向 sibling chain），刻
+// 意不提供 reparent / link / unlink helper —— 那些是"图操作"语义，引擎
+// 自己只有序列化等数据流场景，运行时父子关系变动是编辑器才有的需求。
+// 这一组函数放在编辑器本地（不进引擎 include/），Task 06-03 描述里明确
+// 说"不引入新公共 API"。
+//
+// 同时该组也是后续 Task 06-07 场景加载后编辑器侧能"鼠标拖拽 reparent"
+// 的底座。Task 06-03 步骤 (a)~(c) 阶段先实现 LinkAsLastChild —— 种子实
+// 体需要它；步骤 (f) 真做 DnD 时再补 Detach + ReparentTo。
+
+namespace EditorHierarchy
+{
+
+using ::Orange::Engine::Entity;
+using ::Orange::Engine::World;
+using HC = ::Orange::Engine::Scene::HierarchyComponent;
+
+inline HC& GetOrAdd(World& world, Entity e)
+{
+    if (auto* p = world.GetComponent<HC>(e)) { return *p; }
+    return world.AddComponent<HC>(e, HC{});
+}
+
+// 把 child 挂到 parent 的子链末尾。child 进入时假定为 detached（parent
+// 为 Invalid）。种子构造期顺序调用即可保证；运行时调用前先 Detach。
+inline void LinkAsLastChild(World& world, Entity parent, Entity child)
+{
+    HC& pc = GetOrAdd(world, parent);
+    HC& cc = GetOrAdd(world, child);
+    cc.parent = parent;
+    if (!pc.firstChild.IsValid()) {
+        pc.firstChild = child;
+        return;
+    }
+    // 走到尾兄弟
+    Entity cur = pc.firstChild;
+    while (true) {
+        HC* h = world.GetComponent<HC>(cur);
+        if (h == nullptr || !h->nextSibling.IsValid()) { break; }
+        cur = h->nextSibling;
+    }
+    HC* tail = world.GetComponent<HC>(cur);
+    tail->nextSibling = child;
+    cc.prevSibling    = cur;
+}
+
+// 把实体从其父亲的子链上摘下来，使其变为 root。不销毁实体本身、不动
+// firstChild —— 整个子树仍然挂在该实体下，只是它从父链脱离。
+inline void Detach(World& world, Entity e)
+{
+    HC* h = world.GetComponent<HC>(e);
+    if (h == nullptr) { return; }
+    if (!h->parent.IsValid()) { return; }  // 已经是 root
+
+    Entity parent = h->parent;
+    Entity prev   = h->prevSibling;
+    Entity next   = h->nextSibling;
+
+    // 修兄弟链
+    if (prev.IsValid()) {
+        if (HC* ph = world.GetComponent<HC>(prev)) { ph->nextSibling = next; }
+    } else {
+        // 自己是 firstChild —— 让父亲的 firstChild 指向 next
+        if (HC* pp = world.GetComponent<HC>(parent)) { pp->firstChild = next; }
+    }
+    if (next.IsValid()) {
+        if (HC* nh = world.GetComponent<HC>(next)) { nh->prevSibling = prev; }
+    }
+
+    h->parent      = Entity::Invalid();
+    h->prevSibling = Entity::Invalid();
+    h->nextSibling = Entity::Invalid();
+}
+
+// `ancestor` 是不是 `descendant` 的祖先（含本身）。DnD 防环用。
+inline bool IsAncestorOf(World& world, Entity ancestor, Entity descendant)
+{
+    if (!ancestor.IsValid() || !descendant.IsValid()) { return false; }
+    Entity cur = descendant;
+    while (cur.IsValid()) {
+        if (cur == ancestor) { return true; }
+        const HC* h = world.GetComponent<HC>(cur);
+        if (h == nullptr) { return false; }
+        cur = h->parent;
+    }
+    return false;
+}
+
+// child 改挂到 newParent 下；newParent == Invalid 时把 child 提到 root。
+// 调用方负责防环（IsAncestorOf 检查），本函数不再二次校验。
+inline void ReparentTo(World& world, Entity child, Entity newParent)
+{
+    Detach(world, child);
+    if (newParent.IsValid()) {
+        LinkAsLastChild(world, newParent, child);
+    }
+}
+
+// 递归销毁 e 及其整个子树。先收集 child 列表（不能边遍历兄弟链边
+// destroy，destroy 会把组件抽走 sibling 字段失效），再依次递归销毁，最
+// 后把 e 自己从父链摘下并销毁。
+inline void DestroySubtree(World& world, Entity e)
+{
+    if (!e.IsValid()) { return; }
+    if (HC* h = world.GetComponent<HC>(e)) {
+        // 收集 children 快照（不能边遍历边 destroy —— DestroyEntity 会让
+        // 后续 GetComponent 返回 null，sibling 字段失效）。这里用 vector
+        // 而非定长数组：编辑器允许任意 fan-out，没必要硬上限。
+        std::vector<Entity> kids;
+        Entity child = h->firstChild;
+        while (child.IsValid()) {
+            kids.push_back(child);
+            const HC* ch = world.GetComponent<HC>(child);
+            child = (ch != nullptr) ? ch->nextSibling : Entity::Invalid();
+        }
+        for (Entity k : kids) {
+            DestroySubtree(world, k);
+        }
+    }
+    Detach(world, e);
+    world.DestroyEntity(e);
+}
+
+}  // namespace EditorHierarchy
+
+// 种子 demo 世界：让 Task 06-03 阶段的 Entity Tree 面板能立刻显示一棵
+// 有意义的层级结构。后续 Task 06-07 接入真实场景加载后，这个种子函数
+// 退化为"打开编辑器但没加载 scene 时"的占位 fallback，或直接删除。
+//
+// 拓扑：
+//   Root
+//   ├── Camera
+//   ├── Light
+//   └── Geometry
+//       ├── Floor
+//       └── Wall
+//   Misc Sibling      （第二棵根，验证多根显示）
+//
+inline void SeedDemoWorld(Orange::Engine::World& world)
+{
+    using ::Orange::Engine::Entity;
+    using ::Orange::Engine::Scene::NameComponent;
+    using ::Orange::Engine::Scene::TransformComponent;
+
+    auto make = [&](const char* name) {
+        Entity e = world.CreateEntity();
+        world.AddComponent<NameComponent>(e, NameComponent{name});
+        world.AddComponent<TransformComponent>(e, TransformComponent{});
+        return e;
+    };
+
+    Entity root     = make("Root");
+    Entity camera   = make("Camera");
+    Entity light    = make("Light");
+    Entity geometry = make("Geometry");
+    Entity floor    = make("Floor");
+    Entity wall     = make("Wall");
+    Entity misc     = make("Misc Sibling");
+
+    EditorHierarchy::LinkAsLastChild(world, root,     camera);
+    EditorHierarchy::LinkAsLastChild(world, root,     light);
+    EditorHierarchy::LinkAsLastChild(world, root,     geometry);
+    EditorHierarchy::LinkAsLastChild(world, geometry, floor);
+    EditorHierarchy::LinkAsLastChild(world, geometry, wall);
+    // root 和 misc 自身是 root level —— 不挂任何 parent，HierarchyComponent
+    // 也可以不加（树视图按"无 HC 或 parent invalid 视为 root"处理）。
+    (void)misc;
+}
+
 // 编辑器侧需要在每帧 BeginFrame 之前调 ImGui::NewFrame 等。把这件事
 // 封到一个 layer，让 AppHost 主循环按 LayerStack 的 OnUpdate 顺序自动
 // 触发。Render layer 在最后 push，确保 ImGui::NewFrame → user UI →
@@ -157,12 +373,14 @@ public:
     EditorRenderLayer(Orange::Engine::AppHost&             host,
                       Orange::Renderer::IRenderer&         renderer,
                       VkDescriptorPool                     descriptorPool,
-                      VkDevice                             device)
+                      VkDevice                             device,
+                      EditorState&                         state)
         : Orange::Engine::Layer("EditorRender")
         , mHost(host)
         , mRenderer(renderer)
         , mDescriptorPool(descriptorPool)
         , mDevice(device)
+        , mState(state)
     {
         // 注册 swap-chain overlay callback —— 引擎 EndFrame 内 swap-chain
         // 渲染窗口里调一次 ImGui_ImplVulkan_RenderDrawData，把当前帧 ImGui
@@ -310,16 +528,259 @@ private:
         ImGui::End();
     }
 
-    static void DrawEntityTreePanel()
+    void DrawEntityTreePanel()
     {
         ImGui::Begin("Entity Tree");
-        ImGui::TextDisabled("ECS world entity tree — Task 06-03");
+        if (mState.pWorld == nullptr) {
+            ImGui::TextDisabled("(no world bound)");
+            ImGui::End();
+            return;
+        }
+
+        // 全局快捷键：F2 重命名选中、Del 删除选中。重命名进行中不响应
+        // —— 否则 InputText 里按 Del 删字符会同时触发实体删除。
+        const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        if (focused && !mState.renamingEntity.IsValid() && mState.selectedEntity.IsValid()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
+                BeginRename(mState.selectedEntity);
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+                mState.pendingDelete = mState.selectedEntity;
+            }
+        }
+
+        // 列出所有 root 实体（无 HierarchyComponent 或 parent invalid），
+        // 然后递归画子树。EnTT view 遍历的是组件存储不是创建顺序 —— 编
+        // 辑器侧不关心顺序稳定性（同根实体在两帧之间显示位置可能不同），
+        // 后续 task 真要稳定排序时再加 SortIndex 之类。
+        auto& reg = mState.pWorld->Registry();
+        // EnTT 3.13：registry.each() 已删除，遍历所有实体走 view<entt::entity>。
+        // 引擎序列化层（src/scene/SceneSerialization.cpp）用的也是这个 idiom。
+        using HC = Orange::Engine::Scene::HierarchyComponent;
+        for (auto e : reg.view<entt::entity>()) {
+            const auto* h = reg.try_get<HC>(e);
+            const bool isRoot = (h == nullptr) || !h->parent.IsValid();
+            if (isRoot) {
+                DrawEntityNodeRecursive(Orange::Engine::World::FromEntt(e));
+            }
+        }
+
+        // 面板剩余空白区域 = "drop here to unparent" 区。Dummy 占满残余
+        // ContentRegion，作为 drop target —— 把一个 entity 拖到这片空白
+        // 上等同把它提到 root（detach from parent）。
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        if (avail.y > 0.0f) {
+            ImGui::Dummy(avail);
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* p =
+                        ImGui::AcceptDragDropPayload(kEntityPayload)) {
+                    Orange::Engine::Entity src{};
+                    std::memcpy(&src, p->Data, sizeof(src));
+                    mState.pendingReparent = {src,
+                                              Orange::Engine::Entity::Invalid(),
+                                              true};
+                }
+                ImGui::EndDragDropTarget();
+            }
+        }
+
         ImGui::End();
+
+        // 帧末统一 apply pending 结构性操作 ——
+        // 这两步必须在 tree 递归画完之后执行，否则会破坏当前帧的 sibling
+        // 链遍历。同帧内 delete + reparent 同时发生时 delete 优先（被
+        // delete 的实体即使有 pendingReparent 也失效）。
+        if (mState.pendingDelete.IsValid()) {
+            if (mState.selectedEntity == mState.pendingDelete) {
+                mState.selectedEntity = Orange::Engine::Entity::Invalid();
+            }
+            if (mState.renamingEntity == mState.pendingDelete) {
+                CancelRename();
+            }
+            EditorHierarchy::DestroySubtree(*mState.pWorld, mState.pendingDelete);
+            mState.pendingDelete = Orange::Engine::Entity::Invalid();
+            mState.pendingReparent.valid = false;  // 同帧 reparent 已无意义
+        }
+        if (mState.pendingReparent.valid) {
+            const Orange::Engine::Entity src = mState.pendingReparent.child;
+            const Orange::Engine::Entity dst = mState.pendingReparent.newParent;
+            mState.pendingReparent.valid = false;
+            // 防环 + 防自挂自 + 防"挂到当前父亲"重复操作
+            if (src.IsValid() && src != dst
+                && !EditorHierarchy::IsAncestorOf(*mState.pWorld, src, dst))
+            {
+                EditorHierarchy::ReparentTo(*mState.pWorld, src, dst);
+            }
+        }
     }
 
-    static void DrawInspectorPanel()
+    // 递归画一个实体节点 + 其子树。
+    //
+    // 用 TreeNodeEx + ImGuiTreeNodeFlags_OpenOnArrow：点叶身体当选中，点
+    // 三角才展开 —— 跟 Unity / Unreal 编辑器手感一致。Selected 状态从
+    // mState.selectedEntity 反映，点击任意节点写回。叶子节点（无 firstChild）
+    // 用 ImGuiTreeNodeFlags_Leaf 关闭三角并强制不可展开。
+    //
+    // Rename：renamingEntity == 当前 entity 时，TreeNode 的 label 用空串
+    // + AllowOverlap，SameLine 上画 InputText 接管 label 区域。Enter 提
+    // 交，Esc / 失焦取消。
+    // DnD：每个节点同时是 drag source 和 drop target；拖一个 entity 放到
+    // 另一节点 → reparent 进它；放到面板空白 → detach 到 root（见
+    // DrawEntityTreePanel 末尾）。
+    void DrawEntityNodeRecursive(Orange::Engine::Entity entity)
+    {
+        if (!entity.IsValid()) { return; }
+        using HC = Orange::Engine::Scene::HierarchyComponent;
+        using NameComponent = Orange::Engine::Scene::NameComponent;
+
+        const auto* h     = mState.pWorld->GetComponent<HC>(entity);
+        const auto* name  = mState.pWorld->GetComponent<NameComponent>(entity);
+        const bool  hasKid = (h != nullptr) && h->firstChild.IsValid();
+        const bool  selected = (mState.selectedEntity == entity);
+        const bool  renaming = (mState.renamingEntity == entity);
+
+        ImGuiTreeNodeFlags flags =
+              ImGuiTreeNodeFlags_OpenOnArrow
+            | ImGuiTreeNodeFlags_OpenOnDoubleClick
+            | ImGuiTreeNodeFlags_SpanAvailWidth
+            | ImGuiTreeNodeFlags_DefaultOpen
+            | ImGuiTreeNodeFlags_AllowOverlap;
+        if (!hasKid)  { flags |= ImGuiTreeNodeFlags_Leaf; }
+        if (selected) { flags |= ImGuiTreeNodeFlags_Selected; }
+
+        // ID 用 entity 数值 —— 不依赖名字（重名/空名也稳定），并满足
+        // "同一棵子树里不会重复" 的 ImGui ID 唯一性约束。
+        ImGui::PushID(static_cast<int>(static_cast<std::uint32_t>(entity.Value())));
+
+        bool open = false;
+        if (renaming) {
+            // 空 label + SameLine InputText —— TreeNode 三角仍可用，
+            // label 区域被 InputText 接管。
+            open = ImGui::TreeNodeEx("##node", flags, "%s", "");
+            ImGui::SameLine();
+            if (mState.renameJustStarted) {
+                ImGui::SetKeyboardFocusHere();
+                mState.renameJustStarted = false;
+            }
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            const bool entered = ImGui::InputText(
+                "##rename", mState.renameBuffer, sizeof(mState.renameBuffer),
+                  ImGuiInputTextFlags_EnterReturnsTrue
+                | ImGuiInputTextFlags_AutoSelectAll);
+            if (entered) {
+                CommitRename(entity);
+            } else if (ImGui::IsItemDeactivated()) {
+                // 失焦 = 取消（Esc / 点别处）。EnterReturnsTrue 已经走
+                // 上面的分支，所以这里走的是非 Enter 的所有退出路径。
+                CancelRename();
+            }
+        } else {
+            const char* label = (name != nullptr && !name->name.empty())
+                ? name->name.c_str()
+                : "(unnamed)";
+            open = ImGui::TreeNodeEx("##node", flags, "%s", label);
+            if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                mState.selectedEntity = entity;
+            }
+            // 双击 entry-body 进入重命名（不是双击三角 —— OpenOnDoubleClick
+            // 让三角双击只切换展开）
+            if (ImGui::IsItemHovered()
+                && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
+                && !ImGui::IsItemToggledOpen()) {
+                BeginRename(entity);
+            }
+            // DnD source —— 只有非重命名态才允许拖拽
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                ImGui::SetDragDropPayload(kEntityPayload, &entity, sizeof(entity));
+                ImGui::Text("Move %s",
+                            (name != nullptr && !name->name.empty())
+                                ? name->name.c_str() : "(unnamed)");
+                ImGui::EndDragDropSource();
+            }
+        }
+        // DnD target —— 无论是否重命名都可接受 drop，把别的节点挂到本节点下
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p =
+                    ImGui::AcceptDragDropPayload(kEntityPayload)) {
+                Orange::Engine::Entity src{};
+                std::memcpy(&src, p->Data, sizeof(src));
+                mState.pendingReparent = {src, entity, true};
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        if (open) {
+            // 遍历兄弟链，递归
+            if (h != nullptr) {
+                Orange::Engine::Entity child = h->firstChild;
+                while (child.IsValid()) {
+                    DrawEntityNodeRecursive(child);
+                    const auto* ch = mState.pWorld->GetComponent<HC>(child);
+                    child = (ch != nullptr) ? ch->nextSibling
+                                            : Orange::Engine::Entity::Invalid();
+                }
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+
+    void BeginRename(Orange::Engine::Entity entity)
+    {
+        const auto* name = mState.pWorld->GetComponent<
+            Orange::Engine::Scene::NameComponent>(entity);
+        const std::string& src = (name != nullptr) ? name->name : std::string{};
+        const std::size_t  n   = std::min(src.size(), sizeof(mState.renameBuffer) - 1);
+        std::memcpy(mState.renameBuffer, src.data(), n);
+        mState.renameBuffer[n]   = '\0';
+        mState.renamingEntity    = entity;
+        mState.renameJustStarted = true;
+    }
+
+    void CommitRename(Orange::Engine::Entity entity)
+    {
+        if (mState.pWorld == nullptr || !entity.IsValid()) {
+            CancelRename();
+            return;
+        }
+        mState.renameBuffer[sizeof(mState.renameBuffer) - 1] = '\0';
+        Orange::Engine::Scene::NameComponent nc;
+        nc.name = mState.renameBuffer;
+        mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
+            entity, std::move(nc));
+        CancelRename();
+    }
+
+    void CancelRename()
+    {
+        mState.renamingEntity    = Orange::Engine::Entity::Invalid();
+        mState.renameJustStarted = false;
+        mState.renameBuffer[0]   = '\0';
+    }
+
+    // DnD payload type 标识。ImGui 用这个字符串区分不同类型的 drag payload。
+    static constexpr const char* kEntityPayload = "ORANGE_EDITOR_ENTITY";
+
+    void DrawInspectorPanel()
     {
         ImGui::Begin("Inspector");
+        if (mState.pWorld == nullptr || !mState.selectedEntity.IsValid()) {
+            ImGui::TextDisabled("(select an entity)");
+            ImGui::End();
+            return;
+        }
+        // Task 06-03 阶段 Inspector 仅显示 entity id + name —— 真组件检
+        // 视器是 Task 06-04。这里现在就显示一行是为了"选中态"在 UI 上
+        // 可见，便于验证 Entity Tree 的 select 行为。
+        const auto* name = mState.pWorld->GetComponent<
+            Orange::Engine::Scene::NameComponent>(mState.selectedEntity);
+        ImGui::Text("Entity #%u",
+                    static_cast<unsigned>(static_cast<std::uint32_t>(
+                        mState.selectedEntity.Value())));
+        ImGui::Text("Name: %s",
+                    (name != nullptr && !name->name.empty())
+                        ? name->name.c_str() : "(unnamed)");
+        ImGui::Separator();
         ImGui::TextDisabled("component inspector — Task 06-04");
         ImGui::End();
     }
@@ -358,6 +819,7 @@ private:
     Orange::Renderer::IRenderer&  mRenderer;
     VkDescriptorPool              mDescriptorPool;  // owned by main, not by layer
     VkDevice                      mDevice;
+    EditorState&                  mState;           // owned by main, not by layer
 };
 
 // 创建 ImGui Vulkan backend 用的 descriptor pool。
@@ -583,11 +1045,31 @@ int main()
         return 1;
     }
 
+    // ---- 编辑器侧 World + EditorState -----------------------------------
+    //
+    // Task 06-03 阶段：用代码种一棵 demo 层级（Root → Camera/Light/Geometry
+    // (→Floor/Wall) + Misc Sibling 第二棵根）让 Entity Tree 面板能立刻看
+    // 到东西。Task 06-07 接真实场景加载后，这段退化成"未加载任何场景时"
+    // 的占位 fallback（或直接删）。
+    //
+    // World 由 main 拥有，layer 通过 EditorState 引用读写 —— 生命周期：
+    // host.reset() 走 layer dtor 之前 world 必须存活，所以 world / state
+    // 声明在 layer push 之前、host.reset() 之后才析构（与 host 在同一
+    // scope，且声明顺序在 host 之后保证析构先于 host 的反过来 OK 因为
+    // host.reset() 被手动提前调，见关停段）。
+    auto pWorld = std::make_unique<Orange::Engine::World>();
+    SeedDemoWorld(*pWorld);
+    EditorState editorState{};
+    editorState.pWorld = pWorld.get();
+
     // ---- Layer 注入 -----------------------------------------------------
     host->PushLayer(std::make_unique<EditorRenderLayer>(*host, *pRenderer,
-                                                        imguiDescPool, vkDevice));
+                                                        imguiDescPool, vkDevice,
+                                                        editorState));
 
-    std::fprintf(stdout, "[OrangeEditor] ImGui dock + multi-viewport ready. Esc 退出。\n");
+    std::fprintf(stdout,
+                 "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
+                 pWorld->Size());
 
     const int rc = host->Run();
 
