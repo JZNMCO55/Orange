@@ -41,6 +41,19 @@ namespace Orange::Engine::Platform
 class Window;
 }
 
+// OrangeRender 公共面前向声明 —— 公共头**不**包含 `<orange/...>`，但前向
+// 声明指针 / 引用类型是允许的（与 OrangeRender 自家 `VulkanInterop.h` 前
+// 向声明 `RHITexture` / `RHICommandList` 同节奏）。消费者真正取用时再
+// `#include <orange/renderer/RenderDevice.h>` / `<orange/rhi/RHITexture.h>`。
+namespace Orange::Renderer
+{
+class RenderDevice;
+}
+namespace Orange::Rhi
+{
+class RHITexture;
+}
+
 namespace Orange::Engine::Render
 {
 
@@ -70,6 +83,58 @@ public:
     // 返回 AlreadyInitialized。`window` 的生存期同样必须长于 Pipeline。
     Result<void, ResultCode> Initialize(::Orange::Engine::Platform::Window&        window,
                                         ::Orange::Engine::Asset::AssetRegistry&    assets);
+
+    // 离屏模式初始化：不绑定 swap-chain，渲染结果落到 Pipeline 内部持有
+    // 的 `viewportColor` RT（BGRA8Unorm，SRGB-compatible），调用方通过
+    // `GetOffscreenColor()` 拿到 `Orange::Rhi::RHITexture*` 后用
+    // `Orange::Renderer::Interop::GetVulkanImageView()` 取 `VkImageView`
+    // 喂给 `ImGui_ImplVulkan_AddTexture` —— 这是编辑器 Scene 面板视口的
+    // 标准路径。
+    //
+    // 与 `Initialize(window, ...)` 互斥：同一 Pipeline 实例两条 Initialize
+    // 入口只能选一条，第二次（不论同模式还是异模式）返回
+    // `AlreadyInitialized`。`device` 借用语义（不取所有权）：调用方负责
+    // 保证 device 活到 `Shutdown()` 之前；典型路径是宿主（编辑器）自己
+    // 创建 `RenderDevice` 给 ImGui Vulkan backend 用，同一份借给 Pipeline。
+    //
+    // S1 范围（当前实现）：本路径**只**跑主 pass（含 shadow），bloom /
+    // tonemap / godrays / `RequestCapture` / `InsertPass` 一律走 fallback
+    // 或 silent-ignore——HDR 域 raw color 经一次 passthrough 直写到
+    // viewportColor。若编辑器需要 LDR / tonemap 视觉效果，后续子任务再
+    // 把后处理接进来；S1 目标是先把"渲染 → 拿 native view"链路打通。
+    //
+    // `width × height` 必须 > 0；为 0 返回 `InvalidArgument`。后续运行期
+    // 调 `ResizeOffscreen` 改尺寸。
+    Result<void, ResultCode> InitializeOffscreen(
+        ::Orange::Renderer::RenderDevice&        device,
+        ::Orange::Engine::Asset::AssetRegistry&  assets,
+        std::uint32_t                            width,
+        std::uint32_t                            height);
+
+    // 通知 Pipeline 离屏目标尺寸需要变化（编辑器 Scene 面板 resize 路径）。
+    // 与 `OnResize(width, height)` 同语义：标记 dirty，真正重建发生在下一
+    // 次 `Render()` 顶部。未 `InitializeOffscreen` 时 no-op。`width × height
+    // == 0`（面板折叠）允许，Pipeline 跳过下一帧 Render 的主 pass 直到尺
+    // 寸再变正。
+    void ResizeOffscreen(std::uint32_t width, std::uint32_t height) noexcept;
+
+    // 当前离屏 final output color RT。仅 `InitializeOffscreen` 模式下且
+    // 完成至少一次 `Render()` 后非空；window 模式 / 未 Initialize / 当前
+    // 尺寸为 0 → 返回 nullptr。
+    //
+    // 生命周期：返回的 `RHITexture` 由 Pipeline 拥有，`Shutdown()` 或
+    // `ResizeOffscreen` 触发重建时句柄失效——消费者拿到 ImGui descriptor
+    // set 后**必须**在每次 resize 时重新调本接口并重新绑 view。
+    //
+    // 取 `VkImageView` 标准路径（编辑器侧）：
+    // ```
+    // auto* tex  = pipeline.GetOffscreenColor();
+    // auto* view = Orange::Renderer::Interop::GetVulkanImageView(*tex);
+    // VkDescriptorSet ds = ImGui_ImplVulkan_AddTexture(sampler,
+    //     static_cast<VkImageView>(view), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // ImGui::Image(reinterpret_cast<ImTextureID>(ds), ...);
+    // ```
+    const ::Orange::Rhi::RHITexture* GetOffscreenColor() const noexcept;
 
     // 释放 OrangeRender 资源。在调用 Window 析构之前必须调用——
     // RenderDevice 会先 WaitIdle 再释放 swap-chain 上挂的资源。
@@ -207,6 +272,13 @@ public:
                          std::uint32_t& height) const noexcept;
 
 private:
+    // 共享 RHI 资源创建逻辑（sampler / passthrough / bloom / tonemap /
+    // godrays / 主 pass UBO / shadow caster pipeline / offscreen cmd list）。
+    // Initialize / InitializeOffscreen 两条入口都调它；调用前必须保证
+    // `mpImpl->renderDevice` + `mpImpl->upload` + `mpImpl->assets` 已就绪。
+    // 失败时内部调 `Shutdown()` 整体回滚。
+    Result<void, ResultCode> SetupRhiResources();
+
     struct Impl;
     std::unique_ptr<Impl> mpImpl;
 };

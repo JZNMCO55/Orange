@@ -282,9 +282,32 @@ struct Pipeline::Impl
 
     bool initialized{false};
 
-    std::unique_ptr<Orange::Renderer::RenderDevice> renderDevice;
+    // window 模式 / offscreen 模式双向兼容：所有权交给 ownedRenderDevice
+    // （仅 window 模式持有），所有访问统一过 raw 指针 renderDevice。
+    // offscreen 模式 renderDevice 指向调用方提供的外部 RenderDevice
+    // （借用），ownedRenderDevice 保持 nullptr。
+    std::unique_ptr<Orange::Renderer::RenderDevice> ownedRenderDevice;
+    Orange::Renderer::RenderDevice*                 renderDevice{nullptr};
+    // true = InitializeOffscreen 路径，跳过 swap-chain stage B，把场景渲
+    // 到内部 viewportColor RT；调用方通过 GetOffscreenColor + Interop
+    // 接 ImGui::Image。
+    bool                                            offscreenMode{false};
     std::unique_ptr<Orange::Renderer::IRenderer>    renderer;
     std::unique_ptr<Orange::Resource::UploadContext> upload;
+
+    // 离屏模式 final output —— BGRA8Unorm + RenderTarget|Sampled，每帧主
+    // pass + passthrough 写入；Render 末尾 transition 到 ShaderReadOnly
+    // 让消费者直接采样。window 模式恒空。
+    std::unique_ptr<Orange::Rhi::RHITexture> viewportColor;
+    // viewportColor 跨帧 layout 跟踪：false = Undefined / 刚重建；true =
+    // 上一帧末翻到 ShaderReadOnly。passthrough 写入前再翻回 ColorAttachment。
+    bool                                     viewportLayoutShaderReadOnly{false};
+    // 离屏模式下 viewportColor 的 BGRA8Unorm pipeline。复用现有 passthrough
+    // shader + layout / pool / set，只是 color attachment format 与 swap-
+    // chain 那条管线相同，可以直接 alias passthroughPipeline；这里保留独
+    // 立字段以便将来切到不同 SRGB / HDR LDR 输出。S1 直接复用 swap-chain
+    // 那条 BGRA8Unorm 管线，因此本字段 lazy / 留空，渲染时拿
+    // passthroughPipeline 即可。
 
     // drawable.materialInstance == nullptr 时的 fallback Material。第一
     // 次需要时 lazy-load——sample 即便不挂 MaterialSystem 也能跑通。
@@ -672,6 +695,18 @@ struct Pipeline::Impl
     // 深度 1.0 的清空数据，shadow_pcf 取出来 = 全亮）。
     bool RecordShadowPass(const DirectionalLight* light, const glm::mat4& lightViewProj);
 
+    // 离屏模式专用：把 HDR 主 pass 的输出（已 ShaderReadOnly 的 hdrColor）
+    // 经 passthroughPipeline 写到 viewportColor（BGRA8Unorm）。本方法假设
+    // 调用方已经 Begin cmd 且 hdrColor 当前处于 ShaderReadOnly 状态（与
+    // RecordOffscreenPass 末尾的状态对接）。完成后 viewportColor 处于
+    // ShaderReadOnly，可被 ImGui_ImplVulkan_AddTexture 直接绑定采样。
+    bool RecordPassthroughToViewport();
+
+    // 离屏模式专用：跳过 swap-chain 收尾的 Render 实现。语义对齐 Pipeline::
+    // Render 的 window 路径但走 RHI 自管 cmd list；外部由 Pipeline::Render
+    // 在 offscreenMode 时调用一次。
+    void RenderOffscreen(Orange::Engine::World& world);
+
     // RequestCapture 路径辅助：
     //   * EnsureCaptureBuffer：按 hdrWidth*hdrHeight*8（RGBA16F = 8 B/像素）
     //     grow captureBuffer；尺寸够大时 no-op；首次或扩容时 WaitIdle 再
@@ -776,6 +811,60 @@ struct Pipeline::Impl
         }
         return true;
     }
+
+    // 创建 / 重建 viewportColor（离屏 final output）。pendingWidth/Height
+    // 与 hdrColor 共用，因此每次 EnsureHdrTarget 触发重建后调一次本方法
+    // 即可保证 viewportColor 与 hdrColor 同尺寸；非 offscreen 模式下不调
+    // 用。BGRA8Unorm 与 swap-chain 同格式，passthroughPipeline（已在
+    // SetupRhiResources 阶段构建为 BGRA8Unorm color attachment）可直接绑
+    // 定，不需要为离屏单独建一条 pipeline。
+    bool EnsureViewportTarget()
+    {
+        if (!offscreenMode)
+        {
+            return false;
+        }
+        if (viewportColor &&
+            viewportWidth == pendingWidth && viewportHeight == pendingHeight)
+        {
+            return true;
+        }
+        if (pendingWidth == 0 || pendingHeight == 0)
+        {
+            return false;
+        }
+        if (renderDevice == nullptr)
+        {
+            return false;
+        }
+
+        renderDevice->WaitIdle();  // 旧 viewportColor 可能被 ImGui 上一帧引用
+
+        Orange::Rhi::TextureDesc t{};
+        t.mWidth  = pendingWidth;
+        t.mHeight = pendingHeight;
+        t.mFormat = kSwapchainColorFormat;
+        t.mUsage  = Orange::Rhi::TextureUsage::RenderTarget
+                  | Orange::Rhi::TextureUsage::Sampled;
+        auto newTex = renderDevice->GetRhiDevice().CreateTexture(t);
+        if (!newTex)
+        {
+            ORANGE_LOG_ERROR("Pipeline: CreateTexture (viewport color) 失败 ({}x{})",
+                             pendingWidth, pendingHeight);
+            return false;
+        }
+        viewportColor = std::move(newTex);
+        viewportWidth  = pendingWidth;
+        viewportHeight = pendingHeight;
+        viewportLayoutShaderReadOnly = false;  // 新建 = Undefined，首帧 transition 时按此判定
+        return true;
+    }
+
+    // viewportColor 当前 build 出来的实际尺寸；用于 EnsureViewportTarget
+    // 判定是否需要重建（pendingWidth/Height 由 ResizeOffscreen / OnResize
+    // 写入，本字段记录"已落地"尺寸）。
+    std::uint32_t viewportWidth{0};
+    std::uint32_t viewportHeight{0};
 };
 
 Pipeline::Pipeline() : mpImpl(std::make_unique<Impl>())
@@ -795,62 +884,14 @@ bool Pipeline::IsInitialized() const noexcept
     return mpImpl && mpImpl->initialized;
 }
 
-Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
-                                              Asset::AssetRegistry&     assets)
+Result<void, ResultCode> Pipeline::SetupRhiResources()
 {
+    // 共享 RHI 资源创建（sampler / passthrough / bloom / tonemap / godrays /
+    // main pass UBO / shadow caster pipeline / offscreen cmd list）。Initialize
+    // 与 InitializeOffscreen 两条入口都调用本函数；调用前必须保证
+    // `mpImpl->renderDevice` + `mpImpl->upload` + `mpImpl->assets` 已就位。
+    // 失败路径内部已调 Shutdown() 整体回滚，caller 只需 propagate 错误码。
     auto& impl = *mpImpl;
-    if (impl.initialized)
-    {
-        return ResultCode::AlreadyInitialized;
-    }
-    impl.assets = &assets;
-    impl.window = &window;
-
-    // 1. RenderDevice ----------------------------------------------------
-    Orange::Renderer::RenderDeviceDesc deviceDesc{};
-    deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
-    deviceDesc.mEnableValidation = true;
-    impl.renderDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
-    if (!impl.renderDevice)
-    {
-        ORANGE_LOG_ERROR("Pipeline::Initialize: RenderDevice::Create 失败");
-        return ResultCode::InternalError;
-    }
-
-    // 2. Renderer --------------------------------------------------------
-    impl.renderer = Orange::Renderer::CreateRenderer();
-    if (!impl.renderer)
-    {
-        ORANGE_LOG_ERROR("Pipeline::Initialize: CreateRenderer 失败");
-        impl.renderDevice.reset();
-        return ResultCode::InternalError;
-    }
-
-    Orange::Renderer::RendererDesc rendererDesc{};
-    rendererDesc.mpDevice             = &impl.renderDevice->GetRhiDevice();
-    rendererDesc.mpNativeWindowHandle = window.GetGlfwWindowHandle();
-    rendererDesc.mFramesInFlight      = 2;
-
-    if (Orange::Failed(impl.renderer->Initialize(rendererDesc)))
-    {
-        ORANGE_LOG_ERROR("Pipeline::Initialize: Renderer::Initialize 失败");
-        impl.renderer.reset();
-        impl.renderDevice.reset();
-        return ResultCode::InternalError;
-    }
-
-    // 3. UploadContext --------------------------------------------------
-    impl.upload = std::make_unique<Orange::Resource::UploadContext>();
-    if (Orange::Failed(impl.upload->Initialize(impl.renderDevice->GetRhiDevice())))
-    {
-        ORANGE_LOG_ERROR("Pipeline::Initialize: UploadContext::Initialize 失败");
-        impl.upload.reset();
-        impl.renderer->Shutdown();
-        impl.renderer.reset();
-        impl.renderDevice.reset();
-        return ResultCode::InternalError;
-    }
-
     auto& rhi = impl.renderDevice->GetRhiDevice();
 
     // 4. Sampler ---------------------------------------------------------
@@ -1321,6 +1362,76 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
         }
     }
 
+    return Result<void, ResultCode>{};
+}
+
+Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
+                                              Asset::AssetRegistry&     assets)
+{
+    auto& impl = *mpImpl;
+    if (impl.initialized)
+    {
+        return ResultCode::AlreadyInitialized;
+    }
+    impl.assets = &assets;
+    impl.window = &window;
+
+    // 1. RenderDevice ----------------------------------------------------
+    Orange::Renderer::RenderDeviceDesc deviceDesc{};
+    deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
+    deviceDesc.mEnableValidation = true;
+    impl.ownedRenderDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
+    if (!impl.ownedRenderDevice)
+    {
+        ORANGE_LOG_ERROR("Pipeline::Initialize: RenderDevice::Create 失败");
+        return ResultCode::InternalError;
+    }
+    impl.renderDevice  = impl.ownedRenderDevice.get();
+    impl.offscreenMode = false;
+
+    // 2. Renderer --------------------------------------------------------
+    impl.renderer = Orange::Renderer::CreateRenderer();
+    if (!impl.renderer)
+    {
+        ORANGE_LOG_ERROR("Pipeline::Initialize: CreateRenderer 失败");
+        impl.ownedRenderDevice.reset();
+        impl.renderDevice = nullptr;
+        return ResultCode::InternalError;
+    }
+
+    Orange::Renderer::RendererDesc rendererDesc{};
+    rendererDesc.mpDevice             = &impl.renderDevice->GetRhiDevice();
+    rendererDesc.mpNativeWindowHandle = window.GetGlfwWindowHandle();
+    rendererDesc.mFramesInFlight      = 2;
+
+    if (Orange::Failed(impl.renderer->Initialize(rendererDesc)))
+    {
+        ORANGE_LOG_ERROR("Pipeline::Initialize: Renderer::Initialize 失败");
+        impl.renderer.reset();
+        impl.ownedRenderDevice.reset();
+        impl.renderDevice = nullptr;
+        return ResultCode::InternalError;
+    }
+
+    // 3. UploadContext --------------------------------------------------
+    impl.upload = std::make_unique<Orange::Resource::UploadContext>();
+    if (Orange::Failed(impl.upload->Initialize(impl.renderDevice->GetRhiDevice())))
+    {
+        ORANGE_LOG_ERROR("Pipeline::Initialize: UploadContext::Initialize 失败");
+        impl.upload.reset();
+        impl.renderer->Shutdown();
+        impl.renderer.reset();
+        impl.ownedRenderDevice.reset();
+        impl.renderDevice = nullptr;
+        return ResultCode::InternalError;
+    }
+
+    auto setupResult = SetupRhiResources();
+    if (setupResult.IsErr())
+    {
+        return setupResult.Error();
+    }
+
     // 8. 初始 HDR target —— 按 window 当前 framebuffer extent 建一张。
     impl.SeedExtentFromWindow();
     if (impl.pendingWidth > 0 && impl.pendingHeight > 0)
@@ -1331,6 +1442,112 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
     impl.frameIndex  = 0;
     impl.initialized = true;
     return Result<void, ResultCode>{};
+}
+
+Result<void, ResultCode> Pipeline::InitializeOffscreen(Orange::Renderer::RenderDevice& device,
+                                                       Asset::AssetRegistry&           assets,
+                                                       std::uint32_t                   width,
+                                                       std::uint32_t                   height)
+{
+    auto& impl = *mpImpl;
+    if (impl.initialized)
+    {
+        return ResultCode::AlreadyInitialized;
+    }
+    if (width == 0 || height == 0)
+    {
+        ORANGE_LOG_ERROR("Pipeline::InitializeOffscreen: width / height 必须 > 0");
+        return ResultCode::InvalidArgument;
+    }
+
+    impl.assets         = &assets;
+    impl.window         = nullptr;
+    impl.renderDevice   = &device;                  // 借用外部 RenderDevice
+    impl.ownedRenderDevice.reset();                 // 显式：本路径不持有 device
+    impl.offscreenMode  = true;
+    impl.pendingWidth   = width;
+    impl.pendingHeight  = height;
+    impl.hdrDirty       = true;
+
+    // UploadContext：与 window 模式一致，用 `device.GetRhiDevice()` 初始化。
+    // 失败路径手动回滚字段（不调 Shutdown —— Shutdown 假定 initialized 后
+    // 的资源全图，这里只有 upload 半就绪）。
+    impl.upload = std::make_unique<Orange::Resource::UploadContext>();
+    if (Orange::Failed(impl.upload->Initialize(impl.renderDevice->GetRhiDevice())))
+    {
+        ORANGE_LOG_ERROR("Pipeline::InitializeOffscreen: UploadContext::Initialize 失败");
+        impl.upload.reset();
+        impl.renderDevice  = nullptr;
+        impl.offscreenMode = false;
+        impl.assets        = nullptr;
+        return ResultCode::InternalError;
+    }
+
+    // RHI 资源（sampler / passthrough / bloom / tonemap / godrays / 主 pass
+    // UBO / shadow caster）共享路径；失败时 SetupRhiResources 内部已调
+    // Shutdown 整体回滚，本函数只需透传错误码。
+    auto setupResult = SetupRhiResources();
+    if (setupResult.IsErr())
+    {
+        return setupResult.Error();
+    }
+
+    // 8. 初始 HDR + viewport 目标。pendingWidth/Height 已经由本入口写入，
+    // 不需要 SeedExtentFromWindow。EnsureHdrTarget 失败时回滚整盘资源。
+    if (!impl.EnsureHdrTarget())
+    {
+        ORANGE_LOG_ERROR("Pipeline::InitializeOffscreen: EnsureHdrTarget 失败 ({}x{})",
+                         width, height);
+        Shutdown();
+        return ResultCode::InternalError;
+    }
+    if (!impl.EnsureViewportTarget())
+    {
+        ORANGE_LOG_ERROR("Pipeline::InitializeOffscreen: EnsureViewportTarget 失败 ({}x{})",
+                         width, height);
+        Shutdown();
+        return ResultCode::InternalError;
+    }
+
+    impl.frameIndex  = 0;
+    impl.initialized = true;
+    return Result<void, ResultCode>{};
+}
+
+void Pipeline::ResizeOffscreen(std::uint32_t width, std::uint32_t height) noexcept
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    auto& impl = *mpImpl;
+    if (!impl.offscreenMode || !impl.initialized)
+    {
+        return;
+    }
+    if (width == impl.pendingWidth && height == impl.pendingHeight)
+    {
+        return;
+    }
+    // 实际重建在下一次 Render 顶部的 EnsureHdrTarget / EnsureViewportTarget
+    // 路径里发生；OnResize 同节奏（pendingWidth/Height + hdrDirty 标记）。
+    impl.pendingWidth  = width;
+    impl.pendingHeight = height;
+    impl.hdrDirty      = true;
+}
+
+const Orange::Rhi::RHITexture* Pipeline::GetOffscreenColor() const noexcept
+{
+    if (!mpImpl)
+    {
+        return nullptr;
+    }
+    auto& impl = *mpImpl;
+    if (!impl.offscreenMode)
+    {
+        return nullptr;
+    }
+    return impl.viewportColor.get();
 }
 
 void Pipeline::Shutdown()
@@ -1394,6 +1611,8 @@ void Pipeline::Shutdown()
     impl.hdrSampler.reset();
     impl.hdrColor.reset();
     impl.sceneDepth.reset();
+    impl.viewportColor.reset();
+    impl.viewportLayoutShaderReadOnly = false;
     impl.captureBuffer.reset();
     impl.captureBufferCapacity = 0;
     impl.pendingCapturePath.reset();
@@ -1413,7 +1632,9 @@ void Pipeline::Shutdown()
         impl.renderer->Shutdown();
     }
     impl.renderer.reset();
-    impl.renderDevice.reset();
+    impl.ownedRenderDevice.reset();
+    impl.renderDevice  = nullptr;
+    impl.offscreenMode = false;
 
     impl.assets       = nullptr;
     impl.window       = nullptr;
@@ -1549,7 +1770,7 @@ void Pipeline::SetVfxSystem(VfxSystem* system) noexcept
     if (system != nullptr && !system->IsInitialized()
         && mpImpl->renderDevice != nullptr && mpImpl->assets != nullptr)
     {
-        auto r = system->Initialize(mpImpl->renderDevice.get(),
+        auto r = system->Initialize(mpImpl->renderDevice,
                                     /*framesInFlight=*/2u,
                                     *mpImpl->assets);
         if (r.IsErr())
@@ -1755,6 +1976,188 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
                           Orange::Rhi::TextureLayout::ShaderReadOnly);
     impl.hdrLayoutShaderReadOnly = true;
     return true;
+}
+
+bool Pipeline::Impl::RecordPassthroughToViewport()
+{
+    auto& impl = *this;
+    if (!impl.viewportColor)
+    {
+        return false;
+    }
+    auto& cmd = *impl.offscreenCmd;
+
+    // viewportColor 初始或上一帧末翻到 ShaderReadOnly；现在写回 ColorAttachment。
+    // 首帧 viewportLayoutShaderReadOnly == false（Undefined），与 hdrColor 同模式。
+    const auto fromLayout = impl.viewportLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+    cmd.TransitionTexture(*impl.viewportColor, fromLayout,
+                          Orange::Rhi::TextureLayout::ColorAttachment);
+
+    Orange::Rhi::ColorAttachment att{};
+    att.mpView           = impl.viewportColor->GetDefaultView();
+    att.mLoadOp          = Orange::Rhi::LoadOp::Clear;
+    att.mStoreOp         = Orange::Rhi::StoreOp::Store;
+    att.mClear.mColor[0] = 0.0f;
+    att.mClear.mColor[1] = 0.0f;
+    att.mClear.mColor[2] = 0.0f;
+    att.mClear.mColor[3] = 1.0f;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = impl.viewportWidth;
+    rd.mRenderArea.mHeight = impl.viewportHeight;
+    rd.mColorAttachments.push_back(att);
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(impl.viewportWidth);
+    vp.mHeight   = static_cast<float>(impl.viewportHeight);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = impl.viewportWidth;
+    sc.mHeight = impl.viewportHeight;
+    cmd.SetScissor(sc);
+
+    cmd.BindGraphicsPipeline(*impl.passthroughPipeline);
+    cmd.SetDescriptorSet(0, *impl.passthroughSet);
+    cmd.Draw(3, 1, 0, 0);  // big-triangle，fullscreen.vert 走 gl_VertexIndex
+    cmd.EndRendering();
+
+    cmd.TransitionTexture(*impl.viewportColor,
+                          Orange::Rhi::TextureLayout::ColorAttachment,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    impl.viewportLayoutShaderReadOnly = true;
+    return true;
+}
+
+void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
+{
+    auto& impl = *this;
+
+    // 0. 同步 HDR + viewport RT（ResizeOffscreen 标过 dirty 时这里重建）。
+    const bool hdrReady      = impl.EnsureHdrTarget();
+    const bool viewportReady = impl.EnsureViewportTarget();
+    if (!hdrReady || !viewportReady)
+    {
+        ++impl.frameIndex;
+        return;
+    }
+
+    // 1. mesh GPU 上传（UploadContext 的 transient cmd 必须先于 offscreenCmd.Begin）。
+    if (impl.scene.HasCamera())
+    {
+        impl.EnsureMeshGpuCache();
+    }
+
+    // 1.5 Shadow / Light 准备：找 DirectionalLight + 写 light UBO + 确保
+    // shadow map 已建好。无 light 场景仍写默认 light UBO（rim_light 等
+    // fragment 才有合理 base 着色），shadow map 走"远深度清零 + 不画
+    // caster"路径（PCF 取 1.0 = 全亮）。
+    const DirectionalLight* activeLight = nullptr;
+    if (impl.scene.HasCamera())
+    {
+        auto& reg  = world.Registry();
+        auto  view = reg.view<DirectionalLight>();
+        if (!view.empty())
+        {
+            const auto entity = view.front();
+            activeLight = &view.get<DirectionalLight>(entity);
+        }
+        impl.EnsureShadowMap();
+        const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(*activeLight)
+                                                : glm::mat4(1.0f);
+        const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
+        const glm::vec3 cameraPos(invView[3]);
+        impl.UpdateLightUbo(activeLight, lightVP, cameraPos);
+    }
+
+    // 2. 一次 cmd list 包含：shadow → 主 pass → passthrough → 翻 layout。
+    auto& cmd = *impl.offscreenCmd;
+    if (Orange::Failed(cmd.Begin()))
+    {
+        ORANGE_LOG_ERROR("Pipeline::RenderOffscreen: cmd Begin 失败 (frame={})",
+                         impl.frameIndex);
+        ++impl.frameIndex;
+        return;
+    }
+
+    bool ok = true;
+    if (impl.scene.HasCamera())
+    {
+        const glm::mat4 viewProj = impl.scene.MainCamera().projection
+                                 * impl.scene.MainCamera().view;
+        const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(*activeLight)
+                                               : glm::mat4(1.0f);
+
+        // shadow pre-pass
+        if (impl.shadowMap)
+        {
+            ok = impl.RecordShadowPass(activeLight, lightVP);
+        }
+
+        // 主 HDR pass
+        if (ok)
+        {
+            ok = impl.RecordOffscreenPass(viewProj);
+        }
+
+        // passthrough HDR → viewportColor
+        if (ok)
+        {
+            ok = impl.RecordPassthroughToViewport();
+        }
+    }
+    else
+    {
+        // 无相机：把 viewportColor 清成黑，避免 ImGui 采样到 Undefined。
+        // hdrColor 不写也不读——这一帧主 pass 跳过。
+        const auto fromLayout = impl.viewportLayoutShaderReadOnly
+            ? Orange::Rhi::TextureLayout::ShaderReadOnly
+            : Orange::Rhi::TextureLayout::Undefined;
+        cmd.TransitionTexture(*impl.viewportColor, fromLayout,
+                              Orange::Rhi::TextureLayout::ColorAttachment);
+        Orange::Rhi::ColorAttachment att{};
+        att.mpView           = impl.viewportColor->GetDefaultView();
+        att.mLoadOp          = Orange::Rhi::LoadOp::Clear;
+        att.mStoreOp         = Orange::Rhi::StoreOp::Store;
+        att.mClear.mColor[3] = 1.0f;
+        Orange::Rhi::RenderingDesc rd{};
+        rd.mRenderArea.mWidth  = impl.viewportWidth;
+        rd.mRenderArea.mHeight = impl.viewportHeight;
+        rd.mColorAttachments.push_back(att);
+        cmd.BeginRendering(rd);
+        cmd.EndRendering();
+        cmd.TransitionTexture(*impl.viewportColor,
+                              Orange::Rhi::TextureLayout::ColorAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        impl.viewportLayoutShaderReadOnly = true;
+    }
+
+    if (Orange::Failed(cmd.End()))
+    {
+        ORANGE_LOG_ERROR("Pipeline::RenderOffscreen: cmd End 失败 (frame={})",
+                         impl.frameIndex);
+        ++impl.frameIndex;
+        return;
+    }
+    if (Orange::Failed(impl.renderDevice->GetRhiDevice().SubmitCommandList(cmd)))
+    {
+        ORANGE_LOG_ERROR("Pipeline::RenderOffscreen: SubmitCommandList 失败 (frame={})",
+                         impl.frameIndex);
+        ++impl.frameIndex;
+        return;
+    }
+    if (Orange::Failed(impl.renderDevice->WaitIdle()))
+    {
+        ORANGE_LOG_ERROR("Pipeline::RenderOffscreen: WaitIdle 失败 (frame={})",
+                         impl.frameIndex);
+    }
+
+    (void)ok;  // ok==false 也走到这里（cmd 已经 End 才能 Submit）；下一帧重来
+    ++impl.frameIndex;
 }
 
 void Pipeline::Impl::EnsureMeshGpuCache()
@@ -2715,6 +3118,15 @@ void Pipeline::Render(Orange::Engine::World& world)
 
     if (!impl.initialized)
     {
+        return;
+    }
+
+    // 离屏模式分叉：不走 swap-chain renderer，最终输出落到 viewportColor。
+    // S1 范围：bloom / tonemap / godrays / RequestCapture / InsertPass 在
+    // 本路径下静默 skip，详见公共头 InitializeOffscreen 的 S1 说明。
+    if (impl.offscreenMode)
+    {
+        impl.RenderOffscreen(world);
         return;
     }
 
