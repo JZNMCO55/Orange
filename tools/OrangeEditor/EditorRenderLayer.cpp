@@ -1,0 +1,396 @@
+// EditorRenderLayer 主 TU —— 构造 / 析构 / OnUpdate / OnEvent / dock 布局 /
+// main menu / pending scene op / Assets / Console。其余面板（Scene /
+// EntityTree / Inspector）在 panels/ 下独立 TU，共享同一类声明
+// （EditorRenderLayer.h）。
+
+#include "EditorRenderLayer.h"
+
+#include "DemoWorld.h"
+#include "EditorHierarchy.h"
+#include "VulkanLoaderShim.h"
+
+#include <orange/engine/platform/Window.h>
+#include <orange/engine/scene/SceneSerialization.h>
+#include <orange/engine/scene/World.h>
+
+#include <orange/renderer/RenderTypes.h>
+#include <orange/renderer/VulkanInterop.h>
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+
+#include <imgui_internal.h>  // DockBuilder* API
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
+
+#include <cstdio>
+#include <string>
+#include <variant>
+
+namespace
+{
+
+// Esc 全局退出（与 Input::KeyCode::Escape 同值）；仅本 TU 用。
+constexpr std::int32_t kEscapeKeyRaw = 256;
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// 构造 / 析构
+// ---------------------------------------------------------------------------
+
+EditorRenderLayer::EditorRenderLayer(Orange::Engine::AppHost&             host,
+                                     Orange::Renderer::RenderDevice&      renderDevice,
+                                     Orange::Renderer::IRenderer&         renderer,
+                                     VkDescriptorPool                     descriptorPool,
+                                     VkDevice                             device,
+                                     EditorState&                         state)
+    : Orange::Engine::Layer("EditorRender")
+    , mHost(host)
+    , mRenderDevice(renderDevice)
+    , mRenderer(renderer)
+    , mDescriptorPool(descriptorPool)
+    , mDevice(device)
+    , mState(state)
+{
+    // 注册 swap-chain overlay callback —— 引擎 EndFrame 内 swap-chain
+    // 渲染窗口里调一次 ImGui_ImplVulkan_RenderDrawData，把当前帧 ImGui
+    // DrawData 录到主窗口 swap-chain image。
+    mRenderer.SetSwapchainOverlayCallback(
+        [](Orange::Rhi::RHICommandList& cmd,
+           std::uint32_t /*w*/, std::uint32_t /*h*/, std::uint64_t /*frameIndex*/)
+        {
+            void* rawCmd = Orange::Renderer::Interop::GetVulkanCommandBuffer(cmd);
+            if (rawCmd != nullptr) {
+                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
+                                                static_cast<VkCommandBuffer>(rawCmd));
+            }
+        });
+
+    // Scene 面板 ImGui::Image 用的 sampler —— 与 MakeImguiDescriptorPool
+    // 同一条 loader 解析路径（OrangeRender 内 volk 已加载的
+    // vkGetInstanceProcAddr），不依赖静态链 vulkan-1.lib。
+    CreateScenePanelSampler();
+}
+
+EditorRenderLayer::~EditorRenderLayer()
+{
+    // 清 callback 避免捕获已销毁资源
+    mRenderer.SetSwapchainOverlayCallback({});
+
+    // Pipeline 先释放（持有 viewportColor / hdrColor 等 RHI 资源），
+    // ImGui_ImplVulkan_Shutdown 在 main() 已先于 layer dtor 执行，所以
+    // 这里**不**再调 ImGui_ImplVulkan_RemoveTexture（ImGui 内部 pool
+    // 已 dead，descriptor set 同时 free，避免 use-after-free）。Pipeline
+    // 仍可安全 Shutdown —— 它走 mRenderDevice.WaitIdle + RHI 资源释放。
+    mpScenePipeline.reset();
+    // Sampler 直接走 loader 销毁；main() 的关停序列保证 vkDevice 还活着。
+    DestroyScenePanelSampler();
+}
+
+// ---------------------------------------------------------------------------
+// OnUpdate / OnEvent
+// ---------------------------------------------------------------------------
+
+void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
+{
+    // ---- ImGui 帧开始 ---------------------------------------------
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    // dock space —— 占满主 viewport，所有 imgui window 都可以 dock 进来。
+    // DockSpaceOverViewport 返回的 ID 在主 viewport 生命周期内稳定，下面
+    // DockBuilder 系列 API 用它建默认布局。
+    const ImGuiID dockspaceId =
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
+    BuildDefaultLayoutOnce(dockspaceId);
+    DrawMainMenuBar();
+
+    // 五个固定面板：Scene / Entity Tree / Inspector / Assets / Console。
+    DrawScenePanel();
+    DrawEntityTreePanel();
+    DrawInspectorPanel();
+    DrawAssetsPanel();
+    DrawConsolePanel(frame);
+
+    // 帧末统一 apply 场景级操作。放在 panel 绘制完之后、ImGui::Render
+    // 之前 —— 文件对话框是模态阻塞窗口，它内部会 pump 一些消息但不
+    // 影响本帧的 ImGui DrawData；swap world 之后的 selectedEntity /
+    // renamingEntity / euler 缓存清理也在此发生，下一帧才用新状态画。
+    ApplyPendingSceneOp();
+
+    ImGui::Render();
+
+    // ---- engine frame：BeginFrame → (overlay callback fires
+    //      ImGui_ImplVulkan_RenderDrawData) → EndFrame ----------------
+    Orange::Renderer::FrameTimeInfo time{};
+    time.mTotalTimeSeconds = frame.time.totalSeconds;
+    time.mDeltaTimeSeconds = static_cast<float>(frame.time.deltaSeconds);
+    if (Orange::Failed(mRenderer.BeginFrame(time))) {
+        std::fprintf(stderr, "[OrangeEditor] BeginFrame failed\n");
+        mHost.RequestExit();
+        return;
+    }
+    // 编辑器不渲染任何 SubmitItem 内容 —— 仅靠 overlay callback 内的
+    // ImGui draw data。FrameLifecycle 在 hasDraw=false + overlay 已
+    // 注册时会强制走 begin/end rendering 路径（FEATURE-2026-05-09 修
+    // 复的 overlay-on-empty-frame bug），callback 仍能正常触发。
+    if (Orange::Failed(mRenderer.EndFrame())) {
+        std::fprintf(stderr, "[OrangeEditor] EndFrame failed\n");
+        mHost.RequestExit();
+        return;
+    }
+
+    // ---- multi-viewport：让 ImGui 渲染所有"已拖出主窗口"的额外
+    //      viewport 到它们各自的 native window 上 -------------------
+    ImGuiIO& io = ImGui::GetIO();
+    if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+    }
+}
+
+bool EditorRenderLayer::OnEvent(const Orange::Engine::Platform::WindowEvent& event)
+{
+    // ImGui_ImplGlfw_InitForVulkan(true) 时 install_callbacks=true，
+    // ImGui 会自己装 GLFW 回调拿到所有事件 —— 这里**不**再转发
+    // KeyEvent，避免双触发。仅把 Esc 作为编辑器的全局退出快捷键拦
+    // 截。不检查 WantCaptureKeyboard：NavEnableKeyboard 开启后 ImGui
+    // 几乎永远占着键盘焦点（demo / dock 任一可导航 widget 在就会拿
+    // WantCaptureKeyboard=true），那样 Esc 永远到不了这里。Esc=quit
+    // 是 scaffold 选定的开发期约定，与 ImGui 的常规键盘交互不会冲突。
+    const auto* key = std::get_if<Orange::Engine::Platform::KeyEvent>(&event);
+    if (key == nullptr) { return false; }
+    if (key->action != Orange::Engine::Platform::KeyAction::Press) { return false; }
+    if (key->key != kEscapeKeyRaw) { return false; }
+    std::fprintf(stdout, "[OrangeEditor] Esc 按下，请求退出\n");
+    mHost.RequestExit();
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Dock 默认布局
+// ---------------------------------------------------------------------------
+
+// 首帧（或 imgui.ini 还没存过布局时）建默认 dock 布局。判定条件用
+// DockBuilderGetNode → 子节点为空，这样能兼容两种场景：
+//   * 首次启动 / 删了 imgui.ini —— 节点存在但无子，建布局；
+//   * 已有保存的布局 —— 节点有子，跳过、尊重用户调整。
+// 注意 DockBuilder* 来自 imgui_internal.h，是 ImGui 公开但内部稳定度
+// 比 imgui.h 略低的 API；编辑器侧使用是 ImGui 官方推荐路径。
+void EditorRenderLayer::BuildDefaultLayoutOnce(ImGuiID dockspaceId)
+{
+    ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspaceId);
+    if (node != nullptr && node->IsSplitNode()) { return; }
+
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    ImGui::DockBuilderAddNode(dockspaceId,
+                              ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspaceId,
+                                  ImGui::GetMainViewport()->Size);
+
+    // 布局：左 20% Entity Tree；右 25% Inspector；下 30% Assets/Console
+    // tab；剩余中央留给 Scene。比例与 Unity / Unreal 默认 layout 接近，
+    // 后续可让用户调；ImGui 会把改动写回 imgui.ini，下次启动恢复。
+    ImGuiID center = dockspaceId;
+    ImGuiID left   = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left,
+                                                0.20f, nullptr, &center);
+    ImGuiID right  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right,
+                                                0.25f, nullptr, &center);
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down,
+                                                0.30f, nullptr, &center);
+
+    ImGui::DockBuilderDockWindow("Entity Tree", left);
+    ImGui::DockBuilderDockWindow("Inspector",   right);
+    ImGui::DockBuilderDockWindow("Assets",      bottom);
+    ImGui::DockBuilderDockWindow("Console",     bottom);  // 同节点 = tab
+    ImGui::DockBuilderDockWindow("Scene",       center);
+
+    ImGui::DockBuilderFinish(dockspaceId);
+}
+
+// ---------------------------------------------------------------------------
+// Main menu bar / scene op
+// ---------------------------------------------------------------------------
+
+// 主菜单栏（File / View / Help ...）。BeginMainMenuBar 创建一个固定
+// 顶部的浮动 bar，与 DockSpaceOverViewport 共存 —— ImGui 自动把
+// dockspace 下移留出 menu bar 高度。文件操作不在此立即执行：菜单点
+// 击仅设置 pendingSceneOp，真正的 dialog + Save/Load 调用走帧末
+// ApplyPendingSceneOp。
+//
+// 快捷键 Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S 在菜单 label 处只
+// 是显示文本，真要响应快捷键需要在 OnUpdate 里检 IsKeyPressed +
+// ModCtrl。本 task 范围内菜单点击足以验收 Save/Load 流程；快捷键留
+// 给后续微调（同时也避免与 Entity Tree 面板的 F2/Del 冲突）。
+void EditorRenderLayer::DrawMainMenuBar()
+{
+    if (!ImGui::BeginMainMenuBar()) { return; }
+    if (ImGui::BeginMenu("File")) {
+        if (ImGui::MenuItem("New Scene")) {
+            mState.pendingSceneOp = SceneOp::New;
+        }
+        if (ImGui::MenuItem("Open Scene...")) {
+            mState.pendingSceneOp = SceneOp::Open;
+        }
+        ImGui::Separator();
+        const bool canQuickSave = !mState.currentScenePath.empty();
+        if (ImGui::MenuItem("Save", nullptr, false, canQuickSave)) {
+            mState.pendingSceneOp = SceneOp::Save;
+        }
+        if (ImGui::MenuItem("Save Scene As...")) {
+            mState.pendingSceneOp = SceneOp::SaveAs;
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Exit")) {
+            mHost.RequestExit();
+        }
+        ImGui::EndMenu();
+    }
+    // 当前 scene 路径作为只读 indicator 显示在菜单栏右侧 —— OS 窗口
+    // 标题这一层目前没有动态修改入口，先放这里让用户清楚自己在编辑哪个
+    // 文件 / 是不是 Untitled。
+    const std::string& path = mState.currentScenePath;
+    const char* sceneLabel  = path.empty() ? "[Untitled]" : path.c_str();
+    const float bbWidth =
+        ImGui::CalcTextSize(sceneLabel).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+    ImGui::SameLine(ImGui::GetWindowWidth() - bbWidth);
+    ImGui::TextDisabled("%s", sceneLabel);
+    ImGui::EndMainMenuBar();
+}
+
+// 把 EditorState 内与"被编辑 world 实体身份强相关"的状态全清空。
+// Open / New 切 world 后必须调；不调的话 selectedEntity 会指向新 world
+// 里不存在的 entity，Inspector 看到野指针。
+void EditorRenderLayer::ResetEntityLocalState()
+{
+    mState.selectedEntity            = Orange::Engine::Entity::Invalid();
+    mState.renamingEntity            = Orange::Engine::Entity::Invalid();
+    mState.renameBuffer[0]           = '\0';
+    mState.renameJustStarted         = false;
+    mState.pendingDelete             = Orange::Engine::Entity::Invalid();
+    mState.pendingReparent.valid     = false;
+    mState.pendingCreate.valid       = false;
+    mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+}
+
+// 帧末统一 apply 用户菜单点击的场景操作。dialog 阻塞期 ImGui 主循环
+// 等待，可接受 —— 编辑器无实时帧率要求。失败 / 取消都仅 stderr 记
+// 录，不弹 modal，与项目"日志走 stderr，等 Core::Log 接入再改"的过
+// 渡期惯例一致。
+void EditorRenderLayer::ApplyPendingSceneOp()
+{
+    const SceneOp op = mState.pendingSceneOp;
+    if (op == SceneOp::None) { return; }
+    mState.pendingSceneOp = SceneOp::None;
+
+    // 拿主窗口 HWND 给 dialog 当 parent，确保 dialog 居中 + 抢焦点。
+    auto* gw = static_cast<GLFWwindow*>(
+        mHost.GetWindow().GetGlfwWindowHandle());
+    void* hwnd = (gw != nullptr) ? static_cast<void*>(glfwGetWin32Window(gw)) : nullptr;
+
+    switch (op) {
+        case SceneOp::New: {
+            mState.pWorld = std::make_unique<Orange::Engine::World>();
+            SeedDemoWorld(mState);  // 与启动期一致；后续真要"空场景"再做"New Empty"
+            mState.currentScenePath.clear();
+            ResetEntityLocalState();
+            std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
+            break;
+        }
+        case SceneOp::Open: {
+            std::string path;
+            if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) { break; }
+            auto pNew = std::make_unique<Orange::Engine::World>();
+            auto rc = Orange::Engine::Scene::Load(path, *pNew);
+            if (rc.IsErr()) {
+                std::fprintf(stderr,
+                             "[OrangeEditor] Scene::Load failed: %s (code=%u)\n",
+                             path.c_str(),
+                             static_cast<unsigned>(rc.Error()));
+                break;  // 保留原 world
+            }
+            mState.pWorld = std::move(pNew);
+            mState.currentScenePath = path;
+            ResetEntityLocalState();
+            std::fprintf(stdout, "[OrangeEditor] opened scene: %s\n", path.c_str());
+            break;
+        }
+        case SceneOp::Save: {
+            if (mState.currentScenePath.empty()) {
+                // 没保存过 → 转 SaveAs。
+                std::string path;
+                if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
+                mState.currentScenePath = std::move(path);
+            }
+            auto rc = Orange::Engine::Scene::Save(
+                *mState.pWorld, mState.currentScenePath);
+            if (rc.IsErr()) {
+                std::fprintf(stderr,
+                             "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
+                             mState.currentScenePath.c_str(),
+                             static_cast<unsigned>(rc.Error()));
+            } else {
+                std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
+                             mState.currentScenePath.c_str());
+            }
+            break;
+        }
+        case SceneOp::SaveAs: {
+            std::string path;
+            if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
+            auto rc = Orange::Engine::Scene::Save(*mState.pWorld, path);
+            if (rc.IsErr()) {
+                std::fprintf(stderr,
+                             "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
+                             path.c_str(),
+                             static_cast<unsigned>(rc.Error()));
+                break;
+            }
+            mState.currentScenePath = std::move(path);
+            std::fprintf(stdout, "[OrangeEditor] saved scene as: %s\n",
+                         mState.currentScenePath.c_str());
+            break;
+        }
+        case SceneOp::None:
+            break;  // unreachable, 上面已 early return
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 小面板（Assets / Console）—— 占位 + 帧统计
+// ---------------------------------------------------------------------------
+
+void EditorRenderLayer::DrawAssetsPanel()
+{
+    ImGui::Begin("Assets");
+    ImGui::TextDisabled("asset browser — Phase 6 后续");
+    ImGui::End();
+}
+
+// Console 面板放调试信息：帧 index、deltaTime、Esc 退出按钮、Vulkan
+// multi-viewport 提示。Task 06-02 阶段编辑器没有日志系统，先把这些
+// 当作 "console" 的内容，等真接 Core::Log 时换成日志流。
+void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& frame)
+{
+    ImGui::Begin("Console");
+    ImGui::Text("OrangeEditor v0.0.3 (Task 06-02)");
+    ImGui::Separator();
+    ImGui::Text("frame index: %llu",
+                static_cast<unsigned long long>(frame.time.frameIndex));
+    ImGui::Text("delta: %.3f ms",
+                frame.time.deltaSeconds * 1000.0);
+    ImGui::Separator();
+    ImGui::TextWrapped(
+        "Drag any panel's tab OUT of the main window to detach it as a "
+        "floating native OS window (ImGui multi-viewport).");
+    ImGui::Separator();
+    if (ImGui::Button("Quit (or press Esc)")) {
+        mHost.RequestExit();
+    }
+    ImGui::End();
+}

@@ -138,7 +138,12 @@ add_executable(OrangeEditor
     DemoWorld.cpp
     EditorCameraControl.cpp
     EditorHierarchy.cpp
+    EditorRenderLayer.cpp
+    EditorWidgets.cpp
     VulkanLoaderShim.cpp
+    panels/EntityTreePanel.cpp
+    panels/InspectorPanel.cpp
+    panels/ScenePanel.cpp
 )
 # OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
 # link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。

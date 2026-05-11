@@ -1,0 +1,425 @@
+// Inspector 面板（每个内置组件一个 Draw 段 + Add Component popup）。
+// 与 EditorRenderLayer.cpp 主 TU 共享同一类声明 EditorRenderLayer。
+
+#include "../EditorRenderLayer.h"
+
+#include "../EditorWidgets.h"
+
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/ColliderDesc.h>
+#include <orange/engine/physics/RigidBodyComponent.h>
+#include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/ParticleEmitterComponent.h>
+#include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/World.h>
+
+#include <glm/gtc/quaternion.hpp>
+#include <glm/trigonometric.hpp>
+
+#include <imgui.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <variant>
+
+// Inspector 入口：选中实体的 entity id + 所有"已挂着的内置 component"
+// 各起一个 CollapsingHeader 段。每段 if HasComponent → DrawXxx。
+//
+// 组件类型表是**硬编码**的（task 描述就是"内置组件"列表）。引擎仍处
+// 在 Phase 1–6 阶段禁止 entt::meta / 反射，所以游戏侧自定义 component
+// 暂时只能不显示 —— Phase 6 后续真要扩展时走"编辑器扩展点 API 让游
+// 戏注册自己的 inspector callback"路径，不在本 task 范围内。
+void EditorRenderLayer::DrawInspectorPanel()
+{
+    ImGui::Begin("Inspector");
+    if (mState.pWorld == nullptr || !mState.selectedEntity.IsValid()) {
+        ImGui::TextDisabled("(select an entity)");
+        ImGui::End();
+        return;
+    }
+
+    const Orange::Engine::Entity e = mState.selectedEntity;
+    ImGui::Text("Entity #%u",
+                static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
+    ImGui::Separator();
+
+    DrawInspectorName(e);
+    DrawInspectorTransform(e);
+    DrawInspectorHierarchy(e);
+    DrawInspectorDirectionalLight(e);
+    DrawInspectorRenderable(e);
+    DrawInspectorRigidBody(e);
+    DrawInspectorCollider(e);
+    DrawInspectorParticleEmitter(e);
+    DrawInspectorAnimator(e);
+
+    // ---- + Add Component -----------------------------------------
+    // 列出尚未挂在本实体上的内置可添加组件。Animator 跳过 —— 需要具
+    // 体 IAnimator 子类实例，不能用空 unique_ptr 默认构造。Hierarchy
+    // 跳过 —— DnD 管理，手动 add 会出现 "孤立 HC"（parent invalid
+    // 且不挂在任何父链上）。
+    ImGui::Separator();
+    if (ImGui::Button("+ Add Component")) {
+        ImGui::OpenPopup("##add_component");
+    }
+    if (ImGui::BeginPopup("##add_component")) {
+        using namespace Orange::Engine::Scene;
+        using namespace Orange::Engine::Render;
+        using namespace Orange::Engine::Physics;
+        auto& w = *mState.pWorld;
+        if (!w.HasComponent<TransformComponent>(e)
+            && ImGui::MenuItem("Transform")) {
+            w.AddComponent<TransformComponent>(e, TransformComponent{});
+        }
+        if (!w.HasComponent<DirectionalLight>(e)
+            && ImGui::MenuItem("Directional Light")) {
+            w.AddComponent<DirectionalLight>(e, DirectionalLight{});
+        }
+        if (!w.HasComponent<RenderableComponent>(e)
+            && ImGui::MenuItem("Renderable")) {
+            w.AddComponent<RenderableComponent>(e, RenderableComponent{});
+        }
+        if (!w.HasComponent<RigidBodyComponent>(e)
+            && ImGui::MenuItem("RigidBody")) {
+            w.AddComponent<RigidBodyComponent>(e, RigidBodyComponent{});
+        }
+        if (!w.HasComponent<ColliderComponent>(e)
+            && ImGui::MenuItem("Collider")) {
+            w.AddComponent<ColliderComponent>(e, ColliderComponent{});
+        }
+        if (!w.HasComponent<ParticleEmitterComponent>(e)
+            && ImGui::MenuItem("Particle Emitter")) {
+            w.AddComponent<ParticleEmitterComponent>(e,
+                ParticleEmitterComponent{});
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::End();
+}
+
+// CollapsingHeader 包装 —— 多一个 "右键 → Remove Component" 上下文菜
+// 单。outRemove 表示用户本帧请求了移除；调用方在 fields 渲染完后据
+// 此调 RemoveComponent。把 remove 写在 fields 之后是为了让该帧的
+// field 控件仍正常渲染，不会因为半途 remove 而 GetComponent 拿到野
+// 指针。
+//
+// 不暴露 Name / Hierarchy 的 remove —— Name 总在让 Entity Tree 有
+// 名字显示；Hierarchy 是 DnD 维护的结构性数据，手动 remove 会让自
+// 身脱离父链且子节点变成孤儿。这两段调用方直接用裸 CollapsingHeader。
+bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
+                                        bool defaultOpen)
+{
+    *outRemove = false;
+    const bool open = ImGui::CollapsingHeader(
+        label, defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+    if (ImGui::BeginPopupContextItem()) {
+        if (ImGui::MenuItem("Remove Component")) { *outRemove = true; }
+        ImGui::EndPopup();
+    }
+    return open;
+}
+
+// ---- 各 component 段 -------------------------------------------------
+//
+// 每个 DrawInspectorXxx 的统一模式：
+//   1. 先 HasComponent 检查 —— 不挂就整段不显示
+//   2. CollapsingHeader（默认展开），点 header 可折叠
+//   3. ImGui::DragFloat / Checkbox / Combo 等控件直接读写 component 字段
+//   4. 编辑修改后不需要显式 commit，下一帧就会反映到 ECS（组件就是这
+//      行数据）
+//
+// 没必要在每段中包 PushID —— ImGui 的控件 label（"##xxx"）+ 当前 ID
+// stack（DrawInspectorPanel 在一个 Window 内，没多重并发同名 entity）
+// 已经足够区分。
+
+void EditorRenderLayer::DrawInspectorName(Orange::Engine::Entity e)
+{
+    using NameComponent = Orange::Engine::Scene::NameComponent;
+    if (!mState.pWorld->HasComponent<NameComponent>(e)) { return; }
+    if (!ImGui::CollapsingHeader("Name", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+    auto* nc = mState.pWorld->GetComponent<NameComponent>(e);
+    // 直接复用 mState.renameBuffer 容量大小的本地缓冲，避免对
+    // std::string 内存的实时 resize。每帧从 component 拷贝进 buf，
+    // 编辑后写回 —— 这样多个面板（树 InputText / Inspector InputText）
+    // 同时观察一份 NameComponent 时不会跟 mState.renameBuffer 串味。
+    char buf[256];
+    const std::size_t n = std::min(nc->name.size(), sizeof(buf) - 1);
+    std::memcpy(buf, nc->name.data(), n);
+    buf[n] = '\0';
+    if (ImGui::InputText("##name", buf, sizeof(buf))) {
+        nc->name = buf;
+    }
+}
+
+void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
+{
+    using TransformComponent = Orange::Engine::Scene::TransformComponent;
+    if (!mState.pWorld->HasComponent<TransformComponent>(e)) { return; }
+    bool remove = false;
+    const bool open = ComponentHeader("Transform", &remove);
+    if (!open) {
+        if (remove) {
+            mState.pWorld->RemoveComponent<TransformComponent>(e);
+            mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        }
+        return;
+    }
+    auto* t = mState.pWorld->GetComponent<TransformComponent>(e);
+
+    DragVec3Colored("Position", &t->position.x, 0.05f);
+
+    // Euler 缓存：换实体了 → 重置 cache（从 quat 推 Euler）；同一实体
+    // 持续编辑 → 用 cache 保证 DragFloat3 在 gimbal lock 附近不抖。
+    if (mState.transformEulerCacheEntity != e) {
+        const glm::vec3 eulerRad = glm::eulerAngles(t->rotation);
+        mState.transformEulerCache       = glm::degrees(eulerRad);
+        mState.transformEulerCacheEntity = e;
+    }
+    if (DragVec3Colored("Rotation (°)", &mState.transformEulerCache.x, 0.5f)) {
+        t->rotation = glm::quat(glm::radians(mState.transformEulerCache));
+    }
+
+    DragVec3Colored("Scale", &t->scale.x, 0.05f);
+
+    if (remove) {
+        mState.pWorld->RemoveComponent<TransformComponent>(e);
+        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    }
+}
+
+void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
+{
+    using HC = Orange::Engine::Scene::HierarchyComponent;
+    if (!mState.pWorld->HasComponent<HC>(e)) { return; }
+    if (!ImGui::CollapsingHeader("Hierarchy")) { return; }
+    const auto* h = mState.pWorld->GetComponent<HC>(e);
+
+    auto idTextOf = [](Orange::Engine::Entity x) -> std::string {
+        if (!x.IsValid()) { return "(none)"; }
+        char tmp[32];
+        std::snprintf(tmp, sizeof(tmp), "#%u",
+                      static_cast<unsigned>(
+                          static_cast<std::uint32_t>(x.Value())));
+        return tmp;
+    };
+    // 全只读 —— 父子关系的编辑入口是 Entity Tree 面板的 DnD（Task 06-03）。
+    // 在这里再加一遍 reparent 控件会让两套修改路径竞争状态。
+    ImGui::Text("Parent       : %s", idTextOf(h->parent).c_str());
+    ImGui::Text("First child  : %s", idTextOf(h->firstChild).c_str());
+    ImGui::Text("Prev sibling : %s", idTextOf(h->prevSibling).c_str());
+    ImGui::Text("Next sibling : %s", idTextOf(h->nextSibling).c_str());
+    ImGui::TextDisabled("(edit by drag-drop in Entity Tree)");
+}
+
+void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
+{
+    using DirectionalLight = Orange::Engine::Render::DirectionalLight;
+    if (!mState.pWorld->HasComponent<DirectionalLight>(e)) { return; }
+    bool remove = false;
+    const bool open = ComponentHeader("Directional Light", &remove);
+    if (!open) {
+        if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
+        return;
+    }
+    auto* l = mState.pWorld->GetComponent<DirectionalLight>(e);
+    // direction 约定为单位向量；UI 不强制 normalize（用户拖中间态可能
+    // 临时变长度），但 Pipeline 自己在着色阶段会按需 normalize。这里
+    // 加一个 "Normalize" 按钮让用户随时归一化。
+    DragVec3Colored("Direction", &l->direction.x, 0.01f);
+    if (ImGui::SmallButton("Normalize Direction")) {
+        const float len = glm::length(l->direction);
+        if (len > 0.0f) { l->direction /= len; }
+    }
+    ImGui::ColorEdit3("Color", &l->color.x);
+    ImGui::DragFloat("Intensity", &l->intensity, 0.05f, 0.0f, 1000.0f);
+    ImGui::Checkbox("Casts Shadow", &l->castsShadow);
+
+    if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
+}
+
+void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
+{
+    using RC = Orange::Engine::Render::RenderableComponent;
+    if (!mState.pWorld->HasComponent<RC>(e)) { return; }
+    bool remove = false;
+    const bool open = ComponentHeader("Renderable", &remove);
+    if (!open) {
+        if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
+        return;
+    }
+    auto* r = mState.pWorld->GetComponent<RC>(e);
+    // mesh / materialInstance 是 handle / 裸指针 —— 编辑得通过 Asset
+    // 浏览器（Phase 6 后续 task）才有意义。这里只读显示。
+    ImGui::Text("Mesh handle      : %llu",
+                static_cast<unsigned long long>(r->mesh.Value()));
+    ImGui::Text("MaterialInstance : %p",
+                reinterpret_cast<void*>(r->materialInstance));
+    ImGui::Checkbox("Visible",      &r->visible);
+    ImGui::Checkbox("Casts Shadow", &r->castsShadow);
+
+    if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
+}
+
+void EditorRenderLayer::DrawInspectorRigidBody(Orange::Engine::Entity e)
+{
+    using RB = Orange::Engine::Physics::RigidBodyComponent;
+    using BT = Orange::Engine::Physics::BodyType;
+    if (!mState.pWorld->HasComponent<RB>(e)) { return; }
+    bool remove = false;
+    const bool open = ComponentHeader("RigidBody", &remove);
+    if (!open) {
+        if (remove) { mState.pWorld->RemoveComponent<RB>(e); }
+        return;
+    }
+    auto* b = mState.pWorld->GetComponent<RB>(e);
+
+    const char* kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
+    int typeIdx = static_cast<int>(b->type);
+    if (ImGui::Combo("Type", &typeIdx, kBodyTypeNames, 3)) {
+        b->type = static_cast<BT>(typeIdx);
+    }
+    ImGui::DragFloat2("Initial Position", &b->initialPosition.x, 0.05f);
+    ImGui::DragFloat("Initial Angle (rad)", &b->initialAngle, 0.01f);
+    ImGui::DragFloat2("Linear Velocity",  &b->linearVelocity.x,  0.05f);
+    ImGui::DragFloat("Angular Velocity",  &b->angularVelocity,   0.05f);
+    ImGui::DragFloat("Linear Damping",    &b->linearDamping,     0.01f, 0.0f, 100.0f);
+    ImGui::DragFloat("Angular Damping",   &b->angularDamping,    0.01f, 0.0f, 100.0f);
+    ImGui::Checkbox("Fixed Rotation",     &b->fixedRotation);
+    ImGui::DragFloat("Gravity Scale",     &b->gravityScale,      0.05f);
+    // handle 是 PhysicsWorld::AddBody 反写的运行时引用，编辑器不该动；
+    // 但显示一下让用户知道 body 是否已注册。
+    ImGui::Separator();
+    ImGui::TextDisabled("handle (runtime) : %llu",
+                        static_cast<unsigned long long>(b->handle.Value()));
+
+    if (remove) { mState.pWorld->RemoveComponent<RB>(e); }
+}
+
+void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
+{
+    using CC = Orange::Engine::Physics::ColliderComponent;
+    using ::Orange::Engine::Physics::CircleDesc;
+    using ::Orange::Engine::Physics::BoxDesc;
+    using ::Orange::Engine::Physics::PolygonDesc;
+    using ::Orange::Engine::Physics::EdgeChainDesc;
+    if (!mState.pWorld->HasComponent<CC>(e)) { return; }
+    bool remove = false;
+    const bool open = ComponentHeader("Collider", &remove);
+    if (!open) {
+        if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+        return;
+    }
+    auto* c = mState.pWorld->GetComponent<CC>(e);
+
+    // shape 是 std::variant —— 显示 shape 类型 + 各自的简单数值。
+    // 切换 shape 类型（assign 一个不同 alternative）会重置数据，
+    // 比起 Inspector 一行 Combo 误操作风险大，这里**不**提供切换
+    // 控件，留给 Task 06-05 / 后续 collider 编辑专用 UI。
+    if (std::holds_alternative<CircleDesc>(c->shape)) {
+        auto& s = std::get<CircleDesc>(c->shape);
+        ImGui::Text("Shape: Circle");
+        ImGui::DragFloat("Radius", &s.radius, 0.01f, 0.0f, 0.0f);
+        ImGui::DragFloat2("Center", &s.center.x, 0.01f);
+    } else if (std::holds_alternative<BoxDesc>(c->shape)) {
+        auto& s = std::get<BoxDesc>(c->shape);
+        ImGui::Text("Shape: Box");
+        ImGui::DragFloat2("Half Extents", &s.halfExtents.x, 0.01f);
+        ImGui::DragFloat2("Center",       &s.center.x,      0.01f);
+    } else if (std::holds_alternative<PolygonDesc>(c->shape)) {
+        const auto& s = std::get<PolygonDesc>(c->shape);
+        ImGui::Text("Shape: Polygon (%u verts)",
+                    static_cast<unsigned>(s.count));
+        ImGui::TextDisabled("(polygon vertex editing — later task)");
+    } else if (std::holds_alternative<EdgeChainDesc>(c->shape)) {
+        const auto& s = std::get<EdgeChainDesc>(c->shape);
+        ImGui::Text("Shape: EdgeChain (%u verts, loop=%s)",
+                    static_cast<unsigned>(s.count),
+                    s.isLoop ? "yes" : "no");
+        ImGui::TextDisabled("(edge chain editing — later task)");
+    }
+    ImGui::Separator();
+    ImGui::DragFloat("Density",     &c->density,     0.01f, 0.0f, 0.0f);
+    ImGui::DragFloat("Friction",    &c->friction,    0.01f, 0.0f, 1.0f);
+    ImGui::DragFloat("Restitution", &c->restitution, 0.01f, 0.0f, 1.0f);
+    ImGui::Checkbox("Is Sensor",    &c->isSensor);
+
+    if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+}
+
+void EditorRenderLayer::DrawInspectorParticleEmitter(Orange::Engine::Entity e)
+{
+    using PEC = Orange::Engine::Render::ParticleEmitterComponent;
+    if (!mState.pWorld->HasComponent<PEC>(e)) { return; }
+    bool remove = false;
+    const bool open = ComponentHeader("Particle Emitter", &remove);
+    if (!open) {
+        if (remove) { mState.pWorld->RemoveComponent<PEC>(e); }
+        return;
+    }
+    auto* p = mState.pWorld->GetComponent<PEC>(e);
+    auto& d = p->desc;
+
+    ImGui::Checkbox("Emitting", &p->emitting);
+    ImGui::DragFloat("Emission Rate (/s)", &d.emissionRate, 0.5f, 0.0f, 0.0f);
+
+    ImGui::SeparatorText("Lifetime");
+    ImGui::DragFloat("Lifetime Min (s)", &d.lifetimeMin, 0.01f, 0.0f, 0.0f);
+    ImGui::DragFloat("Lifetime Max (s)", &d.lifetimeMax, 0.01f, 0.0f, 0.0f);
+
+    ImGui::SeparatorText("Spawn Offset (entity local)");
+    ImGui::DragFloat2("Offset Min", &d.spawnOffsetMin.x, 0.01f);
+    ImGui::DragFloat2("Offset Max", &d.spawnOffsetMax.x, 0.01f);
+
+    ImGui::SeparatorText("Initial Velocity (m/s, worldspace)");
+    ImGui::DragFloat2("Velocity Min", &d.initialVelocityMin.x, 0.05f);
+    ImGui::DragFloat2("Velocity Max", &d.initialVelocityMax.x, 0.05f);
+
+    ImGui::SeparatorText("Forces");
+    ImGui::DragFloat2("Gravity (m/s²)", &d.gravity.x, 0.05f);
+
+    ImGui::SeparatorText("Color curve (linear lerp start→end by age01)");
+    // 颜色 RGB + alpha 分开 —— alpha > 1 触发 bloom 拾取，需要 DragFloat
+    // 而非 ColorEdit 的 [0,1] clamp。所以 RGB 给 ColorEdit3，alpha 单独
+    // DragFloat。
+    ImGui::ColorEdit3("Color Start RGB", &d.colorStart.x);
+    ImGui::DragFloat("Color Start Alpha", &d.colorStart.w, 0.01f, 0.0f, 0.0f);
+    ImGui::ColorEdit3("Color End RGB",   &d.colorEnd.x);
+    ImGui::DragFloat("Color End Alpha",   &d.colorEnd.w,   0.01f, 0.0f, 0.0f);
+
+    ImGui::SeparatorText("Size curve");
+    ImGui::DragFloat("Size Start", &d.sizeStart, 0.005f, 0.0f, 0.0f);
+    ImGui::DragFloat("Size End",   &d.sizeEnd,   0.005f, 0.0f, 0.0f);
+
+    ImGui::SeparatorText("Pool");
+    int maxP = static_cast<int>(d.maxParticles);
+    if (ImGui::DragInt("Max Particles", &maxP, 1.0f, 0, 65536)) {
+        d.maxParticles = static_cast<std::uint32_t>(std::max(0, maxP));
+    }
+
+    ImGui::TextDisabled("(real-time preview pending Task 06-08 viewport)");
+
+    if (remove) { mState.pWorld->RemoveComponent<PEC>(e); }
+}
+
+void EditorRenderLayer::DrawInspectorAnimator(Orange::Engine::Entity e)
+{
+    using AC = Orange::Engine::Animation::AnimatorComponent;
+    if (!mState.pWorld->HasComponent<AC>(e)) { return; }
+    if (!ImGui::CollapsingHeader("Animator")) { return; }
+    const auto* a = mState.pWorld->GetComponent<AC>(e);
+    // AnimatorComponent 持 unique_ptr<IAnimator>，是 move-only 抽象类指
+    // 针，运行时 "换 backend" 不是 inspector 一行 combo 能搞定的。这里
+    // 仅显示是否挂着 + 指针地址；详细参数交给后续动画子模式。
+    ImGui::Text("Animator (runtime) : %p",
+                reinterpret_cast<const void*>(a->animator.get()));
+    ImGui::TextDisabled("(animator backend editing — later task)");
+}
