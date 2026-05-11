@@ -631,3 +631,24 @@ endif ()
 # 按顺序 add_subdirectory 每一个 sample。
 # ---------------------------------------------------------------------------
 add_subdirectory(samples)
+
+# ---------------------------------------------------------------------------
+# OrangeEditor（tools/OrangeEditor）
+#
+# 编辑器是双模 CMake 工程：可作为本仓子目录被 add_subdirectory 拉入同一
+# sln（开发期主路径，免去两阶段 install），也可作为顶级独立工程通过
+# `find_package(OrangeEngine CONFIG)` 消费已 install 的引擎（CI 验证路径，
+# `editor_build_smoke` ctest 守门）。两条路径都要求编辑器只链
+# `OrangeEngine::orange_engine` 公共 target——API 纪律靠 target_include_
+# directories 的 PRIVATE 范围守，不靠"不在同一 sln"守。
+#
+# 默认 ON 仅对顶层 build——作为引擎下游 SDK 被 add_subdirectory 嵌入时
+# 默认 OFF，与 ORANGE_ENGINE_BUILD_TESTS / ORANGE_ENGINE_INSTALL 同策略。
+# ---------------------------------------------------------------------------
+option(ORANGE_ENGINE_BUILD_EDITOR
+    "Build tools/OrangeEditor as part of engine sln"
+    "${PROJECT_IS_TOP_LEVEL}")
+
+if (ORANGE_ENGINE_BUILD_EDITOR)
+    add_subdirectory(tools/OrangeEditor)
+endif ()

@@ -1,48 +1,64 @@
-# OrangeEditor —— Phase 6 / Task 06-01 起步 target。
+# OrangeEditor —— OrangeEngine 关卡 / 粒子 / 材质编辑器。
 #
-# **本 CMake 工程刻意是顶级独立工程**（不在 OrangeEngine 主仓 root 的
-# add_subdirectory 链上），仅通过 `find_package(OrangeEngine CONFIG)` 消
-# 费引擎。这是 Task 06-01 的核心约束 ——
+# 双模 CMake 工程，两条路径都受支持，二者不互斥：
 #
-#   "编辑器通过 find_package(OrangeEngine) 依赖引擎，不直接吃源；这是
-#    引擎 API 自身可消费性的最强验证"
+#   * **In-tree（开发期主路径）**：被引擎仓 root 的 `add_subdirectory(tools/OrangeEditor)`
+#     拉进同一 sln，跟引擎共享 build/configure 周期。改一行引擎源码 →
+#     直接 F5 编辑器，免去两阶段 install。由根 CMake 的
+#     `ORANGE_ENGINE_BUILD_EDITOR` option 控制（顶层 build 时默认 ON）。
 #
-# 等同于 game 仓库消费引擎的方式：先 `cmake --install build` 把引擎装
-# 到一个 prefix，再用 `-DCMAKE_PREFIX_PATH=<install-prefix>` 配置编辑
-# 器。详细 build 流程见同目录 README.md。
+#   * **Standalone consumer（CI 验证路径）**：本目录作为顶级 CMake 工程
+#     独立 configure，通过 `find_package(OrangeEngine CONFIG)` 消费已
+#     install 的引擎。这是引擎公共 API 可用性的最强验证——
 #
-# CI 验证：tests/install/editor_build_smoke.cmake 自动跑这套两阶段流
-# 程，确保 `find_package` 消费链不回归。
+#       "编辑器通过 find_package(OrangeEngine) 依赖引擎，不直接吃源；这是
+#        引擎 API 自身可消费性的最强验证"
+#
+#     用法：先 `cmake --install build --prefix build/install_tree` 装
+#     引擎，再用 `-DCMAKE_PREFIX_PATH=<install-prefix>` 配置本目录。
+#     详细 build 流程见同目录 README.md。
+#
+# CI 验证：tests/install/editor_build_smoke.cmake 自动跑 standalone
+# 路径，确保 `find_package` 消费链不回归。
+#
+# 不论哪条路径，编辑器仅链 `OrangeEngine::orange_engine` 公共 namespaced
+# target——CMake 的 target_include_directories PRIVATE 把 `src/` 关在外
+# 面，编辑器看不到引擎 internal 头，API 纪律靠 target visibility 守。
 
 cmake_minimum_required(VERSION 3.28)
 
 project(OrangeEditor
     VERSION   0.0.2
     LANGUAGES CXX
-    DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器（Phase 6 起）")
+    DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# `0.1` 系列 ABI 不稳，但 Task 06-01 阶段编辑器只触碰 AppHost 这种最
-# 稳定的公共面；将来引擎 API 出现 0.x 内的破坏性变更时，编辑器跟随
-# 引擎一同发版本号即可。
-find_package(OrangeEngine 0.1 CONFIG REQUIRED)
-
+# 双模守卫：in-tree 路径下 OrangeEngine::orange_engine 已由父 CMake 创
+# 建（根 CMakeLists 的 ALIAS），跳过 find_package；standalone 路径下走
+# `find_package(OrangeEngine 0.1 CONFIG REQUIRED)` 从已 install 的 SDK
+# 拿同名 IMPORTED target。`0.1` 系列 ABI 不稳，将来 0.x 内出现破坏性
+# 变更时编辑器跟随引擎一同发版本号即可。
 if (NOT TARGET OrangeEngine::orange_engine)
-    message(FATAL_ERROR
-        "OrangeEditor: find_package(OrangeEngine CONFIG) 通过了，但 "
-        "namespaced target OrangeEngine::orange_engine 不存在 —— "
-        "OrangeEngineTargets.cmake 可能损坏。")
+    find_package(OrangeEngine 0.1 CONFIG REQUIRED)
+    if (NOT TARGET OrangeEngine::orange_engine)
+        message(FATAL_ERROR
+            "OrangeEditor: find_package(OrangeEngine CONFIG) 通过了，但 "
+            "namespaced target OrangeEngine::orange_engine 不存在 —— "
+            "OrangeEngineTargets.cmake 可能损坏。")
+    endif ()
 endif ()
 
 # OrangeRender 由 OrangeEngine 的 find_dependency 拉进来；编辑器 ImGui
 # 接入需要走 Orange::Renderer::Interop 公共面拿 VkInstance / VkDevice
 # 等 raw Vulkan handle，因此显式确认 Renderer 公共头可见 + 绑定 namespaced
-# target 到 link line（已经被 OrangeEngine 公共依赖间接传播，这里 explicit
-# 一下让 build 错误更清晰）。
-find_package(OrangeRender 0.1 CONFIG REQUIRED)
+# target 到 link line（in-tree 时父 CMake 已经 find_package 过，重复
+# find_package 是无害的 cache hit；同样守一道 guard 让意图清晰）。
+if (NOT TARGET OrangeRender::orange_render)
+    find_package(OrangeRender 0.1 CONFIG REQUIRED)
+endif ()
 
 # Vulkan SDK headers —— ImGui Vulkan backend 直接 #include <vulkan/vulkan.h>，
 # 编辑器自己也需要 cast Interop::* void* 回 VkInstance 等。OrangeRender
