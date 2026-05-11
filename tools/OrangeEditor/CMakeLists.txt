@@ -135,6 +135,8 @@ endif ()
 
 add_executable(OrangeEditor
     main.cpp
+    DemoWorld.cpp
+    EditorCameraControl.cpp
     EditorHierarchy.cpp
     VulkanLoaderShim.cpp
 )
