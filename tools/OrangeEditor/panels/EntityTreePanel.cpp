@@ -310,22 +310,15 @@ void EditorRenderLayer::BeginRename(Orange::Engine::Entity entity)
     mState.renameBuffer[n]   = '\0';
     mState.renamingEntity    = entity;
     mState.renameJustStarted = true;
-    std::fprintf(stdout, "[rename] begin entity #%u old='%s'\n",
-                 static_cast<unsigned>(static_cast<std::uint32_t>(entity.Value())),
-                 mState.renameBuffer);
 }
 
 void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
 {
     if (mState.pWorld == nullptr || !entity.IsValid()) {
-        std::fprintf(stderr, "[rename] commit 跳过：world / entity 无效\n");
         CancelRename();
         return;
     }
     mState.renameBuffer[sizeof(mState.renameBuffer) - 1] = '\0';
-    std::fprintf(stdout, "[rename] commit entity #%u new='%s'\n",
-                 static_cast<unsigned>(static_cast<std::uint32_t>(entity.Value())),
-                 mState.renameBuffer);
     Orange::Engine::Scene::NameComponent nc;
     nc.name = mState.renameBuffer;
     mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
@@ -335,11 +328,6 @@ void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
 
 void EditorRenderLayer::CancelRename()
 {
-    if (mState.renamingEntity.IsValid()) {
-        std::fprintf(stdout, "[rename] cancel entity #%u\n",
-                     static_cast<unsigned>(
-                         static_cast<std::uint32_t>(mState.renamingEntity.Value())));
-    }
     mState.renamingEntity    = Orange::Engine::Entity::Invalid();
     mState.renameJustStarted = false;
     mState.renameBuffer[0]   = '\0';
