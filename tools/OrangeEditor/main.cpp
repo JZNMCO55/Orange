@@ -70,12 +70,68 @@ constexpr std::int32_t kEscapeKeyRaw = 256;  // GLFW_KEY_ESCAPE，与 Input::Key
 struct ImguiVulkanLoaderCtx
 {
     PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr;
+    PFN_vkGetDeviceProcAddr   pfnGetDeviceProcAddr;  // 二级回退用，可为 null
     VkInstance                vkInstance;
+    VkDevice                  vkDevice;              // 二级回退用，可为 VK_NULL_HANDLE
 };
 
 PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData)
 {
     const auto* ctx = static_cast<const ImguiVulkanLoaderCtx*>(userData);
+
+    // ImGui docking v1.91.5 的 imgui_impl_vulkan.cpp（line ~1100）硬编码用
+    // KHR 后缀名解析 dynamic rendering 两个命令：
+    //     ImGuiImplVulkanFuncs_vkCmdBeginRenderingKHR =
+    //         loader_func("vkCmdBeginRenderingKHR", user_data);
+    //     ImGuiImplVulkanFuncs_vkCmdEndRenderingKHR =
+    //         loader_func("vkCmdEndRenderingKHR", user_data);
+    //
+    // 这里我们**必须**拦截这两个名字并改用 vkGetDeviceProcAddr 解析到 core
+    // 名字（无 KHR 后缀），原因是：
+    //
+    // [trampoline 陷阱] 1.3 SDK 的 Vulkan loader 在 `vkGetInstanceProcAddr(
+    // inst, "vkCmdBeginRenderingKHR")` 上**总是**返回一个非 null 的 loader
+    // trampoline —— 不管 device 有没有 enable VK_KHR_dynamic_rendering 扩展。
+    // 调用时 trampoline 才去查 device dispatch 表里 KHR 槽位；OrangeRender
+    // 启用的是 Vulkan 1.3 core 的 `dynamicRendering` feature，不是 KHR 扩
+    // 展，KHR 槽位在 dispatch 表里是 null —— trampoline 一旦被调用就跳
+    // 0x0000_0000_0000_0000 访问冲突。
+    //
+    // 实测现象：watch 窗口里 ImGuiImplVulkanFuncs_vkCmdBeginRenderingKHR
+    // 显示 vulkan-1.dll!0x...3790（非 null，是 loader trampoline），但抛
+    // 异常 0xC0000005 在 0x0000_0000_0000_0000 —— 进了 trampoline、查不到
+    // dispatch、空跳。
+    //
+    // 主视口看不出问题：overlay callback 在 OrangeRender 外层 begin/end
+    // rendering scope 里调 RenderDrawData，ImGui 不会自己 call KHR 入口；
+    // OrangeRender 自己的 vkCmdBeginRendering 走的是 volk → vkGetDeviceProcAddr
+    // 拿到的驱动直接函数指针，绕开 loader trampoline 那层。
+    //
+    // 出路就是这里 —— 解析 KHR 名时改用 vkGetDeviceProcAddr 拿 core 名字。
+    // vkGetDeviceProcAddr 直接落到驱动 ICD，没有 loader trampoline 这层，
+    // dispatch 不依赖扩展启用状态、只看 feature；core `dynamicRendering`
+    // feature 已 enable，驱动会返回有效函数指针。Vulkan 1.3 promote 这两
+    // 个 KHR 命令时是纯名字 promotion、签名完全一致，强制 cast 安全。
+    //
+    // 注意：仅对这两个**被 promote 的**命令做替换。其它 KHR 命令（如
+    // vkAcquireNextImageKHR、vkCreateSwapchainKHR）是真扩展、未被 promote，
+    // 不能做同样替换。
+    if (ctx->pfnGetDeviceProcAddr != nullptr && ctx->vkDevice != VK_NULL_HANDLE) {
+        const char* coreName = nullptr;
+        if (std::strcmp(funcName, "vkCmdBeginRenderingKHR") == 0) {
+            coreName = "vkCmdBeginRendering";
+        } else if (std::strcmp(funcName, "vkCmdEndRenderingKHR") == 0) {
+            coreName = "vkCmdEndRendering";
+        }
+        if (coreName != nullptr) {
+            PFN_vkVoidFunction core =
+                ctx->pfnGetDeviceProcAddr(ctx->vkDevice, coreName);
+            if (core != nullptr) { return core; }
+            // 兜底：万一驱动只导出 KHR 名字（极不常见），最后再回 instance
+            // proc addr 试一次。
+        }
+    }
+
     return ctx->pfnGetInstanceProcAddr(ctx->vkInstance, funcName);
 }
 
@@ -181,14 +237,16 @@ public:
     bool OnEvent(const Orange::Engine::Platform::WindowEvent& event) override
     {
         // ImGui_ImplGlfw_InitForVulkan(true) 时 install_callbacks=true，
-        // ImGui 会自己装 GLFW 回调拿到所有事件 —— 我们这里**不**再转发
-        // KeyEvent，避免双触发。仅手动处理 Esc 退出（如果按下时焦点没
-        // 在 ImGui 任何 widget 上）。
+        // ImGui 会自己装 GLFW 回调拿到所有事件 —— 这里**不**再转发
+        // KeyEvent，避免双触发。仅把 Esc 作为编辑器的全局退出快捷键拦
+        // 截。不检查 WantCaptureKeyboard：NavEnableKeyboard 开启后 ImGui
+        // 几乎永远占着键盘焦点（demo / dock 任一可导航 widget 在就会拿
+        // WantCaptureKeyboard=true），那样 Esc 永远到不了这里。Esc=quit
+        // 是 scaffold 选定的开发期约定，与 ImGui 的常规键盘交互不会冲突。
         const auto* key = std::get_if<Orange::Engine::Platform::KeyEvent>(&event);
         if (key == nullptr) { return false; }
         if (key->action != Orange::Engine::Platform::KeyAction::Press) { return false; }
         if (key->key != kEscapeKeyRaw) { return false; }
-        if (ImGui::GetIO().WantCaptureKeyboard) { return false; }
         std::fprintf(stdout, "[OrangeEditor] Esc 按下，请求退出\n");
         mHost.RequestExit();
         return true;
@@ -368,7 +426,14 @@ int main()
     // 把内部 ~30 个 vkXxx 指针逐个 resolve；user_data 必须同时携带 loader fn
     // 与一个真 VkInstance，否则 instance/device 级函数无法解析。LoadFunctions
     // 仅在调用期间读 user_data，本地栈对象生命周期足够。
-    ImguiVulkanLoaderCtx loaderCtx{pfnGetInstanceProcAddr, vkInstance};
+    // 预解析 vkGetDeviceProcAddr 作为 loader 的二级回退（仅 KHR→core alias
+    // 路径用得到）。device proc addr 比 instance proc addr 对 device 级
+    // 命令的解析更可靠 —— 后者在某些 loader 实现里对 core 1.3 device
+    // 命令有 quirk。
+    auto pfnGetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+        pfnGetInstanceProcAddr(vkInstance, "vkGetDeviceProcAddr"));
+
+    ImguiVulkanLoaderCtx loaderCtx{pfnGetInstanceProcAddr, pfnGetDeviceProcAddr, vkInstance, vkDevice};
     if (!ImGui_ImplVulkan_LoadFunctions(&ImguiVulkanLoader, &loaderCtx)) {
         std::fprintf(stderr, "[OrangeEditor] ImGui_ImplVulkan_LoadFunctions failed\n");
         return 1;
@@ -407,14 +472,25 @@ int main()
 
     const int rc = host->Run();
 
-    // ---- 关停（顺序：等 GPU idle → 清 callback → ImGui shutdown → renderer
-    //      shutdown → render device → host）
+    // ---- 关停 ---------------------------------------------------------
+    // 关键约束：ImGui_ImplGlfw_Shutdown 会销毁 multi-viewport 期间 ImGui
+    // 自己开的额外 GLFWwindow + 标准 cursor，必须发生在 AppHost dtor
+    // （主 GLFWwindow 销毁 + glfwTerminate）**之前**，否则 GLFW 已经
+    // 被 terminate，所有 glfwDestroy* 调用会丢 17 行
+    // GLFW_NOT_INITIALIZED。
+    //
+    // 同时还要先 EditorRenderLayer 析构（dtor 清 overlay callback），
+    // 避免 renderer Shutdown 时调到捕获 ImGui 已 dead 状态的 callback。
+    // LayerStack 由 host 拥有，要逼析构必须先 host.reset() —— 这跟上一
+    // 段冲突：layer 想先 reset，window 想后 reset。出路是手工先把
+    // overlay callback 清空，再做 ImGui shutdown 与 host.reset。
     pRenderDevice->WaitIdle();
-    // overlay callback 在 EditorRenderLayer 析构时清除（dtor）
-    host.reset();   // → AppHost dtor → LayerStack dtor → EditorRenderLayer dtor
+    pRenderer->SetSwapchainOverlayCallback({});  // layer dtor 之外手工提前清
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+    host.reset();   // → AppHost dtor → LayerStack dtor → EditorRenderLayer dtor
+                    //   （overlay callback 已提前清，dtor 再清一次是幂等的）
     DestroyImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice, imguiDescPool);
     pRenderer->Shutdown();
     pRenderer.reset();
