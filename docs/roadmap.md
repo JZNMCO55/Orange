@@ -37,11 +37,28 @@
     - 实体树 / 检视器 / 资源浏览器 → Task 06-03 起
     - 把 `samples/07_full_pipeline` 的物理 / 动画 / 粒子真实接入 → 编辑器自身演化路径上视需要再做，sample 07 仍保留作引擎 API demo
 
-### Task 06-02 · ImGui 集成与 dock space
+### Task 06-02 · ImGui 集成与 dock space ✅
 - 描述：默认窗口布局：场景视图 / 实体树 / 检视器 / 资源浏览器 / 控制台
 - 前置：06-01
 - 实现要点：ImGui 的 GLFW + Vulkan backend 已通过 OrangeRender 集成可复用；编辑器 UI 全走 ImGui
 - Critical Path：是
+- **落地状态**（2026-05-11）：
+  - **Existing**：
+    - `tools/OrangeEditor/CMakeLists.txt` 引入 `orange_editor_imgui` 静态库（ImGui core + impl_glfw + impl_vulkan，docking 分支 v1.91.5；FetchContent；编 `IMGUI_IMPL_VULKAN_NO_PROTOTYPES` + 通过 `Interop::GetVulkanGetInstanceProcAddr` 注入 loader callback，与 OrangeRender 共用同一 volk loader）
+    - `tools/OrangeEditor/main.cpp`：
+      - `ImGui_ImplGlfw_InitForVulkan` + `ImGui_ImplVulkan_Init`（启用 dynamic rendering）+ `ImGuiConfigFlags_DockingEnable | ViewportsEnable`
+      - `EditorRenderLayer::OnUpdate` 内 `DockSpaceOverViewport` + 首帧 `DockBuilder*` 编程式建默认布局（左 20% Entity Tree / 右 25% Inspector / 下 30% Assets+Console tab / 中央 Scene）
+      - 五个固定占位面板：Scene / Entity Tree / Inspector / Assets / Console（前四个 `TextDisabled` 占位，Console 放帧统计 + Esc 退出按钮）
+      - swap-chain overlay callback 内调 `ImGui_ImplVulkan_RenderDrawData` 把主 viewport DrawData 录到引擎主窗口 swap-chain image；secondary viewport 走 ImGui 自带 `UpdatePlatformWindows` + `RenderPlatformWindowsDefault`
+    - 消费 OrangeRender FEATURE-2026-05-09（Vulkan handle interop + swap-chain overlay hook）+ FEATURE-2026-05-10（vulkan loader export）
+  - **关键 bug 修复**（提交 12ba32a）：multi-viewport 拖出子窗口奔溃 —— Vulkan 1.3 SDK loader 对 `vkGetInstanceProcAddr(inst, "vkCmdBeginRenderingKHR")` 总返回非 null trampoline，但 OrangeRender 启用的是 1.3 core `dynamicRendering` feature 而非 KHR 扩展，device dispatch 表里 KHR 槽位是 null，trampoline 一调即空跳。修复：在编辑器侧 ImGui loader callback 内拦截两个 KHR 名字（`vkCmdBeginRenderingKHR` / `vkCmdEndRenderingKHR`），强制走 `vkGetDeviceProcAddr` 解析到 core 名字（`vkCmdBeginRendering` / `vkCmdEndRendering`），拿驱动 ICD 直接函数指针绕开 trampoline。
+  - **验证**：
+    - `cmake --build build --config Debug --target OrangeEditor` 干净
+    - 手动跑 `build/bin/Debug/OrangeEditor.exe`：默认 dock layout 正确显示五个面板；可拖动 tab 改 dock、可拖出主窗口形成独立 OS window（多次拖出 / 收回不奔溃）；Esc 干净退出
+  - **Out-of-scope（移交后续 task）**：
+    - 各面板的实际内容（实体树 / 检视器 / 资源浏览器 / 场景 viewport 渲染）→ 06-03 起
+    - 编辑器侧日志系统（接 Core::Log，目前 Console 面板只显示帧统计）→ Phase 6 后续
+    - 多窗口布局保存 / 加载多个 layout preset → Phase 6 后续
 
 ### Task 06-03 · 实体树视图
 - 描述：可视化 ECS World，支持 select / 重命名 / 删除 / 拖拽改父子关系

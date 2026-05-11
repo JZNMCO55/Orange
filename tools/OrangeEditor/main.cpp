@@ -23,8 +23,11 @@
 //     platform / renderer interface 接管额外 viewport 的窗口 / swapchain
 //     创建 + 渲染
 //
-// 当前 UI 内容：dock space + ImGui demo window + 一个"about OrangeEditor"
-// 小窗口。后续迭代填实体树 / 检视器 / 资源浏览器 / 控制台。
+// 当前 UI 内容：dock space 上五个固定占位面板 —— Scene / Entity Tree /
+// Inspector / Assets / Console。前四个仅 TextDisabled 占位，由 Task 06-03
+// 起逐个填实；Console 当前放帧统计 + Esc 退出按钮，等接 Core::Log 时换
+// 成日志流。默认 dock 布局首帧通过 DockBuilder* 编程式建立，之后用户调
+// 整由 imgui.ini 持久化。
 
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
@@ -44,6 +47,7 @@
 #include <vulkan/vulkan.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>  // DockBuilder* API（仅在编辑器侧首帧建默认布局用）
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 
@@ -56,6 +60,13 @@ namespace
 {
 
 constexpr std::int32_t kEscapeKeyRaw = 256;  // GLFW_KEY_ESCAPE，与 Input::KeyCode::Escape 同值
+
+// 编辑器默认 UI 字体 size（像素）。ImGui 内嵌 ProggyClean 默认 13px，在
+// 1080p+ 屏上对编辑器使用偏小；这里拉到 18px。后续要做的扩展点：把这个
+// 数值抽到一个"编辑器 Settings"面板里让用户运行时调整 —— 改后重建
+// io.Fonts atlas 并触发 ImGui_ImplVulkan_CreateFontsTexture 重传到 GPU。
+// 现在硬编码即可，后续 task 真做 Settings 面板时再抽。
+constexpr float kDefaultFontSizePx = 28.0f;
 
 // ImGui 在 NO_PROTOTYPES 编译下不再 extern 引用 vulkan-1.lib 的静态 vkXxx
 // 符号，启动期通过 `ImGui_ImplVulkan_LoadFunctions(loader, userData)` 让
@@ -181,27 +192,25 @@ public:
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // dock space —— 让所有 imgui window 可以拖到主窗口里组成 dock 布局
-        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+        // dock space —— 占满主 viewport，所有 imgui window 都可以 dock 进来。
+        // DockSpaceOverViewport 返回的 ID 在主 viewport 生命周期内稳定，下面
+        // DockBuilder 系列 API 用它建默认布局。
+        const ImGuiID dockspaceId =
+            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
-        // demo + about 占位窗口（Task 06-03 起替换为实体树 / 检视器 / etc.）
-        ImGui::ShowDemoWindow();
+        BuildDefaultLayoutOnce(dockspaceId);
 
-        ImGui::Begin("About OrangeEditor");
-        ImGui::Text("OrangeEditor v0.0.2 (Task 06-02 scaffold)");
-        ImGui::Separator();
-        ImGui::Text("frame index: %llu",
-                    static_cast<unsigned long long>(frame.time.frameIndex));
-        ImGui::Text("delta: %.3f ms", frame.time.deltaSeconds * 1000.0);
-        ImGui::Separator();
-        ImGui::TextWrapped(
-            "Drag any window's title bar OUT of this main window to detach it "
-            "into a floating native OS window (multi-viewport).");
-        ImGui::Separator();
-        if (ImGui::Button("Quit (or press Esc)")) {
-            mHost.RequestExit();
-        }
-        ImGui::End();
+        // 五个固定面板（Task 06-02 占位骨架）：
+        //   Scene        —— 场景视口预览（Task 06-04 真要画 viewport 时填）
+        //   Entity Tree  —— ECS World 实体树（Task 06-03 填）
+        //   Inspector    —— 组件检视器（Task 06-04 填）
+        //   Assets       —— 资源浏览器（Phase 6 后续填）
+        //   Console      —— 编辑器日志 / 帧统计（本 task 已能放调试信息）
+        DrawScenePanel();
+        DrawEntityTreePanel();
+        DrawInspectorPanel();
+        DrawAssetsPanel();
+        DrawConsolePanel(frame);
 
         ImGui::Render();
 
@@ -253,6 +262,98 @@ public:
     }
 
 private:
+    // 首帧（或 imgui.ini 还没存过布局时）建默认 dock 布局。判定条件用
+    // DockBuilderGetNode → 子节点为空，这样能兼容两种场景：
+    //   * 首次启动 / 删了 imgui.ini —— 节点存在但无子，建布局；
+    //   * 已有保存的布局 —— 节点有子，跳过、尊重用户调整。
+    // 注意 DockBuilder* 来自 imgui_internal.h，是 ImGui 公开但内部稳定度
+    // 比 imgui.h 略低的 API；编辑器侧使用是 ImGui 官方推荐路径。
+    static void BuildDefaultLayoutOnce(ImGuiID dockspaceId)
+    {
+        ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspaceId);
+        if (node != nullptr && node->IsSplitNode()) { return; }
+
+        ImGui::DockBuilderRemoveNode(dockspaceId);
+        ImGui::DockBuilderAddNode(dockspaceId,
+                                  ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspaceId,
+                                      ImGui::GetMainViewport()->Size);
+
+        // 布局：左 20% Entity Tree；右 25% Inspector；下 30% Assets/Console
+        // tab；剩余中央留给 Scene。比例与 Unity / Unreal 默认 layout 接近，
+        // 后续可让用户调；ImGui 会把改动写回 imgui.ini，下次启动恢复。
+        ImGuiID center = dockspaceId;
+        ImGuiID left   = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left,
+                                                    0.20f, nullptr, &center);
+        ImGuiID right  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right,
+                                                    0.25f, nullptr, &center);
+        ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down,
+                                                    0.30f, nullptr, &center);
+
+        ImGui::DockBuilderDockWindow("Entity Tree", left);
+        ImGui::DockBuilderDockWindow("Inspector",   right);
+        ImGui::DockBuilderDockWindow("Assets",      bottom);
+        ImGui::DockBuilderDockWindow("Console",     bottom);  // 同节点 = tab
+        ImGui::DockBuilderDockWindow("Scene",       center);
+
+        ImGui::DockBuilderFinish(dockspaceId);
+    }
+
+    // 占位面板：仅一行 placeholder 文案。每个面板的实际内容由后续 task 填
+    // —— Entity Tree 由 06-03、Inspector 由 06-04、Scene viewport 由 06-04、
+    // Assets 由 Phase 6 后续 task。这里只保证默认 dock 布局里这些名字真的
+    // 存在，dock layout 才能建得起来。
+    static void DrawScenePanel()
+    {
+        ImGui::Begin("Scene");
+        ImGui::TextDisabled("scene viewport — Task 06-04");
+        ImGui::End();
+    }
+
+    static void DrawEntityTreePanel()
+    {
+        ImGui::Begin("Entity Tree");
+        ImGui::TextDisabled("ECS world entity tree — Task 06-03");
+        ImGui::End();
+    }
+
+    static void DrawInspectorPanel()
+    {
+        ImGui::Begin("Inspector");
+        ImGui::TextDisabled("component inspector — Task 06-04");
+        ImGui::End();
+    }
+
+    static void DrawAssetsPanel()
+    {
+        ImGui::Begin("Assets");
+        ImGui::TextDisabled("asset browser — Phase 6 后续");
+        ImGui::End();
+    }
+
+    // Console 面板放调试信息：帧 index、deltaTime、Esc 退出按钮、Vulkan
+    // multi-viewport 提示。Task 06-02 阶段编辑器没有日志系统，先把这些
+    // 当作 "console" 的内容，等真接 Core::Log 时换成日志流。
+    void DrawConsolePanel(const Orange::Engine::FrameContext& frame)
+    {
+        ImGui::Begin("Console");
+        ImGui::Text("OrangeEditor v0.0.3 (Task 06-02)");
+        ImGui::Separator();
+        ImGui::Text("frame index: %llu",
+                    static_cast<unsigned long long>(frame.time.frameIndex));
+        ImGui::Text("delta: %.3f ms",
+                    frame.time.deltaSeconds * 1000.0);
+        ImGui::Separator();
+        ImGui::TextWrapped(
+            "Drag any panel's tab OUT of the main window to detach it as a "
+            "floating native OS window (ImGui multi-viewport).");
+        ImGui::Separator();
+        if (ImGui::Button("Quit (or press Esc)")) {
+            mHost.RequestExit();
+        }
+        ImGui::End();
+    }
+
     Orange::Engine::AppHost&      mHost;
     Orange::Renderer::IRenderer&  mRenderer;
     VkDescriptorPool              mDescriptorPool;  // owned by main, not by layer
@@ -326,7 +427,7 @@ int main()
 
     // ---- AppHost（窗口 + 主循环）---------------------------------------
     AppConfig cfg{};
-    cfg.window.title  = "OrangeEditor v0.0.2 (Task 06-02 ImGui dock + multi-viewport)";
+    cfg.window.title  = "OrangeEditor v0.0.3 (Task 06-02 default dock layout)";
     cfg.window.width  = 1600;
     cfg.window.height = 900;
     auto hostRes = AppHost::Create(cfg);
@@ -412,6 +513,24 @@ int main()
         ImGuiStyle& style = ImGui::GetStyle();
         style.WindowRounding = 0.0f;
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+    }
+
+    // 默认 UI 字体加大：优先用 Windows 系统 Segoe UI（TrueType，任意 size
+    // 都清晰），找不到回退到 ImGui 内嵌 ProggyClean 拉大 SizePixels（位图
+    // 字体非原生 size 略糊但保底可用）。**必须**在 ImGui_ImplVulkan_Init
+    // 之前完成 —— Vulkan backend 在 Init 阶段从 io.Fonts atlas 创建 font
+    // texture，后改动 atlas 需要重建 + 重上传。
+    {
+        ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
+            "C:\\Windows\\Fonts\\segoeui.ttf", kDefaultFontSizePx);
+        if (fontMain == nullptr) {
+            ImFontConfig fontCfg;
+            fontCfg.SizePixels = kDefaultFontSizePx;
+            io.Fonts->AddFontDefault(&fontCfg);
+            std::fprintf(stdout,
+                         "[OrangeEditor] Segoe UI 加载失败，回退 ImGui 默认字体 @%.0fpx\n",
+                         kDefaultFontSizePx);
+        }
     }
 
     // GLFW backend —— install_callbacks=true 让 ImGui 自动装 GLFW key /
