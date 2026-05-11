@@ -354,6 +354,32 @@ struct EditorState
     // 跟着 EditorState 走。
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pFloorMaterial;
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pWallMaterial;
+
+    // ---- 编辑器相机（Phase 6 / Task 06-08 S3）---------------------------
+    // viewport-local 相机状态：position + yaw/pitch + 投影参数。每帧由
+    // DrawScenePanel 读 ImGui 输入更新本结构，再 Compute 出 Camera 写到
+    // World 里 Camera 组件第一个出现的实体上 —— Camera 组件不在
+    // SceneSerialization 路径上（src/scene/SceneSerialization.cpp 不处理
+    // Camera 类型），因此本写入对 Save / Load 透明，不会"污染"用户场景。
+    //
+    // 控制约定（与 DrawScenePanel 内的输入捕获保持一致）：
+    //   * 鼠标右键拖动（hover Scene 面板时按下）—— 旋转 yaw / pitch
+    //   * 滚轮（hover Scene 面板时）—— 沿 forward 方向距离 + / -
+    //   * WASD（focus Scene 面板时）—— 相对相机朝向水平移动
+    //   * Q / E（focus Scene 面板时）—— 世界 Y 上 / 下
+    struct EditorCamera
+    {
+        glm::vec3 position{3.0f, 2.5f, 5.0f};
+        float     yaw           = -0.541f;   // 弧度；与 SeedDemoWorld 旧 lookAt 一致
+        float     pitch         = -0.330f;   // 弧度
+        float     fovYDegrees   = 50.0f;
+        float     zNear         = 0.1f;
+        float     zFar          = 100.0f;
+        // 操作灵敏度（编辑器经验值，未来可暴露给 Preferences）
+        float     moveSpeed       = 4.0f;     // units / sec
+        float     lookSensitivity = 0.0035f;  // 弧度 / pixel
+        float     zoomSensitivity = 0.6f;     // units / wheel notch
+    } editorCamera;
 };
 
 // ---- Hierarchy 维护工具 ------------------------------------------------
@@ -774,6 +800,109 @@ inline bool DragVec3Colored(const char* label, float v[3],
     return changed;
 }
 
+// 从 (yaw, pitch) 算 forward 向量（右手系，pitch=0 / yaw=0 时朝 -Z）。
+// 与 SeedDemoWorld 初始 lookAt 的 yaw≈-0.541 / pitch≈-0.330 配合：摄像
+// 机看向场景原点附近。
+inline glm::vec3 EditorCameraForward(float yaw, float pitch) noexcept
+{
+    return glm::vec3(
+        std::cos(pitch) * std::sin(yaw),
+        std::sin(pitch),
+       -std::cos(pitch) * std::cos(yaw));
+}
+
+// 读取 ImGui 当前帧输入更新 EditorCamera 状态。调用前提：处于 Scene 面板
+// 的 Begin / End 之间（这样 IsWindowHovered / IsWindowFocused 返回的是
+// 该面板的状态）。aspect 是 Scene viewport 当前宽高比，pitch 受限避免
+// gimbal flip。
+inline void UpdateEditorCameraFromInput(EditorState::EditorCamera& ec)
+{
+    const ImGuiIO& io = ImGui::GetIO();
+    const float    dt = io.DeltaTime;
+    if (dt <= 0.0f)
+    {
+        return;
+    }
+
+    const bool hovered = ImGui::IsWindowHovered();
+    const bool focused = ImGui::IsWindowFocused();
+
+    // 鼠标右键拖动：旋转 yaw / pitch。仅当鼠标 down 且本面板 hover 才
+    // 累加 delta —— 用户从 Scene 之外按住 RMB 拖进来不会突然转动相机。
+    if (hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        const ImVec2 d = io.MouseDelta;
+        ec.yaw   -= d.x * ec.lookSensitivity;
+        ec.pitch -= d.y * ec.lookSensitivity;
+        constexpr float kMaxPitch = 1.5533430343f;   // glm::radians(89°)
+        if (ec.pitch >  kMaxPitch) ec.pitch =  kMaxPitch;
+        if (ec.pitch < -kMaxPitch) ec.pitch = -kMaxPitch;
+    }
+
+    // 滚轮：沿 forward 距离方向缩放（前 / 后）；hover 才生效避免在其它
+    // 面板滚动条上误触。
+    if (hovered && io.MouseWheel != 0.0f)
+    {
+        const glm::vec3 forward = EditorCameraForward(ec.yaw, ec.pitch);
+        ec.position += forward * io.MouseWheel * ec.zoomSensitivity;
+    }
+
+    // WASD / QE：相对相机朝向移动。仅当 Scene 面板有焦点 —— 否则在
+    // 别的窗口里编辑 InputText 也会触发相机走 / 转动。focused 同时也
+    // 让 ImGui::IsKeyDown 拿到的是 Scene 面板上下文的输入路由结果。
+    if (focused)
+    {
+        const float     speed   = ec.moveSpeed * dt;
+        const glm::vec3 forward = EditorCameraForward(ec.yaw, ec.pitch);
+        const glm::vec3 right   = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
+        const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+
+        if (ImGui::IsKeyDown(ImGuiKey_W)) { ec.position += forward * speed; }
+        if (ImGui::IsKeyDown(ImGuiKey_S)) { ec.position -= forward * speed; }
+        if (ImGui::IsKeyDown(ImGuiKey_A)) { ec.position -= right   * speed; }
+        if (ImGui::IsKeyDown(ImGuiKey_D)) { ec.position += right   * speed; }
+        if (ImGui::IsKeyDown(ImGuiKey_E)) { ec.position += worldUp * speed; }
+        if (ImGui::IsKeyDown(ImGuiKey_Q)) { ec.position -= worldUp * speed; }
+    }
+}
+
+// 用当前 EditorCamera 状态构造 Camera 组件值。aspect = 当前 viewport 宽
+// 高比，由 DrawScenePanel 从 ImGui::GetContentRegionAvail() 计算。aspect
+// <= 0（面板折叠）时退化为 1，避免投影矩阵奇异。
+inline Orange::Engine::Render::Camera
+BuildEditorCamera(const EditorState::EditorCamera& ec, float aspect)
+{
+    using ::Orange::Engine::Render::Camera;
+    const float safeAspect = (aspect > 0.0f) ? aspect : 1.0f;
+    Camera cam = Camera::Perspective(glm::radians(ec.fovYDegrees),
+                                     safeAspect, ec.zNear, ec.zFar);
+    const glm::vec3 forward = EditorCameraForward(ec.yaw, ec.pitch);
+    cam.view = glm::lookAt(ec.position, ec.position + forward, glm::vec3(0, 1, 0));
+    return cam;
+}
+
+// 在 World 里找首个挂 Camera 组件的实体，把 BuildEditorCamera 结果写回去。
+// 找不到时 no-op —— 编辑器不主动创建 Camera 实体（避免在用户加载的纯
+// data scene 上加幽灵实体）；当前 demo 由 SeedDemoWorld 始终种一个 Camera
+// 实体，因此正常路径下总能找到。
+inline void ApplyEditorCameraToWorld(EditorState& state, float aspect)
+{
+    if (state.pWorld == nullptr)
+    {
+        return;
+    }
+    using ::Orange::Engine::Render::Camera;
+    auto& reg  = state.pWorld->Registry();
+    auto  view = reg.view<Camera>();
+    if (view.empty())
+    {
+        return;
+    }
+    const auto e   = view.front();
+    auto&      cam = view.get<Camera>(e);
+    cam            = BuildEditorCamera(state.editorCamera, aspect);
+}
+
 // 编辑器侧需要在每帧 BeginFrame 之前调 ImGui::NewFrame 等。把这件事
 // 封到一个 layer，让 AppHost 主循环按 LayerStack 的 OnUpdate 顺序自动
 // 触发。Render layer 在最后 push，确保 ImGui::NewFrame → user UI →
@@ -1085,10 +1214,28 @@ private:
     // —— Entity Tree 由 06-03、Inspector 由 06-04、Scene viewport 由 06-04、
     // Assets 由 Phase 6 后续 task。这里只保证默认 dock 布局里这些名字真的
     // 存在，dock layout 才能建得起来。
-    static void DrawScenePanel()
+    void DrawScenePanel()
     {
         ImGui::Begin("Scene");
-        ImGui::TextDisabled("scene viewport — Task 06-08");
+
+        // S3：相机输入捕获 + 应用到 World Camera 组件。S4 接入 ImGui::Image
+        // 把 Pipeline::GetOffscreenColor 的 view 绑成实际 viewport 后，
+        // 同样依赖本 panel 的 hover / focus / content region 数据。
+        const ImVec2 region = ImGui::GetContentRegionAvail();
+        const float  aspect = (region.y > 0.0f) ? (region.x / region.y) : 1.0f;
+        UpdateEditorCameraFromInput(mState.editorCamera);
+        ApplyEditorCameraToWorld(mState, aspect);
+
+        // 占位文案 —— S4 用 ImGui::Image 替换。当前显示 viewport 尺寸 +
+        // 相机位置，让用户感知到输入确实在驱动状态（视觉验证 hook）。
+        ImGui::TextDisabled("scene viewport — Task 06-08 (S3：相机输入已接通，S4 接 ImGui::Image)");
+        const auto& ec = mState.editorCamera;
+        ImGui::Text("viewport %.0fx%.0f  aspect=%.2f", region.x, region.y, aspect);
+        ImGui::Text("camera pos=(%.2f, %.2f, %.2f)  yaw=%.2f  pitch=%.2f",
+                    ec.position.x, ec.position.y, ec.position.z,
+                    ec.yaw, ec.pitch);
+        ImGui::TextDisabled("RMB 拖动 旋转  滚轮 缩放  WASD/QE 移动（需 focus 本面板）");
+
         ImGui::End();
     }
 
