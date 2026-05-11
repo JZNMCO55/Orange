@@ -63,6 +63,7 @@ private:
     void DrawMainMenuBar();
     void ResetEntityLocalState();
     void ApplyPendingSceneOp();
+    void ApplyPendingPlayOp();
     static void DrawAssetsPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
 

@@ -44,6 +44,32 @@ enum class SceneOp : std::uint8_t
     SaveAs,
 };
 
+// Play 模式三态（Task 06-09）：
+//   * Edit  —— 默认；纯编辑器状态，没有 simulation tick；所有结构性 /
+//              组件级编辑都允许；selectedEntity 等 UI 状态正常工作
+//   * Play  —— "运行" 状态；physics / vfx / animator 每帧 tick；编辑
+//              入口（CreateEntity / Delete / DnD reparent / Rename /
+//              Inspector 字段）全部 disable，防止 mutate 打破 simulation
+//              不变量
+//   * Paused —— 同 Play 但 tick 暂停；可用于"观察当前帧"。编辑同样禁
+enum class PlayState : std::uint8_t
+{
+    Edit = 0,
+    Play,
+    Paused,
+};
+
+// 帧末统一 apply 的 Play 操作；与 SceneOp 同节奏，避免在 ImGui 帧内 /
+// EnTT view 迭代中切状态破坏不变量。
+enum class PlayOp : std::uint8_t
+{
+    None = 0,
+    EnterPlay,    // Edit  → Play （建 snapshot + 启动 simulation）
+    Pause,        // Play  → Paused
+    Resume,       // Paused → Play
+    Stop,         // Play / Paused → Edit （销毁 simulation + 还原 snapshot）
+};
+
 struct EditorState
 {
     // 编辑器持有 World 所有权 —— Task 06-07 起场景 Open / New 需要在
@@ -58,6 +84,15 @@ struct EditorState
     std::string currentScenePath;
 
     SceneOp pendingSceneOp = SceneOp::None;
+
+    // Task 06-09 Play Mode 状态机：playState 是当前模式（Edit / Play /
+    // Paused），pendingPlayOp 是用户菜单点击的待执行迁移；帧末
+    // EditorRenderLayer::ApplyPendingPlayOp 统一处理。playSnapshotPath
+    // 保存 Edit→Play 时的 World 序列化文件路径，Stop 时从该路径反序列化
+    // 恢复（用 temp dir 下唯一文件名，editor 退出时清理）。
+    PlayState   playState        = PlayState::Edit;
+    PlayOp      pendingPlayOp    = PlayOp::None;
+    std::string playSnapshotPath;
 
     // 内联重命名状态：renamingEntity 标记当前正在重命名哪个 entity，
     // renameBuffer 是 InputText 编辑缓冲。renameJustStarted 让首帧自动

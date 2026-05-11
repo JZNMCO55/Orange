@@ -122,6 +122,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // 影响本帧的 ImGui DrawData；swap world 之后的 selectedEntity /
     // renamingEntity / euler 缓存清理也在此发生，下一帧才用新状态画。
     ApplyPendingSceneOp();
+    ApplyPendingPlayOp();
 
     ImGui::Render();
 
@@ -251,14 +252,54 @@ void EditorRenderLayer::DrawMainMenuBar()
         }
         ImGui::EndMenu();
     }
-    // 当前 scene 路径作为只读 indicator 显示在菜单栏右侧 —— OS 窗口
-    // 标题这一层目前没有动态修改入口，先放这里让用户清楚自己在编辑哪个
-    // 文件 / 是不是 Untitled。
+
+    // ---- Play / Pause / Stop 按钮（Task 06-09）-------------------------
+    // 直接放主菜单栏右侧（不另开 toolbar，避免再加一行垂直空间占用）。
+    // 状态显示用一个 Text + 三个按钮：disabled / enabled 按当前 playState
+    // 推算（典型 transport-control 风格：Play 在 Edit / Paused 可用，
+    // Pause 仅 Play 可用，Stop 仅 Play / Paused 可用）。
+    {
+        const PlayState ps = mState.playState;
+        const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
+                               : (ps == PlayState::Play)   ? "[Play]"
+                                                           : "[Paused]";
+        // 三个按钮 + 状态 label 总宽：粗算 36*3 + 60 = 168。
+        constexpr float kButtonW   = 36.0f;
+        constexpr float kStateW    = 70.0f;
+        constexpr float kGroupW    = kButtonW * 3.0f + kStateW + 16.0f;
+        ImGui::SameLine(ImGui::GetWindowWidth() - kGroupW);
+
+        const bool canPlay   = (ps == PlayState::Edit  || ps == PlayState::Paused);
+        const bool canPause  = (ps == PlayState::Play);
+        const bool canStop   = (ps == PlayState::Play  || ps == PlayState::Paused);
+        ImGui::BeginDisabled(!canPlay);
+        if (ImGui::Button("Play", ImVec2(kButtonW, 0))) {
+            mState.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
+                                                             : PlayOp::EnterPlay;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!canPause);
+        if (ImGui::Button("Pause", ImVec2(kButtonW, 0))) {
+            mState.pendingPlayOp = PlayOp::Pause;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!canStop);
+        if (ImGui::Button("Stop", ImVec2(kButtonW, 0))) {
+            mState.pendingPlayOp = PlayOp::Stop;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", stateLabel);
+    }
+
+    // 当前 scene 路径作为只读 indicator 显示在菜单栏左侧（File 菜单后）。
+    // 注：以前显示在右侧，被 Play 按钮挤掉了 —— scene 名次要、Play 状态
+    // 高频读，按编辑器惯例优先级 Play 控件靠右。
     const std::string& path = mState.currentScenePath;
     const char* sceneLabel  = path.empty() ? "[Untitled]" : path.c_str();
-    const float bbWidth =
-        ImGui::CalcTextSize(sceneLabel).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
-    ImGui::SameLine(ImGui::GetWindowWidth() - bbWidth);
+    ImGui::SameLine();
     ImGui::TextDisabled("%s", sceneLabel);
     ImGui::EndMainMenuBar();
 }
@@ -358,6 +399,56 @@ void EditorRenderLayer::ApplyPendingSceneOp()
         }
         case SceneOp::None:
             break;  // unreachable, 上面已 early return
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Play Mode（Task 06-09）—— 状态机迁移处理
+// ---------------------------------------------------------------------------
+//
+// S1 范围：只做状态机骨架；snapshot 序列化 + simulation tick 在 S2 / S3 /
+// S4 加。Edit ↔ Play ↔ Paused 迁移的"行为"用 stdout 占位，验证转入 / 转
+// 出钩子在正确时机调到。
+void EditorRenderLayer::ApplyPendingPlayOp()
+{
+    const PlayOp op = mState.pendingPlayOp;
+    if (op == PlayOp::None) { return; }
+    mState.pendingPlayOp = PlayOp::None;
+
+    switch (op) {
+        case PlayOp::EnterPlay: {
+            if (mState.playState != PlayState::Edit) { break; }
+            // TODO S2: World snapshot 落盘到 temp file，路径写 playSnapshotPath
+            // TODO S3: 实例化 PhysicsWorld + AddBody / AddFixture
+            // TODO S4: 实例化 VfxSystem + Pipeline.SetVfxSystem
+            mState.playState = PlayState::Play;
+            std::fprintf(stdout, "[play] Edit → Play\n");
+            break;
+        }
+        case PlayOp::Pause: {
+            if (mState.playState != PlayState::Play) { break; }
+            mState.playState = PlayState::Paused;
+            std::fprintf(stdout, "[play] Play → Paused\n");
+            break;
+        }
+        case PlayOp::Resume: {
+            if (mState.playState != PlayState::Paused) { break; }
+            mState.playState = PlayState::Play;
+            std::fprintf(stdout, "[play] Paused → Play\n");
+            break;
+        }
+        case PlayOp::Stop: {
+            if (mState.playState == PlayState::Edit) { break; }
+            // TODO S4: Pipeline.SetVfxSystem(nullptr) + Shutdown VfxSystem
+            // TODO S3: 销毁 PhysicsWorld
+            // TODO S2: Scene::Load 从 playSnapshotPath 还原 World；ResetEntityLocalState
+            mState.playState = PlayState::Edit;
+            std::fprintf(stdout, "[play] %s → Edit\n",
+                         (op == PlayOp::Stop) ? "Play/Paused" : "?");
+            break;
+        }
+        case PlayOp::None:
+            break;
     }
 }
 

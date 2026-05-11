@@ -176,7 +176,7 @@
     - "dirty" 状态指示 + 关闭确认对话框 → Phase 6 后续
     - 多 scene 标签 → Phase 6 后续
 
-### Task 06-08 · 场景视口渲染
+### Task 06-08 · 场景视口渲染 ✅
 - 描述：Scene 面板内显示 ECS World 的 3D 渲染结果（不是 Entity Tree 的层级，是真实着色的几何），并提供编辑器相机控制（WASD / orbit）。当前 Scene 面板只有占位文案，"看不到场景"是 Phase 6 闭环最后一道缺口
 - 前置：06-07
 - 实现要点：
@@ -186,6 +186,18 @@
   * **viewport 大小变化处理**：Scene 面板 resize → off-screen RT 重建 + descriptor set 重绑；不能每帧 alloc
   * **内置 SPV 部署**：编辑器 exe 旁要能找到内置 shader SPV（已在 06-01 占位讨论里挂账）
 - Critical Path：是 —— Phase 6 目标"足以让美术 / 关卡设计师不写代码完成日常工作"必须有视口
+
+### Task 06-09 · 编辑器 Play Mode
+- 描述：编辑器引入 Edit / Play / Paused 三态状态机；Play 状态下物理（Box2D PhysicsWorld）+ 粒子（VfxSystem）+ 动画（IAnimator 子类）每帧 tick，让 RigidBody / Collider / ParticleEmitter / Animator 等组件挂上后能在视口看到运行时行为；Stop 还原 World 快照，组件值回 Play 开始前的状态
+- 前置：06-08
+- 实现要点：
+  * **状态机**：EditorState 加 `enum PlayState { Edit, Play, Paused }`；主菜单（或独立 toolbar）加 Play / Pause / Stop 按钮。状态切换走"统一帧末 apply"路径，与 SceneOp 一致风格
+  * **World 快照**：Edit → Play 时把 World 序列化到内存 buffer（复用 `Scene::Save` 但走 stringstream 落点）；Stop → Edit 时 `Scene::Load` 反序列化回去。selectedEntity / renamingEntity 等 entity-local UI 状态在 Stop 时清空
+  * **PhysicsWorld 接入**：Edit → Play 时实例化 `Phys::PhysicsWorld`，遍历挂了 RigidBody / Collider 的 entity 调 AddBody / AddFixture；每帧 `Step(dt)` 后把 b2Body 位姿写回 TransformComponent；Stop 时销毁
+  * **VfxSystem 接入**：Edit → Play 时实例化 `Render::VfxSystem` + 调 Pipeline 的 SetVfxSystem；每帧 Tick；Stop 时先 SetVfxSystem(nullptr) 后销毁
+  * **Animator 接入**：每帧遍历 AnimatorComponent 调 `animator->Tick(dt)`（运行时已经支持）
+  * **Edit 期 vs Play 期编辑约束**：Play 期间禁用结构性编辑（CreateEntity / Delete / DnD reparent / Rename）—— 防止 simulation invariant 被打破；Inspector 字段编辑也禁（component 是 simulation 输入，运行时改有非确定后果）。Paused 期 = Play 帧暂停 + 编辑同样禁；用户可以选 Inspector 查看运行时数值但不能改
+- Critical Path：是 —— 06-08 让"看到场景"，06-09 让"组件挂上能动"。Phase 6 闭环目标是"美术 / 关卡设计师不写代码完成日常工作"，物理 / 粒子可视化是日常工作必备
 
 ---
 
