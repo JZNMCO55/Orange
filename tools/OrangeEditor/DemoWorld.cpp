@@ -141,6 +141,11 @@ void InitializeEditorAssets(EditorState& state)
 
     state.pFloorMaterial = state.pMaterials->CreateInstance("textured");
     state.pWallMaterial  = state.pMaterials->CreateInstance("textured");
+    // "+ Add Component → Renderable" 默认材质（textured）+ Light Object
+    // 发光材质（emissive）。CreateInstance 失败时回退 nullptr，调用方按
+    // nullptr 自然降级（Pipeline 跳过该 drawable）。
+    state.pDefaultRenderableMaterial = state.pMaterials->CreateInstance("textured");
+    state.pLightObjectMaterial       = state.pMaterials->CreateInstance("emissive");
 }
 
 // 种子 demo 世界 —— 拓扑：

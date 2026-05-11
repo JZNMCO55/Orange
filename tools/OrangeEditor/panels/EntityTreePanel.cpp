@@ -5,6 +5,8 @@
 
 #include "../EditorHierarchy.h"
 
+#include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -82,7 +84,12 @@ void EditorRenderLayer::DrawEntityTreePanel()
               ImGuiPopupFlags_MouseButtonRight
             | ImGuiPopupFlags_NoOpenOverItems)) {
         if (ImGui::MenuItem("Create Entity (root)")) {
-            mState.pendingCreate = {Orange::Engine::Entity::Invalid(), true};
+            mState.pendingCreate = {Orange::Engine::Entity::Invalid(),
+                                    EditorState::PendingCreateKind::Empty, true};
+        }
+        if (ImGui::MenuItem("Create Light Object (root)")) {
+            mState.pendingCreate = {Orange::Engine::Entity::Invalid(),
+                                    EditorState::PendingCreateKind::Light, true};
         }
         ImGui::EndPopup();
     }
@@ -116,16 +123,34 @@ void EditorRenderLayer::DrawEntityTreePanel()
         }
     }
     if (mState.pendingCreate.valid) {
-        const Orange::Engine::Entity parent = mState.pendingCreate.parent;
+        const Orange::Engine::Entity         parent = mState.pendingCreate.parent;
+        const EditorState::PendingCreateKind kind   = mState.pendingCreate.kind;
         mState.pendingCreate.valid = false;
         Orange::Engine::Entity e = mState.pWorld->CreateEntity();
-        // 默认 component：Name + Transform —— 跟 SeedDemoWorld 里
-        // make() lambda 行为一致，让新创建实体在 Inspector 里至少
-        // 有这两段可看。
+        const char* initialName = (kind == EditorState::PendingCreateKind::Light)
+            ? "Light Object" : "New Entity";
         mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
-            e, Orange::Engine::Scene::NameComponent{"New Entity"});
+            e, Orange::Engine::Scene::NameComponent{initialName});
         mState.pWorld->AddComponent<Orange::Engine::Scene::TransformComponent>(
             e, Orange::Engine::Scene::TransformComponent{});
+
+        if (kind == EditorState::PendingCreateKind::Light) {
+            // 一键搭出"可见的发光物体" —— DirectionalLight 提供光照贡献 +
+            // Renderable(cube + emissive material) 让灯本身在 Scene 视口
+            // 可见（不然方向光是看不见的）。emissive shader 自然把 cube
+            // 渲成 bloom-bright，搭配 Pipeline 的 bloom pass 就有"灯泡"
+            // 视觉效果。
+            using ::Orange::Engine::Render::DirectionalLight;
+            using ::Orange::Engine::Render::RenderableComponent;
+            mState.pWorld->AddComponent<DirectionalLight>(e, DirectionalLight{});
+            RenderableComponent rc{};
+            rc.mesh             = mState.cubeMeshHandle;
+            rc.materialInstance = mState.pLightObjectMaterial.get();
+            rc.visible          = true;
+            rc.castsShadow      = false;  // 灯本身不投影 —— 否则会自挡光
+            mState.pWorld->AddComponent<RenderableComponent>(e, rc);
+        }
+
         if (parent.IsValid()) {
             EditorHierarchy::LinkAsLastChild(*mState.pWorld, parent, e);
         }
@@ -189,11 +214,19 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             "##rename", mState.renameBuffer, sizeof(mState.renameBuffer),
               ImGuiInputTextFlags_EnterReturnsTrue
             | ImGuiInputTextFlags_AutoSelectAll);
-        if (entered) {
+        // 三种触发：
+        //   * entered = Enter 键明确确认（EnterReturnsTrue 触发）
+        //   * IsItemDeactivatedAfterEdit = 用户编辑过内容后失焦（典型
+        //     "改完点别处" 的 UX 期望是 commit，不是 cancel；Unity /
+        //     Unreal 的 InputField 也是这个行为）
+        //   * IsItemDeactivated 且未 edit = Esc / 点别处但没改动 → 取消
+        // 顺序 if-else 保证 Enter 优先；deactivated-after-edit 把"鼠标转
+        // 走但已经输完" 这条容易丢的路径也 commit。
+        const bool deactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
+        const bool deactivated          = ImGui::IsItemDeactivated();
+        if (entered || deactivatedAfterEdit) {
             CommitRename(entity);
-        } else if (ImGui::IsItemDeactivated()) {
-            // 失焦 = 取消（Esc / 点别处）。EnterReturnsTrue 已经走
-            // 上面的分支，所以这里走的是非 Enter 的所有退出路径。
+        } else if (deactivated) {
             CancelRename();
         }
     } else {
@@ -225,7 +258,10 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     if (!renaming && ImGui::BeginPopupContextItem("##node_ctx")) {
         mState.selectedEntity = entity;
         if (ImGui::MenuItem("Create Child")) {
-            mState.pendingCreate = {entity, true};
+            mState.pendingCreate = {entity, EditorState::PendingCreateKind::Empty, true};
+        }
+        if (ImGui::MenuItem("Create Light Object (Child)")) {
+            mState.pendingCreate = {entity, EditorState::PendingCreateKind::Light, true};
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Rename", "F2")) {
@@ -274,15 +310,22 @@ void EditorRenderLayer::BeginRename(Orange::Engine::Entity entity)
     mState.renameBuffer[n]   = '\0';
     mState.renamingEntity    = entity;
     mState.renameJustStarted = true;
+    std::fprintf(stdout, "[rename] begin entity #%u old='%s'\n",
+                 static_cast<unsigned>(static_cast<std::uint32_t>(entity.Value())),
+                 mState.renameBuffer);
 }
 
 void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
 {
     if (mState.pWorld == nullptr || !entity.IsValid()) {
+        std::fprintf(stderr, "[rename] commit 跳过：world / entity 无效\n");
         CancelRename();
         return;
     }
     mState.renameBuffer[sizeof(mState.renameBuffer) - 1] = '\0';
+    std::fprintf(stdout, "[rename] commit entity #%u new='%s'\n",
+                 static_cast<unsigned>(static_cast<std::uint32_t>(entity.Value())),
+                 mState.renameBuffer);
     Orange::Engine::Scene::NameComponent nc;
     nc.name = mState.renameBuffer;
     mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
@@ -292,6 +335,11 @@ void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
 
 void EditorRenderLayer::CancelRename()
 {
+    if (mState.renamingEntity.IsValid()) {
+        std::fprintf(stdout, "[rename] cancel entity #%u\n",
+                     static_cast<unsigned>(
+                         static_cast<std::uint32_t>(mState.renamingEntity.Value())));
+    }
     mState.renamingEntity    = Orange::Engine::Entity::Invalid();
     mState.renameJustStarted = false;
     mState.renameBuffer[0]   = '\0';

@@ -83,7 +83,14 @@ void EditorRenderLayer::DrawInspectorPanel()
         }
         if (!w.HasComponent<RenderableComponent>(e)
             && ImGui::MenuItem("Renderable")) {
-            w.AddComponent<RenderableComponent>(e, RenderableComponent{});
+            // 新挂的 Renderable 默认绑内置 cube mesh + textured material，
+            // 用户立刻能在 Scene 视口看到一个白色立方体；不挂 mesh /
+            // material 的空 Renderable 等于隐形，对刚加完组件的用户来说
+            // 没有可见反馈。
+            RenderableComponent rc{};
+            rc.mesh             = mState.cubeMeshHandle;
+            rc.materialInstance = mState.pDefaultRenderableMaterial.get();
+            w.AddComponent<RenderableComponent>(e, rc);
         }
         if (!w.HasComponent<RigidBodyComponent>(e)
             && ImGui::MenuItem("RigidBody")) {
@@ -242,6 +249,12 @@ void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
     ImGui::ColorEdit3("Color", &l->color.x);
     ImGui::DragFloat("Intensity", &l->intensity, 0.05f, 0.0f, 1000.0f);
     ImGui::Checkbox("Casts Shadow", &l->castsShadow);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "本光源整体是否参与投影计算（全局开关）。\n"
+            "关闭后场景中不会有任何阴影，即便 Renderable 上勾了 Casts Shadow。\n"
+            "与 Renderable 的同名 flag 是 AND 关系：两个都必须为 true 才会真投影。");
+    }
 
     if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
 }
@@ -265,6 +278,13 @@ void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
                 reinterpret_cast<void*>(r->materialInstance));
     ImGui::Checkbox("Visible",      &r->visible);
     ImGui::Checkbox("Casts Shadow", &r->castsShadow);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "本物体是否参与投射阴影（per-object 开关）。\n"
+            "关掉对应 \"几何不投影但仍接收阴影\"（典型用例：透明 UI / 装饰物 /\n"
+            "近景特效）。与 DirectionalLight 的同名 flag 是 AND 关系：两个都\n"
+            "必须为 true 才会真投影。");
+    }
 
     if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
 }

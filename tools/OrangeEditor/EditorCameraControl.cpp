@@ -31,9 +31,22 @@ void UpdateEditorCameraFromInput(EditorState::EditorCamera& ec)
     const bool hovered = ImGui::IsWindowHovered();
     const bool focused = ImGui::IsWindowFocused();
 
-    // 鼠标右键拖动：旋转 yaw / pitch。仅当鼠标 down 且本面板 hover 才
-    // 累加 delta —— 用户从 Scene 之外按住 RMB 拖进来不会突然转动相机。
-    if (hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    // RMB 旋转 —— capture-on-press 状态机：
+    //   * 仅当 RMB 在本面板内 *按下* 时进入 dragging 模式（避免从其它面
+    //     板拖进来突然转动相机）；
+    //   * dragging 期间无视 hover，连续吃 MouseDelta —— 修复"拖快了鼠标
+    //     划出面板边界 → IsWindowHovered=false → 旋转中断"的体感问题；
+    //   * RMB 释放（无论鼠标在哪个面板）退出 dragging。
+    // 与 Unity SceneView / Unreal viewport 同模式。
+    if (ec.dragging && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        ec.dragging = false;
+    }
+    if (!ec.dragging && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        ec.dragging = true;
+    }
+    if (ec.dragging)
     {
         const ImVec2 d = io.MouseDelta;
         ec.yaw   -= d.x * ec.lookSensitivity;

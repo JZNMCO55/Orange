@@ -78,9 +78,16 @@ struct EditorState
         Orange::Engine::Entity newParent;  // Invalid 表示提到 root
         bool                   valid = false;
     } pendingReparent;
+    enum class PendingCreateKind : std::uint8_t
+    {
+        Empty = 0,    // Name + Transform，用户后续手动 + Add Component
+        Light,        // Name + Transform + DirectionalLight + Renderable(cube + emissive)
+                      // —— 一键搭出"看得见的发光物体"
+    };
     struct PendingCreate
     {
         Orange::Engine::Entity parent;  // Invalid = 创建为 root；否则挂为该 parent 末子
+        PendingCreateKind      kind  = PendingCreateKind::Empty;
         bool                   valid = false;
     } pendingCreate;
 
@@ -117,6 +124,16 @@ struct EditorState
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pFloorMaterial;
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pWallMaterial;
 
+    // "Create Light Object" / "Add Renderable Component" 等编辑器创建路径
+    // 共用的默认 material instance：
+    //   * pDefaultRenderableMaterial = textured ——"+ Add Component → Renderable"
+    //     时默认绑这个，让新挂的 Renderable 立刻能看到（而非 mesh=Invalid /
+    //     material=nullptr 的空挂）；
+    //   * pLightObjectMaterial = emissive ——"Create Light Object" 把灯做
+    //     成发光的可见物体（cube + emissive material）。
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDefaultRenderableMaterial;
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pLightObjectMaterial;
+
     // ---- 编辑器相机（Phase 6 / Task 06-08 S3）---------------------------
     // viewport-local 相机状态：position + yaw/pitch + 投影参数。每帧由
     // DrawScenePanel 读 ImGui 输入更新本结构，再 Compute 出 Camera 写到
@@ -141,6 +158,13 @@ struct EditorState
         float     moveSpeed       = 4.0f;     // units / sec
         float     lookSensitivity = 0.0035f;  // 弧度 / pixel
         float     zoomSensitivity = 0.6f;     // units / wheel notch
+
+        // RMB 拖动状态机：按下时（且鼠标在 Scene 面板内）置 true，进入"无
+        // 论鼠标是否仍 hover 都吃 MouseDelta"模式；释放时清零。修复"拖动
+        // 快了鼠标滑出面板 → IsWindowHovered 返回 false → 旋转中断"的体感
+        // 问题，与 Unity SceneView / Unreal viewport 通行的 capture-on-press
+        // 模式一致。
+        bool      dragging = false;
     } editorCamera;
 };
 
