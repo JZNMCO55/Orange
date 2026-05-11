@@ -146,6 +146,17 @@
 - 前置：06-04、Phase 5 序列化
 - Critical Path：是
 
+### Task 06-08 · 场景视口渲染
+- 描述：Scene 面板内显示 ECS World 的 3D 渲染结果（不是 Entity Tree 的层级，是真实着色的几何），并提供编辑器相机控制（WASD / orbit）。当前 Scene 面板只有占位文案，"看不到场景"是 Phase 6 闭环最后一道缺口
+- 前置：06-07
+- 实现要点：
+  * **架构跳变**：编辑器现在完全不用 engine Pipeline（06-01 落地状态明示"编辑器只渲染 ImGui"）。本 task 反过来要把 engine Pipeline 接入：让 Pipeline 渲到一张 off-screen RT（不是 swap-chain），编辑器侧拿到这张 RT 的 VkImageView，包成 ImGui 用的 descriptor set 喂给 `ImGui::Image` 显示在 Scene 面板里
+  * **种子 demo 实体要有真 mesh / material**：现在 SeedDemoWorld 给 Floor / Wall 的 RenderableComponent.mesh 都是 Invalid handle，啥都画不出。本 task 启动时通过 AssetRegistry 加载至少一个内置 mesh（cube / plane），种到 demo 实体上
+  * **编辑器相机**：独立的 viewport-local Camera，不污染 World 里可能存在的 game camera。WASD + 鼠标右键拖 = look around；中键平移；滚轮 zoom。相机参数（位置 / 朝向 / FOV）存在 EditorState
+  * **viewport 大小变化处理**：Scene 面板 resize → off-screen RT 重建 + descriptor set 重绑；不能每帧 alloc
+  * **内置 SPV 部署**：编辑器 exe 旁要能找到内置 shader SPV（已在 06-01 占位讨论里挂账）
+- Critical Path：是 —— Phase 6 目标"足以让美术 / 关卡设计师不写代码完成日常工作"必须有视口
+
 ---
 
 ## Phase 7 · C# Scripting (CoreCLR Hosting)

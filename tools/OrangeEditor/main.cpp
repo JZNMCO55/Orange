@@ -637,7 +637,7 @@ private:
     static void DrawScenePanel()
     {
         ImGui::Begin("Scene");
-        ImGui::TextDisabled("scene viewport — Task 06-04");
+        ImGui::TextDisabled("scene viewport — Task 06-08");
         ImGui::End();
     }
 
