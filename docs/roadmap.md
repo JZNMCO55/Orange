@@ -141,10 +141,32 @@
 - 前置：06-04
 - Critical Path：否
 
-### Task 06-07 · 场景保存 / 加载流程
+### Task 06-07 · 场景保存 / 加载流程 ✅
 - 描述：从工具栏触发 `Scene::Serialize` / `Scene::Deserialize`；undo/redo 在 Phase 7 再加
 - 前置：06-04、Phase 5 序列化
 - Critical Path：是
+- **落地状态**（2026-05-11）：
+  - **Existing**：
+    - 顶部 `BeginMainMenuBar` 加 `File` 菜单：New Scene / Open Scene... / Save / Save Scene As... / Exit。Save 在 `currentScenePath` 为空时灰掉，强制走 SaveAs 流程；menu bar 右侧显示当前 scene 路径或 `[Untitled]` 作为状态 indicator
+    - `ShowSceneFileDialog`：Windows native IFileDialog 包装（IFileOpenDialog / IFileSaveDialog）—— COM 初始化用 STA + DISABLE_OLE1DDE；filter 固定 `.scene.json`；路径 wide→UTF-8 写回；CoUninitialize 仅在本次实际 init 时调，避免破坏调用方更上层的 COM 上下文。`GLFW_EXPOSE_NATIVE_WIN32` + `glfwGetWin32Window` 取 HWND 做 dialog parent，dialog 表现为 modal child
+    - `EditorState` 重构：`pWorld` 从裸指针升级为 `std::unique_ptr<Orange::Engine::World>`（编辑器拥有），新增 `currentScenePath` + `pendingSceneOp { None / New / Open / Save / SaveAs }`。改动让 `OnUpdate` 内整体 swap world 成为可能
+    - `SceneOp` 帧末统一 apply：`ApplyPendingSceneOp` 在 `ImGui::Render` 之前执行，dialog 模态阻塞与 ImGui frame 不冲突。Open 路径用临时 `unique_ptr<World>` 装载，`Scene::Load` 失败时保留原 world（与引擎"失败不部分写入"约定对齐）
+    - `ResetEntityLocalState` 在 Open / New 切 world 之后清掉 selectedEntity / renamingEntity / pendingDelete / pendingReparent / pendingCreate / transformEulerCacheEntity —— 这些状态全是 per-world entity 身份，新 world 上不再有效
+    - `NOMINMAX` / `WIN32_LEAN_AND_MEAN` 移到文件最顶端：GLFW native header 会拉 windows.h，min/max 宏会污染 std::min / std::numeric_limits::max（实测 C2589 / C2737）
+    - main() 简化：world 所有权从 main 局部 unique_ptr 搬到 EditorState 字段；启动期种 demo world 一行 `SeedDemoWorld(*editorState.pWorld)`
+  - **错误处理**：Save / Load 失败仅 stderr 记录 + 返回原状态，不弹 modal —— 与项目"日志走 stderr，等 Core::Log 接入再改"的过渡期惯例一致
+  - **验证**：
+    - `cmake --build build --config Debug --target OrangeEditor` 干净
+    - 手动跑：File → Save Scene As → 选路径 → 落盘 .scene.json（schemaVersion scene/world v1.0 + 7 demo entities）；改实体（rename / 加组件 / delete）→ File → Open Scene → 选同一文件 → world 回到保存时状态；File → New Scene → 重新种子；快捷 Save 直接覆写当前路径
+  - **当前限制**（编辑器尚未驱动 runtime，序列化层 graceful 退化）：
+    - 没注入 AssetRegistry → RenderableComponent.mesh handle 落空 + warning
+    - 没注入 PhysicsWorld → RigidBody.handle 落 Invalid + warning（数据字段如 type / damping / 等正常 round-trip）
+    - 没注入 AnimatorRegistry → AnimatorComponent.animator 空 + warning
+  - **Out-of-scope（移交后续 task）**：
+    - undo / redo → Phase 7+
+    - 快捷键 Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S 实际响应（菜单 label 只是显示文本）→ 后续微调
+    - "dirty" 状态指示 + 关闭确认对话框 → Phase 6 后续
+    - 多 scene 标签 → Phase 6 后续
 
 ### Task 06-08 · 场景视口渲染
 - 描述：Scene 面板内显示 ECS World 的 3D 渲染结果（不是 Entity Tree 的层级，是真实着色的几何），并提供编辑器相机控制（WASD / orbit）。当前 Scene 面板只有占位文案，"看不到场景"是 Phase 6 闭环最后一道缺口

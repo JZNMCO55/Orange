@@ -29,6 +29,13 @@
 // 成日志流。默认 dock 布局首帧通过 DockBuilder* 编程式建立，之后用户调
 // 整由 imgui.ini 持久化。
 
+// NOMINMAX / WIN32_LEAN_AND_MEAN 必须在**任何**可能传染 windows.h 的头之
+// 前 define —— GLFW_EXPOSE_NATIVE_WIN32 + GLFW/glfw3native.h 会拉 windows.h，
+// 后续 std::min / std::numeric_limits::max 会被 min/max 宏污染（实测 build
+// 报 C2589 / C2737）。
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
 #include <orange/engine/app/FrameContext.h>
@@ -44,6 +51,7 @@
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
@@ -58,8 +66,17 @@
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 
 #include <vulkan/vulkan.h>
+
+// Windows IFileDialog —— 编辑器 File 菜单的 Open / Save As 走 native
+// Common Item Dialog（COM）。NOMINMAX / WIN32_LEAN_AND_MEAN 已在文件顶
+// 部 define（GLFW native header 早于此处 include），这里直接拉 windows.h
+// + shobjidl 就行。
+#include <windows.h>
+#include <shobjidl.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>  // DockBuilder* API（仅在编辑器侧首帧建默认布局用）
@@ -176,10 +193,97 @@ PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData)
 //
 // 后续 task 加 rename buffer / clipboard / undo stack 等 UI-side 状态时，
 // 全部往这个结构里追加；不应进 engine 公共 API。
+// Windows native file dialog 包装（IFileOpenDialog / IFileSaveDialog）。
+//
+// 设计：
+// * isSave 决定调 FileSave 还是 FileOpen dialog；
+// * 过滤器固定 ".scene.json"（编辑器场景文件后缀；与引擎 Scene::Save/Load
+//   约定一致）；
+// * 路径以 UTF-8 写回 outPath —— 引擎 Scene::Save / Load 接受 string_view，
+//   传 UTF-8 即可（std::filesystem::path 在 Windows 上构造 UTF-8 string
+//   会自动转 wide，本身对编辑器调用方透明）；
+// * CoInitializeEx STA 模式 —— ComDlg 要求；CoUninitialize 仅在本帧
+//   真正初始化（hr == S_OK）时才调，避免误关掉调用方更高层的 COM 上下文；
+// * 失败 / 用户取消 → 返回 false，outPath 保持原状；
+// * parentHwnd 用主窗口的 HWND，让 dialog 作为 modal child 居中 / 抢焦点。
+//   GLFW 的 HWND 通过 glfwGetWin32Window（GLFW_EXPOSE_NATIVE_WIN32）取。
+inline bool ShowSceneFileDialog(bool isSave, HWND parentHwnd, std::string& outPath)
+{
+    const HRESULT hrCo = CoInitializeEx(nullptr,
+                                        COINIT_APARTMENTTHREADED
+                                        | COINIT_DISABLE_OLE1DDE);
+    if (hrCo != S_OK && hrCo != S_FALSE) { return false; }
+
+    bool ok = false;
+    IFileDialog* pDialog = nullptr;
+    HRESULT hr = CoCreateInstance(
+        isSave ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
+        nullptr, CLSCTX_ALL,
+        IID_PPV_ARGS(&pDialog));
+    if (SUCCEEDED(hr)) {
+        const COMDLG_FILTERSPEC filterSpec[] = {
+            { L"Scene Files (*.scene.json)", L"*.scene.json" },
+            { L"All Files (*.*)",            L"*.*" },
+        };
+        pDialog->SetFileTypes(2, filterSpec);
+        pDialog->SetFileTypeIndex(1);
+        pDialog->SetDefaultExtension(L"scene.json");
+        pDialog->SetTitle(isSave ? L"Save Scene As" : L"Open Scene");
+
+        hr = pDialog->Show(parentHwnd);
+        if (SUCCEEDED(hr)) {
+            IShellItem* pItem = nullptr;
+            hr = pDialog->GetResult(&pItem);
+            if (SUCCEEDED(hr)) {
+                PWSTR pszPath = nullptr;
+                hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+                if (SUCCEEDED(hr)) {
+                    const int u8len = WideCharToMultiByte(
+                        CP_UTF8, 0, pszPath, -1,
+                        nullptr, 0, nullptr, nullptr);
+                    if (u8len > 1) {
+                        outPath.resize(static_cast<std::size_t>(u8len - 1));
+                        WideCharToMultiByte(
+                            CP_UTF8, 0, pszPath, -1,
+                            outPath.data(), u8len, nullptr, nullptr);
+                        ok = true;
+                    }
+                    CoTaskMemFree(pszPath);
+                }
+                pItem->Release();
+            }
+        }
+        pDialog->Release();
+    }
+    if (hrCo == S_OK) { CoUninitialize(); }
+    return ok;
+}
+
+enum class SceneOp : std::uint8_t
+{
+    None = 0,
+    New,
+    Open,
+    Save,
+    SaveAs,
+};
+
 struct EditorState
 {
-    Orange::Engine::World* pWorld         = nullptr;
+    // 编辑器持有 World 所有权 —— 06-07 起场景 Open / New 需要在 OnUpdate
+    // 内整体 swap world，必须放在 state 里让 layer 能直接 reset / replace。
+    // 之前是 main() 拥有 + state 持裸指针，重构理由见 Task 06-07 提交。
+    std::unique_ptr<Orange::Engine::World> pWorld;
     Orange::Engine::Entity selectedEntity = Orange::Engine::Entity::Invalid();
+
+    // 当前 scene 文件路径（绝对路径，UTF-8）；空 = 尚未保存过 / "Untitled"。
+    // Save 走 currentScenePath；空时回退到 SaveAs 流程。
+    std::string currentScenePath;
+
+    // 帧末统一执行的场景级操作。把"用户从菜单点了 New / Open / ..."与
+    // 模态文件对话框 + 真正 swap world 的执行分开，避免在 ImGui frame 中
+    // 间或 EnTT view 迭代中触发模态阻塞 / mutate registry。
+    SceneOp pendingSceneOp = SceneOp::None;
 
     // 内联重命名状态：renamingEntity 标记当前正在重命名哪个 entity，
     // renameBuffer 是 InputText 编辑缓冲。renameJustStarted 让首帧自动
@@ -530,6 +634,7 @@ public:
             ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
         BuildDefaultLayoutOnce(dockspaceId);
+        DrawMainMenuBar();
 
         // 五个固定面板（Task 06-02 占位骨架）：
         //   Scene        —— 场景视口预览（Task 06-04 真要画 viewport 时填）
@@ -542,6 +647,12 @@ public:
         DrawInspectorPanel();
         DrawAssetsPanel();
         DrawConsolePanel(frame);
+
+        // 帧末统一 apply 场景级操作。放在 panel 绘制完之后、ImGui::Render
+        // 之前 —— 文件对话框是模态阻塞窗口，它内部会 pump 一些消息但不
+        // 影响本帧的 ImGui DrawData；swap world 之后的 selectedEntity /
+        // renamingEntity / euler 缓存清理也在此发生，下一帧才用新状态画。
+        ApplyPendingSceneOp();
 
         ImGui::Render();
 
@@ -628,6 +739,151 @@ private:
         ImGui::DockBuilderDockWindow("Scene",       center);
 
         ImGui::DockBuilderFinish(dockspaceId);
+    }
+
+    // 主菜单栏（File / View / Help ...）。BeginMainMenuBar 创建一个固定
+    // 顶部的浮动 bar，与 DockSpaceOverViewport 共存 —— ImGui 自动把
+    // dockspace 下移留出 menu bar 高度。文件操作不在此立即执行：菜单点
+    // 击仅设置 pendingSceneOp，真正的 dialog + Save/Load 调用走帧末
+    // ApplyPendingSceneOp。
+    //
+    // 快捷键 Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S 在菜单 label 处只
+    // 是显示文本，真要响应快捷键需要在 OnUpdate 里检 IsKeyPressed +
+    // ModCtrl。本 task 范围内菜单点击足以验收 Save/Load 流程；快捷键留
+    // 给后续微调（同时也避免与 Entity Tree 面板的 F2/Del 冲突）。
+    void DrawMainMenuBar()
+    {
+        if (!ImGui::BeginMainMenuBar()) { return; }
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("New Scene")) {
+                mState.pendingSceneOp = SceneOp::New;
+            }
+            if (ImGui::MenuItem("Open Scene...")) {
+                mState.pendingSceneOp = SceneOp::Open;
+            }
+            ImGui::Separator();
+            const bool canQuickSave = !mState.currentScenePath.empty();
+            if (ImGui::MenuItem("Save", nullptr, false, canQuickSave)) {
+                mState.pendingSceneOp = SceneOp::Save;
+            }
+            if (ImGui::MenuItem("Save Scene As...")) {
+                mState.pendingSceneOp = SceneOp::SaveAs;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Exit")) {
+                mHost.RequestExit();
+            }
+            ImGui::EndMenu();
+        }
+        // 当前 scene 路径作为只读 indicator 显示在菜单栏右侧 —— OS 窗口
+        // 标题这一层目前没有动态修改入口，先放这里让用户清楚自己在编辑哪个
+        // 文件 / 是不是 Untitled。
+        const std::string& path = mState.currentScenePath;
+        const char* sceneLabel  = path.empty() ? "[Untitled]" : path.c_str();
+        const float bbWidth =
+            ImGui::CalcTextSize(sceneLabel).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+        ImGui::SameLine(ImGui::GetWindowWidth() - bbWidth);
+        ImGui::TextDisabled("%s", sceneLabel);
+        ImGui::EndMainMenuBar();
+    }
+
+    // 把 EditorState 内与"被编辑 world 实体身份强相关"的状态全清空。
+    // Open / New 切 world 后必须调；不调的话 selectedEntity 会指向新 world
+    // 里不存在的 entity，Inspector 看到野指针。
+    void ResetEntityLocalState()
+    {
+        mState.selectedEntity            = Orange::Engine::Entity::Invalid();
+        mState.renamingEntity            = Orange::Engine::Entity::Invalid();
+        mState.renameBuffer[0]           = '\0';
+        mState.renameJustStarted         = false;
+        mState.pendingDelete             = Orange::Engine::Entity::Invalid();
+        mState.pendingReparent.valid     = false;
+        mState.pendingCreate.valid       = false;
+        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    }
+
+    // 帧末统一 apply 用户菜单点击的场景操作。dialog 阻塞期 ImGui 主循环
+    // 等待，可接受 —— 编辑器无实时帧率要求。失败 / 取消都仅 stderr 记
+    // 录，不弹 modal，与项目"日志走 stderr，等 Core::Log 接入再改"的过
+    // 渡期惯例一致。
+    void ApplyPendingSceneOp()
+    {
+        const SceneOp op = mState.pendingSceneOp;
+        if (op == SceneOp::None) { return; }
+        mState.pendingSceneOp = SceneOp::None;
+
+        // 拿主窗口 HWND 给 dialog 当 parent，确保 dialog 居中 + 抢焦点。
+        auto* gw = static_cast<GLFWwindow*>(
+            mHost.GetWindow().GetGlfwWindowHandle());
+        const HWND hwnd = (gw != nullptr) ? glfwGetWin32Window(gw) : nullptr;
+
+        switch (op) {
+            case SceneOp::New: {
+                mState.pWorld = std::make_unique<Orange::Engine::World>();
+                SeedDemoWorld(*mState.pWorld);  // 与启动期一致；后续真要"空场景"再做"New Empty"
+                mState.currentScenePath.clear();
+                ResetEntityLocalState();
+                std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
+                break;
+            }
+            case SceneOp::Open: {
+                std::string path;
+                if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) { break; }
+                auto pNew = std::make_unique<Orange::Engine::World>();
+                auto rc = Orange::Engine::Scene::Load(path, *pNew);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                                 "[OrangeEditor] Scene::Load failed: %s (code=%u)\n",
+                                 path.c_str(),
+                                 static_cast<unsigned>(rc.Error()));
+                    break;  // 保留原 world
+                }
+                mState.pWorld = std::move(pNew);
+                mState.currentScenePath = path;
+                ResetEntityLocalState();
+                std::fprintf(stdout, "[OrangeEditor] opened scene: %s\n", path.c_str());
+                break;
+            }
+            case SceneOp::Save: {
+                if (mState.currentScenePath.empty()) {
+                    // 没保存过 → 转 SaveAs。下一帧 menu 不再可见，但
+                    // 我们直接走 SaveAs 流程也行。
+                    std::string path;
+                    if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
+                    mState.currentScenePath = std::move(path);
+                }
+                auto rc = Orange::Engine::Scene::Save(
+                    *mState.pWorld, mState.currentScenePath);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                                 "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
+                                 mState.currentScenePath.c_str(),
+                                 static_cast<unsigned>(rc.Error()));
+                } else {
+                    std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
+                                 mState.currentScenePath.c_str());
+                }
+                break;
+            }
+            case SceneOp::SaveAs: {
+                std::string path;
+                if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
+                auto rc = Orange::Engine::Scene::Save(*mState.pWorld, path);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                                 "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
+                                 path.c_str(),
+                                 static_cast<unsigned>(rc.Error()));
+                    break;
+                }
+                mState.currentScenePath = std::move(path);
+                std::fprintf(stdout, "[OrangeEditor] saved scene as: %s\n",
+                             mState.currentScenePath.c_str());
+                break;
+            }
+            case SceneOp::None:
+                break;  // unreachable, 上面已 early return
+        }
     }
 
     // 占位面板：仅一行 placeholder 文案。每个面板的实际内容由后续 task 填
@@ -1523,22 +1779,20 @@ int main()
         return 1;
     }
 
-    // ---- 编辑器侧 World + EditorState -----------------------------------
+    // ---- 编辑器侧 EditorState + 启动期种子 World ------------------------
     //
-    // Task 06-03 阶段：用代码种一棵 demo 层级（Root → Camera/Light/Geometry
-    // (→Floor/Wall) + Misc Sibling 第二棵根）让 Entity Tree 面板能立刻看
-    // 到东西。Task 06-07 接真实场景加载后，这段退化成"未加载任何场景时"
-    // 的占位 fallback（或直接删）。
+    // EditorState 拥有 World（unique_ptr 字段）—— Task 06-07 起 File →
+    // Open / New 要在 OnUpdate 内整体 swap world，所有权放 state 内最自
+    // 然。生命周期：editorState 与 host 在同一 scope；host.reset() 已
+    // 在关停段手工提前调，保证 layer 析构时 state（含 world）仍存活。
     //
-    // World 由 main 拥有，layer 通过 EditorState 引用读写 —— 生命周期：
-    // host.reset() 走 layer dtor 之前 world 必须存活，所以 world / state
-    // 声明在 layer push 之前、host.reset() 之后才析构（与 host 在同一
-    // scope，且声明顺序在 host 之后保证析构先于 host 的反过来 OK 因为
-    // host.reset() 被手动提前调，见关停段）。
-    auto pWorld = std::make_unique<Orange::Engine::World>();
-    SeedDemoWorld(*pWorld);
-    EditorState editorState{};
-    editorState.pWorld = pWorld.get();
+    // 启动期种 demo 实体（Root → Camera/Light/Geometry → Floor/Wall +
+    // Misc Sibling）让 Entity Tree / Inspector 立刻有东西可看。File →
+    // New 会重新执行同样的 seed —— 真要"空场景"等后续 task 加 "New Empty"
+    // 入口再分。
+    EditorState editorState;
+    editorState.pWorld = std::make_unique<Orange::Engine::World>();
+    SeedDemoWorld(*editorState.pWorld);
 
     // ---- Layer 注入 -----------------------------------------------------
     host->PushLayer(std::make_unique<EditorRenderLayer>(*host, *pRenderer,
@@ -1547,7 +1801,7 @@ int main()
 
     std::fprintf(stdout,
                  "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
-                 pWorld->Size());
+                 editorState.pWorld->Size());
 
     const int rc = host->Run();
 
