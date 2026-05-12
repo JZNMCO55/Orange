@@ -7,6 +7,8 @@
 #include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
 #include "../command/SetFieldValueCommand.h"
+#include "../schema/ComponentSchemaRegistry.h"
+#include "../schema/SchemaInspector.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/physics/ColliderComponent.h>
@@ -72,7 +74,14 @@ void EditorRenderLayer::DrawInspectorPanel()
     DrawInspectorName(e);
     DrawInspectorTransform(e);
     DrawInspectorHierarchy(e);
-    DrawInspectorDirectionalLight(e);
+    // v0.2.5 commit 3 起，DirectionalLight 走 schema-driven 渲染。
+    // 其它 component 在后续 commit 逐个迁移；全部 ✅ 后整段 DrawInspectorXxx
+    // 路径删除，本调用统一替换为 Orange::Editor::Schema::DrawEntityViaSchemas。
+    if (const auto* dlSchema = Orange::Editor::Schema::ComponentSchemaRegistry::Instance()
+            .Find<Orange::Engine::Render::DirectionalLight>())
+    {
+        Orange::Editor::Schema::DrawComponentSchemaSection(mHost, e, *dlSchema);
+    }
     DrawInspectorRenderable(e);
     DrawInspectorRigidBody(e);
     DrawInspectorCollider(e);
@@ -290,90 +299,13 @@ void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
     ImGui::TextDisabled("(edit by drag-drop in Entity Tree)");
 }
 
-void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
-{
-    using DL = Orange::Engine::Render::DirectionalLight;
-    if (!mHost.scene.pWorld->HasComponent<DL>(e)) { return; }
-    bool remove = false;
-    const bool open = ComponentHeader("Directional Light", &remove);
-    if (!open) {
-        if (remove) {
-            mHost.scene.pWorld->RemoveComponent<DL>(e);
-            mHost.cmdStack.Clear();
-        }
-        return;
-    }
-    auto* l  = mHost.scene.pWorld->GetComponent<DL>(e);
-    auto* pW = mHost.scene.pWorld.get();
-
-    {
-        glm::vec3 oldDir = l->direction;
-        if (DragVec3Colored("Direction", &l->direction.x, 0.01f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                e, "light.direction", oldDir, l->direction,
-                [pW, e](const glm::vec3& v) {
-                    if (auto* dl = pW->GetComponent<DL>(e)) dl->direction = v;
-                }));
-        }
-    }
-    // direction 约定为单位向量；UI 不强制 normalize（用户拖中间态可能
-    // 临时变长度），但 Pipeline 自己在着色阶段会按需 normalize。
-    {
-        glm::vec3 oldDir = l->direction;
-        if (ImGui::SmallButton("Normalize Direction")) {
-            const float len = glm::length(l->direction);
-            if (len > 0.0f) {
-                l->direction /= len;
-                mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                    e, "light.direction", oldDir, l->direction,
-                    [pW, e](const glm::vec3& v) {
-                        if (auto* dl = pW->GetComponent<DL>(e)) dl->direction = v;
-                    }));
-            }
-        }
-    }
-    {
-        glm::vec3 oldColor = l->color;
-        if (ImGui::ColorEdit3("Color", &l->color.x)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                e, "light.color", oldColor, l->color,
-                [pW, e](const glm::vec3& v) {
-                    if (auto* dl = pW->GetComponent<DL>(e)) dl->color = v;
-                }));
-        }
-    }
-    {
-        float oldIntensity = l->intensity;
-        if (ImGui::DragFloat("Intensity", &l->intensity, 0.05f, 0.0f, 1000.0f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "light.intensity", oldIntensity, l->intensity,
-                [pW, e](const float& v) {
-                    if (auto* dl = pW->GetComponent<DL>(e)) dl->intensity = v;
-                }));
-        }
-    }
-    {
-        bool oldShadow = l->castsShadow;
-        if (ImGui::Checkbox("Casts Shadow", &l->castsShadow)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
-                e, "light.castsShadow", oldShadow, l->castsShadow,
-                [pW, e](const bool& v) {
-                    if (auto* dl = pW->GetComponent<DL>(e)) dl->castsShadow = v;
-                }));
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "本光源整体是否参与投影计算（全局开关）。\n"
-                "关闭后场景中不会有任何阴影，即便 Renderable 上勾了 Casts Shadow。\n"
-                "与 Renderable 的同名 flag 是 AND 关系：两个都必须为 true 才会真投影。");
-        }
-    }
-
-    if (remove) {
-        mHost.scene.pWorld->RemoveComponent<DL>(e);
-        mHost.cmdStack.Clear();
-    }
-}
+// DrawInspectorDirectionalLight 已删除 —— v0.2.5 commit 3 起 DirectionalLight
+// 走 schema-driven 渲染（schema/RegisterBuiltinSchemas.cpp）。"Normalize
+// Direction" 一键按钮目前未在 schema 路径表达：schema 系统当前只支持
+// 字段 read/write，没有"action button"概念。后续 commit 在 schema 系统
+// 引入 ActionButton attribute 或独立 IEditorInspectorPlugin 路径后再
+// 还原该 helper（短期可接受退化——direction 在 ImGui DragFloat3 拖动
+// 时大概率仍是单位向量附近的值；Pipeline 着色阶段按需 normalize 保底）。
 
 void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
 {

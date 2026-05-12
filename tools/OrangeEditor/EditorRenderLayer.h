@@ -98,7 +98,8 @@ private:
     void DrawInspectorName             (Orange::Engine::Entity e);
     void DrawInspectorTransform        (Orange::Engine::Entity e);
     void DrawInspectorHierarchy        (Orange::Engine::Entity e);
-    void DrawInspectorDirectionalLight (Orange::Engine::Entity e);
+    // DirectionalLight 已迁移到 schema-driven 渲染（v0.2.5 commit 3）；
+    // 不再有 DrawInspectorDirectionalLight 成员。后续 component 同步迁移。
     void DrawInspectorRenderable       (Orange::Engine::Entity e);
     void DrawInspectorRigidBody        (Orange::Engine::Entity e);
     void DrawInspectorCollider         (Orange::Engine::Entity e);

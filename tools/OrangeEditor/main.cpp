@@ -70,6 +70,7 @@
 #include "EditorHost.h"
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
+#include "schema/RegisterBuiltinSchemas.h"
 
 #include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
 #include <glm/gtc/quaternion.hpp>
@@ -307,6 +308,12 @@ int main()
     // 启动优先级：检测 assets/editor/demo.scene.json（相对 .exe 工作目录），
     // 存在则 Load；文件不存在（IoError）或加载失败则回退 SeedDemoWorld。
     // File > New Scene 走 ApplyPendingSceneOp，与回退路径保持一致。
+    // 启动期一次性注册所有内置 component schema —— 必须在创建 EditorRenderLayer
+    // 之前完成，让 Inspector 首帧绘制时 registry 已 ready。后续 v0.3 游戏侧
+    // 自定义 component 通过 OrangeEditor::RegisterComponentSchema 扩展点
+    // 继续追加。
+    Orange::Editor::Schema::RegisterBuiltinSchemas();
+
     EditorHost editorHost;
     editorHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
     InitializeEditorAssets(editorHost);
