@@ -1,0 +1,73 @@
+#ifndef ORANGE_EDITOR_CONTEXT_EDITOR_SELECTION_H
+#define ORANGE_EDITOR_CONTEXT_EDITOR_SELECTION_H
+
+// EditorSelection —— 选中 entity + 帧末延迟操作 + Inspector 编辑相关 UI 缓存。
+//
+// v0.2.5 整骨：从原 19 字段的 god struct EditorState 拆出 selection 子域。
+//
+// 字段归属 rationale：
+//   * selectedEntity / pendingDelete / pendingReparent / pendingCreate 都是
+//     selection 域："当前选了谁" + "帧末对选中实体或 hierarchy 做什么"
+//   * rename 三件套属 selection——rename 永远绑当前选中 entity
+//   * transformEulerCache 属 selection——它与 selectedEntity 联动（切实体
+//     时缓存失效需要从 quat 重算 Euler）。editor-roadmap.md v0.2.5 deliverable
+//     里写 "EditorCameraState（轨道相机 + Euler cache）" 字眼让人误以为
+//     Euler 是相机角度——实际是 Transform 段 DragFloat3 的编辑缓存，与
+//     camera 完全无关，归 selection 才是语义对的位置。
+//
+// 树状结构上的破坏性 / 增加操作（DestroySubtree / Reparent / Create）
+// 不能在递归 draw 中即时执行 —— 会破坏当前遍历的 sibling 链 / EnTT view
+// 迭代器。先在面板里记下"本帧应执行什么"，draw 结束后统一 apply。
+
+#include <orange/engine/scene/Entity.h>
+
+#include <glm/vec3.hpp>
+
+#include <cstdint>
+
+struct EditorSelection
+{
+    Orange::Engine::Entity selectedEntity = Orange::Engine::Entity::Invalid();
+
+    Orange::Engine::Entity pendingDelete = Orange::Engine::Entity::Invalid();
+
+    struct PendingReparent
+    {
+        Orange::Engine::Entity child;
+        Orange::Engine::Entity newParent;  // Invalid 表示提到 root
+        bool                   valid = false;
+    } pendingReparent;
+
+    enum class PendingCreateKind : std::uint8_t
+    {
+        Empty = 0,    // Name + Transform，用户后续手动 + Add Component
+        Light,        // Name + Transform + DirectionalLight + Renderable(cube + emissive)
+                      // —— 一键搭出"看得见的发光物体"
+    };
+
+    struct PendingCreate
+    {
+        Orange::Engine::Entity parent;  // Invalid = 创建为 root；否则挂为该 parent 末子
+        PendingCreateKind      kind  = PendingCreateKind::Empty;
+        bool                   valid = false;
+    } pendingCreate;
+
+    // 内联重命名状态：renamingEntity 标记当前正在重命名哪个 entity，
+    // renameBuffer 是 InputText 编辑缓冲。renameJustStarted 让首帧自动
+    // 抢键盘焦点（SetKeyboardFocusHere），之后归 false 让用户能正常点击
+    // 撤销编辑。
+    Orange::Engine::Entity renamingEntity    = Orange::Engine::Entity::Invalid();
+    char                   renameBuffer[256] = {};
+    bool                   renameJustStarted = false;
+
+    // Transform Euler 编辑缓存（degrees）。UI 用 Euler 输入比 quat 4 字段
+    // 直观，但 quat→Euler 在 gimbal lock 附近不连续，用户在 DragFloat3 上
+    // 滑动时显示值会跳。所以编辑期把 Euler 缓存到 selection；切 entity 时
+    // 才从 quat 重算一次，DragFloat3 写 cache，cache 改了再把 quat 重算回
+    // component。
+    Orange::Engine::Entity transformEulerCacheEntity =
+        Orange::Engine::Entity::Invalid();
+    glm::vec3              transformEulerCache{0.0f, 0.0f, 0.0f};
+};
+
+#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_SELECTION_H

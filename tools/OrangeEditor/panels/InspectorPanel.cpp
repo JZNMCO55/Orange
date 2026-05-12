@@ -41,28 +41,28 @@
 void EditorRenderLayer::DrawInspectorPanel()
 {
     ImGui::Begin("Inspector");
-    if (mState.pWorld == nullptr || !mState.selectedEntity.IsValid()) {
+    if (mState.scene.pWorld == nullptr || !mState.selection.selectedEntity.IsValid()) {
         ImGui::TextDisabled("(select an entity)");
         ImGui::End();
         return;
     }
     // Entity::IsValid() 只检查是否为哨兵 null 值；Undo 可能已销毁该实体但
     // 未清掉句柄。World::IsValid 走 registry.valid()，可正确甄别死实体。
-    if (!mState.pWorld->IsValid(mState.selectedEntity)) {
-        mState.selectedEntity            = Orange::Engine::Entity::Invalid();
-        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    if (!mState.scene.pWorld->IsValid(mState.selection.selectedEntity)) {
+        mState.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
+        mState.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
         ImGui::TextDisabled("(select an entity)");
         ImGui::End();
         return;
     }
 
-    const Orange::Engine::Entity e = mState.selectedEntity;
+    const Orange::Engine::Entity e = mState.selection.selectedEntity;
     ImGui::Text("Entity #%u",
                 static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
     ImGui::Separator();
 
     // Play / Paused 期间所有 component 字段只读（灰显但可见）。
-    const bool canEdit = (mState.playState == PlayState::Edit);
+    const bool canEdit = (mState.scene.playState == PlayState::Edit);
     if (!canEdit) {
         ImGui::TextDisabled("[ Read-only in Play / Paused ]");
         ImGui::Separator();
@@ -95,7 +95,7 @@ void EditorRenderLayer::DrawInspectorPanel()
         using namespace Orange::Engine::Scene;
         using namespace Orange::Engine::Render;
         using namespace Orange::Engine::Physics;
-        auto& w = *mState.pWorld;
+        auto& w = *mState.scene.pWorld;
         if (!w.HasComponent<TransformComponent>(e)
             && ImGui::MenuItem("Transform")) {
             w.AddComponent<TransformComponent>(e, TransformComponent{});
@@ -113,8 +113,8 @@ void EditorRenderLayer::DrawInspectorPanel()
             // material 的空 Renderable 等于隐形，对刚加完组件的用户来说
             // 没有可见反馈。
             RenderableComponent rc{};
-            rc.mesh             = mState.cubeMeshHandle;
-            rc.materialInstance = mState.pDefaultRenderableMaterial.get();
+            rc.mesh             = mState.assets.cubeMeshHandle;
+            rc.materialInstance = mState.assets.pDefaultRenderableMaterial.get();
             w.AddComponent<RenderableComponent>(e, rc);
             mState.pCmdStack->Clear();
         }
@@ -175,15 +175,15 @@ bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
 void EditorRenderLayer::DrawInspectorName(Orange::Engine::Entity e)
 {
     using NameComponent = Orange::Engine::Scene::NameComponent;
-    if (!mState.pWorld->HasComponent<NameComponent>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<NameComponent>(e)) { return; }
     if (!ImGui::CollapsingHeader("Name", ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
     }
-    auto* nc = mState.pWorld->GetComponent<NameComponent>(e);
-    // 直接复用 mState.renameBuffer 容量大小的本地缓冲，避免对
+    auto* nc = mState.scene.pWorld->GetComponent<NameComponent>(e);
+    // 直接复用 mState.selection.renameBuffer 容量大小的本地缓冲，避免对
     // std::string 内存的实时 resize。每帧从 component 拷贝进 buf，
     // 编辑后写回 —— 这样多个面板（树 InputText / Inspector InputText）
-    // 同时观察一份 NameComponent 时不会跟 mState.renameBuffer 串味。
+    // 同时观察一份 NameComponent 时不会跟 mState.selection.renameBuffer 串味。
     char buf[256];
     const std::size_t n = std::min(nc->name.size(), sizeof(buf) - 1);
     std::memcpy(buf, nc->name.data(), n);
@@ -193,26 +193,26 @@ void EditorRenderLayer::DrawInspectorName(Orange::Engine::Entity e)
         // 每次按键都 Push RenameCommand；CommandStack 的 coalesce 会把
         // 同一实体的连续改名折叠成一条 Undo 步骤（mOldName 保持最初值）。
         mState.pCmdStack->Push(std::make_unique<RenameCommand>(
-            *mState.pWorld, e, oldName, std::string(buf)));
+            *mState.scene.pWorld, e, oldName, std::string(buf)));
     }
 }
 
 void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
 {
     using TC = Orange::Engine::Scene::TransformComponent;
-    if (!mState.pWorld->HasComponent<TC>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<TC>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Transform", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<TC>(e);
-            mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+            mState.scene.pWorld->RemoveComponent<TC>(e);
+            mState.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
             mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* t  = mState.pWorld->GetComponent<TC>(e);
-    auto* pW = mState.pWorld.get();
+    auto* t  = mState.scene.pWorld->GetComponent<TC>(e);
+    auto* pW = mState.scene.pWorld.get();
 
     {
         glm::vec3 oldPos = t->position;
@@ -227,15 +227,15 @@ void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
 
     // Euler 缓存：换实体了 → 重置 cache（从 quat 推 Euler）；同一实体
     // 持续编辑 → 用 cache 保证 DragFloat3 在 gimbal lock 附近不抖。
-    if (mState.transformEulerCacheEntity != e) {
+    if (mState.selection.transformEulerCacheEntity != e) {
         const glm::vec3 eulerRad = glm::eulerAngles(t->rotation);
-        mState.transformEulerCache       = glm::degrees(eulerRad);
-        mState.transformEulerCacheEntity = e;
+        mState.selection.transformEulerCache       = glm::degrees(eulerRad);
+        mState.selection.transformEulerCacheEntity = e;
     }
     {
         glm::quat oldRot = t->rotation;
-        if (DragVec3Colored("Rotation (°)", &mState.transformEulerCache.x, 0.5f)) {
-            t->rotation = glm::quat(glm::radians(mState.transformEulerCache));
+        if (DragVec3Colored("Rotation (°)", &mState.selection.transformEulerCache.x, 0.5f)) {
+            t->rotation = glm::quat(glm::radians(mState.selection.transformEulerCache));
             // Undo 时需额外使 Euler 缓存失效，避免 Inspector 下一帧从
             // 旧 cache 重建错误的显示值。
             auto* pState = &mState;
@@ -243,7 +243,7 @@ void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
                 e, "transform.rotation", oldRot, t->rotation,
                 [pW, pState, e](const glm::quat& v) {
                     if (auto* tc = pW->GetComponent<TC>(e)) tc->rotation = v;
-                    pState->transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+                    pState->selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
                 }));
         }
     }
@@ -260,8 +260,8 @@ void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
     }
 
     if (remove) {
-        mState.pWorld->RemoveComponent<TC>(e);
-        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        mState.scene.pWorld->RemoveComponent<TC>(e);
+        mState.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
         mState.pCmdStack->Clear();
     }
 }
@@ -269,9 +269,9 @@ void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
 void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
 {
     using HC = Orange::Engine::Scene::HierarchyComponent;
-    if (!mState.pWorld->HasComponent<HC>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<HC>(e)) { return; }
     if (!ImGui::CollapsingHeader("Hierarchy")) { return; }
-    const auto* h = mState.pWorld->GetComponent<HC>(e);
+    const auto* h = mState.scene.pWorld->GetComponent<HC>(e);
 
     auto idTextOf = [](Orange::Engine::Entity x) -> std::string {
         if (!x.IsValid()) { return "(none)"; }
@@ -293,18 +293,18 @@ void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
 void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
 {
     using DL = Orange::Engine::Render::DirectionalLight;
-    if (!mState.pWorld->HasComponent<DL>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<DL>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Directional Light", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<DL>(e);
+            mState.scene.pWorld->RemoveComponent<DL>(e);
             mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* l  = mState.pWorld->GetComponent<DL>(e);
-    auto* pW = mState.pWorld.get();
+    auto* l  = mState.scene.pWorld->GetComponent<DL>(e);
+    auto* pW = mState.scene.pWorld.get();
 
     {
         glm::vec3 oldDir = l->direction;
@@ -370,7 +370,7 @@ void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
     }
 
     if (remove) {
-        mState.pWorld->RemoveComponent<DL>(e);
+        mState.scene.pWorld->RemoveComponent<DL>(e);
         mState.pCmdStack->Clear();
     }
 }
@@ -378,18 +378,18 @@ void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
 void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
 {
     using RC = Orange::Engine::Render::RenderableComponent;
-    if (!mState.pWorld->HasComponent<RC>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<RC>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Renderable", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<RC>(e);
+            mState.scene.pWorld->RemoveComponent<RC>(e);
             mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* r  = mState.pWorld->GetComponent<RC>(e);
-    auto* pW = mState.pWorld.get();
+    auto* r  = mState.scene.pWorld->GetComponent<RC>(e);
+    auto* pW = mState.scene.pWorld.get();
 
     // mesh / materialInstance 是 handle / 裸指针 —— 编辑得通过 Asset
     // 浏览器（后续扩展）才有意义。这里只读显示。
@@ -427,7 +427,7 @@ void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
     }
 
     if (remove) {
-        mState.pWorld->RemoveComponent<RC>(e);
+        mState.scene.pWorld->RemoveComponent<RC>(e);
         mState.pCmdStack->Clear();
     }
 }
@@ -436,18 +436,18 @@ void EditorRenderLayer::DrawInspectorRigidBody(Orange::Engine::Entity e)
 {
     using RB = Orange::Engine::Physics::RigidBodyComponent;
     using BT = Orange::Engine::Physics::BodyType;
-    if (!mState.pWorld->HasComponent<RB>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<RB>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("RigidBody", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<RB>(e);
+            mState.scene.pWorld->RemoveComponent<RB>(e);
             mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* b  = mState.pWorld->GetComponent<RB>(e);
-    auto* pW = mState.pWorld.get();
+    auto* b  = mState.scene.pWorld->GetComponent<RB>(e);
+    auto* pW = mState.scene.pWorld.get();
 
     {
         const char* kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
@@ -550,7 +550,7 @@ void EditorRenderLayer::DrawInspectorRigidBody(Orange::Engine::Entity e)
                         static_cast<unsigned long long>(b->handle.Value()));
 
     if (remove) {
-        mState.pWorld->RemoveComponent<RB>(e);
+        mState.scene.pWorld->RemoveComponent<RB>(e);
         mState.pCmdStack->Clear();
     }
 }
@@ -562,18 +562,18 @@ void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
     using ::Orange::Engine::Physics::BoxDesc;
     using ::Orange::Engine::Physics::PolygonDesc;
     using ::Orange::Engine::Physics::EdgeChainDesc;
-    if (!mState.pWorld->HasComponent<CC>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<CC>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Collider", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<CC>(e);
+            mState.scene.pWorld->RemoveComponent<CC>(e);
             mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* c  = mState.pWorld->GetComponent<CC>(e);
-    auto* pW = mState.pWorld.get();
+    auto* c  = mState.scene.pWorld->GetComponent<CC>(e);
+    auto* pW = mState.scene.pWorld.get();
 
     // shape 是 std::variant —— 显示 shape 类型 + 各自的简单数值。
     // 切换 shape 类型（assign 一个不同 alternative）会重置数据，
@@ -688,7 +688,7 @@ void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
     }
 
     if (remove) {
-        mState.pWorld->RemoveComponent<CC>(e);
+        mState.scene.pWorld->RemoveComponent<CC>(e);
         mState.pCmdStack->Clear();
     }
 }
@@ -696,19 +696,19 @@ void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
 void EditorRenderLayer::DrawInspectorParticleEmitter(Orange::Engine::Entity e)
 {
     using PEC = Orange::Engine::Render::ParticleEmitterComponent;
-    if (!mState.pWorld->HasComponent<PEC>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<PEC>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Particle Emitter", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<PEC>(e);
+            mState.scene.pWorld->RemoveComponent<PEC>(e);
             mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* p  = mState.pWorld->GetComponent<PEC>(e);
+    auto* p  = mState.scene.pWorld->GetComponent<PEC>(e);
     auto& d  = p->desc;
-    auto* pW = mState.pWorld.get();
+    auto* pW = mState.scene.pWorld.get();
 
     {
         bool old = p->emitting;
@@ -905,7 +905,7 @@ void EditorRenderLayer::DrawInspectorParticleEmitter(Orange::Engine::Entity e)
     ImGui::TextDisabled("(real-time preview pending Task 06-08 viewport)");
 
     if (remove) {
-        mState.pWorld->RemoveComponent<PEC>(e);
+        mState.scene.pWorld->RemoveComponent<PEC>(e);
         mState.pCmdStack->Clear();
     }
 }
@@ -913,9 +913,9 @@ void EditorRenderLayer::DrawInspectorParticleEmitter(Orange::Engine::Entity e)
 void EditorRenderLayer::DrawInspectorAnimator(Orange::Engine::Entity e)
 {
     using AC = Orange::Engine::Animation::AnimatorComponent;
-    if (!mState.pWorld->HasComponent<AC>(e)) { return; }
+    if (!mState.scene.pWorld->HasComponent<AC>(e)) { return; }
     if (!ImGui::CollapsingHeader("Animator")) { return; }
-    const auto* a = mState.pWorld->GetComponent<AC>(e);
+    const auto* a = mState.scene.pWorld->GetComponent<AC>(e);
     // AnimatorComponent 持 unique_ptr<IAnimator>，是 move-only 抽象类指
     // 针，运行时 "换 backend" 不是 inspector 一行 combo 能搞定的。这里
     // 仅显示是否挂着 + 指针地址；详细参数交给后续动画子模式。

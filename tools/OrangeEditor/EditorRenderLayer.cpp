@@ -51,12 +51,12 @@ constexpr std::int32_t kEscapeKeyRaw = 256;
 // 与 "Add Renderable Component" 编辑器操作的默认行为保持一致。
 void ReattachMaterialInstances(EditorState& state)
 {
-    if (state.pWorld == nullptr) { return; }
+    if (state.scene.pWorld == nullptr) { return; }
 
     using Orange::Engine::Render::RenderableComponent;
     using Orange::Engine::Scene::NameComponent;
 
-    auto& reg  = state.pWorld->Registry();
+    auto& reg  = state.scene.pWorld->Registry();
     auto  view = reg.view<RenderableComponent>();
     for (const auto e : view)
     {
@@ -66,13 +66,13 @@ void ReattachMaterialInstances(EditorState& state)
         const NameComponent* nc  = reg.try_get<NameComponent>(e);
         const std::string    name = nc ? nc->name : "";
 
-        if      (name == "Ground")                                 rc.materialInstance = state.pFloorMaterial.get();
-        else if (name == "Backdrop")                               rc.materialInstance = state.pRimLightMaterial.get();
+        if      (name == "Ground")                                 rc.materialInstance = state.assets.pFloorMaterial.get();
+        else if (name == "Backdrop")                               rc.materialInstance = state.assets.pRimLightMaterial.get();
         else if (name == "Platform L" || name == "Platform R"
-              || name == "Tower")                                  rc.materialInstance = state.pToonMaterial.get();
-        else if (name == "Glow Box")                               rc.materialInstance = state.pDissolveMaterial.get();
-        else if (name == "Emissive Pillar")                        rc.materialInstance = state.pLightObjectMaterial.get();
-        else                                                       rc.materialInstance = state.pDefaultRenderableMaterial.get();
+              || name == "Tower")                                  rc.materialInstance = state.assets.pToonMaterial.get();
+        else if (name == "Glow Box")                               rc.materialInstance = state.assets.pDissolveMaterial.get();
+        else if (name == "Emissive Pillar")                        rc.materialInstance = state.assets.pLightObjectMaterial.get();
+        else                                                       rc.materialInstance = state.assets.pDefaultRenderableMaterial.get();
     }
 }
 
@@ -147,11 +147,11 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 
     // ---- Play 态 simulation tick（在 ImGui 帧开始前推进，保证
     //      本帧 DrawScenePanel → Pipeline::Render 看到最新状态）-----
-    if (mState.playState == PlayState::Play && mState.pWorld != nullptr) {
+    if (mState.scene.playState == PlayState::Play && mState.scene.pWorld != nullptr) {
         // Physics step → 把 dynamic body 新位姿写回 ECS Transform
         if (mpPhysicsWorld != nullptr) {
             mpPhysicsWorld->Step(dt);
-            auto& reg = mState.pWorld->Registry();
+            auto& reg = mState.scene.pWorld->Registry();
             using TC  = Orange::Engine::Scene::TransformComponent;
             using namespace Orange::Engine::Physics;
             for (auto e : reg.view<RigidBodyComponent>()) {
@@ -171,7 +171,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 
         // Particle emitter tick
         if (mpVfxSystem != nullptr) {
-            mpVfxSystem->Tick(*mState.pWorld, dt);
+            mpVfxSystem->Tick(*mState.scene.pWorld, dt);
             // 诊断：每秒打一次粒子计数，确认 sim 是否正常运行
             static float sDiagTimer = 0.0f;
             sDiagTimer += dt;
@@ -185,8 +185,8 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
         // Animator tick
         {
             using namespace Orange::Engine::Animation;
-            for (auto e : mState.pWorld->Registry().view<AnimatorComponent>()) {
-                auto& ac = mState.pWorld->Registry().get<AnimatorComponent>(e);
+            for (auto e : mState.scene.pWorld->Registry().view<AnimatorComponent>()) {
+                auto& ac = mState.scene.pWorld->Registry().get<AnimatorComponent>(e);
                 if (ac.animator != nullptr) {
                     ac.animator->Tick(dt);
                 }
@@ -201,7 +201,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 
     // Ctrl+Z / Ctrl+Y 全局 Undo/Redo —— 仅 Edit 态且无文本输入焦点时响应。
     // WantTextInput 阻止：InputText 活跃时 Z/Y 是正常字符输入，不应触发撤销。
-    if (mState.playState == PlayState::Edit
+    if (mState.scene.playState == PlayState::Edit
         && mState.pCmdStack != nullptr
         && !ImGui::GetIO().WantTextInput)
     {
@@ -348,18 +348,18 @@ void EditorRenderLayer::DrawMainMenuBar()
     if (!ImGui::BeginMainMenuBar()) { return; }
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New Scene")) {
-            mState.pendingSceneOp = SceneOp::New;
+            mState.scene.pendingSceneOp = SceneOp::New;
         }
         if (ImGui::MenuItem("Open Scene...")) {
-            mState.pendingSceneOp = SceneOp::Open;
+            mState.scene.pendingSceneOp = SceneOp::Open;
         }
         ImGui::Separator();
-        const bool canQuickSave = !mState.currentScenePath.empty();
+        const bool canQuickSave = !mState.scene.currentScenePath.empty();
         if (ImGui::MenuItem("Save", nullptr, false, canQuickSave)) {
-            mState.pendingSceneOp = SceneOp::Save;
+            mState.scene.pendingSceneOp = SceneOp::Save;
         }
         if (ImGui::MenuItem("Save Scene As...")) {
-            mState.pendingSceneOp = SceneOp::SaveAs;
+            mState.scene.pendingSceneOp = SceneOp::SaveAs;
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Exit")) {
@@ -374,7 +374,7 @@ void EditorRenderLayer::DrawMainMenuBar()
     // 推算（典型 transport-control 风格：Play 在 Edit / Paused 可用，
     // Pause 仅 Play 可用，Stop 仅 Play / Paused 可用）。
     {
-        const PlayState ps = mState.playState;
+        const PlayState ps = mState.scene.playState;
         const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
                                : (ps == PlayState::Play)   ? "[Play]"
                                                            : "[Paused]";
@@ -389,20 +389,20 @@ void EditorRenderLayer::DrawMainMenuBar()
         const bool canStop   = (ps == PlayState::Play  || ps == PlayState::Paused);
         ImGui::BeginDisabled(!canPlay);
         if (ImGui::Button("Play", ImVec2(kButtonW, 0))) {
-            mState.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
+            mState.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
                                                              : PlayOp::EnterPlay;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(!canPause);
         if (ImGui::Button("Pause", ImVec2(kButtonW, 0))) {
-            mState.pendingPlayOp = PlayOp::Pause;
+            mState.scene.pendingPlayOp = PlayOp::Pause;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(!canStop);
         if (ImGui::Button("Stop", ImVec2(kButtonW, 0))) {
-            mState.pendingPlayOp = PlayOp::Stop;
+            mState.scene.pendingPlayOp = PlayOp::Stop;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
@@ -412,7 +412,7 @@ void EditorRenderLayer::DrawMainMenuBar()
     // 当前 scene 路径作为只读 indicator 显示在菜单栏左侧（File 菜单后）。
     // 注：以前显示在右侧，被 Play 按钮挤掉了 —— scene 名次要、Play 状态
     // 高频读，按编辑器惯例优先级 Play 控件靠右。
-    const std::string& path = mState.currentScenePath;
+    const std::string& path = mState.scene.currentScenePath;
     const char* sceneLabel  = path.empty() ? "[Untitled]" : path.c_str();
     ImGui::SameLine();
     ImGui::TextDisabled("%s", sceneLabel);
@@ -425,19 +425,19 @@ void EditorRenderLayer::DrawMainMenuBar()
 // 是精准检查（每次 Undo/Redo 后用）。
 void EditorRenderLayer::ValidateEntityHandles()
 {
-    if (mState.pWorld == nullptr) { return; }
-    auto& w = *mState.pWorld;
+    if (mState.scene.pWorld == nullptr) { return; }
+    auto& w = *mState.scene.pWorld;
 
-    if (mState.selectedEntity.IsValid() && !w.IsValid(mState.selectedEntity)) {
-        mState.selectedEntity            = Orange::Engine::Entity::Invalid();
-        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    if (mState.selection.selectedEntity.IsValid() && !w.IsValid(mState.selection.selectedEntity)) {
+        mState.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
+        mState.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
     }
-    if (mState.renamingEntity.IsValid() && !w.IsValid(mState.renamingEntity)) {
+    if (mState.selection.renamingEntity.IsValid() && !w.IsValid(mState.selection.renamingEntity)) {
         CancelRename();
     }
-    if (mState.transformEulerCacheEntity.IsValid()
-        && !w.IsValid(mState.transformEulerCacheEntity)) {
-        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    if (mState.selection.transformEulerCacheEntity.IsValid()
+        && !w.IsValid(mState.selection.transformEulerCacheEntity)) {
+        mState.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
     }
     // pendingDelete / pendingReparent / pendingCreate 是帧内消耗完的一次性
     // 标志（DrawEntityTreePanel 末尾 apply），跨帧不存活，无需在此验证。
@@ -448,14 +448,14 @@ void EditorRenderLayer::ValidateEntityHandles()
 // 里不存在的 entity，Inspector 看到野指针。
 void EditorRenderLayer::ResetEntityLocalState()
 {
-    mState.selectedEntity            = Orange::Engine::Entity::Invalid();
-    mState.renamingEntity            = Orange::Engine::Entity::Invalid();
-    mState.renameBuffer[0]           = '\0';
-    mState.renameJustStarted         = false;
-    mState.pendingDelete             = Orange::Engine::Entity::Invalid();
-    mState.pendingReparent.valid     = false;
-    mState.pendingCreate.valid       = false;
-    mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    mState.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
+    mState.selection.renamingEntity            = Orange::Engine::Entity::Invalid();
+    mState.selection.renameBuffer[0]           = '\0';
+    mState.selection.renameJustStarted         = false;
+    mState.selection.pendingDelete             = Orange::Engine::Entity::Invalid();
+    mState.selection.pendingReparent.valid     = false;
+    mState.selection.pendingCreate.valid       = false;
+    mState.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
 }
 
 // 帧末统一 apply 用户菜单点击的场景操作。dialog 阻塞期 ImGui 主循环
@@ -464,9 +464,9 @@ void EditorRenderLayer::ResetEntityLocalState()
 // 渡期惯例一致。
 void EditorRenderLayer::ApplyPendingSceneOp()
 {
-    const SceneOp op = mState.pendingSceneOp;
+    const SceneOp op = mState.scene.pendingSceneOp;
     if (op == SceneOp::None) { return; }
-    mState.pendingSceneOp = SceneOp::None;
+    mState.scene.pendingSceneOp = SceneOp::None;
 
     // 拿主窗口 HWND 给 dialog 当 parent，确保 dialog 居中 + 抢焦点。
     auto* gw = static_cast<GLFWwindow*>(
@@ -475,9 +475,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
 
     switch (op) {
         case SceneOp::New: {
-            mState.pWorld = std::make_unique<Orange::Engine::World>();
+            mState.scene.pWorld = std::make_unique<Orange::Engine::World>();
             SeedDemoWorld(mState);  // 与启动期一致；后续真要"空场景"再做"New Empty"
-            mState.currentScenePath.clear();
+            mState.scene.currentScenePath.clear();
             ResetEntityLocalState();
             if (mState.pCmdStack != nullptr) { mState.pCmdStack->Clear(); }
             std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
@@ -495,37 +495,37 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                              static_cast<unsigned>(rc.Error()));
                 break;  // 保留原 world
             }
-            mState.pWorld = std::move(pNew);
-            mState.currentScenePath = path;
+            mState.scene.pWorld = std::move(pNew);
+            mState.scene.currentScenePath = path;
             ResetEntityLocalState();
             if (mState.pCmdStack != nullptr) { mState.pCmdStack->Clear(); }
             std::fprintf(stdout, "[OrangeEditor] opened scene: %s\n", path.c_str());
             break;
         }
         case SceneOp::Save: {
-            if (mState.currentScenePath.empty()) {
+            if (mState.scene.currentScenePath.empty()) {
                 // 没保存过 → 转 SaveAs。
                 std::string path;
                 if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
-                mState.currentScenePath = std::move(path);
+                mState.scene.currentScenePath = std::move(path);
             }
             auto rc = Orange::Engine::Scene::Save(
-                *mState.pWorld, mState.currentScenePath);
+                *mState.scene.pWorld, mState.scene.currentScenePath);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
                              "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
-                             mState.currentScenePath.c_str(),
+                             mState.scene.currentScenePath.c_str(),
                              static_cast<unsigned>(rc.Error()));
             } else {
                 std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
-                             mState.currentScenePath.c_str());
+                             mState.scene.currentScenePath.c_str());
             }
             break;
         }
         case SceneOp::SaveAs: {
             std::string path;
             if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
-            auto rc = Orange::Engine::Scene::Save(*mState.pWorld, path);
+            auto rc = Orange::Engine::Scene::Save(*mState.scene.pWorld, path);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
                              "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
@@ -533,9 +533,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                              static_cast<unsigned>(rc.Error()));
                 break;
             }
-            mState.currentScenePath = std::move(path);
+            mState.scene.currentScenePath = std::move(path);
             std::fprintf(stdout, "[OrangeEditor] saved scene as: %s\n",
-                         mState.currentScenePath.c_str());
+                         mState.scene.currentScenePath.c_str());
             break;
         }
         case SceneOp::None:
@@ -548,32 +548,32 @@ void EditorRenderLayer::ApplyPendingSceneOp()
 // ---------------------------------------------------------------------------
 void EditorRenderLayer::ApplyPendingPlayOp()
 {
-    const PlayOp op = mState.pendingPlayOp;
+    const PlayOp op = mState.scene.pendingPlayOp;
     if (op == PlayOp::None) { return; }
-    mState.pendingPlayOp = PlayOp::None;
+    mState.scene.pendingPlayOp = PlayOp::None;
 
     switch (op) {
         case PlayOp::EnterPlay: {
-            if (mState.playState != PlayState::Edit) { break; }
+            if (mState.scene.playState != PlayState::Edit) { break; }
 
             // S2: World 快照落盘 —— Stop 时从此路径还原，保证 Play 期
             //     对 ECS 的所有修改（物理驱动 Transform / 粒子spawn）都
             //     能被丢弃，回到 Play 前的编辑状态。
             {
                 namespace fs = std::filesystem;
-                mState.playSnapshotPath =
+                mState.scene.playSnapshotPath =
                     (fs::temp_directory_path() /
                      "OrangeEditor_play_snapshot.scene.json").string();
                 Orange::Engine::Scene::SaveOptions saveOpts;
-                saveOpts.assetRegistry = mState.pAssets.get();
+                saveOpts.assetRegistry = mState.assets.pAssets.get();
                 const auto rc = Orange::Engine::Scene::Save(
-                    *mState.pWorld, mState.playSnapshotPath, saveOpts);
+                    *mState.scene.pWorld, mState.scene.playSnapshotPath, saveOpts);
                 if (rc.IsErr()) {
                     std::fprintf(stderr,
                         "[OrangeEditor] Play 快照落盘失败: %s (code=%u) —— 取消进入 Play\n",
-                        mState.playSnapshotPath.c_str(),
+                        mState.scene.playSnapshotPath.c_str(),
                         static_cast<unsigned>(rc.Error()));
-                    mState.playSnapshotPath.clear();
+                    mState.scene.playSnapshotPath.clear();
                     break;  // 快照失败则保持 Edit，不进 Play
                 }
             }
@@ -584,7 +584,7 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             {
                 mpPhysicsWorld =
                     std::make_unique<Orange::Engine::Physics::PhysicsWorld>();
-                auto& reg = mState.pWorld->Registry();
+                auto& reg = mState.scene.pWorld->Registry();
                 using TC  = Orange::Engine::Scene::TransformComponent;
                 using namespace Orange::Engine::Physics;
                 for (auto e : reg.view<RigidBodyComponent, ColliderComponent>()) {
@@ -606,14 +606,14 @@ void EditorRenderLayer::ApplyPendingPlayOp()
 
             // S4: VfxSystem 接入 —— 需要 Pipeline 已就绪（Scene 面板
             //     必须至少渲染过一帧才会 lazy init Pipeline）。
-            if (mpScenePipeline != nullptr && mState.pAssets != nullptr) {
+            if (mpScenePipeline != nullptr && mState.assets.pAssets != nullptr) {
                 mpVfxSystem =
                     std::make_unique<Orange::Engine::Render::VfxSystem>();
                 // framesInFlight 与 Pipeline 同值（典型 2）
                 constexpr std::uint32_t kFIF = 2u;
                 const auto rc = mpVfxSystem->Initialize(
                     static_cast<void*>(&mRenderDevice), kFIF,
-                    *mState.pAssets);
+                    *mState.assets.pAssets);
                 if (rc.IsErr()) {
                     std::fprintf(stderr,
                         "[OrangeEditor] VfxSystem::Initialize 失败 (code=%u)\n",
@@ -627,29 +627,29 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 std::fprintf(stderr,
                     "[play] VfxSystem 跳过：Pipeline=%s  Assets=%s\n",
                     mpScenePipeline ? "ok" : "null",
-                    mState.pAssets  ? "ok" : "null");
+                    mState.assets.pAssets  ? "ok" : "null");
             }
 
-            mState.playState = PlayState::Play;
+            mState.scene.playState = PlayState::Play;
             std::fprintf(stdout, "[play] Edit → Play\n");
             break;
         }
         case PlayOp::Pause: {
-            if (mState.playState != PlayState::Play) { break; }
-            mState.playState = PlayState::Paused;
+            if (mState.scene.playState != PlayState::Play) { break; }
+            mState.scene.playState = PlayState::Paused;
             std::fprintf(stdout, "[play] Play → Paused\n");
             break;
         }
         case PlayOp::Resume: {
-            if (mState.playState != PlayState::Paused) { break; }
-            mState.playState = PlayState::Play;
+            if (mState.scene.playState != PlayState::Paused) { break; }
+            mState.scene.playState = PlayState::Play;
             std::fprintf(stdout, "[play] Paused → Play\n");
             break;
         }
         case PlayOp::Stop: {
-            if (mState.playState == PlayState::Edit) { break; }
+            if (mState.scene.playState == PlayState::Edit) { break; }
             const char* prevLabel =
-                (mState.playState == PlayState::Play) ? "Play" : "Paused";
+                (mState.scene.playState == PlayState::Play) ? "Play" : "Paused";
 
             // S4 拆卸：先断开 Pipeline → VfxSystem 引用，再 Shutdown / reset
             if (mpScenePipeline != nullptr) {
@@ -667,29 +667,29 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             //   - 只传 assetRegistry（mesh / material handle round-trip 需要）
             //   - 不传 physicsWorld / animatorRegistry：Edit 态不需要
             //     运行时 backend，handle 留 Invalid 是正确的 Edit 态初值
-            if (!mState.playSnapshotPath.empty()) {
+            if (!mState.scene.playSnapshotPath.empty()) {
                 auto pNew = std::make_unique<Orange::Engine::World>();
                 Orange::Engine::Scene::LoadOptions loadOpts;
-                loadOpts.assetRegistry = mState.pAssets.get();
+                loadOpts.assetRegistry = mState.assets.pAssets.get();
                 const auto rc = Orange::Engine::Scene::Load(
-                    mState.playSnapshotPath, *pNew, loadOpts);
+                    mState.scene.playSnapshotPath, *pNew, loadOpts);
                 if (rc.IsErr()) {
                     std::fprintf(stderr,
                         "[OrangeEditor] Play 快照还原失败 (code=%u)，"
                         "保留 Play 后的 World\n",
                         static_cast<unsigned>(rc.Error()));
                 } else {
-                    mState.pWorld = std::move(pNew);
+                    mState.scene.pWorld = std::move(pNew);
                     // Scene::Load 恢复了所有 PureData component，但
                     // materialInstance（raw 指针，editor 侧持有）不参与
                     // 序列化，需在此重新挂回。
                     ReattachMaterialInstances(mState);
                 }
-                std::filesystem::remove(mState.playSnapshotPath);
-                mState.playSnapshotPath.clear();
+                std::filesystem::remove(mState.scene.playSnapshotPath);
+                mState.scene.playSnapshotPath.clear();
             }
 
-            mState.playState = PlayState::Edit;
+            mState.scene.playState = PlayState::Edit;
             ResetEntityLocalState();
             // Stop 时 pWorld 已被换成还原快照的新实例；栈内所有命令的 pW
             // 仍指向旧 World，全部失效 —— 必须在此清栈，否则 Ctrl+Z 会

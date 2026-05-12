@@ -1,0 +1,56 @@
+#ifndef ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H
+#define ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H
+
+// EditorAssetContext —— 编辑器自管 AssetRegistry + MaterialSystem + 内置
+// mesh handle + 内置 / demo 用的 MaterialInstance 集合。
+//
+// v0.2.5 整骨：从原 god struct EditorState 拆出 asset 子域。
+//
+// 生命周期约束：AssetRegistry 与 MaterialSystem 必须长于任一引用其中
+// mesh handle / material instance 的 World——因此它们由编辑器顶层 context
+// 持有，World swap（New / Open）时 context 不动。
+//
+// 场景 Save / Load 当前不串联 AssetRegistry；存盘的 scene JSON 里的 mesh /
+// material 引用对应的是 *本次启动* 创建的内置 handle，跨进程加载语义还
+// 需要后续把 AssetRegistry 也参与序列化（登记到 docs/engine-known-gaps.md
+// 或对应 milestone）。
+
+#include <orange/engine/asset/AssetHandle.h>
+#include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/render/MaterialInstance.h>
+#include <orange/engine/render/MaterialSystem.h>
+
+#include <memory>
+
+struct EditorAssetContext
+{
+    std::unique_ptr<Orange::Engine::Asset::AssetRegistry>   pAssets;
+    std::unique_ptr<Orange::Engine::Render::MaterialSystem> pMaterials;
+
+    // 内置 mesh handle —— SeedDemoWorld 给 Floor 用 plane / Wall 用 cube。
+    Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
+        cubeMeshHandle  {};
+    Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
+        planeMeshHandle {};
+
+    // demo 场景用的各材质实例 —— 地址要稳定供
+    // RenderableComponent::materialInstance 持有，生命周期跟着 context 走。
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pFloorMaterial;
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pWallMaterial;     // 保留备用（textured）
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pToonMaterial;     // 二阶 cel-shading
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pRimLightMaterial; // fresnel rim glow
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDissolveMaterial; // noise 溶解 + 发光边沿
+
+    // "Create Light Object" / "Add Renderable Component" 等编辑器创建路径
+    // 共用的默认 material instance：
+    //   * pDefaultRenderableMaterial = textured —— "+ Add Component → Renderable"
+    //     时默认绑这个，让新挂的 Renderable 立刻能看到（而非 mesh=Invalid /
+    //     material=nullptr 的空挂）；
+    //   * pLightObjectMaterial = emissive —— "Create Light Object" 把灯做
+    //     成发光的可见物体（cube + emissive material）。
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDefaultRenderableMaterial;
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pLightObjectMaterial;
+};
+
+#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H

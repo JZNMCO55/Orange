@@ -305,21 +305,21 @@ int main()
     // 存在则 Load；文件不存在（IoError）或加载失败则回退 SeedDemoWorld。
     // File > New Scene 走 ApplyPendingSceneOp，与回退路径保持一致。
     EditorState editorState;
-    editorState.pWorld    = std::make_unique<Orange::Engine::World>();
+    editorState.scene.pWorld    = std::make_unique<Orange::Engine::World>();
     editorState.pCmdStack = std::make_unique<CommandStack>();
     InitializeEditorAssets(editorState);
     {
         Scene::LoadOptions demoLoadOpts{};
-        demoLoadOpts.assetRegistry = editorState.pAssets.get();
+        demoLoadOpts.assetRegistry = editorState.assets.pAssets.get();
         if (auto res = Scene::Load("assets/editor/demo.scene.json",
-                                   *editorState.pWorld, demoLoadOpts);
+                                   *editorState.scene.pWorld, demoLoadOpts);
             res.IsErr())
         {
             SeedDemoWorld(editorState);
         }
         else
         {
-            editorState.currentScenePath = "assets/editor/demo.scene.json";
+            editorState.scene.currentScenePath = "assets/editor/demo.scene.json";
         }
     }
 
@@ -331,7 +331,7 @@ int main()
 
     std::fprintf(stdout,
                  "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
-                 editorState.pWorld->Size());
+                 editorState.scene.pWorld->Size());
 
     const int rc = host->Run();
 

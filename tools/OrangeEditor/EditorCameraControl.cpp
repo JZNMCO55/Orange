@@ -11,7 +11,7 @@
 
 #include <cmath>
 
-void UpdateEditorCameraFromInput(EditorState::EditorCamera& ec)
+void UpdateEditorCameraFromInput(EditorCameraState& ec)
 {
     const ImGuiIO& io = ImGui::GetIO();
 
@@ -51,7 +51,7 @@ void UpdateEditorCameraFromInput(EditorState::EditorCamera& ec)
 }
 
 Orange::Engine::Render::Camera
-BuildEditorCamera(const EditorState::EditorCamera& ec, float aspect)
+BuildEditorCamera(const EditorCameraState& ec, float aspect)
 {
     using ::Orange::Engine::Render::Camera;
     const float safeAspect = (aspect > 0.0f) ? aspect : 1.0f;
@@ -69,12 +69,12 @@ BuildEditorCamera(const EditorState::EditorCamera& ec, float aspect)
 
 void ApplyEditorCameraToWorld(EditorState& state, float aspect)
 {
-    if (state.pWorld == nullptr)
+    if (state.scene.pWorld == nullptr)
     {
         return;
     }
     using ::Orange::Engine::Render::Camera;
-    auto& reg  = state.pWorld->Registry();
+    auto& reg  = state.scene.pWorld->Registry();
     auto  view = reg.view<Camera>();
     if (view.empty())
     {
@@ -82,5 +82,5 @@ void ApplyEditorCameraToWorld(EditorState& state, float aspect)
     }
     const auto e   = view.front();
     auto&      cam = view.get<Camera>(e);
-    cam            = BuildEditorCamera(state.editorCamera, aspect);
+    cam            = BuildEditorCamera(state.camera, aspect);
 }
