@@ -4,6 +4,8 @@
 #include "../EditorRenderLayer.h"
 
 #include "../EditorHierarchy.h"
+#include "../command/EntityCommands.h"
+#include "../command/LambdaCommand.h"
 
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -39,9 +41,12 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 全局快捷键：F2 重命名选中、Del 删除选中。重命名进行中不响应
     // —— 否则 InputText 里按 Del 删字符会同时触发实体删除。
     const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    // Entity::IsValid() 只检测哨兵 null；Undo 可能已销毁实体，补一次
+    // World::IsValid 以防操作死实体触发 EnTT assert / UB。
     if (canEdit && focused
         && !mState.renamingEntity.IsValid()
-        && mState.selectedEntity.IsValid())
+        && mState.selectedEntity.IsValid()
+        && mState.pWorld->IsValid(mState.selectedEntity))
     {
         if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
             BeginRename(mState.selectedEntity);
@@ -111,13 +116,20 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 链遍历。同帧内 delete + reparent 同时发生时 delete 优先（被
     // delete 的实体即使有 pendingReparent 也失效）。
     if (mState.pendingDelete.IsValid()) {
-        if (mState.selectedEntity == mState.pendingDelete) {
-            mState.selectedEntity = Orange::Engine::Entity::Invalid();
+        // 额外检查实体是否仍在 registry 中 —— Undo 可能已销毁它，此时
+        // pendingDelete 持有的是死实体句柄，DestroySubtree 会崩溃。
+        if (mState.pWorld->IsValid(mState.pendingDelete)) {
+            if (mState.selectedEntity == mState.pendingDelete) {
+                mState.selectedEntity = Orange::Engine::Entity::Invalid();
+            }
+            if (mState.renamingEntity == mState.pendingDelete) {
+                CancelRename();
+            }
+            EditorHierarchy::DestroySubtree(*mState.pWorld, mState.pendingDelete);
+            // 删除操作不可撤销（子树已析构）—— 清掉 undo 历史，防止后续 Undo
+            // 尝试访问已销毁 entity 的 SetFieldValueCommand lambda。
+            mState.pCmdStack->Clear();
         }
-        if (mState.renamingEntity == mState.pendingDelete) {
-            CancelRename();
-        }
-        EditorHierarchy::DestroySubtree(*mState.pWorld, mState.pendingDelete);
         mState.pendingDelete = Orange::Engine::Entity::Invalid();
         mState.pendingReparent.valid = false;  // 同帧 reparent 已无意义
     }
@@ -126,47 +138,78 @@ void EditorRenderLayer::DrawEntityTreePanel()
         const Orange::Engine::Entity dst = mState.pendingReparent.newParent;
         mState.pendingReparent.valid = false;
         // 防环 + 防自挂自 + 防"挂到当前父亲"重复操作
-        if (src.IsValid() && src != dst
+        if (src.IsValid() && mState.pWorld->IsValid(src) && src != dst
             && !EditorHierarchy::IsAncestorOf(*mState.pWorld, src, dst))
         {
-            EditorHierarchy::ReparentTo(*mState.pWorld, src, dst);
+            // 记录旧 parent，用于 Undo 还原层级关系。
+            using HC = Orange::Engine::Scene::HierarchyComponent;
+            const auto*                  hc        = mState.pWorld->GetComponent<HC>(src);
+            const Orange::Engine::Entity oldParent = (hc != nullptr)
+                ? hc->parent
+                : Orange::Engine::Entity::Invalid();
+            mState.pCmdStack->Push(std::make_unique<LambdaCommand>(
+                "reparent",
+                [pW = mState.pWorld.get(), src, dst]() {
+                    EditorHierarchy::ReparentTo(*pW, src, dst);
+                },
+                [pW = mState.pWorld.get(), src, oldParent]() {
+                    // Undo 时 src 可能已被其他命令销毁（EnTT version check）
+                    if (pW->IsValid(src)) {
+                        EditorHierarchy::ReparentTo(*pW, src, oldParent);
+                    }
+                }
+            ));
         }
     }
     if (mState.pendingCreate.valid) {
-        const Orange::Engine::Entity         parent = mState.pendingCreate.parent;
-        const EditorState::PendingCreateKind kind   = mState.pendingCreate.kind;
+        const Orange::Engine::Entity         parent         = mState.pendingCreate.parent;
+        const EditorState::PendingCreateKind kind           = mState.pendingCreate.kind;
+        const auto cubeMesh  = mState.cubeMeshHandle;
+        auto* const pLightMat = mState.pLightObjectMaterial.get();
         mState.pendingCreate.valid = false;
-        Orange::Engine::Entity e = mState.pWorld->CreateEntity();
-        const char* initialName = (kind == EditorState::PendingCreateKind::Light)
-            ? "Light Object" : "New Entity";
-        mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
-            e, Orange::Engine::Scene::NameComponent{initialName});
-        mState.pWorld->AddComponent<Orange::Engine::Scene::TransformComponent>(
-            e, Orange::Engine::Scene::TransformComponent{});
 
-        if (kind == EditorState::PendingCreateKind::Light) {
-            // 一键搭出"可见的发光物体" —— DirectionalLight 提供光照贡献 +
-            // Renderable(cube + emissive material) 让灯本身在 Scene 视口
-            // 可见（不然方向光是看不见的）。emissive shader 自然把 cube
-            // 渲成 bloom-bright，搭配 Pipeline 的 bloom pass 就有"灯泡"
-            // 视觉效果。
-            using ::Orange::Engine::Render::DirectionalLight;
-            using ::Orange::Engine::Render::RenderableComponent;
-            mState.pWorld->AddComponent<DirectionalLight>(e, DirectionalLight{});
-            RenderableComponent rc{};
-            rc.mesh             = mState.cubeMeshHandle;
-            rc.materialInstance = mState.pLightObjectMaterial.get();
-            rc.visible          = true;
-            rc.castsShadow      = false;  // 灯本身不投影 —— 否则会自挡光
-            mState.pWorld->AddComponent<RenderableComponent>(e, rc);
-        }
+        auto cmd = std::make_unique<CreateEntityCommand>(
+            *mState.pWorld,
+            [parent, kind, cubeMesh, pLightMat]
+            (Orange::Engine::World& w) -> Orange::Engine::Entity
+            {
+                Orange::Engine::Entity e = w.CreateEntity();
+                const char* initialName = (kind == EditorState::PendingCreateKind::Light)
+                    ? "Light Object" : "New Entity";
+                w.AddComponent<Orange::Engine::Scene::NameComponent>(
+                    e, Orange::Engine::Scene::NameComponent{initialName});
+                w.AddComponent<Orange::Engine::Scene::TransformComponent>(
+                    e, Orange::Engine::Scene::TransformComponent{});
 
-        if (parent.IsValid()) {
-            EditorHierarchy::LinkAsLastChild(*mState.pWorld, parent, e);
-        }
+                if (kind == EditorState::PendingCreateKind::Light) {
+                    // 一键搭出"可见的发光物体" —— DirectionalLight 提供光照贡献 +
+                    // Renderable(cube + emissive material) 让灯本身在 Scene 视口
+                    // 可见（不然方向光是看不见的）。
+                    using ::Orange::Engine::Render::DirectionalLight;
+                    using ::Orange::Engine::Render::RenderableComponent;
+                    w.AddComponent<DirectionalLight>(e, DirectionalLight{});
+                    RenderableComponent rc{};
+                    rc.mesh             = cubeMesh;
+                    rc.materialInstance = pLightMat;
+                    rc.visible          = true;
+                    rc.castsShadow      = false;
+                    w.AddComponent<RenderableComponent>(e, rc);
+                }
+
+                if (parent.IsValid() && w.IsValid(parent)) {
+                    EditorHierarchy::LinkAsLastChild(w, parent, e);
+                }
+                return e;
+            }
+        );
+
+        // Push 前取 raw 指针；Push 内部 Execute 会填充 mCreated，
+        // 随后 unique_ptr move 进栈 —— raw 仍指向栈内对象，生命周期安全。
+        auto* rawCmd = cmd.get();
+        mState.pCmdStack->Push(std::move(cmd));
+        const Orange::Engine::Entity e = rawCmd->CreatedEntity();
+
         mState.selectedEntity = e;
-        // 自动进入 rename 模式：刚建出来用户最有可能想做的下一步是命
-        // 名，省一次 F2。
         BeginRename(e);
     }
 }
@@ -187,6 +230,12 @@ void EditorRenderLayer::DrawEntityTreePanel()
 void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
 {
     if (!entity.IsValid()) { return; }
+    // Entity::IsValid() 只检查哨兵 null；World::IsValid() 才能检出 EnTT
+    // version 已被 Undo/Redo 的 DestroyEntity 失效的"死实体"。
+    // 正常路径下（DestroySubtree + Detach 已清理兄弟链）死实体不会进到
+    // 这里，但防御性 early-out 避免万一出现 ghost 引用时 GetComponent /
+    // PushID 对死实体操作导致 EnTT assert / UB。
+    if (!mState.pWorld->IsValid(entity)) { return; }
     using HC = Orange::Engine::Scene::HierarchyComponent;
     using NameComponent = Orange::Engine::Scene::NameComponent;
 
@@ -336,10 +385,14 @@ void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
         return;
     }
     mState.renameBuffer[sizeof(mState.renameBuffer) - 1] = '\0';
-    Orange::Engine::Scene::NameComponent nc;
-    nc.name = mState.renameBuffer;
-    mState.pWorld->AddComponent<Orange::Engine::Scene::NameComponent>(
-        entity, std::move(nc));
+    const auto* nc = mState.pWorld->GetComponent<
+        Orange::Engine::Scene::NameComponent>(entity);
+    const std::string oldName = (nc != nullptr) ? nc->name : std::string{};
+    const std::string newName = mState.renameBuffer;
+    if (oldName != newName) {
+        mState.pCmdStack->Push(std::make_unique<RenameCommand>(
+            *mState.pWorld, entity, oldName, newName));
+    }
     CancelRename();
 }
 

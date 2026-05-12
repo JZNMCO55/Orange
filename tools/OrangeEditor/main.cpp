@@ -305,7 +305,8 @@ int main()
     // 存在则 Load；文件不存在（IoError）或加载失败则回退 SeedDemoWorld。
     // File > New Scene 走 ApplyPendingSceneOp，与回退路径保持一致。
     EditorState editorState;
-    editorState.pWorld = std::make_unique<Orange::Engine::World>();
+    editorState.pWorld    = std::make_unique<Orange::Engine::World>();
+    editorState.pCmdStack = std::make_unique<CommandStack>();
     InitializeEditorAssets(editorState);
     {
         Scene::LoadOptions demoLoadOpts{};

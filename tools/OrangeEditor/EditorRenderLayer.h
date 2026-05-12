@@ -64,6 +64,9 @@ private:
     static void BuildDefaultLayoutOnce(ImGuiID dockspaceId);
     void DrawMainMenuBar();
     void ResetEntityLocalState();
+    // Undo/Redo 之后立即调用：把已被销毁的实体句柄从 EditorState 各字段里清掉，
+    // 避免后续帧对死实体做 DestroySubtree / GetComponent 等操作崩溃。
+    void ValidateEntityHandles();
     void ApplyPendingSceneOp();
     void ApplyPendingPlayOp();
     static void DrawAssetsPanel();

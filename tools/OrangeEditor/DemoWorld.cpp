@@ -168,6 +168,7 @@ void InitializeEditorAssets(EditorState& state)
 //       ├── Tower        （高塔 scale×2Y，toon，静态刚体）
 //       ├── Glow Box     （溶解方块，dissolve，自动动画）
 //       ├── Emissive Pillar（自发光细柱，emissive）
+//       ├── Dynamic Box  （动态刚体，Play Mode 物理演示，y=4 悬空下落）
 //       ├── Fire Emitter （粒子：火焰，暖橙 HDR → bloom）
 //       └── Sparkle Emitter（粒子：萤火，蓝白 HDR → bloom）
 void SeedDemoWorld(EditorState& state)
@@ -207,6 +208,7 @@ void SeedDemoWorld(EditorState& state)
     Entity tower           = make("Tower");
     Entity glowBox         = make("Glow Box");
     Entity emissivePillar  = make("Emissive Pillar");
+    Entity dynamicBox      = make("Dynamic Box");
     Entity fireEmitter     = make("Fire Emitter");
     Entity sparkleEmitter  = make("Sparkle Emitter");
 
@@ -393,6 +395,34 @@ void SeedDemoWorld(EditorState& state)
         world.AddComponent<RenderableComponent>(emissivePillar, rc);
     }
 
+    // ---- Dynamic Box（演示 Play Mode 物理：悬空下落，落到地面上）---------
+    // 位于 y=4，正上方无遮挡；Play 后受重力下落，碰 Ground 静止。
+    // 使用 toon 材质，castsShadow=true，视觉上与静态台面区分。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(dynamicBox);
+        if (tc != nullptr) { tc->position = glm::vec3(0.0f, 4.0f, 0.0f); }
+
+        RenderableComponent rc{};
+        rc.mesh             = state.cubeMeshHandle;
+        rc.materialInstance = state.pToonMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = true;
+        world.AddComponent<RenderableComponent>(dynamicBox, rc);
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Dynamic;
+        rb.fixedRotation = false;
+        rb.gravityScale  = 1.0f;
+        rb.linearDamping = 0.05f;
+        world.AddComponent<RigidBodyComponent>(dynamicBox, rb);
+
+        ColliderComponent cc{};
+        cc.shape    = BoxDesc{glm::vec2{0.5f, 0.5f}};
+        cc.density  = 1.0f;
+        cc.friction = 0.5f;
+        world.AddComponent<ColliderComponent>(dynamicBox, cc);
+    }
+
     // ---- Fire Emitter（火焰粒子：暖橙 HDR，bloom 自动触发光晕）----------
     {
         auto* tc = world.GetComponent<TransformComponent>(fireEmitter);
@@ -450,6 +480,7 @@ void SeedDemoWorld(EditorState& state)
     EditorHierarchy::LinkAsLastChild(world, geometry, tower);
     EditorHierarchy::LinkAsLastChild(world, geometry, glowBox);
     EditorHierarchy::LinkAsLastChild(world, geometry, emissivePillar);
+    EditorHierarchy::LinkAsLastChild(world, geometry, dynamicBox);
     EditorHierarchy::LinkAsLastChild(world, geometry, fireEmitter);
     EditorHierarchy::LinkAsLastChild(world, geometry, sparkleEmitter);
 }

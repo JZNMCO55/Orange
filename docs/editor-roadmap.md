@@ -117,7 +117,7 @@ wiki 给三种：
 
 > v0.2 是 critical foundation —— 后续所有 milestone 都假设命令系统存在。**v0.2 完成前不开 v0.3+**。其余 milestone 之间可乱序、跳跃（同主 roadmap Phase 6+ 节奏纪律）。
 
-### v0.1 · 基础闭环 ✅（v0.1 收尾中）
+### v0.1 · 基础闭环 ✅
 
 **对应**：`docs/roadmap.md` Task 06-01 ~ 06-09
 
@@ -125,7 +125,7 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
 
 详细任务历史保留在 `docs/roadmap.md` Phase 6 内（不重复抄）。
 
-### v0.1.5 · Editor Demo Scene v2 ✅（2026-05-12 落地，待运行时验收）
+### v0.1.5 · Editor Demo Scene v2 ✅
 
 **为什么单独立条**：v0.1 收尾时编辑器视觉与引擎能力**严重失配** —— Phase 1–5 全 ✅ 但编辑器内只有 7 个 placeholder。这条 milestone 不引入新 engine / editor feature，只是**把已落地能力组合成一个像样的演示场景**。**这是消除主观"引擎不行"感受的最高 ROI 动作**。
 
@@ -161,7 +161,7 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
 - **未能展示**：DragonBones 角色——`DragonBonesContext` 在 `src/` 私有头，editor CMake target 无法访问；体积光（god rays）依赖 Pipeline 在有 castsShadow 光时自动开启，运行时验证后确认
 - 编译：`cmake --build build --config Debug --target OrangeEditor` 7 TU 全绿（2026-05-12）
 
-### v0.2 · Command System + Undo/Redo
+### v0.2 · Command System + Undo/Redo ✅
 
 **为什么是 critical**：
 

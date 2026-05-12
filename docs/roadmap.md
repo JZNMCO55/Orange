@@ -189,7 +189,7 @@
   * **内置 SPV 部署**：编辑器 exe 旁要能找到内置 shader SPV（已在 06-01 占位讨论里挂账）
 - Critical Path：是 —— Phase 6 目标"足以让美术 / 关卡设计师不写代码完成日常工作"必须有视口
 
-### Task 06-09 · 编辑器 Play Mode
+### Task 06-09 · 编辑器 Play Mode ✅
 - 描述：编辑器引入 Edit / Play / Paused 三态状态机；Play 状态下物理（Box2D PhysicsWorld）+ 粒子（VfxSystem）+ 动画（IAnimator 子类）每帧 tick，让 RigidBody / Collider / ParticleEmitter / Animator 等组件挂上后能在视口看到运行时行为；Stop 还原 World 快照，组件值回 Play 开始前的状态
 - 前置：06-08
 - 实现要点：
@@ -207,7 +207,8 @@
   - **S4**：VfxSystem 实例化 + Initialize(renderDevice, 2) + Pipeline::SetVfxSystem；每帧 Tick；Stop 时 SetVfxSystem(nullptr) + Shutdown + reset。Animator 每帧 Tick。Play/Paused 期编辑约束：Entity Tree（快捷键/DnD/右键菜单）+ Inspector（BeginDisabled 包裹全部 DrawInspectorXxx + Add Component）
   - **快照实现说明**：原实现要点写"stringstream 落点"，最终走 temp 文件（`std::filesystem::temp_directory_path()`），语义等价；v0.2 改为 Command Stack capture/restore primitive 时替换（已在 editor-roadmap v0.2 中显式记录）
   - **build**：2026-05-12 `cmake --build build --config Debug --target OrangeEditor` 5 TU 全绿
-  - **验证**（待手跑）：Play 点击 → stdout "[play] Edit → Play"；Floor(Static RigidBody) 静止，Dynamic body 受重力下落，Transform 在 Inspector 实时刷新；粒子 emitter emitting=true 时粒子在 Scene 视口出现；Stop 后 World 回到 Play 前状态（entity 位置 / 值与保存时一致）；Play/Paused 期 F2/Del/DnD/Inspector 字段全部 disable
+  - **验证**（待手跑）：Play 点击 → stdout "[play] Edit → Play"；"Dynamic Box"（y=4 悬空）受重力下落，Transform 在 Inspector 实时刷新；粒子 emitter emitting=true 时粒子在 Scene 视口出现（已确认）；Stop 后 World 回到 Play 前状态（entity 位置 / 值与保存时一致）；Play/Paused 期 F2/Del/DnD/Inspector 字段全部 disable
+  - **注**：DemoWorld 原只有 Static 刚体，无法演示下落；2026-05-12 补 "Dynamic Box" 实体（toon + Dynamic RigidBody + BoxDesc，y=4）
 
 ---
 

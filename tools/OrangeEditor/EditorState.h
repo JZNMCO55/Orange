@@ -18,6 +18,8 @@
 // 本头仅供 tools/OrangeEditor/ 内部 TU 包含（CMake target_include_directories
 // 不暴露 tools/，外部代码不会撞到）。
 
+#include "command/CommandStack.h"
+
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -170,6 +172,11 @@ struct EditorState
     //     成发光的可见物体（cube + emissive material）。
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDefaultRenderableMaterial;
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pLightObjectMaterial;
+
+    // ---- Command System（v0.2）-----------------------------------------
+    // 所有可撤销编辑操作通过此栈管理。切换场景 / 破坏性操作（删实体 /
+    // 移除组件）时需调 pCmdStack->Clear()；编辑器启动时由 main.cpp 初始化。
+    std::unique_ptr<CommandStack> pCmdStack;
 
     // ---- 编辑器相机（轨道模式）------------------------------------------
     // viewport-local 相机状态：pivot（轨道中心）+ 球坐标（azimuth/elevation/

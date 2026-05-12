@@ -4,6 +4,9 @@
 #include "../EditorRenderLayer.h"
 
 #include "../EditorWidgets.h"
+#include "../command/EntityCommands.h"
+#include "../command/LambdaCommand.h"
+#include "../command/SetFieldValueCommand.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/physics/ColliderComponent.h>
@@ -43,6 +46,15 @@ void EditorRenderLayer::DrawInspectorPanel()
         ImGui::End();
         return;
     }
+    // Entity::IsValid() 只检查是否为哨兵 null 值；Undo 可能已销毁该实体但
+    // 未清掉句柄。World::IsValid 走 registry.valid()，可正确甄别死实体。
+    if (!mState.pWorld->IsValid(mState.selectedEntity)) {
+        mState.selectedEntity            = Orange::Engine::Entity::Invalid();
+        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        ImGui::TextDisabled("(select an entity)");
+        ImGui::End();
+        return;
+    }
 
     const Orange::Engine::Entity e = mState.selectedEntity;
     ImGui::Text("Entity #%u",
@@ -50,7 +62,6 @@ void EditorRenderLayer::DrawInspectorPanel()
     ImGui::Separator();
 
     // Play / Paused 期间所有 component 字段只读（灰显但可见）。
-    // v0.2 Command System 接入后，此处改为检查 CommandStack::IsAccepting()。
     const bool canEdit = (mState.playState == PlayState::Edit);
     if (!canEdit) {
         ImGui::TextDisabled("[ Read-only in Play / Paused ]");
@@ -73,6 +84,9 @@ void EditorRenderLayer::DrawInspectorPanel()
     // 体 IAnimator 子类实例，不能用空 unique_ptr 默认构造。Hierarchy
     // 跳过 —— DnD 管理，手动 add 会出现 "孤立 HC"（parent invalid
     // 且不挂在任何父链上）。
+    //
+    // AddComponent 是破坏性操作（从此刻起历史才有意义），清掉 undo 历史
+    // 防止旧命令对组件布局做出错误假设。
     ImGui::Separator();
     if (ImGui::Button("+ Add Component")) {
         ImGui::OpenPopup("##add_component");
@@ -85,10 +99,12 @@ void EditorRenderLayer::DrawInspectorPanel()
         if (!w.HasComponent<TransformComponent>(e)
             && ImGui::MenuItem("Transform")) {
             w.AddComponent<TransformComponent>(e, TransformComponent{});
+            mState.pCmdStack->Clear();
         }
         if (!w.HasComponent<DirectionalLight>(e)
             && ImGui::MenuItem("Directional Light")) {
             w.AddComponent<DirectionalLight>(e, DirectionalLight{});
+            mState.pCmdStack->Clear();
         }
         if (!w.HasComponent<RenderableComponent>(e)
             && ImGui::MenuItem("Renderable")) {
@@ -100,19 +116,23 @@ void EditorRenderLayer::DrawInspectorPanel()
             rc.mesh             = mState.cubeMeshHandle;
             rc.materialInstance = mState.pDefaultRenderableMaterial.get();
             w.AddComponent<RenderableComponent>(e, rc);
+            mState.pCmdStack->Clear();
         }
         if (!w.HasComponent<RigidBodyComponent>(e)
             && ImGui::MenuItem("RigidBody")) {
             w.AddComponent<RigidBodyComponent>(e, RigidBodyComponent{});
+            mState.pCmdStack->Clear();
         }
         if (!w.HasComponent<ColliderComponent>(e)
             && ImGui::MenuItem("Collider")) {
             w.AddComponent<ColliderComponent>(e, ColliderComponent{});
+            mState.pCmdStack->Clear();
         }
         if (!w.HasComponent<ParticleEmitterComponent>(e)
             && ImGui::MenuItem("Particle Emitter")) {
             w.AddComponent<ParticleEmitterComponent>(e,
                 ParticleEmitterComponent{});
+            mState.pCmdStack->Clear();
         }
         ImGui::EndPopup();
     }
@@ -145,16 +165,12 @@ bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
 
 // ---- 各 component 段 -------------------------------------------------
 //
-// 每个 DrawInspectorXxx 的统一模式：
+// 每个 DrawInspectorXxx 的统一模式（v0.2 Command System）：
 //   1. 先 HasComponent 检查 —— 不挂就整段不显示
 //   2. CollapsingHeader（默认展开），点 header 可折叠
-//   3. ImGui::DragFloat / Checkbox / Combo 等控件直接读写 component 字段
-//   4. 编辑修改后不需要显式 commit，下一帧就会反映到 ECS（组件就是这
-//      行数据）
-//
-// 没必要在每段中包 PushID —— ImGui 的控件 label（"##xxx"）+ 当前 ID
-// stack（DrawInspectorPanel 在一个 Window 内，没多重并发同名 entity）
-// 已经足够区分。
+//   3. 控件前先捕获 old 值
+//   4. 控件返回 true（有变化）时 Push SetFieldValueCommand<T>
+//   5. RemoveComponent 直接执行 + Clear()（无法撤销，历史清零）
 
 void EditorRenderLayer::DrawInspectorName(Orange::Engine::Entity e)
 {
@@ -172,27 +188,42 @@ void EditorRenderLayer::DrawInspectorName(Orange::Engine::Entity e)
     const std::size_t n = std::min(nc->name.size(), sizeof(buf) - 1);
     std::memcpy(buf, nc->name.data(), n);
     buf[n] = '\0';
+    const std::string oldName = nc->name;
     if (ImGui::InputText("##name", buf, sizeof(buf))) {
-        nc->name = buf;
+        // 每次按键都 Push RenameCommand；CommandStack 的 coalesce 会把
+        // 同一实体的连续改名折叠成一条 Undo 步骤（mOldName 保持最初值）。
+        mState.pCmdStack->Push(std::make_unique<RenameCommand>(
+            *mState.pWorld, e, oldName, std::string(buf)));
     }
 }
 
 void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
 {
-    using TransformComponent = Orange::Engine::Scene::TransformComponent;
-    if (!mState.pWorld->HasComponent<TransformComponent>(e)) { return; }
+    using TC = Orange::Engine::Scene::TransformComponent;
+    if (!mState.pWorld->HasComponent<TC>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Transform", &remove);
     if (!open) {
         if (remove) {
-            mState.pWorld->RemoveComponent<TransformComponent>(e);
+            mState.pWorld->RemoveComponent<TC>(e);
             mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+            mState.pCmdStack->Clear();
         }
         return;
     }
-    auto* t = mState.pWorld->GetComponent<TransformComponent>(e);
+    auto* t  = mState.pWorld->GetComponent<TC>(e);
+    auto* pW = mState.pWorld.get();
 
-    DragVec3Colored("Position", &t->position.x, 0.05f);
+    {
+        glm::vec3 oldPos = t->position;
+        if (DragVec3Colored("Position", &t->position.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                e, "transform.position", oldPos, t->position,
+                [pW, e](const glm::vec3& v) {
+                    if (auto* tc = pW->GetComponent<TC>(e)) tc->position = v;
+                }));
+        }
+    }
 
     // Euler 缓存：换实体了 → 重置 cache（从 quat 推 Euler）；同一实体
     // 持续编辑 → 用 cache 保证 DragFloat3 在 gimbal lock 附近不抖。
@@ -201,15 +232,37 @@ void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
         mState.transformEulerCache       = glm::degrees(eulerRad);
         mState.transformEulerCacheEntity = e;
     }
-    if (DragVec3Colored("Rotation (°)", &mState.transformEulerCache.x, 0.5f)) {
-        t->rotation = glm::quat(glm::radians(mState.transformEulerCache));
+    {
+        glm::quat oldRot = t->rotation;
+        if (DragVec3Colored("Rotation (°)", &mState.transformEulerCache.x, 0.5f)) {
+            t->rotation = glm::quat(glm::radians(mState.transformEulerCache));
+            // Undo 时需额外使 Euler 缓存失效，避免 Inspector 下一帧从
+            // 旧 cache 重建错误的显示值。
+            auto* pState = &mState;
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
+                e, "transform.rotation", oldRot, t->rotation,
+                [pW, pState, e](const glm::quat& v) {
+                    if (auto* tc = pW->GetComponent<TC>(e)) tc->rotation = v;
+                    pState->transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+                }));
+        }
     }
 
-    DragVec3Colored("Scale", &t->scale.x, 0.05f);
+    {
+        glm::vec3 oldScale = t->scale;
+        if (DragVec3Colored("Scale", &t->scale.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                e, "transform.scale", oldScale, t->scale,
+                [pW, e](const glm::vec3& v) {
+                    if (auto* tc = pW->GetComponent<TC>(e)) tc->scale = v;
+                }));
+        }
+    }
 
     if (remove) {
-        mState.pWorld->RemoveComponent<TransformComponent>(e);
+        mState.pWorld->RemoveComponent<TC>(e);
         mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        mState.pCmdStack->Clear();
     }
 }
 
@@ -228,7 +281,7 @@ void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
                           static_cast<std::uint32_t>(x.Value())));
         return tmp;
     };
-    // 全只读 —— 父子关系的编辑入口是 Entity Tree 面板的 DnD（Task 06-03）。
+    // 全只读 —— 父子关系的编辑入口是 Entity Tree 面板的 DnD。
     // 在这里再加一遍 reparent 控件会让两套修改路径竞争状态。
     ImGui::Text("Parent       : %s", idTextOf(h->parent).c_str());
     ImGui::Text("First child  : %s", idTextOf(h->firstChild).c_str());
@@ -239,34 +292,87 @@ void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
 
 void EditorRenderLayer::DrawInspectorDirectionalLight(Orange::Engine::Entity e)
 {
-    using DirectionalLight = Orange::Engine::Render::DirectionalLight;
-    if (!mState.pWorld->HasComponent<DirectionalLight>(e)) { return; }
+    using DL = Orange::Engine::Render::DirectionalLight;
+    if (!mState.pWorld->HasComponent<DL>(e)) { return; }
     bool remove = false;
     const bool open = ComponentHeader("Directional Light", &remove);
     if (!open) {
-        if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
+        if (remove) {
+            mState.pWorld->RemoveComponent<DL>(e);
+            mState.pCmdStack->Clear();
+        }
         return;
     }
-    auto* l = mState.pWorld->GetComponent<DirectionalLight>(e);
-    // direction 约定为单位向量；UI 不强制 normalize（用户拖中间态可能
-    // 临时变长度），但 Pipeline 自己在着色阶段会按需 normalize。这里
-    // 加一个 "Normalize" 按钮让用户随时归一化。
-    DragVec3Colored("Direction", &l->direction.x, 0.01f);
-    if (ImGui::SmallButton("Normalize Direction")) {
-        const float len = glm::length(l->direction);
-        if (len > 0.0f) { l->direction /= len; }
+    auto* l  = mState.pWorld->GetComponent<DL>(e);
+    auto* pW = mState.pWorld.get();
+
+    {
+        glm::vec3 oldDir = l->direction;
+        if (DragVec3Colored("Direction", &l->direction.x, 0.01f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                e, "light.direction", oldDir, l->direction,
+                [pW, e](const glm::vec3& v) {
+                    if (auto* dl = pW->GetComponent<DL>(e)) dl->direction = v;
+                }));
+        }
     }
-    ImGui::ColorEdit3("Color", &l->color.x);
-    ImGui::DragFloat("Intensity", &l->intensity, 0.05f, 0.0f, 1000.0f);
-    ImGui::Checkbox("Casts Shadow", &l->castsShadow);
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "本光源整体是否参与投影计算（全局开关）。\n"
-            "关闭后场景中不会有任何阴影，即便 Renderable 上勾了 Casts Shadow。\n"
-            "与 Renderable 的同名 flag 是 AND 关系：两个都必须为 true 才会真投影。");
+    // direction 约定为单位向量；UI 不强制 normalize（用户拖中间态可能
+    // 临时变长度），但 Pipeline 自己在着色阶段会按需 normalize。
+    {
+        glm::vec3 oldDir = l->direction;
+        if (ImGui::SmallButton("Normalize Direction")) {
+            const float len = glm::length(l->direction);
+            if (len > 0.0f) {
+                l->direction /= len;
+                mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                    e, "light.direction", oldDir, l->direction,
+                    [pW, e](const glm::vec3& v) {
+                        if (auto* dl = pW->GetComponent<DL>(e)) dl->direction = v;
+                    }));
+            }
+        }
+    }
+    {
+        glm::vec3 oldColor = l->color;
+        if (ImGui::ColorEdit3("Color", &l->color.x)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                e, "light.color", oldColor, l->color,
+                [pW, e](const glm::vec3& v) {
+                    if (auto* dl = pW->GetComponent<DL>(e)) dl->color = v;
+                }));
+        }
+    }
+    {
+        float oldIntensity = l->intensity;
+        if (ImGui::DragFloat("Intensity", &l->intensity, 0.05f, 0.0f, 1000.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "light.intensity", oldIntensity, l->intensity,
+                [pW, e](const float& v) {
+                    if (auto* dl = pW->GetComponent<DL>(e)) dl->intensity = v;
+                }));
+        }
+    }
+    {
+        bool oldShadow = l->castsShadow;
+        if (ImGui::Checkbox("Casts Shadow", &l->castsShadow)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<bool>>(
+                e, "light.castsShadow", oldShadow, l->castsShadow,
+                [pW, e](const bool& v) {
+                    if (auto* dl = pW->GetComponent<DL>(e)) dl->castsShadow = v;
+                }));
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "本光源整体是否参与投影计算（全局开关）。\n"
+                "关闭后场景中不会有任何阴影，即便 Renderable 上勾了 Casts Shadow。\n"
+                "与 Renderable 的同名 flag 是 AND 关系：两个都必须为 true 才会真投影。");
+        }
     }
 
-    if (remove) { mState.pWorld->RemoveComponent<DirectionalLight>(e); }
+    if (remove) {
+        mState.pWorld->RemoveComponent<DL>(e);
+        mState.pCmdStack->Clear();
+    }
 }
 
 void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
@@ -276,27 +382,54 @@ void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
     bool remove = false;
     const bool open = ComponentHeader("Renderable", &remove);
     if (!open) {
-        if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
+        if (remove) {
+            mState.pWorld->RemoveComponent<RC>(e);
+            mState.pCmdStack->Clear();
+        }
         return;
     }
-    auto* r = mState.pWorld->GetComponent<RC>(e);
+    auto* r  = mState.pWorld->GetComponent<RC>(e);
+    auto* pW = mState.pWorld.get();
+
     // mesh / materialInstance 是 handle / 裸指针 —— 编辑得通过 Asset
     // 浏览器（Phase 6 后续 task）才有意义。这里只读显示。
     ImGui::Text("Mesh handle      : %llu",
                 static_cast<unsigned long long>(r->mesh.Value()));
     ImGui::Text("MaterialInstance : %p",
                 reinterpret_cast<void*>(r->materialInstance));
-    ImGui::Checkbox("Visible",      &r->visible);
-    ImGui::Checkbox("Casts Shadow", &r->castsShadow);
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "本物体是否参与投射阴影（per-object 开关）。\n"
-            "关掉对应 \"几何不投影但仍接收阴影\"（典型用例：透明 UI / 装饰物 /\n"
-            "近景特效）。与 DirectionalLight 的同名 flag 是 AND 关系：两个都\n"
-            "必须为 true 才会真投影。");
+
+    {
+        bool oldVisible = r->visible;
+        if (ImGui::Checkbox("Visible", &r->visible)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<bool>>(
+                e, "renderable.visible", oldVisible, r->visible,
+                [pW, e](const bool& v) {
+                    if (auto* rc = pW->GetComponent<RC>(e)) rc->visible = v;
+                }));
+        }
+    }
+    {
+        bool oldShadow = r->castsShadow;
+        if (ImGui::Checkbox("Casts Shadow", &r->castsShadow)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<bool>>(
+                e, "renderable.castsShadow", oldShadow, r->castsShadow,
+                [pW, e](const bool& v) {
+                    if (auto* rc = pW->GetComponent<RC>(e)) rc->castsShadow = v;
+                }));
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "本物体是否参与投射阴影（per-object 开关）。\n"
+                "关掉对应 \"几何不投影但仍接收阴影\"（典型用例：透明 UI / 装饰物 /\n"
+                "近景特效）。与 DirectionalLight 的同名 flag 是 AND 关系：两个都\n"
+                "必须为 true 才会真投影。");
+        }
     }
 
-    if (remove) { mState.pWorld->RemoveComponent<RC>(e); }
+    if (remove) {
+        mState.pWorld->RemoveComponent<RC>(e);
+        mState.pCmdStack->Clear();
+    }
 }
 
 void EditorRenderLayer::DrawInspectorRigidBody(Orange::Engine::Entity e)
@@ -307,31 +440,119 @@ void EditorRenderLayer::DrawInspectorRigidBody(Orange::Engine::Entity e)
     bool remove = false;
     const bool open = ComponentHeader("RigidBody", &remove);
     if (!open) {
-        if (remove) { mState.pWorld->RemoveComponent<RB>(e); }
+        if (remove) {
+            mState.pWorld->RemoveComponent<RB>(e);
+            mState.pCmdStack->Clear();
+        }
         return;
     }
-    auto* b = mState.pWorld->GetComponent<RB>(e);
+    auto* b  = mState.pWorld->GetComponent<RB>(e);
+    auto* pW = mState.pWorld.get();
 
-    const char* kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
-    int typeIdx = static_cast<int>(b->type);
-    if (ImGui::Combo("Type", &typeIdx, kBodyTypeNames, 3)) {
-        b->type = static_cast<BT>(typeIdx);
+    {
+        const char* kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
+        int oldIdx = static_cast<int>(b->type);
+        int typeIdx = oldIdx;
+        if (ImGui::Combo("Type", &typeIdx, kBodyTypeNames, 3)) {
+            b->type = static_cast<BT>(typeIdx);
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<int>>(
+                e, "rb.type", oldIdx, typeIdx,
+                [pW, e](const int& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e))
+                        rb->type = static_cast<BT>(v);
+                }));
+        }
     }
-    ImGui::DragFloat2("Initial Position", &b->initialPosition.x, 0.05f);
-    ImGui::DragFloat("Initial Angle (rad)", &b->initialAngle, 0.01f);
-    ImGui::DragFloat2("Linear Velocity",  &b->linearVelocity.x,  0.05f);
-    ImGui::DragFloat("Angular Velocity",  &b->angularVelocity,   0.05f);
-    ImGui::DragFloat("Linear Damping",    &b->linearDamping,     0.01f, 0.0f, 100.0f);
-    ImGui::DragFloat("Angular Damping",   &b->angularDamping,    0.01f, 0.0f, 100.0f);
-    ImGui::Checkbox("Fixed Rotation",     &b->fixedRotation);
-    ImGui::DragFloat("Gravity Scale",     &b->gravityScale,      0.05f);
+    {
+        glm::vec2 old = b->initialPosition;
+        if (ImGui::DragFloat2("Initial Position", &b->initialPosition.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "rb.initialPosition", old, b->initialPosition,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->initialPosition = v;
+                }));
+        }
+    }
+    {
+        float old = b->initialAngle;
+        if (ImGui::DragFloat("Initial Angle (rad)", &b->initialAngle, 0.01f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "rb.initialAngle", old, b->initialAngle,
+                [pW, e](const float& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->initialAngle = v;
+                }));
+        }
+    }
+    {
+        glm::vec2 old = b->linearVelocity;
+        if (ImGui::DragFloat2("Linear Velocity", &b->linearVelocity.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "rb.linearVelocity", old, b->linearVelocity,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->linearVelocity = v;
+                }));
+        }
+    }
+    {
+        float old = b->angularVelocity;
+        if (ImGui::DragFloat("Angular Velocity", &b->angularVelocity, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "rb.angularVelocity", old, b->angularVelocity,
+                [pW, e](const float& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->angularVelocity = v;
+                }));
+        }
+    }
+    {
+        float old = b->linearDamping;
+        if (ImGui::DragFloat("Linear Damping", &b->linearDamping, 0.01f, 0.0f, 100.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "rb.linearDamping", old, b->linearDamping,
+                [pW, e](const float& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->linearDamping = v;
+                }));
+        }
+    }
+    {
+        float old = b->angularDamping;
+        if (ImGui::DragFloat("Angular Damping", &b->angularDamping, 0.01f, 0.0f, 100.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "rb.angularDamping", old, b->angularDamping,
+                [pW, e](const float& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->angularDamping = v;
+                }));
+        }
+    }
+    {
+        bool old = b->fixedRotation;
+        if (ImGui::Checkbox("Fixed Rotation", &b->fixedRotation)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<bool>>(
+                e, "rb.fixedRotation", old, b->fixedRotation,
+                [pW, e](const bool& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->fixedRotation = v;
+                }));
+        }
+    }
+    {
+        float old = b->gravityScale;
+        if (ImGui::DragFloat("Gravity Scale", &b->gravityScale, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "rb.gravityScale", old, b->gravityScale,
+                [pW, e](const float& v) {
+                    if (auto* rb = pW->GetComponent<RB>(e)) rb->gravityScale = v;
+                }));
+        }
+    }
     // handle 是 PhysicsWorld::AddBody 反写的运行时引用，编辑器不该动；
     // 但显示一下让用户知道 body 是否已注册。
     ImGui::Separator();
     ImGui::TextDisabled("handle (runtime) : %llu",
                         static_cast<unsigned long long>(b->handle.Value()));
 
-    if (remove) { mState.pWorld->RemoveComponent<RB>(e); }
+    if (remove) {
+        mState.pWorld->RemoveComponent<RB>(e);
+        mState.pCmdStack->Clear();
+    }
 }
 
 void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
@@ -345,25 +566,73 @@ void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
     bool remove = false;
     const bool open = ComponentHeader("Collider", &remove);
     if (!open) {
-        if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+        if (remove) {
+            mState.pWorld->RemoveComponent<CC>(e);
+            mState.pCmdStack->Clear();
+        }
         return;
     }
-    auto* c = mState.pWorld->GetComponent<CC>(e);
+    auto* c  = mState.pWorld->GetComponent<CC>(e);
+    auto* pW = mState.pWorld.get();
 
     // shape 是 std::variant —— 显示 shape 类型 + 各自的简单数值。
     // 切换 shape 类型（assign 一个不同 alternative）会重置数据，
     // 比起 Inspector 一行 Combo 误操作风险大，这里**不**提供切换
-    // 控件，留给 Task 06-05 / 后续 collider 编辑专用 UI。
+    // 控件，留给后续 collider 编辑专用 UI。
     if (std::holds_alternative<CircleDesc>(c->shape)) {
         auto& s = std::get<CircleDesc>(c->shape);
         ImGui::Text("Shape: Circle");
-        ImGui::DragFloat("Radius", &s.radius, 0.01f, 0.0f, 0.0f);
-        ImGui::DragFloat2("Center", &s.center.x, 0.01f);
+        {
+            float old = s.radius;
+            if (ImGui::DragFloat("Radius", &s.radius, 0.01f, 0.0f, 0.0f)) {
+                mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                    e, "collider.circle.radius", old, s.radius,
+                    [pW, e](const float& v) {
+                        if (auto* cc = pW->GetComponent<CC>(e))
+                            if (auto* sd = std::get_if<CircleDesc>(&cc->shape))
+                                sd->radius = v;
+                    }));
+            }
+        }
+        {
+            glm::vec2 old = s.center;
+            if (ImGui::DragFloat2("Center", &s.center.x, 0.01f)) {
+                mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                    e, "collider.circle.center", old, s.center,
+                    [pW, e](const glm::vec2& v) {
+                        if (auto* cc = pW->GetComponent<CC>(e))
+                            if (auto* sd = std::get_if<CircleDesc>(&cc->shape))
+                                sd->center = v;
+                    }));
+            }
+        }
     } else if (std::holds_alternative<BoxDesc>(c->shape)) {
         auto& s = std::get<BoxDesc>(c->shape);
         ImGui::Text("Shape: Box");
-        ImGui::DragFloat2("Half Extents", &s.halfExtents.x, 0.01f);
-        ImGui::DragFloat2("Center",       &s.center.x,      0.01f);
+        {
+            glm::vec2 old = s.halfExtents;
+            if (ImGui::DragFloat2("Half Extents", &s.halfExtents.x, 0.01f)) {
+                mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                    e, "collider.box.halfExtents", old, s.halfExtents,
+                    [pW, e](const glm::vec2& v) {
+                        if (auto* cc = pW->GetComponent<CC>(e))
+                            if (auto* sd = std::get_if<BoxDesc>(&cc->shape))
+                                sd->halfExtents = v;
+                    }));
+            }
+        }
+        {
+            glm::vec2 old = s.center;
+            if (ImGui::DragFloat2("Center", &s.center.x, 0.01f)) {
+                mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                    e, "collider.box.center", old, s.center,
+                    [pW, e](const glm::vec2& v) {
+                        if (auto* cc = pW->GetComponent<CC>(e))
+                            if (auto* sd = std::get_if<BoxDesc>(&cc->shape))
+                                sd->center = v;
+                    }));
+            }
+        }
     } else if (std::holds_alternative<PolygonDesc>(c->shape)) {
         const auto& s = std::get<PolygonDesc>(c->shape);
         ImGui::Text("Shape: Polygon (%u verts)",
@@ -377,12 +646,51 @@ void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
         ImGui::TextDisabled("(edge chain editing — later task)");
     }
     ImGui::Separator();
-    ImGui::DragFloat("Density",     &c->density,     0.01f, 0.0f, 0.0f);
-    ImGui::DragFloat("Friction",    &c->friction,    0.01f, 0.0f, 1.0f);
-    ImGui::DragFloat("Restitution", &c->restitution, 0.01f, 0.0f, 1.0f);
-    ImGui::Checkbox("Is Sensor",    &c->isSensor);
+    {
+        float old = c->density;
+        if (ImGui::DragFloat("Density", &c->density, 0.01f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "collider.density", old, c->density,
+                [pW, e](const float& v) {
+                    if (auto* cc = pW->GetComponent<CC>(e)) cc->density = v;
+                }));
+        }
+    }
+    {
+        float old = c->friction;
+        if (ImGui::DragFloat("Friction", &c->friction, 0.01f, 0.0f, 1.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "collider.friction", old, c->friction,
+                [pW, e](const float& v) {
+                    if (auto* cc = pW->GetComponent<CC>(e)) cc->friction = v;
+                }));
+        }
+    }
+    {
+        float old = c->restitution;
+        if (ImGui::DragFloat("Restitution", &c->restitution, 0.01f, 0.0f, 1.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "collider.restitution", old, c->restitution,
+                [pW, e](const float& v) {
+                    if (auto* cc = pW->GetComponent<CC>(e)) cc->restitution = v;
+                }));
+        }
+    }
+    {
+        bool old = c->isSensor;
+        if (ImGui::Checkbox("Is Sensor", &c->isSensor)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<bool>>(
+                e, "collider.isSensor", old, c->isSensor,
+                [pW, e](const bool& v) {
+                    if (auto* cc = pW->GetComponent<CC>(e)) cc->isSensor = v;
+                }));
+        }
+    }
 
-    if (remove) { mState.pWorld->RemoveComponent<CC>(e); }
+    if (remove) {
+        mState.pWorld->RemoveComponent<CC>(e);
+        mState.pCmdStack->Clear();
+    }
 }
 
 void EditorRenderLayer::DrawInspectorParticleEmitter(Orange::Engine::Entity e)
@@ -392,52 +700,214 @@ void EditorRenderLayer::DrawInspectorParticleEmitter(Orange::Engine::Entity e)
     bool remove = false;
     const bool open = ComponentHeader("Particle Emitter", &remove);
     if (!open) {
-        if (remove) { mState.pWorld->RemoveComponent<PEC>(e); }
+        if (remove) {
+            mState.pWorld->RemoveComponent<PEC>(e);
+            mState.pCmdStack->Clear();
+        }
         return;
     }
-    auto* p = mState.pWorld->GetComponent<PEC>(e);
-    auto& d = p->desc;
+    auto* p  = mState.pWorld->GetComponent<PEC>(e);
+    auto& d  = p->desc;
+    auto* pW = mState.pWorld.get();
 
-    ImGui::Checkbox("Emitting", &p->emitting);
-    ImGui::DragFloat("Emission Rate (/s)", &d.emissionRate, 0.5f, 0.0f, 0.0f);
+    {
+        bool old = p->emitting;
+        if (ImGui::Checkbox("Emitting", &p->emitting)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<bool>>(
+                e, "pec.emitting", old, p->emitting,
+                [pW, e](const bool& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->emitting = v;
+                }));
+        }
+    }
+    {
+        float old = d.emissionRate;
+        if (ImGui::DragFloat("Emission Rate (/s)", &d.emissionRate, 0.5f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.emissionRate", old, d.emissionRate,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.emissionRate = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Lifetime");
-    ImGui::DragFloat("Lifetime Min (s)", &d.lifetimeMin, 0.01f, 0.0f, 0.0f);
-    ImGui::DragFloat("Lifetime Max (s)", &d.lifetimeMax, 0.01f, 0.0f, 0.0f);
+    {
+        float old = d.lifetimeMin;
+        if (ImGui::DragFloat("Lifetime Min (s)", &d.lifetimeMin, 0.01f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.lifetimeMin", old, d.lifetimeMin,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.lifetimeMin = v;
+                }));
+        }
+    }
+    {
+        float old = d.lifetimeMax;
+        if (ImGui::DragFloat("Lifetime Max (s)", &d.lifetimeMax, 0.01f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.lifetimeMax", old, d.lifetimeMax,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.lifetimeMax = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Spawn Offset (entity local)");
-    ImGui::DragFloat2("Offset Min", &d.spawnOffsetMin.x, 0.01f);
-    ImGui::DragFloat2("Offset Max", &d.spawnOffsetMax.x, 0.01f);
+    {
+        glm::vec2 old = d.spawnOffsetMin;
+        if (ImGui::DragFloat2("Offset Min", &d.spawnOffsetMin.x, 0.01f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "pec.spawnOffsetMin", old, d.spawnOffsetMin,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.spawnOffsetMin = v;
+                }));
+        }
+    }
+    {
+        glm::vec2 old = d.spawnOffsetMax;
+        if (ImGui::DragFloat2("Offset Max", &d.spawnOffsetMax.x, 0.01f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "pec.spawnOffsetMax", old, d.spawnOffsetMax,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.spawnOffsetMax = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Initial Velocity (m/s, worldspace)");
-    ImGui::DragFloat2("Velocity Min", &d.initialVelocityMin.x, 0.05f);
-    ImGui::DragFloat2("Velocity Max", &d.initialVelocityMax.x, 0.05f);
+    {
+        glm::vec2 old = d.initialVelocityMin;
+        if (ImGui::DragFloat2("Velocity Min", &d.initialVelocityMin.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "pec.velocityMin", old, d.initialVelocityMin,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.initialVelocityMin = v;
+                }));
+        }
+    }
+    {
+        glm::vec2 old = d.initialVelocityMax;
+        if (ImGui::DragFloat2("Velocity Max", &d.initialVelocityMax.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "pec.velocityMax", old, d.initialVelocityMax,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.initialVelocityMax = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Forces");
-    ImGui::DragFloat2("Gravity (m/s²)", &d.gravity.x, 0.05f);
+    {
+        glm::vec2 old = d.gravity;
+        if (ImGui::DragFloat2("Gravity (m/s²)", &d.gravity.x, 0.05f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
+                e, "pec.gravity", old, d.gravity,
+                [pW, e](const glm::vec2& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.gravity = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Color curve (linear lerp start→end by age01)");
     // 颜色 RGB + alpha 分开 —— alpha > 1 触发 bloom 拾取，需要 DragFloat
     // 而非 ColorEdit 的 [0,1] clamp。所以 RGB 给 ColorEdit3，alpha 单独
     // DragFloat。
-    ImGui::ColorEdit3("Color Start RGB", &d.colorStart.x);
-    ImGui::DragFloat("Color Start Alpha", &d.colorStart.w, 0.01f, 0.0f, 0.0f);
-    ImGui::ColorEdit3("Color End RGB",   &d.colorEnd.x);
-    ImGui::DragFloat("Color End Alpha",   &d.colorEnd.w,   0.01f, 0.0f, 0.0f);
+    {
+        glm::vec3 old{d.colorStart.x, d.colorStart.y, d.colorStart.z};
+        if (ImGui::ColorEdit3("Color Start RGB", &d.colorStart.x)) {
+            glm::vec3 newRgb{d.colorStart.x, d.colorStart.y, d.colorStart.z};
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                e, "pec.colorStartRGB", old, newRgb,
+                [pW, e](const glm::vec3& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) {
+                        pec->desc.colorStart.x = v.x;
+                        pec->desc.colorStart.y = v.y;
+                        pec->desc.colorStart.z = v.z;
+                    }
+                }));
+        }
+    }
+    {
+        float old = d.colorStart.w;
+        if (ImGui::DragFloat("Color Start Alpha", &d.colorStart.w, 0.01f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.colorStartAlpha", old, d.colorStart.w,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.colorStart.w = v;
+                }));
+        }
+    }
+    {
+        glm::vec3 old{d.colorEnd.x, d.colorEnd.y, d.colorEnd.z};
+        if (ImGui::ColorEdit3("Color End RGB", &d.colorEnd.x)) {
+            glm::vec3 newRgb{d.colorEnd.x, d.colorEnd.y, d.colorEnd.z};
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                e, "pec.colorEndRGB", old, newRgb,
+                [pW, e](const glm::vec3& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) {
+                        pec->desc.colorEnd.x = v.x;
+                        pec->desc.colorEnd.y = v.y;
+                        pec->desc.colorEnd.z = v.z;
+                    }
+                }));
+        }
+    }
+    {
+        float old = d.colorEnd.w;
+        if (ImGui::DragFloat("Color End Alpha", &d.colorEnd.w, 0.01f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.colorEndAlpha", old, d.colorEnd.w,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.colorEnd.w = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Size curve");
-    ImGui::DragFloat("Size Start", &d.sizeStart, 0.005f, 0.0f, 0.0f);
-    ImGui::DragFloat("Size End",   &d.sizeEnd,   0.005f, 0.0f, 0.0f);
+    {
+        float old = d.sizeStart;
+        if (ImGui::DragFloat("Size Start", &d.sizeStart, 0.005f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.sizeStart", old, d.sizeStart,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.sizeStart = v;
+                }));
+        }
+    }
+    {
+        float old = d.sizeEnd;
+        if (ImGui::DragFloat("Size End", &d.sizeEnd, 0.005f, 0.0f, 0.0f)) {
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<float>>(
+                e, "pec.sizeEnd", old, d.sizeEnd,
+                [pW, e](const float& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e)) pec->desc.sizeEnd = v;
+                }));
+        }
+    }
 
     ImGui::SeparatorText("Pool");
-    int maxP = static_cast<int>(d.maxParticles);
-    if (ImGui::DragInt("Max Particles", &maxP, 1.0f, 0, 65536)) {
-        d.maxParticles = static_cast<std::uint32_t>(std::max(0, maxP));
+    {
+        int maxP = static_cast<int>(d.maxParticles);
+        int old  = maxP;
+        if (ImGui::DragInt("Max Particles", &maxP, 1.0f, 0, 65536)) {
+            d.maxParticles = static_cast<std::uint32_t>(std::max(0, maxP));
+            mState.pCmdStack->Push(std::make_unique<SetFieldValueCommand<int>>(
+                e, "pec.maxParticles", old, maxP,
+                [pW, e](const int& v) {
+                    if (auto* pec = pW->GetComponent<PEC>(e))
+                        pec->desc.maxParticles =
+                            static_cast<std::uint32_t>(std::max(0, v));
+                }));
+        }
     }
 
     ImGui::TextDisabled("(real-time preview pending Task 06-08 viewport)");
 
-    if (remove) { mState.pWorld->RemoveComponent<PEC>(e); }
+    if (remove) {
+        mState.pWorld->RemoveComponent<PEC>(e);
+        mState.pCmdStack->Clear();
+    }
 }
 
 void EditorRenderLayer::DrawInspectorAnimator(Orange::Engine::Entity e)

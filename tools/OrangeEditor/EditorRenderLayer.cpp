@@ -199,6 +199,23 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
+    // Ctrl+Z / Ctrl+Y 全局 Undo/Redo —— 仅 Edit 态且无文本输入焦点时响应。
+    // WantTextInput 阻止：InputText 活跃时 Z/Y 是正常字符输入，不应触发撤销。
+    if (mState.playState == PlayState::Edit
+        && mState.pCmdStack != nullptr
+        && !ImGui::GetIO().WantTextInput)
+    {
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z)) {
+            mState.pCmdStack->Undo();
+            ValidateEntityHandles();  // 清除可能被 Undo 销毁的实体句柄
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y)
+            || ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z)) {
+            mState.pCmdStack->Redo();
+            ValidateEntityHandles();  // 清除可能被 Redo 恢复/销毁的实体句柄
+        }
+    }
+
     // dock space —— 占满主 viewport，所有 imgui window 都可以 dock 进来。
     // DockSpaceOverViewport 返回的 ID 在主 viewport 生命周期内稳定，下面
     // DockBuilder 系列 API 用它建默认布局。
@@ -402,6 +419,30 @@ void EditorRenderLayer::DrawMainMenuBar()
     ImGui::EndMainMenuBar();
 }
 
+// 检查 EditorState 里各实体句柄是否仍在 registry 中存活；对已被 Undo
+// 销毁的实体清零，防止后续帧在死实体上调 DestroySubtree / GetComponent。
+// 与 ResetEntityLocalState 的区别：Reset 是全清（切场景用），Validate
+// 是精准检查（每次 Undo/Redo 后用）。
+void EditorRenderLayer::ValidateEntityHandles()
+{
+    if (mState.pWorld == nullptr) { return; }
+    auto& w = *mState.pWorld;
+
+    if (mState.selectedEntity.IsValid() && !w.IsValid(mState.selectedEntity)) {
+        mState.selectedEntity            = Orange::Engine::Entity::Invalid();
+        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    }
+    if (mState.renamingEntity.IsValid() && !w.IsValid(mState.renamingEntity)) {
+        CancelRename();
+    }
+    if (mState.transformEulerCacheEntity.IsValid()
+        && !w.IsValid(mState.transformEulerCacheEntity)) {
+        mState.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    }
+    // pendingDelete / pendingReparent / pendingCreate 是帧内消耗完的一次性
+    // 标志（DrawEntityTreePanel 末尾 apply），跨帧不存活，无需在此验证。
+}
+
 // 把 EditorState 内与"被编辑 world 实体身份强相关"的状态全清空。
 // Open / New 切 world 后必须调；不调的话 selectedEntity 会指向新 world
 // 里不存在的 entity，Inspector 看到野指针。
@@ -438,6 +479,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             SeedDemoWorld(mState);  // 与启动期一致；后续真要"空场景"再做"New Empty"
             mState.currentScenePath.clear();
             ResetEntityLocalState();
+            if (mState.pCmdStack != nullptr) { mState.pCmdStack->Clear(); }
             std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
             break;
         }
@@ -456,6 +498,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             mState.pWorld = std::move(pNew);
             mState.currentScenePath = path;
             ResetEntityLocalState();
+            if (mState.pCmdStack != nullptr) { mState.pCmdStack->Clear(); }
             std::fprintf(stdout, "[OrangeEditor] opened scene: %s\n", path.c_str());
             break;
         }
@@ -648,6 +691,11 @@ void EditorRenderLayer::ApplyPendingPlayOp()
 
             mState.playState = PlayState::Edit;
             ResetEntityLocalState();
+            // Stop 时 pWorld 已被换成还原快照的新实例；栈内所有命令的 pW
+            // 仍指向旧 World，全部失效 —— 必须在此清栈，否则 Ctrl+Z 会
+            // 用悬垂指针执行 lambda 导致崩溃。与 New / Open 场景切换时的
+            // 处理保持一致（切 world 必清栈）。
+            if (mState.pCmdStack != nullptr) { mState.pCmdStack->Clear(); }
             std::fprintf(stdout, "[play] %s → Edit\n", prevLabel);
             break;
         }
