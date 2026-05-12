@@ -201,6 +201,36 @@ The wiki at `vendor/Orange-Wiki/` is a curated, incrementally-built knowledge ba
 ### Branch
 - The wiki must be on branch `Orange-Render-Wiki`. The default `main` branch does not contain the ingested content. Verify with `git -C vendor/Orange-Wiki branch --show-current`.
 
+## OrangeEditor 参考引擎与资源
+
+OrangeEditor 开发时采用**双参考**策略：
+
+### LumixEngine — 技术实现参考
+
+`vendor/LumixEngine/` 是 OrangeEditor 各 feature 的**首要技术参考**。Lumix 是 C++ / ImGui 技术栈，架构与 OrangeEditor 高度相似（in-engine editor、ImGui dock、ECS world、命令栈）。
+
+**使用方式**：
+- 开发每个编辑器 feature 前，先在 `vendor/LumixEngine/src/editor/` 找对应实现，理解其架构选择和数学方案，再以 OrangeEditor 自身的约定重新实现（**不直接复制代码**，许可证 / 命名 / 架构三方面都有差异）
+- Lumix 的做法同时指导 OrangeEngine 和 OrangeRender 的**能力补齐方向**——编辑器侧发现引擎 / 渲染器缺能力时，先对比 Lumix 如何在自己渲染器里解决，再按既有工作流向 `docs/engine-known-gaps.md` / `vendor/OrangeRender/docs/incoming_feature.md` 登记需求
+- 如果 Orange-Wiki 尚未收录 Lumix 对应 feature 的 wiki 页，建议在完成实现后开一个 Orange-Wiki 维护 session 补页，后续同类 feature 可直接引用 wiki 而非重新 grep Lumix 源码
+
+**关键文件索引（编辑器开发高频参考）**：
+
+| 功能领域 | 文件 |
+|----------|------|
+| Gizmo 几何 + 碰撞检测 + 交互数学 | `src/editor/gizmo.cpp`（~934 行） |
+| 命令栈 / MoveEntityCommand / merge | `src/editor/world_editor.cpp`（~3126 行） |
+| SceneView + gizmo → 命令集成点 | `src/renderer/editor/scene_view.cpp` |
+| Spline editor（自定义 gizmo 扩展示例）| `src/editor/spline_editor.cpp` |
+
+### Cocos Creator — UI/UX 布局参考与占位资源
+
+`vendor/cocos-engine/` 用于编辑器**界面布局和交互设计**参考，不作为技术实现参考。
+
+- viewport 工具栏、底部 tab 容器（Assets / Console / Animation）、全局 toolbar 等布局设计参照 Cocos Creator 的界面组织方式
+- Cocos 的美术资源（图标、UI 纹理、默认 mesh 等）可作为**临时占位素材**，后期统一替换为项目自有资源；使用前确认具体资源的许可证条款（Cocos 引擎本体 MIT，内置资源许可证需单独核查）
+- **不参考 Cocos 的技术实现**（TypeScript / Web 技术栈与 OrangeEditor C++ 完全不同）
+
 ## Working in this repo: practical guidance
 
 When given a task in this repo, default to this workflow:
