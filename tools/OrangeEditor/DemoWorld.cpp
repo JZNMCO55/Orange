@@ -100,7 +100,7 @@ MakeCubeMesh(float halfSize)
 // 一次性建好 AssetRegistry + 注册 ShaderLoader + 内置 mesh + MaterialSystem
 // + 所有内置材质实例。失败仅 log，不抛；SeedDemoWorld 仍能工作（Renderable
 // 退化到 nullptr material），只是 Scene 视口看不到几何。
-void InitializeEditorAssets(EditorState& state)
+void InitializeEditorAssets(EditorHost& host)
 {
     using Orange::Engine::Asset::AssetRegistry;
     using Orange::Engine::Asset::MeshAsset;
@@ -108,8 +108,8 @@ void InitializeEditorAssets(EditorState& state)
     using Orange::Engine::Asset::ShaderLoader;
     using Orange::Engine::Render::MaterialSystem;
 
-    state.assets.pAssets = std::make_unique<AssetRegistry>();
-    if (auto reg = state.assets.pAssets->RegisterLoader<ShaderAsset>(
+    host.assets.pAssets = std::make_unique<AssetRegistry>();
+    if (auto reg = host.assets.pAssets->RegisterLoader<ShaderAsset>(
             std::make_unique<ShaderLoader>());
         reg.IsErr())
     {
@@ -119,19 +119,19 @@ void InitializeEditorAssets(EditorState& state)
                      static_cast<unsigned>(reg.Error()));
     }
 
-    if (auto h = state.assets.pAssets->Insert<MeshAsset>("editor/cube", MakeCubeMesh(0.5f));
+    if (auto h = host.assets.pAssets->Insert<MeshAsset>("editor/cube", MakeCubeMesh(0.5f));
         h.IsOk())
     {
-        state.assets.cubeMeshHandle = h.Value();
+        host.assets.cubeMeshHandle = h.Value();
     }
-    if (auto h = state.assets.pAssets->Insert<MeshAsset>("editor/plane", MakePlaneMesh(2.5f));
+    if (auto h = host.assets.pAssets->Insert<MeshAsset>("editor/plane", MakePlaneMesh(2.5f));
         h.IsOk())
     {
-        state.assets.planeMeshHandle = h.Value();
+        host.assets.planeMeshHandle = h.Value();
     }
 
-    state.assets.pMaterials = std::make_unique<MaterialSystem>(*state.assets.pAssets);
-    if (auto rb = state.assets.pMaterials->RegisterBuiltins(); rb.IsErr())
+    host.assets.pMaterials = std::make_unique<MaterialSystem>(*host.assets.pAssets);
+    if (auto rb = host.assets.pMaterials->RegisterBuiltins(); rb.IsErr())
     {
         // 通常意味着 shaders/orange_engine/*.spv 不在 .exe 同目录——in-tree
         // build 由 CMake 把 SPV 拷到 build/bin/$<CONFIG>/shaders/orange_engine/，
@@ -143,17 +143,17 @@ void InitializeEditorAssets(EditorState& state)
     }
 
     // 地面 / 备用 textured 实例
-    state.assets.pFloorMaterial = state.assets.pMaterials->CreateInstance("textured");
-    state.assets.pWallMaterial  = state.assets.pMaterials->CreateInstance("textured");
+    host.assets.pFloorMaterial = host.assets.pMaterials->CreateInstance("textured");
+    host.assets.pWallMaterial  = host.assets.pMaterials->CreateInstance("textured");
 
     // v0.1.5 新增内置材质实例（失败时 unique_ptr 为 nullptr，Renderable 降级）
-    state.assets.pToonMaterial     = state.assets.pMaterials->CreateInstance("toon");
-    state.assets.pRimLightMaterial = state.assets.pMaterials->CreateInstance("rim_light");
-    state.assets.pDissolveMaterial = state.assets.pMaterials->CreateInstance("dissolve");
+    host.assets.pToonMaterial     = host.assets.pMaterials->CreateInstance("toon");
+    host.assets.pRimLightMaterial = host.assets.pMaterials->CreateInstance("rim_light");
+    host.assets.pDissolveMaterial = host.assets.pMaterials->CreateInstance("dissolve");
 
     // 编辑器操作共用默认材质
-    state.assets.pDefaultRenderableMaterial = state.assets.pMaterials->CreateInstance("textured");
-    state.assets.pLightObjectMaterial       = state.assets.pMaterials->CreateInstance("emissive");
+    host.assets.pDefaultRenderableMaterial = host.assets.pMaterials->CreateInstance("textured");
+    host.assets.pLightObjectMaterial       = host.assets.pMaterials->CreateInstance("emissive");
 }
 
 // demo 世界层级：
@@ -171,7 +171,7 @@ void InitializeEditorAssets(EditorState& state)
 //       ├── Dynamic Box  （动态刚体，Play Mode 物理演示，y=4 悬空下落）
 //       ├── Fire Emitter （粒子：火焰，暖橙 HDR → bloom）
 //       └── Sparkle Emitter（粒子：萤火，蓝白 HDR → bloom）
-void SeedDemoWorld(EditorState& state)
+void SeedDemoWorld(EditorHost& host)
 {
     using ::Orange::Engine::Entity;
     using ::Orange::Engine::Scene::NameComponent;
@@ -186,7 +186,7 @@ void SeedDemoWorld(EditorState& state)
     using ::Orange::Engine::Physics::BoxDesc;
     using ::Orange::Engine::Physics::RigidBodyComponent;
 
-    auto& world = *state.scene.pWorld;
+    auto& world = *host.scene.pWorld;
     auto make = [&](const char* name) -> Entity {
         Entity e = world.CreateEntity();
         world.AddComponent<NameComponent>(e, NameComponent{name});
@@ -245,8 +245,8 @@ void SeedDemoWorld(EditorState& state)
         if (tc != nullptr) { tc->position.y = -0.5f; }
 
         RenderableComponent rc{};
-        rc.mesh             = state.assets.planeMeshHandle;
-        rc.materialInstance = state.assets.pFloorMaterial.get();
+        rc.mesh             = host.assets.planeMeshHandle;
+        rc.materialInstance = host.assets.pFloorMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = false;
         world.AddComponent<RenderableComponent>(ground, rc);
@@ -276,8 +276,8 @@ void SeedDemoWorld(EditorState& state)
                                           glm::vec3(1.0f, 0.0f, 0.0f));
         }
         RenderableComponent rc{};
-        rc.mesh             = state.assets.planeMeshHandle;
-        rc.materialInstance = state.assets.pRimLightMaterial.get();
+        rc.mesh             = host.assets.planeMeshHandle;
+        rc.materialInstance = host.assets.pRimLightMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = false;
         world.AddComponent<RenderableComponent>(backdrop, rc);
@@ -289,8 +289,8 @@ void SeedDemoWorld(EditorState& state)
         if (tc != nullptr) { tc->position = glm::vec3(-2.0f, 0.0f, 0.0f); }
 
         RenderableComponent rc{};
-        rc.mesh             = state.assets.cubeMeshHandle;
-        rc.materialInstance = state.assets.pToonMaterial.get();
+        rc.mesh             = host.assets.cubeMeshHandle;
+        rc.materialInstance = host.assets.pToonMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = true;
         world.AddComponent<RenderableComponent>(platformLeft, rc);
@@ -314,8 +314,8 @@ void SeedDemoWorld(EditorState& state)
         if (tc != nullptr) { tc->position = glm::vec3(2.0f, 0.0f, 0.0f); }
 
         RenderableComponent rc{};
-        rc.mesh             = state.assets.cubeMeshHandle;
-        rc.materialInstance = state.assets.pToonMaterial.get();
+        rc.mesh             = host.assets.cubeMeshHandle;
+        rc.materialInstance = host.assets.pToonMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = true;
         world.AddComponent<RenderableComponent>(platformRight, rc);
@@ -343,8 +343,8 @@ void SeedDemoWorld(EditorState& state)
             tc->scale    = glm::vec3(1.0f, 2.0f, 1.0f);
         }
         RenderableComponent rc{};
-        rc.mesh             = state.assets.cubeMeshHandle;
-        rc.materialInstance = state.assets.pToonMaterial.get();
+        rc.mesh             = host.assets.cubeMeshHandle;
+        rc.materialInstance = host.assets.pToonMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = true;
         world.AddComponent<RenderableComponent>(tower, rc);
@@ -371,8 +371,8 @@ void SeedDemoWorld(EditorState& state)
         if (tc != nullptr) { tc->position = glm::vec3(0.8f, 0.0f, 0.5f); }
 
         RenderableComponent rc{};
-        rc.mesh             = state.assets.cubeMeshHandle;
-        rc.materialInstance = state.assets.pDissolveMaterial.get();
+        rc.mesh             = host.assets.cubeMeshHandle;
+        rc.materialInstance = host.assets.pDissolveMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = false;
         world.AddComponent<RenderableComponent>(glowBox, rc);
@@ -388,8 +388,8 @@ void SeedDemoWorld(EditorState& state)
             tc->scale    = glm::vec3(0.5f, 2.5f, 0.5f);
         }
         RenderableComponent rc{};
-        rc.mesh             = state.assets.cubeMeshHandle;
-        rc.materialInstance = state.assets.pLightObjectMaterial.get();
+        rc.mesh             = host.assets.cubeMeshHandle;
+        rc.materialInstance = host.assets.pLightObjectMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = false;
         world.AddComponent<RenderableComponent>(emissivePillar, rc);
@@ -403,8 +403,8 @@ void SeedDemoWorld(EditorState& state)
         if (tc != nullptr) { tc->position = glm::vec3(0.0f, 4.0f, 0.0f); }
 
         RenderableComponent rc{};
-        rc.mesh             = state.assets.cubeMeshHandle;
-        rc.materialInstance = state.assets.pToonMaterial.get();
+        rc.mesh             = host.assets.cubeMeshHandle;
+        rc.materialInstance = host.assets.pToonMaterial.get();
         rc.visible          = true;
         rc.castsShadow      = true;
         world.AddComponent<RenderableComponent>(dynamicBox, rc);

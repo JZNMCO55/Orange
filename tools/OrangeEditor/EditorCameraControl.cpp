@@ -67,14 +67,14 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect)
     return cam;
 }
 
-void ApplyEditorCameraToWorld(EditorState& state, float aspect)
+void ApplyEditorCameraToWorld(EditorHost& host, float aspect)
 {
-    if (state.scene.pWorld == nullptr)
+    if (host.scene.pWorld == nullptr)
     {
         return;
     }
     using ::Orange::Engine::Render::Camera;
-    auto& reg  = state.scene.pWorld->Registry();
+    auto& reg  = host.scene.pWorld->Registry();
     auto  view = reg.view<Camera>();
     if (view.empty())
     {
@@ -82,5 +82,5 @@ void ApplyEditorCameraToWorld(EditorState& state, float aspect)
     }
     const auto e   = view.front();
     auto&      cam = view.get<Camera>(e);
-    cam            = BuildEditorCamera(state.camera, aspect);
+    cam            = BuildEditorCamera(host.camera, aspect);
 }

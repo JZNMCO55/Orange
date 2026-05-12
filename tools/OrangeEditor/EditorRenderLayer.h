@@ -24,7 +24,7 @@
 //                                     段 + + Add Component）
 // 字段全部 private，跨 TU 仅靠成员函数访问。
 
-#include "EditorState.h"
+#include "EditorHost.h"
 
 #include <orange/engine/app/AppHost.h>
 #include <orange/engine/app/FrameContext.h>
@@ -48,12 +48,12 @@
 class EditorRenderLayer : public Orange::Engine::Layer
 {
 public:
-    EditorRenderLayer(Orange::Engine::AppHost&             host,
+    EditorRenderLayer(Orange::Engine::AppHost&             appHost,
                       Orange::Renderer::RenderDevice&      renderDevice,
                       Orange::Renderer::IRenderer&         renderer,
                       VkDescriptorPool                     descriptorPool,
                       VkDevice                             device,
-                      EditorState&                         state);
+                      EditorHost&                          editorHost);
     ~EditorRenderLayer() override;
 
     void OnUpdate(const Orange::Engine::FrameContext& frame) override;
@@ -64,7 +64,7 @@ private:
     static void BuildDefaultLayoutOnce(ImGuiID dockspaceId);
     void DrawMainMenuBar();
     void ResetEntityLocalState();
-    // Undo/Redo 之后立即调用：把已被销毁的实体句柄从 EditorState 各字段里清掉，
+    // Undo/Redo 之后立即调用：把已被销毁的实体句柄从 EditorHost 各字段里清掉，
     // 避免后续帧对死实体做 DestroySubtree / GetComponent 等操作崩溃。
     void ValidateEntityHandles();
     void ApplyPendingSceneOp();
@@ -106,12 +106,17 @@ private:
     void DrawInspectorAnimator         (Orange::Engine::Entity e);
 
     // ---- 字段 -----------------------------------------------------------
-    Orange::Engine::AppHost&         mHost;
+    // mAppHost  ：引擎层 AppHost（窗口 / LayerStack / 主循环）；
+    // mHost     ：编辑器顶层 EditorHost（聚合 4 个 sub-context + CommandStack
+    //              + 后续 plugin registry）。两者均由 main 拥有，layer 持
+    //              非拥有引用。EditorHost 命名匹配 Lumix StudioApp / Godot
+    //              EditorNode 的工业惯例：editor 自己的 application hub。
+    Orange::Engine::AppHost&         mAppHost;
     Orange::Renderer::RenderDevice&  mRenderDevice;
     Orange::Renderer::IRenderer&     mRenderer;
     VkDescriptorPool                 mDescriptorPool;  // owned by main, not by layer
     VkDevice                         mDevice;
-    EditorState&                     mState;           // owned by main, not by layer
+    EditorHost&                      mHost;            // owned by main, not by layer
 
     // ---- Scene 面板 off-screen 渲染状态 ----------------------------------
     std::unique_ptr<Orange::Engine::Render::Pipeline> mpScenePipeline;

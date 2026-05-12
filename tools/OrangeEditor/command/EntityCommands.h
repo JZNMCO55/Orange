@@ -12,7 +12,7 @@ namespace Orange::Engine { class World; }
 
 // CreateEntityCommand：创建实体（通过调用方提供的 creator lambda）；
 // Undo 调 EditorHierarchy::DestroySubtree 销毁所创建的实体。
-// Creator 捕获 EditorState 中所需的材质/网格句柄，命令本身不持有状态。
+// Creator 捕获 EditorHost.assets 中所需的材质/网格句柄，命令本身不持有状态。
 class CreateEntityCommand : public ICommand
 {
 public:

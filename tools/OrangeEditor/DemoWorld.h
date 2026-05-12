@@ -13,7 +13,7 @@
 //     / Emissive Pillar（emissive）/ Fire Emitter（粒子：火焰）/
 //     Sparkle Emitter（粒子：萤火）。
 
-#include "EditorState.h"
+#include "EditorHost.h"
 
 #include <orange/engine/asset/MeshAsset.h>
 
@@ -25,8 +25,8 @@ MakePlaneMesh(float halfSize);
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakeCubeMesh(float halfSize);
 
-void InitializeEditorAssets(EditorState& state);
+void InitializeEditorAssets(EditorHost& host);
 
-void SeedDemoWorld(EditorState& state);
+void SeedDemoWorld(EditorHost& host);
 
 #endif  // ORANGE_EDITOR_DEMO_WORLD_H

@@ -67,8 +67,8 @@
 
 // 编辑器内部模块（拆分后的本地 header；不进 include/ 公共面）
 #include "DemoWorld.h"
+#include "EditorHost.h"
 #include "EditorRenderLayer.h"
-#include "EditorState.h"
 #include "VulkanLoaderShim.h"
 
 #include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
@@ -115,8 +115,9 @@ namespace
 constexpr float kDefaultFontSizePx = 28.0f;
 
 // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
-// 业务逻辑已按 commit 1 / 2 / 3 拆出：
-//   EditorState           → EditorState.h
+// 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
+//   EditorHost            → EditorHost.h（顶层 hub，聚合 4 sub-context + cmdStack）
+//   context/Editor*       → 4 个 sub-context（selection / scene / assets / camera）
 //   EditorHierarchy       → EditorHierarchy.{h,cpp}
 //   VulkanLoaderShim      → VulkanLoaderShim.{h,cpp}（含 ImguiVulkanLoader /
 //                           Make/DestroyImguiDescriptorPool / ShowSceneFileDialog）
@@ -291,12 +292,14 @@ int main()
         return 1;
     }
 
-    // ---- 编辑器侧 EditorState + 启动期场景 ---------------------------------
+    // ---- 编辑器顶层 EditorHost + 启动期场景 ---------------------------------
     //
-    // EditorState 拥有 World 所有权——场景 Open / New 在 OnUpdate 内整体
-    // swap world，所有权放 state 内最自然。生命周期：editorState 与 host
-    // 在同一 scope；host.reset() 在关停段手工提前调，保证 layer 析构时
-    // state（含 world）仍存活。
+    // EditorHost 是编辑器中央 hub（Lumix StudioApp / Godot EditorNode 同位）：
+    // 聚合 4 个 sub-context（selection / scene / assets / camera）+ CommandStack。
+    // scene context 拥有 World 所有权；场景 Open / New 在 OnUpdate 内整体
+    // swap world，所有权放 host.scene 内最自然。生命周期：editorHost 与
+    // AppHost 在同一 scope；AppHost.reset() 在关停段手工提前调，保证 layer
+    // 析构时 host（含 world）仍存活。
     //
     // 资产初始化必须先于场景加载，否则 RenderableComponent.mesh 会拿到
     // Invalid handle，Scene 视口画不出几何。
@@ -304,22 +307,21 @@ int main()
     // 启动优先级：检测 assets/editor/demo.scene.json（相对 .exe 工作目录），
     // 存在则 Load；文件不存在（IoError）或加载失败则回退 SeedDemoWorld。
     // File > New Scene 走 ApplyPendingSceneOp，与回退路径保持一致。
-    EditorState editorState;
-    editorState.scene.pWorld    = std::make_unique<Orange::Engine::World>();
-    editorState.pCmdStack = std::make_unique<CommandStack>();
-    InitializeEditorAssets(editorState);
+    EditorHost editorHost;
+    editorHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
+    InitializeEditorAssets(editorHost);
     {
         Scene::LoadOptions demoLoadOpts{};
-        demoLoadOpts.assetRegistry = editorState.assets.pAssets.get();
+        demoLoadOpts.assetRegistry = editorHost.assets.pAssets.get();
         if (auto res = Scene::Load("assets/editor/demo.scene.json",
-                                   *editorState.scene.pWorld, demoLoadOpts);
+                                   *editorHost.scene.pWorld, demoLoadOpts);
             res.IsErr())
         {
-            SeedDemoWorld(editorState);
+            SeedDemoWorld(editorHost);
         }
         else
         {
-            editorState.scene.currentScenePath = "assets/editor/demo.scene.json";
+            editorHost.scene.currentScenePath = "assets/editor/demo.scene.json";
         }
     }
 
@@ -327,11 +329,11 @@ int main()
     host->PushLayer(std::make_unique<EditorRenderLayer>(*host, *pRenderDevice,
                                                         *pRenderer,
                                                         imguiDescPool, vkDevice,
-                                                        editorState));
+                                                        editorHost));
 
     std::fprintf(stdout,
                  "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
-                 editorState.scene.pWorld->Size());
+                 editorHost.scene.pWorld->Size());
 
     const int rc = host->Run();
 

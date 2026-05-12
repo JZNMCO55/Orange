@@ -20,8 +20,8 @@ void EditorRenderLayer::DrawScenePanel()
     // S3：相机输入捕获 + 应用到 World Camera 组件。
     const ImVec2 region = ImGui::GetContentRegionAvail();
     const float  aspect = (region.y > 0.0f) ? (region.x / region.y) : 1.0f;
-    UpdateEditorCameraFromInput(mState.camera);
-    ApplyEditorCameraToWorld(mState, aspect);
+    UpdateEditorCameraFromInput(mHost.camera);
+    ApplyEditorCameraToWorld(mHost, aspect);
 
     // S4：把 Scene 面板接到 Pipeline::InitializeOffscreen 上 ——
     // viewport-sized off-screen RT 渲染场景 → Interop::GetVulkanImageView
@@ -36,10 +36,10 @@ void EditorRenderLayer::DrawScenePanel()
         (region.y > 1.0f) ? static_cast<std::uint32_t>(region.y) : 0u;
 
     bool drewImage = false;
-    if (EnsureScenePipeline(panelW, panelH) && mState.scene.pWorld != nullptr) {
+    if (EnsureScenePipeline(panelW, panelH) && mHost.scene.pWorld != nullptr) {
         // Pipeline::RenderOffscreen 内部 WaitIdle —— 本帧返回时 GPU 已
         // 空，之后 RemoveTexture(旧 descriptor) + AddTexture(新) 才安全。
-        mpScenePipeline->Render(*mState.scene.pWorld);
+        mpScenePipeline->Render(*mHost.scene.pWorld);
         RebindSceneDescriptorSetIfNeeded();
         if (mSceneDescSet != VK_NULL_HANDLE) {
             ImGui::Image(reinterpret_cast<ImTextureID>(mSceneDescSet),
@@ -51,7 +51,7 @@ void EditorRenderLayer::DrawScenePanel()
 
     if (!drewImage) {
         ImGui::TextDisabled("scene viewport 未就绪 —— 面板太小或 Pipeline 初始化失败");
-        const auto& ec = mState.camera;
+        const auto& ec = mHost.camera;
         ImGui::Text("viewport %.0fx%.0f  aspect=%.2f", region.x, region.y, aspect);
         ImGui::Text("camera pivot=(%.2f, %.2f, %.2f)  az=%.2f  el=%.2f  r=%.2f",
                     ec.pivot.x, ec.pivot.y, ec.pivot.z,
@@ -129,14 +129,14 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
 {
     if (mScenePipelineFailed)              { return false; }
     if (width == 0 || height == 0)         { return false; }
-    if (mState.assets.pAssets == nullptr)         { return false; }
+    if (mHost.assets.pAssets == nullptr)         { return false; }
     if (mSceneSampler == VK_NULL_HANDLE)   { return false; }
 
     // lazy init
     if (mpScenePipeline == nullptr) {
         mpScenePipeline = std::make_unique<Orange::Engine::Render::Pipeline>();
         auto r = mpScenePipeline->InitializeOffscreen(
-            mRenderDevice, *mState.assets.pAssets, width, height);
+            mRenderDevice, *mHost.assets.pAssets, width, height);
         if (r.IsErr()) {
             std::fprintf(stderr,
                          "[OrangeEditor] Pipeline::InitializeOffscreen 失败 (code=%u) —— "

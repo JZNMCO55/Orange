@@ -8,7 +8,7 @@
 //   * BuildEditorCamera(EditorCameraState, aspect) —— 由球坐标构造 Camera
 //     组件值（Perspective + lookAt pivot）；aspect ≤ 0 退化到 1 避免投影
 //     矩阵奇异；
-//   * ApplyEditorCameraToWorld(EditorState&, aspect) —— 把 BuildEditorCamera
+//   * ApplyEditorCameraToWorld(EditorHost&, aspect) —— 把 BuildEditorCamera
 //     结果写到 World 里首个 Camera 组件上；找不到 no-op。
 //
 // 控制约定（与 UpdateEditorCameraFromInput 内的输入捕获保持一致）：
@@ -18,7 +18,7 @@
 // v0.2.5 整骨：原 EditorState::EditorCamera 嵌套类型被提为顶层
 // EditorCameraState（context/EditorCameraState.h）。
 
-#include "EditorState.h"
+#include "EditorHost.h"
 
 #include <orange/engine/render/Camera.h>
 
@@ -27,6 +27,6 @@ void UpdateEditorCameraFromInput(EditorCameraState& ec);
 Orange::Engine::Render::Camera
 BuildEditorCamera(const EditorCameraState& ec, float aspect);
 
-void ApplyEditorCameraToWorld(EditorState& state, float aspect);
+void ApplyEditorCameraToWorld(EditorHost& host, float aspect);
 
 #endif  // ORANGE_EDITOR_EDITOR_CAMERA_CONTROL_H

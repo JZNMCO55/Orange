@@ -27,7 +27,7 @@
 void EditorRenderLayer::DrawEntityTreePanel()
 {
     ImGui::Begin("Entity Tree");
-    if (mState.scene.pWorld == nullptr) {
+    if (mHost.scene.pWorld == nullptr) {
         ImGui::TextDisabled("(no world bound)");
         ImGui::End();
         return;
@@ -36,7 +36,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // Play / Paused 期间禁止结构性编辑；Edit 态才允许。
     // 这里统一给"一帧内所有结构性操作的入口"加防护；帧末 apply 处不
     // 再重复检查 —— 保证 pendingXxx 只在 canEdit 为 true 时被写入。
-    const bool canEdit = (mState.scene.playState == PlayState::Edit);
+    const bool canEdit = (mHost.scene.playState == PlayState::Edit);
 
     // 全局快捷键：F2 重命名选中、Del 删除选中。重命名进行中不响应
     // —— 否则 InputText 里按 Del 删字符会同时触发实体删除。
@@ -44,15 +44,15 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // Entity::IsValid() 只检测哨兵 null；Undo 可能已销毁实体，补一次
     // World::IsValid 以防操作死实体触发 EnTT assert / UB。
     if (canEdit && focused
-        && !mState.selection.renamingEntity.IsValid()
-        && mState.selection.selectedEntity.IsValid()
-        && mState.scene.pWorld->IsValid(mState.selection.selectedEntity))
+        && !mHost.selection.renamingEntity.IsValid()
+        && mHost.selection.selectedEntity.IsValid()
+        && mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity))
     {
         if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
-            BeginRename(mState.selection.selectedEntity);
+            BeginRename(mHost.selection.selectedEntity);
         }
         if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
-            mState.selection.pendingDelete = mState.selection.selectedEntity;
+            mHost.selection.pendingDelete = mHost.selection.selectedEntity;
         }
     }
 
@@ -60,7 +60,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 然后递归画子树。EnTT view 遍历的是组件存储不是创建顺序 —— 编
     // 辑器侧不关心顺序稳定性（同根实体在两帧之间显示位置可能不同），
     // 后续 task 真要稳定排序时再加 SortIndex 之类。
-    auto& reg = mState.scene.pWorld->Registry();
+    auto& reg = mHost.scene.pWorld->Registry();
     using HC = Orange::Engine::Scene::HierarchyComponent;
     for (auto e : reg.view<entt::entity>()) {
         const auto* h = reg.try_get<HC>(e);
@@ -81,7 +81,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
                     ImGui::AcceptDragDropPayload(kEntityPayload)) {
                 Orange::Engine::Entity src{};
                 std::memcpy(&src, p->Data, sizeof(src));
-                mState.selection.pendingReparent = {src,
+                mHost.selection.pendingReparent = {src,
                                           Orange::Engine::Entity::Invalid(),
                                           true};
             }
@@ -98,11 +98,11 @@ void EditorRenderLayer::DrawEntityTreePanel()
             | ImGuiPopupFlags_NoOpenOverItems)) {
         ImGui::BeginDisabled(!canEdit);
         if (ImGui::MenuItem("Create Entity (root)")) {
-            mState.selection.pendingCreate = {Orange::Engine::Entity::Invalid(),
+            mHost.selection.pendingCreate = {Orange::Engine::Entity::Invalid(),
                                     EditorSelection::PendingCreateKind::Empty, true};
         }
         if (ImGui::MenuItem("Create Light Object (root)")) {
-            mState.selection.pendingCreate = {Orange::Engine::Entity::Invalid(),
+            mHost.selection.pendingCreate = {Orange::Engine::Entity::Invalid(),
                                     EditorSelection::PendingCreateKind::Light, true};
         }
         ImGui::EndDisabled();
@@ -115,44 +115,44 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 这两步必须在 tree 递归画完之后执行，否则会破坏当前帧的 sibling
     // 链遍历。同帧内 delete + reparent 同时发生时 delete 优先（被
     // delete 的实体即使有 pendingReparent 也失效）。
-    if (mState.selection.pendingDelete.IsValid()) {
+    if (mHost.selection.pendingDelete.IsValid()) {
         // 额外检查实体是否仍在 registry 中 —— Undo 可能已销毁它，此时
         // pendingDelete 持有的是死实体句柄，DestroySubtree 会崩溃。
-        if (mState.scene.pWorld->IsValid(mState.selection.pendingDelete)) {
-            if (mState.selection.selectedEntity == mState.selection.pendingDelete) {
-                mState.selection.selectedEntity = Orange::Engine::Entity::Invalid();
+        if (mHost.scene.pWorld->IsValid(mHost.selection.pendingDelete)) {
+            if (mHost.selection.selectedEntity == mHost.selection.pendingDelete) {
+                mHost.selection.selectedEntity = Orange::Engine::Entity::Invalid();
             }
-            if (mState.selection.renamingEntity == mState.selection.pendingDelete) {
+            if (mHost.selection.renamingEntity == mHost.selection.pendingDelete) {
                 CancelRename();
             }
-            EditorHierarchy::DestroySubtree(*mState.scene.pWorld, mState.selection.pendingDelete);
+            EditorHierarchy::DestroySubtree(*mHost.scene.pWorld, mHost.selection.pendingDelete);
             // 删除操作不可撤销（子树已析构）—— 清掉 undo 历史，防止后续 Undo
             // 尝试访问已销毁 entity 的 SetFieldValueCommand lambda。
-            mState.pCmdStack->Clear();
+            mHost.cmdStack.Clear();
         }
-        mState.selection.pendingDelete = Orange::Engine::Entity::Invalid();
-        mState.selection.pendingReparent.valid = false;  // 同帧 reparent 已无意义
+        mHost.selection.pendingDelete = Orange::Engine::Entity::Invalid();
+        mHost.selection.pendingReparent.valid = false;  // 同帧 reparent 已无意义
     }
-    if (mState.selection.pendingReparent.valid) {
-        const Orange::Engine::Entity src = mState.selection.pendingReparent.child;
-        const Orange::Engine::Entity dst = mState.selection.pendingReparent.newParent;
-        mState.selection.pendingReparent.valid = false;
+    if (mHost.selection.pendingReparent.valid) {
+        const Orange::Engine::Entity src = mHost.selection.pendingReparent.child;
+        const Orange::Engine::Entity dst = mHost.selection.pendingReparent.newParent;
+        mHost.selection.pendingReparent.valid = false;
         // 防环 + 防自挂自 + 防"挂到当前父亲"重复操作
-        if (src.IsValid() && mState.scene.pWorld->IsValid(src) && src != dst
-            && !EditorHierarchy::IsAncestorOf(*mState.scene.pWorld, src, dst))
+        if (src.IsValid() && mHost.scene.pWorld->IsValid(src) && src != dst
+            && !EditorHierarchy::IsAncestorOf(*mHost.scene.pWorld, src, dst))
         {
             // 记录旧 parent，用于 Undo 还原层级关系。
             using HC = Orange::Engine::Scene::HierarchyComponent;
-            const auto*                  hc        = mState.scene.pWorld->GetComponent<HC>(src);
+            const auto*                  hc        = mHost.scene.pWorld->GetComponent<HC>(src);
             const Orange::Engine::Entity oldParent = (hc != nullptr)
                 ? hc->parent
                 : Orange::Engine::Entity::Invalid();
-            mState.pCmdStack->Push(std::make_unique<LambdaCommand>(
+            mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
                 "reparent",
-                [pW = mState.scene.pWorld.get(), src, dst]() {
+                [pW = mHost.scene.pWorld.get(), src, dst]() {
                     EditorHierarchy::ReparentTo(*pW, src, dst);
                 },
-                [pW = mState.scene.pWorld.get(), src, oldParent]() {
+                [pW = mHost.scene.pWorld.get(), src, oldParent]() {
                     // Undo 时 src 可能已被其他命令销毁（EnTT version check）
                     if (pW->IsValid(src)) {
                         EditorHierarchy::ReparentTo(*pW, src, oldParent);
@@ -161,15 +161,15 @@ void EditorRenderLayer::DrawEntityTreePanel()
             ));
         }
     }
-    if (mState.selection.pendingCreate.valid) {
-        const Orange::Engine::Entity         parent         = mState.selection.pendingCreate.parent;
-        const EditorSelection::PendingCreateKind kind           = mState.selection.pendingCreate.kind;
-        const auto cubeMesh  = mState.assets.cubeMeshHandle;
-        auto* const pLightMat = mState.assets.pLightObjectMaterial.get();
-        mState.selection.pendingCreate.valid = false;
+    if (mHost.selection.pendingCreate.valid) {
+        const Orange::Engine::Entity         parent         = mHost.selection.pendingCreate.parent;
+        const EditorSelection::PendingCreateKind kind           = mHost.selection.pendingCreate.kind;
+        const auto cubeMesh  = mHost.assets.cubeMeshHandle;
+        auto* const pLightMat = mHost.assets.pLightObjectMaterial.get();
+        mHost.selection.pendingCreate.valid = false;
 
         auto cmd = std::make_unique<CreateEntityCommand>(
-            *mState.scene.pWorld,
+            *mHost.scene.pWorld,
             [parent, kind, cubeMesh, pLightMat]
             (Orange::Engine::World& w) -> Orange::Engine::Entity
             {
@@ -206,10 +206,10 @@ void EditorRenderLayer::DrawEntityTreePanel()
         // Push 前取 raw 指针；Push 内部 Execute 会填充 mCreated，
         // 随后 unique_ptr move 进栈 —— raw 仍指向栈内对象，生命周期安全。
         auto* rawCmd = cmd.get();
-        mState.pCmdStack->Push(std::move(cmd));
+        mHost.cmdStack.Push(std::move(cmd));
         const Orange::Engine::Entity e = rawCmd->CreatedEntity();
 
-        mState.selection.selectedEntity = e;
+        mHost.selection.selectedEntity = e;
         BeginRename(e);
     }
 }
@@ -218,7 +218,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
 //
 // 用 TreeNodeEx + ImGuiTreeNodeFlags_OpenOnArrow：点叶身体当选中，点
 // 三角才展开 —— 跟 Unity / Unreal 编辑器手感一致。Selected 状态从
-// mState.selection.selectedEntity 反映，点击任意节点写回。叶子节点（无 firstChild）
+// mHost.selection.selectedEntity 反映，点击任意节点写回。叶子节点（无 firstChild）
 // 用 ImGuiTreeNodeFlags_Leaf 关闭三角并强制不可展开。
 //
 // Rename：renamingEntity == 当前 entity 时，TreeNode 的 label 用空串
@@ -235,15 +235,15 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     // 正常路径下（DestroySubtree + Detach 已清理兄弟链）死实体不会进到
     // 这里，但防御性 early-out 避免万一出现 ghost 引用时 GetComponent /
     // PushID 对死实体操作导致 EnTT assert / UB。
-    if (!mState.scene.pWorld->IsValid(entity)) { return; }
+    if (!mHost.scene.pWorld->IsValid(entity)) { return; }
     using HC = Orange::Engine::Scene::HierarchyComponent;
     using NameComponent = Orange::Engine::Scene::NameComponent;
 
-    const auto* h     = mState.scene.pWorld->GetComponent<HC>(entity);
-    const auto* name  = mState.scene.pWorld->GetComponent<NameComponent>(entity);
+    const auto* h     = mHost.scene.pWorld->GetComponent<HC>(entity);
+    const auto* name  = mHost.scene.pWorld->GetComponent<NameComponent>(entity);
     const bool  hasKid = (h != nullptr) && h->firstChild.IsValid();
-    const bool  selected = (mState.selection.selectedEntity == entity);
-    const bool  renaming = (mState.selection.renamingEntity == entity);
+    const bool  selected = (mHost.selection.selectedEntity == entity);
+    const bool  renaming = (mHost.selection.renamingEntity == entity);
 
     ImGuiTreeNodeFlags flags =
           ImGuiTreeNodeFlags_OpenOnArrow
@@ -261,20 +261,20 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     bool open = false;
     // 节点级编辑权限 —— 与 DrawEntityTreePanel 顶部的 canEdit 同逻辑，
     // 但 DrawEntityNodeRecursive 是独立调用栈，所以这里重新取一次。
-    const bool canEditNode = (mState.scene.playState == PlayState::Edit);
+    const bool canEditNode = (mHost.scene.playState == PlayState::Edit);
 
     if (renaming) {
         // 空 label + SameLine InputText —— TreeNode 三角仍可用，
         // label 区域被 InputText 接管。
         open = ImGui::TreeNodeEx("##node", flags, "%s", "");
         ImGui::SameLine();
-        if (mState.selection.renameJustStarted) {
+        if (mHost.selection.renameJustStarted) {
             ImGui::SetKeyboardFocusHere();
-            mState.selection.renameJustStarted = false;
+            mHost.selection.renameJustStarted = false;
         }
         ImGui::SetNextItemWidth(-FLT_MIN);
         const bool entered = ImGui::InputText(
-            "##rename", mState.selection.renameBuffer, sizeof(mState.selection.renameBuffer),
+            "##rename", mHost.selection.renameBuffer, sizeof(mHost.selection.renameBuffer),
               ImGuiInputTextFlags_EnterReturnsTrue
             | ImGuiInputTextFlags_AutoSelectAll);
         // 三种触发：
@@ -298,7 +298,7 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             : "(unnamed)";
         open = ImGui::TreeNodeEx("##node", flags, "%s", label);
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-            mState.selection.selectedEntity = entity;
+            mHost.selection.selectedEntity = entity;
         }
         // 双击 entry-body 进入重命名（Edit 态才允许）
         if (canEditNode
@@ -320,20 +320,20 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     // 节点右键菜单 —— 选中始终允许；结构性操作（Create/Rename/Delete）
     // 受 canEditNode 约束。
     if (!renaming && ImGui::BeginPopupContextItem("##node_ctx")) {
-        mState.selection.selectedEntity = entity;
+        mHost.selection.selectedEntity = entity;
         ImGui::BeginDisabled(!canEditNode);
         if (ImGui::MenuItem("Create Child")) {
-            mState.selection.pendingCreate = {entity, EditorSelection::PendingCreateKind::Empty, true};
+            mHost.selection.pendingCreate = {entity, EditorSelection::PendingCreateKind::Empty, true};
         }
         if (ImGui::MenuItem("Create Light Object (Child)")) {
-            mState.selection.pendingCreate = {entity, EditorSelection::PendingCreateKind::Light, true};
+            mHost.selection.pendingCreate = {entity, EditorSelection::PendingCreateKind::Light, true};
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Rename", "F2")) {
             BeginRename(entity);
         }
         if (ImGui::MenuItem("Delete", "Del")) {
-            mState.selection.pendingDelete = entity;
+            mHost.selection.pendingDelete = entity;
         }
         ImGui::EndDisabled();
         ImGui::EndPopup();
@@ -345,7 +345,7 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                 ImGui::AcceptDragDropPayload(kEntityPayload)) {
             Orange::Engine::Entity src{};
             std::memcpy(&src, p->Data, sizeof(src));
-            mState.selection.pendingReparent = {src, entity, true};
+            mHost.selection.pendingReparent = {src, entity, true};
         }
         ImGui::EndDragDropTarget();
     }
@@ -356,7 +356,7 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             Orange::Engine::Entity child = h->firstChild;
             while (child.IsValid()) {
                 DrawEntityNodeRecursive(child);
-                const auto* ch = mState.scene.pWorld->GetComponent<HC>(child);
+                const auto* ch = mHost.scene.pWorld->GetComponent<HC>(child);
                 child = (ch != nullptr) ? ch->nextSibling
                                         : Orange::Engine::Entity::Invalid();
             }
@@ -368,37 +368,37 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
 
 void EditorRenderLayer::BeginRename(Orange::Engine::Entity entity)
 {
-    const auto* name = mState.scene.pWorld->GetComponent<
+    const auto* name = mHost.scene.pWorld->GetComponent<
         Orange::Engine::Scene::NameComponent>(entity);
     const std::string& src = (name != nullptr) ? name->name : std::string{};
-    const std::size_t  n   = std::min(src.size(), sizeof(mState.selection.renameBuffer) - 1);
-    std::memcpy(mState.selection.renameBuffer, src.data(), n);
-    mState.selection.renameBuffer[n]   = '\0';
-    mState.selection.renamingEntity    = entity;
-    mState.selection.renameJustStarted = true;
+    const std::size_t  n   = std::min(src.size(), sizeof(mHost.selection.renameBuffer) - 1);
+    std::memcpy(mHost.selection.renameBuffer, src.data(), n);
+    mHost.selection.renameBuffer[n]   = '\0';
+    mHost.selection.renamingEntity    = entity;
+    mHost.selection.renameJustStarted = true;
 }
 
 void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
 {
-    if (mState.scene.pWorld == nullptr || !entity.IsValid()) {
+    if (mHost.scene.pWorld == nullptr || !entity.IsValid()) {
         CancelRename();
         return;
     }
-    mState.selection.renameBuffer[sizeof(mState.selection.renameBuffer) - 1] = '\0';
-    const auto* nc = mState.scene.pWorld->GetComponent<
+    mHost.selection.renameBuffer[sizeof(mHost.selection.renameBuffer) - 1] = '\0';
+    const auto* nc = mHost.scene.pWorld->GetComponent<
         Orange::Engine::Scene::NameComponent>(entity);
     const std::string oldName = (nc != nullptr) ? nc->name : std::string{};
-    const std::string newName = mState.selection.renameBuffer;
+    const std::string newName = mHost.selection.renameBuffer;
     if (oldName != newName) {
-        mState.pCmdStack->Push(std::make_unique<RenameCommand>(
-            *mState.scene.pWorld, entity, oldName, newName));
+        mHost.cmdStack.Push(std::make_unique<RenameCommand>(
+            *mHost.scene.pWorld, entity, oldName, newName));
     }
     CancelRename();
 }
 
 void EditorRenderLayer::CancelRename()
 {
-    mState.selection.renamingEntity    = Orange::Engine::Entity::Invalid();
-    mState.selection.renameJustStarted = false;
-    mState.selection.renameBuffer[0]   = '\0';
+    mHost.selection.renamingEntity    = Orange::Engine::Entity::Invalid();
+    mHost.selection.renameJustStarted = false;
+    mHost.selection.renameBuffer[0]   = '\0';
 }
