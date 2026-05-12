@@ -110,7 +110,7 @@ const Json* FindByPath(const Json& root, std::string_view path) noexcept
 // 处理（越界则用空对象补齐到该下标）。这条分支让 `BeginArray` 之后
 // 的 "arr/0/name" 这类路径能往同一个数组里继续写。如果当前节点既不
 // 是 object 也不是匹配的数组（例如把一个标量当成中间节点继续下钻），
-// 仍按原有语义重置为 object——这与 Phase 1 / Task 05 落地时"路径
+// 仍按原有语义重置为 object——这与"路径
 // 自动建对象树"的承诺保持一致。
 Json& EnsureByPath(Json& root, std::string_view path)
 {

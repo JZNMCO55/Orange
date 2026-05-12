@@ -9,7 +9,7 @@
 //
 // 流程：Pipeline 在每帧顶部调用 Collect(World)，扫一遍 EnTT view 把
 // 上述两类信息从 ECS 数据形态转成"已合成 worldMatrix 的 drawable"形
-// 态，让 Task 07 起的真实下发逻辑（OrangeRender RenderGraph）只关心
+// 态，让真实下发逻辑（OrangeRender RenderGraph）只关心
 // 几何 / 纹理 / 矩阵，不再触碰 World / Component。
 //
 // 公共面刻意不暴露 entt 类型——本类的"内部"角色明确，但放在 public
@@ -17,7 +17,7 @@
 // 察到 drawable 列表。Pipeline.cpp 内部使用本类作为 working buffer。
 //
 // **本阶段范围**：drawable 的 worldMatrix 直接来自 TransformComponent
-// 的 local TRS 合成；Hierarchy 父子链的复合矩阵留待 Phase 4（关卡级
+// 的 local TRS 合成；Hierarchy 父子链的复合矩阵留待后续（关卡级
 // 实体多于 100 时再上）。
 // ---------------------------------------------------------------------------
 

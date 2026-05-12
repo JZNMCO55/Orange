@@ -14,7 +14,7 @@
 // 用做字节序翻转。
 //
 // `ShaderStage` 标识本 shader 的执行模型；从 SPIR-V 的 OpEntryPoint
-// 解析 ExecutionModel 是合法但繁琐，对 Phase 2 来说"按文件名后缀判
+// 解析 ExecutionModel 是合法但繁琐，当前"按文件名后缀判
 // 定"足够（.vert.spv / .frag.spv / .comp.spv），ShaderLoader 会负责
 // 这层映射。
 // ---------------------------------------------------------------------------

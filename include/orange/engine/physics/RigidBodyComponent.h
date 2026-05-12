@@ -7,7 +7,7 @@
 // trivially-copyable POD：BodyType / 浮点 / vec2 / 一个 BodyHandle（也是
 // POD）。EnTT archetype 行迁移走 memcpy 路径。
 //
-// 字段语义对齐 Box2D 3.x b2BodyDef，方便 Task 06 接后端时直接转换：
+// 字段语义对齐 Box2D 3.x b2BodyDef，方便接后端时直接转换：
 //   - type             ↔ b2BodyType
 //   - linearVelocity   ↔ b2BodyDef.linearVelocity
 //   - angularVelocity  ↔ b2BodyDef.angularVelocity
@@ -17,7 +17,7 @@
 //   - gravityScale     ↔ b2BodyDef.gravityScale
 //
 // `handle` 字段由 PhysicsWorld::AddBody 反写——构造时为 Invalid()，注册
-// 进 PhysicsWorld 后被填上对应 BodyHandle。Task 06 sync 路径据此把 ECS
+// 进 PhysicsWorld 后被填上对应 BodyHandle。sync 路径据此把 ECS
 // transform ↔ Box2D body 双向同步起来。
 // ---------------------------------------------------------------------------
 

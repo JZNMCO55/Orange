@@ -5,12 +5,12 @@
 // MaterialTypes —— Material / MaterialInstance 共用的描述符与枚举。
 //
 // 当前覆盖最小 uniform 类型集（Float / Vec2 / Vec3 / Vec4 / Int / Mat4），
-// 刚好够支持 Phase 3 / Task 02 的内置卡通 + rim light template 与
-// Task 04 的自定义 shader 注入路径。需要新类型时（例如 IVec4、Bool、
+// 刚好够支持内置卡通 + rim light template 与
+// 自定义 shader 注入路径。需要新类型时（例如 IVec4、Bool、
 // Texture-flag 等）在这里加 enum + 在 MaterialInstance 内 SetUniform
 // 重载补一个对应签名即可，不破已有公共面。
 //
-// **不引入 SPIR-V 反射**：与 Phase 1–6 "完全手写、不引入运行时反射库"
+// **不引入 SPIR-V 反射**：与"完全手写、不引入运行时反射库"
 // 的反射策略对齐——uniform 与 texture 槽必须由 Material 创建方显式声
 // 明，引擎不在运行时去解析 .spv 自动推断。
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ struct MaterialUniformDesc
 };
 
 // 单个 texture 绑定槽的声明记录。`binding` 是 descriptor-set binding
-// index（Phase 3 / Task 02 起把它直接喂给 OrangeRender 的 descriptor
+// index（直接喂给 OrangeRender 的 descriptor
 // 路径），`name` 仅作为 debug / 序列化用途。
 struct MaterialTextureSlotDesc
 {

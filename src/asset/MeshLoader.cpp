@@ -45,7 +45,7 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         return ResultCode::InvalidArgument;
     }
 
-    // 上限做一个软保护——单 mesh 上百万顶点已经远超 Phase 2 场景，
+    // 上限做一个软保护——单 mesh 上百万顶点已经远超当前场景，
     // 防御性地拒绝异常大的值，避免下面 vector 一口气分配几个 GB。
     constexpr std::uint32_t kMaxCount = 16u * 1024u * 1024u;
     if (vertexCount > kMaxCount || indexCount > kMaxCount)

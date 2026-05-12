@@ -1,6 +1,6 @@
 // 4 个内置 IPostProcessPass 具体类的方法体。Setup / Execute 当前是空
-// stub——Phase 3 / Task 03 仅交付接口与默认链描述符；Pipeline 真跑后
-// 处理链由后续 task 在不破公共面的前提下接通，那时回到这里给 Setup /
+// stub——仅交付接口与默认链描述符；Pipeline 真跑后
+// 处理链由后续在不破公共面的前提下接通，那时回到这里给 Setup /
 // Execute 真正的内容。
 //
 // Name() 返回 string literal 指针——生命周期与可执行体一致，调用方按
@@ -20,7 +20,7 @@ const char* HdrPass::Name() const noexcept
 
 void HdrPass::Setup(PostProcessSetupContext& /*ctx*/)
 {
-    // 空 stub：Phase 3 / Task 03 仅交付接口；Pipeline 真接通时在这里把
+    // 空 stub：仅交付接口；Pipeline 真接通时在这里把
     // 主渲染目标切到 RGBA16F off-screen color target。
 }
 
@@ -40,7 +40,7 @@ const char* BloomPass::Name() const noexcept
 
 void BloomPass::Setup(PostProcessSetupContext& /*ctx*/)
 {
-    // 空 stub：Phase 3 / Task 03 仅交付接口；后续 task 在这里声明 mip-
+    // 空 stub：仅交付接口；后续在这里声明 mip-
     // chain（typically 6 levels downsample + 6 levels upsample）作为
     // RenderGraph resource。
 }

@@ -1,4 +1,4 @@
-// samples/08_custom_shader —— Phase 3 收尾里程碑。
+// samples/08_custom_shader —— 自定义 shader 注入演示。
 //
 // 验证 MaterialSystem::RegisterTemplate 扩展点：游戏侧不修改引擎源码，
 // 自带 .vert.glsl + .frag.glsl + glslangValidator 编 .spv + ShaderTemplateDesc
@@ -12,7 +12,7 @@
 //   * DirectionalLight 方向在 X-Z 平面慢转，sphere 投影跟着转——验证
 //     "自定义 shader 也能享受引擎 shadow" 这条 extension-points 合同。
 //
-// Phase 3 完成标准全部兑现：
+// 完成标准全部兑现：
 //   ① Material 系统支持 uniform 块 + 纹理槽 + 自定义 shader；
 //   ② PostProcessChain 至少串通 Bloom + Tonemap 两个 pass；
 //   ③ 自定义 shader 注入 API 通过本 sample 验证。
@@ -268,7 +268,7 @@ int main()
     //   uMVP  (Mat4 = 64 B)  +  uModel (Mat4 = 64 B) = 128 B，命中 Pipeline
     //   "pcSize >= 128 → push 128 B" 分支。fresnel 颜色 / 幂 / pulseSpeed 因
     //   Pipeline 当前不打包 per-instance uniform 故 hardcode 在 .frag 里——
-    //   等 Phase 6 Material UBO 上线再让 ShaderTemplateDesc 列举它们。
+    //   等 Material UBO 上线再让 ShaderTemplateDesc 列举它们。
     fresnelDesc.uniforms = {
         {"uMVP",   MaterialUniformType::Mat4},
         {"uModel", MaterialUniformType::Mat4},

@@ -27,11 +27,18 @@ wiki 给三种映射（按解耦度递增）：
 2. Tool-side GO → 多个 runtime 组件（组件化分解）
 3. Tool-side GO = 唯一 id + property 表（property-centric，编辑器与运行时完全解耦）
 
-**v0.1 选择**：第 1 种 —— Inspector 直接 `reg.get<TransformComponent>(e)` 读写引擎 component，组件类型清单**硬编码**在 `panels/InspectorPanel.cpp`。CLAUDE.md "Serialization and reflection" 节强约束 Phase 1–6 禁用 `entt::meta` / RTTR / clang AST codegen，因此走第 3 种的 reflection 自动化路径在 Phase 6 内**不可行**。
+**v0.1 选择（事后追评：失误）**：第 1 种 —— Inspector 直接 `reg.get<TransformComponent>(e)` 读写引擎 component，组件类型清单**硬编码**在 `EditorRenderLayer` 的 9 个 `DrawInspectorXxx` 成员里。当时担心"反射库被禁就只能 hardcode"，但忽略了同栈参考引擎的事实做法：
 
-**v0.3 演进方向**：保留第 1 种作内置组件 fast path，**新增** hand-written Property Schema 描述游戏侧自定义组件。对应 wiki `techniques/gameplay/cpp-reflection-serialization.md` 的 "Spawner + Type Schema（键值对解耦编辑器与运行时）" 方案。Schema 与现有 `Read/Write` 序列化代码共用同一字段清单，一致性靠 review 保证。
+- `vendor/LumixEngine/src/engine/reflection.h` —— 模板 + 宏的 Builder API，编译期注册，零运行时反射库依赖
+- `vendor/godot/core/object/class_db.h` —— GDCLASS 宏 + ClassDB hash 表，同样是手写注册
 
-**绝不引入**：`entt::meta` / RTTR / cereal / clang AST codegen —— 违反 CLAUDE.md 项目级 invariant。
+这两套都符合 CLAUDE.md "Serialization and reflection" 节禁令的本意（禁的是 `entt::meta` / RTTR / cereal-with-reflection / AST codegen，**不是**手写宏注册）。
+
+**v0.2.5 整骨纠偏（schema-first，不是"保留 fast path + 新增 schema"）**：v0.2.5 milestone 引入 `PropertySchema` + `IComponentSchemaProvider`，**所有**内置组件改 schema 驱动渲染；硬编码 `DrawInspectorXxx` 路径整体清除，**不**保留 fallback。理由：调研 Lumix + Godot 后确认 schema-first 是同栈工业标准，"保留 fast path" 只是给未来再来一次硬编码留口子，没有工程价值；hardcode 禁令同步沉淀进 CLAUDE.md "OrangeEditor 架构纪律" 节。
+
+**v0.3 角色变更**：v0.3 不再是"新增 schema 系统"，而是"基于 v0.2.5 落地的 schema 基础设施，让游戏侧自定义 component 也能注册 schema 显示在 Inspector + 第一个真实的 IEditorInspectorPlugin case"。
+
+**绝不引入**：`entt::meta` / RTTR / cereal / clang AST codegen —— 违反 CLAUDE.md 项目级 invariant。手写宏 + 模板特化的 Builder API **不在禁令之列**。
 
 ### D2 · ACP 集成时机
 
@@ -101,7 +108,7 @@ wiki 给三种：
 | # | 限制 | 待消除于 |
 |---|------|---------|
 | L1 | **没 Undo/Redo** —— 所有 mutate 直接生效，关闭无确认 | v0.2 |
-| L2 | **游戏侧自定义 component 不显示** —— Inspector 硬编码内置组件清单 | v0.3 |
+| L2 | **游戏侧自定义 component 不显示** —— Inspector 硬编码内置组件清单 | v0.2.5（架构整骨：内置组件转 schema）+ v0.3（游戏侧 schema 注册落地） |
 | L3 | **viewport 内无 gizmo** —— Transform 只能通过 Inspector 拖 DragFloat 改 | v0.4 |
 | L4 | **mesh / material 字段编辑要靠手敲 handle id** —— 没资源浏览器 | v0.5 |
 | L5 | **没 dirty 状态指示** —— File / Open 不提示未保存改动 | v0.6 |
@@ -184,23 +191,72 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
 
 **Critical Path**：是（后续所有 milestone 的地基）
 
-### v0.3 · Property Schema 解耦
+### v0.2.5 · 架构整骨（Schema-first + Plugin 抽象 + EditorHost 拆分）
 
-**目标**：让游戏侧自定义 component 能在 Inspector 显示并编辑，不引入反射。
+**为什么单独立条 + Critical Path**：
+
+v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `vendor/Orange-Wiki/wiki/concepts/gameplay/game-world-editor.md` + 调研 `vendor/LumixEngine/src/editor/*` + `vendor/godot/editor/*`，**当前架构在 5 个具体维度上是 hardcode / god class / 缺抽象**。这些不在 v0.3（schema 应用）/ v0.4（Gizmo）顺手做的范围内，需要专门 milestone 处理。继续在现状上加 v0.3 / v0.4 等于把 hardcode 路径再叠一层，未来要还的债更大。
+
+**"随意"的 5 条具体诊断（2026-05-12）**：
+
+1. **EditorRenderLayer 是 god class** —— `OnUpdate` + 9 个 `DrawInspectorXxx` 成员（Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator / Name）+ 5 个 panel 函数 + Play Mode 入口全塞一个类。切到多 TU 不解决类自身的巨型问题
+2. **EditorState 是 god struct，单调增长** —— 当前 19 个字段（World / selection / scenePath / pendingSceneOp / playState / pendingPlayOp / snapshot path / rename 三件套 / pendingDelete / pendingReparent / pendingCreate / Euler cache / AssetRegistry / MaterialSystem / 2 个 MeshHandle / 7 个 MaterialInstance / CommandStack / EditorCamera）；每个 milestone 加字段没有任何子域切分
+3. **没有 IEditorInspectorPlugin / IEditorGizmoPlugin 抽象** —— 游戏侧自定义 component 要显示在 Inspector，只能改 EditorRenderLayer 源码新增 `DrawInspectorXxx`；正中 wiki `game-world-editor.md §陷阱` 第 2 条 "Per-type property hardcode → schema 驱动"
+4. **CommandStack lambda 捕获 World\*** —— scene swap / 破坏性操作必须 `Clear()`；Godot `EditorUndoRedoManager` 用 `ObjectID` 弱引用 + per-scene history 隔离的做法是更稳的抽象
+5. **没有 EditorHost / EditorApp 一层** —— `main.cpp` 直接构造 AppHost + EditorRenderLayer + EditorState，编辑器没有"自己的应用入口"概念；Lumix `StudioApp` / Godot `EditorNode` 都是单例 hub，OrangeEditor 缺这一层意味着任何全局编辑器服务（剪贴板 / quick search / preferences / 后续 plugin registry）只能继续塞 EditorState
 
 **关键 deliverables**：
 
-- `editor/schema/PropertySchema.h`：手写 schema 描述 component 字段（type / label / tooltip / range / display flags）
-- Inspector 改成 schema 驱动渲染（保留内置硬编码 fast path 作 fallback —— 内置组件继续走 v0.1 写法）
-- 游戏侧 API：`OrangeEditor::RegisterComponentSchema<T>(schemaDesc)` —— 在编辑器 main 启动期或 plugin 注册
-- 与引擎 `Read/Write` 序列化共用字段清单：手写一份 schema 描述 + 一份 Read/Write，靠 review 保一致（不引入 codegen）
-- Inspector 拖拽 / 数值控件 / 颜色 / 资源 ref 等控件由 schema entry type 选择
+- **EditorHost 单例 + EditorState 子域拆分** —— EditorState 按域拆 4 个 context：
+  - `EditorSelection`（selectedEntity / 多选 / pendingDelete / pendingReparent / pendingCreate / rename 三件套）
+  - `EditorSceneContext`（World 所有权 / currentScenePath / pendingSceneOp / playState / pendingPlayOp / playSnapshotPath）
+  - `EditorAssetContext`（AssetRegistry / MaterialSystem / 内置 mesh / material handles）
+  - `EditorCameraState`（轨道相机 + Euler cache）
+  - `EditorHost` 单例聚合 4 个 context + CommandStack + 后续 plugin registry；EditorState 退化为薄壳或直接删除（按重构方便程度二选一）
+- **PropertySchema + IComponentSchemaProvider** —— 参考 Lumix Builder API（`vendor/LumixEngine/src/engine/reflection.h`）和 Godot ClassDB（`vendor/godot/core/object/class_db.h`）的宏 + 模板特化注册：每个内置 component 通过 `static const PropertySchema& Schema()` 或等价注册入口提供字段元数据（type / label / tooltip / range / display flags）；Inspector 通过 visitor pattern 遍历 schema 生成 ImGui 控件
+- **内置组件 schema 化（全量，无 fallback）** —— 9 个 `DrawInspectorXxx` 全部改 schema 驱动；硬编码路径**整体清除**，不保留 fast path。Add Component 菜单也改 schema 注册表枚举驱动，不再 hardcode `if/else` 列表
+- **IEditorInspectorPlugin 接口（声明 + 注册表，本 milestone 不实现真实 plugin case）** —— 游戏侧或后续编辑器扩展可注册 plugin 截获特定 component 提供自定义 UI（参 Godot `EditorInspectorPlugin::parse_property()`）；本 milestone 只定义接口 + EditorHost 里的 plugin registry，v0.3 出第一个真实 case
+- **IEditorGizmoPlugin 接口（仅声明，v0.4 实现）** —— 同上 plugin 抽象的对偶；接口签名定下来让 v0.4 直接消费，不再回头改抽象
+- **CommandStack 增 BeginGroup / EndGroup** —— 参 Lumix `beginCommandGroup()`，支持原子多命令组合（一次 gizmo 拖动 = group 内多条 SetField 命令）。MergeMode 扩展为三档（`Disable` / `Ends` / `All`）参 Godot
+- **CommandStack 解 World\* 强耦合** —— 命令存 entity id 而非 lambda 捕获 World\*；改走 `EditorHost::GetSceneContext().GetWorld()` 解引；scene swap 时仅需让 EditorSceneContext 失效，不必 Clear 整栈（但保留 `Clear()` 给真正不可恢复的场景切换）
 
-**前置**：v0.2（schema 驱动的 Inspector 修改必须走命令）
+**前置**：v0.2（命令栈基础已有）+ v0.1.5（Demo scene 验证视觉栈未坏的 baseline）；均已 ✅
 
-**与引擎关系**：仅在编辑器侧加扩展点；引擎不感知 schema 的存在
+**与引擎关系**：纯编辑器侧重构；引擎 component 不感知 schema 注册。schema 注册代码位于编辑器 target 内（建议 `tools/OrangeEditor/schema/*` 新目录），引擎公共 API 零改动
 
-**Critical Path**：否（不影响 v0.4/v0.5/v0.6 推进，但游戏侧没法看自定义 component）
+**Critical Path**：是（v0.3 之后所有 milestone 的真正地基；不先做 v0.2.5，v0.3 等于在 hardcode 上再叠一层 + CLAUDE.md "OrangeEditor 架构纪律" 直接违反）
+
+**禁止条款（同步沉淀进 CLAUDE.md "OrangeEditor 架构纪律" 节）**：
+- v0.2.5 之后所有编辑器代码：**禁止**新增"加一个 component 类型就改 `EditorRenderLayer` 源码"路径；必须走 schema 注册
+- **禁止**把 per-component 的 Inspector / Gizmo / 序列化 UI 逻辑写进任一 mega-class；必须以独立注册项形式存在
+- **禁止**在 EditorState / 任一子 context 上无脑加字段；新功能找对应 context 加，没有合适 context 就先拆 context
+
+**验收**：
+
+- `tools/OrangeEditor/EditorRenderLayer.cpp` 中所有 `DrawInspectorXxx` 删除
+- 新增任意内置 / 假设的"游戏侧" component 只需写 schema 注册 + 序列化 `Read/Write`，**不需要**改 `EditorRenderLayer` / `EditorHost` / 任一 context
+- CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档单元测试通过
+- v0.1 ~ v0.2 已有功能（场景保存 / 加载 / Undo / Redo / Play Mode / Demo scene）回归测试通过 —— 整骨不允许损失已落地能力
+- Editor 启动 + Demo scene 加载 + 选中实体 + 改 Inspector 字段 + Undo + Save 路径全绿
+- `EditorState` 字段数从 19 降到 ≤ 3（仅薄壳聚合）或直接删除；4 个子 context 文件存在且单文件 < 200 行
+
+### v0.3 · 游戏侧 Schema 注册落地
+
+**目标**：基于 v0.2.5 已落地的 `PropertySchema` / `IComponentSchemaProvider` / `IEditorInspectorPlugin` 基础设施，让游戏侧自定义 component 通过同一套 schema API 显示在 Inspector，并出第一个真实的 plugin case 验证抽象边界。
+
+**关键 deliverables**：
+
+- 游戏侧 API：`OrangeEditor::RegisterComponentSchema<T>(schemaDesc)` —— 在编辑器 main 启动期或独立 plugin 入口注册
+- 与引擎 `Read/Write` 序列化共用字段清单：手写一份 schema 描述 + 一份 `Read/Write`，靠 review 保一致（**不**引入 codegen）
+- 控件类型扩展：拖拽 / 数值控件 / 颜色 / 资源 ref / enum 下拉 / nested struct 折叠等控件类型枚举完整化，schema entry 选择
+- 示例：在 `samples/` 或 `tests/` 中注册一个伪"游戏侧" component（如 `HealthComponent`），验证从 schema 注册 → Inspector 显示 → Undo / Redo → 序列化保存 / 加载完整链路无需改 editor 源码
+- 第一个真实 `IEditorInspectorPlugin` case：覆写某 component 的默认 schema 渲染（候选：Animator 加 mini-preview / Material 加资源预览缩略图）—— 验证 plugin 能在 schema 默认行为上叠加 UI 而不替换整段
+
+**前置**：v0.2.5（schema 基础设施 + plugin 接口已落）
+
+**与引擎关系**：仅在编辑器侧 + sample / test 侧；引擎不感知 schema 的存在
+
+**Critical Path**：否（v0.2.5 落地后，本 milestone 算扩展点真实性验证；v0.4 / v0.5 / v0.6 不依赖游戏侧 schema 已注册，只依赖 v0.2.5 的接口）
 
 ### v0.4 · Gizmo & 特殊对象可视化
 
@@ -372,7 +428,8 @@ v0.1 ~ v0.9 全部 ✅。验收路径：邀请非程序员（如美术 / 关卡�
 ## Self-Check
 
 - **v0.1.5 (Editor Demo Scene v2) 是最高 ROI 动作** —— 不引入新能力，把 Phase 1–5 已落地视觉栈在编辑器内组合可见；建议先做这条再回到 v0.2 主线
-- v0.2 是后续所有 milestone 的地基（command system / undo / Play Mode 快照统一）；**v0.2 完成前不开 v0.3+**（v0.1.5 是例外，因为不动 mutate 路径，只是种子数据）
+- v0.2 是 mutate / undo 能力的地基（command system / undo / Play Mode 快照统一）
+- **v0.2.5（架构整骨）是 v0.3 之后所有 milestone 的真正地基** —— schema / plugin / EditorHost / CommandStack 解耦 World\* 全在此 milestone 落地；不先做 v0.2.5，v0.3 就是在 hardcode 上叠一层，且直接违反 CLAUDE.md "OrangeEditor 架构纪律" 节；**v0.2.5 完成前不开 v0.3+**
 - 编辑器 semver 独立于 OrangeEngine 0.1.x：editor 升 v0.2 ≠ engine 升版
 - 四个核心架构决策（D1/D2/D3/D4）显式记录，避免后期被动重做
 - 与主 roadmap 的依赖以 "前置：主 roadmap Phase N" 形式标，不抢占 phase 编号

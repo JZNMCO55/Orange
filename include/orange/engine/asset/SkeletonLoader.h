@@ -41,7 +41,7 @@ public:
     ~SkeletonLoader() override;
 
     // 路径以扩展名识别格式：".json" / ".dbjson" → JSON 文本；".dbbin" →
-    // 二进制（Phase 4 / Task 03 范围内只保 JSON 路径稳定，binary 暂返
+    // 二进制（当前只保 JSON 路径稳定，binary 暂返
     // SchemaMismatch；待真消费 .dbbin 时再补 BinaryDataParser 路径）。
     Result<std::unique_ptr<SkeletonAsset>, ResultCode> Load(std::string_view path) override;
 

@@ -1,4 +1,4 @@
-// samples/04_3d_mesh —— Phase 2 收尾的 3D 视觉验证。
+// samples/04_3d_mesh —— 3D 视觉验证。
 //
 // 把 perspective camera + 立方体 mesh + 每帧 TransformComponent 旋转
 // 串到位，确认引擎已具备 "3D 实体在 3D 投影下旋转上屏" 的全链路能力。
@@ -14,7 +14,7 @@
 // 没 depth buffer：OrangeRender 的 BeginFrame/SubmitItem/EndFrame 路径
 // 当前只挂 swapchain color attachment，VkRenderingInfo 没 depth。所以
 // 立方体的 "看着 3D" 只靠背面剔除——任意旋转下相机看到的只有 1–3 个外
-// 向面，互不重叠。深度路径等 OrangeRender 暴露 depth 接口或 Phase 3
+// 向面，互不重叠。深度路径等 OrangeRender 暴露 depth 接口或
 // 自定义 RenderTarget 路径打通后再补，本 sample 不在引擎层重铺这条线。
 
 #include <orange/engine/app/AppConfig.h>

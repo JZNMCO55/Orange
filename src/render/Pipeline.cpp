@@ -27,9 +27,9 @@
 // `RHIShaderModule` 缓存按 AssetHandle<ShaderAsset>::Value() 跨模板复用。
 // `mesh GPU cache` 不变。
 //
-// 后处理链 / 自定义 RenderPass 真正接通在 06.04（Bloom）/ 06.05（Tonemap +
-// LUT）/ Phase 5（自定义 InsertPass）跟进；本 task 只把 Pipeline 双段流
-// 程铺出来 + 给后续子任务留好 SetPostProcessChain / SetMaterialSystem 入
+// 后处理链 / 自定义 RenderPass 真正接通由后续 Bloom / Tonemap /
+// LUT / 自定义 InsertPass 跟进；本期只把 Pipeline 双段流
+// 程铺出来 + 给后续留好 SetPostProcessChain / SetMaterialSystem 入
 // 口与 IPostProcessPass context 字段。
 
 #include "orange/engine/render/Pipeline.h"
@@ -182,7 +182,7 @@ void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc)
 // 提示，pipeline 仍能创建但 fragment 端读到 undefined 内容——视觉正确
 // 性等到 OrangeRender 把 PushConstantRange 升级为多 stage（或 SetPushConstants
 // 支持多 stage flag）后跟进。当前 0.x 阶段 toon / rim_light 视觉表现
-// 不在 Phase 3 / Task 06 验收范围（Task 07 接通 light UBO + shadow 时
+// 不在本期验收范围（接通 light UBO + shadow 时
 // 视觉才进入"正式" 状态）。
 void FillPushConstantRanges(Orange::Rhi::GraphicsPipelineDesc& desc, std::uint32_t size)
 {
@@ -339,7 +339,7 @@ struct Pipeline::Impl
     // 主 pass 的 scene depth attachment——D32Float、跟 hdrColor 同生命
     // 周期。没有它主 pass 会按 draw call 顺序覆盖（不做 depth test），重
     // 叠几何只能"后绘者赢"，导致球 / plane 这类 z 重叠场景出现"前后错
-    // 乱"假象。Phase 4 / Task 11 收尾时补。
+    // 乱"假象。后续收尾时补。
     std::unique_ptr<Orange::Rhi::RHITexture> sceneDepth;
     // sceneDepth 跨段 layout 跟踪——主 pass 输出 DepthStencilAttachment，
     // god rays pass 走 ShaderReadOnly 采样它，下一帧主 pass 再翻回 DSA。
@@ -431,7 +431,7 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> tonemapPipeline;
 
-    // ---- Shadow pass + Light UBO 资源（Task 07）-----------------------
+    // ---- Shadow pass + Light UBO 资源 -----------------------
     // Pipeline 持本地 ShadowConfig 拷贝；外部 SetShadowConfig 时复写。
     ShadowConfig shadowConfig{};
 
@@ -580,7 +580,7 @@ struct Pipeline::Impl
         desc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
         desc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;
         desc.mRasterizer.mFrontFace   = Orange::Rhi::FrontFace::CounterClockwise;
-        // 主 pass 的 depth test：从 Phase 4 / Task 11 起接通 sceneDepth
+        // 主 pass 的 depth test：接通 sceneDepth
         // attachment。没有 depth test 时 z 重叠几何走"后绘者赢"——sample
         // 06 那种 ball + plane 在 z=0 处贴合的场景就会出现"plane 误画在
         // ball 前"的视觉错乱。
@@ -595,7 +595,7 @@ struct Pipeline::Impl
         desc.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
         desc.mRenderTargets.mDepthStencilFormat = Orange::Rhi::TextureFormat::D32Float;
 
-        // Task 07：所有 per-template pipeline 都声明 set 0 = main desc layout
+        // 所有 per-template pipeline 都声明 set 0 = main desc layout
         // （shadow sampler + light UBO）。textured fragment 不读这两个
         // binding，shader / pipeline 都接受不引用的声明（Vulkan 只检查
         // shader-USED ⊆ layout-DECLARED）。统一声明让 SetDescriptorSet 在
@@ -1935,7 +1935,7 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
             }
         }
 
-        // Task 07：push constant 按 Material.uniforms 推算的尺寸打包。
+        // push constant 按 Material.uniforms 推算的尺寸打包。
         //   * 64 B → uMVP 单独（textured）；
         //   * 128 B → uMVP + uModel（toon / rim_light）。
         // 其他尺寸为半残 schema，按 64 B 处理。

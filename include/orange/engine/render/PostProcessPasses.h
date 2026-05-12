@@ -5,8 +5,8 @@
 // PostProcessPasses —— 引擎内置 4 个 IPostProcessPass 具体类。
 //
 // 默认链顺序：HDR → Bloom → Tonemap → LUT。每类的 Setup / Execute 当前
-// 是空 stub（Phase 3 / Task 03 仅交付接口与默认链描述符；Pipeline 真跑
-// 后处理链由后续 task 在不破公共面的前提下接通），但每类各自的 public
+// 是空 stub（仅交付接口与默认链描述符；Pipeline 真跑
+// 后处理链后续在不破公共面的前提下接通），但每类各自的 public
 // 参数字段已经稳定可用——调用方拿到 pass 后直接修改成员即可调参。
 //
 // 取出参数：`chain.PassAt(1)` 拿 `IPostProcessPass*`，再 dynamic_cast
@@ -56,7 +56,7 @@ class ORANGE_ENGINE_API TonemapPass final : public IPostProcessPass
 public:
     // 曝光乘子。1.0 = 原 HDR 输入直接喂给 tonemap 算子；线性 stop 调整
     // 走 `exposure *= 2.0^stops`。Tonemap 算子（Reinhard / ACES / 自定
-    // 义）当前固定，等到 Task 06 写实际 tonemap shader 时再决定是否引
+    // 义）当前固定，等到写实际 tonemap shader 时再决定是否引
     // 入 enum 选项。
     float exposure{1.0f};
 
@@ -68,8 +68,8 @@ public:
 class ORANGE_ENGINE_API LutPass final : public IPostProcessPass
 {
 public:
-    // 颜色查找表 texture handle。Phase 3 / Task 06 与 sample 一并接入
-    // 真正的 3D LUT（17×17×17 unrolled to 2D atlas）；Task 03 阶段允
+    // 颜色查找表 texture handle。后续与 sample 一并接入
+    // 真正的 3D LUT（17×17×17 unrolled to 2D atlas）；当前阶段允
     // 许这个 handle 无效，pass 将被识别为 "no-op LUT"。
     Asset::AssetHandle<Asset::TextureAsset> lut{};
 

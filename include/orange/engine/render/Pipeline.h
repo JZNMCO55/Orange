@@ -4,17 +4,17 @@
 // ---------------------------------------------------------------------------
 // Pipeline —— "World → 一帧画面"的根入口。
 //
-// 当前 task 仅交付公共面：
+// 当前仅交付公共面：
 //   * 生命周期（默认构造、移动、析构）；
-//   * 单一驱动方法 `Render(World&)` —— 后续 Task 06 把 World 翻译为
-//     drawable list，Task 07 用 OrangeRender RenderGraph 真正下发。
+//   * 单一驱动方法 `Render(World&)` —— 后续把 World 翻译为
+//     drawable list，用 OrangeRender RenderGraph 真正下发。
 //
 // 公共头**不**包含任何 OrangeRender / Vulkan 头：依据 CLAUDE.md 的
 // "Header isolation" 不变量，`<orange/...>` 只允许出现在
 // `src/render/**`。Pipeline 走 PIMPL 把 OrangeRender 的 RHI / RenderGraph
 // 类型完全藏在 .cpp 一侧。
 //
-// `InsertPass` 在 Phase 3 起会出现，Phase 5 才真正接通；当前 task 不
+// `InsertPass` 当前会出现但暂未真正接通；当前不
 // 提前 stub 它（避免一个仅 assert(false) 的占位接口污染公共面）。
 // ---------------------------------------------------------------------------
 
@@ -153,12 +153,12 @@ public:
     // 标记保留到下次有效 extent 出现。
     void OnResize(std::uint32_t width, std::uint32_t height);
 
-    // 渲染一帧。Phase 2 当前阶段：
-    //   * Task 06 实现 RenderScene 收集（World → drawable list）；
-    //   * Task 07 接通 OrangeRender RenderGraph：每帧 BeginFrame +
+    // 渲染一帧。当前阶段：
+    //   * RenderScene 收集（World → drawable list）；
+    //   * 接通 OrangeRender RenderGraph：每帧 BeginFrame +
     //     提交一个内置 minimal-mesh draw（gl_VertexIndex 走的硬编码
     //     triangle）+ EndFrame。drawable list 已收集，但当前内置
-    //     pipeline 不读其几何——后续 task 把 mesh upload 路径接进
+    //     pipeline 不读其几何——后续把 mesh upload 路径接进
     //     来时再切到按 drawable 驱动。
     //
     // 未 Initialize 时 Render 是 no-op；让"在 main loop 顶层无脑

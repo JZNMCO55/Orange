@@ -8,14 +8,14 @@
 // texture 槽布局打包成一个可命名的模板，供 MaterialInstance 引用。
 // MaterialInstance 在每实例上覆盖具体 uniform 值与 texture 绑定。
 //
-// 当前阶段（Phase 3 / Task 01）Material 是 ownership-agnostic 的——
-// Task 02 决定把它放进 Asset 路径还是 MaterialSystem 自己的表里；
-// Task 04 引入 `MaterialSystem::RegisterTemplate` 真正落地存储后，
+// 当前阶段 Material 是 ownership-agnostic 的——
+// 后续决定把它放进 Asset 路径还是 MaterialSystem 自己的表里；
+// 引入 `MaterialSystem::RegisterTemplate` 真正落地存储后，
 // MaterialInstance 会改持 system-managed 引用。在那之前，调用方负责
 // 让 Material 活到所有引用它的 MaterialInstance 都析构完。
 //
-// 字段层面有意贴近 Phase 3 / Task 02 的内置 template、Phase 3 / Task 04
-// 的 ShaderSourceDesc：直接持 `AssetHandle<ShaderAsset>`，shader 走
+// 字段层面有意贴近内置 template 与
+// ShaderSourceDesc：直接持 `AssetHandle<ShaderAsset>`，shader 走
 // AssetRegistry 加载（不裸 fopen）；uniform 与 texture 槽是显式声明、
 // 不靠运行时反射。
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 // 模块统一。
 //
 // uniform 列表的字段顺序与对应 GLSL push_constant block 的字段顺序严
-// 格一一对应——Phase 3 / Task 04 起 Pipeline 按这个顺序 + std430 对齐
+// 格一一对应——Pipeline 按这个顺序 + std430 对齐
 // 把 MaterialInstance 覆盖打包成 push-constant bytes。改这里时记得同步
 // 改 .vert.glsl / .frag.glsl 里的 push_constant block 字段顺序。
 
@@ -35,7 +35,7 @@ namespace
 // 解析当前可执行体所在目录。CWD 可能与 .exe 目录不一致（尤其是从 repo
 // 根用 build/bin/Debug/...exe 跑时），所以把 SPIR-V 路径锚定到 .exe 自
 // 身所在目录更稳。Win32 用 GetModuleFileName；其它平台暂时回退到
-// fs::current_path（Phase 2 工程只发 Windows）。
+// fs::current_path（当前工程只发 Windows）。
 std::filesystem::path GetExecutableDir()
 {
 #if defined(_WIN32)
@@ -101,7 +101,7 @@ Material LoadTextured(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "textured";
 
-    // Task 07 重构：textured 与 toon / rim_light 同模式——push-constant
+    // textured 与 toon / rim_light 同模式——push-constant
     // {uMVP, uModel} = 128 B；fragment 端用 vWorldPos + light UBO + shadow
     // map 接通"接收阴影"路径，让 plane 这类用 textured 的 entity 也能
     // 看到 cube / sphere 投下来的 shadow。
@@ -125,12 +125,12 @@ Material LoadToon(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "toon";
 
-    // Task 07 重构：push-constant 收缩为 {uMVP, uModel} = 128 B（Pipeline
+    // push-constant 收缩为 {uMVP, uModel} = 128 B（Pipeline
     // 上限 + 极简）。颜色 / threshold / light 方向都迁出 push constant：
     //   * uLightDir / uLightColor / uLightIntensity / shadow params →
     //     主 pass 的 light UBO（descriptor set 0 binding 1，per-frame）；
     //   * uColorWarm / uColorCool / uShadowThreshold → 暂时 hardcode 进
-    //     toon.frag.glsl，per-instance 自定义留给 Phase 6 Material UBO。
+    //     toon.frag.glsl，per-instance 自定义留待 Material UBO。
     //
     // Material.uniforms 仅保留 Pipeline 实际 push 的两个字段——这是
     // Pipeline 路由时计算 push-constant size 的依据。
@@ -150,7 +150,7 @@ Material LoadRimLight(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "rim_light";
 
-    // Task 07 重构：与 LoadToon 同模式——push-constant 收缩为 {uMVP, uModel}，
+    // 与 LoadToon 同模式——push-constant 收缩为 {uMVP, uModel}，
     // 其余 rim 参数（uRimColor / uRimPower / uRimIntensity / uViewPos）
     // hardcode 进 rim_light.frag.glsl。
     desc.uniforms = {

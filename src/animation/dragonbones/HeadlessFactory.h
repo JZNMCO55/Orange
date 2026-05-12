@@ -7,7 +7,7 @@
 // 为纯虚——上游约定每个对接引擎实现自己的 display 路径。本类把它们
 // 接到 HeadlessTypes 里的 no-op 显示具体类，让 OrangeEngine 在没有渲
 // 染端介入的情况下就能完成 .json/.dbbin → DragonBonesData → Armature
-// 的全部 runtime 路径，CPU pose 输出（Task 03）即可工作。
+// 的全部 runtime 路径，CPU pose 输出即可工作。
 //
 // 当前实例：每个 DragonBonesContext 持有一份 HeadlessFactory 单例；
 // SkeletonLoader 通过 context 拿到 factory 来 parseDragonBonesData，
@@ -31,7 +31,7 @@ public:
     HeadlessFactory& operator=(const HeadlessFactory&) = delete;
 
 protected:
-    // _buildTextureAtlasData：本期不调（Task 03 不做贴图）；保留实现
+    // _buildTextureAtlasData：本期不调（暂不做贴图）；保留实现
     // 以满足纯虚要求 + 防御未来误调。textureAtlasData != nullptr 时按
     // upstream 例约定"已有 atlas 数据，本函数挂 GPU 贴图"——本侧无
     // GPU 路径，原值返回不动；nullptr 时返回 borrowObject<HeadlessTextureAtlasData>。

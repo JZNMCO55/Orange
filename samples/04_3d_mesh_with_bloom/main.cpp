@@ -1,4 +1,4 @@
-// samples/04_3d_mesh_with_bloom —— Phase 3 / Task 06 收尾里程碑。
+// samples/04_3d_mesh_with_bloom —— HDR + Bloom 收尾里程碑。
 //
 // 与 04_3d_mesh 同骨架（旋转 textured 立方体 + 透视相机），多一条
 // PostProcessChain：`BuiltinPostProcessChain::CreateDefault()` 串

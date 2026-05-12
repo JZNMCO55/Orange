@@ -1,4 +1,4 @@
-// samples/05_skeletal_animation —— Phase 4 / Task 10
+// samples/05_skeletal_animation —— 骨骼动画演示
 //
 // 场景：
 //   * 一块 plane（textured Material）作背景；
@@ -7,9 +7,9 @@
 //     映射到 joint marker 的 TransformComponent.position；
 //   * DirectionalLight + 默认 PostProcessChain（沿用 sample 07 视觉基线）。
 //
-// Phase 4 范围 SkeletalAnimator 只算 CPU palette，**不**做 GPU skinning——
+// 当前 SkeletalAnimator 只算 CPU palette，**不**做 GPU skinning——
 // 把 vertex 绑到 bone 索引、palette 走 UBO push、vertex shader 累乘
-// skin matrix 等渲染端工作量留 Phase 6 / Material UBO 落地配套做。本
+// skin matrix 等渲染端工作量留待 Material UBO 落地后配套做。本
 // sample 用"骨头位置画成小球"的方式可视化，让人眼能验证 idle 动画
 // 时骨架在动。
 //

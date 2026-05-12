@@ -7,7 +7,7 @@
 //     + Insert cube/plane + MaterialSystem::RegisterBuiltins + 全部内置材质
 //     实例（textured / toon / rim_light / dissolve / emissive）；失败仅 log，
 //     不抛；
-//   * SeedDemoWorld —— 种 13 个实体展示 Phase 1–5 视觉栈：Root > Camera /
+//   * SeedDemoWorld —— 种 13 个实体展示完整视觉栈：Root > Camera /
 //     Sun（平行光+阴影）/ Geometry > Ground（textured）/ Backdrop（rim_light）
 //     / Platform L + R（toon）/ Tower（toon）/ Glow Box（dissolve，自动动画）
 //     / Emissive Pillar（emissive）/ Fire Emitter（粒子：火焰）/

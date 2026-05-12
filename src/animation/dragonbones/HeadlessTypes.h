@@ -5,8 +5,8 @@
 //
 // DragonBones 的 BaseFactory / Slot / TextureAtlasData / IArmatureProxy
 // 在上游全是抽象接口（专为对接 Cocos2D-x / SFML / Egret 等渲染引擎而
-// 设计——它们各自实现一套 display 路径）。OrangeEngine 在 Phase 4 /
-// Task 03 阶段只需要 CPU 端 pose（per-bone matrix palette）输出，**不**
+// 设计——它们各自实现一套 display 路径）。OrangeEngine 当前
+// 只需要 CPU 端 pose（per-bone matrix palette）输出，**不**
 // 进任何渲染——所以这里给 runtime 配上一组"显示路径全部 no-op"的具
 // 体类，让 Armature 能被 init / advanceTime / 析构、bone 全局变换正确
 // 计算，但任何与 GPU / display node 相关的虚函数全部空体。
@@ -134,7 +134,7 @@ public:
 
     // IEventDispatcher：armature 自身 anim 事件（loop / complete / frame）
     // 在 headless 后端按"先丢"处理，与 DragonBonesContext 上的 NoopEvent
-    // Dispatcher 对齐。Audio（Task 09）/ 游戏侧 frame event 等真正落地后
+    // Dispatcher 对齐。Audio / 游戏侧 frame event 等真正落地后
     // 在外层（SkeletalAnimator）替换为转发实现。
     bool hasDBEventListener(const std::string& /*type*/) const override
     {

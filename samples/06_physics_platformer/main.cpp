@@ -1,4 +1,4 @@
-// samples/06_physics_platformer —— Phase 4 / Task 10
+// samples/06_physics_platformer —— 物理平台跳跃演示
 //
 // 场景：
 //   * 静态地面 plane（textured Material）+ 静态 ground BoxCollider 在 y=-0.5；

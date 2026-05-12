@@ -46,7 +46,7 @@ enum class SceneOp : std::uint8_t
     SaveAs,
 };
 
-// Play 模式三态（Task 06-09）：
+// Play 模式三态：
 //   * Edit  —— 默认；纯编辑器状态，没有 simulation tick；所有结构性 /
 //              组件级编辑都允许；selectedEntity 等 UI 状态正常工作
 //   * Play  —— "运行" 状态；physics / vfx / animator 每帧 tick；编辑
@@ -74,10 +74,10 @@ enum class PlayOp : std::uint8_t
 
 struct EditorState
 {
-    // 编辑器持有 World 所有权 —— Task 06-07 起场景 Open / New 需要在
+    // 编辑器持有 World 所有权 —— 场景 Open / New 需要在
     // OnUpdate 内整体 swap world，必须放在 state 里让 layer 能直接
     // reset / replace。之前是 main() 拥有 + state 持裸指针，重构理由见
-    // Task 06-07 提交。
+    // commit history。
     std::unique_ptr<Orange::Engine::World> pWorld;
     Orange::Engine::Entity selectedEntity = Orange::Engine::Entity::Invalid();
 
@@ -87,7 +87,7 @@ struct EditorState
 
     SceneOp pendingSceneOp = SceneOp::None;
 
-    // Task 06-09 Play Mode 状态机：playState 是当前模式（Edit / Play /
+    // Play Mode 状态机：playState 是当前模式（Edit / Play /
     // Paused），pendingPlayOp 是用户菜单点击的待执行迁移；帧末
     // EditorRenderLayer::ApplyPendingPlayOp 统一处理。playSnapshotPath
     // 保存 Edit→Play 时的 World 序列化文件路径，Stop 时从该路径反序列化
@@ -138,14 +138,14 @@ struct EditorState
     glm::vec3              transformEulerCache{0.0f, 0.0f, 0.0f};
 
     // ---- 编辑器自管 AssetRegistry + MaterialSystem ----------------------
-    // Phase 6 / Task 06-08 S2：SeedDemoWorld 给 Floor / Wall 实体挂真 mesh
+    // SeedDemoWorld 给 Floor / Wall 实体挂真 mesh
     // + textured material，让 Scene 视口立刻能看到几何。AssetRegistry
     // 与 MaterialSystem 由编辑器持有所有权 —— 它们的生命周期必须长于任何
     // 引用其中 mesh handle / material instance 的 World，因此放进 EditorState。
     //
     // 注意：场景 Save / Load 当前不串联 AssetRegistry，存盘的 scene JSON
     // 里的 mesh / material 引用对应的是 *本次启动* 创建的内置 handle，
-    // 跨进程加载语义还需要后续 task 把 AssetRegistry 也参与序列化。
+    // 跨进程加载语义还需要后续把 AssetRegistry 也参与序列化。
     std::unique_ptr<Orange::Engine::Asset::AssetRegistry>   pAssets;
     std::unique_ptr<Orange::Engine::Render::MaterialSystem> pMaterials;
 

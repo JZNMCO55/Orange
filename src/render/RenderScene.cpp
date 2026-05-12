@@ -7,9 +7,9 @@
 //   * Drawable：view<TransformComponent, RenderableComponent>()，对每
 //     个命中实体把 TRS 合成 world matrix、过滤 visible=false。
 //
-// **未做的事**：Hierarchy 父子链的世界变换合成。Phase 2 sample 都是
+// **未做的事**：Hierarchy 父子链的世界变换合成。当前 sample 都是
 // 单层实体，flat=local 即可；引入复合 matrix 路径会同时拉进"depth-
-// first 还是按拓扑序"、"是否缓存计算结果"等设计问题，留给 Phase 4
+// first 还是按拓扑序"、"是否缓存计算结果"等设计问题，留待
 // 关卡复杂化时一并解决。
 
 #include "orange/engine/render/RenderScene.h"

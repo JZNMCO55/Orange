@@ -1,4 +1,4 @@
-// samples/03_textured_quad —— Phase 2 视觉验证节点。
+// samples/03_textured_quad —— 视觉验证节点。
 //
 // 走通 ECS → Pipeline → OrangeRender 的完整数据流：
 //   1. 程序式构造一个 quad MeshAsset（4 顶点、6 索引、pos+uv）；

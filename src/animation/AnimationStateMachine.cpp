@@ -1,7 +1,6 @@
 // AnimationStateMachine impl ——
 // flat-weighted FSM；状态名 + 进入/退出回调 + 出向 transition 列表。
-// 本期不做 blend tree 也不做 layered ASM——按 design-plan Phase 4 /
-// Task 01 范围。
+// 本期不做 blend tree 也不做 layered ASM。
 
 #include "orange/engine/animation/AnimationStateMachine.h"
 

@@ -3,7 +3,7 @@
 #include "HeadlessFactory.h"
 
 // 引入 runtime 完整头——本 cpp 是 OrangeEngine 内**唯一**直接 include
-// <dragonBones/...> 的地方（Phase 4 / Task 02），CLAUDE.md "Header
+// <dragonBones/...> 的地方，CLAUDE.md "Header
 // isolation" 要求 dragonBones 头只在 src/animation/dragonbones/** 下出现。
 //
 // orange_engine 自身按 /W4 /WX 编译，但 DragonBones runtime + 其内嵌的
@@ -38,9 +38,9 @@ public:
 
     void dispatchDBEvent(const std::string& /*type*/, dragonBones::EventObject* /*value*/) override
     {
-        // no-op：runtime 想派发的事件在 Phase 4 / Task 02 阶段全部丢弃。
-        // Audio（Task 09）上线后接 Sound 事件；游戏侧自行处理 frame
-        // event 时由 SkeletalAnimator（Task 03）改用真 dispatcher。
+        // no-op：runtime 想派发的事件在当前阶段全部丢弃。
+        // Audio 上线后接 Sound 事件；游戏侧自行处理 frame
+        // event 时由 SkeletalAnimator 改用真 dispatcher。
     }
 
     void addDBEventListener(const std::string& /*type*/,

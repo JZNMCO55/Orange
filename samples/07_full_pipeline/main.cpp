@@ -1,10 +1,10 @@
-// samples/07_full_pipeline —— Phase 4 / Task 11 收官里程碑
+// samples/07_full_pipeline —— 全流程综合演示
 //
-// 把 Phase 3 视觉基线（plane + DirectionalLight + shadow + bloom + tonemap）
-// 与 Phase 4 全部子系统串起来：
+// 把视觉基线（plane + DirectionalLight + shadow + bloom + tonemap）
+// 与全部子系统串起来：
 //
 //   * Animation：DragonBones mecha_1406 骨架；按角色当前速度切 idle/
-//     walk/jump，joint 用 17 个 rim_light 小球可视化（Phase 4 范围 GPU
+//     walk/jump，joint 用 17 个 rim_light 小球可视化（当前 GPU
 //     skinning 暂缺，joint marker 表达"骨头在动"即够看）；
 //   * Physics：Box2D 3.x dynamic body（CircleCollider）做角色，static
 //     ground 保住 sphere 不掉穿；

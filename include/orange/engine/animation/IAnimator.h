@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // IAnimator —— Animation 后端抽象基类。
 //
-// Animation 子系统在 Phase 4 即承诺 Skeletal + Procedural 双后端并列。
+// Animation 子系统从一开始即承诺 Skeletal + Procedural 双后端并列。
 // 两条路径输出形态完全不同（matrix palette / shader uniform），因此
 // IAnimator 故意**不**规定 pose / uniform 输出 API——只暴露最小驱动入
 // 口 `Tick(dt)`：

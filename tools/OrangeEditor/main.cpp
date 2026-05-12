@@ -24,8 +24,8 @@
 //     创建 + 渲染
 //
 // 当前 UI 内容：dock space 上五个固定占位面板 —— Scene / Entity Tree /
-// Inspector / Assets / Console。前四个仅 TextDisabled 占位，由 Task 06-03
-// 起逐个填实；Console 当前放帧统计 + Esc 退出按钮，等接 Core::Log 时换
+// Inspector / Assets / Console。前四个仅 TextDisabled 占位，后续
+// 逐个填实；Console 当前放帧统计 + Esc 退出按钮，等接 Core::Log 时换
 // 成日志流。默认 dock 布局首帧通过 DockBuilder* 编程式建立，之后用户调
 // 整由 imgui.ini 持久化。
 
@@ -135,7 +135,7 @@ int main()
 
     // ---- AppHost（窗口 + 主循环）---------------------------------------
     AppConfig cfg{};
-    cfg.window.title  = "OrangeEditor v0.0.3 (Task 06-02 default dock layout)";
+    cfg.window.title  = "OrangeEditor v0.0.3";
     cfg.window.width  = 1600;
     cfg.window.height = 900;
     auto hostRes = AppHost::Create(cfg);

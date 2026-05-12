@@ -12,9 +12,9 @@
 //   bytes 16..   positions[vertexCount] : float[3]
 //   随后        indices[indexCount]    : uint32
 //
-// 选择自有格式而不接 OBJ / glTF 是 Phase 2 的 scope 决策：避免在
+// 选择自有格式而不接 OBJ / glTF 是有意为之：避免在
 // Asset 模块上线时同时解决"第三方解析器 vendoring"这个独立问题。后
-// 续 task（在 stb / tinygltf 等 vendor 落地后）可以新增对应的
+// 续（在 stb / tinygltf 等 vendor 落地后）可以新增对应的
 // MeshLoader 子类，与本类并存。
 // ---------------------------------------------------------------------------
 

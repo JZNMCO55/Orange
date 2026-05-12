@@ -5,7 +5,7 @@
 // ShadowConfig —— Pipeline 阴影路径的全局配置。
 //
 // 这是 per-pipeline 配置（不是 per-light），决定阴影贴图分辨率、PCF 采
-// 样核、深度偏移量。Task 07 起 Pipeline 暴露 `SetShadowConfig` by-value
+// 样核、深度偏移量。Pipeline 暴露 `SetShadowConfig` by-value
 // 接收这个结构体。
 //
 // 默认值是卡通 / PCG 类游戏的常见基线：

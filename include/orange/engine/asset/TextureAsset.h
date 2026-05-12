@@ -6,7 +6,7 @@
 //
 // 当前阶段只承载一种 layout：8-bit unsigned R/G/B/A，按 row-major、左
 // 上原点存储。其它格式（HDR / 压缩 BC / 多 mip / 立方贴图）随消费方
-// 真正用到时再加，避免 Phase 2 把 TextureAsset 一次性做成 super-set。
+// 真正用到时再加，避免一次性把 TextureAsset 做成 super-set。
 //
 // 与 MeshAsset 同理：这里只保证像素字节正确入内存；GPU 端 image / view
 // 的创建在 Render 模块完成。

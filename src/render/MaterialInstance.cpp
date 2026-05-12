@@ -81,8 +81,8 @@ struct MaterialInstance::Impl
     const Material* pMaterial{nullptr};
 
     // 用 std::string 作为 key（heterogenous lookup 在 unordered_map 上
-    // 要 C++20 transparent hash + key_equal，复杂度不值得在 Phase 3 /
-    // Task 01 引入）。SetUniform 的 std::string_view 在这里材化成
+    // 要 C++20 transparent hash + key_equal，复杂度暂时不值得引入）。
+    // SetUniform 的 std::string_view 在这里材化成
     // std::string——uniform 写入路径通常不在帧内热路径上。
     std::unordered_map<std::string, UniformValue>                                uniformOverrides;
     std::unordered_map<std::uint32_t, Asset::AssetHandle<Asset::TextureAsset>>   textureOverrides;

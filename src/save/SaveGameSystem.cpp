@@ -236,7 +236,7 @@ Result<void, ResultCode> SaveGameSystem::Save(const World& world, std::string_vi
             const std::string componentBase = ComponentBasePath(base, entry.name);
 
             // per-component schemaVersion —— 一旦存档发到玩家手里，每条
-            // component 的 version 即冻结；后续游戏侧 bump 后由 Task 05
+            // component 的 version 即冻结；后续游戏侧 bump 后由
             // migrator hook 接管。
             writer.WriteSchemaVersion(componentBase + "/version", entry.version);
 
@@ -412,7 +412,7 @@ Result<void, ResultCode> SaveGameSystem::Load(std::string_view path, World& worl
             }
 
             // per-component schema 校验 —— 不通过直接 fail，让调用方
-            // （Task 05 的 migrator hook）决定是否做迁移。
+            // （migrator hook）决定是否做迁移。
             auto compSchemaResult = reader.ReadSchemaVersion(componentBase + "/version");
             if (compSchemaResult.IsErr())
             {

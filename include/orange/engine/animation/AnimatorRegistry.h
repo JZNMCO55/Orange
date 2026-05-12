@@ -5,8 +5,8 @@
 // AnimatorRegistry —— Animator backend factory 注册表。
 //
 // 与 MaterialSystem::RegisterTemplate 同节奏（可扩展点）：游戏侧不修改
-// 引擎源码地注册自己的 Animator backend。Phase 4 / Task 03 / Task 04 用
-// 它注册"skeletal_dragonbones" / "procedural"两条内置 backend。
+// 引擎源码地注册自己的 Animator backend。引擎内置注册
+// "skeletal_dragonbones" / "procedural" 两条 backend。
 //
 // MaterialSystem 内部要 SPIR-V 加载 + Pipeline 缓存；本类只是个
 // `std::unordered_map<string, factory>`，不持 GPU 资源——更轻。

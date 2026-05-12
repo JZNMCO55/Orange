@@ -34,10 +34,10 @@
 // Inspector 入口：选中实体的 entity id + 所有"已挂着的内置 component"
 // 各起一个 CollapsingHeader 段。每段 if HasComponent → DrawXxx。
 //
-// 组件类型表是**硬编码**的（task 描述就是"内置组件"列表）。引擎仍处
-// 在 Phase 1–6 阶段禁止 entt::meta / 反射，所以游戏侧自定义 component
-// 暂时只能不显示 —— Phase 6 后续真要扩展时走"编辑器扩展点 API 让游
-// 戏注册自己的 inspector callback"路径，不在本 task 范围内。
+// 组件类型表是**硬编码**的（按"内置组件"列表枚举）。引擎当前
+// 禁止 entt::meta / 反射，所以游戏侧自定义 component
+// 暂时只能不显示 —— 后续真要扩展时走"编辑器扩展点 API 让游
+// 戏注册自己的 inspector callback"路径，不在本期范围内。
 void EditorRenderLayer::DrawInspectorPanel()
 {
     ImGui::Begin("Inspector");
@@ -392,7 +392,7 @@ void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
     auto* pW = mState.pWorld.get();
 
     // mesh / materialInstance 是 handle / 裸指针 —— 编辑得通过 Asset
-    // 浏览器（Phase 6 后续 task）才有意义。这里只读显示。
+    // 浏览器（后续扩展）才有意义。这里只读显示。
     ImGui::Text("Mesh handle      : %llu",
                 static_cast<unsigned long long>(r->mesh.Value()));
     ImGui::Text("MaterialInstance : %p",

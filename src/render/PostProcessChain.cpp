@@ -1,6 +1,6 @@
 // PostProcessChain 实现：vector<unique_ptr<IPostProcessPass>> 的薄包
 // 装。CRUD 全部走标准 vector 语义；越界 / nullptr 输入按 silent-ignore
-// 处理（不抛异常、不 log）——与 Phase 3 / Task 01 MaterialInstance 的
+// 处理（不抛异常、不 log）——与 MaterialInstance 的
 // silent-ignore 路径一致。
 
 #include "orange/engine/render/PostProcessChain.h"

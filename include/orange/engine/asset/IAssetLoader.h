@@ -11,8 +11,8 @@
 //
 // 设计要点：
 //   * 接口刻意保持狭窄——只负责"从路径解出一个 T"，不管缓存、引用
-//     计数、异步：这些是 AssetRegistry 的职责。Phase 2 起单一同步路
-//     径足够；async loading 安排在 Phase 5。
+//     计数、异步：这些是 AssetRegistry 的职责。当前只有单一同步路
+//     径；async loading 后续再加。
 //   * 失败一律走 Result<unique_ptr<T>, ResultCode>；不抛异常、不返回
 //     裸 nullptr。常见 ResultCode：NotFound（文件不存在）、IoError
 //     （读盘失败）、InvalidArgument（解码失败）、SchemaMismatch（带

@@ -13,12 +13,16 @@ OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games 
 The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference.
 
 - Current version: `0.1.0` (Unreleased; 0.x ABI is **not** stable)
-- Status: **pre-Phase-1**. Architecture documents are complete; implementation has not started. The legacy `Src/` skeleton (GEA-style 4-layer cathedral) is scheduled for removal in Phase 1 / Task 01. Until then, the only authoritative artifact is `docs/`.
+- Status (基准 2026-05-12)：**Phase 1 ~ 5.5 全 ✅**（design-plan.md Task 级历史），现处 **Phase 6** —— OrangeEditor 工具链。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 已 ✅；下一里程碑 **v0.2.5 架构整骨**，见 `docs/editor-roadmap.md` 与 `docs/decisions/ADR-001`）。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
 - Authoritative documents (read these first):
-  - `docs/design-plan.md` — architecture, module breakdown, Phase 1 task table, Phase 2–5.5 task outlines
+  - `docs/design-plan.md` — Phase 1–5.5 architecture + task table（含 ✅ 进度）
   - `docs/roadmap.md` — Phase 6+ long-term roadmap
+  - `docs/editor-roadmap.md` — OrangeEditor v0.x 路线（独立 semver）
+  - `docs/decisions/` — Architecture Decision Records（跨阶段决策；从 ADR-001 起）
+  - `docs/engine-known-gaps.md` — 编辑器 / sample 撞上的引擎缺口登记
   - `docs/extension-points.md` — public API extension surface and project-level invariants
   - `docs/coding-standards.md` — naming, guards, API macro (delta vs OrangeRender)
+  - `docs/milestone-start-checklist.md` — 任意 milestone 开工前的 5–10 分钟 ritual
   - `docs/case-studies/character-forms.md` — first-game design note (NOT engine spec; will migrate to game repo when forked)
 
 ## Toolchain
@@ -35,9 +39,9 @@ The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in th
 
 ## Common commands
 
-> **Note**: Until Phase 1 / Task 02 lands, there is no top-level `CMakeLists.txt` for the new structure. The legacy `CMakeLists.txt` references empty skeletons under `Src/` and is **not** the engine build entry. Do not invoke it. The commands below describe the **target** state after Phase 1 / Task 02.
+> Phase 1 ~ 5.5 全 ✅；顶层 `CMakeLists.txt` 已是引擎构建入口，下面的命令是**现行**用法（不是目标态）。
 
-Bootstrap third-party deps (target state — script does not exist yet, will arrive in Phase 1 / Task 03):
+Bootstrap third-party deps:
 
 ```
 python scripts/fetch_and_build_3rdparty.py                 # default prefix D:\3rdparty
@@ -111,12 +115,13 @@ The engine is organized **horizontally by module**, not as a vertical pyramid. S
 
 ### Phase discipline
 
-Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.md`). **Do not implement Phase N+1 features while Phase N is incomplete.** Each Phase has a demonstrable milestone (typically a `samples/` executable). Phase status as of this writing:
+Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.md`). **Do not implement Phase N+1 features while Phase N is incomplete.** Each Phase has a demonstrable milestone (typically a `samples/` executable). Phase status（基准 2026-05-12；权威 source 是 `docs/design-plan.md` 中各 Task 的 ✅ 标记）：
 
-- **Phase 1** (engine skeleton + minimal main loop): not started
-- Phases 2–5.5: not started; outlines only
+- **Phase 1 ~ 5.5：全部 ✅**（design-plan.md Task 级均已 ✅；`samples/01_minimal_window` ~ `samples/09_vfx_demo` 已落地）
+- **Phase 6**：进行中——OrangeEditor 工具链。OrangeEditor 自身按 semver 独立演进，详见 `docs/editor-roadmap.md`（v0.1 / v0.1.5 / v0.2 ✅；下一里程碑 v0.2.5 架构整骨）
+- **Phase 7+**：未开工；前瞻路线见 `docs/roadmap.md`
 
-When working on a task, locate it in `docs/design-plan.md` Task Breakdown. Implement only the listed outputs; reject scope creep.
+When working on a task, locate it in `docs/design-plan.md` Task Breakdown（Phase 1–5.5 历史 + 接口参考）、`docs/editor-roadmap.md`（Phase 6 编辑器）或 `docs/roadmap.md`（Phase 7+）. Implement only the listed outputs; reject scope creep.
 
 ## Coding conventions (enforced)
 
@@ -230,6 +235,76 @@ OrangeEditor 开发时采用**双参考**策略：
 - viewport 工具栏、底部 tab 容器（Assets / Console / Animation）、全局 toolbar 等布局设计参照 Cocos Creator 的界面组织方式
 - Cocos 的美术资源（图标、UI 纹理、默认 mesh 等）可作为**临时占位素材**，后期统一替换为项目自有资源；使用前确认具体资源的许可证条款（Cocos 引擎本体 MIT，内置资源许可证需单独核查）
 - **不参考 Cocos 的技术实现**（TypeScript / Web 技术栈与 OrangeEditor C++ 完全不同）
+
+## OrangeEditor 架构纪律
+
+**禁止 hardcode**。OrangeEditor 自 v0.2.5（架构整骨 milestone，见 `docs/editor-roadmap.md`）起进入 schema-first / plugin-first 架构。背景：v0.1 ~ v0.2 期"先把功能跑起来"的写法在 Inspector / Add-Component / EditorState 等多处沉淀成 hardcode + god class（9 个 `DrawInspectorXxx` 成员 + 19 字段 god struct），调研 Lumix（`src/editor/*` + `src/engine/reflection.h`）与 Godot（`editor/*` + `core/object/class_db.h`）确认 schema-first / plugin-first 是同栈工业标准 —— 因此把"禁止 hardcode"沉淀为项目级 invariant，与 Header isolation / Phase scope 同级严肃。
+
+具体规约：
+
+- **不允许**任何"加一个 component 类型就改 `EditorRenderLayer` / `EditorState` / 其他 mega-class 源码"的路径。新增 component 的 Inspector / Gizmo / Add-Component 菜单项必须通过 schema 注册或 `IEditor*Plugin` 注册完成
+- **不允许**把 per-component 的 Inspector / Gizmo / 序列化 UI 逻辑塞进任一 mega-class（god class）；必须以独立注册项 / plugin / schema 形式存在
+- **不允许**在 `EditorState` 上无脑加字段；新功能找对应子 context（`EditorSelection` / `EditorSceneContext` / `EditorAssetContext` / `EditorCameraState`，由 v0.2.5 拆出）加；没有合适 context 就先拆 context
+- **允许**的反射形式：手写宏 + 模板特化的 Builder API（参 `vendor/LumixEngine/src/engine/reflection.h`、`vendor/godot/core/object/class_db.h`），编译期注册零运行时反射库依赖；**仍然禁止** `entt::meta` / RTTR / cereal-with-reflection / clang AST codegen（沿用 "Serialization and reflection" 节禁令）
+- 违反以上任一条视为编辑器侧架构 bug，与引擎侧 invariant 同等严肃，code review 应直接 block
+
+发现现有代码触犯禁令时的正确动作：登记到 v0.2.5（若尚未开工）或后续整骨 milestone，**不**在当前任务里顺手 hack 一条新 hardcode 路径"先用着"——这正是 v0.1 ~ v0.2 期债务累积的方式。
+
+## 工作流基础设施
+
+按 2026-05-12 工作流升级（详见 `docs/decisions/ADR-001` 关联讨论），项目沉淀了 4 件协同纪律基础设施。下面是**何时用 + 怎么用**——三件都是低摩擦工具，不用就会让早期决策腐烂。
+
+### 1. Invariant lint —— `scripts/check_invariants.py`
+
+机器化执行 CLAUDE.md 的硬纪律：header isolation / 公共头无裸 `nlohmann::json` / 代码注释无 `Task NN` `Phase N` / OrangeEditor 无 `DrawInspectorXxx` hardcode（v0.2.5 后切 error）。
+
+**何时跑**：
+- **每次 milestone 开工前**：跑一次确认 baseline 干净（如脏先修，不在本 milestone 内捎带）
+- **每次 commit 前**：跑一次确认本次改动没引入新违规
+- 用 `--write-baseline` 重新生成 `scripts/.invariants-baseline.json`——**仅在批量清理历史 banner 后才动**，日常不要拿它"压"违规
+
+**接受的输出**：`All invariants OK. (N grandfathered by baseline)` —— 退出码 0；任何 `new violation(s) found` 必须修，不允许 commit。
+
+### 2. CLAUDE.md 漂移检测 —— `scripts/check_claude_md_drift.py`
+
+把 `docs/design-plan.md` ✅ 计数 + 文件系统真实状态（顶层 `CMakeLists.txt` / `scripts/fetch_and_build_3rdparty.py` / `Src/` 历史目录）和本文件的 "Phase status" 段比对。
+
+**何时跑**：
+- 任何 commit 修改了 design-plan.md / editor-roadmap.md 的 ✅ 标记后
+- 任何 commit 修改了 CLAUDE.md 的 Project / Common commands / Phase discipline 段后
+- 也可加进 CI 兜底（推荐）
+
+**接受的输出**：`CLAUDE.md drift: none detected.` —— 退出码 0；任何漂移条目都意味着本文件需要更新。
+
+### 3. ADR（架构决策记录）—— `docs/decisions/`
+
+跨阶段、跨文件的架构决策留 ADR；从 `ADR-001` 起，单调编号、不重排。**roadmap 写计划，ADR 写决策**——同一件事可同时在两处提到，但"为什么这么选" + "事后追评"只属于 ADR。
+
+**何时写新 ADR**：见 `docs/decisions/README.md` "什么进 ADR" 节——非平凡选择 / 与 invariant 张力 / 事后追评失误 / 跨仓协同纪律 四类。
+
+**何时读 ADR**：milestone 启动 ritual 第 3 步（见下）；review 跨阶段改动时；编辑器 / 渲染器接口讨论时。
+
+### 4. Milestone 启动 ritual —— `docs/milestone-start-checklist.md`
+
+任何 design-plan task / editor-roadmap v0.x / engine-known-gaps 缺口开工**前**走一遍 5–10 分钟 checklist：定位权威描述 → 查 wiki → 查 ADR → 查参考引擎 → 跑 lint baseline → 检查跨仓影响 → 写 commit-plan 草稿。**红线触发不开工**条款见该文件末段。
+
+设计意图：把"边写边发现要返工"的成本前置到读文档阶段，而不是在 commit 后才反应过来违反了哪条纪律。
+
+### 这 4 件的相互关系
+
+```
+milestone-start-checklist （前置：每个 milestone 开工前）
+   │
+   ├─ 第 3 步：读相关 ADR（docs/decisions/）
+   ├─ 第 5 步：跑 invariant lint + drift 检测 → 必须 baseline 干净
+   └─ 第 6 步：跨仓影响检查 → 触发 engine-known-gaps / OrangeRender incoming_feature 登记
+
+milestone 完成时：
+   ├─ design-plan.md / editor-roadmap.md 加 ✅
+   ├─ 跑 drift 检测确认 CLAUDE.md 同步
+   ├─ 决策面 → 写 ADR（如适用）
+   └─ commit 前最后跑一次 invariant lint
+```
 
 ## Working in this repo: practical guidance
 

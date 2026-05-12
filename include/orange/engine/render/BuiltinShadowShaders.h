@@ -6,7 +6,7 @@
 //
 // 与 BuiltinMaterials 平行：不强行套进 Material（shadow_caster 没有
 // uniform 描述符 / 没有 texture 槽，是 Pipeline-managed shader pair，
-// 不该走 MaterialInstance 路径）。Pipeline 在 Task 07 接通 shadow pass
+// 不该走 MaterialInstance 路径）。Pipeline 接通 shadow pass
 // 时直接拿 ShaderPair 的两个 handle 编 RHI Pipeline。
 //
 // `LoadShadowCaster` 负责：

@@ -5,10 +5,9 @@
 // PhysicsWorld —— "World → 一帧物理步进"的根入口（PIMPL）。
 //
 // 公共面**不**含任何 b2 类型——CLAUDE.md "Header isolation" 不变量约束
-// `<box2d/...>` 只允许出现在 `src/physics/box2d/**`。Phase 4 / Task 05 是
-// 接口阶段，.cpp 走 stub 实现（AddBody / RemoveBody 维护内表 + 反写 handle，
-// Step 是 no-op）；Task 06 / Box2D 集成时把 .cpp 整体替换为真 b2World 路径，
-// 公共面不动。
+// `<box2d/...>` 只允许出现在 `src/physics/box2d/**`。接口阶段先以
+// stub 实现（AddBody / RemoveBody 维护内表 + 反写 handle，Step 是 no-op）；
+// 接入 Box2D 时把 .cpp 整体替换为真 b2World 路径，公共面不动。
 //
 // 设计决策：让接口对 Box2D 之外的 2D physics（Chipmunk / Jolt 2D）也无破坏
 // 性改动——所以
@@ -64,8 +63,7 @@ public:
     PhysicsWorld(PhysicsWorld&&) noexcept;
     PhysicsWorld& operator=(PhysicsWorld&&) noexcept;
 
-    // 推进一帧物理。dt = 本帧时间步（秒）。Phase 4 / Task 05 stub：本帧
-    // 内置 step 计数 +1，body 状态不变；Task 06 接 b2World_Step 后真模拟。
+    // 推进一帧物理。dt = 本帧时间步（秒）。
     // dt < 0 当 0 处理；过大 dt 由后端自管（Box2D 内部不会自动 sub-clamp）。
     void Step(float dt);
 
@@ -126,12 +124,11 @@ public:
     // 当前已注册 body 数（诊断 / 单测用）。
     std::size_t BodyCount() const noexcept;
 
-    // PhysicsWorldDesc 访问。Task 06 起 b2World 重力 / substep 用此值；
-    // Task 05 仅按值存储。
+    // PhysicsWorldDesc 访问。b2World 重力 / substep 用此值。
     const PhysicsWorldDesc& Desc() const noexcept;
 
-    // 已发生的 Step 次数（诊断 / 单测用——证明 Step 真被调用，等 Task 06
-    // 替换 stub 后用于"step 真发到 b2World 了吗"的回归测试）。
+    // 已发生的 Step 次数（诊断 / 单测用——证明 Step 真被调用，
+    // 用于"step 真发到 b2World 了吗"的回归测试）。
     std::size_t StepCount() const noexcept;
 
 private:

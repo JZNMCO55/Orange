@@ -20,13 +20,13 @@
 //         void write(JsonWriter&, path, const TComp&)
 //         bool read (const JsonReader&, path, TComp&)
 //
-//     再调 `Register<TComp>(name, version, write, read)`。Phase 1–6 不
+//     再调 `Register<TComp>(name, version, write, read)`。不
 //     引入任何反射 / codegen（详见 CLAUDE.md "Serialization and reflection"）。
 //
 //   * 每条注册带独立 SchemaVersion —— 同一存档文件里不同 component 的
 //     schema 各自演化。Save 写入时把 `name + version + payload` 三件套
 //     一起落地；Load 时主流程用注册侧 version 与文件里 version 配对，
-//     触发 migrator（Task 05）或 fail-fast（major 不匹配）。
+//     触发 migrator 或 fail-fast（major 不匹配）。
 //
 //   * 公共面只见 `JsonReader` / `JsonWriter` / `SchemaVersion`（来自
 //     `orange/engine/core/Serialization.h` / `SchemaVersion.h`）—— 不暴
@@ -34,9 +34,9 @@
 //     束一致。
 //
 //   * 注册表本身只做"有序存储 + 按名查询"，**不**知道哪些 entity 算"可
-//     入存档"。该策略由 Task 02 的 Save / Load 主流程决定（典型方案：
+//     入存档"。该策略由 Save / Load 主流程决定（典型方案：
 //     游戏侧给 entity 打一个 tag component，主流程 view 一遍）。注册表
-//     与策略解耦，让后续 Task 02 / 04 / 07 各自演化时不用回头改这层。
+//     与策略解耦，让后续各自演化时不用回头改这层。
 //
 //   * `SaveGameComponentEntry` 中 has/write/read 用 `std::function` 而
 //     非裸函数指针：要把 `Register<TComp>` 拿到的 typed callbacks 包成
@@ -73,7 +73,7 @@
 //             return true;
 //         });
 //
-//     // —— 此后 Task 02 的 SaveGameSystem::Save / Load 走 registry.Entries()
+//     // —— 此后 SaveGameSystem::Save / Load 走 registry.Entries()
 //     //    去派发到具体 component。
 // ---------------------------------------------------------------------------
 
@@ -103,7 +103,7 @@ namespace Orange::Engine::Save
 {
 
 // 单条注册项的 type-erased 形态 —— 注册时由模板把 typed callbacks 包
-// 装成操作 `(World&, Entity, ...)` 的统一形态；Task 02 的 Save / Load
+// 装成操作 `(World&, Entity, ...)` 的统一形态；Save / Load
 // 主流程拿到 entry 后只需循环调用 has → write / read，无需再 dispatch
 // 到具体 TComp。
 //
@@ -111,12 +111,12 @@ namespace Orange::Engine::Save
 // 对齐（Has / Write / Read 三件套），让两层将来重构调度循环时形态一致。
 struct ORANGE_ENGINE_API SaveGameComponentEntry
 {
-    // 落地到 JSON 的 component key（Task 02 主流程典型把它接到
+    // 落地到 JSON 的 component key（主流程典型把它接到
     // "entities/<n>/components/<name>" 后传给 Write/Read）。
     std::string name;
 
     // 该 component 自己的 schema 版本。每次字段增删 / 语义变化时游戏
-    // 侧 bump 后再发版；旧存档加载时由 Task 05 的 migrator hook 接管。
+    // 侧 bump 后再发版；旧存档加载时由 migrator hook 接管。
     SchemaVersion version;
 
     // entity 是否拥有该 component（Save 阶段判断"要不要写这一条"）。
@@ -138,7 +138,7 @@ struct ORANGE_ENGINE_API SaveGameComponentEntry
                        World&                 world,
                        Entity                 entity)> Read;
 
-    // 单条 schema 迁移：(from → to) 的 JSON 变换。Task 05 起 SaveGameSystem
+    // 单条 schema 迁移：(from → to) 的 JSON 变换。SaveGameSystem
     // ::Load 在 per-component schema 不匹配时按"找 from == 当前版本的
     // migrator → 应用 → 把 dst dump+reparse 当下次输入"循环走链，直到
     // 到达 entry.version 或链断（→ SchemaMismatch）。
@@ -166,8 +166,8 @@ struct ORANGE_ENGINE_API SaveGameComponentEntry
     std::vector<Migrator> migrators;
 };
 
-// SaveGameRegistry —— 容器 + 注册门面。Save / Load 主流程在 Task 02 接
-// 入；本 Task 01 仅交付注册 + 查询。
+// SaveGameRegistry —— 容器 + 注册门面。Save / Load 主流程后续接
+// 入；当前仅交付注册 + 查询。
 //
 // 线程模型：注册阶段（启动期）单线程；运行期注册表只读，可任意线程
 // 并发查询。
@@ -210,7 +210,7 @@ public:
                                       WriteFn<TComp>   write,
                                       ReadFn<TComp>    read);
 
-    // 给已注册的 component 追加一条 schema migrator。Task 05 起
+    // 给已注册的 component 追加一条 schema migrator。
     // SaveGameSystem::Load 在 per-component schema 不匹配时按
     // (from→to) chain 走，直到到达 entry.version 或链断（→ SchemaMismatch）。
     //
@@ -233,11 +233,11 @@ public:
                            std::string_view  dstPath)> fn);
 
     // 按 name 查 entry。命中返回非 null 指针，未命中返回 nullptr。
-    // Task 02 的 Load 路径用它处理 "JSON 里出现了某个 component key 但
+    // Load 路径用它处理 "JSON 里出现了某个 component key 但
     // 注册表里没有" → 走 forward-compat：跳过 + warn。
     const SaveGameComponentEntry* Find(std::string_view name) const noexcept;
 
-    // 枚举所有已注册的 entry，顺序 = 注册顺序。Task 02 的 Save 路径直
+    // 枚举所有已注册的 entry，顺序 = 注册顺序。Save 路径直
     // 接按这个顺序对每个 entity 跑一遍 entries.Has → entries.Write，让
     // 落地的 JSON 字段排列稳定。
     const std::vector<SaveGameComponentEntry>& Entries() const noexcept { return mEntries; }

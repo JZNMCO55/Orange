@@ -11,7 +11,7 @@
 //     画推进、变换求 final matrix 等），生命周期通常等于 World，按依
 //     赖关系排序、按帧 tick。
 //
-// Phase 2 / Task 03 仅定义最薄的接口；后续 Phase 4 起会引入
+// 当前仅定义最薄的接口；后续会引入
 // SystemScheduler（或类似）来管理 system 间的依赖、阶段、并行机会。
 // 当前不预设任何调度语义——OnUpdate 由 World 持有方按自己需要的顺
 // 序串行调用。

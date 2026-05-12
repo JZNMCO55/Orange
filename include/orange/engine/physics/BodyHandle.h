@@ -7,8 +7,8 @@
 // 用 Core::TypedHandle 携带 phantom tag，让 BodyHandle 与其它 typed handle
 // （AssetHandle / 未来的 ConstraintHandle）在编译期不可互换。
 //
-// PhysicsWorld 内部如何分配 / 解读这个 64 位 value 是后端细节（Phase 4 /
-// Task 06 接 Box2D 后端时拆 32 位 index + 32 位 generation 走 b2BodyId
+// PhysicsWorld 内部如何分配 / 解读这个 64 位 value 是后端细节（Box2D
+// 后端拆 32 位 index + 32 位 generation 走 b2BodyId
 // 等价模式），消费者按 IsValid() / 等值比较使用即可。
 // ---------------------------------------------------------------------------
 

@@ -17,7 +17,7 @@
 //   * 持 `Asset::AssetRegistry&` 引用作为成员——子系统需要长期访问 registry
 //     时在构造时绑定，避免每次 RegisterTemplate 重新传参。registry 必须
 //     活到 MaterialSystem 析构。
-//   * 只接受 SPIR-V 路径。运行时 GLSL 编译 / hot-reload 留给 Phase 6。
+//   * 只接受 SPIR-V 路径。运行时 GLSL 编译 / hot-reload 留待后续扩展。
 //   * `FindTemplate` 返回 `const Material*`：Material 在内表里地址稳定
 //     （unordered_map 节点存储），新 RegisterTemplate 不会让旧引用失效。
 //   * `CreateInstance` 返回 `std::unique_ptr<MaterialInstance>`：调用方

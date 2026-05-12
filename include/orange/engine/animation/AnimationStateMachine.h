@@ -5,9 +5,9 @@
 // AnimationStateMachine —— 轻量 flat-weighted FSM。
 //
 // 按 `vendor/Orange-Wiki/wiki/techniques/animation/animation-state-machine.md`
-// 的"两种 ASM 架构"，本期 Phase 4 / Task 01 只交付最简的 flat
+// 的"两种 ASM 架构"，当前只交付最简的 flat
 // weighted-average 入口（状态名 + 进入/退出回调 + 条件过渡）；blend
-// tree 留 Phase 6。状态本身的 cross-fade 由各 backend 自管（DragonBones
+// tree 留待后续扩展。状态本身的 cross-fade 由各 backend 自管（DragonBones
 // 切 anim 时设 fade 时长，Procedural 后端不需要 fade）。
 //
 // 状态节点：用 `std::string` 名字索引；进入 / 退出回调 + 用户自定义
@@ -16,8 +16,8 @@
 // （与项目"无 reflection / 无 codegen"约束一致）。
 //
 // **不**支持：
-//   * blend tree（Phase 6）；
-//   * layered ASM（Phase 6 后随 IK / additive 一起做）；
+//   * blend tree（待后续扩展）；
+//   * layered ASM（后续随 IK / additive 一起做）；
 //   * 状态间 cross-fade 时长本身（每个 backend 自管，在 OnEnter 回调里
 //     调 backend.Play(animName, fadeIn) 即可）。
 //
@@ -41,7 +41,7 @@
 namespace Orange::Engine::Animation
 {
 
-// 过渡条件求值时的当前帧上下文。允许扩展但不破坏：未来 Phase 6 加 layer
+// 过渡条件求值时的当前帧上下文。允许扩展但不破坏：未来加 layer
 // 标识 / blend tree 句柄等字段时，旧 condition 函数仍可读取既有字段。
 struct StateContext
 {

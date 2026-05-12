@@ -1,6 +1,6 @@
-// PhysicsWorld impl —— Phase 4 / Task 06：Box2D 3.x 后端。
+// PhysicsWorld impl —— Box2D 3.x 后端。
 //
-// Task 05 stub 的内表 + 单调递增 handle 全替换为 b2WorldId / b2BodyId 真
+// 早期 stub 的内表 + 单调递增 handle 已全替换为 b2WorldId / b2BodyId 真
 // 后端。BodyHandle 的 64-bit value 仍然不透明对外——内部按
 //   high 32 = b2BodyId.index1
 //   low  32 = b2BodyId 的 generation + world0 联合编码（足以唯一）
@@ -35,7 +35,7 @@ namespace
 // 本实现只用单 world，world0 在 64-bit 里恒为 0；index1 占 high 32，
 // generation 占 low 16，剩余 16 bit 留 0。
 //
-// 这样的编码让 BodyHandle 在 Task 05 stub 时代分配的"单调递增 1, 2, 3..."
+// 这样的编码让 BodyHandle 在早期 stub 时代分配的"单调递增 1, 2, 3..."
 // 与本期编码不冲突（index1 从 1 开始恰好与 stub handle 序列对应），
 // 测试不感知差异。
 constexpr std::uint64_t kWorld0Mask        = 0xFFFFu << 16;  // 不使用，留 0

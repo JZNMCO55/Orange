@@ -4,9 +4,9 @@
 // ---------------------------------------------------------------------------
 // MeshAsset —— mesh 资源的 CPU 数据容器。
 //
-// Phase 2 范围只承载位置 + 可选 UV + 索引——刚好够支持
+// 当前范围只承载位置 + 可选 UV + 索引——刚好够支持
 // 03_textured_quad 这条最小渲染路径。法线 / tangent / 多 set UV /
-// skin 等更丰富属性留给后续 phase。
+// skin 等更丰富属性留待后续扩展。
 //
 // **磁盘 binary 格式（MeshLoader v1）当前仅写入 positions + indices**；
 // UV 字段是给"程序式构造的 mesh"留的内存路径——sample 用

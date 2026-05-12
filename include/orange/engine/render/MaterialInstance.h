@@ -6,15 +6,14 @@
 //
 // 每个 MaterialInstance 绑定一个 const Material*（caller-owned），并维
 // 护一份 per-instance 的 uniform / texture 覆盖。Pipeline 在每帧渲染时
-// 先从 Material 取默认值（Phase 3 / Task 02 起），再用 Instance 的覆盖
+// 先从 Material 取默认值，再用 Instance 的覆盖
 // 增量补上——典型用法：同一 Material 模板被多个 entity 共享，每个 entity
 // 通过自己的 MaterialInstance 覆盖个别 uniform（颜色 / 时间 / 纹理）。
 //
 // SetUniform / SetTexture 的 name 与 binding 必须在 Material 的描述符
 // 列表里出现且类型匹配；否则调用是 no-op（不抛、不崩、不 log——0.x
-// 阶段优先吞 schema 演化造成的"旧调用方喂新 template"路径）。Phase 3 /
-// Task 02 内置第一个 template 后，如果发现 silent-ignore 隐藏了真 bug，
-// 再考虑加可选 ORANGE_LOG_WARN。
+// 阶段优先吞 schema 演化造成的"旧调用方喂新 template"路径）。如果发现
+// silent-ignore 隐藏了真 bug，再考虑加可选 ORANGE_LOG_WARN。
 //
 // PIMPL：override 存储用 unordered_map + type-tagged blob，藏在 .cpp，
 // 公共头不暴露 std::variant<glm 多类型> 这种"传染性"的复合 std 类型。
@@ -42,8 +41,8 @@ class ORANGE_ENGINE_API MaterialInstance
 {
 public:
     // pMaterial == nullptr 是受支持的退化状态（"还没 bind template 的
-    // 半构造态"）；所有 SetXxx 在这种状态下都是 no-op。Phase 3 / Task 02
-    // 起把它和 MaterialSystem::CreateInstance 配套，正常路径下不会出现
+    // 半构造态"）；所有 SetXxx 在这种状态下都是 no-op。它和
+    // MaterialSystem::CreateInstance 配套，正常路径下不会出现
     // null instance。
     explicit MaterialInstance(const Material* pMaterial = nullptr);
     ~MaterialInstance();

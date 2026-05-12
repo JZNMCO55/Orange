@@ -368,7 +368,7 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::EndMenu();
     }
 
-    // ---- Play / Pause / Stop 按钮（Task 06-09）-------------------------
+    // ---- Play / Pause / Stop 按钮 -------------------------
     // 直接放主菜单栏右侧（不另开 toolbar，避免再加一行垂直空间占用）。
     // 状态显示用一个 Text + 三个按钮：disabled / enabled 按当前 playState
     // 推算（典型 transport-control 风格：Play 在 Edit / Paused 可用，
@@ -716,12 +716,12 @@ void EditorRenderLayer::DrawAssetsPanel()
 }
 
 // Console 面板放调试信息：帧 index、deltaTime、Esc 退出按钮、Vulkan
-// multi-viewport 提示。Task 06-02 阶段编辑器没有日志系统，先把这些
+// multi-viewport 提示。当前编辑器没有日志系统，先把这些
 // 当作 "console" 的内容，等真接 Core::Log 时换成日志流。
 void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& frame)
 {
     ImGui::Begin("Console");
-    ImGui::Text("OrangeEditor v0.0.3 (Task 06-02)");
+    ImGui::Text("OrangeEditor v0.0.3");
     ImGui::Separator();
     ImGui::Text("frame index: %llu",
                 static_cast<unsigned long long>(frame.time.frameIndex));

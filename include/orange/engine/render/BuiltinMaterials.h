@@ -22,8 +22,8 @@
 // 用 LoadXxx 不会再注册 loader（Asset 层 dedup 保证 .spv 文件只读一次）。
 //
 // **当前阶段限制**：Pipeline 的真实 Material 路由（按 MaterialInstance
-// 覆盖打 push-constant / 描述符）由 Phase 3 / Task 04 起接通；Task 02
-// 仅交付 "Material 数据可被消费"——descriptor 已稳定、Task 04 起在不破
+// 覆盖打 push-constant / 描述符）随后续接通；当前
+// 仅交付 "Material 数据可被消费"——descriptor 已稳定、在不破
 // 公共面的前提下把渲染管线接上。
 // ---------------------------------------------------------------------------
 

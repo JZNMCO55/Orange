@@ -63,8 +63,8 @@
 //     与 EnTT entity 解耦。当前 schema v1 不持久化 entity 间引用，所以
 //     该 ID 仅用于诊断 / 未来扩展时不破兼容。
 //   * 每条 component 自带 `version` 与游戏侧 schema 一一对应——一旦发
-//     给玩家就冻结；后续游戏侧 bump major/minor 时由 Task 05 的 migrator
-//     hook 接管。Task 02 仅做 `SchemaVersion::CanRead` 严格检查，不通过
+//     给玩家就冻结；后续游戏侧 bump major/minor 时由 migrator
+//     hook 接管。当前仅做 `SchemaVersion::CanRead` 严格检查，不通过
 //     直接返回 SchemaMismatch。
 //   * 未识别 component 名：JSON 里出现但 registry 没注册 → silent skip
 //     （forward-compat：旧 reader 处理不动新字段时不崩）。

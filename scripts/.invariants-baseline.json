@@ -1,0 +1,80 @@
+{
+  "doc": "OrangeEngine invariant lint baseline. 仅记录历史 grandfathered 违规——这些在 CLAUDE.md \"No task references in code\" 节明确豁免（既有 banner 不强制重写）。新增违规仍然 fail。重新生成：python scripts/check_invariants.py --write-baseline",
+  "violations": [
+    {
+      "message": "`box2d/Box2DBridge.h` 仅允许在 `src/physics/box2d/**` 下使用",
+      "path": "src/physics/PhysicsWorld.cpp",
+      "rule": "header-isolation"
+    },
+    {
+      "message": "`box2d/box2d.h` 仅允许在 `src/physics/box2d/**` 下使用",
+      "path": "src/physics/PhysicsWorld.cpp",
+      "rule": "header-isolation"
+    },
+    {
+      "message": "`box2d/id.h` 仅允许在 `src/physics/box2d/**` 下使用",
+      "path": "src/physics/PhysicsWorld.cpp",
+      "rule": "header-isolation"
+    },
+    {
+      "message": "`box2d/types.h` 仅允许在 `src/physics/box2d/**` 下使用",
+      "path": "src/physics/PhysicsWorld.cpp",
+      "rule": "header-isolation"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.cpp",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    },
+    {
+      "message": "v0.2.5 整骨后将禁止（当前 warn-only）：`DrawInspectorXxx` 路径必须改 schema 驱动（见 CLAUDE.md 「OrangeEditor 架构纪律」）",
+      "path": "tools/OrangeEditor/EditorRenderLayer.h",
+      "rule": "editor-no-hardcode-pending"
+    }
+  ]
+}

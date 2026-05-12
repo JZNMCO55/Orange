@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // ProceduralAnimator —— IAnimator 的 shader-uniform 驱动后端。
 //
-// 与 SkeletalAnimator 配对、并列存在，承担 Phase 4 承诺的"双后端"中
+// 与 SkeletalAnimator 配对、并列存在，承担引擎承诺的"双后端"中
 // 第二条路径：不走 skeleton bone hierarchy，直接把"时间 → uniform 值"
 // 的曲线 / 噪声 / 程序式函数挂到一个 MaterialInstance 上——典型用
 // 例：史莱姆 noise 振幅、dissolve 进度、UV 流动等不依赖骨架但需要
@@ -22,7 +22,7 @@
 //                     // mi->SetUniform 写覆盖表
 //
 // **Material UBO 接通**：本期 SetUniform 写到 MaterialInstance 内部 override
-// 表；Pipeline 在 Phase 6 / Material UBO 落地前**不**自动把这张表 push
+// 表；Pipeline 在 Material UBO 落地前**不**自动把这张表 push
 // 到 GPU——所以 sample 里看不到效果。等 UBO 路径上线，本类不需重做：
 // override 表已写对，到时只是 Pipeline 路径多一个"读表 → push-constant"
 // 的步骤。

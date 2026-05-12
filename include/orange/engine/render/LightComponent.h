@@ -4,8 +4,8 @@
 // ---------------------------------------------------------------------------
 // LightComponent —— 光源 ECS component。
 //
-// 当前阶段（Phase 3 / Task 05）只交付 `DirectionalLight` —— Ori 风格场
-// 景的主光（太阳 / 月亮 / 卡通主光）就是它。点光 / 聚光留给 Phase 4+。
+// 当前阶段只交付 `DirectionalLight` —— Ori 风格场
+// 景的主光（太阳 / 月亮 / 卡通主光）就是它。点光 / 聚光留待后续扩展。
 //
 // 设计要点：
 //   * **不存运行时矩阵**：light view / light proj 由 Pipeline 在 Shadow
@@ -15,9 +15,9 @@
 //     矩阵设错。
 //   * **direction 默认指向斜下方**：默认值在 main 函数里直接挂 component
 //     就立即合理（典型卡通主光从前上方斜射），不强制调用方填字段。
-//   * **不在 component 上加 priority / index 字段**：Phase 3 / Task 07
-//     的 Pipeline 取 first-found DirectionalLight 作为主光；多 light
-//     的优先级 / 数量上限留给 Phase 6。
+//   * **不在 component 上加 priority / index 字段**：当前
+//     Pipeline 取 first-found DirectionalLight 作为主光；多 light
+//     的优先级 / 数量上限留待后续扩展。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
@@ -38,7 +38,7 @@ struct DirectionalLight
     // 一致。调用方通常在 main 里覆盖这个字段。
     glm::vec3 direction{0.3f, -1.0f, 0.4f};
 
-    // 线性 RGB 颜色（不预乘 intensity）。Phase 3 视觉基线下默认白光。
+    // 线性 RGB 颜色（不预乘 intensity）。当前视觉基线下默认白光。
     glm::vec3 color{1.0f, 1.0f, 1.0f};
 
     // 标量强度乘子。Pipeline 在 fragment shader 里计算 lighting 时
@@ -47,7 +47,7 @@ struct DirectionalLight
 
     // 是否投影。false → Pipeline 跳过把这个 light 放进 shadow pass；
     // true 时 Pipeline 用第一个 castsShadow == true 的 light 计算 light
-    // view-proj、跑 depth-only pass 渲到 shadow map（Task 07 接通）。
+    // view-proj、跑 depth-only pass 渲到 shadow map。
     bool castsShadow{false};
 };
 

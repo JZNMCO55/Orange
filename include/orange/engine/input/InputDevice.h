@@ -5,7 +5,7 @@
 // InputDevice —— 物理输入设备的 key / button 枚举。
 //
 // 设计取舍：
-//   * 数值与 GLFW 对齐——Phase 1 的 Window 走 GLFW，原始 key code 直接
+//   * 数值与 GLFW 对齐——Window 走 GLFW，原始 key code 直接
 //     reinterpret 转 KeyCode，省一层人肉映射表；
 //   * 命名走"按键功能"而非"键位"：Space / Enter / Escape，避免
 //     美式 / 国际键盘差异；
@@ -105,9 +105,9 @@ enum class MouseButton : std::int32_t
     Middle  = 2,
 };
 
-// gamepad 暂占位——Phase 4 / Task 08 内不接 GLFW gamepad polling，仅为
-// JSON loader 端在解析时不抛"unknown device" 即可。真正接通 polling 等
-// Task 11 综合 demo 上线后再加。
+// gamepad 暂占位——当前不接 GLFW gamepad polling，仅为
+// JSON loader 端在解析时不抛"unknown device" 即可。真正接通 polling
+// 待后续综合 demo 上线后再加。
 enum class GamepadButton : std::int32_t
 {
     Unknown = -1,

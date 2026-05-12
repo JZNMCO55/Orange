@@ -49,7 +49,7 @@ Result<std::unique_ptr<TextureAsset>, ResultCode> TextureLoader::Load(std::strin
     {
         return ResultCode::InvalidArgument;
     }
-    // 软上限避免恶意输入诱发巨型分配；Phase 2 场景远小于这个值。
+    // 软上限避免恶意输入诱发巨型分配；当前场景远小于这个值。
     constexpr std::uint32_t kMaxDim = 16u * 1024u;
     if (width > kMaxDim || height > kMaxDim)
     {

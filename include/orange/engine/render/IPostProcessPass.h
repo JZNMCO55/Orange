@@ -9,14 +9,14 @@
 // 实际绘制命令。后处理是 RenderPass 的子集——通常是 fullscreen quad 读
 // 上一阶段的 color、写下一阶段的 color。
 //
-// **当前阶段（Phase 3 / Task 06.03）的 context 已带骨架字段**：双段 frame
+// **当前阶段的 context 已带骨架字段**：双段 frame
 // 流程把 HDR off-screen view 与 swap-chain 收尾路径都暴露给 pass；
 // Pipeline 在每帧调 Setup 一次（chain 装载或 HDR target 重建后）+ Execute
 // 一次（按 chain 顺序逐 pass）。
 //
 // 子类（HdrPass / BloomPass / TonemapPass / LutPass）当前的 Setup /
-// Execute 仍是空 stub，由 Phase 3 / Task 06.04 / 06.05 起逐步填实——本
-// task 只把 context 字段定下来，子类签名不破。
+// Execute 仍是空 stub，由后续逐步填实——本期
+// 只把 context 字段定下来，子类签名不破。
 //
 // 头文件隔离约束：本头不 #include `<orange/...>`——RHI / Renderer 的类
 // 型只用前向声明引用。游戏侧 / 引擎侧 src 实现 pass 时再 #include 完整
@@ -107,8 +107,8 @@ public:
     // FindByName 命中第一个。
     virtual const char* Name() const noexcept = 0;
 
-    // 在 chain 装载 / HDR target 重建后调用一次。Phase 3 / Task 06.03
-    // 阶段 4 个内置 pass 仍是空 stub，子类按需重写。
+    // 在 chain 装载 / HDR target 重建后调用一次。当前
+    // 4 个内置 pass 仍是空 stub，子类按需重写。
     virtual void Setup(PostProcessSetupContext& ctx) = 0;
 
     // 每帧渲染时调用，按 chain 顺序触发。

@@ -91,7 +91,7 @@ private:
 // binding 字符串语法：
 //     "key:<KeyCode 名>"        e.g. "key:Space" / "key:W"
 //     "mouse:<Left|Right|Middle>"
-//     "gamepad:<South|East|...>"   (Phase 4 / Task 08 内不消费，留 hook)
+//     "gamepad:<South|East|...>"   (当前不消费，留 hook)
 //
 // 失败码：InvalidArgument（schema_version 缺失 / actions 不是数组 /
 // binding 字符串解析失败）。

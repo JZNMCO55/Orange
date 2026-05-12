@@ -1,4 +1,4 @@
-// samples/11_save_load_demo —— Phase 5.5 收尾 demo：把 SaveGameRegistry /
+// samples/11_save_load_demo —— 把 SaveGameRegistry /
 // SaveGameSystem / SlotManager / SavePath / AutosaveScheduler 全部串成
 // 一个完整的"玩家进度存取"闭环。
 //
@@ -25,7 +25,7 @@
 // 存档格式与文件位置：
 //   * Windows：`%APPDATA%/OrangeEngine/SaveLoadDemo/saves/slot1.save` +
 //     `slot1.meta.json` 配套 sidecar；autosave 同模式
-//   * 文件格式：Phase 5.5 Task 02 定的 OSAV header + JSON payload；
+//   * 文件格式：OSAV header + JSON payload；
 //     PlayerProgress schema = `game/PlayerProgress` v1.0
 
 #include "../common/CaptureLayer.h"
@@ -153,7 +153,7 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
                                        std::move(indices));
 }
 
-// 按 NameComponent.name 反查 entity（Phase 5 sample 通用 helper）。
+// 按 NameComponent.name 反查 entity（sample 通用 helper）。
 Entity FindEntityByName(World& world, std::string_view name)
 {
     auto& reg  = world.Registry();

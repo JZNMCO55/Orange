@@ -5,10 +5,10 @@
 //
 // runtime（vendor/DragonBones/...）入口对象 dragonBones::DragonBones 必须
 // 拿一个 IEventDispatcher* 构造；那个 dispatcher 是 runtime 把 anim 事件
-// （loop / complete / frame event / sound 触发）回调出来的接缝。Phase 4 /
-// Task 02 范围只接通 runtime，不接通 Audio / 不接通游戏侧 UI——这里给一
+// （loop / complete / frame event / sound 触发）回调出来的接缝。
+// 当前只接通 runtime，不接通 Audio / 不接通游戏侧 UI——这里给一
 // 个 no-op dispatcher 顶上：实现 4 个虚函数全部空体，让 runtime 构造合
-// 法、advanceTime 真跑，但所有事件都被默默吞掉。Audio（Task 09）上线后
+// 法、advanceTime 真跑，但所有事件都被默默吞掉。Audio 上线后
 // 由它处理 Sound 事件、game 层处理 frame event。
 //
 // 头隔离：本头**不**暴露任何 dragonBones 类型 / 头到 include/orange/
@@ -16,7 +16,7 @@
 // 里 include。这保证 CLAUDE.md "Header isolation" 不变量
 //   `<dragonBones/...>` 仅出现在 src/animation/dragonbones/**
 // 在本文件层面已成立——而本头作为 src 内部接口，可被 SkeletalAnimator
-// （Task 03）实现 / smoke 测试 共同消费。
+// 实现 / smoke 测试 共同消费。
 
 #include <cstddef>
 #include <memory>
