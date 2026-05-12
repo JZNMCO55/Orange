@@ -19,6 +19,7 @@
 #include "orange/engine/core/Serialization.h"
 #include "orange/engine/physics/ColliderComponent.h"
 #include "orange/engine/physics/RigidBodyComponent.h"
+#include "orange/engine/render/Camera.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
@@ -743,6 +744,66 @@ void WriteAnimator(JsonWriter& writer,
     writer.WriteString(Join(componentPath, "backend"), ac->animator->BackendName());
 }
 
+// ---------------------------------------------------------------------------
+// Camera
+//
+// 保存 view 和 projection 两个 mat4（各 16 个 float，列主序）。
+// Load 时 view 是可选的——EditorCamera 每帧都会覆写，所以不依赖存档值；
+// projection 是必填，缺失则视为损坏数据，返回 false。
+// ---------------------------------------------------------------------------
+
+bool HasCamera(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::Camera>(entity);
+}
+
+void WriteCamera(JsonWriter& writer,
+                 std::string_view componentPath,
+                 Entity entity,
+                 const SaveContext& ctx)
+{
+    const auto* cam = ctx.world.GetComponent<Render::Camera>(entity);
+    if (cam == nullptr) { return; }
+
+    float view[16], proj[16];
+    for (int c = 0; c < 4; ++c)
+    {
+        for (int r = 0; r < 4; ++r)
+        {
+            view[c * 4 + r] = cam->view[c][r];
+            proj[c * 4 + r] = cam->projection[c][r];
+        }
+    }
+    writer.WriteFloatArray(Join(componentPath, "view"),       view, 16);
+    writer.WriteFloatArray(Join(componentPath, "projection"), proj, 16);
+}
+
+bool ReadCamera(const JsonReader& reader,
+                std::string_view  componentPath,
+                Entity            entity,
+                const LoadContext& ctx)
+{
+    // view 可选（EditorCamera 每帧覆写）
+    float view[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    reader.ReadFloatArray(Join(componentPath, "view"), view, 16);
+
+    float proj[16] = {};
+    if (!reader.ReadFloatArray(Join(componentPath, "projection"), proj, 16))
+        return false;
+
+    Render::Camera cam;
+    for (int c = 0; c < 4; ++c)
+    {
+        for (int r = 0; r < 4; ++r)
+        {
+            cam.view[c][r]       = view[c * 4 + r];
+            cam.projection[c][r] = proj[c * 4 + r];
+        }
+    }
+    ctx.world.AddComponent(entity, cam);
+    return true;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1032,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
+        {"Camera",           ComponentKind::PureData,         &HasCamera,           &WriteCamera,           &ReadCamera},
 
         // Backend-dependent：Pass 2 由 SceneSerialization 主流程按 entity
         // 配对调用 PhysicsWorld::AddBody / AnimatorRegistry::Create；这里

@@ -13,16 +13,20 @@
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/MaterialSystem.h>
+#include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
+#include <glm/geometric.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstdio>
 #include <utility>
@@ -93,10 +97,9 @@ MakeCubeMesh(float halfSize)
                                        std::move(indices));
 }
 
-// 编辑器侧的"AssetRegistry / MaterialSystem 一次性建好"——main() 在
-// SeedDemoWorld 首次调用之前调一次。失败会让 SeedDemoWorld 仍能工作
-// （RenderableComponent 退化到无 mesh / nullptr material 状态），只是 Scene
-// 面板视口看不到几何 —— 编辑器本身仍正常运转。
+// 一次性建好 AssetRegistry + 注册 ShaderLoader + 内置 mesh + MaterialSystem
+// + 所有内置材质实例。失败仅 log，不抛；SeedDemoWorld 仍能工作（Renderable
+// 退化到 nullptr material），只是 Scene 视口看不到几何。
 void InitializeEditorAssets(EditorState& state)
 {
     using Orange::Engine::Asset::AssetRegistry;
@@ -130,7 +133,7 @@ void InitializeEditorAssets(EditorState& state)
     state.pMaterials = std::make_unique<MaterialSystem>(*state.pAssets);
     if (auto rb = state.pMaterials->RegisterBuiltins(); rb.IsErr())
     {
-        // 通常意味着 shaders/orange_engine/*.spv 不在 .exe 同目录 —— in-tree
+        // 通常意味着 shaders/orange_engine/*.spv 不在 .exe 同目录——in-tree
         // build 由 CMake 把 SPV 拷到 build/bin/$<CONFIG>/shaders/orange_engine/，
         // standalone install 还没有官方流程时这里会报，但不阻止编辑器启动。
         std::fprintf(stderr,
@@ -139,23 +142,34 @@ void InitializeEditorAssets(EditorState& state)
                      static_cast<unsigned>(rb.Error()));
     }
 
+    // 地面 / 备用 textured 实例
     state.pFloorMaterial = state.pMaterials->CreateInstance("textured");
     state.pWallMaterial  = state.pMaterials->CreateInstance("textured");
-    // "+ Add Component → Renderable" 默认材质（textured）+ Light Object
-    // 发光材质（emissive）。CreateInstance 失败时回退 nullptr，调用方按
-    // nullptr 自然降级（Pipeline 跳过该 drawable）。
+
+    // v0.1.5 新增内置材质实例（失败时 unique_ptr 为 nullptr，Renderable 降级）
+    state.pToonMaterial     = state.pMaterials->CreateInstance("toon");
+    state.pRimLightMaterial = state.pMaterials->CreateInstance("rim_light");
+    state.pDissolveMaterial = state.pMaterials->CreateInstance("dissolve");
+
+    // 编辑器操作共用默认材质
     state.pDefaultRenderableMaterial = state.pMaterials->CreateInstance("textured");
     state.pLightObjectMaterial       = state.pMaterials->CreateInstance("emissive");
 }
 
-// 种子 demo 世界 —— 拓扑：
+// demo 世界层级：
 //   Root
-//   ├── Camera
-//   ├── Light
+//   ├── Camera           （2.5D 侧视角）
+//   ├── Sun              （平行光 + 软阴影）
 //   └── Geometry
-//       ├── Floor
-//       └── Wall
-//   Misc Sibling      （第二棵根，验证多根显示）
+//       ├── Ground       （大平面，textured，静态刚体）
+//       ├── Backdrop     （竖立背景平面，rim_light）
+//       ├── Platform L   （左台，toon，静态刚体）
+//       ├── Platform R   （右台，toon，静态刚体）
+//       ├── Tower        （高塔 scale×2Y，toon，静态刚体）
+//       ├── Glow Box     （溶解方块，dissolve，自动动画）
+//       ├── Emissive Pillar（自发光细柱，emissive）
+//       ├── Fire Emitter （粒子：火焰，暖橙 HDR → bloom）
+//       └── Sparkle Emitter（粒子：萤火，蓝白 HDR → bloom）
 void SeedDemoWorld(EditorState& state)
 {
     using ::Orange::Engine::Entity;
@@ -164,97 +178,278 @@ void SeedDemoWorld(EditorState& state)
     using ::Orange::Engine::Render::Camera;
     using ::Orange::Engine::Render::DirectionalLight;
     using ::Orange::Engine::Render::RenderableComponent;
+    using ::Orange::Engine::Render::ParticleEmitterComponent;
+    using ::Orange::Engine::Render::ParticleEmitterDesc;
     using ::Orange::Engine::Physics::BodyType;
     using ::Orange::Engine::Physics::ColliderComponent;
     using ::Orange::Engine::Physics::BoxDesc;
     using ::Orange::Engine::Physics::RigidBodyComponent;
 
     auto& world = *state.pWorld;
-    auto make = [&](const char* name) {
+    auto make = [&](const char* name) -> Entity {
         Entity e = world.CreateEntity();
         world.AddComponent<NameComponent>(e, NameComponent{name});
         world.AddComponent<TransformComponent>(e, TransformComponent{});
         return e;
     };
 
+    // ---- 层级容器 -------------------------------------------------------
     Entity root     = make("Root");
     Entity camera   = make("Camera");
-    Entity light    = make("Light");
+    Entity sun      = make("Sun");
     Entity geometry = make("Geometry");
-    Entity floor    = make("Floor");
-    Entity wall     = make("Wall");
-    Entity misc     = make("Misc Sibling");
 
-    // Camera：透视投影 + lookAt 从前上方看向原点，让 Floor / Wall 都在视
-    // 野里。aspect 用 1:1（Scene 视口默认尺寸先按方形），S3 / S4 接通
-    // viewport resize 后由编辑器相机系统按实际尺寸覆盖 projection。
+    // ---- Geometry 下的子节点 --------------------------------------------
+    Entity ground          = make("Ground");
+    Entity backdrop        = make("Backdrop");
+    Entity platformLeft    = make("Platform L");
+    Entity platformRight   = make("Platform R");
+    Entity tower           = make("Tower");
+    Entity glowBox         = make("Glow Box");
+    Entity emissivePillar  = make("Emissive Pillar");
+    Entity fireEmitter     = make("Fire Emitter");
+    Entity sparkleEmitter  = make("Sparkle Emitter");
+
+    // ---- Camera：2.5D 侧视角 + 轻微俯角 --------------------------------
+    // EditorCamera 会每帧覆写 view 矩阵；此处的 view 仅在非编辑器消费
+    // （如 Play Mode 截图、非 editor host）时生效。
     {
-        Camera cam = Camera::Perspective(glm::radians(50.0f),
+        Camera cam = Camera::Perspective(glm::radians(45.0f),
                                          /*aspect=*/1.0f,
                                          /*zNear=*/0.1f,
                                          /*zFar=*/100.0f);
-        cam.view = glm::lookAt(glm::vec3(3.0f, 2.5f, 5.0f),
-                               glm::vec3(0.0f, 0.5f, 0.0f),
+        cam.view = glm::lookAt(glm::vec3(0.0f, 2.0f, 8.0f),
+                               glm::vec3(0.0f, 1.0f, 0.0f),
                                glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent<Camera>(camera, cam);
     }
 
-    // Light：默认朝下方略偏前的方向 —— 让 Wall 在 Floor 上投出可见阴影。
+    // ---- Sun：暖色平行光 + 软阴影开启 -----------------------------------
     {
+        auto* tc = world.GetComponent<TransformComponent>(sun);
+        if (tc != nullptr) { tc->position = glm::vec3(5.0f, 8.0f, 5.0f); }
+
         DirectionalLight dl{};
-        world.AddComponent<DirectionalLight>(light, dl);
+        dl.direction   = glm::normalize(glm::vec3(0.4f, -1.0f, 0.3f));
+        dl.color       = glm::vec3(1.0f, 0.93f, 0.78f);  // 暖黄阳光
+        dl.intensity   = 1.3f;
+        dl.castsShadow = true;  // 开启软阴影（Phase 3 Task 05 已落地）
+        world.AddComponent<DirectionalLight>(sun, dl);
     }
 
-    // Floor：plane mesh + textured material；地面通常不投自己阴影。
+    // ---- Ground（大平面，textured，静态刚体）----------------------------
     {
-        // 调整 Floor transform：略下移让 cube 站在地面上（cube 中心在 y=0
-        // 时 -Y 面落在 y=-0.5；地面 y=-0.5 与 cube 底齐）。
-        auto* floorT = world.GetComponent<TransformComponent>(floor);
-        if (floorT != nullptr)
-        {
-            floorT->position.y = -0.5f;
-        }
-        RenderableComponent rcFloor{};
-        rcFloor.mesh             = state.planeMeshHandle;
-        rcFloor.materialInstance = state.pFloorMaterial.get();
-        rcFloor.visible          = true;
-        rcFloor.castsShadow      = false;
-        world.AddComponent<RenderableComponent>(floor, rcFloor);
+        auto* tc = world.GetComponent<TransformComponent>(ground);
+        if (tc != nullptr) { tc->position.y = -0.5f; }
 
-        RigidBodyComponent rbFloor{};
-        rbFloor.type            = BodyType::Static;
-        rbFloor.fixedRotation   = true;
-        rbFloor.gravityScale    = 0.0f;
-        world.AddComponent<RigidBodyComponent>(floor, rbFloor);
+        RenderableComponent rc{};
+        rc.mesh             = state.planeMeshHandle;
+        rc.materialInstance = state.pFloorMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = false;
+        world.AddComponent<RenderableComponent>(ground, rc);
 
-        ColliderComponent ccFloor{};
-        ccFloor.shape       = BoxDesc{glm::vec2{5.0f, 0.5f}};  // 半宽 / 半高
-        ccFloor.density     = 0.0f;
-        ccFloor.friction    = 0.5f;
-        world.AddComponent<ColliderComponent>(floor, ccFloor);
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(ground, rb);
+
+        ColliderComponent cc{};
+        cc.shape    = BoxDesc{glm::vec2{5.0f, 0.5f}};
+        cc.density  = 0.0f;
+        cc.friction = 0.6f;
+        world.AddComponent<ColliderComponent>(ground, cc);
     }
 
-    // Wall：cube mesh + textured material；偏左一点站在 Floor 上方。
+    // ---- Backdrop（竖立背景平面，rim_light）-----------------------------
+    // 绕 +X 轴旋转 90°：平面法线 +Y → +Z，朝向相机，形成 5×5 背景幕布。
+    // 位于 z=-3.5，Y 方向从地面 (-0.5) 延伸到上方 (4.5)。
     {
-        auto* wallT = world.GetComponent<TransformComponent>(wall);
-        if (wallT != nullptr)
+        auto* tc = world.GetComponent<TransformComponent>(backdrop);
+        if (tc != nullptr)
         {
-            wallT->position = glm::vec3(-1.0f, 0.0f, 0.0f);  // cube 底面正好坐在 Floor 上
+            tc->position = glm::vec3(0.0f, 2.0f, -3.5f);
+            tc->rotation = glm::angleAxis(glm::radians(90.0f),
+                                          glm::vec3(1.0f, 0.0f, 0.0f));
         }
-        RenderableComponent rcWall{};
-        rcWall.mesh             = state.cubeMeshHandle;
-        rcWall.materialInstance = state.pWallMaterial.get();
-        rcWall.visible          = true;
-        rcWall.castsShadow      = true;
-        world.AddComponent<RenderableComponent>(wall, rcWall);
+        RenderableComponent rc{};
+        rc.mesh             = state.planeMeshHandle;
+        rc.materialInstance = state.pRimLightMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = false;
+        world.AddComponent<RenderableComponent>(backdrop, rc);
     }
 
+    // ---- Platform L（左侧平台，toon，静态刚体）--------------------------
+    {
+        auto* tc = world.GetComponent<TransformComponent>(platformLeft);
+        if (tc != nullptr) { tc->position = glm::vec3(-2.0f, 0.0f, 0.0f); }
+
+        RenderableComponent rc{};
+        rc.mesh             = state.cubeMeshHandle;
+        rc.materialInstance = state.pToonMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = true;
+        world.AddComponent<RenderableComponent>(platformLeft, rc);
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(platformLeft, rb);
+
+        ColliderComponent cc{};
+        cc.shape    = BoxDesc{glm::vec2{0.5f, 0.5f}};
+        cc.density  = 0.0f;
+        cc.friction = 0.4f;
+        world.AddComponent<ColliderComponent>(platformLeft, cc);
+    }
+
+    // ---- Platform R（右侧平台，toon，静态刚体）--------------------------
+    {
+        auto* tc = world.GetComponent<TransformComponent>(platformRight);
+        if (tc != nullptr) { tc->position = glm::vec3(2.0f, 0.0f, 0.0f); }
+
+        RenderableComponent rc{};
+        rc.mesh             = state.cubeMeshHandle;
+        rc.materialInstance = state.pToonMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = true;
+        world.AddComponent<RenderableComponent>(platformRight, rc);
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(platformRight, rb);
+
+        ColliderComponent cc{};
+        cc.shape    = BoxDesc{glm::vec2{0.5f, 0.5f}};
+        cc.density  = 0.0f;
+        cc.friction = 0.4f;
+        world.AddComponent<ColliderComponent>(platformRight, cc);
+    }
+
+    // ---- Tower（高塔，scale Y×2，toon，静态刚体）-----------------------
+    // scale(1,2,1) → 实际半高 1.0；center y=0.5 → 底部 y=-0.5（齐地面）。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(tower);
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(0.0f, 0.5f, -1.0f);
+            tc->scale    = glm::vec3(1.0f, 2.0f, 1.0f);
+        }
+        RenderableComponent rc{};
+        rc.mesh             = state.cubeMeshHandle;
+        rc.materialInstance = state.pToonMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = true;
+        world.AddComponent<RenderableComponent>(tower, rc);
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(tower, rb);
+
+        // 物理碰撞盒需与 scale 后的实际半尺寸匹配
+        ColliderComponent cc{};
+        cc.shape    = BoxDesc{glm::vec2{0.5f, 1.0f}};
+        cc.density  = 0.0f;
+        cc.friction = 0.5f;
+        world.AddComponent<ColliderComponent>(tower, cc);
+    }
+
+    // ---- Glow Box（dissolve 溶解方块，自动 pingpong 动画）---------------
+    // dissolve shader 从 light UBO 的 uFrameInfo.x 自驱 dissolve_t，
+    // 不需要 game 代码手动驱动——Edit 模式下即可看到溶解 + 发光边沿效果。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(glowBox);
+        if (tc != nullptr) { tc->position = glm::vec3(0.8f, 0.0f, 0.5f); }
+
+        RenderableComponent rc{};
+        rc.mesh             = state.cubeMeshHandle;
+        rc.materialInstance = state.pDissolveMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = false;
+        world.AddComponent<RenderableComponent>(glowBox, rc);
+    }
+
+    // ---- Emissive Pillar（自发光细柱，emissive，HDR→bloom）--------------
+    // scale(0.5,2.5,0.5) → 细高柱；center y=0.75 → 底部 y=-0.5（齐地面）。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(emissivePillar);
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(-1.2f, 0.75f, 1.0f);
+            tc->scale    = glm::vec3(0.5f, 2.5f, 0.5f);
+        }
+        RenderableComponent rc{};
+        rc.mesh             = state.cubeMeshHandle;
+        rc.materialInstance = state.pLightObjectMaterial.get();
+        rc.visible          = true;
+        rc.castsShadow      = false;
+        world.AddComponent<RenderableComponent>(emissivePillar, rc);
+    }
+
+    // ---- Fire Emitter（火焰粒子：暖橙 HDR，bloom 自动触发光晕）----------
+    {
+        auto* tc = world.GetComponent<TransformComponent>(fireEmitter);
+        if (tc != nullptr) { tc->position = glm::vec3(1.5f, -0.3f, 0.5f); }
+
+        ParticleEmitterComponent pec{};
+        pec.emitting               = true;
+        pec.desc.emissionRate      = 30.0f;
+        pec.desc.lifetimeMin       = 0.6f;
+        pec.desc.lifetimeMax       = 1.2f;
+        pec.desc.spawnOffsetMin    = glm::vec2{-0.12f, 0.0f};
+        pec.desc.spawnOffsetMax    = glm::vec2{ 0.12f, 0.0f};
+        pec.desc.initialVelocityMin = glm::vec2{-0.25f, 1.2f};
+        pec.desc.initialVelocityMax = glm::vec2{ 0.25f, 2.2f};
+        pec.desc.gravity           = glm::vec2{0.0f, -0.4f};
+        pec.desc.colorStart        = glm::vec4{1.6f, 0.75f, 0.1f, 2.2f};  // HDR 橙黄
+        pec.desc.colorEnd          = glm::vec4{0.7f, 0.15f, 0.0f, 0.0f};  // 红色熄灭
+        pec.desc.sizeStart         = 0.04f;
+        pec.desc.sizeEnd           = 0.09f;
+        pec.desc.maxParticles      = 128u;
+        world.AddComponent<ParticleEmitterComponent>(fireEmitter, pec);
+    }
+
+    // ---- Sparkle Emitter（萤火粒子：蓝白 HDR，飘浮上升）----------------
+    {
+        auto* tc = world.GetComponent<TransformComponent>(sparkleEmitter);
+        if (tc != nullptr) { tc->position = glm::vec3(-1.5f, 1.2f, 0.8f); }
+
+        ParticleEmitterComponent pec{};
+        pec.emitting               = true;
+        pec.desc.emissionRate      = 10.0f;
+        pec.desc.lifetimeMin       = 2.0f;
+        pec.desc.lifetimeMax       = 3.5f;
+        pec.desc.spawnOffsetMin    = glm::vec2{-0.5f, -0.3f};
+        pec.desc.spawnOffsetMax    = glm::vec2{ 0.5f,  0.3f};
+        pec.desc.initialVelocityMin = glm::vec2{-0.15f, 0.05f};
+        pec.desc.initialVelocityMax = glm::vec2{ 0.15f, 0.35f};
+        pec.desc.gravity           = glm::vec2{0.0f, 0.08f};   // 轻微上浮
+        pec.desc.colorStart        = glm::vec4{0.7f, 0.9f, 3.0f, 3.5f};  // HDR 蓝白（强 bloom）
+        pec.desc.colorEnd          = glm::vec4{0.3f, 0.5f, 1.0f, 0.0f};  // 蓝色消散
+        pec.desc.sizeStart         = 0.025f;
+        pec.desc.sizeEnd           = 0.055f;
+        pec.desc.maxParticles      = 64u;
+        world.AddComponent<ParticleEmitterComponent>(sparkleEmitter, pec);
+    }
+
+    // ---- 构建父子层级 ---------------------------------------------------
     EditorHierarchy::LinkAsLastChild(world, root,     camera);
-    EditorHierarchy::LinkAsLastChild(world, root,     light);
+    EditorHierarchy::LinkAsLastChild(world, root,     sun);
     EditorHierarchy::LinkAsLastChild(world, root,     geometry);
-    EditorHierarchy::LinkAsLastChild(world, geometry, floor);
-    EditorHierarchy::LinkAsLastChild(world, geometry, wall);
-    // root 和 misc 自身是 root level —— 不挂任何 parent，HierarchyComponent
-    // 也可以不加（树视图按"无 HC 或 parent invalid 视为 root"处理）。
-    (void)misc;
+    EditorHierarchy::LinkAsLastChild(world, geometry, ground);
+    EditorHierarchy::LinkAsLastChild(world, geometry, backdrop);
+    EditorHierarchy::LinkAsLastChild(world, geometry, platformLeft);
+    EditorHierarchy::LinkAsLastChild(world, geometry, platformRight);
+    EditorHierarchy::LinkAsLastChild(world, geometry, tower);
+    EditorHierarchy::LinkAsLastChild(world, geometry, glowBox);
+    EditorHierarchy::LinkAsLastChild(world, geometry, emissivePillar);
+    EditorHierarchy::LinkAsLastChild(world, geometry, fireEmitter);
+    EditorHierarchy::LinkAsLastChild(world, geometry, sparkleEmitter);
 }

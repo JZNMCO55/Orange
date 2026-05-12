@@ -53,10 +53,10 @@ void EditorRenderLayer::DrawScenePanel()
         ImGui::TextDisabled("scene viewport 未就绪 —— 面板太小或 Pipeline 初始化失败");
         const auto& ec = mState.editorCamera;
         ImGui::Text("viewport %.0fx%.0f  aspect=%.2f", region.x, region.y, aspect);
-        ImGui::Text("camera pos=(%.2f, %.2f, %.2f)  yaw=%.2f  pitch=%.2f",
-                    ec.position.x, ec.position.y, ec.position.z,
-                    ec.yaw, ec.pitch);
-        ImGui::TextDisabled("RMB 拖动 旋转  滚轮 缩放  WASD/QE 移动（需 focus 本面板）");
+        ImGui::Text("camera pivot=(%.2f, %.2f, %.2f)  az=%.2f  el=%.2f  r=%.2f",
+                    ec.pivot.x, ec.pivot.y, ec.pivot.z,
+                    ec.azimuth, ec.elevation, ec.radius);
+        ImGui::TextDisabled("LMB 拖动 旋转  滚轮 缩放");
     }
 
     ImGui::End();

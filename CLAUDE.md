@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 回答语言
+
+**所有回答必须使用中文。** 无论用户用何种语言提问，所有面向用户的文字输出（解释、说明、分析、建议等）均使用中文书写。代码标识符、专业术语（API 名称、库名、命令行参数等）保留英文原文不翻译。
+
 ## Project
 
 OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games (first product: an Ori-like 平台跳跃 with a fluid/slime protagonist that swallows boss forms). It is delivered as a static library `OrangeEngine::orange_engine` (switchable to dll via `BUILD_SHARED_LIBS=ON`) intended for third-party integration through `find_package(OrangeEngine CONFIG)`. The engine owns scene representation, asset management, animation runtimes, physics, audio, input, and the application main loop; it does **not** own gameplay, narrative, level data, or game-specific systems (those live in the consumer game repository).

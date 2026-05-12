@@ -31,10 +31,18 @@ void EditorRenderLayer::DrawEntityTreePanel()
         return;
     }
 
+    // Play / Paused 期间禁止结构性编辑；Edit 态才允许。
+    // 这里统一给"一帧内所有结构性操作的入口"加防护；帧末 apply 处不
+    // 再重复检查 —— 保证 pendingXxx 只在 canEdit 为 true 时被写入。
+    const bool canEdit = (mState.playState == PlayState::Edit);
+
     // 全局快捷键：F2 重命名选中、Del 删除选中。重命名进行中不响应
     // —— 否则 InputText 里按 Del 删字符会同时触发实体删除。
     const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    if (focused && !mState.renamingEntity.IsValid() && mState.selectedEntity.IsValid()) {
+    if (canEdit && focused
+        && !mState.renamingEntity.IsValid()
+        && mState.selectedEntity.IsValid())
+    {
         if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
             BeginRename(mState.selectedEntity);
         }
@@ -63,7 +71,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.y > 0.0f) {
         ImGui::Dummy(avail);
-        if (ImGui::BeginDragDropTarget()) {
+        if (canEdit && ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* p =
                     ImGui::AcceptDragDropPayload(kEntityPayload)) {
                 Orange::Engine::Entity src{};
@@ -83,6 +91,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
             "##tree_bg_ctx",
               ImGuiPopupFlags_MouseButtonRight
             | ImGuiPopupFlags_NoOpenOverItems)) {
+        ImGui::BeginDisabled(!canEdit);
         if (ImGui::MenuItem("Create Entity (root)")) {
             mState.pendingCreate = {Orange::Engine::Entity::Invalid(),
                                     EditorState::PendingCreateKind::Empty, true};
@@ -91,6 +100,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
             mState.pendingCreate = {Orange::Engine::Entity::Invalid(),
                                     EditorState::PendingCreateKind::Light, true};
         }
+        ImGui::EndDisabled();
         ImGui::EndPopup();
     }
 
@@ -200,6 +210,10 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     ImGui::PushID(static_cast<int>(static_cast<std::uint32_t>(entity.Value())));
 
     bool open = false;
+    // 节点级编辑权限 —— 与 DrawEntityTreePanel 顶部的 canEdit 同逻辑，
+    // 但 DrawEntityNodeRecursive 是独立调用栈，所以这里重新取一次。
+    const bool canEditNode = (mState.playState == PlayState::Edit);
+
     if (renaming) {
         // 空 label + SameLine InputText —— TreeNode 三角仍可用，
         // label 区域被 InputText 接管。
@@ -237,15 +251,16 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
             mState.selectedEntity = entity;
         }
-        // 双击 entry-body 进入重命名（不是双击三角 —— OpenOnDoubleClick
-        // 让三角双击只切换展开）
-        if (ImGui::IsItemHovered()
+        // 双击 entry-body 进入重命名（Edit 态才允许）
+        if (canEditNode
+            && ImGui::IsItemHovered()
             && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
             && !ImGui::IsItemToggledOpen()) {
             BeginRename(entity);
         }
-        // DnD source —— 只有非重命名态才允许拖拽
-        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+        // DnD source —— Play / Paused 期间禁止拖拽（防止触发 reparent）
+        if (canEditNode
+            && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
             ImGui::SetDragDropPayload(kEntityPayload, &entity, sizeof(entity));
             ImGui::Text("Move %s",
                         (name != nullptr && !name->name.empty())
@@ -253,10 +268,11 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             ImGui::EndDragDropSource();
         }
     }
-    // 节点上的右键菜单 —— "Create Child" 把新实体挂为本节点末子；
-    // Rename / Delete 把 F2 / Del 快捷键的等价入口挂上菜单。
+    // 节点右键菜单 —— 选中始终允许；结构性操作（Create/Rename/Delete）
+    // 受 canEditNode 约束。
     if (!renaming && ImGui::BeginPopupContextItem("##node_ctx")) {
         mState.selectedEntity = entity;
+        ImGui::BeginDisabled(!canEditNode);
         if (ImGui::MenuItem("Create Child")) {
             mState.pendingCreate = {entity, EditorState::PendingCreateKind::Empty, true};
         }
@@ -270,11 +286,12 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         if (ImGui::MenuItem("Delete", "Del")) {
             mState.pendingDelete = entity;
         }
+        ImGui::EndDisabled();
         ImGui::EndPopup();
     }
 
-    // DnD target —— 无论是否重命名都可接受 drop，把别的节点挂到本节点下
-    if (ImGui::BeginDragDropTarget()) {
+    // DnD target —— Play / Paused 期间不接受 drop
+    if (canEditNode && ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p =
                 ImGui::AcceptDragDropPayload(kEntityPayload)) {
             Orange::Engine::Entity src{};

@@ -9,9 +9,17 @@
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/platform/Window.h>
+#include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
+#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <orange/renderer/RenderTypes.h>
 #include <orange/renderer/VulkanInterop.h>
@@ -26,6 +34,7 @@
 #include <backends/imgui_impl_vulkan.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <variant>
 
@@ -34,6 +43,38 @@ namespace
 
 // Esc 全局退出（与 Input::KeyCode::Escape 同值）；仅本 TU 用。
 constexpr std::int32_t kEscapeKeyRaw = 256;
+
+// Play → Stop 后 Scene::Load 重建了所有 RenderableComponent，但
+// materialInstance 不参与序列化（raw 指针，由编辑器侧持有）。
+// 这里按实体名把材质指针重新挂回去。
+// 没有对应名字的实体统一挂 pDefaultRenderableMaterial（textured），
+// 与 "Add Renderable Component" 编辑器操作的默认行为保持一致。
+void ReattachMaterialInstances(EditorState& state)
+{
+    if (state.pWorld == nullptr) { return; }
+
+    using Orange::Engine::Render::RenderableComponent;
+    using Orange::Engine::Scene::NameComponent;
+
+    auto& reg  = state.pWorld->Registry();
+    auto  view = reg.view<RenderableComponent>();
+    for (const auto e : view)
+    {
+        auto& rc = view.get<RenderableComponent>(e);
+        if (rc.materialInstance != nullptr) { continue; }  // 已有材质不覆盖
+
+        const NameComponent* nc  = reg.try_get<NameComponent>(e);
+        const std::string    name = nc ? nc->name : "";
+
+        if      (name == "Ground")                                 rc.materialInstance = state.pFloorMaterial.get();
+        else if (name == "Backdrop")                               rc.materialInstance = state.pRimLightMaterial.get();
+        else if (name == "Platform L" || name == "Platform R"
+              || name == "Tower")                                  rc.materialInstance = state.pToonMaterial.get();
+        else if (name == "Glow Box")                               rc.materialInstance = state.pDissolveMaterial.get();
+        else if (name == "Emissive Pillar")                        rc.materialInstance = state.pLightObjectMaterial.get();
+        else                                                       rc.materialInstance = state.pDefaultRenderableMaterial.get();
+    }
+}
 
 }  // namespace
 
@@ -96,6 +137,63 @@ EditorRenderLayer::~EditorRenderLayer()
 
 void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 {
+    // 无论 Play/Edit 状态都推进编辑器时间，供 dissolve 等时间驱动 shader 预览
+    const float dt = static_cast<float>(frame.time.deltaSeconds);
+    mEditorTime += dt;
+    if (mpScenePipeline != nullptr)
+    {
+        mpScenePipeline->SetFrameTime(mEditorTime);
+    }
+
+    // ---- Play 态 simulation tick（在 ImGui 帧开始前推进，保证
+    //      本帧 DrawScenePanel → Pipeline::Render 看到最新状态）-----
+    if (mState.playState == PlayState::Play && mState.pWorld != nullptr) {
+        // Physics step → 把 dynamic body 新位姿写回 ECS Transform
+        if (mpPhysicsWorld != nullptr) {
+            mpPhysicsWorld->Step(dt);
+            auto& reg = mState.pWorld->Registry();
+            using TC  = Orange::Engine::Scene::TransformComponent;
+            using namespace Orange::Engine::Physics;
+            for (auto e : reg.view<RigidBodyComponent>()) {
+                auto& rb = reg.get<RigidBodyComponent>(e);
+                if (rb.type == BodyType::Static) { continue; }
+                if (!mpPhysicsWorld->IsValid(rb.handle)) { continue; }
+                const BodyTransform xf = mpPhysicsWorld->GetBodyTransform(rb.handle);
+                auto* tc = reg.try_get<TC>(e);
+                if (tc != nullptr) {
+                    tc->position.x = xf.position.x;
+                    tc->position.y = xf.position.y;
+                    // 2D 物理只有 Z 轴旋转，直接从角度重建 quat
+                    tc->rotation = glm::quat(glm::vec3(0.0f, 0.0f, xf.angle));
+                }
+            }
+        }
+
+        // Particle emitter tick
+        if (mpVfxSystem != nullptr) {
+            mpVfxSystem->Tick(*mState.pWorld, dt);
+            // 诊断：每秒打一次粒子计数，确认 sim 是否正常运行
+            static float sDiagTimer = 0.0f;
+            sDiagTimer += dt;
+            if (sDiagTimer >= 1.0f) {
+                sDiagTimer = 0.0f;
+                std::fprintf(stdout, "[vfx-diag] live particles: %zu\n",
+                             mpVfxSystem->TotalLiveParticleCount());
+            }
+        }
+
+        // Animator tick
+        {
+            using namespace Orange::Engine::Animation;
+            for (auto e : mState.pWorld->Registry().view<AnimatorComponent>()) {
+                auto& ac = mState.pWorld->Registry().get<AnimatorComponent>(e);
+                if (ac.animator != nullptr) {
+                    ac.animator->Tick(dt);
+                }
+            }
+        }
+    }
+
     // ---- ImGui 帧开始 ---------------------------------------------
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -403,12 +501,8 @@ void EditorRenderLayer::ApplyPendingSceneOp()
 }
 
 // ---------------------------------------------------------------------------
-// Play Mode（Task 06-09）—— 状态机迁移处理
+// Play Mode —— 状态机迁移处理
 // ---------------------------------------------------------------------------
-//
-// S1 范围：只做状态机骨架；snapshot 序列化 + simulation tick 在 S2 / S3 /
-// S4 加。Edit ↔ Play ↔ Paused 迁移的"行为"用 stdout 占位，验证转入 / 转
-// 出钩子在正确时机调到。
 void EditorRenderLayer::ApplyPendingPlayOp()
 {
     const PlayOp op = mState.pendingPlayOp;
@@ -418,9 +512,81 @@ void EditorRenderLayer::ApplyPendingPlayOp()
     switch (op) {
         case PlayOp::EnterPlay: {
             if (mState.playState != PlayState::Edit) { break; }
-            // TODO S2: World snapshot 落盘到 temp file，路径写 playSnapshotPath
-            // TODO S3: 实例化 PhysicsWorld + AddBody / AddFixture
-            // TODO S4: 实例化 VfxSystem + Pipeline.SetVfxSystem
+
+            // S2: World 快照落盘 —— Stop 时从此路径还原，保证 Play 期
+            //     对 ECS 的所有修改（物理驱动 Transform / 粒子spawn）都
+            //     能被丢弃，回到 Play 前的编辑状态。
+            {
+                namespace fs = std::filesystem;
+                mState.playSnapshotPath =
+                    (fs::temp_directory_path() /
+                     "OrangeEditor_play_snapshot.scene.json").string();
+                Orange::Engine::Scene::SaveOptions saveOpts;
+                saveOpts.assetRegistry = mState.pAssets.get();
+                const auto rc = Orange::Engine::Scene::Save(
+                    *mState.pWorld, mState.playSnapshotPath, saveOpts);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                        "[OrangeEditor] Play 快照落盘失败: %s (code=%u) —— 取消进入 Play\n",
+                        mState.playSnapshotPath.c_str(),
+                        static_cast<unsigned>(rc.Error()));
+                    mState.playSnapshotPath.clear();
+                    break;  // 快照失败则保持 Edit，不进 Play
+                }
+            }
+
+            // S3: PhysicsWorld 接入 —— 遍历所有同时挂 RigidBody +
+            //     Collider 的 entity，从 TransformComponent 填 initial
+            //     pos / angle，注册进 PhysicsWorld，handle 反写回 ECS。
+            {
+                mpPhysicsWorld =
+                    std::make_unique<Orange::Engine::Physics::PhysicsWorld>();
+                auto& reg = mState.pWorld->Registry();
+                using TC  = Orange::Engine::Scene::TransformComponent;
+                using namespace Orange::Engine::Physics;
+                for (auto e : reg.view<RigidBodyComponent, ColliderComponent>()) {
+                    auto& rb = reg.get<RigidBodyComponent>(e);
+                    auto& cc = reg.get<ColliderComponent>(e);
+                    const auto* tc = reg.try_get<TC>(e);
+                    if (tc != nullptr) {
+                        rb.initialPosition =
+                            glm::vec2(tc->position.x, tc->position.y);
+                        // glm::eulerAngles 返回 (pitch, yaw, roll) 弧度；
+                        // 2D 平面物理只用 Z 轴旋转（roll）
+                        const glm::vec3 euler = glm::eulerAngles(tc->rotation);
+                        rb.initialAngle = euler.z;
+                    }
+                    const BodyHandle h = mpPhysicsWorld->AddBody(rb, cc);
+                    rb.handle = h;
+                }
+            }
+
+            // S4: VfxSystem 接入 —— 需要 Pipeline 已就绪（Scene 面板
+            //     必须至少渲染过一帧才会 lazy init Pipeline）。
+            if (mpScenePipeline != nullptr && mState.pAssets != nullptr) {
+                mpVfxSystem =
+                    std::make_unique<Orange::Engine::Render::VfxSystem>();
+                // framesInFlight 与 Pipeline 同值（典型 2）
+                constexpr std::uint32_t kFIF = 2u;
+                const auto rc = mpVfxSystem->Initialize(
+                    static_cast<void*>(&mRenderDevice), kFIF,
+                    *mState.pAssets);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                        "[OrangeEditor] VfxSystem::Initialize 失败 (code=%u)\n",
+                        static_cast<unsigned>(rc.Error()));
+                    mpVfxSystem.reset();
+                } else {
+                    mpScenePipeline->SetVfxSystem(mpVfxSystem.get());
+                    std::fprintf(stdout, "[play] VfxSystem 初始化成功，粒子 tick 已启动\n");
+                }
+            } else {
+                std::fprintf(stderr,
+                    "[play] VfxSystem 跳过：Pipeline=%s  Assets=%s\n",
+                    mpScenePipeline ? "ok" : "null",
+                    mState.pAssets  ? "ok" : "null");
+            }
+
             mState.playState = PlayState::Play;
             std::fprintf(stdout, "[play] Edit → Play\n");
             break;
@@ -439,12 +605,50 @@ void EditorRenderLayer::ApplyPendingPlayOp()
         }
         case PlayOp::Stop: {
             if (mState.playState == PlayState::Edit) { break; }
-            // TODO S4: Pipeline.SetVfxSystem(nullptr) + Shutdown VfxSystem
-            // TODO S3: 销毁 PhysicsWorld
-            // TODO S2: Scene::Load 从 playSnapshotPath 还原 World；ResetEntityLocalState
+            const char* prevLabel =
+                (mState.playState == PlayState::Play) ? "Play" : "Paused";
+
+            // S4 拆卸：先断开 Pipeline → VfxSystem 引用，再 Shutdown / reset
+            if (mpScenePipeline != nullptr) {
+                mpScenePipeline->SetVfxSystem(nullptr);
+            }
+            if (mpVfxSystem != nullptr) {
+                mpVfxSystem->Shutdown();
+                mpVfxSystem.reset();
+            }
+
+            // S3 拆卸：销毁 PhysicsWorld（所有 b2 body 随之释放）
+            mpPhysicsWorld.reset();
+
+            // S2 还原：从快照加载回 Edit 前的 World 状态。
+            //   - 只传 assetRegistry（mesh / material handle round-trip 需要）
+            //   - 不传 physicsWorld / animatorRegistry：Edit 态不需要
+            //     运行时 backend，handle 留 Invalid 是正确的 Edit 态初值
+            if (!mState.playSnapshotPath.empty()) {
+                auto pNew = std::make_unique<Orange::Engine::World>();
+                Orange::Engine::Scene::LoadOptions loadOpts;
+                loadOpts.assetRegistry = mState.pAssets.get();
+                const auto rc = Orange::Engine::Scene::Load(
+                    mState.playSnapshotPath, *pNew, loadOpts);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                        "[OrangeEditor] Play 快照还原失败 (code=%u)，"
+                        "保留 Play 后的 World\n",
+                        static_cast<unsigned>(rc.Error()));
+                } else {
+                    mState.pWorld = std::move(pNew);
+                    // Scene::Load 恢复了所有 PureData component，但
+                    // materialInstance（raw 指针，editor 侧持有）不参与
+                    // 序列化，需在此重新挂回。
+                    ReattachMaterialInstances(mState);
+                }
+                std::filesystem::remove(mState.playSnapshotPath);
+                mState.playSnapshotPath.clear();
+            }
+
             mState.playState = PlayState::Edit;
-            std::fprintf(stdout, "[play] %s → Edit\n",
-                         (op == PlayOp::Stop) ? "Play/Paused" : "?");
+            ResetEntityLocalState();
+            std::fprintf(stdout, "[play] %s → Edit\n", prevLabel);
             break;
         }
         case PlayOp::None:

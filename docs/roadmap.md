@@ -11,7 +11,9 @@
 
 ## Phase 6 · 编辑器 v0.1
 
-**目标**：把 `samples/07_full_pipeline` 升级为独立 target `tools/OrangeEditor`，提供关卡 / 粒子 / 材质三个最小工具子集，足以让美术 / 关卡设计师不写代码完成日常工作。
+> **后续演进迁移至独立路线图**：编辑器 v0.2 之后的所有里程碑（Command System + Undo/Redo / Property Schema / Gizmo / Asset 浏览器 / 多 layer / Animation 子模式 / Log + Keybinding / Profiler / ...）记录在 [`editor-roadmap.md`](./editor-roadmap.md)。本节内的 Task 06-01 ~ 06-09 是 **v0.1 闭环的历史快照**，保留供回溯，不再扩展。
+
+**目标**（v0.1 范围）：把 `samples/07_full_pipeline` 升级为独立 target `tools/OrangeEditor`，提供关卡 / 粒子 / 材质三个最小工具子集，足以让美术 / 关卡设计师不写代码完成日常工作。
 
 **闭环后解锁**：游戏 content 生产从"程序员手写 JSON"过渡到"编辑器交互式编辑"。
 
@@ -198,6 +200,14 @@
   * **Animator 接入**：每帧遍历 AnimatorComponent 调 `animator->Tick(dt)`（运行时已经支持）
   * **Edit 期 vs Play 期编辑约束**：Play 期间禁用结构性编辑（CreateEntity / Delete / DnD reparent / Rename）—— 防止 simulation invariant 被打破；Inspector 字段编辑也禁（component 是 simulation 输入，运行时改有非确定后果）。Paused 期 = Play 帧暂停 + 编辑同样禁；用户可以选 Inspector 查看运行时数值但不能改
 - Critical Path：是 —— 06-08 让"看到场景"，06-09 让"组件挂上能动"。Phase 6 闭环目标是"美术 / 关卡设计师不写代码完成日常工作"，物理 / 粒子可视化是日常工作必备
+- **落地状态**（2026-05-12）：
+  - **S1**（2026-05-11 已落）：PlayState 枚举 + PlayOp 枚举 + EditorState 字段 + Play/Pause/Stop 按钮 + ApplyPendingPlayOp 骨架
+  - **S2**：World 快照落盘（`%TEMP%/OrangeEditor_play_snapshot.scene.json`，带 SaveOptions.assetRegistry 保证 mesh handle round-trip）；Stop 时 Load 还原 + 删 temp 文件 + ResetEntityLocalState
+  - **S3**：PhysicsWorld 实例化 + 遍历 `view<RigidBodyComponent, ColliderComponent>` 注册 body（从 TransformComponent 填 initialPosition/initialAngle，handle 反写 ECS）；每帧 Step + dynamic body transform 写回 ECS（Z-axis quat）；Stop 时 reset
+  - **S4**：VfxSystem 实例化 + Initialize(renderDevice, 2) + Pipeline::SetVfxSystem；每帧 Tick；Stop 时 SetVfxSystem(nullptr) + Shutdown + reset。Animator 每帧 Tick。Play/Paused 期编辑约束：Entity Tree（快捷键/DnD/右键菜单）+ Inspector（BeginDisabled 包裹全部 DrawInspectorXxx + Add Component）
+  - **快照实现说明**：原实现要点写"stringstream 落点"，最终走 temp 文件（`std::filesystem::temp_directory_path()`），语义等价；v0.2 改为 Command Stack capture/restore primitive 时替换（已在 editor-roadmap v0.2 中显式记录）
+  - **build**：2026-05-12 `cmake --build build --config Debug --target OrangeEditor` 5 TU 全绿
+  - **验证**（待手跑）：Play 点击 → stdout "[play] Edit → Play"；Floor(Static RigidBody) 静止，Dynamic body 受重力下落，Transform 在 Inspector 实时刷新；粒子 emitter emitting=true 时粒子在 Scene 视口出现；Stop 后 World 回到 Play 前状态（entity 位置 / 值与保存时一致）；Play/Paused 期 F2/Del/DnD/Inspector 字段全部 disable
 
 ---
 
@@ -307,6 +317,7 @@
 - Task 10-04 · GPU 粒子（迁移 Phase 5 的 CPU 粒子到 compute shader）
 - Task 10-05 · 高质量软阴影（PCSS / VSM）
 - Task 10-06 · 大气散射（户外地图）
+- Task 10-07 · PointLight + 多 light 支持（详见 `docs/engine-known-gaps.md` GAP-2026-05-11-point-light-and-visible-halo：PointLightComponent 公共接口 + Pipeline 多 light 收集 / forward shading + billboard 可见光晕近似；omnidirectional shadow map 留给更后的任务）
 
 ---
 

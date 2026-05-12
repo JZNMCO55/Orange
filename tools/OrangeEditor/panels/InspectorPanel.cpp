@@ -49,6 +49,15 @@ void EditorRenderLayer::DrawInspectorPanel()
                 static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
     ImGui::Separator();
 
+    // Play / Paused 期间所有 component 字段只读（灰显但可见）。
+    // v0.2 Command System 接入后，此处改为检查 CommandStack::IsAccepting()。
+    const bool canEdit = (mState.playState == PlayState::Edit);
+    if (!canEdit) {
+        ImGui::TextDisabled("[ Read-only in Play / Paused ]");
+        ImGui::Separator();
+    }
+    ImGui::BeginDisabled(!canEdit);
+
     DrawInspectorName(e);
     DrawInspectorTransform(e);
     DrawInspectorHierarchy(e);
@@ -108,6 +117,7 @@ void EditorRenderLayer::DrawInspectorPanel()
         ImGui::EndPopup();
     }
 
+    ImGui::EndDisabled();
     ImGui::End();
 }
 

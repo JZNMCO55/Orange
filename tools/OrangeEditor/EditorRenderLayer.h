@@ -29,8 +29,10 @@
 #include <orange/engine/app/AppHost.h>
 #include <orange/engine/app/FrameContext.h>
 #include <orange/engine/app/Layer.h>
+#include <orange/engine/physics/PhysicsWorld.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/Pipeline.h>
+#include <orange/engine/render/VfxSystem.h>
 #include <orange/engine/scene/Entity.h>
 
 #include <orange/renderer/RenderDevice.h>
@@ -108,7 +110,7 @@ private:
     VkDevice                         mDevice;
     EditorState&                     mState;           // owned by main, not by layer
 
-    // ---- Scene 面板 off-screen 渲染状态（Phase 6 / Task 06-08 S4）------
+    // ---- Scene 面板 off-screen 渲染状态 ----------------------------------
     std::unique_ptr<Orange::Engine::Render::Pipeline> mpScenePipeline;
     VkSampler                                         mSceneSampler{VK_NULL_HANDLE};
     VkDescriptorSet                                   mSceneDescSet{VK_NULL_HANDLE};
@@ -117,6 +119,15 @@ private:
     std::uint32_t                                     mScenePanelHeight{0};
     // 一次性失败保险（Initialize 失败后不再每帧 retry / spam log）。
     bool                                              mScenePipelineFailed{false};
+    // 单调递增的编辑器运行时间（秒），每帧累加 deltaSeconds，无论 Play/Edit
+    // 状态均推进——供 dissolve 等时间驱动 shader 在 Edit 模式下也能预览动画。
+    float                                             mEditorTime{0.0f};
+
+    // ---- Play Mode simulation 运行时（Edit 态均为 nullptr）--------------
+    // Play → Stop 时统一销毁（PhysicsWorld reset 即销毁所有 b2 body；
+    // VfxSystem 先 SetVfxSystem(nullptr) + Shutdown 再 reset）。
+    std::unique_ptr<Orange::Engine::Physics::PhysicsWorld> mpPhysicsWorld;
+    std::unique_ptr<Orange::Engine::Render::VfxSystem>     mpVfxSystem;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_RENDER_LAYER_H

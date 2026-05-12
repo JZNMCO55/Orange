@@ -11,75 +11,42 @@
 
 #include <cmath>
 
-glm::vec3 EditorCameraForward(float yaw, float pitch) noexcept
-{
-    return glm::vec3(
-        std::cos(pitch) * std::sin(yaw),
-        std::sin(pitch),
-       -std::cos(pitch) * std::cos(yaw));
-}
-
 void UpdateEditorCameraFromInput(EditorState::EditorCamera& ec)
 {
     const ImGuiIO& io = ImGui::GetIO();
-    const float    dt = io.DeltaTime;
-    if (dt <= 0.0f)
-    {
-        return;
-    }
 
     const bool hovered = ImGui::IsWindowHovered();
-    const bool focused = ImGui::IsWindowFocused();
 
-    // RMB 旋转 —— capture-on-press 状态机：
-    //   * 仅当 RMB 在本面板内 *按下* 时进入 dragging 模式（避免从其它面
-    //     板拖进来突然转动相机）；
+    // LMB 轨道旋转 —— capture-on-press 状态机：
+    //   * 仅当 LMB 在本面板内 *按下* 时进入 dragging 模式；
     //   * dragging 期间无视 hover，连续吃 MouseDelta —— 修复"拖快了鼠标
-    //     划出面板边界 → IsWindowHovered=false → 旋转中断"的体感问题；
-    //   * RMB 释放（无论鼠标在哪个面板）退出 dragging。
-    // 与 Unity SceneView / Unreal viewport 同模式。
-    if (ec.dragging && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    //     划出面板 → 旋转中断"的体感问题；
+    //   * LMB 释放退出 dragging。
+    if (ec.dragging && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
     {
         ec.dragging = false;
     }
-    if (!ec.dragging && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    if (!ec.dragging && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         ec.dragging = true;
     }
     if (ec.dragging)
     {
         const ImVec2 d = io.MouseDelta;
-        ec.yaw   -= d.x * ec.lookSensitivity;
-        ec.pitch -= d.y * ec.lookSensitivity;
-        constexpr float kMaxPitch = 1.5533430343f;   // glm::radians(89°)
-        if (ec.pitch >  kMaxPitch) ec.pitch =  kMaxPitch;
-        if (ec.pitch < -kMaxPitch) ec.pitch = -kMaxPitch;
+        // 拖右 → azimuth 减小 → 相机向左绕轨道 → 场景向右转，与鼠标方向一致
+        ec.azimuth  -= d.x * ec.lookSensitivity;
+        // 屏幕 Y 向下为正；拖下 → d.y > 0 → elevation 减小 → 相机下沉 → 视角上仰
+        ec.elevation += d.y * ec.lookSensitivity;
+        constexpr float kMaxElev = 1.5533430343f;   // glm::radians(89°)
+        if (ec.elevation >  kMaxElev) ec.elevation =  kMaxElev;
+        if (ec.elevation < -kMaxElev) ec.elevation = -kMaxElev;
     }
 
-    // 滚轮：沿 forward 距离方向缩放（前 / 后）；hover 才生效避免在其它
-    // 面板滚动条上误触。
+    // 滚轮：缩放 radius（推近 / 拉远）；hover 才生效避免误触其它面板滚动条。
     if (hovered && io.MouseWheel != 0.0f)
     {
-        const glm::vec3 forward = EditorCameraForward(ec.yaw, ec.pitch);
-        ec.position += forward * io.MouseWheel * ec.zoomSensitivity;
-    }
-
-    // WASD / QE：相对相机朝向移动。仅当 Scene 面板有焦点 —— 否则在
-    // 别的窗口里编辑 InputText 也会触发相机走 / 转动。focused 同时也
-    // 让 ImGui::IsKeyDown 拿到的是 Scene 面板上下文的输入路由结果。
-    if (focused)
-    {
-        const float     speed   = ec.moveSpeed * dt;
-        const glm::vec3 forward = EditorCameraForward(ec.yaw, ec.pitch);
-        const glm::vec3 right   = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
-        const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-
-        if (ImGui::IsKeyDown(ImGuiKey_W)) { ec.position += forward * speed; }
-        if (ImGui::IsKeyDown(ImGuiKey_S)) { ec.position -= forward * speed; }
-        if (ImGui::IsKeyDown(ImGuiKey_A)) { ec.position -= right   * speed; }
-        if (ImGui::IsKeyDown(ImGuiKey_D)) { ec.position += right   * speed; }
-        if (ImGui::IsKeyDown(ImGuiKey_E)) { ec.position += worldUp * speed; }
-        if (ImGui::IsKeyDown(ImGuiKey_Q)) { ec.position -= worldUp * speed; }
+        ec.radius -= io.MouseWheel * ec.zoomSensitivity;
+        if (ec.radius < 0.5f) ec.radius = 0.5f;
     }
 }
 
@@ -90,8 +57,13 @@ BuildEditorCamera(const EditorState::EditorCamera& ec, float aspect)
     const float safeAspect = (aspect > 0.0f) ? aspect : 1.0f;
     Camera cam = Camera::Perspective(glm::radians(ec.fovYDegrees),
                                      safeAspect, ec.zNear, ec.zFar);
-    const glm::vec3 forward = EditorCameraForward(ec.yaw, ec.pitch);
-    cam.view = glm::lookAt(ec.position, ec.position + forward, glm::vec3(0, 1, 0));
+    const float cosElev = std::cos(ec.elevation);
+    const glm::vec3 offset(
+        ec.radius * cosElev * std::sin(ec.azimuth),
+        ec.radius * std::sin(ec.elevation),
+        ec.radius * cosElev * std::cos(ec.azimuth));
+    const glm::vec3 position = ec.pivot + offset;
+    cam.view = glm::lookAt(position, ec.pivot, glm::vec3(0.0f, 1.0f, 0.0f));
     return cam;
 }
 

@@ -291,25 +291,36 @@ int main()
         return 1;
     }
 
-    // ---- 编辑器侧 EditorState + 启动期种子 World ------------------------
+    // ---- 编辑器侧 EditorState + 启动期场景 ---------------------------------
     //
-    // EditorState 拥有 World（unique_ptr 字段）—— Task 06-07 起 File →
-    // Open / New 要在 OnUpdate 内整体 swap world，所有权放 state 内最自
-    // 然。生命周期：editorState 与 host 在同一 scope；host.reset() 已
-    // 在关停段手工提前调，保证 layer 析构时 state（含 world）仍存活。
+    // EditorState 拥有 World 所有权——场景 Open / New 在 OnUpdate 内整体
+    // swap world，所有权放 state 内最自然。生命周期：editorState 与 host
+    // 在同一 scope；host.reset() 在关停段手工提前调，保证 layer 析构时
+    // state（含 world）仍存活。
     //
-    // 启动期种 demo 实体（Root → Camera/Light/Geometry → Floor/Wall +
-    // Misc Sibling）让 Entity Tree / Inspector 立刻有东西可看。File →
-    // New 会重新执行同样的 seed —— 真要"空场景"等后续 task 加 "New Empty"
-    // 入口再分。
+    // 资产初始化必须先于场景加载，否则 RenderableComponent.mesh 会拿到
+    // Invalid handle，Scene 视口画不出几何。
     //
-    // 资产初始化必须发生在 SeedDemoWorld 之前 —— 否则 Floor / Wall 的
-    // RenderableComponent.mesh 会拿到 Invalid handle，Scene 视口（S4）
-    // 接通后就什么都画不出来。
+    // 启动优先级：检测 assets/editor/demo.scene.json（相对 .exe 工作目录），
+    // 存在则 Load；文件不存在（IoError）或加载失败则回退 SeedDemoWorld。
+    // File > New Scene 走 ApplyPendingSceneOp，与回退路径保持一致。
     EditorState editorState;
     editorState.pWorld = std::make_unique<Orange::Engine::World>();
     InitializeEditorAssets(editorState);
-    SeedDemoWorld(editorState);
+    {
+        Scene::LoadOptions demoLoadOpts{};
+        demoLoadOpts.assetRegistry = editorState.pAssets.get();
+        if (auto res = Scene::Load("assets/editor/demo.scene.json",
+                                   *editorState.pWorld, demoLoadOpts);
+            res.IsErr())
+        {
+            SeedDemoWorld(editorState);
+        }
+        else
+        {
+            editorState.currentScenePath = "assets/editor/demo.scene.json";
+        }
+    }
 
     // ---- Layer 注入 -----------------------------------------------------
     host->PushLayer(std::make_unique<EditorRenderLayer>(*host, *pRenderDevice,

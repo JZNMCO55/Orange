@@ -920,8 +920,8 @@ Removed: Src/                              (整目录，src/ 替换)
 
 ### Phase 6+：长期演进
 
-详见 `docs/roadmap.md`。包括：
-- 编辑器（关卡 / 粒子 / 材质三件套）
+详见 `docs/roadmap.md` 与 `docs/editor-roadmap.md`（编辑器独立路线图）。包括：
+- 编辑器 v0.x 演进（关卡 / 粒子 / 材质 / 动画 / 资源浏览器 / Undo/Redo / Schema 解耦 / Gizmo / ...）→ `docs/editor-roadmap.md`
 - C# Scripting (CoreCLR hosting)
 - Hot reload (DLL plugin / shader hot reload)
 - 资产 cook 工具链（离线流水线）

@@ -153,11 +153,13 @@ struct EditorState
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
         planeMeshHandle {};
 
-    // SeedDemoWorld 用的 textured material 实例 —— Floor / Wall 各一个
-    // （地址要稳定供 RenderableComponent::materialInstance 持有），生命周期
-    // 跟着 EditorState 走。
+    // demo 场景用的各材质实例——地址要稳定供 RenderableComponent::
+    // materialInstance 持有，生命周期跟着 EditorState 走。
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pFloorMaterial;
-    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pWallMaterial;
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pWallMaterial;     // 保留备用（textured）
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pToonMaterial;     // 二阶 cel-shading
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pRimLightMaterial; // fresnel rim glow
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDissolveMaterial; // noise 溶解 + 发光边沿
 
     // "Create Light Object" / "Add Renderable Component" 等编辑器创建路径
     // 共用的默认 material instance：
@@ -169,36 +171,29 @@ struct EditorState
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDefaultRenderableMaterial;
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pLightObjectMaterial;
 
-    // ---- 编辑器相机（Phase 6 / Task 06-08 S3）---------------------------
-    // viewport-local 相机状态：position + yaw/pitch + 投影参数。每帧由
-    // DrawScenePanel 读 ImGui 输入更新本结构，再 Compute 出 Camera 写到
-    // World 里 Camera 组件第一个出现的实体上 —— Camera 组件不在
-    // SceneSerialization 路径上，本写入对 Save / Load 透明，不会"污染"用
-    // 户场景。
+    // ---- 编辑器相机（轨道模式）------------------------------------------
+    // viewport-local 相机状态：pivot（轨道中心）+ 球坐标（azimuth/elevation/
+    // radius）+ 投影参数。每帧由 DrawScenePanel 读 ImGui 输入更新本结构，
+    // 再 BuildEditorCamera 构出 Camera 写到 World 里首个 Camera 组件上。
     //
-    // 控制约定（与 DrawScenePanel 内的输入捕获保持一致）：
-    //   * 鼠标右键拖动（hover Scene 面板时按下）—— 旋转 yaw / pitch
-    //   * 滚轮（hover Scene 面板时）—— 沿 forward 方向距离 + / -
-    //   * WASD（focus Scene 面板时）—— 相对相机朝向水平移动
-    //   * Q / E（focus Scene 面板时）—— 世界 Y 上 / 下
+    // 控制约定（与 UpdateEditorCameraFromInput 保持一致）：
+    //   * 鼠标左键拖动（hover Scene 面板时按下）—— 轨道旋转 azimuth / elevation
+    //   * 滚轮（hover Scene 面板时）—— 缩放 radius（推近 / 拉远）
     struct EditorCamera
     {
-        glm::vec3 position{3.0f, 2.5f, 5.0f};
-        float     yaw           = -0.541f;   // 弧度；与 SeedDemoWorld 旧 lookAt 一致
-        float     pitch         = -0.330f;   // 弧度
-        float     fovYDegrees   = 50.0f;
+        glm::vec3 pivot{0.0f, 0.5f, 0.0f};  // 轨道中心，暂定场景中心
+        float     azimuth       = 0.0f;      // 水平角（弧度）；0 = 相机在 +Z 侧
+        float     elevation     = 0.19f;     // 垂直角（弧度）；正 = 相机高于 pivot
+        float     radius        = 8.15f;     // 相机到 pivot 的距离
+        float     fovYDegrees   = 45.0f;
         float     zNear         = 0.1f;
         float     zFar          = 100.0f;
         // 操作灵敏度（编辑器经验值，未来可暴露给 Preferences）
-        float     moveSpeed       = 4.0f;     // units / sec
         float     lookSensitivity = 0.0035f;  // 弧度 / pixel
-        float     zoomSensitivity = 0.6f;     // units / wheel notch
+        float     zoomSensitivity = 0.6f;     // radius units / wheel notch
 
-        // RMB 拖动状态机：按下时（且鼠标在 Scene 面板内）置 true，进入"无
-        // 论鼠标是否仍 hover 都吃 MouseDelta"模式；释放时清零。修复"拖动
-        // 快了鼠标滑出面板 → IsWindowHovered 返回 false → 旋转中断"的体感
-        // 问题，与 Unity SceneView / Unreal viewport 通行的 capture-on-press
-        // 模式一致。
+        // LMB 拖动状态机：按下时（且鼠标在 Scene 面板内）置 true，进入"无
+        // 论鼠标是否仍 hover 都吃 MouseDelta"模式；释放时清零。
         bool      dragging = false;
     } editorCamera;
 };

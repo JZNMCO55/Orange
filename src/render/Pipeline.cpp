@@ -2104,6 +2104,22 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             ok = impl.RecordOffscreenPass(viewProj);
         }
 
+        // 粒子 pass —— 与窗口模式路径对称，插在主 pass 之后、passthrough 之前。
+        // VfxSystem 自管 HDR 的 ShaderReadOnly ↔ ColorAttachment 翻转。
+        if (ok && impl.vfxSystem != nullptr
+            && impl.vfxSystem->IsInitialized()
+            && impl.hdrColor)
+        {
+            impl.vfxSystem->DrawParticles(
+                impl.offscreenCmd.get(),
+                impl.hdrColor->GetDefaultView(),
+                /*pDepthView=*/nullptr,
+                glm::value_ptr(viewProj),
+                impl.frameIndex,
+                impl.hdrWidth,
+                impl.hdrHeight);
+        }
+
         // passthrough HDR → viewportColor
         if (ok)
         {

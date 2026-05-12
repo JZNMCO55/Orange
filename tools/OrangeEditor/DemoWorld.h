@@ -2,19 +2,16 @@
 #define ORANGE_EDITOR_DEMO_WORLD_H
 
 // 编辑器启动期资产 / demo 世界种植：
-//   * Make{Plane,Cube}Mesh —— 程序生成内置 mesh，与 samples/07_full_pipeline
-//     的同名 helper 字段顺序一致；
+//   * Make{Plane,Cube}Mesh —— 程序生成内置 mesh；
 //   * InitializeEditorAssets —— 一次性建好 AssetRegistry + 注册 ShaderLoader
-//     + Insert cube/plane + MaterialSystem::RegisterBuiltins + CreateInstance
-//     ("textured") × 2；失败仅 log，不抛；
-//   * SeedDemoWorld —— 给 EditorState.pWorld 种 Root / Camera / Light /
-//     Geometry / Floor / Wall / Misc Sibling 七个实体 + 父子关系 +
-//     Camera::Perspective + Floor 平面 + Wall 立方 + RigidBody / Collider /
-//     Light component；Scene 视口（S4 起）真正显示画面靠的就是它。
-//
-// 注意：场景 Save / Load 当前不串联 AssetRegistry，所以新开场景 / load 老
-// 存档时 RenderableComponent 的 mesh / material handle 会失效；本头不解
-// 决该问题（后续 task 把 AssetRegistry 也参与序列化）。
+//     + Insert cube/plane + MaterialSystem::RegisterBuiltins + 全部内置材质
+//     实例（textured / toon / rim_light / dissolve / emissive）；失败仅 log，
+//     不抛；
+//   * SeedDemoWorld —— 种 13 个实体展示 Phase 1–5 视觉栈：Root > Camera /
+//     Sun（平行光+阴影）/ Geometry > Ground（textured）/ Backdrop（rim_light）
+//     / Platform L + R（toon）/ Tower（toon）/ Glow Box（dissolve，自动动画）
+//     / Emissive Pillar（emissive）/ Fire Emitter（粒子：火焰）/
+//     Sparkle Emitter（粒子：萤火）。
 
 #include "EditorState.h"
 
