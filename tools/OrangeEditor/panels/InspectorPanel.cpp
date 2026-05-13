@@ -74,16 +74,26 @@ void EditorRenderLayer::DrawInspectorPanel()
     DrawInspectorName(e);
     DrawInspectorTransform(e);
     DrawInspectorHierarchy(e);
-    // v0.2.5 commit 3 起，DirectionalLight 走 schema-driven 渲染。
-    // 其它 component 在后续 commit 逐个迁移；全部 ✅ 后整段 DrawInspectorXxx
-    // 路径删除，本调用统一替换为 Orange::Editor::Schema::DrawEntityViaSchemas。
-    if (const auto* dlSchema = Orange::Editor::Schema::ComponentSchemaRegistry::Instance()
+    // v0.2.5 整骨期：已迁 schema 的 component 走 schema-driven 渲染；
+    // 未迁的仍走 DrawInspectorXxx 硬编码路径。全部迁完后，整段 if-block
+    // 统一替换为 Orange::Editor::Schema::DrawEntityViaSchemas(mHost, e)
+    // 并删除剩余 DrawInspectorXxx 调用。
+    //
+    // 已迁顺序 = schema 注册顺序（见 RegisterBuiltinSchemas.cpp）= 这里
+    // 显式分派的顺序，保证 v0.1 期 Inspector 内 component header 视觉
+    // 顺序不变（DirectionalLight 在 Renderable 前 / RigidBody 在 Collider 前）。
+    auto& schemaReg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
+    if (const auto* dlSchema = schemaReg
             .Find<Orange::Engine::Render::DirectionalLight>())
     {
         Orange::Editor::Schema::DrawComponentSchemaSection(mHost, e, *dlSchema);
     }
     DrawInspectorRenderable(e);
-    DrawInspectorRigidBody(e);
+    if (const auto* rbSchema = schemaReg
+            .Find<Orange::Engine::Physics::RigidBodyComponent>())
+    {
+        Orange::Editor::Schema::DrawComponentSchemaSection(mHost, e, *rbSchema);
+    }
     DrawInspectorCollider(e);
     DrawInspectorParticleEmitter(e);
     DrawInspectorAnimator(e);
@@ -364,128 +374,14 @@ void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
     }
 }
 
-void EditorRenderLayer::DrawInspectorRigidBody(Orange::Engine::Entity e)
-{
-    using RB = Orange::Engine::Physics::RigidBodyComponent;
-    using BT = Orange::Engine::Physics::BodyType;
-    if (!mHost.scene.pWorld->HasComponent<RB>(e)) { return; }
-    bool remove = false;
-    const bool open = ComponentHeader("RigidBody", &remove);
-    if (!open) {
-        if (remove) {
-            mHost.scene.pWorld->RemoveComponent<RB>(e);
-            mHost.cmdStack.Clear();
-        }
-        return;
-    }
-    auto* b  = mHost.scene.pWorld->GetComponent<RB>(e);
-    auto* pW = mHost.scene.pWorld.get();
-
-    {
-        const char* kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
-        int oldIdx = static_cast<int>(b->type);
-        int typeIdx = oldIdx;
-        if (ImGui::Combo("Type", &typeIdx, kBodyTypeNames, 3)) {
-            b->type = static_cast<BT>(typeIdx);
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
-                e, "rb.type", oldIdx, typeIdx,
-                [pW, e](const int& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e))
-                        rb->type = static_cast<BT>(v);
-                }));
-        }
-    }
-    {
-        glm::vec2 old = b->initialPosition;
-        if (ImGui::DragFloat2("Initial Position", &b->initialPosition.x, 0.05f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
-                e, "rb.initialPosition", old, b->initialPosition,
-                [pW, e](const glm::vec2& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->initialPosition = v;
-                }));
-        }
-    }
-    {
-        float old = b->initialAngle;
-        if (ImGui::DragFloat("Initial Angle (rad)", &b->initialAngle, 0.01f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "rb.initialAngle", old, b->initialAngle,
-                [pW, e](const float& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->initialAngle = v;
-                }));
-        }
-    }
-    {
-        glm::vec2 old = b->linearVelocity;
-        if (ImGui::DragFloat2("Linear Velocity", &b->linearVelocity.x, 0.05f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
-                e, "rb.linearVelocity", old, b->linearVelocity,
-                [pW, e](const glm::vec2& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->linearVelocity = v;
-                }));
-        }
-    }
-    {
-        float old = b->angularVelocity;
-        if (ImGui::DragFloat("Angular Velocity", &b->angularVelocity, 0.05f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "rb.angularVelocity", old, b->angularVelocity,
-                [pW, e](const float& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->angularVelocity = v;
-                }));
-        }
-    }
-    {
-        float old = b->linearDamping;
-        if (ImGui::DragFloat("Linear Damping", &b->linearDamping, 0.01f, 0.0f, 100.0f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "rb.linearDamping", old, b->linearDamping,
-                [pW, e](const float& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->linearDamping = v;
-                }));
-        }
-    }
-    {
-        float old = b->angularDamping;
-        if (ImGui::DragFloat("Angular Damping", &b->angularDamping, 0.01f, 0.0f, 100.0f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "rb.angularDamping", old, b->angularDamping,
-                [pW, e](const float& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->angularDamping = v;
-                }));
-        }
-    }
-    {
-        bool old = b->fixedRotation;
-        if (ImGui::Checkbox("Fixed Rotation", &b->fixedRotation)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
-                e, "rb.fixedRotation", old, b->fixedRotation,
-                [pW, e](const bool& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->fixedRotation = v;
-                }));
-        }
-    }
-    {
-        float old = b->gravityScale;
-        if (ImGui::DragFloat("Gravity Scale", &b->gravityScale, 0.05f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "rb.gravityScale", old, b->gravityScale,
-                [pW, e](const float& v) {
-                    if (auto* rb = pW->GetComponent<RB>(e)) rb->gravityScale = v;
-                }));
-        }
-    }
-    // handle 是 PhysicsWorld::AddBody 反写的运行时引用，编辑器不该动；
-    // 但显示一下让用户知道 body 是否已注册。
-    ImGui::Separator();
-    ImGui::TextDisabled("handle (runtime) : %llu",
-                        static_cast<unsigned long long>(b->handle.Value()));
-
-    if (remove) {
-        mHost.scene.pWorld->RemoveComponent<RB>(e);
-        mHost.cmdStack.Clear();
-    }
-}
+// DrawInspectorRigidBody 已删除 —— v0.2.5 commit 4 起 RigidBodyComponent
+// 走 schema-driven 渲染（schema/RegisterBuiltinSchemas.cpp 内 RegisterRigid
+// BodyComponentSchema()）。`handle` 字段（PhysicsWorld::AddBody 反写的运
+// 行时 BodyHandle）暂未在 schema 内显示——schema 系统当前没有 "DisplayOnly /
+// read-only" 字段标记，本期接受这一行 TextDisabled 调试值的视觉降级，等
+// 后续 commit 引入 read-only display attribute 后再补回。Combo 控件能力
+// 由本 commit 同步引入的 PropertyType::Enum 提供，BodyType enum 项名表见
+// schema 注册代码。
 
 void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
 {

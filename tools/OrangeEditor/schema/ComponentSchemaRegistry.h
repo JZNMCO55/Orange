@@ -154,6 +154,44 @@ public:
         return *this;
     }
 
+    // 注册一个 enum / enum class 字段。caller-side marshal 类型固定为 int
+    // ——SchemaInspector 的 Enum case 用 int buffer 配合 ImGui::Combo，
+    // SetFieldValueCommand<int> 入栈；Builder 内部 lambda 负责 enum ↔
+    // int 的 underlying_type 转换。
+    //
+    // 与 Field<> 分开提供专用入口的原因：enum 走 UnderlyingT 路径在
+    // PropertyTypeOf<T> 主表里要么写 std::is_enum_v 偏特化（隐式魔法），
+    // 要么强制 caller 在 Field<> 后另调 EnumNames（PropertyType 还是
+    // 错的 Int）。显式 FieldEnum 比这两条都干净。
+    //
+    // 设计参考：vendor/godot/core/object/class_db.h 的 PROPERTY_HINT_ENUM
+    // ——Godot 也是 enum 走专用 hint，runtime side 看作 int64_t。
+    template <auto FieldPtr>
+    ComponentSchemaBuilder& FieldEnum(const char* name, const char* label)
+    {
+        using FieldT = std::remove_reference_t<decltype(std::declval<C>().*FieldPtr)>;
+        static_assert(std::is_enum_v<FieldT>,
+                      "FieldEnum requires an enum (or enum class) member; "
+                      "use Field<> for non-enum types.");
+        using UnderlyingT = std::underlying_type_t<FieldT>;
+
+        PropertyDescriptor pd{};
+        pd.name  = name;
+        pd.label = label;
+        pd.type  = PropertyType::Enum;
+        pd.get = [](const void* component, void* outValue) {
+            const FieldT& field = (static_cast<const C*>(component))->*FieldPtr;
+            *static_cast<int*>(outValue) =
+                static_cast<int>(static_cast<UnderlyingT>(field));
+        };
+        pd.set = [](void* component, const void* inValue) {
+            (static_cast<C*>(component))->*FieldPtr = static_cast<FieldT>(
+                static_cast<UnderlyingT>(*static_cast<const int*>(inValue)));
+        };
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
     // ---- 最近一次 Field 的 attribute 修饰 -----------------------------
 
     ComponentSchemaBuilder& Range(float minV, float maxV)
@@ -180,6 +218,16 @@ public:
     ComponentSchemaBuilder& Tooltip(const char* text)
     {
         mSchema.properties.back().attribs.tooltip = text;
+        return *this;
+    }
+
+    // PropertyType::Enum 专用：Combo 项名表。names 数组与 count 都要求静
+    // 态生命周期（Builder 不复制）；元素顺序 = enum underlying 值 0..count-1。
+    ComponentSchemaBuilder& EnumNames(const char* const* names, int count)
+    {
+        auto& a = mSchema.properties.back().attribs;
+        a.enumNames = names;
+        a.enumCount = count;
         return *this;
     }
 

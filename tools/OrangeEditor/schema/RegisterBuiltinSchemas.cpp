@@ -12,6 +12,7 @@
 
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
 
 namespace Orange::Editor::Schema
@@ -40,13 +41,56 @@ void RegisterDirectionalLightSchema()
         .Register();
 }
 
+void RegisterRigidBodyComponentSchema()
+{
+    using RB = Orange::Engine::Physics::RigidBodyComponent;
+    using BT = Orange::Engine::Physics::BodyType;
+
+    // BodyType enum 项名表 —— 顺序与 enum class 定义 (Static=0, Kinematic=1,
+    // Dynamic=2) 严格对齐。静态生命周期；EnumNames 不复制。
+    static const char* const kBodyTypeNames[] = {"Static", "Kinematic", "Dynamic"};
+    static_assert(static_cast<int>(BT::Static)    == 0, "BodyType enum drift");
+    static_assert(static_cast<int>(BT::Kinematic) == 1, "BodyType enum drift");
+    static_assert(static_cast<int>(BT::Dynamic)   == 2, "BodyType enum drift");
+
+    // `handle` 字段不暴露——这是 PhysicsWorld::AddBody 反写的运行时引用，
+    // 编辑器不该编辑。v0.1 期 DrawInspectorRigidBody 通过 TextDisabled 给
+    // 它显示一行调试值；schema 系统当前没有 "DisplayOnly" 字段标记，本
+    // commit 接受这一行视觉降级，等后续 commit 引入 read-only display
+    // attribute 后再补回。
+    ComponentSchemaBuilder<RB>("RigidBody", "RigidBody")
+        .FieldEnum<&RB::type>("type", "Type")
+            .EnumNames(kBodyTypeNames, 3)
+        .Field<&RB::initialPosition>("initialPosition", "Initial Position")
+            .DragSpeed(0.05f)
+        .Field<&RB::initialAngle>("initialAngle", "Initial Angle (rad)")
+            .DragSpeed(0.01f)
+        .Field<&RB::linearVelocity>("linearVelocity", "Linear Velocity")
+            .DragSpeed(0.05f)
+        .Field<&RB::angularVelocity>("angularVelocity", "Angular Velocity")
+            .DragSpeed(0.05f)
+        .Field<&RB::linearDamping>("linearDamping", "Linear Damping")
+            .Range(0.0f, 100.0f)
+            .DragSpeed(0.01f)
+        .Field<&RB::angularDamping>("angularDamping", "Angular Damping")
+            .Range(0.0f, 100.0f)
+            .DragSpeed(0.01f)
+        .Field<&RB::fixedRotation>("fixedRotation", "Fixed Rotation")
+        .Field<&RB::gravityScale>("gravityScale", "Gravity Scale")
+            .DragSpeed(0.05f)
+        .Addable()
+        .Removable()
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
 {
     RegisterDirectionalLightSchema();
+    RegisterRigidBodyComponentSchema();
     // 后续 commit 在此追加：Transform / Name / Hierarchy / Renderable /
-    //                       RigidBody / Collider / ParticleEmitter / Animator
+    //                       Collider / ParticleEmitter / Animator
 }
 
 }  // namespace Orange::Editor::Schema

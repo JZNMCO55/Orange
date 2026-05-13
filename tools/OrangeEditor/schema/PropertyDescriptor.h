@@ -67,6 +67,15 @@ struct PropertyAttributes
     // 同 ImGui::SetTooltip 内容；nullptr 表示无 tooltip。字符串字面量
     // 由 schema 注册代码持有（静态生命周期），不复制。
     const char* tooltip = nullptr;
+
+    // PropertyType::Enum 专用：Combo 控件的项名表。
+    //   * enumNames 指向一段 const char*[enumCount] 数组，元素顺序 = 枚举
+    //     underlying 值递增顺序（典型 enum class : 0,1,2,...）
+    //   * 字符串字面量 + 数组本体由 schema 注册代码持有静态生命周期
+    //   * 其它 PropertyType 上设这两个字段会被 SchemaInspector switch
+    //     忽略（只在 Enum case 内检查）
+    const char* const* enumNames = nullptr;
+    int                enumCount = 0;
 };
 
 // PropertyDescriptor —— 单个字段的完整描述。

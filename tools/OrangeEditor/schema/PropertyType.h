@@ -34,6 +34,10 @@ enum class PropertyType : std::uint8_t
     Quat,    // 当前未在内置 component schema 中使用；保留给后续 Transform.rotation
              // 走 Euler 缓存的混合路径（v0.2.5 后续 commit 处理）
     String,
+    Enum,    // C++ enum / enum class —— Builder::FieldEnum<auto FieldPtr> 注册；
+             // marshal 走 int（caller-side 视类型为 int，Builder 内部 lambda
+             // 负责 underlying_type 转换）。控件由 PropertyAttributes::enumNames
+             // 决定 Combo 项列表
 };
 
 }  // namespace Orange::Editor::Schema

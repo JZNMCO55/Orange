@@ -244,6 +244,39 @@ void DrawProperty(EditorHost&                  host,
             ImGui::TextDisabled("%s (quat — not yet schema-rendered)", prop.label);
             break;
         }
+        case PropertyType::Enum:
+        {
+            // Enum 走 int marshal —— Builder::FieldEnum 内 get/set 已把
+            // 枚举值与 int 互转。控件用 ImGui::Combo：enumNames 缺失或
+            // count <= 0 时降级显示 "(no enum names)" placeholder（开发
+            // 期 schema 注册漏写 .EnumNames(...) 的兜底）。
+            int oldVal = 0;
+            prop.get(component, &oldVal);
+            int newVal = oldVal;
+            if (prop.attribs.enumNames == nullptr || prop.attribs.enumCount <= 0)
+            {
+                ImGui::TextDisabled("%s (enum: no names — schema bug)", prop.label);
+                break;
+            }
+            // ImGui::Combo 对越界 current item 显示空；这里把超界值钳进
+            // [0, enumCount) 仅用于显示，underlying enum 数据本身不改
+            // （直到用户实际选了新项才走 set 路径）。
+            int displayIdx = newVal;
+            if (displayIdx < 0 || displayIdx >= prop.attribs.enumCount)
+            {
+                displayIdx = 0;
+            }
+            if (ImGui::Combo(prop.label, &displayIdx,
+                             prop.attribs.enumNames, prop.attribs.enumCount))
+            {
+                newVal = displayIdx;
+                prop.set(component, &newVal);
+                host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
+                    entity, fieldKey, oldVal, newVal,
+                    MakeFieldApply<int>(pWorld, entity, &schema, prop.set)));
+            }
+            break;
+        }
         case PropertyType::String:
         {
             std::string oldVal;

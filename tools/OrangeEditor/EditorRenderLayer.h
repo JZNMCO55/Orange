@@ -101,7 +101,7 @@ private:
     // DirectionalLight 已迁移到 schema-driven 渲染（v0.2.5 commit 3）；
     // 不再有 DrawInspectorDirectionalLight 成员。后续 component 同步迁移。
     void DrawInspectorRenderable       (Orange::Engine::Entity e);
-    void DrawInspectorRigidBody        (Orange::Engine::Entity e);
+    // RigidBody 已迁 schema-driven（v0.2.5 commit 4）；声明删除。
     void DrawInspectorCollider         (Orange::Engine::Entity e);
     void DrawInspectorParticleEmitter  (Orange::Engine::Entity e);
     void DrawInspectorAnimator         (Orange::Engine::Entity e);
