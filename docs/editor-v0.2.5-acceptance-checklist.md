@@ -6,20 +6,80 @@
   把每个 commit 的验收点沉淀进本文档，按**小节点**统一跑回归——既保住开发节奏，也控制 bug
   累积窗口
 
-## 回归节奏建议
+## 回归节奏
 
-不要等 v0.2.5 整 milestone 完才回归——窗口过大、bug 定位成本高。推荐分 3 个小节点：
+**v0.2.5 整 milestone 完工后一次性大节点回归**。用户选择此节奏（开发节奏优先），代价是
+bug 定位成本——一旦回归测试失败需要 `git bisect` 在 v0.2.5 全段 commit 内定位，准备好接
+受这个成本。
 
-| 节点 | 时机 | 范围 |
-|------|------|------|
-| 节点 A | 全部内置组件 schema 化完成（c3–c8 累计） | 跑"小节点回归路径"+ c3–c8 各 commit 验收点 |
-| 节点 B | Add Component 菜单 + 插件接口落地完成 | 同 A + 新 commit 验收点 + 关注 Add 菜单 schema 驱动正确性 |
-| 节点 C | CommandStack 改造完成（v0.2.5 完工） | 全 milestone 回归 + 关闭 milestone 验收 |
-
-每个小节点跑完后：
+回归后处理：
 - 通过的清单条目划掉（在本文档内 `[ ]` → `[x]`）
 - 失败的条目登记到对应 commit 节内 `### bugs` 段，包含「现象 / 复现步骤 / 候选根因」
 - 修复后 push 新 commit（commit message 引用本文档 bug 编号），不重写历史
+
+## 大节点回归的测试盲点提醒
+
+按大节点回归容易漏的几类路径（v0.2.5 上下文）——回归时请刻意覆盖：
+
+### 1. 多 component / 跨 commit 状态泄漏
+
+每个 schema commit 单独看都没问题，组合起来才会暴露：
+
+- **CommandStack 跨 commit 累积**：连续编辑 Transform → Name → ParticleEmitter → DirectionalLight → Undo / Redo 多次。验证命令栈在不同 commit 引入的 schema 字段之间正确切换 fieldKey、不串味
+- **Euler cache 在多触发路径下的 invalidate**：编辑 Transform.rotation → 选别的实体 → 回来 → 改 Transform → Remove Transform → Undo → Redo。每条路径都要不残留旧 Euler 值
+- **rename buffer 与 schema String 互不串味**：Entity Tree 内联重命名（仍走 `RenameCommand`）与 Inspector Name section schema 路径（走 `SetFieldValueCommand<std::string>`）写同一个 NameComponent。先 Tree 改 → 再 Inspector 改 → Undo 几次，验证两条路径 Merge 不冲突
+
+### 2. Coalesce 边界
+
+`SetFieldValueCommand` 的 Merge 走 entity + fieldKey 双键匹配。schema 通用路径靠 builder
+拼接 `"<typeName>.<propName>"` 形成 fieldKey。容易漏测：
+
+- **交错编辑**：编辑字段 A → 编辑字段 B → 回到字段 A → Undo 一次只回滚最后一次 A 编辑（而不是把两次 A 合成一条）。如果 fieldKey 拼接有 bug 会触发
+- **不同 entity 同字段名**：选 entity X 编辑 Transform.position → 选 entity Y 编辑 Transform.position。Undo 应只回滚 Y，不影响 X
+
+### 3. Save → 重启 → 加载 round-trip
+
+Scene 序列化走引擎 `Read` / `Write`，不经 schema。但 schema 注册的字段集与序列化字段集
+**必须一致**——schema 漏一个字段，Inspector 看不到，但 Save / Load 仍保留它（用户感知
+"改不动的字段"）。回归路径：
+
+- Save 当前 demo scene → 关闭 editor → 重启 → 加载 → 全字段值与保存前一致
+- 特别关注 ParticleEmitter（14 字段，覆盖最广）、RigidBody（含 enum）、Transform（含 quat→Euler 缓存）
+
+### 4. Play / Pause / Stop 期间 schema Inspector 的 disable
+
+`InspectorPanel.cpp` 顶层有 `ImGui::BeginDisabled(!canEdit)` 包裹整段，按
+`mHost.scene.playState == PlayState::Edit` 启用。验证：
+
+- Play 期间所有 schema 字段灰显且不能编辑
+- Pause 期间同上
+- Stop 后立即可编辑，且 cmdStack 状态保持（不被 play snapshot restore 清空）
+
+### 5. demo scene 完整覆盖
+
+`SeedDemoWorld` 或 `assets/editor/demo.scene.json` 内 13 个实体：
+
+- 5 种内置材质（textured / toon×3 / rim_light / dissolve / emissive）→ Renderable 段（c7 迁后）
+- DirectionalLight 含 `castsShadow` → c3 段
+- 2 个 ParticleEmitterComponent（火焰 + 萤火）→ c6 段
+- 2.5D EditorCamera 默认值
+
+每个实体都点一遍，所有 schema 段都展开看一眼。
+
+### 6. Add Component 菜单（c10 之后）
+
+`+ Add Component` 当前是 hardcode `if/else` 列表。c10 改 schema 注册表枚举驱动后，验证：
+
+- 菜单出现的项 = schema 注册了 `.Addable()` 的 component（不多不少）
+- 添加后 Inspector 立即显示新 component 的 schema 段（无需切换实体刷新）
+
+### 7. git bisect 准备
+
+大节点回归发现 bug 后，准备 `git bisect` 区间 `94bd463..HEAD`（c3 起到 milestone 完工
+commit），每个步骤用对应的 commit 验收点作为 reproducer。回归前先**确认 c3 状态可
+build / 运行**（即 bisect 区间端点干净），避免 bisect 中途撞到无关 broken commit。
+
+---
 
 ## 小节点回归路径（每次小节点都跑一遍）
 
