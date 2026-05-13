@@ -12,6 +12,8 @@
 
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
@@ -21,6 +23,7 @@
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 
+#include <string>
 #include <variant>
 
 namespace Orange::Editor::Schema
@@ -436,13 +439,65 @@ void RegisterColliderComponentSchema()
         .Register();
 }
 
+void RegisterAnimatorComponentSchema()
+{
+    using AC = Orange::Engine::Animation::AnimatorComponent;
+
+    // AnimatorComponent.animator 是 std::unique_ptr<IAnimator>——IAnimator 是
+    // 抽象基类，构造 AnimatorComponent 需要具体子类实例（SkeletalAnimator /
+    // ProceduralAnimator / 游戏自注册的 backend）。schema 当前没有"构造抽象
+    // 子类"的入口，所以本组件 **不 Addable**——与 v0.1 期 +Add Component
+    // popup 内显式跳过 Animator 的行为一致。
+    //
+    // 也不 Removable —— v0.1 期 hardcode 段用裸 CollapsingHeader，无 Remove
+    // 入口；本期保持一致。后续 v0.7 Animation 子模式可能引入 backend 切换
+    // 路径，那时再决定 schema 是否 Addable / Removable。
+    //
+    // 字段：仅一个 backend 名只读 String。v0.1 hardcode 显示 `Animator
+    // (runtime) : <ptr>` 原始指针 + TextDisabled "(animator backend editing
+    // — later task)" 占位；c9 升级为更可读的 backend name 字符串（如
+    // "skeletal_dragonbones" / "procedural"），通过 c9 同步引入的 ReadOnly
+    // attribute 显示。指针地址显示与 later-task 占位文本本期接受视觉变更
+    // ——backend name 信息量严格高于指针地址。
+    //
+    // getter 捕获 unique_ptr 可能为 null 的情况——AnimatorComponent 默认
+    // 构造时 animator 是空 unique_ptr，理论上不应进入 Inspector 段（v0.1
+    // hardcode 也没 guard，进了就显示 nullptr 指针），但 schema 路径保留
+    // defensive guard：null 显示 "(no backend)"，与"未挂 backend"语义一致。
+    static const auto getBackendName = +[](const void* c, void* out)
+    {
+        const auto* ac = static_cast<const AC*>(c);
+        if (ac->animator)
+        {
+            *static_cast<std::string*>(out) =
+                std::string(ac->animator->BackendName());
+        }
+        else
+        {
+            *static_cast<std::string*>(out) = "(no backend)";
+        }
+    };
+    // setter 是 no-op —— readOnly 路径下 SchemaInspector 不会调用 set，留
+    // nullptr 也行（c9 同步放宽了 set==nullptr 早退检查），但保留显式 no-op
+    // 让 FieldCustom 调用站点更对称（caller 一眼能看出"这是 read-only"）。
+    static const auto setBackendNameNoOp = +[](void*, const void*) { };
+
+    ComponentSchemaBuilder<AC>("Animator", "Animator")
+        .FieldCustom<std::string>("backend", "Backend",
+                                  getBackendName, setBackendNameNoOp)
+            .ReadOnly()
+        // 不 Addable / 不 Removable —— 见函数顶注释
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
 {
     // 注册顺序 = Inspector 内 component header 显示顺序：与 v0.1 期
     // DrawInspectorPanel 内显式调用顺序保持一致（Name → Transform →
-    // Hierarchy → DirectionalLight → ... → RigidBody → Collider → ...）。
+    // Hierarchy → DirectionalLight → ... → RigidBody → Collider →
+    // ParticleEmitter → Animator）。
     RegisterNameComponentSchema();
     RegisterTransformComponentSchema();
     RegisterHierarchyComponentSchema();
@@ -451,7 +506,9 @@ void RegisterBuiltinSchemas()
     RegisterRigidBodyComponentSchema();
     RegisterColliderComponentSchema();
     RegisterParticleEmitterComponentSchema();
-    // 后续 commit 在此追加：Animator
+    RegisterAnimatorComponentSchema();
+    // 所有内置组件 schema 已全数迁完。后续 commit（c10）改 Add Component 菜
+    // 单走 schema 注册表枚举驱动；c11 / c12 引入 IEditor*Plugin 抽象。
 }
 
 }  // namespace Orange::Editor::Schema

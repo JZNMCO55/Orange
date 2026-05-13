@@ -102,9 +102,10 @@ private:
     //   * ParticleEmitter       v0.2.5 commit 6
     //   * Renderable           v0.2.5 commit 7
     //   * Collider             v0.2.5 commit 8
-    // 剩余 hardcode 段在后续 commit 持续清空，最终整段 InspectorPanel
-    // 显式分派会被 DrawEntityViaSchemas(mHost, e) 单调用替代。
-    void DrawInspectorAnimator         (Orange::Engine::Entity e);
+    //   * Animator             v0.2.5 commit 9
+    // 所有内置 component 已全数迁完。剩余的 InspectorPanel 显式分派仅是
+    // 控制顺序的轻量代码，后续 commit（c10 之后）可考虑替换为
+    // DrawEntityViaSchemas(mHost, e) 单调用 + 注册顺序驱动；本期不顺手做。
 
     // ---- 字段 -----------------------------------------------------------
     // mAppHost  ：引擎层 AppHost（窗口 / LayerStack / 主循环）；

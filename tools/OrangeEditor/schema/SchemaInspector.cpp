@@ -123,8 +123,12 @@ void DrawProperty(EditorHost&                  host,
         ImGui::SeparatorText(prop.attribs.groupSeparator);
     }
 
-    // 无 get/set → 该字段是 Group-only 占位，仅显示 SeparatorText 后返回。
-    if (prop.get == nullptr || prop.set == nullptr) { return; }
+    // 无 get → 该字段是 Group-only 占位，仅显示 SeparatorText 后返回。
+    // 无 set 但 get 有效：允许 readOnly 字段以 nullptr setter 注册（典型
+    // 用例：AnimatorComponent.backend 名只读显示，无可编辑路径）；非
+    // readOnly 字段仍要求 set 有效（否则字段在 UI 上能拖但写不回，更糟）。
+    if (prop.get == nullptr) { return; }
+    if (prop.set == nullptr && !prop.attribs.readOnly) { return; }
 
     switch (prop.type)
     {
@@ -382,6 +386,19 @@ void DrawProperty(EditorHost&                  host,
         {
             std::string oldVal;
             prop.get(component, &oldVal);
+
+            // readOnly 路径：仅显示 "<label>: <value>"——左侧 ImGui::Text 写
+            // 静态 label，SameLine 后 TextDisabled 写动态 value。不画 InputText、
+            // 不 Push 命令。当前 readOnly 仅 String case 支持（c9 最小集）；其
+            // 他 PropertyType 上设 readOnly 暂被忽略走默认编辑控件。
+            if (prop.attribs.readOnly)
+            {
+                ImGui::Text("%s:", prop.label);
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", oldVal.c_str());
+                break;
+            }
+
             // 用静态 buffer 给 ImGui InputText 写——避免每帧 push std::string
             // back-and-forth。256 字节符合 Inspector typical entity name 长度。
             // 切实体时 ImGui ID 不同，buffer 内容也会被刷新（用户切走再切回

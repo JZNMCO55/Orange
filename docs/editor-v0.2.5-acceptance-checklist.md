@@ -253,6 +253,57 @@ Bool 路径。本 commit 不引入新机制。
 
 ---
 
+## Commit 9：Animator schema 迁移
+
+把 `DrawInspectorAnimator`（~15 行 hardcode）迁到 schema 路径。同步引入
+**`PropertyAttributes::readOnly` + `Builder::ReadOnly()`** —— 让 String 字段
+走"label: value"形式的 TextDisabled 展示路径（无 InputText、无命令推送）。
+AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字符串），
+不 Addable / 不 Removable（IAnimator 抽象类，无默认构造路径；v0.1 同款）。
+
+**收尾里程碑**：c9 完成后所有 9 个内置 component 全数 schema 化，
+`EditorRenderLayer` 内 `DrawInspectorXxx` 路径整体清除。
+
+### 验收点
+
+- [ ] **Animator section**（在挂了 Animator 的实体上，可用 `samples/05_dragonbones_demo` 或类似）
+  - [ ] Header 文本 = `Animator`
+  - [ ] 展开后**仅显示一行** `Backend: <name>`
+    - [ ] `<name>` 为 backend 字符串：DragonBones 后端 → `skeletal_dragonbones`；Procedural 后端 → `procedural`；游戏自注册后端 → 该后端 `BackendName()` 返回值
+    - [ ] 不显示 v0.1 期的指针地址（`Animator (runtime) : 0x...`）
+    - [ ] 不显示 v0.1 期的占位文本（`(animator backend editing — later task)`）
+  - [ ] **空 animator unique_ptr** 防御路径：如果某 entity 的 `AnimatorComponent.animator == nullptr`（理论上不应进入此状态，v0.1 hardcode 进了就显示 `nullptr`），schema 显示 `Backend: (no backend)` 而非 crash
+
+- [ ] **ReadOnly 控件行为**
+  - [ ] Backend 字段**不可编辑**：尝试点击 / 双击 / 拖拽都没有 InputText 出现
+  - [ ] 文本视觉为 `Text "Backend:"` + `SameLine` + `TextDisabled "<value>"`（label 正常色 + value 灰色）
+  - [ ] Inspector 整段被 `BeginDisabled(!canEdit)` 包裹时（Play / Paused 期）—— readOnly 字段同样灰显，但视觉与 Edit 期 readOnly 几乎一致；接受这一退化（不区分 "Inspector 全段 disable" vs "字段自身 readOnly"）
+
+- [ ] **Add / Remove**
+  - [ ] 右键 Animator header → **无 Remove Component 菜单项**（schema 未 `.Removable()`）
+  - [ ] `+ Add Component` → **无 Animator 菜单项**（schema 未 `.Addable()`；与 v0.1 期 InspectorPanel +Add popup 显式跳过 Animator 行为一致）
+
+- [ ] **跨 commit 状态**（验证 c5 ~ c8 未受影响）
+  - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变（c9 把 Animator 由"自定义函数调用"改为"schema 段"，但视觉位置不变）
+  - [ ] 其他 component 的 String 字段（如 Name）未受 readOnly 引入影响——未挂 readOnly 的字段仍走 InputText 编辑路径，无任何 regression
+  - [ ] 命令栈在 Animator 段不产生任何条目（readOnly 不 Push 命令）；Undo / Redo 跳过 Animator 段
+
+- [ ] **schema 基础设施新增**
+  - [ ] `PropertyAttributes::readOnly` 字段存在
+  - [ ] `ComponentSchemaBuilder::ReadOnly()` 链式 API 可用
+  - [ ] SchemaInspector 早退检查放宽：`set==nullptr && !readOnly` 才早退（readOnly 字段允许 nullptr setter）
+  - [ ] String 以外的 PropertyType 上设 readOnly 暂被忽略，走默认编辑路径（c9 仅 String case 实现，文档化为已知限制）
+
+- [ ] **v0.2.5 整骨收尾里程碑**
+  - [ ] `tools/OrangeEditor/EditorRenderLayer.h` 内**无任何** `DrawInspectorXxx` 成员声明
+  - [ ] `tools/OrangeEditor/panels/InspectorPanel.cpp` 内**无任何** `DrawInspectorXxx` 函数体（仅留若干"已删除"注释指向对应 schema 注册位置作历史索引）
+  - [ ] DrawInspectorPanel 函数体全部走 `schemaReg.Find<...>() → DrawComponentSchemaSection`
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -274,7 +325,7 @@ Bool 路径。本 commit 不引入新机制。
 
 - ~~Commit 7：Renderable schema 迁移~~ ✅
 - ~~Commit 8：Collider schema 迁移（含 `std::variant<CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc>` 多形）~~ ✅
-- Commit 9：Animator schema 迁移（含 `unique_ptr<IAnimator>` 抽象，仅展示 backend type）
+- ~~Commit 9：Animator schema 迁移（含 `unique_ptr<IAnimator>` 抽象，仅展示 backend type）~~ ✅
 - **节点 A 小回归**
 - Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）
 - Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry（仅声明，无真实 plugin）

@@ -91,7 +91,8 @@ void EditorRenderLayer::DrawInspectorPanel()
         { DrawComponentSchemaSection(mHost, e, *s); }
     if (const auto* s = schemaReg.Find<Orange::Engine::Render::ParticleEmitterComponent>())
         { DrawComponentSchemaSection(mHost, e, *s); }
-    DrawInspectorAnimator(e);
+    if (const auto* s = schemaReg.Find<Orange::Engine::Animation::AnimatorComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
 
     // ---- + Add Component -----------------------------------------
     // 列出尚未挂在本实体上的内置可添加组件。Animator 跳过 —— 需要具
@@ -239,16 +240,24 @@ bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
 //     间会让通用字段视觉被挤；颠倒顺序让 shape 段总在 component 段末尾
 // 两条都属 informational 降级，运行时行为与 v0.1 一致。
 
-void EditorRenderLayer::DrawInspectorAnimator(Orange::Engine::Entity e)
-{
-    using AC = Orange::Engine::Animation::AnimatorComponent;
-    if (!mHost.scene.pWorld->HasComponent<AC>(e)) { return; }
-    if (!ImGui::CollapsingHeader("Animator")) { return; }
-    const auto* a = mHost.scene.pWorld->GetComponent<AC>(e);
-    // AnimatorComponent 持 unique_ptr<IAnimator>，是 move-only 抽象类指
-    // 针，运行时 "换 backend" 不是 inspector 一行 combo 能搞定的。这里
-    // 仅显示是否挂着 + 指针地址；详细参数交给后续动画子模式。
-    ImGui::Text("Animator (runtime) : %p",
-                reinterpret_cast<const void*>(a->animator.get()));
-    ImGui::TextDisabled("(animator backend editing — later task)");
-}
+// DrawInspectorAnimator 已删除 —— v0.2.5 commit 9 起 AnimatorComponent
+// 走 schema-driven 渲染（schema/RegisterBuiltinSchemas.cpp 内 Register
+// AnimatorComponentSchema()）。
+//
+// v0.1 hardcode 显示两行：
+//   1. `Animator (runtime) : <ptr>` —— 原始 IAnimator* 指针地址
+//   2. `(animator backend editing — later task)` TextDisabled 占位
+//
+// c9 改显 backend name 字符串（"skeletal_dragonbones" / "procedural" 等）。
+// 同步引入 PropertyAttributes::readOnly + Builder::ReadOnly() 让 String
+// 字段走"Text + SameLine + TextDisabled"展示路径，不暴露 InputText。
+//
+// 信息变更（vs v0.1）：
+//   * 指针地址  → backend name（更可读，信息量提升）
+//   * "later task" 占位文本 → 不再显示（informational 删除）
+// 行为变更：无（v0.1 也无任何编辑能力）。
+//
+// readOnly attribute 同时为后续还原 c4 RigidBody.handle / c7 Renderable
+// mesh handle / MaterialInstance ptr 的调试显示打下基础——但那些字段还
+// 需要专门的 PropertyType（AssetHandle / BodyHandle 等），等专门 commit
+// 解决，本 commit 不顺手做。

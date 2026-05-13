@@ -93,6 +93,24 @@ struct PropertyAttributes
     // 第一个字段再挂新的 GroupSeparator。
     const char* groupSeparator = nullptr;
 
+    // 只读显示标志。true → SchemaInspector 走"只显示当前值、不暴露编辑控件
+    // / 不 Push SetFieldValueCommand"的路径。当前仅 PropertyType::String case
+    // 实现 readOnly 分支（Text "<label>:" + SameLine + TextDisabled "<value>"）；
+    // 其他 PropertyType 上设 readOnly 暂被忽略（c9 之后按需扩展，等真有 use
+    // case 时再补，避免预先撒网）。
+    //
+    // 典型用例：
+    //   * AnimatorComponent.animator->BackendName()（v0.1 期显示为指针；c9
+    //     升级为 backend 名字符串）
+    //   * 未来 RigidBodyComponent.handle（c4 期已记 deferred）/ Renderable
+    //     mesh handle / MaterialInstance ptr（c7 期已记 deferred）—— 这些
+    //     类型尚无 schema 化路径，等专门的 PropertyType（AssetHandle 等）
+    //     落地后再用 readOnly 显示
+    //
+    // 与 visibleIf 正交：readOnly 决定"显示成什么样"；visibleIf 决定"是否
+    // 显示"。两个都可同时用（少见但合法）。
+    bool readOnly = false;
+
     // 条件可见谓词。nullptr = 总显示（默认）；非 nullptr → SchemaInspector
     // 在渲染本字段的"任何 UI（含 GroupSeparator）"之前调一次，返回 false
     // 时本字段**整体**跳过（不画 SeparatorText / 不画控件 / 不查 tooltip）。

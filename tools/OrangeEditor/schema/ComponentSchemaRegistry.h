@@ -315,6 +315,20 @@ public:
         return *this;
     }
 
+    // 给最近一次 Field 标记为只读显示。SchemaInspector 走 readOnly 路径——
+    // 当前仅 PropertyType::String 实现："label: value" 形式 TextDisabled，不
+    // 暴露 InputText / 不 Push 命令。其他 PropertyType 暂忽略（c9 阶段最小集）。
+    //
+    // readOnly 字段允许注册时 set 函数指针为 nullptr（caller 给 no-op setter
+    // 也行）—— SchemaInspector 在 readOnly 分支内不调 setter，nullptr 安全。
+    //
+    // 典型用例（c9）：AnimatorComponent 的 backend name 字符串显示。
+    ComponentSchemaBuilder& ReadOnly()
+    {
+        mSchema.properties.back().attribs.readOnly = true;
+        return *this;
+    }
+
     // 注册一个**纯 header 段**：只有 GroupSeparator 文本，无可编辑控件。
     // 等价于 v0.1 hardcode 内 `ImGui::Text("Shape: Polygon (...)")` 这类
     // "信息行"——schema 通用 PropertyDescriptor 必须有 type + get/set，所
