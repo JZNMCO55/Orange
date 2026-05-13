@@ -549,6 +549,85 @@ coalesce 路径不受影响。
 
 ---
 
+## Commit 14：CommandStack 解 World\* 强耦合
+
+所有命令（SetFieldValueCommand / CreateEntityCommand / RenameCommand / LambdaCommand
+reparent）一律改 capture / 存 `EditorHost*`（弱引用），不再直接 capture `World*`。
+Execute / Undo 内通过 `host->scene.pWorld.get()` 间接解 World——切场景时 host.scene
+.pWorld 换新指针 / 置空，命令走 nullptr 防御分支 no-op，不再因 dangling World*
+崩溃。
+
+**保留 Clear() 调用点**（scene swap / 破坏性操作仍调 Clear），c14 改进仅是把"漏
+Clear 必崩"降级为"漏 Clear 安全 no-op"——纯防呆改进。
+
+### 验收点
+
+- [ ] **EntityCommands 改 host-based**
+  - [ ] `CreateEntityCommand` 构造签名：`(EditorHost& host, CreatorFn creator)`
+  - [ ] `RenameCommand` 构造签名：`(EditorHost& host, Entity, std::string, std::string)`
+  - [ ] 字段：`EditorHost* mpHost`（替代原 `Orange::Engine::World* mpWorld`）
+  - [ ] Execute / Undo 均通过本地 `ResolveWorld(mpHost)` helper 解 World + nullptr 防御
+  - [ ] CreateEntityCommand::Execute 在 world == nullptr 时不调 mCreatorFn，留 mCreated = Invalid
+
+- [ ] **SchemaInspector MakeFieldApply 改 host-based**
+  - [ ] 模板函数签名：`MakeFieldApply(EditorHost* pHost, Entity, const ComponentSchema*, SetFn)`
+  - [ ] lambda 内通过 `pHost->scene.pWorld.get()` 解 World + nullptr 防御 + nullptr 时 return
+  - [ ] 所有 8 个 PropertyType case（Float / Int / UInt / Bool / Vec2 / Vec3 / Vec4 / Enum / String）的 `MakeFieldApply<T>(pWorld, ...)` 调用改为 `MakeFieldApply<T>(&host, ...)`
+  - [ ] Quat case 的自定义 apply lambda 改 capture `pHost` + `pSchema` + `setFn` + `entity`（不再单独 capture `pWorld` / `pHostInner`）
+
+- [ ] **EntityTreePanel 调用点迁移**
+  - [ ] `CreateEntityCommand` 调用：`std::make_unique<CreateEntityCommand>(mHost, ...)`（去掉 `*mHost.scene.pWorld`）
+  - [ ] `RenameCommand` 调用：`std::make_unique<RenameCommand>(mHost, entity, oldName, newName)`
+  - [ ] reparent LambdaCommand：lambda capture `pH = &mHost`（不再 `pW = mHost.scene.pWorld.get()`），内部 `pH->scene.pWorld.get()` 解 + nullptr 防御
+
+- [ ] **行为防御**（手工 / 调试器步进）
+  - [ ] **场景切换不崩**：编辑器 New Scene / Open Scene → 切换瞬间 host.scene.pWorld 置新指针；之前命令栈上残留命令（虽然 caller 仍按规约调 `Clear()`，但即便漏调）也不再因 dangling World 崩
+  - [ ] **正常 Edit Mode 行为不变**：c12 baseline 的所有 Inspector / Tree / Play / Undo / Redo 路径在 c14 下行为一致
+  - [ ] CommandStack::Clear() 调用点不动（新 / 加载 / 删 entity / 删 component 等仍调）
+
+- [ ] **保后兼容**
+  - [ ] ICommand 接口签名不变（Execute() / Undo() 仍无参数）
+  - [ ] CommandStack 接口不变（除 c13 加的 group 三方法外）
+  - [ ] LambdaCommand 接口不变（lambda 内容由调用方决定，caller 负责 capture host 而非 world）
+
+- [ ] **下行影响验证**
+  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
+  - [ ] 编辑器启动 + Demo scene 加载 + 选实体 + Inspector 各字段编辑 + Undo / Redo + Play Mode 路径无 regression
+  - [ ] `python scripts/check_invariants.py` 通过
+
+### bugs
+（待大节点回归后填）
+
+---
+
+## v0.2.5 milestone 完工标记
+
+c14 落地后，v0.2.5 "架构整骨" milestone 13 个 commit 全数 ✅（c3~c14；c1/c2 是 EditorState
+→ EditorHost 拆分前置）：
+
+| Commit | 主题 | 状态 |
+|--------|------|------|
+| c3 | DirectionalLight schema | ✅ |
+| c4 | RigidBody schema | ✅ |
+| c5 | Name / Transform / Hierarchy schema | ✅ |
+| c6 | ParticleEmitter schema + FieldNested / FieldCustom / GroupSeparator | ✅ |
+| c7 | Renderable schema | ✅ |
+| c8 | Collider schema + visibleIf + Group(header-only) | ✅ |
+| c9 | Animator schema + ReadOnly | ✅ |
+| **节点 A 小回归** | 推迟到里程碑统一执行 | — |
+| c10 | Add Component schema 化 + DrawEntityViaSchemas 收尾 | ✅ |
+| c11 | IEditorInspectorPlugin 接口 + EditorHost 注册表 | ✅ |
+| c12 | IEditorGizmoPlugin 接口 + EditorHost 注册表 | ✅ |
+| **节点 B 小回归** | 推迟到里程碑统一执行 | — |
+| c13 | CommandStack BeginGroup / EndGroup + MergeMode 三档 | ✅ |
+| c14 | CommandStack 解 World\* 强耦合 | ✅ |
+| **节点 C 全 milestone 回归** | 待统一执行（用户决定的回归节奏） | — |
+
+整 milestone ✅ 标记由节点 C 回归通过后落到 `docs/editor-roadmap.md` 的 v0.2.5
+heading 上；本 acceptance-checklist 同时归档到 `docs/qa-records/` 或保留原位。
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -577,8 +656,8 @@ coalesce 路径不受影响。
 - ~~Commit 12：`IEditorGizmoPlugin` 接口声明（仅签名，v0.4 消费）~~ ✅
 - **节点 B 小回归**（推迟到里程碑统一回归——用户决定）
 - ~~Commit 13：CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档~~ ✅
-- Commit 14：CommandStack 解 World\* 强耦合（命令存 entity id，scene swap 不再 Clear 整栈）
-- **节点 C 全 milestone 回归 + v0.2.5 ✅**
+- ~~Commit 14：CommandStack 解 World\* 强耦合（命令存 entity id，scene swap 不再 Clear 整栈）~~ ✅
+- **节点 C 全 milestone 回归 + v0.2.5 ✅**（待统一执行）
 
 具体 commit 数和顺序在开工时按需调整；本占位仅为对齐 `editor-roadmap.md` v0.2.5
 deliverables 列表的方向参考。

@@ -147,12 +147,20 @@ void EditorRenderLayer::DrawEntityTreePanel()
             const Orange::Engine::Entity oldParent = (hc != nullptr)
                 ? hc->parent
                 : Orange::Engine::Entity::Invalid();
+            // c14 解 World* 强耦合：lambda 捕获 EditorHost* 而非裸 World*，
+            // 调用时 `pH->scene.pWorld.get()` 间接解——切场景时 host 解到
+            // 新 World 或 nullptr，命令走 nullptr 防御分支 no-op 而非 dangling
+            // 崩溃。详见 command/EntityCommands.h 顶注释。
             mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
                 "reparent",
-                [pW = mHost.scene.pWorld.get(), src, dst]() {
-                    EditorHierarchy::ReparentTo(*pW, src, dst);
+                [pH = &mHost, src, dst]() {
+                    if (auto* pW = pH->scene.pWorld.get()) {
+                        EditorHierarchy::ReparentTo(*pW, src, dst);
+                    }
                 },
-                [pW = mHost.scene.pWorld.get(), src, oldParent]() {
+                [pH = &mHost, src, oldParent]() {
+                    auto* pW = pH->scene.pWorld.get();
+                    if (pW == nullptr) { return; }
                     // Undo 时 src 可能已被其他命令销毁（EnTT version check）
                     if (pW->IsValid(src)) {
                         EditorHierarchy::ReparentTo(*pW, src, oldParent);
@@ -169,7 +177,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
         mHost.selection.pendingCreate.valid = false;
 
         auto cmd = std::make_unique<CreateEntityCommand>(
-            *mHost.scene.pWorld,
+            mHost,
             [parent, kind, cubeMesh, pLightMat]
             (Orange::Engine::World& w) -> Orange::Engine::Entity
             {
@@ -391,7 +399,7 @@ void EditorRenderLayer::CommitRename(Orange::Engine::Entity entity)
     const std::string newName = mHost.selection.renameBuffer;
     if (oldName != newName) {
         mHost.cmdStack.Push(std::make_unique<RenameCommand>(
-            *mHost.scene.pWorld, entity, oldName, newName));
+            mHost, entity, oldName, newName));
     }
     CancelRename();
 }

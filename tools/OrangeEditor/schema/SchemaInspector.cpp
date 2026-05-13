@@ -63,21 +63,28 @@ bool ComponentHeaderLocal(const char* label, bool* outRemove,
 // 把 schema 内的某个字段写回 component；schema.get 每次都用最新 entity 解引，
 // 应对 Undo/Redo 中 component 被 Remove → 重新 AddComponent 后地址变化。
 //
+// c14 起 lambda 捕获 `EditorHost*` 而非 `World*`：调用时 `pHost->scene
+// .pWorld.get()` 间接解 World——切场景后 host.scene.pWorld 换新指针 / 置
+// 空，命令 lambda 走 nullptr 防御分支 no-op，不再因 dangling World* 崩溃。
+// 详细纪律见 command/EntityCommands.h 顶注释。
+//
 // SetFn 是 PropertyDescriptor::SetFn（capture-less function ptr）；这里
 // 包装成 std::function 让 SetFieldValueCommand 持有。
 template <typename T>
-auto MakeFieldApply(Orange::Engine::World*       pWorld,
+auto MakeFieldApply(EditorHost*                  pHost,
                     Orange::Engine::Entity       entity,
                     const ComponentSchema*       pSchema,
                     PropertyDescriptor::SetFn    setFn)
 {
-    return [pWorld, entity, pSchema, setFn](const T& value)
+    return [pHost, entity, pSchema, setFn](const T& value)
     {
-        if (pWorld == nullptr || pSchema == nullptr || pSchema->get == nullptr
+        if (pHost == nullptr || pSchema == nullptr || pSchema->get == nullptr
             || setFn == nullptr)
         {
             return;
         }
+        auto* pWorld = pHost->scene.pWorld.get();
+        if (pWorld == nullptr) { return; }   // 漏 Clear 的安全降级
         void* component = pSchema->get(*pWorld, entity);
         if (component != nullptr)
         {
@@ -144,7 +151,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<float>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<float>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -160,7 +167,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<int>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<int>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -180,7 +187,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<unsigned int>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<unsigned int>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<unsigned int>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -194,7 +201,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<bool>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<bool>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -211,7 +218,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<glm::vec2>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<glm::vec2>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -238,7 +245,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<glm::vec3>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<glm::vec3>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -264,7 +271,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec4>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<glm::vec4>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<glm::vec4>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -303,23 +310,28 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
 
                 // apply lambda 不复用通用 MakeFieldApply<glm::quat>——多一步
-                // invalidate Euler 缓存。pHostInner 通过 capture 进入 std::function。
-                auto*                       pHostInner = &host;
+                // invalidate Euler 缓存。c14 起仅 capture pHost（不再 capture
+                // pWorld），lambda 内 `pHost->scene.pWorld.get()` 间接解 World——
+                // 切场景时 host.scene.pWorld 换新指针 / 置空，命令走 nullptr
+                // 防御分支 no-op，不再因 dangling 崩。
+                auto*                       pHost      = &host;
                 PropertyDescriptor::SetFn   setFn      = prop.set;
                 const ComponentSchema*      pSchema    = &schema;
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
                     entity, fieldKey, oldVal, newVal,
-                    [pWorld, entity, pSchema, setFn, pHostInner]
+                    [pHost, entity, pSchema, setFn]
                     (const glm::quat& v)
                     {
-                        if (pSchema == nullptr || pSchema->get == nullptr
-                            || setFn == nullptr)
+                        if (pHost == nullptr || pSchema == nullptr
+                            || pSchema->get == nullptr || setFn == nullptr)
                         {
                             return;
                         }
-                        void* c = pSchema->get(*pWorld, entity);
+                        auto* pW = pHost->scene.pWorld.get();
+                        if (pW == nullptr) { return; }
+                        void* c = pSchema->get(*pW, entity);
                         if (c != nullptr) { setFn(c, &v); }
-                        pHostInner->selection.transformEulerCacheEntity =
+                        pHost->selection.transformEulerCacheEntity =
                             Orange::Engine::Entity::Invalid();
                     }));
             }
@@ -354,7 +366,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<int>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<int>(&host, entity, &schema, prop.set)));
             }
             break;
         }
@@ -413,7 +425,7 @@ void DrawProperty(EditorHost&                  host,
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<std::string>>(
                     entity, fieldKey, oldVal, newVal,
-                    MakeFieldApply<std::string>(pWorld, entity, &schema, prop.set)));
+                    MakeFieldApply<std::string>(&host, entity, &schema, prop.set)));
             }
             break;
         }
