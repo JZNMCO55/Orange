@@ -85,7 +85,8 @@ void EditorRenderLayer::DrawInspectorPanel()
         { DrawComponentSchemaSection(mHost, e, *s); }
     if (const auto* s = schemaReg.Find<Orange::Engine::Render::DirectionalLight>())
         { DrawComponentSchemaSection(mHost, e, *s); }
-    DrawInspectorRenderable(e);
+    if (const auto* s = schemaReg.Find<Orange::Engine::Render::RenderableComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
     if (const auto* s = schemaReg.Find<Orange::Engine::Physics::RigidBodyComponent>())
         { DrawComponentSchemaSection(mHost, e, *s); }
     DrawInspectorCollider(e);
@@ -210,63 +211,6 @@ bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
 // 引入 ActionButton attribute 或独立 IEditorInspectorPlugin 路径后再
 // 还原该 helper（短期可接受退化——direction 在 ImGui DragFloat3 拖动
 // 时大概率仍是单位向量附近的值；Pipeline 着色阶段按需 normalize 保底）。
-
-void EditorRenderLayer::DrawInspectorRenderable(Orange::Engine::Entity e)
-{
-    using RC = Orange::Engine::Render::RenderableComponent;
-    if (!mHost.scene.pWorld->HasComponent<RC>(e)) { return; }
-    bool remove = false;
-    const bool open = ComponentHeader("Renderable", &remove);
-    if (!open) {
-        if (remove) {
-            mHost.scene.pWorld->RemoveComponent<RC>(e);
-            mHost.cmdStack.Clear();
-        }
-        return;
-    }
-    auto* r  = mHost.scene.pWorld->GetComponent<RC>(e);
-    auto* pW = mHost.scene.pWorld.get();
-
-    // mesh / materialInstance 是 handle / 裸指针 —— 编辑得通过 Asset
-    // 浏览器（后续扩展）才有意义。这里只读显示。
-    ImGui::Text("Mesh handle      : %llu",
-                static_cast<unsigned long long>(r->mesh.Value()));
-    ImGui::Text("MaterialInstance : %p",
-                reinterpret_cast<void*>(r->materialInstance));
-
-    {
-        bool oldVisible = r->visible;
-        if (ImGui::Checkbox("Visible", &r->visible)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
-                e, "renderable.visible", oldVisible, r->visible,
-                [pW, e](const bool& v) {
-                    if (auto* rc = pW->GetComponent<RC>(e)) rc->visible = v;
-                }));
-        }
-    }
-    {
-        bool oldShadow = r->castsShadow;
-        if (ImGui::Checkbox("Casts Shadow", &r->castsShadow)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
-                e, "renderable.castsShadow", oldShadow, r->castsShadow,
-                [pW, e](const bool& v) {
-                    if (auto* rc = pW->GetComponent<RC>(e)) rc->castsShadow = v;
-                }));
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "本物体是否参与投射阴影（per-object 开关）。\n"
-                "关掉对应 \"几何不投影但仍接收阴影\"（典型用例：透明 UI / 装饰物 /\n"
-                "近景特效）。与 DirectionalLight 的同名 flag 是 AND 关系：两个都\n"
-                "必须为 true 才会真投影。");
-        }
-    }
-
-    if (remove) {
-        mHost.scene.pWorld->RemoveComponent<RC>(e);
-        mHost.cmdStack.Clear();
-    }
-}
 
 // DrawInspectorRigidBody 已删除 —— v0.2.5 commit 4 起 RigidBodyComponent
 // 走 schema-driven 渲染（schema/RegisterBuiltinSchemas.cpp 内 RegisterRigid

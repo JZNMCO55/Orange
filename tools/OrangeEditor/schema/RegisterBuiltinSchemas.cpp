@@ -15,6 +15,7 @@
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
+#include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -231,6 +232,38 @@ void RegisterParticleEmitterComponentSchema()
         .Register();
 }
 
+void RegisterRenderableComponentSchema()
+{
+    using RC = Orange::Engine::Render::RenderableComponent;
+    // mesh（AssetHandle<MeshAsset>）与 materialInstance（MaterialInstance*
+    // 裸指针）目前**不**注册到 schema —— 同 RigidBody.handle 一样属于
+    // "运行时引用 / 资源 ref，编辑器当前没有可视化编辑路径"。schema 系
+    // 统当前无 ReadOnly attribute 或 AssetHandle PropertyType；v0.1 期两
+    // 行 TextDisabled 调试值（"Mesh handle: <id>" / "MaterialInstance:
+    // <ptr>"）在本 commit 暂时不显示，接受视觉降级。
+    //
+    // 后续 v0.3 IEditorInspectorPlugin 落地或 v0.5 资源浏览器引入
+    // PropertyType::AssetHandle 路径后还原。
+    //
+    // Addable 暂不挂 —— v0.1 期 "+Add Component" 内挂 Renderable 时**预
+    // 绑** cubeMesh + defaultMaterial（让用户立刻在 viewport 看到几何，
+    // 而不是空 component 等于隐形）。schema 默认 add 走 `RC{}` 默认构
+    // 造，会回归为空 RC——这是 regression。c10 改 Add 菜单 schema 驱动
+    // 时一并引入 `.AddableWith(customFn)` 入口，由编辑器侧的注册代码
+    // 注入 EditorAssetContext 引用，实现自定义 add lambda。本 commit
+    // 保留 InspectorPanel "+Add Component" 内的 Renderable hardcode 路径
+    // 不动。
+    ComponentSchemaBuilder<RC>("Renderable", "Renderable")
+        .Field<&RC::visible>("visible", "Visible")
+        .Field<&RC::castsShadow>("castsShadow", "Casts Shadow")
+            .Tooltip("本物体是否参与投射阴影（per-object 开关）。\n"
+                     "关掉对应 \"几何不投影但仍接收阴影\"（典型用例：透明 UI / 装饰物 /\n"
+                     "近景特效）。与 DirectionalLight 的同名 flag 是 AND 关系：两个都\n"
+                     "必须为 true 才会真投影。")
+        .Removable()
+        .Register();
+}
+
 void RegisterHierarchyComponentSchema()
 {
     using HC = Orange::Engine::Scene::HierarchyComponent;
@@ -265,9 +298,10 @@ void RegisterBuiltinSchemas()
     RegisterTransformComponentSchema();
     RegisterHierarchyComponentSchema();
     RegisterDirectionalLightSchema();
+    RegisterRenderableComponentSchema();
     RegisterRigidBodyComponentSchema();
     RegisterParticleEmitterComponentSchema();
-    // 后续 commit 在此追加：Renderable / Collider / Animator
+    // 后续 commit 在此追加：Collider / Animator
 }
 
 }  // namespace Orange::Editor::Schema

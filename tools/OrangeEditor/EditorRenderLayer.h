@@ -100,9 +100,9 @@ private:
     //   * RigidBody            v0.2.5 commit 4
     //   * Name / Transform / Hierarchy   v0.2.5 commit 5
     //   * ParticleEmitter       v0.2.5 commit 6
+    //   * Renderable           v0.2.5 commit 7
     // 剩余 hardcode 段在后续 commit 持续清空，最终整段 InspectorPanel
     // 显式分派会被 DrawEntityViaSchemas(mHost, e) 单调用替代。
-    void DrawInspectorRenderable       (Orange::Engine::Entity e);
     void DrawInspectorCollider         (Orange::Engine::Entity e);
     void DrawInspectorAnimator         (Orange::Engine::Entity e);
 

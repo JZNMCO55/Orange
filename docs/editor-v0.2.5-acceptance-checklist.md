@@ -160,6 +160,34 @@ mapping）/ `PropertyAttributes::groupSeparator`（`ImGui::SeparatorText`）。
 
 ---
 
+## Commit 7：Renderable schema 迁移
+
+把 `DrawInspectorRenderable`（约 60 行 hardcode）迁到 schema 路径。`mesh`
+（`AssetHandle<MeshAsset>`）/ `materialInstance`（`MaterialInstance*` 裸指针）两
+字段不注册到 schema（同 RigidBody.handle 路径，等 ReadOnly attribute 或
+`PropertyType::AssetHandle` 引入后还原）；`visible` / `castsShadow` 走通用
+Bool 路径。本 commit 不引入新机制。
+
+### 验收点
+
+- [ ] **Renderable section**（demo scene 任意带几何的实体）
+  - [ ] `Visible` checkbox 可勾 / 取消，几何相应隐 / 显
+  - [ ] `Casts Shadow` checkbox 可勾 / 取消；hover 显示 tooltip 文本与 v0.1 一致
+  - [ ] **视觉降级**：v0.1 期两行 `Mesh handle: <id>` / `MaterialInstance: <ptr>` 调试信息**不再显示**——确认可接受
+
+- [ ] **Add / Remove**
+  - [ ] 右键 Renderable header → Remove Component → 几何消失
+  - [ ] `+Add Component` → `Renderable` 菜单项**仍可用**（仍走 InspectorPanel 内 hardcode 路径，预绑 cubeMesh + defaultMaterial）；从菜单加挂的 Renderable 立即显示白色立方体
+  - [ ] 验证 schema 的 `.Removable()` 与 hardcode `+Add` 路径**互不冲突**：Remove → Add → Remove → Add 多次循环正常
+
+- [ ] **跨 commit 状态**（验证 c5 / c6 未受影响）
+  - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -179,7 +207,7 @@ mapping）/ `PropertyAttributes::groupSeparator`（`ImGui::SeparatorText`）。
 
 ### 待开工 commit 占位
 
-- Commit 7：Renderable schema 迁移（含 mesh / materialInstance handle 字段——预计需 `PropertyType::AssetHandle` 或只读 placeholder）
+- ~~Commit 7：Renderable schema 迁移~~ ✅
 - Commit 8：Collider schema 迁移（含 `std::variant<CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc>` 多形）
 - Commit 9：Animator schema 迁移（含 `unique_ptr<IAnimator>` 抽象，仅展示 backend type）
 - **节点 A 小回归**
