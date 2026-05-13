@@ -478,6 +478,77 @@ mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
 
 ---
 
+## Commit 13：CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档
+
+引入命令组（atomic grouped commands）+ 三档合并策略。
+
+设计参考 Lumix `WorldEditor::beginCommandGroup()`（group 内多条命令一次 undo
+原子撤销）+ Godot `UndoRedo` 的三档 `MergeMode`（DISABLE / ENDS / ALL）。
+本期是基础设施落地——v0.4 Gizmo 拖动时调度的"一次 drag = group 内多条
+SetField" 用例，本 commit 提供 API，v0.4 实际消费。
+
+**保后兼容**：Push 在未 BeginGroup 时行为零变化；现有 Inspector DragFloat
+coalesce 路径不受影响。
+
+### 验收点
+
+- [ ] **MergeMode 枚举**
+  - [ ] `enum class MergeMode : std::uint8_t { Disable=0, Ends=1, All=2 }`
+  - [ ] 默认值在 `BeginGroup` 签名内为 `Ends`
+
+- [ ] **BeginGroup / EndGroup / InGroup API**
+  - [ ] `void BeginGroup(const char* name, MergeMode mode = MergeMode::Ends)`
+  - [ ] `void EndGroup()`
+  - [ ] `bool InGroup() const`
+  - [ ] `BeginGroup` 内 name 参数文档为静态生命周期；CommandStack 不复制
+
+- [ ] **组内 Push 行为**（手工单元测试 / 调试器步进）
+  - [ ] BeginGroup 后调 `cmd->Execute()` 立刻生效（live preview）
+  - [ ] Push 不直接进 `mStack`，进 `mPendingGroup`
+  - [ ] 组内 intra-group coalesce 工作：同 GetType 连续 Push 在 pending 末尾合并
+
+- [ ] **EndGroup 入栈**
+  - [ ] 空组（BeginGroup 后无 Push）EndGroup 不污染栈
+  - [ ] 非空组 EndGroup → 单条 CommandGroup 入栈 + `mIndex` ++
+  - [ ] CommandGroup 的 `GetType()` 返回 BeginGroup 传入的 name
+
+- [ ] **MergeMode::Disable 行为**
+  - [ ] 第一次 `BeginGroup("X", Disable) ... EndGroup()` → 栈条目 +1
+  - [ ] 第二次 `BeginGroup("X", Disable) ... EndGroup()` → 栈条目再 +1（不与栈顶合并）
+
+- [ ] **MergeMode::Ends 行为**（默认）
+  - [ ] 第一次 `BeginGroup("X", Ends) ... EndGroup()` → 栈条目 +1
+  - [ ] 第二次 `BeginGroup("X", Ends) ... EndGroup()` → 栈条目仍是 1（与栈顶 "X" 合并）
+  - [ ] 中间插入一个 `BeginGroup("Y", Ends) ... EndGroup()` 后再来 `BeginGroup("X", Ends)`：
+    栈顶不是 "X"（是 "Y"），所以新 "X" 不与之前的 "X" 合并，栈条目 +1（总 3 条）
+
+- [ ] **MergeMode::All 行为**
+  - [ ] 同 Ends 的"连续两条 X 合并"
+  - [ ] 区别：中间插入 "Y" 后再来 `BeginGroup("X", All)` → 跨过 "Y" 与最早 "X" 合并，栈条目仍 2（X+Y）
+  - [ ] 头注释明确"All 跨条目合并隐含时序重排，调用方负责保证字段不冲突"
+
+- [ ] **Group Undo / Redo 原子性**
+  - [ ] Group 内 3 个 sub-command → Undo 一次回到 BeginGroup 之前状态（3 个字段同时回滚）
+  - [ ] Redo 一次重新应用 3 个 sub-command（同样原子）
+
+- [ ] **Clear() 清理 pending**
+  - [ ] BeginGroup 后调 Clear() → mStack 清空 + mPendingGroup 清空 + mInGroup = false
+  - [ ] Clear 后 InGroup() == false；后续 Push 走默认（非组）路径
+
+- [ ] **保后兼容**
+  - [ ] 未调 BeginGroup 的 Push 行为与 c12 完全一致
+  - [ ] Inspector DragFloat 连续拖动仍 coalesce 成单条栈条目（fieldKey 匹配 + SetFieldValueCommand::Merge 返回 true）
+
+- [ ] **下行影响验证**
+  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
+  - [ ] 编辑器启动 + Inspector 编辑 + Undo / Redo 路径行为不变（c12 baseline）
+  - [ ] `python scripts/check_invariants.py` 通过
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -504,8 +575,8 @@ mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
 - ~~Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）~~ ✅
 - ~~Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry（仅声明，无真实 plugin）~~ ✅
 - ~~Commit 12：`IEditorGizmoPlugin` 接口声明（仅签名，v0.4 消费）~~ ✅
-- **节点 B 小回归**
-- Commit 13：CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档
+- **节点 B 小回归**（推迟到里程碑统一回归——用户决定）
+- ~~Commit 13：CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档~~ ✅
 - Commit 14：CommandStack 解 World\* 强耦合（命令存 entity id，scene swap 不再 Clear 整栈）
 - **节点 C 全 milestone 回归 + v0.2.5 ✅**
 
