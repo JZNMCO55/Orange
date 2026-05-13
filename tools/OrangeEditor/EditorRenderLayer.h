@@ -90,22 +90,16 @@ private:
 
     // ---- panels/InspectorPanel.cpp -------------------------------------
     void DrawInspectorPanel();
-    // CollapsingHeader 包装 —— 多一个 "右键 → Remove Component" 上下文
-    // 菜单。outRemove 表示用户本帧请求了移除，调用方在 fields 渲染完后
-    // 据此调 RemoveComponent。
-    static bool ComponentHeader(const char* label, bool* outRemove,
-                                bool defaultOpen = true);
-    // 已迁 schema-driven 渲染的 component 成员声明已逐步删除：
-    //   * DirectionalLight     v0.2.5 commit 3
-    //   * RigidBody            v0.2.5 commit 4
-    //   * Name / Transform / Hierarchy   v0.2.5 commit 5
-    //   * ParticleEmitter       v0.2.5 commit 6
-    //   * Renderable           v0.2.5 commit 7
-    //   * Collider             v0.2.5 commit 8
-    //   * Animator             v0.2.5 commit 9
-    // 所有内置 component 已全数迁完。剩余的 InspectorPanel 显式分派仅是
-    // 控制顺序的轻量代码，后续 commit（c10 之后）可考虑替换为
-    // DrawEntityViaSchemas(mHost, e) 单调用 + 注册顺序驱动；本期不顺手做。
+    // v0.2.5 commit 3 ~ 10 把所有 DrawInspectorXxx 成员（DirectionalLight /
+    // RigidBody / Name / Transform / Hierarchy / ParticleEmitter / Renderable
+    // / Collider / Animator）+ 静态 ComponentHeader helper 全数清除：
+    //   * 9 个 component 段：见 schema/RegisterBuiltinSchemas.cpp
+    //   * CollapsingHeader 包装：见 schema/SchemaInspector.cpp 的
+    //     ComponentHeaderLocal（schema 内部 helper）
+    //   * +Add Component 菜单：c10 起按 ComponentSchemaRegistry 枚举驱动，
+    //     不再 hardcode 单个组件
+    // 类外不再 mention 任何具体内置 component 类型 —— 见 InspectorPanel.cpp
+    // 顶注释。
 
     // ---- 字段 -----------------------------------------------------------
     // mAppHost  ：引擎层 AppHost（窗口 / LayerStack / 主循环）；

@@ -1,38 +1,25 @@
-// Inspector 面板（每个内置组件一个 Draw 段 + Add Component popup）。
+// Inspector 面板（DrawInspectorPanel + Add Component popup）。
+//
+// v0.2.5 commit 10 收尾：所有 component 列举 / +Add 菜单都走 Component
+// SchemaRegistry 迭代，本 TU 内不再 mention 任何具体内置 component 类型。
 // 与 EditorRenderLayer.cpp 主 TU 共享同一类声明 EditorRenderLayer。
 
 #include "../EditorRenderLayer.h"
 
-#include "../command/LambdaCommand.h"
-#include "../command/SetFieldValueCommand.h"
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 
-#include <orange/engine/animation/AnimatorComponent.h>
-#include <orange/engine/physics/ColliderComponent.h>
-#include <orange/engine/physics/RigidBodyComponent.h>
-#include <orange/engine/render/LightComponent.h>
-#include <orange/engine/render/ParticleEmitterComponent.h>
-#include <orange/engine/render/RenderableComponent.h>
-#include <orange/engine/scene/HierarchyComponent.h>
-#include <orange/engine/scene/NameComponent.h>
-#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <imgui.h>
 
-#include <algorithm>
-#include <cstdio>
-#include <cstring>
-#include <string>
-
-// Inspector 入口：选中实体的 entity id + 所有"已挂着的内置 component"
-// 各起一个 CollapsingHeader 段。每段 if HasComponent → DrawXxx。
+// Inspector 入口：选中实体的 entity id + 所有"已挂着的 component"各起一段
+// schema-driven 渲染 + 一个 +Add Component popup 按 schema registry 枚举。
 //
-// 组件类型表是**硬编码**的（按"内置组件"列表枚举）。引擎当前
-// 禁止 entt::meta / 反射，所以游戏侧自定义 component
-// 暂时只能不显示 —— 后续真要扩展时走"编辑器扩展点 API 让游
-// 戏注册自己的 inspector callback"路径，不在本期范围内。
+// c10 起本 TU 不再 mention 任何具体内置 component 类型；所有组件清单 +
+// 顺序 + UI 行为都从 ComponentSchemaRegistry 取。游戏侧自定义 component
+// 通过同一 registry 注册即可自动出现在 Inspector + +Add 菜单——v0.3 game
+// side schema 注册落地后无需改本 TU 一行。
 void EditorRenderLayer::DrawInspectorPanel()
 {
     ImGui::Begin("Inspector");
@@ -64,90 +51,48 @@ void EditorRenderLayer::DrawInspectorPanel()
     }
     ImGui::BeginDisabled(!canEdit);
 
-    // v0.2.5 整骨期：已迁 schema 的 component 走 schema-driven 渲染；
-    // 未迁的仍走 DrawInspectorXxx 硬编码路径。全部迁完后，整段 if-block
-    // 统一替换为 Orange::Editor::Schema::DrawEntityViaSchemas(mHost, e)
-    // 并删除剩余 DrawInspectorXxx 调用。
-    //
-    // 已迁顺序 = schema 注册顺序（见 RegisterBuiltinSchemas.cpp）= 这里
-    // 显式分派的顺序，保证 v0.1 期 Inspector 内 component header 视觉
-    // 顺序不变（Name → Transform → Hierarchy → DirectionalLight →
-    // Renderable → RigidBody → Collider → ParticleEmitter → Animator）。
-    auto& schemaReg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
-    using Orange::Editor::Schema::DrawComponentSchemaSection;
-    if (const auto* s = schemaReg.Find<Orange::Engine::Scene::NameComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Scene::TransformComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Scene::HierarchyComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Render::DirectionalLight>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Render::RenderableComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Physics::RigidBodyComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Physics::ColliderComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Render::ParticleEmitterComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
-    if (const auto* s = schemaReg.Find<Orange::Engine::Animation::AnimatorComponent>())
-        { DrawComponentSchemaSection(mHost, e, *s); }
+    // 所有 schema 段按注册顺序逐段渲染（schema.has 内部已 guard 未挂的 entity，
+    // 不会画空段）。注册顺序见 schema/RegisterBuiltinSchemas.cpp，与 v0.1
+    // 期 Inspector 内 component header 顺序一致：Name → Transform → Hierarchy
+    // → DirectionalLight → Renderable → RigidBody → Collider → ParticleEmitter
+    // → Animator。
+    Orange::Editor::Schema::DrawEntityViaSchemas(mHost, e);
 
-    // ---- + Add Component -----------------------------------------
-    // 列出尚未挂在本实体上的内置可添加组件。Animator 跳过 —— 需要具
-    // 体 IAnimator 子类实例，不能用空 unique_ptr 默认构造。Hierarchy
-    // 跳过 —— DnD 管理，手动 add 会出现 "孤立 HC"（parent invalid
-    // 且不挂在任何父链上）。
+    // ---- + Add Component -------------------------------------------------
+    // 枚举 ComponentSchemaRegistry 内所有挂了 `.Addable()` / `.AddableWith()`
+    // 的 schema 项；过滤掉已挂在本实体上的 component。schema.add(host, entity)
+    // 完成实际挂载——默认 Addable 走 `world.AddComponent<C>(e, C{})`，
+    // AddableWith 走调用方自定义 lambda（典型：Renderable 预绑 cubeMesh +
+    // defaultMaterial）。
     //
     // AddComponent 是破坏性操作（从此刻起历史才有意义），清掉 undo 历史
     // 防止旧命令对组件布局做出错误假设。
+    //
+    // 跳过的 component（schema 未挂 Addable）：
+    //   * Name / Hierarchy —— 由 entity 创建路径 / Entity Tree DnD 自动管理
+    //   * Animator         —— IAnimator 抽象类，需要具体子类实例
+    auto& schemaReg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
     ImGui::Separator();
     if (ImGui::Button("+ Add Component")) {
         ImGui::OpenPopup("##add_component");
     }
     if (ImGui::BeginPopup("##add_component")) {
-        using namespace Orange::Engine::Scene;
-        using namespace Orange::Engine::Render;
-        using namespace Orange::Engine::Physics;
-        auto& w = *mHost.scene.pWorld;
-        if (!w.HasComponent<TransformComponent>(e)
-            && ImGui::MenuItem("Transform")) {
-            w.AddComponent<TransformComponent>(e, TransformComponent{});
-            mHost.cmdStack.Clear();
-        }
-        if (!w.HasComponent<DirectionalLight>(e)
-            && ImGui::MenuItem("Directional Light")) {
-            w.AddComponent<DirectionalLight>(e, DirectionalLight{});
-            mHost.cmdStack.Clear();
-        }
-        if (!w.HasComponent<RenderableComponent>(e)
-            && ImGui::MenuItem("Renderable")) {
-            // 新挂的 Renderable 默认绑内置 cube mesh + textured material，
-            // 用户立刻能在 Scene 视口看到一个白色立方体；不挂 mesh /
-            // material 的空 Renderable 等于隐形，对刚加完组件的用户来说
-            // 没有可见反馈。
-            RenderableComponent rc{};
-            rc.mesh             = mHost.assets.cubeMeshHandle;
-            rc.materialInstance = mHost.assets.pDefaultRenderableMaterial.get();
-            w.AddComponent<RenderableComponent>(e, rc);
-            mHost.cmdStack.Clear();
-        }
-        if (!w.HasComponent<RigidBodyComponent>(e)
-            && ImGui::MenuItem("RigidBody")) {
-            w.AddComponent<RigidBodyComponent>(e, RigidBodyComponent{});
-            mHost.cmdStack.Clear();
-        }
-        if (!w.HasComponent<ColliderComponent>(e)
-            && ImGui::MenuItem("Collider")) {
-            w.AddComponent<ColliderComponent>(e, ColliderComponent{});
-            mHost.cmdStack.Clear();
-        }
-        if (!w.HasComponent<ParticleEmitterComponent>(e)
-            && ImGui::MenuItem("Particle Emitter")) {
-            w.AddComponent<ParticleEmitterComponent>(e,
-                ParticleEmitterComponent{});
-            mHost.cmdStack.Clear();
+        auto* pWorld = mHost.scene.pWorld.get();
+        if (pWorld != nullptr)
+        {
+            for (const auto& schema : schemaReg.All()) {
+                if (schema.add == nullptr) { continue; }        // 未挂 Addable
+                if (schema.has != nullptr && schema.has(*pWorld, e)) {
+                    continue;                                    // 已挂
+                }
+                const char* label = (schema.displayName != nullptr)
+                                  ? schema.displayName
+                                  : (schema.typeName ? schema.typeName : "?");
+                if (ImGui::MenuItem(label)) {
+                    schema.add(mHost, e);
+                    mHost.cmdStack.Clear();
+                }
+            }
         }
         ImGui::EndPopup();
     }
@@ -156,36 +101,15 @@ void EditorRenderLayer::DrawInspectorPanel()
     ImGui::End();
 }
 
-// CollapsingHeader 包装 —— 多一个 "右键 → Remove Component" 上下文菜
-// 单。outRemove 表示用户本帧请求了移除；调用方在 fields 渲染完后据
-// 此调 RemoveComponent。把 remove 写在 fields 之后是为了让该帧的
-// field 控件仍正常渲染，不会因为半途 remove 而 GetComponent 拿到野
-// 指针。
+// ---- v0.2.5 schema-driven 迁移历史索引 -------------------------------
 //
-// 不暴露 Name / Hierarchy 的 remove —— Name 总在让 Entity Tree 有
-// 名字显示；Hierarchy 是 DnD 维护的结构性数据，手动 remove 会让自
-// 身脱离父链且子节点变成孤儿。这两段调用方直接用裸 CollapsingHeader。
-bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
-                                        bool defaultOpen)
-{
-    *outRemove = false;
-    const bool open = ImGui::CollapsingHeader(
-        label, defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-    if (ImGui::BeginPopupContextItem()) {
-        if (ImGui::MenuItem("Remove Component")) { *outRemove = true; }
-        ImGui::EndPopup();
-    }
-    return open;
-}
-
-// ---- 各 component 段 -------------------------------------------------
+// v0.2.5 commit 3 ~ 10 把 EditorRenderLayer 的 9 个 DrawInspectorXxx 成员
+// 函数 + 静态 ComponentHeader helper 全数清除，每个 component 段都由
+// schema/RegisterBuiltinSchemas.cpp 内的 Register*ComponentSchema() 注册
+// 驱动；ComponentHeaderLocal 在 schema/SchemaInspector.cpp 内部承担同等
+// 角色的 CollapsingHeader 包装。
 //
-// 每个 DrawInspectorXxx 的统一模式（v0.2 Command System）：
-//   1. 先 HasComponent 检查 —— 不挂就整段不显示
-//   2. CollapsingHeader（默认展开），点 header 可折叠
-//   3. 控件前先捕获 old 值
-//   4. 控件返回 true（有变化）时 Push SetFieldValueCommand<T>
-//   5. RemoveComponent 直接执行 + Clear()（无法撤销，历史清零）
+// 旧 DrawInspectorXxx → 迁移 commit 对照：
 
 // DrawInspectorName / DrawInspectorTransform / DrawInspectorHierarchy 已删除
 // —— v0.2.5 commit 5 起：

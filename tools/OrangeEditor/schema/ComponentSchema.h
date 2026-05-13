@@ -24,6 +24,12 @@
 
 #include <vector>
 
+// EditorHost 前向声明 —— AddFn 签名引用它，但 ComponentSchema.h 本身不需要
+// EditorHost 的完整定义（只暴露引用类型签名）。Builder 实现（Component
+// SchemaRegistry.h）和 AddFn 调用站点（InspectorPanel.cpp / SchemaInspector.cpp）
+// 才需要 #include "../EditorHost.h"。
+struct EditorHost;
+
 namespace Orange::Editor::Schema
 {
 
@@ -48,9 +54,17 @@ struct ComponentSchema
     // add / remove 可选：nullptr 表示该 component 在当前 schema 体系下
     // 不能通过 Add Component 菜单 / 右键 Remove Component 操作（典型例外：
     // Hierarchy 由 DnD reparent 管理 / Animator 需要具体 IAnimator 子类）。
+    //
+    // AddFn 签名差异：has / get / remove 只需要 World + Entity，因为这些操
+    // 作完全在 ECS 内部；add 需要 EditorHost 引用——typically default-construct
+    // 即可（走 Builder::Addable()），但部分 component 在 +Add 路径需要预先
+    // 注入 editor-side 资源（典型：Renderable 预绑 cubeMesh + defaultMaterial），
+    // 这些预绑数据存在 EditorAssetContext / 其他 sub-context 内。让 AddFn 拿
+    // EditorHost& 而非只是 World& 就避免了"add fn 通过全局 / 静态指针拿
+    // assets"的丑陋写法。caller 在 add 内通过 `host.scene.pWorld->...` 取 world。
     using HasFn    = bool  (*)(const Orange::Engine::World& world, Orange::Engine::Entity entity);
     using GetFn    = void* (*)(Orange::Engine::World&       world, Orange::Engine::Entity entity);
-    using AddFn    = void  (*)(Orange::Engine::World&       world, Orange::Engine::Entity entity);
+    using AddFn    = void  (*)(EditorHost&                  host,  Orange::Engine::Entity entity);
     using RemoveFn = void  (*)(Orange::Engine::World&       world, Orange::Engine::Entity entity);
 
     HasFn    has    = nullptr;

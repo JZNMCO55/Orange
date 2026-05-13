@@ -304,6 +304,76 @@ AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字�
 
 ---
 
+## Commit 10：Add Component 菜单改 schema 注册表驱动
+
+把 `InspectorPanel.cpp` 内 ~50 行 hardcode +Add Component if/else 列表替换为 schema
+注册表迭代；同时把上半段 9 个 `schemaReg.Find<...>() → DrawComponentSchemaSection`
+显式分派替换为 `Orange::Editor::Schema::DrawEntityViaSchemas(mHost, e)` 单调用。
+
+同步引入 schema 基础设施扩展：
+- `ComponentSchema::AddFn` 签名改 `void (*)(EditorHost&, Entity)`（原 `void (*)(World&, Entity)`），
+  让 add 路径能访问 editor-side 资源（典型：Renderable 预绑 cubeMesh + defaultMaterial）
+- `Builder::AddableWith(customFn)` 新增——caller 提供 capture-less lambda 注入自定义 add 路径
+
+修正 v0.2.5 c5 / c7 的两处 Addable 缺失：
+- Transform schema 加 `.Addable()`（v0.1 期 +Add 菜单实际包含 Transform，c5 注册时误标）
+- Renderable schema 加 `.AddableWith(...)` 还原 v0.1 期挂 Renderable 时预绑 cube + defaultMaterial 行为
+
+**收尾里程碑**：InspectorPanel.cpp 内不再 mention 任何具体内置 component 类型；EditorRenderLayer
+也不再持有 `ComponentHeader` helper（schema/SchemaInspector.cpp 内 `ComponentHeaderLocal` 承担同等
+角色）。游戏侧自定义 component 通过 ComponentSchemaRegistry 同款注册即可自动出现在 Inspector +
++Add 菜单——v0.3 game-side schema 注册落地后**无需改 editor 一行**。
+
+### 验收点
+
+- [ ] **+Add Component 菜单内容（按 schema registry 枚举驱动）**
+  - [ ] 在未挂任何 component 的新建实体上点 +Add Component → 菜单包含 6 项：
+    Transform / Directional Light / Renderable / RigidBody / Collider / Particle Emitter
+  - [ ] 菜单**不**包含：Name（无 Addable）、Hierarchy（无 Addable）、Animator（无 Addable）
+  - [ ] 在已挂某 component 的实体上 +Add Component → 该 component 不再出现在菜单内
+    （schema.has 守卫）
+
+- [ ] **Transform 重新加挂**（c5 oversight 修正）
+  - [ ] 在某实体上右键 Transform header → Remove Component → Transform 段消失
+  - [ ] 点 +Add Component → 菜单出现 `Transform` 项
+  - [ ] 选中后 Transform 默认值（position=0 / rotation=identity / scale=1）出现在 Inspector
+
+- [ ] **Renderable 预绑还原**（c7 deferred 兑现）
+  - [ ] 在某未挂 Renderable 的实体上 +Add Component → 选 `Renderable`
+  - [ ] 立即在 Scene viewport 看到一个白色立方体（cubeMesh + textured material），
+    **不是**隐形空 Renderable
+  - [ ] Inspector 内 Renderable 段显示 `Visible=true` / `Casts Shadow=true`
+  - [ ] Remove → +Add 重复多次，每次都正确预绑
+
+- [ ] **AddableWith 抽象 + Addable 默认路径**
+  - [ ] DirectionalLight / RigidBody / Collider / ParticleEmitter / Transform 走默认 Addable，
+    挂上后 component 字段 = 各自默认构造值
+  - [ ] Renderable 走 AddableWith，挂上后 mesh / materialInstance 不是默认空值
+
+- [ ] **AddFn 签名变更副作用**
+  - [ ] 现有 cmdStack.Clear() 行为保留：+Add 后 Undo 不能回滚（破坏性操作历史清零）
+  - [ ] 切换 entity / Play Mode / Save / Load 等路径未受 AddFn 签名变更影响
+
+- [ ] **Inspector 上半段统一为 DrawEntityViaSchemas**
+  - [ ] 9 个 schema 段渲染顺序与 c9 完工时一致：Name → Transform → Hierarchy →
+    DirectionalLight → Renderable → RigidBody → Collider → ParticleEmitter → Animator
+  - [ ] 任一 component 在 entity 未挂时不画空段（schema.has 守卫）
+  - [ ] 切实体后 Inspector 立即刷新到新 entity 的 component 集合
+
+- [ ] **代码层验收（架构纪律）**
+  - [ ] `tools/OrangeEditor/panels/InspectorPanel.cpp` 内 grep `Orange::Engine::Render::` /
+    `Orange::Engine::Physics::` / `Orange::Engine::Animation::` 等 component 类型 ——
+    **零命中**（除注释里的历史索引）
+  - [ ] `tools/OrangeEditor/EditorRenderLayer.h` 内 grep `DrawInspector` 或 `ComponentHeader`
+    —— **零命中**（除注释里的历史索引）
+  - [ ] `python scripts/check_invariants.py` 通过；baseline grandfathered 计数应继续下降
+    （或保持，不应上升）
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -326,8 +396,8 @@ AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字�
 - ~~Commit 7：Renderable schema 迁移~~ ✅
 - ~~Commit 8：Collider schema 迁移（含 `std::variant<CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc>` 多形）~~ ✅
 - ~~Commit 9：Animator schema 迁移（含 `unique_ptr<IAnimator>` 抽象，仅展示 backend type）~~ ✅
-- **节点 A 小回归**
-- Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）
+- **节点 A 小回归**（推迟到里程碑统一回归——用户决定）
+- ~~Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）~~ ✅
 - Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry（仅声明，无真实 plugin）
 - Commit 12：`IEditorGizmoPlugin` 接口声明（仅签名，v0.4 消费）
 - **节点 B 小回归**

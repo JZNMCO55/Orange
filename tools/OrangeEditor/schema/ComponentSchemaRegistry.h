@@ -28,6 +28,10 @@
 #include "ComponentSchema.h"
 #include "PropertyDescriptor.h"
 
+// Builder::Addable() 内嵌 lambda 用 `host.scene.pWorld->AddComponent<C>(...)`，
+// 需要 EditorHost 的完整定义；ComponentSchema.h 仅前向声明 EditorHost。
+#include "../EditorHost.h"
+
 #include <deque>
 #include <type_traits>
 #include <typeindex>
@@ -361,11 +365,32 @@ public:
     // ---- component 级配置 -------------------------------------------------
 
     // 允许通过 "+ Add Component" 菜单添加。默认构造 C{} 插入。
+    //
+    // add lambda 拿 EditorHost& 而非 World&：让自定义 add 路径能访问 editor-side
+    // 资源（参 AddableWith）。默认 Addable 仅用 host.scene.pWorld，不碰 assets，
+    // 与之前 World& 签名等价。
     ComponentSchemaBuilder& Addable()
     {
-        mSchema.add = [](Orange::Engine::World& w, Orange::Engine::Entity e) {
-            w.AddComponent<C>(e, C{});
+        mSchema.add = [](EditorHost& host, Orange::Engine::Entity e) {
+            if (host.scene.pWorld != nullptr)
+            {
+                host.scene.pWorld->AddComponent<C>(e, C{});
+            }
         };
+        return *this;
+    }
+
+    // 自定义 add 路径——caller 提供 capture-less lambda / free function，能转
+    // ComponentSchema::AddFn 函数指针类型。typical 用例：Renderable 在 +Add
+    // Component 路径预绑 cubeMesh + defaultMaterial（让新挂的 Renderable 立刻
+    // 可见）—— v0.1 期 InspectorPanel 内 hardcode 该 preset；c10 把它迁到
+    // schema 注册侧通过本入口承载。
+    //
+    // customFn 完全自主决定如何构造 + 写入 C；典型 pattern 见 RegisterBuiltin
+    // Schemas.cpp 内 RegisterRenderableComponentSchema()。
+    ComponentSchemaBuilder& AddableWith(ComponentSchema::AddFn customFn)
+    {
+        mSchema.add = customFn;
         return *this;
     }
 
