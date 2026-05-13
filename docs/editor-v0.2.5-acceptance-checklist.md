@@ -422,6 +422,62 @@ mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
 
 ---
 
+## Commit 12：`IEditorGizmoPlugin` 接口声明
+
+**本期范围**：仅声明抽象基类 + EditorHost 注册表字段；**不**实现任何 gizmo plugin、
+**不**集成进 viewport overlay、**不**定义 `GizmoContext` 字段（v0.4 决定）。与 c11
+完全对偶。
+
+设计要点：
+- **Plugin 仅承载 component-specific overlay**（DirectionalLight 方向箭头 / ParticleEmitter
+  spawn box / Camera frustum / 游戏侧自定义 gizmo）。内置 Transform translate / rotate /
+  scale gizmo **不**走 plugin 路径（v0.4 走专门的 TransformGizmo 子系统）
+- **`GizmoContext` 前向声明**：v0.4 定义具体字段（viewport 矩阵 / ImDrawList / picking
+  ray / handle 命中槽），plugin 头 ABI 在 v0.4 加 context 字段时**无需变更**
+
+### 验收点
+
+- [ ] **接口文件存在**
+  - [ ] `tools/OrangeEditor/plugin/IEditorGizmoPlugin.h` 存在
+  - [ ] header guard 命名规范：`ORANGE_EDITOR_PLUGIN_I_EDITOR_GIZMO_PLUGIN_H`
+  - [ ] 命名空间：`Orange::Editor::Plugin`（与 c11 同款）
+
+- [ ] **接口签名**
+  - [ ] `virtual ~IEditorGizmoPlugin() = default`
+  - [ ] copy / move 显式 delete
+  - [ ] `virtual bool CanHandle(const ComponentSchema&) const = 0` —— 纯虚
+  - [ ] `virtual void Draw(EditorHost&, Entity, const ComponentSchema&, void*, const GizmoContext&) = 0` —— 纯虚
+  - [ ] `virtual bool HitTest(EditorHost&, Entity, const ComponentSchema&, void*, const GizmoContext&)` —— 默认返回 false
+
+- [ ] **GizmoContext 前向声明纪律**
+  - [ ] IEditorGizmoPlugin.h 内 `namespace Orange::Editor::Plugin { struct GizmoContext; }` —— **仅前向声明**，**不**定义字段
+  - [ ] 头注释明确文档化 v0.4 预期填入的 GizmoContext 字段（viewport matrix / ImDrawList / picking ray / handle 命中槽）
+
+- [ ] **前向声明同 c11 纪律**
+  - [ ] IEditorGizmoPlugin.h 内 `struct EditorHost;` + `namespace Orange::Editor::Schema { struct ComponentSchema; }` 前向声明
+  - [ ] **不**从 plugin 头反向 include EditorHost.h（避免循环）
+
+- [ ] **EditorHost 注册表字段**
+  - [ ] `EditorHost.h` include `plugin/IEditorGizmoPlugin.h`
+  - [ ] EditorHost 内新增 `std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorGizmoPlugin>> gizmoPlugins;`
+  - [ ] 字段初始化：默认为空 vector
+
+- [ ] **本期不做的（确认未做）**
+  - [ ] SchemaInspector.cpp / SceneView 渲染路径**不**包含 gizmo plugin 调度逻辑
+  - [ ] 没有任何派生类实例化（搜 `: public IEditorGizmoPlugin` 应零命中除注释外）
+  - [ ] EditorHost.gizmoPlugins 在 main / Demo / 其他构造路径上**不**被 push_back
+  - [ ] **没有** GizmoContext 的字段定义（仅前向声明）
+
+- [ ] **下行影响验证**
+  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
+  - [ ] 编辑器启动 + demo scene 加载 + 选实体 + Inspector 渲染 —— 行为与 c11 完全一致（gizmoPlugins 字段为空，viewport 当前也不查 gizmo plugin，无任何视觉变化）
+  - [ ] `python scripts/check_invariants.py` 通过（无新违规）
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -447,7 +503,7 @@ mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
 - **节点 A 小回归**（推迟到里程碑统一回归——用户决定）
 - ~~Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）~~ ✅
 - ~~Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry（仅声明，无真实 plugin）~~ ✅
-- Commit 12：`IEditorGizmoPlugin` 接口声明（仅签名，v0.4 消费）
+- ~~Commit 12：`IEditorGizmoPlugin` 接口声明（仅签名，v0.4 消费）~~ ✅
 - **节点 B 小回归**
 - Commit 13：CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档
 - Commit 14：CommandStack 解 World\* 强耦合（命令存 entity id，scene swap 不再 Clear 整栈）

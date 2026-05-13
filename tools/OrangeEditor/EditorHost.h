@@ -44,6 +44,7 @@
 #include "context/EditorCameraState.h"
 #include "context/EditorSceneContext.h"
 #include "context/EditorSelection.h"
+#include "plugin/IEditorGizmoPlugin.h"
 #include "plugin/IEditorInspectorPlugin.h"
 
 #include <memory>
@@ -75,6 +76,25 @@ struct EditorHost
     // 口，让 v0.3 落地时无需再 bump EditorHost layout。
     std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorInspectorPlugin>>
         inspectorPlugins;
+
+    // Viewport gizmo 渲染 + hit-test 扩展点注册表 —— v0.2.5 commit 12 仅
+    // 声明 + 注册表，集成进 SceneView overlay + 第一个真实 plugin case 在
+    // v0.4 "Gizmo & 特殊对象可视化" milestone 落地。详见 plugin/IEditor
+    // GizmoPlugin.h 头注释（设计意图 / 调用约定 / 不在本期范围）。
+    //
+    // 与 inspectorPlugins 同款 std::vector + unique_ptr 模式；plugin 注册顺
+    // 序 = SceneView overlay 遍历顺序 = Draw 调用顺序（多 plugin 都返回 true
+    // 时全部绘制，**不**互斥；HitTest 同样按注册顺序检查，第一个命中即结束）。
+    //
+    // 内置 Transform translate / rotate / scale gizmo **不** 走本注册表
+    // ——见 plugin/IEditorGizmoPlugin.h 头注释。本注册表只承载 component-
+    // specific overlay（DirectionalLight 方向箭头 / ParticleEmitter spawn
+    // box / Camera frustum / 游戏侧 component 自定义 gizmo 等）。
+    //
+    // v0.2.5 commit 12 完成时本字段恒为空；字段存在仅为锁定 EditorHost
+    // 公共接口，让 v0.4 落地时无需再 bump EditorHost layout。
+    std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorGizmoPlugin>>
+        gizmoPlugins;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_HOST_H
