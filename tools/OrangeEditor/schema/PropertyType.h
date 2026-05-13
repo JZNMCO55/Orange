@@ -31,13 +31,21 @@ enum class PropertyType : std::uint8_t
     Vec2,
     Vec3,
     Vec4,
-    Quat,    // 当前未在内置 component schema 中使用；保留给后续 Transform.rotation
-             // 走 Euler 缓存的混合路径（v0.2.5 后续 commit 处理）
+    Quat,    // 旋转四元数。控件路径**不**是直接的 4 分量编辑：Quat 在 gimbal
+             // lock 附近 q→Euler 不连续，DragFloat4 编辑也不直观。SchemaInspector
+             // 的 Quat case 走 "DragFloat3 Euler 缓存 + apply 时回算 quat" 的混
+             // 合路径，缓存放在 EditorSelection.transformEulerCache（与
+             // selectedEntity 联动）。当前仅 TransformComponent.rotation 使用
     String,
     Enum,    // C++ enum / enum class —— Builder::FieldEnum<auto FieldPtr> 注册；
              // marshal 走 int（caller-side 视类型为 int，Builder 内部 lambda
              // 负责 underlying_type 转换）。控件由 PropertyAttributes::enumNames
              // 决定 Combo 项列表
+    EntityRef, // Orange::Engine::Entity 字段。本 commit 仅支持只读显示
+             // （"#<id>" / "(none)"）—— Hierarchy.parent / firstChild / prev /
+             // nextSibling 走此路径。后续 commit 可扩展 drag-drop 写入 entity
+             // 句柄；扩展时 SchemaInspector::DrawProperty 的 EntityRef case
+             // 内加 source/target accept 逻辑即可，不影响已注册 schema
 };
 
 }  // namespace Orange::Editor::Schema

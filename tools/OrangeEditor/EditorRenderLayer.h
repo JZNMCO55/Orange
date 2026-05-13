@@ -95,13 +95,14 @@ private:
     // 据此调 RemoveComponent。
     static bool ComponentHeader(const char* label, bool* outRemove,
                                 bool defaultOpen = true);
-    void DrawInspectorName             (Orange::Engine::Entity e);
-    void DrawInspectorTransform        (Orange::Engine::Entity e);
-    void DrawInspectorHierarchy        (Orange::Engine::Entity e);
-    // DirectionalLight 已迁移到 schema-driven 渲染（v0.2.5 commit 3）；
-    // 不再有 DrawInspectorDirectionalLight 成员。后续 component 同步迁移。
+    // 已迁 schema-driven 渲染的 component 成员声明已逐步删除（见
+    // panels/InspectorPanel.cpp 顶部注释总账）：
+    //   * DirectionalLight     v0.2.5 commit 3
+    //   * RigidBody            v0.2.5 commit 4
+    //   * Name / Transform / Hierarchy   v0.2.5 commit 5
+    // 剩余 hardcode 段在后续 commit 持续清空，最终整段 InspectorPanel
+    // 显式分派会被 DrawEntityViaSchemas(mHost, e) 单调用替代。
     void DrawInspectorRenderable       (Orange::Engine::Entity e);
-    // RigidBody 已迁 schema-driven（v0.2.5 commit 4）；声明删除。
     void DrawInspectorCollider         (Orange::Engine::Entity e);
     void DrawInspectorParticleEmitter  (Orange::Engine::Entity e);
     void DrawInspectorAnimator         (Orange::Engine::Entity e);

@@ -18,14 +18,18 @@
 #include "../command/SetFieldValueCommand.h"
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/World.h>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <imgui.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -238,10 +242,59 @@ void DrawProperty(EditorHost&                  host,
         }
         case PropertyType::Quat:
         {
-            // 当前没有内置 component 通过 schema 暴露 quat（Transform.rotation
-            // 走 Euler 缓存的混合路径，留到后续 commit 处理）。这里给个
-            // 显式的"未在 schema 路径渲染"placeholder，方便日后启用。
-            ImGui::TextDisabled("%s (quat — not yet schema-rendered)", prop.label);
+            // 旋转字段走 "DragFloat3 Euler 缓存 + apply 时回算 quat" 混合路径：
+            //   * 直接 DragFloat4 quat 不直观（用户不可能心算 (w,x,y,z) 单位
+            //     四元数）；用 Euler 给视觉
+            //   * 但 quat→Euler 在 gimbal lock 附近不连续，每帧从 quat 重推
+            //     Euler 会让 DragFloat3 滑动时数字跳——所以**编辑期**缓存
+            //     Euler 在 EditorSelection 内，仅在切实体时从 quat 重算一次
+            //   * Undo / Redo 路径在 apply lambda 里把缓存 entity 置 Invalid，
+            //     下一帧 Quat case 看到 cacheEntity != entity 自动从最新 quat
+            //     重算 Euler 显示
+            //
+            // 等价于 v0.1 期 EditorRenderLayer::DrawInspectorTransform 内
+            // rotation 段（已删）。所有 Transform.rotation 编辑路径都汇入此 case。
+            glm::quat oldVal{1.0f, 0.0f, 0.0f, 0.0f};
+            prop.get(component, &oldVal);
+
+            if (host.selection.transformEulerCacheEntity != entity)
+            {
+                const glm::vec3 eulerRad = glm::eulerAngles(oldVal);
+                host.selection.transformEulerCache       = glm::degrees(eulerRad);
+                host.selection.transformEulerCacheEntity = entity;
+            }
+
+            const float dragSpeed = (prop.attribs.dragSpeed > 0.0f)
+                                  ? prop.attribs.dragSpeed : 0.5f;
+            if (DragVec3Colored(prop.label,
+                                &host.selection.transformEulerCache.x,
+                                dragSpeed))
+            {
+                const glm::quat newVal =
+                    glm::quat(glm::radians(host.selection.transformEulerCache));
+                prop.set(component, &newVal);
+
+                // apply lambda 不复用通用 MakeFieldApply<glm::quat>——多一步
+                // invalidate Euler 缓存。pHostInner 通过 capture 进入 std::function。
+                auto*                       pHostInner = &host;
+                PropertyDescriptor::SetFn   setFn      = prop.set;
+                const ComponentSchema*      pSchema    = &schema;
+                host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
+                    entity, fieldKey, oldVal, newVal,
+                    [pWorld, entity, pSchema, setFn, pHostInner]
+                    (const glm::quat& v)
+                    {
+                        if (pSchema == nullptr || pSchema->get == nullptr
+                            || setFn == nullptr)
+                        {
+                            return;
+                        }
+                        void* c = pSchema->get(*pWorld, entity);
+                        if (c != nullptr) { setFn(c, &v); }
+                        pHostInner->selection.transformEulerCacheEntity =
+                            Orange::Engine::Entity::Invalid();
+                    }));
+            }
             break;
         }
         case PropertyType::Enum:
@@ -274,6 +327,30 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<int>(pWorld, entity, &schema, prop.set)));
+            }
+            break;
+        }
+        case PropertyType::EntityRef:
+        {
+            // Entity 引用字段——本 commit 只读显示。"#<id>" / "(none)"。
+            // 当前用例：Hierarchy.parent / firstChild / prevSibling / nextSibling，
+            // 这四个字段由 Entity Tree 的 DnD reparent 路径管理；Inspector 内
+            // 直接编辑反而会与 DnD 状态机竞争。
+            //
+            // 后续可扩展为 drag-drop 写入：在 ImGui::Text 后追加
+            // BeginDragDropTarget / AcceptDragDropPayload("ORANGE_ENTITY") 路径
+            // + Push SetFieldValueCommand<Orange::Engine::Entity>。本 commit 不做。
+            Orange::Engine::Entity oldVal = Orange::Engine::Entity::Invalid();
+            prop.get(component, &oldVal);
+            if (oldVal.IsValid())
+            {
+                ImGui::Text("%s: #%u", prop.label,
+                            static_cast<unsigned>(
+                                static_cast<std::uint32_t>(oldVal.Value())));
+            }
+            else
+            {
+                ImGui::Text("%s: (none)", prop.label);
             }
             break;
         }
@@ -347,6 +424,14 @@ void DrawComponentSchemaSection(EditorHost&                  host,
     if (requestRemove && schema.remove != nullptr)
     {
         schema.remove(*pWorld, entity);
+        // Transform Euler 缓存与 selectedEntity 联动；任意 component 被
+        // Remove 都顺手 invalidate 一下：避免 Remove Transform 后再
+        // AddComponent 时 cacheEntity 仍等于当前 entity → Quat case 直接
+        // 走旧 cache 值（导致显示错位）。invalidate 无害——下一帧 Quat
+        // case 看到 cacheEntity != entity 会从最新 quat 重算 Euler；如果
+        // 该 entity 已经没有 TransformComponent，Quat case 根本不会进入。
+        host.selection.transformEulerCacheEntity =
+            Orange::Engine::Entity::Invalid();
         // 破坏性操作清掉 undo 历史——同 v0.2 期 DrawInspectorXxx 移除路径
         // 的一贯做法（命令栈内的字段编辑 lambda 仍指向已 destroy 的
         // component 槽位，下一次 Undo 会触发 entt assert）。

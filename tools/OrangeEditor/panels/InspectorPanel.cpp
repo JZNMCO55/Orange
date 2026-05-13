@@ -3,8 +3,6 @@
 
 #include "../EditorRenderLayer.h"
 
-#include "../EditorWidgets.h"
-#include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
 #include "../command/SetFieldValueCommand.h"
 #include "../schema/ComponentSchemaRegistry.h"
@@ -21,9 +19,6 @@
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
-
-#include <glm/gtc/quaternion.hpp>
-#include <glm/trigonometric.hpp>
 
 #include <imgui.h>
 
@@ -71,9 +66,6 @@ void EditorRenderLayer::DrawInspectorPanel()
     }
     ImGui::BeginDisabled(!canEdit);
 
-    DrawInspectorName(e);
-    DrawInspectorTransform(e);
-    DrawInspectorHierarchy(e);
     // v0.2.5 整骨期：已迁 schema 的 component 走 schema-driven 渲染；
     // 未迁的仍走 DrawInspectorXxx 硬编码路径。全部迁完后，整段 if-block
     // 统一替换为 Orange::Editor::Schema::DrawEntityViaSchemas(mHost, e)
@@ -81,19 +73,21 @@ void EditorRenderLayer::DrawInspectorPanel()
     //
     // 已迁顺序 = schema 注册顺序（见 RegisterBuiltinSchemas.cpp）= 这里
     // 显式分派的顺序，保证 v0.1 期 Inspector 内 component header 视觉
-    // 顺序不变（DirectionalLight 在 Renderable 前 / RigidBody 在 Collider 前）。
+    // 顺序不变（Name → Transform → Hierarchy → DirectionalLight →
+    // Renderable → RigidBody → Collider → ParticleEmitter → Animator）。
     auto& schemaReg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
-    if (const auto* dlSchema = schemaReg
-            .Find<Orange::Engine::Render::DirectionalLight>())
-    {
-        Orange::Editor::Schema::DrawComponentSchemaSection(mHost, e, *dlSchema);
-    }
+    using Orange::Editor::Schema::DrawComponentSchemaSection;
+    if (const auto* s = schemaReg.Find<Orange::Engine::Scene::NameComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
+    if (const auto* s = schemaReg.Find<Orange::Engine::Scene::TransformComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
+    if (const auto* s = schemaReg.Find<Orange::Engine::Scene::HierarchyComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
+    if (const auto* s = schemaReg.Find<Orange::Engine::Render::DirectionalLight>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
     DrawInspectorRenderable(e);
-    if (const auto* rbSchema = schemaReg
-            .Find<Orange::Engine::Physics::RigidBodyComponent>())
-    {
-        Orange::Editor::Schema::DrawComponentSchemaSection(mHost, e, *rbSchema);
-    }
+    if (const auto* s = schemaReg.Find<Orange::Engine::Physics::RigidBodyComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
     DrawInspectorCollider(e);
     DrawInspectorParticleEmitter(e);
     DrawInspectorAnimator(e);
@@ -191,123 +185,22 @@ bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
 //   4. 控件返回 true（有变化）时 Push SetFieldValueCommand<T>
 //   5. RemoveComponent 直接执行 + Clear()（无法撤销，历史清零）
 
-void EditorRenderLayer::DrawInspectorName(Orange::Engine::Entity e)
-{
-    using NameComponent = Orange::Engine::Scene::NameComponent;
-    if (!mHost.scene.pWorld->HasComponent<NameComponent>(e)) { return; }
-    if (!ImGui::CollapsingHeader("Name", ImGuiTreeNodeFlags_DefaultOpen)) {
-        return;
-    }
-    auto* nc = mHost.scene.pWorld->GetComponent<NameComponent>(e);
-    // 直接复用 mHost.selection.renameBuffer 容量大小的本地缓冲，避免对
-    // std::string 内存的实时 resize。每帧从 component 拷贝进 buf，
-    // 编辑后写回 —— 这样多个面板（树 InputText / Inspector InputText）
-    // 同时观察一份 NameComponent 时不会跟 mHost.selection.renameBuffer 串味。
-    char buf[256];
-    const std::size_t n = std::min(nc->name.size(), sizeof(buf) - 1);
-    std::memcpy(buf, nc->name.data(), n);
-    buf[n] = '\0';
-    const std::string oldName = nc->name;
-    if (ImGui::InputText("##name", buf, sizeof(buf))) {
-        // 每次按键都 Push RenameCommand；CommandStack 的 coalesce 会把
-        // 同一实体的连续改名折叠成一条 Undo 步骤（mOldName 保持最初值）。
-        mHost.cmdStack.Push(std::make_unique<RenameCommand>(
-            *mHost.scene.pWorld, e, oldName, std::string(buf)));
-    }
-}
-
-void EditorRenderLayer::DrawInspectorTransform(Orange::Engine::Entity e)
-{
-    using TC = Orange::Engine::Scene::TransformComponent;
-    if (!mHost.scene.pWorld->HasComponent<TC>(e)) { return; }
-    bool remove = false;
-    const bool open = ComponentHeader("Transform", &remove);
-    if (!open) {
-        if (remove) {
-            mHost.scene.pWorld->RemoveComponent<TC>(e);
-            mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
-            mHost.cmdStack.Clear();
-        }
-        return;
-    }
-    auto* t  = mHost.scene.pWorld->GetComponent<TC>(e);
-    auto* pW = mHost.scene.pWorld.get();
-
-    {
-        glm::vec3 oldPos = t->position;
-        if (DragVec3Colored("Position", &t->position.x, 0.05f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                e, "transform.position", oldPos, t->position,
-                [pW, e](const glm::vec3& v) {
-                    if (auto* tc = pW->GetComponent<TC>(e)) tc->position = v;
-                }));
-        }
-    }
-
-    // Euler 缓存：换实体了 → 重置 cache（从 quat 推 Euler）；同一实体
-    // 持续编辑 → 用 cache 保证 DragFloat3 在 gimbal lock 附近不抖。
-    if (mHost.selection.transformEulerCacheEntity != e) {
-        const glm::vec3 eulerRad = glm::eulerAngles(t->rotation);
-        mHost.selection.transformEulerCache       = glm::degrees(eulerRad);
-        mHost.selection.transformEulerCacheEntity = e;
-    }
-    {
-        glm::quat oldRot = t->rotation;
-        if (DragVec3Colored("Rotation (°)", &mHost.selection.transformEulerCache.x, 0.5f)) {
-            t->rotation = glm::quat(glm::radians(mHost.selection.transformEulerCache));
-            // Undo 时需额外使 Euler 缓存失效，避免 Inspector 下一帧从
-            // 旧 cache 重建错误的显示值。
-            auto* pHost = &mHost;
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
-                e, "transform.rotation", oldRot, t->rotation,
-                [pW, pHost, e](const glm::quat& v) {
-                    if (auto* tc = pW->GetComponent<TC>(e)) tc->rotation = v;
-                    pHost->selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
-                }));
-        }
-    }
-
-    {
-        glm::vec3 oldScale = t->scale;
-        if (DragVec3Colored("Scale", &t->scale.x, 0.05f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                e, "transform.scale", oldScale, t->scale,
-                [pW, e](const glm::vec3& v) {
-                    if (auto* tc = pW->GetComponent<TC>(e)) tc->scale = v;
-                }));
-        }
-    }
-
-    if (remove) {
-        mHost.scene.pWorld->RemoveComponent<TC>(e);
-        mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
-        mHost.cmdStack.Clear();
-    }
-}
-
-void EditorRenderLayer::DrawInspectorHierarchy(Orange::Engine::Entity e)
-{
-    using HC = Orange::Engine::Scene::HierarchyComponent;
-    if (!mHost.scene.pWorld->HasComponent<HC>(e)) { return; }
-    if (!ImGui::CollapsingHeader("Hierarchy")) { return; }
-    const auto* h = mHost.scene.pWorld->GetComponent<HC>(e);
-
-    auto idTextOf = [](Orange::Engine::Entity x) -> std::string {
-        if (!x.IsValid()) { return "(none)"; }
-        char tmp[32];
-        std::snprintf(tmp, sizeof(tmp), "#%u",
-                      static_cast<unsigned>(
-                          static_cast<std::uint32_t>(x.Value())));
-        return tmp;
-    };
-    // 全只读 —— 父子关系的编辑入口是 Entity Tree 面板的 DnD。
-    // 在这里再加一遍 reparent 控件会让两套修改路径竞争状态。
-    ImGui::Text("Parent       : %s", idTextOf(h->parent).c_str());
-    ImGui::Text("First child  : %s", idTextOf(h->firstChild).c_str());
-    ImGui::Text("Prev sibling : %s", idTextOf(h->prevSibling).c_str());
-    ImGui::Text("Next sibling : %s", idTextOf(h->nextSibling).c_str());
-    ImGui::TextDisabled("(edit by drag-drop in Entity Tree)");
-}
+// DrawInspectorName / DrawInspectorTransform / DrawInspectorHierarchy 已删除
+// —— v0.2.5 commit 5 起：
+//   * NameComponent       走 PropertyType::String 通用路径（schema/Register
+//                         BuiltinSchemas.cpp 内 RegisterNameComponentSchema）。
+//                         RenameCommand 在 schema 路径下被 SetFieldValueCommand
+//                         <std::string> 取代——CommandStack::Push 内 fieldKey
+//                         "Name.name" + 同 entity 触发 Merge，等价 RenameCommand
+//                         的连续改名 coalesce 行为
+//   * TransformComponent  position / scale 走 Vec3 通用路径；rotation 走 Quat
+//                         case（SchemaInspector.cpp）的 Euler-cache 混合路径，
+//                         缓存仍在 EditorSelection.transformEulerCache，apply
+//                         lambda 内 invalidate cache
+//   * HierarchyComponent  4 个 Entity 字段走 PropertyType::EntityRef 只读路径
+//
+// v0.1 期 Hierarchy 段的 ImGui::TextDisabled "(edit by drag-drop in Entity
+// Tree)" 提示本期接受视觉降级；后续 v0.3 IEditorInspectorPlugin 落地时还原。
 
 // DrawInspectorDirectionalLight 已删除 —— v0.2.5 commit 3 起 DirectionalLight
 // 走 schema-driven 渲染（schema/RegisterBuiltinSchemas.cpp）。"Normalize

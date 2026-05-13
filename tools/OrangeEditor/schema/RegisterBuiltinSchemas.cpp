@@ -14,6 +14,9 @@
 
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/TransformComponent.h>
 
 namespace Orange::Editor::Schema
 {
@@ -83,14 +86,81 @@ void RegisterRigidBodyComponentSchema()
         .Register();
 }
 
+void RegisterNameComponentSchema()
+{
+    using NC = Orange::Engine::Scene::NameComponent;
+    // 视觉与 v0.1 hardcode 段对齐：
+    //   * label 用 "##name" 隐藏 ImGui 控件左侧 label，让 InputText 横向占满
+    //     CollapsingHeader 内宽（v0.1 `ImGui::InputText("##name", ...)` 同款）
+    //   * 不 Addable / 不 Removable —— Name 由 entity 创建路径自动挂上，
+    //     Inspector 不给手动添加 / 移除入口
+    //
+    // 持续输入：String case 每帧 InputText 返回 true → Push 一条
+    // SetFieldValueCommand<std::string>，fieldKey="Name.name" + 同 entity →
+    // CommandStack::Push 内 Merge 合并成单条 Undo 步骤，等价于 v0.1 期
+    // RenameCommand 的 Merge 行为。
+    ComponentSchemaBuilder<NC>("Name", "Name")
+        .Field<&NC::name>("name", "##name")
+        .Register();
+}
+
+void RegisterTransformComponentSchema()
+{
+    using TC = Orange::Engine::Scene::TransformComponent;
+    // rotation 走 PropertyType::Quat 的 Euler-cache 路径（见
+    // SchemaInspector.cpp Quat case 注释）。从 schema 视角看 rotation 仍
+    // 是一个 quat 字段；Euler 缓存与 SetFieldValueCommand<glm::quat> 的
+    // mOldValue / mNewValue 都用 quat marshal——Undo / Redo 是 quat 级
+    // 回放，与 v0.1 期 hardcode 行为一致。
+    ComponentSchemaBuilder<TC>("Transform", "Transform")
+        .Field<&TC::position>("position", "Position")
+            .DragSpeed(0.05f)
+        .Field<&TC::rotation>("rotation", "Rotation (°)")
+            .DragSpeed(0.5f)
+        .Field<&TC::scale>("scale", "Scale")
+            .DragSpeed(0.05f)
+        .Removable()   // v0.1 期 hardcode 支持 right-click Remove；保留
+        // 不 Addable —— 新 entity 创建路径默认挂 Transform，Inspector
+        // "+Add Component" 列表不再出现 Transform 项（与 v0.1 行为一致）
+        .Register();
+}
+
+void RegisterHierarchyComponentSchema()
+{
+    using HC = Orange::Engine::Scene::HierarchyComponent;
+    // 4 个字段都是 Entity 引用——schema 走 PropertyType::EntityRef 的
+    // 只读路径（"#<id>" / "(none)"），与 v0.1 期 hardcode 段视觉一致。
+    //
+    // 不 Addable / 不 Removable：父子关系由 Entity Tree 的 DnD reparent
+    // 命令路径管理（避免 Inspector 与 DnD 两条修改路径竞争状态）。v0.1
+    // 期 hardcode 段也没有 Add / Remove 入口。
+    //
+    // v0.1 期 hardcode 段最后一行 ImGui::TextDisabled "(edit by drag-drop
+    // in Entity Tree)" 提示在本 commit 内**接受视觉降级**——schema 通
+    // 用路径当前没有 "component-level helpText / footer" 机制，单为这
+    // 一行新增 attribute 不值。后续 v0.3 IEditorInspectorPlugin 落地
+    // 时可还原（plugin 在 schema 默认渲染外追加自定义 UI 是其典型用例）。
+    ComponentSchemaBuilder<HC>("Hierarchy", "Hierarchy")
+        .Field<&HC::parent>     ("parent",      "Parent")
+        .Field<&HC::firstChild> ("firstChild",  "First child")
+        .Field<&HC::prevSibling>("prevSibling", "Prev sibling")
+        .Field<&HC::nextSibling>("nextSibling", "Next sibling")
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
 {
+    // 注册顺序 = Inspector 内 component header 显示顺序：与 v0.1 期
+    // DrawInspectorPanel 内显式调用顺序保持一致（Name → Transform →
+    // Hierarchy → DirectionalLight → ... → RigidBody → ...）。
+    RegisterNameComponentSchema();
+    RegisterTransformComponentSchema();
+    RegisterHierarchyComponentSchema();
     RegisterDirectionalLightSchema();
     RegisterRigidBodyComponentSchema();
-    // 后续 commit 在此追加：Transform / Name / Hierarchy / Renderable /
-    //                       Collider / ParticleEmitter / Animator
+    // 后续 commit 在此追加：Renderable / Collider / ParticleEmitter / Animator
 }
 
 }  // namespace Orange::Editor::Schema

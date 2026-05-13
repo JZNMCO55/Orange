@@ -22,6 +22,8 @@
 
 #include "PropertyType.h"
 
+#include <orange/engine/scene/Entity.h>
+
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -44,6 +46,10 @@ template <> struct PropertyTypeOf<glm::vec3>    { static constexpr PropertyType 
 template <> struct PropertyTypeOf<glm::vec4>    { static constexpr PropertyType value = PropertyType::Vec4;   };
 template <> struct PropertyTypeOf<glm::quat>    { static constexpr PropertyType value = PropertyType::Quat;   };
 template <> struct PropertyTypeOf<std::string>  { static constexpr PropertyType value = PropertyType::String; };
+template <> struct PropertyTypeOf<Orange::Engine::Entity>
+{
+    static constexpr PropertyType value = PropertyType::EntityRef;
+};
 
 // PropertyAttributes —— 修饰单个 property 的可选属性。
 // 与 Lumix `IAttribute` 类层级（MinAttribute / ClampAttribute / ColorAttribute
