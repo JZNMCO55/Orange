@@ -12,6 +12,7 @@
 
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
@@ -19,6 +20,8 @@
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+
+#include <variant>
 
 namespace Orange::Editor::Schema
 {
@@ -287,21 +290,168 @@ void RegisterHierarchyComponentSchema()
         .Register();
 }
 
+void RegisterColliderComponentSchema()
+{
+    using CC = Orange::Engine::Physics::ColliderComponent;
+    using Orange::Engine::Physics::CircleDesc;
+    using Orange::Engine::Physics::BoxDesc;
+    using Orange::Engine::Physics::PolygonDesc;
+    using Orange::Engine::Physics::EdgeChainDesc;
+
+    // shape 是 std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc>。
+    // v0.1 hardcode 内 deliberately not implemented "shape 类型切换控件"
+    // （切换 alternative 会重置数据，误操作风险大）；c8 严格 1:1 复刻，
+    // **不**引入 shape 切换入口。
+    //
+    // 4 个 shape 段通过 VisibleIf(holds_alternative<X>) 互斥显示：
+    //   Circle    → Radius + Center
+    //   Box       → Half Extents + Center
+    //   Polygon   → 仅 GroupSeparator 占位（顶点编辑 — later task）
+    //   EdgeChain → 同上
+    //
+    // 视觉降级（vs v0.1）：
+    //   * Polygon 不再显示动态 vertex count（v0.1 `(%u verts)`）
+    //   * EdgeChain 不再显示动态 vertex count + loop 状态
+    // 两条都属 informational 显示，v0.1 也不可编辑——真正能编辑时（后续
+    // collider 专用 UI / v0.4 Gizmo）再回归。
+    //
+    // FieldCustom getter / setter 必须 capture-less 才能转 PropertyDescriptor
+    // 的函数指针类型。get/set 内对错配 alternative 走 std::get_if 守护
+    // ——虽然 visibleIf 已在 SchemaInspector 侧把错配 alternative 整段跳
+    // 掉、getter 理论上不会被调到错配状态，但保留 defensive guard 让
+    // setter 安全（防御命令栈 Undo / Redo 在 shape 已被外部改写后回放命令的边界情况）。
+
+    // ---- Circle 字段 ----
+    static const auto getCircleRadius = +[](const void* c, void* out)
+    {
+        const auto& shape = static_cast<const CC*>(c)->shape;
+        *static_cast<float*>(out) = std::holds_alternative<CircleDesc>(shape)
+            ? std::get<CircleDesc>(shape).radius
+            : 0.0f;
+    };
+    static const auto setCircleRadius = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        if (auto* s = std::get_if<CircleDesc>(&shape))
+        {
+            s->radius = *static_cast<const float*>(in);
+        }
+    };
+    static const auto getCircleCenter = +[](const void* c, void* out)
+    {
+        const auto& shape = static_cast<const CC*>(c)->shape;
+        *static_cast<glm::vec2*>(out) = std::holds_alternative<CircleDesc>(shape)
+            ? std::get<CircleDesc>(shape).center
+            : glm::vec2{0.0f};
+    };
+    static const auto setCircleCenter = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        if (auto* s = std::get_if<CircleDesc>(&shape))
+        {
+            s->center = *static_cast<const glm::vec2*>(in);
+        }
+    };
+
+    // ---- Box 字段 ----
+    static const auto getBoxHalfExtents = +[](const void* c, void* out)
+    {
+        const auto& shape = static_cast<const CC*>(c)->shape;
+        *static_cast<glm::vec2*>(out) = std::holds_alternative<BoxDesc>(shape)
+            ? std::get<BoxDesc>(shape).halfExtents
+            : glm::vec2{0.0f};
+    };
+    static const auto setBoxHalfExtents = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        if (auto* s = std::get_if<BoxDesc>(&shape))
+        {
+            s->halfExtents = *static_cast<const glm::vec2*>(in);
+        }
+    };
+    static const auto getBoxCenter = +[](const void* c, void* out)
+    {
+        const auto& shape = static_cast<const CC*>(c)->shape;
+        *static_cast<glm::vec2*>(out) = std::holds_alternative<BoxDesc>(shape)
+            ? std::get<BoxDesc>(shape).center
+            : glm::vec2{0.0f};
+    };
+    static const auto setBoxCenter = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        if (auto* s = std::get_if<BoxDesc>(&shape))
+        {
+            s->center = *static_cast<const glm::vec2*>(in);
+        }
+    };
+
+    // ---- 4 个 shape 的 visibleIf 谓词 ----
+    static const auto isCircle    = +[](const void* c) -> bool
+        { return std::holds_alternative<CircleDesc>   (static_cast<const CC*>(c)->shape); };
+    static const auto isBox       = +[](const void* c) -> bool
+        { return std::holds_alternative<BoxDesc>      (static_cast<const CC*>(c)->shape); };
+    static const auto isPolygon   = +[](const void* c) -> bool
+        { return std::holds_alternative<PolygonDesc>  (static_cast<const CC*>(c)->shape); };
+    static const auto isEdgeChain = +[](const void* c) -> bool
+        { return std::holds_alternative<EdgeChainDesc>(static_cast<const CC*>(c)->shape); };
+
+    // 字段顺序：通用物理字段（density / friction / restitution / isSensor）
+    // 在前，shape 段在后。v0.1 hardcode 内顺序相反（shape 在前），但 schema
+    // 是线性顺序——Polygon / EdgeChain 的"零字段段"放在中间会导致用户感觉
+    // 通用字段"被挤"到段末尾。颠倒顺序让 shape 段总在 component 段末尾，
+    // 视觉更稳定。
+    ComponentSchemaBuilder<CC>("Collider", "Collider")
+        .Field<&CC::density>("density", "Density")
+            .DragSpeed(0.01f)
+        .Field<&CC::friction>("friction", "Friction")
+            .Range(0.0f, 1.0f).DragSpeed(0.01f)
+        .Field<&CC::restitution>("restitution", "Restitution")
+            .Range(0.0f, 1.0f).DragSpeed(0.01f)
+        .Field<&CC::isSensor>("isSensor", "Is Sensor")
+        // ---- Circle ----
+        .FieldCustom<float>("circle.radius", "Radius",
+                            getCircleRadius, setCircleRadius)
+            .GroupSeparator("Shape: Circle")
+            .VisibleIf(isCircle)
+            .DragSpeed(0.01f)
+        .FieldCustom<glm::vec2>("circle.center", "Center",
+                                getCircleCenter, setCircleCenter)
+            .VisibleIf(isCircle)
+            .DragSpeed(0.01f)
+        // ---- Box ----
+        .FieldCustom<glm::vec2>("box.halfExtents", "Half Extents",
+                                getBoxHalfExtents, setBoxHalfExtents)
+            .GroupSeparator("Shape: Box")
+            .VisibleIf(isBox)
+            .DragSpeed(0.01f)
+        .FieldCustom<glm::vec2>("box.center", "Center",
+                                getBoxCenter, setBoxCenter)
+            .VisibleIf(isBox)
+            .DragSpeed(0.01f)
+        // ---- Polygon / EdgeChain：零字段 header-only ----
+        .Group("Shape: Polygon (vertex editing — later)",   isPolygon)
+        .Group("Shape: EdgeChain (vertex editing — later)", isEdgeChain)
+        .Addable()
+        .Removable()
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
 {
     // 注册顺序 = Inspector 内 component header 显示顺序：与 v0.1 期
     // DrawInspectorPanel 内显式调用顺序保持一致（Name → Transform →
-    // Hierarchy → DirectionalLight → ... → RigidBody → ...）。
+    // Hierarchy → DirectionalLight → ... → RigidBody → Collider → ...）。
     RegisterNameComponentSchema();
     RegisterTransformComponentSchema();
     RegisterHierarchyComponentSchema();
     RegisterDirectionalLightSchema();
     RegisterRenderableComponentSchema();
     RegisterRigidBodyComponentSchema();
+    RegisterColliderComponentSchema();
     RegisterParticleEmitterComponentSchema();
-    // 后续 commit 在此追加：Collider / Animator
+    // 后续 commit 在此追加：Animator
 }
 
 }  // namespace Orange::Editor::Schema

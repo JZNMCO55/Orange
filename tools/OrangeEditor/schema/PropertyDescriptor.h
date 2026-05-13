@@ -92,6 +92,22 @@ struct PropertyAttributes
     // 的第一个字段挂 GroupSeparator(text)，后续字段不挂；下一个 group 的
     // 第一个字段再挂新的 GroupSeparator。
     const char* groupSeparator = nullptr;
+
+    // 条件可见谓词。nullptr = 总显示（默认）；非 nullptr → SchemaInspector
+    // 在渲染本字段的"任何 UI（含 GroupSeparator）"之前调一次，返回 false
+    // 时本字段**整体**跳过（不画 SeparatorText / 不画控件 / 不查 tooltip）。
+    //
+    // 典型用例：std::variant 持有的"互斥子结构"——ColliderComponent.shape
+    // 在 Circle / Box / Polygon / EdgeChain 之间四选一，circle.radius 字段
+    // 注册 visibleIf = `holds_alternative<CircleDesc>` 即可在不持 Circle 时
+    // 自动隐藏。
+    //
+    // 函数指针（非 std::function）—— 与 PropertyDescriptor::GetFn / SetFn
+    // 同档零开销；caller 通过 capture-less lambda 注入即可。component 指针
+    // 与 PropertyDescriptor::get/set 的入参同义（caller 在 lambda 内
+    // `static_cast<const C*>(component)` 拿 typed 组件指针）。
+    using VisibleIfFn = bool (*)(const void* component);
+    VisibleIfFn visibleIf = nullptr;
 };
 
 // PropertyDescriptor —— 单个字段的完整描述。

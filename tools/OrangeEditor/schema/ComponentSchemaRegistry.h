@@ -301,6 +301,49 @@ public:
         return *this;
     }
 
+    // 给最近一次 Field 挂条件可见谓词。pred 必须 capture-less lambda 或
+    // free function，能转 PropertyAttributes::VisibleIfFn。pred 返回 false
+    // 时 SchemaInspector 跳过整个字段（含 GroupSeparator）。pred 入参与
+    // PropertyDescriptor::get / set 同义：const void* component 是当前
+    // entity 上挂的 component 实例。
+    //
+    // 典型用例：ColliderComponent.shape 是 std::variant，circle.radius 等字
+    // 段仅在 holds_alternative<CircleDesc> 时显示。
+    ComponentSchemaBuilder& VisibleIf(PropertyAttributes::VisibleIfFn pred)
+    {
+        mSchema.properties.back().attribs.visibleIf = pred;
+        return *this;
+    }
+
+    // 注册一个**纯 header 段**：只有 GroupSeparator 文本，无可编辑控件。
+    // 等价于 v0.1 hardcode 内 `ImGui::Text("Shape: Polygon (...)")` 这类
+    // "信息行"——schema 通用 PropertyDescriptor 必须有 type + get/set，所
+    // 以本入口注册一个 get/set 均为 nullptr 的占位 PD，SchemaInspector 走
+    // 到这条字段时仅渲染 SeparatorText 后立即返回。
+    //
+    // pred 同 VisibleIf 语义；nullptr = 总显示。
+    //
+    // 典型用例：ColliderComponent 在 variant 持 PolygonDesc / EdgeChainDesc
+    // 时画一行 "Shape: Polygon (vertex editing — later)"，但本 commit 不暴
+    // 露任何顶点编辑字段。
+    //
+    // name 用 caller 提供的 const char* 占位（默认就用 separator text 本身）；
+    // 仅用于 schema 内部 properties 容器的 debug / 命令栈 fieldKey 占位
+    // ——本 header-only 字段不会进入命令栈（无 set 路径）。
+    ComponentSchemaBuilder& Group(const char* separator,
+                                  PropertyAttributes::VisibleIfFn pred = nullptr)
+    {
+        PropertyDescriptor pd{};
+        pd.name  = separator;     // fieldKey 占位（不入命令栈）
+        pd.label = "";
+        pd.type  = PropertyType::Bool;   // 任意值——get/set 为 nullptr 时不进 switch
+        pd.attribs.groupSeparator = separator;
+        pd.attribs.visibleIf      = pred;
+        // get / set 留空 → SchemaInspector 渲染完 SeparatorText 后立刻返回
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
     // ---- component 级配置 -------------------------------------------------
 
     // 允许通过 "+ Add Component" 菜单添加。默认构造 C{} 插入。

@@ -188,6 +188,71 @@ Bool 路径。本 commit 不引入新机制。
 
 ---
 
+## Commit 8：Collider schema 迁移
+
+把 `DrawInspectorCollider`（~135 行 hardcode）迁到 schema 路径。引入两个新的 schema
+基础设施：`PropertyAttributes::visibleIf` + `Builder::VisibleIf(pred)` 链式 API，以及
+`Builder::Group(separator, pred)` 入口（注册纯 GroupSeparator-only header 段）。`shape`
+（`std::variant<CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc>`）的 4 个 alternative
+通过 visibleIf 互斥显示——Circle / Box 各 2 字段、Polygon / EdgeChain 仅占位 header。
+
+### 验收点
+
+- [ ] **Collider section 通用字段**（任意持 Collider 的实体，可用 `samples/06_physics_platformer` 或自建）
+  - [ ] `Density` DragFloat（无 clamp）
+  - [ ] `Friction` DragFloat（clamp 0..1）
+  - [ ] `Restitution` DragFloat（clamp 0..1）
+  - [ ] `Is Sensor` checkbox
+  - [ ] 上述 4 字段在**任何 shape 下**都显示且可编辑
+
+- [ ] **Circle shape 段**
+  - [ ] 实体 shape = CircleDesc 时：显示 `SeparatorText "Shape: Circle"` + `Radius` + `Center`
+  - [ ] 不显示 Box / Polygon / EdgeChain 任一段
+  - [ ] 编辑 Radius / Center → 拖动连续生效 + Undo 回滚
+
+- [ ] **Box shape 段**
+  - [ ] 实体 shape = BoxDesc 时：显示 `SeparatorText "Shape: Box"` + `Half Extents` + `Center`
+  - [ ] 不显示 Circle / Polygon / EdgeChain 任一段
+  - [ ] 编辑 Half Extents / Center → 拖动连续生效 + Undo 回滚
+
+- [ ] **Polygon / EdgeChain 段（零字段 header-only）**
+  - [ ] Polygon shape：仅显示一行 `SeparatorText "Shape: Polygon (vertex editing — later)"`，**无任何可编辑控件**
+  - [ ] EdgeChain shape：仅显示一行 `SeparatorText "Shape: EdgeChain (vertex editing — later)"`，**无任何可编辑控件**
+  - [ ] **视觉降级**：v0.1 期 `Shape: Polygon (8 verts)` 的动态 vertex count、`Shape: EdgeChain (..., loop=yes)` 的 loop 状态**不再显示**——确认可接受
+
+- [ ] **字段顺序变更（视觉降级）**
+  - [ ] v0.1 期顺序：shape 段 → 通用字段；c8 改为：通用字段 → shape 段
+  - [ ] 顺序变更原因：schema 是线性顺序，Polygon / EdgeChain 的零字段段若放在中间会让通用字段被挤；颠倒让 shape 段总在 component 段末尾
+  - [ ] 确认新顺序视觉上可接受
+
+- [ ] **shape 类型切换控件**
+  - [ ] Inspector 内**无** shape 类型切换 Combo / 按钮 / 任何入口（与 v0.1 deliberately not implemented 行为一致）
+  - [ ] 切换 shape 需要走代码 / 场景文件，不是 Inspector 操作
+
+- [ ] **跨 shape Coalesce**
+  - [ ] 编辑 Circle 实体的 `circle.radius` → 选 Box 实体编辑 `box.halfExtents` → 回到 Circle 实体编辑 `circle.radius` → Undo 一次只回滚最后一次 Circle 编辑（fieldKey `Collider.circle.radius` ≠ `Collider.box.halfExtents`，coalesce 按 entity+fieldKey 双键正确隔离）
+
+- [ ] **Add / Remove**
+  - [ ] 右键 Collider header → Remove Component → component 消失；cmdStack 被 Clear（破坏性操作）
+  - [ ] `+ Add Component` → Collider 菜单项**仍可用**（走 InspectorPanel 内 hardcode 路径，添加默认 `ColliderComponent{}`，shape 默认是 CircleDesc）
+  - [ ] 添加后 Inspector 立即显示新挂的 Collider 段，Circle shape 段可见
+
+- [ ] **跨 commit 状态**（验证 c5 / c6 / c7 未受影响）
+  - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变（**c8 把 Collider 位置由"自定义函数调用"改为"schema 段"，但视觉位置不变**）
+  - [ ] visibleIf 不影响其他 component 的字段渲染（其他 schema 注册不挂 visibleIf，DrawProperty 内 nullptr 默认走"总显示"路径）
+  - [ ] ParticleEmitter c6 引入的 GroupSeparator 路径不受 visibleIf 引入影响（GroupSeparator 与 visibleIf 在 SchemaInspector 内的顺序：先 visibleIf → 再 SeparatorText → 再 get/set 检查 → 再 switch 控件）
+
+- [ ] **schema 基础设施新增**
+  - [ ] `PropertyAttributes::visibleIf` 字段 + `PropertyAttributes::VisibleIfFn` typedef 存在
+  - [ ] `ComponentSchemaBuilder::VisibleIf(pred)` 链式 API 可用
+  - [ ] `ComponentSchemaBuilder::Group(separator, pred)` 链式 API 可用，注册的 PD 仅渲染 SeparatorText 后立即返回
+  - [ ] 编译期 Lint / clang-tidy（如有）无新警告
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -208,7 +273,7 @@ Bool 路径。本 commit 不引入新机制。
 ### 待开工 commit 占位
 
 - ~~Commit 7：Renderable schema 迁移~~ ✅
-- Commit 8：Collider schema 迁移（含 `std::variant<CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc>` 多形）
+- ~~Commit 8：Collider schema 迁移（含 `std::variant<CircleDesc / BoxDesc / PolygonDesc / EdgeChainDesc>` 多形）~~ ✅
 - Commit 9：Animator schema 迁移（含 `unique_ptr<IAnimator>` 抽象，仅展示 backend type）
 - **节点 A 小回归**
 - Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）

@@ -100,15 +100,31 @@ void DrawProperty(EditorHost&                  host,
                   const std::string&           fieldKey)
 {
     auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || prop.get == nullptr || prop.set == nullptr) { return; }
+    if (pWorld == nullptr) { return; }
+
+    // 条件可见：visibleIf 返回 false 时整段跳过（含 GroupSeparator / 控件 /
+    // tooltip）。典型用例 ColliderComponent.shape 的 variant 分支——非当前
+    // alternative 的字段全部隐藏。空 visibleIf = 总显示。
+    if (prop.attribs.visibleIf != nullptr
+        && !prop.attribs.visibleIf(component))
+    {
+        return;
+    }
 
     // 视觉分组分隔符：注册时挂在 group 第一个字段上，在该字段控件**之前**
     // 渲染 SeparatorText。等价 v0.1 期 EditorRenderLayer 内手写
     // `ImGui::SeparatorText("Lifetime")` 等分组提示。
+    //
+    // 注意：本检查在 get/set null 早退**之前**——这样允许 Builder::Group(...)
+    // 注册"纯 header 段"（typeName 占位 + get/set 均为 nullptr），仅显示
+    // SeparatorText 文本而无可编辑控件（Polygon / EdgeChain 的零字段段用例）。
     if (prop.attribs.groupSeparator != nullptr)
     {
         ImGui::SeparatorText(prop.attribs.groupSeparator);
     }
+
+    // 无 get/set → 该字段是 Group-only 占位，仅显示 SeparatorText 后返回。
+    if (prop.get == nullptr || prop.set == nullptr) { return; }
 
     switch (prop.type)
     {

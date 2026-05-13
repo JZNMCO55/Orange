@@ -101,9 +101,9 @@ private:
     //   * Name / Transform / Hierarchy   v0.2.5 commit 5
     //   * ParticleEmitter       v0.2.5 commit 6
     //   * Renderable           v0.2.5 commit 7
+    //   * Collider             v0.2.5 commit 8
     // 剩余 hardcode 段在后续 commit 持续清空，最终整段 InspectorPanel
     // 显式分派会被 DrawEntityViaSchemas(mHost, e) 单调用替代。
-    void DrawInspectorCollider         (Orange::Engine::Entity e);
     void DrawInspectorAnimator         (Orange::Engine::Entity e);
 
     // ---- 字段 -----------------------------------------------------------

@@ -10,7 +10,6 @@
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/physics/ColliderComponent.h>
-#include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
@@ -26,7 +25,6 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <variant>
 
 // Inspector 入口：选中实体的 entity id + 所有"已挂着的内置 component"
 // 各起一个 CollapsingHeader 段。每段 if HasComponent → DrawXxx。
@@ -89,7 +87,8 @@ void EditorRenderLayer::DrawInspectorPanel()
         { DrawComponentSchemaSection(mHost, e, *s); }
     if (const auto* s = schemaReg.Find<Orange::Engine::Physics::RigidBodyComponent>())
         { DrawComponentSchemaSection(mHost, e, *s); }
-    DrawInspectorCollider(e);
+    if (const auto* s = schemaReg.Find<Orange::Engine::Physics::ColliderComponent>())
+        { DrawComponentSchemaSection(mHost, e, *s); }
     if (const auto* s = schemaReg.Find<Orange::Engine::Render::ParticleEmitterComponent>())
         { DrawComponentSchemaSection(mHost, e, *s); }
     DrawInspectorAnimator(e);
@@ -221,143 +220,24 @@ bool EditorRenderLayer::ComponentHeader(const char* label, bool* outRemove,
 // 由本 commit 同步引入的 PropertyType::Enum 提供，BodyType enum 项名表见
 // schema 注册代码。
 
-void EditorRenderLayer::DrawInspectorCollider(Orange::Engine::Entity e)
-{
-    using CC = Orange::Engine::Physics::ColliderComponent;
-    using ::Orange::Engine::Physics::CircleDesc;
-    using ::Orange::Engine::Physics::BoxDesc;
-    using ::Orange::Engine::Physics::PolygonDesc;
-    using ::Orange::Engine::Physics::EdgeChainDesc;
-    if (!mHost.scene.pWorld->HasComponent<CC>(e)) { return; }
-    bool remove = false;
-    const bool open = ComponentHeader("Collider", &remove);
-    if (!open) {
-        if (remove) {
-            mHost.scene.pWorld->RemoveComponent<CC>(e);
-            mHost.cmdStack.Clear();
-        }
-        return;
-    }
-    auto* c  = mHost.scene.pWorld->GetComponent<CC>(e);
-    auto* pW = mHost.scene.pWorld.get();
-
-    // shape 是 std::variant —— 显示 shape 类型 + 各自的简单数值。
-    // 切换 shape 类型（assign 一个不同 alternative）会重置数据，
-    // 比起 Inspector 一行 Combo 误操作风险大，这里**不**提供切换
-    // 控件，留给后续 collider 编辑专用 UI。
-    if (std::holds_alternative<CircleDesc>(c->shape)) {
-        auto& s = std::get<CircleDesc>(c->shape);
-        ImGui::Text("Shape: Circle");
-        {
-            float old = s.radius;
-            if (ImGui::DragFloat("Radius", &s.radius, 0.01f, 0.0f, 0.0f)) {
-                mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                    e, "collider.circle.radius", old, s.radius,
-                    [pW, e](const float& v) {
-                        if (auto* cc = pW->GetComponent<CC>(e))
-                            if (auto* sd = std::get_if<CircleDesc>(&cc->shape))
-                                sd->radius = v;
-                    }));
-            }
-        }
-        {
-            glm::vec2 old = s.center;
-            if (ImGui::DragFloat2("Center", &s.center.x, 0.01f)) {
-                mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
-                    e, "collider.circle.center", old, s.center,
-                    [pW, e](const glm::vec2& v) {
-                        if (auto* cc = pW->GetComponent<CC>(e))
-                            if (auto* sd = std::get_if<CircleDesc>(&cc->shape))
-                                sd->center = v;
-                    }));
-            }
-        }
-    } else if (std::holds_alternative<BoxDesc>(c->shape)) {
-        auto& s = std::get<BoxDesc>(c->shape);
-        ImGui::Text("Shape: Box");
-        {
-            glm::vec2 old = s.halfExtents;
-            if (ImGui::DragFloat2("Half Extents", &s.halfExtents.x, 0.01f)) {
-                mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
-                    e, "collider.box.halfExtents", old, s.halfExtents,
-                    [pW, e](const glm::vec2& v) {
-                        if (auto* cc = pW->GetComponent<CC>(e))
-                            if (auto* sd = std::get_if<BoxDesc>(&cc->shape))
-                                sd->halfExtents = v;
-                    }));
-            }
-        }
-        {
-            glm::vec2 old = s.center;
-            if (ImGui::DragFloat2("Center", &s.center.x, 0.01f)) {
-                mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
-                    e, "collider.box.center", old, s.center,
-                    [pW, e](const glm::vec2& v) {
-                        if (auto* cc = pW->GetComponent<CC>(e))
-                            if (auto* sd = std::get_if<BoxDesc>(&cc->shape))
-                                sd->center = v;
-                    }));
-            }
-        }
-    } else if (std::holds_alternative<PolygonDesc>(c->shape)) {
-        const auto& s = std::get<PolygonDesc>(c->shape);
-        ImGui::Text("Shape: Polygon (%u verts)",
-                    static_cast<unsigned>(s.count));
-        ImGui::TextDisabled("(polygon vertex editing — later task)");
-    } else if (std::holds_alternative<EdgeChainDesc>(c->shape)) {
-        const auto& s = std::get<EdgeChainDesc>(c->shape);
-        ImGui::Text("Shape: EdgeChain (%u verts, loop=%s)",
-                    static_cast<unsigned>(s.count),
-                    s.isLoop ? "yes" : "no");
-        ImGui::TextDisabled("(edge chain editing — later task)");
-    }
-    ImGui::Separator();
-    {
-        float old = c->density;
-        if (ImGui::DragFloat("Density", &c->density, 0.01f, 0.0f, 0.0f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "collider.density", old, c->density,
-                [pW, e](const float& v) {
-                    if (auto* cc = pW->GetComponent<CC>(e)) cc->density = v;
-                }));
-        }
-    }
-    {
-        float old = c->friction;
-        if (ImGui::DragFloat("Friction", &c->friction, 0.01f, 0.0f, 1.0f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "collider.friction", old, c->friction,
-                [pW, e](const float& v) {
-                    if (auto* cc = pW->GetComponent<CC>(e)) cc->friction = v;
-                }));
-        }
-    }
-    {
-        float old = c->restitution;
-        if (ImGui::DragFloat("Restitution", &c->restitution, 0.01f, 0.0f, 1.0f)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                e, "collider.restitution", old, c->restitution,
-                [pW, e](const float& v) {
-                    if (auto* cc = pW->GetComponent<CC>(e)) cc->restitution = v;
-                }));
-        }
-    }
-    {
-        bool old = c->isSensor;
-        if (ImGui::Checkbox("Is Sensor", &c->isSensor)) {
-            mHost.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
-                e, "collider.isSensor", old, c->isSensor,
-                [pW, e](const bool& v) {
-                    if (auto* cc = pW->GetComponent<CC>(e)) cc->isSensor = v;
-                }));
-        }
-    }
-
-    if (remove) {
-        mHost.scene.pWorld->RemoveComponent<CC>(e);
-        mHost.cmdStack.Clear();
-    }
-}
+// DrawInspectorCollider 已删除 —— v0.2.5 commit 8 起 ColliderComponent
+// 走 schema-driven 渲染（schema/RegisterBuiltinSchemas.cpp 内 Register
+// ColliderComponentSchema()）。
+//
+// shape 是 std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc>；
+// 本 commit 同步引入 PropertyAttributes::visibleIf + Builder::VisibleIf /
+// Builder::Group 两个 schema 入口，把 v0.1 hardcode 内"按 alternative 显
+// 示不同字段"的行为表达成"每个 shape 段挂 visibleIf(holds_alternative<X>)"。
+// shape 类型切换控件**不**引入（v0.1 deliberately not implemented，避免
+// 切换 alternative 时重置数据；保留给后续 collider 专用 UI / v0.4 Gizmo）。
+//
+// 视觉降级（vs v0.1）：
+//   * Polygon / EdgeChain 段不再显示动态 vertex count / loop 状态
+//     （v0.1 `Shape: Polygon (%u verts)` / `Shape: EdgeChain (... loop=...)`）
+//   * 字段顺序由 "shape 段在前 / 通用字段在后" 改为 "通用字段在前 / shape
+//     段在后" —— schema 是线性顺序，Polygon / EdgeChain 的零字段段放在中
+//     间会让通用字段视觉被挤；颠倒顺序让 shape 段总在 component 段末尾
+// 两条都属 informational 降级，运行时行为与 v0.1 一致。
 
 void EditorRenderLayer::DrawInspectorAnimator(Orange::Engine::Entity e)
 {
