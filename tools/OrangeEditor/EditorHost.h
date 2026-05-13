@@ -44,6 +44,10 @@
 #include "context/EditorCameraState.h"
 #include "context/EditorSceneContext.h"
 #include "context/EditorSelection.h"
+#include "plugin/IEditorInspectorPlugin.h"
+
+#include <memory>
+#include <vector>
 
 struct EditorHost
 {
@@ -56,6 +60,21 @@ struct EditorHost
     // 值成员（非 unique_ptr）—— 没有跨 host 共享需求，少一层间接 + 免
     // nullptr 检查。CommandStack 自身 POD-ish，构造无副作用。
     CommandStack cmdStack;
+
+    // Inspector 渲染扩展点注册表 —— v0.2.5 commit 11 仅声明 + 注册表，
+    // 集成进 SchemaInspector + 第一个真实 plugin case 在 v0.3 落地。详见
+    // plugin/IEditorInspectorPlugin.h 头注释（设计意图 / 调用约定 / 不在
+    // 本期范围）。
+    //
+    // 存储用 std::vector<unique_ptr<...>>——plugin 由 host 持有 ownership，
+    // 析构顺序按 vector 倒序自动管理；plugin 注册顺序 = SchemaInspector 检
+    // 查优先级（按 push_back 顺序遍历，第一条 CanHandle == true 接管）。
+    //
+    // v0.2.5 commit 11 完成时本字段恒为空——尚无真实 plugin 注册路径，
+    // 也无 SchemaInspector 调度路径；字段存在仅为锁定 EditorHost 公共接
+    // 口，让 v0.3 落地时无需再 bump EditorHost layout。
+    std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorInspectorPlugin>>
+        inspectorPlugins;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_HOST_H

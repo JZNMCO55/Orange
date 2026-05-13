@@ -374,6 +374,54 @@ AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字�
 
 ---
 
+## Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry
+
+**本期范围**：仅声明抽象基类 + EditorHost 注册表字段；**不**实现真实 plugin、
+**不**集成进 SchemaInspector。v0.3 起出第一个真实 plugin case（候选：Animator
+mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
+
+设计参考 Godot `EditorInspectorPlugin`（多档钩子）/ Lumix `PropertyGrid::IPlugin`
+（单 onGUI 钩子），落地 begin/end 两档最小集——property-level 拦截
+（parse_property）等真实 case 浮出再加。
+
+### 验收点
+
+- [ ] **接口文件存在**
+  - [ ] `tools/OrangeEditor/plugin/IEditorInspectorPlugin.h` 存在
+  - [ ] header guard 命名规范：`ORANGE_EDITOR_PLUGIN_I_EDITOR_INSPECTOR_PLUGIN_H`
+  - [ ] 命名空间：`Orange::Editor::Plugin`
+
+- [ ] **接口签名**
+  - [ ] `virtual ~IEditorInspectorPlugin() = default`
+  - [ ] copy / move 显式 delete（plugin 实例由 unique_ptr 持有，禁拷贝禁移动避免 slicing）
+  - [ ] `virtual bool CanHandle(const ComponentSchema&) const = 0` —— 纯虚
+  - [ ] `virtual bool ParseBegin(EditorHost&, Entity, const ComponentSchema&, void*)` —— 默认返回 false
+  - [ ] `virtual void ParseEnd  (EditorHost&, Entity, const ComponentSchema&, void*)` —— 默认 no-op
+
+- [ ] **前向声明纪律**
+  - [ ] IEditorInspectorPlugin.h 内 `struct EditorHost;` + `namespace Orange::Editor::Schema { struct ComponentSchema; }` 前向声明
+  - [ ] **不**从 plugin 头反向 `#include "../EditorHost.h"`（避免循环）
+
+- [ ] **EditorHost 注册表字段**
+  - [ ] `EditorHost.h` 顶部新增 `#include "plugin/IEditorInspectorPlugin.h"` + `<memory>` + `<vector>`
+  - [ ] EditorHost 内新增字段 `std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorInspectorPlugin>> inspectorPlugins;`
+  - [ ] 字段初始化：默认为空 vector（无 plugin 注册路径）
+
+- [ ] **本期不做的（确认未做）**
+  - [ ] SchemaInspector.cpp **不**包含 plugin 调度逻辑（搜 `IEditorInspectorPlugin` / `CanHandle` 应仅命中 header 注释）
+  - [ ] 没有任何派生类实例化（搜 `: public IEditorInspectorPlugin` 应零命中除注释外）
+  - [ ] EditorHost.inspectorPlugins 在 main / Demo / 其他构造路径上**不**被 push_back
+
+- [ ] **下行影响验证**
+  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
+  - [ ] 编辑器启动 + demo scene 加载 + 选实体 + Inspector 渲染所有 component 段 —— 行为与 c10 完全一致（plugin 字段为空，SchemaInspector 当前也不查 plugin，无任何视觉变化）
+  - [ ] `python scripts/check_invariants.py` 通过（无新违规）
+
+### bugs
+（待大节点回归后填）
+
+---
+
 ## 后续 commit（待追加）
 
 每个新 commit 落地时在本文档**追加**一节，结构同上：
@@ -398,7 +446,7 @@ AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字�
 - ~~Commit 9：Animator schema 迁移（含 `unique_ptr<IAnimator>` 抽象，仅展示 backend type）~~ ✅
 - **节点 A 小回归**（推迟到里程碑统一回归——用户决定）
 - ~~Commit 10：Add Component 菜单改 schema 注册表枚举驱动（不再 hardcode if/else 列表）~~ ✅
-- Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry（仅声明，无真实 plugin）
+- ~~Commit 11：`IEditorInspectorPlugin` 接口声明 + `EditorHost` plugin registry（仅声明，无真实 plugin）~~ ✅
 - Commit 12：`IEditorGizmoPlugin` 接口声明（仅签名，v0.4 消费）
 - **节点 B 小回归**
 - Commit 13：CommandStack `BeginGroup` / `EndGroup` + `MergeMode` 三档
