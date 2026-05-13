@@ -82,6 +82,16 @@ struct PropertyAttributes
     //     忽略（只在 Enum case 内检查）
     const char* const* enumNames = nullptr;
     int                enumCount = 0;
+
+    // 视觉分组分隔符。非 nullptr → SchemaInspector 在本字段控件渲染**之前**
+    // 调 ImGui::SeparatorText(groupSeparator)。用于把若干相关字段在 Inspector
+    // 段内视觉聚成一组（典型场景：ParticleEmitter 的 Lifetime / Spawn Offset /
+    // Initial Velocity / Color curve / Pool 等小节）。
+    //
+    // 字符串字面量静态生命周期，schema 不拷贝。注册顺序敏感——每个 group
+    // 的第一个字段挂 GroupSeparator(text)，后续字段不挂；下一个 group 的
+    // 第一个字段再挂新的 GroupSeparator。
+    const char* groupSeparator = nullptr;
 };
 
 // PropertyDescriptor —— 单个字段的完整描述。

@@ -192,6 +192,66 @@ public:
         return *this;
     }
 
+    // 注册一个嵌套字段：ParentPtr 是外层 component 内"子结构"成员指针
+    // （典型 `&PEC::desc` 把 ParticleEmitterComponent 钻进 ParticleEmitterDesc），
+    // ChildPtr 是子结构内的实际数据字段指针（典型 `&PED::emissionRate`）。
+    //
+    // 等价 v0.1 hardcode 内 `pec->desc.emissionRate` 风格的访问。两层 NTTP
+    // 都 capture-less，生成的 lambda 仍是 capture-less 函数指针（与 Field<>
+    // 同档零开销）。PropertyType 由 ChildPtr 的 pointee 类型经
+    // PropertyTypeOf<T> 推导（与 Field<> 一致）。
+    //
+    // 内嵌结构超过两层时（typically 不会出现在合理的 component 设计内）
+    // 直接走 FieldCustom 显式 get/set。
+    template <auto ParentPtr, auto ChildPtr>
+    ComponentSchemaBuilder& FieldNested(const char* name, const char* label)
+    {
+        using ParentT = std::remove_reference_t<decltype(std::declval<C>().*ParentPtr)>;
+        using FieldT  = std::remove_reference_t<decltype(std::declval<ParentT>().*ChildPtr)>;
+        PropertyDescriptor pd{};
+        pd.name  = name;
+        pd.label = label;
+        pd.type  = PropertyTypeOf<FieldT>::value;
+        pd.get = [](const void* component, void* outValue) {
+            const C& c = *static_cast<const C*>(component);
+            *static_cast<FieldT*>(outValue) = (c.*ParentPtr).*ChildPtr;
+        };
+        pd.set = [](void* component, const void* inValue) {
+            C& c = *static_cast<C*>(component);
+            (c.*ParentPtr).*ChildPtr = *static_cast<const FieldT*>(inValue);
+        };
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
+    // 注册一个自定义字段：get / set 由调用方显式提供，可表达任意 mapping。
+    // 典型用例：把 vec4 拆为 RGB + Alpha 两个独立 schema 字段（如
+    // ParticleEmitterComponent.desc.colorStart 拆成 colorStartRGB +
+    // colorStartAlpha，让 alpha 能自由 >1 触发 bloom）。
+    //
+    // 约定 / 注意：
+    //   * getFn / setFn 必须是 **capture-less** lambda 或 free function，能
+    //     转 PropertyDescriptor::GetFn / SetFn 函数指针类型。caller 在 lambda
+    //     内通过 `static_cast<const C*>(component)` 拿到 typed 组件指针
+    //   * outValue / inValue 必须按 T 的 storage 形态读写；T 决定 PropertyType
+    //     枚举值，进而决定 SchemaInspector 的控件分派
+    //   * PropertyAttributes（DragSpeed / Range / Color / Tooltip / GroupSeparator）
+    //     仍走链式修饰，对最近一次 FieldCustom 生效
+    template <typename T>
+    ComponentSchemaBuilder& FieldCustom(const char* name, const char* label,
+                                       PropertyDescriptor::GetFn getFn,
+                                       PropertyDescriptor::SetFn setFn)
+    {
+        PropertyDescriptor pd{};
+        pd.name  = name;
+        pd.label = label;
+        pd.type  = PropertyTypeOf<T>::value;
+        pd.get   = getFn;
+        pd.set   = setFn;
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
     // ---- 最近一次 Field 的 attribute 修饰 -----------------------------
 
     ComponentSchemaBuilder& Range(float minV, float maxV)
@@ -228,6 +288,16 @@ public:
         auto& a = mSchema.properties.back().attribs;
         a.enumNames = names;
         a.enumCount = count;
+        return *this;
+    }
+
+    // 给最近一次 Field（或 FieldNested / FieldCustom / FieldEnum）挂一个
+    // 视觉分组 SeparatorText：SchemaInspector 在控件渲染之前画一行
+    // ImGui::SeparatorText(text)。typically 用在 group 第一个字段上，把
+    // schema 内若干相关字段视觉分簇。text 字符串字面量静态生命周期。
+    ComponentSchemaBuilder& GroupSeparator(const char* text)
+    {
+        mSchema.properties.back().attribs.groupSeparator = text;
         return *this;
     }
 

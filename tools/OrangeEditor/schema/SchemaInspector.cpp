@@ -102,6 +102,14 @@ void DrawProperty(EditorHost&                  host,
     auto* pWorld = host.scene.pWorld.get();
     if (pWorld == nullptr || prop.get == nullptr || prop.set == nullptr) { return; }
 
+    // 视觉分组分隔符：注册时挂在 group 第一个字段上，在该字段控件**之前**
+    // 渲染 SeparatorText。等价 v0.1 期 EditorRenderLayer 内手写
+    // `ImGui::SeparatorText("Lifetime")` 等分组提示。
+    if (prop.attribs.groupSeparator != nullptr)
+    {
+        ImGui::SeparatorText(prop.attribs.groupSeparator);
+    }
+
     switch (prop.type)
     {
         case PropertyType::Float:
