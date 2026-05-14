@@ -64,6 +64,16 @@ struct EditorSceneContext
     // Save 走 currentScenePath；空时回退到 SaveAs 流程。
     std::string currentScenePath;
 
+    // 自上次"保存 / 加载 / 新建"以来 world 是否被修改过。任一 cmdStack
+    // Push / Undo / Redo / EndGroup 后由 CommandStack::onChanged 钩子置 true；
+    // Save / SaveAs / Open / New 成功后由 EditorRenderLayer 清回 false。
+    //
+    // File>Save 菜单 enabled 判定就看这个字段——避免之前"始终以
+    // currentScenePath 非空为条件"导致 fallback 走 SeedDemoWorld 时 Save 永
+    // 远置灰的 bug。currentScenePath 为空时点 Save 会自动转 SaveAs 流程
+    // （见 EditorRenderLayer::ApplyPendingSceneOp 内的 Save 分支）。
+    bool dirty = false;
+
     SceneOp pendingSceneOp = SceneOp::None;
 
     // Play Mode 状态机：playState 是当前模式（Edit / Play / Paused），

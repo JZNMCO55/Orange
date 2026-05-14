@@ -354,7 +354,10 @@ void EditorRenderLayer::DrawMainMenuBar()
             mHost.scene.pendingSceneOp = SceneOp::Open;
         }
         ImGui::Separator();
-        const bool canQuickSave = !mHost.scene.currentScenePath.empty();
+        // Save 亮判定 = "world 自上次保存/加载后被改过"。currentScenePath 是
+        // 否非空不再作为前置条件——empty 时点 Save 会自动转 SaveAs 流程（见
+        // ApplyPendingSceneOp 的 Save 分支）。
+        const bool canQuickSave = mHost.scene.dirty;
         if (ImGui::MenuItem("Save", nullptr, false, canQuickSave)) {
             mHost.scene.pendingSceneOp = SceneOp::Save;
         }
@@ -478,6 +481,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             mHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
             SeedDemoWorld(mHost);  // 与启动期一致；后续真要"空场景"再做"New Empty"
             mHost.scene.currentScenePath.clear();
+            mHost.scene.dirty = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
             std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
@@ -497,6 +501,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             }
             mHost.scene.pWorld = std::move(pNew);
             mHost.scene.currentScenePath = path;
+            mHost.scene.dirty = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
             std::fprintf(stdout, "[OrangeEditor] opened scene: %s\n", path.c_str());
@@ -517,6 +522,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                              mHost.scene.currentScenePath.c_str(),
                              static_cast<unsigned>(rc.Error()));
             } else {
+                mHost.scene.dirty = false;
                 std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
                              mHost.scene.currentScenePath.c_str());
             }
@@ -534,6 +540,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 break;
             }
             mHost.scene.currentScenePath = std::move(path);
+            mHost.scene.dirty = false;
             std::fprintf(stdout, "[OrangeEditor] saved scene as: %s\n",
                          mHost.scene.currentScenePath.c_str());
             break;

@@ -144,9 +144,11 @@ void CommandStack::Push(std::unique_ptr<ICommand> cmd)
             && std::string_view(mPendingGroup.back()->GetType()) == cmd->GetType()
             && mPendingGroup.back()->Merge(*cmd))
         {
+            if (mOnChanged) { mOnChanged(); }
             return;
         }
         mPendingGroup.push_back(std::move(cmd));
+        if (mOnChanged) { mOnChanged(); }
         return;
     }
 
@@ -170,6 +172,7 @@ void CommandStack::Push(std::unique_ptr<ICommand> cmd)
         && mStack[mIndex]->Merge(*cmd))
     {
         mStack[mIndex]->Execute();
+        if (mOnChanged) { mOnChanged(); }
         return;
     }
 
@@ -184,6 +187,8 @@ void CommandStack::Push(std::unique_ptr<ICommand> cmd)
         mStack.erase(mStack.begin());
         --mIndex;
     }
+
+    if (mOnChanged) { mOnChanged(); }
 }
 
 void CommandStack::BeginGroup(const char* name, MergeMode mode)
@@ -267,6 +272,10 @@ void CommandStack::EndGroup()
     }
 
     mGroupName = nullptr;
+
+    // 非空 EndGroup（无论 merged 还是新 push）都视为一次有效变更。空组上方
+    // 已 early return，不会到达这里。
+    if (mOnChanged) { mOnChanged(); }
 }
 
 bool CommandStack::InGroup() const
@@ -279,6 +288,7 @@ void CommandStack::Undo()
     if (!CanUndo()) { return; }
     mStack[mIndex]->Undo();
     --mIndex;
+    if (mOnChanged) { mOnChanged(); }
 }
 
 void CommandStack::Redo()
@@ -286,6 +296,7 @@ void CommandStack::Redo()
     if (!CanRedo()) { return; }
     ++mIndex;
     mStack[mIndex]->Execute();
+    if (mOnChanged) { mOnChanged(); }
 }
 
 void CommandStack::Clear()
@@ -298,6 +309,11 @@ void CommandStack::Clear()
     mGroupName = nullptr;
     mGroupMode = MergeMode::Ends;
     mInGroup   = false;
+}
+
+void CommandStack::SetOnChanged(std::function<void()> hook)
+{
+    mOnChanged = std::move(hook);
 }
 
 bool CommandStack::CanUndo() const

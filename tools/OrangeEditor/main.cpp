@@ -113,7 +113,7 @@ namespace
 // 1080p+ 屏上对编辑器使用偏小；这里拉到 28px。后续要做的扩展点：把这个
 // 数值抽到一个"编辑器 Settings"面板里让用户运行时调整 —— 改后重建
 // io.Fonts atlas 并触发 ImGui_ImplVulkan_CreateFontsTexture 重传到 GPU。
-constexpr float kDefaultFontSizePx = 28.0f;
+constexpr float kDefaultFontSizePx = 36.0f;
 
 // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
 // 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
@@ -317,6 +317,12 @@ int main()
     EditorHost editorHost;
     editorHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
     InitializeEditorAssets(editorHost);
+
+    // 把 CommandStack 的"栈有效变更"钩子绑到 scene.dirty——任何 Push / Undo /
+    // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地
+    // 址；editorHost 与 cmdStack 同生命周期（main 栈帧），lambda 不会悬挂。
+    editorHost.cmdStack.SetOnChanged(
+        [pHost = &editorHost]{ pHost->scene.dirty = true; });
     {
         Scene::LoadOptions demoLoadOpts{};
         demoLoadOpts.assetRegistry = editorHost.assets.pAssets.get();

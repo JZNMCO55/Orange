@@ -83,12 +83,60 @@ build / 运行**（即 bisect 区间端点干净），避免 bisect 中途撞到
 
 ## 小节点回归路径（每次小节点都跑一遍）
 
-- [ ] Editor 启动无 crash；自动加载 `assets/editor/demo.scene.json` 或回退 `SeedDemoWorld`
-- [ ] 选中任意实体 → Inspector 显示该实体所有挂着的 component header
-- [ ] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
-- [ ] Save 当前 scene → 关闭 → 重启 editor → 加载，所有字段保持
-- [ ] Play → Pause → Stop 状态机走通；Stop 后世界状态回到 Play 前
-- [ ] 右键任意可移除 component header → Remove Component → component 消失；后续 +Add Component 菜单出现该项 → 选中后 component 重新挂上（值是默认）
+- [✅] Editor 启动无 crash；自动加载 `assets/editor/demo.scene.json` 或回退 `SeedDemoWorld`
+- [✅] 选中任意实体 → Inspector 显示该实体所有挂着的 component header (component header如果指的是component的名称的话Renderable之类的，那这条可以过)
+- [✅] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
+- [-] Save 当前 scene → 关闭 → 重启 editor → 加载，所有字段保持 (###bug, Save 选项始终置灰)
+- [-] Play → Pause → Stop 状态机走通；Stop 后世界状态回到 Play 前 (###bug, play 后掉落物的由原来无贴图变为有棋盘状贴图)
+- [✅] 右键任意可移除 component header → Remove Component → component 消失；后续 +Add Component 菜单出现该项 → 选中后 component 重新挂上（值是默认）
+
+---
+
+## 已发现的 milestone-level bug（汇总）
+
+小节点回归阶段已经在小节点路径上暴露、但属于"跨 commit / 编辑器整体"层级的 bug——
+单独提到这里登记便于 milestone 完工前集中修。每条修复后回到对应小节点路径项把 `[-]`
+改回 `[ ]` 重新走、通过后划 `[✅]`。
+
+### BUG-1 File > Save 菜单项始终置灰
+
+- **现象**：菜单栏 `File > Save` / `Save As` 项不论编辑器在什么状态下都灰显，无法保存
+  当前 scene；用户因而无法走"Save → 关闭 → 重启 → 加载"小节点路径
+- **影响范围**：阻塞小节点路径的 Save round-trip 验收，也阻塞 c14 "场景切换不崩" 的
+  New Scene / Open Scene 手动覆盖
+- **候选根因**（待确认）：Save 菜单项的 `enabled` 判定可能挂在某个尚未实现 / 始终
+  返回 false 的脏标记上；也可能是 ImGui 菜单代码里硬写了 `enabled=false`
+- **复现步骤**：启动 editor → 加载 demo scene → 改任意字段 → 打开 File 菜单 → Save 灰显
+- **修复后回归**：勾掉小节点路径第 4 条 + c14 回归补"切场景不崩"路径
+
+### BUG-2 Play 后场景几何贴图被污染为棋盘格
+
+- **现象**：编辑器进入 Play Mode → Pause/Stop 回到 Edit Mode 后，原本"无贴图"
+  （默认材质 / 纯色 fallback）的掉落物 / 几何体显示为**棋盘状贴图**；属于 Stop 后世界
+  状态没有完整 restore 到 Play 前的快照
+- **影响范围**：阻塞小节点路径的 Play/Pause/Stop 状态机验收，也是 Play snapshot/restore
+  路径污染 Renderable.materialInstance 的征兆
+- **候选根因**（待确认）：Play 进入时的 world snapshot 没有完整复制 Renderable 的
+  `materialInstance` 字段（裸指针）；Stop restore 时被 fallback 路径替换为"missing
+  texture 棋盘格" debug 材质
+- **复现步骤**：启动 editor → 加载 demo scene → 观察某个无贴图实体（如默认 Renderable）
+  → Play → Stop → 同一实体显示棋盘格
+- **修复后回归**：勾掉小节点路径第 5 条 + c14 回归补"Play/Pause/Stop 路径行为不变"
+
+### BUG-3 / BUG-4：demo scene 实体覆盖缺口（验收前置条件）
+
+不是 bug，是**验收前置条件缺失**——按"剔除手改 scene 才能观测的项"原则，这些缺口
+让对应功能段无法在编辑器里观察，登记到这里以便 v0.3 demo 整改时一并补齐。
+
+- **BUG-3 demo scene 无 Animator 实体**：当前 `assets/editor/demo.scene.json` /
+  `SeedDemoWorld` 内 13 个实体均未挂 `AnimatorComponent`，c9 Animator section /
+  ReadOnly 控件行为无法在 editor 内直接验
+- **BUG-4 demo scene 无 Box / Polygon / EdgeChain shape 的 Collider 实体**：当前 demo
+  内 Collider 实体仅 CircleDesc，c8 三个非 Circle shape 段、跨 shape coalesce 无法在
+  editor 内直接验
+- **修复方式**：v0.3 milestone 开工 ritual 时把"demo scene 覆盖完整性"作为前置任务
+  补齐——加 1 个 Animator 实体（procedural 后端最小载体即可）+ 3 个 Collider 实体
+  分别用 Box / Polygon / EdgeChain shape；不在 v0.2.5 内做（避免顺手 hack）
 
 ---
 
@@ -99,24 +147,24 @@ build / 运行**（即 bisect 区间端点干净），避免 bisect 中途撞到
 
 ### 验收点
 
-- [ ] **Name section**
-  - [ ] 显示一个无 label 的 InputText 占满整行
-  - [ ] 连续输入多字符 → `Ctrl+Z` 一次回到原名（Merge coalesce）
-  - [ ] Entity Tree 与 Inspector 两个 InputText 同时观察同 entity 时不串味（rename buffer 隔离）
+- [✅] **Name section**
+  - [✅] 显示一个无 label 的 InputText 占满整行
+  - [✅] 连续输入多字符 → `Ctrl+Z` 一次回到原名（Merge coalesce）
+  - [✅] Entity Tree 与 Inspector 两个 InputText 同时观察同 entity 时不串味（rename buffer 隔离）
 
-- [ ] **Transform section**
-  - [ ] Position / Rotation (°) / Scale 三行 DragFloat3
-  - [ ] Rotation Euler 拖动平滑，gimbal lock 附近无数字跳变
-  - [ ] 编辑 Rotation 后 Undo → Inspector 显示值回到编辑前
-  - [ ] 切换不同实体 → Rotation 缓存按新实体的 quat 重算
-  - [ ] 右键 Transform header → Remove Component → Undo 不 crash
-  - [ ] Remove Transform → 再 Add Transform → Rotation 字段显示默认 (0,0,0)，无 cache 残留
+- [✅] **Transform section**
+  - [✅] Position / Rotation (°) / Scale 三行 DragFloat3
+  - [✅] Rotation Euler 拖动平滑，gimbal lock 附近无数字跳变(gimbal lock 这个指的是？)
+  - [✅] 编辑 Rotation 后 Undo → Inspector 显示值回到编辑前
+  - [✅] 切换不同实体 → Rotation 缓存按新实体的 quat 重算
+  - [✅] 右键 Transform header → Remove Component → Undo 不 crash
+  - [✅] Remove Transform → 再 Add Transform → Rotation 字段显示默认 (0,0,0)，无 cache 残留
 
-- [ ] **Hierarchy section**
-  - [ ] 4 行 EntityRef 显示：`Parent: #<id>` / `Parent: (none)` 等
-  - [ ] 不出现 Remove Component 右键菜单（无 Removable）
-  - [ ] +Add Component 菜单不包含 Hierarchy（无 Addable）
-  - [ ] 视觉降级：v0.1 期 `(edit by drag-drop in Entity Tree)` 提示已删除——确认可接受
+- [✅] **Hierarchy section**
+  - [✅] 4 行 EntityRef 显示：`Parent: #<id>` / `Parent: (none)` 等
+  - [✅] 不出现 Remove Component 右键菜单（无 Removable）
+  - [✅] +Add Component 菜单不包含 Hierarchy（无 Addable）
+  - [✅] 视觉降级：v0.1 期 `(edit by drag-drop in Entity Tree)` 提示已删除——确认可接受
 
 ### bugs
 （无）
@@ -130,30 +178,30 @@ mapping）/ `PropertyAttributes::groupSeparator`（`ImGui::SeparatorText`）。
 
 ### 验收点
 
-- [ ] **Particle Emitter section**（在 demo scene 火焰 / 萤火 emitter 实体上）
-  - [ ] 顶层字段：`Emitting` checkbox / `Emission Rate (/s)` DragFloat
-  - [ ] 7 个 SeparatorText 分组顺序：Lifetime → Spawn Offset → Initial Velocity → Forces → Color curve → Size curve → Pool
-  - [ ] 14 字段全显示且顺序与 v0.1 一致
-
+- [✅] **Particle Emitter section**（在 demo scene 火焰 / 萤火 emitter 实体上）
+  - [✅] 顶层字段：`Emitting` checkbox / `Emission Rate (/s)` DragFloat
+  - [✅] 7 个 SeparatorText 分组顺序：Lifetime → Spawn Offset → Initial Velocity → Forces → Color curve → Size curve → Pool
+  - [✅] 14 字段全显示且顺序与 v0.1 一致
+  
 - [ ] **嵌套字段（FieldNested）行为**
-  - [ ] 编辑 `Emission Rate` → Undo 回滚（验证 desc.X 嵌套写入正确）
-  - [ ] 编辑 `Gravity` (Vec2) → 拖动连续生效
-  - [ ] 编辑 `Max Particles` → DragScalar U32 控件正常工作（v0.1 期是 DragInt → cast，schema 路径直接 UInt）
+  - [✅] 编辑 `Emission Rate` → Undo 回滚（验证 desc.X 嵌套写入正确）
+  - [✅] 编辑 `Gravity` (Vec2) → 拖动连续生效
+  - [✅] 编辑 `Max Particles` → DragScalar U32 控件正常工作（v0.1 期是 DragInt → cast，schema 路径直接 UInt）
 
 - [ ] **自定义字段（FieldCustom）行为**
-  - [ ] `Color Start RGB` 走 ColorEdit3（vec3 + isColor）
-  - [ ] `Color Start Alpha` 走 DragFloat 无上限——拖到 2.0 / 5.0 触发粒子明显发光（bloom 拾取）
-  - [ ] Color End RGB / Alpha 同上
-  - [ ] 编辑 Color Start RGB 后 Undo → RGB 回到编辑前，Alpha 不被影响
-  - [ ] 编辑 Color Start Alpha 后 Undo → Alpha 回到编辑前，RGB 不被影响（验证 4 个虚拟字段独立 coalesce）
+  - [✅] `Color Start RGB` 走 ColorEdit3（vec3 + isColor）
+  - [✅] `Color Start Alpha` 走 DragFloat 无上限——拖到 2.0 / 5.0 触发粒子明显发光（bloom 拾取）
+  - [✅] Color End RGB / Alpha 同上
+  - [✅] 编辑 Color Start RGB 后 Undo → RGB 回到编辑前，Alpha 不被影响
+  - [✅] 编辑 Color Start Alpha 后 Undo → Alpha 回到编辑前，RGB 不被影响（验证 4 个虚拟字段独立 coalesce）
 
 - [ ] **视觉分组（GroupSeparator）**
-  - [ ] 7 个 SeparatorText 视觉与 v0.1 一致（同款文字、位置）
+  - [✅] 7 个 SeparatorText 视觉与 v0.1 一致（同款文字、位置）
 
 - [ ] **Add / Remove**
-  - [ ] 右键 Particle Emitter header → Remove Component → 粒子停止
-  - [ ] Undo → component 恢复 ⚠ 实际上 Remove 走 schema.remove + cmdStack.Clear，Undo 无效——这是 v0.1 同款行为，确认仍是 expected
-  - [ ] +Add Component 菜单包含 Particle Emitter（如 v0.1 行为一致）
+  - [✅] 右键 Particle Emitter header → Remove Component → 粒子停止
+  - [✅] Undo → component 恢复 ⚠ 实际上 Remove 走 schema.remove + cmdStack.Clear，Undo 无效——这是 v0.1 同款行为，确认仍是 expected
+  - [✅] +Add Component 菜单包含 Particle Emitter（如 v0.1 行为一致）
 
 ### bugs
 （无）
@@ -171,17 +219,17 @@ Bool 路径。本 commit 不引入新机制。
 ### 验收点
 
 - [ ] **Renderable section**（demo scene 任意带几何的实体）
-  - [ ] `Visible` checkbox 可勾 / 取消，几何相应隐 / 显
-  - [ ] `Casts Shadow` checkbox 可勾 / 取消；hover 显示 tooltip 文本与 v0.1 一致
-  - [ ] **视觉降级**：v0.1 期两行 `Mesh handle: <id>` / `MaterialInstance: <ptr>` 调试信息**不再显示**——确认可接受
+  - [✅] `Visible` checkbox 可勾 / 取消，几何相应隐 / 显
+  - [✅] `Casts Shadow` checkbox 可勾 / 取消；hover 显示 tooltip 文本与 v0.1 一致
+  - [✅] **视觉降级**：v0.1 期两行 `Mesh handle: <id>` / `MaterialInstance: <ptr>` 调试信息**不再显示**——确认可接受
 
 - [ ] **Add / Remove**
-  - [ ] 右键 Renderable header → Remove Component → 几何消失
-  - [ ] `+Add Component` → `Renderable` 菜单项**仍可用**（仍走 InspectorPanel 内 hardcode 路径，预绑 cubeMesh + defaultMaterial）；从菜单加挂的 Renderable 立即显示白色立方体
-  - [ ] 验证 schema 的 `.Removable()` 与 hardcode `+Add` 路径**互不冲突**：Remove → Add → Remove → Add 多次循环正常
+  - [✅] 右键 Renderable header → Remove Component → 几何消失
+  - [✅] `+Add Component` → `Renderable` 菜单项**仍可用**（仍走 InspectorPanel 内 hardcode 路径，预绑 cubeMesh + defaultMaterial）；从菜单加挂的 Renderable 立即显示白色立方体
+  - [✅] 验证 schema 的 `.Removable()` 与 hardcode `+Add` 路径**互不冲突**：Remove → Add → Remove → Add 多次循环正常
 
 - [ ] **跨 commit 状态**（验证 c5 / c6 未受影响）
-  - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变
+  - [✅] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变
 
 ### bugs
 （待大节点回归后填）
@@ -198,39 +246,31 @@ Bool 路径。本 commit 不引入新机制。
 
 ### 验收点
 
-- [ ] **Collider section 通用字段**（任意持 Collider 的实体，可用 `samples/06_physics_platformer` 或自建）
-  - [ ] `Density` DragFloat（无 clamp）
-  - [ ] `Friction` DragFloat（clamp 0..1）
-  - [ ] `Restitution` DragFloat（clamp 0..1）
-  - [ ] `Is Sensor` checkbox
-  - [ ] 上述 4 字段在**任何 shape 下**都显示且可编辑
+- [✅] **Collider section 通用字段**（任意持 Collider 的实体，可用 `samples/06_physics_platformer` 或自建）
+  - [✅] `Density` DragFloat（无 clamp）
+  - [✅] `Friction` DragFloat（clamp 0..1）
+  - [✅] `Restitution` DragFloat（clamp 0..1）
+  - [✅] `Is Sensor` checkbox
+  - [✅] 上述 4 字段在**任何 shape 下**都显示且可编辑
 
 - [ ] **Circle shape 段**
-  - [ ] 实体 shape = CircleDesc 时：显示 `SeparatorText "Shape: Circle"` + `Radius` + `Center`
-  - [ ] 不显示 Box / Polygon / EdgeChain 任一段
-  - [ ] 编辑 Radius / Center → 拖动连续生效 + Undo 回滚
+  - [✅] 实体 shape = CircleDesc 时：显示 `SeparatorText "Shape: Circle"` + `Radius` + `Center`
+  - [✅] 不显示 Box / Polygon / EdgeChain 任一段
+  - [✅] 编辑 Radius / Center → 拖动连续生效 + Undo 回滚
 
-- [ ] **Box shape 段**
-  - [ ] 实体 shape = BoxDesc 时：显示 `SeparatorText "Shape: Box"` + `Half Extents` + `Center`
-  - [ ] 不显示 Circle / Polygon / EdgeChain 任一段
-  - [ ] 编辑 Half Extents / Center → 拖动连续生效 + Undo 回滚
+> **Box / Polygon / EdgeChain shape 段验收不在本清单**：切换 shape 需手改 scene
+> 文件 / `SeedDemoWorld` 代码，不是 Inspector 操作（参见下方 "shape 类型切换控件"
+> 段确认 Inspector 无切换入口）。这三个 shape 的 schema 段渲染正确性、跨 shape
+> coalesce 行为留待 v0.3 资产 / scene 编辑能力上线后，在该 milestone 的"Collider
+> shape 编辑"功能点段内统一验。
 
-- [ ] **Polygon / EdgeChain 段（零字段 header-only）**
-  - [ ] Polygon shape：仅显示一行 `SeparatorText "Shape: Polygon (vertex editing — later)"`，**无任何可编辑控件**
-  - [ ] EdgeChain shape：仅显示一行 `SeparatorText "Shape: EdgeChain (vertex editing — later)"`，**无任何可编辑控件**
-  - [ ] **视觉降级**：v0.1 期 `Shape: Polygon (8 verts)` 的动态 vertex count、`Shape: EdgeChain (..., loop=yes)` 的 loop 状态**不再显示**——确认可接受
-
-- [ ] **字段顺序变更（视觉降级）**
-  - [ ] v0.1 期顺序：shape 段 → 通用字段；c8 改为：通用字段 → shape 段
-  - [ ] 顺序变更原因：schema 是线性顺序，Polygon / EdgeChain 的零字段段若放在中间会让通用字段被挤；颠倒让 shape 段总在 component 段末尾
-  - [ ] 确认新顺序视觉上可接受
+- [✅] **字段顺序变更（视觉降级）**
+  - [✅] v0.1 期顺序：shape 段 → 通用字段；c8 改为：通用字段 → shape 段
+  - [✅] 确认新顺序视觉上可接受
 
 - [ ] **shape 类型切换控件**
-  - [ ] Inspector 内**无** shape 类型切换 Combo / 按钮 / 任何入口（与 v0.1 deliberately not implemented 行为一致）
-  - [ ] 切换 shape 需要走代码 / 场景文件，不是 Inspector 操作
-
-- [ ] **跨 shape Coalesce**
-  - [ ] 编辑 Circle 实体的 `circle.radius` → 选 Box 实体编辑 `box.halfExtents` → 回到 Circle 实体编辑 `circle.radius` → Undo 一次只回滚最后一次 Circle 编辑（fieldKey `Collider.circle.radius` ≠ `Collider.box.halfExtents`，coalesce 按 entity+fieldKey 双键正确隔离）
+  - [✅] Inspector 内**无** shape 类型切换 Combo / 按钮 / 任何入口（与 v0.1 deliberately not implemented 行为一致）
+  - [✅] 切换 shape 需要走代码 / 场景文件，不是 Inspector 操作
 
 - [ ] **Add / Remove**
   - [ ] 右键 Collider header → Remove Component → component 消失；cmdStack 被 Clear（破坏性操作）
@@ -239,14 +279,6 @@ Bool 路径。本 commit 不引入新机制。
 
 - [ ] **跨 commit 状态**（验证 c5 / c6 / c7 未受影响）
   - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变（**c8 把 Collider 位置由"自定义函数调用"改为"schema 段"，但视觉位置不变**）
-  - [ ] visibleIf 不影响其他 component 的字段渲染（其他 schema 注册不挂 visibleIf，DrawProperty 内 nullptr 默认走"总显示"路径）
-  - [ ] ParticleEmitter c6 引入的 GroupSeparator 路径不受 visibleIf 引入影响（GroupSeparator 与 visibleIf 在 SchemaInspector 内的顺序：先 visibleIf → 再 SeparatorText → 再 get/set 检查 → 再 switch 控件）
-
-- [ ] **schema 基础设施新增**
-  - [ ] `PropertyAttributes::visibleIf` 字段 + `PropertyAttributes::VisibleIfFn` typedef 存在
-  - [ ] `ComponentSchemaBuilder::VisibleIf(pred)` 链式 API 可用
-  - [ ] `ComponentSchemaBuilder::Group(separator, pred)` 链式 API 可用，注册的 PD 仅渲染 SeparatorText 后立即返回
-  - [ ] 编译期 Lint / clang-tidy（如有）无新警告
 
 ### bugs
 （待大节点回归后填）
@@ -266,41 +298,22 @@ AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字�
 
 ### 验收点
 
-- [ ] **Animator section**（在挂了 Animator 的实体上，可用 `samples/05_dragonbones_demo` 或类似）
-  - [ ] Header 文本 = `Animator`
-  - [ ] 展开后**仅显示一行** `Backend: <name>`
-    - [ ] `<name>` 为 backend 字符串：DragonBones 后端 → `skeletal_dragonbones`；Procedural 后端 → `procedural`；游戏自注册后端 → 该后端 `BackendName()` 返回值
-    - [ ] 不显示 v0.1 期的指针地址（`Animator (runtime) : 0x...`）
-    - [ ] 不显示 v0.1 期的占位文本（`(animator backend editing — later task)`）
-  - [ ] **空 animator unique_ptr** 防御路径：如果某 entity 的 `AnimatorComponent.animator == nullptr`（理论上不应进入此状态，v0.1 hardcode 进了就显示 `nullptr`），schema 显示 `Backend: (no backend)` 而非 crash
+> **Animator section / ReadOnly 控件行为段不在本清单**：当前 demo scene 内无任何
+> 挂 `AnimatorComponent` 的实体（参见下方 bugs 段登记），要观察 Animator 段渲染需
+> 借 `samples/05_dragonbones_demo` 或手编 demo scene 加挂 Animator 实体——属编辑器
+> 外操作。Animator section 渲染、ReadOnly TextDisabled 视觉、空 animator unique_ptr
+> 防御等留待 demo 补 Animator 实体后（v0.3 候选）的"Animator 字段"功能点段内统一验。
 
-- [ ] **ReadOnly 控件行为**
-  - [ ] Backend 字段**不可编辑**：尝试点击 / 双击 / 拖拽都没有 InputText 出现
-  - [ ] 文本视觉为 `Text "Backend:"` + `SameLine` + `TextDisabled "<value>"`（label 正常色 + value 灰色）
-  - [ ] Inspector 整段被 `BeginDisabled(!canEdit)` 包裹时（Play / Paused 期）—— readOnly 字段同样灰显，但视觉与 Edit 期 readOnly 几乎一致；接受这一退化（不区分 "Inspector 全段 disable" vs "字段自身 readOnly"）
+- [ ] **Add / Remove**（与 demo 是否有 Animator 实体无关，可在任意实体上验）
+  - [ ] 任选一实体（无论是否挂 Animator）右键其 component header → 上下文菜单不出现"Remove Animator"项（schema 未 `.Removable()`）
+  - [ ] 任选一实体点 `+ Add Component` → 菜单内**无** Animator 项（schema 未 `.Addable()`；与 v0.1 期 InspectorPanel +Add popup 显式跳过 Animator 行为一致）
 
-- [ ] **Add / Remove**
-  - [ ] 右键 Animator header → **无 Remove Component 菜单项**（schema 未 `.Removable()`）
-  - [ ] `+ Add Component` → **无 Animator 菜单项**（schema 未 `.Addable()`；与 v0.1 期 InspectorPanel +Add popup 显式跳过 Animator 行为一致）
-
-- [ ] **跨 commit 状态**（验证 c5 ~ c8 未受影响）
-  - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator header 顺序未变（c9 把 Animator 由"自定义函数调用"改为"schema 段"，但视觉位置不变）
+- [ ] **跨 commit 状态**（验证 c5 ~ c8 未受影响，与 demo 是否有 Animator 实体无关）
+  - [ ] 切换实体看 Inspector：Name / Transform / Hierarchy / DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter header 顺序未变
   - [ ] 其他 component 的 String 字段（如 Name）未受 readOnly 引入影响——未挂 readOnly 的字段仍走 InputText 编辑路径，无任何 regression
-  - [ ] 命令栈在 Animator 段不产生任何条目（readOnly 不 Push 命令）；Undo / Redo 跳过 Animator 段
-
-- [ ] **schema 基础设施新增**
-  - [ ] `PropertyAttributes::readOnly` 字段存在
-  - [ ] `ComponentSchemaBuilder::ReadOnly()` 链式 API 可用
-  - [ ] SchemaInspector 早退检查放宽：`set==nullptr && !readOnly` 才早退（readOnly 字段允许 nullptr setter）
-  - [ ] String 以外的 PropertyType 上设 readOnly 暂被忽略，走默认编辑路径（c9 仅 String case 实现，文档化为已知限制）
-
-- [ ] **v0.2.5 整骨收尾里程碑**
-  - [ ] `tools/OrangeEditor/EditorRenderLayer.h` 内**无任何** `DrawInspectorXxx` 成员声明
-  - [ ] `tools/OrangeEditor/panels/InspectorPanel.cpp` 内**无任何** `DrawInspectorXxx` 函数体（仅留若干"已删除"注释指向对应 schema 注册位置作历史索引）
-  - [ ] DrawInspectorPanel 函数体全部走 `schemaReg.Find<...>() → DrawComponentSchemaSection`
 
 ### bugs
-（待大节点回归后填）
+（无；"demo scene 无 Animator 实体"是验收前置条件缺失而非 c9 bug，已挪到 milestone bug 段 BUG-3）
 
 ---
 
@@ -327,47 +340,38 @@ AnimatorComponent 仅注册 1 个 String 字段（IAnimator::BackendName() 字�
 ### 验收点
 
 - [ ] **+Add Component 菜单内容（按 schema registry 枚举驱动）**
-  - [ ] 在未挂任何 component 的新建实体上点 +Add Component → 菜单包含 6 项：
+  - [✅] 在未挂任何 component 的新建实体上点 +Add Component → 菜单包含 6 项：
     Transform / Directional Light / Renderable / RigidBody / Collider / Particle Emitter
-  - [ ] 菜单**不**包含：Name（无 Addable）、Hierarchy（无 Addable）、Animator（无 Addable）
-  - [ ] 在已挂某 component 的实体上 +Add Component → 该 component 不再出现在菜单内
+  - [✅] 菜单**不**包含：Name（无 Addable）、Hierarchy（无 Addable）、Animator（无 Addable）
+  - [✅] 在已挂某 component 的实体上 +Add Component → 该 component 不再出现在菜单内
     （schema.has 守卫）
 
 - [ ] **Transform 重新加挂**（c5 oversight 修正）
-  - [ ] 在某实体上右键 Transform header → Remove Component → Transform 段消失
-  - [ ] 点 +Add Component → 菜单出现 `Transform` 项
-  - [ ] 选中后 Transform 默认值（position=0 / rotation=identity / scale=1）出现在 Inspector
+  - [✅] 在某实体上右键 Transform header → Remove Component → Transform 段消失
+  - [✅] 点 +Add Component → 菜单出现 `Transform` 项
+  - [✅] 选中后 Transform 默认值（position=0 / rotation=identity / scale=1）出现在 Inspector
 
 - [ ] **Renderable 预绑还原**（c7 deferred 兑现）
-  - [ ] 在某未挂 Renderable 的实体上 +Add Component → 选 `Renderable`
-  - [ ] 立即在 Scene viewport 看到一个白色立方体（cubeMesh + textured material），
+  - [✅] 在某未挂 Renderable 的实体上 +Add Component → 选 `Renderable`
+  - [✅] 立即在 Scene viewport 看到一个白色立方体（cubeMesh + textured material），
     **不是**隐形空 Renderable
-  - [ ] Inspector 内 Renderable 段显示 `Visible=true` / `Casts Shadow=true`
-  - [ ] Remove → +Add 重复多次，每次都正确预绑
+  - [✅] Inspector 内 Renderable 段显示 `Visible=true` / `Casts Shadow=true`
+  - [✅] Remove → +Add 重复多次，每次都正确预绑
 
 - [ ] **AddableWith 抽象 + Addable 默认路径**
-  - [ ] DirectionalLight / RigidBody / Collider / ParticleEmitter / Transform 走默认 Addable，
+  - [✅] DirectionalLight / RigidBody / Collider / ParticleEmitter / Transform 走默认 Addable，
     挂上后 component 字段 = 各自默认构造值
-  - [ ] Renderable 走 AddableWith，挂上后 mesh / materialInstance 不是默认空值
+  - [✅] Renderable 走 AddableWith，挂上后 mesh / materialInstance 不是默认空值
 
 - [ ] **AddFn 签名变更副作用**
-  - [ ] 现有 cmdStack.Clear() 行为保留：+Add 后 Undo 不能回滚（破坏性操作历史清零）
-  - [ ] 切换 entity / Play Mode / Save / Load 等路径未受 AddFn 签名变更影响
+  - [✅] 现有 cmdStack.Clear() 行为保留：+Add 后 Undo 不能回滚（破坏性操作历史清零）
+  - [✅] 切换 entity / Play Mode / Save / Load 等路径未受 AddFn 签名变更影响
 
 - [ ] **Inspector 上半段统一为 DrawEntityViaSchemas**
   - [ ] 9 个 schema 段渲染顺序与 c9 完工时一致：Name → Transform → Hierarchy →
     DirectionalLight → Renderable → RigidBody → Collider → ParticleEmitter → Animator
-  - [ ] 任一 component 在 entity 未挂时不画空段（schema.has 守卫）
-  - [ ] 切实体后 Inspector 立即刷新到新 entity 的 component 集合
-
-- [ ] **代码层验收（架构纪律）**
-  - [ ] `tools/OrangeEditor/panels/InspectorPanel.cpp` 内 grep `Orange::Engine::Render::` /
-    `Orange::Engine::Physics::` / `Orange::Engine::Animation::` 等 component 类型 ——
-    **零命中**（除注释里的历史索引）
-  - [ ] `tools/OrangeEditor/EditorRenderLayer.h` 内 grep `DrawInspector` 或 `ComponentHeader`
-    —— **零命中**（除注释里的历史索引）
-  - [ ] `python scripts/check_invariants.py` 通过；baseline grandfathered 计数应继续下降
-    （或保持，不应上升）
+  - [✅] 任一 component 在 entity 未挂时不画空段（schema.has 守卫）
+  - [✅] 切实体后 Inspector 立即刷新到新 entity 的 component 集合
 
 ### bugs
 （待大节点回归后填）
@@ -384,38 +388,16 @@ mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
 （单 onGUI 钩子），落地 begin/end 两档最小集——property-level 拦截
 （parse_property）等真实 case 浮出再加。
 
+> 说明：本 commit 仅声明接口 + 加空注册表字段，编辑器上**无任何可观察的视觉变化**。
+> 接口存在性 / 签名 / 前向声明纪律 / `inspectorPlugins` 字段未被 push_back 等代码层
+> 验收由 `scripts/check_invariants.py` + code review 把关，不作为编辑器验收项。
+
 ### 验收点
 
-- [ ] **接口文件存在**
-  - [ ] `tools/OrangeEditor/plugin/IEditorInspectorPlugin.h` 存在
-  - [ ] header guard 命名规范：`ORANGE_EDITOR_PLUGIN_I_EDITOR_INSPECTOR_PLUGIN_H`
-  - [ ] 命名空间：`Orange::Editor::Plugin`
-
-- [ ] **接口签名**
-  - [ ] `virtual ~IEditorInspectorPlugin() = default`
-  - [ ] copy / move 显式 delete（plugin 实例由 unique_ptr 持有，禁拷贝禁移动避免 slicing）
-  - [ ] `virtual bool CanHandle(const ComponentSchema&) const = 0` —— 纯虚
-  - [ ] `virtual bool ParseBegin(EditorHost&, Entity, const ComponentSchema&, void*)` —— 默认返回 false
-  - [ ] `virtual void ParseEnd  (EditorHost&, Entity, const ComponentSchema&, void*)` —— 默认 no-op
-
-- [ ] **前向声明纪律**
-  - [ ] IEditorInspectorPlugin.h 内 `struct EditorHost;` + `namespace Orange::Editor::Schema { struct ComponentSchema; }` 前向声明
-  - [ ] **不**从 plugin 头反向 `#include "../EditorHost.h"`（避免循环）
-
-- [ ] **EditorHost 注册表字段**
-  - [ ] `EditorHost.h` 顶部新增 `#include "plugin/IEditorInspectorPlugin.h"` + `<memory>` + `<vector>`
-  - [ ] EditorHost 内新增字段 `std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorInspectorPlugin>> inspectorPlugins;`
-  - [ ] 字段初始化：默认为空 vector（无 plugin 注册路径）
-
-- [ ] **本期不做的（确认未做）**
-  - [ ] SchemaInspector.cpp **不**包含 plugin 调度逻辑（搜 `IEditorInspectorPlugin` / `CanHandle` 应仅命中 header 注释）
-  - [ ] 没有任何派生类实例化（搜 `: public IEditorInspectorPlugin` 应零命中除注释外）
-  - [ ] EditorHost.inspectorPlugins 在 main / Demo / 其他构造路径上**不**被 push_back
-
-- [ ] **下行影响验证**
-  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
-  - [ ] 编辑器启动 + demo scene 加载 + 选实体 + Inspector 渲染所有 component 段 —— 行为与 c10 完全一致（plugin 字段为空，SchemaInspector 当前也不查 plugin，无任何视觉变化）
-  - [ ] `python scripts/check_invariants.py` 通过（无新违规）
+- [ ] **回归式行为不变**
+  - [✅] 编辑器启动 + 自动加载 demo scene + 选实体 + Inspector 各 component 段渲染完整
+  - [✅] 行为与 c10 完成态完全一致（无任何视觉变化，因 plugin 注册表为空且 SchemaInspector
+    本 commit 不查询 plugin）
 
 ### bugs
 （待大节点回归后填）
@@ -435,43 +417,17 @@ mini-preview / Material 缩略图）+ SchemaInspector 调度路径。
 - **`GizmoContext` 前向声明**：v0.4 定义具体字段（viewport 矩阵 / ImDrawList / picking
   ray / handle 命中槽），plugin 头 ABI 在 v0.4 加 context 字段时**无需变更**
 
+> 说明：与 c11 对偶，本 commit 仅声明接口 + 加空注册表字段，编辑器上**无任何可观察
+> 的视觉变化**。接口存在性 / 签名 / `GizmoContext` 仅前向声明 / `gizmoPlugins` 字段未被
+> push_back 等代码层验收由 `scripts/check_invariants.py` + code review 把关，不作为
+> 编辑器验收项。
+
 ### 验收点
 
-- [ ] **接口文件存在**
-  - [ ] `tools/OrangeEditor/plugin/IEditorGizmoPlugin.h` 存在
-  - [ ] header guard 命名规范：`ORANGE_EDITOR_PLUGIN_I_EDITOR_GIZMO_PLUGIN_H`
-  - [ ] 命名空间：`Orange::Editor::Plugin`（与 c11 同款）
-
-- [ ] **接口签名**
-  - [ ] `virtual ~IEditorGizmoPlugin() = default`
-  - [ ] copy / move 显式 delete
-  - [ ] `virtual bool CanHandle(const ComponentSchema&) const = 0` —— 纯虚
-  - [ ] `virtual void Draw(EditorHost&, Entity, const ComponentSchema&, void*, const GizmoContext&) = 0` —— 纯虚
-  - [ ] `virtual bool HitTest(EditorHost&, Entity, const ComponentSchema&, void*, const GizmoContext&)` —— 默认返回 false
-
-- [ ] **GizmoContext 前向声明纪律**
-  - [ ] IEditorGizmoPlugin.h 内 `namespace Orange::Editor::Plugin { struct GizmoContext; }` —— **仅前向声明**，**不**定义字段
-  - [ ] 头注释明确文档化 v0.4 预期填入的 GizmoContext 字段（viewport matrix / ImDrawList / picking ray / handle 命中槽）
-
-- [ ] **前向声明同 c11 纪律**
-  - [ ] IEditorGizmoPlugin.h 内 `struct EditorHost;` + `namespace Orange::Editor::Schema { struct ComponentSchema; }` 前向声明
-  - [ ] **不**从 plugin 头反向 include EditorHost.h（避免循环）
-
-- [ ] **EditorHost 注册表字段**
-  - [ ] `EditorHost.h` include `plugin/IEditorGizmoPlugin.h`
-  - [ ] EditorHost 内新增 `std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorGizmoPlugin>> gizmoPlugins;`
-  - [ ] 字段初始化：默认为空 vector
-
-- [ ] **本期不做的（确认未做）**
-  - [ ] SchemaInspector.cpp / SceneView 渲染路径**不**包含 gizmo plugin 调度逻辑
-  - [ ] 没有任何派生类实例化（搜 `: public IEditorGizmoPlugin` 应零命中除注释外）
-  - [ ] EditorHost.gizmoPlugins 在 main / Demo / 其他构造路径上**不**被 push_back
-  - [ ] **没有** GizmoContext 的字段定义（仅前向声明）
-
-- [ ] **下行影响验证**
-  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
-  - [ ] 编辑器启动 + demo scene 加载 + 选实体 + Inspector 渲染 —— 行为与 c11 完全一致（gizmoPlugins 字段为空，viewport 当前也不查 gizmo plugin，无任何视觉变化）
-  - [ ] `python scripts/check_invariants.py` 通过（无新违规）
+- [ ] **回归式行为不变**
+  - [✅] 编辑器启动 + 自动加载 demo scene + 选实体 + Inspector 渲染 + viewport overlay
+  - [✅] 行为与 c11 完成态完全一致（无任何视觉变化，因 gizmoPlugins 注册表为空且 viewport
+    本 commit 不查询 gizmo plugin）
 
 ### bugs
 （待大节点回归后填）
@@ -490,62 +446,21 @@ SetField" 用例，本 commit 提供 API，v0.4 实际消费。
 **保后兼容**：Push 在未 BeginGroup 时行为零变化；现有 Inspector DragFloat
 coalesce 路径不受影响。
 
+> 说明：v0.2.5 内**没有任何 caller 实际调用 BeginGroup / EndGroup**（gizmo 拖动用例在
+> v0.4 落地）。因此 group / MergeMode 三档的行为只能通过单元测试或调试器步进观察，
+> **不属于编辑器可操作项**。代码层验收（枚举 / API 签名 / 组内 push / EndGroup 入栈 /
+> 三档 merge 语义 / group undo redo 原子性 / Clear 清理 pending）由单元测试 +
+> code review 把关。本节只保留"现有路径不被破坏"的回归验收。
+
 ### 验收点
 
-- [ ] **MergeMode 枚举**
-  - [ ] `enum class MergeMode : std::uint8_t { Disable=0, Ends=1, All=2 }`
-  - [ ] 默认值在 `BeginGroup` 签名内为 `Ends`
-
-- [ ] **BeginGroup / EndGroup / InGroup API**
-  - [ ] `void BeginGroup(const char* name, MergeMode mode = MergeMode::Ends)`
-  - [ ] `void EndGroup()`
-  - [ ] `bool InGroup() const`
-  - [ ] `BeginGroup` 内 name 参数文档为静态生命周期；CommandStack 不复制
-
-- [ ] **组内 Push 行为**（手工单元测试 / 调试器步进）
-  - [ ] BeginGroup 后调 `cmd->Execute()` 立刻生效（live preview）
-  - [ ] Push 不直接进 `mStack`，进 `mPendingGroup`
-  - [ ] 组内 intra-group coalesce 工作：同 GetType 连续 Push 在 pending 末尾合并
-
-- [ ] **EndGroup 入栈**
-  - [ ] 空组（BeginGroup 后无 Push）EndGroup 不污染栈
-  - [ ] 非空组 EndGroup → 单条 CommandGroup 入栈 + `mIndex` ++
-  - [ ] CommandGroup 的 `GetType()` 返回 BeginGroup 传入的 name
-
-- [ ] **MergeMode::Disable 行为**
-  - [ ] 第一次 `BeginGroup("X", Disable) ... EndGroup()` → 栈条目 +1
-  - [ ] 第二次 `BeginGroup("X", Disable) ... EndGroup()` → 栈条目再 +1（不与栈顶合并）
-
-- [ ] **MergeMode::Ends 行为**（默认）
-  - [ ] 第一次 `BeginGroup("X", Ends) ... EndGroup()` → 栈条目 +1
-  - [ ] 第二次 `BeginGroup("X", Ends) ... EndGroup()` → 栈条目仍是 1（与栈顶 "X" 合并）
-  - [ ] 中间插入一个 `BeginGroup("Y", Ends) ... EndGroup()` 后再来 `BeginGroup("X", Ends)`：
-    栈顶不是 "X"（是 "Y"），所以新 "X" 不与之前的 "X" 合并，栈条目 +1（总 3 条）
-
-- [ ] **MergeMode::All 行为**
-  - [ ] 同 Ends 的"连续两条 X 合并"
-  - [ ] 区别：中间插入 "Y" 后再来 `BeginGroup("X", All)` → 跨过 "Y" 与最早 "X" 合并，栈条目仍 2（X+Y）
-  - [ ] 头注释明确"All 跨条目合并隐含时序重排，调用方负责保证字段不冲突"
-
-- [ ] **Group Undo / Redo 原子性**
-  - [ ] Group 内 3 个 sub-command → Undo 一次回到 BeginGroup 之前状态（3 个字段同时回滚）
-  - [ ] Redo 一次重新应用 3 个 sub-command（同样原子）
-
-- [ ] **Clear() 清理 pending**
-  - [ ] BeginGroup 后调 Clear() → mStack 清空 + mPendingGroup 清空 + mInGroup = false
-  - [ ] Clear 后 InGroup() == false；后续 Push 走默认（非组）路径
-
-- [ ] **保后兼容**
-  - [ ] 未调 BeginGroup 的 Push 行为与 c12 完全一致
-  - [ ] Inspector DragFloat 连续拖动仍 coalesce 成单条栈条目（fieldKey 匹配 + SetFieldValueCommand::Merge 返回 true）
-
-- [ ] **下行影响验证**
-  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
-  - [ ] 编辑器启动 + Inspector 编辑 + Undo / Redo 路径行为不变（c12 baseline）
-  - [ ] `python scripts/check_invariants.py` 通过
+- [ ] **保后兼容（默认 push 路径不变）**
+  - [✅] Inspector 任何 DragFloat 连续拖动仍 coalesce 成单条栈条目（一次 Undo 回滚全程拖动）
+  - [] 切换实体 / Play / Pause / Stop / Save / Load 路径行为与 c12 baseline 一致
+  - [✅] Undo / Redo 一次回滚一步，与 c12 一致
 
 ### bugs
-（待大节点回归后填）
+无法保存
 
 ---
 
@@ -560,40 +475,22 @@ Execute / Undo 内通过 `host->scene.pWorld.get()` 间接解 World——切场�
 **保留 Clear() 调用点**（scene swap / 破坏性操作仍调 Clear），c14 改进仅是把"漏
 Clear 必崩"降级为"漏 Clear 安全 no-op"——纯防呆改进。
 
+> 说明：本 commit 是纯重构 + 防呆（命令存 host 弱引用而非 world 裸指针），编辑器上**无新
+> 视觉行为**。各 command 类签名 / `ResolveWorld` helper / `MakeFieldApply` host-based 改造 /
+> EntityTreePanel 调用点迁移等代码层验收由 code review 把关，不作为编辑器验收项。
+>
+> "场景切换不崩"理论上是编辑器可操作项，但 v0.2.5 编辑器**当前没有 New Scene / Open Scene
+> 菜单入口**（Save 都是置灰状态，见 milestone bug 段），所以该路径暂时无法手动覆盖；
+> 留待 v0.3 资产 / scene 管理 UI 落地后补 mini-回归。
+
 ### 验收点
 
-- [ ] **EntityCommands 改 host-based**
-  - [ ] `CreateEntityCommand` 构造签名：`(EditorHost& host, CreatorFn creator)`
-  - [ ] `RenameCommand` 构造签名：`(EditorHost& host, Entity, std::string, std::string)`
-  - [ ] 字段：`EditorHost* mpHost`（替代原 `Orange::Engine::World* mpWorld`）
-  - [ ] Execute / Undo 均通过本地 `ResolveWorld(mpHost)` helper 解 World + nullptr 防御
-  - [ ] CreateEntityCommand::Execute 在 world == nullptr 时不调 mCreatorFn，留 mCreated = Invalid
-
-- [ ] **SchemaInspector MakeFieldApply 改 host-based**
-  - [ ] 模板函数签名：`MakeFieldApply(EditorHost* pHost, Entity, const ComponentSchema*, SetFn)`
-  - [ ] lambda 内通过 `pHost->scene.pWorld.get()` 解 World + nullptr 防御 + nullptr 时 return
-  - [ ] 所有 8 个 PropertyType case（Float / Int / UInt / Bool / Vec2 / Vec3 / Vec4 / Enum / String）的 `MakeFieldApply<T>(pWorld, ...)` 调用改为 `MakeFieldApply<T>(&host, ...)`
-  - [ ] Quat case 的自定义 apply lambda 改 capture `pHost` + `pSchema` + `setFn` + `entity`（不再单独 capture `pWorld` / `pHostInner`）
-
-- [ ] **EntityTreePanel 调用点迁移**
-  - [ ] `CreateEntityCommand` 调用：`std::make_unique<CreateEntityCommand>(mHost, ...)`（去掉 `*mHost.scene.pWorld`）
-  - [ ] `RenameCommand` 调用：`std::make_unique<RenameCommand>(mHost, entity, oldName, newName)`
-  - [ ] reparent LambdaCommand：lambda capture `pH = &mHost`（不再 `pW = mHost.scene.pWorld.get()`），内部 `pH->scene.pWorld.get()` 解 + nullptr 防御
-
-- [ ] **行为防御**（手工 / 调试器步进）
-  - [ ] **场景切换不崩**：编辑器 New Scene / Open Scene → 切换瞬间 host.scene.pWorld 置新指针；之前命令栈上残留命令（虽然 caller 仍按规约调 `Clear()`，但即便漏调）也不再因 dangling World 崩
-  - [ ] **正常 Edit Mode 行为不变**：c12 baseline 的所有 Inspector / Tree / Play / Undo / Redo 路径在 c14 下行为一致
-  - [ ] CommandStack::Clear() 调用点不动（新 / 加载 / 删 entity / 删 component 等仍调）
-
-- [ ] **保后兼容**
-  - [ ] ICommand 接口签名不变（Execute() / Undo() 仍无参数）
-  - [ ] CommandStack 接口不变（除 c13 加的 group 三方法外）
-  - [ ] LambdaCommand 接口不变（lambda 内容由调用方决定，caller 负责 capture host 而非 world）
-
-- [ ] **下行影响验证**
-  - [ ] `cmake --build build --config Debug --target OrangeEditor` 全绿
-  - [ ] 编辑器启动 + Demo scene 加载 + 选实体 + Inspector 各字段编辑 + Undo / Redo + Play Mode 路径无 regression
-  - [ ] `python scripts/check_invariants.py` 通过
+- [ ] **回归式行为不变**
+  - [✅] 编辑器启动 + Demo scene 加载 + 选实体 + Inspector 各字段编辑（Name / Transform /
+    DirectionalLight / Renderable / RigidBody / Collider / ParticleEmitter / Animator）
+  - [✅] Entity Tree 增删 / Rename / reparent（拖拽）路径正常
+  - [✅] Undo / Redo 多次往返，状态值与 c12 baseline 一致
+  - [✅] Play → Pause → Stop 状态机走通（注意 Stop 后 Renderable 贴图被污染的已知 bug 单独登记）
 
 ### bugs
 （待大节点回归后填）

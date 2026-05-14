@@ -4,6 +4,7 @@
 #include "ICommand.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -103,6 +104,18 @@ public:
     bool CanUndo() const;
     bool CanRedo() const;
 
+    // 注册 "栈发生有效变更" 回调。触发时机：成功 Push（含组内 Push）/ Undo /
+    // Redo / 非空组 EndGroup —— 任一调用都意味着 world 状态已被改动一次。
+    // **不**在 Clear() 触发：Clear 是破坏性操作的后置清理（如 RemoveComponent
+    // 先 Push 再 Clear），实际改动已在 Push 阶段被计数；Clear 本身只是抹掉
+    // 撤销历史，不再代表新的脏化。
+    //
+    // 典型用途：editor 把 EditorSceneContext::dirty 标 true，让 File>Save
+    // 菜单 enabled 判定起效。
+    //
+    // 替换调用——多次 SetOnChanged 仅保留最后一次。传入 nullptr 关闭通知。
+    void SetOnChanged(std::function<void()> hook);
+
 private:
     std::vector<std::unique_ptr<ICommand>> mStack;
     int mIndex = -1;  // 最后已执行命令的下标；-1 = 栈空 / 全部已撤销
@@ -115,6 +128,9 @@ private:
     const char* mGroupName = nullptr;
     MergeMode   mGroupMode = MergeMode::Ends;
     bool        mInGroup   = false;
+
+    // "栈有效变更" 通知钩子；空表示无注册方，调用点直接跳过。详见 SetOnChanged。
+    std::function<void()> mOnChanged;
 };
 
 #endif  // ORANGE_EDITOR_COMMAND_COMMANDSTACK_H
