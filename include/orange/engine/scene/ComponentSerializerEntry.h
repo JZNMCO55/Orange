@@ -31,6 +31,7 @@
 #include <orange/engine/scene/Entity.h>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -55,6 +56,11 @@ namespace Orange::Engine::Animation
 class AnimatorRegistry;
 }
 
+namespace Orange::Engine::Render
+{
+class MaterialInstance;
+}
+
 namespace Orange::Engine::Scene
 {
 
@@ -73,6 +79,11 @@ struct SaveContext
     const World&                       world;
     const EntityToPersistentId&        entityToId;
     const Asset::AssetRegistry*        assetRegistry;
+
+    // 按名字注册的 MaterialInstance 表（name → non-owning pointer）。
+    // 供 RenderableComponent::Write 把 materialInstance* 反查为 id 字符串。
+    // 空 → 持有 materialInstance 的组件写出空 id + warn。
+    const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
 };
 
 // Load 路径透传给每个组件 Read 函数的上下文。
@@ -83,6 +94,10 @@ struct LoadContext
     Asset::AssetRegistry*               assetRegistry;
     Physics::PhysicsWorld*              physicsWorld;
     const Animation::AnimatorRegistry*  animatorRegistry;
+
+    // 与 SaveContext::namedMaterialInstances 相同表；Load 路径按 id 正向
+    // 查找 MaterialInstance*，赋给 RenderableComponent::materialInstance。
+    const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
 };
 
 // 区分 Pass 1（纯数据，无 backend 依赖）与 Pass 2（需先建 backend 再 attach）。

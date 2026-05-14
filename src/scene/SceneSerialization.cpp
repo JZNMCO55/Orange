@@ -41,7 +41,7 @@ namespace
 // 绝读取，调用方按需路由 migrator）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 0};
+    static const SchemaVersion kVersion{"scene/world", 1, 1};
     return kVersion;
 }
 
@@ -98,7 +98,7 @@ Result<void, ResultCode> Save(const World& world,
         }
     }
 
-    const SaveContext ctx{world, idMap, options.assetRegistry};
+    const SaveContext ctx{world, idMap, options.assetRegistry, options.namedMaterialInstances};
 
     // 2) 名字冲突检测：extra 不允许与内置 component 同名。
     const auto& serializers = GetBuiltinComponentSerializers();
@@ -242,7 +242,8 @@ Result<void, ResultCode> Load(std::string_view path,
     const LoadContext ctx{world, idTable,
                           options.assetRegistry,
                           options.physicsWorld,
-                          options.animatorRegistry};
+                          options.animatorRegistry,
+                          options.namedMaterialInstances};
 
     const auto& serializers = GetBuiltinComponentSerializers();
 

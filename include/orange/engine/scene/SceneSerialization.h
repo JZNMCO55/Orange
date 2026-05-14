@@ -106,6 +106,12 @@ struct SaveOptions
     // 空字符串 + warn。
     const Asset::AssetRegistry* assetRegistry{nullptr};
 
+    // 按名字注册的 MaterialInstance 表（name → non-owning pointer）。
+    // 供 RenderableComponent 把 materialInstance* 反查为 id 字符串写入 JSON。
+    // 空 → materialInstance 写出空 id + warn。
+    // 生命周期须覆盖 Save 调用期间。
+    const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
+
     // 游戏侧 / 编辑器侧自定义组件序列化器。条目 name 不得与内置组件名
     // 重复（重复时 Save 立即返回 AlreadyExists）。
     // span 指向的数据生命周期须覆盖 Save 调用期间。
@@ -128,6 +134,10 @@ struct LoadOptions
     // nullptr。注：scene 仅持久化 backend 名字，具体的 skeleton / channel
     // 配置由 game 端在注册 factory 时 capture，不下钻到 schema。
     const Animation::AnimatorRegistry* animatorRegistry{nullptr};
+
+    // 与 SaveOptions::namedMaterialInstances 相同表；Load 路径按 id 正向
+    // 查找 MaterialInstance*，赋给 RenderableComponent::materialInstance。
+    const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
 
     // 游戏侧 / 编辑器侧自定义组件序列化器，同 SaveOptions::extraSerializers。
     std::span<const ComponentSerializerEntry> extraSerializers{};

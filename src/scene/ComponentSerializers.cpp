@@ -310,9 +310,40 @@ void WriteRenderable(JsonWriter& writer,
             "was supplied to Save(); writing empty path.");
     }
 
-    writer.WriteString(Join(componentPath, "mesh"),        meshPath);
-    writer.WriteBool(  Join(componentPath, "visible"),     r->visible);
-    writer.WriteBool(  Join(componentPath, "castsShadow"), r->castsShadow);
+    // materialInstance 按 id 字符串持久化。调用方通过 SaveContext::
+    // namedMaterialInstances 提供 name→pointer 表；此处 O(N) 反查。
+    std::string_view materialId;
+    if (r->materialInstance != nullptr)
+    {
+        if (ctx.namedMaterialInstances != nullptr)
+        {
+            for (const auto& [name, ptr] : *ctx.namedMaterialInstances)
+            {
+                if (ptr == r->materialInstance)
+                {
+                    materialId = name;
+                    break;
+                }
+            }
+            if (materialId.empty())
+            {
+                ORANGE_LOG_WARN(
+                    "Scene save: RenderableComponent.materialInstance not found in "
+                    "namedMaterialInstances; writing empty materialInstanceId.");
+            }
+        }
+        else
+        {
+            ORANGE_LOG_WARN(
+                "Scene save: RenderableComponent has a materialInstance but no "
+                "namedMaterialInstances was supplied to Save(); writing empty id.");
+        }
+    }
+
+    writer.WriteString(Join(componentPath, "mesh"),               meshPath);
+    writer.WriteString(Join(componentPath, "materialInstanceId"), materialId);
+    writer.WriteBool(  Join(componentPath, "visible"),            r->visible);
+    writer.WriteBool(  Join(componentPath, "castsShadow"),        r->castsShadow);
 }
 
 bool ReadRenderable(const JsonReader& reader,
@@ -358,7 +389,36 @@ bool ReadRenderable(const JsonReader& reader,
     r.visible     = reader.GetBool(Join(componentPath, "visible"),     true);
     r.castsShadow = reader.GetBool(Join(componentPath, "castsShadow"), true);
 
-    // materialInstance 留 nullptr —— 调用方在 Load 之后重新挂 instance。
+    // materialInstanceId 是 schema v1.1 新增的可选字段；旧 v1.0 文件缺失时
+    // GetString 返回空字符串，materialInstance 留 nullptr（与旧行为一致）。
+    const std::string materialId =
+        reader.GetString(Join(componentPath, "materialInstanceId"), "");
+    if (!materialId.empty())
+    {
+        if (ctx.namedMaterialInstances != nullptr)
+        {
+            auto it = ctx.namedMaterialInstances->find(materialId);
+            if (it != ctx.namedMaterialInstances->end())
+            {
+                r.materialInstance = it->second;
+            }
+            else
+            {
+                ORANGE_LOG_WARN(
+                    "Scene load: materialInstanceId '{}' not found in "
+                    "namedMaterialInstances; leaving null.",
+                    materialId);
+            }
+        }
+        else
+        {
+            ORANGE_LOG_WARN(
+                "Scene load: RenderableComponent has materialInstanceId '{}' but no "
+                "namedMaterialInstances was supplied to Load(); leaving null.",
+                materialId);
+        }
+    }
+
     ctx.world.AddComponent(entity, r);
     return true;
 }
