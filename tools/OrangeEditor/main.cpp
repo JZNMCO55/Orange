@@ -305,7 +305,7 @@ int main()
     // 资产初始化必须先于场景加载，否则 RenderableComponent.mesh 会拿到
     // Invalid handle，Scene 视口画不出几何。
     //
-    // 启动优先级：检测 assets/editor/demo.scene.json（相对 .exe 工作目录），
+    // 启动优先级：检测 assets/scenes/demo.scene.json（相对 .exe 工作目录），
     // 存在则 Load；文件不存在（IoError）或加载失败则回退 SeedDemoWorld。
     // File > New Scene 走 ApplyPendingSceneOp，与回退路径保持一致。
     // 启动期一次性注册所有内置 component schema —— 必须在创建 EditorRenderLayer
@@ -326,7 +326,7 @@ int main()
     {
         Scene::LoadOptions demoLoadOpts{};
         demoLoadOpts.assetRegistry = editorHost.assets.pAssets.get();
-        if (auto res = Scene::Load("assets/editor/demo.scene.json",
+        if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);
             res.IsErr())
         {
@@ -334,7 +334,7 @@ int main()
         }
         else
         {
-            editorHost.scene.currentScenePath = "assets/editor/demo.scene.json";
+            editorHost.scene.currentScenePath = "assets/scenes/demo.scene.json";
         }
     }
 

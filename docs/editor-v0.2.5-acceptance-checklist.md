@@ -57,7 +57,7 @@ Scene 序列化走引擎 `Read` / `Write`，不经 schema。但 schema 注册的
 
 ### 5. demo scene 完整覆盖
 
-`SeedDemoWorld` 或 `assets/editor/demo.scene.json` 内 13 个实体：
+`SeedDemoWorld` 或 `assets/scenes/demo.scene.json` 内 13 个实体：
 
 - 5 种内置材质（textured / toon×3 / rim_light / dissolve / emissive）→ Renderable 段（c7 迁后）
 - DirectionalLight 含 `castsShadow` → c3 段
@@ -83,7 +83,7 @@ build / 运行**（即 bisect 区间端点干净），避免 bisect 中途撞到
 
 ## 小节点回归路径（每次小节点都跑一遍）
 
-- [✅] Editor 启动无 crash；自动加载 `assets/editor/demo.scene.json` 或回退 `SeedDemoWorld`
+- [✅] Editor 启动无 crash；自动加载 `assets/scenes/demo.scene.json` 或回退 `SeedDemoWorld`
 - [✅] 选中任意实体 → Inspector 显示该实体所有挂着的 component header (component header如果指的是component的名称的话Renderable之类的，那这条可以过)
 - [✅] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
 - [-] Save 当前 scene → 关闭 → 重启 editor → 加载，所有字段保持 (###bug, Save 选项始终置灰)
@@ -128,7 +128,7 @@ build / 运行**（即 bisect 区间端点干净），避免 bisect 中途撞到
 不是 bug，是**验收前置条件缺失**——按"剔除手改 scene 才能观测的项"原则，这些缺口
 让对应功能段无法在编辑器里观察，登记到这里以便 v0.3 demo 整改时一并补齐。
 
-- **BUG-3 demo scene 无 Animator 实体**：当前 `assets/editor/demo.scene.json` /
+- **BUG-3 demo scene 无 Animator 实体**：当前 `assets/scenes/demo.scene.json` /
   `SeedDemoWorld` 内 13 个实体均未挂 `AnimatorComponent`，c9 Animator section /
   ReadOnly 控件行为无法在 editor 内直接验
 - **BUG-4 demo scene 无 Box / Polygon / EdgeChain shape 的 Collider 实体**：当前 demo

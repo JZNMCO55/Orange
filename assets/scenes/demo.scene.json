@@ -1,0 +1,776 @@
+{
+  "entities": [
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": -1,
+          "parent": 10,
+          "prevSibling": 1
+        },
+        "Name": {
+          "name": "Sparkle Emitter"
+        },
+        "ParticleEmitter": {
+          "colorEnd": [
+            0.30000001192092896,
+            0.5,
+            1.0,
+            0.0
+          ],
+          "colorStart": [
+            0.699999988079071,
+            0.8999999761581421,
+            3.0,
+            3.5
+          ],
+          "emissionRate": 10.0,
+          "emitting": true,
+          "gravity": [
+            0.0,
+            0.07999999821186066
+          ],
+          "initialVelocityMax": [
+            0.15000000596046448,
+            0.3499999940395355
+          ],
+          "initialVelocityMin": [
+            -0.15000000596046448,
+            0.05000000074505806
+          ],
+          "lifetimeMax": 3.5,
+          "lifetimeMin": 2.0,
+          "maxParticles": 64,
+          "sizeEnd": 0.054999999701976776,
+          "sizeStart": 0.02500000037252903,
+          "spawnOffsetMax": [
+            0.5,
+            0.30000001192092896
+          ],
+          "spawnOffsetMin": [
+            -0.5,
+            -0.30000001192092896
+          ]
+        },
+        "Transform": {
+          "position": [
+            -1.5,
+            1.2000000476837158,
+            0.800000011920929
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 0,
+          "parent": 10,
+          "prevSibling": 2
+        },
+        "Name": {
+          "name": "Fire Emitter"
+        },
+        "ParticleEmitter": {
+          "colorEnd": [
+            0.699999988079071,
+            0.15000000596046448,
+            0.0,
+            0.0
+          ],
+          "colorStart": [
+            1.600000023841858,
+            0.75,
+            0.10000000149011612,
+            2.200000047683716
+          ],
+          "emissionRate": 30.0,
+          "emitting": true,
+          "gravity": [
+            0.0,
+            -0.4000000059604645
+          ],
+          "initialVelocityMax": [
+            0.25,
+            2.200000047683716
+          ],
+          "initialVelocityMin": [
+            -0.25,
+            1.2000000476837158
+          ],
+          "lifetimeMax": 1.2000000476837158,
+          "lifetimeMin": 0.6000000238418579,
+          "maxParticles": 128,
+          "sizeEnd": 0.09000000357627869,
+          "sizeStart": 0.03999999910593033,
+          "spawnOffsetMax": [
+            0.11999999731779099,
+            0.0
+          ],
+          "spawnOffsetMin": [
+            -0.11999999731779099,
+            0.0
+          ]
+        },
+        "Transform": {
+          "position": [
+            1.5,
+            -0.30000001192092896,
+            0.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 1.0,
+          "friction": 0.5,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              0.5,
+              0.5
+            ],
+            "kind": "Box"
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 1,
+          "parent": 10,
+          "prevSibling": 3
+        },
+        "Name": {
+          "name": "Dynamic Box"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "mesh": "",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": false,
+          "gravityScale": 1.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.05000000074505806,
+          "type": "Dynamic"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            4.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 2,
+          "parent": 10,
+          "prevSibling": 4
+        },
+        "Name": {
+          "name": "Emissive Pillar"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "mesh": "",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -1.2000000476837158,
+            0.75,
+            1.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.5,
+            2.5,
+            0.5
+          ]
+        }
+      },
+      "id": 3
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 3,
+          "parent": 10,
+          "prevSibling": 5
+        },
+        "Name": {
+          "name": "Glow Box"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "mesh": "",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            0.800000011920929,
+            0.0,
+            0.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 4
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.5,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              0.5,
+              1.0
+            ],
+            "kind": "Box"
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 4,
+          "parent": 10,
+          "prevSibling": 6
+        },
+        "Name": {
+          "name": "Tower"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "mesh": "",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.5,
+            -1.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            2.0,
+            1.0
+          ]
+        }
+      },
+      "id": 5
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.4000000059604645,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              0.5,
+              0.5
+            ],
+            "kind": "Box"
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 5,
+          "parent": 10,
+          "prevSibling": 7
+        },
+        "Name": {
+          "name": "Platform R"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "mesh": "",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 6
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.4000000059604645,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              0.5,
+              0.5
+            ],
+            "kind": "Box"
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 6,
+          "parent": 10,
+          "prevSibling": 8
+        },
+        "Name": {
+          "name": "Platform L"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "mesh": "",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            -2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 7
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 7,
+          "parent": 10,
+          "prevSibling": 9
+        },
+        "Name": {
+          "name": "Backdrop"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "mesh": "",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            2.0,
+            -3.5
+          ],
+          "rotation": [
+            0.7071067690849304,
+            0.0,
+            0.0,
+            0.7071067690849304
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 8
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.6000000238418579,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              5.0,
+              0.5
+            ],
+            "kind": "Box"
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 8,
+          "parent": 10,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "Ground"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "mesh": "",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            -0.5,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 9
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": 9,
+          "nextSibling": -1,
+          "parent": 13,
+          "prevSibling": 11
+        },
+        "Name": {
+          "name": "Geometry"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 10
+    },
+    {
+      "components": {
+        "DirectionalLight": {
+          "castsShadow": true,
+          "color": [
+            1.0,
+            0.9300000071525574,
+            0.7799999713897705
+          ],
+          "direction": [
+            0.3577708899974823,
+            -0.8944271802902222,
+            0.26832816004753113
+          ],
+          "intensity": 1.2999999523162842
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 10,
+          "parent": 13,
+          "prevSibling": 12
+        },
+        "Name": {
+          "name": "Sun"
+        },
+        "Transform": {
+          "position": [
+            5.0,
+            8.0,
+            5.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 11
+    },
+    {
+      "components": {
+        "Camera": {
+          "projection": [
+            1.3985103368759155,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -2.4142134189605713,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -1.001001000404358,
+            -1.0,
+            0.0,
+            0.0,
+            -0.10010010004043579,
+            0.0
+          ],
+          "view": [
+            0.9992588758468628,
+            -0.00766574265435338,
+            0.037719424813985825,
+            0.0,
+            0.0,
+            0.9799671173095703,
+            0.1991593837738037,
+            0.0,
+            -0.03849049285054207,
+            -0.19901178777217865,
+            0.9792410135269165,
+            0.0,
+            -0.0,
+            -0.48998379707336426,
+            -8.249580383300781,
+            1.0
+          ]
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 11,
+          "parent": 13,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "Camera"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 12
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": 12,
+          "nextSibling": -1,
+          "parent": -1,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "Root"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 13
+    }
+  ],
+  "schemaVersion": {
+    "major": 1,
+    "minor": 0,
+    "namespace": "scene/world"
+  }
+}

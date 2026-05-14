@@ -138,7 +138,7 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
 
 **关键 deliverables**：
 
-- 替换 `tools/OrangeEditor/DemoWorld.cpp::SeedDemoWorld` 或新增 `assets/editor/demo.scene.json`：
+- 替换 `tools/OrangeEditor/DemoWorld.cpp::SeedDemoWorld` 或新增 `assets/scenes/demo.scene.json`：
   - 5–10 个真实 mesh（cube / plane / sphere / 内置 model）摆出一个小室内 / 户外切片
   - 真实 Material：toon + rim_light（Phase 3 Task 02）/ dissolve / emissive（Phase 5 Task 02b）至少各一个实例
   - DirectionalLight + 软阴影开启（Phase 3 Task 05）
@@ -147,7 +147,7 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
   - HDR / Bloom / ACES Tonemap 默认开启（Phase 3 Task 03 已自动）
   - 一个 DragonBones 角色（Phase 4 Task 02-03）—— 用引擎自带 sample 资源
   - 2.5D 视角 camera（透视 + 锁 X/Y 平面 + 轻微 parallax）
-- 加载机制：编辑器启动时检测 `assets/editor/demo.scene.json` 存在则自动 Load，否则 fallback 到当前 SeedDemoWorld
+- 加载机制：编辑器启动时检测 `assets/scenes/demo.scene.json` 存在则自动 Load，否则 fallback 到当前 SeedDemoWorld
 - 验收：打开 OrangeEditor 看到的画面要让人**直观感受 Phase 1–5 视觉栈在工作**，而不是几个白色 placeholder cube
 
 **已知不能展示（依赖引擎缺口）**：
@@ -164,7 +164,7 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
 
 - `SeedDemoWorld` 重写：13 个实体，5 种内置材质各至少一个实例（textured / toon×3 / rim_light / dissolve / emissive），DirectionalLight.castsShadow=true，两个 `ParticleEmitterComponent`（火焰 + 萤火），2.5D EditorCamera 默认值更新
 - `InitializeEditorAssets` 新增 toon / rim_light / dissolve 三个 `MaterialInstance` 字段到 `EditorState`
-- `main.cpp` 自动加载机制：尝试 `Scene::Load("assets/editor/demo.scene.json")`，失败回退 SeedDemoWorld
+- `main.cpp` 自动加载机制：尝试 `Scene::Load("assets/scenes/demo.scene.json")`，失败回退 SeedDemoWorld
 - **未能展示**：DragonBones 角色——`DragonBonesContext` 在 `src/` 私有头，editor CMake target 无法访问；体积光（god rays）依赖 Pipeline 在有 castsShadow 光时自动开启，运行时验证后确认
 - 编译：`cmake --build build --config Debug --target OrangeEditor` 7 TU 全绿（2026-05-12）
 
