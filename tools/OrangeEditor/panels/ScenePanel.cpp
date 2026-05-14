@@ -4,12 +4,15 @@
 #include "../EditorRenderLayer.h"
 
 #include "../EditorCameraControl.h"
+#include "../EditorPicking.h"
 
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
 #include <orange/rhi/RHITexture.h>
 
 #include <backends/imgui_impl_vulkan.h>
+
+#include <glm/vec2.hpp>
 
 #include <cstdio>
 
@@ -46,6 +49,42 @@ void EditorRenderLayer::DrawScenePanel()
                          ImVec2(static_cast<float>(panelW),
                                 static_cast<float>(panelH)));
             drewImage = true;
+
+            // viewport picking —— LMB 释放且累积 drag 距离 < 阈值 → 视为
+            // 单击（区分于轨道相机拖动）。屏幕坐标 → image-local → NDC
+            // ([-1,1]) → world ray → ECS hit-test → 命中实体写
+            // EditorSelection.selectedEntity。Entity Tree 走既有 selection
+            // 联动机制自动高亮，无需双向写。
+            //
+            // 阈值 4px：Cocos / Unreal 内典型 click 容差。drag 大于阈值的
+            // 释放视为相机轨道旋转结束，不触发 picking。
+            //
+            // 命中失败（点空白）= Entity::Invalid → 清当前选中，与
+            // Cocos / Unity / Unreal 工业惯例一致。
+            if (ImGui::IsItemHovered()
+                && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                const ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
+                constexpr float kClickThresholdPx = 4.0f;
+                if (drag.x * drag.x + drag.y * drag.y
+                        <= kClickThresholdPx * kClickThresholdPx)
+                {
+                    const ImVec2 itemMin  = ImGui::GetItemRectMin();
+                    const ImVec2 mousePos = ImGui::GetMousePos();
+                    const float lx = mousePos.x - itemMin.x;
+                    const float ly = mousePos.y - itemMin.y;
+                    // 屏幕坐标 → NDC：Vulkan NDC y-down 与 ImGui 屏幕 y-down
+                    // 同向，不再额外翻转
+                    const float ndcX = (lx / static_cast<float>(panelW)) * 2.0f - 1.0f;
+                    const float ndcY = (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
+                    const Orange::Engine::Entity picked =
+                        PickEntityAt(mHost, glm::vec2(ndcX, ndcY), aspect);
+                    mHost.selection.selectedEntity = picked;
+                    // 切实体 → Euler 编辑缓存失效（与 Quat case 行为一致）
+                    mHost.selection.transformEulerCacheEntity =
+                        Orange::Engine::Entity::Invalid();
+                }
+            }
         }
     }
 

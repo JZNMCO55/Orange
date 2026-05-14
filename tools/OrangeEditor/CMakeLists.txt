@@ -138,6 +138,7 @@ add_executable(OrangeEditor
     DemoWorld.cpp
     EditorCameraControl.cpp
     EditorHierarchy.cpp
+    EditorPicking.cpp
     EditorRenderLayer.cpp
     EditorWidgets.cpp
     VulkanLoaderShim.cpp
