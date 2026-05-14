@@ -71,6 +71,7 @@
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
 #include "demo_game/HealthComponent.h"
+#include "plugin/AnimatorMiniPreviewPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
 
 #include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
@@ -320,6 +321,13 @@ int main()
     editorHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
     InitializeEditorAssets(editorHost);
     editorHost.extraSerializers.push_back(DemoGame::GetHealthSerializerEntry());
+
+    // 注册第一个 IEditorInspectorPlugin —— v0.3 deliverable 5 落地。
+    // 多 plugin 按 push_back 顺序检查 CanHandle，第一条命中接管段；目前
+    // 仅一条，未来 v0.5 Material 缩略图 / v0.7 Animator 时间轴 plugin 同款
+    // push_back 在此排队即可。
+    editorHost.inspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::AnimatorMiniPreviewPlugin>());
 
     // 把 CommandStack 的"栈有效变更"钩子绑到 scene.dirty——任何 Push / Undo /
     // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地

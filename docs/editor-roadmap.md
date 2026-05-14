@@ -240,7 +240,7 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 - Editor 启动 + Demo scene 加载 + 选中实体 + 改 Inspector 字段 + Undo + Save 路径全绿
 - `EditorState` 字段数从 19 降到 ≤ 3（仅薄壳聚合）或直接删除；4 个子 context 文件存在且单文件 < 200 行
 
-### v0.3 · 游戏侧 Schema 注册落地
+### v0.3 · 游戏侧 Schema 注册落地 ✅
 
 **目标**：基于 v0.2.5 已落地的 `PropertySchema` / `IComponentSchemaProvider` / `IEditorInspectorPlugin` 基础设施，让游戏侧自定义 component 通过同一套 schema API 显示在 Inspector，并出第一个真实的 plugin case 验证抽象边界。
 

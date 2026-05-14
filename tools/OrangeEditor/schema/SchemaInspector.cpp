@@ -16,6 +16,7 @@
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../command/SetFieldValueCommand.h"
+#include "../plugin/IEditorInspectorPlugin.h"
 #include "ComponentSchemaRegistry.h"
 
 #include <orange/engine/scene/Entity.h>
@@ -461,16 +462,42 @@ void DrawComponentSchemaSection(EditorHost&                  host,
 
     if (open)
     {
-        for (const auto& prop : schema.properties)
+        // Plugin 调度：遍历 host.inspectorPlugins，第一条 CanHandle == true 接
+        // 管本 component 段。语义按 IEditorInspectorPlugin.h "调用约定" 节：
+        //   * ParseBegin 返 true → 跳过默认 properties 渲染（plugin 自渲染整段）
+        //   * ParseBegin 返 false → 继续默认渲染
+        //   * 默认渲染（或自渲染）之后**总是**调 ParseEnd 追加扩展 UI
+        // 多 plugin 都 CanHandle 时按注册顺序取第一条；后续 plugin 不再调度。
+        Orange::Editor::Plugin::IEditorInspectorPlugin* pActivePlugin = nullptr;
+        bool pluginTakesOver = false;
+        for (auto& pPlugin : host.inspectorPlugins)
         {
-            // 字段 key："{type}.{prop}" —— 与既有 SetFieldValueCommand 风格
-            // 一致；确保 coalesce 在同一字段连续编辑时合并成一条命令。
-            std::string fieldKey;
-            fieldKey.reserve(64);
-            fieldKey.append(schema.typeName ? schema.typeName : "?");
-            fieldKey.push_back('.');
-            fieldKey.append(prop.name ? prop.name : "?");
-            DrawProperty(host, entity, schema, prop, component, fieldKey);
+            if (pPlugin != nullptr && pPlugin->CanHandle(schema))
+            {
+                pActivePlugin   = pPlugin.get();
+                pluginTakesOver = pActivePlugin->ParseBegin(host, entity, schema, component);
+                break;
+            }
+        }
+
+        if (!pluginTakesOver)
+        {
+            for (const auto& prop : schema.properties)
+            {
+                // 字段 key："{type}.{prop}" —— 与既有 SetFieldValueCommand 风格
+                // 一致；确保 coalesce 在同一字段连续编辑时合并成一条命令。
+                std::string fieldKey;
+                fieldKey.reserve(64);
+                fieldKey.append(schema.typeName ? schema.typeName : "?");
+                fieldKey.push_back('.');
+                fieldKey.append(prop.name ? prop.name : "?");
+                DrawProperty(host, entity, schema, prop, component, fieldKey);
+            }
+        }
+
+        if (pActivePlugin != nullptr)
+        {
+            pActivePlugin->ParseEnd(host, entity, schema, component);
         }
     }
 
