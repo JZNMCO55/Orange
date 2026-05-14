@@ -491,7 +491,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             std::string path;
             if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) { break; }
             auto pNew = std::make_unique<Orange::Engine::World>();
-            auto rc = Orange::Engine::Scene::Load(path, *pNew);
+            Orange::Engine::Scene::LoadOptions openLoadOpts;
+            openLoadOpts.assetRegistry     = mHost.assets.pAssets.get();
+            openLoadOpts.animatorRegistry  = mHost.assets.pAnimators.get();
+            auto rc = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
                              "[OrangeEditor] Scene::Load failed: %s (code=%u)\n",
@@ -671,13 +674,18 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             mpPhysicsWorld.reset();
 
             // S2 还原：从快照加载回 Edit 前的 World 状态。
-            //   - 只传 assetRegistry（mesh / material handle round-trip 需要）
-            //   - 不传 physicsWorld / animatorRegistry：Edit 态不需要
-            //     运行时 backend，handle 留 Invalid 是正确的 Edit 态初值
+            //   - 传 assetRegistry（mesh / material handle round-trip 需要）
+            //   - 传 animatorRegistry：AnimatorComponent 在还原时需要重建
+            //     IAnimator backend 实例（backend 名持久化，IAnimator 本身
+            //     不序列化）；不传则 component 还原为 animator=nullptr，
+            //     Inspector Animator 段会看到空 backend 名
+            //   - 不传 physicsWorld：Edit 态不需要运行时 backend，handle 留
+            //     Invalid 是正确的 Edit 态初值
             if (!mHost.scene.playSnapshotPath.empty()) {
                 auto pNew = std::make_unique<Orange::Engine::World>();
                 Orange::Engine::Scene::LoadOptions loadOpts;
-                loadOpts.assetRegistry = mHost.assets.pAssets.get();
+                loadOpts.assetRegistry    = mHost.assets.pAssets.get();
+                loadOpts.animatorRegistry = mHost.assets.pAnimators.get();
                 const auto rc = Orange::Engine::Scene::Load(
                     mHost.scene.playSnapshotPath, *pNew, loadOpts);
                 if (rc.IsErr()) {

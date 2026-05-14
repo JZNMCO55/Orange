@@ -4,7 +4,7 @@
       "components": {
         "Hierarchy": {
           "firstChild": -1,
-          "nextSibling": -1,
+          "nextSibling": 14,
           "parent": 10,
           "prevSibling": 1
         },
@@ -766,6 +766,226 @@
         }
       },
       "id": 13
+    },
+    {
+      "components": {
+        "Animator": {
+          "backend": "procedural"
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 15,
+          "parent": 10,
+          "prevSibling": 0
+        },
+        "Name": {
+          "name": "Slime Doll"
+        },
+        "Transform": {
+          "position": [
+            0.800000011920929,
+            1.2000000476837158,
+            0.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 14
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.5,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "kind": "Circle",
+            "radius": 0.5
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 16,
+          "parent": 10,
+          "prevSibling": 14
+        },
+        "Name": {
+          "name": "Static Circle (demo)"
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            8.0,
+            -0.5,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 15
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.5,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "kind": "Polygon",
+            "vertices": [
+              -0.4000000059604645,
+              -0.30000001192092896,
+              0.4000000059604645,
+              -0.30000001192092896,
+              0.30000001192092896,
+              0.30000001192092896,
+              -0.30000001192092896,
+              0.30000001192092896
+            ]
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 17,
+          "parent": 10,
+          "prevSibling": 15
+        },
+        "Name": {
+          "name": "Static Polygon (demo)"
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            8.5,
+            -0.5,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 16
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 0.0,
+          "friction": 0.5,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "isLoop": false,
+            "kind": "EdgeChain",
+            "vertices": [
+              -0.5,
+              0.0,
+              -0.20000000298023224,
+              0.30000001192092896,
+              0.20000000298023224,
+              0.30000001192092896,
+              0.5,
+              0.0
+            ]
+          }
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": -1,
+          "parent": 10,
+          "prevSibling": 16
+        },
+        "Name": {
+          "name": "Static EdgeChain (demo)"
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": true,
+          "gravityScale": 0.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            9.0,
+            -0.5,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 17
     }
   ],
   "schemaVersion": {

@@ -15,6 +15,7 @@
 // 需要后续把 AssetRegistry 也参与序列化（登记到 docs/engine-known-gaps.md
 // 或对应 milestone）。
 
+#include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -25,8 +26,9 @@
 
 struct EditorAssetContext
 {
-    std::unique_ptr<Orange::Engine::Asset::AssetRegistry>   pAssets;
-    std::unique_ptr<Orange::Engine::Render::MaterialSystem> pMaterials;
+    std::unique_ptr<Orange::Engine::Asset::AssetRegistry>     pAssets;
+    std::unique_ptr<Orange::Engine::Render::MaterialSystem>   pMaterials;
+    std::unique_ptr<Orange::Engine::Animation::AnimatorRegistry> pAnimators;
 
     // 内置 mesh handle —— SeedDemoWorld 给 Floor 用 plane / Wall 用 cube。
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>

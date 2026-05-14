@@ -4,6 +4,9 @@
 
 #include "EditorHierarchy.h"
 
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/AnimatorRegistry.h>
+#include <orange/engine/animation/ProceduralAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
@@ -154,6 +157,38 @@ void InitializeEditorAssets(EditorHost& host)
     // 编辑器操作共用默认材质
     host.assets.pDefaultRenderableMaterial = host.assets.pMaterials->CreateInstance("textured");
     host.assets.pLightObjectMaterial       = host.assets.pMaterials->CreateInstance("emissive");
+
+    // AnimatorRegistry —— Scene::Load 遇到 AnimatorComponent 时通过 backend
+    // name 查 factory 创建 IAnimator。当前只注册引擎自带 "procedural" 后端；
+    // dragonbones 后端依赖 DragonBonesContext + skeleton asset，编辑器 demo
+    // 暂不消费，等 v0.7 Animation 子模式上线后再注册。
+    //
+    // factory 捕获 dissolve material 的裸指针——pDissolveMaterial 由本
+    // context 拥有，生命周期 ≥ AnimatorRegistry，指针稳定。channel 列表
+    // 故意只塞一条占位 dissolve_t，目的是让 c4 IEditorInspectorPlugin
+    // mini-preview 能读到 ChannelCount > 0；UBO 通路未接通前 channel 写入
+    // 不会真正影响 GPU 端 uniform（参 ProceduralAnimator.h 头注释）。
+    host.assets.pAnimators = std::make_unique<Orange::Engine::Animation::AnimatorRegistry>();
+    {
+        auto* pDissolveTarget = host.assets.pDissolveMaterial.get();
+        auto factory = [pDissolveTarget]()
+            -> std::unique_ptr<Orange::Engine::Animation::IAnimator>
+        {
+            auto anim = std::make_unique<
+                Orange::Engine::Animation::ProceduralAnimator>(pDissolveTarget);
+            anim->AddChannel<float>("dissolve_t",
+                                    [](float t) { return t * 0.5f; });
+            return anim;
+        };
+        if (auto rb = host.assets.pAnimators->RegisterBackend("procedural", factory);
+            rb.IsErr())
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] AnimatorRegistry::RegisterBackend(procedural) "
+                         "失败 (code=%u)\n",
+                         static_cast<unsigned>(rb.Error()));
+        }
+    }
 }
 
 // demo 世界层级：
@@ -184,7 +219,11 @@ void SeedDemoWorld(EditorHost& host)
     using ::Orange::Engine::Physics::BodyType;
     using ::Orange::Engine::Physics::ColliderComponent;
     using ::Orange::Engine::Physics::BoxDesc;
+    using ::Orange::Engine::Physics::CircleDesc;
+    using ::Orange::Engine::Physics::EdgeChainDesc;
+    using ::Orange::Engine::Physics::PolygonDesc;
     using ::Orange::Engine::Physics::RigidBodyComponent;
+    using ::Orange::Engine::Animation::AnimatorComponent;
 
     auto& world = *host.scene.pWorld;
     auto make = [&](const char* name) -> Entity {
@@ -211,6 +250,19 @@ void SeedDemoWorld(EditorHost& host)
     Entity dynamicBox      = make("Dynamic Box");
     Entity fireEmitter     = make("Fire Emitter");
     Entity sparkleEmitter  = make("Sparkle Emitter");
+
+    // v0.3 c1：演示 / 验收前置实体。
+    //   * slimeDoll：Animator-only 实体，无 Renderable——避免 BUG-2 hardcode
+    //     依赖（"Slime Doll" 不在 ReattachMaterialInstances 名单里）。Inspector
+    //     可观察 Animator schema 段 + ReadOnly Backend 字段。
+    //   * staticCircle / staticPolygon / staticEdgeChain：Box 之外三种 shape
+    //     的 Collider 验收前置实体；位置放右侧远端，无 Renderable，物理上
+    //     仅作为 schema 段渲染样本——切换到这三个实体看 Inspector 即可验
+    //     c8 三个 visibleIf 互斥段。
+    Entity slimeDoll       = make("Slime Doll");
+    Entity staticCircle    = make("Static Circle (demo)");
+    Entity staticPolygon   = make("Static Polygon (demo)");
+    Entity staticEdgeChain = make("Static EdgeChain (demo)");
 
     // ---- Camera：2.5D 侧视角 + 轻微俯角 --------------------------------
     // EditorCamera 会每帧覆写 view 矩阵；此处的 view 仅在非编辑器消费
@@ -469,6 +521,96 @@ void SeedDemoWorld(EditorHost& host)
         world.AddComponent<ParticleEmitterComponent>(sparkleEmitter, pec);
     }
 
+    // ---- Slime Doll（Animator-only，无 Renderable）-----------------------
+    // 位置贴在 Glow Box 上方，方便在 Inspector 选实体时 viewport 大致定位；
+    // 没有 Renderable 是刻意决定（参 entity 创建段注释）。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(slimeDoll);
+        if (tc != nullptr) { tc->position = glm::vec3(0.8f, 1.2f, 0.5f); }
+
+        AnimatorComponent ac{};
+        if (host.assets.pAnimators != nullptr)
+        {
+            ac.animator = host.assets.pAnimators->Create("procedural");
+        }
+        world.AddComponent<AnimatorComponent>(slimeDoll, std::move(ac));
+    }
+
+    // ---- Static Circle (demo)（Circle Collider 验收前置实体）-------------
+    // 放右侧远端 (x=8) 避免与主场景视觉冲突；无 Renderable，仅供 Inspector
+    // 段渲染样本。RigidBody Static + 与 Collider 配对，Load 时 PhysicsWorld
+    // 能完整 AddBody（不出现 "single component" 警告）。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(staticCircle);
+        if (tc != nullptr) { tc->position = glm::vec3(8.0f, -0.5f, 0.0f); }
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(staticCircle, rb);
+
+        ColliderComponent cc{};
+        cc.shape    = CircleDesc{/*radius=*/0.5f, /*center=*/glm::vec2{0.0f, 0.0f}};
+        cc.density  = 0.0f;
+        cc.friction = 0.5f;
+        world.AddComponent<ColliderComponent>(staticCircle, cc);
+    }
+
+    // ---- Static Polygon (demo)（Polygon Collider 验收前置实体）-----------
+    // 4 顶点凸四边形（梯形），验证 Polygon shape schema 段在 Inspector 渲染。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(staticPolygon);
+        if (tc != nullptr) { tc->position = glm::vec3(8.5f, -0.5f, 0.0f); }
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(staticPolygon, rb);
+
+        PolygonDesc pd{};
+        pd.count = 4u;
+        pd.vertices[0] = glm::vec2{-0.4f, -0.3f};
+        pd.vertices[1] = glm::vec2{ 0.4f, -0.3f};
+        pd.vertices[2] = glm::vec2{ 0.3f,  0.3f};
+        pd.vertices[3] = glm::vec2{-0.3f,  0.3f};
+
+        ColliderComponent cc{};
+        cc.shape    = pd;
+        cc.density  = 0.0f;
+        cc.friction = 0.5f;
+        world.AddComponent<ColliderComponent>(staticPolygon, cc);
+    }
+
+    // ---- Static EdgeChain (demo)（EdgeChain Collider 验收前置实体）-------
+    // 4 顶点开放折线（不闭环），验证 EdgeChain shape schema 段在 Inspector
+    // 渲染 + isLoop 字段。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(staticEdgeChain);
+        if (tc != nullptr) { tc->position = glm::vec3(9.0f, -0.5f, 0.0f); }
+
+        RigidBodyComponent rb{};
+        rb.type          = BodyType::Static;
+        rb.fixedRotation = true;
+        rb.gravityScale  = 0.0f;
+        world.AddComponent<RigidBodyComponent>(staticEdgeChain, rb);
+
+        EdgeChainDesc ed{};
+        ed.count = 4u;
+        ed.vertices[0] = glm::vec2{-0.5f,  0.0f};
+        ed.vertices[1] = glm::vec2{-0.2f,  0.3f};
+        ed.vertices[2] = glm::vec2{ 0.2f,  0.3f};
+        ed.vertices[3] = glm::vec2{ 0.5f,  0.0f};
+        ed.isLoop = false;
+
+        ColliderComponent cc{};
+        cc.shape    = ed;
+        cc.density  = 0.0f;
+        cc.friction = 0.5f;
+        world.AddComponent<ColliderComponent>(staticEdgeChain, cc);
+    }
+
     // ---- 构建父子层级 ---------------------------------------------------
     EditorHierarchy::LinkAsLastChild(world, root,     camera);
     EditorHierarchy::LinkAsLastChild(world, root,     sun);
@@ -483,4 +625,8 @@ void SeedDemoWorld(EditorHost& host)
     EditorHierarchy::LinkAsLastChild(world, geometry, dynamicBox);
     EditorHierarchy::LinkAsLastChild(world, geometry, fireEmitter);
     EditorHierarchy::LinkAsLastChild(world, geometry, sparkleEmitter);
+    EditorHierarchy::LinkAsLastChild(world, geometry, slimeDoll);
+    EditorHierarchy::LinkAsLastChild(world, geometry, staticCircle);
+    EditorHierarchy::LinkAsLastChild(world, geometry, staticPolygon);
+    EditorHierarchy::LinkAsLastChild(world, geometry, staticEdgeChain);
 }

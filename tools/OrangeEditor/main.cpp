@@ -325,7 +325,8 @@ int main()
         [pHost = &editorHost]{ pHost->scene.dirty = true; });
     {
         Scene::LoadOptions demoLoadOpts{};
-        demoLoadOpts.assetRegistry = editorHost.assets.pAssets.get();
+        demoLoadOpts.assetRegistry     = editorHost.assets.pAssets.get();
+        demoLoadOpts.animatorRegistry  = editorHost.assets.pAnimators.get();
         if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);
             res.IsErr())
