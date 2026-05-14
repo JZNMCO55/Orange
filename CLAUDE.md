@@ -252,7 +252,7 @@ OrangeEditor 开发时采用**双参考**策略：
 
 ## 工作流基础设施
 
-按 2026-05-12 工作流升级（详见 `docs/decisions/ADR-001` 关联讨论），项目沉淀了 4 件协同纪律基础设施。下面是**何时用 + 怎么用**——三件都是低摩擦工具，不用就会让早期决策腐烂。
+按 2026-05-12 工作流升级（详见 `docs/decisions/ADR-001` 关联讨论），项目沉淀了 5 件协同纪律基础设施（2026-05-14 补 end-checklist 后从 4 件扩到 5 件）。下面是**何时用 + 怎么用**——都是低摩擦工具，不用就会让早期决策腐烂。
 
 ### 1. Invariant lint —— `scripts/check_invariants.py`
 
@@ -290,20 +290,37 @@ OrangeEditor 开发时采用**双参考**策略：
 
 设计意图：把"边写边发现要返工"的成本前置到读文档阶段，而不是在 commit 后才反应过来违反了哪条纪律。
 
-### 这 4 件的相互关系
+### 5. Milestone 完工 ritual —— `docs/milestone-end-checklist.md`
+
+任何 milestone **标 ✅ 之前**走一遍 5–10 分钟 checklist：跑 lint + drift → acceptance-checklist 文档就位 → 参考引擎 retro 对比（本期引入新机制时必做）→ ADR 决定 → 跨仓影响登记 → commit 序列回顾 → roadmap 标 ✅ → memory 沉淀。**红线触发不标 ✅** 条款见该文件末段。
+
+设计意图（与 start-checklist 对偶）：把"标 ✅ 后才发现纪律漏洞"的成本前置到完工 ritual 阶段。2026-05-14 v0.3 milestone 标 ✅ 时漏写 acceptance-checklist 后补此文档；同 commit 落 v0.3 retro 节。
+
+### 这 5 件的相互关系
 
 ```
 milestone-start-checklist （前置：每个 milestone 开工前）
    │
    ├─ 第 3 步：读相关 ADR（docs/decisions/）
+   ├─ 第 4 步：查参考引擎对照设计（Lumix / Godot / Cocos）
    ├─ 第 5 步：跑 invariant lint + drift 检测 → 必须 baseline 干净
-   └─ 第 6 步：跨仓影响检查 → 触发 engine-known-gaps / OrangeRender incoming_feature 登记
+   ├─ 第 6 步：跨仓影响识别 → 触发 engine-known-gaps / OrangeRender incoming_feature 登记
+   └─ 第 7 步：写 commit-plan 草稿
 
-milestone 完成时：
-   ├─ design-plan.md / editor-roadmap.md 加 ✅
-   ├─ 跑 drift 检测确认 CLAUDE.md 同步
-   ├─ 决策面 → 写 ADR（如适用）
-   └─ commit 前最后跑一次 invariant lint
+milestone 进行中：
+   ├─ 每个 commit 前跑 invariant lint
+   └─ 撞上引擎缺口 / OrangeRender 需求 → 立刻登记，不在同 session 实现
+
+milestone-end-checklist （前置：标 ✅ 之前）
+   │
+   ├─ 第 1 步：跑 invariant lint + drift 检测（baseline 全绿）
+   ├─ 第 2 步：acceptance-checklist 文档就位（编辑器 milestone 必须）
+   ├─ 第 3 步：参考引擎 retro 对比（本期引入新机制时必做，与 start 第 4 步对偶）
+   ├─ 第 4 步：ADR 决定（与 start 第 3 步对偶）
+   ├─ 第 5 步：跨仓影响登记（与 start 第 6 步对偶）
+   ├─ 第 6 步：commit 序列回顾（与 start 第 7 步对偶）
+   ├─ 第 7 步：roadmap 标 ✅ + 跑 drift 确认 CLAUDE.md 同步
+   └─ 第 8 步：memory 沉淀（可选）
 ```
 
 ## Working in this repo: practical guidance

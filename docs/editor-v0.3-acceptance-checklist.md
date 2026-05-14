@@ -281,6 +281,75 @@ acceptance-checklist 同时归档：节点 A 回归通过后可迁到 `docs/qa-r
 
 ---
 
+## v0.3 retro · 参考引擎对比
+
+按 `docs/milestone-end-checklist.md` 第 3 步要求，对本期引入的**新机制 / 新抽象**做事后追评，
+确认设计选择在 milestone 完工事后看仍然合理。
+
+### 决策点 1 · IEditorInspectorPlugin 调度模型选 Godot begin/end 双钩子
+
+**决策位置**：`tools/OrangeEditor/plugin/IEditorInspectorPlugin.h` + `tools/OrangeEditor/schema/SchemaInspector.cpp::DrawComponentSchemaSection`
+
+**选项**：
+- **A · Godot 风格 begin/end 双钩子**：`ParseBegin` 返 true 接管整段、`ParseEnd` 总在段末追加 UI。可同时支持"装饰式"和"接管式"两种 plugin
+  - 参考：`vendor/godot/editor/editor_inspector.h` `EditorInspectorPlugin` 的 `parse_begin/parse_property/parse_category/parse_end` 多档钩子
+- **B · Lumix 风格 single onGUI**：单一 `onGUI(ComponentType, EntityRef)` 钩子，plugin 接管整段；无段首/段尾分离
+  - 参考：`vendor/LumixEngine/src/editor/property_grid.h` `PropertyGrid::IPlugin::onGUI`
+- **C · Cocos TypeScript decorator**：装饰器模式注册 component → editor UI；与栈完全不同，不可比
+
+**已选**：A 的最小子集（仅 begin/end，property-level 拦截 `parse_property` 推迟到真实 use case 浮出）
+
+**事后追评**：仍合理。理由：
+- 第一个真实 case（AnimatorMiniPreviewPlugin）就是装饰式（`ParseEnd` 追加 mini-preview，**不**接管），证明 begin/end 分离的价值——若选 B 就必须 plugin 自己重画整段 Backend 字段
+- 但 Godot 的 4 档钩子（含 `parse_property` / `parse_category`）确实给了 future 扩展头，未来需要"plugin 拦截某具体字段而非整段"时直接加钩子即可，不破已注册 plugin。当前最小子集没有引入"plugin 与 schema 字段命名硬绑定"的接口面债
+- v0.4 第二个真实 case（IEditorGizmoPlugin）已沿用同款 begin/end 风格——抽象在 v0.3 完工后仍能扩展，不需要重设计
+
+### 决策点 2 · HealthComponent 走"双份字段表"（schema 一份 + Read/Write 一份）
+
+**决策位置**：`tools/OrangeEditor/demo_game/HealthComponent.cpp`（Schema builder + HealthWrite/HealthRead 各列一份字段）
+
+**选项**：
+- **A · 双份手写**：schema 列 `hp / maxHp`，Read/Write 也各列 `hp / maxHp`，靠 review 保一致
+- **B · Lumix `serialize_member` 风格**：从 reflection 表自动派生 Read/Write，单源真相
+  - 参考：`vendor/LumixEngine/src/engine/reflection.h` `getCompiledType` / `serialize_member` 系列
+- **C · Godot `_get_property_list` 反射**：运行时反射拿字段表
+  - 参考：`vendor/godot/core/object/object.h` PROPERTY_HINT 系列
+
+**已选**：A，且这是项目级 invariant 决定的（CLAUDE.md "Serialization and reflection" 节明确禁 `entt::meta` / RTTR / cereal-with-reflection / clang AST codegen）
+
+**事后追评**：仍合理。理由：
+- HealthComponent 仅 2 字段，双份维护成本极低
+- 即便 component 字段数膨胀到 ParticleEmitter 那样 14 字段，CLAUDE.md 内禁令是项目级 invariant，不为单个 case 破例
+- Lumix `serialize_member` 是宏 + 模板（非 codegen），看起来与 invariant 不冲突——但它隐含"reflection 数据是序列化数据"假设，会让某些 schema-only 元数据（如 ImGui display label / DragSpeed / Range）也跟着进序列化输出。OrangeEditor 通过双份显式分离这两类元数据：schema = UI 渲染契约，Read/Write = 持久化契约，**两者职责不耦合**，这是设计优势不是债
+
+**潜在问题**：双份手写如果 schema 加字段忘加 Read/Write（或反之），现象是"Inspector 能编辑但保存丢失"或"保存的字段 Inspector 不显示"。当前没有 lint 检测——v0.4+ 字段数膨胀时如果撞坑可考虑加一个 schema/serializer 一致性 lint，但本期不预先撒网
+
+### 决策点 3 · AnimatorMiniPreviewPlugin 选作首个真实 plugin case
+
+**决策位置**：3 候选间通过 `AskUserQuestion` 选定（commit 30e3346）
+
+**选项**：
+- **A · Animator mini-preview**：纯只读，IAnimator API（BackendName + IsFinished）已具备，工程量最小
+- **B · Light 色温色环 + viewport 同步**：需要 Kelvin → RGB 经验公式 + SetField 命令栈联动；中等工程量
+- **C · Material 缩略图**：需要离屏 RT 渲染缩略图；最大工程量，与 v0.5 Asset 浏览器有重叠工作
+
+**已选**：A（用户在 AskUserQuestion 选定）
+
+**事后追评**：仍合理。理由：
+- 选 A 让 v0.3 c3 单 commit 完成"plugin dispatch 集成 + 第一个真实 plugin 落地"两件事；若选 B/C，dispatch 集成与 plugin 实现可能要拆 2 个 commit
+- "纯装饰式"plugin（ParseEnd 追加 UI、不接管、不入命令栈）正好对应 IEditorInspectorPlugin 头注释"装饰式扩展"主用例——验证抽象的 minimal valid path
+- B（Light 色温）+ C（Material 缩略图）作为第二 / 第三 plugin case 留给 v0.4 / v0.5 同期落，与对应 milestone 的内容关联性更强（B 与 v0.4 Light gizmo 同类、C 与 v0.5 Asset 浏览器同类）
+
+### 综合事后追评
+
+v0.3 三个决策点 retro 后均**未发现**事后追评失误。新机制（plugin dispatch / extraSerializers / 双份字段表 / mini-preview 选型）在 milestone 完工事后看与同栈参考引擎设计契合或合理偏离（双份字段表偏离 Lumix 是项目级 invariant 主动选择）。
+
+**对 v0.4 的启示**（基于本 retro）：
+- IEditorGizmoPlugin 沿用 begin/end 双钩子风格，不需要在 v0.4 重新评估抽象
+- 游戏侧自定义 gizmo（与 HealthComponent 同款"游戏侧扩展"方向）将是 v0.4 末或 v0.5 的候选验证 case；HealthComponent 已建立"双份手写"模式可复用
+
+---
+
 ## 文档生命周期
 
 - v0.3 milestone 节点 A 回归通过后：本文档可归档（迁到 `docs/qa-records/` 或保留在原位作为
