@@ -105,6 +105,69 @@
 
 ---
 
+## GAP-2026-05-14-renderable-material-instance-round-trip
+
+- **发现方**：OrangeEditor v0.2.5 BUG-2 诊断
+- **发现日期**：2026-05-14
+- **一句话定性**：`RenderableComponent.materialInstance` 是裸 `MaterialInstance*`，Scene 序列化完全跳过该字段；任何 Save → Load round-trip 后 materialInstance 一律 nullptr，编辑器侧不得不靠 hardcode by-name 分派兜底——是 BUG-2（Play→Stop 后掉落物变棋盘格）的结构性根因
+
+### 触发场景
+
+OrangeEditor v0.2.5：
+
+1. **启动加载**：main.cpp 跑 `Scene::Load("assets/scenes/demo.scene.json")`——demo.scene.json 内 8 个 Renderable 段全部缺 material 字段（Save 时根本写不出）。Load 返回 IsErr 后 main.cpp fallback 到 `SeedDemoWorld`，靠 SeedDemoWorld 内 hardcode `rc.materialInstance = host.assets.pXxxMaterial.get()` 挂材质——绕过了缺口但没解决
+2. **Play→Stop snapshot**：EditorRenderLayer 走 `Scene::Save → temp file → Scene::Load`。Save 跳过 materialInstance，Load 还原后全 nullptr；`ReattachMaterialInstances` 按实体名 hardcode 分派挂回，未命中的（如 Dynamic Box）落 `pDefaultRenderableMaterial`（textured 棋盘格）——BUG-2 现象
+3. **Save → Reopen** 用户手工保存的 scene 同理丢失 materialInstance；下次启动只能靠 hardcode 路径勉强还原
+
+### 验证（2026-05-14 通过 grep + 阅读引擎源码确认）
+
+- `src/scene/SceneSerialization.cpp::Save` 内 `idMap` 把 entt::entity 重映射为 0..N-1 持久 ID 写入 JSON；Load 时 create 新 entt::entity，所以 **EnTT 句柄在 round-trip 中不稳定**，无法直接用作 caller-side 还原键
+- `RenderableComponent` 的 Read/Write 不写 materialInstance 字段（demo.scene.json 内 Renderable 段仅含 `castsShadow / mesh / visible`，且 `mesh` 字段是空字符串——AssetHandle 也没真正序列化）
+
+### 缺什么（按依赖拆，v0.3+ 评审定）
+
+#### G1 · `MaterialInstance` 命名注册 + 序列化形式
+
+候选设计：
+
+1. **基于 asset id 的字符串字段**：`AssetRegistry` 增加"按 string id 注册 MaterialInstance"路径；`RenderableComponent` 序列化时写 material 的 string id，Load 时反向 lookup。需要 `pFloorMaterial` / `pToonMaterial` / `pDissolveMaterial` 等内置材质在编辑器启动期注册时一并写 id（典型："builtin/floor" / "builtin/toon" / ...）
+2. **`AssetHandle<MaterialInstance>` 强类型 handle**：与 `mesh: AssetHandle<MeshAsset>` 走同款路径；裸指针字段降级为运行时缓存（lazy resolve from handle）。要求 `MaterialInstance` 满足 `AssetHandle` 的 trait 约束
+3. **混合**：保留裸指针字段（性能 hot path），新增可选 `materialAssetId` 兄弟字段参与序列化，Load 后调度一次 ResolvePointers pass
+
+无论哪种，本 GAP 范围内**只**做：(a) `RenderableComponent` schema bump（SchemaVersion +1）+ Read/Write 处理新字段；(b) Save 写出 + Load 反向解析；(c) 现有 v1 数据 migrator 走老路径（裸指针保持 nullptr，编辑器侧自然兼容现有 hardcode 兜底）
+
+#### G2 · `mesh` 字段同款修复
+
+demo.scene.json 内 `"mesh": ""` 也是同款问题——`AssetHandle<MeshAsset>` 看似走 handle 路径但序列化是空字符串，Load 后 handle 也是 Invalid。要么 G1 落地同时把 mesh 一起补正，要么单独再开一条 GAP
+
+#### G3 · `RigidBodyComponent.handle` / `AnimatorComponent.animator` 等同类裸字段统一治理
+
+裸指针 / 运行时 handle 字段都是同款"运行时引用不进序列化"模式。本 GAP 主目标是 materialInstance，但顺手把同类字段处理原则在引擎 Serialization 文档写一遍，避免未来再撞同款
+
+### 期望验收
+
+- 在编辑器里 +Add Renderable 一个实体（预绑 cubeMesh + defaultMaterial）→ 改字段 → Save → 关闭重启 → Load → 该实体 Renderable 段 `materialInstance` **仍指向 defaultMaterial**（视觉：实体仍显示 textured 棋盘格，不是无材质 fallback）
+- 同流程下 Play → Stop → materialInstance 保持原值（不再 nullptr）；BUG-2 现象天然消失
+- 编辑器侧可**删除** `tools/OrangeEditor/EditorRenderLayer.cpp::ReattachMaterialInstances` 全部 hardcode by-name 分派（v0.2.5 末期标记为 "GAP-2026-05-14 落地后退役"）
+
+### 临时方案（v0.2.5 编辑器侧）
+
+GAP 未落地前，编辑器侧 v0.2.5 范围内的临时修复候选见 OrangeEditor 验收清单 BUG-2 段（`docs/editor-v0.2.5-acceptance-checklist.md`）：
+
+- **Y'** hardcode 表加 Dynamic Box 一行（最小妥协）
+- **Y''''** EditorRenderLayer 加 `mPlayMaterialSnapshot` 通用 by-name snapshot/restore（约 20 行，不新增 hardcode 名字）—— 推荐
+
+下个 milestone 评审决定走 Y' / Y'''' 还是直接等本 GAP 落地走 N
+
+### 状态
+
+- **登记**：2026-05-14
+- **处理**：未启动；预估 1 个独立 OrangeEngine session 体量（G1 + G2 schema bump + Read/Write + 单元测试）
+- **关联**：OrangeEditor v0.2.5 BUG-2（已诊断，未修复）；editor-roadmap.md v0.3 资产 / scene 编辑能力
+- **归属**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 序列化深化 或独立小 task
+
+---
+
 ## 处理记录
 
 （空）

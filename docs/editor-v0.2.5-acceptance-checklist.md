@@ -111,17 +111,30 @@ build / 运行**（即 bisect 区间端点干净），避免 bisect 中途撞到
 
 ### BUG-2 Play 后场景几何贴图被污染为棋盘格
 
-- **现象**：编辑器进入 Play Mode → Pause/Stop 回到 Edit Mode 后，原本"无贴图"
-  （默认材质 / 纯色 fallback）的掉落物 / 几何体显示为**棋盘状贴图**；属于 Stop 后世界
-  状态没有完整 restore 到 Play 前的快照
-- **影响范围**：阻塞小节点路径的 Play/Pause/Stop 状态机验收，也是 Play snapshot/restore
-  路径污染 Renderable.materialInstance 的征兆
-- **候选根因**（待确认）：Play 进入时的 world snapshot 没有完整复制 Renderable 的
-  `materialInstance` 字段（裸指针）；Stop restore 时被 fallback 路径替换为"missing
-  texture 棋盘格" debug 材质
-- **复现步骤**：启动 editor → 加载 demo scene → 观察某个无贴图实体（如默认 Renderable）
-  → Play → Stop → 同一实体显示棋盘格
-- **修复后回归**：勾掉小节点路径第 5 条 + c14 回归补"Play/Pause/Stop 路径行为不变"
+- **现象**：编辑器进入 Play Mode → Pause/Stop 回到 Edit Mode 后，原本有正常材质
+  的"掉落物"（典型：Dynamic Box）显示为橘黑相间的**棋盘状贴图**；其它带 NameComponent
+  的实体（Ground / Backdrop / Tower / Platform L/R / Glow Box / Emissive Pillar）目前
+  能保住材质，但这是 hardcode 兜底的偶然命中、不可持续
+- **诊断结论**（2026-05-14 闭环）：
+  - `RenderableComponent.materialInstance` 是裸 `MaterialInstance*`，不参与 Scene 序列化
+  - EnterPlay 路径：`Scene::Save` 写 snapshot 到 temp file → materialInstance 信息丢失
+  - Stop 路径：`Scene::Load` 还原 world → 所有 materialInstance 字段为 nullptr
+  - 当前 `tools/OrangeEditor/EditorRenderLayer.cpp::ReattachMaterialInstances` 用 **hardcode by-name 分派**兜底（Ground → pFloorMaterial / Backdrop → pRimLightMaterial / ...），未命中名字的实体落到 `pDefaultRenderableMaterial`（textured 棋盘格）。`Dynamic Box` 不在 hardcode 名字列表里，所以变棋盘
+  - 同 hardcode 表跟 SeedDemoWorld 实体名硬绑定；签入 demo.scene.json 后任何实体增删都得同步改 editor C++，结构性维护负担
+- **影响范围**：阻塞小节点路径的 Play/Pause/Stop 状态机验收；任何运行时 add 的匿名实体也会撞同款问题
+- **候选修复方案**（v0.2.5 不做，登记留给下个 milestone 评审）：
+  - **方案 Y'**（最小妥协）：`ReattachMaterialInstances` 加一行 `else if (name == "Dynamic Box") → pToonMaterial`，hardcode 表延伸。改动 1 行，BUG-2 视觉现象消失。代价：进一步 hardcode 维护负担，与 v0.2.5 "禁止 hardcode" 纪律精神冲突
+  - **方案 Y''''**（通用 snapshot，推荐）：在 EditorRenderLayer 增加 `std::unordered_map<std::string, MaterialInstance*> mPlayMaterialSnapshot` 成员；EnterPlay 在 `Scene::Save` 之前遍历所有挂 Renderable+Name 的实体快照 `{name → materialInstance}`；Stop 在 `Scene::Load` 之后、`ReattachMaterialInstances` 之前按 name 还原；未命中的实体落 fallback。约 20 行代码，**不新增 hardcode 名字**，Dynamic Box / 任意带 name 的实体都被通用还原；GAP-2026-05-14 治本后这段代码可直接删除
+  - **方案 N**（彻底治本）：让 `MaterialInstance` 真正参与序列化（asset id 字段），登记于 `docs/engine-known-gaps.md` 的 `GAP-2026-05-14-renderable-material-instance-round-trip`；OrangeEngine 侧改动，独立 session 处理
+- **当前状态**（2026-05-14）：诊断完成；**v0.2.5 不修**，留待下个 milestone 评审采用 Y' / Y'''' / N 之一。小节点路径第 5 条标记为受 BUG-2 阻塞，不强求 v0.2.5 完工时勾过
+- **测试人员复现步骤**（修复后回归用）：
+  1. 双击 OrangeEditor 启动编辑器
+  2. 等主窗口出现，记下 viewport 中**当前**画面（特别是中间偏后那个落下后会显示的方块）
+  3. 顶部 ▶ Play 按钮点一下 —— 编辑器进入 Play 模式，会看到一个方块从空中掉到地面
+  4. ■ Stop 按钮点一下 —— 回到 Edit 模式
+  5. 对比 viewport 当前画面 vs 第 2 步 —— **掉落物应保留原材质**，**不出现橘黑棋盘格**
+  6. 重复 3-5 步 2~3 次都保持一致 = 通过
+  7. 任何步骤出现棋盘格 → 截图标出哪个物体变成棋盘格了，反馈给开发者
 
 ### BUG-3 / BUG-4：demo scene 实体覆盖缺口（验收前置条件）
 
