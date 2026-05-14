@@ -168,6 +168,67 @@ GAP 未落地前，编辑器侧 v0.2.5 范围内的临时修复候选见 OrangeE
 
 ---
 
+## GAP-2026-05-14-scene-serializer-extension
+
+- **发现方**：OrangeEditor v0.3 c2 计划（游戏侧 schema 注册落地）
+- **发现日期**：2026-05-14
+- **一句话定性**：`Scene::Save` / `Scene::Load` 写死 `GetBuiltinComponentSerializers()` 内置 component 列表，无任何 hook 让游戏侧 / 编辑器侧注册自定义 `ComponentSerializerEntry`——直接 block 了 editor-roadmap v0.3 "游戏侧自定义 component 走完整 schema → Inspector → Undo/Redo → **Save/Load** 链路" 这条验收路径
+
+### 触发场景
+
+OrangeEditor v0.3 c2 设计：演示一个伪游戏侧 `HealthComponent` 通过 `OrangeEditor::RegisterComponentSchema<T>(...)` 公共 API 注册后，**不改 editor 一行**就能在 Inspector 显示 + Undo/Redo + Save/Load round-trip。前三段（schema 注册 / Inspector 渲染 / Undo/Redo）当前架构都已具备，**只差 Save/Load**：
+
+- `src/scene/ComponentSerializers.cpp:1025` `GetBuiltinComponentSerializers()` 返回写死 `std::vector<ComponentSerializerEntry>`
+- `src/scene/SceneSerialization.cpp:108` 与 `:221` 是 Save / Load 仅有的两个调用点，都直接拿 builtin 列表，没有"额外 entry"参数
+- `Scene::SaveOptions` / `LoadOptions` 当前字段：`assetRegistry` / `physicsWorld` / `animatorRegistry` —— 没有任何"自定义 serializer"扩展点
+
+结果：
+- **Save**：World 内挂的 `HealthComponent` 不在 builtin Has() 集合 → 直接被跳过，不写入 JSON
+- **Load**：JSON 里如果硬塞 "Health" 段，按现有 forward-compat 规则被 warn + skip
+
+游戏侧 / 编辑器侧无任何合法路径让 `HealthComponent` 参与 Scene 序列化。
+
+### 缺什么（按依赖拆）
+
+#### G1 · `LoadOptions` / `SaveOptions` 加 `extraSerializers` 字段
+
+- `Scene::SaveOptions` 加 `std::span<const ComponentSerializerEntry> extraSerializers{};`（或等价 view 类型，避免引入 `<vector>` 到公共头）
+- `Scene::LoadOptions` 同款字段
+- Save / Load 内部把 builtin + extra 拼成单一 dispatch 表（线性查找即可，N ≤ 几十）
+- 名字冲突处理：extra 与 builtin 同 `name` → 返回 `ResultCode::AlreadyExists`（开发期 bug，不允许覆盖 builtin）
+
+#### G2 · `ComponentSerializerEntry` 公共面化
+
+- 当前 `ComponentSerializerEntry` 在 `src/scene/ComponentSerializers.h`（私有头）
+- 让游戏侧能填这个 struct 必须移到 `include/orange/engine/scene/ComponentSerializerEntry.h`（公共头）
+- 函数指针签名：`Has(const World&, Entity)` / `Write(JsonWriter&, ..., SaveContext&)` / `Read(const JsonReader&, ..., LoadContext&)`——`JsonWriter` / `JsonReader` / `SaveContext` / `LoadContext` 也要公共化（除非这些已经在公共头中）
+
+#### G3 · `SchemaVersion` 路径处理
+
+- 游戏侧 component 应该自带 `SchemaVersion`（参 CLAUDE.md "Serialization and reflection" 节）
+- 写入 / 读取路径是否需要在 ComponentSerializerEntry 内承载 schema version？还是约定调用方在 `Write` / `Read` 内部自己处理？两条路径都可行，G1 落地时定一种
+
+### 期望验收
+
+- OrangeEditor v0.3 c2b（GAP 落地后另开 session）：在 sample / test 内定义 `HealthComponent { int hp; int maxHp; }` + `Read/Write` + schema 注册
+- 编辑器启动期通过 `extraSerializers` 把 HealthComponent 的 `ComponentSerializerEntry` 喂给 `Scene::LoadOptions`
+- demo.scene.json 内手工塞一个挂 HealthComponent 的实体 → Load 后该实体在 World 里 + Inspector 显示 + 改值 + Save → 重启 → Load → 值保留
+
+### 临时方案（v0.3 c2a 编辑器侧）
+
+GAP 未落地前，v0.3 c2 拆为：
+- **c2a**（GAP 落地前可做）：公共 API `OrangeEditor::RegisterComponentSchema<T>(...)` + HealthComponent demo schema → Inspector → Undo/Redo 三段链路验收；**不**进 demo.scene.json，仅靠 SeedDemoWorld / 启动 hook attach
+- **c2b**（GAP 落地后另开 session）：HealthComponent 通过 `extraSerializers` 接入 Scene 序列化，完成 Save/Load round-trip 验收 + 进 demo.scene.json
+
+### 状态
+
+- **登记**：2026-05-14
+- **处理**：未启动；预估 1 个独立 OrangeEngine session 体量（G1 + G2 + 单元测试）
+- **关联**：OrangeEditor v0.3 c2 拆分为 c2a / c2b（详见上方临时方案）
+- **归属**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 序列化扩展性深化 或独立小 task
+
+---
+
 ## 处理记录
 
 （空）
