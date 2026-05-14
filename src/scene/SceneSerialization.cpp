@@ -100,12 +100,27 @@ Result<void, ResultCode> Save(const World& world,
 
     const SaveContext ctx{world, idMap, options.assetRegistry};
 
-    // 2) 组装 JSON。
+    // 2) 名字冲突检测：extra 不允许与内置 component 同名。
+    const auto& serializers = GetBuiltinComponentSerializers();
+    for (const auto& extra : options.extraSerializers)
+    {
+        for (const auto& builtin : serializers)
+        {
+            if (builtin.name == extra.name)
+            {
+                ORANGE_LOG_ERROR(
+                    "Scene save: extra serializer name '{}' conflicts with builtin; "
+                    "use a unique name.",
+                    extra.name);
+                return ResultCode::AlreadyExists;
+            }
+        }
+    }
+
+    // 3) 组装 JSON。
     JsonWriter writer;
     writer.WriteSchemaVersion(kSchemaVersionPath, SceneSchemaVersion());
     writer.BeginArray(kEntitiesPath, entityList.size());
-
-    const auto& serializers = GetBuiltinComponentSerializers();
 
     for (std::size_t i = 0; i < entityList.size(); ++i)
     {
@@ -124,9 +139,20 @@ Result<void, ResultCode> Save(const World& world,
                 entry.Write(writer, componentPath, entity, ctx);
             }
         }
+        for (const auto& entry : options.extraSerializers)
+        {
+            if (entry.Has != nullptr && entry.Has(world, entity))
+            {
+                const std::string componentPath = ComponentPath(base, entry.name);
+                if (entry.Write != nullptr)
+                {
+                    entry.Write(writer, componentPath, entity, ctx);
+                }
+            }
+        }
     }
 
-    // 3) 落盘。
+    // 4) 落盘。
     auto saveResult = writer.SaveToFile(path);
     if (saveResult.IsErr())
     {
@@ -220,7 +246,20 @@ Result<void, ResultCode> Load(std::string_view path,
 
     const auto& serializers = GetBuiltinComponentSerializers();
 
-    // 4) Pass 1：PureData 组件——按 dispatch 表逐个 Read 并 attach。
+    // 4) 名字冲突检测：extra 不允许与内置 component 同名。
+    for (const auto& extra : options.extraSerializers)
+    {
+        for (const auto& builtin : serializers)
+        {
+            if (builtin.name == extra.name)
+            {
+                RollbackCreatedEntities(world, created);
+                return ResultCode::AlreadyExists;
+            }
+        }
+    }
+
+    // 5) Pass 1：PureData 组件——按 dispatch 表逐个 Read 并 attach。
     //    Hierarchy 引用 / Renderable 的 mesh path / DirectionalLight 字段
     //    都不依赖 backend，可以直接落地。
     for (std::size_t i = 0; i < entityCount; ++i)
@@ -242,6 +281,25 @@ Result<void, ResultCode> Load(std::string_view path,
             if (!entry.Read(reader, componentPath, entity, ctx))
             {
                 // 数据格式坏 → 整体回滚本次 Load，World 回到未加载前状态。
+                RollbackCreatedEntities(world, created);
+                return ResultCode::InvalidArgument;
+            }
+        }
+
+        // extra PureData 组件——游戏侧 / 编辑器侧自定义组件在此分派。
+        for (const auto& entry : options.extraSerializers)
+        {
+            if (entry.kind != ComponentKind::PureData)
+            {
+                continue;
+            }
+            const std::string componentPath = ComponentPath(base, entry.name);
+            if (!reader.Has(componentPath))
+            {
+                continue;
+            }
+            if (entry.Read == nullptr || !entry.Read(reader, componentPath, entity, ctx))
+            {
                 RollbackCreatedEntities(world, created);
                 return ResultCode::InvalidArgument;
             }
@@ -358,6 +416,30 @@ Result<void, ResultCode> Load(std::string_view path,
                     "supplied; component will hold a null animator.");
             }
             world.AddComponent(entity, std::move(ac));
+        }
+
+        // extra BackendDependent 组件——不走内置 RigidBody / Animator 配对逻辑，
+        // 直接调用各 entry 的 Read 函数指针让实现方自行处理 backend 绑定。
+        for (const auto& entry : options.extraSerializers)
+        {
+            if (entry.kind != ComponentKind::BackendDependent)
+            {
+                continue;
+            }
+            if (entry.Read == nullptr)
+            {
+                continue;
+            }
+            const std::string componentPath = ComponentPath(base, entry.name);
+            if (!reader.Has(componentPath))
+            {
+                continue;
+            }
+            if (!entry.Read(reader, componentPath, entity, ctx))
+            {
+                RollbackCreatedEntities(world, created);
+                return ResultCode::InvalidArgument;
+            }
         }
     }
 

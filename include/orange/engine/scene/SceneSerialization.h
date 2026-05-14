@@ -44,13 +44,16 @@
 // * **当前覆盖范围**：Transform / Hierarchy / Name 三件套；其余内置
 //   组件由 Render / Physics / Animation 模块按需往同一调度表里追加。
 //
-// 公共头不引入 Serialization.h——读 / 写实现自然内部要用，但调用方
-// 只看到 Result + std::filesystem::path 接口，不被 nlohmann 感染。
+// * **自定义组件扩展**：游戏侧 / 编辑器侧可通过 SaveOptions /
+//   LoadOptions 的 extraSerializers 字段追加自定义 ComponentSerializerEntry，
+//   让 Scene::Save / Load 识别并序列化游戏侧 component。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
 #include <orange/engine/core/Result.h>
+#include <orange/engine/scene/ComponentSerializerEntry.h>
 
+#include <span>
 #include <string_view>
 
 namespace Orange::Engine
@@ -94,6 +97,7 @@ namespace Orange::Engine::Scene
 //         .assetRegistry    = &reg,
 //         .physicsWorld     = &world,
 //         .animatorRegistry = &animReg,
+//         .extraSerializers = std::span{gameEntries},
 //     };
 //     Scene::Load(path, world, opt);
 struct SaveOptions
@@ -101,6 +105,11 @@ struct SaveOptions
     // 反查"AssetHandle → 资源路径"。空 → 持有 AssetHandle 的组件落
     // 空字符串 + warn。
     const Asset::AssetRegistry* assetRegistry{nullptr};
+
+    // 游戏侧 / 编辑器侧自定义组件序列化器。条目 name 不得与内置组件名
+    // 重复（重复时 Save 立即返回 AlreadyExists）。
+    // span 指向的数据生命周期须覆盖 Save 调用期间。
+    std::span<const ComponentSerializerEntry> extraSerializers{};
 };
 
 struct LoadOptions
@@ -119,6 +128,9 @@ struct LoadOptions
     // nullptr。注：scene 仅持久化 backend 名字，具体的 skeleton / channel
     // 配置由 game 端在注册 factory 时 capture，不下钻到 schema。
     const Animation::AnimatorRegistry* animatorRegistry{nullptr};
+
+    // 游戏侧 / 编辑器侧自定义组件序列化器，同 SaveOptions::extraSerializers。
+    std::span<const ComponentSerializerEntry> extraSerializers{};
 };
 
 // 把 `world` 写到 `path`。覆盖目标文件。

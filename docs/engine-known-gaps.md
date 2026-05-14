@@ -223,7 +223,10 @@ GAP 未落地前，v0.3 c2 拆为：
 ### 状态
 
 - **登记**：2026-05-14
-- **处理**：未启动；预估 1 个独立 OrangeEngine session 体量（G1 + G2 + 单元测试）
+- **处理**：引擎侧落地 2026-05-14（G1 + G2，独立 session）
+  - G2：`include/orange/engine/scene/ComponentSerializerEntry.h` 新建（公共化 ComponentSerializerEntry / SaveContext / LoadContext / ComponentKind / EntityToPersistentId / PersistentIdToEntity）；`src/scene/ComponentSerializers.h` 缩短为 include 公共头 + 内部 helper 声明
+  - G1：`SceneSerialization.h` 的 SaveOptions / LoadOptions 增加 `std::span<const ComponentSerializerEntry> extraSerializers{}`；`SceneSerialization.cpp` Save/Load 路由 extra 条目（冲突检测 + Pass 1 PureData + Pass 2 BackendDependent）
+  - 待验收（v0.3 c2b session）：HealthComponent 通过 extraSerializers 完整 Save/Load round-trip
 - **关联**：OrangeEditor v0.3 c2 拆分为 c2a / c2b（详见上方临时方案）
 - **归属**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 序列化扩展性深化 或独立小 task
 
