@@ -191,7 +191,7 @@ scaffold + ImGui dock + 实体树 + Inspector + Scene 保存/加载 + viewport +
 
 **Critical Path**：是（后续所有 milestone 的地基）
 
-### v0.2.5 · 架构整骨（Schema-first + Plugin 抽象 + EditorHost 拆分）
+### v0.2.5 · 架构整骨（Schema-first + Plugin 抽象 + EditorHost 拆分） ✅
 
 **为什么单独立条 + Critical Path**：
 
