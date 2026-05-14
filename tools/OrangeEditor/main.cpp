@@ -324,9 +324,11 @@ int main()
     editorHost.cmdStack.SetOnChanged(
         [pHost = &editorHost]{ pHost->scene.dirty = true; });
     {
+        const auto namedMat = BuildNamedMaterialInstances(editorHost.assets);
         Scene::LoadOptions demoLoadOpts{};
-        demoLoadOpts.assetRegistry     = editorHost.assets.pAssets.get();
-        demoLoadOpts.animatorRegistry  = editorHost.assets.pAnimators.get();
+        demoLoadOpts.assetRegistry          = editorHost.assets.pAssets.get();
+        demoLoadOpts.animatorRegistry       = editorHost.assets.pAnimators.get();
+        demoLoadOpts.namedMaterialInstances = &namedMat;
         if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);
             res.IsErr())

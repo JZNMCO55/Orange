@@ -44,38 +44,6 @@ namespace
 // Esc 全局退出（与 Input::KeyCode::Escape 同值）；仅本 TU 用。
 constexpr std::int32_t kEscapeKeyRaw = 256;
 
-// Play → Stop 后 Scene::Load 重建了所有 RenderableComponent，但
-// materialInstance 不参与序列化（raw 指针，由编辑器侧持有）。
-// 这里按实体名把材质指针重新挂回去。
-// 没有对应名字的实体统一挂 pDefaultRenderableMaterial（textured），
-// 与 "Add Renderable Component" 编辑器操作的默认行为保持一致。
-void ReattachMaterialInstances(EditorHost& host)
-{
-    if (host.scene.pWorld == nullptr) { return; }
-
-    using Orange::Engine::Render::RenderableComponent;
-    using Orange::Engine::Scene::NameComponent;
-
-    auto& reg  = host.scene.pWorld->Registry();
-    auto  view = reg.view<RenderableComponent>();
-    for (const auto e : view)
-    {
-        auto& rc = view.get<RenderableComponent>(e);
-        if (rc.materialInstance != nullptr) { continue; }  // 已有材质不覆盖
-
-        const NameComponent* nc  = reg.try_get<NameComponent>(e);
-        const std::string    name = nc ? nc->name : "";
-
-        if      (name == "Ground")                                 rc.materialInstance = host.assets.pFloorMaterial.get();
-        else if (name == "Backdrop")                               rc.materialInstance = host.assets.pRimLightMaterial.get();
-        else if (name == "Platform L" || name == "Platform R"
-              || name == "Tower")                                  rc.materialInstance = host.assets.pToonMaterial.get();
-        else if (name == "Glow Box")                               rc.materialInstance = host.assets.pDissolveMaterial.get();
-        else if (name == "Emissive Pillar")                        rc.materialInstance = host.assets.pLightObjectMaterial.get();
-        else                                                       rc.materialInstance = host.assets.pDefaultRenderableMaterial.get();
-    }
-}
-
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -491,9 +459,11 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             std::string path;
             if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) { break; }
             auto pNew = std::make_unique<Orange::Engine::World>();
+            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
             Orange::Engine::Scene::LoadOptions openLoadOpts;
-            openLoadOpts.assetRegistry     = mHost.assets.pAssets.get();
-            openLoadOpts.animatorRegistry  = mHost.assets.pAnimators.get();
+            openLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
+            openLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
+            openLoadOpts.namedMaterialInstances = &namedMat;
             auto rc = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
@@ -517,24 +487,34 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
                 mHost.scene.currentScenePath = std::move(path);
             }
-            auto rc = Orange::Engine::Scene::Save(
-                *mHost.scene.pWorld, mHost.scene.currentScenePath);
-            if (rc.IsErr()) {
-                std::fprintf(stderr,
-                             "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
-                             mHost.scene.currentScenePath.c_str(),
-                             static_cast<unsigned>(rc.Error()));
-            } else {
-                mHost.scene.dirty = false;
-                std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
-                             mHost.scene.currentScenePath.c_str());
+            {
+                const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+                Orange::Engine::Scene::SaveOptions saveOpts;
+                saveOpts.assetRegistry          = mHost.assets.pAssets.get();
+                saveOpts.namedMaterialInstances = &namedMat;
+                auto rc = Orange::Engine::Scene::Save(
+                    *mHost.scene.pWorld, mHost.scene.currentScenePath, saveOpts);
+                if (rc.IsErr()) {
+                    std::fprintf(stderr,
+                                 "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
+                                 mHost.scene.currentScenePath.c_str(),
+                                 static_cast<unsigned>(rc.Error()));
+                } else {
+                    mHost.scene.dirty = false;
+                    std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
+                                 mHost.scene.currentScenePath.c_str());
+                }
             }
             break;
         }
         case SceneOp::SaveAs: {
             std::string path;
             if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
-            auto rc = Orange::Engine::Scene::Save(*mHost.scene.pWorld, path);
+            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            Orange::Engine::Scene::SaveOptions saveAsOpts;
+            saveAsOpts.assetRegistry          = mHost.assets.pAssets.get();
+            saveAsOpts.namedMaterialInstances = &namedMat;
+            auto rc = Orange::Engine::Scene::Save(*mHost.scene.pWorld, path, saveAsOpts);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
                              "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
@@ -574,8 +554,10 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 mHost.scene.playSnapshotPath =
                     (fs::temp_directory_path() /
                      "OrangeEditor_play_snapshot.scene.json").string();
+                const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
                 Orange::Engine::Scene::SaveOptions saveOpts;
-                saveOpts.assetRegistry = mHost.assets.pAssets.get();
+                saveOpts.assetRegistry          = mHost.assets.pAssets.get();
+                saveOpts.namedMaterialInstances = &namedMat;
                 const auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.playSnapshotPath, saveOpts);
                 if (rc.IsErr()) {
@@ -683,9 +665,11 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             //     Invalid 是正确的 Edit 态初值
             if (!mHost.scene.playSnapshotPath.empty()) {
                 auto pNew = std::make_unique<Orange::Engine::World>();
+                const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
                 Orange::Engine::Scene::LoadOptions loadOpts;
-                loadOpts.assetRegistry    = mHost.assets.pAssets.get();
-                loadOpts.animatorRegistry = mHost.assets.pAnimators.get();
+                loadOpts.assetRegistry          = mHost.assets.pAssets.get();
+                loadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
+                loadOpts.namedMaterialInstances = &namedMat;
                 const auto rc = Orange::Engine::Scene::Load(
                     mHost.scene.playSnapshotPath, *pNew, loadOpts);
                 if (rc.IsErr()) {
@@ -695,10 +679,6 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                         static_cast<unsigned>(rc.Error()));
                 } else {
                     mHost.scene.pWorld = std::move(pNew);
-                    // Scene::Load 恢复了所有 PureData component，但
-                    // materialInstance（raw 指针，editor 侧持有）不参与
-                    // 序列化，需在此重新挂回。
-                    ReattachMaterialInstances(mHost);
                 }
                 std::filesystem::remove(mHost.scene.playSnapshotPath);
                 mHost.scene.playSnapshotPath.clear();

@@ -32,6 +32,8 @@
 #include <glm/vec4.hpp>
 
 #include <cstdio>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -191,6 +193,21 @@ void InitializeEditorAssets(EditorHost& host)
     }
 }
 
+std::unordered_map<std::string, Orange::Engine::Render::MaterialInstance*>
+BuildNamedMaterialInstances(const EditorAssetContext& assets)
+{
+    using Orange::Engine::Render::MaterialInstance;
+    std::unordered_map<std::string, MaterialInstance*> m;
+    if (assets.pFloorMaterial)             m["builtin/floor"]        = assets.pFloorMaterial.get();
+    if (assets.pWallMaterial)              m["builtin/wall"]         = assets.pWallMaterial.get();
+    if (assets.pToonMaterial)              m["builtin/toon"]         = assets.pToonMaterial.get();
+    if (assets.pRimLightMaterial)          m["builtin/rim_light"]    = assets.pRimLightMaterial.get();
+    if (assets.pDissolveMaterial)          m["builtin/dissolve"]     = assets.pDissolveMaterial.get();
+    if (assets.pDefaultRenderableMaterial) m["builtin/default"]      = assets.pDefaultRenderableMaterial.get();
+    if (assets.pLightObjectMaterial)       m["builtin/light_object"] = assets.pLightObjectMaterial.get();
+    return m;
+}
+
 // demo 世界层级：
 //   Root
 //   ├── Camera           （2.5D 侧视角）
@@ -252,9 +269,8 @@ void SeedDemoWorld(EditorHost& host)
     Entity sparkleEmitter  = make("Sparkle Emitter");
 
     // v0.3 c1：演示 / 验收前置实体。
-    //   * slimeDoll：Animator-only 实体，无 Renderable——避免 BUG-2 hardcode
-    //     依赖（"Slime Doll" 不在 ReattachMaterialInstances 名单里）。Inspector
-    //     可观察 Animator schema 段 + ReadOnly Backend 字段。
+    //   * slimeDoll：Animator-only 实体，无 Renderable——专门展示 Animator schema
+    //     段 + ReadOnly Backend 字段，Inspector 可直接观察。
     //   * staticCircle / staticPolygon / staticEdgeChain：Box 之外三种 shape
     //     的 Collider 验收前置实体；位置放右侧远端，无 Renderable，物理上
     //     仅作为 schema 段渲染样本——切换到这三个实体看 Inspector 即可验

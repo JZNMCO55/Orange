@@ -166,8 +166,8 @@ GAP 未落地前，编辑器侧 v0.2.5 范围内的临时修复候选见 OrangeE
   - G1：`ComponentSerializerEntry.h` 加 `Render::MaterialInstance` forward decl + `namedMaterialInstances` 字段到 `SaveContext` / `LoadContext`；`SceneSerialization.h` 的 SaveOptions / LoadOptions 同步加字段；WriteRenderable 写出 `materialInstanceId` 字符串（O(N) 反查 namedMaterialInstances）；ReadRenderable 按 id 正向查表赋指针；SceneSchemaVersion 从 1.0 → 1.1（minor bump，可选字段，向后兼容）
   - G2（mesh 空路径）：诊断结论——不是引擎序列化 bug，是编辑器侧 builtin mesh 未通过 `AssetRegistry::Insert` 注册有效路径导致 `PathOf` 返回空；fix 属编辑器侧（确保 SeedDemoWorld / InitializeEditorAssets 时用 `registry.Insert("builtin/cube", ...)` 等有意义路径）；引擎端 WriteRenderable / ReadRenderable 逻辑本身正确，无需改动
   - G3（同类裸字段原则）：`RigidBodyComponent.handle` / `AnimatorComponent.animator` 是运行时 backend binding，不属于"内容序列化"范围，与 materialInstance 不同款；materialInstance 是内容引用（玩家看到哪个材质），应该序列化；设计原则：凡"内容引用"字段（控制运行时展现的数据）必须序列化，凡"backend binding 句柄"（物理 body handle、IAnimator 实例）在 Load 后由系统重建，不序列化
-  - 待验收：v0.3 c2b 或 OrangeEditor 单独 session 中，调用方传入 `namedMaterialInstances`，验证 materialInstance Save/Load round-trip 后指针非 null + BUG-2 现象消失；编辑器侧可删除 `ReattachMaterialInstances` hardcode 分派
-- **关联**：OrangeEditor v0.2.5 BUG-2（根因已修复引擎侧；编辑器侧消费需另开 session）；editor-roadmap.md v0.3 资产 / scene 编辑能力
+  - **编辑器侧消费**（2026-05-14）：`DemoWorld.cpp` 新增 `BuildNamedMaterialInstances(EditorAssetContext&)` → `"builtin/*"` id 表；所有 Scene::Save / Load 调用点（SceneOp::Open / Save / SaveAs + Play 快照 Save + Play Stop 快照 Load）均传入 `namedMaterialInstances`；`ReattachMaterialInstances` hardcode by-name 分派已删除；BUG-2 现象消失
+- **关联**：OrangeEditor v0.2.5 BUG-2（已完整修复）；editor-roadmap.md v0.3 资产 / scene 编辑能力
 - **归属**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 序列化深化 或独立小 task
 
 ---

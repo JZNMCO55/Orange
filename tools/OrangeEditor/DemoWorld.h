@@ -18,6 +18,8 @@
 #include <orange/engine/asset/MeshAsset.h>
 
 #include <memory>
+#include <string>
+#include <unordered_map>
 
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakePlaneMesh(float halfSize);
@@ -28,5 +30,11 @@ MakeCubeMesh(float halfSize);
 void InitializeEditorAssets(EditorHost& host);
 
 void SeedDemoWorld(EditorHost& host);
+
+// 从 EditorAssetContext 构建 materialInstance 名称表，供 Scene::Save/Load 的
+// namedMaterialInstances 字段使用。名字格式 "builtin/<key>"，与 .scene.json
+// 里写出的 materialInstanceId 字符串对应。
+std::unordered_map<std::string, Orange::Engine::Render::MaterialInstance*>
+BuildNamedMaterialInstances(const EditorAssetContext& assets);
 
 #endif  // ORANGE_EDITOR_DEMO_WORLD_H
