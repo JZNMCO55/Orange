@@ -3,6 +3,7 @@
 #include "DemoWorld.h"
 
 #include "EditorHierarchy.h"
+#include "demo_game/HealthComponent.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
@@ -276,6 +277,7 @@ void SeedDemoWorld(EditorHost& host)
     //     仅作为 schema 段渲染样本——切换到这三个实体看 Inspector 即可验
     //     c8 三个 visibleIf 互斥段。
     Entity slimeDoll       = make("Slime Doll");
+    Entity testFighter     = make("Test Fighter");
     Entity staticCircle    = make("Static Circle (demo)");
     Entity staticPolygon   = make("Static Polygon (demo)");
     Entity staticEdgeChain = make("Static EdgeChain (demo)");
@@ -552,6 +554,20 @@ void SeedDemoWorld(EditorHost& host)
         world.AddComponent<AnimatorComponent>(slimeDoll, std::move(ac));
     }
 
+    // ---- Test Fighter（HealthComponent 验收前置实体）----------------------
+    // 演示 extraSerializers 扩展点的 Save/Load round-trip：挂非默认 hp 值，
+    // Save → 重启 → Load 后 Inspector 应显示相同数值。无 Renderable / 物理体，
+    // 仅作 Inspector 样本。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(testFighter);
+        if (tc != nullptr) { tc->position = glm::vec3(-8.0f, 0.5f, 0.0f); }
+
+        DemoGame::HealthComponent health{};
+        health.hp    = 75;
+        health.maxHp = 100;
+        world.AddComponent<DemoGame::HealthComponent>(testFighter, health);
+    }
+
     // ---- Static Circle (demo)（Circle Collider 验收前置实体）-------------
     // 放右侧远端 (x=8) 避免与主场景视觉冲突；无 Renderable，仅供 Inspector
     // 段渲染样本。RigidBody Static + 与 Collider 配对，Load 时 PhysicsWorld
@@ -642,6 +658,7 @@ void SeedDemoWorld(EditorHost& host)
     EditorHierarchy::LinkAsLastChild(world, geometry, fireEmitter);
     EditorHierarchy::LinkAsLastChild(world, geometry, sparkleEmitter);
     EditorHierarchy::LinkAsLastChild(world, geometry, slimeDoll);
+    EditorHierarchy::LinkAsLastChild(world, geometry, testFighter);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticCircle);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticPolygon);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticEdgeChain);

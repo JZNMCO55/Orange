@@ -230,8 +230,8 @@ GAP 未落地前，v0.3 c2 拆为：
 - **处理**：引擎侧落地 2026-05-14（G1 + G2，独立 session）
   - G2：`include/orange/engine/scene/ComponentSerializerEntry.h` 新建（公共化 ComponentSerializerEntry / SaveContext / LoadContext / ComponentKind / EntityToPersistentId / PersistentIdToEntity）；`src/scene/ComponentSerializers.h` 缩短为 include 公共头 + 内部 helper 声明
   - G1：`SceneSerialization.h` 的 SaveOptions / LoadOptions 增加 `std::span<const ComponentSerializerEntry> extraSerializers{}`；`SceneSerialization.cpp` Save/Load 路由 extra 条目（冲突检测 + Pass 1 PureData + Pass 2 BackendDependent）
-  - 待验收（v0.3 c2b session）：HealthComponent 通过 extraSerializers 完整 Save/Load round-trip
-- **关联**：OrangeEditor v0.3 c2 拆分为 c2a / c2b（详见上方临时方案）
+  - **编辑器侧消费**（2026-05-14）：`demo_game/HealthComponent.h/cpp` 新建（DemoGame::HealthComponent{hp, maxHp} + HealthHas/Write/Read + kHealthSchemaVersion + RegisterHealthComponentSchema + GetHealthSerializerEntry）；`EditorHost.extraSerializers` 字段落地；main 启动期注册 schema + push_back entry；所有 Scene::Save / Load 调用点（SceneOp::Open / Save / SaveAs + Play 快照 Save + Play Stop 快照 Load）均传入 `extraSerializers`；DemoWorld 新增 "Test Fighter" 实体挂 HealthComponent；完整 Save/Load round-trip 验收路径就绪
+- **关联**：OrangeEditor v0.3 c2 已完整落地（c2a Inspector + c2b Save/Load）
 - **归属**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 序列化扩展性深化 或独立小 task
 
 ---

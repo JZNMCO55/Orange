@@ -70,6 +70,7 @@
 #include "EditorHost.h"
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
+#include "demo_game/HealthComponent.h"
 #include "schema/RegisterBuiltinSchemas.h"
 
 #include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
@@ -313,10 +314,12 @@ int main()
     // 自定义 component 通过 OrangeEditor::RegisterComponentSchema 扩展点
     // 继续追加。
     Orange::Editor::Schema::RegisterBuiltinSchemas();
+    DemoGame::RegisterHealthComponentSchema();
 
     EditorHost editorHost;
     editorHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
     InitializeEditorAssets(editorHost);
+    editorHost.extraSerializers.push_back(DemoGame::GetHealthSerializerEntry());
 
     // 把 CommandStack 的"栈有效变更"钩子绑到 scene.dirty——任何 Push / Undo /
     // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地
@@ -329,6 +332,7 @@ int main()
         demoLoadOpts.assetRegistry          = editorHost.assets.pAssets.get();
         demoLoadOpts.animatorRegistry       = editorHost.assets.pAnimators.get();
         demoLoadOpts.namedMaterialInstances = &namedMat;
+        demoLoadOpts.extraSerializers       = editorHost.extraSerializers;
         if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);
             res.IsErr())

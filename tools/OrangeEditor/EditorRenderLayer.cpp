@@ -464,6 +464,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             openLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
             openLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
             openLoadOpts.namedMaterialInstances = &namedMat;
+            openLoadOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
@@ -492,6 +493,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 Orange::Engine::Scene::SaveOptions saveOpts;
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
                 saveOpts.namedMaterialInstances = &namedMat;
+                saveOpts.extraSerializers       = mHost.extraSerializers;
                 auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.currentScenePath, saveOpts);
                 if (rc.IsErr()) {
@@ -514,6 +516,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             Orange::Engine::Scene::SaveOptions saveAsOpts;
             saveAsOpts.assetRegistry          = mHost.assets.pAssets.get();
             saveAsOpts.namedMaterialInstances = &namedMat;
+            saveAsOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Save(*mHost.scene.pWorld, path, saveAsOpts);
             if (rc.IsErr()) {
                 std::fprintf(stderr,
@@ -558,6 +561,7 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 Orange::Engine::Scene::SaveOptions saveOpts;
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
                 saveOpts.namedMaterialInstances = &namedMat;
+                saveOpts.extraSerializers       = mHost.extraSerializers;
                 const auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.playSnapshotPath, saveOpts);
                 if (rc.IsErr()) {
@@ -670,6 +674,7 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 loadOpts.assetRegistry          = mHost.assets.pAssets.get();
                 loadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
                 loadOpts.namedMaterialInstances = &namedMat;
+                loadOpts.extraSerializers       = mHost.extraSerializers;
                 const auto rc = Orange::Engine::Scene::Load(
                     mHost.scene.playSnapshotPath, *pNew, loadOpts);
                 if (rc.IsErr()) {

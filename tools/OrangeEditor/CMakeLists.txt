@@ -149,6 +149,7 @@ add_executable(OrangeEditor
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
+    demo_game/HealthComponent.cpp
 )
 # OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
 # link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。

@@ -47,6 +47,8 @@
 #include "plugin/IEditorGizmoPlugin.h"
 #include "plugin/IEditorInspectorPlugin.h"
 
+#include <orange/engine/scene/ComponentSerializerEntry.h>
+
 #include <memory>
 #include <vector>
 
@@ -95,6 +97,14 @@ struct EditorHost
     // 公共接口，让 v0.4 落地时无需再 bump EditorHost layout。
     std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorGizmoPlugin>>
         gizmoPlugins;
+
+    // 游戏侧 / demo 侧自定义 component 序列化器注册表。
+    // main 启动期把各 ComponentSerializerEntry push_back 进来；所有
+    // Scene::Save / Load 调用点通过 `extraSerializers` 字段把整张表以
+    // std::span 视图传给引擎序列化器，实现非侵入的 Save/Load round-trip。
+    // 存储用 value（非 unique_ptr）—— ComponentSerializerEntry 只含函数
+    // 指针 + string_view，自身无资源所有权，拷贝语义安全。
+    std::vector<Orange::Engine::Scene::ComponentSerializerEntry> extraSerializers;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_HOST_H
