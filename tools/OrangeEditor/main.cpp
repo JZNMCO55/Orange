@@ -114,11 +114,13 @@
 namespace
 {
 
-// 编辑器默认 UI 字体 size（像素）。ImGui 内嵌 ProggyClean 默认 13px，在
-// 1080p+ 屏上对编辑器使用偏小；这里拉到 28px。后续要做的扩展点：把这个
-// 数值抽到一个"编辑器 Settings"面板里让用户运行时调整 —— 改后重建
-// io.Fonts atlas 并触发 ImGui_ImplVulkan_CreateFontsTexture 重传到 GPU。
-constexpr float kDefaultFontSizePx = 36.0f;
+// 编辑器默认 UI 字体 size 的**设计基准**（@ 100% DPI / content scale 1.0）。
+// 实际加载到 atlas 的字号是 kDesignFontSizePx * contentScale（见 ImGui Init
+// 段，通过 glfwGetWindowContentScale 拿主显示器缩放）。同步 style.ScaleAllSizes
+// 让 padding / spacing 一起按 DPI 缩放，避免在低物理像素 / 低缩放屏上 panel
+// 内 widget 撑爆 dock cell。注意：本路径仅做全局 DPI 兜底；Inspector / Panel
+// 内部 widget 列宽 / minSize 的比例化属架构整骨范畴，由对应 milestone 根治。
+constexpr float kDesignFontSizePx = 18.0f;
 
 // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
 // 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
@@ -230,21 +232,37 @@ int main()
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 
-    // 默认 UI 字体加大：优先用 Windows 系统 Segoe UI（TrueType，任意 size
-    // 都清晰），找不到回退到 ImGui 内嵌 ProggyClean 拉大 SizePixels（位图
-    // 字体非原生 size 略糊但保底可用）。**必须**在 ImGui_ImplVulkan_Init
-    // 之前完成 —— Vulkan backend 在 Init 阶段从 io.Fonts atlas 创建 font
-    // texture，后改动 atlas 需要重建 + 重上传。
+    // DPI / content-scale 自适应：ImGui 内部所有 widget 尺寸都是绝对像素，
+    // 字号 + style padding 不随屏幕 DPI 自动放缩。这里拿 GLFW 主窗口的
+    // content scale（Windows 上等于"设置 → 系统 → 显示 → 缩放与布局"那个
+    // 百分比，如 1.0 / 1.25 / 1.5 / 1.75 / 2.0），用同一个系数同时缩放：
+    //   * io.Fonts 加载字号：kDesignFontSizePx * scale
+    //   * ImGui style（FramePadding / ItemSpacing / IndentSpacing 等）整体
+    //     ScaleAllSizes(scale)
+    // 不读 io.FontGlobalScale —— 那是位图重采样路径，TrueType 字体直接用目标
+    // 像素加载更清晰。注意 ScaleAllSizes 必须只调一次，重复调会指数级放大。
+    float dpiScaleX = 1.0f;
+    float dpiScaleY = 1.0f;
+    glfwGetWindowContentScale(glfwWindow, &dpiScaleX, &dpiScaleY);
+    const float dpiScale = dpiScaleX > 0.0f ? dpiScaleX : 1.0f;
+    const float fontPx   = kDesignFontSizePx * dpiScale;
+    ImGui::GetStyle().ScaleAllSizes(dpiScale);
+
+    // 默认 UI 字体：优先用 Windows 系统 Segoe UI（TrueType，任意 size 都清晰），
+    // 找不到回退到 ImGui 内嵌 ProggyClean 拉大 SizePixels（位图字体非原生 size
+    // 略糊但保底可用）。**必须**在 ImGui_ImplVulkan_Init 之前完成 —— Vulkan
+    // backend 在 Init 阶段从 io.Fonts atlas 创建 font texture，后改动 atlas
+    // 需要重建 + 重上传。
     {
         ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
-            "C:\\Windows\\Fonts\\segoeui.ttf", kDefaultFontSizePx);
+            "C:\\Windows\\Fonts\\segoeui.ttf", fontPx);
         if (fontMain == nullptr) {
             ImFontConfig fontCfg;
-            fontCfg.SizePixels = kDefaultFontSizePx;
+            fontCfg.SizePixels = fontPx;
             io.Fonts->AddFontDefault(&fontCfg);
             std::fprintf(stdout,
-                         "[OrangeEditor] Segoe UI 加载失败，回退 ImGui 默认字体 @%.0fpx\n",
-                         kDefaultFontSizePx);
+                         "[OrangeEditor] Segoe UI 加载失败，回退 ImGui 默认字体 @%.0fpx (dpiScale=%.2f)\n",
+                         fontPx, dpiScale);
         }
     }
 
