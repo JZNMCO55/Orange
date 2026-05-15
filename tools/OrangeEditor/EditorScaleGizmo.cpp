@@ -94,7 +94,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
     using Axis = EditorGizmoState::Axis;
     using Orange::Engine::Scene::TransformComponent;
 
-    if (host.scene.playState != PlayState::Edit)
+    if (!host.gizmo.visible || host.scene.playState != PlayState::Edit)
     {
         AbortDragIfNeeded(host);
         host.gizmo.hoveredAxis = Axis::None;

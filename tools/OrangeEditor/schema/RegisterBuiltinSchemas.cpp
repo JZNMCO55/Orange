@@ -16,6 +16,7 @@
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -503,6 +504,27 @@ void RegisterAnimatorComponentSchema()
         .Register();
 }
 
+// v0.4 c5：注册 Camera schema 让 CameraFrustumGizmoPlugin 的 dispatch 路径
+// 走通（plugin 通过 schema.has + schema.get 找 component）。
+//
+// 当前**不**暴露 view / projection 字段——schema 体系没有 Mat4 PropertyType，
+// 且 ApplyEditorCameraToWorld 每帧覆写这两个矩阵让"Inspector 编辑 view"无
+// 意义。Inspector 内显示一个**空 Camera header**（只有 collapsing header，
+// 没字段；用户视角下提示"此实体有 Camera 组件"，编辑入口推到引擎补足
+// CameraDesc 后再加，见 docs/engine-known-gaps.md
+// GAP-2026-05-15-camera-editor-vs-runtime-separation）。
+//
+// 不 Addable / 不 Removable —— 同 Animator：Camera 的初始化路径需要 fov /
+// aspect 等参数，不适合"+Add Component 走默认构造"路径。
+void RegisterCameraComponentSchema()
+{
+    using Cam = Orange::Engine::Render::Camera;
+    ComponentSchemaBuilder<Cam>("Camera", "Camera")
+        // schema 注册不需要 .Field()——仅 typeName + has + get 就够 plugin
+        // dispatch 路径用。Inspector 段空，没字段。
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
@@ -520,6 +542,7 @@ void RegisterBuiltinSchemas()
     RegisterColliderComponentSchema();
     RegisterParticleEmitterComponentSchema();
     RegisterAnimatorComponentSchema();
+    RegisterCameraComponentSchema();
     // 所有内置组件 schema 已全数迁完。后续 commit（c10）改 Add Component 菜
     // 单走 schema 注册表枚举驱动；c11 / c12 引入 IEditor*Plugin 抽象。
 }

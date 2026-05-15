@@ -129,8 +129,8 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
     using Axis = EditorGizmoState::Axis;
     using Orange::Engine::Scene::TransformComponent;
 
-    // ---- 早退：Play Mode / 无 World / 无选中实体 / 实体无 Transform ----
-    if (host.scene.playState != PlayState::Edit)
+    // ---- 早退：Gizmo 总开关关闭 / Play Mode / 无 World / 无选中实体 / 实体无 Transform ----
+    if (!host.gizmo.visible || host.scene.playState != PlayState::Edit)
     {
         AbortDragIfNeeded(host);
         host.gizmo.hoveredAxis = Axis::None;

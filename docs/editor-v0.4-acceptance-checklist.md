@@ -445,12 +445,129 @@ gizmo 路径正交）。
 
 ---
 
-## Commit 5+ 占位
+## Commit 5：Camera frustum gizmo + Viewport 工具栏（v0.4 收尾）
 
-后续 commit 按 editor-roadmap.md v0.4 deliverables 顺序推进：
+editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
 
-- **c5**：Camera frustum（选中带 Camera 组件实体显示线框）+ Viewport 工具栏（视图模式 /
-  Shaded / Wireframe / Camera mode / Gizmo on-off 总开关；参 Cocos Creator 截图布局）
+**1. Camera frustum gizmo（via IEditorGizmoPlugin）**
+
+- 注册 Camera schema（typeName="Camera"，空字段，不 Addable / 不 Removable）—— 让
+  plugin dispatch 路径走通；Inspector 内显示空 "Camera" header（不暴露 view/projection
+  矩阵字段，schema 体系无 Mat4 PropertyType + 矩阵被编辑器每帧覆写，编辑无意义）
+- 新建 `plugin/CameraFrustumGizmoPlugin.{h,cpp}`：选中带 `Render::Camera` 的实体时，
+  画 frustum 12 段线框（near rect 4 + far rect 4 + connecting 4），青色（与 Particle
+  Emitter spawn box 同色系）；near plane 更亮 + 略粗，区分远近
+- 引擎缺口登记：`docs/engine-known-gaps.md` 新增 `GAP-2026-05-15-camera-editor-vs-
+  runtime-separation`，详述当前 `ApplyEditorCameraToWorld` 每帧覆写 Camera component
+  的限制 + 三种候选修复路径
+- 临时方案：plugin 用 **hardcode 默认 fov=45° / aspect=16:9 / near=0.1 / far=10**
+  + entity Transform 推 view（`lookAt(pos, pos + rot*-Z, rot*+Y)`）算 frustum 8
+  corners；代码内 TODO 注释明示等 GAP 落地后切真实数据
+
+**2. Viewport 工具栏（ScenePanel 顶部，参 Cocos Creator 3.6.0 布局）**
+
+- **Gizmos checkbox**（实现）—— `host.gizmo.visible` 总开关；写 false 时 c2/c3 内置
+  Translate/Rotate/Scale + c4/c5 所有 plugin overlay 一起隐藏（不绘制、不响应输入），
+  状态保持以让用户切回 true 后 UX 一致
+- **View Mode**（disabled placeholder + tooltip）—— 依赖编辑器引入 2D Lock 相机
+  模式，未实现
+- **Shading**（disabled placeholder + tooltip）—— 依赖 OrangeRender wireframe pass，
+  按 engine-known-gaps 工作流推到 OrangeRender incoming_feature 独立 session
+- **Camera Mode**（disabled placeholder + tooltip）—— Design Resolution 锁定，依赖
+  CameraDesc，链接 GAP-2026-05-15
+
+`EditorGizmoState` 加 `bool visible = true` 字段；c2/c3/c4 早退守卫统一改为
+`!host.gizmo.visible || playState != Edit` 双条件。
+
+参考实现：
+- `vendor/Cocos Creator 3.6.0` viewport toolbar 布局（截图，editor-roadmap.md D5 节）
+- `vendor/LumixEngine/src/editor/scene_view.cpp` `gizmo_config` toggle 实现思路
+
+### 验收点
+
+- [ ] **Gizmos 总开关 checkbox 基础**
+  - [ ] 启动编辑器、自动加载 demo scene
+  - [ ] Scene 面板顶部出现一行工具栏：`[x] Gizmos | [Persp ▼] [Shaded ▼] [Camera Mode]`
+  - [ ] hover "Gizmos" checkbox → tooltip 显示总开关说明文字
+  - [ ] 默认勾选状态（gizmo 默认显示）
+
+- [ ] **Gizmos 关闭后所有 overlay 消失**
+  - [ ] 选中带 Transform 的实体 → 看到内置 Transform gizmo（W/E/R 三模式之一）
+  - [ ] 选中 DirectionalLight → 看到黄色方向箭头
+  - [ ] 选中 ParticleEmitter → 看到青色 spawn box + 箭头
+  - [ ] 选中 Camera 实体 → 看到 frustum 线框
+  - [ ] **取消勾选 Gizmos checkbox** → 上述**所有** overlay 在 viewport 内同时消失
+  - [ ] 重新勾选 → 全部 overlay 立即恢复
+
+- [ ] **Gizmos 关闭期间 picking 仍正常**
+  - [ ] 取消 Gizmos 勾选 → 在 viewport 内点击不同几何体 → 选中实体正确切换
+  - [ ] 验证 hover gizmo handle 阻拦 picking 的行为在 visible=false 时也不会误触发
+
+- [ ] **disabled placeholder 项的 tooltip**
+  - [ ] hover "Persp" Combo / "Shaded" Combo / "Camera Mode" SmallButton（即使 disabled）
+  - [ ] 每个 placeholder 弹出**说明未实现 + 依赖什么 + 登记位置**的 tooltip 文字
+  - [ ] 点击 disabled 项不响应（视觉灰色 + 无 hover 高亮）
+
+- [ ] **Camera frustum 显示**
+  - [ ] 在 Entity Tree 找到 demo scene 内挂 Camera 的实体（DemoWorld 内的 "camera"
+    实体，typeName 可能显示为根节点附近的 "Camera" 名字）
+  - [ ] 选中后 viewport 内**出现 12 段青色线框组成的 frustum**：
+    - 4 段亮青色 near rect（更亮 + 略粗）
+    - 4 段普通青色 far rect
+    - 4 段连接 near/far rect 的边
+  - [ ] frustum 朝向跟随 entity 旋转：Inspector 改 Transform.rotation → frustum
+    在 viewport 内重新指向
+  - [ ] frustum 位置跟随 entity.position：Inspector 改 position → frustum 移动到
+    新位置
+
+- [ ] **Camera 实体 Inspector 显示**
+  - [ ] 选中 Camera 实体 → Inspector 内出现一个**空的 "Camera" component header**
+    （可折叠 / 展开，没字段）
+  - [ ] **不**显示 Remove Component 右键菜单项（Camera schema 未 .Removable()）
+  - [ ] +Add Component 菜单**不**包含 Camera（schema 未 .Addable()）
+
+- [ ] **Camera frustum 当前限制（已知 fake 行为）**
+  - [ ] frustum 的 fov / aspect / near / far 是 hardcode 默认值（45° / 16:9 /
+    0.1 / 10）—— 视觉上是一个固定形状的锥体，**不**反映 Camera component 真实
+    view/projection 矩阵
+  - [ ] 用户视角：能看到"哦这个 entity 是相机，朝向那边"，但**不**能看到"游戏相
+    机的实际视野有多大" —— 这是 engine-known-gaps GAP-2026-05-15 限制
+  - [ ] 编辑器轨道相机移动 / 缩放 viewport → frustum 不跟着改变形状（**仅**朝向
+    跟 Camera entity transform 走，形状是 hardcode）
+
+- [ ] **多 plugin overlay 同选多 component 实体并存**
+  - [ ] 找一个**同时挂 DirectionalLight + Camera** 的实体（如有）→ 验证黄色光箭
+    头 + 青色 frustum 同时显示，不互相覆盖
+  - [ ] 同理：同时挂 ParticleEmitter + Camera 的（如有）→ spawn box + frustum 并存
+
+- [ ] **Play Mode 与 visible 开关正交**
+  - [ ] 勾选 Gizmos → 选实体 → 看到 overlay → ▶ Play → overlay 消失（Play Mode
+    强制禁用，与 visible 状态无关）
+  - [ ] Stop → overlay 恢复
+  - [ ] **取消** Gizmos 勾选 → ▶ Play → overlay 仍消失（visible=false + Play 双重
+    禁用）→ Stop → overlay 仍不显示（visible 还是 false）
+  - [ ] 勾回 Gizmos → overlay 立即恢复
+
+### bugs
+（待大节点回归后填）
+
+---
+
+## v0.4 milestone 完工准备
+
+c5 落地后，v0.4 "Gizmo & 特殊对象可视化" milestone 5 个 commit 全数 ✅：
+
+- c1 viewport picking
+- c2 Translate gizmo + CommandStack BeginGroup 首批消费
+- c3 Rotate + Scale gizmo + W/E/R 模式切换
+- c4 Light + ParticleEmitter gizmo (IEditorGizmoPlugin 首批消费)
+- c5 Camera frustum gizmo + Viewport 工具栏
+
+整 milestone ✅ 标记需要：
+1. **节点 A 全 milestone 回归**（与 v0.3 节点 A 合并执行——用户决定的合并节奏）
+2. milestone-end-checklist 8 步走完（含 v0.4 retro 段填写）
+3. `docs/editor-roadmap.md` v0.4 heading 落 ✅
+4. 跑 `scripts/check_claude_md_drift.py` 确认 CLAUDE.md 同步
 
 具体 commit 数和顺序在开工时按需调整；本占位仅为对齐 `editor-roadmap.md` v0.4 deliverables
 列表的方向参考。
@@ -472,7 +589,7 @@ acceptance-checklist 同时归档（v0.2.5 / v0.3 同款生命周期）。
 | c2 | Translate gizmo + CommandStack BeginGroup 首批消费 | ✅ |
 | c3 | Rotate / Scale gizmo + W/E/R 切换 | ✅ |
 | c4 | Light + ParticleEmitter gizmo (IEditorGizmoPlugin 首批消费) | ✅ |
-| c5 | Camera frustum + Viewport 工具栏 | — |
+| c5 | Camera frustum + Viewport 工具栏 | ✅ |
 | **节点 A 全 milestone 回归** | **与 v0.3 节点 A 合并执行**（用户决定的合并节奏） | — |
 
 ---

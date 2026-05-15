@@ -45,6 +45,16 @@ struct EditorGizmoState
     // 到 LMB 释放，避免 mid-drag 切模式撞坑。
     Mode mode = Mode::Translate;
 
+    // viewport 工具栏的"Gizmos on/off"总开关（v0.4 c5 落地）。false 时
+    // 所有 gizmo（内置 Transform translate/rotate/scale + plugin overlay）
+    // 都既不绘制也不响应输入——但模式 / hovered / dragging 等内部状态保
+    // 持，让用户切回 visible 时恢复一致 UX。
+    //
+    // 与 Play Mode 禁用路径正交：Play Mode 由 host.scene.playState 控制，
+    // 强制禁用；visible 是用户主动控制的"我不想看 gizmo"开关，Edit Mode
+    // 期内才有意义。
+    bool visible = true;
+
     // 当前 hover 的 handle —— 每帧 hit-test 重置（None = 鼠标不在任何
     // handle 上）。draggingAxis != None 期间 hoveredAxis 强制等于
     // draggingAxis（拖动期不参与 hit-test）。

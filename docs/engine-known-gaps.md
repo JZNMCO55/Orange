@@ -236,6 +236,59 @@ GAP 未落地前，v0.3 c2 拆为：
 
 ---
 
+## GAP-2026-05-15-camera-editor-vs-runtime-separation
+
+- **发现方**：OrangeEditor v0.4 c5（Camera frustum gizmo）
+- **发现日期**：2026-05-15
+- **一句话定性**：引擎当前 `Render::Camera` component 同时承载"编辑器 viewport 相机"与"游戏运行时相机"两个角色，`ApplyEditorCameraToWorld` 每帧把 World 内**首个** Camera 组件的 view/projection 全量覆写为编辑器轨道相机的矩阵——这导致：编辑器内"选中游戏 Camera entity → 显示其 frustum"无法基于 component 实际数据展示（component 数据=编辑器相机视野，frustum 视觉上与 viewport 自身重合，无意义）
+
+### 触发场景
+
+OrangeEditor v0.4 c5 实现 Camera frustum gizmo：
+
+- 选中 demo scene 内挂着 `Render::Camera` component 的实体
+- 期望 viewport 内看到该相机的 frustum 线框（视野范围 + near/far plane 投影），帮助美术 / 关卡设计师判断游戏运行时相机会看到什么
+
+当前阻塞：
+
+- `tools/OrangeEditor/EditorCameraControl.cpp::ApplyEditorCameraToWorld` 拿 World 中首个 Camera component → 整体覆写为 `BuildEditorCamera(...)` 返回值
+- DemoWorld 内 `world.AddComponent<Camera>(camera, cam)` 落了一个 Camera entity，但每帧第一句话就被覆写
+- Plugin 读 `component.view` / `component.projection` 反推 frustum corners → 拿到的是编辑器 viewport 自己的视野，frustum 必然与 viewport 自身边框对齐，对用户毫无信息量
+
+### 缺什么
+
+引擎侧需要把"编辑器 viewport 相机"与"ECS 内游戏 Camera"概念分离。候选路径（待评审）：
+
+1. **引擎侧 EditorCameraContext**：Pipeline 新增一个"editor override camera"输入字段（不挂 ECS），渲染时优先用 override 而非首个 ECS Camera。OrangeEditor 直接 push `BuildEditorCamera` 结果给 Pipeline，不再 mutate World。ECS Camera 保持游戏侧语义不被破坏
+2. **Camera 标签分类**：Camera component 加 `enum class CameraRole { Game, EditorViewport }` 字段，Pipeline 默认渲染 `EditorViewport`，但忽略其在序列化 / Inspector 里的显示；编辑器内的 viewport 自己挂一个 hidden `EditorViewport` 角色 Camera，不影响 `Game` 角色
+3. **Camera 拆 Desc + Runtime**：`CameraDesc { fov, aspect, near, far, mode }` 是数据 POD（可序列化、Inspector 可编辑、不被覆写），`Camera { view, projection }` 是运行时缓存（Pipeline 每帧从 transform + desc 推导，序列化忽略）。frustum gizmo 基于 desc 算 → 与渲染状态解耦
+
+路径 1 最小侵入；路径 3 最干净（也顺手让 Camera 在 Inspector 里有真实可编辑字段——目前 view/projection 是 mat4，schema 不支持，Inspector 段是空的）。
+
+### 期望验收
+
+- demo scene 内 Camera entity 的 component 数据被编辑器读取时**反映游戏侧设置**（不是编辑器轨道相机）
+- 选中该 entity → viewport 内 frustum 反映**该游戏相机**的视野（fov / aspect / near / far / 朝向）
+- 移动 Camera entity transform → frustum 跟着动，视觉验证摆位
+- Pipeline 渲染仍由编辑器 viewport 相机驱动（编辑器内看到的画面与游戏运行时画面**可不同**）
+
+### 临时方案（v0.4 c5 编辑器侧）
+
+GAP 未落地前，c5 frustum gizmo 走**fake hardcode 默认参数**路径：
+
+- `CameraFrustumGizmoPlugin` 用 hardcode 默认 fov=45° / aspect=16:9 / near=0.1 / far=10 + entity Transform 推 view（lookAt(position, position + rot * -Z, rot * Y)）算 frustum 8 corners
+- 视觉上能看到一个"假"frustum 在 entity 位置 + 朝向，给用户**摆位提示**；但 fov/near/far 数值是 hardcode，不反映 Camera component 真实数据
+- 代码内 TODO 注释明示当前限制 + 链接本 GAP
+- 待 GAP 落地（路径 1 / 2 / 3 任一）后，plugin 切到读真实数据
+
+### 状态
+
+- **登记**：2026-05-15
+- **处理**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 或独立小 task
+- **关联**：OrangeEditor v0.4 c5 已用 fake 默认参数路径落地，等 GAP 决议后回头修正
+
+---
+
 ## 处理记录
 
 （空）

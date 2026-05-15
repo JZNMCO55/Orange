@@ -27,6 +27,81 @@ void EditorRenderLayer::DrawScenePanel()
 {
     ImGui::Begin("Scene");
 
+    // ---- v0.4 c5：Viewport 工具栏 ---------------------------------------
+    // 参 Cocos Creator 3.6.0 截图的"Scene 面板顶部工具栏"布局（editor-roadmap
+    // .md D5 节）。本期落 3 个能消费的功能 + 3 个占位（依赖引擎能力，登记
+    // engine-known-gaps 后独立 session 处理）。
+    //
+    //   * **Gizmos**（checkbox）—— 全部 gizmo overlay 总开关；写
+    //     `host.gizmo.visible`，c2/c3 内置 Translate/Rotate/Scale 早退 +
+    //     c4 plugin dispatch gate 都消费本字段
+    //   * **View Mode**（placeholder disabled）—— Persp / 2D Lock 切换；
+    //     依赖编辑器相机引入"锁定 XY 平面 + 关闭 elevation"模式（当前
+    //     EditorCameraControl 只支持自由轨道）
+    //   * **Shading**（placeholder disabled）—— Shaded / Wireframe；依赖
+    //     OrangeRender 提供 wireframe pass（按 engine-known-gaps 工作流
+    //     推到 OrangeRender incoming_feature 单独 session 处理）
+    //   * **Camera Mode**（placeholder disabled）—— Design Resolution 锁定；
+    //     依赖引擎 CameraDesc + viewport resolution lock 概念
+    //
+    // disabled 项的 tooltip 用 `ImGuiHoveredFlags_AllowWhenDisabled` 让 hover
+    // 在 disabled 状态下仍弹出，向用户解释"为什么不可用 + 哪里登记了"。
+    ImGui::Checkbox("Gizmos", &mHost.gizmo.visible);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Viewport gizmo overlay 总开关（Translate / Rotate / Scale\n"
+                          "内置 gizmo + Light / ParticleEmitter / Camera frustum plugin）");
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    {
+        ImGui::BeginDisabled();
+        const char* kViewModes[] = {"Persp"};
+        int curView = 0;
+        ImGui::SetNextItemWidth(70.0f);
+        ImGui::Combo("##ViewMode", &curView, kViewModes, IM_ARRAYSIZE(kViewModes));
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("View Mode（Persp / 2D Lock）未实现\n"
+                              "依赖 EditorCameraControl 引入 2D 锁定模式");
+        }
+    }
+
+    ImGui::SameLine();
+    {
+        ImGui::BeginDisabled();
+        const char* kShadingModes[] = {"Shaded"};
+        int curShading = 0;
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::Combo("##Shading", &curShading, kShadingModes, IM_ARRAYSIZE(kShadingModes));
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("Shading (Shaded / Wireframe / Shaded+Wireframe) 未实现\n"
+                              "依赖 OrangeRender wireframe pass —— 按 engine-known-gaps\n"
+                              "工作流推到 OrangeRender incoming_feature 单独 session");
+        }
+    }
+
+    ImGui::SameLine();
+    {
+        ImGui::BeginDisabled();
+        ImGui::SmallButton("Camera Mode");
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("Camera Mode (Design Resolution 锁定) 未实现\n"
+                              "依赖引擎 CameraDesc + viewport resolution lock —— 见\n"
+                              "engine-known-gaps GAP-2026-05-15-camera-editor-vs-runtime-separation");
+        }
+    }
+
+    ImGui::Separator();
+
     // S3：相机输入捕获 + 应用到 World Camera 组件。
     const ImVec2 region = ImGui::GetContentRegionAvail();
     const float  aspect = (region.y > 0.0f) ? (region.x / region.y) : 1.0f;
@@ -119,7 +194,8 @@ void EditorRenderLayer::DrawScenePanel()
             // 调用约定见 plugin/IEditorGizmoPlugin.h 头注释"调用约定"段第 1
             // 条："对 selected entity 遍历 host.gizmoPlugins 调 CanHandle，
             // 对所有返回 true 的 plugin 依次调 Draw"。
-            if (mHost.scene.playState == PlayState::Edit
+            if (mHost.gizmo.visible
+                && mHost.scene.playState == PlayState::Edit
                 && mHost.selection.selectedEntity.IsValid()
                 && !mHost.gizmoPlugins.empty())
             {

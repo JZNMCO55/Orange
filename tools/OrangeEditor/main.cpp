@@ -72,6 +72,7 @@
 #include "VulkanLoaderShim.h"
 #include "demo_game/HealthComponent.h"
 #include "plugin/AnimatorMiniPreviewPlugin.h"
+#include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
@@ -341,6 +342,11 @@ int main()
         std::make_unique<Orange::Editor::Plugin::DirectionalLightGizmoPlugin>());
     editorHost.gizmoPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::ParticleEmitterGizmoPlugin>());
+    // v0.4 c5：Camera frustum gizmo（plugin 当前用 hardcode 默认 fov/aspect/
+    // near/far + entity transform 推 view；待 GAP-2026-05-15-camera-editor-
+    // vs-runtime-separation 落地后切真实 component 数据）
+    editorHost.gizmoPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::CameraFrustumGizmoPlugin>());
 
     // 把 CommandStack 的"栈有效变更"钩子绑到 scene.dirty——任何 Push / Undo /
     // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地
