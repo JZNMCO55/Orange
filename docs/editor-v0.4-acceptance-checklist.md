@@ -596,14 +596,142 @@ acceptance-checklist 同时归档（v0.2.5 / v0.3 同款生命周期）。
 
 ## v0.4 retro · 参考引擎对比
 
-按 `docs/milestone-end-checklist.md` 第 3 步要求，对本期引入的**新机制 / 新抽象**做事后追评。
-v0.4 milestone 完工时填本节，结构同 v0.3 retro 段。
+按 `docs/milestone-end-checklist.md` 第 3 步要求，对本期引入的**新机制 / 新抽象**做事后追评，
+确认设计选择在 milestone 完工事后看仍然合理。
 
-候选决策点（c2+ 落地后回填）：
-- gizmo handle hit-test 算法（screen-space 距离 vs world-space ray-cylinder/cone）
-- gizmo 拖动 plane 选择策略（轴正交 plane vs 视线垂直 plane）
-- world vs local space 切换是否本期落（vs 推迟到 v1.x）
-- IEditorGizmoPlugin 第一个真实 case 选型（c4 落地时记录 AskUserQuestion 三选项）
+### 决策点 1 · gizmo handle hit-test 走"2D 屏幕距离"而非"3D ray-cylinder"
+
+**决策位置**：`tools/OrangeEditor/EditorTranslateGizmo.cpp` + `EditorRotateGizmo.cpp` +
+`EditorScaleGizmo.cpp`（c2 / c3）。所有 axis handle / 圆环段 hit-test 走 2D 屏幕坐标点-线段
+距离阈值（8 px），而非 world-space ray 与 cylinder / cone 几何求交。
+
+**选项**：
+- **A · 2D 屏幕距离阈值**：投影 axis 端点到屏幕，2D point-to-segment 距离 < kHitThresholdPx
+  - 参 `vendor/LumixEngine/src/editor/gizmo.cpp` Translate / Rotate 段（同款 2D 距离思路）
+- **B · 3D ray-cylinder 求交**：把 axis 当成有半径的世界空间圆柱，做 ray-cylinder hit-test
+  - 参 Unity / Unreal source 不可读；Godot `editor_node_3d.cpp` 走 plane intersection
+    + 距离阈值（接近 A 但 plane 单位是 world，阈值是 plane normal 投影距离）
+
+**已选**：A（c2 落地时直接采用，c3 / c5 继承）
+
+**事后追评**：仍合理。理由：
+- 2D 屏幕距离阈值（像素）对 UI 直觉最对齐——用户感受到的是"鼠标离 handle 视觉中心多近"，
+  而非"鼠标 ray 离 world axis 多近"；3D 距离阈值会让远处实体 handle 难选中、近处实体 handle
+  误触发
+- 实现简单（一行投影 + 一行点线段距离）；rotate 圆环也复用同款（48 段 polyline 每段独立 hit-test）
+- 性能完全足够（c5 完工后 viewport 内 hit-test 路径每帧调 < 100 次 segment 距离检查，N/A）
+
+**潜在问题（已知）**：c2 / c3 期没有"hover 时显示精确 hit-test 反馈"（如把高亮缩放到鼠标接近
+端点而非整条 axis 平均）。这是后续 UX 优化点，不构成 v0.4 缺陷。
+
+### 决策点 2 · 共享 helper 提取到 `EditorGizmoMath` 而非 anon ns 复制
+
+**决策位置**：c3 重构期间。c2 期 `EditorTranslateGizmo.cpp` 的 anon ns 内有 4 个 helper
+（ProjectWorldToScreen / ScreenToWorldRay / PointSegmentDistance2D / ClosestPointOnAxisToRay）；
+c3 引入 Rotate / Scale 需要同款 + 新增 `RayPlaneIntersect`。
+
+**选项**：
+- **A · 提取到 `EditorGizmoMath.{h,cpp}` 内部 helper**（OrangeEditor::Internal::GizmoMath 命名空间）
+- **B · c3 cpp 复制 c2 anon ns helper**（3 份独立维护）
+
+**已选**：A（c3 落地时同步重构）
+
+**事后追评**：仍合理。理由：
+- 共享 helper 在 c4 (light/particle plugin) + c5 (camera frustum plugin) 均消费——4 个 cpp
+  共享单一实现，避免"Vulkan NDC y-down 与 ImGui y-down 同向"等坐标系约定跨文件漂移
+- 重构成本低（c2 测试已通过 → c3 重构是机械搬迁，外部 API 不变）
+- 命名空间 `OrangeEditor::Internal::GizmoMath` 显式表达"编辑器内部 helper，不对外公开"，
+  不污染 OrangeEngine 公共 API（与 EditorPicking.cpp 同款 editor-side 自包含工具纪律）
+
+**对偶选择**：刻意**不**把 EditorPicking.cpp 的反投影合并进 GizmoMath——两者各自归属域清晰
+（picking 是 entity 命中、gizmo 是 handle 命中），合并会让"为什么 gizmo helper 在 picking 路径
+使用 picking 反投影"的反向依赖出现，违反 SRP。
+
+### 决策点 3 · IEditorGizmoPlugin 调度模型走"扁平 Draw/HitTest"而非 Godot 多档接口
+
+**决策位置**：`tools/OrangeEditor/plugin/IEditorGizmoPlugin.h`（v0.2.5 c12 声明，c4 首批消费
+时确认实际落地路径）。
+
+**选项**：
+- **A · 扁平 Draw + HitTest 双钩子**（OrangeEditor 当前选择）：plugin 仅实现 Draw（纯虚）+
+  HitTest（默认 false）。SceneView overlay 遍历 plugin × 匹配 schema 调 Draw，所有 true 的全画。
+- **B · Godot 多档接口**（has_gizmo / create_gizmo / get_name / set_state / get_handle_value /
+  commit_handle ...）—— plugin 自管 gizmo 实例挂在 Node 上，编辑器 SceneView 调度多档钩子
+  - 参 `vendor/godot/editor/plugins/node_3d_editor_gizmos.h`
+- **C · Lumix 写死无 plugin 抽象**——所有 gizmo 在 SceneView 内 hardcode
+  - 参 `vendor/LumixEngine/src/editor/gizmo.cpp`
+
+**已选**：A（v0.2.5 c12 头注释明确"OrangeEditor 不学 Godot 的 gizmo 实例挂在 Node 上 / 不学
+Lumix 的不可扩展，走扁平 Draw/HitTest"）
+
+**事后追评**：仍合理。c4 / c5 三个 concrete plugin（DirectionalLight / ParticleEmitter /
+CameraFrustum）全部走 Draw 纯装饰路径，HitTest 默认 false——证明扁平接口已经能覆盖"plugin
+是 component-specific overlay" 的核心用例。Godot 多档接口的 `get_handle_value` /
+`commit_handle` 等钩子是为"plugin 接管 drag 修改 component"设计的，OrangeEditor 当前 plugin
+都不接管 drag（drag 走内置 Transform gizmo），所以多档接口暂时是过度设计。
+
+**未来扩展头**：v0.4+ 真撞到"plugin 想接管 drag 修改某 component 字段"需求时，可在 IEditor
+GizmoPlugin 上加 `OnDragBegin / OnDragUpdate / OnDragEnd` 钩子，**不**破坏现有 plugin 编译
+（fields 增加规则同 GizmoContext，与 c4 头注释承诺一致）。
+
+### 决策点 4 · IEditorGizmoPlugin 首批 case 一次出 2 个（c4）而非 1 个
+
+**决策位置**：c4。v0.3 c3 是"第一个真实 IEditorInspectorPlugin case"（AnimatorMini
+Preview，1 个），v0.4 c4 同款"首批真实 IEditorGizmoPlugin case" 但出了 2 个
+（DirectionalLight + ParticleEmitter）。
+
+**选项**：
+- **A · 一次出 2 个 plugin**（c4 当前）：验证多 plugin 并存 + 互不串味
+- **B · 先出 1 个，c5 再加 1 个**：节奏更慢，更保险
+
+**已选**：A
+
+**事后追评**：仍合理。理由：
+- 两个 plugin 同 commit 落地实际验证了"多 plugin 在 dispatch loop 内并存"路径（c4 ScenePanel
+  dispatch loop 遍历每个 plugin × 每个匹配 schema），单 plugin case 验证不到
+- 工程量可控（plugin 共享 GizmoMath helper，每个 plugin .cpp 约 150 行）
+- c5 顺利加入第 3 个 plugin（CameraFrustumGizmo）无需改 dispatch 路径——抽象稳
+
+### 决策点 5 · c5 Camera frustum 走"hardcode fake 参数 + GAP 登记"而非"跳过 frustum"
+
+**决策位置**：c5。`ApplyEditorCameraToWorld` 每帧覆写 Camera component 让"读真实 view/
+projection 算 frustum"无意义。
+
+**选项**：
+- **A · hardcode fake fov/aspect/near/far + entity transform 推 view + GAP 登记**（当前实现）
+- **B · 跳过 c5 Camera frustum，只做 Viewport 工具栏，frustum 推到 GAP 落地后做**
+- **C · 编辑器侧 snapshot Camera 原始数据让 frustum 看真值**（heavy，破坏"编辑器只消费引擎
+  API"纪律）
+
+**已选**：A
+
+**事后追评**：仍合理。理由：
+- A 让 c5 deliverable 完整（editor-roadmap.md v0.4 列出的 Camera frustum 是 deliverable，不是
+  TODO 段的"按需补"项）—— editor-roadmap 优先级保证
+- fake 参数是**老实的**临时方案：代码内 TODO 注释 + GAP-2026-05-15 链接 + acceptance-checklist
+  内"已知限制"段明示——不构成隐藏债（与 v0.3 retro 决策点 2 双份字段表同款"老实承认偏离"
+  原则）
+- 走 IEditorGizmoPlugin dispatch 路径而非另起 hardcode 路径，保架构对称性—— c5 之后所有 per-
+  component gizmo 都走 plugin（c2/c3 内置 Transform gizmo 是唯一例外，IEditorGizmoPlugin.h
+  头注释已明确豁免）
+
+**潜在问题**：B 选项的诚实度更高（不引入 fake）。但 v0.4 milestone 边界已临近，B 选项会留
+"editor-roadmap.md v0.4 列出但未实现"的尾巴。权衡后 A 选项的工程平衡更好——前提是 GAP 落地
+后真的回头切真值（用 GAP 条目 + 代码 TODO 双重提醒）。
+
+### 综合事后追评
+
+v0.4 五个决策点 retro 后均**未发现**事后追评失误。新机制（2D 屏幕 hit-test / 内部 helper 提
+取 / 扁平 plugin 接口 / 首批 case 多 plugin / fake frustum + GAP）在 milestone 完工事后看，
+与同栈参考引擎设计契合或合理偏离（fake frustum 偏离纯净路径是工程平衡主动选择，登记 GAP
+保证后续回头）。
+
+**对 v0.5 的启示**（基于本 retro）：
+- Asset 浏览器 + Material 子模式 milestone 启动时，schema 体系若撞到"无 Mat4 PropertyType"
+  问题（Material 也含矩阵字段如 UV scale/offset 在 mat3 / mat2 内）—— 复用 c5 同款"空字段
+  schema + plugin 接管 UI"策略，或扩 PropertySchema 加 Mat3/Mat4 PropertyType
+- v0.5 若引入新 plugin（如 MaterialThumbnailPlugin），沿用 c4 / c5 IEditorGizmoPlugin /
+  IEditorInspectorPlugin 同款扁平接口，**不**重新评估抽象
 
 ---
 

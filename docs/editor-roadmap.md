@@ -258,7 +258,7 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 
 **Critical Path**：否（v0.2.5 落地后，本 milestone 算扩展点真实性验证；v0.4 / v0.5 / v0.6 不依赖游戏侧 schema 已注册，只依赖 v0.2.5 的接口）
 
-### v0.4 · Gizmo & 特殊对象可视化
+### v0.4 · Gizmo & 特殊对象可视化 ✅
 
 **目标**：viewport 内能直接拖实体，对应 wiki `game-world-editor.md` §核心功能 4（Selection）+ 5（Layers）+ 7（特殊对象类型）。
 
