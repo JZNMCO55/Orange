@@ -5,6 +5,7 @@
 
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
+#include "../EditorTranslateGizmo.h"
 
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
@@ -50,6 +51,18 @@ void EditorRenderLayer::DrawScenePanel()
                                 static_cast<float>(panelH)));
             drewImage = true;
 
+            const ImVec2 itemMin  = ImGui::GetItemRectMin();
+            const glm::vec2 imageOrigin(itemMin.x, itemMin.y);
+            const glm::vec2 imageSize(static_cast<float>(panelW),
+                                      static_cast<float>(panelH));
+
+            // viewport gizmo —— v0.4 c2 引入 translate gizmo（c3 扩 R/S）。
+            // 必须在 ImGui::Image 之后、picking 触发之前调：让 gizmo 先消
+            // 费 LMB / hover，picking 仅在 gizmo 没接管时触发，避免"拖完
+            // gizmo 松手又触发 picking 清空 / 改变选中"。
+            const bool gizmoActive = DrawAndHandleTranslateGizmo(
+                mHost, imageOrigin, imageSize, aspect);
+
             // viewport picking —— LMB 释放且累积 drag 距离 < 阈值 → 视为
             // 单击（区分于轨道相机拖动）。屏幕坐标 → image-local → NDC
             // ([-1,1]) → world ray → ECS hit-test → 命中实体写
@@ -61,7 +74,12 @@ void EditorRenderLayer::DrawScenePanel()
             //
             // 命中失败（点空白）= Entity::Invalid → 清当前选中，与
             // Cocos / Unity / Unreal 工业惯例一致。
-            if (ImGui::IsItemHovered()
+            //
+            // gizmoActive gate：本帧 gizmo 处理了 LMB（hover handle 或正在
+            // 拖动）→ 跳过 picking。否则 gizmo 拖动结束时的 LMB-release 会
+            // 同时触发 picking，把选中实体改成 gizmo 下方的物体，破坏 UX。
+            if (!gizmoActive
+                && ImGui::IsItemHovered()
                 && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
             {
                 const ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
@@ -69,7 +87,6 @@ void EditorRenderLayer::DrawScenePanel()
                 if (drag.x * drag.x + drag.y * drag.y
                         <= kClickThresholdPx * kClickThresholdPx)
                 {
-                    const ImVec2 itemMin  = ImGui::GetItemRectMin();
                     const ImVec2 mousePos = ImGui::GetMousePos();
                     const float lx = mousePos.x - itemMin.x;
                     const float ly = mousePos.y - itemMin.y;

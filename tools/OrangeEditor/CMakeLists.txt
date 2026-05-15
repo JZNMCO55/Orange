@@ -140,6 +140,7 @@ add_executable(OrangeEditor
     EditorHierarchy.cpp
     EditorPicking.cpp
     EditorRenderLayer.cpp
+    EditorTranslateGizmo.cpp
     EditorWidgets.cpp
     VulkanLoaderShim.cpp
     panels/EntityTreePanel.cpp
