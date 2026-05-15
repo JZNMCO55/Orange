@@ -105,7 +105,7 @@ void EditorRenderLayer::DrawScenePanel()
     // S3：相机输入捕获 + 应用到 World Camera 组件。
     const ImVec2 region = ImGui::GetContentRegionAvail();
     const float  aspect = (region.y > 0.0f) ? (region.x / region.y) : 1.0f;
-    UpdateEditorCameraFromInput(mHost.camera);
+    UpdateEditorCameraFromInput(mHost);
     ApplyEditorCameraToWorld(mHost, aspect);
 
     // S4：把 Scene 面板接到 Pipeline::InitializeOffscreen 上 ——

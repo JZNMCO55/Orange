@@ -22,7 +22,12 @@
 
 #include <orange/engine/render/Camera.h>
 
-void UpdateEditorCameraFromInput(EditorCameraState& ec);
+// 注：函数参数从 EditorCameraState& 改为 EditorHost& —— 实现内需要读
+// `host.gizmo.IsHovered() / IsDragging()` 状态来避免与 gizmo 抢 LMB
+// 拖动。读上一帧的 gizmo 状态是预期的：实际 UX 下 hover handle → click
+// 至少跨多帧（60fps 单帧 16ms < 人类反应时间），上一帧 hover 状态正确
+// 反映"按下 LMB 那一刻"。
+void UpdateEditorCameraFromInput(EditorHost& host);
 
 Orange::Engine::Render::Camera
 BuildEditorCamera(const EditorCameraState& ec, float aspect);
