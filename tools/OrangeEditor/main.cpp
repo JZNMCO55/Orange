@@ -72,6 +72,8 @@
 #include "VulkanLoaderShim.h"
 #include "demo_game/HealthComponent.h"
 #include "plugin/AnimatorMiniPreviewPlugin.h"
+#include "plugin/DirectionalLightGizmoPlugin.h"
+#include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
 
 #include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
@@ -328,6 +330,17 @@ int main()
     // push_back 在此排队即可。
     editorHost.inspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::AnimatorMiniPreviewPlugin>());
+
+    // 注册首批 IEditorGizmoPlugin —— v0.4 c4 落地（v0.2.5 c12 抽象首批
+    // 真实消费）。Light 方向箭头 + ParticleEmitter spawn box / velocity
+    // 向量两个纯装饰 overlay；与 c2 / c3 内置 Transform gizmo（直接子系
+    // 统，不走 plugin）正交。多 plugin 按 push_back 顺序遍历，**所有**
+    // CanHandle 返回 true 的 plugin 全画（不互斥）；ScenePanel.cpp 内
+    // dispatch 路径同款。
+    editorHost.gizmoPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::DirectionalLightGizmoPlugin>());
+    editorHost.gizmoPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::ParticleEmitterGizmoPlugin>());
 
     // 把 CommandStack 的"栈有效变更"钩子绑到 scene.dirty——任何 Push / Undo /
     // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地

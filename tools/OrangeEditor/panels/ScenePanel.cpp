@@ -8,6 +8,10 @@
 #include "../EditorRotateGizmo.h"
 #include "../EditorScaleGizmo.h"
 #include "../EditorTranslateGizmo.h"
+#include "../plugin/GizmoContext.h"
+#include "../plugin/IEditorGizmoPlugin.h"
+#include "../schema/ComponentSchema.h"
+#include "../schema/ComponentSchemaRegistry.h"
 
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
@@ -98,6 +102,56 @@ void EditorRenderLayer::DrawScenePanel()
                     gizmoActive = DrawAndHandleScaleGizmo(
                         mHost, imageOrigin, imageSize, aspect);
                     break;
+            }
+
+            // ---- c4：IEditorGizmoPlugin 调度（v0.2.5 c12 抽象首批真实消费）
+            //
+            // Edit Mode 且选中实体有效时遍历 schema 注册表，对每个匹配
+            // (plugin.CanHandle && schema.has(world, entity)) 的 (plugin,
+            // schema) 对调 plugin.Draw。所有返回 true 的 plugin 全画（**不**
+            // 互斥；多 plugin 可同时叠加 overlay）。
+            //
+            // Plugin Draw 是纯装饰 overlay（c4 设计：DirectionalLight 方向
+            // 箭头 / ParticleEmitter spawn box + velocity 向量），不参与
+            // gizmoActive 判定——Inspector 仍是字段编辑唯一入口，plugin
+            // 不接管 LMB / picking 不被 gate。
+            //
+            // 调用约定见 plugin/IEditorGizmoPlugin.h 头注释"调用约定"段第 1
+            // 条："对 selected entity 遍历 host.gizmoPlugins 调 CanHandle，
+            // 对所有返回 true 的 plugin 依次调 Draw"。
+            if (mHost.scene.playState == PlayState::Edit
+                && mHost.selection.selectedEntity.IsValid()
+                && !mHost.gizmoPlugins.empty())
+            {
+                const auto      cam      = BuildEditorCamera(mHost.camera, aspect);
+                const glm::mat4 viewProj = cam.projection * cam.view;
+
+                Orange::Editor::Plugin::GizmoContext ctx{};
+                ctx.viewProj    = viewProj;
+                ctx.imageOrigin = imageOrigin;
+                ctx.imageSize   = imageSize;
+                ctx.drawList    = ImGui::GetWindowDrawList();
+
+                auto& reg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
+                for (auto& pPlugin : mHost.gizmoPlugins)
+                {
+                    if (pPlugin == nullptr) { continue; }
+                    for (const auto& schema : reg.All())
+                    {
+                        if (!pPlugin->CanHandle(schema)) { continue; }
+                        if (schema.has == nullptr || schema.get == nullptr) { continue; }
+                        if (!schema.has(*mHost.scene.pWorld,
+                                        mHost.selection.selectedEntity))
+                        {
+                            continue;
+                        }
+                        void* component = schema.get(*mHost.scene.pWorld,
+                                                     mHost.selection.selectedEntity);
+                        if (component == nullptr) { continue; }
+                        pPlugin->Draw(mHost, mHost.selection.selectedEntity,
+                                      schema, component, ctx);
+                    }
+                }
             }
 
             // viewport picking —— LMB 释放且累积 drag 距离 < 阈值 → 视为

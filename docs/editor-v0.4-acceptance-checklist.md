@@ -351,12 +351,104 @@ CommandStack 联动：
 
 ---
 
-## Commit 4+ 占位
+## Commit 4：Light + ParticleEmitter gizmo via IEditorGizmoPlugin（v0.2.5 c12 抽象首批真实消费）
+
+新建 `plugin/GizmoContext.h` 定义 plugin Draw 钩子入参（viewProj / imageOrigin / imageSize /
+ImDrawList\*；HitTest 相关字段留 v0.4+ 真撞到需求再加，对偶 v0.2.5 c12 头注释"fields 增加不破坏现
+有 plugin 编译"纪律）。新建两个 concrete plugin：
+
+- `plugin/DirectionalLightGizmoPlugin.{h,cpp}`：选中实体挂 `DirectionalLight` 时，从 entity world
+  位置沿 `direction` 单位方向画**黄色 3D 箭头**（屏幕长度 ~100 px 自适应）。CanHandle 按
+  `schema.typeName == "DirectionalLight"` 匹配；HitTest 走基类默认 false（纯装饰 overlay）
+- `plugin/ParticleEmitterGizmoPlugin.{h,cpp}`：选中实体挂 `ParticleEmitter` 时，画两个东西：
+  - **青色 spawn box** —— entity world XY 平面内 `desc.spawnOffsetMin` / `spawnOffsetMax`
+    围成的矩形（4 角投影到屏幕，连 4 段边线 + 极淡 fill）。Box 退化（min==max）跳过绘制
+  - **浅青色 velocity 箭头** —— 沿 `avg(initialVelocityMin, initialVelocityMax)` 方向，屏幕
+    长度 ~80 px 自适应。avg velocity = 0（length < 1e-4）时跳过箭头绘制
+
+`panels/ScenePanel.cpp` 加 plugin dispatch：Edit Mode 且选中实体有效 + plugin 注册表非空时，
+遍历每个 plugin × 每个匹配 (CanHandle && schema.has) 的 schema 对调 `Draw(host, entity, schema,
+component, ctx)`。所有返回 true 的 plugin **全部**绘制（不互斥；多 plugin 可同时叠加 overlay）。
+Plugin Draw 是纯装饰，**不**参与 gizmoActive 判定 → picking 不被 gate（与 c2/c3 内置 Transform
+gizmo 路径正交）。
+
+`main.cpp` 启动期 `editorHost.gizmoPlugins.push_back(...)` 注册两个 plugin。
+
+设计参考：
+- `vendor/godot/editor/plugins/node_3d_editor_gizmos.h` `EditorNode3DGizmoPlugin` 多档接口
+  （OrangeEditor 走更扁平的 Draw / HitTest 直接调度，不学 Godot 的"gizmo 实例挂在 Node 上"）
+- `vendor/LumixEngine/src/editor/gizmo.cpp` 没有显式 plugin 抽象（所有 gizmo 写死在 SceneView，
+  不可扩展，OrangeEditor 不学）
+
+### 验收点
+
+- [ ] **DirectionalLight gizmo 显示**
+  - [ ] 启动编辑器、自动加载 demo scene
+  - [ ] 在 Entity Tree 找到 demo scene 内的 DirectionalLight 实体（名字含 "Light" 或类似），
+    点选
+  - [ ] viewport 内**该实体位置出现一根黄色箭头**，从实体位置沿 light direction
+    （demo scene 默认大致斜下方）延伸
+  - [ ] 切换 W/E/R gizmo 模式 → 黄色箭头**始终显示**（与内置 Transform gizmo 并存，不被
+    隐藏）
+  - [ ] 同时观察：内置 Transform gizmo（红/绿/蓝箭头 or 圆环 or 立方体）也正常显示在同一
+    实体上，两套 overlay **不互相覆盖、不闪烁**
+
+- [ ] **DirectionalLight 方向调整后箭头实时更新**
+  - [ ] 选中 DirectionalLight 实体
+  - [ ] 在 Inspector 内拖 Directional Light 段的 `Direction` Vec3 字段任一分量（如 X 改
+    到 `1.0` / `-1.0`）
+  - [ ] viewport 内**黄色箭头方向实时跟着变**（不需要切实体刷新）
+  - [ ] Undo 一次 → 箭头方向回到编辑前
+  - [ ] 把 direction 改成 `(0, 0, 0)` → 箭头**消失**（退化方向防御）
+  - [ ] 改回非零向量 → 箭头**重新出现**
+
+- [ ] **ParticleEmitter gizmo 显示**
+  - [ ] demo scene 内的两个 ParticleEmitter 实体（火焰 + 萤火，名字含 "Fire" / "Sparkle"
+    或类似），分别点选
+  - [ ] 选中后 viewport 内**实体位置出现青色矩形线框**（spawn box，可能很小但要能看见）
+  - [ ] 同时出现**浅青色箭头**（initial velocity 平均方向；火焰大致朝上 / 萤火也大致朝上）
+  - [ ] spawn box 内**极淡的青色填充**提示是个区域（不是空线框）
+
+- [ ] **ParticleEmitter spawn box / velocity 编辑实时更新**
+  - [ ] 选中火焰 Emitter → Inspector 拖 `Spawn Offset Max` Vec2 → spawn box 在 viewport
+    内**变大 / 变小 / 变形**实时跟随
+  - [ ] 拖 `Initial Velocity Min/Max` Vec2 → 箭头方向实时跟随
+  - [ ] 把 `Spawn Offset Min == Spawn Offset Max`（同值，最简法 → 把 Max 拖到与 Min 同值）
+    → spawn box 退化消失（box 退化防御），velocity 箭头仍显示
+  - [ ] 把 initialVelocity Min == Max == (0,0) → 箭头消失，spawn box 仍显示
+
+- [ ] **未选中实体 plugin 不画 gizmo**
+  - [ ] 点击 viewport 空白处清除选中 → 黄色 light 箭头 / 青色 spawn box **都消失**
+  - [ ] 选不挂 DirectionalLight / ParticleEmitter 的实体（如 Ground / Tower / Test Fighter）
+    → 不画 light 箭头 / spawn box（只画内置 Transform gizmo）
+
+- [ ] **Play Mode 期间 plugin gizmo 全部禁用**
+  - [ ] 选中 DirectionalLight 或 ParticleEmitter 实体 → 看到对应 overlay
+  - [ ] ▶ Play 按钮 → 内置 Transform gizmo + plugin gizmo **全部消失**
+  - [ ] Play 期间不出现"plugin overlay 跑出来挡视野"
+  - [ ] ■ Stop → overlay 全部回来
+
+- [ ] **plugin Draw 不入命令栈（纯装饰）**
+  - [ ] 选中 DirectionalLight 实体 → cmdStack 状态记下（File>Save 是否亮）
+  - [ ] 切换实体 / 拖 viewport 边角 / 旋转编辑器相机 → 不触发任何命令栈变化（File>Save
+    亮 / 灰状态不变；不出现"莫名其妙生了一条命令"现象）
+  - [ ] 同理 ParticleEmitter：选中后只 viewport 滚轮 / 旋转视图，cmdStack 不动
+
+- [ ] **picking gate 不被 plugin 打断**
+  - [ ] 选中 DirectionalLight → viewport 在 light 箭头**外侧**单击空白处 → 触发 picking
+    （清空选中），plugin overlay 消失
+  - [ ] 选中 ParticleEmitter → viewport 在 spawn box **内部**单击（落在 emitter 实体 AABB
+    之外的空白区域）→ 触发 picking（清空 / 选下方物体）—— plugin overlay 不接管 LMB
+
+### bugs
+（待大节点回归后填）
+
+---
+
+## Commit 5+ 占位
 
 后续 commit 按 editor-roadmap.md v0.4 deliverables 顺序推进：
 
-- **c4**：Light gizmo（DirectionalLight 方向箭头）+ ParticleEmitter gizmo（spawn box +
-  velocity 向量）—— 走 v0.2.5 c12 落地的 `IEditorGizmoPlugin` 抽象（首批真实消费）
 - **c5**：Camera frustum（选中带 Camera 组件实体显示线框）+ Viewport 工具栏（视图模式 /
   Shaded / Wireframe / Camera mode / Gizmo on-off 总开关；参 Cocos Creator 截图布局）
 
@@ -379,7 +471,7 @@ acceptance-checklist 同时归档（v0.2.5 / v0.3 同款生命周期）。
 | c1 | Viewport picking (ray-AABB hit-test) | ✅ |
 | c2 | Translate gizmo + CommandStack BeginGroup 首批消费 | ✅ |
 | c3 | Rotate / Scale gizmo + W/E/R 切换 | ✅ |
-| c4 | Light + ParticleEmitter gizmo (IEditorGizmoPlugin 首批消费) | — |
+| c4 | Light + ParticleEmitter gizmo (IEditorGizmoPlugin 首批消费) | ✅ |
 | c5 | Camera frustum + Viewport 工具栏 | — |
 | **节点 A 全 milestone 回归** | **与 v0.3 节点 A 合并执行**（用户决定的合并节奏） | — |
 

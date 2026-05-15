@@ -155,6 +155,8 @@ add_executable(OrangeEditor
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
     plugin/AnimatorMiniPreviewPlugin.cpp
+    plugin/DirectionalLightGizmoPlugin.cpp
+    plugin/ParticleEmitterGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
 )
 # OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
