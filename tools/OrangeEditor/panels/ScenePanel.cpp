@@ -5,6 +5,8 @@
 
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
+#include "../EditorRotateGizmo.h"
+#include "../EditorScaleGizmo.h"
 #include "../EditorTranslateGizmo.h"
 
 #include <orange/engine/scene/World.h>
@@ -56,12 +58,47 @@ void EditorRenderLayer::DrawScenePanel()
             const glm::vec2 imageSize(static_cast<float>(panelW),
                                       static_cast<float>(panelH));
 
-            // viewport gizmo —— v0.4 c2 引入 translate gizmo（c3 扩 R/S）。
-            // 必须在 ImGui::Image 之后、picking 触发之前调：让 gizmo 先消
-            // 费 LMB / hover，picking 仅在 gizmo 没接管时触发，避免"拖完
-            // gizmo 松手又触发 picking 清空 / 改变选中"。
-            const bool gizmoActive = DrawAndHandleTranslateGizmo(
-                mHost, imageOrigin, imageSize, aspect);
+            // viewport gizmo —— v0.4 c2 translate；c3 起 W/E/R 切换 +
+            // rotate / scale。必须在 ImGui::Image 之后、picking 触发之前
+            // 调：让 gizmo 先消费 LMB / hover，picking 仅在 gizmo 没接管
+            // 时触发，避免"拖完 gizmo 松手又触发 picking"。
+            //
+            // 模式切换：拖动期间不切换（保 mid-drag 一致性，按 v0.2.5 c13
+            // 的"BeginGroup 期间不交叉"惯例对偶）。键盘 W/E/R 不依赖 viewport
+            // hover（与 Lumix / Unity 同款全局快捷键约定；但要求 ImGui 无
+            // 文本输入 active，否则会拦截字母键）。
+            if (!mHost.gizmo.IsDragging() && !ImGui::IsAnyItemActive())
+            {
+                if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+                {
+                    mHost.gizmo.mode = EditorGizmoState::Mode::Translate;
+                }
+                else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
+                {
+                    mHost.gizmo.mode = EditorGizmoState::Mode::Rotate;
+                }
+                else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+                {
+                    mHost.gizmo.mode = EditorGizmoState::Mode::Scale;
+                }
+            }
+
+            bool gizmoActive = false;
+            switch (mHost.gizmo.mode)
+            {
+                case EditorGizmoState::Mode::Translate:
+                    gizmoActive = DrawAndHandleTranslateGizmo(
+                        mHost, imageOrigin, imageSize, aspect);
+                    break;
+                case EditorGizmoState::Mode::Rotate:
+                    gizmoActive = DrawAndHandleRotateGizmo(
+                        mHost, imageOrigin, imageSize, aspect);
+                    break;
+                case EditorGizmoState::Mode::Scale:
+                    gizmoActive = DrawAndHandleScaleGizmo(
+                        mHost, imageOrigin, imageSize, aspect);
+                    break;
+            }
 
             // viewport picking —— LMB 释放且累积 drag 距离 < 阈值 → 视为
             // 单击（区分于轨道相机拖动）。屏幕坐标 → image-local → NDC

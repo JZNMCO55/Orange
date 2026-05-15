@@ -3,9 +3,9 @@
 
 // EditorGizmoState —— viewport overlay gizmo 的 hover / drag 跨帧状态。
 //
-// v0.4 c2 引入：本期仅承载 Translate gizmo 状态（hoveredAxis /
-// draggingAxis / 拖动起点缓存）。c3 扩 Rotate / Scale 时同结构追加字
-// 段（增 mode enum + plane drag start 等），不拆新 context。
+// v0.4 c2 引入（translate-only）；v0.4 c3 扩 rotate / scale + W/E/R 模式
+// 切换。Axis::None / W/E/R 之外的轴枚举（如中心 uniform-scale handle）
+// 用 Axis::Center。
 //
 // 设计纪律（与 v0.2.5 commit 1 拆 4 个 sub-context 同款）：
 //   "viewport gizmo 跨帧状态" 是第 5 个 editor-global 域 —— 按 CLAUDE.md
@@ -14,41 +14,79 @@
 //
 // 设计参考：vendor/LumixEngine/src/editor/gizmo.cpp 内 `Gizmo` 类持有
 // 的 m_active / m_axis / m_drag_start_pos 等成员；OrangeEditor 走数据
-// 与逻辑分离 —— 状态在本 struct，逻辑在 EditorTranslateGizmo.cpp（c3
-// 起 + EditorRotateGizmo.cpp / EditorScaleGizmo.cpp）。
+// 与逻辑分离 —— 状态在本 struct，逻辑在 EditorTranslateGizmo.cpp /
+// EditorRotateGizmo.cpp / EditorScaleGizmo.cpp。
 
+#include <glm/gtc/quaternion.hpp>
 #include <glm/vec3.hpp>
 
 #include <cstdint>
 
 struct EditorGizmoState
 {
-    enum class Axis : std::uint8_t
+    enum class Mode : std::uint8_t
     {
-        None = 0,
-        X    = 1,
-        Y    = 2,
-        Z    = 3,
+        Translate = 0,  // W
+        Rotate    = 1,  // E
+        Scale     = 2,  // R
     };
 
-    // 当前 hover 的 axis handle —— 每帧 hit-test 重置（None = 鼠标不在
-    // 任何 handle 上）。draggingAxis != None 期间 hoveredAxis 强制等于
+    enum class Axis : std::uint8_t
+    {
+        None   = 0,
+        X      = 1,
+        Y      = 2,
+        Z      = 3,
+        Center = 4,  // Scale gizmo 中心 uniform-scale handle；其他 mode 不用
+    };
+
+    // 当前 gizmo 模式（W / E / R 切换）。键盘快捷键由 ScenePanel 内 ImGui
+    // hotkey 探测路径写本字段；切换时若 draggingAxis != None 暂保持模式不变
+    // 到 LMB 释放，避免 mid-drag 切模式撞坑。
+    Mode mode = Mode::Translate;
+
+    // 当前 hover 的 handle —— 每帧 hit-test 重置（None = 鼠标不在任何
+    // handle 上）。draggingAxis != None 期间 hoveredAxis 强制等于
     // draggingAxis（拖动期不参与 hit-test）。
     Axis hoveredAxis = Axis::None;
 
-    // 当前正在拖动的 axis handle —— None = 没有拖动中。draggingAxis !=
-    // None 期间 ScenePanel 跳过 picking 触发，避免 LMB 释放时既拖完
-    // gizmo 又触发 picking。
+    // 当前正在拖动的 handle —— None = 没有拖动中。draggingAxis != None
+    // 期间 ScenePanel 跳过 picking 触发，避免 LMB 释放时既拖完 gizmo
+    // 又触发 picking。
     Axis draggingAxis = Axis::None;
 
-    // 拖动起点：实体在按下 LMB 那一帧的 position（用作 SetFieldValue
-    // Command 的 oldValue + 增量计算 baseline）。
-    glm::vec3 dragStartEntityPos = glm::vec3(0.0f);
+    // ---- 通用拖动起点（所有 mode 共用）----------------------------------
+    // 实体在按下 LMB 那一帧的 transform 快照——translate 用 position 作
+    // oldValue / 增量 baseline；rotate 用 rotation 作 axisAngle 累乘的
+    // baseline；scale 用 scale 作乘数 baseline。
+    glm::vec3 dragStartEntityPos   = glm::vec3(0.0f);
+    glm::quat dragStartEntityRot   = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::vec3 dragStartEntityScale = glm::vec3(1.0f);
 
-    // 拖动起点：鼠标 ray 与拖动轴线的最近点 world 坐标（按下 LMB 那
-    // 一帧计算）。每帧用最新鼠标 ray 重算最近点，与本字段相减得到沿
-    // 轴位移增量。
+    // ---- Translate 专用 ------------------------------------------------
+    // 鼠标 ray 与拖动轴线的最近点 world 坐标（按下 LMB 那一帧）。每帧用
+    // 最新鼠标 ray 重算最近点，与本字段相减得到沿轴位移增量。
     glm::vec3 dragStartHitOnAxis = glm::vec3(0.0f);
+
+    // ---- Rotate 专用 ---------------------------------------------------
+    // 拖动起点：mouse ray 与 axis 平面交点相对 entity 的向量在 axis 平
+    // 面内的投影方向（单位向量）。每帧重算 → 与本字段求 signedAngle =
+    // 角度增量；newRot = axisAngle(axisDir, deltaAngle) * dragStartRot。
+    glm::vec3 dragStartRotateRef = glm::vec3(1.0f, 0.0f, 0.0f);
+
+    // ---- Scale 专用 ----------------------------------------------------
+    // 拖动起点：mouse ray 与 axis line 最近点相对 dragStartEntityPos 的
+    // 沿轴 signed 距离（dot(hit-pos, axisDir)）。每帧 currentSigned /
+    // dragStartScaleRefSigned = 沿该轴的乘数 factor（clamp 防 NaN / 极
+    // 端值）。Axis::Center（uniform scale）走屏幕 dy / 100 启发式，不用
+    // 本字段。
+    float dragStartScaleRefSigned = 0.0f;
+
+    // ---- Scale Center（uniform）专用 ----------------------------------
+    // 拖动起点：鼠标屏幕坐标（按下 LMB 那一帧）。每帧 (currentMouseY -
+    // dragStartMouseScreen.y) / 100 + 1 = uniform factor（Y 向上拖 = 缩
+    // 小 / Y 向下拖 = 放大，与 Lumix 同款屏幕约定）。
+    glm::vec3 dragStartMouseScreen = glm::vec3(0.0f, 0.0f, 0.0f);
 
     bool IsDragging() const noexcept { return draggingAxis != Axis::None; }
     bool IsHovered()  const noexcept { return hoveredAxis  != Axis::None; }

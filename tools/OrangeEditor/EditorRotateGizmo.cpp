@@ -1,0 +1,373 @@
+#include "EditorRotateGizmo.h"
+
+#include "EditorCameraControl.h"
+#include "EditorGizmoMath.h"
+#include "command/SetFieldValueCommand.h"
+
+#include <orange/engine/render/Camera.h>
+#include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/World.h>
+
+#include <imgui.h>
+
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/trigonometric.hpp>
+#include <glm/vec3.hpp>
+
+#include <array>
+#include <cmath>
+#include <memory>
+#include <string>
+
+namespace
+{
+
+namespace GM = OrangeEditor::Internal::GizmoMath;
+
+// 设计常数。
+constexpr int   kRingSegments        = 48;   // 圆环 polyline 段数
+constexpr float kHandleScreenLengthPx = 90.0f;  // 圆环半径目标屏幕长度（与 translate axis 同款）
+constexpr float kHitThresholdPx       = 8.0f;   // 2D 点-线段距离阈值
+
+// ---- 颜色（与 translate 共享同款方案；c4 后可能抽到 shared 头）-----------
+constexpr ImU32 kColX        = IM_COL32(220, 60,  60,  255);
+constexpr ImU32 kColXBright  = IM_COL32(255, 180, 120, 255);
+constexpr ImU32 kColY        = IM_COL32(60,  200, 60,  255);
+constexpr ImU32 kColYBright  = IM_COL32(180, 255, 120, 255);
+constexpr ImU32 kColZ        = IM_COL32(60,  120, 240, 255);
+constexpr ImU32 kColZBright  = IM_COL32(140, 200, 255, 255);
+
+ImU32 AxisColor(EditorGizmoState::Axis axis, bool highlight) noexcept
+{
+    switch (axis)
+    {
+        case EditorGizmoState::Axis::X: return highlight ? kColXBright : kColX;
+        case EditorGizmoState::Axis::Y: return highlight ? kColYBright : kColY;
+        case EditorGizmoState::Axis::Z: return highlight ? kColZBright : kColZ;
+        default:                        return IM_COL32(255, 255, 255, 255);
+    }
+}
+
+glm::vec3 AxisDir(EditorGizmoState::Axis axis) noexcept
+{
+    switch (axis)
+    {
+        case EditorGizmoState::Axis::X: return glm::vec3(1.0f, 0.0f, 0.0f);
+        case EditorGizmoState::Axis::Y: return glm::vec3(0.0f, 1.0f, 0.0f);
+        case EditorGizmoState::Axis::Z: return glm::vec3(0.0f, 0.0f, 1.0f);
+        default:                        return glm::vec3(0.0f);
+    }
+}
+
+// 选两个在 axis 平面内、彼此正交的单位向量，用于 ring 参数化（u * cos +
+// v * sin 描点）。注意：cross(axis, world_up) 退化（axis ≈ ±Y）时换用 X。
+struct PlaneBasis { glm::vec3 u; glm::vec3 v; };
+
+PlaneBasis MakePlaneBasis(const glm::vec3& axis) noexcept
+{
+    glm::vec3 helper = (std::abs(axis.y) < 0.99f) ? glm::vec3(0, 1, 0)
+                                                  : glm::vec3(1, 0, 0);
+    glm::vec3 u = glm::normalize(glm::cross(axis, helper));
+    glm::vec3 v = glm::normalize(glm::cross(axis, u));
+    return {u, v};
+}
+
+// 在圆环上取 N 个 world 点（u/v 基 + center + radius）。
+template <std::size_t N>
+std::array<glm::vec3, N>
+SampleRingPoints(const glm::vec3& center, const glm::vec3& axisDir, float radius) noexcept
+{
+    const auto basis = MakePlaneBasis(axisDir);
+    std::array<glm::vec3, N> pts;
+    for (std::size_t i = 0; i < N; ++i)
+    {
+        const float theta = (2.0f * 3.14159265358979f * static_cast<float>(i))
+                          / static_cast<float>(N);
+        pts[i] = center
+               + basis.u * (radius * std::cos(theta))
+               + basis.v * (radius * std::sin(theta));
+    }
+    return pts;
+}
+
+// ---- Transform.rotation 写回 + invalidate Euler 缓存 -----------------------
+// 同步 invalidate `selection.transformEulerCacheEntity`，让 Inspector 下一
+// 帧 Quat case 从最新 quat 重算 Euler 显示 —— 与 SchemaInspector.cpp Quat
+// case 的 invalidate 路径完全对偶（区别仅在 caller：那边是 DragFloat3 改
+// Euler 后回算 quat 写入；本 gizmo 是直接生成新 quat，但 Euler 缓存同样
+// 必须失效，否则 Inspector 会显示旧 Euler 数字直到用户手动切实体重算）。
+auto MakeTransformRotationApply(EditorHost* pHost, Orange::Engine::Entity entity)
+{
+    return [pHost, entity](const glm::quat& value)
+    {
+        if (pHost == nullptr) { return; }
+        auto* pWorld = pHost->scene.pWorld.get();
+        if (pWorld == nullptr) { return; }
+        auto* pTC = pWorld->GetComponent<Orange::Engine::Scene::TransformComponent>(entity);
+        if (pTC == nullptr) { return; }
+        pTC->rotation = value;
+        pHost->selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    };
+}
+
+void AbortDragIfNeeded(EditorHost& host)
+{
+    if (!host.gizmo.IsDragging()) { return; }
+    if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
+    host.gizmo.draggingAxis = EditorGizmoState::Axis::None;
+}
+
+}  // anonymous namespace
+
+bool DrawAndHandleRotateGizmo(EditorHost& host,
+                              glm::vec2   viewportImageOriginScreen,
+                              glm::vec2   viewportImageSize,
+                              float       aspect)
+{
+    using Axis = EditorGizmoState::Axis;
+    using Orange::Engine::Scene::TransformComponent;
+
+    // ---- 早退：Play Mode / 无 World / 无选中实体 / 实体无 Transform ----
+    if (host.scene.playState != PlayState::Edit)
+    {
+        AbortDragIfNeeded(host);
+        host.gizmo.hoveredAxis = Axis::None;
+        return false;
+    }
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr || !host.selection.selectedEntity.IsValid())
+    {
+        AbortDragIfNeeded(host);
+        host.gizmo.hoveredAxis = Axis::None;
+        return false;
+    }
+    const Orange::Engine::Entity entity = host.selection.selectedEntity;
+    auto* pTC = pWorld->GetComponent<TransformComponent>(entity);
+    if (pTC == nullptr)
+    {
+        AbortDragIfNeeded(host);
+        host.gizmo.hoveredAxis = Axis::None;
+        return false;
+    }
+
+    // ---- camera + viewProj ----
+    const auto      cam         = BuildEditorCamera(host.camera, aspect);
+    const glm::mat4 viewProj    = cam.projection * cam.view;
+    const glm::mat4 invViewProj = glm::inverse(viewProj);
+
+    const glm::vec3 entityPos = pTC->position;
+
+    // ---- gizmo 半径自适应（同 translate）----
+    const auto projOrigin = GM::ProjectWorldToScreen(entityPos, viewProj,
+                                                     viewportImageOriginScreen,
+                                                     viewportImageSize);
+    if (!projOrigin.has_value())
+    {
+        AbortDragIfNeeded(host);
+        host.gizmo.hoveredAxis = Axis::None;
+        return false;
+    }
+    float ringRadius = 1.0f;
+    const auto projPlusX = GM::ProjectWorldToScreen(
+        entityPos + glm::vec3(1.0f, 0.0f, 0.0f),
+        viewProj, viewportImageOriginScreen, viewportImageSize);
+    if (projPlusX.has_value())
+    {
+        const float pxPerUnit = glm::length(projPlusX->screen - projOrigin->screen);
+        if (pxPerUnit > 1e-3f)
+        {
+            ringRadius = kHandleScreenLengthPx / pxPerUnit;
+        }
+    }
+
+    // ---- 3 个圆环：投影所有顶点到屏幕 ----
+    struct RingProjected
+    {
+        Axis      axis;
+        glm::vec3 axisDir;
+        std::array<glm::vec2, kRingSegments> screenPts;
+        bool any_visible = false;
+    };
+    std::array<RingProjected, 3> rings{{
+        {Axis::X, AxisDir(Axis::X), {}, false},
+        {Axis::Y, AxisDir(Axis::Y), {}, false},
+        {Axis::Z, AxisDir(Axis::Z), {}, false},
+    }};
+    for (auto& rp : rings)
+    {
+        const auto pts = SampleRingPoints<kRingSegments>(entityPos, rp.axisDir, ringRadius);
+        bool allBehind = true;
+        for (std::size_t i = 0; i < kRingSegments; ++i)
+        {
+            const auto sp = GM::ProjectWorldToScreen(pts[i], viewProj,
+                                                    viewportImageOriginScreen,
+                                                    viewportImageSize);
+            if (sp.has_value())
+            {
+                rp.screenPts[i] = sp->screen;
+                allBehind = false;
+            }
+            else
+            {
+                // 标记一个 sentinel（不绘制本段；hit-test 跳过）。
+                rp.screenPts[i] = glm::vec2(std::numeric_limits<float>::quiet_NaN());
+            }
+        }
+        rp.any_visible = !allBehind;
+    }
+
+    // ---- 2D hit-test（拖动期间跳过；强制 hoveredAxis = draggingAxis）----
+    const ImVec2    mousePosIm = ImGui::GetMousePos();
+    const glm::vec2 mousePos(mousePosIm.x, mousePosIm.y);
+
+    if (!host.gizmo.IsDragging())
+    {
+        Axis  bestAxis = Axis::None;
+        float bestDist = kHitThresholdPx;
+        for (const auto& rp : rings)
+        {
+            if (!rp.any_visible) { continue; }
+            for (std::size_t i = 0; i < kRingSegments; ++i)
+            {
+                const std::size_t j = (i + 1) % kRingSegments;
+                const glm::vec2&  a = rp.screenPts[i];
+                const glm::vec2&  b = rp.screenPts[j];
+                if (std::isnan(a.x) || std::isnan(b.x)) { continue; }
+                const float d = GM::PointSegmentDistance2D(mousePos, a, b);
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    bestAxis = rp.axis;
+                }
+            }
+        }
+        host.gizmo.hoveredAxis = bestAxis;
+    }
+    else
+    {
+        host.gizmo.hoveredAxis = host.gizmo.draggingAxis;
+    }
+
+    // ---- 输入：按下 / 拖动 / 释放 ----
+    const bool imageHovered = ImGui::IsItemHovered();
+
+    // 按下：mouse ray 与 axis plane 交点 → dragStartRotateRef
+    if (!host.gizmo.IsDragging()
+        && imageHovered
+        && host.gizmo.IsHovered()
+        && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        const auto mouseRay = GM::ScreenToWorldRay(mousePos,
+                                                   viewportImageOriginScreen,
+                                                   viewportImageSize,
+                                                   invViewProj);
+        if (mouseRay.has_value())
+        {
+            const glm::vec3 axisDir = AxisDir(host.gizmo.hoveredAxis);
+            const auto t = GM::RayPlaneIntersect(mouseRay->origin, mouseRay->dir,
+                                                 entityPos, axisDir);
+            if (t.has_value())
+            {
+                const glm::vec3 hitWorld = mouseRay->origin + mouseRay->dir * (*t);
+                const glm::vec3 fromCenter = hitWorld - entityPos;
+                const float len = glm::length(fromCenter);
+                if (len > 1e-4f)
+                {
+                    host.gizmo.draggingAxis       = host.gizmo.hoveredAxis;
+                    host.gizmo.dragStartEntityRot = pTC->rotation;
+                    host.gizmo.dragStartRotateRef = fromCenter / len;
+                    host.cmdStack.BeginGroup("Rotate Drag", MergeMode::Ends);
+                }
+            }
+        }
+    }
+
+    if (host.gizmo.IsDragging())
+    {
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
+            host.gizmo.draggingAxis = Axis::None;
+        }
+        else
+        {
+            const auto mouseRay = GM::ScreenToWorldRay(mousePos,
+                                                      viewportImageOriginScreen,
+                                                      viewportImageSize,
+                                                      invViewProj);
+            if (mouseRay.has_value())
+            {
+                const glm::vec3 axisDir = AxisDir(host.gizmo.draggingAxis);
+                const auto t = GM::RayPlaneIntersect(mouseRay->origin, mouseRay->dir,
+                                                    entityPos, axisDir);
+                if (t.has_value())
+                {
+                    const glm::vec3 hitWorld   = mouseRay->origin + mouseRay->dir * (*t);
+                    const glm::vec3 fromCenter = hitWorld - entityPos;
+                    const float     len        = glm::length(fromCenter);
+                    if (len > 1e-4f)
+                    {
+                        const glm::vec3 currentRef = fromCenter / len;
+                        // signed angle between dragStartRotateRef → currentRef
+                        // around axisDir：atan2(cross·axis, dot)。
+                        const float dotPart  = glm::dot(host.gizmo.dragStartRotateRef, currentRef);
+                        const glm::vec3 cr   = glm::cross(host.gizmo.dragStartRotateRef, currentRef);
+                        const float crossPart = glm::dot(cr, axisDir);
+                        const float deltaAngle = std::atan2(crossPart, dotPart);
+
+                        const glm::quat deltaQ = glm::angleAxis(deltaAngle, axisDir);
+                        const glm::quat newRot = deltaQ * host.gizmo.dragStartEntityRot;
+                        const glm::quat oldRot = pTC->rotation;
+
+                        // quat 直接 != 比较有 epsilon 风险；用 dot 阈值更稳。
+                        const float similarity = std::abs(glm::dot(oldRot, newRot));
+                        if (similarity < 1.0f - 1e-6f)
+                        {
+                            pTC->rotation = newRot;
+                            host.selection.transformEulerCacheEntity =
+                                Orange::Engine::Entity::Invalid();
+                            host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
+                                entity,
+                                std::string("Transform.rotation"),
+                                host.gizmo.dragStartEntityRot,  // oldVal 锁定到拖动起点
+                                newRot,
+                                MakeTransformRotationApply(&host, entity)));
+                        }
+                    }
+                }
+            }
+
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            {
+                if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
+                host.gizmo.draggingAxis = Axis::None;
+            }
+        }
+    }
+
+    // ---- 绘制 polyline ring ----
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    if (drawList != nullptr)
+    {
+        for (const auto& rp : rings)
+        {
+            if (!rp.any_visible) { continue; }
+            const bool   highlight = (host.gizmo.hoveredAxis == rp.axis)
+                                  || (host.gizmo.draggingAxis == rp.axis);
+            const ImU32  col       = AxisColor(rp.axis, highlight);
+            const float  thickness = highlight ? 3.5f : 2.0f;
+            for (std::size_t i = 0; i < kRingSegments; ++i)
+            {
+                const std::size_t j = (i + 1) % kRingSegments;
+                const glm::vec2&  a = rp.screenPts[i];
+                const glm::vec2&  b = rp.screenPts[j];
+                if (std::isnan(a.x) || std::isnan(b.x)) { continue; }
+                drawList->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), col, thickness);
+            }
+        }
+    }
+
+    return host.gizmo.IsDragging() || (imageHovered && host.gizmo.IsHovered());
+}

@@ -234,12 +234,127 @@ units per ~90 px）。
 
 ---
 
-## Commit 3+ 占位
+## Commit 3：Rotate + Scale gizmo + W/E/R 模式切换
 
-后续 commit 按 editor-roadmap.md v0.4 deliverables 顺序推进，每个 commit 落地时在本文档**追加**
-一节，结构同上：
+`tools/OrangeEditor/EditorRotateGizmo.{h,cpp}` + `EditorScaleGizmo.{h,cpp}` 引入，配合
+`EditorGizmoState` 增 `Mode` enum（Translate / Rotate / Scale）+ rotate / scale 拖动起点字
+段（`dragStartEntityRot` / `dragStartRotateRef` / `dragStartEntityScale` /
+`dragStartScaleRefSigned` / `dragStartMouseScreen`）。`ScenePanel` 按 `host.gizmo.mode`
+分派对应 gizmo；W/E/R 键盘快捷键切换模式（不依赖 viewport hover，但要求 ImGui 无文本输入
+active 以免拦截字母键；mid-drag 不切换以保持原子性）。
 
-- **c3**：Rotate gizmo + Scale gizmo + W/E/R 模式切换
+同 PR 把 c2 期 `EditorTranslateGizmo.cpp` anon ns 里的 4 个 helper（`ProjectWorldToScreen` /
+`ScreenToWorldRay` / `PointSegmentDistance2D` / `ClosestPointOnAxisToRay`）+ 新增的
+`RayPlaneIntersect` 提取到 `EditorGizmoMath.{h,cpp}`（内部 helper，命名空间
+`OrangeEditor::Internal::GizmoMath`，仅 editor target 内消费），三个 gizmo cpp 共享。避免
+c3+ 多 gizmo 跨文件重复维护"Vulkan NDC y-down"等坐标系约定。
+
+CommandStack 联动：
+- Rotate：`BeginGroup("Rotate Drag")` + per-frame `SetFieldValueCommand<glm::quat>(entity,
+  "Transform.rotation", oldVal=dragStartEntityRot, newVal=newRot)`；apply lambda 同步
+  invalidate `selection.transformEulerCacheEntity`，让 Inspector 下一帧 Quat case 重算
+  Euler 显示（与 SchemaInspector.cpp Quat case invalidate 路径对偶）
+- Scale：`BeginGroup("Scale Drag")` + per-frame `SetFieldValueCommand<glm::vec3>(entity,
+  "Transform.scale", oldVal=dragStartEntityScale, newVal=newScale)`；单轴拖按沿轴 signed
+  距离 ratio 乘单轴；中心 `Axis::Center` 走 uniform 屏幕 (dx+dy)/100+1 乘全 3 轴；factor
+  clamp [0.01, 100] 防退化
+
+参考实现：
+- `vendor/LumixEngine/src/editor/gizmo.cpp` Rotate 段（polyline 圆环 + signed angle
+  atan2 路径 + axisAngle quat 累乘）+ Scale 段（屏幕距离启发 + 沿轴 signed 比例）
+- 圆环切线方向参数化（`MakePlaneBasis` 取与 axis 正交的 u/v 单位向量，cos/sin 描点 48
+  段）
+
+### 验收点
+
+- [ ] **W/E/R 模式切换基础**
+  - [ ] 选中带 Transform 的实体（demo scene 任意实体均可）
+  - [ ] 默认看到 Translate gizmo（3 个箭头）—— 编辑器启动后默认 mode
+  - [ ] 按 `W` 键 → 仍是 Translate gizmo（无变化）
+  - [ ] 按 `E` 键 → gizmo **变成 3 个圆环**（X 红 / Y 绿 / Z 蓝，绕实体位置呈球面)
+  - [ ] 按 `R` 键 → gizmo **变成 3 个箭头 + tip 小方块 + 中心白色小方块**（scale 视觉）
+  - [ ] 再按 `W` 键 → 回到 Translate 箭头
+  - [ ] 三种模式视觉清晰可区分：translate 三角箭头 / rotate 圆环 / scale 立方体 tip
+
+- [ ] **模式切换不打断拖动**
+  - [ ] 选实体 → 按 `W` → 按住红 X 箭头开始拖动（不松开）
+  - [ ] 拖动中按 `E` 或 `R` 键 → gizmo **保持 Translate 模式**（不切换到 Rotate / Scale）
+  - [ ] 松开 LMB 后再按 `E` → 切换到 Rotate gizmo
+  - [ ] 同理：rotate 拖动中按 W/R 也不切换；scale 拖动中按 W/E 也不切换
+
+- [ ] **模式切换不被 Inspector 文本框拦截**
+  - [ ] 在 Inspector 的 Name 字段 InputText 内点击 → 光标进入文本框
+  - [ ] 按 `W` / `E` / `R` 键 → 字母进入 Name 字段（**不**切换 gizmo 模式）
+  - [ ] 点击 viewport 空白处（脱出 InputText focus）
+  - [ ] 再按 `W` / `E` / `R` → 正常切换 gizmo 模式
+
+- [ ] **Rotate gizmo 拖动 + Undo/Redo**
+  - [ ] 选实体 → 按 `E` 切到 Rotate → Inspector 记下 Transform.rotation 初始 Euler 值
+  - [ ] 按住红色 X 圆环 → 拖动鼠标绕圆周 → 实体绕 X 轴旋转；同时 Inspector 的 Rotation
+    字段数值实时变化
+  - [ ] 松开 LMB → 实体停在新角度
+  - [ ] `Ctrl+Z` 一次 → 实体**回到拖动前的角度**（不是中间某帧）+ Inspector Rotation
+    回到初始值
+  - [ ] `Ctrl+Y` 一次 → 回到拖动结束的角度
+  - [ ] 同样验证绿色 Y 圆环 + 蓝色 Z 圆环
+
+- [ ] **Rotate Inspector / gizmo 双路径不串味**
+  - [ ] 选实体 → Inspector 拖 Rotation Y 改到 `45°`
+  - [ ] 按 `E` 切 Rotate → 拖 X 圆环再加 `30°`
+  - [ ] `Ctrl+Z` 一次 → 仅回滚 gizmo 那次（X 旋转回到 0°；Y 仍是 45°）
+  - [ ] 再 `Ctrl+Z` 一次 → Y 也回滚到 0°（Inspector 那次）
+  - [ ] **关键**：gizmo 拖动期间 Inspector 的 Rotation 字段应**实时**显示新 Euler 值
+    （不是停在旧值——验证 `transformEulerCacheEntity` invalidate 正确）
+
+- [ ] **Scale 单轴拖动**
+  - [ ] 选实体 → 按 `R` 切 Scale → Inspector 记下 Transform.scale 初始 `(1, 1, 1)`
+  - [ ] 按住红 X 箭头 → 沿 X 方向**远离原点**拖动 → 实体在 X 方向**变长**；Inspector
+    scale.x 数值实时增大
+  - [ ] 反向拖动（朝原点 → 沿轴负方向）→ 实体在 X 方向**变短**；scale.x 数值缩小
+  - [ ] 极端拖动到很小（不越过 0）→ scale.x clamp 到 ≥ 0.01（不应变 0 / 负数）
+  - [ ] 松开 LMB → `Ctrl+Z` 一次回到 `(1, 1, 1)`
+  - [ ] 同理验证 Y 轴（scale.y 变化，X/Z 不变）+ Z 轴
+
+- [ ] **Scale uniform 中心 handle**
+  - [ ] 选实体 → 按 `R` → 中心**白色小立方体**位于 gizmo 原点（与 3 轴起点重合）
+  - [ ] hover 中心立方体 → 立方体颜色变亮（黄色高亮）
+  - [ ] 按住中心 → 鼠标**向右下角**拖动 → 实体**整体放大**；Inspector scale.x/y/z **同步**
+    变大（uniform）
+  - [ ] 反向（向左上角）拖动 → 实体整体缩小；scale 三轴同步变小
+  - [ ] `Ctrl+Z` 一次回到 `(1, 1, 1)` —— 三轴一起回滚
+
+- [ ] **Scale 各模式 hit-test 优先级**
+  - [ ] 中心立方体在原点附近 → 鼠标放在原点中心 → hover 高亮的是**中心**（不是某条轴）
+  - [ ] 鼠标稍微离开原点（往 X 方向移） → hover 高亮的是 **X 轴**（不是中心）
+  - [ ] 切换不串味（不出现"中心和 X 同时高亮"）
+
+- [ ] **三模式跨模式切换 + cmdStack 干净**
+  - [ ] 拖 Translate X 移到某位置 → 按 `E` 切 Rotate → 拖 Y 圆环 → 按 `R` 切 Scale →
+    拖中心放大
+  - [ ] `Ctrl+Z` 三次 → 逐步回滚 scale → rotate → translate，每步对应一次拖动
+  - [ ] 每次 `Ctrl+Z` 期间 gizmo **保持当前模式**（不会被 Undo 反向切回旧模式——gizmo
+    mode 不入命令栈，是 UI 状态）
+
+- [ ] **Play Mode 期间所有 3 模式 gizmo 都禁用**
+  - [ ] 选实体 → 按 W → 看到 Translate gizmo
+  - [ ] ▶ Play → gizmo **消失**（同 c2 行为）
+  - [ ] Play 期间按 E / R → mode 字段可能更新（无危害）但 gizmo 仍不绘制不响应
+  - [ ] ■ Stop → gizmo 重新出现，按当前 mode 显示对应类型
+  - [ ] 拖动正常工作，cmdStack 状态保持
+
+- [ ] **picking gate 仍正确（c2 行为不回退）**
+  - [ ] 三模式之一拖完 gizmo 松手 → **不**触发 picking（选中实体不变）
+  - [ ] viewport 空白处单击（任何模式下）→ 触发 picking（清除选中或选中下方物体）
+
+### bugs
+（待大节点回归后填）
+
+---
+
+## Commit 4+ 占位
+
+后续 commit 按 editor-roadmap.md v0.4 deliverables 顺序推进：
+
 - **c4**：Light gizmo（DirectionalLight 方向箭头）+ ParticleEmitter gizmo（spawn box +
   velocity 向量）—— 走 v0.2.5 c12 落地的 `IEditorGizmoPlugin` 抽象（首批真实消费）
 - **c5**：Camera frustum（选中带 Camera 组件实体显示线框）+ Viewport 工具栏（视图模式 /
@@ -262,8 +377,8 @@ acceptance-checklist 同时归档（v0.2.5 / v0.3 同款生命周期）。
 | Commit | 主题 | 状态 |
 |--------|------|------|
 | c1 | Viewport picking (ray-AABB hit-test) | ✅ |
-| c2 | Translate gizmo + CommandStack BeginGroup 首批消费 | — |
-| c3 | Rotate / Scale gizmo + W/E/R 切换 | — |
+| c2 | Translate gizmo + CommandStack BeginGroup 首批消费 | ✅ |
+| c3 | Rotate / Scale gizmo + W/E/R 切换 | ✅ |
 | c4 | Light + ParticleEmitter gizmo (IEditorGizmoPlugin 首批消费) | — |
 | c5 | Camera frustum + Viewport 工具栏 | — |
 | **节点 A 全 milestone 回归** | **与 v0.3 节点 A 合并执行**（用户决定的合并节奏） | — |
