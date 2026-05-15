@@ -629,8 +629,19 @@ endif ()
 #
 # Sample 子工程随各阶段里程碑逐个加入；samples/CMakeLists.txt 内部
 # 按顺序 add_subdirectory 每一个 sample。
+#
+# 默认 ON 仅对顶层 build——作为下游 SDK 被 add_subdirectory 嵌入时
+# 默认 OFF，与 ORANGE_ENGINE_BUILD_TESTS / ORANGE_ENGINE_BUILD_EDITOR
+# 同策略。日常迭代编辑器时可以显式 -DORANGE_ENGINE_BUILD_SAMPLES=OFF
+# 跳过，加快增量构建。
 # ---------------------------------------------------------------------------
-add_subdirectory(samples)
+option(ORANGE_ENGINE_BUILD_SAMPLES
+    "Build samples/* end-to-end demos"
+    "${PROJECT_IS_TOP_LEVEL}")
+
+if (ORANGE_ENGINE_BUILD_SAMPLES)
+    add_subdirectory(samples)
+endif ()
 
 # ---------------------------------------------------------------------------
 # OrangeEditor（tools/OrangeEditor）
