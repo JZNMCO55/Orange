@@ -272,8 +272,14 @@ int main()
     // 简体中文都覆盖；体积比 simsun.ttc 稍大但清晰度好。
     //
     // ImGui 默认 glyph range 是 ASCII (0x20-0xFF)，必须**显式**传入 CJK 范围
-    // 才会把中文字符烘焙到 font atlas。GetGlyphRangesChineseSimplifiedCommon
-    // 含常用 ~2500 简中字 + ASCII + 部分 CJK 标点，覆盖编辑器 UI 文案足够。
+    // 才会把中文字符烘焙到 font atlas。
+    //
+    // 用 `GetGlyphRangesChineseFull` (21000+ 字，覆盖完整 CJK Unified
+    // Ideographs Basic 区 U+4E00-U+9FAF + 标点 + 假名等) 而非
+    // `GetGlyphRangesChineseSimplifiedCommon` 的 ~2500 常用字——后者漏
+    // 罕用字 / 部分 CJK 标点（em-dash U+2014 等）导致零星 "?" 乱码。
+    // 代价：font atlas 体积增大约 600KB，启动时烘焙 + 上传时间增 ~100ms 量级，
+    // editor 场景可接受。后续若 atlas 体积压力大，可切按需 glyph 加载方案。
     //
     // **必须**在 ImGui_ImplVulkan_Init 之前完成 —— Vulkan backend 在 Init 阶段
     // 从 io.Fonts atlas 创建 font texture，后改动 atlas 需要重建 + 重上传。
@@ -281,7 +287,7 @@ int main()
     // 失败 fallback 链：msyh.ttc → segoeui.ttf (ASCII only) → ImGui 内置
     // ProggyClean（位图，仅 ASCII；中文仍乱码但保底能跑）。
     {
-        const ImWchar* cjkRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+        const ImWchar* cjkRanges = io.Fonts->GetGlyphRangesChineseFull();
         ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
             "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges);
         if (fontMain == nullptr) {
