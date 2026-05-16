@@ -126,6 +126,14 @@ void DrawProperty(EditorHost&                  host,
     // 而非控件上（控件拖拽 / 编辑状态时 hover 会被打断；label hover 更稳定）。
     Orange::Editor::Widgets::PropertyLabel(prop.label, prop.attribs.tooltip);
 
+    // PushID(prop.name) 隔离同一 component schema 段内多个控件的 ImGui ID。
+    // v0.4.5 c1 修复：之前所有控件 label 用同一个 "##v"，ImGui ID =
+    // hash("##v") + ID stack 在同 Table 内**共享**——hover 一个控件会让
+    // 所有同 ID 控件被算作 hover，红色高亮 + tooltip 在错误位置弹出。
+    // PropertyLabel 内 TextUnformatted 不产生 ID，所以 PushID 放在 Label
+    // 之后、控件之前都可——这里放控件之前最直观。
+    ImGui::PushID(prop.name != nullptr ? prop.name : "?");
+
     // 紧跟 PropertyLabel 的下一个 ImGui 控件占满右列。控件 label 一律用
     // "##" 前缀隐藏 —— 真实 label 已经被 PropertyLabel 写在左列。
     switch (prop.type)
@@ -421,6 +429,8 @@ void DrawProperty(EditorHost&                  host,
             break;
         }
     }
+
+    ImGui::PopID();
 
     // tooltip 已经在 PropertyLabel 内挂在左列 label 上 —— 控件本身不再做
     // hover 检查（控件在拖拽 / 编辑状态时 hover 行为会被打断，label hover
