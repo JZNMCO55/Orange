@@ -348,7 +348,7 @@ GAP 未落地前，编辑器侧**不**主动 workaround（避免 Convention C �
 - **发现方**：OrangeEditor v0.5 start-checklist（Asset 浏览器 + Material 子模式 milestone）
 - **发现日期**：2026-05-16
 - **一句话定性**：编辑器内置 mesh / material 仅在启动期通过 `InitializeEditorAssets` + `BuildNamedMaterialInstances` 在内存中注册，缺 .material / .mesh 磁盘落盘 + AssetRegistry 从盘加载命名 asset 的路径，导致 v0.5 Asset 浏览器无法浏览真实磁盘 asset、Material 子模式调参无法持久化
-- **状态**：待评审 + 待落地
+- **状态**：✅ 已落地（2026-05-16，本 session 内 G1+G2+G4 + 顺手扩 MeshLoader v2 加 UV 支持；G3 评审决定不需要——LookupByPath 不必新增 API，AssetRegistry::Load 自带 dedup + namedMaterialInstances map 已是 path→ptr 反查）
 
 ### 触发场景
 
@@ -420,8 +420,34 @@ v0.5 milestone 描述"资源浏览器 + Material 子模式"假设 `assets/` 下�
 1. **GAP 落地 session**（本 GAP）：G1 + G2 + G3 + G4 一次性落（共享 .obj / .material loader 注册 + Scene migrator 逻辑；拆 4 个 session 会反复改 AssetRegistry / DemoWorld 同一区域，碎片化）
 2. **v0.5 推进 session**：消费 G1–G4 已落地的能力实现 Asset 浏览器 + Material 子模式 + Inspector AssetRef 字段
 
+### 落地记录（2026-05-16）
+
+实际工作流偏离原计划：用户在 v0.5 推进 session（本 session）授权"先落 GAP 再推 v0.5"，把"GAP 落地 + v0.5 消费"合并到同一 session。两阶段顺序串行执行，无双向操作冲突（GAP 三个 commit 全部 ✅ + 验证通过后才进入 v0.5 commit）。
+
+**实际落地范围**：
+
+- **G1 ✅**（commit `222bd3f`）：MeshLoader v1 → v2 加 UV 段 + 引入 `MeshLoader::Save(path, mesh)` 静态方法。`tools/OrangeEditor/DemoWorld.cpp::InitializeEditorAssets` 注册 MeshLoader + lazy bake 路径（检测 `assets/meshes/X.mesh` 缺失则程序化构造 + MeshLoader::Save 写盘后再 AssetRegistry::Load）。本 commit 自带烘焙产物：`assets/meshes/cube.mesh` (641B) + `assets/meshes/plane.mesh` (121B)
+- **G2 ✅**（commit `60eaa40`）：`.material` JSON 文件格式 v1.0 最小集（仅 `templateName` 字段）。`tools/OrangeEditor/DemoWorld.cpp` 加 `writeMaterialFile / readMaterialTemplate / bakeAndLoadMaterial` 三个 helper lambda（直接用 JsonReader/JsonWriter，不引入 IAssetLoader<MaterialInstance>——后者需要 MaterialSystem 注入容器没法塞 IAssetLoader 接口）。七个内置 material（floor / wall / toon / rim_light / dissolve / default / light_object）走 lazy bake。`BuildNamedMaterialInstances` map key 从 "builtin/X" 改成 "assets/materials/builtin/X.material" 路径风格。本 commit 自带 7 个 `.material` lazy bake 产物
+- **G3 ❌ 评审拒绝**：不需要新增 `AssetRegistry::LookupByPath` API。`AssetRegistry::Load<T>(path)` 已自带 dedup（"同 path 复用同一 handle"）；`namedMaterialInstances` map 本身就是 path → MaterialInstance* 反查接口；v0.5 Asset 浏览器 DnD payload 携带 path 字符串足够，写入字段时按 path 直接 Load / 查表
+- **G4 ✅**（commit `222bd3f` + `60eaa40` 联合）：`demo.scene.json` 内 6 处 Renderable.mesh + 多处 materialInstanceId 字段从命名 ID 迁移到磁盘路径。`src/scene/ComponentSerializers.cpp::ReadRenderable` 加 "editor/X" → "assets/meshes/X.mesh" + "builtin/X" → "assets/materials/builtin/X.material" 透明 mapping fallback，老 .scene.json 仍可加载（warn-less，无 SchemaVersion bump—— mapping 透明）
+
+**期望验收对照**：
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| `git ls-files` 看到 `assets/meshes/*.mesh` + `assets/materials/builtin/*.material` 磁盘文件 | ✅ |
+| `demo.scene.json` 内 `mesh` / `materialInstanceId` 是磁盘相对路径 | ✅ |
+| 启动 OrangeEditor → 自动加载 demo scene → 视觉与现状像素级一致 | ✅（17 entities，stderr 无 load failed warn） |
+| `AssetRegistry::LookupByPath` 返回有效 handle | ❌ 评审拒绝，不需要新 API |
+| OrangeEditor v0.5 Asset 浏览器消费这些能力 | 本 session 后续 v0.5 commit 落地 |
+
+**未来扩展**：
+
+- v0.5 c5 Material 子模式落地时把 .material schema 从 v1.0（仅 templateName）扩到 v1.1（uniforms + textures override 字段）—— 当前内置 material 全部 default-constructed 无 override 所以不阻塞
+- 远期 UUID + .meta 资产数据库 / ACP 中间格式 / FileSystemWatcher 自动重加载 仍按本 GAP 原始"不在范围"段记录走，独立 milestone 处理
+
 ---
 
 ## 处理记录
 
-（空）
+- **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
