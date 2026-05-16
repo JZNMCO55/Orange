@@ -311,7 +311,7 @@
         "Renderable": {
           "castsShadow": true,
           "materialInstanceId": "builtin/toon",
-          "mesh": "editor/cube",
+          "mesh": "assets/meshes/cube.mesh",
           "visible": true
         },
         "RigidBody": {
@@ -361,7 +361,7 @@
         "Renderable": {
           "castsShadow": false,
           "materialInstanceId": "builtin/light_object",
-          "mesh": "editor/cube",
+          "mesh": "assets/meshes/cube.mesh",
           "visible": true
         },
         "Transform": {
@@ -399,7 +399,7 @@
         "Renderable": {
           "castsShadow": false,
           "materialInstanceId": "builtin/dissolve",
-          "mesh": "editor/cube",
+          "mesh": "assets/meshes/cube.mesh",
           "visible": true
         },
         "Transform": {
@@ -454,7 +454,7 @@
         "Renderable": {
           "castsShadow": true,
           "materialInstanceId": "builtin/toon",
-          "mesh": "editor/cube",
+          "mesh": "assets/meshes/cube.mesh",
           "visible": true
         },
         "RigidBody": {
@@ -631,7 +631,7 @@
         "Renderable": {
           "castsShadow": false,
           "materialInstanceId": "builtin/rim_light",
-          "mesh": "editor/plane",
+          "mesh": "assets/meshes/plane.mesh",
           "visible": true
         },
         "Transform": {
@@ -686,7 +686,7 @@
         "Renderable": {
           "castsShadow": false,
           "materialInstanceId": "builtin/floor",
-          "mesh": "editor/plane",
+          "mesh": "assets/meshes/plane.mesh",
           "visible": true
         },
         "RigidBody": {

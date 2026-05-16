@@ -9,6 +9,7 @@
 #include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/animation/ProceduralAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/physics/ColliderComponent.h>
@@ -33,6 +34,7 @@
 #include <glm/vec4.hpp>
 
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -124,17 +126,72 @@ void InitializeEditorAssets(EditorHost& host)
                      "(code=%u)\n",
                      static_cast<unsigned>(reg.Error()));
     }
+    // GAP-2026-05-16 G1：注册 MeshLoader 让 RenderableComponent.mesh 字段
+    // 走 "assets/meshes/*.mesh" 磁盘路径 Load 路径（取代旧的内存 named
+    // "editor/cube" Insert 路径）。MeshLoader v2 支持 UV 段（同 commit 落
+    // 地的引擎扩展），textured / toon material 在烘焙后的 .mesh 上 UV 不
+    // 丢失。
+    using Orange::Engine::Asset::MeshLoader;
+    if (auto reg = host.assets.pAssets->RegisterLoader<MeshAsset>(
+            std::make_unique<MeshLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "[OrangeEditor] AssetRegistry::RegisterLoader<MeshAsset> 失败 "
+                     "(code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+    }
 
-    if (auto h = host.assets.pAssets->Insert<MeshAsset>("editor/cube", MakeCubeMesh(0.5f));
-        h.IsOk())
+    // 内置 mesh lazy bake：检测 assets/meshes/X.mesh，缺失则程序化构造 +
+    // MeshLoader::Save 写盘后再 Load；存在直接 Load。lazy bake 让首次跑
+    // OrangeEditor 自动产出 .mesh 文件让开发者手动 git add commit 入仓；
+    // 之后 CI 跑或其他人拉仓直接走盘上的 .mesh。
+    //
+    // 不在 InitializeEditorAssets 内 fall back 到 Insert("editor/cube",...)
+    // 路径——那是 G1 之前的兼容残留，G1 ✅ 后所有 mesh 引用必须走磁盘路径。
+    auto bakeIfMissingThenLoad = [&](const std::string& path,
+                                     auto buildFn) -> Orange::Engine::Asset::AssetHandle<MeshAsset>
     {
-        host.assets.cubeMeshHandle = h.Value();
-    }
-    if (auto h = host.assets.pAssets->Insert<MeshAsset>("editor/plane", MakePlaneMesh(2.5f));
-        h.IsOk())
-    {
-        host.assets.planeMeshHandle = h.Value();
-    }
+        if (!std::filesystem::exists(path))
+        {
+            auto pMesh = buildFn();
+            if (pMesh != nullptr)
+            {
+                // 确保目录存在；MeshLoader::Save 不创建目录。
+                std::filesystem::create_directories(
+                    std::filesystem::path(path).parent_path());
+                if (auto sv = MeshLoader::Save(path, *pMesh); sv.IsErr())
+                {
+                    std::fprintf(stderr,
+                                 "[OrangeEditor] MeshLoader::Save '%s' 失败 (code=%u)\n",
+                                 path.c_str(),
+                                 static_cast<unsigned>(sv.Error()));
+                    // 仍然 Insert 一份内存版本作为最后兜底，让本次会话能继续渲染
+                    if (auto h = host.assets.pAssets->Insert<MeshAsset>(path, std::move(pMesh));
+                        h.IsOk())
+                    {
+                        return h.Value();
+                    }
+                    return {};
+                }
+            }
+        }
+        auto lr = host.assets.pAssets->Load<MeshAsset>(path);
+        if (lr.IsErr())
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] Load<MeshAsset> '%s' 失败 (code=%u)\n",
+                         path.c_str(),
+                         static_cast<unsigned>(lr.Error()));
+            return {};
+        }
+        return lr.Value();
+    };
+
+    host.assets.cubeMeshHandle  = bakeIfMissingThenLoad(
+        "assets/meshes/cube.mesh",  [] { return MakeCubeMesh(0.5f); });
+    host.assets.planeMeshHandle = bakeIfMissingThenLoad(
+        "assets/meshes/plane.mesh", [] { return MakePlaneMesh(2.5f); });
 
     host.assets.pMaterials = std::make_unique<MaterialSystem>(*host.assets.pAssets);
     if (auto rb = host.assets.pMaterials->RegisterBuiltins(); rb.IsErr())

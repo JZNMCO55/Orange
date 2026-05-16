@@ -358,6 +358,15 @@ bool ReadRenderable(const JsonReader& reader,
         return false;
     }
 
+    // GAP-2026-05-16 G4：旧版 demo / save_load_demo 等 .scene.json 内
+    // RenderableComponent.mesh 用过命名 ID "editor/cube" / "editor/plane"
+    // 风格（G1 之前内置 mesh 是内存 named handle）。G1 落地后内置 mesh
+    // 改为磁盘 "assets/meshes/X.mesh"，老 .scene.json 字段需要透明 mapping
+    // 让旧文件仍可加载。已知映射表见下；命中即重写到磁盘路径，未命中
+    // 按原值走 AssetRegistry::Load（caller 自己保证路径正确）。
+    if (meshPath == "editor/cube")  { meshPath = "assets/meshes/cube.mesh"; }
+    else if (meshPath == "editor/plane") { meshPath = "assets/meshes/plane.mesh"; }
+
     Render::RenderableComponent r;
     if (!meshPath.empty())
     {

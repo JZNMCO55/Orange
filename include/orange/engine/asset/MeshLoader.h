@@ -5,12 +5,24 @@
 // MeshLoader —— 引擎自有 mesh 二进制格式的同步加载器。
 //
 // 文件格式（little-endian、紧凑、无 padding）：
+//
+// v1（历史）：
 //   bytes 0..3   magic = 'O' 'R' 'M' 'E'
 //   bytes 4..7   version = 1
 //   bytes 8..11  vertexCount  (uint32)
 //   bytes 12..15 indexCount   (uint32)
 //   bytes 16..   positions[vertexCount] : float[3]
-//   随后        indices[indexCount]    : uint32
+//   随后         indices[indexCount]    : uint32
+//
+// v2（当前；为 GAP-2026-05-16 内置 mesh 落盘 + textured material 保留
+// UV 引入）：v1 末尾追加 hasUVs 字节 + 可选 uvs 段：
+//   ... 同 v1 头部 + positions + indices
+//   1B hasUVs (0 / 1)
+//   if hasUVs == 1:
+//       uvs[vertexCount] : float[2]
+//
+// Load 同时支持读 v1 / v2；v1 文件读出的 MeshAsset.UVs() 为空。Save 永远
+// 写 v2 格式；输入 MeshAsset.HasUVs() 决定是否写 UV 段。
 //
 // 选择自有格式而不接 OBJ / glTF 是有意为之：避免在
 // Asset 模块上线时同时解决"第三方解析器 vendoring"这个独立问题。后
@@ -35,12 +47,21 @@ public:
     // 'O','R','M','E' 按 little-endian 读出：内存字节序 0x4F,0x52,0x4D,0x45
     // 反推 uint32 = 0x454D524F。
     static constexpr std::uint32_t kMagic = 0x454D524FU;
-    static constexpr std::uint32_t kSupportedVersion = 1;
+    // Load 支持的最小 / 最大 version。Save 总是写 kLatestVersion。
+    static constexpr std::uint32_t kVersionV1     = 1;
+    static constexpr std::uint32_t kVersionV2     = 2;
+    static constexpr std::uint32_t kLatestVersion = kVersionV2;
 
     MeshLoader() = default;
     ~MeshLoader() override = default;
 
     Result<std::unique_ptr<MeshAsset>, ResultCode> Load(std::string_view path) override;
+
+    // 把 MeshAsset 序列化到磁盘 .mesh 文件（v2 格式）。caller 保证目标
+    // 目录已存在；本函数不创建目录。HasUVs() 决定是否写 UV 段。
+    // 失败码：IoError（无法写文件） / InvalidArgument（顶点数据不一致）。
+    static Result<void, ResultCode> Save(std::string_view path,
+                                         const MeshAsset& mesh);
 };
 
 }  // namespace Orange::Engine::Asset
