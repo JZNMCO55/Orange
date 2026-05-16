@@ -343,6 +343,85 @@ GAP 未落地前，编辑器侧**不**主动 workaround（避免 Convention C �
 
 ---
 
+## GAP-2026-05-16-builtin-asset-disk-serialization
+
+- **发现方**：OrangeEditor v0.5 start-checklist（Asset 浏览器 + Material 子模式 milestone）
+- **发现日期**：2026-05-16
+- **一句话定性**：编辑器内置 mesh / material 仅在启动期通过 `InitializeEditorAssets` + `BuildNamedMaterialInstances` 在内存中注册，缺 .material / .mesh 磁盘落盘 + AssetRegistry 从盘加载命名 asset 的路径，导致 v0.5 Asset 浏览器无法浏览真实磁盘 asset、Material 子模式调参无法持久化
+- **状态**：待评审 + 待落地
+
+### 触发场景
+
+v0.5 milestone 描述"资源浏览器 + Material 子模式"假设 `assets/` 下有 mesh / texture / material 文件可浏览，Material 调参可保存到 .material 文件。但实际现状：
+
+- `assets/` 目录仅含 `configs/` + `scenes/` 的 JSON 文件
+- demo scene 的 `Renderable.mesh = "editor/cube"` / `materialInstanceId = "builtin/toon"` 全是**字符串 ID**，指向编辑器启动期 `InitializeEditorAssets` + `BuildNamedMaterialInstances` 在内存中注册的命名 asset
+- 仓库无 .material 文件；`Resources/Models/` 下的 .obj 是 GEA 旧架构历史归档，未接入新 AssetRegistry
+- 用户在 v0.5 范围选择上选了"方案 B：完整磁盘模型"——demo scene 改引用磁盘路径 + Material 调参可持久化
+
+当前内置 asset 注册位置：
+
+- `tools/OrangeEditor/DemoWorld.cpp::InitializeEditorAssets` —— mesh 程序化构造（cube / plane / sphere 等顶点 + index 直接构造 MeshAsset）
+- `tools/OrangeEditor/DemoWorld.cpp::BuildNamedMaterialInstances` —— material 实例直接构造（pickShader + uniform 默认值 + texture handle）
+- 注册 ID："editor/cube" / "editor/plane" / "builtin/toon" / "builtin/dissolve" / "builtin/emissive" 等
+
+### 缺什么（按依赖拆）
+
+#### G1 · 内置 mesh 落盘 + .mesh / .obj 加载链路
+
+- 决定**内置 mesh 落盘格式**：
+  - 选项 a：复用 Phase 2 Task 02 的 .obj loader 把程序化 cube / plane / sphere 烘焙成 `assets/meshes/cube.obj` 等真实 .obj 文件（生成期一次，提交仓库）
+  - 选项 b：新增 `.mesh` 二进制格式 + serializer（顶点 + index 直接 binary dump）
+  - 推荐选项 a（loader 已有；.obj 是 source asset，符合 D2 "只浏览 source asset" 决策）
+- 写一个一次性 `scripts/bake_builtin_meshes.py` 或 `tests/bake_builtin_meshes.cpp` 把 `DemoWorld.cpp::Build*Mesh` 的逻辑跑一遍输出 .obj 文件到 `assets/meshes/`
+- `InitializeEditorAssets` 改为从盘 `Load<MeshAsset>("assets/meshes/cube.obj")` 而非程序化构造；同时保留程序化构造作为 .obj 文件缺失时的 fallback（开发期友好）
+- demo scene 的 `Renderable.mesh` 字段值从 `"editor/cube"` 迁移到 `"assets/meshes/cube.obj"`；Scene SchemaVersion bump + migrator 把旧 ID 重写成路径
+
+#### G2 · 内置 MaterialInstance 落盘 + .material 加载链路
+
+- Phase 3 Task 01 已有 `MaterialInstance::Read / Write` JSON 序列化（按 CLAUDE.md "Phase 3 Material" 段叙述），但**项目内未实际使用** —— 没有任何 .material 文件 + 没有 `MaterialLoader` 注册到 AssetRegistry
+- 写 `MaterialLoader` 实现 `IAssetLoader<MaterialInstance>` 接口，调用既有 Read 函数从 JSON 反序列化
+- 一次性 `scripts/bake_builtin_materials.py` 把 `BuildNamedMaterialInstances` 内每条 MaterialInstance 用 Write 函数 dump 成 `assets/materials/builtin/toon.material`、`assets/materials/builtin/dissolve.material` 等
+- `BuildNamedMaterialInstances` 改为从盘 `Load<MaterialInstance>("assets/materials/builtin/toon.material")`；保留程序化构造作为 .material 缺失时的 fallback
+- demo scene 的 `Renderable.materialInstanceId` 字段从 `"builtin/toon"` 迁移到 `"assets/materials/builtin/toon.material"`
+
+#### G3 · AssetRegistry 启动期预加载 + path → handle 反查
+
+- v0.5 Asset 浏览器要把"磁盘文件 .material" 显示成卡片并支持 DnD 写入 Renderable.materialInstance —— DnD payload 必须能携带 "磁盘路径 → AssetHandle" 的映射，要求 AssetRegistry 暴露 `LookupByPath(path)` 接口
+- 启动期 / 浏览器扫盘期 / 用户首次拖一个新 asset 入 Inspector 时，三种触发都要能 lazy-load + dedup（避免同一文件多次加载产生多个 handle）
+- 现状 `AssetRegistry::Load<T>(path)` 已经做 dedup（"同 path 复用同一 handle"），但**没有公开 LookupByPath** 接口让 Asset 浏览器查询"这个文件路径是否已加载 / 对应哪个 handle"
+
+#### G4 · Scene SchemaVersion bump + migrator
+
+- demo / save_load_demo / thirty_seconds_demo 三个 scene 文件目前用 `"editor/cube"` / `"builtin/toon"` 风格 ID；G1 / G2 落地后迁移到磁盘路径
+- 按 CLAUDE.md "Serialization and reflection" 节："不改已发版本，新版本 + migrator"——SchemaVersion 从 N bump 到 N+1，migrator 把字符串 ID 重写为路径
+- migrator 在 Scene::Load 内自动跑，旧 .scene.json 文件不必手改
+
+### 期望验收
+
+落地后能跑通：
+
+1. `git ls-files` 看到 `assets/meshes/cube.obj` / `assets/meshes/plane.obj` 等 + `assets/materials/builtin/toon.material` 等磁盘文件
+2. demo.scene.json 内 `Renderable.mesh` / `materialInstanceId` 是磁盘相对路径而非字符串 ID
+3. 启动 OrangeEditor → 自动加载 demo scene → 视觉与现状像素级一致（migrator 自动迁移生效；如未迁移走 fallback 路径仍能 render）
+4. `AssetRegistry::LookupByPath("assets/materials/builtin/toon.material")` 返回有效 handle
+5. OrangeEditor v0.5 Asset 浏览器在此 GAP 落地**之后**消费这些能力（Asset 浏览器扫盘 + Material 调参 → Save → 关闭重启保留）
+
+### 不在本 GAP 范围
+
+- **UUID + .meta** 资产数据库（参 `vendor/Orange-Wiki/wiki/concepts/editor/asset-database.md` 远期建议）—— 本 GAP 走"路径哈希 / 路径字符串作为 ID"的近期方案
+- **ACP（Asset Conditioning Pipeline）中间格式**（runtime 编译产物）—— 仍按 editor-roadmap L11 推到 v1.x + 主 roadmap Phase 9
+- **AssetWatcher / FileSystemWatcher 自动重加载** —— 远期，v0.5 接受"改盘 + 编辑器重启"刷新
+
+### 落地节奏
+
+按 engine-known-gaps 处理纪律：本 GAP 由独立 session 受理。建议 session 序列：
+
+1. **GAP 落地 session**（本 GAP）：G1 + G2 + G3 + G4 一次性落（共享 .obj / .material loader 注册 + Scene migrator 逻辑；拆 4 个 session 会反复改 AssetRegistry / DemoWorld 同一区域，碎片化）
+2. **v0.5 推进 session**：消费 G1–G4 已落地的能力实现 Asset 浏览器 + Material 子模式 + Inspector AssetRef 字段
+
+---
+
 ## 处理记录
 
 （空）
