@@ -23,6 +23,7 @@
 #include <orange/engine/render/MaterialSystem.h>
 
 #include <memory>
+#include <string>
 
 struct EditorAssetContext
 {
@@ -53,6 +54,14 @@ struct EditorAssetContext
     //     成发光的可见物体（cube + emissive material）。
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDefaultRenderableMaterial;
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pLightObjectMaterial;
+
+    // v0.5 c3：Asset 浏览器选中状态。
+    // browserCurrentDir 是浏览器当前查看的目录（相对仓库根，前缀 "assets/"），
+    // 启动期初始化为 "assets/" 根目录，用户点目录树切换；selectedAssetPath
+    // 是浏览器当前选中的 asset 文件路径（同款相对路径），空字符串表示未选中。
+    // v0.5 c4 DnD 写入 / c5 Material 子模式入口都消费 selectedAssetPath。
+    std::string browserCurrentDir   = "assets";
+    std::string selectedAssetPath   = {};
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H

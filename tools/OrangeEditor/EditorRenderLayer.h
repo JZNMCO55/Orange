@@ -69,7 +69,7 @@ private:
     void ValidateEntityHandles();
     void ApplyPendingSceneOp();
     void ApplyPendingPlayOp();
-    static void DrawAssetsPanel();
+    void DrawAssetsPanel();
     static void DrawAnimationPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
 

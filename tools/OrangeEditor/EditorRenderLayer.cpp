@@ -763,10 +763,169 @@ void EditorRenderLayer::ApplyPendingPlayOp()
 // 小面板（Assets / Console）—— 占位 + 帧统计
 // ---------------------------------------------------------------------------
 
+// v0.5 c3 Asset 浏览器实现 helpers（anonymous namespace 局部可见）。
+namespace
+{
+
+// 递归画 dir 自身 + 所有子目录 tree node。click 时把 dir 写入
+// `assets.browserCurrentDir` 让右侧 file list 刷新。
+void DrawAssetTreeRecursive(EditorAssetContext& assets, const std::string& dir)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) { return; }
+
+    // 节点 label = dir 最后一段；root 节点显示完整 "assets"。
+    const auto slash = dir.find_last_of('/');
+    const std::string label = (slash == std::string::npos)
+                            ? dir
+                            : dir.substr(slash + 1);
+
+    const bool isSelected = (dir == assets.browserCurrentDir);
+    int flags = ImGuiTreeNodeFlags_OpenOnArrow
+              | ImGuiTreeNodeFlags_OpenOnDoubleClick
+              | ImGuiTreeNodeFlags_DefaultOpen
+              | ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (isSelected) { flags |= ImGuiTreeNodeFlags_Selected; }
+
+    const bool open = ImGui::TreeNodeEx(dir.c_str(), flags, "%s",
+                                        label.c_str());
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+    {
+        assets.browserCurrentDir = dir;
+    }
+    if (open)
+    {
+        std::vector<std::string> subdirs;
+        for (auto& entry : fs::directory_iterator(dir, ec))
+        {
+            if (entry.is_directory(ec))
+            {
+                subdirs.push_back(entry.path().generic_string());
+            }
+        }
+        std::sort(subdirs.begin(), subdirs.end());
+        for (auto& sub : subdirs)
+        {
+            DrawAssetTreeRecursive(assets, sub);
+        }
+        ImGui::TreePop();
+    }
+}
+
+// 当前目录文件列表（不递归）。文件类型按扩展名前缀 [M]/[Mat]/[T]/[S]/[J]/[?]
+// 显示，点选写入 `assets.selectedAssetPath`；BeginDragDropSource 起 DnD payload
+// "ORANGE_ASSET" 携带 path 字符串供 v0.5 c4 Inspector AssetRef 字段接收。
+void DrawAssetFileList(EditorAssetContext& assets)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::exists(assets.browserCurrentDir, ec))
+    {
+        ImGui::TextDisabled("(directory '%s' not found)",
+                            assets.browserCurrentDir.c_str());
+        return;
+    }
+
+    std::vector<fs::path> files;
+    for (auto& entry : fs::directory_iterator(assets.browserCurrentDir, ec))
+    {
+        if (entry.is_regular_file(ec))
+        {
+            files.push_back(entry.path());
+        }
+    }
+    std::sort(files.begin(), files.end());
+
+    for (const auto& f : files)
+    {
+        const std::string path = f.generic_string();
+        const std::string name = f.filename().string();
+        const std::string ext  = f.extension().string();
+
+        const char* icon = "[?]";
+        if      (ext == ".mesh" || ext == ".obj")   icon = "[M]";
+        else if (ext == ".material")                icon = "[Mat]";
+        else if (ext == ".png" || ext == ".jpg"
+              || ext == ".jpeg" || ext == ".ktx")   icon = "[T]";
+        else if (name.size() >= 11
+              && name.compare(name.size() - 11, 11, ".scene.json") == 0)
+                                                    icon = "[S]";
+        else if (ext == ".json")                    icon = "[J]";
+
+        const bool selected = (path == assets.selectedAssetPath);
+        char labelBuf[512];
+        std::snprintf(labelBuf, sizeof(labelBuf), "%s %s",
+                      icon, name.c_str());
+        if (ImGui::Selectable(labelBuf, selected))
+        {
+            assets.selectedAssetPath = path;
+        }
+        // DnD source：path 字符串（含 '\0' 终止符）作为 payload 数据；
+        // v0.5 c4 接收方在 Inspector AssetRef 字段内 AcceptDragDropPayload
+        // 拿到 path 后调 prop.set(component, &pathString) 写入字段。
+        if (ImGui::BeginDragDropSource())
+        {
+            ImGui::SetDragDropPayload("ORANGE_ASSET",
+                                      path.data(),
+                                      path.size() + 1);
+            ImGui::Text("Drag %s", name.c_str());
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("%s", path.c_str());
+        }
+    }
+}
+
+}  // anonymous namespace
+
+// v0.5 c3：Asset 浏览器面板。左侧目录树（assets/ 递归扫描）+ 右侧当前
+// 目录文件列表 + 类型 icon prefix + DnD source。选中状态走 EditorAssetContext。
+//
+// 当前简化范围：
+//   * 仅浏览 source asset（D2 决策）；不引入缩略图生成 / 编译产物显示
+//   * 类型 icon 用 ASCII 前缀（[M]/[Mat]/[T]/[S]/[J]/[?]），不接入 icon
+//     font —— icon font 接入由 v0.6.5 视觉统一 milestone 实施
+//   * 不支持创建 / 删除 / 重命名（v0.6 多 chunk + dirty 状态时再加）
 void EditorRenderLayer::DrawAssetsPanel()
 {
     ImGui::Begin("Assets");
-    ImGui::TextDisabled("asset browser — v0.5 c3 实施");
+
+    auto& assets = mHost.assets;
+
+    // 顶部：当前路径 + 退到父目录按钮（root assets/ 时禁用）
+    ImGui::TextDisabled("Path:");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(assets.browserCurrentDir.c_str());
+    ImGui::SameLine();
+    const bool atRoot = (assets.browserCurrentDir == "assets");
+    ImGui::BeginDisabled(atRoot);
+    if (ImGui::SmallButton(".."))
+    {
+        const auto slash = assets.browserCurrentDir.find_last_of('/');
+        if (slash != std::string::npos)
+        {
+            assets.browserCurrentDir.resize(slash);
+        }
+    }
+    ImGui::EndDisabled();
+    ImGui::Separator();
+
+    // 左 30% 目录树 + 右 70% 文件列表，BeginChild 内独立滚动。
+    constexpr float kLeftRatio = 0.30f;
+    const float leftW = ImGui::GetContentRegionAvail().x * kLeftRatio;
+
+    ImGui::BeginChild("##asset_tree", ImVec2(leftW, 0), true);
+    DrawAssetTreeRecursive(assets, "assets");
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+    ImGui::BeginChild("##asset_list", ImVec2(0, 0), true);
+    DrawAssetFileList(assets);
+    ImGui::EndChild();
+
     ImGui::End();
 }
 
