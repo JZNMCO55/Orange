@@ -400,8 +400,20 @@ bool ReadRenderable(const JsonReader& reader,
 
     // materialInstanceId 是 schema v1.1 新增的可选字段；旧 v1.0 文件缺失时
     // GetString 返回空字符串，materialInstance 留 nullptr（与旧行为一致）。
-    const std::string materialId =
+    std::string materialId =
         reader.GetString(Join(componentPath, "materialInstanceId"), "");
+    // GAP-2026-05-16 G4：与 mesh path mapping 对偶——namedMaterialInstances
+    // key 从 "builtin/X" 迁移到 "assets/materials/builtin/X.material" 后，
+    // 老 .scene.json 内 materialInstanceId 字段值也需要透明 mapping。
+    // mapping 表与 BuildNamedMaterialInstances 内 key 列表保持一致。
+    if (!materialId.empty() && materialId.rfind("builtin/", 0) == 0)
+    {
+        // 形如 "builtin/toon" → "assets/materials/builtin/toon.material"
+        std::string remapped = "assets/materials/";
+        remapped.append(materialId);
+        remapped.append(".material");
+        materialId = std::move(remapped);
+    }
     if (!materialId.empty())
     {
         if (ctx.namedMaterialInstances != nullptr)

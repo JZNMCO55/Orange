@@ -1,0 +1,8 @@
+{
+  "schemaVersion": {
+    "major": 1,
+    "minor": 0,
+    "namespace": "render/material_instance"
+  },
+  "templateName": "rim_light"
+}

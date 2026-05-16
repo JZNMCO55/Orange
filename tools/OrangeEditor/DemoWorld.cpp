@@ -12,6 +12,7 @@
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
+#include <orange/engine/core/Serialization.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
@@ -205,18 +206,96 @@ void InitializeEditorAssets(EditorHost& host)
                      static_cast<unsigned>(rb.Error()));
     }
 
-    // 地面 / 备用 textured 实例
-    host.assets.pFloorMaterial = host.assets.pMaterials->CreateInstance("textured");
-    host.assets.pWallMaterial  = host.assets.pMaterials->CreateInstance("textured");
+    // GAP-2026-05-16 G2：内置 MaterialInstance 落盘 .material + lazy bake。
+    // 文件格式（v1.0 最小集）：
+    //   { "schemaVersion": {"namespace":"render/material_instance","major":1,"minor":0},
+    //     "templateName": "toon" }
+    // 当前内置 material 全部 default-constructed（无 uniform override），
+    // 所以 .material 文件唯一携带的信息就是 templateName。v0.5 c5 Material
+    // 子模式落地后扩 uniforms / textures 字段。
+    //
+    // 不引入 IAssetLoader<MaterialInstance>：MaterialInstance 构造依赖
+    // MaterialSystem& 注入，IAssetLoader 接口没这种容器；走 helper 函数
+    // 路径足够简单。namedMaterialInstances 仍是 host.assets 自己拥有 +
+    // BuildNamedMaterialInstances 返回 path→ptr 映射。
+    using ::Orange::Engine::JsonReader;
+    using ::Orange::Engine::JsonWriter;
+    using ::Orange::Engine::SchemaVersion;
+    static const SchemaVersion kMatSchema{"render/material_instance", 1, 0};
 
-    // v0.1.5 新增内置材质实例（失败时 unique_ptr 为 nullptr，Renderable 降级）
-    host.assets.pToonMaterial     = host.assets.pMaterials->CreateInstance("toon");
-    host.assets.pRimLightMaterial = host.assets.pMaterials->CreateInstance("rim_light");
-    host.assets.pDissolveMaterial = host.assets.pMaterials->CreateInstance("dissolve");
+    auto writeMaterialFile = [](const std::string& path,
+                                std::string_view templateName) -> bool {
+        JsonWriter writer;
+        writer.WriteSchemaVersion("schemaVersion", kMatSchema);
+        writer.WriteString("templateName", templateName);
+        auto sv = writer.SaveToFile(path, 2);
+        if (sv.IsErr())
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] .material 写盘 '%s' 失败 (code=%u)\n",
+                         path.c_str(),
+                         static_cast<unsigned>(sv.Error()));
+            return false;
+        }
+        return true;
+    };
+    auto readMaterialTemplate = [](const std::string& path,
+                                   std::string_view fallback) -> std::string {
+        auto rr = JsonReader::FromFile(path);
+        if (rr.IsErr())
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] .material 读取 '%s' 失败 (code=%u)，回退 '%.*s'\n",
+                         path.c_str(),
+                         static_cast<unsigned>(rr.Error().code),
+                         static_cast<int>(fallback.size()),
+                         fallback.data());
+            return std::string{fallback};
+        }
+        const auto& reader = rr.Value();
+        std::string templateName;
+        if (!reader.ReadString("templateName", templateName) || templateName.empty())
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] .material '%s' templateName 缺失，回退 '%.*s'\n",
+                         path.c_str(),
+                         static_cast<int>(fallback.size()),
+                         fallback.data());
+            return std::string{fallback};
+        }
+        return templateName;
+    };
+    auto bakeAndLoadMaterial = [&](const std::string& path,
+                                   std::string_view templateName) {
+        if (!std::filesystem::exists(path))
+        {
+            std::filesystem::create_directories(
+                std::filesystem::path(path).parent_path());
+            writeMaterialFile(path, templateName);
+        }
+        const std::string actual = readMaterialTemplate(path, templateName);
+        return host.assets.pMaterials->CreateInstance(actual);
+    };
 
-    // 编辑器操作共用默认材质
-    host.assets.pDefaultRenderableMaterial = host.assets.pMaterials->CreateInstance("textured");
-    host.assets.pLightObjectMaterial       = host.assets.pMaterials->CreateInstance("emissive");
+    // 地面 / 备用 textured 实例（路径风格 ID，namedMaterialInstances 用同款 key）
+    host.assets.pFloorMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/floor.material", "textured");
+    host.assets.pWallMaterial  = bakeAndLoadMaterial(
+        "assets/materials/builtin/wall.material",  "textured");
+
+    // v0.1.5 内置材质（失败时 unique_ptr 为 nullptr，Renderable 降级）
+    host.assets.pToonMaterial     = bakeAndLoadMaterial(
+        "assets/materials/builtin/toon.material",      "toon");
+    host.assets.pRimLightMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/rim_light.material", "rim_light");
+    host.assets.pDissolveMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/dissolve.material",  "dissolve");
+
+    // 编辑器默认 / 光物体材质
+    host.assets.pDefaultRenderableMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/default.material",      "textured");
+    host.assets.pLightObjectMaterial       = bakeAndLoadMaterial(
+        "assets/materials/builtin/light_object.material", "emissive");
 
     // AnimatorRegistry —— Scene::Load 遇到 AnimatorComponent 时通过 backend
     // name 查 factory 创建 IAnimator。当前只注册引擎自带 "procedural" 后端；
@@ -256,13 +335,24 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
 {
     using Orange::Engine::Render::MaterialInstance;
     std::unordered_map<std::string, MaterialInstance*> m;
-    if (assets.pFloorMaterial)             m["builtin/floor"]        = assets.pFloorMaterial.get();
-    if (assets.pWallMaterial)              m["builtin/wall"]         = assets.pWallMaterial.get();
-    if (assets.pToonMaterial)              m["builtin/toon"]         = assets.pToonMaterial.get();
-    if (assets.pRimLightMaterial)          m["builtin/rim_light"]    = assets.pRimLightMaterial.get();
-    if (assets.pDissolveMaterial)          m["builtin/dissolve"]     = assets.pDissolveMaterial.get();
-    if (assets.pDefaultRenderableMaterial) m["builtin/default"]      = assets.pDefaultRenderableMaterial.get();
-    if (assets.pLightObjectMaterial)       m["builtin/light_object"] = assets.pLightObjectMaterial.get();
+    // GAP-2026-05-16 G2：key 从 "builtin/X" 改成磁盘路径 "assets/materials/
+    // builtin/X.material"，与 InitializeEditorAssets 内 lazy bake 路径一致。
+    // Scene Save/Load 路径 RenderableComponent.materialInstanceId 字段值
+    // 同款迁移；ReadRenderable 内有 mapping fallback 容旧 ID。
+    if (assets.pFloorMaterial)
+        m["assets/materials/builtin/floor.material"]        = assets.pFloorMaterial.get();
+    if (assets.pWallMaterial)
+        m["assets/materials/builtin/wall.material"]         = assets.pWallMaterial.get();
+    if (assets.pToonMaterial)
+        m["assets/materials/builtin/toon.material"]         = assets.pToonMaterial.get();
+    if (assets.pRimLightMaterial)
+        m["assets/materials/builtin/rim_light.material"]    = assets.pRimLightMaterial.get();
+    if (assets.pDissolveMaterial)
+        m["assets/materials/builtin/dissolve.material"]     = assets.pDissolveMaterial.get();
+    if (assets.pDefaultRenderableMaterial)
+        m["assets/materials/builtin/default.material"]      = assets.pDefaultRenderableMaterial.get();
+    if (assets.pLightObjectMaterial)
+        m["assets/materials/builtin/light_object.material"] = assets.pLightObjectMaterial.get();
     return m;
 }
 
