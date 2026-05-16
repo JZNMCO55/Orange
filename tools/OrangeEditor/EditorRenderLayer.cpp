@@ -224,12 +224,15 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     BuildDefaultLayoutOnce(dockspaceId);
     DrawMainMenuBar();
 
-    // 五个固定面板：Scene / Entity Tree / Inspector / Assets / Console。
+    // 六个固定面板：Scene / Entity Tree / Inspector / Assets / Console /
+    // Animation（v0.5 c2 起 Animation 加入底部 tab 容器，与 Cocos Creator 3.6.0
+    // 底部布局对齐；本期仅占位，状态机图编辑由 v0.7 实施）。
     DrawScenePanel();
     DrawEntityTreePanel();
     DrawInspectorPanel();
     DrawAssetsPanel();
     DrawConsolePanel(frame);
+    DrawAnimationPanel();
 
     // 帧末统一 apply 场景级操作。放在 panel 绘制完之后、ImGui::Render
     // 之前 —— 文件对话框是模态阻塞窗口，它内部会 pump 一些消息但不
@@ -321,8 +324,12 @@ void EditorRenderLayer::BuildDefaultLayoutOnce(ImGuiID dockspaceId)
 
     ImGui::DockBuilderDockWindow("Entity Tree", left);
     ImGui::DockBuilderDockWindow("Inspector",   right);
+    // 底部 tab 容器（v0.5 c2，参 Cocos Creator 3.6.0 底部三 tab 布局）
+    // 同节点 = tab。Animation 当前是 placeholder，v0.7 状态机图编辑落地后
+    // 替换 panel 内容。Assets 内容 v0.5 c3 落地（目录树 + 文件列表）。
     ImGui::DockBuilderDockWindow("Assets",      bottom);
-    ImGui::DockBuilderDockWindow("Console",     bottom);  // 同节点 = tab
+    ImGui::DockBuilderDockWindow("Console",     bottom);
+    ImGui::DockBuilderDockWindow("Animation",   bottom);
     ImGui::DockBuilderDockWindow("Scene",       center);
 
     ImGui::DockBuilderFinish(dockspaceId);
@@ -759,7 +766,21 @@ void EditorRenderLayer::ApplyPendingPlayOp()
 void EditorRenderLayer::DrawAssetsPanel()
 {
     ImGui::Begin("Assets");
-    ImGui::TextDisabled("asset browser — Phase 6 后续");
+    ImGui::TextDisabled("asset browser — v0.5 c3 实施");
+    ImGui::End();
+}
+
+// v0.5 c2：底部 tab 容器加 Animation 占位面板（Assets / Console / Animation
+// 三 tab 与 Cocos Creator 3.6.0 底部布局对齐）。本期仅占位，状态机图编辑
+// 由 v0.7 实施。BuildDefaultLayoutOnce 内把 Animation window dock 到 bottom
+// 节点（与 Assets / Console 同 slot 自动变 tab）。
+void EditorRenderLayer::DrawAnimationPanel()
+{
+    ImGui::Begin("Animation");
+    ImGui::TextDisabled("animation timeline / state-machine graph editor "
+                        "— v0.7 实施");
+    ImGui::TextDisabled("当前接受视觉降级：动画 backend 切换 / 状态机编辑 "
+                        "仅 Inspector 字段路径可用");
     ImGui::End();
 }
 

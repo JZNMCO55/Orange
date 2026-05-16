@@ -70,6 +70,7 @@ private:
     void ApplyPendingSceneOp();
     void ApplyPendingPlayOp();
     static void DrawAssetsPanel();
+    static void DrawAnimationPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
 
     // ---- panels/ScenePanel.cpp -----------------------------------------
