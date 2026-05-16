@@ -397,33 +397,127 @@ void DrawProperty(EditorHost&                  host,
         }
         case PropertyType::AssetRef:
         {
-            // v0.5 c1：仅显示当前 path（与 readOnly String case 同款"右列
-            // TextDisabled value"）。DnD 接收 + clear 按钮 + 浏览器 popup
-            // 选择由 v0.5 c4 实施。get/set 类型擦除媒介是 std::string。
-            //
-            // path 空 → 显示 "(none)" 灰底，与 EntityRef case 视觉一致
-            // 让"未关联资源" 的字段在视觉上一目了然。
+            // v0.5 c4：完整 AssetRef 控件。左→右排列：
+            //   [短名 / "(none)"] [×清除] [Pick 浏览器当前选中]
+            // 整段 BeginDragDropTarget 接受 "ORANGE_ASSET" payload 写入字段。
+            // 全路径走 hover tooltip（Inspector 右列宽有限），与 c1 显示
+            // 风格一致。所有写入路径都 Push SetFieldValueCommand<std::string>
+            // 让 Ctrl+Z / Ctrl+Y 与其他字段同款 undo / redo。
             std::string curPath;
             if (prop.get != nullptr) { prop.get(component, &curPath); }
+            const std::string oldPath = curPath;
+
+            // 显示当前 path 短名 / "(none)"。Selectable 让本段成为 DnD
+            // target hit-rect（BeginDragDropTarget 要求"上一个 item 有 ID"，
+            // TextUnformatted 无 ID 而 Selectable 有）。
+            std::string_view displayLabel;
+            std::string shortNameBuf;
             if (curPath.empty())
             {
-                ImGui::TextDisabled("(none)");
+                displayLabel = std::string_view{"(none)"};
             }
             else
             {
-                // 把路径里 '/' 后的最后一段作为短显示名 + 完整 path 走
-                // hover tooltip。Inspector 右列宽度有限，全路径常被截断；
-                // 短名 + tooltip 是 Lumix / Godot 同款做法。
                 const auto slash = curPath.find_last_of('/');
-                const std::string_view shortName = (slash == std::string::npos)
-                    ? std::string_view{curPath}
-                    : std::string_view{curPath.data() + slash + 1,
-                                       curPath.size() - slash - 1};
-                ImGui::TextUnformatted(shortName.data(),
-                                       shortName.data() + shortName.size());
-                if (ImGui::IsItemHovered())
+                shortNameBuf = (slash == std::string::npos)
+                    ? curPath
+                    : curPath.substr(slash + 1);
+                displayLabel = shortNameBuf;
+            }
+            // 短名 cell width 留给 button：CalcItemWidth - 两个 SmallButton 宽。
+            const ImGuiStyle& s = ImGui::GetStyle();
+            const float btnXW   = ImGui::CalcTextSize("\xC3\x97").x
+                                 + s.FramePadding.x * 2.0f;  // "×"
+            const float btnPickW = ImGui::CalcTextSize("Pick").x
+                                 + s.FramePadding.x * 2.0f;
+            const float total   = ImGui::CalcItemWidth();
+            const float nameW   = (std::max)(64.0f,
+                total - btnXW - btnPickW - s.ItemSpacing.x * 2.0f);
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0,0,0,0));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                                  s.Colors[ImGuiCol_FrameBgHovered]);
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+                                  s.Colors[ImGuiCol_FrameBgActive]);
+            ImGui::Selectable(std::string(displayLabel).c_str(), false,
+                              ImGuiSelectableFlags_AllowDoubleClick,
+                              ImVec2(nameW, 0));
+            ImGui::PopStyleColor(3);
+            if (!curPath.empty() && ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("%s", curPath.c_str());
+            }
+            // DnD target：接收 Asset 浏览器拖来的 path 字符串。payload
+            // 含 '\0'，直接 std::string{data} 构造即可。
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload =
+                        ImGui::AcceptDragDropPayload("ORANGE_ASSET"))
                 {
-                    ImGui::SetTooltip("%s", curPath.c_str());
+                    const char* pData = static_cast<const char*>(payload->Data);
+                    std::string newPath{pData};
+                    if (newPath != oldPath && prop.set != nullptr)
+                    {
+                        prop.set(component, &newPath);
+                        host.cmdStack.Push(
+                            std::make_unique<SetFieldValueCommand<std::string>>(
+                                entity, fieldKey, oldPath, newPath,
+                                MakeFieldApply<std::string>(&host, entity,
+                                                            &schema, prop.set)));
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
+            // 清除按钮 "×"（U+00D7 中点乘号，比 ASCII 'x' 视觉更像按钮符号）
+            ImGui::SameLine();
+            ImGui::BeginDisabled(curPath.empty() || prop.set == nullptr);
+            if (ImGui::SmallButton("\xC3\x97##clear"))
+            {
+                std::string newPath;  // empty
+                prop.set(component, &newPath);
+                host.cmdStack.Push(
+                    std::make_unique<SetFieldValueCommand<std::string>>(
+                        entity, fieldKey, oldPath, newPath,
+                        MakeFieldApply<std::string>(&host, entity,
+                                                    &schema, prop.set)));
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("清除字段（写入空路径）");
+            }
+
+            // Pick 按钮：把 Asset 浏览器当前选中的 asset path 写入字段。
+            // 选中 path 必须非空 + 字段 set 可调 + 浏览器选中确实变了
+            // （避免重复写同款 path 触发无意义命令栈条目）。
+            const std::string& browserSel = host.assets.selectedAssetPath;
+            const bool pickEnabled = !browserSel.empty()
+                                  && browserSel != oldPath
+                                  && prop.set != nullptr;
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!pickEnabled);
+            if (ImGui::SmallButton("Pick##pick"))
+            {
+                std::string newPath = browserSel;
+                prop.set(component, &newPath);
+                host.cmdStack.Push(
+                    std::make_unique<SetFieldValueCommand<std::string>>(
+                        entity, fieldKey, oldPath, newPath,
+                        MakeFieldApply<std::string>(&host, entity,
+                                                    &schema, prop.set)));
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                if (browserSel.empty())
+                {
+                    ImGui::SetTooltip("Asset 浏览器无选中（点底部 Assets tab\n"
+                                      "选一个 asset 后此按钮可点）");
+                }
+                else
+                {
+                    ImGui::SetTooltip("写入 Asset 浏览器当前选中:\n%s",
+                                      browserSel.c_str());
                 }
             }
             break;
