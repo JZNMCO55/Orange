@@ -30,7 +30,11 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cfloat>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -94,7 +98,15 @@ auto MakeFieldApply(EditorHost*                  pHost,
     };
 }
 
-// 单个 property 的 ImGui 控件渲染 + 命令推送。
+// 单个 property 的 ImGui 控件渲染 + 命令推送。**调用前提**：caller 已在
+// PropertyTable 内（Widgets::BeginPropertyTable 已 return true），DrawProperty
+// 内通过 Widgets::PropertyLabel 写左列 label + 触发右列 SetNextItemWidth
+// (-FLT_MIN)，然后画占满右列的控件。所有控件 ImGui 调用都用 "##<name>"
+// 形式的隐藏 label —— 真实 label 已经被 PropertyLabel 在左列单独显示。
+//
+// 分段（GroupSeparator）+ 可见性（visibleIf）+ get/set null 早退**不**在
+// 本函数处理，由 DrawComponentSchemaSection 在调用 DrawProperty 之前过
+// 滤；进到本函数的 prop 一定要渲染。
 //
 // fieldKey 是 caller 已拼好的 "{type}.{prop}" 字符串副本（避免 lambda 内
 // 捕获 const char*，因为 SchemaInspector::DrawComponentSchemaSection 之后
@@ -110,34 +122,12 @@ void DrawProperty(EditorHost&                  host,
     auto* pWorld = host.scene.pWorld.get();
     if (pWorld == nullptr) { return; }
 
-    // 条件可见：visibleIf 返回 false 时整段跳过（含 GroupSeparator / 控件 /
-    // tooltip）。典型用例 ColliderComponent.shape 的 variant 分支——非当前
-    // alternative 的字段全部隐藏。空 visibleIf = 总显示。
-    if (prop.attribs.visibleIf != nullptr
-        && !prop.attribs.visibleIf(component))
-    {
-        return;
-    }
+    // 左列 label + 右列 SetNextItemWidth(-FLT_MIN)；tooltip 挂在 label 上
+    // 而非控件上（控件拖拽 / 编辑状态时 hover 会被打断；label hover 更稳定）。
+    Orange::Editor::Widgets::PropertyLabel(prop.label, prop.attribs.tooltip);
 
-    // 视觉分组分隔符：注册时挂在 group 第一个字段上，在该字段控件**之前**
-    // 渲染 SeparatorText。等价 v0.1 期 EditorRenderLayer 内手写
-    // `ImGui::SeparatorText("Lifetime")` 等分组提示。
-    //
-    // 注意：本检查在 get/set null 早退**之前**——这样允许 Builder::Group(...)
-    // 注册"纯 header 段"（typeName 占位 + get/set 均为 nullptr），仅显示
-    // SeparatorText 文本而无可编辑控件（Polygon / EdgeChain 的零字段段用例）。
-    if (prop.attribs.groupSeparator != nullptr)
-    {
-        ImGui::SeparatorText(prop.attribs.groupSeparator);
-    }
-
-    // 无 get → 该字段是 Group-only 占位，仅显示 SeparatorText 后返回。
-    // 无 set 但 get 有效：允许 readOnly 字段以 nullptr setter 注册（典型
-    // 用例：AnimatorComponent.backend 名只读显示，无可编辑路径）；非
-    // readOnly 字段仍要求 set 有效（否则字段在 UI 上能拖但写不回，更糟）。
-    if (prop.get == nullptr) { return; }
-    if (prop.set == nullptr && !prop.attribs.readOnly) { return; }
-
+    // 紧跟 PropertyLabel 的下一个 ImGui 控件占满右列。控件 label 一律用
+    // "##" 前缀隐藏 —— 真实 label 已经被 PropertyLabel 写在左列。
     switch (prop.type)
     {
         case PropertyType::Float:
@@ -147,7 +137,7 @@ void DrawProperty(EditorHost&                  host,
             float newVal = oldVal;
             const float minV = prop.attribs.hasRange ? prop.attribs.minValue : 0.0f;
             const float maxV = prop.attribs.hasRange ? prop.attribs.maxValue : 0.0f;
-            if (ImGui::DragFloat(prop.label, &newVal, prop.attribs.dragSpeed, minV, maxV))
+            if (ImGui::DragFloat("##v", &newVal, prop.attribs.dragSpeed, minV, maxV))
             {
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
@@ -163,7 +153,7 @@ void DrawProperty(EditorHost&                  host,
             int newVal = oldVal;
             const int minV = prop.attribs.hasRange ? static_cast<int>(prop.attribs.minValue) : 0;
             const int maxV = prop.attribs.hasRange ? static_cast<int>(prop.attribs.maxValue) : 0;
-            if (ImGui::DragInt(prop.label, &newVal, prop.attribs.dragSpeed, minV, maxV))
+            if (ImGui::DragInt("##v", &newVal, prop.attribs.dragSpeed, minV, maxV))
             {
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
@@ -182,7 +172,7 @@ void DrawProperty(EditorHost&                  host,
                 ? static_cast<unsigned int>(prop.attribs.minValue) : 0u;
             const unsigned int maxV = prop.attribs.hasRange
                 ? static_cast<unsigned int>(prop.attribs.maxValue) : 0u;
-            if (ImGui::DragScalar(prop.label, ImGuiDataType_U32, &newVal,
+            if (ImGui::DragScalar("##v", ImGuiDataType_U32, &newVal,
                                   prop.attribs.dragSpeed, &minV, &maxV))
             {
                 prop.set(component, &newVal);
@@ -197,7 +187,7 @@ void DrawProperty(EditorHost&                  host,
             bool oldVal = false;
             prop.get(component, &oldVal);
             bool newVal = oldVal;
-            if (ImGui::Checkbox(prop.label, &newVal))
+            if (ImGui::Checkbox("##v", &newVal))
             {
                 prop.set(component, &newVal);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
@@ -213,7 +203,7 @@ void DrawProperty(EditorHost&                  host,
             glm::vec2 newVal = oldVal;
             const float minV = prop.attribs.hasRange ? prop.attribs.minValue : 0.0f;
             const float maxV = prop.attribs.hasRange ? prop.attribs.maxValue : 0.0f;
-            if (ImGui::DragFloat2(prop.label, &newVal.x,
+            if (ImGui::DragFloat2("##v", &newVal.x,
                                   prop.attribs.dragSpeed, minV, maxV))
             {
                 prop.set(component, &newVal);
@@ -234,7 +224,7 @@ void DrawProperty(EditorHost&                  host,
                 // ColorEdit3 默认 0..1；HDR float 字段超出 1.0 时调用方该
                 // 走 ColorEdit4 + HDR flag。当前内置 component（DirectionalLight
                 // / Renderable tint）color 限定在 LDR 范围，这里走标准 ColorEdit3。
-                changed = ImGui::ColorEdit3(prop.label, &newVal.x);
+                changed = ImGui::ColorEdit3("##v", &newVal.x);
             }
             else
             {
@@ -258,13 +248,13 @@ void DrawProperty(EditorHost&                  host,
             bool changed = false;
             if (prop.attribs.isColor)
             {
-                changed = ImGui::ColorEdit4(prop.label, &newVal.x);
+                changed = ImGui::ColorEdit4("##v", &newVal.x);
             }
             else
             {
                 const float minV = prop.attribs.hasRange ? prop.attribs.minValue : 0.0f;
                 const float maxV = prop.attribs.hasRange ? prop.attribs.maxValue : 0.0f;
-                changed = ImGui::DragFloat4(prop.label, &newVal.x,
+                changed = ImGui::DragFloat4("##v", &newVal.x,
                                             prop.attribs.dragSpeed, minV, maxV);
             }
             if (changed)
@@ -349,7 +339,8 @@ void DrawProperty(EditorHost&                  host,
             int newVal = oldVal;
             if (prop.attribs.enumNames == nullptr || prop.attribs.enumCount <= 0)
             {
-                ImGui::TextDisabled("%s (enum: no names — schema bug)", prop.label);
+                // 右列显示开发期 hint；左列的 prop.label 已经被 PropertyLabel 写过。
+                ImGui::TextDisabled("(enum: no names — schema bug)");
                 break;
             }
             // ImGui::Combo 对越界 current item 显示空；这里把超界值钳进
@@ -360,7 +351,7 @@ void DrawProperty(EditorHost&                  host,
             {
                 displayIdx = 0;
             }
-            if (ImGui::Combo(prop.label, &displayIdx,
+            if (ImGui::Combo("##v", &displayIdx,
                              prop.attribs.enumNames, prop.attribs.enumCount))
             {
                 newVal = displayIdx;
@@ -381,17 +372,18 @@ void DrawProperty(EditorHost&                  host,
             // 后续可扩展为 drag-drop 写入：在 ImGui::Text 后追加
             // BeginDragDropTarget / AcceptDragDropPayload("ORANGE_ENTITY") 路径
             // + Push SetFieldValueCommand<Orange::Engine::Entity>。本 commit 不做。
+            // 右列显示 entity 引用值；左列的 prop.label 由 PropertyLabel 写过。
             Orange::Engine::Entity oldVal = Orange::Engine::Entity::Invalid();
             prop.get(component, &oldVal);
             if (oldVal.IsValid())
             {
-                ImGui::Text("%s: #%u", prop.label,
+                ImGui::Text("#%u",
                             static_cast<unsigned>(
                                 static_cast<std::uint32_t>(oldVal.Value())));
             }
             else
             {
-                ImGui::Text("%s: (none)", prop.label);
+                ImGui::TextDisabled("(none)");
             }
             break;
         }
@@ -400,14 +392,12 @@ void DrawProperty(EditorHost&                  host,
             std::string oldVal;
             prop.get(component, &oldVal);
 
-            // readOnly 路径：仅显示 "<label>: <value>"——左侧 ImGui::Text 写
-            // 静态 label，SameLine 后 TextDisabled 写动态 value。不画 InputText、
-            // 不 Push 命令。当前 readOnly 仅 String case 支持（c9 最小集）；其
-            // 他 PropertyType 上设 readOnly 暂被忽略走默认编辑控件。
+            // readOnly 路径：右列仅显示动态 value（TextDisabled 灰显），左列
+            // 的 prop.label 由 PropertyLabel 写过。不画 InputText、不 Push 命令。
+            // 当前 readOnly 仅 String case 支持（c9 最小集）；其他 PropertyType
+            // 上设 readOnly 暂被忽略走默认编辑控件。
             if (prop.attribs.readOnly)
             {
-                ImGui::Text("%s:", prop.label);
-                ImGui::SameLine();
                 ImGui::TextDisabled("%s", oldVal.c_str());
                 break;
             }
@@ -420,7 +410,7 @@ void DrawProperty(EditorHost&                  host,
             const std::size_t copyN = std::min<std::size_t>(oldVal.size(),
                                                             sizeof(buffer) - 1);
             std::memcpy(buffer, oldVal.data(), copyN);
-            if (ImGui::InputText(prop.label, buffer, sizeof(buffer)))
+            if (ImGui::InputText("##v", buffer, sizeof(buffer)))
             {
                 std::string newVal{buffer};
                 prop.set(component, &newVal);
@@ -432,13 +422,9 @@ void DrawProperty(EditorHost&                  host,
         }
     }
 
-    // 通用 tooltip：所有 PropertyType 共用。注意 isItemHovered 必须**紧跟
-    // 上面控件**调用——switch 内每个 case 已 Pop 控件，hover 检查在 switch
-    // 之外是对"最后一个 ImGui item（也就是上面渲染的控件）"。
-    if (prop.attribs.tooltip != nullptr && ImGui::IsItemHovered())
-    {
-        ImGui::SetTooltip("%s", prop.attribs.tooltip);
-    }
+    // tooltip 已经在 PropertyLabel 内挂在左列 label 上 —— 控件本身不再做
+    // hover 检查（控件在拖拽 / 编辑状态时 hover 行为会被打断，label hover
+    // 更稳定）。
 }
 
 }  // anonymous namespace
@@ -482,8 +468,75 @@ void DrawComponentSchemaSection(EditorHost&                  host,
 
         if (!pluginTakesOver)
         {
+            // ---- v0.4.5：所有 property 走两列 ImGui::Table 布局 ----
+            //
+            // 先一遍扫 schema 计算"本段最长 label 文本宽" maxLabelW（用 CalcText
+            // Size，跳过 visibleIf 返回 false 的字段 + 纯 Group-only 占位 / readOnly-
+            // 无-get 等不进 DrawProperty 的字段），传给 BeginPropertyTable 作为左列
+            // 固定宽。每个 component schema 独立算自己的 maxLabelW —— 相邻段宽度可
+            // 能不一致但 CollapsingHeader 视觉断开，自然。
+            //
+            // 段化：每条挂了 groupSeparator 的 prop 结束当前 table → SeparatorText →
+            // 起一个新 table（labelColW 沿用）。这样 SeparatorText 可以占满整个
+            // 段宽（不被两列分割），视觉上分组提示完整。
+            float maxLabelW = 0.0f;
+            for (const auto& p : schema.properties)
+            {
+                if (p.attribs.visibleIf != nullptr
+                    && !p.attribs.visibleIf(component)) { continue; }
+                if (p.get == nullptr) { continue; }  // Group-only / pure header
+                if (p.set == nullptr && !p.attribs.readOnly) { continue; }
+                if (p.label != nullptr)
+                {
+                    const float w = ImGui::CalcTextSize(p.label).x;
+                    if (w > maxLabelW) { maxLabelW = w; }
+                }
+            }
+
+            int  segIdx    = 0;
+            bool tableOpen = false;
+            auto endTable  = [&]() {
+                if (tableOpen) {
+                    Orange::Editor::Widgets::EndPropertyTable();
+                    tableOpen = false;
+                }
+            };
+            auto ensureTable = [&]() {
+                if (!tableOpen)
+                {
+                    char id[96];
+                    std::snprintf(id, sizeof(id), "##pt.%s.%d",
+                                  schema.typeName ? schema.typeName : "?",
+                                  segIdx);
+                    tableOpen =
+                        Orange::Editor::Widgets::BeginPropertyTable(id, maxLabelW);
+                }
+                return tableOpen;
+            };
+
             for (const auto& prop : schema.properties)
             {
+                if (prop.attribs.visibleIf != nullptr
+                    && !prop.attribs.visibleIf(component))
+                {
+                    continue;
+                }
+
+                // GroupSeparator：结束当前 table，画 SeparatorText 占满整段宽，
+                // 起一个新 table。允许"Group-only prop"（get/set 都为 nullptr）
+                // 只为 SeparatorText 占位（Polygon / EdgeChain 等零字段段）。
+                if (prop.attribs.groupSeparator != nullptr)
+                {
+                    endTable();
+                    ImGui::SeparatorText(prop.attribs.groupSeparator);
+                    ++segIdx;
+                }
+
+                if (prop.get == nullptr) { continue; }
+                if (prop.set == nullptr && !prop.attribs.readOnly) { continue; }
+
+                if (!ensureTable()) { continue; }
+
                 // 字段 key："{type}.{prop}" —— 与既有 SetFieldValueCommand 风格
                 // 一致；确保 coalesce 在同一字段连续编辑时合并成一条命令。
                 std::string fieldKey;
@@ -493,6 +546,7 @@ void DrawComponentSchemaSection(EditorHost&                  host,
                 fieldKey.append(prop.name ? prop.name : "?");
                 DrawProperty(host, entity, schema, prop, component, fieldKey);
             }
+            endTable();
         }
 
         if (pActivePlugin != nullptr)
