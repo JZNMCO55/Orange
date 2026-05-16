@@ -46,6 +46,29 @@ enum class PropertyType : std::uint8_t
              // nextSibling 走此路径。后续 commit 可扩展 drag-drop 写入 entity
              // 句柄；扩展时 SchemaInspector::DrawProperty 的 EntityRef case
              // 内加 source/target accept 逻辑即可，不影响已注册 schema
+    AssetRef, // v0.5 c1 起：磁盘资源引用字段。get/set 类型擦除媒介是
+             // std::string（资源相对路径，如 "assets/meshes/cube.mesh"）。
+             // schema 注册侧通过 capture 全局 AssetRegistry / 名表静态指针
+             // 完成 path ↔ component 字段（AssetHandle<T> / MaterialInstance*
+             // 等）的双向映射。AssetKind 属性区分资源类型用于 Asset 浏览器
+             // 过滤 + DnD payload 校验。
+             //
+             // 控件路径分两期：c1 仅显示当前 path（无控件 / 与 readOnly 同款
+             // Text + TextDisabled）；c4 加 DnD 接收 + clear 按钮 + 浏览器
+             // popup 选择
+};
+
+// AssetKind —— PropertyType::AssetRef 字段的资源类型标签。
+// 用途：Asset 浏览器按 kind 过滤可拖入字段的卡片；DnD payload 携带 kind
+// 让 receiving field 校验类型匹配（拒绝把 .scene 文件拖到 mesh 字段上）；
+// Material 子模式入口判定（path 后缀 .material 时按 Material kind 处理）。
+enum class AssetKind : std::uint8_t
+{
+    Unknown = 0,
+    Mesh,     // .mesh / .obj / .gltf 等 → AssetHandle<MeshAsset>
+    Material, // .material → MaterialInstance*（通过 namedMaterialInstances 反查）
+    Texture,  // .png / .jpg / .ktx 等 → AssetHandle<TextureAsset>
+    Scene,    // .scene.json → 不持 handle，仅作为路径引用（场景拖入打开）
 };
 
 }  // namespace Orange::Editor::Schema

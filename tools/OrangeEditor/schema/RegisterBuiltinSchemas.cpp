@@ -241,19 +241,29 @@ void RegisterParticleEmitterComponentSchema()
         .Register();
 }
 
+// v0.5 c1：schema 注册侧需要全局可访问的 AssetRegistry / namedMaterialInstances
+// 把 component 字段（AssetHandle<MeshAsset> / MaterialInstance*）与 AssetRef
+// 字段的类型擦除媒介 std::string (path) 双向映射。两个静态指针由
+// main.cpp 启动期通过 SetAssetRegistry / SetNamedMaterialInstances 注入；
+// 在 schema 注册 lambda 内通过裸指针访问。
+//
+// capture-less lambda 不能 capture 局部状态，所以走"文件作用域静态"路径——
+// 这是 schema 模块内部约定（不暴露到公共 schema API），保持 PropertyDescriptor::
+// GetFn / SetFn 签名干净。host 生命周期 ≥ schema 注册 + Inspector 渲染，
+// 静态指针不会悬挂。
+//
+// 这两个静态指针在 anonymous namespace 内（internal linkage 限定本 TU），
+// 但 setter 函数 SetAssetRegistryForSchema / SetNamedMaterialInstancesForSchema
+// 要被 main.cpp 链接到，必须放在 anonymous namespace **外**（line 608 后）。
+
+::Orange::Engine::Asset::AssetRegistry* gpAssetRegistry = nullptr;
+std::unordered_map<std::string, ::Orange::Engine::Render::MaterialInstance*>*
+    gpNamedMaterialInstances = nullptr;
+
 void RegisterRenderableComponentSchema()
 {
     using RC = Orange::Engine::Render::RenderableComponent;
-    // mesh（AssetHandle<MeshAsset>）与 materialInstance（MaterialInstance*
-    // 裸指针）目前**不**注册到 schema —— 同 RigidBody.handle 一样属于
-    // "运行时引用 / 资源 ref，编辑器当前没有可视化编辑路径"。schema 系
-    // 统当前无 ReadOnly attribute 或 AssetHandle PropertyType；v0.1 期两
-    // 行 TextDisabled 调试值（"Mesh handle: <id>" / "MaterialInstance:
-    // <ptr>"）在本 commit 暂时不显示，接受视觉降级。
-    //
-    // 后续 v0.3 IEditorInspectorPlugin 落地或 v0.5 资源浏览器引入
-    // PropertyType::AssetHandle 路径后还原。
-    //
+
     // c10 落地 Renderable 自定义 add 路径：v0.1 期 +Add Component 在挂 Renderable
     // 时**预绑** cubeMesh + defaultMaterial（让用户立刻在 viewport 看到一个白色
     // 立方体，而不是 mesh=Invalid / material=nullptr 的"隐形"挂法）。c7 schema
@@ -272,7 +282,65 @@ void RegisterRenderableComponentSchema()
             host.scene.pWorld->AddComponent<RC>(e, rc);
         };
 
+    // v0.5 c1：mesh / materialInstance 字段走 PropertyType::AssetRef 注册。
+    // 当前 SchemaInspector AssetRef case 仅显示 path（短名 + tooltip 全路径），
+    // 无控件 / 不 Push 命令；DnD 接收 + 浏览器写入由 c4 落地。
+    static const auto meshGet = +[](const void* c, void* out) {
+        auto* r = static_cast<const RC*>(c);
+        auto* sOut = static_cast<std::string*>(out);
+        if (gpAssetRegistry == nullptr || !r->mesh.IsValid()) {
+            sOut->clear();
+            return;
+        }
+        *sOut = std::string{gpAssetRegistry->PathOf<
+            ::Orange::Engine::Asset::MeshAsset>(r->mesh)};
+    };
+    static const auto meshSet = +[](void* c, const void* in) {
+        auto* r = static_cast<RC*>(c);
+        const auto& path = *static_cast<const std::string*>(in);
+        if (gpAssetRegistry == nullptr) { return; }
+        if (path.empty()) {
+            r->mesh = {};
+            return;
+        }
+        auto lr = gpAssetRegistry->Load<
+            ::Orange::Engine::Asset::MeshAsset>(path);
+        if (lr.IsOk()) { r->mesh = lr.Value(); }
+    };
+
+    static const auto materialGet = +[](const void* c, void* out) {
+        auto* r = static_cast<const RC*>(c);
+        auto* sOut = static_cast<std::string*>(out);
+        sOut->clear();
+        if (gpNamedMaterialInstances == nullptr
+            || r->materialInstance == nullptr) { return; }
+        // O(N) 反查 path → ptr 表。namedMaterialInstances 当前规模 < 10，
+        // 即使每帧调用一次也可忽略。后续若 schema 内有大量 material 字段
+        // 可加 ptr → path 反向缓存。
+        for (const auto& [path, ptr] : *gpNamedMaterialInstances)
+        {
+            if (ptr == r->materialInstance) { *sOut = path; return; }
+        }
+    };
+    static const auto materialSet = +[](void* c, const void* in) {
+        auto* r = static_cast<RC*>(c);
+        const auto& path = *static_cast<const std::string*>(in);
+        if (gpNamedMaterialInstances == nullptr) { return; }
+        if (path.empty()) {
+            r->materialInstance = nullptr;
+            return;
+        }
+        auto it = gpNamedMaterialInstances->find(path);
+        if (it != gpNamedMaterialInstances->end())
+        {
+            r->materialInstance = it->second;
+        }
+    };
+
     ComponentSchemaBuilder<RC>("Renderable", "Renderable")
+        .FieldAssetRef("mesh", "Mesh", AssetKind::Mesh, meshGet, meshSet)
+        .FieldAssetRef("materialInstance", "Material", AssetKind::Material,
+                       materialGet, materialSet)
         .Field<&RC::visible>("visible", "Visible")
         .Field<&RC::castsShadow>("castsShadow", "Casts Shadow")
             .Tooltip("本物体是否参与投射阴影（per-object 开关）。\n"
@@ -526,6 +594,21 @@ void RegisterCameraComponentSchema()
 }
 
 }  // anonymous namespace
+
+// v0.5 c1：setter 函数必须在 anonymous namespace 外（external linkage），
+// 让 main.cpp 启动期能 link 到。setter 内部访问的 gpAssetRegistry /
+// gpNamedMaterialInstances 仍是 anonymous-namespace 文件作用域静态指针。
+void SetAssetRegistryForSchema(::Orange::Engine::Asset::AssetRegistry* p)
+{
+    gpAssetRegistry = p;
+}
+
+void SetNamedMaterialInstancesForSchema(
+    std::unordered_map<std::string,
+                       ::Orange::Engine::Render::MaterialInstance*>* p)
+{
+    gpNamedMaterialInstances = p;
+}
 
 void RegisterBuiltinSchemas()
 {

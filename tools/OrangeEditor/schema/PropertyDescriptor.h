@@ -126,6 +126,11 @@ struct PropertyAttributes
     // `static_cast<const C*>(component)` 拿 typed 组件指针）。
     using VisibleIfFn = bool (*)(const void* component);
     VisibleIfFn visibleIf = nullptr;
+
+    // PropertyType::AssetRef 字段专用：资源类型标签。Asset 浏览器按 kind
+    // 过滤可拖入；DnD payload 携带 kind 让接收字段校验类型匹配；Material
+    // 子模式入口判定。默认 Unknown 不限定类型（接受任何 path）。
+    AssetKind assetKind = AssetKind::Unknown;
 };
 
 // PropertyDescriptor —— 单个字段的完整描述。

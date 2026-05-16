@@ -256,6 +256,30 @@ public:
         return *this;
     }
 
+    // v0.5 c1：AssetRef 字段注册入口。get/set 类型擦除媒介是 std::string
+    // （资源相对路径，如 "assets/meshes/cube.mesh"）。component 内字段实际
+    // 类型（AssetHandle<T> / MaterialInstance*）与 path 的双向映射由 caller
+    // 在 getFn / setFn 内自行实现——typically capture 一个静态指向
+    // AssetRegistry / namedMaterialInstances 的指针完成 PathOf / Load 反查。
+    //
+    // assetKind 区分 mesh / material / texture / scene；Asset 浏览器按 kind
+    // 过滤可拖入；DnD payload 校验类型匹配；Material 子模式入口判定。
+    ComponentSchemaBuilder& FieldAssetRef(const char* name, const char* label,
+                                          AssetKind                 kind,
+                                          PropertyDescriptor::GetFn getFn,
+                                          PropertyDescriptor::SetFn setFn)
+    {
+        PropertyDescriptor pd{};
+        pd.name             = name;
+        pd.label            = label;
+        pd.type             = PropertyType::AssetRef;
+        pd.attribs.assetKind = kind;
+        pd.get              = getFn;
+        pd.set              = setFn;
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
     // ---- 最近一次 Field 的 attribute 修饰 -----------------------------
 
     ComponentSchemaBuilder& Range(float minV, float maxV)

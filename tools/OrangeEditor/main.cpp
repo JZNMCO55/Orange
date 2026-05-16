@@ -386,8 +386,18 @@ int main()
     // 址；editorHost 与 cmdStack 同生命周期（main 栈帧），lambda 不会悬挂。
     editorHost.cmdStack.SetOnChanged(
         [pHost = &editorHost]{ pHost->scene.dirty = true; });
+
+    // v0.5 c1：namedMaterialInstances 从原本的"块内局部 const auto"提升到
+    // main 整个生命周期——schema AssetRef get/set 在 Inspector 渲染 / DnD
+    // 写入路径上需要持续访问该 map，绝不能让它在块退出后悬挂。
+    // SetNamedMaterialInstancesForSchema 把指针注入 schema 模块文件作用域
+    // 静态变量；编辑器关闭时 main 栈帧析构同时 map 析构，schema 不会再
+    // 访问（layer 已先 shutdown）。
+    auto namedMat = BuildNamedMaterialInstances(editorHost.assets);
+    Orange::Editor::Schema::SetAssetRegistryForSchema(
+        editorHost.assets.pAssets.get());
+    Orange::Editor::Schema::SetNamedMaterialInstancesForSchema(&namedMat);
     {
-        const auto namedMat = BuildNamedMaterialInstances(editorHost.assets);
         Scene::LoadOptions demoLoadOpts{};
         demoLoadOpts.assetRegistry          = editorHost.assets.pAssets.get();
         demoLoadOpts.animatorRegistry       = editorHost.assets.pAnimators.get();

@@ -395,6 +395,39 @@ void DrawProperty(EditorHost&                  host,
             }
             break;
         }
+        case PropertyType::AssetRef:
+        {
+            // v0.5 c1：仅显示当前 path（与 readOnly String case 同款"右列
+            // TextDisabled value"）。DnD 接收 + clear 按钮 + 浏览器 popup
+            // 选择由 v0.5 c4 实施。get/set 类型擦除媒介是 std::string。
+            //
+            // path 空 → 显示 "(none)" 灰底，与 EntityRef case 视觉一致
+            // 让"未关联资源" 的字段在视觉上一目了然。
+            std::string curPath;
+            if (prop.get != nullptr) { prop.get(component, &curPath); }
+            if (curPath.empty())
+            {
+                ImGui::TextDisabled("(none)");
+            }
+            else
+            {
+                // 把路径里 '/' 后的最后一段作为短显示名 + 完整 path 走
+                // hover tooltip。Inspector 右列宽度有限，全路径常被截断；
+                // 短名 + tooltip 是 Lumix / Godot 同款做法。
+                const auto slash = curPath.find_last_of('/');
+                const std::string_view shortName = (slash == std::string::npos)
+                    ? std::string_view{curPath}
+                    : std::string_view{curPath.data() + slash + 1,
+                                       curPath.size() - slash - 1};
+                ImGui::TextUnformatted(shortName.data(),
+                                       shortName.data() + shortName.size());
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("%s", curPath.c_str());
+                }
+            }
+            break;
+        }
         case PropertyType::String:
         {
             std::string oldVal;
