@@ -289,6 +289,60 @@ GAP 未落地前，c5 frustum gizmo 走**fake hardcode 默认参数**路径：
 
 ---
 
+## GAP-2026-05-16-directional-light-transform-decoupled
+
+- **发现方**：OrangeEditor v0.4 c4（DirectionalLight gizmo）验收
+- **发现日期**：2026-05-16
+- **一句话定性**：DirectionalLight component 的 `direction` 字段与 entity 的 `TransformComponent` 完全解耦——`Pipeline::ComputeLightViewProj` 只读 `light.direction` 不读任何 transform；但 `DirectionalLightGizmoPlugin` 把箭头**起点**画在 `pTC->position`，给用户"光源在这里"的视觉错觉。结果：编辑器拖 DirectionalLight entity → 黄色箭头跟着飘 → 用户预期阴影实时变化 → 实际阴影完全不变（component direction 没动），交互反馈与渲染结果断裂
+
+### 触发场景
+
+OrangeEditor v0.4 c4 落地了 IEditorGizmoPlugin 首批消费——`DirectionalLightGizmoPlugin` 给挂 `DirectionalLight` 的 entity 画黄色方向箭头。验收路径：
+
+- 选中 demo scene 内的 DirectionalLight 实体（"Sun" / "Light"）
+- viewport 拖 entity（Translate gizmo 改 `Transform.position`）/ Inspector 改 position
+- 黄色箭头**起点**跟着 entity 移动，视觉上像"光源在飘"
+- 但场景里物体的阴影**完全不变**（plane 上 cube 的 shadow 既不平移也不变形）
+
+复现 100%。
+
+### 根因
+
+- `src/render/Pipeline.cpp:2352 ComputeLightViewProj` 只用 `light.direction`，shadow lightPos 从 `sceneCenter - lightDir * 2 * halfExtent` 推断，**完全不读 entity Transform**
+- `tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp:65` 箭头起点 `origin = pTC->position`；line 71 方向 `pDL->direction / dirLen`
+- 二者各自独立：拖 entity Transform → gizmo 起点变 / Pipeline lightPos 不变；改 `light.direction` → gizmo 方向变 / Pipeline 同步变；但**没有**任何路径让 transform → direction 同步
+
+### 缺什么
+
+工业惯例（Unity / Unreal / Godot）：DirectionalLight 的 direction = entity Transform 的"local 朝下方向"经 rotation 旋转后的世界向量。component 上不单独存 direction，靠 transform 派生。候选路径（待评审）：
+
+1. **Convention A（rotation-derived direction，最干净）**：DirectionalLight 删 `direction` 字段；Pipeline 改 `direction = transformRotation * (0, -1, 0)`；编辑器用户按 Rotate gizmo 转 entity 改方向。代价：序列化 SchemaVersion bump + migrator（旧 scene direction 字段读出后转 quat 写回 rotation）
+2. **Convention B（双 source，过渡式）**：保留 `direction` 字段；Pipeline 优先看 transform-rotation（identity 时 fallback 到 direction）。Inspector 加只读"effective direction"显示推导后值。代价：两份真相易撞冲突，long-term 仍需走 Convention A
+3. **Convention C（gizmo 内 hack）**：纯编辑器侧——DirectionalLight gizmo 拖动同时写 `transform.rotation` 和 `light.direction`，保持二者同步。代价：引擎内 ECS 系统 / 游戏脚本若改 transform 不会传播到 direction，"美术拖编辑器看到对的，运行时不一样"
+
+路径 1 最干净（与 Camera GAP-2026-05-15 路径 3 同思路：废 component 内冗余字段，让 transform 唯一拥有几何状态）。
+
+### 期望验收
+
+- 移动 DirectionalLight entity 的 `Transform.rotation`（Inspector 或将来 Rotate gizmo）→ 阴影在 viewport 内**实时**变化
+- 移动 entity `Transform.position` → 黄色箭头起点跟着移动是**预期**（视觉摆位提示），但阴影**不**变化（平行光 position 无意义；可考虑 plugin 改成画在 sceneCenter / camera-facing 固定屏幕位置以避免 misleading）
+- DirectionalLight Inspector 不再有独立 `direction` 字段（或字段标只读 + 注明"由 Transform.rotation 推导"）
+- 现有 demo scene 的 DirectionalLight 经 migrator 自动从旧 direction 字段升到 rotation；视觉无回归
+
+### 临时方案（v0.4 编辑器侧）
+
+GAP 未落地前，编辑器侧**不**主动 workaround（避免 Convention C 那种"拖动同时写两个字段"在引擎自己 tick 时撞冲突）。验收文档登记本 GAP 链接，告知用户"这是已知设计缺口、阴影不变是当前真实行为"。
+
+`v0.4-acceptance-checklist.md` c4 ### bugs 段保留这条记录（已存在），不在编辑器侧硬改方向同步。
+
+### 状态
+
+- **登记**：2026-05-16
+- **处理**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 或独立小 task；优先级建议高于 GAP-2026-05-15（用户每次拖光都撞，反馈级 P1）
+- **关联**：OrangeEditor v0.4 c4 ### bugs 第 1 条；与 GAP-2026-05-15-camera-editor-vs-runtime-separation 同思路（component 几何字段 vs Transform 唯一真相）
+
+---
+
 ## 处理记录
 
 （空）

@@ -441,7 +441,12 @@ gizmo 路径正交）。
     之外的空白区域）→ 触发 picking（清空 / 选下方物体）—— plugin overlay 不接管 LMB
 
 ### bugs
-1.DirectionalLight 在移动的过程中，物体阴影不会实时发生变化
+1. **DirectionalLight 在移动的过程中，物体阴影不会实时发生变化**
+   - **现象**：拖动 DirectionalLight entity（Translate gizmo / Inspector 改 position）→ 黄色方向箭头起点跟着移动，但场景物体阴影完全不变
+   - **复现**：选 demo scene 内 DirectionalLight 实体 → 拖 X/Y/Z 任一方向 → 观察 plane 上 cube 的 shadow → 阴影不动
+   - **根因**：DirectionalLight component 的 `direction` 字段与 entity Transform 完全解耦——`Pipeline::ComputeLightViewProj` 只读 `light.direction` 不读 transform，但 gizmo 把箭头起点画在 entity position
+   - **登记**：`docs/engine-known-gaps.md` GAP-2026-05-16-directional-light-transform-decoupled
+   - **处置**：本 session 不修；待 GAP 评审 + 落地（候选 Convention A：废 direction 字段、改 transform-derived，与 GAP-2026-05-15 同思路）；编辑器侧**不**主动 workaround，避免与引擎 tick 撞冲突
 
 ---
 

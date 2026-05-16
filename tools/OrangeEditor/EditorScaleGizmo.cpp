@@ -11,6 +11,8 @@
 #include <imgui.h>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/mat3x3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
@@ -121,6 +123,13 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
     const glm::mat4 invViewProj = glm::inverse(viewProj);
 
     const glm::vec3 entityPos = pTC->position;
+    // Scale 必须 local：pTC->scale.xyz 永远表示沿实体局部轴的缩放系数。
+    // 实体被 rotate 后若 gizmo 仍画 world XYZ，视觉 handle 与实际缩放方
+    // 向脱钩——拖红轴看似沿水平方向拉，实体却沿"局部 X（已旋转）"伸缩。
+    // 故 axis 一律 entityRot * worldAxis，绘制 + hit-test + drag math 三
+    // 处保持同一基。Translate 也可同样改，但 world-axis translate 是工
+    // 业惯例，不动；Rotate 同理。
+    const glm::mat3 entityRot = glm::mat3_cast(pTC->rotation);
 
     const auto projOrigin = GM::ProjectWorldToScreen(entityPos, viewProj,
                                                      viewportImageOriginScreen,
@@ -146,9 +155,9 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
         bool      tipVisible;
     };
     std::array<AxisProjected, 3> axes{{
-        {Axis::X, AxisDir(Axis::X), {}, false},
-        {Axis::Y, AxisDir(Axis::Y), {}, false},
-        {Axis::Z, AxisDir(Axis::Z), {}, false},
+        {Axis::X, entityRot * AxisDir(Axis::X), {}, false},
+        {Axis::Y, entityRot * AxisDir(Axis::Y), {}, false},
+        {Axis::Z, entityRot * AxisDir(Axis::Z), {}, false},
     }};
     for (auto& ap : axes)
     {
@@ -221,7 +230,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                                                       invViewProj);
             if (mouseRay.has_value())
             {
-                const glm::vec3 axisDir = AxisDir(host.gizmo.hoveredAxis);
+                const glm::vec3 axisDir = entityRot * AxisDir(host.gizmo.hoveredAxis);
                 const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
                                                             entityPos, axisDir);
                 if (hit.has_value())
@@ -273,7 +282,12 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                                                           invViewProj);
                 if (mouseRay.has_value())
                 {
-                    const glm::vec3 axisDir = AxisDir(host.gizmo.draggingAxis);
+                    // 注意：dragStartEntityPos 在 drag 起点 capture，但 entityRot
+                    // 用每帧最新的 pTC->rotation——Scale drag 期间没有任何路径
+                    // 写 pTC->rotation（Rotate gizmo 在 mode != Scale 时不响应），
+                    // 所以两者帧间一致；若以后 Animator 在 Edit Mode tick 时改
+                    // rotation，需要把 entityRot 也 capture 到 dragStart*。
+                    const glm::vec3 axisDir = entityRot * AxisDir(host.gizmo.draggingAxis);
                     const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
                                                                 host.gizmo.dragStartEntityPos,
                                                                 axisDir);
