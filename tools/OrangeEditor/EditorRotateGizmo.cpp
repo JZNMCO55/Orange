@@ -159,7 +159,9 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
 
     const glm::vec3 entityPos = pTC->position;
 
-    // ---- gizmo 半径自适应（同 translate）----
+    // ---- gizmo 半径自适应（同 translate）。探针用相机右向量而非 world X
+    //      轴 —— 见 GizmoMath::ComputeWorldUnitsForScreenLength 注释（防止
+    //      orbit 相机时三个圆环整体伸缩）。----
     const auto projOrigin = GM::ProjectWorldToScreen(entityPos, viewProj,
                                                      viewportImageOriginScreen,
                                                      viewportImageSize);
@@ -169,18 +171,10 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
         host.gizmo.hoveredAxis = Axis::None;
         return false;
     }
-    float ringRadius = 1.0f;
-    const auto projPlusX = GM::ProjectWorldToScreen(
-        entityPos + glm::vec3(1.0f, 0.0f, 0.0f),
-        viewProj, viewportImageOriginScreen, viewportImageSize);
-    if (projPlusX.has_value())
-    {
-        const float pxPerUnit = glm::length(projPlusX->screen - projOrigin->screen);
-        if (pxPerUnit > 1e-3f)
-        {
-            ringRadius = kHandleScreenLengthPx / pxPerUnit;
-        }
-    }
+    const auto ringRadiusOpt = GM::ComputeWorldUnitsForScreenLength(
+        entityPos, cam.view, viewProj,
+        viewportImageOriginScreen, viewportImageSize, kHandleScreenLengthPx);
+    const float ringRadius = ringRadiusOpt.value_or(1.0f);
 
     // ---- 3 个圆环：投影所有顶点到屏幕 ----
     struct RingProjected
@@ -357,7 +351,7 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
             const bool   highlight = (host.gizmo.hoveredAxis == rp.axis)
                                   || (host.gizmo.draggingAxis == rp.axis);
             const ImU32  col       = AxisColor(rp.axis, highlight);
-            const float  thickness = highlight ? 3.5f : 2.0f;
+            const float  thickness = highlight ? 5.0f : 3.0f;
             for (std::size_t i = 0; i < kRingSegments; ++i)
             {
                 const std::size_t j = (i + 1) % kRingSegments;

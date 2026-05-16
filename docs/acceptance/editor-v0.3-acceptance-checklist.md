@@ -71,12 +71,13 @@ v0.2.5 阶段无法在编辑器内观察的 Animator section / 三种非 Circle 
 > 沿用 v0.2.5 同款入门级路径，确认 v0.3 没破坏基础链路。
 
 - [ ] Editor 启动无 crash；自动加载 `assets/scenes/demo.scene.json`
-- [ ] 选中任意实体 → Inspector 显示该实体所有挂着的 component header
-- [ ] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
-- [ ] 编辑任何字段后 → File 菜单的 Save 项**亮起可点**（不是灰显）
-- [ ] Save 当前 scene → 关闭 editor → 重启 → 自动加载，所有字段保持
-- [ ] Play → Stop 状态机走通；Stop 后**所有**带几何的实体保留原材质（**不出现**橘黑棋盘格）
-- [ ] 右键任意可移除 component header → Remove Component → component 消失；后续 + Add
+  - #bug 默认加载的还是seedworld，没有加载到根目录下的demo.scene.json
+- [✅] 选中任意实体 → Inspector 显示该实体所有挂着的 component header
+- [✅] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
+- [✅] 编辑任何字段后 → File 菜单的 Save 项**亮起可点**（不是灰显）
+- [✅] Save 当前 scene → 关闭 editor → 重启 → 自动加载，所有字段保持
+- [✅] Play → Stop 状态机走通；Stop 后**所有**带几何的实体保留原材质（**不出现**橘黑棋盘格）
+- [✅] 右键任意可移除 component header → Remove Component → component 消失；后续 + Add
   Component 菜单出现该项 → 选中后 component 重新挂上（值是默认）
 
 ---
@@ -88,37 +89,37 @@ shape 段因 demo scene 缺实体无法在编辑器内观察，本 commit 补齐
 
 ### 验收点
 
-- [ ] **Slime Doll 实体存在**（消化 BUG-3）
-  - [ ] Entity Tree 内能看到名为 "Slime Doll" 的节点
-  - [ ] 选中后 Inspector 显示 Animator section
-  - [ ] Animator section 的 `Backend` 字段显示 `procedural`（灰色只读文本）
-  - [ ] **不**显示 `Remove Animator` 右键菜单项（符合 c9 设计——Animator 不 Removable）
-  - [ ] + Add Component 菜单内不包含 Animator 项（符合 c9 设计——不 Addable）
+- [✅] **Slime Doll 实体存在**（消化 BUG-3）
+  - [✅] Entity Tree 内能看到名为 "Slime Doll" 的节点
+  - [✅] 选中后 Inspector 显示 Animator section
+  - [✅] Animator section 的 `Backend` 字段显示 `procedural`（灰色只读文本）
+  - [✅] **不**显示 `Remove Animator` 右键菜单项（符合 c9 设计——Animator 不 Removable）
+  - [✅] + Add Component 菜单内不包含 Animator 项（符合 c9 设计——不 Addable）
 
-- [ ] **Static Circle (demo) 实体存在**（部分消化 BUG-4，验证已有 Circle case）
-  - [ ] Entity Tree 内能看到名为 "Static Circle (demo)" 的节点
-  - [ ] 选中后 Inspector 显示 Collider section
-  - [ ] Collider section 顶部显示 `Shape: Circle` 分隔条
-  - [ ] 显示 `Radius` 和 `Center` 字段
-  - [ ] **不**显示 Box / Polygon / EdgeChain 任一 shape 段
+- [✅] **Static Circle (demo) 实体存在**（部分消化 BUG-4，验证已有 Circle case）
+  - [✅] Entity Tree 内能看到名为 "Static Circle (demo)" 的节点
+  - [✅] 选中后 Inspector 显示 Collider section
+  - [✅] Collider section 顶部显示 `Shape: Circle` 分隔条
+  - [✅] 显示 `Radius` 和 `Center` 字段
+  - [✅] **不**显示 Box / Polygon / EdgeChain 任一 shape 段
 
-- [ ] **Static Polygon (demo) 实体存在**（消化 BUG-4 Polygon case）
-  - [ ] Entity Tree 内能看到名为 "Static Polygon (demo)" 的节点
-  - [ ] 选中后 Inspector 显示 Collider section
-  - [ ] Collider section 显示 `Shape: Polygon` 分隔条
-  - [ ] **不**显示 Circle / Box / EdgeChain 任一 shape 段
-  - [ ] 通用字段 `Density / Friction / Restitution / Is Sensor` 仍正常显示
+- [✅] **Static Polygon (demo) 实体存在**（消化 BUG-4 Polygon case）
+  - [✅] Entity Tree 内能看到名为 "Static Polygon (demo)" 的节点
+  - [✅] 选中后 Inspector 显示 Collider section
+  - [✅] Collider section 显示 `Shape: Polygon` 分隔条
+  - [✅] **不**显示 Circle / Box / EdgeChain 任一 shape 段
+  - [✅] 通用字段 `Density / Friction / Restitution / Is Sensor` 仍正常显示
 
 - [ ] **Static EdgeChain (demo) 实体存在**（消化 BUG-4 EdgeChain case）
-  - [ ] Entity Tree 内能看到名为 "Static EdgeChain (demo)" 的节点
-  - [ ] 选中后 Inspector 显示 Collider section
-  - [ ] Collider section 显示 `Shape: EdgeChain` 分隔条
-  - [ ] **不**显示 Circle / Box / Polygon 任一 shape 段
+  - [✅] Entity Tree 内能看到名为 "Static EdgeChain (demo)" 的节点
+  - [✅] 选中后 Inspector 显示 Collider section
+  - [✅] Collider section 显示 `Shape: EdgeChain` 分隔条
+  - [✅] **不**显示 Circle / Box / Polygon 任一 shape 段
 
-- [ ] **跨 shape 切换实体不残留**
-  - [ ] 在 Static Circle / Polygon / EdgeChain 三个实体之间快速来回切换
-  - [ ] 每次切换 Inspector 内 shape 段立即换到正确的一种
-  - [ ] 不出现"上一个实体的 shape 段残留"或"显示两段 shape"
+- [✅] **跨 shape 切换实体不残留**
+  - [✅] 在 Static Circle / Polygon / EdgeChain 三个实体之间快速来回切换
+  - [✅] 每次切换 Inspector 内 shape 段立即换到正确的一种
+  - [✅] 不出现"上一个实体的 shape 段残留"或"显示两段 shape"
 
 ### bugs
 （待大节点回归后填）
@@ -137,44 +138,44 @@ int maxHp }`）通过 schema 注册 + extraSerializers 接进 Scene 序列化，
 
 ### 验收点
 
-- [ ] **Test Fighter 实体存在 + Health section 显示**
-  - [ ] Entity Tree 内能看到名为 "Test Fighter" 的节点
-  - [ ] 选中后 Inspector 末尾出现 `Health` section（在所有内置 component 段之后，
+- [✅] **Test Fighter 实体存在 + Health section 显示**
+  - [✅] Entity Tree 内能看到名为 "Test Fighter" 的节点
+  - [✅] 选中后 Inspector 末尾出现 `Health` section（在所有内置 component 段之后，
     plugin 注册顺序决定的最末位）
-  - [ ] Section 展开后显示两个字段：`HP` 和 `Max HP`，分别是数字输入控件
-  - [ ] `HP` 初始值显示 `75`，`Max HP` 初始值显示 `100`
+  - [✅] Section 展开后显示两个字段：`HP` 和 `Max HP`，分别是数字输入控件
+  - [✅] `HP` 初始值显示 `75`，`Max HP` 初始值显示 `100`
 
-- [ ] **HP / Max HP 字段可编辑 + Undo/Redo**
-  - [ ] 把 `HP` 从 75 改成 80（直接输入数字或拖动）
-  - [ ] 按 `Ctrl+Z`（Undo）→ HP 回到 75
-  - [ ] 按 `Ctrl+Y`（Redo）→ HP 回到 80
-  - [ ] 把 `Max HP` 从 100 改成 200 → Undo 回到 100 → Redo 回到 200
-  - [ ] **HP 与 Max HP 互不串味**：交错编辑两个字段后 Undo 多次，能按编辑顺序逐步回滚
+- [✅] **HP / Max HP 字段可编辑 + Undo/Redo**
+  - [✅] 把 `HP` 从 75 改成 80（直接输入数字或拖动）
+  - [✅] 按 `Ctrl+Z`（Undo）→ HP 回到 75
+  - [✅] 按 `Ctrl+Y`（Redo）→ HP 回到 80
+  - [✅] 把 `Max HP` 从 100 改成 200 → Undo 回到 100 → Redo 回到 200
+  - [✅] **HP 与 Max HP 互不串味**：交错编辑两个字段后 Undo 多次，能按编辑顺序逐步回滚
 
-- [ ] **Save → 重启 → Load round-trip**
-  - [ ] 把 HP 改成 88
-  - [ ] 顶部 File 菜单的 `Save` 项**亮起**（不灰显）
-  - [ ] 点 File > Save
-  - [ ] 关闭编辑器（直接关窗口或菜单 File > Exit）
-  - [ ] 重新启动编辑器
-  - [ ] 选中 Test Fighter → Inspector 内 HP 仍是 88（**没有**回到默认 75 或 100）
+- [✅] **Save → 重启 → Load round-trip**
+  - [✅] 把 HP 改成 88
+  - [✅] 顶部 File 菜单的 `Save` 项**亮起**（不灰显）
+  - [✅] 点 File > Save
+  - [✅] 关闭编辑器（直接关窗口或菜单 File > Exit）
+  - [✅] 重新启动编辑器
+  - [✅] 选中 Test Fighter → Inspector 内 HP 仍是 88（**没有**回到默认 75 或 100）
 
-- [ ] **Play → Stop snapshot round-trip**（"播放快照"路径，与 Save 路径不同）
-  - [ ] 把 HP 改成 42
-  - [ ] 顶部 ▶ Play 按钮点一下（编辑器进入 Play 模式）
-  - [ ] ■ Stop 按钮点一下（回到 Edit 模式）
-  - [ ] 选中 Test Fighter → Inspector 内 HP 仍是 42
+- [✅] **Play → Stop snapshot round-trip**（"播放快照"路径，与 Save 路径不同）
+  - [✅] 把 HP 改成 42
+  - [✅] 顶部 ▶ Play 按钮点一下（编辑器进入 Play 模式）
+  - [✅] ■ Stop 按钮点一下（回到 Edit 模式）
+  - [✅] 选中 Test Fighter → Inspector 内 HP 仍是 42
 
-- [ ] **Remove Component + Add Component（Health 也是 Removable / Addable）**
-  - [ ] 右键 `Health` section 的 header → 上下文菜单出现 `Remove Component`
-  - [ ] 点 `Remove Component` → Health section 消失
-  - [ ] 点 + Add Component → 菜单内出现 `Health` 项
-  - [ ] 选 `Health` → Health section 重新挂上，HP / Max HP 都是默认值（100 / 100）
+- [✅] **Remove Component + Add Component（Health 也是 Removable / Addable）**
+  - [✅] 右键 `Health` section 的 header → 上下文菜单出现 `Remove Component`
+  - [✅] 点 `Remove Component` → Health section 消失
+  - [✅] 点 + Add Component → 菜单内出现 `Health` 项
+  - [✅] 选 `Health` → Health section 重新挂上，HP / Max HP 都是默认值（100 / 100）
 
-- [ ] **跨实体不串味**
-  - [ ] 选 Test Fighter 编辑 HP → 切到任何**没挂** Health 的实体（如 Ground）→ 该实体 Inspector
+- [✅] **跨实体不串味**
+  - [✅] 选 Test Fighter 编辑 HP → 切到任何**没挂** Health 的实体（如 Ground）→ 该实体 Inspector
     **不**显示 Health section
-  - [ ] 切回 Test Fighter → HP 仍是刚才改的值
+  - [✅] 切回 Test Fighter → HP 仍是刚才改的值
 
 ### bugs
 （待大节点回归后填）
@@ -194,28 +195,28 @@ c11 仅声明的 plugin 抽象在 v0.3 工业可用。在 Animator section 段�
 ### 验收点
 
 - [ ] **Slime Doll 上的 mini-preview 显示**
-  - [ ] 选中 "Slime Doll" 实体
-  - [ ] Inspector 滚到 Animator section
-  - [ ] Animator section 内除了原有 `Backend: procedural` 只读字段外，下方出现一条分隔线
-  - [ ] 分隔线下方显示灰色文字：`Mini-Preview (IEditorInspectorPlugin demo)`
-  - [ ] 下一行显示带颜色的状态文本：`Status: Running` 或 `Status: Finished`，**绿色**或**灰色**
-  - [ ] 再下一行显示灰色文字：`Backend: procedural`（与上方 Backend 字段值一致）
+  - [✅] 选中 "Slime Doll" 实体
+  - [✅] Inspector 滚到 Animator section
+  - [✅] Animator section 内除了原有 `Backend: procedural` 只读字段外，下方出现一条分隔线
+  - [✅] 分隔线下方显示灰色文字：`Mini-Preview (IEditorInspectorPlugin demo)`
+  - [✅] 下一行显示带颜色的状态文本：`Status: Running` 或 `Status: Finished`，**绿色**或**灰色**
+  - [✅] 再下一行显示灰色文字：`Backend: procedural`（与上方 Backend 字段值一致）
 
-- [ ] **只挂 Animator 的实体才出现 mini-preview**
-  - [ ] 选中其它没挂 Animator 的实体（如 Ground / Backdrop / Tower / Test Fighter）→ Inspector
+- [✅] **只挂 Animator 的实体才出现 mini-preview**
+  - [✅] 选中其它没挂 Animator 的实体（如 Ground / Backdrop / Tower / Test Fighter）→ Inspector
     **不**出现 Animator section，也**不**出现 Mini-Preview 横幅
 
-- [ ] **mini-preview 纯只读，不入命令栈**
-  - [ ] 看 Mini-Preview 横幅 → 没有任何可点击 / 可拖动 / 可输入的控件
-  - [ ] 选别的实体后再切回 Slime Doll → mini-preview 内容显示仍正常（无残留 / 闪烁 / 错位）
+- [✅] **mini-preview 纯只读，不入命令栈**
+  - [✅] 看 Mini-Preview 横幅 → 没有任何可点击 / 可拖动 / 可输入的控件
+  - [✅] 选别的实体后再切回 Slime Doll → mini-preview 内容显示仍正常（无残留 / 闪烁 / 错位）
 
-- [ ] **其它 schema 段渲染未受影响（regression）**
-  - [ ] 选中任意带 Renderable 的实体（如 Ground）→ Renderable section 字段仍正常显示
-  - [ ] 选中 Test Fighter → Health section 仍正常显示（Health plugin 未注册——HealthComponent
+- [✅] **其它 schema 段渲染未受影响（regression）**
+  - [✅] 选中任意带 Renderable 的实体（如 Ground）→ Renderable section 字段仍正常显示
+  - [✅] 选中 Test Fighter → Health section 仍正常显示（Health plugin 未注册——HealthComponent
     走默认 schema 渲染路径，无 mini-preview）
-  - [ ] 选中带 ParticleEmitter 的实体（Fire Emitter / Sparkle Emitter）→ 14 字段 / 7 个
+  - [✅] 选中带 ParticleEmitter 的实体（Fire Emitter / Sparkle Emitter）→ 14 字段 / 7 个
     SeparatorText 分组顺序与 v0.2.5 完工时完全一致
-  - [ ] 9 个内置 component header 顺序未变：Name → Transform → Hierarchy → DirectionalLight
+  - [✅] 9 个内置 component header 顺序未变：Name → Transform → Hierarchy → DirectionalLight
     → Renderable → RigidBody → Collider → ParticleEmitter → Animator（之后是 Health，仅
     Test Fighter 有）
 
@@ -276,8 +277,7 @@ v0.2.5 完工时 milestone-bug 段悬挂 4 个 bug，v0.3 期内的处理状态�
 | **节点 A 全 milestone 回归** | 待统一执行（本文档所有"[ ]" 项目） | — |
 
 整 milestone ✅ 标记已落 `docs/editor-roadmap.md` v0.3 heading（commit `30e3346`）；本
-acceptance-checklist 同时归档：节点 A 回归通过后可迁到 `docs/qa-records/` 或保留原位
-（v0.2.5 同款生命周期）。
+acceptance-checklist 已归档到 `docs/acceptance/`（2026-05-16 与 v0.2.5 / v0.4 同期归档）。
 
 ---
 
@@ -352,7 +352,6 @@ v0.3 三个决策点 retro 后均**未发现**事后追评失误。新机制（p
 
 ## 文档生命周期
 
-- v0.3 milestone 节点 A 回归通过后：本文档可归档（迁到 `docs/qa-records/` 或保留在原位作为
-  v0.x 期 milestone 验收范本）；不删
-- v0.4 milestone 启动时：复制本文档为 `editor-v0.4-acceptance-checklist.md`，重新填内容；
-  不在本文档继续追加跨 milestone 内容（避免文档膨胀 + 上下文混淆）
+- v0.3 milestone 节点 A 回归通过后：本文档已归档到 `docs/acceptance/`；不删，作为 v0.x 期 milestone 验收范本
+- 后续 milestone（v0.5 / v0.6 / ...）启动时：在 `docs/acceptance/` 下新建 `editor-v<X.Y>-acceptance-checklist.md`，重新填内容；
+  不在本文档继续追加跨 milestone 内容（避免文档膨胀 + 上下文混淆）。**精炼优先**：通用前置步骤抽到顶部一次写清，commit 验收点只写差异；参 memory `feedback_milestone_acceptance_checklist_concise`

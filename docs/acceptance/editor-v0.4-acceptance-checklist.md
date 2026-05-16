@@ -23,7 +23,7 @@
 
 v0.3 节点 A 大回归推迟到 v0.4 完工后合并执行——v0.4 验收必须**先**确认 v0.3 三个 commit
 （c1 demo scene 补实体 / c2 HealthComponent 端到端 / c3 AnimatorMiniPreviewPlugin）的所有
-验收点全数通过，再走 v0.4 自身验收。`docs/editor-v0.3-acceptance-checklist.md` 的所有 `[ ]`
+验收点全数通过，再走 v0.4 自身验收。`docs/acceptance/editor-v0.3-acceptance-checklist.md` 的所有 `[ ]`
 项目同步在合并节点跑。
 
 ### 2. picking + gizmo 与 CommandStack BeginGroup / EndGroup 的联动
@@ -69,13 +69,14 @@ gizmo 走 viewport overlay sub-pass（不入 RenderGraph 主路径），回归�
 
 > 沿用 v0.2.5 / v0.3 同款入门级路径，确认 v0.4 没破坏基础链路。
 
-- [ ] Editor 启动无 crash；自动加载 `assets/scenes/demo.scene.json`
-- [ ] 选中任意实体 → Inspector 显示该实体所有挂着的 component header
-- [ ] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
-- [ ] 编辑任何字段后 → File 菜单的 Save 项**亮起可点**（不是灰显）
-- [ ] Save 当前 scene → 关闭 editor → 重启 → 自动加载，所有字段保持
-- [ ] Play → Stop 状态机走通；Stop 后所有带几何的实体保留原材质
-- [ ] 右键任意可移除 component header → Remove Component → component 消失；后续 + Add
+- [x] Editor 启动无 crash；自动加载 `assets/scenes/demo.scene.json`
+  - 并未默认加载demo.scene.json,加载的是seedworld
+- [✅] 选中任意实体 → Inspector 显示该实体所有挂着的 component header
+- [✅] 任改一个标量字段 → `Ctrl+Z` 回滚 → `Ctrl+Y` 重做，三步值一致
+- [✅] 编辑任何字段后 → File 菜单的 Save 项**亮起可点**（不是灰显）
+- [✅] Save 当前 scene → 关闭 editor → 重启 → 自动加载，所有字段保持
+- [✅] Play → Stop 状态机走通；Stop 后所有带几何的实体保留原材质
+- [✅] 右键任意可移除 component header → Remove Component → component 消失；后续 + Add
   Component 菜单出现该项 → 选中后 component 重新挂上（值是默认）
 
 ---
@@ -97,44 +98,43 @@ Entity Tree 通过既有 selection 绑定自动高亮（无需双向布线）。
 
 ### 验收点
 
-- [ ] **viewport 内点击实体即选中**
+- [✅] **viewport 内点击实体即选中**
   - [ ] 启动编辑器、自动加载 demo scene
-  - [ ] 在 Scene 面板内对任意可见几何体（Ground / Tower / Box / Pillar / Static Circle 等）
+  - [✅] 在 Scene 面板内对任意可见几何体（Ground / Tower / Box / Pillar / Static Circle 等）
     点击鼠标**左键**
-  - [ ] Inspector 立即切换到该实体（Name 段显示该实体名 / Transform 段显示其位姿）
-  - [ ] Entity Tree 内对应节点高亮（与 v0.1 既有 selection 视觉一致）
+  - [✅] Inspector 立即切换到该实体（Name 段显示该实体名 / Transform 段显示其位姿）
+  - [✅] Entity Tree 内对应节点高亮（与 v0.1 既有 selection 视觉一致）
 
-- [ ] **viewport 空白区域点击清除选中**
-  - [ ] 选中任意实体 → 在 Scene 面板 viewport 空白处（如远处天空 / 镜头外区域）点左键
-  - [ ] Inspector 立即清空（无任何 component header）
-  - [ ] Entity Tree 内之前高亮节点回到非高亮态
+- [✅] **viewport 空白区域点击清除选中**
+  - [✅] 选中任意实体 → 在 Scene 面板 viewport 空白处（如远处天空 / 镜头外区域）点左键
+  - [✅] Inspector 立即清空（无任何 component header）
+  - [✅] Entity Tree 内之前高亮节点回到非高亮态
 
-- [ ] **drag vs click 区分（4px 阈值）**
-  - [ ] 选中实体 A → 在 viewport 内按住左键**拖动超过几个像素**再松开
-  - [ ] **不**触发 picking（A 仍保持选中，Inspector 不切换）
-  - [ ] 选中实体 A → 在 viewport 内按住左键**几乎不动**（< 4px）就松开
-  - [ ] 触发 picking（命中谁就选谁）
+- [✅] **drag vs click 区分（4px 阈值）**
+  - [✅] 选中实体 A → 在 viewport 内按住左键**拖动超过几个像素**再松开
+  - [✅] **不**触发 picking（A 仍保持选中，Inspector 不切换）
+  - [✅] 选中实体 A → 在 viewport 内按住左键**几乎不动**（< 4px）就松开
+  - [✅] 触发 picking（命中谁就选谁）
 
-- [ ] **多次点击不串味**
-  - [ ] 连续点击 5~10 个不同实体，每次 Inspector 立即换到新实体
-  - [ ] 选 A 编辑 Transform.rotation 多次 → 点 B → 再点回 A → A 的 Euler 字段显示与编辑后
+- [✅] **多次点击不串味**
+  - [✅] 连续点击 5~10 个不同实体，每次 Inspector 立即换到新实体
+  - [✅] 选 A 编辑 Transform.rotation 多次 → 点 B → 再点回 A → A 的 Euler 字段显示与编辑后
     一致（**不**显示 0/默认值——cache 切实体时正确清理）
 
-- [ ] **Entity Tree → viewport 单向（已有路径未回退）**
-  - [ ] 在 Entity Tree 内点选某实体 → Inspector 切换（v0.1 既有行为，c1 不应破坏）
-  - [ ] viewport 端**当前无 outline 视觉**（outline / 选中高亮在后续 commit；c1 仅 Inspector
+- [✅] **Entity Tree → viewport 单向（已有路径未回退）**
+  - [✅] 在 Entity Tree 内点选某实体 → Inspector 切换（v0.1 既有行为，c1 不应破坏）
+  - [✅] viewport 端**当前无 outline 视觉**（outline / 选中高亮在后续 commit；c1 仅 Inspector
     + Entity Tree 端可观察选中态）
 
-- [ ] **picking 命中精度**
-  - [ ] 选 demo scene 内一个**有旋转**的实体（如 Tower 若有非零 rotation）→ 点击其几何视觉中心
+- [✅] **picking 命中精度**
+  - [✅] 选 demo scene 内一个**有旋转**的实体（如 Tower 若有非零 rotation）→ 点击其几何视觉中心
     应命中
-  - [ ] 选两个相互遮挡的实体 → 点击近处那个应命中近处（取最近击中）
-  - [ ] 点击粒子 emitter / DirectionalLight 实体（无几何或仅图标）→ 当前**不能**命中（c1 仅
+  - [✅] 选两个相互遮挡的实体 → 点击近处那个应命中近处（取最近击中）
+  - [✅] 点击粒子 emitter / DirectionalLight 实体（无几何或仅图标）→ 当前**不能**命中（c1 仅
     AABB 命中带 Renderable 的实体；图标 picking 在 c4 IEditorGizmoPlugin 落地）
 
 ### bugs
-（待大节点回归后填）
-
+（无新增；节点 A 大回归补跑后若仍无新增，本段保持）
 ---
 
 ## Commit 2：Translate Gizmo + CommandStack BeginGroup / EndGroup 首批消费
@@ -164,73 +164,73 @@ units per ~90 px）。
 
 ### 验收点
 
-- [ ] **gizmo 显示 + 选中实体时可见**
-  - [ ] 启动编辑器、自动加载 demo scene
-  - [ ] 在 viewport 内点击任意带几何的实体（Ground / Tower / Box / Pillar 等）
-  - [ ] 选中后在该实体位置看到 3 条彩色 axis line + 箭头三角：**红轴沿 +X / 绿轴沿
+- [✅] **gizmo 显示 + 选中实体时可见**
+  - [✅] 启动编辑器、自动加载 demo scene
+  - [✅] 在 viewport 内点击任意带几何的实体（Ground / Tower / Box / Pillar 等）
+  - [✅] 选中后在该实体位置看到 3 条彩色 axis line + 箭头三角：**红轴沿 +X / 绿轴沿
     +Y / 蓝轴沿 +Z**
-  - [ ] gizmo 屏幕长度看上去约 80~100 像素（远近实体大致一致——不会"远处变成一个点 /
+  - [✅] gizmo 屏幕长度看上去约 80~100 像素（远近实体大致一致——不会"远处变成一个点 /
     近处充满整个屏幕"）
 
-- [ ] **未选中时 gizmo 不显示**
-  - [ ] 点 viewport 空白处清除选中 → 整个 viewport 内**不**出现任何 axis line / 箭头
-  - [ ] 重新点选实体 → gizmo 立即出现在新实体位置
+- [✅] **未选中时 gizmo 不显示**
+  - [✅] 点 viewport 空白处清除选中 → 整个 viewport 内**不**出现任何 axis line / 箭头
+  - [✅] 重新点选实体 → gizmo 立即出现在新实体位置
 
-- [ ] **hover 高亮**
-  - [ ] 鼠标移到某条 axis line 上（不点击）→ 该 axis 颜色变亮 + 线条加粗
-  - [ ] 鼠标移开 → axis 立即回到原色 / 原粗细
-  - [ ] 三条 axis 同时 hover-test 不串味（只有最近的那条高亮）
+- [✅] **hover 高亮**
+  - [✅] 鼠标移到某条 axis line 上（不点击）→ 该 axis 颜色变亮 + 线条加粗
+  - [✅] 鼠标移开 → axis 立即回到原色 / 原粗细
+  - [✅ ] 三条 axis 同时 hover-test 不串味（只有最近的那条高亮）
 
-- [ ] **基础拖动 + 视觉同步**
-  - [ ] 选中实体 → 按住红色 X 轴 → 沿屏幕水平方向拖动鼠标
-  - [ ] 实体在 viewport 内沿 +X / -X 方向移动；同时 Inspector 内 Transform.position.x
+- [✅] **基础拖动 + 视觉同步**
+  - [✅] 选中实体 → 按住红色 X 轴 → 沿屏幕水平方向拖动鼠标
+  - [✅] 实体在 viewport 内沿 +X / -X 方向移动；同时 Inspector 内 Transform.position.x
     数值实时变化
-  - [ ] 同样验证绿色 Y 轴（实体沿 ±Y 移动）+ 蓝色 Z 轴（沿 ±Z 移动）
+  - [✅] 同样验证绿色 Y 轴（实体沿 ±Y 移动）+ 蓝色 Z 轴（沿 ±Z 移动）
 
 - [ ] **一次 drag = 一次 Undo（CommandStack BeginGroup 首批消费）**
-  - [ ] 记下实体起始 position（例如 `(0, 0, 0)`）
-  - [ ] 按住红 X 轴拖动到大约 `(3, 0, 0)`（中间途经多个像素 → 内部 push 多帧命令，靠
+  - [✅] 记下实体起始 position（例如 `(0, 0, 0)`）
+  - [✅] 按住红 X 轴拖动到大约 `(3, 0, 0)`（中间途经多个像素 → 内部 push 多帧命令，靠
     intra-group coalesce 合并）
-  - [ ] 松开 LMB → 实体停在 `(3, 0, 0)` 附近
-  - [ ] 按 `Ctrl+Z` **一次** → 实体**回到** `(0, 0, 0)`（不是中间某个值——验证整次拖动是
+  - [✅] 松开 LMB → 实体停在 `(3, 0, 0)` 附近
+  - [✅] 按 `Ctrl+Z` **一次** → 实体**回到** `(0, 0, 0)`（不是中间某个值——验证整次拖动是
     单条 Undo 条目）
-  - [ ] 按 `Ctrl+Y` 一次 → 实体回到拖动结束的位置
+  - [✅] 按 `Ctrl+Y` 一次 → 实体回到拖动结束的位置
 
-- [ ] **拖动与轨道相机 LMB 互不冲突**
-  - [ ] 不选中实体时按住 LMB 拖动 → 相机轨道旋转（v0.1 行为）
-  - [ ] 选中实体后**不在 gizmo handle 上**按住 LMB 拖动 → 相机轨道旋转
-  - [ ] 选中实体**在 gizmo handle 上**按住 LMB 拖动 → gizmo 拖动（不旋转相机）
-  - [ ] 拖完 gizmo 松手 → **不**触发 picking（选中实体不变；典型撞坑：松手时既拖完
+- [✅] **拖动与轨道相机 LMB 互不冲突**
+  - [✅] 不选中实体时按住 LMB 拖动 → 相机轨道旋转（v0.1 行为）
+  - [✅] 选中实体后**不在 gizmo handle 上**按住 LMB 拖动 → 相机轨道旋转
+  - [✅] 选中实体**在 gizmo handle 上**按住 LMB 拖动 → gizmo 拖动（不旋转相机）
+  - [✅] 拖完 gizmo 松手 → **不**触发 picking（选中实体不变；典型撞坑：松手时既拖完
     gizmo 又触发 picking 把选中改成 handle 下方的物体）
 
-- [ ] **drag 中途切实体 / 删除实体的安全终止**
-  - [ ] 选实体 A → 开始拖 X 轴（按住 LMB）→ 在 Entity Tree 中点选另一个实体 B
-  - [ ] 当前选中切到 B；A 的拖动**停止**（A 不再继续被拖）
-  - [ ] 仍按住 LMB → 不进入 B 的拖动（gizmo 期待 fresh click）
-  - [ ] 松开 LMB → 无任何 crash / 错误日志
-  - [ ] cmdStack 状态完整：再编辑 B 的任意字段 → Undo / Redo 正常
+- [✅] **drag 中途切实体 / 删除实体的安全终止**
+  - [✅] 选实体 A → 开始拖 X 轴（按住 LMB）→ 在 Entity Tree 中点选另一个实体 B
+  - [✅] 当前选中切到 B；A 的拖动**停止**（A 不再继续被拖）
+  - [✅] 仍按住 LMB → 不进入 B 的拖动（gizmo 期待 fresh click）
+  - [✅] 松开 LMB → 无任何 crash / 错误日志
+  - [✅] cmdStack 状态完整：再编辑 B 的任意字段 → Undo / Redo 正常
 
-- [ ] **Play Mode 期间 gizmo 禁用**
-  - [ ] 选中带几何的实体 → 看到 gizmo
-  - [ ] 顶部 ▶ Play 按钮点一下 → 进入 Play Mode → gizmo **消失**（不绘制）
-  - [ ] Play 期间 viewport 内拖动鼠标 → 不修改任何实体 position（gizmo 不响应输入）
-  - [ ] ■ Stop 按钮点一下 → 回到 Edit Mode → gizmo **重新出现**在该实体位置
-  - [ ] Stop 后立即拖 gizmo → 与 Play 之前行为一致（cmdStack 未被破坏）
+- [✅] **Play Mode 期间 gizmo 禁用**
+  - [✅] 选中带几何的实体 → 看到 gizmo
+  - [✅] 顶部 ▶ Play 按钮点一下 → 进入 Play Mode → gizmo **消失**（不绘制）
+  - [✅] Play 期间 viewport 内拖动鼠标 → 不修改任何实体 position（gizmo 不响应输入）
+  - [✅] ■ Stop 按钮点一下 → 回到 Edit Mode → gizmo **重新出现**在该实体位置
+  - [✅] Stop 后立即拖 gizmo → 与 Play 之前行为一致（cmdStack 未被破坏）
 
-- [ ] **相机后方实体不绘制**
-  - [ ] 选中实体 → 旋转相机让该实体走出视锥（在 viewport 看不到）
-  - [ ] gizmo 不在 viewport 边缘 / 角落出现"飘"的 axis line
-  - [ ] 旋转相机让实体重新进入视锥 → gizmo 立即恢复显示
+- [✅] **相机后方实体不绘制**
+  - [✅] 选中实体 → 旋转相机让该实体走出视锥（在 viewport 看不到）
+  - [✅] gizmo 不在 viewport 边缘 / 角落出现"飘"的 axis line
+  - [✅] 旋转相机让实体重新进入视锥 → gizmo 立即恢复显示
 
-- [ ] **Inspector / gizmo 双路径写 position 不串味**
-  - [ ] 选中实体 → 在 Inspector 拖动 Transform.position.x DragFloat 改到 `2`
-  - [ ] 在 viewport 拖 X 轴再加 `3` → 实体在 `(5, 0, 0)` 附近
-  - [ ] `Ctrl+Z` 一次 → 回到 `(2, 0, 0)`（仅回滚 gizmo 那次拖动）
-  - [ ] 再 `Ctrl+Z` 一次 → 回到 `(0, 0, 0)`（回滚 Inspector 那次编辑）
-  - [ ] 验证两条路径都走命令栈、互不串味、按操作时序逐步回滚
+- [✅] **Inspector / gizmo 双路径写 position 不串味**
+  - [✅] 选中实体 → 在 Inspector 拖动 Transform.position.x DragFloat 改到 `2`
+  - [✅] 在 viewport 拖 X 轴再加 `3` → 实体在 `(5, 0, 0)` 附近
+  - [✅] `Ctrl+Z` 一次 → 回到 `(2, 0, 0)`（仅回滚 gizmo 那次拖动）
+  - [✅] 再 `Ctrl+Z` 一次 → 回到 `(0, 0, 0)`（回滚 Inspector 那次编辑）
+  - [✅] 验证两条路径都走命令栈、互不串味、按操作时序逐步回滚
 
 ### bugs
-（待大节点回归后填）
+（无新增；节点 A 大回归补跑后若仍无新增，本段保持）
 
 ---
 
@@ -267,87 +267,87 @@ CommandStack 联动：
 
 ### 验收点
 
-- [ ] **W/E/R 模式切换基础**
-  - [ ] 选中带 Transform 的实体（demo scene 任意实体均可）
-  - [ ] 默认看到 Translate gizmo（3 个箭头）—— 编辑器启动后默认 mode
-  - [ ] 按 `W` 键 → 仍是 Translate gizmo（无变化）
-  - [ ] 按 `E` 键 → gizmo **变成 3 个圆环**（X 红 / Y 绿 / Z 蓝，绕实体位置呈球面)
-  - [ ] 按 `R` 键 → gizmo **变成 3 个箭头 + tip 小方块 + 中心白色小方块**（scale 视觉）
-  - [ ] 再按 `W` 键 → 回到 Translate 箭头
-  - [ ] 三种模式视觉清晰可区分：translate 三角箭头 / rotate 圆环 / scale 立方体 tip
+- [✅] **W/E/R 模式切换基础**
+  - [✅] 选中带 Transform 的实体（demo scene 任意实体均可）
+  - [✅] 默认看到 Translate gizmo（3 个箭头）—— 编辑器启动后默认 mode
+  - [✅] 按 `W` 键 → 仍是 Translate gizmo（无变化）
+  - [✅] 按 `E` 键 → gizmo **变成 3 个圆环**（X 红 / Y 绿 / Z 蓝，绕实体位置呈球面）
+  - [✅] 按 `R` 键 → gizmo **变成 3 个箭头 + tip 小方块 + 中心白色小方块**（scale 视觉）
+  - [✅] 再按 `W` 键 → 回到 Translate 箭头
+  - [✅] 三种模式视觉清晰可区分：translate 三角箭头 / rotate 圆环 / scale 立方体 tip
 
-- [ ] **模式切换不打断拖动**
-  - [ ] 选实体 → 按 `W` → 按住红 X 箭头开始拖动（不松开）
-  - [ ] 拖动中按 `E` 或 `R` 键 → gizmo **保持 Translate 模式**（不切换到 Rotate / Scale）
-  - [ ] 松开 LMB 后再按 `E` → 切换到 Rotate gizmo
-  - [ ] 同理：rotate 拖动中按 W/R 也不切换；scale 拖动中按 W/E 也不切换
+- [✅] **模式切换不打断拖动**
+  - [✅] 选实体 → 按 `W` → 按住红 X 箭头开始拖动（不松开）
+  - [✅] 拖动中按 `E` 或 `R` 键 → gizmo **保持 Translate 模式**（不切换到 Rotate / Scale）
+  - [✅] 松开 LMB 后再按 `E` → 切换到 Rotate gizmo
+  - [✅] 同理：rotate 拖动中按 W/R 也不切换；scale 拖动中按 W/E 也不切换
 
-- [ ] **模式切换不被 Inspector 文本框拦截**
-  - [ ] 在 Inspector 的 Name 字段 InputText 内点击 → 光标进入文本框
-  - [ ] 按 `W` / `E` / `R` 键 → 字母进入 Name 字段（**不**切换 gizmo 模式）
-  - [ ] 点击 viewport 空白处（脱出 InputText focus）
-  - [ ] 再按 `W` / `E` / `R` → 正常切换 gizmo 模式
+- [✅] **模式切换不被 Inspector 文本框拦截**
+  - [✅] 在 Inspector 的 Name 字段 InputText 内点击 → 光标进入文本框
+  - [✅] 按 `W` / `E` / `R` 键 → 字母进入 Name 字段（**不**切换 gizmo 模式）
+  - [✅] 点击 viewport 空白处（脱出 InputText focus）
+  - [✅] 再按 `W` / `E` / `R` → 正常切换 gizmo 模式
 
-- [ ] **Rotate gizmo 拖动 + Undo/Redo**
-  - [ ] 选实体 → 按 `E` 切到 Rotate → Inspector 记下 Transform.rotation 初始 Euler 值
-  - [ ] 按住红色 X 圆环 → 拖动鼠标绕圆周 → 实体绕 X 轴旋转；同时 Inspector 的 Rotation
+- [✅] **Rotate gizmo 拖动 + Undo/Redo**
+  - [✅] 选实体 → 按 `E` 切到 Rotate → Inspector 记下 Transform.rotation 初始 Euler 值
+  - [✅] 按住红色 X 圆环 → 拖动鼠标绕圆周 → 实体绕 X 轴旋转；同时 Inspector 的 Rotation
     字段数值实时变化
-  - [ ] 松开 LMB → 实体停在新角度
-  - [ ] `Ctrl+Z` 一次 → 实体**回到拖动前的角度**（不是中间某帧）+ Inspector Rotation
+  - [✅] 松开 LMB → 实体停在新角度
+  - [✅] `Ctrl+Z` 一次 → 实体**回到拖动前的角度**（不是中间某帧）+ Inspector Rotation
     回到初始值
-  - [ ] `Ctrl+Y` 一次 → 回到拖动结束的角度
-  - [ ] 同样验证绿色 Y 圆环 + 蓝色 Z 圆环
+  - [✅] `Ctrl+Y` 一次 → 回到拖动结束的角度
+  - [✅] 同样验证绿色 Y 圆环 + 蓝色 Z 圆环
 
-- [ ] **Rotate Inspector / gizmo 双路径不串味**
-  - [ ] 选实体 → Inspector 拖 Rotation Y 改到 `45°`
-  - [ ] 按 `E` 切 Rotate → 拖 X 圆环再加 `30°`
-  - [ ] `Ctrl+Z` 一次 → 仅回滚 gizmo 那次（X 旋转回到 0°；Y 仍是 45°）
-  - [ ] 再 `Ctrl+Z` 一次 → Y 也回滚到 0°（Inspector 那次）
-  - [ ] **关键**：gizmo 拖动期间 Inspector 的 Rotation 字段应**实时**显示新 Euler 值
+- [✅] **Rotate Inspector / gizmo 双路径不串味**
+  - [✅] 选实体 → Inspector 拖 Rotation Y 改到 `45°`
+  - [✅] 按 `E` 切 Rotate → 拖 X 圆环再加 `30°`
+  - [✅] `Ctrl+Z` 一次 → 仅回滚 gizmo 那次（X 旋转回到 0°；Y 仍是 45°）
+  - [✅] 再 `Ctrl+Z` 一次 → Y 也回滚到 0°（Inspector 那次）
+  - [✅] **关键**：gizmo 拖动期间 Inspector 的 Rotation 字段应**实时**显示新 Euler 值
     （不是停在旧值——验证 `transformEulerCacheEntity` invalidate 正确）
 
-- [ ] **Scale 单轴拖动**
-  - [ ] 选实体 → 按 `R` 切 Scale → Inspector 记下 Transform.scale 初始 `(1, 1, 1)`
-  - [ ] 按住红 X 箭头 → 沿 X 方向**远离原点**拖动 → 实体在 X 方向**变长**；Inspector
+- [✅] **Scale 单轴拖动**
+  - [✅] 选实体 → 按 `R` 切 Scale → Inspector 记下 Transform.scale 初始 `(1, 1, 1)`
+  - [✅] 按住红 X 箭头 → 沿 X 方向**远离原点**拖动 → 实体在 X 方向**变长**；Inspector
     scale.x 数值实时增大
-  - [ ] 反向拖动（朝原点 → 沿轴负方向）→ 实体在 X 方向**变短**；scale.x 数值缩小
-  - [ ] 极端拖动到很小（不越过 0）→ scale.x clamp 到 ≥ 0.01（不应变 0 / 负数）
-  - [ ] 松开 LMB → `Ctrl+Z` 一次回到 `(1, 1, 1)`
-  - [ ] 同理验证 Y 轴（scale.y 变化，X/Z 不变）+ Z 轴
+  - [✅] 反向拖动（朝原点 → 沿轴负方向）→ 实体在 X 方向**变短**；scale.x 数值缩小
+  - [✅] 极端拖动到很小（不越过 0）→ scale.x clamp 到 ≥ 0.01（不应变 0 / 负数）
+  - [✅] 松开 LMB → `Ctrl+Z` 一次回到 `(1, 1, 1)`
+  - [✅] 同理验证 Y 轴（scale.y 变化，X/Z 不变）+ Z 轴
 
-- [ ] **Scale uniform 中心 handle**
-  - [ ] 选实体 → 按 `R` → 中心**白色小立方体**位于 gizmo 原点（与 3 轴起点重合）
-  - [ ] hover 中心立方体 → 立方体颜色变亮（黄色高亮）
-  - [ ] 按住中心 → 鼠标**向右下角**拖动 → 实体**整体放大**；Inspector scale.x/y/z **同步**
+- [✅] **Scale uniform 中心 handle**
+  - [✅] 选实体 → 按 `R` → 中心**白色小立方体**位于 gizmo 原点（与 3 轴起点重合）
+  - [✅] hover 中心立方体 → 立方体颜色变亮（黄色高亮）
+  - [✅] 按住中心 → 鼠标**向右下角**拖动 → 实体**整体放大**；Inspector scale.x/y/z **同步**
     变大（uniform）
-  - [ ] 反向（向左上角）拖动 → 实体整体缩小；scale 三轴同步变小
-  - [ ] `Ctrl+Z` 一次回到 `(1, 1, 1)` —— 三轴一起回滚
+  - [✅] 反向（向左上角）拖动 → 实体整体缩小；scale 三轴同步变小
+  - [✅] `Ctrl+Z` 一次回到 `(1, 1, 1)` —— 三轴一起回滚
 
-- [ ] **Scale 各模式 hit-test 优先级**
-  - [ ] 中心立方体在原点附近 → 鼠标放在原点中心 → hover 高亮的是**中心**（不是某条轴）
-  - [ ] 鼠标稍微离开原点（往 X 方向移） → hover 高亮的是 **X 轴**（不是中心）
-  - [ ] 切换不串味（不出现"中心和 X 同时高亮"）
+- [✅] **Scale 各模式 hit-test 优先级**
+  - [✅] 中心立方体在原点附近 → 鼠标放在原点中心 → hover 高亮的是**中心**（不是某条轴）
+  - [✅] 鼠标稍微离开原点（往 X 方向移） → hover 高亮的是 **X 轴**（不是中心）
+  - [✅] 切换不串味（不出现"中心和 X 同时高亮"）
 
-- [ ] **三模式跨模式切换 + cmdStack 干净**
-  - [ ] 拖 Translate X 移到某位置 → 按 `E` 切 Rotate → 拖 Y 圆环 → 按 `R` 切 Scale →
+- [✅] **三模式跨模式切换 + cmdStack 干净**
+  - [✅] 拖 Translate X 移到某位置 → 按 `E` 切 Rotate → 拖 Y 圆环 → 按 `R` 切 Scale →
     拖中心放大
-  - [ ] `Ctrl+Z` 三次 → 逐步回滚 scale → rotate → translate，每步对应一次拖动
-  - [ ] 每次 `Ctrl+Z` 期间 gizmo **保持当前模式**（不会被 Undo 反向切回旧模式——gizmo
+  - [✅] `Ctrl+Z` 三次 → 逐步回滚 scale → rotate → translate，每步对应一次拖动
+  - [✅] 每次 `Ctrl+Z` 期间 gizmo **保持当前模式**（不会被 Undo 反向切回旧模式——gizmo
     mode 不入命令栈，是 UI 状态）
 
-- [ ] **Play Mode 期间所有 3 模式 gizmo 都禁用**
-  - [ ] 选实体 → 按 W → 看到 Translate gizmo
-  - [ ] ▶ Play → gizmo **消失**（同 c2 行为）
-  - [ ] Play 期间按 E / R → mode 字段可能更新（无危害）但 gizmo 仍不绘制不响应
-  - [ ] ■ Stop → gizmo 重新出现，按当前 mode 显示对应类型
-  - [ ] 拖动正常工作，cmdStack 状态保持
+- [✅] **Play Mode 期间所有 3 模式 gizmo 都禁用**
+  - [✅] 选实体 → 按 W → 看到 Translate gizmo
+  - [✅] ▶ Play → gizmo **消失**（同 c2 行为）
+  - [✅] Play 期间按 E / R → mode 字段可能更新（无危害）但 gizmo 仍不绘制不响应
+  - [✅] ■ Stop → gizmo 重新出现，按当前 mode 显示对应类型
+  - [✅] 拖动正常工作，cmdStack 状态保持
 
-- [ ] **picking gate 仍正确（c2 行为不回退）**
-  - [ ] 三模式之一拖完 gizmo 松手 → **不**触发 picking（选中实体不变）
-  - [ ] viewport 空白处单击（任何模式下）→ 触发 picking（清除选中或选中下方物体）
+- [✅] **picking gate 仍正确（c2 行为不回退）**
+  - [✅] 三模式之一拖完 gizmo 松手 → **不**触发 picking（选中实体不变）
+  - [✅] viewport 空白处单击（任何模式下）→ 触发 picking（清除选中或选中下方物体）
 
 ### bugs
-（待大节点回归后填）
+1. 在进行Rotation后，拉伸Scale的line，并不会沿着指定方向拉伸
 
 ---
 
@@ -382,66 +382,66 @@ gizmo 路径正交）。
 
 ### 验收点
 
-- [ ] **DirectionalLight gizmo 显示**
-  - [ ] 启动编辑器、自动加载 demo scene
-  - [ ] 在 Entity Tree 找到 demo scene 内的 DirectionalLight 实体（名字含 "Light" 或类似），
+- [✅] **DirectionalLight gizmo 显示**
+  - [✅] 启动编辑器、自动加载 demo scene
+  - [✅] 在 Entity Tree 找到 demo scene 内的 DirectionalLight 实体（名字含 "Light" 或类似），
     点选
-  - [ ] viewport 内**该实体位置出现一根黄色箭头**，从实体位置沿 light direction
+  - [✅] viewport 内**该实体位置出现一根黄色箭头**，从实体位置沿 light direction
     （demo scene 默认大致斜下方）延伸
-  - [ ] 切换 W/E/R gizmo 模式 → 黄色箭头**始终显示**（与内置 Transform gizmo 并存，不被
+  - [✅] 切换 W/E/R gizmo 模式 → 黄色箭头**始终显示**（与内置 Transform gizmo 并存，不被
     隐藏）
-  - [ ] 同时观察：内置 Transform gizmo（红/绿/蓝箭头 or 圆环 or 立方体）也正常显示在同一
+  - [✅] 同时观察：内置 Transform gizmo（红/绿/蓝箭头 or 圆环 or 立方体）也正常显示在同一
     实体上，两套 overlay **不互相覆盖、不闪烁**
 
-- [ ] **DirectionalLight 方向调整后箭头实时更新**
-  - [ ] 选中 DirectionalLight 实体
-  - [ ] 在 Inspector 内拖 Directional Light 段的 `Direction` Vec3 字段任一分量（如 X 改
+- [✅] **DirectionalLight 方向调整后箭头实时更新**
+  - [✅] 选中 DirectionalLight 实体
+  - [✅] 在 Inspector 内拖 Directional Light 段的 `Direction` Vec3 字段任一分量（如 X 改
     到 `1.0` / `-1.0`）
-  - [ ] viewport 内**黄色箭头方向实时跟着变**（不需要切实体刷新）
-  - [ ] Undo 一次 → 箭头方向回到编辑前
-  - [ ] 把 direction 改成 `(0, 0, 0)` → 箭头**消失**（退化方向防御）
-  - [ ] 改回非零向量 → 箭头**重新出现**
+  - [✅] viewport 内**黄色箭头方向实时跟着变**（不需要切实体刷新）
+  - [✅] Undo 一次 → 箭头方向回到编辑前
+  - [✅] 把 direction 改成 `(0, 0, 0)` → 箭头**消失**（退化方向防御）
+  - [✅] 改回非零向量 → 箭头**重新出现**
 
-- [ ] **ParticleEmitter gizmo 显示**
-  - [ ] demo scene 内的两个 ParticleEmitter 实体（火焰 + 萤火，名字含 "Fire" / "Sparkle"
+- [✅] **ParticleEmitter gizmo 显示**
+  - [✅] demo scene 内的两个 ParticleEmitter 实体（火焰 + 萤火，名字含 "Fire" / "Sparkle"
     或类似），分别点选
-  - [ ] 选中后 viewport 内**实体位置出现青色矩形线框**（spawn box，可能很小但要能看见）
-  - [ ] 同时出现**浅青色箭头**（initial velocity 平均方向；火焰大致朝上 / 萤火也大致朝上）
-  - [ ] spawn box 内**极淡的青色填充**提示是个区域（不是空线框）
+  - [✅] 选中后 viewport 内**实体位置出现青色矩形线框**（spawn box，可能很小但要能看见）
+  - [✅] 同时出现**浅青色箭头**（initial velocity 平均方向；火焰大致朝上 / 萤火也大致朝上）
+  - [✅] spawn box 内**极淡的青色填充**提示是个区域（不是空线框）
 
-- [ ] **ParticleEmitter spawn box / velocity 编辑实时更新**
+- [✅] **ParticleEmitter spawn box / velocity 编辑实时更新**
   - [ ] 选中火焰 Emitter → Inspector 拖 `Spawn Offset Max` Vec2 → spawn box 在 viewport
     内**变大 / 变小 / 变形**实时跟随
-  - [ ] 拖 `Initial Velocity Min/Max` Vec2 → 箭头方向实时跟随
-  - [ ] 把 `Spawn Offset Min == Spawn Offset Max`（同值，最简法 → 把 Max 拖到与 Min 同值）
+  - [✅] 拖 `Initial Velocity Min/Max` Vec2 → 箭头方向实时跟随
+  - [✅] 把 `Spawn Offset Min == Spawn Offset Max`（同值，最简法 → 把 Max 拖到与 Min 同值）
     → spawn box 退化消失（box 退化防御），velocity 箭头仍显示
-  - [ ] 把 initialVelocity Min == Max == (0,0) → 箭头消失，spawn box 仍显示
+  - [✅] 把 initialVelocity Min == Max == (0,0) → 箭头消失，spawn box 仍显示
 
-- [ ] **未选中实体 plugin 不画 gizmo**
-  - [ ] 点击 viewport 空白处清除选中 → 黄色 light 箭头 / 青色 spawn box **都消失**
-  - [ ] 选不挂 DirectionalLight / ParticleEmitter 的实体（如 Ground / Tower / Test Fighter）
+- [✅] **未选中实体 plugin 不画 gizmo**
+  - [✅] 点击 viewport 空白处清除选中 → 黄色 light 箭头 / 青色 spawn box **都消失**
+  - [✅] 选不挂 DirectionalLight / ParticleEmitter 的实体（如 Ground / Tower / Test Fighter）
     → 不画 light 箭头 / spawn box（只画内置 Transform gizmo）
 
-- [ ] **Play Mode 期间 plugin gizmo 全部禁用**
-  - [ ] 选中 DirectionalLight 或 ParticleEmitter 实体 → 看到对应 overlay
-  - [ ] ▶ Play 按钮 → 内置 Transform gizmo + plugin gizmo **全部消失**
-  - [ ] Play 期间不出现"plugin overlay 跑出来挡视野"
-  - [ ] ■ Stop → overlay 全部回来
+- [✅] **Play Mode 期间 plugin gizmo 全部禁用**
+  - [✅] 选中 DirectionalLight 或 ParticleEmitter 实体 → 看到对应 overlay
+  - [✅] ▶ Play 按钮 → 内置 Transform gizmo + plugin gizmo **全部消失**
+  - [✅] Play 期间不出现"plugin overlay 跑出来挡视野"
+  - [✅] ■ Stop → overlay 全部回来
 
-- [ ] **plugin Draw 不入命令栈（纯装饰）**
-  - [ ] 选中 DirectionalLight 实体 → cmdStack 状态记下（File>Save 是否亮）
-  - [ ] 切换实体 / 拖 viewport 边角 / 旋转编辑器相机 → 不触发任何命令栈变化（File>Save
+- [✅] **plugin Draw 不入命令栈（纯装饰）**
+  - [✅] 选中 DirectionalLight 实体 → cmdStack 状态记下（File>Save 是否亮）
+  - [✅] 切换实体 / 拖 viewport 边角 / 旋转编辑器相机 → 不触发任何命令栈变化（File>Save
     亮 / 灰状态不变；不出现"莫名其妙生了一条命令"现象）
-  - [ ] 同理 ParticleEmitter：选中后只 viewport 滚轮 / 旋转视图，cmdStack 不动
+  - [✅] 同理 ParticleEmitter：选中后只 viewport 滚轮 / 旋转视图，cmdStack 不动
 
-- [ ] **picking gate 不被 plugin 打断**
-  - [ ] 选中 DirectionalLight → viewport 在 light 箭头**外侧**单击空白处 → 触发 picking
+- [✅] **picking gate 不被 plugin 打断**
+  - [✅] 选中 DirectionalLight → viewport 在 light 箭头**外侧**单击空白处 → 触发 picking
     （清空选中），plugin overlay 消失
-  - [ ] 选中 ParticleEmitter → viewport 在 spawn box **内部**单击（落在 emitter 实体 AABB
+  - [✅] 选中 ParticleEmitter → viewport 在 spawn box **内部**单击（落在 emitter 实体 AABB
     之外的空白区域）→ 触发 picking（清空 / 选下方物体）—— plugin overlay 不接管 LMB
 
 ### bugs
-（待大节点回归后填）
+1.DirectionalLight 在移动的过程中，物体阴影不会实时发生变化
 
 ---
 
@@ -485,11 +485,11 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
 
 ### 验收点
 
-- [ ] **Gizmos 总开关 checkbox 基础**
-  - [ ] 启动编辑器、自动加载 demo scene
-  - [ ] Scene 面板顶部出现一行工具栏：`[x] Gizmos | [Persp ▼] [Shaded ▼] [Camera Mode]`
-  - [ ] hover "Gizmos" checkbox → tooltip 显示总开关说明文字
-  - [ ] 默认勾选状态（gizmo 默认显示）
+- [✅] **Gizmos 总开关 checkbox 基础**
+  - [✅] 启动编辑器、自动加载 demo scene
+  - [✅] Scene 面板顶部出现一行工具栏：`[x] Gizmos | [Persp ▼] [Shaded ▼] [Camera Mode]`
+  - [✅] hover "Gizmos" checkbox → tooltip 显示总开关说明文字
+  - [✅] 默认勾选状态（gizmo 默认显示）
 
 - [ ] **Gizmos 关闭后所有 overlay 消失**
   - [ ] 选中带 Transform 的实体 → 看到内置 Transform gizmo（W/E/R 三模式之一）
@@ -549,7 +549,7 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
   - [ ] 勾回 Gizmos → overlay 立即恢复
 
 ### bugs
-（待大节点回归后填）
+（无新增；节点 A 大回归补跑后若仍无新增，本段保持）
 
 ---
 
@@ -581,7 +581,7 @@ Spline / Sound radius / Nav mesh gizmo —— 不进 v0.4 critical path，第一
 ## v0.4 milestone 完工标记
 
 c1 ~ cN 全数 ✅ 后，整 milestone ✅ 标记落 `docs/editor-roadmap.md` v0.4 heading；本
-acceptance-checklist 同时归档（v0.2.5 / v0.3 同款生命周期）。
+acceptance-checklist 已归档到 `docs/acceptance/`（2026-05-16 与 v0.2.5 / v0.3 同期归档）。
 
 | Commit | 主题 | 状态 |
 |--------|------|------|
@@ -737,7 +737,6 @@ v0.4 五个决策点 retro 后均**未发现**事后追评失误。新机制（2
 
 ## 文档生命周期
 
-- v0.4 milestone 节点 A 回归通过后：本文档可归档（迁到 `docs/qa-records/` 或保留在原位作为
-  v0.x 期 milestone 验收范本）；不删
-- v0.5 milestone 启动时：复制本文档为 `editor-v0.5-acceptance-checklist.md`，重新填内容；
-  不在本文档继续追加跨 milestone 内容（避免文档膨胀 + 上下文混淆）
+- v0.4 milestone 节点 A 回归通过后：本文档已归档到 `docs/acceptance/`；不删，作为 v0.x 期 milestone 验收范本
+- v0.5 milestone 启动时：在 `docs/acceptance/` 下新建 `editor-v0.5-acceptance-checklist.md`，重新填内容；
+  不在本文档继续追加跨 milestone 内容（避免文档膨胀 + 上下文混淆）。**精炼优先**：v0.3 / v0.4 验收时用户当场反馈"重复内容太多"——通用前置步骤（build / 启动编辑器 / 选实体 / Save / Load）抽到文档顶部"前置环境"节一次写清，每个 commit 验收点只写**与该 commit 相关的最小差异**；参 memory `feedback_milestone_acceptance_checklist_concise`

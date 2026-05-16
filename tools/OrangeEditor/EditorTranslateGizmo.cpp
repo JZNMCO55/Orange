@@ -130,7 +130,9 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     const glm::vec3 entityWorldPos = pTC->position;
 
     // ---- gizmo 屏幕尺寸自适应：选取 world-space handle 长度，使其投影到
-    //      屏幕约 kHandleScreenLengthPx 像素 ----
+    //      屏幕约 kHandleScreenLengthPx 像素。探针用相机右向量而非 world X
+    //      轴 —— 见 GizmoMath::ComputeWorldUnitsForScreenLength 注释（防止
+    //      orbit 相机时 handle 整体伸缩）。----
     const auto projOrigin = GM::ProjectWorldToScreen(entityWorldPos, viewProj,
                                                      viewportImageOriginScreen,
                                                      viewportImageSize);
@@ -140,18 +142,10 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
         host.gizmo.hoveredAxis = Axis::None;
         return false;
     }
-    const auto projOriginPlusX = GM::ProjectWorldToScreen(
-        entityWorldPos + glm::vec3(1.0f, 0.0f, 0.0f),
-        viewProj, viewportImageOriginScreen, viewportImageSize);
-    float worldUnitsPerHandle = 1.0f;
-    if (projOriginPlusX.has_value())
-    {
-        const float pxPerUnit = glm::length(projOriginPlusX->screen - projOrigin->screen);
-        if (pxPerUnit > 1e-3f)
-        {
-            worldUnitsPerHandle = kHandleScreenLengthPx / pxPerUnit;
-        }
-    }
+    const auto handleWorldLen = GM::ComputeWorldUnitsForScreenLength(
+        entityWorldPos, cam.view, viewProj,
+        viewportImageOriginScreen, viewportImageSize, kHandleScreenLengthPx);
+    const float worldUnitsPerHandle = handleWorldLen.value_or(1.0f);
 
     // ---- 每轴端点屏幕投影（用于绘制 + 2D hit-test）----
     struct AxisProjected
@@ -290,7 +284,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
             const bool   highlight = (host.gizmo.hoveredAxis == ap.axis)
                                   || (host.gizmo.draggingAxis == ap.axis);
             const ImU32  col       = AxisColor(ap.axis, highlight);
-            const float  thickness = highlight ? 4.0f : 2.5f;
+            const float  thickness = highlight ? 5.5f : 3.5f;
             const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
             const ImVec2 b{ap.tipScreen.x,       ap.tipScreen.y};
             drawList->AddLine(a, b, col, thickness);

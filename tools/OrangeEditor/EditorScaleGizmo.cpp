@@ -131,18 +131,12 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
         host.gizmo.hoveredAxis = Axis::None;
         return false;
     }
-    const auto projPlusX = GM::ProjectWorldToScreen(
-        entityPos + glm::vec3(1.0f, 0.0f, 0.0f),
-        viewProj, viewportImageOriginScreen, viewportImageSize);
-    float worldUnitsPerHandle = 1.0f;
-    if (projPlusX.has_value())
-    {
-        const float pxPerUnit = glm::length(projPlusX->screen - projOrigin->screen);
-        if (pxPerUnit > 1e-3f)
-        {
-            worldUnitsPerHandle = kHandleScreenLengthPx / pxPerUnit;
-        }
-    }
+    // 探针用相机右向量而非 world X 轴 —— 见 GizmoMath::ComputeWorldUnits
+    // ForScreenLength 注释（防止 orbit 相机时 handle 整体伸缩）。
+    const auto handleWorldLen = GM::ComputeWorldUnitsForScreenLength(
+        entityPos, cam.view, viewProj,
+        viewportImageOriginScreen, viewportImageSize, kHandleScreenLengthPx);
+    const float worldUnitsPerHandle = handleWorldLen.value_or(1.0f);
 
     struct AxisProjected
     {
@@ -331,7 +325,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
             const bool   highlight = (host.gizmo.hoveredAxis == ap.axis)
                                   || (host.gizmo.draggingAxis == ap.axis);
             const ImU32  col       = AxisColor(ap.axis, highlight);
-            const float  thickness = highlight ? 4.0f : 2.5f;
+            const float  thickness = highlight ? 5.5f : 3.5f;
             const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
             const ImVec2 b{ap.tipScreen.x,       ap.tipScreen.y};
             drawList->AddLine(a, b, col, thickness);

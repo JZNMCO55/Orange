@@ -534,7 +534,7 @@ c14 落地后，v0.2.5 "架构整骨" milestone 13 个 commit 全数 ✅（c3~c1
 | **节点 C 全 milestone 回归** | 待统一执行（用户决定的回归节奏） | — |
 
 整 milestone ✅ 标记由节点 C 回归通过后落到 `docs/editor-roadmap.md` 的 v0.2.5
-heading 上；本 acceptance-checklist 同时归档到 `docs/qa-records/` 或保留原位。
+heading 上；本 acceptance-checklist 已归档到 `docs/acceptance/`（2026-05-16 与 v0.3 / v0.4 同期归档）。
 
 ---
 
@@ -576,8 +576,7 @@ deliverables 列表的方向参考。
 
 ## 文档生命周期
 
-- v0.2.5 milestone ✅ 后：本文档可归档（迁到 `docs/qa-records/` 或保留在原位作为
-  v0.x 期 milestone 验收范本）；不删
-- 未来 milestone（v0.3 / v0.4 / ...）若沿用此模式：复制本文档为
+- v0.2.5 milestone ✅ 后：本文档已归档到 `docs/acceptance/`（2026-05-16 同期归档 v0.3 / v0.4）；不删，作为 v0.x 期 milestone 验收范本
+- 未来 milestone（v0.5 / v0.6 / ...）若沿用此模式：在 `docs/acceptance/` 下新建
   `editor-v<X.Y>-acceptance-checklist.md`，重新填内容；不在本文档继续追加跨
-  milestone 内容（避免文档膨胀 + 上下文混淆）
+  milestone 内容（避免文档膨胀 + 上下文混淆）。**精炼优先**：通用前置步骤（build / 启动编辑器 / 选实体 / Save / Load）抽到顶部"前置环境"节一次写清，commit 验收点只写差异；参 memory `feedback_milestone_acceptance_checklist_concise`

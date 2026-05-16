@@ -1,5 +1,5 @@
 {
-    "_comment": "Engine third-party dependency manifest. Only engine-direct dependencies are listed. Vulkan SDK / volk / VulkanMemoryAllocator / glfw3 / fmt are intentionally NOT listed because they are pulled in transitively (Vulkan stack via OrangeRender's find_dependency, fmt via spdlog's bundled copy) and the engine itself does not consume their headers directly outside of the dedicated isolated source trees that already document each rule.",
+    "_comment": "Engine third-party dependency manifest. Only engine-direct dependencies are listed. Vulkan SDK / volk / VulkanMemoryAllocator / glfw3 / fmt are intentionally NOT listed because they are pulled in transitively (Vulkan stack via OrangeRender's find_dependency, fmt via spdlog's bundled copy) and the engine itself does not consume their headers directly outside of the dedicated isolated source trees that already document each rule. stb 也不在本 manifest 里：上游仓库根目录没有 CMakeLists.txt，作者长期拒绝维护任何 CMake/package 文件；OrangeEngine 只用 stb_image_write.h，已作为 in-tree 单文件 vendor 落在 vendor/stb/stb_image_write.h（git tracked），由顶层 CMakeLists 以 BUILD_INTERFACE include 直接消费。",
 
     "dependencies": [
         {
@@ -49,8 +49,13 @@
             "name": "nlohmann_json",
             "type": "library",
             "url": "https://github.com/nlohmann/json.git",
+            "version": "v3.11.3",
+            "cmake_extra": [
+                "-DJSON_BuildTests=OFF",
+                "-DJSON_Install=ON"
+            ],
             "linkage": "PRIVATE",
-            "purpose": "JSON backend for Core::Serialization::JsonReader / JsonWriter. Public API does not expose nlohmann::json types — see越界禁令 in docs/extension-points.md."
+            "purpose": "JSON backend for Core::Serialization::JsonReader / JsonWriter. Public API does not expose nlohmann::json types — see越界禁令 in docs/extension-points.md. version pin + JSON_BuildTests=OFF：默认分支 develop 上的 tests/src/unit-unicode1.cpp 在 MSVC + 非 UTF-8 代码页下会触发 C2143 语法错误；我们只用 header-only 部分，没必要跟着 develop 漂、也没必要编它的测试。"
         },
         {
             "name": "Box2D",
@@ -68,18 +73,12 @@
             "purpose": "Cross-platform audio backend. Allowed only in src/audio/miniaudio/. Source repo provides CMakeLists which installs the single header — fetch 脚本走标准 cmake_install。"
         },
         {
-            "name": "stb",
-            "type": "library",
-            "url": "https://github.com/nothings/stb.git",
-            "linkage": "PRIVATE",
-            "purpose": "stb_image (texture decode), stb_truetype (font rasterization). Single-header inclusion."
-        },
-        {
             "name": "Dear ImGui",
             "type": "library",
             "url": "https://github.com/ocornut/imgui.git",
+            "optional": true,
             "linkage": "PRIVATE",
-            "purpose": "Immediate-mode GUI for editor / debug overlays. Phase 6 feature; integrated via GLFW + Vulkan backends."
+            "purpose": "Immediate-mode GUI for editor / debug overlays. Phase 6 feature; integrated via GLFW + Vulkan backends. optional=true：上游仓库根目录没有官方 CMakeLists.txt（ocornut 长期拒绝），当前 cmake_install 模式跑不通；Dependencies.cmake 已把 imgui 当 soft dep (find_package CONFIG QUIET) 处理，没装也不阻断 engine 构建。编辑器侧真正落 imgui 集成时改 mode=vendor_clone 由 OrangeEngine 自编，并在 cmake/Dependencies.cmake 改为 in-tree add_library 路径——届时再启用此条目。"
         },
         {
             "name": "DragonBonesCPP",

@@ -82,4 +82,31 @@ RayPlaneIntersect(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
     return t;
 }
 
+std::optional<float>
+ComputeWorldUnitsForScreenLength(const glm::vec3& worldPos,
+                                 const glm::mat4& view,
+                                 const glm::mat4& viewProj,
+                                 glm::vec2        imageOrigin,
+                                 glm::vec2        imageSize,
+                                 float            targetScreenPx) noexcept
+{
+    // glm 列主序：view[col][row]。lookAt 产出的视矩阵第 0 行是相机
+    // 右向量在世界坐标系的分量 (rx, ry, rz)。
+    const glm::vec3 cameraRightWorld(view[0][0], view[1][0], view[2][0]);
+    const float rightLen = glm::length(cameraRightWorld);
+    if (rightLen < 1e-6f) { return std::nullopt; }
+    const glm::vec3 cameraRightUnit = cameraRightWorld / rightLen;
+
+    const auto projOrigin = ProjectWorldToScreen(worldPos, viewProj,
+                                                 imageOrigin, imageSize);
+    if (!projOrigin.has_value()) { return std::nullopt; }
+    const auto projOriginPlusRight = ProjectWorldToScreen(worldPos + cameraRightUnit,
+                                                          viewProj,
+                                                          imageOrigin, imageSize);
+    if (!projOriginPlusRight.has_value()) { return std::nullopt; }
+    const float pxPerUnit = glm::length(projOriginPlusRight->screen - projOrigin->screen);
+    if (pxPerUnit < 1e-3f) { return std::nullopt; }
+    return targetScreenPx / pxPerUnit;
+}
+
 }  // namespace OrangeEditor::Internal::GizmoMath

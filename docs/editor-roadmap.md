@@ -119,6 +119,8 @@ wiki 给三种：
 | L10 | **没 Profiler / Debug Draw** | v0.9 |
 | L11 | **没 ACP** —— mesh / texture 走 source asset | v1.x（依赖主 roadmap Phase 9） |
 | L12 | **没热重载** —— shader / scene 改了要重启 | v1.x（依赖主 roadmap Phase 8） |
+| L13 | **没 Editor Settings 系统** —— gizmo 线宽 / handle 长度 / 颜色等视觉常量散落在各 cpp anonymous namespace 的 constexpr，不可在运行时调整 | v0.8（v0.6.5 先集中到 `EditorTheme.h`，v0.8 迁入 EditorSettings） |
+| L14 | **视觉风格不统一** —— v0.4 ~ v0.6 各 UI 表面功能优先落地，配色 / 图标 / 控件三态散乱；v0.4 收尾时被用户当场指出 viewport 工具栏不够美观以致没法做完整功能验证 | v0.6.5 |
 
 ## 里程碑
 
@@ -282,6 +284,42 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 
 **Critical Path**：是（"美术能拖东西"是编辑器最强烈的用户期待）
 
+### v0.4.5 · UI DPI 自适应 + Inspector / Panel widget 比例化
+
+**为什么单独立条**：
+
+v0.4 收尾后在另一台不同分辨率 / 缩放比的机器上跑 OrangeEditor，发现 Inspector 右侧字段名被截成 `Enti...` / `Sta...` / `Par...`，一排 Remove Component 红 X 挤在一起。诊断（2026-05-15）：
+
+- 你这台机 4K × 175%（逻辑分辨率 ~2194×1234）一切正常
+- 另一台 2520×1680 × 150%（逻辑分辨率 1680×1120）—— 宽度只有你 76%
+- 根因有二：
+  1. **`main.cpp` 字号写死 `kDefaultFontSizePx = 36.0f`，ImGui style padding / spacing 完全没按 DPI 缩放** —— 任一窄屏机器都装不下
+  2. **Inspector / Panel 内部所有 widget 的列宽 / 按钮 / table column 都按绝对像素布局**，dock 比例化（v0.4 起 left 20% / right 25% / bottom 30%）只解决 panel 外框，没解决 panel 内 widget
+
+(1) 已经在 v0.4 post-milestone 一次性 hotfix 落地（`main.cpp` 的 ImGui Init 改为 `glfwGetWindowContentScale` + `ScaleAllSizes(scale)` + 字号基准从 36 → 18 × scale）—— 但这只兜底，未根治 (2)。本 milestone 处理 (2)。
+
+**关键 deliverables**：
+
+- **Inspector schema 控件比例化**：`tools/OrangeEditor/schema/SchemaInspector.cpp`（v0.2.5 整骨产物）里所有 ImGui 控件改成 ratio / min-size 驱动；`ImGui::CalcTextSize` 主动测列名宽度作为 column min，剩余空间给 value 控件；component header（Remove 按钮、folding triangle、name）整体用 `ImGui::PushItemWidth(GetContentRegionAvail().x * ratio)` 限定，不依赖 ImGui 默认行宽
+- **Inspector 的标签 / 值两列改 `ImGui::Table` + `ImGuiTableColumnFlags_WidthStretch`**：标签列设 minWidth = `CalcTextSize("最长内置 label 名").x`，值列 stretch；放弃当前 `ImGui::Columns` / 隐式 column 路径
+- **EntityTreePanel / ScenePanel / Console / Assets 同步处理**：树状缩进尺寸用 `style.IndentSpacing`（已被 ScaleAllSizes 缩了），不再写绝对像素 padding；ScenePanel 顶部工具栏 `BeginChild` 高度用 `GetFrameHeightWithSpacing()` 而不是数字
+- **acceptance scene**：在两台机器（4K × 175% 和 1680×1120 × 150%）分别全屏跑 demo.scene，Inspector 选中带 5+ component 的 entity，无任何 label 出现 `...` 省略；component remove 按钮可点击，行高一致
+- **回归**：v0.4 gizmo 拖动、v0.3 Inspector 字段编辑、v0.2 Undo / Redo、v0.1.5 demo scene 加载——全部回归通过
+
+**前置**：v0.2.5（schema-first Inspector 已落，所有 widget 都过 `SchemaInspector`）+ v0.4 post-fix DPI scale 已落（本条由 v0.4 ✅ 后的 hotfix commit 处理）
+
+**与引擎关系**：纯编辑器侧；引擎公共 API 零改动
+
+**Critical Path**：否（功能上 v0.5 / v0.6 不依赖；但任何团队成员换机器跑 OrangeEditor 都会撞，体验级 P1）
+
+**红线**：本 milestone 内**禁止**给某个 component / panel 在 widget 层 hardcode "magic number 像素列宽" 来"先用着" —— 这正是 v0.4 期撞上本问题的原因。所有列宽必须来自 `CalcTextSize` 或 `style.*` 或 dock cell 比例。
+
+**验收**：
+
+- 上述 acceptance scene 在两种 DPI / 分辨率配置下全绿
+- `Grep` `SchemaInspector.cpp` / `InspectorPanel.cpp` / 其他 panel 找不到字面量像素列宽（除 `style.*` / `CalcTextSize` / `GetContentRegionAvail` 派生外）—— 加进 `scripts/check_invariants.py` 作为编辑器侧新 lint 规则
+- 编辑器 milestone-end-checklist 走完，含两台机器实测截图存档
+
 ### v0.5 · Asset 浏览器 + Material 子模式
 
 **对应**：`docs/roadmap.md` Task 06-06（材质编辑器子模式）的真正落地
@@ -321,6 +359,53 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 
 **Critical Path**：否（仅协作场景必须）
 
+### v0.6.5 · 视觉统一与主题打磨
+
+**为什么单独立条**：
+
+v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具栏（v0.4）/ Inspector & Panels（v0.2.5 schema）/ 资源浏览器 + 底部 tab 容器（v0.5）/ 顶部全局 toolbar（v0.6）。但这一路是**功能优先**，每条 milestone 只保证"能用 + 不丑得离谱"，没有任何一条专门处理整体视觉一致性。结果在 v0.4 收尾时被用户当场指出 viewport 工具栏不够美观以致没法做完整功能验证 —— 单纯 toolbar 调整不够，需要把整套视觉 token（间距 / 配色 / 图标 / 控件三态）统一打磨一遍。
+
+**为什么放在这里（不更早 / 不更晚）**：
+
+- **不更早**：v0.6 要落"顶部全局 toolbar"（Save/Build/Play/Pause/Stop + dirty 高亮）—— 另一条主 UI 表面。在 v0.6 之前美化会被 v0.6 新增 toolbar 推翻配色 / 间距 / 图标体系
+- **不更晚**：v0.7 要画 Animation 状态机图编辑器（节点 / 边 / 高亮）—— 又一大块新视觉表面。本 milestone 在 v0.7 之前定下视觉 token，v0.7 直接按 token 画状态机，避免后续 polish 时返工
+- **v0.8 EditorSettings 不是前置**：本 milestone 可以先把视觉常量硬编码到一处 `EditorTheme.h`，v0.8 落 Settings 系统时把这些常量迁入 `EditorSettings` —— 恰好对偶 L13 的迁移路径
+
+**关键 deliverables**：
+
+- **`tools/OrangeEditor/theme/EditorTheme.h`**：集中所有视觉 token —— 间距单位 / 圆角 / 边框宽度 / 配色 palette（深色主题，参 Cocos Creator 3.6.0 截图配色）/ 字号档位（H1 / H2 / Body / Caption）/ 控件三态色（idle / hover / active / disabled）/ icon 尺寸档位
+- **图标 font 接入**：选 Font Awesome 6 Free / Lucide / Codicons 之一（按 license 与覆盖度二选一），通过 ImGui font merge 加载到默认字体，文字按钮全部替换为 icon + tooltip
+- **viewport 工具栏 polish**：按 EditorTheme 重画 v0.4 已落的视图模式 / 显示模式 / Camera mode / Gizmo on-off 按钮；状态切换有视觉反馈
+- **顶部全局 toolbar polish**：v0.6 落地后跟随本 milestone 重画 Save / Build / Play / Pause / Stop 按钮；Save 在 dirty 时按 EditorTheme accent 色高亮；Play / Stop 用对比色（绿 / 红）易识别
+- **panel 视觉统一**：标题栏 / 分隔条 / 折叠箭头 / Inspector component header 折叠图标 / Entity Tree 行 hover/select 状态全部按 EditorTheme 重画
+- **Inspector 控件三态**：DragFloat / SliderFloat / Combo / Button hover / active / disabled 三态颜色一致
+- **acceptance scene**：在 demo.scene 上完整跑一遍"开场景 → 选实体 → 改 Inspector → gizmo 拖 → Save → Play → Stop → Build" 路径，全程视觉风格一致，无 ImGui 默认深蓝 / 灰白色块漏出
+
+**前置**：v0.6（全局 toolbar 已落，所有主 UI 表面齐全）；v0.4.5（DPI 自适应已落，token 化的间距 / 字号才有意义）
+
+**与引擎关系**：纯编辑器侧；引擎公共 API 零改动；不消费任何新 engine 能力
+
+**Critical Path**：否（功能上 v0.7 / v0.8 / v0.9 不依赖 EditorTheme；但用户体验级 P1，且推迟会让 v0.7 状态机图编辑器再来一次返工）
+
+**红线**：
+
+- 本 milestone **禁止**新增 / 修改任何 editor 功能行为 —— 只动视觉。任何"顺手把 X feature 也改一下" 都拆出去单独 commit / milestone
+- **禁止**直接调 `ImGui::PushStyleColor(ImGuiCol_xxx, ImVec4(0.2f, 0.4f, 0.7f, 1.0f))` 这种字面量 RGBA —— 必须经 EditorTheme token；加进 `scripts/check_invariants.py` 作为编辑器侧新 lint 规则（与 v0.4.5 的字面量像素列宽 lint 同期上）
+- **禁止**为单个 panel / 控件硬编码"特殊"颜色 —— 不在 token 里就先加 token；token 不够用是 EditorTheme 的设计 bug，不是 panel 的自由度
+
+**不做**：
+
+- **可切换主题**（亮色 / 自定义 palette）—— 留给 v0.8 EditorSettings 接入主题切换
+- **自定义 dock layout 模板**（保存 / 加载多套 layout 预设）—— 与本 milestone 视觉打磨正交，按需另立
+- **动画过渡 / tween**（按钮 hover 渐变、panel 折叠动画）—— ImGui 不擅长，硬做易撞 frame pacing 问题
+
+**验收**：
+
+- 上述 acceptance scene 在两种 DPI / 分辨率配置（v0.4.5 acceptance 同款机器）下视觉一致
+- `Grep` `tools/OrangeEditor/` 找不到字面量 `ImVec4(0.\d+f, 0.\d+f, 0.\d+f, ` 形式的 RGBA（除 EditorTheme.h / EditorTheme.cpp 自身外）
+- `Grep` 找不到字面量 button label 是裸文字符号（`"X"` / `"+"` / `"▼"` 等）—— 必须用 icon font codepoint
+- 编辑器 milestone-end-checklist 走完，含 v0.4 ~ v0.6 全 panel polish 前后对比截图存档
+
 ### v0.7 · Animation 子模式
 
 **关键 deliverables**：
@@ -336,7 +421,7 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 
 **Critical Path**：否（第一款游戏可以先用 Inspector 字段编辑临时凑）
 
-### v0.8 · 编辑器 Log + 输入扩展
+### v0.8 · 编辑器 Log + 输入扩展 + Settings
 
 **关键 deliverables**：
 
@@ -344,6 +429,7 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 - Keybinding 自定义（hot key editor），保存到 `editor_keybindings.json`
 - 多选 / Shift / Ctrl-click 多选实体（参 Task 06-03 Out-of-scope）
 - 多选 Inspector：wiki §6 property grid "异构多选 = 只显示所有类型共有的属性"
+- **Editor Settings 系统**（消除 L13）：把现在散落在 cpp anonymous namespace 的视觉常量集中到一个 `EditorSettings` 结构 + Settings 面板调整 + 保存到 `editor_settings.json`。首批纳入：gizmo 线宽（translate / rotate / scale 各 idle + highlight 共 6 个值）、gizmo handle 屏幕长度 `kHandleScreenLengthPx`、hit threshold、gizmo 配色。架构参 `vendor/LumixEngine/src/editor/settings.h`（同栈手写注册，符合 CLAUDE.md "禁止 hardcode" 纪律）
 
 **前置**：v0.2
 
@@ -409,6 +495,7 @@ v0.1 ~ v0.9 全部 ✅。验收路径：邀请非程序员（如美术 / 关卡�
 | v0.1 ~ v0.4 | 仅 Phase 1–5（全部已落地） |
 | v0.5 Material 编辑 | Phase 3 Material（已落地） |
 | v0.6 layer 序列化 | Phase 5 SchemaVersion + migrator（已落地） |
+| v0.6.5 视觉统一 | 无引擎依赖（纯编辑器侧） |
 | v0.7 Animation 子模式 | Phase 4 AnimationStateMachine（已落地） |
 | v0.9 Profiler | Phase 1 tracy gate（已落地） |
 | v1.x Hot reload | 主 roadmap Phase 8 |
@@ -430,6 +517,7 @@ v0.1 ~ v0.9 全部 ✅。验收路径：邀请非程序员（如美术 / 关卡�
 - **v0.1.5 (Editor Demo Scene v2) 是最高 ROI 动作** —— 不引入新能力，把 Phase 1–5 已落地视觉栈在编辑器内组合可见；建议先做这条再回到 v0.2 主线
 - v0.2 是 mutate / undo 能力的地基（command system / undo / Play Mode 快照统一）
 - **v0.2.5（架构整骨）是 v0.3 之后所有 milestone 的真正地基** —— schema / plugin / EditorHost / CommandStack 解耦 World\* 全在此 milestone 落地；不先做 v0.2.5，v0.3 就是在 hardcode 上叠一层，且直接违反 CLAUDE.md "OrangeEditor 架构纪律" 节；**v0.2.5 完成前不开 v0.3+**
+- **v0.6.5（视觉统一）放在 v0.6 之后 / v0.7 之前** —— 必须等 v0.6 全局 toolbar 落地（否则返工），又必须在 v0.7 状态机图编辑器之前（让 v0.7 直接按 EditorTheme token 画，避免再次返工）；纯视觉打磨，不动功能
 - 编辑器 semver 独立于 OrangeEngine 0.1.x：editor 升 v0.2 ≠ engine 升版
 - 四个核心架构决策（D1/D2/D3/D4）显式记录，避免后期被动重做
 - 与主 roadmap 的依赖以 "前置：主 roadmap Phase N" 形式标，不抢占 phase 编号

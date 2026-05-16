@@ -152,7 +152,7 @@ demo.scene.json 内 `"mesh": ""` 也是同款问题——`AssetHandle<MeshAsset>
 
 ### 临时方案（v0.2.5 编辑器侧）
 
-GAP 未落地前，编辑器侧 v0.2.5 范围内的临时修复候选见 OrangeEditor 验收清单 BUG-2 段（`docs/editor-v0.2.5-acceptance-checklist.md`）：
+GAP 未落地前，编辑器侧 v0.2.5 范围内的临时修复候选见 OrangeEditor 验收清单 BUG-2 段（`docs/acceptance/editor-v0.2.5-acceptance-checklist.md`）：
 
 - **Y'** hardcode 表加 Dynamic Box 一行（最小妥协）
 - **Y''''** EditorRenderLayer 加 `mPlayMaterialSnapshot` 通用 by-name snapshot/restore（约 20 行，不新增 hardcode 名字）—— 推荐
