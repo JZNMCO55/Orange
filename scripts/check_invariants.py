@@ -277,11 +277,72 @@ def rule_editor_no_hardcode(path: Path, lines: list[str]) -> Iterable[Violation]
             )
 
 
+# OrangeEditor v0.4.5 widget 像素列宽纪律：
+#
+# tools/OrangeEditor/ 内任何 `ImGui::SetNextItemWidth(<literal>)` /
+# `ImGui::SetCursorPosX(<literal>)` / `ImGui::Indent(<literal>)` /
+# `ImGui::Unindent(<literal>)` / `ImGui::SetColumnWidth(..., <literal>)`
+# 调用，若括号内是字面量浮点 / 整数（不含 identifier / 派生表达式），
+# 报违规。这些函数控制 widget 像素列宽 / 列偏移；硬编码字面量会在窄屏 /
+# 高 DPI 撞列宽不足（v0.4 收尾撞过，详 editor-roadmap v0.4.5）。
+#
+# 允许的派生形式（不会被 match）：
+#   * SetNextItemWidth(-FLT_MIN)       -- identifier
+#   * SetNextItemWidth(dragW)          -- identifier
+#   * SetNextItemWidth(ImGui::CalcTextSize("x").x + style.FramePadding.x * 2)
+#                                       -- 表达式带 ImGui:: 或 style.*，识别为派生
+#   * SetNextItemWidth(comboItemWidth(...))   -- 函数调用，识别为派生
+#
+# 简化策略：本规则只 hit "整个参数就是数字字面量 (可带 . 和 f 后缀)" 的情形；
+# 任何表达式 / identifier 形式自动豁免。
+EDITOR_PIXEL_LITERAL_FN = (
+    "SetNextItemWidth", "SetCursorPosX", "SetCursorPosY",
+    "Indent", "Unindent", "SetColumnWidth",
+)
+# 匹配 ImGui::<fn>(...) 内圆括号最外层；仅当整段参数是一个数字字面量时 hit。
+# 数字字面量：[+-]?\d+ 或 [+-]?\d+\.\d+ 后可选 f/F 后缀；前后允许空白。
+EDITOR_PIXEL_LITERAL_RE = re.compile(
+    r"\bImGui::(" + "|".join(EDITOR_PIXEL_LITERAL_FN) + r")"
+    r"\s*\(\s*([+-]?\d+(?:\.\d+)?[fF]?)\s*\)"
+)
+
+
+def rule_editor_no_widget_pixel_literal(path: Path, lines: list[str]) -> Iterable[Violation]:
+    rel_path = rel(path)
+    if not rel_path.startswith("tools/OrangeEditor/"):
+        return
+    in_block_comment = False
+    for i, line in enumerate(lines, start=1):
+        # 与 task-ref 规则同款 block-comment 状态机，避免注释里的样例 hit。
+        if in_block_comment:
+            if "*/" in line:
+                in_block_comment = False
+            continue
+        if _block_comment_starts_here(line):
+            in_block_comment = True
+            continue
+        if COMMENT_LINE_RE.match(line):
+            continue
+        m = EDITOR_PIXEL_LITERAL_RE.search(line)
+        if not m:
+            continue
+        fn_name = m.group(1)
+        literal = m.group(2)
+        yield Violation(
+            "editor-widget-pixel-literal",
+            rel_path,
+            i,
+            f"`ImGui::{fn_name}({literal})` 用字面量像素：必须改 CalcTextSize / style.* / "
+            "GetContentRegionAvail 派生（见 editor-roadmap v0.4.5 红线）",
+        )
+
+
 RULES: list[Rule] = [
     Rule("header-isolation", "公共头与第三方头隔离（box2d / dragonBones / miniaudio / orange/* / vulkan）", rule_header_isolation),
     Rule("no-bare-json-in-public-headers", "公共头禁止裸 nlohmann::json", rule_no_bare_json_in_public_headers),
     Rule("no-task-references", "代码注释禁止引用 Task NN / Phase N", rule_no_task_references),
     Rule("editor-no-hardcode", "OrangeEditor 禁止 DrawInspectorXxx hardcode（v0.2.5 后强制）", rule_editor_no_hardcode),
+    Rule("editor-widget-pixel-literal", "OrangeEditor 禁止 widget 层字面量像素列宽（v0.4.5 后强制）", rule_editor_no_widget_pixel_literal),
 ]
 
 
