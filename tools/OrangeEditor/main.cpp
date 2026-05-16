@@ -156,6 +156,21 @@ int main()
     auto host = std::move(hostRes).Value();
     auto* glfwWindow = static_cast<GLFWwindow*>(host->GetWindow().GetGlfwWindowHandle());
 
+    // 启动即 maximize —— v0.4.5 后用户在低 DPI / 窄屏机器报 "初始打开 OK，
+    // 用户拉伸 / 最大化后 Inspector 永久消失"。诊断初步排除 multi-viewport
+    // detach 误判（关 ViewportsEnable 仍复现）；嫌疑点剩 GLFW WindowSize
+    // callback chain（AppHost OnSize + ImGui ImplGlfw 1.91+ WindowSize
+    // chained handler）在 resize 风暴下的事件分发顺序、或 OrangeRender
+    // swap-chain rebuild 与 ImGui DisplaySize sync 的时序竞争。
+    //
+    // 当前 commit 是 workaround：在 ImGui / Renderer init 之前立刻 maximize，
+    // 让 GLFW window settle 到 maximized 物理尺寸；之后 Renderer 创建
+    // swap-chain + ImGui DisplaySize 都直接以 maximized 尺寸为基准，跳过
+    // "1600×900 → maximized" 的 resize transition 路径。如果验证通过，
+    // 说明 bug 在 resize transition 链上，留独立 session 挖 root cause；
+    // 验证不通过则 dock layout 本身在 maximize 状态下就算错。
+    glfwMaximizeWindow(glfwWindow);
+
     // ---- 编辑器自管 RenderDevice + IRenderer ---------------------------
     Orange::Renderer::RenderDeviceDesc rdDesc{};
     rdDesc.mBackend          = Orange::Renderer::BackendType::Default;
