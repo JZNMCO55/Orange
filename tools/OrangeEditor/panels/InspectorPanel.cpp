@@ -6,12 +6,25 @@
 
 #include "../EditorRenderLayer.h"
 
+#include "../EditorWidgets.h"
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 
+#include <orange/engine/core/Serialization.h>
+#include <orange/engine/render/MaterialInstance.h>
+#include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/scene/World.h>
 
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
+
 #include <imgui.h>
+
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <string>
 
 // Inspector 入口：选中实体的 entity id + 所有"已挂着的 component"各起一段
 // schema-driven 渲染 + 一个 +Add Component popup 按 schema registry 枚举。
@@ -20,9 +33,181 @@
 // 顺序 + UI 行为都从 ComponentSchemaRegistry 取。游戏侧自定义 component
 // 通过同一 registry 注册即可自动出现在 Inspector + +Add 菜单——v0.3 game
 // side schema 注册落地后无需改本 TU 一行。
+// v0.5 c5：Material 子模式。当 Asset 浏览器选中一个 .material 文件时，
+// Inspector 切到 material 编辑视图：MaterialTemplate Combo + uniforms /
+// textures 调参 + Save 写回 .material 文件。
+//
+// 简化范围（c5 当前）：
+//   * Combo 项硬编码内置 5 个模板名（toon / rim_light / dissolve / emissive
+//     / textured）—— MaterialSystem 当前未暴露 EnumerateTemplateNames 公共 API；
+//     登记 GAP 后续 patch 自动取
+//   * uniform 调参 + 写盘**仅写 templateName**，uniform override 持久化作为
+//     deferred 单独 patch 实施 —— 当前内置 material 全是 default 无 override
+//     现成用例不够，schema v1.0 → v1.1 等真有 use case 时再扩
+//   * 不支持创建新 .material（仅编辑已存在）/ 删除 / 重命名
+namespace
+{
+
+// 内置模板名硬编码列表。与 MaterialSystem::RegisterBuiltins 注册一致。
+// 后续 MaterialSystem 暴露 EnumerateTemplateNames API 后自动替换。
+constexpr const char* kBuiltinTemplateNames[] = {
+    "toon", "rim_light", "dissolve", "emissive", "textured"
+};
+
+// 读 .material 文件的 templateName 字段。失败返回空 string。
+std::string ReadMaterialTemplateName(const std::string& path)
+{
+    auto rr = ::Orange::Engine::JsonReader::FromFile(path);
+    if (rr.IsErr()) { return {}; }
+    std::string t;
+    rr.Value().ReadString("templateName", t);
+    return t;
+}
+
+// 写 .material 文件 v1.0（仅 templateName）。失败 log + 不抛。
+void WriteMaterialFile(const std::string& path,
+                       std::string_view templateName)
+{
+    using ::Orange::Engine::JsonWriter;
+    using ::Orange::Engine::SchemaVersion;
+    static const SchemaVersion kSchema{"render/material_instance", 1, 0};
+    JsonWriter writer;
+    writer.WriteSchemaVersion("schemaVersion", kSchema);
+    writer.WriteString("templateName", templateName);
+    auto sv = writer.SaveToFile(path, 2);
+    if (sv.IsErr())
+    {
+        std::fprintf(stderr,
+                     "[OrangeEditor] Save .material '%s' 失败 (code=%u)\n",
+                     path.c_str(),
+                     static_cast<unsigned>(sv.Error()));
+    }
+}
+
+// Material 子模式主体：读 .material 显示当前 templateName + Combo 切换 +
+// uniform 调参 + Save 按钮。已加载的 MaterialInstance（通过
+// host.assets.pMaterials 的 named instance map 反查）就地修改 uniform；
+// Save 写回 .material 仅写 templateName（uniform 持久化 deferred）。
+void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
+{
+    // c5 当前简化版仅写 templateName，不访问 host.assets.pMaterials
+    // 进行 uniform 实时调参——后续完整版会通过 host 拿 namedMaterialInstances
+    // 找运行时 MaterialInstance* 实现"调参立即生效"。当前抑制未使用警告。
+    (void)host;
+    ImGui::TextDisabled("Material:");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(materialPath.c_str());
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("%s", materialPath.c_str());
+    }
+    ImGui::Separator();
+
+    // 读 .material 拿 templateName + 在 namedMaterialInstances map 找
+    // 对应运行时 MaterialInstance* —— 命中则用户可调 uniform；不命中
+    // （map 未注册此 path）只能切 template name 写盘。
+    std::string templateName = ReadMaterialTemplateName(materialPath);
+    if (templateName.empty())
+    {
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1),
+                           "无法读取 .material 文件 templateName 字段");
+        return;
+    }
+
+    // 找当前 templateName 在内置列表里的 index（找不到走 -1 → Combo 显示
+    // 空）。当前文件 templateName 可能是游戏侧自定义模板（不在硬编码列表
+    // 内），Combo 显示空 + 用户可选切到内置模板。
+    int curTemplateIdx = -1;
+    for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kBuiltinTemplateNames));
+         ++i)
+    {
+        if (templateName == kBuiltinTemplateNames[i])
+        {
+            curTemplateIdx = i;
+            break;
+        }
+    }
+    int newTemplateIdx = curTemplateIdx;
+    Orange::Editor::Widgets::BeginPropertyTable("##matprops", 100.0f);
+    Orange::Editor::Widgets::PropertyLabel("Template",
+        "材质模板（决定 shader + uniform 布局）");
+    if (ImGui::Combo("##template", &newTemplateIdx,
+                     kBuiltinTemplateNames,
+                     IM_ARRAYSIZE(kBuiltinTemplateNames)))
+    {
+        if (newTemplateIdx >= 0
+            && newTemplateIdx < static_cast<int>(
+                IM_ARRAYSIZE(kBuiltinTemplateNames)))
+        {
+            templateName = kBuiltinTemplateNames[newTemplateIdx];
+        }
+    }
+    Orange::Editor::Widgets::EndPropertyTable();
+
+    // 找运行时 MaterialInstance*（通过 schema 模块持有的 namedMaterialInstances
+    // 反向接口拿不到；直接遍历 host.assets 的各 MaterialInstance ptr 对比）。
+    // 简化：当前 c5 不支持 uniform 实时调参 UI —— "deferred" 见头注释。
+    // 占位提示让用户知道这功能正在路上。
+    ImGui::Separator();
+    ImGui::TextDisabled("Uniforms / Textures 调参 UI：deferred 到后续 patch");
+    ImGui::TextDisabled("当前内置 material 全是 default-constructed 无 override，");
+    ImGui::TextDisabled("等真有调参 use case + .material schema v1.1 落地后实施");
+
+    // Save 按钮：写回 templateName（uniform 持久化 deferred）。disabled
+    // 在 templateName 与文件原值相同时（避免重复落盘）。
+    ImGui::Separator();
+    const std::string originalTemplate = ReadMaterialTemplateName(materialPath);
+    const bool dirty = (templateName != originalTemplate);
+    ImGui::BeginDisabled(!dirty);
+    if (ImGui::Button("Save"))
+    {
+        WriteMaterialFile(materialPath, templateName);
+        // 内存 MaterialInstance 不在此重新 CreateInstance —— 那会让 Render
+        // able.materialInstance 字段持有的旧指针悬挂。完整刷新路径要走
+        // namedMaterialInstances 重建 + 所有 Renderable 字段重定向，超出
+        // c5 范围。当前 Save 只动盘上文件，运行时直到重启编辑器才看到效果。
+        ImGui::OpenPopup("##saved_notice");
+    }
+    ImGui::EndDisabled();
+    if (!dirty)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(no changes to save)");
+    }
+    if (ImGui::BeginPopup("##saved_notice"))
+    {
+        ImGui::TextUnformatted("已保存到 .material 文件。");
+        ImGui::Separator();
+        ImGui::TextDisabled("注：当前会话的运行时 MaterialInstance 未刷新；");
+        ImGui::TextDisabled("重启 OrangeEditor 可看到新 template 生效。");
+        if (ImGui::Button("OK")) { ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
+}
+
+// 判断 selectedAssetPath 是否是 .material 文件路径。
+bool IsMaterialAssetSelected(const std::string& path)
+{
+    if (path.size() < 9) { return false; }  // ".material" = 9 chars
+    return path.compare(path.size() - 9, 9, ".material") == 0;
+}
+
+}  // anonymous namespace
+
 void EditorRenderLayer::DrawInspectorPanel()
 {
     ImGui::Begin("Inspector");
+
+    // v0.5 c5：Material 子模式优先级 —— 当 Asset 浏览器选中 .material 文
+    // 件时，Inspector 切到 material 编辑视图。实体选中仍保留在 selection
+    // 内，用户在 Asset 浏览器选别的文件或清空选中后自动切回实体 Inspector。
+    if (IsMaterialAssetSelected(mHost.assets.selectedAssetPath))
+    {
+        DrawMaterialSubMode(mHost, mHost.assets.selectedAssetPath);
+        ImGui::End();
+        return;
+    }
+
     if (mHost.scene.pWorld == nullptr || !mHost.selection.selectedEntity.IsValid()) {
         ImGui::TextDisabled("(select an entity)");
         ImGui::End();

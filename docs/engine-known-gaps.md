@@ -448,6 +448,70 @@ v0.5 milestone 描述"资源浏览器 + Material 子模式"假设 `assets/` 下�
 
 ---
 
+## GAP-2026-05-16-material-system-enumerate-and-instance-overrides
+
+- **发现方**：OrangeEditor v0.5 c5（Material 子模式实施）
+- **发现日期**：2026-05-16
+- **一句话定性**：Material 子模式 UI 撞上两个引擎能力缺口——(1) `MaterialSystem` 缺 `EnumerateTemplateNames()` / `GetTemplateNameAt(i)` 公共 API，Inspector Combo 控件没法动态列出所有已注册模板；(2) `MaterialInstance` 缺 "枚举所有 uniform override / texture binding" 公共 API + `.material` JSON schema v1.0 只存 templateName，调参不能持久化
+- **状态**：待评审 + 待落地（v0.5 c5 已用 hardcoded 内置 5 模板列表 + Save 仅写 templateName 兜底；完整版 deferred 到本 GAP 落地后）
+
+### 触发场景
+
+OrangeEditor v0.5 c5 Material 子模式：Asset 浏览器选中 .material 文件 → Inspector 切到 material 编辑视图。需要的两项能力：
+
+1. **Template Combo 列出可选模板**：让用户切 toon → dissolve 等。当前 hardcoded `kBuiltinTemplateNames[]` 数组（toon / rim_light / dissolve / emissive / textured）—— 与 `MaterialSystem::RegisterBuiltins` 注册一致但游戏侧 `RegisterTemplate` 自定义模板不会出现。
+2. **Uniform 调参 + 持久化**：当前 Material 子模式只能切 templateName 写盘；用户改 ToonColor 等 uniform → Save → 重启编辑器 → 改动丢失（.material 文件只存 templateName）。
+
+### 缺什么
+
+#### G1 · `MaterialSystem::EnumerateTemplateNames` 公共 API
+
+```cpp
+// include/orange/engine/render/MaterialSystem.h
+std::vector<std::string_view> GetTemplateNames() const;
+// 或
+const std::vector<std::string>& EnumerateTemplateNames() const;
+```
+
+`MaterialSystem` 内部已用 unordered_map 存 templates，把 key 集合暴露为 view 即可。MaterialInstance 子模式 Combo 控件直接从此 API 拿列表。
+
+#### G2 · `MaterialInstance` 枚举 override + `.material` schema v1.1
+
+`MaterialInstance` 公共面需要 "迭代所有已设置 uniform / texture override" 接口。当前只有 `HasUniformOverride(name)` + `GetUniformXxx(name)`，无法不知道 name 的情况下遍历。
+
+`.material` JSON schema v1.0 → v1.1：
+
+```json
+{
+  "schemaVersion": {"namespace":"render/material_instance","major":1,"minor":1},
+  "templateName": "toon",
+  "uniforms": [
+    {"name":"ToonColor","type":"vec4","value":[0.8,0.3,0.2,1.0]},
+    {"name":"OutlineWidth","type":"float","value":0.05}
+  ],
+  "textures": [
+    {"binding":0,"path":"assets/textures/foo.png"}
+  ]
+}
+```
+
+`DemoWorld.cpp::bakeAndLoadMaterial` 内 `MaterialSystem::CreateInstance` 之后按 uniforms 列表 SetUniform 还原 override；Save 路径反向迭代 override 列表写盘。
+
+### 期望验收
+
+落地后能跑通：
+
+1. Material 子模式 Combo 控件**自动**列出所有已注册模板（含游戏侧 RegisterTemplate 注入的自定义模板），不再硬编码
+2. 用户改 toon material 的 ToonColor → Save → 重启编辑器 → 颜色保留
+3. `.material` schema v1.1 兼容读 v1.0（无 uniforms 字段时 default override empty）
+
+### 关联
+
+- OrangeEditor v0.5 c5 当前简化版（commit 本 session 末尾 v0.5 c5 commit）—— Material 子模式 UI 框架 + Save 仅 templateName
+- GAP-2026-05-16-builtin-asset-disk-serialization（已 ✅）—— 本 GAP 是其下一阶段
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
