@@ -187,7 +187,7 @@ units per ~90 px）。
     数值实时变化
   - [✅] 同样验证绿色 Y 轴（实体沿 ±Y 移动）+ 蓝色 Z 轴（沿 ±Z 移动）
 
-- [ ] **一次 drag = 一次 Undo（CommandStack BeginGroup 首批消费）**
+- [✅] **一次 drag = 一次 Undo（CommandStack BeginGroup 首批消费）**
   - [✅] 记下实体起始 position（例如 `(0, 0, 0)`）
   - [✅] 按住红 X 轴拖动到大约 `(3, 0, 0)`（中间途经多个像素 → 内部 push 多帧命令，靠
     intra-group coalesce 合并）
@@ -441,7 +441,14 @@ gizmo 路径正交）。
     之外的空白区域）→ 触发 picking（清空 / 选下方物体）—— plugin overlay 不接管 LMB
 
 ### bugs
-1. **DirectionalLight 在移动的过程中，物体阴影不会实时发生变化**
+1. **ParticleEmitter Inspector 拖 `Spawn Offset Max` → spawn box 不实时跟随**
+   - **现象**：选中火焰 Emitter → Inspector 拖 `Spawn Offset Max` Vec2 → spawn box 在 viewport 内**不变形**（兄弟项 `Initial Velocity Min/Max` 拖时箭头实时跟随 OK；独 `Spawn Offset Max` 失效）
+   - **复现**：选 demo scene "Fire Emitter" → Inspector 找到 `Spawn Offset Max` → DragFloat2 拖动数值 → 观察 viewport 内青色 spawn box → 数值在变但 box 大小 / 形状不变
+   - **2026-05-16 代码 review 诊断**（未找到 root cause）：schema 注册（`RegisterBuiltinSchemas:204-208`）+ FieldNested set 路径 + plugin dispatch（`ScenePanel:212-228` 每帧 fresh component pointer）+ SchemaInspector Vec2 case 都 review 一遍，与 Velocity Min/Max（同款代码路径，工作 OK）+ 同段 line 416 ✅ "Min == Max → box 退化消失"（同款 plugin 路径，能读到 spawnOffsetMax 实时变化）形成矛盾——line 413 失败的现象与 line 416 成功的现象用同一段代码
+   - **候选解释**（按概率）：(a) 用户实际跑 SeedWorld 受 B1 影响，初始 box 是 0 高水平线，拖 Max x 时视觉变化不明显；(b) DragFloat2 极慢拖动（dragSpeed=0.01）的间歇性更新；(c) 真 bug 但代码 review 漏了，需 instrument 日志定位
+   - **处置**：**用户决定后续再修**（不是大问题，不阻塞 v0.4.5 开工）；待 B1 修复后 / v0.6.5 工具栏验收重跑时再观察现象，必要时加 instrument 日志诊断
+   - **登记**：从 v0.4.5 prep 修复列表移出
+2. **DirectionalLight 在移动的过程中，物体阴影不会实时发生变化**
    - **现象**：拖动 DirectionalLight entity（Translate gizmo / Inspector 改 position）→ 黄色方向箭头起点跟着移动，但场景物体阴影完全不变
    - **复现**：选 demo scene 内 DirectionalLight 实体 → 拖 X/Y/Z 任一方向 → 观察 plane 上 cube 的 shadow → 阴影不动
    - **根因**：DirectionalLight component 的 `direction` 字段与 entity Transform 完全解耦——`Pipeline::ComputeLightViewProj` 只读 `light.direction` 不读 transform，但 gizmo 把箭头起点画在 entity position
@@ -489,6 +496,8 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
 - `vendor/LumixEngine/src/editor/scene_view.cpp` `gizmo_config` toggle 实现思路
 
 ### 验收点
+
+> **8 项功能验收推迟到 v0.6.5**：v0.4 期用户因工具栏不够美观以致没法集中注意力跑完整功能验收（[v0.6.5 立项](../editor-roadmap.md#v065--视觉统一与主题打磨) 即由此触发）。下面 [✅] 的项是 c5 落地时已确认；剩余 [ ] 项推迟到 v0.6.5 美化完成后跟 acceptance scene 一并跑。
 
 - [✅] **Gizmos 总开关 checkbox 基础**
   - [✅] 启动编辑器、自动加载 demo scene

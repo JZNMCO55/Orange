@@ -110,7 +110,7 @@ shape 段因 demo scene 缺实体无法在编辑器内观察，本 commit 补齐
   - [✅] **不**显示 Circle / Box / EdgeChain 任一 shape 段
   - [✅] 通用字段 `Density / Friction / Restitution / Is Sensor` 仍正常显示
 
-- [ ] **Static EdgeChain (demo) 实体存在**（消化 BUG-4 EdgeChain case）
+- [✅] **Static EdgeChain (demo) 实体存在**（消化 BUG-4 EdgeChain case）
   - [✅] Entity Tree 内能看到名为 "Static EdgeChain (demo)" 的节点
   - [✅] 选中后 Inspector 显示 Collider section
   - [✅] Collider section 显示 `Shape: EdgeChain` 分隔条
@@ -122,7 +122,12 @@ shape 段因 demo scene 缺实体无法在编辑器内观察，本 commit 补齐
   - [✅] 不出现"上一个实体的 shape 段残留"或"显示两段 shape"
 
 ### bugs
-（待大节点回归后填）
+1. **Editor 启动加载默认 SeedWorld 而非 demo.scene.json**
+   - **现象**：v0.3 commit `0e4b15e` 落地"demo scene 走文件加载"后，启动编辑器仍看到 SeedWorld（程序化 7 实体）而不是 demo.scene.json（13+ 实体）
+   - **复现**：双击 OrangeEditor.exe → 观察 Entity Tree → 看到 Root/Camera/Light/Geometry/Floor/Wall/Misc 而不是 demo scene 的 13+ 实体
+   - **候选根因**：CWD 与可执行目录不一致 → `assets/scenes/demo.scene.json` 相对路径解析失败 → fallback 到 SeedWorld；或 `Scene::Load` 路径拼装 / 异常吞噬；或 demo.scene.json 反序列化失败默默退回
+   - **处置**：**不在 v0.4.5 prep 修**；指向 v0.5 Asset 浏览器 milestone（届时会重走资源加载路径，连带消化）
+   - **影响**：本 v0.3 验收 + v0.4 c1 picking 验收（line 102 同症）期间 demo scene 不在场，验证依赖 SeedWorld；不影响 c3 / c4 修复（gizmo 与具体 scene 无关）
 
 ---
 
@@ -194,7 +199,7 @@ c11 仅声明的 plugin 抽象在 v0.3 工业可用。在 Animator section 段�
 
 ### 验收点
 
-- [ ] **Slime Doll 上的 mini-preview 显示**
+- [✅] **Slime Doll 上的 mini-preview 显示**
   - [✅] 选中 "Slime Doll" 实体
   - [✅] Inspector 滚到 Animator section
   - [✅] Animator section 内除了原有 `Backend: procedural` 只读字段外，下方出现一条分隔线

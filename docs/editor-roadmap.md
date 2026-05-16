@@ -380,6 +380,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - **panel 视觉统一**：标题栏 / 分隔条 / 折叠箭头 / Inspector component header 折叠图标 / Entity Tree 行 hover/select 状态全部按 EditorTheme 重画
 - **Inspector 控件三态**：DragFloat / SliderFloat / Combo / Button hover / active / disabled 三态颜色一致
 - **acceptance scene**：在 demo.scene 上完整跑一遍"开场景 → 选实体 → 改 Inspector → gizmo 拖 → Save → Play → Stop → Build" 路径，全程视觉风格一致，无 ImGui 默认深蓝 / 灰白色块漏出
+- **附带：v0.4 c5 工具栏 8 项遗留功能验收**——`docs/acceptance/editor-v0.4-acceptance-checklist.md` c5 段共 8 项 `[ ]`（Gizmos 总开关 / disabled tooltip / Camera frustum / 多 plugin 并存 / Play vs visible 正交 等）。v0.4 期用户因工具栏不美观推迟，本 milestone 美化完成后一并跑；跑完把 c5 段父级标记勾 ✅，节点 A 大回归（P2）覆盖剩余
 
 **前置**：v0.6（全局 toolbar 已落，所有主 UI 表面齐全）；v0.4.5（DPI 自适应已落，token 化的间距 / 字号才有意义）
 
