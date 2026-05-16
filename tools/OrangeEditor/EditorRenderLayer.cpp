@@ -106,6 +106,36 @@ EditorRenderLayer::~EditorRenderLayer()
 
 void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 {
+    // ---- 每帧 framebuffer 同步 → 通知 OrangeRender swap-chain rebuild --
+    //
+    // 修复 bug：v0.4.5 后用户报"resize 后 ImGui 内容只占窗口左上一小块"。
+    // Root cause：OrangeRender::BeginFrame 自动重建 swap-chain 仅依赖
+    // (a) 消费者主动调 `Renderer::OnResize(...)` 置位 mSwapchainDirty
+    // (b) AcquireNextImage 返回 OUT_OF_DATE
+    // OrangeEditor 漏 wire (a)；(b) 在某些 driver / DPI / multi-monitor
+    // 组合下不报 OUT_OF_DATE（driver 自动 scale），swap-chain 持续旧 size
+    // → ImGui 渲染到旧 image 左上区域 → present 到新 surface 出现空白。
+    //
+    // 修法：OnUpdate 顶部 query GLFW framebuffer size，与上帧缓存对比，
+    // 任何变化即 `mRenderer.OnResize`。首帧 0/0 哨兵让启动后第一次同步
+    // 总会触发（与 maximize-on-startup workaround 协同确保 swap-chain 在
+    // 第一帧前对齐 maximized framebuffer）。
+    {
+        auto*        pGlfwWindow = static_cast<GLFWwindow*>(
+            mAppHost.GetWindow().GetGlfwWindowHandle());
+        int          fbW = 0, fbH = 0;
+        glfwGetFramebufferSize(pGlfwWindow, &fbW, &fbH);
+        const auto newW = static_cast<std::uint32_t>(fbW > 0 ? fbW : 0);
+        const auto newH = static_cast<std::uint32_t>(fbH > 0 ? fbH : 0);
+        if ((newW != mLastFramebufferWidth || newH != mLastFramebufferHeight)
+            && newW > 0 && newH > 0)
+        {
+            mRenderer.OnResize(newW, newH);
+            mLastFramebufferWidth  = newW;
+            mLastFramebufferHeight = newH;
+        }
+    }
+
     // 无论 Play/Edit 状态都推进编辑器时间，供 dissolve 等时间驱动 shader 预览
     const float dt = static_cast<float>(frame.time.deltaSeconds);
     mEditorTime += dt;

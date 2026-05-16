@@ -127,6 +127,21 @@ private:
     // 状态均推进——供 dissolve 等时间驱动 shader 在 Edit 模式下也能预览动画。
     float                                             mEditorTime{0.0f};
 
+    // 上一帧 GLFW framebuffer size 缓存 —— OnUpdate 每帧 query 当前
+    // framebuffer，与缓存比对发现变化即调 `mRenderer.OnResize(...)` 通知
+    // OrangeRender 重建 swap-chain。0 哨兵值让首帧总会触发一次 OnResize
+    // 与启动 maximize 同步。
+    //
+    // 修复 bug：v0.4.5 后用户在某台机器报 "resize 后 ImGui 内容只占窗口左上
+    // 一小块，剩余黑色空白"。Root cause：OrangeRender BeginFrame 内 swap-
+    // chain 自动重建仅依赖 (a) `mSwapchainDirty` 由消费者主动调 OnResize
+    // 置位 (b) AcquireNextImage 返回 OUT_OF_DATE。OrangeEditor 漏 wire (a)；
+    // (b) 在某些 Vulkan driver 配置下不报 OUT_OF_DATE（driver 自动 scale /
+    // blit 容错过头）→ swap-chain 永远不重建 → 渲染到旧 size image →
+    // present 到新 size surface 出现"image 在 surface 左上角 + 剩余空白"。
+    std::uint32_t                                     mLastFramebufferWidth{0};
+    std::uint32_t                                     mLastFramebufferHeight{0};
+
     // ---- Play Mode simulation 运行时（Edit 态均为 nullptr）--------------
     // Play → Stop 时统一销毁（PhysicsWorld reset 即销毁所有 b2 body；
     // VfxSystem 先 SetVfxSystem(nullptr) + Shutdown 再 reset）。
