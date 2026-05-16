@@ -320,7 +320,7 @@ v0.4 收尾后在另一台不同分辨率 / 缩放比的机器上跑 OrangeEdito
 - `Grep` `SchemaInspector.cpp` / `InspectorPanel.cpp` / 其他 panel 找不到字面量像素列宽（除 `style.*` / `CalcTextSize` / `GetContentRegionAvail` 派生外）—— 加进 `scripts/check_invariants.py` 作为编辑器侧新 lint 规则
 - 编辑器 milestone-end-checklist 走完，含两台机器实测截图存档
 
-### v0.5 · Asset 浏览器 + Material 子模式
+### v0.5 · Asset 浏览器 + Material 子模式 ✅
 
 **对应**：`docs/roadmap.md` Task 06-06（材质编辑器子模式）的真正落地
 
