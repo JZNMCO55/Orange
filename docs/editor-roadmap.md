@@ -284,7 +284,7 @@ v0.1 + v0.1.5 + v0.2 收尾后回看 OrangeEditor 当前结构，对照 wiki `ve
 
 **Critical Path**：是（"美术能拖东西"是编辑器最强烈的用户期待）
 
-### v0.4.5 · UI DPI 自适应 + Inspector / Panel widget 比例化
+### v0.4.5 · UI DPI 自适应 + Inspector / Panel widget 比例化 ✅
 
 **为什么单独立条**：
 
