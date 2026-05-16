@@ -263,20 +263,41 @@ int main()
     const float fontPx   = kDesignFontSizePx * dpiScale;
     ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
-    // 默认 UI 字体：优先用 Windows 系统 Segoe UI（TrueType，任意 size 都清晰），
-    // 找不到回退到 ImGui 内嵌 ProggyClean 拉大 SizePixels（位图字体非原生 size
-    // 略糊但保底可用）。**必须**在 ImGui_ImplVulkan_Init 之前完成 —— Vulkan
-    // backend 在 Init 阶段从 io.Fonts atlas 创建 font texture，后改动 atlas
-    // 需要重建 + 重上传。
+    // 默认 UI 字体：Microsoft YaHei UI（msyh.ttc）—— 同时含 ASCII + 简体中文
+    // glyph，覆盖编辑器 UI 内所有中英混排 tooltip / 提示。
+    //
+    // 之前用 Segoe UI（segoeui.ttf）字体不含中文 glyph，所有中文字符显示为
+    // "?" 占位（Animation panel placeholder / Inspector AssetRef tooltip 等
+    // 中文文案全部乱码）。msyh.ttc 是 Windows 10/11 默认安装字体，ASCII +
+    // 简体中文都覆盖；体积比 simsun.ttc 稍大但清晰度好。
+    //
+    // ImGui 默认 glyph range 是 ASCII (0x20-0xFF)，必须**显式**传入 CJK 范围
+    // 才会把中文字符烘焙到 font atlas。GetGlyphRangesChineseSimplifiedCommon
+    // 含常用 ~2500 简中字 + ASCII + 部分 CJK 标点，覆盖编辑器 UI 文案足够。
+    //
+    // **必须**在 ImGui_ImplVulkan_Init 之前完成 —— Vulkan backend 在 Init 阶段
+    // 从 io.Fonts atlas 创建 font texture，后改动 atlas 需要重建 + 重上传。
+    //
+    // 失败 fallback 链：msyh.ttc → segoeui.ttf (ASCII only) → ImGui 内置
+    // ProggyClean（位图，仅 ASCII；中文仍乱码但保底能跑）。
     {
+        const ImWchar* cjkRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
         ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
-            "C:\\Windows\\Fonts\\segoeui.ttf", fontPx);
+            "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges);
+        if (fontMain == nullptr) {
+            std::fprintf(stdout,
+                         "[OrangeEditor] msyh.ttc 加载失败，回退 segoeui.ttf "
+                         "(ASCII only, 中文会显示成 '?')\n");
+            fontMain = io.Fonts->AddFontFromFileTTF(
+                "C:\\Windows\\Fonts\\segoeui.ttf", fontPx);
+        }
         if (fontMain == nullptr) {
             ImFontConfig fontCfg;
             fontCfg.SizePixels = fontPx;
             io.Fonts->AddFontDefault(&fontCfg);
             std::fprintf(stdout,
-                         "[OrangeEditor] Segoe UI 加载失败，回退 ImGui 默认字体 @%.0fpx (dpiScale=%.2f)\n",
+                         "[OrangeEditor] 系统字体全部加载失败，回退 ImGui 默认 "
+                         "@%.0fpx (dpiScale=%.2f)\n",
                          fontPx, dpiScale);
         }
     }
