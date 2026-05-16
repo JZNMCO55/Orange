@@ -21,7 +21,9 @@
 
 #include <glm/vec2.hpp>
 
+#include <algorithm>
 #include <cstdio>
+#include <initializer_list>
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -57,11 +59,28 @@ void EditorRenderLayer::DrawScenePanel()
     ImGui::TextDisabled("|");
     ImGui::SameLine();
 
+    // Combo 列宽从 CalcTextSize 派生 —— v0.4 期硬编码 70 / 80 像素在
+    // 1680×1120 × 150% scale 上会被字体撑出 combo 控件框（Segoe UI 24px 下
+    // "Shaded" 文本宽 ~58px，加 framePad + arrow 按钮 ~24px 远超 80px）。
+    // FramePadding / arrow 按钮宽由 main.cpp ScaleAllSizes(dpiScale) 同步缩放。
+    // 用 (std::max)(...) 圆括号包装绕开 windows.h max 宏污染（本 TU 通过
+    // imgui_impl_vulkan / VulkanInterop 间接拉 windows.h，没 #define NOMINMAX）。
+    auto comboItemWidth = [&](std::initializer_list<const char*> items) {
+        const ImGuiStyle& s = ImGui::GetStyle();
+        float maxW = 0.0f;
+        for (const char* it : items) {
+            const float w = ImGui::CalcTextSize(it).x;
+            if (w > maxW) { maxW = w; }
+        }
+        // arrow button 宽 ≈ FrameHeight；framePadding 左右各一份。
+        return maxW + s.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
+    };
+
     {
         ImGui::BeginDisabled();
         const char* kViewModes[] = {"Persp"};
         int curView = 0;
-        ImGui::SetNextItemWidth(70.0f);
+        ImGui::SetNextItemWidth(comboItemWidth({"Persp", "2D Lock"}));
         ImGui::Combo("##ViewMode", &curView, kViewModes, IM_ARRAYSIZE(kViewModes));
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -76,7 +95,7 @@ void EditorRenderLayer::DrawScenePanel()
         ImGui::BeginDisabled();
         const char* kShadingModes[] = {"Shaded"};
         int curShading = 0;
-        ImGui::SetNextItemWidth(80.0f);
+        ImGui::SetNextItemWidth(comboItemWidth({"Shaded", "Wireframe", "Shaded+Wireframe"}));
         ImGui::Combo("##Shading", &curShading, kShadingModes, IM_ARRAYSIZE(kShadingModes));
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))

@@ -33,6 +33,7 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -349,30 +350,47 @@ void EditorRenderLayer::DrawMainMenuBar()
         const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
                                : (ps == PlayState::Play)   ? "[Play]"
                                                            : "[Paused]";
-        // 三个按钮 + 状态 label 总宽：粗算 36*3 + 60 = 168。
-        constexpr float kButtonW   = 36.0f;
-        constexpr float kStateW    = 70.0f;
-        constexpr float kGroupW    = kButtonW * 3.0f + kStateW + 16.0f;
-        ImGui::SameLine(ImGui::GetWindowWidth() - kGroupW);
+        // 按钮 / 状态 label 宽度全部从 CalcTextSize 派生 —— v0.4 期硬编码
+        // 36 / 70 像素在 1680×1120 × 150% scale 上会被字体撑爆 (Segoe UI
+        // 24px 下 "Pause" 文本宽 ~44px > 36px button)。FramePadding 已被
+        // main.cpp ImGui::GetStyle().ScaleAllSizes(dpiScale) 同步缩放。
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float framePadX   = style.FramePadding.x * 2.0f;
+        const float btnPlayW    = ImGui::CalcTextSize("Play").x  + framePadX;
+        const float btnPauseW   = ImGui::CalcTextSize("Pause").x + framePadX;
+        const float btnStopW    = ImGui::CalcTextSize("Stop").x  + framePadX;
+        // state label 取三种状态最长那个 + framePad，保证切换时右边距稳定。
+        // 用 (std::max)(...) 圆括号包装绕开 windows.h max 宏污染（本 TU 通
+        // 过 imgui_internal.h / GLFW backends 间接拉 windows.h，没 #define
+        // NOMINMAX；main.cpp 那侧定义了 NOMINMAX 但不影响本 TU）。
+        const float stateW = (std::max)(
+            ImGui::CalcTextSize("[Edit]").x,
+            (std::max)(ImGui::CalcTextSize("[Play]").x,
+                       ImGui::CalcTextSize("[Paused]").x))
+            + framePadX;
+        const float itemSpc = style.ItemSpacing.x;
+        const float groupW = btnPlayW + btnPauseW + btnStopW + stateW
+                           + 4.0f * itemSpc;
+        ImGui::SameLine(ImGui::GetWindowWidth() - groupW);
 
         const bool canPlay   = (ps == PlayState::Edit  || ps == PlayState::Paused);
         const bool canPause  = (ps == PlayState::Play);
         const bool canStop   = (ps == PlayState::Play  || ps == PlayState::Paused);
         ImGui::BeginDisabled(!canPlay);
-        if (ImGui::Button("Play", ImVec2(kButtonW, 0))) {
+        if (ImGui::Button("Play", ImVec2(btnPlayW, 0))) {
             mHost.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
                                                              : PlayOp::EnterPlay;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(!canPause);
-        if (ImGui::Button("Pause", ImVec2(kButtonW, 0))) {
+        if (ImGui::Button("Pause", ImVec2(btnPauseW, 0))) {
             mHost.scene.pendingPlayOp = PlayOp::Pause;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(!canStop);
-        if (ImGui::Button("Stop", ImVec2(kButtonW, 0))) {
+        if (ImGui::Button("Stop", ImVec2(btnStopW, 0))) {
             mHost.scene.pendingPlayOp = PlayOp::Stop;
         }
         ImGui::EndDisabled();
