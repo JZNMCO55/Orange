@@ -55,3 +55,24 @@ Asset 浏览器选中 `.material` 文件时 Inspector 切到 Material 编辑视�
 ### bugs
 
 （验收期登记；当前为空）
+
+## Wiki 设计意图对照（retro）
+
+按 `docs/milestone-end-checklist.md` 第 3 步走参考引擎 / wiki retro 对比，对照 `vendor/Orange-Wiki/wiki/` 核心页（asset-database / plugin-architecture / property-reflection / property-grid-imgui / orange-editor-architecture / game-world-editor）：
+
+### 对齐（5/7 deliverable）
+
+- **c1 `PropertyType::AssetRef` + `AssetKind`**：等价 Lumix `Attributes::resource_type`（`concepts/editor/property-reflection.md` § Orange 实现建议）
+- **c2 三 tab 容器**：参 `concepts/editor/orange-editor-architecture.md` § D5 Cocos 底部布局
+- **c3 路径字符串 + 树/文件列表双视图**：参 `concepts/editor/asset-database.md` § Orange 实现建议"近期单人开发用路径哈希（Lumix 方案）"；简化范围（无缩略图 / 无搜索 score / 无 Favorites）落在 wiki 显式标记的"远期升级"段
+- **c4 DnD + Command 写回**：参 `techniques/editor/property-grid-imgui.md` Lumix `visit(Property<Path>&)`；用 Selectable 代 InputText 是 asset id 字符串路径下的合理变形
+- **命令系统纪律**：c4 push `SetFieldValueCommand<std::string>` 严格遵守 wiki "ImGui 修改走 executeCommand" 原则
+
+### 临时偏离（2/7，已登记 `docs/editor-roadmap.md` L15 / L16）
+
+- **L15 schema 注册依赖 static globals**：违背 `concepts/editor/plugin-architecture.md` Lumix `StudioApp::addPlugin(plugin)` 依赖注入路径；消除点 v0.8（让 `FieldAssetRef` 等接受 `EditorHost&` / 子 context）与 wiki 推荐方向一致
+- **L16 Inspector 顶部 if 分发**：正中 `concepts/editor/property-reflection.md` 明确反对的"在 Visitor 内写 ComponentType 判断分支"模式；消除点 v0.7 c0 抽 `IEditorAssetInspectorPlugin`（参 Godot `EditorInspectorPlugin::can_handle()`）与 wiki 推荐方向一致
+
+### 结论
+
+两条临时偏离均在 retro 期自发识别（不是事后被 wiki 打脸），消除路径与 wiki 已记录的正确演进方向一致。简化范围全部落在 wiki "Orange 实现建议" 远期段或新登记 GAP 内（`GAP-2026-05-16-material-system-enumerate-and-instance-overrides`），无偷工减料。

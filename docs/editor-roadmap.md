@@ -121,6 +121,8 @@ wiki 给三种：
 | L12 | **没热重载** —— shader / scene 改了要重启 | v1.x（依赖主 roadmap Phase 8） |
 | L13 | **没 Editor Settings 系统** —— gizmo 线宽 / handle 长度 / 颜色等视觉常量散落在各 cpp anonymous namespace 的 constexpr，不可在运行时调整 | v0.8（v0.6.5 先集中到 `EditorTheme.h`，v0.8 迁入 EditorSettings） |
 | L14 | **视觉风格不统一** —— v0.4 ~ v0.6 各 UI 表面功能优先落地，配色 / 图标 / 控件三态散乱；v0.4 收尾时被用户当场指出 viewport 工具栏不够美观以致没法做完整功能验证 | v0.6.5 |
+| L15 | **Schema 注册依赖文件作用域 static 指针** —— v0.5 c1 在 `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` 引入 `gpAssetRegistry` / `gpNamedMaterialInstances` + 外部 setter（`SetAssetRegistryForSchema` / `SetNamedMaterialInstancesForSchema`），让 `FieldAssetRef` 的 getFn / setFn 能拿运行时数据。技术上不违反公共头 isolation，但走 hidden global state 违背 v0.2.5 EditorHost 单例 hub "消除散落 global" 的设计本意；新增任一需要运行时上下文的 schema 字段都会被诱导继续加 static 指针 | v0.8（与 EditorSettings 整骨同期；让 `FieldAssetRef` / 任意需要运行时上下文的 schema 注册入口接受 `EditorHost&` 或对应子 context 引用作为显式参数，删除 `gpAssetRegistry` / `gpNamedMaterialInstances` + setter） |
+| L16 | **Inspector 顶部分发缺 IEditorAssetInspectorPlugin 抽象** —— v0.5 c5 在 `InspectorPanel.cpp` 顶部加 `IsMaterialAssetSelected → DrawMaterialSubMode` if 分支接管 Asset 浏览器选中。当前只一条特殊路径，不构成 god if/else；但 v0.7 Animation 子模式（选中 `.anim_fsm`）+ 后续可能的 scene preview（选中 `.scene.json`）都是同款"按选中资源类型切 Inspector 内容"路径，再加两条就会演化成 if/else 链，正中 v0.2.5 整骨禁令 | v0.7（c1 落 Animation 子模式 UI 之前必须先抽 `IEditorAssetInspectorPlugin` 接口 + 注册表；Material 子模式从 `InspectorPanel.cpp` 顶部 if 分支迁出为第一个 plugin case，Animation 子模式作为第二个 case 验证抽象边界） |
 
 ## 里程碑
 
@@ -411,8 +413,9 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **关键 deliverables**：
 
+- **c0 前置整骨（消除 L16）**：抽 `IEditorAssetInspectorPlugin` 接口 + 注册表（与 `IEditorInspectorPlugin` 对偶，按选中资源扩展名 / kind 分派）；v0.5 c5 Material 子模式从 `InspectorPanel.cpp` 顶部 `IsMaterialAssetSelected` 分支迁出为第一个 plugin case。本条不引入 v0.7 新功能，纯为后续两条 deliverables 让路；落地后 InspectorPanel 顶部 if 分支消失，新增 asset 子模式（.anim_fsm / .scene.json）只需注册 plugin
 - Inspector 的 Animator 段加 backend 切换（Skeletal / Procedural）
-- Skeletal animation state machine **图编辑**（节点 = state，边 = transition + condition），保存到 .anim_fsm
+- Skeletal animation state machine **图编辑**（节点 = state，边 = transition + condition），保存到 .anim_fsm —— 通过 c0 注册的 plugin 接管 `.anim_fsm` 选中态，作为抽象的第二个真实 case
 - DragonBones 资源浏览 + 单 clip 预览（独立窗口）
 - Procedural Animator 的 channel 配置面板（fn 名 + 目标 uniform）
 
@@ -431,6 +434,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - 多选 / Shift / Ctrl-click 多选实体（参 Task 06-03 Out-of-scope）
 - 多选 Inspector：wiki §6 property grid "异构多选 = 只显示所有类型共有的属性"
 - **Editor Settings 系统**（消除 L13）：把现在散落在 cpp anonymous namespace 的视觉常量集中到一个 `EditorSettings` 结构 + Settings 面板调整 + 保存到 `editor_settings.json`。首批纳入：gizmo 线宽（translate / rotate / scale 各 idle + highlight 共 6 个值）、gizmo handle 屏幕长度 `kHandleScreenLengthPx`、hit threshold、gizmo 配色。架构参 `vendor/LumixEngine/src/editor/settings.h`（同栈手写注册，符合 CLAUDE.md "禁止 hardcode" 纪律）
+- **Schema 注册 context 注入整骨（消除 L15）**：让 `FieldAssetRef` / 任意需要运行时上下文的 schema 注册入口接受 `EditorHost&` 或对应子 context 引用作为显式参数（候选签名：`Builder::FieldAssetRef(name, label, kind, getFn, setFn)` 的 getFn/setFn 签名从 `(Component&)` 改为 `(Component&, const EditorAssetContext&)`，或注册路径整体接受 `EditorHost&` 让 builder 自行透传）；删除 `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` 内的 `gpAssetRegistry` / `gpNamedMaterialInstances` 文件作用域指针 + `SetAssetRegistryForSchema` / `SetNamedMaterialInstancesForSchema` 外部 setter。本条与 EditorSettings 并行落地（Settings 面板控件本身也是 schema 驱动，正好需要 context 注入路径）
 
 **前置**：v0.2
 
@@ -523,6 +527,6 @@ v0.1 ~ v0.9 全部 ✅。验收路径：邀请非程序员（如美术 / 关卡�
 - 四个核心架构决策（D1/D2/D3/D4）显式记录，避免后期被动重做
 - 与主 roadmap 的依赖以 "前置：主 roadmap Phase N" 形式标，不抢占 phase 编号
 - 已落地 v0.1 任务历史仍在 `docs/roadmap.md` Phase 6 内查（不重复抄）
-- 已知限制 L1–L12 显式登记 + 标定消除点；不存在"心知肚明但没写下来"的悬置项
+- 已知限制 L1–L16 显式登记 + 标定消除点；不存在"心知肚明但没写下来"的悬置项（L15 / L16 是 v0.5 retro 期新增的隐性架构债，消除点分别 v0.8 / v0.7）
 - v1.x 长尾全部带依赖；不在 critical path 上
 - "Ori-like 视觉子模式"（Camera Cinematic / Parallax / Ambient Weather）登记为需求但**不主动开发**，等第一款游戏 fork 后真实用到时再升格
