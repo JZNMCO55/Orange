@@ -219,16 +219,42 @@ const char* GetGear();     // ICON_CI_GEAR，用于 Settings 入口
 
 // ---- ComponentTypeBand ----------------------------------------------
 // Inspector component header 左侧 4px 色带（方向 C "识别度补丁"）。
-// per-component-type 一个低饱和色，c5 接入 SchemaInspector 消费。
+// per-component-type 一个低饱和色作为视觉分类标签，与 schema typeName
+// 字符串映射；c5 接入 SchemaInspector ComponentHeaderLocal 消费。
+//
+// 配色原则（低饱和度避免与橙 accent 冲突）：
+//   * Transform     —— 绿（位置 / 朝向，对应 Y 轴 gizmo 同色系）
+//   * Renderable    —— 蓝（mesh / 几何）
+//   * DirectionalLight —— 黄（光源）
+//   * RigidBody     —— 红（物理 / 碰撞）
+//   * Collider      —— 紫（碰撞形状）
+//   * ParticleEmitter —— 青（粒子）
+//   * Animator      —— 粉（动画 / 骨骼）
+//   * Name          —— 灰（基础元数据）
+//   * Default       —— 浅灰 fallback（未注册的 component type）
 namespace ComponentTypeBand
 {
 
-// 色带宽度（px）。c1 = 4.0f（与 §D5.1 决策一致）。
+// 色带宽度（px）。c5 = 4.0f（与 §D5.1 决策一致）。
 float GetBandWidthPx();
 
-// Transform component 色带色。c1 占位 = 低饱和绿（与 Y 轴 gizmo 同色系，
-// 用户可联想"位置/朝向"）；c5 校色。
+// 8 个内置 component 色带色。
 const ImVec4& GetTransform();
+const ImVec4& GetRenderable();
+const ImVec4& GetDirectionalLight();
+const ImVec4& GetRigidBody();
+const ImVec4& GetCollider();
+const ImVec4& GetParticleEmitter();
+const ImVec4& GetAnimator();
+const ImVec4& GetName();
+
+// fallback：未注册的 component type / 游戏侧自定义 component。
+const ImVec4& GetDefault();
+
+// 字符串查表：按 schema.typeName 返回对应色带色；不命中返回 GetDefault()。
+// 调用方传 schema 顶层 typeName（如 "Transform" / "Renderable" /
+// "DirectionalLight"）。
+const ImVec4& LookupByTypeName(const char* typeName);
 
 }  // namespace ComponentTypeBand
 

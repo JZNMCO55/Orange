@@ -20,6 +20,8 @@
 
 #include "codicons/IconsCodicons.h"
 
+#include <cstring>  // std::strcmp（ComponentTypeBand::LookupByTypeName）
+
 namespace Orange::Editor::Theme
 {
 
@@ -197,12 +199,59 @@ namespace ComponentTypeBand
 namespace
 {
 
-const ImVec4 kTransform{0.45f, 0.65f, 0.40f, 1.00f};
+// 低饱和色 palette（参 EditorTheme.h 配色原则）。alpha = 1.0 实色画 4px
+// 色带，宽度小所以饱和度高一点也不刺眼；色相分布尽量与 brand 橙 #FF8A3D
+// 拉开（避免橙 / 红橙 / 黄橙混淆）。
+const ImVec4 kTransform        {0.45f, 0.65f, 0.40f, 1.00f};  // 绿
+const ImVec4 kRenderable       {0.40f, 0.60f, 0.75f, 1.00f};  // 蓝
+const ImVec4 kDirectionalLight {0.85f, 0.75f, 0.35f, 1.00f};  // 黄
+const ImVec4 kRigidBody        {0.75f, 0.40f, 0.40f, 1.00f};  // 红
+const ImVec4 kCollider         {0.60f, 0.45f, 0.75f, 1.00f};  // 紫
+const ImVec4 kParticleEmitter  {0.40f, 0.70f, 0.65f, 1.00f};  // 青
+const ImVec4 kAnimator         {0.80f, 0.55f, 0.70f, 1.00f};  // 粉
+const ImVec4 kName             {0.55f, 0.55f, 0.55f, 1.00f};  // 灰
+const ImVec4 kDefault          {0.50f, 0.50f, 0.50f, 1.00f};  // 浅灰 fallback
+
+// strcmp / std::string_view 比 std::string 构造更便宜——typeName 是
+// schema 注册期传入的 const char* 字符串字面量（生命周期与 schema 相同），
+// 直接走 const char* 路径。
+struct TypeBandEntry { const char* typeName; const ImVec4* color; };
+const TypeBandEntry kTable[] = {
+    {"Transform",         &kTransform},
+    {"Renderable",        &kRenderable},
+    {"DirectionalLight",  &kDirectionalLight},
+    {"RigidBody",         &kRigidBody},
+    {"Collider",          &kCollider},
+    {"ParticleEmitter",   &kParticleEmitter},
+    {"Animator",          &kAnimator},
+    {"Name",              &kName},
+};
 
 }  // namespace
 
-float          GetBandWidthPx() { return 4.0f;        }
-const ImVec4&  GetTransform()   { return kTransform;  }
+float          GetBandWidthPx()      { return 4.0f;             }
+const ImVec4&  GetTransform()        { return kTransform;        }
+const ImVec4&  GetRenderable()       { return kRenderable;       }
+const ImVec4&  GetDirectionalLight() { return kDirectionalLight; }
+const ImVec4&  GetRigidBody()        { return kRigidBody;        }
+const ImVec4&  GetCollider()         { return kCollider;         }
+const ImVec4&  GetParticleEmitter()  { return kParticleEmitter;  }
+const ImVec4&  GetAnimator()         { return kAnimator;         }
+const ImVec4&  GetName()             { return kName;             }
+const ImVec4&  GetDefault()          { return kDefault;          }
+
+const ImVec4& LookupByTypeName(const char* typeName)
+{
+    if (typeName == nullptr) { return kDefault; }
+    for (const auto& entry : kTable)
+    {
+        if (std::strcmp(typeName, entry.typeName) == 0)
+        {
+            return *entry.color;
+        }
+    }
+    return kDefault;
+}
 
 }  // namespace ComponentTypeBand
 

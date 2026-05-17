@@ -51,13 +51,36 @@ namespace
 //
 // 返回 (open, requestRemove) 组合：第二参数 outRemove 帧内"用户在右键
 // 菜单点了 Remove Component"标志。
+//
+// v0.6.5 c5：bandColor 参数承载 per-component-type 4px 色带色（方向 C
+// "识别度补丁"）。color.w == 0 时不画色带（向后兼容 / fallback）。色带
+// 在 CollapsingHeader 渲染完成后通过 DrawList 叠加在 header 左侧，**遮
+// 盖** header 本身的左 4px 区域；这意味着 header 内左侧很窄的一段会被
+// 色带覆盖（折叠箭头 ▶ 通常在色带右侧 framePadding 处，不受影响）。
 bool ComponentHeaderLocal(const char* label, bool* outRemove,
-                          bool removable, bool defaultOpen = true)
+                          bool removable, const ImVec4& bandColor,
+                          bool defaultOpen = true)
 {
     if (outRemove != nullptr) { *outRemove = false; }
     int flags = ImGuiTreeNodeFlags_AllowOverlap;
     if (defaultOpen) { flags |= ImGuiTreeNodeFlags_DefaultOpen; }
     const bool open = ImGui::CollapsingHeader(label, flags);
+
+    // 4px 色带：取 CollapsingHeader 渲染后的 item rect，左边缘画 4px
+    // 实色矩形。bandColor.w > 0 才画（== 0 视为 "不画"）。
+    if (bandColor.w > 0.0f)
+    {
+        const ImVec2 itemMin = ImGui::GetItemRectMin();
+        const ImVec2 itemMax = ImGui::GetItemRectMax();
+        const float  bandW   =
+            Orange::Editor::Theme::ComponentTypeBand::GetBandWidthPx();
+        const ImU32  bandU32 = ImGui::ColorConvertFloat4ToU32(bandColor);
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImVec2(itemMin.x, itemMin.y),
+            ImVec2(itemMin.x + bandW, itemMax.y),
+            bandU32);
+    }
+
     if (removable && outRemove != nullptr && ImGui::BeginPopupContextItem(label))
     {
         if (ImGui::MenuItem("Remove Component")) { *outRemove = true; }
@@ -586,9 +609,14 @@ void DrawComponentSchemaSection(EditorHost&                  host,
     if (component == nullptr) { return; }
 
     bool requestRemove = false;
+    // v0.6.5 c5：色带色按 schema.typeName 查表（"Transform" → 绿、
+    // "Renderable" → 蓝、...）；未注册 typeName 走 GetDefault 浅灰 fallback。
+    const ImVec4& bandColor =
+        Orange::Editor::Theme::ComponentTypeBand::LookupByTypeName(schema.typeName);
     const bool open = ComponentHeaderLocal(
         schema.displayName ? schema.displayName : schema.typeName,
-        &requestRemove, /*removable=*/schema.remove != nullptr);
+        &requestRemove, /*removable=*/schema.remove != nullptr,
+        bandColor);
 
     if (open)
     {
