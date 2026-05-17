@@ -14,15 +14,25 @@
 //   bytes 16..   positions[vertexCount] : float[3]
 //   随后         indices[indexCount]    : uint32
 //
-// v2（当前；为 GAP-2026-05-16 内置 mesh 落盘 + textured material 保留
-// UV 引入）：v1 末尾追加 hasUVs 字节 + 可选 uvs 段：
+// v2（GAP-2026-05-16）：v1 末尾追加 hasUVs 字节 + 可选 uvs 段：
 //   ... 同 v1 头部 + positions + indices
 //   1B hasUVs (0 / 1)
 //   if hasUVs == 1:
 //       uvs[vertexCount] : float[2]
 //
-// Load 同时支持读 v1 / v2；v1 文件读出的 MeshAsset.UVs() 为空。Save 永远
-// 写 v2 格式；输入 MeshAsset.HasUVs() 决定是否写 UV 段。
+// v3（GAP-2026-05-17）：v2 末尾再追加 hasNormals 字节 + 可选 normals 段：
+//   ... 同 v2 头部 + positions + indices + (hasUVs + uvs)
+//   1B hasNormals (0 / 1)
+//   if hasNormals == 1:
+//       normals[vertexCount] : float[3]
+//
+// Load 同时支持读 v1 / v2 / v3：
+//   * v1 / v2 / v3-hasNormals=0：loader 自动调
+//     MeshAsset::ComputeSmoothNormalsFromTriangles 现场补算 normal，
+//     渲染端从 v3 起统一假定 MeshAsset.Normals() 非空。
+//   * v3-hasNormals=1：直接使用磁盘 normal。
+// Save 永远写 v3 格式；输入 MeshAsset.HasUVs() / HasNormals() 决定是
+// 否写 UV / normal 段。
 //
 // 选择自有格式而不接 OBJ / glTF 是有意为之：避免在
 // Asset 模块上线时同时解决"第三方解析器 vendoring"这个独立问题。后
@@ -50,15 +60,17 @@ public:
     // Load 支持的最小 / 最大 version。Save 总是写 kLatestVersion。
     static constexpr std::uint32_t kVersionV1     = 1;
     static constexpr std::uint32_t kVersionV2     = 2;
-    static constexpr std::uint32_t kLatestVersion = kVersionV2;
+    static constexpr std::uint32_t kVersionV3     = 3;
+    static constexpr std::uint32_t kLatestVersion = kVersionV3;
 
     MeshLoader() = default;
     ~MeshLoader() override = default;
 
     Result<std::unique_ptr<MeshAsset>, ResultCode> Load(std::string_view path) override;
 
-    // 把 MeshAsset 序列化到磁盘 .mesh 文件（v2 格式）。caller 保证目标
-    // 目录已存在；本函数不创建目录。HasUVs() 决定是否写 UV 段。
+    // 把 MeshAsset 序列化到磁盘 .mesh 文件（v3 格式）。caller 保证目标
+    // 目录已存在；本函数不创建目录。HasUVs() / HasNormals() 决定是否
+    // 写对应可选段。
     // 失败码：IoError（无法写文件） / InvalidArgument（顶点数据不一致）。
     static Result<void, ResultCode> Save(std::string_view path,
                                          const MeshAsset& mesh);

@@ -138,9 +138,11 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
         indices.push_back(base + 3);
         indices.push_back(base + 2);
     }
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 // 按 NameComponent.name 在 World 里反查 entity。SceneLoad 之后 entity

@@ -10,11 +10,13 @@
 //   * uModel         —— per-draw，drawable 的 world transform。
 //
 // 顶点输入 layout 必须与 src/render/Pipeline.cpp 中 VertexInputLayoutDesc
-// 的 attribute 0（float3 pos）兼容。location 1（uv）shadow caster 不
-// 关心，但顶点 buffer 共享，所以这里仍声明 location 0/1，frag 只读 depth。
+// 的 attribute 0（float3 pos）兼容。location 1（uv）/ location 2
+// （normal）shadow caster 不关心，但顶点 buffer 共享，所以这里仍
+// 声明完整 3 个 attribute，frag 只读 depth。
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;     // 不使用，仅占位与 textured_mesh 对齐
+layout(location = 2) in vec3 inNormal; // 不使用，仅占位与 textured_mesh 对齐
 
 layout(push_constant, std430) uniform ShadowCaster {
     mat4 uLightViewProj;   //   0  64

@@ -33,18 +33,17 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
 
 layout(location = 0) in vec2 vUV;
 layout(location = 1) in vec3 vWorldPos;
+layout(location = 2) in vec3 vNormal;
 
 layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    // world-space face normal —— 用 fragment 内置的 dFdx / dFdy 推 flat
-    // face normal（Phase 2 MeshAsset 没 vertex normal attribute）。注意
-    // cross 顺序：Vulkan 屏幕 +Y 朝下，`cross(dFdx, dFdy)` 在右手坐标系
-    // 下指向 inward；用 `cross(dFdy, dFdx)` 取反得到 outward normal。
-    vec3 dx     = dFdx(vWorldPos);
-    vec3 dy     = dFdy(vWorldPos);
-    vec3 normal = normalize(cross(dy, dx));
+    // world-space smooth normal —— GAP-2026-05-17 起 MeshAsset 携带
+    // per-vertex normal，shader 直接读 vNormal 即可，不再依赖 dFdx/dFdy
+    // 推 flat face normal。vert shader 已经把 normal 乘 mat3(uModel)
+    // 翻到 world space（假设模型无非均匀缩放）；frag 只需 normalize。
+    vec3 normal = normalize(vNormal);
 
     // -uLightDir 是 "从表面指向光源" 的方向；NdotL 越大代表越正对光。
     vec3  lightDir = normalize(-light.uLightDirIntensity.xyz);

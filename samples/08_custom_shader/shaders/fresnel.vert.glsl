@@ -5,7 +5,8 @@
 // 顶点输入 layout 与内置 toon / rim_light / textured 完全一致：
 //   location 0 = vec3 inPosition
 //   location 1 = vec2 inUV
-//   stride 20 字节，由 Pipeline 的 InterleavedVertex 决定
+//   location 2 = vec3 inNormal
+//   stride 32 字节，由 Pipeline 的 InterleavedVertex 决定
 //
 // push_constant block 也与 toon / rim_light 同形态（uMVP + uModel = 128 B），
 // 让 Pipeline 主 pass 的 "pcSize >= 128 → push 128 B" 分支能直接命中——
@@ -13,12 +14,16 @@
 //
 // fresnel 颜色 / 幂指数 / 时间脉动速率本期 hardcode 在 fragment 里（per-instance
 // 调参等 Phase 6 Material UBO）；时间则从 frame UBO 的 uFrameInfo.x 拿。
+// vNormal 由 vert 端乘 mat3(uModel) 翻 world space 后输出，frag 端读取
+// 跑 fresnel 不再依赖 dFdx/dFdy 推 flat face normal。
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
+layout(location = 2) in vec3 inNormal;
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) out vec3 vWorldPos;
+layout(location = 2) out vec3 vNormal;
 
 layout(push_constant, std430) uniform Push
 {
@@ -31,5 +36,6 @@ void main()
     vec4 worldPos4 = pc.uModel * vec4(inPosition, 1.0);
     vWorldPos      = worldPos4.xyz;
     vUV            = inUV;
+    vNormal        = mat3(pc.uModel) * inNormal;
     gl_Position    = pc.uMVP * vec4(inPosition, 1.0);
 }

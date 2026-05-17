@@ -152,7 +152,12 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
         indices.push_back(base + 2);
     }
 
-    return std::make_unique<MeshAsset>(std::move(positions), std::move(uvs), std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    // 程序化 mesh 工厂在返回前补算 smooth normal（GAP-2026-05-17）。
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 class RenderLayer : public Layer

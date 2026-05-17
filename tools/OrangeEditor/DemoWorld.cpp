@@ -59,9 +59,15 @@ MakePlaneMesh(float halfSize)
         {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
     };
     std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    // GAP-2026-05-17：lazy bake 路径写盘前补算 smooth normal —— 让
+    // 首次产出的 assets/meshes/plane.mesh 直接是 v3 带 normal 版本；
+    // 既有 v2 文件不会被改写，Load 时由 MeshLoader fallback 补算，
+    // 渲染端始终拿到非空 Normals()。
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 // 内置 cube mesh（6 面 × 4 顶点，共 24 vertices / 12 triangles）。每面单独
@@ -102,9 +108,14 @@ MakeCubeMesh(float halfSize)
     addFace({-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h});  // +Z
     addFace({ h,-h,-h}, {-h,-h,-h}, {-h, h,-h}, { h, h,-h});  // -Z
 
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    // 同 MakePlaneMesh：lazy bake 写盘前补算 smooth normal。cube 24 个
+    // 顶点每面独占，smooth-from-triangles 退化为 face normal —— 视觉
+    // 上 cube 仍是分面 shading，符合预期。
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 // 一次性建好 AssetRegistry + 注册 ShaderLoader + 内置 mesh + MaterialSystem

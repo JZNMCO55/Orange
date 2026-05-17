@@ -35,6 +35,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
 
 layout(location = 0) in vec2 vUV;
 layout(location = 1) in vec3 vWorldPos;
+layout(location = 2) in vec3 vNormal;
 
 layout(location = 0) out vec4 outColor;
 
@@ -65,11 +66,10 @@ float SamplePcfShadow3x3(vec3 worldPos, mat4 lightVP, float depthBias)
 
 void main()
 {
-    // flat face normal —— 与 toon / rim_light 同样从 worldPos 推导，
-    // sphere mesh 上呈现多边形面（Phase 2 MeshAsset 不带 vertex normal）。
-    vec3 dx     = dFdx(vWorldPos);
-    vec3 dy     = dFdy(vWorldPos);
-    vec3 normal = normalize(cross(dy, dx));
+    // world-space smooth normal（GAP-2026-05-17 起 MeshAsset 携带 per-vertex
+    // normal，sphere mesh 也算好了 normalize(position)；vert 端乘 mat3(uModel)
+    // 翻进 world space）。
+    vec3 normal = normalize(vNormal);
 
     // 真 viewDir（surface → camera）。
     vec3 viewDir = normalize(light.uCameraWorldPos.xyz - vWorldPos);

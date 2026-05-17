@@ -1,14 +1,18 @@
 #version 450
 
 // 内置 emissive 顶点 shader —— 与 textured / toon 同 layout，复用
-// pos+uv vertex 输入与 {uMVP, uModel} push constant。仅 vUV 这一个
-// fragment 通道会被消费（emissive frag 不需要 worldPos / normal）。
+// pos+uv+normal vertex 输入与 {uMVP, uModel} push constant。仅 vUV
+// 这一个 fragment 通道会被消费（emissive frag 不需要 worldPos /
+// normal），其余 varying 与 Pipeline InterleavedVertex 32B stride 对
+// 齐，frag 不读由 driver dead-code-elim。
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
+layout(location = 2) in vec3 inNormal;
 
 layout(location = 0) out vec2 vUV;
-layout(location = 1) out vec3 vWorldPos;  // 占位，让 set 0 layout 一致；frag 不读
+layout(location = 1) out vec3 vWorldPos;  // 占位，frag 不读
+layout(location = 2) out vec3 vNormal;    // 占位，frag 不读
 
 layout(push_constant, std430) uniform Push
 {
@@ -21,5 +25,6 @@ void main()
     vec4 worldPos4 = pc.uModel * vec4(inPosition, 1.0);
     vWorldPos      = worldPos4.xyz;
     vUV            = inUV;
+    vNormal        = mat3(pc.uModel) * inNormal;
     gl_Position    = pc.uMVP * vec4(inPosition, 1.0);
 }

@@ -110,9 +110,11 @@ std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
         {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
     };
     std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
@@ -150,9 +152,11 @@ std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::
             indices.push_back(a); indices.push_back(d); indices.push_back(c);
         }
     }
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 class SkeletonLayer : public Layer

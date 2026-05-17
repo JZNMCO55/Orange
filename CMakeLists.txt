@@ -63,6 +63,7 @@ add_library(orange_engine STATIC
     # loader（Mesh / Texture / Shader，custom binary / .spv 同步加载）
     src/asset/AssetHeaderCheck.cpp
     src/asset/AssetRegistry.cpp
+    src/asset/MeshAsset.cpp
     src/asset/MeshLoader.cpp
     src/asset/TextureLoader.cpp
     src/asset/ShaderLoader.cpp

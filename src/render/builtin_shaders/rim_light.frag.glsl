@@ -25,15 +25,15 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
 layout(location = 0) in vec2 vUV;
 layout(location = 1) in vec3 vWorldPos;
 layout(location = 2) in vec3 vModelPos;
+layout(location = 3) in vec3 vNormal;
 
 layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    // 同 toon.frag：Vulkan 屏幕 +Y 朝下，cross 顺序 dy×dx 取 outward。
-    vec3 dx     = dFdx(vWorldPos);
-    vec3 dy     = dFdy(vWorldPos);
-    vec3 normal = normalize(cross(dy, dx));
+    // world-space smooth normal（GAP-2026-05-17 起 per-vertex normal 已
+    // 在 vert 端乘 mat3(uModel) 喂进来）。
+    vec3 normal = normalize(vNormal);
 
     // 真 viewDir：world-space 由 frame UBO 的 cameraWorldPos 取。指向
     // surface → camera。

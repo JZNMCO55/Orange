@@ -905,8 +905,65 @@ Phase 6.5 PBR direct lighting milestone（B.1）启动 ritual：
 ### 状态
 
 - **登记**：2026-05-17
-- **处理**：未启动；预估 1 个独立 session 体量（G1 + G2 + G3 + G5 一次性落，G4 路径在 session 内评审定）
+- **处理**：2026-05-17 同日落地（独立 session，按 CLAUDE.md "engine-known-gaps 跨 session 工作流"）
 - **归属**：Phase 6.5 B.1 启动前 prerequisite；落地后 PBR-01 在新 session bump 消费
+
+### 落地记录（2026-05-17）
+
+按 user 在 session 启动 ritual 步骤选择的设计方案：(1) G4 走 **路径 A**（所有 vert shader 统一加 `inNormal`，单 VID stride 32B；与 Lumix/Godot 工业约定一致），(2) 现存 v1/v2 `.mesh` 文件迁移走 **load 时自动算 smooth normal + 不重写盘**（最稳路径，不副作用地碰用户已存在的资产文件）。
+
+G1 ~ G5 一次性落地，无 commit 拆分（GAP 体量适中，单 commit 边界清晰）：
+
+- **G1 ✅ `MeshAsset` 公共 API + helper**
+  - `include/orange/engine/asset/MeshAsset.h`：新增 `VertexNormal3` struct（default `{0, 1, 0}` 防 zero-normal）+ 私有 `mNormals` + 4 参构造（pos/uv/normal/indices）+ `Normals()` accessor + `HasNormals()` 谓词
+  - 新增 `src/asset/MeshAsset.cpp`：`ComputeFlatNormals()` per-triangle face normal（共享顶点 vertex 后写覆盖先写——非严格 flat，仅 fallback 用）+ `ComputeSmoothNormalsFromTriangles()` 面积加权平均的每顶点平滑法线（loader fallback + 程序化 mesh 通路均消费此 helper）；不依赖 glm，裸 float 自行 cross / normalize，避免在 Asset 模块引入 render 上游依赖
+  - `CMakeLists.txt`：把 `src/asset/MeshAsset.cpp` 加进 `orange_engine` 源列表
+
+- **G2 ✅ `MeshLoader` v2 → v3 schema bump**
+  - `include/orange/engine/asset/MeshLoader.h`：新增 `kVersionV3`，`kLatestVersion` 升到 v3；头注释展开 v3 字节布局（v2 末尾再追加 `hasNormals` uint8 + 可选 `normals[vertexCount] : float[3]`）
+  - `src/asset/MeshLoader.cpp` Load：兼容 v1/v2/v3 三档读取；v1/v2 / v3-hasNormals=0 文件读完后调 `ComputeSmoothNormalsFromTriangles` 现场补算 normal（渲染端从 v3 起统一假定 `Normals()` 非空）；构造时按 normals/uvs 是否非空走 2/3/4 参 overload
+  - Save：始终写 v3 格式；`HasUVs()` / `HasNormals()` 各自决定是否写对应可选段；normal 段非 per-vertex 一一对应时返回 `InvalidArgument`
+
+- **G3 ✅ `Pipeline` InterleavedVertex + VID 扩展**
+  - `src/render/Pipeline.cpp`：`InterleavedVertex` 加 `normal[3]` 字段（stride 20 → 32 B）；`FillVertexInputLayout` 新增 location=2 / Float32x3 attribute；`InterleaveMesh` 把 `mesh.Normals()` 填进；空 normal 路径兜底 `(0, 1, 0)`（MeshLoader / 程序化构造现都保证 Normals() 非空，兜底仅防御性）
+
+- **G4 ✅ 6 个内置 vert shader + 1 个 sample shader 加 `inNormal`（Path A）**
+  - 6 个内置 vert shader（`textured_mesh / toon / rim_light / dissolve / emissive / shadow_caster`）：统一新增 `layout(location = 2) in vec3 inNormal;`；`shadow_caster` 仅声明不消费（与 inUV 同模式），其余把 `mat3(uModel) * inNormal` 输出到 fragment 的 `vNormal`（rim_light 因 location 2 已被 vModelPos 占用，vNormal 出在 location 3）
+  - `toon.frag.glsl` / `rim_light.frag.glsl`：删 dFdx/dFdy face-normal fallback，统一读 `normalize(vNormal)`
+  - sample 08 自定义 shader：`samples/08_custom_shader/shaders/fresnel.vert.glsl` 加 inNormal + 输出 vNormal；`fresnel.frag.glsl` 切走 vNormal 读取
+  - 非均匀缩放支持（mat3 inverse-transpose）暂未引入——本期渲染端仍假定模型变换无非均匀缩放；PBR 阶段如需再升级
+
+- **G5 ✅ 8 个 sample + Editor DemoWorld mesh 工厂同步**
+  - 8 个 sample 的 `MakeQuadMesh` / `MakeCubeMesh` / `MakePlaneMesh` / `MakeSphereMesh`（03/04/04_with_bloom/05/06/07/08/09/10/11/12）：返回 `unique_ptr<MeshAsset>` 前补调 `ComputeSmoothNormalsFromTriangles()`；sphere 的 lat/lon 网格 vertex 在共享路径下平均出近似 `normalize(position)`，cube 24 顶点每面独占退化为 face normal（分面 shading 符合预期）
+  - `tools/OrangeEditor/DemoWorld.cpp`：`MakePlaneMesh` / `MakeCubeMesh` 同上；lazy bake 路径首次写盘时 Save 写出带 normal 段的 v3 `.mesh`；既有 v2 cube.mesh/plane.mesh 不重写，由 MeshLoader Load fallback 补算
+
+- **测试修复（顺手）**：`tests/asset/AssetRegistryTest.cpp` 历史遗留的 `MeshLoader::kSupportedVersion` 引用（HEAD 上常量已不存在；因 `ORANGE_ENGINE_BUILD_TESTS=OFF` 默认未触发未被发现）改为 `MeshLoader::kVersionV1`（fixture 字节结构就是 v1 形态）；以便本 GAP 跑 ctest 端到端验证
+
+### 期望验收对照
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| demo.scene 在编辑器内打开后球体（若有）渲染为平滑圆球 | ✅ —— sphere mesh smooth normal 已喂进 vertex buffer，toon / rim / fresnel shader 全读 vNormal |
+| Phase 6.5 sample 09_pbr_direct 9 球阵表面平滑过渡（无 facet artifact） | **待 PBR-01 落地后验证**（本 GAP 解锁前置） |
+| 现存 `.mesh` 文件 loader 兼容（v1 无 normal 走 fallback 自动补算，不报错） | ✅ —— MeshLoader Load v1/v2/v3-no-normal 路径均调 `ComputeSmoothNormalsFromTriangles` 补算；既有 `assets/meshes/cube.mesh` / `plane.mesh` 保持 v2 格式继续可读 |
+| 序列化 round-trip：MeshAsset 写 / 读 normal 字段无丢失 | ✅ —— `MeshLoader::Save` 写 v3 hasNormals 段，`Load` 读回；现有 `AssetRegistryTest::TestMeshLoadGetUnload` 间接覆盖（v1 fixture → fallback compute → mesh 可用） |
+| Pipeline 创建不破现有 shaders（textured_mesh / toon / rim_light / dissolve / emissive / shadow_caster 等加载/编译/绘制均正常） | ✅ —— ctest 全 43 测试通过（含 builtin_materials_test / pipeline_template_cache_test / pipeline_hdr_target_test / pipeline_offscreen_test / bloom_chain_test / light_and_shadow_test 等所有覆盖渲染路径的 case） |
+
+### 关键改动文件汇总
+
+- 公共 API：`include/orange/engine/asset/MeshAsset.h` / `include/orange/engine/asset/MeshLoader.h`
+- 引擎私有实现：`src/asset/MeshAsset.cpp`（新增）/ `src/asset/MeshLoader.cpp` / `src/render/Pipeline.cpp`
+- 内置 shader：`src/render/builtin_shaders/{textured_mesh,toon,rim_light,dissolve,emissive,shadow_caster}.vert.glsl` / `src/render/builtin_shaders/{toon,rim_light}.frag.glsl`
+- 构建：`CMakeLists.txt`
+- Samples：`samples/{03_textured_quad,04_3d_mesh,04_3d_mesh_with_bloom,05_skeletal_animation,06_physics_platformer,07_full_pipeline,08_custom_shader,09_vfx_demo,10_thirty_seconds_demo,11_save_load_demo,12_layer_partition_demo}/main.cpp` / `samples/08_custom_shader/shaders/fresnel.{vert,frag}.glsl`
+- Editor：`tools/OrangeEditor/DemoWorld.cpp`
+- 测试：`tests/asset/AssetRegistryTest.cpp`（顺手修陈旧常量引用）
+
+### 不在本期范围（已登记 / 后续 session 处理）
+
+- **tangent / bitangent + mikkT space 法线贴图支持** —— PBR-01 不上 normal map，留给 B.2 或独立 GAP
+- **mat3 inverse-transpose 非均匀缩放兼容** —— vert shader 当前用 `mat3(uModel)` 近似；非均匀缩放走 PBR 时再升级
+- **现有 v2 cube.mesh / plane.mesh 主动 rewrite 到 v3** —— 按 user 选择走 load-time fallback；本 session 不副作用碰用户既有 .mesh 文件
 
 ---
 
@@ -917,3 +974,4 @@ Phase 6.5 PBR direct lighting milestone（B.1）启动 ritual：
 - **GAP-2026-05-16-directional-light-transform-decoupled**（2026-05-17 落地）：DirectionalLight 删 direction 字段 + Pipeline 改用 entity.Transform.rotation 派生方向 + ReadDirectionalLight v1 migrator 旧 scene direction 字段自动转 TC.rotation + 7 sample/DemoWorld/编辑器 schema/gizmo plugin/2 tests 全数迁移。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/render/LightComponent.h` / `src/render/Pipeline.cpp` / `src/scene/ComponentSerializers.cpp` / `samples/{05,06,07,08,09,12}*/main.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tests/render/LightAndShadowTest.cpp` / `tests/scene/SceneSerializationTest.cpp`
 - **GAP-2026-05-17-scene-layer-component**（2026-05-17 落地）：LayerComponent + WorldPartition 公共面 + SceneSerialization 多文件 + manifest + Render/Physics layer.visible 过滤 + sample。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/scene/LayerComponent.h` / `include/orange/engine/scene/WorldPartition.h` / `include/orange/engine/scene/SceneSerialization.h`（SaveSplit/LoadSplit + LoadOptions.assignLayerId）/ `include/orange/engine/render/RenderScene.h`（Collect 加 partition 参数）/ `include/orange/engine/render/Pipeline.h`（SetWorldPartition）/ `include/orange/engine/physics/PhysicsWorld.h`（SetBodyEnabled/IsBodyEnabled）/ `include/orange/engine/physics/LayerVisibilitySync.h` / `src/scene/WorldPartition.cpp` / `src/scene/SceneSerialization.cpp`（SaveImpl 抽取 + SaveSplit/LoadSplit + scene/world 1.2 + scene/manifest 1.0）/ `src/scene/ComponentSerializers.cpp`（Layer 序列化器注册）/ `src/render/RenderScene.cpp` / `src/render/Pipeline.cpp` / `src/physics/PhysicsWorld.cpp` / `src/physics/LayerVisibilitySync.cpp` / `samples/12_layer_partition_demo/`
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
+- **GAP-2026-05-17-mesh-vertex-normals**（2026-05-17 落地）：MeshAsset 加 VertexNormal3 + helper（ComputeFlat/SmoothNormalsFromTriangles）+ MeshLoader v2 → v3 schema bump（hasNormals + normals 段，Load 兼容 v1/v2/v3 + fallback 补算）+ Pipeline InterleavedVertex stride 20→32 加 normal attr + 6 内置 vert shader + 1 sample shader 加 inNormal（Path A 单 VID）+ toon/rim/fresnel frag 切 vNormal 替换 dFdx fallback + 8 sample/DemoWorld mesh 工厂调 ComputeSmoothNormalsFromTriangles + 顺手修 AssetRegistryTest 陈旧 kSupportedVersion 常量引用。ctest 全 43 测试通过。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/asset/MeshAsset.h` / `include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshAsset.cpp`（新增） / `src/asset/MeshLoader.cpp` / `src/render/Pipeline.cpp` / `src/render/builtin_shaders/{textured_mesh,toon,rim_light,dissolve,emissive,shadow_caster}.vert.glsl` / `src/render/builtin_shaders/{toon,rim_light}.frag.glsl` / `CMakeLists.txt` / `samples/0[3-9]*/main.cpp` / `samples/1[0-2]*/main.cpp` / `samples/08_custom_shader/shaders/fresnel.{vert,frag}.glsl` / `tools/OrangeEditor/DemoWorld.cpp` / `tests/asset/AssetRegistryTest.cpp`

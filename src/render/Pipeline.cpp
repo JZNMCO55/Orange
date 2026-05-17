@@ -111,13 +111,16 @@ namespace Orange::Engine::Render
 namespace
 {
 
-// 顶点 layout：interleaved 5 floats = pos(3) + uv(2)。所有内置模板共
-// 用本布局；未来引入 vertex normal / tangent 时在 Material 上再加一个
-// 描述字段，本布局保持稳定。
+// 顶点 layout：interleaved 8 floats = pos(3) + uv(2) + normal(3)。所有
+// 内置模板共用本布局；缺 normal 的 mesh 由 MeshLoader / 程序化构造路
+// 径调 MeshAsset::ComputeSmoothNormalsFromTriangles 在 CPU 端补算，保
+// 证 InterleaveMesh 不需要在 GPU 喂数据时分支。tangent 等更丰富属性
+// 将来引入时通过新 location 扩展，本布局保持稳定。
 struct InterleavedVertex
 {
     float position[3];
     float uv[2];
+    float normal[3];
 };
 
 // std430 push-constant 字节占用——vec3 padded 到 16，与内置 toon /
@@ -167,6 +170,13 @@ void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc)
     attrUV.mOffset   = offsetof(InterleavedVertex, uv);
     attrUV.mFormat   = Orange::Rhi::VertexFormat::Float32x2;
     desc.mVertexInput.mAttributes.push_back(attrUV);
+
+    Orange::Rhi::VertexAttributeDesc attrNormal{};
+    attrNormal.mLocation = 2;
+    attrNormal.mBinding  = 0;
+    attrNormal.mOffset   = offsetof(InterleavedVertex, normal);
+    attrNormal.mFormat   = Orange::Rhi::VertexFormat::Float32x3;
+    desc.mVertexInput.mAttributes.push_back(attrNormal);
 }
 
 // 给 GraphicsPipelineDesc 加单条 Vertex stage 的 push range。
@@ -203,6 +213,7 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
 {
     const auto& positions = mesh.Positions();
     const auto& uvs       = mesh.UVs();
+    const auto& normals   = mesh.Normals();
     std::vector<InterleavedVertex> out(positions.size());
     for (std::size_t i = 0; i < positions.size(); ++i)
     {
@@ -218,6 +229,21 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
         {
             out[i].uv[0] = 0.0f;
             out[i].uv[1] = 0.0f;
+        }
+        if (i < normals.size())
+        {
+            out[i].normal[0] = normals[i].x;
+            out[i].normal[1] = normals[i].y;
+            out[i].normal[2] = normals[i].z;
+        }
+        else
+        {
+            // MeshLoader / 程序化构造路径都保证 Normals 非空；这里兜底
+            // +Y，避免极端构造路径（手工 Insert(MeshAsset) 不带 normal）
+            // 把 NaN/0 法线塞进 vertex buffer。
+            out[i].normal[0] = 0.0f;
+            out[i].normal[1] = 1.0f;
+            out[i].normal[2] = 0.0f;
         }
     }
     return out;

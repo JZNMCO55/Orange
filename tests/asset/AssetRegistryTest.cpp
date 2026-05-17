@@ -76,7 +76,7 @@ fs::path MakeMeshFixture(const fs::path& root)
 {
     std::vector<std::uint8_t> bytes;
     AppendPod(bytes, MeshLoader::kMagic);
-    AppendPod(bytes, MeshLoader::kSupportedVersion);
+    AppendPod(bytes, MeshLoader::kVersionV1);
     const std::uint32_t vertexCount = 3;
     const std::uint32_t indexCount  = 3;
     AppendPod(bytes, vertexCount);
@@ -287,7 +287,7 @@ void TestErrorPaths()
         std::vector<std::uint8_t> bytes;
         const std::uint32_t bogus = 0xDEADBEEFU;
         AppendPod(bytes, bogus);
-        AppendPod(bytes, MeshLoader::kSupportedVersion);
+        AppendPod(bytes, MeshLoader::kVersionV1);
         AppendPod(bytes, std::uint32_t{0});
         AppendPod(bytes, std::uint32_t{0});
         auto p = root / "bad_magic.orme";

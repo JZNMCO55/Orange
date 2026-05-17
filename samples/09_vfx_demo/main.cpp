@@ -162,9 +162,11 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
         indices.push_back(base + 2);
     }
 
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 // 把"shaders/<x>.spv"相对路径锚定到 .exe 同目录——CWD 与 .exe 目录可

@@ -80,7 +80,14 @@ std::unique_ptr<MeshAsset> MakeQuadMesh()
         0, 2, 1,
         0, 3, 2,
     };
-    return std::make_unique<MeshAsset>(std::move(positions), std::move(uvs), std::move(indices));
+    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                             std::move(uvs),
+                                             std::move(indices));
+    // GAP-2026-05-17：渲染端从 v3 起统一假定 Normals() 非空；程序化
+    // mesh 工厂在返回前补算 smooth normal，与 MeshLoader Load 路径
+    // 的 fallback 行为一致。
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
 }
 
 class RenderLayer : public Layer

@@ -4,15 +4,14 @@
 // ---------------------------------------------------------------------------
 // MeshAsset —— mesh 资源的 CPU 数据容器。
 //
-// 当前范围只承载位置 + 可选 UV + 索引——刚好够支持
-// 03_textured_quad 这条最小渲染路径。法线 / tangent / 多 set UV /
-// skin 等更丰富属性留待后续扩展。
+// 当前承载：位置 + 可选 UV + 可选 vertex normal + 索引。tangent / 多
+// set UV / skin 等更丰富属性仍留待后续扩展。
 //
-// **磁盘 binary 格式（MeshLoader v1）当前仅写入 positions + indices**；
-// UV 字段是给"程序式构造的 mesh"留的内存路径——sample 用
-// AssetRegistry::Insert 把直接 new 出来的 MeshAsset 塞进 registry
-// 时可以一并填 UV。后续把 UV / 法线写入 .orme 文件时升 schema_version
-// 与 loader 即可，不破公共 API。
+// **磁盘 binary 格式（MeshLoader）演进**：v1 仅 positions+indices；
+// v2 追加可选 UV 段；v3 在 v2 之后追加可选 normal 段。Load 兼容三个
+// 版本，缺失 normal 时由 loader 调用 ComputeSmoothNormalsFromTriangles
+// 现场补算——shader 端从 v3 起可以直接读 vertex normal，不再依赖
+// fragment 的 dFdx/dFdy face-normal fallback。Save 始终写 v3。
 //
 // 这一层不做任何 GPU 上传——上传发生在 Render 模块把 MeshAsset 翻
 // 成 OrangeRender RHI buffer 的时刻。Asset 层只保证字节正确进了内存。
@@ -41,6 +40,13 @@ struct VertexUV2
     float v{0.0f};
 };
 
+struct VertexNormal3
+{
+    float x{0.0f};
+    float y{1.0f};
+    float z{0.0f};
+};
+
 class ORANGE_ENGINE_API MeshAsset
 {
 public:
@@ -61,19 +67,45 @@ public:
     {
     }
 
+    MeshAsset(std::vector<VertexPosition3> positions,
+              std::vector<VertexUV2>       uvs,
+              std::vector<VertexNormal3>   normals,
+              std::vector<std::uint32_t>   indices)
+        : mPositions(std::move(positions))
+        , mUVs(std::move(uvs))
+        , mNormals(std::move(normals))
+        , mIndices(std::move(indices))
+    {
+    }
+
     const std::vector<VertexPosition3>& Positions() const noexcept { return mPositions; }
     const std::vector<VertexUV2>&       UVs() const noexcept { return mUVs; }
+    const std::vector<VertexNormal3>&   Normals() const noexcept { return mNormals; }
     const std::vector<std::uint32_t>&   Indices() const noexcept { return mIndices; }
 
     bool        HasUVs() const noexcept { return !mUVs.empty(); }
+    bool        HasNormals() const noexcept { return !mNormals.empty(); }
     std::size_t VertexCount() const noexcept { return mPositions.size(); }
     std::size_t IndexCount() const noexcept { return mIndices.size(); }
 
     bool Empty() const noexcept { return mPositions.empty() && mIndices.empty(); }
 
+    // 把 normals 替换为"每三角形 face normal、3 个顶点共享"的结果。对
+    // 共享顶点的索引网格而言，等价于"最后一个引用本顶点的三角形面法线"
+    // ——并非严格 flat shading（要严格 flat 必须 split vertex），主要给
+    // tangent / 法线贴图前的 fallback / 调试用。
+    void ComputeFlatNormals();
+
+    // 把 normals 替换为"每顶点 smooth normal = 引用本顶点的所有三角形
+    // 面法线、按面积加权平均后归一化"。loader 在 v1/v2/v3-no-normal 文
+    // 件读取后兜底调用本函数；程序化构造的内置 cube / plane mesh 也走
+    // 同一路径，保证渲染端始终拿到 normal。
+    void ComputeSmoothNormalsFromTriangles();
+
 private:
     std::vector<VertexPosition3> mPositions;
     std::vector<VertexUV2>       mUVs;
+    std::vector<VertexNormal3>   mNormals;
     std::vector<std::uint32_t>   mIndices;
 };
 

@@ -33,8 +33,8 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
     {
         return ResultCode::InvalidArgument;
     }
-    // 接受 v1 / v2；其他 version 拒绝（前向兼容由 Save 时 bump version 处理）。
-    if (version != kVersionV1 && version != kVersionV2)
+    // 接受 v1 / v2 / v3；其他 version 拒绝（前向兼容由 Save 时 bump version 处理）。
+    if (version != kVersionV1 && version != kVersionV2 && version != kVersionV3)
     {
         return ResultCode::SchemaMismatch;
     }
@@ -70,10 +70,10 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         return ResultCode::InvalidArgument;
     }
 
-    // v2 追加段：hasUVs (uint8) + 可选 uvs[vertexCount]。
+    // v2 / v3 追加段：hasUVs (uint8) + 可选 uvs[vertexCount]。
     // v1 文件读到这里已经到 EOF，MeshAsset.UVs() 留空。
     std::vector<VertexUV2> uvs;
-    if (version == kVersionV2)
+    if (version == kVersionV2 || version == kVersionV3)
     {
         std::uint8_t hasUVs = 0;
         if (!reader.Read(hasUVs))
@@ -92,25 +92,83 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         }
     }
 
-    if (uvs.empty())
+    // v3 追加段：hasNormals (uint8) + 可选 normals[vertexCount]。
+    // v1 / v2 文件读到这里已经到 EOF，下面 fallback 会调
+    // ComputeSmoothNormalsFromTriangles 补算。
+    std::vector<VertexNormal3> normals;
+    if (version == kVersionV3)
     {
-        return std::make_unique<MeshAsset>(std::move(positions), std::move(indices));
+        std::uint8_t hasNormals = 0;
+        if (!reader.Read(hasNormals))
+        {
+            return ResultCode::InvalidArgument;
+        }
+        if (hasNormals != 0 && vertexCount > 0)
+        {
+            normals.resize(vertexCount);
+            if (!reader.ReadBytes(normals.data(), vertexCount * sizeof(VertexNormal3)))
+            {
+                return ResultCode::InvalidArgument;
+            }
+        }
     }
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
+
+    std::unique_ptr<MeshAsset> asset;
+    if (uvs.empty() && normals.empty())
+    {
+        asset = std::make_unique<MeshAsset>(std::move(positions), std::move(indices));
+    }
+    else if (normals.empty())
+    {
+        asset = std::make_unique<MeshAsset>(std::move(positions),
+                                            std::move(uvs),
+                                            std::move(indices));
+    }
+    else if (uvs.empty())
+    {
+        // 无 UV 但有 normal 的情况：通过 4 参构造塞空 UV，避免再加一个
+        // 构造重载。VertexUV2 默认 {0,0}，shader 端拿不到有意义 UV 但
+        // 也不报错——本路径只在手工合成 mesh 时会走到。
+        std::vector<VertexUV2> emptyUvs;
+        emptyUvs.resize(positions.size());
+        asset = std::make_unique<MeshAsset>(std::move(positions),
+                                            std::move(emptyUvs),
+                                            std::move(normals),
+                                            std::move(indices));
+    }
+    else
+    {
+        asset = std::make_unique<MeshAsset>(std::move(positions),
+                                            std::move(uvs),
+                                            std::move(normals),
+                                            std::move(indices));
+    }
+
+    // 缺 normal 时现场补算 smooth normal（v1 / v2 / v3-hasNormals=0 均
+    // 走这里）。渲染端从 v3 起统一假定 MeshAsset.Normals() 非空。
+    if (asset != nullptr && !asset->HasNormals() && !asset->Positions().empty())
+    {
+        asset->ComputeSmoothNormalsFromTriangles();
+    }
+    return asset;
 }
 
 Result<void, ResultCode> MeshLoader::Save(std::string_view path, const MeshAsset& mesh)
 {
     const auto& positions = mesh.Positions();
     const auto& uvs       = mesh.UVs();
+    const auto& normals   = mesh.Normals();
     const auto& indices   = mesh.Indices();
 
-    // UV 段若存在必须 per-vertex 一一对应——本格式约定，避免读取端无法
-    // 确定 uv index 与 position index 的关系。
-    const bool hasUVs = !uvs.empty();
+    // UV / normal 段若存在必须 per-vertex 一一对应——本格式约定，避免
+    // 读取端无法确定 attribute index 与 position index 的对应关系。
+    const bool hasUVs     = !uvs.empty();
+    const bool hasNormals = !normals.empty();
     if (hasUVs && uvs.size() != positions.size())
+    {
+        return ResultCode::InvalidArgument;
+    }
+    if (hasNormals && normals.size() != positions.size())
     {
         return ResultCode::InvalidArgument;
     }
@@ -136,6 +194,12 @@ Result<void, ResultCode> MeshLoader::Save(std::string_view path, const MeshAsset
     if (hasUVs)
     {
         writer.WriteBytes(uvs.data(), uvs.size() * sizeof(VertexUV2));
+    }
+
+    writer.Write<std::uint8_t>(hasNormals ? 1u : 0u);
+    if (hasNormals)
+    {
+        writer.WriteBytes(normals.data(), normals.size() * sizeof(VertexNormal3));
     }
 
     return writer.SaveToFile(path);
