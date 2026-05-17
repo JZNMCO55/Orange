@@ -486,12 +486,12 @@ v0.5 milestone 描述"资源浏览器 + Material 子模式"假设 `assets/` 下�
 
 ---
 
-## GAP-2026-05-16-material-system-enumerate-and-instance-overrides
+## GAP-2026-05-16-material-system-enumerate-and-instance-overrides ✅
 
 - **发现方**：OrangeEditor v0.5 c5（Material 子模式实施）
 - **发现日期**：2026-05-16
 - **一句话定性**：Material 子模式 UI 撞上两个引擎能力缺口——(1) `MaterialSystem` 缺 `EnumerateTemplateNames()` / `GetTemplateNameAt(i)` 公共 API，Inspector Combo 控件没法动态列出所有已注册模板；(2) `MaterialInstance` 缺 "枚举所有 uniform override / texture binding" 公共 API + `.material` JSON schema v1.0 只存 templateName，调参不能持久化
-- **状态**：待评审 + 待落地（v0.5 c5 已用 hardcoded 内置 5 模板列表 + Save 仅写 templateName 兜底；完整版 deferred 到本 GAP 落地后）
+- **状态**：✅ 落地完成（2026-05-17，独立 session，按 CLAUDE.md "engine-known-gaps 跨 session 工作流"）
 
 ### 触发场景
 
@@ -547,6 +547,41 @@ const std::vector<std::string>& EnumerateTemplateNames() const;
 
 - OrangeEditor v0.5 c5 当前简化版（commit 本 session 末尾 v0.5 c5 commit）—— Material 子模式 UI 框架 + Save 仅 templateName
 - GAP-2026-05-16-builtin-asset-disk-serialization（已 ✅）—— 本 GAP 是其下一阶段
+
+### 落地记录（2026-05-17）
+
+按 GAP 原文 G1 + G2 拆三步落地：
+
+- **C1 ✅ `MaterialSystem::GetTemplateNames` 公共 API**
+  - `include/orange/engine/render/MaterialSystem.h` + `src/render/MaterialSystem.cpp`：返回 `std::vector<std::string>`（值类型，免 rehash 让 string_view 悬挂）；顺序未定义（unordered_map 遍历无序），调用方按需 sort
+  - 设计偏离 GAP 原文 `vector<string_view>`：选 value 类型避免 view 悬挂，符合 0.x 阶段"优先稳"取向
+  - Editor 侧 `tools/OrangeEditor/panels/InspectorPanel.cpp` 删 `kBuiltinTemplateNames` 硬编码 5 项，改调 `GetTemplateNames` + 字典序排序喂 ImGui::Combo；游戏侧 `RegisterTemplate` 注入的自定义模板自动出现
+  - 测试：`tests/render/MaterialSystemTest.cpp` 新增 `TestGetTemplateNames`（空表 / builtin 5 / 自定义 6）
+
+- **C2 ✅ `MaterialInstance` 枚举 override + 类型查询 API**
+  - `include/orange/engine/render/MaterialInstance.h` + `src/render/MaterialInstance.cpp`：新增 `GetUniformOverrideNames` / `GetTextureOverrideBindings` / `GetUniformOverrideType`，让序列化 / Inspector 在不知道 name 的情况下遍历所有 override
+  - 测试：`tests/render/MaterialInterfaceTest.cpp` 新增 `TestEnumerateOverrides`（空 instance / 3 uniform + 2 texture override / 类型查询命中与未命中 / null instance 退化）
+
+- **C3 ✅ `.material` schema v1.1 + Editor 端 round-trip**
+  - 新增 `tools/OrangeEditor/MaterialFileIO.{h,cpp}` —— editor 侧 helper（不在引擎公共面，schema 解析是消费方的事）：`WriteMaterialFile` / `ReadMaterialFile` / `BuildDataFromInstance` / `ApplyDataToInstance`
+  - v1.1 schema = templateName + uniforms[]（name+type+value，含 6 种 type）+ textures[]（binding+path）
+  - v1.0 兼容：旧文件 uniforms / textures 字段视作空，等价 GAP 原文"无 uniforms 字段时 default override empty"
+  - `DemoWorld.cpp::bakeAndLoadMaterial` 改调 helper 走 v1.1 schema；`InspectorPanel.cpp::DrawMaterialSubMode` Save 走 v1.1（uniform 调参 UI 是独立 deferred deliverable，当前 Save 仅写 templateName + 空 uniforms / textures 段）
+  - 测试：新增 `tests/render/MaterialFileIOTest.cpp` 自带编译 helper（不 require lib 化），覆盖 v1.1 round-trip / v1.0 兼容 / instance round-trip / 错误路径 4 个 case
+
+### 期望验收对照
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| Material 子模式 Combo 控件**自动**列出所有已注册模板（含游戏侧 RegisterTemplate 注入的自定义模板），不再硬编码 | ✅（InspectorPanel `CollectTemplateNames` 调 `GetTemplateNames`） |
+| 用户改 toon material 的 ToonColor → Save → 重启编辑器 → 颜色保留 | **部分**：schema v1.1 已支持持久化所有 6 种 uniform type 的 override；Save 写盘 + Load 还原 round-trip 由 `MaterialFileIOTest` 覆盖；但 Inspector "调参 UI"（让用户在 ImGui 上编辑 uniform 值的控件）是独立 deferred deliverable，本 GAP 不包含——上线后 Save 路径直接调 `BuildDataFromInstance` 即可 |
+| `.material` schema v1.1 兼容读 v1.0（无 uniforms 字段时 default override empty） | ✅（`MaterialFileIOTest::TestV10Compat`） |
+
+### 不在本 GAP 范围（已登记 / 后续 session 处理）
+
+- **`AssetRegistry::LookupSourcePath(handle) -> path`**：写盘端 `BuildDataFromInstance` 当前对 texture override 只填 binding（path 为空），因为 `MaterialInstance::GetTextureBinding` 拿到的是 `AssetHandle<TextureAsset>`，但 `AssetRegistry` 没有 handle → 源路径的反查 API。当前 reader 看到空 path 跳过还原。补此 API 后 `BuildDataFromInstance` 写盘语义自动完善——见 [GAP-2026-05-17-asset-registry-handle-to-path](#gap-2026-05-17-asset-registry-handle-to-path)（同 commit 登记）
+- **Material Inspector uniform 调参 UI**：让用户在 ImGui 中编辑 ToonColor 等 uniform 值的控件 —— OrangeEditor v0.5 后续 patch 范围（c6 或 c7），不在引擎 GAP 范围。引擎侧的"调参 → SetUniform → Save → Load → SetUniform 还原"链路在本 GAP 已全部就位
+- **InspectorPanel Save 后运行时 MaterialInstance 不刷新**：仍是 v0.5 c5 deferred（重启编辑器才看到新 templateName 生效）—— 完整刷新路径要走 namedMaterialInstances 重建 + 所有 Renderable 字段重定向，超出本 GAP 范围
 
 ---
 
@@ -643,8 +678,80 @@ editor-roadmap.md v0.6 milestone "多 chunk / per-layer + dirty 状态" 的 6 �
 
 ---
 
+## GAP-2026-05-17-asset-registry-handle-to-path
+
+- **发现方**：GAP-2026-05-16-material-system-enumerate-and-instance-overrides C3 落地
+- **发现日期**：2026-05-17
+- **一句话定性**：`AssetRegistry` 缺 `AssetHandle<T>` → 源路径反查 API；导致 `MaterialFileIO::BuildDataFromInstance` 在写盘端无法把 `MaterialInstance::GetTextureBinding` 拿到的 handle 翻译回 path，texture override 段写盘只能填 binding（path 空），reader 端识别空 path 跳过还原 —— texture override round-trip 形式上残缺
+- **状态**：登记，未开工
+
+### 触发场景
+
+`tools/OrangeEditor/MaterialFileIO.cpp::BuildDataFromInstance` 遍历 `instance.GetTextureOverrideBindings()` → 每个 binding 调 `instance.GetTextureBinding(binding)` 拿 `AssetHandle<TextureAsset>` → **缺一步**反查回原始 path 字符串 → 写盘需要 path 而不是 handle。
+
+当前 `BuildDataFromInstance` 在 texture 段只填 binding，path 留空（`MaterialFileIO.cpp` 倒数第二个 for 循环）。reader 端 `ApplyDataToInstance` 看到 path 为空就跳过还原。schema v1.1 的 textures[] 字段就位 + uniform override 路径完整，但 texture override 写盘端语义残缺。
+
+### 缺什么
+
+`AssetRegistry` 公共面增加：
+
+```cpp
+// include/orange/engine/asset/AssetRegistry.h
+template <typename T>
+std::optional<std::string> LookupSourcePath(AssetHandle<T> handle) const;
+// 或
+template <typename T>
+std::string GetSourcePath(AssetHandle<T> handle) const;  // 失败返空
+```
+
+内部 registry 已经按 path 做 dedup（同 path 第二次 Load 返回同 handle），所以应该已经持有 handle → path 反向映射或可重建。
+
+### 期望验收
+
+- `BuildDataFromInstance` 在 texture override 段填写完整 path（写盘端不再残缺）
+- 新增单测：texture override round-trip（Set → Build → Write → Read → Apply → texture handle IsValid + 命中同 path 资源）
+- 不破坏现有 `LoadXxx` 公共 API；只新增一个查询接口
+
+### 关联
+
+- 母 GAP：[GAP-2026-05-16-material-system-enumerate-and-instance-overrides](#gap-2026-05-16-material-system-enumerate-and-instance-overrides)（已 ✅）
+- 消费方：`tools/OrangeEditor/MaterialFileIO.cpp::BuildDataFromInstance` 第二个 for 循环
+
+---
+
+## GAP-2026-05-17-mesh-loader-supported-version-symbol
+
+- **发现方**：GAP-2026-05-16-material-system-enumerate-and-instance-overrides C3 完整 build 验证时
+- **发现日期**：2026-05-17
+- **一句话定性**：`tests/asset/AssetRegistryTest.cpp` 79 / 290 行引用 `Orange::Engine::Asset::MeshLoader::kSupportedVersion`，但 `MeshLoader.h` 没暴露此符号；`asset_registry_test` 编译失败 —— pre-existing bug，不是本 GAP 引入
+- **状态**：登记，未开工
+
+### 触发场景
+
+跑 `cmake --build build --config Debug --target asset_registry_test` 报：
+
+```
+AssetRegistryTest.cpp(79,34): error C2039: "kSupportedVersion": 不是 "Orange::Engine::Asset::MeshLoader" 的成员
+AssetRegistryTest.cpp(290,38): error C2039: 同上
+```
+
+stash 出本 GAP 全部改动后该错误仍存在，确认 pre-existing。
+
+### 缺什么 / 怎么修
+
+两条路径：(1) 在 `include/orange/engine/asset/MeshLoader.h` 暴露 `static constexpr SchemaVersion kSupportedVersion`；(2) 改测试不依赖该符号（按 MeshLoader 实际公共面调）。
+
+需要查 `MeshLoader.h` / `.cpp` 内现有 schema 版本声明（疑似只是 .cpp 内的 anonymous 常量），决定哪条修法更对齐设计意图。
+
+### 关联
+
+- pre-existing；与本 GAP 并行登记仅为不漏。本 GAP 范围内 lint + drift 全绿、material 5 个测试全通过、OrangeEditor build 通过；asset_registry_test 失败不阻塞本 GAP ✅
+
+---
+
 ## 处理记录
 
+- **GAP-2026-05-16-material-system-enumerate-and-instance-overrides**（2026-05-17 落地）：MaterialSystem::GetTemplateNames + MaterialInstance enumerate override API + .material schema v1.0 → v1.1（uniforms/textures）+ Editor 端 MaterialFileIO helper + 4 新测试。详细见上文条目末尾"落地记录"节。涉及 commit：`3b9718d`（C1）/ `6b598ba`（C2）/ `b7c92d3`（C3）。关键改动文件：`include/orange/engine/render/MaterialSystem.h` / `include/orange/engine/render/MaterialInstance.h` / `src/render/MaterialSystem.cpp` / `src/render/MaterialInstance.cpp` / `tools/OrangeEditor/MaterialFileIO.{h,cpp}`（新增）/ `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/panels/InspectorPanel.cpp` / `tools/OrangeEditor/CMakeLists.txt` / `tests/render/MaterialFileIOTest.cpp`（新增）/ `tests/render/MaterialInterfaceTest.cpp` / `tests/render/MaterialSystemTest.cpp` / `tests/CMakeLists.txt`
 - **GAP-2026-05-16-directional-light-transform-decoupled**（2026-05-17 落地）：DirectionalLight 删 direction 字段 + Pipeline 改用 entity.Transform.rotation 派生方向 + ReadDirectionalLight v1 migrator 旧 scene direction 字段自动转 TC.rotation + 7 sample/DemoWorld/编辑器 schema/gizmo plugin/2 tests 全数迁移。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/render/LightComponent.h` / `src/render/Pipeline.cpp` / `src/scene/ComponentSerializers.cpp` / `samples/{05,06,07,08,09,12}*/main.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tests/render/LightAndShadowTest.cpp` / `tests/scene/SceneSerializationTest.cpp`
 - **GAP-2026-05-17-scene-layer-component**（2026-05-17 落地）：LayerComponent + WorldPartition 公共面 + SceneSerialization 多文件 + manifest + Render/Physics layer.visible 过滤 + sample。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/scene/LayerComponent.h` / `include/orange/engine/scene/WorldPartition.h` / `include/orange/engine/scene/SceneSerialization.h`（SaveSplit/LoadSplit + LoadOptions.assignLayerId）/ `include/orange/engine/render/RenderScene.h`（Collect 加 partition 参数）/ `include/orange/engine/render/Pipeline.h`（SetWorldPartition）/ `include/orange/engine/physics/PhysicsWorld.h`（SetBodyEnabled/IsBodyEnabled）/ `include/orange/engine/physics/LayerVisibilitySync.h` / `src/scene/WorldPartition.cpp` / `src/scene/SceneSerialization.cpp`（SaveImpl 抽取 + SaveSplit/LoadSplit + scene/world 1.2 + scene/manifest 1.0）/ `src/scene/ComponentSerializers.cpp`（Layer 序列化器注册）/ `src/render/RenderScene.cpp` / `src/render/Pipeline.cpp` / `src/physics/PhysicsWorld.cpp` / `src/physics/LayerVisibilitySync.cpp` / `samples/12_layer_partition_demo/`
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
