@@ -123,7 +123,7 @@ wiki 给三种：
 | L14 | **视觉风格不统一** —— v0.4 ~ v0.6 各 UI 表面功能优先落地，配色 / 图标 / 控件三态散乱；v0.4 收尾时被用户当场指出 viewport 工具栏不够美观以致没法做完整功能验证 | v0.6.5 |
 | L15 | **Schema 注册依赖文件作用域 static 指针** —— v0.5 c1 在 `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` 引入 `gpAssetRegistry` / `gpNamedMaterialInstances` + 外部 setter（`SetAssetRegistryForSchema` / `SetNamedMaterialInstancesForSchema`），让 `FieldAssetRef` 的 getFn / setFn 能拿运行时数据。技术上不违反公共头 isolation，但走 hidden global state 违背 v0.2.5 EditorHost 单例 hub "消除散落 global" 的设计本意；新增任一需要运行时上下文的 schema 字段都会被诱导继续加 static 指针 | v0.8（与 EditorSettings 整骨同期；让 `FieldAssetRef` / 任意需要运行时上下文的 schema 注册入口接受 `EditorHost&` 或对应子 context 引用作为显式参数，删除 `gpAssetRegistry` / `gpNamedMaterialInstances` + setter） |
 | L16 | **Inspector 顶部分发缺 IEditorAssetInspectorPlugin 抽象** —— v0.5 c5 在 `InspectorPanel.cpp` 顶部加 `IsMaterialAssetSelected → DrawMaterialSubMode` if 分支接管 Asset 浏览器选中。当前只一条特殊路径，不构成 god if/else；但 v0.7 Animation 子模式（选中 `.anim_fsm`）+ 后续可能的 scene preview（选中 `.scene.json`）都是同款"按选中资源类型切 Inspector 内容"路径，再加两条就会演化成 if/else 链，正中 v0.2.5 整骨禁令 | v0.7（c1 落 Animation 子模式 UI 之前必须先抽 `IEditorAssetInspectorPlugin` 接口 + 注册表；Material 子模式从 `InspectorPanel.cpp` 顶部 if 分支迁出为第一个 plugin case，Animation 子模式作为第二个 case 验证抽象边界） |
-| L17 | **Pick 按钮对 `.material` 字段不可用** —— v0.5 验收 patch（B3 互斥选择修复）副作用：点 `.material` 文件 → Material 子模式接管 → 实体 Inspector 不画 → 字段 Pick 按钮永远不显示。当前 `.material` 仅能通过 DnD 写入字段；`.mesh` 等非子模式 asset 的 Pick 路径不受影响。consequence：违背 v0.5 c4 "Pick 是 DnD 的等价 affordance" 设计意图 | v0.6（Asset 浏览器节点右键菜单加 "Pick to Inspector field"，让用户在 Material 子模式被接管的情况下仍能精准触发 Pick 写入。也作为 v0.6 dirty 状态 milestone 顺带的 UX 修补；不需独立 milestone） |
+| L17 | **Pick 按钮对 `.material` 字段不可用** —— v0.5 验收 patch（B3 互斥选择修复）副作用：点 `.material` 文件 → Material 子模式接管 → 实体 Inspector 不画 → 字段 Pick 按钮永远不显示。 | ✅ v0.6 c7（Asset 浏览器右键菜单 "Pick to Renderable.mesh" / "Pick to Renderable.material"；RMB 路径不触发 left-click selectedAssetPath 改写，所以选中 entity 不被清，绕过 Material 子模式接管） |
 
 ## 里程碑
 
@@ -341,7 +341,7 @@ v0.4 收尾后在另一台不同分辨率 / 缩放比的机器上跑 OrangeEdito
 
 **Critical Path**：否（手敲 handle 也能用，但烦扰极高）
 
-### v0.6 · 多 chunk / per-layer + dirty 状态
+### v0.6 · 多 chunk / per-layer + dirty 状态 ✅
 
 **对应**：wiki §保存加载 + §陷阱 "chunk 粒度与 VCS 冲突"
 

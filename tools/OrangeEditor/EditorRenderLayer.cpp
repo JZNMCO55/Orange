@@ -8,6 +8,11 @@
 #include "DemoWorld.h"
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
+#include "command/SetFieldValueCommand.h"
+
+#include <orange/engine/asset/AssetHandle.h>
+#include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/MeshAsset.h>
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/physics/ColliderComponent.h>
@@ -1180,6 +1185,98 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
             ImGui::Text("Drag %s", name.c_str());
             ImGui::EndDragDropSource();
         }
+
+        // v0.6 c7：L17 右键 "Pick to Inspector field"。修复 v0.5 B3 副作用
+        // —— 点 .material 触发 Material 子模式接管，Inspector 不画实体，Pick
+        // 按钮永远不显示。提供右键路径精准写入选中 entity 的 Renderable 字段
+        // 而不需要先解除 Material 子模式。Selectable 左键才把 selectedAssetPath
+        // 改写，右键 BeginPopupContextItem 不触发 left-click 路径，所以选中
+        // entity 不会被本路径清掉。
+        if (ImGui::BeginPopupContextItem("##asset_file_ctx"))
+        {
+            using ::Orange::Engine::Entity;
+            using ::Orange::Engine::Render::RenderableComponent;
+            const Entity selEntity = host.selection.selectedEntity;
+            const bool   selValid  = selEntity.IsValid()
+                                  && host.scene.pWorld != nullptr
+                                  && host.scene.pWorld->IsValid(selEntity);
+            const auto* rc = selValid
+                ? host.scene.pWorld->GetComponent<RenderableComponent>(selEntity)
+                : nullptr;
+            const bool canPickMesh     = (rc != nullptr)
+                                      && (ext == ".mesh" || ext == ".obj");
+            const bool canPickMaterial = (rc != nullptr)
+                                      && (ext == ".material");
+
+            if (!selValid) {
+                ImGui::TextDisabled("(no entity selected)");
+            } else if (rc == nullptr) {
+                ImGui::TextDisabled("(selected entity has no Renderable)");
+            }
+
+            ImGui::BeginDisabled(!canPickMesh);
+            if (ImGui::MenuItem("Pick to Renderable.mesh"))
+            {
+                using ::Orange::Engine::Asset::MeshAsset;
+                std::string oldPath;
+                if (rc != nullptr && rc->mesh.IsValid()
+                    && host.assets.pAssets != nullptr)
+                {
+                    oldPath = std::string{host.assets.pAssets
+                        ->PathOf<MeshAsset>(rc->mesh)};
+                }
+                auto apply = [pH = &host, capE = selEntity]
+                              (const std::string& p) {
+                    auto* pW = pH->scene.pWorld.get();
+                    if (pW == nullptr || !pW->IsValid(capE)) { return; }
+                    auto* pRC = pW->GetComponent<RenderableComponent>(capE);
+                    if (pRC == nullptr) { return; }
+                    if (p.empty()) { pRC->mesh = {}; return; }
+                    auto* pReg = pH->assets.pAssets.get();
+                    if (pReg == nullptr) { return; }
+                    auto lr = pReg->Load<
+                        ::Orange::Engine::Asset::MeshAsset>(p);
+                    if (lr.IsOk()) { pRC->mesh = lr.Value(); }
+                };
+                host.cmdStack.Push(
+                    std::make_unique<SetFieldValueCommand<std::string>>(
+                        selEntity, "Renderable.mesh",
+                        oldPath, path, std::move(apply)));
+            }
+            ImGui::EndDisabled();
+
+            ImGui::BeginDisabled(!canPickMaterial);
+            if (ImGui::MenuItem("Pick to Renderable.material"))
+            {
+                std::string oldPath;
+                const auto named = BuildNamedMaterialInstances(host.assets);
+                if (rc != nullptr && rc->materialInstance != nullptr) {
+                    for (const auto& [p, ptr] : named) {
+                        if (ptr == rc->materialInstance) { oldPath = p; break; }
+                    }
+                }
+                auto apply = [pH = &host, capE = selEntity]
+                              (const std::string& p) {
+                    auto* pW = pH->scene.pWorld.get();
+                    if (pW == nullptr || !pW->IsValid(capE)) { return; }
+                    auto* pRC = pW->GetComponent<RenderableComponent>(capE);
+                    if (pRC == nullptr) { return; }
+                    if (p.empty()) { pRC->materialInstance = nullptr; return; }
+                    const auto m = BuildNamedMaterialInstances(pH->assets);
+                    auto it = m.find(p);
+                    pRC->materialInstance = (it != m.end())
+                        ? it->second : nullptr;
+                };
+                host.cmdStack.Push(
+                    std::make_unique<SetFieldValueCommand<std::string>>(
+                        selEntity, "Renderable.materialInstance",
+                        oldPath, path, std::move(apply)));
+            }
+            ImGui::EndDisabled();
+
+            ImGui::EndPopup();
+        }
+
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip("%s", path.c_str());
