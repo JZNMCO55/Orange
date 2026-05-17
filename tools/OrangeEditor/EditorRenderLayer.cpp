@@ -813,10 +813,19 @@ void DrawAssetTreeRecursive(EditorAssetContext& assets, const std::string& dir)
     }
 }
 
+// 判 path 是否对应一个会触发 Inspector 子模式的 asset 类型（当前仅
+// .material；后续 mesh / texture 子模式扩展时在此追加）。文件列表点击
+// 路径要据此决定是否清掉 entity 选中（互斥选择，B3 修）。
+bool DoesAssetTriggerInspectorSubMode(const std::string& path)
+{
+    if (path.size() < 9) { return false; }
+    return path.compare(path.size() - 9, 9, ".material") == 0;
+}
+
 // 当前目录文件列表（不递归）。文件类型按扩展名前缀 [M]/[Mat]/[T]/[S]/[J]/[?]
 // 显示，点选写入 `assets.selectedAssetPath`；BeginDragDropSource 起 DnD payload
 // "ORANGE_ASSET" 携带 path 字符串供 v0.5 c4 Inspector AssetRef 字段接收。
-void DrawAssetFileList(EditorAssetContext& assets)
+void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
 {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -860,6 +869,16 @@ void DrawAssetFileList(EditorAssetContext& assets)
         if (ImGui::Selectable(labelBuf, selected))
         {
             assets.selectedAssetPath = path;
+            // B3 修：互斥选择 —— 选中一个会触发 Inspector 子模式的 asset
+            // （当前 .material），清掉 entity 选中。这样 Inspector 干净切到
+            // 资源编辑视图，与 Cocos / Unity Project 面板手感一致。
+            // 不触发子模式的 asset（.mesh / 普通 json 等）选中不清 entity——
+            // 用户可能想"先选 entity 看属性，再点 asset 拿到路径做 DnD"。
+            if (DoesAssetTriggerInspectorSubMode(path))
+            {
+                host.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
+                host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+            }
         }
         // DnD source：path 字符串（含 '\0' 终止符）作为 payload 数据；
         // v0.5 c4 接收方在 Inspector AssetRef 字段内 AcceptDragDropPayload
@@ -918,12 +937,55 @@ void EditorRenderLayer::DrawAssetsPanel()
     const float leftW = ImGui::GetContentRegionAvail().x * kLeftRatio;
 
     ImGui::BeginChild("##asset_tree", ImVec2(leftW, 0), true);
-    DrawAssetTreeRecursive(assets, "assets");
+    // B1 修：平铺 assets/ 顶层子目录（去掉 root "assets" TreeNode）。
+    // 旧版用 root 节点 + DefaultOpen 持久化展开状态到 imgui.ini —— 一旦
+    // 用户在某次会话折叠了 root 或某个顶层目录，下次启动 imgui.ini 状态
+    // 覆盖 DefaultOpen，scenes / configs 等节点就"看起来不存在"。新版直
+    // 接平铺 + 每次启动首次强制展开顶层目录（Cond_Once），匹配 Cocos /
+    // Unity Project 面板手感。
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        if (!fs::exists("assets", ec))
+        {
+            const auto cwd = fs::current_path(ec).generic_string();
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1),
+                "assets/ 目录未找到");
+            ImGui::TextDisabled("cwd: %s", cwd.c_str());
+            ImGui::TextDisabled("（启动期 ChdirToRepoRoot 未能定位仓库根 —— "
+                                ".exe 不在仓库 build/ 子树内？）");
+        }
+        else
+        {
+            std::vector<std::string> topDirs;
+            for (auto& entry : fs::directory_iterator("assets", ec))
+            {
+                if (entry.is_directory(ec))
+                {
+                    topDirs.push_back(entry.path().generic_string());
+                }
+            }
+            std::sort(topDirs.begin(), topDirs.end());
+
+            for (auto& d : topDirs)
+            {
+                // Cond_Once：每次启动首次强制打开（盖过 imgui.ini 可能记录
+                // 的折叠状态），期间用户折叠/展开操作保留 —— 避免 imgui.ini
+                // 旧状态卡死目录树，又不破坏正常 UX。
+                ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+                DrawAssetTreeRecursive(assets, d);
+            }
+            if (topDirs.empty())
+            {
+                ImGui::TextDisabled("(assets/ 内无子目录)");
+            }
+        }
+    }
     ImGui::EndChild();
 
     ImGui::SameLine();
     ImGui::BeginChild("##asset_list", ImVec2(0, 0), true);
-    DrawAssetFileList(assets);
+    DrawAssetFileList(mHost, assets);
     ImGui::EndChild();
 
     ImGui::End();

@@ -90,10 +90,6 @@ void WriteMaterialFile(const std::string& path,
 // Save 写回 .material 仅写 templateName（uniform 持久化 deferred）。
 void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
 {
-    // c5 当前简化版仅写 templateName，不访问 host.assets.pMaterials
-    // 进行 uniform 实时调参——后续完整版会通过 host 拿 namedMaterialInstances
-    // 找运行时 MaterialInstance* 实现"调参立即生效"。当前抑制未使用警告。
-    (void)host;
     ImGui::TextDisabled("Material:");
     ImGui::SameLine();
     ImGui::TextUnformatted(materialPath.c_str());
@@ -103,43 +99,50 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     }
     ImGui::Separator();
 
-    // 读 .material 拿 templateName + 在 namedMaterialInstances map 找
-    // 对应运行时 MaterialInstance* —— 命中则用户可调 uniform；不命中
-    // （map 未注册此 path）只能切 template name 写盘。
-    std::string templateName = ReadMaterialTemplateName(materialPath);
-    if (templateName.empty())
+    // 读 .material 盘上原始 templateName（用于 dirty 判定）。
+    const std::string originalTemplate = ReadMaterialTemplateName(materialPath);
+    if (originalTemplate.empty())
     {
         ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1),
                            "无法读取 .material 文件 templateName 字段");
         return;
     }
 
-    // 找当前 templateName 在内置列表里的 index（找不到走 -1 → Combo 显示
-    // 空）。当前文件 templateName 可能是游戏侧自定义模板（不在硬编码列表
-    // 内），Combo 显示空 + 用户可选切到内置模板。
+    // 切到另一个 .material 文件 → 刷新 editing 缓存（首次进入或换文件）。
+    // 否则 editingTemplateName 持续保留用户在 Combo 的选择，跨帧不丢——
+    // 这是 B2 修复点：旧版每帧从盘重读 + 局部 newTemplateIdx 导致用户
+    // 切 Combo 后下一帧立刻被盘上值覆盖，外观就是"Combo 切不动"。
+    if (host.assets.editingMaterialPath != materialPath)
+    {
+        host.assets.editingMaterialPath = materialPath;
+        host.assets.editingTemplateName = originalTemplate;
+    }
+
+    // 找当前 editingTemplateName 在内置列表里的 index（找不到走 -1 → Combo
+    // 显示空）。当前文件 templateName 可能是游戏侧自定义模板（不在硬编码
+    // 列表内），Combo 显示空 + 用户可选切到内置模板。
     int curTemplateIdx = -1;
     for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kBuiltinTemplateNames));
          ++i)
     {
-        if (templateName == kBuiltinTemplateNames[i])
+        if (host.assets.editingTemplateName == kBuiltinTemplateNames[i])
         {
             curTemplateIdx = i;
             break;
         }
     }
-    int newTemplateIdx = curTemplateIdx;
     Orange::Editor::Widgets::BeginPropertyTable("##matprops", 100.0f);
     Orange::Editor::Widgets::PropertyLabel("Template",
         "材质模板（决定 shader + uniform 布局）");
-    if (ImGui::Combo("##template", &newTemplateIdx,
+    if (ImGui::Combo("##template", &curTemplateIdx,
                      kBuiltinTemplateNames,
                      IM_ARRAYSIZE(kBuiltinTemplateNames)))
     {
-        if (newTemplateIdx >= 0
-            && newTemplateIdx < static_cast<int>(
+        if (curTemplateIdx >= 0
+            && curTemplateIdx < static_cast<int>(
                 IM_ARRAYSIZE(kBuiltinTemplateNames)))
         {
-            templateName = kBuiltinTemplateNames[newTemplateIdx];
+            host.assets.editingTemplateName = kBuiltinTemplateNames[curTemplateIdx];
         }
     }
     Orange::Editor::Widgets::EndPropertyTable();
@@ -153,15 +156,14 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     ImGui::TextDisabled("当前内置 material 全是 default-constructed 无 override，");
     ImGui::TextDisabled("等真有调参 use case + .material schema v1.1 落地后实施");
 
-    // Save 按钮：写回 templateName（uniform 持久化 deferred）。disabled
-    // 在 templateName 与文件原值相同时（避免重复落盘）。
+    // Save 按钮：写回 editingTemplateName（uniform 持久化 deferred）。
+    // dirty = 用户在 Combo 选的值 != 盘上原值。
     ImGui::Separator();
-    const std::string originalTemplate = ReadMaterialTemplateName(materialPath);
-    const bool dirty = (templateName != originalTemplate);
+    const bool dirty = (host.assets.editingTemplateName != originalTemplate);
     ImGui::BeginDisabled(!dirty);
     if (ImGui::Button("Save"))
     {
-        WriteMaterialFile(materialPath, templateName);
+        WriteMaterialFile(materialPath, host.assets.editingTemplateName);
         // 内存 MaterialInstance 不在此重新 CreateInstance —— 那会让 Render
         // able.materialInstance 字段持有的旧指针悬挂。完整刷新路径要走
         // namedMaterialInstances 重建 + 所有 Renderable 字段重定向，超出

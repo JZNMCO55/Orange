@@ -62,6 +62,14 @@ struct EditorAssetContext
     // v0.5 c4 DnD 写入 / c5 Material 子模式入口都消费 selectedAssetPath。
     std::string browserCurrentDir   = "assets";
     std::string selectedAssetPath   = {};
+
+    // v0.5 c5 修 B2：Material 子模式编辑缓存。Combo 切换 template 需要 UI
+    // 状态跨帧持久（否则每帧 DrawMaterialSubMode 都重读盘把 newTemplateIdx
+    // 覆盖回盘上值，用户切换立即被冲掉）。当 editingMaterialPath 与当前
+    // selectedAssetPath 不一致时（用户切到另一个 .material）重置缓存重新
+    // 从盘读；一致则 editingTemplateName 持续保留用户选择，Save 时落盘。
+    std::string editingMaterialPath   = {};
+    std::string editingTemplateName   = {};
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H

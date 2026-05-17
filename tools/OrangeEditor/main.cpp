@@ -106,6 +106,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <variant>
@@ -121,6 +122,39 @@ namespace
 // 内 widget 撑爆 dock cell。注意：本路径仅做全局 DPI 兜底；Inspector / Panel
 // 内部 widget 列宽 / minSize 的比例化属架构整骨范畴，由对应 milestone 根治。
 constexpr float kDesignFontSizePx = 18.0f;
+
+// 启动期自定位仓库根（与 Lumix / Godot 同款方案）：用户从 build/bin/Debug
+// 双击 .exe / IDE F5 / 任意 cwd 启动时，把 cwd 切回包含真实 assets/ 的仓
+// 库根。否则 fs::current_path() = 启动者所在目录，所有 "assets/..." 相
+// 对路径都找错位置（v0.5 B1 验收 retro：用户 cwd=build/bin/Debug 时只能
+// 看到 build 产物自创建的 assets/ 子集 meshes + materials/builtin，而看不
+// 到仓库根真实 assets/ 里的 scenes / configs）。
+//
+// 标记选用 "assets/scenes/demo.scene.json" 而非 "assets/" 本身 —— 后者
+// 在 build/bin/Debug 下也会存在（DemoWorld lazy-bake fallback 写出来），
+// 无法区分仓库根与 build 产物。.scene.json 只在仓库根有。
+void ChdirToRepoRoot()
+{
+    namespace fs = std::filesystem;
+    wchar_t exePathW[MAX_PATH] = {};
+    const DWORD len = GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) { return; }
+
+    fs::path dir = fs::path(exePathW).parent_path();
+    constexpr int kMaxWalkUp = 8;
+    for (int i = 0; i < kMaxWalkUp; ++i)
+    {
+        std::error_code ec;
+        if (fs::exists(dir / "assets" / "scenes" / "demo.scene.json", ec))
+        {
+            fs::current_path(dir, ec);
+            return;
+        }
+        const fs::path parent = dir.parent_path();
+        if (parent == dir) { return; }
+        dir = parent;
+    }
+}
 
 // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
 // 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
@@ -141,6 +175,11 @@ constexpr float kDesignFontSizePx = 18.0f;
 int main()
 {
     using namespace Orange::Engine;
+
+    // 必须在任何相对路径 IO（Scene::Load / asset lazy-bake / shader 编译
+    // 缓存等）之前完成 chdir，否则 build/bin/Debug 启动场景会产生 stale
+    // build 产物 assets/ 子树污染。
+    ChdirToRepoRoot();
 
     // ---- AppHost（窗口 + 主循环）---------------------------------------
     AppConfig cfg{};

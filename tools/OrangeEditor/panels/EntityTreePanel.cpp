@@ -218,6 +218,9 @@ void EditorRenderLayer::DrawEntityTreePanel()
         const Orange::Engine::Entity e = rawCmd->CreatedEntity();
 
         mHost.selection.selectedEntity = e;
+        // B3 修：互斥选择 —— Hierarchy / viewport / 新建实体 操作总是把
+        // Inspector 焦点拉回实体模式，不让 Material 子模式残留。
+        mHost.assets.selectedAssetPath.clear();
         BeginRename(e);
     }
 }
@@ -307,6 +310,8 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         open = ImGui::TreeNodeEx("##node", flags, "%s", label);
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
             mHost.selection.selectedEntity = entity;
+            // B3 修：互斥选择，详见 ScenePanel viewport pick 同名注释。
+            mHost.assets.selectedAssetPath.clear();
         }
         // 双击 entry-body 进入重命名（Edit 态才允许）
         if (canEditNode
@@ -329,6 +334,8 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     // 受 canEditNode 约束。
     if (!renaming && ImGui::BeginPopupContextItem("##node_ctx")) {
         mHost.selection.selectedEntity = entity;
+        // B3 修：互斥选择，右键 context menu 也是"实体选中"入口之一。
+        mHost.assets.selectedAssetPath.clear();
         ImGui::BeginDisabled(!canEditNode);
         if (ImGui::MenuItem("Create Child")) {
             mHost.selection.pendingCreate = {entity, EditorSelection::PendingCreateKind::Empty, true};

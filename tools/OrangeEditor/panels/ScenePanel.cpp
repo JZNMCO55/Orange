@@ -286,6 +286,13 @@ void EditorRenderLayer::DrawScenePanel()
                     // 切实体 → Euler 编辑缓存失效（与 Quat case 行为一致）
                     mHost.selection.transformEulerCacheEntity =
                         Orange::Engine::Entity::Invalid();
+                    // B3 修：选了 valid 实体 → 清 asset 选中，让 Inspector 从
+                    // Material 子模式切回实体模式（互斥选择，匹配 Cocos/Unity
+                    // 惯例：viewport 点选总是把焦点拉回实体 Inspector）。
+                    if (picked.IsValid())
+                    {
+                        mHost.assets.selectedAssetPath.clear();
+                    }
                 }
             }
         }
