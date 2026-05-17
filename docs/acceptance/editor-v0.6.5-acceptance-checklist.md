@@ -56,3 +56,12 @@
 - ImFontConfig.GlyphOffset.y 经验偏移导致 " + Add Component" 类 mixed 按钮里 + icon 比文字 baseline 略低 ~3px @ 18px font —— c4 commit message 明确登记的可接受副作用
 - `assets/scenes/demo.scene.json` 等 GAP-2026-05-17 系列 round-trip 副产物未独立处理
 - 启动期一闪而过的"白色矩形 + 黑色背景"画面 —— pre-existing，登记于 engine-known-gaps `GAP-2026-05-17-editor-first-frame-flash`
+
+## v0.6.5 retro · commit 序列回顾
+
+开工 ritual Step 7 写的 commit-plan 草稿 8 个 commit；实际 8 个 commit 顺序 / 边界 / 数量**完全匹配**。偏差点：
+
+- **c4 内部撞了 3 轮 icon 居中 fix**（字体 metrics 调试）—— 试 1：固定正方形按钮 + GlyphMaxAdvanceX = fontPx → 偏左；试 2：再加 GlyphOffset.y → 偏右上；试 3（最终）：auto-size 按钮 + 仅纵向 GlyphOffset。三轮 fix 都在 c4 commit 内部消化未拆出新 commit，但用户实测后才暴露。**校准下次 commit-plan**：含字体 metrics / ImGui layout 调试的 commit 应预留实测反馈 1–2 轮的内部 iteration 时间，不要假设"一次 push 就完美"
+- **c7 顺手清理 LayersPanel + AnimatorMiniPreviewPlugin 的字面量 RGBA**（c4 漏扫的 2 处）—— c7 lint 规则编写时跑全仓 grep 才发现；属于 c4 应做的工作被 c7 收尾时补完。**校准**：c4 类"全仓 grep + 替换"任务需要走完一次 lint 规则 dry-run 才能确认没有遗漏
+
+完整决策由来 + 参考引擎 retro 见 [ADR-002](../decisions/ADR-002-editor-visual-system.md)。
