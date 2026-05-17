@@ -46,13 +46,61 @@ namespace Orange::Editor::Theme
 
 // ---- Color ----------------------------------------------------------
 // RGBA token（背景 / panel / 控件三态 / accent / alert / selection）。
-// c1 仅 2 个示意性 getter；完整集合由 c2 / c4 增量添加。
+// c2 落 Cocos 3.8.8 采色（背景 / 控件 / header / menu / 字色 / 分隔）；
+// c4 追加 accent 橙 + 半透 selection；c6 追加 alert 系（warn / error /
+// success）。
 namespace Color
 {
 
-// 主 dock space 背景。c1 占位 = ImGui StyleColorsDark 等价深色；c2 采色
-// 替换为 Cocos #2A2A2A 区间。
+// 主 dock space 背景（最深一档炭灰）。c2 = #242424 (~14% 亮度)，与
+// §D5.1 决策 #2A2A2A ~ #2C2C2C 范围一致（略偏深以让 panel 与 dock 有
+// 视觉分层）。
 const ImVec4& GetBackgroundPrimary();
+
+// panel 内容背景（中等炭灰）。c2 = #2E2E2E (~18% 亮度)，比主背景亮
+// 一档让 panel 边界明确，对应 Cocos 各 panel 内容区域。
+const ImVec4& GetBackgroundSecondary();
+
+// popup / tooltip 背景（最亮一档炭灰）。c2 = #363636 (~21%)，让 popup
+// 比主 UI 浮出来。
+const ImVec4& GetBackgroundTertiary();
+
+// 输入框 / Combo / DragFloat 控件 idle 态背景。c2 = #1E1E1E (~12%)，
+// 比主背景更深让输入框轮廓自然显现，对应 Cocos Inspector 字段输入框
+// 的"凹陷"视觉。
+const ImVec4& GetControlBg();
+
+// 控件 hover 态。c2 = #3C3C3C (~24%)。
+const ImVec4& GetControlBgHovered();
+
+// 控件 active 态（按下 / 点击瞬间）。c2 = #464646 (~28%)。
+const ImVec4& GetControlBgActive();
+
+// component header / 折叠区块 / TreeNode / Selectable idle 态。c2 =
+// #363636 (~21%)，与 popup 背景同档，让 header 在 panel 内"突起"。
+const ImVec4& GetHeaderBg();
+
+// header hover 态。c2 = #464646 (~28%)。
+const ImVec4& GetHeaderBgHovered();
+
+// header active 态（选中 / 展开瞬间）。c2 = #555555 (~33%)。
+const ImVec4& GetHeaderBgActive();
+
+// menu bar / toolbar 背景。c2 = #282828 (~16%)，介于主背景与 panel 之间。
+const ImVec4& GetMenuBarBg();
+
+// 主字色（普通文本）。c2 = #DCDCDC (~86%)，浅灰非纯白，长时间盯不疲劳。
+const ImVec4& GetTextPrimary();
+
+// 次字色（label / hint）。c2 = #A0A0A0 (~63%)。
+const ImVec4& GetTextSecondary();
+
+// 禁用字色（disabled 控件 label）。c2 = #6E6E6E (~43%)。
+const ImVec4& GetTextDisabled();
+
+// 分隔线 / border（深到几乎隐形，仅作为视觉断点）。c2 = #141414 (~8%)。
+const ImVec4& GetSeparator();
+const ImVec4& GetBorder();
 
 // brand accent 色（橙）。c1 占位 = OrangeEngine 主色 #FF8A3D（已知最终
 // 值，无需 c2 调整）；c4 起用于 focus outline / active tab 下划线 / Save
@@ -63,24 +111,57 @@ const ImVec4& GetAccentPrimary();
 }  // namespace Color
 
 // ---- Spacing --------------------------------------------------------
-// 间距 / padding。c2 时把当前 ImGui 默认值（经 main.cpp ScaleAllSizes
-// 缩放）固化到 token。
+// 间距 / padding。c2 时基于 ImGui 默认值（经 main.cpp ScaleAllSizes 已
+// 按 DPI 缩放过）作为基线，仅在 Cocos 风格需要时微调；本期不动 DPI
+// scale 路径。
 namespace Spacing
 {
 
-// 窗口内边距。c1 占位 = ImGui 默认 ImVec2(8, 8)；c2 校准。
+// 窗口内边距。c2 = ImVec2(8, 8)（ImGui 默认 + ScaleAllSizes 后基线）。
 const ImVec2& GetWindowPadding();
+
+// 控件内边距（frame 内文本与边的间距）。c2 = ImVec2(6, 4)。
+const ImVec2& GetFramePadding();
+
+// item 间距（同行 widget 间 / 行间）。c2 = ImVec2(8, 4)，比 ImGui 默认
+// 略紧（4 → 4 不变 / 8 → 8 不变，实际不动）。
+const ImVec2& GetItemSpacing();
+
+// item 内部子元素间距（如 checkbox label 与方框之间）。c2 = ImVec2(4, 4)。
+const ImVec2& GetItemInnerSpacing();
+
+// TreeNode 缩进单位。c2 = 18.0f（与字号 baseline 一致）。
+float GetIndentSpacing();
 
 }  // namespace Spacing
 
 // ---- Rounding -------------------------------------------------------
-// 圆角半径。Cocos 工具感方向 → 倾向 0 ~ 1px。
+// 圆角半径。Cocos 工具感方向 → 全部走 0px（方正风格）。整套 Rounding
+// token 全部返回 0.0f；如 Cocos 截图细看出某处微圆角，c6 polish 时
+// 再微调。
 namespace Rounding
 {
 
-// 控件圆角（Button / Frame / Combo）。c1 占位 = 0.0f（Cocos 方正风格）；
-// c2 微调（可能保留 0 或上调到 1px）。
+// 窗口圆角。Cocos = 0px（与多视口 detached window 走 0 同款一致性）。
+float GetWindow();
+
+// 控件圆角（Button / Frame / Combo）。c2 = 0.0f。
 float GetFrame();
+
+// popup / tooltip 圆角。c2 = 0.0f。
+float GetPopup();
+
+// scrollbar 圆角。c2 = 0.0f。
+float GetScrollbar();
+
+// slider grab 圆角。c2 = 0.0f。
+float GetGrab();
+
+// tab 圆角。c2 = 0.0f。
+float GetTab();
+
+// child window 圆角。c2 = 0.0f。
+float GetChild();
 
 }  // namespace Rounding
 

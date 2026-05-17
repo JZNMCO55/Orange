@@ -78,6 +78,7 @@
 #include "plugin/DirectionalLightGizmoPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
+#include "theme/EditorTheme.h"
 
 #include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
 #include <glm/gtc/quaternion.hpp>
@@ -280,11 +281,17 @@ int main()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-    ImGui::StyleColorsDark();
-    // 多视口模式下让"detached" window 看起来跟主窗口风格一致
+    // v0.6.5 c2：编辑器主题从 ImGui StyleColorsDark 切到 Cocos 炭灰
+    // 路线。ApplyToImGui 内部以 StyleColorsDark 为 baseline（保证未覆盖
+    // 的 ImGuiCol_* 仍有合法值），然后按 EditorTheme token 覆盖关键项
+    // （背景 / 控件三态 / 字色 / 分隔 / 圆角 / 间距 / 边框）。
+    Orange::Editor::Theme::ApplyToImGui();
+    // 多视口模式下让"detached" window 看起来跟主窗口风格一致：
+    // WindowRounding 已被 ApplyToImGui 设为 0，本段仅强制
+    // ImGuiCol_WindowBg.w = 1.0f 防止多视口透明导致 detached window 看穿
+    // 桌面（ImGui 多视口默认偏好半透）。
     if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
         ImGuiStyle& style = ImGui::GetStyle();
-        style.WindowRounding = 0.0f;
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 
