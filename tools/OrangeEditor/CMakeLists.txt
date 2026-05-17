@@ -163,6 +163,12 @@ add_executable(OrangeEditor
     plugin/DirectionalLightGizmoPlugin.cpp
     plugin/ParticleEmitterGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
+    branding/EditorWindowIcon.cpp
+    # Windows resource：把 orange-editor-logo.ico 嵌进 exe。MSVC / CMake 自
+    # 动识别 .rc 后缀、调 rc.exe 编出 .res、link 到 exe；非 MSVC（Linux /
+    # Clang on Linux）下会被自动忽略——本仓库当前 Windows-only 不影响。
+    # 重建 ICO：跑 `python tools/OrangeEditor/branding/build_icon.py`。
+    branding/OrangeEditor.rc
 )
 # OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
 # link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。

@@ -1,0 +1,15 @@
+// OrangeEditor Windows resource file.
+//
+// 把 orange-editor-logo.ico（由同目录 build_icon.py 从 master PNG 生成）
+// 嵌进 OrangeEditor.exe，让 Windows 文件资源管理器 / Alt-Tab / taskbar
+// 直接读出多分辨率 logo，不需要 GLFW 运行期注入。
+//
+// 数字 ID 1 是 Windows Explorer 的约定：枚举可执行文件 icon 资源时挑
+// 数值最低的 ICON 资源做"app 图标"，因此用裸数字 1 而不是 IDI_ICON1
+// 符号（后者需要 #include "resource.h" + 定义；裸数字最简单稳）。
+//
+// ICO 路径相对于 .rc 文件位置（rc.exe 默认行为）—— ICO 与 RC 同目录。
+//
+// 重建 ICO：跑 `python tools/OrangeEditor/branding/build_icon.py`。
+
+1 ICON "orange-editor-logo.ico"

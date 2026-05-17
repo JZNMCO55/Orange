@@ -72,6 +72,7 @@
 #include "EditorHost.h"
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
+#include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
 #include "plugin/AnimatorMiniPreviewPlugin.h"
 #include "plugin/CameraFrustumGizmoPlugin.h"
@@ -197,6 +198,12 @@ int main()
     }
     auto host = std::move(hostRes).Value();
     auto* glfwWindow = static_cast<GLFWwindow*>(host->GetWindow().GetGlfwWindowHandle());
+
+    // 运行期窗口 icon —— 与 OrangeEditor.rc 嵌进 exe 的 ICO 资源双重保险。
+    // .rc 覆盖 Explorer / Alt-Tab / taskbar inactive；本调用覆盖窗口装饰
+    // 区 / 多视口子窗口（GLFW 不会让子窗口继承主窗口 icon，必须每个
+    // GLFWwindow 单独 set；当前仅主窗口，多视口扩展见 BRANDING.md）。
+    OrangeEditorBranding::ApplyEditorWindowIcons(glfwWindow);
 
     // 启动即 maximize —— v0.4.5 后用户在低 DPI / 窄屏机器报 "初始打开 OK，
     // 用户拉伸 / 最大化后 Inspector 永久消失"。诊断初步排除 multi-viewport
