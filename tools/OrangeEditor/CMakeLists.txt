@@ -157,6 +157,7 @@ add_executable(OrangeEditor
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
+    theme/EditorTheme.cpp
     plugin/AnimatorMiniPreviewPlugin.cpp
     plugin/CameraFrustumGizmoPlugin.cpp
     plugin/DirectionalLightGizmoPlugin.cpp
