@@ -354,6 +354,35 @@ int main()
                          "@%.0fpx (dpiScale=%.2f)\n",
                          fontPx, dpiScale);
         }
+
+        // v0.6.5 c3：Codicons icon font merge —— 把 VS Code 同款 icon font
+        // 合并到当前主字体（msyh / segoeui / ImGui default 任一），让按钮 /
+        // tooltip 可以直接写 ICON_CI_* codepoint 与中英文混排。
+        //
+        // MergeMode = true → 同一 ImFont 多 source；GlyphMinAdvanceX = fontPx
+        // 让 icon 至少占满字符宽（多数 Codicons 字形是 1em 宽，与文字基线一
+        // 致即可，不需要额外行距）。PixelSnapH 让 icon 边像素对齐避免 subpixel
+        // 渲染模糊。
+        //
+        // ranges 必须 static 寿命：AddFontFromFileTTF 不复制 range 数组，仅
+        // 存指针，io.Fonts->Build()（ImGui_ImplVulkan_Init 内触发）期间需访问。
+        //
+        // 路径：相对工作目录（已被 ChdirToRepoRoot 切到仓库根）。加载失败仅
+        // log，不致命——失败后按钮显示 codepoint 对应的 fallback glyph "?"
+        // 占位，编辑器仍能用。
+        static const ImWchar kCodiconsRange[] = { 0xea60, 0xf102, 0 };
+        ImFontConfig codiconsCfg;
+        codiconsCfg.MergeMode        = true;
+        codiconsCfg.PixelSnapH       = true;
+        codiconsCfg.GlyphMinAdvanceX = fontPx;
+        ImFont* fontCodicons = io.Fonts->AddFontFromFileTTF(
+            "tools/OrangeEditor/theme/codicons/codicon.ttf",
+            fontPx, &codiconsCfg, kCodiconsRange);
+        if (fontCodicons == nullptr) {
+            std::fprintf(stdout,
+                         "[OrangeEditor] codicon.ttf 加载失败 —— Codicons icon "
+                         "将显示为 '?' 占位（不致命）\n");
+        }
     }
 
     // GLFW backend —— install_callbacks=true 让 ImGui 自动装 GLFW key /

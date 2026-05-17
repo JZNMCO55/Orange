@@ -18,6 +18,8 @@
 
 #include "EditorTheme.h"
 
+#include "codicons/IconsCodicons.h"
+
 namespace Orange::Editor::Theme
 {
 
@@ -153,8 +155,16 @@ float GetSizeBody() { return 18.0f; }
 namespace Icon
 {
 
-const char* GetSave() { return "Save"; }
-const char* GetPlay() { return "Play"; }
+// c3：返回 Codicons codepoint UTF-8 字节序列（来自 IconsCodicons.h）。
+// 调用方 `ImGui::Button(EditorTheme::Icon::GetSave())` 即得 icon 按钮。
+// 主字体 atlas 已 merge Codicons（main.cpp v0.6.5 c3）；Codicons 加载
+// 失败时该 codepoint 渲染为 "?" 占位（main.cpp 内 log warning）。
+//
+// 选 DEBUG_START / DEBUG_PAUSE / DEBUG_STOP 而非 PLAY / PAUSE / STOP：
+// VS Code 里前者就是 transport-control toolbar 三件套，语义与编辑器
+// Play Mode 完全对应；c4 实际替换按钮时维持这条选择。
+const char* GetSave() { return ICON_CI_SAVE;        }
+const char* GetPlay() { return ICON_CI_DEBUG_START; }
 
 }  // namespace Icon
 
