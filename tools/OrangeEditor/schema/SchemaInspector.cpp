@@ -17,6 +17,7 @@
 #include "../EditorWidgets.h"
 #include "../command/SetFieldValueCommand.h"
 #include "../plugin/IEditorInspectorPlugin.h"
+#include "../theme/EditorTheme.h"
 #include "ComponentSchemaRegistry.h"
 
 #include <orange/engine/scene/Entity.h>
@@ -468,10 +469,14 @@ void DrawProperty(EditorHost&                  host,
                 ImGui::EndDragDropTarget();
             }
 
-            // 清除按钮 "×"（U+00D7 中点乘号，比 ASCII 'x' 视觉更像按钮符号）
+            // 清除按钮（Codicons CLOSE）—— v0.6.5 c4 起从 UTF-8 "×"
+            // U+00D7 切到 ICON_CI_CLOSE，与 LayersPanel "X" remove 按钮
+            // 同款 icon 视觉。
             ImGui::SameLine();
             ImGui::BeginDisabled(curPath.empty() || prop.set == nullptr);
-            if (ImGui::SmallButton("\xC3\x97##clear"))
+            const std::string clearBtnLabel =
+                std::string(Orange::Editor::Theme::Icon::GetClose()) + "##clear";
+            if (ImGui::SmallButton(clearBtnLabel.c_str()))
             {
                 std::string newPath;  // empty
                 prop.set(component, &newPath);
@@ -496,7 +501,9 @@ void DrawProperty(EditorHost&                  host,
                                   && prop.set != nullptr;
             ImGui::SameLine();
             ImGui::BeginDisabled(!pickEnabled);
-            if (ImGui::SmallButton("Pick##pick"))
+            const std::string pickBtnLabel =
+                std::string(Orange::Editor::Theme::Icon::GetSearch()) + "##pick";
+            if (ImGui::SmallButton(pickBtnLabel.c_str()))
             {
                 std::string newPath = browserSel;
                 prop.set(component, &newPath);

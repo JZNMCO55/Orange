@@ -370,11 +370,31 @@ int main()
         // 路径：相对工作目录（已被 ChdirToRepoRoot 切到仓库根）。加载失败仅
         // log，不致命——失败后按钮显示 codepoint 对应的 fallback glyph "?"
         // 占位，编辑器仍能用。
+        // Codicons font merge 参数：
+        //   * GlyphMinAdvanceX = fontPx —— 让 icon glyph 至少占 1em 宽
+        //     （多数 Codicons 设计就是 1em，本参数确保偶尔的 < 1em glyph
+        //     也对齐到 1em，避免横向密度参差）
+        //   * **不**设 GlyphMaxAdvanceX —— 实测设了 = fontPx 反而让 glyph
+        //     在 1em cell 内位置失控（用户反馈"icon 在按钮内偏右"），
+        //     用 glyph 自身 advance 让 ImGui 默认居中算法自然工作更稳
+        //   * GlyphOffset.y = floor(fontPx * 0.15f) —— **仅纵向**经验偏移。
+        //     Codicons icon glyph 设计在 1em cell 顶部附近（无 descender），
+        //     ImGui 按 ascent/descent 算 baseline 后 icon 视觉中心略偏 button
+        //     上沿（实测用户反馈"偏上"），向下推 ~15% fontPx 把视觉中心拉
+        //     到 button center。这个值只动纵向不动横向，与 auto-size 按钮
+        //     正交不冲突。
+        //   * 副作用：" + Add Component" 这种 icon+文字组合里 icon 比文字
+        //     baseline 略低 2-3 px @ 18px font。toolbar icon-only 按钮是
+        //     主战场，这点偏移视觉可接受。
+        // 工程教训：调字体 metrics 的几何精度撞 ImGui 内部 layout 算法
+        // 不会赢——按钮居中靠 auto-size 比靠 fixed-size + glyph offset 稳；
+        // 但**仅纵向** GlyphOffset 仍是 ImGui icon font 集成的标准 hack。
         static const ImWchar kCodiconsRange[] = { 0xea60, 0xf102, 0 };
         ImFontConfig codiconsCfg;
         codiconsCfg.MergeMode        = true;
         codiconsCfg.PixelSnapH       = true;
         codiconsCfg.GlyphMinAdvanceX = fontPx;
+        codiconsCfg.GlyphOffset.y    = std::floor(fontPx * 0.15f);
         ImFont* fontCodicons = io.Fonts->AddFontFromFileTTF(
             "tools/OrangeEditor/theme/codicons/codicon.ttf",
             fontPx, &codiconsCfg, kCodiconsRange);

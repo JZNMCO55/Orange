@@ -23,6 +23,7 @@
 #include "../EditorRenderLayer.h"
 
 #include "../command/LambdaCommand.h"
+#include "../theme/EditorTheme.h"
 
 #include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/World.h>
@@ -81,9 +82,11 @@ void EditorRenderLayer::DrawLayersPanel()
     // 撞到旧 manifest。
     const bool canEdit = (mHost.scene.playState == PlayState::Edit);
 
-    // ---- 顶部工具栏：+ Add Layer ----
+    // ---- 顶部工具栏：[+ icon] Add Layer ----
     ImGui::BeginDisabled(!canEdit);
-    if (ImGui::Button("+ Add Layer")) {
+    const std::string addLayerLabel =
+        std::string(Orange::Editor::Theme::Icon::GetAdd()) + " Add Layer";
+    if (ImGui::Button(addLayerLabel.c_str())) {
         ImGui::OpenPopup("##add_layer_popup");
     }
     ImGui::EndDisabled();
@@ -180,13 +183,14 @@ void EditorRenderLayer::DrawLayersPanel()
             ImGui::Text("%s", layer.id.c_str());
         }
 
-        // [X] 删除按钮 —— default 禁掉。
+        // [×] 删除按钮（Codicons CLOSE）—— default 禁掉。
         const bool isDefault = (layer.id == kDefaultLayerId);
-        const float buttonW  = ImGui::CalcTextSize("X").x
-                             + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const char* closeIcon = Orange::Editor::Theme::Icon::GetClose();
+        const float buttonW   = ImGui::CalcTextSize(closeIcon).x
+                              + ImGui::GetStyle().FramePadding.x * 2.0f;
         ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - buttonW);
         ImGui::BeginDisabled(!canEdit || isDefault);
-        if (ImGui::SmallButton("X")) {
+        if (ImGui::SmallButton(closeIcon)) {
             pendingRemoveId = layer.id;
         }
         ImGui::EndDisabled();

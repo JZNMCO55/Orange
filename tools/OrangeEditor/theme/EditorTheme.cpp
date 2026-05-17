@@ -75,8 +75,18 @@ const ImVec4 kTextDisabled{0.431f, 0.431f, 0.431f, 1.000f};
 const ImVec4 kSeparator{0.078f, 0.078f, 0.078f, 1.000f};
 const ImVec4 kBorder   {0.078f, 0.078f, 0.078f, 1.000f};
 
-// brand accent：OrangeEngine 橙 #FF8A3D。c4 起 ApplyToImGui 才消费。
-const ImVec4 kAccentPrimary{1.000f, 0.541f, 0.239f, 1.000f};
+// brand accent：OrangeEngine 橙 #FF8A3D (RGB 1.000 / 0.541 / 0.239)。
+// c4 起 ApplyToImGui 消费：
+//   * kAccentPrimary  alpha=1.0 —— focus outline / Save dirty 高亮
+//   * kAccentHovered  alpha=0.5 —— ImGuiCol_HeaderHovered / TabHovered
+//   * kAccentActive   alpha=0.6 —— ImGuiCol_HeaderActive / ButtonActive
+//   * kAccentSelection alpha=0.3 —— ImGuiCol_Header 整行半透叠加（§D5.1
+//     决策"selection 用半透不用实色"的落地）
+// 多档 alpha 共用同一 RGB 让 hover→active 视觉过渡自然（仅亮度变化）。
+const ImVec4 kAccentPrimary  {1.000f, 0.541f, 0.239f, 1.000f};
+const ImVec4 kAccentHovered  {1.000f, 0.541f, 0.239f, 0.500f};
+const ImVec4 kAccentActive   {1.000f, 0.541f, 0.239f, 0.600f};
+const ImVec4 kAccentSelection{1.000f, 0.541f, 0.239f, 0.300f};
 
 }  // namespace
 
@@ -96,6 +106,9 @@ const ImVec4& GetTextDisabled()         { return kTextDisabled;         }
 const ImVec4& GetSeparator()            { return kSeparator;            }
 const ImVec4& GetBorder()               { return kBorder;               }
 const ImVec4& GetAccentPrimary()        { return kAccentPrimary;        }
+const ImVec4& GetAccentHovered()        { return kAccentHovered;        }
+const ImVec4& GetAccentActive()         { return kAccentActive;         }
+const ImVec4& GetAccentSelection()      { return kAccentSelection;      }
 
 }  // namespace Color
 
@@ -163,8 +176,16 @@ namespace Icon
 // 选 DEBUG_START / DEBUG_PAUSE / DEBUG_STOP 而非 PLAY / PAUSE / STOP：
 // VS Code 里前者就是 transport-control toolbar 三件套，语义与编辑器
 // Play Mode 完全对应；c4 实际替换按钮时维持这条选择。
-const char* GetSave() { return ICON_CI_SAVE;        }
-const char* GetPlay() { return ICON_CI_DEBUG_START; }
+const char* GetSave()    { return ICON_CI_SAVE;        }
+const char* GetPlay()    { return ICON_CI_DEBUG_START; }
+const char* GetPause()   { return ICON_CI_DEBUG_PAUSE; }
+const char* GetStop()    { return ICON_CI_DEBUG_STOP;  }
+const char* GetClose()   { return ICON_CI_CLOSE;       }
+const char* GetSearch()  { return ICON_CI_SEARCH;      }
+const char* GetAdd()     { return ICON_CI_ADD;         }
+const char* GetArrowUp() { return ICON_CI_ARROW_UP;    }
+const char* GetFolder()  { return ICON_CI_FOLDER;      }
+const char* GetGear()    { return ICON_CI_GEAR;        }
 
 }  // namespace Icon
 
@@ -270,6 +291,49 @@ void ApplyToImGui()
     style.WindowBorderSize  = 1.0f;
     style.FrameBorderSize   = 0.0f;
     style.PopupBorderSize   = 1.0f;
+
+    // ---- v0.6.5 c4：accent 橙 + 半透 selection ----
+    // 覆盖 c2 已设的 ImGuiCol_Header* / Tab* / FrameBgActive / CheckMark
+    // 等 selection-related 项。橙 alpha 多档：30% selection 整行半透叠
+    // 加；50% hover；60% active；100% focus outline / dirty Save 边缘。
+    // §D5.1 决策"selection 用半透而非整行实色填充"的落地点。
+    //
+    // ImGuiCol_Header* —— TreeNode / Selectable / CollapsingHeader 选中
+    // 行：整行半透橙叠加，鼠标 hover / active 时 alpha 渐增。
+    style.Colors[ImGuiCol_Header]            = Color::GetAccentSelection();
+    style.Colors[ImGuiCol_HeaderHovered]     = Color::GetAccentHovered();
+    style.Colors[ImGuiCol_HeaderActive]      = Color::GetAccentActive();
+
+    // ImGuiCol_Tab* —— active tab 半透橙（c2 设的灰被 c4 覆盖）。
+    // Unfocused 系列保留灰（非主 viewport 时弱化视觉）。
+    style.Colors[ImGuiCol_TabActive]         = Color::GetAccentActive();
+    style.Colors[ImGuiCol_TabHovered]        = Color::GetAccentHovered();
+
+    // ImGuiCol_TabSelectedOverline / DimmedSelectedOverline —— ImGui 1.91
+    // 新增的 active tab 顶部 indicator 细线。c2 / c4 早期未覆盖时保留
+    // StyleColorsDark 默认蓝色，与橙 accent 主题冲突；c4 修复（c4 增量
+    // 修复用户反馈"Scene tab 顶部蓝线"问题）。
+    style.Colors[ImGuiCol_TabSelectedOverline]       = Color::GetAccentPrimary();
+    style.Colors[ImGuiCol_TabDimmedSelectedOverline] = Color::GetAccentSelection();
+
+    // ImGuiCol_FrameBgActive —— 输入框 focus 时的轻染（DragFloat 拖动 /
+    // InputText focus）。
+    style.Colors[ImGuiCol_FrameBgActive]     = Color::GetAccentSelection();
+
+    // CheckMark / SliderGrab —— 复选框勾 / 滑块圆点用 accent 主色（小
+    // 面积可饱和）。
+    style.Colors[ImGuiCol_CheckMark]         = Color::GetAccentPrimary();
+    style.Colors[ImGuiCol_SliderGrab]        = Color::GetAccentPrimary();
+    style.Colors[ImGuiCol_SliderGrabActive]  = Color::GetAccentActive();
+
+    // NavHighlight —— 键盘导航焦点框。
+    style.Colors[ImGuiCol_NavHighlight]      = Color::GetAccentPrimary();
+
+    // DockingPreview —— 拖 panel 时的预览区域（半透）。
+    style.Colors[ImGuiCol_DockingPreview]    = Color::GetAccentSelection();
+
+    // ImGuiCol_TextSelectedBg —— 文本框内选中文字的高亮背景。
+    style.Colors[ImGuiCol_TextSelectedBg]    = Color::GetAccentSelection();
 }
 
 }  // namespace Orange::Editor::Theme

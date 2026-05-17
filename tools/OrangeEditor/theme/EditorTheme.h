@@ -102,11 +102,23 @@ const ImVec4& GetTextDisabled();
 const ImVec4& GetSeparator();
 const ImVec4& GetBorder();
 
-// brand accent 色（橙）。c1 占位 = OrangeEngine 主色 #FF8A3D（已知最终
-// 值，无需 c2 调整）；c4 起用于 focus outline / active tab 下划线 / Save
-// dirty 高亮等"小面积高对比"位置。**绝不用于大面积实色填充**——半透
-// selection 由 `GetAccentSelection()`（c4 添加）承担。
+// brand accent 色（橙）#FF8A3D，alpha 1.0。c4 起用于 focus outline /
+// active tab 下划线 / Save dirty 高亮等"小面积高对比"位置。**绝不用于
+// 大面积实色填充**——大色块走 `GetAccentSelection()` 半透。
 const ImVec4& GetAccentPrimary();
+
+// accent hover：橙 50% alpha。c4 起用于 ImGuiCol_HeaderHovered /
+// ButtonHovered（dirty Save）/ TabHovered 等"鼠标悬停高亮"。
+const ImVec4& GetAccentHovered();
+
+// accent active：橙 60% alpha。c4 起用于 ImGuiCol_HeaderActive /
+// ButtonActive（dirty Save 按下瞬间）/ TabActive 当前激活态。
+const ImVec4& GetAccentActive();
+
+// accent selection：橙 30% alpha 半透叠加。c4 起用于 ImGuiCol_Header
+// （TreeNode / Selectable 选中行整行染色），避免大面积饱和橙刺眼。
+// §D5.1 决策点："selection 用半透叠加而非整行实色填充"的落地。
+const ImVec4& GetAccentSelection();
 
 }  // namespace Color
 
@@ -186,11 +198,22 @@ float GetSizeBody();
 namespace Icon
 {
 
-// 顶部 toolbar Save 按钮 icon。c1 = "Save"；c3 = ICON_CI_SAVE。
+// 顶部 toolbar Save 按钮 icon。c3 = ICON_CI_SAVE。
 const char* GetSave();
 
-// 顶部 toolbar Play 按钮 icon。c1 = "Play"；c3 = ICON_CI_PLAY。
+// 顶部 toolbar Play 按钮 icon。c3 = ICON_CI_DEBUG_START（VS Code
+// transport-control 同款三件套之一）。
 const char* GetPlay();
+
+// c4 扩：toolbar / panel 通用按钮 icon。
+const char* GetPause();    // ICON_CI_DEBUG_PAUSE
+const char* GetStop();     // ICON_CI_DEBUG_STOP
+const char* GetClose();    // ICON_CI_CLOSE / CHROME_CLOSE，用于 "×" 取消按钮
+const char* GetSearch();   // ICON_CI_SEARCH，用于 "Pick" asset 选择
+const char* GetAdd();      // ICON_CI_ADD，用于 "+" 新增按钮
+const char* GetArrowUp();  // ICON_CI_ARROW_UP，用于 ".." 上级目录
+const char* GetFolder();   // ICON_CI_FOLDER
+const char* GetGear();     // ICON_CI_GEAR，用于 Settings 入口
 
 }  // namespace Icon
 

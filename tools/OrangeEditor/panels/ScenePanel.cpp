@@ -109,7 +109,10 @@ void EditorRenderLayer::DrawScenePanel()
     ImGui::SameLine();
     {
         ImGui::BeginDisabled();
-        ImGui::SmallButton("Camera Mode");
+        // v0.6.5 c4：SmallButton → Button，让 disabled 占位与左侧 Persp /
+        // Shaded combo 等高（SmallButton 无 FramePadding.y 比 Combo 矮一档，
+        // 视觉上突兀）。
+        ImGui::Button("Camera Mode");
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         {

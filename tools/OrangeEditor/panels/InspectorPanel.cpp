@@ -10,6 +10,7 @@
 #include "../MaterialFileIO.h"
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
+#include "../theme/EditorTheme.h"
 
 #include <orange/engine/core/Serialization.h>
 #include <orange/engine/render/MaterialInstance.h>
@@ -266,7 +267,9 @@ void EditorRenderLayer::DrawInspectorPanel()
     //   * Animator         —— IAnimator 抽象类，需要具体子类实例
     auto& schemaReg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
     ImGui::Separator();
-    if (ImGui::Button("+ Add Component")) {
+    const std::string addComponentLabel =
+        std::string(Orange::Editor::Theme::Icon::GetAdd()) + " Add Component";
+    if (ImGui::Button(addComponentLabel.c_str())) {
         ImGui::OpenPopup("##add_component");
     }
     if (ImGui::BeginPopup("##add_component")) {

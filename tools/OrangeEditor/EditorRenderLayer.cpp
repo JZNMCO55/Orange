@@ -9,6 +9,7 @@
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
+#include "theme/EditorTheme.h"
 
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
@@ -1237,7 +1238,7 @@ void EditorRenderLayer::DrawAssetsPanel()
     ImGui::SameLine();
     const bool atRoot = (assets.browserCurrentDir == "assets");
     ImGui::BeginDisabled(atRoot);
-    if (ImGui::SmallButton(".."))
+    if (ImGui::SmallButton(Orange::Editor::Theme::Icon::GetArrowUp()))
     {
         const auto slash = assets.browserCurrentDir.find_last_of('/');
         if (slash != std::string::npos)
