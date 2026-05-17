@@ -266,6 +266,41 @@ float PhysicsWorld::GetMass(BodyHandle handle) const noexcept
     return b2Body_GetMass(it->second);
 }
 
+void PhysicsWorld::SetBodyEnabled(BodyHandle handle, bool enabled)
+{
+    if (!mpImpl)
+    {
+        return;
+    }
+    auto it = mpImpl->bodies.find(handle.Value());
+    if (it == mpImpl->bodies.end())
+    {
+        return;
+    }
+    if (enabled)
+    {
+        b2Body_Enable(it->second);
+    }
+    else
+    {
+        b2Body_Disable(it->second);
+    }
+}
+
+bool PhysicsWorld::IsBodyEnabled(BodyHandle handle) const noexcept
+{
+    if (!mpImpl)
+    {
+        return false;
+    }
+    auto it = mpImpl->bodies.find(handle.Value());
+    if (it == mpImpl->bodies.end())
+    {
+        return false;
+    }
+    return b2Body_IsEnabled(it->second);
+}
+
 std::size_t PhysicsWorld::BodyCount() const noexcept
 {
     return mpImpl ? mpImpl->bodies.size() : 0;

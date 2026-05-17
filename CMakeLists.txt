@@ -133,6 +133,7 @@ add_library(orange_engine STATIC
     # + Box2D 3.x 后端（Phase 4 / Task 06）。Box2D 头只在 src/physics/box2d/
     # 与 src/physics/PhysicsWorld.cpp 内出现，公共 include/ 零 b2 依赖。
     src/physics/PhysicsWorld.cpp
+    src/physics/LayerVisibilitySync.cpp
     src/physics/box2d/Box2DBridge.cpp
 
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load

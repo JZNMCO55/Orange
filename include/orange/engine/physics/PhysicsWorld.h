@@ -121,6 +121,25 @@ public:
     // 主要用于诊断 / 单测验证 ReplaceFixture 是否真触发了 mass 重算。
     float GetMass(BodyHandle handle) const noexcept;
 
+    // 启用 / 禁用 body —— 走 Box2D 3.x 的 b2Body_Enable / b2Body_Disable
+    // 路径。disable 的 body：
+    //   * 不参与物理积分（不被 b2World_Step 推进）
+    //   * 不产生 / 接收任何碰撞 contact
+    //   * 仍保留在 world 内，handle 仍然 valid——重新 Enable 即可恢复
+    //
+    // 典型用法（Scene layer hide / show）：
+    //   for each entity in hidden layer:
+    //     world.SetBodyEnabled(body.handle, false);
+    //   when layer is shown again:
+    //     world.SetBodyEnabled(body.handle, true);
+    //
+    // 与 SetLinearVelocity / SetBodyTransform 一样，本调用必须在 Step()
+    // 之外（"逻辑阶段"）。handle 无效 → no-op。
+    void SetBodyEnabled(BodyHandle handle, bool enabled);
+
+    // 查询 body 是否启用。handle 无效 → 返回 false。
+    bool IsBodyEnabled(BodyHandle handle) const noexcept;
+
     // 当前已注册 body 数（诊断 / 单测用）。
     std::size_t BodyCount() const noexcept;
 

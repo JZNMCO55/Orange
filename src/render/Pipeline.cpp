@@ -53,6 +53,7 @@
 #include "orange/engine/render/VfxSystem.h"
 #include "orange/engine/render/ShadowConfig.h"
 #include "orange/engine/scene/World.h"
+#include "orange/engine/scene/WorldPartition.h"
 
 #include "orange/renderer/RenderDevice.h"
 #include "orange/renderer/Renderer.h"
@@ -279,6 +280,11 @@ struct Pipeline::Impl
     RenderScene                            scene;
     Asset::AssetRegistry*                  assets{nullptr};
     Platform::Window*                      window{nullptr};
+
+    // 可选 WorldPartition 引用，由 SetWorldPartition 注入；非空时
+    // RenderScene::Collect 会按 layer 可见性过滤 drawable。nullptr 退化
+    // 到"不按 layer 过滤"行为。
+    const Scene::WorldPartition*           worldPartition{nullptr};
 
     bool initialized{false};
 
@@ -1676,6 +1682,14 @@ void Pipeline::SetMaterialSystem(MaterialSystem* system) noexcept
     if (mpImpl)
     {
         mpImpl->materialSystem = system;
+    }
+}
+
+void Pipeline::SetWorldPartition(const Scene::WorldPartition* partition) noexcept
+{
+    if (mpImpl)
+    {
+        mpImpl->worldPartition = partition;
     }
 }
 
@@ -3130,7 +3144,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     auto& impl = *mpImpl;
 
     impl.scene.Clear();
-    impl.scene.Collect(world);
+    impl.scene.Collect(world, impl.worldPartition);
 
     if (!impl.initialized)
     {

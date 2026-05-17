@@ -36,6 +36,11 @@ namespace Orange::Engine
 class World;
 }
 
+namespace Orange::Engine::Scene
+{
+class WorldPartition;
+}
+
 namespace Orange::Engine::Render
 {
 
@@ -67,7 +72,12 @@ public:
     // visible=true 的实体翻成 Drawable 推入列表。`world` 当中没有
     // Camera 时 HasCamera() 为 false——调用方应据此决定是否仍然下发
     // 渲染。
-    void Collect(const ::Orange::Engine::World& world);
+    //
+    // `partition` 非空时再加一层 "layer.visible" 过滤——对每个 drawable
+    // 候选 entity 查 `partition->IsEntityVisible(world, e)`，false 即跳
+    // 过。partition 空 → 不参与 layer 过滤（行为退化为旧版本）。
+    void Collect(const ::Orange::Engine::World& world,
+                 const ::Orange::Engine::Scene::WorldPartition* partition = nullptr);
 
     // 主相机访问。仅在 HasCamera() == true 时调用 MainCamera()，否
     // 则返回值未定义（默认构造的 Camera）。

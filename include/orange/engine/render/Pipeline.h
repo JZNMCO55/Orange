@@ -41,6 +41,11 @@ namespace Orange::Engine::Platform
 class Window;
 }
 
+namespace Orange::Engine::Scene
+{
+class WorldPartition;
+}
+
 // OrangeRender 公共面前向声明 —— 公共头**不**包含 `<orange/...>`，但前向
 // 声明指针 / 引用类型是允许的（与 OrangeRender 自家 `VulkanInterop.h` 前
 // 向声明 `RHITexture` / `RHICommandList` 同节奏）。消费者真正取用时再
@@ -177,6 +182,13 @@ public:
     // 等需要 system 协作的路径）。nullptr 时 Pipeline 走 fallback：
     // drawable.materialInstance == nullptr 时落到内置 textured Material。
     void SetMaterialSystem(MaterialSystem* system) noexcept;
+
+    // 安装 / 卸载 WorldPartition（非拥有指针）。安装后 Render() 在
+    // RenderScene 收集阶段会按 partition 的 layer 可见性过滤 drawable
+    // ——隐藏 layer 的实体既不进主 pass 也不进 shadow pass。partition
+    // 必须活到 Pipeline 析构 / 下次 SetWorldPartition 之前；nullptr 退
+    // 化到"不按 layer 过滤"行为，与 v1.x 之前完全等价。
+    void SetWorldPartition(const ::Orange::Engine::Scene::WorldPartition* partition) noexcept;
 
     // 安装 / 卸载 VfxSystem（非拥有指针）。安装后 Render() 在主 pass 与
     // bloom 之间插一段 instanced additive billboard pass，把 VfxSystem

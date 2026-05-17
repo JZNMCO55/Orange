@@ -18,6 +18,7 @@
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
+#include "orange/engine/scene/WorldPartition.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -48,7 +49,8 @@ void RenderScene::Clear() noexcept
     mDrawables.clear();
 }
 
-void RenderScene::Collect(const Orange::Engine::World& world)
+void RenderScene::Collect(const Orange::Engine::World& world,
+                          const Orange::Engine::Scene::WorldPartition* partition)
 {
     // 取 const reference 看似一致，但 entt::view 的迭代需要 mutable
     // registry 引用——本实现保证仅读 component，所以做一次内部
@@ -68,11 +70,18 @@ void RenderScene::Collect(const Orange::Engine::World& world)
     }
 
     // Drawable：必须同时有 Transform + Renderable，且 visible=true。
+    // partition 非空时再加一层 layer.visible 过滤——隐藏 layer 上的
+    // entity 不进 drawable 列表，自然也不进 shadow pass。
     auto drawView = registry.view<Scene::TransformComponent, RenderableComponent>();
     for (auto e : drawView)
     {
         const auto& renderable = drawView.get<RenderableComponent>(e);
         if (!renderable.visible)
+        {
+            continue;
+        }
+        const auto entity = Orange::Engine::World::FromEntt(e);
+        if (partition != nullptr && !partition->IsEntityVisible(world, entity))
         {
             continue;
         }
