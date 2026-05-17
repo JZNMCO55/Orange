@@ -47,6 +47,19 @@ orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(vfx_system_test             render/VfxSystemTest.cpp)
 orange_engine_add_test(insert_pass_test            render/InsertPassTest.cpp)
 
+# Material：.material 文件 v1.1 schema helper（MaterialFileIO）。
+# 不走 orange_engine_add_test：helper 源码在 tools/OrangeEditor/ 不属于引擎 lib，
+# 测试 exe 直接编译它 + 加 include path 取 helper 头。本测试 standalone build
+# 时不消费 OrangeEditor 任何 ImGui / GLFW / Vulkan 路径——纯引擎公共面 + helper。
+add_executable(material_file_io_test
+    render/MaterialFileIOTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp")
+target_link_libraries(material_file_io_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(material_file_io_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(material_file_io_test)
+add_test(NAME material_file_io_test COMMAND material_file_io_test)
+
 # Animation：FSM + Backend Registry（Phase 4 / Task 01 公共接口）
 # + ProceduralAnimator 后端（Task 04，shader-uniform 驱动）
 orange_engine_add_test(animation_state_machine_test animation/AnimationStateMachineTest.cpp)

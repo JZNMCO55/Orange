@@ -7,6 +7,7 @@
 #include "../EditorRenderLayer.h"
 
 #include "../EditorWidgets.h"
+#include "../MaterialFileIO.h"
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 
@@ -61,34 +62,13 @@ std::vector<std::string> CollectTemplateNames(
     return names;
 }
 
-// 读 .material 文件的 templateName 字段。失败返回空 string。
+// 读 .material 文件的 templateName 字段。失败 / templateName 缺失返回
+// 空 string。底层走 MaterialFileIO 的 v1.1 reader（v1.0 兼容）。
 std::string ReadMaterialTemplateName(const std::string& path)
 {
-    auto rr = ::Orange::Engine::JsonReader::FromFile(path);
-    if (rr.IsErr()) { return {}; }
-    std::string t;
-    rr.Value().ReadString("templateName", t);
-    return t;
-}
-
-// 写 .material 文件 v1.0（仅 templateName）。失败 log + 不抛。
-void WriteMaterialFile(const std::string& path,
-                       std::string_view templateName)
-{
-    using ::Orange::Engine::JsonWriter;
-    using ::Orange::Engine::SchemaVersion;
-    static const SchemaVersion kSchema{"render/material_instance", 1, 0};
-    JsonWriter writer;
-    writer.WriteSchemaVersion("schemaVersion", kSchema);
-    writer.WriteString("templateName", templateName);
-    auto sv = writer.SaveToFile(path, 2);
-    if (sv.IsErr())
-    {
-        std::fprintf(stderr,
-                     "[OrangeEditor] Save .material '%s' 失败 (code=%u)\n",
-                     path.c_str(),
-                     static_cast<unsigned>(sv.Error()));
-    }
+    auto dataOpt = ::Orange::Editor::Material::ReadMaterialFile(path);
+    if (!dataOpt.has_value()) { return {}; }
+    return dataOpt->templateName;
 }
 
 // Material 子模式主体：读 .material 显示当前 templateName + Combo 切换 +
@@ -170,23 +150,26 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     }
     Orange::Editor::Widgets::EndPropertyTable();
 
-    // 找运行时 MaterialInstance*（通过 schema 模块持有的 namedMaterialInstances
-    // 反向接口拿不到；直接遍历 host.assets 的各 MaterialInstance ptr 对比）。
-    // 简化：当前 c5 不支持 uniform 实时调参 UI —— "deferred" 见头注释。
-    // 占位提示让用户知道这功能正在路上。
+    // Uniform 调参 UI：deferred 到后续 patch（独立 deliverable，不在本
+    // GAP 范围）。schema v1.1 已支持持久化所有 SetUniform override，调参
+    // UI 上线后此处接 BuildDataFromInstance + 各 uniform 控件即可。
     ImGui::Separator();
     ImGui::TextDisabled("Uniforms / Textures 调参 UI：deferred 到后续 patch");
-    ImGui::TextDisabled("当前内置 material 全是 default-constructed 无 override，");
-    ImGui::TextDisabled("等真有调参 use case + .material schema v1.1 落地后实施");
+    ImGui::TextDisabled("(.material schema v1.1 已支持持久化所有 SetUniform override)");
 
-    // Save 按钮：写回 editingTemplateName（uniform 持久化 deferred）。
+    // Save 按钮：以 v1.1 schema 写回（当前 Save 路径只动 templateName，
+    // uniforms / textures 段写空——调参 UI 还没上线，无 override 可保存）。
     // dirty = 用户在 Combo 选的值 != 盘上原值。
     ImGui::Separator();
     const bool dirty = (host.assets.editingTemplateName != originalTemplate);
     ImGui::BeginDisabled(!dirty);
     if (ImGui::Button("Save"))
     {
-        WriteMaterialFile(materialPath, host.assets.editingTemplateName);
+        ::Orange::Editor::Material::MaterialFileData data;
+        data.templateName = host.assets.editingTemplateName;
+        // uniforms / textures 留空——调参 UI 上线后此处改为
+        // BuildDataFromInstance(currentInstance, editingTemplateName)。
+        ::Orange::Editor::Material::WriteMaterialFile(materialPath, data);
         // 内存 MaterialInstance 不在此重新 CreateInstance —— 那会让 Render
         // able.materialInstance 字段持有的旧指针悬挂。完整刷新路径要走
         // namedMaterialInstances 重建 + 所有 Renderable 字段重定向，超出

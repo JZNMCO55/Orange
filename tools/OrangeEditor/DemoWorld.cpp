@@ -3,6 +3,7 @@
 #include "DemoWorld.h"
 
 #include "EditorHierarchy.h"
+#include "MaterialFileIO.h"
 #include "demo_game/HealthComponent.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
@@ -207,74 +208,50 @@ void InitializeEditorAssets(EditorHost& host)
     }
 
     // GAP-2026-05-16 G2：内置 MaterialInstance 落盘 .material + lazy bake。
-    // 文件格式（v1.0 最小集）：
-    //   { "schemaVersion": {"namespace":"render/material_instance","major":1,"minor":0},
-    //     "templateName": "toon" }
-    // 当前内置 material 全部 default-constructed（无 uniform override），
-    // 所以 .material 文件唯一携带的信息就是 templateName。v0.5 c5 Material
-    // 子模式落地后扩 uniforms / textures 字段。
+    // schema v1.1 详见 tools/OrangeEditor/MaterialFileIO.h。
     //
     // 不引入 IAssetLoader<MaterialInstance>：MaterialInstance 构造依赖
     // MaterialSystem& 注入，IAssetLoader 接口没这种容器；走 helper 函数
     // 路径足够简单。namedMaterialInstances 仍是 host.assets 自己拥有 +
     // BuildNamedMaterialInstances 返回 path→ptr 映射。
-    using ::Orange::Engine::JsonReader;
-    using ::Orange::Engine::JsonWriter;
-    using ::Orange::Engine::SchemaVersion;
-    static const SchemaVersion kMatSchema{"render/material_instance", 1, 0};
-
-    auto writeMaterialFile = [](const std::string& path,
-                                std::string_view templateName) -> bool {
-        JsonWriter writer;
-        writer.WriteSchemaVersion("schemaVersion", kMatSchema);
-        writer.WriteString("templateName", templateName);
-        auto sv = writer.SaveToFile(path, 2);
-        if (sv.IsErr())
-        {
-            std::fprintf(stderr,
-                         "[OrangeEditor] .material 写盘 '%s' 失败 (code=%u)\n",
-                         path.c_str(),
-                         static_cast<unsigned>(sv.Error()));
-            return false;
-        }
-        return true;
-    };
-    auto readMaterialTemplate = [](const std::string& path,
-                                   std::string_view fallback) -> std::string {
-        auto rr = JsonReader::FromFile(path);
-        if (rr.IsErr())
-        {
-            std::fprintf(stderr,
-                         "[OrangeEditor] .material 读取 '%s' 失败 (code=%u)，回退 '%.*s'\n",
-                         path.c_str(),
-                         static_cast<unsigned>(rr.Error().code),
-                         static_cast<int>(fallback.size()),
-                         fallback.data());
-            return std::string{fallback};
-        }
-        const auto& reader = rr.Value();
-        std::string templateName;
-        if (!reader.ReadString("templateName", templateName) || templateName.empty())
-        {
-            std::fprintf(stderr,
-                         "[OrangeEditor] .material '%s' templateName 缺失，回退 '%.*s'\n",
-                         path.c_str(),
-                         static_cast<int>(fallback.size()),
-                         fallback.data());
-            return std::string{fallback};
-        }
-        return templateName;
-    };
     auto bakeAndLoadMaterial = [&](const std::string& path,
-                                   std::string_view templateName) {
+                                   std::string_view fallbackTemplate)
+        -> std::unique_ptr<::Orange::Engine::Render::MaterialInstance>
+    {
+        // 文件不存在：用 fallbackTemplate 写一份默认 v1.1（uniforms /
+        // textures 为空）落盘，避免下次启动时再走 fallback。
         if (!std::filesystem::exists(path))
         {
             std::filesystem::create_directories(
                 std::filesystem::path(path).parent_path());
-            writeMaterialFile(path, templateName);
+            ::Orange::Editor::Material::MaterialFileData defaultData;
+            defaultData.templateName = std::string{fallbackTemplate};
+            ::Orange::Editor::Material::WriteMaterialFile(path, defaultData);
         }
-        const std::string actual = readMaterialTemplate(path, templateName);
-        return host.assets.pMaterials->CreateInstance(actual);
+
+        auto dataOpt = ::Orange::Editor::Material::ReadMaterialFile(path);
+        if (!dataOpt.has_value())
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] .material '%s' 读取失败，回退到 '%.*s'\n",
+                         path.c_str(),
+                         static_cast<int>(fallbackTemplate.size()),
+                         fallbackTemplate.data());
+            return host.assets.pMaterials->CreateInstance(fallbackTemplate);
+        }
+
+        auto inst = host.assets.pMaterials->CreateInstance(dataOpt->templateName);
+        if (inst == nullptr)
+        {
+            std::fprintf(stderr,
+                         "[OrangeEditor] .material '%s' template '%s' 未注册，回退\n",
+                         path.c_str(),
+                         dataOpt->templateName.c_str());
+            return host.assets.pMaterials->CreateInstance(fallbackTemplate);
+        }
+        ::Orange::Editor::Material::ApplyDataToInstance(
+            *dataOpt, *inst, host.assets.pAssets.get());
+        return inst;
     };
 
     // 地面 / 备用 textured 实例（路径风格 ID，namedMaterialInstances 用同款 key）
