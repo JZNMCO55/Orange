@@ -102,16 +102,16 @@ bool WriteMaterialFile(const std::string& path, const MaterialFileData& data);
 // GetUniformXxx + GetTextureOverrideBindings 读取——这些 API 是 GAP G2
 // 引擎侧落地的产物（commit c2）。
 //
-// 已知约束（texture override 写盘）：当前 AssetRegistry 不提供
-// AssetHandle<TextureAsset> → 源路径反查 API。BuildDataFromInstance
-// 不能从 instance 里读出"texture binding 当年是从哪个 path 加载的"。
-// 因此 textures[] 段在写盘端目前**只填 binding，path 写为空串**，让
-// reader 读到 path 为空时跳过——schema 字段就位但 round-trip 在
-// texture override 路径上仍残缺。补 AssetRegistry 反查 API 是另一个
-// GAP，本 helper 端写盘语义会随之自动完善。
+// pAssetRegistry：texture override 写盘端用 `AssetRegistry::PathOf` 把
+// `AssetHandle<TextureAsset>` 反查成 path 字符串落盘（GAP-2026-05-17-
+// asset-registry-handle-to-path 落地后实测 PathOf API 早就存在，原 GAP
+// 描述的"缺反查 API"是认知误差）。`nullptr` 时 texture 段只填 binding，
+// path 留空（reader 端识别空 path 跳过还原——与 GAP-2026-05-16 c3 阶段
+// 的过渡行为兼容）。
 MaterialFileData BuildDataFromInstance(
     const ::Orange::Engine::Render::MaterialInstance& instance,
-    const std::string&                                templateName);
+    const std::string&                                templateName,
+    const ::Orange::Engine::Asset::AssetRegistry*     pAssetRegistry = nullptr);
 
 // 把 MaterialFileData 内的 uniform / texture override 应用到一个
 // MaterialInstance 上。typically 在 LoadMaterialFile → CreateInstance

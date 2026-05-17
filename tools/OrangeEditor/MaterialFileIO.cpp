@@ -291,8 +291,9 @@ bool WriteMaterialFile(const std::string& path, const MaterialFileData& data)
 }
 
 MaterialFileData BuildDataFromInstance(
-    const MaterialInstance& instance,
-    const std::string&      templateName)
+    const MaterialInstance&                       instance,
+    const std::string&                            templateName,
+    const ::Orange::Engine::Asset::AssetRegistry* pAssetRegistry)
 {
     MaterialFileData data;
     data.templateName = templateName;
@@ -331,16 +332,25 @@ MaterialFileData BuildDataFromInstance(
         data.uniforms.push_back(std::move(u));
     }
 
-    // texture override：写盘端目前只填 binding，path 空（AssetHandle →
-    // path 反查 API 缺失；见 .h 头注释 "已知约束"）
+    // texture override：pAssetRegistry 非空时调 PathOf 把 handle 反查回
+    // path 字符串落盘；nullptr 时 path 留空（reader 端识别空 path 跳过
+    // 还原——兼容母 GAP c3 阶段过渡行为）。
     std::vector<std::uint32_t> bindings = instance.GetTextureOverrideBindings();
     data.textures.reserve(bindings.size());
     for (std::uint32_t b : bindings)
     {
         TextureOverrideEntry t;
         t.binding = b;
-        // t.path 留空
-        data.textures.push_back(t);
+        if (pAssetRegistry != nullptr)
+        {
+            auto handle = instance.GetTextureBinding(b);
+            // PathOf 处理无效 handle / 已卸载 entry 都安全返回空 view，
+            // 不需要再判 IsValid。
+            std::string_view pv = pAssetRegistry->PathOf(handle);
+            t.path.assign(pv.data(), pv.size());
+        }
+        // else: t.path 留空
+        data.textures.push_back(std::move(t));
     }
 
     return data;

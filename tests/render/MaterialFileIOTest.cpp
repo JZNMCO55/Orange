@@ -17,7 +17,9 @@
 
 #include "MaterialFileIO.h"  // include path 由 CMake 加 tools/OrangeEditor
 
+#include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/render/Material.h>
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/MaterialTypes.h>
@@ -184,7 +186,84 @@ void TestInstanceRoundTrip()
     std::fprintf(stdout, "  [PASS] BuildDataFromInstance + ApplyDataToInstance 还原 uniform override\n");
 }
 
-// 5. 错误路径
+// 5. Texture override 完整 round-trip（GAP-2026-05-17-asset-registry-handle-to-path）：
+//    AssetRegistry.Insert<TextureAsset> → SetTexture(handle) →
+//    BuildDataFromInstance(&registry) 写 path → 序列化 → 反序列化 →
+//    ApplyDataToInstance(&registry) → HasTextureOverride + GetTextureBinding
+//    命中的 handle 通过 registry.Get 拿到同一 TextureAsset（即 dedup 命中
+//    原 entry，没有重复加载）。
+void TestTextureRoundTripWithRegistry()
+{
+    using ::Orange::Engine::Asset::AssetHandle;
+    using ::Orange::Engine::Asset::AssetRegistry;
+    using ::Orange::Engine::Asset::TextureAsset;
+    using ::Orange::Engine::Asset::TextureFormat;
+
+    AssetRegistry registry;
+
+    // 程序式构造一张 1x1 红色纹理，Insert 进 registry（不需 RegisterLoader
+    // 因为走 Insert 路径自带 deleter，详见 AssetRegistry.h Insert 注释）。
+    const std::string texPath = "assets/textures/round_trip_red.png";
+    auto tex = std::make_unique<TextureAsset>(
+        1u, 1u, TextureFormat::R8G8B8A8_UNorm,
+        std::vector<std::uint8_t>{255, 0, 0, 255});
+    auto insertResult = registry.Insert<TextureAsset>(texPath, std::move(tex));
+    assert(insertResult.IsOk());
+    const AssetHandle<TextureAsset> texHandle = insertResult.Value();
+    assert(texHandle.IsValid());
+
+    // 验证 PathOf 反查 OK（前置 sanity）
+    auto pathView = registry.PathOf(texHandle);
+    assert(std::string(pathView) == texPath);
+
+    // 准备 Material schema + Instance A，挂 texture override 到 binding 2
+    Render::Material m;
+    m.textureSlots.push_back({2u, "uMain"});
+
+    Render::MaterialInstance a(&m);
+    a.SetTexture(2u, texHandle);
+    assert(a.HasTextureOverride(2u));
+
+    // BuildDataFromInstance(&registry)：texture path 应被填充
+    MatIO::MaterialFileData data = MatIO::BuildDataFromInstance(a, "tex_tpl", &registry);
+    assert(data.templateName == "tex_tpl");
+    assert(data.textures.size() == 1);
+    assert(data.textures[0].binding == 2u);
+    assert(data.textures[0].path == texPath);  // PathOf 写盘成功
+
+    // 序列化 + 反序列化
+    const std::string filePath = TempPath("texture_round_trip.material");
+    bool wrote = MatIO::WriteMaterialFile(filePath, data);
+    assert(wrote);
+
+    auto readOpt = MatIO::ReadMaterialFile(filePath);
+    assert(readOpt.has_value());
+    assert(readOpt->textures.size() == 1);
+    assert(readOpt->textures[0].binding == 2u);
+    assert(readOpt->textures[0].path == texPath);
+
+    // 应用到新 instance B —— Apply 内部走 registry.Load<TextureAsset>(path)。
+    // AssetRegistry::LoadErased 在 loader 检查之前先看 pathToHandle dedup
+    // 表（src/asset/AssetRegistry.cpp:352）：Insert 路径挂进去的 entry 同
+    // path 命中即可直接返回 cached handle，根本不调 loader。所以即使本测
+    // 试没 RegisterLoader<TextureAsset>，Apply 的 SetTexture 仍能命中。
+    Render::MaterialInstance b(&m);
+    MatIO::ApplyDataToInstance(*readOpt, b, &registry);
+    assert(b.HasTextureOverride(2u));
+    // 还原的 handle 与原 Insert 拿到的 handle 应是同一个（dedup 命中）。
+    auto restoredHandle = b.GetTextureBinding(2u);
+    assert(restoredHandle.IsValid());
+    assert(restoredHandle.Value() == texHandle.Value());
+    // 验证 registry.Get 拿回的 TextureAsset 是原 entry（指针等价）。
+    const TextureAsset* pBefore = registry.Get(texHandle);
+    const TextureAsset* pAfter  = registry.Get(restoredHandle);
+    assert(pBefore != nullptr && pAfter == pBefore);
+
+    std::fprintf(stdout,
+                 "  [PASS] texture override 完整 round-trip（PathOf 写盘 + dedup 命中还原）\n");
+}
+
+// 6. 错误路径
 void TestErrorPaths()
 {
     // 文件不存在
@@ -240,6 +319,7 @@ int main()
     TestRoundTrip();
     TestV10Compat();
     TestInstanceRoundTrip();
+    TestTextureRoundTripWithRegistry();
     TestErrorPaths();
     std::fprintf(stdout, "[MaterialFileIOTest] all tests passed.\n");
     return 0;
