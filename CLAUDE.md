@@ -13,10 +13,11 @@ OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games 
 The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference.
 
 - Current version: `0.1.0` (Unreleased; 0.x ABI is **not** stable)
-- Status (基准 2026-05-15)：**Phase 1 ~ 5.5 全 ✅**（design-plan.md Task 级历史），现处 **Phase 6** —— OrangeEditor 工具链。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 已 ✅；下一里程碑 **v0.5 Asset 浏览器 + Material 子模式**，见 `docs/editor-roadmap.md` 与 `docs/decisions/ADR-001`）。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
+- Status (基准 2026-05-17)：**Phase 1 ~ 5.5 全 ✅**（design-plan.md Task 级历史），现处 **Phase 6** —— OrangeEditor 工具链 **+ Phase 6.5 · 渲染真实感基线（PBR + IBL）已立项，待 B.1 commit-1 启动**。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 已 ✅；下一里程碑 **v0.5 Asset 浏览器 + Material 子模式**，见 `docs/editor-roadmap.md` 与 `docs/decisions/ADR-001`）。Phase 6.5 详细 milestone 设计见 `docs/pbr-ibl-milestone.md`，路线图入口在 `docs/roadmap.md` Phase 6.5 节。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
 - Authoritative documents (read these first):
   - `docs/design-plan.md` — Phase 1–5.5 architecture + task table（含 ✅ 进度）
-  - `docs/roadmap.md` — Phase 6+ long-term roadmap
+  - `docs/roadmap.md` — Phase 6+ long-term roadmap（含 Phase 6.5 outline 入口）
+  - `docs/pbr-ibl-milestone.md` — Phase 6.5 详细 milestone 设计（PBR + IBL，方案 B 两步走）
   - `docs/editor-roadmap.md` — OrangeEditor v0.x 路线（独立 semver）
   - `docs/decisions/` — Architecture Decision Records（跨阶段决策；从 ADR-001 起）
   - `docs/engine-known-gaps.md` — 编辑器 / sample 撞上的引擎缺口登记

@@ -212,6 +212,62 @@
 
 ---
 
+## Phase 6.5 · 渲染真实感基线（PBR + IBL）
+
+**详细 milestone 设计** —— [`pbr-ibl-milestone.md`](./pbr-ibl-milestone.md)。本节是 outline 入口，task 字段（描述 / 前置 / 输出 / 实现要点 / 验证 / Critical Path）以及决议记录 / 风险登记全部在 companion 文件，节奏与 `editor-roadmap.md` 之于 Phase 6 同款。
+
+**目标**：默认 viewport 观感跃迁——从"棋盘 × 阴影"塑料感升级到 PBR + IBL 真实感，对标 Cocos `standard.effect` / Godot `StandardMaterial3D`。Phase 10 渲染深化（SSAO / SSR / 软阴影 / 大气散射）所有 task 建立在本 phase baseline 之上。
+
+**定位**：对位 `Phase 5.5 · Save Game` 先例 —— 独立小 phase 承接基础设施，**不**塞 Phase 10（Phase 10 是按游戏需求拉动的可选渲染深化集合，PBR baseline 是其前置条件而非可选项）。
+
+**拆分**：方案 B 两步走（详细决议见 companion 文件 §决议记录）：
+
+- **B.1 · PBR direct lighting**（3-5 天，不依赖跨仓）：monolithic PBR shader（Cook-Torrance + GGX + Schlick + Smith correlated）+ MaterialInstance 五通道（baseColor / metallic / roughness / normal / AO）+ sample `09_pbr_direct`；IBL 槽位绑 dummy 1×1 黑纹理退化为 direct-only，B.2 阶段替换为真实纹理**零 shader 重构**
+- **B.2 · IBL 完整接入**（1.5-2 周，依赖跨仓 R1/R2/R3 audit pass）：BRDF LUT + irradiance + prefiltered specular 三种卷积烘焙合并单 task（启动期烘焙，对照 Lumix `data/shaders/ibl_filter.hlsl` 122 行单文件多 entry 风格）+ EnvironmentComponent + PolyHaven CC0 default IBL + sample `10_pbr_ibl`
+
+**前置**：Phase 6 编辑器 v0.1 ✅
+
+**跨仓依赖**（OrangeRender 侧 audit）：R1 cubemap 完整 binding 链 / R2 mipmap level-by-level upload / R3 R16G16F format 创建。Lumix（Vulkan + DX12 双后端）跑通这套，audit pass 概率高但仍需独立 session 验证；audit session **B.1 commit-1 当天启动**，与 B.1 实施并行不阻塞。
+
+**编辑器伴随**：
+- B.1 Task 06.5-02 同 commit 序列内补 Material schema 同步（hours 级，不另立 milestone）
+- B.2 Task 06.5-06 同 commit 序列内补 Environment schema 同步
+- 完整编辑器扩展（Environment 浏览 / material thumbnail / sky placeholder）作为**独立 v0.8 编辑器 milestone**在 B.2 完工后启动，见 `editor-roadmap.md`
+
+### Task 06.5-01 · monolithic PBR shader 落地（IBL 槽位 dummy）
+
+详细字段：companion §Task PBR-01。一份 shader 同时含 direct + IBL 全路径，IBL 三槽位 B.1 期间绑 dummy 1×1 黑纹理自然退化，**对标 Lumix `data/shaders/standard.hlsl` monolithic 风格**。`textured_mesh.{vert,frag}` 不删保留作 dev fallback。Critical Path。
+
+### Task 06.5-02 · MaterialInstance 五通道 + texture binding（含 Inspector schema 同步）
+
+详细字段：companion §Task PBR-02。同 commit 序列内完成编辑器 Inspector schema 同步，避免"PBR ✅ 但 Inspector 看不到 metallic / roughness 字段"断层态。Critical Path。
+
+### Task 06.5-03 · sample `09_pbr_direct` + B.1 验收
+
+详细字段：companion §Task PBR-03。9 球阵（3 metallic × 3 roughness）+ 1 个 directional light，**不接 IBL**。Critical Path。
+
+> **B.1 完工 ritual**：跑两份 lint，标 06.5-01 / 02 / 03 ✅，确认 OrangeRender audit 收尾状态（R1/R2/R3 全 pass 或 OrangeRender 侧已 land + bump 完）后才进 B.2。
+
+### Task 06.5-04 · IBL 三种卷积烘焙（合并 BRDF LUT + irradiance + prefiltered specular）
+
+详细字段：companion §Task PBR-04。单一烘焙路径产出 IBL 三件套，**启动期一次性烘焙**（不走编译期 codegen——理由：IBL prefilter 必须启动期，多一条编译期路径属工程复杂度净增）。Critical Path（依赖 R2 audit pass）。
+
+### Task 06.5-05 · IBL 接入 PBR shader（替换 dummy 槽位）
+
+详细字段：companion §Task PBR-05。把 B.1 阶段 dummy 1×1 黑 IBL 纹理替换成 06.5-04 烘焙产物，**shader 一行不改**（B.1 shader 已预留 IBL 段）。Critical Path。
+
+### Task 06.5-06 · EnvironmentComponent + 资产管线
+
+详细字段：companion §Task PBR-06。World 全局 `EnvironmentComponent`（cubemap asset + intensity + tint），**对标 Lumix `render_module.h:267 EnvProbeInfo`**。default IBL 从 **PolyHaven CC0** HDRI 站选 1K outdoor scene equirect 入库 `assets/environments/`。Critical Path。
+
+### Task 06.5-07 · sample `10_pbr_ibl` + B.2 验收
+
+详细字段：companion §Task PBR-07。9 球阵 + IBL 环境 + 1 directional light + furnace test（验能量守恒）。Critical Path。
+
+> **Phase 6.5 完工 ritual**：跑两份 lint，标 Phase 6.5 ✅，拉 v0.8 编辑器伴随 milestone 立项。
+
+---
+
 ## Phase 7 · C# Scripting (CoreCLR Hosting)
 
 **目标**：让游戏侧能用 C# 写 component / system，引擎用 CoreCLR hosting 嵌入 .NET runtime；C++ 与 C# 通过反向 P/Invoke + 受控 marshalling 通讯。**这是大工程，预算 3–6 个月**，且只有在游戏侧明确反馈 C++ 编译循环慢到不可接受时才启动。
