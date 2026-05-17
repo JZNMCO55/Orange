@@ -579,7 +579,7 @@ const std::vector<std::string>& EnumerateTemplateNames() const;
 
 ### 不在本 GAP 范围（已登记 / 后续 session 处理）
 
-- **`AssetRegistry::LookupSourcePath(handle) -> path`**：写盘端 `BuildDataFromInstance` 当前对 texture override 只填 binding（path 为空），因为 `MaterialInstance::GetTextureBinding` 拿到的是 `AssetHandle<TextureAsset>`，但 `AssetRegistry` 没有 handle → 源路径的反查 API。当前 reader 看到空 path 跳过还原。补此 API 后 `BuildDataFromInstance` 写盘语义自动完善——见 [GAP-2026-05-17-asset-registry-handle-to-path](#gap-2026-05-17-asset-registry-handle-to-path)（同 commit 登记）
+- ~~**`AssetRegistry::LookupSourcePath(handle) -> path`**~~ —— ✅ 已落地（2026-05-17 同日补完）。原以为需要新增 API 但实际 `PathOf<T>` 早已存在；`BuildDataFromInstance` 加可选 `AssetRegistry*` 参数后 texture override 写盘端完整。详见 [GAP-2026-05-17-asset-registry-handle-to-path](#gap-2026-05-17-asset-registry-handle-to-path)
 - **Material Inspector uniform 调参 UI**：让用户在 ImGui 中编辑 ToonColor 等 uniform 值的控件 —— OrangeEditor v0.5 后续 patch 范围（c6 或 c7），不在引擎 GAP 范围。引擎侧的"调参 → SetUniform → Save → Load → SetUniform 还原"链路在本 GAP 已全部就位
 - **InspectorPanel Save 后运行时 MaterialInstance 不刷新**：仍是 v0.5 c5 deferred（重启编辑器才看到新 templateName 生效）—— 完整刷新路径要走 namedMaterialInstances 重建 + 所有 Renderable 字段重定向，超出本 GAP 范围
 
@@ -678,12 +678,12 @@ editor-roadmap.md v0.6 milestone "多 chunk / per-layer + dirty 状态" 的 6 �
 
 ---
 
-## GAP-2026-05-17-asset-registry-handle-to-path
+## GAP-2026-05-17-asset-registry-handle-to-path ✅
 
 - **发现方**：GAP-2026-05-16-material-system-enumerate-and-instance-overrides C3 落地
 - **发现日期**：2026-05-17
 - **一句话定性**：`AssetRegistry` 缺 `AssetHandle<T>` → 源路径反查 API；导致 `MaterialFileIO::BuildDataFromInstance` 在写盘端无法把 `MaterialInstance::GetTextureBinding` 拿到的 handle 翻译回 path，texture override 段写盘只能填 binding（path 空），reader 端识别空 path 跳过还原 —— texture override round-trip 形式上残缺
-- **状态**：登记，未开工
+- **状态**：✅ 落地完成（2026-05-17，独立 session）——**GAP 原文认知误差**：能力本来就在（`AssetRegistry::PathOf<T>` 公共 API 已存在于 `include/orange/engine/asset/AssetRegistry.h:211`，2026-05-14 GAP-renderable-material-instance-round-trip 落地时引入用于 scene 序列化），本 GAP 实际只需让 `MaterialFileIO` 消费方真正调它
 
 ### 触发场景
 
@@ -716,6 +716,34 @@ std::string GetSourcePath(AssetHandle<T> handle) const;  // 失败返空
 
 - 母 GAP：[GAP-2026-05-16-material-system-enumerate-and-instance-overrides](#gap-2026-05-16-material-system-enumerate-and-instance-overrides)（已 ✅）
 - 消费方：`tools/OrangeEditor/MaterialFileIO.cpp::BuildDataFromInstance` 第二个 for 循环
+
+### 落地记录（2026-05-17）
+
+**评审发现 G1 无需新增**：开工 ritual 第 1 步阅读 `AssetRegistry.h` 时直接看到 line 211 已有 `PathOf<T>(handle) -> string_view` 模板方法，handle 失效 / 已卸载返回空 view，正是本 GAP 期望的反查接口。该 API 由 2026-05-14 母级别的 [GAP-2026-05-14-renderable-material-instance-round-trip](#gap-2026-05-14-renderable-material-instance-round-trip) 落地时为 scene 序列化引入，但当时本仓库的 OrangeEditor 侧 MaterialFileIO 还没写，所以 c3 commit 那位作者（也是我）登记 GAP 时漏看了——典型"GAP 登记没做开工前 5 分钟的 surface scan"。
+
+两个 commit 落地：
+
+- **C1 ✅ `MaterialFileIO::BuildDataFromInstance` 加可选 `const AssetRegistry*` 参数**
+  - 默认 `nullptr` 向后兼容（DemoWorld / InspectorPanel 现有 caller 不必同步改动）
+  - 非空时按 binding 调 `instance.GetTextureBinding(b)` 拿 `AssetHandle<TextureAsset>` → `pAssetRegistry->PathOf(handle)` → 翻为 string 落盘
+  - `.h` 头注释从"已知约束 / 后续 GAP 落地后自动完善" 改为说明能力已就位
+
+- **C2 ✅ `MaterialFileIOTest::TestTextureRoundTripWithRegistry`**
+  - 程序式构造 1x1 红色 TextureAsset → `registry.Insert<TextureAsset>(path, ...)` → SetTexture(handle) → Build(&registry) 写盘 path 非空 → Write → Read → Apply(&registry) → handle 还原
+  - 关键洞察：`AssetRegistry::LoadErased` 在 loader 检查之前先看 `pathToHandle` dedup（`src/asset/AssetRegistry.cpp:352`），Insert entry 同 path 的 Load 直接命中 cache 返回原 handle，根本不调 loader。所以单测环境（无 `RegisterLoader<TextureAsset>`）也能跑完整 round-trip：还原 handle.Value() == 原 Insert handle.Value() + `registry.Get` 拿回同一 `TextureAsset*`（指针等价）
+
+### 期望验收对照
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| `BuildDataFromInstance` 在 texture override 段填写完整 path（写盘端不再残缺） | ✅（c1） |
+| 新增单测：texture override round-trip（Set → Build → Write → Read → Apply → handle IsValid + 命中同 path 资源） | ✅（c2 TestTextureRoundTripWithRegistry，5 个 case 全 PASS） |
+| 不破坏现有 `LoadXxx` 公共 API；只新增一个查询接口 | ✅（PathOf 早已存在；BuildDataFromInstance 是 editor 侧 helper，加默认参数向后兼容） |
+
+### 不在本 GAP 范围
+
+- **`InspectorPanel` Save 路径接 `BuildDataFromInstance`**：当前 Save 仅写 templateName + 空 uniforms/textures（c3 commit `b7c92d3` 旧路径），待 Material Inspector 调参 UI 上线时一并切到 `BuildDataFromInstance(currentInstance, editingTemplateName, &assetRegistry)`——属 OrangeEditor v0.5 后续 patch 范围
+- **`DemoWorld::bakeAndLoadMaterial` 内部 texture 段**：当前内置 material 全部 default-constructed（无 texture override），bake 路径未实际触发 texture 写盘，无需改动
 
 ---
 
@@ -751,6 +779,7 @@ stash 出本 GAP 全部改动后该错误仍存在，确认 pre-existing。
 
 ## 处理记录
 
+- **GAP-2026-05-17-asset-registry-handle-to-path**（2026-05-17 落地）：发现 `AssetRegistry::PathOf<T>` 公共 API 早已存在（GAP 登记时漏看），实际只需 `MaterialFileIO::BuildDataFromInstance` 加可选 `const AssetRegistry*` 参数 + 内部消费 PathOf。详细见上文条目末尾"落地记录"节。涉及 commit：`784bf1a`。关键改动文件：`tools/OrangeEditor/MaterialFileIO.{h,cpp}` / `tests/render/MaterialFileIOTest.cpp`（TestTextureRoundTripWithRegistry）
 - **GAP-2026-05-16-material-system-enumerate-and-instance-overrides**（2026-05-17 落地）：MaterialSystem::GetTemplateNames + MaterialInstance enumerate override API + .material schema v1.0 → v1.1（uniforms/textures）+ Editor 端 MaterialFileIO helper + 4 新测试。详细见上文条目末尾"落地记录"节。涉及 commit：`3b9718d`（C1）/ `6b598ba`（C2）/ `b7c92d3`（C3）。关键改动文件：`include/orange/engine/render/MaterialSystem.h` / `include/orange/engine/render/MaterialInstance.h` / `src/render/MaterialSystem.cpp` / `src/render/MaterialInstance.cpp` / `tools/OrangeEditor/MaterialFileIO.{h,cpp}`（新增）/ `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/panels/InspectorPanel.cpp` / `tools/OrangeEditor/CMakeLists.txt` / `tests/render/MaterialFileIOTest.cpp`（新增）/ `tests/render/MaterialInterfaceTest.cpp` / `tests/render/MaterialSystemTest.cpp` / `tests/CMakeLists.txt`
 - **GAP-2026-05-16-directional-light-transform-decoupled**（2026-05-17 落地）：DirectionalLight 删 direction 字段 + Pipeline 改用 entity.Transform.rotation 派生方向 + ReadDirectionalLight v1 migrator 旧 scene direction 字段自动转 TC.rotation + 7 sample/DemoWorld/编辑器 schema/gizmo plugin/2 tests 全数迁移。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/render/LightComponent.h` / `src/render/Pipeline.cpp` / `src/scene/ComponentSerializers.cpp` / `samples/{05,06,07,08,09,12}*/main.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tests/render/LightAndShadowTest.cpp` / `tests/scene/SceneSerializationTest.cpp`
 - **GAP-2026-05-17-scene-layer-component**（2026-05-17 落地）：LayerComponent + WorldPartition 公共面 + SceneSerialization 多文件 + manifest + Render/Physics layer.visible 过滤 + sample。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/scene/LayerComponent.h` / `include/orange/engine/scene/WorldPartition.h` / `include/orange/engine/scene/SceneSerialization.h`（SaveSplit/LoadSplit + LoadOptions.assignLayerId）/ `include/orange/engine/render/RenderScene.h`（Collect 加 partition 参数）/ `include/orange/engine/render/Pipeline.h`（SetWorldPartition）/ `include/orange/engine/physics/PhysicsWorld.h`（SetBodyEnabled/IsBodyEnabled）/ `include/orange/engine/physics/LayerVisibilitySync.h` / `src/scene/WorldPartition.cpp` / `src/scene/SceneSerialization.cpp`（SaveImpl 抽取 + SaveSplit/LoadSplit + scene/world 1.2 + scene/manifest 1.0）/ `src/scene/ComponentSerializers.cpp`（Layer 序列化器注册）/ `src/render/RenderScene.cpp` / `src/render/Pipeline.cpp` / `src/physics/PhysicsWorld.cpp` / `src/physics/LayerVisibilitySync.cpp` / `samples/12_layer_partition_demo/`
