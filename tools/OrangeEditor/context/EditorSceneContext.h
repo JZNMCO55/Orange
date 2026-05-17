@@ -51,7 +51,28 @@ enum class PlayOp : std::uint8_t
     EnterPlay,    // Edit  → Play （建 snapshot + 启动 simulation）
     Pause,        // Play  → Paused
     Resume,       // Paused → Play
-    Stop,         // Play / Paused → Edit （销毁 simulation + 还原 snapshot）
+    Stop,         // Play / 已 Paused → Edit （销毁 simulation + 还原 snapshot）
+};
+
+// v0.6 c2：未保存改动确认对话框的"待执行动作"。
+// 触发：用户在 dirty=true 时按 Esc / 点窗口 × / 点 File>New / File>Open。
+// 触发路径**不**直接执行（不丢未保存），而是把目标动作记到本字段 +
+// 弹模态 popup；popup 用户选 Save / Discard / Cancel 后决定怎么走。
+//
+// 三个用户操作的语义：
+//   * Save    —— 执行 Save 流程（同 SceneOp::Save）成功后再执行 pending action
+//   * Discard —— 忽略未保存改动，直接执行 pending action
+//   * Cancel  —— 取消 pending action，编辑器回到原状态
+//
+// "Save 流程"包括 currentScenePath 为空时弹文件对话框（同 SceneOp::Save 内
+// 的 SaveAs fallback）；Save 失败时**不**继续 pending action（保持 popup
+// 让用户重试或 Cancel）。
+enum class PendingCloseAction : std::uint8_t
+{
+    None = 0,
+    Exit,       // Esc / 窗口 × → RequestExit
+    NewScene,   // File>New → pendingSceneOp = New
+    OpenScene,  // File>Open → pendingSceneOp = Open
 };
 
 struct EditorSceneContext
@@ -84,6 +105,11 @@ struct EditorSceneContext
     PlayState   playState        = PlayState::Edit;
     PlayOp      pendingPlayOp    = PlayOp::None;
     std::string playSnapshotPath;
+
+    // v0.6 c2：未保存确认 popup 状态。pendingCloseAction != None 时下一
+    // 帧 EditorRenderLayer 弹 modal popup；用户选 Save/Discard/Cancel 后
+    // 决定怎么走 pendingCloseAction（执行 / 重置）。
+    PendingCloseAction pendingCloseAction = PendingCloseAction::None;
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_SCENE_CONTEXT_H

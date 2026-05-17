@@ -63,12 +63,26 @@ private:
     // ---- EditorRenderLayer.cpp -----------------------------------------
     static void BuildDefaultLayoutOnce(ImGuiID dockspaceId);
     void DrawMainMenuBar();
+    // v0.6 c1：每帧把"<scene>[ *] — OrangeEditor" 推到 GLFW 原生窗口
+    // title。dirty 状态由 mHost.scene.dirty 决定，scene 名取
+    // currentScenePath basename（空路径走 "(unsaved scene)"）。内部
+    // 缓存上次 title，仅在变化时调 glfwSetWindowTitle 避免无谓 OS-level
+    // 非客户区重绘。
+    void UpdateWindowTitle();
     void ResetEntityLocalState();
     // Undo/Redo 之后立即调用：把已被销毁的实体句柄从 EditorHost 各字段里清掉，
     // 避免后续帧对死实体做 DestroySubtree / GetComponent 等操作崩溃。
     void ValidateEntityHandles();
     void ApplyPendingSceneOp();
     void ApplyPendingPlayOp();
+    // v0.6 c2：未保存改动确认 modal。pendingCloseAction != None 触发；
+    // Save / Discard / Cancel 三选一分别 →  调 SceneOp::Save 然后等下帧
+    // dirty=false 自动 dispatch / 立即 dispatch / 重置 pendingCloseAction。
+    void DrawUnsavedConfirmPopup();
+    // v0.6 c2：执行 pendingCloseAction（Exit/NewScene/OpenScene）+ 清状态。
+    // Discard 路径直接调；Save 路径在 dirty 清零后由 DrawUnsavedConfirmPopup
+    // 早退分支自动调。
+    void DispatchPendingCloseAction();
     void DrawAssetsPanel();
     static void DrawAnimationPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
@@ -142,6 +156,10 @@ private:
     // present 到新 size surface 出现"image 在 surface 左上角 + 剩余空白"。
     std::uint32_t                                     mLastFramebufferWidth{0};
     std::uint32_t                                     mLastFramebufferHeight{0};
+
+    // v0.6 c1：上一帧推到 GLFW 的窗口 title 缓存。UpdateWindowTitle 算
+    // 新 title 与本字段比对，仅在不同时调 glfwSetWindowTitle。
+    std::string                                       mLastWindowTitle;
 
     // ---- Play Mode simulation 运行时（Edit 态均为 nullptr）--------------
     // Play → Stop 时统一销毁（PhysicsWorld reset 即销毁所有 b2 body；

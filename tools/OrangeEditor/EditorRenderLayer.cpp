@@ -223,6 +223,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 
     BuildDefaultLayoutOnce(dockspaceId);
     DrawMainMenuBar();
+    UpdateWindowTitle();
 
     // 六个固定面板：Scene / Entity Tree / Inspector / Assets / Console /
     // Animation（v0.5 c2 起 Animation 加入底部 tab 容器，与 Cocos Creator 3.6.0
@@ -233,6 +234,12 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     DrawAssetsPanel();
     DrawConsolePanel(frame);
     DrawAnimationPanel();
+
+    // v0.6 c2：未保存确认 popup —— 必须在 ApplyPendingSceneOp 之前，让
+    // popup 的 Save 按钮设置的 pendingSceneOp 在同帧 ApplyPendingSceneOp
+    // 内被消费；popup 自身用 BeginPopupModal 阻塞 ImGui 帧逻辑（背后
+    // panels 仍画但不响应输入），用户点 Save/Discard/Cancel 后才继续。
+    DrawUnsavedConfirmPopup();
 
     // 帧末统一 apply 场景级操作。放在 panel 绘制完之后、ImGui::Render
     // 之前 —— 文件对话框是模态阻塞窗口，它内部会 pump 一些消息但不
@@ -285,6 +292,13 @@ bool EditorRenderLayer::OnEvent(const Orange::Engine::Platform::WindowEvent& eve
     if (key == nullptr) { return false; }
     if (key->action != Orange::Engine::Platform::KeyAction::Press) { return false; }
     if (key->key != kEscapeKeyRaw) { return false; }
+    // v0.6 c2：dirty 时 Esc 拦截走未保存确认 popup（不直接 RequestExit）。
+    if (mHost.scene.dirty) {
+        if (mHost.scene.pendingCloseAction == PendingCloseAction::None) {
+            mHost.scene.pendingCloseAction = PendingCloseAction::Exit;
+        }
+        return true;
+    }
     std::fprintf(stdout, "[OrangeEditor] Esc 按下，请求退出\n");
     mAppHost.RequestExit();
     return true;
@@ -339,6 +353,107 @@ void EditorRenderLayer::BuildDefaultLayoutOnce(ImGuiID dockspaceId)
 // Main menu bar / scene op
 // ---------------------------------------------------------------------------
 
+// v0.6 c1：原生窗口 title 同步 scene 名 + dirty 状态。
+// 格式（VS Code / Lumix 同款 "file [*] — app" 工业惯例）：
+//   "demo.scene.json — OrangeEditor"        无 dirty / 已保存
+//   "demo.scene.json * — OrangeEditor"      有未保存改动
+//   "(unsaved scene) * — OrangeEditor"      新建未保存
+// dirty backend (mHost.scene.dirty) 自 v0.2 cmdStack.SetOnChanged 钩子起
+// 已 wired；本函数仅消费 + 推 GLFW。mLastWindowTitle 缓存避免每帧 GLFW
+// SetWindowTextW（Win32 非客户区重绘）spam。
+void EditorRenderLayer::UpdateWindowTitle()
+{
+    const std::string& path = mHost.scene.currentScenePath;
+    std::string sceneName;
+    if (path.empty())
+    {
+        sceneName = "(unsaved scene)";
+    }
+    else
+    {
+        const auto slash = path.find_last_of('/');
+        sceneName = (slash == std::string::npos)
+                  ? path
+                  : path.substr(slash + 1);
+    }
+    const char* dirtyMark = mHost.scene.dirty ? " *" : "";
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), "%s%s \xE2\x80\x94 OrangeEditor",
+                  sceneName.c_str(), dirtyMark);
+    if (mLastWindowTitle == buf) { return; }
+    mLastWindowTitle = buf;
+    auto* pGlfw = static_cast<GLFWwindow*>(
+        mAppHost.GetWindow().GetGlfwWindowHandle());
+    if (pGlfw != nullptr) { glfwSetWindowTitle(pGlfw, buf); }
+}
+
+// v0.6 c2：执行 pendingCloseAction（Exit/NewScene/OpenScene）+ 清状态。
+// Discard 按钮直接调；Save 按钮路径在 dirty 清零后由
+// DrawUnsavedConfirmPopup 早退分支自动调。
+void EditorRenderLayer::DispatchPendingCloseAction()
+{
+    switch (mHost.scene.pendingCloseAction)
+    {
+        case PendingCloseAction::Exit:
+            mAppHost.RequestExit();
+            break;
+        case PendingCloseAction::NewScene:
+            mHost.scene.pendingSceneOp = SceneOp::New;
+            break;
+        case PendingCloseAction::OpenScene:
+            mHost.scene.pendingSceneOp = SceneOp::Open;
+            break;
+        case PendingCloseAction::None:
+            break;
+    }
+    mHost.scene.pendingCloseAction = PendingCloseAction::None;
+}
+
+// v0.6 c2：未保存改动 modal 确认。状态机：
+//   pendingCloseAction != None + dirty=true   → 显示 popup
+//   pendingCloseAction != None + dirty=false  → 静默 dispatch（Save 完成后路径）
+//   pendingCloseAction == None                → 不显示
+// Save 按钮转 SceneOp::Save → ApplyPendingSceneOp 帧末执行；下帧 dirty 清
+// 零自动 dispatch pendingCloseAction（Save 失败 → dirty 仍 true → popup 重
+// 新弹让用户重试或 Cancel）。
+void EditorRenderLayer::DrawUnsavedConfirmPopup()
+{
+    if (mHost.scene.pendingCloseAction == PendingCloseAction::None) { return; }
+    if (!mHost.scene.dirty)
+    {
+        DispatchPendingCloseAction();
+        return;
+    }
+
+    static constexpr const char* kPopupId = "##unsaved_confirm";
+    ImGui::OpenPopup(kPopupId);
+    if (ImGui::BeginPopupModal(kPopupId, nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("当前 scene 有未保存的改动。");
+        ImGui::TextDisabled("Save = 保存后继续  /  Discard = 丢弃改动继续  /  Cancel = 取消");
+        ImGui::Separator();
+        if (ImGui::Button("Save"))
+        {
+            mHost.scene.pendingSceneOp = SceneOp::Save;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard"))
+        {
+            DispatchPendingCloseAction();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            mHost.scene.pendingCloseAction = PendingCloseAction::None;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 // 主菜单栏（File / View / Help ...）。BeginMainMenuBar 创建一个固定
 // 顶部的浮动 bar，与 DockSpaceOverViewport 共存 —— ImGui 自动把
 // dockspace 下移留出 menu bar 高度。文件操作不在此立即执行：菜单点
@@ -354,10 +469,20 @@ void EditorRenderLayer::DrawMainMenuBar()
     if (!ImGui::BeginMainMenuBar()) { return; }
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New Scene")) {
-            mHost.scene.pendingSceneOp = SceneOp::New;
+            // v0.6 c2：dirty 时拦截走未保存确认 popup（DispatchPendingCloseAction
+            // 在 popup 走完 Save/Discard 后会重设 pendingSceneOp）。
+            if (mHost.scene.dirty) {
+                mHost.scene.pendingCloseAction = PendingCloseAction::NewScene;
+            } else {
+                mHost.scene.pendingSceneOp = SceneOp::New;
+            }
         }
         if (ImGui::MenuItem("Open Scene...")) {
-            mHost.scene.pendingSceneOp = SceneOp::Open;
+            if (mHost.scene.dirty) {
+                mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
+            } else {
+                mHost.scene.pendingSceneOp = SceneOp::Open;
+            }
         }
         ImGui::Separator();
         // Save 亮判定 = "world 自上次保存/加载后被改过"。currentScenePath 是
@@ -372,7 +497,12 @@ void EditorRenderLayer::DrawMainMenuBar()
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Exit")) {
-            mAppHost.RequestExit();
+            // v0.6 c2：dirty 时拦截走未保存确认 popup。
+            if (mHost.scene.dirty) {
+                mHost.scene.pendingCloseAction = PendingCloseAction::Exit;
+            } else {
+                mAppHost.RequestExit();
+            }
         }
         ImGui::EndMenu();
     }

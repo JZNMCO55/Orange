@@ -487,6 +487,32 @@ int main()
                                                         imguiDescPool, vkDevice,
                                                         editorHost));
 
+    // v0.6 c2：窗口 × 拦截。AppHost::Run 的循环结构是
+    // `while (!ShouldClose && !exitRequested)`，先 check 后 OnUpdate ——
+    // 意味用户点 × 后下一次 iteration 起头 ShouldClose=true 立即 break，
+    // **不进** OnUpdate，编辑器无机会拦截 dirty。
+    // 解：glfwSetWindowCloseCallback 在 GLFW 处理 × 事件时即触发，
+    // dirty=true 时 set ShouldClose=false 阻止关闭 + 标记 pendingCloseAction
+    // 让 EditorRenderLayer 帧末弹 popup。dirty=false 时不拦，让 ShouldClose
+    // 保持 true，AppHost::Run 下次 iteration 正常退出。
+    // ImGui_ImplGlfw_InitForVulkan(install_callbacks=true) 不安装
+    // WindowCloseCallback（仅 Key/Char/MouseButton/Scroll/Cursor*/Focus
+    // /Monitor），所以本 callback 独占该 hook。
+    glfwSetWindowUserPointer(glfwWindow, &editorHost);
+    glfwSetWindowCloseCallback(glfwWindow, [](GLFWwindow* w)
+    {
+        auto* pHost = static_cast<EditorHost*>(glfwGetWindowUserPointer(w));
+        if (pHost == nullptr) { return; }
+        if (pHost->scene.dirty)
+        {
+            glfwSetWindowShouldClose(w, GLFW_FALSE);
+            if (pHost->scene.pendingCloseAction == PendingCloseAction::None)
+            {
+                pHost->scene.pendingCloseAction = PendingCloseAction::Exit;
+            }
+        }
+    });
+
     std::fprintf(stdout,
                  "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
                  editorHost.scene.pWorld->Size());
