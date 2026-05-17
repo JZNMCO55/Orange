@@ -337,12 +337,99 @@ def rule_editor_no_widget_pixel_literal(path: Path, lines: list[str]) -> Iterabl
         )
 
 
+# OrangeEditor v0.6.5 视觉体系纪律（§D5.1 红线）：
+#
+# 红线 1：禁止直接调字面量 ImVec4 RGBA —— 必须经 EditorTheme token。
+# EditorTheme.cpp / .h 是 token 定义层（必然写字面量），白名单豁免。
+#
+# 匹配策略：`ImVec4(\s*[+-]?\d*\.\d+f?\s*,\s*[+-]?\d*\.\d+f?\s*,\s*
+# [+-]?\d*\.\d+f?\s*,` —— 至少 3 个 float literal 参数说明这是 RGBA 字
+# 面量构造（而非来自 EditorTheme getter 的赋值 / copy）。注释 /
+# 字符串字面量豁免（block-comment 状态机）。
+EDITOR_LITERAL_RGBA_RE = re.compile(
+    r"ImVec4\s*\(\s*[+-]?\d*\.\d+f?\s*,\s*[+-]?\d*\.\d+f?\s*,\s*[+-]?\d*\.\d+f?\s*,"
+)
+
+EDITOR_LITERAL_RGBA_WHITELIST = {
+    "tools/OrangeEditor/theme/EditorTheme.cpp",
+    "tools/OrangeEditor/theme/EditorTheme.h",
+}
+
+
+def rule_editor_no_literal_rgba(path: Path, lines: list[str]) -> Iterable[Violation]:
+    rel_path = rel(path)
+    if not rel_path.startswith("tools/OrangeEditor/"):
+        return
+    if rel_path in EDITOR_LITERAL_RGBA_WHITELIST:
+        return
+    in_block_comment = False
+    for i, line in enumerate(lines, start=1):
+        if in_block_comment:
+            if "*/" in line:
+                in_block_comment = False
+            continue
+        if _block_comment_starts_here(line):
+            in_block_comment = True
+            continue
+        if COMMENT_LINE_RE.match(line):
+            continue
+        if EDITOR_LITERAL_RGBA_RE.search(line):
+            yield Violation(
+                "editor-literal-rgba",
+                rel_path,
+                i,
+                "字面量 ImVec4 RGBA 必须经 EditorTheme token "
+                "（见 editor-roadmap §D5.1 红线 / EditorTheme.h Color::Get* getters）",
+            )
+
+
+# 红线 2：禁止裸短符号文字按钮 —— 必须用 Codicons codepoint。多字 dialog
+# 按钮（Save / Cancel / OK 等）允许，按 §D5.1 红线针对短符号精神。
+#
+# 匹配策略：枚举已知短符号 label —— `+` / `-` / `.` / `..` / `X` / `x`
+# / `×`（UTF-8 `\xC3\x97`）/ `▼` `▲` `►` `◄` / `<` `>` / `!` `?` `*`。
+# 长度 > 2 或包含字母（"Save" 等）自动豁免。覆盖 Button / SmallButton /
+# ArrowButton 三个 API（不含 ImageButton —— icon 路径已经走 image 不存在
+# 字符串 label）。
+EDITOR_BARE_SHORT_BUTTON_RE = re.compile(
+    r'\bImGui::(?:Button|SmallButton|ArrowButton)\s*\(\s*'
+    r'"(?:\+|-|\.|\.\.|X|x|\xC3\x97|▼|▲|►|◄|<|>|!|\?|\*)"'
+)
+
+
+def rule_editor_no_bare_text_button(path: Path, lines: list[str]) -> Iterable[Violation]:
+    rel_path = rel(path)
+    if not rel_path.startswith("tools/OrangeEditor/"):
+        return
+    in_block_comment = False
+    for i, line in enumerate(lines, start=1):
+        if in_block_comment:
+            if "*/" in line:
+                in_block_comment = False
+            continue
+        if _block_comment_starts_here(line):
+            in_block_comment = True
+            continue
+        if COMMENT_LINE_RE.match(line):
+            continue
+        if EDITOR_BARE_SHORT_BUTTON_RE.search(line):
+            yield Violation(
+                "editor-bare-text-button",
+                rel_path,
+                i,
+                "裸短符号文字按钮必须用 Codicons codepoint "
+                "（见 editor-roadmap §D5.1 红线 / EditorTheme.h Icon::Get* getters）",
+            )
+
+
 RULES: list[Rule] = [
     Rule("header-isolation", "公共头与第三方头隔离（box2d / dragonBones / miniaudio / orange/* / vulkan）", rule_header_isolation),
     Rule("no-bare-json-in-public-headers", "公共头禁止裸 nlohmann::json", rule_no_bare_json_in_public_headers),
     Rule("no-task-references", "代码注释禁止引用 Task NN / Phase N", rule_no_task_references),
     Rule("editor-no-hardcode", "OrangeEditor 禁止 DrawInspectorXxx hardcode（v0.2.5 后强制）", rule_editor_no_hardcode),
     Rule("editor-widget-pixel-literal", "OrangeEditor 禁止 widget 层字面量像素列宽（v0.4.5 后强制）", rule_editor_no_widget_pixel_literal),
+    Rule("editor-literal-rgba", "OrangeEditor 禁止字面量 ImVec4 RGBA（v0.6.5 后强制；token 定义层白名单）", rule_editor_no_literal_rgba),
+    Rule("editor-bare-text-button", "OrangeEditor 禁止裸短符号文字按钮（v0.6.5 后强制；多字 label 允许）", rule_editor_no_bare_text_button),
 ]
 
 

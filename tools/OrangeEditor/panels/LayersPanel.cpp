@@ -111,7 +111,9 @@ void EditorRenderLayer::DrawLayersPanel()
         const bool idEmpty     = (idBuf[0] == '\0');
         const bool idCollision = !idEmpty && mHost.scene.partition.HasLayer(idBuf);
         if (idCollision) {
-            ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
+            // v0.6.5 c7：错误提示用 EditorTheme AlertError 红 token
+            // 替换字面量 RGBA（与 lint editor-literal-rgba 规则对齐）。
+            ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertError(),
                                "id '%s' already exists", idBuf);
         }
         ImGui::BeginDisabled(idEmpty || idCollision);

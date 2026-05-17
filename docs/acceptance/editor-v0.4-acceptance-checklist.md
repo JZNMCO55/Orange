@@ -497,7 +497,7 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
 
 ### 验收点
 
-> **8 项功能验收推迟到 v0.6.5**：v0.4 期用户因工具栏不够美观以致没法集中注意力跑完整功能验收（[v0.6.5 立项](../editor-roadmap.md#v065--视觉统一与主题打磨) 即由此触发）。下面 [✅] 的项是 c5 落地时已确认；剩余 [ ] 项推迟到 v0.6.5 美化完成后跟 acceptance scene 一并跑。
+> **8 项功能验收推迟到 v0.6.5**：v0.4 期用户因工具栏不够美观以致没法集中注意力跑完整功能验收（[v0.6.5 立项](../editor-roadmap.md#v065--视觉统一与主题打磨) 即由此触发）。下面 [✅] 的项是 c5 落地时已确认；剩余 8 项的**父级**于 v0.6.5 c7 收尾时勾 ✅，由 v0.6.5 acceptance-checklist 节点 A 大回归（P2）覆盖；子级保留 [ ] 表示"未逐一独立验证，节点 A 通过即视为整段通过"。
 
 - [✅] **Gizmos 总开关 checkbox 基础**
   - [✅] 启动编辑器、自动加载 demo scene
@@ -505,7 +505,7 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
   - [✅] hover "Gizmos" checkbox → tooltip 显示总开关说明文字
   - [✅] 默认勾选状态（gizmo 默认显示）
 
-- [ ] **Gizmos 关闭后所有 overlay 消失**
+- [✅] **Gizmos 关闭后所有 overlay 消失**
   - [ ] 选中带 Transform 的实体 → 看到内置 Transform gizmo（W/E/R 三模式之一）
   - [ ] 选中 DirectionalLight → 看到黄色方向箭头
   - [ ] 选中 ParticleEmitter → 看到青色 spawn box + 箭头
@@ -513,16 +513,16 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
   - [ ] **取消勾选 Gizmos checkbox** → 上述**所有** overlay 在 viewport 内同时消失
   - [ ] 重新勾选 → 全部 overlay 立即恢复
 
-- [ ] **Gizmos 关闭期间 picking 仍正常**
+- [✅] **Gizmos 关闭期间 picking 仍正常**
   - [ ] 取消 Gizmos 勾选 → 在 viewport 内点击不同几何体 → 选中实体正确切换
   - [ ] 验证 hover gizmo handle 阻拦 picking 的行为在 visible=false 时也不会误触发
 
-- [ ] **disabled placeholder 项的 tooltip**
+- [✅] **disabled placeholder 项的 tooltip**
   - [ ] hover "Persp" Combo / "Shaded" Combo / "Camera Mode" SmallButton（即使 disabled）
   - [ ] 每个 placeholder 弹出**说明未实现 + 依赖什么 + 登记位置**的 tooltip 文字
   - [ ] 点击 disabled 项不响应（视觉灰色 + 无 hover 高亮）
 
-- [ ] **Camera frustum 显示**
+- [✅] **Camera frustum 显示**
   - [ ] 在 Entity Tree 找到 demo scene 内挂 Camera 的实体（DemoWorld 内的 "camera"
     实体，typeName 可能显示为根节点附近的 "Camera" 名字）
   - [ ] 选中后 viewport 内**出现 12 段青色线框组成的 frustum**：
@@ -534,13 +534,13 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
   - [ ] frustum 位置跟随 entity.position：Inspector 改 position → frustum 移动到
     新位置
 
-- [ ] **Camera 实体 Inspector 显示**
+- [✅] **Camera 实体 Inspector 显示**
   - [ ] 选中 Camera 实体 → Inspector 内出现一个**空的 "Camera" component header**
     （可折叠 / 展开，没字段）
   - [ ] **不**显示 Remove Component 右键菜单项（Camera schema 未 .Removable()）
   - [ ] +Add Component 菜单**不**包含 Camera（schema 未 .Addable()）
 
-- [ ] **Camera frustum 当前限制（已知 fake 行为）**
+- [✅] **Camera frustum 当前限制（已知 fake 行为）**
   - [ ] frustum 的 fov / aspect / near / far 是 hardcode 默认值（45° / 16:9 /
     0.1 / 10）—— 视觉上是一个固定形状的锥体，**不**反映 Camera component 真实
     view/projection 矩阵
@@ -549,12 +549,12 @@ editor-roadmap.md v0.4 最后一项 deliverable，落两个东西：
   - [ ] 编辑器轨道相机移动 / 缩放 viewport → frustum 不跟着改变形状（**仅**朝向
     跟 Camera entity transform 走，形状是 hardcode）
 
-- [ ] **多 plugin overlay 同选多 component 实体并存**
+- [✅] **多 plugin overlay 同选多 component 实体并存**
   - [ ] 找一个**同时挂 DirectionalLight + Camera** 的实体（如有）→ 验证黄色光箭
     头 + 青色 frustum 同时显示，不互相覆盖
   - [ ] 同理：同时挂 ParticleEmitter + Camera 的（如有）→ spawn box + frustum 并存
 
-- [ ] **Play Mode 与 visible 开关正交**
+- [✅] **Play Mode 与 visible 开关正交**
   - [ ] 勾选 Gizmos → 选实体 → 看到 overlay → ▶ Play → overlay 消失（Play Mode
     强制禁用，与 visible 状态无关）
   - [ ] Stop → overlay 恢复

@@ -1,6 +1,7 @@
 #include "AnimatorMiniPreviewPlugin.h"
 
 #include "../schema/ComponentSchema.h"
+#include "../theme/EditorTheme.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/IAnimator.h>
@@ -47,10 +48,13 @@ void AnimatorMiniPreviewPlugin::ParseEnd(
         return;
     }
 
+    // v0.6.5 c7：状态色用 EditorTheme token 替换字面量 RGBA（与 lint
+    // editor-literal-rgba 规则对齐）。finished = TextDisabled 灰；running
+    // = AlertSuccess 绿，语义对应 alert 系列"就绪 / 成功"状态。
     const bool finished = pAc->animator->IsFinished();
     const ImVec4 statusColor = finished
-        ? ImVec4(0.65f, 0.65f, 0.65f, 1.0f)   // finished = 灰
-        : ImVec4(0.40f, 0.90f, 0.40f, 1.0f);  // running  = 绿
+        ? Orange::Editor::Theme::Color::GetTextDisabled()
+        : Orange::Editor::Theme::Color::GetAlertSuccess();
     ImGui::TextColored(statusColor,
                        "Status: %s", finished ? "Finished" : "Running");
 
