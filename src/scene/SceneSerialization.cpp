@@ -18,13 +18,17 @@
 #include "orange/engine/physics/PhysicsWorld.h"
 #include "orange/engine/physics/RigidBodyComponent.h"
 #include "orange/engine/scene/Entity.h"
+#include "orange/engine/scene/LayerComponent.h"
 #include "orange/engine/scene/World.h"
+#include "orange/engine/scene/WorldPartition.h"
 
 #include "scene/ComponentSerializers.h"
 
 #include <entt/entt.hpp>
 
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -39,9 +43,21 @@ namespace
 // scene 顶层 schema 版本。一旦交付到玩家手里，major/minor 只增不改——
 // 字段新增走 minor bump（向后兼容），结构性破坏走 major bump（reader 拒
 // 绝读取，调用方按需路由 migrator）。
+//
+// 1.1 → 1.2：新增 LayerComponent（可选 component，旧 1.1 文件读出后该
+// 字段缺失视为"归属于 default layer"，与新增任何 optional component 的
+// forward-compat 路径一致；不需要 major bump）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 1};
+    static const SchemaVersion kVersion{"scene/world", 1, 2};
+    return kVersion;
+}
+
+// manifest 文件独立 schema namespace；与 scene/world 不复用版本号，避免
+// "manifest 改 schema 把 scene/world 拖一起 bump"。
+const SchemaVersion& SceneManifestSchemaVersion()
+{
+    static const SchemaVersion kVersion{"scene/manifest", 1, 0};
     return kVersion;
 }
 
@@ -68,17 +84,22 @@ std::string ComponentPath(const std::string& entityBase, std::string_view compon
     return p;
 }
 
-}  // namespace
-
-// ---------------------------------------------------------------------------
-// Save
-// ---------------------------------------------------------------------------
-
-Result<void, ResultCode> Save(const World& world,
-                              std::string_view path,
-                              const SaveOptions& options)
+// SaveImpl 是 Save / SaveSplit 共用的核心。entityFilter 为空时把所有活
+// 实体写进 JSON；非空时只写过滤通过的子集——SaveSplit 按 layerId 过滤
+// 时用这条路径。
+//
+// 注意：持久 ID 按"过滤后剩下的 entity 在 view 内的相对顺序"重新分配，
+// 不与"完整 world 内的全局位置"耦合——这样每个 per-layer 文件内部都从
+// 0 开始编号，文件可读性 + diff 友好性最大。HierarchyComponent 跨 layer
+// 引用因此**不会被正确序列化**——是已知设计选择：跨 layer 的 hierarchy
+// 关系本来就违反 "per-layer 独立编辑" 的工程意图；遇到时 layer 编辑器
+// 应在 attach-time 拒绝建立跨 layer parent-child。
+Result<void, ResultCode> SaveImpl(const World& world,
+                                  std::string_view path,
+                                  const SaveOptions& options,
+                                  const std::function<bool(Entity)>& entityFilter)
 {
-    // 1) 收集所有 live entity，按 view 顺序分配 0..N-1 持久 ID。
+    // 1) 收集所有 live entity（可选过滤），按 view 顺序分配 0..N-1 持久 ID。
     //    EnTT view<entt::entity>() 在 3.13 上即"所有活实体"的迭代源。
     std::vector<Entity>          entityList;
     EntityToPersistentId         idMap;
@@ -92,6 +113,10 @@ Result<void, ResultCode> Save(const World& world,
         for (auto e : reg.view<entt::entity>())
         {
             const Entity entity = World::FromEntt(e);
+            if (entityFilter && !entityFilter(entity))
+            {
+                continue;
+            }
             entityList.push_back(entity);
             idMap.emplace(entity, persistentId);
             ++persistentId;
@@ -159,6 +184,20 @@ Result<void, ResultCode> Save(const World& world,
         return saveResult.Error();
     }
     return Result<void, ResultCode>{};
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Save
+// ---------------------------------------------------------------------------
+
+Result<void, ResultCode> Save(const World& world,
+                              std::string_view path,
+                              const SaveOptions& options)
+{
+    // 直接走 SaveImpl 不带 filter——单文件路径写出整 world。
+    return SaveImpl(world, path, options, {});
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +480,229 @@ Result<void, ResultCode> Load(std::string_view path,
                 RollbackCreatedEntities(world, created);
                 return ResultCode::InvalidArgument;
             }
+        }
+    }
+
+    // 6) assignLayerId 兜底：LoadSplit 路径把每个 per-layer 文件的 entity
+    //    自动归属到对应 layer。本次新建且 component map 里没明确写出
+    //    LayerComponent 的 entity，统一挂上 assignLayerId。
+    //    单文件 Load 默认 options.assignLayerId 为空，跳过此 pass。
+    if (!options.assignLayerId.empty())
+    {
+        for (Entity e : created)
+        {
+            if (!world.HasComponent<LayerComponent>(e))
+            {
+                LayerComponent lc;
+                lc.layerId = options.assignLayerId;
+                world.AddComponent(e, std::move(lc));
+            }
+        }
+    }
+
+    return Result<void, ResultCode>{};
+}
+
+// ---------------------------------------------------------------------------
+// SaveSplit / LoadSplit —— 多文件 + manifest 序列化。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr std::string_view kManifestSchemaVersionPath = "schemaVersion";
+constexpr std::string_view kManifestLayersPath        = "layers";
+
+std::string LayerArrayPath(std::size_t index)
+{
+    std::string p;
+    p.reserve(kManifestLayersPath.size() + 1 + 12);
+    p.append(kManifestLayersPath);
+    p.push_back('/');
+    p.append(std::to_string(index));
+    return p;
+}
+
+// 把 source 字段（manifest 内的相对路径）解析为绝对 / 工作目录可用的
+// 完整路径。base 是 manifest 文件所在目录；source 为空时直接返回空 path
+// （SaveSplit / LoadSplit 调用前会先校验 source 非空，本函数只做拼接）。
+std::filesystem::path ResolveSource(const std::filesystem::path& base,
+                                    std::string_view source)
+{
+    std::filesystem::path src{source};
+    if (src.is_absolute())
+    {
+        return src;
+    }
+    return base / src;
+}
+
+}  // namespace
+
+Result<void, ResultCode> SaveSplit(const World& world,
+                                   const WorldPartition& partition,
+                                   std::string_view manifestPath,
+                                   const SaveOptions& options)
+{
+    const auto& layers = partition.GetLayers();
+    if (layers.empty())
+    {
+        // 至少要有 default layer——WorldPartition 构造时自动补；空状态
+        // 说明调用方拿到一个被 ResetLayers({}) 清空后又没补 default 的
+        // partition，视为编程错误而不是数据错误。
+        ORANGE_LOG_ERROR("Scene SaveSplit: WorldPartition has no layers; expected at least 'default'.");
+        return ResultCode::InvalidArgument;
+    }
+
+    // 每条 layer 必须配 source 文件路径——manifest 没法引用空 source。
+    for (const auto& layer : layers)
+    {
+        if (layer.source.empty())
+        {
+            ORANGE_LOG_ERROR(
+                "Scene SaveSplit: layer '{}' has no source filename; "
+                "set LayerInfo.source before calling SaveSplit.",
+                layer.id);
+            return ResultCode::InvalidArgument;
+        }
+    }
+
+    const std::filesystem::path manifestFsPath{std::string{manifestPath}};
+    const std::filesystem::path baseDir = manifestFsPath.parent_path();
+
+    // 先写出每个 layer 的 .scene.json——按 partition 排列序，文件顺序
+    // 与 manifest 内 layers 数组一致。
+    for (const auto& layer : layers)
+    {
+        const std::filesystem::path layerPath = ResolveSource(baseDir, layer.source);
+        // SaveImpl 内部覆盖写；中间失败已写盘的层不会自动回收（与单文件
+        // Save 同款约束——调用方应在临时目录写完再 rename / commit）。
+        const std::string capturedId = layer.id;
+        auto filter = [&world, capturedId](Entity e) -> bool
+        {
+            // GetLayerOf 返回 default 给"无 LayerComponent"的 entity；
+            // 与 partition 内 default layer 的 id 比较即可正确归属。
+            const auto* lc = world.GetComponent<LayerComponent>(e);
+            const std::string_view layerId =
+                (lc != nullptr && !lc->layerId.empty())
+                    ? std::string_view{lc->layerId}
+                    : WorldPartition::DefaultLayerId();
+            return layerId == capturedId;
+        };
+
+        auto layerResult = SaveImpl(world, layerPath.string(), options, filter);
+        if (layerResult.IsErr())
+        {
+            ORANGE_LOG_ERROR(
+                "Scene SaveSplit: failed to write layer '{}' to '{}' (code={}); aborting.",
+                layer.id, layerPath.string(),
+                static_cast<int>(layerResult.Error()));
+            return layerResult.Error();
+        }
+    }
+
+    // 写 manifest：schemaVersion + layers 数组（id / displayName / visible / source）。
+    JsonWriter manifestWriter;
+    manifestWriter.WriteSchemaVersion(kManifestSchemaVersionPath, SceneManifestSchemaVersion());
+    manifestWriter.BeginArray(kManifestLayersPath, layers.size());
+    for (std::size_t i = 0; i < layers.size(); ++i)
+    {
+        const auto& layer = layers[i];
+        const std::string base = LayerArrayPath(i);
+        manifestWriter.WriteString(base + "/id",          layer.id);
+        manifestWriter.WriteString(base + "/displayName", layer.displayName);
+        manifestWriter.WriteBool  (base + "/visible",     layer.visible);
+        manifestWriter.WriteString(base + "/source",      layer.source);
+    }
+
+    auto manifestSave = manifestWriter.SaveToFile(manifestPath);
+    if (manifestSave.IsErr())
+    {
+        return manifestSave.Error();
+    }
+    return Result<void, ResultCode>{};
+}
+
+Result<void, ResultCode> LoadSplit(std::string_view manifestPath,
+                                   World& world,
+                                   WorldPartition& partition,
+                                   const LoadOptions& options)
+{
+    // 1) 解析 manifest 文件。
+    auto manifestReaderResult = JsonReader::FromFile(manifestPath);
+    if (manifestReaderResult.IsErr())
+    {
+        return manifestReaderResult.Error().code;
+    }
+    const JsonReader& manifestReader = manifestReaderResult.Value();
+
+    auto schemaResult = manifestReader.ReadSchemaVersion(kManifestSchemaVersionPath);
+    if (schemaResult.IsErr())
+    {
+        return ResultCode::SchemaMismatch;
+    }
+    if (!SceneManifestSchemaVersion().CanRead(schemaResult.Value()))
+    {
+        return ResultCode::SchemaMismatch;
+    }
+
+    const std::size_t layerCount = manifestReader.ArraySize(kManifestLayersPath);
+    std::vector<LayerInfo> manifestLayers;
+    manifestLayers.reserve(layerCount);
+    for (std::size_t i = 0; i < layerCount; ++i)
+    {
+        const std::string base = LayerArrayPath(i);
+        LayerInfo li;
+        if (!manifestReader.ReadString(base + "/id", li.id))
+        {
+            return ResultCode::InvalidArgument;
+        }
+        // displayName / visible / source 缺失时用宽容默认值，便于未来 minor
+        // bump 不破坏读路径。
+        li.displayName = manifestReader.GetString(base + "/displayName", li.id);
+        li.visible     = manifestReader.GetBool  (base + "/visible",     true);
+        li.source      = manifestReader.GetString(base + "/source",      std::string{});
+        manifestLayers.push_back(std::move(li));
+    }
+
+    // 2) 灌入 manifest——ResetLayers 内部会自动补 default layer 兜底。
+    partition.ResetLayers(std::move(manifestLayers));
+
+    // 3) 对每个 layer 逐个 Load 对应 source 文件。
+    //    每条 source 内的 entity 都强制归属到本 layer——已存在 LayerComponent
+    //    的 entity 优先于 assignLayerId（手工编辑允许某 entity 跨 layer 引用
+    //    时不被覆盖）。
+    const std::filesystem::path manifestFsPath{std::string{manifestPath}};
+    const std::filesystem::path baseDir = manifestFsPath.parent_path();
+
+    for (const auto& layer : partition.GetLayers())
+    {
+        if (layer.source.empty())
+        {
+            // default layer 自动补的条目通常没 source——跳过即可，对应 layer
+            // 上的 entity 由调用方 SeedDemoWorld 之类的代码自己挂。
+            continue;
+        }
+
+        LoadOptions perLayerOptions{
+            .assetRegistry          = options.assetRegistry,
+            .physicsWorld           = options.physicsWorld,
+            .animatorRegistry       = options.animatorRegistry,
+            .namedMaterialInstances = options.namedMaterialInstances,
+            .extraSerializers       = options.extraSerializers,
+            .assignLayerId          = layer.id,
+        };
+
+        const std::filesystem::path layerPath = ResolveSource(baseDir, layer.source);
+        auto layerResult = Load(layerPath.string(), world, perLayerOptions);
+        if (layerResult.IsErr())
+        {
+            ORANGE_LOG_ERROR(
+                "Scene LoadSplit: failed to load layer '{}' from '{}' (code={}); "
+                "World may be in partial state.",
+                layer.id, layerPath.string(),
+                static_cast<int>(layerResult.Error()));
+            return layerResult.Error();
         }
     }
 

@@ -54,6 +54,7 @@
 #include <orange/engine/scene/ComponentSerializerEntry.h>
 
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace Orange::Engine
@@ -86,6 +87,8 @@ class AnimatorRegistry;
 
 namespace Orange::Engine::Scene
 {
+
+class WorldPartition;
 
 // Save / Load 的可选依赖打包。每条都是"持有 AssetHandle / backend 资源
 // 的组件需要时才用得到"——传空时序列化层对相应组件走 graceful 退化，
@@ -141,6 +144,12 @@ struct LoadOptions
 
     // 游戏侧 / 编辑器侧自定义组件序列化器，同 SaveOptions::extraSerializers。
     std::span<const ComponentSerializerEntry> extraSerializers{};
+
+    // 若非空：Load 路径在 attach 完所有 component 后，给本次新建且**没有**
+    // LayerComponent 的 entity 强制挂上 LayerComponent{assignLayerId}。
+    // LoadSplit 用它把"来自 layer X 的 source 文件" 自动归属到 X。
+    // 单文件 Load 不需要时留空，保持向后兼容。
+    std::string assignLayerId{};
 };
 
 // 把 `world` 写到 `path`。覆盖目标文件。
@@ -162,6 +171,57 @@ ORANGE_ENGINE_API Result<void, ResultCode> Save(const World& world,
 ORANGE_ENGINE_API Result<void, ResultCode> Load(std::string_view path,
                                                 World& world,
                                                 const LoadOptions& options = {});
+
+// ---------------------------------------------------------------------------
+// SaveSplit / LoadSplit —— 多文件 + manifest 序列化。
+//
+// 与单文件 Save / Load 关系：
+//   * **完全独立**的 API；不破坏 v1.1 schema、不替换原 Save / Load。
+//   * 调用方按"想要 per-layer 落盘"显式选这条路径；编辑器侧 v0.6 之后
+//     会优先走 SaveSplit，减少多人编辑时的 VCS 冲突（Orange-Wiki
+//     `concepts/gameplay/game-world-editor.md` §陷阱 4）。
+//
+// manifest 文件格式（独立 schema namespace `scene/manifest 1.0`）：
+//
+//   {
+//     "schemaVersion": { "namespace": "scene/manifest", "major": 1, "minor": 0 },
+//     "layers": [
+//       { "id": "background", "displayName": "Background", "visible": true,
+//         "source": "background.scene.json" },
+//       { "id": "foreground", "displayName": "Foreground", "visible": true,
+//         "source": "foreground.scene.json" }
+//     ]
+//   }
+//
+// per-layer .scene.json 文件复用 `scene/world` schema（当前 1.2）；仅
+// 包含归属于该 layer 的 entity（实体内仍写 LayerComponent.id，确保
+// "单文件 Load 也能恢复 layer 信息"）。
+//
+// source 路径 解析规则：以 `manifestPath` 所在目录为 base 解析相对路径。
+//
+// 失败语义：
+//   * 任一 per-layer 文件 Save / Load 失败 → 整体返回失败；Load 走
+//     internal rollback（已建实体回收）；Save 不保证回滚已写盘的中间
+//     文件（与单文件 Save 同款约束——caller 应在临时目录写完再 rename）。
+//
+// `WorldPartition` 双向角色：
+//   * Save 端：partition 提供 layer 列表 + 元数据（id / displayName /
+//     visible / source）；GAP-2026-05-17 Save 路径会按 partition 的
+//     layer 顺序遍历，每条 source 写一个 .scene.json。
+//   * Load 端：partition 在 Load 完成后被 ResetLayers 灌入 manifest
+//     里的 layer 列表（保留顺序），并且每条 LayerComponent.layerId 自
+//     动按 source 归属。
+// ---------------------------------------------------------------------------
+
+ORANGE_ENGINE_API Result<void, ResultCode> SaveSplit(const World& world,
+                                                     const WorldPartition& partition,
+                                                     std::string_view manifestPath,
+                                                     const SaveOptions& options = {});
+
+ORANGE_ENGINE_API Result<void, ResultCode> LoadSplit(std::string_view manifestPath,
+                                                     World& world,
+                                                     WorldPartition& partition,
+                                                     const LoadOptions& options = {});
 
 }  // namespace Orange::Engine::Scene
 
