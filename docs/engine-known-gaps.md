@@ -554,16 +554,58 @@ editor-roadmap.md v0.6 milestone "多 chunk / per-layer + dirty 状态" 的 6 �
 
 ### 状态
 
-**registered, not started** —— 本 session 仅登记不实现（按 CLAUDE.md "engine-known-gaps 跨 session 工作流"）。引擎补强是显式独立 session 处理。落地后 editor v0.6 在新 session bump vendor 后消费。
+- **登记**：2026-05-17
+- **处理**：引擎侧落地 2026-05-17（独立 session，按 CLAUDE.md "engine-known-gaps 跨 session 工作流"）
+- **关联**：editor-roadmap.md v0.6 deliverable 2 / 3 / 5；现有 `SceneSerialization` / `World` 公共 API；`Pipeline::Render` / `PhysicsWorld::Step` —— layer.visible 过滤的最终消费方
 
-### 关联
+### 落地记录（2026-05-17）
 
-- editor-roadmap.md v0.6 deliverable 2 / 3 / 5
-- 现有 `SceneSerialization` / `World` 公共 API（要扩展但不破坏 v1.0 schema）
-- `Pipeline::Render` / `PhysicsWorld::Step` —— layer.visible 过滤的最终消费方
+按 user 在 start-checklist 步骤 7 选择的设计方案：(1) per-layer **多文件 + manifest** 落盘（匹配 GAP 原文 + wiki §陷阱 4 关于 VCS 冲突的建议），(2) Render + Physics 都接入 layer.visible 过滤（满足验收 "viewport 只剩背景" + 避免 hidden layer 物理逻辑漏出）。
+
+四个 commit 串行落地：
+
+- **C1 ✅ LayerComponent + WorldPartition 公共面**
+  - 新增 `include/orange/engine/scene/LayerComponent.h`：单字段 `std::string layerId`，visible 不放 component 上（避免 manifest 与 component 双 source of truth）
+  - 新增 `include/orange/engine/scene/WorldPartition.h` + `src/scene/WorldPartition.cpp`：layer manifest CRUD（AddLayer / RemoveLayer / ResetLayers / GetLayer*）+ visibility 查询（IsLayerVisible / SetLayerVisible / IsEntityVisible）+ entity → layer 归属（GetLayerOf / SetLayerOf）；构造期自动注册 "default" layer（兜底；不可删）
+  - `src/scene/ComponentSerializers.cpp` 注册 `Layer` 序列化器（PureData，写 `{"id": "..."}` 对象形态留 schema bump 空间）
+  - 设计偏离 GAP 原文"暂定名 WorldPartition + visible 字段在 component"——实际落地：visible 放 manifest（避免重复 source），名字采用 WorldPartition 不变
+
+- **C2 ✅ SceneSerialization 多文件 + manifest**
+  - `scene/world` schema **1.1 → 1.2**（minor bump，因新增 optional LayerComponent；不是 GAP 原文"v2.0 major bump"——技术上无破坏性变化，旧 v1.1 文件 graceful 兼容：缺 LayerComponent 段 → WorldPartition.GetLayerOf 回退 default，等价于"migrator 归入 default layer"语义）
+  - `scene/manifest` schema **1.0 新建**（独立 namespace）
+  - 新公共 API：`Scene::SaveSplit(world, partition, manifestPath, options)` / `Scene::LoadSplit(manifestPath, world, partition, options)`
+    - SaveSplit：按 partition.GetLayers() 顺序，每条 layer 写一个独立 .scene.json（仅含归属该 layer 的 entity，subset idMap 从 0 重排），最后写 manifest 文件（schemaVersion + layers 数组 with id / displayName / visible / source）
+    - LoadSplit：读 manifest → partition.ResetLayers 灌入 → 按顺序 Load 每条 source；新增 `LoadOptions::assignLayerId` 字段让 Load 自动给本次新建且没挂 LayerComponent 的 entity 兜底归属
+  - 旧 `Save` / `Load` 单文件路径**不动**——保持 v1.1 schema 完全兼容；新增字段在公共 header 内增量。内部把 Save 主体抽到 anonymous namespace `SaveImpl(world, path, options, entityFilter)`，让 Save / SaveSplit 共用
+  - 已知设计选择：HierarchyComponent 跨 layer 引用**不会被正确序列化**（per-layer 文件内 idMap 从 0 重排，跨文件 ID 不对齐）——视为"per-layer 独立编辑"工程意图下的预期约束，遇到时 v0.6 编辑器应在 attach-time 拒绝跨 layer parent-child
+
+- **C3 ✅ Render + Physics layer.visible 过滤**
+  - Render：`RenderScene::Collect` 接 `const WorldPartition* partition = nullptr` 可选参数；非空时对每个 drawable 候选查 `partition->IsEntityVisible(world, e)`，false 即跳过（不进 drawable list，自然不进 shadow pass）。`Pipeline::SetWorldPartition(const WorldPartition*)` setter（与 SetPostProcessChain / SetMaterialSystem 同款模式），Render() 内透传给 RenderScene::Collect
+  - Physics：`PhysicsWorld::SetBodyEnabled(handle, bool)` / `IsBodyEnabled` 新增，封 Box2D 3.x `b2Body_Enable` / `b2Body_Disable` / `b2Body_IsEnabled`（disabled body 不参与积分 / 不产生 contact / 仍在 world 内）
+  - 新公共 free function：`Physics::ApplyLayerVisibility(world, partition, physics)`（独立 .h/.cpp，不耦合 Scene 模块到 PhysicsWorld）；遍历 World 内 RigidBodyComponent，按 layer 可见性调 SetBodyEnabled。调用方在每帧 Step 之前调一次
+
+- **C4 ✅ Sample + 文档收尾**
+  - 新增 `samples/12_layer_partition_demo`：background layer (plane + sphere + DirectionalLight + Camera) + foreground layer (两个 dynamic box 受重力下落)；VisibilityToggleLayer 每 3 秒翻转 foreground.visible + 调 ApplyLayerVisibility；本 session 实测 8 秒内 toggle 两次（false → true），干净退出，cube 在 hide 时视觉消失 + 物理冻结
+  - 本 GAP 落地记录写回 docs/engine-known-gaps.md（本节）
+  - invariant lint + drift baseline 重新跑：全绿（7 个 grandfathered 不变 / no drift）
+
+### 期望验收对照
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| editor v0.6 能调引擎公共 API 完成 layer 分组 / 序列化 / hide-show | ✅（LayerComponent / WorldPartition / SaveSplit / LoadSplit / Pipeline.SetWorldPartition / ApplyLayerVisibility 全部公共面就位） |
+| 引擎自带 sample 演示：两个 layer，加载 / 隐藏前景 → viewport 只剩背景 | ✅（samples/12_layer_partition_demo） |
+| Scene schema v2.0 写盘 + 加载 v1.0 旧文件（migrator 归 default） | **部分**：技术上 schema bump 1.1 → 1.2 + 旧文件 graceful 兼容（缺 LayerComponent 段 → default layer），与 GAP 原文 v2.0 major bump 偏离；语义上等价于 migrator 归 default 行为，但形式上"无 migrator"——按 CLAUDE.md "Serialization and reflection" 新增 optional 字段是 minor bump 的标准路径，没有结构性破坏可言。本设计偏离已在 C2 段落说明 |
+
+### 不在本 GAP 范围（后续 session 处理）
+
+- **多 scene tab** —— editor-roadmap v0.6 deliverable 5，纯编辑器侧 UI；引擎不需要新能力
+- **HierarchyComponent 跨 layer 引用的序列化保留** —— 当前 per-layer 文件 idMap 从 0 重排导致跨 layer parent-child 在 split 模式下丢失；如未来 v0.6 编辑器允许并真实使用，需要扩 manifest schema 引入"跨 layer 引用映射段"。当前视为预期约束
+- **Editor 侧 Hierarchy 加 layer 列 + 右键 'Move to layer' UX** —— editor v0.6 范围；本 GAP 落地后 editor 在新 session bump vendor 后消费
 
 ---
 
 ## 处理记录
 
+- **GAP-2026-05-17-scene-layer-component**（2026-05-17 落地）：LayerComponent + WorldPartition 公共面 + SceneSerialization 多文件 + manifest + Render/Physics layer.visible 过滤 + sample。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/scene/LayerComponent.h` / `include/orange/engine/scene/WorldPartition.h` / `include/orange/engine/scene/SceneSerialization.h`（SaveSplit/LoadSplit + LoadOptions.assignLayerId）/ `include/orange/engine/render/RenderScene.h`（Collect 加 partition 参数）/ `include/orange/engine/render/Pipeline.h`（SetWorldPartition）/ `include/orange/engine/physics/PhysicsWorld.h`（SetBodyEnabled/IsBodyEnabled）/ `include/orange/engine/physics/LayerVisibilitySync.h` / `src/scene/WorldPartition.cpp` / `src/scene/SceneSerialization.cpp`（SaveImpl 抽取 + SaveSplit/LoadSplit + scene/world 1.2 + scene/manifest 1.0）/ `src/scene/ComponentSerializers.cpp`（Layer 序列化器注册）/ `src/render/RenderScene.cpp` / `src/render/Pipeline.cpp` / `src/physics/PhysicsWorld.cpp` / `src/physics/LayerVisibilitySync.cpp` / `samples/12_layer_partition_demo/`
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
