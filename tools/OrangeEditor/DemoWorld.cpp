@@ -446,13 +446,20 @@ void SeedDemoWorld(EditorHost& host)
     // ---- Sun：暖色平行光 + 软阴影开启 -----------------------------------
     {
         auto* tc = world.GetComponent<TransformComponent>(sun);
-        if (tc != nullptr) { tc->position = glm::vec3(5.0f, 8.0f, 5.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(5.0f, 8.0f, 5.0f);
+            // 方向由 rotation 派生；identity 表示光向下，这里把传统
+            // (0.4,-1,0.3) 朝向编码进 rotation 里。
+            tc->rotation = ::Orange::Engine::Render::
+                MakeDirectionalLightRotationFromDir(
+                    glm::vec3(0.4f, -1.0f, 0.3f));
+        }
 
         DirectionalLight dl{};
-        dl.direction   = glm::normalize(glm::vec3(0.4f, -1.0f, 0.3f));
         dl.color       = glm::vec3(1.0f, 0.93f, 0.78f);  // 暖黄阳光
         dl.intensity   = 1.3f;
-        dl.castsShadow = true;  // 开启软阴影（Phase 3 Task 05 已落地）
+        dl.castsShadow = true;  // 开启软阴影
         world.AddComponent<DirectionalLight>(sun, dl);
     }
 

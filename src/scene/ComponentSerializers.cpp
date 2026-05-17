@@ -510,11 +510,12 @@ void WriteDirectionalLight(JsonWriter& writer,
         return;
     }
 
-    const float direction[3] = {light->direction.x, light->direction.y, light->direction.z};
-    const float color[3]     = {light->color.x,     light->color.y,     light->color.z};
+    const float color[3] = {light->color.x, light->color.y, light->color.z};
 
-    writer.WriteFloatArray(Join(componentPath, "direction"),   direction, 3);
-    writer.WriteFloatArray(Join(componentPath, "color"),       color,     3);
+    // 注意：direction 字段已废 —— 方向由 entity.Transform.rotation 派生，
+    // 仅落 color / intensity / castsShadow 三项。旧 scene 的 direction
+    // 字段由 Read 路径 graceful 兼容（migrator 转 Transform.rotation）。
+    writer.WriteFloatArray(Join(componentPath, "color"),       color, 3);
     writer.WriteFloat(     Join(componentPath, "intensity"),   light->intensity);
     writer.WriteBool(      Join(componentPath, "castsShadow"), light->castsShadow);
 }
@@ -526,11 +527,32 @@ bool ReadDirectionalLight(const JsonReader& reader,
 {
     Render::DirectionalLight light;
 
-    float direction[3] = {0.3f, -1.0f, 0.4f};
-    if (!reader.ReadFloatArray(Join(componentPath, "direction"), direction, 3))
+    // v1 → v2 migrator：旧 scene 在 DirectionalLight 段写 direction 字段，
+    // 新版本方向由 Transform.rotation 派生。命中 direction key 时把它转
+    // quat 写回 entity 的 TransformComponent（若 entity 尚未挂 Transform
+    // 则新建一个 default 的；保留已挂 Transform 的 position/scale 不动，
+    // 只覆盖 rotation —— 旧 scene 里 direction 是光向唯一权威，rotation
+    // 字段在旧版本对 light 完全无意义，覆盖它正好等价于"按原视觉迁移"）。
+    if (reader.Has(Join(componentPath, "direction")))
     {
-        return false;
+        float direction[3] = {0.3f, -1.0f, 0.4f};
+        if (reader.ReadFloatArray(Join(componentPath, "direction"), direction, 3))
+        {
+            const glm::vec3 oldDir{direction[0], direction[1], direction[2]};
+            const glm::quat rot = Render::MakeDirectionalLightRotationFromDir(oldDir);
+            if (auto* tc = ctx.world.GetComponent<TransformComponent>(entity))
+            {
+                tc->rotation = rot;
+            }
+            else
+            {
+                TransformComponent newTc{};
+                newTc.rotation = rot;
+                ctx.world.AddComponent(entity, newTc);
+            }
+        }
     }
+
     float color[3] = {1.0f, 1.0f, 1.0f};
     if (!reader.ReadFloatArray(Join(componentPath, "color"), color, 3))
     {
@@ -546,8 +568,7 @@ bool ReadDirectionalLight(const JsonReader& reader,
         }
     }
 
-    light.direction   = {direction[0], direction[1], direction[2]};
-    light.color       = {color[0],     color[1],     color[2]};
+    light.color       = {color[0], color[1], color[2]};
     light.intensity   = static_cast<float>(intensity);
     light.castsShadow = reader.GetBool(Join(componentPath, "castsShadow"), false);
 

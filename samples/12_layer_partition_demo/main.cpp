@@ -415,8 +415,12 @@ int main(int /*argc*/, char** /*argv*/)
     // 后仍能看到正常照明的背景（不是黑屏）。
     Entity lightEntity = world.CreateEntity();
     {
+        TransformComponent lightXf{};
+        lightXf.rotation = Orange::Engine::Render::MakeDirectionalLightRotationFromDir(
+            glm::vec3(0.2f, -1.0f, 0.3f));
+        world.AddComponent(lightEntity, lightXf);
+
         DirectionalLight dl{};
-        dl.direction   = glm::normalize(glm::vec3(0.2f, -1.0f, 0.3f));
         dl.color       = glm::vec3(1.0f, 0.95f, 0.85f);
         dl.intensity   = 1.2f;
         dl.castsShadow = true;

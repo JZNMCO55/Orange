@@ -506,11 +506,19 @@ void TestDirectionalLightRoundTrip()
 {
     const auto path = MakeTempScenePath("directional_light");
 
+    // 方向已搬到 entity 的 TransformComponent.rotation —— 测试 round-trip
+    // 同时覆盖 (a) DirectionalLight color/intensity/castsShadow 字段 +
+    // (b) Transform.rotation 在 Save/Load 内保留。
     World source;
     Entity e = source.CreateEntity();
 
+    const glm::vec3 desiredDir{0.5f, -0.7f, 0.5f};
+    TransformComponent xf{};
+    xf.rotation = Orange::Engine::Render::
+        MakeDirectionalLightRotationFromDir(desiredDir);
+    source.AddComponent(e, xf);
+
     DirectionalLight light;
-    light.direction   = {0.5f, -0.7f, 0.5f};
     light.color       = {1.0f, 0.95f, 0.85f};
     light.intensity   = 2.5f;
     light.castsShadow = true;
@@ -536,14 +544,21 @@ void TestDirectionalLightRoundTrip()
 
     const auto* loadedLight = loaded.GetComponent<DirectionalLight>(loadedE);
     assert(loadedLight != nullptr);
-    assert(FloatEq(loadedLight->direction.x, 0.5f));
-    assert(FloatEq(loadedLight->direction.y, -0.7f));
-    assert(FloatEq(loadedLight->direction.z, 0.5f));
     assert(FloatEq(loadedLight->color.x, 1.0f));
     assert(FloatEq(loadedLight->color.y, 0.95f));
     assert(FloatEq(loadedLight->color.z, 0.85f));
     assert(FloatEq(loadedLight->intensity, 2.5f));
     assert(loadedLight->castsShadow == true);
+
+    // Transform.rotation 保留 + 派生回方向匹配原始（数值精度内）
+    const auto* loadedXf = loaded.GetComponent<TransformComponent>(loadedE);
+    assert(loadedXf != nullptr);
+    const glm::vec3 derived = Orange::Engine::Render::
+        ComputeDirectionalLightWorldDir(loadedXf->rotation);
+    const glm::vec3 expected = glm::normalize(desiredDir);
+    assert(FloatEq(derived.x, expected.x));
+    assert(FloatEq(derived.y, expected.y));
+    assert(FloatEq(derived.z, expected.z));
 
     RemoveIfExists(path);
     std::fprintf(stdout, "  [PASS] directional light round-trip\n");

@@ -495,8 +495,12 @@ int main(int argc, char** argv)
     // 取到未初始化值。这条与其它 builtin sample 同模式。
     Entity lightEntity = world.CreateEntity();
     {
+        TransformComponent lightXf{};
+        lightXf.rotation = Orange::Engine::Render::MakeDirectionalLightRotationFromDir(
+            glm::vec3(0.3f, -1.0f, 0.4f));
+        world.AddComponent(lightEntity, lightXf);
+
         DirectionalLight dl{};
-        dl.direction   = glm::normalize(glm::vec3(0.3f, -1.0f, 0.4f));
         dl.color       = glm::vec3(1.0f, 0.97f, 0.92f);
         dl.intensity   = 1.2f;
         dl.castsShadow = false;

@@ -359,11 +359,15 @@ int main(int argc, char** argv)
         jointEntities.push_back(e);
     }
 
-    // 主光：方向斜下。
+    // 主光：方向斜下 —— 由 entity.Transform.rotation 派生（identity = -Y 朝下）。
     Entity lightEntity = world.CreateEntity();
     {
+        TransformComponent lightXf{};
+        lightXf.rotation = Orange::Engine::Render::MakeDirectionalLightRotationFromDir(
+            glm::vec3(0.4f, -1.0f, 0.6f));
+        world.AddComponent(lightEntity, lightXf);
+
         DirectionalLight dl{};
-        dl.direction   = glm::normalize(glm::vec3(0.4f, -1.0f, 0.6f));
         dl.color       = glm::vec3(1.0f, 0.95f, 0.85f);
         dl.intensity   = 1.2f;
         dl.castsShadow = true;

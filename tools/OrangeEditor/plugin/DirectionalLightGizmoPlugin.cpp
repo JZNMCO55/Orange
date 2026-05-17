@@ -58,17 +58,17 @@ void DirectionalLightGizmoPlugin::Draw(
     auto* pWorld = host.scene.pWorld.get();
     if (pWorld == nullptr) { return; }
 
-    // entity world 位置作为箭头起点；entity 没挂 Transform 时退到原点（不画
-    // 没意义的远端箭头）。
+    // entity world 位置作为箭头起点；entity 没挂 Transform 时不画——方向
+    // 也由 Transform.rotation 派生，没 Transform 就没有"方向"概念可视化。
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
     const glm::vec3 origin = pTC->position;
 
-    // direction 约定为光的传播方向（与 LightComponent.h 注释一致）。规范化
-    // 防御零向量 / 已 normalize 仍除以 length 是廉价稳健操作。
-    const float dirLen = glm::length(pDL->direction);
-    if (dirLen < 1e-5f) { return; }  // 退化方向不画
-    const glm::vec3 dirN = pDL->direction / dirLen;
+    // 方向 = TC.rotation 派生（identity 表示光向 -Y）。与 Pipeline 内的
+    // 派生公式同源（LightComponent.h `ComputeDirectionalLightWorldDir`），
+    // 保证 gizmo 视觉与 shading 方向永远一致。
+    const glm::vec3 dirN =
+        Orange::Engine::Render::ComputeDirectionalLightWorldDir(pTC->rotation);
 
     // 屏幕长度自适应：投影 origin 与 origin+1*X 的屏幕距离换算 world-units-
     // per-handle（与 EditorTranslateGizmo 同款 heuristic）。

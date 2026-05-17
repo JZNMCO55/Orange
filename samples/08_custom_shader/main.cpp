@@ -162,12 +162,14 @@ public:
     {
         // 光源方向慢转（0.4 rad/s），让 sphere 在 plane 上的影子跟着转——
         // 验证自定义 shader 物体仍能正确投影。
-        if (auto* dl = mWorld.GetComponent<DirectionalLight>(mLight))
+        if (auto* lightXf = mWorld.GetComponent<TransformComponent>(mLight))
         {
             const float t  = frame.time.totalSeconds * 0.4f;
             const float cx = std::cos(t);
             const float cz = std::sin(t);
-            dl->direction = glm::normalize(glm::vec3(cx * 0.6f, -1.0f, cz * 0.6f));
+            lightXf->rotation = Orange::Engine::Render::
+                MakeDirectionalLightRotationFromDir(
+                    glm::vec3(cx * 0.6f, -1.0f, cz * 0.6f));
         }
 
         // 把当前帧时间喂给 Pipeline，让 LightUbo.frameInfo.x = time，
@@ -317,11 +319,15 @@ int main()
         world.AddComponent(sphereEntity, r);
     }
 
-    // 主光：暖白，castsShadow = true。
+    // 主光：暖白，castsShadow = true。方向由 LightSpinLayer 每帧改 Transform.rotation。
     Entity lightEntity = world.CreateEntity();
     {
+        TransformComponent lightXf{};
+        lightXf.rotation = Orange::Engine::Render::MakeDirectionalLightRotationFromDir(
+            glm::vec3(0.6f, -1.0f, 0.4f));
+        world.AddComponent(lightEntity, lightXf);
+
         DirectionalLight dl{};
-        dl.direction   = glm::normalize(glm::vec3(0.6f, -1.0f, 0.4f));
         dl.color       = glm::vec3(1.0f, 0.95f, 0.85f);
         dl.intensity   = 1.2f;
         dl.castsShadow = true;

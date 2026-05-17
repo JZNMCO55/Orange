@@ -52,6 +52,7 @@
 #include "orange/engine/render/RenderScene.h"
 #include "orange/engine/render/VfxSystem.h"
 #include "orange/engine/render/ShadowConfig.h"
+#include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
 
@@ -731,14 +732,19 @@ struct Pipeline::Impl
     // 把 light 数据写入 lightUbo（CpuToGpu Map/memcpy/Unmap）。无 light
     // 时写 "neutral light"：identity lightViewProj、单位强度、单位色，
     // 让 toon / rim_light fragment 在没真光场景下仍显示合理的 base 着色。
+    // `lightWorldDir` 是已 normalize 的世界方向（由调用方按 entity 的
+    // Transform.rotation 推算）；light==nullptr 时本参数被忽略。
     void UpdateLightUbo(const DirectionalLight* light,
+                        const glm::vec3&        lightWorldDir,
                         const glm::mat4&        lightViewProj,
                         const glm::vec3&        cameraWorldPos);
 
     // 计算 light view-proj：方向投影 + scene 包围盒 fitted ortho 视锥
     // 投影。scene 包围盒当前 hardcode 为 ±10 单位的立方体（足够覆盖
     // sample 的 plane + cube + sphere；后续可由 RenderScene 给 bbox）。
-    glm::mat4 ComputeLightViewProj(const DirectionalLight& light) const;
+    // direction 已 normalize；与 UpdateLightUbo 同款约定，由调用方按
+    // entity Transform.rotation 派生。
+    glm::mat4 ComputeLightViewProj(const glm::vec3& lightWorldDir) const;
 
     // 创建 / 重建 HDR off-screen target；descriptor set 同步重写指向新
     // view。size == 0 时跳过——窗口最小化、initialize 早期的 windows 没
@@ -2071,6 +2077,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     // fragment 才有合理 base 着色），shadow map 走"远深度清零 + 不画
     // caster"路径（PCF 取 1.0 = 全亮）。
     const DirectionalLight* activeLight = nullptr;
+    glm::vec3               activeLightDir{0.3f, -1.0f, 0.4f};  // neutral 默认
     if (impl.scene.HasCamera())
     {
         auto& reg  = world.Registry();
@@ -2079,13 +2086,20 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         {
             const auto entity = view.front();
             activeLight = &view.get<DirectionalLight>(entity);
+            // 方向由 entity.Transform.rotation 派生；没挂 Transform 视为
+            // identity rotation（光向下 -Y）。Pipeline 不感知"哪是 forward"
+            // 约定细节，全部走 LightComponent.h 的统一公式。
+            using TC = Orange::Engine::Scene::TransformComponent;
+            const auto* tc = reg.try_get<TC>(entity);
+            const glm::quat rot = (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            activeLightDir = ComputeDirectionalLightWorldDir(rot);
         }
         impl.EnsureShadowMap();
-        const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(*activeLight)
+        const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                 : glm::mat4(1.0f);
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         const glm::vec3 cameraPos(invView[3]);
-        impl.UpdateLightUbo(activeLight, lightVP, cameraPos);
+        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos);
     }
 
     // 2. 一次 cmd list 包含：shadow → 主 pass → passthrough → 翻 layout。
@@ -2103,7 +2117,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     {
         const glm::mat4 viewProj = impl.scene.MainCamera().projection
                                  * impl.scene.MainCamera().view;
-        const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(*activeLight)
+        const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                : glm::mat4(1.0f);
 
         // shadow pre-pass
@@ -2363,11 +2377,11 @@ bool Pipeline::Impl::EnsureShadowMap()
     return true;
 }
 
-glm::mat4 Pipeline::Impl::ComputeLightViewProj(const DirectionalLight& light) const
+glm::mat4 Pipeline::Impl::ComputeLightViewProj(const glm::vec3& lightWorldDir) const
 {
     // 0.x 简化：scene bbox 假定为 ±10 单位的立方体（足够覆盖 sample
     // 的 plane + cube + sphere）。后续接 RenderScene 提供的 bbox。
-    const glm::vec3 lightDir = glm::normalize(light.direction);
+    const glm::vec3 lightDir = glm::normalize(lightWorldDir);
     const glm::vec3 sceneCenter(0.0f);
     constexpr float kHalfExtent = 10.0f;
 
@@ -2397,6 +2411,7 @@ glm::mat4 Pipeline::Impl::ComputeLightViewProj(const DirectionalLight& light) co
 }
 
 void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
+                                    const glm::vec3&        lightWorldDir,
                                     const glm::mat4&        lightViewProj,
                                     const glm::vec3&        cameraWorldPos)
 {
@@ -2408,7 +2423,7 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
     data.lightViewProj = lightViewProj;
     if (light != nullptr)
     {
-        data.lightDirIntensity = glm::vec4(light->direction, light->intensity);
+        data.lightDirIntensity = glm::vec4(lightWorldDir, light->intensity);
         data.lightColor        = glm::vec4(light->color, 0.0f);
     }
     else
@@ -3214,6 +3229,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     // 中性默认（toon / rim_light fragment 才有合理 base 着色），shadow map
     // 走"远深度清零 + 不画 caster"路径，PCF 取 1.0 = 全亮。
     const DirectionalLight* activeLight = nullptr;
+    glm::vec3               activeLightDir{0.3f, -1.0f, 0.4f};  // neutral 默认
     if (hdrReady && impl.scene.HasCamera())
     {
         auto& reg  = world.Registry();
@@ -3222,16 +3238,23 @@ void Pipeline::Render(Orange::Engine::World& world)
         {
             const auto entity = view.front();
             activeLight = &view.get<DirectionalLight>(entity);
+            // 方向由 entity.Transform.rotation 派生（identity = -Y 朝下）；
+            // 没挂 Transform 视为 identity，与本函数另一分支 neutral 默认
+            // 不冲突——neutral 默认仅在 activeLight==nullptr 时生效。
+            using TC = Orange::Engine::Scene::TransformComponent;
+            const auto* tc = reg.try_get<TC>(entity);
+            const glm::quat rot = (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            activeLightDir = ComputeDirectionalLightWorldDir(rot);
         }
         impl.EnsureShadowMap();
-        const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(*activeLight)
+        const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                               : glm::mat4(1.0f);
         // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
         // 取 inverse 后的第 4 列即为相机在 world 中的位置。供 rim_light
         // / 后续 specular 类 fragment 取真 viewDir。
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         const glm::vec3 cameraPos(invView[3]);
-        impl.UpdateLightUbo(activeLight, lightVP, cameraPos);
+        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos);
     }
 
     // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /
@@ -3252,7 +3275,7 @@ void Pipeline::Render(Orange::Engine::World& world)
             const glm::mat4 viewProj =
                 impl.scene.MainCamera().projection * impl.scene.MainCamera().view;
             const glm::mat4 lightVP =
-                activeLight ? impl.ComputeLightViewProj(*activeLight) : glm::mat4(1.0f);
+                activeLight ? impl.ComputeLightViewProj(activeLightDir) : glm::mat4(1.0f);
 
             // Shadow 预 pass：在主 pass 之前把场景从 light 视角渲到
             // shadow map（depth-only）。无 light 时跳过实际绘制，只清深度。

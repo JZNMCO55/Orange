@@ -31,7 +31,9 @@ using Orange::Engine::World;
 using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
+using Orange::Engine::Render::ComputeDirectionalLightWorldDir;
 using Orange::Engine::Render::DirectionalLight;
+using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
 using Orange::Engine::Render::ShadowConfig;
 namespace BuiltinShadowShaders = Orange::Engine::Render::BuiltinShadowShaders;
 
@@ -39,16 +41,13 @@ namespace
 {
 
 // 1. DirectionalLight 默认值合理
+//
+// 方向字段已搬到 entity 的 TransformComponent.rotation —— 此测试只覆盖
+// component 本身的默认 color / intensity / castsShadow；方向的默认（光向
+// -Y）由 LightComponent.h 的 kDirectionalLightLocalForward 独立校验。
 void TestDirectionalLightDefaults()
 {
     DirectionalLight light;
-
-    // direction 朝下方斜射（y 分量 < 0）—— 卡通主光约定
-    assert(light.direction.y < 0.0f);
-    // 默认值大致是单位长度（不强制 1.0，因为 (0.3, -1.0, 0.4) 长度
-    // ≈1.115；调用方按需 normalize）。这里只验证非零长度且合理量级。
-    const float len = glm::length(light.direction);
-    assert(len > 0.5f && len < 2.0f);
 
     // 默认白光、强度 1、不投影
     assert(light.color.r == 1.0f);
@@ -57,7 +56,14 @@ void TestDirectionalLightDefaults()
     assert(light.intensity == 1.0f);
     assert(light.castsShadow == false);
 
-    std::fprintf(stdout, "  [PASS] DirectionalLight 默认字段\n");
+    // identity rotation 派生的方向 = kDirectionalLightLocalForward = (0,-1,0)
+    const glm::quat identity{1.0f, 0.0f, 0.0f, 0.0f};
+    const glm::vec3 dir = ComputeDirectionalLightWorldDir(identity);
+    assert(std::abs(dir.x - 0.0f) < 1e-5f);
+    assert(std::abs(dir.y - (-1.0f)) < 1e-5f);
+    assert(std::abs(dir.z - 0.0f) < 1e-5f);
+
+    std::fprintf(stdout, "  [PASS] DirectionalLight 默认字段 + identity rotation 派生方向\n");
 }
 
 // 2. ShadowConfig 默认值合理且字段独立
@@ -88,13 +94,16 @@ void TestShadowConfigDefaults()
 }
 
 // 3. DirectionalLight 真可用作 ECS component
+//
+// 方向由 entity Transform.rotation 派生 —— 本测试覆盖 (a) component 字段
+// round-trip、(b) MakeDirectionalLightRotationFromDir →
+// ComputeDirectionalLightWorldDir 反推回原方向（数值精度内）。
 void TestDirectionalLightAsEcsComponent()
 {
     World world;
     Entity e = world.CreateEntity();
 
     DirectionalLight light;
-    light.direction   = glm::vec3{0.0f, -1.0f, 0.0f};
     light.color       = glm::vec3{1.0f, 0.8f, 0.6f};   // 暖光
     light.intensity   = 1.5f;
     light.castsShadow = true;
@@ -104,14 +113,21 @@ void TestDirectionalLightAsEcsComponent()
 
     const DirectionalLight* readBack = world.GetComponent<DirectionalLight>(e);
     assert(readBack != nullptr);
-    assert(readBack->direction.y == -1.0f);
     assert(readBack->color.r     == 1.0f);
     assert(readBack->color.g     == 0.8f);
     assert(readBack->color.b     == 0.6f);
     assert(readBack->intensity   == 1.5f);
     assert(readBack->castsShadow == true);
 
-    std::fprintf(stdout, "  [PASS] DirectionalLight 作为 ECS component\n");
+    // 方向 round-trip：把世界方向编入 rotation，再从 rotation 派生回方向。
+    const glm::vec3 desired = glm::vec3{0.0f, -1.0f, 0.0f};
+    const glm::quat rot     = MakeDirectionalLightRotationFromDir(desired);
+    const glm::vec3 derived = ComputeDirectionalLightWorldDir(rot);
+    assert(std::abs(derived.x - desired.x) < 1e-5f);
+    assert(std::abs(derived.y - desired.y) < 1e-5f);
+    assert(std::abs(derived.z - desired.z) < 1e-5f);
+
+    std::fprintf(stdout, "  [PASS] DirectionalLight 作为 ECS component + rotation 派生方向\n");
 }
 
 // 4. BuiltinShadowShaders::LoadShadowCaster + dedup

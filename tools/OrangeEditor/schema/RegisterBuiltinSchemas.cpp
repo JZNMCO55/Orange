@@ -36,9 +36,12 @@ namespace
 void RegisterDirectionalLightSchema()
 {
     using DL = Orange::Engine::Render::DirectionalLight;
+    // 方向字段已废 —— 改由 entity 的 TransformComponent.rotation 派生
+    // （Pipeline 内 ComputeDirectionalLightWorldDir(rotation)）。Inspector
+    // 不再展示 Direction 控件；用户旋转 entity（Rotate gizmo / Transform
+    // schema 的 rotation 编辑）即可改光向，与 Unity / Unreal / Godot 同款
+    // 工业惯例（几何状态由 Transform 唯一拥有）。
     ComponentSchemaBuilder<DL>("DirectionalLight", "Directional Light")
-        .Field<&DL::direction>("direction", "Direction")
-            .DragSpeed(0.01f)
         .Field<&DL::color>("color", "Color")
             .Color()
         .Field<&DL::intensity>("intensity", "Intensity")

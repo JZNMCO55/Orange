@@ -408,9 +408,13 @@ public:
         const float cz = std::sin(t);
         const glm::vec3 dir = glm::normalize(glm::vec3(cx * 0.6f, -1.0f, cz * 0.6f));
 
-        if (auto* dl = mWorld.GetComponent<DirectionalLight>(mLight))
+        // 方向由 light entity 的 Transform.rotation 派生 —— 直接改 rotation
+        // 让 Pipeline 取到新方向。MakeDirectionalLightRotationFromDir 把
+        // 世界方向反推回 quat。
+        if (auto* lightXf = mWorld.GetComponent<TransformComponent>(mLight))
         {
-            dl->direction = dir;
+            lightXf->rotation = Orange::Engine::Render::
+                MakeDirectionalLightRotationFromDir(dir);
         }
         if (auto* xf = mWorld.GetComponent<TransformComponent>(mMarker))
         {
@@ -614,11 +618,15 @@ int main(int argc, char** argv)
         jointEntities.push_back(e);
     }
 
-    // 主光：方向斜下，旋转。
+    // 主光：方向斜下，每帧旋转（LightSpinLayer 改 Transform.rotation）。
     Entity lightEntity = world.CreateEntity();
     {
+        TransformComponent lightXf{};
+        lightXf.rotation = Orange::Engine::Render::MakeDirectionalLightRotationFromDir(
+            glm::vec3(0.6f, -1.0f, 0.4f));
+        world.AddComponent(lightEntity, lightXf);
+
         DirectionalLight dl{};
-        dl.direction   = glm::normalize(glm::vec3(0.6f, -1.0f, 0.4f));
         dl.color       = glm::vec3(1.0f, 0.95f, 0.85f);
         dl.intensity   = 1.2f;
         dl.castsShadow = true;
