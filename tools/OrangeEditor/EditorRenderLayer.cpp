@@ -507,11 +507,15 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::EndMenu();
     }
 
-    // ---- Play / Pause / Stop 按钮 -------------------------
-    // 直接放主菜单栏右侧（不另开 toolbar，避免再加一行垂直空间占用）。
-    // 状态显示用一个 Text + 三个按钮：disabled / enabled 按当前 playState
-    // 推算（典型 transport-control 风格：Play 在 Edit / Paused 可用，
-    // Pause 仅 Play 可用，Stop 仅 Play / Paused 可用）。
+    // ---- Save + Play / Pause / Stop 按钮（v0.6 c3 起 Save 加入）-------
+    // 主菜单栏右侧：Save | Play | Pause | Stop | [State]。
+    // Save 是 File 菜单 "Save" 项的 toolbar 主入口 —— File 菜单仍保留作
+    // 为键盘快捷键 hint + 后备入口（与 Lumix / Godot / Cocos 同款双入口
+    // 惯例）。dirty 时高亮：硬编码 accent 蓝（v0.6.5 视觉统一 milestone
+    // 会迁到 EditorTheme token；当前 EditorTheme 尚未存在，无法 token 化）。
+    // disabled / enabled 按当前 playState + dirty 推算（典型 transport-
+    // control 风格：Play 在 Edit / Paused 可用，Pause 仅 Play 可用，Stop
+    // 仅 Play / Paused 可用；Save 仅 dirty 可用——与 File>Save 同款条件）。
     {
         const PlayState ps = mHost.scene.playState;
         const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
@@ -523,6 +527,7 @@ void EditorRenderLayer::DrawMainMenuBar()
         // main.cpp ImGui::GetStyle().ScaleAllSizes(dpiScale) 同步缩放。
         const ImGuiStyle& style = ImGui::GetStyle();
         const float framePadX   = style.FramePadding.x * 2.0f;
+        const float btnSaveW    = ImGui::CalcTextSize("Save").x  + framePadX;
         const float btnPlayW    = ImGui::CalcTextSize("Play").x  + framePadX;
         const float btnPauseW   = ImGui::CalcTextSize("Pause").x + framePadX;
         const float btnStopW    = ImGui::CalcTextSize("Stop").x  + framePadX;
@@ -536,13 +541,32 @@ void EditorRenderLayer::DrawMainMenuBar()
                        ImGui::CalcTextSize("[Paused]").x))
             + framePadX;
         const float itemSpc = style.ItemSpacing.x;
-        const float groupW = btnPlayW + btnPauseW + btnStopW + stateW
-                           + 4.0f * itemSpc;
+        const float groupW = btnSaveW + btnPlayW + btnPauseW + btnStopW + stateW
+                           + 5.0f * itemSpc;
         ImGui::SameLine(ImGui::GetWindowWidth() - groupW);
+
+        // Save 按钮：dirty 时 accent 高亮。颜色硬编码——v0.6.5 视觉统一
+        // milestone 引入 EditorTheme token 后替换为 EditorTheme::Accent。
+        const bool dirty = mHost.scene.dirty;
+        if (dirty) {
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                ImVec4(0.30f, 0.55f, 0.95f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                ImVec4(0.15f, 0.40f, 0.80f, 1.0f));
+        }
+        ImGui::BeginDisabled(!dirty);
+        if (ImGui::Button("Save", ImVec2(btnSaveW, 0))) {
+            mHost.scene.pendingSceneOp = SceneOp::Save;
+        }
+        ImGui::EndDisabled();
+        if (dirty) { ImGui::PopStyleColor(3); }
 
         const bool canPlay   = (ps == PlayState::Edit  || ps == PlayState::Paused);
         const bool canPause  = (ps == PlayState::Play);
         const bool canStop   = (ps == PlayState::Play  || ps == PlayState::Paused);
+        ImGui::SameLine();
         ImGui::BeginDisabled(!canPlay);
         if (ImGui::Button("Play", ImVec2(btnPlayW, 0))) {
             mHost.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
