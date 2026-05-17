@@ -153,7 +153,15 @@ void DestroyImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr
 // * parentHwnd 用主窗口的 HWND（GLFW 的 HWND 通过 glfwGetWin32Window 取），
 //   让 dialog 作为 modal child 居中 / 抢焦点。本函数签名 void* 透传，
 //   内部 cast 回 HWND 调 Win32 API。
-bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
+namespace
+{
+
+// 共享 IFileDialog 模板 —— ShowSceneFileDialog / ShowManifestFileDialog
+// 只过滤器与默认扩展名不同，其余 COM 流程完全一致。
+bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
+                        const COMDLG_FILTERSPEC* filters, std::size_t filterCount,
+                        const wchar_t* defaultExt, const wchar_t* title,
+                        std::string& outPath)
 {
     const HRESULT hrCo = CoInitializeEx(nullptr,
                                         COINIT_APARTMENTTHREADED
@@ -167,14 +175,10 @@ bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
         nullptr, CLSCTX_ALL,
         IID_PPV_ARGS(&pDialog));
     if (SUCCEEDED(hr)) {
-        const COMDLG_FILTERSPEC filterSpec[] = {
-            { L"Scene Files (*.scene.json)", L"*.scene.json" },
-            { L"All Files (*.*)",            L"*.*" },
-        };
-        pDialog->SetFileTypes(2, filterSpec);
+        pDialog->SetFileTypes(static_cast<UINT>(filterCount), filters);
         pDialog->SetFileTypeIndex(1);
-        pDialog->SetDefaultExtension(L"scene.json");
-        pDialog->SetTitle(isSave ? L"Save Scene As" : L"Open Scene");
+        pDialog->SetDefaultExtension(defaultExt);
+        pDialog->SetTitle(title);
 
         hr = pDialog->Show(static_cast<HWND>(parentHwnd));
         if (SUCCEEDED(hr)) {
@@ -203,4 +207,30 @@ bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
     }
     if (hrCo == S_OK) { CoUninitialize(); }
     return ok;
+}
+
+}  // namespace
+
+bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
+{
+    const COMDLG_FILTERSPEC filterSpec[] = {
+        { L"Scene Files (*.scene.json)", L"*.scene.json" },
+        { L"All Files (*.*)",            L"*.*" },
+    };
+    return ShowFileDialogImpl(isSave, parentHwnd, filterSpec, 2,
+                              L"scene.json",
+                              isSave ? L"Save Scene As" : L"Open Scene",
+                              outPath);
+}
+
+bool ShowManifestFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
+{
+    const COMDLG_FILTERSPEC filterSpec[] = {
+        { L"Scene Manifest (*.scene.manifest.json)", L"*.scene.manifest.json" },
+        { L"All Files (*.*)",                        L"*.*" },
+    };
+    return ShowFileDialogImpl(isSave, parentHwnd, filterSpec, 2,
+                              L"scene.manifest.json",
+                              isSave ? L"Save Scene (Split) As" : L"Open Scene (Split)",
+                              outPath);
 }

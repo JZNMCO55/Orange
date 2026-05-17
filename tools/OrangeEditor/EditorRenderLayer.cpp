@@ -508,6 +508,21 @@ void EditorRenderLayer::DrawMainMenuBar()
             mHost.scene.pendingSceneOp = SceneOp::SaveAs;
         }
         ImGui::Separator();
+        // v0.6 c6：多文件 + manifest 路径——把每条 layer 的 entity 单独
+        // 拆到 per-layer .scene.json，最后写 manifest 文件。多人编辑 / VCS
+        // 友好（per-layer 文件独立 diff）；dirty 状态、未保存确认、Play
+        // 快照仍走单文件 Save 路径（避免编辑器内多种序列化模式互撞）。
+        if (ImGui::MenuItem("Save Split As...")) {
+            mHost.scene.pendingSceneOp = SceneOp::SaveSplitAs;
+        }
+        if (ImGui::MenuItem("Open Split...")) {
+            if (mHost.scene.dirty) {
+                mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
+            } else {
+                mHost.scene.pendingSceneOp = SceneOp::OpenSplit;
+            }
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem("Exit")) {
             // v0.6 c2：dirty 时拦截走未保存确认 popup。
             if (mHost.scene.dirty) {
@@ -774,6 +789,90 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             mHost.scene.dirty = false;
             std::fprintf(stdout, "[OrangeEditor] saved scene as: %s\n",
                          mHost.scene.currentScenePath.c_str());
+            break;
+        }
+        case SceneOp::SaveSplitAs: {
+            // v0.6 c6：拆 manifest + per-layer .scene.json 写盘。partition
+            // 必须至少含两条 layer（default + 至少一条用户加的）才有意义；
+            // 仅一条 layer 仍允许（manifest 只列 default，等价于单文件
+            // 但走多文件路径）。源文件名按 layer id 派生：
+            // manifestPath = "X.scene.manifest.json" → 同目录写
+            // "<layer.id>.scene.json"；落盘前更新 partition.layer.source
+            // 让 manifest 写出的 source 字段反映本次实际路径。
+            std::string manifestPath;
+            if (!ShowManifestFileDialog(/*isSave=*/true, hwnd, manifestPath)) { break; }
+            // 为每条 layer 赋一个稳定的 source 文件名（若 partition 内已
+            // 有 source 字段则保留，方便"反复 SaveSplitAs 到同名 manifest
+            // 不改 layer 文件名"）。遍历 GetLayers() 拿 id，再通过非 const
+            // GetLayer(id) 拿可改 LayerInfo*；不直接 mutate GetLayers()
+            // 返回的 const& vector。
+            const auto& layersView = mHost.scene.partition.GetLayers();
+            for (const auto& l : layersView) {
+                if (auto* mutInfo = mHost.scene.partition.GetLayer(l.id);
+                    mutInfo != nullptr && mutInfo->source.empty())
+                {
+                    mutInfo->source = l.id + ".scene.json";
+                }
+            }
+            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            Orange::Engine::Scene::SaveOptions saveOpts;
+            saveOpts.assetRegistry          = mHost.assets.pAssets.get();
+            saveOpts.namedMaterialInstances = &namedMat;
+            saveOpts.extraSerializers       = mHost.extraSerializers;
+            const auto rc = Orange::Engine::Scene::SaveSplit(
+                *mHost.scene.pWorld, mHost.scene.partition, manifestPath, saveOpts);
+            if (rc.IsErr()) {
+                std::fprintf(stderr,
+                             "[OrangeEditor] Scene::SaveSplit failed: %s (code=%u)\n",
+                             manifestPath.c_str(),
+                             static_cast<unsigned>(rc.Error()));
+                break;
+            }
+            // currentScenePath 此刻指向 manifest 文件；后续 File>Save 仍
+            // 走单文件 Save 路径（覆盖 manifest 文件本身），与多文件 split
+            // 路径**不**互通——用户后续要继续 split 落盘必须再走 Save
+            // Split As。这条限制写进 v0.6 acceptance checklist 的"已知简化"。
+            mHost.scene.currentScenePath = std::move(manifestPath);
+            mHost.scene.dirty = false;
+            std::fprintf(stdout, "[OrangeEditor] saved scene (split) as: %s (%zu layers)\n",
+                         mHost.scene.currentScenePath.c_str(),
+                         mHost.scene.partition.LayerCount());
+            break;
+        }
+        case SceneOp::OpenSplit: {
+            std::string manifestPath;
+            if (!ShowManifestFileDialog(/*isSave=*/false, hwnd, manifestPath)) { break; }
+            auto pNew = std::make_unique<Orange::Engine::World>();
+            Orange::Engine::Scene::WorldPartition newPartition;
+            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            Orange::Engine::Scene::LoadOptions splitLoadOpts;
+            splitLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
+            splitLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
+            splitLoadOpts.namedMaterialInstances = &namedMat;
+            splitLoadOpts.extraSerializers       = mHost.extraSerializers;
+            // LoadSplit 内部按 manifest.layers 顺序遍历每条 source，
+            // 并通过 LoadOptions.assignLayerId 给本次新建且没挂
+            // LayerComponent 的 entity 自动按归属 layer 兜底——不必再
+            // 在 editor 侧扫一遍 entity 重建 partition（与单文件 Open 路径
+            // 不同：LoadSplit 已经把 partition 灌入完整 manifest）。
+            const auto rc = Orange::Engine::Scene::LoadSplit(
+                manifestPath, *pNew, newPartition, splitLoadOpts);
+            if (rc.IsErr()) {
+                std::fprintf(stderr,
+                             "[OrangeEditor] Scene::LoadSplit failed: %s (code=%u)\n",
+                             manifestPath.c_str(),
+                             static_cast<unsigned>(rc.Error()));
+                break;
+            }
+            mHost.scene.pWorld           = std::move(pNew);
+            mHost.scene.partition        = std::move(newPartition);
+            mHost.scene.currentScenePath = manifestPath;
+            mHost.scene.dirty            = false;
+            ResetEntityLocalState();
+            mHost.cmdStack.Clear();
+            std::fprintf(stdout, "[OrangeEditor] opened scene (split): %s (%zu layers)\n",
+                         manifestPath.c_str(),
+                         mHost.scene.partition.LayerCount());
             break;
         }
         case SceneOp::None:

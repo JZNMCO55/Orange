@@ -27,6 +27,12 @@ enum class SceneOp : std::uint8_t
     Open,
     Save,
     SaveAs,
+    // v0.6 c6：多文件 + manifest 路径。SaveSplitAs 弹 manifest 文件
+    // dialog，按 partition.GetLayers() 写 per-layer .scene.json + manifest；
+    // OpenSplit 反向。当前 Save 菜单仍走单文件 SaveAs / Save；SplitAs
+    // 是显式新入口（File>Save Split As / Open Split），不替换原路径。
+    SaveSplitAs,
+    OpenSplit,
 };
 
 // Play 模式三态：

@@ -56,4 +56,9 @@ void DestroyImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr
 // 取（glfwGetWin32Window），以 void* 透传，避免本头拉 <windows.h>。
 bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath);
 
+// 同款 dialog 但过滤 `.scene.manifest.json` —— v0.6 c6 SaveSplit /
+// LoadSplit 多文件落盘的 manifest 文件入口。manifest 路径决定 base
+// directory，per-layer .scene.json 与 manifest 同目录。
+bool ShowManifestFileDialog(bool isSave, void* parentHwnd, std::string& outPath);
+
 #endif  // ORANGE_EDITOR_VULKAN_LOADER_SHIM_H
