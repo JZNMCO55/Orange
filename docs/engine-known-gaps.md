@@ -512,6 +512,58 @@ const std::vector<std::string>& EnumerateTemplateNames() const;
 
 ---
 
+## GAP-2026-05-17-scene-layer-component
+
+- **发现方**：OrangeEditor v0.6 启动 ritual（milestone-start-checklist 步骤 6 跨仓影响识别）
+- **发现日期**：2026-05-17
+- **一句话定性**：引擎侧 `include/orange/engine/scene/` 缺 `LayerComponent` / `WorldPartition` 概念，编辑器侧 v0.6 "Scene 拆 chunk → layer 两级；per-layer 落盘 + 单独加载 / hide / show" deliverable 无法落地
+
+### 触发场景
+
+editor-roadmap.md v0.6 milestone "多 chunk / per-layer + dirty 状态" 的 6 个 deliverable 中有 3 个依赖引擎侧 layer 概念：
+
+- **Scene 序列化扩 SchemaVersion**：新 schema v2.0 需要在 entity 上多一个 layer 字段
+- **Scene 拆 chunk → layer 两级；per-layer 落盘 + 单独加载 / hide / show**：核心 feature
+- **多 scene tab**：跨 World 容器协调（次要，可能也涉及）
+
+引擎当前能力对照：
+
+| 原子能力 | 现状 | 备注 |
+|---------|------|------|
+| Scene/World 概念 | ✅ | `include/orange/engine/scene/World.h` 单个 EnTT registry |
+| Entity hierarchy（parent/child） | ✅ | `HierarchyComponent` |
+| Entity name / transform | ✅ | `NameComponent` / `TransformComponent` |
+| **Entity layer 归属** | ❌ | 无 `LayerComponent` |
+| **Layer 容器 / 分组 / hide-show** | ❌ | 无 `WorldPartition` / `LayerManager` |
+| **per-layer 序列化（拆 chunk）** | ❌ | 当前 `SceneSerialization` 单文件整 World 序列化，不支持分文件 |
+| Scene SchemaVersion + migrator | ✅ | Phase 5 Task 01 已有 migrator 机制；v1.0 → v2.0 走同款路径 |
+
+### 缺什么
+
+- 公共头 `include/orange/engine/scene/LayerComponent.h`：layer id（字符串或 uint16）+ visible 标志
+- 公共头 `include/orange/engine/scene/WorldPartition.h`（暂定名）：layer manifest（id → name / visible / source file）；query 该 World 当前有哪些 layer；遍历某 layer 的所有 entity；hide/show 某 layer（影响 Render / Physics tick filter）
+- `SceneSerialization` 扩展：保存时按 entity layer 分组写多文件（per-layer .scene.json）；加载时拼回 manifest
+- Render Pipeline 在收集 RenderableComponent 时过滤 layer.visible=false 的 entity
+- Physics tick 同理过滤（避免隐藏 layer 内的 RigidBody 仍参与物理）
+
+### 期望验收
+
+- editor v0.6 实现 "Hierarchy 加 layer 列 + 右键 'Move to layer'" UX 时，能调引擎公共 API 完成 layer 分组 / 序列化 / hide-show
+- 引擎自带 sample 演示：两个 layer（背景 + 前景），加载 / 隐藏前景 → viewport 只剩背景
+- Scene schema v2.0 写盘 + 加载 v1.0 旧文件（migrator 把所有 entity 归入 default layer）
+
+### 状态
+
+**registered, not started** —— 本 session 仅登记不实现（按 CLAUDE.md "engine-known-gaps 跨 session 工作流"）。引擎补强是显式独立 session 处理。落地后 editor v0.6 在新 session bump vendor 后消费。
+
+### 关联
+
+- editor-roadmap.md v0.6 deliverable 2 / 3 / 5
+- 现有 `SceneSerialization` / `World` 公共 API（要扩展但不破坏 v1.0 schema）
+- `Pipeline::Render` / `PhysicsWorld::Step` —— layer.visible 过滤的最终消费方
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
