@@ -262,4 +262,49 @@ MaterialInstance::GetTextureBinding(std::uint32_t binding) const noexcept
     return it->second;
 }
 
+std::vector<std::string> MaterialInstance::GetUniformOverrideNames() const
+{
+    std::vector<std::string> names;
+    if (!mpImpl)
+    {
+        return names;
+    }
+    names.reserve(mpImpl->uniformOverrides.size());
+    for (const auto& [name, _val] : mpImpl->uniformOverrides)
+    {
+        names.push_back(name);
+    }
+    return names;
+}
+
+std::vector<std::uint32_t> MaterialInstance::GetTextureOverrideBindings() const
+{
+    std::vector<std::uint32_t> bindings;
+    if (!mpImpl)
+    {
+        return bindings;
+    }
+    bindings.reserve(mpImpl->textureOverrides.size());
+    for (const auto& [binding, _handle] : mpImpl->textureOverrides)
+    {
+        bindings.push_back(binding);
+    }
+    return bindings;
+}
+
+std::optional<MaterialUniformType>
+MaterialInstance::GetUniformOverrideType(std::string_view name) const noexcept
+{
+    if (!mpImpl)
+    {
+        return std::nullopt;
+    }
+    auto it = mpImpl->uniformOverrides.find(std::string(name));
+    if (it == mpImpl->uniformOverrides.end())
+    {
+        return std::nullopt;
+    }
+    return it->second.type;
+}
+
 }  // namespace Orange::Engine::Render

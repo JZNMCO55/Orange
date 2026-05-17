@@ -19,9 +19,12 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include <string>
 #include <utility>
+#include <vector>
 
 using Orange::Engine::Asset::AssetHandle;
 using Orange::Engine::Asset::ShaderAsset;
@@ -159,6 +162,65 @@ void TestSetTextureAndMove()
     std::fprintf(stdout, "  [PASS] SetTexture + move-construction preserves overrides\n");
 }
 
+// 枚举 override API（GAP-2026-05-16 G2）：
+//   * 空 instance → 三个 enumerate 都返回空
+//   * 设置 3 个 uniform + 2 个 texture override → 列表长度匹配 + 内容匹配
+//   * GetUniformOverrideType 命中返回正确类型；未命中 nullopt
+void TestEnumerateOverrides()
+{
+    Material m;
+    m.uniforms.push_back({"uTime",     MaterialUniformType::Float});
+    m.uniforms.push_back({"uRimColor", MaterialUniformType::Vec3});
+    m.uniforms.push_back({"uMVP",      MaterialUniformType::Mat4});
+    m.textureSlots.push_back({0, "uAlbedo"});
+    m.textureSlots.push_back({2, "uNormal"});
+
+    MaterialInstance inst(&m);
+
+    // 空 instance：三个 enumerate 全空
+    assert(inst.GetUniformOverrideNames().empty());
+    assert(inst.GetTextureOverrideBindings().empty());
+    assert(!inst.GetUniformOverrideType("uTime").has_value());
+
+    // 设置 override 后正确返回
+    inst.SetUniform("uTime", 1.5f);
+    inst.SetUniform("uRimColor", glm::vec3(0.4f, 0.8f, 1.0f));
+    inst.SetUniform("uMVP", glm::mat4(1.0f));
+    inst.SetTexture(0, AssetHandle<TextureAsset>{42});
+    inst.SetTexture(2, AssetHandle<TextureAsset>{43});
+
+    std::vector<std::string> uniformNames = inst.GetUniformOverrideNames();
+    assert(uniformNames.size() == 3);
+    std::sort(uniformNames.begin(), uniformNames.end());
+    assert(uniformNames[0] == "uMVP");
+    assert(uniformNames[1] == "uRimColor");
+    assert(uniformNames[2] == "uTime");
+
+    std::vector<std::uint32_t> bindings = inst.GetTextureOverrideBindings();
+    assert(bindings.size() == 2);
+    std::sort(bindings.begin(), bindings.end());
+    assert(bindings[0] == 0u);
+    assert(bindings[1] == 2u);
+
+    // 类型查询
+    auto t1 = inst.GetUniformOverrideType("uTime");
+    assert(t1.has_value() && *t1 == MaterialUniformType::Float);
+    auto t2 = inst.GetUniformOverrideType("uRimColor");
+    assert(t2.has_value() && *t2 == MaterialUniformType::Vec3);
+    auto t3 = inst.GetUniformOverrideType("uMVP");
+    assert(t3.has_value() && *t3 == MaterialUniformType::Mat4);
+    auto tMiss = inst.GetUniformOverrideType("nope");
+    assert(!tMiss.has_value());
+
+    // null instance：enumerate 全空
+    MaterialInstance nullInst(nullptr);
+    assert(nullInst.GetUniformOverrideNames().empty());
+    assert(nullInst.GetTextureOverrideBindings().empty());
+    assert(!nullInst.GetUniformOverrideType("uTime").has_value());
+
+    std::fprintf(stdout, "  [PASS] enumerate uniform / texture override\n");
+}
+
 }  // namespace
 
 int main()
@@ -170,6 +232,7 @@ int main()
     TestSetUniformHit();
     TestSetUniformMissAndMismatch();
     TestSetTextureAndMove();
+    TestEnumerateOverrides();
     std::fprintf(stdout, "[MaterialInterfaceTest] all tests passed.\n");
     return 0;
 }

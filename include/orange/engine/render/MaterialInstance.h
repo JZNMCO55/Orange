@@ -23,6 +23,7 @@
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/render/Material.h>
+#include <orange/engine/render/MaterialTypes.h>
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
@@ -32,7 +33,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace Orange::Engine::Render
 {
@@ -93,6 +96,26 @@ public:
     // 的无效 handle（IsValid() == false）；调用方按 IsValid() 判定。
     Asset::AssetHandle<Asset::TextureAsset>
         GetTextureBinding(std::uint32_t binding) const noexcept;
+
+    // 枚举所有已设置 uniform override 的 name —— 让序列化 / Inspector
+    // 调参 UI 等"不知道 name 的情况下遍历"路径可行。返回值类型 vector
+    // 拷贝，免后续 SetUniform rehash 让 view 悬挂。
+    //
+    // 顺序未定义：内部 unordered_map 遍历无序。调用方需要稳定输出顺序
+    // （如序列化写盘）时自行 sort。
+    //
+    // 不在帧内热路径——典型消费方是 Save / Inspector 列举，与
+    // SetUniform / GetUniformXxx 同节奏；不强调零分配。
+    std::vector<std::string> GetUniformOverrideNames() const;
+
+    // 枚举所有已设置 texture override 的 binding。同上语义。
+    std::vector<std::uint32_t> GetTextureOverrideBindings() const;
+
+    // 取得某 uniform override 的实际类型。命中返回 type；未命中返回
+    // nullopt。Save 路径用 type 决定写哪个 GetUniformXxx + 写盘的 type
+    // 字段；Inspector 用 type 决定显示哪种调参控件。
+    std::optional<MaterialUniformType>
+        GetUniformOverrideType(std::string_view name) const noexcept;
 
 private:
     struct Impl;
