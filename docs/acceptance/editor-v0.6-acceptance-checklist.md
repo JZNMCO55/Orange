@@ -14,8 +14,8 @@
 
 ### 1. Dirty 状态 + 关闭确认 + Save 入口（c1 / c2 / c3）
 
-- [ ] 改动任意 Inspector 字段后窗口 title 出现 `*` 后缀（"demo.scene.json * — OrangeEditor"）
-- [ ] dirty 时 menu bar 右侧 **Save** 按钮 accent 蓝高亮；点击 → title `*` 消失
+- [ ✅] 改动任意 Inspector 字段后窗口 title 出现 `*` 后缀（"demo.scene.json * — OrangeEditor"）
+- [✅ ] dirty 时 menu bar 右侧 **Save** 按钮 accent 蓝高亮；点击 → title `*` 消失
 - [ ] dirty 时按 Esc / 点窗口 × / File>New / File>Open / File>Open Split 任一 → 弹"未保存改动"确认 popup（Save / Discard / Cancel 三选一）
 
 ### 2. Layer 编辑 UI（c4 / c5）
