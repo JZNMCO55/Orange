@@ -24,6 +24,7 @@
 #include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/scene/HierarchyComponent.h"
+#include "orange/engine/scene/LayerComponent.h"
 #include "orange/engine/scene/NameComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
@@ -253,6 +254,46 @@ bool ReadName(const JsonReader& reader,
         return false;
     }
     ctx.world.AddComponent(entity, n);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// LayerComponent
+//
+// 序列化策略：仅一个 string 字段，但走对象形态 `{"id": "..."}`，给后续
+// 加 lockInEditor / color 等 layer-side meta 留 schema bump 空间。空字符
+// 串显式落盘——读时 WorldPartition::GetLayerOf 把空 id 解释为 default。
+// ---------------------------------------------------------------------------
+
+bool HasLayer(const World& world, Entity entity)
+{
+    return world.HasComponent<LayerComponent>(entity);
+}
+
+void WriteLayer(JsonWriter& writer,
+                std::string_view componentPath,
+                Entity entity,
+                const SaveContext& ctx)
+{
+    const auto* l = ctx.world.GetComponent<LayerComponent>(entity);
+    if (l == nullptr)
+    {
+        return;
+    }
+    writer.WriteString(Join(componentPath, "id"), l->layerId);
+}
+
+bool ReadLayer(const JsonReader& reader,
+               std::string_view componentPath,
+               Entity entity,
+               const LoadContext& ctx)
+{
+    LayerComponent l;
+    if (!reader.ReadString(Join(componentPath, "id"), l.layerId))
+    {
+        return false;
+    }
+    ctx.world.AddComponent(entity, std::move(l));
     return true;
 }
 
@@ -1110,6 +1151,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Transform",        ComponentKind::PureData,         &HasTransform,        &WriteTransform,        &ReadTransform},
         {"Hierarchy",        ComponentKind::PureData,         &HasHierarchy,        &WriteHierarchy,        &ReadHierarchy},
         {"Name",             ComponentKind::PureData,         &HasName,             &WriteName,             &ReadName},
+        {"Layer",            ComponentKind::PureData,         &HasLayer,            &WriteLayer,            &ReadLayer},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},

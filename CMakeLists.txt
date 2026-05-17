@@ -75,6 +75,7 @@ add_library(orange_engine STATIC
     src/scene/World.cpp
     src/scene/SceneSerialization.cpp
     src/scene/ComponentSerializers.cpp
+    src/scene/WorldPartition.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
     # + RenderScene 收集（World → drawable list）+ Pipeline 接通
