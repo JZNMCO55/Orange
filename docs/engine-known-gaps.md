@@ -777,6 +777,54 @@ stash 出本 GAP 全部改动后该错误仍存在，确认 pre-existing。
 
 ---
 
+## GAP-2026-05-17-editor-first-frame-flash
+
+- **发现方**：OrangeEditor v0.6.5 c0 视觉验收
+- **发现日期**：2026-05-17
+- **一句话定性**：编辑器启动时一闪而过出现"左上约 1920×500 白色矩形 + 其余纯黑"的异常画面（持续 < 1 帧），是 ImGui dock layout 渲染完成前的瑕疵帧；pre-existing，**与 c0 无关**（stash c0 改动后启动仍复现）
+- **状态**：登记，未开工
+
+### 触发场景
+
+启动 `build/bin/Debug/OrangeEditor.exe`，maximize 完成后到 demo.scene 加载 + dock layout 首帧渲染之间的若干帧内，主 swap-chain 已 present 但 ImGui DrawData 未带任何 panel 内容，视觉上出现：
+
+- 左上约 1920×500 大小白色矩形（疑似 ImGui dummy window background 或 swap-chain clear color 残留）
+- 其余区域纯黑（疑似 swap-chain clear 后无 draw 覆盖）
+
+持续时间：肉眼可见 ~0.5–1 帧，约 16–33ms 量级。后续帧正常呈现 5 panel + viewport。
+
+### 历史关联
+
+`tools/OrangeEditor/main.cpp:200-213` v0.4.5 落地的 workaround 注释里登记过同源问题：
+
+> 启动即 maximize —— v0.4.5 后用户在低 DPI / 窄屏机器报"初始打开 OK，用户拉伸 / 最大化后 Inspector 永久消失"…… 嫌疑点剩 GLFW WindowSize callback chain（AppHost OnSize + ImGui ImplGlfw 1.91+ WindowSize chained handler）在 resize 风暴下的事件分发顺序、或 OrangeRender swap-chain rebuild 与 ImGui DisplaySize sync 的时序竞争。
+
+v0.4.5 workaround（把 `glfwMaximizeWindow` 提到 ImGui Init 之前）解决了**永久消失**这条极端 path，但首帧白屏闪烁未消除——本 GAP 是 v0.4.5 workaround 的**残留分支**。
+
+### 嫌疑
+
+按相同的根因树排查：
+
+| 嫌疑 | 验证手段 |
+|------|---------|
+| **swap-chain rebuild 与 ImGui DisplaySize sync 时序竞争** | 在 `main.cpp` ImGui_ImplVulkan_Init 后 + 第一帧 BeginFrame 前插入一段 "dummy 几帧 + clear to black + 不画 ImGui" 让 swap-chain settle，看是否消除闪烁 |
+| **dock layout 首帧建立耗 1–2 帧才 visible** | 把 `BuildDefaultLayoutOnce` 改为预热（main 启动期跑一次）而不是 OnUpdate 首帧懒建，看首帧能否立即拿到 dock 节点尺寸 |
+| **ImGui first valid DrawData 与 swap-chain present 节奏不齐** | 加 frame counter，前 N 帧 swap-chain submit empty draw（背景色与 ImGui dock background 一致），让肉眼感受不到差异 |
+
+### 期望验收
+
+- 启动 OrangeEditor.exe 后无肉眼可感的"白色矩形 + 黑色背景"闪烁
+- v0.4.5 修复的"resize 后 Inspector 永久消失"回归测试不退化
+- 1080p / 1680×1120 / 4K 三种 DPI 配置下均不复现
+
+### 关联
+
+- `tools/OrangeEditor/main.cpp:200-213`（v0.4.5 workaround 注释）
+- editor-roadmap v0.6.5 c0（本 GAP 的发现点，但 c0 不修；独立 session 处理）
+- pre-existing；不阻塞 v0.6.5 任何 commit 推进
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-17-asset-registry-handle-to-path**（2026-05-17 落地）：发现 `AssetRegistry::PathOf<T>` 公共 API 早已存在（GAP 登记时漏看），实际只需 `MaterialFileIO::BuildDataFromInstance` 加可选 `const AssetRegistry*` 参数 + 内部消费 PathOf。详细见上文条目末尾"落地记录"节。涉及 commit：`784bf1a`。关键改动文件：`tools/OrangeEditor/MaterialFileIO.{h,cpp}` / `tests/render/MaterialFileIOTest.cpp`（TestTextureRoundTripWithRegistry）

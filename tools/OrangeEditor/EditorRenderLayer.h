@@ -63,6 +63,11 @@ private:
     // ---- EditorRenderLayer.cpp -----------------------------------------
     static void BuildDefaultLayoutOnce(ImGuiID dockspaceId);
     void DrawMainMenuBar();
+    // v0.6.5 c0：独立顶部 toolbar（紧贴 main menu bar 下方），实现在
+    // panels/ToolbarPanel.cpp。承载 Save / Play / Pause / Stop / [State]
+    // transport controls，居中布局参 Cocos Creator 3.8.8。必须在
+    // DockSpaceOverViewport 之前调用，让 BuildWorkOffset 累积生效。
+    void DrawMainToolbar();
     // v0.6 c1：每帧把"<scene>[ *] — OrangeEditor" 推到 GLFW 原生窗口
     // title。dirty 状态由 mHost.scene.dirty 决定，scene 名取
     // currentScenePath basename（空路径走 "(unsaved scene)"）。内部

@@ -228,14 +228,25 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
         }
     }
 
-    // dock space —— 占满主 viewport，所有 imgui window 都可以 dock 进来。
+    // 顶部固定 UI 的渲染顺序（v0.6.5 c0 起）：
+    //   1. DrawMainMenuBar    —— BeginMainMenuBar 占主 viewport 顶部一行
+    //   2. DrawMainToolbar    —— BeginViewportSideBar(Up) 占第二行
+    //   3. DockSpaceOverViewport —— 在 1 + 2 扣除后的 work area 内画 dock
+    // ImGui 把 BeginMainMenuBar / BeginViewportSideBar 累积到 viewport
+    // BuildWorkOffset，下帧 commit 到 WorkOffset；DockSpaceOverViewport
+    // 读 viewport WorkPos/WorkSize 派生 dock 区域。因此把 menu/toolbar 调用
+    // 放在 DockSpaceOverViewport 之前是稳态正确的（首帧 t=0 可能 dockspace
+    // 短暂覆盖 toolbar 一帧，稳态后正常）。
+    DrawMainMenuBar();
+    DrawMainToolbar();
+
+    // dock space —— 占满主 viewport 内 menu + toolbar 扣除后的剩余区域。
     // DockSpaceOverViewport 返回的 ID 在主 viewport 生命周期内稳定，下面
     // DockBuilder 系列 API 用它建默认布局。
     const ImGuiID dockspaceId =
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
     BuildDefaultLayoutOnce(dockspaceId);
-    DrawMainMenuBar();
     UpdateWindowTitle();
 
     // 六个固定面板：Scene / Entity Tree / Inspector / Assets / Console /
@@ -539,91 +550,10 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::EndMenu();
     }
 
-    // ---- Save + Play / Pause / Stop 按钮（v0.6 c3 起 Save 加入）-------
-    // 主菜单栏右侧：Save | Play | Pause | Stop | [State]。
-    // Save 是 File 菜单 "Save" 项的 toolbar 主入口 —— File 菜单仍保留作
-    // 为键盘快捷键 hint + 后备入口（与 Lumix / Godot / Cocos 同款双入口
-    // 惯例）。dirty 时高亮：硬编码 accent 蓝（v0.6.5 视觉统一 milestone
-    // 会迁到 EditorTheme token；当前 EditorTheme 尚未存在，无法 token 化）。
-    // disabled / enabled 按当前 playState + dirty 推算（典型 transport-
-    // control 风格：Play 在 Edit / Paused 可用，Pause 仅 Play 可用，Stop
-    // 仅 Play / Paused 可用；Save 仅 dirty 可用——与 File>Save 同款条件）。
-    {
-        const PlayState ps = mHost.scene.playState;
-        const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
-                               : (ps == PlayState::Play)   ? "[Play]"
-                                                           : "[Paused]";
-        // 按钮 / 状态 label 宽度全部从 CalcTextSize 派生 —— v0.4 期硬编码
-        // 36 / 70 像素在 1680×1120 × 150% scale 上会被字体撑爆 (Segoe UI
-        // 24px 下 "Pause" 文本宽 ~44px > 36px button)。FramePadding 已被
-        // main.cpp ImGui::GetStyle().ScaleAllSizes(dpiScale) 同步缩放。
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float framePadX   = style.FramePadding.x * 2.0f;
-        const float btnSaveW    = ImGui::CalcTextSize("Save").x  + framePadX;
-        const float btnPlayW    = ImGui::CalcTextSize("Play").x  + framePadX;
-        const float btnPauseW   = ImGui::CalcTextSize("Pause").x + framePadX;
-        const float btnStopW    = ImGui::CalcTextSize("Stop").x  + framePadX;
-        // state label 取三种状态最长那个 + framePad，保证切换时右边距稳定。
-        // 用 (std::max)(...) 圆括号包装绕开 windows.h max 宏污染（本 TU 通
-        // 过 imgui_internal.h / GLFW backends 间接拉 windows.h，没 #define
-        // NOMINMAX；main.cpp 那侧定义了 NOMINMAX 但不影响本 TU）。
-        const float stateW = (std::max)(
-            ImGui::CalcTextSize("[Edit]").x,
-            (std::max)(ImGui::CalcTextSize("[Play]").x,
-                       ImGui::CalcTextSize("[Paused]").x))
-            + framePadX;
-        const float itemSpc = style.ItemSpacing.x;
-        const float groupW = btnSaveW + btnPlayW + btnPauseW + btnStopW + stateW
-                           + 5.0f * itemSpc;
-        ImGui::SameLine(ImGui::GetWindowWidth() - groupW);
-
-        // Save 按钮：dirty 时 accent 高亮。颜色硬编码——v0.6.5 视觉统一
-        // milestone 引入 EditorTheme token 后替换为 EditorTheme::Accent。
-        const bool dirty = mHost.scene.dirty;
-        if (dirty) {
-            ImGui::PushStyleColor(ImGuiCol_Button,
-                ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-                ImVec4(0.30f, 0.55f, 0.95f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
-                ImVec4(0.15f, 0.40f, 0.80f, 1.0f));
-        }
-        ImGui::BeginDisabled(!dirty);
-        if (ImGui::Button("Save", ImVec2(btnSaveW, 0))) {
-            mHost.scene.pendingSceneOp = SceneOp::Save;
-        }
-        ImGui::EndDisabled();
-        if (dirty) { ImGui::PopStyleColor(3); }
-
-        const bool canPlay   = (ps == PlayState::Edit  || ps == PlayState::Paused);
-        const bool canPause  = (ps == PlayState::Play);
-        const bool canStop   = (ps == PlayState::Play  || ps == PlayState::Paused);
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!canPlay);
-        if (ImGui::Button("Play", ImVec2(btnPlayW, 0))) {
-            mHost.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
-                                                             : PlayOp::EnterPlay;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!canPause);
-        if (ImGui::Button("Pause", ImVec2(btnPauseW, 0))) {
-            mHost.scene.pendingPlayOp = PlayOp::Pause;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!canStop);
-        if (ImGui::Button("Stop", ImVec2(btnStopW, 0))) {
-            mHost.scene.pendingPlayOp = PlayOp::Stop;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", stateLabel);
-    }
-
-    // 当前 scene 路径作为只读 indicator 显示在菜单栏左侧（File 菜单后）。
-    // 注：以前显示在右侧，被 Play 按钮挤掉了 —— scene 名次要、Play 状态
-    // 高频读，按编辑器惯例优先级 Play 控件靠右。
+    // 当前 scene 路径作为只读 indicator 显示在 File 菜单右侧。
+    // v0.6.5 c0：Save / Play / Pause / Stop / [State] 已迁出本菜单栏到
+    // 独立 toolbar 行（DrawMainToolbar，紧贴本 menu bar 下方）。menu bar
+    // 退回纯 File/Edit/View/Help + scene path indicator。
     const std::string& path = mHost.scene.currentScenePath;
     const char* sceneLabel  = path.empty() ? "[Untitled]" : path.c_str();
     ImGui::SameLine();

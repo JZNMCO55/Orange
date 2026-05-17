@@ -1,0 +1,141 @@
+// 主 toolbar 行（v0.6.5 c0：独立 toolbar 抽象，v0.6 c3 的落地补完）。
+//
+// v0.6 c3 当时把 Save / Play / Pause / Stop 妥协塞进 BeginMainMenuBar
+// 右侧——与 c3 deliverable 原意"聚到一条 toolbar 上"未对齐。本文件
+// 把 transport-control 按钮独立到紧贴 menu bar 下方的固定 bar，与
+// Cocos Creator 3.8.8 的两行布局对齐（行 1 menu / 行 2 toolbar）。
+//
+// 实现要点：
+//   * ImGui `BeginViewportSideBar(... ImGuiDir_Up, height, MenuBar)` 在
+//     主 viewport 顶部紧贴 menu bar 下方占一段固定高度，并自动从
+//     viewport work area 扣除该段，让 DockSpaceOverViewport 不与 toolbar
+//     重叠。首帧瑕疵：BuildWorkOffset 累积本帧、下帧 commit，因此 t=0
+//     首帧 dockspace 仍可能短暂覆盖 toolbar 一帧；稳态后正常。
+//   * BeginMenuBar 让按钮以与 MainMenuBar 一致的样式渲染（同款 frame
+//     padding / item spacing），视觉上与上方 menu bar 自然衔接。
+//   * 必须在 DockSpaceOverViewport 之前调用，让 BuildWorkOffset 累积
+//     生效（与 BeginMainMenuBar 同款约束）。
+//
+// 布局：
+//   [Save (靠左)]  ...  [Play | Pause | Stop (居中)]  ...  [State (靠右)]
+//
+// 居中策略：以 GetWindowWidth 为绝对基准，SameLine 跳到
+// (winW - playGroupW) / 2 画 Play 控件组；[State] 同款 SameLine(winW -
+// stateW - WindowPadding.x) 靠右。不靠 cursor 推进，能容忍 Save 按钮文
+// 字宽度变化不抖动中央 group 位置。
+//
+// 视觉规约：v0.6.5 c0 仅迁布局，按钮仍为裸文字 + 蓝色 dirty 高亮（保留
+// v0.6 视觉，与迁出前像素级等价）。EditorTheme token 化 + Codicons icon
+// 替换 + accent 橙 + Play 绿 / Stop 红由后续 c2 / c4 / c6 处理；本 commit
+// 内部仍有 hardcode ImVec4 RGBA，等 c4 替换为 EditorTheme::Color::* token。
+
+#include "../EditorRenderLayer.h"
+
+#include "../EditorHost.h"
+
+#include <imgui.h>
+#include <imgui_internal.h>  // BeginViewportSideBar（公开但 internal 命名）
+
+#include <algorithm>
+
+void EditorRenderLayer::DrawMainToolbar()
+{
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (viewport == nullptr) { return; }
+
+    const float frameH   = ImGui::GetFrameHeight();
+    const float toolbarH = frameH * 1.2f;
+
+    const ImGuiWindowFlags flags =
+          ImGuiWindowFlags_NoDecoration
+        | ImGuiWindowFlags_NoScrollbar
+        | ImGuiWindowFlags_NoSavedSettings
+        | ImGuiWindowFlags_MenuBar;
+
+    // BeginViewportSideBar 内部已调 Begin()，无论是否返回 true 都必须
+    // End() 配对（ImGui Begin/End 通用规则）。
+    const bool open = ImGui::BeginViewportSideBar("##MainToolbar", viewport,
+                                                  ImGuiDir_Up, toolbarH, flags);
+    if (open && ImGui::BeginMenuBar())
+    {
+        const PlayState ps = mHost.scene.playState;
+        const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
+                               : (ps == PlayState::Play)   ? "[Play]"
+                                                           : "[Paused]";
+
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float framePadX = style.FramePadding.x * 2.0f;
+        const float btnSaveW  = ImGui::CalcTextSize("Save").x  + framePadX;
+        const float btnPlayW  = ImGui::CalcTextSize("Play").x  + framePadX;
+        const float btnPauseW = ImGui::CalcTextSize("Pause").x + framePadX;
+        const float btnStopW  = ImGui::CalcTextSize("Stop").x  + framePadX;
+        // 三态 label 取最长 + framePad 保证切换不抖动；用 (std::max)(...)
+        // 圆括号绕开 windows.h max 宏污染（与 EditorRenderLayer.cpp 同款手法）。
+        const float stateW = (std::max)(
+            ImGui::CalcTextSize("[Edit]").x,
+            (std::max)(ImGui::CalcTextSize("[Play]").x,
+                       ImGui::CalcTextSize("[Paused]").x))
+            + framePadX;
+        const float itemSpc    = style.ItemSpacing.x;
+        const float playGroupW = btnPlayW + btnPauseW + btnStopW + 2.0f * itemSpc;
+
+        // ---- Save 靠左 ---------------------------------------------
+        // dirty 时 accent 蓝高亮（保留 v0.6 视觉；v0.6.5 c4 切 EditorTheme
+        // accent 橙 token）。
+        const bool dirty = mHost.scene.dirty;
+        if (dirty) {
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                ImVec4(0.30f, 0.55f, 0.95f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                ImVec4(0.15f, 0.40f, 0.80f, 1.0f));
+        }
+        ImGui::BeginDisabled(!dirty);
+        if (ImGui::Button("Save", ImVec2(btnSaveW, 0))) {
+            mHost.scene.pendingSceneOp = SceneOp::Save;
+        }
+        ImGui::EndDisabled();
+        if (dirty) { ImGui::PopStyleColor(3); }
+
+        // ---- Play / Pause / Stop 居中 ------------------------------
+        // SameLine(absX) 用绝对 X 不依赖 cursor，Save 按钮宽度变化不影响
+        // 中央 group 位置。GetWindowWidth 是 toolbar window 自身的总宽，
+        // 不含 ScrollBar（NoScrollbar flag 保证）。
+        const float winW         = ImGui::GetWindowWidth();
+        const float playCenterX  = (winW - playGroupW) * 0.5f;
+        ImGui::SameLine(playCenterX);
+
+        const bool canPlay  = (ps == PlayState::Edit  || ps == PlayState::Paused);
+        const bool canPause = (ps == PlayState::Play);
+        const bool canStop  = (ps == PlayState::Play  || ps == PlayState::Paused);
+
+        ImGui::BeginDisabled(!canPlay);
+        if (ImGui::Button("Play", ImVec2(btnPlayW, 0))) {
+            mHost.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
+                                                                  : PlayOp::EnterPlay;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!canPause);
+        if (ImGui::Button("Pause", ImVec2(btnPauseW, 0))) {
+            mHost.scene.pendingPlayOp = PlayOp::Pause;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!canStop);
+        if (ImGui::Button("Stop", ImVec2(btnStopW, 0))) {
+            mHost.scene.pendingPlayOp = PlayOp::Stop;
+        }
+        ImGui::EndDisabled();
+
+        // ---- [State] 靠右 -----------------------------------------
+        // 同款绝对 X 跳转；预留 WindowPadding.x 距离右边距，与 menu bar
+        // 项右对齐留白节奏一致。
+        ImGui::SameLine(winW - stateW - style.WindowPadding.x);
+        ImGui::TextDisabled("%s", stateLabel);
+
+        ImGui::EndMenuBar();
+    }
+    ImGui::End();
+}

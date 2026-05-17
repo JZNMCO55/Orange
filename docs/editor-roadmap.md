@@ -81,6 +81,52 @@ wiki 给三档：
 
 **词条小注**：用户最初提到的"cocos2D"按上下文（提供的截图为 Cocos Creator 3.6.0）解释为 Cocos Creator；如果实际指 cocos2d-x（旧 2D 框架，无此种 3D 编辑器 UI），本节需重写。
 
+**版本基线更新（2026-05-17）**：v0.6.5 启动前补一组 Cocos Creator **3.8.8** 深色主题截图（Animation / Animation Graph / Assets / Assets Preview 四个底部 tab 状态），覆盖了 3.6.0 截图未覆盖的若干 panel 细节；本节配色 / 控件细节按 3.8.8 截图采色，与 3.6.0 整体布局基准不冲突（Cocos Creator 3.6 → 3.8 视觉演化为微调，未改变 UI 大局）。
+
+#### D5.1 · v0.6.5 视觉体系落锚（2026-05-17 决策）
+
+v0.6.5 启动 ritual 前定下来的具体视觉决策。后续 v0.6.5 之内的 token 化工作 + v0.7 起的所有 UI 表面都照这套办，不再回头讨论"整体走哪条路"——只在 token 内具体值（圆角 / 字号 / per-type 色带）上微调。
+
+**决策清单**：
+
+| 项 | 选择 | 决策由来 |
+|----|------|--------|
+| **整体方向** | **方向 C** —— Cocos 布局气质（间距 / 圆角 / 配色克制）+ Godot 的"selection 明确性"（但用半透不用实色）+ Inspector component header 左侧 4px 彩色色带作为"识别度补丁"，不依赖全套彩色 icon | 节点树仍单色（接受），Inspector 是实际工作流主战场，色带成本 = EditorTheme 加一组 per-component-type token，比做整套彩色 icon 便宜 90% |
+| **toolbar 布局** | **行 1 = menu bar**（File / Edit / View / Help + scene path indicator）；**行 2 = 独立 toolbar**（Save 靠左 / Play + Pause + Stop 中央 / [State] 靠右），紧贴 menu bar 下方、跨 dock root 整宽 | v0.6 c3 deliverable 原意是"聚到一条 toolbar 上"，当时实现为"挤进 menu bar 右侧"是技术妥协，未对齐 deliverable；本 milestone 补完。中央放 Play 控件参 Cocos Creator 3.8.8 + Unity / Unreal 同款工业惯例（Play 是最高频读 + 写控件） |
+| **背景色基调** | Cocos 路线，**#2A2A2A ~ #2C2C2C** 区间（亮度 ~17%），具体值由 v0.6.5 开工时从 Cocos Creator 3.8.8 截图采色定 | 暗色编辑器背景走炭灰而非纯黑是工业惯例（VS Code / JetBrains / Blender / Maya / Unity / Unreal 全在 17–20% 亮度区间）；纯黑与环境（白墙 / 显示器边框 / 白天光）对比度过高，瞳孔反复调节疲劳更快。OrangeEditor 当前的"偏黑"是 ImGui `StyleColorsDark()` 默认 ~#15151E 直接套用的结果，v0.6.5 抛弃默认 |
+| **主 accent 色** | **橙 #FF8A3D**（与 OrangeEngine brand 一致，保留鲜亮饱和度） | 选橙是 brand 一致性决策；保留高饱和度但配套半透 selection 是为了规避橙色作为大色块的眼睛刺激 |
+| **selection 表现** | **半透叠加**（橙色 30% alpha overlay），**不**用 Godot 那种整行实色填充 | 橙色处于警告色波段，人眼对其本能更敏感（消防 / 施工 / 警示牌同因）；大面积饱和橙整行长时间盯易疲劳。橙的辨识度优势在"小面积跳出来"——把它当 focus outline / active tab 下划线 / Save dirty 高亮 / Play indicator 等"小面积高对比"用反而更体现 brand |
+| **alert 色系**（与 accent 共存） | 待 v0.6.5 开工时具体化；候选：warn = 黄 / 暖橙偏黄（与主 accent 橙做饱和度 / 色相区分）；error = 红；success = 绿 | alert 不与主 accent 同色，否则失去"状态提示"功能；橙作为 brand accent 时 warn 必须明显偏黄或换色系 |
+| **icon font** | **Codicons**（VS Code 同款，MIT 许可证，~500 图标，IconFontCppHeaders 头文件直接接入） | 三候选（Codicons / Lucide / FA6）中 Codicons 与 Cocos 工具感方向匹配度最高；图标数量精准覆盖 OrangeEditor 当前 UI 表面所需 30–40 个；微软 VS Code 用户认知度高，"看起来专业工具"第一印象 |
+| **图标使用边界** | **不**直接拷贝 Cocos Creator 或 Godot 的 PNG 图标资产 | Cocos Creator 是专有 EULA（非 MIT，与 cocos-engine MIT 不同），其图标资产不能重分发；Godot 图标 MIT 兼容但混用 Godot 图标 + Cocos 风格布局会破坏 v0.6.5 "视觉统一" 目的，且长期沾染"看起来像 Godot"印象。Codicons 一步到位，无过渡期 |
+| **圆角半径** | 倾向 **0 ~ 1px**（跟 Cocos 路线）；具体值 v0.6.5 开工时定 | Cocos 控件方正接近 0px 圆角，整体"工具感"；Godot 用 2–3px 略柔。OrangeEditor 走 Cocos 工具感所以倾向 0 ~ 1px |
+| **字号档位** | 基于 v0.4.5 已落的 DPI scale 18px baseline 派生 H1 / H2 / Body / Caption 四档；具体值 v0.6.5 开工时定 | v0.4.5 已落的 `glfwGetWindowContentScale + ScaleAllSizes(scale)` 是 baseline，本期只是在它之上分档 |
+| **per-component-type 色带颜色** | 待 v0.6.5 开工时具体化；每种内置 component 一个低饱和色（Transform / Renderable / DirectionalLight / RigidBody / Collider / ParticleEmitter / Animator / Name） | 低饱和度避免与 brand 橙 accent 互相干扰；色带本身只 4px 宽不抢戏 |
+
+**红线**（与既有 v0.6.5 红线节并存，沉淀到 CLAUDE.md "OrangeEditor 架构纪律" 同级严肃）：
+
+- **禁止直接调** `ImGui::PushStyleColor(ImGuiCol_xxx, ImVec4(0.x, 0.x, 0.x, 1.0f))` 字面量 RGBA —— 必须经 `EditorTheme` token；加进 `scripts/check_invariants.py` 作为编辑器侧新 lint 规则（v0.6.5 c? 落地时同步实装）
+- **禁止 selection 整行实色填充** —— 必须用半透叠加，违反者视为今天讨论清楚的决策被推翻，需要重新立项讨论
+- **禁止直接拷贝 Cocos Creator / Godot 的 PNG 图标资产**进 OrangeEditor 仓库
+- **禁止裸文字按钮**（如 `"X"` / `"+"` / `"▼"` 字面量）—— 必须用 Codicons codepoint
+
+**v0.6.5 开工时需要具体化的小项**（不在本节定，留给 commit-plan 内处理）：
+
+- 背景 / panel 一档亮 / panel 二档亮 / 输入框 / 分隔线 / 字色 / 控件三态色 的具体 RGB（从 Cocos 3.8.8 截图采色）
+- 圆角具体 px（0 / 1 / 2 三选）
+- 字号档位具体 px
+- 8 个内置 component 的色带具体色
+- alert 色系（warn / error / success）具体色
+
+**关联 wiki 缺页**（按 CLAUDE.md 纪律，wiki 维护另开 wiki session 处理；本节内**不**抄通用知识，仅留 anchor 指向后续 ingest 候选）：
+
+- `concepts/editor-ui/dark-theme-base-color.md` —— 暗色编辑器背景走炭灰的人因学根据 + 跨编辑器实测对比
+- `concepts/editor-ui/accent-color-budget.md` —— accent 用量 ~4% 设计原则、暖色 vs 冷色 accent 的人眼疲劳差异
+- `techniques/editor-ui/icon-font-integration.md` —— ImGui icon font merge 方案，Codicons / Lucide / FA6 对比
+- `comparisons/editor-ui/cocos-vs-godot-style.md` —— Cocos 3.8.8 vs Godot 4.6.2 视觉风格对比表
+
+wiki ingest 完成后，本节"决策由来" 列应改为引用 wiki 页相对路径，删除复述的通用知识。
+
 ### D4 · 演示场景（Editor Demo Content）的角色
 
 **问题**：编辑器开发期，"打开 OrangeEditor 看到了什么" 直接决定了对引擎能力的主观感受。当前 `tools/OrangeEditor/DemoWorld.cpp::SeedDemoWorld` 只种了 7 个占位 entity（Root / Camera / Light / Geometry / Floor / Wall / Misc），mesh handle 全 Invalid、Material default、没体积光、没粒子、没真实灯光 —— 这让编辑器看起来像学院派 UI 占位，**完全没展示 Phase 1–5 已落地的视觉栈**（HDR / Bloom / Tonemap / 软阴影 / 体积光 / Material 模板 / VfxSystem / DragonBones）。
@@ -379,7 +425,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - **`tools/OrangeEditor/theme/EditorTheme.h`**：集中所有视觉 token —— 间距单位 / 圆角 / 边框宽度 / 配色 palette（深色主题，参 Cocos Creator 3.6.0 截图配色）/ 字号档位（H1 / H2 / Body / Caption）/ 控件三态色（idle / hover / active / disabled）/ icon 尺寸档位
 - **图标 font 接入**：选 Font Awesome 6 Free / Lucide / Codicons 之一（按 license 与覆盖度二选一），通过 ImGui font merge 加载到默认字体，文字按钮全部替换为 icon + tooltip
 - **viewport 工具栏 polish**：按 EditorTheme 重画 v0.4 已落的视图模式 / 显示模式 / Camera mode / Gizmo on-off 按钮；状态切换有视觉反馈
-- **顶部全局 toolbar polish**：v0.6 落地后跟随本 milestone 重画 Save / Build / Play / Pause / Stop 按钮；Save 在 dirty 时按 EditorTheme accent 色高亮；Play / Stop 用对比色（绿 / 红）易识别
+- **顶部全局 toolbar 抽象 + polish（v0.6 c3 收尾）**：v0.6 c3 当时把 Save / Play / Pause / Stop 妥协塞进 menu bar 右侧（同行与 File/Edit/View/Help 挤在一起），与 v0.6 c3 deliverable 原意"聚到一条 toolbar 上"未对齐。本 milestone 抽出**独立 toolbar 行**（紧贴 menu bar 下方、跨 dock root 整宽、固定高度 `GetFrameHeight() * 1.2`），Save / Play / Pause / Stop / [State] 从 menu bar 迁出，**Play / Pause / Stop 在 toolbar 中央**（参 Cocos Creator 3.8.8 布局），Save 靠左，[State] 靠右。Save 在 dirty 时按 EditorTheme accent 橙高亮（小面积，不整 button 填充）；Play / Stop 用对比色（绿 success / 红 error）易识别
 - **panel 视觉统一**：标题栏 / 分隔条 / 折叠箭头 / Inspector component header 折叠图标 / Entity Tree 行 hover/select 状态全部按 EditorTheme 重画
 - **Inspector 控件三态**：DragFloat / SliderFloat / Combo / Button hover / active / disabled 三态颜色一致
 - **acceptance scene**：在 demo.scene 上完整跑一遍"开场景 → 选实体 → 改 Inspector → gizmo 拖 → Save → Play → Stop → Build" 路径，全程视觉风格一致，无 ImGui 默认深蓝 / 灰白色块漏出
