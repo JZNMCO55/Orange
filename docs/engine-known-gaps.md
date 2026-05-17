@@ -338,8 +338,46 @@ GAP 未落地前，编辑器侧**不**主动 workaround（避免 Convention C �
 ### 状态
 
 - **登记**：2026-05-16
-- **处理**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 或独立小 task；优先级建议高于 GAP-2026-05-15（用户每次拖光都撞，反馈级 P1）
-- **关联**：OrangeEditor v0.4 c4 ### bugs 第 1 条；与 GAP-2026-05-15-camera-editor-vs-runtime-separation 同思路（component 几何字段 vs Transform 唯一真相）
+- **处理**：✅ 引擎侧落地 2026-05-17（独立 session，路径 A "rotation-derived direction，最干净"；与 CLAUDE.md "engine-known-gaps 跨 session 工作流" 对齐：登记 / 实现分 session，本次实现 session 内合并落 engine + samples + tests + editor 消费方避免中间态 broken build）
+- **关联**：OrangeEditor v0.4 c4 ### bugs 第 1 条（已通过本 GAP 落地天然消失）；与 GAP-2026-05-15-camera-editor-vs-runtime-separation 同思路（component 几何字段 vs Transform 唯一真相）
+
+### 落地记录（2026-05-17）
+
+按用户选择走**路径 A**（DirectionalLight 删 direction 字段，方向由 entity 的 TransformComponent.rotation 派生）。理由：与 Unity / Unreal / Godot 工业惯例完全一致，避免双 source-of-truth 的长期债。
+
+**实际落地范围**（单 commit `cf44a0c`，14 文件）：
+
+- **G1 引擎公共面（LightComponent.h）**：DirectionalLight struct 删 `glm::vec3 direction` 字段；保留 color / intensity / castsShadow 三项。加两个 inline helper：
+  - `kDirectionalLightLocalForward = (0, -1, 0)` 常量约定（identity rotation = 光向 -Y）
+  - `ComputeDirectionalLightWorldDir(rotation)` —— Pipeline / gizmo / 工具代码共用的方向派生公式
+  - `MakeDirectionalLightRotationFromDir(desiredDir)` —— 反推 quat 用于 scene migrator / sample 初始化场景。手写 from-to 标准 quat 公式（dot + cross + sqrt 半角）避免拉 `<glm/gtx/quaternion.hpp>` 实验扩展的 GLM_ENABLE_EXPERIMENTAL 宏污染消费者侧编译环境
+- **G2 Pipeline.cpp**：`ComputeLightViewProj` / `UpdateLightUbo` 签名改 `const glm::vec3& lightWorldDir`。两个 callsite（Render / RenderOffscreen）在 `view<DirectionalLight>()` 找到 entity 后 `try_get<TransformComponent>` 查 rotation，调 `ComputeDirectionalLightWorldDir` 派生方向喂给 Pipeline；entity 没挂 Transform 时退到 identity（光向 -Y），与 nullptr-light 分支的中性默认 (0.3,-1,0.4) 不冲突
+- **G3 SchemaVersion bump + v1 migrator（ComponentSerializers.cpp）**：`ReadDirectionalLight` 检测旧 scene 的 `direction` 字段时，`MakeRotationFromDir` 转 quat upsert 到 entity 的 TransformComponent（有 Transform 则覆盖 rotation 保留 position/scale；无则新建 default + rotation）。dispatch 顺序保证 Transform 在 DirectionalLight 之前 Read，migrator 永远能拿到正确状态。`WriteDirectionalLight` 不再写 direction（已无该字段），新写出的 scene 自然是 v2 格式
+- **G4 跨文件消费方迁移**：
+  - **samples/05/06/07/08/09/12** + **tools/OrangeEditor/DemoWorld.cpp**：原 `DirectionalLight dl{}; dl.direction = ...;` 改为给 light entity 挂带 `MakeRotationFromDir(...)` 派生的 TransformComponent。samples/07/08 内每帧 mutate direction 的 LightSpinLayer 改 mutate light entity 的 `Transform.rotation`
+  - **编辑器 schema/RegisterBuiltinSchemas.cpp**：删 DirectionalLight 的 `direction` Field 注册（Inspector 不再显示 Direction 控件）
+  - **编辑器 plugin/DirectionalLightGizmoPlugin.cpp**：箭头方向改读 `ComputeDirectionalLightWorldDir(pTC->rotation)`，与 Pipeline 同源派生公式，gizmo 视觉与 shading 方向永远一致；entity 没挂 Transform 时不画（无方向概念）
+  - **tests/render/LightAndShadowTest.cpp**：默认字段测试改校验 color/intensity/castsShadow + identity-rotation 派生 (0,-1,0)；ECS component 测试加 MakeRotationFromDir → ComputeWorldDir 反推回原方向精度校验
+  - **tests/scene/SceneSerializationTest.cpp**：round-trip 改先挂 Transform with MakeRotationFromDir 再 Save→Load→反推匹配
+
+**期望验收对照**：
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| 移动 DirectionalLight entity 的 Transform.rotation → 阴影在 viewport 实时变化 | ✅（Pipeline 每帧读 TC.rotation 派生方向，rotation 改动即下一帧生效） |
+| 移动 entity Transform.position → 黄色箭头起点跟着移动是预期，阴影不变 | ✅（箭头起点仍是 TC.position；shadow 公式只依赖方向不依赖 entity 位置——平行光语义） |
+| DirectionalLight Inspector 不再有独立 direction 字段 | ✅（schema 已删；用户旋转 entity 改光向） |
+| 现有 demo scene 的 DirectionalLight 经 migrator 自动从旧 direction 字段升到 rotation；视觉无回归 | ✅（migrator 在 ReadDirectionalLight 内 upsert TC.rotation；不主动改 assets/scenes/*.scene.json，让 migrator 在真实加载路径得到验证；首次 Open + Save 后文件自然清洗为新格式） |
+
+**测试通过**：`light_and_shadow_test` + `scene_serialization_test` 全绿（`ctest -C Debug -R "light_and_shadow|scene_serialization"`），其余测试无回归。
+
+**关键改动文件**：`include/orange/engine/render/LightComponent.h` / `src/render/Pipeline.cpp` / `src/scene/ComponentSerializers.cpp` / `samples/{05,06,07,08,09,12}*/main.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tests/render/LightAndShadowTest.cpp` / `tests/scene/SceneSerializationTest.cpp`
+
+**未在本 GAP 范围**：
+
+- 引擎侧没新增 ADR —— 路径 A 即 GAP 原文推荐路径 + 与同思路 GAP-2026-05-15 路径 3 对偶，沿用现有"component 几何字段 vs Transform 唯一真相"原则，没有新决策需要 ADR
+- DirectionalLight gizmo 拖动改方向（Rotate gizmo overlay）—— 当前用户调 entity Rotate gizmo / Inspector Transform.rotation 即可；DirectionalLight 自带"拖箭头改方向" 是 v0.4 c4 的设计扩展，本 GAP 范围外
+- 旧 scene 文件主动清洗（重写 assets/scenes/*.scene.json 删 direction 字段）—— 留给 migrator 在真实加载路径上自然清洗，不批量修改文件历史
 
 ---
 
@@ -607,5 +645,6 @@ editor-roadmap.md v0.6 milestone "多 chunk / per-layer + dirty 状态" 的 6 �
 
 ## 处理记录
 
+- **GAP-2026-05-16-directional-light-transform-decoupled**（2026-05-17 落地）：DirectionalLight 删 direction 字段 + Pipeline 改用 entity.Transform.rotation 派生方向 + ReadDirectionalLight v1 migrator 旧 scene direction 字段自动转 TC.rotation + 7 sample/DemoWorld/编辑器 schema/gizmo plugin/2 tests 全数迁移。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/render/LightComponent.h` / `src/render/Pipeline.cpp` / `src/scene/ComponentSerializers.cpp` / `samples/{05,06,07,08,09,12}*/main.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tests/render/LightAndShadowTest.cpp` / `tests/scene/SceneSerializationTest.cpp`
 - **GAP-2026-05-17-scene-layer-component**（2026-05-17 落地）：LayerComponent + WorldPartition 公共面 + SceneSerialization 多文件 + manifest + Render/Physics layer.visible 过滤 + sample。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/scene/LayerComponent.h` / `include/orange/engine/scene/WorldPartition.h` / `include/orange/engine/scene/SceneSerialization.h`（SaveSplit/LoadSplit + LoadOptions.assignLayerId）/ `include/orange/engine/render/RenderScene.h`（Collect 加 partition 参数）/ `include/orange/engine/render/Pipeline.h`（SetWorldPartition）/ `include/orange/engine/physics/PhysicsWorld.h`（SetBodyEnabled/IsBodyEnabled）/ `include/orange/engine/physics/LayerVisibilitySync.h` / `src/scene/WorldPartition.cpp` / `src/scene/SceneSerialization.cpp`（SaveImpl 抽取 + SaveSplit/LoadSplit + scene/world 1.2 + scene/manifest 1.0）/ `src/scene/ComponentSerializers.cpp`（Layer 序列化器注册）/ `src/render/RenderScene.cpp` / `src/render/Pipeline.cpp` / `src/physics/PhysicsWorld.cpp` / `src/physics/LayerVisibilitySync.cpp` / `samples/12_layer_partition_demo/`
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
