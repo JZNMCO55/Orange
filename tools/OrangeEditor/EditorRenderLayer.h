@@ -86,6 +86,11 @@ private:
     void DrawAssetsPanel();
     static void DrawAnimationPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
+    // ---- panels/LayersPanel.cpp (v0.6 c5) -------------------------------
+    // Layer manifest 编辑：visibility 切换 / 添加 / 删除。
+    // Hierarchy panel 的 layer 列 + 右键 "Move to layer >" 在
+    // EntityTreePanel.cpp 内。
+    void DrawLayersPanel();
 
     // ---- panels/ScenePanel.cpp -----------------------------------------
     void DrawScenePanel();

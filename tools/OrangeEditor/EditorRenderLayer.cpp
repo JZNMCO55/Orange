@@ -239,6 +239,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     DrawScenePanel();
     DrawEntityTreePanel();
     DrawInspectorPanel();
+    DrawLayersPanel();
     DrawAssetsPanel();
     DrawConsolePanel(frame);
     DrawAnimationPanel();
@@ -345,6 +346,9 @@ void EditorRenderLayer::BuildDefaultLayoutOnce(ImGuiID dockspaceId)
                                                 0.30f, nullptr, &center);
 
     ImGui::DockBuilderDockWindow("Entity Tree", left);
+    // v0.6 c5：Layers 面板与 Entity Tree dock 在同一节点（tab 共存）。
+    // 默认 tab 顺序：Entity Tree → Layers；user 可拖出独立 dock 或换序。
+    ImGui::DockBuilderDockWindow("Layers",      left);
     ImGui::DockBuilderDockWindow("Inspector",   right);
     // 底部 tab 容器（v0.5 c2，参 Cocos Creator 3.6.0 底部三 tab 布局）
     // 同节点 = tab。Animation 当前是 placeholder，v0.7 状态机图编辑落地后

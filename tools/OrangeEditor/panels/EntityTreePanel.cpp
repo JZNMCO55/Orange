@@ -10,9 +10,11 @@
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldPartition.h>
 
 #include <entt/entity/registry.hpp>
 
@@ -23,6 +25,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 void EditorRenderLayer::DrawEntityTreePanel()
 {
@@ -313,6 +316,30 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             // B3 修：互斥选择，详见 ScenePanel viewport pick 同名注释。
             mHost.assets.selectedAssetPath.clear();
         }
+
+        // v0.6 c5：行尾 layer chip —— 让用户一眼看到每个 entity 所属
+        // layer。chip 显示 LayerComponent.layerId（缺则 "default"），灰色
+        // 弱化避免抢主名字。SameLine + 右对齐：用 GetContentRegionAvail
+        // 倒推一个 button 位置；hover 弹 tooltip 提示用右键 "Move to
+        // layer >" 改归属（避免增加额外的可点击控件冲淡 tree DnD 手感）。
+        {
+            const std::string_view layerId =
+                mHost.scene.partition.GetLayerOf(*mHost.scene.pWorld, entity);
+            const std::string layerText{layerId};
+            const ImVec2 chipSize = ImGui::CalcTextSize(layerText.c_str());
+            const float  avail    = ImGui::GetContentRegionAvail().x;
+            // 仅在右侧确实有空间时画，避免极窄面板时与名字重叠
+            if (avail > chipSize.x + ImGui::GetStyle().ItemSpacing.x * 2.0f) {
+                ImGui::SameLine(ImGui::GetCursorPosX() + avail - chipSize.x
+                                - ImGui::GetStyle().ItemSpacing.x);
+                ImGui::TextDisabled("%s", layerText.c_str());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("layer: %s\n右键 → Move to layer 改归属",
+                                      layerText.c_str());
+                }
+            }
+        }
+
         // 双击 entry-body 进入重命名（Edit 态才允许）
         if (canEditNode
             && ImGui::IsItemHovered()
@@ -349,6 +376,51 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         }
         if (ImGui::MenuItem("Delete", "Del")) {
             mHost.selection.pendingDelete = entity;
+        }
+        ImGui::Separator();
+        // v0.6 c5："Move to layer >" 子菜单 —— 遍历 partition.GetLayers()
+        // 列出所有 layer；点击 = SetLayerOf via cmdStack（可 Undo）。
+        // 当前归属用 "(current)" 后缀标识，避免无意义的"改归同 layer"
+        // 命令污染 undo 栈。
+        if (ImGui::BeginMenu("Move to layer")) {
+            const std::string_view curId =
+                mHost.scene.partition.GetLayerOf(*mHost.scene.pWorld, entity);
+            const auto& allLayers = mHost.scene.partition.GetLayers();
+            for (const auto& info : allLayers) {
+                const bool isCurrent = (info.id == curId);
+                const std::string item = info.displayName.empty()
+                                             ? info.id
+                                             : info.displayName;
+                const std::string label = isCurrent
+                                              ? (item + "  (current)")
+                                              : item;
+                if (ImGui::MenuItem(label.c_str(), nullptr, false, !isCurrent)) {
+                    const std::string oldId{curId};
+                    const std::string newId = info.id;
+                    auto*       pH         = &mHost;
+                    Orange::Engine::Entity capturedEntity = entity;
+                    mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                        "set_entity_layer",
+                        [pH, capturedEntity, newId]() {
+                            if (auto* pW = pH->scene.pWorld.get()) {
+                                if (pW->IsValid(capturedEntity)) {
+                                    pH->scene.partition.SetLayerOf(
+                                        *pW, capturedEntity, newId);
+                                }
+                            }
+                        },
+                        [pH, capturedEntity, oldId]() {
+                            if (auto* pW = pH->scene.pWorld.get()) {
+                                if (pW->IsValid(capturedEntity)) {
+                                    pH->scene.partition.SetLayerOf(
+                                        *pW, capturedEntity, oldId);
+                                }
+                            }
+                        }
+                    ));
+                }
+            }
+            ImGui::EndMenu();
         }
         ImGui::EndDisabled();
         ImGui::EndPopup();

@@ -148,6 +148,7 @@ add_executable(OrangeEditor
     VulkanLoaderShim.cpp
     panels/EntityTreePanel.cpp
     panels/InspectorPanel.cpp
+    panels/LayersPanel.cpp
     panels/ScenePanel.cpp
     command/CommandStack.cpp
     command/EntityCommands.cpp
