@@ -133,14 +133,23 @@ void EditorRenderLayer::DrawMainToolbar()
         const bool canPause = (ps == PlayState::Play);
         const bool canStop  = (ps == PlayState::Play  || ps == PlayState::Paused);
 
+        // Play 按钮 idle 时 icon 着绿（success alert）让"就绪可点"状态
+        // 跳出来；hover/active 时背景走 c2 默认灰过渡，icon 仍绿保持视
+        // 觉一致。disabled 时 EndDisabled 路径自动 dim alpha，绿色也变浅。
         ImGui::BeginDisabled(!canPlay);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            Orange::Editor::Theme::Color::GetAlertSuccess());
         if (ImGui::Button(Orange::Editor::Theme::Icon::GetPlay(), btnSize)) {
             mHost.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
                                                                   : PlayOp::EnterPlay;
         }
+        ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Play"); }
         ImGui::EndDisabled();
         ImGui::SameLine();
+        // Pause icon 保留默认文字色 —— pause 不属于 alert 范畴（既非
+        // success 也非 error），保留中性 brand 灰避免与 Play 绿 / Stop
+        // 红混淆。
         ImGui::BeginDisabled(!canPause);
         if (ImGui::Button(Orange::Editor::Theme::Icon::GetPause(), btnSize)) {
             mHost.scene.pendingPlayOp = PlayOp::Pause;
@@ -148,10 +157,16 @@ void EditorRenderLayer::DrawMainToolbar()
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Pause"); }
         ImGui::EndDisabled();
         ImGui::SameLine();
+        // Stop 按钮 idle 时 icon 着红（error alert）让"停止 / 退出 Play
+        // 模式"状态显眼；同 Play 路径，hover/active 背景走默认灰，icon
+        // 仍红。
         ImGui::BeginDisabled(!canStop);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            Orange::Editor::Theme::Color::GetAlertError());
         if (ImGui::Button(Orange::Editor::Theme::Icon::GetStop(), btnSize)) {
             mHost.scene.pendingPlayOp = PlayOp::Stop;
         }
+        ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Stop"); }
         ImGui::EndDisabled();
 

@@ -90,6 +90,13 @@ const ImVec4 kAccentHovered  {1.000f, 0.541f, 0.239f, 0.500f};
 const ImVec4 kAccentActive   {1.000f, 0.541f, 0.239f, 0.600f};
 const ImVec4 kAccentSelection{1.000f, 0.541f, 0.239f, 0.300f};
 
+// alert 色系（c6）：饱和度高（status 提示需要"跳出来"），色相距离 brand
+// 橙 #FF8A3D (hue ~22°) 远——warn 黄 hue ~50°、error 红 hue ~0°/360°
+// 避开橙、success 绿 hue ~110°。
+const ImVec4 kAlertWarn   {0.961f, 0.749f, 0.169f, 1.000f};  // #F5BF2B 黄
+const ImVec4 kAlertError  {0.890f, 0.310f, 0.310f, 1.000f};  // #E34F4F 红
+const ImVec4 kAlertSuccess{0.330f, 0.780f, 0.420f, 1.000f};  // #54C76B 绿
+
 }  // namespace
 
 const ImVec4& GetBackgroundPrimary()    { return kBackgroundPrimary;    }
@@ -111,6 +118,9 @@ const ImVec4& GetAccentPrimary()        { return kAccentPrimary;        }
 const ImVec4& GetAccentHovered()        { return kAccentHovered;        }
 const ImVec4& GetAccentActive()         { return kAccentActive;         }
 const ImVec4& GetAccentSelection()      { return kAccentSelection;      }
+const ImVec4& GetAlertWarn()            { return kAlertWarn;            }
+const ImVec4& GetAlertError()           { return kAlertError;           }
+const ImVec4& GetAlertSuccess()         { return kAlertSuccess;         }
 
 }  // namespace Color
 

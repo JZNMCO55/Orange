@@ -120,6 +120,17 @@ const ImVec4& GetAccentActive();
 // §D5.1 决策点："selection 用半透叠加而非整行实色填充"的落地。
 const ImVec4& GetAccentSelection();
 
+// alert 色系（与 brand accent 橙正交，承载"状态提示"语义）：
+//   * Warn   —— 黄（饱和度偏高，与 brand 橙拉开色相距离避免混淆；用于
+//                警告 / 待确认 / 占位等状态提示）
+//   * Error  —— 红（用于错误 / 危险 / 不可恢复操作如 Stop 按钮）
+//   * Success—— 绿（用于成功 / 就绪状态如 Play 按钮 idle 提示）
+// c6 起用于 ToolbarPanel Play / Stop 按钮 icon 着色 + Console panel
+// 未来的 log level filter（v0.8 接 Core::Log 时消费）。
+const ImVec4& GetAlertWarn();
+const ImVec4& GetAlertError();
+const ImVec4& GetAlertSuccess();
+
 }  // namespace Color
 
 // ---- Spacing --------------------------------------------------------
