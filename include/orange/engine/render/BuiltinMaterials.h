@@ -67,6 +67,20 @@ ORANGE_ENGINE_API Material LoadDissolve(Asset::AssetRegistry& registry);
 // 拾取产出光晕。颜色 / 强度参数 hardcode 同 toon / rim_light。
 ORANGE_ENGINE_API Material LoadEmissive(Asset::AssetRegistry& registry);
 
+// 加载内置 PBR 模板：monolithic Cook-Torrance + GGX + Smith correlated +
+// Schlick + Lambert + IBL split-sum 三槽位。push-constant 与现有 toon /
+// rim_light 同款 {uMVP, uModel} = 128 B。当前五通道材质参数（baseColor /
+// metallic / roughness / normal / AO）在 shader 内 hardcoded；后续把它们
+// 抬进 MaterialInstance + Inspector schema 时 textureSlots 同步扩。当前
+// textureSlots 留空，避免 schema 与 shader 默认值漂移。
+//
+// Pipeline 在 Initialize 期把"drawable.materialInstance == nullptr"的
+// fallback 切到本模板（替代历史 textured 棋盘），所有未显式挂材质的
+// Renderable 自动按 PBR 渲染——这就是 "棋盘塑料 → PBR 真实感" 视觉跃迁
+// 的来源。textured 不删，仍可被 sample 显式 LoadTextured 用作 dev-checker
+// fallback。
+ORANGE_ENGINE_API Material LoadPbr(Asset::AssetRegistry& registry);
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
 
 #endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

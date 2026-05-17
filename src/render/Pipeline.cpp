@@ -344,8 +344,11 @@ struct Pipeline::Impl
 
     // drawable.materialInstance == nullptr 时的 fallback Material。第一
     // 次需要时 lazy-load——sample 即便不挂 MaterialSystem 也能跑通。
-    Material builtinTexturedMaterial;
-    bool     builtinTexturedLoaded{false};
+    // 当前 fallback 装配为 PBR 模板（替代历史 textured 棋盘），默认观感
+    // 跃迁；textured 模板保留作 dev-checker，sample / DemoWorld 仍可显式
+    // BuiltinMaterials::LoadTextured 使用。
+    Material builtinDefaultMaterial;
+    bool     builtinDefaultLoaded{false};
 
     // ShaderModule 缓存：键 = AssetHandle<ShaderAsset>::Value()。同 .spv
     // 跨 Material 复用。
@@ -511,30 +514,47 @@ struct Pipeline::Impl
     std::uint64_t                            captureBufferCapacity{0};
 
     // Main pass descriptor set —— 所有 per-template pipeline 共用 set 0：
-    //   binding 0 = sampler2D shadowMap
-    //   binding 1 = uniform LightUbo
-    // textured 的 fragment 不引用这 2 个 binding，但 pipeline layout 仍
-    // 然声明（无副作用，shader 不读即可）。
+    //   binding 0 = sampler2D    shadowMap         (direct shadow)
+    //   binding 1 = uniform      LightUbo          (per-frame light)
+    //   binding 2 = samplerCube  uIrradiance       (IBL diffuse)
+    //   binding 3 = samplerCube  uPrefilteredEnv   (IBL specular)
+    //   binding 4 = sampler2D    uBrdfLut          (IBL split-sum LUT)
+    // 非 PBR 模板（textured / toon / rim_light / dissolve / emissive）的
+    // fragment 不引用 IBL 三 binding；Vulkan spec 允许 shader-USED ⊆
+    // layout-DECLARED，pipeline 仍能创建。binding 2/3/4 由 Pipeline 在
+    // Initialize 期注入 dummy 1×1 zero-cleared 资源，后续由
+    // EnvironmentComponent 替换为真实烘焙产物，shader 一行不改。
     std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> mainDescLayout;
     std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      mainDescPool;
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       mainDescSet;
     bool                                                  mainDescBound{false};
 
+    // Dummy IBL 资源：全部 RGBA16Float、1×1 / 1×1×6，启动期 zero-clear →
+    // shader 端 IBL 贡献 = 0 → PBR 退化为 direct-only。后续 cube 两张换成
+    // EnvironmentComponent 烘焙的 irradiance / prefiltered specular，BRDF
+    // LUT 换成启动期 split-sum 烘焙 R16G16F 产物。
+    std::unique_ptr<Orange::Rhi::RHITexture> dummyIrradianceCube;
+    std::unique_ptr<Orange::Rhi::RHITexture> dummyPrefilteredCube;
+    std::unique_ptr<Orange::Rhi::RHITexture> dummyBrdfLut;
+
     // -----------------------------------------------------------------
 
-    const Material* EnsureBuiltinTexturedMaterial()
+    // drawable.materialInstance == nullptr 时的 fallback Material。当前装
+    // 配为 BuiltinMaterials::LoadPbr —— "默认渲染路径走 PBR" 是默认观感
+    // 跃迁的入口点。第一次需要时 lazy-load。
+    const Material* EnsureBuiltinDefaultMaterial()
     {
-        if (builtinTexturedLoaded)
+        if (builtinDefaultLoaded)
         {
-            return &builtinTexturedMaterial;
+            return &builtinDefaultMaterial;
         }
         if (assets == nullptr)
         {
             return nullptr;
         }
-        builtinTexturedMaterial = BuiltinMaterials::LoadTextured(*assets);
-        builtinTexturedLoaded   = true;
-        return &builtinTexturedMaterial;
+        builtinDefaultMaterial = BuiltinMaterials::LoadPbr(*assets);
+        builtinDefaultLoaded   = true;
+        return &builtinDefaultMaterial;
     }
 
     Orange::Rhi::RHIShaderModule* GetOrCreateShaderModule(
@@ -1285,9 +1305,12 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
 
     // 7.6 Main pass descriptor set + light UBO + shadow caster pipeline
     {
-        // Main desc layout: set 0
-        //   binding 0 = sampler2D shadowMap (Fragment 阶段)
-        //   binding 1 = uniform LightUbo (Fragment 阶段)
+        // Main desc layout: set 0（详细 binding 注释见 Pipeline::Impl 内）
+        //   binding 0 = sampler2D    shadowMap
+        //   binding 1 = uniform      LightUbo
+        //   binding 2 = samplerCube  uIrradiance       (IBL diffuse)
+        //   binding 3 = samplerCube  uPrefilteredEnv   (IBL specular)
+        //   binding 4 = sampler2D    uBrdfLut          (IBL split-sum LUT)
         Orange::Rhi::DescriptorSetLayoutDesc lay{};
         lay.mBindings.push_back({0,
                                  Orange::Rhi::DescriptorType::CombinedImageSampler,
@@ -1295,6 +1318,18 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                                  Orange::Rhi::ShaderStage::Fragment});
         lay.mBindings.push_back({1,
                                  Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({2,
+                                 Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({3,
+                                 Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({4,
+                                 Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1,
                                  Orange::Rhi::ShaderStage::Fragment});
         lay.mpDebugName = "orange_engine.main.layout";
@@ -1309,10 +1344,10 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         bufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
         impl.lightUbo = rhi.CreateBuffer(bufDesc);
 
-        // Main desc pool: 1 set，1 个 sampler + 1 个 UBO
+        // Main desc pool: 1 set，4 个 CombinedImageSampler（shadow + 3 dummy IBL） + 1 个 UBO
         Orange::Rhi::DescriptorPoolDesc pool{};
         pool.mMaxSets = 1;
-        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 1});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 4});
         pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 1});
         pool.mpDebugName = "orange_engine.main.pool";
         impl.mainDescPool = rhi.CreateDescriptorPool(pool);
@@ -1341,6 +1376,157 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         write.mBufferInfo.mOffset  = 0;
         write.mBufferInfo.mRange   = sizeof(Pipeline::Impl::LightUboData);
         rhi.UpdateDescriptorSet(*impl.mainDescSet, &write, 1);
+    }
+
+    // 7.7 Dummy IBL 资源
+    {
+        // 三纹理：1×1×6 RGBA16Float cube ×2 + 1×1 RGBA16Float 2D。启动期
+        // zero-clear → PBR shader IBL 贡献 = 0 → 退化为 direct-only。
+        // BRDF LUT 当前用 RGBA16Float 而非 R16G16F：dummy 只关心结果 = 0；
+        // 真实烘焙路径上线时再切回 R16G16F 物理正确格式（依赖 RHI 端补齐
+        // R16G16F 创建支持）。
+        Orange::Rhi::TextureDesc cubeDesc{};
+        cubeDesc.mWidth       = 1;
+        cubeDesc.mHeight      = 1;
+        cubeDesc.mFormat      = Orange::Rhi::TextureFormat::RGBA16Float;
+        cubeDesc.mDimension   = Orange::Rhi::TextureDimension::TexCube;
+        cubeDesc.mArrayLayers = 6;
+        cubeDesc.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                              | Orange::Rhi::TextureUsage::TransferDst;
+        impl.dummyIrradianceCube  = rhi.CreateTexture(cubeDesc);
+        impl.dummyPrefilteredCube = rhi.CreateTexture(cubeDesc);
+
+        Orange::Rhi::TextureDesc brdfDesc{};
+        brdfDesc.mWidth       = 1;
+        brdfDesc.mHeight      = 1;
+        brdfDesc.mFormat      = Orange::Rhi::TextureFormat::RGBA16Float;
+        brdfDesc.mDimension   = Orange::Rhi::TextureDimension::Tex2D;
+        brdfDesc.mArrayLayers = 1;
+        brdfDesc.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                              | Orange::Rhi::TextureUsage::TransferDst;
+        impl.dummyBrdfLut = rhi.CreateTexture(brdfDesc);
+
+        if (!impl.dummyIrradianceCube || !impl.dummyPrefilteredCube || !impl.dummyBrdfLut)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL 纹理创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        // 一次性 staging buffer：每像素 RGBA16Float = 8 字节，cube 6 层 ×
+        // 1 px 顶天 48 B；用 64 B 兜底，6 层共用 offset 0（数据全 0）。
+        Orange::Rhi::BufferDesc stagingDesc{};
+        stagingDesc.mSize        = 64;
+        stagingDesc.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+        stagingDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        auto staging = rhi.CreateBuffer(stagingDesc);
+        if (!staging)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL staging buffer 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        {
+            void* mapped = staging->Map();
+            if (mapped == nullptr)
+            {
+                ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL staging Map 失败");
+                Shutdown();
+                return ResultCode::InternalError;
+            }
+            std::memset(mapped, 0, 64);
+            staging->Unmap();
+        }
+
+        // 用 offscreenCmd 跑一次性 transition + copy；本帧前 offscreenCmd
+        // 还没进入 frame loop，可以独立 Begin/End/Submit 一次再 reset 回去。
+        auto& cmd = *impl.offscreenCmd;
+        if (cmd.Begin() != Orange::ResultCode::Success)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL cmd.Begin 失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        auto initCube = [&](Orange::Rhi::RHITexture& tex) {
+            cmd.TransitionTexture(tex,
+                                  Orange::Rhi::TextureLayout::Undefined,
+                                  Orange::Rhi::TextureLayout::TransferDst);
+            for (std::uint32_t layer = 0; layer < 6; ++layer)
+            {
+                Orange::Rhi::BufferTextureCopyRegion r{};
+                r.mBufferOffset = 0;
+                r.mMipLevel     = 0;
+                r.mArrayLayer   = layer;
+                r.mWidth        = 1;
+                r.mHeight       = 1;
+                r.mDepth        = 1;
+                cmd.CopyBufferToTexture(*staging, tex, r);
+            }
+            cmd.TransitionTexture(tex,
+                                  Orange::Rhi::TextureLayout::TransferDst,
+                                  Orange::Rhi::TextureLayout::ShaderReadOnly);
+        };
+
+        initCube(*impl.dummyIrradianceCube);
+        initCube(*impl.dummyPrefilteredCube);
+
+        // 2D BRDF LUT —— 单 layer 单 copy
+        cmd.TransitionTexture(*impl.dummyBrdfLut,
+                              Orange::Rhi::TextureLayout::Undefined,
+                              Orange::Rhi::TextureLayout::TransferDst);
+        {
+            Orange::Rhi::BufferTextureCopyRegion r{};
+            r.mBufferOffset = 0;
+            r.mMipLevel     = 0;
+            r.mArrayLayer   = 0;
+            r.mWidth        = 1;
+            r.mHeight       = 1;
+            r.mDepth        = 1;
+            cmd.CopyBufferToTexture(*staging, *impl.dummyBrdfLut, r);
+        }
+        cmd.TransitionTexture(*impl.dummyBrdfLut,
+                              Orange::Rhi::TextureLayout::TransferDst,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+
+        if (cmd.End() != Orange::ResultCode::Success)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL cmd.End 失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        if (rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL SubmitCommandList 失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        // 等待 copy 落盘后再让 staging buffer 出作用域；0.x 阶段 WaitIdle 够用
+        impl.renderDevice->WaitIdle();
+
+        // 把 binding 2/3/4 写入 mainDescSet。hdrSampler 在 7.x 早段已创建，
+        // 与 shadow / IBL sampler 共用同一个 linear sampler（point/linear/mip
+        // 等差异等到 EnvironmentComponent 引入再独立）。
+        if (impl.mainDescSet && impl.hdrSampler)
+        {
+            Orange::Rhi::DescriptorWrite writes[3] = {};
+            writes[0].mBinding             = 2;
+            writes[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+            writes[0].mImageInfo.mpTexture = impl.dummyIrradianceCube.get();
+            writes[0].mImageInfo.mpSampler = impl.hdrSampler.get();
+
+            writes[1].mBinding             = 3;
+            writes[1].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+            writes[1].mImageInfo.mpTexture = impl.dummyPrefilteredCube.get();
+            writes[1].mImageInfo.mpSampler = impl.hdrSampler.get();
+
+            writes[2].mBinding             = 4;
+            writes[2].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+            writes[2].mImageInfo.mpTexture = impl.dummyBrdfLut.get();
+            writes[2].mImageInfo.mpSampler = impl.hdrSampler.get();
+
+            rhi.UpdateDescriptorSet(*impl.mainDescSet, writes, 3);
+        }
     }
     {
         // shadow caster pipeline：depth-only target (D32Float)，push constant
@@ -1662,8 +1848,11 @@ void Pipeline::Shutdown()
         impl.upload.reset();
     }
 
-    impl.builtinTexturedMaterial = Material{};
-    impl.builtinTexturedLoaded   = false;
+    impl.builtinDefaultMaterial = Material{};
+    impl.builtinDefaultLoaded   = false;
+    impl.dummyBrdfLut.reset();
+    impl.dummyPrefilteredCube.reset();
+    impl.dummyIrradianceCube.reset();
 
     if (impl.renderer)
     {
@@ -1955,7 +2144,7 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
         }
         if (mat == nullptr)
         {
-            mat = impl.EnsureBuiltinTexturedMaterial();
+            mat = impl.EnsureBuiltinDefaultMaterial();
         }
         if (mat == nullptr)
         {

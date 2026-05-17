@@ -204,4 +204,29 @@ Material LoadEmissive(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/emissive.frag.spv");
 }
 
+Material LoadPbr(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "pbr";
+
+    // push constant 与 toon / rim_light 同款 {uMVP, uModel} = 128 B；五通道
+    // 材质参数（baseColor / metallic / roughness / normal / AO）暂在 pbr.
+    // frag.glsl 内 hardcoded，后续抬进 MaterialInstance 时本 schema + frag
+    // 端 hardcoded 一并切换，避免现在先声明 uniforms 而 shader 仍按
+    // hardcoded 走的 "schema 与默认值漂移"。
+    //
+    // textureSlots 留空：set 0 binding 2/3/4 的 IBL 三纹理由 Pipeline 全局
+    // 注入（per-frame，dummy 或真实），不走 per-instance MaterialInstance
+    // 路径——它们与 EnvironmentComponent 生命周期同步。
+    desc.uniforms = {
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
+    };
+    desc.textureSlots = {};
+
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/pbr.vert.spv",
+                         "shaders/orange_engine/pbr.frag.spv");
+}
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
