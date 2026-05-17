@@ -825,6 +825,91 @@ v0.4.5 workaround（把 `glfwMaximizeWindow` 提到 ImGui Init 之前）解决�
 
 ---
 
+## GAP-2026-05-17-mesh-vertex-normals
+
+- **发现方**：Phase 6.5 PBR-01 milestone-start-checklist 步骤 4（摸现有 Pipeline 渲染路径）
+- **发现日期**：2026-05-17
+- **一句话定性**：`MeshAsset` / `InterleavedVertex` / `MeshLoader v1` / 所有 sample 的 `MakeSphereMesh` 都不存 vertex normal；现有 shaders 只能通过 `dFdx/dFdy` 推 flat face normal（toon.frag.glsl:45）—— PBR 球体会渲染成低多边形多面体，直接阻塞 Phase 6.5 PBR-01 / PBR-03 "9 球阵 roughness 0→1 视觉过渡" 验证
+- **状态**：登记，未开工
+
+### 触发场景
+
+Phase 6.5 PBR direct lighting milestone（B.1）启动 ritual：
+
+- Task PBR-01 落 monolithic `pbr.{vert,frag}.glsl`，Cook-Torrance + GGX + Schlick + Smith 都要 smooth world-space normal
+- Task PBR-03 验证：9 球阵（3 metallic × 3 roughness）+ 1 directional light，roughness 0→1 specular highlight 从 sharp 到 wide 连续过渡 + 金属/塑料视觉区分
+
+引擎当前能力对照：
+
+| 原子能力 | 现状 | 备注 |
+|---------|------|------|
+| `MeshAsset` 公共面 | ❌ 无 normal | 头注释 line 5–9 明说 "法线 / tangent / 多 set UV / skin 等更丰富属性留待后续扩展" |
+| `InterleavedVertex` (Pipeline.cpp:117) | ❌ 仅 pos(3) + uv(2) stride 20 B | line 114–116 注释明说"未来引入 vertex normal / tangent 时在 Material 上再加一个描述字段" |
+| `MeshLoader v1` 磁盘格式 | ❌ 不写 normal | 磁盘 .mesh 文件无 normal 段 |
+| Sample `MakeSphereMesh` 8 处 | ❌ | 仅算 pos + uv |
+| Procedural cube / plane 落盘产物 | ❌ | `assets/meshes/cube.mesh` / `plane.mesh` 由 GAP-2026-05-16-builtin-asset-disk-serialization lazy bake 产出，同样无 normal |
+| shader 端 normal 来源 | dFdx/dFdy fallback | `toon.frag.glsl:45` 推 flat face normal —— sphere 渲染成多面体 |
+
+### 缺什么（按依赖拆）
+
+#### G1 · MeshAsset 公共 API + helper
+
+- `include/orange/engine/asset/MeshAsset.h` 加 `struct VertexNormal3 { float x, y, z; }` + 私有字段 `std::vector<VertexNormal3> mNormals`
+- 配套 accessor / `HasNormals()` / 构造函数 overload（带 normals 的 4 参版本）
+- 提供 helper：`MeshAsset::ComputeFlatNormals()`（per-triangle）+ `MeshAsset::ComputeSmoothNormalsFromTriangles()`（per-vertex 邻面加权平均）—— 旧资产 fallback 用
+
+#### G2 · `MeshLoader` schema bump（v1 → v2）
+
+- 磁盘格式 v2 加可选 normal 段；v1 旧文件 loader 走 fallback：检测无 normal → 自动调 `ComputeSmoothNormalsFromTriangles` 填上
+- Write 路径写出 normal 段
+- 兼容现有 `assets/meshes/cube.mesh` / `plane.mesh`（不破坏；lazy bake 走 v2 路径重写出带 normal 的版本，或保留 v1 + 加载期补算）
+
+#### G3 · Pipeline `InterleavedVertex` + `FillVertexInputLayout` 扩展
+
+- `InterleavedVertex` 加 normal[3] 字段，stride 20 → 32 B（按 std140 / 顶点 attribute 对齐）
+- `FillVertexInputLayout` 加 location=2 vec3 normal attribute
+- `InterleaveMesh` 把 `mesh.Normals()` 填进；空 normal → 兜底 `(0, 1, 0)` 或调 G1 helper 现场算
+
+#### G4 · 现存 shader vertex 输入层兼容
+
+两条路径，二选一（实施期评审）：
+
+- **路径 A**：所有 vertex shader (textured_mesh / toon / rim_light / dissolve / emissive / shadow_caster 等) 都加 `layout(location = 2) in vec3 inNormal;` 但不一定 output —— attribute 不被消费的话 driver 可 dead-code-elim，但 VID 必须声明（Vulkan 强对齐 mesh stride 与 shader attribute），最干净
+- **路径 B**：保留 stride 20 与 stride 32 双 VID，Pipeline 创建期按 shader 是否需要 normal 切换 —— 复杂但向前兼容旧 .mesh 文件零迁移
+
+#### G5 · 程序化 mesh 生成器与磁盘资产同步
+
+- 8 个 sample 的 `MakeSphereMesh` 同步生成 normal（球体平凡：`normalize(position)`）
+- `tools/OrangeEditor/DemoWorld.cpp` 的内置 cube / plane lazy bake 路径触发 G1 helper 算 normal 后再写盘
+- 现存 `assets/meshes/cube.mesh` / `plane.mesh` 通过 lazy bake 自动重生成 v2 格式（或加载期补算）
+
+### 期望验收
+
+- demo.scene 在编辑器内打开后球体（若有）渲染为平滑圆球
+- Phase 6.5 sample 09_pbr_direct 9 球阵表面平滑过渡（无 facet artifact）
+- 现存 `.mesh` 文件 loader 兼容（v1 无 normal 走 fallback 自动补算，不报错）
+- 序列化 round-trip：`MeshAsset` 写 / 读 normal 字段无丢失
+- Pipeline 创建不破现有 shaders（textured_mesh / toon / rim_light / dissolve / emissive / shadow_caster 等加载/编译/绘制均正常）
+
+### 关联
+
+- **强阻塞**：[Phase 6.5 PBR-01](../roadmap.md#task-065-01--monolithic-pbr-shader-落地ibl-槽位-dummy)（不解决则 PBR shader 只能走 flat-normal fallback，球体多面体化）
+- 关联引用：`include/orange/engine/asset/MeshAsset.h:5-9`（头注释明确标"留待后续扩展"）/ `src/render/Pipeline.cpp:114-116`（注释明确标"未来引入 vertex normal / tangent"）/ `src/render/builtin_shaders/toon.frag.glsl:45`（dFdx/dFdy fallback 实例）
+
+### 不在本 GAP 范围
+
+- **tangent / bitangent**（PBR 法线贴图需要，B.1 不上 normal map 暂可推迟到 B.2 或独立 GAP）
+- **vertex color / 多 set UV / skin weights**（同 MeshAsset 头注释提及，分别独立 GAP）
+- **mikkT space tangent 算法**（如未来支持 normal map 时一并）
+
+### 状态
+
+- **登记**：2026-05-17
+- **处理**：未启动；预估 1 个独立 session 体量（G1 + G2 + G3 + G5 一次性落，G4 路径在 session 内评审定）
+- **归属**：Phase 6.5 B.1 启动前 prerequisite；落地后 PBR-01 在新 session bump 消费
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-17-asset-registry-handle-to-path**（2026-05-17 落地）：发现 `AssetRegistry::PathOf<T>` 公共 API 早已存在（GAP 登记时漏看），实际只需 `MaterialFileIO::BuildDataFromInstance` 加可选 `const AssetRegistry*` 参数 + 内部消费 PathOf。详细见上文条目末尾"落地记录"节。涉及 commit：`784bf1a`。关键改动文件：`tools/OrangeEditor/MaterialFileIO.{h,cpp}` / `tests/render/MaterialFileIOTest.cpp`（TestTextureRoundTripWithRegistry）
