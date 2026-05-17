@@ -100,6 +100,18 @@ public:
 
     std::size_t TemplateCount() const noexcept;
 
+    // 枚举所有已注册模板的名字。返回拷贝（值类型 vector<string>），调用
+    // 方持有的副本不会被后续 RegisterTemplate 的 rehash 影响——string_view
+    // 版本曾被考虑但因 unordered_map 的 key 在 rehash 时仍可能让 view
+    // 悬挂被 reject，0.x 阶段优先稳。
+    //
+    // 顺序未定义：内部是 unordered_map，遍历顺序与插入顺序无关。调用方
+    // （如 Editor Inspector Combo 控件）若需稳定顺序，自行 sort。
+    //
+    // 不在帧内热路径——本接口典型消费方是 Editor UI / 资源序列化，与
+    // FindTemplate / CreateInstance 同节奏；不强调零分配。
+    std::vector<std::string> GetTemplateNames() const;
+
     // 便利方法：把引擎内置的 toon / rim_light 模板注册进 system。等价
     // 于手动 RegisterTemplate(toon_desc) + RegisterTemplate(rim_light_desc)，
     // 但内部直接复用 BuiltinMaterials::LoadToon / LoadRimLight 的工厂

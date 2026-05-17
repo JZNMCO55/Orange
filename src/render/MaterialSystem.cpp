@@ -124,6 +124,17 @@ std::size_t MaterialSystem::TemplateCount() const noexcept
     return mpImpl->templates.size();
 }
 
+std::vector<std::string> MaterialSystem::GetTemplateNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(mpImpl->templates.size());
+    for (const auto& [name, _mat] : mpImpl->templates)
+    {
+        names.push_back(name);
+    }
+    return names;
+}
+
 Result<void, ResultCode> MaterialSystem::RegisterBuiltins()
 {
     // 直接复用 BuiltinMaterials 的工厂——它们已经做完 .exe-相对路径解析

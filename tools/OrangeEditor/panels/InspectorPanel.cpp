@@ -21,10 +21,12 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 // Inspector 入口：选中实体的 entity id + 所有"已挂着的 component"各起一段
 // schema-driven 渲染 + 一个 +Add Component popup 按 schema registry 枚举。
@@ -37,22 +39,27 @@
 // Inspector 切到 material 编辑视图：MaterialTemplate Combo + uniforms /
 // textures 调参 + Save 写回 .material 文件。
 //
-// 简化范围（c5 当前）：
-//   * Combo 项硬编码内置 5 个模板名（toon / rim_light / dissolve / emissive
-//     / textured）—— MaterialSystem 当前未暴露 EnumerateTemplateNames 公共 API；
-//     登记 GAP 后续 patch 自动取
-//   * uniform 调参 + 写盘**仅写 templateName**，uniform override 持久化作为
-//     deferred 单独 patch 实施 —— 当前内置 material 全是 default 无 override
-//     现成用例不够，schema v1.0 → v1.1 等真有 use case 时再扩
+// 当前范围（GAP-2026-05-16-material-system-enumerate-and-instance-overrides
+// G1 落地后）：
+//   * Combo 项直接调 MaterialSystem::GetTemplateNames，覆盖内置 + 游戏侧
+//     RegisterTemplate 注入的自定义模板
+//   * uniform 调参 + 写盘逐步上线（见后续 commit C2/C3 的 enumerate API
+//     + .material schema v1.1）
 //   * 不支持创建新 .material（仅编辑已存在）/ 删除 / 重命名
 namespace
 {
 
-// 内置模板名硬编码列表。与 MaterialSystem::RegisterBuiltins 注册一致。
-// 后续 MaterialSystem 暴露 EnumerateTemplateNames API 后自动替换。
-constexpr const char* kBuiltinTemplateNames[] = {
-    "toon", "rim_light", "dissolve", "emissive", "textured"
-};
+// 从 MaterialSystem 读所有已注册模板名（含内置 + 游戏侧 RegisterTemplate
+// 注入的自定义模板），排序后返回——unordered_map 遍历无序，UI 一致
+// 性要求按 name 字典序展示。
+std::vector<std::string> CollectTemplateNames(
+    const Orange::Engine::Render::MaterialSystem* pMaterials)
+{
+    if (pMaterials == nullptr) { return {}; }
+    std::vector<std::string> names = pMaterials->GetTemplateNames();
+    std::sort(names.begin(), names.end());
+    return names;
+}
 
 // 读 .material 文件的 templateName 字段。失败返回空 string。
 std::string ReadMaterialTemplateName(const std::string& path)
@@ -118,14 +125,26 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
         host.assets.editingTemplateName = originalTemplate;
     }
 
-    // 找当前 editingTemplateName 在内置列表里的 index（找不到走 -1 → Combo
-    // 显示空）。当前文件 templateName 可能是游戏侧自定义模板（不在硬编码
-    // 列表内），Combo 显示空 + 用户可选切到内置模板。
+    // 从 MaterialSystem 实时取所有已注册模板（含游戏侧自定义）。注：游戏侧
+    // 若在 editor 启动后才注册，需要 host.assets.pMaterials 真实拿到那次注
+    // 册结果；当前 host 单 session 内不动 RegisterTemplate，所以每帧重读
+    // 即可——开销与每帧 ImGui 重布局同节奏，可忽略。
+    const std::vector<std::string> templateNames =
+        CollectTemplateNames(host.assets.pMaterials.get());
+
+    // ImGui::Combo 需要 const char* 数组形式 —— 把 vector<string> 转成
+    // vector<const char*> 喂给 Combo。
+    std::vector<const char*> templateNameCStrs;
+    templateNameCStrs.reserve(templateNames.size());
+    for (const auto& n : templateNames) { templateNameCStrs.push_back(n.c_str()); }
+
+    // 找当前 editingTemplateName 在列表里的 index（找不到走 -1 → Combo
+    // 显示空）。当前文件 templateName 若是已被卸载的旧模板，Combo 显示
+    // 空 + 用户可选切到任一已注册模板。
     int curTemplateIdx = -1;
-    for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kBuiltinTemplateNames));
-         ++i)
+    for (int i = 0; i < static_cast<int>(templateNames.size()); ++i)
     {
-        if (host.assets.editingTemplateName == kBuiltinTemplateNames[i])
+        if (host.assets.editingTemplateName == templateNames[i])
         {
             curTemplateIdx = i;
             break;
@@ -134,16 +153,20 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     Orange::Editor::Widgets::BeginPropertyTable("##matprops", 100.0f);
     Orange::Editor::Widgets::PropertyLabel("Template",
         "材质模板（决定 shader + uniform 布局）");
-    if (ImGui::Combo("##template", &curTemplateIdx,
-                     kBuiltinTemplateNames,
-                     IM_ARRAYSIZE(kBuiltinTemplateNames)))
+    if (!templateNameCStrs.empty()
+        && ImGui::Combo("##template", &curTemplateIdx,
+                        templateNameCStrs.data(),
+                        static_cast<int>(templateNameCStrs.size())))
     {
         if (curTemplateIdx >= 0
-            && curTemplateIdx < static_cast<int>(
-                IM_ARRAYSIZE(kBuiltinTemplateNames)))
+            && curTemplateIdx < static_cast<int>(templateNames.size()))
         {
-            host.assets.editingTemplateName = kBuiltinTemplateNames[curTemplateIdx];
+            host.assets.editingTemplateName = templateNames[curTemplateIdx];
         }
+    }
+    if (templateNameCStrs.empty())
+    {
+        ImGui::TextDisabled("(no templates registered)");
     }
     Orange::Editor::Widgets::EndPropertyTable();
 

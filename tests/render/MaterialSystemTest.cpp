@@ -28,11 +28,13 @@
 #include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/MaterialTypes.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
     #define NOMINMAX
@@ -245,6 +247,44 @@ void TestCreateInstance()
     std::fprintf(stdout, "  [PASS] CreateInstance 命中 / 不命中路径\n");
 }
 
+// 6.5 GetTemplateNames：默认空、RegisterBuiltins 后 5 项、自定义注册后 6 项
+void TestGetTemplateNames()
+{
+    AssetRegistry registry;
+    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+    assert(reg.IsOk());
+
+    MaterialSystem matSys(registry);
+    assert(matSys.GetTemplateNames().empty());
+
+    matSys.RegisterBuiltins();
+    std::vector<std::string> names = matSys.GetTemplateNames();
+    assert(names.size() == 5);
+    // 不假定顺序——unordered_map 遍历无序。排序后比对内容。
+    std::sort(names.begin(), names.end());
+    assert(names[0] == "dissolve");
+    assert(names[1] == "emissive");
+    assert(names[2] == "rim_light");
+    assert(names[3] == "textured");
+    assert(names[4] == "toon");
+
+    // 自定义注册后 1 + 5 = 6 项，且新名出现在列表里
+    ShaderTemplateDesc desc;
+    desc.name              = "user_custom";
+    desc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
+    desc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
+    auto regResult = matSys.RegisterTemplate(desc);
+    assert(regResult.IsOk());
+
+    names = matSys.GetTemplateNames();
+    assert(names.size() == 6);
+    const bool hasCustom =
+        std::find(names.begin(), names.end(), std::string("user_custom")) != names.end();
+    assert(hasCustom);
+
+    std::fprintf(stdout, "  [PASS] GetTemplateNames 默认空 + builtin 5 + 自定义 6\n");
+}
+
 // 6. CreateInstance 拿到的 MaterialInstance 上 SetUniform 真正命中 toon
 //    的 uniform 名 —— 验证 Task 01 silent-ignore 与 Task 04 system-managed
 //    Material 引用贯通
@@ -287,6 +327,7 @@ int main()
     TestRegisterCustomTemplate();
     TestDuplicateNameRejected();
     TestCreateInstance();
+    TestGetTemplateNames();
     TestInstanceUniformRouting();
 
     std::fprintf(stdout, "[MaterialSystemTest] all tests passed.\n");
