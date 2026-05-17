@@ -11,9 +11,11 @@
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/LayerVisibilitySync.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/platform/Window.h>
 #include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -149,6 +151,12 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     if (mHost.scene.playState == PlayState::Play && mHost.scene.pWorld != nullptr) {
         // Physics step → 把 dynamic body 新位姿写回 ECS Transform
         if (mpPhysicsWorld != nullptr) {
+            // v0.6 c4：每帧 Step 之前同步 layer.visible → body enabled。
+            // hidden layer 的 dynamic body 不参与积分 / 不产生 contact，匹配
+            // "hide 一个 layer 整个 layer 不要参与物理"的 UX 预期。
+            // partition 由 EditorSceneContext 值成员持有，始终 valid。
+            Orange::Engine::Physics::ApplyLayerVisibility(
+                *mHost.scene.pWorld, mHost.scene.partition, *mpPhysicsWorld);
             mpPhysicsWorld->Step(dt);
             auto& reg = mHost.scene.pWorld->Registry();
             using TC  = Orange::Engine::Scene::TransformComponent;
@@ -656,6 +664,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
     switch (op) {
         case SceneOp::New: {
             mHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
+            // v0.6 c4：partition 与 pWorld 同生命周期，scene swap 时一并重建。
+            // 默认构造自动注册 "default" layer，SeedDemoWorld 内挂的 entity
+            // 在没显式 SetLayerOf 时自然归 default。
+            mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
             SeedDemoWorld(mHost);  // 与启动期一致；后续真要"空场景"再做"New Empty"
             mHost.scene.currentScenePath.clear();
             mHost.scene.dirty = false;
@@ -683,6 +695,26 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 break;  // 保留原 world
             }
             mHost.scene.pWorld = std::move(pNew);
+            // v0.6 c4：单文件 Load 不读 manifest（partition 元数据没被持久
+            // 化）；scene 里只有 LayerComponent.layerId。重建一个空 partition，
+            // 再扫一遍 world 把出现过的 layerId 自动 AddLayer（visible 默认
+            // true）—— 用户重启后仍能看到完整 layer 列表，已删 layer 上残
+            // 留的 entity 也能被 partition 兜底视为 default 之外的合法 layer。
+            mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
+            {
+                auto& reg = mHost.scene.pWorld->Registry();
+                using LC  = Orange::Engine::Scene::LayerComponent;
+                for (auto e : reg.view<LC>()) {
+                    const auto& lc = reg.get<LC>(e);
+                    if (lc.layerId.empty()) { continue; }
+                    if (mHost.scene.partition.HasLayer(lc.layerId)) { continue; }
+                    Orange::Engine::Scene::LayerInfo info;
+                    info.id          = lc.layerId;
+                    info.displayName = lc.layerId;
+                    info.visible     = true;
+                    mHost.scene.partition.AddLayer(std::move(info));
+                }
+            }
             mHost.scene.currentScenePath = path;
             mHost.scene.dirty = false;
             ResetEntityLocalState();

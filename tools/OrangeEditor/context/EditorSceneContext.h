@@ -11,6 +11,7 @@
 // 最小化。从语义上它们都是 scene 域的"行为标识"，所以放在本头文件内。
 
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldPartition.h>
 
 #include <cstdint>
 #include <memory>
@@ -80,6 +81,19 @@ struct EditorSceneContext
     // 编辑器持有 World 所有权 —— 场景 Open / New 需要在 OnUpdate 内整体
     // swap world，必须放在 context 里让 layer 能直接 reset / replace。
     std::unique_ptr<Orange::Engine::World> pWorld;
+
+    // v0.6 c4：layer manifest 持有者，与 pWorld 同生命周期 —— New / Open
+    // 时一并 reset / 重建。值成员（非 unique_ptr）：默认构造即注册 "default"
+    // layer，无空状态需要保护；不需要跨 host 共享，少一层间接。
+    //
+    // 设计取舍：放在 EditorSceneContext（scene 子域）而非 EditorHost 顶层，
+    // 因为 partition 是 "本次打开的 scene 的元数据"，scene swap 时必须随之
+    // 重建——否则旧 manifest 里的 visible 状态会泄露到新 scene 上。
+    //
+    // Pipeline.SetWorldPartition + Physics::ApplyLayerVisibility 每帧消费它；
+    // 编辑器侧 Layer Manager panel / Hierarchy 右键 "Move to layer" 都把
+    // mutate 走 CommandStack 反映到这里。
+    Orange::Engine::Scene::WorldPartition partition;
 
     // 当前 scene 文件路径（绝对路径，UTF-8）；空 = 尚未保存过 / "Untitled"。
     // Save 走 currentScenePath；空时回退到 SaveAs 流程。

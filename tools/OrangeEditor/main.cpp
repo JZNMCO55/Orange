@@ -60,10 +60,12 @@
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldPartition.h>
 
 // 编辑器内部模块（拆分后的本地 header；不进 include/ 公共面）
 #include "DemoWorld.h"
@@ -478,6 +480,21 @@ int main()
         else
         {
             editorHost.scene.currentScenePath = "assets/scenes/demo.scene.json";
+            // v0.6 c4：单文件 Load 不读 manifest，扫一遍 World 把出现过的
+            // LayerComponent.layerId 自动 AddLayer，让用户重启后仍能在
+            // Layer Panel 看到完整列表（visible 默认 true，dirty 不变）。
+            auto& reg = editorHost.scene.pWorld->Registry();
+            using LC  = ::Orange::Engine::Scene::LayerComponent;
+            for (auto e : reg.view<LC>()) {
+                const auto& lc = reg.get<LC>(e);
+                if (lc.layerId.empty()) { continue; }
+                if (editorHost.scene.partition.HasLayer(lc.layerId)) { continue; }
+                ::Orange::Engine::Scene::LayerInfo info;
+                info.id          = lc.layerId;
+                info.displayName = lc.layerId;
+                info.visible     = true;
+                editorHost.scene.partition.AddLayer(std::move(info));
+            }
         }
     }
 

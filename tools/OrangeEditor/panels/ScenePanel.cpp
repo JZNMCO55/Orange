@@ -141,6 +141,12 @@ void EditorRenderLayer::DrawScenePanel()
 
     bool drewImage = false;
     if (EnsureScenePipeline(panelW, panelH) && mHost.scene.pWorld != nullptr) {
+        // v0.6 c4：每帧 wire partition 给 Pipeline —— Pipeline 内部按
+        // partition.IsEntityVisible(world, e) 过滤 drawable + shadow caster；
+        // hide 的 layer 立即从 viewport 消失，无需 mutate ECS。
+        // pointer 非拥有，partition 与 EditorSceneContext 同生命周期，
+        // 始终 valid，无需 null 检查。
+        mpScenePipeline->SetWorldPartition(&mHost.scene.partition);
         // Pipeline::RenderOffscreen 内部 WaitIdle —— 本帧返回时 GPU 已
         // 空，之后 RemoveTexture(旧 descriptor) + AddTexture(新) 才安全。
         mpScenePipeline->Render(*mHost.scene.pWorld);
