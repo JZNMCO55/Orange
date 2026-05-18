@@ -183,6 +183,9 @@ private:
     // v0.8 EditorSettings：是否显示 Settings 浮动面板（默认不显示，由 View
     // 菜单 / 主 toolbar 切换）。
     bool                                              mShowSettingsPanel{false};
+    // v0.8 Keybinding rebind 状态：empty = 不在 rebind；非空 = 等当前 slot
+    // 名（"gizmoTranslate" 等）下次按键写回。Esc 取消。
+    std::string                                       mRebindActive;
 
     // v0.8 Console 面板日志接入（Core::Log → SetLogSink → 本 ring buffer）。
     // sink callback 在任意线程触发，写 buffer 必须持 mutex。读路径（Draw

@@ -1482,5 +1482,66 @@ void EditorRenderLayer::DrawSettingsPanel()
             s = EditorSettings{};
         }
     }
+
+    if (ImGui::CollapsingHeader("Keybindings", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        auto& kb = mHost.keybindings;
+
+        // 每条 binding 一行：label | 当前键名 | [Rebind] 按钮。点 Rebind 后
+        // 等下一个键按下即写入；按 Esc 取消。
+        auto drawBind = [&](const char* label, ImGuiKey* pKey, const char* slot)
+        {
+            ImGui::PushID(slot);
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine(180.0f);
+            ImGui::TextDisabled("[%s]", ImGui::GetKeyName(*pKey));
+            ImGui::SameLine(280.0f);
+
+            const bool waiting = (mRebindActive == slot);
+            if (waiting)
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f), "press a key (Esc = cancel)");
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+                {
+                    mRebindActive.clear();
+                }
+                else
+                {
+                    // 扫所有 named key；第一个本帧 just-pressed 的写回。
+                    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k)
+                    {
+                        const auto key = static_cast<ImGuiKey>(k);
+                        if (key == ImGuiKey_Escape) { continue; }
+                        if (ImGui::IsKeyPressed(key, false))
+                        {
+                            *pKey = key;
+                            mRebindActive.clear();
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                if (ImGui::SmallButton("Rebind"))
+                {
+                    mRebindActive = slot;
+                }
+            }
+            ImGui::PopID();
+        };
+
+        drawBind("Gizmo Translate",  &kb.gizmoTranslate, "gizmoTranslate");
+        drawBind("Gizmo Rotate",     &kb.gizmoRotate,    "gizmoRotate");
+        drawBind("Gizmo Scale",      &kb.gizmoScale,     "gizmoScale");
+        drawBind("Rename Entity",    &kb.renameEntity,   "renameEntity");
+        drawBind("Delete Entity",    &kb.deleteEntity,   "deleteEntity");
+
+        if (ImGui::Button("Reset keybindings to defaults"))
+        {
+            kb = EditorKeybindings{};
+            mRebindActive.clear();
+        }
+    }
     ImGui::End();
 }

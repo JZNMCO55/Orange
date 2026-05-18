@@ -179,15 +179,18 @@ void EditorRenderLayer::DrawScenePanel()
             // 文本输入 active，否则会拦截字母键）。
             if (!mHost.gizmo.IsDragging() && !ImGui::IsAnyItemActive())
             {
-                if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+                // v0.8 keybinding：从 EditorKeybindings 读绑定的 key（默认
+                // W/E/R，可在 Settings 面板内 rebind）。
+                const auto& kb = mHost.keybindings;
+                if (ImGui::IsKeyPressed(kb.gizmoTranslate, false))
                 {
                     mHost.gizmo.mode = EditorGizmoState::Mode::Translate;
                 }
-                else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
+                else if (ImGui::IsKeyPressed(kb.gizmoRotate, false))
                 {
                     mHost.gizmo.mode = EditorGizmoState::Mode::Rotate;
                 }
-                else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+                else if (ImGui::IsKeyPressed(kb.gizmoScale, false))
                 {
                     mHost.gizmo.mode = EditorGizmoState::Mode::Scale;
                 }

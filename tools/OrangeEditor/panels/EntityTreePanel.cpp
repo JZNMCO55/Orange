@@ -51,10 +51,13 @@ void EditorRenderLayer::DrawEntityTreePanel()
         && mHost.selection.selectedEntity.IsValid()
         && mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity))
     {
-        if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
+        // v0.8 keybinding：从 EditorKeybindings 读绑定的 key（默认 F2 /
+        // Delete，可在 Settings 面板内 rebind）。
+        const auto& kb = mHost.keybindings;
+        if (ImGui::IsKeyPressed(kb.renameEntity)) {
             BeginRename(mHost.selection.selectedEntity);
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+        if (ImGui::IsKeyPressed(kb.deleteEntity)) {
             mHost.selection.pendingDelete = mHost.selection.selectedEntity;
         }
     }

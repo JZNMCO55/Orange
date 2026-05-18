@@ -522,14 +522,16 @@ int main()
     InitializeEditorAssets(editorHost);
     editorHost.extraSerializers.push_back(DemoGame::GetHealthSerializerEntry());
 
-    // v0.8 EditorSettings 持久化：启动时尝试从 editor_settings.json 加载，
-    // 缺失 / 解析失败保留默认值。文件相对路径（ChdirToRepoRoot 之后）。
+    // v0.8 EditorSettings + EditorKeybindings 持久化：启动时尝试从 editor_
+    // settings.json 加载（含 settings 段 + keybindings 段共享同文件），缺失
+    // / 解析失败保留默认值。文件相对路径（ChdirToRepoRoot 之后）。
     constexpr const char* kEditorSettingsPath = "editor_settings.json";
     {
         auto readRes = Orange::Engine::JsonReader::FromFile(kEditorSettingsPath);
         if (readRes.IsOk())
         {
             ReadEditorSettings(readRes.Value(), editorHost.settings);
+            ReadEditorKeybindings(readRes.Value(), editorHost.keybindings);
             std::fprintf(stdout, "[OrangeEditor] loaded %s\n", kEditorSettingsPath);
         }
     }
@@ -656,10 +658,12 @@ int main()
     // 针上 push。
     Orange::Engine::Log::ClearLogSink();
 
-    // v0.8 EditorSettings 持久化：进程退出前写盘。失败仅 log，不阻断 shutdown。
+    // v0.8 EditorSettings + EditorKeybindings 持久化：进程退出前写盘。失败
+    // 仅 log，不阻断 shutdown。
     {
         Orange::Engine::JsonWriter w;
         WriteEditorSettings(w, editorHost.settings);
+        WriteEditorKeybindings(w, editorHost.keybindings);
         auto saveRes = w.SaveToFile(kEditorSettingsPath);
         if (saveRes.IsErr())
         {

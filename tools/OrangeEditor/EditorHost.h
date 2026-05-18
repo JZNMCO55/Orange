@@ -43,6 +43,7 @@
 #include "context/EditorAssetContext.h"
 #include "context/EditorCameraState.h"
 #include "context/EditorGizmoState.h"
+#include "context/EditorKeybindings.h"
 #include "context/EditorSceneContext.h"
 #include "context/EditorSelection.h"
 #include "context/EditorSettings.h"
@@ -62,6 +63,7 @@ struct EditorHost
     EditorCameraState  camera;
     EditorGizmoState   gizmo;
     EditorSettings     settings;
+    EditorKeybindings  keybindings;
 
     // 命令栈是编辑器全局单例：所有 mutate 走它产生 / Undo / Redo。
     // 值成员（非 unique_ptr）—— 没有跨 host 共享需求，少一层间接 + 免
