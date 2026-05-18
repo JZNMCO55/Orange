@@ -7,9 +7,12 @@
 // 采样结果 = 0 自然退化为 direct-only；后续 dummy 替换为真实烘焙产物
 // （BRDF LUT / irradiance / prefiltered specular），shader 一行不改。
 //
-// 当前阶段：baseColor / metallic / roughness / ao 在 shader 内 hardcoded
-// 为 vec3(0.8) / 0.0 / 0.5 / 1.0 —— 后续抬进 MaterialInstance 五通道时
-// frag 这一段会从 push constant / UBO 读。
+// PBR 材质五通道：baseColor / metallic / roughness / ao 由 MaterialInstance
+// 的 uBaseColor + uMRA 两条 vec4 uniform 驱动，经 vert push constant 透传
+// 进 vBaseColor / vMRA varying；normal 通道暂走 vNormal vertex 插值，等
+// tangent + 法线贴图基础设施落地后再上 texture 路径。texture binding（基
+// 础色 / MR / AO / 法线贴图）整体延后到 per-instance descriptor set 路径
+// 上线时一并接通。
 //
 // 数学约定（参 vendor/Orange-Wiki §microfacet-theory §fresnel-reflectance）：
 //   D_GGX  = α² / (π · (NoH² · (α² - 1) + 1)²)
@@ -46,6 +49,8 @@ layout(set = 0, binding = 4) uniform sampler2D   uBrdfLut;          // BRDF spli
 layout(location = 0) in vec2 vUV;
 layout(location = 1) in vec3 vWorldPos;
 layout(location = 2) in vec3 vNormal;
+layout(location = 3) in vec4 vBaseColor;
+layout(location = 4) in vec4 vMRA;
 
 layout(location = 0) out vec4 outColor;
 
@@ -88,14 +93,15 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 
 void main()
 {
-    // ---- PBR 材质参数（当前 hardcoded；后续切到 MaterialInstance 五通道）
-    const vec3  baseColor = vec3(0.8);
-    const float metallic  = 0.0;
-    const float roughness = 0.5;
-    const float ao        = 1.0;
+    // ---- PBR 材质参数（per-instance，来自 MaterialInstance 的 uBaseColor /
+    //      uMRA override，经 vert push constant 透传成 varying）
+    vec3  baseColor = vBaseColor.rgb;
+    float metallic  = clamp(vMRA.x, 0.0, 1.0);
+    float roughness = clamp(vMRA.y, 0.04, 1.0);  // 下限避开 D_GGX α→0 奇异
+    float ao        = clamp(vMRA.z, 0.0, 1.0);
 
     // α = roughness²（Disney convention，感知线性）
-    float alpha = max(roughness * roughness, 1e-3);
+    float alpha = roughness * roughness;
 
     // F0：非金属 ≈ 0.04（典型介电），金属 = baseColor（金属"吸收"非反射）
     vec3 F0 = mix(vec3(0.04), baseColor, metallic);

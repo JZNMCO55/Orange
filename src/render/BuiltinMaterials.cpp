@@ -209,18 +209,31 @@ Material LoadPbr(Asset::AssetRegistry& registry)
     Material desc;
     desc.name = "pbr";
 
-    // push constant 与 toon / rim_light 同款 {uMVP, uModel} = 128 B；五通道
-    // 材质参数（baseColor / metallic / roughness / normal / AO）暂在 pbr.
-    // frag.glsl 内 hardcoded，后续抬进 MaterialInstance 时本 schema + frag
-    // 端 hardcoded 一并切换，避免现在先声明 uniforms 而 shader 仍按
-    // hardcoded 走的 "schema 与默认值漂移"。
+    // push constant 在 toon / rim_light 的 {uMVP, uModel} 128 B 基础上扩两
+    // 条 vec4：uBaseColor + uMRA = 32 B，总 160 B，仍在所有桌面级 GPU 的
+    // maxPushConstantsSize（普遍 256 B）以内。fragment 端材质参数（baseColor /
+    // metallic / roughness / ao）由 vert 读 push constant 后透传 varying；
+    // 待 OrangeRender PushConstantRange 支持 multi-stage 或 per-instance
+    // material UBO 上线后，本 transport 路径可改成 frag stage 直接读 push
+    // constant 或 set 1 UBO。
+    //
+    // uMRA 字段约定：.x = metallic，.y = roughness，.z = ao，.w 预留（normal
+    // map scale 或 emissive intensity 等延后通道）。
+    //
+    // 默认值（MaterialInstance 不覆盖时 Pipeline pack 路径喂入）：
+    //   * uBaseColor = (0.8, 0.8, 0.8, 1.0)  —— 中性灰塑料
+    //   * uMRA       = (0.0, 0.5, 1.0, 0.0)  —— 非金属、中等粗糙、AO 满
     //
     // textureSlots 留空：set 0 binding 2/3/4 的 IBL 三纹理由 Pipeline 全局
     // 注入（per-frame，dummy 或真实），不走 per-instance MaterialInstance
-    // 路径——它们与 EnvironmentComponent 生命周期同步。
+    // 路径——它们与 EnvironmentComponent 生命周期同步。baseColor / MR /
+    // AO / normal 贴图绑定整体延后到 per-instance descriptor set 基础设施
+    // 上线时一并接通。
     desc.uniforms = {
-        {"uMVP",   MaterialUniformType::Mat4},
-        {"uModel", MaterialUniformType::Mat4},
+        {"uMVP",       MaterialUniformType::Mat4},
+        {"uModel",     MaterialUniformType::Mat4},
+        {"uBaseColor", MaterialUniformType::Vec4},
+        {"uMRA",       MaterialUniformType::Vec4},
     };
     desc.textureSlots = {};
 

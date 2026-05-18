@@ -2171,12 +2171,47 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
         }
 
         // push constant 按 Material.uniforms 推算的尺寸打包。
-        //   * 64 B → uMVP 单独（textured）；
-        //   * 128 B → uMVP + uModel（toon / rim_light）。
+        //   *  64 B → uMVP 单独（textured-only schema，已被 fallback 切走，
+        //              保留兼容外部 sample 自定义 schema）
+        //   * 128 B → uMVP + uModel（toon / rim_light / dissolve / emissive /
+        //              内置 textured 实际 schema）
+        //   * 160 B → uMVP + uModel + uBaseColor + uMRA（pbr）
         // 其他尺寸为半残 schema，按 64 B 处理。
         const glm::mat4 mvp = viewProj * drawable.worldMatrix;
         const std::uint32_t pcSize = ComputePushConstantSize(*mat);
-        if (pcSize >= 128)
+        if (pcSize >= 160)
+        {
+            // PBR 路径：MaterialInstance 的 uBaseColor / uMRA override 优先；
+            // 缺省时 fallback 到 PBR 中性默认（与 BuiltinMaterials::LoadPbr
+            // 注释一致：灰塑料 + 非金属 + 中等粗糙 + AO 满）。
+            struct PushPbr {
+                glm::mat4 mvp;
+                glm::mat4 model;
+                glm::vec4 baseColor;
+                glm::vec4 mra;
+            };
+            PushPbr data{};
+            data.mvp       = mvp;
+            data.model     = drawable.worldMatrix;
+            data.baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+            data.mra       = glm::vec4(0.0f, 0.5f, 1.0f, 0.0f);
+            if (drawable.materialInstance != nullptr)
+            {
+                if (auto over = drawable.materialInstance->GetUniformVec4("uBaseColor"))
+                {
+                    data.baseColor = *over;
+                }
+                if (auto over = drawable.materialInstance->GetUniformVec4("uMRA"))
+                {
+                    data.mra = *over;
+                }
+            }
+            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                 /*offset=*/0,
+                                 /*size=*/sizeof(PushPbr),
+                                 &data);
+        }
+        else if (pcSize >= 128)
         {
             struct PushMvpModel { glm::mat4 mvp; glm::mat4 model; };
             PushMvpModel data{};
