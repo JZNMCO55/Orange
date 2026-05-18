@@ -264,9 +264,13 @@
 
 详细字段：companion §Task PBR-07。9 球阵 + IBL 环境 + 1 directional light + furnace test（验能量守恒）。Critical Path。
 
-**当前状态**：sample 文件 + Pipeline::BakeIblFromWorld 代码已落地（c8 commit cf75126），但 `14_pbr_ibl.exe --furnace` 在第一次 Render 采样 baked IBL 时 segfault（exit 139）。二分定位排除 baker 生命周期 / 两套 transition API / UpdateDescriptorSet imageLayout 等本仓内可能性；怀疑 OrangeRender 端 cross cmd-list 同步或 `Storage | Sampled` 双 usage cube view sampling driver 边角问题。已登记 OrangeRender bug：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-baked-ibl-cube-sampling-segfault；按 CLAUDE.md 单 session 双向操作禁令，修复留另开 session 在 OrangeRender 仓 deep debug。**Task 不标 ✅ 直到 sample runs。**
+**当前状态**（2026-05-19，OR fix 消费后）：sample segfault 真因（OR `mPipelineCache` cache lifecycle dangling raw pointer，c12 锁定）已由 OR 端 commit `5715a9d` 落地修复 + commit `4eec1bf` 归档；本仓 vendor submodule bump 到 `4eec1bf` 后 sample 完整跑通 init + frame loop。但视觉验收暴露 2 个**新的 OE 端 follow-up 缺口**：
+- `docs/engine-known-gaps.md` GAP-2026-05-19-pbr-ibl-specular-quality —— PBR + IBL specular split-sum 路径在 high roughness 段能量损失（furnace 9 球远非"近似全白"，顶行右几乎纯黑）+ 中 roughness 段 prefiltered 采样伪影；direct GGX 路径（13_pbr_direct）无此症状，问题锁定 IBL 路径
+- `docs/engine-known-gaps.md` GAP-2026-05-19-editor-environment-component-wiring —— 编辑器 Environment Inspector schema ✅，但 Cubemap 字段无 drop/picker 实现 + Intensity 拖动 viewport 无响应（Pipeline 不 query World runtime EnvironmentComponent，runtime IBL 切换已 deferred 到 v0.8 编辑器伴随 milestone）
 
-> **Phase 6.5 完工 ritual（部分）**（2026-05-18）：B.1 全部 ✅（Task 06.5-01 / 02 / 03）；B.2 代码段全 ✅（Task 06.5-04 / 05 / 06）但 Task 06.5-07 sample 视觉验收因 segfault 不达 "sample runs" 标准，**暂不 ✅**。B.1 / B.2 acceptance-checklist 落 `docs/acceptance/phase-6.5-B.{1,2}-acceptance-checklist.md`（B.2 末段记已知 bug）；v0.8 编辑器伴随 milestone 立项推到 sample crash 修复 + 06.5-07 ✅ 后。
+按 milestone-end-checklist 红线（渲染正确性 + 验收口径未达），**Task 不标 ✅**。视觉验收 6 项实测见 `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md` "OR pipeline cache fix 落地 + 视觉验收（2026-05-19）" 段。
+
+> **Phase 6.5 完工 ritual（持续推进中）**：B.1 全部 ✅（Task 06.5-01 / 02 / 03）；B.2 代码段全 ✅（Task 06.5-04 / 05 / 06）；**Task 06.5-07 sample segfault 真因已解决（OR 端 fix 落地 + 本仓消费 OK），但视觉验收暴露 2 个新 OE 端 GAP 阻塞** ✅。前置 fix 路径：(1) GAP-2026-05-19-pbr-ibl-specular-quality 落地 → 核心功能 1/2 视觉验收通过 (2) GAP-2026-05-19-editor-environment-component-wiring 落地 → 核心功能 3 视觉验收通过。两 GAP 落地后才标 Task 06.5-07 ✅ + Phase 6.5 整体 ✅；v0.8 编辑器伴随 milestone 同等待 Phase 6.5 ✅ 后立项。
 
 ---
 

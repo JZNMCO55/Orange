@@ -42,77 +42,48 @@
 - [ ] **资产缺失 graceful**：删除 `assets/environments/default_outdoor.hdr` 后跑 `14_pbr_ibl.exe`，控制台 print warn 但**仍能渲染**（视觉等价 13_pbr_direct，金属球反射黑）
 - [ ] **lint baseline 全绿**：`python scripts/check_invariants.py` + `python scripts/check_claude_md_drift.py` 各自退出码 0
 
-## 已知 bug · sample 14_pbr_ibl baked IBL 接通路径 segfault（2026-05-18 抓到 + 续二分）
+## OR pipeline cache fix 落地 + 视觉验收（2026-05-19）
 
-**现象**：`build/bin/Debug/14_pbr_ibl.exe --furnace` 启动后崩在第一次 Render，exit code 139（segfault）。默认模式（无 `assets/environments/default_outdoor.hdr` 时走 dummy IBL fallback）能正常跑——所以**只有真实 baked IBL 接通路径**触发崩溃；推测真实 HDR 路径同款症状（未测）。
+c10/c11/c12 三轮调查的 "已知 bug · sample 14_pbr_ibl baked IBL 接通路径 segfault" 段已删除（OR 端 commit `5715a9d` fix 落地 + commit `4eec1bf` 归档；详细调查方法学留 `vendor/OrangeRender/docs/incoming_bugs.md` "处理记录" 段 + memory `[[project-furnace-segfault-status]]`）。本节记录 OR fix 消费后的视觉验收实测结果。
 
-**首轮二分（c10 ritual 期间）**：
+### 步骤复盘
 
-- ✅ crash **不**在 `Pipeline::BakeIblFromWorld` 内部（烘焙日志 "三件套烘焙完成" 出来了）
-- ✅ crash **不**在 baker 生命周期 / 子资源 view 析构（不调 SetIblTextures 后烘焙跑完不崩）
-- ✅ 1×1 与 16×8 furnace equirect 均崩 —— 不是 size 边角 case
-- ✅ 只接 baked irradiance（compute path 烘焙）单项也崩 —— 不是 prefilter graphics pass 子资源 view 特有
-- ✅ 两套 transition API（`ResourceState::ShaderResource` / `TextureLayout::ShaderReadOnly`）最终都映到 `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`，barrier 设置正确
-- ✅ OrangeRender `UpdateDescriptorSet` 的 `imageLayout` 字段写 `SHADER_READ_ONLY_OPTIMAL`，与 image 实际 layout 一致
-- ❌ Pipeline 端 explicit re-transition baked image 同 layout 无效
+1. vendor/OrangeRender submodule bump 到 commit `4eec1bf`（含 cache lifecycle fix）
+2. 撞 build incremental 陷阱：OR 端 `.lib` mtime > OE 端 `.exe` mtime 时 MSBuild 跳过 re-link（incremental check 错位），需删 .exe 强制 full link 才真的链接新符号；记入 [[reference-msvc-incremental-link-mtime-trap]]（待沉淀）
+3. OR 端 `cmake --build vendor/OrangeRender/build --config Debug` + `cmake --install` 装到 `D:/3rdparty/install/`；OE 端删 `build/bin/Debug/*.exe` + `cmake --build` 强制 re-link
+4. furnace smoke test 3 连跑 exit 124（GNU timeout SIGTERM 正常 kill）+ 9 行完整 init log → cache lifecycle fix 真生效，"baker 析构 → 第一帧 PBR pipeline segfault" 路径消失
 
-**OrangeRender 端首轮评审（commit `0f9ea4c`）**：T1 ctest 等价路径（compute-imageCube-write → ShaderResource → samplerCube 采样）**未复现** → bug 根因不在 OrangeRender 端 cube + Sampled|Storage 路径；交付 T3 LogSink 公共 API（`Orange::SetLogSink` / `LogCategory::Validation`），让消费方继续二分。
+### 视觉验收 6 项实测
 
-**OrangeEngine 端续二分（本 session 2026-05-18 续接）**：
+| # | 验收项 | 结果 | 备注 |
+|---|--------|------|------|
+| 核心 1 | HDR 默认模式 | **部分 ✅** | 3×3 暖橙球阵 ✅ + 顶行左 metallic=1 r=0.1 清晰反映 HDR 环境 ✅ + 漫反射阴影填充 ✅；中 roughness 段密集白方块**采样伪影** ✗；顶行右 metallic=1 r=0.9 **偏暗** ✗ |
+| 核心 2 | furnace 能量守恒 | **✗ fail** | 9 球阵远非"近似全白"——顶行右几乎纯黑、中行中灰 = 严重能量损失；底行漫反射球接近白 ✅（irradiance 路径正常） |
+| 核心 3 | 编辑器 Environment | **部分 ✅** | schema 注册 + 3 字段显示 ✅；Cubemap 字段拖拽 / picker 无反应 ✗；Intensity 拖动 viewport 无响应 ✗ |
+| 大节点 1 | 13_pbr_direct 回归 | ✅ | 9 球阵漂亮，dummy IBL fallback 退化正确 |
+| 大节点 2 | 资产缺失 graceful | ✅ | 不崩 + 视觉等价 13_pbr_direct |
+| 大节点 3 | lint baseline | ✅ | `check_invariants.py` 7 grandfathered / drift none detected |
+| 额外 | 退出 crash | **已知 OR bug** | `BUG-2026-05-18-vma-shutdown-allocation-leak-assertion`（incoming_bugs.md 未处理段顶部）—— 登记时优先级 low + 预言"等 cache fix 落地后会成为首选可见症状"，应验 |
 
-LogSink 接通：在 `src/render/Pipeline.cpp::Initialize` 头部注册 `OrangeRenderLogAdapter`，把 `Orange::Log*` 的所有输出（含 Validation 类别）转入本仓 `ORANGE_LOG_*`。结果——**Vulkan validation layer 完全沉默**，确认非 layout/descriptor/usage 校验失败，是驱动层 segfault。
+### 关键 diagnostic 信号
 
-ISO 二分矩阵（在 `IblBaker::BakePrefilteredEnvironment` 的 `CreateTexture(cubeDesc)` 出口立即 return，跳过 6×9=54 subview/DescriptorPool/cmd 渲染全套）：
+13_pbr_direct（不接 IBL，dummy 1×1 黑 cubemap fallback）9 球阵 r=0.9 金属球橙色 dim 但**不纯黑**（GGX wide highlight + albedo），14_pbr_ibl furnace 同位置几乎纯黑 → **direct GGX BRDF 数学正确，所有异常都集中在 IBL specular split-sum 路径**。后续修 bug 应聚焦 BRDF LUT split-sum 第二项 / prefiltered specular 烘焙 / multi-scatter compensation，**不是** GGX 本身。
 
-| 测试 | cube usage | mipLevels | first-frame CreateGraphicsPipeline 结果 |
-|---|---|---|---|
-| ISO-F | `Sampled\|RenderTarget\|TransferSrc` | 9 | **崩** |
-| ISO-G | `Sampled\|RenderTarget\|TransferSrc` | 1 | **崩** |
-| ISO-H | `Sampled\|TransferSrc` | 1 | ✅ 跑通 22861 帧 |
-| ISO-I | `Sampled\|TransferSrc` | 9 | **崩** |
+### 后续 follow-up（不在本期范围）
 
-**精确根因**（c11 当下结论，已被 c12 推翻 ⚠️）：`CreateTexture(TexCube + (RenderTarget OR mipLevels>1))` 两条路径任一即触发 OrangeRender 端 device 状态破坏；**之后任何** `CreateGraphicsPipeline` 段错误。Crash 表面在 `Pipeline::Render` 内 PBR template pipeline 首次编译时 —— 但 root cause 在更早的 prefiltered cube 创建路径。
+| 缺口 | 登记位置 |
+|------|---------|
+| PBR + IBL specular 质量缺陷（能量损失 + 采样伪影） | `docs/engine-known-gaps.md` GAP-2026-05-19-pbr-ibl-specular-quality |
+| 编辑器 Environment wiring 缺口（AssetRef drop / picker + Pipeline runtime query） | `docs/engine-known-gaps.md` GAP-2026-05-19-editor-environment-component-wiring |
+| sample 退出 VMA leak assert / segfault | 本 session 实测真实路径撞（不只是 ctest harness）→ 按 OR commit `0210909` 分支判断升**中**优先级；**OE 端**先二分 `Pipeline::Impl` 析构顺序（怀疑方向 2，最可能在 OE 端 cube IBL 三件套 / dummy IBL 三件套 / mainDescSet 在 VkDevice 销毁前未 reset）；OE 确认在 OE 后自家 fix，确认在 OR 才回 OR `.T1/.T2`。条目：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-vma-shutdown-allocation-leak-assertion |
 
-**登记位置**：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-cube-rt-or-multimip-poisons-device（接续 BUG-2026-05-18-baked-ibl-cube-sampling-segfault，是其下游精确化）
+### Task 06.5-07 ✅ 路径
 
-**c11 → c12 评审走偏复盘**：上述"精确根因"是**假设伪装成事实**——ISO-F/G/I 崩 vs ISO-H 跑通的二分结果是事实，"CreateTexture(cube + RT/mip>1) 污染 device" 是从二分结果推出的**假设**。报告方写报告时未明确"症状 vs 假设"分离，OR 端按假设拆 .T1/.T2/.T3 三方向（cube + RT/mip 路径单独 ctest 复现失败 → 假设伪）+ confirm A' 证伪 vkCmdDraw UB 假设，归档后 OE 端**真因仍未解**。c12 推翻该假设并锁定真实根因（见下）。
+按 `docs/milestone-end-checklist.md` 红线（渲染正确性问题 / 验收口径未达不能 ✅），**Task 06.5-07 仍不标 ✅**。前置条件：
 
-### c12 续二分（本 session 2026-05-18）—— 真因锁定
-
-**新增工具**：
-- `cmake/CompilerOptions.cmake` 加 `ORANGE_ENGINE_WITH_ASAN` option（MSVC `/fsanitize=address` + `_DISABLE_VECTOR_ANNOTATION=1` 让 ABI 与 OR 预编译 .lib 兼容）
-- `build-asan/` 独立 build dir 跑 ASan 14_pbr_ibl
-- `VK_LAYER_LUNARG_api_dump` layer dump 完整 Vulkan API call 序列（baseline / ASan 两条路径各一份）
-- `Pipeline.cpp::CreateOrGetTemplatePipeline` 临时加 dump（A/B/C/D 锚点 + desc 字段）二分崩点位置后已撤回
-
-**症状（事实层）**：
-1. baseline 14_pbr_ibl --furnace 在第一帧 PBR template pipeline 创建时 segfault (0xC0000005 = ACCESS_VIOLATION)
-2. **ASan build 跑 14_pbr_ibl --furnace 完整启动 → baker 三件套烘焙完成 → frame loop 稳定跑 11s CPU 700MB RSS 无任何 warning** → 排除典型 UAF / heap-OOB / double-free / leak（这些 ASan 必抓）
-3. baseline 与 ASan build 在 Pipeline.cpp:709 调用 CreateGraphicsPipeline 前的 desc 字段**完全一致**：shaderStages=2, vertexBindings=1, vertexAttrs=3, descSetLayouts=1, colorFormats=1, depthFormat=14 (D32Float), pushRanges=1 (Vertex/0/160B); 各 raw pointer non-null
-4. baseline api_dump 末尾最后一条 Vulkan call: `vkCreateGraphicsPipelines` → **VK_SUCCESS** —— GPU pipeline 编译**成功**
-5. 加细粒度 dump 后 baseline 输出顺序：`A: before CreateGraphicsPipeline` 打出来，`B: after CreateGraphicsPipeline` **没打** → 崩点在 OR `VulkanDevice::CreateGraphicsPipeline` 函数体内（vkCreateGraphicsPipelines VK_SUCCESS 后的 post-create 段）
-
-**证据链（fact-derived）**：
-1. OR `VulkanDevice::CreateGraphicsPipeline` (vendor/OrangeRender/src/backend/vulkan/VulkanDevice.cpp:609-638)：line 611 `mPipelineCache.find(desc)` + line 636 `mPipelineCache.emplace(desc, holder)` —— **cache 持有 desc 整体副本**
-2. `mPipelineCache` 类型：`unordered_map<GraphicsPipelineDesc, shared_ptr<VulkanPipelineHandle>, GraphicsPipelineDescHash, GraphicsPipelineDescEq>`
-3. OR `VulkanDedup.cpp::ResolveHandle` (line 79-83) + `HashSetLayouts` (85-93) + `EqSetLayouts` (95-103)：hash 和 equal 函数读 `desc.mDescriptorSetLayouts[i]` 时调 `ResolveHandle(p)` → `static_cast<VulkanDescriptorSetLayout*>(p)->GetHandle()` —— **deref raw RHIDescriptorSetLayout 指针**
-4. OE `IblBaker::BakePrefilteredEnvironment` (src/render/IblBaker.cpp:812-1021)：唯一**创建 graphics pipeline** 的 baker 路径（其余 3 条 compute）。`desc.mDescriptorSetLayouts` 内含 `baker.Impl::prefilterLayout` 的 raw pointer → 进 mPipelineCache emplace 后留下 desc 副本
-5. `Pipeline::BakeIblFromWorld` 函数返回时 baker 局部变量析构 → `baker.Impl::prefilterLayout` (unique_ptr<RHIDescriptorSetLayout>) 释放 → **mPipelineCache 内 desc 副本中的 raw pointer 变 dangling**
-6. 第一帧 PBR `CreateGraphicsPipeline` → `mPipelineCache.find/emplace` 触发遍历 / rehash → `HashSetLayouts(baker entry)` / `EqSetLayouts(baker entry, PBR desc)` → `ResolveHandle(dangling)` → **deref freed memory → segfault**
-
-**根因（假设，未补充验证；交 OR 端 fix 时附实验提案）**：
-**OR `mPipelineCache` cache lifecycle bug**——cache 持有 desc 副本含 raw `RHIDescriptorSetLayout*` / `RHIShaderModule*`，cache 寿命与 caller-owned 对象生命周期解耦，调用方不必维持 raw pointer 等寿至 cache lifetime；hash/equal deref 这些 raw pointer 时若调用方对象已析构 → dangling deref → segfault。
-
-**ASan 不抓的原因**：OR 是预编译 .lib（D:/3rdparty/install），编译时**不带 ASan instrumentation**。OE 端 free 的 memory 被 ASan 标 poisoned，但 OR 端 read 不通过 ASan check（instrumentation 是编译时插桩）。ASan allocator 的 quarantine 还推迟 reuse → OR 端 read 拿到旧的"valid-looking" handle → 不崩。这套 deduction 完美解释 ASan / baseline 行为差异，并间接确认 dangling deref 假设。
-
-**登记位置（新）**：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-pipeline-cache-dangling-desc-raw-pointer（本 session 追加；接续 BUG-2026-05-18-cube-rt-or-multimip-poisons-device 的下游精确化 / 推翻其 ISO 假设）
-
-**修复回归路径**：OR 端 fix cache lifecycle（候选方向：(a) cache key 用 `VkDescriptorSetLayout` / `VkShaderModule` 原生 handle 而非 raw RHI* 指针；(b) cache value 持 shared_ptr<RHIDescriptorSetLayout> 把生命周期接管过来；(c) cache 用纯 hash 不 deep compare —— OR 端自行选）+ tag + bump vendor 后，撤本"已知 bug"段，跑本文件顶部"核心功能 1 / 2"验收。
-
-**OrangeEngine 端保留**：
-- LogSink adapter 桥接（`OrangeRenderLogAdapter`，Pipeline.cpp:299-327 + Initialize/Shutdown 注册点）—— 未来撞 OR 端 validation 时复用
-- `ORANGE_ENGINE_WITH_ASAN` cmake option —— 未来类 Heisenbug 调查复用
-- BakeIblFromWorld / IblBaker 代码恢复到 c8 落地状态（不加 workaround，按双向纪律等 OR 端 fix）
+1. GAP-2026-05-19-pbr-ibl-specular-quality 落地（OE 端独立 session）→ 重跑核心功能 2 视觉验收（furnace 9 球近似全白）+ 核心功能 1 (HDR 中 r 无伪影 + 高 r 不偏暗)
+2. GAP-2026-05-19-editor-environment-component-wiring 落地（OE 端独立 session）→ 重跑核心功能 3 视觉验收（Cubemap 绑定 + Intensity / Tint 拖动 viewport 跟随）
+3. （可选）OR `BUG-2026-05-18-vma-shutdown-allocation-leak-assertion` fix —— 不阻塞 Task 06.5-07 ✅（不影响渲染正确性，但影响 graceful exit；优先级 OR 端 low）
 
 ## 已知简化范围（不验收）
 

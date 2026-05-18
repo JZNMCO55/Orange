@@ -967,6 +967,127 @@ G1 ~ G5 一次性落地，无 commit 拆分（GAP 体量适中，单 commit 边�
 
 ---
 
+## GAP-2026-05-19-pbr-ibl-specular-quality
+
+- **发现方**：Phase 6.5 / Task 06.5-07 sample `14_pbr_ibl` 视觉验收（消费 OrangeRender `BUG-2026-05-18-pipeline-cache-dangling-desc-raw-pointer` fix 后首次能完整跑通 IBL pipeline）
+- **发现日期**：2026-05-19
+- **一句话定性**：PBR + IBL 路径在 high roughness 段 single-scatter 能量损失（furnace test 远非"近似全白"），且中等 roughness 段 prefiltered specular 出现密集白色方块采样伪影；direct GGX 路径（13_pbr_direct）**无此症状** → 问题定位在 IBL specular split-sum 路径，与 GGX BRDF 数学本身无关
+- **状态**：登记，未开工
+
+### 触发场景
+
+OrangeRender pipeline cache lifecycle fix 落地（commit `5715a9d`） + 本仓 vendor bump + sample `14_pbr_ibl` 完整跑通后视觉验收：
+
+- `14_pbr_ibl.exe --furnace`（全白 1×1 RGBA32F equirect + 关掉 direct 光，纯 IBL 驱动）
+- `14_pbr_ibl.exe`（真 HDR `assets/environments/default_outdoor.hdr` 1024×512 outdoor）
+- 对照 `13_pbr_direct.exe`（不接 IBL，dummy 1×1 黑 cubemap fallback）
+
+### 现象（症状层）
+
+**furnace 模式**（acceptance-checklist 核心功能 2 验收）：
+
+- 9 球阵远非 "近似全白"：
+  - 顶行 metallic=1：左 roughness=0.1 中灰 / 中 roughness=0.5 中灰偏暗 / 右 roughness=0.9 **几乎纯黑**
+  - 中行 metallic=0.5：三球均中灰约 0.5 强度
+  - 底行 metallic=0：三球接近白色 ✅（漫反射 IBL irradiance cubemap 路径正常）
+- 验收口径定义（pbr-ibl-milestone §Task PBR-05 / RISK-5）：「全白 IBL + 任意 PBR 材质应输出近似全白；不平衡的 BRDF 会偏暗 / 偏亮」—— 实测严重偏暗 = 验收 fail
+
+**HDR 默认模式**（acceptance-checklist 核心功能 1 验收）：
+
+- 顶行右 metallic=1 roughness=0.9 金属球 **橙色 dim 偏暗**（同 furnace fail root cause）
+- 中行 metallic=0.5 三球反射出现 **密集白色小方块斑点**（独立于能量损失的另一类伪影）
+- 底行 metallic=0 完全无斑点（→ irradiance cubemap 32×32×6 卷积路径平滑正常）
+
+**13_pbr_direct 对照**（大节点回归 1）：
+
+- 9 球阵无任何上述异常；顶行右 r=0.9 球橙色 dim 但**不纯黑**（GGX wide highlight + albedo 显现）
+- 关键 diagnostic 信号：direct GGX BRDF 数学正确，**所有异常都集中在 IBL specular split-sum 路径**
+
+### 嫌疑（按概率）
+
+| 嫌疑 | 说明 | 验证手段 |
+|------|------|---------|
+| (a) single-scatter GGX 经典能量损失 | high roughness 段 GGX masking-shadowing 损失 single bounce 能量；Filament/UE/Unity 标准解法 multi-scatter compensation (Kulla-Conty / E_LUT)；本 milestone scope 只列 "Cook-Torrance + GGX + Schlick + Smith" = single-scatter 实现，没明确列 multi-scatter | 在 `pbr.frag.glsl` IBL specular 项叠加 multi-scatter 补偿项 `kS * (1 - E_ss) + E_ss * F0`（filament 简化版），看 furnace test 9 球是否全部转白 |
+| (b) BRDF LUT split-sum 第二项 `(F0 * brdfLut.x + brdfLut.y)` 实现 typo | 系数公式 / 采样数不足 / sampler 模式 / texture format | grep `pbr.frag.glsl` IBL specular 段对照 `vendor/Orange-Wiki/wiki/concepts/rendering/environment-lighting.md` split-sum 段 + 对照 Lumix `data/shaders/standard.hlsl` IBL specular 段 |
+| (c) prefiltered specular 烘焙问题 | mip 卷积 sample 数不够（采样伪影源头）/ mip 选择公式 typo `mipLevel = roughness * (mipCount - 1)` / HDR equirect→cube resample 接缝伪影 | 看 `IblBaker::BakePrefilteredEnvironment` sample 数 + mip 卷积逻辑；对照 Lumix `ibl_filter.hlsl` csPrefilter 段 |
+
+(a) 与 (c) 可能同时存在 —— (a) 解释顶行右纯黑，(c) 解释中行密集白方块。
+
+### 期望验收
+
+落 GAP 修复后重跑 acceptance-checklist：
+
+- furnace test 9 球阵 **接近全白**（顶行右 metallic=1 roughness=0.9 不再纯黑；任意球面任意位置输出 ≥ 0.85 量级）
+- HDR 默认模式中 roughness 段（中行三球）**无密集白方块伪影**
+- HDR 默认模式顶行右 metallic=1 roughness=0.9 金属球 **不再偏暗**（颜色明显比 13_pbr_direct 对照亮，体现 IBL 贡献）
+
+### 关联
+
+- `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md` 核心功能 1 / 2
+- `docs/pbr-ibl-milestone.md` §Task PBR-05 / PBR-07 / RISK-5
+- 阻塞 Task 06.5-07 ✅ + Phase 6.5 整体 ✅
+- 参考 wiki：`vendor/Orange-Wiki/wiki/concepts/rendering/environment-lighting.md` split-sum 段、`microfacet-theory.md` GGX importance sampling 段
+- 参考实现：Lumix `data/shaders/standard.hlsl` IBL specular + `data/shaders/ibl_filter.hlsl` csPrefilter（multi-scatter compensation 是否在 Lumix 已实现待 audit）
+- 调查方法学：[[feedback-cross-repo-bug-workflow]] 三段（症状 / 证据 / 假设）已应用
+
+---
+
+## GAP-2026-05-19-editor-environment-component-wiring
+
+- **发现方**：Phase 6.5 / Task 06.5-07 sample `14_pbr_ibl` 视觉验收（核心功能 3 编辑器 EnvironmentComponent Inspector 调参）
+- **发现日期**：2026-05-19
+- **一句话定性**：OrangeEditor Inspector 的 Environment 段 schema 注册 ✅，但 Cubemap (HDR) 字段无 drag-drop / picker 实现；Intensity 拖动 viewport 完全无响应（Pipeline 不 query World runtime EnvironmentComponent，只在启动期 `BakeIblFromWorld` 一次性加载）。等同于编辑器侧 "Inspector schema 通了但 wiring 半截"，acceptance-checklist 核心功能 3 中 2/3 条 fail
+- **状态**：登记，未开工
+
+### 触发场景
+
+启动 `build/bin/Debug/OrangeEditor.exe` → demo.scene 加载 → 在 Entity Tree 任选 / 新建 Entity → Add Component → Environment → Inspector 出现 Environment 段（3 字段：Cubemap (HDR) / Tint / Intensity）：
+
+- 从 Assets 浏览器拖拽 `assets/environments/default_outdoor.hdr` 到 Cubemap (HDR) 字段：**无反应**
+- 点 Cubemap (HDR) 字段右侧 🔍 picker 图标：**无反应 / 未实现 / 报错**
+- 拖动 Intensity 0 → 4：viewport **完全无变化**
+- Tint 改色：未进一步验证（Cubemap 未绑 + Intensity 不响应已构成核心功能 3 fail）
+
+### 现象（症状层）
+
+| 验收子项 | 期望 | 实测 | 状态 |
+|----------|------|------|------|
+| Inspector 出现 Environment 段含 3 字段 | 显示 Cubemap (HDR) / Tint / Intensity | 显示正确 | ✅ |
+| 拖 Intensity 0 → 4 viewport 跟随 | 整场景 IBL 贡献明暗跟随 | viewport 无任何变化 | ✗ |
+| Tint 改红 viewport 整体偏红 | IBL 贡献整体偏红 | 未测（前 2 条已 fail） | — |
+
+### 嫌疑（按层次拆）
+
+| 层次 | 嫌疑 | 影响 |
+|------|------|------|
+| (a) 编辑器 Inspector AssetRef control 缺 drag-drop target + asset type picker | AssetRef field 在 Inspector 渲染了但**没绑事件**：未实现 ImGui drag-drop accept payload + 未实现 picker dialog 列举 asset registry 中匹配类型的资产 | 用户无路径在编辑器内绑 .hdr 到任何 AssetRef 字段 |
+| (b) Pipeline 不 query World runtime EnvironmentComponent | sample `14_pbr_ibl` 走 `Pipeline::BakeIblFromWorld` 启动期一次性烘焙；Editor scene 改 EnvironmentComponent 字段后 Pipeline 没"dirty → re-bake"路径 | 即使绑上 Cubemap 拖 Intensity 也不响应 |
+| (c) acceptance-checklist 已知简化段 | 文档 line 119 明确推 "运行时 IBL 切换" 到 v0.8 编辑器伴随 milestone | (b) 已被显式 deferred；本 GAP 主要是 (a) 缺口 + 暴露 (b) 的优先级是否需要前移 |
+
+**优先级思考**：
+- (a) 是**通用编辑器缺口** —— 任何 AssetRef 字段都受影响，不限 Environment；优先级独立
+- (b) 已 deferred 到 v0.8 —— 本 GAP 不要求前移，但发现的 finding 应同步到 v0.8 立项前置条件
+
+### 期望验收
+
+落 GAP 修复后重跑 acceptance-checklist 核心功能 3：
+
+- 拖拽 `assets/environments/default_outdoor.hdr` 到 Cubemap (HDR) 字段 **成功绑定**（字段显示 path）
+- 点 🔍 picker 弹出 asset 选择对话框，能选 .hdr 资产
+- 拖动 Intensity 0 → 4，viewport IBL 贡献明暗 **实时跟随**
+- Tint 改红，viewport IBL 贡献整体偏红
+
+### 关联
+
+- `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md` 核心功能 3
+- `docs/pbr-ibl-milestone.md` §"已知简化范围" 运行时 IBL 切换 → v0.8 编辑器伴随 milestone
+- `docs/editor-roadmap.md` v0.5（当前在推）/ v0.8（编辑器伴随）
+- 阻塞 Task 06.5-07 ✅ 第 3 项验收
+- 参考实现：Lumix `vendor/LumixEngine/src/editor/asset_browser.cpp` AssetRef drag-drop + asset picker 模式；Godot `vendor/godot/editor/editor_resource_picker.cpp` 资源 picker 模式
+- (a) 是编辑器**通用缺口**，可能被其他 milestone（material AssetRef / mesh AssetRef / sound AssetRef 等）撞上同款问题；本 GAP 是首次明确登记
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-17-asset-registry-handle-to-path**（2026-05-17 落地）：发现 `AssetRegistry::PathOf<T>` 公共 API 早已存在（GAP 登记时漏看），实际只需 `MaterialFileIO::BuildDataFromInstance` 加可选 `const AssetRegistry*` 参数 + 内部消费 PathOf。详细见上文条目末尾"落地记录"节。涉及 commit：`784bf1a`。关键改动文件：`tools/OrangeEditor/MaterialFileIO.{h,cpp}` / `tests/render/MaterialFileIOTest.cpp`（TestTextureRoundTripWithRegistry）
