@@ -1,6 +1,6 @@
 # Phase 6.5 · 渲染真实感基线（PBR + IBL）milestone
 
-- **状态**：ACTIVE — 起草于 2026-05-17；6 项 review 议题已全部决议（见末尾决议记录）；已并入 `docs/roadmap.md` 作为 Phase 6.5 outline 入口，本文件作为详细 companion（与 `editor-roadmap.md` 之于 Phase 6 同款节奏）。**B.1 ✅（2026-05-18）**：Task PBR-01 / 02 / 03 全部落地（commits 753627e / edc783b / 0bc55c5 / 080ed8f / 97d4950）；OrangeRender R1/R2/R3/R4 audit 同期完成（vendor bump commit 06025ae）。**下一步开 B.2**（PBR-04 起步）
+- **状态**：ACTIVE — 起草于 2026-05-17；6 项 review 议题已全部决议（见末尾决议记录）；已并入 `docs/roadmap.md` 作为 Phase 6.5 outline 入口，本文件作为详细 companion（与 `editor-roadmap.md` 之于 Phase 6 同款节奏）。**B.1 ✅（2026-05-18）**：Task PBR-01 / 02 / 03 全部落地（commits 753627e / edc783b / 0bc55c5 / 080ed8f / 97d4950 / 4fcabe0）；OrangeRender R1/R2/R3/R4 audit 同期 ✅（vendor bump commit 06025ae）。**B.2 ACTIVE**：起步 ritual 已写入本文件 §跨仓依赖 落地状态 + §B.2 commit-plan 草稿；按 CLAUDE.md "不在 B.1 ✅ 同 session 一边推 B.2"纪律，c1 ~ c9 留新 session 按 plan 推进
 - **路线图入口**：[`docs/roadmap.md`](./roadmap.md) Phase 6.5 节
 - **参考实现**（2026-05-17 audit 确认）：Lumix `data/shaders/common.hlsli` (776 行 PBR 库：`F_Schlick` L465 / `D_GGX` L764 / V_Smith 等齐全) + `data/shaders/standard.hlsl`（monolithic PBR 主路径）+ `data/shaders/ibl_filter.hlsl`（**122 行**单文件做 BRDF LUT + irradiance + prefiltered specular 三种卷积）+ `render_module.h:267 EnvProbeInfo`（EnvironmentComponent ECS 对位）。我们方案 B 直接对标这套
 - **驱动**：编辑器 v0.6.5 完工后 retro 发现"场景观感整体偏亮、几何体塑料感强"，根因是默认 mesh shader（`textured_mesh.frag.glsl`）只是开发期校验用的"棋盘 × 阴影"，没装任何 lighting model；ACES tonemap 在链尾，但上游喂进来的不带法线响应的图，tonemap 救不回真实感
@@ -46,34 +46,76 @@
 
 **audit 启动时机已决**：**B.1 commit-1 当天**就开 OrangeRender audit session（与本仓 B.1 推进并行）。理由：audit 是独立 session 不占本仓上下文；最早开 = 最早收尾 = R 缺需求时 OrangeRender 侧 land + tag 可在 B.1 期间完成，B.2 起步零等待。
 
-### R1 · cubemap 完整 binding 链 audit
+### R1 · cubemap 完整 binding 链 audit ✅
 
 - 已知：`vendor/OrangeRender/include/orange/rhi/RHICapabilities.h` 已声明 `mTextureCubeArray` / `mMaxTextureCubeSize`
 - 未知：cubemap texture 创建（6 face upload）/ cube view / cube sampler bind 是否端到端通
 - audit 步骤：开 OrangeRender 仓 session，写最小 Vulkan test —— 创建 6×64×64 cube → 上传 → bind 到 fragment shader → 采样验证。pass 才算通
 - 若失败：登记 `FEATURE-2026-XX-cubemap-binding`
+- **落地状态**（2026-05-18，OrangeRender FEATURE-2026-05-17.T2 / T5）：`TextureViewDesc` 公共面 + `IRenderDevice::CreateTextureView` 持有型 view 接口落地；按 `(mViewDimension, mLayerCount)` 派发 `VkImageViewType`：`TexCube + 6 → CUBE`、`TexCube + >6 → CUBE_ARRAY`；T5 cube end-to-end ctest 全过。**消费入口**：`vendor/OrangeRender/docs/api_guide.md §6.10`
 
-### R2 · mipmap level-by-level upload
+### R2 · mipmap level-by-level upload ✅
 
 - IBL prefiltered specular 必需：每个 mip level 用不同 roughness 跑卷积，结果写回**指定 mip level**
 - audit：现有 `IRenderDevice::CreateTexture` / texture upload API 是否支持 `dst mip level` 参数
 - 若失败：登记 `FEATURE-2026-XX-texture-mip-write`
+- **落地状态**（2026-05-18，OrangeRender FEATURE-2026-05-17.T2 / T3）：`TextureViewDesc.BaseMipLevel / LevelCount` 字段让持有型 view 指向单 mip level；T3 子资源 view 端到端 ctest 验证 BeginRendering 可往指定 mip 写入。**消费模式**：每个 mip level 一个 `unique_ptr<RHITextureView>`，循环 dispatch GGX importance sampling 卷积 + 写对应 view
 
-### R3 · texture format R16G16F
+### R3 · texture format R16G16F ✅
 
 - BRDF LUT 是 R16G16F 2D；HDR scene color R16G16B16A16F 已用应该没问题
 - audit：R16G16F 是否在 `RHIFormat` 枚举内 + Vulkan backend 是否能创建该格式 texture
 - 若失败：登记 `FEATURE-2026-XX-rg16f-format`
+- **落地状态**（2026-05-18，OrangeRender FEATURE-2026-05-17.T1）：`TextureFormat::RG16Float → VK_FORMAT_R16G16_SFLOAT`；`FormatCoverageTest` 验证 desktop GPU SampledImage + ColorAttachment + TransferDst 三 capability 稳定
 
-### R4 ·（可能）compute shader pipeline
+### R4 · compute shader pipeline ✅
 
 - IBL prefilter / irradiance / BRDF LUT 三种烘焙：compute 路径快，graphics fullscreen pass fallback 也可接受
 - audit：`RHICompute*` 系列 API 是否完整
 - **如缺**：本 milestone 改走 graphics fallback（每个烘焙写成 fullscreen quad fragment shader），不强制提需求 —— 性能影响仅限**启动期一次性**烘焙，可接受
+- **落地状态**（2026-05-18，OrangeRender FEATURE-2026-05-17.T1 / T4）：`TextureLayout::General` + UnorderedAccess 路径就绪；T4 `StorageImageComputeTest` 端到端验过 RGBA16F storage image + 4×4 workgroup dispatch + writeonly image2D binding。**结论**：B.2 三种烘焙全走 compute 路径，graphics fallback 无需启用
 
-### audit session 落地后
+### audit session 落地后 ✅
 
 R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再开**本 milestone 的实施 session**。审视卡点是 R2 —— 真的不通就 IBL specular 完全做不了，必须先跨仓修。
+
+**实际收尾**（2026-05-18）：R1 ~ R4 全数 ✅ pass，无需 fallback，无 deferred feature。OrangeRender 侧 vendor bump 落本仓 commit `06025ae`；详细 audit 实操记录见 OrangeRender `docs/incoming_feature.md` 内 `FEATURE-2026-05-17-pbr-ibl-baking-prereqs ✅` 段。
+
+---
+
+## B.2 commit-plan 草稿（2026-05-18 起步 ritual）
+
+按 milestone-start-checklist 第 7 步在 B.2 commit-1 之前落 commit-plan，作为后续 session 推进的对照基准。**新 session 推进时严格按此 commit 序拆**，避免单 commit 跨越多 sub-task 让 PR review 失焦。
+
+| commit | task | 内容 | 体量 | 关键引用 |
+|--------|------|------|------|---------|
+| c1 | PBR-04 | `IblBaker` 类骨架（`include/orange/engine/render/IblBaker.h` 公共面 + `src/render/IblBaker.cpp` 实现）+ HDR equirect → cubemap resample 路径（compute 或 graphics fullscreen pass，所有 IBL 烘焙共用的输入预处理） | 中 | Lumix `ibl_filter.hlsl` § equirect 段；OrangeRender `api_guide.md §6.10` cube view |
+| c2 | PBR-04 | BRDF LUT 2D 256×256 RG16Float 烘焙 —— split-sum 第二项预积分，GGX importance sampling ≥1024 samples，全局共享一次性烘焙 | 中 | wiki `concepts/rendering/environment-lighting.md` § split-sum；Lumix `ibl_filter.hlsl` `csBRDFLUT` |
+| c3 | PBR-04 | Irradiance cubemap 32×32×6 RGBA16Float 烘焙 —— Lambertian 半球积分 ~512 cos-weighted samples | 中 | wiki `environment-lighting.md` § diffuse irradiance；Lumix `csIrradiance` |
+| c4 | PBR-04 | Prefiltered specular cubemap base 256×256×6 RGBA16Float + 9 mip level —— 逐 mip 用对应 roughness 跑 GGX importance sampling 卷积；mip 0 ↔ roughness 0、mip N ↔ roughness 1 | 大 | wiki `microfacet-theory.md` § GGX IS；Lumix `csPrefilter` |
+| c5 | PBR-05 | PBR shader IBL 段 binding 从全局 dummy 切真实纹理（**shader 一行不改**，仅 Pipeline 端 descriptor set 切；保留 dummy fallback 走"未挂 EnvironmentComponent"路径） | 小 | pbr-ibl-milestone §Task PBR-05 |
+| c6 | PBR-06 | `include/orange/engine/render/EnvironmentComponent.h` 公共 API + serializer + Pipeline 接入 World 全局 EnvironmentComponent | 中 | Lumix `render_module.h:267 EnvProbeInfo` |
+| c7 | PBR-06 | PolyHaven CC0 HDRI asset（1K outdoor scene）入库 `assets/environments/` + HDR equirect loader + Environment Inspector schema 同步 | 中 | feedback_milestone_acceptance_checklist_required（schema 同 commit 序列） |
+| c8 | PBR-07 | sample `14_pbr_ibl` 9 球阵 + IBL 环境 + 1 directional light + furnace test 内置开关 | 中 | pbr-ibl-milestone §Task PBR-07 |
+| c9 | PBR-07 | `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md`（≤100 行 / ≤20 项）+ roadmap 06.5-04 ~ 07 标 ✅ + B.2 完工 ritual + Phase 6.5 整体 ✅ | 小 | feedback_milestone_acceptance_checklist_concise / milestone-end-checklist |
+
+**节奏纪律**：
+
+- c1 → c4（PBR-04 全套）建议**单一 session 推完**——`IblBaker` 类四个 entry point 在同一架构下，跨 session 容易让 class 表面发散
+- c5（PBR-05）独立小 session 即可（shader 不改 + binding 切换）
+- c6 + c7（PBR-06）可同 session 也可分开
+- c8 + c9（PBR-07）建议同 session（sample 一落就直接写 checklist + 标 ✅，与 B.1 的 c2 + c3 同节奏）
+- 任何 commit 落地前**强制跑** `python scripts/check_invariants.py` —— B.1 阶段抓过一次 sample 注释含 "Phase 6.5" task reference 违规，B.2 实施期 grep regression 概率高
+
+**关键 wiki / 参考**：
+
+| 主题 | 路径 |
+|------|------|
+| split-sum + IBL specular 数学 | `vendor/Orange-Wiki/wiki/concepts/rendering/environment-lighting.md` |
+| GGX importance sampling | `vendor/Orange-Wiki/wiki/concepts/rendering/microfacet-theory.md` |
+| Lumix 单文件多 entry IBL filter | `vendor/LumixEngine/data/shaders/ibl_filter.hlsl`（122 行） |
+| Lumix EnvironmentComponent 对位 | `vendor/LumixEngine/src/renderer/render_module.h:267 EnvProbeInfo` |
+| OrangeRender cube view + IBL bake 示例 | `vendor/OrangeRender/docs/api_guide.md §6.10` |
 
 ---
 
