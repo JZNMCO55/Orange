@@ -42,6 +42,28 @@
 - [ ] **资产缺失 graceful**：删除 `assets/environments/default_outdoor.hdr` 后跑 `14_pbr_ibl.exe`，控制台 print warn 但**仍能渲染**（视觉等价 13_pbr_direct，金属球反射黑）
 - [ ] **lint baseline 全绿**：`python scripts/check_invariants.py` + `python scripts/check_claude_md_drift.py` 各自退出码 0
 
+## 已知 bug · sample 14_pbr_ibl baked IBL 接通路径 segfault（2026-05-18 抓到）
+
+**现象**：`build/bin/Debug/14_pbr_ibl.exe --furnace` 启动后崩在第一次 Render，exit code 139（segfault）。默认模式（无 `assets/environments/default_outdoor.hdr` 时走 dummy IBL fallback）能正常跑——所以**只有真实 baked IBL 接通路径**触发崩溃；推测真实 HDR 路径同款症状（未测）。
+
+**二分定位**（本仓内已排除）：
+
+- ✅ crash **不**在 `Pipeline::BakeIblFromWorld` 内部（烘焙日志 "三件套烘焙完成" 出来了）
+- ✅ crash **不**在 baker 生命周期 / 子资源 view 析构（不调 SetIblTextures 后烘焙跑完不崩）
+- ✅ 1×1 与 16×8 furnace equirect 均崩 —— 不是 size 边角 case
+- ✅ 只接 baked irradiance（compute path 烘焙）单项也崩 —— 不是 prefilter graphics pass 子资源 view 特有
+- ✅ 两套 transition API（`ResourceState::ShaderResource` / `TextureLayout::ShaderReadOnly`）最终都映到 `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`，barrier 设置正确
+- ✅ OrangeRender `UpdateDescriptorSet` 的 `imageLayout` 字段写 `SHADER_READ_ONLY_OPTIMAL`，与 image 实际 layout 一致
+- ❌ Pipeline 端 explicit re-transition baked image 同 layout 无效
+
+**怀疑根因**（待跨仓查）：
+- 跨 cmd list 边界 sync 缺失（IblBaker 内 cmd vs Pipeline offscreenCmd 是两个独立 cmd list，barrier 不 inter-cmd-list 传递）
+- OrangeRender 端 `Storage | Sampled` 双 usage cube 的 default view 在 sampling 时驱动 corner case（NVIDIA RTX 5070 Ti）
+
+**登记位置**：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-baked-ibl-cube-sampling-segfault
+
+**修复回归路径**：OrangeRender 修完 + tag + bump vendor 后，跑本节顶部"核心功能 1 / 2"验收。一旦 furnace 模式 + 真实 HDR 模式两条路径都视觉过，Task 06.5-07 才补 ✅。
+
 ## 已知简化范围（不验收）
 
 - **运行时 IBL 切换**：当前 `Pipeline::BakeIblFromWorld` 是启动期一次性触发；运行时切换 cubemap handle 后需重启 sample。完整运行时 IBL 切换路径推到 v0.8 编辑器伴随 milestone

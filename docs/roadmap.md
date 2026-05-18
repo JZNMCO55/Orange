@@ -260,11 +260,13 @@
 
 详细字段：companion §Task PBR-06。World 全局 `EnvironmentComponent`（cubemap asset + intensity + tint），**对标 Lumix `render_module.h:267 EnvProbeInfo`**。default IBL 从 **PolyHaven CC0** HDRI 站选 1K outdoor scene equirect 入库 `assets/environments/`。Critical Path。
 
-### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收 ✅
+### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收
 
 详细字段：companion §Task PBR-07。9 球阵 + IBL 环境 + 1 directional light + furnace test（验能量守恒）。Critical Path。
 
-> **Phase 6.5 完工 ritual ✅**（2026-05-18）：所有 Critical Path task 06.5-01 ~ 07 已 ✅；B.1 / B.2 acceptance-checklist 落 `docs/acceptance/phase-6.5-B.{1,2}-acceptance-checklist.md`；CLAUDE.md Phase status 段同步；v0.8 编辑器伴随 milestone（Environment 浏览 / material thumbnail / sky placeholder）拉到 `editor-roadmap.md` 立项。
+**当前状态**：sample 文件 + Pipeline::BakeIblFromWorld 代码已落地（c8 commit cf75126），但 `14_pbr_ibl.exe --furnace` 在第一次 Render 采样 baked IBL 时 segfault（exit 139）。二分定位排除 baker 生命周期 / 两套 transition API / UpdateDescriptorSet imageLayout 等本仓内可能性；怀疑 OrangeRender 端 cross cmd-list 同步或 `Storage | Sampled` 双 usage cube view sampling driver 边角问题。已登记 OrangeRender bug：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-baked-ibl-cube-sampling-segfault；按 CLAUDE.md 单 session 双向操作禁令，修复留另开 session 在 OrangeRender 仓 deep debug。**Task 不标 ✅ 直到 sample runs。**
+
+> **Phase 6.5 完工 ritual（部分）**（2026-05-18）：B.1 全部 ✅（Task 06.5-01 / 02 / 03）；B.2 代码段全 ✅（Task 06.5-04 / 05 / 06）但 Task 06.5-07 sample 视觉验收因 segfault 不达 "sample runs" 标准，**暂不 ✅**。B.1 / B.2 acceptance-checklist 落 `docs/acceptance/phase-6.5-B.{1,2}-acceptance-checklist.md`（B.2 末段记已知 bug）；v0.8 编辑器伴随 milestone 立项推到 sample crash 修复 + 06.5-07 ✅ 后。
 
 ---
 
