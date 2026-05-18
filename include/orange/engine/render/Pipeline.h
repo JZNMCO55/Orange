@@ -282,6 +282,43 @@ public:
                         Orange::Rhi::RHITexture* prefilteredCube,
                         Orange::Rhi::RHITexture* brdfLut2D) noexcept;
 
+    // 高阶 IBL 接通入口：扫 World 找首张 EnvironmentComponent，把它的
+    // `cubemap`（HDR equirect TextureAsset，RGBA32Float）上传到 GPU、用内置
+    // IblBaker 跑完三件套（irradiance cube + prefiltered specular cube +
+    // BRDF LUT 2D），再调 `SetIblTextures` 接通 PBR shader。烘焙产物由
+    // Pipeline 内部持有 unique_ptr，等寿与 Pipeline 一致；重复调用本接口会
+    // 释放上一轮产物再烘焙新的（典型用例：scene 切换 / 运行时切换 IBL 环境）。
+    //
+    // **典型用法**（sample 14_pbr_ibl）：
+    // ```
+    // pipeline.Initialize(window, assets);
+    // // ...build world, attach EnvironmentComponent...
+    // pipeline.BakeIblFromWorld(world, assets);   // 烘焙 + 接通
+    // host->PushLayer(std::make_unique<RenderLayer>(pipeline, world));
+    // ```
+    //
+    // **参数语义**：
+    //   * `world` —— 扫描的 EnTT registry 源；找到首个 EnvironmentComponent
+    //     即用，多个时取迭代器第一个（与 Pipeline LightUbo 端 EnvironmentComponent
+    //     first-found 选取节奏一致）
+    //   * `assets` —— 解析 `EnvironmentComponent.cubemap` 用的 AssetRegistry；
+    //     必须与 cubemap handle 配对（同一 registry 创建出来的 handle）
+    //
+    // **退化分支**：
+    //   * 未 Initialize → silent-ignore（与 SetIblTextures 同节奏）
+    //   * 未挂 EnvironmentComponent / cubemap handle invalid / TextureAsset
+    //     Format 非 RGBA32Float / IblBaker 任一阶段失败 → log + 调
+    //     `SetIblTextures(nullptr, nullptr, nullptr)` 回退到 dummy IBL，不
+    //     阻断 caller。这条策略让 sample / scene 即使 .hdr 资产缺失也能继续渲染
+    //
+    // **性能 / 时机**：本调用走 IblBaker 三件套（GGX importance sampling
+    // 1024 samples + 9 mip prefilter），desktop GPU ~50-200ms 一次性开销；
+    // 必须在帧外调用（两次 Render 之间 / 首帧之前），与 SetIblTextures
+    // 同款帧外契约。内部含 `RHIDevice::WaitIdle`，**不可**在 frame loop
+    // 内高频触发。
+    void BakeIblFromWorld(::Orange::Engine::World&                world,
+                          ::Orange::Engine::Asset::AssetRegistry& assets);
+
     // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
     // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material
     // 路由到一条 RHI Pipeline；同一 Material 多次出现只会编译一次。本

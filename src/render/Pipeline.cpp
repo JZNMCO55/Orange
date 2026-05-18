@@ -37,11 +37,13 @@
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/asset/MeshAsset.h"
 #include "orange/engine/asset/ShaderAsset.h"
+#include "orange/engine/asset/TextureAsset.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/platform/Window.h"
 #include "orange/engine/render/BuiltinMaterials.h"
 #include "orange/engine/render/BuiltinShadowShaders.h"
 #include "orange/engine/render/EnvironmentComponent.h"
+#include "orange/engine/render/IblBaker.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/Material.h"
 #include "orange/engine/render/MaterialInstance.h"
@@ -538,6 +540,15 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHITexture> dummyIrradianceCube;
     std::unique_ptr<Orange::Rhi::RHITexture> dummyPrefilteredCube;
     std::unique_ptr<Orange::Rhi::RHITexture> dummyBrdfLut;
+
+    // 真实 IBL 烘焙产物（BakeIblFromWorld 出口）。null 表示尚未烘焙或上一
+    // 次烘焙失败/卸 EnvironmentComponent；SetIblTextures 端按 null 退化到
+    // dummy 路径。每次 BakeIblFromWorld 重新调用会 reset 这三个 unique_ptr
+    // 再赋值，等寿与 Pipeline 一致——避免烘焙中途调用方 World 析构后 RHI
+    // 端 cube 还活着的悬挂引用。
+    std::unique_ptr<Orange::Rhi::RHITexture> bakedIrradianceCube;
+    std::unique_ptr<Orange::Rhi::RHITexture> bakedPrefilteredCube;
+    std::unique_ptr<Orange::Rhi::RHITexture> bakedBrdfLut;
 
     // -----------------------------------------------------------------
 
@@ -2062,6 +2073,239 @@ void Pipeline::SetIblTextures(Orange::Rhi::RHITexture* irradianceCube,
     writes[2].mImageInfo.mpSampler = mpImpl->hdrSampler.get();
 
     mpImpl->renderDevice->GetRhiDevice().UpdateDescriptorSet(*mpImpl->mainDescSet, writes, 3);
+}
+
+// ---------------------------------------------------------------------------
+// BakeIblFromWorld：高阶 IBL 接通入口（EnvironmentComponent → IblBaker 三件套）
+//
+// 责任划分：本接口把 c1~c7 的所有片段串起来——sample / 编辑器只需挂
+// EnvironmentComponent 然后调一次，不接触 RHITexture / IblBaker 实例。
+//
+//   World ──首个 EnvironmentComponent──> cubemap handle
+//     ──AssetRegistry::Get<TextureAsset>──> CPU byte buffer (RGBA32Float)
+//     ──CreateTexture + staging upload + Transition──> equirect RHITexture
+//     ──IblBaker.BakeEquirectToCube──> 6-face cube
+//     ├──BakeIrradiance──> irradiance cube
+//     ├──BakePrefilteredEnvironment──> 9-mip prefiltered specular cube
+//     └──BakeBrdfLut──> split-sum 2D LUT
+//   Pipeline::SetIblTextures(...) → PBR shader binding 2/3/4 切换
+//
+// 中间产物（equirect / 6-face cube）用完即析构；最终三件套以 unique_ptr
+// 落 impl.baked* —— 等寿与 Pipeline 一致，避免 IblBaker 析构后 GPU 端纹理
+// 失效。
+// ---------------------------------------------------------------------------
+void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
+                                ::Orange::Engine::Asset::AssetRegistry& assets)
+{
+    if (!mpImpl || !mpImpl->renderDevice)
+    {
+        return;  // 未 Initialize：silent-ignore（与 SetIblTextures 同节奏）
+    }
+    auto& rhi = mpImpl->renderDevice->GetRhiDevice();
+
+    // ---- 1. 扫 first-found EnvironmentComponent ----
+    auto&       reg     = world.Registry();
+    const auto  envView = reg.view<EnvironmentComponent>();
+    if (envView.empty())
+    {
+        // 无 EnvironmentComponent → 切回 dummy IBL；释放之前烘焙的产物
+        ORANGE_LOG_INFO("Pipeline::BakeIblFromWorld: 未找到 EnvironmentComponent，"
+                        "回退到 dummy IBL");
+        mpImpl->bakedIrradianceCube.reset();
+        mpImpl->bakedPrefilteredCube.reset();
+        mpImpl->bakedBrdfLut.reset();
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    const auto& env = envView.get<EnvironmentComponent>(envView.front());
+    if (!env.cubemap.IsValid())
+    {
+        ORANGE_LOG_WARN("Pipeline::BakeIblFromWorld: EnvironmentComponent.cubemap "
+                        "handle 无效，回退到 dummy IBL");
+        mpImpl->bakedIrradianceCube.reset();
+        mpImpl->bakedPrefilteredCube.reset();
+        mpImpl->bakedBrdfLut.reset();
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+
+    // ---- 2. 拿 TextureAsset + 校验格式 ----
+    const ::Orange::Engine::Asset::TextureAsset* equirectAsset =
+        assets.Get<::Orange::Engine::Asset::TextureAsset>(env.cubemap);
+    if (equirectAsset == nullptr)
+    {
+        ORANGE_LOG_WARN("Pipeline::BakeIblFromWorld: AssetRegistry::Get<TextureAsset> "
+                        "返回 nullptr（handle 失效？），回退到 dummy IBL");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    if (equirectAsset->Format() != ::Orange::Engine::Asset::TextureFormat::R32G32B32A32_Float)
+    {
+        ORANGE_LOG_WARN("Pipeline::BakeIblFromWorld: cubemap 资产格式不是 R32G32B32A32_Float "
+                        "（当前烘焙路径只接 HDR equirect float32 RGBA），回退到 dummy IBL");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    if (equirectAsset->Empty() || equirectAsset->Width() == 0 || equirectAsset->Height() == 0)
+    {
+        ORANGE_LOG_WARN("Pipeline::BakeIblFromWorld: cubemap 资产像素数据为空，"
+                        "回退到 dummy IBL");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+
+    const std::uint32_t equirectW = equirectAsset->Width();
+    const std::uint32_t equirectH = equirectAsset->Height();
+    const auto&         pixels    = equirectAsset->Pixels();
+    const std::size_t   pixelBytes = pixels.size();
+    // 防御性检查：byte buffer 大小应为 w*h*16（RGBA32Float = 16 bytes/px）
+    if (pixelBytes != static_cast<std::size_t>(equirectW)
+                    * static_cast<std::size_t>(equirectH)
+                    * ::Orange::Engine::Asset::BytesPerPixel(
+                        ::Orange::Engine::Asset::TextureFormat::R32G32B32A32_Float))
+    {
+        ORANGE_LOG_WARN("Pipeline::BakeIblFromWorld: equirect byte size {} 与 {}x{}x16 不符，"
+                        "回退到 dummy IBL", pixelBytes, equirectW, equirectH);
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+
+    // ---- 3. 创建 equirect RHITexture (Tex2D RGBA32Float) ----
+    Orange::Rhi::TextureDesc equirectDesc{};
+    equirectDesc.mWidth       = equirectW;
+    equirectDesc.mHeight      = equirectH;
+    equirectDesc.mFormat      = Orange::Rhi::TextureFormat::RGBA32Float;
+    equirectDesc.mDimension   = Orange::Rhi::TextureDimension::Tex2D;
+    equirectDesc.mArrayLayers = 1u;
+    equirectDesc.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                              | Orange::Rhi::TextureUsage::TransferDst;
+    auto equirectRhi = rhi.CreateTexture(equirectDesc);
+    if (!equirectRhi)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: CreateTexture(equirect {}x{}) 失败，"
+                         "回退到 dummy IBL", equirectW, equirectH);
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+
+    // staging buffer → equirect upload。RGBA32F 在 desktop GPU 上 1K HDRI
+    // 典型 8 MB（2048×1024×16），4K 32 MB；单次启动期分配可以接受，无须
+    // 复用 UploadContext 的 ring buffer。
+    Orange::Rhi::BufferDesc stagingDesc{};
+    stagingDesc.mSize        = pixelBytes;
+    stagingDesc.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+    stagingDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+    auto staging = rhi.CreateBuffer(stagingDesc);
+    if (!staging)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: 创建 staging buffer ({} bytes) 失败",
+                         pixelBytes);
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    {
+        void* mapped = staging->Map();
+        if (mapped == nullptr)
+        {
+            ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: staging buffer Map 失败");
+            SetIblTextures(nullptr, nullptr, nullptr);
+            return;
+        }
+        std::memcpy(mapped, pixels.data(), pixelBytes);
+        staging->Unmap();
+    }
+
+    // 一次性 transfer cmd list —— 与 dummy IBL Initialize 路径同款；
+    // offscreenCmd 此刻不在 frame loop 内，可以独立 Begin/End/Submit。
+    auto& cmd = *mpImpl->offscreenCmd;
+    if (cmd.Begin() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: cmd.Begin 失败");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    cmd.TransitionTexture(*equirectRhi,
+                          Orange::Rhi::TextureLayout::Undefined,
+                          Orange::Rhi::TextureLayout::TransferDst);
+    {
+        Orange::Rhi::BufferTextureCopyRegion r{};
+        r.mBufferOffset = 0;
+        r.mMipLevel     = 0;
+        r.mArrayLayer   = 0;
+        r.mWidth        = equirectW;
+        r.mHeight       = equirectH;
+        r.mDepth        = 1;
+        cmd.CopyBufferToTexture(*staging, *equirectRhi, r);
+    }
+    cmd.TransitionTexture(*equirectRhi,
+                          Orange::Rhi::TextureLayout::TransferDst,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    if (cmd.End() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: cmd.End 失败");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    if (rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: SubmitCommandList 失败");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    // 等 GPU 落盘后让 staging buffer 安全析构。0.x 阶段同步等待是惯例。
+    mpImpl->renderDevice->WaitIdle();
+
+    // ---- 4. IblBaker 三件套 ----
+    // BakeEquirectToCube 输入 RHITexture 必须处于 ShaderResource 状态，上面
+    // 一段 transition 已经满足。cubeFaceSize 512：与 Lumix / Filament 默认
+    // 一致，HDR scene reflection 视觉收敛足够；后续若想拉到 1024 加 Pipeline
+    // 参数即可。
+    IblBaker baker(rhi, *mpImpl->assets);
+
+    auto envCube = baker.BakeEquirectToCube(*equirectRhi, 512u);
+    if (!envCube)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: BakeEquirectToCube 失败，"
+                         "回退到 dummy IBL");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    auto irradianceCube = baker.BakeIrradiance(*envCube);
+    if (!irradianceCube)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: BakeIrradiance 失败");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    auto prefilteredCube = baker.BakePrefilteredEnvironment(*envCube);
+    if (!prefilteredCube)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: BakePrefilteredEnvironment 失败");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+    auto brdfLut = baker.BakeBrdfLut();
+    if (!brdfLut)
+    {
+        ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: BakeBrdfLut 失败");
+        SetIblTextures(nullptr, nullptr, nullptr);
+        return;
+    }
+
+    // ---- 5. 移动到 Impl + SetIblTextures 接通 PBR shader ----
+    mpImpl->bakedIrradianceCube  = std::move(irradianceCube);
+    mpImpl->bakedPrefilteredCube = std::move(prefilteredCube);
+    mpImpl->bakedBrdfLut         = std::move(brdfLut);
+    SetIblTextures(mpImpl->bakedIrradianceCube.get(),
+                   mpImpl->bakedPrefilteredCube.get(),
+                   mpImpl->bakedBrdfLut.get());
+
+    ORANGE_LOG_INFO("Pipeline::BakeIblFromWorld: IBL 三件套烘焙完成 "
+                    "(equirect {}x{} → cube 512 / irradiance 32 / prefilter 256 (9 mips) / brdfLut)",
+                    equirectW, equirectH);
+
+    // envCube / equirectRhi / baker 在 scope 结束自动析构（中间产物，三件套
+    // 不再依赖它们）。
 }
 
 void Pipeline::SetFrameTime(float seconds) noexcept
