@@ -15,8 +15,8 @@
 // `BakeEquirectToCube` 就承担这一步——后续 irradiance / prefilter 把它
 // 的输出作为各自卷积路径的源。
 //
-// **当前阶段**：仅暴露 `BakeEquirectToCube`。irradiance / prefilter /
-// BRDF LUT 三个 entry point 在后续 commit 增量引入；公共面按需扩，避
+// **当前阶段**：暴露 `BakeEquirectToCube` + `BakeBrdfLut`。irradiance /
+// prefilter 两个 entry point 在后续 commit 增量引入；公共面按需扩，避
 // 免一次性暴露半成品 API（与 PBR-04 commit-plan 的 c1 → c4 节奏对齐）。
 //
 // 设计参考：
@@ -97,6 +97,26 @@ public:
     std::unique_ptr<Orange::Rhi::RHITexture>
     BakeEquirectToCube(Orange::Rhi::RHITexture& equirectHdr,
                        std::uint32_t            cubeFaceSize);
+
+    // 烘焙 split-sum 第二项预积分 BRDF LUT —— 2D R16G16F 纹理，(scale, bias)
+    // 两通道、索引 (NoV, roughness)。全局共享一次性烘焙（与具体 environment
+    // 无关，所有 EnvironmentComponent 共用同一份 LUT）。
+    //
+    // 参数约束：
+    //   * `lutSize`：每边像素数，必须 ≥ 8 且为 8 的倍数；典型 256（与
+    //     Filament / UE / glTF reference renderer 一致）。
+    //   * `sampleCount`：GGX importance sampling 样本数；典型 1024（收敛足
+    //     够、~64ms 一次性 GPU 开销可接受）。低于 128 视觉上 LUT 表面会出
+    //     现 banding；这里不做下限强制，调用方自行权衡。
+    //
+    // 输出：
+    //   * 新 2D 纹理，`mFormat == RG16Float`，`mUsage == Sampled | Storage |
+    //     TransferSrc`；返回时已 transition 到 `ShaderResource` 状态。
+    //   * 失败返回 `nullptr`（compute pipeline 创建失败、RG16F storage 不被
+    //     当前 GPU 支持等）。
+    std::unique_ptr<Orange::Rhi::RHITexture>
+    BakeBrdfLut(std::uint32_t lutSize     = 256u,
+                std::uint32_t sampleCount = 1024u);
 
 private:
     struct Impl;

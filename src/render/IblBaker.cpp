@@ -85,8 +85,9 @@ std::string ResolveBuiltinShaderPath(const char* relative)
 
 // ---------------------------------------------------------------------------
 // Impl —— 持有 device / registry 引用 + lazy-init 的 compute pipeline 资源。
-// 后续 commit 引入 BRDF LUT / irradiance / prefilter 时各自加一组 (layout,
-// pipeline) 字段；equirect→cube 的资源全部以 `equirect` 前缀命名。
+// 各烘焙路径按前缀分组：`equirect` / `brdfLut` / 后续 `irradiance` /
+// `prefilter`。每路径自带 shader + descriptor layout + pipeline，sampler
+// 按需复用（equirect 路径用，brdfLut 无 input texture 不需要）。
 // ---------------------------------------------------------------------------
 struct IblBaker::Impl
 {
@@ -99,10 +100,51 @@ struct IblBaker::Impl
     std::unique_ptr<Orange::Rhi::RHIPipeline>            equirectPipeline;
     std::unique_ptr<Orange::Rhi::RHISampler>             equirectSampler;
 
+    // BRDF LUT 路径（无 input texture）
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        brdfLutShader;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> brdfLutLayout;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            brdfLutPipeline;
+
     Impl(Orange::Rhi::RHIDevice& d, Orange::Engine::Asset::AssetRegistry& r)
         : device(d)
         , registry(r)
     {
+    }
+
+    // 共享 helper：把 "shaders/orange_engine/<file>" 加载为 RHIShaderModule。
+    // 走 AssetRegistry::Load<ShaderAsset> 做 dedup + Get 拿 SPIR-V bytes。
+    // 失败返回 nullptr，调用方按 unique_ptr 真伪判定。`debugName` 透传给
+    // RHI 后端（GPU capture 工具用）。
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>
+    LoadComputeShader(const char* spvRelative, const char* debugName)
+    {
+        const auto spvPath = ResolveBuiltinShaderPath(spvRelative);
+        auto spvResult = registry.Load<Orange::Engine::Asset::ShaderAsset>(spvPath);
+        if (spvResult.IsErr())
+        {
+            ORANGE_LOG_ERROR("IblBaker: 加载 {} 失败 (path={}, code={})",
+                             spvRelative, spvPath,
+                             static_cast<unsigned>(spvResult.Error()));
+            return nullptr;
+        }
+        const auto* pShaderAsset = registry.Get(spvResult.Value());
+        if (pShaderAsset == nullptr || pShaderAsset->Empty())
+        {
+            ORANGE_LOG_ERROR("IblBaker: ShaderAsset 无效或为空 (path={})", spvPath);
+            return nullptr;
+        }
+        Orange::Rhi::ShaderModuleDesc modDesc{};
+        modDesc.mpCode      = pShaderAsset->SpirV().data();
+        modDesc.mCodeSize   = pShaderAsset->ByteSize();
+        modDesc.mStage      = Orange::Rhi::ShaderStage::Compute;
+        modDesc.mpDebugName = debugName;
+        auto module = device.CreateShaderModule(modDesc);
+        if (!module)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateShaderModule 失败 (path={})", spvPath);
+            return nullptr;
+        }
+        return module;
     }
 
     // 首次进入 BakeEquirectToCube 时调用；幂等。失败返回 false。
@@ -113,33 +155,11 @@ struct IblBaker::Impl
             return true;
         }
 
-        // ---- 1. 加载 SPIR-V ----
-        const auto spvPath = ResolveBuiltinShaderPath(
-            "shaders/orange_engine/ibl_equirect_to_cube.comp.spv");
-        auto spvResult = registry.Load<Orange::Engine::Asset::ShaderAsset>(spvPath);
-        if (spvResult.IsErr())
-        {
-            ORANGE_LOG_ERROR("IblBaker: 加载 ibl_equirect_to_cube.comp.spv 失败 "
-                             "(path={}, code={})",
-                             spvPath, static_cast<unsigned>(spvResult.Error()));
-            return false;
-        }
-        const auto* pShaderAsset = registry.Get(spvResult.Value());
-        if (pShaderAsset == nullptr || pShaderAsset->Empty())
-        {
-            ORANGE_LOG_ERROR("IblBaker: ShaderAsset 无效或为空 (path={})", spvPath);
-            return false;
-        }
-
-        Orange::Rhi::ShaderModuleDesc modDesc{};
-        modDesc.mpCode      = pShaderAsset->SpirV().data();
-        modDesc.mCodeSize   = pShaderAsset->ByteSize();
-        modDesc.mStage      = Orange::Rhi::ShaderStage::Compute;
-        modDesc.mpDebugName = "IblBaker/EquirectToCube";
-        equirectShader = device.CreateShaderModule(modDesc);
+        equirectShader = LoadComputeShader(
+            "shaders/orange_engine/ibl_equirect_to_cube.comp.spv",
+            "IblBaker/EquirectToCube");
         if (!equirectShader)
         {
-            ORANGE_LOG_ERROR("IblBaker: CreateShaderModule(equirect→cube) 失败");
             return false;
         }
 
@@ -189,6 +209,56 @@ struct IblBaker::Impl
         if (!equirectSampler)
         {
             ORANGE_LOG_ERROR("IblBaker: CreateSampler(equirect) 失败");
+            return false;
+        }
+
+        return true;
+    }
+
+    // 首次进入 BakeBrdfLut 时调用；幂等。失败返回 false。
+    // BRDF LUT 与 environment 无关（仅依赖 NoV / roughness），没有 input
+    // texture，所以 descriptor layout 只有 1 个 binding = StorageImage。
+    bool EnsureBrdfLutPipeline()
+    {
+        if (brdfLutPipeline)
+        {
+            return true;
+        }
+
+        brdfLutShader = LoadComputeShader(
+            "shaders/orange_engine/ibl_brdf_lut.comp.spv",
+            "IblBaker/BrdfLut");
+        if (!brdfLutShader)
+        {
+            return false;
+        }
+
+        Orange::Rhi::DescriptorSetLayoutDesc layoutDesc{};
+        layoutDesc.mBindings = {
+            { 0u, Orange::Rhi::DescriptorType::StorageImage, 1u,
+              Orange::Rhi::ShaderStage::Compute },
+        };
+        layoutDesc.mpDebugName = "IblBaker/BrdfLut/Layout";
+        brdfLutLayout = device.CreateDescriptorSetLayout(layoutDesc);
+        if (!brdfLutLayout)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateDescriptorSetLayout(brdfLut) 失败");
+            return false;
+        }
+
+        // push constant：uLutSize + uSampleCount = 2 × uint32 = 8 B。
+        Orange::Rhi::ComputePipelineDesc pipeDesc{};
+        pipeDesc.mComputeShader.mStage      = Orange::Rhi::ShaderStage::Compute;
+        pipeDesc.mComputeShader.mpModule    = brdfLutShader.get();
+        pipeDesc.mComputeShader.mEntryPoint = "main";
+        pipeDesc.mDescriptorSetLayouts.push_back(brdfLutLayout.get());
+        pipeDesc.mPushConstantRanges.push_back(
+            { Orange::Rhi::ShaderStage::Compute, 0u, 2u * sizeof(std::uint32_t) });
+        pipeDesc.mpDebugName = "IblBaker/BrdfLut/Pipeline";
+        brdfLutPipeline = device.CreateComputePipeline(pipeDesc);
+        if (!brdfLutPipeline)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateComputePipeline(brdfLut) 失败");
             return false;
         }
 
@@ -326,6 +396,124 @@ IblBaker::BakeEquirectToCube(Orange::Rhi::RHITexture& equirectHdr,
     device.WaitIdle();
 
     return cubeTex;
+}
+
+std::unique_ptr<Orange::Rhi::RHITexture>
+IblBaker::BakeBrdfLut(std::uint32_t lutSize, std::uint32_t sampleCount)
+{
+    // ---- 参数校验 ----
+    if (lutSize < 8u || (lutSize % 8u) != 0u)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: lutSize 必须 ≥ 8 且为 8 的倍数 (got={})",
+                         lutSize);
+        return nullptr;
+    }
+    if (sampleCount == 0u)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: sampleCount 必须 > 0");
+        return nullptr;
+    }
+
+    if (!mpImpl->EnsureBrdfLutPipeline())
+    {
+        return nullptr;
+    }
+    auto& device = mpImpl->device;
+
+    // ---- 创建 RG16F 2D LUT ----
+    // RG16Float 在 OrangeRender FormatCoverageTest 验过 Sampled / ColorAttachment
+    // / TransferDst 三项；StorageImage 能力当前没显式验证，desktop GPU 事实
+    // 全支持。撞上不支持的驱动应 fallback 到 graphics fullscreen 路径（写到
+    // ColorAttachment）—— c2 阶段先按主路径走，撞到再 engine-known-gaps 登记。
+    Orange::Rhi::TextureDesc lutDesc{};
+    lutDesc.mWidth       = lutSize;
+    lutDesc.mHeight      = lutSize;
+    lutDesc.mFormat      = Orange::Rhi::TextureFormat::RG16Float;
+    lutDesc.mDimension   = Orange::Rhi::TextureDimension::Tex2D;
+    lutDesc.mArrayLayers = 1u;
+    lutDesc.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                         | Orange::Rhi::TextureUsage::Storage
+                         | Orange::Rhi::TextureUsage::TransferSrc;
+    auto lutTex = device.CreateTexture(lutDesc);
+    if (!lutTex)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: CreateTexture({}^2 RG16F) 失败", lutSize);
+        return nullptr;
+    }
+
+    // ---- per-call descriptor pool + set ----
+    Orange::Rhi::DescriptorPoolDesc poolDesc{};
+    poolDesc.mMaxSets   = 1u;
+    poolDesc.mPoolSizes = {
+        { Orange::Rhi::DescriptorType::StorageImage, 1u },
+    };
+    poolDesc.mpDebugName = "IblBaker/BrdfLut/Pool";
+    auto descPool = device.CreateDescriptorPool(poolDesc);
+    if (!descPool)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: CreateDescriptorPool 失败");
+        return nullptr;
+    }
+
+    auto descSet = device.AllocateDescriptorSet(*descPool, *mpImpl->brdfLutLayout);
+    if (!descSet)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: AllocateDescriptorSet 失败");
+        return nullptr;
+    }
+
+    Orange::Rhi::DescriptorWrite write{};
+    write.mBinding             = 0u;
+    write.mType                = Orange::Rhi::DescriptorType::StorageImage;
+    write.mImageInfo.mpTexture = lutTex.get();
+    device.UpdateDescriptorSet(*descSet, &write, 1u);
+
+    // ---- 一次性 command list：Transition + Dispatch + Transition ----
+    auto cmd = device.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
+    if (!cmd)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: CreateCommandList 失败");
+        return nullptr;
+    }
+    if (cmd->Begin() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: cmd.Begin 失败");
+        return nullptr;
+    }
+
+    cmd->TransitionResource(*lutTex,
+                            Orange::Rhi::ResourceState::Common,
+                            Orange::Rhi::ResourceState::UnorderedAccess);
+
+    cmd->BindComputePipeline(*mpImpl->brdfLutPipeline);
+    cmd->SetDescriptorSet(0u, *descSet);
+
+    // push constant block layout 与 GLSL 端 PushConstants { uLutSize; uSampleCount; } 一致
+    const std::uint32_t pcData[2] = { lutSize, sampleCount };
+    cmd->SetPushConstants(Orange::Rhi::ShaderStage::Compute,
+                          0u, sizeof(pcData), pcData);
+
+    const std::uint32_t groupX = lutSize / 8u;
+    const std::uint32_t groupY = lutSize / 8u;
+    cmd->Dispatch(groupX, groupY, 1u);
+
+    cmd->TransitionResource(*lutTex,
+                            Orange::Rhi::ResourceState::UnorderedAccess,
+                            Orange::Rhi::ResourceState::ShaderResource);
+
+    if (cmd->End() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: cmd.End 失败");
+        return nullptr;
+    }
+    if (device.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeBrdfLut: SubmitCommandList 失败");
+        return nullptr;
+    }
+    device.WaitIdle();
+
+    return lutTex;
 }
 
 }  // namespace Orange::Engine::Render
