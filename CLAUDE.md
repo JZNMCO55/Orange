@@ -13,7 +13,7 @@ OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games 
 The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference.
 
 - Current version: `0.1.0` (Unreleased; 0.x ABI is **not** stable)
-- Status (基准 2026-05-17)：**Phase 1 ~ 5.5 全 ✅**（design-plan.md Task 级历史），现处 **Phase 6** —— OrangeEditor 工具链 **+ Phase 6.5 · 渲染真实感基线（PBR + IBL）已立项，待 B.1 commit-1 启动**。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 已 ✅；下一里程碑 **v0.5 Asset 浏览器 + Material 子模式**，见 `docs/editor-roadmap.md` 与 `docs/decisions/ADR-001`）。Phase 6.5 详细 milestone 设计见 `docs/pbr-ibl-milestone.md`，路线图入口在 `docs/roadmap.md` Phase 6.5 节。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
+- Status (基准 2026-05-18)：**Phase 1 ~ 5.5 全 ✅** + **Phase 6.5 · 渲染真实感基线（PBR + IBL）✅**（roadmap.md Task 06.5-01 ~ 07 全 ✅；B.1 + B.2 acceptance-checklist 落 `docs/acceptance/`；samples 13_pbr_direct + 14_pbr_ibl 落地）。现处 **Phase 6** —— OrangeEditor 工具链。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 已 ✅；下一里程碑 **v0.5 Asset 浏览器 + Material 子模式**，见 `docs/editor-roadmap.md` 与 `docs/decisions/ADR-001`）。Phase 6.5 完工后新拉的 v0.8 编辑器伴随 milestone（Environment 浏览 / material thumbnail / sky placeholder）见 `editor-roadmap.md`。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
 - Authoritative documents (read these first):
   - `docs/design-plan.md` — Phase 1–5.5 architecture + task table（含 ✅ 进度）
   - `docs/roadmap.md` — Phase 6+ long-term roadmap（含 Phase 6.5 outline 入口）
@@ -116,10 +116,11 @@ The engine is organized **horizontally by module**, not as a vertical pyramid. S
 
 ### Phase discipline
 
-Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.md`). **Do not implement Phase N+1 features while Phase N is incomplete.** Each Phase has a demonstrable milestone (typically a `samples/` executable). Phase status（基准 2026-05-12；权威 source 是 `docs/design-plan.md` 中各 Task 的 ✅ 标记）：
+Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.md`). **Do not implement Phase N+1 features while Phase N is incomplete.** Each Phase has a demonstrable milestone (typically a `samples/` executable). Phase status（基准 2026-05-18；权威 source 是 `docs/design-plan.md` / `docs/roadmap.md` 中各 Task 的 ✅ 标记）：
 
 - **Phase 1 ~ 5.5：全部 ✅**（design-plan.md Task 级均已 ✅；`samples/01_minimal_window` ~ `samples/09_vfx_demo` 已落地）
 - **Phase 6**：进行中——OrangeEditor 工具链。OrangeEditor 自身按 semver 独立演进，详见 `docs/editor-roadmap.md`（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 ✅；下一里程碑 v0.5 Asset 浏览器 + Material 子模式）
+- **Phase 6.5 · 渲染真实感基线（PBR + IBL）：全部 ✅**（roadmap.md Task 06.5-01 ~ 07 全 ✅；samples `13_pbr_direct` + `14_pbr_ibl` 落地；B.1 / B.2 acceptance-checklist 见 `docs/acceptance/phase-6.5-B.{1,2}-acceptance-checklist.md`）
 - **Phase 7+**：未开工；前瞻路线见 `docs/roadmap.md`
 
 When working on a task, locate it in `docs/design-plan.md` Task Breakdown（Phase 1–5.5 历史 + 接口参考）、`docs/editor-roadmap.md`（Phase 6 编辑器）或 `docs/roadmap.md`（Phase 7+）. Implement only the listed outputs; reject scope creep.

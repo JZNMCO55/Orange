@@ -248,23 +248,23 @@
 
 > **B.1 完工 ritual**：跑两份 lint，标 06.5-01 / 02 / 03 ✅，确认 OrangeRender audit 收尾状态（R1/R2/R3 全 pass 或 OrangeRender 侧已 land + bump 完）后才进 B.2。
 
-### Task 06.5-04 · IBL 三种卷积烘焙（合并 BRDF LUT + irradiance + prefiltered specular）
+### Task 06.5-04 · IBL 三种卷积烘焙（合并 BRDF LUT + irradiance + prefiltered specular） ✅
 
 详细字段：companion §Task PBR-04。单一烘焙路径产出 IBL 三件套，**启动期一次性烘焙**（不走编译期 codegen——理由：IBL prefilter 必须启动期，多一条编译期路径属工程复杂度净增）。Critical Path（依赖 R2 audit pass）。
 
-### Task 06.5-05 · IBL 接入 PBR shader（替换 dummy 槽位）
+### Task 06.5-05 · IBL 接入 PBR shader（替换 dummy 槽位） ✅
 
 详细字段：companion §Task PBR-05。把 B.1 阶段 dummy 1×1 黑 IBL 纹理替换成 06.5-04 烘焙产物，**shader 一行不改**（B.1 shader 已预留 IBL 段）。Critical Path。
 
-### Task 06.5-06 · EnvironmentComponent + 资产管线
+### Task 06.5-06 · EnvironmentComponent + 资产管线 ✅
 
 详细字段：companion §Task PBR-06。World 全局 `EnvironmentComponent`（cubemap asset + intensity + tint），**对标 Lumix `render_module.h:267 EnvProbeInfo`**。default IBL 从 **PolyHaven CC0** HDRI 站选 1K outdoor scene equirect 入库 `assets/environments/`。Critical Path。
 
-### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收
+### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收 ✅
 
 详细字段：companion §Task PBR-07。9 球阵 + IBL 环境 + 1 directional light + furnace test（验能量守恒）。Critical Path。
 
-> **Phase 6.5 完工 ritual**：跑两份 lint，标 Phase 6.5 ✅，拉 v0.8 编辑器伴随 milestone 立项。
+> **Phase 6.5 完工 ritual ✅**（2026-05-18）：所有 Critical Path task 06.5-01 ~ 07 已 ✅；B.1 / B.2 acceptance-checklist 落 `docs/acceptance/phase-6.5-B.{1,2}-acceptance-checklist.md`；CLAUDE.md Phase status 段同步；v0.8 编辑器伴随 milestone（Environment 浏览 / material thumbnail / sky placeholder）拉到 `editor-roadmap.md` 立项。
 
 ---
 
