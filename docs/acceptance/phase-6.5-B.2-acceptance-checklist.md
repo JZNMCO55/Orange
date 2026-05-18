@@ -42,11 +42,11 @@
 - [ ] **资产缺失 graceful**：删除 `assets/environments/default_outdoor.hdr` 后跑 `14_pbr_ibl.exe`，控制台 print warn 但**仍能渲染**（视觉等价 13_pbr_direct，金属球反射黑）
 - [ ] **lint baseline 全绿**：`python scripts/check_invariants.py` + `python scripts/check_claude_md_drift.py` 各自退出码 0
 
-## 已知 bug · sample 14_pbr_ibl baked IBL 接通路径 segfault（2026-05-18 抓到）
+## 已知 bug · sample 14_pbr_ibl baked IBL 接通路径 segfault（2026-05-18 抓到 + 续二分）
 
 **现象**：`build/bin/Debug/14_pbr_ibl.exe --furnace` 启动后崩在第一次 Render，exit code 139（segfault）。默认模式（无 `assets/environments/default_outdoor.hdr` 时走 dummy IBL fallback）能正常跑——所以**只有真实 baked IBL 接通路径**触发崩溃；推测真实 HDR 路径同款症状（未测）。
 
-**二分定位**（本仓内已排除）：
+**首轮二分（c10 ritual 期间）**：
 
 - ✅ crash **不**在 `Pipeline::BakeIblFromWorld` 内部（烘焙日志 "三件套烘焙完成" 出来了）
 - ✅ crash **不**在 baker 生命周期 / 子资源 view 析构（不调 SetIblTextures 后烘焙跑完不崩）
@@ -56,13 +56,28 @@
 - ✅ OrangeRender `UpdateDescriptorSet` 的 `imageLayout` 字段写 `SHADER_READ_ONLY_OPTIMAL`，与 image 实际 layout 一致
 - ❌ Pipeline 端 explicit re-transition baked image 同 layout 无效
 
-**怀疑根因**（待跨仓查）：
-- 跨 cmd list 边界 sync 缺失（IblBaker 内 cmd vs Pipeline offscreenCmd 是两个独立 cmd list，barrier 不 inter-cmd-list 传递）
-- OrangeRender 端 `Storage | Sampled` 双 usage cube 的 default view 在 sampling 时驱动 corner case（NVIDIA RTX 5070 Ti）
+**OrangeRender 端首轮评审（commit `0f9ea4c`）**：T1 ctest 等价路径（compute-imageCube-write → ShaderResource → samplerCube 采样）**未复现** → bug 根因不在 OrangeRender 端 cube + Sampled|Storage 路径；交付 T3 LogSink 公共 API（`Orange::SetLogSink` / `LogCategory::Validation`），让消费方继续二分。
 
-**登记位置**：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-baked-ibl-cube-sampling-segfault
+**OrangeEngine 端续二分（本 session 2026-05-18 续接）**：
 
-**修复回归路径**：OrangeRender 修完 + tag + bump vendor 后，跑本节顶部"核心功能 1 / 2"验收。一旦 furnace 模式 + 真实 HDR 模式两条路径都视觉过，Task 06.5-07 才补 ✅。
+LogSink 接通：在 `src/render/Pipeline.cpp::Initialize` 头部注册 `OrangeRenderLogAdapter`，把 `Orange::Log*` 的所有输出（含 Validation 类别）转入本仓 `ORANGE_LOG_*`。结果——**Vulkan validation layer 完全沉默**，确认非 layout/descriptor/usage 校验失败，是驱动层 segfault。
+
+ISO 二分矩阵（在 `IblBaker::BakePrefilteredEnvironment` 的 `CreateTexture(cubeDesc)` 出口立即 return，跳过 6×9=54 subview/DescriptorPool/cmd 渲染全套）：
+
+| 测试 | cube usage | mipLevels | first-frame CreateGraphicsPipeline 结果 |
+|---|---|---|---|
+| ISO-F | `Sampled\|RenderTarget\|TransferSrc` | 9 | **崩** |
+| ISO-G | `Sampled\|RenderTarget\|TransferSrc` | 1 | **崩** |
+| ISO-H | `Sampled\|TransferSrc` | 1 | ✅ 跑通 22861 帧 |
+| ISO-I | `Sampled\|TransferSrc` | 9 | **崩** |
+
+**精确根因**：`CreateTexture(TexCube + (RenderTarget OR mipLevels>1))` 两条路径任一即触发 OrangeRender 端 device 状态破坏；**之后任何** `CreateGraphicsPipeline` 段错误。Crash 表面在 `Pipeline::Render` 内 PBR template pipeline 首次编译时 —— 但 root cause 在更早的 prefiltered cube 创建路径。
+
+**登记位置**：`vendor/OrangeRender/docs/incoming_bugs.md` BUG-2026-05-18-cube-rt-or-multimip-poisons-device（接续 BUG-2026-05-18-baked-ibl-cube-sampling-segfault，是其下游精确化）
+
+**修复回归路径**：OrangeRender 修完 cube-RT / cube-multi-mip 路径 + tag + bump vendor 后，撤本节，跑本文件顶部"核心功能 1 / 2"验收。一旦 furnace 模式 + 真实 HDR 模式两条路径都视觉过，Task 06.5-07 才补 ✅。
+
+**OrangeEngine 端**：LogSink adapter 桥接持久保留（不撤），它是未来撞 OrangeRender 端 validation / 错误时的解锁工具。所有 ISO trace 已撤；BakeIblFromWorld 内部代码恢复到 c8 落地状态。
 
 ## 已知简化范围（不验收）
 

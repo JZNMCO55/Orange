@@ -59,6 +59,7 @@
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
 
+#include "orange/core/Log.h"
 #include "orange/renderer/RenderDevice.h"
 #include "orange/renderer/Renderer.h"
 #include "orange/renderer/RenderTypes.h"
@@ -293,6 +294,36 @@ std::vector<std::uint32_t> LoadSpirv(const char* relativePath)
     file.seekg(0);
     file.read(reinterpret_cast<char*>(words.data()), size);
     return words;
+}
+
+// OrangeRender 日志桥：把 Orange::Log* 的输出（含 Validation 类别 —
+// Vulkan validation layer / debug-utils messenger 走这条）转入 OrangeEngine
+// 的 ORANGE_LOG_*。Pipeline::Initialize 在 RenderDevice::Create 之前
+// SetLogSink，Shutdown 末段 ClearLogSink。注意：validation callback 可能
+// 跨线程触发，ORANGE_LOG_* 自负线程安全（如果撞上交错就再补 mutex）。
+void OrangeRenderLogAdapter(::Orange::LogCategory category,
+                            ::Orange::LogLevel    level,
+                            const char*           pMessage,
+                            void* /*pUserData*/)
+{
+    if (pMessage == nullptr)
+    {
+        return;
+    }
+    const char* catStr   = ::Orange::ToString(category);
+    const char* levelStr = ::Orange::ToString(level);
+    switch (level)
+    {
+        case ::Orange::LogLevel::Info:
+            ORANGE_LOG_INFO("[OrangeRender][{}][{}] {}", catStr, levelStr, pMessage);
+            break;
+        case ::Orange::LogLevel::Warn:
+            ORANGE_LOG_WARN("[OrangeRender][{}][{}] {}", catStr, levelStr, pMessage);
+            break;
+        case ::Orange::LogLevel::Error:
+            ORANGE_LOG_ERROR("[OrangeRender][{}][{}] {}", catStr, levelStr, pMessage);
+            break;
+    }
 }
 
 constexpr Orange::Rhi::TextureFormat kHdrColorFormat      = Orange::Rhi::TextureFormat::RGBA16Float;
@@ -1614,6 +1645,11 @@ Result<void, ResultCode> Pipeline::Initialize(Platform::Window&         window,
     impl.assets = &assets;
     impl.window = &window;
 
+    // 把 OrangeRender 内部的 Orange::Log* 转入本仓 ORANGE_LOG_*。必须在
+    // RenderDevice::Create 之前注册，否则 Instance / Device 创建期间的
+    // validation 信息会落到 stderr 而非本仓日志流。
+    ::Orange::SetLogSink(&OrangeRenderLogAdapter, nullptr);
+
     // 1. RenderDevice ----------------------------------------------------
     Orange::Renderer::RenderDeviceDesc deviceDesc{};
     deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
@@ -1886,6 +1922,11 @@ void Pipeline::Shutdown()
     impl.hdrHeight    = 0;
     impl.hdrDirty     = true;
     impl.hdrLayoutShaderReadOnly = false;
+
+    // 与 Initialize 头部 SetLogSink 配对。放在所有 RHI 资源 reset 之后：
+    // 析构链里可能还有 OrangeRender 内部 log（DeferredDestroy / pool free
+    // 之类），不能太早断掉桥。
+    ::Orange::ClearLogSink();
 }
 
 void Pipeline::OnResize(std::uint32_t width, std::uint32_t height)
