@@ -2027,6 +2027,40 @@ void Pipeline::SetShadowConfig(const ShadowConfig& config) noexcept
     // mapResolution 切换会让 EnsureShadowMap 在下一帧重建 shadow target。
 }
 
+void Pipeline::SetIblTextures(Orange::Rhi::RHITexture* irradianceCube,
+                              Orange::Rhi::RHITexture* prefilteredCube,
+                              Orange::Rhi::RHITexture* brdfLut2D) noexcept
+{
+    if (!mpImpl || !mpImpl->renderDevice || !mpImpl->mainDescSet || !mpImpl->hdrSampler)
+    {
+        return;  // 未 Initialize 或 main desc set 尚未建好——silent-ignore
+    }
+
+    // nullptr → 回退到对应 dummy（启动期注入的 1×1 黑），与 Initialize
+    // 时 binding 2/3/4 的 dummy 注入路径完全等价。
+    Orange::Rhi::RHITexture* irrTex = irradianceCube  ? irradianceCube  : mpImpl->dummyIrradianceCube.get();
+    Orange::Rhi::RHITexture* prefTex = prefilteredCube ? prefilteredCube : mpImpl->dummyPrefilteredCube.get();
+    Orange::Rhi::RHITexture* lutTex  = brdfLut2D       ? brdfLut2D       : mpImpl->dummyBrdfLut.get();
+
+    Orange::Rhi::DescriptorWrite writes[3] = {};
+    writes[0].mBinding             = 2;
+    writes[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+    writes[0].mImageInfo.mpTexture = irrTex;
+    writes[0].mImageInfo.mpSampler = mpImpl->hdrSampler.get();
+
+    writes[1].mBinding             = 3;
+    writes[1].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+    writes[1].mImageInfo.mpTexture = prefTex;
+    writes[1].mImageInfo.mpSampler = mpImpl->hdrSampler.get();
+
+    writes[2].mBinding             = 4;
+    writes[2].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+    writes[2].mImageInfo.mpTexture = lutTex;
+    writes[2].mImageInfo.mpSampler = mpImpl->hdrSampler.get();
+
+    mpImpl->renderDevice->GetRhiDevice().UpdateDescriptorSet(*mpImpl->mainDescSet, writes, 3);
+}
+
 void Pipeline::SetFrameTime(float seconds) noexcept
 {
     if (!mpImpl)

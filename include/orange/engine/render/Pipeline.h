@@ -257,6 +257,31 @@ public:
     // 值（1024 / 3×3 PCF / 0.005 depthBias / 0.01 normalBias）。
     void SetShadowConfig(const ShadowConfig& config) noexcept;
 
+    // 切换 IBL 三纹理（替换 Initialize 时注入的全局 dummy）。典型用法：
+    // EnvironmentComponent 资产管线把 HDR 环境烘焙成 irradiance /
+    // prefiltered specular cube + 一次性烘 BRDF LUT 之后，调用本接口接通
+    // PBR shader 的 IBL 段。`pbr.frag.glsl` 的 binding 2/3/4 不变，整条
+    // dummy → 真实切换不重编 shader、不重建 pipeline。
+    //
+    // 参数语义：
+    //   * `irradianceCube` —— RGBA16F cube，per-EnvironmentComponent
+    //   * `prefilteredCube` —— RGBA16F cube 多 mip，per-EnvironmentComponent
+    //   * `brdfLut2D` —— RG16F 2D，全局共享一次性
+    //   * 任一参数为 nullptr → 该 binding 回退到对应 dummy（启动期注入
+    //     的 1×1 黑），等效该通道 IBL = 0；三参数全 nullptr 等同于把整
+    //     套 IBL 切回 dummy 状态（适用于场景卸 EnvironmentComponent）
+    //
+    // **生命周期 / 同步契约**：
+    //   * Pipeline 不取所有权；调用方负责保证 RHITexture 活到下次
+    //     SetIblTextures 切换或 Pipeline::Shutdown 之前
+    //   * 内部走 RHI `UpdateDescriptorSet`，应在帧外（两次 Render 之间或
+    //     首帧之前）调用；帧内调用可能触发 validation warning 或视觉撕裂
+    //   * 未 Initialize 时 silent-ignore（与 SetShadowConfig 同节奏，避免
+    //     调用方 forgot-init 时 crash）
+    void SetIblTextures(Orange::Rhi::RHITexture* irradianceCube,
+                        Orange::Rhi::RHITexture* prefilteredCube,
+                        Orange::Rhi::RHITexture* brdfLut2D) noexcept;
+
     // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
     // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material
     // 路由到一条 RHI Pipeline；同一 Material 多次出现只会编译一次。本
