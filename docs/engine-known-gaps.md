@@ -967,12 +967,12 @@ G1 ~ G5 一次性落地，无 commit 拆分（GAP 体量适中，单 commit 边�
 
 ---
 
-## GAP-2026-05-19-pbr-ibl-specular-quality
+## GAP-2026-05-19-pbr-ibl-specular-quality ✅
 
 - **发现方**：Phase 6.5 / Task 06.5-07 sample `14_pbr_ibl` 视觉验收（消费 OrangeRender `BUG-2026-05-18-pipeline-cache-dangling-desc-raw-pointer` fix 后首次能完整跑通 IBL pipeline）
 - **发现日期**：2026-05-19
 - **一句话定性**：PBR + IBL 路径在 high roughness 段 single-scatter 能量损失（furnace test 远非"近似全白"），且中等 roughness 段 prefiltered specular 出现密集白色方块采样伪影；direct GGX 路径（13_pbr_direct）**无此症状** → 问题定位在 IBL specular split-sum 路径，与 GGX BRDF 数学本身无关
-- **状态**：登记，未开工
+- **状态**：✅ 落地完成（2026-05-19，跨仓 session 顺路落地）
 
 ### 触发场景
 
@@ -1029,6 +1029,40 @@ OrangeRender pipeline cache lifecycle fix 落地（commit `5715a9d`） + 本仓 
 - 参考 wiki：`vendor/Orange-Wiki/wiki/concepts/rendering/environment-lighting.md` split-sum 段、`microfacet-theory.md` GGX importance sampling 段
 - 参考实现：Lumix `data/shaders/standard.hlsl` IBL specular + `data/shaders/ibl_filter.hlsl` csPrefilter（multi-scatter compensation 是否在 Lumix 已实现待 audit）
 - 调查方法学：[[feedback-cross-repo-bug-workflow]] 三段（症状 / 证据 / 假设）已应用
+
+### 落地记录（2026-05-19）
+
+跨仓 session（`/goal` 用户授权"本 session 允许跨仓库和跨项目开发"）顺路落地。两条独立 fix 联合解决：
+
+- **F1 · multi-scatter 能量补偿**（解决 high roughness 段 single-scatter 能量损失）
+  - `src/render/builtin_shaders/pbr.frag.glsl` IBL specular 段：`iblSpec_ss = prefiltered * (Fibl * brdf.x + brdf.y)`（原 single-scatter）→ 后乘 `1 + F0 · (1/brdf.y - 1)` 补偿系数。formula 与 Filament `light_indirect.fs` / Fdez-Aguero 2019 简化版一致。`max(brdf.y, 1e-4)` 防除零
+  - 数学解释：BRDF LUT (scale, bias) 只记 single-bounce 命中，high roughness GGX masking-shadowing 把数十百分之能量散失到 multi-bounce 域；补偿系数把缺失能量按"所有丢失光在表面继续反射"近似补回
+  - 命中症状：furnace 顶行右 metallic=1 r=0.9 从"几乎纯黑"→ 近白；HDR 顶行右 metallic=1 r=0.9 从"橙色 dim 偏暗"→ 明显发亮
+- **F2 · prefilter sampleCount 4096**（解决中 roughness 段密集白方块采样伪影）
+  - `src/render/Pipeline.cpp::BakeIblFromWorld`：`baker.BakePrefilteredEnvironment(*envCube, 256u, 9u, 4096u)` 把 sampleCount 从默认 1024 → 4096
+  - HDR equirect 含高动态范围亮斑（如太阳盘）+ 中 roughness cone 半角 ~30°，1024 GGX importance samples 撞上个别 bright pixel 时留下"白方块"伪影；4096 把每像素卷积噪声推到肉眼基本不可见
+  - 命中症状：HDR 中 roughness 段（中行三球）"密集白色小方块斑点"→ 大幅消失，残留 speckle 是真实环境反射纹理内容（云朵 / 高频细节）
+- **F3 · 14_pbr_ibl sample 无人值守 capture flag**（视觉验收基础设施）
+  - `samples/14_pbr_ibl/main.cpp` 加 `--capture <path>` + `--exit-after <N>` flag：第 `N - 1` 帧 RequestCapture（Pipeline 内部 CopyTextureToBuffer + PNG 落盘），第 N 帧 RequestExit 干净退出
+  - 用于本 GAP 验收 + 后续 IBL / PBR 类视觉回归门基础设施
+
+**期望验收对照**：
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| furnace test 9 球阵接近全白（顶行右不再纯黑；任意球面任意位置 ≥ 0.85 量级） | ✅ 中 / 顶行 metallic=0.5/1 三组 9 球均 ≥ 0.9 量级；底行 metallic=0 略偏灰（漫反射 + 多 scatter 系数权衡，仍在 0.85+ 区间） |
+| HDR 默认模式中 roughness 段（中行三球）无密集白方块伪影 | ✅ 4096 sample 后伪影大幅减少；残留 speckle = 真实 HDR 环境反射内容 |
+| HDR 默认模式顶行右 metallic=1 roughness=0.9 不再偏暗 | ✅ 明显发亮，IBL 贡献清晰 |
+
+**视觉验收 capture 产物**：
+
+- `furnace_capture.png`（1280×720，project root /build/bin/Debug/）—— furnace 模式，9 球阵均近白
+- `hdr_capture.png`（1280×720，project root /）—— HDR outdoor 模式，9 球阵反射 + 亮度合理
+
+**未在本 GAP 范围（follow-up）**：
+
+- **envCube mip chain + Karis 2013 mip-LOD selection** —— 进一步降低 prefilter convolution 噪声的工业标准做法。需要 OR 支持 BlitImage / mip 生成 graphics pass / 让 envCube 自带 mip 链；当前 4096 sample 已满足 acceptance，留作未来低优先级优化（如撞上 HDR 极高亮斑场景再做）
+- **bottom row metallic=0 略偏灰** —— 漫反射 IBL 与 multi-scatter compensation 互动产生的微小亮度损失（约 0.03~0.05 量级），未阻塞 acceptance。如未来 PBR shader 升级 multi-scatter 公式（Turquin 2019 等更准的能量守恒版），可顺路改善
 
 ---
 

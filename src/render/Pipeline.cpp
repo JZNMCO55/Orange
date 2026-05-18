@@ -1900,6 +1900,12 @@ void Pipeline::Shutdown()
 
     impl.builtinDefaultMaterial = Material{};
     impl.builtinDefaultLoaded   = false;
+    // baked IBL 三件套（BakeIblFromWorld 出口）必须在 renderer/ownedRenderDevice
+    // reset 之前显式释放——否则 ~Impl 在 Shutdown 返回后才析构 unique_ptr，VMA /
+    // VkDevice 已死，触发 VmaBlockMetadata 析构期 leak 断言。
+    impl.bakedBrdfLut.reset();
+    impl.bakedPrefilteredCube.reset();
+    impl.bakedIrradianceCube.reset();
     impl.dummyBrdfLut.reset();
     impl.dummyPrefilteredCube.reset();
     impl.dummyIrradianceCube.reset();
@@ -2318,7 +2324,11 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
         SetIblTextures(nullptr, nullptr, nullptr);
         return;
     }
-    auto prefilteredCube = baker.BakePrefilteredEnvironment(*envCube);
+    // sampleCount 显式 4096（IblBaker 默认 1024）。1024 samples 在 HDR equirect
+    // 含高动态范围亮斑（如太阳盘）+ 中 roughness 段（cone 半角 ~30°）撞上
+    // 个别 bright pixel 时会留下"白方块"采样伪影；4096 把每像素 GGX 卷积
+    // 噪声推到肉眼不可见量级，bake 时间是一次性启动期开销，可接受。
+    auto prefilteredCube = baker.BakePrefilteredEnvironment(*envCube, 256u, 9u, 4096u);
     if (!prefilteredCube)
     {
         ORANGE_LOG_ERROR("Pipeline::BakeIblFromWorld: BakePrefilteredEnvironment 失败");

@@ -57,7 +57,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -148,14 +150,29 @@ std::unique_ptr<TextureAsset> MakeFurnaceWhiteEquirect()
 class RenderLayer : public Layer
 {
 public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
+    RenderLayer(Pipeline& pipeline, World& world, AppHost* host = nullptr,
+                std::filesystem::path capturePath = {}, int exitAfterFrames = -1)
+        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world),
+          mpHost(host), mCapturePath(std::move(capturePath)),
+          mExitAfterFrames(exitAfterFrames)
     {
     }
 
     void OnUpdate(const FrameContext& /*frame*/) override
     {
+        // capture 模式：第 mExitAfterFrames - 1 帧请求 capture（capture 走
+        // Render 内部 Stage A 末尾 CopyTextureToBuffer + 本帧 WaitIdle 后
+        // FinalizeCapture 把 PNG 写盘），下一帧（== mExitAfterFrames）RequestExit。
+        if (!mCapturePath.empty() && mFrameIndex == mExitAfterFrames - 1)
+        {
+            mPipeline.RequestCapture(mCapturePath);
+        }
         mPipeline.Render(mWorld);
+        if (mpHost && mExitAfterFrames >= 0 && mFrameIndex >= mExitAfterFrames)
+        {
+            mpHost->RequestExit();
+        }
+        ++mFrameIndex;
     }
 
     bool OnEvent(const Platform::WindowEvent& event) override
@@ -168,8 +185,12 @@ public:
     }
 
 private:
-    Pipeline& mPipeline;
-    World&    mWorld;
+    Pipeline&             mPipeline;
+    World&                mWorld;
+    AppHost*              mpHost{nullptr};
+    std::filesystem::path mCapturePath{};
+    int                   mExitAfterFrames{-1};
+    int                   mFrameIndex{0};
 };
 
 constexpr std::array<float, 3> kMetallicSteps  = {0.0f, 0.5f, 1.0f};
@@ -187,14 +208,28 @@ constexpr std::string_view kFurnaceEnvKey  = "builtin/furnace_white_1x1";
 
 int main(int argc, char** argv)
 {
-    // 命令行参数：仅识别 --furnace；其它参数 silent ignore（与 sample 1-13 一致）
-    bool furnaceMode = false;
+    // 命令行参数：
+    //   --furnace                  white furnace test 模式
+    //   --capture <path>           第 (exit-after - 1) 帧 RequestCapture 写 PNG 落盘
+    //   --exit-after <N>           第 N 帧后 RequestExit（无人值守视觉验证）
+    //   其它参数 silent ignore（与 sample 1-13 一致）
+    bool                  furnaceMode      = false;
+    std::filesystem::path capturePath{};
+    int                   exitAfterFrames  = -1;
     for (int i = 1; i < argc; ++i)
     {
         const std::string_view arg{argv[i]};
         if (arg == "--furnace")
         {
             furnaceMode = true;
+        }
+        else if (arg == "--capture" && i + 1 < argc)
+        {
+            capturePath = std::filesystem::path{argv[++i]};
+        }
+        else if (arg == "--exit-after" && i + 1 < argc)
+        {
+            exitAfterFrames = std::atoi(argv[++i]);
         }
     }
 
@@ -388,7 +423,9 @@ int main(int argc, char** argv)
     // 内部 graceful fallback 到 dummy IBL（不会 throw / 不阻断）。
     pipeline.BakeIblFromWorld(world, assets);
 
-    host->PushLayer(std::make_unique<RenderLayer>(pipeline, world));
+    host->PushLayer(std::make_unique<RenderLayer>(pipeline, world,
+                                                  host.get(), capturePath,
+                                                  exitAfterFrames));
 
     const int rc = host->Run();
     pipeline.Shutdown();

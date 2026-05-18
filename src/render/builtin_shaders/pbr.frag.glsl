@@ -153,7 +153,14 @@ void main()
     vec3 prefiltered = textureLod(uPrefilteredEnv, R, roughness * kMaxReflectionLod).rgb;
 
     vec2  brdf       = texture(uBrdfLut, vec2(NoV, roughness)).rg;
-    vec3  iblSpec    = prefiltered * (Fibl * brdf.x + brdf.y);
+    vec3  iblSpec_ss = prefiltered * (Fibl * brdf.x + brdf.y);
+    // Multi-scatter 能量补偿（Fdez-Aguero 2019 简化 / Filament `light_indirect.fs`
+    // 同款）：single-scatter GGX 在 high roughness 段把数十百分之能量散失到
+    // multi-bounce 域，BRDF LUT 只记 single-bounce 命中——furnace test 顶行右
+    // metallic=1 roughness=0.9 几乎纯黑即此症状。补偿系数 1 + F0·(1/brdf.y - 1)
+    // 把缺失能量按 "所有丢失光在表面继续反射" 近似补回，white furnace + 任意
+    // 材质应近似输出全白。
+    vec3  iblSpec    = iblSpec_ss * (1.0 + F0 * (1.0 / max(brdf.y, 1e-4) - 1.0));
 
     // EnvironmentComponent.tint * intensity（host 端预乘成 uIblFactor.rgb）
     // 一次性作用到 diffuse + specular IBL 两项。dummy IBL 阶段
