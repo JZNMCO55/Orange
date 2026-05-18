@@ -15,9 +15,9 @@
 // `BakeEquirectToCube` 就承担这一步——后续 irradiance / prefilter 把它
 // 的输出作为各自卷积路径的源。
 //
-// **当前阶段**：暴露 `BakeEquirectToCube` + `BakeBrdfLut`。irradiance /
-// prefilter 两个 entry point 在后续 commit 增量引入；公共面按需扩，避
-// 免一次性暴露半成品 API（与 PBR-04 commit-plan 的 c1 → c4 节奏对齐）。
+// **当前阶段**：暴露 `BakeEquirectToCube` + `BakeBrdfLut` + `BakeIrradiance`。
+// prefilter entry point 在后续 commit 增量引入；公共面按需扩，避免一次
+// 性暴露半成品 API（与 PBR-04 commit-plan 的 c1 → c4 节奏对齐）。
 //
 // 设计参考：
 //   * Lumix `data/shaders/ibl_filter.hlsl` —— 单文件多 entry point 的
@@ -117,6 +117,30 @@ public:
     std::unique_ptr<Orange::Rhi::RHITexture>
     BakeBrdfLut(std::uint32_t lutSize     = 256u,
                 std::uint32_t sampleCount = 1024u);
+
+    // 烘焙 Lambertian 漫反射 IBL —— 输入环境 cubemap（c1 输出），输出
+    // 32×32×6 RGBA16Float irradiance cubemap。本函数输出**已 fold 1/π**
+    // 的形式（即 `E/π` 而非 E），与 `pbr.frag.glsl` 端 `iblDiffuse =
+    // kDibl * irradiance * baseColor`（不再除 π）约定一致；这是
+    // LearnOpenGL / glTF reference / Filament 通用做法。
+    //
+    // 参数约束：
+    //   * `envCube` 必须是 TexCube + 浮点 format + arrayLayers=6，处于
+    //     `ShaderResource` 状态；本函数不修改 input 状态。
+    //   * `cubeFaceSize`：≥ 8 且为 8 的倍数；典型 32（irradiance 是低
+    //     频信号，32 分辨率已经充分；与 LearnOpenGL / Khronos glTF
+    //     reference renderer 默认一致）。
+    //   * `sampleCount`：cos-weighted Hammersley 样本数；典型 512。低
+    //     于 128 视觉上会出现 banding；这里不做下限强制。
+    //
+    // 输出：
+    //   * RGBA16Float cubemap，`mUsage == Sampled | Storage | TransferSrc`；
+    //     返回时已 transition 到 `ShaderResource` 状态。
+    //   * 失败返回 `nullptr`。
+    std::unique_ptr<Orange::Rhi::RHITexture>
+    BakeIrradiance(Orange::Rhi::RHITexture& envCube,
+                   std::uint32_t            cubeFaceSize = 32u,
+                   std::uint32_t            sampleCount  = 512u);
 
 private:
     struct Impl;

@@ -105,6 +105,12 @@ struct IblBaker::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> brdfLutLayout;
     std::unique_ptr<Orange::Rhi::RHIPipeline>            brdfLutPipeline;
 
+    // irradiance cube 路径（input: envCube + sampler；output: irradiance cube）
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        irradianceShader;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> irradianceLayout;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            irradiancePipeline;
+    std::unique_ptr<Orange::Rhi::RHISampler>             irradianceSampler;
+
     Impl(Orange::Rhi::RHIDevice& d, Orange::Engine::Asset::AssetRegistry& r)
         : device(d)
         , registry(r)
@@ -209,6 +215,75 @@ struct IblBaker::Impl
         if (!equirectSampler)
         {
             ORANGE_LOG_ERROR("IblBaker: CreateSampler(equirect) 失败");
+            return false;
+        }
+
+        return true;
+    }
+
+    // 首次进入 BakeIrradiance 时调用；幂等。失败返回 false。
+    // descriptor layout 与 c1 equirect→cube 同款（CombinedImageSampler +
+    // StorageImage），但 sampler 全 ClampToEdge（cube sampling 不需要经度
+    // wrap）。
+    bool EnsureIrradiancePipeline()
+    {
+        if (irradiancePipeline)
+        {
+            return true;
+        }
+
+        irradianceShader = LoadComputeShader(
+            "shaders/orange_engine/ibl_irradiance.comp.spv",
+            "IblBaker/Irradiance");
+        if (!irradianceShader)
+        {
+            return false;
+        }
+
+        Orange::Rhi::DescriptorSetLayoutDesc layoutDesc{};
+        layoutDesc.mBindings = {
+            { 0u, Orange::Rhi::DescriptorType::CombinedImageSampler, 1u,
+              Orange::Rhi::ShaderStage::Compute },
+            { 1u, Orange::Rhi::DescriptorType::StorageImage, 1u,
+              Orange::Rhi::ShaderStage::Compute },
+        };
+        layoutDesc.mpDebugName = "IblBaker/Irradiance/Layout";
+        irradianceLayout = device.CreateDescriptorSetLayout(layoutDesc);
+        if (!irradianceLayout)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateDescriptorSetLayout(irradiance) 失败");
+            return false;
+        }
+
+        Orange::Rhi::ComputePipelineDesc pipeDesc{};
+        pipeDesc.mComputeShader.mStage      = Orange::Rhi::ShaderStage::Compute;
+        pipeDesc.mComputeShader.mpModule    = irradianceShader.get();
+        pipeDesc.mComputeShader.mEntryPoint = "main";
+        pipeDesc.mDescriptorSetLayouts.push_back(irradianceLayout.get());
+        pipeDesc.mPushConstantRanges.push_back(
+            { Orange::Rhi::ShaderStage::Compute, 0u, 2u * sizeof(std::uint32_t) });
+        pipeDesc.mpDebugName = "IblBaker/Irradiance/Pipeline";
+        irradiancePipeline = device.CreateComputePipeline(pipeDesc);
+        if (!irradiancePipeline)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateComputePipeline(irradiance) 失败");
+            return false;
+        }
+
+        // cube 采样：全 ClampToEdge（cube map 硬件自动处理 face 接缝，
+        // 但 sampler ClampToEdge 仍是工业惯例，避免 wrap 引入跨 face 漂移）。
+        Orange::Rhi::SamplerDesc sampDesc{};
+        sampDesc.mMinFilter   = Orange::Rhi::SamplerFilter::Linear;
+        sampDesc.mMagFilter   = Orange::Rhi::SamplerFilter::Linear;
+        sampDesc.mMipmapMode  = Orange::Rhi::SamplerMipmapMode::Linear;
+        sampDesc.mAddressU    = Orange::Rhi::SamplerAddressMode::ClampToEdge;
+        sampDesc.mAddressV    = Orange::Rhi::SamplerAddressMode::ClampToEdge;
+        sampDesc.mAddressW    = Orange::Rhi::SamplerAddressMode::ClampToEdge;
+        sampDesc.mpDebugName  = "IblBaker/CubeSampler";
+        irradianceSampler = device.CreateSampler(sampDesc);
+        if (!irradianceSampler)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateSampler(irradiance) 失败");
             return false;
         }
 
@@ -514,6 +589,123 @@ IblBaker::BakeBrdfLut(std::uint32_t lutSize, std::uint32_t sampleCount)
     device.WaitIdle();
 
     return lutTex;
+}
+
+std::unique_ptr<Orange::Rhi::RHITexture>
+IblBaker::BakeIrradiance(Orange::Rhi::RHITexture& envCube,
+                         std::uint32_t            cubeFaceSize,
+                         std::uint32_t            sampleCount)
+{
+    if (cubeFaceSize < 8u || (cubeFaceSize % 8u) != 0u)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: cubeFaceSize 必须 ≥ 8 且为 8 的倍数 (got={})",
+                         cubeFaceSize);
+        return nullptr;
+    }
+    if (sampleCount == 0u)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: sampleCount 必须 > 0");
+        return nullptr;
+    }
+
+    if (!mpImpl->EnsureIrradiancePipeline())
+    {
+        return nullptr;
+    }
+    auto& device = mpImpl->device;
+
+    Orange::Rhi::TextureDesc cubeDesc{};
+    cubeDesc.mWidth       = cubeFaceSize;
+    cubeDesc.mHeight      = cubeFaceSize;
+    cubeDesc.mFormat      = Orange::Rhi::TextureFormat::RGBA16Float;
+    cubeDesc.mDimension   = Orange::Rhi::TextureDimension::TexCube;
+    cubeDesc.mArrayLayers = 6u;
+    cubeDesc.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                          | Orange::Rhi::TextureUsage::Storage
+                          | Orange::Rhi::TextureUsage::TransferSrc;
+    auto irrTex = device.CreateTexture(cubeDesc);
+    if (!irrTex)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: CreateTexture({}^2 cube ×6) 失败",
+                         cubeFaceSize);
+        return nullptr;
+    }
+
+    Orange::Rhi::DescriptorPoolDesc poolDesc{};
+    poolDesc.mMaxSets   = 1u;
+    poolDesc.mPoolSizes = {
+        { Orange::Rhi::DescriptorType::CombinedImageSampler, 1u },
+        { Orange::Rhi::DescriptorType::StorageImage,         1u },
+    };
+    poolDesc.mpDebugName = "IblBaker/Irradiance/Pool";
+    auto descPool = device.CreateDescriptorPool(poolDesc);
+    if (!descPool)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: CreateDescriptorPool 失败");
+        return nullptr;
+    }
+
+    auto descSet = device.AllocateDescriptorSet(*descPool, *mpImpl->irradianceLayout);
+    if (!descSet)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: AllocateDescriptorSet 失败");
+        return nullptr;
+    }
+
+    Orange::Rhi::DescriptorWrite writes[2] = {};
+    writes[0].mBinding             = 0u;
+    writes[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+    writes[0].mImageInfo.mpTexture = &envCube;
+    writes[0].mImageInfo.mpSampler = mpImpl->irradianceSampler.get();
+    writes[1].mBinding             = 1u;
+    writes[1].mType                = Orange::Rhi::DescriptorType::StorageImage;
+    writes[1].mImageInfo.mpTexture = irrTex.get();
+    device.UpdateDescriptorSet(*descSet, writes, 2u);
+
+    auto cmd = device.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
+    if (!cmd)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: CreateCommandList 失败");
+        return nullptr;
+    }
+    if (cmd->Begin() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: cmd.Begin 失败");
+        return nullptr;
+    }
+
+    cmd->TransitionResource(*irrTex,
+                            Orange::Rhi::ResourceState::Common,
+                            Orange::Rhi::ResourceState::UnorderedAccess);
+
+    cmd->BindComputePipeline(*mpImpl->irradiancePipeline);
+    cmd->SetDescriptorSet(0u, *descSet);
+
+    const std::uint32_t pcData[2] = { cubeFaceSize, sampleCount };
+    cmd->SetPushConstants(Orange::Rhi::ShaderStage::Compute,
+                          0u, sizeof(pcData), pcData);
+
+    const std::uint32_t groupX = cubeFaceSize / 8u;
+    const std::uint32_t groupY = cubeFaceSize / 8u;
+    cmd->Dispatch(groupX, groupY, 6u);
+
+    cmd->TransitionResource(*irrTex,
+                            Orange::Rhi::ResourceState::UnorderedAccess,
+                            Orange::Rhi::ResourceState::ShaderResource);
+
+    if (cmd->End() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: cmd.End 失败");
+        return nullptr;
+    }
+    if (device.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakeIrradiance: SubmitCommandList 失败");
+        return nullptr;
+    }
+    device.WaitIdle();
+
+    return irrTex;
 }
 
 }  // namespace Orange::Engine::Render

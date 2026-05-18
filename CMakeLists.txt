@@ -295,6 +295,9 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ibl_brdf_lut.comp.glsl"
     ORANGE_ENGINE_BUILTIN_IBL_BRDF_LUT_CS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/ibl_irradiance.comp.glsl"
+    ORANGE_ENGINE_BUILTIN_IBL_IRRADIANCE_CS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
@@ -323,7 +326,8 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_PBR_VS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_IBL_BRDF_LUT_CS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_IBL_BRDF_LUT_CS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_IBL_IRRADIANCE_CS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)
