@@ -645,11 +645,12 @@ void RegisterAnimatorComponentSchema()
 // 走通（plugin 通过 schema.has + schema.get 找 component）。
 //
 // 当前**不**暴露 view / projection 字段——schema 体系没有 Mat4 PropertyType，
-// 且 ApplyEditorCameraToWorld 每帧覆写这两个矩阵让"Inspector 编辑 view"无
-// 意义。Inspector 内显示一个**空 Camera header**（只有 collapsing header，
-// 没字段；用户视角下提示"此实体有 Camera 组件"，编辑入口推到引擎补足
-// CameraDesc 后再加，见 docs/engine-known-gaps.md
-// GAP-2026-05-15-camera-editor-vs-runtime-separation）。
+// 且 Camera 的 view / projection 是矩阵形态（Camera::Perspective / lookAt
+// 生成），直接 Inspector 编辑 4×4 矩阵不友好。GAP-2026-05-15 落地后 ECS
+// Camera 数据不再被 ApplyEditorCameraToWorld 覆写，frustum gizmo 已能反
+// 映用户在构造期 / Inspector 内设置的 projection；未来引入 CameraDesc
+// {fov, aspect, near, far} 拆分后再补 Inspector 字段。Inspector 段当前
+// 仍空（只 collapsing header），不影响 frustum gizmo 视觉。
 //
 // 不 Addable / 不 Removable —— 同 Animator：Camera 的初始化路径需要 fov /
 // aspect 等参数，不适合"+Add Component 走默认构造"路径。

@@ -84,6 +84,18 @@ public:
     bool          HasCamera()  const noexcept { return mHasCamera; }
     const Camera& MainCamera() const noexcept { return mCamera; }
 
+    // 覆写 main camera（编辑器 viewport 路径用）：Collect 之后调用，把
+    // mCamera 替换成编辑器轨道相机的 view/projection；HasCamera 顺便置
+    // true。这是 GAP-2026-05-15-camera-editor-vs-runtime-separation 落地
+    // 的"engine-side EditorCameraContext"——编辑器无需再 mutate ECS 内的
+    // Render::Camera 组件，Frustum gizmo 等 plugin 读 ECS Camera 取到的
+    // 是游戏侧原始数据。
+    void OverrideMainCamera(const Camera& cam) noexcept
+    {
+        mCamera    = cam;
+        mHasCamera = true;
+    }
+
     const std::vector<Drawable>& Drawables() const noexcept { return mDrawables; }
     std::size_t                  DrawableCount() const noexcept { return mDrawables.size(); }
     bool                         Empty() const noexcept { return mDrawables.empty(); }

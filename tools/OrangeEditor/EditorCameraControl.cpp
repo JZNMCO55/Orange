@@ -91,21 +91,3 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect)
     cam.view = glm::lookAt(position, ec.pivot, glm::vec3(0.0f, 1.0f, 0.0f));
     return cam;
 }
-
-void ApplyEditorCameraToWorld(EditorHost& host, float aspect)
-{
-    if (host.scene.pWorld == nullptr)
-    {
-        return;
-    }
-    using ::Orange::Engine::Render::Camera;
-    auto& reg  = host.scene.pWorld->Registry();
-    auto  view = reg.view<Camera>();
-    if (view.empty())
-    {
-        return;
-    }
-    const auto e   = view.front();
-    auto&      cam = view.get<Camera>(e);
-    cam            = BuildEditorCamera(host.camera, aspect);
-}

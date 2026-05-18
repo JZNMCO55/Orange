@@ -8,26 +8,20 @@
 // 上画该相机的 frustum 线框（near + far rect 4 角 + 8 段连接边），帮助美
 // 术 / 关卡设计师在编辑器内判断游戏运行时相机的视野范围。
 //
-// ⚠ 当前限制（与 docs/engine-known-gaps.md
-// GAP-2026-05-15-camera-editor-vs-runtime-separation 关联）：
+// 现行实现（GAP-2026-05-15 落地后路径）：
 //
-// 引擎 `Render::Camera` 当前被 `ApplyEditorCameraToWorld` 每帧整体覆写为
-// 编辑器轨道相机的 view / projection。如果直接读 component.view /
-// component.projection 算 frustum，会得到"编辑器自己的视野"——frustum
-// 线框与 viewport 自身边框重合，对用户无信息量。
+//   * **projection** 直接来自 component.projection —— 由用户在 DemoWorld /
+//     `Camera::Perspective` 设置，反映该相机真实的 fov / aspect / near /
+//     far。Pipeline 改走 `SetEditorCameraOverride` 路径接收编辑器轨道相机，
+//     ECS 内 Camera 组件**不再被每帧覆写**，所以 component 数据可信
+//   * **view** 由 entity.Transform 推导（lookAt(position, position + rot *
+//     -Z, rot * +Y)）—— Camera 看向 -Z 是 OpenGL / GLTF / Vulkan 工业惯例。
+//     这条路径让 frustum 实时跟随用户摆位 entity，与 Unity / Lumix 同款
+//     UX 约定
 //
-// 临时方案（本 plugin 当前实现）：
-//   * **fov / aspect / near / far 用 hardcode 默认值**（45° / 16:9 / 0.1
-//     / 10.0）—— 引擎尚无 `CameraDesc { fov, aspect, near, far }` 概念
-//   * **view 由 entity.Transform 推导**（lookAt(position, position + rot
-//     * -Z, rot * +Y)）—— 绕开 component.view 被覆写的问题，让 frustum 朝
-//     向跟随 entity 摆位
-//   * 视觉上 frustum 反映 entity **位姿 + 朝向**，但不反映 component 真实
-//     fov / aspect / near / far 数值（这些是 hardcode）
-//
-// 修复路径：等 GAP-2026-05-15 落地（候选：引擎引入 CameraDesc / 编辑器
-// 引擎 viewport camera 分离 / Camera role 标签分类），plugin 切到读真实
-// 数据。代码内 TODO 注释明示。
+// 视觉：frustum 既反映 entity 摆位（Transform.position / rotation）也反映
+// 用户在 Inspector 内设置的 fov / aspect / near / far（component.projection
+// 派生）。
 
 #include "IEditorGizmoPlugin.h"
 

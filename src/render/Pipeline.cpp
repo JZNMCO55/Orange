@@ -347,6 +347,14 @@ struct Pipeline::Impl
     // 到"不按 layer 过滤"行为。
     const Scene::WorldPartition*           worldPartition{nullptr};
 
+    // 可选编辑器 viewport 相机覆写（非拥有指针），由 SetEditorCameraOverride
+    // 注入。非空时 Render() 在 RenderScene::Collect 之后把 main camera
+    // 替换为本指针指向的 Camera——ECS 内挂的 Render::Camera **不被修改**，
+    // CameraFrustumGizmoPlugin 等读 ECS Camera 的路径拿到的是用户在场景
+    // 里摆位的游戏侧相机数据。nullptr 退化到"读 ECS 首个 Camera 组件"。
+    // 详见 GAP-2026-05-15-camera-editor-vs-runtime-separation 落地记录。
+    const Camera*                          editorCameraOverride{nullptr};
+
     bool initialized{false};
 
     // window 模式 / offscreen 模式双向兼容：所有权交给 ownedRenderDevice
@@ -1980,6 +1988,14 @@ void Pipeline::SetWorldPartition(const Scene::WorldPartition* partition) noexcep
     if (mpImpl)
     {
         mpImpl->worldPartition = partition;
+    }
+}
+
+void Pipeline::SetEditorCameraOverride(const Camera* camera) noexcept
+{
+    if (mpImpl)
+    {
+        mpImpl->editorCameraOverride = camera;
     }
 }
 
@@ -3767,6 +3783,14 @@ void Pipeline::Render(Orange::Engine::World& world)
 
     impl.scene.Clear();
     impl.scene.Collect(world, impl.worldPartition);
+
+    // 编辑器 viewport 相机覆写：SetEditorCameraOverride 注入后，把 main
+    // camera 替换为编辑器轨道相机的 view/projection；ECS 内 Render::Camera
+    // 组件保持游戏侧原始数据不动。详见 GAP-2026-05-15。
+    if (impl.editorCameraOverride != nullptr)
+    {
+        impl.scene.OverrideMainCamera(*impl.editorCameraOverride);
+    }
 
     if (!impl.initialized)
     {

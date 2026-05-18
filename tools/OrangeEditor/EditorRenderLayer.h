@@ -31,6 +31,7 @@
 #include <orange/engine/app/Layer.h>
 #include <orange/engine/physics/PhysicsWorld.h>
 #include <orange/engine/platform/WindowEvent.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/VfxSystem.h>
 #include <orange/engine/scene/Entity.h>
@@ -141,6 +142,11 @@ private:
 
     // ---- Scene 面板 off-screen 渲染状态 ----------------------------------
     std::unique_ptr<Orange::Engine::Render::Pipeline> mpScenePipeline;
+    // GAP-2026-05-15 落地：编辑器轨道相机的 Camera 实例化缓存，每帧
+    // DrawScenePanel 重算后 push 给 mpScenePipeline.SetEditorCameraOverride。
+    // 必须是稳定地址（pipeline 持非拥有 const* 跨帧），所以做成 layer 成员
+    // 而不是栈局部变量。
+    Orange::Engine::Render::Camera                    mEditorCameraOverride{};
     VkSampler                                         mSceneSampler{VK_NULL_HANDLE};
     VkDescriptorSet                                   mSceneDescSet{VK_NULL_HANDLE};
     bool                                              mSceneDescSetDirty{true};

@@ -62,6 +62,7 @@ class RHITexture;
 namespace Orange::Engine::Render
 {
 
+struct Camera;
 class MaterialSystem;
 class PostProcessChain;
 class VfxSystem;
@@ -189,6 +190,25 @@ public:
     // 必须活到 Pipeline 析构 / 下次 SetWorldPartition 之前；nullptr 退
     // 化到"不按 layer 过滤"行为，与 v1.x 之前完全等价。
     void SetWorldPartition(const ::Orange::Engine::Scene::WorldPartition* partition) noexcept;
+
+    // 安装 / 卸载编辑器 viewport 相机覆写（非拥有指针）。安装后 Render()
+    // 在 RenderScene::Collect 之后把 main camera 替换为本 override 的
+    // view/projection；ECS 内挂的 Render::Camera 组件**不被修改**——
+    // CameraFrustumGizmoPlugin / 多相机调度等读 ECS Camera 的下游路径
+    // 拿到的是用户在场景里摆位的游戏侧相机数据，与编辑器轨道相机解耦。
+    //
+    // 典型用法（参 `tools/OrangeEditor/panels/ScenePanel.cpp`）：
+    //   editorCam = BuildEditorCamera(host.camera, aspect);
+    //   pipeline.SetEditorCameraOverride(&editorCam);
+    //   pipeline.Render(world);   // 用 override，不 mutate world
+    //
+    // override 必须活到 Pipeline 析构 / 下次 SetEditorCameraOverride 之
+    // 前；nullptr 退化到"读 ECS 首个 Camera 组件"行为（与 v1.x 之前完
+    // 全等价，sample / 非编辑器消费者无任何视觉差异）。
+    //
+    // 这是 GAP-2026-05-15-camera-editor-vs-runtime-separation 引擎侧落
+    // 地路径（path A，最小侵入）。
+    void SetEditorCameraOverride(const Camera* camera) noexcept;
 
     // 安装 / 卸载 VfxSystem（非拥有指针）。安装后 Render() 在主 pass 与
     // bloom 之间插一段 instanced additive billboard pass，把 VfxSystem

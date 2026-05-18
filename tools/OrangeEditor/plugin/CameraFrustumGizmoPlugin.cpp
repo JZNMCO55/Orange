@@ -5,6 +5,7 @@
 #include "../schema/ComponentSchema.h"
 #include "GizmoContext.h"
 
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
@@ -27,14 +28,6 @@ namespace
 
 namespace GM = OrangeEditor::Internal::GizmoMath;
 
-// ⚠ Hardcode 默认相机参数 —— 详见本 plugin .h 顶注释 + docs/engine-known-
-// gaps.md GAP-2026-05-15-camera-editor-vs-runtime-separation。引擎引入
-// CameraDesc 后这些常量改读 component.desc.* 字段。
-constexpr float kHardcodedFovDeg  = 45.0f;
-constexpr float kHardcodedAspect  = 16.0f / 9.0f;
-constexpr float kHardcodedNear    = 0.1f;
-constexpr float kHardcodedFar     = 10.0f;
-
 constexpr ImU32 kFrustumColor     = IM_COL32(140, 250, 240, 220);  // 浅青色（与 ParticleEmitter spawn box 同色系）
 constexpr ImU32 kFrustumNearColor = IM_COL32(180, 255, 240, 255);  // near plane 更亮（区分远近）
 
@@ -55,36 +48,33 @@ void CameraFrustumGizmoPlugin::Draw(
     const GizmoContext&                                    ctx)
 {
     (void)schema;
-    (void)component;  // ⚠ 当前不读 component 数据；详见 plugin .h 顶注释
 
     using TC = Orange::Engine::Scene::TransformComponent;
+    using Camera = Orange::Engine::Render::Camera;
 
     if (ctx.drawList == nullptr) { return; }
+    if (component == nullptr)    { return; }
     auto* pWorld = host.scene.pWorld.get();
     if (pWorld == nullptr) { return; }
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
 
+    // GAP-2026-05-15 落地后路径：ECS Camera 组件不再被编辑器轨道相机覆写
+    //（ScenePanel 改用 Pipeline::SetEditorCameraOverride），可以安全读 component
+    // 真实数据。projection 直接来自 Camera（fov / aspect / near / far 由用户在
+    // DemoWorld / Inspector 设置）；view 仍由 entity.Transform 推（让用户拖
+    // entity 时 frustum 实时跟随位置 / 朝向，与"摆位预览"的 UX 一致——参 Unity
+    // / Lumix 同款约定）。
+    const auto* pCam = static_cast<const Camera*>(component);
+    const glm::mat4& proj = pCam->projection;
+
     // ---- view: 从 entity.Transform 推 ----
     // Camera"看向 -Z"是工业惯例（OpenGL / GLTF / Vulkan 同款）。entity
-    // rotation 决定 forward / up 方向。当前 ECS Camera 的 view 是 lookAt
-    // 生成的（DemoWorld.cpp 内构造），不暴露 lookAt 参数；这里走"如果有
-    // CameraDesc 会怎么推 view"的对偶路径。
+    // rotation 决定 forward / up 方向。
     const glm::vec3 forward = pTC->rotation * glm::vec3(0.0f, 0.0f, -1.0f);
     const glm::vec3 up      = pTC->rotation * glm::vec3(0.0f, 1.0f, 0.0f);
     const glm::vec3 eye     = pTC->position;
     const glm::mat4 view    = glm::lookAt(eye, eye + forward, up);
-
-    // ---- projection: hardcode 默认参数 ----
-    // ⚠ 引擎引入 CameraDesc 后改读 component 真实字段。手写矩阵与
-    // Camera::Perspective 一致（Vulkan NDC, y-flip, z ∈ [0, 1]）。
-    const float f = 1.0f / std::tan(glm::radians(kHardcodedFovDeg) * 0.5f);
-    glm::mat4   proj(0.0f);
-    proj[0][0] = f / kHardcodedAspect;
-    proj[1][1] = -f;
-    proj[2][2] = kHardcodedFar / (kHardcodedNear - kHardcodedFar);
-    proj[2][3] = -1.0f;
-    proj[3][2] = (kHardcodedNear * kHardcodedFar) / (kHardcodedNear - kHardcodedFar);
 
     // ---- frustum 8 corners：NDC → world ----
     // Vulkan NDC: x/y ∈ [-1, 1], z = 0 (near) / 1 (far)。

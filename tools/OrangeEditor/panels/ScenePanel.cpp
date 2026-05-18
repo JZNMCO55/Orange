@@ -124,11 +124,13 @@ void EditorRenderLayer::DrawScenePanel()
 
     ImGui::Separator();
 
-    // S3：相机输入捕获 + 应用到 World Camera 组件。
+    // S3：相机输入捕获 + push 编辑器轨道相机给 Pipeline override（GAP-2026-
+    // 05-15 落地后路径——不再 mutate World ECS Camera，CameraFrustumGizmo
+    // 等读 ECS Camera 的下游路径拿到的是游戏侧原始数据）。
     const ImVec2 region = ImGui::GetContentRegionAvail();
     const float  aspect = (region.y > 0.0f) ? (region.x / region.y) : 1.0f;
     UpdateEditorCameraFromInput(mHost);
-    ApplyEditorCameraToWorld(mHost, aspect);
+    mEditorCameraOverride = BuildEditorCamera(mHost.camera, aspect);
 
     // S4：把 Scene 面板接到 Pipeline::InitializeOffscreen 上 ——
     // viewport-sized off-screen RT 渲染场景 → Interop::GetVulkanImageView
@@ -150,6 +152,7 @@ void EditorRenderLayer::DrawScenePanel()
         // pointer 非拥有，partition 与 EditorSceneContext 同生命周期，
         // 始终 valid，无需 null 检查。
         mpScenePipeline->SetWorldPartition(&mHost.scene.partition);
+        mpScenePipeline->SetEditorCameraOverride(&mEditorCameraOverride);
         // Pipeline::RenderOffscreen 内部 WaitIdle —— 本帧返回时 GPU 已
         // 空，之后 RemoveTexture(旧 descriptor) + AddTexture(新) 才安全。
         mpScenePipeline->Render(*mHost.scene.pWorld);

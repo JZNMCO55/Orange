@@ -236,11 +236,12 @@ GAP 未落地前，v0.3 c2 拆为：
 
 ---
 
-## GAP-2026-05-15-camera-editor-vs-runtime-separation
+## GAP-2026-05-15-camera-editor-vs-runtime-separation ✅
 
 - **发现方**：OrangeEditor v0.4 c5（Camera frustum gizmo）
 - **发现日期**：2026-05-15
 - **一句话定性**：引擎当前 `Render::Camera` component 同时承载"编辑器 viewport 相机"与"游戏运行时相机"两个角色，`ApplyEditorCameraToWorld` 每帧把 World 内**首个** Camera 组件的 view/projection 全量覆写为编辑器轨道相机的矩阵——这导致：编辑器内"选中游戏 Camera entity → 显示其 frustum"无法基于 component 实际数据展示（component 数据=编辑器相机视野，frustum 视觉上与 viewport 自身重合，无意义）
+- **状态**：✅ 落地完成（2026-05-19，跨仓 session）
 
 ### 触发场景
 
@@ -284,8 +285,40 @@ GAP 未落地前，c5 frustum gizmo 走**fake hardcode 默认参数**路径：
 ### 状态
 
 - **登记**：2026-05-15
-- **处理**：待评审；候选挂到 `docs/roadmap.md` Phase 7+ 或独立小 task
-- **关联**：OrangeEditor v0.4 c5 已用 fake 默认参数路径落地，等 GAP 决议后回头修正
+- **处理**：✅ 落地（2026-05-19，路径 A 引擎侧 EditorCameraContext / 最小侵入）
+
+### 落地记录（2026-05-19）
+
+按 GAP 原文路径 1（engine-side EditorCameraContext，Pipeline override）+ 路径 3（Camera Desc + Runtime 拆分）的简化版混合：不引入新的 CameraDesc 类型（避免改动序列化 + Inspector 全套），改在 Pipeline 上加一个 `SetEditorCameraOverride(const Camera*)` 入口，编辑器把轨道相机 push 进去；ECS 内 Camera 组件**完全不被覆写**，下游 plugin / 多相机 / sample 读 Camera 拿到的是游戏侧原始数据。
+
+**实际落地范围**（跨仓 session，3 文件 + 4 文件）：
+
+- **F1 引擎公共面**
+  - `include/orange/engine/render/RenderScene.h` 加 `void OverrideMainCamera(const Camera&)` —— Collect 之后被 Pipeline 调；mCamera 替换 + mHasCamera=true
+  - `include/orange/engine/render/Pipeline.h` 加 `void SetEditorCameraOverride(const Camera*)` —— 非拥有指针，nullptr 退化到原"读 ECS 首个 Camera 组件"路径；与 SetWorldPartition / SetMaterialSystem 同节奏
+  - forward decl `struct Camera;`（避免 include `Camera.h`）
+- **F2 引擎实现**
+  - `src/render/Pipeline.cpp` Impl 字段加 `const Camera* editorCameraOverride{nullptr}`；Render() 入口在 scene.Collect() 之后检查 override，非空即 OverrideMainCamera；offscreenMode 分支自然继承（共享 impl.scene）
+- **F3 编辑器侧消费方迁移**
+  - `tools/OrangeEditor/EditorRenderLayer.h` 加 `Camera mEditorCameraOverride{}` 成员（稳定地址跨帧）
+  - `tools/OrangeEditor/panels/ScenePanel.cpp::DrawScenePanel` 删 `ApplyEditorCameraToWorld(mHost, aspect)`；改 `mEditorCameraOverride = BuildEditorCamera(host.camera, aspect)` + `mpScenePipeline->SetEditorCameraOverride(&mEditorCameraOverride)`
+  - `tools/OrangeEditor/EditorCameraControl.{h,cpp}` 删 `ApplyEditorCameraToWorld` 声明 + 实现（不再被任何调用方引用）
+  - `tools/OrangeEditor/plugin/CameraFrustumGizmoPlugin.cpp` 删 hardcode fov/aspect/near/far + 改读 `component->projection` 真实矩阵；view 仍由 Transform 推（Unity / Lumix 同款 UX 约定）；plugin .h 顶注释更新去掉"hardcode 临时方案"段
+  - `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` Camera schema 注释更新（不再提"ApplyEditorCameraToWorld 覆写让 Inspector 编辑无意义"）
+
+**期望验收对照**：
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| demo scene 内 Camera entity 的 component 数据被编辑器读取时反映游戏侧设置 | ✅ ECS Camera 不再被覆写；plugin 读 `component->projection` 拿到真实矩阵 |
+| 选中该 entity → viewport 内 frustum 反映该游戏相机的视野（fov / aspect / near / far / 朝向） | ✅ projection 从 component 拿；view 由 Transform 推（UX 一致） |
+| 移动 Camera entity transform → frustum 跟着动，视觉验证摆位 | ✅ Transform.position / rotation 直接驱动 frustum 视觉 |
+| Pipeline 渲染仍由编辑器 viewport 相机驱动（编辑器内看到的画面与游戏运行时画面可不同） | ✅ Pipeline SetEditorCameraOverride 路径接收编辑器相机，渲染端走 override |
+
+**未在本 GAP 范围（已登记 / 后续）**：
+
+- **完整 CameraDesc 拆分** —— 路径 3 的完整版：把 Camera 拆 `CameraDesc { fov, aspect, near, far }` 数据 POD（可序列化、Inspector 可编辑）+ `Camera { view, projection }` 运行时缓存（每帧从 Transform + Desc 推导）。本 GAP 走的是简化版：override 解决"ECS Camera 被覆写"症状但没拆 Camera 结构。完整拆分留到 v0.8 编辑器伴随 milestone 或独立 GAP，触发条件 = Inspector 需要可编辑 fov / aspect / near / far 字段
+- **Camera role 标签 / 多 Camera 调度** —— 多相机场景（split-screen / picture-in-picture / cinematic）需要"哪个是 main" 选择语义；当前 Pipeline 仍取 first-found Camera，与 GAP 原文一致。reflection probe milestone 一起处理
 
 ---
 

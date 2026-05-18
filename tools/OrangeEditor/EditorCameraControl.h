@@ -7,9 +7,8 @@
 //     radius；
 //   * BuildEditorCamera(EditorCameraState, aspect) —— 由球坐标构造 Camera
 //     组件值（Perspective + lookAt pivot）；aspect ≤ 0 退化到 1 避免投影
-//     矩阵奇异；
-//   * ApplyEditorCameraToWorld(EditorHost&, aspect) —— 把 BuildEditorCamera
-//     结果写到 World 里首个 Camera 组件上；找不到 no-op。
+//     矩阵奇异；结果由调用方 push 给 `Pipeline::SetEditorCameraOverride`
+//     （GAP-2026-05-15 落地后路径——ECS 内 Camera 组件不再被覆写）。
 //
 // 控制约定（与 UpdateEditorCameraFromInput 内的输入捕获保持一致）：
 //   * 鼠标左键拖动（hover Scene 面板时按下） —— 轨道旋转 azimuth / elevation
@@ -31,7 +30,5 @@ void UpdateEditorCameraFromInput(EditorHost& host);
 
 Orange::Engine::Render::Camera
 BuildEditorCamera(const EditorCameraState& ec, float aspect);
-
-void ApplyEditorCameraToWorld(EditorHost& host, float aspect);
 
 #endif  // ORANGE_EDITOR_EDITOR_CAMERA_CONTROL_H
