@@ -331,6 +331,21 @@ void EditorRenderLayer::DrawInspectorPanel()
     }
 
     const Orange::Engine::Entity e = mHost.selection.selectedEntity;
+
+    // v0.8 多选 Inspector：primary 仍正常显示，additional 集合非空时上方
+    // 加 banner 提示 "N entities selected"。当前 schema-first 渲染路径
+    // 还未支持"异构多选 → 共有属性"模式，仅做选区指示 + 用户提示。完整
+    // multi-edit（共有属性写到所有选中 entity）留作 v0.8 patch / v0.9 拓展。
+    const std::size_t selCount = mHost.selection.SelectedCount();
+    if (selCount > 1)
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f),
+                           "%zu entities selected (showing primary)",
+                           selCount);
+        ImGui::TextDisabled("[ Multi-edit not yet wired; click single entity to edit ]");
+        ImGui::Separator();
+    }
+
     ImGui::Text("Entity #%u",
                 static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
     ImGui::Separator();

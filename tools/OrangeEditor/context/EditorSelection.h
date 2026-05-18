@@ -23,11 +23,61 @@
 
 #include <glm/vec3.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <vector>
 
 struct EditorSelection
 {
     Orange::Engine::Entity selectedEntity = Orange::Engine::Entity::Invalid();
+
+    // v0.8 多选实体：除 selectedEntity（primary）外的其它选中 entity 集合。
+    // Ctrl-click 在 EntityTree 内 toggle 添加 / 移除。Shift-click 范围选择
+    // 在 v0.8 范围外（需要 tree 节点扁平化排序）。
+    // 语义：
+    //   * 单选场景：selectedEntity = X / additionalSelectedEntities 空
+    //   * 多选场景：selectedEntity = primary（最后一次点击的，gizmo
+    //     pivot / Inspector 主体） / additionalSelectedEntities = 其余
+    //   * 任何切 primary 路径（regular click / right-click context）都应
+    //     清空 additionalSelectedEntities（Lumix / Unity 同款）
+    std::vector<Orange::Engine::Entity> additionalSelectedEntities;
+
+    bool IsSelected(Orange::Engine::Entity e) const noexcept
+    {
+        if (e == selectedEntity) { return true; }
+        for (const auto& a : additionalSelectedEntities)
+        {
+            if (a == e) { return true; }
+        }
+        return false;
+    }
+
+    std::size_t SelectedCount() const noexcept
+    {
+        return selectedEntity.IsValid() ? (1 + additionalSelectedEntities.size()) : 0;
+    }
+
+    // Toggle entity in additional set；若 entity 是 primary 则 no-op
+    // （要清 primary 需走 selectedEntity = Invalid 路径）。
+    void ToggleAdditional(Orange::Engine::Entity e)
+    {
+        if (e == selectedEntity) { return; }
+        auto it = std::find(additionalSelectedEntities.begin(),
+                            additionalSelectedEntities.end(), e);
+        if (it != additionalSelectedEntities.end())
+        {
+            additionalSelectedEntities.erase(it);
+        }
+        else
+        {
+            additionalSelectedEntities.push_back(e);
+        }
+    }
+
+    void ClearAdditional() noexcept
+    {
+        additionalSelectedEntities.clear();
+    }
 
     Orange::Engine::Entity pendingDelete = Orange::Engine::Entity::Invalid();
 

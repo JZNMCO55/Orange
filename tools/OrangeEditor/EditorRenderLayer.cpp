@@ -586,6 +586,15 @@ void EditorRenderLayer::ValidateEntityHandles()
         mHost.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
         mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
     }
+    // v0.8 多选：清除 additional 集合中失效的实体
+    {
+        auto& addl = mHost.selection.additionalSelectedEntities;
+        addl.erase(std::remove_if(addl.begin(), addl.end(),
+                                   [&w](Orange::Engine::Entity ent) {
+                                       return !w.IsValid(ent);
+                                   }),
+                   addl.end());
+    }
     if (mHost.selection.renamingEntity.IsValid() && !w.IsValid(mHost.selection.renamingEntity)) {
         CancelRename();
     }

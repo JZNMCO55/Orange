@@ -312,7 +312,20 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             : "(unnamed)";
         open = ImGui::TreeNodeEx("##node", flags, "%s", label);
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-            mHost.selection.selectedEntity = entity;
+            // v0.8 多选：Ctrl-click toggle 加入 / 移出 additional set；regular
+            // click 清空 additional + 切 primary。Shift-click 范围选择留到
+            // v0.8 patch（需要节点顺序扁平化映射）。
+            const ImGuiIO& io = ImGui::GetIO();
+            if (io.KeyCtrl && mHost.selection.selectedEntity.IsValid()
+                && entity != mHost.selection.selectedEntity)
+            {
+                mHost.selection.ToggleAdditional(entity);
+            }
+            else
+            {
+                mHost.selection.selectedEntity = entity;
+                mHost.selection.ClearAdditional();
+            }
             // B3 修：互斥选择，详见 ScenePanel viewport pick 同名注释。
             mHost.assets.selectedAssetPath.clear();
         }
