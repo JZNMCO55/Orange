@@ -278,6 +278,8 @@ void InitializeEditorAssets(EditorHost& host)
         "assets/materials/builtin/rim_light.material", "rim_light");
     host.assets.pDissolveMaterial = bakeAndLoadMaterial(
         "assets/materials/builtin/dissolve.material",  "dissolve");
+    host.assets.pPbrMaterial      = bakeAndLoadMaterial(
+        "assets/materials/builtin/pbr.material",       "pbr");
 
     // 编辑器默认 / 光物体材质
     host.assets.pDefaultRenderableMaterial = bakeAndLoadMaterial(
@@ -333,6 +335,8 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
         m["assets/materials/builtin/wall.material"]         = assets.pWallMaterial.get();
     if (assets.pToonMaterial)
         m["assets/materials/builtin/toon.material"]         = assets.pToonMaterial.get();
+    if (assets.pPbrMaterial)
+        m["assets/materials/builtin/pbr.material"]          = assets.pPbrMaterial.get();
     if (assets.pRimLightMaterial)
         m["assets/materials/builtin/rim_light.material"]    = assets.pRimLightMaterial.get();
     if (assets.pDissolveMaterial)

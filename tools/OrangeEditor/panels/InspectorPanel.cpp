@@ -6,6 +6,7 @@
 
 #include "../EditorRenderLayer.h"
 
+#include "../DemoWorld.h"
 #include "../EditorWidgets.h"
 #include "../MaterialFileIO.h"
 #include "../schema/ComponentSchemaRegistry.h"
@@ -151,30 +152,119 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     }
     Orange::Editor::Widgets::EndPropertyTable();
 
-    // Uniform 调参 UI：deferred 到后续 patch（独立 deliverable，不在本
-    // GAP 范围）。schema v1.1 已支持持久化所有 SetUniform override，调参
-    // UI 上线后此处接 BuildDataFromInstance + 各 uniform 控件即可。
-    ImGui::Separator();
-    ImGui::TextDisabled("Uniforms / Textures 调参 UI：deferred 到后续 patch");
-    ImGui::TextDisabled("(.material schema v1.1 已支持持久化所有 SetUniform override)");
+    // 找到此 .material path 当前对应的运行时 MaterialInstance（如有）。
+    // BuildNamedMaterialInstances 是 path → instance* 表的权威反查路径；
+    // 当前 path 不在表里（demo 内置范围之外的 .material 文件）则 nullptr，
+    // 走"无 live instance 时只能编辑磁盘 schema"的退化路径——本期 PBR 调
+    // 参 UI 主要面向内置 pbr.material 一档，未命中时直接显示提示。
+    auto namedMap = BuildNamedMaterialInstances(host.assets);
+    auto namedIt = namedMap.find(materialPath);
+    Orange::Engine::Render::MaterialInstance* liveInstance =
+        (namedIt != namedMap.end()) ? namedIt->second : nullptr;
 
-    // Save 按钮：以 v1.1 schema 写回（当前 Save 路径只动 templateName，
-    // uniforms / textures 段写空——调参 UI 还没上线，无 override 可保存）。
-    // dirty = 用户在 Combo 选的值 != 盘上原值。
+    // Uniform 调参 UI：当 template == "pbr" 且当前 .material 对应 live
+    // MaterialInstance 找得到时展开 PBR 五通道调参（normal 通道走 vNormal
+    // vertex 插值未引入 texture，本期面板不展示）。其他模板的 uniform 调
+    // 参 UI 等后续 milestone 按需补；schema v1.1 已支持持久化全部 override。
+    bool pbrUniformDirty = false;
+    if (host.assets.editingTemplateName == "pbr" && liveInstance != nullptr)
+    {
+        ImGui::Separator();
+        ImGui::TextUnformatted("PBR 材质参数");
+
+        // 当前 override 值 → fallback 到 Pipeline pack 路径里 PBR 默认
+        // （灰塑料 + 非金属 + 中等粗糙 + AO 满）。任一字段在 .material
+        // 文件里被持久化为 override 时本帧立即从 MaterialInstance 读回真值。
+        glm::vec4 baseColor = liveInstance->GetUniformVec4("uBaseColor")
+                                  .value_or(glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
+        glm::vec4 mra       = liveInstance->GetUniformVec4("uMRA")
+                                  .value_or(glm::vec4(0.0f, 0.5f, 1.0f, 0.0f));
+
+        Orange::Editor::Widgets::BeginPropertyTable("##pbrprops", 100.0f);
+
+        Orange::Editor::Widgets::PropertyLabel("Base Color",
+            "线性 RGB 漫反射底色（金属时改变高光颜色，非金属时改变 diffuse）");
+        float rgb[3] = {baseColor.r, baseColor.g, baseColor.b};
+        if (ImGui::ColorEdit3("##baseColor", rgb))
+        {
+            liveInstance->SetUniform("uBaseColor",
+                glm::vec4(rgb[0], rgb[1], rgb[2], baseColor.a));
+            pbrUniformDirty = true;
+        }
+
+        Orange::Editor::Widgets::PropertyLabel("Metallic",
+            "0 = 介电（塑料 / 木材），1 = 金属（高光取 baseColor，diffuse 趋 0）");
+        if (ImGui::SliderFloat("##metallic", &mra.x, 0.0f, 1.0f, "%.3f"))
+        {
+            liveInstance->SetUniform("uMRA", mra);
+            pbrUniformDirty = true;
+        }
+
+        Orange::Editor::Widgets::PropertyLabel("Roughness",
+            "0 = 镜面，1 = 粗糙漫反射；shader 内 clamp 到 [0.04, 1.0] 避开 D_GGX 奇异");
+        if (ImGui::SliderFloat("##roughness", &mra.y, 0.0f, 1.0f, "%.3f"))
+        {
+            liveInstance->SetUniform("uMRA", mra);
+            pbrUniformDirty = true;
+        }
+
+        Orange::Editor::Widgets::PropertyLabel("AO",
+            "环境光遮蔽乘子；仅作用于 IBL 贡献（当前 IBL 槽 dummy → 视觉不变）");
+        if (ImGui::SliderFloat("##ao", &mra.z, 0.0f, 1.0f, "%.3f"))
+        {
+            liveInstance->SetUniform("uMRA", mra);
+            pbrUniformDirty = true;
+        }
+
+        Orange::Editor::Widgets::EndPropertyTable();
+
+        ImGui::TextDisabled("Normal: 当前走 vNormal vertex 插值（无法线贴图）；"
+                            "tangent + 法线贴图基础设施落地后再上 texture 路径");
+    }
+    else if (host.assets.editingTemplateName == "pbr")
+    {
+        ImGui::Separator();
+        ImGui::TextDisabled("PBR 五通道调参面板需要当前 .material 已被加载到运行时实例。");
+        ImGui::TextDisabled("（本 .material 未出现在 namedMaterialInstances 表内，跳过）");
+    }
+    else
+    {
+        // 其他模板的 uniform / texture 调参 UI 等后续 milestone 按需扩；
+        // schema v1.1 已支持持久化全部 SetUniform override。
+        ImGui::Separator();
+        ImGui::TextDisabled("Uniforms / Textures 调参 UI：仅 pbr 模板已上线。");
+        ImGui::TextDisabled("(.material schema v1.1 已支持持久化所有 SetUniform override)");
+    }
+
+    // Save 按钮：以 v1.1 schema 写回。template 切换或任一 PBR uniform 编
+    // 辑都标 dirty；live instance 不存在时仅按 template 差异判 dirty。
     ImGui::Separator();
-    const bool dirty = (host.assets.editingTemplateName != originalTemplate);
+    const bool templateDirty = (host.assets.editingTemplateName != originalTemplate);
+    const bool dirty         = templateDirty || pbrUniformDirty;
     ImGui::BeginDisabled(!dirty);
     if (ImGui::Button("Save"))
     {
         ::Orange::Editor::Material::MaterialFileData data;
-        data.templateName = host.assets.editingTemplateName;
-        // uniforms / textures 留空——调参 UI 上线后此处改为
-        // BuildDataFromInstance(currentInstance, editingTemplateName)。
+        if (liveInstance != nullptr)
+        {
+            // 从运行时 instance 抽 override（含 PBR 编辑的 uBaseColor /
+            // uMRA），再覆盖 templateName 字段——templateName 走用户在
+            // Combo 的选择，而 instance 持有的 Material* 仍可能是旧模板
+            // （Combo 切换 template 不会重建 instance，运行时直到重启才
+            // 切换；本设计与 c5 阶段一致，避免悬挂 Renderable 指针）。
+            data = ::Orange::Editor::Material::BuildDataFromInstance(
+                *liveInstance, host.assets.editingTemplateName,
+                host.assets.pAssets.get());
+            data.templateName = host.assets.editingTemplateName;
+        }
+        else
+        {
+            data.templateName = host.assets.editingTemplateName;
+        }
         ::Orange::Editor::Material::WriteMaterialFile(materialPath, data);
-        // 内存 MaterialInstance 不在此重新 CreateInstance —— 那会让 Render
-        // able.materialInstance 字段持有的旧指针悬挂。完整刷新路径要走
-        // namedMaterialInstances 重建 + 所有 Renderable 字段重定向，超出
-        // c5 范围。当前 Save 只动盘上文件，运行时直到重启编辑器才看到效果。
+        // 内存 MaterialInstance 的 SetUniform override 已在编辑过程中
+        // 应用到 live instance，视觉立即更新；磁盘 .material 文件本步
+        // 落盘下次启动按 ApplyDataToInstance 重新加载相同的 override。
         ImGui::OpenPopup("##saved_notice");
     }
     ImGui::EndDisabled();
@@ -187,8 +277,16 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     {
         ImGui::TextUnformatted("已保存到 .material 文件。");
         ImGui::Separator();
-        ImGui::TextDisabled("注：当前会话的运行时 MaterialInstance 未刷新；");
-        ImGui::TextDisabled("重启 OrangeEditor 可看到新 template 生效。");
+        if (templateDirty)
+        {
+            ImGui::TextDisabled("Template 切换：磁盘已写新模板名，运行时实例需要");
+            ImGui::TextDisabled("重启 OrangeEditor 才会按新模板重建。");
+        }
+        else
+        {
+            ImGui::TextDisabled("Uniform 编辑：运行时实例已即时生效；磁盘 .material");
+            ImGui::TextDisabled("文件 schema v1.1 已落盘下次启动 ApplyDataToInstance 还原。");
+        }
         if (ImGui::Button("OK")) { ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }

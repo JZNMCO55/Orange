@@ -94,7 +94,7 @@ void TestEmptyConstruction()
     std::fprintf(stdout, "  [PASS] MaterialSystem 空表与 FindTemplate 默认行为\n");
 }
 
-// 2. RegisterBuiltins 注册 textured + toon + rim_light
+// 2. RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr
 void TestRegisterBuiltins()
 {
     AssetRegistry registry;
@@ -104,24 +104,27 @@ void TestRegisterBuiltins()
     MaterialSystem matSys(registry);
     auto result = matSys.RegisterBuiltins();
     assert(result.IsOk());
-    // textured / toon / rim_light / dissolve / emissive 五件内置模板。
-    assert(matSys.TemplateCount() == 5);
+    // textured / toon / rim_light / dissolve / emissive / pbr 六件内置模板。
+    assert(matSys.TemplateCount() == 6);
 
     const Material* textured = matSys.FindTemplate("textured");
     const Material* toon     = matSys.FindTemplate("toon");
     const Material* rim      = matSys.FindTemplate("rim_light");
     const Material* dissolve = matSys.FindTemplate("dissolve");
     const Material* emissive = matSys.FindTemplate("emissive");
+    const Material* pbr      = matSys.FindTemplate("pbr");
     assert(textured != nullptr);
     assert(toon     != nullptr);
     assert(rim      != nullptr);
     assert(dissolve != nullptr);
     assert(emissive != nullptr);
+    assert(pbr      != nullptr);
     assert(textured->name == "textured");
     assert(toon->name     == "toon");
     assert(rim->name      == "rim_light");
     assert(dissolve->name == "dissolve");
     assert(emissive->name == "emissive");
+    assert(pbr->name      == "pbr");
     assert(textured->vertexShader.IsValid());
     assert(textured->fragmentShader.IsValid());
     assert(toon->vertexShader.IsValid());
@@ -132,16 +135,21 @@ void TestRegisterBuiltins()
     assert(dissolve->fragmentShader.IsValid());
     assert(emissive->vertexShader.IsValid());
     assert(emissive->fragmentShader.IsValid());
+    assert(pbr->vertexShader.IsValid());
+    assert(pbr->fragmentShader.IsValid());
 
-    // Task 07 重构：textured / toon / rim_light push-constant 全部收为
-    // {uMVP, uModel} = 2 项；其余参数迁到 light UBO 或 hardcode（详见
-    // BuiltinMaterials.cpp 注释）。textured 多带一个 textureSlot 占位。
+    // textured / toon / rim_light push-constant 收为 {uMVP, uModel} = 2 项；
+    // textured 多带一个 textureSlot 占位。pbr 扩出 uBaseColor + uMRA 两条
+    // vec4，共 4 项（uMVP / uModel / uBaseColor / uMRA），textureSlots
+    // 当前空（待 per-instance descriptor set 上线后接 5 通道纹理绑定）。
     assert(textured->uniforms.size()     == 2);
     assert(textured->textureSlots.size() == 1);
     assert(toon->uniforms.size() == 2);
     assert(rim->uniforms.size()  == 2);
+    assert(pbr->uniforms.size()     == 4);
+    assert(pbr->textureSlots.empty());
 
-    std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light\n");
+    std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr\n");
 }
 
 // 3. 自定义 ShaderTemplateDesc 注册
@@ -208,8 +216,8 @@ void TestDuplicateNameRejected()
     auto result = matSys.RegisterTemplate(dupDesc);
     assert(result.IsErr());
     assert(result.Error() == ResultCode::AlreadyExists);
-    // textured + toon + rim_light + dissolve + emissive 五件内置模板。
-    assert(matSys.TemplateCount() == 5);
+    // textured + toon + rim_light + dissolve + emissive + pbr 六件内置模板。
+    assert(matSys.TemplateCount() == 6);
 
     const Material* toon = matSys.FindTemplate("toon");
     assert(toon != nullptr);
@@ -247,7 +255,7 @@ void TestCreateInstance()
     std::fprintf(stdout, "  [PASS] CreateInstance 命中 / 不命中路径\n");
 }
 
-// 6.5 GetTemplateNames：默认空、RegisterBuiltins 后 5 项、自定义注册后 6 项
+// 6.5 GetTemplateNames：默认空、RegisterBuiltins 后 6 项、自定义注册后 7 项
 void TestGetTemplateNames()
 {
     AssetRegistry registry;
@@ -259,16 +267,17 @@ void TestGetTemplateNames()
 
     matSys.RegisterBuiltins();
     std::vector<std::string> names = matSys.GetTemplateNames();
-    assert(names.size() == 5);
+    assert(names.size() == 6);
     // 不假定顺序——unordered_map 遍历无序。排序后比对内容。
     std::sort(names.begin(), names.end());
     assert(names[0] == "dissolve");
     assert(names[1] == "emissive");
-    assert(names[2] == "rim_light");
-    assert(names[3] == "textured");
-    assert(names[4] == "toon");
+    assert(names[2] == "pbr");
+    assert(names[3] == "rim_light");
+    assert(names[4] == "textured");
+    assert(names[5] == "toon");
 
-    // 自定义注册后 1 + 5 = 6 项，且新名出现在列表里
+    // 自定义注册后 1 + 6 = 7 项，且新名出现在列表里
     ShaderTemplateDesc desc;
     desc.name              = "user_custom";
     desc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
@@ -277,12 +286,12 @@ void TestGetTemplateNames()
     assert(regResult.IsOk());
 
     names = matSys.GetTemplateNames();
-    assert(names.size() == 6);
+    assert(names.size() == 7);
     const bool hasCustom =
         std::find(names.begin(), names.end(), std::string("user_custom")) != names.end();
     assert(hasCustom);
 
-    std::fprintf(stdout, "  [PASS] GetTemplateNames 默认空 + builtin 5 + 自定义 6\n");
+    std::fprintf(stdout, "  [PASS] GetTemplateNames 默认空 + builtin 6 + 自定义 7\n");
 }
 
 // 6. CreateInstance 拿到的 MaterialInstance 上 SetUniform 真正命中 toon

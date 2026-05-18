@@ -44,6 +44,7 @@ struct EditorAssetContext
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pToonMaterial;     // 二阶 cel-shading
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pRimLightMaterial; // fresnel rim glow
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDissolveMaterial; // noise 溶解 + 发光边沿
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pPbrMaterial;      // Cook-Torrance PBR baseline
 
     // "Create Light Object" / "Add Renderable Component" 等编辑器创建路径
     // 共用的默认 material instance：
