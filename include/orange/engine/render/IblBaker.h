@@ -15,9 +15,10 @@
 // `BakeEquirectToCube` 就承担这一步——后续 irradiance / prefilter 把它
 // 的输出作为各自卷积路径的源。
 //
-// **当前阶段**：暴露 `BakeEquirectToCube` + `BakeBrdfLut` + `BakeIrradiance`。
-// prefilter entry point 在后续 commit 增量引入；公共面按需扩，避免一次
-// 性暴露半成品 API（与 PBR-04 commit-plan 的 c1 → c4 节奏对齐）。
+// **当前阶段**：四个 entry point 全部就绪（BakeEquirectToCube / BakeBrdfLut /
+// BakeIrradiance / BakePrefilteredEnvironment）。PBR-04 commit-plan c1 → c4
+// 节奏收尾；后续 c5 ~ c9 在 IblBaker 输出基础上接通 EnvironmentComponent +
+// PBR shader。
 //
 // 设计参考：
 //   * Lumix `data/shaders/ibl_filter.hlsl` —— 单文件多 entry point 的
@@ -141,6 +142,32 @@ public:
     BakeIrradiance(Orange::Rhi::RHITexture& envCube,
                    std::uint32_t            cubeFaceSize = 32u,
                    std::uint32_t            sampleCount  = 512u);
+
+    // 烘焙 prefiltered specular IBL —— Karis split-sum 第一项。输出 cube
+    // 多 mip：mip 0 ↔ roughness 0、mip N-1 ↔ roughness 1，中间线性插值。
+    // **走 graphics fullscreen pass + per-(face, mip) Tex2D 子资源 view 作
+    // ColorAttachment**（OrangeRender 当前 descriptor 仍走 default view，
+    // 无法 per-mip storage write cube；ColorAttachment + 子资源 view 是
+    // FEATURE-2026-05-17 T2/T3/T5 端到端验过的设计消费路径）。
+    //
+    // 参数约束：
+    //   * `envCube`：TexCube + 6 layer + 浮点 format，`ShaderResource` 状态。
+    //   * `baseFaceSize`：mip 0 每边像素数；≥ 8 且 8 倍数；典型 256。
+    //   * `mipLevels`：mip 链长度；典型 9（256→1：256/128/64/32/16/8/4/2/1）；
+    //     最大为 `log2(baseFaceSize) + 1`，超出按上限钳制。
+    //   * `sampleCount`：GGX importance sampling 样本数；典型 1024。
+    //
+    // 输出：
+    //   * RGBA16Float cubemap，`mUsage == Sampled | RenderTarget | TransferSrc`；
+    //     返回时整张已 transition 到 `ShaderResource` 状态，所有 mip 全部
+    //     烘焙完毕。
+    //   * 失败返回 `nullptr`（graphics pipeline 创建失败、subresource view
+    //     创建失败等）。
+    std::unique_ptr<Orange::Rhi::RHITexture>
+    BakePrefilteredEnvironment(Orange::Rhi::RHITexture& envCube,
+                               std::uint32_t            baseFaceSize = 256u,
+                               std::uint32_t            mipLevels    = 9u,
+                               std::uint32_t            sampleCount  = 1024u);
 
 private:
     struct Impl;

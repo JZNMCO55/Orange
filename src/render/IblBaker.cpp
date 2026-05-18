@@ -36,10 +36,14 @@
 #include "orange/rhi/RHIDescriptor.h"
 #include "orange/rhi/RHIDevice.h"
 #include "orange/rhi/RHIPipeline.h"
+#include "orange/rhi/RHIRendering.h"
 #include "orange/rhi/RHISampler.h"
 #include "orange/rhi/RHIShaderModule.h"
 #include "orange/rhi/RHITexture.h"
 #include "orange/rhi/RHITypes.h"
+
+#include <algorithm>
+#include <vector>
 
 #include <cstdint>
 #include <filesystem>
@@ -111,6 +115,14 @@ struct IblBaker::Impl
     std::unique_ptr<Orange::Rhi::RHIPipeline>            irradiancePipeline;
     std::unique_ptr<Orange::Rhi::RHISampler>             irradianceSampler;
 
+    // prefilter cube 路径（graphics fullscreen pass；input: envCube +
+    // sampler；output: cube 每 (face, mip) 作 ColorAttachment）
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        prefilterVs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        prefilterFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> prefilterLayout;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            prefilterPipeline;
+    std::unique_ptr<Orange::Rhi::RHISampler>             prefilterSampler;
+
     Impl(Orange::Rhi::RHIDevice& d, Orange::Engine::Asset::AssetRegistry& r)
         : device(d)
         , registry(r)
@@ -119,10 +131,14 @@ struct IblBaker::Impl
 
     // 共享 helper：把 "shaders/orange_engine/<file>" 加载为 RHIShaderModule。
     // 走 AssetRegistry::Load<ShaderAsset> 做 dedup + Get 拿 SPIR-V bytes。
-    // 失败返回 nullptr，调用方按 unique_ptr 真伪判定。`debugName` 透传给
-    // RHI 后端（GPU capture 工具用）。
+    // `stage` 由调用方显式指定（Compute / Vertex / Fragment）；与
+    // ShaderLoader 按文件名后缀推断的 ShaderAsset::Stage() 必须一致，调用
+    // 方传错会让后端 pipeline 创建失败。`debugName` 透传给 RHI 后端（GPU
+    // capture 工具用）。失败返回 nullptr，调用方按 unique_ptr 真伪判定。
     std::unique_ptr<Orange::Rhi::RHIShaderModule>
-    LoadComputeShader(const char* spvRelative, const char* debugName)
+    LoadShader(const char*              spvRelative,
+               const char*              debugName,
+               Orange::Rhi::ShaderStage stage)
     {
         const auto spvPath = ResolveBuiltinShaderPath(spvRelative);
         auto spvResult = registry.Load<Orange::Engine::Asset::ShaderAsset>(spvPath);
@@ -142,7 +158,7 @@ struct IblBaker::Impl
         Orange::Rhi::ShaderModuleDesc modDesc{};
         modDesc.mpCode      = pShaderAsset->SpirV().data();
         modDesc.mCodeSize   = pShaderAsset->ByteSize();
-        modDesc.mStage      = Orange::Rhi::ShaderStage::Compute;
+        modDesc.mStage      = stage;
         modDesc.mpDebugName = debugName;
         auto module = device.CreateShaderModule(modDesc);
         if (!module)
@@ -161,9 +177,10 @@ struct IblBaker::Impl
             return true;
         }
 
-        equirectShader = LoadComputeShader(
+        equirectShader = LoadShader(
             "shaders/orange_engine/ibl_equirect_to_cube.comp.spv",
-            "IblBaker/EquirectToCube");
+            "IblBaker/EquirectToCube",
+            Orange::Rhi::ShaderStage::Compute);
         if (!equirectShader)
         {
             return false;
@@ -232,9 +249,10 @@ struct IblBaker::Impl
             return true;
         }
 
-        irradianceShader = LoadComputeShader(
+        irradianceShader = LoadShader(
             "shaders/orange_engine/ibl_irradiance.comp.spv",
-            "IblBaker/Irradiance");
+            "IblBaker/Irradiance",
+            Orange::Rhi::ShaderStage::Compute);
         if (!irradianceShader)
         {
             return false;
@@ -290,6 +308,87 @@ struct IblBaker::Impl
         return true;
     }
 
+    // 首次进入 BakePrefilteredEnvironment 时调用；幂等。失败返回 false。
+    // **graphics pipeline 路径**（与其他三个 compute pipeline 不同）：
+    // fullscreen vert + ibl_prefilter.frag.glsl，per-(face, mip) BeginRendering
+    // 写入对应 ColorAttachment 子资源 view。理由见 ibl_prefilter.frag.glsl
+    // 顶部注释 + BakePrefilteredEnvironment 实装段说明。
+    bool EnsurePrefilterPipeline()
+    {
+        if (prefilterPipeline)
+        {
+            return true;
+        }
+
+        prefilterVs = LoadShader(
+            "shaders/orange_engine/fullscreen.vert.spv",
+            "IblBaker/Prefilter/VS",
+            Orange::Rhi::ShaderStage::Vertex);
+        prefilterFs = LoadShader(
+            "shaders/orange_engine/ibl_prefilter.frag.spv",
+            "IblBaker/Prefilter/FS",
+            Orange::Rhi::ShaderStage::Fragment);
+        if (!prefilterVs || !prefilterFs)
+        {
+            return false;
+        }
+
+        Orange::Rhi::DescriptorSetLayoutDesc layoutDesc{};
+        layoutDesc.mBindings = {
+            { 0u, Orange::Rhi::DescriptorType::CombinedImageSampler, 1u,
+              Orange::Rhi::ShaderStage::Fragment },
+        };
+        layoutDesc.mpDebugName = "IblBaker/Prefilter/Layout";
+        prefilterLayout = device.CreateDescriptorSetLayout(layoutDesc);
+        if (!prefilterLayout)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateDescriptorSetLayout(prefilter) 失败");
+            return false;
+        }
+
+        // Push constant block：与 GLSL `PushConstants { uFaceIdx; uRoughness;
+        // uSampleCount; uPad; }` 字段顺序一致；16 B 对齐占位预留扩展。
+        Orange::Rhi::GraphicsPipelineDesc pipeDesc{};
+        pipeDesc.mShaderStages.push_back(
+            { Orange::Rhi::ShaderStage::Vertex,   prefilterVs.get(), "main" });
+        pipeDesc.mShaderStages.push_back(
+            { Orange::Rhi::ShaderStage::Fragment, prefilterFs.get(), "main" });
+        pipeDesc.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
+        pipeDesc.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
+        pipeDesc.mDepthStencil.mDepthTestEnable  = false;
+        pipeDesc.mDepthStencil.mDepthWriteEnable = false;
+        pipeDesc.mColorBlend.mAttachments.push_back({});
+        pipeDesc.mRenderTargets.mColorFormats.push_back(
+            Orange::Rhi::TextureFormat::RGBA16Float);
+        pipeDesc.mDescriptorSetLayouts.push_back(prefilterLayout.get());
+        pipeDesc.mPushConstantRanges.push_back(
+            { Orange::Rhi::ShaderStage::Fragment, 0u, 4u * sizeof(std::uint32_t) });
+        pipeDesc.mpDebugName = "IblBaker/Prefilter/Pipeline";
+        prefilterPipeline = device.CreateGraphicsPipeline(pipeDesc);
+        if (!prefilterPipeline)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateGraphicsPipeline(prefilter) 失败");
+            return false;
+        }
+
+        Orange::Rhi::SamplerDesc sampDesc{};
+        sampDesc.mMinFilter   = Orange::Rhi::SamplerFilter::Linear;
+        sampDesc.mMagFilter   = Orange::Rhi::SamplerFilter::Linear;
+        sampDesc.mMipmapMode  = Orange::Rhi::SamplerMipmapMode::Linear;
+        sampDesc.mAddressU    = Orange::Rhi::SamplerAddressMode::ClampToEdge;
+        sampDesc.mAddressV    = Orange::Rhi::SamplerAddressMode::ClampToEdge;
+        sampDesc.mAddressW    = Orange::Rhi::SamplerAddressMode::ClampToEdge;
+        sampDesc.mpDebugName  = "IblBaker/PrefilterCubeSampler";
+        prefilterSampler = device.CreateSampler(sampDesc);
+        if (!prefilterSampler)
+        {
+            ORANGE_LOG_ERROR("IblBaker: CreateSampler(prefilter) 失败");
+            return false;
+        }
+
+        return true;
+    }
+
     // 首次进入 BakeBrdfLut 时调用；幂等。失败返回 false。
     // BRDF LUT 与 environment 无关（仅依赖 NoV / roughness），没有 input
     // texture，所以 descriptor layout 只有 1 个 binding = StorageImage。
@@ -300,9 +399,10 @@ struct IblBaker::Impl
             return true;
         }
 
-        brdfLutShader = LoadComputeShader(
+        brdfLutShader = LoadShader(
             "shaders/orange_engine/ibl_brdf_lut.comp.spv",
-            "IblBaker/BrdfLut");
+            "IblBaker/BrdfLut",
+            Orange::Rhi::ShaderStage::Compute);
         if (!brdfLutShader)
         {
             return false;
@@ -706,6 +806,218 @@ IblBaker::BakeIrradiance(Orange::Rhi::RHITexture& envCube,
     device.WaitIdle();
 
     return irrTex;
+}
+
+std::unique_ptr<Orange::Rhi::RHITexture>
+IblBaker::BakePrefilteredEnvironment(Orange::Rhi::RHITexture& envCube,
+                                     std::uint32_t            baseFaceSize,
+                                     std::uint32_t            mipLevels,
+                                     std::uint32_t            sampleCount)
+{
+    if (baseFaceSize < 8u || (baseFaceSize % 8u) != 0u)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: baseFaceSize 必须 ≥ 8 且为 8 的倍数 (got={})",
+                         baseFaceSize);
+        return nullptr;
+    }
+    if (sampleCount == 0u)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: sampleCount 必须 > 0");
+        return nullptr;
+    }
+
+    // mipLevels 上限：log2(baseFaceSize) + 1（典型 256 → 9 mips）。
+    std::uint32_t maxMips = 1u;
+    {
+        std::uint32_t s = baseFaceSize;
+        while (s > 1u) { s >>= 1u; ++maxMips; }
+    }
+    if (mipLevels == 0u || mipLevels > maxMips)
+    {
+        mipLevels = maxMips;
+    }
+
+    if (!mpImpl->EnsurePrefilterPipeline())
+    {
+        return nullptr;
+    }
+    auto& device = mpImpl->device;
+
+    // ---- 创建多 mip cube ----
+    // usage: RenderTarget（per-mip view 作 ColorAttachment）+ Sampled（运行
+    // 时 pbr.frag 采样）+ TransferSrc（保留 readback 入口，可选）
+    Orange::Rhi::TextureDesc cubeDesc{};
+    cubeDesc.mWidth       = baseFaceSize;
+    cubeDesc.mHeight      = baseFaceSize;
+    cubeDesc.mMipLevels   = mipLevels;
+    cubeDesc.mArrayLayers = 6u;
+    cubeDesc.mFormat      = Orange::Rhi::TextureFormat::RGBA16Float;
+    cubeDesc.mDimension   = Orange::Rhi::TextureDimension::TexCube;
+    cubeDesc.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                          | Orange::Rhi::TextureUsage::RenderTarget
+                          | Orange::Rhi::TextureUsage::TransferSrc;
+    auto prefilteredTex = device.CreateTexture(cubeDesc);
+    if (!prefilteredTex)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: CreateTexture(base={}^2, mips={}, cube) 失败",
+                         baseFaceSize, mipLevels);
+        return nullptr;
+    }
+
+    // ---- 6 face × N mip 子资源 view（Tex2D + 单 face 单 mip）----
+    const std::uint32_t totalViews = 6u * mipLevels;
+    std::vector<std::unique_ptr<Orange::Rhi::RHITextureView>> subviews;
+    subviews.reserve(totalViews);
+    for (std::uint32_t face = 0u; face < 6u; ++face)
+    {
+        for (std::uint32_t mip = 0u; mip < mipLevels; ++mip)
+        {
+            Orange::Rhi::TextureViewDesc viewDesc{};
+            viewDesc.mViewDimension  = Orange::Rhi::TextureDimension::Tex2D;
+            viewDesc.mBaseMipLevel   = mip;
+            viewDesc.mLevelCount     = 1u;
+            viewDesc.mBaseArrayLayer = face;
+            viewDesc.mLayerCount     = 1u;
+            auto pView = device.CreateTextureView(*prefilteredTex, viewDesc);
+            if (!pView)
+            {
+                ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: CreateTextureView(face={}, mip={}) 失败",
+                                 face, mip);
+                return nullptr;
+            }
+            subviews.push_back(std::move(pView));
+        }
+    }
+
+    // ---- per-call descriptor pool 容纳 6 × mipLevels 个 set（每 dispatch 一个）----
+    Orange::Rhi::DescriptorPoolDesc poolDesc{};
+    poolDesc.mMaxSets   = totalViews;
+    poolDesc.mPoolSizes = {
+        { Orange::Rhi::DescriptorType::CombinedImageSampler, totalViews },
+    };
+    poolDesc.mpDebugName = "IblBaker/Prefilter/Pool";
+    auto descPool = device.CreateDescriptorPool(poolDesc);
+    if (!descPool)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: CreateDescriptorPool 失败");
+        return nullptr;
+    }
+
+    std::vector<std::unique_ptr<Orange::Rhi::RHIDescriptorSet>> sets;
+    sets.reserve(totalViews);
+    for (std::uint32_t i = 0u; i < totalViews; ++i)
+    {
+        auto set = device.AllocateDescriptorSet(*descPool, *mpImpl->prefilterLayout);
+        if (!set)
+        {
+            ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: AllocateDescriptorSet (idx={}) 失败", i);
+            return nullptr;
+        }
+        Orange::Rhi::DescriptorWrite w{};
+        w.mBinding             = 0u;
+        w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w.mImageInfo.mpTexture = &envCube;
+        w.mImageInfo.mpSampler = mpImpl->prefilterSampler.get();
+        device.UpdateDescriptorSet(*set, &w, 1u);
+        sets.push_back(std::move(set));
+    }
+
+    // ---- 录制：54 个 BeginRendering / Draw 3 / EndRendering ----
+    auto cmd = device.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
+    if (!cmd)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: CreateCommandList 失败");
+        return nullptr;
+    }
+    if (cmd->Begin() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: cmd.Begin 失败");
+        return nullptr;
+    }
+
+    // 整张 cube：Common → RenderTarget（一次性 transition 所有 subresource）
+    cmd->TransitionResource(*prefilteredTex,
+                            Orange::Rhi::ResourceState::Common,
+                            Orange::Rhi::ResourceState::RenderTarget);
+
+    const float maxMipF = (mipLevels > 1u) ? static_cast<float>(mipLevels - 1u) : 1.0f;
+    for (std::uint32_t face = 0u; face < 6u; ++face)
+    {
+        for (std::uint32_t mip = 0u; mip < mipLevels; ++mip)
+        {
+            const std::uint32_t idx     = face * mipLevels + mip;
+            const std::uint32_t mipDim  = std::max<std::uint32_t>(1u, baseFaceSize >> mip);
+            const float         roughness = (mipLevels == 1u) ? 0.0f
+                                          : static_cast<float>(mip) / maxMipF;
+
+            Orange::Rhi::ColorAttachment color{};
+            color.mpView   = subviews[idx].get();
+            color.mLoadOp  = Orange::Rhi::LoadOp::Clear;
+            color.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+            Orange::Rhi::RenderingDesc rd{};
+            rd.mRenderArea.mWidth  = mipDim;
+            rd.mRenderArea.mHeight = mipDim;
+            rd.mColorAttachments.push_back(color);
+            cmd->BeginRendering(rd);
+
+            cmd->BindGraphicsPipeline(*mpImpl->prefilterPipeline);
+            cmd->SetDescriptorSet(0u, *sets[idx]);
+
+            // viewport + scissor 必须覆盖整个 attachment（per-mip 尺寸变化）
+            Orange::Rhi::RHIViewport vp{};
+            vp.mX        = 0.0f;
+            vp.mY        = 0.0f;
+            vp.mWidth    = static_cast<float>(mipDim);
+            vp.mHeight   = static_cast<float>(mipDim);
+            vp.mMinDepth = 0.0f;
+            vp.mMaxDepth = 1.0f;
+            cmd->SetViewport(vp);
+
+            Orange::Rhi::RHIScissor sc{};
+            sc.mOffsetX = 0;
+            sc.mOffsetY = 0;
+            sc.mWidth   = mipDim;
+            sc.mHeight  = mipDim;
+            cmd->SetScissor(sc);
+
+            // push constant：{ faceIdx, roughness, sampleCount, pad } = 16 B
+            struct PrefilterPC
+            {
+                std::uint32_t faceIdx;
+                float         roughness;
+                std::uint32_t sampleCount;
+                std::uint32_t pad;
+            };
+            const PrefilterPC pcData{ face, roughness, sampleCount, 0u };
+            cmd->SetPushConstants(Orange::Rhi::ShaderStage::Fragment,
+                                  0u, sizeof(pcData), &pcData);
+
+            // fullscreen big-triangle: 3 vertices, no vertex buffer
+            cmd->Draw(3u, 1u, 0u, 0u);
+
+            cmd->EndRendering();
+        }
+    }
+
+    // 整张 cube：RenderTarget → ShaderResource（供下游 sampling）
+    cmd->TransitionResource(*prefilteredTex,
+                            Orange::Rhi::ResourceState::RenderTarget,
+                            Orange::Rhi::ResourceState::ShaderResource);
+
+    if (cmd->End() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: cmd.End 失败");
+        return nullptr;
+    }
+    if (device.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("IblBaker::BakePrefilteredEnvironment: SubmitCommandList 失败");
+        return nullptr;
+    }
+    device.WaitIdle();
+
+    return prefilteredTex;
 }
 
 }  // namespace Orange::Engine::Render
