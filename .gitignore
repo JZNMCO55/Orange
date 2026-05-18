@@ -2,9 +2,16 @@
 .vscode/
 out/
 build/
+# ASan / 别名 build 目录（如 build-asan/、build-tsan/）由调查 session
+# 临时创建；构建产物不入库。
+build-*/
 script/__pycache__/
 3rdparty/
 install/
+
+# Vulkan API dump / 临时 trace 文件（VK_LAYER_LUNARG_api_dump 输出 +
+# 临时崩点 dump 等）落 project root 时不入库。
+/api_*.txt
 
 # install/ 的 ignore 用于挡住临时 install 输出，但 tests/install/
 # 是 install_smoke / config_smoke 的源码目录，必须跟踪。
