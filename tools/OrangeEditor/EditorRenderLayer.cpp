@@ -1082,6 +1082,7 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         else if (ext == ".material")                icon = "[Mat]";
         else if (ext == ".png" || ext == ".jpg"
               || ext == ".jpeg" || ext == ".ktx")   icon = "[T]";
+        else if (ext == ".hdr" || ext == ".exr")    icon = "[HDR]";
         else if (name.size() >= 11
               && name.compare(name.size() - 11, 11, ".scene.json") == 0)
                                                     icon = "[S]";

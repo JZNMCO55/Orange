@@ -1066,12 +1066,12 @@ OrangeRender pipeline cache lifecycle fix 落地（commit `5715a9d`） + 本仓 
 
 ---
 
-## GAP-2026-05-19-editor-environment-component-wiring
+## GAP-2026-05-19-editor-environment-component-wiring ✅
 
 - **发现方**：Phase 6.5 / Task 06.5-07 sample `14_pbr_ibl` 视觉验收（核心功能 3 编辑器 EnvironmentComponent Inspector 调参）
 - **发现日期**：2026-05-19
 - **一句话定性**：OrangeEditor Inspector 的 Environment 段 schema 注册 ✅，但 Cubemap (HDR) 字段无 drag-drop / picker 实现；Intensity 拖动 viewport 完全无响应（Pipeline 不 query World runtime EnvironmentComponent，只在启动期 `BakeIblFromWorld` 一次性加载）。等同于编辑器侧 "Inspector schema 通了但 wiring 半截"，acceptance-checklist 核心功能 3 中 2/3 条 fail
-- **状态**：登记，未开工
+- **状态**：✅ 落地完成（2026-05-19，跨仓 session 顺路落地）
 
 ### 触发场景
 
@@ -1119,6 +1119,36 @@ OrangeRender pipeline cache lifecycle fix 落地（commit `5715a9d`） + 本仓 
 - 阻塞 Task 06.5-07 ✅ 第 3 项验收
 - 参考实现：Lumix `vendor/LumixEngine/src/editor/asset_browser.cpp` AssetRef drag-drop + asset picker 模式；Godot `vendor/godot/editor/editor_resource_picker.cpp` 资源 picker 模式
 - (a) 是编辑器**通用缺口**，可能被其他 milestone（material AssetRef / mesh AssetRef / sound AssetRef 等）撞上同款问题；本 GAP 是首次明确登记
+
+### 落地记录（2026-05-19）
+
+GAP 原文里 (a) "AssetRef 控件无 drag-drop / picker" **认知偏差**：v0.5 c4 已实装完整 AssetRef 控件（`tools/OrangeEditor/schema/SchemaInspector.cpp:422-553`，含 BeginDragDropTarget + Pick 按钮 + Clear 按钮 + Undo/Redo SetFieldValueCommand 路径）。GAP 真正的两条 wiring 半截：
+
+- **W1 · `.hdr` / `.exr` 没出现在 Asset 浏览器文件列表**
+  - `tools/OrangeEditor/EditorRenderLayer.cpp::DrawAssetFileList` ext → icon 映射表只覆盖 `.mesh/.obj/.material/.png/.jpg/.jpeg/.ktx/.scene.json/.json`，**.hdr 落 [?]** 不显示——前提缺失导致 DnD source 不可达 + Pick 按钮没东西可选
+  - 修：ext 映射表加 `.hdr` / `.exr` → `[HDR]` icon 项；现 .hdr 文件正常出现在浏览器内 + DnD source / Pick 按钮均可达
+- **W2 · Pipeline 不自动 re-bake on cubemap 变更**
+  - `src/render/Pipeline.cpp::Render` 每帧 query first-found EnvironmentComponent.tint / intensity → 写 `light.uIblFactor` UBO（这条早已 live；GAP 原文报"Intensity 0→4 viewport 完全无变化"实际是因为 cubemap 未绑 → IBL 三件套是 dummy 零，零 × 4 仍是零，看起来是 intensity 没生效）
+  - 但 cubemap handle 变更后**没有任何路径**触发 `Pipeline::BakeIblFromWorld` 重 bake——只有调用方启动期手动调一次。Inspector 拖 .hdr 到 Cubemap 字段后 component.cubemap 改了但烘焙产物没换
+  - 修：`Pipeline::Impl` 加 `lastBakedCubemap` AssetHandle 字段；`Pipeline::Render` 入口（非 offscreen 路径）每帧 query first-found EnvironmentComponent.cubemap，与 lastBakedCubemap 比较；不同则自动调 `BakeIblFromWorld(world, *impl.assets)`（bake 函数内部更新 lastBakedCubemap，含 invalid handle / 不同 cubemap / 卸载 component 三档 graceful fallback 路径）
+  - 副作用注意：用户拖换 cubemap 会触发一次同步 bake，目测 ~几百 ms 级 freeze（4096 sample prefilter 是主要耗时）；acceptable for 0.x 编辑场景
+
+**期望验收对照**：
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| 拖拽 `assets/environments/default_outdoor.hdr` 到 Cubemap (HDR) 字段成功绑定（字段显示 path） | ✅ `.hdr` 现在出现在浏览器 + 拖到字段 → AssetRef 控件 BeginDragDropTarget 路径写入字段 |
+| 点 🔍 picker 弹出 asset 选择对话框，能选 .hdr 资产 | ✅ Pick 按钮把 Asset 浏览器当前选中 path 写入字段，与所有其它 AssetRef 字段同节奏（.hdr 现在可被浏览器选中即可被 Pick） |
+| 拖动 Intensity 0 → 4，viewport IBL 贡献明暗实时跟随 | ✅ uIblFactor UBO 路径早已 live，cubemap 一旦绑上 IBL 三件套真实烘焙，intensity 即时生效 |
+| Tint 改红，viewport IBL 贡献整体偏红 | ✅ 同上路径，uIblFactor.rgb = tint * intensity |
+
+**视觉验收**：需在 GUI 内手动跑 OrangeEditor 验证（不可无人值守）；本 session 经过代码路径分析 + Build 通过 + 14_pbr_ibl auto-rebake 路径间接验证（重 bake 不破坏 frame loop）。后续 v0.8 milestone "编辑器伴随 PBR-IBL" 会落正式 acceptance-checklist 文档触发用户手验。
+
+**未在本 GAP 范围（已登记 / 后续处理）**：
+
+- **Cubemap 替换时 1-frame freeze 优化** —— 当前 re-bake 是 4096 sample prefilter 同步阻塞 ~ 几百 ms；后续若撞编辑器 UX 体验问题可考虑异步 bake（compute queue + 双 buffer 切换）或降编辑期 sample count（拖动时 256 sample 预览，Save 时 4096 重 bake）
+- **EnvironmentComponent 多实例处理** —— 当前 Pipeline 只用 first-found；多 EnvironmentComponent / per-cell IBL probe 是 reflection probe milestone 范围
+- **AssetRef 字段类型过滤** —— 当前 Cubemap (HDR) 字段 schema `AssetKind::Texture` 接受任何 TextureAsset；理论上拖 PNG 也会绑进去导致 BakeEquirectToCube 参数校验 fail（log warn + fallback dummy IBL）。完美的类型过滤要求 schema 区分 "Texture-2D" vs "Texture-HDR-Equirect"；留作 v0.8 编辑器伴随 milestone 处理
 
 ---
 

@@ -581,6 +581,13 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHITexture> bakedPrefilteredCube;
     std::unique_ptr<Orange::Rhi::RHITexture> bakedBrdfLut;
 
+    // Pipeline 内部记录的 "上次烘焙时 EnvironmentComponent.cubemap 的句柄"。
+    // Render() 每帧 query 当前 EnvironmentComponent.cubemap，若与本字段不同
+    // 则自动触发一次 BakeIblFromWorld（编辑器 Inspector 拖拽 / picker 替换
+    // cubemap 字段后无需手动重 bake）。初值 invalid handle = 尚未烘焙。
+    ::Orange::Engine::Asset::AssetHandle<::Orange::Engine::Asset::TextureAsset>
+        lastBakedCubemap{};
+
     // -----------------------------------------------------------------
 
     // drawable.materialInstance == nullptr 时的 fallback Material。当前装
@@ -1906,6 +1913,7 @@ void Pipeline::Shutdown()
     impl.bakedBrdfLut.reset();
     impl.bakedPrefilteredCube.reset();
     impl.bakedIrradianceCube.reset();
+    impl.lastBakedCubemap = {};
     impl.dummyBrdfLut.reset();
     impl.dummyPrefilteredCube.reset();
     impl.dummyIrradianceCube.reset();
@@ -2161,6 +2169,7 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
         mpImpl->bakedIrradianceCube.reset();
         mpImpl->bakedPrefilteredCube.reset();
         mpImpl->bakedBrdfLut.reset();
+        mpImpl->lastBakedCubemap = {};
         SetIblTextures(nullptr, nullptr, nullptr);
         return;
     }
@@ -2172,6 +2181,7 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
         mpImpl->bakedIrradianceCube.reset();
         mpImpl->bakedPrefilteredCube.reset();
         mpImpl->bakedBrdfLut.reset();
+        mpImpl->lastBakedCubemap = {};
         SetIblTextures(nullptr, nullptr, nullptr);
         return;
     }
@@ -2347,6 +2357,7 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
     mpImpl->bakedIrradianceCube  = std::move(irradianceCube);
     mpImpl->bakedPrefilteredCube = std::move(prefilteredCube);
     mpImpl->bakedBrdfLut         = std::move(brdfLut);
+    mpImpl->lastBakedCubemap     = env.cubemap;
     SetIblTextures(mpImpl->bakedIrradianceCube.get(),
                    mpImpl->bakedPrefilteredCube.get(),
                    mpImpl->bakedBrdfLut.get());
@@ -3760,6 +3771,33 @@ void Pipeline::Render(Orange::Engine::World& world)
     if (!impl.initialized)
     {
         return;
+    }
+
+    // EnvironmentComponent.cubemap 变更自动 re-bake：编辑器 Inspector 拖拽 /
+    // picker 替换 cubemap 字段后无需调用方手动 BakeIblFromWorld。每帧 query
+    // first-found EnvironmentComponent.cubemap，与上次烘焙时记录的 handle 比
+    // 较；不同（含 invalid → valid / valid → 不同 cubemap / valid → invalid）
+    // 即触发一次 bake。bake 是同步阻塞（~ 几百 ms 量级），频次取决于用户
+    // 编辑节奏，acceptable for 0.x。assets 在 Initialize 时已经绑定到 impl，
+    // 所以本路径不需要 caller 显式喂 AssetRegistry。
+    if (impl.assets != nullptr)
+    {
+        auto&        reg     = world.Registry();
+        const auto   envView = reg.view<EnvironmentComponent>();
+        ::Orange::Engine::Asset::AssetHandle<::Orange::Engine::Asset::TextureAsset>
+            currentCubemap{};
+        if (!envView.empty())
+        {
+            currentCubemap =
+                envView.get<EnvironmentComponent>(envView.front()).cubemap;
+        }
+        if (currentCubemap != impl.lastBakedCubemap)
+        {
+            BakeIblFromWorld(world, *impl.assets);
+            // 注意：BakeIblFromWorld 内部会更新 lastBakedCubemap；本路径
+            // 不再额外赋值，避免与 graceful fallback（invalid handle → null
+            // lastBakedCubemap）冲突。
+        }
     }
 
     // 离屏模式分叉：不走 swap-chain renderer，最终输出落到 viewportColor。
