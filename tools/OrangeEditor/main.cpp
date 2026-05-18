@@ -220,6 +220,39 @@ int main()
     // 验证不通过则 dock layout 本身在 maximize 状态下就算错。
     glfwMaximizeWindow(glfwWindow);
 
+    // GAP-2026-05-17-editor-first-frame-flash 修复：glfwMaximizeWindow 在
+    // Windows 上是异步消息——maximize 后 GLFW 内部 framebuffer size 不会立刻
+    // 更新；之后 RenderDevice / Renderer 创建 swap-chain 拿的是旧 1600×900 尺
+    // 寸，第一帧 present 时 surface 已经变 1920×N，swap-chain 与 surface 错配
+    // 表现为"左上 1600×900 区域 = 渲染内容、其余 = 未覆盖白色框 buffer"的
+    // 一闪而过白条。
+    //
+    // 修法：连续 PollEvents + 比对 framebuffer size，让 GLFW 把 maximize 后
+    // 的 WM_SIZE 消息处理完再继续。最多等 32 轮（~ 几十毫秒，Windows 通常
+    // 1-2 轮就回，安全余量）；超时仍走原路径不阻断启动。
+    {
+        int prevW = 0, prevH = 0;
+        glfwGetFramebufferSize(glfwWindow, &prevW, &prevH);
+        for (int attempt = 0; attempt < 32; ++attempt)
+        {
+            glfwPollEvents();
+            int newW = 0, newH = 0;
+            glfwGetFramebufferSize(glfwWindow, &newW, &newH);
+            if (newW != prevW || newH != prevH)
+            {
+                // size 变了，再 poll 一轮直到稳态（防 macOS / Linux DWM 多
+                // 段 resize），否则跳出
+                prevW = newW;
+                prevH = newH;
+            }
+            else if (attempt > 0)
+            {
+                // 连续两轮 size 未变 = settled
+                break;
+            }
+        }
+    }
+
     // ---- 编辑器自管 RenderDevice + IRenderer ---------------------------
     Orange::Renderer::RenderDeviceDesc rdDesc{};
     rdDesc.mBackend          = Orange::Renderer::BackendType::Default;

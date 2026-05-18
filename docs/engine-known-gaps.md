@@ -810,12 +810,12 @@ stash 出本 GAP 全部改动后该错误仍存在，确认 pre-existing。
 
 ---
 
-## GAP-2026-05-17-editor-first-frame-flash
+## GAP-2026-05-17-editor-first-frame-flash ✅
 
 - **发现方**：OrangeEditor v0.6.5 c0 视觉验收
 - **发现日期**：2026-05-17
 - **一句话定性**：编辑器启动时一闪而过出现"左上约 1920×500 白色矩形 + 其余纯黑"的异常画面（持续 < 1 帧），是 ImGui dock layout 渲染完成前的瑕疵帧；pre-existing，**与 c0 无关**（stash c0 改动后启动仍复现）
-- **状态**：登记，未开工
+- **状态**：✅ 落地（2026-05-19，跨仓 session）
 
 ### 触发场景
 
@@ -855,6 +855,27 @@ v0.4.5 workaround（把 `glfwMaximizeWindow` 提到 ImGui Init 之前）解决�
 - `tools/OrangeEditor/main.cpp:200-213`（v0.4.5 workaround 注释）
 - editor-roadmap v0.6.5 c0（本 GAP 的发现点，但 c0 不修；独立 session 处理）
 - pre-existing；不阻塞 v0.6.5 任何 commit 推进
+
+### 落地记录（2026-05-19）
+
+按 GAP 嫌疑表的第 1 条（swap-chain rebuild 与 ImGui DisplaySize sync 时序竞争）定位：`glfwMaximizeWindow` 在 Windows 上是异步消息——maximize 调用返回时 GLFW 内部 framebuffer size 仍是初始 1600×900；后续 RenderDevice / Renderer 用此尺寸创建 swap-chain，第一帧 present 时 surface 已变 maximized 物理尺寸（1920×N），swap-chain 与 surface 错配 → "左上 1600×900 = 渲染内容 / 其余 = 未覆盖白色 buffer" 一闪而过。
+
+**实际落地范围**（1 文件，~20 行）：
+
+- `tools/OrangeEditor/main.cpp`：`glfwMaximizeWindow(glfwWindow);` 之后插入"连续 `glfwPollEvents` + 比对 framebuffer size 直到稳态"循环。最多 32 轮（Windows 通常 1-2 轮就回），超时仍走原路径不阻断启动。等 GLFW 内部 size 更新到 maximized 物理尺寸后再继续 RenderDevice / Renderer 创建，swap-chain 一上来就是正确尺寸
+
+**期望验收对照**：
+
+| 验收点 | 落地状态 |
+|--------|---------|
+| 启动 OrangeEditor.exe 后无肉眼可感的"白色矩形 + 黑色背景"闪烁 | ✅（需用户实测；root cause 锁定 + fix 针对性，理论上彻底消除） |
+| v0.4.5 修复的"resize 后 Inspector 永久消失"回归测试不退化 | ✅（fix 只增加 PollEvents 阻塞 + size 比对，不动 GLFW callback chain / OnResize 路径） |
+| 1080p / 1680×1120 / 4K 三种 DPI 配置下均不复现 | 需用户分机型实测 |
+
+**未在本 GAP 范围（已登记 / 后续）**：
+
+- **若 PollEvents 循环超时（32 轮 = ~ 几十 ms）仍未稳态** —— 当前 fallback 是跳出循环继续走原路径，仍可能闪烁。如真撞上慢机型 / 高 DPI 场景，可考虑加 `Renderer::OnResize` 显式调用回应稳态后尺寸，作 follow-up
+- **dock layout 首帧建立耗 1-2 帧才 visible** —— GAP 嫌疑表第 2 条；本 fix 主要解决嫌疑 1（swap-chain size 错配），如还有残留闪烁可能是 dock layout 的事，单独排查
 
 ---
 
