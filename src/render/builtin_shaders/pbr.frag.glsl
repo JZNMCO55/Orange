@@ -41,6 +41,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
     vec4 uShadowParams;       // x = pcfKernelRadius，y = depthBias，z/w 预留
     vec4 uCameraWorldPos;     // xyz = camera worldPos
     vec4 uFrameInfo;          // x = time 秒，y/z/w 预留
+    vec4 uIblFactor;          // xyz = EnvironmentComponent.tint * intensity（host 端预乘），w 预留
 } light;
 layout(set = 0, binding = 2) uniform samplerCube uIrradiance;       // diffuse IBL — dummy zero in direct-only baseline
 layout(set = 0, binding = 3) uniform samplerCube uPrefilteredEnv;   // specular IBL — dummy zero in direct-only baseline
@@ -154,7 +155,11 @@ void main()
     vec2  brdf       = texture(uBrdfLut, vec2(NoV, roughness)).rg;
     vec3  iblSpec    = prefiltered * (Fibl * brdf.x + brdf.y);
 
-    vec3  iblLo      = (iblDiffuse + iblSpec) * ao;
+    // EnvironmentComponent.tint * intensity（host 端预乘成 uIblFactor.rgb）
+    // 一次性作用到 diffuse + specular IBL 两项。dummy IBL 阶段
+    // irradiance / prefiltered 全 0 → 相乘仍 0，本乘子无视觉影响；c7
+    // SetIblTextures 喂入真实烘焙产物后立即生效，无需再改 shader。
+    vec3  iblLo      = (iblDiffuse + iblSpec) * ao * light.uIblFactor.rgb;
 
     // ---- 合成 ----
     vec3 color = directLo + iblLo;

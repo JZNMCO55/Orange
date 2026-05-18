@@ -41,6 +41,7 @@
 #include "orange/engine/platform/Window.h"
 #include "orange/engine/render/BuiltinMaterials.h"
 #include "orange/engine/render/BuiltinShadowShaders.h"
+#include "orange/engine/render/EnvironmentComponent.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/Material.h"
 #include "orange/engine/render/MaterialInstance.h"
@@ -494,9 +495,10 @@ struct Pipeline::Impl
         glm::vec4 shadowParams;       // x = pcfKernelRadius, y = depthBias, z/w pad
         glm::vec4 cameraWorldPos;     // xyz = camera worldPos（rim/spec 类 shader 取 viewDir）, w = unused
         glm::vec4 frameInfo;          // x = time（seconds），y/z/w 预留（deltaTime / frameCount / vsyncFps）
+        glm::vec4 iblFactor;          // xyz = EnvironmentComponent.tint * intensity, w pad；PBR shader IBL 段乘子
     };
-    static_assert(sizeof(LightUboData) == 64 + 16 * 5,
-                  "LightUboData std140 size mismatch (expected 144 bytes)");
+    static_assert(sizeof(LightUboData) == 64 + 16 * 6,
+                  "LightUboData std140 size mismatch (expected 160 bytes)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
 
     // 当前帧时间（seconds，单调递增）。Pipeline::SetFrameTime 设置，
@@ -783,7 +785,8 @@ struct Pipeline::Impl
     void UpdateLightUbo(const DirectionalLight* light,
                         const glm::vec3&        lightWorldDir,
                         const glm::mat4&        lightViewProj,
-                        const glm::vec3&        cameraWorldPos);
+                        const glm::vec3&        cameraWorldPos,
+                        const glm::vec3&        iblTintIntensity);
 
     // 计算 light view-proj：方向投影 + scene 包围盒 fitted ortho 视锥
     // 投影。scene 包围盒当前 hardcode 为 ±10 单位的立方体（足够覆盖
@@ -2362,6 +2365,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     // caster"路径（PCF 取 1.0 = 全亮）。
     const DirectionalLight* activeLight = nullptr;
     glm::vec3               activeLightDir{0.3f, -1.0f, 0.4f};  // neutral 默认
+    glm::vec3               iblTintIntensity{1.0f, 1.0f, 1.0f}; // 未挂 EnvironmentComponent → 1,1,1（中性）
     if (impl.scene.HasCamera())
     {
         auto& reg  = world.Registry();
@@ -2378,12 +2382,23 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             const glm::quat rot = (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
             activeLightDir = ComputeDirectionalLightWorldDir(rot);
         }
+        // EnvironmentComponent first-found：与 DirectionalLight 同款选取；
+        // 多个时取迭代器第一个（baseline 单 World 全局环境，多 environment
+        // blending 留给后续 reflection probe milestone）。tint * intensity
+        // 在 host 端先乘好，shader 侧只读 `uIblFactor.rgb` 一次相乘——避免
+        // 在 fragment 内每像素再算一次乘法。
+        auto envView = reg.view<EnvironmentComponent>();
+        if (!envView.empty())
+        {
+            const auto&  env = envView.get<EnvironmentComponent>(envView.front());
+            iblTintIntensity = env.tint * env.intensity;
+        }
         impl.EnsureShadowMap();
         const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                 : glm::mat4(1.0f);
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         const glm::vec3 cameraPos(invView[3]);
-        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos);
+        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos, iblTintIntensity);
     }
 
     // 2. 一次 cmd list 包含：shadow → 主 pass → passthrough → 翻 layout。
@@ -2697,7 +2712,8 @@ glm::mat4 Pipeline::Impl::ComputeLightViewProj(const glm::vec3& lightWorldDir) c
 void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
                                     const glm::vec3&        lightWorldDir,
                                     const glm::mat4&        lightViewProj,
-                                    const glm::vec3&        cameraWorldPos)
+                                    const glm::vec3&        cameraWorldPos,
+                                    const glm::vec3&        iblTintIntensity)
 {
     if (!lightUbo)
     {
@@ -2722,6 +2738,7 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
                                   0.0f, 0.0f);
     data.cameraWorldPos = glm::vec4(cameraWorldPos, 0.0f);
     data.frameInfo      = glm::vec4(frameTime, 0.0f, 0.0f, 0.0f);
+    data.iblFactor      = glm::vec4(iblTintIntensity, 0.0f);
 
     void* mapped = lightUbo->Map();
     if (mapped == nullptr)
@@ -3514,6 +3531,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     // 走"远深度清零 + 不画 caster"路径，PCF 取 1.0 = 全亮。
     const DirectionalLight* activeLight = nullptr;
     glm::vec3               activeLightDir{0.3f, -1.0f, 0.4f};  // neutral 默认
+    glm::vec3               iblTintIntensity{1.0f, 1.0f, 1.0f}; // 未挂 EnvironmentComponent → 1,1,1（中性）
     if (hdrReady && impl.scene.HasCamera())
     {
         auto& reg  = world.Registry();
@@ -3530,6 +3548,17 @@ void Pipeline::Render(Orange::Engine::World& world)
             const glm::quat rot = (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
             activeLightDir = ComputeDirectionalLightWorldDir(rot);
         }
+        // EnvironmentComponent first-found：详细注释参见 RenderOffscreen 内
+        // 同款代码块。tint * intensity 在 host 端先乘好，shader 端仅一次
+        // 乘法。dummy IBL 阶段（c6 / c7 前）irradiance + prefiltered 仍是
+        // 1×1 黑，相乘结果 = 0，本字段对最终视觉无影响——纯接通点等待 c7
+        // SetIblTextures 真实喂入烘焙产物后立即生效。
+        auto envView = reg.view<EnvironmentComponent>();
+        if (!envView.empty())
+        {
+            const auto&  env = envView.get<EnvironmentComponent>(envView.front());
+            iblTintIntensity = env.tint * env.intensity;
+        }
         impl.EnsureShadowMap();
         const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                               : glm::mat4(1.0f);
@@ -3538,7 +3567,7 @@ void Pipeline::Render(Orange::Engine::World& world)
         // / 后续 specular 类 fragment 取真 viewDir。
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         const glm::vec3 cameraPos(invView[3]);
-        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos);
+        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos, iblTintIntensity);
     }
 
     // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /

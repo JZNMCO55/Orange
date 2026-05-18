@@ -47,9 +47,11 @@ namespace
 // 1.1 → 1.2：新增 LayerComponent（可选 component，旧 1.1 文件读出后该
 // 字段缺失视为"归属于 default layer"，与新增任何 optional component 的
 // forward-compat 路径一致；不需要 major bump）。
+// 1.2 → 1.3：新增 EnvironmentComponent（同款 optional component 路径，
+// 旧 1.2 文件无该字段时 Pipeline 退化到 dummy IBL，PBR + IBL baseline）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 2};
+    static const SchemaVersion kVersion{"scene/world", 1, 3};
     return kVersion;
 }
 

@@ -19,7 +19,9 @@
 #include "orange/engine/core/Serialization.h"
 #include "orange/engine/physics/ColliderComponent.h"
 #include "orange/engine/physics/RigidBodyComponent.h"
+#include "orange/engine/asset/TextureAsset.h"
 #include "orange/engine/render/Camera.h"
+#include "orange/engine/render/EnvironmentComponent.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
@@ -573,6 +575,127 @@ bool ReadDirectionalLight(const JsonReader& reader,
     light.castsShadow = reader.GetBool(Join(componentPath, "castsShadow"), false);
 
     ctx.world.AddComponent(entity, light);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// EnvironmentComponent
+//
+// 三个字段：cubemap（HDR equirect 资产路径，c7 真正接 HDR loader 后才能
+// 加载非空数据；c6 阶段允许写空字符串）+ intensity + tint。schema 上与
+// RenderableComponent 同样用 AssetRegistry::PathOf<TextureAsset> 反查 path
+// 字符串，Load 路径调 AssetRegistry::Load<TextureAsset>，加载失败时留空
+// handle 不阻断 scene load——与 mesh handle 的容错策略一致，编辑器修复
+// 路径更友好。
+// ---------------------------------------------------------------------------
+
+bool HasEnvironment(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::EnvironmentComponent>(entity);
+}
+
+void WriteEnvironment(JsonWriter& writer,
+                      std::string_view componentPath,
+                      Entity entity,
+                      const SaveContext& ctx)
+{
+    const auto* env = ctx.world.GetComponent<Render::EnvironmentComponent>(entity);
+    if (env == nullptr)
+    {
+        return;
+    }
+
+    std::string_view cubemapPath;
+    if (ctx.assetRegistry != nullptr && env->cubemap.IsValid())
+    {
+        cubemapPath = ctx.assetRegistry->PathOf<Asset::TextureAsset>(env->cubemap);
+        if (cubemapPath.empty())
+        {
+            ORANGE_LOG_WARN(
+                "Scene save: EnvironmentComponent's cubemap handle has no path in "
+                "AssetRegistry; writing empty path.");
+        }
+    }
+    else if (env->cubemap.IsValid() && ctx.assetRegistry == nullptr)
+    {
+        ORANGE_LOG_WARN(
+            "Scene save: EnvironmentComponent has a valid cubemap handle but no AssetRegistry "
+            "was supplied to Save(); writing empty path.");
+    }
+
+    const float tint[3] = {env->tint.x, env->tint.y, env->tint.z};
+
+    writer.WriteString(    Join(componentPath, "cubemap"),   cubemapPath);
+    writer.WriteFloatArray(Join(componentPath, "tint"),      tint, 3);
+    writer.WriteFloat(     Join(componentPath, "intensity"), env->intensity);
+}
+
+bool ReadEnvironment(const JsonReader& reader,
+                     std::string_view componentPath,
+                     Entity entity,
+                     const LoadContext& ctx)
+{
+    Render::EnvironmentComponent env;
+
+    std::string cubemapPath;
+    if (reader.Has(Join(componentPath, "cubemap")))
+    {
+        if (!reader.ReadString(Join(componentPath, "cubemap"), cubemapPath))
+        {
+            return false;
+        }
+    }
+
+    if (!cubemapPath.empty())
+    {
+        if (ctx.assetRegistry != nullptr)
+        {
+            auto loadResult = ctx.assetRegistry->Load<Asset::TextureAsset>(cubemapPath);
+            if (loadResult.IsOk())
+            {
+                env.cubemap = loadResult.Value();
+            }
+            else
+            {
+                // 加载失败（如 c7 HDR loader 尚未到位时遇到 .hdr 资产）→
+                // 留空 handle，Pipeline 退化到 dummy IBL；warn 提示让 caller
+                // 排查，但不阻断 scene load。
+                ORANGE_LOG_WARN(
+                    "Scene load: failed to load environment cubemap '{}'; leaving handle empty.",
+                    cubemapPath);
+            }
+        }
+        else
+        {
+            ORANGE_LOG_WARN(
+                "Scene load: EnvironmentComponent references cubemap '{}' but no AssetRegistry "
+                "was supplied to Load(); leaving handle empty.",
+                cubemapPath);
+        }
+    }
+
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    if (reader.Has(Join(componentPath, "tint")))
+    {
+        if (!reader.ReadFloatArray(Join(componentPath, "tint"), tint, 3))
+        {
+            return false;
+        }
+    }
+
+    double intensity = 1.0;
+    if (reader.Has(Join(componentPath, "intensity")))
+    {
+        if (!reader.ReadFloat(Join(componentPath, "intensity"), intensity))
+        {
+            return false;
+        }
+    }
+
+    env.tint      = {tint[0], tint[1], tint[2]};
+    env.intensity = static_cast<float>(intensity);
+
+    ctx.world.AddComponent(entity, env);
     return true;
 }
 
@@ -1175,6 +1298,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Layer",            ComponentKind::PureData,         &HasLayer,            &WriteLayer,            &ReadLayer},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
+        {"Environment",      ComponentKind::PureData,         &HasEnvironment,      &WriteEnvironment,      &ReadEnvironment},
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
         {"Camera",           ComponentKind::PureData,         &HasCamera,           &WriteCamera,           &ReadCamera},
 
