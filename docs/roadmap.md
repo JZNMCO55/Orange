@@ -234,15 +234,15 @@
 - B.2 Task 06.5-06 同 commit 序列内补 Environment schema 同步
 - 完整编辑器扩展（Environment 浏览 / material thumbnail / sky placeholder）作为**独立 v0.8 编辑器 milestone**在 B.2 完工后启动，见 `editor-roadmap.md`
 
-### Task 06.5-01 · monolithic PBR shader 落地（IBL 槽位 dummy）
+### Task 06.5-01 · monolithic PBR shader 落地（IBL 槽位 dummy） ✅
 
 详细字段：companion §Task PBR-01。一份 shader 同时含 direct + IBL 全路径，IBL 三槽位 B.1 期间绑 dummy 1×1 黑纹理自然退化，**对标 Lumix `data/shaders/standard.hlsl` monolithic 风格**。`textured_mesh.{vert,frag}` 不删保留作 dev fallback。Critical Path。
 
-### Task 06.5-02 · MaterialInstance 五通道 + texture binding（含 Inspector schema 同步）
+### Task 06.5-02 · MaterialInstance 五通道 + texture binding（含 Inspector schema 同步） ✅
 
 详细字段：companion §Task PBR-02。同 commit 序列内完成编辑器 Inspector schema 同步，避免"PBR ✅ 但 Inspector 看不到 metallic / roughness 字段"断层态。Critical Path。
 
-### Task 06.5-03 · sample `13_pbr_direct` + B.1 验收
+### Task 06.5-03 · sample `13_pbr_direct` + B.1 验收 ✅
 
 详细字段：companion §Task PBR-03。9 球阵（3 metallic × 3 roughness）+ 1 个 directional light，**不接 IBL**。Critical Path。
 

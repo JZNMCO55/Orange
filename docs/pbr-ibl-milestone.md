@@ -1,6 +1,6 @@
 # Phase 6.5 · 渲染真实感基线（PBR + IBL）milestone
 
-- **状态**：ACTIVE — 起草于 2026-05-17；6 项 review 议题已全部决议（见末尾决议记录）；已并入 `docs/roadmap.md` 作为 Phase 6.5 outline 入口，本文件作为详细 companion（与 `editor-roadmap.md` 之于 Phase 6 同款节奏）；下一步开 B.1 commit-1 + OrangeRender audit session
+- **状态**：ACTIVE — 起草于 2026-05-17；6 项 review 议题已全部决议（见末尾决议记录）；已并入 `docs/roadmap.md` 作为 Phase 6.5 outline 入口，本文件作为详细 companion（与 `editor-roadmap.md` 之于 Phase 6 同款节奏）。**B.1 ✅（2026-05-18）**：Task PBR-01 / 02 / 03 全部落地（commits 753627e / edc783b / 0bc55c5 / 080ed8f / 97d4950）；OrangeRender R1/R2/R3/R4 audit 同期完成（vendor bump commit 06025ae）。**下一步开 B.2**（PBR-04 起步）
 - **路线图入口**：[`docs/roadmap.md`](./roadmap.md) Phase 6.5 节
 - **参考实现**（2026-05-17 audit 确认）：Lumix `data/shaders/common.hlsli` (776 行 PBR 库：`F_Schlick` L465 / `D_GGX` L764 / V_Smith 等齐全) + `data/shaders/standard.hlsl`（monolithic PBR 主路径）+ `data/shaders/ibl_filter.hlsl`（**122 行**单文件做 BRDF LUT + irradiance + prefiltered specular 三种卷积）+ `render_module.h:267 EnvProbeInfo`（EnvironmentComponent ECS 对位）。我们方案 B 直接对标这套
 - **驱动**：编辑器 v0.6.5 完工后 retro 发现"场景观感整体偏亮、几何体塑料感强"，根因是默认 mesh shader（`textured_mesh.frag.glsl`）只是开发期校验用的"棋盘 × 阴影"，没装任何 lighting model；ACES tonemap 在链尾，但上游喂进来的不带法线响应的图，tonemap 救不回真实感
@@ -89,7 +89,7 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
 
 > **目标**：场景脱离"棋盘 × 阴影"塑料感，几何体按 N·L 明暗，metallic / roughness 物理感可调。约 3-5 天。
 
-#### Task PBR-01 · monolithic PBR shader 落地（IBL 槽位 dummy）
+#### Task PBR-01 · monolithic PBR shader 落地（IBL 槽位 dummy） ✅
 
 - **描述**：新增 `src/render/builtin_shaders/pbr.{vert,frag}.glsl` —— **一份 shader 含 direct + IBL 全路径**，IBL 三纹理在 B.1 阶段绑全局 dummy 1×1 黑 cubemap / 2D 黑 LUT，自然退化为 direct-only。`textured_mesh` 不动，保留作 dev fallback
 - **前置**：无（B.1 完全本仓内闭环，与 OrangeRender audit session 并行不阻塞）
@@ -105,7 +105,7 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
 - **验证**：sample 场景 9 球（3 metallic × 3 roughness）按 PBR 渲染，金属 / 塑料视觉区分明显；调 roughness 0→1 specular highlight 从 sharp 到 wide 连续；关掉所有 direct light → 全黑（dummy IBL 为 0 验证）
 - **Critical Path**：是
 
-#### Task PBR-02 · MaterialInstance 五通道 + texture binding（含 Inspector schema 同步）
+#### Task PBR-02 · MaterialInstance 五通道 + texture binding（含 Inspector schema 同步） ✅
 
 - **描述**：扩展 `MaterialInstance` 暴露 baseColor / metallic / roughness / normal / AO 五通道；每通道可绑 texture，未绑时退化为 scalar uniform。**同 commit 序列内**完成编辑器 Inspector schema 同步（v0.2.5 schema-first 架构下加 5 个 PropertyDescriptor 是 hours 级工作，不允许 PBR ✅ 而 Inspector 看不到 metallic / roughness 字段的断层态）
 - **前置**：PBR-01
@@ -120,7 +120,7 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
   - 编辑器 Inspector 选中 material 后能看到并实时拖拽编辑五字段
 - **Critical Path**：是
 
-#### Task PBR-03 · sample `13_pbr_direct` + B.1 验收
+#### Task PBR-03 · sample `13_pbr_direct` + B.1 验收 ✅
 
 - **描述**：新 sample `samples/13_pbr_direct`：9 球阵（3 metallic × 3 roughness）+ 1 个 directional light，**不接 IBL**。validate Cook-Torrance + Schlick + GGX + Smith 数学正确性
 - **前置**：PBR-01 / 02
