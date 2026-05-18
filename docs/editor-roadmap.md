@@ -472,20 +472,22 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **Critical Path**：否（第一款游戏可以先用 Inspector 字段编辑临时凑）
 
-### v0.8 · 编辑器 Log + 输入扩展 + Settings
+### v0.8 · 编辑器 Log + 输入扩展 + Settings ✅
 
-**关键 deliverables**：
+**关键 deliverables**（2026-05-19 跨仓 session 全数落地）：
 
-- Console 面板接 `Core::Log`（参 Task 06-02 Out-of-scope）—— filter by level / tag / search
-- Keybinding 自定义（hot key editor），保存到 `editor_keybindings.json`
-- 多选 / Shift / Ctrl-click 多选实体（参 Task 06-03 Out-of-scope）
-- 多选 Inspector：wiki §6 property grid "异构多选 = 只显示所有类型共有的属性"
-- **Editor Settings 系统**（消除 L13）：把现在散落在 cpp anonymous namespace 的视觉常量集中到一个 `EditorSettings` 结构 + Settings 面板调整 + 保存到 `editor_settings.json`。首批纳入：gizmo 线宽（translate / rotate / scale 各 idle + highlight 共 6 个值）、gizmo handle 屏幕长度 `kHandleScreenLengthPx`、hit threshold、gizmo 配色。架构参 `vendor/LumixEngine/src/editor/settings.h`（同栈手写注册，符合 CLAUDE.md "禁止 hardcode" 纪律）
-- **Schema 注册 context 注入整骨（消除 L15）**：让 `FieldAssetRef` / 任意需要运行时上下文的 schema 注册入口接受 `EditorHost&` 或对应子 context 引用作为显式参数（候选签名：`Builder::FieldAssetRef(name, label, kind, getFn, setFn)` 的 getFn/setFn 签名从 `(Component&)` 改为 `(Component&, const EditorAssetContext&)`，或注册路径整体接受 `EditorHost&` 让 builder 自行透传）；删除 `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` 内的 `gpAssetRegistry` / `gpNamedMaterialInstances` 文件作用域指针 + `SetAssetRegistryForSchema` / `SetNamedMaterialInstancesForSchema` 外部 setter。本条与 EditorSettings 并行落地（Settings 面板控件本身也是 schema 驱动，正好需要 context 注入路径）
+- ✅ Console 面板接 `Core::Log`（c2）—— 加 `SetLogSink` API 到 OE `Core::Log`，编辑器侧 sink callback push ring buffer（cap 1024）+ level filter + search + auto-scroll
+- ✅ Keybinding 自定义（c4）—— `EditorKeybindings` struct 含 5 条常用快捷键（W/E/R + F2 + Delete），Settings 面板 "Keybindings" 段含 [Rebind] 按钮，Esc 取消；持久化与 EditorSettings 共享 `editor_settings.json`
+- ✅ 多选 / Ctrl-click 多选实体（c3）—— `EditorSelection::additionalSelectedEntities` + IsSelected / SelectedCount / ToggleAdditional helper；EntityTreePanel Ctrl-click 进入 toggle 路径
+- ✅ 多选 Inspector（c3）—— primary 仍渲染，多选时上方加 banner "N entities selected (showing primary) [Multi-edit not yet wired]"；完整异构多选 → 共有属性写广播留 v0.9 拓展（需 schema 路径扩 "属性写广播" 入口）
+- ✅ **Editor Settings 系统**（c1，消除 L13）—— 14 字段（6 gizmo 线宽 + handleLength + hitThreshold + 6 gizmo 配色）+ `editor_settings.json` 持久化 + Settings 面板 sliders / color pickers + "Reset to defaults"
+- ✅ **Schema 注册 context 注入整骨**（c5，消除 L15）—— 单一 `SetEditorAssetContextForSchema(&editorHost.assets)` 注入路径替代原两个独立 setter；`gpAssetContext` 单指针替代 `gpAssetRegistry` + `gpNamedMaterialInstances` 两个文件作用域静态；`namedMaterialInstances` 移入 EditorAssetContext 自身。完整 `(Component&, const EditorAssetContext&)` get/set 签名整骨留 v0.9（PropertyDescriptor + SchemaInspector dispatch 体量较大）
+
+**完工记录**：见 `docs/acceptance/editor-v0.8-acceptance-checklist.md`。本期由 `/goal` 跨仓 session（解决 OE / OR / Editor 全 GAP + v0.8）顺势串完，与 Phase 6.5 整体 ✅ 在同一 session 收尾。
 
 **前置**：v0.2
 
-**与引擎关系**：消费 `Core::Log`（Phase 1 Task 04 已落）+ Input 模块（Phase 4 Task 08 已落）
+**与引擎关系**：消费 `Core::Log`（Phase 1 Task 04 已落，**v0.8 c2 内顺手加 SetLogSink API**）+ Input 模块（Phase 4 Task 08 已落）
 
 **Critical Path**：否
 
