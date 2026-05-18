@@ -212,7 +212,7 @@
 
 ---
 
-## Phase 6.5 · 渲染真实感基线（PBR + IBL）
+## Phase 6.5 · 渲染真实感基线（PBR + IBL） ✅
 
 **详细 milestone 设计** —— [`pbr-ibl-milestone.md`](./pbr-ibl-milestone.md)。本节是 outline 入口，task 字段（描述 / 前置 / 输出 / 实现要点 / 验证 / Critical Path）以及决议记录 / 风险登记全部在 companion 文件，节奏与 `editor-roadmap.md` 之于 Phase 6 同款。
 
@@ -260,17 +260,18 @@
 
 详细字段：companion §Task PBR-06。World 全局 `EnvironmentComponent`（cubemap asset + intensity + tint），**对标 Lumix `render_module.h:267 EnvProbeInfo`**。default IBL 从 **PolyHaven CC0** HDRI 站选 1K outdoor scene equirect 入库 `assets/environments/`。Critical Path。
 
-### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收
+### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收 ✅
 
 详细字段：companion §Task PBR-07。9 球阵 + IBL 环境 + 1 directional light + furnace test（验能量守恒）。Critical Path。
 
-**当前状态**（2026-05-19，OR fix 消费后）：sample segfault 真因（OR `mPipelineCache` cache lifecycle dangling raw pointer，c12 锁定）已由 OR 端 commit `5715a9d` 落地修复 + commit `4eec1bf` 归档；本仓 vendor submodule bump 到 `4eec1bf` 后 sample 完整跑通 init + frame loop。但视觉验收暴露 2 个**新的 OE 端 follow-up 缺口**：
-- `docs/engine-known-gaps.md` GAP-2026-05-19-pbr-ibl-specular-quality —— PBR + IBL specular split-sum 路径在 high roughness 段能量损失（furnace 9 球远非"近似全白"，顶行右几乎纯黑）+ 中 roughness 段 prefiltered 采样伪影；direct GGX 路径（13_pbr_direct）无此症状，问题锁定 IBL 路径
-- `docs/engine-known-gaps.md` GAP-2026-05-19-editor-environment-component-wiring —— 编辑器 Environment Inspector schema ✅，但 Cubemap 字段无 drop/picker 实现 + Intensity 拖动 viewport 无响应（Pipeline 不 query World runtime EnvironmentComponent，runtime IBL 切换已 deferred 到 v0.8 编辑器伴随 milestone）
+**完工状态**（2026-05-19）：sample segfault 真因（OR `mPipelineCache` cache lifecycle dangling raw pointer）由 OR commit `5715a9d` 落地修复，本仓 vendor bump 后 sample 完整跑通；2 个 OE 端 follow-up GAP 同日跨仓 session 落地：
+- `docs/engine-known-gaps.md` GAP-2026-05-19-pbr-ibl-specular-quality ✅ —— multi-scatter compensation (Fdez-Aguero 2019 简化 / Filament 同款) 接到 PBR shader IBL specular 段 + BakePrefilteredEnvironment sampleCount 1024 → 4096。furnace 9 球阵接近全白；HDR 中 roughness 段密集白方块大幅消失；顶行右 metallic=1 r=0.9 不再偏暗
+- `docs/engine-known-gaps.md` GAP-2026-05-19-editor-environment-component-wiring ✅ —— Asset 浏览器 ext 映射加 .hdr/.exr ([HDR] icon)；Pipeline::Impl 加 lastBakedCubemap + Render 入口每帧 query first-found EnvironmentComponent.cubemap，与 lastBakedCubemap 不同则自动调 BakeIblFromWorld。Inspector 拖 .hdr / Pick / 改 Intensity / Tint 字段在 viewport 视觉实时跟随
+- 顺路 fix BUG-2026-05-18-vma-shutdown-allocation-leak-assertion 双源（OR ctest harness + OE Pipeline::Shutdown 漏 reset bakedXxx）
 
-按 milestone-end-checklist 红线（渲染正确性 + 验收口径未达），**Task 不标 ✅**。视觉验收 6 项实测见 `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md` "OR pipeline cache fix 落地 + 视觉验收（2026-05-19）" 段。
+视觉验收 6 项 + acceptance-checklist 见 `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md` "OR pipeline cache fix 落地 + 视觉验收（2026-05-19）" 段。
 
-> **Phase 6.5 完工 ritual（持续推进中）**：B.1 全部 ✅（Task 06.5-01 / 02 / 03）；B.2 代码段全 ✅（Task 06.5-04 / 05 / 06）；**Task 06.5-07 sample segfault 真因已解决（OR 端 fix 落地 + 本仓消费 OK），但视觉验收暴露 2 个新 OE 端 GAP 阻塞** ✅。前置 fix 路径：(1) GAP-2026-05-19-pbr-ibl-specular-quality 落地 → 核心功能 1/2 视觉验收通过 (2) GAP-2026-05-19-editor-environment-component-wiring 落地 → 核心功能 3 视觉验收通过。两 GAP 落地后才标 Task 06.5-07 ✅ + Phase 6.5 整体 ✅；v0.8 编辑器伴随 milestone 同等待 Phase 6.5 ✅ 后立项。
+> **Phase 6.5 完工 ritual（已完成）**：B.1 全部 ✅（Task 06.5-01 / 02 / 03）；B.2 全部 ✅（Task 06.5-04 / 05 / 06 / 07）；Phase 6.5 整体 ✅。后续 v0.8 编辑器伴随 milestone（Environment 浏览 / material thumbnail / sky placeholder）按 editor-roadmap.md v0.8 规划，与本 Phase 解耦推进。
 
 ---
 
