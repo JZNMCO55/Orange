@@ -85,10 +85,13 @@ add_library(orange_engine STATIC
     # + PostProcessChain（HDR / Bloom / Tonemap / LUT 默认链描述符）
     # + MaterialSystem（自定义 shader 注入扩展点）
     # + BuiltinShadowShaders（shadow_caster shader pair 工厂）
+    # + IblBaker（HDR equirect → cube resample / 后续续 BRDF LUT /
+    #   irradiance / prefiltered specular 三种卷积烘焙路径）
     src/render/RenderHeaderCheck.cpp
     src/render/BuiltinMaterials.cpp
     src/render/BuiltinPostProcessChain.cpp
     src/render/BuiltinShadowShaders.cpp
+    src/render/IblBaker.cpp
     src/render/MaterialInstance.cpp
     src/render/MaterialSystem.cpp
     src/render/Pipeline.cpp
@@ -286,6 +289,9 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/pbr.frag.glsl"
     ORANGE_ENGINE_BUILTIN_PBR_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/ibl_equirect_to_cube.comp.glsl"
+    ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
@@ -312,7 +318,8 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PBR_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)
