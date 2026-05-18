@@ -29,6 +29,7 @@
 #include <orange/engine/app/AppHost.h>
 #include <orange/engine/app/FrameContext.h>
 #include <orange/engine/app/Layer.h>
+#include <orange/engine/core/Log.h>
 #include <orange/engine/physics/PhysicsWorld.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/Camera.h>
@@ -44,7 +45,10 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <deque>
 #include <memory>
+#include <mutex>
+#include <string>
 
 class EditorRenderLayer : public Orange::Engine::Layer
 {
@@ -179,6 +183,32 @@ private:
     // v0.8 EditorSettings：是否显示 Settings 浮动面板（默认不显示，由 View
     // 菜单 / 主 toolbar 切换）。
     bool                                              mShowSettingsPanel{false};
+
+    // v0.8 Console 面板日志接入（Core::Log → SetLogSink → 本 ring buffer）。
+    // sink callback 在任意线程触发，写 buffer 必须持 mutex。读路径（Draw
+    // ConsolePanel）也持 mutex，保持简单一致；ring buffer 大小 cap 防止
+    // 长时间运行 oom。entry 含 (level, message)。
+public:
+    struct LogEntry
+    {
+        Orange::Engine::Log::Level level;
+        std::string                message;
+    };
+
+private:
+    static constexpr std::size_t kLogBufferCap = 1024;
+    std::deque<LogEntry>                              mLogEntries;
+    std::mutex                                        mLogMutex;
+    // Console 面板 filter 状态（level 下拉 + 文本框 search）。
+    int                                               mConsoleMinLevel{0};  // Level::Trace 起
+    char                                              mConsoleSearchBuf[128]{};
+    bool                                              mConsoleAutoScroll{true};
+
+    // 静态 sink callback —— 由 main 注册到 Core::Log。userdata 是 this 指针。
+public:
+    static void LogSinkCallback(Orange::Engine::Log::Level level,
+                                std::string_view           message,
+                                void*                      userData);
 
     // v0.6 c1：上一帧推到 GLFW 的窗口 title 缓存。UpdateWindowTitle 算
     // 新 title 与本字段比对，仅在不同时调 glfwSetWindowTitle。

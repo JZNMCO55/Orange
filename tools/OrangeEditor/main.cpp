@@ -607,10 +607,9 @@ int main()
     }
 
     // ---- Layer 注入 -----------------------------------------------------
-    host->PushLayer(std::make_unique<EditorRenderLayer>(*host, *pRenderDevice,
-                                                        *pRenderer,
-                                                        imguiDescPool, vkDevice,
-                                                        editorHost));
+    auto* pEditorLayerRaw = host->PushLayer(std::make_unique<EditorRenderLayer>(
+        *host, *pRenderDevice, *pRenderer, imguiDescPool, vkDevice, editorHost));
+    auto* pEditorLayer = static_cast<EditorRenderLayer*>(pEditorLayerRaw);
 
     // v0.6 c2：窗口 × 拦截。AppHost::Run 的循环结构是
     // `while (!ShouldClose && !exitRequested)`，先 check 后 OnUpdate ——
@@ -638,11 +637,24 @@ int main()
         }
     });
 
+    // v0.8 Console 接 Core::Log：PushLayer 之后注册 sink，让 Core::Log
+    // 写入路径并行 push 到 Editor Console ring buffer。layer 的析构（host
+    // .reset 触发）会先于 Core::Log 全局静态析构发生，所以这里在退出前
+    // 必须显式 ClearLogSink 避免 dangling。
+    if (pEditorLayer != nullptr)
+    {
+        Orange::Engine::Log::SetLogSink(&EditorRenderLayer::LogSinkCallback, pEditorLayer);
+    }
+
     std::fprintf(stdout,
                  "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
                  editorHost.scene.pWorld->Size());
 
     const int rc = host->Run();
+
+    // Console 面板 sink 解绑：layer 即将析构，避免后续日志在 dangling 指
+    // 针上 push。
+    Orange::Engine::Log::ClearLogSink();
 
     // v0.8 EditorSettings 持久化：进程退出前写盘。失败仅 log，不阻断 shutdown。
     {

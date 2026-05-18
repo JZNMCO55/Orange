@@ -45,6 +45,16 @@ ORANGE_ENGINE_API bool  IsEnabled(Level level) noexcept;
 // 底层 sink。一般请使用 ORANGE_LOG_* 宏 / Format()。
 ORANGE_ENGINE_API void Write(Level level, std::string_view message) noexcept;
 
+// 应用层 sink hook（OrangeEditor v0.8 Console 面板等消费者用）：把每条
+// 日志原文 + level 转给注册 callback，让消费方自己缓存 / 过滤 / 渲染。
+// 与 backend 输出**并行**（spdlog / stderr fallback 仍然照常写），不替
+// 代主输出路径。userData 透传，callback 内部可挂自定义 context。
+// callback 必须 thread-safe（日志可能从任意线程调用）。
+// 设置 nullptr / 调 ClearLogSink 卸载。
+using LogSinkFn = void (*)(Level level, std::string_view message, void* userData);
+ORANGE_ENGINE_API void SetLogSink(LogSinkFn fn, void* userData) noexcept;
+ORANGE_ENGINE_API void ClearLogSink() noexcept;
+
 template <typename... Args>
 inline void Format(Level level, std::format_string<Args...> fmt, Args&&... args)
 {

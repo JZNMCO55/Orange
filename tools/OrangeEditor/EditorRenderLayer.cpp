@@ -1334,27 +1334,104 @@ void EditorRenderLayer::DrawAnimationPanel()
     ImGui::End();
 }
 
-// Console 面板放调试信息：帧 index、deltaTime、Esc 退出按钮、Vulkan
-// multi-viewport 提示。当前编辑器没有日志系统，先把这些
-// 当作 "console" 的内容，等真接 Core::Log 时换成日志流。
+// v0.8 Console 面板：接 Core::Log SetLogSink 路径，渲染 ring buffer 内
+// 的日志条目；filter by level + search 字符串。Header 仍保留旧的 frame
+// 信息 + Esc 退出按钮便于快速操作。
+//
+// 线程安全：mLogMutex 保护 mLogEntries，sink callback 在任意线程 push、
+// Draw 在 ImGui 线程 read，两端持锁。
 void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& frame)
 {
     ImGui::Begin("Console");
-    ImGui::Text("OrangeEditor v0.0.3");
-    ImGui::Separator();
-    ImGui::Text("frame index: %llu",
-                static_cast<unsigned long long>(frame.time.frameIndex));
-    ImGui::Text("delta: %.3f ms",
+
+    ImGui::Text("OrangeEditor v0.0.3  frame=%llu  Δ=%.2fms",
+                static_cast<unsigned long long>(frame.time.frameIndex),
                 frame.time.deltaSeconds * 1000.0);
+
+    // Filter row：level 下拉 + search 文本框 + Clear / Auto-scroll / Quit 按钮
     ImGui::Separator();
-    ImGui::TextWrapped(
-        "Drag any panel's tab OUT of the main window to detach it as a "
-        "floating native OS window (ImGui multi-viewport).");
-    ImGui::Separator();
-    if (ImGui::Button("Quit (or press Esc)")) {
-        mAppHost.RequestExit();
+    {
+        ImGui::SetNextItemWidth(110.0f);
+        const char* kLevelLabels[] = {
+            "Trace+", "Debug+", "Info+", "Warn+", "Error+", "Critical"
+        };
+        ImGui::Combo("##loglevel", &mConsoleMinLevel, kLevelLabels, IM_ARRAYSIZE(kLevelLabels));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(180.0f);
+        ImGui::InputTextWithHint("##search", "search...", mConsoleSearchBuf,
+                                 IM_ARRAYSIZE(mConsoleSearchBuf));
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear"))
+        {
+            std::lock_guard<std::mutex> guard(mLogMutex);
+            mLogEntries.clear();
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto", &mConsoleAutoScroll);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Quit"))
+        {
+            mAppHost.RequestExit();
+        }
     }
+    ImGui::Separator();
+
+    // 日志条目区
+    ImGui::BeginChild("##logentries", ImVec2(0, 0), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    {
+        std::lock_guard<std::mutex> guard(mLogMutex);
+        const auto minLevel = static_cast<Orange::Engine::Log::Level>(mConsoleMinLevel);
+        const std::string_view searchView{mConsoleSearchBuf};
+        for (const auto& e : mLogEntries)
+        {
+            if (static_cast<int>(e.level) < static_cast<int>(minLevel))
+            {
+                continue;
+            }
+            if (!searchView.empty() && e.message.find(searchView) == std::string::npos)
+            {
+                continue;
+            }
+            ImVec4 color;
+            const char* tag = "?";
+            switch (e.level)
+            {
+                case Orange::Engine::Log::Level::Trace:    color = ImVec4(0.55f, 0.55f, 0.55f, 1); tag = "TRC"; break;
+                case Orange::Engine::Log::Level::Debug:    color = ImVec4(0.55f, 0.75f, 0.95f, 1); tag = "DBG"; break;
+                case Orange::Engine::Log::Level::Info:     color = ImVec4(0.85f, 0.85f, 0.85f, 1); tag = "INF"; break;
+                case Orange::Engine::Log::Level::Warn:     color = ImVec4(1.00f, 0.80f, 0.40f, 1); tag = "WRN"; break;
+                case Orange::Engine::Log::Level::Error:    color = ImVec4(1.00f, 0.45f, 0.45f, 1); tag = "ERR"; break;
+                case Orange::Engine::Log::Level::Critical: color = ImVec4(1.00f, 0.20f, 0.20f, 1); tag = "CRT"; break;
+                default:                                   color = ImVec4(0.85f, 0.85f, 0.85f, 1); break;
+            }
+            ImGui::TextColored(color, "[%s] %s", tag, e.message.c_str());
+        }
+    }
+    if (mConsoleAutoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f)
+    {
+        ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::EndChild();
+
     ImGui::End();
+}
+
+// Core::Log SetLogSink 注册的静态 callback —— userData 是 EditorRender
+// Layer* 指针；callback 在任意线程触发，push 日志到 ring buffer，超过
+// cap 时丢最早条目。所有写入都在 mLogMutex 保护下。
+void EditorRenderLayer::LogSinkCallback(Orange::Engine::Log::Level level,
+                                       std::string_view           message,
+                                       void*                      userData)
+{
+    auto* pLayer = static_cast<EditorRenderLayer*>(userData);
+    if (pLayer == nullptr) { return; }
+    std::lock_guard<std::mutex> guard(pLayer->mLogMutex);
+    if (pLayer->mLogEntries.size() >= kLogBufferCap)
+    {
+        pLayer->mLogEntries.pop_front();
+    }
+    pLayer->mLogEntries.push_back({level, std::string{message}});
 }
 
 // v0.8 Settings 面板 —— gizmo 视觉常量集中编辑入口（消除 L13）。窗口浮动

@@ -32,6 +32,12 @@ namespace
 std::atomic<Level> sLevel{Level::Info};
 std::mutex         sStderrMutex;
 
+// v0.8 应用层 sink hook —— OrangeEditor Console 面板用。pointer + userData
+// 由 SetLogSink 同步加载到本对内（fn 在 mutex 保护下读，避免线程间撕裂）。
+std::mutex     sSinkMutex;
+LogSinkFn      sSinkFn{nullptr};
+void*          spSinkUserData{nullptr};
+
 const char* LevelTag(Level level) noexcept
 {
     switch (level)
@@ -136,6 +142,18 @@ void Write(Level level, std::string_view message) noexcept
     {
         return;
     }
+
+    // 应用层 sink hook 并行执行（不替代主输出路径，避免某 sink 死循环 / 缓存
+    // 满让所有日志丢失）。snapshot 指针后再调用，让 SetLogSink / ClearLogSink
+    // 在调用期间是 thread-safe 的。
+    {
+        std::lock_guard<std::mutex> guard(sSinkMutex);
+        if (sSinkFn != nullptr)
+        {
+            sSinkFn(level, message, spSinkUserData);
+        }
+    }
+
 #if defined(ORANGE_ENGINE_WITH_SPDLOG)
     EnsureLogger();
     if (sLogger)
@@ -145,6 +163,20 @@ void Write(Level level, std::string_view message) noexcept
     }
 #endif
     WriteFallback(level, message);
+}
+
+void SetLogSink(LogSinkFn fn, void* userData) noexcept
+{
+    std::lock_guard<std::mutex> guard(sSinkMutex);
+    sSinkFn        = fn;
+    spSinkUserData = userData;
+}
+
+void ClearLogSink() noexcept
+{
+    std::lock_guard<std::mutex> guard(sSinkMutex);
+    sSinkFn        = nullptr;
+    spSinkUserData = nullptr;
 }
 
 }  // namespace Orange::Engine::Log
