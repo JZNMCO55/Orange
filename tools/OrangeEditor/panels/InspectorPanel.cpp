@@ -339,7 +339,7 @@ void EditorRenderLayer::DrawInspectorPanel()
     const std::size_t selCount = mHost.selection.SelectedCount();
     if (selCount > 1)
     {
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f),
+        ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertWarn(),
                            "%zu entities selected (showing primary)",
                            selCount);
         ImGui::TextDisabled("[ Multi-edit not yet wired; click single entity to edit ]");

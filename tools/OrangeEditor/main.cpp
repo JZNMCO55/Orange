@@ -565,21 +565,20 @@ int main()
     editorHost.cmdStack.SetOnChanged(
         [pHost = &editorHost]{ pHost->scene.dirty = true; });
 
-    // v0.5 c1：namedMaterialInstances 从原本的"块内局部 const auto"提升到
-    // main 整个生命周期——schema AssetRef get/set 在 Inspector 渲染 / DnD
-    // 写入路径上需要持续访问该 map，绝不能让它在块退出后悬挂。
-    // SetNamedMaterialInstancesForSchema 把指针注入 schema 模块文件作用域
-    // 静态变量；编辑器关闭时 main 栈帧析构同时 map 析构，schema 不会再
-    // 访问（layer 已先 shutdown）。
-    auto namedMat = BuildNamedMaterialInstances(editorHost.assets);
-    Orange::Editor::Schema::SetAssetRegistryForSchema(
-        editorHost.assets.pAssets.get());
-    Orange::Editor::Schema::SetNamedMaterialInstancesForSchema(&namedMat);
+    // v0.8 整骨：namedMaterialInstances 集中到 EditorAssetContext 自身
+    //（消除 L15）。BuildNamedMaterialInstances 直接写到 context 字段，所有
+    // schema AssetRef get/set lambda 通过 SetEditorAssetContextForSchema 注
+    // 入的 gpAssetContext 访问。原"两个独立 setter"消化为单一入口；编辑器
+    // 关闭时 main 栈帧析构 context（含 map）同款时序，schema 不会再访问
+    //（layer 已先 shutdown）。
+    editorHost.assets.namedMaterialInstances =
+        BuildNamedMaterialInstances(editorHost.assets);
+    Orange::Editor::Schema::SetEditorAssetContextForSchema(&editorHost.assets);
     {
         Scene::LoadOptions demoLoadOpts{};
         demoLoadOpts.assetRegistry          = editorHost.assets.pAssets.get();
         demoLoadOpts.animatorRegistry       = editorHost.assets.pAnimators.get();
-        demoLoadOpts.namedMaterialInstances = &namedMat;
+        demoLoadOpts.namedMaterialInstances = &editorHost.assets.namedMaterialInstances;
         demoLoadOpts.extraSerializers       = editorHost.extraSerializers;
         if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);

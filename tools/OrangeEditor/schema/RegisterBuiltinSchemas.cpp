@@ -10,6 +10,7 @@
 
 #include "RegisterBuiltinSchemas.h"
 
+#include "../context/EditorAssetContext.h"
 #include "ComponentSchemaRegistry.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
@@ -249,21 +250,21 @@ void RegisterParticleEmitterComponentSchema()
 // v0.5 c1：schema 注册侧需要全局可访问的 AssetRegistry / namedMaterialInstances
 // 把 component 字段（AssetHandle<MeshAsset> / MaterialInstance*）与 AssetRef
 // 字段的类型擦除媒介 std::string (path) 双向映射。两个静态指针由
-// main.cpp 启动期通过 SetAssetRegistry / SetNamedMaterialInstances 注入；
-// 在 schema 注册 lambda 内通过裸指针访问。
+// v0.8 整骨（消除 L15）：main.cpp 启动期通过 SetEditorAssetContextForSchema
+// 注入单一 EditorAssetContext 指针；schema 注册 lambda 内通过 gpAssetContext
+// 访问 pAssets.get() + namedMaterialInstances 两段数据。原 v0.5 ~ v0.6 期的
+// "两个独立 file-scope 指针 + 两个独立 setter" 模式被消化掉。
 //
-// capture-less lambda 不能 capture 局部状态，所以走"文件作用域静态"路径——
-// 这是 schema 模块内部约定（不暴露到公共 schema API），保持 PropertyDescriptor::
-// GetFn / SetFn 签名干净。host 生命周期 ≥ schema 注册 + Inspector 渲染，
-// 静态指针不会悬挂。
+// capture-less lambda 不能 capture 局部状态，所以仍走"文件作用域静态"路径——
+// 完整的 (Component&, const EditorAssetContext&) get/set 签名整骨需要改
+// PropertyDescriptor + SchemaInspector dispatch + 所有 Field<T>::register
+// 站点，体量较大，留作 v0.9 拓展。
 //
-// 这两个静态指针在 anonymous namespace 内（internal linkage 限定本 TU），
-// 但 setter 函数 SetAssetRegistryForSchema / SetNamedMaterialInstancesForSchema
-// 要被 main.cpp 链接到，必须放在 anonymous namespace **外**（line 608 后）。
+// 静态指针在 anonymous namespace（internal linkage 限定本 TU），但 setter
+// 函数 SetEditorAssetContextForSchema 要被 main.cpp 链接到，必须放在
+// anonymous namespace 外（line 670 后）。
 
-::Orange::Engine::Asset::AssetRegistry* gpAssetRegistry = nullptr;
-std::unordered_map<std::string, ::Orange::Engine::Render::MaterialInstance*>*
-    gpNamedMaterialInstances = nullptr;
+const EditorAssetContext* gpAssetContext = nullptr;
 
 void RegisterRenderableComponentSchema()
 {
@@ -293,22 +294,23 @@ void RegisterRenderableComponentSchema()
     static const auto meshGet = +[](const void* c, void* out) {
         auto* r = static_cast<const RC*>(c);
         auto* sOut = static_cast<std::string*>(out);
-        if (gpAssetRegistry == nullptr || !r->mesh.IsValid()) {
+        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr
+            || !r->mesh.IsValid()) {
             sOut->clear();
             return;
         }
-        *sOut = std::string{gpAssetRegistry->PathOf<
+        *sOut = std::string{gpAssetContext->pAssets->PathOf<
             ::Orange::Engine::Asset::MeshAsset>(r->mesh)};
     };
     static const auto meshSet = +[](void* c, const void* in) {
         auto* r = static_cast<RC*>(c);
         const auto& path = *static_cast<const std::string*>(in);
-        if (gpAssetRegistry == nullptr) { return; }
+        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr) { return; }
         if (path.empty()) {
             r->mesh = {};
             return;
         }
-        auto lr = gpAssetRegistry->Load<
+        auto lr = gpAssetContext->pAssets->Load<
             ::Orange::Engine::Asset::MeshAsset>(path);
         if (lr.IsOk()) { r->mesh = lr.Value(); }
     };
@@ -317,12 +319,11 @@ void RegisterRenderableComponentSchema()
         auto* r = static_cast<const RC*>(c);
         auto* sOut = static_cast<std::string*>(out);
         sOut->clear();
-        if (gpNamedMaterialInstances == nullptr
-            || r->materialInstance == nullptr) { return; }
+        if (gpAssetContext == nullptr || r->materialInstance == nullptr) { return; }
         // O(N) 反查 path → ptr 表。namedMaterialInstances 当前规模 < 10，
         // 即使每帧调用一次也可忽略。后续若 schema 内有大量 material 字段
         // 可加 ptr → path 反向缓存。
-        for (const auto& [path, ptr] : *gpNamedMaterialInstances)
+        for (const auto& [path, ptr] : gpAssetContext->namedMaterialInstances)
         {
             if (ptr == r->materialInstance) { *sOut = path; return; }
         }
@@ -330,13 +331,13 @@ void RegisterRenderableComponentSchema()
     static const auto materialSet = +[](void* c, const void* in) {
         auto* r = static_cast<RC*>(c);
         const auto& path = *static_cast<const std::string*>(in);
-        if (gpNamedMaterialInstances == nullptr) { return; }
+        if (gpAssetContext == nullptr) { return; }
         if (path.empty()) {
             r->materialInstance = nullptr;
             return;
         }
-        auto it = gpNamedMaterialInstances->find(path);
-        if (it != gpNamedMaterialInstances->end())
+        auto it = gpAssetContext->namedMaterialInstances.find(path);
+        if (it != gpAssetContext->namedMaterialInstances.end())
         {
             r->materialInstance = it->second;
         }
@@ -383,22 +384,23 @@ void RegisterEnvironmentComponentSchema()
     static const auto cubemapGet = +[](const void* c, void* out) {
         auto* e = static_cast<const EC*>(c);
         auto* sOut = static_cast<std::string*>(out);
-        if (gpAssetRegistry == nullptr || !e->cubemap.IsValid()) {
+        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr
+            || !e->cubemap.IsValid()) {
             sOut->clear();
             return;
         }
-        *sOut = std::string{gpAssetRegistry->PathOf<
+        *sOut = std::string{gpAssetContext->pAssets->PathOf<
             ::Orange::Engine::Asset::TextureAsset>(e->cubemap)};
     };
     static const auto cubemapSet = +[](void* c, const void* in) {
         auto* e = static_cast<EC*>(c);
         const auto& path = *static_cast<const std::string*>(in);
-        if (gpAssetRegistry == nullptr) { return; }
+        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr) { return; }
         if (path.empty()) {
             e->cubemap = {};
             return;
         }
-        auto lr = gpAssetRegistry->Load<
+        auto lr = gpAssetContext->pAssets->Load<
             ::Orange::Engine::Asset::TextureAsset>(path);
         if (lr.IsOk()) { e->cubemap = lr.Value(); }
     };
@@ -665,19 +667,13 @@ void RegisterCameraComponentSchema()
 
 }  // anonymous namespace
 
-// v0.5 c1：setter 函数必须在 anonymous namespace 外（external linkage），
-// 让 main.cpp 启动期能 link 到。setter 内部访问的 gpAssetRegistry /
-// gpNamedMaterialInstances 仍是 anonymous-namespace 文件作用域静态指针。
-void SetAssetRegistryForSchema(::Orange::Engine::Asset::AssetRegistry* p)
+// v0.8 整骨（消除 L15）：setter 函数必须在 anonymous namespace 外（external
+// linkage），让 main.cpp 启动期能 link 到。单一 SetEditorAssetContextForSchema
+// 注入路径替代原 SetAssetRegistryForSchema + SetNamedMaterialInstancesForSchema
+// 两个独立 setter。
+void SetEditorAssetContextForSchema(const EditorAssetContext* p)
 {
-    gpAssetRegistry = p;
-}
-
-void SetNamedMaterialInstancesForSchema(
-    std::unordered_map<std::string,
-                       ::Orange::Engine::Render::MaterialInstance*>* p)
-{
-    gpNamedMaterialInstances = p;
+    gpAssetContext = p;
 }
 
 void RegisterBuiltinSchemas()

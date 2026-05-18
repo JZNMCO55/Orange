@@ -655,11 +655,11 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             std::string path;
             if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) { break; }
             auto pNew = std::make_unique<Orange::Engine::World>();
-            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            
             Orange::Engine::Scene::LoadOptions openLoadOpts;
             openLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
             openLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
-            openLoadOpts.namedMaterialInstances = &namedMat;
+            openLoadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
             openLoadOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
             if (rc.IsErr()) {
@@ -705,10 +705,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 mHost.scene.currentScenePath = std::move(path);
             }
             {
-                const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+                
                 Orange::Engine::Scene::SaveOptions saveOpts;
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
-                saveOpts.namedMaterialInstances = &namedMat;
+                saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
                 saveOpts.extraSerializers       = mHost.extraSerializers;
                 auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.currentScenePath, saveOpts);
@@ -728,10 +728,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
         case SceneOp::SaveAs: {
             std::string path;
             if (!ShowSceneFileDialog(/*isSave=*/true, hwnd, path)) { break; }
-            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            
             Orange::Engine::Scene::SaveOptions saveAsOpts;
             saveAsOpts.assetRegistry          = mHost.assets.pAssets.get();
-            saveAsOpts.namedMaterialInstances = &namedMat;
+            saveAsOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
             saveAsOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Save(*mHost.scene.pWorld, path, saveAsOpts);
             if (rc.IsErr()) {
@@ -770,10 +770,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                     mutInfo->source = l.id + ".scene.json";
                 }
             }
-            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            
             Orange::Engine::Scene::SaveOptions saveOpts;
             saveOpts.assetRegistry          = mHost.assets.pAssets.get();
-            saveOpts.namedMaterialInstances = &namedMat;
+            saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
             saveOpts.extraSerializers       = mHost.extraSerializers;
             const auto rc = Orange::Engine::Scene::SaveSplit(
                 *mHost.scene.pWorld, mHost.scene.partition, manifestPath, saveOpts);
@@ -800,11 +800,11 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             if (!ShowManifestFileDialog(/*isSave=*/false, hwnd, manifestPath)) { break; }
             auto pNew = std::make_unique<Orange::Engine::World>();
             Orange::Engine::Scene::WorldPartition newPartition;
-            const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+            
             Orange::Engine::Scene::LoadOptions splitLoadOpts;
             splitLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
             splitLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
-            splitLoadOpts.namedMaterialInstances = &namedMat;
+            splitLoadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
             splitLoadOpts.extraSerializers       = mHost.extraSerializers;
             // LoadSplit 内部按 manifest.layers 顺序遍历每条 source，
             // 并通过 LoadOptions.assignLayerId 给本次新建且没挂
@@ -857,10 +857,10 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 mHost.scene.playSnapshotPath =
                     (fs::temp_directory_path() /
                      "OrangeEditor_play_snapshot.scene.json").string();
-                const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+                
                 Orange::Engine::Scene::SaveOptions saveOpts;
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
-                saveOpts.namedMaterialInstances = &namedMat;
+                saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
                 saveOpts.extraSerializers       = mHost.extraSerializers;
                 const auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.playSnapshotPath, saveOpts);
@@ -969,11 +969,11 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             //     Invalid 是正确的 Edit 态初值
             if (!mHost.scene.playSnapshotPath.empty()) {
                 auto pNew = std::make_unique<Orange::Engine::World>();
-                const auto namedMat = BuildNamedMaterialInstances(mHost.assets);
+                
                 Orange::Engine::Scene::LoadOptions loadOpts;
                 loadOpts.assetRegistry          = mHost.assets.pAssets.get();
                 loadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
-                loadOpts.namedMaterialInstances = &namedMat;
+                loadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
                 loadOpts.extraSerializers       = mHost.extraSerializers;
                 const auto rc = Orange::Engine::Scene::Load(
                     mHost.scene.playSnapshotPath, *pNew, loadOpts);
@@ -1360,13 +1360,16 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
     // Filter row：level 下拉 + search 文本框 + Clear / Auto-scroll / Quit 按钮
     ImGui::Separator();
     {
-        ImGui::SetNextItemWidth(110.0f);
+        // widths 由 CalcTextSize 派生（v0.4.5 lint：禁止像素字面量）。
+        const float levelW  = ImGui::CalcTextSize("Critical XX").x;
+        const float searchW = ImGui::CalcTextSize("search........").x * 2.0f;
+        ImGui::SetNextItemWidth(levelW);
         const char* kLevelLabels[] = {
             "Trace+", "Debug+", "Info+", "Warn+", "Error+", "Critical"
         };
         ImGui::Combo("##loglevel", &mConsoleMinLevel, kLevelLabels, IM_ARRAYSIZE(kLevelLabels));
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(180.0f);
+        ImGui::SetNextItemWidth(searchW);
         ImGui::InputTextWithHint("##search", "search...", mConsoleSearchBuf,
                                  IM_ARRAYSIZE(mConsoleSearchBuf));
         ImGui::SameLine();
@@ -1406,13 +1409,16 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
             const char* tag = "?";
             switch (e.level)
             {
-                case Orange::Engine::Log::Level::Trace:    color = ImVec4(0.55f, 0.55f, 0.55f, 1); tag = "TRC"; break;
-                case Orange::Engine::Log::Level::Debug:    color = ImVec4(0.55f, 0.75f, 0.95f, 1); tag = "DBG"; break;
-                case Orange::Engine::Log::Level::Info:     color = ImVec4(0.85f, 0.85f, 0.85f, 1); tag = "INF"; break;
-                case Orange::Engine::Log::Level::Warn:     color = ImVec4(1.00f, 0.80f, 0.40f, 1); tag = "WRN"; break;
-                case Orange::Engine::Log::Level::Error:    color = ImVec4(1.00f, 0.45f, 0.45f, 1); tag = "ERR"; break;
-                case Orange::Engine::Log::Level::Critical: color = ImVec4(1.00f, 0.20f, 0.20f, 1); tag = "CRT"; break;
-                default:                                   color = ImVec4(0.85f, 0.85f, 0.85f, 1); break;
+                // 走 EditorTheme tokens；Warn / Error 直接拿，Trace 走 TextDisabled，
+                // Debug 走 Accent，Info / default 走 TextPrimary。Critical 复用
+                // GetAlertError（更红的语义在 Theme 里没单独 token）。
+                case Orange::Engine::Log::Level::Trace:    color = Orange::Editor::Theme::Color::GetTextDisabled();  tag = "TRC"; break;
+                case Orange::Engine::Log::Level::Debug:    color = Orange::Editor::Theme::Color::GetAccentPrimary(); tag = "DBG"; break;
+                case Orange::Engine::Log::Level::Info:     color = Orange::Editor::Theme::Color::GetTextPrimary();   tag = "INF"; break;
+                case Orange::Engine::Log::Level::Warn:     color = Orange::Editor::Theme::Color::GetAlertWarn();     tag = "WRN"; break;
+                case Orange::Engine::Log::Level::Error:    color = Orange::Editor::Theme::Color::GetAlertError();    tag = "ERR"; break;
+                case Orange::Engine::Log::Level::Critical: color = Orange::Editor::Theme::Color::GetAlertError();    tag = "CRT"; break;
+                default:                                   color = Orange::Editor::Theme::Color::GetTextPrimary();   break;
             }
             ImGui::TextColored(color, "[%s] %s", tag, e.message.c_str());
         }
@@ -1500,7 +1506,8 @@ void EditorRenderLayer::DrawSettingsPanel()
             const bool waiting = (mRebindActive == slot);
             if (waiting)
             {
-                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f), "press a key (Esc = cancel)");
+                ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertWarn(),
+                                   "press a key (Esc = cancel)");
                 if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
                 {
                     mRebindActive.clear();

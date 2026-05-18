@@ -24,6 +24,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 struct EditorAssetContext
 {
@@ -63,6 +64,17 @@ struct EditorAssetContext
     // v0.5 c4 DnD 写入 / c5 Material 子模式入口都消费 selectedAssetPath。
     std::string browserCurrentDir   = "assets";
     std::string selectedAssetPath   = {};
+
+    // v0.8 Schema context 整骨（消除 L15）：内置 MaterialInstance 命名表
+    // 集中到 context 自身。原 main.cpp 局部 std::unordered_map<string,
+    // MaterialInstance*> + 两个独立 file-scope setter (SetAssetRegistryFor
+    // Schema / SetNamedMaterialInstancesForSchema) 合并为单一
+    // `SetEditorAssetContextForSchema(&editorHost.assets)` 注入路径。
+    // 由 BuildNamedMaterialInstances 在 main 启动期填好；Schema AssetRef
+    // lambda 通过 gpAssetContext->namedMaterialInstances 反查。
+    std::unordered_map<std::string,
+                       Orange::Engine::Render::MaterialInstance*>
+        namedMaterialInstances;
 
     // v0.5 c5 修 B2：Material 子模式编辑缓存。Combo 切换 template 需要 UI
     // 状态跨帧持久（否则每帧 DrawMaterialSubMode 都重读盘把 newTemplateIdx
