@@ -12,11 +12,29 @@
 ## 来源
 
 - 生成工具：ChatGPT / DALL-E 3
-- 生成日期：2026-05-17（v0.6.5 milestone ✅ 后续 brand 工作；当晚迭代到 v2 行星 + 光环版本）
+- 生成日期：
+  - v1：2026-05-17（v0.6.5 milestone ✅ 后续 brand 工作首版）
+  - v2：2026-05-17（当晚迭代到行星 + 光环 + 中心白热点版本）
+  - **v3：2026-05-18（当前生效）**——painterly 太空场景：行星 + 倾斜光环 + 星空粒子 + 圆角矩形外框
 - 设计决策由来：见 `docs/decisions/ADR-002-editor-visual-system.md` §视觉体系
-- 设计方向（v2 当前）：橘色行星 + 发光内核（中心白热点） + 倾斜光环（neon 黄白带轨迹粒子）+ 绿色叶柄（保留 fruit 身份）+ 黑色背景 + alpha 镂空
+- 设计方向演进：
+  - **v3 当前**：橘色行星 + 发光内核（中心白热点向外辐射星芒）+ 倾斜光环（橙黄发光带 + 轨迹粒子尘埃）+ 绿色双叶柄（保留 fruit 身份）+ 深空背景（黑底 + 星点 + 橙色尘埃云）+ 1px 橙色圆角矩形外框（app icon 边界提示）；整体 painterly / 体积感渲染（非 flat vector）
+  - v2 历史：相同行星 + 光环 + 叶柄概念，但 flat vector 风、单色深炭灰背景（#2A2A2A 纯色，无星空粒子）、无外框；见下方 v2 prompt 段
+  - v1 历史：单一行星，无光环；已废弃
 
-## 设计 prompt（摘要，完整迭代过程见 v0.6.5 session）
+## 设计 prompt 历史
+
+### v3 prompt 摘要（2026-05-18，painterly 太空场景，当前生效）
+
+直接由用户在 ChatGPT 端迭代生成，未在本仓留存完整 prompt 文本。视觉要素列表：
+
+- 主体：橘色发光行星（中心白热点 → 星芒辐射 → 表面体积光），绿色双叶柄（一大一小）
+- 光环：倾斜约 25°，橙黄发光带（非 neon flat），带轨迹粒子 / 尘埃从光环边缘飞散
+- 背景：深空黑底 + 星点（白 / 橙黄两色）+ 行星右下方橙色尘埃云（暗示 nebula）
+- 边框：1px 橙色圆角矩形 app icon 边界
+- 风格：painterly / 体积感渲染（**非** v2 的 flat vector / Figma 风）
+
+### v2 prompt 摘要（2026-05-17，flat vector，已被 v3 取代）
 
 ```
 A modern flat vector software logo for "OrangeEditor", a 2D/2.5D game engine
@@ -48,7 +66,7 @@ or Substance Painter logo style, NOT a fruit illustration. Must read clearly at
    - 选内嵌 constexpr 而非 stb_image 解 PNG：避免再 vendor 一份 stb_image.h（仓内 `vendor/stb/` 当前只放 stb_image_write.h，3rdparty.json 已说明 stb_image 不入引擎依赖）
    - 启动日志验证：`[OrangeEditor] applied window icon (3 sizes)`
    - 多视口 caveat：GLFW 不会让 multi-viewport 子窗口自动继承主窗口 icon。当前仅主窗口 set；用户把 panel 拖出成独立 native window 时子窗口仍用 OS 默认 icon。修法是在 ImGui Platform_CreateWindow 回调后对每个 sub-viewport 的 GLFWwindow 再调一次 `ApplyEditorWindowIcons`——属后续 polish，本期不做
-   - 小尺寸 caveat：v2 设计在 16×16 / 24×24 档橘色光环细节会被 LANCZOS 缩成噪点（光环线宽 < 1 像素），近距离看是橘色团块。视觉上仍能识别 brand，taskbar / Alt-Tab 距离够远不显眼；不另出"小尺寸专版" simplified glyph
+   - 小尺寸 caveat（v2/v3 共通，v3 更严重）：行星 + 光环设计在 16×16 / 24×24 档被 LANCZOS 缩成橘色团块——光环线宽 < 1 像素、星空粒子完全糊掉。近距离看是橘色光斑，但视觉上仍能识别 brand（橙色 + 圆形 + 黑底），taskbar / Alt-Tab 距离够远不显眼；不另出"小尺寸专版" simplified glyph。v3 因星空粒子 + 尘埃云密度更高，16×16 档信息熵进一步降低；如未来要"小尺寸专版"，应单独出一个无光环 / 无星空、仅"橙球 + 叶"的 simplified glyph 用作 16/24 档替换
 
 ## 重建 brand 资产
 
