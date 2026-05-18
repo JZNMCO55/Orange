@@ -25,3 +25,9 @@ imgui.ini
 
 # Claude Code 本地调度 / 会话状态（scheduled_tasks.lock 等），纯机器本地，不入库
 .claude/
+
+# HDR 环境贴图：5 MB 量级二进制，由测试人员按 assets/environments/README.md
+# 步骤从 PolyHaven 下载到本地，不进 git 仓主线避免 hot path 历史膨胀。
+# 真正生产期由 Phase 9 资产管线把 .hdr → ORTX 容器化后再决定入库策略。
+assets/environments/*.hdr
+assets/environments/*.HDR

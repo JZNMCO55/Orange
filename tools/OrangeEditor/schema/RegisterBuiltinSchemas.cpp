@@ -14,9 +14,11 @@
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/IAnimator.h>
+#include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/EnvironmentComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -355,6 +357,70 @@ void RegisterRenderableComponentSchema()
         .Register();
 }
 
+// EnvironmentComponent 的 Inspector schema。
+//
+// 三个字段：cubemap（HDR equirect 资产引用）+ tint（线性 RGB 色调乘子）+
+// intensity（标量强度）。schema 注册与 RenderableComponent.mesh 同款 AssetRef
+// 路径——通过 gpAssetRegistry 反查 path 字符串，控件层把 string 显示成短名
+// （ImGui DnD 接收 + 浏览器写入由后续编辑器 milestone 处理）。
+//
+// 视觉对位：Material 五通道 schema + DirectionalLight schema，同节奏的
+// PBR-IBL Inspector 三件套。Environment 浏览器 / sky preview 留给独立的
+// 编辑器伴随 milestone（见 docs/pbr-ibl-milestone.md §RISK-6 决议）。
+//
+// 定义位置：放在 RegisterRenderableComponentSchema 之后，是因为本函数依赖
+// gpAssetRegistry（在 Renderable 段之前的 anonymous namespace 内声明）；
+// 实际 Inspector 显示顺序由 RegisterBuiltinSchemas() 内的调用次序决定，
+// 与定义顺序解耦。
+void RegisterEnvironmentComponentSchema()
+{
+    using EC = Orange::Engine::Render::EnvironmentComponent;
+
+    // cubemap AssetRef 字段的 get/set —— 与 Renderable.mesh 同款实现，仅
+    // 类型从 MeshAsset 换成 TextureAsset。capture-less +lambda 转 PropertyDescriptor
+    // 函数指针；gpAssetRegistry 由 main.cpp 启动期通过 SetAssetRegistryForSchema
+    // 注入。
+    static const auto cubemapGet = +[](const void* c, void* out) {
+        auto* e = static_cast<const EC*>(c);
+        auto* sOut = static_cast<std::string*>(out);
+        if (gpAssetRegistry == nullptr || !e->cubemap.IsValid()) {
+            sOut->clear();
+            return;
+        }
+        *sOut = std::string{gpAssetRegistry->PathOf<
+            ::Orange::Engine::Asset::TextureAsset>(e->cubemap)};
+    };
+    static const auto cubemapSet = +[](void* c, const void* in) {
+        auto* e = static_cast<EC*>(c);
+        const auto& path = *static_cast<const std::string*>(in);
+        if (gpAssetRegistry == nullptr) { return; }
+        if (path.empty()) {
+            e->cubemap = {};
+            return;
+        }
+        auto lr = gpAssetRegistry->Load<
+            ::Orange::Engine::Asset::TextureAsset>(path);
+        if (lr.IsOk()) { e->cubemap = lr.Value(); }
+    };
+
+    ComponentSchemaBuilder<EC>("Environment", "Environment")
+        .FieldAssetRef("cubemap", "Cubemap (HDR)", AssetKind::Texture,
+                       cubemapGet, cubemapSet)
+        .Field<&EC::tint>("tint", "Tint")
+            .Color()
+            .Tooltip("线性 RGB 色调乘子，对 irradiance + prefiltered IBL 一并生效。\n"
+                     "(1,1,1) = 无修正；(0,0,0) = 关掉 IBL 贡献。\n"
+                     "在 host 端预乘 intensity，shader 内一次相乘，无需重烘焙。")
+        .Field<&EC::intensity>("intensity", "Intensity")
+            .Range(0.0f, 16.0f)
+            .DragSpeed(0.05f)
+            .Tooltip("标量强度乘子。1 = 烘焙原始亮度；> 1 = 加亮；< 1 = 减亮（夜景 / 阴天）。\n"
+                     "调本字段不会触发重烘焙——亮度微调由 LightUbo 的 iblFactor 即时承担。")
+        .Addable()
+        .Removable()
+        .Register();
+}
+
 void RegisterHierarchyComponentSchema()
 {
     using HC = Orange::Engine::Scene::HierarchyComponent;
@@ -623,6 +689,7 @@ void RegisterBuiltinSchemas()
     RegisterTransformComponentSchema();
     RegisterHierarchyComponentSchema();
     RegisterDirectionalLightSchema();
+    RegisterEnvironmentComponentSchema();
     RegisterRenderableComponentSchema();
     RegisterRigidBodyComponentSchema();
     RegisterColliderComponentSchema();

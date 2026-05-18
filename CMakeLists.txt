@@ -396,8 +396,11 @@ target_include_directories(orange_engine
         "$<INSTALL_INTERFACE:include>"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        # vendor/stb：单头实现（stb_image_write.h），仅 src/render 的截图
-        # 路径消费——头不暴露到公共面，BUILD_INTERFACE only。
+        # vendor/stb：两份单头实现，BUILD_INTERFACE only，公共面不漏 stb 类型。
+        #   * stb_image_write.h —— 仅 src/render 截图路径消费
+        #   * stb_image.h       —— 仅 src/asset/TextureLoader.cpp 消费（.hdr
+        #     Radiance equirect → RGBA32Float TextureAsset；其它后缀仍走自
+        #     有 ORTX 容器）
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb>"
         # miniaudio：单头库，仅 src/audio/miniaudio/** PRIVATE 消费。路径
         # 由 Dependencies.cmake 的 find_path 解出来；BUILD_INTERFACE only，
