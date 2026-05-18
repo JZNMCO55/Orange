@@ -22,7 +22,7 @@
 | IBL · Diffuse | 环境 cubemap → 32×32×6 irradiance cubemap（Lambertian 半球积分卷积） |
 | IBL · Specular | 环境 cubemap → 多 mip prefiltered specular cubemap（GGX importance sampling 逐 mip 卷积，mip level ↔ roughness 一一对应） |
 | 资产 | 新增 `EnvironmentComponent`（cubemap asset + intensity scalar + tint）；HDR equirect 输入 → 启动期 resample 到 cube；至少 1 张 default IBL（室外 sky） |
-| Sample | 新增 `samples/10_pbr_ibl`：9 球阵（3 metallic × 3 roughness）+ 1 张 IBL 环境，对照 Frostbite / UE 经典 IBL 验证场景 |
+| Sample | 新增 `samples/14_pbr_ibl`：9 球阵（3 metallic × 3 roughness）+ 1 张 IBL 环境，对照 Frostbite / UE 经典 IBL 验证场景 |
 
 ### Out-of-scope（明确推迟）
 
@@ -120,11 +120,11 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
   - 编辑器 Inspector 选中 material 后能看到并实时拖拽编辑五字段
 - **Critical Path**：是
 
-#### Task PBR-03 · sample `09_pbr_direct` + B.1 验收
+#### Task PBR-03 · sample `13_pbr_direct` + B.1 验收
 
-- **描述**：新 sample `samples/09_pbr_direct`：9 球阵（3 metallic × 3 roughness）+ 1 个 directional light，**不接 IBL**。validate Cook-Torrance + Schlick + GGX + Smith 数学正确性
+- **描述**：新 sample `samples/13_pbr_direct`：9 球阵（3 metallic × 3 roughness）+ 1 个 directional light，**不接 IBL**。validate Cook-Torrance + Schlick + GGX + Smith 数学正确性
 - **前置**：PBR-01 / 02
-- **输出**：`samples/09_pbr_direct/main.cpp` + scene asset
+- **输出**：`samples/13_pbr_direct/main.cpp` + scene asset
 - **实现要点**：用 Khronos `glTF-Sample-Models/MetalRoughSpheres` 或自制等价 9 球
 - **验证**：视觉效果与 wiki ref 图比对，metallic 轴与 roughness 轴的变化连续 + 物理直观；旋转 light 方向高光位置随之移动
 - **Critical Path**：是
@@ -177,11 +177,11 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
 - **验证**：demo.scene 切换不同环境 HDR → 整场景观感跟变
 - **Critical Path**：是
 
-#### Task PBR-07 · sample `10_pbr_ibl` + B.2 验收
+#### Task PBR-07 · sample `14_pbr_ibl` + B.2 验收
 
-- **描述**：`samples/09_pbr_direct` 升级为 `samples/10_pbr_ibl`（或并存）：9 球阵 + IBL 环境 + 1 directional light。参考 Frostbite / UE / glTF reference renderer 经典 IBL 验证场景
+- **描述**：`samples/13_pbr_direct` 升级为 `samples/14_pbr_ibl`（或并存）：9 球阵 + IBL 环境 + 1 directional light。参考 Frostbite / UE / glTF reference renderer 经典 IBL 验证场景
 - **前置**：PBR-04 / 05 / 06
-- **输出**：`samples/10_pbr_ibl/main.cpp` + scene asset + 至少 1 张 IBL 环境
+- **输出**：`samples/14_pbr_ibl/main.cpp` + scene asset + 至少 1 张 IBL 环境
 - **验证**：
   - 视觉效果与 wiki ref 图比对，metallic 轴与 roughness 轴变化连续 + 物理直观
   - 切换 IBL 环境（晴天 / 室内 / 黄昏）整场景观感跟变
@@ -214,7 +214,7 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
 
 ### 功能区 4 · sample 验证
 
-- [ ] 跑 `samples/10_pbr_ibl.exe`，看到 9 球阵
+- [ ] 跑 `samples/14_pbr_ibl.exe`，看到 9 球阵
 - [ ] 9 球的视觉效果与 milestone PR 描述里的 reference 图基本一致
 
 ---
@@ -227,7 +227,7 @@ R1 ~ R4 全部"通过 audit + 必要的 incoming_feature 落地完毕"后，再�
 | RISK-2 | R1 cubemap binding 不通 | B.2 only | OrangeRender audit 阶段确认 | **已降级**（同 RISK-1 理由）。若不通则 B.2 blocked，B.1 不受影响 |
 | ~~RISK-3~~（已决） | ~~BRDF LUT 编译期 vs 启动期方案未决~~ | ~~B.2~~ | ~~实施期~~ | **2026-05-17 决：启动期一次性烘焙**（与 IBL prefilter 共享同一启动路径）。若实施期发现启动 GPU 开销超出预期再重开讨论 |
 | RISK-4 | HDR equirect → cube resample 视觉伪影（极点过采样 / 接缝） | B.2 | 实施期 | 已知问题，wiki `environment-lighting.md` 有标准解法（filterable importance sampling + box filter at seams）；可参考 Lumix `ibl_filter.hlsl` 实现 |
-| RISK-5 | metallic / roughness "看起来对了"但能量不守恒 | B.1 + B.2 | 实施期 | sample `10_pbr_ibl` 内置 furnace test（全白 IBL + 任意 PBR 材质应输出近似全白；不平衡的 BRDF 会偏暗 / 偏亮）|
+| RISK-5 | metallic / roughness "看起来对了"但能量不守恒 | B.1 + B.2 | 实施期 | sample `14_pbr_ibl` 内置 furnace test（全白 IBL + 任意 PBR 材质应输出近似全白；不平衡的 BRDF 会偏暗 / 偏亮）|
 | RISK-6 | 落地后编辑器侧 schema 没跟上 | 落地阶段 | B.1 / B.2 任一完工时 | **2026-05-17 决：分两段**——B.1 Material schema 同步紧跟 PBR-02 同 commit 序列（hours 级，不另立 milestone）；B.2 Environment schema 同步紧跟 PBR-06；完整编辑器扩展（Environment 浏览 / material thumbnail）作为独立 v0.8 编辑器 milestone 在 B.2 完工后启动 |
 | RISK-7 | B.1 dummy IBL 纹理资源管理与正式 IBL 切换不平滑 | B.2 起步阶段 | B.2 实施期 | dummy IBL 是 `Pipeline` 启动期注册的全局 1×1 黑 texture；B.2 替换路径设计：`EnvironmentComponent` 优先级 > dummy，没挂 component 自动 fallback dummy。**B.1 阶段就把 fallback 路径写完整**，避免 B.2 临时改 |
 

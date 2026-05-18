@@ -886,7 +886,7 @@ Phase 6.5 PBR direct lighting milestone（B.1）启动 ritual：
 ### 期望验收
 
 - demo.scene 在编辑器内打开后球体（若有）渲染为平滑圆球
-- Phase 6.5 sample 09_pbr_direct 9 球阵表面平滑过渡（无 facet artifact）
+- Phase 6.5 sample 13_pbr_direct 9 球阵表面平滑过渡（无 facet artifact）
 - 现存 `.mesh` 文件 loader 兼容（v1 无 normal 走 fallback 自动补算，不报错）
 - 序列化 round-trip：`MeshAsset` 写 / 读 normal 字段无丢失
 - Pipeline 创建不破现有 shaders（textured_mesh / toon / rim_light / dissolve / emissive / shadow_caster 等加载/编译/绘制均正常）
@@ -944,7 +944,7 @@ G1 ~ G5 一次性落地，无 commit 拆分（GAP 体量适中，单 commit 边�
 | 验收点 | 落地状态 |
 |--------|---------|
 | demo.scene 在编辑器内打开后球体（若有）渲染为平滑圆球 | ✅ —— sphere mesh smooth normal 已喂进 vertex buffer，toon / rim / fresnel shader 全读 vNormal |
-| Phase 6.5 sample 09_pbr_direct 9 球阵表面平滑过渡（无 facet artifact） | **待 PBR-01 落地后验证**（本 GAP 解锁前置） |
+| Phase 6.5 sample 13_pbr_direct 9 球阵表面平滑过渡（无 facet artifact） | **待 PBR-01 落地后验证**（本 GAP 解锁前置） |
 | 现存 `.mesh` 文件 loader 兼容（v1 无 normal 走 fallback 自动补算，不报错） | ✅ —— MeshLoader Load v1/v2/v3-no-normal 路径均调 `ComputeSmoothNormalsFromTriangles` 补算；既有 `assets/meshes/cube.mesh` / `plane.mesh` 保持 v2 格式继续可读 |
 | 序列化 round-trip：MeshAsset 写 / 读 normal 字段无丢失 | ✅ —— `MeshLoader::Save` 写 v3 hasNormals 段，`Load` 读回；现有 `AssetRegistryTest::TestMeshLoadGetUnload` 间接覆盖（v1 fixture → fallback compute → mesh 可用） |
 | Pipeline 创建不破现有 shaders（textured_mesh / toon / rim_light / dissolve / emissive / shadow_caster 等加载/编译/绘制均正常） | ✅ —— ctest 全 43 测试通过（含 builtin_materials_test / pipeline_template_cache_test / pipeline_hdr_target_test / pipeline_offscreen_test / bloom_chain_test / light_and_shadow_test 等所有覆盖渲染路径的 case） |

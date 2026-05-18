@@ -222,8 +222,8 @@
 
 **拆分**：方案 B 两步走（详细决议见 companion 文件 §决议记录）：
 
-- **B.1 · PBR direct lighting**（3-5 天，不依赖跨仓）：monolithic PBR shader（Cook-Torrance + GGX + Schlick + Smith correlated）+ MaterialInstance 五通道（baseColor / metallic / roughness / normal / AO）+ sample `09_pbr_direct`；IBL 槽位绑 dummy 1×1 黑纹理退化为 direct-only，B.2 阶段替换为真实纹理**零 shader 重构**
-- **B.2 · IBL 完整接入**（1.5-2 周，依赖跨仓 R1/R2/R3 audit pass）：BRDF LUT + irradiance + prefiltered specular 三种卷积烘焙合并单 task（启动期烘焙，对照 Lumix `data/shaders/ibl_filter.hlsl` 122 行单文件多 entry 风格）+ EnvironmentComponent + PolyHaven CC0 default IBL + sample `10_pbr_ibl`
+- **B.1 · PBR direct lighting**（3-5 天，不依赖跨仓）：monolithic PBR shader（Cook-Torrance + GGX + Schlick + Smith correlated）+ MaterialInstance 五通道（baseColor / metallic / roughness / normal / AO）+ sample `13_pbr_direct`；IBL 槽位绑 dummy 1×1 黑纹理退化为 direct-only，B.2 阶段替换为真实纹理**零 shader 重构**
+- **B.2 · IBL 完整接入**（1.5-2 周，依赖跨仓 R1/R2/R3 audit pass）：BRDF LUT + irradiance + prefiltered specular 三种卷积烘焙合并单 task（启动期烘焙，对照 Lumix `data/shaders/ibl_filter.hlsl` 122 行单文件多 entry 风格）+ EnvironmentComponent + PolyHaven CC0 default IBL + sample `14_pbr_ibl`
 
 **前置**：Phase 6 编辑器 v0.1 ✅
 
@@ -242,7 +242,7 @@
 
 详细字段：companion §Task PBR-02。同 commit 序列内完成编辑器 Inspector schema 同步，避免"PBR ✅ 但 Inspector 看不到 metallic / roughness 字段"断层态。Critical Path。
 
-### Task 06.5-03 · sample `09_pbr_direct` + B.1 验收
+### Task 06.5-03 · sample `13_pbr_direct` + B.1 验收
 
 详细字段：companion §Task PBR-03。9 球阵（3 metallic × 3 roughness）+ 1 个 directional light，**不接 IBL**。Critical Path。
 
@@ -260,7 +260,7 @@
 
 详细字段：companion §Task PBR-06。World 全局 `EnvironmentComponent`（cubemap asset + intensity + tint），**对标 Lumix `render_module.h:267 EnvProbeInfo`**。default IBL 从 **PolyHaven CC0** HDRI 站选 1K outdoor scene equirect 入库 `assets/environments/`。Critical Path。
 
-### Task 06.5-07 · sample `10_pbr_ibl` + B.2 验收
+### Task 06.5-07 · sample `14_pbr_ibl` + B.2 验收
 
 详细字段：companion §Task PBR-07。9 球阵 + IBL 环境 + 1 directional light + furnace test（验能量守恒）。Critical Path。
 
