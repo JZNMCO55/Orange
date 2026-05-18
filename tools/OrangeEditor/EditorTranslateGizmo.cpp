@@ -26,29 +26,38 @@ namespace GM = OrangeEditor::Internal::GizmoMath;
 
 // 设计常数（屏幕像素 / 启发式）。Lumix 走 absolute pixel 阈值 + handle 长
 // 度按相机距离自适应，这里取同款。
-constexpr float kHandleScreenLengthPx = 90.0f;  // axis line 屏幕长度（像素）
-constexpr float kHitThresholdPx       = 8.0f;   // 2D 点-线段距离阈值（像素）
+// **v0.8 起 handleScreenLength / hitThreshold / 线宽 / 配色从 EditorSettings
+// 读取**（消除 L13）；arrowHead 尺寸暂未纳入 settings，保持 hardcode。
 constexpr float kArrowHeadLengthPx    = 14.0f;  // arrow head 三角高度
 constexpr float kArrowHeadHalfWidthPx = 6.0f;   // arrow head 三角底半宽
 
-// ---- 颜色 -----------------------------------------------------------------
-// X / Y / Z 三色 + hovered / dragging 加亮变体。Lumix / Unity / Godot 同款
-// "红绿蓝" + "黄色 highlight" 工业惯例。
-constexpr ImU32 kColX        = IM_COL32(220, 60,  60,  255);
-constexpr ImU32 kColXBright  = IM_COL32(255, 180, 120, 255);
-constexpr ImU32 kColY        = IM_COL32(60,  200, 60,  255);
-constexpr ImU32 kColYBright  = IM_COL32(180, 255, 120, 255);
-constexpr ImU32 kColZ        = IM_COL32(60,  120, 240, 255);
-constexpr ImU32 kColZBright  = IM_COL32(140, 200, 255, 255);
+// 从 settings 的 glm::vec4 配色（linear 0..1 RGBA）转 ImGui 32-bit RGBA。
+// clamp 防越界后乘 255。
+ImU32 SettingsToImU32(const glm::vec4& c) noexcept
+{
+    auto byteOf = [](float v) -> int
+    {
+        if (v < 0.0f) { v = 0.0f; }
+        if (v > 1.0f) { v = 1.0f; }
+        return static_cast<int>(v * 255.0f + 0.5f);
+    };
+    return IM_COL32(byteOf(c.r), byteOf(c.g), byteOf(c.b), byteOf(c.a));
+}
 
-ImU32 AxisColor(EditorGizmoState::Axis axis, bool highlight) noexcept
+ImU32 SettingsAxisColor(const EditorSettings& s,
+                        EditorGizmoState::Axis axis,
+                        bool highlight) noexcept
 {
     switch (axis)
     {
-        case EditorGizmoState::Axis::X: return highlight ? kColXBright : kColX;
-        case EditorGizmoState::Axis::Y: return highlight ? kColYBright : kColY;
-        case EditorGizmoState::Axis::Z: return highlight ? kColZBright : kColZ;
-        default:                        return IM_COL32(255, 255, 255, 255);
+        case EditorGizmoState::Axis::X:
+            return SettingsToImU32(highlight ? s.gizmoColorXHighlight : s.gizmoColorXIdle);
+        case EditorGizmoState::Axis::Y:
+            return SettingsToImU32(highlight ? s.gizmoColorYHighlight : s.gizmoColorYIdle);
+        case EditorGizmoState::Axis::Z:
+            return SettingsToImU32(highlight ? s.gizmoColorZHighlight : s.gizmoColorZIdle);
+        default:
+            return IM_COL32(255, 255, 255, 255);
     }
 }
 
@@ -130,9 +139,11 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     const glm::vec3 entityWorldPos = pTC->position;
 
     // ---- gizmo 屏幕尺寸自适应：选取 world-space handle 长度，使其投影到
-    //      屏幕约 kHandleScreenLengthPx 像素。探针用相机右向量而非 world X
-    //      轴 —— 见 GizmoMath::ComputeWorldUnitsForScreenLength 注释（防止
-    //      orbit 相机时 handle 整体伸缩）。----
+    //      屏幕约 host.settings.gizmoHandleScreenLengthPx 像素。探针用相机
+    //      右向量而非 world X 轴 —— 见 GizmoMath::ComputeWorldUnitsForScreen
+    //      Length 注释（防止 orbit 相机时 handle 整体伸缩）。----
+    const float handleScreenLengthPx = host.settings.gizmoHandleScreenLengthPx;
+    const float hitThresholdPx       = host.settings.gizmoHitThresholdPx;
     const auto projOrigin = GM::ProjectWorldToScreen(entityWorldPos, viewProj,
                                                      viewportImageOriginScreen,
                                                      viewportImageSize);
@@ -144,7 +155,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     }
     const auto handleWorldLen = GM::ComputeWorldUnitsForScreenLength(
         entityWorldPos, cam.view, viewProj,
-        viewportImageOriginScreen, viewportImageSize, kHandleScreenLengthPx);
+        viewportImageOriginScreen, viewportImageSize, handleScreenLengthPx);
     const float worldUnitsPerHandle = handleWorldLen.value_or(1.0f);
 
     // ---- 每轴端点屏幕投影（用于绘制 + 2D hit-test）----
@@ -180,7 +191,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     if (!host.gizmo.IsDragging())
     {
         Axis  bestAxis = Axis::None;
-        float bestDist = kHitThresholdPx;
+        float bestDist = hitThresholdPx;
         for (const auto& ap : axes)
         {
             if (!ap.tipVisible) { continue; }
@@ -283,8 +294,9 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
             if (!ap.tipVisible) { continue; }
             const bool   highlight = (host.gizmo.hoveredAxis == ap.axis)
                                   || (host.gizmo.draggingAxis == ap.axis);
-            const ImU32  col       = AxisColor(ap.axis, highlight);
-            const float  thickness = highlight ? 5.5f : 3.5f;
+            const ImU32  col       = SettingsAxisColor(host.settings, ap.axis, highlight);
+            const float  thickness = highlight ? host.settings.gizmoLineWidthTranslateHighlight
+                                               : host.settings.gizmoLineWidthTranslateIdle;
             const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
             const ImVec2 b{ap.tipScreen.x,       ap.tipScreen.y};
             drawList->AddLine(a, b, col, thickness);

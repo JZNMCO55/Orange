@@ -260,6 +260,10 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     DrawAssetsPanel();
     DrawConsolePanel(frame);
     DrawAnimationPanel();
+    if (mShowSettingsPanel)
+    {
+        DrawSettingsPanel();
+    }
 
     // v0.6 c2：未保存确认 popup —— 必须在 ApplyPendingSceneOp 之前，让
     // popup 的 Save 按钮设置的 pendingSceneOp 在同帧 ApplyPendingSceneOp
@@ -548,6 +552,13 @@ void EditorRenderLayer::DrawMainMenuBar()
                 mAppHost.RequestExit();
             }
         }
+        ImGui::EndMenu();
+    }
+
+    // View 菜单：Settings / 其它 UI toggles（v0.8 落地）。
+    if (ImGui::BeginMenu("View"))
+    {
+        ImGui::MenuItem("Settings", nullptr, &mShowSettingsPanel);
         ImGui::EndMenu();
     }
 
@@ -1342,6 +1353,48 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
     ImGui::Separator();
     if (ImGui::Button("Quit (or press Esc)")) {
         mAppHost.RequestExit();
+    }
+    ImGui::End();
+}
+
+// v0.8 Settings 面板 —— gizmo 视觉常量集中编辑入口（消除 L13）。窗口浮动
+// 在主 viewport 之外，可拖动 / 关闭。所有编辑直写 host.settings，
+// 下一帧 gizmo 立即应用；持久化在 main.cpp 进程退出时统一写盘。
+void EditorRenderLayer::DrawSettingsPanel()
+{
+    if (!ImGui::Begin("Settings##editor", &mShowSettingsPanel))
+    {
+        ImGui::End();
+        return;
+    }
+    auto& s = mHost.settings;
+
+    if (ImGui::CollapsingHeader("Gizmo", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::SeparatorText("Line Width (px)");
+        ImGui::DragFloat("Translate idle",      &s.gizmoLineWidthTranslateIdle,      0.1f, 0.5f, 12.0f);
+        ImGui::DragFloat("Translate highlight", &s.gizmoLineWidthTranslateHighlight, 0.1f, 0.5f, 12.0f);
+        ImGui::DragFloat("Rotate idle",         &s.gizmoLineWidthRotateIdle,         0.1f, 0.5f, 12.0f);
+        ImGui::DragFloat("Rotate highlight",    &s.gizmoLineWidthRotateHighlight,    0.1f, 0.5f, 12.0f);
+        ImGui::DragFloat("Scale idle",          &s.gizmoLineWidthScaleIdle,          0.1f, 0.5f, 12.0f);
+        ImGui::DragFloat("Scale highlight",     &s.gizmoLineWidthScaleHighlight,     0.1f, 0.5f, 12.0f);
+
+        ImGui::SeparatorText("Handle / Hit Test");
+        ImGui::DragFloat("Handle screen length (px)", &s.gizmoHandleScreenLengthPx, 1.0f, 30.0f, 300.0f);
+        ImGui::DragFloat("Hit threshold (px)",        &s.gizmoHitThresholdPx,       0.5f, 1.0f, 32.0f);
+
+        ImGui::SeparatorText("Axis Colors");
+        ImGui::ColorEdit4("X idle",      &s.gizmoColorXIdle.x);
+        ImGui::ColorEdit4("X highlight", &s.gizmoColorXHighlight.x);
+        ImGui::ColorEdit4("Y idle",      &s.gizmoColorYIdle.x);
+        ImGui::ColorEdit4("Y highlight", &s.gizmoColorYHighlight.x);
+        ImGui::ColorEdit4("Z idle",      &s.gizmoColorZIdle.x);
+        ImGui::ColorEdit4("Z highlight", &s.gizmoColorZHighlight.x);
+
+        if (ImGui::Button("Reset to defaults"))
+        {
+            s = EditorSettings{};
+        }
     }
     ImGui::End();
 }

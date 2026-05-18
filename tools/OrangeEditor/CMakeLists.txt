@@ -147,6 +147,7 @@ add_executable(OrangeEditor
     EditorWidgets.cpp
     MaterialFileIO.cpp
     VulkanLoaderShim.cpp
+    context/EditorSettings.cpp
     panels/EntityTreePanel.cpp
     panels/InspectorPanel.cpp
     panels/LayersPanel.cpp

@@ -92,6 +92,10 @@ private:
     void DrawAssetsPanel();
     static void DrawAnimationPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
+    // v0.8：Settings 面板 —— gizmo 线宽 / 配色 / handle 长度 / hit threshold
+    // 的 ImGui 编辑控件；写回 host.settings + 标记 dirty 触发持久化（仅在
+    // 关闭编辑器时统一写盘，避免每帧 disk I/O）。
+    void DrawSettingsPanel();
     // ---- panels/LayersPanel.cpp (v0.6 c5) -------------------------------
     // Layer manifest 编辑：visibility 切换 / 添加 / 删除。
     // Hierarchy panel 的 layer 列 + 右键 "Move to layer >" 在
@@ -172,6 +176,9 @@ private:
     // present 到新 size surface 出现"image 在 surface 左上角 + 剩余空白"。
     std::uint32_t                                     mLastFramebufferWidth{0};
     std::uint32_t                                     mLastFramebufferHeight{0};
+    // v0.8 EditorSettings：是否显示 Settings 浮动面板（默认不显示，由 View
+    // 菜单 / 主 toolbar 切换）。
+    bool                                              mShowSettingsPanel{false};
 
     // v0.6 c1：上一帧推到 GLFW 的窗口 title 缓存。UpdateWindowTitle 算
     // 新 title 与本字段比对，仅在不同时调 glfwSetWindowTitle。

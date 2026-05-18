@@ -26,27 +26,36 @@ namespace
 
 namespace GM = OrangeEditor::Internal::GizmoMath;
 
-// 设计常数。
-constexpr int   kRingSegments        = 48;   // 圆环 polyline 段数
-constexpr float kHandleScreenLengthPx = 90.0f;  // 圆环半径目标屏幕长度（与 translate axis 同款）
-constexpr float kHitThresholdPx       = 8.0f;   // 2D 点-线段距离阈值
+// 设计常数（圆环段数不进 settings——视觉上 48 段已足够平滑，多余 budget）。
+// 其余 handle 长度 / hit threshold / 配色 / 线宽 从 host.settings 读取
+// （v0.8 EditorSettings 落地后路径，消除 L13）。
+constexpr int kRingSegments = 48;
 
-// ---- 颜色（与 translate 共享同款方案；c4 后可能抽到 shared 头）-----------
-constexpr ImU32 kColX        = IM_COL32(220, 60,  60,  255);
-constexpr ImU32 kColXBright  = IM_COL32(255, 180, 120, 255);
-constexpr ImU32 kColY        = IM_COL32(60,  200, 60,  255);
-constexpr ImU32 kColYBright  = IM_COL32(180, 255, 120, 255);
-constexpr ImU32 kColZ        = IM_COL32(60,  120, 240, 255);
-constexpr ImU32 kColZBright  = IM_COL32(140, 200, 255, 255);
+ImU32 SettingsToImU32(const glm::vec4& c) noexcept
+{
+    auto byteOf = [](float v) -> int
+    {
+        if (v < 0.0f) { v = 0.0f; }
+        if (v > 1.0f) { v = 1.0f; }
+        return static_cast<int>(v * 255.0f + 0.5f);
+    };
+    return IM_COL32(byteOf(c.r), byteOf(c.g), byteOf(c.b), byteOf(c.a));
+}
 
-ImU32 AxisColor(EditorGizmoState::Axis axis, bool highlight) noexcept
+ImU32 SettingsAxisColor(const EditorSettings& s,
+                        EditorGizmoState::Axis axis,
+                        bool highlight) noexcept
 {
     switch (axis)
     {
-        case EditorGizmoState::Axis::X: return highlight ? kColXBright : kColX;
-        case EditorGizmoState::Axis::Y: return highlight ? kColYBright : kColY;
-        case EditorGizmoState::Axis::Z: return highlight ? kColZBright : kColZ;
-        default:                        return IM_COL32(255, 255, 255, 255);
+        case EditorGizmoState::Axis::X:
+            return SettingsToImU32(highlight ? s.gizmoColorXHighlight : s.gizmoColorXIdle);
+        case EditorGizmoState::Axis::Y:
+            return SettingsToImU32(highlight ? s.gizmoColorYHighlight : s.gizmoColorYIdle);
+        case EditorGizmoState::Axis::Z:
+            return SettingsToImU32(highlight ? s.gizmoColorZHighlight : s.gizmoColorZIdle);
+        default:
+            return IM_COL32(255, 255, 255, 255);
     }
 }
 
@@ -171,9 +180,11 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
         host.gizmo.hoveredAxis = Axis::None;
         return false;
     }
+    const float handleScreenLengthPx = host.settings.gizmoHandleScreenLengthPx;
+    const float hitThresholdPx       = host.settings.gizmoHitThresholdPx;
     const auto ringRadiusOpt = GM::ComputeWorldUnitsForScreenLength(
         entityPos, cam.view, viewProj,
-        viewportImageOriginScreen, viewportImageSize, kHandleScreenLengthPx);
+        viewportImageOriginScreen, viewportImageSize, handleScreenLengthPx);
     const float ringRadius = ringRadiusOpt.value_or(1.0f);
 
     // ---- 3 个圆环：投影所有顶点到屏幕 ----
@@ -219,7 +230,7 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
     if (!host.gizmo.IsDragging())
     {
         Axis  bestAxis = Axis::None;
-        float bestDist = kHitThresholdPx;
+        float bestDist = hitThresholdPx;
         for (const auto& rp : rings)
         {
             if (!rp.any_visible) { continue; }
@@ -350,8 +361,9 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
             if (!rp.any_visible) { continue; }
             const bool   highlight = (host.gizmo.hoveredAxis == rp.axis)
                                   || (host.gizmo.draggingAxis == rp.axis);
-            const ImU32  col       = AxisColor(rp.axis, highlight);
-            const float  thickness = highlight ? 5.0f : 3.0f;
+            const ImU32  col       = SettingsAxisColor(host.settings, rp.axis, highlight);
+            const float  thickness = highlight ? host.settings.gizmoLineWidthRotateHighlight
+                                               : host.settings.gizmoLineWidthRotateIdle;
             for (std::size_t i = 0; i < kRingSegments; ++i)
             {
                 const std::size_t j = (i + 1) % kRingSegments;

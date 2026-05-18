@@ -522,6 +522,18 @@ int main()
     InitializeEditorAssets(editorHost);
     editorHost.extraSerializers.push_back(DemoGame::GetHealthSerializerEntry());
 
+    // v0.8 EditorSettings 持久化：启动时尝试从 editor_settings.json 加载，
+    // 缺失 / 解析失败保留默认值。文件相对路径（ChdirToRepoRoot 之后）。
+    constexpr const char* kEditorSettingsPath = "editor_settings.json";
+    {
+        auto readRes = Orange::Engine::JsonReader::FromFile(kEditorSettingsPath);
+        if (readRes.IsOk())
+        {
+            ReadEditorSettings(readRes.Value(), editorHost.settings);
+            std::fprintf(stdout, "[OrangeEditor] loaded %s\n", kEditorSettingsPath);
+        }
+    }
+
     // 注册第一个 IEditorInspectorPlugin —— v0.3 deliverable 5 落地。
     // 多 plugin 按 push_back 顺序检查 CanHandle，第一条命中接管段；目前
     // 仅一条，未来 v0.5 Material 缩略图 / v0.7 Animator 时间轴 plugin 同款
@@ -631,6 +643,19 @@ int main()
                  editorHost.scene.pWorld->Size());
 
     const int rc = host->Run();
+
+    // v0.8 EditorSettings 持久化：进程退出前写盘。失败仅 log，不阻断 shutdown。
+    {
+        Orange::Engine::JsonWriter w;
+        WriteEditorSettings(w, editorHost.settings);
+        auto saveRes = w.SaveToFile(kEditorSettingsPath);
+        if (saveRes.IsErr())
+        {
+            std::fprintf(stderr, "[OrangeEditor] WARNING: save %s failed (code=%u)\n",
+                         kEditorSettingsPath,
+                         static_cast<unsigned>(saveRes.Error()));
+        }
+    }
 
     // ---- 关停 ---------------------------------------------------------
     // 关键约束：ImGui_ImplGlfw_Shutdown 会销毁 multi-viewport 期间 ImGui

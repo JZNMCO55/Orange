@@ -26,32 +26,47 @@ namespace
 
 namespace GM = OrangeEditor::Internal::GizmoMath;
 
-constexpr float kHandleScreenLengthPx = 90.0f;
-constexpr float kHitThresholdPx       = 8.0f;
+// handle 长度 / hit threshold / 配色 / 线宽 从 host.settings 读取（v0.8 之后）。
+// cube / center 尺寸 / factor clamp 暂保留 hardcode（不属于 v0.8 首批纳入
+// settings 的视觉常量列表，未来扩展再纳入）。
 constexpr float kCubeHalfSizePx       = 6.0f;   // axis tip 立方体（屏幕方块）边长一半
 constexpr float kCenterHalfSizePx     = 7.0f;   // 中心 uniform cube 边长一半
 constexpr float kCenterHitRadiusPx    = 10.0f;  // 中心 handle hit-test 范围
 constexpr float kFactorMin            = 0.01f;
 constexpr float kFactorMax            = 100.0f;
 
-constexpr ImU32 kColX        = IM_COL32(220, 60,  60,  255);
-constexpr ImU32 kColXBright  = IM_COL32(255, 180, 120, 255);
-constexpr ImU32 kColY        = IM_COL32(60,  200, 60,  255);
-constexpr ImU32 kColYBright  = IM_COL32(180, 255, 120, 255);
-constexpr ImU32 kColZ        = IM_COL32(60,  120, 240, 255);
-constexpr ImU32 kColZBright  = IM_COL32(140, 200, 255, 255);
+// 中心 handle 颜色（uniform scale 用，无对应轴色）暂保留 hardcode——
+// settings 仅覆盖 X/Y/Z 三轴 + idle/highlight 6 色。
 constexpr ImU32 kColCenter        = IM_COL32(220, 220, 220, 255);
 constexpr ImU32 kColCenterBright  = IM_COL32(255, 240, 140, 255);
 
-ImU32 AxisColor(EditorGizmoState::Axis axis, bool highlight) noexcept
+ImU32 SettingsToImU32(const glm::vec4& c) noexcept
+{
+    auto byteOf = [](float v) -> int
+    {
+        if (v < 0.0f) { v = 0.0f; }
+        if (v > 1.0f) { v = 1.0f; }
+        return static_cast<int>(v * 255.0f + 0.5f);
+    };
+    return IM_COL32(byteOf(c.r), byteOf(c.g), byteOf(c.b), byteOf(c.a));
+}
+
+ImU32 SettingsAxisColor(const EditorSettings& s,
+                        EditorGizmoState::Axis axis,
+                        bool highlight) noexcept
 {
     switch (axis)
     {
-        case EditorGizmoState::Axis::X:      return highlight ? kColXBright      : kColX;
-        case EditorGizmoState::Axis::Y:      return highlight ? kColYBright      : kColY;
-        case EditorGizmoState::Axis::Z:      return highlight ? kColZBright      : kColZ;
-        case EditorGizmoState::Axis::Center: return highlight ? kColCenterBright : kColCenter;
-        default:                             return IM_COL32(255, 255, 255, 255);
+        case EditorGizmoState::Axis::X:
+            return SettingsToImU32(highlight ? s.gizmoColorXHighlight : s.gizmoColorXIdle);
+        case EditorGizmoState::Axis::Y:
+            return SettingsToImU32(highlight ? s.gizmoColorYHighlight : s.gizmoColorYIdle);
+        case EditorGizmoState::Axis::Z:
+            return SettingsToImU32(highlight ? s.gizmoColorZHighlight : s.gizmoColorZIdle);
+        case EditorGizmoState::Axis::Center:
+            return highlight ? kColCenterBright : kColCenter;
+        default:
+            return IM_COL32(255, 255, 255, 255);
     }
 }
 
@@ -142,9 +157,11 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
     }
     // 探针用相机右向量而非 world X 轴 —— 见 GizmoMath::ComputeWorldUnits
     // ForScreenLength 注释（防止 orbit 相机时 handle 整体伸缩）。
+    const float handleScreenLengthPx = host.settings.gizmoHandleScreenLengthPx;
+    const float hitThresholdPx       = host.settings.gizmoHitThresholdPx;
     const auto handleWorldLen = GM::ComputeWorldUnitsForScreenLength(
         entityPos, cam.view, viewProj,
-        viewportImageOriginScreen, viewportImageSize, kHandleScreenLengthPx);
+        viewportImageOriginScreen, viewportImageSize, handleScreenLengthPx);
     const float worldUnitsPerHandle = handleWorldLen.value_or(1.0f);
 
     struct AxisProjected
@@ -187,7 +204,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
         else
         {
             Axis  bestAxis = Axis::None;
-            float bestDist = kHitThresholdPx;
+            float bestDist = hitThresholdPx;
             for (const auto& ap : axes)
             {
                 if (!ap.tipVisible) { continue; }
@@ -338,8 +355,9 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
             if (!ap.tipVisible) { continue; }
             const bool   highlight = (host.gizmo.hoveredAxis == ap.axis)
                                   || (host.gizmo.draggingAxis == ap.axis);
-            const ImU32  col       = AxisColor(ap.axis, highlight);
-            const float  thickness = highlight ? 5.5f : 3.5f;
+            const ImU32  col       = SettingsAxisColor(host.settings, ap.axis, highlight);
+            const float  thickness = highlight ? host.settings.gizmoLineWidthScaleHighlight
+                                               : host.settings.gizmoLineWidthScaleIdle;
             const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
             const ImVec2 b{ap.tipScreen.x,       ap.tipScreen.y};
             drawList->AddLine(a, b, col, thickness);
@@ -354,7 +372,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
         // 中心 uniform handle
         const bool  centerHi = (host.gizmo.hoveredAxis == Axis::Center)
                             || (host.gizmo.draggingAxis == Axis::Center);
-        const ImU32 colCtr   = AxisColor(Axis::Center, centerHi);
+        const ImU32 colCtr   = SettingsAxisColor(host.settings, Axis::Center, centerHi);
         drawList->AddRectFilled(
             ImVec2(projOrigin->screen.x - kCenterHalfSizePx, projOrigin->screen.y - kCenterHalfSizePx),
             ImVec2(projOrigin->screen.x + kCenterHalfSizePx, projOrigin->screen.y + kCenterHalfSizePx),
