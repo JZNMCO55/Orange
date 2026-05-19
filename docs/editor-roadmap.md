@@ -491,6 +491,32 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **Critical Path**：否
 
+### v0.8.5 · 编辑器视觉基线（sky / grid / tonemap / PBR showcase） ✅
+
+**关键 deliverables**（2026-05-19 单 commit `ca0f112` 落地；后置 patch milestone 锚点）：
+
+- ✅ **sky-dome pass**：`Pipeline::SetSkyEnabled / IsSkyEnabled` 公共 API；`bakedEnvCube` 有时走 cubemap 采样，无时走 procedural 3 色 horizon gradient + 太阳 disc（DirectionalLight 驱动方向 / 颜色 / 强度）
+- ✅ **viewport grid pass**：`Pipeline::SetEditorGridEnabled` 公共 API；fullscreen quad + Ben Golus PristineGrid（细线 1m / 粗线 10m / 20→80m 淡出）+ sceneDepth 比较 + discard 处理几何遮挡（不走 `gl_FragDepth` 避撞精度坑）
+- ✅ **ACES tonemap**：`passthrough.frag.glsl` 自带 Narkowicz fit；编辑器 RenderOffscreen 路径直读 ACES（不消费 PostProcessChain bloom+tonemap，HDR > 1 像素 shader 内自压回 [0,1]）
+- ✅ **dummy IBL ambient**：从全 0 提到 (0.25, 0.25, 0.25) 灰；未挂 EnvironmentComponent 时 PBR 物体不再显灰白塑料
+- ✅ **viewport clear color**：深蓝 (0.05, 0.07, 0.10) → 中性灰 (0.12, 0.12, 0.13)；sky 关时背景克制
+- ✅ **PBR showcase 场景**：`assets/scenes/pbr_showcase.scene.json`（24 entity = Root + Camera + Sun + Environment + 两组 3×3 球阵）+ 18 个 `pbr_showcase/{warm,white}_m{0-2}r{0-2}.material` + `assets/meshes/sphere.mesh`（32×16 UV-sphere v3 含 normal）；启动期 lazy seed + Save 落盘，File → Open Scene 加载
+- ✅ ScenePanel toolbar 加 Grid / Sky checkbox；Add Component → Renderable 默认材质 `default.material` → `pbr.material`（与 Cocos 默认 cube 手感一致）
+- ✅ **顺路 bug fix**：GAP-2026-05-19-editor-environment-component-wiring 再修（漏注册 TextureLoader）+ cube.mesh face normal 朝向修（quad 顶点序与 cross 约定反向）+ EnsureHdrTarget 重建 sceneDepth 漏 reset ShaderReadOnly layout flag（pre-existing）
+
+**已知归属债**（v0.8.5 验收通过但已显式登记，下次相关 session 解套）：
+
+- grid pass + dummy IBL ambient 默认值 + clear color 是 **编辑器审美决定**，当前塞在 engine `Pipeline` 公共面 → `docs/engine-known-gaps.md` GAP-2026-05-19-editor-aux-passes-in-engine-pipeline
+- PBR push constant 160 B 撞 Vulkan 规范保证下限 128 B（桌面 GPU 普遍 256 B，老 Intel iGPU / 移动端会 fail）→ `docs/engine-known-gaps.md` GAP-2026-05-19-pbr-push-constant-exceeds-spec-min；已在 `Pipeline::SetupRhiResources` 加 init-time 校验，devicelimit 不足时日志告警
+
+**完工记录**：见 `docs/acceptance/editor-v0.8.5-acceptance-checklist.md`。
+
+**前置**：v0.8（消费 `Core::Log` SetLogSink）+ Phase 6.5（消费 `EnvironmentComponent` / `Pipeline::BakeIblFromWorld` / PBR 材质路径）
+
+**与引擎关系**：sky-dome 与 ACES tonemap 是引擎 Pipeline 永久能力（游戏侧也消费）；grid pass + ambient 默认值 + clear color 是已登记的 editor 归属债，迁回 editor 端走独立 session
+
+**Critical Path**：否
+
 ### v0.9 · Profiler / Debug Draw 集成
 
 **关键 deliverables**：
