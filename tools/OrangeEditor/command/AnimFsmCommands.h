@@ -201,6 +201,26 @@ private:
     // 让用户决定是否手动删
 };
 
+// SetInitialStateCommand（v0.7 c2-8） —— 改 fsm.initialState 字符串
+// + 联动运行时启动 state（实际写入磁盘 + 运行时翻译时按本字段 SetInitial
+// State）。空字符串视为"清空 initial state"合法操作。
+class AnimFsmSetInitialStateCommand : public ICommand
+{
+public:
+    AnimFsmSetInitialStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                                  std::string oldInitial,
+                                  std::string newInitial);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_set_initial_state"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::string                                          mOldInitial;
+    std::string                                          mNewInitial;
+};
+
 // 整 vector<EditableCondition> 覆盖式命令 —— Add / Delete / Edit 单条
 // condition 都通过构造 newConds 推送本命令实现。merge 暂不实现（Undo
 // 粒度按 transition 覆盖，与 Lumix 模式一致）。

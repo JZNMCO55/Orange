@@ -526,6 +526,33 @@ void AnimFsmDeleteParameterCommand::Undo()
 }
 
 // ---------------------------------------------------------------------------
+// AnimFsmSetInitialStateCommand
+// ---------------------------------------------------------------------------
+
+AnimFsmSetInitialStateCommand::AnimFsmSetInitialStateCommand(
+    AnimFsmAssetInspectorPlugin* pPlugin,
+    std::string                  oldInitial,
+    std::string                  newInitial)
+    : mpPlugin(pPlugin)
+    , mOldInitial(std::move(oldInitial))
+    , mNewInitial(std::move(newInitial))
+{}
+
+void AnimFsmSetInitialStateCommand::Execute()
+{
+    if (mpPlugin == nullptr) { return; }
+    mpPlugin->GetEditingFsm().initialState = mNewInitial;
+    mpPlugin->MarkDirty();
+}
+
+void AnimFsmSetInitialStateCommand::Undo()
+{
+    if (mpPlugin == nullptr) { return; }
+    mpPlugin->GetEditingFsm().initialState = mOldInitial;
+    mpPlugin->MarkDirty();
+}
+
+// ---------------------------------------------------------------------------
 // AnimFsmSetTransitionConditionsCommand
 // ---------------------------------------------------------------------------
 

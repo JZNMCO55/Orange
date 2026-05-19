@@ -275,6 +275,20 @@ void AnimFsmAssetInspectorPlugin::DrawCanvas(EditorHost& host)
             nodeMin.y + (kNodeHeight - textSize.y) * 0.5f);
         dl->AddText(textPos, textColor, state.name.c_str());
 
+        // c2-8：initial state 节点左上角金色三角标识（Unity Animator
+        // Controller 同款视觉惯例）
+        if (state.name == mEditingFsm.initialState)
+        {
+            const float  triSize = ImGui::GetFontSize() * 0.7f;
+            const ImVec2 t0 = ImVec2(nodeMin.x,           nodeMin.y);
+            const ImVec2 t1 = ImVec2(nodeMin.x + triSize, nodeMin.y);
+            const ImVec2 t2 = ImVec2(nodeMin.x,           nodeMin.y + triSize);
+            // 金色 = ImGui 内置 PlotHistogram 色（橙黄），与 EditorTheme
+            // accent 同色系；不写 IM_COL32 字面量以遵守 v0.6.5 视觉体系
+            const ImU32 initialColor = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+            dl->AddTriangleFilled(t0, t1, t2, initialColor);
+        }
+
         ImGui::PopID();
     }
 
@@ -384,6 +398,22 @@ void AnimFsmAssetInspectorPlugin::DrawNodeContextPopup(EditorHost& host)
     if (ImGui::Button("Cancel"))
     {
         ImGui::CloseCurrentPopup();
+    }
+
+    // c2-8：Set as initial 按钮（当前 state != initialState 时启用）
+    const bool alreadyInitial = (mRenameTargetState == mEditingFsm.initialState);
+    ImGui::BeginDisabled(alreadyInitial);
+    if (ImGui::Button("Set as Initial"))
+    {
+        host.cmdStack.Push(std::make_unique<AnimFsmSetInitialStateCommand>(
+            this, mEditingFsm.initialState, mRenameTargetState));
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    if (alreadyInitial)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(already initial)");
     }
 
     if (renameClicked && newValid && !sameName && !nameClash)
