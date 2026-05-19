@@ -34,6 +34,7 @@ OrangeEngine 一键编译入口。
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -106,6 +107,149 @@ def _is_multi_config(generator: str) -> bool:
 def _section(title: str) -> None:
     bar = "=" * (len(title) + 8)
     print(f"\n{bar}\n=== {title} ===\n{bar}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# vendor SHA cache + force-relink helpers
+# ---------------------------------------------------------------------------
+#
+# 解决 incremental link trap（详见 memory reference_msvc_incremental_link_mtime_trap.md
+# 与本脚本 2026-05-19 验证记录）。完整 trap 链：
+#
+#   1. git pull / git checkout 不更新 vendor 源文件 mtime
+#   2. MSBuild 看 src mtime < .obj mtime → 跳过 compile（.obj 不更新）
+#   3. .obj 不变 → 跳过 link（.lib 不更新）
+#   4. cmake install 走 copy_if_different 保留 mtime → install/.lib 不更新
+#   5. 引擎 build 看 install/.lib mtime < .exe mtime → 跳过 re-link → .exe 不更新
+#   6. 启动崩溃：.exe 链接的是 vendor 旧版本（含早已 fix 的 bug）
+#
+# 修复策略（三钩子）：
+#
+#   H1 _detect_vendor_changes  —— 对比 build/.vendor-sha-cache.json vs 当前 vendor
+#                                 HEAD，决定哪些 vendor 需要 force rebuild
+#   H2 _bump_lib_mtimes        —— vendor build/install 之后把 install/.lib mtime
+#                                 改为 now，对抗 copy_if_different trap
+#   H3 _force_relink_cleanup   —— 引擎 build 之前删 build/bin/<config>/*.exe，
+#                                 强制 MSBuild 走完整 link 路径
+#
+# 钩子组合（SHA 未变化时全部 no-op，开发期增量 build 0 额外成本）。
+# --force-vendor-rebuild flag 显式跳过 SHA 对比，CI / 怀疑 trap 时手动触发。
+
+_VENDOR_SHA_CACHE_FILENAME = ".vendor-sha-cache.json"
+
+
+def _vendor_sha(vendor_path: Path) -> str:
+    """返回 vendor 当前 HEAD SHA；working tree 有未提交改动时追加 '-dirty' 后缀。
+
+    dirty 检测是必要的：本地改了 vendor 源码但没 commit 时，HEAD SHA 不变但需要
+    re-build。'-dirty' 后缀让 cache 比对自然失败 → 触发 force rebuild。
+    """
+    if not (vendor_path / ".git").exists():
+        return "no-git"
+    try:
+        sha = _capture(["git", "-C", str(vendor_path), "rev-parse", "HEAD"])
+        dirty = _capture(["git", "-C", str(vendor_path), "status", "--porcelain"])
+    except subprocess.CalledProcessError:
+        return "unknown"
+    return sha + ("-dirty" if dirty else "")
+
+
+def _sha_cache_file(build_dir: Path) -> Path:
+    return build_dir / _VENDOR_SHA_CACHE_FILENAME
+
+
+def _load_sha_cache(build_dir: Path) -> dict:
+    cache_file = _sha_cache_file(build_dir)
+    if not cache_file.is_file():
+        return {}
+    try:
+        return json.loads(cache_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_sha_cache(build_dir: Path, data: dict) -> None:
+    cache_file = _sha_cache_file(build_dir)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _detect_vendor_changes(build_dir: Path, force: bool) -> tuple[set, dict]:
+    """检测哪些 vendor 需要 force rebuild。
+
+    返回 (needs_rebuild 集合, 当前 vendor SHA 字典)。SHA 字典在 step 5 成功后通过
+    _save_sha_cache 写回，作为下次 build 的对比基准。
+
+    当前只跟踪 OrangeRender —— 它走 build_all.py Step 4 的 cmake install 路径，
+    是 trap 的主要受害者。DragonBones 是 in-tree 编译走 engine build 增量逻辑，
+    Orange-Wiki 是知识库不影响 build —— 未来按需扩展本字典即可纳入。
+    """
+    vendors = {
+        "OrangeRender": VENDOR_RENDER,
+    }
+    cache = _load_sha_cache(build_dir)
+    current = {name: _vendor_sha(path) for name, path in vendors.items()}
+    needs = set()
+    for name, sha in current.items():
+        cached = cache.get(name)
+        short_sha = sha[:7] if sha and sha != "no-git" else sha
+        short_cached = cached[:7] if cached and cached != "no-git" else (cached or "none")
+        if force:
+            print(f"[vendor] {name}: force rebuild (sha={short_sha})", flush=True)
+            needs.add(name)
+        elif cached != sha:
+            print(
+                f"[vendor] {name}: SHA changed ({short_cached} → {short_sha}) → force rebuild",
+                flush=True,
+            )
+            needs.add(name)
+        else:
+            print(f"[vendor] {name}: SHA unchanged ({short_sha}) → incremental ok", flush=True)
+    return needs, current
+
+
+def _bump_lib_mtimes(lib_dir: Path) -> int:
+    """把 lib 目录里所有 .lib / .a 文件 mtime 改为 now。
+
+    对抗 cmake install --copy-if-different 保留源 mtime 的 trap：vendor 真的
+    re-build 了，但 install 出来的 .lib mtime 仍是源 .lib 的旧 mtime；下游
+    MSBuild 看 install/.lib mtime 旧于 .exe → 跳过 re-link。
+    """
+    if not lib_dir.is_dir():
+        return 0
+    bumped = 0
+    for ext in ("*.lib", "*.a"):
+        for lib in lib_dir.glob(ext):
+            try:
+                os.utime(lib, None)
+                bumped += 1
+            except OSError as e:
+                print(f"[vendor] WARN: could not bump mtime on {lib}: {e}", flush=True)
+    return bumped
+
+
+def _force_relink_cleanup(build_dir: Path, config: str) -> int:
+    """删 build/bin/<config>/*.exe，强制 MSBuild 走完整 link 路径。
+
+    单凭 _bump_lib_mtimes 在某些 MSBuild 版本 / 缓存状态下仍不够（例如 .ilk /
+    .pdb 增量 link 数据库判定为 up-to-date）；删 .exe 是绕过 MSBuild 增量判定
+    的最直接路径——目标产物不存在时 MSBuild 必须重新 link。
+    """
+    bin_dir = build_dir / "bin" / config
+    if not bin_dir.is_dir():
+        return 0
+    removed = 0
+    for exe in bin_dir.glob("*.exe"):
+        try:
+            exe.unlink()
+            print(f"[force-relink] removed {exe.name}", flush=True)
+            removed += 1
+        except OSError as e:
+            print(f"[force-relink] WARN: could not remove {exe.name}: {e}", flush=True)
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +462,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                    help="为 OrangeEngine 打开 ORANGE_ENGINE_BUILD_SAMPLES（默认关闭，加快编辑器迭代）")
     p.add_argument("--clean", action="store_true",
                    help="清理 OrangeRender 与 OrangeEngine 的构建目录后从头来")
+    p.add_argument("--force-vendor-rebuild", action="store_true",
+                   help="跳过 vendor SHA 比对，强制走 force rebuild 路径（Step 4 自动 --clean + bump install lib mtime + 删下游 .exe）。CI / 怀疑 incremental link trap 时手动触发")
 
     p.add_argument("--skip-submodules", action="store_true", help="跳过 Step 1（git submodule）")
     p.add_argument("--skip-render-3rdparty", action="store_true", help="跳过 Step 2（OrangeRender 3rdparty）")
@@ -367,6 +513,15 @@ def main(argv: list[str]) -> int:
         else:
             print("[skip] Step 1 (submodule)", flush=True)
 
+        # H1：vendor SHA 变更检测（详见上方 helpers 段头注释）。
+        # 始终运行——SHA 未变化时 needs_rebuild 为空集合，所有钩子 no-op；
+        # 变化时驱动 H2 / H3 钩子在 Step 4 / Step 5 期间做强制 rebuild + relink。
+        needs_rebuild, vendor_shas = _detect_vendor_changes(
+            engine_build, args.force_vendor_rebuild
+        )
+        render_force_clean = ("OrangeRender" in needs_rebuild)
+        render_clean = args.clean or render_force_clean
+
         if not skip_render_3rd:
             _fetch_render_3rdparty(dep_prefix, args.jobs, args.config, args.generator, args.with_spdlog)
         else:
@@ -378,21 +533,50 @@ def main(argv: list[str]) -> int:
             print("[skip] Step 3 (OrangeEngine 3rdparty)", flush=True)
 
         if not args.skip_render:
+            if render_force_clean and not args.clean:
+                print(
+                    "[vendor] OrangeRender SHA changed → Step 4 强制 --clean（force rebuild）",
+                    flush=True,
+                )
             _build_and_install_render(
                 dep_prefix, render_sdk, render_build,
                 args.config, args.generator, args.jobs,
-                args.clean, args.with_spdlog,
+                render_clean, args.with_spdlog,
             )
+            # H2：bump install lib mtime 对抗 copy_if_different trap。两个候选 prefix
+            # 都 bump，避免本机有多份 install（D:/sdk/orange-render + D:/3rdparty/install）
+            # 时遗漏 cmake 实际 find_package 命中的那份。
+            if "OrangeRender" in needs_rebuild:
+                bumped = _bump_lib_mtimes(render_sdk / "lib")
+                bumped += _bump_lib_mtimes(dep_prefix / "install" / "lib")
+                if bumped:
+                    print(
+                        f"[vendor] bumped {bumped} install lib mtime(s) to defeat copy_if_different trap",
+                        flush=True,
+                    )
         else:
             print("[skip] Step 4 (OrangeRender build/install)", flush=True)
 
         if not args.skip_engine:
+            # H3：删 .exe 强制 MSBuild re-link。
+            # 只在 needs_rebuild 非空时触发——SHA 未变化的 incremental 路径仍走快速增量。
+            if needs_rebuild:
+                removed = _force_relink_cleanup(engine_build, args.config)
+                if removed:
+                    print(
+                        f"[force-relink] removed {removed} stale .exe(s) → MSBuild 必须重新 link",
+                        flush=True,
+                    )
             _build_engine(
                 cmake, dep_prefix, render_sdk, engine_build,
                 args.config, args.generator, args.jobs,
                 args.clean, args.with_spdlog, args.with_tests, args.run_tests,
                 args.with_samples,
             )
+            # H3 post：写回 SHA cache，作为下次 build 的基准。
+            # 只在 Step 5 成功（异常路径不在此分支）时写——确保 cache 里的 SHA 对应
+            # 当前 build 产物所基于的源码版本。
+            _save_sha_cache(engine_build, vendor_shas)
         else:
             print("[skip] Step 5 (OrangeEngine build)", flush=True)
 
