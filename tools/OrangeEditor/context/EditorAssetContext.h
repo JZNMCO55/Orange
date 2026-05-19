@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 struct EditorAssetContext
 {
@@ -37,6 +38,10 @@ struct EditorAssetContext
         cubeMeshHandle  {};
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
         planeMeshHandle {};
+    // PBR showcase scene 用的 sphere mesh（lat/lon UV-sphere，与 sample 13/14
+    // 同款）。InitializeEditorAssets 内 lazy bake assets/meshes/sphere.mesh。
+    Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
+        sphereMeshHandle{};
 
     // demo 场景用的各材质实例 —— 地址要稳定供
     // RenderableComponent::materialInstance 持有，生命周期跟着 context 走。
@@ -56,6 +61,15 @@ struct EditorAssetContext
     //     成发光的可见物体（cube + emissive material）。
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDefaultRenderableMaterial;
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pLightObjectMaterial;
+
+    // PBR showcase scene 的 18 个 MaterialInstance（两组 3×3：左 warm 暖橙 /
+    // 右 white furnace；每球独立 metallic + roughness 组合）。BuildNamedMaterialInstances
+    // 把它们以 "assets/materials/pbr_showcase/<key>.material" 路径加入
+    // namedMaterialInstances 映射，让 pbr_showcase.scene.json 的 Renderable
+    // materialInstanceId 字段可正确解析。
+    std::vector<std::unique_ptr<Orange::Engine::Render::MaterialInstance>>
+        pbrShowcaseMaterials;
+    std::vector<std::string> pbrShowcaseMaterialPaths;  // 与 pbrShowcaseMaterials 一一对应
 
     // v0.5 c3：Asset 浏览器选中状态。
     // browserCurrentDir 是浏览器当前查看的目录（相对仓库根，前缀 "assets/"），

@@ -1,0 +1,941 @@
+{
+  "entities": [
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": -1,
+          "parent": 18,
+          "prevSibling": 1
+        },
+        "Name": {
+          "name": "white m2r2"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m2r2.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            3.9000000953674316,
+            1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 0,
+          "parent": 18,
+          "prevSibling": 2
+        },
+        "Name": {
+          "name": "white m2r1"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m2r1.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            2.5,
+            1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 1,
+          "parent": 18,
+          "prevSibling": 3
+        },
+        "Name": {
+          "name": "white m2r0"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m2r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            1.100000023841858,
+            1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 2,
+          "parent": 18,
+          "prevSibling": 4
+        },
+        "Name": {
+          "name": "white m1r2"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m1r2.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            3.9000000953674316,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 3,
+          "parent": 18,
+          "prevSibling": 5
+        },
+        "Name": {
+          "name": "white m1r1"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m1r1.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            2.5,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 4
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 4,
+          "parent": 18,
+          "prevSibling": 6
+        },
+        "Name": {
+          "name": "white m1r0"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m1r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            1.100000023841858,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 5
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 5,
+          "parent": 18,
+          "prevSibling": 7
+        },
+        "Name": {
+          "name": "white m0r2"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m0r2.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            3.9000000953674316,
+            -1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 6
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 6,
+          "parent": 18,
+          "prevSibling": 8
+        },
+        "Name": {
+          "name": "white m0r1"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m0r1.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            2.5,
+            -1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 7
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 7,
+          "parent": 18,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "white m0r0"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/white_m0r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            1.100000023841858,
+            -1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 8
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": -1,
+          "parent": 19,
+          "prevSibling": 10
+        },
+        "Name": {
+          "name": "warm m2r2"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m2r2.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -1.100000023841858,
+            1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 9
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 9,
+          "parent": 19,
+          "prevSibling": 11
+        },
+        "Name": {
+          "name": "warm m2r1"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m2r1.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -2.5,
+            1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 10
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 10,
+          "parent": 19,
+          "prevSibling": 12
+        },
+        "Name": {
+          "name": "warm m2r0"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m2r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -3.9000000953674316,
+            1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 11
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 11,
+          "parent": 19,
+          "prevSibling": 13
+        },
+        "Name": {
+          "name": "warm m1r2"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m1r2.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -1.100000023841858,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 12
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 12,
+          "parent": 19,
+          "prevSibling": 14
+        },
+        "Name": {
+          "name": "warm m1r1"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m1r1.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -2.5,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 13
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 13,
+          "parent": 19,
+          "prevSibling": 15
+        },
+        "Name": {
+          "name": "warm m1r0"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m1r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -3.9000000953674316,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 14
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 14,
+          "parent": 19,
+          "prevSibling": 16
+        },
+        "Name": {
+          "name": "warm m0r2"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m0r2.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -1.100000023841858,
+            -1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 15
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 15,
+          "parent": 19,
+          "prevSibling": 17
+        },
+        "Name": {
+          "name": "warm m0r1"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m0r1.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -2.5,
+            -1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 16
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 16,
+          "parent": 19,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "warm m0r0"
+        },
+        "Renderable": {
+          "castsShadow": false,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m0r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -3.9000000953674316,
+            -1.399999976158142,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 17
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": 8,
+          "nextSibling": -1,
+          "parent": 23,
+          "prevSibling": 19
+        },
+        "Name": {
+          "name": "White Spheres (14_pbr_ibl furnace)"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 18
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": 17,
+          "nextSibling": 18,
+          "parent": 23,
+          "prevSibling": 20
+        },
+        "Name": {
+          "name": "Warm Spheres (13_pbr_direct)"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 19
+    },
+    {
+      "components": {
+        "Environment": {
+          "cubemap": "",
+          "intensity": 1.0,
+          "tint": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 19,
+          "parent": 23,
+          "prevSibling": 21
+        },
+        "Name": {
+          "name": "Environment"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 20
+    },
+    {
+      "components": {
+        "DirectionalLight": {
+          "castsShadow": false,
+          "color": [
+            1.0,
+            0.949999988079071,
+            0.8500000238418579
+          ],
+          "intensity": 1.2000000476837158
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 20,
+          "parent": 23,
+          "prevSibling": 22
+        },
+        "Name": {
+          "name": "Sun"
+        },
+        "Transform": {
+          "position": [
+            5.0,
+            8.0,
+            5.0
+          ],
+          "rotation": [
+            -0.1378517597913742,
+            0.0,
+            0.18380235135555267,
+            0.9732489585876465
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 21
+    },
+    {
+      "components": {
+        "Camera": {
+          "projection": [
+            2.7474775314331055,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -2.7474775314331055,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -1.001001000404358,
+            -1.0,
+            0.0,
+            0.0,
+            -0.10010010004043579,
+            0.0
+          ],
+          "view": [
+            1.0,
+            0.0,
+            -0.0,
+            0.0,
+            -0.0,
+            0.9992976188659668,
+            0.037473663687705994,
+            0.0,
+            0.0,
+            -0.037473663687705994,
+            0.9992976188659668,
+            0.0,
+            -0.0,
+            -0.0,
+            -8.005622863769531,
+            1.0
+          ]
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 21,
+          "parent": 23,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "Camera"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 22
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": 22,
+          "nextSibling": -1,
+          "parent": -1,
+          "prevSibling": -1
+        },
+        "Name": {
+          "name": "Root"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 23
+    }
+  ],
+  "schemaVersion": {
+    "major": 1,
+    "minor": 3,
+    "namespace": "scene/world"
+  }
+}

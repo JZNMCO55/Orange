@@ -62,6 +62,8 @@
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/asset/TextureAsset.h>
+#include <orange/engine/render/EnvironmentComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
@@ -603,6 +605,51 @@ int main()
                 info.displayName = lc.layerId;
                 info.visible     = true;
                 editorHost.scene.partition.AddLayer(std::move(info));
+            }
+        }
+
+        // 不在启动期自动挂 EnvironmentComponent —— 与 Cocos Creator 默认
+        // 一致："viewport 干净中性灰 + IBL 全黑"的 baseline 状态。用户想
+        // 启用 PBR + IBL 真实反射时，按 Add Component → Environment + 拖
+        // .hdr 到 cubemap 字段触发 BakeIblFromWorld（auto-rebake 路径已通），
+        // 同时 sky-dome pass 也会随之激活。这条路径与 main.cpp 别处的
+        // "Inspector 加 Environment 就立刻生效" 流程对位，无额外 magic。
+    }
+
+    // PBR showcase scene 一次性 lazy 生成：检测 pbr_showcase.scene.json 不
+    // 存在时种好 + Save 落盘，让用户 File → Open Scene 立即可加载。临时
+    // World 内构造完后存盘即丢，不影响当前已加载的 demo.scene。
+    //
+    // 实现：临时把 editorHost.scene.pWorld 指向 tempWorld，调 SeedPbrShowcaseWorld
+    // 复用 editorHost.assets 的 sphereMeshHandle + pbrShowcaseMaterials；
+    // Save 完成后把 pWorld 指针恢复到原 demo world。tempWorld 析构时
+    // RenderableComponent (POD) 不会 delete materialInstance 裸指针，无 dangling。
+    {
+        namespace fs = std::filesystem;
+        const char* kShowcasePath = "assets/scenes/pbr_showcase.scene.json";
+        if (!fs::exists(kShowcasePath))
+        {
+            World tempWorld;
+            SeedPbrShowcaseWorld(tempWorld, editorHost.assets);
+
+            auto namedMap = BuildNamedMaterialInstances(editorHost.assets);
+            Scene::SaveOptions saveOpts{};
+            saveOpts.assetRegistry          = editorHost.assets.pAssets.get();
+            saveOpts.namedMaterialInstances = &namedMap;
+            saveOpts.extraSerializers       = editorHost.extraSerializers;
+            if (auto sv = Scene::Save(tempWorld, kShowcasePath, saveOpts);
+                sv.IsErr())
+            {
+                std::fprintf(stderr,
+                             "[OrangeEditor] Scene::Save '%s' 失败 (code=%u)；"
+                             "File → Open Scene 仍可手动写入\n",
+                             kShowcasePath, static_cast<unsigned>(sv.Error()));
+            }
+            else
+            {
+                std::fprintf(stdout,
+                             "[OrangeEditor] 生成 %s（18 球 PBR showcase）\n",
+                             kShowcasePath);
             }
         }
     }

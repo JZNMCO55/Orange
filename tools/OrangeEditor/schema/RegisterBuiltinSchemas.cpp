@@ -284,7 +284,14 @@ void RegisterRenderableComponentSchema()
             if (host.scene.pWorld == nullptr) { return; }
             RC rc{};
             rc.mesh             = host.assets.cubeMeshHandle;
-            rc.materialInstance = host.assets.pDefaultRenderableMaterial.get();
+            // 默认绑 PBR 材质（Cocos Creator builtin-standard 同款手感）。
+            // pPbrMaterial 缺席时退化到 default.material（textured 模板棋盘格
+            // dev-checker，保证物体永远可见）。textured 不再做"默认主战场"的
+            // 角色——它是 dev-checker，地板 / 墙面这类需要程序图案的场景仍可
+            // 显式选用。
+            rc.materialInstance = host.assets.pPbrMaterial
+                ? host.assets.pPbrMaterial.get()
+                : host.assets.pDefaultRenderableMaterial.get();
             host.scene.pWorld->AddComponent<RC>(e, rc);
         };
 

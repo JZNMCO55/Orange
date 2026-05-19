@@ -13,6 +13,7 @@
 #include "../schema/ComponentSchema.h"
 #include "../schema/ComponentSchemaRegistry.h"
 
+#include <orange/engine/render/BuiltinPostProcessChain.h>
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
 #include <orange/rhi/RHITexture.h>
@@ -24,6 +25,14 @@
 #include <algorithm>
 #include <cstdio>
 #include <initializer_list>
+
+// viewport 工具栏 grid / sky 开关持久状态。本期只用 file-static（不进 Editor
+// Settings 持久化），与 ScenePanel.cpp 的 toolbar 局部 UI 状态同节奏；后续
+// v0.8 EditorSettings 整骨 milestone 若要在重启间保留，再迁移到 settings。
+// Grid 默认开（地面参考线对编辑器主战场最有用）；Sky 默认开（cubemap 未烘焙
+// 时 Pipeline 内部 fallback 到原 clear color，开关也不会让 viewport 黑屏）。
+static bool sViewportGridEnabled = true;
+static bool sViewportSkyEnabled  = true;
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -53,6 +62,22 @@ void EditorRenderLayer::DrawScenePanel()
     {
         ImGui::SetTooltip("Viewport gizmo overlay 总开关（Translate / Rotate / Scale\n"
                           "内置 gizmo + Light / ParticleEmitter / Camera frustum plugin）");
+    }
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Grid", &sViewportGridEnabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("地面参考网格（Y=0 平面，每 1 m 细线 + 每 10 m 粗线）\n"
+                          "走 fullscreen-quad + PristineGrid + depth test，被几何遮挡");
+    }
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Sky", &sViewportSkyEnabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("天空盒背景（采 EnvironmentComponent.cubemap）\n"
+                          "未挂 EnvironmentComponent / cubemap 未烘焙 → 显示深蓝灰 fallback");
     }
 
     ImGui::SameLine();
@@ -153,6 +178,10 @@ void EditorRenderLayer::DrawScenePanel()
         // 始终 valid，无需 null 检查。
         mpScenePipeline->SetWorldPartition(&mHost.scene.partition);
         mpScenePipeline->SetEditorCameraOverride(&mEditorCameraOverride);
+        // viewport toolbar toggle → Pipeline 状态：每帧 push（开销极小，
+        // 避免在 toggle 改变时维护额外 dirty 标记）。
+        mpScenePipeline->SetEditorGridEnabled(sViewportGridEnabled);
+        mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
         // Pipeline::RenderOffscreen 内部 WaitIdle —— 本帧返回时 GPU 已
         // 空，之后 RemoveTexture(旧 descriptor) + AddTexture(新) 才安全。
         mpScenePipeline->Render(*mHost.scene.pWorld);
@@ -410,6 +439,15 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
             mScenePipelineFailed = true;
             return false;
         }
+        // 默认 PostProcessChain（Bloom + Tonemap + LUT）—— sample 14_pbr_ibl /
+        // 13_pbr_direct 同款。让 HDR pipeline 走完整路径：emissive HDR > 1
+        // 像素经 bloom 柔化扩散、PBR 物体经 ACES tonemap 曲线提亮。漏接时
+        // 视觉症状：emissive 物体硬边 clamp 像染色周围像素 + PBR cube 偏暗
+        // （没 tonemap 曲线把 linear 0.3-0.4 提到 ~0.5 显示）。
+        mpScenePostProcessChain = std::make_unique<
+            Orange::Engine::Render::PostProcessChain>(
+                Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
+        mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
         mScenePanelWidth  = width;
         mScenePanelHeight = height;
     }

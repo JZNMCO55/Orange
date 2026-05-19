@@ -339,6 +339,30 @@ public:
     void BakeIblFromWorld(::Orange::Engine::World&                world,
                           ::Orange::Engine::Asset::AssetRegistry& assets);
 
+    // 编辑器 viewport 地面 grid 显隐开关（默认关）。开启时 Pipeline 在主
+    // 几何 pass 之后画一层 PristineGrid（Y=0 平面）+ alpha-blend 叠加到
+    // hdrColor，写正确 NDC depth 让 grid 能被场景几何遮挡。Lumix /
+    // Unity / Godot 等编辑器都内置类似 reference grid，便于摆放参考物。
+    //
+    // 典型调用方：编辑器 ScenePanel 工具栏 Grid checkbox 直接写本字段。
+    // 运行时 game 端默认走 false，不感知 grid 存在；切到 true 也只是多
+    // 走一个 fullscreen pass，不影响主 pass / IBL / bloom。
+    //
+    // 未 Initialize 时 silent-ignore；shader 加载失败时也 silent，pass
+    // 自然 skip（与 godrays/bloom 缺失资源时的退化节奏一致）。
+    void SetEditorGridEnabled(bool enabled) noexcept;
+    bool IsEditorGridEnabled() const noexcept;
+
+    // 天空盒（sky-dome）显隐开关（默认开）。开启时若 EnvironmentComponent
+    // cubemap 已烘焙（BakeIblFromWorld 走过且成功），Pipeline 在主几何
+    // pass 之前画一层全屏 cubemap sample 作背景。关闭 / cubemap 未烘焙
+    // 时回退到主 pass 的 clear color（默认深蓝灰）。
+    //
+    // 典型调用方：编辑器或游戏端 toolbar；本字段独立于 IBL —— IBL 永远
+    // 按 BakeIblFromWorld 结果接通 PBR shader，与是否画 sky-dome 解耦。
+    void SetSkyEnabled(bool enabled) noexcept;
+    bool IsSkyEnabled() const noexcept;
+
     // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
     // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material
     // 路由到一条 RHI Pipeline；同一 Material 多次出现只会编译一次。本

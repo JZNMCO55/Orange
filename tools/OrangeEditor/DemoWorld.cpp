@@ -13,11 +13,14 @@
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
+#include <orange/engine/asset/TextureAsset.h>
+#include <orange/engine/asset/TextureLoader.h>
 #include <orange/engine/core/Serialization.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/EnvironmentComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
@@ -73,47 +76,112 @@ MakePlaneMesh(float halfSize)
 // 内置 cube mesh（6 面 × 4 顶点，共 24 vertices / 12 triangles）。每面单独
 // 一组顶点是为了让 UV 在 face 边界不连续 —— textured material 在 face 间
 // 看起来才正常（共享 8 顶点的方案 UV 必然拉伸 / 接缝错位）。
+//
+// **face normal 显式 push**（不依赖 ComputeSmoothNormalsFromTriangles）：
+// MakeCubeMesh 的 quad 顶点顺序与 ComputeSmoothNormalsFromTriangles 的 cross
+// 约定（Cross(b - a, c - a)）反向 —— smooth-from-triangles 算出的 normal
+// 指向 cube 内部，PBR `max(0, NoL)` 直接 zero out direct light 让 cube 几乎
+// 全黑；toon 走 fallback kCool 蓝色看着正常（实际是 NoL ≤ 0 的 brunched
+// 分支）。修法：让 MakeCubeMesh 自己显式写 6 面 face normal 朝外，绕开
+// 算法约定问题。重 bake 后 cube.mesh v3 段直接持正确 normal。
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakeCubeMesh(float halfSize)
 {
     using ::Orange::Engine::Asset::MeshAsset;
+    using ::Orange::Engine::Asset::VertexNormal3;
     using ::Orange::Engine::Asset::VertexPosition3;
     using ::Orange::Engine::Asset::VertexUV2;
 
     const float h = halfSize;
     std::vector<VertexPosition3> positions;
     std::vector<VertexUV2>       uvs;
+    std::vector<VertexNormal3>   normals;
     std::vector<std::uint32_t>   indices;
     positions.reserve(24);
     uvs.reserve(24);
+    normals.reserve(24);
     indices.reserve(36);
 
     auto addFace = [&](VertexPosition3 a, VertexPosition3 b,
-                       VertexPosition3 c, VertexPosition3 d) {
+                       VertexPosition3 c, VertexPosition3 d,
+                       VertexNormal3 faceNormal) {
         const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
         positions.push_back(a); positions.push_back(b);
         positions.push_back(c); positions.push_back(d);
         uvs.push_back({0.0f, 0.0f}); uvs.push_back({1.0f, 0.0f});
         uvs.push_back({1.0f, 1.0f}); uvs.push_back({0.0f, 1.0f});
+        normals.push_back(faceNormal); normals.push_back(faceNormal);
+        normals.push_back(faceNormal); normals.push_back(faceNormal);
         indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 1);
         indices.push_back(base + 0); indices.push_back(base + 3); indices.push_back(base + 2);
     };
 
-    // +X / -X / +Y / -Y / +Z / -Z；winding 与既有 sample 的 plane 同顺
-    // （CCW 朝外），避免与 shadow caster / 主 pass 的 CullMode 假设打架。
-    addFace({ h,-h, h}, { h,-h,-h}, { h, h,-h}, { h, h, h});  // +X
-    addFace({-h,-h,-h}, {-h,-h, h}, {-h, h, h}, {-h, h,-h});  // -X
-    addFace({-h, h, h}, { h, h, h}, { h, h,-h}, {-h, h,-h});  // +Y (top)
-    addFace({-h,-h,-h}, { h,-h,-h}, { h,-h, h}, {-h,-h, h});  // -Y (bottom)
-    addFace({-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h});  // +Z
-    addFace({ h,-h,-h}, {-h,-h,-h}, {-h, h,-h}, { h, h,-h});  // -Z
+    // 6 面 + 显式朝外 face normal。winding 与既有 sample 的 plane 同顺
+    // （shadow caster / 主 pass 的 CullMode 当前是 None，winding 选向不
+    // 影响可见性；normal 由本函数显式写，与 winding 解耦）。
+    addFace({ h,-h, h}, { h,-h,-h}, { h, h,-h}, { h, h, h}, { 1.0f, 0.0f, 0.0f});  // +X
+    addFace({-h,-h,-h}, {-h,-h, h}, {-h, h, h}, {-h, h,-h}, {-1.0f, 0.0f, 0.0f});  // -X
+    addFace({-h, h, h}, { h, h, h}, { h, h,-h}, {-h, h,-h}, { 0.0f, 1.0f, 0.0f});  // +Y (top)
+    addFace({-h,-h,-h}, { h,-h,-h}, { h,-h, h}, {-h,-h, h}, { 0.0f,-1.0f, 0.0f});  // -Y (bottom)
+    addFace({-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h}, { 0.0f, 0.0f, 1.0f});  // +Z
+    addFace({ h,-h,-h}, {-h,-h,-h}, {-h, h,-h}, { h, h,-h}, { 0.0f, 0.0f,-1.0f});  // -Z
 
+    return std::make_unique<MeshAsset>(std::move(positions),
+                                       std::move(uvs),
+                                       std::move(normals),
+                                       std::move(indices));
+}
+
+// lat/lon UV-sphere（共享顶点路径下 ComputeSmoothNormalsFromTriangles 自然
+// 得到 normalize(position) 平滑法线）。与 sample 13_pbr_direct / 14_pbr_ibl
+// 同款构造。
+std::unique_ptr<Orange::Engine::Asset::MeshAsset>
+MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
+{
+    using ::Orange::Engine::Asset::MeshAsset;
+    using ::Orange::Engine::Asset::VertexPosition3;
+    using ::Orange::Engine::Asset::VertexUV2;
+
+    std::vector<VertexPosition3> positions;
+    std::vector<VertexUV2>       uvs;
+    std::vector<std::uint32_t>   indices;
+    const float kPi = 3.14159265358979323846f;
+    for (std::uint32_t i = 0; i <= lat; ++i)
+    {
+        const float v     = static_cast<float>(i) / static_cast<float>(lat);
+        const float theta = v * kPi;
+        const float sinT  = std::sin(theta);
+        const float cosT  = std::cos(theta);
+        for (std::uint32_t j = 0; j <= lon; ++j)
+        {
+            const float u    = static_cast<float>(j) / static_cast<float>(lon);
+            const float phi  = u * 2.0f * kPi;
+            const float sinP = std::sin(phi);
+            const float cosP = std::cos(phi);
+            positions.push_back({radius * sinT * cosP,
+                                 radius * cosT,
+                                 radius * sinT * sinP});
+            uvs.push_back({u, 1.0f - v});
+        }
+    }
+    for (std::uint32_t i = 0; i < lat; ++i)
+    {
+        for (std::uint32_t j = 0; j < lon; ++j)
+        {
+            const std::uint32_t a = i       * (lon + 1) + j;
+            const std::uint32_t b = (i + 1) * (lon + 1) + j;
+            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+            const std::uint32_t d = i       * (lon + 1) + (j + 1);
+            indices.push_back(a); indices.push_back(c); indices.push_back(b);
+            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+        }
+    }
     auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
                                              std::move(uvs),
                                              std::move(indices));
-    // 同 MakePlaneMesh：lazy bake 写盘前补算 smooth normal。cube 24 个
-    // 顶点每面独占，smooth-from-triangles 退化为 face normal —— 视觉
-    // 上 cube 仍是分面 shading，符合预期。
+    // 球面共享顶点，smooth-from-triangles 算出 normalize(position) 的近似
+    // 平滑法线 —— 与 cube 不同，sphere 顶点序列与算法约定一致，输出方向
+    // 朝外（指向球心外）。
     pMesh->ComputeSmoothNormalsFromTriangles();
     return pMesh;
 }
@@ -151,6 +219,25 @@ void InitializeEditorAssets(EditorHost& host)
     {
         std::fprintf(stderr,
                      "[OrangeEditor] AssetRegistry::RegisterLoader<MeshAsset> 失败 "
+                     "(code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+    }
+
+    // 注册 TextureLoader 让 EnvironmentComponent.cubemap 字段 / 任何
+    // AssetRef(Texture) 字段都能走 "assets/environments/*.hdr" 磁盘路径 Load。
+    // 漏注册时 cubemap path 写入 schema set 路径调 Load<TextureAsset> 立刻返
+    // 回 NotRegistered，handle 永远 invalid，Pipeline re-bake 看不到变化 →
+    // 用户视觉上等同 "Environment 拖放和数值调节都没反应"。原 GAP-2026-05-19
+    // -editor-environment-component-wiring fix 漏了这一步：当时只看 sample
+    // 14_pbr_ibl 通了（sample 自己注册了 TextureLoader），编辑器没真走 GUI 验。
+    using Orange::Engine::Asset::TextureAsset;
+    using Orange::Engine::Asset::TextureLoader;
+    if (auto reg = host.assets.pAssets->RegisterLoader<TextureAsset>(
+            std::make_unique<TextureLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "[OrangeEditor] AssetRegistry::RegisterLoader<TextureAsset> 失败 "
                      "(code=%u)\n",
                      static_cast<unsigned>(reg.Error()));
     }
@@ -205,6 +292,10 @@ void InitializeEditorAssets(EditorHost& host)
         "assets/meshes/cube.mesh",  [] { return MakeCubeMesh(0.5f); });
     host.assets.planeMeshHandle = bakeIfMissingThenLoad(
         "assets/meshes/plane.mesh", [] { return MakePlaneMesh(2.5f); });
+    // PBR showcase 用的 sphere mesh —— 与 sample 13_pbr_direct / 14_pbr_ibl
+    // 同款半径 0.5、lon 32 / lat 16 lat/lon tessellation。
+    host.assets.sphereMeshHandle = bakeIfMissingThenLoad(
+        "assets/meshes/sphere.mesh", [] { return MakeSphereMesh(0.5f, 32u, 16u); });
 
     host.assets.pMaterials = std::make_unique<MaterialSystem>(*host.assets.pAssets);
     if (auto rb = host.assets.pMaterials->RegisterBuiltins(); rb.IsErr())
@@ -287,6 +378,83 @@ void InitializeEditorAssets(EditorHost& host)
     host.assets.pLightObjectMaterial       = bakeAndLoadMaterial(
         "assets/materials/builtin/light_object.material", "emissive");
 
+    // PBR showcase 18 个 MaterialInstance —— 两组 3×3 球阵的 per-instance
+    // 配置。lazy bake 写到 assets/materials/pbr_showcase/，pbr_showcase.scene.json
+    // 通过 materialInstanceId 字符串引用。第一次启动时若 .material 不存在则
+    // 程序化写盘 + 覆盖 baseColor / uMRA uniform；后续启动直接从盘加载。
+    //
+    // 用户自行删 assets/materials/pbr_showcase/ 后，下次启动会重 bake 出
+    // 默认值（baseColor 暖橙 / 白 + MRA 9 组合）；用户在 Inspector 改过
+    // 的覆盖值已落盘 .material 文件，重 bake 不会回滚。
+    //
+    // baseColor 暖橙 (1.0, 0.78, 0.34) 是 sample 13_pbr_direct 同款；white
+    // (1, 1, 1) 是 sample 14_pbr_ibl furnace 测试同款。
+    {
+        using ::Orange::Engine::Render::MaterialInstance;
+        constexpr float kMetallicSteps[3]  = {0.0f, 0.5f, 1.0f};
+        constexpr float kRoughnessSteps[3] = {0.1f, 0.5f, 0.9f};
+        struct VariantDef
+        {
+            const char* keyPrefix;
+            float       baseColor[4];
+        };
+        const VariantDef kVariants[2] = {
+            {"warm",  {1.00f, 0.78f, 0.34f, 1.0f}},  // 暖橙 (13_pbr_direct)
+            {"white", {1.00f, 1.00f, 1.00f, 1.0f}},  // 白 (14_pbr_ibl furnace)
+        };
+
+        host.assets.pbrShowcaseMaterials.reserve(18);
+        host.assets.pbrShowcaseMaterialPaths.reserve(18);
+
+        for (const auto& variant : kVariants)
+        {
+            for (std::size_t row = 0; row < 3; ++row)
+            {
+                for (std::size_t col = 0; col < 3; ++col)
+                {
+                    char relPath[128];
+                    std::snprintf(relPath, sizeof(relPath),
+                                  "assets/materials/pbr_showcase/%s_m%zur%zu.material",
+                                  variant.keyPrefix, row, col);
+
+                    // lazy bake：文件不存在则程序化写一份带 uniform override 的
+                    // .material 落盘，下次启动直接 Load 用户已编辑值。
+                    if (!std::filesystem::exists(relPath))
+                    {
+                        std::filesystem::create_directories(
+                            std::filesystem::path(relPath).parent_path());
+                        ::Orange::Editor::Material::MaterialFileData data;
+                        data.templateName = "pbr";
+                        ::Orange::Editor::Material::UniformOverrideValue uBC;
+                        uBC.name = "uBaseColor";
+                        uBC.type = ::Orange::Engine::Render::MaterialUniformType::Vec4;
+                        uBC.value = glm::vec4(variant.baseColor[0],
+                                              variant.baseColor[1],
+                                              variant.baseColor[2],
+                                              variant.baseColor[3]);
+                        data.uniforms.push_back(uBC);
+                        ::Orange::Editor::Material::UniformOverrideValue uMRA;
+                        uMRA.name = "uMRA";
+                        uMRA.type = ::Orange::Engine::Render::MaterialUniformType::Vec4;
+                        uMRA.value = glm::vec4(kMetallicSteps[row],
+                                               kRoughnessSteps[col],
+                                               1.0f,
+                                               0.0f);
+                        data.uniforms.push_back(uMRA);
+                        ::Orange::Editor::Material::WriteMaterialFile(relPath, data);
+                    }
+
+                    auto inst = bakeAndLoadMaterial(relPath, "pbr");
+                    if (inst != nullptr)
+                    {
+                        host.assets.pbrShowcaseMaterials.push_back(std::move(inst));
+                        host.assets.pbrShowcaseMaterialPaths.emplace_back(relPath);
+                    }
+                }
+            }
+        }
+    }
+
     // AnimatorRegistry —— Scene::Load 遇到 AnimatorComponent 时通过 backend
     // name 查 factory 创建 IAnimator。当前只注册引擎自带 "procedural" 后端；
     // dragonbones 后端依赖 DragonBonesContext + skeleton asset，编辑器 demo
@@ -345,6 +513,18 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
         m["assets/materials/builtin/default.material"]      = assets.pDefaultRenderableMaterial.get();
     if (assets.pLightObjectMaterial)
         m["assets/materials/builtin/light_object.material"] = assets.pLightObjectMaterial.get();
+
+    // PBR showcase 18 个 material —— 与 pbr_showcase.scene.json 的 Renderable
+    // materialInstanceId 字段一一对应。InitializeEditorAssets 内 pbrShowcaseMaterials
+    // 与 pbrShowcaseMaterialPaths 同 index 维护。
+    for (std::size_t i = 0; i < assets.pbrShowcaseMaterials.size()
+                         && i < assets.pbrShowcaseMaterialPaths.size(); ++i)
+    {
+        if (assets.pbrShowcaseMaterials[i])
+        {
+            m[assets.pbrShowcaseMaterialPaths[i]] = assets.pbrShowcaseMaterials[i].get();
+        }
+    }
     return m;
 }
 
@@ -808,4 +988,127 @@ void SeedDemoWorld(EditorHost& host)
     EditorHierarchy::LinkAsLastChild(world, geometry, staticCircle);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticPolygon);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticEdgeChain);
+}
+
+// PBR showcase scene 种植：与 sample 13_pbr_direct / 14_pbr_ibl 同款 3×3 球
+// 阵布局，但放成两组并排——左侧 warm 暖橙（对应 13_pbr_direct），右侧
+// white furnace（对应 14_pbr_ibl）。Camera 正前方 + Sun 暖光 + Environment
+// 占位 entity（cubemap 留空，用户拖 HDR 进去激活 IBL）。
+//
+// 球阵布局：每组 3×3，spacing 1.4，组间留 ~1.4 间距让两组明显分开。
+// 行（Y 自下而上）= metallic [0.0, 0.5, 1.0]；列（X 自左向右）= roughness
+// [0.1, 0.5, 0.9]。两组共 18 球，与 InitializeEditorAssets 内 lazy bake 的
+// 18 个 MaterialInstance 一一对应（路径键 warm_m{0..2}r{0..2} / white_m{0..2}r{0..2}）。
+void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
+                          const EditorAssetContext& assets)
+{
+    using ::Orange::Engine::Entity;
+    using ::Orange::Engine::Scene::NameComponent;
+    using ::Orange::Engine::Scene::TransformComponent;
+    using ::Orange::Engine::Render::Camera;
+    using ::Orange::Engine::Render::DirectionalLight;
+    using ::Orange::Engine::Render::EnvironmentComponent;
+    using ::Orange::Engine::Render::RenderableComponent;
+
+    auto& world = targetWorld;
+    auto make = [&](const char* name) -> Entity {
+        Entity e = world.CreateEntity();
+        world.AddComponent<NameComponent>(e, NameComponent{name});
+        world.AddComponent<TransformComponent>(e, TransformComponent{});
+        return e;
+    };
+
+    Entity root        = make("Root");
+    Entity camera      = make("Camera");
+    Entity sun         = make("Sun");
+    Entity environment = make("Environment");
+    Entity warmGroup   = make("Warm Spheres (13_pbr_direct)");
+    Entity whiteGroup  = make("White Spheres (14_pbr_ibl furnace)");
+
+    // Camera：正前方稍高俯视，与 sample 14_pbr_ibl 视角同款 + 拉远适应两组
+    // 并排球阵的宽度。
+    {
+        Camera cam = Camera::Perspective(glm::radians(40.0f), 1.0f, 0.1f, 100.0f);
+        cam.view = glm::lookAt(glm::vec3(0.0f, 0.3f, 8.0f),
+                               glm::vec3(0.0f, 0.0f, 0.0f),
+                               glm::vec3(0.0f, 1.0f, 0.0f));
+        world.AddComponent<Camera>(camera, cam);
+    }
+
+    // Sun：暖光平行光从右上前斜下打，与 demo 同款方向。
+    {
+        auto* tc = world.GetComponent<TransformComponent>(sun);
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(5.0f, 8.0f, 5.0f);
+            tc->rotation = ::Orange::Engine::Render::
+                MakeDirectionalLightRotationFromDir(
+                    glm::vec3(0.4f, -1.0f, 0.3f));
+        }
+        DirectionalLight dl{};
+        dl.color       = glm::vec3(1.0f, 0.95f, 0.85f);  // 偏白暖色，furnace 球阵不偏色
+        dl.intensity   = 1.2f;
+        dl.castsShadow = false;  // showcase 无地面，不需要阴影
+        world.AddComponent<DirectionalLight>(sun, dl);
+    }
+
+    // Environment：默认空 cubemap。用户拖 HDR 进去后 Pipeline auto re-bake，
+    // 14_pbr_ibl 那组 furnace 球会显示真实 IBL specular 反射。
+    {
+        EnvironmentComponent env{};
+        world.AddComponent<EnvironmentComponent>(environment, env);
+    }
+
+    // 18 个球 entity：左 warm 9 + 右 white 9
+    constexpr float kSphereSpacing = 1.4f;
+    // 两组中心 X 距离 = 单组宽 (2 * spacing) + 组间 spacing = 4.2 → 左右对称
+    // 让中心 0 ≈ 两组中间。
+    constexpr float kGroupOffset = 2.5f;
+
+    auto spawnSphereGrid =
+        [&](Entity parent, const char* variantKey, float groupCenterX,
+            std::size_t materialBaseIndex)
+        {
+            for (std::size_t row = 0; row < 3; ++row)
+            {
+                for (std::size_t col = 0; col < 3; ++col)
+                {
+                    char name[64];
+                    std::snprintf(name, sizeof(name), "%s m%zur%zu",
+                                  variantKey, row, col);
+                    Entity sphere = make(name);
+
+                    auto* tc = world.GetComponent<TransformComponent>(sphere);
+                    if (tc != nullptr)
+                    {
+                        tc->position = glm::vec3(
+                            groupCenterX + (static_cast<float>(col) - 1.0f) * kSphereSpacing,
+                            (static_cast<float>(row) - 1.0f) * kSphereSpacing,
+                            0.0f);
+                    }
+
+                    RenderableComponent rc{};
+                    rc.mesh    = assets.sphereMeshHandle;
+                    rc.visible = true;
+                    rc.castsShadow = false;
+                    const std::size_t matIdx = materialBaseIndex + row * 3 + col;
+                    if (matIdx < assets.pbrShowcaseMaterials.size())
+                    {
+                        rc.materialInstance = assets.pbrShowcaseMaterials[matIdx].get();
+                    }
+                    world.AddComponent<RenderableComponent>(sphere, rc);
+
+                    EditorHierarchy::LinkAsLastChild(world, parent, sphere);
+                }
+            }
+        };
+
+    spawnSphereGrid(warmGroup,  "warm",  -kGroupOffset, /*matBase=*/0);
+    spawnSphereGrid(whiteGroup, "white",  kGroupOffset, /*matBase=*/9);
+
+    EditorHierarchy::LinkAsLastChild(world, root, camera);
+    EditorHierarchy::LinkAsLastChild(world, root, sun);
+    EditorHierarchy::LinkAsLastChild(world, root, environment);
+    EditorHierarchy::LinkAsLastChild(world, root, warmGroup);
+    EditorHierarchy::LinkAsLastChild(world, root, whiteGroup);
 }

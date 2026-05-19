@@ -27,9 +27,27 @@ MakePlaneMesh(float halfSize);
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakeCubeMesh(float halfSize);
 
+// lat/lon UV-sphere（共享顶点路径，ComputeSmoothNormalsFromTriangles 自然
+// 得到 normalize(position) 平滑法线）。与 sample 13_pbr_direct /
+// 14_pbr_ibl 同款，编辑器 PBR showcase scene 复用。
+std::unique_ptr<Orange::Engine::Asset::MeshAsset>
+MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat);
+
 void InitializeEditorAssets(EditorHost& host);
 
 void SeedDemoWorld(EditorHost& host);
+
+// PBR showcase scene seeder：两组 3×3 球阵——左组暖橙 baseColor（对应
+// sample 13_pbr_direct）/ 右组白色 baseColor（对应 sample 14_pbr_ibl furnace
+// 测试）。每球独立 MaterialInstance（不同 metallic / roughness）。同时
+// 挂 Camera 正前方 + Sun 暖光平行光 + Environment 占位（cubemap 空，等用户
+// 后续拖 HDR 进去激活 IBL）。
+//
+// 调用前置：InitializeEditorAssets 必须先跑（assets 内 sphereMeshHandle +
+// pbrShowcaseMaterials 都已 lazy-bake 完成）。直接传 targetWorld 而非通过
+// host.scene.pWorld，便于 caller 在 temp World 内构造再 Save 落盘。
+void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
+                          const EditorAssetContext& assets);
 
 // 从 EditorAssetContext 构建 materialInstance 名称表，供 Scene::Save/Load 的
 // namedMaterialInstances 字段使用。名字格式 "builtin/<key>"，与 .scene.json

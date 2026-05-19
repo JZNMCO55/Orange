@@ -596,6 +596,52 @@ struct Pipeline::Impl
     ::Orange::Engine::Asset::AssetHandle<::Orange::Engine::Asset::TextureAsset>
         lastBakedCubemap{};
 
+    // 原始 environment cube（BakeEquirectToCube 输出，未经 GGX 卷积）。供
+    // sky-dome pass 采样背景；区别于 bakedPrefilteredCube（卷积过的，给
+    // PBR specular IBL 用，mip 0 也带 roughness=0 段噪声）。null 表示当前
+    // 无 cubemap（dummy IBL 状态），sky pass 跳过。生命周期与 baked 三件
+    // 套同步：BakeIblFromWorld 重 bake 时 reset → 重新赋值。
+    std::unique_ptr<Orange::Rhi::RHITexture> bakedEnvCube;
+
+    // ---- Sky-dome pass GPU 资源 ----------------------------------------
+    // 单 binding samplerCube layout，pool 仅 1 个 set（cube 替换走重写 set
+    // binding；与 godRaysSetBoundDepth 同款"绑定缓存"模式避免每帧 rewrite）。
+    // sky pipeline 走 fullscreenVs + skyFs，无 depth attachment（sky 不写
+    // depth，主 pass 自己 Clear depth 到 1.0）。
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        skyFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> skyLayout;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            skyPipeline;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      skyPool;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       skySet;
+    // 最近一次写进 skySet 的 cube 对象指针；bakedEnvCube 重建时（BakeIblFromWorld
+    // 重跑）需要重写 binding 0。
+    Orange::Rhi::RHITexture*                              skySetBoundCube{nullptr};
+    bool                                                  skyEnabled{true};
+
+    // ---- Procedural sky pass GPU 资源 ----------------------------------
+    // 无描述符（push constant only）；pipeline 与 skyPipeline 同 attachment
+    // 配置（HDR color, no depth, no blend）；bakedEnvCube 缺席（未挂
+    // EnvironmentComponent 或 cubemap invalid）+ skyEnabled = true 时
+    // RenderOffscreen / Render 选择本分支替代 cubemap sky。push 128B：
+    // mat4 invViewProj + cameraPos + pad + sunDir + sunSize + sunColor
+    // + sunIntensity + zenithColor + pad + horizonColor + pad。
+    std::unique_ptr<Orange::Rhi::RHIShaderModule> proceduralSkyFs;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>     proceduralSkyPipeline;
+
+    // ---- Grid pass GPU 资源 --------------------------------------------
+    // 单 binding sampler2D layout（sceneDepth），pool 1 个 set；pipeline 走
+    // fullscreenVs + gridFs，HDR color attachment + alpha blend，**无 depth
+    // attachment** —— grid shader 自己 sample sceneDepth + 手动比较 + discard
+    // 处理遮挡，比 gl_FragDepth + depth test Less 更稳（v0 撞过 hit 在 camera
+    // 后方 / cube 内部的精度坑导致 grid 透几何）。
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        gridFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> gridLayout;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            gridPipeline;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      gridPool;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       gridSet;
+    Orange::Rhi::RHITexture*                              gridSetBoundDepth{nullptr};
+    bool                                                  editorGridEnabled{false};
+
     // -----------------------------------------------------------------
 
     // drawable.materialInstance == nullptr 时的 fallback Material。当前装
@@ -755,8 +801,10 @@ struct Pipeline::Impl
     void EnsureMeshGpuCache();
 
     // 自管 cmd list 跑离屏 HDR 主 pass。返回 false 表示本帧离屏失败、
-    // 调用方应跳过 Stage B 的 SubmitItem。
-    bool RecordOffscreenPass(const glm::mat4& viewProj);
+    // 调用方应跳过 Stage B 的 SubmitItem。loadColor == true 时跳过
+    // hdrColor 的 fromLayout 翻转 + 用 LoadOp::Load 接住调用方提前画好
+    // 的内容（典型用例：sky-dome pass 已经在 hdrColor 上画了背景）。
+    bool RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor = false);
 
     // 在已经 Begin 的 offscreenCmd 上追加 6 round downsample + 5 round
     // upsample。预期调用顺序：主 pass 已 transition HDR 到 ShaderReadOnly。
@@ -785,6 +833,36 @@ struct Pipeline::Impl
     // viewProj 用主相机的（与 RecordOffscreenPass 同一个），让 sun 投影
     // 到 NDC 的位置与主 pass 几何位置一致。
     bool RecordGodRaysPass(const GodRaysPass& gr, const glm::mat4& viewProj);
+
+    // bakedEnvCube 重建（BakeIblFromWorld 重跑）或首次启用 sky 时分配 /
+    // 重写 skySet 的 binding 0。返回 false 仅 RHI alloc / write 失败时；
+    // bakedEnvCube == nullptr 时返回 false，调用方应 skip sky pass。
+    bool EnsureSkyDescSet();
+
+    // 录制 sky-dome pass（主 pass 之前）：transition hdrColor → ColorAttachment
+    // + LoadOp::Clear → fullscreen draw with cubemap sample → 留在 ColorAttachment
+    // 让主 pass LoadOp::Load 接住。sceneDepth 不被本 pass touch（无 depth
+    // attachment）。返回 false 表示资源未就绪 / 失败，主 pass 应走 Clear 路径。
+    bool RecordSkyPass(const glm::mat4& invViewProj, const glm::vec3& cameraPos,
+                       const glm::vec3& tint, float intensity);
+
+    // 录制 procedural sky pass（cubemap 不可用时的替代分支）：与 RecordSkyPass
+    // 同款 attachment 配置，但 shader 走 3 色 gradient + 太阳 disc 程序生成。
+    // sunDir 指向太阳的方向（= -directional light direction，长度无关，
+    // shader 内 normalize）；activeLight == nullptr 时调用方应传一个合理
+    // 默认（如 (0.4, 1.0, 0.3) 模拟正午偏南）+ neutral sunColor。
+    bool RecordProceduralSkyPass(const glm::mat4& invViewProj,
+                                 const glm::vec3& cameraPos,
+                                 const glm::vec3& sunDir,
+                                 const glm::vec3& sunColor,
+                                 float            sunIntensity);
+
+    // 录制编辑器地面 grid pass（主 pass 之后、bloom 之前）：transition
+    // hdrColor: ShaderReadOnly → ColorAttachment + LoadOp::Load；sceneDepth
+    // 仍在 DepthStencilAttachment（主 pass 末尾不翻），attach 用 LoadOp::Load
+    // + DepthTest Less + DepthWrite false → fullscreen draw with PristineGrid
+    // 反推 Y=0 平面交点 → 翻 hdrColor 回 ShaderReadOnly。
+    bool RecordGridPass(const glm::mat4& invViewProj, const glm::mat4& viewProj);
 
     // 创建 / 重建 bloom 6 张 mip + 描述符 set（首次激活、HDR 尺寸变化、
     // chain 切到含 BloomPass 时触发）。失败返回 false。
@@ -912,6 +990,15 @@ struct Pipeline::Impl
             return false;
         }
         sceneDepth = std::move(newDepth);
+        // 与 hdrLayoutShaderReadOnly 对偶：新建 RHITexture layout = Undefined，
+        // 字段必须 reset 否则下一帧主 pass entry 看上一帧残留的 true 会按
+        // ShaderReadOnly → DSA transition（实际 Undefined → DSA），撞 validation。
+        // grid pass 引入"sceneDepth ShaderReadOnly 翻转"路径后让这条 pre-existing
+        // 漏点显形。
+        sceneDepthLayoutShaderReadOnly = false;
+        // grid descriptor set 之前绑的是旧 sceneDepth 指针；invalidate 让
+        // RecordGridPass 下帧 UpdateDescriptorSet 重写 binding 0。
+        gridSetBoundDepth = nullptr;
 
         // 把 descriptor set 指向新 view。
         Orange::Rhi::DescriptorWrite w{};
@@ -1165,9 +1252,13 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         auto tonemapVsCode = LoadSpirv("shaders/orange_engine/tonemap.vert.spv");
         auto tonemapFsCode = LoadSpirv("shaders/orange_engine/tonemap.frag.spv");
         auto godRaysCode   = LoadSpirv("shaders/orange_engine/god_rays.frag.spv");
+        auto skyCode       = LoadSpirv("shaders/orange_engine/sky.frag.spv");
+        auto proceduralSkyCode = LoadSpirv("shaders/orange_engine/procedural_sky.frag.spv");
+        auto gridCode      = LoadSpirv("shaders/orange_engine/grid.frag.spv");
         if (downCode.empty() || upCode.empty() || combineCode.empty()
             || tonemapVsCode.empty() || tonemapFsCode.empty()
-            || godRaysCode.empty())
+            || godRaysCode.empty()
+            || skyCode.empty() || proceduralSkyCode.empty() || gridCode.empty())
         {
             Shutdown();
             return ResultCode::IoError;
@@ -1209,10 +1300,57 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         sm.mpDebugName = "orange_engine.god_rays.frag";
         impl.godRaysFs = rhi.CreateShaderModule(sm);
 
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = skyCode.data();
+        sm.mCodeSize   = skyCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.sky.frag";
+        impl.skyFs     = rhi.CreateShaderModule(sm);
+
+        sm.mStage             = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode             = proceduralSkyCode.data();
+        sm.mCodeSize          = proceduralSkyCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName        = "orange_engine.procedural_sky.frag";
+        impl.proceduralSkyFs  = rhi.CreateShaderModule(sm);
+
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = gridCode.data();
+        sm.mCodeSize   = gridCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.grid.frag";
+        impl.gridFs    = rhi.CreateShaderModule(sm);
+
         if (!impl.bloomDownsampleFs || !impl.bloomUpsampleFs || !impl.passthroughCombineFs
-            || !impl.tonemapVs || !impl.tonemapFs || !impl.godRaysFs)
+            || !impl.tonemapVs || !impl.tonemapFs || !impl.godRaysFs
+            || !impl.skyFs || !impl.proceduralSkyFs || !impl.gridFs)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / tonemap / god_rays shader 模块创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / tonemap / god_rays / sky / "
+                             "procedural_sky / grid shader 模块创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
+        // sky descriptor layout (1 binding samplerCube)
+        Orange::Rhi::DescriptorSetLayoutDesc layDesc{};
+        layDesc.mBindings.push_back({0,
+                                     Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                     1,
+                                     Orange::Rhi::ShaderStage::Fragment});
+        layDesc.mpDebugName = "orange_engine.sky.layout";
+        impl.skyLayout = rhi.CreateDescriptorSetLayout(layDesc);
+
+        // grid descriptor layout (1 binding sampler2D sceneDepth)
+        Orange::Rhi::DescriptorSetLayoutDesc gridLayDesc{};
+        gridLayDesc.mBindings.push_back({0,
+                                         Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                         1,
+                                         Orange::Rhi::ShaderStage::Fragment});
+        gridLayDesc.mpDebugName = "orange_engine.grid.layout";
+        impl.gridLayout = rhi.CreateDescriptorSetLayout(gridLayDesc);
+
+        if (!impl.skyLayout || !impl.gridLayout)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: sky / grid DescriptorSetLayout "
+                             "创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -1353,9 +1491,98 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         d.mpDebugName = "orange_engine.god_rays";
         impl.godRaysPipeline = rhi.CreateGraphicsPipeline(d);
     }
+    {
+        // sky pipeline —— RGBA16F HDR target，no blend，无 depth attachment
+        // （sky 自家 BeginRendering 不带 depth；主 pass 在 sky 之后自己 Clear
+        // depth 到 1.0 + 写入几何 depth）。push constant 96 字节（mat4 invVP
+        // + vec3 camera + intensity + vec3 tint + pad）。
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.skyFs.get(), "main"});
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});  // no blend
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.skyLayout.get());
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 96;  // mat4(64) + vec3(12) + float(4) + vec3(12) + float(4)
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.sky";
+        impl.skyPipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    {
+        // procedural sky pipeline —— 与 skyPipeline 同 attachment 配置
+        // （RGBA16F no blend，无 depth），仅 shader 不同、无描述符。push
+        // constant 128 字节（与 ProceduralSkyPush 严格对齐）。
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.proceduralSkyFs.get(), "main"});
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 112;  // mat4(64) + 3×(vec3+float)(48) = 112
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.procedural_sky";
+        impl.proceduralSkyPipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    {
+        // grid pipeline —— RGBA16F HDR target with alpha blend (over)，**无
+        // depth attachment**。grid shader 自己采 sceneDepth + 手动比较 + discard
+        // 处理几何遮挡，比 gl_FragDepth 路径稳。push 128B（mat4 invVP + mat4 VP）。
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.gridFs.get(), "main"});
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+
+        Orange::Rhi::ColorBlendAttachmentDesc blend{};
+        blend.mBlendEnable         = true;
+        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::SrcAlpha;
+        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::OneMinusSrcAlpha;
+        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::OneMinusSrcAlpha;
+        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+        d.mColorBlend.mAttachments.push_back(blend);
+
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.gridLayout.get());
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 128;  // mat4(64) + mat4(64)
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.grid";
+        impl.gridPipeline = rhi.CreateGraphicsPipeline(d);
+    }
     if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
         !impl.passthroughCombinePipeline || !impl.tonemapPipeline ||
-        !impl.godRaysPipeline)
+        !impl.godRaysPipeline ||
+        !impl.skyPipeline || !impl.proceduralSkyPipeline || !impl.gridPipeline)
     {
         ORANGE_LOG_ERROR(
             "Pipeline::Initialize: bloom / combine / tonemap / god_rays pipeline 创建失败");
@@ -1473,8 +1700,16 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             return ResultCode::InternalError;
         }
 
-        // 一次性 staging buffer：每像素 RGBA16Float = 8 字节，cube 6 层 ×
-        // 1 px 顶天 48 B；用 64 B 兜底，6 层共用 offset 0（数据全 0）。
+        // 一次性 staging buffer：每像素 RGBA16Float = 8 字节。
+        //   offset  0..7  : 中性灰 ambient (0.25, 0.25, 0.25, 1.0)，给
+        //                   irradiance cube 用——没挂 EnvironmentComponent
+        //                   时 PBR 物体仍有可见 ambient（与 Cocos / Unity URP
+        //                   默认 ambient 量级一致），观感是"灰白塑料"，不
+        //                   是仅 direct light 的"半灰"
+        //   offset  8..15 : 全 0，给 prefiltered cube + BRDF LUT 用
+        //                   （specular 反射保持 0 避免没环境时出现"灰雾"
+        //                   破坏 PBR 数学，BRDF LUT 全 0 等同 IBL 总贡献
+        //                   被两项乘子双 0 抹平）
         Orange::Rhi::BufferDesc stagingDesc{};
         stagingDesc.mSize        = 64;
         stagingDesc.mUsage       = Orange::Rhi::BufferUsage::Transfer;
@@ -1495,6 +1730,20 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                 return ResultCode::InternalError;
             }
             std::memset(mapped, 0, 64);
+            // IEEE 754 binary16 hardcode ambient 灰 RGBA = (0.25, 0.25, 0.25,
+            // 1.0)：与 Cocos Creator / Unity URP 默认 ambient 量级一致。让
+            // PBR 物体在没 EnvironmentComponent 时显示"灰白塑料"（Cocos /
+            // Godot 默认 cube 观感）。值更大会让真实 IBL 烘焙前的 demo 视觉
+            // 过亮；0.25 是手感与 PBR 数学的平衡点。0x3400 = 0.25 half；
+            // 0x3C00 = 1.0 half。字节序按 little-endian 平台直写 uint16；
+            // MSVC + RTX 5070 Ti 都是 LE，需要 BE 平台时再换 byteswap。
+            const std::uint16_t halfPx[4] = {
+                std::uint16_t{0x3400},   // R = 0.25
+                std::uint16_t{0x3400},   // G = 0.25
+                std::uint16_t{0x3400},   // B = 0.25
+                std::uint16_t{0x3C00},   // A = 1.0
+            };
+            std::memcpy(mapped, halfPx, 8);
             staging->Unmap();
         }
 
@@ -1508,14 +1757,14 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             return ResultCode::InternalError;
         }
 
-        auto initCube = [&](Orange::Rhi::RHITexture& tex) {
+        auto initCube = [&](Orange::Rhi::RHITexture& tex, std::uint64_t srcOffset) {
             cmd.TransitionTexture(tex,
                                   Orange::Rhi::TextureLayout::Undefined,
                                   Orange::Rhi::TextureLayout::TransferDst);
             for (std::uint32_t layer = 0; layer < 6; ++layer)
             {
                 Orange::Rhi::BufferTextureCopyRegion r{};
-                r.mBufferOffset = 0;
+                r.mBufferOffset = srcOffset;
                 r.mMipLevel     = 0;
                 r.mArrayLayer   = layer;
                 r.mWidth        = 1;
@@ -1528,16 +1777,16 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                                   Orange::Rhi::TextureLayout::ShaderReadOnly);
         };
 
-        initCube(*impl.dummyIrradianceCube);
-        initCube(*impl.dummyPrefilteredCube);
+        initCube(*impl.dummyIrradianceCube,  /*srcOffset=*/0);  // ambient 灰
+        initCube(*impl.dummyPrefilteredCube, /*srcOffset=*/8);  // 全 0
 
-        // 2D BRDF LUT —— 单 layer 单 copy
+        // 2D BRDF LUT —— 单 layer 单 copy，全 0
         cmd.TransitionTexture(*impl.dummyBrdfLut,
                               Orange::Rhi::TextureLayout::Undefined,
                               Orange::Rhi::TextureLayout::TransferDst);
         {
             Orange::Rhi::BufferTextureCopyRegion r{};
-            r.mBufferOffset = 0;
+            r.mBufferOffset = 8;
             r.mMipLevel     = 0;
             r.mArrayLayer   = 0;
             r.mWidth        = 1;
@@ -1869,6 +2118,20 @@ void Pipeline::Shutdown()
     impl.godRaysPipeline.reset();
     impl.godRaysFs.reset();
     impl.godRaysSetBoundDepth = nullptr;
+    impl.gridSet.reset();
+    impl.gridPool.reset();
+    impl.gridPipeline.reset();
+    impl.gridLayout.reset();
+    impl.gridFs.reset();
+    impl.gridSetBoundDepth = nullptr;
+    impl.proceduralSkyPipeline.reset();
+    impl.proceduralSkyFs.reset();
+    impl.skySet.reset();
+    impl.skyPool.reset();
+    impl.skyPipeline.reset();
+    impl.skyLayout.reset();
+    impl.skyFs.reset();
+    impl.skySetBoundCube = nullptr;
     impl.shadowCasterPipeline.reset();
     impl.shadowMap.reset();
     impl.shadowMapResolution = 0;
@@ -1921,6 +2184,7 @@ void Pipeline::Shutdown()
     impl.bakedBrdfLut.reset();
     impl.bakedPrefilteredCube.reset();
     impl.bakedIrradianceCube.reset();
+    impl.bakedEnvCube.reset();
     impl.lastBakedCubemap = {};
     impl.dummyBrdfLut.reset();
     impl.dummyPrefilteredCube.reset();
@@ -2112,6 +2376,28 @@ void Pipeline::SetShadowConfig(const ShadowConfig& config) noexcept
     // mapResolution 切换会让 EnsureShadowMap 在下一帧重建 shadow target。
 }
 
+void Pipeline::SetEditorGridEnabled(bool enabled) noexcept
+{
+    if (!mpImpl) { return; }
+    mpImpl->editorGridEnabled = enabled;
+}
+
+bool Pipeline::IsEditorGridEnabled() const noexcept
+{
+    return mpImpl && mpImpl->editorGridEnabled;
+}
+
+void Pipeline::SetSkyEnabled(bool enabled) noexcept
+{
+    if (!mpImpl) { return; }
+    mpImpl->skyEnabled = enabled;
+}
+
+bool Pipeline::IsSkyEnabled() const noexcept
+{
+    return mpImpl && mpImpl->skyEnabled;
+}
+
 void Pipeline::SetIblTextures(Orange::Rhi::RHITexture* irradianceCube,
                               Orange::Rhi::RHITexture* prefilteredCube,
                               Orange::Rhi::RHITexture* brdfLut2D) noexcept
@@ -2185,6 +2471,8 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
         mpImpl->bakedIrradianceCube.reset();
         mpImpl->bakedPrefilteredCube.reset();
         mpImpl->bakedBrdfLut.reset();
+        mpImpl->bakedEnvCube.reset();
+        mpImpl->skySetBoundCube = nullptr;
         mpImpl->lastBakedCubemap = {};
         SetIblTextures(nullptr, nullptr, nullptr);
         return;
@@ -2197,6 +2485,8 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
         mpImpl->bakedIrradianceCube.reset();
         mpImpl->bakedPrefilteredCube.reset();
         mpImpl->bakedBrdfLut.reset();
+        mpImpl->bakedEnvCube.reset();
+        mpImpl->skySetBoundCube = nullptr;
         mpImpl->lastBakedCubemap = {};
         SetIblTextures(nullptr, nullptr, nullptr);
         return;
@@ -2370,6 +2660,10 @@ void Pipeline::BakeIblFromWorld(::Orange::Engine::World&                world,
     }
 
     // ---- 5. 移动到 Impl + SetIblTextures 接通 PBR shader ----
+    // 顺便保存原始 envCube 给 sky-dome pass 采样（未经 GGX 卷积的"真"环境
+    // 贴图）。skySetBoundCube 重置让下帧 EnsureSkyDescSet 重新写 binding。
+    mpImpl->bakedEnvCube         = std::move(envCube);
+    mpImpl->skySetBoundCube      = nullptr;
     mpImpl->bakedIrradianceCube  = std::move(irradianceCube);
     mpImpl->bakedPrefilteredCube = std::move(prefilteredCube);
     mpImpl->bakedBrdfLut         = std::move(brdfLut);
@@ -2417,7 +2711,7 @@ namespace
 
 }  // namespace
 
-bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
+bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor)
 {
     auto& impl = *this;
     auto& cmd = *impl.offscreenCmd;
@@ -2425,11 +2719,16 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
     // 后续 bloom 链 / End / Submit 由 Render 顶层负责，让所有 GPU 工作进
     // 入同一 cmd list 同一 Submit。
 
-    const auto fromLayout = impl.hdrLayoutShaderReadOnly
-        ? Orange::Rhi::TextureLayout::ShaderReadOnly
-        : Orange::Rhi::TextureLayout::Undefined;
-    cmd.TransitionTexture(*impl.hdrColor, fromLayout,
-                          Orange::Rhi::TextureLayout::ColorAttachment);
+    // loadColor == true：sky pass 已经把 hdrColor 留在 ColorAttachment，
+    // 直接 LoadOp::Load 接住，不重复 transition / clear。
+    if (!loadColor)
+    {
+        const auto fromLayout = impl.hdrLayoutShaderReadOnly
+            ? Orange::Rhi::TextureLayout::ShaderReadOnly
+            : Orange::Rhi::TextureLayout::Undefined;
+        cmd.TransitionTexture(*impl.hdrColor, fromLayout,
+                              Orange::Rhi::TextureLayout::ColorAttachment);
+    }
     // sceneDepth 每帧 transition → DepthStencilAttachment（每帧 Clear，
     // 几何顺序无关性靠 depth test 保证）。GodRaysPass 启用时上一帧末尾
     // 把它翻到 ShaderReadOnly（采样作 occlusion proxy），未启用时还是
@@ -2444,11 +2743,17 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj)
 
     Orange::Rhi::ColorAttachment att{};
     att.mpView          = impl.hdrColor->GetDefaultView();
-    att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
+    att.mLoadOp         = loadColor ? Orange::Rhi::LoadOp::Load
+                                    : Orange::Rhi::LoadOp::Clear;
     att.mStoreOp        = Orange::Rhi::StoreOp::Store;
-    att.mClear.mColor[0] = 0.05f;
-    att.mClear.mColor[1] = 0.07f;
-    att.mClear.mColor[2] = 0.10f;
+    // viewport 默认背景：Cocos Creator 风中性灰（≈ #5C5C60，略偏冷），让
+    // 没挂 EnvironmentComponent 时编辑器 viewport 看起来克制工具感，与主
+    // panel 深炭灰（EditorTheme.cpp，~#2A2A2A）拉开一档亮度便于辨识渲染区。
+    // hdrColor 是线性 HDR target，写入值会经 tonemap 出到 swapchain；线性
+    // 0.12 对应感知 ~0.36 / sRGB ~0.39（取 1/2.2 power），目标灰度刚好。
+    att.mClear.mColor[0] = 0.12f;
+    att.mClear.mColor[1] = 0.12f;
+    att.mClear.mColor[2] = 0.13f;
     att.mClear.mColor[3] = 1.0f;
 
     Orange::Rhi::DepthStencilAttachment depthAtt{};
@@ -2688,6 +2993,9 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     const DirectionalLight* activeLight = nullptr;
     glm::vec3               activeLightDir{0.3f, -1.0f, 0.4f};  // neutral 默认
     glm::vec3               iblTintIntensity{1.0f, 1.0f, 1.0f}; // 未挂 EnvironmentComponent → 1,1,1（中性）
+    glm::vec3               envTint{1.0f, 1.0f, 1.0f};
+    float                   envIntensity = 1.0f;
+    glm::vec3               cameraWorldPos{0.0f};
     if (impl.scene.HasCamera())
     {
         auto& reg  = world.Registry();
@@ -2707,23 +3015,26 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         // EnvironmentComponent first-found：与 DirectionalLight 同款选取；
         // 多个时取迭代器第一个（baseline 单 World 全局环境，多 environment
         // blending 留给后续 reflection probe milestone）。tint * intensity
-        // 在 host 端先乘好，shader 侧只读 `uIblFactor.rgb` 一次相乘——避免
-        // 在 fragment 内每像素再算一次乘法。
+        // 在 host 端先乘好喂 LightUbo，shader 侧 fragment 一次相乘；同时
+        // envTint / envIntensity 单独留下给 sky-dome pass 用（sky shader
+        // 内部数学上等价于 `sky * tint * intensity`，但保留两个量可读性更好）。
         auto envView = reg.view<EnvironmentComponent>();
         if (!envView.empty())
         {
             const auto&  env = envView.get<EnvironmentComponent>(envView.front());
+            envTint          = env.tint;
+            envIntensity     = env.intensity;
             iblTintIntensity = env.tint * env.intensity;
         }
         impl.EnsureShadowMap();
         const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                 : glm::mat4(1.0f);
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
-        const glm::vec3 cameraPos(invView[3]);
-        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos, iblTintIntensity);
+        cameraWorldPos            = glm::vec3(invView[3]);
+        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
     }
 
-    // 2. 一次 cmd list 包含：shadow → 主 pass → passthrough → 翻 layout。
+    // 2. 一次 cmd list 包含：shadow → (sky) → 主 pass → (grid) → passthrough → 翻 layout。
     auto& cmd = *impl.offscreenCmd;
     if (Orange::Failed(cmd.Begin()))
     {
@@ -2738,6 +3049,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     {
         const glm::mat4 viewProj = impl.scene.MainCamera().projection
                                  * impl.scene.MainCamera().view;
+        const glm::mat4 invViewProj = glm::inverse(viewProj);
         const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                : glm::mat4(1.0f);
 
@@ -2747,10 +3059,42 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             ok = impl.RecordShadowPass(activeLight, lightVP);
         }
 
+        // sky pass：主 pass 之前画背景。两种分支：
+        //   (a) bakedEnvCube 有 → cubemap sky（采 EnvironmentComponent.cubemap）
+        //   (b) bakedEnvCube 无 + skyEnabled → procedural sky（3 色 gradient
+        //       + 太阳 disc，无资源依赖；Cocos / Godot / Unity HDRP 默认天空
+        //       同思路）
+        // skyEnabled = false → 都跳过，主 pass clear color fallback。
+        bool skyDrew = false;
+        if (ok && impl.skyEnabled)
+        {
+            // sunDir 指向太阳的方向 = -DirectionalLight.dir（光是从太阳
+            // 出射的方向，太阳本身在反方向）。无 active light 时取一个
+            // 正午偏南默认（让用户即使删了 DirectionalLight 也有视觉锚点）。
+            glm::vec3 sunDir = (activeLight != nullptr)
+                ? -glm::normalize(activeLightDir)
+                : glm::normalize(glm::vec3(0.4f, 1.0f, 0.3f));
+            glm::vec3 sunColor = (activeLight != nullptr)
+                ? activeLight->color
+                : glm::vec3(1.0f, 0.95f, 0.85f);
+            float sunIntensity = (activeLight != nullptr) ? activeLight->intensity : 1.0f;
+
+            if (impl.bakedEnvCube)
+            {
+                skyDrew = impl.RecordSkyPass(invViewProj, cameraWorldPos,
+                                             envTint, envIntensity);
+            }
+            else
+            {
+                skyDrew = impl.RecordProceduralSkyPass(invViewProj, cameraWorldPos,
+                                                       sunDir, sunColor, sunIntensity);
+            }
+        }
+
         // 主 HDR pass
         if (ok)
         {
-            ok = impl.RecordOffscreenPass(viewProj);
+            ok = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew);
         }
 
         // 粒子 pass —— 与窗口模式路径对称，插在主 pass 之后、passthrough 之前。
@@ -2767,6 +3111,13 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                 impl.frameIndex,
                 impl.hdrWidth,
                 impl.hdrHeight);
+        }
+
+        // grid pass：在主 pass + 粒子之后、passthrough 之前。开关 +
+        // 内部 NULL 检查；失败 silent，passthrough 继续。
+        if (ok && impl.editorGridEnabled)
+        {
+            impl.RecordGridPass(invViewProj, viewProj);
         }
 
         // passthrough HDR → viewportColor
@@ -3777,6 +4128,358 @@ bool Pipeline::Impl::RecordGodRaysPass(const GodRaysPass& gr,
     return true;
 }
 
+bool Pipeline::Impl::EnsureSkyDescSet()
+{
+    if (renderDevice == nullptr || skyPipeline == nullptr || skyLayout == nullptr
+        || hdrSampler == nullptr || bakedEnvCube == nullptr)
+    {
+        return false;
+    }
+
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    // 池只建一次（1 个 set，长寿命）。后续仅 rewrite binding。
+    if (!skyPool)
+    {
+        Orange::Rhi::DescriptorPoolDesc poolDesc{};
+        poolDesc.mMaxSets = 1;
+        Orange::Rhi::DescriptorPoolSize sz{};
+        sz.mType  = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        sz.mCount = 1;
+        poolDesc.mPoolSizes.push_back(sz);
+        poolDesc.mpDebugName = "orange_engine.sky.pool";
+        skyPool = rhi.CreateDescriptorPool(poolDesc);
+        if (!skyPool)
+        {
+            ORANGE_LOG_ERROR("Pipeline: sky CreateDescriptorPool 失败");
+            return false;
+        }
+    }
+
+    // bakedEnvCube 重建（BakeIblFromWorld 重跑、首次烘焙完成）→ 重新分配
+    // set 并写 binding 0。同款"绑定缓存"惯例参 EnsureGodRaysSet。
+    if (skySet == nullptr || skySetBoundCube != bakedEnvCube.get())
+    {
+        skySet.reset();
+        auto set = rhi.AllocateDescriptorSet(*skyPool, *skyLayout);
+        if (!set)
+        {
+            ORANGE_LOG_ERROR("Pipeline: sky AllocateDescriptorSet 失败");
+            return false;
+        }
+        Orange::Rhi::DescriptorWrite w{};
+        w.mBinding             = 0;
+        w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w.mImageInfo.mpTexture = bakedEnvCube.get();
+        w.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*set, &w, 1);
+
+        skySet           = std::move(set);
+        skySetBoundCube  = bakedEnvCube.get();
+    }
+    return true;
+}
+
+bool Pipeline::Impl::RecordSkyPass(const glm::mat4& invViewProj,
+                                   const glm::vec3& cameraPos,
+                                   const glm::vec3& tint,
+                                   float            intensity)
+{
+    if (offscreenCmd == nullptr || hdrColor == nullptr || skyPipeline == nullptr)
+    {
+        return false;
+    }
+    if (!EnsureSkyDescSet())
+    {
+        return false;  // 无 bakedEnvCube 或资源未就绪
+    }
+
+    auto& cmd = *offscreenCmd;
+
+    // hdrColor 当前 layout：上一帧末尾通常翻在 ShaderReadOnly（passthrough /
+    // bloom 末尾的契约）；首帧 hdrLayoutShaderReadOnly == false（Undefined）。
+    const auto fromLayout = hdrLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+    cmd.TransitionTexture(*hdrColor, fromLayout,
+                          Orange::Rhi::TextureLayout::ColorAttachment);
+    hdrLayoutShaderReadOnly = false;
+
+    Orange::Rhi::ColorAttachment att{};
+    att.mpView          = hdrColor->GetDefaultView();
+    att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
+    att.mStoreOp        = Orange::Rhi::StoreOp::Store;
+    att.mClear.mColor[0] = 0.05f;
+    att.mClear.mColor[1] = 0.07f;
+    att.mClear.mColor[2] = 0.10f;
+    att.mClear.mColor[3] = 1.0f;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = hdrWidth;
+    rd.mRenderArea.mHeight = hdrHeight;
+    rd.mColorAttachments.push_back(att);
+    // 不挂 depth attachment —— sky 不消费 / 不修改 depth；主 pass 自家
+    // BeginRendering 会以 LoadOp::Clear depth = 1.0 重建 sceneDepth。
+
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(hdrWidth);
+    vp.mHeight   = static_cast<float>(hdrHeight);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = hdrWidth;
+    sc.mHeight = hdrHeight;
+    cmd.SetScissor(sc);
+
+    cmd.BindGraphicsPipeline(*skyPipeline);
+    cmd.SetDescriptorSet(0, *skySet);
+
+    // push constant 96 字节：mat4 invVP + vec3 cameraPos + float intensity
+    // + vec3 tint + float pad；与 sky.frag.glsl push_constant block 严格对齐。
+    struct SkyPush
+    {
+        glm::mat4 invViewProj;
+        glm::vec3 cameraPos;
+        float     intensity;
+        glm::vec3 tint;
+        float     pad0;
+    };
+    static_assert(sizeof(SkyPush) == 96,
+                  "SkyPush must match sky.frag push_constant block (96 B).");
+
+    SkyPush push{};
+    push.invViewProj = invViewProj;
+    push.cameraPos   = cameraPos;
+    push.intensity   = intensity;
+    push.tint        = tint;
+    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment, 0,
+                         sizeof(SkyPush), &push);
+
+    cmd.Draw(3, 1, 0, 0);
+    cmd.EndRendering();
+
+    // hdrColor 留在 ColorAttachment —— 主 pass 入口接 LoadOp::Load 直接
+    // 沿用本帧 sky 输出作背景。
+    return true;
+}
+
+bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
+                                             const glm::vec3& cameraPos,
+                                             const glm::vec3& sunDir,
+                                             const glm::vec3& sunColor,
+                                             float            sunIntensity)
+{
+    if (offscreenCmd == nullptr || hdrColor == nullptr || proceduralSkyPipeline == nullptr)
+    {
+        return false;
+    }
+
+    auto& cmd = *offscreenCmd;
+
+    // hdrColor transition：与 RecordSkyPass 同款入口契约（上一帧通常翻在
+    // ShaderReadOnly；首帧 Undefined）。
+    const auto fromLayout = hdrLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+    cmd.TransitionTexture(*hdrColor, fromLayout,
+                          Orange::Rhi::TextureLayout::ColorAttachment);
+    hdrLayoutShaderReadOnly = false;
+
+    Orange::Rhi::ColorAttachment att{};
+    att.mpView          = hdrColor->GetDefaultView();
+    att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
+    att.mStoreOp        = Orange::Rhi::StoreOp::Store;
+    att.mClear.mColor[0] = 0.12f;  // fallback；shader 会全覆盖
+    att.mClear.mColor[1] = 0.12f;
+    att.mClear.mColor[2] = 0.13f;
+    att.mClear.mColor[3] = 1.0f;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = hdrWidth;
+    rd.mRenderArea.mHeight = hdrHeight;
+    rd.mColorAttachments.push_back(att);
+
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(hdrWidth);
+    vp.mHeight   = static_cast<float>(hdrHeight);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = hdrWidth;
+    sc.mHeight = hdrHeight;
+    cmd.SetScissor(sc);
+
+    cmd.BindGraphicsPipeline(*proceduralSkyPipeline);
+
+    // push 112 字节，必须与 procedural_sky.frag.glsl 内 push_constant block
+    // 严格对齐（mat4 + 3 组 vec3+float，std430 自然 16B 对齐）。zenith /
+    // horizon palette 在 shader 内 hardcode（v0.x baseline），未来扩展时
+    // 升级为 push 字段或 UBO。
+    struct ProceduralSkyPush
+    {
+        glm::mat4 invViewProj;     // 64
+        glm::vec3 cameraPos;       // 12
+        float     pad0;            //  4
+        glm::vec3 sunDir;          // 12
+        float     sunSize;         //  4
+        glm::vec3 sunColor;        // 12
+        float     sunIntensity;    //  4
+    };
+    static_assert(sizeof(ProceduralSkyPush) == 112,
+                  "ProceduralSkyPush must match procedural_sky.frag push_constant (112 B).");
+
+    ProceduralSkyPush push{};
+    push.invViewProj = invViewProj;
+    push.cameraPos   = cameraPos;
+    push.sunDir      = sunDir;
+    // sunSize 是 disc 阈值的 cos 值，越接近 1 = 越小。0.9995 ≈ 视角 ~1.8°，
+    // 比真实太阳（~0.53°）偏大，编辑器观感优先 —— 用户能清楚看到一个圆盘
+    // 而非"针尖"。
+    push.sunSize      = 0.9995f;
+    push.sunColor     = sunColor;
+    push.sunIntensity = sunIntensity;
+
+    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment, 0,
+                         sizeof(ProceduralSkyPush), &push);
+
+    cmd.Draw(3, 1, 0, 0);
+    cmd.EndRendering();
+
+    // hdrColor 留在 ColorAttachment，主 pass 接 LoadOp::Load。
+    return true;
+}
+
+bool Pipeline::Impl::RecordGridPass(const glm::mat4& invViewProj,
+                                    const glm::mat4& viewProj)
+{
+    if (offscreenCmd == nullptr || hdrColor == nullptr || sceneDepth == nullptr
+        || gridPipeline == nullptr || gridLayout == nullptr || hdrSampler == nullptr)
+    {
+        return false;
+    }
+
+    auto& rhi = renderDevice->GetRhiDevice();
+    auto& cmd = *offscreenCmd;
+
+    // 1. grid descriptor set lazy create + re-bind sceneDepth：
+    //    池 + set 都只 alloc 一次（避免 ImGui viewport 启动期 N 次 resize 让
+    //    sceneDepth 反复重建 → reset+realloc 撞 OUT_OF_POOL_MEMORY，Vulkan
+    //    默认 pool 不支持 free 单 set）。sceneDepth 重建只走 UpdateDescriptorSet
+    //    重写 binding，Pipeline::Render 末尾 WaitIdle 保证前帧 set 不再 in-flight。
+    if (!gridPool)
+    {
+        Orange::Rhi::DescriptorPoolDesc poolDesc{};
+        poolDesc.mMaxSets = 1;
+        Orange::Rhi::DescriptorPoolSize sz{};
+        sz.mType  = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        sz.mCount = 1;
+        poolDesc.mPoolSizes.push_back(sz);
+        poolDesc.mpDebugName = "orange_engine.grid.pool";
+        gridPool = rhi.CreateDescriptorPool(poolDesc);
+        if (!gridPool)
+        {
+            ORANGE_LOG_ERROR("Pipeline: grid CreateDescriptorPool 失败");
+            return false;
+        }
+    }
+    if (!gridSet)
+    {
+        auto set = rhi.AllocateDescriptorSet(*gridPool, *gridLayout);
+        if (!set)
+        {
+            ORANGE_LOG_ERROR("Pipeline: grid AllocateDescriptorSet 失败");
+            return false;
+        }
+        gridSet = std::move(set);
+        gridSetBoundDepth = nullptr;  // 强制下面走 UpdateDescriptorSet
+    }
+    if (gridSetBoundDepth != sceneDepth.get())
+    {
+        Orange::Rhi::DescriptorWrite w{};
+        w.mBinding             = 0;
+        w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w.mImageInfo.mpTexture = sceneDepth.get();
+        w.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*gridSet, &w, 1);
+        gridSetBoundDepth = sceneDepth.get();
+    }
+
+    // 2. sceneDepth → ShaderReadOnly 供采样。主 pass 末尾留在 DSA；
+    //    god rays（如果启用）已翻 ShaderReadOnly。
+    if (!sceneDepthLayoutShaderReadOnly)
+    {
+        cmd.TransitionTexture(*sceneDepth,
+                              Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        sceneDepthLayoutShaderReadOnly = true;
+    }
+
+    // 3. hdrColor: ShaderReadOnly → ColorAttachment 准备 alpha-blend 上 grid。
+    cmd.TransitionTexture(*hdrColor,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly,
+                          Orange::Rhi::TextureLayout::ColorAttachment);
+
+    Orange::Rhi::ColorAttachment colorAtt{};
+    colorAtt.mpView   = hdrColor->GetDefaultView();
+    colorAtt.mLoadOp  = Orange::Rhi::LoadOp::Load;
+    colorAtt.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = hdrWidth;
+    rd.mRenderArea.mHeight = hdrHeight;
+    rd.mColorAttachments.push_back(colorAtt);
+    // 不挂 depth attachment —— shader 自己采 sceneDepth + 手动比较 + discard。
+
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(hdrWidth);
+    vp.mHeight   = static_cast<float>(hdrHeight);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = hdrWidth;
+    sc.mHeight = hdrHeight;
+    cmd.SetScissor(sc);
+
+    cmd.BindGraphicsPipeline(*gridPipeline);
+    cmd.SetDescriptorSet(0, *gridSet);
+
+    struct GridPush
+    {
+        glm::mat4 invViewProj;
+        glm::mat4 viewProj;
+    };
+    static_assert(sizeof(GridPush) == 128,
+                  "GridPush must match grid.frag push_constant block (128 B).");
+
+    GridPush push{};
+    push.invViewProj = invViewProj;
+    push.viewProj    = viewProj;
+    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment, 0,
+                         sizeof(GridPush), &push);
+
+    cmd.Draw(3, 1, 0, 0);
+    cmd.EndRendering();
+
+    // 4. hdrColor 翻回 ShaderReadOnly：下一段（bloom / passthrough / tonemap）
+    //    按 ShaderReadOnly 假设跑。sceneDepth 留在 ShaderReadOnly —— 下一
+    //    帧主 pass 入口看 sceneDepthLayoutShaderReadOnly == true 会正确
+    //    transition 回 DSA。
+    cmd.TransitionTexture(*hdrColor,
+                          Orange::Rhi::TextureLayout::ColorAttachment,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    hdrLayoutShaderReadOnly = true;
+    return true;
+}
+
 void Pipeline::Render(Orange::Engine::World& world)
 {
     auto& impl = *mpImpl;
@@ -3889,6 +4592,9 @@ void Pipeline::Render(Orange::Engine::World& world)
     const DirectionalLight* activeLight = nullptr;
     glm::vec3               activeLightDir{0.3f, -1.0f, 0.4f};  // neutral 默认
     glm::vec3               iblTintIntensity{1.0f, 1.0f, 1.0f}; // 未挂 EnvironmentComponent → 1,1,1（中性）
+    glm::vec3               envTint{1.0f, 1.0f, 1.0f};
+    float                   envIntensity = 1.0f;
+    glm::vec3               cameraWorldPos{0.0f};
     if (hdrReady && impl.scene.HasCamera())
     {
         auto& reg  = world.Registry();
@@ -3906,14 +4612,14 @@ void Pipeline::Render(Orange::Engine::World& world)
             activeLightDir = ComputeDirectionalLightWorldDir(rot);
         }
         // EnvironmentComponent first-found：详细注释参见 RenderOffscreen 内
-        // 同款代码块。tint * intensity 在 host 端先乘好，shader 端仅一次
-        // 乘法。dummy IBL 阶段（c6 / c7 前）irradiance + prefiltered 仍是
-        // 1×1 黑，相乘结果 = 0，本字段对最终视觉无影响——纯接通点等待 c7
-        // SetIblTextures 真实喂入烘焙产物后立即生效。
+        // 同款代码块。envTint / envIntensity 单独留下给 sky-dome pass 用；
+        // iblTintIntensity 喂 LightUbo（PBR shader IBL 段消费）。
         auto envView = reg.view<EnvironmentComponent>();
         if (!envView.empty())
         {
             const auto&  env = envView.get<EnvironmentComponent>(envView.front());
+            envTint          = env.tint;
+            envIntensity     = env.intensity;
             iblTintIntensity = env.tint * env.intensity;
         }
         impl.EnsureShadowMap();
@@ -3921,10 +4627,10 @@ void Pipeline::Render(Orange::Engine::World& world)
                                               : glm::mat4(1.0f);
         // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
         // 取 inverse 后的第 4 列即为相机在 world 中的位置。供 rim_light
-        // / 后续 specular 类 fragment 取真 viewDir。
+        // / 后续 specular 类 fragment 取真 viewDir + sky-dome pass 反推。
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
-        const glm::vec3 cameraPos(invView[3]);
-        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraPos, iblTintIntensity);
+        cameraWorldPos            = glm::vec3(invView[3]);
+        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
     }
 
     // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /
@@ -3977,9 +4683,39 @@ void Pipeline::Render(Orange::Engine::World& world)
                 }
             }
 
+            // sky-dome pass：主 pass 之前画背景。两条分支与 RenderOffscreen
+            // 同款 —— (a) bakedEnvCube 有 → cubemap sky；(b) 无 + skyEnabled
+            // → procedural 3 色 gradient + 太阳 disc。skyEnabled = false →
+            // 都跳过，主 pass clear color fallback。
+            bool skyDrew = false;
+            if (offscreenOk && impl.skyEnabled)
+            {
+                const glm::mat4 invViewProjSky = glm::inverse(viewProj);
+                glm::vec3 sunDir = (activeLight != nullptr)
+                    ? -glm::normalize(activeLightDir)
+                    : glm::normalize(glm::vec3(0.4f, 1.0f, 0.3f));
+                glm::vec3 sunColor = (activeLight != nullptr)
+                    ? activeLight->color
+                    : glm::vec3(1.0f, 0.95f, 0.85f);
+                float sunIntensity = (activeLight != nullptr)
+                    ? activeLight->intensity : 1.0f;
+
+                if (impl.bakedEnvCube)
+                {
+                    skyDrew = impl.RecordSkyPass(invViewProjSky, cameraWorldPos,
+                                                 envTint, envIntensity);
+                }
+                else
+                {
+                    skyDrew = impl.RecordProceduralSkyPass(
+                        invViewProjSky, cameraWorldPos,
+                        sunDir, sunColor, sunIntensity);
+                }
+            }
+
             if (offscreenOk)
             {
-                offscreenOk = impl.RecordOffscreenPass(viewProj);
+                offscreenOk = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew);
             }
 
             // 粒子 pass 插在主 pass 与 bloom 之间——粒子写到同一 HDR
@@ -4024,6 +4760,15 @@ void Pipeline::Render(Orange::Engine::World& world)
                     ctx.frameIndex      = impl.frameIndex;
                     for (auto& p : v) { p->Execute(ctx); }
                 }
+            }
+
+            // grid pass：主 pass + 粒子 + AfterMainPass inserted 都画完后、
+            // bloom 之前。grid 走 alpha-blend 叠加 + DepthTest Less → 几何
+            // 把 grid 自然遮挡。editorGridEnabled = false 时 silent skip。
+            if (offscreenOk && impl.editorGridEnabled)
+            {
+                const glm::mat4 invViewProjGrid = glm::inverse(viewProj);
+                impl.RecordGridPass(invViewProjGrid, viewProj);
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)
