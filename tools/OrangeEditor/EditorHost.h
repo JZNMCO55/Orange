@@ -47,6 +47,7 @@
 #include "context/EditorSceneContext.h"
 #include "context/EditorSelection.h"
 #include "context/EditorSettings.h"
+#include "plugin/IEditorAssetInspectorPlugin.h"
 #include "plugin/IEditorGizmoPlugin.h"
 #include "plugin/IEditorInspectorPlugin.h"
 
@@ -103,6 +104,19 @@ struct EditorHost
     // 公共接口，让 v0.4 落地时无需再 bump EditorHost layout。
     std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorGizmoPlugin>>
         gizmoPlugins;
+
+    // Inspector 资源类型分派扩展点注册表 —— v0.7 c0 落地（消除 L16）。
+    //
+    // 与 inspectorPlugins / gizmoPlugins 并存：前者按 component schema 分
+    // 派（"实体段装饰"），后者按选中资源扩展名分派（"Asset 浏览器选中
+    // .material → Inspector 整体改画"）。InspectorPanel::DrawInspectorPanel
+    // 入口处遍历本注册表，第一条 CanHandle(selectedAssetPath) == true 的
+    // plugin 接管整段；未命中则走默认实体 Inspector 路径。
+    //
+    // 详见 plugin/IEditorAssetInspectorPlugin.h 头注释（设计意图 / 调用约
+    // 定 / 与 IEditorInspectorPlugin 的语义分工）。
+    std::vector<std::unique_ptr<Orange::Editor::Plugin::IEditorAssetInspectorPlugin>>
+        assetInspectorPlugins;
 
     // 游戏侧 / demo 侧自定义 component 序列化器注册表。
     // main 启动期把各 ComponentSerializerEntry push_back 进来；所有
