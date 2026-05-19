@@ -3,6 +3,8 @@
 #include "../EditorHierarchy.h"
 #include "../EditorHost.h"
 
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/World.h>
 
@@ -95,4 +97,54 @@ bool RenameCommand::Merge(ICommand& newer)
     if (n.mEntity != mEntity) { return false; }
     mNewName = std::move(n.mNewName);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// SwitchAnimatorBackendCommand
+// ---------------------------------------------------------------------------
+
+SwitchAnimatorBackendCommand::SwitchAnimatorBackendCommand(
+    EditorHost&            host,
+    Orange::Engine::Entity entity,
+    std::string            oldBackendName,
+    std::string            newBackendName)
+    : mpHost(&host)
+    , mEntity(entity)
+    , mOldBackend(std::move(oldBackendName))
+    , mNewBackend(std::move(newBackendName))
+{}
+
+namespace
+{
+// 共享重建 helper：把 entity 上的 AnimatorComponent.animator 重置为 registry
+// 按 backend 名 factory 新建的实例。任一环（host/world/registry/entity/component）
+// 为空 → no-op，与其他命令的"漏 Clear 安全降级"纪律一致。
+void RebuildAnimatorBackend(EditorHost* pHost,
+                            Orange::Engine::Entity entity,
+                            const std::string& backendName)
+{
+    using AC = Orange::Engine::Animation::AnimatorComponent;
+    if (pHost == nullptr) { return; }
+    auto* pWorld    = pHost->scene.pWorld.get();
+    auto* pRegistry = pHost->assets.pAnimators.get();
+    if (pWorld == nullptr || pRegistry == nullptr) { return; }
+    if (!entity.IsValid() || !pWorld->IsValid(entity)) { return; }
+    auto* ac = pWorld->GetComponent<AC>(entity);
+    if (ac == nullptr) { return; }
+    // factory 未注册 → 保留旧 animator 不变（视为 no-op；plugin UI 不让用户
+    // 在 BackendNames 之外的项里 Combo，理论上不会走到此分支，但仍守住）。
+    auto newAnimator = pRegistry->Create(backendName);
+    if (!newAnimator) { return; }
+    ac->animator = std::move(newAnimator);
+}
+}  // anonymous namespace
+
+void SwitchAnimatorBackendCommand::Execute()
+{
+    RebuildAnimatorBackend(mpHost, mEntity, mNewBackend);
+}
+
+void SwitchAnimatorBackendCommand::Undo()
+{
+    RebuildAnimatorBackend(mpHost, mEntity, mOldBackend);
 }
