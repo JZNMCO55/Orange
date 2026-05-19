@@ -1,7 +1,7 @@
 ---
 id: ADR-005
 title: AnimationStateMachine condition 可序列化形态 —— 引擎侧 ConditionExpr + StateContext parameter table（方案 B）
-status: proposed
+status: accepted
 date: 2026-05-19
 deciders: [solo-dev]
 related:

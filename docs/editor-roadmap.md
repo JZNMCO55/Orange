@@ -159,7 +159,7 @@ wiki 给三种：
 | L4 | **mesh / material 字段编辑要靠手敲 handle id** —— 没资源浏览器 | v0.5 |
 | L5 | **没 dirty 状态指示** —— File / Open 不提示未保存改动 | v0.6 |
 | L6 | **没 per-layer / 多 chunk 协作** —— 一个 .scene.json 整个 chunk 一文件，多人编辑 merge 困难 | v0.6（按需） |
-| L7 | **Animator backend 切换 + 状态机图不可编辑** —— Inspector 看不到 Animator 内部 | v0.7 |
+| L7 | **Animator backend 切换 + 状态机图不可编辑** —— Inspector 看不到 Animator 内部 | ✅ v0.7（c1 backend Combo + c2 状态机图全套 + c3 DragonBones metadata + c4 Procedural channel name 浏览） |
 | L8 | **Console 面板只显示帧统计** —— 没接 Core::Log | v0.8 |
 | L9 | **快捷键硬编码** —— F2 / Del / Esc 等不可配置 | v0.8 |
 | L10 | **没 Profiler / Debug Draw** | v0.9 |
@@ -456,7 +456,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - `Grep` 找不到字面量 button label 是裸文字符号（`"X"` / `"+"` / `"▼"` 等）—— 必须用 icon font codepoint
 - 编辑器 milestone-end-checklist 走完，含 v0.4 ~ v0.6 全 panel polish 前后对比截图存档
 
-### v0.7 · Animation 子模式
+### v0.7 · Animation 子模式 ✅
 
 **关键 deliverables**：
 
