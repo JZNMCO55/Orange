@@ -618,7 +618,10 @@ struct Pipeline::Impl
     // 最近一次写进 skySet 的 cube 对象指针；bakedEnvCube 重建时（BakeIblFromWorld
     // 重跑）需要重写 binding 0。
     Orange::Rhi::RHITexture*                              skySetBoundCube{nullptr};
-    bool                                                  skyEnabled{true};
+    // [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
+    // 临时 hardcode false：测试机回归确认 BR#1 sky pass 是崩点；本次跳过 sky
+    // pass 看后续 BR# 是否仍崩。复现锁定后回滚。
+    bool                                                  skyEnabled{false};
 
     // ---- Procedural sky pass GPU 资源 ----------------------------------
     // 无描述符（push constant only）；pipeline 与 skyPipeline 同 attachment
