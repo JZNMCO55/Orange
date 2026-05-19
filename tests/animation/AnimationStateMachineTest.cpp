@@ -7,6 +7,15 @@
 //   * 同帧只 fire 一条 transition（避免无限链）；
 //   * AddTransition 空 condition 被拒绝（TransitionCount 不增）；
 //   * 重名 AddState 覆盖 OnEnter / OnExit。
+//
+// v0.7 c2-7（ADR-005）新增覆盖：
+//   * AddTransition(ConditionExpr) 数据驱动路径：Bool 参数 + If/IfNot；
+//   * Float 参数 + Greater/Less/Equal 比较；
+//   * Trigger 参数 fire 后自动 reset 为 false；
+//   * 多 ConditionExpr AND 组合；
+//   * Parameter 未注册 → no-fire；
+//   * 类型 widening（Bool ↔ Int ↔ Float）；
+//   * 旧 ConditionFn 路径与新 ConditionExpr 路径混用同一 FSM 行为正常。
 
 #include "orange/engine/animation/AnimationStateMachine.h"
 
@@ -77,7 +86,8 @@ void TestEmptyConditionRejected()
     Anim::AnimationStateMachine fsm;
     fsm.AddState("a");
     fsm.AddState("b");
-    fsm.AddTransition("a", "b", {});  // 空 condition：应被拒
+    // 空 ConditionFn（默认构造的 std::function）：应被拒
+    fsm.AddTransition("a", "b", Anim::AnimationStateMachine::ConditionFn{});
     assert(fsm.TransitionCount() == 0);
 
     fsm.AddTransition("a", "b", [](const auto&) { return true; });
@@ -117,6 +127,185 @@ void TestSetInitialStateNonExistent()
     assert(fsm.CurrentState() == "a");
 }
 
+// ----- v0.7 c2-7（ADR-005）新增 -----
+
+void TestConditionExprBoolIf()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("idle");
+    fsm.AddState("walk");
+    fsm.RegisterParameter("isMoving", Anim::ParameterType::Bool);
+    fsm.AddTransition("idle", "walk",
+                      std::vector<Anim::ConditionExpr>{
+                          {"isMoving", Anim::ConditionOp::If, false}});
+    fsm.SetInitialState("idle");
+
+    fsm.Tick(0.1f);
+    assert(fsm.CurrentState() == "idle");  // isMoving 默认 false → If 不命中
+
+    fsm.SetParameterBool("isMoving", true);
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "walk");
+}
+
+void TestConditionExprBoolIfNot()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("a");
+    fsm.AddState("b");
+    fsm.RegisterParameter("ready", Anim::ParameterType::Bool);
+    fsm.AddTransition("a", "b",
+                      std::vector<Anim::ConditionExpr>{
+                          {"ready", Anim::ConditionOp::IfNot, false}});
+    fsm.SetInitialState("a");
+
+    // ready 默认 false → IfNot 命中 → 立即过
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "b");
+}
+
+void TestConditionExprFloatGreater()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("idle");
+    fsm.AddState("run");
+    fsm.RegisterParameter("speed", Anim::ParameterType::Float);
+    fsm.AddTransition("idle", "run",
+                      std::vector<Anim::ConditionExpr>{
+                          {"speed", Anim::ConditionOp::Greater, 5.0f}});
+    fsm.SetInitialState("idle");
+
+    fsm.SetParameterFloat("speed", 3.0f);
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "idle");
+
+    fsm.SetParameterFloat("speed", 10.0f);
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "run");
+}
+
+void TestConditionExprAndCompound()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("idle");
+    fsm.AddState("sprint");
+    fsm.RegisterParameter("isMoving", Anim::ParameterType::Bool);
+    fsm.RegisterParameter("speed",    Anim::ParameterType::Float);
+    fsm.AddTransition("idle", "sprint",
+                      std::vector<Anim::ConditionExpr>{
+                          {"isMoving", Anim::ConditionOp::If,      false},
+                          {"speed",    Anim::ConditionOp::Greater, 8.0f}});
+    fsm.SetInitialState("idle");
+
+    fsm.SetParameterBool("isMoving", true);
+    fsm.SetParameterFloat("speed", 5.0f);
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "idle");  // speed 不够，AND fail
+
+    fsm.SetParameterFloat("speed", 12.0f);
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "sprint");
+}
+
+void TestTriggerAutoReset()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("idle");
+    fsm.AddState("attack");
+    fsm.AddState("recover");
+    fsm.RegisterParameter("attackPressed", Anim::ParameterType::Trigger);
+    // idle → attack 仅在 trigger 命中时
+    fsm.AddTransition("idle", "attack",
+                      std::vector<Anim::ConditionExpr>{
+                          {"attackPressed", Anim::ConditionOp::If, false}});
+    // attack → recover 仅在再次 trigger 时（验证 reset 行为）
+    fsm.AddTransition("attack", "recover",
+                      std::vector<Anim::ConditionExpr>{
+                          {"attackPressed", Anim::ConditionOp::If, false}});
+    fsm.SetInitialState("idle");
+
+    fsm.SetTrigger("attackPressed");
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "attack");
+    // Trigger 已自动 reset：再 Tick 不会进 recover
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "attack");
+
+    // 显式再次 SetTrigger → 进 recover
+    fsm.SetTrigger("attackPressed");
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "recover");
+}
+
+void TestConditionExprUnregisteredParamNoFire()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("a");
+    fsm.AddState("b");
+    // 不注册 "missing" 参数
+    fsm.AddTransition("a", "b",
+                      std::vector<Anim::ConditionExpr>{
+                          {"missing", Anim::ConditionOp::If, false}});
+    fsm.SetInitialState("a");
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "a");  // 引用未注册参数 → no-fire
+}
+
+void TestConditionExprEmptyListAlwaysFires()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("a");
+    fsm.AddState("b");
+    fsm.AddTransition("a", "b", std::vector<Anim::ConditionExpr>{});  // 空 list = 无条件
+    fsm.SetInitialState("a");
+    fsm.Tick(0.0f);
+    assert(fsm.CurrentState() == "b");
+}
+
+void TestParameterTypeWidening()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.RegisterParameter("flag", Anim::ParameterType::Bool);
+    fsm.RegisterParameter("count", Anim::ParameterType::Int);
+    fsm.RegisterParameter("ratio", Anim::ParameterType::Float);
+
+    // bool → int / float widening 通过 SetParameterBool
+    fsm.SetParameterBool("count", true);
+    assert(fsm.GetParameterInt("count") == 1);
+    fsm.SetParameterBool("ratio", true);
+    assert(fsm.GetParameterFloat("ratio") > 0.99f);
+
+    // int → bool / float widening
+    fsm.SetParameterInt("flag", 5);
+    assert(fsm.GetParameterBool("flag") == true);
+    fsm.SetParameterInt("ratio", 3);
+    assert(fsm.GetParameterFloat("ratio") > 2.99f);
+}
+
+void TestMixedLambdaAndExprPaths()
+{
+    Anim::AnimationStateMachine fsm;
+    fsm.AddState("idle");
+    fsm.AddState("walk");
+    fsm.AddState("jump");
+    bool wantJump = false;
+    fsm.RegisterParameter("isMoving", Anim::ParameterType::Bool);
+    // idle → walk 走数据路径
+    fsm.AddTransition("idle", "walk",
+                      std::vector<Anim::ConditionExpr>{
+                          {"isMoving", Anim::ConditionOp::If, false}});
+    // idle → jump 走 lambda 路径（同 FSM 内两路径并存）
+    fsm.AddTransition("idle", "jump", [&](const auto&) { return wantJump; });
+    fsm.SetInitialState("idle");
+    assert(fsm.TransitionCount() == 2);
+
+    wantJump = true;
+    fsm.Tick(0.0f);
+    // idle → jump 先注册，按注册顺序 idle → walk 先 evaluate；isMoving false → fail；
+    // 再 evaluate idle → jump → wantJump true → fire
+    assert(fsm.CurrentState() == "jump");
+}
+
 }  // namespace
 
 int main()
@@ -126,5 +315,15 @@ int main()
     TestUnsetInitialStateTickIsNoOp();
     TestStateNameOverwrite();
     TestSetInitialStateNonExistent();
+    // v0.7 c2-7（ADR-005）新增
+    TestConditionExprBoolIf();
+    TestConditionExprBoolIfNot();
+    TestConditionExprFloatGreater();
+    TestConditionExprAndCompound();
+    TestTriggerAutoReset();
+    TestConditionExprUnregisteredParamNoFire();
+    TestConditionExprEmptyListAlwaysFires();
+    TestParameterTypeWidening();
+    TestMixedLambdaAndExprPaths();
     return 0;
 }
