@@ -2,9 +2,35 @@
   "schemaVersion": {
     "namespace": "editor/anim_fsm",
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "initialState": "idle",
+  "parameters": [
+    {
+      "name": "isMoving",
+      "type": "bool",
+      "default": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    {
+      "name": "attackPressed",
+      "type": "trigger",
+      "default": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    {
+      "name": "speed",
+      "type": "float",
+      "default": {
+        "type": "float",
+        "value": 0.0
+      }
+    }
+  ],
   "states": [
     {
       "name": "idle",
@@ -34,23 +60,72 @@
   "transitions": [
     {
       "from": "idle",
-      "to": "walk"
+      "to": "walk",
+      "conditions": [
+        {
+          "paramName": "isMoving",
+          "op": "if",
+          "threshold": {
+            "type": "bool",
+            "value": false
+          }
+        }
+      ]
     },
     {
       "from": "walk",
-      "to": "idle"
+      "to": "idle",
+      "conditions": [
+        {
+          "paramName": "isMoving",
+          "op": "ifNot",
+          "threshold": {
+            "type": "bool",
+            "value": false
+          }
+        }
+      ]
     },
     {
       "from": "idle",
-      "to": "jump"
+      "to": "jump",
+      "conditions": [
+        {
+          "paramName": "attackPressed",
+          "op": "if",
+          "threshold": {
+            "type": "bool",
+            "value": false
+          }
+        }
+      ]
     },
     {
       "from": "walk",
-      "to": "jump"
+      "to": "jump",
+      "conditions": [
+        {
+          "paramName": "attackPressed",
+          "op": "if",
+          "threshold": {
+            "type": "bool",
+            "value": false
+          }
+        },
+        {
+          "paramName": "speed",
+          "op": "greater",
+          "threshold": {
+            "type": "float",
+            "value": 5.0
+          }
+        }
+      ]
     },
     {
       "from": "jump",
-      "to": "idle"
+      "to": "idle",
+      "conditions": []
     }
   ]
 }

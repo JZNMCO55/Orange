@@ -437,3 +437,132 @@ void AnimFsmDeleteTransitionCommand::Undo()
         mSavedTransition);
     mpPlugin->MarkDirty();
 }
+
+// ---------------------------------------------------------------------------
+// AnimFsmAddParameterCommand
+// ---------------------------------------------------------------------------
+
+using ::Orange::Editor::AnimFsm::EditableParameter;
+using ::Orange::Editor::AnimFsm::EditableCondition;
+
+AnimFsmAddParameterCommand::AnimFsmAddParameterCommand(
+    AnimFsmAssetInspectorPlugin* pPlugin,
+    EditableParameter            parameter)
+    : mpPlugin(pPlugin)
+    , mParameter(std::move(parameter))
+{}
+
+void AnimFsmAddParameterCommand::Execute()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    // 重名防御
+    for (const auto& p : fsm.parameters)
+    {
+        if (p.name == mParameter.name)
+        {
+            std::fprintf(stderr,
+                         "[AnimFsmAddParameter] '%s' 已存在，跳过\n",
+                         mParameter.name.c_str());
+            return;
+        }
+    }
+    fsm.parameters.push_back(mParameter);
+    mpPlugin->MarkDirty();
+}
+
+void AnimFsmAddParameterCommand::Undo()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    for (auto it = fsm.parameters.begin(); it != fsm.parameters.end(); ++it)
+    {
+        if (it->name == mParameter.name)
+        {
+            fsm.parameters.erase(it);
+            break;
+        }
+    }
+    mpPlugin->MarkDirty();
+}
+
+// ---------------------------------------------------------------------------
+// AnimFsmDeleteParameterCommand
+// ---------------------------------------------------------------------------
+
+AnimFsmDeleteParameterCommand::AnimFsmDeleteParameterCommand(
+    AnimFsmAssetInspectorPlugin* pPlugin,
+    std::size_t                  parameterIndex)
+    : mpPlugin(pPlugin)
+    , mIndex(parameterIndex)
+{}
+
+void AnimFsmDeleteParameterCommand::Execute()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    if (mIndex >= fsm.parameters.size())
+    {
+        std::fprintf(stderr,
+                     "[AnimFsmDeleteParameter] index %zu 越界（size=%zu），跳过\n",
+                     mIndex, fsm.parameters.size());
+        mWasValid = false;
+        return;
+    }
+    mSaved = fsm.parameters[mIndex];
+    fsm.parameters.erase(fsm.parameters.begin() + static_cast<std::ptrdiff_t>(mIndex));
+    mWasValid = true;
+    mpPlugin->MarkDirty();
+}
+
+void AnimFsmDeleteParameterCommand::Undo()
+{
+    if (mpPlugin == nullptr || !mWasValid) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    const std::size_t insertAt = std::min(mIndex, fsm.parameters.size());
+    fsm.parameters.insert(fsm.parameters.begin() + static_cast<std::ptrdiff_t>(insertAt),
+                          mSaved);
+    mpPlugin->MarkDirty();
+}
+
+// ---------------------------------------------------------------------------
+// AnimFsmSetTransitionConditionsCommand
+// ---------------------------------------------------------------------------
+
+AnimFsmSetTransitionConditionsCommand::AnimFsmSetTransitionConditionsCommand(
+    AnimFsmAssetInspectorPlugin*           pPlugin,
+    std::size_t                            transitionIndex,
+    std::vector<EditableCondition>         oldConditions,
+    std::vector<EditableCondition>         newConditions)
+    : mpPlugin(pPlugin)
+    , mIndex(transitionIndex)
+    , mOldConditions(std::move(oldConditions))
+    , mNewConditions(std::move(newConditions))
+{}
+
+void AnimFsmSetTransitionConditionsCommand::Execute()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    if (mIndex >= fsm.transitions.size())
+    {
+        std::fprintf(stderr,
+                     "[AnimFsmSetTransitionConditions] index %zu 越界，跳过\n",
+                     mIndex);
+        return;
+    }
+    fsm.transitions[mIndex].conditions = mNewConditions;
+    mpPlugin->MarkDirty();
+}
+
+void AnimFsmSetTransitionConditionsCommand::Undo()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    if (mIndex >= fsm.transitions.size())
+    {
+        return;
+    }
+    fsm.transitions[mIndex].conditions = mOldConditions;
+    mpPlugin->MarkDirty();
+}

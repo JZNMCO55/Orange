@@ -82,6 +82,7 @@ void AnimFsmAssetInspectorPlugin::EnsureEditingCache(EditorHost& host,
     mEditingPath = assetPath;
     mSelectedStateName.clear();
     mDraggingStateName.clear();
+    mSelectedTransitionIndex = static_cast<std::size_t>(-1);
     mDirty = false;
 }
 
@@ -407,6 +408,14 @@ void AnimFsmAssetInspectorPlugin::DrawNodeContextPopup(EditorHost& host)
             ImGui::PushID(static_cast<int>(i));
             ImGui::Text("→ %s", tr.toState.c_str());
             ImGui::SameLine();
+            if (ImGui::SmallButton("Edit##tr"))
+            {
+                // c2-7-B：选中本 transition 用于在 Inspector 主面板编辑
+                // condition list，关闭 popup
+                mSelectedTransitionIndex = i;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
             if (ImGui::SmallButton("Delete##tr"))
             {
                 indexToDelete = i;
@@ -447,6 +456,345 @@ void AnimFsmAssetInspectorPlugin::DrawNodeContextPopup(EditorHost& host)
     }
 
     ImGui::EndPopup();
+}
+
+namespace
+{
+
+using ::Orange::Editor::AnimFsm::EditableCondition;
+using ::Orange::Editor::AnimFsm::EditableParameter;
+using ::Orange::Engine::Animation::ConditionOp;
+using ::Orange::Engine::Animation::ParameterType;
+
+const char* ParameterTypeShort(ParameterType t) noexcept
+{
+    switch (t)
+    {
+        case ParameterType::Bool:    return "B";
+        case ParameterType::Int:     return "I";
+        case ParameterType::Float:   return "F";
+        case ParameterType::Trigger: return "T";
+    }
+    return "?";
+}
+
+// 找到指定 paramName 在 parameters[] 内的 type（找不到返回 Bool fallback）
+ParameterType FindParameterType(
+    const std::vector<EditableParameter>& parameters, const std::string& name)
+{
+    for (const auto& p : parameters)
+    {
+        if (p.name == name) { return p.type; }
+    }
+    return ParameterType::Bool;
+}
+
+// 按 ParameterType 把 threshold 初始化为对应 variant index 的零值
+void InitThresholdForType(std::variant<bool, std::int32_t, float>& th, ParameterType t)
+{
+    switch (t)
+    {
+        case ParameterType::Bool:
+        case ParameterType::Trigger: th = false;        break;
+        case ParameterType::Int:     th = std::int32_t{0}; break;
+        case ParameterType::Float:   th = 0.0f;        break;
+    }
+}
+
+// Default value display string for parameters table row
+std::string FormatVariantValue(const std::variant<bool, std::int32_t, float>& v)
+{
+    if (std::holds_alternative<bool>(v))
+    {
+        return std::get<bool>(v) ? "true" : "false";
+    }
+    if (std::holds_alternative<std::int32_t>(v))
+    {
+        return std::to_string(std::get<std::int32_t>(v));
+    }
+    return std::to_string(std::get<float>(v));
+}
+
+// 一条 ConditionExpr 的 row UI —— paramName combo + op combo + threshold
+// input。返回 true 表示用户改了某字段（caller 决定是否 push 命令）。
+bool DrawConditionRowUI(EditableCondition&                       condition,
+                        const std::vector<EditableParameter>&    parameters,
+                        const std::string&                       widgetIdPrefix)
+{
+    bool modified = false;
+
+    // ----- paramName combo -----
+    int currentParamIdx = -1;
+    std::vector<const char*> paramNames;
+    paramNames.reserve(parameters.size());
+    for (std::size_t i = 0; i < parameters.size(); ++i)
+    {
+        paramNames.push_back(parameters[i].name.c_str());
+        if (parameters[i].name == condition.paramName)
+        {
+            currentParamIdx = static_cast<int>(i);
+        }
+    }
+
+    const float comboWidth = ImGui::CalcTextSize("XXXXXXXXXX").x
+                             + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(comboWidth);
+    if (ImGui::Combo((widgetIdPrefix + "param").c_str(),
+                     &currentParamIdx,
+                     paramNames.data(),
+                     static_cast<int>(paramNames.size())))
+    {
+        if (currentParamIdx >= 0 && currentParamIdx < static_cast<int>(parameters.size()))
+        {
+            condition.paramName = parameters[currentParamIdx].name;
+            // 切换 paramName 时按新 param type 重置 threshold（避免 variant
+            // index 与 type 不一致）
+            InitThresholdForType(condition.threshold,
+                                 parameters[currentParamIdx].type);
+            modified = true;
+        }
+    }
+
+    ImGui::SameLine();
+
+    // ----- op combo -----
+    const char* opLabels[] = {
+        "If", "IfNot", ">", "<", "==", "!=", ">=", "<="};
+    int curOpIdx = static_cast<int>(condition.op);
+    ImGui::SetNextItemWidth(ImGui::CalcTextSize("XXXX").x
+                            + ImGui::GetStyle().FramePadding.x * 2.0f);
+    if (ImGui::Combo((widgetIdPrefix + "op").c_str(),
+                     &curOpIdx, opLabels, IM_ARRAYSIZE(opLabels)))
+    {
+        condition.op = static_cast<ConditionOp>(curOpIdx);
+        modified = true;
+    }
+
+    // ----- threshold input（按 condition.threshold variant index 渲染对应控件）
+    // If / IfNot 时 threshold 不消费，但 UI 仍渲染（让用户随时切回比较 op）
+    ImGui::SameLine();
+    const float thWidth = ImGui::CalcTextSize("XXXXXXXX").x
+                          + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(thWidth);
+
+    if (std::holds_alternative<bool>(condition.threshold))
+    {
+        bool v = std::get<bool>(condition.threshold);
+        if (ImGui::Checkbox((widgetIdPrefix + "th").c_str(), &v))
+        {
+            condition.threshold = v;
+            modified = true;
+        }
+    }
+    else if (std::holds_alternative<std::int32_t>(condition.threshold))
+    {
+        int v = static_cast<int>(std::get<std::int32_t>(condition.threshold));
+        if (ImGui::InputInt((widgetIdPrefix + "th").c_str(), &v, 0))
+        {
+            condition.threshold = static_cast<std::int32_t>(v);
+            modified = true;
+        }
+    }
+    else  // float
+    {
+        float v = std::get<float>(condition.threshold);
+        if (ImGui::InputFloat((widgetIdPrefix + "th").c_str(), &v, 0.0f, 0.0f, "%.3f"))
+        {
+            condition.threshold = v;
+            modified = true;
+        }
+    }
+
+    return modified;
+}
+
+}  // anonymous namespace
+
+void AnimFsmAssetInspectorPlugin::DrawParametersSection(EditorHost& host)
+{
+    if (!ImGui::CollapsingHeader("Parameters", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        return;
+    }
+
+    std::size_t indexToDelete = static_cast<std::size_t>(-1);
+    for (std::size_t i = 0; i < mEditingFsm.parameters.size(); ++i)
+    {
+        const auto& p = mEditingFsm.parameters[i];
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::Text("[%s] %s = %s",
+                    ParameterTypeShort(p.type),
+                    p.name.c_str(),
+                    FormatVariantValue(p.defaultValue).c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Delete##param"))
+        {
+            indexToDelete = i;
+        }
+        ImGui::PopID();
+    }
+    if (mEditingFsm.parameters.empty())
+    {
+        ImGui::TextDisabled("(no parameters; click '+ Add Parameter' below)");
+    }
+    if (indexToDelete != static_cast<std::size_t>(-1))
+    {
+        host.cmdStack.Push(std::make_unique<AnimFsmDeleteParameterCommand>(
+            this, indexToDelete));
+    }
+
+    if (ImGui::SmallButton("+ Add Parameter"))
+    {
+        mAddParameterBuffer[0] = '\0';
+        mAddParameterTypeIdx   = 0;
+        ImGui::OpenPopup("##anim_fsm_add_param");
+    }
+
+    DrawAddParameterPopup(host);
+}
+
+void AnimFsmAssetInspectorPlugin::DrawAddParameterPopup(EditorHost& host)
+{
+    if (!ImGui::BeginPopup("##anim_fsm_add_param")) { return; }
+
+    ImGui::TextUnformatted("Add Parameter");
+    ImGui::Separator();
+
+    const float popupInputW = ImGui::CalcTextSize("XXXXXXXXXXXX").x
+                              + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(popupInputW);
+    const bool enterPressed = ImGui::InputText("##param_name",
+                                               mAddParameterBuffer,
+                                               sizeof(mAddParameterBuffer),
+                                               ImGuiInputTextFlags_EnterReturnsTrue);
+
+    const char* typeLabels[] = {"Bool", "Int", "Float", "Trigger"};
+    ImGui::SetNextItemWidth(popupInputW);
+    ImGui::Combo("##param_type", &mAddParameterTypeIdx,
+                 typeLabels, IM_ARRAYSIZE(typeLabels));
+
+    const std::string newName = mAddParameterBuffer;
+    const bool        valid   = !newName.empty();
+    bool              clash   = false;
+    if (valid)
+    {
+        for (const auto& p : mEditingFsm.parameters)
+        {
+            if (p.name == newName) { clash = true; break; }
+        }
+    }
+    if (clash)
+    {
+        ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertError(),
+                           "name '%s' 已存在", newName.c_str());
+    }
+
+    ImGui::BeginDisabled(!valid || clash);
+    const bool addClicked = ImGui::Button("Add") || enterPressed;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+    {
+        ImGui::CloseCurrentPopup();
+    }
+
+    if (addClicked && valid && !clash)
+    {
+        EditableParameter p;
+        p.name = newName;
+        p.type = static_cast<ParameterType>(mAddParameterTypeIdx);
+        InitThresholdForType(p.defaultValue, p.type);
+        host.cmdStack.Push(std::make_unique<AnimFsmAddParameterCommand>(
+            this, std::move(p)));
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+void AnimFsmAssetInspectorPlugin::DrawSelectedTransitionSection(EditorHost& host)
+{
+    if (mSelectedTransitionIndex == static_cast<std::size_t>(-1))
+    {
+        return;
+    }
+    if (mSelectedTransitionIndex >= mEditingFsm.transitions.size())
+    {
+        // transition 被删 / 切文件后选中残留 → 自愈
+        mSelectedTransitionIndex = static_cast<std::size_t>(-1);
+        return;
+    }
+
+    auto&             t      = mEditingFsm.transitions[mSelectedTransitionIndex];
+    const std::string header = "Selected transition: " + t.fromState
+                               + " -> " + t.toState + "##sel_tr";
+    if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        return;
+    }
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Deselect##tr"))
+    {
+        mSelectedTransitionIndex = static_cast<std::size_t>(-1);
+        return;
+    }
+
+    ImGui::TextDisabled("Conditions (AND combined; empty list = unconditional transition):");
+
+    // 工作副本 + modified flag —— 任一字段编辑都触发整 vector 覆盖式命令
+    std::vector<EditableCondition> newConds   = t.conditions;
+    bool                           modified   = false;
+    std::size_t                    indexToDel = static_cast<std::size_t>(-1);
+
+    for (std::size_t i = 0; i < newConds.size(); ++i)
+    {
+        ImGui::PushID(static_cast<int>(i));
+        if (DrawConditionRowUI(newConds[i], mEditingFsm.parameters,
+                               "##cond_"))
+        {
+            modified = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Delete##cond_row"))
+        {
+            indexToDel = i;
+        }
+        ImGui::PopID();
+    }
+    if (indexToDel != static_cast<std::size_t>(-1))
+    {
+        newConds.erase(newConds.begin() + static_cast<std::ptrdiff_t>(indexToDel));
+        modified = true;
+    }
+
+    ImGui::BeginDisabled(mEditingFsm.parameters.empty());
+    if (ImGui::SmallButton("+ Add Condition"))
+    {
+        if (!mEditingFsm.parameters.empty())
+        {
+            EditableCondition c;
+            c.paramName = mEditingFsm.parameters.front().name;
+            c.op        = ConditionOp::If;
+            InitThresholdForType(c.threshold,
+                                 mEditingFsm.parameters.front().type);
+            newConds.push_back(std::move(c));
+            modified = true;
+        }
+    }
+    ImGui::EndDisabled();
+    if (mEditingFsm.parameters.empty())
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(register a parameter first)");
+    }
+
+    if (modified)
+    {
+        host.cmdStack.Push(std::make_unique<AnimFsmSetTransitionConditionsCommand>(
+            this, mSelectedTransitionIndex,
+            t.conditions, std::move(newConds)));
+    }
 }
 
 void AnimFsmAssetInspectorPlugin::DrawTables() const
@@ -551,12 +899,18 @@ void AnimFsmAssetInspectorPlugin::Draw(EditorHost& host,
     DrawCanvas(host);
 
     ImGui::Separator();
+    DrawParametersSection(host);
+
+    ImGui::Separator();
+    DrawSelectedTransitionSection(host);
+
+    ImGui::Separator();
     DrawTables();
 
     ImGui::Separator();
-    ImGui::TextDisabled("c2-5 scope：节点增删改 + 拖动 + Save + Undo/Redo");
-    ImGui::TextDisabled("右键空白 = Add State；右键节点 = Delete / Rename；Ctrl+Z/Y 走全局命令栈");
-    ImGui::TextDisabled("边绘制 / transition 增删在 c2-6 落地；Condition DSL 在 c2-7");
+    ImGui::TextDisabled("v0.7 c2-7：Parameters + transition Conditions（AND）+ Undo/Redo");
+    ImGui::TextDisabled("右键空白 = Add State；右键节点 = Delete / Rename / Add Transition / Edit Transition");
+    ImGui::TextDisabled("选中 transition（节点 popup Edit）→ 上方 Selected transition 段编辑 conditions");
 }
 
 }  // namespace Orange::Editor::Plugin

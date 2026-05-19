@@ -164,4 +164,64 @@ private:
     bool                                                 mWasValid{false};
 };
 
+// ----- v0.7 c2-7-B: parameter + condition 命令 -----
+
+class AnimFsmAddParameterCommand : public ICommand
+{
+public:
+    AnimFsmAddParameterCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                               ::Orange::Editor::AnimFsm::EditableParameter parameter);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_add_parameter"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    ::Orange::Editor::AnimFsm::EditableParameter         mParameter;
+};
+
+class AnimFsmDeleteParameterCommand : public ICommand
+{
+public:
+    AnimFsmDeleteParameterCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                                  std::size_t parameterIndex);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_delete_parameter"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::size_t                                          mIndex;
+    ::Orange::Editor::AnimFsm::EditableParameter         mSaved;
+    bool                                                 mWasValid{false};
+    // 删 parameter **不**级联引用的 condition —— 引用 dangling parameter
+    // 的 condition 运行时 evaluate 始终 false（no-fire），编辑器仍展示
+    // 让用户决定是否手动删
+};
+
+// 整 vector<EditableCondition> 覆盖式命令 —— Add / Delete / Edit 单条
+// condition 都通过构造 newConds 推送本命令实现。merge 暂不实现（Undo
+// 粒度按 transition 覆盖，与 Lumix 模式一致）。
+class AnimFsmSetTransitionConditionsCommand : public ICommand
+{
+public:
+    AnimFsmSetTransitionConditionsCommand(
+        Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+        std::size_t                                          transitionIndex,
+        std::vector<::Orange::Editor::AnimFsm::EditableCondition> oldConditions,
+        std::vector<::Orange::Editor::AnimFsm::EditableCondition> newConditions);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_set_transition_conditions"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin*       mpPlugin;
+    std::size_t                                                mIndex;
+    std::vector<::Orange::Editor::AnimFsm::EditableCondition>  mOldConditions;
+    std::vector<::Orange::Editor::AnimFsm::EditableCondition>  mNewConditions;
+};
+
 #endif  // ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H

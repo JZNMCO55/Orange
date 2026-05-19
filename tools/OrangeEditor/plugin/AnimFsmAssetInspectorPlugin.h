@@ -76,6 +76,11 @@ private:
     void DrawAddStatePopup(EditorHost& host);
     void DrawNodeContextPopup(EditorHost& host);
 
+    // c2-7-B 新增：Parameters 折叠段 + 选中 transition condition 编辑段
+    void DrawParametersSection(EditorHost& host);
+    void DrawSelectedTransitionSection(EditorHost& host);
+    void DrawAddParameterPopup(EditorHost& host);
+
     // ----- editing 状态 -----
     std::string                                     mEditingPath;
     ::Orange::Editor::AnimFsm::EditableStateMachine mEditingFsm;
@@ -104,6 +109,14 @@ private:
     // Rename popup：目标 state（右键触发时记录）+ 新名 buffer
     std::string mRenameTargetState;
     char        mRenameBuffer[64]{};
+
+    // ----- v0.7 c2-7-B: condition / parameter UI 状态 -----
+    // 用户当前正在编辑的 transition 在 mEditingFsm.transitions[] 内的 index；
+    // 未选时为 size_t(-1)。切换 .anim_fsm 文件 / 删除 transition 时重置。
+    std::size_t mSelectedTransitionIndex{static_cast<std::size_t>(-1)};
+    // Add Parameter popup 的输入 buffer
+    char mAddParameterBuffer[64]{};
+    int  mAddParameterTypeIdx{0};  // 0=Bool, 1=Int, 2=Float, 3=Trigger（与 ParameterType enum 对齐）
 };
 
 }  // namespace Orange::Editor::Plugin
