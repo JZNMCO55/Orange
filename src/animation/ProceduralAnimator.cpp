@@ -64,6 +64,26 @@ std::size_t ProceduralAnimator::ChannelCount() const noexcept
     return mChannels.size();
 }
 
+std::vector<std::string> ProceduralAnimator::ChannelNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(mChannels.size());
+    for (const auto& ch : mChannels)
+    {
+        if (ch) { names.push_back(ch->name); }
+    }
+    return names;
+}
+
+std::string_view ProceduralAnimator::ChannelNameAt(std::size_t index) const noexcept
+{
+    if (index >= mChannels.size() || !mChannels[index])
+    {
+        return {};
+    }
+    return mChannels[index]->name;
+}
+
 void ProceduralAnimator::ResetElapsed(float seconds) noexcept
 {
     mElapsedSeconds = seconds < 0.0f ? 0.0f : seconds;

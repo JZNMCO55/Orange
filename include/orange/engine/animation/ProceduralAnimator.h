@@ -90,6 +90,16 @@ public:
     float       ElapsedSeconds() const noexcept;
     std::size_t ChannelCount() const noexcept;
 
+    // v0.7 c4：列出已注册 channel 的 name 清单。返回值按注册顺序，供
+    // 编辑器 Inspector 的 Procedural Animator channel 配置面板枚举显示。
+    // by-value 返回避免暴露内部 vector<unique_ptr<IChannel>> 布局。
+    std::vector<std::string> ChannelNames() const;
+
+    // v0.7 c4：按 index 拿单条 channel 的 name（编辑器 UI 逐行渲染时
+    // 比 ChannelNames() 整 vector 拷贝更便宜）。越界返回空 string_view；
+    // 返回的 view 与 channel 对象生命周期同步。
+    std::string_view ChannelNameAt(std::size_t index) const noexcept;
+
     // 把 elapsed 拨回某个值。用于"重启 channel 时序"——典型场景：换状
     // 态时让 dissolve 从头开始。仅改 elapsed，不影响 channel 列表。
     void ResetElapsed(float seconds = 0.0f) noexcept;

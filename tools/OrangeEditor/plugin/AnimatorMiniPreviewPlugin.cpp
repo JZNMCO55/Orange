@@ -9,6 +9,7 @@
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/animation/IAnimator.h>
+#include <orange/engine/animation/ProceduralAnimator.h>
 
 #include <imgui.h>
 
@@ -130,6 +131,36 @@ void AnimatorMiniPreviewPlugin::ParseEnd(
     ImGui::TextDisabled("Backend: %.*s",
                         static_cast<int>(backendName.size()),
                         backendName.data());
+
+    // v0.7 c4：procedural backend 时显示 channel name 列表 + 占位说明。
+    // 完整 channel fn 编辑 UI 需要 Material UBO 通路 + channel 表达式 DSL（同
+    // ADR-005 condition DSL 同款问题：std::function 不可序列化），留 v1.x；
+    // c4 scope 是"channel name 浏览"（消费 ProceduralAnimator::ChannelNames
+    // 引擎扩展面）。
+    if (backendName == std::string_view{"procedural"})
+    {
+        auto* pProcedural = dynamic_cast<
+            Orange::Engine::Animation::ProceduralAnimator*>(pAc->animator.get());
+        if (pProcedural != nullptr)
+        {
+            const auto channelNames = pProcedural->ChannelNames();
+            ImGui::Spacing();
+            ImGui::TextDisabled("Channels (%zu):", channelNames.size());
+            if (channelNames.empty())
+            {
+                ImGui::BulletText("(no channels registered)");
+            }
+            else
+            {
+                for (const auto& n : channelNames)
+                {
+                    ImGui::BulletText("%s", n.c_str());
+                }
+            }
+            ImGui::TextDisabled("c4 scope：channel name 浏览（fn 配置 UI 需");
+            ImGui::TextDisabled(" Material UBO 通路落地 + channel DSL，留 v1.x）");
+        }
+    }
 }
 
 }  // namespace Orange::Editor::Plugin
