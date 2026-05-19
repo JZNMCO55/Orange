@@ -535,17 +535,20 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **Critical Path**：否
 
-### v0.9.5 · Schema dispatch 整骨（v0.8 c5 → v0.9 → v0.9.5）
+### v0.9.5 · Schema dispatch 整骨（v0.8 c5 → v0.9 → v0.9.5） ✅
 
 **触发**：v0.8 c5 自承诺留 v0.9；v0.9 完工评估后推延到本 patch milestone。
 
-**关键 deliverables**：
+**关键 deliverables**（2026-05-19 落地，c1–c4 commit 序列）：
 
-- 消除 `RegisterBuiltinSchemas.cpp` 的 `gpAssetContext` file-scope 单例
-- 扩 `PropertyDescriptor::GetFn / SetFn` 签名加 `const EditorAssetContext& ctx` 参数（或引入专门的 `AssetRefAccessor` 槽位避免污染所有非 AssetRef 字段）
-- 改 `SchemaInspector` dispatch 调用站点把 ctx 传到 lambda
-- 全 schema 注册 lambda（Renderable mesh/material 字段 + 其它 AssetRef）走 ctx 而非 gpAssetContext
-- 保留现有 SchemaInspector 视觉 / 行为不变，纯架构整骨
+- ✅ **AssetRefAccessor 专用槽位**（c1）—— `PropertyDescriptor` 加 `AssetRefGetFn / AssetRefSetFn`（带 `const EditorAssetContext&` 参数）+ `assetRefGet / assetRefSet` 字段，与既有 `get/set` 槽位并存
+- ✅ **SchemaInspector AssetRef case 双路径 dispatch**（c2）—— `useCtxAccessor` 分支判定：assetRefGet/Set 非空走新路径 + `MakeAssetRefFieldApply` 命令栈 replay；否则回退旧 get/set + `MakeFieldApply`（外部 plugin 兼容防御）
+- ✅ **内置 lambda 全数迁移 + 下架 gpAssetContext**（c3）—— `ComponentSchemaBuilder::FieldAssetRef` 改签名收新 accessor；Renderable mesh/material + Environment cubemap 共 6 个 lambda 改走 ctx 参数；`gpAssetContext` 静态指针 + `SetEditorAssetContextForSchema` setter + main.cpp 启动期注入 同步下架
+- ✅ **ADR-004 + acceptance-checklist**（c4）—— 选型决策（方案 B 专用槽位 vs 方案 A 扩全字段加 ctx）+ 升级到方案 A 的 trigger 条件 + 5 项编辑器手动验收回归项
+
+**与原描述的偏差**：原 deliverable 提两条候选（"扩 GetFn/SetFn 全字段加 ctx" vs "引入 AssetRefAccessor 槽位"），ADR-004 选定后者。理由：当前只有 AssetRef 一类需 ctx，方案 A 为"假设可能出现的扩展"提前付 40+ 站点改动成本不对称；方案 B 与 Lumix 模式一致（同栈参考引擎 setter 不带 editor ctx），未来升级到方案 A 仍可行（ADR-004 Notes 段记录升级路径）。
+
+**完工记录**：见 `docs/acceptance/editor-v0.9.5-acceptance-checklist.md`。ADR-004（Schema AssetRef accessor 选型）在本 milestone 完工同 commit 切 status: accepted。
 
 **前置**：v0.2.5（schema-first 基础）+ v0.9（无依赖，正交）
 
