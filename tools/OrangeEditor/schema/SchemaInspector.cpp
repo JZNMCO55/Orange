@@ -122,6 +122,34 @@ auto MakeFieldApply(EditorHost*                  pHost,
     };
 }
 
+// MakeFieldApply 的 AssetRef 变体：setter 多带 `const EditorAssetContext&`
+// 参数。命令 replay 时通过 capture 的 EditorHost* 拿到 `host.assets`，
+// 转交给新签名 setter。EditorAssetContext 与 EditorHost 同生命周期（host
+// 持有 EditorAssetContext 子结构），不会出现 dangling 引用；World 已置空
+// 走 nullptr 早退分支。
+template <typename T>
+auto MakeAssetRefFieldApply(EditorHost*                          pHost,
+                            Orange::Engine::Entity               entity,
+                            const ComponentSchema*               pSchema,
+                            PropertyDescriptor::AssetRefSetFn    setFn)
+{
+    return [pHost, entity, pSchema, setFn](const T& value)
+    {
+        if (pHost == nullptr || pSchema == nullptr || pSchema->get == nullptr
+            || setFn == nullptr)
+        {
+            return;
+        }
+        auto* pWorld = pHost->scene.pWorld.get();
+        if (pWorld == nullptr) { return; }
+        void* component = pSchema->get(*pWorld, entity);
+        if (component != nullptr)
+        {
+            setFn(component, pHost->assets, &value);
+        }
+    };
+}
+
 // 单个 property 的 ImGui 控件渲染 + 命令推送。**调用前提**：caller 已在
 // PropertyTable 内（Widgets::BeginPropertyTable 已 return true），DrawProperty
 // 内通过 Widgets::PropertyLabel 写左列 label + 触发右列 SetNextItemWidth
@@ -427,8 +455,59 @@ void DrawProperty(EditorHost&                  host,
             // 全路径走 hover tooltip（Inspector 右列宽有限），与 c1 显示
             // 风格一致。所有写入路径都 Push SetFieldValueCommand<std::string>
             // 让 Ctrl+Z / Ctrl+Y 与其他字段同款 undo / redo。
+            //
+            // v0.9.5 c2：双路径 dispatch —— `assetRefGet/Set` 非空时走带
+            // `const EditorAssetContext&` 的新 accessor（c3 完成迁移后这是
+            // 主路径）；否则走旧 `get/set`（兼容期防御，c3 完工后无内置
+            // schema 再走该分支）。Undo/Redo replay 的 apply lambda 相应
+            // 切换 MakeAssetRefFieldApply / MakeFieldApply。
+            const bool useCtxAccessor = (prop.assetRefGet != nullptr)
+                                     || (prop.assetRefSet != nullptr);
+            const bool canRead  = useCtxAccessor ? (prop.assetRefGet != nullptr)
+                                                  : (prop.get != nullptr);
+            const bool canWrite = useCtxAccessor ? (prop.assetRefSet != nullptr)
+                                                  : (prop.set != nullptr);
+            auto readPath = [&](std::string& out)
+            {
+                if (useCtxAccessor)
+                {
+                    if (prop.assetRefGet != nullptr)
+                    {
+                        prop.assetRefGet(component, host.assets, &out);
+                    }
+                }
+                else if (prop.get != nullptr)
+                {
+                    prop.get(component, &out);
+                }
+            };
+            auto writePath = [&](const std::string& v)
+            {
+                if (useCtxAccessor)
+                {
+                    if (prop.assetRefSet != nullptr)
+                    {
+                        prop.assetRefSet(component, host.assets, &v);
+                    }
+                }
+                else if (prop.set != nullptr)
+                {
+                    prop.set(component, &v);
+                }
+            };
+            auto makeApply = [&]() -> SetFieldValueCommand<std::string>::ApplyFn
+            {
+                if (useCtxAccessor)
+                {
+                    return MakeAssetRefFieldApply<std::string>(
+                        &host, entity, &schema, prop.assetRefSet);
+                }
+                return MakeFieldApply<std::string>(
+                    &host, entity, &schema, prop.set);
+            };
+
             std::string curPath;
-            if (prop.get != nullptr) { prop.get(component, &curPath); }
+            if (canRead) { readPath(curPath); }
             const std::string oldPath = curPath;
 
             // 显示当前 path 短名 / "(none)"。Selectable 让本段成为 DnD
@@ -479,14 +558,12 @@ void DrawProperty(EditorHost&                  host,
                 {
                     const char* pData = static_cast<const char*>(payload->Data);
                     std::string newPath{pData};
-                    if (newPath != oldPath && prop.set != nullptr)
+                    if (newPath != oldPath && canWrite)
                     {
-                        prop.set(component, &newPath);
+                        writePath(newPath);
                         host.cmdStack.Push(
                             std::make_unique<SetFieldValueCommand<std::string>>(
-                                entity, fieldKey, oldPath, newPath,
-                                MakeFieldApply<std::string>(&host, entity,
-                                                            &schema, prop.set)));
+                                entity, fieldKey, oldPath, newPath, makeApply()));
                     }
                 }
                 ImGui::EndDragDropTarget();
@@ -496,18 +573,16 @@ void DrawProperty(EditorHost&                  host,
             // U+00D7 切到 ICON_CI_CLOSE，与 LayersPanel "X" remove 按钮
             // 同款 icon 视觉。
             ImGui::SameLine();
-            ImGui::BeginDisabled(curPath.empty() || prop.set == nullptr);
+            ImGui::BeginDisabled(curPath.empty() || !canWrite);
             const std::string clearBtnLabel =
                 std::string(Orange::Editor::Theme::Icon::GetClose()) + "##clear";
             if (ImGui::SmallButton(clearBtnLabel.c_str()))
             {
                 std::string newPath;  // empty
-                prop.set(component, &newPath);
+                writePath(newPath);
                 host.cmdStack.Push(
                     std::make_unique<SetFieldValueCommand<std::string>>(
-                        entity, fieldKey, oldPath, newPath,
-                        MakeFieldApply<std::string>(&host, entity,
-                                                    &schema, prop.set)));
+                        entity, fieldKey, oldPath, newPath, makeApply()));
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -521,7 +596,7 @@ void DrawProperty(EditorHost&                  host,
             const std::string& browserSel = host.assets.selectedAssetPath;
             const bool pickEnabled = !browserSel.empty()
                                   && browserSel != oldPath
-                                  && prop.set != nullptr;
+                                  && canWrite;
             ImGui::SameLine();
             ImGui::BeginDisabled(!pickEnabled);
             const std::string pickBtnLabel =
@@ -529,12 +604,10 @@ void DrawProperty(EditorHost&                  host,
             if (ImGui::SmallButton(pickBtnLabel.c_str()))
             {
                 std::string newPath = browserSel;
-                prop.set(component, &newPath);
+                writePath(newPath);
                 host.cmdStack.Push(
                     std::make_unique<SetFieldValueCommand<std::string>>(
-                        entity, fieldKey, oldPath, newPath,
-                        MakeFieldApply<std::string>(&host, entity,
-                                                    &schema, prop.set)));
+                        entity, fieldKey, oldPath, newPath, makeApply()));
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -704,8 +777,15 @@ void DrawComponentSchemaSection(EditorHost&                  host,
                     ++segIdx;
                 }
 
-                if (prop.get == nullptr) { continue; }
-                if (prop.set == nullptr && !prop.attribs.readOnly) { continue; }
+                // get / set 双源：AssetRef 走 assetRefGet/Set，其他 PropertyType
+                // 走 get/set。任一来源非空即视为字段可显示 / 可写入。readOnly
+                // 字段的写检查仍只看主路径（AssetRef readOnly 当前没用例）。
+                const bool hasGet = (prop.get != nullptr)
+                                 || (prop.assetRefGet != nullptr);
+                const bool hasSet = (prop.set != nullptr)
+                                 || (prop.assetRefSet != nullptr);
+                if (!hasGet) { continue; }
+                if (!hasSet && !prop.attribs.readOnly) { continue; }
 
                 if (!ensureTable()) { continue; }
 
