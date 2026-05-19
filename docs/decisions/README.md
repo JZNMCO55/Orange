@@ -74,3 +74,4 @@ ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。
 |----|------|------|------|
 | [ADR-001](ADR-001-editor-schema-first-and-no-hardcode.md) | OrangeEditor 转向 schema-first 架构 + 全局禁止 hardcode | accepted | 2026-05-12 |
 | [ADR-002](ADR-002-editor-visual-system.md) | OrangeEditor 视觉体系决策（EditorTheme token + Cocos 灰 + 橙 accent + Codicons + 4px 色带） | accepted | 2026-05-17 |
+| [ADR-003](ADR-003-profiler-backend-selection.md) | OrangeEditor v0.9 Profiler 后端选型 —— 自实现 AutoProfile RAII（暂不接 Tracy） | proposed | 2026-05-19 |
