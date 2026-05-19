@@ -8,12 +8,14 @@
 //
 // 落地范围（c2 sub-commit 拆分）：
 //   * c2-3：plugin 链路 + .anim_fsm round-trip（States / Transitions 表格）
-//   * c2-4（本 commit）：节点图 ImGui 自绘（节点矩形 + label + 选中 +
-//     拖动）。仿 Lumix `imgui_user.inl` 的 ImDrawList::AddRectFilled +
-//     IsMouseDragging(0) + GetIO().MouseDelta 模式；零 third-party 依
-//     赖。拖动只改 in-memory editing 副本，**不**落盘 / **不**走 Undo
-//     —— Save + 命令栈在 c2-5 落地
-//   * c2-5：节点交互 + 命令栈（Add / Delete / Rename / Move + Save）
+//   * c2-4：节点图 ImGui 自绘（节点矩形 + 选中 + 拖动）
+//   * c2-5（本 commit）：节点交互 + 命令栈 + Save
+//     - 命令类型：AnimFsm{Add,Delete,Rename,Move}StateCommand
+//     - 右键空白 popup：Add State
+//     - 右键节点 popup：Delete / Rename
+//     - 拖动结束时 push MoveStateCommand（拖动期间走 in-memory delta 不入栈）
+//     - Save 按钮：dirty 时启用，WriteAnimFsmFile 写回 + 清 dirty
+//     - 切 .anim_fsm 文件时 host.cmdStack.Clear()（与切 Scene 同款纪律）
 //   * c2-6：边绘制 + transition 创建删除
 //   * c2-7：Condition DSL 编辑（依赖 ADR-005 决策）
 //   * c2-8：Initial state 标记
@@ -34,31 +36,74 @@ public:
     // 按 path 末尾 ".anim_fsm" 后缀比较匹配。空 / 短 path 返回 false。
     bool CanHandle(const std::string& assetPath) const override;
 
-    // 接管 Inspector 整段：path 头部 + 统计行 + 节点图 canvas + 折叠
-    // States/Transitions 表格 + 底部 scope 提示。
+    // 接管 Inspector 整段。详见 .cpp 内 Draw 实现。
     void Draw(EditorHost& host, const std::string& assetPath) override;
 
+    // ---- 命令访问入口（c2-5 起，AnimFsmCommands.cpp 调用） ----
+    //
+    // 命令类不是 plugin friend；通过暴露 mutation 入口接口直接操作 editing
+    // 副本。dirty 字段由命令 Execute / Undo 显式 MarkDirty 标，Save 路径
+    // ClearDirty。
+    ::Orange::Editor::AnimFsm::EditableStateMachine&       GetEditingFsm() noexcept       { return mEditingFsm; }
+    const ::Orange::Editor::AnimFsm::EditableStateMachine& GetEditingFsm() const noexcept { return mEditingFsm; }
+
+    void MarkDirty() noexcept   { mDirty = true; }
+    bool IsDirty() const noexcept { return mDirty; }
+
+    // 命令操作如果同时改变了选中状态（Rename / Delete 后），plugin 选中
+    // 字段必须联动 —— 命令调用以保持 UI 一致。
+    const std::string& GetSelectedStateName() const noexcept { return mSelectedStateName; }
+    void               SetSelectedStateName(std::string name) { mSelectedStateName = std::move(name); }
+
 private:
-    // editing 副本与 assetPath 不一致时从盘 reload；不一致时 mSelected
-    // StateName 同步清空。reload 失败 → mEditingValid = false。
-    void EnsureEditingCache(const std::string& assetPath);
+    // editing 副本与 assetPath 不一致时从盘 reload + Clear 命令栈；reload
+    // 失败 → mEditingValid = false。
+    void EnsureEditingCache(EditorHost& host, const std::string& assetPath);
 
-    // 在 ImGui 当前布局位置开 child window 画节点 canvas。节点位置走
-    // mEditingFsm.states[i].layoutX/Y（in-memory，拖动直接改副本，不落盘）。
-    void DrawCanvas();
+    // 把 mEditingFsm 写回 mEditingPath 指向的文件；成功后 mDirty = false。
+    void SaveToDisk();
 
-    // 折叠区：States / Transitions 表格（c2-3 落地的展示路径保留，作为
-    // 节点图之外的"数据视角"辅助检查）。
+    // canvas 节点图绘制 + 鼠标交互（拖动 / 选中 / 右键 popup 触发）。
+    // 命令 push 走 host.cmdStack。
+    void DrawCanvas(EditorHost& host);
+
+    // 折叠区：States / Transitions 表格。
     void DrawTables() const;
 
-    // editing 副本 —— 切 .anim_fsm 文件时 reload，拖动 layout 时就地改
+    // 右键 popup 路径（c2-5）：
+    // - Add State popup 由 canvas 空白处右键触发
+    // - Rename / Delete popup 由节点右键触发
+    void DrawAddStatePopup(EditorHost& host);
+    void DrawNodeContextPopup(EditorHost& host);
+
+    // ----- editing 状态 -----
     std::string                                     mEditingPath;
     ::Orange::Editor::AnimFsm::EditableStateMachine mEditingFsm;
     bool                                            mEditingValid{false};
+    bool                                            mDirty{false};
 
-    // 选中的 state name；空 string = 未选中。多选留 c2-5（与项目"先单
-    // 选再扩多选"惯例一致；v0.8 多选实体也走同款节奏）。
+    // ----- 选中 -----
     std::string mSelectedStateName;
+
+    // ----- 拖动跟踪（per-frame）-----
+    // 鼠标按下瞬间记录 mDraggingStateName + initialX/Y；松手（IsItemDeactivated）
+    // 时 push MoveStateCommand(initialX/Y, currentX/Y) + 清空 mDraggingStateName。
+    // 拖动**期间**已直接修改 state.layoutX/Y（in-memory delta），不入命令栈。
+    std::string mDraggingStateName;
+    float       mDragInitialX{0.0f};
+    float       mDragInitialY{0.0f};
+
+    // ----- popup buffers -----
+    // Add State popup：用户输入的 state name 编辑 buffer + 触发时鼠标位
+    // 置（canvas 内坐标，作为新节点的默认 layout）。**独立**于 mDragInitial
+    // 字段——后者只服务节点拖动跟踪，混用会在 popup 打开期间被节点 Activated
+    // 路径覆盖。
+    char  mAddStateBuffer[64]{};
+    float mPopupSpawnX{0.0f};
+    float mPopupSpawnY{0.0f};
+    // Rename popup：目标 state（右键触发时记录）+ 新名 buffer
+    std::string mRenameTargetState;
+    char        mRenameBuffer[64]{};
 };
 
 }  // namespace Orange::Editor::Plugin

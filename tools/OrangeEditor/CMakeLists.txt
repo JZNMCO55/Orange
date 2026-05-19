@@ -155,6 +155,7 @@ add_executable(OrangeEditor
     panels/LayersPanel.cpp
     panels/ScenePanel.cpp
     panels/ToolbarPanel.cpp
+    command/AnimFsmCommands.cpp
     command/CommandStack.cpp
     command/EntityCommands.cpp
     schema/ComponentSchemaRegistry.cpp

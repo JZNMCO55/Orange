@@ -1,0 +1,128 @@
+#ifndef ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H
+#define ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H
+
+// AnimFsm 子模式命令集（v0.7 c2-5 落地）。
+//
+// 与 EntityCommands 的纪律差异：本组命令操作 plugin 内部的 in-memory
+// EditableStateMachine 副本，不操作 World / Entity。命令存 plugin 弱
+// 引用 —— plugin 由 EditorHost.assetInspectorPlugins 持有，与 CommandStack
+// 同生命周期；析构顺序 plugin 先 / CommandStack 后，但 CommandStack 析
+// 构不调 Undo，dangling pointer 永不被访问，安全。
+//
+// 切 .anim_fsm 文件时（plugin::EnsureEditingCache reload）需要 Clear
+// 全局命令栈 —— 旧文件的命令在新 fsm 上 Undo 会乱跑（state name 命中
+// 错位）。这与切场景同款节奏：与 EditorSceneContext::pWorld swap 时
+// CommandStack::Clear() 的设计意图一致。
+//
+// 命令清单：
+//   * AnimFsmAddStateCommand    —— 追加 state；空 fsm 时自动设为
+//                                  initialState
+//   * AnimFsmDeleteStateCommand —— 删 state + 级联删所有相关 transitions
+//                                  + 清 initialState（如有）
+//   * AnimFsmRenameStateCommand —— 改 state.name + 联动 transitions /
+//                                  initialState；连续 rename 同一 state
+//                                  合并为单条 Undo（Merge 路径）
+//   * AnimFsmMoveStateCommand   —— 改 state.layoutX/Y；同 state 连续拖
+//                                  动合并为单条 Undo（Merge 路径）
+
+#include "../AnimFsmModel.h"
+#include "ICommand.h"
+
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace Orange::Editor::Plugin
+{
+class AnimFsmAssetInspectorPlugin;
+}
+
+class AnimFsmAddStateCommand : public ICommand
+{
+public:
+    AnimFsmAddStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                           std::string stateName,
+                           float       layoutX,
+                           float       layoutY);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_add_state"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::string                                          mStateName;
+    float                                                mLayoutX;
+    float                                                mLayoutY;
+    // Execute 时如果 fsm 之前为空 → 顺手把 initialState 设为本 state；
+    // Undo 时按本字段恢复（true 才清空，避免误清其它命令设的 initial）
+    bool mDidSetInitialState{false};
+};
+
+class AnimFsmDeleteStateCommand : public ICommand
+{
+public:
+    AnimFsmDeleteStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                              std::string stateName);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_delete_state"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::string                                          mStateName;
+
+    // Undo 用快照：删除前的 state 副本 + 与本 state 相关的所有 transitions
+    // + 在原 transitions[] 内的 index（恢复时按原序插回）。initialState
+    // 是否被本命令清空也记录。
+    ::Orange::Editor::AnimFsm::EditableState                      mSavedState;
+    std::vector<::Orange::Editor::AnimFsm::EditableTransition>    mSavedTransitions;
+    std::vector<std::size_t>                                      mSavedTransitionIndices;
+    std::size_t                                                   mSavedStateIndex{0};
+    bool                                                          mWasInitialState{false};
+};
+
+class AnimFsmRenameStateCommand : public ICommand
+{
+public:
+    AnimFsmRenameStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                              std::string oldName,
+                              std::string newName);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_rename_state"; }
+    bool        Merge(ICommand& newer) override;
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::string                                          mOldName;
+    std::string                                          mNewName;
+};
+
+class AnimFsmMoveStateCommand : public ICommand
+{
+public:
+    AnimFsmMoveStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                            std::string stateName,
+                            float       oldX,
+                            float       oldY,
+                            float       newX,
+                            float       newY);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_move_state"; }
+    bool        Merge(ICommand& newer) override;
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::string                                          mStateName;
+    float                                                mOldX;
+    float                                                mOldY;
+    float                                                mNewX;
+    float                                                mNewY;
+};
+
+#endif  // ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H
