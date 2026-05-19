@@ -79,6 +79,7 @@
 #include "plugin/AnimatorMiniPreviewPlugin.h"
 #include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
+#include "plugin/MaterialAssetInspectorPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
@@ -544,6 +545,13 @@ int main()
     // push_back 在此排队即可。
     editorHost.inspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::AnimatorMiniPreviewPlugin>());
+
+    // 注册第一个 IEditorAssetInspectorPlugin —— v0.7 c0 落地（消除 L16）。
+    // 当 Asset 浏览器选中 .material 文件时接管 Inspector 整段；与
+    // inspectorPlugins 正交（按选中资源类型而非 component schema 分派）。
+    // v0.7 c2 Animation 子模式 plugin 落地后作为第二条 push_back。
+    editorHost.assetInspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::MaterialAssetInspectorPlugin>());
 
     // 注册首批 IEditorGizmoPlugin —— v0.4 c4 落地（v0.2.5 c12 抽象首批
     // 真实消费）。Light 方向箭头 + ParticleEmitter spawn box / velocity

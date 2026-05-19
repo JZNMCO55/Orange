@@ -163,6 +163,7 @@ add_executable(OrangeEditor
     plugin/AnimatorMiniPreviewPlugin.cpp
     plugin/CameraFrustumGizmoPlugin.cpp
     plugin/DirectionalLightGizmoPlugin.cpp
+    plugin/MaterialAssetInspectorPlugin.cpp
     plugin/ParticleEmitterGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
     branding/EditorWindowIcon.cpp
