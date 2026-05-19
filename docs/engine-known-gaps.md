@@ -1206,6 +1206,103 @@ GAP 原文里 (a) "AssetRef 控件无 drag-drop / picker" **认知偏差**：v0.
 
 ---
 
+## GAP-2026-05-19-editor-aux-passes-in-engine-pipeline
+
+- **发现方**：OrangeEditor v0.8.5 ca0f112 commit 自审 + 跨仓 review
+- **发现日期**：2026-05-19
+- **一句话定性**：编辑器视觉辅助 pass / 编辑器审美默认值塞进 engine 公共 `Pipeline`，违反 "engine 不持游戏 / 编辑器审美决定" 中性原则；将来游戏侧 `find_package(OrangeEngine)` 消费时会带上整套 "Cocos 风默认观感"
+
+### 触发场景
+
+`ca0f112`（v0.8.5 编辑器视觉真实感整骨）为快速串通编辑器 viewport 观感，将三类"编辑器审美"加进 engine `Pipeline`：
+
+1. **viewport grid pass**：`Pipeline::SetEditorGridEnabled` 公共 API + `grid.frag.glsl` 内置 shader + sceneDepth 比较 + ShaderReadOnly layout 翻转——`Pipeline` 公共面命名已标 `EditorGrid`，但 pass infra（descriptor pool / set layout / pipeline / render attachment 切换）仍在 engine 端编译进引擎，shipping 二进制也带这套
+2. **dummy IBL ambient 默认值** (0.25, 0.25, 0.25)：原 (0, 0, 0) → 0.25 灰；选择"Cocos / Unity URP 默认 ambient 量级"是编辑器审美决定，不是引擎中性默认
+3. **viewport clear color** 默认值：原 (0.05, 0.07, 0.10) 深蓝 → (0.12, 0.12, 0.13) 中性灰；同上属编辑器审美
+
+引擎纪律对照：
+- CLAUDE.md "Game-specific concepts forbidden in engine" 段精神类似——审美决定属游戏侧 / 编辑器侧 / 工具链侧，引擎只提原子能力
+- 当前破口是"sky-dome pass 真属引擎共用（游戏运行时也消费 procedural sky）"+ "grid pass 严格属编辑器" 两条混在同一 commit，sky 留 engine 对、grid 留 engine 错——但拆开需要架构动作
+
+### 缺什么（按依赖拆）
+
+#### G1 · `IEditorAuxPass` 钩子或 `EditorRenderLayer` 自管 pass
+
+候选方案：
+
+1. **engine 提供 pass 钩子**：`Pipeline::SetAuxPassProvider(IAuxPassProvider*)`，让 editor 端实现 grid pass。引擎只保留 hook 与 sceneDepth + colorTarget 共享通路，不知道具体 pass 内容
+2. **editor 端自管完整 grid pipeline**：`tools/OrangeEditor/EditorRenderLayer.cpp` 自建 fullscreen quad pass，把 `Pipeline` 输出的 colorTarget 作为 input + 自管 sceneDepth shared resource。要求引擎暴露 colorTarget / sceneDepth 的 `RHITexture*` view + 当前 layout state
+3. **编译期 gate**：`ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option，shipping 构建剔除整套——简单但耦合解不掉，仅遮蔽
+
+#### G2 · 默认值口径
+
+- dummy IBL ambient = 0.25 灰 / clear color = 中性灰：要么搬到 `EditorRenderLayer` 启动期写入 `Pipeline::SetAmbient(...)` / `Pipeline::SetClearColor(...)` 公共面，引擎 `Pipeline` 默认全 0；要么挂 `Pipeline::SetEngineProfile(EngineProfile::Editor / Game)` enum，profile 决定默认（架构更重，慎用）
+
+### 期望验收
+
+- engine `Pipeline` 公共头 grep 不到 "grid" / "EditorGrid" 字样（钩子方案接受 `IAuxPassProvider` 命名）
+- shipping 构建（无 EditorRenderLayer 链接）不携带 grid shader / grid descriptor pool / grid pipeline 任何 GPU 资源
+- editor 端仍正确显示 grid（视觉行为不变）
+
+### 状态
+
+- **登记**：2026-05-19（v0.8.5 milestone ✅ 时显式登记，作为已知归属债）
+- **处理**：未启动；预估 1 个独立 session 体量（推荐方案 1 + G2 搬到 editor 端写入）
+- **关联**：editor-roadmap v0.8.5（落地源头）；engine 公共 API 中性化原则
+- **归属**：未拍板分配到具体 Phase；候选 Phase 7 / v1.0 验收前
+
+---
+
+## GAP-2026-05-19-pbr-push-constant-exceeds-spec-min
+
+- **发现方**：跨仓 review（Phase 6.5 PBR + IBL milestone retro）
+- **发现日期**：2026-05-19
+- **一句话定性**：内置 `pbr.vert.glsl` push constant 总 160 B 超过 Vulkan 规范保证下限 `maxPushConstantsSize >= 128B`；桌面 GPU 普遍 256 B 不触发，但移动 / 老 Intel iGPU 会 vkCreatePipelineLayout fail —— 长期方案是切 per-instance material UBO
+
+### 触发场景
+
+`src/render/builtin_shaders/pbr.vert.glsl:32-37`：
+
+```
+mat4 uMVP    //  64
+mat4 uModel  //  64
+vec4 uBaseColor  //  16
+vec4 uMRA        //  16
+                = 160 B
+```
+
+`BuiltinMaterials::LoadPbr` 注释（`src/render/BuiltinMaterials.cpp:212-218`）已自承"在所有桌面级 GPU 的 maxPushConstantsSize（普遍 256 B）以内"，但**未在运行时 assert 验证**。本期顺手在 `Pipeline::SetupRhiResources` 加 init-time `device.GetCapabilities().mLimits.mMaxPushConstantsSize` 校验：< 160 B 时日志告警（不阻塞启动，允许其他材质路径继续；PBR 渲染会在 vkCreatePipelineLayout / vkCmdPushConstants 处自然 fail）。
+
+### 缺什么（按依赖拆）
+
+#### G1 · 长期：per-instance material UBO 路径
+
+- 切 `set 1 binding 0` per-instance UBO 携带 (uBaseColor, uMRA, ...)；push constant 缩回 {uMVP, uModel} 128 B
+- 依赖：`OrangeRender` 的 per-frame / per-instance descriptor set 重绑成本可接受（vkCmdBindDescriptorSets 调用频率上升）
+- 同时支持 PushConstantRange multi-stage（fragment 直接读 push constant），二选一
+
+#### G2 · 中期：runtime fallback
+
+- 若设备 maxPushConstantsSize < 160 B，PBR pipeline 创建失败时退到 non-PBR `default.material`（textured 棋盘）+ ORANGE_LOG_WARN 一次性提示
+
+#### G3 · 短期（本 GAP 登记同 session 已落）
+
+- `Pipeline::SetupRhiResources` 加 init-time `mMaxPushConstantsSize >= 160` 校验 + 日志告警
+
+### 期望验收
+
+- 桌面 NVIDIA / AMD / Intel discrete GPU：启动期日志无告警
+- 模拟 maxPushConstantsSize = 128 B 设备（VK_LAYER_LUNARG_device_simulation 或类似）：启动期日志出现 `ORANGE_LOG_WARN("Pipeline: device maxPushConstantsSize=128 < 160B required by PBR material...")` 一次，非 PBR sample (`01_minimal_window`) 仍能跑
+
+### 状态
+
+- **登记**：2026-05-19
+- **处理**：G3 已落（与本 GAP 登记同 session，例外于"登记 ≠ 同 session 实现"惯例，原因：单点 init-time 校验体量过小且阻塞 review 闭环）；G1 / G2 未启动
+- **关联**：Phase 6.5 PBR + IBL milestone；OrangeRender 未来"per-instance material UBO infra"或"multi-stage PushConstantRange"路径
+- **归属**：G1 候选 Phase 10 渲染深化（per-instance material UBO 基础设施）；G2 候选 Phase 7+ 移动端 / iGPU 测试 trigger
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-19-pbr-ibl-specular-quality**（2026-05-19 落地）：multi-scatter compensation (Fdez-Aguero 2019 / Filament `light_indirect.fs` 同款 `1 + F0·(1/brdf.y - 1)`) 接到 PBR shader IBL specular 段 + `BakePrefilteredEnvironment` sampleCount 1024 → 4096；顺路修 BUG-2026-05-18-vma-shutdown OE 端漏 reset baked IBL 三件套。视觉 furnace 9 球阵接近全白；HDR 中 roughness 段密集白方块大幅消失；顶行右 metallic=1 r=0.9 不再偏暗。详细见上文条目末尾"落地记录"节。关键改动文件：`src/render/builtin_shaders/pbr.frag.glsl` / `src/render/Pipeline.cpp` / `samples/14_pbr_ibl/main.cpp`（--capture / --exit-after flag 无人值守视觉验收路径）
