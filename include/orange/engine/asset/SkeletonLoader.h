@@ -38,6 +38,15 @@ public:
     // ctx 必须在 loader 整个生命周期内可用——通常由游戏侧 / AppHost 持
     // 共享的 DragonBonesContext，把引用传进来即可。loader 不持所有权。
     explicit SkeletonLoader(Orange::Engine::Animation::DragonBonesBackend::DragonBonesContext& ctx) noexcept;
+
+    // v0.7 c3：无参 ctor —— loader 内部自管一个 DragonBonesContext
+    // unique_ptr。适合"调用方不关心 context 生命周期 / 单 World 单 loader
+    // 简单消费"场景（如 OrangeEditor 通过 public API 注册 SkeletonLoader
+    // 时无法直接构造 DragonBonesContext，因后者头位于 src/ 不在公共面）。
+    // 复杂场景（多 World 共享 context / 自定义 event dispatcher）仍走带
+    // ctx 参数 ctor。
+    SkeletonLoader();
+
     ~SkeletonLoader() override;
 
     // 路径以扩展名识别格式：".json" / ".dbjson" → JSON 文本；".dbbin" →
@@ -46,7 +55,12 @@ public:
     Result<std::unique_ptr<SkeletonAsset>, ResultCode> Load(std::string_view path) override;
 
 private:
-    Orange::Engine::Animation::DragonBonesBackend::DragonBonesContext* mpContext{nullptr};
+    Orange::Engine::Animation::DragonBonesBackend::DragonBonesContext*                  mpContext{nullptr};
+    // 仅无参 ctor 路径持有；带 ctx 参数 ctor 不动这个字段（保持原"loader
+    // 不持所有权"语义）。声明顺序 = 析构顺序：mpOwnedContext 析构发生在
+    // ~SkeletonLoader（dtor 显式实现在 .cpp 让 forward declared
+    // DragonBonesContext 的 unique_ptr 能编出 deleter）。
+    std::unique_ptr<Orange::Engine::Animation::DragonBonesBackend::DragonBonesContext>  mpOwnedContext;
 };
 
 }  // namespace Orange::Engine::Asset

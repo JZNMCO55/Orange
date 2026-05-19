@@ -164,6 +164,7 @@ add_executable(OrangeEditor
     theme/EditorTheme.cpp
     plugin/AnimFsmAssetInspectorPlugin.cpp
     plugin/AnimatorMiniPreviewPlugin.cpp
+    plugin/DragonBonesAssetInspectorPlugin.cpp
     plugin/CameraFrustumGizmoPlugin.cpp
     plugin/DirectionalLightGizmoPlugin.cpp
     plugin/MaterialAssetInspectorPlugin.cpp

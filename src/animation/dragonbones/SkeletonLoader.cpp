@@ -135,6 +135,20 @@ SkeletonLoader::SkeletonLoader(DBB::DragonBonesContext& ctx) noexcept
 {
 }
 
+// v0.7 c3：无参 ctor —— loader 内部自管 DragonBonesContext。让 OrangeEditor
+// 等 public-API-only 消费方可直接 std::make_unique<SkeletonLoader>() 注
+// 册 loader，不需要先 instantiate DragonBonesContext（其头位于 src/ 不在
+// 公共面，public consumer 无法构造）。
+SkeletonLoader::SkeletonLoader()
+    : mpOwnedContext(std::make_unique<DBB::DragonBonesContext>())
+{
+    mpContext = mpOwnedContext.get();
+}
+
+// dtor 显式实现在 .cpp 让 forward declared DragonBonesContext 的
+// unique_ptr deleter 可正确链接。原本 = default 在 .h 内会失败（incomplete
+// type）；本仓 SkeletonLoader.h 用 forward declaration 不 include
+// DragonBonesContext.h 是必要的（防止 dragonBones 类型穿透公共面）。
 SkeletonLoader::~SkeletonLoader() = default;
 
 Result<std::unique_ptr<SkeletonAsset>, ResultCode> SkeletonLoader::Load(std::string_view path)

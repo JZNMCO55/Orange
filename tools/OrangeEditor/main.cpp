@@ -80,6 +80,7 @@
 #include "plugin/AnimatorMiniPreviewPlugin.h"
 #include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
+#include "plugin/DragonBonesAssetInspectorPlugin.h"
 #include "plugin/MaterialAssetInspectorPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
@@ -559,6 +560,12 @@ int main()
     // DSL 在 c2-3 ~ c2-6 逐步展开。
     editorHost.assetInspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin>());
+
+    // v0.7 c3：第三条 IEditorAssetInspectorPlugin —— 选中 DragonBones
+    // skeleton 资源（_ske.json / _ske.dbbin）时接管 Inspector，显示
+    // dragonBonesName + 每个 armature 的 bone / animation metadata。
+    editorHost.assetInspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::DragonBonesAssetInspectorPlugin>());
 
     // 注册首批 IEditorGizmoPlugin —— v0.4 c4 落地（v0.2.5 c12 抽象首批
     // 真实消费）。Light 方向箭头 + ParticleEmitter spawn box / velocity

@@ -13,6 +13,8 @@
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
+#include <orange/engine/asset/SkeletonAsset.h>
+#include <orange/engine/asset/SkeletonLoader.h>
 #include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/asset/TextureLoader.h>
 #include <orange/engine/core/Serialization.h>
@@ -238,6 +240,22 @@ void InitializeEditorAssets(EditorHost& host)
     {
         std::fprintf(stderr,
                      "[OrangeEditor] AssetRegistry::RegisterLoader<TextureAsset> 失败 "
+                     "(code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+    }
+
+    // v0.7 c3：注册 SkeletonLoader 让 DragonBonesAssetInspectorPlugin
+    // 可加载 _ske.json / _ske.dbbin 资源浏览 metadata。无参 ctor 内部
+    // 自管 DragonBonesContext（c3 同 commit 落地的公共面扩展），公共
+    // consumer 不需关心 context 生命周期。
+    using Orange::Engine::Asset::SkeletonAsset;
+    using Orange::Engine::Asset::SkeletonLoader;
+    if (auto reg = host.assets.pAssets->RegisterLoader<SkeletonAsset>(
+            std::make_unique<SkeletonLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "[OrangeEditor] AssetRegistry::RegisterLoader<SkeletonAsset> 失败 "
                      "(code=%u)\n",
                      static_cast<unsigned>(reg.Error()));
     }
