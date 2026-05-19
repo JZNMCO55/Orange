@@ -14,6 +14,8 @@
 #include "../schema/ComponentSchemaRegistry.h"
 
 #include <orange/engine/render/BuiltinPostProcessChain.h>
+#include <orange/engine/render/DebugDrawScene.h>
+#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
 #include <orange/rhi/RHITexture.h>
@@ -31,8 +33,11 @@
 // v0.8 EditorSettings 整骨 milestone 若要在重启间保留，再迁移到 settings。
 // Grid 默认开（地面参考线对编辑器主战场最有用）；Sky 默认开（cubemap 未烘焙
 // 时 Pipeline 内部 fallback 到原 clear color，开关也不会让 viewport 黑屏）。
-static bool sViewportGridEnabled = true;
-static bool sViewportSkyEnabled  = true;
+// Debug Draw 默认关 —— 是 opt-in 的 v0.9 调试工具，普通编辑器用户大多数
+// 时间不需要，开启后才会画原点坐标轴 + selected entity 位置 sphere。
+static bool sViewportGridEnabled      = true;
+static bool sViewportSkyEnabled       = true;
+static bool sViewportDebugDrawEnabled = false;
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -78,6 +83,15 @@ void EditorRenderLayer::DrawScenePanel()
     {
         ImGui::SetTooltip("天空盒背景（采 EnvironmentComponent.cubemap）\n"
                           "未挂 EnvironmentComponent / cubemap 未烘焙 → 显示深蓝灰 fallback");
+    }
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Debug Draw", &sViewportDebugDrawEnabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("v0.9 调试几何 overlay：原点坐标轴 + selected entity 位置 sphere\n"
+                          "走 OrangeRender DebugDraw immediate-mode（line / triangle）\n"
+                          "always-on-top，不被场景几何遮挡");
     }
 
     ImGui::SameLine();
@@ -182,6 +196,42 @@ void EditorRenderLayer::DrawScenePanel()
         // 避免在 toggle 改变时维护额外 dirty 标记）。
         mpScenePipeline->SetEditorGridEnabled(sViewportGridEnabled);
         mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
+
+        // v0.9 c2 DebugDraw 接通：toggle → wrap.SetEnabled；启用时本帧提交
+        // origin 坐标轴 + selected entity 位置 wireframe sphere（黄色，
+        // 半径 0.5），证明 editor → wrap → OR DebugDraw → HDR pass 端到端。
+        if (auto* dbg = mpScenePipeline->GetDebugDrawScene())
+        {
+            dbg->SetEnabled(sViewportDebugDrawEnabled);
+            if (sViewportDebugDrawEnabled)
+            {
+                // 原点 3 轴坐标（X 红 / Y 绿 / Z 蓝，长度 1.5）—— ABGR
+                // packed：低 8 位 R，高 8 位 A。
+                constexpr std::uint32_t kRed   = 0xFF0000FFu;
+                constexpr std::uint32_t kGreen = 0xFF00FF00u;
+                constexpr std::uint32_t kBlue  = 0xFFFF0000u;
+                constexpr std::uint32_t kHi    = 0xFF00FFFFu;  // 选中实体高亮黄
+                dbg->AddLine(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), kRed);
+                dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), kGreen);
+                dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), kBlue);
+
+                // 选中 entities 位置 wireframe sphere —— primary + additional
+                // 都画，让多选可视化。
+                auto drawSelected = [&](Orange::Engine::Entity e) {
+                    if (!e.IsValid()) { return; }
+                    auto* xf = mHost.scene.pWorld->GetComponent<
+                        Orange::Engine::Scene::TransformComponent>(e);
+                    if (xf == nullptr) { return; }
+                    dbg->AddSphere(xf->position, 0.5f, kHi, 16);
+                };
+                drawSelected(mHost.selection.selectedEntity);
+                for (const auto& e : mHost.selection.additionalSelectedEntities)
+                {
+                    drawSelected(e);
+                }
+            }
+        }
+
         // Pipeline::RenderOffscreen 内部 WaitIdle —— 本帧返回时 GPU 已
         // 空，之后 RemoveTexture(旧 descriptor) + AddTexture(新) 才安全。
         mpScenePipeline->Render(*mHost.scene.pWorld);
