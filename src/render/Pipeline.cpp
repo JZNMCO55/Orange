@@ -39,6 +39,7 @@
 #include "orange/engine/asset/ShaderAsset.h"
 #include "orange/engine/asset/TextureAsset.h"
 #include "orange/engine/core/Log.h"
+#include "orange/engine/core/Profiler.h"
 #include "orange/engine/platform/Window.h"
 #include "orange/engine/render/BuiltinMaterials.h"
 #include "orange/engine/render/BuiltinShadowShaders.h"
@@ -2782,6 +2783,7 @@ namespace
 
 bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor)
 {
+    ORANGE_PROFILE_SCOPE("MainPass");
     auto& impl = *this;
     auto& cmd = *impl.offscreenCmd;
     // Caller (Render) 已经 cmd.Begin() —— 这里只录制主 pass + transition，
@@ -3502,6 +3504,7 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
 bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
                                       const glm::mat4& lightViewProj)
 {
+    ORANGE_PROFILE_SCOPE("Shadow");
     if (!shadowMap || offscreenCmd == nullptr)
     {
         return false;
@@ -4261,6 +4264,7 @@ bool Pipeline::Impl::RecordSkyPass(const glm::mat4& invViewProj,
                                    const glm::vec3& tint,
                                    float            intensity)
 {
+    ORANGE_PROFILE_SCOPE("Sky");
     if (offscreenCmd == nullptr || hdrColor == nullptr || skyPipeline == nullptr)
     {
         return false;
@@ -4348,6 +4352,7 @@ bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
                                              const glm::vec3& sunColor,
                                              float            sunIntensity)
 {
+    ORANGE_PROFILE_SCOPE("Sky");
     if (offscreenCmd == nullptr || hdrColor == nullptr || proceduralSkyPipeline == nullptr)
     {
         return false;
@@ -4434,6 +4439,7 @@ bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
 bool Pipeline::Impl::RecordGridPass(const glm::mat4& invViewProj,
                                     const glm::mat4& viewProj)
 {
+    ORANGE_PROFILE_SCOPE("Grid");
     if (offscreenCmd == nullptr || hdrColor == nullptr || sceneDepth == nullptr
         || gridPipeline == nullptr || gridLayout == nullptr || hdrSampler == nullptr)
     {
@@ -4558,6 +4564,7 @@ bool Pipeline::Impl::RecordGridPass(const glm::mat4& invViewProj,
 
 bool Pipeline::Impl::RecordDebugDrawPass(const glm::mat4& viewProj)
 {
+    ORANGE_PROFILE_SCOPE("DebugDraw");
     if (!debugDrawScene || !debugDrawScene->IsInitialized())
     {
         return false;
@@ -4623,8 +4630,23 @@ bool Pipeline::Impl::RecordDebugDrawPass(const glm::mat4& viewProj)
     return true;
 }
 
+// v0.9 c4：Pipeline 端 sample bin 树注册。挂到 "LayerUpdate" 下；细分
+// 子 pass（Shadow / Sky / MainPass / Particles / Bloom / Tonemap / DebugDraw）
+// 让 ProfilerPanel 能看到帧耗时分布。
+ORANGE_PROFILE_DECLARE_BIN("Render",    "LayerUpdate")
+ORANGE_PROFILE_DECLARE_BIN("Shadow",    "Render")
+ORANGE_PROFILE_DECLARE_BIN("Sky",       "Render")
+ORANGE_PROFILE_DECLARE_BIN("MainPass",  "Render")
+ORANGE_PROFILE_DECLARE_BIN("Particles", "Render")
+ORANGE_PROFILE_DECLARE_BIN("Bloom",     "Render")
+ORANGE_PROFILE_DECLARE_BIN("Tonemap",   "Render")
+ORANGE_PROFILE_DECLARE_BIN("DebugDraw", "Render")
+ORANGE_PROFILE_DECLARE_BIN("Grid",      "Render")
+
 void Pipeline::Render(Orange::Engine::World& world)
 {
+    ORANGE_PROFILE_SCOPE("Render");
+
     auto& impl = *mpImpl;
 
     impl.scene.Clear();

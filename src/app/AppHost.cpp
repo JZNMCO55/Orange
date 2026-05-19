@@ -2,6 +2,7 @@
 
 #include "orange/engine/app/FrameContext.h"
 #include "orange/engine/core/Log.h"
+#include "orange/engine/core/Profiler.h"
 #include "orange/engine/core/Time.h"
 
 #include <atomic>
@@ -76,10 +77,32 @@ int AppHost::Run()
     impl.frameIndex    = 0;
     impl.exitRequested.store(false, std::memory_order_relaxed);
 
+    // v0.9 c4：声明引擎内置 sample bin 树。根 "Frame" 下挂 PollEvents /
+    // LayerUpdate / Present 三个一级子项；Layer 子系统（Render / Physics
+    // / Audio 等）按各自模块的 PROFILE_SCOPE 自然形成 "LayerUpdate" 的子
+    // 树。游戏侧 / 编辑器侧可继续 DeclareSampleBin 把自定义热点挂回任一
+    // 已知 parent。
+    static const bool sProfilerBinsDeclared = []() {
+        using namespace ::Orange::Engine::Core;
+        Profiler::DeclareSampleBin("Frame");
+        Profiler::DeclareSampleBin("PollEvents", "Frame");
+        Profiler::DeclareSampleBin("LayerUpdate", "Frame");
+        return true;
+    }();
+    (void)sProfilerBinsDeclared;
+
     while (!impl.pWindow->ShouldClose()
         && !impl.exitRequested.load(std::memory_order_relaxed))
     {
-        Platform::Window::PollEvents();
+        // "Frame" scope 用内层 block 包整帧主体，让其 dtor 在 FinalizeFrame
+        // 之前跑——这样 FinalizeFrame 看到的 inclusive_ms 包含整帧。
+        {
+        ORANGE_PROFILE_SCOPE("Frame");
+
+        {
+            ORANGE_PROFILE_SCOPE("PollEvents");
+            Platform::Window::PollEvents();
+        }
 
         const auto now = Impl::SteadyClock::now();
 
@@ -107,16 +130,27 @@ int AppHost::Run()
         frame.framebufferHeight  = fbHeight;
         frame.pWindow            = impl.pWindow.get();
 
-        for (auto& layer : impl.stack)
         {
-            if (layer)
+            ORANGE_PROFILE_SCOPE("LayerUpdate");
+            for (auto& layer : impl.stack)
             {
-                layer->OnUpdate(frame);
+                if (layer)
+                {
+                    layer->OnUpdate(frame);
+                }
             }
         }
 
         // Render / present 阶段当前为空，待 OrangeRender 在后续阶段
         // 接通后填充。
+        }  // "Frame" scope dtor 在此跑完，inclusive_ms 已累加
+
+        // 帧末汇总 profiler：上一行 "Frame" scope 已 dtor，本调用看到的
+        // inclusive_ms 是整帧累加值。FinalizeFrame 本身的开销不计入 "Frame"
+        // bin（在 scope 之外），但下一帧 PollEvents 之前会有 ~μs 间隙；
+        // 想精确测 FinalizeFrame 自身耗时可单独声明 "ProfilerFinalize" bin
+        // 再 wrap，本期不做。
+        ::Orange::Engine::Core::Profiler::FinalizeFrame();
 
         ++impl.frameIndex;
     }
