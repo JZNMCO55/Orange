@@ -145,6 +145,7 @@ add_executable(OrangeEditor
     EditorScaleGizmo.cpp
     EditorTranslateGizmo.cpp
     EditorWidgets.cpp
+    AnimFsmFileIO.cpp
     MaterialFileIO.cpp
     VulkanLoaderShim.cpp
     context/EditorKeybindings.cpp
