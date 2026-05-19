@@ -38,6 +38,16 @@
 - [ ] 同一帧 Inspector 同时显示：实体 component schema 段（含 read-only `backend` 字段）+ AnimatorMiniPreviewPlugin 装饰段（Combo + Status + Backend 三行）—— 证明 IEditorInspectorPlugin（装饰）与 IEditorAssetInspectorPlugin（接管）正交并存
 - [ ] 点 `.material` 文件 → Inspector 切到 Material 子模式 → 再点 entity → 回到实体 Inspector + Animator Combo 仍正常显示
 
+## patch · Intel Iris Xe sky pass driver bug workaround（commit `0890006`）
+
+> 与 v0.7 c1 同 session 顺路修，独立工程缺陷归档。
+
+### 5. Intel Iris Xe 测试机启动回归
+
+- [ ] Intel Iris Xe / 其他老 iGPU 测试机 `git pull && build` 后启动 OrangeEditor，不再崩在 `vkCmdBeginRendering` 内 `igvk64.dll` 0x3B0 deref；进入 ImGui dock + 多 viewport ready 主循环
+- [ ] viewport ScenePanel 显示 procedural sky 的 3 色 horizon gradient + 太阳 disc（与 NV 桌面 GPU 视觉一致）
+- [ ] NV 桌面 GPU 上行为无回归（sky pass 仍正常渲染，drawable 主 pass 跑通）
+
 ## 已知不验收（与 c0 + c1 范围正交）
 
 - `assetInspectorPlugins` / `inspectorPlugins` 注册表实现细节、unique_ptr 生命周期、CanHandle 命中优先级 —— 纯架构改动无视觉表现
