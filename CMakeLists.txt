@@ -42,6 +42,7 @@ add_library(orange_engine STATIC
     # Core
     src/core/CoreHeaderCheck.cpp
     src/core/Log.cpp
+    src/core/Memory.cpp
     src/core/Profiler.cpp
     src/core/Result.cpp
 

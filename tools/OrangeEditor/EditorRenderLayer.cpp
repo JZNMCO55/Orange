@@ -16,6 +16,8 @@
 #include <orange/engine/asset/MeshAsset.h>
 
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/core/Memory.h>
 #include <orange/engine/core/Profiler.h>
 
 #include <functional>
@@ -1562,18 +1564,31 @@ void EditorRenderLayer::DrawSettingsPanel()
     ImGui::End();
 }
 
-// v0.9 Profiler 面板 —— 最近 N 帧耗时柱状图 + sample bin 树形（按 parent
-// 关系展开）。数据源是 Core::Profiler 单例（AppHost 主循环帧末
-// FinalizeFrame 写入的 snapshot）。
+// v0.9 Profiler 面板 —— 帧耗时柱状图 + sample bin 树（Performance tab）+
+// Memory 计数（Memory tab）。数据源：Core::Profiler::Snapshot()（AppHost
+// 主循环帧末 FinalizeFrame 写入）+ Core::Memory::Snapshot()（模块 opt-in
+// 调 AddBytes/SubBytes）+ host 直接 introspection（World::Size /
+// AssetRegistry::Size / Pipeline::TemplatePipelineCount 等）。
 void EditorRenderLayer::DrawProfilerPanel(const Orange::Engine::FrameContext& frame)
 {
     namespace Profiler = ::Orange::Engine::Core::Profiler;
+    namespace Memory   = ::Orange::Engine::Core::Memory;
 
     if (!ImGui::Begin("Profiler##editor", &mShowProfilerPanel))
     {
         ImGui::End();
         return;
     }
+
+    if (!ImGui::BeginTabBar("##profilertabs"))
+    {
+        ImGui::End();
+        return;
+    }
+
+    // ======================== Performance tab ========================
+    if (ImGui::BeginTabItem("Performance"))
+    {
 
     // 1. 帧耗时柱状图 ----------------------------------------------------
     // 把本帧 delta 推入 ring buffer。ring 用 write-index + count 实现，避免
@@ -1613,6 +1628,8 @@ void EditorRenderLayer::DrawProfilerPanel(const Orange::Engine::FrameContext& fr
     if (snapshot.empty())
     {
         ImGui::TextDisabled("(no sample bins declared)");
+        ImGui::EndTabItem();
+        ImGui::EndTabBar();
         ImGui::End();
         return;
     }
@@ -1676,5 +1693,94 @@ void EditorRenderLayer::DrawProfilerPanel(const Orange::Engine::FrameContext& fr
         ImGui::EndTable();
     }
 
+    ImGui::EndTabItem();
+    }  // Performance tab
+
+    // ======================== Memory tab ========================
+    if (ImGui::BeginTabItem("Memory"))
+    {
+        // 1. Tracked categories（模块 opt-in Memory::AddBytes/SubBytes）。
+        ImGui::TextDisabled("Tracked Categories (Core::Memory opt-in)");
+        ImGui::Separator();
+        auto memSnap = Memory::Snapshot();
+        if (memSnap.empty())
+        {
+            ImGui::TextDisabled("(no categories registered; modules opt in via "
+                                "Core::Memory::RegisterCategory + AddBytes/SubBytes)");
+        }
+        else if (ImGui::BeginTable("##memcats", 4,
+                                    ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg))
+        {
+            ImGui::TableSetupColumn("Category",   ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Current KB", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+            ImGui::TableSetupColumn("Peak KB",    ImGuiTableColumnFlags_WidthFixed, 90.0f);
+            ImGui::TableSetupColumn("Alloc/Free", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+            ImGui::TableHeadersRow();
+            for (const auto& c : memSnap)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(c.name);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.1f", static_cast<double>(c.bytesCurrent) / 1024.0);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.1f", static_cast<double>(c.bytesHighWater) / 1024.0);
+                ImGui::TableNextColumn();
+                ImGui::Text("%llu / %llu",
+                            static_cast<unsigned long long>(c.allocCount),
+                            static_cast<unsigned long long>(c.freeCount));
+            }
+            ImGui::EndTable();
+        }
+
+        // 2. Module Counts —— 走现有 introspection API。这是非 byte-accurate 但
+        //    立即可用的"每模块状态"概览（v0.9 c6 deliverable）。
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        ImGui::TextDisabled("Module Counts (logical introspection)");
+        ImGui::Separator();
+        if (ImGui::BeginTable("##modulecounts", 2,
+                               ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg))
+        {
+            ImGui::TableSetupColumn("Module / Metric", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Count",           ImGuiTableColumnFlags_WidthFixed, 100.0f);
+            ImGui::TableHeadersRow();
+
+            auto row = [](const char* label, std::size_t value) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(label);
+                ImGui::TableNextColumn();
+                ImGui::Text("%llu", static_cast<unsigned long long>(value));
+            };
+
+            if (mHost.scene.pWorld != nullptr)
+            {
+                row("Scene::Entity count", mHost.scene.pWorld->Size());
+            }
+            if (mHost.assets.pAssets != nullptr)
+            {
+                row("Asset::Registry size (all kinds)", mHost.assets.pAssets->Size());
+            }
+            if (mpScenePipeline != nullptr)
+            {
+                row("Render::Pipeline cache (templates)",
+                    mpScenePipeline->TemplatePipelineCount());
+                row("Render::Bloom mip count",
+                    mpScenePipeline->BloomMipCount());
+            }
+            row("Profiler::Sample bin count", Profiler::BinCount());
+            row("Memory::Category count",     Memory::CategoryCount());
+
+            ImGui::EndTable();
+        }
+
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::TextDisabled("Note: byte-accurate per-allocator tracking is future work\n"
+                            "(heap-level hook is non-trivial; see ADR-003 Consequences)");
+
+        ImGui::EndTabItem();
+    }
+
+    ImGui::EndTabBar();
     ImGui::End();
 }
