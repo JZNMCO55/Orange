@@ -63,6 +63,7 @@ namespace Orange::Engine::Render
 {
 
 struct Camera;
+class DebugDrawScene;
 class MaterialSystem;
 class PostProcessChain;
 class VfxSystem;
@@ -362,6 +363,21 @@ public:
     // 按 BakeIblFromWorld 结果接通 PBR shader，与是否画 sky-dome 解耦。
     void SetSkyEnabled(bool enabled) noexcept;
     bool IsSkyEnabled() const noexcept;
+
+    // 取 Pipeline 内置 DebugDrawScene 引用。Pipeline 自己管 Initialize /
+    // Render 内 SetViewProj+Flush / Shutdown 三段生命周期；消费者拿到指针
+    // 后**仅**调 Add* / SetEnabled 等公共面（参 `DebugDrawScene.h`）。
+    //
+    // 未 Initialize / Shutdown 后返回 nullptr。`InitializeOffscreen` 模式
+    // 与 window 模式都支持；HDR 目标格式（RGBA16Float）自动匹配 DebugDraw
+    // backend pipeline。
+    //
+    // 路径：每帧 Render() 在主 pass + 粒子 + grid 之后、passthrough/tonemap
+    // 之前调 DebugDraw flush，几何叠加在 HDR scene color 上方，不写深度。
+    // 与编辑器 ScenePanel toolbar "Debug Draw" checkbox 配套：toggle 走
+    // `dbg->SetEnabled(bool)` zero-cost off 路径。
+    DebugDrawScene*       GetDebugDrawScene() noexcept;
+    const DebugDrawScene* GetDebugDrawScene() const noexcept;
 
     // 当前帧已经按 const Material* 缓存的 RHI Pipeline 数量。Pipeline 在
     // Render() 时对每个 drawable 按其 MaterialInstance 绑定的 Material

@@ -42,6 +42,7 @@
 #include "orange/engine/platform/Window.h"
 #include "orange/engine/render/BuiltinMaterials.h"
 #include "orange/engine/render/BuiltinShadowShaders.h"
+#include "orange/engine/render/DebugDrawScene.h"
 #include "orange/engine/render/EnvironmentComponent.h"
 #include "orange/engine/render/IblBaker.h"
 #include "orange/engine/render/LightComponent.h"
@@ -642,6 +643,13 @@ struct Pipeline::Impl
     Orange::Rhi::RHITexture*                              gridSetBoundDepth{nullptr};
     bool                                                  editorGridEnabled{false};
 
+    // DebugDrawScene —— v0.9 viewport 调试几何 wrap（line / aabb / sphere /
+    // triangle）。Pipeline 自己 lazy-create + InitializeBackend_ + 每帧
+    // RecordDebugDrawPass + Shutdown；公共面通过 `GetDebugDrawScene()` 返回
+    // 指针给消费者调 Add* / SetEnabled。底层是 Orange::Renderer::DebugDraw
+    // （vendor/OrangeRender），公共头不暴露 OR 类型。
+    std::unique_ptr<DebugDrawScene>                       debugDrawScene;
+
     // -----------------------------------------------------------------
 
     // drawable.materialInstance == nullptr 时的 fallback Material。当前装
@@ -863,6 +871,14 @@ struct Pipeline::Impl
     // + DepthTest Less + DepthWrite false → fullscreen draw with PristineGrid
     // 反推 Y=0 平面交点 → 翻 hdrColor 回 ShaderReadOnly。
     bool RecordGridPass(const glm::mat4& invViewProj, const glm::mat4& viewProj);
+
+    // 录制 v0.9 debug draw pass（grid 之后、passthrough/bloom 之前）：
+    // hdrColor: ShaderReadOnly → ColorAttachment + LoadOp::Load；不挂深度
+    // attach（DebugDraw pipeline 自身 depth-test 关），调 DebugDrawScene 内部
+    // SetViewProj + Flush 把 immediate-mode 线 / 三角形几何叠到 HDR 上 → 翻
+    // hdrColor 回 ShaderReadOnly。debugDrawScene 未 init / 几何为空 / disabled
+    // 时 silent skip。
+    bool RecordDebugDrawPass(const glm::mat4& viewProj);
 
     // 创建 / 重建 bloom 6 张 mip + 描述符 set（首次激活、HDR 尺寸变化、
     // chain 切到含 BloomPass 时触发）。失败返回 false。
@@ -1914,6 +1930,22 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         }
     }
 
+    // DebugDrawScene 接 RHI：HDR target 格式 RGBA16Float / 双缓冲。失败不阻
+    // 塞 Pipeline 初始化（DebugDraw 是 viewport overlay 调试工具，不可用时
+    // 只是 GetDebugDrawScene 返回的 wrap IsInitialized()=false，Add* 自动
+    // 静默丢——保留 Pipeline 主路径仍能起。
+    impl.debugDrawScene = std::make_unique<DebugDrawScene>();
+    auto dbgRc = impl.debugDrawScene->InitializeBackend_(
+        rhi, kHdrColorFormat, /*framesInFlight=*/2u);
+    if (dbgRc.IsErr())
+    {
+        ORANGE_LOG_WARN(
+            "Pipeline::SetupRhiResources: DebugDrawScene backend 初始化失败，"
+            "viewport debug draw 不可用。");
+        // wrap 已构造但 IsInitialized=false；保留对象让 GetDebugDrawScene 仍返回
+        // 有效指针，消费者 Add* 自动 no-op。
+    }
+
     return Result<void, ResultCode>{};
 }
 
@@ -2137,6 +2169,14 @@ void Pipeline::Shutdown()
     impl.godRaysPipeline.reset();
     impl.godRaysFs.reset();
     impl.godRaysSetBoundDepth = nullptr;
+    // DebugDrawScene 必须在 renderDevice WaitIdle 之后、其他 RHI 资源释放前
+    // 一起释放——Orange::Renderer::DebugDraw 持有 vertex staging buffer 与
+    // 两条 pipeline，析构需要 device 还活着。
+    if (impl.debugDrawScene)
+    {
+        impl.debugDrawScene->ShutdownBackend_();
+        impl.debugDrawScene.reset();
+    }
     impl.gridSet.reset();
     impl.gridPool.reset();
     impl.gridPipeline.reset();
@@ -2415,6 +2455,16 @@ void Pipeline::SetSkyEnabled(bool enabled) noexcept
 bool Pipeline::IsSkyEnabled() const noexcept
 {
     return mpImpl && mpImpl->skyEnabled;
+}
+
+DebugDrawScene* Pipeline::GetDebugDrawScene() noexcept
+{
+    return mpImpl ? mpImpl->debugDrawScene.get() : nullptr;
+}
+
+const DebugDrawScene* Pipeline::GetDebugDrawScene() const noexcept
+{
+    return mpImpl ? mpImpl->debugDrawScene.get() : nullptr;
 }
 
 void Pipeline::SetIblTextures(Orange::Rhi::RHITexture* irradianceCube,
@@ -3137,6 +3187,13 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         if (ok && impl.editorGridEnabled)
         {
             impl.RecordGridPass(invViewProj, viewProj);
+        }
+
+        // debug draw pass：grid 之后、passthrough 之前。wrap 内自管 enabled /
+        // 空几何 silent skip；失败 silent，passthrough 继续。
+        if (ok)
+        {
+            impl.RecordDebugDrawPass(viewProj);
         }
 
         // passthrough HDR → viewportColor
@@ -4499,6 +4556,73 @@ bool Pipeline::Impl::RecordGridPass(const glm::mat4& invViewProj,
     return true;
 }
 
+bool Pipeline::Impl::RecordDebugDrawPass(const glm::mat4& viewProj)
+{
+    if (!debugDrawScene || !debugDrawScene->IsInitialized())
+    {
+        return false;
+    }
+    if (!debugDrawScene->IsEnabled() || debugDrawScene->IsEmptyBackend_())
+    {
+        // 当前帧无几何 / 整条 wrap 已 disable —— silent skip，不付 BeginRendering
+        // 开销。SetViewProjBackend_ 即使不调，Flush silent 内 OR side 自然 skip。
+        return true;
+    }
+    if (offscreenCmd == nullptr || hdrColor == nullptr)
+    {
+        return false;
+    }
+
+    auto& cmd = *offscreenCmd;
+
+    // hdrColor: ShaderReadOnly → ColorAttachment 准备叠加 debug 几何。
+    if (hdrLayoutShaderReadOnly)
+    {
+        cmd.TransitionTexture(*hdrColor,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly,
+                              Orange::Rhi::TextureLayout::ColorAttachment);
+        hdrLayoutShaderReadOnly = false;
+    }
+
+    Orange::Rhi::ColorAttachment colorAtt{};
+    colorAtt.mpView   = hdrColor->GetDefaultView();
+    colorAtt.mLoadOp  = Orange::Rhi::LoadOp::Load;
+    colorAtt.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+    Orange::Rhi::RenderingDesc rd{};
+    rd.mRenderArea.mWidth  = hdrWidth;
+    rd.mRenderArea.mHeight = hdrHeight;
+    rd.mColorAttachments.push_back(colorAtt);
+    // 不挂 depth attachment —— DebugDraw pipeline 自身 depth-test 关，
+    // 视觉上 always-on-top，与 Lumix / Godot debug viewport 同款节奏。
+
+    cmd.BeginRendering(rd);
+
+    Orange::Rhi::RHIViewport vp{};
+    vp.mWidth    = static_cast<float>(hdrWidth);
+    vp.mHeight   = static_cast<float>(hdrHeight);
+    vp.mMinDepth = 0.0f;
+    vp.mMaxDepth = 1.0f;
+    cmd.SetViewport(vp);
+    Orange::Rhi::RHIScissor sc{};
+    sc.mWidth  = hdrWidth;
+    sc.mHeight = hdrHeight;
+    cmd.SetScissor(sc);
+
+    debugDrawScene->SetViewProjBackend_(viewProj);
+    debugDrawScene->FlushBackend_(cmd);
+
+    cmd.EndRendering();
+
+    // hdrColor 翻回 ShaderReadOnly：与 RecordGridPass 收尾同款契约，
+    // 下一段 pass（bloom / passthrough / tonemap）按 ShaderReadOnly 假设跑。
+    cmd.TransitionTexture(*hdrColor,
+                          Orange::Rhi::TextureLayout::ColorAttachment,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    hdrLayoutShaderReadOnly = true;
+    return true;
+}
+
 void Pipeline::Render(Orange::Engine::World& world)
 {
     auto& impl = *mpImpl;
@@ -4788,6 +4912,13 @@ void Pipeline::Render(Orange::Engine::World& world)
             {
                 const glm::mat4 invViewProjGrid = glm::inverse(viewProj);
                 impl.RecordGridPass(invViewProjGrid, viewProj);
+            }
+
+            // debug draw pass：grid 之后、bloom 之前。wrap 内自管空几何 /
+            // disabled silent skip。
+            if (offscreenOk)
+            {
+                impl.RecordDebugDrawPass(viewProj);
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)

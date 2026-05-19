@@ -91,6 +91,7 @@ add_library(orange_engine STATIC
     src/render/BuiltinMaterials.cpp
     src/render/BuiltinPostProcessChain.cpp
     src/render/BuiltinShadowShaders.cpp
+    src/render/DebugDrawScene.cpp
     src/render/IblBaker.cpp
     src/render/MaterialInstance.cpp
     src/render/MaterialSystem.cpp
