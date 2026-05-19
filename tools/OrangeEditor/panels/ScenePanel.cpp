@@ -195,12 +195,7 @@ void EditorRenderLayer::DrawScenePanel()
         // viewport toolbar toggle → Pipeline 状态：每帧 push（开销极小，
         // 避免在 toggle 改变时维护额外 dirty 标记）。
         mpScenePipeline->SetEditorGridEnabled(sViewportGridEnabled);
-        // [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
-        // 临时 hardcode false 覆盖 toolbar toggle —— 验证 BR#1 sky pass 是否
-        // 崩点特定。Pipeline 内 skyEnabled 字段已 hardcode false，但本 caller
-        // 每帧 push 覆盖；本句强制传 false 让两处一致。复现锁定后回滚。
-        mpScenePipeline->SetSkyEnabled(false);
-        (void)sViewportSkyEnabled;
+        mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
 
         // v0.9 c2 DebugDraw 接通：toggle → wrap.SetEnabled；启用时本帧提交
         // origin 坐标轴 + selected entity 位置 wireframe sphere（黄色，

@@ -618,10 +618,7 @@ struct Pipeline::Impl
     // 最近一次写进 skySet 的 cube 对象指针；bakedEnvCube 重建时（BakeIblFromWorld
     // 重跑）需要重写 binding 0。
     Orange::Rhi::RHITexture*                              skySetBoundCube{nullptr};
-    // [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
-    // 临时 hardcode false：测试机回归确认 BR#1 sky pass 是崩点；本次跳过 sky
-    // pass 看后续 BR# 是否仍崩。复现锁定后回滚。
-    bool                                                  skyEnabled{false};
+    bool                                                  skyEnabled{true};
 
     // ---- Procedural sky pass GPU 资源 ----------------------------------
     // 无描述符（push constant only）；pipeline 与 skyPipeline 同 attachment
@@ -1651,6 +1648,15 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         // procedural sky pipeline —— 与 skyPipeline 同 attachment 配置
         // （RGBA16F no blend，无 depth），仅 shader 不同、无描述符。push
         // constant 128 字节（与 ProceduralSkyPush 严格对齐）。
+        //
+        // BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe：
+        // 测试机回归锁定真因是 Intel Iris Xe ICD 对"RGBA16F color-only +
+        // dynamic rendering"路径有 driver bug（具体崩在 vkCmdBeginRendering
+        // 内 deref 0x3B0）。主 pass / passthrough 有 depth attachment 工作正
+        // 常，唯 procedural sky 是 color-only。workaround：给 pipeline +
+        // RenderingDesc 都加 dummy depth attachment（depth test / write 都
+        // 关），shader 不消费 depth，但 dynamic rendering 路径在 Intel ICD
+        // 看到 depth 后走有 depth 的 well-tested 路径。NV 上行为不变。
         Orange::Rhi::GraphicsPipelineDesc d{};
         d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
                                    impl.fullscreenVs.get(), "main"});
@@ -1662,6 +1668,10 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         d.mDepthStencil.mDepthWriteEnable = false;
         d.mColorBlend.mAttachments.push_back({});
         d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        // Intel Iris Xe workaround：声明 depth attachment format（与 sceneDepth
+        // 同 D32_SFLOAT），pipeline 与 RenderingDesc 对齐，driver 走 with-depth
+        // 路径。depth test / write 均关，运行时不读写 sceneDepth 内容。
+        d.mRenderTargets.mDepthStencilFormat = Orange::Rhi::TextureFormat::D32Float;
 
         Orange::Rhi::PushConstantRange pcRange{};
         pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
@@ -4482,6 +4492,19 @@ bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
                           Orange::Rhi::TextureLayout::ColorAttachment);
     hdrLayoutShaderReadOnly = false;
 
+    // BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe workaround：
+    // procedural sky pipeline 声明了 depth attachment format（见 SetupRhiResources），
+    // RenderingDesc 必须对齐挂 sceneDepth；否则 Intel Iris Xe ICD 走 color-only
+    // dynamic rendering 路径 deref 0x3B0 段错误。本 transition / attachment
+    // 是 pure workaround，shader 不消费 depth、depth test / write 均关。NV 上
+    // 行为不变（with-depth 路径也 well-tested）。
+    const auto fromDepthLayout = sceneDepthLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+    cmd.TransitionTexture(*sceneDepth, fromDepthLayout,
+                          Orange::Rhi::TextureLayout::DepthStencilAttachment);
+    sceneDepthLayoutShaderReadOnly = false;
+
     Orange::Rhi::ColorAttachment att{};
     att.mpView          = hdrColor->GetDefaultView();
     att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
@@ -4491,10 +4514,22 @@ bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
     att.mClear.mColor[2] = 0.13f;
     att.mClear.mColor[3] = 1.0f;
 
+    // Dummy depth attachment（pipeline 已声明 D32 format，此处必须配对）。
+    // LoadOp=Clear 把 depth 清到 far（1.0），与主 pass 行为同款 —— 主 pass 之
+    // 后接的 RecordOffscreenPass 仍会 Clear depth，本 sky pass 写的 depth 值
+    // 被主 pass 抹掉，纯占位无副作用。StoreOp=Store 让主 pass 入口 transition
+    // 起点合法（也可 DontCare，但 Store 与现有 pattern 一致）。
+    Orange::Rhi::DepthStencilAttachment depthAtt{};
+    depthAtt.mpView         = sceneDepth->GetDefaultView();
+    depthAtt.mDepthLoadOp   = Orange::Rhi::LoadOp::Clear;
+    depthAtt.mDepthStoreOp  = Orange::Rhi::StoreOp::Store;
+    depthAtt.mClear.mDepth  = 1.0f;
+
     Orange::Rhi::RenderingDesc rd{};
     rd.mRenderArea.mWidth  = hdrWidth;
     rd.mRenderArea.mHeight = hdrHeight;
     rd.mColorAttachments.push_back(att);
+    rd.mDepthStencil       = depthAtt;
 
     cmd.BeginRendering(rd);
 
