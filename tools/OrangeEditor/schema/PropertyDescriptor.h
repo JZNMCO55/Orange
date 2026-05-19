@@ -31,6 +31,11 @@
 
 #include <string>
 
+// 前向声明：AssetRef 字段的 accessor 拿引用参数即可，无需此处 include
+// EditorAssetContext.h（避免把 AssetRegistry / MaterialSystem / AnimatorRegistry
+// 等引擎头通过 PropertyDescriptor.h 传染到所有消费 schema 的 TU）
+struct EditorAssetContext;
+
 namespace Orange::Editor::Schema
 {
 
@@ -163,6 +168,35 @@ struct PropertyDescriptor
     using SetFn = void (*)(void*       component, const void* inValue);
     GetFn get = nullptr;
     SetFn set = nullptr;
+
+    // AssetRef 字段专用 accessor —— 与 GetFn / SetFn 同款类型擦除策略，但
+    // 多带一个 `const EditorAssetContext& ctx` 参数让 path↔handle 转换能
+    // 取到 AssetRegistry / namedMaterialInstances 两段数据，而不依赖
+    // RegisterBuiltinSchemas.cpp 的 file-scope 静态指针。
+    //
+    // 设计理由（详见 docs/decisions/ADR-004）：
+    //   * 主路径走 LumixEngine reflection.h:130 同款 "setter 不带 editor
+    //     context" —— 90%+ property 是纯数据 setter，加 ctx 参数是不必要
+    //     的污染
+    //   * AssetRef 是 OrangeEngine 因组件存 AssetHandle（而非 Lumix 那样
+    //     存 Path）导致的真实架构错配的局部解：schema 层做 std::string
+    //     ↔ AssetHandle 双向转换确实需要 AssetRegistry
+    //   * 未来若有第二类 ctx-hungry 字段（ScriptRef / LocaleRef / ...）
+    //     再考虑升级到 PropertyDescriptor 统一传 ctx 的方案 A，触发条件
+    //     与升级路径记录在 ADR-004
+    //
+    // 调用约定：SchemaInspector AssetRef case 优先用 assetRefGet/assetRefSet
+    // （非空时）；它们与上方 get/set 在 AssetRef 字段上是互斥关系（同一
+    // PropertyDescriptor 上同时设两套会被 schema 注册期 assert）。其它
+    // PropertyType 字段忽略本对槽位。
+    using AssetRefGetFn = void (*)(const void* component,
+                                   const EditorAssetContext& ctx,
+                                   void* outValue);
+    using AssetRefSetFn = void (*)(void* component,
+                                   const EditorAssetContext& ctx,
+                                   const void* inValue);
+    AssetRefGetFn assetRefGet = nullptr;
+    AssetRefSetFn assetRefSet = nullptr;
 };
 
 }  // namespace Orange::Editor::Schema
