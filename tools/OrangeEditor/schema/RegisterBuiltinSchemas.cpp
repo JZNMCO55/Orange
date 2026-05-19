@@ -247,24 +247,15 @@ void RegisterParticleEmitterComponentSchema()
         .Register();
 }
 
-// v0.5 c1：schema 注册侧需要全局可访问的 AssetRegistry / namedMaterialInstances
-// 把 component 字段（AssetHandle<MeshAsset> / MaterialInstance*）与 AssetRef
-// 字段的类型擦除媒介 std::string (path) 双向映射。两个静态指针由
-// v0.8 整骨（消除 L15）：main.cpp 启动期通过 SetEditorAssetContextForSchema
-// 注入单一 EditorAssetContext 指针；schema 注册 lambda 内通过 gpAssetContext
-// 访问 pAssets.get() + namedMaterialInstances 两段数据。原 v0.5 ~ v0.6 期的
-// "两个独立 file-scope 指针 + 两个独立 setter" 模式被消化掉。
+// v0.9.5 c3：file-scope gpAssetContext 单例下架。AssetRef get/set 改走
+// PropertyDescriptor::AssetRefGetFn / AssetRefSetFn 新签名，由 SchemaInspector
+// 在 dispatch + 命令栈 replay 两个路径显式传入 `const EditorAssetContext&`。
+// 同步删除 SetEditorAssetContextForSchema 外部 setter；main.cpp 启动期注入
+// 调用一并清掉（见 v0.9.5 c3 同步改动）。
 //
-// capture-less lambda 不能 capture 局部状态，所以仍走"文件作用域静态"路径——
-// 完整的 (Component&, const EditorAssetContext&) get/set 签名整骨需要改
-// PropertyDescriptor + SchemaInspector dispatch + 所有 Field<T>::register
-// 站点，体量较大，留作 v0.9 拓展。
-//
-// 静态指针在 anonymous namespace（internal linkage 限定本 TU），但 setter
-// 函数 SetEditorAssetContextForSchema 要被 main.cpp 链接到，必须放在
-// anonymous namespace 外（line 670 后）。
-
-const EditorAssetContext* gpAssetContext = nullptr;
+// 设计选型详见 docs/decisions/ADR-004：方案 B（AssetRefAccessor 专用槽位）
+// 而非方案 A（扩 GetFn/SetFn 全字段加 ctx）；未来若有第二类 ctx-hungry 字段
+// （ScriptRef / LocaleRef ...）再考虑升级到方案 A。
 
 void RegisterRenderableComponentSchema()
 {
@@ -295,56 +286,61 @@ void RegisterRenderableComponentSchema()
             host.scene.pWorld->AddComponent<RC>(e, rc);
         };
 
-    // v0.5 c1：mesh / materialInstance 字段走 PropertyType::AssetRef 注册。
-    // 当前 SchemaInspector AssetRef case 仅显示 path（短名 + tooltip 全路径），
-    // 无控件 / 不 Push 命令；DnD 接收 + 浏览器写入由 c4 落地。
-    static const auto meshGet = +[](const void* c, void* out) {
+    // mesh / materialInstance 字段走 PropertyType::AssetRef 注册。AssetHandle ↔
+    // path 双向转换由 ctx.pAssets / ctx.namedMaterialInstances 承担。
+    static const auto meshGet = +[](const void* c,
+                                    const EditorAssetContext& ctx,
+                                    void* out) {
         auto* r = static_cast<const RC*>(c);
         auto* sOut = static_cast<std::string*>(out);
-        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr
-            || !r->mesh.IsValid()) {
+        if (ctx.pAssets == nullptr || !r->mesh.IsValid()) {
             sOut->clear();
             return;
         }
-        *sOut = std::string{gpAssetContext->pAssets->PathOf<
+        *sOut = std::string{ctx.pAssets->PathOf<
             ::Orange::Engine::Asset::MeshAsset>(r->mesh)};
     };
-    static const auto meshSet = +[](void* c, const void* in) {
+    static const auto meshSet = +[](void* c,
+                                    const EditorAssetContext& ctx,
+                                    const void* in) {
         auto* r = static_cast<RC*>(c);
         const auto& path = *static_cast<const std::string*>(in);
-        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr) { return; }
+        if (ctx.pAssets == nullptr) { return; }
         if (path.empty()) {
             r->mesh = {};
             return;
         }
-        auto lr = gpAssetContext->pAssets->Load<
+        auto lr = ctx.pAssets->Load<
             ::Orange::Engine::Asset::MeshAsset>(path);
         if (lr.IsOk()) { r->mesh = lr.Value(); }
     };
 
-    static const auto materialGet = +[](const void* c, void* out) {
+    static const auto materialGet = +[](const void* c,
+                                        const EditorAssetContext& ctx,
+                                        void* out) {
         auto* r = static_cast<const RC*>(c);
         auto* sOut = static_cast<std::string*>(out);
         sOut->clear();
-        if (gpAssetContext == nullptr || r->materialInstance == nullptr) { return; }
+        if (r->materialInstance == nullptr) { return; }
         // O(N) 反查 path → ptr 表。namedMaterialInstances 当前规模 < 10，
         // 即使每帧调用一次也可忽略。后续若 schema 内有大量 material 字段
         // 可加 ptr → path 反向缓存。
-        for (const auto& [path, ptr] : gpAssetContext->namedMaterialInstances)
+        for (const auto& [path, ptr] : ctx.namedMaterialInstances)
         {
             if (ptr == r->materialInstance) { *sOut = path; return; }
         }
     };
-    static const auto materialSet = +[](void* c, const void* in) {
+    static const auto materialSet = +[](void* c,
+                                        const EditorAssetContext& ctx,
+                                        const void* in) {
         auto* r = static_cast<RC*>(c);
         const auto& path = *static_cast<const std::string*>(in);
-        if (gpAssetContext == nullptr) { return; }
         if (path.empty()) {
             r->materialInstance = nullptr;
             return;
         }
-        auto it = gpAssetContext->namedMaterialInstances.find(path);
-        if (it != gpAssetContext->namedMaterialInstances.end())
+        auto it = ctx.namedMaterialInstances.find(path);
+        if (it != ctx.namedMaterialInstances.end())
         {
             r->materialInstance = it->second;
         }
@@ -385,29 +381,31 @@ void RegisterEnvironmentComponentSchema()
     using EC = Orange::Engine::Render::EnvironmentComponent;
 
     // cubemap AssetRef 字段的 get/set —— 与 Renderable.mesh 同款实现，仅
-    // 类型从 MeshAsset 换成 TextureAsset。capture-less +lambda 转 PropertyDescriptor
-    // 函数指针；gpAssetRegistry 由 main.cpp 启动期通过 SetAssetRegistryForSchema
-    // 注入。
-    static const auto cubemapGet = +[](const void* c, void* out) {
+    // 类型从 MeshAsset 换成 TextureAsset。ctx.pAssets 由 SchemaInspector
+    // dispatch / 命令 replay 路径显式传入，不再依赖 file-scope 静态。
+    static const auto cubemapGet = +[](const void* c,
+                                       const EditorAssetContext& ctx,
+                                       void* out) {
         auto* e = static_cast<const EC*>(c);
         auto* sOut = static_cast<std::string*>(out);
-        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr
-            || !e->cubemap.IsValid()) {
+        if (ctx.pAssets == nullptr || !e->cubemap.IsValid()) {
             sOut->clear();
             return;
         }
-        *sOut = std::string{gpAssetContext->pAssets->PathOf<
+        *sOut = std::string{ctx.pAssets->PathOf<
             ::Orange::Engine::Asset::TextureAsset>(e->cubemap)};
     };
-    static const auto cubemapSet = +[](void* c, const void* in) {
+    static const auto cubemapSet = +[](void* c,
+                                       const EditorAssetContext& ctx,
+                                       const void* in) {
         auto* e = static_cast<EC*>(c);
         const auto& path = *static_cast<const std::string*>(in);
-        if (gpAssetContext == nullptr || gpAssetContext->pAssets == nullptr) { return; }
+        if (ctx.pAssets == nullptr) { return; }
         if (path.empty()) {
             e->cubemap = {};
             return;
         }
-        auto lr = gpAssetContext->pAssets->Load<
+        auto lr = ctx.pAssets->Load<
             ::Orange::Engine::Asset::TextureAsset>(path);
         if (lr.IsOk()) { e->cubemap = lr.Value(); }
     };
@@ -673,15 +671,6 @@ void RegisterCameraComponentSchema()
 }
 
 }  // anonymous namespace
-
-// v0.8 整骨（消除 L15）：setter 函数必须在 anonymous namespace 外（external
-// linkage），让 main.cpp 启动期能 link 到。单一 SetEditorAssetContextForSchema
-// 注入路径替代原 SetAssetRegistryForSchema + SetNamedMaterialInstancesForSchema
-// 两个独立 setter。
-void SetEditorAssetContextForSchema(const EditorAssetContext* p)
-{
-    gpAssetContext = p;
-}
 
 void RegisterBuiltinSchemas()
 {

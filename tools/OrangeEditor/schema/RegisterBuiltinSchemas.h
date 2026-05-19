@@ -6,22 +6,16 @@
 //
 // 调用方：tools/OrangeEditor/main.cpp，在创建 EditorHost 之前 / 紧随其后
 // 调用一次。重复调用会触发 registry 内部的重复注册断言（开发期捕获）。
-
-struct EditorAssetContext;
+//
+// v0.9.5 c3：AssetRef get/set 改走 PropertyDescriptor::AssetRefGetFn /
+// AssetRefSetFn 新签名（带 `const EditorAssetContext&` 参数），SchemaInspector
+// 在 dispatch + 命令栈 replay 显式传 ctx。原 SetEditorAssetContextForSchema
+// 启动期注入路径不再需要，已下架。
 
 namespace Orange::Editor::Schema
 {
 
 void RegisterBuiltinSchemas();
-
-// v0.8 整骨（消除 L15）：单一 EditorAssetContext 注入入口，替代原
-// SetAssetRegistryForSchema + SetNamedMaterialInstancesForSchema 两个独立
-// setter。main.cpp 在 InitializeEditorAssets + BuildNamedMaterialInstances
-// 完成后调一次 SetEditorAssetContextForSchema(&editorHost.assets)；schema
-// 内 AssetRef get/set lambda 通过 gpAssetContext 访问 pAssets +
-// namedMaterialInstances 两段数据。host 生命周期 ≥ schema 渲染，裸指针不
-// 悬挂。
-void SetEditorAssetContextForSchema(const EditorAssetContext* p);
 
 }  // namespace Orange::Editor::Schema
 

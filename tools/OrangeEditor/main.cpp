@@ -567,15 +567,13 @@ int main()
     editorHost.cmdStack.SetOnChanged(
         [pHost = &editorHost]{ pHost->scene.dirty = true; });
 
-    // v0.8 整骨：namedMaterialInstances 集中到 EditorAssetContext 自身
-    //（消除 L15）。BuildNamedMaterialInstances 直接写到 context 字段，所有
-    // schema AssetRef get/set lambda 通过 SetEditorAssetContextForSchema 注
-    // 入的 gpAssetContext 访问。原"两个独立 setter"消化为单一入口；编辑器
-    // 关闭时 main 栈帧析构 context（含 map）同款时序，schema 不会再访问
-    //（layer 已先 shutdown）。
+    // namedMaterialInstances 集中到 EditorAssetContext 自身（v0.8 整骨消除
+    // L15）。BuildNamedMaterialInstances 直接写到 context 字段；schema AssetRef
+    // get/set lambda 在 v0.9.5 c3 后通过 SchemaInspector 显式传入的
+    // `const EditorAssetContext&` 参数访问 pAssets / namedMaterialInstances，
+    // 不再需要启动期注入 file-scope 静态指针。
     editorHost.assets.namedMaterialInstances =
         BuildNamedMaterialInstances(editorHost.assets);
-    Orange::Editor::Schema::SetEditorAssetContextForSchema(&editorHost.assets);
     {
         Scene::LoadOptions demoLoadOpts{};
         demoLoadOpts.assetRegistry          = editorHost.assets.pAssets.get();

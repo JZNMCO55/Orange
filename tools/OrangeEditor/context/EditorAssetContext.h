@@ -79,13 +79,10 @@ struct EditorAssetContext
     std::string browserCurrentDir   = "assets";
     std::string selectedAssetPath   = {};
 
-    // v0.8 Schema context 整骨（消除 L15）：内置 MaterialInstance 命名表
-    // 集中到 context 自身。原 main.cpp 局部 std::unordered_map<string,
-    // MaterialInstance*> + 两个独立 file-scope setter (SetAssetRegistryFor
-    // Schema / SetNamedMaterialInstancesForSchema) 合并为单一
-    // `SetEditorAssetContextForSchema(&editorHost.assets)` 注入路径。
-    // 由 BuildNamedMaterialInstances 在 main 启动期填好；Schema AssetRef
-    // lambda 通过 gpAssetContext->namedMaterialInstances 反查。
+    // 内置 MaterialInstance 命名表，集中到 context 自身（v0.8 整骨消除 L15）。
+    // 由 BuildNamedMaterialInstances 在 main 启动期填好；v0.9.5 c3 起 Schema
+    // AssetRef lambda 通过 SchemaInspector 显式传入的 `const EditorAssetContext&`
+    // 参数访问本字段，不再走任何 file-scope 静态注入路径。
     std::unordered_map<std::string,
                        Orange::Engine::Render::MaterialInstance*>
         namedMaterialInstances;

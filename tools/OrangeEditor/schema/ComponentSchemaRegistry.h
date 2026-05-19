@@ -259,23 +259,29 @@ public:
     // v0.5 c1：AssetRef 字段注册入口。get/set 类型擦除媒介是 std::string
     // （资源相对路径，如 "assets/meshes/cube.mesh"）。component 内字段实际
     // 类型（AssetHandle<T> / MaterialInstance*）与 path 的双向映射由 caller
-    // 在 getFn / setFn 内自行实现——typically capture 一个静态指向
-    // AssetRegistry / namedMaterialInstances 的指针完成 PathOf / Load 反查。
+    // 在 getFn / setFn 内自行实现。
+    //
+    // v0.9.5 c3：签名升级为带 `const EditorAssetContext&` 的新 accessor，
+    // 替代原"capture 文件作用域静态指针"模式。caller 在 lambda 内通过 ctx
+    // 参数直接访问 AssetRegistry / namedMaterialInstances，零 file-scope
+    // 全局状态；SchemaInspector 在 dispatch 与命令栈 replay 两个路径都
+    // 把 ctx 显式传递下来（详见 SchemaInspector.cpp MakeAssetRefFieldApply
+    // 与 ADR-004）。
     //
     // assetKind 区分 mesh / material / texture / scene；Asset 浏览器按 kind
     // 过滤可拖入；DnD payload 校验类型匹配；Material 子模式入口判定。
     ComponentSchemaBuilder& FieldAssetRef(const char* name, const char* label,
-                                          AssetKind                 kind,
-                                          PropertyDescriptor::GetFn getFn,
-                                          PropertyDescriptor::SetFn setFn)
+                                          AssetKind                         kind,
+                                          PropertyDescriptor::AssetRefGetFn getFn,
+                                          PropertyDescriptor::AssetRefSetFn setFn)
     {
         PropertyDescriptor pd{};
-        pd.name             = name;
-        pd.label            = label;
-        pd.type             = PropertyType::AssetRef;
+        pd.name              = name;
+        pd.label             = label;
+        pd.type              = PropertyType::AssetRef;
         pd.attribs.assetKind = kind;
-        pd.get              = getFn;
-        pd.set              = setFn;
+        pd.assetRefGet       = getFn;
+        pd.assetRefSet       = setFn;
         mSchema.properties.push_back(pd);
         return *this;
     }
