@@ -4,6 +4,7 @@
 
 #include "orange/engine/animation/AnimatorRegistry.h"
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -73,6 +74,22 @@ bool AnimatorRegistry::HasBackend(std::string_view name) const noexcept
 std::size_t AnimatorRegistry::BackendCount() const noexcept
 {
     return mpImpl ? mpImpl->backends.size() : 0;
+}
+
+std::vector<std::string> AnimatorRegistry::BackendNames() const
+{
+    if (!mpImpl)
+    {
+        return {};
+    }
+    std::vector<std::string> names;
+    names.reserve(mpImpl->backends.size());
+    for (const auto& kv : mpImpl->backends)
+    {
+        names.push_back(kv.first);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
 }
 
 }  // namespace Orange::Engine::Animation
