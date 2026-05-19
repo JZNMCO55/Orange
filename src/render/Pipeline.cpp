@@ -1099,6 +1099,25 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
     auto& impl = *mpImpl;
     auto& rhi = impl.renderDevice->GetRhiDevice();
 
+    // 内置 PBR 顶点 shader push constant 总 160 B（mat4×2 + vec4×2），
+    // 超过 Vulkan 规范保证下限 128 B。桌面 NVIDIA / AMD / Intel discrete
+    // 普遍 256 B 不触发；移动 / 老 Intel iGPU 可能报 128 B，PBR pipeline
+    // 创建会在 vkCreatePipelineLayout 处自然 fail。这里 init-time 一次性
+    // 检测并日志告警，便于将来撞上时定位（非 PBR 路径仍可工作，所以不
+    // 阻塞启动）。长期方案见 docs/engine-known-gaps.md
+    // GAP-2026-05-19-pbr-push-constant-exceeds-spec-min（切 per-instance
+    // material UBO 或 multi-stage PushConstantRange）。
+    constexpr uint32_t kPbrPushConstantBytes = 160;
+    const uint32_t maxPushConstants = rhi.GetCapabilities().mLimits.mMaxPushConstantsSize;
+    if (maxPushConstants > 0 && maxPushConstants < kPbrPushConstantBytes)
+    {
+        ORANGE_LOG_WARN(
+            "Pipeline::SetupRhiResources: device maxPushConstantsSize={} < {}B required by "
+            "builtin PBR material; PBR pipeline creation may fail. See engine-known-gaps "
+            "GAP-2026-05-19-pbr-push-constant-exceeds-spec-min.",
+            maxPushConstants, kPbrPushConstantBytes);
+    }
+
     // 4. Sampler ---------------------------------------------------------
     Orange::Rhi::SamplerDesc samplerDesc{};
     samplerDesc.mMagFilter  = Orange::Rhi::SamplerFilter::Linear;
