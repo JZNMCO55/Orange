@@ -1,14 +1,21 @@
 #include "AnimatorMiniPreviewPlugin.h"
 
+#include "../EditorHost.h"
+#include "../command/EntityCommands.h"
+#include "../context/EditorSceneContext.h"
 #include "../schema/ComponentSchema.h"
 #include "../theme/EditorTheme.h"
 
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/animation/IAnimator.h>
 
 #include <imgui.h>
 
+#include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace Orange::Editor::Plugin
 {
@@ -28,8 +35,6 @@ void AnimatorMiniPreviewPlugin::ParseEnd(
     const Orange::Editor::Schema::ComponentSchema&         schema,
     void*                                                  component)
 {
-    (void)host;
-    (void)entity;
     (void)schema;
 
     using AC = Orange::Engine::Animation::AnimatorComponent;
@@ -40,10 +45,70 @@ void AnimatorMiniPreviewPlugin::ParseEnd(
     ImGui::Separator();
     ImGui::TextDisabled("Mini-Preview (IEditorInspectorPlugin demo)");
 
+    // v0.7 c1：Backend 切换 Combo —— 即便当前 animator 是 null 也能 Combo
+    // 选个 backend 让 AnimatorComponent 真正挂上 backend，因此 Combo 段必
+    // 须在 null guard 之上独立渲染。Mini-Preview 状态行依然保留 null guard
+    // 的早退路径（无 backend 没 Status / Backend 信息可读）。
+    auto* pRegistry = host.assets.pAnimators.get();
+    if (pRegistry != nullptr)
+    {
+        // 每帧从 registry 实时枚举可用 backend，让游戏侧动态 Register/Unregister
+        // 即时反映；BackendNames 内部已按字典序排序保证 Combo 顺序稳定。
+        const std::vector<std::string> backendNames = pRegistry->BackendNames();
+
+        // 当前 backend 名作为 Combo 显示值；animator==nullptr 时显示 (none)。
+        const std::string currentName = pAc->animator
+            ? std::string(pAc->animator->BackendName())
+            : std::string{};
+
+        // 找 currentName 在列表中的 index（找不到走 -1 → Combo 显示空）。
+        // 找不到的情况：游戏侧外部注册过 backend、用 Register 切到该 backend、
+        // 后又 Unregister；当前 animator 还活着但 registry 不认得它了。
+        int curIdx = -1;
+        for (int i = 0; i < static_cast<int>(backendNames.size()); ++i)
+        {
+            if (backendNames[static_cast<std::size_t>(i)] == currentName)
+            {
+                curIdx = i;
+                break;
+            }
+        }
+
+        // ImGui::Combo 需要 const char* 数组 —— 转一次。
+        std::vector<const char*> backendNameCStrs;
+        backendNameCStrs.reserve(backendNames.size());
+        for (const auto& n : backendNames) { backendNameCStrs.push_back(n.c_str()); }
+
+        // Play / Paused 期间禁用 Combo —— 与 Inspector 主路径 Play 期 read-only
+        // 行为一致；切换 backend 在 runtime 期有损，仅 Edit 期允许。
+        const bool canEdit = (host.scene.playState == PlayState::Edit);
+        ImGui::BeginDisabled(!canEdit);
+        if (!backendNameCStrs.empty()
+            && ImGui::Combo("Backend##animator_switch", &curIdx,
+                            backendNameCStrs.data(),
+                            static_cast<int>(backendNameCStrs.size())))
+        {
+            if (curIdx >= 0
+                && curIdx < static_cast<int>(backendNames.size()))
+            {
+                const std::string& chosen = backendNames[static_cast<std::size_t>(curIdx)];
+                if (chosen != currentName)
+                {
+                    host.cmdStack.Push(std::make_unique<SwitchAnimatorBackendCommand>(
+                        host, entity, currentName, chosen));
+                }
+            }
+        }
+        if (backendNameCStrs.empty())
+        {
+            ImGui::TextDisabled("(no animator backends registered)");
+        }
+        ImGui::EndDisabled();
+    }
+
+    // 状态 / Backend 显示行 —— 依赖 animator 非空；与 v0.3 c5 行为一致。
     if (!pAc->animator)
     {
-        // 没挂 backend：schema 默认段已经在 "backend" 字段显示 "(no backend)"，
-        // 这里仅追加一条灰色状态说明，与 schema 段语义一致。
         ImGui::TextDisabled("Status: (no backend attached)");
         return;
     }
