@@ -46,6 +46,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <array>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -101,6 +102,10 @@ private:
     // 的 ImGui 编辑控件；写回 host.settings + 标记 dirty 触发持久化（仅在
     // 关闭编辑器时统一写盘，避免每帧 disk I/O）。
     void DrawSettingsPanel();
+    // v0.9：Profiler 面板 —— 最近 N 帧耗时柱状图 + sample bin 树形
+    // （inclusive/exclusive ms + call count）。数据源是 Core::Profiler
+    // 单例（AppHost 主循环帧末 FinalizeFrame 写入的 snapshot）。
+    void DrawProfilerPanel(const Orange::Engine::FrameContext& frame);
     // ---- panels/LayersPanel.cpp (v0.6 c5) -------------------------------
     // Layer manifest 编辑：visibility 切换 / 添加 / 删除。
     // Hierarchy panel 的 layer 列 + 右键 "Move to layer >" 在
@@ -192,6 +197,14 @@ private:
     // v0.8 EditorSettings：是否显示 Settings 浮动面板（默认不显示，由 View
     // 菜单 / 主 toolbar 切换）。
     bool                                              mShowSettingsPanel{false};
+    // v0.9 Profiler：是否显示 Profiler 面板（默认不显示，由 View 菜单切换）。
+    bool                                              mShowProfilerPanel{false};
+    // v0.9 Profiler 帧耗时 ring buffer —— PlotLines 喂数据用。capped 大小 +
+    // 写指针 + 当前长度三件套。push 新值时按 ring 节奏覆盖最老值。
+    static constexpr std::size_t                      kProfilerFrameRingCap = 128;
+    std::array<float, kProfilerFrameRingCap>          mProfilerFrameMs{};
+    std::size_t                                       mProfilerFrameWriteIdx{0};
+    std::size_t                                       mProfilerFrameCount{0};
     // v0.8 Keybinding rebind 状态：empty = 不在 rebind；非空 = 等当前 slot
     // 名（"gizmoTranslate" 等）下次按键写回。Esc 取消。
     std::string                                       mRebindActive;

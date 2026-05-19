@@ -16,6 +16,10 @@
 #include <orange/engine/asset/MeshAsset.h>
 
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/core/Profiler.h>
+
+#include <functional>
+#include <string_view>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/LayerVisibilitySync.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
@@ -263,6 +267,10 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     if (mShowSettingsPanel)
     {
         DrawSettingsPanel();
+    }
+    if (mShowProfilerPanel)
+    {
+        DrawProfilerPanel(frame);
     }
 
     // v0.6 c2：未保存确认 popup —— 必须在 ApplyPendingSceneOp 之前，让
@@ -559,6 +567,7 @@ void EditorRenderLayer::DrawMainMenuBar()
     if (ImGui::BeginMenu("View"))
     {
         ImGui::MenuItem("Settings", nullptr, &mShowSettingsPanel);
+        ImGui::MenuItem("Profiler", nullptr, &mShowProfilerPanel);
         ImGui::EndMenu();
     }
 
@@ -1550,5 +1559,122 @@ void EditorRenderLayer::DrawSettingsPanel()
             mRebindActive.clear();
         }
     }
+    ImGui::End();
+}
+
+// v0.9 Profiler 面板 —— 最近 N 帧耗时柱状图 + sample bin 树形（按 parent
+// 关系展开）。数据源是 Core::Profiler 单例（AppHost 主循环帧末
+// FinalizeFrame 写入的 snapshot）。
+void EditorRenderLayer::DrawProfilerPanel(const Orange::Engine::FrameContext& frame)
+{
+    namespace Profiler = ::Orange::Engine::Core::Profiler;
+
+    if (!ImGui::Begin("Profiler##editor", &mShowProfilerPanel))
+    {
+        ImGui::End();
+        return;
+    }
+
+    // 1. 帧耗时柱状图 ----------------------------------------------------
+    // 把本帧 delta 推入 ring buffer。ring 用 write-index + count 实现，避免
+    // 每帧 std::deque pop/push 的分配；PlotLines 接受 stride / offset 直接
+    // 绘 ring 起点 = oldest sample。
+    const float deltaMs = frame.time.deltaSeconds * 1000.0f;
+    mProfilerFrameMs[mProfilerFrameWriteIdx] = deltaMs;
+    mProfilerFrameWriteIdx = (mProfilerFrameWriteIdx + 1) % kProfilerFrameRingCap;
+    if (mProfilerFrameCount < kProfilerFrameRingCap)
+    {
+        ++mProfilerFrameCount;
+    }
+
+    ImGui::Text("Frame %llu  Δ=%.2f ms (%.1f FPS)",
+                static_cast<unsigned long long>(frame.time.frameIndex),
+                deltaMs,
+                (deltaMs > 0.001f) ? (1000.0f / deltaMs) : 0.0f);
+
+    // PlotLines values_offset = write_idx 当 ring 满了等价于 "oldest 在 buffer
+    // 起点的逻辑视图"。scale_min/max 自动；用 50ms 给 plot 一个稳定 y 上限避
+    // 免单帧尖刺把 plot 压扁。
+    const float plotMax = 50.0f;
+    ImGui::PlotLines("##frametime",
+                     mProfilerFrameMs.data(),
+                     static_cast<int>(mProfilerFrameCount),
+                     static_cast<int>(mProfilerFrameWriteIdx),
+                     nullptr,
+                     0.0f, plotMax,
+                     ImVec2(0.0f, 80.0f));
+
+    ImGui::Separator();
+
+    // 2. Sample bin 树形 -------------------------------------------------
+    // Profiler::Snapshot 返回稳定顺序的 SampleBinSnapshot 数组（按 DeclareSampleBin
+    // 调用次序）。按 parentName 关系递归展开为 tree。
+    auto snapshot = Profiler::Snapshot();
+    if (snapshot.empty())
+    {
+        ImGui::TextDisabled("(no sample bins declared)");
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::BeginTable("##profilerBins", 4,
+                           ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg |
+                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY))
+    {
+        ImGui::TableSetupColumn("Name",        ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Inclusive",   ImGuiTableColumnFlags_WidthFixed, 80.0f);
+        ImGui::TableSetupColumn("Exclusive",   ImGuiTableColumnFlags_WidthFixed, 80.0f);
+        ImGui::TableSetupColumn("Calls",       ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableHeadersRow();
+
+        // 递归绘 bin：先画自己一行，再递归画 children。child 关系 O(N²)
+        // 扫描；v0.9 bin 数十量级足够，未来 bin 数十万再上 child 索引。
+        std::function<void(const char*)> drawSubtree = [&](const char* parentName) {
+            for (const auto& bin : snapshot)
+            {
+                const bool isRoot = (bin.parentName == nullptr);
+                const bool match  = (parentName == nullptr)
+                    ? isRoot
+                    : (!isRoot && std::string_view{bin.parentName} == std::string_view{parentName});
+                if (!match) { continue; }
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                // 数 children 决定 TreeNode 是否 leaf
+                bool hasChildren = false;
+                for (const auto& other : snapshot)
+                {
+                    if (other.parentName != nullptr &&
+                        std::string_view{other.parentName} == std::string_view{bin.name})
+                    {
+                        hasChildren = true;
+                        break;
+                    }
+                }
+                const ImGuiTreeNodeFlags flags = hasChildren
+                    ? ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth
+                    : ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen |
+                      ImGuiTreeNodeFlags_SpanAvailWidth;
+                const bool open = ImGui::TreeNodeEx(bin.name, flags);
+
+                ImGui::TableNextColumn();
+                ImGui::Text("%.3f", bin.inclusiveMs);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.3f", bin.exclusiveMs);
+                ImGui::TableNextColumn();
+                ImGui::Text("%u", bin.callCount);
+
+                if (open && hasChildren)
+                {
+                    drawSubtree(bin.name);
+                    ImGui::TreePop();
+                }
+            }
+        };
+        drawSubtree(nullptr);
+
+        ImGui::EndTable();
+    }
+
     ImGui::End();
 }
