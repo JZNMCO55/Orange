@@ -76,6 +76,7 @@
 #include "VulkanLoaderShim.h"
 #include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
+#include "plugin/AnimFsmAssetInspectorPlugin.h"
 #include "plugin/AnimatorMiniPreviewPlugin.h"
 #include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
@@ -549,9 +550,15 @@ int main()
     // 注册第一个 IEditorAssetInspectorPlugin —— v0.7 c0 落地（消除 L16）。
     // 当 Asset 浏览器选中 .material 文件时接管 Inspector 整段；与
     // inspectorPlugins 正交（按选中资源类型而非 component schema 分派）。
-    // v0.7 c2 Animation 子模式 plugin 落地后作为第二条 push_back。
     editorHost.assetInspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::MaterialAssetInspectorPlugin>());
+
+    // v0.7 c2-2：第二条 IEditorAssetInspectorPlugin —— 选中 .anim_fsm
+    // 文件时接管 Inspector 整段。当前 scope 仅展示 states / transitions /
+    // initial state（round-trip 验证）；节点图编辑 UI / Save / Condition
+    // DSL 在 c2-3 ~ c2-6 逐步展开。
+    editorHost.assetInspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin>());
 
     // 注册首批 IEditorGizmoPlugin —— v0.4 c4 落地（v0.2.5 c12 抽象首批
     // 真实消费）。Light 方向箭头 + ParticleEmitter spawn box / velocity

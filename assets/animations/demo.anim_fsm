@@ -1,0 +1,56 @@
+{
+  "schemaVersion": {
+    "namespace": "editor/anim_fsm",
+    "major": 1,
+    "minor": 0
+  },
+  "initialState": "idle",
+  "states": [
+    {
+      "name": "idle",
+      "clipName": "idle",
+      "layout": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "walk",
+      "clipName": "walk",
+      "layout": [
+        220.0,
+        0.0
+      ]
+    },
+    {
+      "name": "jump",
+      "clipName": "jump",
+      "layout": [
+        110.0,
+        -140.0
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from": "idle",
+      "to": "walk"
+    },
+    {
+      "from": "walk",
+      "to": "idle"
+    },
+    {
+      "from": "idle",
+      "to": "jump"
+    },
+    {
+      "from": "walk",
+      "to": "jump"
+    },
+    {
+      "from": "jump",
+      "to": "idle"
+    }
+  ]
+}
