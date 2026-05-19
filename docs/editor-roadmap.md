@@ -517,19 +517,41 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **Critical Path**：否
 
-### v0.9 · Profiler / Debug Draw 集成
+### v0.9 · Profiler / Debug Draw 集成 ✅
+
+**关键 deliverables**（2026-05-19 跨仓 session 全数落地，c0–c8 commit 序列）：
+
+- ✅ **Debug 绘制 API**（c1 + c2）—— `Orange::Engine::Render::DebugDrawScene` 公共面 wrap `OrangeRender::Renderer::DebugDraw`：AddLine / AddAabb / AddSphere / AddTriangle 四条 immediate-mode 入口 + Pipeline 自管 RecordDebugDrawPass（grid 之后、passthrough 之前，always-on-top 不写深度）+ ScenePanel toolbar Debug Draw checkbox + 选中实体黄色 sphere overlay 试点。sample 15 `samples/15_debug_draw_minimal/` 端到端验证（line/aabb/sphere/triangle 全覆盖）。**Text 暂未提供**——ImGui DrawList screen-space overlay 已覆盖 gizmo label / panel 标签等 text 用例；3D world-space text 留 v1.x 按需扩
+- ✅ **Profiler 面板自实现 AutoProfile RAII**（c3 + c4 + c5）—— ADR-003 选定方案 B（自实现 in-game 路径，不接 Tracy）：`include/orange/engine/core/Profiler.h` AutoProfile RAII + 分层 sample bin（parent 关系树）+ FinalizeFrame 算 exclusive。`ORANGE_PROFILE_SCOPE` / `ORANGE_PROFILE_DECLARE_BIN` 宏；AppHost 主循环帧末 FinalizeFrame；Pipeline 内置 9 个 bin（Frame / PollEvents / LayerUpdate / Render / Shadow / Sky / MainPass / Particles / Bloom / Tonemap / DebugDraw / Grid）。ProfilerPanel Performance tab：帧耗时 PlotLines（128 帧 ring）+ sample bin TreeNode 表格（Name / Inclusive / Exclusive / Calls）。**Tracy gate 保留 CMake stub 不接通**——双轨升级路径走 superseding ADR
+- ✅ **内存统计 per-module**（c6）—— `include/orange/engine/core/Memory.h` per-category 字节级 counter API（RegisterCategory / AddBytes / SubBytes / Snapshot，含 current / high-water / alloc/free count 四件套）。ProfilerPanel Memory tab：Tracked Categories（Core::Memory opt-in，模块未来 instrument）+ Module Counts（走现有 introspection API：World::Size / AssetRegistry::Size / Pipeline::TemplatePipelineCount / Pipeline::BloomMipCount / Profiler::BinCount / Memory::CategoryCount）。byte-accurate per-allocator hook 是非平凡 refactor，留未来工作
+
+**v0.8 c5 自承诺的"完整 `(Component&, EditorAssetContext&)` 签名整骨"**：调研发现是 GetFn/SetFn 签名扩 context 参数 + 20+ lambda 重写 + dispatch 改造，半天+ 工作量，与 v0.9 主线（DebugDraw + Profiler + Memory）正交且不阻塞用户体验。重新评估推延到 **v0.9.5 patch milestone**（先例：v0.6.5 / v0.8.5 都是从大 milestone 拆出的 patch）。
+
+**完工记录**：见 `docs/acceptance/editor-v0.9-acceptance-checklist.md`。ADR-003（Profiler 后端选型）在 v0.9 完工后切 status: accepted。
+
+**前置**：v0.2（Editor 命令栈基础）+ v0.8 c2（SetLogSink 同节奏的 engine→editor 数据流模式 reuse）
+
+**与引擎关系**：DebugDrawScene 是 engine 端 wrap（Header isolation 守住）；Profiler / Memory 是 Core 模块新公共面（零第三方 include）。Pipeline 内置 PROFILE_SCOPE 让游戏侧消费 Pipeline 时也能看到 frame breakdown。
+
+**Critical Path**：否
+
+### v0.9.5 · Schema dispatch 整骨（v0.8 c5 → v0.9 → v0.9.5）
+
+**触发**：v0.8 c5 自承诺留 v0.9；v0.9 完工评估后推延到本 patch milestone。
 
 **关键 deliverables**：
 
-- Debug 绘制 API 在 viewport 显示（aabb / line / sphere / text），面板开关
-- Profiler 面板：接 `ORANGE_ENGINE_WITH_TRACY` 或自实现 in-game profiler（wiki `techniques/debugging/in-game-profiler.md`）
-- 内存统计（per-module）
+- 消除 `RegisterBuiltinSchemas.cpp` 的 `gpAssetContext` file-scope 单例
+- 扩 `PropertyDescriptor::GetFn / SetFn` 签名加 `const EditorAssetContext& ctx` 参数（或引入专门的 `AssetRefAccessor` 槽位避免污染所有非 AssetRef 字段）
+- 改 `SchemaInspector` dispatch 调用站点把 ctx 传到 lambda
+- 全 schema 注册 lambda（Renderable mesh/material 字段 + 其它 AssetRef）走 ctx 而非 gpAssetContext
+- 保留现有 SchemaInspector 视觉 / 行为不变，纯架构整骨
 
-**前置**：v0.2
+**前置**：v0.2.5（schema-first 基础）+ v0.9（无依赖，正交）
 
-**与引擎关系**：消费引擎已有 tracy gate；调试绘制 API 走编辑器侧 viewport overlay sub-pass
+**与引擎关系**：纯编辑器侧 refactor，不动 engine 公共面。
 
-**Critical Path**：否
+**Critical Path**：否（同 v0.6.5 / v0.8.5 节奏，patch milestone 不在 v1.0 critical path 上）
 
 ### v1.0 · 验收里程碑
 

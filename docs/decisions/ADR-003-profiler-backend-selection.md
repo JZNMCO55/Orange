@@ -1,7 +1,7 @@
 ---
 id: ADR-003
 title: OrangeEditor v0.9 Profiler 后端选型 —— 自实现 AutoProfile RAII（暂不接 Tracy）
-status: proposed
+status: accepted
 date: 2026-05-19
 deciders: [solo-dev]
 related:
