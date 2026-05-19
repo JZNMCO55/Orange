@@ -3217,10 +3217,25 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                : glm::mat4(1.0f);
 
+        // [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
+        // 输出 skyEnabled 实际运行值 + 各 pass 是否真跑——锁定测试机 binary 是
+        // 否含 3e4eb38 fix。binary 旧版本会显示 skyEnabled=1，新版本显示 0。
+        std::fprintf(stderr,
+                     "[INVESTIGATE RenderOffscreen] HasCamera=1, skyEnabled=%d, "
+                     "hasShadowMap=%d, hdrColor=%p, sceneDepth=%p, viewportColor=%p\n",
+                     impl.skyEnabled ? 1 : 0,
+                     impl.shadowMap ? 1 : 0,
+                     static_cast<const void*>(impl.hdrColor.get()),
+                     static_cast<const void*>(impl.sceneDepth.get()),
+                     static_cast<const void*>(impl.viewportColor.get()));
+        std::fflush(stderr);
+
         // shadow pre-pass
         if (impl.shadowMap)
         {
+            std::fprintf(stderr, "[INVESTIGATE] -> RecordShadowPass\n"); std::fflush(stderr);
             ok = impl.RecordShadowPass(activeLight, lightVP);
+            std::fprintf(stderr, "[INVESTIGATE] <- RecordShadowPass (ok=%d)\n", ok ? 1 : 0); std::fflush(stderr);
         }
 
         // sky pass：主 pass 之前画背景。两种分支：
@@ -3255,10 +3270,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             }
         }
 
+        std::fprintf(stderr, "[INVESTIGATE] skyDrew=%d, about to call RecordOffscreenPass (ok=%d)\n",
+                     skyDrew ? 1 : 0, ok ? 1 : 0); std::fflush(stderr);
+
         // 主 HDR pass
         if (ok)
         {
+            std::fprintf(stderr, "[INVESTIGATE] -> RecordOffscreenPass\n"); std::fflush(stderr);
             ok = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew);
+            std::fprintf(stderr, "[INVESTIGATE] <- RecordOffscreenPass (ok=%d)\n", ok ? 1 : 0); std::fflush(stderr);
         }
 
         // 粒子 pass —— 与窗口模式路径对称，插在主 pass 之后、passthrough 之前。
