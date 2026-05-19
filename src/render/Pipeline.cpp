@@ -1007,33 +1007,12 @@ struct Pipeline::Impl
             return false;
         }
         sceneDepth = std::move(newDepth);
-        // 与 hdrLayoutShaderReadOnly 对偶：新建 RHITexture layout = Undefined。
-        // BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe 锁定后改
-        // 走"创建后立即 prime layout 到 ShaderReadOnly / DepthStencilAttachment"
-        // 路径，绕开 Intel Xe ICD 的 Undefined→ColorAttachment driver bug。
-        // 本 prime 之后字段 set true，后续帧 transition 起点变 ShaderReadOnly。
-        if (!PrimeTextureLayout(*hdrColor,
-                                Orange::Rhi::TextureLayout::ShaderReadOnly,
-                                "hdrColor"))
-        {
-            return false;
-        }
-        hdrLayoutShaderReadOnly = true;
-        // sceneDepth 也 prime 到 ShaderReadOnly（而非 DepthStencilAttachment）
-        // 与 hdrColor 同款：sceneDepthLayoutShaderReadOnly flag 的语义是
-        //   true  → 上一帧末尾翻到了 ShaderReadOnly，下一帧 entry 从此起点
-        //   false → 上一帧没翻，下一帧 entry 从 Undefined 起点
-        // prime 翻 ShaderReadOnly 后字段 set true，让首帧 transition 起点变
-        // ShaderReadOnly（合法 Vulkan path），避开 Undefined → DepthStencil-
-        // Attachment 这条触发 Intel Xe driver bug 的路径。depth ShaderReadOnly
-        // 仅是 layout 元数据，不影响"image 有无内容"。
-        if (!PrimeTextureLayout(*sceneDepth,
-                                Orange::Rhi::TextureLayout::ShaderReadOnly,
-                                "sceneDepth"))
-        {
-            return false;
-        }
-        sceneDepthLayoutShaderReadOnly = true;
+        // 与 hdrLayoutShaderReadOnly 对偶：新建 RHITexture layout = Undefined，
+        // 字段必须 reset 否则下一帧主 pass entry 看上一帧残留的 true 会按
+        // ShaderReadOnly → DSA transition（实际 Undefined → DSA），撞 validation。
+        // grid pass 引入"sceneDepth ShaderReadOnly 翻转"路径后让这条 pre-existing
+        // 漏点显形。
+        sceneDepthLayoutShaderReadOnly = false;
         // grid descriptor set 之前绑的是旧 sceneDepth 指针；invalidate 让
         // RecordGridPass 下帧 UpdateDescriptorSet 重写 binding 0。
         gridSetBoundDepth = nullptr;
@@ -1099,17 +1078,7 @@ struct Pipeline::Impl
         viewportColor = std::move(newTex);
         viewportWidth  = pendingWidth;
         viewportHeight = pendingHeight;
-        // 与 hdrColor 同款 prime：避开 Intel Xe ICD 的 Undefined → ColorAttach-
-        // ment driver bug（BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel
-        // -iris-xe）。prime 翻 ShaderReadOnly 后 flag set true，首帧 transition
-        // 起点变 ShaderReadOnly。
-        if (!PrimeTextureLayout(*viewportColor,
-                                Orange::Rhi::TextureLayout::ShaderReadOnly,
-                                "viewportColor"))
-        {
-            return false;
-        }
-        viewportLayoutShaderReadOnly = true;
+        viewportLayoutShaderReadOnly = false;  // 新建 = Undefined，首帧 transition 时按此判定
         return true;
     }
 
@@ -1118,65 +1087,6 @@ struct Pipeline::Impl
     // 写入，本字段记录"已落地"尺寸）。
     std::uint32_t viewportWidth{0};
     std::uint32_t viewportHeight{0};
-
-    // 新建 texture 的初始 layout 是 VK_IMAGE_LAYOUT_UNDEFINED。后续帧主路
-    // 径走"Undefined → ColorAttachment / DepthStencilAttachment / ShaderRead-
-    // Only" transition；Intel Iris Xe ICD 在 RGBA16F / D32_SFLOAT + dynamic
-    // rendering + Undefined 起点路径下 vkCmdBeginRendering 内 deref 0x3B0
-    // 段错误（参 vendor/OrangeRender/docs/incoming_bugs.md
-    // BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe）。
-    //
-    // 本 helper 用一个 transient cmd 在 texture 创建后立即把 layout 显式翻
-    // 到 ShaderReadOnly（color）或 DepthStencilAttachment（depth），然后让
-    // layout tracking flag 反映真实 layout。后续主路径 transition 起点变成
-    // ShaderReadOnly / DepthStencilAttachment，绕开 Intel Xe driver bug。
-    //
-    // 性能影响：每次重建 (window resize / scene panel resize) 一次 transient
-    // cmd + WaitIdle，与 EnsureHdrTarget 已有的 WaitIdle 同节奏；首帧 / 极
-    // 少重建路径，与渲染主循环正交，开销可忽略。
-    bool PrimeTextureLayout(Orange::Rhi::RHITexture& tex,
-                            Orange::Rhi::TextureLayout target,
-                            const char* debugName)
-    {
-        if (renderDevice == nullptr)
-        {
-            return false;
-        }
-        auto& rhi = renderDevice->GetRhiDevice();
-        auto cmd = rhi.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
-        if (!cmd)
-        {
-            ORANGE_LOG_ERROR("Pipeline::PrimeTextureLayout: CreateCommandList 失败 ({})",
-                             debugName);
-            return false;
-        }
-        if (Orange::Failed(cmd->Begin()))
-        {
-            ORANGE_LOG_ERROR("Pipeline::PrimeTextureLayout: cmd.Begin 失败 ({})",
-                             debugName);
-            return false;
-        }
-        cmd->TransitionTexture(tex, Orange::Rhi::TextureLayout::Undefined, target);
-        if (Orange::Failed(cmd->End()))
-        {
-            ORANGE_LOG_ERROR("Pipeline::PrimeTextureLayout: cmd.End 失败 ({})",
-                             debugName);
-            return false;
-        }
-        if (Orange::Failed(rhi.SubmitCommandList(*cmd)))
-        {
-            ORANGE_LOG_ERROR("Pipeline::PrimeTextureLayout: SubmitCommandList 失败 ({})",
-                             debugName);
-            return false;
-        }
-        if (Orange::Failed(renderDevice->WaitIdle()))
-        {
-            ORANGE_LOG_ERROR("Pipeline::PrimeTextureLayout: WaitIdle 失败 ({})",
-                             debugName);
-            return false;
-        }
-        return true;
-    }
 };
 
 Pipeline::Pipeline() : mpImpl(std::make_unique<Impl>())
@@ -3227,25 +3137,10 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                : glm::mat4(1.0f);
 
-        // [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
-        // 输出 skyEnabled 实际运行值 + 各 pass 是否真跑——锁定测试机 binary 是
-        // 否含 3e4eb38 fix。binary 旧版本会显示 skyEnabled=1，新版本显示 0。
-        std::fprintf(stderr,
-                     "[INVESTIGATE RenderOffscreen] HasCamera=1, skyEnabled=%d, "
-                     "hasShadowMap=%d, hdrColor=%p, sceneDepth=%p, viewportColor=%p\n",
-                     impl.skyEnabled ? 1 : 0,
-                     impl.shadowMap ? 1 : 0,
-                     static_cast<const void*>(impl.hdrColor.get()),
-                     static_cast<const void*>(impl.sceneDepth.get()),
-                     static_cast<const void*>(impl.viewportColor.get()));
-        std::fflush(stderr);
-
         // shadow pre-pass
         if (impl.shadowMap)
         {
-            std::fprintf(stderr, "[INVESTIGATE] -> RecordShadowPass\n"); std::fflush(stderr);
             ok = impl.RecordShadowPass(activeLight, lightVP);
-            std::fprintf(stderr, "[INVESTIGATE] <- RecordShadowPass (ok=%d)\n", ok ? 1 : 0); std::fflush(stderr);
         }
 
         // sky pass：主 pass 之前画背景。两种分支：
@@ -3280,15 +3175,10 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             }
         }
 
-        std::fprintf(stderr, "[INVESTIGATE] skyDrew=%d, about to call RecordOffscreenPass (ok=%d)\n",
-                     skyDrew ? 1 : 0, ok ? 1 : 0); std::fflush(stderr);
-
         // 主 HDR pass
         if (ok)
         {
-            std::fprintf(stderr, "[INVESTIGATE] -> RecordOffscreenPass\n"); std::fflush(stderr);
             ok = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew);
-            std::fprintf(stderr, "[INVESTIGATE] <- RecordOffscreenPass (ok=%d)\n", ok ? 1 : 0); std::fflush(stderr);
         }
 
         // 粒子 pass —— 与窗口模式路径对称，插在主 pass 之后、passthrough 之前。

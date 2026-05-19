@@ -43,10 +43,6 @@
 #include <orange/engine/platform/Window.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/animation/AnimatorComponent.h>
-// [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
-// OR 端 Log API（OR 自家 Log 系统，与 OE Engine 的 Orange::Engine::Log 是两套独立 sink）。
-// 见 main.cpp 内 SetLogSink 调用，强制把 validation log 输出到 stderr。
-#include <orange/core/Log.h>
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -181,25 +177,6 @@ void ChdirToRepoRoot()
 //   EditorRenderLayer     → EditorRenderLayer.{h,cpp} + panels/*.cpp（按面板
 //                           切到独立 TU）
 
-// [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
-// OR Orange::Log sink free function。注册到 OR 端 ::Orange::SetLogSink，把
-// OR validation / RHI 输出强制 fprintf 到 OE 进程 stderr。
-//
-// 不写成 lambda 是因为 MSVC 在 lambda 内捕获 Orange:: namespace 函数指针时
-// name lookup 在 OE 的 anonymous namespace 上下文里报歧义；free function 最
-// 简洁、最稳。复现锁定后整段回滚。
-void InvestigateOrSinkCallback(::Orange::LogCategory category,
-                               ::Orange::LogLevel    level,
-                               const char*           pMessage,
-                               void* /*pUserData*/)
-{
-    std::fprintf(stderr, "[OR-sink][%s][%s] %s\n",
-                 ::Orange::ToString(category),
-                 ::Orange::ToString(level),
-                 pMessage ? pMessage : "(null)");
-    std::fflush(stderr);
-}
-
 }  // namespace
 
 int main()
@@ -280,19 +257,6 @@ int main()
     }
 
     // ---- 编辑器自管 RenderDevice + IRenderer ---------------------------
-    //
-    // [INVESTIGATE BUG-2026-05-19-vk-cmd-begin-rendering-crash-on-intel-iris-xe]
-    // 在 RenderDevice::Create 之前 SetLogSink，把 OR validation / RHI 输出直接
-    // fprintf stderr。OrangeEditor 走 InitializeOffscreen 路径，**不**调
-    // Pipeline::Initialize 内部的 OrangeRenderLogAdapter 注册，导致 OR
-    // Orange::Log 输出走 OR 自家 stderr fallback；PowerShell `*>` 重定向对
-    // NativeCommandError 路径可能 swallow 部分 stderr。本 sink 把 validation
-    // 输出贴到 OE-side stderr 一道，rebuild 后回归 oe_crash.log 应该看到
-    // [OR-sink] 行（Validation / General / Performance 类别全 dump）。
-    //
-    // 复现锁定后回滚此 SetLogSink 段。
-    ::Orange::SetLogSink(&InvestigateOrSinkCallback, nullptr);
-
     Orange::Renderer::RenderDeviceDesc rdDesc{};
     rdDesc.mBackend          = Orange::Renderer::BackendType::Default;
     rdDesc.mEnableValidation = true;

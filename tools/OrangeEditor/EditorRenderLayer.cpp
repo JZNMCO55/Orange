@@ -1452,33 +1452,6 @@ void EditorRenderLayer::LogSinkCallback(Orange::Engine::Log::Level level,
 {
     auto* pLayer = static_cast<EditorRenderLayer*>(userData);
     if (pLayer == nullptr) { return; }
-
-    // 同步 fprintf stderr —— 修 BUG-2026-05-19-vk-cmd-begin-rendering-crash-on
-    // -intel-iris-xe 调查路径上的关键一坑：Editor 接管 SetLogSink 后，OR 端
-    // 经 Orange::Log 路由出来的 validation / RHI / debug 输出全部沉到本 ring
-    // buffer，崩溃后 Console panel 不再渲染就永远拿不到。stderr 与 oe_crash.log
-    // redirect 在进程崩溃前由 OS flush，比 ring buffer 可靠。
-    //
-    // 性能：fprintf + fflush 每条 log 一次 syscall；OR 端 validation 输出量级
-    // 通常 < 100 行/启动，不在 hot path 上。Release 构建不影响——validation
-    // layer 通常仅在 dev build 开启。
-    {
-        const char* tag = "info";
-        switch (level)
-        {
-            case Orange::Engine::Log::Level::Trace:    tag = "trace"; break;
-            case Orange::Engine::Log::Level::Debug:    tag = "debug"; break;
-            case Orange::Engine::Log::Level::Info:     tag = "info";  break;
-            case Orange::Engine::Log::Level::Warn:     tag = "warn";  break;
-            case Orange::Engine::Log::Level::Error:    tag = "error"; break;
-            case Orange::Engine::Log::Level::Critical: tag = "crit";  break;
-            case Orange::Engine::Log::Level::Off:      tag = "off";   break;
-        }
-        std::fprintf(stderr, "[OE-sink %s] %.*s\n", tag,
-                     static_cast<int>(message.size()), message.data());
-        std::fflush(stderr);
-    }
-
     std::lock_guard<std::mutex> guard(pLayer->mLogMutex);
     if (pLayer->mLogEntries.size() >= kLogBufferCap)
     {
