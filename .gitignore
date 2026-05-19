@@ -38,3 +38,11 @@ imgui.ini
 # 真正生产期由 Phase 9 资产管线把 .hdr → ORTX 容器化后再决定入库策略。
 assets/environments/*.hdr
 assets/environments/*.HDR
+
+# v0.8 c1 EditorSettings 系统：编辑器关闭时把 gizmo / keybinding 用户配置落
+# 仓库根目录，与开发者机器状态绑定（每人 keybinding 习惯不同），不入库。
+editor_settings.json
+
+# Pipeline::RequestCapture 调试截图：仅本地调试 ACES tonemap / HDR pipeline
+# 时手动触发输出，每次内容随当时帧不同，不入库。
+/hdr_capture.png
