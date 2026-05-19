@@ -341,3 +341,99 @@ bool AnimFsmMoveStateCommand::Merge(ICommand& newer)
     mNewY = p->mNewY;
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// AnimFsmAddTransitionCommand
+// ---------------------------------------------------------------------------
+
+AnimFsmAddTransitionCommand::AnimFsmAddTransitionCommand(
+    AnimFsmAssetInspectorPlugin* pPlugin,
+    std::string                  fromState,
+    std::string                  toState)
+    : mpPlugin(pPlugin)
+    , mFromState(std::move(fromState))
+    , mToState(std::move(toState))
+{}
+
+void AnimFsmAddTransitionCommand::Execute()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+
+    // 端点防御：必须存在于 states[]（UI 应已 prevent，但命令侧再防御）
+    if (FindStateIt(fsm, mFromState) == fsm.states.end()
+        || FindStateIt(fsm, mToState)   == fsm.states.end())
+    {
+        std::fprintf(stderr,
+                     "[AnimFsmAddTransition] 端点 '%s' / '%s' 不存在，跳过\n",
+                     mFromState.c_str(), mToState.c_str());
+        return;
+    }
+
+    EditableTransition t;
+    t.fromState = mFromState;
+    t.toState   = mToState;
+    fsm.transitions.push_back(std::move(t));
+
+    mpPlugin->MarkDirty();
+}
+
+void AnimFsmAddTransitionCommand::Undo()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+
+    // Execute push_back 到末尾；Undo 从末尾找最后一条匹配 from->to 移除
+    // （rbegin 反向扫描首个匹配，匹配的就是 Execute 当时 push 的那条）
+    for (auto it = fsm.transitions.rbegin(); it != fsm.transitions.rend(); ++it)
+    {
+        if (it->fromState == mFromState && it->toState == mToState)
+        {
+            // reverse_iterator → 对应的 forward iterator = std::next(it).base()
+            fsm.transitions.erase(std::next(it).base());
+            break;
+        }
+    }
+    mpPlugin->MarkDirty();
+}
+
+// ---------------------------------------------------------------------------
+// AnimFsmDeleteTransitionCommand
+// ---------------------------------------------------------------------------
+
+AnimFsmDeleteTransitionCommand::AnimFsmDeleteTransitionCommand(
+    AnimFsmAssetInspectorPlugin* pPlugin,
+    std::size_t                  transitionIndex)
+    : mpPlugin(pPlugin)
+    , mIndex(transitionIndex)
+{}
+
+void AnimFsmDeleteTransitionCommand::Execute()
+{
+    if (mpPlugin == nullptr) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    if (mIndex >= fsm.transitions.size())
+    {
+        std::fprintf(stderr,
+                     "[AnimFsmDeleteTransition] index %zu 越界（size=%zu），跳过\n",
+                     mIndex, fsm.transitions.size());
+        mWasValid = false;
+        return;
+    }
+    mSavedTransition = fsm.transitions[mIndex];
+    fsm.transitions.erase(fsm.transitions.begin()
+                          + static_cast<std::ptrdiff_t>(mIndex));
+    mWasValid = true;
+    mpPlugin->MarkDirty();
+}
+
+void AnimFsmDeleteTransitionCommand::Undo()
+{
+    if (mpPlugin == nullptr || !mWasValid) { return; }
+    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
+    const std::size_t insertAt = std::min(mIndex, fsm.transitions.size());
+    fsm.transitions.insert(
+        fsm.transitions.begin() + static_cast<std::ptrdiff_t>(insertAt),
+        mSavedTransition);
+    mpPlugin->MarkDirty();
+}

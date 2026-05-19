@@ -8,6 +8,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -132,6 +133,75 @@ void AnimFsmAssetInspectorPlugin::DrawCanvas(EditorHost& host)
     const ImU32 borderHoverColor   = ImGui::GetColorU32(ImGuiCol_HeaderHovered);
     const ImU32 borderSelectColor  = ImGui::GetColorU32(ImGuiCol_HeaderActive);
     const ImU32 textColor          = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 edgeColor          = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const float edgeThickness      = 2.0f;
+    const float arrowSize          = ImGui::GetFontSize() * 0.6f;
+
+    // 在节点之前画边（绘制顺序 = 边在节点之下，避免覆盖节点边缘）。
+    // 简化策略：直线 + 中点箭头；自循环画节点右侧圆环。Bezier 曲线 +
+    // 端点 clip 到节点矩形边缘的 polish 留 c2-7+。
+    for (const auto& t : mEditingFsm.transitions)
+    {
+        auto fromIt = std::find_if(
+            mEditingFsm.states.begin(), mEditingFsm.states.end(),
+            [&t](const ::Orange::Editor::AnimFsm::EditableState& s)
+            { return s.name == t.fromState; });
+        auto toIt = std::find_if(
+            mEditingFsm.states.begin(), mEditingFsm.states.end(),
+            [&t](const ::Orange::Editor::AnimFsm::EditableState& s)
+            { return s.name == t.toState; });
+        if (fromIt == mEditingFsm.states.end()
+            || toIt == mEditingFsm.states.end())
+        {
+            continue;  // dangling 引用（reader 已 reject + 命令路径理论
+                       //   不产生，仍做防御性 skip）
+        }
+
+        const ImVec2 fromCenter = ImVec2(
+            canvasOrigin.x + fromIt->layoutX + kNodeWidth * 0.5f,
+            canvasOrigin.y + fromIt->layoutY + kNodeHeight * 0.5f);
+        const ImVec2 toCenter = ImVec2(
+            canvasOrigin.x + toIt->layoutX + kNodeWidth * 0.5f,
+            canvasOrigin.y + toIt->layoutY + kNodeHeight * 0.5f);
+
+        if (t.fromState == t.toState)
+        {
+            // 自循环：节点右侧圆环（无箭头 —— self-loop 方向自明）
+            const float loopRadius = ImGui::GetFontSize() * 1.5f;
+            const ImVec2 loopCenter = ImVec2(
+                fromCenter.x + kNodeWidth * 0.5f + loopRadius,
+                fromCenter.y);
+            dl->AddCircle(loopCenter, loopRadius, edgeColor, 16, edgeThickness);
+            continue;
+        }
+
+        dl->AddLine(fromCenter, toCenter, edgeColor, edgeThickness);
+
+        // 箭头：在线中点处画一个朝向 toCenter 方向的三角形
+        const float dx  = toCenter.x - fromCenter.x;
+        const float dy  = toCenter.y - fromCenter.y;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0.001f) { continue; }
+        const float  invLen = 1.0f / len;
+        const ImVec2 dir    = ImVec2(dx * invLen, dy * invLen);
+        const ImVec2 perp   = ImVec2(-dir.y, dir.x);
+        const ImVec2 midPos = ImVec2(
+            (fromCenter.x + toCenter.x) * 0.5f,
+            (fromCenter.y + toCenter.y) * 0.5f);
+        const ImVec2 tipPos = ImVec2(
+            midPos.x + dir.x * arrowSize,
+            midPos.y + dir.y * arrowSize);
+        const ImVec2 baseCenter = ImVec2(
+            midPos.x - dir.x * arrowSize,
+            midPos.y - dir.y * arrowSize);
+        const ImVec2 a1 = ImVec2(
+            baseCenter.x + perp.x * arrowSize * 0.5f,
+            baseCenter.y + perp.y * arrowSize * 0.5f);
+        const ImVec2 a2 = ImVec2(
+            baseCenter.x - perp.x * arrowSize * 0.5f,
+            baseCenter.y - perp.y * arrowSize * 0.5f);
+        dl->AddTriangleFilled(tipPos, a1, a2, edgeColor);
+    }
 
     for (auto& state : mEditingFsm.states)
     {
@@ -320,6 +390,60 @@ void AnimFsmAssetInspectorPlugin::DrawNodeContextPopup(EditorHost& host)
         host.cmdStack.Push(std::make_unique<AnimFsmRenameStateCommand>(
             this, mRenameTargetState, newName));
         ImGui::CloseCurrentPopup();
+    }
+
+    // ---- c2-6：transitions 管理段 ----
+    ImGui::Separator();
+    ImGui::TextDisabled("Transitions from this state:");
+    {
+        // 收集本帧要删的 index，循环结束后 push 命令（避免迭代期间改容器）
+        std::size_t indexToDelete = static_cast<std::size_t>(-1);
+        bool        anyShown      = false;
+        for (std::size_t i = 0; i < mEditingFsm.transitions.size(); ++i)
+        {
+            const auto& tr = mEditingFsm.transitions[i];
+            if (tr.fromState != mRenameTargetState) { continue; }
+            anyShown = true;
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::Text("→ %s", tr.toState.c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Delete##tr"))
+            {
+                indexToDelete = i;
+            }
+            ImGui::PopID();
+        }
+        if (!anyShown)
+        {
+            ImGui::TextDisabled("(no transitions from this state)");
+        }
+        if (indexToDelete != static_cast<std::size_t>(-1))
+        {
+            host.cmdStack.Push(std::make_unique<AnimFsmDeleteTransitionCommand>(
+                this, indexToDelete));
+        }
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Create transition to:");
+    {
+        // 同帧只创建一条 transition；created flag 防御
+        bool created = false;
+        for (const auto& s : mEditingFsm.states)
+        {
+            if (created) { break; }
+            ImGui::PushID(s.name.c_str());
+            // Selectable 走 DontClosePopups —— 用户连续建多条 transition
+            // 不必反复右键节点；点 Cancel / 点外面关闭 popup
+            if (ImGui::Selectable(s.name.c_str(), false,
+                                  ImGuiSelectableFlags_DontClosePopups))
+            {
+                host.cmdStack.Push(std::make_unique<AnimFsmAddTransitionCommand>(
+                    this, mRenameTargetState, s.name));
+                created = true;
+            }
+            ImGui::PopID();
+        }
     }
 
     ImGui::EndPopup();

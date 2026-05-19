@@ -24,6 +24,10 @@
 //                                  合并为单条 Undo（Merge 路径）
 //   * AnimFsmMoveStateCommand   —— 改 state.layoutX/Y；同 state 连续拖
 //                                  动合并为单条 Undo（Merge 路径）
+//   * AnimFsmAddTransitionCommand    —— 在 transitions[] 末尾 push_back
+//                                       一条新 transition
+//   * AnimFsmDeleteTransitionCommand —— 按 index 删除 transition；Undo
+//                                       按原 index 插回
 
 #include "../AnimFsmModel.h"
 #include "ICommand.h"
@@ -123,6 +127,41 @@ private:
     float                                                mOldY;
     float                                                mNewX;
     float                                                mNewY;
+};
+
+class AnimFsmAddTransitionCommand : public ICommand
+{
+public:
+    AnimFsmAddTransitionCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                                std::string fromState,
+                                std::string toState);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_add_transition"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::string                                          mFromState;
+    std::string                                          mToState;
+};
+
+class AnimFsmDeleteTransitionCommand : public ICommand
+{
+public:
+    AnimFsmDeleteTransitionCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
+                                   std::size_t transitionIndex);
+
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "anim_fsm_delete_transition"; }
+
+private:
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
+    std::size_t                                          mIndex;
+    // Execute 时保存被删 transition 的副本，Undo 按原 index 插回
+    ::Orange::Editor::AnimFsm::EditableTransition        mSavedTransition;
+    bool                                                 mWasValid{false};
 };
 
 #endif  // ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H
