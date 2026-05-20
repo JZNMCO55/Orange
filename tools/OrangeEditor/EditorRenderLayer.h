@@ -29,6 +29,7 @@
 #include <orange/engine/app/AppHost.h>
 #include <orange/engine/app/FrameContext.h>
 #include <orange/engine/app/Layer.h>
+#include <orange/engine/audio/SoundInstance.h>
 #include <orange/engine/core/Log.h>
 #include <orange/engine/physics/PhysicsWorld.h>
 #include <orange/engine/platform/WindowEvent.h>
@@ -51,6 +52,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 class EditorRenderLayer : public Orange::Engine::Layer
 {
@@ -244,6 +246,16 @@ public:
     // VfxSystem 先 SetVfxSystem(nullptr) + Shutdown 再 reset）。
     std::unique_ptr<Orange::Engine::Physics::PhysicsWorld> mpPhysicsWorld;
     std::unique_ptr<Orange::Engine::Render::VfxSystem>     mpVfxSystem;
+
+    // Play Mode 期 entity→SoundInstance 映射。Edit→Play 时遍历
+    // view<AudioSourceComponent> 给每条 CreateInstance；playOnAwake 立即
+    // Start。Stop 时整表清空（SoundInstance 析构 → ma_sound_uninit 自动停
+    // 播）。AudioEngine 自身常驻 EditorHost（编辑器进程级单例），不在
+    // Play/Stop 边界重启。
+    std::unordered_map<
+        Orange::Engine::Entity,
+        std::unique_ptr<Orange::Engine::Audio::SoundInstance>>
+        mEntityToSoundInstance;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_RENDER_LAYER_H

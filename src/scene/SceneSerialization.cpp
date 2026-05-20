@@ -49,9 +49,14 @@ namespace
 // forward-compat 路径一致；不需要 major bump）。
 // 1.2 → 1.3：新增 EnvironmentComponent（同款 optional component 路径，
 // 旧 1.2 文件无该字段时 Pipeline 退化到 dummy IBL，PBR + IBL baseline）。
+// 1.3 → 1.4：新增 AudioSourceComponent（同款 optional component 路径，
+// 旧 1.3 文件无该字段时 entity 不参与 audio 播放）。
+// 1.4 → 1.5：新增 PointLight（GAP-2026-05-11 G1；同款 optional component
+// 路径，旧 1.4 文件无该字段时 Pipeline pointLightCount=0 退化为纯
+// DirectionalLight 路径）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 3};
+    static const SchemaVersion kVersion{"scene/world", 1, 5};
     return kVersion;
 }
 

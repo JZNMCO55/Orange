@@ -47,6 +47,21 @@ layout(set = 0, binding = 2) uniform samplerCube uIrradiance;       // diffuse I
 layout(set = 0, binding = 3) uniform samplerCube uPrefilteredEnv;   // specular IBL — dummy zero in direct-only baseline
 layout(set = 0, binding = 4) uniform sampler2D   uBrdfLut;          // BRDF split-sum LUT — dummy zero in direct-only baseline
 
+// GAP-2026-05-11 G2：PointLights UBO（独立 binding 5，host 端 Pipeline
+// 把场景内 cap=8 个 PointLight 喂进来；超出截断）。其他内置 shader 不引
+// 用本 binding（dead-code）。
+#define ORANGE_MAX_POINT_LIGHTS 8
+struct PointLightData
+{
+    vec4 posRange;       // xyz = world pos, w = range
+    vec4 colorIntensity; // xyz = linear rgb, w = intensity
+};
+layout(set = 0, binding = 5, std140) uniform PointLightsUbo
+{
+    uvec4          uPointLightCountPad;  // x = count, y/z/w pad
+    PointLightData uPointLights[ORANGE_MAX_POINT_LIGHTS];
+} pointLights;
+
 layout(location = 0) in vec2 vUV;
 layout(location = 1) in vec3 vWorldPos;
 layout(location = 2) in vec3 vNormal;
@@ -168,7 +183,53 @@ void main()
     // SetIblTextures 喂入真实烘焙产物后立即生效，无需再改 shader。
     vec3  iblLo      = (iblDiffuse + iblSpec) * ao * light.uIblFactor.rgb;
 
+    // ---- Point lights（GAP-2026-05-11 G2）：cap=8 物理基 inverse-square +
+    //      smoothstep range cutoff。castsShadow 字段当前忽略（omnidirectional
+    //      shadow 是 Phase 10 量级）。无 light 时 count=0 → loop 跳过 0 次开销。
+    vec3 ptLo = vec3(0.0);
+    uint pointLightCount = min(pointLights.uPointLightCountPad.x,
+                                uint(ORANGE_MAX_POINT_LIGHTS));
+    for (uint i = 0u; i < pointLightCount; ++i)
+    {
+        vec3  pLightPos = pointLights.uPointLights[i].posRange.xyz;
+        float pRange    = pointLights.uPointLights[i].posRange.w;
+        vec3  pColor    = pointLights.uPointLights[i].colorIntensity.rgb;
+        float pInten    = pointLights.uPointLights[i].colorIntensity.w;
+        if (pRange <= 0.0) { continue; }
+
+        vec3  pL_unnorm = pLightPos - vWorldPos;
+        float pDist     = length(pL_unnorm);
+        if (pDist > pRange) { continue; }
+        vec3  pL  = pL_unnorm / max(pDist, 1e-5);
+        vec3  pH  = normalize(V + pL);
+        float pNoL = max(dot(N, pL), 0.0);
+        if (pNoL <= 0.0) { continue; }
+        float pNoH = max(dot(N, pH), 0.0);
+        float pVoH = max(dot(V, pH), 0.0);
+
+        float pD  = DistributionGGX(pNoH, alpha);
+        float pVs = VisibilitySmithCorrelated(NoV, pNoL, alpha);
+        vec3  pF  = FresnelSchlick(pVoH, F0);
+
+        vec3  pSpec = pD * pVs * pF;
+        vec3  pkS   = pF;
+        vec3  pkD   = (1.0 - pkS) * (1.0 - metallic);
+        vec3  pDiff = pkD * baseColor / kPi;
+
+        // 物理基 inverse-square + smoothstep range cutoff：dist=0 时
+        // attenuation 接近上限（防 0 除），dist→range 平滑到 0。与 Cocos
+        // pointLight / Godot OmniLight 同款。
+        float minD2     = 0.01;  // 1cm 防 0 除
+        float dist2     = max(pDist * pDist, minD2);
+        float invSquare = 1.0 / dist2;
+        float fade      = smoothstep(pRange, 0.0, pDist);  // dist=0→1, dist=range→0
+        float atten     = invSquare * fade;
+
+        vec3 pRadiance = pColor * pInten * atten;
+        ptLo += (pDiff + pSpec) * pRadiance * pNoL;
+    }
+
     // ---- 合成 ----
-    vec3 color = directLo + iblLo;
+    vec3 color = directLo + ptLo + iblLo;
     outColor   = vec4(color, 1.0);
 }

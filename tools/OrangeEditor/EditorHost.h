@@ -51,6 +51,7 @@
 #include "plugin/IEditorGizmoPlugin.h"
 #include "plugin/IEditorInspectorPlugin.h"
 
+#include <orange/engine/audio/AudioEngine.h>
 #include <orange/engine/scene/ComponentSerializerEntry.h>
 
 #include <memory>
@@ -125,6 +126,19 @@ struct EditorHost
     // 存储用 value（非 unique_ptr）—— ComponentSerializerEntry 只含函数
     // 指针 + string_view，自身无资源所有权，拷贝语义安全。
     std::vector<Orange::Engine::Scene::ComponentSerializerEntry> extraSerializers;
+
+    // 编辑器级别的全局 AudioEngine —— 编辑器的"应用进程音频上下文"，与
+    // Inspector 试播按钮 + Asset 浏览器音频预览 + PlayMode 期 AudioSource
+    // 组件实例化共享同一 ma_engine（避免多实例同时持设备 mutex / 多次拉起
+    // WASAPI session）。
+    //
+    // 启动期 main 构造（默认 desc，硬件 backend）；析构在 EditorHost 析构
+    // 时自动跑（main 持值类型 EditorHost，倒序销毁字段）。
+    //
+    // 没声卡 / WASAPI 失败时 audioEngine.IsInitialized() == false，所有调用
+    // 路径（PlayOneShot / CreateInstance）已是 no-op 安全（参 AudioEngine.h
+    // 头注释"游戏没声卡的机器仍能跑"）。
+    Orange::Engine::Audio::AudioEngine audioEngine;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_HOST_H

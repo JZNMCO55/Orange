@@ -532,6 +532,13 @@ if (ORANGE_ENGINE_WITH_TRACY)
     target_compile_definitions(orange_engine PRIVATE ORANGE_ENGINE_WITH_TRACY=1)
 endif ()
 
+# GAP-2026-05-19-editor-aux-passes-in-engine-pipeline：把"编辑器审美默认值"
+# 打成可剔除单元；shipping -DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF 关掉
+# grid pass + 0.25 dummy IBL ambient + 中性灰 clear。默认 ON 保持当前行为。
+if (ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
+    target_compile_definitions(orange_engine PRIVATE ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=1)
+endif ()
+
 orange_engine_set_compiler_options(orange_engine)
 
 # 头文件中含中文注释；MSVC 默认按系统代码页（中文 Windows 上常见

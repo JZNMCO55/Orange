@@ -164,11 +164,14 @@ add_executable(OrangeEditor
     theme/EditorTheme.cpp
     plugin/AnimFsmAssetInspectorPlugin.cpp
     plugin/AnimatorMiniPreviewPlugin.cpp
+    plugin/AudioAssetInspectorPlugin.cpp
+    plugin/AudioSourceInspectorPlugin.cpp
     plugin/DragonBonesAssetInspectorPlugin.cpp
     plugin/CameraFrustumGizmoPlugin.cpp
     plugin/DirectionalLightGizmoPlugin.cpp
     plugin/MaterialAssetInspectorPlugin.cpp
     plugin/ParticleEmitterGizmoPlugin.cpp
+    plugin/PointLightGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
     branding/EditorWindowIcon.cpp
     # Windows resource：把 orange-editor-logo.ico 嵌进 exe。MSVC / CMake 自

@@ -15,6 +15,8 @@
 #include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/asset/SkeletonAsset.h>
 #include <orange/engine/asset/SkeletonLoader.h>
+#include <orange/engine/asset/SoundAsset.h>
+#include <orange/engine/asset/SoundLoader.h>
 #include <orange/engine/asset/TextureAsset.h>
 #include <orange/engine/asset/TextureLoader.h>
 #include <orange/engine/core/Serialization.h>
@@ -40,12 +42,87 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+namespace
+{
+
+// 内联的"叮"声 16-bit PCM WAV 生成 —— 与 samples/common/BeepWav.h 同算法，
+// 复制一份避免跨目录 include（samples/common 不在编辑器 target include
+// path 上）。生成的字节直接写盘 → assets/sounds/beep.wav，与 mesh
+// lazy bake 同模式。
+inline void AppendU32LE(std::vector<std::uint8_t>& buf, std::uint32_t v)
+{
+    buf.push_back(static_cast<std::uint8_t>(v & 0xFF));
+    buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
+    buf.push_back(static_cast<std::uint8_t>((v >> 16) & 0xFF));
+    buf.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFF));
+}
+inline void AppendU16LE(std::vector<std::uint8_t>& buf, std::uint16_t v)
+{
+    buf.push_back(static_cast<std::uint8_t>(v & 0xFF));
+    buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
+}
+inline void AppendBytes(std::vector<std::uint8_t>& buf, const char* s, std::size_t n)
+{
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        buf.push_back(static_cast<std::uint8_t>(s[i]));
+    }
+}
+std::vector<std::uint8_t> MakeBeepWavBytes(float        frequencyHz = 880.0f,
+                                           int          durationMs  = 180,
+                                           std::uint32_t sampleRate = 44100,
+                                           float        volume      = 0.5f)
+{
+    const std::uint16_t channels      = 1;
+    const std::uint16_t bitsPerSample = 16;
+    const std::uint16_t blockAlign    = channels * (bitsPerSample / 8);
+    const std::uint32_t byteRate      = sampleRate * blockAlign;
+    const std::uint32_t numSamples    =
+        static_cast<std::uint32_t>(static_cast<std::uint64_t>(sampleRate) *
+                                   static_cast<std::uint64_t>(durationMs) / 1000ULL);
+    const std::uint32_t dataSize      = numSamples * blockAlign;
+    const std::uint32_t fmtChunkSize  = 16;
+    const std::uint32_t riffSize      = 4 + (8 + fmtChunkSize) + (8 + dataSize);
+
+    std::vector<std::uint8_t> buf;
+    buf.reserve(8 + riffSize);
+    AppendBytes(buf, "RIFF", 4);
+    AppendU32LE(buf, riffSize);
+    AppendBytes(buf, "WAVE", 4);
+    AppendBytes(buf, "fmt ", 4);
+    AppendU32LE(buf, fmtChunkSize);
+    AppendU16LE(buf, 1);
+    AppendU16LE(buf, channels);
+    AppendU32LE(buf, sampleRate);
+    AppendU32LE(buf, byteRate);
+    AppendU16LE(buf, blockAlign);
+    AppendU16LE(buf, bitsPerSample);
+    AppendBytes(buf, "data", 4);
+    AppendU32LE(buf, dataSize);
+
+    const float twoPi = 6.28318530717958647692f;
+    for (std::uint32_t i = 0; i < numSamples; ++i)
+    {
+        const float t        = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float envelope = 1.0f - static_cast<float>(i) / static_cast<float>(numSamples);
+        const float sample   = std::sin(t * twoPi * frequencyHz) * volume * envelope;
+        const std::int16_t s = static_cast<std::int16_t>(sample * 32767.0f);
+        AppendU16LE(buf, static_cast<std::uint16_t>(s));
+    }
+    return buf;
+}
+
+}  // anonymous namespace
 
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakePlaneMesh(float halfSize)
@@ -260,6 +337,21 @@ void InitializeEditorAssets(EditorHost& host)
                      static_cast<unsigned>(reg.Error()));
     }
 
+    // 注册 SoundLoader —— AudioSource schema 的 sound AssetRef 字段 +
+    // AudioAssetInspectorPlugin 资源预览 + Play Mode 实例化路径全数走
+    // AssetRegistry::Load<SoundAsset>(path)，没注册则全部 fail-silent。
+    using Orange::Engine::Asset::SoundAsset;
+    using Orange::Engine::Asset::SoundLoader;
+    if (auto reg = host.assets.pAssets->RegisterLoader<SoundAsset>(
+            std::make_unique<SoundLoader>());
+        reg.IsErr())
+    {
+        std::fprintf(stderr,
+                     "[OrangeEditor] AssetRegistry::RegisterLoader<SoundAsset> 失败 "
+                     "(code=%u)\n",
+                     static_cast<unsigned>(reg.Error()));
+    }
+
     // 内置 mesh lazy bake：检测 assets/meshes/X.mesh，缺失则程序化构造 +
     // MeshLoader::Save 写盘后再 Load；存在直接 Load。lazy bake 让首次跑
     // OrangeEditor 自动产出 .mesh 文件让开发者手动 git add commit 入仓；
@@ -314,6 +406,38 @@ void InitializeEditorAssets(EditorHost& host)
     // 同款半径 0.5、lon 32 / lat 16 lat/lon tessellation。
     host.assets.sphereMeshHandle = bakeIfMissingThenLoad(
         "assets/meshes/sphere.mesh", [] { return MakeSphereMesh(0.5f, 32u, 16u); });
+
+    // 内置 beep.wav lazy bake —— 与 mesh lazy bake 同模式：检测
+    // assets/sounds/beep.wav 缺失则用 BeepWav helper 程序生成 16-bit PCM
+    // 字节 + 写盘。让首次跑 OrangeEditor 自动产出 .wav 让开发者 git add
+    // 入仓；之后拉仓直接走盘上文件。Asset 浏览器扫描 assets/ 即看到
+    // [SND] beep.wav 可拖入 AudioSource.sound 字段或选中预览试播。
+    {
+        const std::filesystem::path beepPath = "assets/sounds/beep.wav";
+        if (!std::filesystem::exists(beepPath))
+        {
+            std::filesystem::create_directories(beepPath.parent_path());
+            const auto bytes = MakeBeepWavBytes(/*freq=*/880.0f,
+                                                /*durationMs=*/180,
+                                                /*sampleRate=*/44100,
+                                                /*volume=*/0.5f);
+            // 用 ofstream 避免 MSVC 把 std::fopen 视作 deprecated（_CRT
+            // _SECURE_NO_WARNINGS 是工程级抑制开关，单点写盘走 ofstream
+            // 更对题）。
+            std::ofstream ofs(beepPath, std::ios::binary | std::ios::trunc);
+            if (ofs.is_open())
+            {
+                ofs.write(reinterpret_cast<const char*>(bytes.data()),
+                          static_cast<std::streamsize>(bytes.size()));
+            }
+            else
+            {
+                std::fprintf(stderr,
+                             "[OrangeEditor] lazy bake beep.wav 写盘失败 '%s'\n",
+                             beepPath.string().c_str());
+            }
+        }
+    }
 
     host.assets.pMaterials = std::make_unique<MaterialSystem>(*host.assets.pAssets);
     if (auto rb = host.assets.pMaterials->RegisterBuiltins(); rb.IsErr())

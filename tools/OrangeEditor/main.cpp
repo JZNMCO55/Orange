@@ -78,11 +78,14 @@
 #include "demo_game/HealthComponent.h"
 #include "plugin/AnimFsmAssetInspectorPlugin.h"
 #include "plugin/AnimatorMiniPreviewPlugin.h"
+#include "plugin/AudioAssetInspectorPlugin.h"
+#include "plugin/AudioSourceInspectorPlugin.h"
 #include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
 #include "plugin/DragonBonesAssetInspectorPlugin.h"
 #include "plugin/MaterialAssetInspectorPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
+#include "plugin/PointLightGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
 
@@ -547,6 +550,10 @@ int main()
     // push_back 在此排队即可。
     editorHost.inspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::AnimatorMiniPreviewPlugin>());
+    // AudioSource 段末 Play / Stop 试播按钮（与 AnimatorMiniPreviewPlugin 同
+    // 款"装饰式扩展"模式）。
+    editorHost.inspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::AudioSourceInspectorPlugin>());
 
     // 注册第一个 IEditorAssetInspectorPlugin —— v0.7 c0 落地（消除 L16）。
     // 当 Asset 浏览器选中 .material 文件时接管 Inspector 整段；与
@@ -567,6 +574,11 @@ int main()
     editorHost.assetInspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::DragonBonesAssetInspectorPlugin>());
 
+    // 第四条 IEditorAssetInspectorPlugin —— 选中 .wav / .ogg / .mp3 / .flac
+    // 时接管 Inspector 显示 Preview Play / Stop 按钮 + 资源元数据。
+    editorHost.assetInspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::AudioAssetInspectorPlugin>());
+
     // 注册首批 IEditorGizmoPlugin —— v0.4 c4 落地（v0.2.5 c12 抽象首批
     // 真实消费）。Light 方向箭头 + ParticleEmitter spawn box / velocity
     // 向量两个纯装饰 overlay；与 c2 / c3 内置 Transform gizmo（直接子系
@@ -577,6 +589,10 @@ int main()
         std::make_unique<Orange::Editor::Plugin::DirectionalLightGizmoPlugin>());
     editorHost.gizmoPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::ParticleEmitterGizmoPlugin>());
+    // PointLight 中心黄色圆点 + XZ 平面 range 圆环 overlay。同
+    // DirectionalLight / ParticleEmitter 模式纯装饰 overlay，不接管 LMB 拖动。
+    editorHost.gizmoPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::PointLightGizmoPlugin>());
     // v0.4 c5：Camera frustum gizmo（plugin 当前用 hardcode 默认 fov/aspect/
     // near/far + entity transform 推 view；待 GAP-2026-05-15-camera-editor-
     // vs-runtime-separation 落地后切真实 component 数据）

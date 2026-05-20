@@ -544,6 +544,28 @@ struct Pipeline::Impl
                   "LightUboData std140 size mismatch (expected 160 bytes)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
 
+    // PointLights UBO（GAP-2026-05-11 G2）：独立 binding 5，只 PBR shader
+    // 引用，其他 shader 不 declare 即 dead-code。std140 layout：
+    //   uvec4 countPad   —— x = pointLightCount，y/z/w pad
+    //   PointLightStd140 lights[kMaxPointLights]
+    //     vec4 posRange       —— xyz = world pos, w = range
+    //     vec4 colorIntensity —— xyz = linear rgb, w = intensity
+    // cap = 8 与 GAP 提案一致；超出 first-found 截断 + warn 一次。
+    static constexpr std::uint32_t kMaxPointLights = 8;
+    struct PointLightStd140
+    {
+        glm::vec4 posRange{};
+        glm::vec4 colorIntensity{};
+    };
+    struct PointLightsUboData
+    {
+        glm::uvec4       countPad{0u, 0u, 0u, 0u};
+        PointLightStd140 lights[kMaxPointLights]{};
+    };
+    static_assert(sizeof(PointLightsUboData) == 16 + 32 * kMaxPointLights,
+                  "PointLightsUboData std140 size mismatch");
+    std::unique_ptr<Orange::Rhi::RHIBuffer> pointLightsUbo;
+
     // 当前帧时间（seconds，单调递增）。Pipeline::SetFrameTime 设置，
     // UpdateLightUbo 写到 LightUbo.frameInfo.x；不会触发 reinit。
     float frameTime{0.0f};
@@ -939,6 +961,11 @@ struct Pipeline::Impl
                         const glm::mat4&        lightViewProj,
                         const glm::vec3&        cameraWorldPos,
                         const glm::vec3&        iblTintIntensity);
+
+    // 把 World 内挂 PointLight + Transform 的 entity 收集到 PointLightsUbo
+    // （首 cap=kMaxPointLights 条，超出截断 + 一次性 warn）。Position 从
+    // entity.Transform.position 派生。Render() 阶段 1.5 调用，每帧一次。
+    void UpdatePointLightsUbo(Orange::Engine::World& world);
 
     // 计算 light view-proj：方向投影 + scene 包围盒 fitted ortho 视锥
     // 投影。scene 包围盒当前 hardcode 为 ±10 单位的立方体（足够覆盖
@@ -1668,6 +1695,12 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                                  Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1,
                                  Orange::Rhi::ShaderStage::Fragment});
+        // GAP-2026-05-11 G2：binding 5 = PointLightsUbo（独立 UBO，只 PBR
+        // shader 引用；其他 shader dead-code 但 layout 必须 declare）。
+        lay.mBindings.push_back({5,
+                                 Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
         lay.mpDebugName = "orange_engine.main.layout";
         impl.mainDescLayout = rhi.CreateDescriptorSetLayout(lay);
 
@@ -1680,17 +1713,25 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         bufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
         impl.lightUbo = rhi.CreateBuffer(bufDesc);
 
-        // Main desc pool: 1 set，4 个 CombinedImageSampler（shadow + 3 dummy IBL） + 1 个 UBO
+        // PointLightsUbo（同款 CpuToGpu）。
+        Orange::Rhi::BufferDesc plBufDesc{};
+        plBufDesc.mSize        = sizeof(Pipeline::Impl::PointLightsUboData);
+        plBufDesc.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        plBufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.pointLightsUbo = rhi.CreateBuffer(plBufDesc);
+
+        // Main desc pool: 1 set，4 个 CombinedImageSampler（shadow + 3 dummy IBL） + 2 个 UBO
         Orange::Rhi::DescriptorPoolDesc pool{};
         pool.mMaxSets = 1;
         pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 4});
-        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 1});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 2});
         pool.mpDebugName = "orange_engine.main.pool";
         impl.mainDescPool = rhi.CreateDescriptorPool(pool);
 
-        if (!impl.mainDescLayout || !impl.lightUbo || !impl.mainDescPool)
+        if (!impl.mainDescLayout || !impl.lightUbo || !impl.pointLightsUbo
+            || !impl.mainDescPool)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo 创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo / pointLightsUbo 创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -1703,8 +1744,9 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             return ResultCode::InternalError;
         }
 
-        // 立刻把 binding 1 (lightUbo) 写进 desc set；binding 0 (shadow
-        // sampler) 等 EnsureShadowMap 创建出 shadowMap 后再写。
+        // 立刻把 binding 1 (lightUbo) + binding 5 (pointLightsUbo) 写进
+        // desc set；binding 0 (shadow sampler) 等 EnsureShadowMap 创建出
+        // shadowMap 后再写。
         Orange::Rhi::DescriptorWrite write{};
         write.mBinding             = 1;
         write.mType                = Orange::Rhi::DescriptorType::UniformBuffer;
@@ -1712,6 +1754,14 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         write.mBufferInfo.mOffset  = 0;
         write.mBufferInfo.mRange   = sizeof(Pipeline::Impl::LightUboData);
         rhi.UpdateDescriptorSet(*impl.mainDescSet, &write, 1);
+
+        Orange::Rhi::DescriptorWrite writePl{};
+        writePl.mBinding             = 5;
+        writePl.mType                = Orange::Rhi::DescriptorType::UniformBuffer;
+        writePl.mBufferInfo.mpBuffer = impl.pointLightsUbo.get();
+        writePl.mBufferInfo.mOffset  = 0;
+        writePl.mBufferInfo.mRange   = sizeof(Pipeline::Impl::PointLightsUboData);
+        rhi.UpdateDescriptorSet(*impl.mainDescSet, &writePl, 1);
     }
 
     // 7.7 Dummy IBL 资源
@@ -1779,13 +1829,14 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                 return ResultCode::InternalError;
             }
             std::memset(mapped, 0, 64);
-            // IEEE 754 binary16 hardcode ambient 灰 RGBA = (0.25, 0.25, 0.25,
-            // 1.0)：与 Cocos Creator / Unity URP 默认 ambient 量级一致。让
-            // PBR 物体在没 EnvironmentComponent 时显示"灰白塑料"（Cocos /
-            // Godot 默认 cube 观感）。值更大会让真实 IBL 烘焙前的 demo 视觉
-            // 过亮；0.25 是手感与 PBR 数学的平衡点。0x3400 = 0.25 half；
-            // 0x3C00 = 1.0 half。字节序按 little-endian 平台直写 uint16；
-            // MSVC + RTX 5070 Ti 都是 LE，需要 BE 平台时再换 byteswap。
+#if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
+            // GAP-2026-05-19 editor-aux-passes：dummy IBL ambient = 0.25 灰
+            // 是"编辑器审美决定"——让 PBR 物体在没 EnvironmentComponent 时
+            // 显示"灰白塑料"（Cocos / Godot 默认 cube 观感）。shipping 构建
+            // 显式关掉本宏 → ambient 退回 (0,0,0)，PBR 物体仅 direct light，
+            // engine 默认中性。0x3400 = 0.25 half；0x3C00 = 1.0 half。LE
+            // 平台直写 uint16；MSVC + RTX 5070 Ti 都是 LE，需要 BE 平台时
+            // 再换 byteswap。
             const std::uint16_t halfPx[4] = {
                 std::uint16_t{0x3400},   // R = 0.25
                 std::uint16_t{0x3400},   // G = 0.25
@@ -1793,6 +1844,7 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                 std::uint16_t{0x3C00},   // A = 1.0
             };
             std::memcpy(mapped, halfPx, 8);
+#endif
             staging->Unmap();
         }
 
@@ -2213,6 +2265,7 @@ void Pipeline::Shutdown()
     impl.mainDescPool.reset();
     impl.mainDescLayout.reset();
     impl.lightUbo.reset();
+    impl.pointLightsUbo.reset();
     impl.shadowCasterVsHandle = {};
     impl.shadowCasterFsHandle = {};
     impl.tonemapPipeline.reset();
@@ -2452,7 +2505,13 @@ void Pipeline::SetShadowConfig(const ShadowConfig& config) noexcept
 void Pipeline::SetEditorGridEnabled(bool enabled) noexcept
 {
     if (!mpImpl) { return; }
+#if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
     mpImpl->editorGridEnabled = enabled;
+#else
+    // Shipping 构建剔除编辑器审美 pass：grid 永远关闭，setter 静默 ignore。
+    (void)enabled;
+    mpImpl->editorGridEnabled = false;
+#endif
 }
 
 bool Pipeline::IsEditorGridEnabled() const noexcept
@@ -2830,15 +2889,23 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
     att.mLoadOp         = loadColor ? Orange::Rhi::LoadOp::Load
                                     : Orange::Rhi::LoadOp::Clear;
     att.mStoreOp        = Orange::Rhi::StoreOp::Store;
-    // viewport 默认背景：Cocos Creator 风中性灰（≈ #5C5C60，略偏冷），让
-    // 没挂 EnvironmentComponent 时编辑器 viewport 看起来克制工具感，与主
-    // panel 深炭灰（EditorTheme.cpp，~#2A2A2A）拉开一档亮度便于辨识渲染区。
-    // hdrColor 是线性 HDR target，写入值会经 tonemap 出到 swapchain；线性
-    // 0.12 对应感知 ~0.36 / sRGB ~0.39（取 1/2.2 power），目标灰度刚好。
+#if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
+    // GAP-2026-05-19 editor-aux-passes：viewport 默认背景 Cocos Creator 风
+    // 中性灰（≈ #5C5C60）是"编辑器审美决定"，让 viewport 与主 panel 深炭灰
+    // 拉开一档亮度便于辨识渲染区。shipping 构建退回 game 端深蓝默认。
+    // hdrColor 是线性 HDR target，写入值经 tonemap 出到 swapchain；线性 0.12
+    // 对应感知 ~0.36 / sRGB ~0.39（取 1/2.2 power）。
     att.mClear.mColor[0] = 0.12f;
     att.mClear.mColor[1] = 0.12f;
     att.mClear.mColor[2] = 0.13f;
     att.mClear.mColor[3] = 1.0f;
+#else
+    // Shipping：v0.8.5 之前的深蓝默认（与 sample 01/03/04 早期视觉一致）。
+    att.mClear.mColor[0] = 0.05f;
+    att.mClear.mColor[1] = 0.07f;
+    att.mClear.mColor[2] = 0.10f;
+    att.mClear.mColor[3] = 1.0f;
+#endif
 
     Orange::Rhi::DepthStencilAttachment depthAtt{};
     depthAtt.mpView        = impl.sceneDepth->GetDefaultView();
@@ -3116,6 +3183,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         cameraWorldPos            = glm::vec3(invView[3]);
         impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
+        impl.UpdatePointLightsUbo(world);
     }
 
     // 2. 一次 cmd list 包含：shadow → (sky) → 主 pass → (grid) → passthrough → 翻 layout。
@@ -3512,6 +3580,51 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
     }
     std::memcpy(mapped, &data, sizeof(data));
     lightUbo->Unmap();
+}
+
+void Pipeline::Impl::UpdatePointLightsUbo(Orange::Engine::World& world)
+{
+    if (!pointLightsUbo) { return; }
+
+    PointLightsUboData data{};
+    std::uint32_t      count = 0;
+
+    auto& reg = world.Registry();
+    // entt 不要求 TransformComponent 同步存在；缺 Transform 视为 origin。
+    auto view = reg.view<PointLight>();
+    bool warnedOverflow = false;
+    for (auto entity : view)
+    {
+        if (count >= kMaxPointLights)
+        {
+            if (!warnedOverflow)
+            {
+                ORANGE_LOG_WARN("Pipeline: scene has more than {} PointLights; "
+                                "extras ignored.", kMaxPointLights);
+                warnedOverflow = true;
+            }
+            continue;
+        }
+        const auto& pl = view.get<PointLight>(entity);
+        glm::vec3 pos{0.0f};
+        if (const auto* tc = reg.try_get<Orange::Engine::Scene::TransformComponent>(entity))
+        {
+            pos = tc->position;
+        }
+        data.lights[count].posRange       = glm::vec4(pos, pl.range);
+        data.lights[count].colorIntensity = glm::vec4(pl.color, pl.intensity);
+        ++count;
+    }
+    data.countPad.x = count;
+
+    void* mapped = pointLightsUbo->Map();
+    if (mapped == nullptr)
+    {
+        ORANGE_LOG_ERROR("Pipeline: pointLightsUbo Map 失败");
+        return;
+    }
+    std::memcpy(mapped, &data, sizeof(data));
+    pointLightsUbo->Unmap();
 }
 
 bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
@@ -4399,9 +4512,12 @@ bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
     att.mpView          = hdrColor->GetDefaultView();
     att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
     att.mStoreOp        = Orange::Rhi::StoreOp::Store;
-    att.mClear.mColor[0] = 0.12f;  // fallback；shader 会全覆盖
-    att.mClear.mColor[1] = 0.12f;
-    att.mClear.mColor[2] = 0.13f;
+    // Sky pass 入口 clear —— shader 会全覆盖，clear 值仅用于驱动 spec
+    // requirement，不影响最终视觉。两路径写值统一为深蓝 (0.05, 0.07, 0.10)
+    // 作中性默认（与 shipping ClearColor 一致），避免编辑器审美污染入口。
+    att.mClear.mColor[0] = 0.05f;
+    att.mClear.mColor[1] = 0.07f;
+    att.mClear.mColor[2] = 0.10f;
     att.mClear.mColor[3] = 1.0f;
 
     // Dummy depth attachment（pipeline 已声明 D32 format，此处必须配对）。
@@ -4834,6 +4950,7 @@ void Pipeline::Render(Orange::Engine::World& world)
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         cameraWorldPos            = glm::vec3(invView[3]);
         impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
+        impl.UpdatePointLightsUbo(world);
     }
 
     // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /

@@ -69,6 +69,7 @@ enum class AssetKind : std::uint8_t
     Material, // .material → MaterialInstance*（通过 namedMaterialInstances 反查）
     Texture,  // .png / .jpg / .ktx 等 → AssetHandle<TextureAsset>
     Scene,    // .scene.json → 不持 handle，仅作为路径引用（场景拖入打开）
+    Sound,    // .wav / .ogg / .mp3 等 → AssetHandle<SoundAsset>
 };
 
 }  // namespace Orange::Editor::Schema

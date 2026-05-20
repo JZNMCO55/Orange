@@ -99,7 +99,7 @@
 ### 状态
 
 - **登记**：2026-05-11
-- **处理**：未启动；预估 1–2 个独立 session 体量（G1 + G2 一个 session，G3 一个 session）
+- **处理**：G1 + G2 已落地（2026-05-20，与音频集成 + GAP-2 cmake gate 同 session）；G3 halo billboard 留 v1.x Ori-like 视觉子模式拉动。详细落地点见本文件"处理记录"段
 - **关联**：editor-roadmap.md v0.1.5 demo scene / v1.x Ori-like 视觉子模式
 - **归属**：`docs/roadmap.md` Phase 10 · 渲染深化 Task 10-07（2026-05-12 拍板）
 - **v0.7 retro 复审（2026-05-19）**：backlog 状态有效；非 v0.7 critical path 上；第一款游戏 fork 启动前不主动开工，与 v1.x Ori-like 视觉子模式同节奏（仅登记需求，撞上即升格）
@@ -160,7 +160,7 @@
 ### 状态
 
 - **登记**：2026-05-19（v0.8.5 milestone ✅ 时显式登记，作为已知归属债）
-- **处理**：未启动；预估 1 个独立 session 体量（推荐方案 1 + G2 搬到 editor 端写入）
+- **处理**：最小可行 cmake gate 已落地（2026-05-20，本 session）—— `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option 默认 ON 保持编辑器行为；shipping `-DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF` 关掉 grid 渲染 + dummy IBL ambient 退回 (0,0,0) + clear color 退回深蓝。**完整 IAuxPassProvider 钩子 + engine 公共面 grep 不到 "EditorGrid" 字样的命名整骨未做**，留 v1.0 验收前 batch milestone（与 OrangeRender API 中性化原则同节奏）。详细落地点见本文件"处理记录"段
 - **关联**：editor-roadmap v0.8.5（落地源头）；engine 公共 API 中性化原则
 - **归属**：未拍板分配到具体 Phase；候选 Phase 7 / v1.0 验收前
 - **v0.7 retro 复审（2026-05-19）**：backlog 状态有效；非 v0.7 critical path；shipping 二进制带 grid 资源是 cosmetic 不阻塞功能，等 v1.0 验收前批量整中性化时一起做（与 OrangeRender API 中性化原则同节奏）
@@ -220,6 +220,24 @@ vec4 uMRA        //  16
 
 ## 处理记录
 
+- **GAP-2026-05-11-point-light-and-visible-halo**（2026-05-20 落地 G1+G2，G3 留 v1.x）：
+  - **G1 PointLightComponent 公共面** ✅ —— `include/orange/engine/render/LightComponent.h` 新增 `struct PointLight { color, intensity, range, castsShadow }`，position 由 entity.Transform.position 派生（与 DirectionalLight 走 Transform.rotation 同款约定）；`src/scene/ComponentSerializers.cpp` Has/Write/Read PointLight + 注册到 GetBuiltinComponentSerializers；scene/world schema v1.4 → v1.5（minor bump，backward-compat：旧 scene 无 PointLight 字段时 entity 不参与点光路径）
+  - **G2 Pipeline 多 light 收集 + shader 多 light loop** ✅ —— Pipeline 新增 `PointLightsUboData`（cap=8 PointLightStd140 + count）+ binding 5 独立 UBO（只 PBR shader 引用，其他 shader dead-code），`UpdatePointLightsUbo(world)` 每帧收集 cap=8 first-found PointLight 进 UBO + 超出 first-found 截断 + 一次性 warn；mainDescPool size += 1 UB；PBR fragment shader `pbr.frag.glsl` 加 `for i in 0..count` point light loop（物理基 inverse-square + smoothstep range cutoff，与 Cocos pointLight / Godot OmniLight 同款）；Shutdown 路径 pointLightsUbo.reset() 配套，VMA 无 leak（ctest 40/40 通过）
+  - **G2 编辑器侧** ✅ —— `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` 新增 PointLight schema（4 字段 + tooltip）+ Inspector 段；`tools/OrangeEditor/plugin/PointLightGizmoPlugin.{h,cpp}` 新增 viewport overlay（黄色填充圆点 + XZ 平面 36 段 range 圆环 stroke）
+  - **G3 halo billboard** —— 留 v1.x Ori-like 视觉子模式拉动时再做；本期范围外
+  - **castsShadow 字段**：保留但 Pipeline 忽略；omnidirectional cubemap shadow 是 long-term roadmap 量级
+  - 关键改动文件：`include/orange/engine/render/LightComponent.h` / `src/scene/ComponentSerializers.cpp` / `src/scene/SceneSerialization.cpp`（schema bump）/ `src/render/Pipeline.cpp`（UBO + UpdatePointLightsUbo + descriptor layout binding 5）/ `src/render/builtin_shaders/pbr.frag.glsl`（point light loop）/ `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tools/OrangeEditor/plugin/PointLightGizmoPlugin.{h,cpp}`（新增）/ `tools/OrangeEditor/main.cpp`（plugin 注册）/ `tools/OrangeEditor/CMakeLists.txt`
+- **GAP-2026-05-19-editor-aux-passes-in-engine-pipeline**（2026-05-20 落地最小可行 cmake gate；完整 IAuxPassProvider 钩子留 v1.0 验收前 batch milestone）：
+  - 新增 `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option（`cmake/Dependencies.cmake`），默认 ON 保持 dev / editor 构建行为不变；shipping 显式 `-DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF` 关掉，engine 端三项编辑器审美默认全数剔除：
+    - `Pipeline::SetEditorGridEnabled` setter OFF 时强 false（grid 永远不渲染，资源仍创建但 RecordGridPass 调用路径不触发）
+    - dummy IBL irradiance ambient 从 (0.25, 0.25, 0.25) hardcode 退回 (0, 0, 0)（PBR 物体仅 direct light，engine 默认中性）
+    - viewport clear color 从中性灰 (0.12, 0.12, 0.13) 退回深蓝 (0.05, 0.07, 0.10)（与 v0.8.5 之前 sample 视觉一致）
+  - **完整 IAuxPassProvider 钩子** + engine 公共头 grep 不到 "EditorGrid" 字样的命名整骨：未落，归 v1.0 验收前 batch milestone（与本 GAP 当初"等 v1.0 验收前批量整中性化时一起做"复审一致）；shipping engine 二进制仍带 grid shader SPV + 资源创建代码（占内存但不画），完整剔除待命名整骨随 IAuxPassProvider 落地一并完成
+  - 关键改动文件：`cmake/Dependencies.cmake`（option 定义）/ `CMakeLists.txt`（target_compile_definitions）/ `src/render/Pipeline.cpp`（三处 #ifdef）
+- **音频集成编辑器**（2026-05-20 落地）：本次顺手完成，**非 GAP 范畴**（用户 goal 直接命名）。详细参见 `docs/acceptance/audio-and-point-light-and-aux-passes-gate-acceptance-checklist.md`。
+  - 引擎侧：`include/orange/engine/audio/AudioSourceComponent.h`（sound handle + playOnAwake / loop / volume / pitch 五字段，PureData）+ `src/scene/ComponentSerializers.cpp` Has/Write/ReadAudioSource + 注册到 GetBuiltinComponentSerializers；scene/world schema v1.3 → v1.4
+  - 编辑器侧：`PropertyType.h` AssetKind 加 Sound；EditorHost 加 audioEngine 字段（编辑器进程级全局 mixer）；RegisterBuiltinSchemas 加 AudioSource schema（含 Sound AssetRef）；新增 `AudioSourceInspectorPlugin`（Inspector ParseEnd 钩子 Play / Stop 试播按钮）+ `AudioAssetInspectorPlugin`（选中 .wav 接管 Inspector 显示预览）；Asset 浏览器 .wav/.ogg/.mp3/.flac → "[SND]" icon + "Pick to AudioSource.sound" 右键菜单；EditorRenderLayer Play Mode tick：进入 Play 遍历 view<AudioSourceComponent> 实例化 SoundInstance + playOnAwake 立即 Start + volume 实时 sync，退出 Play 清表（SoundInstance 析构自动 ma_sound_uninit）；DemoWorld lazy bake `assets/sounds/beep.wav`（440ms 880Hz "叮"声，与 sample 07 BeepWav helper 同款算法，编辑器内联匿名 ns 避免跨目录 include）
+  - 关键改动文件：`include/orange/engine/audio/AudioSourceComponent.h`（新增）/ `src/scene/ComponentSerializers.cpp` / `src/scene/SceneSerialization.cpp` / `tools/OrangeEditor/EditorHost.h` / `tools/OrangeEditor/EditorRenderLayer.{h,cpp}` / `tools/OrangeEditor/schema/PropertyType.h` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` / `tools/OrangeEditor/plugin/AudioSourceInspectorPlugin.{h,cpp}`（新增）/ `tools/OrangeEditor/plugin/AudioAssetInspectorPlugin.{h,cpp}`（新增）/ `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/main.cpp` / `tools/OrangeEditor/CMakeLists.txt`
 - **GAP-2026-05-19-pbr-ibl-specular-quality**（2026-05-19 落地）：multi-scatter compensation (Fdez-Aguero 2019 / Filament `light_indirect.fs` 同款 `1 + F0·(1/brdf.y - 1)`) 接到 PBR shader IBL specular 段 + `BakePrefilteredEnvironment` sampleCount 1024 → 4096；顺路修 BUG-2026-05-18-vma-shutdown OE 端漏 reset baked IBL 三件套。视觉 furnace 9 球阵接近全白；HDR 中 roughness 段密集白方块大幅消失；顶行右 metallic=1 r=0.9 不再偏暗。详细见上文条目末尾"落地记录"节。关键改动文件：`src/render/builtin_shaders/pbr.frag.glsl` / `src/render/Pipeline.cpp` / `samples/14_pbr_ibl/main.cpp`（--capture / --exit-after flag 无人值守视觉验收路径）
 - **GAP-2026-05-19-editor-environment-component-wiring**（2026-05-19 落地）：Asset 浏览器 ext 映射加 .hdr / .exr ([HDR] icon)；Pipeline 加 `lastBakedCubemap` AssetHandle + Render 入口每帧 query first-found EnvironmentComponent.cubemap 自动 re-bake；Inspector 拖换 cubemap / 改 Intensity / Tint 字段在 viewport 视觉实时跟随（uIblFactor UBO 路径早已 live，cubemap auto-rebake 让 IBL 三件套与 component.cubemap 保持一致）。详细见上文条目末尾"落地记录"节。关键改动文件：`src/render/Pipeline.cpp` / `tools/OrangeEditor/EditorRenderLayer.cpp`
 - **GAP-2026-05-15-camera-editor-vs-runtime-separation**（2026-05-19 落地）：Pipeline 加 `SetEditorCameraOverride(const Camera*)` 入口 + RenderScene 加 `OverrideMainCamera(const Camera&)`；编辑器 ScenePanel 不再 mutate ECS Camera 组件，改 push 编辑器轨道相机给 Pipeline override。CameraFrustumGizmoPlugin 改读 `component->projection` 真实矩阵（projection 反映用户设置 fov / aspect / near / far，view 仍由 entity.Transform 推维持 UX）。`ApplyEditorCameraToWorld` 函数删除（不再被调用）。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/render/Pipeline.h` / `include/orange/engine/render/RenderScene.h` / `src/render/Pipeline.cpp` / `tools/OrangeEditor/EditorRenderLayer.h` / `tools/OrangeEditor/panels/ScenePanel.cpp` / `tools/OrangeEditor/EditorCameraControl.{h,cpp}` / `tools/OrangeEditor/plugin/CameraFrustumGizmoPlugin.{h,cpp}` / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp`

@@ -14,8 +14,12 @@
 #include <orange/engine/asset/AssetHandle.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/asset/SoundAsset.h>
 
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/audio/AudioEngine.h>
+#include <orange/engine/audio/AudioSourceComponent.h>
+#include <orange/engine/audio/SoundInstance.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/core/Memory.h>
 #include <orange/engine/core/Profiler.h>
@@ -208,6 +212,24 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
                 auto& ac = mHost.scene.pWorld->Registry().get<AnimatorComponent>(e);
                 if (ac.animator != nullptr) {
                     ac.animator->Tick(dt);
+                }
+            }
+        }
+
+        // Audio: 同步 component 字段 → 已实例化的 SoundInstance（用户在
+        // Play 期改 volume / pitch / loop slider 时声音实时跟随）。pitch /
+        // loop 公共面尚未暴露，先仅 sync volume。
+        if (mHost.audioEngine.IsInitialized()) {
+            using namespace Orange::Engine::Audio;
+            auto& reg = mHost.scene.pWorld->Registry();
+            for (auto e : reg.view<AudioSourceComponent>()) {
+                auto& as = reg.get<AudioSourceComponent>(e);
+                Orange::Engine::Entity eWrap{static_cast<std::uint64_t>(
+                    static_cast<std::uint32_t>(e))};
+                auto it = mEntityToSoundInstance.find(eWrap);
+                if (it != mEntityToSoundInstance.end() && it->second
+                    && it->second->IsValid()) {
+                    it->second->SetVolume(as.volume);
                 }
             }
         }
@@ -911,6 +933,34 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 }
             }
 
+            // Audio: Edit→Play 实例化所有挂 AudioSourceComponent 的实体的
+            //     SoundInstance；playOnAwake=true 即刻 Start。loop /
+            //     volume 通过 SoundInstance 公共面应用（pitch 公共面未暴露，
+            //     mpImpl 内 ma_sound_set_pitch 由 Audio 模块下一版本扩展时
+            //     接通；本期 pitch 字段持久化但运行时无效）。
+            if (mHost.audioEngine.IsInitialized()) {
+                using namespace Orange::Engine::Audio;
+                using namespace Orange::Engine::Asset;
+                auto& reg = mHost.scene.pWorld->Registry();
+                auto* pAssets = mHost.assets.pAssets.get();
+                for (auto e : reg.view<AudioSourceComponent>()) {
+                    auto& as = reg.get<AudioSourceComponent>(e);
+                    if (!as.sound.IsValid() || pAssets == nullptr) { continue; }
+                    const auto* pSoundAsset = pAssets->Get<SoundAsset>(as.sound);
+                    if (pSoundAsset == nullptr) { continue; }
+                    auto inst = mHost.audioEngine.CreateInstance(*pSoundAsset);
+                    if (!inst.IsValid()) { continue; }
+                    inst.SetVolume(as.volume);
+                    if (as.playOnAwake) {
+                        inst.Start();
+                    }
+                    Orange::Engine::Entity eWrap{static_cast<std::uint64_t>(
+                        static_cast<std::uint32_t>(e))};
+                    mEntityToSoundInstance[eWrap] = std::make_unique<
+                        SoundInstance>(std::move(inst));
+                }
+            }
+
             // S4: VfxSystem 接入 —— 需要 Pipeline 已就绪（Scene 面板
             //     必须至少渲染过一帧才会 lazy init Pipeline）。
             if (mpScenePipeline != nullptr && mHost.assets.pAssets != nullptr) {
@@ -969,6 +1019,9 @@ void EditorRenderLayer::ApplyPendingPlayOp()
 
             // S3 拆卸：销毁 PhysicsWorld（所有 b2 body 随之释放）
             mpPhysicsWorld.reset();
+
+            // Audio: 清表 → SoundInstance 析构 → ma_sound_uninit 自动停播
+            mEntityToSoundInstance.clear();
 
             // S2 还原：从快照加载回 Edit 前的 World 状态。
             //   - 传 assetRegistry（mesh / material handle round-trip 需要）
@@ -1114,6 +1167,8 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         else if (ext == ".png" || ext == ".jpg"
               || ext == ".jpeg" || ext == ".ktx")   icon = "[T]";
         else if (ext == ".hdr" || ext == ".exr")    icon = "[HDR]";
+        else if (ext == ".wav" || ext == ".ogg"
+              || ext == ".mp3" || ext == ".flac")   icon = "[SND]";
         else if (name.size() >= 11
               && name.compare(name.size() - 11, 11, ".scene.json") == 0)
                                                     icon = "[S]";
@@ -1233,6 +1288,47 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                 host.cmdStack.Push(
                     std::make_unique<SetFieldValueCommand<std::string>>(
                         selEntity, "Renderable.materialInstance",
+                        oldPath, path, std::move(apply)));
+            }
+            ImGui::EndDisabled();
+
+            // Pick to AudioSource.sound —— 选中实体挂 AudioSourceComponent
+            // 时才启用；与 Pick to Renderable.mesh 同款命令栈 replay 路径
+            // （SetFieldValueCommand<std::string> 持旧 / 新 path，Undo 回退）。
+            using ::Orange::Engine::Audio::AudioSourceComponent;
+            const auto* ac = selValid
+                ? host.scene.pWorld->GetComponent<AudioSourceComponent>(selEntity)
+                : nullptr;
+            const bool canPickAudio = (ac != nullptr)
+                                   && (ext == ".wav" || ext == ".ogg"
+                                    || ext == ".mp3" || ext == ".flac");
+            ImGui::BeginDisabled(!canPickAudio);
+            if (ImGui::MenuItem("Pick to AudioSource.sound"))
+            {
+                using ::Orange::Engine::Asset::SoundAsset;
+                std::string oldPath;
+                if (ac != nullptr && ac->sound.IsValid()
+                    && host.assets.pAssets != nullptr)
+                {
+                    oldPath = std::string{host.assets.pAssets
+                        ->PathOf<SoundAsset>(ac->sound)};
+                }
+                auto apply = [pH = &host, capE = selEntity]
+                              (const std::string& p) {
+                    auto* pW = pH->scene.pWorld.get();
+                    if (pW == nullptr || !pW->IsValid(capE)) { return; }
+                    auto* pAS = pW->GetComponent<AudioSourceComponent>(capE);
+                    if (pAS == nullptr) { return; }
+                    if (p.empty()) { pAS->sound = {}; return; }
+                    auto* pReg = pH->assets.pAssets.get();
+                    if (pReg == nullptr) { return; }
+                    auto lr = pReg->Load<
+                        ::Orange::Engine::Asset::SoundAsset>(p);
+                    if (lr.IsOk()) { pAS->sound = lr.Value(); }
+                };
+                host.cmdStack.Push(
+                    std::make_unique<SetFieldValueCommand<std::string>>(
+                        selEntity, "AudioSource.sound",
                         oldPath, path, std::move(apply)));
             }
             ImGui::EndDisabled();

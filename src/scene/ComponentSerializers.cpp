@@ -15,6 +15,8 @@
 #include "orange/engine/animation/IAnimator.h"
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/asset/MeshAsset.h"
+#include "orange/engine/asset/SoundAsset.h"
+#include "orange/engine/audio/AudioSourceComponent.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Serialization.h"
 #include "orange/engine/physics/ColliderComponent.h"
@@ -579,6 +581,58 @@ bool ReadDirectionalLight(const JsonReader& reader,
 }
 
 // ---------------------------------------------------------------------------
+// PointLight —— Render 模块的 PureData 组件（GAP-2026-05-11 G1）。
+// 位置由 entity.Transform.position 派生，不在 component 上落 position；
+// 字段：color / intensity / range / castsShadow。
+// ---------------------------------------------------------------------------
+
+bool HasPointLight(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::PointLight>(entity);
+}
+
+void WritePointLight(JsonWriter& writer,
+                     std::string_view componentPath,
+                     Entity entity,
+                     const SaveContext& ctx)
+{
+    const auto* light = ctx.world.GetComponent<Render::PointLight>(entity);
+    if (light == nullptr) { return; }
+
+    const float color[3] = {light->color.x, light->color.y, light->color.z};
+    writer.WriteFloatArray(Join(componentPath, "color"),       color, 3);
+    writer.WriteFloat(     Join(componentPath, "intensity"),   light->intensity);
+    writer.WriteFloat(     Join(componentPath, "range"),       light->range);
+    writer.WriteBool(      Join(componentPath, "castsShadow"), light->castsShadow);
+}
+
+bool ReadPointLight(const JsonReader& reader,
+                    std::string_view componentPath,
+                    Entity entity,
+                    const LoadContext& ctx)
+{
+    Render::PointLight light;
+
+    float color[3] = {1.0f, 1.0f, 1.0f};
+    if (reader.Has(Join(componentPath, "color")))
+    {
+        if (!reader.ReadFloatArray(Join(componentPath, "color"), color, 3))
+        {
+            return false;
+        }
+    }
+    light.color       = {color[0], color[1], color[2]};
+    light.intensity   = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "intensity"), light.intensity));
+    light.range       = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "range"),     light.range));
+    light.castsShadow = reader.GetBool(Join(componentPath, "castsShadow"), false);
+
+    ctx.world.AddComponent(entity, light);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // EnvironmentComponent
 //
 // 三个字段：cubemap（HDR equirect 资产路径，c7 真正接 HDR loader 后才能
@@ -979,6 +1033,104 @@ bool ReadParticleEmitter(const JsonReader& reader,
 }
 
 // ---------------------------------------------------------------------------
+// AudioSourceComponent —— Audio 模块的 PureData 组件。
+//
+// 与 RenderableComponent.mesh 同款 AssetHandle 路径模式：写时用
+// AssetRegistry::PathOf 反查；读时按 path 调 AssetRegistry::Load。
+// 运行时 SoundInstance 句柄不属于 component（公共面 PIMPL 不暴露），
+// 由 PlayMode 驱动方（编辑器 EditorRenderLayer / 游戏侧 system）自持
+// entity→instance map，详见 AudioSourceComponent.h 头注释。
+// ---------------------------------------------------------------------------
+
+bool HasAudioSource(const World& world, Entity entity)
+{
+    return world.HasComponent<Audio::AudioSourceComponent>(entity);
+}
+
+void WriteAudioSource(JsonWriter& writer,
+                      std::string_view componentPath,
+                      Entity entity,
+                      const SaveContext& ctx)
+{
+    const auto* a = ctx.world.GetComponent<Audio::AudioSourceComponent>(entity);
+    if (a == nullptr)
+    {
+        return;
+    }
+
+    std::string_view soundPath;
+    if (ctx.assetRegistry != nullptr && a->sound.IsValid())
+    {
+        soundPath = ctx.assetRegistry->PathOf<Asset::SoundAsset>(a->sound);
+        if (soundPath.empty())
+        {
+            ORANGE_LOG_WARN(
+                "Scene save: AudioSourceComponent's sound handle has no path in "
+                "AssetRegistry; writing empty path.");
+        }
+    }
+    else if (a->sound.IsValid() && ctx.assetRegistry == nullptr)
+    {
+        ORANGE_LOG_WARN(
+            "Scene save: AudioSourceComponent has a valid sound handle but no "
+            "AssetRegistry was supplied to Save(); writing empty path.");
+    }
+
+    writer.WriteString(Join(componentPath, "sound"),       soundPath);
+    writer.WriteBool(  Join(componentPath, "playOnAwake"), a->playOnAwake);
+    writer.WriteBool(  Join(componentPath, "loop"),        a->loop);
+    writer.WriteFloat( Join(componentPath, "volume"),      a->volume);
+    writer.WriteFloat( Join(componentPath, "pitch"),       a->pitch);
+}
+
+bool ReadAudioSource(const JsonReader& reader,
+                     std::string_view componentPath,
+                     Entity entity,
+                     const LoadContext& ctx)
+{
+    Audio::AudioSourceComponent a;
+
+    // sound 字段可以为空（"未配音"），但若 key 缺失视为格式坏 —— 与
+    // ReadRenderable.mesh 同款约定。
+    std::string soundPath;
+    if (!reader.ReadString(Join(componentPath, "sound"), soundPath))
+    {
+        return false;
+    }
+    if (!soundPath.empty())
+    {
+        if (ctx.assetRegistry != nullptr)
+        {
+            auto loadResult = ctx.assetRegistry->Load<Asset::SoundAsset>(soundPath);
+            if (loadResult.IsOk())
+            {
+                a.sound = loadResult.Value();
+            }
+            else
+            {
+                ORANGE_LOG_WARN("Scene load: failed to load sound '{}'; leaving handle empty.",
+                                soundPath);
+            }
+        }
+        else
+        {
+            ORANGE_LOG_WARN(
+                "Scene load: AudioSourceComponent references sound '{}' but no AssetRegistry "
+                "was supplied to Load(); leaving handle empty.",
+                soundPath);
+        }
+    }
+
+    a.playOnAwake = reader.GetBool( Join(componentPath, "playOnAwake"), a.playOnAwake);
+    a.loop        = reader.GetBool( Join(componentPath, "loop"),        a.loop);
+    a.volume      = static_cast<float>(reader.GetFloat(Join(componentPath, "volume"), a.volume));
+    a.pitch       = static_cast<float>(reader.GetFloat(Join(componentPath, "pitch"),  a.pitch));
+
+    ctx.world.AddComponent(entity, a);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // AnimatorComponent
 //
 // 当前阶段 Animator 的"重建数据"只是 backend 名字。SkeletalAnimator
@@ -1298,8 +1450,10 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Layer",            ComponentKind::PureData,         &HasLayer,            &WriteLayer,            &ReadLayer},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
+        {"PointLight",       ComponentKind::PureData,         &HasPointLight,       &WritePointLight,       &ReadPointLight},
         {"Environment",      ComponentKind::PureData,         &HasEnvironment,      &WriteEnvironment,      &ReadEnvironment},
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
+        {"AudioSource",      ComponentKind::PureData,         &HasAudioSource,      &WriteAudioSource,      &ReadAudioSource},
         {"Camera",           ComponentKind::PureData,         &HasCamera,           &WriteCamera,           &ReadCamera},
 
         // Backend-dependent：Pass 2 由 SceneSerialization 主流程按 entity

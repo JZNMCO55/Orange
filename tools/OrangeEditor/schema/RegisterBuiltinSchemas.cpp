@@ -15,7 +15,9 @@
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/IAnimator.h>
+#include <orange/engine/asset/SoundAsset.h>
 #include <orange/engine/asset/TextureAsset.h>
+#include <orange/engine/audio/AudioSourceComponent.h>
 #include <orange/engine/physics/ColliderComponent.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/Camera.h>
@@ -54,6 +56,33 @@ void RegisterDirectionalLightSchema()
             .Tooltip("本光源整体是否参与投影计算（全局开关）。\n"
                      "关闭后场景中不会有任何阴影，即便 Renderable 上勾了 Casts Shadow。\n"
                      "与 Renderable 的同名 flag 是 AND 关系：两个都必须为 true 才会真投影。")
+        .Addable()
+        .Removable()
+        .Register();
+}
+
+// PointLight schema。位置由 Transform 派生（与 DirectionalLight 同款），
+// Inspector 仅暴露 color / intensity / range / castsShadow 四字段。
+// castsShadow 当前 Pipeline 忽略（omnidirectional shadow 是 long-term
+// roadmap 量级），tooltip 显式说明留作 forward-compat。
+void RegisterPointLightSchema()
+{
+    using PL = Orange::Engine::Render::PointLight;
+    ComponentSchemaBuilder<PL>("PointLight", "Point Light")
+        .Field<&PL::color>("color", "Color")
+            .Color()
+        .Field<&PL::intensity>("intensity", "Intensity")
+            .Range(0.0f, 1000.0f)
+            .DragSpeed(0.05f)
+        .Field<&PL::range>("range", "Range (m)")
+            .Range(0.01f, 1000.0f)
+            .DragSpeed(0.1f)
+            .Tooltip("光照影响距离上限（米）。超出此距离贡献被 smoothstep 截断到 0。\n"
+                     "Pipeline 用 range 做 culling + shader 内 distance fade。\n"
+                     "典型室内点光 5–10m，路灯 30–100m。")
+        .Field<&PL::castsShadow>("castsShadow", "Casts Shadow")
+            .Tooltip("保留字段。当前 Pipeline 忽略 PointLight 的投影标记。\n"
+                     "Omnidirectional cubemap shadow 是 Phase 10 量级，留待后续 milestone。")
         .Addable()
         .Removable()
         .Register();
@@ -670,6 +699,68 @@ void RegisterCameraComponentSchema()
         .Register();
 }
 
+// AudioSourceComponent 的 Inspector schema。
+//
+// 五字段：sound（.wav / .ogg 资源引用）+ playOnAwake / loop / volume / pitch。
+// sound AssetRef 走 ctx.pAssets 路径（与 Renderable.mesh / Environment.cubemap
+// 同款 PathOf / Load 双向转换），其余四字段是 PureData 标量。
+//
+// 试播 / 停止按钮**不**通过本 schema 暴露 —— 走 IEditorInspectorPlugin
+// ParseEnd 钩子（AudioSourceInspectorPlugin），让"播放控制"与"参数编辑"
+// 切分清晰（同 Unity AudioSource：参数走 Inspector，Play/Stop 走 inspector
+// 顶部的工具栏按钮 / 独立小窗）。
+void RegisterAudioSourceComponentSchema()
+{
+    using AS = Orange::Engine::Audio::AudioSourceComponent;
+
+    static const auto soundGet = +[](const void* c,
+                                     const EditorAssetContext& ctx,
+                                     void* out) {
+        auto* a    = static_cast<const AS*>(c);
+        auto* sOut = static_cast<std::string*>(out);
+        if (ctx.pAssets == nullptr || !a->sound.IsValid()) {
+            sOut->clear();
+            return;
+        }
+        *sOut = std::string{ctx.pAssets->PathOf<
+            ::Orange::Engine::Asset::SoundAsset>(a->sound)};
+    };
+    static const auto soundSet = +[](void* c,
+                                     const EditorAssetContext& ctx,
+                                     const void* in) {
+        auto* a = static_cast<AS*>(c);
+        const auto& path = *static_cast<const std::string*>(in);
+        if (ctx.pAssets == nullptr) { return; }
+        if (path.empty()) {
+            a->sound = {};
+            return;
+        }
+        auto lr = ctx.pAssets->Load<
+            ::Orange::Engine::Asset::SoundAsset>(path);
+        if (lr.IsOk()) { a->sound = lr.Value(); }
+    };
+
+    ComponentSchemaBuilder<AS>("AudioSource", "Audio Source")
+        .FieldAssetRef("sound", "Sound", AssetKind::Sound, soundGet, soundSet)
+        .Field<&AS::playOnAwake>("playOnAwake", "Play On Awake")
+            .Tooltip("Play Mode 进入瞬间是否自动 Start。\n"
+                     "关闭时由游戏侧脚本 / 编辑器 Inspector 试播按钮触发。")
+        .Field<&AS::loop>("loop", "Loop")
+            .Tooltip("是否循环播放。loop=true 时声音不会自然结束。")
+        .Field<&AS::volume>("volume", "Volume")
+            .Range(0.0f, 2.0f)
+            .DragSpeed(0.01f)
+            .Tooltip("音量乘子（0..1+）。0 = 静音；1 = 原始音量；> 1 可能 clip。")
+        .Field<&AS::pitch>("pitch", "Pitch")
+            .Range(0.25f, 4.0f)
+            .DragSpeed(0.01f)
+            .Tooltip("音高乘子（1 = 原速；0.5 = 半速半音高；2 = 双倍）。\n"
+                     "miniaudio 通过重采样实现，pitch != 1 时 CPU 开销略升。")
+        .Addable()
+        .Removable()
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
@@ -682,11 +773,13 @@ void RegisterBuiltinSchemas()
     RegisterTransformComponentSchema();
     RegisterHierarchyComponentSchema();
     RegisterDirectionalLightSchema();
+    RegisterPointLightSchema();
     RegisterEnvironmentComponentSchema();
     RegisterRenderableComponentSchema();
     RegisterRigidBodyComponentSchema();
     RegisterColliderComponentSchema();
     RegisterParticleEmitterComponentSchema();
+    RegisterAudioSourceComponentSchema();
     RegisterAnimatorComponentSchema();
     RegisterCameraComponentSchema();
     // 所有内置组件 schema 已全数迁完。后续 commit（c10）改 Add Component 菜

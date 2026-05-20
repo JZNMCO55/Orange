@@ -55,6 +55,42 @@ struct DirectionalLight
     bool castsShadow{false};
 };
 
+// 点光 ECS component。
+//
+// 位置由 entity 的 TransformComponent.position 派生 —— 与 DirectionalLight
+// 走 Transform.rotation 同款约定，组件不冗余存几何状态。
+//
+// 衰减模型采用物理基 inverse-square 加 smoothstep 至 range 截断：
+//   atten(d) = (1 / max(d², minD²)) * smoothstep(1, 0, d / range)
+// 其中 minD² = 0.01 防 0 除；smoothstep 让 range 边界平滑过渡到 0，避免
+// 硬边切割。Pipeline 在 fragment shader 内消费。
+//
+// 设计取舍：
+//   * 不在组件上挂 attenuation 系数 —— 物理基公式只一个 range 参数，与
+//     Cocos pointLight / Godot OmniLight 同款（"距离 + 强度"两参数即够）。
+//     classical (constant + linear*d + quadratic*d²) 模型有调参负担，PBR
+//     baseline 直接走物理基。
+//   * 不存 SpotLight —— 留待第一款游戏真撞上"手电筒锥光"需求时再扩。
+//   * castsShadow 字段保留但本期不实现 omnidirectional cubemap shadow
+//     —— Pipeline 忽略 PointLight.castsShadow 字段，仅 DirectionalLight 投影。
+struct PointLight
+{
+    // 线性 RGB 颜色（不预乘 intensity）。
+    glm::vec3 color{1.0f, 1.0f, 1.0f};
+
+    // 标量强度乘子。Pipeline 在 fragment shader 里按
+    // `color * intensity * attenuation(distance)` 累加贡献。
+    float intensity{1.0f};
+
+    // 光照影响距离上限（米）。超过此距离贡献被 smoothstep 截断到 0；
+    // Pipeline 用 range 做 culling（距离 camera 太远的 PointLight 不进
+    // light list）。典型室内点光 5-10m，路灯 / 灯塔 30-100m。
+    float range{10.0f};
+
+    // 保留字段 —— 当前 Pipeline 忽略；omnidirectional shadow 实现后启用。
+    bool castsShadow{false};
+};
+
 // identity rotation 下 DirectionalLight 的默认传播方向（-Y，向下）。
 // 把 rotation * kDirectionalLightLocalForward 即得世界方向。
 inline constexpr glm::vec3 kDirectionalLightLocalForward{0.0f, -1.0f, 0.0f};
