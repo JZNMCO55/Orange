@@ -218,6 +218,59 @@ vec4 uMRA        //  16
 
 ---
 
+## GAP-2026-05-20-editor-fprintf-to-core-log-migration
+
+- **发现方**：OrangeEditor v0.6 验收 retrospective（File dialog COM 修复 + menu bar 修补两个 session 末尾）
+- **发现日期**：2026-05-20
+- **一句话定性**：OrangeEditor 内 104 处 `fprintf(stderr/stdout)` 散布未迁移到 `Core::Log` / `ORANGE_LOG_*`，绕过 Console 面板 sink hook，用户在编辑器内看不到这些日志（只在命令行窗口可见）
+
+### 触发场景
+
+- v0.6 ### 3 验收 File dialog hang 诊断时，给 `ShowFileDialogImpl` 加 `fprintf(stderr, ...)` 用作根因定位—— **诊断信息只在命令行窗口可见**，编辑器 Console 面板（已经接 `SetLogSink` v0.8 c2）完全看不到
+- 同款现象出现在编辑器启动诊断（`[OrangeEditor] applied window icon`）/ Save 路径失败（`Scene::Save failed`）/ Play 快照失败（`Play 快照落盘失败`）/ msyh.ttc 字体 fallback 等所有"用户可能想看"的日志
+- 验收期间用户多次反馈"我看不到 console 怎么知道"——需要切到 VS / 命令行窗口看，与"编辑器自带 Console 面板"的 UX 预期割裂
+
+### 现状基础设施（已就绪，仅需迁移消费）
+
+- `Core::Log` 公共面完备（`include/orange/engine/core/Log.h`）：6 个 `ORANGE_LOG_*` 宏 + std::format（C++20，零依赖）+ spdlog 可选 backend (`ORANGE_ENGINE_WITH_SPDLOG`)
+- `SetLogSink` 已 wire（v0.8 c2）：OrangeEditor Console 面板订阅 sink，所有 `ORANGE_LOG_*` 自动出现在面板内
+- 引擎本体 (`src/`) 已经基本迁完（236 处 `ORANGE_LOG_*` vs 6 处 `fprintf` 残留）
+- samples / tests 是 demo / 测试程序，fprintf 直出 stdout 合理，**不在迁移范围**
+
+### 缺什么
+
+- `tools/OrangeEditor/` 内 104 处 `fprintf(stderr/stdout)` 系统性 grep → 替换：
+  - `fprintf(stderr, "[OrangeEditor] ... failed: ...\n", ...)` → `ORANGE_LOG_ERROR("..., ...)`
+  - `fprintf(stdout, "[OrangeEditor] ...\n", ...)` → `ORANGE_LOG_INFO("...", ...)`
+  - 调试用的 ad-hoc `fprintf` 视情况降为 `ORANGE_LOG_DEBUG` 或直接删
+- 涉及文件（按 grep count 降序）：`EditorRenderLayer.cpp` (24) / `main.cpp` (19) / `AnimFsmFileIO.cpp` (19) / `DemoWorld.cpp` (12) / `MaterialFileIO.cpp` (11) / `command/AnimFsmCommands.cpp` (8) + 5 个文件各 ≤6 处
+- 顺路清除残留：`src/animation/AnimationStateMachine.cpp` 的 5 处 fprintf（引擎本体仅剩这一处，搂草打兔子）
+
+### 期望验收
+
+- `grep -rn 'fprintf(stderr\|fprintf(stdout' tools/OrangeEditor/` 输出 0
+- 启动 OrangeEditor 后 Console 面板能看到全部"启动诊断 + file dialog fail + Save 失败 + Play 快照失败"日志（level filter / search 正常工作）
+- 命令行窗口仍能看到日志（spdlog backend OFF 时走 stderr fallback，ON 时走 spdlog console sink，两条路径都保留）
+- `ORANGE_ENGINE_WITH_SPDLOG=ON` build 时验证完整日志链路（spdlog 不是迁移本身，但迁移完成后顺便确认 backend 切换不漏）
+
+### 关于 fmt vs std::format 性能（同 session 讨论留底）
+
+用户问"fmt 官方 benchmark 性能断档领先 std::format，是否切 fmt"。结论：**不切**，理由：
+
+1. **spdlog backend 已经间接用 fmt**——`ORANGE_ENGINE_WITH_SPDLOG=ON` 时实际 sink output 走 fmt（spdlog 自己 vendor 了 fmt）。但 OrangeEngine 的 Core::Log **格式化在公共头 `std::format` 那一步就完成了**（`Format` template 直接 `std::format(fmt, args...)` 得到 std::string，再传 `Write(string_view)`），所以 std::format 性能差异确实落到引擎上
+2. **但游戏引擎 log 不是 hot path**——典型 log 频率 < 1000 条/秒，I/O 与 sink mutex 是更大瓶颈；fmt benchmark 的"3× faster"是在百万级/秒的"格式化即整体瓶颈"测试条件下成立，**不映射到游戏引擎实际负载**
+3. **公共头切 fmt 的代价**：`include/orange/engine/core/Log.h` 是 PUBLIC 头，切 fmt 会引入 `<fmt/format.h>` 公共依赖 → 下游游戏仓库要找 `find_package(fmt)` → 给"无实测性能问题"的优化加一份永久 ABI / 依赖维护成本
+4. **判断标准**：等 Tracy profiler 量出 `std::format` 是 frame budget 的 > 0.1% 才切；目前 v0.9 Profiler 已经接通，可以实测后再决策
+
+### 状态
+
+- **登记**：2026-05-20
+- **处理**：未启动；预估 1 个独立 session 体量（机械替换 + 跑 OrangeEditor 视觉验收 Console 面板能看见日志）
+- **关联**：editor-roadmap v1.0 验收前 batch milestone（与 `GAP-2026-05-19-editor-aux-passes-in-engine-pipeline` 同节奏批处理）；engine-known-gaps `GAP-2026-05-19-editor-aux-passes` 的 IAuxPassProvider 整骨可一并完成"编辑器侧 hardcode 清理"批次
+- **归属**：未拍板分配到具体 Phase；候选 v1.0 验收前 batch milestone
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-11-point-light-and-visible-halo**（2026-05-20 落地 G1+G2，G3 留 v1.x）：
