@@ -1210,7 +1210,11 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         // 而不需要先解除 Material 子模式。Selectable 左键才把 selectedAssetPath
         // 改写，右键 BeginPopupContextItem 不触发 left-click 路径，所以选中
         // entity 不会被本路径清掉。
-        if (ImGui::BeginPopupContextItem("##asset_file_ctx"))
+        // 注意：BeginPopupContextItem 不传 str_id，让 ImGui 用 LastItemID
+        // （即 Selectable 的 ID）作为 popup 唯一 ID。若传固定 str_id，loop
+        // 内每个 file 共享同一个 popup ID，open 状态下所有 file 的 BeginPopup
+        // 都返回 true → 菜单被画 N 次 → 同名 MenuItem ID 冲突报错。
+        if (ImGui::BeginPopupContextItem())
         {
             using ::Orange::Engine::Entity;
             using ::Orange::Engine::Render::RenderableComponent;
