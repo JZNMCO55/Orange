@@ -587,11 +587,47 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::EndMenu();
     }
 
+    // Edit 菜单：Undo / Redo。Ctrl+Z / Ctrl+Y 全局快捷键路径在 OnUpdate
+    // 顶部独立实现（仅 Edit 态 + 无文本焦点时响应），本菜单项是同款
+    // 入口的鼠标可达版本，enabled 条件保持一致。
+    if (ImGui::BeginMenu("Edit"))
+    {
+        const bool canEditCmd = (mHost.scene.playState == PlayState::Edit)
+                             && !ImGui::GetIO().WantTextInput;
+        if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
+                            canEditCmd && mHost.cmdStack.CanUndo()))
+        {
+            mHost.cmdStack.Undo();
+            ValidateEntityHandles();
+        }
+        if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
+                            canEditCmd && mHost.cmdStack.CanRedo()))
+        {
+            mHost.cmdStack.Redo();
+            ValidateEntityHandles();
+        }
+        ImGui::EndMenu();
+    }
+
     // View 菜单：Settings / 其它 UI toggles（v0.8 落地）。
     if (ImGui::BeginMenu("View"))
     {
         ImGui::MenuItem("Settings", nullptr, &mShowSettingsPanel);
         ImGui::MenuItem("Profiler", nullptr, &mShowProfilerPanel);
+        ImGui::EndMenu();
+    }
+
+    // Help 菜单：About。MenuItem 只设 flag，真正的 OpenPopup 走外层
+    // EndMainMenuBar 之后调用 —— 否则 OpenPopup 在 BeginMenu("Help") 内
+    // 触发时 ID 经过 "Help" hash，与外层 BeginPopupModal 的 ID（无 "Help"
+    // 上下文）不匹配，popup 永远不开。
+    static bool sPendingOpenAbout = false;
+    if (ImGui::BeginMenu("Help"))
+    {
+        if (ImGui::MenuItem("About OrangeEditor"))
+        {
+            sPendingOpenAbout = true;
+        }
         ImGui::EndMenu();
     }
 
@@ -604,6 +640,33 @@ void EditorRenderLayer::DrawMainMenuBar()
     ImGui::SameLine();
     ImGui::TextDisabled("%s", sceneLabel);
     ImGui::EndMainMenuBar();
+
+    // About popup —— modal，居中。OpenPopup 必须在 EndMainMenuBar 之后
+    // 调，让 ID stack 与下面 BeginPopupModal 一致（参 sPendingOpenAbout
+    // 注释段）。
+    if (sPendingOpenAbout)
+    {
+        ImGui::OpenPopup("AboutOrangeEditor");
+        sPendingOpenAbout = false;
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("AboutOrangeEditor", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize
+                               | ImGuiWindowFlags_NoSavedSettings))
+    {
+        ImGui::TextUnformatted("OrangeEditor");
+        ImGui::TextDisabled("v0.0.3 (development)");
+        ImGui::Separator();
+        ImGui::TextWrapped("Editor for OrangeEngine —— "
+                           "2D / 2.5D game framework.");
+        ImGui::Separator();
+        if (ImGui::Button("Close", ImVec2(120, 0)))
+        {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 // 检查 EditorHost 里各实体句柄是否仍在 registry 中存活；对已被 Undo

@@ -382,8 +382,26 @@ int main()
     //
     // 失败 fallback 链：msyh.ttc → segoeui.ttf (ASCII only) → ImGui 内置
     // ProggyClean（位图，仅 ASCII；中文仍乱码但保底能跑）。
+    //
+    // GetGlyphRangesChineseFull 不含希腊字母 / 箭头 / 部分数学符号，导致
+    // 项目里的 "Δ"（时间增量）/ "→"（教程指引）/ "×" 等显示为 "?"。用
+    // ImFontGlyphRangesBuilder 在 ChineseFull 之上额外加进项目实际用到的
+    // 一小撮非 CJK Unicode 符号（msyh.ttc 覆盖这些 codepoint）。builder
+    // 输出的 ranges 数组必须 stay alive 到 ImGui_ImplVulkan_Init 完成
+    // font texture 上传，所以用 static 持有。
+    static ImVector<ImWchar> sCustomGlyphRanges;
     {
-        const ImWchar* cjkRanges = io.Fonts->GetGlyphRangesChineseFull();
+        ImFontGlyphRangesBuilder builder;
+        builder.AddRanges(io.Fonts->GetGlyphRangesChineseFull());
+        // 项目实际用到的非 CJK 字符：希腊大写 Δ、箭头 → ← ↑ ↓、乘号 ×、
+        // 度数 °、约等 ≈、不等 ≠ ≤ ≥、无穷 ∞、希腊小写 μ π σ ω。
+        // 源文件 UTF-8 编码（cmake /utf-8），这里用普通字符串字面量即可
+        // （不要用 u8"..."，C++20 下是 const char8_t* 与 AddText 签名不兼容）。
+        builder.AddText("Δ→←↑↓×°≈≠≤≥∞μπσω");
+        builder.BuildRanges(&sCustomGlyphRanges);
+    }
+    {
+        const ImWchar* cjkRanges = sCustomGlyphRanges.Data;
         ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
             "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges);
         if (fontMain == nullptr) {
