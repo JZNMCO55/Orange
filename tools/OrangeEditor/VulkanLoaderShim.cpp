@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 // Windows IFileDialog —— 编辑器 File 菜单的 Open / Save As 走 native
 // Common Item Dialog（COM）。NOMINMAX / WIN32_LEAN_AND_MEAN 避免污染
@@ -158,54 +159,92 @@ namespace
 
 // 共享 IFileDialog 模板 —— ShowSceneFileDialog / ShowManifestFileDialog
 // 只过滤器与默认扩展名不同，其余 COM 流程完全一致。
+//
+// 必须在独立 STA（apartment-threaded）线程里跑 IFileDialog::Show。
+// 原因：OrangeRender Vulkan 初始化时（驱动层 dxgkernel / DXGI / WIC）
+// 会把 main thread 的 COM apartment 设成 **MTA**。而 IFileDialog::Show
+// 在 MTA 下会**永久 hang 死**——COM 内部 marshaling 要靠 STA 消息泵
+// 驱动 dialog 渲染，MTA 没有泵就一直等。直接在 main thread 调
+// CoInitializeEx(APARTMENTTHREADED) 会返回 RPC_E_CHANGED_MODE，无法
+// 改回 STA。Windows 推荐做法是把 dialog 放到独立 STA worker 线程，
+// 主线程 join 等结果——dialog 本身就是模态阻塞，UX 上无差异。
 bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
                         const COMDLG_FILTERSPEC* filters, std::size_t filterCount,
                         const wchar_t* defaultExt, const wchar_t* title,
                         std::string& outPath)
 {
-    const HRESULT hrCo = CoInitializeEx(nullptr,
-                                        COINIT_APARTMENTTHREADED
-                                        | COINIT_DISABLE_OLE1DDE);
-    if (hrCo != S_OK && hrCo != S_FALSE) { return false; }
-
     bool ok = false;
-    IFileDialog* pDialog = nullptr;
-    HRESULT hr = CoCreateInstance(
-        isSave ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
-        nullptr, CLSCTX_ALL,
-        IID_PPV_ARGS(&pDialog));
-    if (SUCCEEDED(hr)) {
-        pDialog->SetFileTypes(static_cast<UINT>(filterCount), filters);
-        pDialog->SetFileTypeIndex(1);
-        pDialog->SetDefaultExtension(defaultExt);
-        pDialog->SetTitle(title);
+    std::string resultPath;
 
-        hr = pDialog->Show(static_cast<HWND>(parentHwnd));
-        if (SUCCEEDED(hr)) {
-            IShellItem* pItem = nullptr;
-            hr = pDialog->GetResult(&pItem);
-            if (SUCCEEDED(hr)) {
-                PWSTR pszPath = nullptr;
-                hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
-                if (SUCCEEDED(hr)) {
-                    const int u8len = WideCharToMultiByte(
-                        CP_UTF8, 0, pszPath, -1,
-                        nullptr, 0, nullptr, nullptr);
-                    if (u8len > 1) {
-                        outPath.resize(static_cast<std::size_t>(u8len - 1));
-                        WideCharToMultiByte(
-                            CP_UTF8, 0, pszPath, -1,
-                            outPath.data(), u8len, nullptr, nullptr);
-                        ok = true;
-                    }
-                    CoTaskMemFree(pszPath);
-                }
-                pItem->Release();
-            }
+    std::thread worker([&]() {
+        // worker 线程：init STA → dialog → uninit。主线程的 MTA 不受影响。
+        const HRESULT hrCo = CoInitializeEx(nullptr,
+                                            COINIT_APARTMENTTHREADED
+                                            | COINIT_DISABLE_OLE1DDE);
+        if (FAILED(hrCo)) {
+            std::fprintf(stderr,
+                "[OrangeEditor] ShowFileDialog worker CoInitializeEx failed: hr=0x%08lX\n",
+                static_cast<unsigned long>(hrCo));
+            return;
         }
-        pDialog->Release();
-    }
-    if (hrCo == S_OK) { CoUninitialize(); }
+
+        IFileDialog* pDialog = nullptr;
+        HRESULT hr = CoCreateInstance(
+            isSave ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
+            nullptr, CLSCTX_ALL,
+            IID_PPV_ARGS(&pDialog));
+        if (SUCCEEDED(hr)) {
+            pDialog->SetFileTypes(static_cast<UINT>(filterCount), filters);
+            pDialog->SetFileTypeIndex(1);
+            pDialog->SetDefaultExtension(defaultExt);
+            pDialog->SetTitle(title);
+
+            // parent 必须传 nullptr：parentHwnd 由 main thread 创建（GLFW
+            // window），而 main thread 此刻卡在 worker.join() 上不 pump
+            // message——若 dialog 把 parent 当 modal owner，需要给 parent
+            // 线程发 WM_ENABLE / WM_NCACTIVATE 等消息等响应，跨线程死锁。
+            // 传 nullptr → dialog 成为顶层独立窗口，仍 modal 自身，但不
+            // 依赖任何 parent 线程的消息泵。
+            (void)parentHwnd;
+            hr = pDialog->Show(nullptr);
+            if (SUCCEEDED(hr)) {
+                IShellItem* pItem = nullptr;
+                hr = pDialog->GetResult(&pItem);
+                if (SUCCEEDED(hr)) {
+                    PWSTR pszPath = nullptr;
+                    hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+                    if (SUCCEEDED(hr)) {
+                        const int u8len = WideCharToMultiByte(
+                            CP_UTF8, 0, pszPath, -1,
+                            nullptr, 0, nullptr, nullptr);
+                        if (u8len > 1) {
+                            resultPath.resize(static_cast<std::size_t>(u8len - 1));
+                            WideCharToMultiByte(
+                                CP_UTF8, 0, pszPath, -1,
+                                resultPath.data(), u8len, nullptr, nullptr);
+                            ok = true;
+                        }
+                        CoTaskMemFree(pszPath);
+                    }
+                    pItem->Release();
+                }
+            } else if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                std::fprintf(stderr,
+                    "[OrangeEditor] ShowFileDialog IFileDialog::Show failed: hr=0x%08lX\n",
+                    static_cast<unsigned long>(hr));
+            }
+            pDialog->Release();
+        } else {
+            std::fprintf(stderr,
+                "[OrangeEditor] ShowFileDialog CoCreateInstance failed: hr=0x%08lX\n",
+                static_cast<unsigned long>(hr));
+        }
+
+        if (hrCo == S_OK) { CoUninitialize(); }
+    });
+    worker.join();
+
+    if (ok) { outPath = std::move(resultPath); }
     return ok;
 }
 
