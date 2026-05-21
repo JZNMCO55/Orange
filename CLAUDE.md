@@ -13,18 +13,22 @@ OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games 
 The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference.
 
 - Current version: `0.1.0` (Unreleased; 0.x ABI is **not** stable)
-- Status (基准 2026-05-19)：**Phase 1 ~ 5.5 全 ✅** + **Phase 6.5 · 渲染真实感基线（PBR + IBL）整体 ✅**（Task 06.5-01 ~ 07 全 ✅；2026-05-19 跨仓 session 落地 GAP-2026-05-19-pbr-ibl-specular-quality（multi-scatter compensation + prefilter 4096 sample）+ GAP-2026-05-19-editor-environment-component-wiring（.hdr 浏览器 + Pipeline 自动 re-bake）+ 顺路 fix BUG-2026-05-18-vma-shutdown-allocation-leak-assertion 双源；B.1 + B.2 acceptance-checklist 落 `docs/acceptance/`；samples 13_pbr_direct + 14_pbr_ibl 已编出 + 视觉验收通过）。现处 **Phase 6** —— OrangeEditor 工具链。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 / v0.4.5 / v0.5 / v0.6 / v0.6.5 / v0.8 / v0.8.5 / v0.9 / v0.9.5 已 ✅；下一里程碑 **v0.7 Animation 子模式**（留待状态机图编辑器需求实际触发）/ **v1.0 验收**，见 `docs/editor-roadmap.md` 与 `docs/decisions/ADR-001` / ADR-003 / ADR-004）。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
+- Status (基准 2026-05-19)：**Phase 1 ~ 5.5 全 ✅** + **Phase 6.5 · 渲染真实感基线（PBR + IBL）整体 ✅**（Task 06.5-01 ~ 07 全 ✅；2026-05-19 跨仓 session 落地 GAP-2026-05-19-pbr-ibl-specular-quality（multi-scatter compensation + prefilter 4096 sample）+ GAP-2026-05-19-editor-environment-component-wiring（.hdr 浏览器 + Pipeline 自动 re-bake）+ 顺路 fix BUG-2026-05-18-vma-shutdown-allocation-leak-assertion 双源；B.1 + B.2 acceptance-checklist 已迁 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/`（ADR-006 落地后）；samples 13_pbr_direct + 14_pbr_ibl 已编出 + 视觉验收通过）。现处 **Phase 6** —— OrangeEditor 工具链。OrangeEditor 自己按 semver 独立演进（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 / v0.4.5 / v0.5 / v0.6 / v0.6.5 / v0.8 / v0.8.5 / v0.9 / v0.9.5 已 ✅；下一里程碑 **v0.7 Animation 子模式**（留待状态机图编辑器需求实际触发）/ **v1.0 验收**，见 `docs/editor-roadmap.md` 与 ADR-001 / ADR-003 / ADR-004（已迁 `vendor/Orange-Wiki/case-studies/orange-engine/decisions/`，入口 `docs/decisions/README.md`））。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
 - Authoritative documents (read these first):
   - `docs/design-plan.md` — Phase 1–5.5 architecture + task table（含 ✅ 进度）
   - `docs/roadmap.md` — Phase 6+ long-term roadmap（含 Phase 6.5 outline 入口）
-  - `docs/pbr-ibl-milestone.md` — Phase 6.5 详细 milestone 设计（PBR + IBL，方案 B 两步走）
   - `docs/editor-roadmap.md` — OrangeEditor v0.x 路线（独立 semver）
-  - `docs/decisions/` — Architecture Decision Records（跨阶段决策；从 ADR-001 起）
   - `docs/engine-known-gaps.md` — 编辑器 / sample 撞上的引擎缺口登记
   - `docs/extension-points.md` — public API extension surface and project-level invariants
   - `docs/coding-standards.md` — naming, guards, API macro (delta vs OrangeRender)
   - `docs/milestone-start-checklist.md` — 任意 milestone 开工前的 5–10 分钟 ritual
-  - `docs/case-studies/character-forms.md` — first-game design note (NOT engine spec; will migrate to game repo when forked)
+  - `docs/milestone-end-checklist.md` — 任意 milestone 标 ✅ 前的 5–10 分钟 ritual
+  - `docs/decisions/README.md` — Architecture Decision Records 入口（实际 ADR 已迁 `vendor/Orange-Wiki/case-studies/orange-engine/decisions/`，本 README 维护索引 + "什么进 ADR" 节）
+- Archived references（已迁 Wiki，仅历史回顾时翻阅）:
+  - `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/milestone-design.md` — Phase 6.5 PBR+IBL 详细 milestone 设计（原 `docs/pbr-ibl-milestone.md`）
+  - `vendor/Orange-Wiki/case-studies/orange-engine/pre-game-design/character-forms.md` — first-game design note（原 `docs/case-studies/character-forms.md`）
+  - `vendor/Orange-Wiki/case-studies/orange-engine/milestones/` — 历次 milestone acceptance checklist（编辑器 v0.x + Phase 6.5 + Phase 3）
+  - `vendor/Orange-Wiki/case-studies/orange-engine/historical-architecture/4-layer-archive/` — 一年前 GEA 风格 4-layer 死架构（原 `docs/Technical Documentation/`）
 
 ## Toolchain
 
@@ -120,7 +124,7 @@ Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.m
 
 - **Phase 1 ~ 5.5：全部 ✅**（design-plan.md Task 级均已 ✅；`samples/01_minimal_window` ~ `samples/09_vfx_demo` 已落地）
 - **Phase 6**：进行中——OrangeEditor 工具链。OrangeEditor 自身按 semver 独立演进，详见 `docs/editor-roadmap.md`（v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 ✅；下一里程碑 v0.5 Asset 浏览器 + Material 子模式）
-- **Phase 6.5 · 渲染真实感基线（PBR + IBL）：接近完工**（roadmap.md Task 06.5-01 ~ 06 ✅；06.5-07 sample 14_pbr_ibl 代码已落地但 `--furnace` 模式 segfault，登记 `vendor/OrangeRender/docs/incoming_bugs.md` 跨仓 bug 后修复回归再 ✅；B.1 / B.2 acceptance-checklist 见 `docs/acceptance/phase-6.5-B.{1,2}-acceptance-checklist.md`）
+- **Phase 6.5 · 渲染真实感基线（PBR + IBL）：接近完工**（roadmap.md Task 06.5-01 ~ 06 ✅；06.5-07 sample 14_pbr_ibl 代码已落地但 `--furnace` 模式 segfault，登记 `vendor/OrangeRender/docs/incoming_bugs.md` 跨仓 bug 后修复回归再 ✅；B.1 / B.2 acceptance-checklist 见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/phase-6.5-B.{1,2}-acceptance-checklist.md`）
 - **Phase 7+**：未开工；前瞻路线见 `docs/roadmap.md`
 
 When working on a task, locate it in `docs/design-plan.md` Task Breakdown（Phase 1–5.5 历史 + 接口参考）、`docs/editor-roadmap.md`（Phase 6 编辑器）或 `docs/roadmap.md`（Phase 7+）. Implement only the listed outputs; reject scope creep.
@@ -254,7 +258,7 @@ OrangeEditor 开发时采用**双参考**策略：
 
 ## 工作流基础设施
 
-按 2026-05-12 工作流升级（详见 `docs/decisions/ADR-001` 关联讨论），项目沉淀了 5 件协同纪律基础设施（2026-05-14 补 end-checklist 后从 4 件扩到 5 件）。下面是**何时用 + 怎么用**——都是低摩擦工具，不用就会让早期决策腐烂。
+按 2026-05-12 工作流升级（详见 ADR-001，已迁 `vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-001-editor-schema-first-and-no-hardcode.md`），项目沉淀了 5 件协同纪律基础设施（2026-05-14 补 end-checklist 后从 4 件扩到 5 件）。下面是**何时用 + 怎么用**——都是低摩擦工具，不用就会让早期决策腐烂。
 
 ### 1. Invariant lint —— `scripts/check_invariants.py`
 
@@ -278,13 +282,13 @@ OrangeEditor 开发时采用**双参考**策略：
 
 **接受的输出**：`CLAUDE.md drift: none detected.` —— 退出码 0；任何漂移条目都意味着本文件需要更新。
 
-### 3. ADR（架构决策记录）—— `docs/decisions/`
+### 3. ADR（架构决策记录）—— `docs/decisions/README.md` → `vendor/Orange-Wiki/case-studies/orange-engine/decisions/`
 
-跨阶段、跨文件的架构决策留 ADR；从 `ADR-001` 起，单调编号、不重排。**roadmap 写计划，ADR 写决策**——同一件事可同时在两处提到，但"为什么这么选" + "事后追评"只属于 ADR。
+跨阶段、跨文件的架构决策留 ADR；从 `ADR-001` 起，单调编号、不重排。**roadmap 写计划，ADR 写决策**——同一件事可同时在两处提到，但"为什么这么选" + "事后追评"只属于 ADR。ADR 文件 2026-05-21 起按 ADR-006 落地迁 Wiki，本仓 `docs/decisions/README.md` 保留索引 + "什么进 ADR" 节作为入口；新 ADR 同 session 写 Wiki 子树，本仓索引同 commit 更新。
 
 **何时写新 ADR**：见 `docs/decisions/README.md` "什么进 ADR" 节——非平凡选择 / 与 invariant 张力 / 事后追评失误 / 跨仓协同纪律 四类。
 
-**何时读 ADR**：milestone 启动 ritual 第 3 步（见下）；review 跨阶段改动时；编辑器 / 渲染器接口讨论时。
+**何时读 ADR**：milestone 启动 ritual 第 3 步（见下）；review 跨阶段改动时；编辑器 / 渲染器接口讨论时。先看 `docs/decisions/README.md` 索引 → 跳转 Wiki 对应 ADR 文件。
 
 ### 4. Milestone 启动 ritual —— `docs/milestone-start-checklist.md`
 
@@ -303,7 +307,7 @@ OrangeEditor 开发时采用**双参考**策略：
 ```
 milestone-start-checklist （前置：每个 milestone 开工前）
    │
-   ├─ 第 3 步：读相关 ADR（docs/decisions/）
+   ├─ 第 3 步：读相关 ADR（入口 docs/decisions/README.md → Wiki case-studies/orange-engine/decisions/）
    ├─ 第 4 步：查参考引擎对照设计（Lumix / Godot / Cocos）
    ├─ 第 5 步：跑 invariant lint + drift 检测 → 必须 baseline 干净
    ├─ 第 6 步：跨仓影响识别 → 触发 engine-known-gaps / OrangeRender incoming_feature 登记
@@ -384,4 +388,12 @@ vendor/
   Orange-Wiki/                          # knowledge base (branch: Orange-Render-Wiki)
 ```
 
-`docs/Technical Documentation/` is a **historical archive** of the abandoned GEA-style 4-layer architecture from a year ago. Do not read it as authoritative; do not delete it (preserved for history). All current architecture lives in `docs/design-plan.md` and its companion files.
+As of 2026-05-21 (ADR-006), historical / archive documents have moved to `vendor/Orange-Wiki/case-studies/orange-engine/`:
+
+- `historical-architecture/4-layer-archive/` — the abandoned GEA-style 4-layer architecture from a year ago (do not read as authoritative; preserved for history)
+- `milestones/` — completed editor v0.x acceptance checklists, Phase 6.5 PBR+IBL acceptance, Phase 3 audio/light gate
+- `decisions/` — Architecture Decision Records (ADR-001..N)
+- `pre-game-design/` — first-game design notes
+- `retrospectives/` — Phase / milestone retros (currently empty; populated when Phase 6 wraps)
+
+All current architecture lives in `docs/design-plan.md` and its companion files.

@@ -429,7 +429,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - **panel 视觉统一**：标题栏 / 分隔条 / 折叠箭头 / Inspector component header 折叠图标 / Entity Tree 行 hover/select 状态全部按 EditorTheme 重画
 - **Inspector 控件三态**：DragFloat / SliderFloat / Combo / Button hover / active / disabled 三态颜色一致
 - **acceptance scene**：在 demo.scene 上完整跑一遍"开场景 → 选实体 → 改 Inspector → gizmo 拖 → Save → Play → Stop → Build" 路径，全程视觉风格一致，无 ImGui 默认深蓝 / 灰白色块漏出
-- **附带：v0.4 c5 工具栏 8 项遗留功能验收**——`docs/acceptance/editor-v0.4-acceptance-checklist.md` c5 段共 8 项 `[ ]`（Gizmos 总开关 / disabled tooltip / Camera frustum / 多 plugin 并存 / Play vs visible 正交 等）。v0.4 期用户因工具栏不美观推迟，本 milestone 美化完成后一并跑；跑完把 c5 段父级标记勾 ✅，节点 A 大回归（P2）覆盖剩余
+- **附带：v0.4 c5 工具栏 8 项遗留功能验收**——`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v0.4-acceptance-checklist.md` c5 段共 8 项 `[ ]`（Gizmos 总开关 / disabled tooltip / Camera frustum / 多 plugin 并存 / Play vs visible 正交 等）。v0.4 期用户因工具栏不美观推迟，本 milestone 美化完成后一并跑；跑完把 c5 段父级标记勾 ✅，节点 A 大回归（P2）覆盖剩余
 
 **前置**：v0.6（全局 toolbar 已落，所有主 UI 表面齐全）；v0.4.5（DPI 自适应已落，token 化的间距 / 字号才有意义）
 
@@ -483,7 +483,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - ✅ **Editor Settings 系统**（c1，消除 L13）—— 14 字段（6 gizmo 线宽 + handleLength + hitThreshold + 6 gizmo 配色）+ `editor_settings.json` 持久化 + Settings 面板 sliders / color pickers + "Reset to defaults"
 - ✅ **Schema 注册 context 注入整骨**（c5，消除 L15）—— 单一 `SetEditorAssetContextForSchema(&editorHost.assets)` 注入路径替代原两个独立 setter；`gpAssetContext` 单指针替代 `gpAssetRegistry` + `gpNamedMaterialInstances` 两个文件作用域静态；`namedMaterialInstances` 移入 EditorAssetContext 自身。完整 `(Component&, const EditorAssetContext&)` get/set 签名整骨留 v0.9（PropertyDescriptor + SchemaInspector dispatch 体量较大）
 
-**完工记录**：见 `docs/acceptance/editor-v0.8-acceptance-checklist.md`。本期由 `/goal` 跨仓 session（解决 OE / OR / Editor 全 GAP + v0.8）顺势串完，与 Phase 6.5 整体 ✅ 在同一 session 收尾。
+**完工记录**：见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v0.8-acceptance-checklist.md`。本期由 `/goal` 跨仓 session（解决 OE / OR / Editor 全 GAP + v0.8）顺势串完，与 Phase 6.5 整体 ✅ 在同一 session 收尾。
 
 **前置**：v0.2
 
@@ -509,7 +509,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 - grid pass + dummy IBL ambient 默认值 + clear color 是 **编辑器审美决定**，当前塞在 engine `Pipeline` 公共面 → `docs/engine-known-gaps.md` GAP-2026-05-19-editor-aux-passes-in-engine-pipeline
 - PBR push constant 160 B 撞 Vulkan 规范保证下限 128 B（桌面 GPU 普遍 256 B，老 Intel iGPU / 移动端会 fail）→ `docs/engine-known-gaps.md` GAP-2026-05-19-pbr-push-constant-exceeds-spec-min；已在 `Pipeline::SetupRhiResources` 加 init-time 校验，devicelimit 不足时日志告警
 
-**完工记录**：见 `docs/acceptance/editor-v0.8.5-acceptance-checklist.md`。
+**完工记录**：见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v0.8.5-acceptance-checklist.md`。
 
 **前置**：v0.8（消费 `Core::Log` SetLogSink）+ Phase 6.5（消费 `EnvironmentComponent` / `Pipeline::BakeIblFromWorld` / PBR 材质路径）
 
@@ -527,7 +527,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **v0.8 c5 自承诺的"完整 `(Component&, EditorAssetContext&)` 签名整骨"**：调研发现是 GetFn/SetFn 签名扩 context 参数 + 20+ lambda 重写 + dispatch 改造，半天+ 工作量，与 v0.9 主线（DebugDraw + Profiler + Memory）正交且不阻塞用户体验。重新评估推延到 **v0.9.5 patch milestone**（先例：v0.6.5 / v0.8.5 都是从大 milestone 拆出的 patch）。
 
-**完工记录**：见 `docs/acceptance/editor-v0.9-acceptance-checklist.md`。ADR-003（Profiler 后端选型）在 v0.9 完工后切 status: accepted。
+**完工记录**：见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v0.9-acceptance-checklist.md`。ADR-003（Profiler 后端选型）在 v0.9 完工后切 status: accepted。
 
 **前置**：v0.2（Editor 命令栈基础）+ v0.8 c2（SetLogSink 同节奏的 engine→editor 数据流模式 reuse）
 
@@ -548,7 +548,7 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **与原描述的偏差**：原 deliverable 提两条候选（"扩 GetFn/SetFn 全字段加 ctx" vs "引入 AssetRefAccessor 槽位"），ADR-004 选定后者。理由：当前只有 AssetRef 一类需 ctx，方案 A 为"假设可能出现的扩展"提前付 40+ 站点改动成本不对称；方案 B 与 Lumix 模式一致（同栈参考引擎 setter 不带 editor ctx），未来升级到方案 A 仍可行（ADR-004 Notes 段记录升级路径）。
 
-**完工记录**：见 `docs/acceptance/editor-v0.9.5-acceptance-checklist.md`。ADR-004（Schema AssetRef accessor 选型）在本 milestone 完工同 commit 切 status: accepted。
+**完工记录**：见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v0.9.5-acceptance-checklist.md`。ADR-004（Schema AssetRef accessor 选型）在本 milestone 完工同 commit 切 status: accepted。
 
 **前置**：v0.2.5（schema-first 基础）+ v0.9（无依赖，正交）
 

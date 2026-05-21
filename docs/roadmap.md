@@ -269,7 +269,7 @@
 - `docs/engine-known-gaps.md` GAP-2026-05-19-editor-environment-component-wiring ✅ —— Asset 浏览器 ext 映射加 .hdr/.exr ([HDR] icon)；Pipeline::Impl 加 lastBakedCubemap + Render 入口每帧 query first-found EnvironmentComponent.cubemap，与 lastBakedCubemap 不同则自动调 BakeIblFromWorld。Inspector 拖 .hdr / Pick / 改 Intensity / Tint 字段在 viewport 视觉实时跟随
 - 顺路 fix BUG-2026-05-18-vma-shutdown-allocation-leak-assertion 双源（OR ctest harness + OE Pipeline::Shutdown 漏 reset bakedXxx）
 
-视觉验收 6 项 + acceptance-checklist 见 `docs/acceptance/phase-6.5-B.2-acceptance-checklist.md` "OR pipeline cache fix 落地 + 视觉验收（2026-05-19）" 段。
+视觉验收 6 项 + acceptance-checklist 见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/phase-6.5-B.2-acceptance-checklist.md` "OR pipeline cache fix 落地 + 视觉验收（2026-05-19）" 段。
 
 > **Phase 6.5 完工 ritual（已完成）**：B.1 全部 ✅（Task 06.5-01 / 02 / 03）；B.2 全部 ✅（Task 06.5-04 / 05 / 06 / 07）；Phase 6.5 整体 ✅。后续 v0.8 编辑器伴随 milestone（Environment 浏览 / material thumbnail / sky placeholder）按 editor-roadmap.md v0.8 规划，与本 Phase 解耦推进。
 

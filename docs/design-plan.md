@@ -2576,4 +2576,4 @@ Pipeline 真消费 PostProcessChain / MaterialSystem 的承诺兑现，Phase 3 �
 - [`docs/roadmap.md`](./roadmap.md)：Phase 6+ 长期演进路线（编辑器 / 脚本层 / Hot reload / cook 工具链）
 - [`docs/extension-points.md`](./extension-points.md)：扩展点详细设计（ECS / Asset 工厂 / Material shader / RenderPass 注入 / Animation 后端注册 / 模块按需启用）
 - [`docs/coding-standards.md`](./coding-standards.md)：本仓编码规范（基于 OrangeRender 同名文档）
-- [`docs/case-studies/character-forms.md`](./case-studies/character-forms.md)：第一款游戏的"流体角色 + 形态吞噬"机制设计笔记（不是引擎规约，是引擎扩展点的下游消费记录）
+- [`vendor/Orange-Wiki/case-studies/orange-engine/pre-game-design/character-forms.md`](../vendor/Orange-Wiki/case-studies/orange-engine/pre-game-design/character-forms.md)：第一款游戏的"流体角色 + 形态吞噬"机制设计笔记（不是引擎规约，是引擎扩展点的下游消费记录；2026-05-21 ADR-006 落地后迁 Wiki）

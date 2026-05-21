@@ -15,8 +15,8 @@
    - 这是完工的必要条件，**第一步跑**——避免在文档 / retro 工作上投入后才发现 baseline 烂掉
 
 2. **acceptance-checklist 文档就位**（编辑器 milestone 必须；引擎 sample milestone 按需）
-   - 编辑器 milestone：`docs/acceptance/editor-v<X.Y>-acceptance-checklist.md` 必须存在且填完所有 commit 验收点
-   - 沿用 `docs/acceptance/editor-v0.2.5-acceptance-checklist.md` / `docs/acceptance/editor-v0.3-acceptance-checklist.md` / `docs/acceptance/editor-v0.4-acceptance-checklist.md` 格式
+   - 自 2026-05-21（ADR-006）起新 checklist 直接写到 Wiki：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v<X.Y>-acceptance-checklist.md`；不在本仓 `docs/acceptance/` 新增文件
+   - 沿用 Wiki 已迁的 `editor-v0.2.5` / `editor-v0.3` / `editor-v0.4` 格式
    - **精炼优先**：v0.3 / v0.4 验收时用户当场反馈"重复内容太多"——新 checklist 不要为每个 commit 重复写 build / 编辑器启动 / 选实体 / 保存 加载 等通用前置步骤；通用步骤抽到文档顶部"前置环境"节一次说清，每个 commit 验收点只写**与该 commit 相关的最小差异**。详见 memory `feedback_milestone_acceptance_checklist_concise`
    - 验收点语言：GUI 操作 + 视觉结果，给无代码能力测试人员看（参 memory `feedback_testing_instruction_audience`）
    - 只列编辑器可操作项：接口声明 / 未上线 feature / 纯内部整骨**不进**清单（参 memory `feedback_milestone_acceptance_checklist`）

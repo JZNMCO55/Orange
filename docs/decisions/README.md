@@ -1,6 +1,9 @@
-# Architecture Decision Records (ADR)
+# Architecture Decision Records (ADR) —— 入口与索引
 
-本目录记录 OrangeEngine / OrangeEditor 演进过程中**非平凡**的架构决策。
+本目录在 2026-05-21 起仅作 **ADR 入口与索引**。具体 ADR 文件已按 ADR-006 落地迁入 Wiki：
+
+> **存放位置**：`vendor/Orange-Wiki/case-studies/orange-engine/decisions/`
+> **入口规则**：先看本 README 索引表 → 跳转 Wiki 对应 ADR 文件读全文。新 ADR 同 session 写到 Wiki 子树，同 commit 在本 README Index 表追加条目。
 
 ## 什么进 ADR
 
@@ -10,14 +13,13 @@
 - 与 CLAUDE.md 既有 invariant 有**张力或扩展**（如：禁用反射库 vs 允许手写宏 Builder API）
 - 事后追评一项**失误**（如：v0.1 Inspector hardcode 选择是失误，v0.2.5 整骨纠偏）
 - 跨仓 / 跨 session 协同纪律（如：OrangeRender 单 session 双向操作禁令）
+- Wiki 仓自身的结构性变更（如：ADR-006 引入 case-studies + cross-pollination 三层）
 
 不进 ADR 的：日常 task 完成记录（去 commit message / design-plan ✅）、bug 修复（commit message）、纯 typo / refactor。
 
 ## 文件命名
 
-`ADR-<3 位序号>-<kebab-case-slug>.md`
-
-序号单调递增，**不复用、不重排**。被取代的 ADR 用 frontmatter `status: superseded-by: ADR-NNN` 链向后继，正文保留作为历史。
+`ADR-<3 位序号>-<kebab-case-slug>.md`，序号单调递增，**不复用、不重排**。被取代的 ADR 用 frontmatter `status: superseded-by: ADR-NNN` 链向后继，正文保留作为历史。
 
 ## 模板
 
@@ -63,16 +65,19 @@ related:
 | `docs/roadmap.md` | Phase 6+ 前瞻路线 |
 | `docs/editor-roadmap.md` | OrangeEditor 路线 + D1/D5 节内嵌当时的决策快照 |
 | `docs/engine-known-gaps.md` | 编辑器 / sample 撞上的引擎缺口（**遇到了什么**） |
-| `docs/decisions/` (本目录) | 跨文件 / 跨阶段的**架构决策**（**为什么这么选**） |
+| `docs/decisions/README.md` (本文件) | ADR 入口 + 索引；具体 ADR 文件迁 Wiki |
+| `vendor/Orange-Wiki/case-studies/orange-engine/decisions/` | 实际 ADR 文件（**为什么这么选**） |
 | `CLAUDE.md` | invariant + 工作流纪律（**之后必须遵守什么**） |
 
 ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。同一件事可同时被两处提到——roadmap 里写当前 milestone 怎么落，ADR 里写为什么这么选。如果某个 roadmap 内嵌决策很关键且会被后续 milestone 反复引用，把它提取到 ADR；否则留在 roadmap 即可。
 
 ## Index
 
-| ID | 标题 | 状态 | 日期 |
-|----|------|------|------|
-| [ADR-001](ADR-001-editor-schema-first-and-no-hardcode.md) | OrangeEditor 转向 schema-first 架构 + 全局禁止 hardcode | accepted | 2026-05-12 |
-| [ADR-002](ADR-002-editor-visual-system.md) | OrangeEditor 视觉体系决策（EditorTheme token + Cocos 灰 + 橙 accent + Codicons + 4px 色带） | accepted | 2026-05-17 |
-| [ADR-003](ADR-003-profiler-backend-selection.md) | OrangeEditor v0.9 Profiler 后端选型 —— 自实现 AutoProfile RAII（暂不接 Tracy） | accepted | 2026-05-19 |
-| [ADR-004](ADR-004-schema-asset-ref-accessor-slot.md) | OrangeEditor v0.9.5 Schema AssetRef accessor 选型 —— 专用槽位（方案 B）而非扩 GetFn/SetFn 全字段加 ctx | accepted | 2026-05-19 |
+| ID | 标题 | 状态 | 日期 | 文件 |
+|----|------|------|------|------|
+| ADR-001 | OrangeEditor 转向 schema-first 架构 + 全局禁止 hardcode | accepted | 2026-05-12 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-001-editor-schema-first-and-no-hardcode.md) |
+| ADR-002 | OrangeEditor 视觉体系决策（EditorTheme token + Cocos 灰 + 橙 accent + Codicons + 4px 色带） | accepted | 2026-05-17 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-002-editor-visual-system.md) |
+| ADR-003 | OrangeEditor v0.9 Profiler 后端选型 —— 自实现 AutoProfile RAII（暂不接 Tracy） | accepted | 2026-05-19 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-003-profiler-backend-selection.md) |
+| ADR-004 | OrangeEditor v0.9.5 Schema AssetRef accessor 选型 —— 专用槽位（方案 B）而非扩 GetFn/SetFn 全字段加 ctx | accepted | 2026-05-19 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-004-schema-asset-ref-accessor-slot.md) |
+| ADR-005 | anim_fsm condition DSL | accepted | 2026-05-20 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-005-anim-fsm-condition-dsl.md) |
+| ADR-006 | Orange-Wiki 升级为 Orange 生态中央知识库（三层分级 + 跨项目反哺） | accepted | 2026-05-21 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-006-wiki-ecosystem-knowledge-base.md) |
