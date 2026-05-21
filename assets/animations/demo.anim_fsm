@@ -1,131 +1,131 @@
 {
-  "schemaVersion": {
-    "namespace": "editor/anim_fsm",
-    "major": 1,
-    "minor": 1
-  },
   "initialState": "idle",
   "parameters": [
     {
+      "default": {
+        "type": "bool",
+        "value": false
+      },
       "name": "isMoving",
-      "type": "bool",
+      "type": "bool"
+    },
+    {
       "default": {
         "type": "bool",
         "value": false
-      }
-    },
-    {
+      },
       "name": "attackPressed",
-      "type": "trigger",
-      "default": {
-        "type": "bool",
-        "value": false
-      }
+      "type": "trigger"
     },
     {
-      "name": "speed",
-      "type": "float",
       "default": {
         "type": "float",
         "value": 0.0
-      }
+      },
+      "name": "speed",
+      "type": "float"
     }
   ],
+  "schemaVersion": {
+    "major": 1,
+    "minor": 1,
+    "namespace": "editor/anim_fsm"
+  },
   "states": [
     {
-      "name": "idle",
       "clipName": "idle",
       "layout": [
         40.0,
         40.0
-      ]
+      ],
+      "name": "idle"
     },
     {
-      "name": "walk",
       "clipName": "walk",
       "layout": [
         260.0,
         40.0
-      ]
+      ],
+      "name": "walk"
     },
     {
-      "name": "jump",
       "clipName": "jump",
       "layout": [
         150.0,
         180.0
-      ]
+      ],
+      "name": "jump"
     }
   ],
   "transitions": [
     {
-      "from": "idle",
-      "to": "walk",
       "conditions": [
         {
-          "paramName": "isMoving",
           "op": "if",
+          "paramName": "isMoving",
           "threshold": {
             "type": "bool",
             "value": false
           }
         }
-      ]
+      ],
+      "from": "idle",
+      "to": "walk"
     },
     {
-      "from": "walk",
-      "to": "idle",
       "conditions": [
         {
-          "paramName": "isMoving",
           "op": "ifNot",
+          "paramName": "isMoving",
           "threshold": {
             "type": "bool",
             "value": false
           }
         }
-      ]
-    },
-    {
-      "from": "idle",
-      "to": "jump",
-      "conditions": [
-        {
-          "paramName": "attackPressed",
-          "op": "if",
-          "threshold": {
-            "type": "bool",
-            "value": false
-          }
-        }
-      ]
-    },
-    {
+      ],
       "from": "walk",
-      "to": "jump",
+      "to": "idle"
+    },
+    {
       "conditions": [
         {
-          "paramName": "attackPressed",
           "op": "if",
+          "paramName": "attackPressed",
+          "threshold": {
+            "type": "bool",
+            "value": false
+          }
+        }
+      ],
+      "from": "idle",
+      "to": "jump"
+    },
+    {
+      "conditions": [
+        {
+          "op": "if",
+          "paramName": "attackPressed",
           "threshold": {
             "type": "bool",
             "value": false
           }
         },
         {
-          "paramName": "speed",
           "op": "greater",
+          "paramName": "speed",
           "threshold": {
             "type": "float",
             "value": 5.0
           }
         }
-      ]
+      ],
+      "from": "walk",
+      "to": "jump"
     },
     {
+      "conditions": [],
       "from": "jump",
-      "to": "idle",
-      "conditions": []
+      "to": "idle"
     }
   ]
 }

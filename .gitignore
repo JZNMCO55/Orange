@@ -46,3 +46,8 @@ editor_settings.json
 # Pipeline::RequestCapture 调试截图：仅本地调试 ACES tonemap / HDR pipeline
 # 时手动触发输出，每次内容随当时帧不同，不入库。
 /hdr_capture.png
+
+# v0.6 SaveSplit 落盘产物：从 assets/scenes/*.scene.json 派生的 per-layer
+# 分文件 + manifest，每次 Save 都会重落，入库会产生持续 diff 噪音。需要
+# 时由编辑器从 demo.scene.json 重新生成。
+assets/scenes/splits/
