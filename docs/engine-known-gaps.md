@@ -265,9 +265,9 @@ vec4 uMRA        //  16
 ### 状态
 
 - **登记**：2026-05-20
-- **处理**：未启动；预估 1 个独立 session 体量（机械替换 + 跑 OrangeEditor 视觉验收 Console 面板能看见日志）
-- **关联**：editor-roadmap v1.0 验收前 batch milestone（与 `GAP-2026-05-19-editor-aux-passes-in-engine-pipeline` 同节奏批处理）；engine-known-gaps `GAP-2026-05-19-editor-aux-passes` 的 IAuxPassProvider 整骨可一并完成"编辑器侧 hardcode 清理"批次
-- **归属**：未拍板分配到具体 Phase；候选 v1.0 验收前 batch milestone
+- **落地**：2026-05-21（独立 session 一次性完成所有 104 处迁移 + build/lint/drift 验收）
+- **关联**：editor-roadmap v1.0 验收前 batch milestone（与 `GAP-2026-05-19-editor-aux-passes-in-engine-pipeline` 同节奏批处理）；engine-known-gaps `GAP-2026-05-19-editor-aux-passes` 的 IAuxPassProvider 整骨独立留 batch milestone
+- **归属**：未拍板分配到具体 Phase；落地节奏走"撞上即补"通道
 
 ---
 
@@ -297,6 +297,14 @@ vec4 uMRA        //  16
 - **GAP-2026-05-17-editor-first-frame-flash**（2026-05-19 落地）：glfwMaximizeWindow 后插入"连续 PollEvents + 比对 framebuffer size 直到稳态"循环（最多 32 轮 / ~几十 ms 超时；Windows 通常 1-2 轮就回）。等 GLFW size 更新到 maximized 物理尺寸后再继续 RenderDevice / Renderer 创建，swap-chain 一上来就是正确尺寸，消除"左上 1600×900 渲染内容 + 其余白色 buffer"一闪而过的 surface↔swap-chain 错配伪影。详细见上文条目末尾"落地记录"节。关键改动文件：`tools/OrangeEditor/main.cpp`
 - **GAP-2026-05-17-mesh-loader-supported-version-symbol**（2026-05-17 落地）：在 GAP-2026-05-17-mesh-vertex-normals 落地 session 顺手修——`tests/asset/AssetRegistryTest.cpp` 79 / 290 行 `MeshLoader::kSupportedVersion` 引用改为 `MeshLoader::kVersionV1`（fixture 字节结构本就是 v1 形态）。详见 mesh-vertex-normals 条目落地记录段"测试修复（顺手）"。
 - **GAP-2026-05-14-renderable-material-instance-round-trip**（2026-05-14 落地）：`ComponentSerializerEntry.h` 加 `Render::MaterialInstance` forward decl + `namedMaterialInstances` 字段到 SaveContext / LoadContext；`SceneSerialization.h` 的 SaveOptions / LoadOptions 同步加字段；WriteRenderable 写出 materialInstanceId 字符串，ReadRenderable 按 id 正向查表赋指针；SceneSchemaVersion 1.0 → 1.1。编辑器侧 `DemoWorld.cpp::BuildNamedMaterialInstances` 落地，BUG-2 现象消失。详见上文条目末尾。
+- **GAP-2026-05-20-editor-fprintf-to-core-log-migration**（2026-05-21 落地）：tools/OrangeEditor/ 内 104 处 `std::fprintf(stderr/stdout)` 系统性迁移到 `ORANGE_LOG_*` 宏（`std::format` 占位 `%s`/`%u`/`%zu` → `{}`），按消息语义分配 level：
+  - **ERROR**：Scene/Asset Load 失败 / VfxSystem::Initialize 失败 / RegisterLoader 失败 / Begin/EndFrame 失败 / Vulkan resolve / Save 落盘失败等"功能失效"路径
+  - **WARN**：字体 fallback / MaterialSystem::RegisterBuiltins 失败（非致命）/ .material template 未注册回退 / parameters/states/transitions/conditions 字段缺失或重名（单条跳过）/ VfxSystem 跳过 / Animator 参数未注册等"degraded but continue"路径
+  - **INFO**：启动诊断（Vulkan handles / swap-chain / dock ready / icon applied）/ scene Save/Load 成功 / Play 状态切换 / Esc 退出请求 / clean shutdown 等"用户想看的进度"路径
+  - **DEBUG**：`[vfx-diag]` 每秒 live particles 计数（周期性 noise，正常运行时不显示）
+  - 顺路：`src/animation/AnimationStateMachine.cpp` 5 处 fprintf（引擎本体最后残留）也清掉
+  - 验收：`grep 'fprintf(stderr\|fprintf(stdout' tools/OrangeEditor/ src/` 输出 0（src/core/Log.cpp 内 1 处 stderr fallback 是 Core::Log 自己的兜底 sink，不算迁移目标）；OrangeEditor.exe build 通过；invariant lint + drift 全绿
+  - 关键改动文件（按 grep count 降序）：`tools/OrangeEditor/EditorRenderLayer.cpp` (24) / `tools/OrangeEditor/main.cpp` (19) / `tools/OrangeEditor/AnimFsmFileIO.cpp` (19) / `tools/OrangeEditor/DemoWorld.cpp` (12) / `tools/OrangeEditor/MaterialFileIO.cpp` (11) / `tools/OrangeEditor/command/AnimFsmCommands.cpp` (8) / `tools/OrangeEditor/VulkanLoaderShim.cpp` (6) / `tools/OrangeEditor/panels/ScenePanel.cpp` (2) / `src/animation/AnimationStateMachine.cpp` (5) / `tools/OrangeEditor/schema/ComponentSchemaRegistry.cpp` (1) / `tools/OrangeEditor/branding/EditorWindowIcon.cpp` (1) / `tools/OrangeEditor/panels/LayersPanel.cpp` (1)
 - **GAP-2026-05-14-scene-serializer-extension**（2026-05-14 落地）：`include/orange/engine/scene/ComponentSerializerEntry.h` 公共化 ComponentSerializerEntry / SaveContext / LoadContext / ComponentKind / EntityToPersistentId / PersistentIdToEntity；SaveOptions / LoadOptions 增加 `std::span<const ComponentSerializerEntry> extraSerializers{}`；Save/Load 路由 extra 条目（冲突检测 + Pass 1 PureData + Pass 2 BackendDependent）。OrangeEditor v0.3 c2 已完整消费。详见上文条目末尾。
 - **GAP-2026-05-17-asset-registry-handle-to-path**（2026-05-17 落地）：发现 `AssetRegistry::PathOf<T>` 公共 API 早已存在（GAP 登记时漏看），实际只需 `MaterialFileIO::BuildDataFromInstance` 加可选 `const AssetRegistry*` 参数 + 内部消费 PathOf。详细见上文条目末尾"落地记录"节。涉及 commit：`784bf1a`。关键改动文件：`tools/OrangeEditor/MaterialFileIO.{h,cpp}` / `tests/render/MaterialFileIOTest.cpp`（TestTextureRoundTripWithRegistry）
 - **GAP-2026-05-16-material-system-enumerate-and-instance-overrides**（2026-05-17 落地）：MaterialSystem::GetTemplateNames + MaterialInstance enumerate override API + .material schema v1.0 → v1.1（uniforms/textures）+ Editor 端 MaterialFileIO helper + 4 新测试。详细见上文条目末尾"落地记录"节。涉及 commit：`3b9718d`（C1）/ `6b598ba`（C2）/ `b7c92d3`（C3）。关键改动文件：`include/orange/engine/render/MaterialSystem.h` / `include/orange/engine/render/MaterialInstance.h` / `src/render/MaterialSystem.cpp` / `src/render/MaterialInstance.cpp` / `tools/OrangeEditor/MaterialFileIO.{h,cpp}`（新增）/ `tools/OrangeEditor/DemoWorld.cpp` / `tools/OrangeEditor/panels/InspectorPanel.cpp` / `tools/OrangeEditor/CMakeLists.txt` / `tests/render/MaterialFileIOTest.cpp`（新增）/ `tests/render/MaterialInterfaceTest.cpp` / `tests/render/MaterialSystemTest.cpp` / `tests/CMakeLists.txt`

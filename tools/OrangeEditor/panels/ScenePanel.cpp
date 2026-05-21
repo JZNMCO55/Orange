@@ -3,6 +3,8 @@
 
 #include "../EditorRenderLayer.h"
 
+#include <orange/engine/core/Log.h>
+
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
 #include "../EditorRotateGizmo.h"
@@ -433,7 +435,7 @@ void EditorRenderLayer::CreateScenePanelSampler()
     s.maxLod       = 0.0f;
     if (pfnCreate(static_cast<VkDevice>(handles.vkDevice), &s, nullptr, &mSceneSampler) != VK_SUCCESS) {
         mSceneSampler = VK_NULL_HANDLE;
-        std::fprintf(stderr, "[OrangeEditor] vkCreateSampler (scene panel) 失败\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] vkCreateSampler (scene panel) 失败");
     }
 }
 
@@ -481,10 +483,9 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         auto r = mpScenePipeline->InitializeOffscreen(
             mRenderDevice, *mHost.assets.pAssets, width, height);
         if (r.IsErr()) {
-            std::fprintf(stderr,
-                         "[OrangeEditor] Pipeline::InitializeOffscreen 失败 (code=%u) —— "
-                         "Scene 视口退化为占位文案\n",
-                         static_cast<unsigned>(r.Error()));
+            ORANGE_LOG_ERROR("[OrangeEditor] Pipeline::InitializeOffscreen 失败 (code={}) —— "
+                             "Scene 视口退化为占位文案",
+                             static_cast<unsigned>(r.Error()));
             mpScenePipeline.reset();
             mScenePipelineFailed = true;
             return false;

@@ -6,6 +6,8 @@
 
 #include "VulkanLoaderShim.h"
 
+#include <orange/engine/core/Log.h>
+
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -95,14 +97,14 @@ VkDescriptorPool MakeImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanc
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
             pfnGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
     if (vkGetDeviceProcAddrFn == nullptr) {
-        std::fprintf(stderr, "[OrangeEditor] resolve vkGetDeviceProcAddr failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] resolve vkGetDeviceProcAddr failed");
         return VK_NULL_HANDLE;
     }
     auto vkCreateDescriptorPoolFn =
         reinterpret_cast<PFN_vkCreateDescriptorPool>(
             vkGetDeviceProcAddrFn(device, "vkCreateDescriptorPool"));
     if (vkCreateDescriptorPoolFn == nullptr) {
-        std::fprintf(stderr, "[OrangeEditor] resolve vkCreateDescriptorPool failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] resolve vkCreateDescriptorPool failed");
         return VK_NULL_HANDLE;
     }
 
@@ -117,7 +119,7 @@ VkDescriptorPool MakeImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanc
     desc.pPoolSizes    = sizes;
     VkDescriptorPool pool = VK_NULL_HANDLE;
     if (vkCreateDescriptorPoolFn(device, &desc, nullptr, &pool) != VK_SUCCESS) {
-        std::fprintf(stderr, "[OrangeEditor] vkCreateDescriptorPool failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] vkCreateDescriptorPool failed");
     }
     return pool;
 }
@@ -182,9 +184,9 @@ bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
                                             COINIT_APARTMENTTHREADED
                                             | COINIT_DISABLE_OLE1DDE);
         if (FAILED(hrCo)) {
-            std::fprintf(stderr,
-                "[OrangeEditor] ShowFileDialog worker CoInitializeEx failed: hr=0x%08lX\n",
-                static_cast<unsigned long>(hrCo));
+            ORANGE_LOG_ERROR("[OrangeEditor] ShowFileDialog worker CoInitializeEx failed: "
+                             "hr=0x{:08X}",
+                             static_cast<unsigned long>(hrCo));
             return;
         }
 
@@ -229,15 +231,14 @@ bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
                     pItem->Release();
                 }
             } else if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
-                std::fprintf(stderr,
-                    "[OrangeEditor] ShowFileDialog IFileDialog::Show failed: hr=0x%08lX\n",
-                    static_cast<unsigned long>(hr));
+                ORANGE_LOG_ERROR("[OrangeEditor] ShowFileDialog IFileDialog::Show failed: "
+                                 "hr=0x{:08X}",
+                                 static_cast<unsigned long>(hr));
             }
             pDialog->Release();
         } else {
-            std::fprintf(stderr,
-                "[OrangeEditor] ShowFileDialog CoCreateInstance failed: hr=0x%08lX\n",
-                static_cast<unsigned long>(hr));
+            ORANGE_LOG_ERROR("[OrangeEditor] ShowFileDialog CoCreateInstance failed: hr=0x{:08X}",
+                             static_cast<unsigned long>(hr));
         }
 
         if (hrCo == S_OK) { CoUninitialize(); }

@@ -2,6 +2,8 @@
 
 #include "EditorWindowIconData.h"
 
+#include <orange/engine/core/Log.h>
+
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -33,9 +35,8 @@ void ApplyEditorWindowIcons(GLFWwindow* window)
     }
 
     glfwSetWindowIcon(window, static_cast<int>(images.size()), images.data());
-    std::fprintf(stdout,
-                 "[OrangeEditor] applied window icon (%zu sizes)\n",
-                 images.size());
+    ORANGE_LOG_INFO("[OrangeEditor] applied window icon ({} sizes)",
+                    images.size());
 }
 
 }  // namespace OrangeEditorBranding

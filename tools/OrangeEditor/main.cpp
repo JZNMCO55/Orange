@@ -38,6 +38,7 @@
 
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
+#include <orange/engine/core/Log.h>
 #include <orange/engine/app/FrameContext.h>
 #include <orange/engine/app/Layer.h>
 #include <orange/engine/platform/Window.h>
@@ -200,8 +201,8 @@ int main()
     cfg.window.height = 900;
     auto hostRes = AppHost::Create(cfg);
     if (hostRes.IsErr()) {
-        std::fprintf(stderr, "[OrangeEditor] AppHost::Create failed (code=%u)\n",
-                     static_cast<unsigned>(hostRes.Error()));
+        ORANGE_LOG_ERROR("[OrangeEditor] AppHost::Create failed (code={})",
+                         static_cast<unsigned>(hostRes.Error()));
         return 1;
     }
     auto host = std::move(hostRes).Value();
@@ -267,7 +268,7 @@ int main()
     rdDesc.mEnableValidation = true;
     auto pRenderDevice = Orange::Renderer::RenderDevice::Create(rdDesc);
     if (pRenderDevice == nullptr) {
-        std::fprintf(stderr, "[OrangeEditor] RenderDevice::Create failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] RenderDevice::Create failed");
         return 1;
     }
 
@@ -277,7 +278,7 @@ int main()
     rendererDesc.mpNativeWindowHandle = glfwWindow;
     rendererDesc.mFramesInFlight      = 2;
     if (Orange::Failed(pRenderer->Initialize(rendererDesc))) {
-        std::fprintf(stderr, "[OrangeEditor] Renderer::Initialize failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] Renderer::Initialize failed");
         return 1;
     }
 
@@ -290,9 +291,8 @@ int main()
     auto pfnGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         Orange::Renderer::Interop::GetVulkanGetInstanceProcAddr());
     if (pfnGetInstanceProcAddr == nullptr) {
-        std::fprintf(stderr,
-                     "[OrangeEditor] Interop::GetVulkanGetInstanceProcAddr 返回 null —— "
-                     "非 Vulkan 后端或 RenderDevice 尚未 Initialize\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] Interop::GetVulkanGetInstanceProcAddr 返回 null —— "
+                         "非 Vulkan 后端或 RenderDevice 尚未 Initialize");
         return 1;
     }
     // 跑一帧让 swap-chain ready，再取 swap-chain info（min/count + format）
@@ -301,20 +301,20 @@ int main()
         dummy.mTotalTimeSeconds = 0.0;
         dummy.mDeltaTimeSeconds = 0.0f;
         if (Orange::Failed(pRenderer->BeginFrame(dummy))) {
-            std::fprintf(stderr, "[OrangeEditor] dummy BeginFrame failed\n");
+            ORANGE_LOG_ERROR("[OrangeEditor] dummy BeginFrame failed");
             return 1;
         }
         if (Orange::Failed(pRenderer->EndFrame())) {
-            std::fprintf(stderr, "[OrangeEditor] dummy EndFrame failed\n");
+            ORANGE_LOG_ERROR("[OrangeEditor] dummy EndFrame failed");
             return 1;
         }
     }
     const auto sci = Orange::Renderer::Interop::GetVulkanSwapchainInfo(*pRenderer);
-    std::fprintf(stdout,
-                 "[OrangeEditor] Vulkan handles: instance=%p device=%p qFamily=%u\n"
-                 "[OrangeEditor] swap-chain: min=%u count=%u format=%d %ux%u\n",
-                 handles.vkInstance, handles.vkDevice, handles.graphicsQueueFamilyIndex,
-                 sci.minImageCount, sci.imageCount, sci.colorFormat, sci.imageWidth, sci.imageHeight);
+    ORANGE_LOG_INFO("[OrangeEditor] Vulkan handles: instance={} device={} qFamily={}",
+                    handles.vkInstance, handles.vkDevice, handles.graphicsQueueFamilyIndex);
+    ORANGE_LOG_INFO("[OrangeEditor] swap-chain: min={} count={} format={} {}x{}",
+                    sci.minImageCount, sci.imageCount,
+                    static_cast<int>(sci.colorFormat), sci.imageWidth, sci.imageHeight);
 
     auto vkInstance       = static_cast<VkInstance>(handles.vkInstance);
     auto vkPhysicalDevice = static_cast<VkPhysicalDevice>(handles.vkPhysicalDevice);
@@ -405,9 +405,8 @@ int main()
         ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
             "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges);
         if (fontMain == nullptr) {
-            std::fprintf(stdout,
-                         "[OrangeEditor] msyh.ttc 加载失败，回退 segoeui.ttf "
-                         "(ASCII only, 中文会显示成 '?')\n");
+            ORANGE_LOG_WARN("[OrangeEditor] msyh.ttc 加载失败，回退 segoeui.ttf "
+                            "(ASCII only, 中文会显示成 '?')");
             fontMain = io.Fonts->AddFontFromFileTTF(
                 "C:\\Windows\\Fonts\\segoeui.ttf", fontPx);
         }
@@ -415,10 +414,9 @@ int main()
             ImFontConfig fontCfg;
             fontCfg.SizePixels = fontPx;
             io.Fonts->AddFontDefault(&fontCfg);
-            std::fprintf(stdout,
-                         "[OrangeEditor] 系统字体全部加载失败，回退 ImGui 默认 "
-                         "@%.0fpx (dpiScale=%.2f)\n",
-                         fontPx, dpiScale);
+            ORANGE_LOG_WARN("[OrangeEditor] 系统字体全部加载失败，回退 ImGui 默认 "
+                            "@{:.0f}px (dpiScale={:.2f})",
+                            fontPx, dpiScale);
         }
 
         // v0.6.5 c3：Codicons icon font merge —— 把 VS Code 同款 icon font
@@ -465,9 +463,8 @@ int main()
             "tools/OrangeEditor/theme/codicons/codicon.ttf",
             fontPx, &codiconsCfg, kCodiconsRange);
         if (fontCodicons == nullptr) {
-            std::fprintf(stdout,
-                         "[OrangeEditor] codicon.ttf 加载失败 —— Codicons icon "
-                         "将显示为 '?' 占位（不致命）\n");
+            ORANGE_LOG_WARN("[OrangeEditor] codicon.ttf 加载失败 —— Codicons icon "
+                            "将显示为 '?' 占位（不致命）");
         }
     }
 
@@ -475,7 +472,7 @@ int main()
     // mouse / focus 回调；与 AppHost 共享同一 window，事件分发上 ImGui
     // 拦在 AppHost 之前（GLFW 回调链顺序）
     if (!ImGui_ImplGlfw_InitForVulkan(glfwWindow, true)) {
-        std::fprintf(stderr, "[OrangeEditor] ImGui_ImplGlfw_InitForVulkan failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] ImGui_ImplGlfw_InitForVulkan failed");
         return 1;
     }
 
@@ -492,7 +489,7 @@ int main()
 
     ImguiVulkanLoaderCtx loaderCtx{pfnGetInstanceProcAddr, pfnGetDeviceProcAddr, vkInstance, vkDevice};
     if (!ImGui_ImplVulkan_LoadFunctions(&ImguiVulkanLoader, &loaderCtx)) {
-        std::fprintf(stderr, "[OrangeEditor] ImGui_ImplVulkan_LoadFunctions failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] ImGui_ImplVulkan_LoadFunctions failed");
         return 1;
     }
 
@@ -516,7 +513,7 @@ int main()
     vkInfo.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
     vkInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFmt;
     if (!ImGui_ImplVulkan_Init(&vkInfo)) {
-        std::fprintf(stderr, "[OrangeEditor] ImGui_ImplVulkan_Init failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] ImGui_ImplVulkan_Init failed");
         DestroyImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice, imguiDescPool);
         return 1;
     }
@@ -558,7 +555,7 @@ int main()
         {
             ReadEditorSettings(readRes.Value(), editorHost.settings);
             ReadEditorKeybindings(readRes.Value(), editorHost.keybindings);
-            std::fprintf(stdout, "[OrangeEditor] loaded %s\n", kEditorSettingsPath);
+            ORANGE_LOG_INFO("[OrangeEditor] loaded {}", kEditorSettingsPath);
         }
     }
 
@@ -694,16 +691,14 @@ int main()
             if (auto sv = Scene::Save(tempWorld, kShowcasePath, saveOpts);
                 sv.IsErr())
             {
-                std::fprintf(stderr,
-                             "[OrangeEditor] Scene::Save '%s' 失败 (code=%u)；"
-                             "File → Open Scene 仍可手动写入\n",
-                             kShowcasePath, static_cast<unsigned>(sv.Error()));
+                ORANGE_LOG_ERROR("[OrangeEditor] Scene::Save '{}' 失败 (code={})；"
+                                 "File → Open Scene 仍可手动写入",
+                                 kShowcasePath, static_cast<unsigned>(sv.Error()));
             }
             else
             {
-                std::fprintf(stdout,
-                             "[OrangeEditor] 生成 %s（18 球 PBR showcase）\n",
-                             kShowcasePath);
+                ORANGE_LOG_INFO("[OrangeEditor] 生成 {}（18 球 PBR showcase）",
+                                kShowcasePath);
             }
         }
     }
@@ -748,9 +743,9 @@ int main()
         Orange::Engine::Log::SetLogSink(&EditorRenderLayer::LogSinkCallback, pEditorLayer);
     }
 
-    std::fprintf(stdout,
-                 "[OrangeEditor] ImGui dock + multi-viewport ready. world entities=%zu. Esc 退出。\n",
-                 editorHost.scene.pWorld->Size());
+    ORANGE_LOG_INFO("[OrangeEditor] ImGui dock + multi-viewport ready. "
+                    "world entities={}. Esc 退出。",
+                    editorHost.scene.pWorld->Size());
 
     const int rc = host->Run();
 
@@ -767,9 +762,9 @@ int main()
         auto saveRes = w.SaveToFile(kEditorSettingsPath);
         if (saveRes.IsErr())
         {
-            std::fprintf(stderr, "[OrangeEditor] WARNING: save %s failed (code=%u)\n",
-                         kEditorSettingsPath,
-                         static_cast<unsigned>(saveRes.Error()));
+            ORANGE_LOG_WARN("[OrangeEditor] save {} failed (code={})",
+                            kEditorSettingsPath,
+                            static_cast<unsigned>(saveRes.Error()));
         }
     }
 
@@ -797,6 +792,6 @@ int main()
     pRenderer.reset();
     pRenderDevice.reset();
 
-    std::fprintf(stdout, "[OrangeEditor] clean shutdown.\n");
+    ORANGE_LOG_INFO("[OrangeEditor] clean shutdown.");
     return rc;
 }

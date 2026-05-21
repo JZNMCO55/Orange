@@ -5,6 +5,8 @@
 
 #include "orange/engine/animation/AnimationStateMachine.h"
 
+#include "orange/engine/core/Log.h"
+
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -354,9 +356,7 @@ void AnimationStateMachine::SetParameterBool(std::string_view name, bool value)
     auto it = mpImpl->parameters.find(std::string(name));
     if (it == mpImpl->parameters.end())
     {
-        std::fprintf(stderr,
-                     "[AnimationStateMachine] SetParameterBool '%.*s' 未注册\n",
-                     static_cast<int>(name.size()), name.data());
+        ORANGE_LOG_WARN("[AnimationStateMachine] SetParameterBool '{}' 未注册", name);
         return;
     }
     // Bool / Trigger 接受 bool；Int / Float 接受 widening
@@ -384,9 +384,7 @@ void AnimationStateMachine::SetParameterInt(std::string_view name, std::int32_t 
     auto it = mpImpl->parameters.find(std::string(name));
     if (it == mpImpl->parameters.end())
     {
-        std::fprintf(stderr,
-                     "[AnimationStateMachine] SetParameterInt '%.*s' 未注册\n",
-                     static_cast<int>(name.size()), name.data());
+        ORANGE_LOG_WARN("[AnimationStateMachine] SetParameterInt '{}' 未注册", name);
         return;
     }
     switch (it->second.type)
@@ -413,20 +411,16 @@ void AnimationStateMachine::SetParameterFloat(std::string_view name, float value
     auto it = mpImpl->parameters.find(std::string(name));
     if (it == mpImpl->parameters.end())
     {
-        std::fprintf(stderr,
-                     "[AnimationStateMachine] SetParameterFloat '%.*s' 未注册\n",
-                     static_cast<int>(name.size()), name.data());
+        ORANGE_LOG_WARN("[AnimationStateMachine] SetParameterFloat '{}' 未注册", name);
         return;
     }
     switch (it->second.type)
     {
         case ParameterType::Bool:
         case ParameterType::Trigger:
-            // float → bool widening 易出错（0.0/NaN 都 false）—— stderr 警告但不阻塞
-            std::fprintf(stderr,
-                         "[AnimationStateMachine] SetParameterFloat 写入 Bool/Trigger 参数 "
-                         "'%.*s'：按非零判定\n",
-                         static_cast<int>(name.size()), name.data());
+            // float → bool widening 易出错（0.0/NaN 都 false）—— warn 但不阻塞
+            ORANGE_LOG_WARN("[AnimationStateMachine] SetParameterFloat 写入 Bool/Trigger 参数 "
+                            "'{}'：按非零判定", name);
             it->second.value = (value != 0.0f);
             break;
         case ParameterType::Int:
@@ -447,9 +441,7 @@ void AnimationStateMachine::SetTrigger(std::string_view name)
     auto it = mpImpl->parameters.find(std::string(name));
     if (it == mpImpl->parameters.end())
     {
-        std::fprintf(stderr,
-                     "[AnimationStateMachine] SetTrigger '%.*s' 未注册\n",
-                     static_cast<int>(name.size()), name.data());
+        ORANGE_LOG_WARN("[AnimationStateMachine] SetTrigger '{}' 未注册", name);
         return;
     }
     // Trigger / Bool 都设 true；其它类型按 SetParameterBool(true) 的 widening

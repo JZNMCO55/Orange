@@ -3,6 +3,8 @@
 
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/core/Log.h>
+
 #include <cassert>
 #include <cstdio>
 
@@ -23,10 +25,9 @@ void ComponentSchemaRegistry::Register(std::type_index typeIdx,
     // release 期保留首次注册条目（不覆盖），并 stderr 警告。
     if (auto it = mByType.find(typeIdx); it != mByType.end())
     {
-        std::fprintf(stderr,
-                     "[OrangeEditor] ComponentSchemaRegistry: 重复注册 '%s' —— "
-                     "保留首次注册条目\n",
-                     schema.typeName ? schema.typeName : "(nullptr)");
+        ORANGE_LOG_ERROR("[OrangeEditor] ComponentSchemaRegistry: 重复注册 '{}' —— "
+                         "保留首次注册条目",
+                         schema.typeName ? schema.typeName : "(nullptr)");
         assert(false && "ComponentSchemaRegistry duplicate registration");
         return;
     }

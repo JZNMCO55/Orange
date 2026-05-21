@@ -25,6 +25,7 @@
 #include "../command/LambdaCommand.h"
 #include "../theme/EditorTheme.h"
 
+#include <orange/engine/core/Log.h>
 #include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/World.h>
 #include <orange/engine/scene/WorldPartition.h>
@@ -213,9 +214,8 @@ void EditorRenderLayer::DrawLayersPanel()
         const std::size_t rewritten = ReparentEntitiesToDefault(
             *mHost.scene.pWorld, mHost.scene.partition, pendingRemoveId);
         if (mHost.scene.partition.RemoveLayer(pendingRemoveId)) {
-            std::fprintf(stdout,
-                "[OrangeEditor] removed layer '%s' (%zu entities moved to default)\n",
-                pendingRemoveId.c_str(), rewritten);
+            ORANGE_LOG_INFO("[OrangeEditor] removed layer '{}' ({} entities moved to default)",
+                            pendingRemoveId, rewritten);
             mHost.cmdStack.Clear();
             mHost.scene.dirty = true;
         }

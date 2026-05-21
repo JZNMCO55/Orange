@@ -4,6 +4,7 @@
 
 #include "AnimFsmFileIO.h"
 
+#include <orange/engine/core/Log.h>
 #include <orange/engine/core/Serialization.h>
 
 #include <cstdio>
@@ -155,10 +156,9 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
     auto rr = JsonReader::FromFile(path);
     if (rr.IsErr())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmFileIO] 读 '%s' 失败 (code=%u)\n",
-                     path.c_str(),
-                     static_cast<unsigned>(rr.Error().code));
+        ORANGE_LOG_ERROR("[AnimFsmFileIO] 读 '{}' 失败 (code={})",
+                         path,
+                         static_cast<unsigned>(rr.Error().code));
         return std::nullopt;
     }
     const JsonReader& reader = rr.Value();
@@ -166,22 +166,19 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
     auto sv = reader.ReadSchemaVersion("schemaVersion");
     if (sv.IsErr())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmFileIO] '%s' 缺 schemaVersion 或格式错\n",
-                     path.c_str());
+        ORANGE_LOG_ERROR("[AnimFsmFileIO] '{}' 缺 schemaVersion 或格式错", path);
         return std::nullopt;
     }
     if (sv.Value().Namespace() != kSchemaNamespace
         || sv.Value().Major() != kSchemaMajor)
     {
-        std::fprintf(stderr,
-                     "[AnimFsmFileIO] '%s' schema namespace/major 不匹配 "
-                     "(got %s v%u.x，期望 %s v%d.x)\n",
-                     path.c_str(),
-                     sv.Value().Namespace().c_str(),
-                     static_cast<unsigned>(sv.Value().Major()),
-                     kSchemaNamespace,
-                     kSchemaMajor);
+        ORANGE_LOG_ERROR("[AnimFsmFileIO] '{}' schema namespace/major 不匹配 "
+                         "(got {} v{}.x，期望 {} v{}.x)",
+                         path,
+                         sv.Value().Namespace(),
+                         static_cast<unsigned>(sv.Value().Major()),
+                         kSchemaNamespace,
+                         kSchemaMajor);
         return std::nullopt;
     }
 
@@ -199,33 +196,29 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
         EditableParameter p;
         if (!reader.ReadString(base + "name", p.name) || p.name.empty())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' parameters[%zu].name 缺失，跳过\n",
-                         path.c_str(), i);
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' parameters[{}].name 缺失，跳过",
+                            path, i);
             continue;
         }
         if (!seenParameterNames.insert(p.name).second)
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' parameters[%zu].name='%s' "
-                         "与之前 parameter 重名，跳过\n",
-                         path.c_str(), i, p.name.c_str());
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' parameters[{}].name='{}' "
+                            "与之前 parameter 重名，跳过",
+                            path, i, p.name);
             continue;
         }
         std::string typeStr;
         if (!reader.ReadString(base + "type", typeStr))
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' parameters[%zu].type 缺失，跳过\n",
-                         path.c_str(), i);
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' parameters[{}].type 缺失，跳过",
+                            path, i);
             continue;
         }
         auto typeOpt = ParseParameterType(typeStr);
         if (!typeOpt.has_value())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' parameters[%zu].type='%s' 未知，跳过\n",
-                         path.c_str(), i, typeStr.c_str());
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' parameters[{}].type='{}' 未知，跳过",
+                            path, i, typeStr);
             continue;
         }
         p.type = *typeOpt;
@@ -257,17 +250,15 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
         EditableState s;
         if (!reader.ReadString(base + "name", s.name) || s.name.empty())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' states[%zu].name 缺失，跳过\n",
-                         path.c_str(), i);
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' states[{}].name 缺失，跳过",
+                            path, i);
             continue;
         }
         if (!seenStateNames.insert(s.name).second)
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' states[%zu].name='%s' "
-                         "与之前 state 重名，整个文件 reject\n",
-                         path.c_str(), i, s.name.c_str());
+            ORANGE_LOG_ERROR("[AnimFsmFileIO] '{}' states[{}].name='{}' "
+                             "与之前 state 重名，整个文件 reject",
+                             path, i, s.name);
             return std::nullopt;
         }
         reader.ReadString(base + "clipName", s.clipName);
@@ -283,9 +274,8 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
     if (!data.initialState.empty()
         && seenStateNames.find(data.initialState) == seenStateNames.end())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmFileIO] '%s' initialState='%s' 未在 states[] 内\n",
-                     path.c_str(), data.initialState.c_str());
+        ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' initialState='{}' 未在 states[] 内",
+                        path, data.initialState);
     }
 
     // ----- transitions 段（v1.1 扩 conditions 子字段）-----
@@ -297,32 +287,28 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
         EditableTransition t;
         if (!reader.ReadString(base + "from", t.fromState) || t.fromState.empty())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' transitions[%zu].from 缺失，跳过\n",
-                         path.c_str(), i);
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].from 缺失，跳过",
+                            path, i);
             continue;
         }
         if (!reader.ReadString(base + "to", t.toState) || t.toState.empty())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' transitions[%zu].to 缺失，跳过\n",
-                         path.c_str(), i);
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].to 缺失，跳过",
+                            path, i);
             continue;
         }
         if (seenStateNames.find(t.fromState) == seenStateNames.end())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' transitions[%zu].from='%s' "
-                         "未在 states[] 内，跳过\n",
-                         path.c_str(), i, t.fromState.c_str());
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].from='{}' "
+                            "未在 states[] 内，跳过",
+                            path, i, t.fromState);
             continue;
         }
         if (seenStateNames.find(t.toState) == seenStateNames.end())
         {
-            std::fprintf(stderr,
-                         "[AnimFsmFileIO] '%s' transitions[%zu].to='%s' "
-                         "未在 states[] 内，跳过\n",
-                         path.c_str(), i, t.toState.c_str());
+            ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].to='{}' "
+                            "未在 states[] 内，跳过",
+                            path, i, t.toState);
             continue;
         }
 
@@ -336,36 +322,32 @@ std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path)
             EditableCondition c;
             if (!reader.ReadString(cb + "paramName", c.paramName) || c.paramName.empty())
             {
-                std::fprintf(stderr,
-                             "[AnimFsmFileIO] '%s' transitions[%zu].conditions[%zu]"
-                             ".paramName 缺失，跳过\n",
-                             path.c_str(), i, j);
+                ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].conditions[{}]"
+                                ".paramName 缺失，跳过",
+                                path, i, j);
                 continue;
             }
             if (seenParameterNames.find(c.paramName) == seenParameterNames.end())
             {
-                std::fprintf(stderr,
-                             "[AnimFsmFileIO] '%s' transitions[%zu].conditions[%zu]"
-                             ".paramName='%s' 未在 parameters[] 内，跳过\n",
-                             path.c_str(), i, j, c.paramName.c_str());
+                ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].conditions[{}]"
+                                ".paramName='{}' 未在 parameters[] 内，跳过",
+                                path, i, j, c.paramName);
                 continue;
             }
             std::string opStr;
             if (!reader.ReadString(cb + "op", opStr))
             {
-                std::fprintf(stderr,
-                             "[AnimFsmFileIO] '%s' transitions[%zu].conditions[%zu]"
-                             ".op 缺失，跳过\n",
-                             path.c_str(), i, j);
+                ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].conditions[{}]"
+                                ".op 缺失，跳过",
+                                path, i, j);
                 continue;
             }
             auto opOpt = ParseConditionOp(opStr);
             if (!opOpt.has_value())
             {
-                std::fprintf(stderr,
-                             "[AnimFsmFileIO] '%s' transitions[%zu].conditions[%zu]"
-                             ".op='%s' 未知，跳过\n",
-                             path.c_str(), i, j, opStr.c_str());
+                ORANGE_LOG_WARN("[AnimFsmFileIO] '{}' transitions[{}].conditions[{}]"
+                                ".op='{}' 未知，跳过",
+                                path, i, j, opStr);
                 continue;
             }
             c.op = *opOpt;
@@ -439,10 +421,9 @@ bool WriteAnimFsmFile(const std::string& path, const EditableStateMachine& data)
     auto sv = writer.SaveToFile(path, 2);
     if (sv.IsErr())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmFileIO] 写 '%s' 失败 (code=%u)\n",
-                     path.c_str(),
-                     static_cast<unsigned>(sv.Error()));
+        ORANGE_LOG_ERROR("[AnimFsmFileIO] 写 '{}' 失败 (code={})",
+                         path,
+                         static_cast<unsigned>(sv.Error()));
         return false;
     }
     return true;

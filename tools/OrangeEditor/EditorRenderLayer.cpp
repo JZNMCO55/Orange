@@ -21,6 +21,7 @@
 #include <orange/engine/audio/AudioSourceComponent.h>
 #include <orange/engine/audio/SoundInstance.h>
 #include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/core/Log.h>
 #include <orange/engine/core/Memory.h>
 #include <orange/engine/core/Profiler.h>
 
@@ -200,8 +201,8 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
             sDiagTimer += dt;
             if (sDiagTimer >= 1.0f) {
                 sDiagTimer = 0.0f;
-                std::fprintf(stdout, "[vfx-diag] live particles: %zu\n",
-                             mpVfxSystem->TotalLiveParticleCount());
+                ORANGE_LOG_DEBUG("[vfx-diag] live particles: {}",
+                                 mpVfxSystem->TotalLiveParticleCount());
             }
         }
 
@@ -318,7 +319,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     time.mTotalTimeSeconds = frame.time.totalSeconds;
     time.mDeltaTimeSeconds = static_cast<float>(frame.time.deltaSeconds);
     if (Orange::Failed(mRenderer.BeginFrame(time))) {
-        std::fprintf(stderr, "[OrangeEditor] BeginFrame failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] BeginFrame failed");
         mAppHost.RequestExit();
         return;
     }
@@ -327,7 +328,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // 注册时会强制走 begin/end rendering 路径（FEATURE-2026-05-09 修
     // 复的 overlay-on-empty-frame bug），callback 仍能正常触发。
     if (Orange::Failed(mRenderer.EndFrame())) {
-        std::fprintf(stderr, "[OrangeEditor] EndFrame failed\n");
+        ORANGE_LOG_ERROR("[OrangeEditor] EndFrame failed");
         mAppHost.RequestExit();
         return;
     }
@@ -361,7 +362,7 @@ bool EditorRenderLayer::OnEvent(const Orange::Engine::Platform::WindowEvent& eve
         }
         return true;
     }
-    std::fprintf(stdout, "[OrangeEditor] Esc 按下，请求退出\n");
+    ORANGE_LOG_INFO("[OrangeEditor] Esc 按下，请求退出");
     mAppHost.RequestExit();
     return true;
 }
@@ -744,7 +745,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             mHost.scene.dirty = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
-            std::fprintf(stdout, "[OrangeEditor] new scene (seeded demo world)\n");
+            ORANGE_LOG_INFO("[OrangeEditor] new scene (seeded demo world)");
             break;
         }
         case SceneOp::Open: {
@@ -759,10 +760,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             openLoadOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
             if (rc.IsErr()) {
-                std::fprintf(stderr,
-                             "[OrangeEditor] Scene::Load failed: %s (code=%u)\n",
-                             path.c_str(),
-                             static_cast<unsigned>(rc.Error()));
+                ORANGE_LOG_ERROR("[OrangeEditor] Scene::Load failed: {} (code={})",
+                                 path,
+                                 static_cast<unsigned>(rc.Error()));
                 break;  // 保留原 world
             }
             mHost.scene.pWorld = std::move(pNew);
@@ -790,7 +790,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             mHost.scene.dirty = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
-            std::fprintf(stdout, "[OrangeEditor] opened scene: %s\n", path.c_str());
+            ORANGE_LOG_INFO("[OrangeEditor] opened scene: {}", path);
             break;
         }
         case SceneOp::Save: {
@@ -809,14 +809,13 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.currentScenePath, saveOpts);
                 if (rc.IsErr()) {
-                    std::fprintf(stderr,
-                                 "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
-                                 mHost.scene.currentScenePath.c_str(),
-                                 static_cast<unsigned>(rc.Error()));
+                    ORANGE_LOG_ERROR("[OrangeEditor] Scene::Save failed: {} (code={})",
+                                     mHost.scene.currentScenePath,
+                                     static_cast<unsigned>(rc.Error()));
                 } else {
                     mHost.scene.dirty = false;
-                    std::fprintf(stdout, "[OrangeEditor] saved scene: %s\n",
-                                 mHost.scene.currentScenePath.c_str());
+                    ORANGE_LOG_INFO("[OrangeEditor] saved scene: {}",
+                                    mHost.scene.currentScenePath);
                 }
             }
             break;
@@ -831,16 +830,15 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             saveAsOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Save(*mHost.scene.pWorld, path, saveAsOpts);
             if (rc.IsErr()) {
-                std::fprintf(stderr,
-                             "[OrangeEditor] Scene::Save failed: %s (code=%u)\n",
-                             path.c_str(),
-                             static_cast<unsigned>(rc.Error()));
+                ORANGE_LOG_ERROR("[OrangeEditor] Scene::Save failed: {} (code={})",
+                                 path,
+                                 static_cast<unsigned>(rc.Error()));
                 break;
             }
             mHost.scene.currentScenePath = std::move(path);
             mHost.scene.dirty = false;
-            std::fprintf(stdout, "[OrangeEditor] saved scene as: %s\n",
-                         mHost.scene.currentScenePath.c_str());
+            ORANGE_LOG_INFO("[OrangeEditor] saved scene as: {}",
+                            mHost.scene.currentScenePath);
             break;
         }
         case SceneOp::SaveSplitAs: {
@@ -874,10 +872,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             const auto rc = Orange::Engine::Scene::SaveSplit(
                 *mHost.scene.pWorld, mHost.scene.partition, manifestPath, saveOpts);
             if (rc.IsErr()) {
-                std::fprintf(stderr,
-                             "[OrangeEditor] Scene::SaveSplit failed: %s (code=%u)\n",
-                             manifestPath.c_str(),
-                             static_cast<unsigned>(rc.Error()));
+                ORANGE_LOG_ERROR("[OrangeEditor] Scene::SaveSplit failed: {} (code={})",
+                                 manifestPath,
+                                 static_cast<unsigned>(rc.Error()));
                 break;
             }
             // currentScenePath 此刻指向 manifest 文件；后续 File>Save 仍
@@ -886,9 +883,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             // Split As。这条限制写进 v0.6 acceptance checklist 的"已知简化"。
             mHost.scene.currentScenePath = std::move(manifestPath);
             mHost.scene.dirty = false;
-            std::fprintf(stdout, "[OrangeEditor] saved scene (split) as: %s (%zu layers)\n",
-                         mHost.scene.currentScenePath.c_str(),
-                         mHost.scene.partition.LayerCount());
+            ORANGE_LOG_INFO("[OrangeEditor] saved scene (split) as: {} ({} layers)",
+                            mHost.scene.currentScenePath,
+                            mHost.scene.partition.LayerCount());
             break;
         }
         case SceneOp::OpenSplit: {
@@ -910,10 +907,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             const auto rc = Orange::Engine::Scene::LoadSplit(
                 manifestPath, *pNew, newPartition, splitLoadOpts);
             if (rc.IsErr()) {
-                std::fprintf(stderr,
-                             "[OrangeEditor] Scene::LoadSplit failed: %s (code=%u)\n",
-                             manifestPath.c_str(),
-                             static_cast<unsigned>(rc.Error()));
+                ORANGE_LOG_ERROR("[OrangeEditor] Scene::LoadSplit failed: {} (code={})",
+                                 manifestPath,
+                                 static_cast<unsigned>(rc.Error()));
                 break;
             }
             mHost.scene.pWorld           = std::move(pNew);
@@ -922,9 +918,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             mHost.scene.dirty            = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
-            std::fprintf(stdout, "[OrangeEditor] opened scene (split): %s (%zu layers)\n",
-                         manifestPath.c_str(),
-                         mHost.scene.partition.LayerCount());
+            ORANGE_LOG_INFO("[OrangeEditor] opened scene (split): {} ({} layers)",
+                            manifestPath,
+                            mHost.scene.partition.LayerCount());
             break;
         }
         case SceneOp::None:
@@ -961,10 +957,10 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 const auto rc = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.playSnapshotPath, saveOpts);
                 if (rc.IsErr()) {
-                    std::fprintf(stderr,
-                        "[OrangeEditor] Play 快照落盘失败: %s (code=%u) —— 取消进入 Play\n",
-                        mHost.scene.playSnapshotPath.c_str(),
-                        static_cast<unsigned>(rc.Error()));
+                    ORANGE_LOG_ERROR("[OrangeEditor] Play 快照落盘失败: {} (code={}) —— "
+                                     "取消进入 Play",
+                                     mHost.scene.playSnapshotPath,
+                                     static_cast<unsigned>(rc.Error()));
                     mHost.scene.playSnapshotPath.clear();
                     break;  // 快照失败则保持 Edit，不进 Play
                 }
@@ -1035,35 +1031,33 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                     static_cast<void*>(&mRenderDevice), kFIF,
                     *mHost.assets.pAssets);
                 if (rc.IsErr()) {
-                    std::fprintf(stderr,
-                        "[OrangeEditor] VfxSystem::Initialize 失败 (code=%u)\n",
-                        static_cast<unsigned>(rc.Error()));
+                    ORANGE_LOG_ERROR("[OrangeEditor] VfxSystem::Initialize 失败 (code={})",
+                                     static_cast<unsigned>(rc.Error()));
                     mpVfxSystem.reset();
                 } else {
                     mpScenePipeline->SetVfxSystem(mpVfxSystem.get());
-                    std::fprintf(stdout, "[play] VfxSystem 初始化成功，粒子 tick 已启动\n");
+                    ORANGE_LOG_INFO("[play] VfxSystem 初始化成功，粒子 tick 已启动");
                 }
             } else {
-                std::fprintf(stderr,
-                    "[play] VfxSystem 跳过：Pipeline=%s  Assets=%s\n",
-                    mpScenePipeline ? "ok" : "null",
-                    mHost.assets.pAssets  ? "ok" : "null");
+                ORANGE_LOG_WARN("[play] VfxSystem 跳过：Pipeline={}  Assets={}",
+                                mpScenePipeline ? "ok" : "null",
+                                mHost.assets.pAssets  ? "ok" : "null");
             }
 
             mHost.scene.playState = PlayState::Play;
-            std::fprintf(stdout, "[play] Edit → Play\n");
+            ORANGE_LOG_INFO("[play] Edit → Play");
             break;
         }
         case PlayOp::Pause: {
             if (mHost.scene.playState != PlayState::Play) { break; }
             mHost.scene.playState = PlayState::Paused;
-            std::fprintf(stdout, "[play] Play → Paused\n");
+            ORANGE_LOG_INFO("[play] Play → Paused");
             break;
         }
         case PlayOp::Resume: {
             if (mHost.scene.playState != PlayState::Paused) { break; }
             mHost.scene.playState = PlayState::Play;
-            std::fprintf(stdout, "[play] Paused → Play\n");
+            ORANGE_LOG_INFO("[play] Paused → Play");
             break;
         }
         case PlayOp::Stop: {
@@ -1105,10 +1099,9 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 const auto rc = Orange::Engine::Scene::Load(
                     mHost.scene.playSnapshotPath, *pNew, loadOpts);
                 if (rc.IsErr()) {
-                    std::fprintf(stderr,
-                        "[OrangeEditor] Play 快照还原失败 (code=%u)，"
-                        "保留 Play 后的 World\n",
-                        static_cast<unsigned>(rc.Error()));
+                    ORANGE_LOG_ERROR("[OrangeEditor] Play 快照还原失败 (code={})，"
+                                     "保留 Play 后的 World",
+                                     static_cast<unsigned>(rc.Error()));
                 } else {
                     mHost.scene.pWorld = std::move(pNew);
                 }
@@ -1123,7 +1116,7 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             // 用悬垂指针执行 lambda 导致崩溃。与 New / Open 场景切换时的
             // 处理保持一致（切 world 必清栈）。
             mHost.cmdStack.Clear();
-            std::fprintf(stdout, "[play] %s → Edit\n", prevLabel);
+            ORANGE_LOG_INFO("[play] {} → Edit", prevLabel);
             break;
         }
         case PlayOp::None:

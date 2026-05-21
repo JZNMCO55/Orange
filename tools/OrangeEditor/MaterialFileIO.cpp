@@ -5,6 +5,7 @@
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/TextureAsset.h>
+#include <orange/engine/core/Log.h>
 #include <orange/engine/core/Serialization.h>
 
 #include <glm/gtc/type_ptr.hpp>
@@ -64,10 +65,9 @@ std::optional<MaterialFileData> ReadMaterialFile(const std::string& path)
     auto rr = JsonReader::FromFile(path);
     if (rr.IsErr())
     {
-        std::fprintf(stderr,
-                     "[MaterialFileIO] 读 '%s' 失败 (code=%u)\n",
-                     path.c_str(),
-                     static_cast<unsigned>(rr.Error().code));
+        ORANGE_LOG_ERROR("[MaterialFileIO] 读 '{}' 失败 (code={})",
+                         path,
+                         static_cast<unsigned>(rr.Error().code));
         return std::nullopt;
     }
     const JsonReader& reader = rr.Value();
@@ -75,22 +75,19 @@ std::optional<MaterialFileData> ReadMaterialFile(const std::string& path)
     auto sv = reader.ReadSchemaVersion("schemaVersion");
     if (sv.IsErr())
     {
-        std::fprintf(stderr,
-                     "[MaterialFileIO] '%s' 缺 schemaVersion 或格式错\n",
-                     path.c_str());
+        ORANGE_LOG_ERROR("[MaterialFileIO] '{}' 缺 schemaVersion 或格式错", path);
         return std::nullopt;
     }
     if (sv.Value().Namespace() != kSchemaNamespace
         || sv.Value().Major() != kSchemaMajor)
     {
-        std::fprintf(stderr,
-                     "[MaterialFileIO] '%s' schema namespace/major 不匹配 "
-                     "(got %s v%u.x，期望 %s v%d.x)\n",
-                     path.c_str(),
-                     sv.Value().Namespace().c_str(),
-                     static_cast<unsigned>(sv.Value().Major()),
-                     kSchemaNamespace,
-                     kSchemaMajor);
+        ORANGE_LOG_ERROR("[MaterialFileIO] '{}' schema namespace/major 不匹配 "
+                         "(got {} v{}.x，期望 {} v{}.x)",
+                         path,
+                         sv.Value().Namespace(),
+                         static_cast<unsigned>(sv.Value().Major()),
+                         kSchemaNamespace,
+                         kSchemaMajor);
         return std::nullopt;
     }
 
@@ -98,9 +95,7 @@ std::optional<MaterialFileData> ReadMaterialFile(const std::string& path)
     if (!reader.ReadString("templateName", data.templateName)
         || data.templateName.empty())
     {
-        std::fprintf(stderr,
-                     "[MaterialFileIO] '%s' templateName 缺失或空\n",
-                     path.c_str());
+        ORANGE_LOG_ERROR("[MaterialFileIO] '{}' templateName 缺失或空", path);
         return std::nullopt;
     }
 
@@ -113,29 +108,22 @@ std::optional<MaterialFileData> ReadMaterialFile(const std::string& path)
         UniformOverrideValue u;
         if (!reader.ReadString(base + "name", u.name) || u.name.empty())
         {
-            std::fprintf(stderr,
-                         "[MaterialFileIO] '%s' uniforms[%zu].name 缺失，跳过\n",
-                         path.c_str(),
-                         i);
+            ORANGE_LOG_WARN("[MaterialFileIO] '{}' uniforms[{}].name 缺失，跳过",
+                            path, i);
             continue;
         }
         std::string typeStr;
         if (!reader.ReadString(base + "type", typeStr))
         {
-            std::fprintf(stderr,
-                         "[MaterialFileIO] '%s' uniforms[%zu].type 缺失，跳过\n",
-                         path.c_str(),
-                         i);
+            ORANGE_LOG_WARN("[MaterialFileIO] '{}' uniforms[{}].type 缺失，跳过",
+                            path, i);
             continue;
         }
         auto typeOpt = ParseUniformType(typeStr);
         if (!typeOpt.has_value())
         {
-            std::fprintf(stderr,
-                         "[MaterialFileIO] '%s' uniforms[%zu].type='%s' 未知，跳过\n",
-                         path.c_str(),
-                         i,
-                         typeStr.c_str());
+            ORANGE_LOG_WARN("[MaterialFileIO] '{}' uniforms[{}].type='{}' 未知，跳过",
+                            path, i, typeStr);
             continue;
         }
         u.type = *typeOpt;
@@ -201,10 +189,8 @@ std::optional<MaterialFileData> ReadMaterialFile(const std::string& path)
         std::int64_t bindingRaw = 0;
         if (!reader.ReadInt(base + "binding", bindingRaw))
         {
-            std::fprintf(stderr,
-                         "[MaterialFileIO] '%s' textures[%zu].binding 缺失，跳过\n",
-                         path.c_str(),
-                         i);
+            ORANGE_LOG_WARN("[MaterialFileIO] '{}' textures[{}].binding 缺失，跳过",
+                            path, i);
             continue;
         }
         t.binding = static_cast<std::uint32_t>(bindingRaw);
@@ -281,10 +267,9 @@ bool WriteMaterialFile(const std::string& path, const MaterialFileData& data)
     auto sv = writer.SaveToFile(path, 2);
     if (sv.IsErr())
     {
-        std::fprintf(stderr,
-                     "[MaterialFileIO] 写 '%s' 失败 (code=%u)\n",
-                     path.c_str(),
-                     static_cast<unsigned>(sv.Error()));
+        ORANGE_LOG_ERROR("[MaterialFileIO] 写 '{}' 失败 (code={})",
+                         path,
+                         static_cast<unsigned>(sv.Error()));
         return false;
     }
     return true;
@@ -395,20 +380,18 @@ void ApplyDataToInstance(
         }
         if (pAssetRegistry == nullptr)
         {
-            std::fprintf(stderr,
-                         "[MaterialFileIO] texture override binding=%u path='%s' "
-                         "无 AssetRegistry，跳过\n",
-                         t.binding,
-                         t.path.c_str());
+            ORANGE_LOG_WARN("[MaterialFileIO] texture override binding={} path='{}' "
+                            "无 AssetRegistry，跳过",
+                            t.binding,
+                            t.path);
             continue;
         }
         auto lr = pAssetRegistry->Load<::Orange::Engine::Asset::TextureAsset>(t.path);
         if (lr.IsErr())
         {
-            std::fprintf(stderr,
-                         "[MaterialFileIO] texture path='%s' 加载失败 (code=%u)\n",
-                         t.path.c_str(),
-                         static_cast<unsigned>(lr.Error()));
+            ORANGE_LOG_WARN("[MaterialFileIO] texture path='{}' 加载失败 (code={})",
+                            t.path,
+                            static_cast<unsigned>(lr.Error()));
             continue;
         }
         instance.SetTexture(t.binding, lr.Value());

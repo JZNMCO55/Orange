@@ -6,6 +6,8 @@
 #include "MaterialFileIO.h"
 #include "demo_game/HealthComponent.h"
 
+#include <orange/engine/core/Log.h>
+
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/animation/ProceduralAnimator.h>
@@ -281,10 +283,9 @@ void InitializeEditorAssets(EditorHost& host)
             std::make_unique<ShaderLoader>());
         reg.IsErr())
     {
-        std::fprintf(stderr,
-                     "[OrangeEditor] AssetRegistry::RegisterLoader<ShaderAsset> 失败 "
-                     "(code=%u)\n",
-                     static_cast<unsigned>(reg.Error()));
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<ShaderAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
     }
     // GAP-2026-05-16 G1：注册 MeshLoader 让 RenderableComponent.mesh 字段
     // 走 "assets/meshes/*.mesh" 磁盘路径 Load 路径（取代旧的内存 named
@@ -296,10 +297,9 @@ void InitializeEditorAssets(EditorHost& host)
             std::make_unique<MeshLoader>());
         reg.IsErr())
     {
-        std::fprintf(stderr,
-                     "[OrangeEditor] AssetRegistry::RegisterLoader<MeshAsset> 失败 "
-                     "(code=%u)\n",
-                     static_cast<unsigned>(reg.Error()));
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<MeshAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
     }
 
     // 注册 TextureLoader 让 EnvironmentComponent.cubemap 字段 / 任何
@@ -315,10 +315,9 @@ void InitializeEditorAssets(EditorHost& host)
             std::make_unique<TextureLoader>());
         reg.IsErr())
     {
-        std::fprintf(stderr,
-                     "[OrangeEditor] AssetRegistry::RegisterLoader<TextureAsset> 失败 "
-                     "(code=%u)\n",
-                     static_cast<unsigned>(reg.Error()));
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<TextureAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
     }
 
     // v0.7 c3：注册 SkeletonLoader 让 DragonBonesAssetInspectorPlugin
@@ -331,10 +330,9 @@ void InitializeEditorAssets(EditorHost& host)
             std::make_unique<SkeletonLoader>());
         reg.IsErr())
     {
-        std::fprintf(stderr,
-                     "[OrangeEditor] AssetRegistry::RegisterLoader<SkeletonAsset> 失败 "
-                     "(code=%u)\n",
-                     static_cast<unsigned>(reg.Error()));
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<SkeletonAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
     }
 
     // 注册 SoundLoader —— AudioSource schema 的 sound AssetRef 字段 +
@@ -346,10 +344,9 @@ void InitializeEditorAssets(EditorHost& host)
             std::make_unique<SoundLoader>());
         reg.IsErr())
     {
-        std::fprintf(stderr,
-                     "[OrangeEditor] AssetRegistry::RegisterLoader<SoundAsset> 失败 "
-                     "(code=%u)\n",
-                     static_cast<unsigned>(reg.Error()));
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<SoundAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
     }
 
     // 内置 mesh lazy bake：检测 assets/meshes/X.mesh，缺失则程序化构造 +
@@ -372,10 +369,9 @@ void InitializeEditorAssets(EditorHost& host)
                     std::filesystem::path(path).parent_path());
                 if (auto sv = MeshLoader::Save(path, *pMesh); sv.IsErr())
                 {
-                    std::fprintf(stderr,
-                                 "[OrangeEditor] MeshLoader::Save '%s' 失败 (code=%u)\n",
-                                 path.c_str(),
-                                 static_cast<unsigned>(sv.Error()));
+                    ORANGE_LOG_ERROR("[OrangeEditor] MeshLoader::Save '{}' 失败 (code={})",
+                                     path,
+                                     static_cast<unsigned>(sv.Error()));
                     // 仍然 Insert 一份内存版本作为最后兜底，让本次会话能继续渲染
                     if (auto h = host.assets.pAssets->Insert<MeshAsset>(path, std::move(pMesh));
                         h.IsOk())
@@ -389,10 +385,9 @@ void InitializeEditorAssets(EditorHost& host)
         auto lr = host.assets.pAssets->Load<MeshAsset>(path);
         if (lr.IsErr())
         {
-            std::fprintf(stderr,
-                         "[OrangeEditor] Load<MeshAsset> '%s' 失败 (code=%u)\n",
-                         path.c_str(),
-                         static_cast<unsigned>(lr.Error()));
+            ORANGE_LOG_ERROR("[OrangeEditor] Load<MeshAsset> '{}' 失败 (code={})",
+                             path,
+                             static_cast<unsigned>(lr.Error()));
             return {};
         }
         return lr.Value();
@@ -432,9 +427,8 @@ void InitializeEditorAssets(EditorHost& host)
             }
             else
             {
-                std::fprintf(stderr,
-                             "[OrangeEditor] lazy bake beep.wav 写盘失败 '%s'\n",
-                             beepPath.string().c_str());
+                ORANGE_LOG_ERROR("[OrangeEditor] lazy bake beep.wav 写盘失败 '{}'",
+                                 beepPath.string());
             }
         }
     }
@@ -445,10 +439,9 @@ void InitializeEditorAssets(EditorHost& host)
         // 通常意味着 shaders/orange_engine/*.spv 不在 .exe 同目录——in-tree
         // build 由 CMake 把 SPV 拷到 build/bin/$<CONFIG>/shaders/orange_engine/，
         // standalone install 还没有官方流程时这里会报，但不阻止编辑器启动。
-        std::fprintf(stderr,
-                     "[OrangeEditor] MaterialSystem::RegisterBuiltins 失败 "
-                     "(code=%u) —— Scene 视口稍后可能不显示几何\n",
-                     static_cast<unsigned>(rb.Error()));
+        ORANGE_LOG_WARN("[OrangeEditor] MaterialSystem::RegisterBuiltins 失败 "
+                        "(code={}) —— Scene 视口稍后可能不显示几何",
+                        static_cast<unsigned>(rb.Error()));
     }
 
     // GAP-2026-05-16 G2：内置 MaterialInstance 落盘 .material + lazy bake。
@@ -476,21 +469,18 @@ void InitializeEditorAssets(EditorHost& host)
         auto dataOpt = ::Orange::Editor::Material::ReadMaterialFile(path);
         if (!dataOpt.has_value())
         {
-            std::fprintf(stderr,
-                         "[OrangeEditor] .material '%s' 读取失败，回退到 '%.*s'\n",
-                         path.c_str(),
-                         static_cast<int>(fallbackTemplate.size()),
-                         fallbackTemplate.data());
+            ORANGE_LOG_WARN("[OrangeEditor] .material '{}' 读取失败，回退到 '{}'",
+                            path,
+                            fallbackTemplate);
             return host.assets.pMaterials->CreateInstance(fallbackTemplate);
         }
 
         auto inst = host.assets.pMaterials->CreateInstance(dataOpt->templateName);
         if (inst == nullptr)
         {
-            std::fprintf(stderr,
-                         "[OrangeEditor] .material '%s' template '%s' 未注册，回退\n",
-                         path.c_str(),
-                         dataOpt->templateName.c_str());
+            ORANGE_LOG_WARN("[OrangeEditor] .material '{}' template '{}' 未注册，回退",
+                            path,
+                            dataOpt->templateName);
             return host.assets.pMaterials->CreateInstance(fallbackTemplate);
         }
         ::Orange::Editor::Material::ApplyDataToInstance(
@@ -622,10 +612,9 @@ void InitializeEditorAssets(EditorHost& host)
         if (auto rb = host.assets.pAnimators->RegisterBackend("procedural", factory);
             rb.IsErr())
         {
-            std::fprintf(stderr,
-                         "[OrangeEditor] AnimatorRegistry::RegisterBackend(procedural) "
-                         "失败 (code=%u)\n",
-                         static_cast<unsigned>(rb.Error()));
+            ORANGE_LOG_ERROR("[OrangeEditor] AnimatorRegistry::RegisterBackend(procedural) "
+                             "失败 (code={})",
+                             static_cast<unsigned>(rb.Error()));
         }
     }
 }

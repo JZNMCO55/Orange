@@ -5,6 +5,8 @@
 
 #include "../plugin/AnimFsmAssetInspectorPlugin.h"
 
+#include <orange/engine/core/Log.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <utility>
@@ -49,9 +51,8 @@ void AnimFsmAddStateCommand::Execute()
     // 重名防御（UI 应已 prevent；命令侧再防御一次避免 redo 路径意外）
     if (FindStateIt(fsm, mStateName) != fsm.states.end())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmAddState] state '%s' 已存在，跳过\n",
-                     mStateName.c_str());
+        ORANGE_LOG_WARN("[AnimFsmAddState] state '{}' 已存在，跳过",
+                        mStateName);
         return;
     }
 
@@ -113,9 +114,8 @@ void AnimFsmDeleteStateCommand::Execute()
     auto it = FindStateIt(fsm, mStateName);
     if (it == fsm.states.end())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmDeleteState] state '%s' 不存在，跳过\n",
-                     mStateName.c_str());
+        ORANGE_LOG_WARN("[AnimFsmDeleteState] state '{}' 不存在，跳过",
+                        mStateName);
         return;
     }
 
@@ -245,9 +245,8 @@ void AnimFsmRenameStateCommand::Execute()
     if (mNewName != mOldName
         && FindStateIt(fsm, mNewName) != fsm.states.end())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmRenameState] new name '%s' 已存在，跳过\n",
-                     mNewName.c_str());
+        ORANGE_LOG_WARN("[AnimFsmRenameState] new name '{}' 已存在，跳过",
+                        mNewName);
         return;
     }
 
@@ -364,9 +363,8 @@ void AnimFsmAddTransitionCommand::Execute()
     if (FindStateIt(fsm, mFromState) == fsm.states.end()
         || FindStateIt(fsm, mToState)   == fsm.states.end())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmAddTransition] 端点 '%s' / '%s' 不存在，跳过\n",
-                     mFromState.c_str(), mToState.c_str());
+        ORANGE_LOG_WARN("[AnimFsmAddTransition] 端点 '{}' / '{}' 不存在，跳过",
+                        mFromState, mToState);
         return;
     }
 
@@ -414,9 +412,8 @@ void AnimFsmDeleteTransitionCommand::Execute()
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.transitions.size())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmDeleteTransition] index %zu 越界（size=%zu），跳过\n",
-                     mIndex, fsm.transitions.size());
+        ORANGE_LOG_WARN("[AnimFsmDeleteTransition] index {} 越界（size={}），跳过",
+                        mIndex, fsm.transitions.size());
         mWasValid = false;
         return;
     }
@@ -461,9 +458,8 @@ void AnimFsmAddParameterCommand::Execute()
     {
         if (p.name == mParameter.name)
         {
-            std::fprintf(stderr,
-                         "[AnimFsmAddParameter] '%s' 已存在，跳过\n",
-                         mParameter.name.c_str());
+            ORANGE_LOG_WARN("[AnimFsmAddParameter] '{}' 已存在，跳过",
+                            mParameter.name);
             return;
         }
     }
@@ -503,9 +499,8 @@ void AnimFsmDeleteParameterCommand::Execute()
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.parameters.size())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmDeleteParameter] index %zu 越界（size=%zu），跳过\n",
-                     mIndex, fsm.parameters.size());
+        ORANGE_LOG_WARN("[AnimFsmDeleteParameter] index {} 越界（size={}），跳过",
+                        mIndex, fsm.parameters.size());
         mWasValid = false;
         return;
     }
@@ -573,9 +568,8 @@ void AnimFsmSetTransitionConditionsCommand::Execute()
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.transitions.size())
     {
-        std::fprintf(stderr,
-                     "[AnimFsmSetTransitionConditions] index %zu 越界，跳过\n",
-                     mIndex);
+        ORANGE_LOG_WARN("[AnimFsmSetTransitionConditions] index {} 越界，跳过",
+                        mIndex);
         return;
     }
     fsm.transitions[mIndex].conditions = mNewConditions;
