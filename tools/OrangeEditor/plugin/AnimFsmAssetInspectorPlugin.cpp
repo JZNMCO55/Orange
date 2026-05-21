@@ -103,10 +103,12 @@ void AnimFsmAssetInspectorPlugin::DrawCanvas(EditorHost& host)
     const ImVec2 canvasOrigin = ImGui::GetCursorScreenPos();
     const ImVec2 canvasSize   = ImGui::GetContentRegionAvail();
 
-    // background hit-target：覆盖整个 canvas 区域。先注册（先画）→ ImGui
-    // hit-test 反序判定 → 节点 InvisibleButton 后注册优先命中。背景仅在
-    // 真空白区命中。
+    // background hit-target：覆盖整个 canvas 区域。先注册（先画）；ImGui
+    // 1.91.x 默认先注册的 item 会"锁定" hover/active/clicked，导致后续节点
+    // InvisibleButton 抢不到 click + drag —— 必须在 bg 上调
+    // SetNextItemAllowOverlap()，显式允许后续 item 在同区域命中。
     ImGui::SetCursorScreenPos(canvasOrigin);
+    ImGui::SetNextItemAllowOverlap();
     ImGui::InvisibleButton("##canvas_bg", canvasSize);
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
     {
@@ -256,7 +258,11 @@ void AnimFsmAssetInspectorPlugin::DrawCanvas(EditorHost& host)
             mSelectedStateName  = state.name;
             mRenameTargetState  = state.name;
             SafeCopyToBuffer(mRenameBuffer, sizeof(mRenameBuffer), state.name);
-            ImGui::OpenPopup(kNodePopupId);
+            // PushID(state.name) scope 内直接 OpenPopup 会让 popup ID 包含
+            // state.name 哈希，但 DrawNodeContextPopup 的 BeginPopup 在 PopID
+            // 外侧调，两边 ID stack 不匹配 → popup 永远开不出来。defer 到
+            // PopID 之后统一 OpenPopup。
+            mPendingOpenNodePopup = true;
         }
 
         const bool selected = (state.name == mSelectedStateName);
@@ -302,6 +308,14 @@ void AnimFsmAssetInspectorPlugin::DrawCanvas(EditorHost& host)
 
     // popup 必须在同一 ImGui ID stack scope 内调 BeginPopup；放 canvas
     // child 内即可。popup 内容由专门的方法绘制。
+    //
+    // 节点右键 popup 的 OpenPopup 必须 defer 到这里（PopID 外），与下面
+    // BeginPopup 处于相同 ID stack scope，否则 ID 哈希不一致 popup 弹不出。
+    if (mPendingOpenNodePopup)
+    {
+        ImGui::OpenPopup(kNodePopupId);
+        mPendingOpenNodePopup = false;
+    }
     DrawAddStatePopup(host);
     DrawNodeContextPopup(host);
 

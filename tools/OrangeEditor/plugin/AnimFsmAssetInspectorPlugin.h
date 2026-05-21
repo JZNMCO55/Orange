@@ -109,6 +109,10 @@ private:
     // Rename popup：目标 state（右键触发时记录）+ 新名 buffer
     std::string mRenameTargetState;
     char        mRenameBuffer[64]{};
+    // 节点右键 popup 触发是 deferred —— 必须在节点循环 PopID 之外调
+    // OpenPopup，否则与 BeginPopup 的 ID stack scope 不匹配导致 popup
+    // 弹不出来。flag 仅活一帧。
+    bool        mPendingOpenNodePopup{false};
 
     // ----- v0.7 c2-7-B: condition / parameter UI 状态 -----
     // 用户当前正在编辑的 transition 在 mEditingFsm.transitions[] 内的 index；
