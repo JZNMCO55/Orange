@@ -5,7 +5,8 @@
 
 #include "EditorRenderLayer.h"
 
-#include "DemoWorld.h"  // BuildNamedMaterialInstances 等 demo 资产工厂仍在用
+#include "BuiltinAssets.h"  // BuildNamedMaterialInstances（v1.0.1 c11 拆出）
+#include "DemoWorld.h"      // SeedDemoWorld / SeedPbrShowcaseWorld
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
@@ -276,6 +277,32 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     const ImGuiID dockspaceId =
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
+    // v1.0.1 c4：检测 viewport 尺寸大幅变化（典型场景：maximize ↔ restore）。
+    // ImGui dock 子节点在窗口尺寸跳变后仍维持上一帧的绝对像素 SizeRef：
+    //   * restore（收缩）：中央 Scene 被两侧 dock 挤到 0 宽
+    //   * maximize（扩大）：两侧 dock 仍按 restore 时的小像素维持，大画布
+    //     里看起来 panel 偏窄，底部 Assets 甚至会被 work area 裁掉
+    // 因此对称检测：任一方向变化超 ±25% 都重建。阈值刻意取大，拖窗口
+    // 边界的连续小幅 resize 不会触发，保留用户细调手感。
+    //
+    // c9 补丁（v1.0.1）：c4 初版只检测收缩，restore → maximize 路径
+    // panel 不恢复 default 比例。改为对称判断 |ratio - 1| > 0.25。
+    {
+        const ImVec2 vpSize = ImGui::GetMainViewport()->Size;
+        if (mLastViewportSize.x > 0.0f && mLastViewportSize.y > 0.0f)
+        {
+            const float wRatio = vpSize.x / mLastViewportSize.x;
+            const float hRatio = vpSize.y / mLastViewportSize.y;
+            const bool wJumped = (wRatio < 0.75f) || (wRatio > 1.33f);
+            const bool hJumped = (hRatio < 0.75f) || (hRatio > 1.33f);
+            if (wJumped || hJumped)
+            {
+                ImGui::DockBuilderRemoveNode(dockspaceId);
+            }
+        }
+        mLastViewportSize = vpSize;
+    }
+
     BuildDefaultLayoutOnce(dockspaceId);
     UpdateWindowTitle();
 
@@ -385,8 +412,14 @@ void EditorRenderLayer::BuildDefaultLayoutOnce(ImGuiID dockspaceId)
     ImGui::DockBuilderRemoveNode(dockspaceId);
     ImGui::DockBuilderAddNode(dockspaceId,
                               ImGuiDockNodeFlags_DockSpace);
+    // v1.0.1 c8：用 WorkSize 替代 Size —— Size 包含 menu bar + toolbar 占据的
+    // 高度，而 dockspace 实际只占 work area；用 Size 算 SplitNode 比例会让
+    // 子节点 SizeRef 持有"超过 dock 实际容器"的绝对像素，导致 maximize →
+    // restore 重建时 Entity Tree / Inspector 无法回到 default 20%/25% 比例
+    // （Imgui dock 在 work area 内 fit 时把超出部分挤压）。WorkSize 等于
+    // viewport.Size 减去 menu + toolbar 的高度，是真实 dock 容器尺寸。
     ImGui::DockBuilderSetNodeSize(dockspaceId,
-                                  ImGui::GetMainViewport()->Size);
+                                  ImGui::GetMainViewport()->WorkSize);
 
     // 布局：左 20% Entity Tree；右 25% Inspector；下 30% Assets/Console
     // tab；剩余中央留给 Scene。比例与 Unity / Unreal 默认 layout 接近，

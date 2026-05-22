@@ -45,6 +45,14 @@ struct ComponentSchema
     // 字段列表。注册顺序 = Inspector 内显示顺序。
     std::vector<PropertyDescriptor> properties;
 
+    // 段顶 helper 文案（可空）。CollapsingHeader 展开后、properties 渲染之前
+    // 显示一行（或多行）TextDisabled + Bullet，用来提示"这个 component 的隐藏
+    // 心智模型"——典型用例：DirectionalLight 方向由 Transform.rotation 派生，
+    // 多实例语义（first-found 生效）等 UI 上不自发现的约定。文案语言跟随
+    // OrangeEditor UI（zh-CN）。
+    // nullptr / 空串都视为"无 helper"，不占垂直空间。
+    const char* helperText = nullptr;
+
     // ---- 类型擦除的 component-on-entity 访问 ----------------------------
     //
     // get 返回 void* —— SchemaInspector 把它喂给每个 PropertyDescriptor 的

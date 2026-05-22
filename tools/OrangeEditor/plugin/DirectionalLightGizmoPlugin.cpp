@@ -70,42 +70,43 @@ void DirectionalLightGizmoPlugin::Draw(
     const glm::vec3 dirN =
         Orange::Engine::Render::ComputeDirectionalLightWorldDir(pTC->rotation);
 
-    // 屏幕长度自适应：投影 origin 与 origin+1*X 的屏幕距离换算 world-units-
-    // per-handle（与 EditorTranslateGizmo 同款 heuristic）。
+    // v1.0.1 c10：屏幕空间钉死箭头长度（== kHandleScreenLengthPx），与
+    // entity rotation / dir 方向解耦。
+    //
+    // 旧路径（c10 前）：投 origin 与 origin+1*X 算 px-per-world-unit，然后
+    //   tipWorld = origin + dirN * worldUnitsPerHandle。问题：perspective
+    //   下"沿 +X 1 单位的 px"≠"沿 dirN 1 单位的 px"，dirN 朝相机时投影几乎
+    //   为 0，箭头屏幕长度随 dir 方向波动 —— entity 旋转时 gizmo 长度肉眼
+    //   可见变化。
+    //
+    // 新路径：projDir = project(origin + dirN)；屏幕方向 = normalize(projDir
+    //   - projOrigin)；tipScreen = projOrigin + 屏幕方向 * 固定 px 长度。
+    //   dir 朝/背相机时投影差近似 0 → 退化为不画箭头（提示该方向"指向相机"，
+    //   后续可补一个 "⊙" / "⊗" icon 表示进/出屏，本 patch 范围外）。
     const auto projOrigin = GM::ProjectWorldToScreen(origin, ctx.viewProj,
                                                      ctx.imageOrigin, ctx.imageSize);
     if (!projOrigin.has_value()) { return; }  // entity 在相机后方
-    const auto projOriginPlusX = GM::ProjectWorldToScreen(
-        origin + glm::vec3(1.0f, 0.0f, 0.0f),
-        ctx.viewProj, ctx.imageOrigin, ctx.imageSize);
-    float worldUnitsPerHandle = 1.0f;
-    if (projOriginPlusX.has_value())
-    {
-        const float pxPerUnit = glm::length(projOriginPlusX->screen - projOrigin->screen);
-        if (pxPerUnit > 1e-3f)
-        {
-            worldUnitsPerHandle = kHandleScreenLengthPx / pxPerUnit;
-        }
-    }
-    const glm::vec3 tipWorld = origin + dirN * worldUnitsPerHandle;
-    const auto      projTip  = GM::ProjectWorldToScreen(tipWorld, ctx.viewProj,
-                                                        ctx.imageOrigin, ctx.imageSize);
-    if (!projTip.has_value()) { return; }  // tip 跑到相机后方
+
+    const auto projDirEnd = GM::ProjectWorldToScreen(
+        origin + dirN, ctx.viewProj, ctx.imageOrigin, ctx.imageSize);
+    if (!projDirEnd.has_value()) { return; }
+
+    const glm::vec2 dir2D = projDirEnd->screen - projOrigin->screen;
+    const float     len2D = glm::length(dir2D);
+    if (len2D < 1e-3f) { return; }  // dir 朝相机投影退化，不画
+    const glm::vec2 dirN2D = dir2D / len2D;
+    const glm::vec2 tipScreen = projOrigin->screen + dirN2D * kHandleScreenLengthPx;
 
     // ---- 画箭杆 + 箭头三角 ----
     const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
-    const ImVec2 b{projTip->screen.x,    projTip->screen.y};
+    const ImVec2 b{tipScreen.x,          tipScreen.y};
     ctx.drawList->AddLine(a, b, kLightGizmoColor, 3.0f);
 
-    const glm::vec2 dir2D = projTip->screen - projOrigin->screen;
-    const float     len2D = glm::length(dir2D);
-    if (len2D < 1e-3f) { return; }
-    const glm::vec2 dirN2D(dir2D.x / len2D, dir2D.y / len2D);
     const glm::vec2 perpN(-dirN2D.y, dirN2D.x);
-    const glm::vec2 baseCtr = projTip->screen - dirN2D * kArrowHeadLengthPx;
+    const glm::vec2 baseCtr = tipScreen - dirN2D * kArrowHeadLengthPx;
     const glm::vec2 baseL   = baseCtr + perpN * kArrowHeadHalfWidthPx;
     const glm::vec2 baseR   = baseCtr - perpN * kArrowHeadHalfWidthPx;
-    ctx.drawList->AddTriangleFilled(ImVec2(projTip->screen.x, projTip->screen.y),
+    ctx.drawList->AddTriangleFilled(ImVec2(tipScreen.x, tipScreen.y),
                                     ImVec2(baseL.x, baseL.y),
                                     ImVec2(baseR.x, baseR.y),
                                     kLightGizmoColor);

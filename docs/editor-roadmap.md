@@ -582,6 +582,27 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **完工记录**：见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`。本 milestone ✅ 后 OrangeEditor 自身 semver 切 stable（1.0.x patch / 1.x.0 minor 行为按一般 semver 演进），编辑器公共 API 进入"破坏性改动需走 major bump"约束（与引擎本体 0.x 仍 unstable 区别）。
 
+### v1.0.1 · Friction Patch Batch ✅
+
+**版本**：v1.0 ✅ 后第一个 patch milestone（按 [[feedback-post-v1-versioning]] 纪律走 v1.0.xx）
+**落地日期**：2026-05-22
+
+**范围**：5 个 v1.0 验收期间 / 后续试搭场景登记的 P1/P2 friction GAP 打包，纯 UX / 视觉 polish，零新功能。
+
+| GAP | 优先级 | 改动落点 |
+|------|--------|----------|
+| `editor-dock-layout-collapses-on-restore` | P1 | OnUpdate 内检测 viewport 收缩 > 25% 时 RemoveNode 让 BuildDefaultLayoutOnce 重建 |
+| `editor-default-ibl-missing-causes-black-pbr-faces` | P1 | `Pipeline.cpp` dummy IBL irradiance 灰度 0.25 → 0.5（aux passes 路径） |
+| `directional-light-inspector-direction-helper-missing` | P1 | ComponentSchema 加 `helperText` 字段 + `Builder::Helper(...)` API + SchemaInspector 段顶渲染；DirLight schema 加 helper 段 |
+| `multi-directional-light-semantics-undefined` G1 | P2 | DirLight schema helper 合并 + Hierarchy ⚠ chip + tooltip（与 #5 共用 overflow set） |
+| `multi-environment-component-semantics-undefined` G1 | P2 | Environment schema helper + 同款 Hierarchy ⚠ chip |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0.1-acceptance-checklist.md`
+
+**与引擎关系**：engine 侧仅一处改动（`src/render/Pipeline.cpp` dummy IBL fallback 灰度 bump，shipping 路径不动）；其他全部在 `tools/OrangeEditor/`。CMake VERSION 1.0.0 → 1.0.1。
+
+**Critical Path**：否（v1.0 已 ✅，后续走 patch 通道）
+
 ### v1.x · 长尾（按需触发，不进 v1.0 critical path）
 
 | 条目 | 依赖 |

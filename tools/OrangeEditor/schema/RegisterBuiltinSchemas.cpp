@@ -47,6 +47,8 @@ void RegisterDirectionalLightSchema()
     // schema 的 rotation 编辑）即可改光向，与 Unity / Unreal / Godot 同款
     // 工业惯例（几何状态由 Transform 唯一拥有）。
     ComponentSchemaBuilder<DL>("DirectionalLight", "Directional Light")
+        .Helper("方向由 entity 的 Transform.rotation 派生 —— 在上方 Transform 段旋转 entity 即可改光向。\n"
+                "场景中只有第一个 DirectionalLight 参与光照与阴影；其余 DirLight 会被忽略。")
         .Field<&DL::color>("color", "Color")
             .Color()
         .Field<&DL::intensity>("intensity", "Intensity")
@@ -440,6 +442,8 @@ void RegisterEnvironmentComponentSchema()
     };
 
     ComponentSchemaBuilder<EC>("Environment", "Environment")
+        .Helper("Environment 作为全局单例使用 —— 场景中只有第一个 EnvironmentComponent 生效，"
+                "其余会被忽略。建议每个 scene 至多挂一个。")
         .FieldAssetRef("cubemap", "Cubemap (HDR)", AssetKind::Texture,
                        cubemapGet, cubemapSet)
         .Field<&EC::tint>("tint", "Tint")

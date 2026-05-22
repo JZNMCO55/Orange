@@ -117,40 +117,31 @@ void ParticleEmitterGizmoPlugin::Draw(
         const glm::vec2 dirN2  = avgVel / vLen;
         const glm::vec3 dir3   = glm::vec3(dirN2.x, dirN2.y, 0.0f);
 
-        // 屏幕长度自适应（同 light gizmo 套路：投 origin + 1*X 量像素 / 单位）
+        // v1.0.1 c10：屏幕空间钉死箭头长度（详见 DirectionalLightGizmoPlugin
+        // 同节注释）。投 origin + dir3 取屏幕方向，长度 = kVelocityScreenLengthPx
+        // 像素固定，与 entity rotation / dir 方向解耦。
         const auto projOrigin = GM::ProjectWorldToScreen(origin, ctx.viewProj,
                                                          ctx.imageOrigin, ctx.imageSize);
         if (!projOrigin.has_value()) { return; }
-        const auto projPlusX = GM::ProjectWorldToScreen(
-            origin + glm::vec3(1.0f, 0.0f, 0.0f),
-            ctx.viewProj, ctx.imageOrigin, ctx.imageSize);
-        float worldUnitsPerHandle = 1.0f;
-        if (projPlusX.has_value())
-        {
-            const float pxPerUnit = glm::length(projPlusX->screen - projOrigin->screen);
-            if (pxPerUnit > 1e-3f)
-            {
-                worldUnitsPerHandle = kVelocityScreenLengthPx / pxPerUnit;
-            }
-        }
-        const glm::vec3 tipWorld = origin + dir3 * worldUnitsPerHandle;
-        const auto      projTip  = GM::ProjectWorldToScreen(tipWorld, ctx.viewProj,
-                                                            ctx.imageOrigin, ctx.imageSize);
-        if (!projTip.has_value()) { return; }
+        const auto projDirEnd = GM::ProjectWorldToScreen(
+            origin + dir3, ctx.viewProj, ctx.imageOrigin, ctx.imageSize);
+        if (!projDirEnd.has_value()) { return; }
+
+        const glm::vec2 dir2D = projDirEnd->screen - projOrigin->screen;
+        const float     len2D = glm::length(dir2D);
+        if (len2D < 1e-3f) { return; }  // dir 投影退化（朝相机），不画
+        const glm::vec2 dirN2D = dir2D / len2D;
+        const glm::vec2 tipScreen = projOrigin->screen + dirN2D * kVelocityScreenLengthPx;
 
         const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
-        const ImVec2 b{projTip->screen.x,    projTip->screen.y};
+        const ImVec2 b{tipScreen.x,          tipScreen.y};
         ctx.drawList->AddLine(a, b, kVelocityColor, 2.5f);
 
-        const glm::vec2 dir2D = projTip->screen - projOrigin->screen;
-        const float     len2D = glm::length(dir2D);
-        if (len2D < 1e-3f) { return; }
-        const glm::vec2 dirN2D(dir2D.x / len2D, dir2D.y / len2D);
         const glm::vec2 perpN(-dirN2D.y, dirN2D.x);
-        const glm::vec2 baseCtr = projTip->screen - dirN2D * kArrowHeadLengthPx;
+        const glm::vec2 baseCtr = tipScreen - dirN2D * kArrowHeadLengthPx;
         const glm::vec2 baseL   = baseCtr + perpN * kArrowHeadHalfWidthPx;
         const glm::vec2 baseR   = baseCtr - perpN * kArrowHeadHalfWidthPx;
-        ctx.drawList->AddTriangleFilled(ImVec2(projTip->screen.x, projTip->screen.y),
+        ctx.drawList->AddTriangleFilled(ImVec2(tipScreen.x, tipScreen.y),
                                         ImVec2(baseL.x, baseL.y),
                                         ImVec2(baseR.x, baseR.y),
                                         kVelocityColor);

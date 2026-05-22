@@ -7,6 +7,7 @@
 #include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
 
+#include <orange/engine/render/EnvironmentComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
@@ -59,6 +60,31 @@ void EditorRenderLayer::DrawEntityTreePanel()
         }
         if (ImGui::IsKeyPressed(kb.deleteEntity)) {
             mHost.selection.pendingDelete = mHost.selection.selectedEntity;
+        }
+    }
+
+    // v1.0.1 c3：每帧 build "singleton-style component overflow" 集合 —— Pipeline
+    // 对 DirectionalLight / EnvironmentComponent 走 first-found 路径，多余实例
+    // 静默忽略。DrawEntityNodeRecursive 查表后在 entity 行尾画 ⚠ chip + tooltip，
+    // 让用户立即看见"这条不生效"。first-found 序定义：与 Pipeline RenderScene
+    // 走的 `view.front()` 同款 EnTT view 顺序，保证 UI 标注与渲染端取舍一致。
+    mSingletonOverflowDirLight.clear();
+    mSingletonOverflowEnvironment.clear();
+    {
+        auto& regForOverflow = mHost.scene.pWorld->Registry();
+        using DL = Orange::Engine::Render::DirectionalLight;
+        using EC = Orange::Engine::Render::EnvironmentComponent;
+        bool firstDirLightSeen = false;
+        for (auto e : regForOverflow.view<DL>()) {
+            if (!firstDirLightSeen) { firstDirLightSeen = true; continue; }
+            mSingletonOverflowDirLight.push_back(
+                Orange::Engine::World::FromEntt(e));
+        }
+        bool firstEnvSeen = false;
+        for (auto e : regForOverflow.view<EC>()) {
+            if (!firstEnvSeen) { firstEnvSeen = true; continue; }
+            mSingletonOverflowEnvironment.push_back(
+                Orange::Engine::World::FromEntt(e));
         }
     }
 
@@ -338,16 +364,71 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         // 弱化避免抢主名字。SameLine + 右对齐：用 GetContentRegionAvail
         // 倒推一个 button 位置；hover 弹 tooltip 提示用右键 "Move to
         // layer >" 改归属（避免增加额外的可点击控件冲淡 tree DnD 手感）。
+        //
+        // v1.0.1 c3：layer chip 左侧追加 ⚠ warning chip ——
+        // singleton-style component（DirectionalLight / Environment）overflow
+        // 的 entity 在此显示 warning，hover 弹 tooltip 说明"不生效"原因。
         {
             const std::string_view layerId =
                 mHost.scene.partition.GetLayerOf(*mHost.scene.pWorld, entity);
             const std::string layerText{layerId};
             const ImVec2 chipSize = ImGui::CalcTextSize(layerText.c_str());
+
+            // overflow 查表 —— linear scan，N ≤ 3 完全可接受。warning
+            // tooltip 文案根据 overflow 类型分支；同一 entity 可能同时撞
+            // 两类（典型：开发者把 DirLight + Environment 都挂到同一辅助
+            // entity 上做测试），合并展示。
+            const bool overflowDirLight = std::find(
+                mSingletonOverflowDirLight.begin(),
+                mSingletonOverflowDirLight.end(), entity)
+                != mSingletonOverflowDirLight.end();
+            const bool overflowEnv = std::find(
+                mSingletonOverflowEnvironment.begin(),
+                mSingletonOverflowEnvironment.end(), entity)
+                != mSingletonOverflowEnvironment.end();
+            const bool hasWarning = overflowDirLight || overflowEnv;
+
+            const char* warnText = "(!)";
+            const ImVec2 warnSize = hasWarning
+                ? ImGui::CalcTextSize(warnText) : ImVec2{0.0f, 0.0f};
+            const float  spacing  = ImGui::GetStyle().ItemSpacing.x;
             const float  avail    = ImGui::GetContentRegionAvail().x;
-            // 仅在右侧确实有空间时画，避免极窄面板时与名字重叠
-            if (avail > chipSize.x + ImGui::GetStyle().ItemSpacing.x * 2.0f) {
-                ImGui::SameLine(ImGui::GetCursorPosX() + avail - chipSize.x
-                                - ImGui::GetStyle().ItemSpacing.x);
+            // chips 总宽 = warning（如有）+ inner spacing + layer + outer spacing。
+            const float  innerSpacing = hasWarning ? spacing : 0.0f;
+            const float  needed = warnSize.x + innerSpacing + chipSize.x + spacing;
+            // 仅在右侧确实有空间时画 chip 组，避免极窄面板时与名字重叠
+            if (avail > needed + spacing) {
+                float cursorX = ImGui::GetCursorPosX() + avail - needed;
+                if (hasWarning) {
+                    ImGui::SameLine(cursorX);
+                    // warning 用黄色而非默认 TextDisabled，让它在一片灰色
+                    // 文本中跳出；color (1.0, 0.78, 0.20) 是 Cocos Creator
+                    // / Lumix StudioApp 的 warning chip 同色系。
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                        ImVec4{1.00f, 0.78f, 0.20f, 1.0f});
+                    ImGui::TextUnformatted(warnText);
+                    ImGui::PopStyleColor();
+                    if (ImGui::IsItemHovered()) {
+                        if (overflowDirLight && overflowEnv) {
+                            ImGui::SetTooltip(
+                                "此 entity 上的 DirectionalLight 与 Environment 都不生效：\n"
+                                "  Pipeline 取 first-found 实例，多余的会被静默忽略。\n"
+                                "若想生效，请删除其他 entity 上的同名组件，或停用本 entity。");
+                        } else if (overflowDirLight) {
+                            ImGui::SetTooltip(
+                                "此 entity 的 DirectionalLight 不生效：\n"
+                                "  场景中已有另一个 DirectionalLight 作为主光（first-found）。\n"
+                                "DirLight 当前为全局单例语义；建议删除其他 DirLight 后再用本条。");
+                        } else {
+                            ImGui::SetTooltip(
+                                "此 entity 的 Environment 不生效：\n"
+                                "  场景中已有另一个 EnvironmentComponent 作为全局环境（first-found）。\n"
+                                "Environment 当前为全局单例语义；建议每个 scene 至多挂一个。");
+                        }
+                    }
+                    cursorX += warnSize.x + innerSpacing;
+                }
+                ImGui::SameLine(cursorX);
                 ImGui::TextDisabled("%s", layerText.c_str());
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("layer: %s\n右键 → Move to layer 改归属",

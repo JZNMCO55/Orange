@@ -1,6 +1,6 @@
 #include "MaterialAssetInspectorPlugin.h"
 
-#include "../DemoWorld.h"
+#include "../BuiltinAssets.h"  // BuildNamedMaterialInstances（v1.0.1 c11 拆出）
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../MaterialFileIO.h"

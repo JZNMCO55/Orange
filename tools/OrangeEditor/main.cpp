@@ -71,6 +71,7 @@
 #include <orange/engine/scene/WorldPartition.h>
 
 // 编辑器内部模块（拆分后的本地 header；不进 include/ 公共面）
+#include "BuiltinAssets.h"
 #include "DemoWorld.h"
 #include "EditorHost.h"
 #include "EditorRenderLayer.h"
@@ -176,8 +177,11 @@ void ChdirToRepoRoot()
 //   EditorHierarchy       → EditorHierarchy.{h,cpp}
 //   VulkanLoaderShim      → VulkanLoaderShim.{h,cpp}（含 ImguiVulkanLoader /
 //                           Make/DestroyImguiDescriptorPool / ShowSceneFileDialog）
-//   DemoWorld             → DemoWorld.{h,cpp}（mesh 工厂 / InitializeEditorAssets
-//                           / SeedDemoWorld）
+//   BuiltinAssets         → BuiltinAssets.{h,cpp}（mesh 工厂 / InitializeEditorAssets
+//                           / BuildNamedMaterialInstances —— v1.0.1 c11 从
+//                           DemoWorld 拆出，与 demo 内容职责分离）
+//   DemoWorld             → DemoWorld.{h,cpp}（SeedDemoWorld /
+//                           SeedPbrShowcaseWorld 仅 demo 场景填充）
 //   EditorCameraControl   → EditorCameraControl.{h,cpp}
 //   EditorWidgets         → EditorWidgets.{h,cpp}（DragVec3Colored）
 //   EditorRenderLayer     → EditorRenderLayer.{h,cpp} + panels/*.cpp（按面板

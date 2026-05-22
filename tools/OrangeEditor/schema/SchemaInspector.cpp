@@ -876,6 +876,28 @@ void DrawComponentSchemaSection(EditorHost&                  host,
 
     if (open)
     {
+        // 段顶 helper 文案 —— schema.helperText 非空时按行画 TextDisabled +
+        // Bullet。位置：CollapsingHeader 展开后、plugin 调度 / properties 渲染
+        // 之前。无论 plugin 是否接管，都先把 helper 暴露给 UI 用户；plugin 想
+        // 完全自管段时 schema 不设 helperText 即可。
+        if (schema.helperText != nullptr && schema.helperText[0] != '\0')
+        {
+            const char* p = schema.helperText;
+            while (*p != '\0')
+            {
+                const char* lineEnd = p;
+                while (*lineEnd != '\0' && *lineEnd != '\n') { ++lineEnd; }
+                ImGui::Bullet();
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::TextWrapped("%.*s", static_cast<int>(lineEnd - p), p);
+                ImGui::PopStyleColor();
+                p = (*lineEnd == '\n') ? lineEnd + 1 : lineEnd;
+            }
+            ImGui::Spacing();
+        }
+
         // Plugin 调度：遍历 host.inspectorPlugins，第一条 CanHandle == true 接
         // 管本 component 段。语义按 IEditorInspectorPlugin.h "调用约定" 节：
         //   * ParseBegin 返 true → 跳过默认 properties 渲染（plugin 自渲染整段）

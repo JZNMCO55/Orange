@@ -1830,17 +1830,23 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             }
             std::memset(mapped, 0, 64);
 #if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
-            // GAP-2026-05-19 editor-aux-passes：dummy IBL ambient = 0.25 灰
-            // 是"编辑器审美决定"——让 PBR 物体在没 EnvironmentComponent 时
-            // 显示"灰白塑料"（Cocos / Godot 默认 cube 观感）。shipping 构建
-            // 显式关掉本宏 → ambient 退回 (0,0,0)，PBR 物体仅 direct light，
-            // engine 默认中性。0x3400 = 0.25 half；0x3C00 = 1.0 half。LE
-            // 平台直写 uint16；MSVC + RTX 5070 Ti 都是 LE，需要 BE 平台时
-            // 再换 byteswap。
+            // GAP-2026-05-22 editor-default-ibl-missing-causes-black-pbr-faces：
+            // dummy IBL ambient = 0.5 灰（v1.0.1 c5 由 0.25 → 0.5 ）—— 编辑器
+            // 路径下未挂 EnvironmentComponent 时给 PBR 暗面 ~50% baseColor 的
+            // ambient 暖橙过渡，避免 "cube 暗面全黑/像透明" UX 陷阱。0.25
+            // 实测验收时仍偏暗（暗面 ~25% baseColor，对零基础用户判定为
+            // "黑"）。
+            //
+            // shipping 构建（ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF）仍走
+            // ambient = (0,0,0) 路径，engine 默认中性原则不动 —— 见
+            // GAP-2026-05-19-editor-aux-passes-in-engine-pipeline 处理记录。
+            //
+            // 0x3800 = 0.5 half；0x3C00 = 1.0 half。LE 平台直写 uint16；MSVC
+            // + RTX 5070 Ti 都是 LE，需要 BE 平台时再换 byteswap。
             const std::uint16_t halfPx[4] = {
-                std::uint16_t{0x3400},   // R = 0.25
-                std::uint16_t{0x3400},   // G = 0.25
-                std::uint16_t{0x3400},   // B = 0.25
+                std::uint16_t{0x3800},   // R = 0.5
+                std::uint16_t{0x3800},   // G = 0.5
+                std::uint16_t{0x3800},   // B = 0.5
                 std::uint16_t{0x3C00},   // A = 1.0
             };
             std::memcpy(mapped, halfPx, 8);

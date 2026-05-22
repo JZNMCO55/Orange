@@ -464,8 +464,9 @@ case SceneOp::New: {
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P1（Friction，不阻塞 v1.0）** —— 流程"能走通"（用户经引导后能正确操作），仅缺 UX 自发现性
-- **归属**：OrangeEditor v1.x UX 改进 batch
+- **关闭**：2026-05-22（v1.0.1 batch G1 落地，详见"处理记录"段）
+- **优先级**：~~**P1（Friction，不阻塞 v1.0）**~~ → 已修
+- **归属**：~~OrangeEditor v1.x UX 改进 batch~~ → v1.0.1 落地
 - **关联**：v1.0 验收脚本段 B 第 2 步；脚本本身也需修订（按当前 schema 改成"选 Sun → Transform → rotation"）
 
 ---
@@ -516,6 +517,124 @@ case SceneOp::New: {
 - **合并去向**：UX 自发现性问题归并到 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] G2 —— Transform.rotation 字段对带 DirectionalLight 的 entity 加 tooltip 说明"position 不影响光向"
 - **优先级**：原 P0 撤销 → 合并条目维持 P1，不阻塞 v1.0
 - **关联**：v1.0 验收脚本段 B / 段 C；[[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]]
+
+---
+
+## GAP-2026-05-22-editor-material-create-and-thumbnail-missing
+
+- **发现方**：用户 v1.0 验收后试搭场景观察（"想新建一个材质 / 想看 Asset 浏览器里材质长什么样"）
+- **发现日期**：2026-05-22
+- **一句话定性**：OrangeEditor 缺失两个材质工作流核心能力 —— (a) **从零创建新材质**（当前只能基于已有 `.material` 文件修改或挑选，没有"New Material"入口）+ (b) **材质资源缩略图**（推荐球体 / 圆形预览，Asset 浏览器只有 [MAT] icon + 文件名，无视觉识别，N+ 个材质难辨）
+
+### 触发场景
+
+- 用户搭场景时想"给这个 Cube 用一个新颜色 / 新粗糙度的材质" → 发现只能：
+  1. 去 Asset 浏览器找一个相近的 `.material`
+  2. 在 Inspector 修改 instance override 字段
+  3. **没有"另存为 / 新建材质"路径** —— 想要永久保存修改成新材质资源无入口
+- 用户在 Asset 浏览器看 v1.0 demo scene 已有 50+ 个 `.material` 文件，**只能靠文件名猜哪个长什么样** → 想换材质必须每个 Pick 试，反复来回
+- 工业惯例对照：Unity / Unreal / Godot / Lumix / Cocos Creator 全部支持 Asset Browser 右键 → Create → Material + 球体 thumbnail，**全行业标配**
+
+### 证据
+
+- `grep "New Material|Create Material" tools/OrangeEditor/` 全仓 0 匹配 —— 无任何菜单项 / 按钮 / 右键入口创建新材质
+- `MaterialAssetInspectorPlugin` 存在但仅渲染 Inspector 段（字段编辑），不渲染缩略图；Asset 浏览器的 `.material` 文件以 `[MAT]` 文本 icon 显示
+- 关联前置已落地能力（这个 GAP 可基于这些扩展）：
+  - GAP-2026-05-16-builtin-asset-disk-serialization：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径 → 写入 `.material` 文件路径已通
+  - GAP-2026-05-16-material-system-enumerate-and-instance-overrides：MaterialSystem::GetTemplateNames + MaterialInstance enumerate override API + .material schema v1.1 → 新建材质所需的"枚举模板"和"写 override"能力已通
+  - GAP-2026-05-14-renderable-material-instance-round-trip：MaterialInstance 命名 round-trip 已通
+
+### 缺什么（高层概括，技术方案留独立 议题讨论）
+
+#### G1 · "New Material" 入口
+
+- Asset 浏览器右键 → Create → Material（Unity / Unreal / Lumix 同款）
+- 弹窗选 template（pbr / unlit / dissolve / 等已注册 MaterialSystem 模板）+ 输入文件名 + 保存目录
+- 写出 `.material` 文件 → AssetRegistry 自动刷新
+
+#### G2 · 材质缩略图（球体预览）
+
+- 每个 `.material` 在 Asset 浏览器显示 64×64 / 96×96 缩略图，材质应用到内置球体 mesh 渲染
+- 缩略图按需 lazy bake（Asset 浏览器滚动到视口才烘培），结果缓存到磁盘（`.material.thumb.png` 或集中 cache）
+- 材质字段改动 → 缩略图自动 invalidate + 重 bake
+
+#### G3 ·（可选）"Save Inspector overrides as new material"
+
+- 用户在 Inspector 改完 instance override 后右键"Save As New Material..." → 把当前 overrides 落盘成新 `.material` 资源
+- 比 G1 流程更顺手（直接从已有材质 derive）
+
+### 期望验收
+
+- 美术 / 关卡设计师**不写代码**完成"复制 demo 材质 → 改颜色 → 保存为新材质 → 应用到不同 entity"完整闭环
+- Asset 浏览器视觉识别：滚动浏览 50+ 个材质，可以**眼看缩略图就识别**，不必每个 Pick 试
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P1（Friction，不阻塞 v1.0 ✅ 但严重影响美术工作流）** —— v1.0 验收脚本只需用现成材质即可跑通 → 不阻塞 ✅；但作为"美术 / 关卡设计师不写代码完成日常工作"目标的关键短板，**比其它 v1.x friction 优先级稍高**（这是用户**主动构思场景**时立刻撞上的痛点，比 dock layout / multi-DirLight UI 暴露面更宽）
+- **归属**：OrangeEditor v1.x material 子模式 milestone（按 `docs/editor-roadmap.md` 历史，v0.5 是 Asset 浏览器 + Material 子模式 ✅，本 GAP 是 v0.5 之上的 polish + complete；建议作为**专门议题** session 讨论技术方案细节后立项）
+- **技术方案讨论 placeholder**：thumbnail 烘培走哪条 Pipeline 路径 / 缓存策略 / 触发器；New Material 模板选择 UX / 文件保存目录约定；G3 vs G1 优先级；**留独立议题讨论**（用户原话："这个可以之后做一个议题来讨论怎么做"）
+- **关联**：[[GAP-2026-05-16-builtin-asset-disk-serialization]] / [[GAP-2026-05-16-material-system-enumerate-and-instance-overrides]] / [[GAP-2026-05-14-renderable-material-instance-round-trip]]（前置已落地基础）
+
+---
+
+## GAP-2026-05-22-editor-dcc-import-pipeline-missing
+
+- **发现方**：用户 v1.0 验收后实测推断（"还有导入模型文件的能力，贴图的能力"）
+- **发现日期**：2026-05-22
+- **一句话定性**：OrangeEditor 缺失**外部 DCC 资产导入流水线** —— 用户手上的 `.obj / .fbx / .gltf` 模型 / `.png / .jpg` 贴图无法通过编辑器导入并入 AssetRegistry。当前所有 mesh 都是 builtin（plane / cube / sphere）+ `DemoWorld` 工厂生成，所有 texture 走 builtin/内嵌路径；用户不能拿现成美术资产搭场景，自有美术工作流被锁死
+
+### 触发场景
+
+- 用户从 PolyHaven / Sketchfab / 自家 Blender 导出 `.obj` 模型想用 → **无入口**（菜单没有 File→Import，Asset 浏览器拖入无反应）
+- 用户有现成 `.png` 漫反射贴图想给材质用 → 引擎侧 `TextureLoader` 能加载，但**编辑器侧无导入 GUI**，用户没法把贴图入 AssetRegistry
+- 工业惯例对照：Unity / Unreal / Godot / Lumix / Cocos Creator 全部支持
+  - 拖外部文件到 Asset 浏览器 → 自动 import + 转引擎自有格式
+  - File → Import Asset... 菜单
+  - 多种格式 importer（mesh: obj/fbx/gltf/dae/usd, texture: png/jpg/exr/dds/tga）
+
+### 证据
+
+- `grep "Import Mesh|Import Model" tools/OrangeEditor/` 全仓 0 匹配 —— 无任何导入入口
+- `grep ".obj|.fbx|.gltf" tools/OrangeEditor/` 仅匹配 2 个文件（EditorRenderLayer.cpp / schema/PropertyType.h），具体看是字符串提及而非实际处理
+- `src/asset/TextureLoader.cpp` 使用 stb_image 支持 PNG / JPG / HDR 加载（引擎侧能读），但编辑器 Asset 浏览器仅识别已有 AssetRegistry 内项目，无外部文件 → 资产 import 路径
+- `Resources/Models/` 64 文件 D（v0.6/v0.7 验收 wrap-up commit 890d2ee 清理） + `assets/Models/` 110MB gitignore 化（commit 890d2ee `.gitignore` 加规则）= 历史 demo 美术资产入仓尝试已退场，但**没有 import 工作流补位** → 用户拿任意外部资产仍无路径入仓
+
+### 缺什么（高层概括，技术方案留独立议题讨论）
+
+#### G1 · Mesh import（.obj 起步，.gltf / .fbx 后续）
+
+- File → Import Mesh... 菜单 / Asset 浏览器拖入 / 右键 Import
+- 选 .obj 文件 → importer 解析顶点 + 法线 + UV + 三角面 → 写出引擎自有 `.mesh` 文件（v3 schema 已含 normals）→ AssetRegistry 自动刷新
+- **格式优先级建议**：.obj（最简单、覆盖 80% 入门用例，无 skeleton/animation）→ .gltf（PBR 标准、跨 DCC 兼容、开源）→ .fbx（最广覆盖但 SDK 复杂，留长期）
+- 涉及 vendor 选型：tinyobjloader / cgltf / OpenFBX 等
+- 复杂度：动画 / 骨骼 / 多材质 / 多 sub-mesh 拆分都是后续
+
+#### G2 · Texture import（.png / .jpg / .tga 起步，.exr / .dds / .hdr 后续）
+
+- File → Import Texture... 菜单 / Asset 浏览器拖入 / 右键 Import
+- 选外部图 → 入 AssetRegistry → 编辑器 Inspector 可 Pick 给材质 BaseColor / Normal / Roughness / etc 通道
+- 引擎侧 `TextureLoader` 已支持 PNG/JPG/HDR（PolyHaven 入口已通）；**主要工作在编辑器 GUI**
+- 涉及决策：是否预生成 mipmap / 是否压缩成 .ktx / BC7 / cwd 内拷贝 vs in-place 引用 / 等
+
+#### G3 ·（可选，更长期）批量导入 + 资产管线
+
+- 拖文件夹 / 多文件批量 import
+- 资产管线 hash + 增量重 import
+- 类似 Unity AssetPostprocessor 风格 hook
+
+### 期望验收
+
+- 美术 / 关卡设计师不写代码完成：从 Blender 导出 `.obj` → 拖到 Asset 浏览器 → 自动 import → 拖到 Hierarchy → 应用现有 / 新建材质 → 渲染正确
+- 同款流程对 .png 贴图：拖入 → 入 AssetRegistry → Pick 给材质 → viewport 实时反映
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P1（Friction，不阻塞 v1.0 ✅ 但锁死美术工作流上游）** —— v1.0 验收脚本用 builtin mesh + 内嵌材质 → 不阻塞 ✅；但作为"美术 / 关卡设计师不写代码完成日常工作"目标**最关键的入口能力**（连资产都进不来就谈不上日常工作），与 [[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] 同属 v1.x 美术工作流补完一组
+- **归属**：OrangeEditor v1.x 或独立 "DCC import milestone"（按 `docs/editor-roadmap.md` 没有 import 相关 milestone，需新增议题立项；与主仓 Phase 9 资产管线远期方向有关联但**不必等 Phase 9** —— 最小可行 .obj + .png import 可在 v1.x 内独立完成）
+- **技术方案讨论 placeholder**：mesh importer vendor 选型（tinyobjloader / cgltf / etc）/ texture mipmap / 压缩策略 / 外部资产物理路径 vs 入仓 copy / 资产管线 hash + 增量；**留独立议题讨论**
+- **关联**：[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]]（同属美术工作流补完 batch，建议同议题或姐妹议题）/ 主仓 Phase 9 资产管线远期方向（前置但**不必等**）
 
 ---
 
@@ -645,9 +764,10 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P2（Friction，不阻塞 v1.0 ✅）** —— 用户能挂能改但语义未定义；与 [[GAP-2026-05-22-multi-directional-light-semantics-undefined]] 完全同档
-- **归属**：G1 留 v1.x UX batch（强烈建议**与 multi-DirLight G1 一次性 batch 修**，schema helper / Hierarchy warning 改动可重用）；G2 待 reflection probe milestone 启动时再做
-- **关联**：[[GAP-2026-05-22-multi-directional-light-semantics-undefined]]（孪生根因）/ [[GAP-2026-05-19-editor-environment-component-wiring]]（前置基础）/ `src/render/Pipeline.cpp:3166-3168`
+- **关闭**：2026-05-22（G1 在 v1.0.1 batch 落地，详见"处理记录"段；G2 留 reflection probe milestone）
+- **优先级**：~~**P2（Friction，不阻塞 v1.0 ✅）**~~ → G1 已修
+- **归属**：~~G1 留 v1.x UX batch~~ → G1 v1.0.1 落地（与 multi-DirLight G1 同 batch 共用 Hierarchy warning 路径，预期 batch 收益验证）；G2 待 reflection probe milestone
+- **关联**：[[GAP-2026-05-22-multi-directional-light-semantics-undefined]]（孪生根因，同 batch 修）/ [[GAP-2026-05-19-editor-environment-component-wiring]]（前置基础）/ `src/render/Pipeline.cpp:3166-3168`
 
 ---
 
@@ -697,8 +817,9 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P1（Friction，不阻塞 v1.0 ✅）** —— 用户能感受到明显视觉问题（"颜色不对" / "cube 像透明"），但**有 workaround**（挂 EnvironmentComponent + .hdr），且不影响编辑器功能可用性
-- **归属**：OrangeEditor v1.0.1 / v1.x patch（与 [[GAP-2026-05-22-editor-dock-layout-collapses-on-restore]] + 之前 4 个 v1.x P1/P2 一起打包）
+- **关闭**：2026-05-22（v1.0.1 batch G1 落地，详见"处理记录"段）
+- **优先级**：~~**P1（Friction，不阻塞 v1.0 ✅）**~~ → 已修
+- **归属**：~~OrangeEditor v1.0.1 / v1.x patch~~ → v1.0.1 落地
 - **关联**：[[GAP-2026-05-19-editor-aux-passes-in-engine-pipeline]] / [[GAP-2026-05-19-editor-environment-component-wiring]]
 - **临时绕过**：用户手动给场景挂 EnvironmentComponent + 一个 .hdr（参 `assets/environments/README.md` PolyHaven CC0 资源）
 
@@ -734,9 +855,10 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P1（Friction，不阻塞 v1.0 验收已通过的 ✅）** —— 编辑器在 maximize 状态下完整可用，restore 路径触发的 layout 崩坏属可工作绕过（一直 maximize 用 / 或调好 layout 后不动）；但作为 v1.0 stable 后的明显 UX bug，应在 OrangeEditor v1.0.1 / v1.x patch milestone 修
-- **归属**：OrangeEditor v1.0.1 patch（与 v4 logo 切换后的其它 polish 一起做）
-- **临时绕过**：保持 OrangeEditor 一直 maximize 使用；不要主动 restore
+- **关闭**：2026-05-22（v1.0.1 batch 落地，详见"处理记录"段）
+- **优先级**：~~**P1（Friction，不阻塞 v1.0 验收已通过的 ✅）**~~ → 已修
+- **归属**：~~OrangeEditor v1.0.1 patch~~ → v1.0.1 落地
+- **临时绕过**：~~保持 OrangeEditor 一直 maximize 使用；不要主动 restore~~（v1.0.1 起还原不再坍塌）
 
 ---
 
@@ -805,9 +927,79 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P2（Friction，不阻塞 v1.0）** —— v1.0 验收脚本只用 1 个 Sun，单 DirLight 流程完整 work；多 DirLight 是 polish / 美术工作流问题
-- **归属**：G1 留 v1.x UX batch（与 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] 同 batch 落更合算）；G2 待第一款游戏 stylized 美术真需要 fill light 时再启动
+- **关闭**：2026-05-22（G1 在 v1.0.1 batch 落地，详见"处理记录"段；G2 留 v2.x）
+- **优先级**：~~**P2（Friction，不阻塞 v1.0）**~~ → G1 已修
+- **归属**：~~G1 留 v1.x UX batch~~ → G1 v1.0.1 落地；G2 等第一款游戏 stylized 美术真需要 fill light 再启动
 - **关联**：[[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] / `src/render/Pipeline.cpp:3153` `:4920`
+
+---
+
+## GAP-2026-05-22-samples-cube-mesh-winding-bug
+
+- **发现方**：v1.0.1 cube winding 修复后 OrangeEngine 仓全 mesh 扫描
+- **发现日期**：2026-05-22
+- **一句话定性**：8 个 sample 各自的 `MakeCubeMesh` 沿用过期的 "world-CW per triangle → Y-flip projection → NDC-CCW" 注释约定，winding 实际是 world-CW；但 Pipeline 当前按 "world-CCW = front" 渲染（v1.0.1 编辑器 cube 修复后用户视觉验证已证实），所以这 8 个 sample 的 cube 都把朝外面 culling 掉、只渲染内壁
+
+### 触发场景
+
+- 跑 `samples/04_3d_mesh` / `04_3d_mesh_with_bloom` / `09_vfx_demo` / `10_thirty_seconds_demo` / `11_save_load_demo` / `12_layer_partition_demo` / `13_pbr_direct` / `14_pbr_ibl` / `15_debug_draw_minimal` 任一个，cube 渲染走 PBR / toon / textured_mesh / rim_light / dissolve / emissive 任何材质（主 pass FrontFace=CCW + CullMode=Back）都把朝外面剔除
+- 视觉症状同 [[GAP-2026-05-22-cube-mesh-back-face-bleed-through]]：穿过 cube 正面看到内壁
+- v1.0 验收 demo.scene.json 用 PBR showcase 24 球阵，不撞 cube，sample 内的 bug 未暴露
+
+### 证据
+
+`samples/04_3d_mesh/main.cpp:145` 注释：
+> "(0, 2, 1, 0, 3, 2) per face：world-CW per triangle，经 Y-flip projection 后变 NDC-CCW = Vulkan 默认 front-facing。"
+
+但实测（v1.0.1 cube fix 后用户视觉验证）：`tools/OrangeEditor/DemoWorld.cpp` 内 cube 改为 CCW `(0, 1, 2, 0, 2, 3)` 视觉变正常 → Pipeline 实际按 world-CCW 走 front face。
+8 个 sample 都基于这条过期注释复制粘贴同款 CW winding（grep `MakeCubeMesh` 共 8 处）。
+
+### 缺什么
+
+- 8 处 `samples/*/main.cpp` 内 `MakeCubeMesh` 的 indices 从 CW `(0, 2, 1, 0, 3, 2)` 改为 CCW `(0, 1, 2, 0, 2, 3)`
+- 删除 / 修订 sample 04 line 145 那条过期注释（误导后续仿写）
+- 每个 sample 改后跑一遍视觉确认 cube 朝外面正确（不再"穿透"）
+
+### 期望验收
+
+- 跑 sample 04 / 14 等任一带 cube 的 demo，从相机视角看 cube 是实心 baseColor 不再看到内壁
+- demo 视觉无回归（其它 mesh / material 不动）
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P2（技术债，不阻塞编辑器流程）** —— sample 是 API 使用示范、不在 critical path；编辑器路径已在 v1.0.1 关闭根因（DemoWorld cube）
+- **归属**：未拍板；候选 v1.0.2 patch（与编辑器 cube fix 同根因，sample 收尾顺手做）或独立 sample sweep session
+- **关联**：[[GAP-2026-05-22-cube-mesh-back-face-bleed-through]]（编辑器路径同款已修）/ `samples/04_3d_mesh/main.cpp:145` 过期注释 / Pipeline.cpp:770-771
+
+---
+
+## GAP-2026-05-22-cube-mesh-back-face-bleed-through
+
+- **发现方**：用户 v1.0.1 试搭场景验收（用 PBR 材质的 cube 出现"穿过正面看到 cube 内部背面"视觉）
+- **发现日期**：2026-05-22
+- **一句话定性**：`MakeCubeMesh`（`tools/OrangeEditor/DemoWorld.cpp:196`）的 triangle index 顺序是 CW（从 face 外侧朝内看顺时针），与 Pipeline 主 pass 的 `FrontFace = CounterClockwise + CullMode = Back` 约定不符；6 个 face 全部被错误剔除"朝外的面"，渲染只剩朝内的内壁
+
+### 触发场景
+
+- v1.0 验收 demo.scene.json 用 PBR showcase 24 球阵，未撞上 cube；用户 v1.0.1 后用 v1.0 验收脚本段 A 流程自搭"Sun + Floor + Cube1/2/3 + Sphere"场景立刻撞上
+- v1.0.1 之前 dummy IBL 0.25 灰让 cube 整体偏暗，"穿透看内壁"被视觉解读成"暗面而已"
+- v1.0.1 c5 把 IBL fallback 提到 0.5 后内壁亮度提高，"从正面看进 cube 看到对面内壁" 特征立显
+
+### 证据
+
+`tools/OrangeEditor/DemoWorld.cpp:196` 原 `indices.push_back(base+0); push(base+2); push(base+1);` 是 a-c-b。以 +X face 为例：
+- a = (h,-h, h), c = (h, h,-h), b = (h,-h,-h)
+- 从 +X 外侧朝 -X 看：a=右上 / c=左下 / b=右下 → 三角形是 **顺时针（CW）**
+- Vulkan FrontFace = CCW + CullMode = Back → CW 三角形被识别为 back face → **culled**
+- 渲染只剩 winding 反向那一面（cube 内壁）
+
+### 状态
+
+- **登记**：2026-05-22
+- **关闭**：2026-05-22（v1.0.1 batch 同 session 顺手修，详见"处理记录"段）
+- **优先级**：**P0（v1.0.1 期暴露的严重视觉 bug）** —— 与 v1.0.1 其他 P1/P2 friction 同 batch 落地
+- **归属**：v1.0.1 friction patch batch
 
 ---
 
@@ -854,3 +1046,13 @@ src/render/
 - **GAP-2026-05-17-mesh-vertex-normals**（2026-05-17 落地）：MeshAsset 加 VertexNormal3 + helper（ComputeFlat/SmoothNormalsFromTriangles）+ MeshLoader v2 → v3 schema bump（hasNormals + normals 段，Load 兼容 v1/v2/v3 + fallback 补算）+ Pipeline InterleavedVertex stride 20→32 加 normal attr + 6 内置 vert shader + 1 sample shader 加 inNormal（Path A 单 VID）+ toon/rim/fresnel frag 切 vNormal 替换 dFdx fallback + 8 sample/DemoWorld mesh 工厂调 ComputeSmoothNormalsFromTriangles + 顺手修 AssetRegistryTest 陈旧 kSupportedVersion 常量引用。ctest 全 43 测试通过。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/asset/MeshAsset.h` / `include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshAsset.cpp`（新增） / `src/asset/MeshLoader.cpp` / `src/render/Pipeline.cpp` / `src/render/builtin_shaders/{textured_mesh,toon,rim_light,dissolve,emissive,shadow_caster}.vert.glsl` / `src/render/builtin_shaders/{toon,rim_light}.frag.glsl` / `CMakeLists.txt` / `samples/0[3-9]*/main.cpp` / `samples/1[0-2]*/main.cpp` / `samples/08_custom_shader/shaders/fresnel.{vert,frag}.glsl` / `tools/OrangeEditor/DemoWorld.cpp` / `tests/asset/AssetRegistryTest.cpp`
 - **GAP-2026-05-22-new-scene-actually-seeds-demo**（2026-05-22 落地，G1 only）：`tools/OrangeEditor/EditorRenderLayer.cpp::ApplyPendingSceneOp` `SceneOp::New` 分支移除 `SeedDemoWorld(mHost)` 调用 —— New Scene 后 World 真正空，Hierarchy 不再含 13 个 demo placeholder entity。同步删 `#include "DemoWorld.h"`（main.cpp 启动期 fallback + Reset to Demo 候选保留 DemoWorld 文件不动）；log message "new scene (seeded demo world)" → "new empty scene"；注释直接说明设计取舍（v1.0 验收脚本段 A 第 2 步首例 Critical fail，程序员便利与零基础用户预期冲突由后者胜）。G2（独立 "Reset to Demo Scene" 菜单项）按当时评估"未必需要"未做，真要演示走 `Open Scene → demo.scene.json` 即可。关键改动文件：`tools/OrangeEditor/EditorRenderLayer.cpp`
 - **GAP-2026-05-22-shadow-not-tracking-directional-light-direction**（2026-05-22 撤回）：用户现场验证 —— 改 Sun.Transform.rotation 阴影正确跟随；改 Sun.Transform.position 阴影不变（DirectionalLight 数学正确行为，参 `src/render/Pipeline.cpp:3164` `:4931` 每帧 live 派生）。**非 bug，是 UX 误解**——位置无关性未通过 UI 暴露给零基础用户。合并到 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] G2（Transform.rotation 字段对带 DirectionalLight 的 entity 加 tooltip）。无代码改动。
+- **v1.0.1 friction patch batch**（2026-05-22 落地；5 个 GAP 同 batch 关闭）：v1.0 ✅ 后第一个 patch milestone，按 [[feedback-post-v1-versioning]] 走 v1.0.xx 节奏。验收文档 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0.1-acceptance-checklist.md`。OrangeEditor CMake VERSION 1.0.0 → 1.0.1。
+  - **GAP-2026-05-22-directional-light-inspector-direction-helper-missing** ✅ —— ComponentSchema 加 `helperText` 字段（`tools/OrangeEditor/schema/ComponentSchema.h`）+ `ComponentSchemaBuilder::Helper(text)` API（`schema/ComponentSchemaRegistry.h`）+ SchemaInspector 在 CollapsingHeader 展开后、plugin 调度 / properties 渲染之前按行渲染 TextDisabled + Bullet（`schema/SchemaInspector.cpp`）。DirectionalLight schema 加 helper 段（与 multi-DirLight G1 合并一段文案，复用 helper 基础设施）
+  - **GAP-2026-05-22-multi-directional-light-semantics-undefined** G1 ✅ —— DirectionalLight schema helper "场景中只有第一个 DirectionalLight 参与..."；EditorRenderLayer 加 `mSingletonOverflowDirLight` 字段，EntityTreePanel.cpp 入口 build first-found 后的 overflow set，DrawEntityNodeRecursive 行尾 layer chip 左侧画黄色 `(!)` 标记 + tooltip 说明不生效原因
+  - **GAP-2026-05-22-multi-environment-component-semantics-undefined** G1 ✅ —— Environment schema 加 helper "Environment 作为全局单例使用..."；同款 overflow set + warning chip 路径复用（`mSingletonOverflowEnvironment`），同一 entity 同时撞两类 overflow 时 tooltip 合并展示
+  - **GAP-2026-05-22-editor-dock-layout-collapses-on-restore** ✅ —— `EditorRenderLayer::OnUpdate` 内 `DockSpaceOverViewport` 之后、`BuildDefaultLayoutOnce` 之前加 viewport-size 比对（`mLastViewportSize` 字段记录上帧尺寸）。**c4 初版**仅检测任一方向收缩 > 25%。**c8 补丁**：`BuildDefaultLayoutOnce` 内 `DockBuilderSetNodeSize` 入参从 `viewport->Size` 改为 `viewport->WorkSize`（Size 包含 menu/toolbar 高度，子节点按比例算出来的 SizeRef 超过 dock 实际容器，导致 Entity Tree / Inspector 重建后被挤窄无法回到 default 20%/25% 比例）。**c9 补丁**：判断对称化为 `|ratio - 1| > 0.25`（同时检测收缩 *和* 扩大）—— restore → maximize 路径下 viewport 扩大但 dock 子节点 SizeRef 仍按 restore 时的小像素维持，大画布里 panel 显窄、底部 Assets 被 work area 裁掉；对称判断后任一方向跳变 ±25% 都重建，连续小幅拖边界仍不触发
+  - **GAP-2026-05-22-editor-default-ibl-missing-causes-black-pbr-faces** ✅ —— `src/render/Pipeline.cpp` 中 `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=ON` 路径下 dummy IBL irradiance 灰度 0.25 (0x3400) → 0.5 (0x3800)；未挂 EnvironmentComponent 时 PBR 暗面获得 ~50% baseColor 暗橙过渡，不再判定为"全黑"。shipping 路径（aux passes OFF）仍 (0,0,0)，engine 默认中性原则不动
+  - **GAP-2026-05-22-cube-mesh-back-face-bleed-through** ✅（c7 顺手修）—— `tools/OrangeEditor/DemoWorld.cpp` `MakeCubeMesh` 内 triangle index 顺序从 CW `(0,2,1)+(0,3,2)` 反转为 CCW `(0,1,2)+(0,2,3)`，与 Pipeline 主 pass `FrontFace = CCW + CullMode = Back` 约定一致。删除 disk `assets/meshes/cube.mesh` + `build/bin/Debug/assets/meshes/cube.mesh` 让启动期 lazy bake 重新生成（与 v3 schema bump 后 normals 段同款 invalidate 路径）。v1.0.1 c5 IBL bump 是暴露这个 pre-existing winding bug 的导火索，但根因独立
+  - **gizmo 长度随 entity rotation 波动**（c10 顺手修，非 GAP 登记）—— DirectionalLight / ParticleEmitter gizmo 的旧实现用"投 origin + 1*X 量像素 / 单位"再 `tipWorld = origin + dirN * worldUnitsPerHandle` 反推世界长度。perspective 投影下"沿 +X 1 单位的 px"≠"沿 dirN 1 单位的 px"，dirN 朝/背相机时投影几乎为 0 → 屏幕长度随 dir 方向剧烈波动，entity 旋转时 gizmo 长度肉眼可见变化。修法：直接在屏幕空间钉死箭头长度 —— 投 `origin + dirN` 取归一化屏幕方向，`tipScreen = projOrigin + dirN2D * kHandleScreenLengthPx`，长度恒定与 dir 方向解耦。dir 投影退化时不画箭头（朝/背相机一面无法表达方向，后续可补 ⊙/⊗ icon，本 patch 范围外）。涉及文件：`tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `ParticleEmitterGizmoPlugin.cpp`
+  - **DemoWorld → BuiltinAssets 拆分**（c11 架构归位，非 GAP 登记）—— `tools/OrangeEditor/DemoWorld.{h,cpp}` 原杂糅 3 层职责：(1) builtin mesh 工厂 (Make{Plane,Cube,Sphere}Mesh) (2) 启动期资产 bootstrap (InitializeEditorAssets + BeepWav helpers + lazy bake .mesh/.material/.wav) (3) demo 场景填充 (SeedDemoWorld / SeedPbrShowcaseWorld)。前 2 类是"编辑器永远需要的"基础设施，命名却挂"Demo"令读者误以为可拿掉；v1.0.1 cube winding 修复期间已被该命名误导一次。修法：新增 `BuiltinAssets.{h,cpp}` 承接 mesh 工厂 + InitializeEditorAssets + BuildNamedMaterialInstances + BeepWav helpers；DemoWorld 仅保留 Seed 函数（命名与内容真正对齐）。零行为变化（move 函数 + update includes + CMakeLists 加 BuiltinAssets.cpp，调用点 `main.cpp` / `EditorRenderLayer.cpp` / `MaterialAssetInspectorPlugin.cpp` 加 `#include "BuiltinAssets.h"`）。`InitializeEditorAssets` 内 SeedDemoWorld 不再被启动期默认调用（v1.0 验收期间已落地），所以拆出后 DemoWorld 真正只在 `File → Reset to Demo Scene` 等候选入口被消费
+  - 关键改动文件：`tools/OrangeEditor/schema/ComponentSchema.h` / `schema/ComponentSchemaRegistry.h` / `schema/SchemaInspector.cpp` / `schema/RegisterBuiltinSchemas.cpp` / `EditorRenderLayer.h` / `EditorRenderLayer.cpp` / `panels/EntityTreePanel.cpp` / `DemoWorld.cpp`（cube winding 修）/ `CMakeLists.txt`（VERSION bump）/ `src/render/Pipeline.cpp`（IBL fallback bump）/ `docs/editor-roadmap.md`（v1.0.1 段）/ `docs/engine-known-gaps.md`（5 个 GAP 关闭 + cube winding GAP 登记+关闭）/ `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0.1-acceptance-checklist.md`（新增）/ `assets/meshes/cube.mesh`（删除让启动期 rebake）

@@ -446,6 +446,19 @@ public:
         return *this;
     }
 
+    // 段顶 helper 文案 —— CollapsingHeader 展开后、properties 渲染之前显示
+    // 一段 TextDisabled + Bullet 提示。典型用例：把"hidden mental model"
+    // （DirectionalLight 方向来自 Transform.rotation / 多实例 first-found 生效）
+    // 暴露给 UI 用户。文案应短小、直陈结论，避免段顶视觉负担过重。
+    //
+    // 多行文本用 '\n' 分割；SchemaInspector 渲染时按行画 Bullet。
+    // 传 nullptr 或不调本方法 → 不显示段顶 helper。
+    ComponentSchemaBuilder& Helper(const char* text)
+    {
+        mSchema.helperText = text;
+        return *this;
+    }
+
     // 允许通过 component header 右键菜单移除。
     ComponentSchemaBuilder& Removable()
     {
