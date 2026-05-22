@@ -5,6 +5,7 @@
 
 #include "EditorRenderLayer.h"
 
+#include "DemoWorld.h"  // BuildNamedMaterialInstances 等 demo 资产工厂仍在用
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
