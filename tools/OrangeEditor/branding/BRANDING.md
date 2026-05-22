@@ -15,16 +15,37 @@
 - 生成日期：
   - v1：2026-05-17（v0.6.5 milestone ✅ 后续 brand 工作首版）
   - v2：2026-05-17（当晚迭代到行星 + 光环 + 中心白热点版本）
-  - **v3：2026-05-18（当前生效）**——painterly 太空场景：行星 + 倾斜光环 + 星空粒子 + 圆角矩形外框
+  - v3：2026-05-18 —— painterly 太空场景：行星 + 倾斜光环 + 星空粒子 + 圆角矩形外框
+  - **v4：2026-05-22（当前生效）**—— OrangeEditor v1.0 验收通过后跨 session brand 重设计；主题"技术宅观察现实 → 解构 → 创造虚拟世界"；painterly 橙子 + sigil 风格切片（橙色橙肉底 + 4 个深紫 Tetris-like pixel 图案）+ 深紫蓝背景，两色系（橙 + 深紫）
 - 设计决策由来：见 `docs/decisions/ADR-002-editor-visual-system.md` §视觉体系
 - 设计方向演进：
-  - **v3 当前**：橘色行星 + 发光内核（中心白热点向外辐射星芒）+ 倾斜光环（橙黄发光带 + 轨迹粒子尘埃）+ 绿色双叶柄（保留 fruit 身份）+ 深空背景（黑底 + 星点 + 橙色尘埃云）+ 1px 橙色圆角矩形外框（app icon 边界提示）；整体 painterly / 体积感渲染（非 flat vector）
-  - v2 历史：相同行星 + 光环 + 叶柄概念，但 flat vector 风、单色深炭灰背景（#2A2A2A 纯色，无星空粒子）、无外框；见下方 v2 prompt 段
-  - v1 历史：单一行星，无光环；已废弃
+  - **v4 当前**：右后方完整 painterly 橙子（柔化 stipple、保留高光 / 阴影 / 绿叶绿柄）= "被技术宅观察的现实"；左前方侧倾横切片，橙色橙肉底（#FFB347）+ 深橙描边（#E07A1F）+ 8 条放射果瓣分割 + 4 个深紫（#2D1B47）Tetris-like pixel 图案（L/T/Z/I 几何形状，散布部分果瓣，其它果瓣留白）= "被解构后看见的数字本质"；背景纯深紫蓝（#2D1B47）+ 橙色圆角矩形外框；**严格两色系**（橙 + 深紫，含描边 / pixel 块 / 背景），sigil 风格兼容；**无中心 kernel 高光、无楔形碎片**（前期设计教训：高光锚抢戏 + 楔形与主橙子语义重复）
+  - v3 历史（2026-05-18）：橘色行星 + 发光内核（中心白热点向外辐射星芒）+ 倾斜光环（橙黄发光带 + 轨迹粒子尘埃）+ 绿色双叶柄 + 深空背景（黑底 + 星点 + 橙色尘埃云）+ 1px 橙色圆角矩形外框；painterly / 体积感渲染。被 v4 取代原因：行星主题与 OrangeEngine 内核（2D/2.5D 游戏引擎、ECS 模块化、不做太空主题游戏）语义错位
+  - v2 历史（2026-05-17）：相同行星 + 光环 + 叶柄概念，但 flat vector 风、单色深炭灰背景（#2A2A2A 纯色，无星空粒子）、无外框；见下方 v2 prompt 段
+  - v1 历史（2026-05-17）：单一行星，无光环；已废弃
 
 ## 设计 prompt 历史
 
-### v3 prompt 摘要（2026-05-18，painterly 太空场景，当前生效）
+### v4 prompt 摘要（2026-05-22，painterly 橙子 + sigil 切片，当前生效）
+
+2026-05-22 OrangeEditor v1.0 验收通过后跨 session 重设计，由用户与 Claude Code 联合迭代 6 轮后定稿。主题：**技术宅观察现实 → 解构 → 创造虚拟世界**。基于最初的"黑底 + 完整橙子 + 横切片 + 楔形"painterly 三件套原图修改而来。
+
+视觉要素列表：
+
+- **主橙子**（右后方）：painterly 完整橙子，stipple 颗粒柔化、modern flat-3D cartoon 风格、保留绿叶 + 绿柄 + 高光阴影 = "被观察的现实"
+- **横切片**（左前方）：保留原图侧倾透视位置 / 大小；橙色橙肉底 (#FFB347) + 深橙描边 (#E07A1F) + 8 条细放射线均匀分隔为 8 果瓣 + 总共 4 个大尺寸 Tetris-like 深紫 pixel 图案 (#2D1B47，L/T/Z/I 几何，散布部分果瓣，其它留白)
+- **不要**：中心 kernel 立方体 / 中心高光 / 楔形碎片 / 加号 + 形 pixel 图案
+- **背景**：纯深紫蓝 (#2D1B47)，圆角方形外框（橙色描边）
+- **两色系**：橙 + 深紫，严禁第三色相
+
+完整 prompt 文本 + 6 轮迭代过程 + v1.x 进一步迭代意见见 user-memory `project_logo_v1_status_and_iterate_list.md`（本仓不持久化 prompt，brand iterate 由 user 跨 session 自驱动）。
+
+**v1.x 已识别但未做的迭代意见**（下次 brand iterate 时优先做）：
+1. 切片侧倾透视加强到 25-30° 椭圆 + 可见厚度环（当前 v4 切片仍偏正圆）
+2. 8 果瓣 → 4 果瓣（小尺寸优先 —— 每果瓣更大，pixel 图案也更大，缩小后清晰度跃升）
+3. Pixel 图案对角线 / 十字均匀分布 + 严格 Tetris L/T/Z/I 形（v4 部分图案集中上半 + 偶有 + 形）
+
+### v3 prompt 摘要（2026-05-18，painterly 太空场景，已被 v4 取代）
 
 直接由用户在 ChatGPT 端迭代生成，未在本仓留存完整 prompt 文本。视觉要素列表：
 
@@ -66,7 +87,7 @@ or Substance Painter logo style, NOT a fruit illustration. Must read clearly at
    - 选内嵌 constexpr 而非 stb_image 解 PNG：避免再 vendor 一份 stb_image.h（仓内 `vendor/stb/` 当前只放 stb_image_write.h，3rdparty.json 已说明 stb_image 不入引擎依赖）
    - 启动日志验证：`[OrangeEditor] applied window icon (3 sizes)`
    - 多视口 caveat：GLFW 不会让 multi-viewport 子窗口自动继承主窗口 icon。当前仅主窗口 set；用户把 panel 拖出成独立 native window 时子窗口仍用 OS 默认 icon。修法是在 ImGui Platform_CreateWindow 回调后对每个 sub-viewport 的 GLFWwindow 再调一次 `ApplyEditorWindowIcons`——属后续 polish，本期不做
-   - 小尺寸 caveat（v2/v3 共通，v3 更严重）：行星 + 光环设计在 16×16 / 24×24 档被 LANCZOS 缩成橘色团块——光环线宽 < 1 像素、星空粒子完全糊掉。近距离看是橘色光斑，但视觉上仍能识别 brand（橙色 + 圆形 + 黑底），taskbar / Alt-Tab 距离够远不显眼；不另出"小尺寸专版" simplified glyph。v3 因星空粒子 + 尘埃云密度更高，16×16 档信息熵进一步降低；如未来要"小尺寸专版"，应单独出一个无光环 / 无星空、仅"橙球 + 叶"的 simplified glyph 用作 16/24 档替换
+   - 小尺寸 caveat（历史，v2/v3 共通；v4 大幅改善）：v2/v3 行星 + 光环设计在 16×16 / 24×24 档被 LANCZOS 缩成橘色团块——光环线宽 < 1 像素、星空粒子完全糊掉。**v4 切片 sigil + painterly 橙子双元素构图在小尺寸下退化更优雅**：主橙子轮廓 + 切片圆盘剪影 + 两色高对比 在 16×16 仍可识别"橙色 + 圆形 + 紫底"brand 信号；但 4 个深紫 Tetris pixel 图案在 16×16 / 24×24 仍会糊（每个 pixel 块 < 1 实际像素）。已识别 v1.x 迭代意见 2（8 果瓣 → 4 果瓣，每果瓣更大）正是为解决该问题；如要 favicon 专版，应基于 v1.x 终版切片设计（4 果瓣 + 4 大 pixel 图案）单独出一份 simplified mark（去 painterly 橙子，纯切片正面朝向），见 user-memory `project_logo_v1_status_and_iterate_list.md` 末段 favicon 待办
 
 ## 重建 brand 资产
 
