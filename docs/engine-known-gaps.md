@@ -519,6 +519,138 @@ case SceneOp::New: {
 
 ---
 
+## GAP-2026-05-22-pipeline-cpp-monolithic-needs-split
+
+- **发现方**：用户 v1.0 验收后浏览代码时观察（"Pipeline.cpp 是不是太大了"）
+- **发现日期**：2026-05-22
+- **一句话定性**：`src/render/Pipeline.cpp` 5308 行单 TU，包含 Setup / Render / Impl 内部各 pass record（Shadow / Bloom / GodRays / Sky / Grid / DebugDraw / Capture 等）全部混在一个 .cpp —— 比同栈对照 Lumix `pipeline.cpp`（4262 行）大 25%；维护 / 编译速度 / 新人 onboard 成本逐 milestone 累加，Phase 7+ 新 pass（SSAO / TAA / volumetrics / reflection probe）每个会 +200~500 行，不拆会滚到 7K+
+
+### 触发场景
+
+- 跨 session 对话频繁出现 `Pipeline.cpp:3164` / `:4931` / `:5015` 等行号引用 —— "先 grep 行号 → 跳行"已是默认 workflow，间接证据
+- MSVC 单 TU 5K+ 行，每次小改触发全文件 re-compile；Pipeline 是 hot 编辑文件，编译 + link 时间感受明显
+- 新人理解架构边界（按 pass / 按生命周期 / 按 Impl/公共 类拆？）需通读 5K 行，没有 .cpp 文件结构给视觉锚
+
+### 证据 / 量化
+
+- `wc -l src/render/Pipeline.cpp` = 5308 行
+- `wc -l vendor/LumixEngine/src/renderer/pipeline.cpp` = 4262 行（同栈 C++ ECS + ImGui editor 引擎对照）
+- 主要 mega-block 行号分布：
+  - 1-1115 helper functions（FillVertexInputLayout / FillPushConstantRanges / OrangeRenderLogAdapter 等）
+  - **1136-2018 `Pipeline::SetupRhiResources` 单方法 882 行**（Vulkan/shader/descriptor pool/pipeline state 初始化）
+  - 2543-2825 IBL bake + frame time + capture (~280 行)
+  - 2856-3338 Impl::RecordOffscreenPass + RecordPassthroughToViewport + RenderOffscreen (~480 行)
+  - 3465-3727 Impl::Shadow 系列（EnsureShadowMap / RecordShadowPass / UpdateLightUbo / UpdatePointLightsUbo）~ 260 行
+  - 3890-4160 Impl::Bloom 系列（Ensure / Record / Release）~ 270 行
+  - 4160-4336 Impl::GodRays 系列 ~ 180 行
+  - 4336-4593 Impl::Sky 系列（Sky + ProceduralSky）~ 260 行
+  - 4593-4800 Impl::Grid + DebugDraw ~ 210 行
+  - **4800-5308 `Pipeline::Render` 主循环 508 行**
+
+### 工业对照
+
+- Lumix `pipeline.cpp` 4262 行（同栈 C++，是 outlier 大但勉强活）
+- Unreal：按 pass 拆 `.cpp`（DeferredShadingRenderer / ShadowRendering / TemporalAA 各 1-3K 行）
+- Unity HDRP / URP：每 RenderPipeline / pass 独立 `.cs`，每 file ~500-1500 行
+- Bevy：module crate 化，每 file ~500 行
+- Godot：按 rasterizer / scene_render backend 拆
+
+主流趋势是**按 pass 拆**单 file 千行级。Lumix 是 outlier；OrangeEngine 比 Lumix 还大 1K，**已超工业可接受上限**。
+
+### 缺什么（拆分方案）
+
+```
+src/render/
+├── Pipeline.cpp                   ~1500 行  (公共类 + Render 主循环)
+├── pipeline/
+│   ├── PipelineSetup.cpp          ~900 行   (SetupRhiResources 拆出)
+│   ├── PipelineShadow.cpp         ~400 行   (Shadow / Light UBO)
+│   ├── PipelineBloom.cpp          ~270 行
+│   ├── PipelineGodRays.cpp        ~180 行
+│   ├── PipelineSky.cpp            ~260 行   (Sky + ProceduralSky)
+│   ├── PipelineGrid.cpp           ~130 行
+│   ├── PipelineDebugDraw.cpp      ~80 行
+│   ├── PipelineCapture.cpp        ~160 行
+│   └── PipelineHelpers.cpp        ~1100 行  (helper functions 拆出)
+```
+
+拆分要点（守不变性）：
+- 所有 `Pipeline::Impl::XXX` 方法是同一个 `class Impl` 的成员；拆 .cpp 时 **Impl 类声明仍集中**（或抽到 `src/render/pipeline/PipelineImpl.h`），各拆出的 .cpp 只定义 method body
+- **不引入新公共 API、不动 `Pipeline.h`、不变 ABI、不破坏 src/render 唯一 OrangeRender consumer 纪律**
+- 每个 .cpp 顶部 include 同款 `<orange/...>` headers，CLAUDE.md header isolation 继续守
+- CMake `src/render/Pipeline.cpp` → `src/render/pipeline/*.cpp` 一并加进 orange_engine target，无新 link 单元
+
+### 期望验收
+
+- 每个 .cpp ≤ 1500 行（main Pipeline.cpp 主循环上限）/ 大多数 ≤ 500 行
+- `Pipeline.h` 公共面**不变**（API + ABI 守住）
+- ctest 全 43 测试通过、samples 01-14 + 编辑器 build 通过、视觉无回归（包括 PBR / IBL / shadow / bloom / godrays / sky / grid / debug draw 各 pass）
+- 重构后 grep 跳函数路径从"先 grep Pipeline.cpp 行号"→"直接 cd 子模块 .cpp 看"
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P2（技术债，不阻塞 v1.0 ✅ + 不阻塞 Phase 7）** —— 当前能编能跑，纯重构 / 零新 feature；但维护成本逐 milestone 累加，越晚拆越贵
+- **归属**：建议作为 **OrangeEngine refactor milestone**（Phase 6 与 Phase 7 之间，或 Phase 7 第 1 个 task 前置），与 [[GAP-2026-05-22-editor-dock-layout-collapses-on-restore]] 等 v1.x patch 系列**不混**——拆分是引擎 internal refactor，编辑器 patch 是 UX；两类工作分别独立 session
+- **关联**：`src/render/Pipeline.cpp` / `vendor/LumixEngine/src/renderer/pipeline.cpp`（对照）/ CLAUDE.md "src/render/ 唯一 OrangeRender consumer" 纪律（拆分后继续守）
+- **触发时机**：(1) Phase 7 第一个 task 开工前；或 (2) Pipeline.cpp 撞到 6K 行（下次 1-2 个新 pass milestone 后）；或 (3) MSVC 单 TU 编译超过 30 秒；任一触发 → 启动专门 refactor session
+
+---
+
+## GAP-2026-05-22-multi-environment-component-semantics-undefined
+
+- **发现方**：用户 v1.0 验收后实测推断（"任意 entity 挂 Environment 都改变景色？多个会怎样？"）
+- **发现日期**：2026-05-22
+- **一句话定性**：场景中存在多个 EnvironmentComponent 时，Pipeline first-found 取迭代器第一个生效，其余静默忽略；用户修改非生效的 EnvironmentComponent 字段（cubemap / tint / intensity）时 viewport 毫无反应，体感"引擎坏了" —— 与 [[GAP-2026-05-22-multi-directional-light-semantics-undefined]] 同根因孪生
+
+### 触发场景
+
+- 用户给 Sun entity 挂一个 EnvironmentComponent + .hdr → 生效
+- 用户后续在 Cube1 上又挂一个 EnvironmentComponent + 另一张 .hdr → **不生效**（Sun 那个仍是 first-found）
+- 用户改 Cube1.Environment.intensity / tint → viewport 不变 → 困惑
+
+### 证据
+
+- `src/render/Pipeline.cpp:3166-3168` 注释明示：
+  ```
+  // EnvironmentComponent first-found：与 DirectionalLight 同款选取；
+  // 多个时取迭代器第一个（baseline 单 World 全局环境，多 environment
+  // blending 留给后续 reflection probe milestone）
+  ```
+- Pipeline 不读 EnvironmentComponent 所挂 entity 的 Transform.position —— 该组件**事实上是全局单例**，但允许挂任意 entity 的现状模糊"全局单例 vs per-entity 实例"边界
+- 工业对照：
+  - Godot：Environment 通常挂 Camera 节点单例，明确语义
+  - Unity HDRP：Volume 多个支持，按 priority / range 区域 blend
+  - Unreal：SkyLight 通常 1 个，多个 SkyLight 报警告
+
+### 缺什么
+
+#### G1 · Inspector helper + Hierarchy warning（推荐 v1.x 落地，与 multi-DirLight 同 patch）
+
+- `RegisterEnvironmentComponentSchema` 加段首 helper 文案："Only the first EnvironmentComponent in the scene is used. Add at most one per scene."
+- Hierarchy 检测到 >1 个 EnvironmentComponent 时，在非首个 entity 行加 warning icon + tooltip "Ignored: another EnvironmentComponent already active"
+- 改动量与 [[GAP-2026-05-22-multi-directional-light-semantics-undefined]] G1 重叠 90%，可一次性 batch
+
+#### G2 · 长期 multi-environment blending（reflection probe milestone）
+
+- HDRP / Lumix EnvProbe 风格的多 environment 区域 blending
+- 引入 `EnvironmentVolume` 概念（每个 environment 有 position + range / priority），Pipeline 按 camera 位置查最近 / blend
+- 属 long-term roadmap 量级（Phase 10+ 或单独 reflection probe milestone，与 [[reference-lumix-ibl-filter]] 同档参考）
+
+### 期望验收
+
+- G1 ✅ 条件：场景里挂 2 个 EnvironmentComponent，第二个 entity Hierarchy 行有明显 warning icon + Inspector 段顶部 helper 文案可见；用户 10 秒内能理解"第 2 个不生效"
+- G2（如真做）✅ 条件：camera 在不同区域时自动切换 / blend 对应 EnvironmentVolume，viewport 实时反映
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P2（Friction，不阻塞 v1.0 ✅）** —— 用户能挂能改但语义未定义；与 [[GAP-2026-05-22-multi-directional-light-semantics-undefined]] 完全同档
+- **归属**：G1 留 v1.x UX batch（强烈建议**与 multi-DirLight G1 一次性 batch 修**，schema helper / Hierarchy warning 改动可重用）；G2 待 reflection probe milestone 启动时再做
+- **关联**：[[GAP-2026-05-22-multi-directional-light-semantics-undefined]]（孪生根因）/ [[GAP-2026-05-19-editor-environment-component-wiring]]（前置基础）/ `src/render/Pipeline.cpp:3166-3168`
+
+---
+
 ## GAP-2026-05-22-editor-default-ibl-missing-causes-black-pbr-faces
 
 - **发现方**：作者本人 v1.0 验收后试搭场景（Sun + Floor + Cube1/2/3 + Sphere + smoke），无 EnvironmentComponent
