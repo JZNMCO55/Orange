@@ -519,6 +519,95 @@ case SceneOp::New: {
 
 ---
 
+## GAP-2026-05-22-editor-default-ibl-missing-causes-black-pbr-faces
+
+- **发现方**：作者本人 v1.0 验收后试搭场景（Sun + Floor + Cube1/2/3 + Sphere + smoke），无 EnvironmentComponent
+- **发现日期**：2026-05-22
+- **一句话定性**：场景未挂 EnvironmentComponent (IBL) 时，PBR 物体的"背向 directional light 的面"完全黑（max(N·L, 0) = 0 + 无 ambient fallback）；离散面 mesh（cube）撞得最严重 —— 朝光的面亮、其它面全黑、视觉上像"半透明 / 渲染了内部"；连续曲面 mesh（sphere）症状较轻但暗部仍偏黑
+
+### 触发场景
+
+- v1.0 验收脚本段 A → B 流程产出的场景（assets/scenes/v1.0.scene.json）
+- 同材质 warm_m0r0 应用到 sphere + cube → sphere 整体黄色 + 暗部渐变 OK / cube 顶面黄 + 正面侧面全黑 → 用户体感"颜色差异大 + cube 像透明 / 渲染内部"
+- 截图 `D:\Photo\Orange\sphere-cube.png`
+
+### 证据 / 根因诊断
+
+- `GAP-2026-05-19-editor-aux-passes-in-engine-pipeline` 处理记录明示：v0.8.5 验收后 engine 端默认 IBL irradiance ambient 从 (0.25, 0.25, 0.25) 退到 (0, 0, 0) —— PBR 物体仅 direct light，无 ambient fallback
+- `GAP-2026-05-19-editor-environment-component-wiring` 处理记录：编辑器有 .hdr 浏览器 + Pipeline 自动 re-bake，能挂 EnvironmentComponent → IBL 接通 → 暗面有 environment 贡献，**但前提是用户主动挂 EnvironmentComponent**
+- 零配置场景（用户 New Scene → 加几个 entity → 不知道要挂 Environment）撞上"PBR 暗面全黑" UX 陷阱
+- 用户的"cube 正面像透明" = 视觉误读：实际是 unlit 极暗 cube 正面 + transform gizmo always-on-top 配置穿过去，让 cube 看起来"被穿透"；cube 本身 opaque
+
+### 缺什么
+
+#### G1 · 编辑器默认 seed 一个 fallback IBL
+
+- New Scene 路径 + Load Scene 路径，World 没有 EnvironmentComponent 时，**Pipeline 用一个内置 fallback environment**（极简的灰白 cubemap 或预 baked SH 系数），让 PBR 物体暗面至少有 ~5-10% ambient
+- 该 fallback 不挂为 ECS 组件，是 Pipeline 内置 baseline；用户挂真正 EnvironmentComponent 时自动覆盖
+- 不影响"engine 默认中性"原则（engine 仍 0 ambient）—— 仅 **OrangeEditor** 侧默认接 fallback，与 v0.8.5 验收后 ambient 退 0 的"shipping engine 中性"目标不冲突
+- 关联 cmake option：`ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES`（已存在）—— fallback IBL 走同款 editor-only 编译开关
+
+#### G2 ·（可选）demo / 新场景默认挂 EnvironmentComponent
+
+- 编辑器自带一个 `assets/environments/default.hdr`（小 cubemap，~1MB）
+- New Scene 时除了清空，自动 seed 一个 Root entity 挂 EnvironmentComponent 指向该 default.hdr
+- 优势：用户开箱即看正常 PBR；劣势：与 v1.0 验收脚本"真·空场景"的精神有点冲突 —— 拍板倾向 G1 而不是 G2
+
+#### G3 ·（更长期）UI 提示
+
+- 当场景内有 PBR 材质但无 EnvironmentComponent 时，编辑器 Inspector / Console 浮一条 hint："Tip: scene has PBR materials but no Environment component. Add one for proper ambient lighting."
+
+### 期望验收
+
+- New Scene → Add Floor + Cube + Sphere（同 PBR 材质，不挂 EnvironmentComponent）→ cube 暗面**不再完全黑**，呈现暗橙色 / 暗灰 ~5-15% ambient
+- 挂真 EnvironmentComponent 后视觉切换到正常 IBL ambient（fallback 自动被覆盖）
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P1（Friction，不阻塞 v1.0 ✅）** —— 用户能感受到明显视觉问题（"颜色不对" / "cube 像透明"），但**有 workaround**（挂 EnvironmentComponent + .hdr），且不影响编辑器功能可用性
+- **归属**：OrangeEditor v1.0.1 / v1.x patch（与 [[GAP-2026-05-22-editor-dock-layout-collapses-on-restore]] + 之前 4 个 v1.x P1/P2 一起打包）
+- **关联**：[[GAP-2026-05-19-editor-aux-passes-in-engine-pipeline]] / [[GAP-2026-05-19-editor-environment-component-wiring]]
+- **临时绕过**：用户手动给场景挂 EnvironmentComponent + 一个 .hdr（参 `assets/environments/README.md` PolyHaven CC0 资源）
+
+---
+
+## GAP-2026-05-22-editor-dock-layout-collapses-on-restore
+
+- **发现方**：作者本人 logo v4 切换后启动 OrangeEditor 看效果时撞上
+- **发现日期**：2026-05-22
+- **一句话定性**：编辑器**最大化后还原**（点最大化按钮 → 再点还原），中间 Scene viewport 区域被压缩到 0 宽 / 完全 collapse，只剩两侧 Inspector + Entity Tree 面板与中间折叠的 dock tab 残骸（垂直 vertical text "anim" / "当前" / Console / Assets tab 标签）
+
+### 触发场景
+
+- 启动 OrangeEditor（默认 maximize 状态，dock layout 正确：Entity Tree | Scene viewport | Inspector + 底部 Assets/Console/Animation）
+- 点窗口右上角 maximize / restore 按钮还原到默认 1280×720 窗口大小
+- Scene viewport 中间区域消失，无法看到 3D 渲染场景
+- 唯一恢复路径：重新点 maximize 回到全屏
+
+### 证据
+
+- 截图见 `D:\Photo\Orange\minsize.png`（v1.0 验收 session 末尾截）
+- 症状：还原后窗口 ~1600×900，左侧 Entity Tree ~280px + 右侧 Inspector ~940px + 中间 ~50px 折叠区 = 中间区域被左右两侧"挤"光
+- 推测根因：ImGui dock layout init 用了**绝对像素**而非**比例** —— max 状态下初始 layout 写死 "Entity Tree=300px / Inspector=500px / Scene=剩余" 之类，still OK；restore 后窗口宽度突变但 dock 还按绝对像素，中间 Scene 区域 = window_w - 300 - 500 = 可能 < 0 → ImGui 用 0
+- 修法 hint：dock builder 初始化时用 `DockBuilderSplitNode(...)` 的 size_ratio 参数（0~1 比例）而非 size_in_pixels；或者监听 GLFW window resize callback 在 resize 时按比例 reapply layout
+- 关联代码位置：`tools/OrangeEditor/EditorRenderLayer.cpp` 的 dock space 初始化路径（具体函数名待定位）
+
+### 期望验收
+
+- 启动 OrangeEditor → 最大化 → 还原（任意窗口大小，最小 800×600 起）→ 中间 Scene viewport 仍占据合理比例（≥ 40% 窗口宽），不消失
+- 还原后再最大化，layout 仍正确
+- 拖任意 panel 边界改大小后 maximize / restore，自定义 layout 不丢失
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P1（Friction，不阻塞 v1.0 验收已通过的 ✅）** —— 编辑器在 maximize 状态下完整可用，restore 路径触发的 layout 崩坏属可工作绕过（一直 maximize 用 / 或调好 layout 后不动）；但作为 v1.0 stable 后的明显 UX bug，应在 OrangeEditor v1.0.1 / v1.x patch milestone 修
+- **归属**：OrangeEditor v1.0.1 patch（与 v4 logo 切换后的其它 polish 一起做）
+- **临时绕过**：保持 OrangeEditor 一直 maximize 使用；不要主动 restore
+
+---
+
 ## GAP-2026-05-22-multi-directional-light-semantics-undefined
 
 - **发现方**：OrangeEditor v1.0 验收讨论（用户提出"方向光是不是不应该能创建多个？感觉应该是全局光源"）
