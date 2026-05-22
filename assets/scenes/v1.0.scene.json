@@ -1,0 +1,329 @@
+{
+  "entities": [
+    {
+      "components": {
+        "Name": {
+          "name": "smoke"
+        },
+        "ParticleEmitter": {
+          "colorEnd": [
+            0.3933265209197998,
+            0.050000011920928955,
+            1.0,
+            0.5899999737739563
+          ],
+          "colorStart": [
+            1.0,
+            0.3500000238418579,
+            0.9506160020828247,
+            1.399999976158142
+          ],
+          "emissionRate": 20.0,
+          "emitting": true,
+          "gravity": [
+            0.0,
+            0.800000011920929
+          ],
+          "initialVelocityMax": [
+            0.5,
+            2.0
+          ],
+          "initialVelocityMin": [
+            -0.5,
+            1.0
+          ],
+          "lifetimeMax": 2.0,
+          "lifetimeMin": 1.0,
+          "maxParticles": 455,
+          "sizeEnd": 0.41499999165534973,
+          "sizeStart": 0.6499999761581421,
+          "spawnOffsetMax": [
+            0.47999998927116394,
+            0.3700000047683716
+          ],
+          "spawnOffsetMin": [
+            -0.6299999952316284,
+            -0.38999998569488525
+          ]
+        },
+        "Transform": {
+          "position": [
+            -1.6329705715179443,
+            0.5236348509788513,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 0
+    },
+    {
+      "components": {
+        "Name": {
+          "name": "Sphere"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m0r0.material",
+          "mesh": "assets/meshes/sphere.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -4.05576229095459,
+            2.3204421997070313,
+            -3.706751585006714
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 1
+    },
+    {
+      "components": {
+        "Name": {
+          "name": "Cube3"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m0r0.material",
+          "mesh": "assets/meshes/cube.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            2.8036365509033203,
+            0.5465919971466064,
+            -2.3084468841552734
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 2
+    },
+    {
+      "components": {
+        "Name": {
+          "name": "Cube2"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/materials/pbr_showcase/warm_m0r2.material",
+          "mesh": "assets/meshes/cube.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            2.420255184173584,
+            0.5705516338348389,
+            1.848083257675171
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 3
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 1.0,
+          "friction": 0.30000001192092896,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              0.5,
+              0.5
+            ],
+            "kind": "Box"
+          }
+        },
+        "Name": {
+          "name": "Cube1"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/materials/builtin/pbr.material",
+          "mesh": "assets/meshes/cube.mesh",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": false,
+          "gravityScale": 1.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Dynamic"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            2.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 4
+    },
+    {
+      "components": {
+        "Collider": {
+          "density": 1.0,
+          "friction": 0.30000001192092896,
+          "isSensor": false,
+          "restitution": 0.0,
+          "shape": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "halfExtents": [
+              20.0,
+              0.05000000074505806
+            ],
+            "kind": "Box"
+          }
+        },
+        "Name": {
+          "name": "Floor"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/materials/builtin/pbr.material",
+          "mesh": "assets/meshes/plane.mesh",
+          "visible": true
+        },
+        "RigidBody": {
+          "angularDamping": 0.0,
+          "fixedRotation": false,
+          "gravityScale": 1.0,
+          "initialAngle": 0.0,
+          "initialPosition": [
+            0.0,
+            0.0
+          ],
+          "linearDamping": 0.0,
+          "type": "Static"
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            10.0,
+            1.0,
+            10.0
+          ]
+        }
+      },
+      "id": 5
+    },
+    {
+      "components": {
+        "DirectionalLight": {
+          "castsShadow": true,
+          "color": [
+            1.0,
+            0.9200000166893005,
+            0.7799999713897705
+          ],
+          "intensity": 1.7000000476837158
+        },
+        "Name": {
+          "name": "Sun"
+        },
+        "Transform": {
+          "position": [
+            6.280511379241943,
+            2.725334644317627,
+            -0.30000001192092896
+          ],
+          "rotation": [
+            0.18703609704971313,
+            0.0,
+            -0.24047498404979706,
+            0.9524648189544678
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 6
+    }
+  ],
+  "schemaVersion": {
+    "major": 1,
+    "minor": 5,
+    "namespace": "scene/world"
+  }
+}

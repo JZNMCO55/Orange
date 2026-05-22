@@ -56,6 +56,25 @@ enum class PropertyType : std::uint8_t
              // 控件路径分两期：c1 仅显示当前 path（无控件 / 与 readOnly 同款
              // Text + TextDisabled）；c4 加 DnD 接收 + clear 按钮 + 浏览器
              // popup 选择
+    PolygonVertices,   // Box2D Polygon shape 顶点表（kMaxVertices = 8）。
+                       // get/set 类型擦除媒介是 Physics::PolygonDesc 整值
+                       // ——表格 UI 整体读出 → 用户编辑 → 整体回写 → Push
+                       // SetFieldValueCommand<PolygonDesc>。SchemaInspector
+                       // 的对应 case 负责渲染：表头 # / X / Y、每行 Remove、
+                       // 顶部 Vertex Count、底部 Add Vertex。
+                       //
+                       // 与 vec2 / float 等标量字段相比，顶点表是 schema
+                       // 框架首次出现的"复合数据 + 动态长度"字段：之前所有
+                       // PropertyType 都是固定大小的标量 / 句柄。其它任何
+                       // "需动态长度子结构编辑"的字段（未来可能的 EdgeChain
+                       // vertices / 待登记的 Skeleton bone array / ...）走
+                       // 同款"新增 PropertyType + SchemaInspector 加 case"
+                       // 路径，不走 schema 通用机制。
+    EdgeChainVertices, // Box2D EdgeChain shape 顶点表（kMaxVertices = 16）+
+                       // isLoop bool。get/set 媒介 EdgeChainDesc 整值。
+                       // SchemaInspector case 在顶点表之外多渲染一个 Loop
+                       // checkbox（"isLoop" 在 alternative struct 内不便单
+                       // 独走 Field<>，整段塞 PropertyType 内是最干净的）
 };
 
 // AssetKind —— PropertyType::AssetRef 字段的资源类型标签。

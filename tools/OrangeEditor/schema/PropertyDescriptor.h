@@ -22,6 +22,7 @@
 
 #include "PropertyType.h"
 
+#include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/scene/Entity.h>
 
 #include <glm/vec2.hpp>
@@ -54,6 +55,14 @@ template <> struct PropertyTypeOf<std::string>  { static constexpr PropertyType 
 template <> struct PropertyTypeOf<Orange::Engine::Entity>
 {
     static constexpr PropertyType value = PropertyType::EntityRef;
+};
+template <> struct PropertyTypeOf<Orange::Engine::Physics::PolygonDesc>
+{
+    static constexpr PropertyType value = PropertyType::PolygonVertices;
+};
+template <> struct PropertyTypeOf<Orange::Engine::Physics::EdgeChainDesc>
+{
+    static constexpr PropertyType value = PropertyType::EdgeChainVertices;
 };
 
 // PropertyAttributes —— 修饰单个 property 的可选属性。

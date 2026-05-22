@@ -489,15 +489,20 @@ void RegisterColliderComponentSchema()
     using Orange::Engine::Physics::EdgeChainDesc;
 
     // shape 是 std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc>。
-    // v0.1 hardcode 内 deliberately not implemented "shape 类型切换控件"
-    // （切换 alternative 会重置数据，误操作风险大）；c8 严格 1:1 复刻，
-    // **不**引入 shape 切换入口。
+    // 后期补口子：v0.1 ~ v0.2.5 期 deliberately 不实现 "shape 类型切换控件"
+    // （理由"切换 alternative 会重置数据，误操作风险大"），但用户撞上"加
+    // Collider 永远是 Circle、要 Box 必须改代码"导致 UX 断裂；本期补上：
+    //   * 顶部加 Shape Type Combo 走 FieldCustomEnum + EnumNames 渲染 Circle
+    //     / Box / Polygon / Edge Chain 四项；切换走命令栈，Undo 可恢复
+    //   * Polygon / EdgeChain 顶点表升级为可编辑（新增 PropertyType::
+    //     PolygonVertices / EdgeChainVertices，SchemaInspector 加 case 渲染
+    //     表格 + Add/Remove）
     //
     // 4 个 shape 段通过 VisibleIf(holds_alternative<X>) 互斥显示：
     //   Circle    → Radius + Center
     //   Box       → Half Extents + Center
-    //   Polygon   → 仅 GroupSeparator 占位（顶点编辑 — later task）
-    //   EdgeChain → 同上
+    //   Polygon   → Vertices 表格（kMax=8）
+    //   EdgeChain → Vertices 表格（kMax=16）+ isLoop checkbox
     //
     // 视觉降级（vs v0.1）：
     //   * Polygon 不再显示动态 vertex count（v0.1 `(%u verts)`）
@@ -585,6 +590,77 @@ void RegisterColliderComponentSchema()
     static const auto isEdgeChain = +[](const void* c) -> bool
         { return std::holds_alternative<EdgeChainDesc>(static_cast<const CC*>(c)->shape); };
 
+    // ---- shape type 切换 ----
+    // variant alternative 编号与 Combo 项一一对应（CircleDesc=0 / BoxDesc=1
+    // / PolygonDesc=2 / EdgeChainDesc=3）；setShapeType 收到 newIdx 时把
+    // shape 重置为对应 alternative 的默认构造值。
+    //
+    // 数据丢失语义：从 Polygon 切到 Circle 会清空 vertex 列表 / 半径回到
+    // 1.0 默认；mutation 走 SchemaInspector::PropertyType::Enum 标准命令栈
+    // —— Undo 可一键恢复（SetFieldValueCommand<int> 持 oldVal=旧 index，
+    // setShapeType 的 apply replay 内会从 Combo 选中"新 index"再走默认重
+    // 置；这意味着 Undo 路径会**恢复到 oldVal 对应的默认 alternative 值**，
+    // 不是 oldVal 对应 alternative 的"原数据"——这是 variant 切换天然的
+    // 信息丢失。Tooltip 内显式提示该语义，避免用户误以为"切回去数据就回
+    // 来了"。
+    //
+    // 已知 corner case：若 ColliderComponent 没挂（component pointer 为
+    // null），SchemaInspector 不会走到该字段的 get/set（外层 schema.has
+    // 路径已过滤）。
+    static const auto getShapeType = +[](const void* c, void* out)
+    {
+        *static_cast<int*>(out) =
+            static_cast<int>(static_cast<const CC*>(c)->shape.index());
+    };
+    static const auto setShapeType = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        const int newIdx = *static_cast<const int*>(in);
+        switch (newIdx)
+        {
+            case 0: shape = CircleDesc{};    break;
+            case 1: shape = BoxDesc{};       break;
+            case 2: shape = PolygonDesc{};   break;
+            case 3: shape = EdgeChainDesc{}; break;
+            default: /* out-of-range：保留旧值，与其它 Enum case 一致 */ break;
+        }
+    };
+    static const char* const kShapeTypeNames[] = {
+        "Circle", "Box", "Polygon", "Edge Chain"
+    };
+
+    // ---- Polygon / EdgeChain：整 desc 读写（命令栈 mutation） ----
+    static const auto getPolygon = +[](const void* c, void* out)
+    {
+        const auto& shape = static_cast<const CC*>(c)->shape;
+        *static_cast<PolygonDesc*>(out) = std::holds_alternative<PolygonDesc>(shape)
+            ? std::get<PolygonDesc>(shape)
+            : PolygonDesc{};
+    };
+    static const auto setPolygon = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        if (std::holds_alternative<PolygonDesc>(shape))
+        {
+            shape = *static_cast<const PolygonDesc*>(in);
+        }
+    };
+    static const auto getEdgeChain = +[](const void* c, void* out)
+    {
+        const auto& shape = static_cast<const CC*>(c)->shape;
+        *static_cast<EdgeChainDesc*>(out) = std::holds_alternative<EdgeChainDesc>(shape)
+            ? std::get<EdgeChainDesc>(shape)
+            : EdgeChainDesc{};
+    };
+    static const auto setEdgeChain = +[](void* c, const void* in)
+    {
+        auto& shape = static_cast<CC*>(c)->shape;
+        if (std::holds_alternative<EdgeChainDesc>(shape))
+        {
+            shape = *static_cast<const EdgeChainDesc*>(in);
+        }
+    };
+
     // 字段顺序：通用物理字段（density / friction / restitution / isSensor）
     // 在前，shape 段在后。v0.1 hardcode 内顺序相反（shape 在前），但 schema
     // 是线性顺序——Polygon / EdgeChain 的"零字段段"放在中间会导致用户感觉
@@ -598,6 +674,12 @@ void RegisterColliderComponentSchema()
         .Field<&CC::restitution>("restitution", "Restitution")
             .Range(0.0f, 1.0f).DragSpeed(0.01f)
         .Field<&CC::isSensor>("isSensor", "Is Sensor")
+        // ---- Shape Type Combo（v0.9.5 后置补丁：变 hardcode Circle 为可切） ----
+        .FieldCustomEnum("shape.type", "Shape Type",
+                         getShapeType, setShapeType)
+            .EnumNames(kShapeTypeNames, 4)
+            .Tooltip("切换形状类型会重置 shape 特定字段（半径 / 半宽 / 顶点表）；\n"
+                     "Undo (Ctrl+Z) 仅恢复到旧类型的默认值，**不**保留切换前的原始数据。")
         // ---- Circle ----
         .FieldCustom<float>("circle.radius", "Radius",
                             getCircleRadius, setCircleRadius)
@@ -618,9 +700,16 @@ void RegisterColliderComponentSchema()
                                 getBoxCenter, setBoxCenter)
             .VisibleIf(isBox)
             .DragSpeed(0.01f)
-        // ---- Polygon / EdgeChain：零字段 header-only ----
-        .Group("Shape: Polygon (vertex editing — later)",   isPolygon)
-        .Group("Shape: EdgeChain (vertex editing — later)", isEdgeChain)
+        // ---- Polygon ----
+        .FieldCustom<PolygonDesc>("polygon.vertices", "Vertices",
+                                  getPolygon, setPolygon)
+            .GroupSeparator("Shape: Polygon")
+            .VisibleIf(isPolygon)
+        // ---- EdgeChain（含 isLoop checkbox 走 PropertyType case 内渲染） ----
+        .FieldCustom<EdgeChainDesc>("edgechain.vertices", "Vertices",
+                                    getEdgeChain, setEdgeChain)
+            .GroupSeparator("Shape: Edge Chain")
+            .VisibleIf(isEdgeChain)
         .Addable()
         .Removable()
         .Register();

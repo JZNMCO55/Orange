@@ -5,6 +5,7 @@
 
 #include <orange/engine/core/Log.h>
 
+#include "../ColliderDebugDraw.h"
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
 #include "../EditorRotateGizmo.h"
@@ -37,9 +38,13 @@
 // 时 Pipeline 内部 fallback 到原 clear color，开关也不会让 viewport 黑屏）。
 // Debug Draw 默认关 —— 是 opt-in 的 v0.9 调试工具，普通编辑器用户大多数
 // 时间不需要，开启后才会画原点坐标轴 + selected entity 位置 sphere。
+// Colliders 默认开 —— 与 Grid 同档，物理碰撞盒可视化是 collider 编辑工作流
+// 的关键反馈（用户不开 Inspector 也能确认碰撞盒在哪 / 多大），开销极低
+// （typical scene < 50 个 collider，每个 < 32 段线，DebugDraw 一帧 < 0.1ms）。
 static bool sViewportGridEnabled      = true;
 static bool sViewportSkyEnabled       = true;
 static bool sViewportDebugDrawEnabled = false;
+static bool sViewportCollidersEnabled = true;
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -94,6 +99,15 @@ void EditorRenderLayer::DrawScenePanel()
         ImGui::SetTooltip("v0.9 调试几何 overlay：原点坐标轴 + selected entity 位置 sphere\n"
                           "走 OrangeRender DebugDraw immediate-mode（line / triangle）\n"
                           "always-on-top，不被场景几何遮挡");
+    }
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Colliders", &sViewportCollidersEnabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("物理碰撞盒可视化（绿 = 未选中 / 黄 = 选中）\n"
+                          "Circle / Box / Polygon / Edge Chain 全部以 wireframe 投影到 XY 平面\n"
+                          "走 OrangeRender DebugDraw immediate-mode，不被场景几何遮挡");
     }
 
     ImGui::SameLine();
@@ -199,12 +213,15 @@ void EditorRenderLayer::DrawScenePanel()
         mpScenePipeline->SetEditorGridEnabled(sViewportGridEnabled);
         mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
 
-        // v0.9 c2 DebugDraw 接通：toggle → wrap.SetEnabled；启用时本帧提交
-        // origin 坐标轴 + selected entity 位置 wireframe sphere（黄色，
-        // 半径 0.5），证明 editor → wrap → OR DebugDraw → HDR pass 端到端。
+        // v0.9 c2 DebugDraw 接通 + Collider 可视化（v0.9.5 后置补丁）：dbg
+        // 通道由 Debug Draw / Colliders 两个独立 toggle 共享，任一开启即启用
+        // dbg；两段几何提交各自由对应 toggle 门控。
         if (auto* dbg = mpScenePipeline->GetDebugDrawScene())
         {
-            dbg->SetEnabled(sViewportDebugDrawEnabled);
+            const bool anyDebugGeom =
+                sViewportDebugDrawEnabled || sViewportCollidersEnabled;
+            dbg->SetEnabled(anyDebugGeom);
+
             if (sViewportDebugDrawEnabled)
             {
                 // 原点 3 轴坐标（X 红 / Y 绿 / Z 蓝，长度 1.5）—— ABGR
@@ -231,6 +248,15 @@ void EditorRenderLayer::DrawScenePanel()
                 {
                     drawSelected(e);
                 }
+            }
+
+            if (sViewportCollidersEnabled)
+            {
+                Orange::Editor::DrawColliders(
+                    *dbg,
+                    *mHost.scene.pWorld,
+                    mHost.selection.selectedEntity,
+                    mHost.selection.additionalSelectedEntities);
             }
         }
 

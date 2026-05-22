@@ -20,6 +20,7 @@
 #include "../theme/EditorTheme.h"
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/World.h>
 
@@ -622,6 +623,188 @@ void DrawProperty(EditorHost&                  host,
                     ImGui::SetTooltip("写入 Asset 浏览器当前选中:\n%s",
                                       browserSel.c_str());
                 }
+            }
+            break;
+        }
+        case PropertyType::PolygonVertices:
+        {
+            // Box2D PolygonDesc 顶点表编辑。读 → 用户改 → 整体回写 → Push
+            // SetFieldValueCommand<PolygonDesc>。
+            //
+            // UI 结构（每一条 Inspector property "右列"内）：
+            //   * 顶部 "Vertex Count: N / kMaxVertices"
+            //   * 顶点表：每行 # / X / Y / [×] Remove 按钮
+            //   * 底部 [+ Add Vertex]（顶点已满时 disabled）
+            //
+            // 标准 SchemaInspector property 走"左列 PropertyLabel + 右列控件"
+            // 双列布局；顶点表整段挂在右列。本字段 prop.label 由外层
+            // PropertyLabel 已经画出（"Vertices" 文字 + tooltip）；右列内不再
+            // 重画 label。
+            using Orange::Engine::Physics::PolygonDesc;
+
+            PolygonDesc oldVal{};
+            prop.get(component, &oldVal);
+            PolygonDesc newVal = oldVal;
+            bool        changed = false;
+
+            ImGui::BeginGroup();
+            ImGui::Text("Count: %u / %u",
+                        static_cast<unsigned>(newVal.count),
+                        static_cast<unsigned>(PolygonDesc::kMaxVertices));
+
+            // 按 close 图标实际尺寸计算右侧预留：SmallButton 与 Button 不同，
+            // 只吃 FramePadding.x 不吃 FramePadding.y。Inspector 右列是 stretch
+            // 列，用户拖窄面板时 avail 会小到 < 100px——此时不能 clamp 到固定
+            // 宽度，必须让 DragFloat2 主动收缩，按钮才能稳定贴右端。
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float closeBtnW =
+                ImGui::CalcTextSize(Orange::Editor::Theme::Icon::GetClose()).x
+                + style.FramePadding.x * 2.0f;
+            for (std::uint32_t i = 0; i < newVal.count; ++i)
+            {
+                ImGui::PushID(static_cast<int>(i));
+                float widgetW =
+                    ImGui::GetContentRegionAvail().x - closeBtnW - style.ItemSpacing.x;
+                if (widgetW < 40.0f) { widgetW = 40.0f; }
+                ImGui::SetNextItemWidth(widgetW);
+                glm::vec2 v = newVal.vertices[i];
+                if (ImGui::DragFloat2("##xy", &v.x, 0.01f, 0.0f, 0.0f, "%.3f"))
+                {
+                    newVal.vertices[i] = v;
+                    changed = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton(Orange::Editor::Theme::Icon::GetClose()))
+                {
+                    for (std::uint32_t j = i; j + 1 < newVal.count; ++j)
+                    {
+                        newVal.vertices[j] = newVal.vertices[j + 1];
+                    }
+                    newVal.vertices[newVal.count - 1] = glm::vec2{0.0f};
+                    --newVal.count;
+                    changed = true;
+                    ImGui::PopID();
+                    break;  // 容器变更，跳出本帧循环
+                }
+                ImGui::PopID();
+            }
+
+            const bool canAdd = (newVal.count < PolygonDesc::kMaxVertices);
+            ImGui::BeginDisabled(!canAdd);
+            if (ImGui::SmallButton("+ Add Vertex"))
+            {
+                // 新顶点放在最后一个顶点附近（+0.5 X），方便用户后续微调；
+                // 顶点数为 0 时放原点。
+                glm::vec2 seed{0.0f};
+                if (newVal.count > 0)
+                {
+                    seed = newVal.vertices[newVal.count - 1] + glm::vec2{0.5f, 0.0f};
+                }
+                newVal.vertices[newVal.count] = seed;
+                ++newVal.count;
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            if (!canAdd && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("Polygon 顶点已达 Box2D 上限 %u",
+                                  static_cast<unsigned>(PolygonDesc::kMaxVertices));
+            }
+            ImGui::EndGroup();
+
+            if (changed)
+            {
+                prop.set(component, &newVal);
+                host.cmdStack.Push(std::make_unique<SetFieldValueCommand<PolygonDesc>>(
+                    entity, fieldKey, oldVal, newVal,
+                    MakeFieldApply<PolygonDesc>(&host, entity, &schema, prop.set)));
+            }
+            break;
+        }
+        case PropertyType::EdgeChainVertices:
+        {
+            // 与 PolygonVertices case 同结构 + 多 isLoop checkbox。
+            using Orange::Engine::Physics::EdgeChainDesc;
+
+            EdgeChainDesc oldVal{};
+            prop.get(component, &oldVal);
+            EdgeChainDesc newVal = oldVal;
+            bool          changed = false;
+
+            ImGui::BeginGroup();
+            ImGui::Text("Count: %u / %u",
+                        static_cast<unsigned>(newVal.count),
+                        static_cast<unsigned>(EdgeChainDesc::kMaxVertices));
+
+            // 与 PolygonVertices case 同款右侧预留——按图标实际尺寸算，
+            // 不再 clamp 到固定宽度，确保窄列下 Remove 按钮稳定贴右端。
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float closeBtnW =
+                ImGui::CalcTextSize(Orange::Editor::Theme::Icon::GetClose()).x
+                + style.FramePadding.x * 2.0f;
+            for (std::uint32_t i = 0; i < newVal.count; ++i)
+            {
+                ImGui::PushID(static_cast<int>(i));
+                float widgetW =
+                    ImGui::GetContentRegionAvail().x - closeBtnW - style.ItemSpacing.x;
+                if (widgetW < 40.0f) { widgetW = 40.0f; }
+                ImGui::SetNextItemWidth(widgetW);
+                glm::vec2 v = newVal.vertices[i];
+                if (ImGui::DragFloat2("##xy", &v.x, 0.01f, 0.0f, 0.0f, "%.3f"))
+                {
+                    newVal.vertices[i] = v;
+                    changed = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton(Orange::Editor::Theme::Icon::GetClose()))
+                {
+                    for (std::uint32_t j = i; j + 1 < newVal.count; ++j)
+                    {
+                        newVal.vertices[j] = newVal.vertices[j + 1];
+                    }
+                    newVal.vertices[newVal.count - 1] = glm::vec2{0.0f};
+                    --newVal.count;
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
+
+            const bool canAdd = (newVal.count < EdgeChainDesc::kMaxVertices);
+            ImGui::BeginDisabled(!canAdd);
+            if (ImGui::SmallButton("+ Add Vertex"))
+            {
+                glm::vec2 seed{0.0f};
+                if (newVal.count > 0)
+                {
+                    seed = newVal.vertices[newVal.count - 1] + glm::vec2{0.5f, 0.0f};
+                }
+                newVal.vertices[newVal.count] = seed;
+                ++newVal.count;
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            if (!canAdd && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("EdgeChain 顶点已达上限 %u（超长链拆段处理）",
+                                  static_cast<unsigned>(EdgeChainDesc::kMaxVertices));
+            }
+
+            bool loopVal = newVal.isLoop;
+            if (ImGui::Checkbox("Loop", &loopVal))
+            {
+                newVal.isLoop = loopVal;
+                changed = true;
+            }
+            ImGui::EndGroup();
+
+            if (changed)
+            {
+                prop.set(component, &newVal);
+                host.cmdStack.Push(std::make_unique<SetFieldValueCommand<EdgeChainDesc>>(
+                    entity, fieldKey, oldVal, newVal,
+                    MakeFieldApply<EdgeChainDesc>(&host, entity, &schema, prop.set)));
             }
             break;
         }

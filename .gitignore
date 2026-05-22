@@ -51,3 +51,10 @@ editor_settings.json
 # 分文件 + manifest，每次 Save 都会重落，入库会产生持续 diff 噪音。需要
 # 时由编辑器从 demo.scene.json 重新生成。
 assets/scenes/splits/
+
+# Demo 占位模型资产（vampire / backpack / cyborg / nanosuit / planet / rock，
+# 合计 ~110MB，源自 Learn-OpenGL 教学资产）：v0.x 期 demo 场景占位用，跟
+# `assets/environments/*.hdr` 同档思路 —— 不进 git 主线避免 hot path 历史
+# 膨胀，由测试人员按需本地拉取。第一款游戏拉动时由项目侧自备美术资产，
+# 这套 demo 资产不进发行环境。
+assets/Models/

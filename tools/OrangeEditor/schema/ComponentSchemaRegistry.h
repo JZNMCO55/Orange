@@ -256,6 +256,28 @@ public:
         return *this;
     }
 
+    // 注册一个自定义"枚举型"字段 —— 与 FieldEnum<> 区别：FieldEnum 走 NTTP
+    // member pointer 直接对接 C++ enum 成员；FieldCustomEnum 用 caller 提供
+    // 的 getFn / setFn，marshal 类型固定 int，PropertyType 强制 Enum。
+    //
+    // 典型用例：ColliderComponent.shape 是 std::variant，需要按"variant 的
+    // alternative 编号"（shape.index()）暴露给 Inspector Combo 切换。该
+    // 字段在 C++ 层没有原生 enum 成员，必须走 FieldCustomEnum + lambda 内
+    // 完成 variant ↔ int 双向转换。后续 .EnumNames(...) 提供项名表。
+    ComponentSchemaBuilder& FieldCustomEnum(const char* name, const char* label,
+                                            PropertyDescriptor::GetFn getFn,
+                                            PropertyDescriptor::SetFn setFn)
+    {
+        PropertyDescriptor pd{};
+        pd.name  = name;
+        pd.label = label;
+        pd.type  = PropertyType::Enum;
+        pd.get   = getFn;
+        pd.set   = setFn;
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
     // v0.5 c1：AssetRef 字段注册入口。get/set 类型擦除媒介是 std::string
     // （资源相对路径，如 "assets/meshes/cube.mesh"）。component 内字段实际
     // 类型（AssetHandle<T> / MaterialInstance*）与 path 的双向映射由 caller
