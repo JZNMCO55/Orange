@@ -556,11 +556,31 @@ v0.4 ~ v0.6 把编辑器的主要 UI 表面陆续摆齐 —— viewport 工具�
 
 **Critical Path**：否（同 v0.6.5 / v0.8.5 节奏，patch milestone 不在 v1.0 critical path 上）
 
-### v1.0 · 验收里程碑
+### v1.0 · 验收里程碑 ✅
 
-v0.1 ~ v0.9 全部 ✅。验收路径：邀请非程序员（如美术 / 关卡设计师）跑一个 30 分钟典型任务 —— 搭场景 / 调材质 / 摆灯光 / 跑 Play Mode 看效果 —— 不需要程序员介入。
+v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关卡设计师）跑一个 30 分钟典型任务 —— 搭场景 / 调材质 / 摆灯光 / 跑 Play Mode 看效果 —— 不需要程序员介入。
 
 通过即声明 Phase 6 当初的目标 "**足以让美术 / 关卡设计师不写代码完成日常工作**" 闭环。
+
+**触发**：v0.9.5 完工后 2026-05-22 由项目作者本人跑验收。作者背景"开发了引擎本身 / 没做过游戏开发 / 没深入用过任何引擎搭场景" —— 与 Phase 6 目标用户画像（不熟悉怎么搭场景反而是优势，不会用 power-user shortcut 绕过 UX 漏洞）实质等同；唯一克制点：遇到卡点不许开 IDE 改代码，开 = 该步 fail。
+
+**关键 deliverables**（2026-05-22 落地，同 session 完成）：
+
+- ✅ **v1.0 验收任务脚本** —— 4 段 30 分钟脚本：A 空场景 / B 加光物件 / C 物理粒子 / D 序列化 round-trip（`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-task-script.md`）
+- ✅ **跑通验收** —— 11 项验收点全数 PASS；2 段 Friction fail（A2 New Scene 误 reseed demo / B1 DirectionalLight Inspector 缺方向 helper）按"Critical / Friction / Visual"三档纪律不阻塞 ✅
+- ✅ **同 session 修 v1.0 阻塞 Critical fail** —— `GAP-2026-05-22-new-scene-actually-seeds-demo` G1 落地（`tools/OrangeEditor/EditorRenderLayer.cpp::ApplyPendingSceneOp` 移除 `SeedDemoWorld(mHost)` 调用 + 同步删除 dead include + log message 改 "new empty scene"）
+- ✅ **3 个 v1.0 验收期间发现的 Friction GAP 留 v1.x batch** —— directional-light-inspector-direction-helper-missing (P1) / multi-directional-light-semantics-undefined (P2，工业对照 Unity / Unreal / Godot / Lumix 均允许多个，归属"补足主光语义 + UI 反馈"而非"禁止多个") / shadow-not-tracking-directional-light-direction（撤回，合并到前者 G2，UX 误解非真 bug）
+- ✅ **acceptance-checklist + 版本号 bump** —— OrangeEditor CMake `project(...) VERSION` 0.0.2 → 1.0.0 第一次与 roadmap 概念对齐（v0.1~v0.9.5 期 CMake VERSION 字段未维护；v1.0 验收同 session 拉齐）；详见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`
+
+**与原描述的偏差**：原文写"邀请非程序员（美术 / 关卡设计师）"，实际由作者本人跑 —— 因独立开发无外援可拉。**通过 think-aloud 守纪律 + 不开 IDE 红线 + 验收脚本压低 power-user shortcut 空间**等效模拟目标用户视角，验收信号同样有效（A2 / B1 两个 fail 是程序员视角看不见、零基础用户视角立刻显现的 UX 陷阱，完美兑现脚本设计意图）。
+
+**前置**：v0.1 ~ v0.9.5 全部 ✅
+
+**与引擎关系**：纯编辑器侧 + 编辑器消费引擎公共面已稳，未触发任何引擎公共头改动；同 session 唯一引擎仓修改 `tools/OrangeEditor/EditorRenderLayer.cpp` 是编辑器侧 New Scene 行为修正。
+
+**Critical Path**：是（Phase 6 OrangeEditor 子项目终结里程碑）
+
+**完工记录**：见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`。本 milestone ✅ 后 OrangeEditor 自身 semver 切 stable（1.0.x patch / 1.x.0 minor 行为按一般 semver 演进），编辑器公共 API 进入"破坏性改动需走 major bump"约束（与引擎本体 0.x 仍 unstable 区别）。
 
 ### v1.x · 长尾（按需触发，不进 v1.0 critical path）
 

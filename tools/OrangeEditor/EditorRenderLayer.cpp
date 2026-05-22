@@ -5,7 +5,6 @@
 
 #include "EditorRenderLayer.h"
 
-#include "DemoWorld.h"
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
@@ -735,17 +734,19 @@ void EditorRenderLayer::ApplyPendingSceneOp()
 
     switch (op) {
         case SceneOp::New: {
+            // v1.0：菜单 label "New Scene" 必须真的给用户一个空场景，不再
+            // 顺手种 demo entity（程序员便利与零基础用户预期严重不符，v1.0
+            // 验收脚本段 A 第 2 步首例 Critical fail）。需要 demo 资产时走
+            // `Open Scene → demo.scene.json`。
             mHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
-            // v0.6 c4：partition 与 pWorld 同生命周期，scene swap 时一并重建。
-            // 默认构造自动注册 "default" layer，SeedDemoWorld 内挂的 entity
-            // 在没显式 SetLayerOf 时自然归 default。
+            // partition 与 pWorld 同生命周期；空 World 时仅保留默认构造自
+            // 动注册的 "default" layer。
             mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
-            SeedDemoWorld(mHost);  // 与启动期一致；后续真要"空场景"再做"New Empty"
             mHost.scene.currentScenePath.clear();
             mHost.scene.dirty = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
-            ORANGE_LOG_INFO("[OrangeEditor] new scene (seeded demo world)");
+            ORANGE_LOG_INFO("[OrangeEditor] new empty scene");
             break;
         }
         case SceneOp::Open: {

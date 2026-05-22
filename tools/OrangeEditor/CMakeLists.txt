@@ -28,7 +28,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(OrangeEditor
-    VERSION   0.0.2
+    VERSION   1.0.0
     LANGUAGES CXX
     DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器")
 
@@ -136,6 +136,7 @@ endif ()
 add_executable(OrangeEditor
     main.cpp
     DemoWorld.cpp
+    ColliderDebugDraw.cpp
     EditorCameraControl.cpp
     EditorHierarchy.cpp
     EditorGizmoMath.cpp

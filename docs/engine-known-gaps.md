@@ -271,6 +271,325 @@ vec4 uMRA        //  16
 
 ---
 
+## GAP-2026-05-21-collider-polygon-edgechain-interactive-edit
+
+- **发现方**：OrangeEditor 用户验收（Collider Polygon / EdgeChain Inspector 试用）
+- **发现日期**：2026-05-21
+- **一句话定性**：Polygon / EdgeChain 顶点编辑当前只能在 Inspector 内 DragFloat2 输数字，用户必须心算坐标 ↔ viewport 位置反向映射，无法直接在视口点击 / 拖拽顶点；这是 Collider 编辑 UX 长期断裂的下一环（继 ColliderDebugDraw wireframe 可视化之后）
+
+### 触发场景
+
+- 用户加 Polygon Collider 后：viewport 已能看到 wireframe（本 session 落地的 `tools/OrangeEditor/ColliderDebugDraw.{h,cpp}`），但调形状必须切到 Inspector 一行一行改 X / Y 数字
+- 同款痛点 EdgeChain 更严重：典型用例（地形折线、自定义边界）顶点多达十几个，纯数字输入工作流不可用
+- 工业标准做法是 viewport 内点击加点 / 拖拽现有点 / 双击或右键删点；OrangeEditor 当前 viewport 鼠标事件全部走 Gizmo + Selection，没有"polygon edit mode"的子状态机
+
+### 缺什么（按依赖拆）
+
+#### G1 · "Polygon edit mode" 全局状态
+
+- `EditorSceneContext` 或新拆 `EditorColliderEditState` 加 "当前正在编辑哪个 entity 的哪个 collider 字段（Polygon / EdgeChain）"状态
+- 与 Gizmo（TranslateGizmo / RotateGizmo / ScaleGizmo）互斥：进入 edit mode 时 Gizmo 隐藏 / 不响应鼠标
+- 进入 / 退出入口：Inspector 段 "Edit in Viewport" 按钮 + Esc 退出
+- 参考：`vendor/LumixEngine/src/editor/spline_editor.cpp`（同栈 spline 顶点编辑，与 polygon 顶点几何同型）
+
+#### G2 · Viewport 顶点 picking
+
+- ColliderDebugDraw 已经能画顶点连线；增加"顶点 hit-test"：屏幕 → 世界 ray，与 entity Transform XY 平面相交，找最近顶点（screen-space 距离 < N px 命中）
+- ScenePanel 鼠标事件路由加分支：edit mode 期间 LMB 点击 → 选顶点 / 拖拽更新 / 空白处加新顶点；RMB 或双击 → 删除点中顶点
+- 视觉反馈：选中顶点高亮（hover 与 picked 两态），未选 / 选中两色与现有 selection 色系一致
+
+#### G3 · 命令栈集成（防 undo 栈爆）
+
+- 每个顶点编辑动作走 `SetFieldValueCommand<PolygonDesc>` / `SetFieldValueCommand<EdgeChainDesc>` 整值写入
+- 拖拽过程一帧一个命令会爆栈：参 v0.4 DragFloat 同款 coalesce 策略（按 fieldKey + 短时 window 合并），fieldKey 沿用 schema 注册的 `collider.shape` 串
+- "加点" / "删点" 是离散动作，单独走一条命令；"拖点" 是连续动作走 coalesce
+
+### 期望验收
+
+- Inspector 段 Polygon / EdgeChain 出现 "Edit in Viewport" 按钮，进入后 Gizmo 隐藏 + viewport 内见高亮顶点
+- viewport 内：空白处 LMB 点击在该位置加新顶点；现有顶点 LMB 拖拽实时更新（拖拽期间 wireframe 实时跟随）；现有顶点 RMB / 双击删除
+- 全部动作走命令栈：Undo / Redo 能逐步回放（拖拽一次 = 一条 coalesced 命令）
+- Esc 退出 edit mode 恢复正常 Gizmo / Selection
+
+### 状态
+
+- **登记**：2026-05-21
+- **关联**：本 session 已落地的 ColliderDebugDraw wireframe 可视化（前置基础）；本 session 同时修复 PolygonVertices / EdgeChainVertices Inspector Remove 按钮窄列越界（顺手 UX 修，不在本 GAP 范围）
+- **归属**：未拍板；候选 OrangeEditor v0.x 独立 milestone（与 v0.7 Animation 子模式 / v1.0 验收 排序优先级未定）
+
+---
+
+## GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention
+
+- **发现方**：OrangeEditor 用户验收（demo.scene.json Tower 底面 z-fight）
+- **发现日期**：2026-05-21
+- **一句话定性**：作者在场景里手动摆贴地 / 贴墙物体时，容易让 mesh 与 ground / 兄弟面**完全共面**（典型：cube 底面 y = ground 顶面 y），主 pass 渲染立刻出现 z-fighting 斜条纹；编辑器目前没有任何"作者无意共面"的检测 / 警告 / 吸附辅助，作者必须自己肉眼对照纹理瑕疵反推问题源
+
+### 触发场景
+
+- `demo.scene.json` Tower entity：cube.mesh + position.y = 0.5 + scale.y = 2.0 → 底面 y = -0.5；同时 Ground 是 plane.mesh + position.y = -0.5 → 顶面 y = -0.5；**两面在 y = -0.5 完全共面**，主 pass `depthCompareOp = LessOrEqual` 导致后画的 fragment 沿对角线随机覆盖前画的（diamond rasterization 的 tie-breaking 表现）
+- 修法只能是 content 侧——把 Tower y 抬 1mm（0.5 → 0.501）让底面 y = -0.499 分开 ground 顶面 y = -0.5；shadow slope-scaled bias / polygon offset / reverse-z 都救不了 mesh 真的几何共面的情况
+- 同款问题潜伏在任意"美术摆贴地物体"场景：墙体贴 ground、装饰物贴墙、楼梯踏面贴墙等。OrangeEditor v0.x 期人工对位摆物，不撞上才怪
+
+### 引擎纪律对照
+
+- CLAUDE.md `Pipeline::SetupRhiResources` depth compare 用 `LessOrEqual` 是工业标准选择（透明合批 / decal 等场景需要 ≤ 语义），切 `Less` 会引入新一类问题，不动
+- shadow path 的 `depthBias = 0.005 + PCF` 已经在用，但 acne 与 mesh-vs-mesh z-fight 是两个独立问题，bias 治不了 mesh 共面
+
+### 缺什么（按依赖拆）
+
+#### G1 · 编辑器共面检测 + Inspector 警告
+
+- 选中 entity 时，编辑器后台跑一次 AABB-vs-AABB 共面查询：本 entity 的 6 个面分别与场景内"邻近 entity"（一定距离阈值内）的对应面做 ε-equal 比较，命中则在 Inspector 的 Transform 段或新增 "Geometry Warnings" 段显示红字提示
+- 提示文案至少给出：哪一面（top/bottom/front/back/left/right）与哪个 entity 的哪一面共面、当前两面间距（可能是 0 或 ±ε）
+- 实现侧考虑：每帧 N² 共面查询成本高，只在 selection 变化或 Transform 改动时触发，缓存到下次失效；或者只对 selection 周边 R 米内的 entity 做查询
+
+#### G2 · "贴地 / 贴边吸附"工具默认插入 ε 偏移
+
+- v0.x 后续 Gizmo 增强（snap to ground / snap to face）时，吸附逻辑默认在贴合方向上插入 1mm（或可配置 ε）偏移而非真 0
+- ε 值挂在 EditorState 或编辑器全局 config（默认 0.001，可调）
+- 与 G1 配合：吸附插入 ε 后 G1 不再触发警告
+
+#### G3 · scene 文件保存时的"安全距 lint"（可选）
+
+- Save scene 时跑一次 G1 同款 AABB 共面扫描，若命中弹 modal 警告"以下 entity 与邻居共面，可能在运行时 z-fight：[列表]，是否继续保存？"
+- 严格度低于 G1（保存仍允许），但避免 .scene.json checkin 到仓库时悄悄带共面瑕疵
+
+### 期望验收
+
+- 加载 demo.scene.json 时如 Tower y 退回 0.5（人为复原），Inspector 选中 Tower 立刻见红字警告"Tower.bottom 与 Ground.top 共面（间距 0.000m）"
+- 用 "snap to ground" 工具把 Tower 拖到 ground 上，落点 y 自动是 -0.499（ε=0.001）而非 -0.5
+- scene save 时若有共面，弹 modal 询问
+
+### 状态
+
+- **登记**：2026-05-21
+- **关联**：本 session 已通过 content fix 把 Tower y 从 0.5 抬到 0.501 解决 demo.scene.json 当前可见 z-fight；本 GAP 是"防再次发生"的工程化方向
+- **归属**：未拍板；候选 OrangeEditor v0.x 独立 milestone（G1 优先级 > G2 > G3；G1 可独立小 milestone 落地，G2 / G3 等吸附工具 / scene save UX 整骨时一起做）
+
+---
+
+## GAP-2026-05-22-new-scene-actually-seeds-demo
+
+- **发现方**：OrangeEditor v1.0 验收脚本（作者本人跑，段 A 第 2 步）
+- **发现日期**：2026-05-22
+- **一句话定性**：`File → New Scene` 菜单 label 与实际行为严重不符 —— 用户期望"打开空白场景从零搭"，实际是"重建 World + 重新种 SeedDemoWorld（13 个 placeholder entity）"；对零基础用户具备误导性，体感"菜单点了没反应 / 打不开新场景"
+
+### 触发场景
+
+- v1.0 验收脚本（`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-task-script.md`）段 A 第 2 步
+- 启动 OrangeEditor → 自动加载 `assets/scenes/demo.scene.json`（PBR showcase 24 entities）→ 点 `File → New Scene` → 画面切到 SeedDemoWorld（13 entities，含 Floor/Wall/Cube/粒子/DragonBones placeholder）
+- 程序员视角：知道 SceneOp::New 调 SeedDemoWorld，"画面有东西"是预期；用户视角：期望空场景但仍看到一堆 entity，体感"打不开"
+- 这是 v1.0 验收脚本捕获的**第一个 Critical fail 信号**，完美兑现了脚本设计意图（程序员看不见的 UX bug 在零基础用户视角立刻显现）
+
+### 证据
+
+`tools/OrangeEditor/EditorRenderLayer.cpp:737-747` `SceneOp::New` 分支：
+
+```cpp
+case SceneOp::New: {
+    mHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
+    mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
+    SeedDemoWorld(mHost);  // 与启动期一致；后续真要"空场景"再做"New Empty"
+    ...
+```
+
+代码注释直接承认这是已知设计取舍（"后续真要'空场景'再做'New Empty'"）。
+
+### 缺什么
+
+#### G1 · `New Scene` 行为改为真·空场景
+
+- `SceneOp::New` 路径**移除** `SeedDemoWorld(mHost)` 调用，World 重建后保持空 entity 列表
+- viewport 应只显示 grid + sky（默认设置）+ 顶部 toolbar，不含任何 ECS entity
+- Hierarchy 面板显示空列表（或 "No entities" 占位文案）
+- Inspector 显示 "No entity selected" 状态
+
+#### G2 ·（可选）保留 "Reset to Demo" 入口
+
+- 如果有意保留"程序化 demo 重置"工作流（用于演示 / 内部调试），加独立菜单项 `File → Reset to Demo Scene`，与 `New Scene` 拆开
+- 优先级低 —— 真要演示 demo 用 `File → Open Scene → demo.scene.json` 走 disk-loaded 路径即可，未必需要程序化 reseed
+
+### 期望验收
+
+- 启动 OrangeEditor → 点 `File → New Scene`：
+  - Hierarchy 面板空白（或空状态占位）
+  - Scene viewport 只剩 grid + sky，看不到任何 mesh / 粒子 / 灯
+  - Inspector "No entity selected"
+  - 顶部 menu bar scene 路径 indicator 显示 `[Untitled]`
+- 然后能正常进段 A 第 3 步：`Create Entity` → Add Component → 等等，从零搭起
+
+### 状态
+
+- **登记**：2026-05-22
+- **关闭**：2026-05-22（v1.0 验收前 G1 落地，详见"处理记录"段）
+- **优先级**：~~**P0（v1.0 阻塞）**~~ → 已修
+- **归属**：~~OrangeEditor v1.0 验收前修复 batch~~ → 同 session 落地
+- **关联**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-task-script.md` 段 A 第 2 步
+
+---
+
+## GAP-2026-05-22-directional-light-inspector-direction-helper-missing
+
+- **发现方**：OrangeEditor v1.0 验收脚本（作者本人跑，段 B 第 2 步）
+- **发现日期**：2026-05-22
+- **一句话定性**：DirectionalLight Inspector 段无任何 helper / tooltip / readonly preview 提示"光向由 Transform.rotation 派生"；零基础用户看到段内只有 color / intensity / castsShadow 三个字段，找不到"方向"控件，无法自行推断要去 Transform 段改 rotation
+
+### 触发场景
+
+- 段 B 第 2 步用户问"我没看到 direction，这一步是设置 Light 的位置吗？"
+- 注：脚本原文表述错误（"direction 拖到 (-0.3, -1.0, -0.3)"按已废 schema 写）；但即使脚本正确，UI 上也缺乏自发现性
+
+### 证据
+
+- `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp:41-62` DirectionalLight schema 仅 color / intensity / castsShadow（GAP-2026-05-16-directional-light-transform-decoupled 落地后）
+- 代码注释 line 44-48 明确说"方向字段已废 ... 用户旋转 entity ... 即可改光向，与 Unity / Unreal / Godot 同款工业惯例"——心智模型正确，但**没暴露给 UI 用户**，只暴露给了读源码的开发者
+
+### 缺什么
+
+#### G1 · DirectionalLight schema 加 helper 文案
+
+- Inspector 段开头加一行 TextDisabled / 浅色 helper："Direction is derived from Transform.rotation. Adjust rotation above to change light direction."
+- 或在 castsShadow 之后加 readonly preview："Computed direction: (x, y, z)"，让用户改 Transform.rotation 时实时看到方向向量
+
+#### G2 · Transform 段对带 Light component 的 entity 加 tooltip
+
+- 选中带 DirectionalLight 的 entity 时，Transform.rotation 字段 tooltip：rotation 决定光向；position 不影响（方向光来自无穷远）。同样规则 PointLight 反之（position 决定光位、rotation 无效）
+
+### 期望验收
+
+- 零基础用户选 Sun → 在 DirectionalLight 段 5 秒内通过 helper 文案得出"去 Transform 改 rotation"结论
+- 改 Transform.rotation 时能看到 computed direction 实时变化
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P1（Friction，不阻塞 v1.0）** —— 流程"能走通"（用户经引导后能正确操作），仅缺 UX 自发现性
+- **归属**：OrangeEditor v1.x UX 改进 batch
+- **关联**：v1.0 验收脚本段 B 第 2 步；脚本本身也需修订（按当前 schema 改成"选 Sun → Transform → rotation"）
+
+---
+
+## GAP-2026-05-22-shadow-not-tracking-directional-light-direction
+
+- **发现方**：OrangeEditor v1.0 验收脚本（作者本人跑，段 B / 段 C）
+- **发现日期**：2026-05-22
+- **一句话定性**：用户调整 Sun entity 后，地面 / cube 投影**不随光照变化**；根因待诊断——可能是 (A) Pipeline live-update 真 bug，或 (B) 用户改了 Transform.position 期望阴影变 = UX 误解（DirectionalLight 数学上不依赖 position）
+
+### 触发场景
+
+- v1.0 验收脚本段 B / 段 C，用户对 Sun entity 做"光照的移动"后阴影方向不变
+
+### 证据
+
+- `src/render/Pipeline.cpp:3164` 和 `:4931` 两处 RenderScene 入口都**每帧**从 `tc->rotation` 重新派生 `activeLightDir`，然后 `ComputeLightViewProj(activeLightDir)` 算 shadow VP；**理论上无缓存、是 live 的**
+- 也就是说：改 Transform.rotation 阴影应该跟随；改 Transform.position 阴影应该不变（DirectionalLight 不依赖 position）
+
+### 待诊断澄清问题
+
+1. 用户测试时改的是 Sun.Transform.**rotation** 还是 **position**？
+2. 若改 rotation 阴影不动 → 真 Pipeline bug，需深入调查（lightVP 缓存？shader uniform 同步？shadow descriptor live update？）
+3. 若改 position 阴影不动 → 不是 bug，是 UX 误解，归并到 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] 的 G2
+
+### 缺什么（视诊断结果分支）
+
+**分支 A（真 bug，改 rotation 阴影不动）**：
+
+- 调查 shadow pass 是否有缓存 lightVP / shadow descriptor 没每帧更新
+- 若是 shader uniform 同步问题，确保 main pass 也每帧 push 新 lightVP
+- 修复后回归：旋转 Sun Transform.rotation.Y 90° 看 demo.scene 阴影方向
+
+**分支 B（UX 误解，改 position 期望阴影变）**：
+
+- 归并到 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] 的 G2
+
+### 期望验收
+
+- 旋转 Sun.Transform.rotation.Y 0→90→180 → 地面投影方向同步旋转
+- 改 Sun.Transform.position → 投影方向**不变**（正确行为）
+
+### 状态
+
+- **登记**：2026-05-22
+- **关闭**：2026-05-22（**撤回** —— 分支 B 确认）
+- **撤回原因**：用户现场验证 —— 改 Sun.Transform.**rotation** 时阴影正确跟随；改 Sun.Transform.**position** 阴影不变（这是 DirectionalLight 数学正确行为，光从无穷远来，position 不参与 ComputeLightViewProj，参 `src/render/Pipeline.cpp:3164` `:4931` 每帧从 rotation live 派生）
+- **合并去向**：UX 自发现性问题归并到 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] G2 —— Transform.rotation 字段对带 DirectionalLight 的 entity 加 tooltip 说明"position 不影响光向"
+- **优先级**：原 P0 撤销 → 合并条目维持 P1，不阻塞 v1.0
+- **关联**：v1.0 验收脚本段 B / 段 C；[[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]]
+
+---
+
+## GAP-2026-05-22-multi-directional-light-semantics-undefined
+
+- **发现方**：OrangeEditor v1.0 验收讨论（用户提出"方向光是不是不应该能创建多个？感觉应该是全局光源"）
+- **发现日期**：2026-05-22
+- **一句话定性**：场景中存在 N 个 DirectionalLight 时，Pipeline 隐式只取迭代器第一个参与光照 / 阴影，多余的静默忽略，UI 无任何反馈 → 用户改第 2 个 DirLight 的颜色 / 方向 / 强度时 viewport 毫无反应，体感"引擎坏了"
+
+### 触发场景
+
+- 用户调研工业惯例时直觉认为"方向光是全局的，应该单例"
+- 实测 Hierarchy 可建任意多个 DirectionalLight，Inspector 各自独立配置看似"都在工作"
+- 但实际只第一个起效，其他完全无效
+
+### 证据
+
+- `src/render/Pipeline.cpp:3153-3164`（第一条 RenderScene 路径）：
+  ```cpp
+  auto view = reg.view<DirectionalLight>();
+  if (!view.empty()) {
+      const auto entity = view.front();   // ← first-found，无主光标记
+      activeLight = &view.get<DirectionalLight>(entity);
+      ...
+  }
+  ```
+- `src/render/Pipeline.cpp:4920-4931`（RenderOffscreen 路径）：同款 first-found
+- `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp:41-62` DirectionalLight schema 无任何 "primary / fill" 标识字段
+- 无 warning log / Hierarchy badge / Inspector helper 提示多 DirLight 语义
+
+### 工业对照（用户调研已收集）
+
+| 引擎 | 允许多个 | 多个时的处理 |
+|------|---------|------------|
+| Unity URP | ✅ | Main Light 参与阴影；其他作为 additional 只贡献漫反射 |
+| Unreal | ✅ | 推荐一个 movable 做 dynamic shadow，其他 stationary 关阴影 |
+| Godot 4 | ✅ | 多个叠加，但只一个 DirectionalLight3D 能开 shadow |
+| Lumix | ✅ | 类似 "main directional" 概念 |
+| **OrangeEngine 现状** | ✅（但语义未定义） | first-found，多余静默忽略 |
+
+**结论**：禁止多个会锁死 stylized fill light / 双月奇幻场景 / 时段切换等合法用例，与全部工业惯例背离 → **不禁止建多个，而是补足主光语义 + UI 反馈**。
+
+### 缺什么
+
+#### G1 · Inspector helper + Hierarchy warning（推荐 v1.x 落地）
+
+- `RegisterDirectionalLightSchema` 加段首 helper 文案：`"Only the first DirectionalLight in the scene participates in lighting and shadow. Disable additional ones to avoid surprises."`
+- Hierarchy 面板检测到 >1 个 enabled DirectionalLight 时，在非首个 entity 行加 warning icon + tooltip "Ignored: scene has another DirectionalLight as primary"
+
+#### G2 · IsPrimary 字段 + fill light 多光叠加（v2.x，待 stylized 美术真需要再做）
+
+- `DirectionalLight` 加 `bool isPrimary = false` 字段（serialize + schema bump）
+- Pipeline 优先选 `isPrimary=true` 的，其次 fallback first-found
+- 其他 DirLight 作为 fill light 进 UBO，只参与漫反射不参与 shadow（对标 Unity URP 模式）
+- 阴影仍只主光一份，避免多 shadow map 成本爆炸
+
+#### 不做
+
+- **不禁止建多个** —— 违反所有工业惯例，锁死扩展性
+
+### 期望验收
+
+- G1 ✅ 条件：建 2 个 DirectionalLight，第二个 entity Hierarchy 行有明显 warning + Inspector 段顶部 helper 文案可见；用户 10 秒内能理解"第 2 个不生效"
+- G2（如真做）✅ 条件：勾选某个 DirLight 的 IsPrimary → 该光参与阴影；其余 N-1 个仍贡献漫反射，viewport 视觉合理叠加
+
+### 状态
+
+- **登记**：2026-05-22
+- **优先级**：**P2（Friction，不阻塞 v1.0）** —— v1.0 验收脚本只用 1 个 Sun，单 DirLight 流程完整 work；多 DirLight 是 polish / 美术工作流问题
+- **归属**：G1 留 v1.x UX batch（与 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] 同 batch 落更合算）；G2 待第一款游戏 stylized 美术真需要 fill light 时再启动
+- **关联**：[[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] / `src/render/Pipeline.cpp:3153` `:4920`
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-11-point-light-and-visible-halo**（2026-05-20 落地 G1+G2，G3 留 v1.x）：
@@ -312,3 +631,5 @@ vec4 uMRA        //  16
 - **GAP-2026-05-17-scene-layer-component**（2026-05-17 落地）：LayerComponent + WorldPartition 公共面 + SceneSerialization 多文件 + manifest + Render/Physics layer.visible 过滤 + sample。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/scene/LayerComponent.h` / `include/orange/engine/scene/WorldPartition.h` / `include/orange/engine/scene/SceneSerialization.h`（SaveSplit/LoadSplit + LoadOptions.assignLayerId）/ `include/orange/engine/render/RenderScene.h`（Collect 加 partition 参数）/ `include/orange/engine/render/Pipeline.h`（SetWorldPartition）/ `include/orange/engine/physics/PhysicsWorld.h`（SetBodyEnabled/IsBodyEnabled）/ `include/orange/engine/physics/LayerVisibilitySync.h` / `src/scene/WorldPartition.cpp` / `src/scene/SceneSerialization.cpp`（SaveImpl 抽取 + SaveSplit/LoadSplit + scene/world 1.2 + scene/manifest 1.0）/ `src/scene/ComponentSerializers.cpp`（Layer 序列化器注册）/ `src/render/RenderScene.cpp` / `src/render/Pipeline.cpp` / `src/physics/PhysicsWorld.cpp` / `src/physics/LayerVisibilitySync.cpp` / `samples/12_layer_partition_demo/`
 - **GAP-2026-05-16-builtin-asset-disk-serialization**（2026-05-16 落地）：内置 mesh / material 磁盘落盘 + Scene 引用迁移到磁盘路径。详细见上文条目末尾"落地记录"节。涉及 commit：`222bd3f`（G1 + 部分 G4）/ `60eaa40`（G2 + G4 剩余）。关键改动文件：`include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshLoader.cpp` / `tools/OrangeEditor/DemoWorld.cpp` / `src/scene/ComponentSerializers.cpp` / `assets/scenes/demo.scene.json` / `assets/meshes/*.mesh` / `assets/materials/builtin/*.material`
 - **GAP-2026-05-17-mesh-vertex-normals**（2026-05-17 落地）：MeshAsset 加 VertexNormal3 + helper（ComputeFlat/SmoothNormalsFromTriangles）+ MeshLoader v2 → v3 schema bump（hasNormals + normals 段，Load 兼容 v1/v2/v3 + fallback 补算）+ Pipeline InterleavedVertex stride 20→32 加 normal attr + 6 内置 vert shader + 1 sample shader 加 inNormal（Path A 单 VID）+ toon/rim/fresnel frag 切 vNormal 替换 dFdx fallback + 8 sample/DemoWorld mesh 工厂调 ComputeSmoothNormalsFromTriangles + 顺手修 AssetRegistryTest 陈旧 kSupportedVersion 常量引用。ctest 全 43 测试通过。详细见上文条目末尾"落地记录"节。关键改动文件：`include/orange/engine/asset/MeshAsset.h` / `include/orange/engine/asset/MeshLoader.h` / `src/asset/MeshAsset.cpp`（新增） / `src/asset/MeshLoader.cpp` / `src/render/Pipeline.cpp` / `src/render/builtin_shaders/{textured_mesh,toon,rim_light,dissolve,emissive,shadow_caster}.vert.glsl` / `src/render/builtin_shaders/{toon,rim_light}.frag.glsl` / `CMakeLists.txt` / `samples/0[3-9]*/main.cpp` / `samples/1[0-2]*/main.cpp` / `samples/08_custom_shader/shaders/fresnel.{vert,frag}.glsl` / `tools/OrangeEditor/DemoWorld.cpp` / `tests/asset/AssetRegistryTest.cpp`
+- **GAP-2026-05-22-new-scene-actually-seeds-demo**（2026-05-22 落地，G1 only）：`tools/OrangeEditor/EditorRenderLayer.cpp::ApplyPendingSceneOp` `SceneOp::New` 分支移除 `SeedDemoWorld(mHost)` 调用 —— New Scene 后 World 真正空，Hierarchy 不再含 13 个 demo placeholder entity。同步删 `#include "DemoWorld.h"`（main.cpp 启动期 fallback + Reset to Demo 候选保留 DemoWorld 文件不动）；log message "new scene (seeded demo world)" → "new empty scene"；注释直接说明设计取舍（v1.0 验收脚本段 A 第 2 步首例 Critical fail，程序员便利与零基础用户预期冲突由后者胜）。G2（独立 "Reset to Demo Scene" 菜单项）按当时评估"未必需要"未做，真要演示走 `Open Scene → demo.scene.json` 即可。关键改动文件：`tools/OrangeEditor/EditorRenderLayer.cpp`
+- **GAP-2026-05-22-shadow-not-tracking-directional-light-direction**（2026-05-22 撤回）：用户现场验证 —— 改 Sun.Transform.rotation 阴影正确跟随；改 Sun.Transform.position 阴影不变（DirectionalLight 数学正确行为，参 `src/render/Pipeline.cpp:3164` `:4931` 每帧 live 派生）。**非 bug，是 UX 误解**——位置无关性未通过 UI 暴露给零基础用户。合并到 [[GAP-2026-05-22-directional-light-inspector-direction-helper-missing]] G2（Transform.rotation 字段对带 DirectionalLight 的 entity 加 tooltip）。无代码改动。

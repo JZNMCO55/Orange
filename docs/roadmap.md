@@ -427,6 +427,28 @@
 
 ---
 
+## 附录 · 零基础教程与入门文档（按里程碑拉动）
+
+**目标**：面向**没有游戏开发经验、也没有游戏引擎使用经历**的读者，产出一份"从零到做出一款小游戏"的端到端教程，落地在 Orange-Wiki 中，最终以静态站点（HTML）形式可读。
+
+**启动条件**（缺一不可）：
+- 编辑器 v1.0 完成验收（`editor-roadmap.md`），公共 API 与编辑器交互流程进入相对稳定期；0.x 期间 ABI / UI 频繁变动会让"照着抄能跑"承诺失效
+- 至少有一款用 OrangeEngine 端到端做出来的小游戏 demo 跑通（不必是 first-game slime/ori-like 完整版，但要覆盖"空项目 → 场景 → 资源 → 脚本 → 可玩"完整闭环）—— 没有真实路径不能写教程，否则只能编
+
+**格式决策**：
+- 源文件用 **Markdown** 写在 Wiki 内，构建产物是 HTML（推荐 **MkDocs Material** 或 **mdbook**）
+- **不手写 HTML**——维护成本高、跟 Wiki 现有 `prerequisites` / `see_also` frontmatter 体系割裂
+
+**归属决策**（按 ADR-006 Wiki 三层架构）：
+- **通用层** `vendor/Orange-Wiki/wiki/concepts/game-dev-101/`（暂定）——"什么是游戏循环 / ECS / transform / asset pipeline"等不依赖 OrangeEngine 的入门概念；未来其他引擎项目也能复用
+- **项目档案层** `vendor/Orange-Wiki/case-studies/orange-engine/tutorials/`——"用 OrangeEditor 拖第一个场景 / 加可控角色 / 接物理 / 配粒子"等 OrangeEngine 专属的具体路径
+
+**折中节奏**：通用层概念部分**不阻塞**于编辑器 v1.0，可在 Phase 6 末期穿插启动（这部分写完不会因 API 变动失效）；项目档案层等启动条件齐再动笔。
+
+**Critical Path**：否（与游戏侧 ship 解耦；纯文档工作）
+
+---
+
 ## 不做的事（明确排除）
 
 下列功能在引擎层**不**实现，除非有明确的游戏需求拉动：
