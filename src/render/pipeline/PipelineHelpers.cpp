@@ -1,0 +1,210 @@
+#include "PipelineHelpers.h"
+
+#include "orange/engine/core/Log.h"
+
+#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+#if defined(_WIN32)
+    #define NOMINMAX
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+#endif
+
+namespace Orange::Engine::Render::PipelineDetail
+{
+namespace
+{
+
+// 解析当前可执行体所在目录。CWD 与 .exe 目录可能不一致；把内置
+// passthrough / fullscreen .spv 锚定到 .exe 同目录的
+// `shaders/orange_engine/` 更稳——同 BuiltinMaterials 的路径解析风格。
+std::filesystem::path GetExecutableDir()
+{
+#if defined(_WIN32)
+    wchar_t buffer[MAX_PATH];
+    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len == MAX_PATH)
+    {
+        return std::filesystem::current_path();
+    }
+    return std::filesystem::path(std::wstring(buffer, len)).parent_path();
+#else
+    return std::filesystem::current_path();
+#endif
+}
+
+}  // namespace
+
+std::uint32_t PushConstantBytesFor(MaterialUniformType type) noexcept
+{
+    switch (type)
+    {
+        case MaterialUniformType::Float: return 4;
+        case MaterialUniformType::Int:   return 4;
+        case MaterialUniformType::Vec2:  return 8;
+        case MaterialUniformType::Vec3:  return 16;
+        case MaterialUniformType::Vec4:  return 16;
+        case MaterialUniformType::Mat4:  return 64;
+    }
+    return 0;
+}
+
+std::uint32_t ComputePushConstantSize(const Material& mat) noexcept
+{
+    std::uint32_t total = 0;
+    for (const auto& u : mat.uniforms)
+    {
+        total += PushConstantBytesFor(u.type);
+    }
+    return total;
+}
+
+void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc)
+{
+    Orange::Rhi::VertexBindingDesc binding{};
+    binding.mBinding   = 0;
+    binding.mStride    = sizeof(InterleavedVertex);
+    binding.mInputRate = Orange::Rhi::VertexInputRate::Vertex;
+    desc.mVertexInput.mBindings.push_back(binding);
+
+    Orange::Rhi::VertexAttributeDesc attrPos{};
+    attrPos.mLocation = 0;
+    attrPos.mBinding  = 0;
+    attrPos.mOffset   = offsetof(InterleavedVertex, position);
+    attrPos.mFormat   = Orange::Rhi::VertexFormat::Float32x3;
+    desc.mVertexInput.mAttributes.push_back(attrPos);
+
+    Orange::Rhi::VertexAttributeDesc attrUV{};
+    attrUV.mLocation = 1;
+    attrUV.mBinding  = 0;
+    attrUV.mOffset   = offsetof(InterleavedVertex, uv);
+    attrUV.mFormat   = Orange::Rhi::VertexFormat::Float32x2;
+    desc.mVertexInput.mAttributes.push_back(attrUV);
+
+    Orange::Rhi::VertexAttributeDesc attrNormal{};
+    attrNormal.mLocation = 2;
+    attrNormal.mBinding  = 0;
+    attrNormal.mOffset   = offsetof(InterleavedVertex, normal);
+    attrNormal.mFormat   = Orange::Rhi::VertexFormat::Float32x3;
+    desc.mVertexInput.mAttributes.push_back(attrNormal);
+}
+
+// 给 GraphicsPipelineDesc 加单条 Vertex stage 的 push range。
+//
+// 历史决策：曾尝试同 offset / 同 size 同时声明 Vertex + Fragment 双
+// range（让 toon / rim_light 的 fragment 端 push_constant 引用合法），
+// 但 Vulkan 校验要求 vkCmdPushConstants 的 stageFlags 必须涵盖所有重叠
+// range 的 stage——OrangeRender 当前的 `PushConstantRange::mStage` 与
+// `SetPushConstants` 都只支持单 stage，没法一次发到两段 stage，重叠双
+// range 会跑出 VK_ERROR-级 validation。
+//
+// 折中：只声明 Vertex range。textured 只 vertex 用 push_constant、不
+// 受影响；toon / rim_light 的 fragment 端读取 push_constant 会触发
+// "shader 在 X 阶段用 push constant 但 layout 没声明 X" 的 validation
+// 提示，pipeline 仍能创建但 fragment 端读到 undefined 内容——视觉正确
+// 性等到 OrangeRender 把 PushConstantRange 升级为多 stage（或 SetPushConstants
+// 支持多 stage flag）后跟进。
+void FillPushConstantRanges(Orange::Rhi::GraphicsPipelineDesc& desc, std::uint32_t size)
+{
+    if (size == 0)
+    {
+        return;
+    }
+    Orange::Rhi::PushConstantRange vs{};
+    vs.mStage  = Orange::Rhi::ShaderStage::Vertex;
+    vs.mOffset = 0;
+    vs.mSize   = size;
+    desc.mPushConstantRanges.push_back(vs);
+}
+
+std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
+{
+    const auto& positions = mesh.Positions();
+    const auto& uvs       = mesh.UVs();
+    const auto& normals   = mesh.Normals();
+    std::vector<InterleavedVertex> out(positions.size());
+    for (std::size_t i = 0; i < positions.size(); ++i)
+    {
+        out[i].position[0] = positions[i].x;
+        out[i].position[1] = positions[i].y;
+        out[i].position[2] = positions[i].z;
+        if (i < uvs.size())
+        {
+            out[i].uv[0] = uvs[i].u;
+            out[i].uv[1] = uvs[i].v;
+        }
+        else
+        {
+            out[i].uv[0] = 0.0f;
+            out[i].uv[1] = 0.0f;
+        }
+        if (i < normals.size())
+        {
+            out[i].normal[0] = normals[i].x;
+            out[i].normal[1] = normals[i].y;
+            out[i].normal[2] = normals[i].z;
+        }
+        else
+        {
+            // MeshLoader / 程序化构造路径都保证 Normals 非空；这里兜底
+            // +Y，避免极端构造路径（手工 Insert(MeshAsset) 不带 normal）
+            // 把 NaN/0 法线塞进 vertex buffer。
+            out[i].normal[0] = 0.0f;
+            out[i].normal[1] = 1.0f;
+            out[i].normal[2] = 0.0f;
+        }
+    }
+    return out;
+}
+
+std::vector<std::uint32_t> LoadSpirv(const char* relativePath)
+{
+    const auto fullPath = (GetExecutableDir() / relativePath).string();
+    std::ifstream file(fullPath, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        ORANGE_LOG_ERROR("Pipeline: 无法打开内置 SPIR-V {}", fullPath);
+        return {};
+    }
+    const std::streamsize size = file.tellg();
+    if (size <= 0 || (size % 4) != 0)
+    {
+        ORANGE_LOG_ERROR("Pipeline: SPIR-V 大小非法 ({}) for {}",
+                         static_cast<long long>(size), fullPath);
+        return {};
+    }
+    std::vector<std::uint32_t> words(static_cast<std::size_t>(size) / 4);
+    file.seekg(0);
+    file.read(reinterpret_cast<char*>(words.data()), size);
+    return words;
+}
+
+void OrangeRenderLogAdapter(::Orange::LogCategory category,
+                            ::Orange::LogLevel    level,
+                            const char*           pMessage,
+                            void* /*pUserData*/)
+{
+    if (pMessage == nullptr)
+    {
+        return;
+    }
+    const char* catStr   = ::Orange::ToString(category);
+    const char* levelStr = ::Orange::ToString(level);
+    switch (level)
+    {
+        case ::Orange::LogLevel::Info:
+            ORANGE_LOG_INFO("[OrangeRender][{}][{}] {}", catStr, levelStr, pMessage);
+            break;
+        case ::Orange::LogLevel::Warn:
+            ORANGE_LOG_WARN("[OrangeRender][{}][{}] {}", catStr, levelStr, pMessage);
+            break;
+        case ::Orange::LogLevel::Error:
+            ORANGE_LOG_ERROR("[OrangeRender][{}][{}] {}", catStr, levelStr, pMessage);
+            break;
+    }
+}
+
+}  // namespace Orange::Engine::Render::PipelineDetail

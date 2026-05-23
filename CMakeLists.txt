@@ -98,6 +98,7 @@ add_library(orange_engine STATIC
     src/render/MaterialInstance.cpp
     src/render/MaterialSystem.cpp
     src/render/Pipeline.cpp
+    src/render/pipeline/PipelineHelpers.cpp
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
     src/render/RenderScene.cpp
