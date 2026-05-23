@@ -163,6 +163,7 @@ add_executable(OrangeEditor
     command/EntityCommands.cpp
     import/ImportDispatcher.cpp
     import/MetaSidecar.cpp
+    import/ObjImporter.cpp
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
@@ -191,6 +192,16 @@ target_link_libraries(OrangeEditor PRIVATE
     OrangeEngine::orange_engine
     orange_editor_imgui
     glfw)
+
+# v1.1 T3：tinyobjloader 单 header（MIT）vendored 到 `vendor/tinyobjloader/`，
+# 与 vendor/stb 同款 in-tree single-header 模式（不走 submodule，体积可控
+# ~467KB 单文件）。include path 只暴露给 OrangeEditor target —— 引擎 runtime
+# 不消费 tinyobjloader（ADR-008 invariant "importer 全部在 tools/OrangeEditor/
+# import/，不污染 src/asset/"）。
+# CMAKE_CURRENT_LIST_DIR 是 tools/OrangeEditor/，向上两级就是 engine repo
+# 根，无论 in-tree 还是 standalone consumer build 模式都稳定指对。
+target_include_directories(OrangeEditor PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/tinyobjloader")
 
 # 与 sample / engine 同档的编译器 warning 级别 —— 编辑器作为长期演化
 # 的 first-class target，不享受任何"宽松 warning"豁免。

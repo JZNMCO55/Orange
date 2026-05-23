@@ -1,6 +1,7 @@
 #include "ImportDispatcher.h"
 
 #include "MetaSidecar.h"
+#include "ObjImporter.h"
 #include "../EditorHost.h"
 
 #include <orange/engine/asset/AssetRegistry.h>
@@ -159,13 +160,11 @@ ImportResult ImportTexture(std::string_view srcPath, EditorHost& host)
     return result;
 }
 
-ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& /*host*/)
+ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host)
 {
-    ImportResult result{};
-    result.status  = ImportStatus::NotImplemented;
-    result.message = "obj importer hooked in v1.1 T3";
-    ORANGE_LOG_WARN("ImportObjMesh: '{}': {}", srcPath, result.message);
-    return result;
+    // v1.1 T3 路由到 ObjImporter 模块（tinyobjloader IMPLEMENTATION 仅在
+    // ObjImporter.cpp 单 TU expand）。
+    return RunObjImport(srcPath, host);
 }
 
 ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& /*host*/)
