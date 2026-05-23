@@ -912,6 +912,58 @@ void TestAnimatorWithoutRegistryGraceful()
     std::fprintf(stdout, "  [PASS] animator graceful when no AnimatorRegistry supplied\n");
 }
 
+// 验证 Save → Load → Save 字节稳定（GAP-2026-05-23-editor-play-stop-entity-
+// tree-order-reversed 回归测试）。
+//
+// 没有这条 fix 之前，EnTT view<entt::entity>() 在 packed array 上的 LIFO
+// 迭代会让 Source World 写出的 entity 数组顺序与 Loaded World 重新写出的
+// 顺序完全反转——纯无业务变动的污染 diff。
+//
+// 这里构造 8 个带 Name 的 entity，跑 Save → Load → Save，比对两次产出的
+// JSON 字节是否完全一致。
+void TestSaveLoadSaveByteStable()
+{
+    const auto path1 = MakeTempScenePath("byte_stable_1");
+    const auto path2 = MakeTempScenePath("byte_stable_2");
+
+    World source;
+    for (int i = 0; i < 8; ++i)
+    {
+        Entity e = source.CreateEntity();
+        NameComponent nm;
+        nm.name = std::string{"entity_"} + std::to_string(i);
+        source.AddComponent(e, nm);
+    }
+
+    auto save1 = SceneSerialization::Save(source, path1.string());
+    assert(save1.IsOk());
+
+    World loaded;
+    auto load1 = SceneSerialization::Load(path1.string(), loaded);
+    assert(load1.IsOk());
+    assert(loaded.Size() == 8);
+
+    auto save2 = SceneSerialization::Save(loaded, path2.string());
+    assert(save2.IsOk());
+
+    // 字节级比对两份 JSON。
+    auto readAll = [](const std::filesystem::path& p)
+    {
+        std::ifstream in(p, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>()};
+    };
+    const std::string a = readAll(path1);
+    const std::string b = readAll(path2);
+    assert(!a.empty());
+    assert(a == b);
+
+    RemoveIfExists(path1);
+    RemoveIfExists(path2);
+    std::fprintf(stdout, "  [PASS] save-load-save byte stable (regression for "
+                         "entity tree order reversal)\n");
+}
+
 }  // namespace
 
 int main()
@@ -933,6 +985,7 @@ int main()
     TestAnimatorBackendNameRoundTrip();
     TestAnimatorWithoutRegistryGraceful();
     TestParticleEmitterRoundTrip();
+    TestSaveLoadSaveByteStable();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
     return 0;
 }

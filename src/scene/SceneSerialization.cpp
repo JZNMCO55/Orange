@@ -26,6 +26,7 @@
 
 #include <entt/entt.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -106,17 +107,27 @@ Result<void, ResultCode> SaveImpl(const World& world,
                                   const SaveOptions& options,
                                   const std::function<bool(Entity)>& entityFilter)
 {
-    // 1) 收集所有 live entity（可选过滤），按 view 顺序分配 0..N-1 持久 ID。
-    //    EnTT view<entt::entity>() 在 3.13 上即"所有活实体"的迭代源。
+    // 1) 收集所有 live entity（可选过滤），按 entity index 升序分配 0..N-1
+    //    持久 ID。
+    //
+    //    为什么要排序：EnTT view<entt::entity>() 在 packed array 上是 LIFO
+    //    方向迭代（后创建的先返回），所以 Save 直接按 view 写出的 entity 数
+    //    组顺序在 Save → Load → Save 往返中会反转：Load 按 JSON 顺序逐个
+    //    CreateEntity，新 World 内 EnTT ID 按 JSON 顺序单调递增，view 再
+    //    LIFO 给出的就是原始顺序的反转，二次 Save 写盘后整段 entity 数组
+    //    完整翻转，制造无业务变动的污染 diff。
+    //
+    //    按 entity index 升序排序后，写盘顺序等价于"按创建顺序"——Source
+    //    与 Loaded World 在 Save 时都会输出相同字节序列，跨机器 / 跨 session
+    //    .scene.json 字节稳定，编辑器 Play → Stop 也不再翻转 Entity Tree
+    //    显示顺序（Entity Tree 仍消费 view，但反转再反转回到原序）。
     std::vector<Entity>          entityList;
     EntityToPersistentId         idMap;
     {
         auto& reg = world.Registry();
         // 先估个容量再 push——Size() 是 World 自己维护的活实体数。
         entityList.reserve(world.Size());
-        idMap.reserve(world.Size());
 
-        std::int64_t persistentId = 0;
         for (auto e : reg.view<entt::entity>())
         {
             const Entity entity = World::FromEntt(e);
@@ -125,8 +136,27 @@ Result<void, ResultCode> SaveImpl(const World& world,
                 continue;
             }
             entityList.push_back(entity);
-            idMap.emplace(entity, persistentId);
-            ++persistentId;
+        }
+
+        std::sort(entityList.begin(), entityList.end(),
+                  [](Entity a, Entity b)
+                  {
+                      // 剥掉 version bits，只比较 index 部分；EnTT 在 entity
+                      // destroy + recycle 时 version 会递增，但 index 仍能
+                      // 反映 EnTT 内部 storage 位置，足以作为稳定 key。
+                      using Traits = entt::entt_traits<entt::entity>;
+                      constexpr auto kEntityMask = Traits::entity_mask;
+                      const auto ai = static_cast<std::uint32_t>(
+                          entt::to_integral(World::ToEntt(a))) & kEntityMask;
+                      const auto bi = static_cast<std::uint32_t>(
+                          entt::to_integral(World::ToEntt(b))) & kEntityMask;
+                      return ai < bi;
+                  });
+
+        idMap.reserve(entityList.size());
+        for (std::size_t i = 0; i < entityList.size(); ++i)
+        {
+            idMap.emplace(entityList[i], static_cast<std::int64_t>(i));
         }
     }
 

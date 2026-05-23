@@ -1061,14 +1061,21 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-23
-- **优先级**：**P1（friction）** —— 不阻塞功能，但持续制造 git diff 噪音 + 破坏 Stop 还原契约；建议纳入下一个 v1.0.x friction patch batch
-- **归属**：未拍板；候选 OrangeEditor v1.0.2+ friction patch batch
-- **关联**：本次 working tree 清理 session 已 revert v1.0.scene.json 的污染 diff，commit message 引用本 GAP
+- **关闭**：2026-05-23（同 session 落地 G2 Save 路径归一化，详见"处理记录"段）
+- **优先级**：P1（friction）—— 不阻塞功能但持续制造 git diff 噪音 + 破坏 Stop 还原契约
+- **归属**：单点 P1 friction，按"撞上即补"通道独立 commit，不进 v1.0.xx batch（引擎本体仍 0.x，无 v1.0.xx 节奏）
+- **关联**：上一个 session（commit e6833a6）revert 了 v1.0.scene.json 的污染 diff 并登记本 GAP；本 session 落地 fix
 
 ---
 
 ## 处理记录
 
+- **GAP-2026-05-23-editor-play-stop-entity-tree-order-reversed**（2026-05-23 落地 G2）：`src/scene/SceneSerialization.cpp::SaveImpl` 在收集 entityList 后追加 `std::sort` 按 EnTT entity index 升序排序（剥掉 version bits），再按排序后顺序分配 persistentId。
+  - **机制**：原 Save 直接按 `reg.view<entt::entity>()` 的 LIFO 方向迭代写出 entity 数组；Load 按 JSON 顺序逐个 `world.CreateEntity()` 使新 World 的 EnTT ID 单调递增；新 World view 再 LIFO 给出原始顺序的反转 → 二次 Save 整段 entity 数组完整翻转的污染 diff（用户原话"Stop 后顺序变反"）
+  - **修后**：按 entity index 升序排序后写盘顺序等价于"按创建顺序"，Source 与 Loaded World 在 Save 时输出相同字节序列；编辑器 Play → Stop 也不再翻转 Entity Tree 显示顺序（Entity Tree 仍消费 view 反向遍历，但反转再反转回到原序）；跨机器 / 跨 session .scene.json 字节稳定
+  - **未做** G3 / G4（无需要：G2 单点修已让 G3/G4 的目标自然达成；G3 依赖 EnTT 内部不稳健，G4 仅在需要"按 Hierarchy DFS 显示"等额外需求时再做）
+  - **回归测试** `TestSaveLoadSaveByteStable`（8 entity → Save path1 → Load → Save path2 → 字节级 `path1 == path2`）；ctest 全 43 通过
+  - **关键改动文件**：`src/scene/SceneSerialization.cpp`（`<algorithm>` include + SaveImpl entityList 排序 + idMap 分配从 view 顺序改为 sort 后顺序）/ `tests/scene/SceneSerializationTest.cpp`（新增 TestSaveLoadSaveByteStable + main 入口注册）
 - **GAP-2026-05-11-point-light-and-visible-halo**（2026-05-20 落地 G1+G2，G3 留 v1.x）：
   - **G1 PointLightComponent 公共面** ✅ —— `include/orange/engine/render/LightComponent.h` 新增 `struct PointLight { color, intensity, range, castsShadow }`，position 由 entity.Transform.position 派生（与 DirectionalLight 走 Transform.rotation 同款约定）；`src/scene/ComponentSerializers.cpp` Has/Write/Read PointLight + 注册到 GetBuiltinComponentSerializers；scene/world schema v1.4 → v1.5（minor bump，backward-compat：旧 scene 无 PointLight 字段时 entity 不参与点光路径）
   - **G2 Pipeline 多 light 收集 + shader 多 light loop** ✅ —— Pipeline 新增 `PointLightsUboData`（cap=8 PointLightStd140 + count）+ binding 5 独立 UBO（只 PBR shader 引用，其他 shader dead-code），`UpdatePointLightsUbo(world)` 每帧收集 cap=8 first-found PointLight 进 UBO + 超出 first-found 截断 + 一次性 warn；mainDescPool size += 1 UB；PBR fragment shader `pbr.frag.glsl` 加 `for i in 0..count` point light loop（物理基 inverse-square + smoothstep range cutoff，与 Cocos pointLight / Godot OmniLight 同款）；Shutdown 路径 pointLightsUbo.reset() 配套，VMA 无 leak（ctest 40/40 通过）
