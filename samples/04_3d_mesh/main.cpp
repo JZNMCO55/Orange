@@ -65,9 +65,9 @@ namespace
 {
 
 // 每个面 4 顶点，按 "从外侧看 outward CCW" 的顺序 BL → BR → TR → TL
-// 列出。配合下方 (0,2,1,0,3,2) 的索引模板，正好得到 "world-CW per
-// triangle"——经 Camera 的 Y-flip projection 翻转一次后在 framebuffer
-// 空间中是 CCW，与 Pipeline 的 FrontFace::CCW + CullMode::Back 对齐。
+// 列出。配合下方 (0, 1, 2, 0, 2, 3) 的索引模板，得到 world-CCW per
+// triangle，与 Pipeline 主 pass FrontFace::CCW + CullMode::Back 对齐
+// （朝外面是 front, 朝内面被 cull）。
 struct CubeFace
 {
     std::array<VertexPosition3, 4> positions;
@@ -142,14 +142,18 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
             positions.push_back(kCubeFaces[face].positions[i]);
             uvs.push_back(kFaceUVs[i]);
         }
-        // (0, 2, 1, 0, 3, 2) per face：world-CW per triangle，经 Y-flip
-        // projection 后变 NDC-CCW = Vulkan 默认 front-facing。
+        // (0, 1, 2, 0, 2, 3) per face：world-CCW per triangle，与
+        // Pipeline 主 pass FrontFace=CCW + CullMode=Back 约定匹配。
+        // 历史注释曾写 "world-CW + Y-flip → NDC-CCW"，但 v1.0.1
+        // 编辑器 cube fix 证明 Pipeline 实际按 world-CCW 走 front face；
+        // 旧 CW 的 sample cube 会把朝外面剔除只剩内壁（参 GAP-2026-05-22-
+        // samples-cube-mesh-winding-bug）。
         indices.push_back(base + 0);
-        indices.push_back(base + 2);
         indices.push_back(base + 1);
-        indices.push_back(base + 0);
-        indices.push_back(base + 3);
         indices.push_back(base + 2);
+        indices.push_back(base + 0);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
     }
 
     auto pMesh = std::make_unique<MeshAsset>(std::move(positions),

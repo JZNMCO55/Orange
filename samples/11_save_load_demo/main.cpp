@@ -145,8 +145,10 @@ std::unique_ptr<MeshAsset> MakeCubeMesh()
             positions.push_back(kCubeFaces[face].positions[i]);
             uvs.push_back(kFaceUVs[i]);
         }
-        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 1);
-        indices.push_back(base + 0); indices.push_back(base + 3); indices.push_back(base + 2);
+        // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
+        // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
+        indices.push_back(base + 0); indices.push_back(base + 1); indices.push_back(base + 2);
+        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 3);
     }
     auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
                                              std::move(uvs),
