@@ -364,8 +364,9 @@ vec4 uMRA        //  16
 ### 状态
 
 - **登记**：2026-05-21
-- **关联**：本 session 已通过 content fix 把 Tower y 从 0.5 抬到 0.501 解决 demo.scene.json 当前可见 z-fight；本 GAP 是"防再次发生"的工程化方向
-- **归属**：未拍板；候选 OrangeEditor v0.x 独立 milestone（G1 优先级 > G2 > G3；G1 可独立小 milestone 落地，G2 / G3 等吸附工具 / scene save UX 整骨时一起做）
+- **关闭**：2026-05-23（G1 落地，详见"处理记录"段；G2/G3 留后续 session 等吸附工具 / scene save UX 整骨拉动）
+- **优先级**：P1（friction）—— 不阻塞功能但作者摆贴地物体时常态化撞 z-fight，肉眼反推问题源成本高
+- **关联**：原 2026-05-21 session 已通过 content fix 把 Tower y 从 0.5 抬到 0.501 解决 demo.scene.json 当前可见 z-fight；本次 G1 是"防再次发生"的工程化落地
 
 ---
 
@@ -1070,6 +1071,15 @@ src/render/
 
 ## 处理记录
 
+- **GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention**（2026-05-23 落地 G1）：新增 `tools/OrangeEditor/CoplanarDetector.{h,cpp}` —— `DetectCoplanar(host, entity, eps=0.001m, maxDist=10m)` 遍历 selected 周围 R 米内挂 Renderable + Transform 的其他 entity，对每对面（self 的 6 个面分别 vs other 的对偶面：top↔bottom / left↔right / front↔back）做 ε 共面 + 另两轴 AABB 重叠双条件检测，命中返回 Hit{selfFace, otherEntity, otherName, otherFace, gap}。
+  - **共面定义**：仅同轴贴边不算 z-fight 风险，必须**另两轴投影区间有交集**（FacesOverlap）才算"真撞上面对面 z-fight"；避免误报远端独立 entity 在某 y 坐标偶然相同的情况
+  - **距离剪枝**：两 AABB 中心距离 > maxDist + 各自半径之和 → 剪枝；几十~几百 entity 的常规场景 N²·8 角点变换 < 1ms，缓存属过度优化（只在 Inspector 每帧调用一次/帧，selection 不变时 hits 也不变，UI 自然稳定）
+  - **AABB helper 复制 30 行**：ComposeWorldMatrix / ComputeMeshLocalAABB / TransformAABB 与 `tools/OrangeEditor/EditorPicking.cpp` 同名 helper 语义一致；按 CLAUDE.md "Three similar lines is better than a premature abstraction" 暂保留两份；第三处需要时（gizmo bbox / snap-to-ground / debug draw 拉动）再抽公共 `EditorAabb.{h,cpp}`
+  - **Inspector UI**：`panels/InspectorPanel.cpp::DrawInspectorPanel` 在 "Entity #N + Separator" 之后、`DrawEntityViaSchemas` 之前插 "Geometry Warnings" 段，仅在 hits 非空时显示；红字标题（用 EditorTheme.GetAlertError 配色）+ 每条 bullet `Bottom face coplanar with 'Ground'.Top (gap 0.000m)` 文案，正常 entity 不打扰
+  - **未做** G2 snap-to-ground 默认 ε 偏移 / G3 scene save lint —— 留后续 session（G2 等吸附工具 milestone 拉动，G3 等 scene save UX 整骨）
+  - **视觉验收**（2026-05-23 用户跑）：demo.scene.json Tower y 改回 0.5 → Inspector 顶部出现红字警告 `Bottom face coplanar with 'Ground'.Top (gap 0.000m)`；改回 0.501 → 警告消失；选其他 entity 不出现警告段
+  - ctest 43/43 + invariant lint + drift 全绿
+  - 关键改动文件：`tools/OrangeEditor/CoplanarDetector.h`（新增）/ `tools/OrangeEditor/CoplanarDetector.cpp`（新增）/ `tools/OrangeEditor/panels/InspectorPanel.cpp`（include + Geometry Warnings 段）/ `tools/OrangeEditor/CMakeLists.txt`（新增 CoplanarDetector.cpp 到源列表）
 - **GAP-2026-05-23-editor-play-stop-entity-tree-order-reversed**（2026-05-23 落地 G2）：`src/scene/SceneSerialization.cpp::SaveImpl` 在收集 entityList 后追加 `std::sort` 按 EnTT entity index 升序排序（剥掉 version bits），再按排序后顺序分配 persistentId。
   - **机制**：原 Save 直接按 `reg.view<entt::entity>()` 的 LIFO 方向迭代写出 entity 数组；Load 按 JSON 顺序逐个 `world.CreateEntity()` 使新 World 的 EnTT ID 单调递增；新 World view 再 LIFO 给出原始顺序的反转 → 二次 Save 整段 entity 数组完整翻转的污染 diff（用户原话"Stop 后顺序变反"）
   - **修后**：按 entity index 升序排序后写盘顺序等价于"按创建顺序"，Source 与 Loaded World 在 Save 时输出相同字节序列；编辑器 Play → Stop 也不再翻转 Entity Tree 显示顺序（Entity Tree 仍消费 view 反向遍历，但反转再反转回到原序）；跨机器 / 跨 session .scene.json 字节稳定

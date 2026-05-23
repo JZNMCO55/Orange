@@ -6,6 +6,7 @@
 
 #include "../EditorRenderLayer.h"
 
+#include "../CoplanarDetector.h"
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 #include "../theme/EditorTheme.h"
@@ -83,6 +84,30 @@ void EditorRenderLayer::DrawInspectorPanel()
     ImGui::Text("Entity #%u",
                 static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
     ImGui::Separator();
+
+    // Geometry Warnings —— 当前选中 entity 的 mesh 与场景内邻居 mesh 是否
+    // 存在 ε 共面（典型：cube 底面 y 与 ground 顶面 y 完全相同，主 pass
+    // depthCompareOp = LessOrEqual 立刻出现 z-fight 斜条纹）。详见
+    // docs/engine-known-gaps.md GAP-2026-05-21-editor-coplanar-mesh-z-fight-
+    // prevention。仅在 hits 非空时显示，正常 entity 不打扰。
+    {
+        const auto coplanarHits = Orange::Editor::Coplanar::DetectCoplanar(mHost, e);
+        if (!coplanarHits.empty())
+        {
+            ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertError(),
+                               "Geometry Warnings (%zu)",
+                               coplanarHits.size());
+            for (const auto& h : coplanarHits)
+            {
+                ImGui::BulletText("%s face coplanar with '%s'.%s (gap %.3fm)",
+                                  Orange::Editor::Coplanar::FaceName(h.selfFace),
+                                  h.otherName.c_str(),
+                                  Orange::Editor::Coplanar::FaceName(h.otherFace),
+                                  static_cast<double>(h.gap));
+            }
+            ImGui::Separator();
+        }
+    }
 
     // Play / Paused 期间所有 component 字段只读（灰显但可见）。
     const bool canEdit = (mHost.scene.playState == PlayState::Edit);

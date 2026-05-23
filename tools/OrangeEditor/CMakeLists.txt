@@ -138,6 +138,7 @@ add_executable(OrangeEditor
     BuiltinAssets.cpp
     DemoWorld.cpp
     ColliderDebugDraw.cpp
+    CoplanarDetector.cpp
     EditorCameraControl.cpp
     EditorHierarchy.cpp
     EditorGizmoMath.cpp
