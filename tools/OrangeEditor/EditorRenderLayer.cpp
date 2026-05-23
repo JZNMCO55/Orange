@@ -10,6 +10,7 @@
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
+#include "import/ImportDispatcher.h"
 #include "theme/EditorTheme.h"
 
 #include <orange/engine/asset/AssetHandle.h>
@@ -337,6 +338,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // renamingEntity / euler 缓存清理也在此发生，下一帧才用新状态画。
     ApplyPendingSceneOp();
     ApplyPendingPlayOp();
+    ApplyPendingImports();
 
     ImGui::Render();
 
@@ -582,6 +584,14 @@ void EditorRenderLayer::DrawMainMenuBar()
             } else {
                 mHost.scene.pendingSceneOp = SceneOp::Open;
             }
+        }
+        ImGui::Separator();
+        // v1.1 T2：Import 外部 DCC 资产入口（与 Asset Browser OS drag-drop
+        // 双路并存，参 ADR-008 议题 A3）。点击只标 flag，dialog 在 OnUpdate
+        // 的 ApplyPendingImports 帧首弹出（与 ApplyPendingSceneOp 同款节奏，
+        // 避免 dialog 模态阻塞与 ImGui frame 冲突）。
+        if (ImGui::MenuItem("Import...")) {
+            mPendingImportDialog = true;
         }
         ImGui::Separator();
         // Save 亮判定 = "world 自上次保存/加载后被改过"。currentScenePath 是
@@ -1156,6 +1166,49 @@ void EditorRenderLayer::ApplyPendingPlayOp()
         }
         case PlayOp::None:
             break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v1.1 T2：外部 DCC 资产 import 路径
+//
+// 两条入站路径合并 drain：
+//   (1) File→Import... 菜单 → mPendingImportDialog=true → 本函数帧首
+//       ShowImportFileDialog 拿路径 push 到 host.pendingImports
+//   (2) OS drag-drop → main.cpp glfwSetDropCallback → 直接 push 队列
+// 然后逐条 ImportDispatcher::Dispatch 处理 + drain 完队列。
+//
+// dialog 模态阻塞与 ImGui frame 不冲突的理由同 ApplyPendingSceneOp：
+// dialog 在独立 STA worker 线程跑，主线程 join 等结果——dialog 本身
+// 就是模态阻塞 UX。
+// ---------------------------------------------------------------------------
+void EditorRenderLayer::ApplyPendingImports()
+{
+    if (mPendingImportDialog)
+    {
+        mPendingImportDialog = false;
+        // 主窗口 HWND 取自 GLFW；当前编辑器只有一个主窗口。
+        auto* glfwWin = static_cast<GLFWwindow*>(
+            mAppHost.GetWindow().GetGlfwWindowHandle());
+        void* hwnd = (glfwWin != nullptr) ? glfwGetWin32Window(glfwWin) : nullptr;
+        std::string picked;
+        if (ShowImportFileDialog(hwnd, picked) && !picked.empty())
+        {
+            mHost.pendingImports.push_back(std::move(picked));
+        }
+    }
+
+    if (mHost.pendingImports.empty()) { return; }
+
+    // 整段 drain 走完一帧；逐条 Dispatch 期间允许 callback 继续 push 进
+    // 队列（drop 时机点是 glfwPollEvents，OnUpdate 之前；本帧只处理"截
+    // 至帧首入队"的请求，新 drop 留下帧）。swap 出去再迭代避免迭代过程
+    // 中 vector reallocate 引用失效。
+    std::vector<std::string> drainList;
+    drainList.swap(mHost.pendingImports);
+    for (const auto& src : drainList)
+    {
+        ::Orange::Editor::Import::Dispatch(src, mHost);
     }
 }
 

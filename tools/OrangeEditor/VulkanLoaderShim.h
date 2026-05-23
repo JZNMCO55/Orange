@@ -61,4 +61,9 @@ bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath);
 // directory，per-layer .scene.json 与 manifest 同目录。
 bool ShowManifestFileDialog(bool isSave, void* parentHwnd, std::string& outPath);
 
+// v1.1 T2：DCC 资产 import 入口对话框。过滤 .obj / .gltf / .glb / .png /
+// .jpg / .jpeg / .tga / .hdr 一组，模式固定 open（非 save）。outPath 写
+// 用户选中的源文件绝对路径，后续由 ImportDispatcher::Dispatch 路由。
+bool ShowImportFileDialog(void* parentHwnd, std::string& outPath);
+
 #endif  // ORANGE_EDITOR_VULKAN_LOADER_SHIM_H

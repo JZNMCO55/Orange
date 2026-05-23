@@ -738,6 +738,22 @@ int main()
         }
     });
 
+    // v1.1 T2：OS 文件 drag-drop 路由。GLFW drop callback 在 glfwPollEvents
+    // 主线程同步触发；ImGui_ImplGlfw_InitForVulkan(install_callbacks=true)
+    // 只 chain Key/Char/MouseButton/Scroll/Cursor*/Focus/Monitor，**不**
+    // 安装 DropCallback —— 本回调独占该 hook。callback 内仅 push 路径到
+    // EditorHost.pendingImports；真正的 Dispatch 在 EditorRenderLayer::
+    // ApplyPendingImports 帧末 drain（与 dialog 模态阻塞节奏一致）。
+    glfwSetDropCallback(glfwWindow, [](GLFWwindow* w, int count, const char** paths)
+    {
+        auto* pHost = static_cast<EditorHost*>(glfwGetWindowUserPointer(w));
+        if (pHost == nullptr || paths == nullptr) { return; }
+        for (int i = 0; i < count; ++i)
+        {
+            if (paths[i] != nullptr) { pHost->pendingImports.emplace_back(paths[i]); }
+        }
+    });
+
     // v0.8 Console 接 Core::Log：PushLayer 之后注册 sink，让 Core::Log
     // 写入路径并行 push 到 Editor Console ring buffer。layer 的析构（host
     // .reset 触发）会先于 Core::Log 全局静态析构发生，所以这里在退出前

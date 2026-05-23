@@ -90,6 +90,12 @@ private:
     void ValidateEntityHandles();
     void ApplyPendingSceneOp();
     void ApplyPendingPlayOp();
+    // v1.1 T2：drain EditorHost.pendingImports —— File→Import dialog 路径
+    // 由 mPendingImportDialog flag 在帧首先弹出文件对话框拿路径 push 进
+    // 队列，然后与 OS drag-drop 同款逐条 ImportDispatcher::Dispatch。dialog
+    // 在此处而非 menu draw 内执行的理由与 ApplyPendingSceneOp 一致：
+    // dialog 模态阻塞与 ImGui frame 不冲突。
+    void ApplyPendingImports();
     // v0.6 c2：未保存改动确认 modal。pendingCloseAction != None 触发；
     // Save / Discard / Cancel 三选一分别 →  调 SceneOp::Save 然后等下帧
     // dirty=false 自动 dispatch / 立即 dispatch / 重置 pendingCloseAction。
@@ -202,6 +208,10 @@ private:
     bool                                              mShowSettingsPanel{false};
     // v0.9 Profiler：是否显示 Profiler 面板（默认不显示，由 View 菜单切换）。
     bool                                              mShowProfilerPanel{false};
+    // v1.1 T2：File→Import... 菜单点击时置 true，下次 ApplyPendingImports
+    // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
+    // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。
+    bool                                              mPendingImportDialog{false};
     // v0.9 Profiler 帧耗时 ring buffer —— PlotLines 喂数据用。capped 大小 +
     // 写指针 + 当前长度三件套。push 新值时按 ring 节奏覆盖最老值。
     static constexpr std::size_t                      kProfilerFrameRingCap = 128;

@@ -127,6 +127,14 @@ struct EditorHost
     // 指针 + string_view，自身无资源所有权，拷贝语义安全。
     std::vector<Orange::Engine::Scene::ComponentSerializerEntry> extraSerializers;
 
+    // v1.1 T2：OS 文件 drop 到主窗口时的入站队列。main.cpp 的
+    // glfwSetDropCallback 把绝对路径 push 进来；EditorRenderLayer::OnUpdate
+    // 帧末统一 drain（按入队顺序逐条调 ImportDispatcher::Dispatch）。
+    // 在 GLFW callback 线程 vs 主线程之间无并发：drop callback 由 glfwPollEvents
+    // 在主线程内同步触发，与 OnUpdate 在同一帧但顺序固定（poll 先 push，
+    // OnUpdate 后 drain），不需要 mutex。
+    std::vector<std::string> pendingImports;
+
     // 编辑器级别的全局 AudioEngine —— 编辑器的"应用进程音频上下文"，与
     // Inspector 试播按钮 + Asset 浏览器音频预览 + PlayMode 期 AudioSource
     // 组件实例化共享同一 ma_engine（避免多实例同时持设备 mutex / 多次拉起
