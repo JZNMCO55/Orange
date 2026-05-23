@@ -105,6 +105,26 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
+    // T5 hash 增量短路：先算源 hash + 算目标 .mesh 路径，若 .meta sourceHash
+    // 已匹配则直接跳过 tinyobj 解析 + dedup + Save + Load 全套（重复拖同一
+    // 文件的快路径）。失败仍走完整 import 路径。
+    const auto earlyHashOpt = ComputeFileHashFnv1a(srcPath);
+    if (earlyHashOpt.has_value())
+    {
+        const std::string earlyStem = src.stem().generic_string();
+        const std::string earlyDestMesh =
+            (fs::path(kModelsDir) / (earlyStem + ".mesh")).generic_string();
+        if (MetaSourceHashMatches(earlyDestMesh, earlyHashOpt.value()))
+        {
+            result.status   = ImportStatus::Success;
+            result.destPath = earlyDestMesh;
+            result.message  = "obj unchanged, skipped reimport";
+            ORANGE_LOG_INFO("ObjImporter: '{}' unchanged (hash={}), skip",
+                            srcPath, HashToHexString(earlyHashOpt.value()));
+            return result;
+        }
+    }
+
     // tinyobjloader v1.0.6 legacy API（v2.x 的 ObjReader OO API 与 fast_float
     // 内部依赖在 MSVC /permissive- + /WX 下撞 constexpr 严格检查 C3615，本
     // 仓选 v1.0.6 stable header ~2K 行无 fast_float 干净通过）。triangulate=

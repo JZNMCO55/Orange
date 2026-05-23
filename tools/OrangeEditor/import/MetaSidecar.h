@@ -95,6 +95,13 @@ bool WriteTextureMeta(std::string_view path, const TextureMetaV1& meta);
 // 与 Lumix / Godot / Unity 行业惯例对齐。
 std::string MetaPathFor(std::string_view assetPath);
 
+// "目标 asset 路径已有 .meta 且 sourceHash 与 newHash 匹配" 的便利查询。
+// T5 增量重 import：importer 计算源文件 hash 后，调本 helper 比对目标 .meta
+// 里记录的旧 hash —— 一致即跳过 copy / Save / Load 全套，直接复用现有
+// 资产（log INFO "unchanged，skipping reimport"）。
+// 不存在 .meta / hash 不一致 / 解析失败 → 返回 false（走完整 import 路径）。
+bool MetaSourceHashMatches(std::string_view destAssetPath, std::uint64_t newHash);
+
 }  // namespace Orange::Editor::Import
 
 #endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_META_SIDECAR_H

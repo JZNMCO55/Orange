@@ -104,10 +104,24 @@ ImportResult ImportTexture(std::string_view srcPath, EditorHost& host)
     }
 
     // 目标路径：assets/Textures/<filename>。文件已存在时 overwrite（reimport
-    // 语义；与 T5 接通后 .meta 的 hash 比对配合，相同源 hash 时跳过 copy）。
+    // 语义；T5 接通后按 .meta 的 hash 比对短路：相同 hash 跳全套）。
     fs::path destDir = kTexturesDir;
     fs::create_directories(destDir, ec);  // 失败下面 copy 一并兜
     fs::path dest = destDir / src.filename();
+    const std::string destStrEarly = dest.generic_string();
+
+    // T5 hash 增量短路：源 hash 与既有 .meta 匹配 → 已是最新，跳过 copy /
+    // Load / 写 .meta 全套。这是 reimport 的最快路径（典型场景：用户重复拖
+    // 同一文件 / .gitignored 资产首次进项目但已 ready）。
+    if (MetaSourceHashMatches(destStrEarly, hashOpt.value()))
+    {
+        result.status   = ImportStatus::Success;
+        result.destPath = destStrEarly;
+        result.message  = "texture unchanged, skipped reimport";
+        ORANGE_LOG_INFO("ImportTexture: '{}' unchanged (hash={}), skip",
+                        srcPath, HashToHexString(hashOpt.value()));
+        return result;
+    }
 
     fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec);
     if (ec)

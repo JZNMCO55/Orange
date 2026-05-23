@@ -85,6 +85,7 @@
 #include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
 #include "plugin/DragonBonesAssetInspectorPlugin.h"
+#include "plugin/ImportMetaAssetInspectorPlugin.h"
 #include "plugin/MaterialAssetInspectorPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "plugin/PointLightGizmoPlugin.h"
@@ -597,6 +598,15 @@ int main()
     // 时接管 Inspector 显示 Preview Play / Stop 按钮 + 资源元数据。
     editorHost.assetInspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::AudioAssetInspectorPlugin>());
+
+    // v1.1 T5：第五条 IEditorAssetInspectorPlugin —— 任何同目录存在 .meta
+    // sidecar 的资产（importer 产物 .mesh / .png / .jpg / .tga / .hdr 等）
+    // 接管 Inspector readonly 显示 source path / source hash / handle id /
+    // import params + Reimport 按钮。注册顺序在 Material / AnimFsm /
+    // DragonBones / Audio 之后 —— 这些 plugin 自家文件无 .meta，所以不会
+    // 与本 plugin 同时命中；显式 IsExtSkipped 防御也守一道。
+    editorHost.assetInspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::ImportMetaAssetInspectorPlugin>());
 
     // 注册首批 IEditorGizmoPlugin —— v0.4 c4 落地（v0.2.5 c12 抽象首批
     // 真实消费）。Light 方向箭头 + ParticleEmitter spawn box / velocity

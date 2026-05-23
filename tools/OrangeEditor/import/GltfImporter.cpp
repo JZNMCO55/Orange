@@ -106,6 +106,25 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
+    // T5 hash 增量短路：先算源 hash + 目标 .mesh 路径，若 .meta sourceHash
+    // 已匹配则跳过 cgltf 解析 + 合并 + Save + Load 全套。
+    const auto earlyHashOpt = ComputeFileHashFnv1a(srcPath);
+    if (earlyHashOpt.has_value())
+    {
+        const std::string earlyStem = src.stem().generic_string();
+        const std::string earlyDestMesh =
+            (fs::path(kModelsDir) / (earlyStem + ".mesh")).generic_string();
+        if (MetaSourceHashMatches(earlyDestMesh, earlyHashOpt.value()))
+        {
+            result.status   = ImportStatus::Success;
+            result.destPath = earlyDestMesh;
+            result.message  = "gltf unchanged, skipped reimport";
+            ORANGE_LOG_INFO("GltfImporter: '{}' unchanged (hash={}), skip",
+                            srcPath, HashToHexString(earlyHashOpt.value()));
+            return result;
+        }
+    }
+
     const std::string srcStr(srcPath);
 
     cgltf_options options{};

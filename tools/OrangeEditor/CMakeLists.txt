@@ -176,6 +176,7 @@ add_executable(OrangeEditor
     plugin/DragonBonesAssetInspectorPlugin.cpp
     plugin/CameraFrustumGizmoPlugin.cpp
     plugin/DirectionalLightGizmoPlugin.cpp
+    plugin/ImportMetaAssetInspectorPlugin.cpp
     plugin/MaterialAssetInspectorPlugin.cpp
     plugin/ParticleEmitterGizmoPlugin.cpp
     plugin/PointLightGizmoPlugin.cpp

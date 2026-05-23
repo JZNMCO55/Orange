@@ -207,4 +207,15 @@ std::string MetaPathFor(std::string_view assetPath)
     return out;
 }
 
+bool MetaSourceHashMatches(std::string_view destAssetPath, std::uint64_t newHash)
+{
+    const std::string metaPath = MetaPathFor(destAssetPath);
+    auto meta = ReadTextureMeta(metaPath);
+    if (!meta.has_value())
+    {
+        return false;  // 缺 .meta / 解析失败 —— 强制走完整 import 路径
+    }
+    return meta->sourceHash == newHash;
+}
+
 }  // namespace Orange::Editor::Import

@@ -11,6 +11,7 @@
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
 #include "import/ImportDispatcher.h"
+#include "import/MetaSidecar.h"
 #include "theme/EditorTheme.h"
 
 #include <orange/engine/asset/AssetHandle.h>
@@ -1450,6 +1451,41 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
             const bool canPickAudio = (ac != nullptr)
                                    && (ext == ".wav" || ext == ".ogg"
                                     || ext == ".mp3" || ext == ".flac");
+            // v1.1 T5：Reimport 入口。当当前 asset 同目录存在 .meta sidecar
+            // 时显示（说明这是 importer 产物）。点击读 .meta 拿 sourcePath，
+            // push 到 host.pendingImports 队列让 ApplyPendingImports 帧末 drain。
+            // 与 OS drag-drop / File→Import 走同款 Dispatch 路径，hash 增量短
+            // 路自动生效（源文件没变 → log 'unchanged, skipped'）。
+            {
+                namespace fs = std::filesystem;
+                std::error_code metaEc;
+                const std::string metaPath =
+                    ::Orange::Editor::Import::MetaPathFor(path);
+                const bool hasMeta = fs::exists(metaPath, metaEc)
+                                  && !metaEc;
+                ImGui::Separator();
+                ImGui::BeginDisabled(!hasMeta);
+                if (ImGui::MenuItem("Reimport"))
+                {
+                    auto meta = ::Orange::Editor::Import::ReadTextureMeta(metaPath);
+                    if (meta.has_value() && !meta->sourcePath.empty())
+                    {
+                        // 源 hash 若与 .meta 记录一致 → Dispatch 内 hash 短路
+                        // 直接 return Success；不一致 → 完整重 import 路径。
+                        // 用户主动 Reimport 时若源路径已失效，Dispatch 会在
+                        // src 不存在分支返 SourceReadFailed + log ERROR。
+                        host.pendingImports.push_back(meta->sourcePath);
+                    }
+                    else
+                    {
+                        ORANGE_LOG_ERROR("Asset Browser: reimport '{}' "
+                                         "—— .meta missing sourcePath",
+                                         path);
+                    }
+                }
+                ImGui::EndDisabled();
+            }
+
             ImGui::BeginDisabled(!canPickAudio);
             if (ImGui::MenuItem("Pick to AudioSource.sound"))
             {
