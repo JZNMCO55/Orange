@@ -603,7 +603,7 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **Critical Path**：否（v1.0 已 ✅，后续走 patch 通道）
 
-### v1.1 · DCC Asset Import Pipeline
+### v1.1 · DCC Asset Import Pipeline ✅
 
 **版本**：v1.0 ✅ 后第一个 minor bump（按 [[feedback-post-v1-versioning]] 纪律新功能 / 大架构走 minor）
 

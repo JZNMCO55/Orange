@@ -252,6 +252,13 @@ OrangeEditor 开发时采用**双参考**策略：
 - **不允许**把 per-component 的 Inspector / Gizmo / 序列化 UI 逻辑塞进任一 mega-class（god class）；必须以独立注册项 / plugin / schema 形式存在
 - **不允许**在 `EditorState` 上无脑加字段；新功能找对应子 context（`EditorSelection` / `EditorSceneContext` / `EditorAssetContext` / `EditorCameraState`，由 v0.2.5 拆出）加；没有合适 context 就先拆 context
 - **允许**的反射形式：手写宏 + 模板特化的 Builder API（参 `vendor/LumixEngine/src/engine/reflection.h`、`vendor/godot/core/object/class_db.h`），编译期注册零运行时反射库依赖；**仍然禁止** `entt::meta` / RTTR / cereal-with-reflection / clang AST codegen（沿用 "Serialization and reflection" 节禁令）
+- **DCC import 4 件套路径**（v1.1 ADR-008 落地）：新增任何外部资产格式（`.fbx` / `.dae` / `.usd` / `.exr` / `.ktx` / `.dds` 等）的 importer **必须**走相同路径：
+  - (a) vendor 接 + 单 header 优先（参 `vendor/tinyobjloader/` + `vendor/cgltf/`，都是 in-tree single-header MIT）
+  - (b) 转引擎自家二进制（`.mesh` v3 / `.texture` ORTX 等）+ copy 源到 `assets/<TypeDir>/`（`Models/` / `Textures/` / `Audio/` / 等）
+  - (c) 同目录写 `.meta` JSON sidecar（schema_version + sourcePath + sourceHash + handleId + importParams{}）
+  - (d) `AssetRegistry::Insert<T>()` / `Load<T>()` 入仓
+  - importer 模块**必须**在 `tools/OrangeEditor/import/` 下（不污染 `src/asset/`，保持引擎 runtime 不带 importer 依赖）
+  - .meta JSON schema 已 shipped 版本不改字段语义（沿用 "Serialization and reflection" 节"schema version 出厂即冻结"约束）
 - 违反以上任一条视为编辑器侧架构 bug，与引擎侧 invariant 同等严肃，code review 应直接 block
 
 发现现有代码触犯禁令时的正确动作：登记到 v0.2.5（若尚未开工）或后续整骨 milestone，**不**在当前任务里顺手 hack 一条新 hardcode 路径"先用着"——这正是 v0.1 ~ v0.2 期债务累积的方式。

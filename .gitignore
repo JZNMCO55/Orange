@@ -57,4 +57,14 @@ assets/scenes/splits/
 # `assets/environments/*.hdr` 同档思路 —— 不进 git 主线避免 hot path 历史
 # 膨胀，由测试人员按需本地拉取。第一款游戏拉动时由项目侧自备美术资产，
 # 这套 demo 资产不进发行环境。
+#
+# v1.1 DCC import 流水线（OrangeEditor）也把用户 import 的 .obj / .gltf /
+# .mesh / .meta 写到 assets/Models/，与上面 demo 占位 ignore 规则合并：每
+# 个开发者的 import 资产是本机工作流状态，不入仓避免 binary blob 历史膨胀。
+# 协作场景按需通过 git LFS / Phase 9 asset cook pipeline 解决。
 assets/Models/
+
+# v1.1 DCC import 流水线产物（.png / .jpg / .jpeg / .tga / .hdr + .meta
+# sidecar）：与 assets/Models/ 同款，本机工作流状态不入仓。
+# 已有的 assets/environments/*.hdr 规则保留作 PolyHaven HDRI 单独入口。
+assets/Textures/
