@@ -11,10 +11,10 @@
 #include <utility>
 #include <vector>
 
-// stb_image 单头实现：仅在本 TU 内 expand。**只**启用 .hdr Radiance
-// RGBE 路径所需的解码器——PNG / JPG / TGA 等格式留给未来 commit，按需
-// 解锁；不必要的解码器编进来会让 orange_engine 静态库每多 ~100 KB 没
-// 收益。下游若需要 PNG / JPG，删掉对应 STBI_NO_* 行即可。
+// stb_image 单头实现：仅在本 TU 内 expand。v1.1 起启用 .hdr / .png /
+// .jpg / .tga 四种解码器，覆盖 DCC 工作流主流贴图格式（PolyHaven HDRI
+// + Blender / Substance / Photoshop 默认导出）。BMP / PSD / GIF / PIC /
+// PNM 仍关闭——这些在 DCC 流水线里几乎用不到，关掉省 ~80 KB 静态库体积。
 //
 // HDR 是 stb_image 自家"我编的"路径之一，被禁用的 NO_HDR 反向是"启用
 // HDR 解码"，所以这里**不**写 STBI_NO_HDR。STBI_NO_LINEAR 也**不**写——
@@ -24,14 +24,11 @@
 // C4244（narrowing conversion）/ C4996（CRT deprecation）等噪音，include
 // 周围 push/disable/pop 关掉。与 Pipeline.cpp 内 stb_image_write 同款做法。
 #define STB_IMAGE_IMPLEMENTATION
-#define STBI_NO_PNG
 #define STBI_NO_BMP
 #define STBI_NO_PSD
-#define STBI_NO_TGA
 #define STBI_NO_GIF
 #define STBI_NO_PIC
 #define STBI_NO_PNM
-#define STBI_NO_JPEG
 #if defined(_MSC_VER)
 #  pragma warning(push)
 #  pragma warning(disable: 4100)  // unreferenced formal parameter
@@ -134,6 +131,56 @@ Result<std::unique_ptr<TextureAsset>, ResultCode> LoadHdrEquirect(std::string_vi
                                           std::move(bytes));
 }
 
+// LDR 路径：用 stbi_load 从磁盘读 8-bit PNG / JPG / TGA，输出 4-channel
+// RGBA，TextureFormat::R8G8B8A8_UNorm。颜色空间假设：sRGB-encoded（典型
+// albedo / basecolor），由消费方在 shader 端 sRGB→linear；本路径不做
+// gamma 转换。alpha 缺失时 stb 自动补 1.0（uint8 = 0xFF）。
+Result<std::unique_ptr<TextureAsset>, ResultCode> LoadStbImageLdr(std::string_view path)
+{
+    std::string cpath(path);
+
+    int width    = 0;
+    int height   = 0;
+    int channels = 0;
+    // 第 4 参数 4 = 强制 4 通道（RGBA）；stb 内部 expand 缺失通道：
+    //   1ch → RGBA = (gray, gray, gray, 1)
+    //   3ch → RGBA = (R, G, B, 1)
+    //   4ch → 原样
+    stbi_uc* pixels = stbi_load(cpath.c_str(), &width, &height, &channels, 4);
+    if (pixels == nullptr)
+    {
+        ORANGE_LOG_ERROR("TextureLoader: stbi_load failed for '{}': {}",
+                         cpath, stbi_failure_reason() ? stbi_failure_reason() : "(no reason)");
+        return ResultCode::InvalidArgument;
+    }
+
+    if (width <= 0 || height <= 0)
+    {
+        stbi_image_free(pixels);
+        return ResultCode::InvalidArgument;
+    }
+    // 软上限：LDR 贴图典型 2K-4K，8K 已属罕见；16K 是合理上限。与 HDR 路径一致。
+    constexpr int kMaxDim = 16 * 1024;
+    if (width > kMaxDim || height > kMaxDim)
+    {
+        stbi_image_free(pixels);
+        return ResultCode::OutOfRange;
+    }
+
+    const std::size_t pixelCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const std::size_t byteCount  = pixelCount * BytesPerPixel(TextureFormat::R8G8B8A8_UNorm);
+
+    std::vector<std::uint8_t> bytes;
+    bytes.resize(byteCount);
+    std::memcpy(bytes.data(), pixels, byteCount);
+    stbi_image_free(pixels);
+
+    return std::make_unique<TextureAsset>(static_cast<std::uint32_t>(width),
+                                          static_cast<std::uint32_t>(height),
+                                          TextureFormat::R8G8B8A8_UNorm,
+                                          std::move(bytes));
+}
+
 // 引擎自有 .texture 二进制容器路径。format 字段允许的取值：
 //   1 = R8G8B8A8_UNorm（LDR 主流）
 //   2 = R32G32B32A32_Float（HDR 离线 cook 产物，c7 起合法）
@@ -217,11 +264,21 @@ Result<std::unique_ptr<TextureAsset>, ResultCode> LoadOrtxContainer(std::string_
 
 Result<std::unique_ptr<TextureAsset>, ResultCode> TextureLoader::Load(std::string_view path)
 {
-    // 后缀 dispatch：.hdr 走 stb_image，其它走引擎自有 ORTX 容器。后缀
-    // 大小写不敏感（PolyHaven 偶有 .HDR 大写命名）。
-    if (EqualsIgnoreCase(LowerSuffix(path), "hdr"))
+    // 后缀 dispatch：.hdr 走 stbi_loadf（HDR float），.png / .jpg / .jpeg /
+    // .tga 走 stbi_load（LDR uint8 RGBA），其它走引擎自有 ORTX 容器。后缀
+    // 大小写不敏感（PolyHaven 偶有 .HDR 大写命名；Windows 资源管理器拖入
+    // 文件后缀大小写也不稳定）。
+    const auto suffix = LowerSuffix(path);
+    if (EqualsIgnoreCase(suffix, "hdr"))
     {
         return LoadHdrEquirect(path);
+    }
+    if (EqualsIgnoreCase(suffix, "png") ||
+        EqualsIgnoreCase(suffix, "jpg") ||
+        EqualsIgnoreCase(suffix, "jpeg") ||
+        EqualsIgnoreCase(suffix, "tga"))
+    {
+        return LoadStbImageLdr(path);
     }
     return LoadOrtxContainer(path);
 }
