@@ -1,5 +1,6 @@
 #include "ImportDispatcher.h"
 
+#include "GltfImporter.h"
 #include "MetaSidecar.h"
 #include "ObjImporter.h"
 #include "../EditorHost.h"
@@ -167,13 +168,11 @@ ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host)
     return RunObjImport(srcPath, host);
 }
 
-ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& /*host*/)
+ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host)
 {
-    ImportResult result{};
-    result.status  = ImportStatus::NotImplemented;
-    result.message = "gltf importer hooked in v1.1 T4";
-    ORANGE_LOG_WARN("ImportGltfMesh: '{}': {}", srcPath, result.message);
-    return result;
+    // v1.1 T4 路由到 GltfImporter 模块（cgltf IMPLEMENTATION 仅在
+    // GltfImporter.cpp 单 TU expand）。
+    return RunGltfImport(srcPath, host);
 }
 
 ImportResult Dispatch(std::string_view srcPath, EditorHost& host)

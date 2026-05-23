@@ -161,6 +161,7 @@ add_executable(OrangeEditor
     command/AnimFsmCommands.cpp
     command/CommandStack.cpp
     command/EntityCommands.cpp
+    import/GltfImporter.cpp
     import/ImportDispatcher.cpp
     import/MetaSidecar.cpp
     import/ObjImporter.cpp
@@ -200,8 +201,10 @@ target_link_libraries(OrangeEditor PRIVATE
 # import/，不污染 src/asset/"）。
 # CMAKE_CURRENT_LIST_DIR 是 tools/OrangeEditor/，向上两级就是 engine repo
 # 根，无论 in-tree 还是 standalone consumer build 模式都稳定指对。
+# v1.1 T4：cgltf 单 header（MIT）同样 in-tree 模式接入。
 target_include_directories(OrangeEditor PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/tinyobjloader")
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/tinyobjloader"
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/cgltf")
 
 # 与 sample / engine 同档的编译器 warning 级别 —— 编辑器作为长期演化
 # 的 first-class target，不享受任何"宽松 warning"豁免。
