@@ -81,3 +81,4 @@ ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。
 | ADR-004 | OrangeEditor v0.9.5 Schema AssetRef accessor 选型 —— 专用槽位（方案 B）而非扩 GetFn/SetFn 全字段加 ctx | accepted | 2026-05-19 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-004-schema-asset-ref-accessor-slot.md) |
 | ADR-005 | anim_fsm condition DSL | accepted | 2026-05-20 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-005-anim-fsm-condition-dsl.md) |
 | ADR-006 | Orange-Wiki 升级为 Orange 生态中央知识库（三层分级 + 跨项目反哺） | accepted | 2026-05-21 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-006-wiki-ecosystem-knowledge-base.md) |
+| ADR-007 | Pipeline.cpp 按 pass 维度拆分（PIMPL Impl 集中声明 + 子 .cpp 各自 method body） | accepted | 2026-05-23 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-007-pipeline-cpp-pass-level-split.md) |

@@ -710,10 +710,43 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P2（技术债，不阻塞 v1.0 ✅ + 不阻塞 Phase 7）** —— 当前能编能跑，纯重构 / 零新 feature；但维护成本逐 milestone 累加，越晚拆越贵
-- **归属**：建议作为 **OrangeEngine refactor milestone**（Phase 6 与 Phase 7 之间，或 Phase 7 第 1 个 task 前置），与 [[GAP-2026-05-22-editor-dock-layout-collapses-on-restore]] 等 v1.x patch 系列**不混**——拆分是引擎 internal refactor，编辑器 patch 是 UX；两类工作分别独立 session
-- **关联**：`src/render/Pipeline.cpp` / `vendor/LumixEngine/src/renderer/pipeline.cpp`（对照）/ CLAUDE.md "src/render/ 唯一 OrangeRender consumer" 纪律（拆分后继续守）
-- **触发时机**：(1) Phase 7 第一个 task 开工前；或 (2) Pipeline.cpp 撞到 6K 行（下次 1-2 个新 pass milestone 后）；或 (3) MSVC 单 TU 编译超过 30 秒；任一触发 → 启动专门 refactor session
+- **关闭**：2026-05-23（跨 2 session 落地，详见"处理记录"段；ADR-007 同 commit 落 Wiki）
+- **优先级**：~~**P2（技术债，不阻塞 v1.0 ✅ + 不阻塞 Phase 7）**~~ → 已修
+- **归属**：~~**OrangeEngine refactor milestone**（Phase 6 与 Phase 7 之间）~~ → 2026-05-23 跨 2 session 完工，未占独立 milestone 编号（按 Phase 6 与 Phase 7 之间的纯重构定位）
+- **关联**：`src/render/Pipeline.cpp` / `src/render/pipeline/*.{h,cpp}` / `vendor/LumixEngine/src/renderer/pipeline.cpp`（对照）/ CLAUDE.md "src/render/ 唯一 OrangeRender consumer" 纪律（拆分后继续守）/ [[ADR-007]]（Pipeline.cpp 按 pass 维度拆分约定）
+
+### 处理记录
+
+**Session 1（2026-05-23，commit `ab16563`）—— 前置：抽 Impl 声明 + 顶部 helpers**
+
+- 抽 `Pipeline::Impl` 完整 declaration 到 `src/render/pipeline/PipelineImpl.h`（656 行，含数据成员 + 嵌套 struct + inline method）
+- 抽 anonymous ns helpers + 常量 + `OrangeRenderLogAdapter` 适配器到 `src/render/pipeline/PipelineHelpers.{h,cpp}`（71 + 210 行，命名空间 `Orange::Engine::Render::PipelineDetail`）
+- Pipeline.cpp 通过 `using namespace PipelineDetail;` 继续以短名引用
+- Pipeline.cpp 5314 → 4322 行（删 992 行，全部迁出 helpers）
+- CMakeLists.txt orange_engine 加 PipelineHelpers.cpp
+- ctest 43/43 + invariant lint + drift 全绿
+
+**Session 2（2026-05-23，本 session）—— 拆 8 个 pass 子 .cpp + ADR-007 落 Wiki**
+
+- 在 `src/render/pipeline/` 下创建 8 个 pass 子 .cpp：
+  - `PipelineSetup.cpp`（909 行）—— `Pipeline::SetupRhiResources` 整体迁出
+  - `PipelineShadow.cpp`（274 行）—— EnsureShadowMap / ComputeLightViewProj / UpdateLightUbo / UpdatePointLightsUbo / RecordShadowPass
+  - `PipelineCapture.cpp`（203 行）—— EnsureCaptureBuffer / RecordCaptureCopy / FinalizeCapture + HalfToFloat / AcesNarkowicz 匿名 ns + `STB_IMAGE_WRITE_IMPLEMENTATION` 块从 Pipeline.cpp 迁入
+  - `PipelineBloom.cpp`（284 行）—— ReleaseBloomResources / EnsureBloomResources / RecordBloomChain
+  - `PipelineGodRays.cpp`（194 行）—— EnsureGodRaysSet / RecordGodRaysPass
+  - `PipelineSky.cpp`（272 行）—— EnsureSkyDescSet / RecordSkyPass / RecordProceduralSkyPass
+  - `PipelineGrid.cpp`（138 行）—— RecordGridPass
+  - `PipelineDebugDraw.cpp`（81 行）—— RecordDebugDrawPass
+- Pipeline.cpp 4322 → 2098 行；主文件留公共面（ctor / Initialize / Shutdown / 各 setter / BakeIblFromWorld / RequestCapture）+ Render 主循环（~500 行）+ Offscreen 系列（RecordOffscreenPass / RecordPassthroughToViewport / RenderOffscreen / EnsureMeshGpuCache）+ FindActive 系列（FindActiveBloomPass / FindActiveTonemapPass / FindActiveGodRaysPass）+ Profile bin declarations
+- CMakeLists.txt orange_engine 加 8 个新 .cpp 源
+- 修复 Build 期一次 stb_image_write 多重定义 link error（IMPLEMENTATION 块从 Pipeline.cpp 删除，仅留 PipelineCapture.cpp 一处）
+- ctest 43/43 + invariant lint + drift 全绿；OrangeEditor + 14 samples + 全测试 build 通过
+- ADR-007 落 Wiki（`vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-007-pipeline-cpp-pass-level-split.md`）+ 本仓 `docs/decisions/README.md` Index 表追加条目 + Wiki case-studies 索引同步更新
+- 用户视觉验收：PBR / IBL / shadow / bloom / godrays / sky / grid / debug draw 各 pass 视觉无回归
+
+**最终行数对照**：拆分前单 TU 5314 行；拆分后 9 子 .cpp + 主 .cpp 共 5390 行（多 76 行为各 .cpp 顶部 includes/namespace boilerplate）。详细每文件行数表见 [[ADR-007]]。
+
+**未来再拆触发条件**：(1) Pipeline.cpp 再撞 3K 行（下个 SSAO / TAA / volumetrics / reflection probe 大 pass milestone 后）；或 (2) Offscreen 系列单独超 800 行 → 拆 PipelineMain.cpp；或 (3) Render() 主循环单方法超 700 行 → 进一步切方法。**当前 2098 行落在 "工业 1K-2.5K 行主文件可接受上限" 内**，不再继续拆。
 
 ---
 

@@ -98,7 +98,15 @@ add_library(orange_engine STATIC
     src/render/MaterialInstance.cpp
     src/render/MaterialSystem.cpp
     src/render/Pipeline.cpp
+    src/render/pipeline/PipelineBloom.cpp
+    src/render/pipeline/PipelineCapture.cpp
+    src/render/pipeline/PipelineDebugDraw.cpp
+    src/render/pipeline/PipelineGodRays.cpp
+    src/render/pipeline/PipelineGrid.cpp
     src/render/pipeline/PipelineHelpers.cpp
+    src/render/pipeline/PipelineSetup.cpp
+    src/render/pipeline/PipelineShadow.cpp
+    src/render/pipeline/PipelineSky.cpp
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
     src/render/RenderScene.cpp
