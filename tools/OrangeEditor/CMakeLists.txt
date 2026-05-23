@@ -161,6 +161,7 @@ add_executable(OrangeEditor
     command/AnimFsmCommands.cpp
     command/CommandStack.cpp
     command/EntityCommands.cpp
+    import/MetaSidecar.cpp
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
