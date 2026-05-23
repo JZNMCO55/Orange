@@ -1162,6 +1162,80 @@ src/render/
 
 ---
 
+## GAP-2026-05-24-material-template-library-and-custom-hook
+
+- **发现方**：v1.1 ✅ 后用户询问 "Template 是不是也可以通过用户自定义插入的方式去做？我们提供一些基础的 shader？"
+- **发现日期**：2026-05-24
+- **一句话定性**：MaterialTemplate 注册路径**完全 C++ 硬编码** —— `BuiltinMaterials::Load*` 6 个 + main.cpp `RegisterTemplate` 启动期调用，用户加新 template 必须改引擎源码 + 重编；同栈所有竞品（Unity / Unreal / Cocos / Godot / Lumix）都提供"基础 shader 库 + 用户自定义 shader hook" 两件套，OrangeEngine 一件也没
+
+### 触发场景
+
+- 当前 6 个内置 template（textured / toon / rim_light / dissolve / emissive / pbr）全在 `src/render/BuiltinMaterials.cpp` 硬编码 + `tools/OrangeEditor/main.cpp` 启动期手动调 `RegisterTemplate`
+- 用户想加新 template（如 cloth / hair / water / clear-coat-pbr / 风格化 toon variants）必须：写 GLSL → 离线编译 SPV → 写新 `LoadXxx()` 函数 → 加 `RegisterTemplate` 调用 → 重编引擎。**非程序员美术 / 关卡设计师无入口**
+- `samples/08_custom_shader` 演示了 "游戏侧自定义 shader" 但仍是 C++ 路径（不是编辑器内）
+- 工业对照（数量是 OrangeEngine 当前的 2-5 倍）：
+
+| 引擎 | 内置 shader 库规模 | 用户自定义入口 |
+|------|---------------|-------------|
+| Unity URP/HDRP | ~30+ | ShaderLab 文本 + Shader Graph 节点 |
+| Unreal | ~10 baseline | Material Editor 节点 + Custom HLSL node |
+| Godot | StandardMaterial3D + 后处理 | ShaderMaterial 文本 + VisualShader 节点 |
+| Lumix | `data/shaders/` ~15 文本 shader | 文本 + auto-scan 注册 |
+| Cocos | builtin .effect ~20 | .effect 文件 + auto-scan |
+| **OrangeEngine** | **6 hardcode** | **C++ 改源码** |
+
+### 缺什么（按依赖拆，三级分层）
+
+#### G1 · Level 2：基础 shader 库 + 自动扫描注册（最优 ROI / 推荐先做）
+
+- 引擎扫描 `assets/shaders/templates/*.template.json` —— 每个文件描述：
+  - `templateName` (必填)
+  - `vertSpv` / `fragSpv` (必填，相对路径)
+  - `uniforms[]` (字段名 + 类型 enum)
+  - `textureSlots[]` (binding + 名)
+- 启动期 `MaterialSystem` 自动遍历该目录，对每个有效 JSON 调 `RegisterTemplate(ShaderTemplateDesc)`（API 已存在，参 `include/orange/engine/render/MaterialSystem.h:89`）
+- 引擎自带 baseline 库：把现有 6 个 hardcode template 迁出来 + 扩 5-10 个常见变体（toon variants / cloth / hair / clear-coat-pbr / water 等）；离线 SPV 入仓
+- 用户加新 template = 提供 vert.spv + frag.spv + 一个 .template.json 丢进 `assets/shaders/templates/`，**不写 C++**
+- 仍要求用户自己离线编译 GLSL → SPV（用 LunarG SDK 的 `glslangValidator`），不引入 runtime 编译依赖
+- 体量预估：**0.5-1 session**（基础设施 `ShaderTemplateDesc` + `RegisterTemplate` 全有，纯 JSON IO + 启动期扫描）
+
+#### G2 · Level 1：编辑器内 GLSL 文本编辑 + runtime SPV 编译（用户撞需求时升级）
+
+- 编辑器加 GLSL 文本编辑器（ImGui 内嵌 / 或 launch 外部编辑器 hook）
+- 用户改 GLSL → Save → 引擎用 **glslang** 或 **shaderc** 运行时编译为 SPV → 自动注册新 template
+- 类比：Unity ShaderLab / Godot ShaderMaterial / Lumix 文本 shader
+- 前置依赖：
+  - vendor 接 `glslang`（FetchContent，几 MB 静态库；与 ImGui 同款模式）
+  - **Material UBO 基础设施**（让用户在 GLSL 里声明的 uniform 字段能被 Inspector 自动暴露成可调控件，否则又退回"hardcode 在 shader 里"老问题）—— 这是更大的工程，与 `GAP-2026-05-19-pbr-push-constant-exceeds-spec-min` G1 同源
+- 体量预估：**2-3 session**（如果 Material UBO 已就绪 1 个 session 就够；否则要先做 UBO 才能做本 G2）
+
+#### G3 · Level 3：节点式 Shader Graph（极远，Phase 11+ 或永不）
+
+- 拖拽 node + 连线，编辑器自动生成 GLSL → SPV
+- 对标 Unreal Material Editor / Unity Shader Graph / Godot VisualShader
+- 工程量**数月级**；只有第一款游戏明确需要、且 G2 用户体感不足时才触发
+- 不推荐主动开工，等 pull-driven
+
+### 期望验收
+
+- **G1 验收**：
+  - 把现有 6 个 hardcode template 迁到 `assets/shaders/templates/*.template.json` + `*.spv` 文件，启动期自动注册，行为与改前完全一致（回归 pbr_showcase scene 无视觉差异）
+  - 用户手动写一个新的 `.template.json` 引用一对自己编的 SPV，丢进目录，重启编辑器 → Material Inspector 的 templateName Combo 多出新 template；选中后能用 Pick 给 entity Renderable.material
+  - 引擎自带 baseline 库扩到 ≥10 个 template（cloth / hair / clear-coat-pbr / 卡通变体 等）
+- **G2 验收**：编辑器内开新 .glsl 文件 → 编辑 → Save → Material Inspector 自动看到新 template + 自动暴露 uniform 字段为可调控件 → viewport 实时反映
+
+### 状态
+
+- **登记**：2026-05-24
+- **优先级**：G1 P1（基础库自动扫描是"美术工作流补完"承诺的关键拼图）；G2 P2（撞需求拉动）；G3 P3（极远）
+- **关联**：
+  - [[GAP-2026-05-24-editor-asset-browser-create-material-missing]] —— Create Material GAP 的对偶：那条解决"基于现有 template 创建实例"，本条解决"如何加新 template"
+  - [[GAP-2026-05-19-pbr-push-constant-exceeds-spec-min]] G1 —— per-instance Material UBO 是 G2 的硬前置
+  - `samples/08_custom_shader` —— 当前唯一的 "游戏侧自定义 shader" 演示路径（C++ 路线，未来 G1 落地后这条 sample 应改 demo G1 路径）
+- **归属**：未拍板。G1 候选 v1.2 minor（与 Create Material UI 同期，构成"美术 shader / material 工作流"完整 batch）；G2 候选 Phase 7+ / 待 Material UBO 基础设施 +1 ；G3 backlog 不主动
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-22-samples-cube-mesh-winding-bug**（2026-05-23 落地）：6 个 sample 的 `MakeCubeMesh` 内 indices 从 CW `(0, 2, 1, 0, 3, 2)` per face 改为 CCW `(0, 1, 2, 0, 2, 3)`，与 Pipeline 主 pass `FrontFace=CCW + CullMode=Back` 约定对齐——朝外面是 front、朝内面被 cull，cube 视觉实心可见而不是"穿透看到内壁"。`samples/04_3d_mesh/main.cpp` 顶部 line 67-70 的过期注释（"world-CW per triangle，经 Y-flip 后 NDC-CCW"）也一并修订为新约定描述 + line 145-146 同步。其余 5 个 sample (04_bloom / 09 / 10 / 11 / 12) 没有同款过期注释只有 indices，改 indices + 加单行 "CCW winding 与 Pipeline ... 对齐 (参 GAP)" 注释。**不动 plane**（sample 03 / 05-08 / 12 的 `0, 2, 1, 0, 3, 2` 是 plane 不是 cube，不在本 GAP 范围；plane 视觉无报错的 user feedback，winding 状态留待第三方 plane bug 触发时再处理）。ctest 43/43 + invariant lint + drift 全绿；用户视觉验收通过（cube 实心可见，6 面交替露出无穿透）。关键改动文件：`samples/04_3d_mesh/main.cpp` / `samples/04_3d_mesh_with_bloom/main.cpp` / `samples/09_vfx_demo/main.cpp` / `samples/10_thirty_seconds_demo/main.cpp` / `samples/11_save_load_demo/main.cpp` / `samples/12_layer_partition_demo/main.cpp`
