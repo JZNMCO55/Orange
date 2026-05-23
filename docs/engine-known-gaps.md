@@ -1102,6 +1102,66 @@ src/render/
 
 ---
 
+## GAP-2026-05-24-editor-asset-browser-create-material-missing
+
+- **发现方**：v1.1 ✅ 后用户试图新建材质时发现
+- **发现日期**：2026-05-24
+- **一句话定性**：编辑器无 "创建新材质" GUI 入口 —— v1.1 解决了外部资产（.obj / .gltf / 贴图）"进来"的路径，但漏了项目内新资产（.material / 新 scene / entity 模板）从零创建的路径；用户当前只能手动复制现有 .material 文件或改代码
+
+### 触发场景
+
+- 用户问 "我现在要怎么创建材质" —— Asset Browser 右键空白、右键现有文件、File 菜单都没有 "New Material" / "Create → Material" 入口
+- 当前 workaround 三选一：(A) 文件管理器外手动复制 builtin/*.material 重命名 (B) 选中现有 .material 改字段 Save（不创建新材质）(C) 写 C++ 代码（`BuiltinAssets::InitializeEditorAssets` 启动期 lazy bake 路径，参 `tools/OrangeEditor/BuiltinAssets.cpp:445`）
+- 都不符合"非程序员美术 / 关卡设计师不写代码完成日常工作"目标（Phase 6 编辑器闭环承诺）
+
+### 引擎纪律对照
+
+- 基础设施**全部就绪**，只缺 GUI 入口：
+  - `MaterialFileIO::WriteMaterialFile(path, MaterialFileData)` 已存在（`tools/OrangeEditor/MaterialFileIO.{h,cpp}`），启动期 `BuiltinAssets` 已经在用
+  - `MaterialSystem::GetTemplateNames()` 已存在（GAP-2026-05-16-material-system-enumerate-and-instance-overrides 落地），可枚举所有已注册 template 喂下拉框
+  - Asset Browser 已有右键菜单基础设施（`tools/OrangeEditor/EditorRenderLayer.cpp::DrawAssetFileList` BeginPopupContextItem 路径已挂多个 entry）
+- 工业对照（同栈编辑器）：
+  - Cocos Creator：Asset Browser 空白处右键 → Create → Material（弹文件名输入）
+  - Unity：Assets 右键 → Create → Material
+  - Lumix：右键 → Create → Material 同款
+  - Unreal：Content Browser 右键 → Material（独立 Material editor，超出本 GAP 范围）
+
+### 缺什么（按依赖拆）
+
+#### G1 · Asset Browser 右键 "Create Material" 基础入口
+
+- `DrawAssetFileList` 末尾或 `DrawAssetsPanel` 主体加 `BeginPopupContextWindow`（右键面板空白处弹出）
+- 菜单结构：`Create → Material`（嵌套 menu，留位置给未来 `Create → Scene` / `Create → Folder`）
+- 点击 → 弹 ImGui modal 输入 filename（默认 `new_material.material`）+ Combo 选 templateName（默认 `pbr`，从 `MaterialSystem::GetTemplateNames()` 拿候选列表）
+- Save 落盘到 `assets.browserCurrentDir` 下（用户当前浏览的目录），通过 `MaterialFileIO::WriteMaterialFile(MaterialFileData{templateName, uniforms={}, textures={}})` 写空 override 的默认材质
+- 落盘后自动 `assets.selectedAssetPath = newPath` 让 Material Inspector 子模式立刻接管，用户继续调参
+
+#### G2 · 文件名冲突处理
+
+- 目标路径已存在时弹 modal 询问 overwrite / cancel（与 v1.1 import overwrite 同款）
+- 或自动追加数字后缀（`new_material.material` → `new_material_1.material`），但与 Unity / Cocos 行为不一致（它们都是弹询问）
+
+#### G3 · 顺路（同 patch 落）："Create → Scene" / "Create → Folder"
+
+- 同款入口扩 2 个候选；Scene 走 `Scene::Save` 写空 World；Folder 走 `std::filesystem::create_directories`
+- 与本 GAP 核心 G1 解耦，可独立 ship；优先级低
+
+### 期望验收
+
+- Asset Browser 浏览到 `assets/materials/builtin/` → 面板空白处右键 → `Create → Material` → 输入文件名 `my_metal.material` → 选 templateName `pbr` → OK
+- Asset Browser 内立即出现 `my_metal.material` 且自动选中 → 右侧 Inspector 切到 Material 编辑视图，PBR 五通道默认值
+- 调 baseColor / metallic / roughness → Save → 关闭重开编辑器 → 同 entity Renderable.material Pick `my_metal.material` → viewport 显示调过的材质效果
+- 同名再 Create → 弹 overwrite 询问
+
+### 状态
+
+- **登记**：2026-05-24
+- **优先级**：P1（friction）—— 不阻塞功能（A/B/C workaround 可用），但严重破坏 "美术不写代码" 心智契约；Phase 6 编辑器闭环承诺的口径上属漏项
+- **关联**：v1.1 DCC import pipeline ✅ 后浮现的对偶缺口（"外部进来" vs "内部从零创建"）；候选 v1.1.1 patch milestone 或 v1.2 minor（与 Inspector 可写 import params / Create Scene / Create Folder 同期）
+- **归属**：未拍板分配到具体 milestone；按 [[feedback-post-v1-versioning]] 纪律，单独 P1 friction 走 v1.0.xx batch（OrangeEditor 已 stable，沿用 v1.1.x 节奏），若同期撞上 G3 顺路 deliverables 升 v1.2 minor
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-22-samples-cube-mesh-winding-bug**（2026-05-23 落地）：6 个 sample 的 `MakeCubeMesh` 内 indices 从 CW `(0, 2, 1, 0, 3, 2)` per face 改为 CCW `(0, 1, 2, 0, 2, 3)`，与 Pipeline 主 pass `FrontFace=CCW + CullMode=Back` 约定对齐——朝外面是 front、朝内面被 cull，cube 视觉实心可见而不是"穿透看到内壁"。`samples/04_3d_mesh/main.cpp` 顶部 line 67-70 的过期注释（"world-CW per triangle，经 Y-flip 后 NDC-CCW"）也一并修订为新约定描述 + line 145-146 同步。其余 5 个 sample (04_bloom / 09 / 10 / 11 / 12) 没有同款过期注释只有 indices，改 indices + 加单行 "CCW winding 与 Pipeline ... 对齐 (参 GAP)" 注释。**不动 plane**（sample 03 / 05-08 / 12 的 `0, 2, 1, 0, 3, 2` 是 plane 不是 cube，不在本 GAP 范围；plane 视觉无报错的 user feedback，winding 状态留待第三方 plane bug 触发时再处理）。ctest 43/43 + invariant lint + drift 全绿；用户视觉验收通过（cube 实心可见，6 面交替露出无穿透）。关键改动文件：`samples/04_3d_mesh/main.cpp` / `samples/04_3d_mesh_with_bloom/main.cpp` / `samples/09_vfx_demo/main.cpp` / `samples/10_thirty_seconds_demo/main.cpp` / `samples/11_save_load_demo/main.cpp` / `samples/12_layer_partition_demo/main.cpp`
