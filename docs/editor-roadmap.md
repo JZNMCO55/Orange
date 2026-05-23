@@ -603,6 +603,55 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **Critical Path**：否（v1.0 已 ✅，后续走 patch 通道）
 
+### v1.1 · DCC Asset Import Pipeline
+
+**版本**：v1.0 ✅ 后第一个 minor bump（按 [[feedback-post-v1-versioning]] 纪律新功能 / 大架构走 minor）
+
+**触发 GAP**：[`GAP-2026-05-22-editor-dcc-import-pipeline-missing`](engine-known-gaps.md) —— 编辑器缺外部 DCC 资产（.obj / .gltf mesh + .png / .jpg / .tga texture）导入流水线，"美术 / 关卡设计师不写代码完成日常工作"目标最关键入口能力
+
+**架构决策**：见 [ADR-008](decisions/README.md)（5 议题合并：A3 UX / B2 物理布局 / C2 .meta sidecar / D3 vendor / E1 mipmap / F2 scope）。本 milestone 不再单独讨论这些议题，按 ADR-008 落地
+
+**Task 拆分**（detail 进入实施 session 时展开）：
+
+| Task | 描述 | 影响模块 | 估时 |
+|------|------|---------|------|
+| T1 | TextureLoader 开 PNG/JPG/TGA decoder + texture .meta v1 schema | `src/asset/TextureLoader.cpp` + `tools/OrangeEditor/import/` | 0.5 session |
+| T2 | File→Import 菜单 + Asset Browser drag-drop OS 文件路由 + 文件类型分派 | `tools/OrangeEditor/EditorRenderLayer.cpp` + `tools/OrangeEditor/import/ImportDispatcher.{h,cpp}` | 0.5 session |
+| T3 | tinyobjloader vendor 接 + ObjImporter 模块 + 转 `.mesh` v3 写盘 | `vendor/tinyobjloader/` + `tools/OrangeEditor/import/ObjImporter.{h,cpp}` | 1 session |
+| T4 | cgltf vendor 接 + GltfImporter 模块 + 转 `.mesh` v3 写盘（PBR material 解析延 v1.2） | `vendor/cgltf/` + `tools/OrangeEditor/import/GltfImporter.{h,cpp}` | 1 session |
+| T5 | .meta sidecar 完整接通（hash 增量重 import + Inspector 显示 import 参数 readonly） | `tools/OrangeEditor/import/MetaSidecar.{h,cpp}` + `tools/OrangeEditor/inspector/*` | 0.5 session |
+| T6 | `.gitignore` 规则扩展 + acceptance-checklist + Wiki cross-pollination 案例（若有）| `docs/` + `assets/` + Wiki | 0.5 session |
+
+**前置已具备**（不必补）：
+- `AssetRegistry::Insert<T>()` runtime 注入 in-memory asset 已支持
+- `TextureLoader` stb_image 已编进，PNG/JPG/JPEG/TGA 仅需删 `STBI_NO_*` 行
+- HDR 路径已通过 PolyHaven `assets/environments/` 验证
+
+**引擎侧需要补的能力**（v1.1 同期 PR 但走引擎自身改动通道）：
+
+| 模块 | 改动 | 备注 |
+|------|------|------|
+| `TextureLoader.cpp` | 删 `STBI_NO_PNG` / `STBI_NO_JPEG` / `STBI_NO_TGA` | 1 行级，进 v1.1 T1 |
+| `MeshLoader.cpp` | 无改动 | `.mesh` v3 格式已够；importer 写出 v3 |
+
+**新增 vendor**（CMakeLists.txt + `vendor/`）：
+
+| Vendor | 用途 | 许可证 |
+|--------|------|--------|
+| tinyobjloader | `.obj` parser | MIT |
+| cgltf | `.gltf` / `.glb` parser | MIT |
+
+**Critical Path**：是（"美术工作流补完"是 v1.0 后第一个新功能 milestone，是第一款游戏 fork 启动的前置之一）
+
+**验收**（acceptance-checklist 在 v1.1 实施完成时落 Wiki）：
+- 美术 / 关卡设计师**不写代码**完成"从 Blender 导出 .obj/.gltf → 拖到 Asset Browser → 应用现有材质 → 渲染正确"完整闭环
+- 同款流程对 .png/.jpg/.tga 贴图：拖入 → 入 AssetRegistry → Pick 给材质 → viewport 实时反映
+- 源文件 hash 变化触发 .meta 自动更新 + 重 import（手动右键 Reimport 兜底）
+
+**与引擎关系**：引擎 runtime 纯净保持（importer 全部在 `tools/OrangeEditor/import/`，不污染 `src/asset/`）；CLAUDE.md "OrangeEditor 架构纪律" 节增 invariant：新增任何外部资产格式必须走相同 4 件套路径（vendor 单 header + 转引擎自家二进制 + .meta sidecar + AssetRegistry Insert）。CMake VERSION 1.0.1 → 1.1.0。
+
+**关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
+
 ### v1.x · 长尾（按需触发，不进 v1.0 critical path）
 
 | 条目 | 依赖 |
@@ -611,7 +660,11 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 | ACP 集成（lazy load + cache 模式） | 主 roadmap Phase 9 |
 | C# 脚本组件可视化 | 主 roadmap Phase 7 |
 | 地形 / 植被工具 | 主 roadmap Phase 13 |
-| DCC 集成（Blender / Maya plugin） | 单独立项 |
+| DCC 集成（Blender / Maya plugin） | 单独立项；v1.1 已落地基础 import 流水线（.obj / .gltf / .png/jpg/tga），本条 = 反向 export plugin |
+| .fbx import | tinyobjloader / cgltf 之外接 OpenFBX 或 ufbx；v1.1 已铺好 4 件套路径，加 .fbx 仅是新增 importer 模块 |
+| .meta Inspector 段编辑（normalmap green invert / scale / mipmap mode） | v1.1 .meta 已存参数 readonly，v1.2 加可写 GUI |
+| BC7 / KTX2 texture 压缩 import 路径 | v1.1 走 RGBA8 + 运行时 mipmap；性能 milestone 触发时切 |
+| mesh normal/tangent 自动补（mikktspace）| v1.1 信任 importer 提供；缺时偏暗，v1.2 加 |
 
 ### v1.x · Ori-like 视觉子模式（按第一款游戏拉动）
 

@@ -82,3 +82,4 @@ ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。
 | ADR-005 | anim_fsm condition DSL | accepted | 2026-05-20 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-005-anim-fsm-condition-dsl.md) |
 | ADR-006 | Orange-Wiki 升级为 Orange 生态中央知识库（三层分级 + 跨项目反哺） | accepted | 2026-05-21 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-006-wiki-ecosystem-knowledge-base.md) |
 | ADR-007 | Pipeline.cpp 按 pass 维度拆分（PIMPL Impl 集中声明 + 子 .cpp 各自 method body） | accepted | 2026-05-23 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-007-pipeline-cpp-pass-level-split.md) |
+| ADR-008 | OrangeEditor v1.1 DCC 资产导入流水线架构（5 议题合并：UX A3 + 物理布局 B2 + .meta C2 + vendor D3 + scope F2） | accepted | 2026-05-23 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-008-dcc-import-pipeline-architecture.md) |
