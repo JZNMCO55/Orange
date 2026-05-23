@@ -1003,6 +1003,70 @@ src/render/
 
 ---
 
+## GAP-2026-05-23-editor-play-stop-entity-tree-order-reversed
+
+- **发现方**：working tree 清理（v1.0.scene.json 出现无解释的 entity 顺序翻转 diff）
+- **发现日期**：2026-05-23
+- **一句话定性**：编辑器 Play → Stop 后 World 内 entity 在 Entity Tree 中的显示顺序反转；再次 Save scene 会把反转顺序写回磁盘，造成"零业务变动但 JSON entity 数组完整 reverse"的污染 diff
+
+### 触发场景
+
+- v1.0.scene.json 在某次编辑器操作后出现 working tree 改动：7 个 entity 集合完全相同，但 on-disk 顺序由 `smoke, Sphere, Cube3, Cube2, Cube1, Floor, Sun` 翻转为 `Sun, Floor, Cube1, Cube2, Cube3, Sphere, smoke` —— 完整 reverse 关系，组件字段一字不变
+- 复现路径推断（待修复 session 确认）：打开 v1.0.scene.json → 进入 Play → Stop → File → Save。Save 写出的是 Stop 后的 World 视图，正是反转后的顺序
+- 推断的机制链：
+  1. `Scene::Save` 按 EnTT `reg.view<entt::entity>()` 遍历顺序写出 entity 数组（`tools/OrangeEditor/panels/EntityTreePanel.cpp:97` 同款遍历）
+  2. Play 入口写 snapshot 走同款 `Scene::Save`（`EditorRenderLayer.cpp:992`）
+  3. Stop 入口走 `Scene::Load` 在**新** `World` 上按 JSON 顺序逐个 `CreateEntity()`（`EditorRenderLayer.cpp:1134`）
+  4. EnTT `view<entt::entity>` 在新 sparse-set 上的遍历顺序与"按 JSON 顺序 CreateEntity 的次序"不一致——sparse-set packed array 的 LIFO 遍历语义 + reverse iteration 实现细节让两次 Save 产出顺序相反
+- Entity Tree UI 直接消费同一个 view，所以用户**视觉**也能看到 Stop 后顺序翻转（用户原话："stop后，Entity Tree的顺序会变反"）
+
+### 影响面
+
+- **用户 UX**：Stop 后 Entity Tree 顺序与 Play 前不一致，破坏"Stop 干净还原"心智契约（与 Play Mode 的"快照 / 还原"承诺直接冲突）
+- **Git 噪音**：未 Save 时 diff 是隐性的；一旦用户在 Stop 后 Save scene，立刻产生大段 reorder diff，与真实业务改动混在一起难以 review
+- **多次 Play/Stop 累积**：每次 Stop 都会翻转一次，理论上偶数次 Play/Stop 后顺序回到原位，奇数次留在反转态；这种"取决于操作次数奇偶性"的行为不能成为持久化语义
+- **scene 文件归一化缺失**：Save 没有"按 stable key 排序" / "按创建时间排序"的归一化步骤，所以两台机器 / 两个 session 即使做同样操作也可能产出不同 entity 顺序的 .scene.json，常态化制造合并冲突
+
+### 缺什么（按依赖拆）
+
+#### G1 · 根因诊断
+
+- 确认实际机制是 EnTT view 遍历方向 + Load 创建顺序的组合，还是另有 Save / Load 中间步骤参与（候选嫌疑：`HierarchyComponent` 双向链表重建顺序、`namedMaterialInstances` resolve 顺序、`ComponentSerializerEntry` Pass 1/2 双趟）
+- 写一个 minimal repro：构造 N entity World → Save → Load → 比对 view 遍历顺序与原始顺序，看是否纯反转
+
+#### G2 · Save 路径归一化
+
+- `Scene::Save` 输出 entity 数组前按 stable key 排序——候选：persistentId 升序（已有 `EntityToPersistentId` 映射）/ Name 字典序 / Hierarchy DFS 顺序（最符合 Entity Tree 视觉预期）
+- DFS 排序方案需要先把无 Hierarchy 的 root 与有 Hierarchy 的 root 合并排序，规则待定
+- 落地后老 scene 文件首次被编辑器 Save 会一次性归一化；纳入 v1.0.2 / 后续 patch 时在 milestone-end-checklist 标注"预期触发 scene 文件大规模 reorder diff"
+
+#### G3 · Load 路径让"还原后的 view 遍历顺序" == "Save 时的顺序"
+
+- 候选思路：`Scene::Load` 在新 World 上以反向顺序 CreateEntity，抵消 EnTT view 的反向遍历
+- 风险：依赖 EnTT 内部实现细节（sparse-set 遍历方向），EnTT 升级可能破；G2 比 G3 更稳健
+
+#### G4 · Entity Tree UI 自管排序
+
+- DrawEntityTreePanel 不再直接 dump view 顺序，而是按 EditorState 持有的"显示顺序"渲染（默认按 persistentId / Name / Hierarchy DFS）
+- 这条与 G2 互补：G2 让磁盘 stable，G4 让 UI 与磁盘视觉一致
+- 与 [[GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention]] 之类的"编辑器侧维护派生数据"是同类增量
+
+### 期望验收
+
+- 打开任意 scene → Play → Stop → Entity Tree 顺序与 Play 前**完全一致**
+- 打开任意 scene → Save → git diff 干净（零字段变动 + 零顺序变动）
+- 反复 Play/Stop 任意次数 → Entity Tree 顺序不变
+- 两台机器 / 两个 session 对同一 scene 做同样操作 → Save 产出字节级一致 .scene.json（归一化目标）
+
+### 状态
+
+- **登记**：2026-05-23
+- **优先级**：**P1（friction）** —— 不阻塞功能，但持续制造 git diff 噪音 + 破坏 Stop 还原契约；建议纳入下一个 v1.0.x friction patch batch
+- **归属**：未拍板；候选 OrangeEditor v1.0.2+ friction patch batch
+- **关联**：本次 working tree 清理 session 已 revert v1.0.scene.json 的污染 diff，commit message 引用本 GAP
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-11-point-light-and-visible-halo**（2026-05-20 落地 G1+G2，G3 留 v1.x）：
