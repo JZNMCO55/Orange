@@ -705,5 +705,11 @@ EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
         *dataOpt, *inst, host.assets.pAssets.get());
     auto* rawPtr = inst.get();
     host.assets.userMaterials[materialPath] = std::move(inst);
+    // v1.2.5 patch · 同步更新 namedMaterialInstances cache —— 否则 schema
+    // AssetRef materialGet 反查（RegisterBuiltinSchemas.cpp:359 走 cache
+    // 而非 BuildNamedMaterialInstances()）找不到新 path 显示 None；Scene
+    // Save / Load 路径同样消费此 cache。main.cpp:642 启动期是 one-shot
+    // snapshot，需在每次 lazy create 后增量同步。
+    host.assets.namedMaterialInstances[materialPath] = rawPtr;
     return rawPtr;
 }

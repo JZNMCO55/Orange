@@ -652,6 +652,33 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.2.5 · EnsureMaterialInstance 同步 namedMaterialInstances cache ✅
+
+**版本**：v1.2.4 ✅ 后第五个 patch
+**落地日期**：2026-05-24
+
+**范围**：修复 v1.2.4 后用户继续报"新材质无法应用到实体，Inspector 显示 None"的真正根因。
+
+**根因**：v1.2.4 抽 `EnsureMaterialInstance` 统一 lazy create 路径，但漏更新 `EditorAssetContext.namedMaterialInstances` cache 字段。schema AssetRef `materialGet`（RegisterBuiltinSchemas.cpp:359）反查走的是 cache 而非 `BuildNamedMaterialInstances()` 函数，所以新 path 找不到 → Inspector Renderable.material 字段显示 None。`namedMaterialInstances` cache 由 `main.cpp:642-643` 启动期 one-shot 填充（仅 8 hardcode + PBR showcase 18），lazy create 之后未增量同步。
+
+**修复**：`EnsureMaterialInstance` 内 lazy create 后加一行 `host.assets.namedMaterialInstances[materialPath] = rawPtr;` 增量同步 cache。schema 反查、Scene Save / Load 路径都立即看到新 path。
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `tools/OrangeEditor/BuiltinAssets.cpp::EnsureMaterialInstance` | lazy create 后增量更新 `host.assets.namedMaterialInstances` cache（1 行核心修复）|
+| `tools/OrangeEditor/CMakeLists.txt` | VERSION 1.2.4 → 1.2.5 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.5-acceptance-checklist.md`
+
+**与引擎关系**：纯编辑器侧 1 行修复；CMake VERSION 1.2.4 → 1.2.5。
+
+**Critical Path**：是（v1.2.x 材质工作流系列的最后闭环——v1.1.1 Create + v1.2.2 Inspector + v1.2.3 DnD + v1.2.4 统一 lazy + v1.2.5 cache 同步，至此美术 / 关卡设计师"不写代码完成日常工作"的材质路径全打通）
+
+**不在本 patch 范围**（明示）：
+- BuildNamedMaterialInstances() 函数 vs namedMaterialInstances 字段统一为单一 source of truth → v1.3.0+ minor 架构整骨
+
 ### v1.2.4 · DnD apply 新材质修复（统一 lazy create 路径）✅
 
 **版本**：v1.2.3 ✅ 后第四个 patch
