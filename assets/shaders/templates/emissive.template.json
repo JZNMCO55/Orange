@@ -1,11 +1,11 @@
 {
-  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 0 },
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 1 },
   "templateName": "emissive",
   "vertexSpv": "shaders/orange_engine/emissive.vert.spv",
   "fragmentSpv": "shaders/orange_engine/emissive.frag.spv",
   "uniforms": [
-    { "name": "uMVP",   "type": "mat4" },
-    { "name": "uModel", "type": "mat4" }
+    { "name": "uMVP",   "type": "mat4", "editor": { "widget": "hidden" } },
+    { "name": "uModel", "type": "mat4", "editor": { "widget": "hidden" } }
   ],
   "textureSlots": []
 }

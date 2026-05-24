@@ -4,6 +4,7 @@
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../MaterialFileIO.h"
+#include "../ShaderTemplateMetaIO.h"  // v1.2 T2 · 数据驱动 widget 元数据
 
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/MaterialSystem.h>
@@ -14,6 +15,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +25,251 @@ namespace Orange::Editor::Plugin
 
 namespace
 {
+
+// v1.2 T2 · 所有已注册 .template.json 的 editor 元数据缓存。启动期由
+// EnsureMetaCache 首次调用时一次性 LoadAllShaderTemplateMetas 填好；后续
+// 每帧渲染按 templateName 线性查找（典型 ≤15 个 template，O(N) 可忽略）。
+// 用户加新 .template.json 后需重启编辑器才生效（与 MaterialSystem 注册
+// 路径同节奏，不引入 file watcher）。
+std::vector<ShaderMeta::ShaderTemplateMeta> sMetaCache;
+bool sMetaCacheInitialized = false;
+
+void EnsureMetaCache()
+{
+    if (sMetaCacheInitialized) { return; }
+    sMetaCache = ShaderMeta::LoadAllShaderTemplateMetas(
+        std::filesystem::path("assets/shaders/templates"));
+    sMetaCacheInitialized = true;
+}
+
+const ShaderMeta::ShaderTemplateMeta* FindMeta(std::string_view templateName)
+{
+    EnsureMetaCache();
+    for (const auto& m : sMetaCache)
+    {
+        if (m.templateName == templateName) { return &m; }
+    }
+    return nullptr;
+}
+
+// v1.2 T2 · 单 uniform widget 渲染。按 metadata.widget + uniform.type 派
+// 发对应 ImGui 控件。返回 true 表示用户本帧改了值（外层 dirty 触发 Save）。
+//
+// 调用约定：调用方处于 BeginPropertyTable / EndPropertyTable 之间（uniform
+// 占两列：左列 PropertyLabel，右列 widget）。Components 模式打破表格——
+// 内部 End 当前 table + 给每 sub component 独立 row + 调用方退回前重
+// Begin。
+bool RenderUniformWidget(
+    const ShaderMeta::UniformMetadata&            u,
+    ::Orange::Engine::Render::MaterialInstance&   instance)
+{
+    using ::Orange::Engine::Render::MaterialUniformType;
+    using W = ShaderMeta::UniformWidget;
+
+    const std::string idStr = "##um_" + u.name;
+    bool changed = false;
+
+    switch (u.type)
+    {
+        case MaterialUniformType::Vec4:
+        {
+            const glm::vec4 fallback =
+                u.hasDefault
+                    ? glm::vec4(u.defaultValue[0], u.defaultValue[1],
+                                u.defaultValue[2], u.defaultValue[3])
+                    : glm::vec4(0.0f);
+            glm::vec4 v = instance.GetUniformVec4(u.name).value_or(fallback);
+            if (u.widget == W::Components)
+            {
+                // 打破当前 table，让每 sub component 各占一 row。外层
+                // displayName 不渲染——与原 pbr hardcode "Metallic /
+                // Roughness / AO" 三行直排视觉一致。
+                Orange::Editor::Widgets::EndPropertyTable();
+                Orange::Editor::Widgets::BeginPropertyTable(
+                    ("##matparams_comp_" + u.name).c_str(), 100.0f);
+                float arr[4] = {v.x, v.y, v.z, v.w};
+                for (std::size_t i = 0;
+                     i < u.components.size() && i < 4; ++i)
+                {
+                    const auto& c = u.components[i];
+                    if (c.widget == W::Hidden) { continue; }
+                    Orange::Editor::Widgets::PropertyLabel(
+                        c.label.c_str(),
+                        c.tooltip.empty() ? nullptr : c.tooltip.c_str());
+                    const std::string subId =
+                        idStr + "_" + std::to_string(i);
+                    const float lo =
+                        c.range.has_value() ? c.range->first  : 0.0f;
+                    const float hi =
+                        c.range.has_value() ? c.range->second : 1.0f;
+                    const float step = c.step.value_or(0.001f);
+                    bool subChanged = false;
+                    if (c.widget == W::Slider)
+                    {
+                        subChanged = ImGui::SliderFloat(
+                            subId.c_str(), &arr[i], lo, hi, "%.3f");
+                    }
+                    else
+                    {
+                        subChanged = ImGui::DragFloat(
+                            subId.c_str(), &arr[i], step, lo, hi, "%.3f");
+                    }
+                    if (subChanged) { changed = true; }
+                }
+                Orange::Editor::Widgets::EndPropertyTable();
+                Orange::Editor::Widgets::BeginPropertyTable(
+                    "##matparams", 100.0f);
+                if (changed)
+                {
+                    instance.SetUniform(
+                        u.name,
+                        glm::vec4(arr[0], arr[1], arr[2], arr[3]));
+                }
+                return changed;
+            }
+            // 非 Components 模式 —— 走外层 PropertyLabel + 右列 widget。
+            const char* label = u.displayName.empty()
+                                    ? u.name.c_str()
+                                    : u.displayName.c_str();
+            Orange::Editor::Widgets::PropertyLabel(
+                label, u.tooltip.empty() ? nullptr : u.tooltip.c_str());
+            if (u.widget == W::Color)
+            {
+                float arr[4] = {v.r, v.g, v.b, v.a};
+                if (ImGui::ColorEdit4(idStr.c_str(), arr))
+                {
+                    instance.SetUniform(
+                        u.name,
+                        glm::vec4(arr[0], arr[1], arr[2], arr[3]));
+                    changed = true;
+                }
+            }
+            else
+            {
+                float arr[4] = {v.x, v.y, v.z, v.w};
+                const float step = u.step.value_or(0.01f);
+                if (ImGui::DragFloat4(idStr.c_str(), arr, step))
+                {
+                    instance.SetUniform(
+                        u.name,
+                        glm::vec4(arr[0], arr[1], arr[2], arr[3]));
+                    changed = true;
+                }
+            }
+            break;
+        }
+        case MaterialUniformType::Vec3:
+        {
+            const glm::vec3 fallback =
+                u.hasDefault
+                    ? glm::vec3(u.defaultValue[0], u.defaultValue[1],
+                                u.defaultValue[2])
+                    : glm::vec3(0.0f);
+            glm::vec3 v = instance.GetUniformVec3(u.name).value_or(fallback);
+            const char* label = u.displayName.empty()
+                                    ? u.name.c_str()
+                                    : u.displayName.c_str();
+            Orange::Editor::Widgets::PropertyLabel(
+                label, u.tooltip.empty() ? nullptr : u.tooltip.c_str());
+            float arr[3] = {v.x, v.y, v.z};
+            if (u.widget == W::Color)
+            {
+                if (ImGui::ColorEdit3(idStr.c_str(), arr))
+                {
+                    instance.SetUniform(
+                        u.name, glm::vec3(arr[0], arr[1], arr[2]));
+                    changed = true;
+                }
+            }
+            else
+            {
+                const float step = u.step.value_or(0.01f);
+                if (ImGui::DragFloat3(idStr.c_str(), arr, step))
+                {
+                    instance.SetUniform(
+                        u.name, glm::vec3(arr[0], arr[1], arr[2]));
+                    changed = true;
+                }
+            }
+            break;
+        }
+        case MaterialUniformType::Vec2:
+        {
+            const glm::vec2 fallback =
+                u.hasDefault
+                    ? glm::vec2(u.defaultValue[0], u.defaultValue[1])
+                    : glm::vec2(0.0f);
+            glm::vec2 v = instance.GetUniformVec2(u.name).value_or(fallback);
+            const char* label = u.displayName.empty()
+                                    ? u.name.c_str()
+                                    : u.displayName.c_str();
+            Orange::Editor::Widgets::PropertyLabel(
+                label, u.tooltip.empty() ? nullptr : u.tooltip.c_str());
+            float arr[2] = {v.x, v.y};
+            const float step = u.step.value_or(0.01f);
+            if (ImGui::DragFloat2(idStr.c_str(), arr, step))
+            {
+                instance.SetUniform(u.name, glm::vec2(arr[0], arr[1]));
+                changed = true;
+            }
+            break;
+        }
+        case MaterialUniformType::Float:
+        {
+            const float fallback = u.hasDefault ? u.defaultValue[0] : 0.0f;
+            float v = instance.GetUniformFloat(u.name).value_or(fallback);
+            const char* label = u.displayName.empty()
+                                    ? u.name.c_str()
+                                    : u.displayName.c_str();
+            Orange::Editor::Widgets::PropertyLabel(
+                label, u.tooltip.empty() ? nullptr : u.tooltip.c_str());
+            const float lo = u.range.has_value() ? u.range->first  : 0.0f;
+            const float hi = u.range.has_value() ? u.range->second : 1.0f;
+            const float step = u.step.value_or(0.01f);
+            if (u.widget == W::Slider)
+            {
+                if (ImGui::SliderFloat(idStr.c_str(), &v, lo, hi, "%.3f"))
+                {
+                    instance.SetUniform(u.name, v);
+                    changed = true;
+                }
+            }
+            else
+            {
+                if (ImGui::DragFloat(idStr.c_str(), &v, step,
+                                     lo, hi, "%.3f"))
+                {
+                    instance.SetUniform(u.name, v);
+                    changed = true;
+                }
+            }
+            break;
+        }
+        case MaterialUniformType::Int:
+        {
+            const std::int32_t fallback =
+                u.hasDefault ? static_cast<std::int32_t>(u.defaultValue[0]) : 0;
+            std::int32_t v = instance.GetUniformInt(u.name).value_or(fallback);
+            const char* label = u.displayName.empty()
+                                    ? u.name.c_str()
+                                    : u.displayName.c_str();
+            Orange::Editor::Widgets::PropertyLabel(
+                label, u.tooltip.empty() ? nullptr : u.tooltip.c_str());
+            if (ImGui::InputInt(idStr.c_str(), &v))
+            {
+                instance.SetUniform(u.name, v);
+                changed = true;
+            }
+            break;
+        }
+        case MaterialUniformType::Mat4:
+            // mat4 不暴露——Pipeline 自动 push uMVP / uModel，schema 内
+            // widget=Hidden 应该在外层就被跳过；走到这里是 schema 配错，
+            // 静默忽略不渲染。
+            break;
+    }
+    return changed;
+}
 
 // 从 MaterialSystem 读所有已注册模板名（含内置 + 游戏侧 RegisterTemplate
 // 注入的自定义模板），排序后返回——unordered_map 遍历无序，UI 一致
@@ -134,85 +381,77 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     Orange::Engine::Render::MaterialInstance* liveInstance =
         (namedIt != namedMap.end()) ? namedIt->second : nullptr;
 
-    // Uniform 调参 UI：当 template == "pbr" 且当前 .material 对应 live
-    // MaterialInstance 找得到时展开 PBR 五通道调参（normal 通道走 vNormal
-    // vertex 插值未引入 texture，本期面板不展示）。其他模板的 uniform 调
-    // 参 UI 等后续 milestone 按需补；schema v1.1 已支持持久化全部 override。
-    bool pbrUniformDirty = false;
-    if (host.assets.editingTemplateName == "pbr" && liveInstance != nullptr)
+    // v1.2 T2 · 数据驱动 widget 渲染。从 .template.json 元数据生成对应
+    // 控件，移除原 pbr hardcode if-else 路径。Material Inspector 现在
+    // 支持所有 6 个 baseline template + 未来用户自定义 .template.json
+    // 自动出 UI；新增模板调参字段 = 改 .template.json 不动 C++。
+    //
+    // 渲染流程：FindMeta 按 editingTemplateName 查 metadata → 跳过全
+    // Hidden 字段后渲染剩余 widget（PropertyTable 两列布局，左列
+    // PropertyLabel + 右列 ImGui control）。SetUniform → live instance
+    // 视觉立即生效语义保留。
+    bool uniformDirty = false;
+    if (liveInstance == nullptr)
     {
         ImGui::Separator();
-        ImGui::TextUnformatted("PBR 材质参数");
-
-        // 当前 override 值 → fallback 到 Pipeline pack 路径里 PBR 默认
-        // （灰塑料 + 非金属 + 中等粗糙 + AO 满）。任一字段在 .material
-        // 文件里被持久化为 override 时本帧立即从 MaterialInstance 读回真值。
-        glm::vec4 baseColor = liveInstance->GetUniformVec4("uBaseColor")
-                                  .value_or(glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
-        glm::vec4 mra       = liveInstance->GetUniformVec4("uMRA")
-                                  .value_or(glm::vec4(0.0f, 0.5f, 1.0f, 0.0f));
-
-        Orange::Editor::Widgets::BeginPropertyTable("##pbrprops", 100.0f);
-
-        Orange::Editor::Widgets::PropertyLabel("Base Color",
-            "线性 RGB 漫反射底色（金属时改变高光颜色，非金属时改变 diffuse）");
-        float rgb[3] = {baseColor.r, baseColor.g, baseColor.b};
-        if (ImGui::ColorEdit3("##baseColor", rgb))
-        {
-            liveInstance->SetUniform("uBaseColor",
-                glm::vec4(rgb[0], rgb[1], rgb[2], baseColor.a));
-            pbrUniformDirty = true;
-        }
-
-        Orange::Editor::Widgets::PropertyLabel("Metallic",
-            "0 = 介电（塑料 / 木材），1 = 金属（高光取 baseColor，diffuse 趋 0）");
-        if (ImGui::SliderFloat("##metallic", &mra.x, 0.0f, 1.0f, "%.3f"))
-        {
-            liveInstance->SetUniform("uMRA", mra);
-            pbrUniformDirty = true;
-        }
-
-        Orange::Editor::Widgets::PropertyLabel("Roughness",
-            "0 = 镜面，1 = 粗糙漫反射；shader 内 clamp 到 [0.04, 1.0] 避开 D_GGX 奇异");
-        if (ImGui::SliderFloat("##roughness", &mra.y, 0.0f, 1.0f, "%.3f"))
-        {
-            liveInstance->SetUniform("uMRA", mra);
-            pbrUniformDirty = true;
-        }
-
-        Orange::Editor::Widgets::PropertyLabel("AO",
-            "环境光遮蔽乘子；仅作用于 IBL 贡献（当前 IBL 槽 dummy → 视觉不变）");
-        if (ImGui::SliderFloat("##ao", &mra.z, 0.0f, 1.0f, "%.3f"))
-        {
-            liveInstance->SetUniform("uMRA", mra);
-            pbrUniformDirty = true;
-        }
-
-        Orange::Editor::Widgets::EndPropertyTable();
-
-        ImGui::TextDisabled("Normal: 当前走 vNormal vertex 插值（无法线贴图）；"
-                            "tangent + 法线贴图基础设施落地后再上 texture 路径");
-    }
-    else if (host.assets.editingTemplateName == "pbr")
-    {
-        ImGui::Separator();
-        ImGui::TextDisabled("PBR 五通道调参面板需要当前 .material 已被加载到运行时实例。");
-        ImGui::TextDisabled("（本 .material 未出现在 namedMaterialInstances 表内，跳过）");
+        ImGui::TextDisabled("调参面板需要当前 .material 已被加载到运行时实例。");
+        ImGui::TextDisabled("(本 .material 未出现在 namedMaterialInstances 表内，跳过)");
     }
     else
     {
-        // 其他模板的 uniform / texture 调参 UI 等后续 milestone 按需扩；
-        // schema v1.1 已支持持久化全部 SetUniform override。
-        ImGui::Separator();
-        ImGui::TextDisabled("Uniforms / Textures 调参 UI：仅 pbr 模板已上线。");
-        ImGui::TextDisabled("(.material schema v1.1 已支持持久化所有 SetUniform override)");
+        const ShaderMeta::ShaderTemplateMeta* meta =
+            FindMeta(host.assets.editingTemplateName);
+        if (meta == nullptr)
+        {
+            ImGui::Separator();
+            ImGui::TextDisabled(
+                "Uniforms：模板 '%s' 缺失 .template.json 元数据。",
+                host.assets.editingTemplateName.c_str());
+        }
+        else
+        {
+            std::size_t visibleCount = 0;
+            for (const auto& u : meta->uniforms)
+            {
+                if (u.widget != ShaderMeta::UniformWidget::Hidden)
+                {
+                    ++visibleCount;
+                }
+            }
+            if (visibleCount == 0)
+            {
+                ImGui::Separator();
+                ImGui::TextDisabled(
+                    "模板 '%s' 无可调参数（uniform 全为 Pipeline 自动 push）。",
+                    host.assets.editingTemplateName.c_str());
+            }
+            else
+            {
+                ImGui::Separator();
+                ImGui::TextUnformatted("材质参数");
+                Orange::Editor::Widgets::BeginPropertyTable(
+                    "##matparams", 100.0f);
+                for (const auto& u : meta->uniforms)
+                {
+                    if (u.widget == ShaderMeta::UniformWidget::Hidden)
+                    {
+                        continue;
+                    }
+                    if (RenderUniformWidget(u, *liveInstance))
+                    {
+                        uniformDirty = true;
+                    }
+                }
+                Orange::Editor::Widgets::EndPropertyTable();
+            }
+        }
     }
 
-    // Save 按钮：以 v1.1 schema 写回。template 切换或任一 PBR uniform 编
-    // 辑都标 dirty；live instance 不存在时仅按 template 差异判 dirty。
+    // Save 按钮：以 v1.1 schema 写回。template 切换或任一 uniform 编辑
+    // 都标 dirty；live instance 不存在时仅按 template 差异判 dirty。
     ImGui::Separator();
     const bool templateDirty = (host.assets.editingTemplateName != originalTemplate);
-    const bool dirty         = templateDirty || pbrUniformDirty;
+    const bool dirty         = templateDirty || uniformDirty;
     ImGui::BeginDisabled(!dirty);
     if (ImGui::Button("Save"))
     {

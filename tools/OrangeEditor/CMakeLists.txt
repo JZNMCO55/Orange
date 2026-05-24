@@ -150,6 +150,7 @@ add_executable(OrangeEditor
     EditorWidgets.cpp
     AnimFsmFileIO.cpp
     MaterialFileIO.cpp
+    ShaderTemplateMetaIO.cpp
     VulkanLoaderShim.cpp
     context/EditorKeybindings.cpp
     context/EditorSettings.cpp

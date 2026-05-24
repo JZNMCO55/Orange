@@ -1,13 +1,53 @@
 {
-  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 0 },
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 1 },
   "templateName": "pbr",
   "vertexSpv": "shaders/orange_engine/pbr.vert.spv",
   "fragmentSpv": "shaders/orange_engine/pbr.frag.spv",
   "uniforms": [
-    { "name": "uMVP",       "type": "mat4" },
-    { "name": "uModel",     "type": "mat4" },
-    { "name": "uBaseColor", "type": "vec4" },
-    { "name": "uMRA",       "type": "vec4" }
+    { "name": "uMVP",   "type": "mat4", "editor": { "widget": "hidden" } },
+    { "name": "uModel", "type": "mat4", "editor": { "widget": "hidden" } },
+    {
+      "name": "uBaseColor",
+      "type": "vec4",
+      "default": [0.8, 0.8, 0.8, 1.0],
+      "editor": {
+        "widget": "color",
+        "displayName": "Base Color",
+        "tooltip": "线性 RGB 漫反射底色（金属时改变高光颜色，非金属时改变 diffuse）"
+      }
+    },
+    {
+      "name": "uMRA",
+      "type": "vec4",
+      "default": [0.0, 0.5, 1.0, 0.0],
+      "editor": {
+        "widget": "components",
+        "components": [
+          {
+            "label": "Metallic",
+            "widget": "slider",
+            "range": [0.0, 1.0],
+            "step": 0.001,
+            "tooltip": "0 = 介电（塑料 / 木材），1 = 金属（高光取 baseColor，diffuse 趋 0）"
+          },
+          {
+            "label": "Roughness",
+            "widget": "slider",
+            "range": [0.0, 1.0],
+            "step": 0.001,
+            "tooltip": "0 = 镜面，1 = 粗糙漫反射；shader 内 clamp 到 [0.04, 1.0] 避开 D_GGX 奇异"
+          },
+          {
+            "label": "AO",
+            "widget": "slider",
+            "range": [0.0, 1.0],
+            "step": 0.001,
+            "tooltip": "环境光遮蔽乘子；仅作用于 IBL 贡献"
+          },
+          { "label": "Reserved", "widget": "hidden" }
+        ]
+      }
+    }
   ],
   "textureSlots": []
 }
