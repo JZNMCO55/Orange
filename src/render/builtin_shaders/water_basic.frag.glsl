@@ -54,6 +54,17 @@ vec2 WaveOffset(vec2 uv, float t, float amp, float speed)
     return vec2(w1, w2) * amp;
 }
 
+// v1.2.7 patch · Caustics 亮度斑（光在水底反射形成的网状光斑）。多层
+// sin 叠加产生 0-1 范围的亮度图案；与 normal 扰动正交，让"水波动画"在
+// 视线方向 / 法线对齐都不理想（如立面 plane）的场景下仍肉眼可见。
+float Caustics(vec2 uv, float t, float speed)
+{
+    float c1 = sin(uv.x * 30.0 + t * speed * 1.5 + uv.y * 18.0);
+    float c2 = sin(uv.y * 25.0 + t * speed * 1.2 + uv.x * 22.0);
+    float c3 = sin((uv.x + uv.y) * 18.0 - t * speed * 0.8);
+    return (c1 + c2 + c3) / 3.0 * 0.5 + 0.5;  // 归一化到 0..1
+}
+
 void main()
 {
     const float t        = light.uFrameInfo.x;
@@ -65,19 +76,27 @@ void main()
     // 入真法线贴图的廉价 wave normal 近似。
     vec2 uvWarp = vUV + WaveOffset(vUV, t, waveAmp, waveSpd);
 
-    // 从扰动梯度近似 normal（central diff）。
+    // 从扰动梯度近似 normal（central diff）。v1.2.7 patch · 系数由 10 升
+    // 到 50，让法线扰动幅度在 default Wave Amplitude 0.015 时仍肉眼可见。
     vec2 offX = WaveOffset(vUV + vec2(0.01, 0.0), t, waveAmp, waveSpd);
     vec2 offY = WaveOffset(vUV + vec2(0.0, 0.01), t, waveAmp, waveSpd);
     vec3 N = normalize(vNormal + vec3(
-        (offX.x - WaveOffset(vUV, t, waveAmp, waveSpd).x) * 10.0,
-        (offY.y - WaveOffset(vUV, t, waveAmp, waveSpd).y) * 10.0,
+        (offX.x - WaveOffset(vUV, t, waveAmp, waveSpd).x) * 50.0,
+        (offY.y - WaveOffset(vUV, t, waveAmp, waveSpd).y) * 50.0,
         0.0));
 
     // 漫反射 N·L（主光方向已存储为 uLightDirIntensity.xyz）。
     vec3 L = normalize(-light.uLightDirIntensity.xyz);
     float NdotL = max(dot(N, L), 0.0);
     vec3  lightCol = light.uLightColor.rgb * light.uLightDirIntensity.w;
-    vec3  diffuse  = vBaseColor.rgb * lightCol * NdotL;
+
+    // v1.2.7 patch · Caustics 亮度斑乘到 baseColor —— 让 "立面水 plane"
+    // 或法线扰动方向不利的场景下，"水波动画" 仍通过亮度变化可见。0.7
+    // ~ 1.3 范围 ≈ ±30% 亮度起伏，足够肉眼辨识。
+    float caustics = mix(0.7, 1.3, Caustics(uvWarp, t, waveSpd));
+    vec3  baseLit  = vBaseColor.rgb * caustics;
+
+    vec3  diffuse  = baseLit * lightCol * NdotL;
 
     // Schlick Fresnel 边缘高光（view 方向越接近切向越亮）。
     vec3 V = normalize(light.uCameraWorldPos.xyz - vWorldPos);
@@ -92,6 +111,6 @@ void main()
                                    light.uShadowParams.y);
     float lighting = mix(0.4, 1.0, shadow);
 
-    vec3 lit = (diffuse + edge) * lighting + vBaseColor.rgb * 0.15;  // 底色环境光基线
+    vec3 lit = (diffuse + edge) * lighting + baseLit * 0.15;  // 底色环境光基线
     outColor = vec4(lit, 1.0);
 }

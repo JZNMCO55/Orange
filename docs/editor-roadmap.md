@@ -652,6 +652,34 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.2.7 · water_basic shader 视觉增强（caustics + 法线扰动 5x）✅
+
+**版本**：v1.2.6 ✅ 后第七个 patch
+**落地日期**：2026-05-24
+
+**范围**：修复 v1.2.6 后用户反馈"plane 没动态波纹"。v1.2.6 的 default uniforms 实际已生效（Inspector 显示 default 值正常），但 `water_basic` shader 原版波纹幅度太微弱（normal 扰动系数 10 + 单 sin 层 + default amp 0.015）→ 视觉变化 <5% 肉眼难辨；加上立面 plane 法线方向与扰动平面（X+Y）不匹配 → 立面上更弱。
+
+**修复**（纯 shader 改动）：
+- 法线扰动系数 `* 10.0` → `* 50.0`（5x），default Wave Amp 0.015 时 NdotL 漫反射变化可见
+- 新增 **caustics 亮度斑层**（3 频 sin 叠加，归一化 0-1，乘到 baseColor 0.7-1.3 范围）—— 与 normal 扰动正交，立面 plane 等法线方向不利场景仍通过亮度起伏看到动画
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `src/render/builtin_shaders/water_basic.frag.glsl` | 加 `Caustics(uv, t, speed)` helper 3 频 sin 叠加；法线扰动系数 10→50；baseLit = vBaseColor × caustics 应用到 diffuse + 环境光基线 |
+| `tools/OrangeEditor/CMakeLists.txt` | VERSION 1.2.6 → 1.2.7 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.7-acceptance-checklist.md`
+
+**与引擎关系**：纯 shader 改动 + CMake VERSION bump；无 C++ / API 改动。
+
+**Critical Path**：是（v1.2.x 材质工作流系列的视觉验收最后保障——前 5 个 patch 修管线 / 数据，本 patch 修视觉强度让"水"真的看着像水）
+
+**不在本 patch 范围**（明示）：
+- 真正物理基底 water shader（FFT / SSR / refraction）→ v1.x minor + OR offscreen RT
+- water 在立面 plane 自动旋转扰动方向 → 不做（水语义上就是水平面）
+
 ### v1.2.6 · lazy create 应用 .template.json 默认值 ✅
 
 **版本**：v1.2.5 ✅ 后第六个 patch
