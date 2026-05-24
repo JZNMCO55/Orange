@@ -66,7 +66,7 @@ related:
 | `docs/editor-roadmap.md` | OrangeEditor 路线 + D1/D5 节内嵌当时的决策快照 |
 | `docs/engine-known-gaps.md` | 编辑器 / sample 撞上的引擎缺口（**遇到了什么**） |
 | `docs/decisions/README.md` (本文件) | ADR 入口 + 索引；具体 ADR 文件迁 Wiki |
-| `vendor/Orange-Wiki/case-studies/orange-engine/decisions/` | 实际 ADR 文件（**为什么这么选**） |
+| `../Orange-Wiki/case-studies/orange-engine/decisions/`（sibling）| 实际 ADR 文件（**为什么这么选**）|
 | `CLAUDE.md` | invariant + 工作流纪律（**之后必须遵守什么**） |
 
 ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。同一件事可同时被两处提到——roadmap 里写当前 milestone 怎么落，ADR 里写为什么这么选。如果某个 roadmap 内嵌决策很关键且会被后续 milestone 反复引用，把它提取到 ADR；否则留在 roadmap 即可。
@@ -75,11 +75,12 @@ ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。
 
 | ID | 标题 | 状态 | 日期 | 文件 |
 |----|------|------|------|------|
-| ADR-001 | OrangeEditor 转向 schema-first 架构 + 全局禁止 hardcode | accepted | 2026-05-12 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-001-editor-schema-first-and-no-hardcode.md) |
-| ADR-002 | OrangeEditor 视觉体系决策（EditorTheme token + Cocos 灰 + 橙 accent + Codicons + 4px 色带） | accepted | 2026-05-17 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-002-editor-visual-system.md) |
-| ADR-003 | OrangeEditor v0.9 Profiler 后端选型 —— 自实现 AutoProfile RAII（暂不接 Tracy） | accepted | 2026-05-19 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-003-profiler-backend-selection.md) |
-| ADR-004 | OrangeEditor v0.9.5 Schema AssetRef accessor 选型 —— 专用槽位（方案 B）而非扩 GetFn/SetFn 全字段加 ctx | accepted | 2026-05-19 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-004-schema-asset-ref-accessor-slot.md) |
-| ADR-005 | anim_fsm condition DSL | accepted | 2026-05-20 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-005-anim-fsm-condition-dsl.md) |
-| ADR-006 | Orange-Wiki 升级为 Orange 生态中央知识库（三层分级 + 跨项目反哺） | accepted | 2026-05-21 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-006-wiki-ecosystem-knowledge-base.md) |
-| ADR-007 | Pipeline.cpp 按 pass 维度拆分（PIMPL Impl 集中声明 + 子 .cpp 各自 method body） | accepted | 2026-05-23 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-007-pipeline-cpp-pass-level-split.md) |
-| ADR-008 | OrangeEditor v1.1 DCC 资产导入流水线架构（5 议题合并：UX A3 + 物理布局 B2 + .meta C2 + vendor D3 + scope F2） | accepted | 2026-05-23 | [Wiki](../../vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-008-dcc-import-pipeline-architecture.md) |
+| ADR-001 | OrangeEditor 转向 schema-first 架构 + 全局禁止 hardcode | accepted | 2026-05-12 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-001-editor-schema-first-and-no-hardcode.md) |
+| ADR-002 | OrangeEditor 视觉体系决策（EditorTheme token + Cocos 灰 + 橙 accent + Codicons + 4px 色带） | accepted | 2026-05-17 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-002-editor-visual-system.md) |
+| ADR-003 | OrangeEditor v0.9 Profiler 后端选型 —— 自实现 AutoProfile RAII（暂不接 Tracy） | accepted | 2026-05-19 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-003-profiler-backend-selection.md) |
+| ADR-004 | OrangeEditor v0.9.5 Schema AssetRef accessor 选型 —— 专用槽位（方案 B）而非扩 GetFn/SetFn 全字段加 ctx | accepted | 2026-05-19 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-004-schema-asset-ref-accessor-slot.md) |
+| ADR-005 | anim_fsm condition DSL | accepted | 2026-05-20 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-005-anim-fsm-condition-dsl.md) |
+| ADR-006 | Orange-Wiki 升级为 Orange 生态中央知识库（三层分级 + 跨项目反哺） | accepted | 2026-05-21 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-006-wiki-ecosystem-knowledge-base.md) |
+| ADR-007 | Pipeline.cpp 按 pass 维度拆分（PIMPL Impl 集中声明 + 子 .cpp 各自 method body） | accepted | 2026-05-23 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-007-pipeline-cpp-pass-level-split.md) |
+| ADR-008 | OrangeEditor v1.1 DCC 资产导入流水线架构（5 议题合并：UX A3 + 物理布局 B2 + .meta C2 + vendor D3 + scope F2） | accepted | 2026-05-23 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-008-dcc-import-pipeline-architecture.md) |
+| ADR-009 | vendor 拓扑反转：Ecosystem 唯一持有 4 个 sibling submodule（OE/OG 不再互 vendor OR + Wiki，sibling find_package） | accepted | 2026-05-24 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-009-vendor-topology-inversion.md) |

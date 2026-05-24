@@ -8,12 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games (first product: an Ori-like 平台跳跃 with a fluid/slime protagonist that swallows boss forms). It is delivered as a static library `OrangeEngine::orange_engine` (switchable to dll via `BUILD_SHARED_LIBS=ON`) intended for third-party integration through `find_package(OrangeEngine CONFIG)`. The engine owns scene representation, asset management, animation runtimes, physics, audio, input, and the application main loop; it does **not** own gameplay, narrative, level data, or game-specific systems (those live in the consumer game repository).
+OrangeEngine is a Windows-first, C++20 game framework targeting 2D / 2.5D games (first product: an Ori-like 平台跳跃 with a fluid/slime protagonist that swallows boss forms). It is delivered as a static library `OrangeEngine::orange_engine` (switchable to dll via `BUILD_SHARED_LIBS=ON`) intended for third-party integration through `find_package(OrangeEngine CONFIG)`. The engine owns scene representation, asset management, animation runtimes, physics, audio, input, and the application main loop; it does **not** own gameplay, narrative, level data, or game-specific systems (those live in the **OrangeGames monorepo**，承载多款基于本引擎的游戏 / demo，含首款 Ori-like).
 
-The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference.
+The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in this constellation) and consumes `Orange-Wiki` (a curated game-engine knowledge base) as its primary reference. 自 2026-05-24 [ADR-009](../Orange-Wiki/case-studies/orange-engine/decisions/ADR-009-vendor-topology-inversion.md) 起，OrangeEngine / OrangeRender / Orange-Wiki / OrangeGames 四仓由 [Orange-Ecosystem](https://github.com/JZNMCO55/Orange-Ecosystem) umbrella 仓唯一持有为 sibling submodule（本仓 `vendor/` 内不再持有 OrangeRender / Orange-Wiki，DragonBones 等纯运行时第三方依赖保留）。
 
 - Current version: `0.1.0` (Unreleased; 0.x ABI is **not** stable)
-- Status (基准 2026-05-22)：**Phase 1 ~ 5.5 全 ✅** + **Phase 6.5 · 渲染真实感基线（PBR + IBL）整体 ✅**（Task 06.5-01 ~ 07 全 ✅；2026-05-19 跨仓 session 落地 GAP-2026-05-19-pbr-ibl-specular-quality（multi-scatter compensation + prefilter 4096 sample）+ GAP-2026-05-19-editor-environment-component-wiring（.hdr 浏览器 + Pipeline 自动 re-bake）+ 顺路 fix BUG-2026-05-18-vma-shutdown-allocation-leak-assertion 双源；B.1 + B.2 acceptance-checklist 已迁 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/`（ADR-006 落地后）；samples 13_pbr_direct + 14_pbr_ibl 已编出 + 视觉验收通过）+ **Phase 6 · OrangeEditor 工具链整体 ✅**（v1.0 验收 2026-05-22 通过，详见 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`；OrangeEditor 自己按 semver 独立演进，CMake VERSION 0.0.2 → 1.0.0 与 roadmap 概念对齐；v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 / v0.4.5 / v0.5 / v0.6 / v0.6.5 / v0.8 / v0.8.5 / v0.9 / v0.9.5 / v1.0 全部 ✅；v0.7 Animation 子模式留待状态机图编辑器需求实际触发；v1.x 长尾如 Hot reload / ACP / C# 脚本 / 地形 等按拉动触发，不在 v1.0 critical path 上）。下一阶段进 Phase 7+，前瞻路线见 `docs/roadmap.md` 与 ADR-001 / ADR-003 / ADR-004（已迁 `vendor/Orange-Wiki/case-studies/orange-engine/decisions/`，入口 `docs/decisions/README.md`）。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
+- Status (基准 2026-05-22)：**Phase 1 ~ 5.5 全 ✅** + **Phase 6.5 · 渲染真实感基线（PBR + IBL）整体 ✅**（Task 06.5-01 ~ 07 全 ✅；2026-05-19 跨仓 session 落地 GAP-2026-05-19-pbr-ibl-specular-quality（multi-scatter compensation + prefilter 4096 sample）+ GAP-2026-05-19-editor-environment-component-wiring（.hdr 浏览器 + Pipeline 自动 re-bake）+ 顺路 fix BUG-2026-05-18-vma-shutdown-allocation-leak-assertion 双源；B.1 + B.2 acceptance-checklist 已迁 `../Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/`（ADR-006 落地后）；samples 13_pbr_direct + 14_pbr_ibl 已编出 + 视觉验收通过）+ **Phase 6 · OrangeEditor 工具链整体 ✅**（v1.0 验收 2026-05-22 通过，详见 `../Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`；OrangeEditor 自己按 semver 独立演进，CMake VERSION 0.0.2 → 1.0.0 与 roadmap 概念对齐；v0.1 / v0.1.5 / v0.2 / v0.2.5 / v0.3 / v0.4 / v0.4.5 / v0.5 / v0.6 / v0.6.5 / v0.8 / v0.8.5 / v0.9 / v0.9.5 / v1.0 全部 ✅；v0.7 Animation 子模式留待状态机图编辑器需求实际触发；v1.x 长尾如 Hot reload / ACP / C# 脚本 / 地形 等按拉动触发，不在 v1.0 critical path 上）。下一阶段进 Phase 7+，前瞻路线见 `docs/roadmap.md` 与 ADR-001 / ADR-003 / ADR-004（已迁 `../Orange-Wiki/case-studies/orange-engine/decisions/`，入口 `docs/decisions/README.md`）。`docs/design-plan.md` 的 ✅ 标记是 phase 进度的权威 source；本节描述若与之冲突，以 design-plan.md 为准。任何 commit 修改了 design-plan / editor-roadmap 的 ✅ 状态后，跑 `python scripts/check_claude_md_drift.py` 确认本节没有新漂移
 - Authoritative documents (read these first):
   - `docs/design-plan.md` — Phase 1–5.5 architecture + task table（含 ✅ 进度）
   - `docs/roadmap.md` — Phase 6+ long-term roadmap（含 Phase 6.5 outline 入口）
@@ -23,18 +23,18 @@ The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in th
   - `docs/coding-standards.md` — naming, guards, API macro (delta vs OrangeRender)
   - `docs/milestone-start-checklist.md` — 任意 milestone 开工前的 5–10 分钟 ritual
   - `docs/milestone-end-checklist.md` — 任意 milestone 标 ✅ 前的 5–10 分钟 ritual
-  - `docs/decisions/README.md` — Architecture Decision Records 入口（实际 ADR 已迁 `vendor/Orange-Wiki/case-studies/orange-engine/decisions/`，本 README 维护索引 + "什么进 ADR" 节）
+  - `docs/decisions/README.md` — Architecture Decision Records 入口（实际 ADR 已迁 `../Orange-Wiki/case-studies/orange-engine/decisions/`，本 README 维护索引 + "什么进 ADR" 节）
 - Archived references（已迁 Wiki，仅历史回顾时翻阅）:
-  - `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/milestone-design.md` — Phase 6.5 PBR+IBL 详细 milestone 设计（原 `docs/pbr-ibl-milestone.md`）
-  - `vendor/Orange-Wiki/case-studies/orange-engine/pre-game-design/character-forms.md` — first-game design note（原 `docs/case-studies/character-forms.md`）
-  - `vendor/Orange-Wiki/case-studies/orange-engine/milestones/` — 历次 milestone acceptance checklist（编辑器 v0.x + Phase 6.5 + Phase 3）
-  - `vendor/Orange-Wiki/case-studies/orange-engine/historical-architecture/4-layer-archive/` — 一年前 GEA 风格 4-layer 死架构（原 `docs/Technical Documentation/`）
+  - `../Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/milestone-design.md` — Phase 6.5 PBR+IBL 详细 milestone 设计（原 `docs/pbr-ibl-milestone.md`）
+  - `../Orange-Wiki/case-studies/orange-engine/pre-game-design/character-forms.md` — first-game design note（原 `docs/case-studies/character-forms.md`）
+  - `../Orange-Wiki/case-studies/orange-engine/milestones/` — 历次 milestone acceptance checklist（编辑器 v0.x + Phase 6.5 + Phase 3）
+  - `../Orange-Wiki/case-studies/orange-engine/historical-architecture/4-layer-archive/` — 一年前 GEA 风格 4-layer 死架构（原 `docs/Technical Documentation/`）
 
 ## Toolchain
 
 - Windows 11, MSVC 2022, CMake 3.28+, C++20 (extensions OFF).
-- Renderer dependency: `OrangeRender 0.1.x` via `find_package(OrangeRender CONFIG REQUIRED)`. OrangeRender is checked out at `vendor/OrangeRender/`.
-- Knowledge-base dependency: `Orange-Wiki` at `vendor/Orange-Wiki/` — **must be on branch `Orange-Render-Wiki`** (default `main` does not contain the engine wiki content).
+- Renderer dependency: `OrangeRender 0.1.x` via `find_package(OrangeRender CONFIG REQUIRED)`. OrangeRender 按 [ADR-009](../Orange-Wiki/case-studies/orange-engine/decisions/ADR-009-vendor-topology-inversion.md) 走 sibling 拓扑 —— 典型布局为 `<repo>/../OrangeRender/`（在 Orange-Ecosystem umbrella 下），或通过显式 `CMAKE_PREFIX_PATH` 指向已 install 的 OrangeRender SDK（如 `D:/sdk/orange-render`）。本仓 `vendor/` 内**不再**持有 OrangeRender。
+- Knowledge-base dependency: `Orange-Wiki` at sibling `../Orange-Wiki/` — **must be on branch `Orange-Render-Wiki`** (default `main` does not contain the engine wiki content). 同样按 ADR-009 走 sibling 拓扑，本仓 `vendor/` 内**不再**持有 Orange-Wiki。
 - Required third-party (resolved via `find_package`, expected under a single prefix such as `D:\3rdparty`):
   - Inherited transitively from OrangeRender: `Vulkan`, `glfw3`, `glm`, `volk`, `VulkanMemoryAllocator`
   - Engine-direct PUBLIC: `EnTT`, `nlohmann_json`
@@ -98,7 +98,7 @@ The engine is organized **horizontally by module**, not as a vertical pyramid. S
                            │ find_package(OrangeRender)
                            ▼
 ┌───────────────────────────────────────────────────────────┐
-│  OrangeRender (vendor/OrangeRender)                       │
+│  OrangeRender (sibling ../OrangeRender，ADR-009)          │
 │   Application / RenderFramework / RenderGraph / RHI       │
 │   Vulkan backend (volk + VMA)                             │
 └───────────────────────────────────────────────────────────┘
@@ -123,15 +123,15 @@ The engine is organized **horizontally by module**, not as a vertical pyramid. S
 Engine work is organized into Phases 1 → 5.5 (then Phase 6+ in `docs/roadmap.md`). **Do not implement Phase N+1 features while Phase N is incomplete.** Each Phase has a demonstrable milestone (typically a `samples/` executable). Phase status（基准 2026-05-22；权威 source 是 `docs/design-plan.md` / `docs/roadmap.md` / `docs/editor-roadmap.md` 中各 Task 的 ✅ 标记）：
 
 - **Phase 1 ~ 5.5：全部 ✅**（design-plan.md Task 级均已 ✅；`samples/01_minimal_window` ~ `samples/09_vfx_demo` 已落地）
-- **Phase 6 · OrangeEditor 工具链：✅**（v1.0 验收 2026-05-22 通过；v0.1 ~ v0.9.5 + v1.0 全部 ✅，详见 `docs/editor-roadmap.md` + `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`；OrangeEditor 按独立 semver 演进，CMake VERSION = 1.0.0；v0.7 Animation 子模式留待状态机图编辑器需求拉动；v1.x 长尾按需触发，不在 v1.0 critical path 上）
-- **Phase 6.5 · 渲染真实感基线（PBR + IBL）：✅**（roadmap.md Task 06.5-01 ~ 07 全 ✅；samples 13_pbr_direct + 14_pbr_ibl 视觉验收通过；B.1 / B.2 acceptance-checklist 已迁 `vendor/Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/`）
+- **Phase 6 · OrangeEditor 工具链：✅**（v1.0 验收 2026-05-22 通过；v0.1 ~ v0.9.5 + v1.0 全部 ✅，详见 `docs/editor-roadmap.md` + `../Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0-acceptance-checklist.md`；OrangeEditor 按独立 semver 演进，CMake VERSION = 1.0.0；v0.7 Animation 子模式留待状态机图编辑器需求拉动；v1.x 长尾按需触发，不在 v1.0 critical path 上）
+- **Phase 6.5 · 渲染真实感基线（PBR + IBL）：✅**（roadmap.md Task 06.5-01 ~ 07 全 ✅；samples 13_pbr_direct + 14_pbr_ibl 视觉验收通过；B.1 / B.2 acceptance-checklist 已迁 `../Orange-Wiki/case-studies/orange-engine/milestones/phase-6.5/`）
 - **Phase 7+**：未开工；前瞻路线见 `docs/roadmap.md`
 
 When working on a task, locate it in `docs/design-plan.md` Task Breakdown（Phase 1–5.5 历史 + 接口参考）、`docs/editor-roadmap.md`（Phase 6 编辑器）或 `docs/roadmap.md`（Phase 7+）. Implement only the listed outputs; reject scope creep.
 
 ## Coding conventions (enforced)
 
-The full rule set is OrangeRender's `coding-standards.md` (linked from `vendor/OrangeRender/docs/coding-standards.md`). OrangeEngine differences are documented in `docs/coding-standards.md`. Highlights:
+The full rule set is OrangeRender's `coding-standards.md` (linked from `../OrangeRender/docs/coding-standards.md`). OrangeEngine differences are documented in `docs/coding-standards.md`. Highlights:
 
 - Namespace everything in **`Orange::Engine`** (nested per module: `Orange::Engine::Render`, `Orange::Engine::Scene`, `Orange::Engine::Animation`, `Orange::Engine::Physics`, etc.). Top-level common types (`AppHost`, `World`, `Entity`, `Layer`, `FrameContext`) live in `Orange::Engine` directly.
 - Functions and types: PascalCase. Locals/params: camelCase.
@@ -183,13 +183,13 @@ These are not suggestions. Violating them is treated as an architectural bug.
 - 字符串字面量、日志消息默认仍用英文（避免编码与跨平台终端显示问题），除非该字符串是面向中文用户的 UI 文案。
 
 ### OrangeRender public API discipline
-- The renderer is consumed via its public API (`Orange::Rhi::*` and the `OrangeRender::orange_render` target). Do not reach into `vendor/OrangeRender/src/` from this repo. If OrangeRender lacks something you need, file an issue / patch in the OrangeRender repo, not a workaround here.
-- **绝对不允许在同一个 session 内既向 OrangeRender 提 feature、又在本仓库消费 / 处理该 feature。** 提 feature（在 OrangeRender 仓库新增需求、改动其公共 API、bump 其版本以引入新能力）和在 OrangeEngine 这一侧基于该 feature 写代码，必须拆成两个独立的 session：先在一个 session 把 OrangeRender 的改动落地、合并、tag/commit 固化；再在新的 session 里 bump `vendor/OrangeRender` 并消费。原因：同 session 双向操作会把"渲染器还没真正稳定的 API"当成既成事实写进引擎，下游一旦回退就会留下半成品；并且容易绕过 OrangeRender 自己的 review / wiki / 版本纪律。遇到"engine 这边发现 OrangeRender 缺东西"的情况，本 session 的正确动作是：停下当前 engine 任务，仅把需求记录下来（commit message / issue / 临时笔记），结束本 session，下次开新 session 再处理。
-- **需求 / bug 提交入口**：发现 OrangeRender 缺能力 → 追加到 `vendor/OrangeRender/docs/incoming_feature.md`；发现 OrangeRender bug → 追加到 `vendor/OrangeRender/docs/incoming_bugs.md`。条目命名约定 `## FEATURE-<日期>-<slug>` / `## BUG-<日期>-<slug>`，便于后续 commit / PR title 引用。OrangeRender 维护者按其仓内 `CLAUDE.md` 的"外部需求 / Bug 处理工作流"评审 + 拆解 + 落地 + 归档，整个评审过程会就地在该条目内留痕；OrangeEngine 这边 **不要**直接编辑别人写的评审记录，也不要在落地前抢先 bump vendor。需求落地 + tag 后，OrangeEngine 在新 session 里 bump `vendor/OrangeRender` 指针并开始消费。
+- The renderer is consumed via its public API (`Orange::Rhi::*` and the `OrangeRender::orange_render` target). Do not reach into `../OrangeRender/src/` from this repo. If OrangeRender lacks something you need, file an issue / patch in the OrangeRender repo, not a workaround here.
+- **绝对不允许在同一个 session 内既向 OrangeRender 提 feature、又在本仓库消费 / 处理该 feature。** 提 feature（在 OrangeRender 仓库新增需求、改动其公共 API、bump 其版本以引入新能力）和在 OrangeEngine 这一侧基于该 feature 写代码，必须拆成两个独立的 session：先在一个 session 把 OrangeRender 的改动落地、合并、tag/commit 固化；再在新的 session 里在 Orange-Ecosystem umbrella 仓 bump `OrangeRender` submodule pointer 并消费（ADR-009 后本仓 `vendor/OrangeRender` 已移除，OrangeRender commit 锁版本由 Ecosystem 仓持有）。原因：同 session 双向操作会把"渲染器还没真正稳定的 API"当成既成事实写进引擎，下游一旦回退就会留下半成品；并且容易绕过 OrangeRender 自己的 review / wiki / 版本纪律。遇到"engine 这边发现 OrangeRender 缺东西"的情况，本 session 的正确动作是：停下当前 engine 任务，仅把需求记录下来（commit message / issue / 临时笔记），结束本 session，下次开新 session 再处理。
+- **需求 / bug 提交入口**：发现 OrangeRender 缺能力 → 追加到 `../OrangeRender/docs/incoming_feature.md`；发现 OrangeRender bug → 追加到 `../OrangeRender/docs/incoming_bugs.md`。条目命名约定 `## FEATURE-<日期>-<slug>` / `## BUG-<日期>-<slug>`，便于后续 commit / PR title 引用。OrangeRender 维护者按其仓内 `CLAUDE.md` 的"外部需求 / Bug 处理工作流"评审 + 拆解 + 落地 + 归档，整个评审过程会就地在该条目内留痕；OrangeEngine 这边 **不要**直接编辑别人写的评审记录，也不要在落地前抢先 bump Ecosystem 那侧的 submodule pointer。需求落地 + tag 后，在新 session 里到 Orange-Ecosystem 仓 bump `OrangeRender` submodule pointer 到新 commit + sync 到本仓 working copy（pull 拿最新 sibling 内容），然后开始消费。
 
 ## Knowledge base: Orange-Wiki
 
-The wiki at `vendor/Orange-Wiki/` is a curated, incrementally-built knowledge base on game engine construction. It is mounted as a Claude Code skill via `vendor/Orange-Wiki/SKILL.md`. **It is the project's authoritative reference for engine implementation decisions.**
+The wiki at `../Orange-Wiki/` is a curated, incrementally-built knowledge base on game engine construction. It is mounted as a Claude Code skill via `../Orange-Wiki/SKILL.md`. **It is the project's authoritative reference for engine implementation decisions.**
 
 ### When to consult it
 - Implementing or designing any engine subsystem (rendering, ECS, physics, animation, audio, asset, scheduling)
@@ -198,19 +198,19 @@ The wiki at `vendor/Orange-Wiki/` is a curated, incrementally-built knowledge ba
 - Cross-engine reference questions ("how does Unreal/Unity/Bevy/Godot do X")
 
 ### How to consult it
-1. Always start with `vendor/Orange-Wiki/wiki/index.md` — it catalogs every page.
+1. Always start with `../Orange-Wiki/wiki/index.md` — it catalogs every page.
 2. Pick candidate pages (subsystem / concept / technique / engine / comparison / pattern).
 3. Read self-contained summaries first to filter relevance.
 4. Follow `prerequisites` and `see_also` frontmatter for related context.
-5. **In answers to the user, cite specific wiki pages with relative paths**: e.g., "按 `vendor/Orange-Wiki/wiki/concepts/ecs/archetype-storage.md`，archetype 在 add component 时整行迁移……"
+5. **In answers to the user, cite specific wiki pages with relative paths**: e.g., "按 `../Orange-Wiki/wiki/concepts/ecs/archetype-storage.md`，archetype 在 add component 时整行迁移……"
 
 ### What NOT to do
-- **Do not modify wiki content** from this repository as a side effect of consumer queries. Wiki maintenance is governed by `vendor/Orange-Wiki/CLAUDE.md` and happens in that repo's own session.
+- **Do not modify wiki content** from this repository as a side effect of consumer queries. Wiki maintenance is governed by `../Orange-Wiki/CLAUDE.md` and happens in that repo's own session.
 - Do not skip the wiki and answer from training-set knowledge for engine-construction topics.
 - Do not assume a topic is covered — if `index.md` does not list a relevant page, say so explicitly and recommend ingesting a source rather than fabricating details.
 
 ### Branch
-- The wiki must be on branch `Orange-Render-Wiki`. The default `main` branch does not contain the ingested content. Verify with `git -C vendor/Orange-Wiki branch --show-current`.
+- The wiki must be on branch `Orange-Render-Wiki`. The default `main` branch does not contain the ingested content. Verify with `git -C ../Orange-Wiki branch --show-current`.
 
 ## OrangeEditor 参考引擎与资源
 
@@ -222,7 +222,7 @@ OrangeEditor 开发时采用**双参考**策略：
 
 **使用方式**：
 - 开发每个编辑器 feature 前，先在 `vendor/LumixEngine/src/editor/` 找对应实现，理解其架构选择和数学方案，再以 OrangeEditor 自身的约定重新实现（**不直接复制代码**，许可证 / 命名 / 架构三方面都有差异）
-- Lumix 的做法同时指导 OrangeEngine 和 OrangeRender 的**能力补齐方向**——编辑器侧发现引擎 / 渲染器缺能力时，先对比 Lumix 如何在自己渲染器里解决，再按既有工作流向 `docs/engine-known-gaps.md` / `vendor/OrangeRender/docs/incoming_feature.md` 登记需求
+- Lumix 的做法同时指导 OrangeEngine 和 OrangeRender 的**能力补齐方向**——编辑器侧发现引擎 / 渲染器缺能力时，先对比 Lumix 如何在自己渲染器里解决，再按既有工作流向 `docs/engine-known-gaps.md` / `../OrangeRender/docs/incoming_feature.md` 登记需求
 - 如果 Orange-Wiki 尚未收录 Lumix 对应 feature 的 wiki 页，建议在完成实现后开一个 Orange-Wiki 维护 session 补页，后续同类 feature 可直接引用 wiki 而非重新 grep Lumix 源码
 
 **关键文件索引（编辑器开发高频参考）**：
@@ -265,7 +265,7 @@ OrangeEditor 开发时采用**双参考**策略：
 
 ## 工作流基础设施
 
-按 2026-05-12 工作流升级（详见 ADR-001，已迁 `vendor/Orange-Wiki/case-studies/orange-engine/decisions/ADR-001-editor-schema-first-and-no-hardcode.md`），项目沉淀了 5 件协同纪律基础设施（2026-05-14 补 end-checklist 后从 4 件扩到 5 件）。下面是**何时用 + 怎么用**——都是低摩擦工具，不用就会让早期决策腐烂。
+按 2026-05-12 工作流升级（详见 ADR-001，已迁 `../Orange-Wiki/case-studies/orange-engine/decisions/ADR-001-editor-schema-first-and-no-hardcode.md`），项目沉淀了 5 件协同纪律基础设施（2026-05-14 补 end-checklist 后从 4 件扩到 5 件）。下面是**何时用 + 怎么用**——都是低摩擦工具，不用就会让早期决策腐烂。
 
 ### 1. Invariant lint —— `scripts/check_invariants.py`
 
@@ -289,7 +289,7 @@ OrangeEditor 开发时采用**双参考**策略：
 
 **接受的输出**：`CLAUDE.md drift: none detected.` —— 退出码 0；任何漂移条目都意味着本文件需要更新。
 
-### 3. ADR（架构决策记录）—— `docs/decisions/README.md` → `vendor/Orange-Wiki/case-studies/orange-engine/decisions/`
+### 3. ADR（架构决策记录）—— `docs/decisions/README.md` → `../Orange-Wiki/case-studies/orange-engine/decisions/`
 
 跨阶段、跨文件的架构决策留 ADR；从 `ADR-001` 起，单调编号、不重排。**roadmap 写计划，ADR 写决策**——同一件事可同时在两处提到，但"为什么这么选" + "事后追评"只属于 ADR。ADR 文件 2026-05-21 起按 ADR-006 落地迁 Wiki，本仓 `docs/decisions/README.md` 保留索引 + "什么进 ADR" 节作为入口；新 ADR 同 session 写 Wiki 子树，本仓索引同 commit 更新。
 
@@ -342,7 +342,7 @@ When given a task in this repo, default to this workflow:
 
 1. **Read `docs/design-plan.md`** to confirm which Phase the task belongs to and what its outputs are. Reject scope that crosses Phase boundaries.
 2. **Read `docs/extension-points.md`** if the task touches any extension surface (custom components / shaders / asset types / render passes / animator backends / save game).
-3. **Consult `vendor/Orange-Wiki/`** for algorithmic / architectural decisions. Cite specific pages.
+3. **Consult `../Orange-Wiki/`** for algorithmic / architectural decisions. Cite specific pages.
 4. **Check the invariants in this file** before adding any `#include`. The header isolation rules are checked in code review.
 5. **Match OrangeRender's coding conventions**. Header guards, naming, brace style, namespace nesting — all aligned.
 6. **Add a sample** to `samples/` if the task introduces new public API. The sample is the canonical "does it still run end-to-end" check.
@@ -391,11 +391,15 @@ tests/                                  # ctest suite
 cmake/                                  # toolchain + Config template
 docs/                                   # authoritative architecture / roadmap / standards
 vendor/
-  OrangeRender/                         # vendored renderer (find_package source)
-  Orange-Wiki/                          # knowledge base (branch: Orange-Render-Wiki)
+  DragonBones/                          # 引擎私有运行时依赖（保留 in-tree 集成）
+
+# sibling 拓扑（ADR-009，2026-05-24）—— 不在本仓内，由 Orange-Ecosystem umbrella 持有
+# ../OrangeRender/                      # vendored renderer (find_package source)
+# ../Orange-Wiki/                       # knowledge base (branch: Orange-Render-Wiki)
+# ../OrangeGames/                       # consumer 仓（多游戏 monorepo）
 ```
 
-As of 2026-05-21 (ADR-006), historical / archive documents have moved to `vendor/Orange-Wiki/case-studies/orange-engine/`:
+As of 2026-05-21 (ADR-006), historical / archive documents have moved to `../Orange-Wiki/case-studies/orange-engine/`:
 
 - `historical-architecture/4-layer-archive/` — the abandoned GEA-style 4-layer architecture from a year ago (do not read as authoritative; preserved for history)
 - `milestones/` — completed editor v0.x acceptance checklists, Phase 6.5 PBR+IBL acceptance, Phase 3 audio/light gate

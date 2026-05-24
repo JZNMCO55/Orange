@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-OrangeEngine 一键编译入口。
+OrangeEngine 一键编译入口（ADR-009 sibling 拓扑版本）。
 
 把"从 0 到 OrangeEditor 跑起来"所需的全部步骤串成单脚本：
 
-  1. 同步 git submodule（vendor/OrangeRender、vendor/Orange-Wiki、vendor/DragonBones）
-     - 自动校验 Orange-Wiki 是否在 `Orange-Render-Wiki` 分支（CLAUDE.md 硬要求），
-       不在就切过去。
+  1. 同步本仓 git submodule（仅 vendor/DragonBones —— ADR-009 后 OrangeRender /
+     Orange-Wiki 改走 sibling 拓扑，由 Orange-Ecosystem umbrella 仓持有，
+     不再是本仓 submodule；本步对它们做的是"sibling 存在性 sanity check + Wiki
+     分支校验"，不再 git submodule update）。
   2. 拉 + 编 OrangeRender 自己的第三方依赖（Vulkan stack / glfw / glm / volk / VMA …）
      到 `<prefix>/install`。
   3. 拉 + 编 OrangeEngine 直消费的第三方依赖（EnTT / nlohmann_json / box2d / miniaudio
@@ -21,6 +22,10 @@ OrangeEngine 一键编译入口。
   - PATH 中有 cmake 与 git
   - 装好 LunarG Vulkan SDK，并设置环境变量 VULKAN_SDK
   - MSVC 2022（默认生成器 "Visual Studio 17 2022"）
+  - **ADR-009 拓扑前置**：OrangeRender / Orange-Wiki 必须作为本仓 sibling 目录存在
+    （典型布局 `<repo>/../OrangeRender/` + `<repo>/../Orange-Wiki/`，最常见的来源是
+    `git clone --recursive https://github.com/JZNMCO55/Orange-Ecosystem.git`）。
+    单独 clone 本仓不带 sibling 时本脚本会在 Step 1 就报错。
 
 用法示例:
   python scripts/build_all.py
@@ -50,14 +55,16 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-VENDOR_RENDER = REPO_ROOT / "vendor" / "OrangeRender"
-VENDOR_WIKI = REPO_ROOT / "vendor" / "Orange-Wiki"
+# ADR-009 sibling 拓扑：OrangeRender / Orange-Wiki 在本仓 sibling，由 Orange-Ecosystem 持有
+SIBLING_RENDER = REPO_ROOT.parent / "OrangeRender"
+SIBLING_WIKI = REPO_ROOT.parent / "Orange-Wiki"
+# DragonBones 是引擎私有运行时依赖，保留 in-tree vendor submodule
 VENDOR_DRAGONBONES = REPO_ROOT / "vendor" / "DragonBones"
 
 DEFAULT_DEP_PREFIX = Path(r"D:\3rdparty")
 DEFAULT_RENDER_SDK = Path(r"D:\sdk\orange-render")
 DEFAULT_BUILD_DIR = REPO_ROOT / "build"
-DEFAULT_RENDER_BUILD_DIR = VENDOR_RENDER / "build"
+DEFAULT_RENDER_BUILD_DIR = SIBLING_RENDER / "build"
 
 WIKI_REQUIRED_BRANCH = "Orange-Render-Wiki"
 
@@ -186,9 +193,11 @@ def _detect_vendor_changes(build_dir: Path, force: bool) -> tuple[set, dict]:
     当前只跟踪 OrangeRender —— 它走 build_all.py Step 4 的 cmake install 路径，
     是 trap 的主要受害者。DragonBones 是 in-tree 编译走 engine build 增量逻辑，
     Orange-Wiki 是知识库不影响 build —— 未来按需扩展本字典即可纳入。
+
+    ADR-009 后 OrangeRender 在 sibling 目录而非 vendor/，本字典 path 同步更新。
     """
     vendors = {
-        "OrangeRender": VENDOR_RENDER,
+        "OrangeRender": SIBLING_RENDER,
     }
     cache = _load_sha_cache(build_dir)
     current = {name: _vendor_sha(path) for name, path in vendors.items()}
@@ -257,45 +266,56 @@ def _force_relink_cleanup(build_dir: Path, config: str) -> int:
 # ---------------------------------------------------------------------------
 
 def _sync_submodules(git: str) -> None:
-    _section("Step 1 / 同步 git submodule")
+    _section("Step 1 / 同步本仓 git submodule + sibling sanity check（ADR-009 拓扑）")
 
-    # `git submodule update --init --recursive` 会一次性把 .gitmodules 里
-    # 注册的全部 submodule 拉下来；递归是为了 OrangeRender 自身可能也有
-    # nested submodule 的将来兼容。
+    # 本仓 .gitmodules 仅含 vendor/DragonBones 一段（ADR-009 后 OrangeRender /
+    # Orange-Wiki 改走 sibling 拓扑由 Orange-Ecosystem 持有）。--recursive 仍保留
+    # 以便 DragonBones 或未来其它 in-tree vendor 可能含 nested submodule 的兼容。
     _run([git, "submodule", "sync", "--recursive"], cwd=REPO_ROOT)
     _run([git, "submodule", "update", "--init", "--recursive"], cwd=REPO_ROOT)
 
-    # Orange-Wiki 必须在 Orange-Render-Wiki 分支（CLAUDE.md 硬要求；
-    # default main 不含 wiki 内容）。submodule 默认 detached HEAD，需要显式
-    # checkout 一次。
-    if VENDOR_WIKI.is_dir():
-        try:
-            current = _capture([git, "branch", "--show-current"], cwd=VENDOR_WIKI)
-        except subprocess.CalledProcessError:
-            current = ""
-        if current != WIKI_REQUIRED_BRANCH:
-            print(
-                f"[info] Orange-Wiki 当前分支='{current or '<detached>'}', "
-                f"切到 '{WIKI_REQUIRED_BRANCH}'",
-                flush=True,
-            )
-            _run([git, "fetch", "origin", WIKI_REQUIRED_BRANCH], cwd=VENDOR_WIKI)
-            _run([git, "checkout", WIKI_REQUIRED_BRANCH], cwd=VENDOR_WIKI)
-            _run([git, "pull", "--ff-only", "origin", WIKI_REQUIRED_BRANCH], cwd=VENDOR_WIKI)
-        else:
-            print(f"[ok] Orange-Wiki 已在 '{WIKI_REQUIRED_BRANCH}'", flush=True)
+    # sibling Orange-Wiki 存在性 + 分支校验（不再 git submodule update —— 它已不是
+    # 本仓 submodule；维护它的责任在 Orange-Ecosystem umbrella 仓那侧）
+    if not SIBLING_WIKI.is_dir():
+        raise RuntimeError(
+            f"sibling 'Orange-Wiki' 不存在: {SIBLING_WIKI}\n"
+            f"ADR-009 后 Orange-Wiki 改走 sibling 拓扑（不再是本仓 submodule），\n"
+            f"典型来源是 git clone --recursive https://github.com/JZNMCO55/Orange-Ecosystem.git；\n"
+            f"或手工 clone 到 {SIBLING_WIKI}。"
+        )
+    try:
+        current = _capture([git, "branch", "--show-current"], cwd=SIBLING_WIKI)
+    except subprocess.CalledProcessError:
+        current = ""
+    if current != WIKI_REQUIRED_BRANCH:
+        print(
+            f"[info] Orange-Wiki 当前分支='{current or '<detached>'}', "
+            f"切到 '{WIKI_REQUIRED_BRANCH}'",
+            flush=True,
+        )
+        _run([git, "fetch", "origin", WIKI_REQUIRED_BRANCH], cwd=SIBLING_WIKI)
+        _run([git, "checkout", WIKI_REQUIRED_BRANCH], cwd=SIBLING_WIKI)
+        _run([git, "pull", "--ff-only", "origin", WIKI_REQUIRED_BRANCH], cwd=SIBLING_WIKI)
+    else:
+        print(f"[ok] Orange-Wiki 已在 '{WIKI_REQUIRED_BRANCH}'", flush=True)
 
-    # 给主要 vendor 目录打一个存在性 sanity check，方便日后路径漂移时早爆
-    for label, path in (
-        ("OrangeRender", VENDOR_RENDER),
-        ("Orange-Wiki", VENDOR_WIKI),
-        ("DragonBones", VENDOR_DRAGONBONES),
+    # 存在性 sanity check：OR/Wiki 走 sibling，DragonBones 仍走 vendor
+    for label, path, kind in (
+        ("OrangeRender", SIBLING_RENDER, "sibling"),
+        ("Orange-Wiki", SIBLING_WIKI, "sibling"),
+        ("DragonBones", VENDOR_DRAGONBONES, "vendor"),
     ):
         if not path.is_dir() or not any(path.iterdir()):
+            hint = ""
+            if kind == "sibling":
+                hint = (
+                    f"\nADR-009 拓扑前置：sibling {label} 必须存在于 {path}。"
+                    f"\n典型来源是从 Orange-Ecosystem umbrella 仓 clone --recursive。"
+                )
             raise RuntimeError(
-                f"submodule '{label}' 未正确初始化，目录 {path} 不存在或为空。"
+                f"{kind} '{label}' 未正确初始化，目录 {path} 不存在或为空。{hint}"
             )
-        print(f"[ok] vendor/{label} 已就绪 ({path})", flush=True)
+        print(f"[ok] {kind}/{label} 已就绪 ({path})", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +345,7 @@ def _fetch_render_3rdparty(prefix: Path, jobs: int, config: str, generator: str,
     _section("Step 2 / 拉取并编译 OrangeRender 的第三方依赖")
     _run_fetch_script(
         "OrangeRender",
-        VENDOR_RENDER / "scripts" / "fetch_and_build_3rdparty.py",
+        SIBLING_RENDER / "scripts" / "fetch_and_build_3rdparty.py",
         prefix, jobs, config, generator, with_spdlog,
     )
 
@@ -348,7 +368,7 @@ def _build_and_install_render(dep_prefix: Path, sdk_prefix: Path, build_dir: Pat
                               config: str, generator: str, jobs: int,
                               clean: bool, with_spdlog: bool) -> None:
     _section("Step 4 / 编译并安装 OrangeRender 到 SDK 前缀")
-    build_py = VENDOR_RENDER / "build.py"
+    build_py = SIBLING_RENDER / "build.py"
     if not build_py.is_file():
         raise RuntimeError(f"未找到 {build_py}")
 
