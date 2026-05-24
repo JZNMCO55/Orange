@@ -724,4 +724,11 @@ option(ORANGE_ENGINE_BUILD_EDITOR
 
 if (ORANGE_ENGINE_BUILD_EDITOR)
     add_subdirectory(tools/OrangeEditor)
+    # 让生成的 OrangeEngine.sln 默认启动项是 OrangeEditor。VS_STARTUP_PROJECT
+    # 的机制是把指定 target 在 sln 里 listed first，VS 在没历史 .suo 选择时
+    # 默认选第一个；不写 ExtensibilityGlobals 的 StartupItem 字段。必须放在
+    # add_subdirectory 之后（target 已存在）。注：本机 build/.vs/*.suo 用户
+    # 设置优先级高于 sln 顺序，已手工选过别的 startup 后此处不会立即生效，
+    # 删 build/.vs/ 重开 sln 可恢复默认。
+    set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT OrangeEditor)
 endif ()
