@@ -1,0 +1,53 @@
+{
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 1 },
+  "templateName": "water_basic",
+  "vertexSpv": "shaders/orange_engine/pbr.vert.spv",
+  "fragmentSpv": "shaders/orange_engine/water_basic.frag.spv",
+  "uniforms": [
+    { "name": "uMVP",   "type": "mat4", "editor": { "widget": "hidden" } },
+    { "name": "uModel", "type": "mat4", "editor": { "widget": "hidden" } },
+    {
+      "name": "uBaseColor",
+      "type": "vec4",
+      "default": [0.1, 0.35, 0.6, 1.0],
+      "editor": {
+        "widget": "color",
+        "displayName": "Water Color",
+        "tooltip": "水体底色（线性 RGB，深蓝偏青典型海水 / 浅蓝偏绿浅水池）"
+      }
+    },
+    {
+      "name": "uMRA",
+      "type": "vec4",
+      "default": [0.015, 1.0, 0.7, 0.0],
+      "editor": {
+        "widget": "components",
+        "components": [
+          {
+            "label": "Wave Amplitude",
+            "widget": "slider",
+            "range": [0.0, 0.05],
+            "step": 0.001,
+            "tooltip": "UV 扰动幅度；0.005 = 微波 / 0.02 = 中浪 / 0.05 = 风暴"
+          },
+          {
+            "label": "Wave Speed",
+            "widget": "slider",
+            "range": [0.1, 3.0],
+            "step": 0.01,
+            "tooltip": "波纹流动速度乘子；1.0 = 自然节奏"
+          },
+          {
+            "label": "Fresnel Strength",
+            "widget": "slider",
+            "range": [0.0, 1.5],
+            "step": 0.01,
+            "tooltip": "边缘菲涅尔高光强度（视线越掠射越亮，模拟水面反光）"
+          },
+          { "label": "Reserved", "widget": "hidden" }
+        ]
+      }
+    }
+  ],
+  "textureSlots": []
+}

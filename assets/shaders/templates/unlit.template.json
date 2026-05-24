@@ -1,0 +1,22 @@
+{
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 1 },
+  "templateName": "unlit",
+  "vertexSpv": "shaders/orange_engine/pbr.vert.spv",
+  "fragmentSpv": "shaders/orange_engine/unlit.frag.spv",
+  "uniforms": [
+    { "name": "uMVP",   "type": "mat4", "editor": { "widget": "hidden" } },
+    { "name": "uModel", "type": "mat4", "editor": { "widget": "hidden" } },
+    {
+      "name": "uBaseColor",
+      "type": "vec4",
+      "default": [1.0, 1.0, 1.0, 1.0],
+      "editor": {
+        "widget": "color",
+        "displayName": "Base Color",
+        "tooltip": "无光照纯色输出（与 emissive 区别：unlit 输出 LDR 用户可调；emissive hardcode HDR > 1 触发 bloom）"
+      }
+    },
+    { "name": "uMRA", "type": "vec4", "editor": { "widget": "hidden" } }
+  ],
+  "textureSlots": []
+}

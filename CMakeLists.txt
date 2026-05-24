@@ -301,6 +301,14 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/pbr.frag.glsl"
     ORANGE_ENGINE_BUILTIN_PBR_FS_SPV)
+# v1.2 T3 · unlit 模板（复用 pbr.vert SPV，仅新增 frag）
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/unlit.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_UNLIT_FS_SPV)
+# v1.2 T4 · water_basic 模板（复用 pbr.vert SPV，仅新增 frag）
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/water_basic.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_WATER_BASIC_FS_SPV)
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ibl_equirect_to_cube.comp.glsl"
     ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV)
@@ -349,6 +357,8 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PBR_VS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_UNLIT_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_WATER_BASIC_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_IBL_BRDF_LUT_CS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_IBL_IRRADIANCE_CS_SPV}"

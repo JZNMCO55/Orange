@@ -674,6 +674,37 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 - GAP G3 顺路 `Create → Scene` / `Create → Folder`——单独 v1.1.x 顺位或 v1.2 minor 一起做
 - `GAP-2026-05-24-material-template-library-and-custom-hook`（自动扫描 + 用户自定义 template 入口）——独立 minor milestone
 
+### v1.2.0 · 数据驱动 Shader Template Library ✅
+
+**版本**：v1.1 DCC Import / v1.1.1 Create Material UI ✅ 后第一个 minor bump
+**落地日期**：2026-05-24
+
+**范围**：把 6 个 hardcode shader template（pbr / textured / toon / rim_light / dissolve / emissive）改为数据驱动 `.template.json` + 自动扫描注册，配套 Material Inspector 数据驱动 widget 重构，让"用户加新 shader 不写 C++ 自动出 widget"承诺落地。**关闭** [`GAP-2026-05-24-material-template-library-and-custom-hook`](engine-known-gaps.md) G1。
+
+**Task 拆分**（T1-T5 跨 5 session 推进）：
+
+| Task | 描述 | 影响模块 | 状态 |
+|------|------|---------|------|
+| T1 | G1 框架：`assets/shaders/templates/` + 6 `.template.json` schema v1.0 + `MaterialSystem::RegisterTemplatesFromDirectory` API + 启动期路径替换 | `src/render/MaterialSystem.{h,cpp}` + `tools/OrangeEditor/BuiltinAssets.cpp` | ✅ |
+| T2 | Inspector UI 数据驱动重构：schema v1.0 → v1.1 加 `editor: {}` 元数据块 + 6 widget enum + components 模式 + `ShaderTemplateMetaIO` parser + `MaterialAssetInspectorPlugin` `RenderUniformWidget` 替换 pbr hardcode | `tools/OrangeEditor/ShaderTemplateMetaIO.{h,cpp}` + `tools/OrangeEditor/plugin/MaterialAssetInspectorPlugin.cpp` | ✅ |
+| T3 | 第二批新 shader：实际 ship `unlit` 1 个；其余 5 个（skybox / sprite2d / particle_cpu / particle_trail / pbr_transparent）撞 Pipeline / OrangeRender 缺口登记 backlog | `src/render/builtin_shaders/unlit.frag.glsl` + `assets/shaders/templates/unlit.template.json` | ✅ |
+| T4 | 第三批新 shader：实际 ship `water_basic` 1 个；剩 2 个（decal / planar_shadow）撞缺口登记 backlog | `src/render/builtin_shaders/water_basic.frag.glsl` + `assets/shaders/templates/water_basic.template.json` | ✅ |
+| T5 | 收尾：CMake VERSION 1.1.1 → 1.2.0 + acceptance-checklist + ✅ | `tools/OrangeEditor/CMakeLists.txt` + docs + Wiki | ✅ |
+
+**实际 ship 数**：8 个 template（6 现有迁出 + unlit + water_basic）vs 原 design 15 个 = 53%。差距 7 个全部因 Pipeline / OrangeRender 端能力缺失（非数据驱动框架缺陷），按 CLAUDE.md "跨仓纪律" 登记 backlog 见 [`engine-known-gaps.md` T3/T4 backlog 登记表](engine-known-gaps.md)。
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.0-acceptance-checklist.md`
+
+**与引擎关系**：`src/render/MaterialSystem.{h,cpp}` 加 `RegisterTemplatesFromDirectory` 公共 API（向后兼容，不破已有 RegisterBuiltins）；`src/render/builtin_shaders/` 加 2 个 frag shader；其他全在 `tools/OrangeEditor/`。CMake VERSION 1.1.1 → 1.2.0。
+
+**Critical Path**：是（"美术 / 关卡设计师不写代码完成日常工作" 承诺的关键拼图——任何 shader template 加 / 改 / 删现在不动 C++）
+
+**不在本 minor 范围**（明示）：
+- 7 个 backlog shader（skybox / sprite2d / particle_cpu / particle_trail / pbr_transparent / decal / planar_shadow）—— 撞 Pipeline / OrangeRender 缺口登记 [`engine-known-gaps.md`](engine-known-gaps.md)，按需触发
+- macro 守卫联动（`USE_NORMAL_MAP` 等 conditional show）—— 本 minor 8 个 baseline 无 macro 字段，等真用到时再实现
+- 材质球缩略图（GAP-2026-05-22 G2）—— 独立 v1.3.0 minor
+- Editor 内 GLSL 文本编辑 + runtime SPV 编译（GAP-2026-05-24 G2）—— Phase 7+ / 待 Material UBO 基础设施 +1
+
 ### v1.x · 长尾（按需触发，不进 v1.0 critical path）
 
 | 条目 | 依赖 |

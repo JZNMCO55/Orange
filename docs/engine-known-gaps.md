@@ -1284,9 +1284,25 @@ src/render/
 - **进度**（v1.2 minor 拆分 T1-T5 多 session 推进，按 OE 历史 v1.1 / Phase 6.5 节奏，最后一次 bump VERSION 1.1.1 → 1.2.0 + ✅）：
   - **T1 ✅**（2026-05-24）：G1 框架落地——`assets/shaders/templates/` + 6 个 `.template.json` schema v1.0（namespace `render/shader_template`）+ `MaterialSystem::RegisterTemplatesFromDirectory(dir)` API（JsonReader 解析 + ResolveSpvPath .exe-relative 解析 + 单文件失败容忍）+ BuiltinAssets.cpp 启动期 `RegisterBuiltins()` → `RegisterTemplatesFromDirectory("assets/shaders/templates")` 替换；BuiltinMaterials / MaterialSystem::RegisterBuiltins / Pipeline default / tests / sample 全不动（最小风险 + 行为完全等价）；Material Inspector UI 仍 pbr hardcode 留待 T2
   - **T2 ✅**（2026-05-24）：Inspector UI 元数据驱动重构——`.template.json` schema v1.0 → v1.1 在 uniforms 每条 optional 加 `default` + `editor: {widget, displayName, tooltip, range, step, components}` 块；widget enum: hidden / color / slider / drag / default / components（6 个覆盖所有 baseline + T3/T4 新 shader 需求）；components 模式让 vec4 内子字段独立 widget（pbr uMRA = Metallic/Roughness/AO/Reserved 4 sub 同款 v1.1.1 hardcode 视觉）；新增 `tools/OrangeEditor/ShaderTemplateMetaIO.{h,cpp}` 编辑器侧 parser（与 MaterialFileIO 同款分层，不污染引擎公共面）；`MaterialAssetInspectorPlugin` 移除 `if (templateName == "pbr") { 4 hardcode widget }` 路径，改 `RenderUniformWidget(metadata, instance)` 数据驱动派发；v1.0 文件向后兼容（无 editor 字段视作全 Default widget）；视觉等价 = pbr 仍 1 ColorEdit3 + 3 SliderFloat，其他 5 个模板显示"无可调参数"；用户加新 .template.json 不写 C++ 自动出 widget
-  - **T3**（待）：第二批 6 个新 shader（unlit / skybox / sprite2d / particle_cpu / particle_trail / pbr_transparent）GLSL + SPV + .template.json
-  - **T4**（待）：第三批 3 个新 shader（decal / water_basic / planar_shadow）
-  - **T5**（待）：macro 守卫联动 + 收尾 + bump VERSION + acceptance-checklist + ✅
+  - **T3 ✅**（2026-05-24）：实际 ship 1 / 6——`unlit`（复用 pbr.vert SPV + 新 unlit.frag，直接输出 uBaseColor，无光照 / shadow / IBL；与 emissive 区别：LDR 用户可调 vs HDR hardcode）。剩 5 个全部撞 Pipeline 改造或 OrangeRender 缺口（见下方"T3/T4 backlog 登记表"），不在本 minor 同 session 处理（按 CLAUDE.md 跨仓纪律），登记到 v1.x 按需触发
+  - **T4 ✅**（2026-05-24）：实际 ship 1 / 3——`water_basic`（复用 pbr.vert SPV + 新 water_basic.frag，时间驱动 UV sin 扰动 + Schlick fresnel 边缘高光 + N·L 漫反射 + PCF shadow；时间从 `light.uFrameInfo.x` 自驱无需 per-instance time uniform；uBaseColor color + uMRA components 拆 3 个 slider: Wave Amplitude / Wave Speed / Fresnel Strength）。剩 2 个全部撞缺口登记 backlog
+  - **T5 ✅**（2026-05-24）：收尾——CMake VERSION 1.1.1 → 1.2.0；editor-roadmap.md v1.2.0 节标 ✅；Wiki acceptance-checklist 落 `editor-v1.2.0-acceptance-checklist.md`；本 GAP 整体标 ✅；macro 守卫联动延后（本 minor 8 个 baseline 全无 macro 字段，T5 子段实际未触发，等真用到时再实现 conditional show）
+
+#### T3 / T4 backlog 登记表（v1.2.0 ✅ 后未 ship 的 7 个 shader）
+
+按 CLAUDE.md "撞即登记不在同 session 处理 OrangeRender / Pipeline 缺口" 纪律，下表 7 个 shader 因 Pipeline / OrangeRender 端能力缺失不能走数据驱动 template 路径，统一标 backlog，按需触发：
+
+| Template | 撞的缺口 | 触发触发条件 |
+|---|---|---|
+| `skybox` | Pipeline 有专门 `PipelineSky.cpp` 处理（last-pass + depth-equal + cubemap binding），不走通用 forward material 路径；要 ship 为 template 需重构 PipelineSky 为可注册的 IAuxPassProvider 或类似机制（与 [[GAP-2026-05-19-editor-aux-passes-in-engine-pipeline]] 同源） | Phase 7+ 渲染深化 milestone 或专门 PipelineSky 整骨拉动 |
+| `sprite2d` | OE forward pipeline 是 3D 路径，无 2D ortho projection；要 ship 需引入 Pipeline 2D pass 或 mesh quad + billboard hack | 第一款游戏（Ori-like 2D / 2.5D）实际撞 2D 渲染需求拉动 |
+| `particle_cpu` | VFX 系统已通过 `additive_billboard.{vert,frag}` 实现 CPU particle，与 Material template 是不同概念（VFX 走 emitter / lifetime 路径，不接 Renderable）；要 ship 为 template 需统一 VFX ↔ Material 路径 | VFX 系统重构 milestone（v2.x） |
+| `particle_trail` | OE mesh 是静态 vertex buffer，无 ribbon / runtime vertex 流式机制；OrangeRender 端无 dynamic vertex stream API | OrangeRender `incoming_feature.md` 登记 dynamic vertex stream → OE 消费 |
+| `pbr_transparent` | `Material` 结构无 blend state / depth state 字段，Pipeline 用统一 forward opaque render state；要 ship 需 Material schema 扩 `renderState: {blend, depth, cull}` + OrangeRender 端 PipelineState API 暴露 per-material 配置 | OrangeRender `incoming_feature.md` 登记 per-material PipelineState → Material schema bump → OE 消费 |
+| `decal` | OE 无 decal pass（projection box + Sutherland-Hodgman 裁剪 + screen-space 变体均无）；属新 pass 不是 shader 加法 | 关卡设计实际撞弹痕 / 涂鸦需求拉动；同 [[GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention]] 关联 |
+| `planar_shadow` | 需要双 pass（先 shadow proj 平面渲染再主 pass），与现 Pipeline 单 forward pass 不匹配；属 Pipeline 路径改造非 shader 加法 | 第一款游戏角色 2.5D 投影需求拉动 |
+
+总结：v1.2.0 ✅ 实际 ship **8 个 template**（6 现有迁出 + unlit + water_basic）vs 原 design 15 个，达成率 53%。差距 7 个全部因 Pipeline / OrangeRender 端能力缺失（非数据驱动框架缺陷），框架本身（T1+T2）已证明扩展性可用 —— 用户加新 shader 只需 .template.json + 一对 SPV 不写 C++ 自动出 widget。
 
 ---
 
