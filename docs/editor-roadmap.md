@@ -652,6 +652,62 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.3.0 · Pipeline 中性化 + Grid pass 真正迁出 ✅
+
+**版本**：v1.2.7 ✅ 后第一个 minor bump
+**落地日期**：2026-05-24
+
+**范围**：bundle 2 个独立用户可感知完整功能区，组合达 [[feedback-minor-bump-must-carry-multiple-features]] minor 多功能门槛（与原拟 3 候选中"材质球缩略图"trim 出去到 v1.4.0 独立议题决策同期）：
+
+**功能区 A · Pipeline 公共面中性化**（GAP-2026-05-19 G1 默认值中性化部分）
+
+- 新增 `Pipeline::SetDummyIblAmbient(r, g, b)` 公共 API —— 控制无 EnvironmentComponent 时 dummy IBL irradiance cube 的 ambient 量级；engine 默认 (0, 0, 0)（中性化：仅 direct light，暗面纯黑）；编辑器侧 lazy init Pipeline 时显式 SetDummyIblAmbient(0.5, 0.5, 0.5) 避免"cube 暗面像透明"UX 陷阱
+- 新增 `Pipeline::SetSceneClearColor(r, g, b)` 公共 API —— 控制主 pass + sky pass entry clear color；engine 默认 (0.05, 0.07, 0.10) shipping 深蓝灰；编辑器显式 SetSceneClearColor(0.12, 0.12, 0.13) Cocos 风灰让 viewport 与 main panel 拉开亮度差
+- 内部 helper `Pipeline::Impl::FillDummyIblIrradiance` + `PipelineDetail::FloatToHalf` IEEE 754 binary32→binary16 转换；SetDummyIblAmbient 运行时调走帧外 cmd.Begin/End/Submit/WaitIdle 一次性重填 dummyIrradianceCube
+- `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake gate 对 dummy IBL ambient + 主 pass clear color 两条路径的特殊化全部移除
+
+**功能区 B · Grid pass 真正迁出**（GAP-2026-05-19 G1 第三阶段）
+
+- 编辑器侧新增 `tools/OrangeEditor/render/EditorGridAuxPassProvider.{h,cpp}` 实现 IAuxPassProvider 接口；自管 shader / DescriptorSetLayout / Pipeline / Pool / Set 全套 GPU 资源；通过 `Pipeline::SetAuxPassProvider` 注册到 engine aux hook
+- 编辑器侧新增 `tools/OrangeEditor/shaders/{grid.frag,fullscreen.vert}.glsl` + CMakeLists.txt 加 add_custom_command 编译到 `shaders/orange_editor/`（与 engine `shaders/orange_engine/` 平行不冲突）
+- ScenePanel 在 EnsureScenePipeline lazy init 创建 + Initialize provider；toolbar Grid checkbox 直接写 provider 的 SetEnabled
+- 引擎侧剔除 PipelineGrid.cpp（136 行）+ grid.frag.glsl + Pipeline 内 gridXxx 6 字段 + RecordGridPass 两条调用点 + PipelineSetup grid PSO 创建段 + ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES cmake option（整体清退）
+- Pipeline 公共 API `SetAuxGridEnabled` / `IsAuxGridEnabled` 删除（0.x ABI 不稳，OrangeEditor 已迁、samples 不消费）
+- IAuxPassProvider hook 契约升级：Pipeline 在调用前**统一** pre-transition sceneDepth → ShaderReadOnly + 更新 tracker，provider 仅写 hdrColor + 读 sceneDepth、不改 depth layout —— 简化 provider 实现
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `include/orange/engine/render/Pipeline.h` | 加 SetDummyIblAmbient / SetSceneClearColor 公共 API；删 SetAuxGridEnabled / IsAuxGridEnabled |
+| `include/orange/engine/render/IAuxPassProvider.h` | hook 契约文档更新（pre-transition sceneDepth；v1.3.0 落地状态） |
+| `src/render/Pipeline.cpp` | 主 pass clear 改读 sceneClearColor 字段；2 个新 API impl；删 SetAuxGridEnabled impl + 2 处 RecordGridPass 调用 + grid shutdown reset；2 处 hook 调用前加 pre-transition sceneDepth |
+| `src/render/pipeline/PipelineImpl.h` | 加 sceneClearColor / dummyIblAmbient 字段 + FillDummyIblIrradiance 方法 decl；删 gridXxx 6 字段 + RecordGridPass decl + EnsureHdrTarget 内 gridSetBoundDepth reset |
+| `src/render/pipeline/PipelineSetup.cpp` | dummy IBL 初始化拆 2 次 Submit（irradiance via helper + prefilter/brdf inline 全 0）；删 grid shader load + descriptor layout + PSO 创建 |
+| `src/render/pipeline/PipelineSky.cpp` | 双路径 sky pass entry clear 切到 sceneClearColor 字段 |
+| `src/render/pipeline/PipelineHelpers.{h,cpp}` | 加 FloatToHalf 简版转换 |
+| `src/render/pipeline/PipelineGrid.cpp` | **删除**（136 行 RecordGridPass） |
+| `src/render/builtin_shaders/grid.frag.glsl` | **迁出**到 `tools/OrangeEditor/shaders/grid.frag.glsl` |
+| `tools/OrangeEditor/render/EditorGridAuxPassProvider.{h,cpp}` | **新增** IAuxPassProvider 实现 |
+| `tools/OrangeEditor/shaders/{grid.frag,fullscreen.vert}.glsl` | **新增** 编辑器自家 shader 源 |
+| `tools/OrangeEditor/EditorRenderLayer.{h,cpp}` | 加 mpEditorGridProvider 成员 + 析构序处理 |
+| `tools/OrangeEditor/panels/ScenePanel.cpp` | 加 SetDummyIblAmbient/SetSceneClearColor 调用；改 Grid toggle 走 provider；lazy init provider |
+| `tools/OrangeEditor/CMakeLists.txt` | VERSION 1.2.7 → 1.3.0；加 shader 编译入口（fullscreen.vert + grid.frag） |
+| `CMakeLists.txt` | 删 grid.frag.glsl 编译入口 + PipelineGrid.cpp 源 + ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES compile def |
+| `cmake/Dependencies.cmake` | 删 ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES option |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.3.0-acceptance-checklist.md`
+
+**与引擎关系**：bundle 跨 engine + editor 双侧。引擎侧 grep "EditorGrid" / "RecordGridPass" / "gridFs" 等字样全部清零；公共面 grep 无 grid 字样；ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES cmake option 完全消失。
+
+**Critical Path**：是（GAP-2026-05-19 G1 完整闭环；为后续 outline / wireframe / debug overlay 等编辑器辅助 pass 同款 IAuxPassProvider 注入路径树立模板）
+
+**不在本 minor 范围**（明示）：
+
+- **材质球缩略图（GAP-2026-05-22 G2）trim 出去 → v1.4.0**：原拟与本 minor 合并，本 session 评估后判断球体真渲染需复刻 mini-pipeline（PSO + scene descriptor set + dummy lights + IBL bind + push constants）500-800 LOC 独立设计点，与 GAP 状态字段"留独立议题讨论后立项"原意匹配。v1.3.0 仍走 2 完整功能区满足 minor 门槛
+- 真实物理基底 water shader（FFT / SSR / refraction）→ v1.x minor（同款 OR offscreen RT 路径，与 thumbnail 同时拉动）
+- 多 provider 链式调用 → 真有需求拉动再加
+
 ### v1.2.7 · water_basic shader 视觉增强（caustics + 法线扰动 5x）✅
 
 **版本**：v1.2.6 ✅ 后第七个 patch

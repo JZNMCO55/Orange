@@ -119,7 +119,7 @@
 
 
 
-## GAP-2026-05-19-editor-aux-passes-in-engine-pipeline
+## GAP-2026-05-19-editor-aux-passes-in-engine-pipeline ✅
 
 - **发现方**：OrangeEditor v0.8.5 ca0f112 commit 自审 + 跨仓 review
 - **发现日期**：2026-05-19
@@ -162,10 +162,10 @@
 - **登记**：2026-05-19（v0.8.5 milestone ✅ 时显式登记，作为已知归属债）
 - **处理**：
   - 2026-05-20：最小可行 cmake gate 已落地 —— `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option 默认 ON 保持编辑器行为；shipping `-DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF` 关掉 grid 渲染 + dummy IBL ambient 退回 (0,0,0) + clear color 退回深蓝
-  - 2026-05-24（v1.2.1 patch，**校准后**）：**G1 第一+二阶段落地** —— `IAuxPassProvider` 公共 interface + `AuxPassContext` struct + `Pipeline::SetAuxPassProvider` 公共 API（window 路径 + offscreen 路径双 hook，grid 之后 / debug draw 之前调用）；公共面命名中性化 `SetEditorGridEnabled` → `SetAuxGridEnabled`；engine 公共头 grep "EditorGrid" 不到。**G1 第三阶段 grid pass 实际迁出**（PipelineGrid.cpp 全文件 + cmake gate 整体移除）留 v1.3.0+ minor 拉动（依赖 OR 端 offscreen RT / texture handle 完整暴露，届时与缩略图 / Pipeline 默认值中性化合并 ship 凑足 minor 多功能门槛）。详见 [editor-roadmap.md v1.2.1 节](editor-roadmap.md)。**版本校准**：原 commit 06b76e3 拟 v1.3.0 minor，同日用户当场指出 "2 天 5 个 bump 太随意，1.x.0 minor 必须伴随多个完整功能落地"，按 [[feedback-minor-bump-must-carry-multiple-features]] 新规则校准为 patch
-- **关联**：editor-roadmap v0.8.5（落地源头）；engine 公共 API 中性化原则
-- **归属**：未拍板分配到具体 Phase；候选 Phase 7 / v1.0 验收前
-- **v0.7 retro 复审（2026-05-19）**：backlog 状态有效；非 v0.7 critical path；shipping 二进制带 grid 资源是 cosmetic 不阻塞功能，等 v1.0 验收前批量整中性化时一起做（与 OrangeRender API 中性化原则同节奏）
+  - 2026-05-24（v1.2.1 patch，**校准后**）：**G1 第一+二阶段落地** —— `IAuxPassProvider` 公共 interface + `AuxPassContext` struct + `Pipeline::SetAuxPassProvider` 公共 API（window 路径 + offscreen 路径双 hook，grid 之后 / debug draw 之前调用）；公共面命名中性化 `SetEditorGridEnabled` → `SetAuxGridEnabled`；engine 公共头 grep "EditorGrid" 不到。**G1 第三阶段 grid pass 实际迁出**（PipelineGrid.cpp 全文件 + cmake gate 整体移除）留 v1.3.0+ minor 拉动。**版本校准**：原 commit 06b76e3 拟 v1.3.0 minor，同日用户当场指出 "2 天 5 个 bump 太随意，1.x.0 minor 必须伴随多个完整功能落地"，按 [[feedback-minor-bump-must-carry-multiple-features]] 新规则校准为 patch
+  - **2026-05-24（v1.3.0 minor）✅**：**G1 第三阶段 grid pass 真正迁出**完成。编辑器侧 `tools/OrangeEditor/render/EditorGridAuxPassProvider.{h,cpp}` 实现 IAuxPassProvider，自管 shader / PSO / 描述符全套 GPU 资源，通过 `Pipeline::SetAuxPassProvider` 注册；引擎侧删除 `src/render/pipeline/PipelineGrid.cpp` + `src/render/builtin_shaders/grid.frag.glsl` + Pipeline 内 gridXxx 6 字段 + 2 处 RecordGridPass 调用 + PipelineSetup grid PSO 创建段 + `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option 整体清退；`Pipeline::SetAuxGridEnabled` / `IsAuxGridEnabled` 公共 API 删除。同时落地 G2 默认值口径中性化：`Pipeline::SetDummyIblAmbient` / `SetSceneClearColor` 公共 API，engine 默认 (0,0,0) ambient + (0.05, 0.07, 0.10) shipping 深蓝灰 clear，编辑器侧显式 override 到 UX 友好值。IAuxPassProvider hook 契约升级：Pipeline pre-transition sceneDepth → ShaderReadOnly + 更新 tracker，provider 仅写 hdrColor + 读 sceneDepth、不改 depth layout。详见 [editor-roadmap.md v1.3.0 节](editor-roadmap.md) + `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.3.0-acceptance-checklist.md`
+- **关联**：editor-roadmap v0.8.5（落地源头）/ v1.2.1（G1 第一+二阶段）/ v1.3.0（G1 第三阶段 + G2 闭环 ✅）；engine 公共 API 中性化原则
+- **归属**：v1.3.0 ✅
 
 ---
 
@@ -575,9 +575,12 @@ case SceneOp::New: {
 
 - **登记**：2026-05-22
 - **优先级**：**P1（Friction，不阻塞 v1.0 ✅ 但严重影响美术工作流）** —— v1.0 验收脚本只需用现成材质即可跑通 → 不阻塞 ✅；但作为"美术 / 关卡设计师不写代码完成日常工作"目标的关键短板，**比其它 v1.x friction 优先级稍高**（这是用户**主动构思场景**时立刻撞上的痛点，比 dock layout / multi-DirLight UI 暴露面更宽）
-- **归属**：OrangeEditor v1.x material 子模式 milestone（按 `docs/editor-roadmap.md` 历史，v0.5 是 Asset 浏览器 + Material 子模式 ✅，本 GAP 是 v0.5 之上的 polish + complete；建议作为**专门议题** session 讨论技术方案细节后立项）
-- **技术方案讨论 placeholder**：thumbnail 烘培走哪条 Pipeline 路径 / 缓存策略 / 触发器；New Material 模板选择 UX / 文件保存目录约定；G3 vs G1 优先级；**留独立议题讨论**（用户原话："这个可以之后做一个议题来讨论怎么做"）
-- **关联**：[[GAP-2026-05-16-builtin-asset-disk-serialization]] / [[GAP-2026-05-16-material-system-enumerate-and-instance-overrides]] / [[GAP-2026-05-14-renderable-material-instance-round-trip]]（前置已落地基础）
+- **归属**：OrangeEditor v1.x material 子模式 milestone（按 `docs/editor-roadmap.md` 历史，v0.5 是 Asset 浏览器 + Material 子模式 ✅，本 GAP 是 v0.5 之上的 polish + complete）
+- **处理**：
+  - **2026-05-23（v1.1.1 patch）✅ G1 完整闭环**：Asset Browser 右键 → Create → Material modal + 自动 lazy create live instance + DnD 应用到实体 + Inspector cache 同步（v1.2.x patch 系列共 7 个 patch 把"新材质工作流"打磨到不写代码完成日常工作的水平）。Lumix / Unity 工业惯例 1:1 对位
+  - **2026-05-24（v1.3.0 minor）trim 决策**：原拟 G2 缩略图与 grid pass 迁出 + Pipeline 中性化合并到 v1.3.0 bundle，本 session 评估后判断球体真渲染需复刻 mini-pipeline（PSO + scene descriptor set + dummy lights + IBL bind + push constants）500-800 LOC 独立设计点，与本 GAP 状态字段"留独立议题讨论后立项"原意匹配 —— trim 出去到 v1.4.0 minor 独立议题。v1.3.0 走 2 完整功能区（中性化 + grid 迁出）满足 [[feedback-minor-bump-must-carry-multiple-features]] 门槛
+- **技术方案讨论 placeholder（v1.4.0 议题准备）**：thumbnail 烘培走哪条 Pipeline 路径 —— 候选 (a) 编辑器侧 mini-pipeline（独立 PSO + scene desc set + 内置球体 mesh + dummy 1 dir light + 复用 dummy IBL + 复用 material push constant 公共部分）；候选 (b) Lumix 简化路径（仅 base color 着色 tile，无真球体渲染，适用于 50+ 材质快速识别，球体保真度低）；候选 (c) 复用 Pipeline 改造为可渲染到任意 RT（侵入 engine，工作量最大）。缓存策略：per-session 内存 vs 磁盘 .material.thumb.png；触发器：lazy on visible vs 启动期 batch；G3 vs G1 优先级
+- **关联**：[[GAP-2026-05-16-builtin-asset-disk-serialization]] / [[GAP-2026-05-16-material-system-enumerate-and-instance-overrides]] / [[GAP-2026-05-14-renderable-material-instance-round-trip]]（前置已落地基础）；[[reference-polyhaven-hdri]] / [[reference-lumix-ibl-filter]]（参考方案）
 
 ---
 
