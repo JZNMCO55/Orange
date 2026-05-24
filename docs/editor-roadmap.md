@@ -652,6 +652,33 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.2.2 · 新建材质 lazy create live instance ✅
+
+**版本**：v1.2.1 ✅ 后第二个 patch
+**落地日期**：2026-05-24
+
+**范围**：v1.1.1 Create Material UI 的对偶 friction 修复——新建 `.material` 后 Inspector 撞 `liveInstance == nullptr`（`BuildNamedMaterialInstances` 只 hardcode 8 个内置 + 18 个 PBR showcase）→ 用户无法调参。本 patch 加 **lazy create on first Inspector access** 路径：任何未注册的 .material 首次被 Inspector 访问时即时 `MaterialSystem::CreateInstance(templateName)` + `ApplyDataToInstance(读 .material override)` own 到新加的 `EditorAssetContext.userMaterials` map，立即可调参。
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `tools/OrangeEditor/context/EditorAssetContext.h` | 加 `std::unordered_map<std::string, std::unique_ptr<MaterialInstance>> userMaterials` 字段（own 用户创建 / lazy 触达的实例）|
+| `tools/OrangeEditor/BuiltinAssets.cpp::BuildNamedMaterialInstances` | 末尾追加遍历 `userMaterials` 把每条加进返回 map（与 hardcode 同 key 时不覆盖）|
+| `tools/OrangeEditor/plugin/MaterialAssetInspectorPlugin.cpp::DrawMaterialSubMode` | `liveInstance == nullptr && originalTemplate 非空` 分支加 lazy `CreateInstance + ApplyDataToInstance + 转 own 到 userMaterials` 路径 |
+| `tools/OrangeEditor/CMakeLists.txt` | VERSION 1.2.1 → 1.2.2 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.2-acceptance-checklist.md`
+
+**与引擎关系**：纯编辑器侧改动，无引擎 / 无 OR 影响。CMake VERSION 1.2.1 → 1.2.2。
+
+**Critical Path**：是（v1.1.1 Create Material UI 闭环补完——美术 / 关卡设计师"不写代码完成日常工作"承诺的关键 friction，新建 → 调参 → Pick → 视觉 的整路径现在无断点）
+
+**不在本 patch 范围**（明示）：
+- userMaterials 析构时 .material override 自动落盘（auto save）→ v1.3.0+ minor 候选
+- userMaterials 内存上限 / LRU 淘汰 → 按需触发
+- 创建 Material modal 路径同步 CreateInstance 写 userMaterials（即 B 方案）—— A 方案 lazy create 已覆盖此路径，不需重复
+
 ### v1.2.1 · IAuxPassProvider Hook + 公共 API 中性化 ✅
 
 **版本**：v1.2.0 ✅ 后第一个 patch（**校准记录**：原 commit `06b76e3` 拟 v1.3.0 minor，2026-05-24 同日用户当场指出 "2 天内 5 个 bump 太随意，1.x.0 minor 必须伴随多个完整功能落地"，按 [[feedback-minor-bump-must-carry-multiple-features]] 新规则校准为 patch —— 本次仅接口预留 + rename 一项未完整功能，不达 minor 2-3 完整功能门槛；follow-up commit 改 CMake VERSION + 重命名 acceptance-checklist + 更新本节性质，commit 历史保留）

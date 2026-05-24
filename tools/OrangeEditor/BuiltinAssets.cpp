@@ -657,5 +657,16 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
             m[assets.pbrShowcaseMaterialPaths[i]] = assets.pbrShowcaseMaterials[i].get();
         }
     }
+
+    // v1.2.2 patch · 用户新建（v1.1.1 Create Material UI）/ 手动 copy 进
+    // assets/ / 老 .material 等通过 MaterialAssetInspectorPlugin lazy
+    // CreateInstance own 到 userMaterials 的实例。同 key 已被前面的 8 个
+    // hardcode / PBR showcase 抢占时（罕见，用户故意用同名 path）以前面
+    // 的为准；正常路径下 userMaterials 内的 path 与前面 hardcode 完全不
+    // 重叠。
+    for (const auto& [p, ptr] : assets.userMaterials)
+    {
+        if (ptr && m.find(p) == m.end()) { m[p] = ptr.get(); }
+    }
     return m;
 }

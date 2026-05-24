@@ -94,6 +94,21 @@ struct EditorAssetContext
     // 从盘读；一致则 editingTemplateName 持续保留用户选择，Save 时落盘。
     std::string editingMaterialPath   = {};
     std::string editingTemplateName   = {};
+
+    // v1.2.2 patch · 用户新建（v1.1.1 Create Material UI）/ 手动 copy 进
+    // assets/ / 老 .material 等"非 8 个内置 hardcode + PBR showcase 18 个"
+    // 的 .material 文件，在 MaterialAssetInspectorPlugin 首次访问时按
+    // templateName lazy CreateInstance + ApplyDataToInstance(读 .material
+    // override) own 到本 map；BuildNamedMaterialInstances 末尾追加遍历，
+    // 让 Inspector 调参 / Pick 路径都能命中。生命周期跟 EditorAssetContext
+    // 走，编辑器关闭时统一析构。
+    //
+    // 关键 friction 修复（GAP-2026-05-24-editor-asset-browser-create-material-
+    // missing 对偶）：v1.1.1 ship 了"创建 .material"但没 ship"刚创建立即
+    // 可调参"；本字段补完闭环。
+    std::unordered_map<std::string,
+                       std::unique_ptr<Orange::Engine::Render::MaterialInstance>>
+        userMaterials;
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H
