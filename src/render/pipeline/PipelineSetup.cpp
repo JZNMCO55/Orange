@@ -202,11 +202,10 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         auto godRaysCode   = LoadSpirv("shaders/orange_engine/god_rays.frag.spv");
         auto skyCode       = LoadSpirv("shaders/orange_engine/sky.frag.spv");
         auto proceduralSkyCode = LoadSpirv("shaders/orange_engine/procedural_sky.frag.spv");
-        auto gridCode      = LoadSpirv("shaders/orange_engine/grid.frag.spv");
         if (downCode.empty() || upCode.empty() || combineCode.empty()
             || tonemapVsCode.empty() || tonemapFsCode.empty()
             || godRaysCode.empty()
-            || skyCode.empty() || proceduralSkyCode.empty() || gridCode.empty())
+            || skyCode.empty() || proceduralSkyCode.empty())
         {
             Shutdown();
             return ResultCode::IoError;
@@ -260,18 +259,12 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         sm.mpDebugName        = "orange_engine.procedural_sky.frag";
         impl.proceduralSkyFs  = rhi.CreateShaderModule(sm);
 
-        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
-        sm.mpCode      = gridCode.data();
-        sm.mCodeSize   = gridCode.size() * sizeof(std::uint32_t);
-        sm.mpDebugName = "orange_engine.grid.frag";
-        impl.gridFs    = rhi.CreateShaderModule(sm);
-
         if (!impl.bloomDownsampleFs || !impl.bloomUpsampleFs || !impl.passthroughCombineFs
             || !impl.tonemapVs || !impl.tonemapFs || !impl.godRaysFs
-            || !impl.skyFs || !impl.proceduralSkyFs || !impl.gridFs)
+            || !impl.skyFs || !impl.proceduralSkyFs)
         {
             ORANGE_LOG_ERROR("Pipeline::Initialize: bloom / tonemap / god_rays / sky / "
-                             "procedural_sky / grid shader 模块创建失败");
+                             "procedural_sky shader 模块创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -286,19 +279,9 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         layDesc.mpDebugName = "orange_engine.sky.layout";
         impl.skyLayout = rhi.CreateDescriptorSetLayout(layDesc);
 
-        // grid descriptor layout (1 binding sampler2D sceneDepth)
-        Orange::Rhi::DescriptorSetLayoutDesc gridLayDesc{};
-        gridLayDesc.mBindings.push_back({0,
-                                         Orange::Rhi::DescriptorType::CombinedImageSampler,
-                                         1,
-                                         Orange::Rhi::ShaderStage::Fragment});
-        gridLayDesc.mpDebugName = "orange_engine.grid.layout";
-        impl.gridLayout = rhi.CreateDescriptorSetLayout(gridLayDesc);
-
-        if (!impl.skyLayout || !impl.gridLayout)
+        if (!impl.skyLayout)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: sky / grid DescriptorSetLayout "
-                             "创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: sky DescriptorSetLayout 创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -504,49 +487,13 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         d.mpDebugName = "orange_engine.procedural_sky";
         impl.proceduralSkyPipeline = rhi.CreateGraphicsPipeline(d);
     }
-    {
-        // grid pipeline —— RGBA16F HDR target with alpha blend (over)，**无
-        // depth attachment**。grid shader 自己采 sceneDepth + 手动比较 + discard
-        // 处理几何遮挡，比 gl_FragDepth 路径稳。push 128B (mat4 invVP + mat4 VP)。
-        Orange::Rhi::GraphicsPipelineDesc d{};
-        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
-                                   impl.fullscreenVs.get(), "main"});
-        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
-                                   impl.gridFs.get(), "main"});
-        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
-        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
-        d.mDepthStencil.mDepthTestEnable  = false;
-        d.mDepthStencil.mDepthWriteEnable = false;
-
-        Orange::Rhi::ColorBlendAttachmentDesc blend{};
-        blend.mBlendEnable         = true;
-        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::SrcAlpha;
-        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::OneMinusSrcAlpha;
-        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
-        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
-        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::OneMinusSrcAlpha;
-        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
-        d.mColorBlend.mAttachments.push_back(blend);
-
-        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
-        d.mDescriptorSetLayouts.push_back(impl.gridLayout.get());
-
-        Orange::Rhi::PushConstantRange pcRange{};
-        pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
-        pcRange.mOffset = 0;
-        pcRange.mSize   = 128;  // mat4(64) + mat4(64)
-        d.mPushConstantRanges.push_back(pcRange);
-
-        d.mpDebugName = "orange_engine.grid";
-        impl.gridPipeline = rhi.CreateGraphicsPipeline(d);
-    }
     if (!impl.bloomDownsamplePipeline || !impl.bloomUpsamplePipeline ||
         !impl.passthroughCombinePipeline || !impl.tonemapPipeline ||
         !impl.godRaysPipeline ||
-        !impl.skyPipeline || !impl.proceduralSkyPipeline || !impl.gridPipeline)
+        !impl.skyPipeline || !impl.proceduralSkyPipeline)
     {
         ORANGE_LOG_ERROR(
-            "Pipeline::Initialize: bloom / combine / tonemap / god_rays pipeline 创建失败");
+            "Pipeline::Initialize: bloom / combine / tonemap / god_rays / sky pipeline 创建失败");
         Shutdown();
         return ResultCode::InternalError;
     }

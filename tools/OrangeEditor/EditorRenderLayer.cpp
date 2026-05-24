@@ -113,6 +113,23 @@ EditorRenderLayer::~EditorRenderLayer()
     // 清 callback 避免捕获已销毁资源
     mRenderer.SetSwapchainOverlayCallback({});
 
+    // 摘掉 grid aux pass 注册：Pipeline 析构前先 SetAuxPassProvider(nullptr)
+    // 让 Pipeline 内 pAuxPassProvider 字段失效，再释放 provider 自身（含
+    // GPU 资源）。顺序：Pipeline → SetAuxPassProvider(nullptr) → provider
+    // Shutdown → provider 析构（unique_ptr.reset）→ Pipeline.reset()。
+    // 若反过来先 Pipeline.reset 也安全 —— Pipeline.Shutdown 内 WaitIdle 已
+    // 保证 provider 的 GPU 工作已完成，且 Pipeline 析构后不再调 provider
+    // hook —— 但显式摘注册让意图更清晰。
+    if (mpScenePipeline)
+    {
+        mpScenePipeline->SetAuxPassProvider(nullptr);
+    }
+    if (mpEditorGridProvider)
+    {
+        mpEditorGridProvider->Shutdown();
+        mpEditorGridProvider.reset();
+    }
+
     // Pipeline 先释放（持有 viewportColor / hdrColor 等 RHI 资源），
     // ImGui_ImplVulkan_Shutdown 在 main() 已先于 layer dtor 执行，所以
     // 这里**不**再调 ImGui_ImplVulkan_RemoveTexture（ImGui 内部 pool

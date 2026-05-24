@@ -92,20 +92,13 @@ find_package(glfw3 CONFIG REQUIRED)
 # 性能分析，按需打开。
 option(ORANGE_ENGINE_WITH_SPDLOG "Link spdlog as the Core::Log backend" OFF)
 option(ORANGE_ENGINE_WITH_TRACY  "Link Tracy as the profiler backend" OFF)
-# GAP-2026-05-19-editor-aux-passes-in-engine-pipeline 最小可行解套：
-# 把"编辑器审美默认值"打成可剔除单元 —— grid pass + 0.25 灰 dummy IBL
-# ambient + 中性灰 viewport clear color。default ON 让 dev / editor 构
-# 建保留全套功能；shipping 显式 -DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF
-# 关掉，engine 端：
-#   * SetEditorGridEnabled 公共面变成 no-op；grid GPU 资源不创建
-#   * dummy IBL ambient 写回 (0,0,0)，PBR 物体仅 direct light（无环境光）
-#   * viewport clear color 走 game 默认（深蓝），不再强推编辑器中性灰
-# 完整 IAuxPassProvider 钩子 + engine 公共面 grep 不到 "EditorGrid" 字
-# 样 的命名整骨归 v1.0 验收前 batch milestone（见 engine-known-gaps.md
-# GAP-2026-05-19 条目末尾"落地记录"）。
-option(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES
-       "Include editor-only aesthetic defaults in engine binary (grid pass + 0.25 dummy ambient + neutral clear)"
-       ON)
+# Note: 历史的 `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option 在 v1.3.0
+# 已彻底移除。grid pass 真正迁出到编辑器（EditorGridAuxPassProvider 走
+# Pipeline::SetAuxPassProvider hook 注入），dummy IBL ambient + scene
+# clear color 默认值通过 Pipeline 公共 API 中性化（SetDummyIblAmbient /
+# SetSceneClearColor）由消费方显式 override —— engine 默认值不带任何编
+# 辑器审美。完整迁出记录见 vendor/Orange-Wiki/case-studies/orange-engine/
+# milestones/editor/editor-v1.3.0-acceptance-checklist.md。
 
 if (ORANGE_ENGINE_WITH_SPDLOG)
     find_package(spdlog CONFIG REQUIRED)

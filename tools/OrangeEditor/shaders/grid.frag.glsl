@@ -1,21 +1,26 @@
 #version 450
 
 // ---------------------------------------------------------------------------
-// 编辑器 viewport grid fragment shader —— fullscreen.vert（big-triangle）
-// 配套。每像素从 vUV 反推 world-space 视线，与 Y=0 平面求交，按 Ben Golus
-// "Pristine Grid" 算法在交点处计算双层 grid alpha（细线每 1 m，粗线每 10 m），
-// 距离衰减后 alpha-blend 到 hdrColor 上。
+// 编辑器 viewport grid fragment shader（v1.3.0 由 engine
+// `src/render/builtin_shaders/grid.frag.glsl` 迁出至编辑器自家路径，配套
+// `EditorGridAuxPassProvider` 通过 `Pipeline::SetAuxPassProvider` hook
+// 注入；engine 不再带 grid 任何资源）。
+//
+// 配套 fullscreen.vert（big-triangle）。每像素从 vUV 反推 world-space 视线，
+// 与 Y=0 平面求交，按 Ben Golus "Pristine Grid" 算法在交点处计算双层 grid
+// alpha（细线每 1 m，粗线每 10 m），距离衰减后 alpha-blend 到 hdrColor 上。
 //
 // **深度遮挡走采样 sceneDepth + 手动 compare + discard** 而非 gl_FragDepth
 // + depth test Less —— gl_FragDepth 路径在 Y=0 hit point 落在 camera 后方
 // （ndcH.w < 0）或 cube 内部时撞精度问题让 grid 穿透几何（v0 实装的视觉
 // bug）。直接采 sceneDepth 自己跟 grid hit 的 NDC z 比，硬性 discard 更
-// 稳健。Pipeline 端为此 grid pipeline 关掉 depth attachment，改加 binding 0
-// 的 sampler2D 接 sceneDepth。
+// 稳健。Provider 端为此 grid pipeline 关掉 depth attachment，改加 binding
+// 0 的 sampler2D 接 sceneDepth。
 //
-// Pipeline 把本 pass 安排在主几何 pass **之后**、bloom 之前；color attachment
-// LoadOp::Load + alpha blend，sceneDepth 在调用前 transition 到 ShaderReadOnly
-// 供本 pass 采样，结束后由调用方按需翻回（god rays / 下一帧主 pass）。
+// Provider 把本 pass 安排在主几何 pass **之后**（aux pass hook 位置）；
+// color attachment LoadOp::Load + alpha blend，sceneDepth 由 Pipeline 在
+// 调用 hook 前已 transition 到 ShaderReadOnly 供本 pass 采样（v1.3.0 hook
+// 前置契约）。
 //
 // push constant 128 字节：
 //   * uInvViewProj : mat4，64B；vUV → world reconstruct

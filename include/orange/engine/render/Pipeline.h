@@ -386,27 +386,6 @@ public:
     void BakeIblFromWorld(::Orange::Engine::World&                world,
                           ::Orange::Engine::Asset::AssetRegistry& assets);
 
-    // viewport 地面 grid 显隐开关（默认关）。开启时 Pipeline 在主几何 pass
-    // 之后画一层 PristineGrid（Y=0 平面）+ alpha-blend 叠加到 hdrColor，
-    // 写正确 NDC depth 让 grid 能被场景几何遮挡。
-    //
-    // **命名中性化**（v1.3.0 由 SetEditorGridEnabled 重命名为 SetAuxGrid
-    // Enabled）：grid 是辅助 pass 性质 vs 编辑器审美决定，运行时游戏端也
-    // 可能消费（如 RTS / 关卡设计模式）。本字段独立于"是否有 editor"语义。
-    // 引擎公共面避免 "Editor*" 字样属 OrangeEngine "Game-specific concepts
-    // forbidden in engine" 与 OrangeRender API 中性化原则同节奏。
-    //
-    // 典型调用方：编辑器 ScenePanel 工具栏 Grid checkbox 直接写本字段。
-    // 未 Initialize 时 silent-ignore；shader 加载失败时也 silent，pass
-    // 自然 skip。
-    //
-    // **长期方向**（GAP-2026-05-19 G1 / v1.4.0+）：grid pass 实现整体迁
-    // 出 engine 到编辑器端走 IAuxPassProvider 注入路径，本字段届时 deprecated；
-    // v1.3.0 阶段仍保留作为兼容路径，与 cmake gate `ORANGE_ENGINE_WITH_
-    // EDITOR_AUX_PASSES` 一同 shipping 关掉。
-    void SetAuxGridEnabled(bool enabled) noexcept;
-    bool IsAuxGridEnabled() const noexcept;
-
     // 注册辅助 pass 提供者（v1.3.0 引入）—— 让外部（editor / 游戏端）注入
     // 在主 pass 与后处理之间渲染的 aux pass（如 outline / wireframe /
     // debug overlay / 未来迁出的 grid）。详见 IAuxPassProvider.h 调用约定。

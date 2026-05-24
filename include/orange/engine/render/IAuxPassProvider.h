@@ -21,16 +21,19 @@
 //     provider 自行 transition 到需要的 layout（典型 ColorAttachment 做
 //     alpha-blend 叠加）；离开时**必须**留在 ShaderReadOnly（下游 bloom
 //     系列按此假设）。
-//   * sceneDepth 进入时可能在 DepthStencilAttachment 或 ShaderReadOnly
-//     （取决于上游 grid / god rays 等是否已经 transition）；ctx 上的
-//     `sceneDepthIsShaderReadOnly` 标志反映当前状态，provider 按需 transition。
+//   * sceneDepth 进入时**总是** ShaderReadOnly —— Pipeline 在调用 hook 前
+//     已统一 transition（v1.3.0 grid 真迁出后引入的契约：让 provider 仅做
+//     纯渲染、不操心 depth state 流转）；provider 不得修改 depth layout。
+//     `ctx.sceneDepthIsShaderReadOnly` 字段保留并固定为 true，供兼容性
+//     消费者读取。
 //   * AuxPassContext 内所有指针由 Pipeline 拥有，生命周期 = 单帧；provider
 //     不得跨帧持有。
 //
-// 与未来 grid 迁出（GAP-2026-05-19 G1）的关系：v1.3.0 仅引入接口与 hook
-// 调用点；引擎内 grid pass 实现保留（仍走 cmake gate），等 v1.4.0+ 把
-// PipelineGrid.cpp 整体迁到编辑器端实现 IAuxPassProvider 时真正接通。本
-// 接口此刻是"预留 hook"，让外部 provider 可以注入与 grid 同位的辅助 pass。
+// 落地状态（基准 2026-05-24）：v1.2.1 ship 接口与 hook 调用点；v1.3.0
+// 实际接通 grid 真迁出 —— 引擎端 grid pass 资源 / shader / 调用点全部
+// 移除，编辑器侧 EditorGridAuxPassProvider 通过本 hook 注入实现完整功
+// 能等价；本接口此后是辅助 pass 的唯一注入入口（外部 outline / wireframe /
+// debug overlay 等同模式接入）。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>

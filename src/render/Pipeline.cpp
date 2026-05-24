@@ -353,12 +353,6 @@ void Pipeline::Shutdown()
         impl.debugDrawScene->ShutdownBackend_();
         impl.debugDrawScene.reset();
     }
-    impl.gridSet.reset();
-    impl.gridPool.reset();
-    impl.gridPipeline.reset();
-    impl.gridLayout.reset();
-    impl.gridFs.reset();
-    impl.gridSetBoundDepth = nullptr;
     impl.proceduralSkyPipeline.reset();
     impl.proceduralSkyFs.reset();
     impl.skySet.reset();
@@ -631,23 +625,6 @@ void Pipeline::SetSceneClearColor(float r, float g, float b) noexcept
     if (!mpImpl) { return; }
     mpImpl->sceneClearColor = glm::vec3{r, g, b};
     // 不动 GPU 资源；下一帧 RecordOffscreenPass / Sky pass 入口从字段读最新值。
-}
-
-void Pipeline::SetAuxGridEnabled(bool enabled) noexcept
-{
-    if (!mpImpl) { return; }
-#if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
-    mpImpl->editorGridEnabled = enabled;
-#else
-    // Shipping 构建剔除辅助 pass：grid 永远关闭，setter 静默 ignore。
-    (void)enabled;
-    mpImpl->editorGridEnabled = false;
-#endif
-}
-
-bool Pipeline::IsAuxGridEnabled() const noexcept
-{
-    return mpImpl && mpImpl->editorGridEnabled;
 }
 
 void Pipeline::SetAuxPassProvider(IAuxPassProvider* pProvider) noexcept
@@ -1396,23 +1373,24 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                 impl.hdrHeight);
         }
 
-        // grid pass：在主 pass + 粒子之后、passthrough 之前。开关 +
-        // 内部 NULL 检查；失败 silent，passthrough 继续。
-        if (ok && impl.editorGridEnabled)
-        {
-            impl.RecordGridPass(invViewProj, viewProj);
-        }
-
-        // v1.3.0 · AuxPassProvider hook：grid 之后、debug draw / passthrough
-        // 之前调用外部注册的辅助 pass（如 editor 端 outline / wireframe）。
-        // ctx 内填好当前帧 hdrColor / sceneDepth / hdrSampler / cmd + 视图
-        // 矩阵 + sceneDepth 当前 layout（grid pass 若 enabled 会把它翻成
-        // ShaderReadOnly，否则维持 DepthStencilAttachment）。Provider 自负
-        // 责进出 layout transition；详见 IAuxPassProvider.h 调用约定。
+        // v1.3.0 · AuxPassProvider hook：主 pass + 粒子之后、debug draw /
+        // passthrough 之前调用外部注册的辅助 pass（典型：editor 端 grid /
+        // outline / wireframe / debug overlay）。Pipeline 在调用 hook 前
+        // 统一把 sceneDepth transition 到 ShaderReadOnly，省去 provider
+        // 自己 transition 逻辑；契约约定 provider 仅写 hdrColor + 读
+        // sceneDepth，不改 depth layout（详见 IAuxPassProvider.h 调用约定）。
         if (ok && impl.pAuxPassProvider != nullptr && impl.offscreenCmd != nullptr
             && impl.hdrColor != nullptr && impl.sceneDepth != nullptr
             && impl.hdrSampler != nullptr)
         {
+            if (!impl.sceneDepthLayoutShaderReadOnly)
+            {
+                cmd.TransitionTexture(*impl.sceneDepth,
+                                      Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                                      Orange::Rhi::TextureLayout::ShaderReadOnly);
+                impl.sceneDepthLayoutShaderReadOnly = true;
+            }
+
             AuxPassContext ctx{};
             ctx.pCmd        = impl.offscreenCmd.get();
             ctx.pHdrColor   = impl.hdrColor.get();
@@ -1422,14 +1400,9 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             ctx.hdrHeight   = impl.hdrHeight;
             ctx.invViewProj = invViewProj;
             ctx.viewProj    = viewProj;
-            ctx.sceneDepthIsShaderReadOnly = impl.sceneDepthLayoutShaderReadOnly;
+            ctx.sceneDepthIsShaderReadOnly = true;  // 契约固定 true（pre-transition）
             impl.pAuxPassProvider->RenderAuxPass(ctx);
-            // provider 约定离开时 hdrColor 必须 ShaderReadOnly（下游 bloom
-            // 等按此假设），不显式 transition 这里。若 provider 在内部把
-            // sceneDepth 翻成 ShaderReadOnly，需要同步更新 impl.sceneDepth-
-            // LayoutShaderReadOnly = true；v1.3.0 阶段约定 provider 仅做
-            // 读 sceneDepth + 写 hdrColor，不修改 sceneDepth layout（与
-            // grid pass 风格一致），故此字段不在此 hook 后被自动同步。
+            // 离开契约：hdrColor 仍 ShaderReadOnly + sceneDepth 仍 ShaderReadOnly。
         }
 
         // debug draw pass：grid / aux 之后、passthrough 之前。wrap 内自管
@@ -1922,23 +1895,23 @@ void Pipeline::Render(Orange::Engine::World& world)
                 }
             }
 
-            // grid pass：主 pass + 粒子 + AfterMainPass inserted 都画完后、
-            // bloom 之前。grid 走 alpha-blend 叠加 + DepthTest Less → 几何
-            // 把 grid 自然遮挡。editorGridEnabled = false 时 silent skip。
-            if (offscreenOk && impl.editorGridEnabled)
-            {
-                const glm::mat4 invViewProjGrid = glm::inverse(viewProj);
-                impl.RecordGridPass(invViewProjGrid, viewProj);
-            }
-
             // v1.3.0 · AuxPassProvider hook（offscreen 路径平行 hook）：与
-            // window 模式同款约定（详见 IAuxPassProvider.h）。grid pass
-            // 之后、debug draw / bloom 之前调用外部注册的辅助 pass。
+            // window 模式同款约定（详见 IAuxPassProvider.h）。主 pass +
+            // 粒子 + AfterMainPass inserted 之后、debug draw + bloom 之前。
+            // Pipeline 统一 pre-transition sceneDepth → ShaderReadOnly。
             if (offscreenOk && impl.pAuxPassProvider != nullptr
                 && impl.offscreenCmd != nullptr
                 && impl.hdrColor != nullptr && impl.sceneDepth != nullptr
                 && impl.hdrSampler != nullptr)
             {
+                if (!impl.sceneDepthLayoutShaderReadOnly)
+                {
+                    cmd.TransitionTexture(*impl.sceneDepth,
+                                          Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+                    impl.sceneDepthLayoutShaderReadOnly = true;
+                }
+
                 AuxPassContext ctx{};
                 ctx.pCmd        = impl.offscreenCmd.get();
                 ctx.pHdrColor   = impl.hdrColor.get();
@@ -1948,7 +1921,7 @@ void Pipeline::Render(Orange::Engine::World& world)
                 ctx.hdrHeight   = impl.hdrHeight;
                 ctx.invViewProj = glm::inverse(viewProj);
                 ctx.viewProj    = viewProj;
-                ctx.sceneDepthIsShaderReadOnly = impl.sceneDepthLayoutShaderReadOnly;
+                ctx.sceneDepthIsShaderReadOnly = true;
                 impl.pAuxPassProvider->RenderAuxPass(ctx);
             }
 

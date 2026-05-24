@@ -102,7 +102,6 @@ add_library(orange_engine STATIC
     src/render/pipeline/PipelineCapture.cpp
     src/render/pipeline/PipelineDebugDraw.cpp
     src/render/pipeline/PipelineGodRays.cpp
-    src/render/pipeline/PipelineGrid.cpp
     src/render/pipeline/PipelineHelpers.cpp
     src/render/pipeline/PipelineSetup.cpp
     src/render/pipeline/PipelineShadow.cpp
@@ -327,9 +326,6 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/procedural_sky.frag.glsl"
     ORANGE_ENGINE_BUILTIN_PROCEDURAL_SKY_FS_SPV)
-orange_engine_compile_builtin_shader(
-    "src/render/builtin_shaders/grid.frag.glsl"
-    ORANGE_ENGINE_BUILTIN_GRID_FS_SPV)
 
 add_custom_target(orange_engine_builtin_shaders ALL
     DEPENDS
@@ -364,8 +360,7 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_IBL_IRRADIANCE_CS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_IBL_PREFILTER_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SKY_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PROCEDURAL_SKY_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_GRID_FS_SPV}")
+        "${ORANGE_ENGINE_BUILTIN_PROCEDURAL_SKY_FS_SPV}")
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)
@@ -549,13 +544,6 @@ endif ()
 if (ORANGE_ENGINE_WITH_TRACY)
     target_link_libraries(orange_engine PRIVATE Tracy::TracyClient)
     target_compile_definitions(orange_engine PRIVATE ORANGE_ENGINE_WITH_TRACY=1)
-endif ()
-
-# GAP-2026-05-19-editor-aux-passes-in-engine-pipeline：把"编辑器审美默认值"
-# 打成可剔除单元；shipping -DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF 关掉
-# grid pass + 0.25 dummy IBL ambient + 中性灰 clear。默认 ON 保持当前行为。
-if (ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
-    target_compile_definitions(orange_engine PRIVATE ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=1)
 endif ()
 
 orange_engine_set_compiler_options(orange_engine)

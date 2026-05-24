@@ -37,6 +37,8 @@
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
 #include <orange/engine/render/VfxSystem.h>
+
+#include "render/EditorGridAuxPassProvider.h"
 #include <orange/engine/scene/Entity.h>
 
 #include <orange/renderer/RenderDevice.h>
@@ -173,6 +175,13 @@ private:
     // 也不必须，layer 析构链顺序 OK（成员声明顺序 == 析构反序，chain 在
     // pipeline 后声明 → 先析构 pipeline 后析构 chain）。
     std::unique_ptr<Orange::Engine::Render::PostProcessChain> mpScenePostProcessChain;
+    // v1.3.0 · viewport 地面 grid pass provider —— 由编辑器自管 PSO / shader /
+    // descriptor set，通过 IAuxPassProvider 接口由 Pipeline 在主 pass 之后调
+    // 用渲染。engine 不再带 grid 任何资源；ScenePanel toolbar Grid checkbox
+    // 直接读写本对象 enable 状态。生命周期对齐 mpScenePipeline（同 layer 析
+    // 构序：声明顺序 == 析构反序，provider 在 pipeline 后声明 → 先析构
+    // pipeline 摘掉注册再析构 provider 释放 GPU 资源）。
+    std::unique_ptr<EditorGridAuxPassProvider>                mpEditorGridProvider;
     // GAP-2026-05-15 落地：编辑器轨道相机的 Camera 实例化缓存，每帧
     // DrawScenePanel 重算后 push 给 mpScenePipeline.SetEditorCameraOverride。
     // 必须是稳定地址（pipeline 持非拥有 const* 跨帧），所以做成 layer 成员

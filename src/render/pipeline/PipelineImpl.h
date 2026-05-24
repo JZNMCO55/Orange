@@ -309,15 +309,6 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIShaderModule> proceduralSkyFs;
     std::unique_ptr<Orange::Rhi::RHIPipeline>     proceduralSkyPipeline;
 
-    // ---- Grid pass GPU 资源 --------------------------------------------
-    std::unique_ptr<Orange::Rhi::RHIShaderModule>        gridFs;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> gridLayout;
-    std::unique_ptr<Orange::Rhi::RHIPipeline>            gridPipeline;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      gridPool;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       gridSet;
-    Orange::Rhi::RHITexture*                              gridSetBoundDepth{nullptr};
-    bool                                                  editorGridEnabled{false};
-
     // ---- v1.3.0 · AuxPassProvider hook --------------------------------
     // 外部（editor / 游戏端）通过 Pipeline::SetAuxPassProvider 注入，主
     // pass 完成后 Render 内调用 RenderAuxPass。Pipeline 不持所有权 ——
@@ -507,9 +498,6 @@ struct Pipeline::Impl
                                  const glm::vec3& sunColor,
                                  float            sunIntensity);
 
-    // 录制编辑器地面 grid pass（主 pass 之后、bloom 之前）。
-    bool RecordGridPass(const glm::mat4& invViewProj, const glm::mat4& viewProj);
-
     // 按当前 dummyIblAmbient 字段值填 dummy IBL irradiance cube 的所有 face
     // 像素（1×1 per face，half float RGBA）。两条入口：
     //   * Initialize 首次创建 dummy IBL 资源时按字段初值填一次（pBootCmd 复
@@ -614,7 +602,6 @@ struct Pipeline::Impl
         }
         sceneDepth = std::move(newDepth);
         sceneDepthLayoutShaderReadOnly = false;
-        gridSetBoundDepth = nullptr;
 
         Orange::Rhi::DescriptorWrite w{};
         w.mBinding             = 0;

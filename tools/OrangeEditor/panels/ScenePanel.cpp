@@ -211,7 +211,12 @@ void EditorRenderLayer::DrawScenePanel()
         mpScenePipeline->SetEditorCameraOverride(&mEditorCameraOverride);
         // viewport toolbar toggle → Pipeline 状态：每帧 push（开销极小，
         // 避免在 toggle 改变时维护额外 dirty 标记）。
-        mpScenePipeline->SetAuxGridEnabled(sViewportGridEnabled);
+        // v1.3.0 grid 真迁出：toggle 直接写编辑器自家 provider 的 enable 状态
+        //（不再走 engine 公共 API），engine 端无任何 grid 资源残留。
+        if (mpEditorGridProvider)
+        {
+            mpEditorGridProvider->SetEnabled(sViewportGridEnabled);
+        }
         mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
 
         // v0.9 c2 DebugDraw 接通 + Collider 可视化（v0.9.5 后置补丁）：dbg
@@ -556,7 +561,7 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         // - dummyIblAmbient (0.5, 0.5, 0.5)：暗面 ~50% baseColor（v1.0.1 c5
         //   从 0.25 提到 0.5 后零基础用户验收通过，避免"cube 暗面像透明"陷阱）
         // - sceneClearColor (0.12, 0.12, 0.13)：Cocos Creator 风中性灰 #5C5C60，
-        //   让 viewport 与 main panel 深炭灰拉开一档亮度便于辨识渲染区
+        //   让 viewport 与 main panel 深炭灰拉开一档亮度差便于辨识渲染区
         mpScenePipeline->SetDummyIblAmbient(0.5f, 0.5f, 0.5f);
         mpScenePipeline->SetSceneClearColor(0.12f, 0.12f, 0.13f);
 
@@ -579,6 +584,24 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
             Orange::Engine::Render::PostProcessChain>(
                 Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
+
+        // v1.3.0 grid 真迁出：编辑器自家 EditorGridAuxPassProvider 实现
+        // IAuxPassProvider，通过 Pipeline::SetAuxPassProvider 注册到 engine
+        // 主 pass 之后的 aux hook 上。Initialize 失败时（shader spv 缺失等）
+        // silent skip 注册，让 viewport 仍能起 —— grid 不显示 ≠ 编辑器不可用。
+        mpEditorGridProvider = std::make_unique<EditorGridAuxPassProvider>();
+        if (mpEditorGridProvider->Initialize(mRenderDevice))
+        {
+            mpEditorGridProvider->SetEnabled(sViewportGridEnabled);
+            mpScenePipeline->SetAuxPassProvider(mpEditorGridProvider.get());
+        }
+        else
+        {
+            ORANGE_LOG_WARN("[OrangeEditor] EditorGridAuxPassProvider Initialize 失败 —— "
+                            "viewport grid 不可用，编辑器其余功能正常");
+            mpEditorGridProvider.reset();
+        }
+
         mScenePanelWidth  = width;
         mScenePanelHeight = height;
     }

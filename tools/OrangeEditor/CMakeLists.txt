@@ -167,6 +167,7 @@ add_executable(OrangeEditor
     import/ImportDispatcher.cpp
     import/MetaSidecar.cpp
     import/ObjImporter.cpp
+    render/EditorGridAuxPassProvider.cpp
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
@@ -222,3 +223,58 @@ endif ()
 # 接入资源加载时相对路径解析与 Release 行为一致。
 set_target_properties(OrangeEditor PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:OrangeEditor>")
+
+# ---------------------------------------------------------------------------
+# OrangeEditor 内置 shader 编译（v1.3.0 引入）—— grid pass + fullscreen
+# vertex 从 OrangeEngine `src/render/builtin_shaders/` 迁出，编辑器自家
+# 路径独立编译落到 `shaders/orange_editor/`，与 engine 端 `shaders/orange_engine/`
+# 平行不冲突。EditorGridAuxPassProvider 在 Initialize 时按
+# "shaders/orange_editor/<name>.spv" 相对 .exe 目录解析。
+#
+# glslangValidator 由 LunarG Vulkan SDK 提供；与 engine 端同款 find_program
+# + add_custom_command 模板，仅 OUTPUT_DIR 改名隔离。
+# ---------------------------------------------------------------------------
+find_program(ORANGE_EDITOR_GLSLANG_VALIDATOR
+    NAMES glslangValidator
+    HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin"
+)
+if (NOT ORANGE_EDITOR_GLSLANG_VALIDATOR)
+    message(FATAL_ERROR
+        "OrangeEditor: 没在 VULKAN_SDK 下找到 glslangValidator。"
+        "Editor 渲染 aux pass shader 需要它编 SPIR-V。请安装 LunarG "
+        "Vulkan SDK 并设置环境变量 VULKAN_SDK。")
+endif ()
+
+set(ORANGE_EDITOR_SHADER_OUTPUT_DIR
+    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/shaders/orange_editor")
+
+function(orange_editor_compile_shader src_relative out_var)
+    set(_src "${CMAKE_CURRENT_LIST_DIR}/${src_relative}")
+    get_filename_component(_full_name "${src_relative}" NAME)
+    string(REGEX REPLACE "\\.glsl$" "" _stem "${_full_name}")
+    set(_out "${ORANGE_EDITOR_SHADER_OUTPUT_DIR}/${_stem}.spv")
+    add_custom_command(
+        OUTPUT  "${_out}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "${ORANGE_EDITOR_SHADER_OUTPUT_DIR}"
+        COMMAND "${ORANGE_EDITOR_GLSLANG_VALIDATOR}" -V
+                "${_src}" -o "${_out}"
+        DEPENDS "${_src}"
+        COMMENT "OrangeEditor: 编译内置 SPIR-V → ${_stem}.spv"
+        VERBATIM
+    )
+    set(${out_var} "${_out}" PARENT_SCOPE)
+endfunction()
+
+orange_editor_compile_shader(
+    "shaders/fullscreen.vert.glsl"
+    ORANGE_EDITOR_FULLSCREEN_VS_SPV)
+orange_editor_compile_shader(
+    "shaders/grid.frag.glsl"
+    ORANGE_EDITOR_GRID_FS_SPV)
+
+add_custom_target(orange_editor_shaders ALL
+    DEPENDS
+        "${ORANGE_EDITOR_FULLSCREEN_VS_SPV}"
+        "${ORANGE_EDITOR_GRID_FS_SPV}")
+add_dependencies(OrangeEditor orange_editor_shaders)
