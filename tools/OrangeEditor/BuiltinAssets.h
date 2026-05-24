@@ -48,4 +48,23 @@ void InitializeEditorAssets(EditorHost& host);
 std::unordered_map<std::string, Orange::Engine::Render::MaterialInstance*>
 BuildNamedMaterialInstances(const EditorAssetContext& assets);
 
+// v1.2.4 patch · 按 path 获取 live MaterialInstance（含 lazy create 兜
+// 底）。统一了 v1.2.2 Inspector 路径 + v1.2.3 ApplyAssetDropToEntity 路径
+// 的 lazy create 逻辑——避免 DnD apply 拖一个未被 Inspector 选过的新
+// .material 时 BuildNamedMaterialInstances 找不到 → 设 nullptr 设回去
+// （v1.2.3 验收 bug 根因）。
+//
+// 行为：
+//   1. 先查 BuildNamedMaterialInstances 已有 → 命中即返回 raw ptr
+//   2. 不在 map → ReadMaterialFile 拿 templateName + override → MaterialSystem::
+//      CreateInstance + ApplyDataToInstance → own 到 host.assets.userMaterials
+//      → 返回 raw ptr
+//   3. 任一步失败（文件不存在 / 解析失败 / templateName 空 / template 未
+//      注册）→ 返回 nullptr + log warn
+//
+// 调用方按 nullptr 决定是否继续（DnD apply 时设回 nullptr / Inspector
+// 显示 "no live instance" 等）。
+Orange::Engine::Render::MaterialInstance*
+EnsureMaterialInstance(EditorHost& host, const std::string& materialPath);
+
 #endif  // ORANGE_EDITOR_BUILTIN_ASSETS_H

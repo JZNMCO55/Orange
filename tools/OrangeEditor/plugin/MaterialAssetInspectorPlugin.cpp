@@ -371,40 +371,14 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     }
     Orange::Editor::Widgets::EndPropertyTable();
 
-    // 找到此 .material path 当前对应的运行时 MaterialInstance（如有）。
-    // BuildNamedMaterialInstances 是 path → instance* 表的权威反查路径；
-    // 8 个内置 hardcode + PBR showcase 18 个直接命中；v1.2.2 patch 后用户
-    // 新建 / 手动 copy / 老 .material 等"非内置"路径走下方 lazy create
-    // 兜底（own 到 host.assets.userMaterials，下次 BuildNamedMaterialInstances
-    // 自动从该 map 拾取）。
-    auto namedMap = BuildNamedMaterialInstances(host.assets);
-    auto namedIt = namedMap.find(materialPath);
+    // v1.2.4 patch · 统一调 EnsureMaterialInstance helper（含 lazy create
+    // 兜底）。8 个内置 hardcode + PBR showcase 18 个直接命中；新建 /
+    // 手动 copy / 老 .material 走 lazy create 路径 own 到 userMaterials。
+    // 同款 helper 也被 EditorAssetDropHandler::ApplyMaterial 复用——避免
+    // v1.2.3 验收 bug（DnD apply 拖未 Inspector 过的新 .material 找不到
+    // 设回 nullptr）。
     Orange::Engine::Render::MaterialInstance* liveInstance =
-        (namedIt != namedMap.end()) ? namedIt->second : nullptr;
-
-    // v1.2.2 patch · Lazy create on first Inspector access。修复 v1.1.1
-    // Create Material UI 对偶 friction：新建 .material 不在 8 个内置
-    // hardcode 表里 → liveInstance 永远 nullptr → 用户无法调参（仅能切
-    // template + Save）。本路径在 nullptr 时按 templateName 创建一份实例
-    // own 到 userMaterials，同时把磁盘已存的 override 应用上去（避免
-    // "上次调过的颜色被 lazy create 重置回默认"）。
-    if (liveInstance == nullptr
-        && host.assets.pMaterials != nullptr
-        && !originalTemplate.empty())
-    {
-        auto inst = host.assets.pMaterials->CreateInstance(originalTemplate);
-        if (inst != nullptr)
-        {
-            if (auto dataOpt =
-                    ::Orange::Editor::Material::ReadMaterialFile(materialPath))
-            {
-                ::Orange::Editor::Material::ApplyDataToInstance(
-                    *dataOpt, *inst, host.assets.pAssets.get());
-            }
-            liveInstance = inst.get();
-            host.assets.userMaterials[materialPath] = std::move(inst);
-        }
-    }
+        EnsureMaterialInstance(host, materialPath);
 
     // v1.2 T2 · 数据驱动 widget 渲染。从 .template.json 元数据生成对应
     // 控件，移除原 pbr hardcode if-else 路径。Material Inspector 现在

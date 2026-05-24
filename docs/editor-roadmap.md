@@ -652,6 +652,32 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.2.4 · DnD apply 新材质修复（统一 lazy create 路径）✅
+
+**版本**：v1.2.3 ✅ 后第四个 patch
+**落地日期**：2026-05-24
+
+**范围**：修复 v1.2.3 验收用户反馈 bug——拖未被 Inspector 选过的新 `.material` 到实体时物体材质显示 None。
+
+**根因**：v1.2.2 lazy create 路径只在 Inspector `DrawMaterialSubMode` 触发；v1.2.3 DnD apply lambda 直接调 `BuildNamedMaterialInstances + map.find` 没经 lazy create 路径。用户拖未 Inspector 过的新 .material → BuildNamedMaterialInstances 找不到 → 设 nullptr → 显示 None。
+
+**修复**：抽 `EnsureMaterialInstance(host, path)` helper 到 `BuiltinAssets.{h,cpp}`，含 lazy create 兜底（先查 BuildNamedMaterialInstances 已有 → 命中返回；否则 ReadMaterialFile + CreateInstance + ApplyDataToInstance + own 到 userMaterials → 返回）。Inspector + EditorAssetDropHandler::ApplyMaterial 两处统一调 helper。
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `tools/OrangeEditor/BuiltinAssets.{h,cpp}` | 加 `EnsureMaterialInstance(host, path)` helper（含 lazy create 兜底）|
+| `tools/OrangeEditor/plugin/MaterialAssetInspectorPlugin.cpp` | DrawMaterialSubMode 原 namedMap.find + lazy create 替换为 `EnsureMaterialInstance(host, materialPath)` 单调用 |
+| `tools/OrangeEditor/EditorAssetDropHandler.cpp::ApplyMaterial` | apply lambda 内 `BuildNamedMaterialInstances + map.find` 替换为 `EnsureMaterialInstance(*pH, p)` |
+| `tools/OrangeEditor/CMakeLists.txt` | VERSION 1.2.3 → 1.2.4 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.4-acceptance-checklist.md`
+
+**与引擎关系**：纯编辑器侧；CMake VERSION 1.2.3 → 1.2.4。
+
+**Critical Path**：是（v1.2.3 DnD 工作流真正打通的最后一拼图）
+
 ### v1.2.3 · Asset 拖拽到实体（Hierarchy + Viewport 双路径）✅
 
 **版本**：v1.2.2 ✅ 后第三个 patch

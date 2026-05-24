@@ -670,3 +670,40 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
     }
     return m;
 }
+
+Orange::Engine::Render::MaterialInstance*
+EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
+{
+    // 1) 先查既有（含 8 内置 + PBR showcase 18 + userMaterials 已 lazy 过的）
+    const auto named = BuildNamedMaterialInstances(host.assets);
+    auto it = named.find(materialPath);
+    if (it != named.end()) { return it->second; }
+
+    // 2) 不在 map → lazy create 兜底（v1.2.2 同款路径，提到 helper 让
+    //    Inspector / DnD apply 两处都能复用，避免 v1.2.3 验收 bug 复现）。
+    if (host.assets.pMaterials == nullptr)
+    {
+        ORANGE_LOG_WARN("EnsureMaterialInstance: MaterialSystem 未就绪 '{}'",
+                        materialPath);
+        return nullptr;
+    }
+    auto dataOpt = ::Orange::Editor::Material::ReadMaterialFile(materialPath);
+    if (!dataOpt.has_value() || dataOpt->templateName.empty())
+    {
+        ORANGE_LOG_WARN("EnsureMaterialInstance: .material 解析失败或 "
+                        "templateName 缺失 '{}'", materialPath);
+        return nullptr;
+    }
+    auto inst = host.assets.pMaterials->CreateInstance(dataOpt->templateName);
+    if (inst == nullptr)
+    {
+        ORANGE_LOG_WARN("EnsureMaterialInstance: template '{}' 未注册（path={}）",
+                        dataOpt->templateName, materialPath);
+        return nullptr;
+    }
+    ::Orange::Editor::Material::ApplyDataToInstance(
+        *dataOpt, *inst, host.assets.pAssets.get());
+    auto* rawPtr = inst.get();
+    host.assets.userMaterials[materialPath] = std::move(inst);
+    return rawPtr;
+}

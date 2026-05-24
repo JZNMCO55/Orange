@@ -79,15 +79,18 @@ bool ApplyMaterial(EditorHost&                 host,
             if (ptr == rc->materialInstance) { oldPath = p; break; }
         }
     }
+    // v1.2.4 patch · apply lambda 走 EnsureMaterialInstance（含 lazy
+    // create 兜底）—— 修复 v1.2.3 验收 bug：拖未被 Inspector 选过的新
+    // .material 时 BuildNamedMaterialInstances 找不到 → 设 nullptr →
+    // 物体材质显示 None。EnsureMaterialInstance 内 lazy CreateInstance
+    // + ApplyDataToInstance + own 到 userMaterials 兜底。
     auto apply = [pH = &host, capE = target](const std::string& p) {
         auto* pW = pH->scene.pWorld.get();
         if (pW == nullptr || !pW->IsValid(capE)) { return; }
         auto* pRC = pW->GetComponent<RenderableComponent>(capE);
         if (pRC == nullptr) { return; }
         if (p.empty()) { pRC->materialInstance = nullptr; return; }
-        const auto m = BuildNamedMaterialInstances(pH->assets);
-        auto it = m.find(p);
-        pRC->materialInstance = (it != m.end()) ? it->second : nullptr;
+        pRC->materialInstance = EnsureMaterialInstance(*pH, p);
     };
     host.cmdStack.Push(
         std::make_unique<SetFieldValueCommand<std::string>>(
