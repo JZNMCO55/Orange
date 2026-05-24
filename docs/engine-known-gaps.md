@@ -1311,6 +1311,180 @@ src/render/
 
 ---
 
+## GAP-2026-05-24-aux-pass-context-missing-format-info
+
+- **发现方**：OrangeEditor v1.3.0 grid pass 真正迁出落地（commit `93a1a2e`）
+- **发现日期**：2026-05-24
+- **一句话定性**：`AuxPassContext` 只携带 `RHITexture*` 指针（hdrColor / sceneDepth），没带它们的 `TextureFormat`。Provider 创建 PSO 时必须声明匹配的 color/depth format —— `EditorGridAuxPassProvider` 不得不 hardcode `Orange::Rhi::TextureFormat::RGBA16Float`（与 engine HDR target 格式镜像）；若 engine 未来改 HDR target 格式（如升 RGBA32Float / R11G11B10Float），所有外部 provider 实现都会**静默** PSO format 不匹配 → validation error 或 vendor-specific 渲染异常
+
+### 触发场景
+
+- `tools/OrangeEditor/render/EditorGridAuxPassProvider.cpp::Initialize` 内 `d.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::RGBA16Float);` —— 字面常量，与 engine 端 `PipelineHelpers.h::kHdrColorFormat` 是独立两份事实，**没有任何编译期 / 链接期保障两边同步**
+- 未来同款外部 aux-pass provider（outline / wireframe / debug overlay / 游戏端 minimap）都要重新 hardcode 一遍同款常量
+- engine 端 HDR target 格式现在是 `kHdrColorFormat = RGBA16Float`，未来若有强需求改 R11G11B10Float（节带宽）或 RGBA32Float（更高动态范围 emissive），engine 单点改后所有 provider 链接通过但运行时挂
+
+### 缺什么（按依赖拆）
+
+#### G1 · `AuxPassContext` 扩字段（推荐）
+
+- struct 加 `Orange::Rhi::TextureFormat hdrColorFormat` + `Orange::Rhi::TextureFormat sceneDepthFormat` 字段
+- Pipeline 在调 hook 前填字段（从 `impl.hdrColor->GetDesc().mFormat` / `impl.sceneDepth->GetDesc().mFormat` 取）
+- provider Initialize 时**不**创建 PSO（因为还不知道 format）—— 改为 lazy create on first RenderAuxPass（从 ctx.hdrColorFormat 取）；缓存 PSO 直到 format 变化重建
+- 与 AuxPassContext 现有"per-frame state"模型一致，扩展性最好
+
+#### G2 · `Pipeline` 加静态公共面查询
+
+- `static constexpr Orange::Rhi::TextureFormat Pipeline::HdrColorFormat() noexcept;`
+- 与 G1 互补；G1 是 runtime / per-frame state，G2 是编译期常量；provider 端可以在 ctor 就用 G2 创建 PSO
+- 不要替 G1，因为 sceneDepth format 在某些 Pipeline 模式下可能变（如 stencil 模式 vs 纯 depth），ctx 字段更稳
+
+### 期望验收
+
+- engine HDR target 格式 grep `kHdrColorFormat` 改一处即可，所有外部 aux-pass provider 自动取新值
+- 移除 EditorGridAuxPassProvider 对 RGBA16Float 字面常量的依赖
+- 新增 ctest（如 `AuxPassContextFormatTest`）验证 ctx.hdrColorFormat 与 Pipeline 内部 HDR target 实际 format 字段一致
+
+### 状态
+
+- **登记**：2026-05-24
+- **优先级**：**P2（Friction，工程纪律隐患）** —— 不阻塞 v1.3.0 ship（当前 engine 端 HDR format 稳定），但任何未来 HDR target 格式变更都是"single point of failure"；同时本 GAP 闭环前**任何**第二个外部 aux-pass provider 都会重复 hardcode 同款常量
+- **归属**：v1.3.x patch 候选（仅 Pipeline 公共面 + AuxPassContext struct + EditorGridAuxPassProvider 改造 3 个点，~50 LOC，0.2 人天），可与下面 GAP-2026-05-24-fullscreen-vert-not-publicly-exposed + GAP-2026-05-24-loadspirv-helper-not-publicly-exposed 同 batch
+- **关联**：[[reference-grid-migration-engine-to-editor-sweep-pattern]]（grid sweep 模板顺手撞出本 GAP）；GAP-2026-05-19-editor-aux-passes-in-engine-pipeline（接口源头）
+
+---
+
+## GAP-2026-05-24-fullscreen-vert-not-publicly-exposed
+
+- **发现方**：OrangeEditor v1.3.0 grid pass 真正迁出落地（commit `93a1a2e`）
+- **发现日期**：2026-05-24
+- **一句话定性**：engine 内置 `src/render/builtin_shaders/fullscreen.vert.glsl`（10 行 big-triangle 模板，gl_VertexIndex → 全屏覆盖）是任何 fullscreen pass 的通用工具，但**不对外暴露**任何形式（spv shipping 路径 / Pipeline 公共面查询 / 公共 RHIShaderModule getter）。`EditorGridAuxPassProvider` 不得不维护一份 sibling copy 走自家 spv 编译路径；未来任何 fullscreen 风格 aux-pass provider 都要再拷一份
+
+### 触发场景
+
+- `tools/OrangeEditor/shaders/fullscreen.vert.glsl` 是 `src/render/builtin_shaders/fullscreen.vert.glsl` 字面 copy，仅 vUV 计算与输出 layout 行字字相同 + 头注释加"sibling copy for editor"标注
+- 未来 outline / wireframe / debug overlay / fullscreen-quad-pass-style minimap / 游戏端自家 post-process aux pass 都要重复同款 copy
+- 工业对照：Lumix 把 `data/shaders/fullscreen.shd` 当 shipped data 让所有 plugin 路径消费；OrangeRender 本身不会管这种 engine-level shader（属 engine 范畴）
+
+### 缺什么（按依赖拆）
+
+#### G1 · engine 端 ship fullscreen.vert.spv 到公共路径（最轻量）
+
+- engine 把 `fullscreen.vert.spv` 编出后 install / copy 到 `<exe-dir>/shaders/orange_engine_public/fullscreen.vert.spv`（或维持现路径但 documented 为公共可消费）
+- 公共面文档明示"该 spv 是 aux-pass provider 可消费的 public asset，路径稳定"
+- editor 删 sibling copy + CMakeLists.txt 删 shader 编译入口
+
+#### G2 · Pipeline 加 `GetFullscreenVertexShader() -> RHIShaderModule*` 公共面（更结构化）
+
+- engine 暴露内部已编译的 RHIShaderModule，provider 直接拿来传给 PSO 创建
+- 优点：零文件拷贝 / 零路径耦合 / 编译期常量
+- 缺点：增加公共 API surface；provider 实例化时刻必须 Pipeline 已经 Initialize
+
+### 期望验收
+
+- 全仓 `tools/OrangeEditor/shaders/fullscreen.vert.glsl` 删除
+- EditorGridAuxPassProvider Initialize 不再加载自家 fullscreen.vert.spv
+
+### 状态
+
+- **登记**：2026-05-24
+- **优先级**：**P3（cosmetic / 微小重复）** —— 不阻塞功能（sibling copy 维护成本 ~0，shader 10 行不会改）；但**每**新 aux-pass provider 都会重复一遍，N 个 provider 时 deduplication 价值上升
+- **归属**：v1.3.x patch 候选（与上面 GAP-2026-05-24-aux-pass-context-missing-format-info + 下面 GAP-2026-05-24-loadspirv-helper-not-publicly-exposed 同 batch）。可主动等待第 2 个外部 aux-pass provider 出现（如 outline / wireframe）再 batch 处理（避免提前 abstraction）
+- **关联**：[[reference-grid-migration-engine-to-editor-sweep-pattern]]；GAP-2026-05-24-aux-pass-context-missing-format-info（同源 sweep 撞出）
+
+---
+
+## GAP-2026-05-24-loadspirv-helper-not-publicly-exposed
+
+- **发现方**：OrangeEditor v1.3.0 grid pass 真正迁出落地（commit `93a1a2e`）
+- **发现日期**：2026-05-24
+- **一句话定性**：engine 端 `src/render/pipeline/PipelineHelpers.cpp::LoadSpirv(relativePath)`（~20 行，`.exe` 同目录相对解析 + ifstream binary read + 大小校验 + word vector 返回）是任何"从 disk 加载 .spv 喂 RHI"消费者的通用工具，但**不对外暴露**。`EditorGridAuxPassProvider` 复刻了一份；所有 sample / 未来游戏仓 / 第三方 plugin 都要重发明同款 boilerplate
+
+### 触发场景
+
+- `tools/OrangeEditor/render/EditorGridAuxPassProvider.cpp` 顶部 anonymous namespace 内 `GetExecutableDir()` + `LoadSpirv()` 是 `PipelineHelpers.cpp:24-183` 同款逻辑的 sibling copy（仅 ORANGE_LOG_ERROR 输出文案不同）
+- `samples/*` 中如 `08_custom_shader/main.cpp` 也有类似 spv 加载 boilerplate（grep "ifstream.*binary.*ate" samples/ 多匹配）
+- 任何外部消费者（编辑器 plugin / 游戏 fork / 第三方工具）都要重新写
+- 工业对照：Lumix 在 `engine/file_system.h` 公共面提供 `loadFile(path, blob)` 通用接口；OrangeEngine 公共 `Asset` 模块有 ShaderLoader 但走的是 `ShaderAsset` 资产路径（含 AssetRegistry 注册 + handle），不适用于"直接给 RHI 喂裸 spv 字节"场景
+
+### 缺什么
+
+#### G1 · `Orange::Engine::Asset` 加 free function
+
+- `Result<std::vector<std::uint32_t>, ResultCode> LoadSpirvFromExecutableDir(std::string_view relativePath) noexcept;`
+- 落到 `include/orange/engine/asset/SpirvDiskLoader.h`（新头）或现有 ShaderLoader.h 同位（语义独立但可邻居）
+- 公共面文档明示"该函数是供外部直接喂 RHI ShaderModuleDesc 的，绕过 AssetRegistry；典型场景：editor aux pass / sample / 游戏 fork 等启动期一次性 spv 加载"
+
+#### G2 · `Orange::Engine::Platform` 加更通用 `LoadBinaryFromExecutableDir(path)`
+
+- 与 G1 同效但更通用（不限 spv 4 字节对齐校验）；下游消费方自己包装成 word vector
+- 更长远的方向（loadBinaryFile 是任何 engine 都需要的工具），但 scope 比 G1 大
+
+### 期望验收
+
+- EditorGridAuxPassProvider 删 anonymous namespace 内 GetExecutableDir + LoadSpirv 25 行
+- samples 内 spv 加载 boilerplate 统一替换为公共面调用
+- 全仓 grep `ifstream.*binary.*ate` + `seekg.*read` 仅在 G1 / G2 实现内部 + 测试 / 历史 build 产物中匹配
+
+### 状态
+
+- **登记**：2026-05-24
+- **优先级**：**P3（cosmetic / 重复造）** —— 不阻塞功能；与上面 GAP-2026-05-24-fullscreen-vert-not-publicly-exposed 同性质（编辑器 sweep 撞出的 engine 工具复用债）
+- **归属**：v1.3.x patch 候选（与 GAP-2026-05-24-aux-pass-context-missing-format-info / GAP-2026-05-24-fullscreen-vert-not-publicly-exposed 同 batch）。可主动延后等第 2-3 个外部消费者出现再处理
+- **关联**：[[reference-grid-migration-engine-to-editor-sweep-pattern]]（grid sweep 顺手撞出三件套之一）
+
+---
+
+## GAP-2026-05-24-pipeline-cannot-render-to-arbitrary-rt
+
+- **发现方**：v1.3.0 minor planning（材质球缩略图 GAP-2026-05-22 G2 trim 决策评估）
+- **发现日期**：2026-05-24
+- **一句话定性**：`Pipeline` 当前只支持两条入口 —— `Initialize(window)` 渲染到 swap-chain / `InitializeOffscreen(width, height)` 渲染到 Pipeline 内部持有的 viewportColor RT，**没有**"渲染当前世界 / 任意世界到调用方提供的任意 `RHITexture*` 上"的入口。任何编辑器内 mini-render 需求（材质球缩略图 / 资源预览 / mesh thumbnail / scene snapshot）都撞同款空缺，必须**复刻一套 mini-pipeline**（PSO + scene descriptor set + dummy lights + IBL bind + push constants）
+
+### 触发场景
+
+- **材质球缩略图（GAP-2026-05-22 G2）**：核心需求 = 把材质应用到内置球体 mesh 渲染到 96×96 RT，bind 到 ImGui::Image。当前路径要么编辑器自建完整 mini-renderer（500-800 LOC 独立设计点），要么把 Pipeline 改造支持任意 RT 输出
+- **未来 mesh thumbnail**：同款问题（GAP-2026-05-22-editor-dcc-import-pipeline-missing G1 后产生）—— `.obj` / `.gltf` 导入后 Asset Browser 需展示几何缩略
+- **未来 scene snapshot**：scene 文件列表 / scene 切换器需要小尺寸 scene 预览图
+- **未来 prefab / archetype preview**：游戏侧 prefab browser
+- **未来 reflection probe bake offline preview**：环境光烘焙过程的 face 单独预览
+- 5+ 候选未来 milestone 撞同一个 engine 空缺
+
+### 缺什么
+
+#### G1 · `Pipeline::RenderToTexture(world, target, viewport, options)` 公共面
+
+- 入参：World + `RHITexture* target`（调用方持有 + RGBA8/16F 格式 + ColorAttachment|Sampled usage）+ viewport size + 可选 ShadowConfig / IBL textures / camera override / Sky 开关
+- Pipeline 内部走与 InitializeOffscreen 同款路径但目标改为外部传入 RT；调用方负责 transition 到 ShaderReadOnly 后消费
+- 实现复杂度：与现有 `InitializeOffscreen` 90% 重叠（GPU 资源 / 主 pass / IBL / shadow / post-process chain 都已就位），关键改造 = `viewportColor` 字段改为"可被调用方覆盖"的 RT 引用
+- 风险：当前 Pipeline 单线程录制 + 单 swap-chain 假设，多 RT 路径下 frame loop 调度需要梳理（offscreenCmd lifecycle 与外部 RT lifecycle 必须正交）
+
+#### G2 · 抽出可独立实例化的 `MiniRenderer` 子集
+
+- 与 Pipeline 共享 MaterialSystem / Asset / RHI 资源但有独立 frame state
+- 调用方 `MiniRenderer mr(device, ...);  mr.RenderOnce(world, target);` 一次性 immediate-mode 渲染
+- 更模块化但工作量更大（需要梳理 Pipeline 内"啥是共享 / 啥是 per-instance"边界）
+
+#### G3 · 编辑器自建完整 mini-pipeline（不动 engine）
+
+- 复刻 PSO + 描述符 + push constants + IBL bind，与 engine Pipeline 平行存在
+- 优点：engine 完全不动；缺点：500-800 LOC 独立维护 + IBL / 光照路径若 engine 端改造（如换 PBR 模型）必须同步改 mini-pipeline，永远滞后
+
+### 期望验收
+
+- `Pipeline` 公共面新增渲染到任意 RT 入口
+- 材质球缩略图 / mesh thumbnail / scene snapshot 等下游 milestone 走统一路径，不重复造 mini-pipeline
+- engine PBR 模型 / shadow / post-process 改造时所有缩略图路径自动跟进
+
+### 状态
+
+- **登记**：2026-05-24
+- **优先级**：**P2（架构 enabler）** —— 不阻塞当前功能，但 5+ 候选未来 milestone 都堵在它上面；越早决策 G1 vs G2 vs G3 后续多 milestone 累积返工成本越低
+- **归属**：v1.4.0 minor 议题第一性问题（与材质球缩略图 GAP-2026-05-22 G2 同 session 讨论；G2 拉动条件 = 本 GAP 决策结果决定 thumbnail 走哪条路径）
+- **议题候选**：G1 / G2 / G3 的 trade-off 评估；OR 端是否需要任何 RHI 接口扩展（当前评估不需要 —— FEATURE-2026-05-24 已提供完整 RT 公共面）
+- **关联**：[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] G2（最直接消费者）；[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]] G1（未来 mesh thumbnail 同源需求）；[[feedback-minor-bundle-per-feature-feasibility-check]]（本 GAP 是 thumbnail 从 v1.3.0 trim 出去到 v1.4.0 的根因）
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
