@@ -1195,10 +1195,56 @@ src/render/
   - `uniforms[]` (字段名 + 类型 enum)
   - `textureSlots[]` (binding + 名)
 - 启动期 `MaterialSystem` 自动遍历该目录，对每个有效 JSON 调 `RegisterTemplate(ShaderTemplateDesc)`（API 已存在，参 `include/orange/engine/render/MaterialSystem.h:89`）
-- 引擎自带 baseline 库：把现有 6 个 hardcode template 迁出来 + 扩 5-10 个常见变体（toon variants / cloth / hair / clear-coat-pbr / water 等）；离线 SPV 入仓
+- 引擎自带 baseline 库：把现有 6 个 hardcode template 迁出来 + 扩 9 个补完通用 + 2.5D 必需缺口（见下方"baseline 库选型表"）；离线 SPV 入仓
 - 用户加新 template = 提供 vert.spv + frag.spv + 一个 .template.json 丢进 `assets/shaders/templates/`，**不写 C++**
 - 仍要求用户自己离线编译 GLSL → SPV（用 LunarG SDK 的 `glslangValidator`），不引入 runtime 编译依赖
-- 体量预估：**0.5-1 session**（基础设施 `ShaderTemplateDesc` + `RegisterTemplate` 全有，纯 JSON IO + 启动期扫描）
+- 体量预估：**0.5-1 session**（基础设施 `ShaderTemplateDesc` + `RegisterTemplate` 全有，纯 JSON IO + 启动期扫描）；shader 本体编写工作量另算，按下方"baseline 库选型表"分批
+
+##### G1 子段 · baseline 库选型表（2026-05-24 拍板，15 个 template）
+
+按"shader 角色"横切工业各引擎（Cocos / Lumix / Unity / UE / Godot）后，结合 OE 第一款 Ori-like 2.5D 平台跳跃 + 通用引擎完整度的最小完备子集，确定 baseline 库共 **15 个 template**，与 Lumix surface 数（12）和 Cocos basic+for2d+particle 总数（13）同档。
+
+**第一批 · 现有 6 个迁出**（行为完全等价，无视觉差异 / 回归验收）：
+
+| Template | OE 角色 | 工业对应 |
+|---|---|---|
+| `pbr` | Cook-Torrance + GGX + Smith G2 + IBL split-sum | Cocos builtin-standard / Unity URP Lit |
+| `textured` | unlit + 单贴图 | Cocos builtin-unlit + texture |
+| `toon` | 二阶 cel-shading | Cocos builtin-toon |
+| `rim_light` | fresnel rim glow | (各引擎都用节点拼) |
+| `dissolve` | noise 溶解 + 发光边沿 | URP Dissolve sample |
+| `emissive` | 纯发光（自照亮） | Cocos builtin-unlit emissive 模式 |
+
+**第二批 · 通用引擎缺口补完 6 个**：
+
+| Template | 角色 / 必要性 | 工业对应 |
+|---|---|---|
+| `unlit` | 纯 unlit 无贴图（textured 是 unlit + tex 变体；分离便于 emissive 流水线纯净） | Cocos builtin-unlit / Unity Unlit |
+| `skybox` | 天空盒（Phase 6.5 IBL 已经在用 cubemap，缺独立 Material Inspector 入口） | Cocos pipeline/skybox + advanced/sky / UE M_Sky |
+| `sprite2d` | 2D 精灵专用（带 UV transform + tint）；Ori-like 主角 / 关卡贴图基础 | Cocos for2d/builtin-sprite / Unity URP Sprite-Lit |
+| `particle_cpu` | CPU particle 渲染（与现 VFX 系统配套；当前 VFX 走 hardcode shader） | Cocos particles/builtin-particle / Unity Particle Standard |
+| `particle_trail` | 主角拖尾 / 子弹拖尾必有 | Cocos particles/builtin-particle-trail / Lumix ribbon |
+| `pbr_transparent` | PBR + alpha blend（玻璃 / 半透明物件；与 `pbr` 共享 fragment 但 blend state 不同） | Cocos builtin-standard transparent / Unity URP Lit Transparent |
+
+**第三批 · 通用引擎应有 3 个**：
+
+| Template | 角色 / 必要性 | 工业对应 |
+|---|---|---|
+| `decal` | 弹痕 / 涂鸦 / 地面标记（关卡设计高频；前置需 [[GAP-2026-05-22-editor-coplanar-mesh-z-fight-prevention]] 推论） | Cocos (无 builtin) / Lumix decal + curve_decal / Unity Decal Projector |
+| `water_basic` | 水面（Ori 主题"水池"场景必备；basic = 法线扰动 + 反射近似，不含真 FFT 波形） | Cocos advanced/water / Lumix water |
+| `planar_shadow` | 平面投影阴影（2.5D 角色简易投影成本极低，先于 CSM 落地） | Cocos pipeline/planar-shadow（无现成对应） |
+
+**Tier 3 backlog**（9 个，不进 baseline，撞需求时单独升 P1）：
+
+`hair / skin / cloth / glass / eye / leaf / car_paint / terrain / particle_gpu` —— Ori-like 第一款游戏均用不上；与 [[GAP-2026-05-11-point-light-and-visible-halo]] G3 halo / v1.x · Ori-like 视觉子模式同节奏，按需触发。
+
+**明示排除**（Tier 4，OE 长期不做或路线不在）：
+
+`impostor`（mesh impostor，大场景流式才需）/ `curve_decal`（编辑器工具向单独 milestone）/ `procedural_geom`（runtime mesh gen，跨子系统）/ `cluster_build / cluster_culling`（Forward+ 路线，OE 是 Forward）/ `deferred_lighting`（同上）/ `ssss_blur / float_output_process`（pipeline 内部 pass，不暴露给用户）。
+
+**配套 Inspector UI 能力**（同 G1 落地，无需新 milestone）：
+
+`.template.json` 的 `uniforms[]` 里需要嵌 `editor: { displayName / range / slide / step / type: color / tooltip / parent: <macro> }` 元数据块（参 Cocos `editor: {}` 块），Material Inspector 按既有 schema-first 框架 100% 自动生成面板；macro 守卫联动（如 `parent: USE_NORMAL_MAP`）属 G1 子需求，在第二批/第三批模板真用到时一起接通。
 
 #### G2 · Level 1：编辑器内 GLSL 文本编辑 + runtime SPV 编译（用户撞需求时升级）
 
@@ -1222,7 +1268,8 @@ src/render/
 - **G1 验收**：
   - 把现有 6 个 hardcode template 迁到 `assets/shaders/templates/*.template.json` + `*.spv` 文件，启动期自动注册，行为与改前完全一致（回归 pbr_showcase scene 无视觉差异）
   - 用户手动写一个新的 `.template.json` 引用一对自己编的 SPV，丢进目录，重启编辑器 → Material Inspector 的 templateName Combo 多出新 template；选中后能用 Pick 给 entity Renderable.material
-  - 引擎自带 baseline 库扩到 ≥10 个 template（cloth / hair / clear-coat-pbr / 卡通变体 等）
+  - 引擎自带 baseline 库扩到 **15 个 template**（按上方"baseline 库选型表"三批：6 迁出 + 6 通用缺口 + 3 通用应有；不含 Tier 3 backlog 9 个）
+  - `.template.json` 内 `editor: {}` 元数据块（displayName / range / slide / type: color / tooltip / parent macro 等）能被 Material Inspector 自动消费生成对应控件，第二批 / 第三批模板的 macro 守卫字段按需展示
 - **G2 验收**：编辑器内开新 .glsl 文件 → 编辑 → Save → Material Inspector 自动看到新 template + 自动暴露 uniform 字段为可调控件 → viewport 实时反映
 
 ### 状态
@@ -1233,7 +1280,7 @@ src/render/
   - [[GAP-2026-05-24-editor-asset-browser-create-material-missing]] —— Create Material GAP 的对偶：那条解决"基于现有 template 创建实例"，本条解决"如何加新 template"
   - [[GAP-2026-05-19-pbr-push-constant-exceeds-spec-min]] G1 —— per-instance Material UBO 是 G2 的硬前置
   - `samples/08_custom_shader` —— 当前唯一的 "游戏侧自定义 shader" 演示路径（C++ 路线，未来 G1 落地后这条 sample 应改 demo G1 路径）
-- **归属**：未拍板。G1 候选 v1.2 minor（与 Create Material UI 同期，构成"美术 shader / material 工作流"完整 batch）；G2 候选 Phase 7+ / 待 Material UBO 基础设施 +1 ；G3 backlog 不主动
+- **归属**：G1 候选 v1.2 minor 独立 milestone（v1.1.1 Create Material UI 已 ✅ 单走 patch；本条与 [[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] G2 材质球缩略图同期，构成"美术 shader / material 工作流"完整 batch 更合理）；G2 候选 Phase 7+ / 待 Material UBO 基础设施 +1；G3 backlog 不主动
 
 ---
 
