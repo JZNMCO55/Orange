@@ -28,7 +28,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(OrangeEditor
-    VERSION   1.2.2
+    VERSION   1.2.3
     LANGUAGES CXX
     DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器")
 
@@ -149,6 +149,7 @@ add_executable(OrangeEditor
     EditorTranslateGizmo.cpp
     EditorWidgets.cpp
     AnimFsmFileIO.cpp
+    EditorAssetDropHandler.cpp
     MaterialFileIO.cpp
     ShaderTemplateMetaIO.cpp
     VulkanLoaderShim.cpp

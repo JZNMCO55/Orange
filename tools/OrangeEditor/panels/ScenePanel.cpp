@@ -6,6 +6,7 @@
 #include <orange/engine/core/Log.h>
 
 #include "../ColliderDebugDraw.h"
+#include "../EditorAssetDropHandler.h"  // v1.2.3 patch · viewport ORANGE_ASSET DnD
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
 #include "../EditorRotateGizmo.h"
@@ -274,6 +275,43 @@ void EditorRenderLayer::DrawScenePanel()
             const glm::vec2 imageOrigin(itemMin.x, itemMin.y);
             const glm::vec2 imageSize(static_cast<float>(panelW),
                                       static_cast<float>(panelH));
+
+            // v1.2.3 patch · viewport ORANGE_ASSET DnD：松开时按光标位置
+            // raycast 找命中 entity + apply asset。AcceptBeforeDelivery 默
+            // 认 false → 仅在松开时触发，避免 hover 期间重复 raycast；
+            // hover 高亮反馈留 v1.x minor 拉动。需绑定到 ImGui::Image item，
+            // 故 BeginDragDropTarget 紧跟其后调（gizmo 等后续 widget 不影
+            // 响，因为 DnD 已绑定到 Image 的 ItemID）。
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* p =
+                        ImGui::AcceptDragDropPayload("ORANGE_ASSET"))
+                {
+                    const std::size_t plen = (p->DataSize > 0)
+                        ? static_cast<std::size_t>(p->DataSize) - 1 : 0;
+                    const std::string assetPath(
+                        static_cast<const char*>(p->Data), plen);
+                    if (!assetPath.empty() && panelW > 0 && panelH > 0)
+                    {
+                        const ImVec2 mp = ImGui::GetMousePos();
+                        const float lx = mp.x - itemMin.x;
+                        const float ly = mp.y - itemMin.y;
+                        const float ndcX =
+                            (lx / static_cast<float>(panelW)) * 2.0f - 1.0f;
+                        const float ndcY =
+                            (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
+                        const Orange::Engine::Entity picked =
+                            PickEntityAt(mHost,
+                                         glm::vec2(ndcX, ndcY),
+                                         aspect);
+                        if (picked.IsValid())
+                        {
+                            Orange::Editor::ApplyAssetDropToEntity(
+                                mHost, picked, assetPath);
+                        }
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
 
             // viewport gizmo —— v0.4 c2 translate；c3 起 W/E/R 切换 +
             // rotate / scale。必须在 ImGui::Image 之后、picking 触发之前

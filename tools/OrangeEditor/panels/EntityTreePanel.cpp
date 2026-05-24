@@ -3,6 +3,7 @@
 
 #include "../EditorRenderLayer.h"
 
+#include "../EditorAssetDropHandler.h"  // v1.2.3 patch · ORANGE_ASSET DnD
 #include "../EditorHierarchy.h"
 #include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
@@ -530,6 +531,19 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             Orange::Engine::Entity src{};
             std::memcpy(&src, p->Data, sizeof(src));
             mHost.selection.pendingReparent = {src, entity, true};
+        }
+        // v1.2.3 patch · ORANGE_ASSET DnD：按文件扩展名 apply 到 entity 对
+        // 应 component 字段（.material → Renderable.materialInstance / .mesh
+        // → Renderable.mesh / .wav 等 → AudioSource.sound）。详 EditorAsset
+        // DropHandler.h 调用约定 + 失败语义（宽容口径 silent skip + log）。
+        if (const ImGuiPayload* p =
+                ImGui::AcceptDragDropPayload("ORANGE_ASSET")) {
+            const std::size_t len = (p->DataSize > 0)
+                ? static_cast<std::size_t>(p->DataSize) - 1 : 0;
+            const std::string path(static_cast<const char*>(p->Data), len);
+            if (!path.empty()) {
+                Orange::Editor::ApplyAssetDropToEntity(mHost, entity, path);
+            }
         }
         ImGui::EndDragDropTarget();
     }

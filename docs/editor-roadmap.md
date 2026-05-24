@@ -652,6 +652,32 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.2.3 · Asset 拖拽到实体（Hierarchy + Viewport 双路径）✅
+
+**版本**：v1.2.2 ✅ 后第三个 patch
+**落地日期**：2026-05-24
+
+**范围**：补完 Asset Browser → 实体的拖拽工作流。以前 DnD source 只能在 Asset Browser 起拖，DnD target 只在 Inspector 字段；本 patch 加：(A) **Hierarchy 行**接受 ORANGE_ASSET payload + (B) **Viewport** 接受 + EditorPicking raycast 找命中 entity；按文件扩展名（`.material` / `.mesh` / `.obj` / `.wav` / `.ogg` / `.mp3` / `.flac`）自动分派到对应 component 字段，全部走 `SetFieldValueCommand<std::string>` 命令栈支持 Undo / Redo。
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `tools/OrangeEditor/EditorAssetDropHandler.{h,cpp}` | 新增单点路由 `ApplyAssetDropToEntity(host, target, assetPath)`，复用 EditorRenderLayer "Pick to Renderable.*" 同款 lambda + 命令栈 |
+| `tools/OrangeEditor/panels/EntityTreePanel.cpp` | 现有 BeginDragDropTarget（行 527）扩接受 ORANGE_ASSET payload → 调 helper |
+| `tools/OrangeEditor/panels/ScenePanel.cpp` | ImGui::Image 之后加 BeginDragDropTarget + AcceptDragDropPayload(ORANGE_ASSET) → 算 NDC + PickEntityAt → 调 helper |
+| `tools/OrangeEditor/CMakeLists.txt` | 加 EditorAssetDropHandler.cpp 编译列表 + VERSION 1.2.2 → 1.2.3 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.3-acceptance-checklist.md`
+
+**与引擎关系**：纯编辑器侧改动；CMake VERSION 1.2.2 → 1.2.3。
+
+**Critical Path**：是（v1.2.2 lazy create 之后 Asset Browser → 实体的工作流闭环全打通 —— 美术 / 关卡设计师"不写代码完成日常工作"承诺再补一拼图）
+
+**不在本 patch 范围**（明示）：
+- Hover 期间视觉高亮反馈（光标拖过 viewport 时被命中 entity 实时描边）→ v1.x minor 与 outline 系统同期
+- Asset Browser 拖动时缩略图反馈 → v1.x minor 依赖 OR offscreen RT
+
 ### v1.2.2 · 新建材质 lazy create live instance ✅
 
 **版本**：v1.2.1 ✅ 后第二个 patch
