@@ -10,6 +10,7 @@
 #include "EditorHierarchy.h"
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
+#include "MaterialFileIO.h"  // v1.1.1 · Asset Browser Create Material modal
 #include "import/ImportDispatcher.h"
 #include "import/MetaSidecar.h"
 #include "theme/EditorTheme.h"
@@ -1221,6 +1222,49 @@ void EditorRenderLayer::ApplyPendingImports()
 namespace
 {
 
+// v1.1.1 · Create Material modal 跨帧状态。
+//
+// 状态机：BeginPopupContextWindow → Create → Material menu item 内只
+// 设 sPendingOpenCreateMaterial = true（不直接 OpenPopup，因 menu 处
+// 于 context popup 的 ID stack 内，嵌套 OpenPopup 会跟着 context popup
+// 一起被关闭，与 AboutOrangeEditor 的 sPendingOpenAbout pattern 同源）；
+// 下一帧 DrawAssetsPanel 内 ImGui::End() 之后消费 pending 标志位 → 调
+// OpenPopup + BeginPopupModal 在全局 viewport-level ID stack 绘制。
+//
+// 文件名冲突走二级 modal：主 modal 的 Create 按钮检测 fs::exists 命中
+// 时 set sPendingOpenOverwriteConfirm = true + 关主 modal；下一帧绘制
+// overwrite 二级 modal 询问。
+bool sPendingOpenCreateMaterial   = false;
+bool sPendingOpenOverwriteConfirm = false;
+char sNewMaterialFilenameBuf[128] = "new_material.material";
+std::vector<std::string> sNewMaterialTemplateNames;
+int  sNewMaterialTemplateIdx      = 0;
+// 落盘目标完整路径（browserCurrentDir + "/" + filename），主 modal 与
+// overwrite 二级 modal 共用，避免二级 modal 重复拼路径产生歧义。
+std::string sNewMaterialTargetPath;
+
+// 内部 helper：执行 WriteMaterialFile + 落盘成功时切 selectedAssetPath 让
+// Material Inspector 子模式立刻接管；失败仅 log，不弹错误 modal（与
+// MaterialFileIO 既有失败口径一致——stderr 已经记录）。
+void CommitNewMaterialFile(EditorAssetContext& assets,
+                           const std::string&  targetPath,
+                           const std::string&  templateName)
+{
+    Orange::Editor::Material::MaterialFileData data;
+    data.templateName = templateName;
+    const bool ok = Orange::Editor::Material::WriteMaterialFile(
+        targetPath, data);
+    if (ok) {
+        assets.selectedAssetPath = targetPath;
+        ORANGE_LOG_INFO("Asset Browser: created material '{}' "
+                        "(template '{}')",
+                        targetPath, templateName);
+    } else {
+        ORANGE_LOG_ERROR("Asset Browser: failed to write material '{}'",
+                         targetPath);
+    }
+}
+
 // 递归画 dir 自身 + 所有子目录 tree node。click 时把 dir 写入
 // `assets.browserCurrentDir` 让右侧 file list 刷新。
 void DrawAssetTreeRecursive(EditorAssetContext& assets, const std::string& dir)
@@ -1525,6 +1569,210 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
             ImGui::SetTooltip("%s", path.c_str());
         }
     }
+
+    // v1.1.1 · 面板空白处右键 "Create" 菜单（关闭
+    // GAP-2026-05-24-editor-asset-browser-create-material-missing G1）。
+    // NoOpenOverItems：鼠标位于上面任何 Selectable 上时不打开本 popup，让
+    // 单文件右键照旧走 BeginPopupContextItem（行 1362）的 Pick / Reimport
+    // 菜单。两套右键互不打架。
+    if (ImGui::BeginPopupContextWindow("##asset_list_ctx",
+            ImGuiPopupFlags_MouseButtonRight
+            | ImGuiPopupFlags_NoOpenOverItems))
+    {
+        if (ImGui::BeginMenu("Create"))
+        {
+            const bool canMakeMaterial = (assets.pMaterials != nullptr);
+            ImGui::BeginDisabled(!canMakeMaterial);
+            if (ImGui::MenuItem("Material"))
+            {
+                // 重置 buffer + 拉 template 列表 + 锁默认 pbr index。
+                // pending 标志位下一帧由 DrawAssetsPanel 末尾消费。
+                std::snprintf(sNewMaterialFilenameBuf,
+                              sizeof(sNewMaterialFilenameBuf),
+                              "new_material.material");
+                sNewMaterialTemplateNames =
+                    assets.pMaterials->GetTemplateNames();
+                std::sort(sNewMaterialTemplateNames.begin(),
+                          sNewMaterialTemplateNames.end());
+                sNewMaterialTemplateIdx = 0;
+                for (std::size_t i = 0;
+                     i < sNewMaterialTemplateNames.size(); ++i)
+                {
+                    if (sNewMaterialTemplateNames[i] == "pbr")
+                    {
+                        sNewMaterialTemplateIdx = static_cast<int>(i);
+                        break;
+                    }
+                }
+                sPendingOpenCreateMaterial = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// v1.1.1 · 主 Create Material modal。filename + templateName Combo +
+// Create / Cancel。Create 命中既存文件时关本 modal、set
+// sPendingOpenOverwriteConfirm，下一帧由二级 modal 接管。
+void DrawCreateMaterialModal(EditorAssetContext& assets)
+{
+    constexpr const char* kPopupId = "Create Material##create_mat";
+    if (sPendingOpenCreateMaterial)
+    {
+        ImGui::OpenPopup(kPopupId);
+        sPendingOpenCreateMaterial = false;
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(kPopupId, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize
+            | ImGuiWindowFlags_NoSavedSettings))
+    {
+        return;
+    }
+
+    // 宽度按字符数派生（v0.4.5 红线：禁字面像素）。约 30 个字符 + 余量
+    // 够装下典型 .material 文件名 (`new_material.material` = 21 字符)。
+    const float kInputW =
+        ImGui::CalcTextSize("M").x * 30.0f;
+
+    ImGui::TextUnformatted("Filename:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(kInputW);
+    ImGui::InputText("##new_mat_filename",
+                     sNewMaterialFilenameBuf,
+                     sizeof(sNewMaterialFilenameBuf));
+
+    ImGui::TextUnformatted("Template:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(kInputW);
+    if (!sNewMaterialTemplateNames.empty())
+    {
+        const int clampedIdx = std::clamp<int>(
+            sNewMaterialTemplateIdx, 0,
+            static_cast<int>(sNewMaterialTemplateNames.size()) - 1);
+        const char* curName = sNewMaterialTemplateNames[clampedIdx].c_str();
+        if (ImGui::BeginCombo("##new_mat_template", curName))
+        {
+            for (std::size_t i = 0;
+                 i < sNewMaterialTemplateNames.size(); ++i)
+            {
+                const bool sel =
+                    (static_cast<int>(i) == sNewMaterialTemplateIdx);
+                if (ImGui::Selectable(
+                        sNewMaterialTemplateNames[i].c_str(), sel))
+                {
+                    sNewMaterialTemplateIdx = static_cast<int>(i);
+                }
+                if (sel) { ImGui::SetItemDefaultFocus(); }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    else
+    {
+        ImGui::TextDisabled("(no templates registered)");
+    }
+
+    // 完整目标路径预览（灰字）。
+    const std::string targetPath = assets.browserCurrentDir
+                                 + "/"
+                                 + std::string{sNewMaterialFilenameBuf};
+    ImGui::Separator();
+    ImGui::TextDisabled("Path: %s", targetPath.c_str());
+    ImGui::Separator();
+
+    const bool nameNonEmpty =
+        (std::strlen(sNewMaterialFilenameBuf) > 0);
+    const bool templateValid =
+        !sNewMaterialTemplateNames.empty()
+        && (sNewMaterialTemplateIdx >= 0)
+        && (sNewMaterialTemplateIdx
+            < static_cast<int>(sNewMaterialTemplateNames.size()));
+    const bool canCreate = nameNonEmpty && templateValid;
+
+    ImGui::BeginDisabled(!canCreate);
+    if (ImGui::Button("Create", ImVec2(120, 0)))
+    {
+        sNewMaterialTargetPath = targetPath;
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const bool exists =
+            fs::exists(sNewMaterialTargetPath, ec) && !ec;
+        if (exists)
+        {
+            // 命中既存 → 关本 modal + 触发 overwrite 二级 modal。
+            sPendingOpenOverwriteConfirm = true;
+            ImGui::CloseCurrentPopup();
+        }
+        else
+        {
+            CommitNewMaterialFile(
+                assets,
+                sNewMaterialTargetPath,
+                sNewMaterialTemplateNames[sNewMaterialTemplateIdx]);
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+    {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+// v1.1.1 · 文件名冲突时的二级 modal。Overwrite 直接覆盖落盘；Cancel
+// 返回（不重弹主 modal，让用户重新右键 Create——与 Cocos 一致）。
+void DrawOverwriteConfirmModal(EditorAssetContext& assets)
+{
+    constexpr const char* kPopupId = "Overwrite?##overwrite_mat";
+    if (sPendingOpenOverwriteConfirm)
+    {
+        ImGui::OpenPopup(kPopupId);
+        sPendingOpenOverwriteConfirm = false;
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(kPopupId, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize
+            | ImGuiWindowFlags_NoSavedSettings))
+    {
+        return;
+    }
+
+    ImGui::TextUnformatted("文件已存在：");
+    ImGui::TextDisabled("%s", sNewMaterialTargetPath.c_str());
+    ImGui::Separator();
+    ImGui::TextWrapped("Overwrite 将覆盖现有 .material（不可 undo）；"
+                       "Cancel 返回上一步。");
+    ImGui::Separator();
+
+    const bool templateValid =
+        !sNewMaterialTemplateNames.empty()
+        && (sNewMaterialTemplateIdx >= 0)
+        && (sNewMaterialTemplateIdx
+            < static_cast<int>(sNewMaterialTemplateNames.size()));
+
+    ImGui::BeginDisabled(!templateValid);
+    if (ImGui::Button("Overwrite", ImVec2(120, 0)))
+    {
+        CommitNewMaterialFile(
+            assets,
+            sNewMaterialTargetPath,
+            sNewMaterialTemplateNames[sNewMaterialTemplateIdx]);
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+    {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 }  // anonymous namespace
@@ -1618,6 +1866,12 @@ void EditorRenderLayer::DrawAssetsPanel()
     ImGui::EndChild();
 
     ImGui::End();
+
+    // v1.1.1 · Create Material modal + overwrite 二级 modal。放在 End()
+    // 之后让 ID stack 处于 viewport-level（与 AboutOrangeEditor 同款），
+    // 避免 popup 父级挂在 "Assets" 窗口而被其布局影响。
+    DrawCreateMaterialModal(assets);
+    DrawOverwriteConfirmModal(assets);
 }
 
 // v0.5 c2：底部 tab 容器加 Animation 占位面板（Assets / Console / Animation

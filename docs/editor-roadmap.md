@@ -652,6 +652,28 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.1.1 · Create Material UI ✅
+
+**版本**：v1.1 ✅ 后的第一个 patch milestone（按 [[feedback-post-v1-versioning]] 纪律走 v1.x.y）
+**落地日期**：2026-05-24
+
+**范围**：单一 P1 friction GAP 修复——Asset Browser 缺"新建材质"GUI 入口。补完 v1.1 "外部资产进来" 之后的对偶能力"项目内从零创建"。
+
+| GAP | 优先级 | 改动落点 |
+|------|--------|----------|
+| `editor-asset-browser-create-material-missing` G1 | P1 | `EditorRenderLayer.cpp::DrawAssetFileList` 末尾挂 `BeginPopupContextWindow` 弹 `Create → Material` 菜单；DrawAssetsPanel 末尾绘制主 modal（filename + template Combo + Path 预览 + Create/Cancel）+ overwrite 二级 modal；落盘走 `MaterialFileIO::WriteMaterialFile` + 自动切 `selectedAssetPath` 让 Material Inspector 子模式接管 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.1.1-acceptance-checklist.md`
+
+**与引擎关系**：零引擎侧改动；全部改动落 `tools/OrangeEditor/EditorRenderLayer.cpp` 一个文件；不引入新公共 surface（仅 UI 入口，底层 API 全已存在）。CMake VERSION 1.1.0 → 1.1.1。
+
+**Critical Path**：否（patch，friction 修复）
+
+**不在本 patch 范围**（明示）：
+- GAP G2 自动后缀编号路径——采用 overwrite 询问取代（与 Cocos / Unity 工业惯例一致）
+- GAP G3 顺路 `Create → Scene` / `Create → Folder`——单独 v1.1.x 顺位或 v1.2 minor 一起做
+- `GAP-2026-05-24-material-template-library-and-custom-hook`（自动扫描 + 用户自定义 template 入口）——独立 minor milestone
+
 ### v1.x · 长尾（按需触发，不进 v1.0 critical path）
 
 | 条目 | 依赖 |

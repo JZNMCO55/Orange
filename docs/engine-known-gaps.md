@@ -1156,6 +1156,7 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-24
+- **关闭**：2026-05-24（同 session 落地 G1，OrangeEditor v1.1.1 milestone）
 - **优先级**：P1（friction）—— 不阻塞功能（A/B/C workaround 可用），但严重破坏 "美术不写代码" 心智契约；Phase 6 编辑器闭环承诺的口径上属漏项
 - **关联**：v1.1 DCC import pipeline ✅ 后浮现的对偶缺口（"外部进来" vs "内部从零创建"）；候选 v1.1.1 patch milestone 或 v1.2 minor（与 Inspector 可写 import params / Create Scene / Create Folder 同期）
 - **归属**：未拍板分配到具体 milestone；按 [[feedback-post-v1-versioning]] 纪律，单独 P1 friction 走 v1.0.xx batch（OrangeEditor 已 stable，沿用 v1.1.x 节奏），若同期撞上 G3 顺路 deliverables 升 v1.2 minor
@@ -1238,6 +1239,15 @@ src/render/
 
 ## 处理记录
 
+- **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
+  - **入口**：`DrawAssetFileList` 末尾挂 `BeginPopupContextWindow("##asset_list_ctx", MouseButtonRight | NoOpenOverItems)` 弹 `Create → Material` 嵌套菜单。`NoOpenOverItems` 让单文件右键照旧走既有 `BeginPopupContextItem`（行 1362 Pick / Reimport 菜单）不冲突
+  - **状态机**：anonymous namespace file-scope `sPendingOpenCreateMaterial` / `sPendingOpenOverwriteConfirm` 标志位与 `AboutOrangeEditor` 同款 pending-pattern——menu item 内只 set 标志位（不直接 OpenPopup，因 menu 处于 context popup 的 ID stack 内嵌套 OpenPopup 会跟着 context popup 一起被关闭），下一帧 `DrawAssetsPanel` 内 `ImGui::End()` **之后**消费标志位 → `OpenPopup + BeginPopupModal` 在 viewport-level ID stack 绘制
+  - **主 modal**：filename `InputText`（默认 `new_material.material`，长度 128 缓冲）+ templateName `BeginCombo`（候选喂自 `MaterialSystem::GetTemplateNames()`，按字母序排序，默认锁定 `pbr` index）+ Path 灰字预览（`browserCurrentDir + "/" + filename`）+ `Create / Cancel` 按钮。Create 命中 `fs::exists` → set `sPendingOpenOverwriteConfirm = true` 关本 modal 让二级 modal 接管；不命中 → 直接 `MaterialFileIO::WriteMaterialFile({templateName, {}, {}})` 落盘 + 切 `assets.selectedAssetPath = newPath` 让 Material Inspector 子模式立刻接管
+  - **overwrite 二级 modal**：显示完整目标路径 + `Overwrite / Cancel` 按钮；Cancel 仅关 modal 不重弹主 modal（用户重新右键即可，与 Cocos 一致）
+  - **CommitNewMaterialFile helper**：抽出主 / 二级 modal 共用的"落盘 + selectedAssetPath 切换 + ORANGE_LOG_INFO/ERROR"代码，避免双份
+  - **未做** G2 自动后缀编号（用 overwrite 询问取代）/ G3 顺路 `Create → Scene` / `Create → Folder`（独立 v1.1.x 或 v1.2 minor）
+  - 编译：`OrangeEditor.exe` 干净链接（warning C4996 `strncpy` 改用 `std::snprintf` 解决）；invariant lint + drift 全绿
+  - 关键改动文件：`tools/OrangeEditor/EditorRenderLayer.cpp`（include MaterialFileIO + statics + 2 个 modal helper + DrawAssetFileList 末尾右键菜单 + DrawAssetsPanel 末尾 modal 调用，~200 行新增）/ `tools/OrangeEditor/CMakeLists.txt`（VERSION 1.1.0 → 1.1.1）/ `docs/editor-roadmap.md`（新增 v1.1.1 节）/ `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.1.1-acceptance-checklist.md`（新增）/ `vendor/Orange-Wiki/case-studies/orange-engine/index.md`（时间线 + 计数）
 - **GAP-2026-05-22-samples-cube-mesh-winding-bug**（2026-05-23 落地）：6 个 sample 的 `MakeCubeMesh` 内 indices 从 CW `(0, 2, 1, 0, 3, 2)` per face 改为 CCW `(0, 1, 2, 0, 2, 3)`，与 Pipeline 主 pass `FrontFace=CCW + CullMode=Back` 约定对齐——朝外面是 front、朝内面被 cull，cube 视觉实心可见而不是"穿透看到内壁"。`samples/04_3d_mesh/main.cpp` 顶部 line 67-70 的过期注释（"world-CW per triangle，经 Y-flip 后 NDC-CCW"）也一并修订为新约定描述 + line 145-146 同步。其余 5 个 sample (04_bloom / 09 / 10 / 11 / 12) 没有同款过期注释只有 indices，改 indices + 加单行 "CCW winding 与 Pipeline ... 对齐 (参 GAP)" 注释。**不动 plane**（sample 03 / 05-08 / 12 的 `0, 2, 1, 0, 3, 2` 是 plane 不是 cube，不在本 GAP 范围；plane 视觉无报错的 user feedback，winding 状态留待第三方 plane bug 触发时再处理）。ctest 43/43 + invariant lint + drift 全绿；用户视觉验收通过（cube 实心可见，6 面交替露出无穿透）。关键改动文件：`samples/04_3d_mesh/main.cpp` / `samples/04_3d_mesh_with_bloom/main.cpp` / `samples/09_vfx_demo/main.cpp` / `samples/10_thirty_seconds_demo/main.cpp` / `samples/11_save_load_demo/main.cpp` / `samples/12_layer_partition_demo/main.cpp`
 - **GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention**（2026-05-23 落地 G1）：新增 `tools/OrangeEditor/CoplanarDetector.{h,cpp}` —— `DetectCoplanar(host, entity, eps=0.001m, maxDist=10m)` 遍历 selected 周围 R 米内挂 Renderable + Transform 的其他 entity，对每对面（self 的 6 个面分别 vs other 的对偶面：top↔bottom / left↔right / front↔back）做 ε 共面 + 另两轴 AABB 重叠双条件检测，命中返回 Hit{selfFace, otherEntity, otherName, otherFace, gap}。
   - **共面定义**：仅同轴贴边不算 z-fight 风险，必须**另两轴投影区间有交集**（FacesOverlap）才算"真撞上面对面 z-fight"；避免误报远端独立 entity 在某 y 坐标偶然相同的情况
