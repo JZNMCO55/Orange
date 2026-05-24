@@ -94,9 +94,13 @@ bool Pipeline::Impl::RecordSkyPass(const glm::mat4& invViewProj,
     att.mpView          = hdrColor->GetDefaultView();
     att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
     att.mStoreOp        = Orange::Rhi::StoreOp::Store;
-    att.mClear.mColor[0] = 0.05f;
-    att.mClear.mColor[1] = 0.07f;
-    att.mClear.mColor[2] = 0.10f;
+    // v1.3.0 中性化：用 sceneClearColor 字段（公共 API SetSceneClearColor
+    // 控制）取代硬写值。sky shader 会全屏覆盖，此处 clear 仅用于驱动 spec
+    // requirement，不影响最终视觉；但与主 pass clear 用同一字段值能让
+    // sky 关 / 烘焙失败 fallback 路径视觉与主 pass clear 一致。
+    att.mClear.mColor[0] = sceneClearColor.x;
+    att.mClear.mColor[1] = sceneClearColor.y;
+    att.mClear.mColor[2] = sceneClearColor.z;
     att.mClear.mColor[3] = 1.0f;
 
     Orange::Rhi::RenderingDesc rd{};
@@ -191,12 +195,12 @@ bool Pipeline::Impl::RecordProceduralSkyPass(const glm::mat4& invViewProj,
     att.mpView          = hdrColor->GetDefaultView();
     att.mLoadOp         = Orange::Rhi::LoadOp::Clear;
     att.mStoreOp        = Orange::Rhi::StoreOp::Store;
-    // Sky pass 入口 clear —— shader 会全覆盖，clear 值仅用于驱动 spec
-    // requirement，不影响最终视觉。两路径写值统一为深蓝 (0.05, 0.07, 0.10)
-    // 作中性默认（与 shipping ClearColor 一致），避免编辑器审美污染入口。
-    att.mClear.mColor[0] = 0.05f;
-    att.mClear.mColor[1] = 0.07f;
-    att.mClear.mColor[2] = 0.10f;
+    // v1.3.0 中性化：用 sceneClearColor 字段（公共 API SetSceneClearColor
+    // 控制）。procedural sky 路径与 cubemap sky 路径走同一字段，关 sky /
+    // fallback 时与主 pass clear 视觉一致。
+    att.mClear.mColor[0] = sceneClearColor.x;
+    att.mClear.mColor[1] = sceneClearColor.y;
+    att.mClear.mColor[2] = sceneClearColor.z;
     att.mClear.mColor[3] = 1.0f;
 
     // Dummy depth attachment（pipeline 已声明 D32 format，此处必须配对）。

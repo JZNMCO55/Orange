@@ -283,6 +283,47 @@ public:
     // 值（1024 / 3×3 PCF / 0.005 depthBias / 0.01 normalBias）。
     void SetShadowConfig(const ShadowConfig& config) noexcept;
 
+    // 设置 dummy IBL ambient（没挂 EnvironmentComponent / cubemap 未烘焙时
+    // PBR 物体仍能拿到的全局 ambient 量级，写入 dummy irradiance cube 的所有
+    // 1×1 face 像素）。engine 默认 (0, 0, 0)（中性化：相当于无 ambient
+    // fallback，PBR 物体仅靠 direct light 着色，暗面纯黑），与 OrangeEngine
+    // "Game-specific concepts forbidden in engine" + OrangeRender API 中性化
+    // 原则同节奏。
+    //
+    // 典型调用方（编辑器侧）：lazy 创建 Pipeline 之后、InitializeOffscreen
+    // 之前调本接口提到非 0 量级，避免"cube 暗面全黑/像透明"UX 陷阱：
+    //   * (0.5, 0.5, 0.5)：OrangeEditor 默认值，暗面 ~50% baseColor
+    //   * (0.25, 0.25, 0.25)：保守值（Unity URP / Cocos default 量级）
+    //
+    // 调用时机与行为：
+    //   * Initialize 之前调：仅设字段；Initialize 时按本字段填 dummy 数据
+    //   * Initialize 之后调：设字段 + 内部 cmd.Begin/End/Submit/WaitIdle
+    //     一次性重填 dummyIrradianceCube（小开销，~64B copy）；**必须**在
+    //     帧外调（首帧之前 / 两次 Render 之间），帧内调可能撞 validation
+    //
+    // 不影响 BakeIblFromWorld / SetIblTextures 接通的真 IBL —— 那些路径完全
+    // 取代 dummy，本字段仅在三纹理为 dummy 时生效。
+    //
+    // r / g / b 取 [0, 8] 量级（half float 正常数范围），超出范围按 IEEE
+    // half 自然截断；NaN / Inf 未定义。alpha 隐含 1.0。
+    void SetDummyIblAmbient(float r, float g, float b) noexcept;
+
+    // 设置主 pass 入口 clear color（HDR linear space，alpha 隐含 1.0）。
+    // engine 默认 (0.05, 0.07, 0.10) —— shipping 中性深蓝灰，与 sample 历史
+    // 视觉一致。
+    //
+    // 典型调用方（编辑器侧）：(0.12, 0.12, 0.13) Cocos 风中性灰，让 viewport
+    // 与 main panel 深炭灰拉开亮度差便于辨识渲染区。
+    //
+    // 与 sky pass 配合：
+    //   * sky 开 + cubemap 烘焙好 → sky shader 全屏覆盖，clear 仅用于
+    //     driver spec requirement，不影响最终视觉
+    //   * sky 关 / cubemap 未烘 → clear 直接作为背景色显示
+    //
+    // 任意时刻调用都安全（不动 GPU 资源，仅改下一帧 attachment desc）；
+    // 未 Initialize 时也接受（字段持下来，Initialize 后生效）。
+    void SetSceneClearColor(float r, float g, float b) noexcept;
+
     // 切换 IBL 三纹理（替换 Initialize 时注入的全局 dummy）。典型用法：
     // EnvironmentComponent 资产管线把 HDR 环境烘焙成 irradiance /
     // prefiltered specular cube + 一次性烘 BRDF LUT 之后，调用本接口接通

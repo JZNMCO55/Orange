@@ -684,93 +684,74 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             return ResultCode::InternalError;
         }
 
-        // 一次性 staging buffer：每像素 RGBA16Float = 8 字节。
-        //   offset  0..7  : 中性灰 ambient (0.25, 0.25, 0.25, 1.0)，给
-        //                   irradiance cube 用——没挂 EnvironmentComponent
-        //                   时 PBR 物体仍有可见 ambient（与 Cocos / Unity URP
-        //                   默认 ambient 量级一致），观感是"灰白塑料"，不
-        //                   是仅 direct light 的"半灰"
-        //   offset  8..15 : 全 0，给 prefiltered cube + BRDF LUT 用
-        //                   （specular 反射保持 0 避免没环境时出现"灰雾"
-        //                   破坏 PBR 数学，BRDF LUT 全 0 等同 IBL 总贡献
-        //                   被两项乘子双 0 抹平）
-        Orange::Rhi::BufferDesc stagingDesc{};
-        stagingDesc.mSize        = 64;
-        stagingDesc.mUsage       = Orange::Rhi::BufferUsage::Transfer;
-        stagingDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
-        auto staging = rhi.CreateBuffer(stagingDesc);
-        if (!staging)
+        // 两次独立 cmd submit：
+        //   (1) FillDummyIblIrradiance —— 按 impl.dummyIblAmbient 字段（公共
+        //       API SetDummyIblAmbient 设置，默认 (0,0,0) engine 中性化）填
+        //       irradiance cube 的 6 face × 1×1 half-RGBA 像素
+        //   (2) 下面 inline 段 —— 把 prefiltered cube + BRDF LUT 一次性填全 0
+        //       （specular 反射保持 0 避免没环境时"灰雾"破坏 PBR 数学，BRDF
+        //       LUT 全 0 等同 IBL 总贡献被两项乘子双 0 抹平）；这两条 dummy
+        //       永远是 0，不参与公共 API 控制
+        //
+        // (1) (2) 走两次独立 Begin/End/Submit/WaitIdle，是为了让 (1) helper
+        // 在 SetDummyIblAmbient 运行时再调时也走相同 cmd lifecycle 路径，
+        // 避免共享 staging buffer 跨函数边界的生命周期问题。
+        if (!impl.FillDummyIblIrradiance(/*pBootCmd=*/nullptr))
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL staging buffer 创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL irradiance 填充失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        Orange::Rhi::BufferDesc zeroStagingDesc{};
+        zeroStagingDesc.mSize        = 8;
+        zeroStagingDesc.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+        zeroStagingDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        auto zeroStaging = rhi.CreateBuffer(zeroStagingDesc);
+        if (!zeroStaging)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL prefilter/BRDF staging buffer 创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
         {
-            void* mapped = staging->Map();
+            void* mapped = zeroStaging->Map();
             if (mapped == nullptr)
             {
-                ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL staging Map 失败");
+                ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL prefilter/BRDF staging Map 失败");
                 Shutdown();
                 return ResultCode::InternalError;
             }
-            std::memset(mapped, 0, 64);
-#if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
-            // GAP-2026-05-22 editor-default-ibl-missing-causes-black-pbr-faces：
-            // dummy IBL ambient = 0.5 灰（v1.0.1 c5 由 0.25 → 0.5 ）—— 编辑器
-            // 路径下未挂 EnvironmentComponent 时给 PBR 暗面 ~50% baseColor 的
-            // ambient 暖橙过渡，避免 "cube 暗面全黑/像透明" UX 陷阱。0.25
-            // 实测验收时仍偏暗（暗面 ~25% baseColor，对零基础用户判定为
-            // "黑"）。
-            //
-            // shipping 构建（ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF）仍走
-            // ambient = (0,0,0) 路径，engine 默认中性原则不动 —— 见
-            // GAP-2026-05-19-editor-aux-passes-in-engine-pipeline 处理记录。
-            //
-            // 0x3800 = 0.5 half；0x3C00 = 1.0 half。LE 平台直写 uint16；MSVC
-            // + RTX 5070 Ti 都是 LE，需要 BE 平台时再换 byteswap。
-            const std::uint16_t halfPx[4] = {
-                std::uint16_t{0x3800},   // R = 0.5
-                std::uint16_t{0x3800},   // G = 0.5
-                std::uint16_t{0x3800},   // B = 0.5
-                std::uint16_t{0x3C00},   // A = 1.0
-            };
-            std::memcpy(mapped, halfPx, 8);
-#endif
-            staging->Unmap();
+            std::memset(mapped, 0, 8);
+            zeroStaging->Unmap();
         }
 
-        // 用 offscreenCmd 跑一次性 transition + copy；本帧前 offscreenCmd
-        // 还没进入 frame loop，可以独立 Begin/End/Submit 一次再 reset 回去。
         auto& cmd = *impl.offscreenCmd;
         if (cmd.Begin() != Orange::ResultCode::Success)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL cmd.Begin 失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL prefilter/BRDF cmd.Begin 失败");
             Shutdown();
             return ResultCode::InternalError;
         }
 
-        auto initCube = [&](Orange::Rhi::RHITexture& tex, std::uint64_t srcOffset) {
-            cmd.TransitionTexture(tex,
-                                  Orange::Rhi::TextureLayout::Undefined,
-                                  Orange::Rhi::TextureLayout::TransferDst);
-            for (std::uint32_t layer = 0; layer < 6; ++layer)
-            {
-                Orange::Rhi::BufferTextureCopyRegion r{};
-                r.mBufferOffset = srcOffset;
-                r.mMipLevel     = 0;
-                r.mArrayLayer   = layer;
-                r.mWidth        = 1;
-                r.mHeight       = 1;
-                r.mDepth        = 1;
-                cmd.CopyBufferToTexture(*staging, tex, r);
-            }
-            cmd.TransitionTexture(tex,
-                                  Orange::Rhi::TextureLayout::TransferDst,
-                                  Orange::Rhi::TextureLayout::ShaderReadOnly);
-        };
-
-        initCube(*impl.dummyIrradianceCube,  /*srcOffset=*/0);  // ambient 灰
-        initCube(*impl.dummyPrefilteredCube, /*srcOffset=*/8);  // 全 0
+        // prefiltered cube 6 face × 1×1 全 0
+        cmd.TransitionTexture(*impl.dummyPrefilteredCube,
+                              Orange::Rhi::TextureLayout::Undefined,
+                              Orange::Rhi::TextureLayout::TransferDst);
+        for (std::uint32_t layer = 0; layer < 6; ++layer)
+        {
+            Orange::Rhi::BufferTextureCopyRegion r{};
+            r.mBufferOffset = 0;
+            r.mMipLevel     = 0;
+            r.mArrayLayer   = layer;
+            r.mWidth        = 1;
+            r.mHeight       = 1;
+            r.mDepth        = 1;
+            cmd.CopyBufferToTexture(*zeroStaging, *impl.dummyPrefilteredCube, r);
+        }
+        cmd.TransitionTexture(*impl.dummyPrefilteredCube,
+                              Orange::Rhi::TextureLayout::TransferDst,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
 
         // 2D BRDF LUT —— 单 layer 单 copy，全 0
         cmd.TransitionTexture(*impl.dummyBrdfLut,
@@ -778,13 +759,13 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                               Orange::Rhi::TextureLayout::TransferDst);
         {
             Orange::Rhi::BufferTextureCopyRegion r{};
-            r.mBufferOffset = 8;
+            r.mBufferOffset = 0;
             r.mMipLevel     = 0;
             r.mArrayLayer   = 0;
             r.mWidth        = 1;
             r.mHeight       = 1;
             r.mDepth        = 1;
-            cmd.CopyBufferToTexture(*staging, *impl.dummyBrdfLut, r);
+            cmd.CopyBufferToTexture(*zeroStaging, *impl.dummyBrdfLut, r);
         }
         cmd.TransitionTexture(*impl.dummyBrdfLut,
                               Orange::Rhi::TextureLayout::TransferDst,
@@ -792,17 +773,17 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
 
         if (cmd.End() != Orange::ResultCode::Success)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL cmd.End 失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL prefilter/BRDF cmd.End 失败");
             Shutdown();
             return ResultCode::InternalError;
         }
         if (rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL SubmitCommandList 失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: dummy IBL prefilter/BRDF SubmitCommandList 失败");
             Shutdown();
             return ResultCode::InternalError;
         }
-        // 等待 copy 落盘后再让 staging buffer 出作用域；0.x 阶段 WaitIdle 够用
+        // 等待 copy 落盘后再让 zeroStaging 出作用域；0.x 阶段 WaitIdle 够用
         impl.renderDevice->WaitIdle();
 
         // 把 binding 2/3/4 写入 mainDescSet。hdrSampler 在 7.x 早段已创建，
@@ -904,6 +885,90 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
     }
 
     return Result<void, ResultCode>{};
+}
+
+bool Pipeline::Impl::FillDummyIblIrradiance(Orange::Rhi::RHICommandList* /*pBootCmd*/)
+{
+    // 当前实现：忽略 pBootCmd（caller 即使传入 cmd 也内部自管 lifecycle，让
+    // staging buffer 的生命周期紧贴 Submit + WaitIdle）。pBootCmd 参数保留
+    // 作为未来"批量初始化打包到外层 cmd"的预留入口。
+    if (renderDevice == nullptr || dummyIrradianceCube == nullptr || offscreenCmd == nullptr)
+    {
+        return false;
+    }
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    Orange::Rhi::BufferDesc stagingDesc{};
+    stagingDesc.mSize        = 8;
+    stagingDesc.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+    stagingDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+    auto staging = rhi.CreateBuffer(stagingDesc);
+    if (!staging)
+    {
+        ORANGE_LOG_ERROR("Pipeline::FillDummyIblIrradiance: staging buffer 创建失败");
+        return false;
+    }
+    {
+        void* mapped = staging->Map();
+        if (mapped == nullptr)
+        {
+            ORANGE_LOG_ERROR("Pipeline::FillDummyIblIrradiance: staging Map 失败");
+            return false;
+        }
+        // 4 个 half float：RGB 从 dummyIblAmbient 字段算，A 固定 1.0（half
+        // 0x3C00）。LE 平台直写 uint16；MSVC + RTX 5070 Ti 都是 LE，需要 BE
+        // 平台时再换 byteswap。
+        const std::uint16_t halfPx[4] = {
+            FloatToHalf(dummyIblAmbient.x),
+            FloatToHalf(dummyIblAmbient.y),
+            FloatToHalf(dummyIblAmbient.z),
+            std::uint16_t{0x3C00},
+        };
+        std::memcpy(mapped, halfPx, 8);
+        staging->Unmap();
+    }
+
+    auto& cmd = *offscreenCmd;
+    if (cmd.Begin() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("Pipeline::FillDummyIblIrradiance: cmd.Begin 失败");
+        return false;
+    }
+    // 首次 Initialize 时 dummyIrradianceCube 处于 Undefined；运行时 SetDummy
+    // IblAmbient 二次调用时已是 ShaderReadOnly（Pipeline 主 pass 采过）。两
+    // 路径都从当前 layout 经 TransferDst 再回 ShaderReadOnly —— 用
+    // 性更宽松的 Undefined（Vulkan spec：Undefined 当作 "内容可丢" 路径，
+    // 与从 ShaderReadOnly 实际语义一致，因为下面要全覆盖 copy）。
+    cmd.TransitionTexture(*dummyIrradianceCube,
+                          Orange::Rhi::TextureLayout::Undefined,
+                          Orange::Rhi::TextureLayout::TransferDst);
+    for (std::uint32_t layer = 0; layer < 6; ++layer)
+    {
+        Orange::Rhi::BufferTextureCopyRegion r{};
+        r.mBufferOffset = 0;
+        r.mMipLevel     = 0;
+        r.mArrayLayer   = layer;
+        r.mWidth        = 1;
+        r.mHeight       = 1;
+        r.mDepth        = 1;
+        cmd.CopyBufferToTexture(*staging, *dummyIrradianceCube, r);
+    }
+    cmd.TransitionTexture(*dummyIrradianceCube,
+                          Orange::Rhi::TextureLayout::TransferDst,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+
+    if (cmd.End() != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("Pipeline::FillDummyIblIrradiance: cmd.End 失败");
+        return false;
+    }
+    if (rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
+    {
+        ORANGE_LOG_ERROR("Pipeline::FillDummyIblIrradiance: SubmitCommandList 失败");
+        return false;
+    }
+    renderDevice->WaitIdle();
+    return true;
 }
 
 }  // namespace Orange::Engine::Render

@@ -544,6 +544,22 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
     // lazy init
     if (mpScenePipeline == nullptr) {
         mpScenePipeline = std::make_unique<Orange::Engine::Render::Pipeline>();
+
+        // v1.3.0 中性化：engine 公共 API 默认值是中性的（dummy IBL ambient
+        // (0,0,0) + 主 pass clear 深蓝灰 (0.05, 0.07, 0.10)）；编辑器在
+        // Initialize 之前显式 override 到 OrangeEditor UX 量级，避免 PBR
+        // 暗面全黑 + viewport 与 main panel 灰度撞色。两条公共 API 都接受
+        // Initialize 之前 / 之后调，本路径选"之前"让 dummy IBL 在 Initialize
+        // 时一次到位（之后调要走运行时 cmd.Begin/End/Submit/WaitIdle 重填，
+        // 多一次 GPU stall 浪费）。
+        //
+        // - dummyIblAmbient (0.5, 0.5, 0.5)：暗面 ~50% baseColor（v1.0.1 c5
+        //   从 0.25 提到 0.5 后零基础用户验收通过，避免"cube 暗面像透明"陷阱）
+        // - sceneClearColor (0.12, 0.12, 0.13)：Cocos Creator 风中性灰 #5C5C60，
+        //   让 viewport 与 main panel 深炭灰拉开一档亮度便于辨识渲染区
+        mpScenePipeline->SetDummyIblAmbient(0.5f, 0.5f, 0.5f);
+        mpScenePipeline->SetSceneClearColor(0.12f, 0.12f, 0.13f);
+
         auto r = mpScenePipeline->InitializeOffscreen(
             mRenderDevice, *mHost.assets.pAssets, width, height);
         if (r.IsErr()) {

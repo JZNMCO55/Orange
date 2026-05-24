@@ -3,6 +3,7 @@
 #include "orange/engine/core/Log.h"
 
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -158,6 +159,29 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
         }
     }
     return out;
+}
+
+std::uint16_t FloatToHalf(float f) noexcept
+{
+    // IEEE 754 binary32 → binary16 简版：覆盖正常数 + 0 + 极简饱和到 ±max；
+    // 不处理 NaN（按指数饱和路径返 inf，调用方场景 ambient/clear 不会有 NaN），
+    // 不处理极小 denormal（指数 < -14 直接丢精度回 0，对 ambient 量级无视觉损失）。
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &f, sizeof(bits));
+    const std::uint16_t sign = static_cast<std::uint16_t>((bits >> 16) & 0x8000u);
+    const std::int32_t  exp  = static_cast<std::int32_t>((bits >> 23) & 0xffu) - 127 + 15;
+    const std::uint16_t mant = static_cast<std::uint16_t>((bits >> 13) & 0x3ffu);
+    if (exp <= 0)
+    {
+        return sign;  // 极小数 / 0 →（带符号）0
+    }
+    if (exp >= 31)
+    {
+        return static_cast<std::uint16_t>(sign | 0x7c00u);  // ±Inf（含 NaN 简化）
+    }
+    return static_cast<std::uint16_t>(sign
+                                      | (static_cast<std::uint16_t>(exp) << 10)
+                                      | mant);
 }
 
 std::vector<std::uint32_t> LoadSpirv(const char* relativePath)

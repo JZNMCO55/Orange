@@ -324,6 +324,16 @@ struct Pipeline::Impl
     // 见 IAuxPassProvider.h 调用约定。
     IAuxPassProvider*                                     pAuxPassProvider{nullptr};
 
+    // ---- v1.3.0 · 公共面中性化字段 ------------------------------------
+    // engine 默认值彻底中性化（无 ambient fallback + shipping 深蓝灰 clear）；
+    // 编辑器侧通过 Pipeline::SetDummyIblAmbient / SetSceneClearColor 公共
+    // 接口提到 UX 友好值（Cocos 风灰 + 0.5 ambient）。原 cmake gate
+    // `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` 对 dummy IBL ambient + 主 pass
+    // clear color 的特殊路径已移除（gate 仅剩 grid pass 资源；grid 真迁出
+    // 后 gate 整体清退）。
+    glm::vec3                                             sceneClearColor{0.05f, 0.07f, 0.10f};
+    glm::vec3                                             dummyIblAmbient{0.0f, 0.0f, 0.0f};
+
     // DebugDrawScene —— v0.9 viewport 调试几何 wrap。
     std::unique_ptr<DebugDrawScene>                       debugDrawScene;
 
@@ -499,6 +509,16 @@ struct Pipeline::Impl
 
     // 录制编辑器地面 grid pass（主 pass 之后、bloom 之前）。
     bool RecordGridPass(const glm::mat4& invViewProj, const glm::mat4& viewProj);
+
+    // 按当前 dummyIblAmbient 字段值填 dummy IBL irradiance cube 的所有 face
+    // 像素（1×1 per face，half float RGBA）。两条入口：
+    //   * Initialize 首次创建 dummy IBL 资源时按字段初值填一次（pBootCmd 复
+    //     用 offscreenCmd，Initialize 内部已 Begin，cmd 处于录制中）
+    //   * SetDummyIblAmbient 运行时切换值时单独跑一次（pBootCmd = nullptr，
+    //     内部自管 cmd.Begin/End/Submit/WaitIdle，必须在帧外调）
+    // 失败返 false（typically dummyIrradianceCube 未就绪 / staging buffer
+    // 创建失败 / cmd lifecycle 出错），caller 决定是否回退。
+    bool FillDummyIblIrradiance(Orange::Rhi::RHICommandList* pBootCmd);
 
     // 录制 v0.9 debug draw pass。
     bool RecordDebugDrawPass(const glm::mat4& viewProj);

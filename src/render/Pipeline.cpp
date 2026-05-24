@@ -612,6 +612,27 @@ void Pipeline::SetShadowConfig(const ShadowConfig& config) noexcept
     // mapResolution 切换会让 EnsureShadowMap 在下一帧重建 shadow target。
 }
 
+void Pipeline::SetDummyIblAmbient(float r, float g, float b) noexcept
+{
+    if (!mpImpl) { return; }
+    mpImpl->dummyIblAmbient = glm::vec3{r, g, b};
+    // Initialize 之后调：dummyIrradianceCube 已经创建并初始化过，需要按新值
+    // 重填 GPU 数据。Initialize 之前调：dummyIrradianceCube 还是 nullptr，
+    // FillDummyIblIrradiance 内部判 nullptr 返 false，本字段值会在 Initialize
+    // 的 FillDummyIblIrradiance(nullptr) 路径里被读到 —— 都正确。
+    if (mpImpl->dummyIrradianceCube != nullptr)
+    {
+        mpImpl->FillDummyIblIrradiance(/*pBootCmd=*/nullptr);
+    }
+}
+
+void Pipeline::SetSceneClearColor(float r, float g, float b) noexcept
+{
+    if (!mpImpl) { return; }
+    mpImpl->sceneClearColor = glm::vec3{r, g, b};
+    // 不动 GPU 资源；下一帧 RecordOffscreenPass / Sky pass 入口从字段读最新值。
+}
+
 void Pipeline::SetAuxGridEnabled(bool enabled) noexcept
 {
     if (!mpImpl) { return; }
@@ -1005,23 +1026,17 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
     att.mLoadOp         = loadColor ? Orange::Rhi::LoadOp::Load
                                     : Orange::Rhi::LoadOp::Clear;
     att.mStoreOp        = Orange::Rhi::StoreOp::Store;
-#if defined(ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES)
-    // GAP-2026-05-19 editor-aux-passes：viewport 默认背景 Cocos Creator 风
-    // 中性灰（≈ #5C5C60）是"编辑器审美决定"，让 viewport 与主 panel 深炭灰
-    // 拉开一档亮度便于辨识渲染区。shipping 构建退回 game 端深蓝默认。
-    // hdrColor 是线性 HDR target，写入值经 tonemap 出到 swapchain；线性 0.12
-    // 对应感知 ~0.36 / sRGB ~0.39（取 1/2.2 power）。
-    att.mClear.mColor[0] = 0.12f;
-    att.mClear.mColor[1] = 0.12f;
-    att.mClear.mColor[2] = 0.13f;
+    // v1.3.0 中性化：clear 色不再 cmake gate，从 impl.sceneClearColor 字段读
+    // —— engine 默认 (0.05, 0.07, 0.10) 深蓝灰（shipping 中性 / 与 sample
+    // 01/03/04 早期视觉一致），编辑器 / 游戏端按需通过公共 API
+    // Pipeline::SetSceneClearColor 提到自家美学量级（OrangeEditor 默认
+    // (0.12, 0.12, 0.13) Cocos 风灰，让 viewport 与 main panel 深炭灰拉开
+    // 亮度差便于辨识渲染区）。hdrColor 是线性 HDR target，写入值经 tonemap
+    // 出到 swapchain；线性 0.12 对应感知 ~0.36 / sRGB ~0.39（取 1/2.2 power）。
+    att.mClear.mColor[0] = impl.sceneClearColor.x;
+    att.mClear.mColor[1] = impl.sceneClearColor.y;
+    att.mClear.mColor[2] = impl.sceneClearColor.z;
     att.mClear.mColor[3] = 1.0f;
-#else
-    // Shipping：v0.8.5 之前的深蓝默认（与 sample 01/03/04 早期视觉一致）。
-    att.mClear.mColor[0] = 0.05f;
-    att.mClear.mColor[1] = 0.07f;
-    att.mClear.mColor[2] = 0.10f;
-    att.mClear.mColor[3] = 1.0f;
-#endif
 
     Orange::Rhi::DepthStencilAttachment depthAtt{};
     depthAtt.mpView        = impl.sceneDepth->GetDefaultView();

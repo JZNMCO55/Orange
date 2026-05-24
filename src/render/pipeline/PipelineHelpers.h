@@ -58,6 +58,13 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh);
 // 把 .exe 同目录下的 SPIR-V 直接读成 word 流——不走 AssetRegistry。
 std::vector<std::uint32_t> LoadSpirv(const char* relativePath);
 
+// IEEE 754 binary32 → binary16 转换（dummy IBL ambient 写 RGBA16F staging
+// 用）。仅覆盖正常 + 0 + 极简饱和，不处理 NaN / 极小 denormal / 主动 round
+// 模式选择。ambient 量级 [0, 8] 完全在 normal half 范围内（max=65504）；
+// 超出范围 +Inf 被映射回 max-normal，其余按 IEEE round-to-nearest-even 简化
+// 为 truncate。
+std::uint16_t FloatToHalf(float f) noexcept;
+
 // OrangeRender 日志桥：把 Orange::Log* 的输出（含 Validation 类别）转入
 // OrangeEngine 的 ORANGE_LOG_*。Pipeline::Initialize 在 RenderDevice::Create
 // 之前 SetLogSink，Shutdown 末段 ClearLogSink。
