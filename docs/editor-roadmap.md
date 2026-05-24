@@ -652,14 +652,14 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
-### v1.3.0 · IAuxPassProvider Hook + 公共 API 中性化 ✅
+### v1.2.1 · IAuxPassProvider Hook + 公共 API 中性化 ✅
 
-**版本**：v1.2.0 ✅ 后第二个 minor bump
+**版本**：v1.2.0 ✅ 后第一个 patch（**校准记录**：原 commit `06b76e3` 拟 v1.3.0 minor，2026-05-24 同日用户当场指出 "2 天内 5 个 bump 太随意，1.x.0 minor 必须伴随多个完整功能落地"，按 [[feedback-minor-bump-must-carry-multiple-features]] 新规则校准为 patch —— 本次仅接口预留 + rename 一项未完整功能，不达 minor 2-3 完整功能门槛；follow-up commit 改 CMake VERSION + 重命名 acceptance-checklist + 更新本节性质，commit 历史保留）
 **落地日期**：2026-05-24
 
 **范围**：引入 `IAuxPassProvider` 公共 hook 让外部（editor / 游戏端）注入主 pass 与后处理之间的辅助 pass；引擎公共面命名中性化（`SetEditorGridEnabled` → `SetAuxGridEnabled`，"EditorGrid" 字样从 engine public API 消除）。部分关闭 [`GAP-2026-05-19-editor-aux-passes-in-engine-pipeline`](engine-known-gaps.md) G1。
 
-**精炼 scope**：完整 G1 三阶段（接口预留 / 命名中性化 / grid pass 实际迁出）。v1.3.0 ship 前两阶段；**第三阶段 grid pass 实际迁出**到编辑器端留 v1.4.0+ 拉动（与 OR 端 offscreen RT / texture handle 完整暴露同节奏）。
+**精炼 scope**：完整 G1 三阶段（接口预留 / 命名中性化 / grid pass 实际迁出）。v1.2.1 ship 前两阶段；**第三阶段 grid pass 实际迁出**到编辑器端留 v1.3.0+ minor 拉动（与 OR 端 offscreen RT / texture handle 完整暴露同节奏；届时与材质球缩略图 / Pipeline 默认值彻底中性化 / 其他功能合并 ship 凑足 minor 多功能门槛）。
 
 **改动**：
 
@@ -671,16 +671,16 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 | `src/render/pipeline/PipelineImpl.h` | 加 `pAuxPassProvider` 字段 + `IAuxPassProvider.h` include |
 | `tools/OrangeEditor/panels/ScenePanel.cpp` | rename 调用 |
 
-**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.3.0-acceptance-checklist.md`
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.1-acceptance-checklist.md`
 
-**与引擎关系**：仅引擎公共面 + Pipeline 内部改动；编辑器侧仅 1 处 rename；CMake VERSION 1.2.0 → 1.3.0。
+**与引擎关系**：仅引擎公共面 + Pipeline 内部改动；编辑器侧仅 1 处 rename；CMake VERSION 1.2.0 → 1.2.1（**校准后**，原 1.3.0）。
 
-**Critical Path**：是（v1.0 验收前预留的"API 中性化"债清理；为 v1.4.0+ grid pass 真正迁出铺垫；为未来 outline / wireframe / debug overlay 等编辑器 / 游戏端辅助 pass 注入提供官方 hook）
+**Critical Path**：是（v1.0 验收前预留的"API 中性化"债清理；为 v1.3.0+ minor 中 grid pass 真正迁出 + 缩略图 + 默认值中性化合并 ship 铺垫；为未来 outline / wireframe / debug overlay 等编辑器 / 游戏端辅助 pass 注入提供官方 hook）
 
-**不在本 minor 范围**（明示）：
-- Grid pass 实际迁出 + cmake gate 整体移除 → v1.4.0+
-- Pipeline `SetAmbient` / `SetClearColor` 公共 API + 默认值彻底中性化 → v1.4.0+ 与 grid 迁出一起
-- 材质球缩略图（GAP-2026-05-22 G2）→ 独立 v1.4.0+ minor，依赖 OR offscreen RT API
+**不在本 patch 范围**（明示）：
+- Grid pass 实际迁出 + cmake gate 整体移除 → v1.3.0+ minor（与缩略图合并凑足 minor 门槛）
+- Pipeline `SetAmbient` / `SetClearColor` 公共 API + 默认值彻底中性化 → v1.3.0+ minor 与 grid 迁出一起
+- 材质球缩略图（GAP-2026-05-22 G2）→ 与 grid 迁出合并到 v1.3.0+ minor，依赖 OR offscreen RT API
 - 多 provider 链式调用 → 真有需求拉动再加
 
 ### v1.1.1 · Create Material UI ✅

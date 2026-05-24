@@ -28,7 +28,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(OrangeEditor
-    VERSION   1.3.0
+    VERSION   1.2.1
     LANGUAGES CXX
     DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器")
 
