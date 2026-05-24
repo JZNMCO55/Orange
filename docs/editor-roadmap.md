@@ -652,6 +652,37 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.3.0 · IAuxPassProvider Hook + 公共 API 中性化 ✅
+
+**版本**：v1.2.0 ✅ 后第二个 minor bump
+**落地日期**：2026-05-24
+
+**范围**：引入 `IAuxPassProvider` 公共 hook 让外部（editor / 游戏端）注入主 pass 与后处理之间的辅助 pass；引擎公共面命名中性化（`SetEditorGridEnabled` → `SetAuxGridEnabled`，"EditorGrid" 字样从 engine public API 消除）。部分关闭 [`GAP-2026-05-19-editor-aux-passes-in-engine-pipeline`](engine-known-gaps.md) G1。
+
+**精炼 scope**：完整 G1 三阶段（接口预留 / 命名中性化 / grid pass 实际迁出）。v1.3.0 ship 前两阶段；**第三阶段 grid pass 实际迁出**到编辑器端留 v1.4.0+ 拉动（与 OR 端 offscreen RT / texture handle 完整暴露同节奏）。
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `include/orange/engine/render/IAuxPassProvider.h` | 新增 interface + `AuxPassContext` struct + RHI 类型前向声明（不破 header isolation） |
+| `include/orange/engine/render/Pipeline.h` | rename `SetEditorGridEnabled`/`IsEditorGridEnabled` → `SetAuxGridEnabled`/`IsAuxGridEnabled`；加 `SetAuxPassProvider(IAuxPassProvider*)` 公共 API |
+| `src/render/Pipeline.cpp` | rename impl + 加 SetAuxPassProvider 实现 + window 路径 / offscreen 路径各加 hook 调用（grid 之后、debug draw 之前） |
+| `src/render/pipeline/PipelineImpl.h` | 加 `pAuxPassProvider` 字段 + `IAuxPassProvider.h` include |
+| `tools/OrangeEditor/panels/ScenePanel.cpp` | rename 调用 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.3.0-acceptance-checklist.md`
+
+**与引擎关系**：仅引擎公共面 + Pipeline 内部改动；编辑器侧仅 1 处 rename；CMake VERSION 1.2.0 → 1.3.0。
+
+**Critical Path**：是（v1.0 验收前预留的"API 中性化"债清理；为 v1.4.0+ grid pass 真正迁出铺垫；为未来 outline / wireframe / debug overlay 等编辑器 / 游戏端辅助 pass 注入提供官方 hook）
+
+**不在本 minor 范围**（明示）：
+- Grid pass 实际迁出 + cmake gate 整体移除 → v1.4.0+
+- Pipeline `SetAmbient` / `SetClearColor` 公共 API + 默认值彻底中性化 → v1.4.0+ 与 grid 迁出一起
+- 材质球缩略图（GAP-2026-05-22 G2）→ 独立 v1.4.0+ minor，依赖 OR offscreen RT API
+- 多 provider 链式调用 → 真有需求拉动再加
+
 ### v1.1.1 · Create Material UI ✅
 
 **版本**：v1.1 ✅ 后的第一个 patch milestone（按 [[feedback-post-v1-versioning]] 纪律走 v1.x.y）

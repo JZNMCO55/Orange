@@ -160,7 +160,9 @@
 ### 状态
 
 - **登记**：2026-05-19（v0.8.5 milestone ✅ 时显式登记，作为已知归属债）
-- **处理**：最小可行 cmake gate 已落地（2026-05-20，本 session）—— `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option 默认 ON 保持编辑器行为；shipping `-DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF` 关掉 grid 渲染 + dummy IBL ambient 退回 (0,0,0) + clear color 退回深蓝。**完整 IAuxPassProvider 钩子 + engine 公共面 grep 不到 "EditorGrid" 字样的命名整骨未做**，留 v1.0 验收前 batch milestone（与 OrangeRender API 中性化原则同节奏）。详细落地点见本文件"处理记录"段
+- **处理**：
+  - 2026-05-20：最小可行 cmake gate 已落地 —— `ORANGE_ENGINE_WITH_EDITOR_AUX_PASSES` cmake option 默认 ON 保持编辑器行为；shipping `-DORANGE_ENGINE_WITH_EDITOR_AUX_PASSES=OFF` 关掉 grid 渲染 + dummy IBL ambient 退回 (0,0,0) + clear color 退回深蓝
+  - 2026-05-24（v1.3.0 minor）：**G1 第一+二阶段落地** —— `IAuxPassProvider` 公共 interface + `AuxPassContext` struct + `Pipeline::SetAuxPassProvider` 公共 API（window 路径 + offscreen 路径双 hook，grid 之后 / debug draw 之前调用）；公共面命名中性化 `SetEditorGridEnabled` → `SetAuxGridEnabled`；engine 公共头 grep "EditorGrid" 不到。**G1 第三阶段 grid pass 实际迁出**（PipelineGrid.cpp 全文件 + cmake gate 整体移除）留 v1.4.0+ 拉动（依赖 OR 端 offscreen RT / texture handle 完整暴露）。详见 [editor-roadmap.md v1.3.0 节](editor-roadmap.md)
 - **关联**：editor-roadmap v0.8.5（落地源头）；engine 公共 API 中性化原则
 - **归属**：未拍板分配到具体 Phase；候选 Phase 7 / v1.0 验收前
 - **v0.7 retro 复审（2026-05-19）**：backlog 状态有效；非 v0.7 critical path；shipping 二进制带 grid 资源是 cosmetic 不阻塞功能，等 v1.0 验收前批量整中性化时一起做（与 OrangeRender API 中性化原则同节奏）

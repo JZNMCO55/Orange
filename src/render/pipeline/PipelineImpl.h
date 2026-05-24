@@ -23,6 +23,7 @@
 #include "orange/engine/render/BuiltinMaterials.h"
 #include "orange/engine/render/DebugDrawScene.h"
 #include "orange/engine/render/EnvironmentComponent.h"
+#include "orange/engine/render/IAuxPassProvider.h"  // v1.3.0 · aux pass hook
 #include "orange/engine/render/IRenderPass.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/Material.h"
@@ -316,6 +317,12 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       gridSet;
     Orange::Rhi::RHITexture*                              gridSetBoundDepth{nullptr};
     bool                                                  editorGridEnabled{false};
+
+    // ---- v1.3.0 · AuxPassProvider hook --------------------------------
+    // 外部（editor / 游戏端）通过 Pipeline::SetAuxPassProvider 注入，主
+    // pass 完成后 Render 内调用 RenderAuxPass。Pipeline 不持所有权 ——
+    // 见 IAuxPassProvider.h 调用约定。
+    IAuxPassProvider*                                     pAuxPassProvider{nullptr};
 
     // DebugDrawScene —— v0.9 viewport 调试几何 wrap。
     std::unique_ptr<DebugDrawScene>                       debugDrawScene;

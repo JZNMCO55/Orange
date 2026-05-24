@@ -210,7 +210,7 @@ void EditorRenderLayer::DrawScenePanel()
         mpScenePipeline->SetEditorCameraOverride(&mEditorCameraOverride);
         // viewport toolbar toggle → Pipeline 状态：每帧 push（开销极小，
         // 避免在 toggle 改变时维护额外 dirty 标记）。
-        mpScenePipeline->SetEditorGridEnabled(sViewportGridEnabled);
+        mpScenePipeline->SetAuxGridEnabled(sViewportGridEnabled);
         mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
 
         // v0.9 c2 DebugDraw 接通 + Collider 可视化（v0.9.5 后置补丁）：dbg

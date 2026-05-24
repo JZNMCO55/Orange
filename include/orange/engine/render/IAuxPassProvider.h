@@ -1,0 +1,93 @@
+#ifndef ORANGE_ENGINE_RENDER_I_AUX_PASS_PROVIDER_H
+#define ORANGE_ENGINE_RENDER_I_AUX_PASS_PROVIDER_H
+
+// ---------------------------------------------------------------------------
+// IAuxPassProvider —— 引擎主 pass 与后处理之间的辅助 pass 钩子（v1.3.0 引入）。
+//
+// 设计意图：让"编辑器审美 / 工具向 pass"（如 grid / outline / wireframe
+// / debug overlay）从外部注入，不污染 engine 公共面 —— 满足 OrangeEngine
+// "Game-specific concepts forbidden in engine" 与 OrangeRender API 中性化
+// 原则同节奏。
+//
+// 调用时机（Pipeline::Render 内）：
+//   主几何 pass → IBL ambient + 粒子 + 主光 shadow 全部完成
+//     ↓
+//   IAuxPassProvider::RenderAuxPass(ctx)   ← 本 hook
+//     ↓
+//   bloom downsample / upsample / tonemap / output
+//
+// 调用约定：
+//   * provider 进入时 hdrColor 处于 ShaderReadOnly layout（主 pass 末尾遗留）；
+//     provider 自行 transition 到需要的 layout（典型 ColorAttachment 做
+//     alpha-blend 叠加）；离开时**必须**留在 ShaderReadOnly（下游 bloom
+//     系列按此假设）。
+//   * sceneDepth 进入时可能在 DepthStencilAttachment 或 ShaderReadOnly
+//     （取决于上游 grid / god rays 等是否已经 transition）；ctx 上的
+//     `sceneDepthIsShaderReadOnly` 标志反映当前状态，provider 按需 transition。
+//   * AuxPassContext 内所有指针由 Pipeline 拥有，生命周期 = 单帧；provider
+//     不得跨帧持有。
+//
+// 与未来 grid 迁出（GAP-2026-05-19 G1）的关系：v1.3.0 仅引入接口与 hook
+// 调用点；引擎内 grid pass 实现保留（仍走 cmake gate），等 v1.4.0+ 把
+// PipelineGrid.cpp 整体迁到编辑器端实现 IAuxPassProvider 时真正接通。本
+// 接口此刻是"预留 hook"，让外部 provider 可以注入与 grid 同位的辅助 pass。
+// ---------------------------------------------------------------------------
+
+#include <orange/engine/OrangeEngineExport.h>
+
+#include <glm/mat4x4.hpp>
+
+#include <cstdint>
+
+// 前向声明 RHI 类型 —— 实际定义在 OrangeRender 公共面。本头不 include
+// <orange/rhi/...>，让引擎公共头保持 "header isolation" invariant（参
+// CLAUDE.md "Design guardrails / Header isolation" 段）。Provider 在
+// editor / 游戏端实现时按需 include OR 头消费 ctx 字段。
+namespace Orange::Rhi
+{
+class RHICommandList;
+class RHITexture;
+class RHISampler;
+}  // namespace Orange::Rhi
+
+namespace Orange::Engine::Render
+{
+
+// 单帧辅助 pass 的上下文 —— Pipeline 在主 pass 完成后填好喂给
+// IAuxPassProvider::RenderAuxPass。所有指针由 Pipeline 拥有，调用结束
+// 后字段失效。
+struct ORANGE_ENGINE_API AuxPassContext
+{
+    Orange::Rhi::RHICommandList* pCmd          = nullptr;
+    // hdrColor 进入时 ShaderReadOnly；provider 自行 transition + Begin/End
+    // Rendering；离开时必须 ShaderReadOnly。
+    Orange::Rhi::RHITexture*     pHdrColor     = nullptr;
+    // sceneDepth 可能 DepthStencilAttachment 或 ShaderReadOnly（取决于
+    // 上游是否 transition）；按 sceneDepthIsShaderReadOnly 判定当前状态。
+    Orange::Rhi::RHITexture*     pSceneDepth   = nullptr;
+    // 复用 Pipeline 内 hdrSampler 用于采 sceneDepth（避免 provider 自创
+    // 重复资源）。
+    Orange::Rhi::RHISampler*     pHdrSampler   = nullptr;
+    std::uint32_t                hdrWidth      = 0;
+    std::uint32_t                hdrHeight     = 0;
+    glm::mat4                    invViewProj   = glm::mat4(1.0f);
+    glm::mat4                    viewProj      = glm::mat4(1.0f);
+    bool                         sceneDepthIsShaderReadOnly = false;
+};
+
+// 辅助 pass 钩子接口。注册到 Pipeline 后每帧主 pass 完成、后处理之前
+// 调用 RenderAuxPass(ctx)。
+//
+// 多 provider 支持留待后续——v1.3.0 单 provider，注册第二个会覆盖前者。
+class ORANGE_ENGINE_API IAuxPassProvider
+{
+public:
+    virtual ~IAuxPassProvider() = default;
+
+    // 单次 aux pass 渲染入口。约定见本头文件开头"调用约定"段。
+    virtual void RenderAuxPass(AuxPassContext& ctx) = 0;
+};
+
+}  // namespace Orange::Engine::Render
+
+#endif  // ORANGE_ENGINE_RENDER_I_AUX_PASS_PROVIDER_H
