@@ -5,6 +5,7 @@
 #include "BuiltinAssets.h"
 
 #include "MaterialFileIO.h"
+#include "ShaderTemplateMetaIO.h"  // v1.2.6 patch · lazy create 时应用 default uniforms
 
 #include <orange/engine/core/Log.h>
 
@@ -23,6 +24,8 @@
 #include <orange/engine/asset/TextureLoader.h>
 #include <orange/engine/render/MaterialSystem.h>
 
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
 #include <cmath>
@@ -703,6 +706,62 @@ EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
     }
     ::Orange::Editor::Material::ApplyDataToInstance(
         *dataOpt, *inst, host.assets.pAssets.get());
+
+    // v1.2.6 patch · 应用 .template.json 默认值（仅当 instance 未 override
+    // 该 uniform 时）。v1.1.1 Create Material modal 创建的新 .material
+    // uniforms 段是空的 → ApplyDataToInstance 上面是 no-op → Pipeline 推
+    // 全 0 push-constant：uBaseColor=(0,0,0,0) 黑色 + alpha 0；uMRA=(0,0,
+    // 0,0) → water Wave Amplitude/Speed/Fresnel 全 0 → 视觉就是纯黑塑料
+    // 看起来"没变成水面"。从 ShaderTemplateMetaIO 读 default 兜底，让"刚
+    // 创建未调过的 .material" 视觉与 Inspector 默认值一致。
+    //
+    // 每次 lazy create 调一次 LoadShaderTemplateMeta（小 JSON IO），不在
+    // 热路径可接受；若日后撞性能问题再加 cache。
+    {
+        namespace Meta = ::Orange::Editor::ShaderMeta;
+        const std::string tmplJsonPath =
+            "assets/shaders/templates/" + dataOpt->templateName + ".template.json";
+        if (auto metaOpt = Meta::LoadShaderTemplateMeta(tmplJsonPath))
+        {
+            for (const auto& u : metaOpt->uniforms)
+            {
+                if (!u.hasDefault) { continue; }
+                if (u.widget == Meta::UniformWidget::Hidden) { continue; }
+                if (inst->HasUniformOverride(u.name)) { continue; }
+                using ::Orange::Engine::Render::MaterialUniformType;
+                switch (u.type)
+                {
+                    case MaterialUniformType::Float:
+                        inst->SetUniform(u.name, u.defaultValue[0]);
+                        break;
+                    case MaterialUniformType::Int:
+                        inst->SetUniform(u.name,
+                            static_cast<std::int32_t>(u.defaultValue[0]));
+                        break;
+                    case MaterialUniformType::Vec2:
+                        inst->SetUniform(u.name,
+                            glm::vec2(u.defaultValue[0], u.defaultValue[1]));
+                        break;
+                    case MaterialUniformType::Vec3:
+                        inst->SetUniform(u.name,
+                            glm::vec3(u.defaultValue[0], u.defaultValue[1],
+                                      u.defaultValue[2]));
+                        break;
+                    case MaterialUniformType::Vec4:
+                        inst->SetUniform(u.name,
+                            glm::vec4(u.defaultValue[0], u.defaultValue[1],
+                                      u.defaultValue[2], u.defaultValue[3]));
+                        break;
+                    case MaterialUniformType::Mat4:
+                        // mat4 default 罕见（uMVP / uModel 一律 hidden 不
+                        // 应该走到这里），跳过避免 16 float → mat4 转换
+                        // 字段映射复杂；如未来真需要再补。
+                        break;
+                }
+            }
+        }
+    }
+
     auto* rawPtr = inst.get();
     host.assets.userMaterials[materialPath] = std::move(inst);
     // v1.2.5 patch · 同步更新 namedMaterialInstances cache —— 否则 schema

@@ -652,6 +652,35 @@ v0.1 ~ v0.9.5 全部 ✅。验收路径：邀请非程序员（如美术 / 关�
 
 **关联 GAP**：v1.1 ✅ 后 [`GAP-2026-05-22-editor-material-create-and-thumbnail-missing`](engine-known-gaps.md) 进入触发条件（material thumbnail 烘培需要真外部贴图，前置已具备）→ 建议 v1.2 / v1.x 跟进。
 
+### v1.2.6 · lazy create 应用 .template.json 默认值 ✅
+
+**版本**：v1.2.5 ✅ 后第六个 patch
+**落地日期**：2026-05-24
+
+**范围**：修复 v1.2.5 后用户继续报"plane 没变成动态水面，材质名称倒是更改了"的真正视觉根因。
+
+**根因**：v1.2.5 修了 Inspector 字段反查（cache 同步），但**新 lazy create 的 instance 没有 uniform override**——v1.1.1 Create Material modal 落盘的 .material 文件 uniforms 段是空的，`ApplyDataToInstance` 是 no-op。Pipeline 推全 0 push-constant：uBaseColor=(0,0,0,0) 黑色 / uMRA=(0,0,0,0) → water Wave Amplitude/Speed/Fresnel 全 0 → 视觉纯黑塑料看起来"没变水面"。
+
+**修复**：`EnsureMaterialInstance` lazy create 后从 `.template.json` 的 `uniforms[].default` 字段读默认值调 `SetUniform` 兜底（仅当 .material 未 override 时——`HasUniformOverride` 检查保用户调过的值不被覆盖）。
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `tools/OrangeEditor/BuiltinAssets.cpp::EnsureMaterialInstance` | lazy create 后加 ~40 行 default uniforms 应用（含 vec4 / vec3 / vec2 / float / int 派发；mat4 跳过——uMVP/uModel hidden 不进路径）|
+| `tools/OrangeEditor/BuiltinAssets.cpp` 顶部 | include `ShaderTemplateMetaIO.h` + glm/vec2.hpp + glm/vec3.hpp |
+| `tools/OrangeEditor/CMakeLists.txt` | VERSION 1.2.5 → 1.2.6 |
+
+**验收文档**：`vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.2.6-acceptance-checklist.md`
+
+**与引擎关系**：纯编辑器侧 ~40 行修复；CMake VERSION 1.2.5 → 1.2.6。
+
+**Critical Path**：是（v1.2.x 材质工作流系列**真正**最后闭环——新材质拖到 plane 视觉呈现 default 水面 / PBR 灰塑料等，与 Inspector 默认值一致）
+
+**不在本 patch 范围**（明示）：
+- v1.1.1 Create Material modal 落盘时直接写 default 到 .material 文件 uniforms 段 → v1.3.0+ minor
+- 每次 lazy create 调一次 LoadShaderTemplateMeta IO → 不在热路径，撞性能再加 cache
+
 ### v1.2.5 · EnsureMaterialInstance 同步 namedMaterialInstances cache ✅
 
 **版本**：v1.2.4 ✅ 后第五个 patch
