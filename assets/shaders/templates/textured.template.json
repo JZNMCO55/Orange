@@ -1,0 +1,13 @@
+{
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 0 },
+  "templateName": "textured",
+  "vertexSpv": "shaders/orange_engine/textured_mesh.vert.spv",
+  "fragmentSpv": "shaders/orange_engine/textured_mesh.frag.spv",
+  "uniforms": [
+    { "name": "uMVP",   "type": "mat4" },
+    { "name": "uModel", "type": "mat4" }
+  ],
+  "textureSlots": [
+    { "binding": 0, "name": "uTexture" }
+  ]
+}

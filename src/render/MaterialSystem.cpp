@@ -10,14 +10,188 @@
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/asset/ShaderAsset.h"
 #include "orange/engine/core/Log.h"
+#include "orange/engine/core/Serialization.h"
 #include "orange/engine/render/BuiltinMaterials.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+
+#if defined(_WIN32)
+    #define NOMINMAX
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+#endif
 
 namespace Orange::Engine::Render
 {
+namespace
+{
+
+// .exe 同目录解析 helper。与 BuiltinMaterials.cpp / Pipeline.cpp 重复——
+// 三处后按 BuiltinMaterials.cpp 自述注释提到 Platform 模块统一，T1 阶段
+// 先并存（"Three similar lines is better than a premature abstraction"
+// 已过门槛，但抽出属独立整骨，不混入本 milestone）。
+std::filesystem::path GetExecutableDir()
+{
+#if defined(_WIN32)
+    wchar_t buffer[MAX_PATH];
+    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len == MAX_PATH)
+    {
+        return std::filesystem::current_path();
+    }
+    return std::filesystem::path(std::wstring(buffer, len)).parent_path();
+#else
+    return std::filesystem::current_path();
+#endif
+}
+
+// 把 .template.json 内的 SPV 路径字符串解析为绝对路径。绝对路径原样返
+// 回；相对路径以 GetExecutableDir 为基（与 BuiltinMaterials::Load* 同款
+// 约定，让 "shaders/orange_engine/<name>.spv" 指向 CMake 编译产物）。
+std::filesystem::path ResolveSpvPath(std::string_view spvField)
+{
+    std::filesystem::path p(spvField);
+    if (p.is_absolute())
+    {
+        return p;
+    }
+    return GetExecutableDir() / p;
+}
+
+// JSON "type" 字段字符串 → MaterialUniformType 枚举。未知字符串返回
+// nullopt（调用方按缺省值 Float 处理 + log 警告）。
+std::optional<MaterialUniformType> ParseUniformType(std::string_view s)
+{
+    if (s == "float") { return MaterialUniformType::Float; }
+    if (s == "vec2")  { return MaterialUniformType::Vec2;  }
+    if (s == "vec3")  { return MaterialUniformType::Vec3;  }
+    if (s == "vec4")  { return MaterialUniformType::Vec4;  }
+    if (s == "int")   { return MaterialUniformType::Int;   }
+    if (s == "mat4")  { return MaterialUniformType::Mat4;  }
+    return std::nullopt;
+}
+
+// 把一个 .template.json 文件解析为 ShaderTemplateDesc。失败返回 nullopt
+// + log 已记录具体原因。
+std::optional<ShaderTemplateDesc> LoadTemplateDescFromFile(
+    const std::filesystem::path& jsonPath)
+{
+    auto readerResult = JsonReader::FromFile(jsonPath.string());
+    if (readerResult.IsErr())
+    {
+        ORANGE_LOG_ERROR("MaterialSystem: 解析 .template.json 失败 (path={}, msg={})",
+                         jsonPath.string(),
+                         readerResult.Error().message);
+        return std::nullopt;
+    }
+    const JsonReader& reader = readerResult.Value();
+
+    // schemaVersion 校验：namespace 必须是 render/shader_template；major
+    // 必须 == 1（T1 阶段单一主版本，未来 break 走 v2 + migrator）。
+    auto verResult = reader.ReadSchemaVersion("schemaVersion");
+    if (verResult.IsErr())
+    {
+        ORANGE_LOG_ERROR("MaterialSystem: .template.json schemaVersion 缺失或错误 (path={})",
+                         jsonPath.string());
+        return std::nullopt;
+    }
+    const SchemaVersion ver = verResult.Value();
+    if (ver.Namespace() != "render/shader_template" || ver.Major() != 1)
+    {
+        ORANGE_LOG_ERROR("MaterialSystem: .template.json schemaVersion 不兼容 "
+                         "(path={}, ns={}, ver={}.{})",
+                         jsonPath.string(),
+                         ver.Namespace(),
+                         ver.Major(), ver.Minor());
+        return std::nullopt;
+    }
+
+    ShaderTemplateDesc desc;
+    if (!reader.ReadString("templateName", desc.name) || desc.name.empty())
+    {
+        ORANGE_LOG_ERROR("MaterialSystem: .template.json templateName 缺失或空 (path={})",
+                         jsonPath.string());
+        return std::nullopt;
+    }
+
+    std::string vertSpv;
+    std::string fragSpv;
+    if (!reader.ReadString("vertexSpv", vertSpv) || vertSpv.empty()
+        || !reader.ReadString("fragmentSpv", fragSpv) || fragSpv.empty())
+    {
+        ORANGE_LOG_ERROR("MaterialSystem: .template.json vertexSpv / fragmentSpv 缺失 "
+                         "(path={}, templateName={})",
+                         jsonPath.string(), desc.name);
+        return std::nullopt;
+    }
+    desc.vertexSpirvPath   = ResolveSpvPath(vertSpv);
+    desc.fragmentSpirvPath = ResolveSpvPath(fragSpv);
+
+    // uniforms 数组遍历。
+    const std::size_t uniformCount = reader.ArraySize("uniforms");
+    desc.uniforms.reserve(uniformCount);
+    for (std::size_t i = 0; i < uniformCount; ++i)
+    {
+        const std::string base = "uniforms/" + std::to_string(i);
+        std::string uName;
+        std::string uType;
+        if (!reader.ReadString(base + "/name", uName)
+            || !reader.ReadString(base + "/type", uType))
+        {
+            ORANGE_LOG_ERROR("MaterialSystem: .template.json uniforms[{}] name/type 缺失 "
+                             "(path={}, templateName={})",
+                             i, jsonPath.string(), desc.name);
+            continue;
+        }
+        const auto typeOpt = ParseUniformType(uType);
+        if (!typeOpt.has_value())
+        {
+            ORANGE_LOG_ERROR("MaterialSystem: .template.json uniforms[{}] type 未知 "
+                             "(path={}, name={}, type={})",
+                             i, jsonPath.string(), uName, uType);
+            continue;
+        }
+        MaterialUniformDesc ud;
+        ud.name = std::move(uName);
+        ud.type = *typeOpt;
+        desc.uniforms.push_back(std::move(ud));
+    }
+
+    // textureSlots 数组遍历。
+    const std::size_t slotCount = reader.ArraySize("textureSlots");
+    desc.textureSlots.reserve(slotCount);
+    for (std::size_t i = 0; i < slotCount; ++i)
+    {
+        const std::string base = "textureSlots/" + std::to_string(i);
+        std::int64_t binding = 0;
+        std::string  slotName;
+        if (!reader.ReadInt(base + "/binding", binding)
+            || !reader.ReadString(base + "/name", slotName))
+        {
+            ORANGE_LOG_ERROR("MaterialSystem: .template.json textureSlots[{}] "
+                             "binding/name 缺失 (path={}, templateName={})",
+                             i, jsonPath.string(), desc.name);
+            continue;
+        }
+        MaterialTextureSlotDesc sd;
+        sd.binding = static_cast<std::uint32_t>(binding);
+        sd.name    = std::move(slotName);
+        desc.textureSlots.push_back(std::move(sd));
+    }
+
+    return desc;
+}
+
+}  // namespace
 
 struct MaterialSystem::Impl
 {
@@ -189,6 +363,72 @@ Result<void, ResultCode> MaterialSystem::RegisterBuiltins()
         return ResultCode::IoError;
     }
     return {};
+}
+
+Result<void, ResultCode> MaterialSystem::RegisterTemplatesFromDirectory(
+    const std::filesystem::path& dir)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec))
+    {
+        ORANGE_LOG_WARN("MaterialSystem::RegisterTemplatesFromDirectory: 目录不存在 "
+                        "或非目录 (dir={})", dir.string());
+        return ResultCode::NotFound;
+    }
+
+    // 收集 *.template.json 候选文件（按字典序确保跨平台稳定的注册顺序）。
+    std::vector<fs::path> candidates;
+    for (const auto& entry : fs::directory_iterator(dir, ec))
+    {
+        if (!entry.is_regular_file(ec)) { continue; }
+        const fs::path& p = entry.path();
+        const std::string fn = p.filename().string();
+        // 后缀 ".template.json" 长度 14；按文件名后缀严格匹配，避免误吃
+        // "foo.template.json.bak" 等历史 backup。
+        constexpr std::string_view kSuffix = ".template.json";
+        if (fn.size() < kSuffix.size()) { continue; }
+        if (fn.compare(fn.size() - kSuffix.size(), kSuffix.size(), kSuffix) != 0)
+        {
+            continue;
+        }
+        candidates.push_back(p);
+    }
+    std::sort(candidates.begin(), candidates.end());
+
+    if (candidates.empty())
+    {
+        ORANGE_LOG_WARN("MaterialSystem::RegisterTemplatesFromDirectory: 目录内无 "
+                        "*.template.json (dir={})", dir.string());
+        return {};
+    }
+
+    // 解析 + 注册。单文件失败仅 log 后跳过，不中断整目录扫描——与编辑器
+    // 启动期的"有 template 能用就启动"语义一致。
+    bool anyFailed = false;
+    for (const auto& jsonPath : candidates)
+    {
+        auto descOpt = LoadTemplateDescFromFile(jsonPath);
+        if (!descOpt.has_value())
+        {
+            anyFailed = true;
+            continue;
+        }
+        auto regResult = RegisterTemplate(*descOpt);
+        if (regResult.IsErr())
+        {
+            ORANGE_LOG_ERROR("MaterialSystem::RegisterTemplatesFromDirectory: "
+                             "RegisterTemplate 失败 (file={}, templateName={}, code={})",
+                             jsonPath.string(),
+                             descOpt->name,
+                             static_cast<unsigned>(regResult.Error()));
+            anyFailed = true;
+        }
+    }
+
+    return anyFailed ? Result<void, ResultCode>(ResultCode::IoError)
+                     : Result<void, ResultCode>{};
 }
 
 }  // namespace Orange::Engine::Render

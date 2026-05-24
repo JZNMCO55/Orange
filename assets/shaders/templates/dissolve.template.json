@@ -1,0 +1,11 @@
+{
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 0 },
+  "templateName": "dissolve",
+  "vertexSpv": "shaders/orange_engine/dissolve.vert.spv",
+  "fragmentSpv": "shaders/orange_engine/dissolve.frag.spv",
+  "uniforms": [
+    { "name": "uMVP",   "type": "mat4" },
+    { "name": "uModel", "type": "mat4" }
+  ],
+  "textureSlots": []
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 0 },
+  "templateName": "pbr",
+  "vertexSpv": "shaders/orange_engine/pbr.vert.spv",
+  "fragmentSpv": "shaders/orange_engine/pbr.frag.spv",
+  "uniforms": [
+    { "name": "uMVP",       "type": "mat4" },
+    { "name": "uModel",     "type": "mat4" },
+    { "name": "uBaseColor", "type": "vec4" },
+    { "name": "uMRA",       "type": "vec4" }
+  ],
+  "textureSlots": []
+}

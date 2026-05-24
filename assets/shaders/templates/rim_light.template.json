@@ -1,0 +1,11 @@
+{
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 0 },
+  "templateName": "rim_light",
+  "vertexSpv": "shaders/orange_engine/rim_light.vert.spv",
+  "fragmentSpv": "shaders/orange_engine/rim_light.frag.spv",
+  "uniforms": [
+    { "name": "uMVP",   "type": "mat4" },
+    { "name": "uModel", "type": "mat4" }
+  ],
+  "textureSlots": []
+}

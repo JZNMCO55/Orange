@@ -112,14 +112,43 @@ public:
     // FindTemplate / CreateInstance 同节奏；不强调零分配。
     std::vector<std::string> GetTemplateNames() const;
 
-    // 便利方法：把引擎内置的 toon / rim_light 模板注册进 system。等价
-    // 于手动 RegisterTemplate(toon_desc) + RegisterTemplate(rim_light_desc)，
-    // 但内部直接复用 BuiltinMaterials::LoadToon / LoadRimLight 的工厂
-    // （它们已经做完 SPIR-V 加载 + Material 装配），不重复实现。
+    // 便利方法：把引擎内置 6 个模板（textured / toon / rim_light /
+    // dissolve / emissive / pbr）通过 BuiltinMaterials::Load* 工厂注册进
+    // system。SPIR-V 路径走 .exe-相对（GetExecutableDir + shaders/
+    // orange_engine/<name>.spv），失败仍把 template 落地但 shader handle
+    // 为无效——与 RegisterTemplate 半残语义一致。
     //
     // 重复调用幂等吗？不——第二次会因为 name 已存在返回 AlreadyExists。
     // 调用方按需在 system 生命周期早期调一次。
     Result<void, ResultCode> RegisterBuiltins();
+
+    // 扫描目录下所有 `*.template.json` 文件，按 schema v1.0 解析成
+    // `ShaderTemplateDesc` 后调 `RegisterTemplate` 注册。schema:
+    //
+    //   {
+    //     "schemaVersion": {"namespace":"render/shader_template","major":1,"minor":0},
+    //     "templateName":  "<unique-name>",
+    //     "vertexSpv":     "<path-to-vert.spv>",
+    //     "fragmentSpv":   "<path-to-frag.spv>",
+    //     "uniforms":      [{"name":"<uniform-name>","type":"mat4|vec2|vec3|vec4|float|int"}],
+    //     "textureSlots":  [{"binding":<uint>,"name":"<slot-name>"}]
+    //   }
+    //
+    // SPIR-V 路径解析约定（T1 阶段）：相对路径以 GetExecutableDir() 为
+    // 基（与 BuiltinMaterials 同款），让 .template.json 写 "shaders/
+    // orange_engine/<name>.spv" 即指向 build/bin/$<CONFIG>/shaders/
+    // orange_engine/ 下的 CMake 编译产物。绝对路径原样喂 AssetRegistry。
+    //
+    // 失败容忍：单个文件解析失败 / schema 不兼容 / RegisterTemplate 返
+    // 错 → log + 继续扫下一个文件；不中断整目录扫描。返回值反映"是否
+    // 全部成功"——失败时调用方可按 log 排查具体哪条出问题。
+    //
+    // 目录不存在 → 返回 NotFound + log warning；不阻塞调用方（编辑器
+    // 仍可启动，只是 Material Combo 无候选）。
+    //
+    // 不在帧内热路径 —— 启动期一次性调用，文件 IO + JSON 解析允许阻塞。
+    Result<void, ResultCode> RegisterTemplatesFromDirectory(
+        const std::filesystem::path& dir);
 
 private:
     struct Impl;

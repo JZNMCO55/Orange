@@ -425,14 +425,24 @@ void InitializeEditorAssets(EditorHost& host)
     }
 
     host.assets.pMaterials = std::make_unique<MaterialSystem>(*host.assets.pAssets);
-    if (auto rb = host.assets.pMaterials->RegisterBuiltins(); rb.IsErr())
+    // v1.2 T1：从 `assets/shaders/templates/*.template.json` 数据驱动注册
+    // 6 个内置 template（pbr / textured / toon / rim_light / dissolve /
+    // emissive），与历史 RegisterBuiltins() 行为完全等价。.template.json
+    // 内 SPIR-V 路径走 .exe-相对（GetExecutableDir + shaders/orange_engine/
+    // <name>.spv），由 RegisterTemplatesFromDirectory 内部 ResolveSpvPath
+    // 统一解析。失败语义：单个 .template.json 解析失败 / SPIR-V 加载失败
+    // 时该 template 半残落入表（与 RegisterBuiltins 旧路径一致），仍允许
+    // 编辑器启动；整体 IoError 仅 log 不阻塞。
     {
-        // 通常意味着 shaders/orange_engine/*.spv 不在 .exe 同目录——in-tree
-        // build 由 CMake 把 SPV 拷到 build/bin/$<CONFIG>/shaders/orange_engine/,
-        // standalone install 还没有官方流程时这里会报，但不阻止编辑器启动。
-        ORANGE_LOG_WARN("[OrangeEditor] MaterialSystem::RegisterBuiltins 失败 "
-                        "(code={}) —— Scene 视口稍后可能不显示几何",
-                        static_cast<unsigned>(rb.Error()));
+        const std::filesystem::path templatesDir = "assets/shaders/templates";
+        auto rb = host.assets.pMaterials->RegisterTemplatesFromDirectory(templatesDir);
+        if (rb.IsErr())
+        {
+            ORANGE_LOG_WARN("[OrangeEditor] MaterialSystem::RegisterTemplatesFromDirectory "
+                            "失败 (dir={}, code={}) —— Scene 视口稍后可能不显示几何",
+                            templatesDir.string(),
+                            static_cast<unsigned>(rb.Error()));
+        }
     }
 
     // GAP-2026-05-16 G2：内置 MaterialInstance 落盘 .material + lazy bake。

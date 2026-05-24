@@ -1280,7 +1280,13 @@ src/render/
   - [[GAP-2026-05-24-editor-asset-browser-create-material-missing]] —— Create Material GAP 的对偶：那条解决"基于现有 template 创建实例"，本条解决"如何加新 template"
   - [[GAP-2026-05-19-pbr-push-constant-exceeds-spec-min]] G1 —— per-instance Material UBO 是 G2 的硬前置
   - `samples/08_custom_shader` —— 当前唯一的 "游戏侧自定义 shader" 演示路径（C++ 路线，未来 G1 落地后这条 sample 应改 demo G1 路径）
-- **归属**：G1 候选 v1.2 minor 独立 milestone（v1.1.1 Create Material UI 已 ✅ 单走 patch；本条与 [[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] G2 材质球缩略图同期，构成"美术 shader / material 工作流"完整 batch 更合理）；G2 候选 Phase 7+ / 待 Material UBO 基础设施 +1；G3 backlog 不主动
+- **归属**：G1 候选 v1.2 minor 独立 milestone（v1.1.1 Create Material UI 已 ✅ 单走 patch；G2 缩略图独立 v1.3.0 minor，按 [[feedback-post-v1-versioning]] 节奏拆分）；G2 候选 Phase 7+ / 待 Material UBO 基础设施 +1；G3 backlog 不主动
+- **进度**（v1.2 minor 拆分 T1-T5 多 session 推进，按 OE 历史 v1.1 / Phase 6.5 节奏，最后一次 bump VERSION 1.1.1 → 1.2.0 + ✅）：
+  - **T1 ✅**（2026-05-24）：G1 框架落地——`assets/shaders/templates/` + 6 个 `.template.json` schema v1.0（namespace `render/shader_template`）+ `MaterialSystem::RegisterTemplatesFromDirectory(dir)` API（JsonReader 解析 + ResolveSpvPath .exe-relative 解析 + 单文件失败容忍）+ BuiltinAssets.cpp 启动期 `RegisterBuiltins()` → `RegisterTemplatesFromDirectory("assets/shaders/templates")` 替换；BuiltinMaterials / MaterialSystem::RegisterBuiltins / Pipeline default / tests / sample 全不动（最小风险 + 行为完全等价）；Material Inspector UI 仍 pbr hardcode 留待 T2
+  - **T2**（待）：Inspector UI 元数据驱动重构（从 ShaderTemplateDesc.uniforms[] 自动生成 widget + 支持 `editor: {}` 块如 range / slide / color / tooltip）
+  - **T3**（待）：第二批 6 个新 shader（unlit / skybox / sprite2d / particle_cpu / particle_trail / pbr_transparent）GLSL + SPV + .template.json
+  - **T4**（待）：第三批 3 个新 shader（decal / water_basic / planar_shadow）
+  - **T5**（待）：macro 守卫联动 + 收尾 + bump VERSION + acceptance-checklist + ✅
 
 ---
 
