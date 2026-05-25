@@ -62,11 +62,26 @@ layout(set = 0, binding = 5, std140) uniform PointLightsUbo
     PointLightData uPointLights[ORANGE_MAX_POINT_LIGHTS];
 } pointLights;
 
-layout(location = 0) in vec2 vUV;
-layout(location = 1) in vec3 vWorldPos;
-layout(location = 2) in vec3 vNormal;
-layout(location = 3) in vec4 vBaseColor;
-layout(location = 4) in vec4 vMRA;
+// set 1 = per-instance material 贴图（GAP-2026-05-25 A2 / G1）。Pipeline 按
+// MaterialInstance 的 texture 槽分配 / 更新本 set；未绑的槽喂 default 贴图
+// （白 baseColor/MR/AO + flat-normal (0.5,0.5,1)），使采样结果 ×scalar = scalar、
+// 法线不扰动 —— 没绑贴图时输出与纯 scalar PBR 完全一致（零回归）。
+//   binding 0: baseColor（sRGB→linear 已由贴图 format 处理，这里按 linear 用）
+//   binding 1: tangent-space normal map（RGB 编码 [0,1] → [-1,1]）
+//   binding 2: metalRough（glTF 约定 G=roughness, B=metallic）
+//   binding 3: ambient occlusion（R 通道）
+layout(set = 1, binding = 0) uniform sampler2D uBaseColorTex;
+layout(set = 1, binding = 1) uniform sampler2D uNormalTex;
+layout(set = 1, binding = 2) uniform sampler2D uMetalRoughTex;
+layout(set = 1, binding = 3) uniform sampler2D uAoTex;
+
+layout(location = 0) in vec2  vUV;
+layout(location = 1) in vec3  vWorldPos;
+layout(location = 2) in vec3  vNormal;
+layout(location = 3) in vec4  vBaseColor;
+layout(location = 4) in vec4  vMRA;
+layout(location = 5) in vec3  vWorldTangent;
+layout(location = 6) in float vTangentSign;
 
 layout(location = 0) out vec4 outColor;
 
@@ -109,12 +124,17 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 
 void main()
 {
-    // ---- PBR 材质参数（per-instance，来自 MaterialInstance 的 uBaseColor /
-    //      uMRA override，经 vert push constant 透传成 varying）
-    vec3  baseColor = vBaseColor.rgb;
-    float metallic  = clamp(vMRA.x, 0.0, 1.0);
-    float roughness = clamp(vMRA.y, 0.04, 1.0);  // 下限避开 D_GGX α→0 奇异
-    float ao        = clamp(vMRA.z, 0.0, 1.0);
+    // ---- PBR 材质参数（per-instance scalar override × set 1 贴图）------------
+    //   scalar 来自 MaterialInstance 的 uBaseColor / uMRA（经 vert push constant
+    //   透传成 varying）；贴图来自 set 1（未绑时为 default 白 / flat-normal，
+    //   乘子 = 1 → 退化为纯 scalar）。glTF 约定 metalRough 贴图 G=roughness、
+    //   B=metallic；ao 贴图取 R。
+    vec4  baseTex   = texture(uBaseColorTex, vUV);
+    vec3  baseColor = vBaseColor.rgb * baseTex.rgb;
+    vec3  mrTex     = texture(uMetalRoughTex, vUV).rgb;
+    float metallic  = clamp(vMRA.x * mrTex.b, 0.0, 1.0);
+    float roughness = clamp(vMRA.y * mrTex.g, 0.04, 1.0);  // 下限避开 D_GGX α→0 奇异
+    float ao        = clamp(vMRA.z * texture(uAoTex, vUV).r, 0.0, 1.0);
 
     // α = roughness²（Disney convention，感知线性）
     float alpha = roughness * roughness;
@@ -122,8 +142,25 @@ void main()
     // F0：非金属 ≈ 0.04（典型介电），金属 = baseColor（金属"吸收"非反射）
     vec3 F0 = mix(vec3(0.04), baseColor, metallic);
 
-    // 几何 / 视图向量
-    vec3 N = normalize(vNormal);
+    // ---- 法线：几何法线 + 切线空间法线贴图扰动（TBN）----------------------
+    //   Gram-Schmidt 把插值后的世界切线对几何法线正交化，副切线由手性符号
+    //   叉乘得到。退化切线（length≈0：default (1,0,0) 恰与 +X 法线平行 / 零缩
+    //   放）时跳过法线贴图、直接用几何法线，避免 mat3 列含 NaN 被 0×NaN 传染。
+    vec3  Ngeom = normalize(vNormal);
+    vec3  tProj = vWorldTangent - Ngeom * dot(Ngeom, vWorldTangent);
+    float tLen  = length(tProj);
+    vec3  N;
+    if (tLen > 1e-4)
+    {
+        vec3 T = tProj / tLen;
+        vec3 B = cross(Ngeom, T) * vTangentSign;
+        vec3 nTex = texture(uNormalTex, vUV).xyz * 2.0 - 1.0;
+        N = normalize(mat3(T, B, Ngeom) * nTex);
+    }
+    else
+    {
+        N = Ngeom;
+    }
     vec3 V = normalize(light.uCameraWorldPos.xyz - vWorldPos);
 
     // 主 directional light 方向：uLightDirIntensity.xyz 是光的"传播方向"，

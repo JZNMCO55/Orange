@@ -23,6 +23,64 @@ orange_engine_add_test(core_handle_test         core/HandleTest.cpp)
 orange_engine_add_test(core_serialization_test  core/SerializationTest.cpp)
 orange_engine_add_test(asset_registry_test      asset/AssetRegistryTest.cpp)
 orange_engine_add_test(async_asset_test         asset/AsyncAssetTest.cpp)
+orange_engine_add_test(mesh_tangent_loader_test asset/MeshTangentLoaderTest.cpp)
+
+# MikkTSpace 切线生成（A2 Inc2）—— 测的是 OrangeEditor import helper
+# （MeshTangentGen）的回调接线 + re-weld，故直接编译该 helper 源 + vendor
+# 的 mikktspace.c（与下方 material_file_io_test 编 editor helper 同款模式）。
+# mikktspace.c 是第三方 C 源（C 语言在顶层 project 启用），单独 /W0 豁免
+# /WX。helper 自身 + 测试源仍走标准 /W4 /WX。
+add_executable(mikktspace_tangent_test
+    asset/MikkTSpaceTangentTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c")
+target_link_libraries(mikktspace_tangent_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(mikktspace_tangent_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace")
+orange_engine_set_compiler_options(mikktspace_tangent_test)
+if (MSVC)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "/W0")
+else ()
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "-w")
+endif ()
+add_test(NAME mikktspace_tangent_test COMMAND mikktspace_tangent_test)
+
+# MikkTSpace 真实复杂模型验证 —— 在有机曲面上跑 cgltf 解析 + 切线生成，断
+# 言全覆盖 + 单位长 + 切线⊥法线。fixture（gltf_test/Avocado）是 session 内
+# 下载的未跟踪资产，故 `if(EXISTS)` 门控：本机有就编 + 跑，干净 checkout 跳
+# 过（不阻塞 CI）。cgltf 同款单 header（CGLTF_IMPLEMENTATION 在测试 TU expand）。
+set(_orange_mikkt_fixture "${CMAKE_SOURCE_DIR}/gltf_test/Avocado/Avocado.gltf")
+if (EXISTS "${_orange_mikkt_fixture}")
+    add_executable(mikktspace_real_model_test
+        asset/MikkTSpaceRealModelTest.cpp
+        "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c")
+    target_link_libraries(mikktspace_real_model_test PRIVATE OrangeEngine::orange_engine)
+    target_include_directories(mikktspace_real_model_test PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace"
+        "${CMAKE_SOURCE_DIR}/vendor/cgltf")
+    target_compile_definitions(mikktspace_real_model_test PRIVATE
+        "ORANGE_ENGINE_GLTF_FIXTURE=\"${_orange_mikkt_fixture}\"")
+    orange_engine_set_compiler_options(mikktspace_real_model_test)
+    if (MSVC)
+        set_source_files_properties(
+            "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+            PROPERTIES COMPILE_FLAGS "/W0")
+    else ()
+        set_source_files_properties(
+            "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+            PROPERTIES COMPILE_FLAGS "-w")
+    endif ()
+    add_test(NAME mikktspace_real_model_test COMMAND mikktspace_real_model_test)
+else ()
+    message(STATUS "mikktspace_real_model_test 跳过：未找到 fixture ${_orange_mikkt_fixture}")
+endif ()
 orange_engine_add_test(scene_world_test         scene/SceneWorldTest.cpp)
 orange_engine_add_test(scene_serialization_test scene/SceneSerializationTest.cpp)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
@@ -43,6 +101,9 @@ orange_engine_add_test(material_schema_test     render/MaterialSchemaTest.cpp)
 orange_engine_add_test(pipeline_template_cache_test render/PipelineTemplateCacheTest.cpp)
 orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.cpp)
 orange_engine_add_test(pipeline_offscreen_test     render/PipelineOffscreenTest.cpp)
+orange_engine_add_test(pbr_scene_black_repro_test  render/PbrSceneBlackReproTest.cpp)
+target_compile_definitions(pbr_scene_black_repro_test PRIVATE
+    "ORANGE_ENGINE_REPO_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\"")
 orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(vfx_system_test             render/VfxSystemTest.cpp)
 orange_engine_add_test(insert_pass_test            render/InsertPassTest.cpp)
@@ -100,6 +161,7 @@ add_test(NAME skeletal_animator_test COMMAND skeletal_animator_test)
 # + 运行时 collider 替换（Phase 4 / Task 07，半径 1 → 0.3 mass / 静止位置都跟变）
 orange_engine_add_test(physics_interface_test       physics/PhysicsInterfaceTest.cpp)
 orange_engine_add_test(box2d_step_test              physics/Box2DStepTest.cpp)
+orange_engine_add_test(collider_shape_fall_test     physics/ColliderShapeFallTest.cpp)
 orange_engine_add_test(fixture_replace_test         physics/FixtureReplaceTest.cpp)
 
 # Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）

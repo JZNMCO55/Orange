@@ -33,8 +33,9 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
     {
         return ResultCode::InvalidArgument;
     }
-    // 接受 v1 / v2 / v3；其他 version 拒绝（前向兼容由 Save 时 bump version 处理）。
-    if (version != kVersionV1 && version != kVersionV2 && version != kVersionV3)
+    // 接受 v1 / v2 / v3 / v4；其他 version 拒绝（前向兼容由 Save 时 bump version 处理）。
+    if (version != kVersionV1 && version != kVersionV2
+        && version != kVersionV3 && version != kVersionV4)
     {
         return ResultCode::SchemaMismatch;
     }
@@ -70,10 +71,10 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         return ResultCode::InvalidArgument;
     }
 
-    // v2 / v3 追加段：hasUVs (uint8) + 可选 uvs[vertexCount]。
+    // v2 及以上追加段：hasUVs (uint8) + 可选 uvs[vertexCount]。
     // v1 文件读到这里已经到 EOF，MeshAsset.UVs() 留空。
     std::vector<VertexUV2> uvs;
-    if (version == kVersionV2 || version == kVersionV3)
+    if (version >= kVersionV2)
     {
         std::uint8_t hasUVs = 0;
         if (!reader.Read(hasUVs))
@@ -92,11 +93,11 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         }
     }
 
-    // v3 追加段：hasNormals (uint8) + 可选 normals[vertexCount]。
+    // v3 及以上追加段：hasNormals (uint8) + 可选 normals[vertexCount]。
     // v1 / v2 文件读到这里已经到 EOF，下面 fallback 会调
     // ComputeSmoothNormalsFromTriangles 补算。
     std::vector<VertexNormal3> normals;
-    if (version == kVersionV3)
+    if (version >= kVersionV3)
     {
         std::uint8_t hasNormals = 0;
         if (!reader.Read(hasNormals))
@@ -107,6 +108,27 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         {
             normals.resize(vertexCount);
             if (!reader.ReadBytes(normals.data(), vertexCount * sizeof(VertexNormal3)))
+            {
+                return ResultCode::InvalidArgument;
+            }
+        }
+    }
+
+    // v4 追加段：hasTangents (uint8) + 可选 tangents[vertexCount]（float[4]）。
+    // v1..v3 文件读到这里已经到 EOF，下面 fallback 会在有 UV+normal 时调
+    // ComputeTangentsFromTriangles 补算。
+    std::vector<VertexTangent4> tangents;
+    if (version >= kVersionV4)
+    {
+        std::uint8_t hasTangents = 0;
+        if (!reader.Read(hasTangents))
+        {
+            return ResultCode::InvalidArgument;
+        }
+        if (hasTangents != 0 && vertexCount > 0)
+        {
+            tangents.resize(vertexCount);
+            if (!reader.ReadBytes(tangents.data(), vertexCount * sizeof(VertexTangent4)))
             {
                 return ResultCode::InvalidArgument;
             }
@@ -150,6 +172,22 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
     {
         asset->ComputeSmoothNormalsFromTriangles();
     }
+
+    // 磁盘 tangent（v4-hasTangents=1）优先注入；缺 tangent 但已有 UV+normal
+    // 时（v1..v3 全部 / v4-hasTangents=0）落 Lengyel fallback 现场补算。无
+    // UV 的 mesh 切线无定义，HasTangents() 保持 false，渲染端走无 tangent 路径。
+    if (asset != nullptr)
+    {
+        if (!tangents.empty())
+        {
+            asset->SetTangents(std::move(tangents));
+        }
+        else if (asset->HasUVs() && asset->HasNormals()
+                 && !asset->Positions().empty())
+        {
+            asset->ComputeTangentsFromTriangles();
+        }
+    }
     return asset;
 }
 
@@ -162,13 +200,19 @@ Result<void, ResultCode> MeshLoader::Save(std::string_view path, const MeshAsset
 
     // UV / normal 段若存在必须 per-vertex 一一对应——本格式约定，避免
     // 读取端无法确定 attribute index 与 position index 的对应关系。
+    const auto& tangents  = mesh.Tangents();
     const bool hasUVs     = !uvs.empty();
     const bool hasNormals = !normals.empty();
+    const bool hasTangents = !tangents.empty();
     if (hasUVs && uvs.size() != positions.size())
     {
         return ResultCode::InvalidArgument;
     }
     if (hasNormals && normals.size() != positions.size())
+    {
+        return ResultCode::InvalidArgument;
+    }
+    if (hasTangents && tangents.size() != positions.size())
     {
         return ResultCode::InvalidArgument;
     }
@@ -200,6 +244,12 @@ Result<void, ResultCode> MeshLoader::Save(std::string_view path, const MeshAsset
     if (hasNormals)
     {
         writer.WriteBytes(normals.data(), normals.size() * sizeof(VertexNormal3));
+    }
+
+    writer.Write<std::uint8_t>(hasTangents ? 1u : 0u);
+    if (hasTangents)
+    {
+        writer.WriteBytes(tangents.data(), tangents.size() * sizeof(VertexTangent4));
     }
 
     return writer.SaveToFile(path);

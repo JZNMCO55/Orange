@@ -757,6 +757,140 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             rhi.UpdateDescriptorSet(*impl.mainDescSet, writes, 3);
         }
     }
+
+    // 7.8 set 1 · per-instance material 贴图基础设施（GAP-2026-05-25 A2/G1）
+    {
+        // 1×1 default 贴图：白（baseColor/MR/AO 缺省 → ×scalar = scalar）+
+        // flat-normal (128,128,255) → 解码 (0,0,1) → TBN 不扰动法线。两张建出
+        // 后，没绑贴图的 PBR 材质渲染与纯 scalar 路径完全一致（零回归）。
+        Orange::Rhi::SamplerDesc matSamp{};  // 默认 linear filter + Repeat wrap
+        impl.materialSampler = rhi.CreateSampler(matSamp);
+
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        for (std::uint32_t b = 0; b < Pipeline::Impl::kMaterialTexBindings; ++b)
+        {
+            lay.mBindings.push_back({b,
+                                     Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                     1,
+                                     Orange::Rhi::ShaderStage::Fragment});
+        }
+        lay.mpDebugName = "orange_engine.material.set1.layout";
+        impl.materialTexLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        const std::uint32_t maxSets = Pipeline::Impl::kMaxMaterialSets + 1u;  // +1 = default set
+        Orange::Rhi::DescriptorPoolDesc pool{};
+        pool.mMaxSets = maxSets;
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                   maxSets * Pipeline::Impl::kMaterialTexBindings});
+        pool.mpDebugName = "orange_engine.material.set1.pool";
+        impl.materialTexPool = rhi.CreateDescriptorPool(pool);
+
+        auto make1x1 = [&]() -> std::unique_ptr<Orange::Rhi::RHITexture> {
+            Orange::Rhi::TextureDesc t{};
+            t.mWidth       = 1;
+            t.mHeight      = 1;
+            t.mFormat      = Orange::Rhi::TextureFormat::RGBA8Unorm;
+            t.mDimension   = Orange::Rhi::TextureDimension::Tex2D;
+            t.mArrayLayers = 1u;
+            t.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                           | Orange::Rhi::TextureUsage::TransferDst;
+            return rhi.CreateTexture(t);
+        };
+        const std::uint8_t whitePx[4] = {255u, 255u, 255u, 255u};
+        const std::uint8_t flatPx[4]  = {128u, 128u, 255u, 255u};  // tangent-space (0,0,1)
+        impl.defaultWhiteTex  = make1x1();
+        impl.defaultNormalTex = make1x1();
+
+        if (!impl.materialSampler || !impl.materialTexLayout || !impl.materialTexPool
+            || !impl.defaultWhiteTex || !impl.defaultNormalTex)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: set 1 material 资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        // 上传两张 default 贴图（offscreenCmd staging，与 dummy IBL 同款）。
+        Orange::Rhi::BufferDesc sd{};
+        sd.mSize        = 8;  // 2 × RGBA8
+        sd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+        sd.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        auto staging = rhi.CreateBuffer(sd);
+        if (!staging)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: default 贴图 staging buffer 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        {
+            void* mapped = staging->Map();
+            if (mapped == nullptr)
+            {
+                ORANGE_LOG_ERROR("Pipeline::Initialize: default 贴图 staging Map 失败");
+                Shutdown();
+                return ResultCode::InternalError;
+            }
+            std::memcpy(mapped, whitePx, 4);
+            std::memcpy(static_cast<std::uint8_t*>(mapped) + 4, flatPx, 4);
+            staging->Unmap();
+        }
+        auto& cmd = *impl.offscreenCmd;
+        if (cmd.Begin() != Orange::ResultCode::Success)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: default 贴图 cmd.Begin 失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        cmd.TransitionTexture(*impl.defaultWhiteTex,
+                              Orange::Rhi::TextureLayout::Undefined,
+                              Orange::Rhi::TextureLayout::TransferDst);
+        cmd.TransitionTexture(*impl.defaultNormalTex,
+                              Orange::Rhi::TextureLayout::Undefined,
+                              Orange::Rhi::TextureLayout::TransferDst);
+        {
+            Orange::Rhi::BufferTextureCopyRegion r{};
+            r.mBufferOffset = 0;
+            r.mMipLevel = 0; r.mArrayLayer = 0;
+            r.mWidth = 1; r.mHeight = 1; r.mDepth = 1;
+            cmd.CopyBufferToTexture(*staging, *impl.defaultWhiteTex, r);
+            r.mBufferOffset = 4;
+            cmd.CopyBufferToTexture(*staging, *impl.defaultNormalTex, r);
+        }
+        cmd.TransitionTexture(*impl.defaultWhiteTex,
+                              Orange::Rhi::TextureLayout::TransferDst,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        cmd.TransitionTexture(*impl.defaultNormalTex,
+                              Orange::Rhi::TextureLayout::TransferDst,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+        if (cmd.End() != Orange::ResultCode::Success
+            || rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: default 贴图上传 cmd 提交失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        impl.renderDevice->WaitIdle();
+
+        // defaultMaterialSet：4 槽全喂 default 贴图（null instance / 非覆盖 PBR draw）。
+        impl.defaultMaterialSet =
+            rhi.AllocateDescriptorSet(*impl.materialTexPool, *impl.materialTexLayout);
+        if (impl.defaultMaterialSet)
+        {
+            Orange::Rhi::RHITexture* defs[Pipeline::Impl::kMaterialTexBindings] = {
+                impl.defaultWhiteTex.get(), impl.defaultNormalTex.get(),
+                impl.defaultWhiteTex.get(), impl.defaultWhiteTex.get()};
+            Orange::Rhi::DescriptorWrite w[Pipeline::Impl::kMaterialTexBindings]{};
+            for (std::uint32_t b = 0; b < Pipeline::Impl::kMaterialTexBindings; ++b)
+            {
+                w[b].mBinding             = b;
+                w[b].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+                w[b].mImageInfo.mpTexture = defs[b];
+                w[b].mImageInfo.mpSampler = impl.materialSampler.get();
+            }
+            rhi.UpdateDescriptorSet(*impl.defaultMaterialSet, w,
+                                    Pipeline::Impl::kMaterialTexBindings);
+        }
+    }
+
     {
         // shadow caster pipeline：depth-only target (D32Float)，push constant
         // 128 B (uLightViewProj + uModel)。

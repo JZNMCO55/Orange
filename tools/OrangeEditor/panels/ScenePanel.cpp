@@ -6,6 +6,7 @@
 #include <orange/engine/core/Log.h>
 
 #include "../ColliderDebugDraw.h"
+#include "../ColliderVertexEdit.h"
 #include "../EditorAssetDropHandler.h"  // v1.2.3 patch · viewport ORANGE_ASSET DnD
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
@@ -327,7 +328,13 @@ void EditorRenderLayer::DrawScenePanel()
             // 的"BeginGroup 期间不交叉"惯例对偶）。键盘 W/E/R 不依赖 viewport
             // hover（与 Lumix / Unity 同款全局快捷键约定；但要求 ImGui 无
             // 文本输入 active，否则会拦截字母键）。
-            if (!mHost.gizmo.IsDragging() && !ImGui::IsAnyItemActive())
+            // collider 顶点编辑子模式（GAP-2026-05-21）：active 时接管 viewport
+            // 鼠标 —— 跳过 W/E/R 切换 + gizmo + picking，避免双重消费。返回 true
+            // 即表示子模式激活；内部已绘制顶点 handle + 处理选 / 拖 / 加 / 删。
+            const bool colliderEditing = Orange::Editor::HandleColliderVertexEdit(
+                mHost, imageOrigin, imageSize, aspect);
+
+            if (!colliderEditing && !mHost.gizmo.IsDragging() && !ImGui::IsAnyItemActive())
             {
                 // v0.8 keybinding：从 EditorKeybindings 读绑定的 key（默认
                 // W/E/R，可在 Settings 面板内 rebind）。
@@ -344,9 +351,17 @@ void EditorRenderLayer::DrawScenePanel()
                 {
                     mHost.gizmo.mode = EditorGizmoState::Mode::Scale;
                 }
+                // F：聚焦选中物体 —— 相机 pivot 移到选中 entity 世界 AABB
+                // 中心 + 拉到合适距离 + 按尺度重算 near/far。解决导入模型
+                // （Duck 165 单位 / Avocado 0.04 单位）尺寸悬殊看不到 / 被裁。
+                else if (ImGui::IsKeyPressed(kb.frameSelected, false))
+                {
+                    FrameSelectedCamera(mHost);
+                }
             }
 
             bool gizmoActive = false;
+            if (!colliderEditing)
             switch (mHost.gizmo.mode)
             {
                 case EditorGizmoState::Mode::Translate:
@@ -429,7 +444,8 @@ void EditorRenderLayer::DrawScenePanel()
             // gizmoActive gate：本帧 gizmo 处理了 LMB（hover handle 或正在
             // 拖动）→ 跳过 picking。否则 gizmo 拖动结束时的 LMB-release 会
             // 同时触发 picking，把选中实体改成 gizmo 下方的物体，破坏 UX。
-            if (!gizmoActive
+            if (!colliderEditing
+                && !gizmoActive
                 && ImGui::IsItemHovered()
                 && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
             {

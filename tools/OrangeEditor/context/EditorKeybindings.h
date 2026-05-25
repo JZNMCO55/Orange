@@ -28,6 +28,11 @@ struct EditorKeybindings
     // Entity Tree 内重命名 / 删除。F2 / Del 工业惯例。
     ImGuiKey renameEntity   = ImGuiKey_F2;
     ImGuiKey deleteEntity   = ImGuiKey_Delete;
+    // Viewport 内聚焦选中物体（相机 pivot 移到选中 entity 的世界 AABB 中心 +
+    // 拉到能完整看到的距离 + 重算 zNear/zFar）。F 对齐 Unity / Unreal；解决
+    // "导入模型尺寸 / 位置千差万别（如 glTF Duck 165 单位且偏离原点 / Avocado
+    // 0.04 单位）看不到 / 被视锥裁剪"。
+    ImGuiKey frameSelected  = ImGuiKey_F;
 };
 
 void ReadEditorKeybindings(const Orange::Engine::JsonReader& in,

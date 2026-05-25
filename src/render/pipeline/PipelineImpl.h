@@ -279,6 +279,171 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       mainDescSet;
     bool                                                  mainDescBound{false};
 
+    // ---- set 1 · per-instance material 贴图（GAP-2026-05-25 A2 / G1）-------
+    // 仅 PBR 模板（textureSlots 非空）的 pipeline 声明本 set。binding 0=baseColor /
+    // 1=normal / 2=metalRough / 3=ao，全 CombinedImageSampler、Fragment stage。
+    // 未绑的槽喂 default 贴图（白 / flat-normal）→ 采样 ×scalar = scalar、法线不
+    // 扰动 → 没绑贴图时输出与纯 scalar PBR 完全一致（零回归）。
+    static constexpr std::uint32_t kMaterialTexBindings = 4;
+    static constexpr std::uint32_t kMaxMaterialSets     = 128;
+    std::unique_ptr<Orange::Rhi::RHISampler>             materialSampler;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> materialTexLayout;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      materialTexPool;
+    std::unique_ptr<Orange::Rhi::RHITexture>             defaultWhiteTex;   // baseColor/MR/AO 缺省
+    std::unique_ptr<Orange::Rhi::RHITexture>             defaultNormalTex;  // flat-normal (0.5,0.5,1)
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       defaultMaterialSet;  // 全 default（null instance）
+    // 贴图 GPU 缓存：键 = AssetHandle<TextureAsset>::Value()。同贴图跨材质复用。
+    std::unordered_map<std::uint64_t, std::unique_ptr<Orange::Rhi::RHITexture>> materialTexCache;
+    // per-MaterialInstance descriptor set 缓存 + 签名（4 个 binding 的 handle
+    // value）；签名变化（编辑器换贴图）时就地 UpdateDescriptorSet 重建。
+    struct MaterialDescEntry
+    {
+        std::unique_ptr<Orange::Rhi::RHIDescriptorSet> set;
+        std::array<std::uint64_t, kMaterialTexBindings> sig{};
+    };
+    std::unordered_map<const MaterialInstance*, MaterialDescEntry> materialDescCache;
+
+    // pbr.frag/vert 无条件采样 set 1（4 贴图）+ 读 tangent(loc3)。任何 PBR 材质
+    // 都必须声明/绑定 set 1 + tangent，否则 shader 采样未绑 descriptor → 管线
+    // 非法 → 全黑（GAP-2026-05-25 回归:pbr.template.json 漏填 textureSlots 时
+    // 本判定误返 false → 编辑器场景全黑）。因此 gate **不只**看 textureSlots,
+    // 还按 PBR push 签名（uMVP+uModel+uBaseColor+uMRA = 160B,仅 pbr 模板有）
+    // 兜底——slotless pbr 也声明/绑 set 1（喂 default 贴图,退化为纯 scalar PBR）。
+    static bool MaterialUsesTextureSet(const Material& mat) noexcept
+    {
+        return !mat.textureSlots.empty()
+            || PipelineDetail::ComputePushConstantSize(mat) >= 160u;
+    }
+
+    // 上传一张 RGBA8 material 贴图到 GPU + 缓存。非 RGBA8 / 缺失 / 失败返
+    // nullptr（caller 落 default 贴图）。frame-time 调用（走 UploadContext）。
+    Orange::Rhi::RHITexture* EnsureGpuTexture(
+        const Asset::AssetHandle<Asset::TextureAsset>& handle)
+    {
+        if (!handle.IsValid() || assets == nullptr || renderDevice == nullptr || !upload)
+        {
+            return nullptr;
+        }
+        if (auto it = materialTexCache.find(handle.Value()); it != materialTexCache.end())
+        {
+            return it->second.get();
+        }
+        const auto* asset = assets->Get(handle);
+        if (asset == nullptr || asset->Empty() || asset->Width() == 0 || asset->Height() == 0)
+        {
+            return nullptr;
+        }
+        if (asset->Format() != Asset::TextureFormat::R8G8B8A8_UNorm)
+        {
+            ORANGE_LOG_WARN("Pipeline: material 贴图 (handle={}) 非 RGBA8，落 default",
+                            static_cast<unsigned long long>(handle.Value()));
+            return nullptr;
+        }
+        auto& rhi = renderDevice->GetRhiDevice();
+        Orange::Rhi::TextureDesc t{};
+        t.mWidth       = asset->Width();
+        t.mHeight      = asset->Height();
+        t.mFormat      = Orange::Rhi::TextureFormat::RGBA8Unorm;
+        t.mDimension   = Orange::Rhi::TextureDimension::Tex2D;
+        t.mArrayLayers = 1u;
+        t.mUsage       = Orange::Rhi::TextureUsage::Sampled
+                       | Orange::Rhi::TextureUsage::TransferDst;
+        auto tex = rhi.CreateTexture(t);
+        if (!tex)
+        {
+            return nullptr;
+        }
+        const auto& px = asset->Pixels();
+        if (Orange::Failed(upload->UploadTexture(*tex, px.data(), px.size())))
+        {
+            ORANGE_LOG_ERROR("Pipeline: material 贴图 UploadTexture 失败 (handle={})",
+                             static_cast<unsigned long long>(handle.Value()));
+            return nullptr;
+        }
+        auto* raw = tex.get();
+        materialTexCache.emplace(handle.Value(), std::move(tex));
+        return raw;
+    }
+
+    // 建 / 复用某 MaterialInstance 的 set 1 descriptor。inst==nullptr 或资源
+    // 未就绪 → defaultMaterialSet。签名命中缓存 → 直接返回（不触发 GPU 写，
+    // 录制期调用安全）。在 EnsureMaterialDescriptors 预通道里 frame 录制前调
+    // 一次确保 build + 上传完成。
+    Orange::Rhi::RHIDescriptorSet* EnsureMaterialDescriptorSet(const MaterialInstance* inst)
+    {
+        if (inst == nullptr || !materialTexLayout || !materialTexPool || renderDevice == nullptr)
+        {
+            return defaultMaterialSet.get();
+        }
+        std::array<std::uint64_t, kMaterialTexBindings> sig{};
+        for (std::uint32_t b = 0; b < kMaterialTexBindings; ++b)
+        {
+            sig[b] = inst->GetTextureBinding(b).Value();
+        }
+        auto it = materialDescCache.find(inst);
+        if (it != materialDescCache.end() && it->second.set && it->second.sig == sig)
+        {
+            return it->second.set.get();
+        }
+
+        auto& rhi = renderDevice->GetRhiDevice();
+        MaterialDescEntry* entry = nullptr;
+        if (it == materialDescCache.end())
+        {
+            if (materialDescCache.size() >= kMaxMaterialSets)
+            {
+                return defaultMaterialSet.get();  // 池满兜底
+            }
+            auto set = rhi.AllocateDescriptorSet(*materialTexPool, *materialTexLayout);
+            if (!set)
+            {
+                return defaultMaterialSet.get();
+            }
+            entry = &materialDescCache.emplace(inst, MaterialDescEntry{std::move(set), {}}).first->second;
+        }
+        else
+        {
+            entry = &it->second;
+        }
+
+        Orange::Rhi::RHITexture* defaults[kMaterialTexBindings] = {
+            defaultWhiteTex.get(), defaultNormalTex.get(),
+            defaultWhiteTex.get(), defaultWhiteTex.get()};
+        Orange::Rhi::DescriptorWrite writes[kMaterialTexBindings]{};
+        for (std::uint32_t b = 0; b < kMaterialTexBindings; ++b)
+        {
+            Orange::Rhi::RHITexture* tex = EnsureGpuTexture(inst->GetTextureBinding(b));
+            if (tex == nullptr)
+            {
+                tex = defaults[b];
+            }
+            writes[b].mBinding             = b;
+            writes[b].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+            writes[b].mImageInfo.mpTexture = tex;
+            writes[b].mImageInfo.mpSampler = materialSampler.get();
+        }
+        rhi.UpdateDescriptorSet(*entry->set, writes, kMaterialTexBindings);
+        entry->sig = sig;
+        return entry->set.get();
+    }
+
+    // frame 录制前预通道：对所有 PBR drawable 确保 set 1 已 build + 贴图已上传。
+    // 录制期 draw loop 再调 EnsureMaterialDescriptorSet 只命中缓存（不触 GPU）。
+    void EnsureMaterialDescriptors()
+    {
+        for (const auto& d : scene.Drawables())
+        {
+            const Material* mat = (d.materialInstance != nullptr)
+                                      ? d.materialInstance->GetMaterial()
+                                      : EnsureBuiltinDefaultMaterial();
+            if (mat == nullptr || !MaterialUsesTextureSet(*mat))
+            {
+                continue;
+            }
+            EnsureMaterialDescriptorSet(d.materialInstance);
+        }
+    }
+
     // Dummy IBL 资源：全部 RGBA16Float、1×1 / 1×1×6，启动期 zero-clear。
     std::unique_ptr<Orange::Rhi::RHITexture> dummyIrradianceCube;
     std::unique_ptr<Orange::Rhi::RHITexture> dummyPrefilteredCube;
@@ -416,7 +581,9 @@ struct Pipeline::Impl
         desc.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,   vsModule, "main"});
         desc.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment, fsModule, "main"});
 
-        PipelineDetail::FillVertexInputLayout(desc);
+        // PBR 模板声明 location 3 (tangent)；其余模板不声明（避免 unconsumed
+        // attribute validation 警告，stride 仍 48B）。
+        PipelineDetail::FillVertexInputLayout(desc, MaterialUsesTextureSet(mat));
 
         desc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
         desc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;
@@ -431,6 +598,12 @@ struct Pipeline::Impl
         if (mainDescLayout)
         {
             desc.mDescriptorSetLayouts.push_back(mainDescLayout.get());
+        }
+        // PBR 模板（含贴图槽）额外声明 set 1 = per-instance material 贴图。
+        // 其他模板（textured / toon / ...）只有 set 0，本 layout 不挂。
+        if (MaterialUsesTextureSet(mat) && materialTexLayout)
+        {
+            desc.mDescriptorSetLayouts.push_back(materialTexLayout.get());
         }
 
         PipelineDetail::FillPushConstantRanges(desc, PipelineDetail::ComputePushConstantSize(mat));
@@ -645,7 +818,8 @@ struct Pipeline::Impl
         t.mHeight = pendingHeight;
         t.mFormat = PipelineDetail::kSwapchainColorFormat;
         t.mUsage  = Orange::Rhi::TextureUsage::RenderTarget
-                  | Orange::Rhi::TextureUsage::Sampled;
+                  | Orange::Rhi::TextureUsage::Sampled
+                  | Orange::Rhi::TextureUsage::TransferSrc;  // 允许像素 readback（DebugReadbackPixel）
         auto newTex = renderDevice->GetRhiDevice().CreateTexture(t);
         if (!newTex)
         {

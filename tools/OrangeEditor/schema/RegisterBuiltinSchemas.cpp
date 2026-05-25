@@ -622,10 +622,35 @@ void RegisterColliderComponentSchema()
         const int newIdx = *static_cast<const int*>(in);
         switch (newIdx)
         {
-            case 0: shape = CircleDesc{};    break;
-            case 1: shape = BoxDesc{};       break;
-            case 2: shape = PolygonDesc{};   break;
-            case 3: shape = EdgeChainDesc{}; break;
+            case 0: shape = CircleDesc{}; break;
+            case 1: shape = BoxDesc{};    break;
+            case 2:
+            {
+                // 切到 Polygon 给一个可用默认（单位方块 4 顶点，CCW）——空
+                // PolygonDesc{}（count=0）会让视口顶点编辑无顶点可拖、且物理
+                // 端退化（GAP-2026-05-25 A3 反馈"编辑不生效 / dynamic 不掉"）。
+                PolygonDesc p{};
+                p.count = 4;
+                p.vertices[0] = glm::vec2(-0.5f, -0.5f);
+                p.vertices[1] = glm::vec2( 0.5f, -0.5f);
+                p.vertices[2] = glm::vec2( 0.5f,  0.5f);
+                p.vertices[3] = glm::vec2(-0.5f,  0.5f);
+                shape = p;
+                break;
+            }
+            case 3:
+            {
+                // 切到 Edge Chain 给一条 3 顶点折线默认（同理,避免空 chain）。
+                // EdgeChain 是 static 地形用途;dynamic 物体想掉落应选 Polygon/Box。
+                EdgeChainDesc e{};
+                e.count = 3;
+                e.vertices[0] = glm::vec2(-1.0f, 0.0f);
+                e.vertices[1] = glm::vec2( 0.0f, 0.0f);
+                e.vertices[2] = glm::vec2( 1.0f, 0.0f);
+                e.isLoop = false;
+                shape = e;
+                break;
+            }
             default: /* out-of-range：保留旧值，与其它 Enum case 一致 */ break;
         }
     };

@@ -316,8 +316,16 @@ vec4 uMRA        //  16
 ### 状态
 
 - **登记**：2026-05-21
+- **代码落地**：2026-05-25（本 session，**待人工视觉验收**）——
+  - **G1 "Polygon edit mode" 全局状态**：`context/EditorColliderEditState.h`（新 sub-context 挂 EditorHost，符合 "新功能找对应子 context" 纪律）；与内置 Translate/Rotate/Scale gizmo 互斥（`EditorCameraControl` 把 colliderEdit.active 并入 gizmoBusy → 相机 LMB 冻结；`ScenePanel` active 时跳过 W/E/R 切换 + gizmo + picking）
+  - **G2 viewport 顶点 picking / 拖 / 加 / 删**：`ColliderVertexEdit.{h,cpp}`，复用 `OrangeEditor::Internal::GizmoMath` 的 ProjectWorldToScreen（hit-test + handle 绘制）/ ScreenToWorldRay + RayPlaneIntersect（拖拽/加点反投影到 entity collider 平面）/ PointSegmentDistance2D（加点找最近边插入）；世界变换与 ColliderDebugDraw 一致（local.xy 经 quat 旋转 + position，yaw-only 假设）；三态 handle 配色（normal 琥珀 / hover 白 / selected 青）
+  - **G3 命令栈集成**：`SetFieldValueCommand<PolygonDesc/EdgeChainDesc>` 整值写入；拖拽连续帧共享 dragOpId 拼进 fieldKey → coalesce 成单条可一次 Undo；加点/删点各递增 opSeq → 离散不 coalesce
+  - **入口**：`plugin/ColliderEditInspectorPlugin`（IEditorInspectorPlugin，Collider 段末 "Edit Vertices in Viewport" 按钮，仅 Polygon/EdgeChain shape；Esc / 再点退出）
+  - 改动文件：新增 `context/EditorColliderEditState.h` / `ColliderVertexEdit.{h,cpp}` / `plugin/ColliderEditInspectorPlugin.{h,cpp}`；改 `EditorHost.h`（colliderEdit 字段）/ `EditorCameraControl.cpp`（LMB gate）/ `panels/ScenePanel.cpp`（集成）/ `main.cpp`（注册）/ `CMakeLists.txt`（2 源）
+  - 验证：OrangeEditor.exe 编译链接通过 + invariant lint（7 grandfathered，无新违规）+ drift 全绿
+  - **未标 ✅ 原因**（milestone-end 红线）：待 (1) 人工视觉验收（拖/加/删/Undo/Redo + 相机 LMB 冻结实测）(2) acceptance checklist（Orange-Wiki 子仓，按单 session 单子仓纪律另开 session 写）(3) CMake VERSION bump（单功能按 [[feedback-minor-bump-must-carry-multiple-features]] 走 patch v1.3.1）
 - **关联**：本 session 已落地的 ColliderDebugDraw wireframe 可视化（前置基础）；本 session 同时修复 PolygonVertices / EdgeChainVertices Inspector Remove 按钮窄列越界（顺手 UX 修，不在本 GAP 范围）
-- **归属**：未拍板；候选 OrangeEditor v0.x 独立 milestone（与 v0.7 Animation 子模式 / v1.0 验收 排序优先级未定）
+- **归属**：~~未拍板~~ → 代码落地于 2026-05-25 本 session（OrangeEditor）；验收通过后正式归 v1.3.1 patch
 
 ---
 
@@ -584,7 +592,7 @@ case SceneOp::New: {
 
 ---
 
-## GAP-2026-05-22-editor-dcc-import-pipeline-missing
+## GAP-2026-05-22-editor-dcc-import-pipeline-missing ✅
 
 - **发现方**：用户 v1.0 验收后实测推断（"还有导入模型文件的能力，贴图的能力"）
 - **发现日期**：2026-05-22
@@ -637,10 +645,12 @@ case SceneOp::New: {
 ### 状态
 
 - **登记**：2026-05-22
-- **优先级**：**P1（Friction，不阻塞 v1.0 ✅ 但锁死美术工作流上游）** —— v1.0 验收脚本用 builtin mesh + 内嵌材质 → 不阻塞 ✅；但作为"美术 / 关卡设计师不写代码完成日常工作"目标**最关键的入口能力**（连资产都进不来就谈不上日常工作），与 [[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] 同属 v1.x 美术工作流补完一组
-- **归属**：OrangeEditor v1.x 或独立 "DCC import milestone"（按 `docs/editor-roadmap.md` 没有 import 相关 milestone，需新增议题立项；与主仓 Phase 9 资产管线远期方向有关联但**不必等 Phase 9** —— 最小可行 .obj + .png import 可在 v1.x 内独立完成）
-- **技术方案讨论 placeholder**：mesh importer vendor 选型（tinyobjloader / cgltf / etc）/ texture mipmap / 压缩策略 / 外部资产物理路径 vs 入仓 copy / 资产管线 hash + 增量；**留独立议题讨论**
-- **关联**：[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]]（同属美术工作流补完 batch，建议同议题或姐妹议题）/ 主仓 Phase 9 资产管线远期方向（前置但**不必等**）
+- **关闭**：2026-05-25（确认 v1.1 · DCC Asset Import Pipeline 已整体落地 ✅，本条状态此前漏回填 —— 文档 bug 修正，非新工作；落地早于本次回填）
+- **优先级**：~~**P1（Friction，不阻塞 v1.0 ✅ 但锁死美术工作流上游）**~~ → v1.1 已落地（.obj + .gltf/.glb mesh + .png/.jpg/.jpeg/.tga/.hdr texture + .meta sidecar + FNV-1a hash 增量 + File→Import 菜单 + Asset Browser 拖拽，见 `tools/OrangeEditor/import/`）
+- **归属**：~~OrangeEditor v1.x 或独立 "DCC import milestone"~~ → OrangeEditor **v1.1 · DCC Asset Import Pipeline ✅**（CMake VERSION 1.0.1 → 1.1.0；T1~T5 全落地，详见 [editor-roadmap.md v1.1 节](editor-roadmap.md) + [ADR-008](decisions/README.md) 5 议题合并决议）
+- **技术方案讨论 placeholder（已由 ADR-008 决议）**：~~mesh importer vendor 选型 / texture mipmap / 压缩策略 / 外部资产物理路径 vs 入仓 copy / 资产管线 hash + 增量~~ → vendor = tinyobjloader(.obj) + cgltf(.gltf)（in-tree single-header）；copy 入 `assets/<TypeDir>/` + .meta sidecar（sourcePath + FNV-1a sourceHash）；texture 走 RGBA8 + 运行时 mipmap
+- **剩余延后项（非本 GAP 范围，editor-roadmap v1.1 节已列）**：glTF PBR **material 解析** + mesh normal/tangent 自动补（**mikktspace**）→ v1.2；**.fbx import**（4 件套路径已铺好，加 importer 模块即可）；BC7/KTX2 压缩 → 性能 milestone；Blender/Maya export plugin → 独立立项；资产 watcher → ACP 后
+- **关联**：[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]]（同属美术工作流补完 batch，其 G1 Create Material UI 已 v1.1.1 ✅）/ 主仓 Phase 9 资产管线远期方向（前置但**不必等**，最小可行 import 已在 v1.1 独立完成）
 
 ---
 
@@ -1168,7 +1178,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-24-material-template-library-and-custom-hook
+## GAP-2026-05-24-material-template-library-and-custom-hook ✅（G1）
 
 - **发现方**：v1.1 ✅ 后用户询问 "Template 是不是也可以通过用户自定义插入的方式去做？我们提供一些基础的 shader？"
 - **发现日期**：2026-05-24
@@ -1482,6 +1492,81 @@ src/render/
 - **归属**：v1.4.0 minor 议题第一性问题（与材质球缩略图 GAP-2026-05-22 G2 同 session 讨论；G2 拉动条件 = 本 GAP 决策结果决定 thumbnail 走哪条路径）
 - **议题候选**：G1 / G2 / G3 的 trade-off 评估；OR 端是否需要任何 RHI 接口扩展（当前评估不需要 —— FEATURE-2026-05-24 已提供完整 RT 公共面）
 - **关联**：[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] G2（最直接消费者）；[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]] G1（未来 mesh thumbnail 同源需求）；[[feedback-minor-bundle-per-feature-feasibility-check]]（本 GAP 是 thumbnail 从 v1.3.0 trim 出去到 v1.4.0 的根因）
+
+---
+
+## GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra
+
+- **发现方**：A 部分推进侦察（DCC import v1.2 增强落地前置核查）
+- **发现日期**：2026-05-25
+- **一句话定性**：PBR shader 当前材质五通道全是 push-constant 标量（uBaseColor + uMRA），**无任何贴图采样路径**；顶点输入仅 pos+uv+normal、**无 tangent**。导致 (a) glTF material 贴图通道导入 + (b) mikktspace tangent / 法线贴图 两类需求全部阻塞 —— 缺 "per-instance material texture binding（descriptor set）+ tangent vertex 通道" 基础设施
+
+### 触发场景
+
+A 部分 A2（DCC import v1.2 增强：glTF PBR material 解析 + mikktspace 切线）落地前侦察发现前置基础设施缺失：
+
+- `pbr.frag.glsl` line 13-15 自承 "normal 通道暂走 vNormal vertex 插值，等 tangent + 法线贴图基础设施落地后再上 texture 路径；texture binding 整体延后到 per-instance descriptor set 路径上线时"
+- `pbr.vert.glsl` 顶点输入 stride 32（pos+uv+normal），无 tangent location
+- `MeshAsset` 注释明示 "tangent 留待后续扩展"；`.mesh` schema 仅到 v3（无 tangent 段）
+
+因此 glTF 的 baseColorTexture / normalTexture / metallicRoughnessTexture 即使解析出来也无 shader 消费；mikktspace 算出 tangent 也无顶点属性承载、无 shader 读取。
+
+### 缺什么（按依赖拆）
+
+#### G1 · per-instance material descriptor set + texture binding（贴图采样基础设施）
+
+- PBR shader 加 set 1 per-instance material descriptor（baseColor / MR / AO / normal sampler2D）
+- Pipeline 每 draw 绑 per-instance descriptor set —— **纯 Engine 侧接线，不缺 OR 能力**（见下"跨仓核对 2026-05-25"）：所需 RHI 原语 `CreateDescriptorSetLayout`(CombinedImageSampler) / `CreateSampler` / `CreateDescriptorPool` / `AllocateDescriptorSet` / `UpdateDescriptorSet` / `GraphicsPipelineDesc.mDescriptorSetLayouts` / `cmd->SetDescriptorSet` / `RenderItem.mpDescriptorSets` 在 OrangeRender 公共面全部就位，且本仓 `src/render/IblBaker.cpp` + `Pipeline.cpp`(mainDescSet 三件套 IBL) + `pipeline/PipelineGodRays.cpp` / `PipelineSky.cpp` 已在用同一套闭环。加材质贴图 descriptor = 把 `mainDescSet` 那套搬到 set 1、按 material instance 频率重建/缓存
+- 与 [[GAP-2026-05-19-pbr-push-constant-exceeds-spec-min]] G1（per-instance material UBO）同源基础设施
+
+#### G2 · tangent vertex 通道 + .mesh schema v4
+
+- MeshAsset 加 tangent 通道；`.mesh` schema v3 → v4 + migrator（已 shipped v3 不改）
+- Pipeline vertex input layout 加 tangent attr（stride 32 → 48）；pbr.vert/frag 加 TBN + 法线贴图采样
+- mikktspace vendor 接 + importer 算 tangent（依赖 G2 通道就位）
+
+#### G3 · glTF material 完整解析（贴图 + 标量）
+
+- 依赖 G1（贴图采样）；标量子集（baseColor/metallic/roughness factor → uBaseColor/uMRA）可先于 G1 落地，但价值有限（importer unified mesh 合并多 primitive 丢失 per-primitive material 边界 + 无自动 mesh↔material 关联）
+
+### 状态
+
+- **登记**：2026-05-25
+- **优先级**：P2（美术工作流深化基础设施）—— v1.x DCC import 增强 + 材质球缩略图真渲染 + 法线贴图细节均堵在 G1/G2 上
+- **归属**：候选 Phase 7+ 渲染深化 / 待 per-instance material descriptor 基础设施 milestone —— **整条 G1/G2/G3 全在 OrangeEngine 子仓内闭环，不触 OrangeRender 公共面**（见下"跨仓核对"）
+- **关联**：[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（v1.1 主线 ✅ 的延后增强前置）；[[GAP-2026-05-19-pbr-push-constant-exceeds-spec-min]] G1（per-instance material UBO 同源）；[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] G2（缩略图真渲染同源）
+
+### 跨仓核对（2026-05-25）
+
+用户要求"A2 给 Render 提需求"时做的前置核对结论：**A2 不存在 OrangeRender 缺口，无需提 FEATURE**。
+
+- **核对方式**：直读 OrangeRender 公共头 + `OrangeRender/docs/incoming_feature.md` 历史 + OrangeEngine `src/render/` 现状（只读，未改 OrangeRender 任何文件）
+- **依据 1（RHI 已就位）**：`RHIDescriptor.h`(DescriptorSetLayout/Pool/Set + `DescriptorType::CombinedImageSampler/SampledImage/Sampler`) / `RHISampler.h` / `RHIPipeline.h`(`GraphicsPipelineDesc.mDescriptorSetLayouts`) / `RHICommandList.h`(`SetDescriptorSet`) 全在公共面。incoming_feature.md `FEATURE-2026-05-07` 评审已确认 B2(Sampler)+B3(Descriptor) 早于该需求落地；`FEATURE-2026-05-07-renderitem-descriptor-sets` 已补 `RenderItem.mpDescriptorSets` + 每 draw 自动 `SetDescriptorSet`(含 dedup/重绑)
+- **依据 2（Engine 已在用）**：`src/render/IblBaker.cpp` 4 处 + `Pipeline.cpp`(mainDescSet 3×CombinedImageSampler IBL) + `pipeline/PipelineGodRays.cpp` / `PipelineSky.cpp` 均跑通"建 layout→建 sampler→建 pool→alloc set→update write→挂 pipeline layout→SetDescriptorSet"完整闭环
+- **结论**：G1/G2/G3 均为 Engine 内部工作（G1 材质 descriptor 接线复用 mainDescSet 模式 / G2 MeshAsset tangent 通道 + .mesh schema v4 + vertex input layout / G3 GltfImporter material 解析），无一触 OrangeRender 公共 API。OrangeRender CLAUDE.md 工作流明文"如发现真实空缺，单独提 BUG 而非 FEATURE"——此处连 BUG 都不成立。原 G1 条目里"可能需 OR 新能力 → 跨仓登记"的猜测已就地划除
+
+### 落地 + 全黑回归 + 修复（2026-05-25，G1+G2 ✅ 用户 GPU 验收通过）
+
+G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已落地并经用户 GPU 视觉验收（PBR 材质球正常显示）。中途踩了一个**两条材质注册路径分叉**导致的全黑回归，记录如下以防重蹈：
+
+- **症状**：keystone 上线后编辑器 PBR scene 所有球全黑；隔离 ctest 却全过。
+- **根因**：`pbr.frag`/`pbr.vert` **无条件**采样 set 1（4 贴图）+ 读 tangent(loc3)，但 gate `Pipeline::Impl::MaterialUsesTextureSet` 当初只看 `mat.textureSlots`。编辑器走 **`MaterialSystem::RegisterTemplatesFromDirectory`** 从 `assets/shaders/templates/pbr.template.json` 加载 pbr 模板，而该 JSON 的 `textureSlots` 为空（落地时只给 C++ 的 `BuiltinMaterials::LoadPbr` 加了槽，**漏改模板 JSON**）→ gate 误判 false → pipeline 不声明/不绑 set 1 + 不声明 tangent loc3 → shader 采样未绑 descriptor + 读未声明顶点属性 → 管线非法（validation: `Set 1 ... not declared` / `Location 3 ... not declared` / `descriptor set 1 ... not compatible`）→ 全黑。隔离 ctest 用 `RegisterBuiltins()`（走 `LoadPbr`，有槽）所以躲过——**两条注册路径分叉是测试盲区**。
+- **修复**：(1) `pbr.template.json` 补 4 个 textureSlots（对齐 `LoadPbr`）；(2) `MaterialUsesTextureSet` 加固——不只看 textureSlots，还按 PBR push 签名（uMVP+uModel+uBaseColor+uMRA = 160B，仅 pbr）兜底，slotless pbr 也声明/绑 set 1（喂 default 白/flat-normal 贴图，退化纯 scalar PBR），杜绝 shader/pipeline 不匹配。
+- **回归门**：`tests/render/PbrSceneBlackReproTest.cpp` —— 走编辑器 `RegisterTemplatesFromDirectory` 路径 + 加载真实 `sphere.mesh` + `Pipeline::DebugReadbackPixel` 像素读回，assert PBR 中心非黑。配套新增 `Pipeline::DebugReadbackPixel`（viewportColor 加 TransferSrc）作为 PBR 像素级回归基础设施。
+- **教训**：① 编辑器材质来自 `.template.json`（`RegisterTemplatesFromDirectory`），**不是** `BuiltinMaterials::LoadPbr`——两者必须同步；② shader 需要的 descriptor set / 顶点属性必须**无条件**声明，不能依赖材质数据（textureSlots）；③ GPU 渲染回归测试必须走**真实消费方（编辑器模板）路径 + 像素 readback**，合成的 `RegisterBuiltins` 会放过这类 bug。
+- **剩余**：G3（glTF material 自动导入，Inc5）代码已成、端到端待真实 glTF 资产验；acceptance checklist + CMake VERSION bump 待 Orange-Wiki 子仓单独 session（单子仓纪律）。
+
+### Inc2 · MikkTSpace 高质量切线落地（2026-05-25）
+
+mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer 侧的 Lengyel fallback：
+
+- **vendor**：`vendor/mikktspace/`（mikktspace.h + mikktspace.c，Morten S. Mikkelsen，zlib 许可，Blender / Godot / Unreal 同款）。与 cgltf / tinyobjloader 同款 in-tree single-file vendor，仅 OrangeEditor + 测试消费，引擎 runtime 不接（ADR-008 importer-only invariant）。
+- **C 语言启用**：顶层 `project(... LANGUAGES C CXX)`。教训——CMake 未启用 C 时**静默丢弃**加进 target 的 `.c` 源（不编、不报错，链接期才暴露 `genTangSpaceDefault` 缺符号）。`mikktspace.c` 单独 `/W0` 豁免编辑器 / 测试的 `/W4 /WX`。
+- **接线**：`tools/OrangeEditor/import/MeshTangentGen.{h,cpp}::GenerateMikkTSpaceTangents`。契约关键（mikktspace.h 行 86-101）——MikkTSpace 输出 per-face-vertex、**未索引**，禁止写回已有 index list；故 de-index 读入喂回调 → 收 per-face-vertex 切线 → 按 (原顶点, 切线方向+手性) **re-weld** 回索引网格（UV / 法线缝处切线分裂为新顶点）。
+- **集成**：`ObjImporter` + `GltfImporter` 在构造 MeshAsset 前调用（UV + normal 齐备时），`SetTangents` 注入 → `.mesh` v4 写出 tangent 段。缺 UV / normal → 返回 false，仍落引擎 Load 端 Lengyel fallback（`MeshAsset::ComputeTangentsFromTriangles`，安全网保留）。
+- **回归门**：
+  - `tests/asset/MikkTSpaceTangentTest.cpp` —— 标准 XY 四边形（法线 +Z、UV 沿 +X/+Y）断言切线 ≈ (1,0,0)、单位长、w=±1，+ 缺 UV / 退化 indices 的 false 路径。验证回调喂数据 + re-weld 正确（mikktspace 算法本身不在覆盖范围）。
+  - `tests/asset/MikkTSpaceRealModelTest.cpp` —— 真实有机曲面（Avocado，682 三角）跑 cgltf 解析 + 切线生成，断言全覆盖 + 单位长 + 手性 ±1 + 切线⊥法线（实测 `|dot(T,N)|` max=mean=**0.00000**）。fixture 是 session 内下载的未跟踪资产，CMake `if(EXISTS)` 门控——干净 checkout 自动跳过不阻塞 CI。
 
 ---
 

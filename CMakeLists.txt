@@ -6,7 +6,12 @@ cmake_minimum_required(VERSION 3.28)
 # C++ 端（整型 + 字符串宏），后续的 `OrangeEngineConfigVersion.cmake`
 # 也通过 CMake 自动派生的 `${PROJECT_VERSION}` 变量回读这里的值。
 # ---------------------------------------------------------------------------
-project(OrangeEngine VERSION 0.1.0 LANGUAGES CXX)
+# LANGUAGES 含 C：引擎本体与 OrangeEditor 全是 C++，但 OrangeEditor 的
+# DCC import 链 vendor 了一个 C 源——MikkTSpace（vendor/mikktspace/mikktspace.c，
+# 标准切线空间算法）。CMake 在未启用 C 时会**静默丢弃**加进 target 的 .c 源
+# （不编、不报错，链接期才暴露缺符号），故在顶层就启用 C，覆盖 editor 与
+# tests 两个会编译该 .c 的子目录（MSVC 的 cl.exe 同时是 C / C++ 编译器）。
+project(OrangeEngine VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -1,5 +1,6 @@
 #include "ObjImporter.h"
 
+#include "MeshTangentGen.h"
 #include "MetaSidecar.h"
 #include "../EditorHost.h"
 
@@ -271,6 +272,18 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
+    // MikkTSpace 高质量切线 —— 仅当 UV + normal 都在时可算（缺任一则切线
+    // 无定义，留给引擎 Load 端 Lengyel fallback）。会就地 re-weld
+    // positions/uvs/normals/indices（顶点数可能增），故必须在下面 std::move
+    // 进构造函数之前调。结果在构造后用 SetTangents 注入。
+    std::vector<::Orange::Engine::Asset::VertexTangent4> tangents;
+    bool haveTangents = false;
+    if (!uvs.empty() && !normals.empty())
+    {
+        haveTangents = Orange::Editor::Import::GenerateMikkTSpaceTangents(
+            positions, uvs, normals, indices, tangents);
+    }
+
     // 构造 MeshAsset；统一走 4 参构造，空 UV / 空 normal 由 Save 端写 has=0。
     std::unique_ptr<MeshAsset> mesh;
     if (uvs.empty() && normals.empty())
@@ -298,6 +311,13 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
                                            std::move(uvs),
                                            std::move(normals),
                                            std::move(indices));
+    }
+
+    // MikkTSpace 算出的切线注入 mesh → MeshLoader::Save 写成 .mesh v4
+    // （含 tangent 段）；Load 读回时即有切线，不触发 Lengyel fallback。
+    if (haveTangents)
+    {
+        mesh->SetTangents(std::move(tangents));
     }
 
     const std::string destMeshStr = destMesh.generic_string();

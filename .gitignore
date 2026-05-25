@@ -68,3 +68,10 @@ assets/Models/
 # sidecar）：与 assets/Models/ 同款，本机工作流状态不入仓。
 # 已有的 assets/environments/*.hdr 规则保留作 PolyHaven HDRI 单独入口。
 assets/Textures/
+
+# A2 DCC import 验证用 glTF 样本（Khronos sample models：BoxTextured /
+# Avocado / Duck / DamagedHelmet，~12MB 含贴图）：与上面 demo 占位资产同档
+# ——由开发者按需下载到本地验证 import + 法线贴图，不入 git 主线。
+# tests/asset/MikkTSpaceRealModelTest.cpp 通过 CMake `if(EXISTS)` 门控消费
+# 其中的 Avocado，缺失即自动跳过，不阻塞 CI。
+gltf_test/

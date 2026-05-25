@@ -1,12 +1,18 @@
 #include "GltfImporter.h"
 
+#include "ImportDispatcher.h"   // ImportTexture（复用纹理导入路径）
+#include "MeshTangentGen.h"     // GenerateMikkTSpaceTangents（高质量切线）
 #include "MetaSidecar.h"
+#include "../BuiltinAssets.h"   // EnsureMaterialInstance（注册进 namedMaterialInstances）
 #include "../EditorHost.h"
+#include "../MaterialFileIO.h"  // WriteMaterialFile（写 .material sidecar）
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
+
+#include <glm/vec4.hpp>
 
 // cgltf 单 header IMPLEMENTATION 仅在本 TU 内 expand。MSVC noisy warning
 // 关掉 —— cgltf 是 C99 风格代码，narrowing / unused / deprecated 全套都
@@ -73,6 +79,55 @@ const char* CgltfResultToString(cgltf_result r)
         case cgltf_result_legacy_gltf:     return "legacy_gltf";
         default:                           return "unknown";
     }
+}
+
+// glTF material 通道解析的中间结果（GAP-2026-05-25 A2 / Inc5）。在 cgltf_free
+// 之前从 cgltf_material 抽出，free 之后用于 import 贴图 + 写 .material。
+// 贴图字段存"源文件绝对/相对路径"（gltfDir/uri 解析后），空 = 该通道无贴图。
+struct GltfMatInfo
+{
+    bool        present{false};
+    std::string baseColorSrc;
+    std::string normalSrc;
+    std::string metalRoughSrc;
+    std::string aoSrc;
+    float       baseColor[4]{1.0f, 1.0f, 1.0f, 1.0f};
+    float       metallic{1.0f};
+    float       roughness{1.0f};
+};
+
+// 把一个 cgltf_texture_view 解析成源文件路径（相对 gltf 所在目录）。仅支持
+// 外部 uri 引用的 image；.glb 内嵌（buffer_view，uri==null）或 data: URI 暂
+// 不支持，返回空（caller 跳过该通道 → 用 default 贴图，graceful）。
+std::string ResolveTextureSource(const cgltf_texture_view& view,
+                                 const std::filesystem::path& gltfDir)
+{
+    if (view.texture == nullptr || view.texture->image == nullptr)
+    {
+        return {};
+    }
+    const char* uri = view.texture->image->uri;
+    if (uri == nullptr || uri[0] == '\0')
+    {
+        return {};  // 内嵌 image（.glb buffer view）/ 无 uri
+    }
+    // data: URI（base64 内嵌）暂不支持。
+    if (std::strncmp(uri, "data:", 5) == 0)
+    {
+        return {};
+    }
+    // percent-decode（cgltf 提供就地解码；在 uri 副本上做）。
+    std::string decoded(uri);
+    cgltf_decode_uri(decoded.data());
+    decoded.resize(std::strlen(decoded.c_str()));  // 解码可能缩短
+
+    std::error_code ec;
+    std::filesystem::path full = gltfDir / decoded;
+    if (!std::filesystem::exists(full, ec))
+    {
+        return {};  // 源贴图缺失 → 跳过（caller 落 default）
+    }
+    return full.generic_string();
 }
 }  // namespace
 
@@ -161,6 +216,10 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     bool fileHasUVs     = false;
     bool fileHasNormals = false;
     std::size_t skippedPrimitives = 0;
+    // 第一个带 material 的三角 primitive 的 cgltf_material —— A2/Inc5 取它解析
+    // PBR 通道。unified mesh 合并多 primitive 丢失 per-primitive material 边界
+    // （GAP 已记），v1 单材质常见模型够用；多材质留后续 per-primitive 拆分。
+    const cgltf_material* firstMat = nullptr;
 
     for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
     {
@@ -180,6 +239,11 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
                 ++skippedPrimitives;
                 continue;
             }
+            if (firstMat == nullptr && prim.material != nullptr)
+            {
+                firstMat = prim.material;
+            }
+
             const cgltf_accessor* nrmAcc = FindAttribute(prim, cgltf_attribute_type_normal);
             const cgltf_accessor* uvAcc  = FindAttribute(prim, cgltf_attribute_type_texcoord, 0);
 
@@ -276,6 +340,29 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
+    // A2/Inc5：在 cgltf_free 之前从 firstMat 抽出 PBR 通道（贴图源路径 + 标量
+    // factor）。贴图源路径相对 gltf 所在目录解析；free 之后用于 import + 写 .material。
+    GltfMatInfo matInfo{};
+    if (firstMat != nullptr)
+    {
+        matInfo.present = true;
+        const std::filesystem::path gltfDir = src.parent_path();
+        if (firstMat->has_pbr_metallic_roughness)
+        {
+            const auto& pmr = firstMat->pbr_metallic_roughness;
+            matInfo.baseColor[0] = pmr.base_color_factor[0];
+            matInfo.baseColor[1] = pmr.base_color_factor[1];
+            matInfo.baseColor[2] = pmr.base_color_factor[2];
+            matInfo.baseColor[3] = pmr.base_color_factor[3];
+            matInfo.metallic     = pmr.metallic_factor;
+            matInfo.roughness    = pmr.roughness_factor;
+            matInfo.baseColorSrc  = ResolveTextureSource(pmr.base_color_texture, gltfDir);
+            matInfo.metalRoughSrc = ResolveTextureSource(pmr.metallic_roughness_texture, gltfDir);
+        }
+        matInfo.normalSrc = ResolveTextureSource(firstMat->normal_texture, gltfDir);
+        matInfo.aoSrc     = ResolveTextureSource(firstMat->occlusion_texture, gltfDir);
+    }
+
     cgltf_free(data);  // 不再需要 cgltf 内部结构，data 已经拷出来
 
     // 整文件无 normal/uv 时清空数组让 MeshLoader::Save 写 has=0；混合情况
@@ -307,6 +394,18 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
+    // MikkTSpace 高质量切线 —— 仅当 UV + normal 都在时可算（glTF 大多两者
+    // 齐备）。就地 re-weld positions/uvs/normals/indices（顶点数可能增），故
+    // 必须在下面 std::move 进构造函数之前调；结果构造后 SetTangents 注入。
+    // 缺 UV/normal → false，留给引擎 Load 端 Lengyel fallback。
+    std::vector<::Orange::Engine::Asset::VertexTangent4> tangents;
+    bool haveTangents = false;
+    if (!uvs.empty() && !normals.empty())
+    {
+        haveTangents = Orange::Editor::Import::GenerateMikkTSpaceTangents(
+            positions, uvs, normals, indices, tangents);
+    }
+
     std::unique_ptr<MeshAsset> mesh;
     if (uvs.empty() && normals.empty())
     {
@@ -333,6 +432,12 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
                                            std::move(uvs),
                                            std::move(normals),
                                            std::move(indices));
+    }
+
+    // MikkTSpace 切线注入 → .mesh v4 写出 tangent 段；Load 读回即有切线。
+    if (haveTangents)
+    {
+        mesh->SetTangents(std::move(tangents));
     }
 
     const std::string destMeshStr = destMesh.generic_string();
@@ -375,6 +480,72 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         ORANGE_LOG_ERROR("GltfImporter: '{}' -> '{}': {}",
                          srcPath, metaPath, result.message);
         return result;
+    }
+
+    // A2/Inc5：解析出 material 通道时 import 各贴图 + 写 .material sidecar。
+    // 贴图走 ImportTexture（copy 到 assets/Textures + load + .meta）；.material
+    // 落 .mesh 同目录（assets/Models/<stem>.material），templateName=pbr，texture
+    // 槽 binding 与 pbr set 1 对齐（0 baseColor / 1 normal / 2 metalRough / 3 ao），
+    // uniform 覆盖 uBaseColor=baseColorFactor、uMRA=(metallic,roughness,ao=1,_=0)。
+    // 引擎不自动 mesh↔material 绑定（GAP 已记），用户在编辑器把 .material 指给 entity。
+    if (matInfo.present)
+    {
+        Material::MaterialFileData mdata;
+        mdata.templateName = "pbr";
+
+        auto importSlot = [&](const std::string& srcTexPath, std::uint32_t binding) {
+            if (srcTexPath.empty()) { return; }
+            ImportResult tr = ImportTexture(srcTexPath, host);
+            if (tr.status == ImportStatus::Success && !tr.destPath.empty())
+            {
+                mdata.textures.push_back({binding, tr.destPath});
+            }
+            else
+            {
+                ORANGE_LOG_WARN("GltfImporter: material 贴图 '{}' import 失败，跳过该槽",
+                                srcTexPath);
+            }
+        };
+        importSlot(matInfo.baseColorSrc,  0u);
+        importSlot(matInfo.normalSrc,     1u);
+        importSlot(matInfo.metalRoughSrc, 2u);
+        importSlot(matInfo.aoSrc,         3u);
+
+        Material::UniformOverrideValue uBase;
+        uBase.name  = "uBaseColor";
+        uBase.type  = ::Orange::Engine::Render::MaterialUniformType::Vec4;
+        uBase.value = glm::vec4(matInfo.baseColor[0], matInfo.baseColor[1],
+                                matInfo.baseColor[2], matInfo.baseColor[3]);
+        mdata.uniforms.push_back(uBase);
+
+        Material::UniformOverrideValue uMra;
+        uMra.name  = "uMRA";
+        uMra.type  = ::Orange::Engine::Render::MaterialUniformType::Vec4;
+        uMra.value = glm::vec4(matInfo.metallic, matInfo.roughness, 1.0f, 0.0f);
+        mdata.uniforms.push_back(uMra);
+
+        const std::string matPath = (destDir / (stem + ".material")).generic_string();
+        if (Material::WriteMaterialFile(matPath, mdata))
+        {
+            ORANGE_LOG_INFO("GltfImporter: wrote material '{}' (textures={})",
+                            matPath, mdata.textures.size());
+            // 立刻注册进 namedMaterialInstances —— 否则刚导入的 .material 不在
+            // 表里,Renderable 的 Material 字段(materialSet 只查表不 lazy load)
+            // 选不到、赋不上(GAP-2026-05-25 用户反馈:导入的材质拖不到 entity)。
+            // EnsureMaterialInstance 内 ReadMaterialFile + CreateInstance +
+            // ApplyDataToInstance(应用 uBaseColor/uMRA + 贴图 override)+ own 到
+            // userMaterials + 写 namedMaterialInstances → 导入后即可在 Inspector
+            // Material 下拉选中。
+            if (::EnsureMaterialInstance(host, matPath) != nullptr)
+            {
+                ORANGE_LOG_INFO("GltfImporter: material '{}' 已注册 → 可在 Renderable "
+                                "Material 字段选用", matPath);
+            }
+        }
+        else
+        {
+            ORANGE_LOG_WARN("GltfImporter: WriteMaterialFile '{}' 失败", matPath);
+        }
     }
 
     result.status   = ImportStatus::Success;

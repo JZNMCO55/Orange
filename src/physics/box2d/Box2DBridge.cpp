@@ -1,5 +1,7 @@
 #include "Box2DBridge.h"
 
+#include "orange/engine/core/Log.h"
+
 #include <box2d/collision.h>
 
 #include <algorithm>
@@ -92,31 +94,71 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
         }
         else if constexpr (std::is_same_v<T, PolygonDesc>)
         {
+            // 退化多边形（空 / 少于 3 顶点）→ b2ComputeHull / b2MakePolygon 会
+            // 内部 assert 崩溃（GAP-2026-05-25 A3 反馈:collider 切到 Polygon 但
+            // 未画出有效多边形 → 进 Play 崩 / 物体不动）。这里前置校验,无效则
+            // 跳过 fixture（caller AddBody 会销毁该 body 并返回 invalid handle）。
+            if (shape.count < 3u)
+            {
+                ORANGE_LOG_WARN("Box2DBridge: PolygonDesc count={} < 3，跳过 fixture"
+                                "（凸多边形需 ≥3 顶点）", shape.count);
+                return false;
+            }
             b2Polygon poly = BuildPolygonFromDesc(shape);
             (void)b2CreatePolygonShape(bodyId, &sd, &poly);
             return true;
         }
         else if constexpr (std::is_same_v<T, EdgeChainDesc>)
         {
-            // b2ChainDef 必须 count >= 4；本期由调用方保证。注意：chain
-            // 不接受 ShapeDef 全集字段（material 走自己的 b2SurfaceMaterial），
-            // 这里复制 friction / restitution 到 chain.material。
-            b2ChainDef cd      = b2DefaultChainDef();
-            // chain 自己持 points 拷贝（文档承诺），所以本地 array 可栈分配。
-            b2Vec2 pts[EdgeChainDesc::kMaxVertices];
-            for (std::uint32_t i = 0; i < shape.count; ++i)
+            if (shape.count < 2u)
             {
-                pts[i] = ToB2(shape.vertices[i]);
+                ORANGE_LOG_WARN("Box2DBridge: EdgeChainDesc count={} < 2，跳过 fixture",
+                                shape.count);
+                return false;
             }
-            cd.points        = pts;
-            cd.count         = static_cast<int>(shape.count);
-            b2SurfaceMaterial mat{};
-            mat.friction     = col.friction;
-            mat.restitution  = col.restitution;
-            cd.materials     = &mat;
-            cd.materialCount = 1;
-            cd.isLoop        = shape.isLoop;
-            (void)b2CreateChain(bodyId, &cd);
+            // **关键**：Box2D 的 chain shape 只能挂在 static body —— 对非 static
+            // body 调 b2CreateChain 直接 assert 崩溃（GAP-2026-05-25 A3 反馈:
+            // dynamic 物体上的 EdgeChain 让编辑器进 Play 崩）。且 b2CreateChain
+            // 要求 count >= 4。仅 static + count>=4 走 chain（terrain，平滑无 ghost
+            // collision）；其余（非 static / count<4）降级为逐段 b2Segment fixture
+            // —— segment 在任意 body type + 任意 count>=2 合法。
+            const b2BodyType bt = b2Body_GetType(bodyId);
+            if (bt == b2_staticBody && shape.count >= 4u)
+            {
+                b2ChainDef cd = b2DefaultChainDef();
+                // chain 自己持 points 拷贝（文档承诺），本地 array 可栈分配。
+                b2Vec2 pts[EdgeChainDesc::kMaxVertices];
+                for (std::uint32_t i = 0; i < shape.count; ++i)
+                {
+                    pts[i] = ToB2(shape.vertices[i]);
+                }
+                cd.points        = pts;
+                cd.count         = static_cast<int>(shape.count);
+                b2SurfaceMaterial mat{};
+                mat.friction     = col.friction;
+                mat.restitution  = col.restitution;
+                cd.materials     = &mat;
+                cd.materialCount = 1;
+                cd.isLoop        = shape.isLoop;
+                (void)b2CreateChain(bodyId, &cd);
+                return true;
+            }
+            // 降级:逐段 segment。isLoop 时末点连回首点。
+            const std::uint32_t segCount =
+                shape.isLoop ? shape.count : (shape.count - 1u);
+            for (std::uint32_t i = 0; i < segCount; ++i)
+            {
+                b2Segment seg{};
+                seg.point1 = ToB2(shape.vertices[i]);
+                seg.point2 = ToB2(shape.vertices[(i + 1u) % shape.count]);
+                (void)b2CreateSegmentShape(bodyId, &sd, &seg);
+            }
+            if (bt != b2_staticBody)
+            {
+                ORANGE_LOG_WARN("Box2DBridge: EdgeChain 在非 static body 上 → 降级为 segment "
+                                "fixture（chain 仅 static；segment 零面积不产生质量,dynamic "
+                                "物体请改用 Polygon / Box collider）");
+            }
             return true;
         }
         else

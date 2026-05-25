@@ -2,14 +2,23 @@
 
 #include "EditorCameraControl.h"
 
+#include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/MeshAsset.h>
+#include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/mat4x4.hpp>
 #include <glm/trigonometric.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 void UpdateEditorCameraFromInput(EditorHost& host)
 {
@@ -36,7 +45,9 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     // 后段调用，更新 hoveredAxis 在本函数之后）。实际 UX 下用户 hover →
     // click 至少跨多帧（人类反应时间 >> 16ms 单帧），上一帧 hover 状态
     // 正确反映"按下 LMB 那一刻"。
-    const bool gizmoBusy = host.gizmo.IsDragging();
+    // collider 顶点编辑子模式 active 时相机 LMB 完全冻结（同 gizmo drag 互斥），
+    // 把 LMB 让给顶点选 / 拖 / 加 / 删（GAP-2026-05-21）。
+    const bool gizmoBusy = host.gizmo.IsDragging() || host.colliderEdit.active;
     const bool gizmoHover = host.gizmo.IsHovered();
 
     // LMB 轨道旋转 —— capture-on-press 状态机：
@@ -71,7 +82,9 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     if (hovered && io.MouseWheel != 0.0f)
     {
         ec.radius -= io.MouseWheel * ec.zoomSensitivity;
-        if (ec.radius < 0.5f) ec.radius = 0.5f;
+        // 下限从 0.5 降到 0.02 —— 让 Frame Selected 聚焦到 Avocado 这种
+        // 0.04 单位级小模型后，滚轮仍能贴近观察而不被 clamp 弹远。
+        if (ec.radius < 0.02f) ec.radius = 0.02f;
     }
 }
 
@@ -90,4 +103,99 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect)
     const glm::vec3 position = ec.pivot + offset;
     cam.view = glm::lookAt(position, ec.pivot, glm::vec3(0.0f, 1.0f, 0.0f));
     return cam;
+}
+
+namespace
+{
+
+// world matrix 合成（与 EditorPicking.cpp / src/render/RenderScene.cpp 同款；
+// 渲染器以外模块不引私有头，按 invariant 自包含复述）。
+glm::mat4
+ComposeWorldMatrix(const Orange::Engine::Scene::TransformComponent& xform) noexcept
+{
+    glm::mat4 m = glm::translate(glm::mat4(1.0f), xform.position);
+    m *= glm::mat4_cast(xform.rotation);
+    m  = glm::scale(m, xform.scale);
+    return m;
+}
+
+}  // anonymous namespace
+
+bool FrameSelectedCamera(EditorHost& host)
+{
+    using namespace Orange::Engine;
+
+    auto& ec = host.camera;
+    const Entity sel = host.selection.selectedEntity;
+    if (!sel.IsValid() || host.scene.pWorld == nullptr) { return false; }
+
+    const auto* pXform = host.scene.pWorld->GetComponent<Scene::TransformComponent>(sel);
+    if (pXform == nullptr) { return false; }
+
+    // ---- 默认（无 Renderable mesh）：对准 Transform 位置 + 默认 radius -----
+    // 灯光 / 空 entity 没有几何，至少把 pivot 移过去让它居中。
+    glm::vec3 center = pXform->position;
+    float     sphereR = 0.0f;
+
+    // ---- 有 Renderable mesh：算世界 AABB → 中心 + 包围球半径 --------------
+    const auto* pRC = host.scene.pWorld->GetComponent<Render::RenderableComponent>(sel);
+    if (pRC != nullptr && host.assets.pAssets != nullptr)
+    {
+        const auto* pMesh = host.assets.pAssets->Get(pRC->mesh);
+        if (pMesh != nullptr && !pMesh->Empty())
+        {
+            const auto& positions = pMesh->Positions();
+            if (!positions.empty())
+            {
+                glm::vec3 mn(std::numeric_limits<float>::max());
+                glm::vec3 mx(std::numeric_limits<float>::lowest());
+                for (const auto& p : positions)
+                {
+                    mn.x = std::min(mn.x, p.x);  mx.x = std::max(mx.x, p.x);
+                    mn.y = std::min(mn.y, p.y);  mx.y = std::max(mx.y, p.y);
+                    mn.z = std::min(mn.z, p.z);  mx.z = std::max(mx.z, p.z);
+                }
+                // local AABB 8 角点过 world matrix 取新 min/max（粗 AABB，
+                // 与 picking 同款；居中 / 取距离用途已足够）。
+                const glm::mat4 worldMat = ComposeWorldMatrix(*pXform);
+                const glm::vec3 corners[8] = {
+                    {mn.x, mn.y, mn.z}, {mx.x, mn.y, mn.z},
+                    {mn.x, mx.y, mn.z}, {mx.x, mx.y, mn.z},
+                    {mn.x, mn.y, mx.z}, {mx.x, mn.y, mx.z},
+                    {mn.x, mx.y, mx.z}, {mx.x, mx.y, mx.z},
+                };
+                glm::vec3 wmn(std::numeric_limits<float>::max());
+                glm::vec3 wmx(std::numeric_limits<float>::lowest());
+                for (const auto& c : corners)
+                {
+                    const glm::vec3 w = glm::vec3(worldMat * glm::vec4(c, 1.0f));
+                    wmn = glm::min(wmn, w);
+                    wmx = glm::max(wmx, w);
+                }
+                center  = (wmn + wmx) * 0.5f;
+                sphereR = glm::length(wmx - wmn) * 0.5f;
+            }
+        }
+    }
+
+    ec.pivot = center;
+
+    if (sphereR > 1e-6f)
+    {
+        // 把包围球塞进垂直 FOV：sinHalfFov = R / dist → dist = R / sin(fov/2)。
+        // ×1.25 留边距。视口通常横宽（水平 FOV ≥ 垂直），垂直是约束方向。
+        const float halfFov = glm::radians(ec.fovYDegrees) * 0.5f;
+        const float sinHalf = std::max(0.01f, std::sin(halfFov));
+        ec.radius = (sphereR / sinHalf) * 1.25f;
+        // 按物体尺度重算近 / 远裁剪面，跨 0.04 单位（Avocado）~ 165 单位
+        // （Duck）都能完整 bracket，不被 zNear/zFar 裁。
+        ec.zNear = std::max(0.001f, sphereR * 0.02f);
+        ec.zFar  = ec.radius + sphereR * 4.0f + 1.0f;
+    }
+    else
+    {
+        // 无几何（灯光 / 空 entity）：给个温和默认距离，不动 near/far。
+        ec.radius = std::max(ec.radius, 4.0f);
+    }
+    return true;
 }

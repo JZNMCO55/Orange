@@ -13,6 +13,7 @@
 
 #include "SchemaInspector.h"
 
+#include "../BuiltinAssets.h"   // EnsureMaterialInstance（Material AssetRef lazy 注册）
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../command/SetFieldValueCommand.h"
@@ -484,6 +485,17 @@ void DrawProperty(EditorHost&                  host,
             };
             auto writePath = [&](const std::string& v)
             {
+                // Material AssetRef:写入前先 lazy 注册到 namedMaterialInstances。
+                // materialSet 只查表不 lazy load → 刚导入(glTF)/创建(Create
+                // Material)的 .material 不在表里就赋不上(GAP-2026-05-25 用户
+                // 反馈:导入/Water 材质拖不到 entity)。EnsureMaterialInstance 读
+                // 文件 + CreateInstance + ApplyDataToInstance + 写表;之后
+                // materialSet/undo-redo replay 都能查到。非 Material 字段
+                // (Mesh 等)不走此路。
+                if (prop.attribs.assetKind == AssetKind::Material && !v.empty())
+                {
+                    (void)::EnsureMaterialInstance(host, v);
+                }
                 if (useCtxAccessor)
                 {
                     if (prop.assetRefSet != nullptr)

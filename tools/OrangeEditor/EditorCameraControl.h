@@ -31,4 +31,18 @@ void UpdateEditorCameraFromInput(EditorHost& host);
 Orange::Engine::Render::Camera
 BuildEditorCamera(const EditorCameraState& ec, float aspect);
 
+// FrameSelectedCamera —— 把轨道相机聚焦到当前选中 entity：pivot 移到该
+// entity 的 Renderable mesh 世界 AABB 中心，radius 拉到能在垂直 FOV 内完整
+// 看到包围球的距离，并按物体尺度重算 zNear / zFar（避免 Duck 165 单位被
+// zFar=100 远裁、Avocado 0.04 单位太小看不见）。
+//
+// 解决"导入模型尺寸 / 位置千差万别，默认 pivot(原点)+radius 看不到 / 被视锥
+// 裁剪"。F 键触发（EditorKeybindings::frameSelected，对齐 Unity / Unreal）。
+//
+// 返回 true 表示成功聚焦；以下情形 no-op 返回 false：无选中 / World 或 Asset
+// 注册表缺失 / 选中 entity 无 Transform / 无 Renderable mesh（或 mesh 为空 /
+// 退化为一点）。无 Renderable 但有 Transform 时退化为"对准 Transform 位置 +
+// 默认 radius"（聚焦灯光 / 空 entity 仍居中），此分支返回 true。
+bool FrameSelectedCamera(EditorHost& host);
+
 #endif  // ORANGE_EDITOR_EDITOR_CAMERA_CONTROL_H

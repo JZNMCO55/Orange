@@ -2105,6 +2105,7 @@ void EditorRenderLayer::DrawSettingsPanel()
         drawBind("Gizmo Scale",      &kb.gizmoScale,     "gizmoScale");
         drawBind("Rename Entity",    &kb.renameEntity,   "renameEntity");
         drawBind("Delete Entity",    &kb.deleteEntity,   "deleteEntity");
+        drawBind("Frame Selected",   &kb.frameSelected,  "frameSelected");
 
         if (ImGui::Button("Reset keybindings to defaults"))
         {

@@ -133,11 +133,16 @@ endif ()
 # OrangeEditor exe
 # ---------------------------------------------------------------------------
 
+# MikkTSpace（vendor/mikktspace/mikktspace.c）以 C 编译——C 语言在顶层
+# project(... LANGUAGES C CXX) 启用（见根 CMakeLists 注释）。纯 C 编译让
+# genTangSpaceDefault 天然 C linkage，与 MeshTangentGen.cpp 经 mikktspace.h
+# `extern "C"` 的引用精确匹配。其 warning 见下方 set_source_files_properties /W0。
 add_executable(OrangeEditor
     main.cpp
     BuiltinAssets.cpp
     DemoWorld.cpp
     ColliderDebugDraw.cpp
+    ColliderVertexEdit.cpp
     CoplanarDetector.cpp
     EditorCameraControl.cpp
     EditorHierarchy.cpp
@@ -165,8 +170,13 @@ add_executable(OrangeEditor
     command/EntityCommands.cpp
     import/GltfImporter.cpp
     import/ImportDispatcher.cpp
+    import/MeshTangentGen.cpp
     import/MetaSidecar.cpp
     import/ObjImporter.cpp
+    # MikkTSpace 标准切线算法（vendor/mikktspace，zlib 许可，C 源）。与
+    # cgltf / tinyobjloader 同款 in-tree vendor。仅 OrangeEditor 消费——引擎
+    # runtime 不接（ADR-008 importer-only invariant）。warning 见下方 /W0。
+    ../../vendor/mikktspace/mikktspace.c
     render/EditorGridAuxPassProvider.cpp
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
@@ -178,6 +188,7 @@ add_executable(OrangeEditor
     plugin/AudioSourceInspectorPlugin.cpp
     plugin/DragonBonesAssetInspectorPlugin.cpp
     plugin/CameraFrustumGizmoPlugin.cpp
+    plugin/ColliderEditInspectorPlugin.cpp
     plugin/DirectionalLightGizmoPlugin.cpp
     plugin/ImportMetaAssetInspectorPlugin.cpp
     plugin/MaterialAssetInspectorPlugin.cpp
@@ -208,7 +219,21 @@ target_link_libraries(OrangeEditor PRIVATE
 # v1.1 T4：cgltf 单 header（MIT）同样 in-tree 模式接入。
 target_include_directories(OrangeEditor PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../vendor/tinyobjloader"
-    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/cgltf")
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/cgltf"
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace")
+
+# MikkTSpace 是第三方 C 源——不享受编辑器的 /W4 /WX。单独把它的 warning
+# 关掉（与 orange_editor_imgui 的 /W0 同款豁免），避免 /WX 把 vendor 代码
+# 的 C4xxx 升级成 error。只作用于这一个源文件，编辑器自身代码仍 /W4 /WX。
+if (MSVC)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "/W0")
+else ()
+    set_source_files_properties(
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "-w")
+endif ()
 
 # 与 sample / engine 同档的编译器 warning 级别 —— 编辑器作为长期演化
 # 的 first-class target，不享受任何"宽松 warning"豁免。

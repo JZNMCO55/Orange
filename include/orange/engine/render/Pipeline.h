@@ -450,6 +450,14 @@ public:
                          std::uint32_t& width,
                          std::uint32_t& height) const noexcept;
 
+    // 离屏 final output（viewportColor，BGRA8）在 (x, y) 处的像素，读回成
+    // 归一化 RGBA float（[0,1]）。**仅离屏模式 + 帧外**调用（内部自管 cmd
+    // Begin/Submit/WaitIdle，会与 frame 录制冲突）。成功返回 true。诊断 +
+    // ctest 像素回归用（GAP-2026-05-25 A2：补上 PBR 像素级回归网，避免再次
+    // "ctest 全绿但视觉全黑"）。
+    bool DebugReadbackPixel(std::uint32_t x, std::uint32_t y,
+                            float outRGBA[4]) const;
+
 private:
     // 共享 RHI 资源创建逻辑（sampler / passthrough / bloom / tonemap /
     // godrays / 主 pass UBO / shadow caster pipeline / offscreen cmd list）。

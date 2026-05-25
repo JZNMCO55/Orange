@@ -49,5 +49,10 @@
       }
     }
   ],
-  "textureSlots": []
+  "textureSlots": [
+    { "binding": 0, "name": "uBaseColorTex" },
+    { "binding": 1, "name": "uNormalTex" },
+    { "binding": 2, "name": "uMetalRoughTex" },
+    { "binding": 3, "name": "uAoTex" }
+  ]
 }

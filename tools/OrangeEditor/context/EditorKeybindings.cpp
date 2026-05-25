@@ -39,6 +39,7 @@ void ReadEditorKeybindings(const JsonReader& in, EditorKeybindings& out)
     ReadKey(in, "keybindings/gizmoScale",     out.gizmoScale);
     ReadKey(in, "keybindings/renameEntity",   out.renameEntity);
     ReadKey(in, "keybindings/deleteEntity",   out.deleteEntity);
+    ReadKey(in, "keybindings/frameSelected",  out.frameSelected);
 }
 
 void WriteEditorKeybindings(JsonWriter& out, const EditorKeybindings& kb)
@@ -48,6 +49,7 @@ void WriteEditorKeybindings(JsonWriter& out, const EditorKeybindings& kb)
     WriteKey(out, "keybindings/gizmoScale",     kb.gizmoScale);
     WriteKey(out, "keybindings/renameEntity",   kb.renameEntity);
     WriteKey(out, "keybindings/deleteEntity",   kb.deleteEntity);
+    WriteKey(out, "keybindings/frameSelected",  kb.frameSelected);
 }
 
 const char* KeyNameFromImGuiKey(ImGuiKey key)

@@ -63,7 +63,7 @@ std::uint32_t ComputePushConstantSize(const Material& mat) noexcept
     return total;
 }
 
-void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc)
+void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc, bool withTangent)
 {
     Orange::Rhi::VertexBindingDesc binding{};
     binding.mBinding   = 0;
@@ -91,6 +91,20 @@ void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc)
     attrNormal.mOffset   = offsetof(InterleavedVertex, normal);
     attrNormal.mFormat   = Orange::Rhi::VertexFormat::Float32x3;
     desc.mVertexInput.mAttributes.push_back(attrNormal);
+
+    // location 3 = tangent（vec4）。仅 PBR 模板声明（pbr.vert 消费它）；其余
+    // 模板 withTangent=false 不声明，避免 validation "location 3 not consumed"
+    // 警告。binding stride 不变（48B），缺声明只是该 attribute 不被该 pipeline
+    // 读取。GAP-2026-05-25 A2 / 法线贴图基础设施。
+    if (withTangent)
+    {
+        Orange::Rhi::VertexAttributeDesc attrTangent{};
+        attrTangent.mLocation = 3;
+        attrTangent.mBinding  = 0;
+        attrTangent.mOffset   = offsetof(InterleavedVertex, tangent);
+        attrTangent.mFormat   = Orange::Rhi::VertexFormat::Float32x4;
+        desc.mVertexInput.mAttributes.push_back(attrTangent);
+    }
 }
 
 // 给 GraphicsPipelineDesc 加单条 Vertex stage 的 push range。
@@ -126,6 +140,7 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
     const auto& positions = mesh.Positions();
     const auto& uvs       = mesh.UVs();
     const auto& normals   = mesh.Normals();
+    const auto& tangents  = mesh.Tangents();
     std::vector<InterleavedVertex> out(positions.size());
     for (std::size_t i = 0; i < positions.size(); ++i)
     {
@@ -156,6 +171,23 @@ std::vector<InterleavedVertex> InterleaveMesh(const Asset::MeshAsset& mesh)
             out[i].normal[0] = 0.0f;
             out[i].normal[1] = 1.0f;
             out[i].normal[2] = 0.0f;
+        }
+        if (i < tangents.size())
+        {
+            out[i].tangent[0] = tangents[i].x;
+            out[i].tangent[1] = tangents[i].y;
+            out[i].tangent[2] = tangents[i].z;
+            out[i].tangent[3] = tangents[i].w;
+        }
+        else
+        {
+            // 缺 tangent（无 UV mesh / 手工构造）→ 默认 +X 切线 + 正手性。
+            // pbr.frag 配合 default flat-normal 贴图 → TBN 退化为不扰动法线，
+            // 视觉等价于"无切线空间"，安全。
+            out[i].tangent[0] = 1.0f;
+            out[i].tangent[1] = 0.0f;
+            out[i].tangent[2] = 0.0f;
+            out[i].tangent[3] = 1.0f;
         }
     }
     return out;

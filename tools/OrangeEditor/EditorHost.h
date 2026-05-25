@@ -42,6 +42,7 @@
 #include "command/CommandStack.h"
 #include "context/EditorAssetContext.h"
 #include "context/EditorCameraState.h"
+#include "context/EditorColliderEditState.h"
 #include "context/EditorGizmoState.h"
 #include "context/EditorKeybindings.h"
 #include "context/EditorSceneContext.h"
@@ -64,6 +65,7 @@ struct EditorHost
     EditorAssetContext assets;
     EditorCameraState  camera;
     EditorGizmoState   gizmo;
+    EditorColliderEditState colliderEdit;
     EditorSettings     settings;
     EditorKeybindings  keybindings;
 

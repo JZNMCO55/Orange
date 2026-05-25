@@ -26,13 +26,23 @@
 //   if hasNormals == 1:
 //       normals[vertexCount] : float[3]
 //
-// Load 同时支持读 v1 / v2 / v3：
-//   * v1 / v2 / v3-hasNormals=0：loader 自动调
+// v4（GAP-2026-05-25）：v3 末尾再追加 hasTangents 字节 + 可选 tangents 段：
+//   ... 同 v3 + (hasNormals + normals)
+//   1B hasTangents (0 / 1)
+//   if hasTangents == 1:
+//       tangents[vertexCount] : float[4]  (xyz 方向 + w 手性符号)
+//
+// Load 同时支持读 v1 / v2 / v3 / v4：
+//   * v1 / v2 / v3-hasNormals=0 / v4-hasNormals=0：loader 自动调
 //     MeshAsset::ComputeSmoothNormalsFromTriangles 现场补算 normal，
 //     渲染端从 v3 起统一假定 MeshAsset.Normals() 非空。
-//   * v3-hasNormals=1：直接使用磁盘 normal。
-// Save 永远写 v3 格式；输入 MeshAsset.HasUVs() / HasNormals() 决定是
-// 否写 UV / normal 段。
+//   * 缺 tangent 但有 UV+normal（v1..v3 全部 / v4-hasTangents=0）：loader
+//     自动调 MeshAsset::ComputeTangentsFromTriangles 补算（UV-based
+//     Lengyel fallback）；importer 侧 mikktspace 烘出的高质量 tangent 经
+//     v4-hasTangents=1 直接读出，优先于 fallback。
+//   * v4-hasTangents=1：直接使用磁盘 tangent。
+// Save 永远写 v4 格式；输入 MeshAsset.HasUVs() / HasNormals() /
+// HasTangents() 决定是否写 UV / normal / tangent 段。
 //
 // 选择自有格式而不接 OBJ / glTF 是有意为之：避免在
 // Asset 模块上线时同时解决"第三方解析器 vendoring"这个独立问题。后
@@ -61,7 +71,8 @@ public:
     static constexpr std::uint32_t kVersionV1     = 1;
     static constexpr std::uint32_t kVersionV2     = 2;
     static constexpr std::uint32_t kVersionV3     = 3;
-    static constexpr std::uint32_t kLatestVersion = kVersionV3;
+    static constexpr std::uint32_t kVersionV4     = 4;
+    static constexpr std::uint32_t kLatestVersion = kVersionV4;
 
     MeshLoader() = default;
     ~MeshLoader() override = default;

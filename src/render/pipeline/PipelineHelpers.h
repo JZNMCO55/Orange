@@ -23,14 +23,18 @@
 namespace Orange::Engine::Render::PipelineDetail
 {
 
-// 顶点 layout：interleaved 8 floats = pos(3) + uv(2) + normal(3)。所有
-// 内置模板共用本布局；缺 normal 的 mesh 由 MeshLoader / 程序化构造路径
-// 调 MeshAsset::ComputeSmoothNormalsFromTriangles 在 CPU 端补算。
+// 顶点 layout：interleaved 12 floats = pos(3) + uv(2) + normal(3) +
+// tangent(4)。所有内置模板共用本布局；缺 normal 的 mesh 由 MeshLoader /
+// 程序化构造路径调 ComputeSmoothNormalsFromTriangles 补算，缺 tangent 时
+// InterleaveMesh 填默认 (1,0,0,1)。tangent location 3 在 FillVertexInputLayout
+// 对所有模板声明，但只有 pbr.vert 读它（Vulkan 允许 shader 读取顶点属性
+// 的子集），其余内置 shader 不声明 location 3 即不消费。
 struct InterleavedVertex
 {
     float position[3];
     float uv[2];
     float normal[3];
+    float tangent[4];  // xyz = 方向, w = 手性符号（bitangent = cross(N,T)*w）
 };
 
 // 后续 pipeline 子模块都会用到的格式常量。
@@ -48,7 +52,12 @@ std::uint32_t PushConstantBytesFor(MaterialUniformType type) noexcept;
 
 std::uint32_t ComputePushConstantSize(const Material& mat) noexcept;
 
-void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc);
+// withTangent=true 时额外声明 location 3 (tangent vec4)——仅 PBR 模板需要
+// （pbr.vert 消费它）。其余模板传 false：binding stride 仍是 48B
+// （sizeof(InterleavedVertex)），只是不声明 loc3 attribute，避免 validation
+// "vertex attribute at location 3 not consumed by vertex shader" 警告。
+void FillVertexInputLayout(Orange::Rhi::GraphicsPipelineDesc& desc,
+                           bool withTangent = false);
 
 // 给 GraphicsPipelineDesc 加单条 Vertex stage 的 push range。size==0 → no-op。
 void FillPushConstantRanges(Orange::Rhi::GraphicsPipelineDesc& desc, std::uint32_t size);

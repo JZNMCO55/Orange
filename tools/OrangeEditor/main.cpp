@@ -83,6 +83,7 @@
 #include "plugin/AudioAssetInspectorPlugin.h"
 #include "plugin/AudioSourceInspectorPlugin.h"
 #include "plugin/CameraFrustumGizmoPlugin.h"
+#include "plugin/ColliderEditInspectorPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
 #include "plugin/DragonBonesAssetInspectorPlugin.h"
 #include "plugin/ImportMetaAssetInspectorPlugin.h"
@@ -193,6 +194,14 @@ void ChdirToRepoRoot()
 int main()
 {
     using namespace Orange::Engine;
+
+    // 控制台用 UTF-8 码页解码日志输出 —— 源文件 / 日志字符串都是 UTF-8,中文
+    // 系统控制台默认 GBK(936) 会把 UTF-8 中文显示成乱码。设成 CP_UTF8 让
+    // ORANGE_LOG 的中文正常显示（GAP-2026-05-25 用户反馈控制台乱码）。
+#if defined(_WIN32)
+    ::SetConsoleOutputCP(CP_UTF8);
+    ::SetConsoleCP(CP_UTF8);
+#endif
 
     // 必须在任何相对路径 IO（Scene::Load / asset lazy-bake / shader 编译
     // 缓存等）之前完成 chdir，否则 build/bin/Debug 启动场景会产生 stale
@@ -574,6 +583,10 @@ int main()
     // 款"装饰式扩展"模式）。
     editorHost.inspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::AudioSourceInspectorPlugin>());
+    // Collider 段末 "Edit Vertices in Viewport" 按钮（GAP-2026-05-21）——
+    // Polygon / Edge Chain shape 时进入 viewport 顶点编辑子模式。
+    editorHost.inspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::ColliderEditInspectorPlugin>());
 
     // 注册第一个 IEditorAssetInspectorPlugin —— v0.7 c0 落地（消除 L16）。
     // 当 Asset 浏览器选中 .material 文件时接管 Inspector 整段；与

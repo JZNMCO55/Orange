@@ -315,6 +315,84 @@ const Orange::Rhi::RHITexture* Pipeline::GetOffscreenColor() const noexcept
     return impl.viewportColor.get();
 }
 
+bool Pipeline::DebugReadbackPixel(std::uint32_t x, std::uint32_t y,
+                                  float outRGBA[4]) const
+{
+    if (!mpImpl || outRGBA == nullptr)
+    {
+        return false;
+    }
+    auto& impl = *mpImpl;
+    if (!impl.offscreenMode || !impl.viewportColor || impl.renderDevice == nullptr
+        || !impl.offscreenCmd || x >= impl.viewportWidth || y >= impl.viewportHeight)
+    {
+        return false;
+    }
+
+    auto& rhi = impl.renderDevice->GetRhiDevice();
+    const std::uint64_t pixels = static_cast<std::uint64_t>(impl.viewportWidth)
+                               * static_cast<std::uint64_t>(impl.viewportHeight);
+    const std::uint64_t bytes = pixels * 4u;  // BGRA8
+
+    Orange::Rhi::BufferDesc bd{};
+    bd.mSize        = bytes;
+    bd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+    bd.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuToCpu;
+    auto readback = rhi.CreateBuffer(bd);
+    if (!readback)
+    {
+        return false;
+    }
+
+    auto& cmd = *impl.offscreenCmd;
+    if (cmd.Begin() != Orange::ResultCode::Success)
+    {
+        return false;
+    }
+    // viewportColor 在上一帧末为 ShaderReadOnly。
+    cmd.TransitionTexture(*impl.viewportColor,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly,
+                          Orange::Rhi::TextureLayout::TransferSrc);
+    {
+        Orange::Rhi::BufferTextureCopyRegion r{};
+        r.mBufferOffset = 0;
+        r.mMipLevel     = 0;
+        r.mArrayLayer   = 0;
+        r.mWidth        = impl.viewportWidth;
+        r.mHeight       = impl.viewportHeight;
+        r.mDepth        = 1;
+        cmd.CopyTextureToBuffer(*impl.viewportColor, *readback, r);
+    }
+    cmd.TransitionTexture(*impl.viewportColor,
+                          Orange::Rhi::TextureLayout::TransferSrc,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    if (cmd.End() != Orange::ResultCode::Success
+        || rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
+    {
+        return false;
+    }
+    impl.renderDevice->WaitIdle();
+
+    const void* mapped = readback->Map();
+    if (mapped == nullptr)
+    {
+        return false;
+    }
+    const auto* p = static_cast<const std::uint8_t*>(mapped);
+    const std::uint64_t idx = (static_cast<std::uint64_t>(y) * impl.viewportWidth + x) * 4u;
+    // kSwapchainColorFormat = BGRA8Unorm → 字节序 B, G, R, A。
+    const float b = p[idx + 0] / 255.0f;
+    const float g = p[idx + 1] / 255.0f;
+    const float rr = p[idx + 2] / 255.0f;
+    const float a = p[idx + 3] / 255.0f;
+    readback->Unmap();
+    outRGBA[0] = rr;
+    outRGBA[1] = g;
+    outRGBA[2] = b;
+    outRGBA[3] = a;
+    return true;
+}
+
 void Pipeline::Shutdown()
 {
     if (!mpImpl)
@@ -370,6 +448,18 @@ void Pipeline::Shutdown()
     impl.mainDescLayout.reset();
     impl.lightUbo.reset();
     impl.pointLightsUbo.reset();
+    // set 1 material 资源（GAP-2026-05-25 A2/G1）：descriptor set 必须先于
+    // pool 释放；贴图缓存 + default 贴图 + sampler 最后。templatePipelines 已
+    // 在本函数顶部 clear（PBR pipeline 引用 materialTexLayout），故 layout
+    // 此刻可安全释放。
+    impl.materialDescCache.clear();
+    impl.defaultMaterialSet.reset();
+    impl.materialTexPool.reset();
+    impl.materialTexLayout.reset();
+    impl.materialTexCache.clear();
+    impl.defaultWhiteTex.reset();
+    impl.defaultNormalTex.reset();
+    impl.materialSampler.reset();
     impl.shadowCasterVsHandle = {};
     impl.shadowCasterFsHandle = {};
     impl.tonemapPipeline.reset();
@@ -1093,6 +1183,20 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
             }
         }
 
+        // set 1 = per-instance material 贴图（仅 PBR 模板，GAP-2026-05-25 A2/G1）。
+        // per-draw 绑定——不同 MaterialInstance 用不同 set。预通道
+        // EnsureMaterialDescriptors 已 build + 上传贴图，这里命中缓存（不触
+        // GPU 写，录制期安全）；非 PBR 模板（textured/toon/...）无 set 1，跳过。
+        if (MaterialUsesTextureSet(*mat))
+        {
+            Orange::Rhi::RHIDescriptorSet* matSet =
+                EnsureMaterialDescriptorSet(drawable.materialInstance);
+            if (matSet != nullptr)
+            {
+                cmd.SetDescriptorSet(1, *matSet);
+            }
+        }
+
         // push constant 按 Material.uniforms 推算的尺寸打包。
         //   *  64 B → uMVP 单独（textured-only schema，已被 fallback 切走，
         //              保留兼容外部 sample 自定义 schema）
@@ -1243,6 +1347,9 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     if (impl.scene.HasCamera())
     {
         impl.EnsureMeshGpuCache();
+        // set 1 material 贴图上传 + descriptor build（同样必须在录制前，
+        // 走 UploadContext；录制期 draw loop 只命中缓存）。
+        impl.EnsureMaterialDescriptors();
     }
 
     // 1.5 Shadow / Light 准备：找 DirectionalLight + 写 light UBO + 确保
@@ -1715,6 +1822,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     if (hdrReady && impl.scene.HasCamera())
     {
         impl.EnsureMeshGpuCache();
+        impl.EnsureMaterialDescriptors();
     }
 
     // 1.5 Shadow / Light 准备：找 DirectionalLight + 计算 lightViewProj +

@@ -224,18 +224,25 @@ Material LoadPbr(Asset::AssetRegistry& registry)
     //   * uBaseColor = (0.8, 0.8, 0.8, 1.0)  —— 中性灰塑料
     //   * uMRA       = (0.0, 0.5, 1.0, 0.0)  —— 非金属、中等粗糙、AO 满
     //
-    // textureSlots 留空：set 0 binding 2/3/4 的 IBL 三纹理由 Pipeline 全局
-    // 注入（per-frame，dummy 或真实），不走 per-instance MaterialInstance
-    // 路径——它们与 EnvironmentComponent 生命周期同步。baseColor / MR /
-    // AO / normal 贴图绑定整体延后到 per-instance descriptor set 基础设施
-    // 上线时一并接通。
+    // set 0 binding 2/3/4 的 IBL 三纹理由 Pipeline 全局注入（per-frame，dummy
+    // 或真实），不走 MaterialInstance 路径——它们与 EnvironmentComponent 生命
+    // 周期同步。下面 textureSlots 是 set 1 per-instance material 贴图
+    // （GAP-2026-05-25 A2/G1），binding 与 pbr.frag set=1 声明严格对齐：
+    //   0 = baseColor / 1 = normal / 2 = metalRough(G=rough,B=metal) / 3 = ao。
+    // MaterialInstance 不绑某槽时 Pipeline 喂 default 贴图（白 / flat-normal），
+    // 采样 ×scalar = scalar、法线不扰动 → 退化为纯 scalar PBR（零回归）。
     desc.uniforms = {
         {"uMVP",       MaterialUniformType::Mat4},
         {"uModel",     MaterialUniformType::Mat4},
         {"uBaseColor", MaterialUniformType::Vec4},
         {"uMRA",       MaterialUniformType::Vec4},
     };
-    desc.textureSlots = {};
+    desc.textureSlots = {
+        {0, "uBaseColorTex"},
+        {1, "uNormalTex"},
+        {2, "uMetalRoughTex"},
+        {3, "uAoTex"},
+    };
 
     return BuildMaterial(registry, std::move(desc),
                          "shaders/orange_engine/pbr.vert.spv",
