@@ -84,3 +84,4 @@ ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。
 | ADR-007 | Pipeline.cpp 按 pass 维度拆分（PIMPL Impl 集中声明 + 子 .cpp 各自 method body） | accepted | 2026-05-23 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-007-pipeline-cpp-pass-level-split.md) |
 | ADR-008 | OrangeEditor v1.1 DCC 资产导入流水线架构（5 议题合并：UX A3 + 物理布局 B2 + .meta C2 + vendor D3 + scope F2） | accepted | 2026-05-23 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-008-dcc-import-pipeline-architecture.md) |
 | ADR-009 | vendor 拓扑反转：Ecosystem 唯一持有 4 个 sibling submodule（OE/OG 不再互 vendor OR + Wiki，sibling find_package） | accepted | 2026-05-24 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-009-vendor-topology-inversion.md) |
+| ADR-010 | per-session 单子仓仅约束代码 —— 纯文档 / work-queue 编辑跨仓豁免 | accepted | 2026-05-25 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-010-per-session-doc-edit-exemption.md) |
