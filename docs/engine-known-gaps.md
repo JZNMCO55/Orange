@@ -1321,7 +1321,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-24-aux-pass-context-missing-format-info
+## GAP-2026-05-24-aux-pass-context-missing-format-info ✅（engine API 侧）
 
 - **发现方**：OrangeEditor v1.3.0 grid pass 真正迁出落地（commit `93a1a2e`）
 - **发现日期**：2026-05-24
@@ -1357,13 +1357,14 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-24
+- **处理（engine API 侧 ✅，2026-05-26）**：采纳 G1 —— `AuxPassContext` 加 `hdrColorFormat` / `sceneDepthFormat` 字段（`enum class TextureFormat : std::uint32_t` 前向声明，沿 DebugDrawScene.h header-isolation 模式）；Pipeline 在两处 hook 调用点（window + offscreen）从 `impl.hdrColor->GetDesc().mFormat` / `impl.sceneDepth->GetDesc().mFormat` 权威填入。**消费侧（EditorGridAuxPassProvider 去掉 RGBA16Float hardcode 改读 ctx.hdrColorFormat）留独立 session**（per-session add/consume 分离纪律：本 session 只补引擎 API + 验证，不在同 session 消费）
 - **优先级**：**P2（Friction，工程纪律隐患）** —— 不阻塞 v1.3.0 ship（当前 engine 端 HDR format 稳定），但任何未来 HDR target 格式变更都是"single point of failure"；同时本 GAP 闭环前**任何**第二个外部 aux-pass provider 都会重复 hardcode 同款常量
-- **归属**：v1.3.x patch 候选（仅 Pipeline 公共面 + AuxPassContext struct + EditorGridAuxPassProvider 改造 3 个点，~50 LOC，0.2 人天），可与下面 GAP-2026-05-24-fullscreen-vert-not-publicly-exposed + GAP-2026-05-24-loadspirv-helper-not-publicly-exposed 同 batch
+- **归属**：engine API 侧 2026-05-26 ✅；editor 消费侧待独立 session。可与下面 GAP-2026-05-24-fullscreen-vert-not-publicly-exposed + GAP-2026-05-24-loadspirv-helper-not-publicly-exposed 同 batch（已同 session 一起补 engine API 侧）
 - **关联**：[[reference-grid-migration-engine-to-editor-sweep-pattern]]（grid sweep 模板顺手撞出本 GAP）；GAP-2026-05-19-editor-aux-passes-in-engine-pipeline（接口源头）
 
 ---
 
-## GAP-2026-05-24-fullscreen-vert-not-publicly-exposed
+## GAP-2026-05-24-fullscreen-vert-not-publicly-exposed ✅（engine API 侧）
 
 - **发现方**：OrangeEditor v1.3.0 grid pass 真正迁出落地（commit `93a1a2e`）
 - **发现日期**：2026-05-24
@@ -1397,13 +1398,14 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-24
+- **处理（engine API 侧 ✅，2026-05-26）**：采纳 G2 变体 —— 不走"ship spv 到公共路径"，改在 `AuxPassContext` 加 `Orange::Rhi::RHIShaderModule* pFullscreenVs`（前向声明 class，header-isolation 安全），Pipeline 在 hook 调用点从 `impl.fullscreenVs.get()` 填入。provider 直接拿引擎已编译的 fullscreen vert 传 PSO，零文件拷贝 / 零路径耦合。**消费侧（editor 删 sibling copy + 改用 ctx.pFullscreenVs）留独立 session**
 - **优先级**：**P3（cosmetic / 微小重复）** —— 不阻塞功能（sibling copy 维护成本 ~0，shader 10 行不会改）；但**每**新 aux-pass provider 都会重复一遍，N 个 provider 时 deduplication 价值上升
-- **归属**：v1.3.x patch 候选（与上面 GAP-2026-05-24-aux-pass-context-missing-format-info + 下面 GAP-2026-05-24-loadspirv-helper-not-publicly-exposed 同 batch）。可主动等待第 2 个外部 aux-pass provider 出现（如 outline / wireframe）再 batch 处理（避免提前 abstraction）
+- **归属**：engine API 侧 2026-05-26 ✅；editor 消费侧待独立 session（与 GAP-2026-05-24-aux-pass-context-missing-format-info + GAP-2026-05-24-loadspirv-helper-not-publicly-exposed 同 batch 补的 engine API）
 - **关联**：[[reference-grid-migration-engine-to-editor-sweep-pattern]]；GAP-2026-05-24-aux-pass-context-missing-format-info（同源 sweep 撞出）
 
 ---
 
-## GAP-2026-05-24-loadspirv-helper-not-publicly-exposed
+## GAP-2026-05-24-loadspirv-helper-not-publicly-exposed ✅（engine API 侧）
 
 - **发现方**：OrangeEditor v1.3.0 grid pass 真正迁出落地（commit `93a1a2e`）
 - **发现日期**：2026-05-24
@@ -1438,8 +1440,9 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-24
+- **处理（engine API 侧 ✅，2026-05-26）**：采纳 G1 —— 新增公共头 `include/orange/engine/asset/SpirvDiskLoader.h` + `src/asset/SpirvDiskLoader.cpp`：`Asset::LoadSpirvFromExecutableDir(string_view) -> vector<uint32_t>`（.exe 相对路径锚定 + 4 字节校验，失败返回空 + LOG_ERROR；header-isolation 安全，无 RHI 依赖）。引擎内部 `PipelineHelpers::LoadSpirv` 改为委托它（去掉本仓内重复的 GetExecutableDir + 加载逻辑）。新增 `tests/asset/SpirvDiskLoaderTest.cpp`（加载 fullscreen.vert.spv 验非空 + SPIR-V magic + 不存在路径返回空）ctest ✅。**消费侧（editor / samples 删各自 boilerplate 改用公共面）留独立 session**
 - **优先级**：**P3（cosmetic / 重复造）** —— 不阻塞功能；与上面 GAP-2026-05-24-fullscreen-vert-not-publicly-exposed 同性质（编辑器 sweep 撞出的 engine 工具复用债）
-- **归属**：v1.3.x patch 候选（与 GAP-2026-05-24-aux-pass-context-missing-format-info / GAP-2026-05-24-fullscreen-vert-not-publicly-exposed 同 batch）。可主动延后等第 2-3 个外部消费者出现再处理
+- **归属**：engine API 侧 2026-05-26 ✅；editor / samples 消费侧待独立 session
 - **关联**：[[reference-grid-migration-engine-to-editor-sweep-pattern]]（grid sweep 顺手撞出三件套之一）
 
 ---

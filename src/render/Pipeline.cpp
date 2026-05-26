@@ -1714,6 +1714,9 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             ctx.invViewProj = invViewProj;
             ctx.viewProj    = viewProj;
             ctx.sceneDepthIsShaderReadOnly = true;  // 契约固定 true（pre-transition）
+            ctx.hdrColorFormat   = impl.hdrColor->GetDesc().mFormat;
+            ctx.sceneDepthFormat = impl.sceneDepth->GetDesc().mFormat;
+            ctx.pFullscreenVs    = impl.fullscreenVs.get();
             impl.pAuxPassProvider->RenderAuxPass(ctx);
             // 离开契约：hdrColor 仍 ShaderReadOnly + sceneDepth 仍 ShaderReadOnly。
         }
@@ -2298,6 +2301,9 @@ void Pipeline::Render(Orange::Engine::World& world)
                 ctx.invViewProj = glm::inverse(viewProj);
                 ctx.viewProj    = viewProj;
                 ctx.sceneDepthIsShaderReadOnly = true;
+                ctx.hdrColorFormat   = impl.hdrColor->GetDesc().mFormat;
+                ctx.sceneDepthFormat = impl.sceneDepth->GetDesc().mFormat;
+                ctx.pFullscreenVs    = impl.fullscreenVs.get();
                 impl.pAuxPassProvider->RenderAuxPass(ctx);
             }
 

@@ -72,6 +72,7 @@ add_library(orange_engine STATIC
     src/asset/AssetRegistry.cpp
     src/asset/MeshAsset.cpp
     src/asset/MeshLoader.cpp
+    src/asset/SpirvDiskLoader.cpp
     src/asset/TextureLoader.cpp
     src/asset/ShaderLoader.cpp
 

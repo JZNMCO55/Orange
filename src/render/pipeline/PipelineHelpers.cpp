@@ -1,43 +1,12 @@
 #include "PipelineHelpers.h"
 
+#include "orange/engine/asset/SpirvDiskLoader.h"
 #include "orange/engine/core/Log.h"
 
-#include <cstddef>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <string>
-
-#if defined(_WIN32)
-    #define NOMINMAX
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
-#endif
 
 namespace Orange::Engine::Render::PipelineDetail
 {
-namespace
-{
-
-// 解析当前可执行体所在目录。CWD 与 .exe 目录可能不一致；把内置
-// passthrough / fullscreen .spv 锚定到 .exe 同目录的
-// `shaders/orange_engine/` 更稳——同 BuiltinMaterials 的路径解析风格。
-std::filesystem::path GetExecutableDir()
-{
-#if defined(_WIN32)
-    wchar_t buffer[MAX_PATH];
-    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (len == 0 || len == MAX_PATH)
-    {
-        return std::filesystem::current_path();
-    }
-    return std::filesystem::path(std::wstring(buffer, len)).parent_path();
-#else
-    return std::filesystem::current_path();
-#endif
-}
-
-}  // namespace
 
 std::uint32_t PushConstantBytesFor(MaterialUniformType type) noexcept
 {
@@ -218,24 +187,10 @@ std::uint16_t FloatToHalf(float f) noexcept
 
 std::vector<std::uint32_t> LoadSpirv(const char* relativePath)
 {
-    const auto fullPath = (GetExecutableDir() / relativePath).string();
-    std::ifstream file(fullPath, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
-        ORANGE_LOG_ERROR("Pipeline: 无法打开内置 SPIR-V {}", fullPath);
-        return {};
-    }
-    const std::streamsize size = file.tellg();
-    if (size <= 0 || (size % 4) != 0)
-    {
-        ORANGE_LOG_ERROR("Pipeline: SPIR-V 大小非法 ({}) for {}",
-                         static_cast<long long>(size), fullPath);
-        return {};
-    }
-    std::vector<std::uint32_t> words(static_cast<std::size_t>(size) / 4);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(words.data()), size);
-    return words;
+    // 委托到公共面 Asset::LoadSpirvFromExecutableDir（GAP-2026-05-24：把 .exe 相对
+    // .spv 加载 helper 提为公共 API 供 editor aux-pass provider / sample / 游戏 fork
+    // 复用，引擎内部不再各持一份）。
+    return Orange::Engine::Asset::LoadSpirvFromExecutableDir(relativePath);
 }
 
 void OrangeRenderLogAdapter(::Orange::LogCategory category,
