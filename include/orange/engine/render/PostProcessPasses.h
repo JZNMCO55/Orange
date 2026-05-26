@@ -339,6 +339,34 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// 相机运动模糊（camera motion blur）。从 sceneDepth 重建 world，用上一帧（未
+// jitter）viewProj 重投影算屏幕空间速度，沿速度方向 gather 模糊 → 独立 target →
+// composite 回 HDR。与 SSAO/SSR 同款 Pipeline 内部 RecordMotionBlurPass 录制
+// （Setup/Execute 空壳）。可选 pass —— enabled 默认 false 让既有 sample 视觉不变。
+//
+// 已知简化：仅相机重投影（无 per-object 运动矢量，运动物体不单独拖影，靠相机
+// 运镜表现模糊）；均匀直线 tap（无 reconstruction filter / tile-max 速度扩散）。
+// 静态相机下零效果（速度为 0）。window + 编辑器 offscreen 两路径。
+class ORANGE_ENGINE_API MotionBlurPass final : public IPostProcessPass
+{
+public:
+    bool enabled{false};
+
+    // 速度强度乘子。1 = 一帧相机位移的全程拖影；<1 收敛拖影长度，>1 夸张。
+    float intensity{0.5f};
+
+    // 最大模糊半径（uv 单位，约屏幕比例）。clamp 速度防超长拖影采到无关像素。
+    // 典型 0.02–0.08。
+    float maxRadius{0.05f};
+
+    // 沿速度方向的采样数。8–16 常见；越多越平滑越贵。
+    std::int32_t sampleCount{8};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

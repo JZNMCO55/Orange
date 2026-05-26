@@ -376,6 +376,35 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       gradeCompositeSet;  // gradeColor
     Orange::Rhi::RHITexture*                             gradeCompositeSetBound{nullptr};
 
+    // ---- 相机运动模糊（motion blur）GPU 资源 ------------------------------
+    // gather pass：hdrColor + depth + ubo → motionBlurColor（沿屏幕速度方向 tap
+    // 模糊，RGBA16F）；composite pass：motionBlurColor → hdrColor（复用 dofComposite
+    // 的 replace blend）。独立 motionBlurColor 避免 gather 读写同 target 反馈。
+    // 速度由当前 / 上一帧（均未 jitter）viewProj 重投影算出（与 TAA 同数学）。
+    struct MotionBlurUboData
+    {
+        glm::mat4 invCurViewProj{1.0f};  // depth → world
+        glm::mat4 prevViewProj{1.0f};    // world → prev clip
+        glm::vec4 params{0.5f, 0.05f, 8.0f, 0.0f};  // intensity / maxRadius / sampleCount / hasHistory
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        motionBlurFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> motionBlurLayout;   // 0=hdr 1=ubo 2=depth
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            motionBlurPipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              motionBlurUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             motionBlurColor;    // RGBA16F 模糊结果
+    std::uint32_t                                        motionBlurColorWidth{0};
+    std::uint32_t                                        motionBlurColorHeight{0};
+    bool                                                 motionBlurColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      motionBlurPool;     // gatherSet + compositeSet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       motionBlurSet;      // hdr + ubo + depth
+    Orange::Rhi::RHITexture*                             motionBlurSetBoundHdr{nullptr};
+    Orange::Rhi::RHITexture*                             motionBlurSetBoundDepth{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       motionBlurCompositeSet;  // motionBlurColor
+    Orange::Rhi::RHITexture*                             motionBlurCompositeSetBound{nullptr};
+    // 上一帧（未 jitter）viewProj + 历史有效标记（RecordMotionBlurPass 末尾更新）。
+    glm::mat4                                            motionBlurPrevViewProj{1.0f};
+    bool                                                 motionBlurHasHistory{false};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -953,6 +982,13 @@ struct Pipeline::Impl
     bool EnsureColorGradeResources();
     bool RecordColorGradePass(const ColorGradePass& gradeDesc);
 
+    // 相机运动模糊：重投影算屏幕速度 → 沿速度 gather → motionBlurColor →
+    // composite 回 hdrColor。curViewProj = 本帧未 jitter 的 viewProj（速度不含
+    // TAA 亚像素抖动）；末尾把它存为下帧 prevViewProj。
+    const MotionBlurPass* FindActiveMotionBlurPass() const noexcept;
+    bool EnsureMotionBlurResources();
+    bool RecordMotionBlurPass(const MotionBlurPass& mbDesc, const glm::mat4& curViewProj);
+
     // ---- PostProcessComponent 消费（V1：find-first 全局）-------------------
     // 每帧渲染前从 world 找 PostProcessComponent（全局单例语义，find-first）→
     // 填充下面的 post* 成员 pass 结构 + 把 PCSS/阴影分辨率灌进 shadowConfig；
@@ -966,6 +1002,7 @@ struct Pipeline::Impl
     DofPass        postDof{};
     TaaPass        postTaa{};
     ColorGradePass postGrade{};
+    MotionBlurPass postMotionBlur{};
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

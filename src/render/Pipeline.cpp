@@ -521,6 +521,23 @@ void Pipeline::Shutdown()
     impl.colorGradeUbo.reset();
     impl.colorGradeFs.reset();
 
+    // 相机运动模糊资源（set 先于 pool）。
+    impl.motionBlurSet.reset();
+    impl.motionBlurCompositeSet.reset();
+    impl.motionBlurPool.reset();
+    impl.motionBlurColor.reset();
+    impl.motionBlurColorWidth = 0;
+    impl.motionBlurColorHeight = 0;
+    impl.motionBlurColorLayoutShaderReadOnly = false;
+    impl.motionBlurSetBoundHdr = nullptr;
+    impl.motionBlurSetBoundDepth = nullptr;
+    impl.motionBlurCompositeSetBound = nullptr;
+    impl.motionBlurHasHistory = false;
+    impl.motionBlurPipeline.reset();
+    impl.motionBlurLayout.reset();
+    impl.motionBlurUbo.reset();
+    impl.motionBlurFs.reset();
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1725,6 +1742,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                     ok = impl.RecordTaaResolve(*taaPass, viewProj);
                 }
             }
+            // 相机运动模糊：TAA 之后（TAA 已 resolve 出锐利帧，再沿相机速度拉糊）、
+            // 色彩分级之前。用未 jitter 的 baseViewProj 算速度（不含 TAA 亚像素抖动）。
+            if (ok)
+            {
+                if (const MotionBlurPass* mbPass = impl.FindActiveMotionBlurPass())
+                {
+                    ok = impl.RecordMotionBlurPass(*mbPass, baseViewProj);
+                }
+            }
             // 色彩分级：最终 look 调整，放在所有 post（含 TAA）之后、tonemap 之前。
             if (ok)
             {
@@ -2259,6 +2285,10 @@ void Pipeline::Render(Orange::Engine::World& world)
             const glm::mat4 viewProj =
                 impl.ApplyTaaJitter(impl.scene.MainCamera().projection)
                 * impl.scene.MainCamera().view;
+            // 未 jitter 的 viewProj —— motion blur 算屏幕速度用（不含 TAA 亚像素抖动）。
+            // 未激活 TAA 时 base == viewProj。
+            const glm::mat4 baseViewProj = impl.scene.MainCamera().projection
+                                         * impl.scene.MainCamera().view;
             const glm::mat4 lightVP =
                 activeLight ? impl.ComputeLightViewProj(activeLightDir) : glm::mat4(1.0f);
 
@@ -2491,6 +2521,16 @@ void Pipeline::Render(Orange::Engine::World& world)
                 if (const TaaPass* taaPass = impl.FindActiveTaaPass())
                 {
                     offscreenOk = impl.RecordTaaResolve(*taaPass, viewProj);
+                }
+            }
+
+            // 相机运动模糊：TAA 之后、色彩分级之前。用未 jitter 的 baseViewProj
+            // 算速度（与 offscreen 路径同款）。
+            if (offscreenOk && impl.scene.HasCamera())
+            {
+                if (const MotionBlurPass* mbPass = impl.FindActiveMotionBlurPass())
+                {
+                    offscreenOk = impl.RecordMotionBlurPass(*mbPass, baseViewProj);
                 }
             }
 

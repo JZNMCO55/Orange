@@ -211,4 +211,21 @@ void ColorGradePass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- MotionBlurPass ---------------------------------------------------
+
+const char* MotionBlurPass::Name() const noexcept
+{
+    return "motion_blur";
+}
+
+void MotionBlurPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordMotionBlurPass。
+}
+
+void MotionBlurPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render
