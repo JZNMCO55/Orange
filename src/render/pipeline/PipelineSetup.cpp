@@ -11,7 +11,10 @@
 
 #include "orange/engine/render/BuiltinShadowShaders.h"
 
+#include <glm/geometric.hpp>
+
 #include <cstring>
+#include <random>
 
 namespace Orange::Engine::Render
 {
@@ -421,6 +424,117 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
 
         d.mpDebugName = "orange_engine.god_rays";
         impl.godRaysPipeline = rhi.CreateGraphicsPipeline(d);
+    }
+    {
+        // SSAO pipelines（屏幕空间环境光遮蔽）：
+        //   ssao       —— sceneDepth + ubo → R8 原始 AO（no blend）；
+        //   ssao_apply —— ssaoColor 4×4 模糊 → 乘法 blend（dst×src）进 HDR。
+        auto ssaoCode      = LoadSpirv("shaders/orange_engine/ssao.frag.spv");
+        auto ssaoApplyCode = LoadSpirv("shaders/orange_engine/ssao_apply.frag.spv");
+        if (ssaoCode.empty() || ssaoApplyCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = ssaoCode.data();
+        sm.mCodeSize   = ssaoCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.ssao.frag";
+        impl.ssaoFs = rhi.CreateShaderModule(sm);
+        sm.mpCode      = ssaoApplyCode.data();
+        sm.mCodeSize   = ssaoApplyCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.ssao_apply.frag";
+        impl.ssaoApplyFs = rhi.CreateShaderModule(sm);
+
+        // ssaoLayout：0 = sceneDepth sampler，1 = SsaoUbo。
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.ssao.layout";
+        impl.ssaoLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        Orange::Rhi::BufferDesc ub{};
+        ub.mSize        = sizeof(Pipeline::Impl::SsaoUboData);
+        ub.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.ssaoUbo = rhi.CreateBuffer(ub);
+
+        if (!impl.ssaoFs || !impl.ssaoApplyFs || !impl.ssaoLayout || !impl.ssaoUbo)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO 资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        {
+            // ssao pipeline → R8Unorm AO target，no blend，layout = ssaoLayout。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.ssaoFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            d.mColorBlend.mAttachments.push_back({});  // no blend
+            d.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::R8Unorm);
+            d.mDescriptorSetLayouts.push_back(impl.ssaoLayout.get());
+            d.mpDebugName = "orange_engine.ssao";
+            impl.ssaoPipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        {
+            // ssao_apply pipeline → HDR target，乘法 blend（out = dst×src =
+            // HDR×AO）；layout 复用 bloomLayout（1 binding sampler = ssaoColor）。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.ssaoApplyFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            Orange::Rhi::ColorBlendAttachmentDesc blend{};
+            blend.mBlendEnable         = true;
+            blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::Zero;
+            blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::SrcColor;  // dst×src
+            blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+            blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::Zero;
+            blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+            d.mColorBlend.mAttachments.push_back(blend);
+            d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+            d.mDescriptorSetLayouts.push_back(impl.bloomLayout.get());
+            d.mpDebugName = "orange_engine.ssao_apply";
+            impl.ssaoApplyPipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        if (!impl.ssaoPipeline || !impl.ssaoApplyPipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        // 半球 kernel（一次性、确定性 seed）：半球内随机方向 × 随机长度，
+        // scale 用 t² 向中心加速分布（近处样本密、远处疏，经典 SSAO 取法）。
+        std::mt19937                          rng(1337u);
+        std::uniform_real_distribution<float> d01(0.0f, 1.0f);
+        std::uniform_real_distribution<float> dn1(-1.0f, 1.0f);
+        for (std::uint32_t i = 0; i < Pipeline::Impl::kSsaoKernelSize; ++i)
+        {
+            glm::vec3 s(dn1(rng), dn1(rng), d01(rng));  // 半球 z>=0
+            s = glm::normalize(s) * d01(rng);
+            const float t     = static_cast<float>(i)
+                              / static_cast<float>(Pipeline::Impl::kSsaoKernelSize);
+            const float scale = 0.1f + 0.9f * (t * t);
+            s *= scale;
+            impl.ssaoKernel[i] = glm::vec4(s, 0.0f);
+        }
     }
     {
         // sky pipeline —— RGBA16F HDR target，no blend，无 depth attachment

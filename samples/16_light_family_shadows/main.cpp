@@ -39,6 +39,7 @@
 #include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
+#include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/scene/Entity.h>
@@ -205,10 +206,14 @@ Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
 int main(int argc, char** argv)
 {
     // `--capture <path>`：渲一帧 PNG 后自动退（CI / 文档无人值守出图）。
+    // `--no-ssao`：关闭 SSAO（做 before/after 对比）。
     std::string capturePath;
-    for (int i = 1; i + 1 < argc; ++i)
+    bool        disableSsao = false;
+    for (int i = 1; i < argc; ++i)
     {
-        if (std::string(argv[i]) == "--capture") { capturePath = argv[i + 1]; break; }
+        const std::string a = argv[i];
+        if (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
+        else if (a == "--no-ssao")            { disableSsao = true; }
     }
 
     AppConfig cfg{};
@@ -355,6 +360,16 @@ int main(int argc, char** argv)
         return 1;
     }
     PostProcessChain chain = CreateDefault();
+    // SSAO：挂进 post chain；`--no-ssao` 关闭做 before/after 对比。
+    // 球↔地面接触处 + 球体下半的凹处会变暗，接触感更强。
+    {
+        auto ssao = std::make_unique<Orange::Engine::Render::SsaoPass>();
+        ssao->enabled  = !disableSsao;
+        ssao->radius   = 0.6f;
+        ssao->strength = 1.0f;
+        ssao->power    = 2.0f;
+        chain.AddPass(std::move(ssao));
+    }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
     pipeline.SetShadowConfig(ShadowConfig{});

@@ -107,4 +107,22 @@ void GodRaysPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 让 PostProcessChain 的"逐 pass 调 Execute"循环不漏调任何 pass。
 }
 
+// ---------- SsaoPass ---------------------------------------------------------
+
+const char* SsaoPass::Name() const noexcept
+{
+    return "ssao";
+}
+
+void SsaoPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 GodRaysPass：实际录制走 Pipeline 内部 RecordSsaoPass（需直接接
+    // sceneDepth / noise / HDR target，不走通用 Setup/Execute 通道）。
+}
+
+void SsaoPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render

@@ -141,6 +141,44 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// SSAO（屏幕空间环境光遮蔽）。前向渲染下从 sceneDepth
+// 重建 view-space pos/normal，半球 kernel 采样估遮蔽 → 4×4 box 模糊 → 乘法
+// blend 进 HDR。与 god rays 同款"挂进 chain 由 Pipeline 走专用 RecordSsaoPass"
+// 模式（Setup/Execute 是空壳，真实工作在 Pipeline 侧）。
+//
+// 已知简化：AO 乘到的是"已含直接光的 HDR"而非仅环境项（无 G-buffer 的
+// 前向取舍），凹处直接光会被轻微压暗；要严格只作用 ambient 需 depth
+// prepass / MRT 分离，留作后续。仅在 window 模式 Stage A 生效（offscreen
+// 编辑器路径按设计跳过所有 post）。
+class ORANGE_ENGINE_API SsaoPass final : public IPostProcessPass
+{
+public:
+    // 整体开关。false 等同 chain 里没挂本 pass。
+    bool enabled{true};
+
+    // 采样半径（view 空间，单位米）。越大遮蔽范围越广、越"软"，过大易
+    // 跨物体串扰。典型 0.3–1.0。
+    float radius{0.5f};
+
+    // 深度比较偏置，抑制平坦面自遮蔽 acne。典型 0.02–0.05。
+    float bias{0.025f};
+
+    // 整体强度：最终 ao = mix(1, ao, strength)。0=无效果，1=全量。
+    float strength{1.0f};
+
+    // 对比 power：ao = pow(ao, power)。>1 加深暗部、收紧过渡。典型 1–3。
+    float power{1.8f};
+
+    // 半球样本数。16 偏噪、32 默认（× 分辨率影响 GPU）。上限 32（与
+    // Pipeline::Impl::kSsaoKernelSize / shader ORANGE_SSAO_MAX_KERNEL 对齐；
+    // 超出由 Pipeline 端 clamp）。
+    std::int32_t kernelSize{32};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

@@ -423,6 +423,23 @@ void Pipeline::Shutdown()
     impl.godRaysPipeline.reset();
     impl.godRaysFs.reset();
     impl.godRaysSetBoundDepth = nullptr;
+
+    // SSAO 资源（set 先于 pool 释放）。
+    impl.ssaoSet.reset();
+    impl.ssaoApplySet.reset();
+    impl.ssaoPool.reset();
+    impl.ssaoColor.reset();
+    impl.ssaoColorWidth = 0;
+    impl.ssaoColorHeight = 0;
+    impl.ssaoColorLayoutShaderReadOnly = false;
+    impl.ssaoSetBoundDepth = nullptr;
+    impl.ssaoApplySetBoundAo = nullptr;
+    impl.ssaoPipeline.reset();
+    impl.ssaoApplyPipeline.reset();
+    impl.ssaoLayout.reset();
+    impl.ssaoUbo.reset();
+    impl.ssaoFs.reset();
+    impl.ssaoApplyFs.reset();
     // DebugDrawScene 必须在 renderDevice WaitIdle 之后、其他 RHI 资源释放前
     // 一起释放——Orange::Renderer::DebugDraw 持有 vertex staging buffer 与
     // 两条 pipeline，析构需要 device 还活着。
@@ -1725,6 +1742,24 @@ const GodRaysPass* Pipeline::Impl::FindActiveGodRaysPass() const noexcept
     return nullptr;
 }
 
+const SsaoPass* Pipeline::Impl::FindActiveSsaoPass() const noexcept
+{
+    if (postProcessChain == nullptr)
+    {
+        return nullptr;
+    }
+    const std::size_t count = postProcessChain->PassCount();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const IPostProcessPass* p = postProcessChain->PassAt(i);
+        if (const SsaoPass* sp = dynamic_cast<const SsaoPass*>(p))
+        {
+            return sp->enabled ? sp : nullptr;
+        }
+    }
+    return nullptr;
+}
+
 
 
 // v0.9 c4：Pipeline 端 sample bin 树注册。挂到 "LayerUpdate" 下；细分
@@ -1821,6 +1856,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     const BloomPass*   activeBloom   = impl.FindActiveBloomPass();
     const TonemapPass* activeTonemap = impl.FindActiveTonemapPass();
     const GodRaysPass* activeGodRays = impl.FindActiveGodRaysPass();
+    const SsaoPass*    activeSsao    = impl.FindActiveSsaoPass();
     if (activeBloom != nullptr && hdrReady)
     {
         if (!impl.EnsureBloomResources())
@@ -2072,6 +2108,14 @@ void Pipeline::Render(Orange::Engine::World& world)
             if (offscreenOk)
             {
                 impl.RecordDebugDrawPass(viewProj);
+            }
+
+            // SSAO：bloom 之前——AO 压暗后的 HDR 再进 bloom，凹处不会被
+            // bloom 错误地提亮。proj 取当前帧 main camera（重建 view-space）。
+            if (offscreenOk && activeSsao != nullptr && impl.scene.HasCamera())
+            {
+                offscreenOk = impl.RecordSsaoPass(*activeSsao,
+                                                  impl.scene.MainCamera().projection);
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)

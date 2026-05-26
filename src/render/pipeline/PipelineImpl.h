@@ -219,6 +219,38 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorPool> godRaysPool;
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>  godRaysSet;
     Orange::Rhi::RHITexture*                         godRaysSetBoundDepth{nullptr};
+
+    // ---- SSAO GPU 资源（屏幕空间环境光遮蔽）---------------------------
+    // ssao pass：sceneDepth + ubo → ssaoColor(R8，原始 AO；噪声用程序化
+    // hash，不需 noise 纹理)；ssao_apply pass：ssaoColor 4×4 模糊 → 乘法
+    // blend 进 hdrColor。
+    static constexpr std::uint32_t kSsaoKernelSize = 32;   // ≤ shader ORANGE_SSAO_MAX_KERNEL(64)
+    struct SsaoUboData
+    {
+        glm::mat4 proj{1.0f};
+        glm::mat4 invProj{1.0f};
+        glm::vec4 kernel[kSsaoKernelSize]{};  // xyz = 切线空间半球样本
+        glm::vec4 params{0.5f, 0.025f, 1.0f, 1.8f};   // radius / bias / strength / power
+        glm::vec4 params2{static_cast<float>(kSsaoKernelSize), 0.0f, 0.0f, 0.0f};  // kernelSize / 预留
+    };
+    // host 端半球 kernel（PipelineSetup 一次性生成；每帧连同 proj/params 写 UBO）。
+    std::array<glm::vec4, kSsaoKernelSize> ssaoKernel{};
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssaoFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssaoApplyFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssaoLayout;   // 0=depth 1=ubo
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            ssaoPipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            ssaoApplyPipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              ssaoUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             ssaoColor;        // R8 原始 AO
+    std::uint32_t                                        ssaoColorWidth{0};
+    std::uint32_t                                        ssaoColorHeight{0};
+    bool                                                 ssaoColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      ssaoPool;          // 容纳 ssaoSet + ssaoApplySet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssaoSet;          // depth + ubo
+    Orange::Rhi::RHITexture*                             ssaoSetBoundDepth{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssaoApplySet;     // ssaoColor
+    Orange::Rhi::RHITexture*                             ssaoApplySetBoundAo{nullptr};
+
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomUpsamplePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> tonemapPipeline;
@@ -725,15 +757,23 @@ struct Pipeline::Impl
     // 在已经 Begin 的 offscreenCmd 上追加 6 round downsample + 5 round upsample。
     bool RecordBloomChain(const BloomPass& bloomDesc);
 
-    // 检测当前 chain 是否含 BloomPass / TonemapPass / GodRaysPass。
+    // 检测当前 chain 是否含 BloomPass / TonemapPass / GodRaysPass / SsaoPass。
     const BloomPass*    FindActiveBloomPass()   const noexcept;
     const TonemapPass*  FindActiveTonemapPass() const noexcept;
     const GodRaysPass*  FindActiveGodRaysPass() const noexcept;
+    const SsaoPass*     FindActiveSsaoPass()    const noexcept;
 
     // 在 sceneDepth 重建（OnResize / 首次）后把 godRaysSet 的 binding 0
     // 重新指向当前 sceneDepth view。
     bool EnsureGodRaysSet();
     bool RecordGodRaysPass(const GodRaysPass& gr, const glm::mat4& viewProj);
+
+    // SSAO：noise + kernel 一次性生成 + ssaoColor target / descriptor set
+    // 按 hdr 尺寸重建（OnResize / 首次 / sceneDepth 重建后重绑）。
+    bool EnsureSsaoResources();
+    // 录制 SSAO：compute AO → ssaoColor，再 4×4 模糊 + 乘法 blend 进 hdrColor。
+    // proj 取自当前帧 main camera（重建 view-space + 投回屏幕）。
+    bool RecordSsaoPass(const SsaoPass& ssaoDesc, const glm::mat4& proj);
 
     // bakedEnvCube 重建后分配 / 重写 skySet。
     bool EnsureSkyDescSet();
