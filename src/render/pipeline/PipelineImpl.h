@@ -265,6 +265,26 @@ struct Pipeline::Impl
                   "PointLightsUboData std140 size mismatch");
     std::unique_ptr<Orange::Rhi::RHIBuffer> pointLightsUbo;
 
+    // SpotLights UBO（GAP-2026-05-26 G1）。锥光 = point 物理基衰减 × 锥角
+    // 软边。每盏 4 个 std140 vec4（13 个 float 装不进 3 个 vec4，且第 4 个
+    // vec4 给 G2 透视阴影 index 预留位）。
+    static constexpr std::uint32_t kMaxSpotLights = 8;
+    struct SpotLightStd140
+    {
+        glm::vec4 posRange{};        // xyz = world pos, w = range
+        glm::vec4 dirCosOuter{};     // xyz = spot dir（normalized）, w = cos(outerConeAngle)
+        glm::vec4 colorIntensity{};  // xyz = linear rgb, w = intensity
+        glm::vec4 cosInnerShadow{};  // x = cos(innerConeAngle), y = shadow index（G2；<0 = 无）, z/w pad
+    };
+    struct SpotLightsUboData
+    {
+        glm::uvec4      countPad{0u, 0u, 0u, 0u};
+        SpotLightStd140 lights[kMaxSpotLights]{};
+    };
+    static_assert(sizeof(SpotLightsUboData) == 16 + 64 * kMaxSpotLights,
+                  "SpotLightsUboData std140 size mismatch");
+    std::unique_ptr<Orange::Rhi::RHIBuffer> spotLightsUbo;
+
     // 当前帧时间（seconds，单调递增）。
     float frameTime{0.0f};
 
@@ -717,6 +737,10 @@ struct Pipeline::Impl
 
     // 把 World 内挂 PointLight + Transform 的 entity 收集到 PointLightsUbo。
     void UpdatePointLightsUbo(Orange::Engine::World& world);
+
+    // 把 World 内挂 SpotLight + Transform 的 entity 收集到 SpotLightsUbo
+    //（pos 由 Transform.position、dir 由 Transform.rotation 派生）。
+    void UpdateSpotLightsUbo(Orange::Engine::World& world);
 
     // 计算 light view-proj。
     glm::mat4 ComputeLightViewProj(const glm::vec3& lightWorldDir) const;

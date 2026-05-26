@@ -70,9 +70,10 @@ struct DirectionalLight
 //     Cocos pointLight / Godot OmniLight 同款（"距离 + 强度"两参数即够）。
 //     classical (constant + linear*d + quadratic*d²) 模型有调参负担，PBR
 //     baseline 直接走物理基。
-//   * 不存 SpotLight —— 留待第一款游戏真撞上"手电筒锥光"需求时再扩。
-//   * castsShadow 字段保留但本期不实现 omnidirectional cubemap shadow
-//     —— Pipeline 忽略 PointLight.castsShadow 字段，仅 DirectionalLight 投影。
+//   * SpotLight 走独立 struct（见下方）—— 锥光 = point 衰减 × 锥角软边，
+//     语义与 point 不同，不复用同一组件。
+//   * castsShadow：true 时 Pipeline 为该 point light 烘 6 面 cubemap
+//     omnidirectional shadow（多 shadow caster 架构落地后启用）。
 struct PointLight
 {
     // 线性 RGB 颜色（不预乘 intensity）。
@@ -87,7 +88,53 @@ struct PointLight
     // light list）。典型室内点光 5-10m，路灯 / 灯塔 30-100m。
     float range{10.0f};
 
-    // 保留字段 —— 当前 Pipeline 忽略；omnidirectional shadow 实现后启用。
+    // true 时 Pipeline 为该 point light 烘 6 面 cubemap omnidirectional
+    // shadow（多 shadow caster 架构落地后生效）。
+    bool castsShadow{false};
+};
+
+// 聚光 ECS component。
+//
+// 几何状态全部由 entity 的 TransformComponent 派生 —— position 由
+// `Transform.position`、direction 由 `Transform.rotation` 派生（identity
+// rotation 表示锥光向下，-Y，与 DirectionalLight 同款约定）。组件只存
+// "输入数据"，不冗余存位置 / 朝向。
+//
+// 着色模型 = PointLight 物理基 inverse-square × range smoothstep 衰减，
+// 再乘一个锥角软边因子：
+//   cone = smoothstep(cos(outerConeAngle), cos(innerConeAngle),
+//                     dot(spotDir, L))
+// 其中 spotDir 是锥光传播方向、L 是表面指向光源方向。innerConeAngle 内
+// 全亮、outerConeAngle 外全暗、两者之间平滑过渡（软锥边）。
+//
+// 设计取舍：
+//   * 锥角存 **半角弧度**（从中心轴到锥边的夹角）—— 与 glm::perspective
+//     的 fov = 2*outerConeAngle 直接对接（透视阴影 light proj 复用），
+//     且着色端只需 cos 一次。编辑器按 "(rad)" 标签暴露（与 RigidBody
+//     的 initialAngle 同款 radian 字段惯例）。
+//   * castsShadow：true 时 Pipeline 为该 spot 烘一张 perspective shadow
+//     map（多 shadow caster 架构落地后生效）。
+struct SpotLight
+{
+    // 线性 RGB 颜色（不预乘 intensity）。
+    glm::vec3 color{1.0f, 1.0f, 1.0f};
+
+    // 标量强度乘子。
+    float intensity{1.0f};
+
+    // 光照影响距离上限（米）。超过此距离贡献被 smoothstep 截断到 0；
+    // Pipeline 用 range 做 culling + 透视阴影 light proj 的 zFar。
+    float range{15.0f};
+
+    // 内锥半角（弧度，从中心轴量起）。≤ 此角全亮。默认 ~17°。
+    float innerConeAngle{0.30f};
+
+    // 外锥半角（弧度）。≥ 此角全暗；内外之间 smoothstep 软过渡。默认 ~26°。
+    // 透视阴影 light proj 的 fov = 2*outerConeAngle。
+    float outerConeAngle{0.45f};
+
+    // true 时 Pipeline 为该 spot 烘一张 perspective shadow map
+    //（多 shadow caster 架构落地后生效）。
     bool castsShadow{false};
 };
 
@@ -132,6 +179,18 @@ inline glm::quat MakeDirectionalLightRotationFromDir(const glm::vec3& desiredWor
     const float     s    = std::sqrt((1.0f + d) * 2.0f);
     const float     invS = 1.0f / s;
     return glm::quat(s * 0.5f, axis.x * invS, axis.y * invS, axis.z * invS);
+}
+
+// identity rotation 下 SpotLight 的默认锥光传播方向（-Y，向下）——
+// 与 DirectionalLight 同款约定，让"旋转 entity 即改光向"在两种光之间
+// 体验一致。
+inline constexpr glm::vec3 kSpotLightLocalForward{0.0f, -1.0f, 0.0f};
+
+// 由 quaternion 推算锥光传播方向（已 normalize）。Pipeline（透视阴影
+// light view / 着色锥角）+ gizmo（锥体 wireframe）共用这一条公式。
+inline glm::vec3 ComputeSpotLightWorldDir(const glm::quat& rotation) noexcept
+{
+    return glm::normalize(rotation * kSpotLightLocalForward);
 }
 
 }  // namespace Orange::Engine::Render

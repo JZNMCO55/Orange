@@ -448,6 +448,7 @@ void Pipeline::Shutdown()
     impl.mainDescLayout.reset();
     impl.lightUbo.reset();
     impl.pointLightsUbo.reset();
+    impl.spotLightsUbo.reset();
     // set 1 material 资源（GAP-2026-05-25 A2/G1）：descriptor set 必须先于
     // pool 释放；贴图缓存 + default 贴图 + sampler 最后。templatePipelines 已
     // 在本函数顶部 clear（PBR pipeline 引用 materialTexLayout），故 layout
@@ -1399,6 +1400,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         cameraWorldPos            = glm::vec3(invView[3]);
         impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
         impl.UpdatePointLightsUbo(world);
+        impl.UpdateSpotLightsUbo(world);
     }
 
     // 2. 一次 cmd list 包含：shadow → (sky) → 主 pass → (grid) → passthrough → 翻 layout。
@@ -1872,6 +1874,7 @@ void Pipeline::Render(Orange::Engine::World& world)
         cameraWorldPos            = glm::vec3(invView[3]);
         impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
         impl.UpdatePointLightsUbo(world);
+        impl.UpdateSpotLightsUbo(world);
     }
 
     // 2. Stage A —— 离屏 HDR 主 pass + 可选 bloom mip-chain。无相机 /

@@ -200,6 +200,7 @@ add_executable(OrangeEditor
     plugin/MaterialAssetInspectorPlugin.cpp
     plugin/ParticleEmitterGizmoPlugin.cpp
     plugin/PointLightGizmoPlugin.cpp
+    plugin/SpotLightGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
     branding/EditorWindowIcon.cpp
     # Windows resource：把 orange-editor-logo.ico 嵌进 exe。MSVC / CMake 自

@@ -55,9 +55,11 @@ namespace
 // 1.4 → 1.5：新增 PointLight（GAP-2026-05-11 G1；同款 optional component
 // 路径，旧 1.4 文件无该字段时 Pipeline pointLightCount=0 退化为纯
 // DirectionalLight 路径）。
+// 1.5 → 1.6：新增 SpotLight（GAP-2026-05-26 G1；同款 optional component
+// 路径，旧 1.5 文件无该字段时 Pipeline spotLightCount=0，无锥光贡献）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 5};
+    static const SchemaVersion kVersion{"scene/world", 1, 6};
     return kVersion;
 }
 

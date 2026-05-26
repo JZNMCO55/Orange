@@ -90,6 +90,7 @@
 #include "plugin/MaterialAssetInspectorPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "plugin/PointLightGizmoPlugin.h"
+#include "plugin/SpotLightGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
 
@@ -635,6 +636,10 @@ int main()
     // DirectionalLight / ParticleEmitter 模式纯装饰 overlay，不接管 LMB 拖动。
     editorHost.gizmoPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::PointLightGizmoPlugin>());
+    // SpotLight 锥体 wireframe overlay（apex + base ring + 4 条侧棱）。同款纯
+    // 装饰 overlay，方向 / 位置随 entity Transform 即时跟随。
+    editorHost.gizmoPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::SpotLightGizmoPlugin>());
     // v0.4 c5：Camera frustum gizmo（plugin 当前用 hardcode 默认 fov/aspect/
     // near/far + entity transform 推 view；待 GAP-2026-05-15-camera-editor-
     // vs-runtime-separation 落地后切真实 component 数据）

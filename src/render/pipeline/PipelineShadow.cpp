@@ -184,6 +184,64 @@ void Pipeline::Impl::UpdatePointLightsUbo(Orange::Engine::World& world)
     pointLightsUbo->Unmap();
 }
 
+void Pipeline::Impl::UpdateSpotLightsUbo(Orange::Engine::World& world)
+{
+    if (!spotLightsUbo) { return; }
+
+    SpotLightsUboData data{};
+    std::uint32_t     count = 0;
+
+    auto& reg = world.Registry();
+    auto  view = reg.view<SpotLight>();
+    bool  warnedOverflow = false;
+    for (auto entity : view)
+    {
+        if (count >= kMaxSpotLights)
+        {
+            if (!warnedOverflow)
+            {
+                ORANGE_LOG_WARN("Pipeline: scene has more than {} SpotLights; "
+                                "extras ignored.", kMaxSpotLights);
+                warnedOverflow = true;
+            }
+            continue;
+        }
+        const auto& sl = view.get<SpotLight>(entity);
+
+        glm::vec3 pos{0.0f};
+        glm::vec3 dir = kSpotLightLocalForward;  // 缺 Transform → 默认向下
+        if (const auto* tc = reg.try_get<Orange::Engine::Scene::TransformComponent>(entity))
+        {
+            pos = tc->position;
+            dir = ComputeSpotLightWorldDir(tc->rotation);
+        }
+
+        // 锥角软边：smoothstep(cosOuter, cosInner, dot)。GLSL smoothstep 要求
+        // edge0 < edge1，故 host 端保证 cosInner > cosOuter（即 innerAngle <
+        // outerAngle）+ 一个 epsilon 防 edge0==edge1 除零。
+        const float outerCos = std::cos(sl.outerConeAngle);
+        float       innerCos = std::cos(std::min(sl.innerConeAngle, sl.outerConeAngle));
+        innerCos = std::max(innerCos, outerCos + 1e-4f);
+
+        data.lights[count].posRange       = glm::vec4(pos, sl.range);
+        data.lights[count].dirCosOuter    = glm::vec4(dir, outerCos);
+        data.lights[count].colorIntensity = glm::vec4(sl.color, sl.intensity);
+        // shadow index 占位 -1（G1 无阴影；G2 透视阴影落地后由 shadow pass 写）。
+        data.lights[count].cosInnerShadow = glm::vec4(innerCos, -1.0f, 0.0f, 0.0f);
+        ++count;
+    }
+    data.countPad.x = count;
+
+    void* mapped = spotLightsUbo->Map();
+    if (mapped == nullptr)
+    {
+        ORANGE_LOG_ERROR("Pipeline: spotLightsUbo Map 失败");
+        return;
+    }
+    std::memcpy(mapped, &data, sizeof(data));
+    spotLightsUbo->Unmap();
+}
+
 bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
                                       const glm::mat4& lightViewProj)
 {

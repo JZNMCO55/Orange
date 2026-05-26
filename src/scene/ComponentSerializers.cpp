@@ -647,6 +647,65 @@ bool ReadPointLight(const JsonReader& reader,
 }
 
 // ---------------------------------------------------------------------------
+// SpotLight —— Render 模块的 PureData 组件（GAP-2026-05-26 G1）。
+// 位置由 entity.Transform.position、方向由 entity.Transform.rotation 派生，
+// 不在 component 上落几何状态；字段：color / intensity / range /
+// innerConeAngle / outerConeAngle（半角弧度）/ castsShadow。
+// ---------------------------------------------------------------------------
+
+bool HasSpotLight(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::SpotLight>(entity);
+}
+
+void WriteSpotLight(JsonWriter& writer,
+                    std::string_view componentPath,
+                    Entity entity,
+                    const SaveContext& ctx)
+{
+    const auto* light = ctx.world.GetComponent<Render::SpotLight>(entity);
+    if (light == nullptr) { return; }
+
+    const float color[3] = {light->color.x, light->color.y, light->color.z};
+    writer.WriteFloatArray(Join(componentPath, "color"),          color, 3);
+    writer.WriteFloat(     Join(componentPath, "intensity"),      light->intensity);
+    writer.WriteFloat(     Join(componentPath, "range"),          light->range);
+    writer.WriteFloat(     Join(componentPath, "innerConeAngle"), light->innerConeAngle);
+    writer.WriteFloat(     Join(componentPath, "outerConeAngle"), light->outerConeAngle);
+    writer.WriteBool(      Join(componentPath, "castsShadow"),    light->castsShadow);
+}
+
+bool ReadSpotLight(const JsonReader& reader,
+                   std::string_view componentPath,
+                   Entity entity,
+                   const LoadContext& ctx)
+{
+    Render::SpotLight light;
+
+    float color[3] = {1.0f, 1.0f, 1.0f};
+    if (reader.Has(Join(componentPath, "color")))
+    {
+        if (!reader.ReadFloatArray(Join(componentPath, "color"), color, 3))
+        {
+            return false;
+        }
+    }
+    light.color          = {color[0], color[1], color[2]};
+    light.intensity      = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "intensity"),      light.intensity));
+    light.range          = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "range"),          light.range));
+    light.innerConeAngle = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "innerConeAngle"), light.innerConeAngle));
+    light.outerConeAngle = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "outerConeAngle"), light.outerConeAngle));
+    light.castsShadow    = reader.GetBool(Join(componentPath, "castsShadow"), false);
+
+    ctx.world.AddComponent(entity, light);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // EnvironmentComponent
 //
 // 三个字段：cubemap（HDR equirect 资产路径，c7 真正接 HDR loader 后才能
@@ -1465,6 +1524,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
         {"PointLight",       ComponentKind::PureData,         &HasPointLight,       &WritePointLight,       &ReadPointLight},
+        {"SpotLight",        ComponentKind::PureData,         &HasSpotLight,        &WriteSpotLight,        &ReadSpotLight},
         {"Environment",      ComponentKind::PureData,         &HasEnvironment,      &WriteEnvironment,      &ReadEnvironment},
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
         {"AudioSource",      ComponentKind::PureData,         &HasAudioSource,      &WriteAudioSource,      &ReadAudioSource},

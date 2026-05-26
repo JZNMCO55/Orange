@@ -83,8 +83,44 @@ void RegisterPointLightSchema()
                      "Pipeline 用 range 做 culling + shader 内 distance fade。\n"
                      "典型室内点光 5–10m，路灯 30–100m。")
         .Field<&PL::castsShadow>("castsShadow", "Casts Shadow")
-            .Tooltip("保留字段。当前 Pipeline 忽略 PointLight 的投影标记。\n"
-                     "Omnidirectional cubemap shadow 是 Phase 10 量级，留待后续 milestone。")
+            .Tooltip("勾选后 Pipeline 为该点光烘 6 面 cubemap omnidirectional 阴影。\n"
+                     "多 shadow caster 架构落地后生效。")
+        .Addable()
+        .Removable()
+        .Register();
+}
+
+// SpotLight schema。位置 + 方向均由 Transform 派生（与 DirectionalLight /
+// PointLight 同款）；Inspector 暴露 color / intensity / range / 内外锥半角
+//（弧度，与 RigidBody initialAngle 同款 "(rad)" 字段惯例）/ castsShadow。
+void RegisterSpotLightSchema()
+{
+    using SL = Orange::Engine::Render::SpotLight;
+    ComponentSchemaBuilder<SL>("SpotLight", "Spot Light")
+        .Helper("位置由 Transform.position、锥光方向由 Transform.rotation 派生 —— 在上方 Transform 段移动 / 旋转 entity 即改光位与朝向。\n"
+                "identity rotation 表示锥光向下（-Y），与 Directional / Point 同款约定。")
+        .Field<&SL::color>("color", "Color")
+            .Color()
+        .Field<&SL::intensity>("intensity", "Intensity")
+            .Range(0.0f, 1000.0f)
+            .DragSpeed(0.05f)
+        .Field<&SL::range>("range", "Range (m)")
+            .Range(0.01f, 1000.0f)
+            .DragSpeed(0.1f)
+            .Tooltip("光照影响距离上限（米）。超出此距离贡献 smoothstep 截断到 0。\n"
+                     "也是透视阴影 light proj 的 zFar。")
+        .Field<&SL::innerConeAngle>("innerConeAngle", "Inner Cone (rad)")
+            .Range(0.01f, 1.5f)
+            .DragSpeed(0.01f)
+            .Tooltip("内锥半角（弧度，从中心轴量起）。≤ 此角全亮。")
+        .Field<&SL::outerConeAngle>("outerConeAngle", "Outer Cone (rad)")
+            .Range(0.01f, 1.5f)
+            .DragSpeed(0.01f)
+            .Tooltip("外锥半角（弧度）。≥ 此角全暗；内外之间 smoothstep 软过渡。\n"
+                     "透视阴影 light proj 的 fov = 2 × 外锥半角。建议 ≥ 内锥半角。")
+        .Field<&SL::castsShadow>("castsShadow", "Casts Shadow")
+            .Tooltip("勾选后 Pipeline 为该聚光烘一张 perspective shadow map。\n"
+                     "多 shadow caster 架构落地后生效。")
         .Addable()
         .Removable()
         .Register();
@@ -892,6 +928,7 @@ void RegisterBuiltinSchemas()
     RegisterHierarchyComponentSchema();
     RegisterDirectionalLightSchema();
     RegisterPointLightSchema();
+    RegisterSpotLightSchema();
     RegisterEnvironmentComponentSchema();
     RegisterRenderableComponentSchema();
     RegisterRigidBodyComponentSchema();

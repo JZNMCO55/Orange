@@ -32,9 +32,11 @@ using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Render::ComputeDirectionalLightWorldDir;
+using Orange::Engine::Render::ComputeSpotLightWorldDir;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::SpotLight;
 namespace BuiltinShadowShaders = Orange::Engine::Render::BuiltinShadowShaders;
 
 namespace
@@ -149,6 +151,58 @@ void TestLoadShadowCaster()
     std::fprintf(stdout, "  [PASS] LoadShadowCaster + dedup\n");
 }
 
+// 5. SpotLight 默认值合理 + identity rotation 派生方向
+void TestSpotLightDefaults()
+{
+    SpotLight light;
+
+    assert(light.color.r == 1.0f);
+    assert(light.color.g == 1.0f);
+    assert(light.color.b == 1.0f);
+    assert(light.intensity == 1.0f);
+    assert(light.range == 15.0f);
+    assert(light.innerConeAngle < light.outerConeAngle);  // 内锥 ≤ 外锥
+    assert(light.castsShadow == false);
+
+    // identity rotation 派生的锥光方向 = kSpotLightLocalForward = (0,-1,0)
+    const glm::quat identity{1.0f, 0.0f, 0.0f, 0.0f};
+    const glm::vec3 dir = ComputeSpotLightWorldDir(identity);
+    assert(std::abs(dir.x - 0.0f) < 1e-5f);
+    assert(std::abs(dir.y - (-1.0f)) < 1e-5f);
+    assert(std::abs(dir.z - 0.0f) < 1e-5f);
+
+    std::fprintf(stdout, "  [PASS] SpotLight 默认字段 + identity rotation 派生方向\n");
+}
+
+// 6. SpotLight 真可用作 ECS component（字段 round-trip）
+void TestSpotLightAsEcsComponent()
+{
+    World world;
+    Entity e = world.CreateEntity();
+
+    SpotLight light;
+    light.color          = glm::vec3{0.2f, 0.6f, 1.0f};  // 冷蓝聚光
+    light.intensity      = 3.0f;
+    light.range          = 22.0f;
+    light.innerConeAngle = 0.25f;
+    light.outerConeAngle = 0.40f;
+    light.castsShadow    = true;
+
+    world.AddComponent<SpotLight>(e, light);
+    assert(world.HasComponent<SpotLight>(e));
+
+    const SpotLight* readBack = world.GetComponent<SpotLight>(e);
+    assert(readBack != nullptr);
+    assert(readBack->color.b        == 1.0f);
+    assert(readBack->intensity      == 3.0f);
+    assert(readBack->range          == 22.0f);
+    assert(readBack->innerConeAngle == 0.25f);
+    assert(readBack->outerConeAngle == 0.40f);
+    assert(readBack->castsShadow    == true);
+
+    std::fprintf(stdout, "  [PASS] SpotLight 作为 ECS component round-trip\n");
+}
+
 }  // namespace
 
 int main()
@@ -159,6 +213,8 @@ int main()
     TestShadowConfigDefaults();
     TestDirectionalLightAsEcsComponent();
     TestLoadShadowCaster();
+    TestSpotLightDefaults();
+    TestSpotLightAsEcsComponent();
 
     std::fprintf(stdout, "[LightAndShadowTest] all tests passed.\n");
     return 0;

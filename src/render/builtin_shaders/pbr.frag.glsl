@@ -62,6 +62,22 @@ layout(set = 0, binding = 5, std140) uniform PointLightsUbo
     PointLightData uPointLights[ORANGE_MAX_POINT_LIGHTS];
 } pointLights;
 
+// GAP-2026-05-26 G1：SpotLights UBO（独立 binding 6）。锥光 = point 物理基
+// inverse-square 衰减 × 锥角软边。host 端 cap=8，超出截断。
+#define ORANGE_MAX_SPOT_LIGHTS 8
+struct SpotLightData
+{
+    vec4 posRange;       // xyz = world pos, w = range
+    vec4 dirCosOuter;    // xyz = spot dir（normalized）, w = cos(outerConeAngle)
+    vec4 colorIntensity; // xyz = linear rgb, w = intensity
+    vec4 cosInnerShadow; // x = cos(innerConeAngle), y = shadow index（G2；<0=无）, z/w pad
+};
+layout(set = 0, binding = 6, std140) uniform SpotLightsUbo
+{
+    uvec4         uSpotLightCountPad;  // x = count, y/z/w pad
+    SpotLightData uSpotLights[ORANGE_MAX_SPOT_LIGHTS];
+} spotLights;
+
 // set 1 = per-instance material 贴图（GAP-2026-05-25 A2 / G1）。Pipeline 按
 // MaterialInstance 的 texture 槽分配 / 更新本 set；未绑的槽喂 default 贴图
 // （白 baseColor/MR/AO + flat-normal (0.5,0.5,1)），使采样结果 ×scalar = scalar、
@@ -266,7 +282,61 @@ void main()
         ptLo += (pDiff + pSpec) * pRadiance * pNoL;
     }
 
+    // ---- Spot lights（GAP-2026-05-26 G1）：point 物理基衰减 × 锥角软边。
+    //      cone = smoothstep(cosOuter, cosInner, dot(spotDir, -L))；spotDir 是
+    //      光的传播方向，-L 是从光指向表面的方向，二者越对齐越在锥心。
+    //      castsShadow（cosInnerShadow.y >= 0）的阴影采样留 G2。
+    vec3 spotLo = vec3(0.0);
+    uint spotLightCount = min(spotLights.uSpotLightCountPad.x,
+                               uint(ORANGE_MAX_SPOT_LIGHTS));
+    for (uint i = 0u; i < spotLightCount; ++i)
+    {
+        vec3  sLightPos = spotLights.uSpotLights[i].posRange.xyz;
+        float sRange    = spotLights.uSpotLights[i].posRange.w;
+        vec3  sDir      = spotLights.uSpotLights[i].dirCosOuter.xyz;
+        float sCosOuter = spotLights.uSpotLights[i].dirCosOuter.w;
+        vec3  sColor    = spotLights.uSpotLights[i].colorIntensity.rgb;
+        float sInten    = spotLights.uSpotLights[i].colorIntensity.w;
+        float sCosInner = spotLights.uSpotLights[i].cosInnerShadow.x;
+        if (sRange <= 0.0) { continue; }
+
+        vec3  sL_unnorm = sLightPos - vWorldPos;
+        float sDist     = length(sL_unnorm);
+        if (sDist > sRange) { continue; }
+        vec3  sL = sL_unnorm / max(sDist, 1e-5);
+
+        // 锥角软边：dot(spotDir, -sL) = surface 在锥轴上的投影 cos。
+        float spotCos    = dot(normalize(sDir), -sL);
+        float coneFactor = smoothstep(sCosOuter, sCosInner, spotCos);
+        if (coneFactor <= 0.0) { continue; }
+
+        vec3  sH   = normalize(V + sL);
+        float sNoL = max(dot(N, sL), 0.0);
+        if (sNoL <= 0.0) { continue; }
+        float sNoH = max(dot(N, sH), 0.0);
+        float sVoH = max(dot(V, sH), 0.0);
+
+        float sD  = DistributionGGX(sNoH, alpha);
+        float sVs = VisibilitySmithCorrelated(NoV, sNoL, alpha);
+        vec3  sF  = FresnelSchlick(sVoH, F0);
+
+        vec3  sSpec = sD * sVs * sF;
+        vec3  skS   = sF;
+        vec3  skD   = (1.0 - skS) * (1.0 - metallic);
+        vec3  sDiff = skD * baseColor / kPi;
+
+        // 物理基 inverse-square + smoothstep range cutoff（同 point light）。
+        float sMinD2     = 0.01;
+        float sDist2     = max(sDist * sDist, sMinD2);
+        float sInvSquare = 1.0 / sDist2;
+        float sFade      = smoothstep(sRange, 0.0, sDist);
+        float sAtten     = sInvSquare * sFade * coneFactor;
+
+        vec3 sRadiance = sColor * sInten * sAtten;
+        spotLo += (sDiff + sSpec) * sRadiance * sNoL;
+    }
+
     // ---- 合成 ----
-    vec3 color = directLo + ptLo + iblLo;
+    vec3 color = directLo + ptLo + spotLo + iblLo;
     outColor   = vec4(color, 1.0);
 }

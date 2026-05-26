@@ -533,6 +533,11 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                                  Orange::Rhi::DescriptorType::UniformBuffer,
                                  1,
                                  Orange::Rhi::ShaderStage::Fragment});
+        // GAP-2026-05-26 G1：binding 6 = SpotLightsUbo（同款独立 UBO）。
+        lay.mBindings.push_back({6,
+                                 Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
         lay.mpDebugName = "orange_engine.main.layout";
         impl.mainDescLayout = rhi.CreateDescriptorSetLayout(lay);
 
@@ -552,18 +557,25 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         plBufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
         impl.pointLightsUbo = rhi.CreateBuffer(plBufDesc);
 
-        // Main desc pool: 1 set，4 个 CombinedImageSampler（shadow + 3 dummy IBL） + 2 个 UBO
+        // SpotLightsUbo（同款 CpuToGpu）。
+        Orange::Rhi::BufferDesc slBufDesc{};
+        slBufDesc.mSize        = sizeof(Pipeline::Impl::SpotLightsUboData);
+        slBufDesc.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        slBufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.spotLightsUbo = rhi.CreateBuffer(slBufDesc);
+
+        // Main desc pool: 1 set，4 个 CombinedImageSampler（shadow + 3 dummy IBL） + 3 个 UBO
         Orange::Rhi::DescriptorPoolDesc pool{};
         pool.mMaxSets = 1;
         pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 4});
-        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 2});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 3});
         pool.mpDebugName = "orange_engine.main.pool";
         impl.mainDescPool = rhi.CreateDescriptorPool(pool);
 
         if (!impl.mainDescLayout || !impl.lightUbo || !impl.pointLightsUbo
-            || !impl.mainDescPool)
+            || !impl.spotLightsUbo || !impl.mainDescPool)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo / pointLightsUbo 创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo / pointLightsUbo / spotLightsUbo 创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -594,6 +606,14 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         writePl.mBufferInfo.mOffset  = 0;
         writePl.mBufferInfo.mRange   = sizeof(Pipeline::Impl::PointLightsUboData);
         rhi.UpdateDescriptorSet(*impl.mainDescSet, &writePl, 1);
+
+        Orange::Rhi::DescriptorWrite writeSl{};
+        writeSl.mBinding             = 6;
+        writeSl.mType                = Orange::Rhi::DescriptorType::UniformBuffer;
+        writeSl.mBufferInfo.mpBuffer = impl.spotLightsUbo.get();
+        writeSl.mBufferInfo.mOffset  = 0;
+        writeSl.mBufferInfo.mRange   = sizeof(Pipeline::Impl::SpotLightsUboData);
+        rhi.UpdateDescriptorSet(*impl.mainDescSet, &writeSl, 1);
     }
 
     // 7.7 Dummy IBL 资源
