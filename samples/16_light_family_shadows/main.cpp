@@ -30,6 +30,7 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
+#include <orange/engine/platform/Window.h>
 #include <orange/engine/platform/WindowEvent.h>
 #include <orange/engine/render/BuiltinPostProcessChain.h>
 #include <orange/engine/render/Camera.h>
@@ -50,7 +51,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -140,10 +144,27 @@ std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
 class RenderLayer : public Layer
 {
 public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world) {}
+    // capturePath 非空时进入"截图模式"：预热几帧让 shadow 资源 / pipeline
+    // 就绪后 RequestCapture 一帧 PNG，再 RequestClose 自动退出 —— 供 CI /
+    // 文档无人值守出图（RequestCapture 仅 window 模式生效）。空 → 正常交互。
+    RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
+                std::string capturePath)
+        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
+          mCapturePath(std::move(capturePath)) {}
 
-    void OnUpdate(const FrameContext& /*frame*/) override { mPipeline.Render(mWorld); }
+    void OnUpdate(const FrameContext& /*frame*/) override
+    {
+        if (!mCapturePath.empty() && mFrame == kCaptureFrame)
+        {
+            mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
+        }
+        mPipeline.Render(mWorld);
+        if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
+        {
+            mWindow.RequestClose();  // 截图已写出，退出
+        }
+        ++mFrame;
+    }
 
     bool OnEvent(const Platform::WindowEvent& event) override
     {
@@ -155,8 +176,12 @@ public:
     }
 
 private:
-    Pipeline& mPipeline;
-    World&    mWorld;
+    static constexpr std::uint64_t kCaptureFrame = 3;  // 预热 3 帧再截
+    Pipeline&         mPipeline;
+    World&            mWorld;
+    Platform::Window& mWindow;
+    std::string       mCapturePath;
+    std::uint64_t     mFrame{0};
 };
 
 // 在 (x, z) 放一个落在地面上的球 occluder（半径 r，球心 y=r），返回该 entity。
@@ -177,8 +202,15 @@ Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
 
 }  // namespace
 
-int main(int /*argc*/, char** /*argv*/)
+int main(int argc, char** argv)
 {
+    // `--capture <path>`：渲一帧 PNG 后自动退（CI / 文档无人值守出图）。
+    std::string capturePath;
+    for (int i = 1; i + 1 < argc; ++i)
+    {
+        if (std::string(argv[i]) == "--capture") { capturePath = argv[i + 1]; break; }
+    }
+
     AppConfig cfg{};
     cfg.window.title  = "OrangeEngine - 16 light_family_shadows";
     cfg.window.width  = 1280;
@@ -329,7 +361,10 @@ int main(int /*argc*/, char** /*argv*/)
     // 一点环境补光，让被阴影遮住、又不在 spot/point 影响范围内的地面不至全黑。
     pipeline.SetDummyIblAmbient(0.06f, 0.07f, 0.09f);
 
-    host->PushLayer(std::make_unique<RenderLayer>(pipeline, world));
+    // 命令行 `--capture <path>` → 截图模式：渲一帧 PNG 后自动退（CI / 文档
+    // 无人值守出图）。不带参数 = 正常交互运行。
+    host->PushLayer(std::make_unique<RenderLayer>(pipeline, world, host->GetWindow(),
+                                                  capturePath));
 
     const int rc = host->Run();
     pipeline.Shutdown();
