@@ -362,11 +362,18 @@ void DrawProperty(EditorHost&                  host,
                     glm::quat(glm::radians(host.selection.transformEulerCache));
                 prop.set(component, &newVal);
 
-                // apply lambda 不复用通用 MakeFieldApply<glm::quat>——多一步
-                // invalidate Euler 缓存。c14 起仅 capture pHost（不再 capture
-                // pWorld），lambda 内 `pHost->scene.pWorld.get()` 间接解 World——
-                // 切场景时 host.scene.pWorld 换新指针 / 置空，命令走 nullptr
-                // 防御分支 no-op，不再因 dangling 崩。
+                // apply lambda 只设 quat 值，**不**在此 invalidate Euler 缓存。
+                // 原先在此 invalidate 本意是 Undo/Redo 后刷新 Euler 显示，但
+                // CommandStack::Push 会立即 Execute 命令（且 DragFloat3 连续拖动
+                // 走 coalesce 分支每 tick 重新 Execute），导致 live 拖动期间缓存
+                // 每帧被失效 → 下一帧 Quat case 从 quat 重算 Euler，撞
+                // glm::eulerAngles 的 pitch asin 值域 [-90°,90°] 折返，表现为
+                // "旋转过不了 90°"。改为：Euler 缓存只在切换 entity（本 case 顶部）
+                // 与 Undo/Redo 后（EditorRenderLayer::ValidateEntityHandles 无条件
+                // 失效）刷新；live 拖动期间持续保留，允许任意角度连续累加。
+                // c14 起仅 capture pHost（不再 capture pWorld），lambda 内
+                // `pHost->scene.pWorld.get()` 间接解 World——切场景时换新指针 /
+                // 置空，走 nullptr 防御分支 no-op，不因 dangling 崩。
                 auto*                       pHost      = &host;
                 PropertyDescriptor::SetFn   setFn      = prop.set;
                 const ComponentSchema*      pSchema    = &schema;
@@ -384,8 +391,6 @@ void DrawProperty(EditorHost&                  host,
                         if (pW == nullptr) { return; }
                         void* c = pSchema->get(*pW, entity);
                         if (c != nullptr) { setFn(c, &v); }
-                        pHost->selection.transformEulerCacheEntity =
-                            Orange::Engine::Entity::Invalid();
                     }));
             }
             break;

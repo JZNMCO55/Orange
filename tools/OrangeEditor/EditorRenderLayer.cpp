@@ -741,6 +741,14 @@ void EditorRenderLayer::ValidateEntityHandles()
     if (mHost.scene.pWorld == nullptr) { return; }
     auto& w = *mHost.scene.pWorld;
 
+    // 本函数只在 Undo/Redo 后调用（4 处调用点全是 cmdStack.Undo/Redo 之后）——
+    // 是刷新 Transform.rotation Euler 显示缓存的正确时机：无条件失效，让下一帧
+    // Quat case 从恢复后的 quat 重算 Euler。rotation 的 Euler 缓存在 live 拖动
+    // 期间被故意保留（避开 glm::eulerAngles pitch ±90° 折返导致"转不过 90°"，
+    // 见 SchemaInspector.cpp Quat case），故失效动作不能放在字段 apply lambda 里
+    // （那条 lambda 会被 CommandStack::Push 每 tick 重 Execute）——而是收敛到这里。
+    mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+
     if (mHost.selection.selectedEntity.IsValid() && !w.IsValid(mHost.selection.selectedEntity)) {
         mHost.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
         mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
