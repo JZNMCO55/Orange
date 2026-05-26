@@ -1,0 +1,122 @@
+{
+  "schemaVersion": { "namespace": "scene/world", "major": 1, "minor": 6 },
+  "_comment": "光源族 + 三类阴影演示场景（GAP-2026-05-26）。一块地面 + 3 球，Directional/Spot/Point 三种光全部 castsShadow。接收方全用 pbr 材质（spot/point 阴影只在 pbr.frag 采样）。左球被 spot 锥光罩 + 透视阴影；中球吃 directional 平行硬阴影；右球旁 point 全向 radial 阴影。编辑器用自身视口相机，故不含 Camera 实体——打开后用编辑器相机环视即可。",
+  "entities": [
+    {
+      "id": 0,
+      "components": {
+        "Name": { "name": "Floor" },
+        "Transform": {
+          "position": [0.0, -0.2, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [16.0, 0.4, 16.0]
+        },
+        "Renderable": {
+          "mesh":               "assets/meshes/cube.mesh",
+          "materialInstanceId": "assets/materials/builtin/pbr.material",
+          "visible":            true,
+          "castsShadow":        false
+        }
+      }
+    },
+    {
+      "id": 1,
+      "components": {
+        "Name": { "name": "Sphere (Spot)" },
+        "Transform": {
+          "position": [-3.5, 1.2, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.0, 1.0, 1.0]
+        },
+        "Renderable": {
+          "mesh":               "assets/meshes/sphere.mesh",
+          "materialInstanceId": "assets/materials/builtin/pbr.material",
+          "visible":            true,
+          "castsShadow":        true
+        }
+      }
+    },
+    {
+      "id": 2,
+      "components": {
+        "Name": { "name": "Sphere (Directional)" },
+        "Transform": {
+          "position": [0.0, 1.2, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.0, 1.0, 1.0]
+        },
+        "Renderable": {
+          "mesh":               "assets/meshes/sphere.mesh",
+          "materialInstanceId": "assets/materials/builtin/pbr.material",
+          "visible":            true,
+          "castsShadow":        true
+        }
+      }
+    },
+    {
+      "id": 3,
+      "components": {
+        "Name": { "name": "Sphere (Point)" },
+        "Transform": {
+          "position": [3.5, 1.2, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.0, 1.0, 1.0]
+        },
+        "Renderable": {
+          "mesh":               "assets/meshes/sphere.mesh",
+          "materialInstanceId": "assets/materials/builtin/pbr.material",
+          "visible":            true,
+          "castsShadow":        true
+        }
+      }
+    },
+    {
+      "id": 4,
+      "components": {
+        "Name": { "name": "Sun (Directional)" },
+        "DirectionalLight": {
+          "direction":   [0.4, -1.0, -0.35],
+          "color":       [1.0, 0.96, 0.88],
+          "intensity":   2.0,
+          "castsShadow": true
+        }
+      }
+    },
+    {
+      "id": 5,
+      "components": {
+        "Name": { "name": "Spot (Left, cool)" },
+        "Transform": {
+          "position": [-3.5, 5.5, 0.0],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.0, 1.0, 1.0]
+        },
+        "SpotLight": {
+          "color":          [0.4, 0.6, 1.0],
+          "intensity":      80.0,
+          "range":          14.0,
+          "innerConeAngle": 0.30,
+          "outerConeAngle": 0.45,
+          "castsShadow":    true
+        }
+      }
+    },
+    {
+      "id": 6,
+      "components": {
+        "Name": { "name": "Point (Right, warm)" },
+        "Transform": {
+          "position": [3.5, 2.8, 2.5],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale":    [1.0, 1.0, 1.0]
+        },
+        "PointLight": {
+          "color":       [1.0, 0.6, 0.25],
+          "intensity":   45.0,
+          "range":       10.0,
+          "castsShadow": true
+        }
+      }
+    }
+  ]
+}
