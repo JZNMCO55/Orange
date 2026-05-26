@@ -60,9 +60,12 @@ namespace
 // 1.6 → 1.7：新增 PostProcessComponent（屏幕空间 post + PCSS 配置；同款
 // optional component 路径，旧 1.6 文件无该字段时 Pipeline 退化到引擎默认
 // post；组件内字段全 optional，缺省保留默认值）。
+// 1.7 → 1.8：PostProcessComponent 新增相机运动模糊字段（motionBlurEnabled /
+// Intensity / MaxRadius / SampleCount；同款 optional，旧 1.7 文件无这些字段时
+// 保留默认值——motion blur 默认关，观感不变）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 7};
+    static const SchemaVersion kVersion{"scene/world", 1, 8};
     return kVersion;
 }
 

@@ -2032,6 +2032,11 @@ void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
     postGrade.temperature = pp.gradeTemperature;
     postGrade.tint        = pp.gradeTint;
 
+    postMotionBlur.enabled     = pp.motionBlurEnabled;
+    postMotionBlur.intensity   = pp.motionBlurIntensity;
+    postMotionBlur.maxRadius   = pp.motionBlurMaxRadius;
+    postMotionBlur.sampleCount = pp.motionBlurSampleCount;
+
     // PCSS / 阴影分辨率：组件在场时驱动 shadowConfig（压过手动 SetShadowConfig）。
     shadowConfig.pcssLightSize = pp.pcssLightSize;
     if (pp.shadowMapResolution != 0)

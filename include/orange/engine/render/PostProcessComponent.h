@@ -78,6 +78,12 @@ struct PostProcessComponent
     float gradeTemperature = 0.0f;
     float gradeTint        = 0.0f;
 
+    // —— 相机运动模糊 ——
+    bool          motionBlurEnabled     = false;
+    float         motionBlurIntensity   = 0.5f;
+    float         motionBlurMaxRadius   = 0.05f;
+    std::int32_t  motionBlurSampleCount = 8;
+
     // —— 阴影质量（PCSS 软阴影 + shadow map 分辨率）——
     float         pcssLightSize       = 0.0f;   // 0 = 固定 PCF；>0 = PCSS 软阴影
     std::uint32_t shadowMapResolution = 1024;

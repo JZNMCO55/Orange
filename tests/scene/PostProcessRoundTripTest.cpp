@@ -1,5 +1,6 @@
 // PostProcessRoundTripTest —— PostProcessComponent 的 Save / Load 往返字段无丢失
-// （schema v1.7 新增 optional component）。设非默认值 → Save → Load → 逐字段比对。
+// （schema v1.7 新增 optional component；v1.8 加相机运动模糊字段）。设非默认值 →
+// Save → Load → 逐字段比对。
 
 #include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
@@ -41,6 +42,8 @@ int main()
     src.taaEnabled = true; src.taaFeedback = 0.85f;
     src.gradeEnabled = true; src.gradeExposure = 0.3f; src.gradeContrast = 1.2f;
     src.gradeSaturation = 0.9f; src.gradeTemperature = -0.4f; src.gradeTint = 0.1f;
+    src.motionBlurEnabled = true; src.motionBlurIntensity = 0.7f;
+    src.motionBlurMaxRadius = 0.06f; src.motionBlurSampleCount = 12;
     src.pcssLightSize = 8.0f; src.shadowMapResolution = 4096;
 
     {
@@ -94,6 +97,9 @@ int main()
     chk(l->gradeEnabled, "gradeEnabled");
     chk(Eq(l->gradeExposure,0.3f) && Eq(l->gradeContrast,1.2f) && Eq(l->gradeSaturation,0.9f)
         && Eq(l->gradeTemperature,-0.4f) && Eq(l->gradeTint,0.1f), "grade params");
+    chk(l->motionBlurEnabled, "motionBlurEnabled");
+    chk(Eq(l->motionBlurIntensity,0.7f) && Eq(l->motionBlurMaxRadius,0.06f)
+        && l->motionBlurSampleCount == 12, "motion blur params");
     chk(Eq(l->pcssLightSize,8.0f), "pcssLightSize");
     chk(l->shadowMapResolution == 4096u, "shadowMapResolution");
 

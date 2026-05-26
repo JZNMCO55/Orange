@@ -896,6 +896,12 @@ void WritePostProcess(JsonWriter& writer,
     writer.WriteFloat(P("gradeTemperature"), pp->gradeTemperature);
     writer.WriteFloat(P("gradeTint"),        pp->gradeTint);
 
+    // 相机运动模糊
+    writer.WriteBool( P("motionBlurEnabled"),     pp->motionBlurEnabled);
+    writer.WriteFloat(P("motionBlurIntensity"),   pp->motionBlurIntensity);
+    writer.WriteFloat(P("motionBlurMaxRadius"),   pp->motionBlurMaxRadius);
+    writer.WriteInt(  P("motionBlurSampleCount"), static_cast<std::int64_t>(pp->motionBlurSampleCount));
+
     // 阴影质量
     writer.WriteFloat(P("pcssLightSize"),       pp->pcssLightSize);
     writer.WriteInt(  P("shadowMapResolution"), static_cast<std::int64_t>(pp->shadowMapResolution));
@@ -971,6 +977,13 @@ bool ReadPostProcess(const JsonReader& reader,
     readF("gradeSaturation",  pp.gradeSaturation);
     readF("gradeTemperature", pp.gradeTemperature);
     readF("gradeTint",        pp.gradeTint);
+
+    readB("motionBlurEnabled",   pp.motionBlurEnabled);
+    readF("motionBlurIntensity", pp.motionBlurIntensity);
+    readF("motionBlurMaxRadius", pp.motionBlurMaxRadius);
+    std::int64_t mbSamples = static_cast<std::int64_t>(pp.motionBlurSampleCount);
+    readI("motionBlurSampleCount", mbSamples);
+    pp.motionBlurSampleCount = static_cast<std::int32_t>(mbSamples);
 
     readF("pcssLightSize", pp.pcssLightSize);
     std::int64_t shadowRes = static_cast<std::int64_t>(pp.shadowMapResolution);
