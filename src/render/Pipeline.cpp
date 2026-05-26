@@ -2061,6 +2061,11 @@ void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
     postMotionBlur.maxRadius   = pp.motionBlurMaxRadius;
     postMotionBlur.sampleCount = pp.motionBlurSampleCount;
 
+    postLens.enabled             = pp.lensEnabled;
+    postLens.chromaticAberration = pp.lensChromaticAberration;
+    postLens.vignetteIntensity   = pp.lensVignetteIntensity;
+    postLens.vignetteSmoothness  = pp.lensVignetteSmoothness;
+
     // PCSS / 阴影分辨率：组件在场时驱动 shadowConfig（压过手动 SetShadowConfig）。
     shadowConfig.pcssLightSize = pp.pcssLightSize;
     if (pp.shadowMapResolution != 0)

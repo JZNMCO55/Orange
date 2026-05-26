@@ -902,6 +902,12 @@ void WritePostProcess(JsonWriter& writer,
     writer.WriteFloat(P("motionBlurMaxRadius"),   pp->motionBlurMaxRadius);
     writer.WriteInt(  P("motionBlurSampleCount"), static_cast<std::int64_t>(pp->motionBlurSampleCount));
 
+    // 镜头效果（色散 + 暗角）
+    writer.WriteBool( P("lensEnabled"),             pp->lensEnabled);
+    writer.WriteFloat(P("lensChromaticAberration"), pp->lensChromaticAberration);
+    writer.WriteFloat(P("lensVignetteIntensity"),   pp->lensVignetteIntensity);
+    writer.WriteFloat(P("lensVignetteSmoothness"),  pp->lensVignetteSmoothness);
+
     // 阴影质量
     writer.WriteFloat(P("pcssLightSize"),       pp->pcssLightSize);
     writer.WriteInt(  P("shadowMapResolution"), static_cast<std::int64_t>(pp->shadowMapResolution));
@@ -984,6 +990,11 @@ bool ReadPostProcess(const JsonReader& reader,
     std::int64_t mbSamples = static_cast<std::int64_t>(pp.motionBlurSampleCount);
     readI("motionBlurSampleCount", mbSamples);
     pp.motionBlurSampleCount = static_cast<std::int32_t>(mbSamples);
+
+    readB("lensEnabled",             pp.lensEnabled);
+    readF("lensChromaticAberration", pp.lensChromaticAberration);
+    readF("lensVignetteIntensity",   pp.lensVignetteIntensity);
+    readF("lensVignetteSmoothness",  pp.lensVignetteSmoothness);
 
     readF("pcssLightSize", pp.pcssLightSize);
     std::int64_t shadowRes = static_cast<std::int64_t>(pp.shadowMapResolution);

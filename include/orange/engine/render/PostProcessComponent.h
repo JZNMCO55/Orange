@@ -84,6 +84,12 @@ struct PostProcessComponent
     float         motionBlurMaxRadius   = 0.05f;
     std::int32_t  motionBlurSampleCount = 8;
 
+    // —— 镜头效果（色散 + 暗角）——
+    bool  lensEnabled            = false;
+    float lensChromaticAberration = 0.0f;
+    float lensVignetteIntensity   = 0.0f;
+    float lensVignetteSmoothness  = 0.5f;
+
     // —— 阴影质量（PCSS 软阴影 + shadow map 分辨率）——
     float         pcssLightSize       = 0.0f;   // 0 = 固定 PCF；>0 = PCSS 软阴影
     std::uint32_t shadowMapResolution = 1024;

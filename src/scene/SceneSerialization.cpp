@@ -63,9 +63,12 @@ namespace
 // 1.7 → 1.8：PostProcessComponent 新增相机运动模糊字段（motionBlurEnabled /
 // Intensity / MaxRadius / SampleCount；同款 optional，旧 1.7 文件无这些字段时
 // 保留默认值——motion blur 默认关，观感不变）。
+// 1.8 → 1.9：PostProcessComponent 新增镜头效果字段（lensEnabled +
+// ChromaticAberration / VignetteIntensity / VignetteSmoothness；同款 optional，
+// 旧 1.8 文件无这些字段时保留默认值——lens 默认关，观感不变）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 8};
+    static const SchemaVersion kVersion{"scene/world", 1, 9};
     return kVersion;
 }
 
