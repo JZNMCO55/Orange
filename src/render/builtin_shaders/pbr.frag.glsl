@@ -38,7 +38,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
     mat4 uLightViewProj;
     vec4 uLightDirIntensity;  // xyz = world direction（光从该方向"射出"），w = intensity
     vec4 uLightColor;         // xyz = rgb，w 未用
-    vec4 uShadowParams;       // x = pcfKernelRadius，y = depthBias，z/w 预留
+    vec4 uShadowParams;       // x = pcfKernelRadius，y = depthBias，z = PCSS lightSize(0=关)，w 预留
     vec4 uCameraWorldPos;     // xyz = camera worldPos
     vec4 uFrameInfo;          // x = time 秒，y/z/w 预留
     vec4 uIblFactor;          // xyz = EnvironmentComponent.tint * intensity（host 端预乘），w 预留
@@ -241,10 +241,12 @@ void main()
     vec3 diffuse  = kD * baseColor / kPi;
 
     vec3  radiance = light.uLightColor.rgb * light.uLightDirIntensity.w;
-    float shadow   = SamplePcfShadow(uShadowMap, vWorldPos,
-                                     light.uLightViewProj,
-                                     int(light.uShadowParams.x),
-                                     light.uShadowParams.y);
+    // PCSS（uShadowParams.z = lightSize，0 → 内部退回固定半径 PCF）。
+    float shadow   = SamplePcssShadow(uShadowMap, vWorldPos,
+                                      light.uLightViewProj,
+                                      int(light.uShadowParams.x),
+                                      light.uShadowParams.y,
+                                      light.uShadowParams.z);
     vec3 directLo  = (diffuse + specular) * radiance * NoL * shadow;
 
     // ---- IBL（split-sum 近似；dummy 纹理全 0 → 贡献 = 0）-------------------
@@ -387,14 +389,16 @@ void main()
         float sAtten     = sInvSquare * sFade * coneFactor;
 
         // 透视阴影：castsShadow 的 spot 有有效 layer index 时采 spot shadow
-        // array + PCF；否则 sShadow = 1（无阴影，与 G1 行为一致）。
+        // array + PCSS（uShadowParams.z=lightSize，0 退回固定 PCF）；否则
+        // sShadow = 1（无阴影，与 G1 行为一致）。
         float sShadow = 1.0;
         if (sShadowIdx >= 0 && sShadowIdx < ORANGE_MAX_SPOT_SHADOWS)
         {
-            sShadow = SamplePcfShadowArray(uSpotShadowMaps, sShadowIdx, vWorldPos,
-                                           spotShadow.uSpotLightViewProj[sShadowIdx],
-                                           int(light.uShadowParams.x),
-                                           light.uShadowParams.y);
+            sShadow = SamplePcssShadowArray(uSpotShadowMaps, sShadowIdx, vWorldPos,
+                                            spotShadow.uSpotLightViewProj[sShadowIdx],
+                                            int(light.uShadowParams.x),
+                                            light.uShadowParams.y,
+                                            light.uShadowParams.z);
         }
 
         vec3 sRadiance = sColor * sInten * sAtten;

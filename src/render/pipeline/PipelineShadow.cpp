@@ -126,7 +126,8 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
     }
     data.shadowParams = glm::vec4(static_cast<float>(shadowConfig.pcfKernelRadius),
                                   shadowConfig.depthBias,
-                                  0.0f, 0.0f);
+                                  shadowConfig.pcssLightSize,  // z = PCSS 半影尺度（0=关）
+                                  0.0f);
     data.cameraWorldPos = glm::vec4(cameraWorldPos, 0.0f);
     data.frameInfo      = glm::vec4(frameTime, 0.0f, 0.0f, 0.0f);
     data.iblFactor      = glm::vec4(iblTintIntensity, 0.0f);

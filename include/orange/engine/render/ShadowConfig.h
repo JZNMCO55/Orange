@@ -48,6 +48,14 @@ struct ShadowConfig
     // 法线偏移：沿表面法线推一段，进一步抑制 acne。配合 depthBias 使
     // 用，对斜面阴影特别有效。
     float normalBias{0.01f};
+
+    // PCSS 软阴影的光源半影尺度（shadow map texel 单位）。
+    //   * 0（默认）= 关闭 PCSS，走固定半径 PCF（= pcfKernelRadius，行为不变）；
+    //   * > 0 = 开启 percentage-closer soft shadows：受影体离遮挡面越远半影越
+    //     宽（接触处硬、远处软），lightSize 同时作 blocker search 半径与最大
+    //     filter 半径。8~16 在 1024 分辨率下是可见的柔和档位。
+    // 仅 directional + spot 阴影消费（point cubemap 仍走固定 PCF）。
+    float pcssLightSize{0.0f};
 };
 
 }  // namespace Orange::Engine::Render

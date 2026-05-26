@@ -210,12 +210,14 @@ int main(int argc, char** argv)
     std::string capturePath;
     bool        disableSsao = false;
     bool        disableSsr  = false;
+    bool        disablePcss = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
         if (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
         else if (a == "--no-ssao")            { disableSsao = true; }
         else if (a == "--no-ssr")             { disableSsr = true; }
+        else if (a == "--no-pcss")            { disablePcss = true; }
     }
 
     AppConfig cfg{};
@@ -384,7 +386,15 @@ int main(int argc, char** argv)
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
-    pipeline.SetShadowConfig(ShadowConfig{});
+    // PCSS 软阴影：受影体离遮挡面越远半影越宽（球底接触处硬、远处软）。
+    // 2048 分辨率让软边更细腻；`--no-pcss` 关闭做 before/after 对比（退回固定
+    // 半径 PCF）。lightSize 单位 = shadow map texel。
+    {
+        ShadowConfig sc{};
+        sc.mapResolution = 2048;
+        sc.pcssLightSize = disablePcss ? 0.0f : 12.0f;
+        pipeline.SetShadowConfig(sc);
+    }
     // 一点环境补光，让被阴影遮住、又不在 spot/point 影响范围内的地面不至全黑。
     pipeline.SetDummyIblAmbient(0.06f, 0.07f, 0.09f);
 
