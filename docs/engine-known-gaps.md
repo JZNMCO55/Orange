@@ -1638,6 +1638,50 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 ---
 
+## GAP-2026-05-27-cascaded-shadow-maps
+
+- **发现方**：渲染推进 session（post-process 特效铺完后回看 directional 阴影质量）
+- **发现日期**：2026-05-27
+- **一句话定性**：directional 阴影用**固定 ±10 ortho box**（`PipelineShadow.cpp::ComputeLightViewProj` 硬编码 `kHalfExtent = 10`）覆盖整个场景，shadow map 分辨率均摊到 20×20 单位 → 近景阴影边缘锯齿粗、远景浪费；缺 **CSM（Cascaded Shadow Maps）**——按相机视锥分级、近景高分辨率，是户外大场景 directional 阴影的工业标准
+- **状态**：**仅登记，未实现**（本 session 只铺 post-process 特效 + 写本设计笔记；CSM 改核心阴影路径 + pbr.frag + LightUbo，破坏面大，留**独立 session** 执行）
+
+### 触发场景
+
+首游是 Ori-like 2.5D 平台跳跃，相机跟随主角在较大关卡里平移。固定 ±10 box 一旦关卡尺度超过 ±10 就漏阴影（caster 落在 box 外不写 shadow map）；即使在 box 内，分辨率均摊导致主角脚下接触阴影锯齿明显。CSM 把视锥近段单独分一张高分辨率 cascade，近景阴影显著变锐。
+
+### 缺什么 / 现状对照
+
+| 能力 | 现状 | CSM 目标 |
+|---|---|---|
+| 阴影范围 | 固定 ±10 ortho，超出漏阴影 | 跟随相机视锥，自动覆盖可见范围 |
+| 近景分辨率 | 全场景均摊 | 近段 cascade 独占一张全分辨率 map |
+| shadowMap 资源 | 单张 `Tex2D`（`PipelineImpl.h::shadowMap`） | `Tex2DArray`（N layer，每 cascade 一层）|
+| light view-proj | 单个 `ComputeLightViewProj(dir)` | per-cascade：按视锥 slice 的 world-space AABB 拟合 ortho |
+| LightUbo | 单 `lightViewProj` mat4 + `shadowParams` | N 个 cascade 矩阵 + N 个 split 距离（std140，GPU-only，非序列化 schema，可自由改）|
+| pbr.frag 采样 | 单 map PCF | 按 view-space 深度选 cascade → 采对应 array layer + PCF，cascade 边界可选 dither/blend |
+
+### 落地设计要点（供独立 session 执行，针对本引擎现有阴影代码）
+
+1. **cascade split**：`splitDist[i]` 用 practical split（log 分布与 uniform 分布按 λ≈0.5 混合）。cascade 数先做 **3 或 4**（config 字段 `cascadeCount`，默认值保持单 cascade 行为以便增量验证）。
+2. **per-cascade fit**：对每段视锥（near_i..far_i）取 8 个角点变换到 world，求其在 light view 空间的 AABB → 构造 ortho（沿用 `ComputeLightViewProj` 已踩对的 **Vulkan z∈[0,1] + y-flip 手写 ortho**，**不要**用 `glm::ortho`，注释里已记 OpenGL z 会裁半视锥的坑）。加 texel-snapping 消 shimmer（AABB 原点按 shadow texel 量化）。
+3. **资源**：`shadowMap` 单 `Tex2D` → `Tex2DArray`（cascadeCount layer）+ per-layer depth view（参 `spotShadowArray` 已有的 Tex2DArray + per-layer view 模板，PipelineImpl.h 现成可抄）。`RecordShadowPass` 改为 loop cascade，每层渲一遍 depth-only（复用 `shadowCasterPipeline`）。
+4. **LightUbo**：`LightUboData` 加 `glm::mat4 cascadeViewProj[N]` + `glm::vec4 cascadeSplits`（split 距离塞一个 vec4，N≤4）。注意现有 `static_assert(sizeof(LightUboData) == ...)` 要同步更新。
+5. **pbr.frag**：按片元 view-space 深度（或 clip.w）选 cascade index → 采 `sampler2DArray` 对应 layer，沿用现有 PCF kernel。可加 cascade 边界 1-texel dither 过渡防硬切。**与 PCSS（`pcssLightSize`）的交互**要想清楚——PCSS 的 blocker search 半径需按 per-cascade ortho 尺度缩放。
+6. **增量验证策略**：先 `cascadeCount=1` 跑通（行为 == 今天），ctest / 视觉零回归；再升 3/4 cascade，用一个**拉长的地面 + 远近多个 caster**的测试场景（现有 demo 的 ±10 太小，体现不出 CSM 收益，需要专门 fixture）肉眼验证近景变锐 + 远景仍有阴影。
+
+### 期望验收
+
+- `cascadeCount=1` 与现状逐像素一致（增量安全网）；
+- 多 cascade 下近景阴影边缘明显更锐、相机平移时无 cascade 边界 popping/shimmer（texel-snapping 生效）；
+- ctest 全绿 + lint/drift 干净 + editor/sample 视觉无回归（其它 pass 不受影响）。
+
+### 备注
+
+- 与 GAP-2026-05-26-complete-light-source-family-and-shadows（已落地 spot/point 阴影）**正交**：那条做的是"多光源各自的阴影"，本条做的是"directional 单光源的阴影质量分级"。spot 用的 `Tex2DArray + per-layer view` 基建可直接复用到 CSM 的 cascade array。
+- OrangeRender 侧能力**充足**（Tex2DArray + per-layer depth view + ortho depth-only 渲染都已在 spot/point 阴影用上），**不需要跨仓提 feature**——纯 OrangeEngine 内 Pipeline + shader 改动。
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
