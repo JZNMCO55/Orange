@@ -664,6 +664,77 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         }
     }
     {
+        // 接触阴影 pipeline —— sceneDepth + ubo → 阴影因子，乘法 blend 直接进
+        // HDR（与 ssao_apply 同款 dst×src blend，无独立 target）。单 pass。
+        auto csCode = LoadSpirv("shaders/orange_engine/contact_shadow.frag.spv");
+        if (csCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: contact_shadow shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = csCode.data();
+        sm.mCodeSize   = csCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.contact_shadow.frag";
+        impl.contactShadowFs = rhi.CreateShaderModule(sm);
+
+        // contactShadowLayout：0 = sceneDepth sampler，1 = CsUbo，2 = normalBuffer sampler。
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({2, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.contact_shadow.layout";
+        impl.contactShadowLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        Orange::Rhi::BufferDesc ub{};
+        ub.mSize        = sizeof(Pipeline::Impl::ContactShadowUboData);
+        ub.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.contactShadowUbo = rhi.CreateBuffer(ub);
+
+        if (!impl.contactShadowFs || !impl.contactShadowLayout || !impl.contactShadowUbo)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 接触阴影资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        // pipeline → HDR target，乘法 blend（out = dst×src = HDR×shadow）。
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.contactShadowFs.get(), "main"});
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        Orange::Rhi::ColorBlendAttachmentDesc blend{};
+        blend.mBlendEnable         = true;
+        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::Zero;
+        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::SrcColor;  // dst×src
+        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::Zero;
+        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+        d.mColorBlend.mAttachments.push_back(blend);
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.contactShadowLayout.get());
+        d.mpDebugName = "orange_engine.contact_shadow";
+        impl.contactShadowPipeline = rhi.CreateGraphicsPipeline(d);
+        if (!impl.contactShadowPipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 接触阴影 pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
         // 法线预通道 pipeline —— 把 view-space 法线渲到 normalBuffer（RGBA8），
         // 供 SSAO / SSR 采真实法线。几何 pipeline（带顶点输入 + depth test），
         // 与 shadow caster 同款 push constant 尺寸（128 B，仅 vertex stage）。

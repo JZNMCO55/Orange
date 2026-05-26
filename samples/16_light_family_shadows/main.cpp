@@ -212,6 +212,7 @@ int main(int argc, char** argv)
     bool        disableSsr  = false;
     bool        disablePcss = false;
     bool        disableGtao = false;
+    bool        disableContact = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -220,6 +221,7 @@ int main(int argc, char** argv)
         else if (a == "--no-ssr")             { disableSsr = true; }
         else if (a == "--no-pcss")            { disablePcss = true; }
         else if (a == "--no-gtao")            { disableGtao = true; }
+        else if (a == "--no-contact")         { disableContact = true; }
     }
 
     AppConfig cfg{};
@@ -387,6 +389,18 @@ int main(int argc, char** argv)
         ssr->thickness   = 0.8f;
         ssr->strength    = 0.7f;
         chain.AddPass(std::move(ssr));
+    }
+    // 接触阴影：`--no-contact` 关闭做对比。补 shadow map 在球↔地面接触处因
+    // depthBias 抬起留下的漏光缝隙，接触线更"咬合"。
+    {
+        auto cs = std::make_unique<Orange::Engine::Render::ContactShadowPass>();
+        cs->enabled   = !disableContact;
+        cs->length    = 0.15f;   // 接触尺度（短）：只补接触线缝隙，不当粗阴影
+        cs->maxSteps  = 16.0f;
+        cs->thickness = 0.3f;
+        cs->bias      = 0.015f;
+        cs->strength  = 0.9f;
+        chain.AddPass(std::move(cs));
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);

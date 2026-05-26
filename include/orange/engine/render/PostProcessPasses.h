@@ -230,6 +230,40 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// 接触阴影（contact shadows）。屏幕空间向光源 view-space 射线步进，命中遮挡则
+// 输出 <1 阴影因子乘进 HDR。补 shadow map + PCSS 在接触处因 depthBias 抬起留下
+// 的"漏光缝隙"（sub-texel 接触细节），AAA 引擎常用（UE Contact Shadows）。与
+// SSAO/SSR 同款 Pipeline 内部 RecordContactShadowPass 录制（Setup/Execute 空壳）。
+//
+// 仅对 directional light 生效（无 directional light 时整 pass 跳过）。已知简化：
+// 阴影因子乘进整个 HDR（含 ambient/其他光），非仅 directional——与 SSAO 同款前向
+// 取舍；length 取接触尺度（短）使串扰可忽略。window + 编辑器 offscreen 两路径均生效。
+class ORANGE_ENGINE_API ContactShadowPass final : public IPostProcessPass
+{
+public:
+    bool enabled{true};
+
+    // view-space 最大射线长度（米）。接触阴影应"短"——只补接触尺度的缝隙，
+    // 过长会变成廉价全局阴影且串扰。典型 0.1–0.5。
+    float length{0.25f};
+
+    // 射线步进数。短射线下 8–16 足够。
+    float maxSteps{16.0f};
+
+    // 命中厚度容差（view-space 米）。z-buffer 只存最近面，厚度内才算命中。
+    float thickness{0.5f};
+
+    // 起点沿光向的偏移（view-space 米），防自遮蔽 acne。典型 0.01–0.05。
+    float bias{0.02f};
+
+    // 阴影强度。1=命中处全黑，<1 半透。
+    float strength{1.0f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

@@ -463,6 +463,16 @@ void Pipeline::Shutdown()
     impl.ssaoSetBoundNormal = nullptr;
     impl.ssrSetBoundNormal = nullptr;
 
+    // 接触阴影资源（set 先于 pool）。
+    impl.contactShadowSet.reset();
+    impl.contactShadowPool.reset();
+    impl.contactShadowPipeline.reset();
+    impl.contactShadowLayout.reset();
+    impl.contactShadowUbo.reset();
+    impl.contactShadowFs.reset();
+    impl.contactShadowSetBoundDepth = nullptr;
+    impl.contactShadowSetBoundNormal = nullptr;
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1533,7 +1543,8 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         // SSR 采真实法线（替代深度差分）。只在二者之一激活时跑——复用 sceneDepth
         // 作 scratch depth（写完留 DSA，紧跟的主 pass 以 Undefined→DSA + Clear 自然
         // 丢弃），故必须紧贴主 pass 之前。
-        if (ok && (impl.FindActiveSsaoPass() != nullptr || impl.FindActiveSsrPass() != nullptr))
+        if (ok && (impl.FindActiveSsaoPass() != nullptr || impl.FindActiveSsrPass() != nullptr
+                   || impl.FindActiveContactShadowPass() != nullptr))
         {
             ok = impl.RecordNormalPrepass(viewProj, impl.scene.MainCamera().view);
         }
@@ -1577,6 +1588,17 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                 if (const SsrPass* ssrPass = impl.FindActiveSsrPass())
                 {
                     ok = impl.RecordSsrPass(*ssrPass, proj);
+                }
+            }
+            // 接触阴影：SSAO/SSR 之后、god rays（加性）之前——乘法暗化要先于
+            // 加光。仅 directional light 时跑（朝光向 = view 空间的 -lightDir）。
+            if (ok && activeLight != nullptr)
+            {
+                if (const ContactShadowPass* csPass = impl.FindActiveContactShadowPass())
+                {
+                    const glm::vec3 viewL = glm::normalize(
+                        glm::mat3(impl.scene.MainCamera().view) * (-activeLightDir));
+                    ok = impl.RecordContactShadowPass(*csPass, proj, viewL);
                 }
             }
             if (ok)
@@ -2114,8 +2136,9 @@ void Pipeline::Render(Orange::Engine::World& world)
             // 法线预通道：主 pass 之前渲 view-space 法线到 normalBuffer，供 SSAO /
             // SSR 采真实法线。只在二者之一激活时跑（复用 sceneDepth 作 scratch
             // depth，必须紧贴主 pass 之前；详见 offscreen 路径同款注释）。
-            if (offscreenOk && (activeSsao != nullptr || activeSsr != nullptr)
-                && impl.scene.HasCamera())
+            if (offscreenOk && impl.scene.HasCamera()
+                && (activeSsao != nullptr || activeSsr != nullptr
+                    || impl.FindActiveContactShadowPass() != nullptr))
             {
                 offscreenOk = impl.RecordNormalPrepass(viewProj,
                                                        impl.scene.MainCamera().view);
@@ -2221,6 +2244,19 @@ void Pipeline::Render(Orange::Engine::World& world)
             {
                 offscreenOk = impl.RecordSsrPass(*activeSsr,
                                                  impl.scene.MainCamera().projection);
+            }
+
+            // 接触阴影：SSAO/SSR 之后、bloom 之前——乘法暗化先于发光。仅
+            // directional light 时跑（朝光向 = view 空间的 -lightDir）。
+            if (offscreenOk && activeLight != nullptr && impl.scene.HasCamera())
+            {
+                if (const ContactShadowPass* csPass = impl.FindActiveContactShadowPass())
+                {
+                    const glm::vec3 viewL = glm::normalize(
+                        glm::mat3(impl.scene.MainCamera().view) * (-activeLightDir));
+                    offscreenOk = impl.RecordContactShadowPass(
+                        *csPass, impl.scene.MainCamera().projection, viewL);
+                }
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)

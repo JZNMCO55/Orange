@@ -282,6 +282,26 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssrCompositeSet;  // ssrColor
     Orange::Rhi::RHITexture*                             ssrCompositeSetBound{nullptr};
 
+    // ---- 接触阴影 GPU 资源（屏幕空间向光源射线步进硬阴影）-----------------
+    // 单 pass：sceneDepth + ubo → 阴影因子，乘法 blend 直接进 hdrColor（与
+    // ssao_apply 同款 multiply blend，无独立 target）。仅 directional light 时跑。
+    struct ContactShadowUboData
+    {
+        glm::mat4 proj{1.0f};
+        glm::mat4 invProj{1.0f};
+        glm::vec4 viewLightDir{0.0f, 1.0f, 0.0f, 0.0f};  // xyz = 朝光方向(view space)
+        glm::vec4 params{0.25f, 16.0f, 0.5f, 1.0f};      // length / maxSteps / thickness / strength
+        glm::vec4 params2{0.02f, 0.0f, 0.0f, 0.0f};      // x=bias
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        contactShadowFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> contactShadowLayout;  // 0=depth 1=ubo 2=normal
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            contactShadowPipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              contactShadowUbo;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      contactShadowPool;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       contactShadowSet;     // depth + ubo + normal
+    Orange::Rhi::RHITexture*                             contactShadowSetBoundDepth{nullptr};
+    Orange::Rhi::RHITexture*                             contactShadowSetBoundNormal{nullptr};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -831,6 +851,13 @@ struct Pipeline::Impl
     bool EnsureSsrResources();
     // 录制 SSR：射线步进采反射 → ssrColor，再加性 blend 进 hdrColor。
     bool RecordSsrPass(const SsrPass& ssrDesc, const glm::mat4& proj);
+
+    // 接触阴影：屏幕空间向光源 march，乘法 blend 进 hdrColor。viewLightDir =
+    // 朝光方向（view space）。无 directional light 时调用方跳过。
+    const ContactShadowPass* FindActiveContactShadowPass() const noexcept;
+    bool EnsureContactShadowResources();
+    bool RecordContactShadowPass(const ContactShadowPass& csDesc,
+                                 const glm::mat4& proj, const glm::vec3& viewLightDir);
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

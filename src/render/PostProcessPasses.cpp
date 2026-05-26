@@ -142,4 +142,21 @@ void SsrPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- ContactShadowPass ------------------------------------------------
+
+const char* ContactShadowPass::Name() const noexcept
+{
+    return "contact_shadow";
+}
+
+void ContactShadowPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordContactShadowPass。
+}
+
+void ContactShadowPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render
