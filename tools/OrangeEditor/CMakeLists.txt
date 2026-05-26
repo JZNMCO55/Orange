@@ -29,7 +29,13 @@ cmake_minimum_required(VERSION 3.28)
 
 project(OrangeEditor
     VERSION   1.3.0
-    LANGUAGES CXX
+    # C 语言必须在本 project 显式启用 —— vendor/mikktspace/mikktspace.c 是
+    # C 源，需 C linkage 才能让 MeshTangentGen.cpp 经 mikktspace.h 的
+    # extern "C" 正确解析 genTangSpaceDefault。in-tree 构建靠根 project
+    # 的 LANGUAGES C CXX 兜住，但 OrangeEditor 作为独立 consumer 工程
+    # （editor_build_smoke / 第三方 find_package 消费）单独 configure 时
+    # 拿不到根的 C 启用，会漏编 mikktspace.c → 链接 unresolved external。
+    LANGUAGES C CXX
     DESCRIPTION "OrangeEngine 关卡 / 粒子 / 材质编辑器")
 
 set(CMAKE_CXX_STANDARD 20)
