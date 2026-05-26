@@ -40,6 +40,10 @@ float Halton(std::uint32_t index, std::uint32_t base)
 
 const TaaPass* Pipeline::Impl::FindActiveTaaPass() const noexcept
 {
+    if (postComponentActive)
+    {
+        return postTaa.enabled ? &postTaa : nullptr;
+    }
     if (postProcessChain == nullptr)
     {
         return nullptr;

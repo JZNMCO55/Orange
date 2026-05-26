@@ -1485,6 +1485,11 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         return;
     }
 
+    // 0.5 PostProcessComponent 同步：每帧从 world 找全局 post 组件 → 填 post*
+    // 成员 + 灌 shadowConfig(PCSS/分辨率)。须在 EnsureShadowMap 之前（mapResolution
+    // 可能变）。无组件时 postComponentActive=false，FindActive* 退回 chain。
+    impl.SyncPostProcessFromWorld(world);
+
     // 1. mesh GPU 上传（UploadContext 的 transient cmd 必须先于 offscreenCmd.Begin）。
     if (impl.scene.HasCamera())
     {
@@ -1956,8 +1961,65 @@ const GodRaysPass* Pipeline::Impl::FindActiveGodRaysPass() const noexcept
     return nullptr;
 }
 
+// PostProcessComponent 在场（postComponentActive）时 FindActive* 走组件填好的
+// post* 成员（数据驱动）；否则退回 chain dynamic_cast（sample/test 等 chain 用法
+// 兼容）。SyncPostProcessFromWorld 每帧渲染前更新 postComponentActive + post* 成员。
+void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
+{
+    postComponentActive = false;
+    auto view = world.Registry().view<PostProcessComponent>();
+    if (view.empty())
+    {
+        return;   // 无组件 → FindActive* 退回 chain
+    }
+    const PostProcessComponent& pp = view.get<PostProcessComponent>(view.front());
+    postComponentActive = true;
+
+    postSsao.enabled  = pp.ssaoEnabled;
+    postSsao.useGtao  = pp.ssaoUseGtao;
+    postSsao.radius   = pp.ssaoRadius;
+    postSsao.strength = pp.ssaoStrength;
+    postSsao.power    = pp.ssaoPower;
+
+    postSsr.enabled     = pp.ssrEnabled;
+    postSsr.maxDistance = pp.ssrMaxDistance;
+    postSsr.thickness   = pp.ssrThickness;
+    postSsr.strength    = pp.ssrStrength;
+
+    postContact.enabled   = pp.contactEnabled;
+    postContact.length    = pp.contactLength;
+    postContact.thickness = pp.contactThickness;
+    postContact.strength  = pp.contactStrength;
+
+    postDof.enabled       = pp.dofEnabled;
+    postDof.focusDistance = pp.dofFocusDistance;
+    postDof.focusRange    = pp.dofFocusRange;
+    postDof.maxCoCRadius  = pp.dofMaxCoCRadius;
+
+    postTaa.enabled  = pp.taaEnabled;
+    postTaa.feedback = pp.taaFeedback;
+
+    postGrade.enabled     = pp.gradeEnabled;
+    postGrade.exposure    = pp.gradeExposure;
+    postGrade.contrast    = pp.gradeContrast;
+    postGrade.saturation  = pp.gradeSaturation;
+    postGrade.temperature = pp.gradeTemperature;
+    postGrade.tint        = pp.gradeTint;
+
+    // PCSS / 阴影分辨率：组件在场时驱动 shadowConfig（压过手动 SetShadowConfig）。
+    shadowConfig.pcssLightSize = pp.pcssLightSize;
+    if (pp.shadowMapResolution != 0)
+    {
+        shadowConfig.mapResolution = pp.shadowMapResolution;
+    }
+}
+
 const SsaoPass* Pipeline::Impl::FindActiveSsaoPass() const noexcept
 {
+    if (postComponentActive)
+    {
+        return postSsao.enabled ? &postSsao : nullptr;
+    }
     if (postProcessChain == nullptr)
     {
         return nullptr;
@@ -1976,6 +2038,10 @@ const SsaoPass* Pipeline::Impl::FindActiveSsaoPass() const noexcept
 
 const SsrPass* Pipeline::Impl::FindActiveSsrPass() const noexcept
 {
+    if (postComponentActive)
+    {
+        return postSsr.enabled ? &postSsr : nullptr;
+    }
     if (postProcessChain == nullptr)
     {
         return nullptr;
@@ -2085,6 +2151,11 @@ void Pipeline::Render(Orange::Engine::World& world)
     // 在 0.x 支持范围——TonemapPass 期望 bloomCombineSet 已经准备好。
     // 设计上需要时由游戏侧自己把 BloomPass 一并加进 chain；建议默认走
     // BuiltinPostProcessChain::CreateDefault()。
+    // PostProcessComponent 同步（须在下面 FindActive* + EnsureShadowMap 之前）：
+    // 有组件则 postComponentActive=true、FindActive* 走组件值 + shadowConfig 受其
+    // 驱动；无组件退回 chain（窗口 sample 默认走 chain）。
+    impl.SyncPostProcessFromWorld(world);
+
     const BloomPass*   activeBloom   = impl.FindActiveBloomPass();
     const TonemapPass* activeTonemap = impl.FindActiveTonemapPass();
     const GodRaysPass* activeGodRays = impl.FindActiveGodRaysPass();

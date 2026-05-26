@@ -30,6 +30,7 @@
 #include "orange/engine/render/MaterialInstance.h"
 #include "orange/engine/render/MaterialSystem.h"
 #include "orange/engine/render/PostProcessChain.h"
+#include "orange/engine/render/PostProcessComponent.h"
 #include "orange/engine/render/PostProcessPasses.h"
 #include "orange/engine/render/RenderScene.h"
 #include "orange/engine/render/ShadowConfig.h"
@@ -951,6 +952,20 @@ struct Pipeline::Impl
     const ColorGradePass* FindActiveColorGradePass() const noexcept;
     bool EnsureColorGradeResources();
     bool RecordColorGradePass(const ColorGradePass& gradeDesc);
+
+    // ---- PostProcessComponent 消费（V1：find-first 全局）-------------------
+    // 每帧渲染前从 world 找 PostProcessComponent（全局单例语义，find-first）→
+    // 填充下面的 post* 成员 pass 结构 + 把 PCSS/阴影分辨率灌进 shadowConfig；
+    // postComponentActive=true。无组件时 false，FindActive* 退回 chain（保
+    // sample/test 等 chain 用法兼容）。bloom/tonemap 不在组件覆盖范围（仍走 chain）。
+    void SyncPostProcessFromWorld(Orange::Engine::World& world);
+    bool           postComponentActive{false};
+    SsaoPass       postSsao{};
+    SsrPass        postSsr{};
+    ContactShadowPass postContact{};
+    DofPass        postDof{};
+    TaaPass        postTaa{};
+    ColorGradePass postGrade{};
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

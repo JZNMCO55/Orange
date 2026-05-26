@@ -20,6 +20,10 @@ namespace Orange::Engine::Render
 
 const ContactShadowPass* Pipeline::Impl::FindActiveContactShadowPass() const noexcept
 {
+    if (postComponentActive)
+    {
+        return postContact.enabled ? &postContact : nullptr;
+    }
     if (postProcessChain == nullptr)
     {
         return nullptr;

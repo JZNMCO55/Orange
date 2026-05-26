@@ -21,6 +21,10 @@ namespace Orange::Engine::Render
 
 const DofPass* Pipeline::Impl::FindActiveDofPass() const noexcept
 {
+    if (postComponentActive)
+    {
+        return postDof.enabled ? &postDof : nullptr;
+    }
     if (postProcessChain == nullptr)
     {
         return nullptr;

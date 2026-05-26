@@ -19,6 +19,10 @@ namespace Orange::Engine::Render
 
 const ColorGradePass* Pipeline::Impl::FindActiveColorGradePass() const noexcept
 {
+    if (postComponentActive)
+    {
+        return postGrade.enabled ? &postGrade : nullptr;
+    }
     if (postProcessChain == nullptr)
     {
         return nullptr;
