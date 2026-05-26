@@ -251,6 +251,33 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssaoApplySet;     // ssaoColor
     Orange::Rhi::RHITexture*                             ssaoApplySetBoundAo{nullptr};
 
+    // ---- SSR GPU 资源（屏幕空间反射）----------------------------------
+    // ssr pass：sceneDepth + hdrColor + ubo → ssrColor(RGBA16F，反射色×权重)；
+    // ssr_composite pass：ssrColor 加性 blend 进 hdrColor（独立 ssrColor 避免
+    // 采 HDR 同时写 HDR 的反馈）。
+    struct SsrUboData
+    {
+        glm::mat4 proj{1.0f};
+        glm::mat4 invProj{1.0f};
+        glm::vec4 params{12.0f, 32.0f, 0.6f, 0.6f};  // maxDistance / maxSteps / thickness / strength
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssrFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssrCompositeFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssrLayout;   // 0=depth 1=hdr 2=ubo
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            ssrPipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            ssrCompositePipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              ssrUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             ssrColor;       // RGBA16F 反射色×权重
+    std::uint32_t                                        ssrColorWidth{0};
+    std::uint32_t                                        ssrColorHeight{0};
+    bool                                                 ssrColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      ssrPool;        // ssrSet + ssrCompositeSet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssrSet;         // depth + hdr + ubo
+    Orange::Rhi::RHITexture*                             ssrSetBoundDepth{nullptr};
+    Orange::Rhi::RHITexture*                             ssrSetBoundHdr{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssrCompositeSet;  // ssrColor
+    Orange::Rhi::RHITexture*                             ssrCompositeSetBound{nullptr};
+
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomUpsamplePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> tonemapPipeline;
@@ -774,6 +801,13 @@ struct Pipeline::Impl
     // 录制 SSAO：compute AO → ssaoColor，再 4×4 模糊 + 乘法 blend 进 hdrColor。
     // proj 取自当前帧 main camera（重建 view-space + 投回屏幕）。
     bool RecordSsaoPass(const SsaoPass& ssaoDesc, const glm::mat4& proj);
+
+    // SSR：ssrColor target / descriptor set 按 hdr 尺寸重建（sceneDepth /
+    // hdrColor 重建后重绑）。
+    const SsrPass* FindActiveSsrPass() const noexcept;
+    bool EnsureSsrResources();
+    // 录制 SSR：射线步进采反射 → ssrColor，再加性 blend 进 hdrColor。
+    bool RecordSsrPass(const SsrPass& ssrDesc, const glm::mat4& proj);
 
     // bakedEnvCube 重建后分配 / 重写 skySet。
     bool EnsureSkyDescSet();

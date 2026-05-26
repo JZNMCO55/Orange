@@ -440,6 +440,24 @@ void Pipeline::Shutdown()
     impl.ssaoUbo.reset();
     impl.ssaoFs.reset();
     impl.ssaoApplyFs.reset();
+
+    // SSR 资源（set 先于 pool）。
+    impl.ssrSet.reset();
+    impl.ssrCompositeSet.reset();
+    impl.ssrPool.reset();
+    impl.ssrColor.reset();
+    impl.ssrColorWidth = 0;
+    impl.ssrColorHeight = 0;
+    impl.ssrColorLayoutShaderReadOnly = false;
+    impl.ssrSetBoundDepth = nullptr;
+    impl.ssrSetBoundHdr = nullptr;
+    impl.ssrCompositeSetBound = nullptr;
+    impl.ssrPipeline.reset();
+    impl.ssrCompositePipeline.reset();
+    impl.ssrLayout.reset();
+    impl.ssrUbo.reset();
+    impl.ssrFs.reset();
+    impl.ssrCompositeFs.reset();
     // DebugDrawScene 必须在 renderDevice WaitIdle 之后、其他 RHI 资源释放前
     // 一起释放——Orange::Renderer::DebugDraw 持有 vertex staging buffer 与
     // 两条 pipeline，析构需要 device 还活着。
@@ -1760,6 +1778,24 @@ const SsaoPass* Pipeline::Impl::FindActiveSsaoPass() const noexcept
     return nullptr;
 }
 
+const SsrPass* Pipeline::Impl::FindActiveSsrPass() const noexcept
+{
+    if (postProcessChain == nullptr)
+    {
+        return nullptr;
+    }
+    const std::size_t count = postProcessChain->PassCount();
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const IPostProcessPass* p = postProcessChain->PassAt(i);
+        if (const SsrPass* sp = dynamic_cast<const SsrPass*>(p))
+        {
+            return sp->enabled ? sp : nullptr;
+        }
+    }
+    return nullptr;
+}
+
 
 
 // v0.9 c4：Pipeline 端 sample bin 树注册。挂到 "LayerUpdate" 下；细分
@@ -1857,6 +1893,7 @@ void Pipeline::Render(Orange::Engine::World& world)
     const TonemapPass* activeTonemap = impl.FindActiveTonemapPass();
     const GodRaysPass* activeGodRays = impl.FindActiveGodRaysPass();
     const SsaoPass*    activeSsao    = impl.FindActiveSsaoPass();
+    const SsrPass*     activeSsr     = impl.FindActiveSsrPass();
     if (activeBloom != nullptr && hdrReady)
     {
         if (!impl.EnsureBloomResources())
@@ -2116,6 +2153,14 @@ void Pipeline::Render(Orange::Engine::World& world)
             {
                 offscreenOk = impl.RecordSsaoPass(*activeSsao,
                                                   impl.scene.MainCamera().projection);
+            }
+
+            // SSR：SSAO 之后、bloom 之前——反射读到的是已 AO 的 HDR，反射本身
+            // 也会进 bloom（湿表面高光反射的 bloom 是想要的）。
+            if (offscreenOk && activeSsr != nullptr && impl.scene.HasCamera())
+            {
+                offscreenOk = impl.RecordSsrPass(*activeSsr,
+                                                 impl.scene.MainCamera().projection);
             }
 
             if (offscreenOk && activeBloom != nullptr && impl.bloomMipsReady)

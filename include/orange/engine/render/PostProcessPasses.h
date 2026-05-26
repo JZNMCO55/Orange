@@ -179,6 +179,39 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// SSR（屏幕空间反射）。前向渲染下从 sceneDepth 重建 view-space pos/normal，
+// 沿反射方向 view-space 射线步进，命中时采 hdrColor 作反射色，按 fresnel(NoV)
+// + 边缘淡出加权，加性合成进 HDR（分层 fallback 的第一层；屏外/未命中处无
+// 反射 = 缺省回退到既有 IBL，不做探针/平面层）。
+//
+// 已知简化（无 G-buffer 的前向取舍）：① 无 per-pixel roughness/F0 → 用统一
+// F0=0.04 的 fresnel 权重（grazing 角反射强，适合地面），非材质驱动；②
+// 加性合成（非能量守恒的 lerp），反射叠加为"光泽 sheen"而非物理替换 —
+// 适合 stylized 湿表面（流体史莱姆）。严格物理需 G-buffer + 分层探针。
+// 仅 window 模式 Stage A 生效（offscreen 编辑器路径按设计跳过 post）。
+class ORANGE_ENGINE_API SsrPass final : public IPostProcessPass
+{
+public:
+    bool enabled{true};
+
+    // view-space 最大射线长度（米）。决定反射能"看多远"，过大增步进成本。
+    float maxDistance{12.0f};
+
+    // 射线步进数。每步推进 maxDistance/maxSteps；越多越准越慢。典型 24–48。
+    float maxSteps{32.0f};
+
+    // 命中厚度容差（view-space 米）。z-buffer 只存最近面，厚度内才算命中，
+    // 太小漏命中、太大穿透。典型 0.3–1.0。
+    float thickness{0.6f};
+
+    // 反射强度整体乘子（叠加到 fresnel 权重上）。0=无反射，1=满。
+    float strength{0.6f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

@@ -125,4 +125,21 @@ void SsaoPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- SsrPass ----------------------------------------------------------
+
+const char* SsrPass::Name() const noexcept
+{
+    return "ssr";
+}
+
+void SsrPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordSsrPass。
+}
+
+void SsrPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render

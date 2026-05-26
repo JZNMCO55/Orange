@@ -376,7 +376,7 @@
 仅在第一款游戏需要时启用。每条都是独立 feature。
 
 - Task 10-01 · 多视口 / 分屏（OrangeRender 已有 `multi_view` sample，封装到引擎 API）
-- Task 10-02 · 屏幕空间反射（如果需要水面）
+- Task 10-02 · 屏幕空间反射（如果需要水面）✅（2026-05-26 第一层落地：`SsrPass` 挂进 PostProcessChain；view-space 射线步进 + 命中采 hdrColor + fresnel(NoV) 加权 + 边缘淡出 → 加性合成进 HDR；独立 ssrColor 避免读写 HDR 反馈。已知简化 = 统一 F0 fresnel（非材质驱动）+ 加性合成 + 仅 SSR 单层（无探针/平面 fallback），适合 stylized 湿表面。仅 window 模式 Stage A。见 `samples/16_light_family_shadows --no-ssr` 对比）
 - Task 10-03 · 屏幕空间环境光遮蔽（SSAO，强化室内场景）✅（2026-05-26 落地：`SsaoPass` 挂进 PostProcessChain；前向从 sceneDepth 重建 view-space pos/normal + 半球 kernel + 4×4 模糊 + 乘法 blend；仅 window 模式 Stage A 生效，编辑器 offscreen 路径暂不接。已知简化 = AO 作用于含直接光的 HDR 而非仅 ambient，严格 ambient-only 需 depth prepass/MRT。见 `samples/16_light_family_shadows --no-ssao` 对比）
 - Task 10-04 · GPU 粒子（迁移 Phase 5 的 CPU 粒子到 compute shader）
 - Task 10-05 · 高质量软阴影（PCSS / VSM）

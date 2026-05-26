@@ -111,6 +111,7 @@ add_library(orange_engine STATIC
     src/render/pipeline/PipelineSetup.cpp
     src/render/pipeline/PipelineShadow.cpp
     src/render/pipeline/PipelineSsao.cpp
+    src/render/pipeline/PipelineSsr.cpp
     src/render/pipeline/PipelineSky.cpp
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
@@ -307,6 +308,12 @@ orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ssao_apply.frag.glsl"
     ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV)
 orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/ssr.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_SSR_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/ssr_composite.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV)
+orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/pbr.vert.glsl"
     ORANGE_ENGINE_BUILTIN_PBR_VS_SPV)
 orange_engine_compile_builtin_shader(
@@ -365,6 +372,8 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSAO_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_SSR_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PBR_VS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_UNLIT_FS_SPV}"

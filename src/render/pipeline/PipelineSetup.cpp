@@ -537,6 +537,104 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         }
     }
     {
+        // SSR pipelines（屏幕空间反射）：
+        //   ssr           —— sceneDepth + hdrColor + ubo → ssrColor（反射色×权重，
+        //                     RGBA16F，no blend）；
+        //   ssr_composite —— ssrColor 加性 blend 进 HDR。
+        auto ssrCode      = LoadSpirv("shaders/orange_engine/ssr.frag.spv");
+        auto ssrCompCode  = LoadSpirv("shaders/orange_engine/ssr_composite.frag.spv");
+        if (ssrCode.empty() || ssrCompCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSR shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = ssrCode.data();
+        sm.mCodeSize   = ssrCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.ssr.frag";
+        impl.ssrFs = rhi.CreateShaderModule(sm);
+        sm.mpCode      = ssrCompCode.data();
+        sm.mCodeSize   = ssrCompCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.ssr_composite.frag";
+        impl.ssrCompositeFs = rhi.CreateShaderModule(sm);
+
+        // ssrLayout：0 = sceneDepth，1 = hdrColor，2 = SsrUbo。
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({2, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.ssr.layout";
+        impl.ssrLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        Orange::Rhi::BufferDesc ub{};
+        ub.mSize        = sizeof(Pipeline::Impl::SsrUboData);
+        ub.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.ssrUbo = rhi.CreateBuffer(ub);
+
+        if (!impl.ssrFs || !impl.ssrCompositeFs || !impl.ssrLayout || !impl.ssrUbo)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSR 资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        {
+            // ssr pipeline → RGBA16F ssrColor，no blend，layout = ssrLayout。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.ssrFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            d.mColorBlend.mAttachments.push_back({});  // no blend
+            d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+            d.mDescriptorSetLayouts.push_back(impl.ssrLayout.get());
+            d.mpDebugName = "orange_engine.ssr";
+            impl.ssrPipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        {
+            // ssr_composite pipeline → HDR，加性 blend（与 bloom upsample / god
+            // rays 同款）；layout 复用 bloomLayout（1 binding = ssrColor）。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.ssrCompositeFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            Orange::Rhi::ColorBlendAttachmentDesc blend{};
+            blend.mBlendEnable         = true;
+            blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+            blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+            d.mColorBlend.mAttachments.push_back(blend);
+            d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+            d.mDescriptorSetLayouts.push_back(impl.bloomLayout.get());
+            d.mpDebugName = "orange_engine.ssr_composite";
+            impl.ssrCompositePipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        if (!impl.ssrPipeline || !impl.ssrCompositePipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSR pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
         // sky pipeline —— RGBA16F HDR target，no blend，无 depth attachment
         // （sky 自家 BeginRendering 不带 depth；主 pass 在 sky 之后自己 Clear
         // depth 到 1.0 + 写入几何 depth）。push constant 96 字节（mat4 invVP

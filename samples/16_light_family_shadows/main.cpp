@@ -209,11 +209,13 @@ int main(int argc, char** argv)
     // `--no-ssao`：关闭 SSAO（做 before/after 对比）。
     std::string capturePath;
     bool        disableSsao = false;
+    bool        disableSsr  = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
         if (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
         else if (a == "--no-ssao")            { disableSsao = true; }
+        else if (a == "--no-ssr")             { disableSsr = true; }
     }
 
     AppConfig cfg{};
@@ -369,6 +371,16 @@ int main(int argc, char** argv)
         ssao->strength = 1.0f;
         ssao->power    = 2.0f;
         chain.AddPass(std::move(ssao));
+    }
+    // SSR：`--no-ssr` 关闭。地面会反射出上方的球体（湿表面/光泽感）。
+    {
+        auto ssr = std::make_unique<Orange::Engine::Render::SsrPass>();
+        ssr->enabled     = !disableSsr;
+        ssr->maxDistance = 14.0f;
+        ssr->maxSteps    = 40.0f;
+        ssr->thickness   = 0.8f;
+        ssr->strength    = 0.7f;
+        chain.AddPass(std::move(ssr));
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
