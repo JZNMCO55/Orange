@@ -548,6 +548,16 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                                  Orange::Rhi::DescriptorType::UniformBuffer,
                                  1,
                                  Orange::Rhi::ShaderStage::Fragment});
+        // GAP-2026-05-26 G3：binding 9..9+N-1 = point shadow cubes（每个
+        // castsShadow point 一个独立 samplerCube；用独立 cube 而非 cubeArray
+        // 免 imageCubeArray feature 依赖）。
+        for (std::uint32_t c = 0; c < Pipeline::Impl::kMaxPointShadowCasters; ++c)
+        {
+            lay.mBindings.push_back({Pipeline::Impl::kPointShadowBinding0 + c,
+                                     Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                     1,
+                                     Orange::Rhi::ShaderStage::Fragment});
+        }
         lay.mpDebugName = "orange_engine.main.layout";
         impl.mainDescLayout = rhi.CreateDescriptorSetLayout(lay);
 
@@ -581,11 +591,13 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         ssBufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
         impl.spotShadowUbo = rhi.CreateBuffer(ssBufDesc);
 
-        // Main desc pool: 1 set，5 个 CombinedImageSampler（dir shadow + 3 dummy
-        // IBL + spot shadow array） + 4 个 UBO（light / point / spot / spot shadow）
+        // Main desc pool: 1 set，CombinedImageSampler = dir shadow + 3 dummy
+        // IBL + spot shadow array + N point shadow cube；UBO = light / point /
+        // spot / spot shadow（4）。
         Orange::Rhi::DescriptorPoolDesc pool{};
         pool.mMaxSets = 1;
-        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 5});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                   5 + Pipeline::Impl::kMaxPointShadowCasters});
         pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 4});
         pool.mpDebugName = "orange_engine.main.pool";
         impl.mainDescPool = rhi.CreateDescriptorPool(pool);

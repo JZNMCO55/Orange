@@ -448,6 +448,11 @@ void Pipeline::Shutdown()
     impl.spotShadowArray.reset();
     impl.spotShadowArrayResolution = 0;
     impl.spotShadowArrayLayoutShaderReadOnly = false;
+    // point shadow cubes：per-face view 同样先于 cube texture 释放。
+    for (auto& v : impl.pointShadowFaceViews) { v.reset(); }
+    for (auto& c : impl.pointShadowCubes)     { c.reset(); }
+    impl.pointShadowCubeResolution = 0;
+    impl.pointShadowCubeLayoutShaderReadOnly = false;
     impl.mainDescSet.reset();
     impl.mainDescPool.reset();
     impl.mainDescLayout.reset();
@@ -1401,6 +1406,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         }
         impl.EnsureShadowMap();
         impl.EnsureSpotShadowArray();
+        impl.EnsurePointShadowCube();
         const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                 : glm::mat4(1.0f);
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
@@ -1437,6 +1443,10 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         if (impl.spotShadowArray)
         {
             impl.RecordSpotShadowPass();
+        }
+        if (impl.pointShadowCubes[0])
+        {
+            impl.RecordPointShadowPass();
         }
 
         // sky pass：主 pass 之前画背景。两种分支：
@@ -1877,6 +1887,7 @@ void Pipeline::Render(Orange::Engine::World& world)
         }
         impl.EnsureShadowMap();
         impl.EnsureSpotShadowArray();
+        impl.EnsurePointShadowCube();
         const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                               : glm::mat4(1.0f);
         // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
@@ -1918,6 +1929,10 @@ void Pipeline::Render(Orange::Engine::World& world)
             if (impl.spotShadowArray)
             {
                 impl.RecordSpotShadowPass();
+            }
+            if (impl.pointShadowCubes[0])
+            {
+                impl.RecordPointShadowPass();
             }
 
             // game-side AfterShadow inserted passes —— shadow map 已写完，

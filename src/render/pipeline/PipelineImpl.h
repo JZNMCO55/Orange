@@ -249,19 +249,20 @@ struct Pipeline::Impl
                   "LightUboData std140 size mismatch (expected 160 bytes)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
 
-    // PointLights UBO（GAP-2026-05-11 G2）。
+    // PointLights UBO（GAP-2026-05-11 G2；GAP-2026-05-26 G3 加 shadowParams）。
     static constexpr std::uint32_t kMaxPointLights = 8;
     struct PointLightStd140
     {
-        glm::vec4 posRange{};
-        glm::vec4 colorIntensity{};
+        glm::vec4 posRange{};        // xyz = world pos, w = range
+        glm::vec4 colorIntensity{};  // xyz = linear rgb, w = intensity
+        glm::vec4 shadowParams{};    // x = cube shadow index（G3；<0 = 无），y/z/w pad
     };
     struct PointLightsUboData
     {
         glm::uvec4       countPad{0u, 0u, 0u, 0u};
         PointLightStd140 lights[kMaxPointLights]{};
     };
-    static_assert(sizeof(PointLightsUboData) == 16 + 32 * kMaxPointLights,
+    static_assert(sizeof(PointLightsUboData) == 16 + 48 * kMaxPointLights,
                   "PointLightsUboData std140 size mismatch");
     std::unique_ptr<Orange::Rhi::RHIBuffer> pointLightsUbo;
 
@@ -312,6 +313,35 @@ struct Pipeline::Impl
     static_assert(sizeof(SpotShadowUboData) == 16 + 64 * kMaxSpotShadowCasters,
                   "SpotShadowUboData std140 size mismatch");
     std::unique_ptr<Orange::Rhi::RHIBuffer> spotShadowUbo;
+
+    // ---- Point shadow（GAP-2026-05-26 G3）：全向 cubemap 阴影 -------------
+    // castsShadow 的 PointLight 子集（cap kMaxPointShadowCasters）各占一个
+    // 独立的 D32Float TexCube（6 layer）。每 face 用 90° perspective depth-only
+    // 渲（复用 shadow_caster pipeline）。pbr.frag 用 samplerCube 按方向采，
+    // 比较"从 dominant 轴距离重建的 NDC depth"与采样值。near 全局常量、
+    // far = light.range（posRange.w），故无需额外矩阵 UBO —— 仅靠 cube depth
+    // + 距离重建。
+    //
+    // 用 **N 个独立 samplerCube** 而非单个 samplerCubeArray：后者需 Vulkan
+    // `imageCubeArray` device feature，OrangeRender 当前未启用（见
+    // incoming_feature FEATURE-2026-05-26-enable-image-cube-array）。普通
+    // samplerCube 是核心能力（IBL 已在用），无需跨仓改动。
+    static constexpr std::uint32_t kMaxPointShadowCasters = 2;
+    static constexpr float         kPointShadowNear       = 0.05f;  // 须与 shader 常量一致
+    static constexpr std::uint32_t kPointShadowBinding0   = 9;      // 第一个 cube 的 binding
+    std::array<std::unique_ptr<Orange::Rhi::RHITexture>, kMaxPointShadowCasters> pointShadowCubes;
+    std::uint32_t                            pointShadowCubeResolution{0};
+    bool                                     pointShadowCubeLayoutShaderReadOnly{false};
+    // per-(cube, face) Tex2D depth view，flat index = cube*6 + face。
+    std::array<std::unique_ptr<Orange::Rhi::RHITextureView>, 6u * kMaxPointShadowCasters>
+        pointShadowFaceViews;
+
+    // 当前帧 shadow-casting point 的 light world pos + far(=range) + 数量：
+    // UpdatePointLightsUbo 算（+ 写 shadowParams.x = cube index），
+    // RecordPointShadowPass 消费（构 6 面矩阵渲 depth）。
+    std::array<glm::vec3, kMaxPointShadowCasters> pointShadowLightPos{};
+    std::array<float, kMaxPointShadowCasters>     pointShadowFar{};
+    std::uint32_t                                 pointShadowCount{0};
 
     // 当前帧时间（seconds，单调递增）。
     float frameTime{0.0f};
@@ -785,6 +815,14 @@ struct Pipeline::Impl
                                        const glm::vec3& dir,
                                        float            outerConeAngle,
                                        float            range) const;
+
+    // 创建 / 重建 point shadow cube array（6 × kMaxPointShadowCasters layer）
+    // + per-face depth view。
+    bool EnsurePointShadowCube();
+
+    // 把场景从各 shadow-casting point 视角渲到 pointShadowCube 6 个 face
+    //（90° perspective depth-only，复用 shadow_caster pipeline）。
+    bool RecordPointShadowPass();
 
     // 计算 light view-proj。
     glm::mat4 ComputeLightViewProj(const glm::vec3& lightWorldDir) const;

@@ -147,6 +147,7 @@ void Pipeline::Impl::UpdatePointLightsUbo(Orange::Engine::World& world)
 
     PointLightsUboData data{};
     std::uint32_t      count = 0;
+    pointShadowCount = 0;  // 本帧 cube shadow caster 计数
 
     auto& reg = world.Registry();
     // entt 不要求 TransformComponent 同步存在；缺 Transform 视为 origin。
@@ -170,8 +171,24 @@ void Pipeline::Impl::UpdatePointLightsUbo(Orange::Engine::World& world)
         {
             pos = tc->position;
         }
+
+        // cube shadow index：castsShadow 的 point 先到先得分配 0..N-1，超出
+        // kMaxPointShadowCasters 退化无阴影。存 lightPos + far(=range) 供
+        // RecordPointShadowPass 构 6 面矩阵。
+        float shadowIndex = -1.0f;
+        if (pl.castsShadow && pointShadowCount < kMaxPointShadowCasters)
+        {
+            const std::uint32_t idx = pointShadowCount;
+            pointShadowLightPos[idx] = pos;
+            pointShadowFar[idx]      = pl.range > kPointShadowNear
+                                           ? pl.range : (kPointShadowNear + 0.01f);
+            shadowIndex = static_cast<float>(idx);
+            ++pointShadowCount;
+        }
+
         data.lights[count].posRange       = glm::vec4(pos, pl.range);
         data.lights[count].colorIntensity = glm::vec4(pl.color, pl.intensity);
+        data.lights[count].shadowParams   = glm::vec4(shadowIndex, 0.0f, 0.0f, 0.0f);
         ++count;
     }
     data.countPad.x = count;
@@ -538,6 +555,189 @@ bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
                           Orange::Rhi::TextureLayout::DepthStencilAttachment,
                           Orange::Rhi::TextureLayout::ShaderReadOnly);
     shadowMapLayoutShaderReadOnly = true;
+    return true;
+}
+
+bool Pipeline::Impl::EnsurePointShadowCube()
+{
+    const std::uint32_t targetRes = shadowConfig.mapResolution > 0
+                                        ? shadowConfig.mapResolution : 1024u;
+    if (pointShadowCubes[0] && pointShadowCubeResolution == targetRes)
+    {
+        return true;
+    }
+    if (renderDevice == nullptr)
+    {
+        return false;
+    }
+    renderDevice->WaitIdle();
+    for (auto& v : pointShadowFaceViews) { v.reset(); }
+    for (auto& c : pointShadowCubes)     { c.reset(); }
+
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    // N 个独立 6-layer TexCube（非 cubeArray，免 imageCubeArray feature）。
+    for (std::uint32_t c = 0; c < kMaxPointShadowCasters; ++c)
+    {
+        Orange::Rhi::TextureDesc t{};
+        t.mWidth       = targetRes;
+        t.mHeight      = targetRes;
+        t.mFormat      = Orange::Rhi::TextureFormat::D32Float;
+        t.mDimension   = Orange::Rhi::TextureDimension::TexCube;  // 6 layer
+        t.mArrayLayers = 6u;
+        t.mUsage       = Orange::Rhi::TextureUsage::DepthStencil
+                       | Orange::Rhi::TextureUsage::Sampled;
+        auto tex = rhi.CreateTexture(t);
+        if (!tex)
+        {
+            ORANGE_LOG_ERROR("Pipeline: point shadow cube[{}] CreateTexture 失败 ({}x{} D32Float)",
+                             c, targetRes, targetRes);
+            return false;
+        }
+        pointShadowCubes[c] = std::move(tex);
+
+        // per-face Tex2D depth view，flat index = c*6 + face。
+        for (std::uint32_t face = 0; face < 6u; ++face)
+        {
+            Orange::Rhi::TextureViewDesc vd{};
+            vd.mViewDimension  = Orange::Rhi::TextureDimension::Tex2D;
+            vd.mBaseMipLevel   = 0;
+            vd.mLevelCount     = 1;
+            vd.mBaseArrayLayer = face;
+            vd.mLayerCount     = 1;
+            auto view = rhi.CreateTextureView(*pointShadowCubes[c], vd);
+            if (!view)
+            {
+                ORANGE_LOG_ERROR("Pipeline: point shadow cube[{}] CreateTextureView(face={}) 失败",
+                                 c, face);
+                return false;
+            }
+            pointShadowFaceViews[c * 6u + face] = std::move(view);
+        }
+
+        // binding (kPointShadowBinding0 + c) = samplerCube uPointShadowCube<c>。
+        if (mainDescSet && hdrSampler)
+        {
+            Orange::Rhi::DescriptorWrite w{};
+            w.mBinding             = kPointShadowBinding0 + c;
+            w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+            w.mImageInfo.mpTexture = pointShadowCubes[c].get();
+            w.mImageInfo.mpSampler = hdrSampler.get();
+            rhi.UpdateDescriptorSet(*mainDescSet, &w, 1);
+        }
+    }
+
+    pointShadowCubeResolution           = targetRes;
+    pointShadowCubeLayoutShaderReadOnly = false;
+    return true;
+}
+
+bool Pipeline::Impl::RecordPointShadowPass()
+{
+    ORANGE_PROFILE_SCOPE("PointShadow");
+    if (!pointShadowCubes[0] || offscreenCmd == nullptr || !shadowCasterPipeline)
+    {
+        return false;
+    }
+    auto& cmd = *offscreenCmd;
+
+    // cube face 朝向 / up（标准 cubemap 约定 +X/-X/+Y/-Y/+Z/-Z）。配合
+    // Camera::Perspective 的 Vulkan y-flip，使采样方向 D 命中渲染时对应
+    // texel。RecordSpotShadowPass 同款 per-face depth attachment。
+    static const glm::vec3 kFaceDir[6] = {
+        { 1.0f,  0.0f,  0.0f}, {-1.0f,  0.0f,  0.0f},
+        { 0.0f,  1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f},
+        { 0.0f,  0.0f,  1.0f}, { 0.0f,  0.0f, -1.0f},
+    };
+    static const glm::vec3 kFaceUp[6] = {
+        { 0.0f, -1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f},
+        { 0.0f,  0.0f,  1.0f}, { 0.0f,  0.0f, -1.0f},
+        { 0.0f, -1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f},
+    };
+    constexpr float kFovY90 = 1.57079632679489661923f;  // 每 face 90° fov（= π/2 弧度）
+
+    const auto fromLayout = pointShadowCubeLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+
+    // 逐 cube（= 逐 shadow-casting point）。caster >= pointShadowCount 的 cube
+    // 仍 Clear 各 face 到 1.0（远深度），保证它在 ShaderReadOnly 且无残留。
+    for (std::uint32_t caster = 0; caster < kMaxPointShadowCasters; ++caster)
+    {
+        cmd.TransitionTexture(*pointShadowCubes[caster], fromLayout,
+                              Orange::Rhi::TextureLayout::DepthStencilAttachment);
+
+        for (std::uint32_t face = 0; face < 6u; ++face)
+        {
+            Orange::Rhi::DepthStencilAttachment depth{};
+            depth.mpView        = pointShadowFaceViews[caster * 6u + face].get();
+            depth.mDepthLoadOp  = Orange::Rhi::LoadOp::Clear;
+            depth.mDepthStoreOp = Orange::Rhi::StoreOp::Store;
+            depth.mClear.mDepth = 1.0f;
+
+            Orange::Rhi::RenderingDesc rd{};
+            rd.mRenderArea.mWidth  = pointShadowCubeResolution;
+            rd.mRenderArea.mHeight = pointShadowCubeResolution;
+            rd.mDepthStencil       = depth;
+            cmd.BeginRendering(rd);
+
+            Orange::Rhi::RHIViewport vp{};
+            vp.mWidth    = static_cast<float>(pointShadowCubeResolution);
+            vp.mHeight   = static_cast<float>(pointShadowCubeResolution);
+            vp.mMinDepth = 0.0f;
+            vp.mMaxDepth = 1.0f;
+            cmd.SetViewport(vp);
+            Orange::Rhi::RHIScissor sc{};
+            sc.mWidth  = pointShadowCubeResolution;
+            sc.mHeight = pointShadowCubeResolution;
+            cmd.SetScissor(sc);
+
+            if (caster < pointShadowCount)
+            {
+                const glm::vec3 lp   = pointShadowLightPos[caster];
+                const float     zFar = pointShadowFar[caster];
+                const glm::mat4 view = glm::lookAt(lp, lp + kFaceDir[face], kFaceUp[face]);
+                const glm::mat4 proj =
+                    Camera::Perspective(kFovY90, 1.0f, kPointShadowNear, zFar).projection;
+                const glm::mat4 lightVP = proj * view;
+
+                cmd.BindGraphicsPipeline(*shadowCasterPipeline);
+                for (const auto& drawable : scene.Drawables())
+                {
+                    if (!drawable.castsShadow || !drawable.mesh.IsValid())
+                    {
+                        continue;
+                    }
+                    auto cacheIt = meshCache.find(drawable.mesh.Value());
+                    if (cacheIt == meshCache.end())
+                    {
+                        continue;
+                    }
+                    const auto& gpu = cacheIt->second;
+
+                    struct ShadowCasterPush { glm::mat4 lightVP; glm::mat4 model; };
+                    ShadowCasterPush pc{};
+                    pc.lightVP = lightVP;
+                    pc.model   = drawable.worldMatrix;
+                    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                         0, static_cast<std::uint32_t>(sizeof(pc)),
+                                         &pc);
+
+                    cmd.BindVertexBuffer(0, *gpu.vertexBuffer, 0);
+                    cmd.BindIndexBuffer(*gpu.indexBuffer, 0, Orange::Rhi::IndexFormat::UInt32);
+                    cmd.DrawIndexed(gpu.indexCount, 1, 0, 0, 0);
+                }
+            }
+
+            cmd.EndRendering();
+        }
+
+        cmd.TransitionTexture(*pointShadowCubes[caster],
+                              Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                              Orange::Rhi::TextureLayout::ShaderReadOnly);
+    }
+
+    pointShadowCubeLayoutShaderReadOnly = true;
     return true;
 }
 

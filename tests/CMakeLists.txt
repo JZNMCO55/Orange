@@ -104,6 +104,7 @@ orange_engine_add_test(pipeline_offscreen_test     render/PipelineOffscreenTest.
 orange_engine_add_test(pbr_scene_black_repro_test  render/PbrSceneBlackReproTest.cpp)
 target_compile_definitions(pbr_scene_black_repro_test PRIVATE
     "ORANGE_ENGINE_REPO_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\"")
+orange_engine_add_test(shadow_occlusion_test       render/ShadowOcclusionTest.cpp)
 orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(vfx_system_test             render/VfxSystemTest.cpp)
 orange_engine_add_test(insert_pass_test            render/InsertPassTest.cpp)

@@ -55,6 +55,7 @@ struct PointLightData
 {
     vec4 posRange;       // xyz = world pos, w = range
     vec4 colorIntensity; // xyz = linear rgb, w = intensity
+    vec4 shadowParams;   // x = cube shadow index（G3；<0 = 无），y/z/w pad
 };
 layout(set = 0, binding = 5, std140) uniform PointLightsUbo
 {
@@ -88,6 +89,15 @@ layout(set = 0, binding = 8, std140) uniform SpotShadowUbo
     uvec4 uSpotShadowCountPad;
     mat4  uSpotLightViewProj[ORANGE_MAX_SPOT_SHADOWS];
 } spotShadow;
+
+// GAP-2026-05-26 G3：point 全向 cubemap 阴影。每个 castsShadow point 占一个
+// 独立 samplerCube（binding 9 / 10；用独立 cube 而非 cubeArray 免
+// imageCubeArray feature）。PointLightData.shadowParams.x 是 cube index
+// （<0 = 无阴影）。比较"按 dominant 轴距离重建的 NDC depth"与采样值；near
+// 须与 host kPointShadowNear 一致，far = light.range。kMaxPointShadowCasters=2。
+#define ORANGE_POINT_SHADOW_NEAR 0.05
+layout(set = 0, binding = 9)  uniform samplerCube uPointShadowCube0;
+layout(set = 0, binding = 10) uniform samplerCube uPointShadowCube1;
 
 // set 1 = per-instance material 贴图（GAP-2026-05-25 A2 / G1）。Pipeline 按
 // MaterialInstance 的 texture 槽分配 / 更新本 set；未绑的槽喂 default 贴图
@@ -145,6 +155,27 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 {
     float f = pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * f;
+}
+
+// Point omni cubemap 阴影（GAP-2026-05-26 G3）。L = fragWorldPos - lightPos
+//（从光指向 frag，= cube 采样方向）。采 cube array（layer = cubeIndex）得
+// stored NDC depth；按 dominant 轴距离重建本 frag 的 NDC depth 比较。
+// 返回 1 = 照亮，0 = 阴影。near 须与 host kPointShadowNear 一致，zFar = range。
+float SamplePointShadow(int cubeIndex, vec3 L, float zFar, float depthBias)
+{
+    float zNear = ORANGE_POINT_SHADOW_NEAR;
+    // dominant 轴距离 = 该 cube face 的 view-space forward 距离。
+    float d = max(max(abs(L.x), abs(L.y)), abs(L.z));
+    if (d <= zNear) { return 1.0; }  // 比 near 还近 → 不自遮挡
+    // Vulkan perspective（Camera::Perspective）下 ndc_z 关于 view 距离 d：
+    //   ndc_z = zFar*(zNear - d) / ((zNear - zFar)*d)
+    float ndcZ    = (zFar * (zNear - d)) / ((zNear - zFar) * d);
+    float current = ndcZ - depthBias;
+    // N=2 个独立 cube；静态分支选 sampler（GLSL 不能动态索引 sampler 变量）。
+    float closest = (cubeIndex == 0)
+                        ? texture(uPointShadowCube0, L).r
+                        : texture(uPointShadowCube1, L).r;
+    return (current <= closest) ? 1.0 : 0.0;
 }
 
 // ----- main -----------------------------------------------------------------
@@ -259,6 +290,7 @@ void main()
         float pRange    = pointLights.uPointLights[i].posRange.w;
         vec3  pColor    = pointLights.uPointLights[i].colorIntensity.rgb;
         float pInten    = pointLights.uPointLights[i].colorIntensity.w;
+        int   pShadowIdx = int(pointLights.uPointLights[i].shadowParams.x);  // <0 = 无阴影
         if (pRange <= 0.0) { continue; }
 
         vec3  pL_unnorm = pLightPos - vWorldPos;
@@ -289,8 +321,18 @@ void main()
         float fade      = smoothstep(pRange, 0.0, pDist);  // dist=0→1, dist=range→0
         float atten     = invSquare * fade;
 
+        // 全向 cubemap 阴影：castsShadow 的 point 有有效 cube index 时采样
+        // 比较；否则 pShadow = 1（无阴影，与 G2 前行为一致）。
+        float pShadow = 1.0;
+        if (pShadowIdx >= 0)
+        {
+            // cube 采样方向 = 从光指向 frag = -pL_unnorm（pL_unnorm 是 frag→光）。
+            pShadow = SamplePointShadow(pShadowIdx, -pL_unnorm, pRange,
+                                        light.uShadowParams.y);
+        }
+
         vec3 pRadiance = pColor * pInten * atten;
-        ptLo += (pDiff + pSpec) * pRadiance * pNoL;
+        ptLo += (pDiff + pSpec) * pRadiance * pNoL * pShadow;
     }
 
     // ---- Spot lights（GAP-2026-05-26 G1）：point 物理基衰减 × 锥角软边。
