@@ -1682,6 +1682,38 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 ---
 
+## GAP-2026-05-27-tonemap-operator-selection
+
+- **发现方**：渲染推进 session（铺完 post 特效后回看 HDR→LDR 收尾算子）
+- **发现日期**：2026-05-27
+- **一句话定性**：tonemap 算子**写死 ACES Narkowicz 5 系数 fit**（`tonemap.frag.glsl::ACESNarkowicz`），无算子选择。ACES Narkowicz 对**高饱和亮色**会偏色/过饱（known issue），对首游明亮多彩的 Ori-like 画风不理想；缺 **AgX**（Blender 4.0+ / Godot 4.3 默认，对鲜艳色 hue 更稳）/ Reinhard 等算子选择
+- **状态**：**仅登记，未实现**（本 session 只铺 post 特效；tonemap 是全引擎 HDR→LDR **核心收尾曲线**，改动影响每个 sample + 编辑器，且 push struct 多处内联，应放专门 session 一并理顺一致性）
+
+### 触发场景
+
+首游主角是"流体史莱姆"+ 发光探索，配色倾向鲜艳/高饱和（参 [[project_first_game_orilike_strategy]] 的剪影/渐变画风）。ACES Narkowicz 在这类亮色上会把橙/品红往黄/红方向 skew + 压饱和，画面"发脏"。AgX 的 sigmoid + 色域内收设计专治此症，是当前 stylized 渲染的事实默认。美术定调阶段需要能切算子对比。
+
+### 缺什么 / 现状（已核实代码）
+
+- 算子写死在 `src/render/builtin_shaders/tonemap.frag.glsl::ACESNarkowicz`。
+- **窗口与 offscreen 两路径都走 ACES**：均用同一 `tonemapPipeline`（`RecordPassthroughToViewport` 的 bloom 合成分支 + 纯 passthrough 分支都 ACES；窗口 stage-B 同）。改算子要覆盖两路。
+- push 传参 struct `PushTonemap{ exposure, bloomIntensity, pad0, pad1 }` **多处内联定义**（至少 `Pipeline.cpp::RecordPassthroughToViewport` ~1494 + 窗口 stage-B tonemap 录制处）——加 operator 要同步所有定义点（有两个 pad float 可直接用，无需扩 push 尺寸）。
+- `TonemapPass`（`PostProcessPasses.h`）只有 `exposure`，无 operator 字段。**注意 tonemap 刻意不在 PostProcessComponent 里**（与 bloom 同属 stage-A/B 收尾），故本 gap 走 chain 的 `TonemapPass.operator`，不进组件 / 不动 scene schema。
+
+### 落地设计要点（供独立 session）
+
+1. `TonemapPass` 加 `enum class Operator { ACESNarkowicz, Reinhard, AgX }` + 字段（默认 ACES 保现状）。
+2. `tonemap.frag` 加 `uOperator`（用现有 pad float 传 0/1/2）+ 三分支：ACES（现成）/ Reinhard（`x/(1+x)`）/ AgX（Troy Sobotka minimal fit，~15 行 matrix+多项式，注意 sRGB/线性约定）。
+3. host 端**所有** PushTonemap 定义点写 operator。先抽一个共享 struct/helper 消除内联重复（顺手还债）。
+4. **验证**：用 `samples/16_light_family_shadows --capture` 出 ACES/Reinhard/AgX 三张对比图肉眼核对（本 session 已验证 `--capture` 无人值守可用，是 post 视觉回归的有效手段）。
+
+### 备注
+
+- 纯 OrangeEngine shader + Pipeline 改动，**不需跨仓提 feature**。
+- 优先级：美术定调（pre-game）阶段触发；非 critical path，可与"窗口 vs offscreen tonemap 路径统一"一并做。
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
