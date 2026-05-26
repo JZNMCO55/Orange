@@ -473,6 +473,24 @@ void Pipeline::Shutdown()
     impl.contactShadowSetBoundDepth = nullptr;
     impl.contactShadowSetBoundNormal = nullptr;
 
+    // 景深资源（set 先于 pool）。
+    impl.dofSet.reset();
+    impl.dofCompositeSet.reset();
+    impl.dofPool.reset();
+    impl.dofColor.reset();
+    impl.dofColorWidth = 0;
+    impl.dofColorHeight = 0;
+    impl.dofColorLayoutShaderReadOnly = false;
+    impl.dofSetBoundHdr = nullptr;
+    impl.dofSetBoundDepth = nullptr;
+    impl.dofCompositeSetBound = nullptr;
+    impl.dofPipeline.reset();
+    impl.dofCompositePipeline.reset();
+    impl.dofLayout.reset();
+    impl.dofUbo.reset();
+    impl.dofFs.reset();
+    impl.dofCompositeFs.reset();
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1601,6 +1619,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                     ok = impl.RecordContactShadowPass(*csPass, proj, viewL);
                 }
             }
+            // 景深：在加性 god rays 之前——先确定对焦/虚化的场景色，god rays
+            // 光束再叠加（保持光束锐利）。
+            if (ok)
+            {
+                if (const DofPass* dofPass = impl.FindActiveDofPass())
+                {
+                    ok = impl.RecordDofPass(*dofPass, proj);
+                }
+            }
             if (ok)
             {
                 if (const GodRaysPass* grPass = impl.FindActiveGodRaysPass())
@@ -2256,6 +2283,16 @@ void Pipeline::Render(Orange::Engine::World& world)
                         glm::mat3(impl.scene.MainCamera().view) * (-activeLightDir));
                     offscreenOk = impl.RecordContactShadowPass(
                         *csPass, impl.scene.MainCamera().projection, viewL);
+                }
+            }
+
+            // 景深：bloom 之前——先虚化场景，离焦的高光再进 bloom（柔和发散）。
+            if (offscreenOk && impl.scene.HasCamera())
+            {
+                if (const DofPass* dofPass = impl.FindActiveDofPass())
+                {
+                    offscreenOk = impl.RecordDofPass(*dofPass,
+                                                     impl.scene.MainCamera().projection);
                 }
             }
 

@@ -735,6 +735,94 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         }
     }
     {
+        // 景深（DoF）pipelines：
+        //   dof           —— hdrColor + depth + ubo → dofColor（CoC 圆盘 gather）；
+        //   dof_composite —— dofColor → HDR（replace blend，复用 bloomLayout）。
+        auto dofCode     = LoadSpirv("shaders/orange_engine/dof.frag.spv");
+        auto dofCompCode = LoadSpirv("shaders/orange_engine/dof_composite.frag.spv");
+        if (dofCode.empty() || dofCompCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: DoF shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = dofCode.data();
+        sm.mCodeSize   = dofCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.dof.frag";
+        impl.dofFs = rhi.CreateShaderModule(sm);
+        sm.mpCode      = dofCompCode.data();
+        sm.mCodeSize   = dofCompCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.dof_composite.frag";
+        impl.dofCompositeFs = rhi.CreateShaderModule(sm);
+
+        // dofLayout：0 = hdrColor，1 = DofUbo，2 = sceneDepth。
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({2, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.dof.layout";
+        impl.dofLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        Orange::Rhi::BufferDesc ub{};
+        ub.mSize        = sizeof(Pipeline::Impl::DofUboData);
+        ub.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.dofUbo = rhi.CreateBuffer(ub);
+
+        if (!impl.dofFs || !impl.dofCompositeFs || !impl.dofLayout || !impl.dofUbo)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: DoF 资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        {
+            // dof gather pipeline → RGBA16F dofColor，no blend。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.dofFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            d.mColorBlend.mAttachments.push_back({});  // no blend
+            d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+            d.mDescriptorSetLayouts.push_back(impl.dofLayout.get());
+            d.mpDebugName = "orange_engine.dof";
+            impl.dofPipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        {
+            // dof_composite pipeline → HDR，replace blend（One/Zero），复用 bloomLayout。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.dofCompositeFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            d.mColorBlend.mAttachments.push_back({});  // no blend = replace（src 覆盖 dst）
+            d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+            d.mDescriptorSetLayouts.push_back(impl.bloomLayout.get());
+            d.mpDebugName = "orange_engine.dof_composite";
+            impl.dofCompositePipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        if (!impl.dofPipeline || !impl.dofCompositePipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: DoF pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
         // 法线预通道 pipeline —— 把 view-space 法线渲到 normalBuffer（RGBA8），
         // 供 SSAO / SSR 采真实法线。几何 pipeline（带顶点输入 + depth test），
         // 与 shadow caster 同款 push constant 尺寸（128 B，仅 vertex stage）。

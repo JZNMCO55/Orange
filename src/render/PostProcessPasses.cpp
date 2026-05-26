@@ -159,4 +159,21 @@ void ContactShadowPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- DofPass ----------------------------------------------------------
+
+const char* DofPass::Name() const noexcept
+{
+    return "dof";
+}
+
+void DofPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordDofPass。
+}
+
+void DofPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render

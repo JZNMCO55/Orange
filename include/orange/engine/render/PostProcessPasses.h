@@ -264,6 +264,31 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// 景深（depth of field）。从 sceneDepth 算 circle-of-confusion，按 CoC 半径在
+// hdrColor 上圆盘 gather 模糊 → 独立 dofColor → composite 写回 HDR。对焦面锐利，
+// 离焦渐糊。与 SSAO/SSR 同款 Pipeline 内部 RecordDofPass 录制（Setup/Execute 空壳）。
+//
+// 已知简化：单层 gather（不分 near/far）+ 圆盘均匀权重（无 bokeh 形状 / 前景
+// 散射），对焦边界轻微 bleeding——stylized 够用。window + 编辑器 offscreen 两路径。
+class ORANGE_ENGINE_API DofPass final : public IPostProcessPass
+{
+public:
+    bool enabled{true};
+
+    // 对焦距离（view-space 米，正值 = 离相机距离）。该深度处最锐利。
+    float focusDistance{6.0f};
+
+    // 对焦范围（米）。|深度 - focusDistance| 超过它即达最大模糊；越小景深越浅。
+    float focusRange{4.0f};
+
+    // 最大模糊半径（uv 单位，约屏幕比例）。典型 0.005–0.02。
+    float maxCoCRadius{0.012f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

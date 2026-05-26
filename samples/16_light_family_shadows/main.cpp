@@ -213,6 +213,7 @@ int main(int argc, char** argv)
     bool        disablePcss = false;
     bool        disableGtao = false;
     bool        disableContact = false;
+    bool        disableDof = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -222,6 +223,7 @@ int main(int argc, char** argv)
         else if (a == "--no-pcss")            { disablePcss = true; }
         else if (a == "--no-gtao")            { disableGtao = true; }
         else if (a == "--no-contact")         { disableContact = true; }
+        else if (a == "--no-dof")             { disableDof = true; }
     }
 
     AppConfig cfg{};
@@ -401,6 +403,16 @@ int main(int argc, char** argv)
         cs->bias      = 0.015f;
         cs->strength  = 0.9f;
         chain.AddPass(std::move(cs));
+    }
+    // 景深：对焦在三球（相机 (0,6,9.5) 看向原点，球深度 ~10）；远处地面 + 近处
+    // 地面虚化。`--no-dof` 关闭做对比。
+    {
+        auto dof = std::make_unique<Orange::Engine::Render::DofPass>();
+        dof->enabled       = !disableDof;
+        dof->focusDistance = 10.0f;
+        dof->focusRange    = 5.0f;
+        dof->maxCoCRadius  = 0.015f;
+        chain.AddPass(std::move(dof));
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);

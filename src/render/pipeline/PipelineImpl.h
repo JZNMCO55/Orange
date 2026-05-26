@@ -302,6 +302,32 @@ struct Pipeline::Impl
     Orange::Rhi::RHITexture*                             contactShadowSetBoundDepth{nullptr};
     Orange::Rhi::RHITexture*                             contactShadowSetBoundNormal{nullptr};
 
+    // ---- 景深（DoF）GPU 资源 ----------------------------------------------
+    // gather pass：hdrColor + depth + ubo → dofColor（CoC 圆盘模糊，RGBA16F）；
+    // composite pass：dofColor → hdrColor（replace blend）。独立 dofColor 避免
+    // gather 读写同 target 反馈。
+    struct DofUboData
+    {
+        glm::mat4 invProj{1.0f};
+        glm::vec4 params{6.0f, 4.0f, 0.012f, 0.0f};  // focusDistance / focusRange / maxCoCRadius / pad
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        dofFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        dofCompositeFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> dofLayout;   // 0=hdr 1=ubo 2=depth
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            dofPipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            dofCompositePipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              dofUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             dofColor;        // RGBA16F 模糊结果
+    std::uint32_t                                        dofColorWidth{0};
+    std::uint32_t                                        dofColorHeight{0};
+    bool                                                 dofColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      dofPool;         // dofSet + dofCompositeSet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       dofSet;          // hdr + ubo + depth
+    Orange::Rhi::RHITexture*                             dofSetBoundHdr{nullptr};
+    Orange::Rhi::RHITexture*                             dofSetBoundDepth{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       dofCompositeSet;  // dofColor
+    Orange::Rhi::RHITexture*                             dofCompositeSetBound{nullptr};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -858,6 +884,12 @@ struct Pipeline::Impl
     bool EnsureContactShadowResources();
     bool RecordContactShadowPass(const ContactShadowPass& csDesc,
                                  const glm::mat4& proj, const glm::vec3& viewLightDir);
+
+    // 景深：CoC 圆盘 gather → dofColor → composite 回 hdrColor。proj 用于
+    // invProj 重建 view 深度。
+    const DofPass* FindActiveDofPass() const noexcept;
+    bool EnsureDofResources();
+    bool RecordDofPass(const DofPass& dofDesc, const glm::mat4& proj);
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();
