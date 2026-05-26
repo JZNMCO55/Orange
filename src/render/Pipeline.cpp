@@ -435,11 +435,13 @@ void Pipeline::Shutdown()
     impl.ssaoSetBoundDepth = nullptr;
     impl.ssaoApplySetBoundAo = nullptr;
     impl.ssaoPipeline.reset();
+    impl.gtaoPipeline.reset();
     impl.ssaoApplyPipeline.reset();
     impl.ssaoLayout.reset();
     impl.ssaoUbo.reset();
     impl.ssaoFs.reset();
     impl.ssaoApplyFs.reset();
+    impl.gtaoFs.reset();
 
     // SSR 资源（set 先于 pool）。
     impl.ssrSet.reset();

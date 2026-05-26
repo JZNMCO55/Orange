@@ -146,10 +146,16 @@ public:
 // blend 进 HDR。与 god rays 同款"挂进 chain 由 Pipeline 走专用 RecordSsaoPass"
 // 模式（Setup/Execute 是空壳，真实工作在 Pipeline 侧）。
 //
-// 已知简化：AO 乘到的是"已含直接光的 HDR"而非仅环境项（无 G-buffer 的
-// 前向取舍），凹处直接光会被轻微压暗；要严格只作用 ambient 需 depth
-// prepass / MRT 分离，留作后续。仅在 window 模式 Stage A 生效（offscreen
-// 编辑器路径按设计跳过所有 post）。
+// 法线取自法线预通道的 normalBuffer（真实几何法线），非深度差分重建。
+//
+// 两种算法（useGtao 切换）：默认半球 kernel SSAO（Crytek 风格）；useGtao=true
+// 走 GTAO（Ground Truth AO，Jimenez 2016）——horizon-based + 余弦加权弧积分，
+// 更接近真值、噪声更低、曲面接触更准。两者共用同一 UBO / descriptor / 模糊 /
+// 合成路径，仅 pass-1 pipeline 不同。
+//
+// 已知简化：AO 乘到的是"已含直接光的 HDR"而非仅环境项（无 G-buffer 的前向
+// 取舍），凹处直接光会被轻微压暗；要严格只作用 ambient 需 G-buffer 分离。
+// window + 编辑器 offscreen 两路径均生效。
 class ORANGE_ENGINE_API SsaoPass final : public IPostProcessPass
 {
 public:
@@ -174,6 +180,18 @@ public:
     // 超出由 Pipeline 端 clamp）。
     std::int32_t kernelSize{32};
 
+    // 切换到 GTAO（Ground Truth AO）。false（默认）= 半球 kernel SSAO；
+    // true = horizon-based GTAO（共用 radius/bias/strength/power，kernelSize
+    // 忽略，改用下面的 slice/step 数）。
+    bool useGtao{false};
+
+    // GTAO slice 数（屏幕空间方向数，每条 slice 覆盖 PI 弧）。3–4 常见；
+    // 越多越平滑、越贵。仅 useGtao 时生效。
+    std::int32_t gtaoSliceCount{3};
+
+    // GTAO 每条 slice 单侧的 horizon march 步数。4–8 常见。仅 useGtao 时生效。
+    std::int32_t gtaoStepsPerSlice{4};
+
     const char* Name() const noexcept override;
     void        Setup(PostProcessSetupContext& ctx) override;
     void        Execute(PostProcessExecuteContext& ctx) override;
@@ -188,7 +206,7 @@ public:
 // F0=0.04 的 fresnel 权重（grazing 角反射强，适合地面），非材质驱动；②
 // 加性合成（非能量守恒的 lerp），反射叠加为"光泽 sheen"而非物理替换 —
 // 适合 stylized 湿表面（流体史莱姆）。严格物理需 G-buffer + 分层探针。
-// 仅 window 模式 Stage A 生效（offscreen 编辑器路径按设计跳过 post）。
+// 法线取自法线预通道的 normalBuffer。window + 编辑器 offscreen 两路径均生效。
 class ORANGE_ENGINE_API SsrPass final : public IPostProcessPass
 {
 public:

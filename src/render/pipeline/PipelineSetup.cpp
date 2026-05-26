@@ -431,9 +431,10 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         //   ssao_apply —— ssaoColor 4×4 模糊 → 乘法 blend（dst×src）进 HDR。
         auto ssaoCode      = LoadSpirv("shaders/orange_engine/ssao.frag.spv");
         auto ssaoApplyCode = LoadSpirv("shaders/orange_engine/ssao_apply.frag.spv");
-        if (ssaoCode.empty() || ssaoApplyCode.empty())
+        auto gtaoCode      = LoadSpirv("shaders/orange_engine/gtao.frag.spv");
+        if (ssaoCode.empty() || ssaoApplyCode.empty() || gtaoCode.empty())
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO shader .spv 加载失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO / GTAO shader .spv 加载失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -447,6 +448,10 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         sm.mCodeSize   = ssaoApplyCode.size() * sizeof(std::uint32_t);
         sm.mpDebugName = "orange_engine.ssao_apply.frag";
         impl.ssaoApplyFs = rhi.CreateShaderModule(sm);
+        sm.mpCode      = gtaoCode.data();
+        sm.mCodeSize   = gtaoCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.gtao.frag";
+        impl.gtaoFs = rhi.CreateShaderModule(sm);
 
         // ssaoLayout：0 = sceneDepth sampler，1 = SsaoUbo，2 = normalBuffer sampler。
         Orange::Rhi::DescriptorSetLayoutDesc lay{};
@@ -465,7 +470,8 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
         impl.ssaoUbo = rhi.CreateBuffer(ub);
 
-        if (!impl.ssaoFs || !impl.ssaoApplyFs || !impl.ssaoLayout || !impl.ssaoUbo)
+        if (!impl.ssaoFs || !impl.ssaoApplyFs || !impl.gtaoFs
+            || !impl.ssaoLayout || !impl.ssaoUbo)
         {
             ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO 资源创建失败");
             Shutdown();
@@ -488,6 +494,25 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             d.mDescriptorSetLayouts.push_back(impl.ssaoLayout.get());
             d.mpDebugName = "orange_engine.ssao";
             impl.ssaoPipeline = rhi.CreateGraphicsPipeline(d);
+        }
+        {
+            // gtao pipeline → 与 ssao pipeline 同 attachment / layout / ssaoSet，
+            // 仅 fragment 换 gtao.frag（horizon-based）。RecordSsaoPass 按
+            // SsaoPass.useGtao 选 ssaoPipeline / gtaoPipeline。
+            Orange::Rhi::GraphicsPipelineDesc d{};
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                       impl.fullscreenVs.get(), "main"});
+            d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                       impl.gtaoFs.get(), "main"});
+            d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            d.mDepthStencil.mDepthTestEnable  = false;
+            d.mDepthStencil.mDepthWriteEnable = false;
+            d.mColorBlend.mAttachments.push_back({});  // no blend
+            d.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::R8Unorm);
+            d.mDescriptorSetLayouts.push_back(impl.ssaoLayout.get());
+            d.mpDebugName = "orange_engine.gtao";
+            impl.gtaoPipeline = rhi.CreateGraphicsPipeline(d);
         }
         {
             // ssao_apply pipeline → HDR target，乘法 blend（out = dst×src =
@@ -515,7 +540,7 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             d.mpDebugName = "orange_engine.ssao_apply";
             impl.ssaoApplyPipeline = rhi.CreateGraphicsPipeline(d);
         }
-        if (!impl.ssaoPipeline || !impl.ssaoApplyPipeline)
+        if (!impl.ssaoPipeline || !impl.gtaoPipeline || !impl.ssaoApplyPipeline)
         {
             ORANGE_LOG_ERROR("Pipeline::Initialize: SSAO pipeline 创建失败");
             Shutdown();

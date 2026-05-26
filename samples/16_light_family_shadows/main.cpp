@@ -211,6 +211,7 @@ int main(int argc, char** argv)
     bool        disableSsao = false;
     bool        disableSsr  = false;
     bool        disablePcss = false;
+    bool        disableGtao = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -218,6 +219,7 @@ int main(int argc, char** argv)
         else if (a == "--no-ssao")            { disableSsao = true; }
         else if (a == "--no-ssr")             { disableSsr = true; }
         else if (a == "--no-pcss")            { disablePcss = true; }
+        else if (a == "--no-gtao")            { disableGtao = true; }
     }
 
     AppConfig cfg{};
@@ -365,13 +367,15 @@ int main(int argc, char** argv)
     }
     PostProcessChain chain = CreateDefault();
     // SSAO：挂进 post chain；`--no-ssao` 关闭做 before/after 对比。
-    // 球↔地面接触处 + 球体下半的凹处会变暗，接触感更强。
+    // 球↔地面接触处 + 球体下半的凹处会变暗，接触感更强。默认走 GTAO
+    //（horizon-based，更准更平滑）；`--no-gtao` 退回半球 kernel SSAO 做对比。
     {
         auto ssao = std::make_unique<Orange::Engine::Render::SsaoPass>();
         ssao->enabled  = !disableSsao;
         ssao->radius   = 0.6f;
         ssao->strength = 1.0f;
         ssao->power    = 2.0f;
+        ssao->useGtao  = !disableGtao;
         chain.AddPass(std::move(ssao));
     }
     // SSR：`--no-ssr` 关闭。地面会反射出上方的球体（湿表面/光泽感）。

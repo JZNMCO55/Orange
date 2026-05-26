@@ -150,7 +150,13 @@ bool Pipeline::Impl::RecordSsaoPass(const SsaoPass& ssaoDesc, const glm::mat4& p
                                           static_cast<int>(kSsaoKernelSize));
         data.params  = glm::vec4(ssaoDesc.radius, ssaoDesc.bias,
                                  ssaoDesc.strength, ssaoDesc.power);
-        data.params2 = glm::vec4(static_cast<float>(kernelSize), 0.0f, 0.0f, 0.0f);
+        // params2：x=kernelSize（半球 SSAO 用），y=sliceCount / z=stepsPerSlice
+        //（GTAO 用）。两算法共用同一 UBO，各取所需。
+        const int sliceCount = std::max(ssaoDesc.gtaoSliceCount, 1);
+        const int stepsPer   = std::max(ssaoDesc.gtaoStepsPerSlice, 1);
+        data.params2 = glm::vec4(static_cast<float>(kernelSize),
+                                 static_cast<float>(sliceCount),
+                                 static_cast<float>(stepsPer), 0.0f);
         void* mapped = ssaoUbo->Map();
         if (mapped == nullptr) { return false; }
         std::memcpy(mapped, &data, sizeof(data));
@@ -197,7 +203,8 @@ bool Pipeline::Impl::RecordSsaoPass(const SsaoPass& ssaoDesc, const glm::mat4& p
         sc.mWidth = ssaoColorWidth; sc.mHeight = ssaoColorHeight;
         cmd.SetScissor(sc);
 
-        cmd.BindGraphicsPipeline(*ssaoPipeline);
+        // useGtao 选 horizon-based GTAO，否则半球 kernel SSAO（共用 ssaoSet）。
+        cmd.BindGraphicsPipeline(ssaoDesc.useGtao ? *gtaoPipeline : *ssaoPipeline);
         cmd.SetDescriptorSet(0, *ssaoSet);
         cmd.Draw(3, 1, 0, 0);
         cmd.EndRendering();

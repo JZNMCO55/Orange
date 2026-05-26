@@ -237,8 +237,10 @@ struct Pipeline::Impl
     std::array<glm::vec4, kSsaoKernelSize> ssaoKernel{};
     std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssaoFs;
     std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssaoApplyFs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        gtaoFs;       // GTAO 变体（SsaoPass.useGtao）
     std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssaoLayout;   // 0=depth 1=ubo 2=normal
     std::unique_ptr<Orange::Rhi::RHIPipeline>            ssaoPipeline;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            gtaoPipeline; // 复用 ssaoLayout + ssaoSet
     std::unique_ptr<Orange::Rhi::RHIPipeline>            ssaoApplyPipeline;
     std::unique_ptr<Orange::Rhi::RHIBuffer>              ssaoUbo;
     std::unique_ptr<Orange::Rhi::RHITexture>             ssaoColor;        // R8 原始 AO

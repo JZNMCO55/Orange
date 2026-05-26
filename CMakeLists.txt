@@ -309,6 +309,9 @@ orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ssao_apply.frag.glsl"
     ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV)
 orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/gtao.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_GTAO_FS_SPV)
+orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ssr.frag.glsl"
     ORANGE_ENGINE_BUILTIN_SSR_FS_SPV)
 orange_engine_compile_builtin_shader(
@@ -379,6 +382,7 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSAO_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_GTAO_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSR_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_VS_SPV}"
