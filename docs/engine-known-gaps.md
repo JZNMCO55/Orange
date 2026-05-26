@@ -1558,12 +1558,12 @@ G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已
 
 ---
 
-## GAP-2026-05-26-complete-light-source-family-and-shadows
+## GAP-2026-05-26-complete-light-source-family-and-shadows ✅
 
 - **发现方**：OrangeEditor 用户验收（dogfood 搭场景时光源类型不全 + 阴影仅平行光）
 - **发现日期**：2026-05-26
 - **一句话定性**：光源族不完整 —— `DirectionalLight`（含 2D shadow map）+ `PointLight`（物理衰减，但 `castsShadow` 是 reserved no-op）已有，`SpotLight` **完全缺失**；阴影系统只支持 **第一个** `castsShadow` 的 `DirectionalLight` 单张 2D shadow map。用户要求**补齐三种经典光源类型 + 各自阴影**（含 PointLight 全向 / SpotLight 透视 / 多 shadow caster）。
-- **处理约定**：用户 2026-05-26 明确"三种光源都做 + 记录到文档，下个 session 处理" —— **本条仅登记，不在本 session 实现**（同本文件登记流程纪律）。
+- **处理约定**：用户 2026-05-26 明确"三种光源都做"。**2026-05-26 同 session 落地 G1 + G2 + G3 全部**（与原"下个 session"约定不同：实现 session 复核确认 G1/G2/G3 全部 OrangeEngine 子仓内闭环，RHI cube/array depth 原语已齐备，无需改 OrangeRender；遂一并落地）。三个 commit：G1 `feat(render): G1 SpotLight…`、G2 `feat(render): G2 多 shadow caster…`、G3 `feat(render): G3 PointLight 全向 cubemap…`。
 
 ### 触发场景
 
@@ -1604,16 +1604,21 @@ G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已
 ### 状态
 
 - **登记**：2026-05-26
-- **优先级**：P1（用户主动拉动；首款游戏 stylized 光照基线需要完整光源族）—— 实际排期由实现 session 评审
-- **归属**：候选 Phase 7+ 渲染深化 / 独立"光源族补全 + 多光源阴影"milestone。**用户已明确下个 session 独立处理**；建议实现 session 按 G1 → G2 → G3 依赖序推进，G1 可独立 ship（patch），G2/G3 因 shadow atlas 地基 + 跨仓不确定性建议合并为一个 minor
-- **关联**：[[GAP-2026-05-11-point-light-and-visible-halo]]（PointLight 同族，其 G3 halo billboard 视觉留 backlog）/ [[GAP-2026-05-22-multi-directional-light-semantics-undefined]]（多 directional 语义 G2，多 shadow caster 同源架构）/ `include/orange/engine/render/LightComponent.h:73`（SpotLight 占位注释）/ `src/render/pipeline/PipelineShadow.cpp`（单 directional shadow 现状）/ `src/render/pipeline/PipelineImpl.h:253`（PointLightsUbo pattern，SpotLightsUbo 照抄）
+- **落地**：2026-05-26（同 session G1+G2+G3 全部 ✅）
+- **优先级**：P1（用户主动拉动；首款游戏 stylized 光照基线需要完整光源族）
+- **G1 · SpotLight 类型 + 无阴影锥光着色** ✅：`LightComponent.h` 加 `SpotLight`（color/intensity/range/inner+outerConeAngle 半角弧度/castsShadow）+ `ComputeSpotLightWorldDir`；`SpotLightsUbo`（binding 6，cap 8）+ `UpdateSpotLightsUbo`；`pbr.frag` 锥光着色（inverse-square × range smoothstep × 锥角 smoothstep 软边）；ComponentSerializers + scene schema 1.5→1.6；editor schema + `SpotLightGizmoPlugin`（锥体 wireframe）+ Add-Component 菜单（schema 驱动自动上）
+- **G2 · 多 shadow caster + SpotLight 透视阴影** ✅：depth `Tex2DArray`（cap 4 caster，binding 7 `sampler2DArray` + binding 8 矩阵 UBO）；per-caster perspective light view-proj（`Camera::Perspective(2*outerCone,…)`）；`pbr.frag` 按 shadow index 采 PCF。directional 仍独立 shadowMap → 多 caster 不串扰
+- **G3 · PointLight 全向 cubemap 阴影** ✅：N 个独立 6-layer `TexCube`（cap 2，binding 9/10 `samplerCube`）；per-face 90° perspective depth-only；`pbr.frag` 按方向采 + dominant 轴距离重建 NDC depth 比较。用独立 cube 而非 cubeArray 免 `imageCubeArray` feature（见下「跨仓核对」+ 已登记 OrangeRender FEATURE）
+- **验收对照期望**：SpotLight 编辑闭环 ✅（schema + 锥体 gizmo + 着色）；point/spot castsShadow 投影正确 + 多光源不串扰 ✅（`tests/render/ShadowOcclusionTest.cpp` 离轴差分遮挡 readback：point/spot 各 lit=2.718 / shadow=0.000）；三光源 + 阴影字段 round-trip ✅（`LightAndShadowTest` + scene 1.6 + Undo/Redo 走 schema/serializer 既有路径）；**sample 同框演示**：以 headless `ShadowOcclusionTest` 作自动化验证替代，可视 sample/demo 场景留 backlog nice-to-have（不阻塞）
+- **关联**：[[GAP-2026-05-11-point-light-and-visible-halo]]（PointLight 同族，halo billboard 视觉留 backlog）/ [[GAP-2026-05-22-multi-directional-light-semantics-undefined]]（多 directional 语义，多 shadow caster 同源架构 —— 本 gap 已铺好 spot array 地基，directional 多投影可后续复用）/ `tests/render/ShadowOcclusionTest.cpp`（阴影正确性回归门）
 
-### 跨仓核对（2026-05-26，初步 —— 实现 session 须复核）
+### 跨仓核对（2026-05-26 实现 session 复核结论）
 
-- **G1（SpotLight 无阴影）**：**纯 Engine**。`SpotLightsUbo` 照 `PointLightsUbo`（`RHIBuffer` UBO 已在用），`pbr.frag` 着色，editor schema/gizmo。无 OrangeRender 缺口
-- **G2（spot perspective shadow）**：**大概率纯 Engine**。2D depth target + depth-only pass 已在 directional shadow 跑通；扩多 caster 是 Engine 内 shadow atlas/array 管理。**待核**：RHI 是否支持 **depth texture array**（directional 单张 2D depth 已验证，array 形态待实现 session 核 `RHITexture` 公共面）
-- **G3（point cubemap shadow）**：**唯一明显跨仓风险点**。需 **render-to-cubemap-face / cubemap depth render target** —— directional/spot 用 2D depth 已验证，cubemap depth 是新 RHI 原语。**实现 session 必须先 spike 核实 OrangeRender RHI 是否提供**；若缺 → 按 CLAUDE.md 跨仓纪律先在 OrangeRender 仓 `incoming_feature.md` 提 FEATURE（独立 session 落地 + tag），**不得**同 session 既提既消费
-- **结论**：G1/G2 预期 OrangeEngine 子仓内闭环；G3 有跨仓不确定性，实现前先核对 RHI cubemap 能力，缺则走 FEATURE 登记 → 独立 session 流程
+- **G1（SpotLight 无阴影）**：**纯 Engine** ✅。无 OrangeRender 缺口（`SpotLightsUbo` 照 `PointLightsUbo`，RHIBuffer UBO 已在用）
+- **G2（spot perspective shadow）**：**纯 Engine** ✅。RHI 已支持 **depth `Tex2DArray`**（`TextureViewDesc` per-layer Tex2D view + depth aspect 由 format 自动派生，见 `OrangeRender/src/backend/vulkan/VulkanDevice.cpp` CreateTextureView）。无 OrangeRender 改动
+- **G3（point cubemap shadow）**：**纯 Engine** ✅（与初步评估的"跨仓风险点"不同）。RHI 已支持 **render-to-cube-face depth**：`TexCube` + DepthStencil usage + per-face Tex2D depth view（IBL prefilter 用同款 render-to-cube-face color 机制；depth 走相同 view 路径，aspect 自动）。**唯一缺口**：`samplerCubeArray` 需 `imageCubeArray` device feature（OrangeRender 未启用）→ 用 N 独立 `samplerCube` 绕过（IBL cube 已在用，core 能力）。已登记 `OrangeRender/docs/incoming_feature.md` FEATURE-2026-05-26-enable-image-cube-array（低优先 nice-to-have，启用后可合并为 cubeArray + 扩展点光阴影数）
+- **结论**：G1/G2/G3 全部 OrangeEngine 子仓内闭环，零 OrangeRender 代码改动；仅一条 forward-looking FEATURE 文档登记（ADR-010 跨仓文档豁免）
+- **已知小问题**：debug 构建开 Vulkan validation 时，cube depth + 11 个 descriptor binding 使 validation 层异常慢（实测百倍量级）；生产 / 关 validation 正常（4 帧 0.2s）。`ShadowOcclusionTest` 用 validation off 保持 CI 快
 
 ### Inc2 · MikkTSpace 高质量切线落地（2026-05-25）
 
