@@ -361,9 +361,13 @@ int main()
         Orange::Engine::Render::PostProcessChain ppChain;
         ppChain.AddPass(std::make_unique<Orange::Engine::Render::SsaoPass>());
         ppChain.AddPass(std::make_unique<Orange::Engine::Render::SsrPass>());
+        // BloomPass：验证 bloom 接 offscreen（RenderOffscreen 录 RecordBloomChain +
+        // RecordPassthroughToViewport 走 tonemap 合成 HDR+bloom→ACES 写 viewportColor），
+        // 编辑器视口 WYSIWYG。bloom 路径不破坏离屏渲染（不崩/不黑/无 validation 错）。
+        ppChain.AddPass(std::make_unique<Orange::Engine::Render::BloomPass>());
         pipeline.SetPostProcessChain(&ppChain);
 
-        // 无遮挡的头顶点光场景：地面中心被点光照亮。挂上 SSAO+SSR 后仍应
+        // 无遮挡的头顶点光场景：地面中心被点光照亮。挂上 SSAO+SSR+Bloom 后仍应
         // 渲出被照亮的地面（post pass 没破坏离屏渲染 / 没把画面搞黑）。
         const float lum = RenderOverheadPointCenter(pipeline, floorXZ, cube, false,
                                                     glm::vec3(0.6f, 3.0f, 0.0f),
@@ -371,7 +375,7 @@ int main()
         std::fprintf(stderr, "  => offscreen post smoke: lum=%.3f\n", lum);
         if (!(lum > 1.0f))
         {
-            std::fprintf(stderr, "  [FAIL] offscreen 挂 SSAO+SSR 后地面未正常照亮（post 破坏离屏渲染？）\n");
+            std::fprintf(stderr, "  [FAIL] offscreen 挂 SSAO+SSR+Bloom 后地面未正常照亮（post 破坏离屏渲染？）\n");
             ++failures;
         }
         pipeline.SetPostProcessChain(nullptr);  // 复位，避免 ppChain 析构后悬空

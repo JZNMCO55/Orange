@@ -1436,9 +1436,30 @@ bool Pipeline::Impl::RecordPassthroughToViewport()
     sc.mHeight = impl.viewportHeight;
     cmd.SetScissor(sc);
 
-    cmd.BindGraphicsPipeline(*impl.passthroughPipeline);
-    cmd.SetDescriptorSet(0, *impl.passthroughSet);
-    cmd.Draw(3, 1, 0, 0);  // big-triangle，fullscreen.vert 走 gl_VertexIndex
+    // bloom 接 offscreen（编辑器视口 WYSIWYG）：活动 BloomPass + bloom mip 就绪时
+    // 走 tonemap 合成（HDR + bloom → ACES，复用窗口 tonemapPipeline + bloomCombineSet；
+    // viewportColor 与 swap-chain 同 BGRA8Unorm，格式合法）。否则纯 passthrough（ACES）。
+    // exposure=1（与 passthrough.frag 的隐式曝光一致）。
+    const BloomPass* bloomPass = impl.FindActiveBloomPass();
+    if (bloomPass != nullptr && impl.bloomMipsReady && impl.bloomCombineSet
+        && impl.tonemapPipeline)
+    {
+        struct PushTonemap { float exposure; float bloomIntensity; float pad0; float pad1; };
+        PushTonemap pcData{};
+        pcData.exposure       = 1.0f;
+        pcData.bloomIntensity = bloomPass->intensity;
+        cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment, 0,
+                             static_cast<std::uint32_t>(sizeof(pcData)), &pcData);
+        cmd.BindGraphicsPipeline(*impl.tonemapPipeline);
+        cmd.SetDescriptorSet(0, *impl.bloomCombineSet);
+        cmd.Draw(3, 1, 0, 0);
+    }
+    else
+    {
+        cmd.BindGraphicsPipeline(*impl.passthroughPipeline);
+        cmd.SetDescriptorSet(0, *impl.passthroughSet);
+        cmd.Draw(3, 1, 0, 0);  // big-triangle，fullscreen.vert 走 gl_VertexIndex
+    }
     cmd.EndRendering();
 
     cmd.TransitionTexture(*impl.viewportColor,
@@ -1658,6 +1679,19 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                 if (const DofPass* dofPass = impl.FindActiveDofPass())
                 {
                     ok = impl.RecordDofPass(*dofPass, proj);
+                }
+            }
+            // Bloom：建资源 + 录 mip 链（offscreen 也接 bloom → 编辑器视口 WYSIWYG）。
+            // 位置与 window 路径一致（DoF 之后、god rays 之前）；RecordPassthroughToViewport
+            // 据 bloomMipsReady + 活动 BloomPass 决定走 tonemap 合成还是纯 passthrough。
+            if (ok)
+            {
+                if (const BloomPass* bloomPass = impl.FindActiveBloomPass())
+                {
+                    if (impl.EnsureBloomResources())
+                    {
+                        ok = impl.RecordBloomChain(*bloomPass);
+                    }
                 }
             }
             if (ok)
