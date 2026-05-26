@@ -34,13 +34,20 @@ bool Pipeline::Impl::EnsureSsrResources()
     {
         return false;
     }
+    // normalBuffer：SSR 采真实几何法线（替代深度差分）；法线预通道在主 pass 前
+    // 已 Ensure + 填好，这里再 Ensure 一次保证 descriptor 始终有有效贴图可绑。
+    if (!EnsureNormalBuffer())
+    {
+        return false;
+    }
     auto& rhi = renderDevice->GetRhiDevice();
 
+    // sampler 计数 = ssrSet 的 depth+hdr+normal（3）+ ssrCompositeSet 的 ssrColor（1）= 4。
     if (!ssrPool)
     {
         Orange::Rhi::DescriptorPoolDesc poolDesc{};
         poolDesc.mMaxSets = 2;
-        poolDesc.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 3});
+        poolDesc.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 4});
         poolDesc.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 1});
         poolDesc.mpDebugName = "orange_engine.ssr.pool";
         ssrPool = rhi.CreateDescriptorPool(poolDesc);
@@ -74,14 +81,16 @@ bool Pipeline::Impl::EnsureSsrResources()
         ssrColorLayoutShaderReadOnly = false;
     }
 
-    // ssrSet（0=sceneDepth, 1=hdrColor, 2=ssrUbo）：depth / hdr 重建后重绑。
+    // ssrSet（0=sceneDepth, 1=hdrColor, 2=ssrUbo, 3=normalBuffer）：depth / hdr /
+    // normalBuffer 重建后重绑。
     if (ssrSet == nullptr || ssrSetBoundDepth != sceneDepth.get()
-        || ssrSetBoundHdr != hdrColor.get())
+        || ssrSetBoundHdr != hdrColor.get()
+        || ssrSetBoundNormal != normalBuffer.get())
     {
         ssrSet.reset();
         auto set = rhi.AllocateDescriptorSet(*ssrPool, *ssrLayout);
         if (!set) { return false; }
-        Orange::Rhi::DescriptorWrite w[3]{};
+        Orange::Rhi::DescriptorWrite w[4]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w[0].mImageInfo.mpTexture = sceneDepth.get();
@@ -95,10 +104,15 @@ bool Pipeline::Impl::EnsureSsrResources()
         w[2].mBufferInfo.mpBuffer = ssrUbo.get();
         w[2].mBufferInfo.mOffset  = 0;
         w[2].mBufferInfo.mRange   = sizeof(SsrUboData);
-        rhi.UpdateDescriptorSet(*set, w, 3);
-        ssrSet           = std::move(set);
-        ssrSetBoundDepth = sceneDepth.get();
-        ssrSetBoundHdr   = hdrColor.get();
+        w[3].mBinding             = 3;
+        w[3].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w[3].mImageInfo.mpTexture = normalBuffer.get();
+        w[3].mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*set, w, 4);
+        ssrSet            = std::move(set);
+        ssrSetBoundDepth  = sceneDepth.get();
+        ssrSetBoundHdr    = hdrColor.get();
+        ssrSetBoundNormal = normalBuffer.get();
     }
 
     // ssrCompositeSet（0=ssrColor，复用 bloomLayout）。

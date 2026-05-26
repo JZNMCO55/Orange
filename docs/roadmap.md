@@ -376,12 +376,13 @@
 仅在第一款游戏需要时启用。每条都是独立 feature。
 
 - Task 10-01 · 多视口 / 分屏（OrangeRender 已有 `multi_view` sample，封装到引擎 API）
-- Task 10-02 · 屏幕空间反射（如果需要水面）✅（2026-05-26 第一层落地：`SsrPass` 挂进 PostProcessChain；view-space 射线步进 + 命中采 hdrColor + fresnel(NoV) 加权 + 边缘淡出 → 加性合成进 HDR；独立 ssrColor 避免读写 HDR 反馈。已知简化 = 统一 F0 fresnel（非材质驱动）+ 加性合成 + 仅 SSR 单层（无探针/平面 fallback），适合 stylized 湿表面。仅 window 模式 Stage A。见 `samples/16_light_family_shadows --no-ssr` 对比）
-- Task 10-03 · 屏幕空间环境光遮蔽（SSAO，强化室内场景）✅（2026-05-26 落地：`SsaoPass` 挂进 PostProcessChain；前向从 sceneDepth 重建 view-space pos/normal + 半球 kernel + 4×4 模糊 + 乘法 blend；仅 window 模式 Stage A 生效，编辑器 offscreen 路径暂不接。已知简化 = AO 作用于含直接光的 HDR 而非仅 ambient，严格 ambient-only 需 depth prepass/MRT。见 `samples/16_light_family_shadows --no-ssao` 对比）
+- Task 10-02 · 屏幕空间反射（如果需要水面）✅（2026-05-26 第一层落地：`SsrPass` 挂进 PostProcessChain；view-space 射线步进（法线采法线预通道（10-08）的真实几何法线）+ 命中采 hdrColor + fresnel(NoV) 加权 + 边缘淡出 → 加性合成进 HDR；独立 ssrColor 避免读写 HDR 反馈。已知简化 = 统一 F0 fresnel（非材质驱动）+ 加性合成 + 仅 SSR 单层（无探针/平面 fallback），适合 stylized 湿表面。window + 编辑器 offscreen 两路径均生效。见 `samples/16_light_family_shadows --no-ssr` 对比）
+- Task 10-03 · 屏幕空间环境光遮蔽（SSAO，强化室内场景）✅（2026-05-26 落地：`SsaoPass` 挂进 PostProcessChain；从 sceneDepth 重建 view-space pos + 采法线预通道（10-08）的真实几何法线 + 半球 kernel + 4×4 模糊 + 乘法 blend；window + 编辑器 offscreen 两路径均生效。已知简化 = AO 作用于含直接光的 HDR 而非仅 ambient，严格 ambient-only 需 G-buffer 拆 albedo/ambient。见 `samples/16_light_family_shadows --no-ssao` 对比）
 - Task 10-04 · GPU 粒子（迁移 Phase 5 的 CPU 粒子到 compute shader）
 - Task 10-05 · 高质量软阴影（PCSS / VSM）
 - Task 10-06 · 大气散射（户外地图）
 - Task 10-07 · PointLight + 多 light 支持（详见 `docs/engine-known-gaps.md` GAP-2026-05-11-point-light-and-visible-halo：PointLightComponent 公共接口 + Pipeline 多 light 收集 / forward shading + billboard 可见光晕近似；omnidirectional shadow map 留给更后的任务）
+- Task 10-08 · 法线预通道（G-buffer view-space 法线，给 SSAO / SSR 供真实几何法线）✅（2026-05-26 落地：主 pass 前一个轻量 geometry pass 复用 shadow caster 的 Drawables 遍历模板，把每个 drawable 的 view-space 法线渲到 `normalBuffer`（RGBA8，n*0.5+0.5 编码）；depth 复用 sceneDepth 作 scratch（写完留 DSA，紧跟主 pass 以 Undefined→DSA + Clear 丢弃，零额外 depth buffer）；只在 SSAO 或 SSR 激活时跑。SSAO（10-03）/ SSR（10-02）改为采 `normalBuffer` 真实法线，替代早期 `cross(dFdx,dFdy)` 深度差分重建——后者在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽。window + 编辑器 offscreen 两路径均接入。已知简化 = 法线变换用 mat3(view*model) 近似（无非均匀缩放修正），与 pbr.vert 同源）
 
 ---
 

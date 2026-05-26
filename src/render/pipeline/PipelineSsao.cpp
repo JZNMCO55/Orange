@@ -34,14 +34,21 @@ bool Pipeline::Impl::EnsureSsaoResources()
     {
         return false;
     }
+    // normalBuffer：SSAO 采真实几何法线（替代深度差分）；法线预通道在主 pass 前
+    // 已 Ensure + 填好，这里再 Ensure 一次保证 descriptor 始终有有效贴图可绑。
+    if (!EnsureNormalBuffer())
+    {
+        return false;
+    }
     auto& rhi = renderDevice->GetRhiDevice();
 
-    // descriptor 池：2 set（ssaoSet + ssaoApplySet），长寿命建一次。
+    // descriptor 池：2 set（ssaoSet=depth+ubo+normal，ssaoApplySet=ssaoColor）。
+    // sampler 计数 = ssaoSet 的 depth + normal（2）+ ssaoApplySet 的 ssaoColor（1）= 3。
     if (!ssaoPool)
     {
         Orange::Rhi::DescriptorPoolDesc poolDesc{};
         poolDesc.mMaxSets = 2;
-        poolDesc.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 2});
+        poolDesc.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 3});
         poolDesc.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 1});
         poolDesc.mpDebugName = "orange_engine.ssao.pool";
         ssaoPool = rhi.CreateDescriptorPool(poolDesc);
@@ -75,13 +82,15 @@ bool Pipeline::Impl::EnsureSsaoResources()
         ssaoColorLayoutShaderReadOnly = false;
     }
 
-    // ssaoSet（binding 0=sceneDepth, 1=ssaoUbo）：sceneDepth 重建后重绑。
-    if (ssaoSet == nullptr || ssaoSetBoundDepth != sceneDepth.get())
+    // ssaoSet（binding 0=sceneDepth, 1=ssaoUbo, 2=normalBuffer）：sceneDepth 或
+    // normalBuffer 重建后重绑。
+    if (ssaoSet == nullptr || ssaoSetBoundDepth != sceneDepth.get()
+        || ssaoSetBoundNormal != normalBuffer.get())
     {
         ssaoSet.reset();
         auto set = rhi.AllocateDescriptorSet(*ssaoPool, *ssaoLayout);
         if (!set) { return false; }
-        Orange::Rhi::DescriptorWrite w[2]{};
+        Orange::Rhi::DescriptorWrite w[3]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w[0].mImageInfo.mpTexture = sceneDepth.get();
@@ -91,9 +100,14 @@ bool Pipeline::Impl::EnsureSsaoResources()
         w[1].mBufferInfo.mpBuffer = ssaoUbo.get();
         w[1].mBufferInfo.mOffset  = 0;
         w[1].mBufferInfo.mRange   = sizeof(SsaoUboData);
-        rhi.UpdateDescriptorSet(*set, w, 2);
-        ssaoSet           = std::move(set);
-        ssaoSetBoundDepth = sceneDepth.get();
+        w[2].mBinding             = 2;
+        w[2].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w[2].mImageInfo.mpTexture = normalBuffer.get();
+        w[2].mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*set, w, 3);
+        ssaoSet            = std::move(set);
+        ssaoSetBoundDepth  = sceneDepth.get();
+        ssaoSetBoundNormal = normalBuffer.get();
     }
 
     // ssaoApplySet（binding 0=ssaoColor）：ssaoColor 重建后重绑（复用 bloomLayout）。

@@ -448,11 +448,13 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         sm.mpDebugName = "orange_engine.ssao_apply.frag";
         impl.ssaoApplyFs = rhi.CreateShaderModule(sm);
 
-        // ssaoLayout：0 = sceneDepth sampler，1 = SsaoUbo。
+        // ssaoLayout：0 = sceneDepth sampler，1 = SsaoUbo，2 = normalBuffer sampler。
         Orange::Rhi::DescriptorSetLayoutDesc lay{};
         lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1, Orange::Rhi::ShaderStage::Fragment});
         lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({2, Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1, Orange::Rhi::ShaderStage::Fragment});
         lay.mpDebugName = "orange_engine.ssao.layout";
         impl.ssaoLayout = rhi.CreateDescriptorSetLayout(lay);
@@ -560,13 +562,15 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         sm.mpDebugName = "orange_engine.ssr_composite.frag";
         impl.ssrCompositeFs = rhi.CreateShaderModule(sm);
 
-        // ssrLayout：0 = sceneDepth，1 = hdrColor，2 = SsrUbo。
+        // ssrLayout：0 = sceneDepth，1 = hdrColor，2 = SsrUbo，3 = normalBuffer sampler。
         Orange::Rhi::DescriptorSetLayoutDesc lay{};
         lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1, Orange::Rhi::ShaderStage::Fragment});
         lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1, Orange::Rhi::ShaderStage::Fragment});
         lay.mBindings.push_back({2, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({3, Orange::Rhi::DescriptorType::CombinedImageSampler,
                                  1, Orange::Rhi::ShaderStage::Fragment});
         lay.mpDebugName = "orange_engine.ssr.layout";
         impl.ssrLayout = rhi.CreateDescriptorSetLayout(lay);
@@ -630,6 +634,70 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         if (!impl.ssrPipeline || !impl.ssrCompositePipeline)
         {
             ORANGE_LOG_ERROR("Pipeline::Initialize: SSR pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
+        // 法线预通道 pipeline —— 把 view-space 法线渲到 normalBuffer（RGBA8），
+        // 供 SSAO / SSR 采真实法线。几何 pipeline（带顶点输入 + depth test），
+        // 与 shadow caster 同款 push constant 尺寸（128 B，仅 vertex stage）。
+        auto npVsCode = LoadSpirv("shaders/orange_engine/normal_prepass.vert.spv");
+        auto npFsCode = LoadSpirv("shaders/orange_engine/normal_prepass.frag.spv");
+        if (npVsCode.empty() || npFsCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 法线预通道 shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Vertex;
+        sm.mpCode      = npVsCode.data();
+        sm.mCodeSize   = npVsCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.normal_prepass.vert";
+        impl.normalPrepassVs = rhi.CreateShaderModule(sm);
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = npFsCode.data();
+        sm.mCodeSize   = npFsCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.normal_prepass.frag";
+        impl.normalPrepassFs = rhi.CreateShaderModule(sm);
+        if (!impl.normalPrepassVs || !impl.normalPrepassFs)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 法线预通道 shader module 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.normalPrepassVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.normalPrepassFs.get(), "main"});
+
+        FillVertexInputLayout(d);
+
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        // cullMode=None 与 shadow caster 同款（背面法线由消费端"强制朝相机"处理）。
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mRasterizer.mFrontFace          = Orange::Rhi::FrontFace::CounterClockwise;
+        d.mDepthStencil.mDepthTestEnable  = true;
+        d.mDepthStencil.mDepthWriteEnable = true;
+        d.mDepthStencil.mDepthCompareOp   = Orange::Rhi::CompareOp::LessOrEqual;
+        d.mColorBlend.mAttachments.push_back({});  // no blend
+        d.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::RGBA8Unorm);
+        d.mRenderTargets.mDepthStencilFormat = Orange::Rhi::TextureFormat::D32Float;
+
+        Orange::Rhi::PushConstantRange pcRange{};
+        pcRange.mStage  = Orange::Rhi::ShaderStage::Vertex;
+        pcRange.mOffset = 0;
+        pcRange.mSize   = 128;  // mat4 uMVP + mat4 uModelView
+        d.mPushConstantRanges.push_back(pcRange);
+
+        d.mpDebugName = "orange_engine.normal_prepass";
+        impl.normalPrepassPipeline = rhi.CreateGraphicsPipeline(d);
+        if (!impl.normalPrepassPipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 法线预通道 pipeline 创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }

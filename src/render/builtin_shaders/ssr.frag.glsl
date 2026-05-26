@@ -2,11 +2,11 @@
 
 // 内置 SSR 片元 shader —— view-space 射线步进的屏幕空间反射。
 //
-// 前向渲染无 G-buffer：从 sceneDepth 重建 view-space pos + 法线(深度导数)，
-// 沿反射方向在 view 空间均匀步进，每步投回屏幕采 sceneDepth 判命中(射线
-// 越过最近几何面且在 thickness 容差内)。命中则采 hdrColor 作反射色，按
-// fresnel(NoV) + 边缘淡出加权，输出到独立 ssrColor(避免读写同 target)。
-// ssr_composite 再加性合成进 HDR。
+// 从 sceneDepth 重建 view-space pos，法线采自法线预通道的 normalBuffer(真实
+// 几何法线，替代早期深度差分重建)，沿反射方向在 view 空间均匀步进，每步投回
+// 屏幕采 sceneDepth 判命中(射线越过最近几何面且在 thickness 容差内)。命中则
+// 采 hdrColor 作反射色，按 fresnel(NoV) + 边缘淡出加权，输出到独立 ssrColor
+// (避免读写同 target)。ssr_composite 再加性合成进 HDR。
 //
 // 已知简化：统一 F0=0.04 fresnel(非材质驱动)、view-space 均匀步长(近处
 // 略欠采样，未上 Hi-Z/DDA)、无二分细化 —— stylized 湿表面够用。
@@ -19,6 +19,7 @@ layout(set = 0, binding = 2, std140) uniform SsrUbo
     mat4 uInvProj;    // clip → view
     vec4 uParams;     // x=maxDistance, y=maxSteps, z=thickness, w=strength
 } ssr;
+layout(set = 0, binding = 3) uniform sampler2D uNormal;  // view-space 法线(n*0.5+0.5)
 
 layout(location = 0) in  vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -41,7 +42,7 @@ void main()
     }
 
     vec3 P = ViewPosFromUV(vUV);
-    vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+    vec3 N = normalize(texture(uNormal, vUV).xyz * 2.0 - 1.0);  // 采 normalBuffer view-space 法线
     if (dot(N, -P) < 0.0) { N = -N; }       // 强制朝相机
     vec3 V = normalize(-P);                  // 表面 → 相机
     vec3 R = normalize(reflect(normalize(P), N));  // 反射方向(入射 = cam→surf = normalize(P))

@@ -1,13 +1,15 @@
 #version 450
 
 // 内置 SSAO 片元 shader —— Crytek / LearnOpenGL 风格的 view-space 半球
-// 采样环境光遮蔽。前向渲染无 G-buffer，故从 sceneDepth **重建** view-space
-// 位置 + 法线(深度导数),再用半球 kernel 采样估遮蔽。
+// 采样环境光遮蔽。从 sceneDepth **重建** view-space 位置,法线则采自法线
+// 预通道渲出的 normalBuffer(真实几何法线,替代早期的深度差分重建——后者在
+// 边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽),再用半球 kernel 采样估遮蔽。
 //
 //   * 重建 view pos:invProj × (ndc.xy, depth) → 透视除。Vulkan depth 已是
 //     [0,1],ndc.z = depth 直接用。用 fullscreen.vert 透传的 vUV 反推
 //     ndc.xy = vUV*2-1(与主 pass 同款 y-flip 投影自洽,invProj 抵消)。
-//   * 法线:cross(dFdx(P), dFdy(P)),强制朝相机(view -z 方向)。
+//   * 法线:采 normalBuffer(view-space,n*0.5+0.5 编码)解码 + 归一化,
+//     强制朝相机(view -z 方向;预通道不翻面)。
 //   * kernel:host 端生成的半球样本,经 noise 旋转的 TBN 变到 view 空间,
 //     沿表面外推 radius,投回屏幕采深度比较 + range check。
 //
@@ -26,6 +28,7 @@ layout(set = 0, binding = 1, std140) uniform SsaoUbo
     vec4 uParams;     // x=radius, y=bias, z=strength, w=power
     vec4 uParams2;    // x=kernelSize, y/z/w 预留
 } ssao;
+layout(set = 0, binding = 2) uniform sampler2D uNormal;  // view-space 法线(n*0.5+0.5)
 
 // per-pixel 程序化随机旋转角(替代 noise 纹理)：gl_FragCoord hash → 角度。
 // 高频噪声由后续 ssao_apply 的 4×4 box 模糊抹平。
@@ -58,9 +61,9 @@ void main()
 
     vec3 P = ViewPosFromUV(vUV);
 
-    // 深度导数重建 view-space 法线;强制朝向相机(view 空间相机在原点、
-    // 看 -z,可见面法线应满足 dot(N, -P) > 0)。
-    vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+    // 采 normalBuffer 的 view-space 法线(解码 + 归一化);强制朝向相机
+    // (view 空间相机在原点、看 -z,可见面法线应满足 dot(N, -P) > 0)。
+    vec3 N = normalize(texture(uNormal, vUV).xyz * 2.0 - 1.0);
     if (dot(N, -P) < 0.0) { N = -N; }
 
     int   kernelSize = int(ssao.uParams2.x);

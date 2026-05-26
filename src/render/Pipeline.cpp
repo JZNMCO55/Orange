@@ -458,6 +458,17 @@ void Pipeline::Shutdown()
     impl.ssrUbo.reset();
     impl.ssrFs.reset();
     impl.ssrCompositeFs.reset();
+    impl.ssaoSetBoundNormal = nullptr;
+    impl.ssrSetBoundNormal = nullptr;
+
+    // 法线预通道资源。
+    impl.normalPrepassPipeline.reset();
+    impl.normalPrepassVs.reset();
+    impl.normalPrepassFs.reset();
+    impl.normalBuffer.reset();
+    impl.normalBufferWidth = 0;
+    impl.normalBufferHeight = 0;
+    impl.normalBufferLayoutShaderReadOnly = false;
     // DebugDrawScene 必须在 renderDevice WaitIdle 之后、其他 RHI 资源释放前
     // 一起释放——Orange::Renderer::DebugDraw 持有 vertex staging buffer 与
     // 两条 pipeline，析构需要 device 还活着。
@@ -1516,6 +1527,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             }
         }
 
+        // 法线预通道：主 pass 之前渲 view-space 法线到 normalBuffer，供 SSAO /
+        // SSR 采真实法线（替代深度差分）。只在二者之一激活时跑——复用 sceneDepth
+        // 作 scratch depth（写完留 DSA，紧跟的主 pass 以 Undefined→DSA + Clear 自然
+        // 丢弃），故必须紧贴主 pass 之前。
+        if (ok && (impl.FindActiveSsaoPass() != nullptr || impl.FindActiveSsrPass() != nullptr))
+        {
+            ok = impl.RecordNormalPrepass(viewProj, impl.scene.MainCamera().view);
+        }
+
         // 主 HDR pass
         if (ok)
         {
@@ -2087,6 +2107,16 @@ void Pipeline::Render(Orange::Engine::World& world)
                         invViewProjSky, cameraWorldPos,
                         sunDir, sunColor, sunIntensity);
                 }
+            }
+
+            // 法线预通道：主 pass 之前渲 view-space 法线到 normalBuffer，供 SSAO /
+            // SSR 采真实法线。只在二者之一激活时跑（复用 sceneDepth 作 scratch
+            // depth，必须紧贴主 pass 之前；详见 offscreen 路径同款注释）。
+            if (offscreenOk && (activeSsao != nullptr || activeSsr != nullptr)
+                && impl.scene.HasCamera())
+            {
+                offscreenOk = impl.RecordNormalPrepass(viewProj,
+                                                       impl.scene.MainCamera().view);
             }
 
             if (offscreenOk)

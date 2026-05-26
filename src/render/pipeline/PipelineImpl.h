@@ -237,7 +237,7 @@ struct Pipeline::Impl
     std::array<glm::vec4, kSsaoKernelSize> ssaoKernel{};
     std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssaoFs;
     std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssaoApplyFs;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssaoLayout;   // 0=depth 1=ubo
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssaoLayout;   // 0=depth 1=ubo 2=normal
     std::unique_ptr<Orange::Rhi::RHIPipeline>            ssaoPipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline>            ssaoApplyPipeline;
     std::unique_ptr<Orange::Rhi::RHIBuffer>              ssaoUbo;
@@ -246,8 +246,9 @@ struct Pipeline::Impl
     std::uint32_t                                        ssaoColorHeight{0};
     bool                                                 ssaoColorLayoutShaderReadOnly{false};
     std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      ssaoPool;          // 容纳 ssaoSet + ssaoApplySet
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssaoSet;          // depth + ubo
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssaoSet;          // depth + ubo + normal
     Orange::Rhi::RHITexture*                             ssaoSetBoundDepth{nullptr};
+    Orange::Rhi::RHITexture*                             ssaoSetBoundNormal{nullptr};
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssaoApplySet;     // ssaoColor
     Orange::Rhi::RHITexture*                             ssaoApplySetBoundAo{nullptr};
 
@@ -263,7 +264,7 @@ struct Pipeline::Impl
     };
     std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssrFs;
     std::unique_ptr<Orange::Rhi::RHIShaderModule>        ssrCompositeFs;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssrLayout;   // 0=depth 1=hdr 2=ubo
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> ssrLayout;   // 0=depth 1=hdr 2=ubo 3=normal
     std::unique_ptr<Orange::Rhi::RHIPipeline>            ssrPipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline>            ssrCompositePipeline;
     std::unique_ptr<Orange::Rhi::RHIBuffer>              ssrUbo;
@@ -272,11 +273,31 @@ struct Pipeline::Impl
     std::uint32_t                                        ssrColorHeight{0};
     bool                                                 ssrColorLayoutShaderReadOnly{false};
     std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      ssrPool;        // ssrSet + ssrCompositeSet
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssrSet;         // depth + hdr + ubo
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssrSet;         // depth + hdr + ubo + normal
     Orange::Rhi::RHITexture*                             ssrSetBoundDepth{nullptr};
     Orange::Rhi::RHITexture*                             ssrSetBoundHdr{nullptr};
+    Orange::Rhi::RHITexture*                             ssrSetBoundNormal{nullptr};
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       ssrCompositeSet;  // ssrColor
     Orange::Rhi::RHITexture*                             ssrCompositeSetBound{nullptr};
+
+    // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
+    // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
+    // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
+    // 跨面突变）。本预通道复用 shadow caster 的几何遍历模板，把每个 drawable 的
+    // view-space 法线渲到 normalBuffer（RGBA8，编码 n*0.5+0.5），SSAO / SSR 改为
+    // 直接采样真实几何法线。
+    //
+    // depth：复用 sceneDepth 作 scratch（预通道需 z-test 只保留最近面法线；写完
+    // 留在 DepthStencilAttachment，紧跟的主 pass 以 Undefined→DSA + LoadOp::Clear
+    // 自然丢弃这份深度，零额外 depth buffer）。因此预通道**必须**紧贴主 pass 之前
+    // 录制。只在 SSAO 或 SSR 激活时跑，不付额外几何遍历成本。
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        normalPrepassVs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        normalPrepassFs;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            normalPrepassPipeline;
+    std::unique_ptr<Orange::Rhi::RHITexture>             normalBuffer;     // RGBA8 view-space 法线
+    std::uint32_t                                        normalBufferWidth{0};
+    std::uint32_t                                        normalBufferHeight{0};
+    bool                                                 normalBufferLayoutShaderReadOnly{false};
 
     std::unique_ptr<Orange::Rhi::RHIPipeline> bloomUpsamplePipeline;
     std::unique_ptr<Orange::Rhi::RHIPipeline> passthroughCombinePipeline;
@@ -808,6 +829,12 @@ struct Pipeline::Impl
     bool EnsureSsrResources();
     // 录制 SSR：射线步进采反射 → ssrColor，再加性 blend 进 hdrColor。
     bool RecordSsrPass(const SsrPass& ssrDesc, const glm::mat4& proj);
+
+    // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
+    bool EnsureNormalBuffer();
+    // 录制法线预通道：遍历 drawables 把 view-space 法线渲进 normalBuffer。
+    // 必须紧贴主 pass 之前调用（复用 sceneDepth 作 scratch depth，见字段注释）。
+    bool RecordNormalPrepass(const glm::mat4& viewProj, const glm::mat4& view);
 
     // bakedEnvCube 重建后分配 / 重写 skySet。
     bool EnsureSkyDescSet();
