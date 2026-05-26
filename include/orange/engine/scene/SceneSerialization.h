@@ -53,6 +53,7 @@
 #include <orange/engine/core/Result.h>
 #include <orange/engine/scene/ComponentSerializerEntry.h>
 
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -141,6 +142,14 @@ struct LoadOptions
     // 与 SaveOptions::namedMaterialInstances 相同表；Load 路径按 id 正向
     // 查找 MaterialInstance*，赋给 RenderableComponent::materialInstance。
     const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
+
+    // namedMaterialInstances 查不到某个 materialInstanceId 时的兜底解析器，
+    // 原样透传给内部 LoadContext（见 LoadContext::materialResolver 的设计动机）。
+    // 编辑器把它接到 EnsureMaterialInstance，让 DCC 导入的 .material 在新
+    // session 重新打开场景时仍能从磁盘 lazy-create 恢复，与 mesh 的磁盘加载
+    // 对称。空 → 维持旧行为（查表失败留 null）。
+    std::function<Render::MaterialInstance*(const std::string& materialId)>
+        materialResolver{};
 
     // 游戏侧 / 编辑器侧自定义组件序列化器，同 SaveOptions::extraSerializers。
     std::span<const ComponentSerializerEntry> extraSerializers{};

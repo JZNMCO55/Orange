@@ -31,6 +31,7 @@
 #include <orange/engine/scene/Entity.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -98,6 +99,18 @@ struct LoadContext
     // 与 SaveContext::namedMaterialInstances 相同表；Load 路径按 id 正向
     // 查找 MaterialInstance*，赋给 RenderableComponent::materialInstance。
     const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
+
+    // namedMaterialInstances 查不到某个 materialInstanceId 时的兜底解析器。
+    // 设计动机：namedMaterialInstances 在编辑器启动期是 one-shot snapshot，
+    // 只含内置 / showcase + 本 session 已 lazy 过的 user material；DCC 导入
+    // 产生的 assets/<Type>/*.material 在新 session 里不在表内，导致重启后
+    // 加载场景时 materialInstance 解析失败留 null（Inspector 显示 None）。
+    // 而 mesh 走 AssetRegistry::Load 从磁盘按路径加载，不受此影响——二者
+    // 不对称。编辑器把本 resolver 接到 EnsureMaterialInstance（按 .material
+    // 路径从磁盘 lazy-create + 注册），令 material 解析与 mesh 对称。
+    // 空 → 维持旧行为（查表失败即留 null）。
+    std::function<Render::MaterialInstance*(const std::string& materialId)>
+        materialResolver{};
 };
 
 // 区分 Pass 1（纯数据，无 backend 依赖）与 Pass 2（需先建 backend 再 attach）。

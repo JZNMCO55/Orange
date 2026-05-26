@@ -319,7 +319,8 @@ Result<void, ResultCode> Load(std::string_view path,
                           options.assetRegistry,
                           options.physicsWorld,
                           options.animatorRegistry,
-                          options.namedMaterialInstances};
+                          options.namedMaterialInstances,
+                          options.materialResolver};
 
     const auto& serializers = GetBuiltinComponentSerializers();
 
@@ -726,6 +727,7 @@ Result<void, ResultCode> LoadSplit(std::string_view manifestPath,
             .physicsWorld           = options.physicsWorld,
             .animatorRegistry       = options.animatorRegistry,
             .namedMaterialInstances = options.namedMaterialInstances,
+            .materialResolver       = options.materialResolver,
             .extraSerializers       = options.extraSerializers,
             .assignLayerId          = layer.id,
         };

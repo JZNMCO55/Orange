@@ -659,6 +659,11 @@ int main()
         demoLoadOpts.assetRegistry          = editorHost.assets.pAssets.get();
         demoLoadOpts.animatorRegistry       = editorHost.assets.pAnimators.get();
         demoLoadOpts.namedMaterialInstances = &editorHost.assets.namedMaterialInstances;
+        // 启动期 namedMaterialInstances 是 one-shot snapshot，不含 DCC 导入的
+        // assets/<Type>/*.material；接 resolver 让查表失败时按磁盘 lazy-create
+        // 兜底，修复"导入模型保存后重启编辑器，material 显示 None"。
+        demoLoadOpts.materialResolver       =
+            [&editorHost](const std::string& id) { return ::EnsureMaterialInstance(editorHost, id); };
         demoLoadOpts.extraSerializers       = editorHost.extraSerializers;
         if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);

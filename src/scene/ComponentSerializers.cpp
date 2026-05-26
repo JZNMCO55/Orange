@@ -461,26 +461,40 @@ bool ReadRenderable(const JsonReader& reader,
     }
     if (!materialId.empty())
     {
+        Render::MaterialInstance* resolved = nullptr;
+
+        // 1) 先查静态表（内置 / showcase + 本 session 已 lazy 过的 user material）。
+        //    命中即用，是最快路径，也是 pbr_showcase 等纯内置场景的常态。
         if (ctx.namedMaterialInstances != nullptr)
         {
             auto it = ctx.namedMaterialInstances->find(materialId);
             if (it != ctx.namedMaterialInstances->end())
             {
-                r.materialInstance = it->second;
+                resolved = it->second;
             }
-            else
-            {
-                ORANGE_LOG_WARN(
-                    "Scene load: materialInstanceId '{}' not found in "
-                    "namedMaterialInstances; leaving null.",
-                    materialId);
-            }
+        }
+
+        // 2) 表里没有 → 用 resolver 从磁盘 lazy-create 兜底。修复"DCC 导入的
+        //    .material 在新 session 重新打开场景时查表失败 → Inspector 显示
+        //    None"：namedMaterialInstances 启动期是 one-shot snapshot，不含
+        //    assets/<Type>/*.material 这类导入产物，而 mesh 走 AssetRegistry
+        //    磁盘加载不受影响——本 resolver 让 material 解析与 mesh 对称。
+        //    编辑器把它接到 EnsureMaterialInstance（见 LoadContext 字段注释）。
+        if (resolved == nullptr && ctx.materialResolver)
+        {
+            resolved = ctx.materialResolver(materialId);
+        }
+
+        if (resolved != nullptr)
+        {
+            r.materialInstance = resolved;
         }
         else
         {
             ORANGE_LOG_WARN(
-                "Scene load: RenderableComponent has materialInstanceId '{}' but no "
-                "namedMaterialInstances was supplied to Load(); leaving null.",
+                "Scene load: materialInstanceId '{}' could not be resolved "
+                "(absent from namedMaterialInstances and no resolver produced "
+                "it); leaving materialInstance null.",
                 materialId);
         }
     }

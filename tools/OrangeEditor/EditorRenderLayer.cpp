@@ -821,6 +821,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             openLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
             openLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
             openLoadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+            // 查表失败时按 .material 路径从磁盘 lazy-create 兜底，修复导入的
+            // material 在新 session 重开场景时 Inspector 显示 None。
+            openLoadOpts.materialResolver       =
+                [this](const std::string& id) { return ::EnsureMaterialInstance(mHost, id); };
             openLoadOpts.extraSerializers       = mHost.extraSerializers;
             auto rc = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
             if (rc.IsErr()) {
@@ -962,6 +966,9 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             splitLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
             splitLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
             splitLoadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+            // 同单文件 Open：查表失败按磁盘 lazy-create 兜底（透传到 per-layer Load）。
+            splitLoadOpts.materialResolver       =
+                [this](const std::string& id) { return ::EnsureMaterialInstance(mHost, id); };
             splitLoadOpts.extraSerializers       = mHost.extraSerializers;
             // LoadSplit 内部按 manifest.layers 顺序遍历每条 source，
             // 并通过 LoadOptions.assignLayerId 给本次新建且没挂
@@ -1159,6 +1166,9 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 loadOpts.assetRegistry          = mHost.assets.pAssets.get();
                 loadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
                 loadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+                // 回放快照恢复同样走磁盘 lazy-create 兜底，保证 Stop 后 material 不丢。
+                loadOpts.materialResolver       =
+                    [this](const std::string& id) { return ::EnsureMaterialInstance(mHost, id); };
                 loadOpts.extraSerializers       = mHost.extraSerializers;
                 const auto rc = Orange::Engine::Scene::Load(
                     mHost.scene.playSnapshotPath, *pNew, loadOpts);
