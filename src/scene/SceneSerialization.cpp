@@ -66,9 +66,11 @@ namespace
 // 1.8 → 1.9：PostProcessComponent 新增镜头效果字段（lensEnabled +
 // ChromaticAberration / VignetteIntensity / VignetteSmoothness；同款 optional，
 // 旧 1.8 文件无这些字段时保留默认值——lens 默认关，观感不变）。
+// 1.9 → 1.10：PostProcessComponent 新增锐化字段（sharpenEnabled / sharpenStrength；
+// 同款 optional，旧 1.9 文件无这些字段时保留默认值——sharpen 默认关，观感不变）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 9};
+    static const SchemaVersion kVersion{"scene/world", 1, 10};
     return kVersion;
 }
 

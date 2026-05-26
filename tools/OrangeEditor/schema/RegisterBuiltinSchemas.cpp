@@ -587,6 +587,12 @@ void RegisterPostProcessComponentSchema()
         .Field<&PP::lensVignetteSmoothness>("lensVignetteSmoothness", "Vignette Smoothness")
             .Range(0.0f, 1.0f).DragSpeed(0.01f)
             .Tooltip("暗角范围/软硬。越大渐变越宽、起始越往中心。典型 0.3–0.7。")
+        // —— 锐化（CAS）——
+        .Field<&PP::sharpenEnabled>("sharpenEnabled", "Sharpen Enabled")
+            .Tooltip("CAS 式自适应锐化，TAA 的标准搭档（恢复 TAA resolve 软化的细节）。")
+        .Field<&PP::sharpenStrength>("sharpenStrength", "Sharpen Strength")
+            .Range(0.0f, 1.0f).DragSpeed(0.01f)
+            .Tooltip("锐化强度。TAA 配套典型 0.3–0.6；过大出镶边。")
         // —— 阴影质量（PCSS）——
         .Field<&PP::pcssLightSize>("pcssLightSize", "PCSS Light Size (texel)")
             .Range(0.0f, 32.0f).DragSpeed(0.1f)

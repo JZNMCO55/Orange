@@ -908,6 +908,10 @@ void WritePostProcess(JsonWriter& writer,
     writer.WriteFloat(P("lensVignetteIntensity"),   pp->lensVignetteIntensity);
     writer.WriteFloat(P("lensVignetteSmoothness"),  pp->lensVignetteSmoothness);
 
+    // 锐化（CAS）
+    writer.WriteBool( P("sharpenEnabled"),  pp->sharpenEnabled);
+    writer.WriteFloat(P("sharpenStrength"), pp->sharpenStrength);
+
     // 阴影质量
     writer.WriteFloat(P("pcssLightSize"),       pp->pcssLightSize);
     writer.WriteInt(  P("shadowMapResolution"), static_cast<std::int64_t>(pp->shadowMapResolution));
@@ -995,6 +999,9 @@ bool ReadPostProcess(const JsonReader& reader,
     readF("lensChromaticAberration", pp.lensChromaticAberration);
     readF("lensVignetteIntensity",   pp.lensVignetteIntensity);
     readF("lensVignetteSmoothness",  pp.lensVignetteSmoothness);
+
+    readB("sharpenEnabled",  pp.sharpenEnabled);
+    readF("sharpenStrength", pp.sharpenStrength);
 
     readF("pcssLightSize", pp.pcssLightSize);
     std::int64_t shadowRes = static_cast<std::int64_t>(pp.shadowMapResolution);

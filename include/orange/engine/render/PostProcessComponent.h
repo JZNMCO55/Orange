@@ -90,6 +90,10 @@ struct PostProcessComponent
     float lensVignetteIntensity   = 0.0f;
     float lensVignetteSmoothness  = 0.5f;
 
+    // —— 锐化（CAS）——
+    bool  sharpenEnabled   = false;
+    float sharpenStrength  = 0.4f;
+
     // —— 阴影质量（PCSS 软阴影 + shadow map 分辨率）——
     float         pcssLightSize       = 0.0f;   // 0 = 固定 PCF；>0 = PCSS 软阴影
     std::uint32_t shadowMapResolution = 1024;

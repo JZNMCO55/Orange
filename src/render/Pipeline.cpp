@@ -2090,6 +2090,9 @@ void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
     postLens.vignetteIntensity   = pp.lensVignetteIntensity;
     postLens.vignetteSmoothness  = pp.lensVignetteSmoothness;
 
+    postSharpen.enabled   = pp.sharpenEnabled;
+    postSharpen.sharpness = pp.sharpenStrength;
+
     // PCSS / 阴影分辨率：组件在场时驱动 shadowConfig（压过手动 SetShadowConfig）。
     shadowConfig.pcssLightSize = pp.pcssLightSize;
     if (pp.shadowMapResolution != 0)

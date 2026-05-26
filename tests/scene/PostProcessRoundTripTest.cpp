@@ -1,6 +1,6 @@
 // PostProcessRoundTripTest —— PostProcessComponent 的 Save / Load 往返字段无丢失
-// （schema v1.7 新增 optional component；v1.8 加相机运动模糊；v1.9 加镜头效果字段）。
-// 设非默认值 → Save → Load → 逐字段比对。
+// （schema v1.7 新增 optional component；v1.8 加相机运动模糊；v1.9 加镜头效果；
+// v1.10 加锐化字段）。设非默认值 → Save → Load → 逐字段比对。
 
 #include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
@@ -46,6 +46,7 @@ int main()
     src.motionBlurMaxRadius = 0.06f; src.motionBlurSampleCount = 12;
     src.lensEnabled = true; src.lensChromaticAberration = 0.005f;
     src.lensVignetteIntensity = 0.45f; src.lensVignetteSmoothness = 0.6f;
+    src.sharpenEnabled = true; src.sharpenStrength = 0.55f;
     src.pcssLightSize = 8.0f; src.shadowMapResolution = 4096;
 
     {
@@ -105,6 +106,7 @@ int main()
     chk(l->lensEnabled, "lensEnabled");
     chk(Eq(l->lensChromaticAberration,0.005f) && Eq(l->lensVignetteIntensity,0.45f)
         && Eq(l->lensVignetteSmoothness,0.6f), "lens params");
+    chk(l->sharpenEnabled && Eq(l->sharpenStrength,0.55f), "sharpen params");
     chk(Eq(l->pcssLightSize,8.0f), "pcssLightSize");
     chk(l->shadowMapResolution == 4096u, "shadowMapResolution");
 
