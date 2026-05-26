@@ -16,7 +16,9 @@
 //   * 三球都拖一道方向一致的平行阴影（directional）。
 //
 // 镜头：前上方俯视，地面 + 三球 + 三类阴影全部入画。后处理链复用
-// BuiltinPostProcessChain::CreateDefault（bloom + tonemap），与编辑器观感一致。
+// BuiltinPostProcessChain::CreateDefault（bloom + tonemap），与编辑器观感一致；
+// 在其上叠 SSAO/SSR/接触阴影/DoF/TAA/色彩分级 + 锐化（CAS）+ 镜头（色散+暗角），
+// 各带 `--no-<x>` flag 做 before/after 对比（相机运动模糊需相机运动，静态 sample 不挂）。
 //
 // 注：directional shadow 的 ortho frustum 当前按 ±10 场景 bbox 估算
 //（Pipeline::Impl::ComputeLightViewProj），故地面 / 球阵控制在该范围内。
@@ -216,6 +218,8 @@ int main(int argc, char** argv)
     bool        disableDof = false;
     bool        disableTaa = false;
     bool        disableGrade = false;
+    bool        disableLens = false;
+    bool        disableSharpen = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -228,6 +232,8 @@ int main(int argc, char** argv)
         else if (a == "--no-dof")             { disableDof = true; }
         else if (a == "--no-taa")             { disableTaa = true; }
         else if (a == "--no-grade")           { disableGrade = true; }
+        else if (a == "--no-lens")            { disableLens = true; }
+        else if (a == "--no-sharpen")         { disableSharpen = true; }
     }
 
     AppConfig cfg{};
@@ -438,6 +444,26 @@ int main(int argc, char** argv)
         grade->tint        = 0.0f;
         chain.AddPass(std::move(grade));
     }
+    // 锐化（CAS）：恢复 TAA resolve 软化的高频细节。`--no-sharpen` 关闭做对比
+    //（关掉后配合 TAA 画面更软）。Pipeline 内部录制在 TAA 之后、motion blur 之前。
+    {
+        auto sharpen = std::make_unique<Orange::Engine::Render::SharpenPass>();
+        sharpen->enabled   = !disableSharpen;
+        sharpen->sharpness = 0.4f;
+        chain.AddPass(std::move(sharpen));
+    }
+    // 镜头效果（色散 + 暗角）：最后的"镜头"阶段，边缘轻微色散 + 暗角聚焦中心，
+    // 给三球场景加一点电影镜头质感。`--no-lens` 关闭做对比。
+    {
+        auto lens = std::make_unique<Orange::Engine::Render::LensPass>();
+        lens->enabled             = !disableLens;
+        lens->chromaticAberration = 0.003f;
+        lens->vignetteIntensity   = 0.35f;
+        lens->vignetteSmoothness  = 0.5f;
+        chain.AddPass(std::move(lens));
+    }
+    // 注：相机运动模糊（MotionBlurPass）需相机运动才有效果；本 sample 相机静态，
+    // 挂上会是 no-op，故不挂——见 samples 注释或 docs/rendering-post-process.md。
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
     // PCSS 软阴影：受影体离遮挡面越远半影越宽（球底接触处硬、远处软）。
