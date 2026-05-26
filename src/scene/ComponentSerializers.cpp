@@ -24,6 +24,7 @@
 #include "orange/engine/asset/TextureAsset.h"
 #include "orange/engine/render/Camera.h"
 #include "orange/engine/render/EnvironmentComponent.h"
+#include "orange/engine/render/PostProcessComponent.h"
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
@@ -827,6 +828,160 @@ bool ReadEnvironment(const JsonReader& reader,
 }
 
 // ---------------------------------------------------------------------------
+// PostProcessComponent
+//
+// 纯标量字段（无资产 handle）—— 扁平 write/read。所有字段 optional（reader.Has
+// 缺省时保留组件默认），便于 schema 演进（新增字段旧场景不报错）+ v2 加 override
+// 字段时旧文件兼容。
+// ---------------------------------------------------------------------------
+
+bool HasPostProcess(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::PostProcessComponent>(entity);
+}
+
+void WritePostProcess(JsonWriter& writer,
+                      std::string_view componentPath,
+                      Entity entity,
+                      const SaveContext& ctx)
+{
+    const auto* pp = ctx.world.GetComponent<Render::PostProcessComponent>(entity);
+    if (pp == nullptr)
+    {
+        return;
+    }
+    const auto P = [&](const char* k) { return Join(componentPath, k); };
+
+    // volume 容器
+    writer.WriteInt(P("mode"), static_cast<std::int64_t>(pp->mode));
+    const float ext[3] = {pp->localExtent.x, pp->localExtent.y, pp->localExtent.z};
+    writer.WriteFloatArray(P("localExtent"), ext, 3);
+    writer.WriteFloat(P("priority"),      pp->priority);
+    writer.WriteFloat(P("blendDistance"), pp->blendDistance);
+
+    // SSAO / GTAO
+    writer.WriteBool( P("ssaoEnabled"),  pp->ssaoEnabled);
+    writer.WriteBool( P("ssaoUseGtao"),  pp->ssaoUseGtao);
+    writer.WriteFloat(P("ssaoRadius"),   pp->ssaoRadius);
+    writer.WriteFloat(P("ssaoStrength"), pp->ssaoStrength);
+    writer.WriteFloat(P("ssaoPower"),    pp->ssaoPower);
+
+    // SSR
+    writer.WriteBool( P("ssrEnabled"),     pp->ssrEnabled);
+    writer.WriteFloat(P("ssrMaxDistance"), pp->ssrMaxDistance);
+    writer.WriteFloat(P("ssrThickness"),   pp->ssrThickness);
+    writer.WriteFloat(P("ssrStrength"),    pp->ssrStrength);
+
+    // 接触阴影
+    writer.WriteBool( P("contactEnabled"),   pp->contactEnabled);
+    writer.WriteFloat(P("contactLength"),    pp->contactLength);
+    writer.WriteFloat(P("contactThickness"), pp->contactThickness);
+    writer.WriteFloat(P("contactStrength"),  pp->contactStrength);
+
+    // 景深
+    writer.WriteBool( P("dofEnabled"),       pp->dofEnabled);
+    writer.WriteFloat(P("dofFocusDistance"), pp->dofFocusDistance);
+    writer.WriteFloat(P("dofFocusRange"),    pp->dofFocusRange);
+    writer.WriteFloat(P("dofMaxCoCRadius"),  pp->dofMaxCoCRadius);
+
+    // TAA
+    writer.WriteBool( P("taaEnabled"),  pp->taaEnabled);
+    writer.WriteFloat(P("taaFeedback"), pp->taaFeedback);
+
+    // 色彩分级
+    writer.WriteBool( P("gradeEnabled"),     pp->gradeEnabled);
+    writer.WriteFloat(P("gradeExposure"),    pp->gradeExposure);
+    writer.WriteFloat(P("gradeContrast"),    pp->gradeContrast);
+    writer.WriteFloat(P("gradeSaturation"),  pp->gradeSaturation);
+    writer.WriteFloat(P("gradeTemperature"), pp->gradeTemperature);
+    writer.WriteFloat(P("gradeTint"),        pp->gradeTint);
+
+    // 阴影质量
+    writer.WriteFloat(P("pcssLightSize"),       pp->pcssLightSize);
+    writer.WriteInt(  P("shadowMapResolution"), static_cast<std::int64_t>(pp->shadowMapResolution));
+}
+
+bool ReadPostProcess(const JsonReader& reader,
+                     std::string_view componentPath,
+                     Entity entity,
+                     const LoadContext& ctx)
+{
+    Render::PostProcessComponent pp;  // 起始 = 默认值；下面按需覆盖
+
+    // optional 读辅助（缺省保留默认）。
+    const auto readF = [&](const char* k, float& v)
+    {
+        const auto path = Join(componentPath, k);
+        double d = 0.0;
+        if (reader.Has(path) && reader.ReadFloat(path, d)) { v = static_cast<float>(d); }
+    };
+    const auto readB = [&](const char* k, bool& v)
+    {
+        const auto path = Join(componentPath, k);
+        bool b = false;
+        if (reader.Has(path) && reader.ReadBool(path, b)) { v = b; }
+    };
+    const auto readI = [&](const char* k, std::int64_t& v)
+    {
+        const auto path = Join(componentPath, k);
+        std::int64_t i = 0;
+        if (reader.Has(path) && reader.ReadInt(path, i)) { v = i; }
+    };
+
+    std::int64_t mode = static_cast<std::int64_t>(pp.mode);
+    readI("mode", mode);
+    pp.mode = (mode == 1) ? Render::PostProcessComponent::Mode::Local
+                          : Render::PostProcessComponent::Mode::Global;
+    float ext[3] = {pp.localExtent.x, pp.localExtent.y, pp.localExtent.z};
+    if (reader.Has(Join(componentPath, "localExtent")))
+    {
+        reader.ReadFloatArray(Join(componentPath, "localExtent"), ext, 3);
+    }
+    pp.localExtent = {ext[0], ext[1], ext[2]};
+    readF("priority",      pp.priority);
+    readF("blendDistance", pp.blendDistance);
+
+    readB("ssaoEnabled",  pp.ssaoEnabled);
+    readB("ssaoUseGtao",  pp.ssaoUseGtao);
+    readF("ssaoRadius",   pp.ssaoRadius);
+    readF("ssaoStrength", pp.ssaoStrength);
+    readF("ssaoPower",    pp.ssaoPower);
+
+    readB("ssrEnabled",     pp.ssrEnabled);
+    readF("ssrMaxDistance", pp.ssrMaxDistance);
+    readF("ssrThickness",   pp.ssrThickness);
+    readF("ssrStrength",    pp.ssrStrength);
+
+    readB("contactEnabled",   pp.contactEnabled);
+    readF("contactLength",    pp.contactLength);
+    readF("contactThickness", pp.contactThickness);
+    readF("contactStrength",  pp.contactStrength);
+
+    readB("dofEnabled",       pp.dofEnabled);
+    readF("dofFocusDistance", pp.dofFocusDistance);
+    readF("dofFocusRange",    pp.dofFocusRange);
+    readF("dofMaxCoCRadius",  pp.dofMaxCoCRadius);
+
+    readB("taaEnabled",  pp.taaEnabled);
+    readF("taaFeedback", pp.taaFeedback);
+
+    readB("gradeEnabled",     pp.gradeEnabled);
+    readF("gradeExposure",    pp.gradeExposure);
+    readF("gradeContrast",    pp.gradeContrast);
+    readF("gradeSaturation",  pp.gradeSaturation);
+    readF("gradeTemperature", pp.gradeTemperature);
+    readF("gradeTint",        pp.gradeTint);
+
+    readF("pcssLightSize", pp.pcssLightSize);
+    std::int64_t shadowRes = static_cast<std::int64_t>(pp.shadowMapResolution);
+    readI("shadowMapResolution", shadowRes);
+    pp.shadowMapResolution = static_cast<std::uint32_t>(shadowRes);
+
+    ctx.world.AddComponent(entity, pp);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // RigidBodyComponent
 //
 // 序列化 body 的"初始 desc"——type / initialPosition / initialAngle /
@@ -1526,6 +1681,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"PointLight",       ComponentKind::PureData,         &HasPointLight,       &WritePointLight,       &ReadPointLight},
         {"SpotLight",        ComponentKind::PureData,         &HasSpotLight,        &WriteSpotLight,        &ReadSpotLight},
         {"Environment",      ComponentKind::PureData,         &HasEnvironment,      &WriteEnvironment,      &ReadEnvironment},
+        {"PostProcess",      ComponentKind::PureData,         &HasPostProcess,      &WritePostProcess,      &ReadPostProcess},
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
         {"AudioSource",      ComponentKind::PureData,         &HasAudioSource,      &WriteAudioSource,      &ReadAudioSource},
         {"Camera",           ComponentKind::PureData,         &HasCamera,           &WriteCamera,           &ReadCamera},

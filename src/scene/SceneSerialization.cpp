@@ -57,9 +57,12 @@ namespace
 // DirectionalLight 路径）。
 // 1.5 → 1.6：新增 SpotLight（GAP-2026-05-26 G1；同款 optional component
 // 路径，旧 1.5 文件无该字段时 Pipeline spotLightCount=0，无锥光贡献）。
+// 1.6 → 1.7：新增 PostProcessComponent（屏幕空间 post + PCSS 配置；同款
+// optional component 路径，旧 1.6 文件无该字段时 Pipeline 退化到引擎默认
+// post；组件内字段全 optional，缺省保留默认值）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 6};
+    static const SchemaVersion kVersion{"scene/world", 1, 7};
     return kVersion;
 }
 
