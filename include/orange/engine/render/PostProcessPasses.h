@@ -289,6 +289,28 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// TAA（temporal anti-aliasing）。每帧投影做 sub-pixel jitter，resolve 把当前帧与
+// 重投影后的上一帧历史按 feedback 混合 + 邻域 clamp。多帧累积 = 超采样 → 边缘
+// 抗锯齿 + 把 GTAO / 接触阴影 / 景深的 jitter 噪点去噪。与 SSAO/SSR 同款 Pipeline
+// 内部 RecordTaaResolve 录制（Setup/Execute 空壳）。
+//
+// 已知简化：仅相机重投影（无 per-object 运动矢量，运动物体靠 clamp 兜底）。静态
+// 相机下完美收敛；相机运动靠重投影；快速运动物体可能轻微 ghost。window + 编辑器
+// offscreen 两路径。
+class ORANGE_ENGINE_API TaaPass final : public IPostProcessPass
+{
+public:
+    bool enabled{true};
+
+    // 历史 feedback 权重（历史占比）。0.9 = 90% 历史 + 10% 当前；越高越稳越糊、
+    // 收敛越慢。典型 0.85–0.95。
+    float feedback{0.9f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

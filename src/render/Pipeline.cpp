@@ -491,6 +491,21 @@ void Pipeline::Shutdown()
     impl.dofFs.reset();
     impl.dofCompositeFs.reset();
 
+    // TAA 资源（set 先于 pool）。
+    for (auto& s : impl.taaResolveSet) { s.reset(); }
+    for (auto& s : impl.taaCopySet) { s.reset(); }
+    impl.taaPool.reset();
+    for (auto& h : impl.taaHistory) { h.reset(); }
+    impl.taaHistoryWidth = 0;
+    impl.taaHistoryHeight = 0;
+    impl.taaHistoryLayoutShaderReadOnly = {false, false};
+    impl.taaSetsBoundHdr = nullptr;
+    impl.taaHasHistory = false;
+    impl.taaResolvePipeline.reset();
+    impl.taaLayout.reset();
+    impl.taaUbo.reset();
+    impl.taaResolveFs.reset();
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1505,7 +1520,9 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
     bool ok = true;
     if (impl.scene.HasCamera())
     {
-        const glm::mat4 viewProj = impl.scene.MainCamera().projection
+        // TAA 激活时给投影叠加 per-frame sub-pixel jitter（法线预通道 + 主 pass
+        // 用此 jittered viewProj；resolve 用同一矩阵自洽重投影）。未激活原样返回。
+        const glm::mat4 viewProj = impl.ApplyTaaJitter(impl.scene.MainCamera().projection)
                                  * impl.scene.MainCamera().view;
         const glm::mat4 invViewProj = glm::inverse(viewProj);
         const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
@@ -1633,6 +1650,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                 if (const GodRaysPass* grPass = impl.FindActiveGodRaysPass())
                 {
                     ok = impl.RecordGodRaysPass(*grPass, viewProj);
+                }
+            }
+            // TAA resolve：所有场景 post 之后、aux/grid overlay 之前——把当前帧
+            // 与重投影历史混合去噪 + 抗锯齿。viewProj 是本帧 jittered 矩阵。
+            if (ok)
+            {
+                if (const TaaPass* taaPass = impl.FindActiveTaaPass())
+                {
+                    ok = impl.RecordTaaResolve(*taaPass, viewProj);
                 }
             }
         }
@@ -2087,8 +2113,10 @@ void Pipeline::Render(Orange::Engine::World& world)
         }
         else
         {
+            // TAA 激活时叠加 per-frame sub-pixel jitter（见 offscreen 路径同款注释）。
             const glm::mat4 viewProj =
-                impl.scene.MainCamera().projection * impl.scene.MainCamera().view;
+                impl.ApplyTaaJitter(impl.scene.MainCamera().projection)
+                * impl.scene.MainCamera().view;
             const glm::mat4 lightVP =
                 activeLight ? impl.ComputeLightViewProj(activeLightDir) : glm::mat4(1.0f);
 
@@ -2308,6 +2336,17 @@ void Pipeline::Render(Orange::Engine::World& world)
             if (offscreenOk && activeGodRays != nullptr && impl.scene.HasCamera())
             {
                 offscreenOk = impl.RecordGodRaysPass(*activeGodRays, viewProj);
+            }
+
+            // TAA resolve：所有场景 post 之后、capture / Stage-B tonemap 之前。
+            // viewProj 是本帧 jittered 矩阵。（bloom mip 已在前面用 pre-TAA HDR
+            // 建好，demo 无强 emissive 时 bloom 极小，该 staleness 可忽略。）
+            if (offscreenOk && impl.scene.HasCamera())
+            {
+                if (const TaaPass* taaPass = impl.FindActiveTaaPass())
+                {
+                    offscreenOk = impl.RecordTaaResolve(*taaPass, viewProj);
+                }
             }
 
             // RequestCapture 路径：bloom 后 hdrColor 已 ShaderReadOnly，

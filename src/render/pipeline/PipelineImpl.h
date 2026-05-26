@@ -328,6 +328,31 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       dofCompositeSet;  // dofColor
     Orange::Rhi::RHITexture*                             dofCompositeSetBound{nullptr};
 
+    // ---- TAA（时序抗锯齿）GPU 资源 ----------------------------------------
+    // 每帧 jitter 投影；resolve 把当前 HDR 与重投影的上一帧历史混合 + 邻域
+    // clamp → 写 curHistory；再 copy curHistory → hdrColor（复用 dofComposite）。
+    // taaHistory[2] ping-pong：parity p = frameIndex%2，写 [p] 读 [1-p]。
+    struct TaaUboData
+    {
+        glm::mat4 invCurViewProj{1.0f};  // depth → world
+        glm::mat4 prevViewProj{1.0f};    // world → prev clip
+        glm::vec4 params{0.9f, 0.0f, 0.0f, 0.0f};  // feedback / hasHistory / pad
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        taaResolveFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> taaLayout;   // 0=cur 1=hist 2=depth 3=ubo
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            taaResolvePipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              taaUbo;
+    std::array<std::unique_ptr<Orange::Rhi::RHITexture>, 2> taaHistory{};
+    std::array<bool, 2>                                  taaHistoryLayoutShaderReadOnly{false, false};
+    std::uint32_t                                        taaHistoryWidth{0};
+    std::uint32_t                                        taaHistoryHeight{0};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      taaPool;
+    std::array<std::unique_ptr<Orange::Rhi::RHIDescriptorSet>, 2> taaResolveSet{};  // [p] 读 history[1-p]
+    std::array<std::unique_ptr<Orange::Rhi::RHIDescriptorSet>, 2> taaCopySet{};     // [p] 读 history[p]
+    Orange::Rhi::RHITexture*                             taaSetsBoundHdr{nullptr};  // 重建触发
+    glm::mat4                                            taaPrevViewProj{1.0f};
+    bool                                                 taaHasHistory{false};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -890,6 +915,15 @@ struct Pipeline::Impl
     const DofPass* FindActiveDofPass() const noexcept;
     bool EnsureDofResources();
     bool RecordDofPass(const DofPass& dofDesc, const glm::mat4& proj);
+
+    // TAA：jitter + 历史 resolve。ApplyTaaJitter 在 TaaPass 激活时给 proj 叠加
+    // per-frame sub-pixel 偏移（否则原样返回）；RecordTaaResolve 在所有 post 之后、
+    // tonemap/passthrough 之前调用，curJitteredViewProj = 本帧主 pass 用的
+    // jittered viewProj。
+    const TaaPass* FindActiveTaaPass() const noexcept;
+    glm::mat4 ApplyTaaJitter(const glm::mat4& proj) const;
+    bool EnsureTaaResources();
+    bool RecordTaaResolve(const TaaPass& taaDesc, const glm::mat4& curJitteredViewProj);
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

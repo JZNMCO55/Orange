@@ -176,4 +176,22 @@ void DofPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- TaaPass ----------------------------------------------------------
+
+const char* TaaPass::Name() const noexcept
+{
+    return "taa";
+}
+
+void TaaPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordTaaResolve（+ Pipeline 端
+    // per-frame jitter 注入 viewProj）。
+}
+
+void TaaPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render

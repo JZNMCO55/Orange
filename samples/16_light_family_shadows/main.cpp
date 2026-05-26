@@ -177,7 +177,7 @@ public:
     }
 
 private:
-    static constexpr std::uint64_t kCaptureFrame = 3;  // 预热 3 帧再截
+    static constexpr std::uint64_t kCaptureFrame = 32;  // 预热 32 帧再截（够 TAA 时序收敛）
     Pipeline&         mPipeline;
     World&            mWorld;
     Platform::Window& mWindow;
@@ -214,6 +214,7 @@ int main(int argc, char** argv)
     bool        disableGtao = false;
     bool        disableContact = false;
     bool        disableDof = false;
+    bool        disableTaa = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -224,6 +225,7 @@ int main(int argc, char** argv)
         else if (a == "--no-gtao")            { disableGtao = true; }
         else if (a == "--no-contact")         { disableContact = true; }
         else if (a == "--no-dof")             { disableDof = true; }
+        else if (a == "--no-taa")             { disableTaa = true; }
     }
 
     AppConfig cfg{};
@@ -413,6 +415,15 @@ int main(int argc, char** argv)
         dof->focusRange    = 5.0f;
         dof->maxCoCRadius  = 0.015f;
         chain.AddPass(std::move(dof));
+    }
+    // TAA：每帧 jitter + 历史 resolve，抗锯齿 + 把 GTAO/接触阴影/景深的 jitter
+    // 噪点去噪。静态相机下数帧即收敛干净。`--no-taa` 关闭做对比（边缘锯齿 +
+    // 屏幕空间噪点显现）。
+    {
+        auto taa = std::make_unique<Orange::Engine::Render::TaaPass>();
+        taa->enabled  = !disableTaa;
+        taa->feedback = 0.9f;
+        chain.AddPass(std::move(taa));
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
