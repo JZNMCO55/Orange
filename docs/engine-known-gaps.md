@@ -273,7 +273,7 @@ vec4 uMRA        //  16
 
 ---
 
-## GAP-2026-05-21-collider-polygon-edgechain-interactive-edit
+## GAP-2026-05-21-collider-polygon-edgechain-interactive-edit ✅
 
 - **发现方**：OrangeEditor 用户验收（Collider Polygon / EdgeChain Inspector 试用）
 - **发现日期**：2026-05-21
@@ -316,16 +316,16 @@ vec4 uMRA        //  16
 ### 状态
 
 - **登记**：2026-05-21
-- **代码落地**：2026-05-25（本 session，**待人工视觉验收**）——
+- **代码落地**：2026-05-25（本 session；2026-05-26 人工视觉验收通过）——
   - **G1 "Polygon edit mode" 全局状态**：`context/EditorColliderEditState.h`（新 sub-context 挂 EditorHost，符合 "新功能找对应子 context" 纪律）；与内置 Translate/Rotate/Scale gizmo 互斥（`EditorCameraControl` 把 colliderEdit.active 并入 gizmoBusy → 相机 LMB 冻结；`ScenePanel` active 时跳过 W/E/R 切换 + gizmo + picking）
   - **G2 viewport 顶点 picking / 拖 / 加 / 删**：`ColliderVertexEdit.{h,cpp}`，复用 `OrangeEditor::Internal::GizmoMath` 的 ProjectWorldToScreen（hit-test + handle 绘制）/ ScreenToWorldRay + RayPlaneIntersect（拖拽/加点反投影到 entity collider 平面）/ PointSegmentDistance2D（加点找最近边插入）；世界变换与 ColliderDebugDraw 一致（local.xy 经 quat 旋转 + position，yaw-only 假设）；三态 handle 配色（normal 琥珀 / hover 白 / selected 青）
   - **G3 命令栈集成**：`SetFieldValueCommand<PolygonDesc/EdgeChainDesc>` 整值写入；拖拽连续帧共享 dragOpId 拼进 fieldKey → coalesce 成单条可一次 Undo；加点/删点各递增 opSeq → 离散不 coalesce
   - **入口**：`plugin/ColliderEditInspectorPlugin`（IEditorInspectorPlugin，Collider 段末 "Edit Vertices in Viewport" 按钮，仅 Polygon/EdgeChain shape；Esc / 再点退出）
   - 改动文件：新增 `context/EditorColliderEditState.h` / `ColliderVertexEdit.{h,cpp}` / `plugin/ColliderEditInspectorPlugin.{h,cpp}`；改 `EditorHost.h`（colliderEdit 字段）/ `EditorCameraControl.cpp`（LMB gate）/ `panels/ScenePanel.cpp`（集成）/ `main.cpp`（注册）/ `CMakeLists.txt`（2 源）
   - 验证：OrangeEditor.exe 编译链接通过 + invariant lint（7 grandfathered，无新违规）+ drift 全绿
-  - **未标 ✅ 原因**（milestone-end 红线）：待 (1) 人工视觉验收（拖/加/删/Undo/Redo + 相机 LMB 冻结实测）(2) acceptance checklist（Orange-Wiki 子仓，按单 session 单子仓纪律另开 session 写）(3) CMake VERSION bump（单功能按 [[feedback-minor-bump-must-carry-multiple-features]] 走 patch v1.3.1）
+  - **人工视觉验收**：2026-05-26 用户确认通过（拖 / 加 / 删顶点 + Undo/Redo + 相机 LMB 冻结实测 OK）→ 标 ✅。**仍待补**：acceptance checklist（Orange-Wiki 子仓，另开 session 写）+ CMake VERSION bump（patch v1.3.1，按 [[feedback-minor-bump-must-carry-multiple-features]]）
 - **关联**：本 session 已落地的 ColliderDebugDraw wireframe 可视化（前置基础）；本 session 同时修复 PolygonVertices / EdgeChainVertices Inspector Remove 按钮窄列越界（顺手 UX 修，不在本 GAP 范围）
-- **归属**：~~未拍板~~ → 代码落地于 2026-05-25 本 session（OrangeEditor）；验收通过后正式归 v1.3.1 patch
+- **归属**：~~未拍板~~ → 代码落地 2026-05-25 + 人工视觉验收通过 2026-05-26（OrangeEditor）；归 v1.3.1 patch（待补 acceptance checklist + VERSION bump）
 
 ---
 
@@ -531,7 +531,7 @@ case SceneOp::New: {
 
 ---
 
-## GAP-2026-05-22-editor-material-create-and-thumbnail-missing
+## GAP-2026-05-22-editor-material-create-and-thumbnail-missing ✅（G1）
 
 - **发现方**：用户 v1.0 验收后试搭场景观察（"想新建一个材质 / 想看 Asset 浏览器里材质长什么样"）
 - **发现日期**：2026-05-22
