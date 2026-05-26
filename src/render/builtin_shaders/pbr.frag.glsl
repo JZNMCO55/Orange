@@ -78,6 +78,17 @@ layout(set = 0, binding = 6, std140) uniform SpotLightsUbo
     SpotLightData uSpotLights[ORANGE_MAX_SPOT_LIGHTS];
 } spotLights;
 
+// GAP-2026-05-26 G2：spot 透视阴影。binding 7 = sampler2DArray（每个
+// castsShadow spot 占一层），binding 8 = per-caster light view-proj 数组。
+// SpotLightData.cosInnerShadow.y 是 layer index（<0 = 该 spot 无阴影）。
+#define ORANGE_MAX_SPOT_SHADOWS 4
+layout(set = 0, binding = 7) uniform sampler2DArray uSpotShadowMaps;
+layout(set = 0, binding = 8, std140) uniform SpotShadowUbo
+{
+    uvec4 uSpotShadowCountPad;
+    mat4  uSpotLightViewProj[ORANGE_MAX_SPOT_SHADOWS];
+} spotShadow;
+
 // set 1 = per-instance material 贴图（GAP-2026-05-25 A2 / G1）。Pipeline 按
 // MaterialInstance 的 texture 槽分配 / 更新本 set；未绑的槽喂 default 贴图
 // （白 baseColor/MR/AO + flat-normal (0.5,0.5,1)），使采样结果 ×scalar = scalar、
@@ -298,6 +309,7 @@ void main()
         vec3  sColor    = spotLights.uSpotLights[i].colorIntensity.rgb;
         float sInten    = spotLights.uSpotLights[i].colorIntensity.w;
         float sCosInner = spotLights.uSpotLights[i].cosInnerShadow.x;
+        int   sShadowIdx = int(spotLights.uSpotLights[i].cosInnerShadow.y);  // <0 = 无阴影
         if (sRange <= 0.0) { continue; }
 
         vec3  sL_unnorm = sLightPos - vWorldPos;
@@ -332,8 +344,19 @@ void main()
         float sFade      = smoothstep(sRange, 0.0, sDist);
         float sAtten     = sInvSquare * sFade * coneFactor;
 
+        // 透视阴影：castsShadow 的 spot 有有效 layer index 时采 spot shadow
+        // array + PCF；否则 sShadow = 1（无阴影，与 G1 行为一致）。
+        float sShadow = 1.0;
+        if (sShadowIdx >= 0 && sShadowIdx < ORANGE_MAX_SPOT_SHADOWS)
+        {
+            sShadow = SamplePcfShadowArray(uSpotShadowMaps, sShadowIdx, vWorldPos,
+                                           spotShadow.uSpotLightViewProj[sShadowIdx],
+                                           int(light.uShadowParams.x),
+                                           light.uShadowParams.y);
+        }
+
         vec3 sRadiance = sColor * sInten * sAtten;
-        spotLo += (sDiff + sSpec) * sRadiance * sNoL;
+        spotLo += (sDiff + sSpec) * sRadiance * sNoL * sShadow;
     }
 
     // ---- 合成 ----

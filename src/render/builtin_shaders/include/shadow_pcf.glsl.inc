@@ -57,4 +57,42 @@ float SamplePcfShadow(sampler2D shadowMap,
     return shadow / float(count);
 }
 
+// sampler2DArray 变体（GAP-2026-05-26 G2）：多 shadow caster 各占一层，
+// 调用方按 shadow index 选 layer。语义与 SamplePcfShadow 一致——光锥外
+// （uv 越界 / z>1）按完全照亮返回 1.0。
+float SamplePcfShadowArray(sampler2DArray shadowArray,
+                           int            layer,
+                           vec3           worldPos,
+                           mat4           lightViewProj,
+                           int            kernelRadius,
+                           float          depthBias)
+{
+    vec4 lightClip = lightViewProj * vec4(worldPos, 1.0);
+    vec3 ndc       = lightClip.xyz / lightClip.w;
+    vec2 uv        = ndc.xy * 0.5 + 0.5;
+
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0)
+    {
+        return 1.0;
+    }
+
+    float currentDepth = ndc.z - depthBias;
+    vec2  texel        = 1.0 / vec2(textureSize(shadowArray, 0).xy);
+
+    float shadow = 0.0;
+    int   count  = 0;
+    for (int x = -kernelRadius; x <= kernelRadius; ++x)
+    {
+        for (int y = -kernelRadius; y <= kernelRadius; ++y)
+        {
+            vec2  offset = vec2(float(x), float(y)) * texel;
+            float closestDepth = texture(shadowArray, vec3(uv + offset, float(layer))).r;
+            shadow += (currentDepth <= closestDepth) ? 1.0 : 0.0;
+            ++count;
+        }
+    }
+
+    return shadow / float(count);
+}
+
 #endif  // ORANGE_ENGINE_BUILTIN_SHADER_SHADOW_PCF_INC

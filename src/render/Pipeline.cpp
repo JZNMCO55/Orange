@@ -443,12 +443,18 @@ void Pipeline::Shutdown()
     impl.shadowMap.reset();
     impl.shadowMapResolution = 0;
     impl.shadowMapLayoutShaderReadOnly = false;
+    // spot shadow array：per-layer view 必须先于 array texture 释放。
+    for (auto& v : impl.spotShadowLayerViews) { v.reset(); }
+    impl.spotShadowArray.reset();
+    impl.spotShadowArrayResolution = 0;
+    impl.spotShadowArrayLayoutShaderReadOnly = false;
     impl.mainDescSet.reset();
     impl.mainDescPool.reset();
     impl.mainDescLayout.reset();
     impl.lightUbo.reset();
     impl.pointLightsUbo.reset();
     impl.spotLightsUbo.reset();
+    impl.spotShadowUbo.reset();
     // set 1 material 资源（GAP-2026-05-25 A2/G1）：descriptor set 必须先于
     // pool 释放；贴图缓存 + default 贴图 + sampler 最后。templatePipelines 已
     // 在本函数顶部 clear（PBR pipeline 引用 materialTexLayout），故 layout
@@ -1394,6 +1400,7 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             iblTintIntensity = env.tint * env.intensity;
         }
         impl.EnsureShadowMap();
+        impl.EnsureSpotShadowArray();
         const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                 : glm::mat4(1.0f);
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
@@ -1422,10 +1429,14 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                : glm::mat4(1.0f);
 
-        // shadow pre-pass
+        // shadow pre-pass：directional 单张 2D map + spot 透视 shadow array。
         if (impl.shadowMap)
         {
             ok = impl.RecordShadowPass(activeLight, lightVP);
+        }
+        if (impl.spotShadowArray)
+        {
+            impl.RecordSpotShadowPass();
         }
 
         // sky pass：主 pass 之前画背景。两种分支：
@@ -1865,6 +1876,7 @@ void Pipeline::Render(Orange::Engine::World& world)
             iblTintIntensity = env.tint * env.intensity;
         }
         impl.EnsureShadowMap();
+        impl.EnsureSpotShadowArray();
         const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                               : glm::mat4(1.0f);
         // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
@@ -1902,6 +1914,10 @@ void Pipeline::Render(Orange::Engine::World& world)
             if (impl.shadowMap)
             {
                 offscreenOk = impl.RecordShadowPass(activeLight, lightVP);
+            }
+            if (impl.spotShadowArray)
+            {
+                impl.RecordSpotShadowPass();
             }
 
             // game-side AfterShadow inserted passes —— shadow map 已写完，

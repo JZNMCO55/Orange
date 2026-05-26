@@ -285,6 +285,34 @@ struct Pipeline::Impl
                   "SpotLightsUboData std140 size mismatch");
     std::unique_ptr<Orange::Rhi::RHIBuffer> spotLightsUbo;
 
+    // ---- Spot shadow（GAP-2026-05-26 G2）：多 shadow caster 透视阴影 -------
+    // castsShadow 的 SpotLight 子集（cap kMaxSpotShadowCasters）各占一张
+    // D32Float Tex2DArray 的一层；per-layer Tex2D depth view 作 depth
+    // attachment 渲 depth-only（复用 shadow_caster pipeline），pbr.frag
+    // 按 shadow index 采 sampler2DArray + PCF。directional shadow 仍走独立
+    // shadowMap（binding 0），与 spot 阴影各自独立 → 多 caster 不串扰。
+    static constexpr std::uint32_t kMaxSpotShadowCasters = 4;
+    std::unique_ptr<Orange::Rhi::RHITexture> spotShadowArray;
+    std::uint32_t                            spotShadowArrayResolution{0};
+    bool                                     spotShadowArrayLayoutShaderReadOnly{false};
+    std::array<std::unique_ptr<Orange::Rhi::RHITextureView>, kMaxSpotShadowCasters>
+        spotShadowLayerViews;
+
+    // 当前帧 shadow-casting spot 的 light view-proj + 数量：UpdateSpotLightsUbo
+    // 计算，RecordSpotShadowPass 消费（渲各 layer）+ 写进 spotShadowUbo 供
+    // pbr.frag 采样。索引与 SpotLightStd140.cosInnerShadow.y 对齐。
+    std::array<glm::mat4, kMaxSpotShadowCasters> spotShadowMatrices{};
+    std::uint32_t                                spotShadowCount{0};
+
+    struct SpotShadowUboData
+    {
+        glm::uvec4 countPad{0u, 0u, 0u, 0u};
+        glm::mat4  lightViewProj[kMaxSpotShadowCasters]{};
+    };
+    static_assert(sizeof(SpotShadowUboData) == 16 + 64 * kMaxSpotShadowCasters,
+                  "SpotShadowUboData std140 size mismatch");
+    std::unique_ptr<Orange::Rhi::RHIBuffer> spotShadowUbo;
+
     // 当前帧时间（seconds，单调递增）。
     float frameTime{0.0f};
 
@@ -739,8 +767,24 @@ struct Pipeline::Impl
     void UpdatePointLightsUbo(Orange::Engine::World& world);
 
     // 把 World 内挂 SpotLight + Transform 的 entity 收集到 SpotLightsUbo
-    //（pos 由 Transform.position、dir 由 Transform.rotation 派生）。
+    //（pos 由 Transform.position、dir 由 Transform.rotation 派生）。同时为
+    // castsShadow 的子集（cap kMaxSpotShadowCasters）算 light view-proj +
+    // 分配 shadow index + 写 spotShadowUbo。
     void UpdateSpotLightsUbo(Orange::Engine::World& world);
+
+    // 创建 / 重建 spot shadow Tex2DArray + per-layer depth view。
+    bool EnsureSpotShadowArray();
+
+    // 把场景从各 shadow-casting spot 视角渲到 spotShadowArray 对应层
+    //（depth-only，复用 shadow_caster pipeline）。
+    bool RecordSpotShadowPass();
+
+    // 计算单个 spot 的 perspective light view-proj：view = lookAt(pos,
+    // pos+dir)，proj = perspective(2*outerConeAngle, 1, near, range)。
+    glm::mat4 ComputeSpotLightViewProj(const glm::vec3& pos,
+                                       const glm::vec3& dir,
+                                       float            outerConeAngle,
+                                       float            range) const;
 
     // 计算 light view-proj。
     glm::mat4 ComputeLightViewProj(const glm::vec3& lightWorldDir) const;

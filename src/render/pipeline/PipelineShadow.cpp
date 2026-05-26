@@ -6,11 +6,13 @@
 #include "PipelineImpl.h"
 
 #include "orange/engine/core/Profiler.h"
+#include "orange/engine/render/Camera.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -190,6 +192,7 @@ void Pipeline::Impl::UpdateSpotLightsUbo(Orange::Engine::World& world)
 
     SpotLightsUboData data{};
     std::uint32_t     count = 0;
+    spotShadowCount = 0;  // 本帧 shadow-casting spot 计数，下方分配 index
 
     auto& reg = world.Registry();
     auto  view = reg.view<SpotLight>();
@@ -223,11 +226,24 @@ void Pipeline::Impl::UpdateSpotLightsUbo(Orange::Engine::World& world)
         float       innerCos = std::cos(std::min(sl.innerConeAngle, sl.outerConeAngle));
         innerCos = std::max(innerCos, outerCos + 1e-4f);
 
+        // shadow index：castsShadow 的 spot 按先到先得分配 0..N-1，超出
+        // kMaxSpotShadowCasters 的退化为无阴影（index = -1）。同步算 light
+        // view-proj 存进 spotShadowMatrices，供 RecordSpotShadowPass 渲 + 写
+        // spotShadowUbo 供 pbr.frag 采样。
+        float shadowIndex = -1.0f;
+        if (sl.castsShadow && spotShadowCount < kMaxSpotShadowCasters)
+        {
+            const std::uint32_t idx = spotShadowCount;
+            spotShadowMatrices[idx] =
+                ComputeSpotLightViewProj(pos, dir, sl.outerConeAngle, sl.range);
+            shadowIndex = static_cast<float>(idx);
+            ++spotShadowCount;
+        }
+
         data.lights[count].posRange       = glm::vec4(pos, sl.range);
         data.lights[count].dirCosOuter    = glm::vec4(dir, outerCos);
         data.lights[count].colorIntensity = glm::vec4(sl.color, sl.intensity);
-        // shadow index 占位 -1（G1 无阴影；G2 透视阴影落地后由 shadow pass 写）。
-        data.lights[count].cosInnerShadow = glm::vec4(innerCos, -1.0f, 0.0f, 0.0f);
+        data.lights[count].cosInnerShadow = glm::vec4(innerCos, shadowIndex, 0.0f, 0.0f);
         ++count;
     }
     data.countPad.x = count;
@@ -240,6 +256,202 @@ void Pipeline::Impl::UpdateSpotLightsUbo(Orange::Engine::World& world)
     }
     std::memcpy(mapped, &data, sizeof(data));
     spotLightsUbo->Unmap();
+
+    // spot shadow matrices UBO（pbr.frag 按 shadow index 采样时用）。
+    if (spotShadowUbo)
+    {
+        SpotShadowUboData sd{};
+        sd.countPad.x = spotShadowCount;
+        for (std::uint32_t i = 0; i < spotShadowCount; ++i)
+        {
+            sd.lightViewProj[i] = spotShadowMatrices[i];
+        }
+        void* sm = spotShadowUbo->Map();
+        if (sm != nullptr)
+        {
+            std::memcpy(sm, &sd, sizeof(sd));
+            spotShadowUbo->Unmap();
+        }
+        else
+        {
+            ORANGE_LOG_ERROR("Pipeline: spotShadowUbo Map 失败");
+        }
+    }
+}
+
+glm::mat4 Pipeline::Impl::ComputeSpotLightViewProj(const glm::vec3& pos,
+                                                   const glm::vec3& dir,
+                                                   float            outerConeAngle,
+                                                   float            range) const
+{
+    const glm::vec3 d  = glm::normalize(dir);
+    glm::vec3       up = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (std::abs(d.y) > 0.99f)
+    {
+        up = glm::vec3(0.0f, 0.0f, 1.0f);  // 锥光接近垂直 → 切 Z 轴避奇异
+    }
+    const glm::mat4 view = glm::lookAt(pos, pos + d, up);
+
+    // fov = 2 × 外锥半角；钳 < π 防 tan 爆。aspect=1（方形 shadow map）。
+    const float fovY  = std::min(2.0f * outerConeAngle, 3.0f);
+    const float zNear = 0.05f;
+    const float zFar  = std::max(range, zNear + 0.01f);
+    const glm::mat4 proj = Camera::Perspective(fovY, 1.0f, zNear, zFar).projection;
+    return proj * view;
+}
+
+bool Pipeline::Impl::EnsureSpotShadowArray()
+{
+    const std::uint32_t targetRes = shadowConfig.mapResolution > 0
+                                        ? shadowConfig.mapResolution : 1024u;
+    if (spotShadowArray && spotShadowArrayResolution == targetRes)
+    {
+        return true;
+    }
+    if (renderDevice == nullptr)
+    {
+        return false;
+    }
+    renderDevice->WaitIdle();
+    for (auto& v : spotShadowLayerViews) { v.reset(); }
+    spotShadowArray.reset();
+
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    Orange::Rhi::TextureDesc t{};
+    t.mWidth       = targetRes;
+    t.mHeight      = targetRes;
+    t.mFormat      = Orange::Rhi::TextureFormat::D32Float;
+    t.mDimension   = Orange::Rhi::TextureDimension::Tex2D;  // 多层 2D array
+    t.mArrayLayers = kMaxSpotShadowCasters;
+    t.mUsage       = Orange::Rhi::TextureUsage::DepthStencil
+                   | Orange::Rhi::TextureUsage::Sampled;
+    auto tex = rhi.CreateTexture(t);
+    if (!tex)
+    {
+        ORANGE_LOG_ERROR("Pipeline: spot shadow array CreateTexture 失败 ({}x{}x{} D32Float)",
+                         targetRes, targetRes, kMaxSpotShadowCasters);
+        return false;
+    }
+    spotShadowArray = std::move(tex);
+
+    // per-layer Tex2D depth view —— 各层作 depth attachment 单独渲。
+    for (std::uint32_t i = 0; i < kMaxSpotShadowCasters; ++i)
+    {
+        Orange::Rhi::TextureViewDesc vd{};
+        vd.mViewDimension  = Orange::Rhi::TextureDimension::Tex2D;
+        vd.mBaseMipLevel   = 0;
+        vd.mLevelCount     = 1;
+        vd.mBaseArrayLayer = i;
+        vd.mLayerCount     = 1;
+        auto view = rhi.CreateTextureView(*spotShadowArray, vd);
+        if (!view)
+        {
+            ORANGE_LOG_ERROR("Pipeline: spot shadow array CreateTextureView(layer={}) 失败", i);
+            return false;
+        }
+        spotShadowLayerViews[i] = std::move(view);
+    }
+
+    spotShadowArrayResolution           = targetRes;
+    spotShadowArrayLayoutShaderReadOnly = false;
+
+    // binding 7 = sampler2DArray uSpotShadowMaps；用整张 array 默认 view。
+    if (mainDescSet && hdrSampler)
+    {
+        Orange::Rhi::DescriptorWrite w{};
+        w.mBinding             = 7;
+        w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        w.mImageInfo.mpTexture = spotShadowArray.get();
+        w.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*mainDescSet, &w, 1);
+    }
+    return true;
+}
+
+bool Pipeline::Impl::RecordSpotShadowPass()
+{
+    ORANGE_PROFILE_SCOPE("SpotShadow");
+    if (!spotShadowArray || offscreenCmd == nullptr || !shadowCasterPipeline)
+    {
+        return false;
+    }
+    auto& cmd = *offscreenCmd;
+
+    // 整张 array 一次 transition（TransitionTexture 覆盖所有 array layer）。
+    const auto fromLayout = spotShadowArrayLayoutShaderReadOnly
+        ? Orange::Rhi::TextureLayout::ShaderReadOnly
+        : Orange::Rhi::TextureLayout::Undefined;
+    cmd.TransitionTexture(*spotShadowArray, fromLayout,
+                          Orange::Rhi::TextureLayout::DepthStencilAttachment);
+
+    // 逐层（= 逐 shadow-casting spot）渲 depth-only。spotShadowCount 之外的
+    // 层仍 Clear 到 1.0（远深度 = 全亮，等价无阴影），避免残留上一帧。
+    for (std::uint32_t layer = 0; layer < kMaxSpotShadowCasters; ++layer)
+    {
+        Orange::Rhi::DepthStencilAttachment depth{};
+        depth.mpView        = spotShadowLayerViews[layer].get();
+        depth.mDepthLoadOp  = Orange::Rhi::LoadOp::Clear;
+        depth.mDepthStoreOp = Orange::Rhi::StoreOp::Store;
+        depth.mClear.mDepth = 1.0f;
+
+        Orange::Rhi::RenderingDesc rd{};
+        rd.mRenderArea.mWidth  = spotShadowArrayResolution;
+        rd.mRenderArea.mHeight = spotShadowArrayResolution;
+        rd.mDepthStencil       = depth;
+        cmd.BeginRendering(rd);
+
+        Orange::Rhi::RHIViewport vp{};
+        vp.mWidth    = static_cast<float>(spotShadowArrayResolution);
+        vp.mHeight   = static_cast<float>(spotShadowArrayResolution);
+        vp.mMinDepth = 0.0f;
+        vp.mMaxDepth = 1.0f;
+        cmd.SetViewport(vp);
+        Orange::Rhi::RHIScissor sc{};
+        sc.mWidth  = spotShadowArrayResolution;
+        sc.mHeight = spotShadowArrayResolution;
+        cmd.SetScissor(sc);
+
+        if (layer < spotShadowCount)
+        {
+            cmd.BindGraphicsPipeline(*shadowCasterPipeline);
+            const glm::mat4& lightVP = spotShadowMatrices[layer];
+
+            for (const auto& drawable : scene.Drawables())
+            {
+                if (!drawable.castsShadow || !drawable.mesh.IsValid())
+                {
+                    continue;
+                }
+                auto cacheIt = meshCache.find(drawable.mesh.Value());
+                if (cacheIt == meshCache.end())
+                {
+                    continue;
+                }
+                const auto& gpu = cacheIt->second;
+
+                struct ShadowCasterPush { glm::mat4 lightVP; glm::mat4 model; };
+                ShadowCasterPush pc{};
+                pc.lightVP = lightVP;
+                pc.model   = drawable.worldMatrix;
+                cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                     0, static_cast<std::uint32_t>(sizeof(pc)),
+                                     &pc);
+
+                cmd.BindVertexBuffer(0, *gpu.vertexBuffer, 0);
+                cmd.BindIndexBuffer(*gpu.indexBuffer, 0, Orange::Rhi::IndexFormat::UInt32);
+                cmd.DrawIndexed(gpu.indexCount, 1, 0, 0, 0);
+            }
+        }
+
+        cmd.EndRendering();
+    }
+
+    cmd.TransitionTexture(*spotShadowArray,
+                          Orange::Rhi::TextureLayout::DepthStencilAttachment,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    spotShadowArrayLayoutShaderReadOnly = true;
+    return true;
 }
 
 bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,

@@ -538,6 +538,16 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
                                  Orange::Rhi::DescriptorType::UniformBuffer,
                                  1,
                                  Orange::Rhi::ShaderStage::Fragment});
+        // GAP-2026-05-26 G2：binding 7 = spot shadow Tex2DArray（sampler2DArray），
+        // binding 8 = SpotShadowUbo（per-caster light view-proj 数组）。
+        lay.mBindings.push_back({7,
+                                 Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({8,
+                                 Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1,
+                                 Orange::Rhi::ShaderStage::Fragment});
         lay.mpDebugName = "orange_engine.main.layout";
         impl.mainDescLayout = rhi.CreateDescriptorSetLayout(lay);
 
@@ -564,18 +574,26 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         slBufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
         impl.spotLightsUbo = rhi.CreateBuffer(slBufDesc);
 
-        // Main desc pool: 1 set，4 个 CombinedImageSampler（shadow + 3 dummy IBL） + 3 个 UBO
+        // SpotShadowUbo（G2 per-caster light view-proj 数组，同款 CpuToGpu）。
+        Orange::Rhi::BufferDesc ssBufDesc{};
+        ssBufDesc.mSize        = sizeof(Pipeline::Impl::SpotShadowUboData);
+        ssBufDesc.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ssBufDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.spotShadowUbo = rhi.CreateBuffer(ssBufDesc);
+
+        // Main desc pool: 1 set，5 个 CombinedImageSampler（dir shadow + 3 dummy
+        // IBL + spot shadow array） + 4 个 UBO（light / point / spot / spot shadow）
         Orange::Rhi::DescriptorPoolDesc pool{};
         pool.mMaxSets = 1;
-        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 4});
-        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 3});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::CombinedImageSampler, 5});
+        pool.mPoolSizes.push_back({Orange::Rhi::DescriptorType::UniformBuffer, 4});
         pool.mpDebugName = "orange_engine.main.pool";
         impl.mainDescPool = rhi.CreateDescriptorPool(pool);
 
         if (!impl.mainDescLayout || !impl.lightUbo || !impl.pointLightsUbo
-            || !impl.spotLightsUbo || !impl.mainDescPool)
+            || !impl.spotLightsUbo || !impl.spotShadowUbo || !impl.mainDescPool)
         {
-            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo / pointLightsUbo / spotLightsUbo 创建失败");
+            ORANGE_LOG_ERROR("Pipeline::Initialize: main desc layout / pool / lightUbo / pointLightsUbo / spotLightsUbo / spotShadowUbo 创建失败");
             Shutdown();
             return ResultCode::InternalError;
         }
@@ -614,6 +632,16 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         writeSl.mBufferInfo.mOffset  = 0;
         writeSl.mBufferInfo.mRange   = sizeof(Pipeline::Impl::SpotLightsUboData);
         rhi.UpdateDescriptorSet(*impl.mainDescSet, &writeSl, 1);
+
+        Orange::Rhi::DescriptorWrite writeSs{};
+        writeSs.mBinding             = 8;
+        writeSs.mType                = Orange::Rhi::DescriptorType::UniformBuffer;
+        writeSs.mBufferInfo.mpBuffer = impl.spotShadowUbo.get();
+        writeSs.mBufferInfo.mOffset  = 0;
+        writeSs.mBufferInfo.mRange   = sizeof(Pipeline::Impl::SpotShadowUboData);
+        rhi.UpdateDescriptorSet(*impl.mainDescSet, &writeSs, 1);
+        // binding 7（spot shadow array sampler）等 EnsureSpotShadowArray 建出
+        // array 后再写——与 binding 0（dir shadow）同款延迟绑定。
     }
 
     // 7.7 Dummy IBL 资源
