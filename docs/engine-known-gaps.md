@@ -220,7 +220,7 @@ vec4 uMRA        //  16
 
 ---
 
-## GAP-2026-05-20-editor-fprintf-to-core-log-migration
+## GAP-2026-05-20-editor-fprintf-to-core-log-migration ✅
 
 - **发现方**：OrangeEditor v0.6 验收 retrospective（File dialog COM 修复 + menu bar 修补两个 session 末尾）
 - **发现日期**：2026-05-20
@@ -329,7 +329,7 @@ vec4 uMRA        //  16
 
 ---
 
-## GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention
+## GAP-2026-05-21-editor-coplanar-mesh-z-fight-prevention ✅
 
 - **发现方**：OrangeEditor 用户验收（demo.scene.json Tower 底面 z-fight）
 - **发现日期**：2026-05-21
@@ -380,7 +380,7 @@ vec4 uMRA        //  16
 
 ---
 
-## GAP-2026-05-22-new-scene-actually-seeds-demo
+## GAP-2026-05-22-new-scene-actually-seeds-demo ✅
 
 - **发现方**：OrangeEditor v1.0 验收脚本（作者本人跑，段 A 第 2 步）
 - **发现日期**：2026-05-22
@@ -440,7 +440,7 @@ case SceneOp::New: {
 
 ---
 
-## GAP-2026-05-22-directional-light-inspector-direction-helper-missing
+## GAP-2026-05-22-directional-light-inspector-direction-helper-missing ✅
 
 - **发现方**：OrangeEditor v1.0 验收脚本（作者本人跑，段 B 第 2 步）
 - **发现日期**：2026-05-22
@@ -482,7 +482,7 @@ case SceneOp::New: {
 
 ---
 
-## GAP-2026-05-22-shadow-not-tracking-directional-light-direction
+## GAP-2026-05-22-shadow-not-tracking-directional-light-direction ✅
 
 - **发现方**：OrangeEditor v1.0 验收脚本（作者本人跑，段 B / 段 C）
 - **发现日期**：2026-05-22
@@ -654,7 +654,7 @@ case SceneOp::New: {
 
 ---
 
-## GAP-2026-05-22-pipeline-cpp-monolithic-needs-split
+## GAP-2026-05-22-pipeline-cpp-monolithic-needs-split ✅
 
 - **发现方**：用户 v1.0 验收后浏览代码时观察（"Pipeline.cpp 是不是太大了"）
 - **发现日期**：2026-05-22
@@ -765,7 +765,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-22-multi-environment-component-semantics-undefined
+## GAP-2026-05-22-multi-environment-component-semantics-undefined ✅
 
 - **发现方**：用户 v1.0 验收后实测推断（"任意 entity 挂 Environment 都改变景色？多个会怎样？"）
 - **发现日期**：2026-05-22
@@ -820,7 +820,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-22-editor-default-ibl-missing-causes-black-pbr-faces
+## GAP-2026-05-22-editor-default-ibl-missing-causes-black-pbr-faces ✅
 
 - **发现方**：作者本人 v1.0 验收后试搭场景（Sun + Floor + Cube1/2/3 + Sphere + smoke），无 EnvironmentComponent
 - **发现日期**：2026-05-22
@@ -874,7 +874,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-22-editor-dock-layout-collapses-on-restore
+## GAP-2026-05-22-editor-dock-layout-collapses-on-restore ✅
 
 - **发现方**：作者本人 logo v4 切换后启动 OrangeEditor 看效果时撞上
 - **发现日期**：2026-05-22
@@ -911,7 +911,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-22-multi-directional-light-semantics-undefined
+## GAP-2026-05-22-multi-directional-light-semantics-undefined ✅
 
 - **发现方**：OrangeEditor v1.0 验收讨论（用户提出"方向光是不是不应该能创建多个？感觉应该是全局光源"）
 - **发现日期**：2026-05-22
@@ -983,7 +983,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-22-samples-cube-mesh-winding-bug
+## GAP-2026-05-22-samples-cube-mesh-winding-bug ✅
 
 - **发现方**：v1.0.1 cube winding 修复后 OrangeEngine 仓全 mesh 扫描
 - **发现日期**：2026-05-22
@@ -1023,7 +1023,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-22-cube-mesh-back-face-bleed-through
+## GAP-2026-05-22-cube-mesh-back-face-bleed-through ✅
 
 - **发现方**：用户 v1.0.1 试搭场景验收（用 PBR 材质的 cube 出现"穿过正面看到 cube 内部背面"视觉）
 - **发现日期**：2026-05-22
@@ -1052,7 +1052,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-23-editor-play-stop-entity-tree-order-reversed
+## GAP-2026-05-23-editor-play-stop-entity-tree-order-reversed ✅
 
 - **发现方**：working tree 清理（v1.0.scene.json 出现无解释的 entity 顺序翻转 diff）
 - **发现日期**：2026-05-23
@@ -1117,7 +1117,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-24-editor-asset-browser-create-material-missing
+## GAP-2026-05-24-editor-asset-browser-create-material-missing ✅
 
 - **发现方**：v1.1 ✅ 后用户试图新建材质时发现
 - **发现日期**：2026-05-24
