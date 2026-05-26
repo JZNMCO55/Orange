@@ -428,6 +428,27 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       lensCompositeSet;  // lensColor
     Orange::Rhi::RHITexture*                             lensCompositeSetBound{nullptr};
 
+    // ---- 锐化（sharpen，CAS 式）GPU 资源 ---------------------------------
+    // gather pass：hdrColor 邻域 + ubo → sharpColor（RGBA16F）；composite pass：
+    // sharpColor → hdrColor（复用 dofComposite 的 replace blend）。无 depth 依赖。
+    struct SharpenUboData
+    {
+        glm::vec4 params{0.4f, 0.0f, 0.0f, 0.0f};  // sharpness / 预留
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        sharpenFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> sharpenLayout;   // 0=hdr 1=ubo
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            sharpenPipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              sharpenUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             sharpenColor;    // RGBA16F 结果
+    std::uint32_t                                        sharpenColorWidth{0};
+    std::uint32_t                                        sharpenColorHeight{0};
+    bool                                                 sharpenColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      sharpenPool;     // gatherSet + compositeSet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       sharpenSet;      // hdr + ubo
+    Orange::Rhi::RHITexture*                             sharpenSetBoundHdr{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       sharpenCompositeSet;  // sharpColor
+    Orange::Rhi::RHITexture*                             sharpenCompositeSetBound{nullptr};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -1017,6 +1038,11 @@ struct Pipeline::Impl
     bool EnsureLensResources();
     bool RecordLensPass(const LensPass& lensDesc);
 
+    // 锐化（CAS 式）：邻域自适应锐化 → sharpColor → composite 回 hdrColor。
+    const SharpenPass* FindActiveSharpenPass() const noexcept;
+    bool EnsureSharpenResources();
+    bool RecordSharpenPass(const SharpenPass& sharpenDesc);
+
     // ---- PostProcessComponent 消费（V1：find-first 全局）-------------------
     // 每帧渲染前从 world 找 PostProcessComponent（全局单例语义，find-first）→
     // 填充下面的 post* 成员 pass 结构 + 把 PCSS/阴影分辨率灌进 shadowConfig；
@@ -1032,6 +1058,7 @@ struct Pipeline::Impl
     ColorGradePass postGrade{};
     MotionBlurPass postMotionBlur{};
     LensPass       postLens{};
+    SharpenPass    postSharpen{};
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

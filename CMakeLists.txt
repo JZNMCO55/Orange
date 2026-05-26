@@ -120,6 +120,7 @@ add_library(orange_engine STATIC
     src/render/pipeline/PipelineColorGrade.cpp
     src/render/pipeline/PipelineMotionBlur.cpp
     src/render/pipeline/PipelineLens.cpp
+    src/render/pipeline/PipelineSharpen.cpp
     src/render/pipeline/PipelineSky.cpp
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
@@ -340,6 +341,9 @@ orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/lens.frag.glsl"
     ORANGE_ENGINE_BUILTIN_LENS_FS_SPV)
 orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/sharpen.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_SHARPEN_FS_SPV)
+orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ssr.frag.glsl"
     ORANGE_ENGINE_BUILTIN_SSR_FS_SPV)
 orange_engine_compile_builtin_shader(
@@ -418,6 +422,7 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_COLOR_GRADE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_MOTION_BLUR_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_LENS_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_SHARPEN_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSR_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_VS_SPV}"

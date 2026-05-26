@@ -391,6 +391,25 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// 锐化（sharpen）。CAS 式（AMD FidelityFX Contrast Adaptive Sharpening 简化版）
+// 自适应锐化，TAA 的标准搭档 —— TAA 多帧 resolve 会软化画面，本 pass 恢复高频
+// 细节、按局部对比自适应避免强边缘 over-shoot。与 SSAO/SSR 同款 Pipeline 内部
+// RecordSharpenPass 录制（Setup/Execute 空壳）。可选 pass —— enabled 默认 false。
+// 录制顺序在 TAA 之后（恢复其软化）、motion blur / DoF 之前（让那些有意虚化）。
+// window + 编辑器 offscreen 两路径。
+class ORANGE_ENGINE_API SharpenPass final : public IPostProcessPass
+{
+public:
+    bool enabled{false};
+
+    // 锐化强度（0..1）。0 = 无；TAA 配套典型 0.3–0.6；过大出镶边。
+    float sharpness{0.4f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

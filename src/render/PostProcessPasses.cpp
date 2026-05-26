@@ -245,4 +245,21 @@ void LensPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- SharpenPass ------------------------------------------------------
+
+const char* SharpenPass::Name() const noexcept
+{
+    return "sharpen";
+}
+
+void SharpenPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordSharpenPass。
+}
+
+void SharpenPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render

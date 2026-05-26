@@ -385,6 +385,13 @@ int main()
             lens->vignetteIntensity   = 0.4f;
             ppChain.AddPass(std::move(lens));
         }
+        // SharpenPass（CAS）显式 enabled，压其 gather/composite + pool（resize-churn）。
+        {
+            auto sharpen = std::make_unique<Orange::Engine::Render::SharpenPass>();
+            sharpen->enabled   = true;
+            sharpen->sharpness = 0.5f;
+            ppChain.AddPass(std::move(sharpen));
+        }
         pipeline.SetPostProcessChain(&ppChain);
 
         // 无遮挡的头顶点光场景：地面中心被点光照亮。挂上 SSAO+SSR+Bloom 后仍应

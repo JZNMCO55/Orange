@@ -553,6 +553,21 @@ void Pipeline::Shutdown()
     impl.lensUbo.reset();
     impl.lensFs.reset();
 
+    // 锐化（CAS）资源（set 先于 pool）。
+    impl.sharpenSet.reset();
+    impl.sharpenCompositeSet.reset();
+    impl.sharpenPool.reset();
+    impl.sharpenColor.reset();
+    impl.sharpenColorWidth = 0;
+    impl.sharpenColorHeight = 0;
+    impl.sharpenColorLayoutShaderReadOnly = false;
+    impl.sharpenSetBoundHdr = nullptr;
+    impl.sharpenCompositeSetBound = nullptr;
+    impl.sharpenPipeline.reset();
+    impl.sharpenLayout.reset();
+    impl.sharpenUbo.reset();
+    impl.sharpenFs.reset();
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1757,6 +1772,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                     ok = impl.RecordTaaResolve(*taaPass, viewProj);
                 }
             }
+            // 锐化（CAS）：紧接 TAA 之后恢复其软化的高频细节；放在 motion blur /
+            // DoF 之前——那些 pass 之后会有意虚化，锐化它们的结果无意义。
+            if (ok)
+            {
+                if (const SharpenPass* sharpenPass = impl.FindActiveSharpenPass())
+                {
+                    ok = impl.RecordSharpenPass(*sharpenPass);
+                }
+            }
             // 相机运动模糊：TAA 之后（TAA 已 resolve 出锐利帧，再沿相机速度拉糊）、
             // 色彩分级之前。用未 jitter 的 baseViewProj 算速度（不含 TAA 亚像素抖动）。
             if (ok)
@@ -2555,6 +2579,16 @@ void Pipeline::Render(Orange::Engine::World& world)
                 if (const TaaPass* taaPass = impl.FindActiveTaaPass())
                 {
                     offscreenOk = impl.RecordTaaResolve(*taaPass, viewProj);
+                }
+            }
+
+            // 锐化（CAS）：紧接 TAA 之后恢复细节，motion blur / DoF 之前
+            // （与 offscreen 路径同款）。
+            if (offscreenOk && impl.scene.HasCamera())
+            {
+                if (const SharpenPass* sharpenPass = impl.FindActiveSharpenPass())
+                {
+                    offscreenOk = impl.RecordSharpenPass(*sharpenPass);
                 }
             }
 
