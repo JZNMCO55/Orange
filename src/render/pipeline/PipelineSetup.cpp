@@ -1009,6 +1009,66 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         }
     }
     {
+        // 镜头效果（色散 + 暗角）gather pipeline —— hdrColor + ubo → lensColor
+        // （RGBA16F，no blend）。composite 复用 dofCompositePipeline。
+        auto lensCode = LoadSpirv("shaders/orange_engine/lens.frag.spv");
+        if (lensCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: lens shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = lensCode.data();
+        sm.mCodeSize   = lensCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.lens.frag";
+        impl.lensFs = rhi.CreateShaderModule(sm);
+
+        // lensLayout：0 = hdrColor，1 = LensUbo。
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.lens.layout";
+        impl.lensLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        Orange::Rhi::BufferDesc ub{};
+        ub.mSize        = sizeof(Pipeline::Impl::LensUboData);
+        ub.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.lensUbo = rhi.CreateBuffer(ub);
+
+        if (!impl.lensFs || !impl.lensLayout || !impl.lensUbo)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: lens 资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.lensFs.get(), "main"});
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});  // no blend
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.lensLayout.get());
+        d.mpDebugName = "orange_engine.lens";
+        impl.lensPipeline = rhi.CreateGraphicsPipeline(d);
+        if (!impl.lensPipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: lens pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
         // 法线预通道 pipeline —— 把 view-space 法线渲到 normalBuffer（RGBA8），
         // 供 SSAO / SSR 采真实法线。几何 pipeline（带顶点输入 + depth test），
         // 与 shadow caster 同款 push constant 尺寸（128 B，仅 vertex stage）。

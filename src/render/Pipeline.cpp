@@ -538,6 +538,21 @@ void Pipeline::Shutdown()
     impl.motionBlurUbo.reset();
     impl.motionBlurFs.reset();
 
+    // 镜头效果（色散 + 暗角）资源（set 先于 pool）。
+    impl.lensSet.reset();
+    impl.lensCompositeSet.reset();
+    impl.lensPool.reset();
+    impl.lensColor.reset();
+    impl.lensColorWidth = 0;
+    impl.lensColorHeight = 0;
+    impl.lensColorLayoutShaderReadOnly = false;
+    impl.lensSetBoundHdr = nullptr;
+    impl.lensCompositeSetBound = nullptr;
+    impl.lensPipeline.reset();
+    impl.lensLayout.reset();
+    impl.lensUbo.reset();
+    impl.lensFs.reset();
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1759,6 +1774,15 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                     ok = impl.RecordColorGradePass(*gradePass);
                 }
             }
+            // 镜头效果（色散 + 暗角）：最后的"镜头"阶段，所有 post（含色彩分级）
+            // 之后、tonemap 之前。
+            if (ok)
+            {
+                if (const LensPass* lensPass = impl.FindActiveLensPass())
+                {
+                    ok = impl.RecordLensPass(*lensPass);
+                }
+            }
         }
 
         // v1.3.0 · AuxPassProvider hook：主 pass + 粒子之后、debug draw /
@@ -2545,6 +2569,16 @@ void Pipeline::Render(Orange::Engine::World& world)
                 if (const ColorGradePass* gradePass = impl.FindActiveColorGradePass())
                 {
                     offscreenOk = impl.RecordColorGradePass(*gradePass);
+                }
+            }
+
+            // 镜头效果（色散 + 暗角）：最后的"镜头"阶段，色彩分级之后、capture /
+            // tonemap 之前（与 offscreen 路径同款）。
+            if (offscreenOk)
+            {
+                if (const LensPass* lensPass = impl.FindActiveLensPass())
+                {
+                    offscreenOk = impl.RecordLensPass(*lensPass);
                 }
             }
 

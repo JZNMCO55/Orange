@@ -367,6 +367,30 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// 镜头效果（lens）：色散（chromatic aberration）+ 暗角（vignette），单 pass 合成。
+// 色散沿屏幕径向给 R/B 通道反向偏移采样（边缘越远越强）；暗角按径向平滑压暗边缘、
+// 聚焦中心。与 SSAO/SSR 同款 Pipeline 内部 RecordLensPass 录制（Setup/Execute 空壳）。
+// 可选 pass —— enabled 默认 false。两项均"量为 0 即无效果"，可单独只留一项。
+// stylized 2.5D 平台跳跃常用。window + 编辑器 offscreen 两路径。
+class ORANGE_ENGINE_API LensPass final : public IPostProcessPass
+{
+public:
+    bool enabled{false};
+
+    // 色散量（径向 uv 偏移）。0 = 无色散。典型 0.001–0.01；过大边缘出明显彩边。
+    float chromaticAberration{0.0f};
+
+    // 暗角强度。0 = 无暗角，1 = 边缘压到全黑。
+    float vignetteIntensity{0.0f};
+
+    // 暗角范围 / 软硬（0..1）。越大渐变越宽、起始越往画面中心。典型 0.3–0.7。
+    float vignetteSmoothness{0.5f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

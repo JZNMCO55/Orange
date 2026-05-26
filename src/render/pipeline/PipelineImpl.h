@@ -405,6 +405,29 @@ struct Pipeline::Impl
     glm::mat4                                            motionBlurPrevViewProj{1.0f};
     bool                                                 motionBlurHasHistory{false};
 
+    // ---- 镜头效果（lens：色散 + 暗角）GPU 资源 ----------------------------
+    // gather pass：hdrColor + ubo → lensColor（CA 沿径向偏移采样邻域，RGBA16F）；
+    // composite pass：lensColor → hdrColor（复用 dofComposite 的 replace blend）。
+    // 独立 lensColor 避免 CA 读 HDR 邻域同时写 HDR 同 target 的反馈。
+    struct LensUboData
+    {
+        // x=chromaticAberration, y=vignetteIntensity, z=vignetteSmoothness, w pad
+        glm::vec4 params{0.0f, 0.0f, 0.5f, 0.0f};
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        lensFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> lensLayout;   // 0=hdr 1=ubo
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            lensPipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              lensUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             lensColor;     // RGBA16F 结果
+    std::uint32_t                                        lensColorWidth{0};
+    std::uint32_t                                        lensColorHeight{0};
+    bool                                                 lensColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      lensPool;      // gatherSet + compositeSet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       lensSet;       // hdr + ubo
+    Orange::Rhi::RHITexture*                             lensSetBoundHdr{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       lensCompositeSet;  // lensColor
+    Orange::Rhi::RHITexture*                             lensCompositeSetBound{nullptr};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -989,6 +1012,11 @@ struct Pipeline::Impl
     bool EnsureMotionBlurResources();
     bool RecordMotionBlurPass(const MotionBlurPass& mbDesc, const glm::mat4& curViewProj);
 
+    // 镜头效果：色散 + 暗角 → lensColor → composite 回 hdrColor。无 depth 依赖。
+    const LensPass* FindActiveLensPass() const noexcept;
+    bool EnsureLensResources();
+    bool RecordLensPass(const LensPass& lensDesc);
+
     // ---- PostProcessComponent 消费（V1：find-first 全局）-------------------
     // 每帧渲染前从 world 找 PostProcessComponent（全局单例语义，find-first）→
     // 填充下面的 post* 成员 pass 结构 + 把 PCSS/阴影分辨率灌进 shadowConfig；
@@ -1003,6 +1031,7 @@ struct Pipeline::Impl
     TaaPass        postTaa{};
     ColorGradePass postGrade{};
     MotionBlurPass postMotionBlur{};
+    LensPass       postLens{};
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

@@ -376,6 +376,15 @@ int main()
             mb->enabled = true;
             ppChain.AddPass(std::move(mb));
         }
+        // LensPass（色散 + 暗角）显式 enabled + 非零量，压其 gather/composite +
+        // descriptor pool（resize-churn）。
+        {
+            auto lens = std::make_unique<Orange::Engine::Render::LensPass>();
+            lens->enabled = true;
+            lens->chromaticAberration = 0.004f;
+            lens->vignetteIntensity   = 0.4f;
+            ppChain.AddPass(std::move(lens));
+        }
         pipeline.SetPostProcessChain(&ppChain);
 
         // 无遮挡的头顶点光场景：地面中心被点光照亮。挂上 SSAO+SSR+Bloom 后仍应

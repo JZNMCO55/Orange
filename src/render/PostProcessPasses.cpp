@@ -228,4 +228,21 @@ void MotionBlurPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- LensPass ---------------------------------------------------------
+
+const char* LensPass::Name() const noexcept
+{
+    return "lens";
+}
+
+void LensPass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordLensPass。
+}
+
+void LensPass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render
