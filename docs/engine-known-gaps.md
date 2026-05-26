@@ -1556,6 +1556,65 @@ G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已
 - **教训**：① 编辑器材质来自 `.template.json`（`RegisterTemplatesFromDirectory`），**不是** `BuiltinMaterials::LoadPbr`——两者必须同步；② shader 需要的 descriptor set / 顶点属性必须**无条件**声明，不能依赖材质数据（textureSlots）；③ GPU 渲染回归测试必须走**真实消费方（编辑器模板）路径 + 像素 readback**，合成的 `RegisterBuiltins` 会放过这类 bug。
 - **剩余**：G3（glTF material 自动导入，Inc5）代码已成、端到端待真实 glTF 资产验；acceptance checklist + CMake VERSION bump 待 Orange-Wiki 子仓单独 session（单子仓纪律）。
 
+---
+
+## GAP-2026-05-26-complete-light-source-family-and-shadows
+
+- **发现方**：OrangeEditor 用户验收（dogfood 搭场景时光源类型不全 + 阴影仅平行光）
+- **发现日期**：2026-05-26
+- **一句话定性**：光源族不完整 —— `DirectionalLight`（含 2D shadow map）+ `PointLight`（物理衰减，但 `castsShadow` 是 reserved no-op）已有，`SpotLight` **完全缺失**；阴影系统只支持 **第一个** `castsShadow` 的 `DirectionalLight` 单张 2D shadow map。用户要求**补齐三种经典光源类型 + 各自阴影**（含 PointLight 全向 / SpotLight 透视 / 多 shadow caster）。
+- **处理约定**：用户 2026-05-26 明确"三种光源都做 + 记录到文档，下个 session 处理" —— **本条仅登记，不在本 session 实现**（同本文件登记流程纪律）。
+
+### 触发场景
+
+- `include/orange/engine/render/LightComponent.h` 当前仅 `DirectionalLight` + `PointLight`；`SpotLight` 在 `:73` 注释明确"留待第一款游戏真撞上手电筒锥光需求时再扩" —— 用户现在主动拉动
+- `PointLight.castsShadow`（`:91`）是保留字段，Pipeline 忽略（无 omnidirectional cubemap shadow）
+- 阴影系统（`src/render/pipeline/PipelineShadow.cpp`）当前只算 first-found `DirectionalLight` 单张 2D shadow map；多 shadow caster 无基础设施
+- 用户搭场景时：聚光（舞台光 / 手电筒 / 卡通角色锥形高光）无类型可用；点光能照亮但不投影，室内场景缺真实感阴影
+
+### 缺什么（按依赖拆）
+
+#### G1 · SpotLight 类型 + 无阴影锥光着色（最易，照 PointLight pattern）
+
+- `LightComponent.h` 加 `SpotLight` struct：`color` / `intensity` / `range` / `innerConeAngle` / `outerConeAngle`（弧度，着色端用 cos 缓存做软锥边）/ `castsShadow`（保留，G2 启用）。**position 由 `Transform.position` 派生、direction 由 `Transform.rotation` 派生** —— 复用 `ComputeDirectionalLightWorldDir` 同款约定（或定义 `kSpotLightLocalForward`），组件不冗余存几何状态
+- `PipelineImpl.h` 加 `SpotLightsUbo`（照 `PointLightsUbo` pattern，`:253`）：`kMaxSpotLights` + std140 `SpotLightStd140{ posRange, dirCosInnerOuter, colorIntensity }`；新增 `UpdateSpotLightsUbo(world)` 每帧收集 + range cull
+- `pbr.frag.glsl` 加 spot 着色：inverse-square 衰减 × `smoothstep(cosOuter, cosInner, dot(spotDir, L))` 锥角软边
+- editor：`schema/RegisterBuiltinSchemas.cpp` 加 SpotLight schema（color / intensity / range / 内外锥角 widget）；`plugin/SpotLightGizmoPlugin`（锥体 wireframe overlay，照 `PointLightGizmoPlugin` pattern）；Add-Component 菜单加项
+- 与 PointLight 当前"无阴影"基线一致 —— 不引入 shadow，先把类型 + 着色 + 编辑闭环跑通
+
+#### G2 · SpotLight 透视阴影（perspective shadow map）+ 多 shadow caster 架构
+
+- 每个 `castsShadow` spot 一张 perspective shadow map：light view = `lookAt(pos, pos+dir)`；light proj = `perspective(2*outerConeAngle, aspect=1, near, range)`
+- **横切前置（G2/G3 共用地基）**：当前 `PipelineShadow` 只算 1 张 directional 2D map。支持多光源投影需要 **shadow atlas 或 depth texture array** + per-light shadow index + shadow matrices UBO 数组。实现 session 先定 **atlas vs array** 策略（参 `vendor/LumixEngine` / Godot / Unreal 的 shadow atlas）+ shadow caster 数量上限 + 优先级（距离 / 重要度 cull）
+- `pbr.frag` 加 spot shadow 采样 + PCF；复用现有 `shadow_caster.vert` depth-only pass
+
+#### G3 · PointLight 全向阴影（omnidirectional cubemap / dual-paraboloid，最难）
+
+- 每个 `castsShadow` point light 6 面 cubemap depth（或 dual-paraboloid 2 张）+ distance-based linear depth
+- `pbr.frag` 加 cubemap shadow 采样
+- 依赖 G2 的多 shadow caster 地基
+
+### 期望验收
+
+- SpotLight：Add Component → SpotLight；Inspector 调 color / intensity / range / 内外锥角；viewport 见锥体 gizmo；场景内呈聚光锥形照明 + 软锥边
+- `PointLight` / `SpotLight` `castsShadow=true` 时投影正确；**多光源同时投影不串扰**
+- 三种光源 + 阴影字段 Undo/Redo + scene save-load round-trip 完整
+- 新增（或扩现有）sample 演示三种光源 + 三类阴影同框
+
+### 状态
+
+- **登记**：2026-05-26
+- **优先级**：P1（用户主动拉动；首款游戏 stylized 光照基线需要完整光源族）—— 实际排期由实现 session 评审
+- **归属**：候选 Phase 7+ 渲染深化 / 独立"光源族补全 + 多光源阴影"milestone。**用户已明确下个 session 独立处理**；建议实现 session 按 G1 → G2 → G3 依赖序推进，G1 可独立 ship（patch），G2/G3 因 shadow atlas 地基 + 跨仓不确定性建议合并为一个 minor
+- **关联**：[[GAP-2026-05-11-point-light-and-visible-halo]]（PointLight 同族，其 G3 halo billboard 视觉留 backlog）/ [[GAP-2026-05-22-multi-directional-light-semantics-undefined]]（多 directional 语义 G2，多 shadow caster 同源架构）/ `include/orange/engine/render/LightComponent.h:73`（SpotLight 占位注释）/ `src/render/pipeline/PipelineShadow.cpp`（单 directional shadow 现状）/ `src/render/pipeline/PipelineImpl.h:253`（PointLightsUbo pattern，SpotLightsUbo 照抄）
+
+### 跨仓核对（2026-05-26，初步 —— 实现 session 须复核）
+
+- **G1（SpotLight 无阴影）**：**纯 Engine**。`SpotLightsUbo` 照 `PointLightsUbo`（`RHIBuffer` UBO 已在用），`pbr.frag` 着色，editor schema/gizmo。无 OrangeRender 缺口
+- **G2（spot perspective shadow）**：**大概率纯 Engine**。2D depth target + depth-only pass 已在 directional shadow 跑通；扩多 caster 是 Engine 内 shadow atlas/array 管理。**待核**：RHI 是否支持 **depth texture array**（directional 单张 2D depth 已验证，array 形态待实现 session 核 `RHITexture` 公共面）
+- **G3（point cubemap shadow）**：**唯一明显跨仓风险点**。需 **render-to-cubemap-face / cubemap depth render target** —— directional/spot 用 2D depth 已验证，cubemap depth 是新 RHI 原语。**实现 session 必须先 spike 核实 OrangeRender RHI 是否提供**；若缺 → 按 CLAUDE.md 跨仓纪律先在 OrangeRender 仓 `incoming_feature.md` 提 FEATURE（独立 session 落地 + tag），**不得**同 session 既提既消费
+- **结论**：G1/G2 预期 OrangeEngine 子仓内闭环；G3 有跨仓不确定性，实现前先核对 RHI cubemap 能力，缺则走 FEATURE 登记 → 独立 session 流程
+
 ### Inc2 · MikkTSpace 高质量切线落地（2026-05-25）
 
 mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer 侧的 Lengyel fallback：
