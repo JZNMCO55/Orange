@@ -697,8 +697,20 @@ bool Pipeline::Impl::RecordPointShadowPass()
                 const glm::vec3 lp   = pointShadowLightPos[caster];
                 const float     zFar = pointShadowFar[caster];
                 const glm::mat4 view = glm::lookAt(lp, lp + kFaceDir[face], kFaceUp[face]);
-                const glm::mat4 proj =
-                    Camera::Perspective(kFovY90, 1.0f, kPointShadowNear, zFar).projection;
+                // cube 专用 perspective：Vulkan z[0,1] 但 **不 y-flip**。硬件
+                // cubemap 采样按固定约定把方向 → (face, uv)，配合标准 face
+                // 朝向/up 向量时要求渲染端用「不翻 y」的投影；若沿用主帧的
+                // Camera::Perspective（p[1][1]=-f y-flip），采样方向会命中
+                // 上下镜像的 texel → 非 -Z 主轴方向（如头顶点光照水平地面、
+                // 压 -Y 面）阴影完全错位。z 行不受 y-flip 影响，故距离重建
+                // （SamplePointShadow）保持有效。fov=90° → cot(45°)=1。
+                const float     fcot = 1.0f / std::tan(kFovY90 * 0.5f);
+                glm::mat4       proj(0.0f);
+                proj[0][0] = fcot;
+                proj[1][1] = fcot;  // 不取负 —— 与主帧 Camera::Perspective 的关键区别
+                proj[2][2] = zFar / (kPointShadowNear - zFar);
+                proj[2][3] = -1.0f;
+                proj[3][2] = (kPointShadowNear * zFar) / (kPointShadowNear - zFar);
                 const glm::mat4 lightVP = proj * view;
 
                 cmd.BindGraphicsPipeline(*shadowCasterPipeline);

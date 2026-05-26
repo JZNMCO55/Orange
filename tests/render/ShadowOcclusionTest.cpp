@@ -138,6 +138,105 @@ float RenderCenterLum(Pipeline& pipeline, AssetHandle<MeshAsset> quad,
     return lum;
 }
 
+// 单位立方体（边长 1，原点居中）。闭合实体 → 任意光照方向都有正面投影
+// 面积，适合作 occluder（扁 quad 在与光向平行时会侧面朝光、近零阴影面积）。
+// 仅作 depth-only shadow caster + 主 pass 占位，法线由 ComputeSmoothNormals
+// 给出（depth-only 不关心）。
+std::unique_ptr<MeshAsset> MakeCubeMesh()
+{
+    std::vector<VertexPosition3> pos = {
+        {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f},
+        {-0.5f, -0.5f,  0.5f}, {0.5f, -0.5f,  0.5f}, {0.5f, 0.5f,  0.5f}, {-0.5f, 0.5f,  0.5f},
+    };
+    std::vector<VertexUV2> uv(8, {0.0f, 0.0f});
+    std::vector<std::uint32_t> idx = {
+        0,1,2, 0,2,3,   // -Z
+        4,6,5, 4,7,6,   // +Z
+        0,4,5, 0,5,1,   // -Y
+        3,2,6, 3,6,7,   // +Y
+        0,3,7, 0,7,4,   // -X
+        1,5,6, 1,6,2,   // +X
+    };
+    auto pMesh = std::make_unique<MeshAsset>(std::move(pos), std::move(uv), std::move(idx));
+    pMesh->ComputeSmoothNormalsFromTriangles();
+    return pMesh;
+}
+
+// XZ 平面水平地面 quad（法线 +Y 朝上），从上方看 CCW（对齐 FrontFace::CCW）。
+std::unique_ptr<MeshAsset> MakeFloorXZ(float h)
+{
+    std::vector<VertexPosition3> pos = {
+        {-h, 0.0f,  h}, { h, 0.0f,  h}, { h, 0.0f, -h}, {-h, 0.0f, -h},
+    };
+    std::vector<VertexUV2> uv = {
+        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+    };
+    std::vector<VertexNormal3> nrm = {
+        {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+    };
+    std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
+    return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
+                                       std::move(nrm), std::move(idx));
+}
+
+// 头顶点光 + 水平地面（压 cube 的 -Y 面，编辑器最常见情形）。点光在
+// lightPos（y=3 上方），遮挡物在 light→原点 连线中点 → 阴影正落世界原点；
+// 相机看向原点 → 原点投到屏幕中心。有遮挡 vs 无遮挡读中心像素差分。
+// lightPos 的水平分量（x / z）决定压 -Y 面的哪个 uv 轴，便于分别验证。
+float RenderOverheadPointCenter(Pipeline& pipeline, AssetHandle<MeshAsset> floorXZ,
+                                AssetHandle<MeshAsset> occQuad, bool withOccluder,
+                                glm::vec3 lightPos, const char* label)
+{
+    World world;
+
+    Entity camE = world.CreateEntity();
+    Camera cam  = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+    cam.view    = glm::lookAt(glm::vec3(0.0f, 3.0f, 3.5f),
+                              glm::vec3(0.0f, 0.0f, 0.0f),
+                              glm::vec3(0.0f, 1.0f, 0.0f));
+    world.AddComponent(camE, cam);
+
+    Entity le = world.CreateEntity();
+    world.AddComponent(le, MakeTransform(lightPos, {1.0f, 1.0f, 1.0f}));
+    {
+        PointLight pl{};
+        pl.color = {1.0f, 1.0f, 1.0f};
+        pl.intensity = 45.0f;
+        pl.range = 12.0f;
+        pl.castsShadow = true;
+        world.AddComponent(le, pl);
+    }
+
+    Entity floorE = world.CreateEntity();
+    world.AddComponent(floorE, MakeTransform({0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}));
+    {
+        RenderableComponent rc;
+        rc.mesh = floorXZ; rc.materialInstance = nullptr; rc.castsShadow = false;
+        world.AddComponent(floorE, rc);
+    }
+
+    if (withOccluder)
+    {
+        Entity occE = world.CreateEntity();
+        // 光→原点 连线中点（遮挡物挡住到原点的光 → 阴影落原点 = 屏幕中心）。
+        world.AddComponent(occE, MakeTransform(lightPos * 0.5f, {0.3f, 0.3f, 0.3f}));
+        RenderableComponent rc;
+        rc.mesh = occQuad; rc.materialInstance = nullptr; rc.castsShadow = true;
+        world.AddComponent(occE, rc);
+    }
+
+    pipeline.Render(world);
+
+    float px[4] = {0, 0, 0, 0};
+    const bool ok = pipeline.DebugReadbackPixel(128, 128, px);
+    const float lum = px[0] + px[1] + px[2];
+    std::fprintf(stderr, "  [%s] 中心 RGB=(%.3f,%.3f,%.3f) lum=%.3f ok=%d\n",
+                 label, px[0], px[1], px[2], lum, ok ? 1 : 0);
+    assert(ok && "DebugReadbackPixel 失败");
+    return lum;
+}
+
 }  // namespace
 
 int main()
@@ -229,6 +328,27 @@ int main()
                  spLit, spShadow, (spLit > 0.0f) ? spShadow / spLit : -1.0f);
     if (!(spLit > 0.1f))            { std::fprintf(stderr, "  [FAIL] spot 未照亮中心\n"); ++failures; }
     if (!(spShadow < spLit * 0.6f)) { std::fprintf(stderr, "  [FAIL] spot 透视阴影未遮挡中心\n"); ++failures; }
+
+    // ---- G3b：头顶点光 + 水平地面（压 cube -Y 面，编辑器最常见情形）-------
+    auto floorRes = assets.Insert<MeshAsset>("test/floorXZ", MakeFloorXZ(6.0f));
+    auto cubeRes  = assets.Insert<MeshAsset>("test/cube", MakeCubeMesh());
+    assert(floorRes.IsOk() && cubeRes.IsOk());
+    AssetHandle<MeshAsset> floorXZ = floorRes.Value();
+    AssetHandle<MeshAsset> cube    = cubeRes.Value();
+    // 两个子情形分别压 -Y 面的 u 轴（光偏 X）与 v 轴（光偏 Z），抓 uv 翻转。
+    // occluder 用 cube（扁 quad 对头顶光侧面朝光 → 近零阴影面积，会假阴性）。
+    const glm::vec3 ovLightX{0.6f, 3.0f, 0.0f};
+    const glm::vec3 ovLightZ{0.0f, 3.0f, 0.6f};
+    const float ovxLit = RenderOverheadPointCenter(pipeline, floorXZ, cube, false, ovLightX, "overheadX-noOcc");
+    const float ovxShd = RenderOverheadPointCenter(pipeline, floorXZ, cube, true,  ovLightX, "overheadX-occ");
+    const float ovzLit = RenderOverheadPointCenter(pipeline, floorXZ, cube, false, ovLightZ, "overheadZ-noOcc");
+    const float ovzShd = RenderOverheadPointCenter(pipeline, floorXZ, cube, true,  ovLightZ, "overheadZ-occ");
+    std::fprintf(stderr, "  => overhead-point X: lit=%.3f shadow=%.3f | Z: lit=%.3f shadow=%.3f\n",
+                 ovxLit, ovxShd, ovzLit, ovzShd);
+    if (!(ovxLit > 0.1f))             { std::fprintf(stderr, "  [FAIL] 头顶点光(X) 未照亮中心\n"); ++failures; }
+    if (!(ovxShd < ovxLit * 0.6f))    { std::fprintf(stderr, "  [FAIL] 头顶点光(X) 阴影未遮挡中心（-Y 面 u 轴约定）\n"); ++failures; }
+    if (!(ovzLit > 0.1f))             { std::fprintf(stderr, "  [FAIL] 头顶点光(Z) 未照亮中心\n"); ++failures; }
+    if (!(ovzShd < ovzLit * 0.6f))    { std::fprintf(stderr, "  [FAIL] 头顶点光(Z) 阴影未遮挡中心（-Y 面 v 轴约定）\n"); ++failures; }
 
     pipeline.Shutdown();
     if (Orange::Failed(pDevice->WaitIdle())) { return 1; }
