@@ -70,7 +70,8 @@ ImportKind ClassifyByExt(std::string_view ext)
     return ImportKind::Unsupported;
 }
 
-ImportResult ImportTexture(std::string_view srcPath, EditorHost& host)
+ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
+                           std::string_view destDirOverride)
 {
     namespace fs = std::filesystem;
 
@@ -103,9 +104,13 @@ ImportResult ImportTexture(std::string_view srcPath, EditorHost& host)
         return result;  // ComputeFileHashFnv1a 自身已经 log
     }
 
-    // 目标路径：assets/Textures/<filename>。文件已存在时 overwrite（reimport
-    // 语义；T5 接通后按 .meta 的 hash 比对短路：相同 hash 跳全套）。
-    fs::path destDir = kTexturesDir;
+    // 目标路径：默认 assets/Textures/<filename>；模型 importer 传 destDirOverride
+    // 时落到模型自己的 assets/Models/<stem>/ 子目录（co-locate 整套资产）。
+    // 文件已存在时 overwrite（reimport 语义；下面 .meta 的 hash 比对短路：
+    // 相同 hash 跳全套）。
+    fs::path destDir = destDirOverride.empty()
+                     ? fs::path(kTexturesDir)
+                     : fs::path(std::string(destDirOverride));
     fs::create_directories(destDir, ec);  // 失败下面 copy 一并兜
     fs::path dest = destDir / src.filename();
     const std::string destStrEarly = dest.generic_string();

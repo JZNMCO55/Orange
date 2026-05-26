@@ -167,8 +167,9 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     if (earlyHashOpt.has_value())
     {
         const std::string earlyStem = src.stem().generic_string();
+        // 每模型一个子目录 assets/Models/<stem>/<stem>.mesh（与主路径一致）。
         const std::string earlyDestMesh =
-            (fs::path(kModelsDir) / (earlyStem + ".mesh")).generic_string();
+            (fs::path(kModelsDir) / earlyStem / (earlyStem + ".mesh")).generic_string();
         if (MetaSourceHashMatches(earlyDestMesh, earlyHashOpt.value()))
         {
             result.status   = ImportStatus::Success;
@@ -373,14 +374,14 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     if (!fileHasNormals) { normals.clear(); }
     if (!fileHasUVs)     { uvs.clear(); }
 
-    // 目标路径：assets/Models/<basename>.mesh + 同目录 source copy。
-    // .gltf 路径需要把外部 .bin / 贴图也 copy 一并进 assets/Models/ 才完整
-    // —— 但 v1.1 范围内贴图独立 import + 没贴图字段，.bin 由 glb embedded
-    // 模式承载较多，外部 .bin 的 .gltf 用 copy 后用户可手动同步 .bin。先
-    // 做单文件 copy 起步。
-    fs::path destDir = kModelsDir;
-    fs::create_directories(destDir, ec);
+    // 每模型一个子目录 assets/Models/<stem>/ —— mesh / material / source copy /
+    // 该模型的贴图全部 co-locate 进去，避免贴图被甩到 assets/Textures/ 后跨
+    // 目录找（用户反馈）。下面 importSlot 会把贴图也写进同一 modelDir。
+    // .gltf 的外部 .bin 仍只做单文件 copy 起步，用户可手动同步 .bin。
     const std::string stem = src.stem().generic_string();
+    fs::path destDir = fs::path(kModelsDir) / stem;
+    fs::create_directories(destDir, ec);
+    const std::string modelDirStr = destDir.generic_string();
     fs::path destMesh = destDir / (stem + ".mesh");
     fs::path destGltf = destDir / src.filename();
 
@@ -495,7 +496,8 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
 
         auto importSlot = [&](const std::string& srcTexPath, std::uint32_t binding) {
             if (srcTexPath.empty()) { return; }
-            ImportResult tr = ImportTexture(srcTexPath, host);
+            // 贴图落进模型自己的 assets/Models/<stem>/ 子目录而非共享 Textures。
+            ImportResult tr = ImportTexture(srcTexPath, host, modelDirStr);
             if (tr.status == ImportStatus::Success && !tr.destPath.empty())
             {
                 mdata.textures.push_back({binding, tr.destPath});

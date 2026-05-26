@@ -67,8 +67,12 @@ ImportKind ClassifyByExt(std::string_view ext);
 ImportResult Dispatch(std::string_view srcPath, EditorHost& host);
 
 // Texture importer：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
-// dest = assets/Textures/<basename>；overwrite 已存在文件（reimport 语义）。
-ImportResult ImportTexture(std::string_view srcPath, EditorHost& host);
+// destDirOverride 空 → dest = assets/Textures/<basename>（独立拖图片的默认）；
+// 非空 → dest = <destDirOverride>/<basename>。模型 importer 把贴图 co-locate
+// 进模型自己的 assets/Models/<stem>/ 子目录时传它（避免贴图被甩到
+// assets/Textures/ 后跨目录找）。overwrite 已存在文件（reimport 语义）。
+ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
+                           std::string_view destDirOverride = {});
 
 // Obj mesh importer：T3 接通。T2 阶段 stub 返回 NotImplemented。
 ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host);

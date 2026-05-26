@@ -113,8 +113,9 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
     if (earlyHashOpt.has_value())
     {
         const std::string earlyStem = src.stem().generic_string();
+        // 每模型一个子目录 assets/Models/<stem>/<stem>.mesh（与主路径一致）。
         const std::string earlyDestMesh =
-            (fs::path(kModelsDir) / (earlyStem + ".mesh")).generic_string();
+            (fs::path(kModelsDir) / earlyStem / (earlyStem + ".mesh")).generic_string();
         if (MetaSourceHashMatches(earlyDestMesh, earlyHashOpt.value()))
         {
             result.status   = ImportStatus::Success;
@@ -254,11 +255,12 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
     if (!fileHasNormals) { normals.clear(); }
     if (!fileHasUVs)     { uvs.clear(); }
 
-    // 目标路径：assets/Models/<basename>.mesh + 同目录 source copy 同 basename
-    // 保留扩展名。已存在文件 overwrite（reimport 语义）。
-    fs::path destDir = kModelsDir;
-    fs::create_directories(destDir, ec);
+    // 每模型一个子目录 assets/Models/<stem>/ —— mesh + source copy co-locate
+    // 进去（与 gltf importer 一致），避免和别的模型的文件混在 Models 根下。
+    // 已存在文件 overwrite（reimport 语义）。
     const std::string stem = src.stem().generic_string();
+    fs::path destDir = fs::path(kModelsDir) / stem;
+    fs::create_directories(destDir, ec);
     fs::path destMesh = destDir / (stem + ".mesh");
     fs::path destObj  = destDir / src.filename();
 
