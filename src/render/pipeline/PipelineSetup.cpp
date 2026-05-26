@@ -887,6 +887,66 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
         }
     }
     {
+        // 色彩分级 pipeline —— hdrColor + ubo → gradeColor（RGBA16F，no blend）。
+        // composite 复用 dofCompositePipeline。
+        auto gradeCode = LoadSpirv("shaders/orange_engine/color_grade.frag.spv");
+        if (gradeCode.empty())
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: color_grade shader .spv 加载失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+        Orange::Rhi::ShaderModuleDesc sm{};
+        sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
+        sm.mpCode      = gradeCode.data();
+        sm.mCodeSize   = gradeCode.size() * sizeof(std::uint32_t);
+        sm.mpDebugName = "orange_engine.color_grade.frag";
+        impl.colorGradeFs = rhi.CreateShaderModule(sm);
+
+        // colorGradeLayout：0 = hdrColor，1 = GradeUbo。
+        Orange::Rhi::DescriptorSetLayoutDesc lay{};
+        lay.mBindings.push_back({0, Orange::Rhi::DescriptorType::CombinedImageSampler,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mBindings.push_back({1, Orange::Rhi::DescriptorType::UniformBuffer,
+                                 1, Orange::Rhi::ShaderStage::Fragment});
+        lay.mpDebugName = "orange_engine.color_grade.layout";
+        impl.colorGradeLayout = rhi.CreateDescriptorSetLayout(lay);
+
+        Orange::Rhi::BufferDesc ub{};
+        ub.mSize        = sizeof(Pipeline::Impl::GradeUboData);
+        ub.mUsage       = Orange::Rhi::BufferUsage::Uniform;
+        ub.mMemoryUsage = Orange::Rhi::MemoryUsage::CpuToGpu;
+        impl.colorGradeUbo = rhi.CreateBuffer(ub);
+
+        if (!impl.colorGradeFs || !impl.colorGradeLayout || !impl.colorGradeUbo)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 色彩分级资源创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+
+        Orange::Rhi::GraphicsPipelineDesc d{};
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,
+                                   impl.fullscreenVs.get(), "main"});
+        d.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment,
+                                   impl.colorGradeFs.get(), "main"});
+        d.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+        d.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+        d.mDepthStencil.mDepthTestEnable  = false;
+        d.mDepthStencil.mDepthWriteEnable = false;
+        d.mColorBlend.mAttachments.push_back({});  // no blend
+        d.mRenderTargets.mColorFormats.push_back(kHdrColorFormat);
+        d.mDescriptorSetLayouts.push_back(impl.colorGradeLayout.get());
+        d.mpDebugName = "orange_engine.color_grade";
+        impl.colorGradePipeline = rhi.CreateGraphicsPipeline(d);
+        if (!impl.colorGradePipeline)
+        {
+            ORANGE_LOG_ERROR("Pipeline::Initialize: 色彩分级 pipeline 创建失败");
+            Shutdown();
+            return ResultCode::InternalError;
+        }
+    }
+    {
         // 法线预通道 pipeline —— 把 view-space 法线渲到 normalBuffer（RGBA8），
         // 供 SSAO / SSR 采真实法线。几何 pipeline（带顶点输入 + depth test），
         // 与 shadow caster 同款 push constant 尺寸（128 B，仅 vertex stage）。

@@ -311,6 +311,34 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// 色彩分级（color grading）。线性 HDR、tonemap 之前：曝光 → 白平衡 → 对比度 →
+// 饱和度。美术定调用。与 SSAO/SSR 同款 Pipeline 内部 RecordColorGradePass 录制
+// （Setup/Execute 空壳）。window + 编辑器 offscreen 两路径。
+class ORANGE_ENGINE_API ColorGradePass final : public IPostProcessPass
+{
+public:
+    bool enabled{true};
+
+    // 曝光补偿（stops，2 的幂）。+1 = 亮一倍，-1 = 暗一半。0 = 不变。
+    float exposure{0.0f};
+
+    // 对比度（围绕线性中灰 0.18）。1 = 不变，>1 加强，<1 减弱。
+    float contrast{1.0f};
+
+    // 饱和度。1 = 不变，0 = 灰度，>1 增艳。
+    float saturation{1.0f};
+
+    // 色温（-1 冷偏蓝 .. +1 暖偏橙）。0 = 中性。
+    float temperature{0.0f};
+
+    // 色调（-1 偏绿 .. +1 偏品红）。0 = 中性。
+    float tint{0.0f};
+
+    const char* Name() const noexcept override;
+    void        Setup(PostProcessSetupContext& ctx) override;
+    void        Execute(PostProcessExecuteContext& ctx) override;
+};
+
 }  // namespace Orange::Engine::Render
 
 #endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_PASSES_H

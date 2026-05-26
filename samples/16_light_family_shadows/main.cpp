@@ -215,6 +215,7 @@ int main(int argc, char** argv)
     bool        disableContact = false;
     bool        disableDof = false;
     bool        disableTaa = false;
+    bool        disableGrade = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -226,6 +227,7 @@ int main(int argc, char** argv)
         else if (a == "--no-contact")         { disableContact = true; }
         else if (a == "--no-dof")             { disableDof = true; }
         else if (a == "--no-taa")             { disableTaa = true; }
+        else if (a == "--no-grade")           { disableGrade = true; }
     }
 
     AppConfig cfg{};
@@ -424,6 +426,17 @@ int main(int argc, char** argv)
         taa->enabled  = !disableTaa;
         taa->feedback = 0.9f;
         chain.AddPass(std::move(taa));
+    }
+    // 色彩分级：暖调 + 轻微提对比/增艳的电影感定调。`--no-grade` 关闭做对比。
+    {
+        auto grade = std::make_unique<Orange::Engine::Render::ColorGradePass>();
+        grade->enabled     = !disableGrade;
+        grade->exposure    = 0.15f;
+        grade->contrast    = 1.1f;
+        grade->saturation  = 1.15f;
+        grade->temperature = 0.25f;   // 暖
+        grade->tint        = 0.0f;
+        chain.AddPass(std::move(grade));
     }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);

@@ -353,6 +353,28 @@ struct Pipeline::Impl
     glm::mat4                                            taaPrevViewProj{1.0f};
     bool                                                 taaHasHistory{false};
 
+    // ---- 色彩分级（color grading）GPU 资源 --------------------------------
+    // grade pass：hdrColor + ubo → gradeColor（曝光/白平衡/对比/饱和）；composite
+    // 复用 dofCompositePipeline 把 gradeColor replace 回 hdrColor。
+    struct GradeUboData
+    {
+        glm::vec4 params{0.0f, 1.0f, 1.0f, 0.0f};      // exposure / contrast / saturation / pad
+        glm::vec4 whiteBalance{1.0f, 1.0f, 1.0f, 0.0f};// rgb 乘子（host 由 temperature/tint 算）
+    };
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        colorGradeFs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> colorGradeLayout;   // 0=hdr 1=ubo
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            colorGradePipeline;
+    std::unique_ptr<Orange::Rhi::RHIBuffer>              colorGradeUbo;
+    std::unique_ptr<Orange::Rhi::RHITexture>             gradeColor;        // RGBA16F 分级结果
+    std::uint32_t                                        gradeColorWidth{0};
+    std::uint32_t                                        gradeColorHeight{0};
+    bool                                                 gradeColorLayoutShaderReadOnly{false};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      colorGradePool;     // gradeSet + gradeCompositeSet
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       colorGradeSet;      // hdr + ubo
+    Orange::Rhi::RHITexture*                             colorGradeSetBoundHdr{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       gradeCompositeSet;  // gradeColor
+    Orange::Rhi::RHITexture*                             gradeCompositeSetBound{nullptr};
+
     // ---- 法线预通道 GPU 资源（view-space G-buffer 法线）-----------------
     // SSAO / SSR 此前用深度差分(dFdx/dFdy)从 sceneDepth 重建 view-space 法线——
     // 那在几何边缘 / 薄物体 / 接缝处出锯齿与错误遮蔽（一个三角面内导数恒定，
@@ -924,6 +946,11 @@ struct Pipeline::Impl
     glm::mat4 ApplyTaaJitter(const glm::mat4& proj) const;
     bool EnsureTaaResources();
     bool RecordTaaResolve(const TaaPass& taaDesc, const glm::mat4& curJitteredViewProj);
+
+    // 色彩分级：曝光/白平衡/对比/饱和 → gradeColor → composite 回 hdrColor。
+    const ColorGradePass* FindActiveColorGradePass() const noexcept;
+    bool EnsureColorGradeResources();
+    bool RecordColorGradePass(const ColorGradePass& gradeDesc);
 
     // 法线预通道：normalBuffer 按 hdr 尺寸建 / 重建（供 SSAO / SSR 采真实法线）。
     bool EnsureNormalBuffer();

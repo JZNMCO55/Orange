@@ -194,4 +194,21 @@ void TaaPass::Execute(PostProcessExecuteContext& /*ctx*/)
     // 空 stub，见 Setup 注释。
 }
 
+// ---------- ColorGradePass ---------------------------------------------------
+
+const char* ColorGradePass::Name() const noexcept
+{
+    return "color_grade";
+}
+
+void ColorGradePass::Setup(PostProcessSetupContext& /*ctx*/)
+{
+    // 同 SsaoPass：实际录制走 Pipeline 内部 RecordColorGradePass。
+}
+
+void ColorGradePass::Execute(PostProcessExecuteContext& /*ctx*/)
+{
+    // 空 stub，见 Setup 注释。
+}
+
 }  // namespace Orange::Engine::Render

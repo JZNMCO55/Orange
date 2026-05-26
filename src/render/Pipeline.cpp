@@ -506,6 +506,21 @@ void Pipeline::Shutdown()
     impl.taaUbo.reset();
     impl.taaResolveFs.reset();
 
+    // 色彩分级资源（set 先于 pool）。
+    impl.colorGradeSet.reset();
+    impl.gradeCompositeSet.reset();
+    impl.colorGradePool.reset();
+    impl.gradeColor.reset();
+    impl.gradeColorWidth = 0;
+    impl.gradeColorHeight = 0;
+    impl.gradeColorLayoutShaderReadOnly = false;
+    impl.colorGradeSetBoundHdr = nullptr;
+    impl.gradeCompositeSetBound = nullptr;
+    impl.colorGradePipeline.reset();
+    impl.colorGradeLayout.reset();
+    impl.colorGradeUbo.reset();
+    impl.colorGradeFs.reset();
+
     // 法线预通道资源。
     impl.normalPrepassPipeline.reset();
     impl.normalPrepassVs.reset();
@@ -1661,6 +1676,14 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                     ok = impl.RecordTaaResolve(*taaPass, viewProj);
                 }
             }
+            // 色彩分级：最终 look 调整，放在所有 post（含 TAA）之后、tonemap 之前。
+            if (ok)
+            {
+                if (const ColorGradePass* gradePass = impl.FindActiveColorGradePass())
+                {
+                    ok = impl.RecordColorGradePass(*gradePass);
+                }
+            }
         }
 
         // v1.3.0 · AuxPassProvider hook：主 pass + 粒子之后、debug draw /
@@ -2346,6 +2369,15 @@ void Pipeline::Render(Orange::Engine::World& world)
                 if (const TaaPass* taaPass = impl.FindActiveTaaPass())
                 {
                     offscreenOk = impl.RecordTaaResolve(*taaPass, viewProj);
+                }
+            }
+
+            // 色彩分级：最终 look 调整，所有 post（含 TAA）之后、capture / tonemap 之前。
+            if (offscreenOk)
+            {
+                if (const ColorGradePass* gradePass = impl.FindActiveColorGradePass())
+                {
+                    offscreenOk = impl.RecordColorGradePass(*gradePass);
                 }
             }
 

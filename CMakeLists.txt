@@ -116,6 +116,7 @@ add_library(orange_engine STATIC
     src/render/pipeline/PipelineContactShadow.cpp
     src/render/pipeline/PipelineDof.cpp
     src/render/pipeline/PipelineTaa.cpp
+    src/render/pipeline/PipelineColorGrade.cpp
     src/render/pipeline/PipelineSky.cpp
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
@@ -327,6 +328,9 @@ orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/taa.frag.glsl"
     ORANGE_ENGINE_BUILTIN_TAA_FS_SPV)
 orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/color_grade.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_COLOR_GRADE_FS_SPV)
+orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/ssr.frag.glsl"
     ORANGE_ENGINE_BUILTIN_SSR_FS_SPV)
 orange_engine_compile_builtin_shader(
@@ -402,6 +406,7 @@ add_custom_target(orange_engine_builtin_shaders ALL
         "${ORANGE_ENGINE_BUILTIN_DOF_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_DOF_COMPOSITE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_TAA_FS_SPV}"
+        "${ORANGE_ENGINE_BUILTIN_COLOR_GRADE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSR_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV}"
         "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_VS_SPV}"
