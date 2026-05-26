@@ -64,14 +64,19 @@ bool Pipeline::Impl::EnsureContactShadowResources()
         if (!contactShadowPool) { return false; }
     }
 
-    // contactShadowSet（0=sceneDepth, 1=ubo, 2=normalBuffer）：depth / normalBuffer
-    // 重建后重绑。
-    if (contactShadowSet == nullptr || contactShadowSetBoundDepth != sceneDepth.get()
+    // contactShadowSet（0=sceneDepth, 1=ubo, 2=normalBuffer）：只分配一次，
+    // depth / normalBuffer 变化时 UpdateDescriptorSet 重写绑定（不 reset+realloc，
+    // RHI pool 无 free-bit 反复 realloc 会 resize 累积耗尽 OOM）。
+    if (contactShadowSet == nullptr)
+    {
+        contactShadowSet = rhi.AllocateDescriptorSet(*contactShadowPool, *contactShadowLayout);
+        if (!contactShadowSet) { return false; }
+        contactShadowSetBoundDepth  = nullptr;   // 强制下面 update
+        contactShadowSetBoundNormal = nullptr;
+    }
+    if (contactShadowSetBoundDepth != sceneDepth.get()
         || contactShadowSetBoundNormal != normalBuffer.get())
     {
-        contactShadowSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*contactShadowPool, *contactShadowLayout);
-        if (!set) { return false; }
         Orange::Rhi::DescriptorWrite w[3]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
@@ -86,8 +91,7 @@ bool Pipeline::Impl::EnsureContactShadowResources()
         w[2].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w[2].mImageInfo.mpTexture = normalBuffer.get();
         w[2].mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, w, 3);
-        contactShadowSet            = std::move(set);
+        rhi.UpdateDescriptorSet(*contactShadowSet, w, 3);
         contactShadowSetBoundDepth  = sceneDepth.get();
         contactShadowSetBoundNormal = normalBuffer.get();
     }

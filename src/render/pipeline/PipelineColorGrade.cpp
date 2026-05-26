@@ -66,7 +66,8 @@ bool Pipeline::Impl::EnsureColorGradeResources()
     {
         renderDevice->WaitIdle();
         gradeColor.reset();
-        gradeCompositeSet.reset();
+        // 不 reset composite set（RHI pool 无 free-bit，reset+realloc 会 resize
+        // 累积耗尽 OOM）；置 bound=null 触发下面 UpdateDescriptorSet 重写。
         gradeCompositeSetBound = nullptr;
 
         Orange::Rhi::TextureDesc t{};
@@ -87,12 +88,16 @@ bool Pipeline::Impl::EnsureColorGradeResources()
         gradeColorLayoutShaderReadOnly = false;
     }
 
-    // colorGradeSet（0=hdrColor, 1=ubo）：hdr 重建后重绑。
-    if (colorGradeSet == nullptr || colorGradeSetBoundHdr != hdrColor.get())
+    // colorGradeSet（0=hdrColor, 1=ubo）：只分配一次，hdr 变化时 UpdateDescriptorSet
+    // 重写（不 reset+realloc，避免 resize 累积耗尽 OOM）。
+    if (colorGradeSet == nullptr)
     {
-        colorGradeSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*colorGradePool, *colorGradeLayout);
-        if (!set) { return false; }
+        colorGradeSet = rhi.AllocateDescriptorSet(*colorGradePool, *colorGradeLayout);
+        if (!colorGradeSet) { return false; }
+        colorGradeSetBoundHdr = nullptr;   // 强制下面 update
+    }
+    if (colorGradeSetBoundHdr != hdrColor.get())
+    {
         Orange::Rhi::DescriptorWrite w[2]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
@@ -103,24 +108,25 @@ bool Pipeline::Impl::EnsureColorGradeResources()
         w[1].mBufferInfo.mpBuffer = colorGradeUbo.get();
         w[1].mBufferInfo.mOffset  = 0;
         w[1].mBufferInfo.mRange   = sizeof(GradeUboData);
-        rhi.UpdateDescriptorSet(*set, w, 2);
-        colorGradeSet         = std::move(set);
+        rhi.UpdateDescriptorSet(*colorGradeSet, w, 2);
         colorGradeSetBoundHdr = hdrColor.get();
     }
 
-    // gradeCompositeSet（0=gradeColor，复用 bloomLayout）。
-    if (gradeCompositeSet == nullptr || gradeCompositeSetBound != gradeColor.get())
+    // gradeCompositeSet（0=gradeColor，复用 bloomLayout）：同款 allocate-once + update。
+    if (gradeCompositeSet == nullptr)
     {
-        gradeCompositeSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*colorGradePool, *bloomLayout);
-        if (!set) { return false; }
+        gradeCompositeSet = rhi.AllocateDescriptorSet(*colorGradePool, *bloomLayout);
+        if (!gradeCompositeSet) { return false; }
+        gradeCompositeSetBound = nullptr;
+    }
+    if (gradeCompositeSetBound != gradeColor.get())
+    {
         Orange::Rhi::DescriptorWrite w{};
         w.mBinding             = 0;
         w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w.mImageInfo.mpTexture = gradeColor.get();
         w.mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, &w, 1);
-        gradeCompositeSet      = std::move(set);
+        rhi.UpdateDescriptorSet(*gradeCompositeSet, &w, 1);
         gradeCompositeSetBound = gradeColor.get();
     }
     return true;

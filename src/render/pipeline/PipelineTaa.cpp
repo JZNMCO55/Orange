@@ -106,8 +106,9 @@ bool Pipeline::Impl::EnsureTaaResources()
     {
         renderDevice->WaitIdle();
         for (auto& h : taaHistory) { h.reset(); }
-        for (auto& s : taaResolveSet) { s.reset(); }
-        for (auto& s : taaCopySet) { s.reset(); }
+        // 不 reset sets（RHI pool 无 free-bit，reset+realloc 会 resize 累积耗尽
+        // OOM）；置 taaSetsBoundHdr=null 触发下面 UpdateDescriptorSet 重写绑定到
+        // 新建的 history 纹理。set 本身只分配一次、长期复用。
         taaSetsBoundHdr = nullptr;
         taaHasHistory   = false;
         taaHistoryLayoutShaderReadOnly = {false, false};
@@ -133,17 +134,24 @@ bool Pipeline::Impl::EnsureTaaResources()
         taaHistoryHeight = hdrHeight;
     }
 
-    // sets：hdr / depth / history 重建后全部重绑（以 hdrColor 指针作触发）。
+    // sets：只分配一次（4 个：2 resolve + 2 copy）；hdr / depth / history 变化时
+    // 只 UpdateDescriptorSet 重写绑定（不 reset+realloc，避免 resize 累积耗尽 OOM）。
+    if (taaResolveSet[0] == nullptr)
+    {
+        for (std::uint32_t p = 0; p < 2; ++p)
+        {
+            taaResolveSet[p] = rhi.AllocateDescriptorSet(*taaPool, *taaLayout);
+            if (!taaResolveSet[p]) { return false; }
+            taaCopySet[p] = rhi.AllocateDescriptorSet(*taaPool, *bloomLayout);
+            if (!taaCopySet[p]) { return false; }
+        }
+        taaSetsBoundHdr = nullptr;   // 强制下面 update
+    }
     if (taaSetsBoundHdr != hdrColor.get())
     {
-        for (auto& s : taaResolveSet) { s.reset(); }
-        for (auto& s : taaCopySet) { s.reset(); }
-
         for (std::uint32_t p = 0; p < 2; ++p)
         {
             // resolve set[p]：0=hdrColor, 1=prevHistory(=history[1-p]), 2=depth, 3=ubo。
-            auto rs = rhi.AllocateDescriptorSet(*taaPool, *taaLayout);
-            if (!rs) { return false; }
             Orange::Rhi::DescriptorWrite w[4]{};
             w[0].mBinding             = 0;
             w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
@@ -162,19 +170,15 @@ bool Pipeline::Impl::EnsureTaaResources()
             w[3].mBufferInfo.mpBuffer = taaUbo.get();
             w[3].mBufferInfo.mOffset  = 0;
             w[3].mBufferInfo.mRange   = sizeof(TaaUboData);
-            rhi.UpdateDescriptorSet(*rs, w, 4);
-            taaResolveSet[p] = std::move(rs);
+            rhi.UpdateDescriptorSet(*taaResolveSet[p], w, 4);
 
             // copy set[p]：0=curHistory(=history[p])，复用 bloomLayout。
-            auto cs = rhi.AllocateDescriptorSet(*taaPool, *bloomLayout);
-            if (!cs) { return false; }
             Orange::Rhi::DescriptorWrite cw{};
             cw.mBinding             = 0;
             cw.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
             cw.mImageInfo.mpTexture = taaHistory[p].get();
             cw.mImageInfo.mpSampler = hdrSampler.get();
-            rhi.UpdateDescriptorSet(*cs, &cw, 1);
-            taaCopySet[p] = std::move(cs);
+            rhi.UpdateDescriptorSet(*taaCopySet[p], &cw, 1);
         }
         taaSetsBoundHdr = hdrColor.get();
     }

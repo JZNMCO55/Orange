@@ -365,6 +365,11 @@ int main()
         // RecordPassthroughToViewport 走 tonemap 合成 HDR+bloom→ACES 写 viewportColor），
         // 编辑器视口 WYSIWYG。bloom 路径不破坏离屏渲染（不崩/不黑/无 validation 错）。
         ppChain.AddPass(std::make_unique<Orange::Engine::Render::BloomPass>());
+        // DoF / TAA / ColorGrade 也挂上 —— 让 resize-churn 同时压这几个 pass 的
+        // descriptor pool（同款 allocate-once + update 修复，验证 resize 不耗尽）。
+        ppChain.AddPass(std::make_unique<Orange::Engine::Render::DofPass>());
+        ppChain.AddPass(std::make_unique<Orange::Engine::Render::TaaPass>());
+        ppChain.AddPass(std::make_unique<Orange::Engine::Render::ColorGradePass>());
         pipeline.SetPostProcessChain(&ppChain);
 
         // 无遮挡的头顶点光场景：地面中心被点光照亮。挂上 SSAO+SSR+Bloom 后仍应

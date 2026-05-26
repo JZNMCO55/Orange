@@ -69,7 +69,8 @@ bool Pipeline::Impl::EnsureDofResources()
     {
         renderDevice->WaitIdle();
         dofColor.reset();
-        dofCompositeSet.reset();
+        // 不 reset composite set（RHI pool 无 free-bit，reset+realloc 会 resize
+        // 累积耗尽 OOM）；置 bound=null 触发下面 UpdateDescriptorSet 重写。
         dofCompositeSetBound = nullptr;
 
         Orange::Rhi::TextureDesc t{};
@@ -90,13 +91,17 @@ bool Pipeline::Impl::EnsureDofResources()
         dofColorLayoutShaderReadOnly = false;
     }
 
-    // dofSet（0=hdrColor, 1=ubo, 2=sceneDepth）：hdr / depth 重建后重绑。
-    if (dofSet == nullptr || dofSetBoundHdr != hdrColor.get()
-        || dofSetBoundDepth != sceneDepth.get())
+    // dofSet（0=hdrColor, 1=ubo, 2=sceneDepth）：只分配一次，hdr / depth 变化时
+    // UpdateDescriptorSet 重写（不 reset+realloc，避免 resize 累积耗尽 OOM）。
+    if (dofSet == nullptr)
     {
-        dofSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*dofPool, *dofLayout);
-        if (!set) { return false; }
+        dofSet = rhi.AllocateDescriptorSet(*dofPool, *dofLayout);
+        if (!dofSet) { return false; }
+        dofSetBoundHdr   = nullptr;   // 强制下面 update
+        dofSetBoundDepth = nullptr;
+    }
+    if (dofSetBoundHdr != hdrColor.get() || dofSetBoundDepth != sceneDepth.get())
+    {
         Orange::Rhi::DescriptorWrite w[3]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
@@ -111,25 +116,26 @@ bool Pipeline::Impl::EnsureDofResources()
         w[2].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w[2].mImageInfo.mpTexture = sceneDepth.get();
         w[2].mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, w, 3);
-        dofSet           = std::move(set);
+        rhi.UpdateDescriptorSet(*dofSet, w, 3);
         dofSetBoundHdr   = hdrColor.get();
         dofSetBoundDepth = sceneDepth.get();
     }
 
-    // dofCompositeSet（0=dofColor，复用 bloomLayout）。
-    if (dofCompositeSet == nullptr || dofCompositeSetBound != dofColor.get())
+    // dofCompositeSet（0=dofColor，复用 bloomLayout）：同款 allocate-once + update。
+    if (dofCompositeSet == nullptr)
     {
-        dofCompositeSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*dofPool, *bloomLayout);
-        if (!set) { return false; }
+        dofCompositeSet = rhi.AllocateDescriptorSet(*dofPool, *bloomLayout);
+        if (!dofCompositeSet) { return false; }
+        dofCompositeSetBound = nullptr;
+    }
+    if (dofCompositeSetBound != dofColor.get())
+    {
         Orange::Rhi::DescriptorWrite w{};
         w.mBinding             = 0;
         w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w.mImageInfo.mpTexture = dofColor.get();
         w.mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, &w, 1);
-        dofCompositeSet      = std::move(set);
+        rhi.UpdateDescriptorSet(*dofCompositeSet, &w, 1);
         dofCompositeSetBound = dofColor.get();
     }
     return true;
