@@ -22,6 +22,7 @@
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
+#include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/ShadowConfig.h>
@@ -188,9 +189,26 @@ std::unique_ptr<MeshAsset> MakeFloorXZ(float h)
 // lightPos 的水平分量（x / z）决定压 -Y 面的哪个 uv 轴，便于分别验证。
 float RenderOverheadPointCenter(Pipeline& pipeline, AssetHandle<MeshAsset> floorXZ,
                                 AssetHandle<MeshAsset> occQuad, bool withOccluder,
-                                glm::vec3 lightPos, const char* label)
+                                glm::vec3 lightPos, const char* label,
+                                bool withPostComponent = false)
 {
     World world;
+
+    // withPostComponent：往 world 挂一个 PostProcessComponent（多效果 enabled），
+    // 验证 Pipeline find-first 的"组件驱动"路径（SyncPostProcessFromWorld →
+    // postComponentActive → FindActive* 走 post* 成员）端到端渲染不崩 + 出图。
+    // 与上面的 chain 路径互补（component 在场时覆盖 chain）。
+    if (withPostComponent)
+    {
+        Entity ppE = world.CreateEntity();
+        Orange::Engine::Render::PostProcessComponent pp;
+        pp.ssaoEnabled = true;
+        pp.ssrEnabled  = true;
+        pp.lensEnabled = true; pp.lensVignetteIntensity = 0.3f; pp.lensChromaticAberration = 0.003f;
+        pp.sharpenEnabled = true; pp.sharpenStrength = 0.4f;
+        pp.motionBlurEnabled = true; pp.motionBlurIntensity = 0.4f;
+        world.AddComponent(ppE, pp);
+    }
 
     Entity camE = world.CreateEntity();
     Camera cam  = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
@@ -427,6 +445,44 @@ int main()
             ++failures;
         }
         pipeline.SetPostProcessChain(nullptr);  // 复位，避免 ppChain 析构后悬空
+    }
+
+    // —— 组件驱动 post 路径 smoke —— 验证 PostProcessComponent 真正驱动渲染
+    // （SyncPostProcessFromWorld → postComponentActive → FindActive* 走 post* 成员），
+    // 与上面的 chain 路径互补。chain 已复位为 nullptr，但 world 里挂了
+    // PostProcessComponent → 组件优先（覆盖 chain），即便 chain 为空也照常出多效果。
+    // 这是 V1 起记着的"组件驱动渲染"回归：此前只有序列化往返 + 手动编辑器验证，
+    // 缺 render 路径覆盖。
+    {
+        const float ppLum = RenderOverheadPointCenter(pipeline, floorXZ, cube, false,
+                                                      glm::vec3(0.6f, 3.0f, 0.0f),
+                                                      "component-driven-post",
+                                                      /*withPostComponent=*/true);
+        std::fprintf(stderr, "  => component-driven post smoke: lum=%.3f\n", ppLum);
+        if (!(ppLum > 1.0f))
+        {
+            std::fprintf(stderr, "  [FAIL] PostProcessComponent 驱动渲染后地面未正常照亮"
+                                 "（组件路径破坏离屏渲染？）\n");
+            ++failures;
+        }
+
+        // resize-churn 同压组件路径（多效果 set 在 resize 时 allocate-once + update）。
+        const std::uint32_t churnSizes[] = {300u, 400u, 256u};
+        float ppChurnLum = 0.0f;
+        for (std::uint32_t s : churnSizes)
+        {
+            pipeline.ResizeOffscreen(s, s);
+            ppChurnLum = RenderOverheadPointCenter(pipeline, floorXZ, cube, false,
+                                                   glm::vec3(0.6f, 3.0f, 0.0f),
+                                                   "component-driven-resize-churn",
+                                                   /*withPostComponent=*/true);
+        }
+        std::fprintf(stderr, "  => component-driven resize-churn 末帧(256) lum=%.3f\n", ppChurnLum);
+        if (!(ppChurnLum > 1.0f))
+        {
+            std::fprintf(stderr, "  [FAIL] 组件路径多次 resize 后地面变黑（pool 耗尽？）\n");
+            ++failures;
+        }
     }
 
     pipeline.Shutdown();
