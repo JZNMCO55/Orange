@@ -22,6 +22,7 @@
 #include <orange/engine/physics/RigidBodyComponent.h>
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/EnvironmentComponent.h>
+#include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -497,6 +498,80 @@ void RegisterEnvironmentComponentSchema()
         .Register();
 }
 
+// PostProcessComponent 的 Inspector schema —— 屏幕空间 post + PCSS 的数据驱动控制
+// 面板（取代 ScenePanel/sample hardcode）。全局单例语义（Pipeline find-first）。
+// volume 容器字段（mode/extent/priority/blendDistance）是 v2 局部 volume 占位，
+// V1 不暴露。bloom/tonemap 不在本组件（由默认 chain 管）。
+void RegisterPostProcessComponentSchema()
+{
+    using PP = Orange::Engine::Render::PostProcessComponent;
+    ComponentSchemaBuilder<PP>("PostProcess", "Post Process")
+        .Helper("全局后处理设置（场景中只有第一个 PostProcessComponent 生效）。\n"
+                "bloom / tonemap 由默认渲染链管理，不在此组件。")
+        // —— SSAO / GTAO ——
+        .Field<&PP::ssaoEnabled>("ssaoEnabled", "SSAO Enabled")
+        .Field<&PP::ssaoUseGtao>("ssaoUseGtao", "Use GTAO")
+            .Tooltip("勾选 = GTAO（horizon-based，更准更平滑）；取消 = 半球 kernel SSAO。")
+        .Field<&PP::ssaoRadius>("ssaoRadius", "SSAO Radius (m)")
+            .Range(0.05f, 2.0f).DragSpeed(0.01f)
+        .Field<&PP::ssaoStrength>("ssaoStrength", "SSAO Strength")
+            .Range(0.0f, 2.0f).DragSpeed(0.01f)
+        .Field<&PP::ssaoPower>("ssaoPower", "SSAO Power")
+            .Range(1.0f, 4.0f).DragSpeed(0.02f)
+        // —— SSR ——
+        .Field<&PP::ssrEnabled>("ssrEnabled", "SSR Enabled")
+        .Field<&PP::ssrMaxDistance>("ssrMaxDistance", "SSR Max Distance (m)")
+            .Range(1.0f, 64.0f).DragSpeed(0.1f)
+        .Field<&PP::ssrThickness>("ssrThickness", "SSR Thickness")
+            .Range(0.05f, 4.0f).DragSpeed(0.01f)
+        .Field<&PP::ssrStrength>("ssrStrength", "SSR Strength")
+            .Range(0.0f, 1.0f).DragSpeed(0.01f)
+        // —— 接触阴影 ——
+        .Field<&PP::contactEnabled>("contactEnabled", "Contact Shadow Enabled")
+        .Field<&PP::contactLength>("contactLength", "Contact Length (m)")
+            .Range(0.02f, 1.0f).DragSpeed(0.005f)
+        .Field<&PP::contactThickness>("contactThickness", "Contact Thickness")
+            .Range(0.05f, 2.0f).DragSpeed(0.01f)
+        .Field<&PP::contactStrength>("contactStrength", "Contact Strength")
+            .Range(0.0f, 1.0f).DragSpeed(0.01f)
+        // —— 景深 ——
+        .Field<&PP::dofEnabled>("dofEnabled", "DoF Enabled")
+            .Tooltip("编辑器相机移动时对焦面固定在 view 空间 focusDistance 处。")
+        .Field<&PP::dofFocusDistance>("dofFocusDistance", "Focus Distance (m)")
+            .Range(0.5f, 100.0f).DragSpeed(0.1f)
+        .Field<&PP::dofFocusRange>("dofFocusRange", "Focus Range (m)")
+            .Range(0.5f, 50.0f).DragSpeed(0.1f)
+        .Field<&PP::dofMaxCoCRadius>("dofMaxCoCRadius", "Max Blur Radius (uv)")
+            .Range(0.002f, 0.05f).DragSpeed(0.001f)
+        // —— TAA ——
+        .Field<&PP::taaEnabled>("taaEnabled", "TAA Enabled")
+        .Field<&PP::taaFeedback>("taaFeedback", "TAA Feedback")
+            .Range(0.8f, 0.98f).DragSpeed(0.005f)
+            .Tooltip("历史权重。越高越稳越糊、收敛越慢。典型 0.85–0.95。")
+        // —— 色彩分级 ——
+        .Field<&PP::gradeEnabled>("gradeEnabled", "Color Grade Enabled")
+        .Field<&PP::gradeExposure>("gradeExposure", "Exposure (stops)")
+            .Range(-4.0f, 4.0f).DragSpeed(0.02f)
+        .Field<&PP::gradeContrast>("gradeContrast", "Contrast")
+            .Range(0.5f, 2.0f).DragSpeed(0.01f)
+        .Field<&PP::gradeSaturation>("gradeSaturation", "Saturation")
+            .Range(0.0f, 2.0f).DragSpeed(0.01f)
+        .Field<&PP::gradeTemperature>("gradeTemperature", "Temperature")
+            .Range(-1.0f, 1.0f).DragSpeed(0.01f)
+            .Tooltip("-1 冷偏蓝 .. +1 暖偏橙。")
+        .Field<&PP::gradeTint>("gradeTint", "Tint")
+            .Range(-1.0f, 1.0f).DragSpeed(0.01f)
+            .Tooltip("-1 偏绿 .. +1 偏品红。")
+        // —— 阴影质量（PCSS）——
+        .Field<&PP::pcssLightSize>("pcssLightSize", "PCSS Light Size (texel)")
+            .Range(0.0f, 32.0f).DragSpeed(0.1f)
+            .Tooltip("0 = 固定 PCF；>0 = PCSS 软阴影（接触硬、远处软）。\n"
+                     "作用 directional + spot 阴影。8–16 在 2048 分辨率下可见柔和。")
+        .Addable()
+        .Removable()
+        .Register();
+}
+
 void RegisterHierarchyComponentSchema()
 {
     using HC = Orange::Engine::Scene::HierarchyComponent;
@@ -930,6 +1005,7 @@ void RegisterBuiltinSchemas()
     RegisterPointLightSchema();
     RegisterSpotLightSchema();
     RegisterEnvironmentComponentSchema();
+    RegisterPostProcessComponentSchema();
     RegisterRenderableComponentSchema();
     RegisterRigidBodyComponentSchema();
     RegisterColliderComponentSchema();
