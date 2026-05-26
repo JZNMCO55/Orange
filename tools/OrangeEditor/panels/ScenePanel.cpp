@@ -20,6 +20,7 @@
 
 #include <orange/engine/render/BuiltinPostProcessChain.h>
 #include <orange/engine/render/PostProcessPasses.h>
+#include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/DebugDrawScene.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
@@ -600,14 +601,58 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         mpScenePostProcessChain = std::make_unique<
             Orange::Engine::Render::PostProcessChain>(
                 Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
-        // SSAO + SSR：offscreen 视口现在会跑这两个直接合成进 HDR 的 post pass
-        //（engine RenderOffscreen 已接），编辑器里所见即所得地显示环境光遮蔽
-        // + 反射。bloom/tonemap 仍仅 window 模式（offscreen 暂不接 stage-B）。
-        mpScenePostProcessChain->AddPass(
-            std::make_unique<Orange::Engine::Render::SsaoPass>());
-        mpScenePostProcessChain->AddPass(
-            std::make_unique<Orange::Engine::Render::SsrPass>());
+        // 全套屏幕空间 post —— engine RenderOffscreen 已把以下 pass 全部接进
+        // offscreen 视口路径（含 bloom WYSIWYG），编辑器视口与 sample
+        // 16_light_family_shadows 观感一致：GTAO 环境光遮蔽 / SSR 反射 / 接触
+        // 阴影 / 景深 / TAA 抗锯齿+去噪 / 色彩分级。参数对齐 sample。
+        namespace R = Orange::Engine::Render;
+        {
+            auto ssao = std::make_unique<R::SsaoPass>();
+            ssao->useGtao = true;   // GTAO（horizon-based，比半球 kernel 更准）
+            ssao->radius = 0.6f; ssao->strength = 1.0f; ssao->power = 2.0f;
+            mpScenePostProcessChain->AddPass(std::move(ssao));
+        }
+        {
+            auto ssr = std::make_unique<R::SsrPass>();
+            ssr->maxDistance = 14.0f; ssr->maxSteps = 40.0f;
+            ssr->thickness = 0.8f; ssr->strength = 0.7f;
+            mpScenePostProcessChain->AddPass(std::move(ssr));
+        }
+        {
+            auto cs = std::make_unique<R::ContactShadowPass>();
+            cs->length = 0.15f; cs->thickness = 0.3f; cs->bias = 0.015f; cs->strength = 0.9f;
+            mpScenePostProcessChain->AddPass(std::move(cs));
+        }
+        {
+            // 景深：编辑器相机可移动，对焦面固定在 view 空间 focusDistance 处；
+            // focusRange 取大一些（10）让在焦带宽、导航时不至大面积虚化。
+            auto dof = std::make_unique<R::DofPass>();
+            dof->focusDistance = 10.0f; dof->focusRange = 10.0f; dof->maxCoCRadius = 0.012f;
+            mpScenePostProcessChain->AddPass(std::move(dof));
+        }
+        {
+            // TAA：编辑器连续渲染，jitter 累积去噪 + 抗锯齿；相机运动靠重投影 +
+            // 邻域 clamp。overlay（grid/gizmo/debug）用未 jitter 的 viewProj（engine
+            // 侧已处理）故不 shimmer。
+            auto taa = std::make_unique<R::TaaPass>();
+            taa->feedback = 0.9f;
+            mpScenePostProcessChain->AddPass(std::move(taa));
+        }
+        {
+            auto grade = std::make_unique<R::ColorGradePass>();
+            grade->exposure = 0.15f; grade->contrast = 1.1f;
+            grade->saturation = 1.15f; grade->temperature = 0.25f;
+            mpScenePostProcessChain->AddPass(std::move(grade));
+        }
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
+
+        // PCSS 软阴影 + 2048 阴影图（directional + spot；与 sample 一致）。
+        {
+            R::ShadowConfig sc{};
+            sc.mapResolution = 2048;
+            sc.pcssLightSize = 12.0f;
+            mpScenePipeline->SetShadowConfig(sc);
+        }
 
         // v1.3.0 grid 真迁出：编辑器自家 EditorGridAuxPassProvider 实现
         // IAuxPassProvider，通过 Pipeline::SetAuxPassProvider 注册到 engine

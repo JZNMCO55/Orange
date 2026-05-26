@@ -1564,6 +1564,13 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         const glm::mat4 viewProj = impl.ApplyTaaJitter(impl.scene.MainCamera().projection)
                                  * impl.scene.MainCamera().view;
         const glm::mat4 invViewProj = glm::inverse(viewProj);
+        // 未 jitter 的 viewProj —— 供 overlay pass（aux/grid + debug draw）使用。
+        // TAA 把 jitter 加在场景几何上（多帧 resolve 抹平），但 overlay 在 TAA
+        // 之后画、不进 resolve；若用 jittered viewProj 会逐帧 sub-pixel 抖动
+        // （grid/gizmo shimmer）。未激活 TAA 时 base == jittered，等价。
+        const glm::mat4 baseViewProj    = impl.scene.MainCamera().projection
+                                        * impl.scene.MainCamera().view;
+        const glm::mat4 invBaseViewProj = glm::inverse(baseViewProj);
         const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
                                                : glm::mat4(1.0f);
 
@@ -1748,8 +1755,8 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             ctx.pHdrSampler = impl.hdrSampler.get();
             ctx.hdrWidth    = impl.hdrWidth;
             ctx.hdrHeight   = impl.hdrHeight;
-            ctx.invViewProj = invViewProj;
-            ctx.viewProj    = viewProj;
+            ctx.invViewProj = invBaseViewProj;  // overlay 用未 jitter（防 TAA shimmer）
+            ctx.viewProj    = baseViewProj;
             ctx.sceneDepthIsShaderReadOnly = true;  // 契约固定 true（pre-transition）
             ctx.hdrColorFormat   = impl.hdrColor->GetDesc().mFormat;
             ctx.sceneDepthFormat = impl.sceneDepth->GetDesc().mFormat;
@@ -1760,9 +1767,10 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
 
         // debug draw pass：grid / aux 之后、passthrough 之前。wrap 内自管
         // enabled / 空几何 silent skip；失败 silent，passthrough 继续。
+        // 用未 jitter 的 baseViewProj（overlay 不进 TAA resolve，防 shimmer）。
         if (ok)
         {
-            impl.RecordDebugDrawPass(viewProj);
+            impl.RecordDebugDrawPass(baseViewProj);
         }
 
         // passthrough HDR → viewportColor
