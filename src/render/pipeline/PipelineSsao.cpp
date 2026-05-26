@@ -60,7 +60,9 @@ bool Pipeline::Impl::EnsureSsaoResources()
     {
         renderDevice->WaitIdle();
         ssaoColor.reset();
-        ssaoApplySet.reset();        // ssaoColor 换了 → apply set 失效
+        // ssaoColor 换了 → apply set 绑定失效，但**不 reset set**（RHI pool 无
+        // free-bit，reset+realloc 会 resize 累积耗尽 OOM）；置 bound=null 触发下面
+        // UpdateDescriptorSet 重写绑定（set 本身只分配一次、长期复用）。
         ssaoApplySetBoundAo = nullptr;
 
         Orange::Rhi::TextureDesc t{};
@@ -82,14 +84,19 @@ bool Pipeline::Impl::EnsureSsaoResources()
         ssaoColorLayoutShaderReadOnly = false;
     }
 
-    // ssaoSet（binding 0=sceneDepth, 1=ssaoUbo, 2=normalBuffer）：sceneDepth 或
-    // normalBuffer 重建后重绑。
-    if (ssaoSet == nullptr || ssaoSetBoundDepth != sceneDepth.get()
-        || ssaoSetBoundNormal != normalBuffer.get())
+    // ssaoSet（binding 0=sceneDepth, 1=ssaoUbo, 2=normalBuffer）：只分配一次，
+    // sceneDepth / normalBuffer 变化时 UpdateDescriptorSet 重写绑定。**不 reset+
+    // realloc**——RHI pool 无 free-bit（DescriptorPoolDesc 无 free flag，也无
+    // ResetDescriptorPool 公共面），反复 realloc 会 resize 累积耗尽 → OOM。
+    if (ssaoSet == nullptr)
     {
-        ssaoSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*ssaoPool, *ssaoLayout);
-        if (!set) { return false; }
+        ssaoSet = rhi.AllocateDescriptorSet(*ssaoPool, *ssaoLayout);
+        if (!ssaoSet) { return false; }
+        ssaoSetBoundDepth  = nullptr;   // 强制下面 update
+        ssaoSetBoundNormal = nullptr;
+    }
+    if (ssaoSetBoundDepth != sceneDepth.get() || ssaoSetBoundNormal != normalBuffer.get())
+    {
         Orange::Rhi::DescriptorWrite w[3]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
@@ -104,25 +111,26 @@ bool Pipeline::Impl::EnsureSsaoResources()
         w[2].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w[2].mImageInfo.mpTexture = normalBuffer.get();
         w[2].mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, w, 3);
-        ssaoSet            = std::move(set);
+        rhi.UpdateDescriptorSet(*ssaoSet, w, 3);
         ssaoSetBoundDepth  = sceneDepth.get();
         ssaoSetBoundNormal = normalBuffer.get();
     }
 
-    // ssaoApplySet（binding 0=ssaoColor）：ssaoColor 重建后重绑（复用 bloomLayout）。
-    if (ssaoApplySet == nullptr || ssaoApplySetBoundAo != ssaoColor.get())
+    // ssaoApplySet（binding 0=ssaoColor，复用 bloomLayout）：同款 allocate-once + update。
+    if (ssaoApplySet == nullptr)
     {
-        ssaoApplySet.reset();
-        auto set = rhi.AllocateDescriptorSet(*ssaoPool, *bloomLayout);
-        if (!set) { return false; }
+        ssaoApplySet = rhi.AllocateDescriptorSet(*ssaoPool, *bloomLayout);
+        if (!ssaoApplySet) { return false; }
+        ssaoApplySetBoundAo = nullptr;
+    }
+    if (ssaoApplySetBoundAo != ssaoColor.get())
+    {
         Orange::Rhi::DescriptorWrite w{};
         w.mBinding             = 0;
         w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w.mImageInfo.mpTexture = ssaoColor.get();
         w.mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, &w, 1);
-        ssaoApplySet        = std::move(set);
+        rhi.UpdateDescriptorSet(*ssaoApplySet, &w, 1);
         ssaoApplySetBoundAo = ssaoColor.get();
     }
     return true;

@@ -1448,9 +1448,12 @@ bool Pipeline::Impl::RecordPassthroughToViewport()
         PushTonemap pcData{};
         pcData.exposure       = 1.0f;
         pcData.bloomIntensity = bloomPass->intensity;
+        // 必须先 BindGraphicsPipeline 再 SetPushConstants —— push constant 落到
+        // 当前已绑 pipeline 的 layout 上；先 push 会落到上一个（主 pass mesh，
+        // Vertex/64）的 layout 造成 stage/size 不匹配 validation error。
+        cmd.BindGraphicsPipeline(*impl.tonemapPipeline);
         cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment, 0,
                              static_cast<std::uint32_t>(sizeof(pcData)), &pcData);
-        cmd.BindGraphicsPipeline(*impl.tonemapPipeline);
         cmd.SetDescriptorSet(0, *impl.bloomCombineSet);
         cmd.Draw(3, 1, 0, 0);
     }

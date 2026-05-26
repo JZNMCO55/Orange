@@ -59,7 +59,9 @@ bool Pipeline::Impl::EnsureSsrResources()
     {
         renderDevice->WaitIdle();
         ssrColor.reset();
-        ssrCompositeSet.reset();
+        // ssrColor 换了 → composite set 绑定失效，但不 reset set（RHI pool 无
+        // free-bit，reset+realloc 会 resize 累积耗尽 OOM）；置 bound=null 触发下面
+        // UpdateDescriptorSet 重写。set 本身只分配一次、长期复用。
         ssrCompositeSetBound = nullptr;
 
         Orange::Rhi::TextureDesc t{};
@@ -83,13 +85,19 @@ bool Pipeline::Impl::EnsureSsrResources()
 
     // ssrSet（0=sceneDepth, 1=hdrColor, 2=ssrUbo, 3=normalBuffer）：depth / hdr /
     // normalBuffer 重建后重绑。
-    if (ssrSet == nullptr || ssrSetBoundDepth != sceneDepth.get()
-        || ssrSetBoundHdr != hdrColor.get()
+    // ssrSet：只分配一次，depth / hdr / normalBuffer 变化时 UpdateDescriptorSet
+    // 重写绑定（不 reset+realloc，RHI pool 无 free-bit 反复 realloc 会 OOM）。
+    if (ssrSet == nullptr)
+    {
+        ssrSet = rhi.AllocateDescriptorSet(*ssrPool, *ssrLayout);
+        if (!ssrSet) { return false; }
+        ssrSetBoundDepth  = nullptr;   // 强制下面 update
+        ssrSetBoundHdr    = nullptr;
+        ssrSetBoundNormal = nullptr;
+    }
+    if (ssrSetBoundDepth != sceneDepth.get() || ssrSetBoundHdr != hdrColor.get()
         || ssrSetBoundNormal != normalBuffer.get())
     {
-        ssrSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*ssrPool, *ssrLayout);
-        if (!set) { return false; }
         Orange::Rhi::DescriptorWrite w[4]{};
         w[0].mBinding             = 0;
         w[0].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
@@ -108,26 +116,27 @@ bool Pipeline::Impl::EnsureSsrResources()
         w[3].mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w[3].mImageInfo.mpTexture = normalBuffer.get();
         w[3].mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, w, 4);
-        ssrSet            = std::move(set);
+        rhi.UpdateDescriptorSet(*ssrSet, w, 4);
         ssrSetBoundDepth  = sceneDepth.get();
         ssrSetBoundHdr    = hdrColor.get();
         ssrSetBoundNormal = normalBuffer.get();
     }
 
-    // ssrCompositeSet（0=ssrColor，复用 bloomLayout）。
-    if (ssrCompositeSet == nullptr || ssrCompositeSetBound != ssrColor.get())
+    // ssrCompositeSet（0=ssrColor，复用 bloomLayout）：同款 allocate-once + update。
+    if (ssrCompositeSet == nullptr)
     {
-        ssrCompositeSet.reset();
-        auto set = rhi.AllocateDescriptorSet(*ssrPool, *bloomLayout);
-        if (!set) { return false; }
+        ssrCompositeSet = rhi.AllocateDescriptorSet(*ssrPool, *bloomLayout);
+        if (!ssrCompositeSet) { return false; }
+        ssrCompositeSetBound = nullptr;
+    }
+    if (ssrCompositeSetBound != ssrColor.get())
+    {
         Orange::Rhi::DescriptorWrite w{};
         w.mBinding             = 0;
         w.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         w.mImageInfo.mpTexture = ssrColor.get();
         w.mImageInfo.mpSampler = hdrSampler.get();
-        rhi.UpdateDescriptorSet(*set, &w, 1);
-        ssrCompositeSet      = std::move(set);
+        rhi.UpdateDescriptorSet(*ssrCompositeSet, &w, 1);
         ssrCompositeSetBound = ssrColor.get();
     }
     return true;

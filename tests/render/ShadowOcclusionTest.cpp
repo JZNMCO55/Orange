@@ -378,6 +378,27 @@ int main()
             std::fprintf(stderr, "  [FAIL] offscreen 挂 SSAO+SSR+Bloom 后地面未正常照亮（post 破坏离屏渲染？）\n");
             ++failures;
         }
+
+        // resize-churn：编辑器视口频繁 resize（如 4K 下 docking / 最大化）不应耗尽
+        // descriptor pool。回归此前 bug —— SSAO/SSR set 在 resize 时 reset+realloc，
+        // RHI pool 无 free-bit → 累积 OOM（vkAllocateDescriptorSets -1000069000）→
+        // 后续采样 UNDEFINED layout 级联。修复后 set 只分配一次 + UpdateDescriptorSet
+        // 重写绑定。多次 resize + 渲染后回 256 仍正常照亮即证不再耗尽。
+        const std::uint32_t churnSizes[] = {320u, 384u, 288u, 512u, 256u};
+        float churnLum = 0.0f;
+        for (std::uint32_t s : churnSizes)
+        {
+            pipeline.ResizeOffscreen(s, s);
+            churnLum = RenderOverheadPointCenter(pipeline, floorXZ, cube, false,
+                                                 glm::vec3(0.6f, 3.0f, 0.0f),
+                                                 "offscreen-resize-churn");
+        }
+        std::fprintf(stderr, "  => offscreen resize-churn 末帧(256) lum=%.3f\n", churnLum);
+        if (!(churnLum > 1.0f))
+        {
+            std::fprintf(stderr, "  [FAIL] offscreen 多次 resize 后地面变黑（descriptor pool 耗尽 / OOM？）\n");
+            ++failures;
+        }
         pipeline.SetPostProcessChain(nullptr);  // 复位，避免 ppChain 析构后悬空
     }
 
