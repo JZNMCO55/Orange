@@ -1538,6 +1538,34 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
                 impl.hdrHeight);
         }
 
+        // SSAO / SSR：主 pass + 粒子之后、grid / aux 之前 —— 直接合成进
+        // hdrColor 的 post pass（无需 stage-B tonemap），让编辑器 offscreen
+        // 视口也能所见即所得地显示环境光遮蔽 + 反射。放在 aux/grid 前，使其
+        // 只作用场景几何、不染编辑器 overlay。bloom/tonemap 因依赖 stage-B
+        // combine 仍仅 window 模式（offscreen passthrough 暂不接，留作后续）。
+        if (ok)
+        {
+            const glm::mat4 proj = impl.scene.MainCamera().projection;
+            if (const SsaoPass* aoPass = impl.FindActiveSsaoPass())
+            {
+                ok = impl.RecordSsaoPass(*aoPass, proj);
+            }
+            if (ok)
+            {
+                if (const SsrPass* ssrPass = impl.FindActiveSsrPass())
+                {
+                    ok = impl.RecordSsrPass(*ssrPass, proj);
+                }
+            }
+            if (ok)
+            {
+                if (const GodRaysPass* grPass = impl.FindActiveGodRaysPass())
+                {
+                    ok = impl.RecordGodRaysPass(*grPass, viewProj);
+                }
+            }
+        }
+
         // v1.3.0 · AuxPassProvider hook：主 pass + 粒子之后、debug draw /
         // passthrough 之前调用外部注册的辅助 pass（典型：editor 端 grid /
         // outline / wireframe / debug overlay）。Pipeline 在调用 hook 前

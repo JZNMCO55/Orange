@@ -19,6 +19,7 @@
 #include "../schema/ComponentSchemaRegistry.h"
 
 #include <orange/engine/render/BuiltinPostProcessChain.h>
+#include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/DebugDrawScene.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
@@ -599,6 +600,13 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         mpScenePostProcessChain = std::make_unique<
             Orange::Engine::Render::PostProcessChain>(
                 Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
+        // SSAO + SSR：offscreen 视口现在会跑这两个直接合成进 HDR 的 post pass
+        //（engine RenderOffscreen 已接），编辑器里所见即所得地显示环境光遮蔽
+        // + 反射。bloom/tonemap 仍仅 window 模式（offscreen 暂不接 stage-B）。
+        mpScenePostProcessChain->AddPass(
+            std::make_unique<Orange::Engine::Render::SsaoPass>());
+        mpScenePostProcessChain->AddPass(
+            std::make_unique<Orange::Engine::Render::SsrPass>());
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
 
         // v1.3.0 grid 真迁出：编辑器自家 EditorGridAuxPassProvider 实现
