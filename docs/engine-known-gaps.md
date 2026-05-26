@@ -1618,7 +1618,7 @@ G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已
 - **G2（spot perspective shadow）**：**纯 Engine** ✅。RHI 已支持 **depth `Tex2DArray`**（`TextureViewDesc` per-layer Tex2D view + depth aspect 由 format 自动派生，见 `OrangeRender/src/backend/vulkan/VulkanDevice.cpp` CreateTextureView）。无 OrangeRender 改动
 - **G3（point cubemap shadow）**：**纯 Engine** ✅（与初步评估的"跨仓风险点"不同）。RHI 已支持 **render-to-cube-face depth**：`TexCube` + DepthStencil usage + per-face Tex2D depth view（IBL prefilter 用同款 render-to-cube-face color 机制；depth 走相同 view 路径，aspect 自动）。**唯一缺口**：`samplerCubeArray` 需 `imageCubeArray` device feature（OrangeRender 未启用）→ 用 N 独立 `samplerCube` 绕过（IBL cube 已在用，core 能力）。已登记 `OrangeRender/docs/incoming_feature.md` FEATURE-2026-05-26-enable-image-cube-array（低优先 nice-to-have，启用后可合并为 cubeArray + 扩展点光阴影数）
 - **结论**：G1/G2/G3 全部 OrangeEngine 子仓内闭环，零 OrangeRender 代码改动；仅一条 forward-looking FEATURE 文档登记（ADR-010 跨仓文档豁免）
-- **已知小问题**：debug 构建开 Vulkan validation 时，cube depth + 11 个 descriptor binding 使 validation 层异常慢（实测百倍量级）；生产 / 关 validation 正常（4 帧 0.2s）。`ShadowOcclusionTest` 用 validation off 保持 CI 快
+- **性能**：阴影渲染开销正常，**开 Vulkan validation 也快**——`ShadowOcclusionTest`（validation on，256 res，4 帧）实测 0.24s；`samples/16_light_family_shadows`（validation on，1280×720，三光源全 castsShadow）流畅出帧。编辑器（device validation on）放 castsShadow 的 spot/point 光不会卡。（调试期一度观测到极慢，事后定位为同时跑两个 Vulkan 进程争用 GPU 所致，非 validation / 非阴影本身。）
 
 ### Inc2 · MikkTSpace 高质量切线落地（2026-05-25）
 

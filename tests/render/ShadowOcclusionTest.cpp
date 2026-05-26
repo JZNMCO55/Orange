@@ -146,7 +146,7 @@ int main()
 
     Orange::Renderer::RenderDeviceDesc deviceDesc{};
     deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
-    deviceDesc.mEnableValidation = false;  // headless 正确性测试；关 validation 提速
+    deviceDesc.mEnableValidation = true;  // 阴影 pass validation-clean，且开 validation 仍快（4 帧 0.24s）
     auto pDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
     if (!pDevice)
     {
