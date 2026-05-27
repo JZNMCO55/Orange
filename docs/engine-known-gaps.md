@@ -1757,6 +1757,113 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 ---
 
+## GAP-2026-05-27-consumer-imgui-tuning-hook
+
+- **发现方**：OrangeGames 首游 Spike 1 scaffold session（搭消费骨架时核对引擎公共面有无消费者 ImGui 接线）
+- **发现日期**：2026-05-27
+- **一句话定性**：引擎公共面**无面向消费者（游戏）的 ImGui / debug-UI 提交 hook**。`Layer` 基类只有 `OnAttach/OnDetach/OnUpdate/OnEvent`，**无 `OnImGui`**；ImGui 仅由 `tools/OrangeEditor`（`EditorRenderLayer.cpp` + `main.cpp`）用引擎私有路径自起；`IRenderPass::InsertPass` 扩展点虽存在但 0.x **"暂未真正接通"**（`Pipeline.h:17` / `:113` 注释，InsertPass 走 fallback）。结果：Spike 1 手感调试方法论里列为**"第一优先级地基"**的"热重载 ImGui 调参面板"在游戏侧无法实现。
+- **状态**：**仅登记，未实现**。用户 2026-05-27 已拍板：**下一步开独立 OrangeEngine session 优先处理本条**（提到 Spike 1 critical path 之上——调参面板是手感 spike 的前置地基），再回 OrangeGames 用真 slider 继续 spike。
+
+### 触发场景
+
+Spike 1 软体史莱姆手感调试需把一批旋钮（约束 stiffness/damping、control-target 弹簧硬度、跳跃冲量、coyote time、jump buffer、apex hang）接到 slider **边玩边拧、不重编不重启、人不离测试点**——这是把手感调试从"无底洞"变成可收敛工程过程的关键。ImGui 已被引擎 vendor，但只对编辑器开放。
+
+### 缺什么 / 现状对照（已核实代码）
+
+| 能力 | 现状 | 目标 |
+|---|---|---|
+| 消费者 GUI hook | `Layer` 无 `OnImGui`；只能 `OnUpdate` + `GetDebugDrawScene()`（线/球/AABB/三角形，不够做参数 UI）| 游戏侧每帧能提交 ImGui 窗 / slider |
+| ImGui context | 仅 `tools/OrangeEditor` 私有起（context + GLFW/Vulkan backend）| 引擎托管，消费者开箱即用 |
+| `IRenderPass` 注入 | `InsertPass` 公共面存在但 0.x 走 fallback、未真正接通 | 接通，或走更 turnkey 的 Layer::OnImGui |
+
+### 落地设计要点（供独立 session 评审）
+
+1. **可选形态（待该 session 拍板）**：(a) `Layer::OnImGui()` 虚函数 + `AppHost`/`Pipeline` 内部托管 ImGui context + GLFW/Vulkan backend 的 `NewFrame`/`RenderDrawData`，在 `AfterPostProcess` 阶段回调——**turnkey、对游戏最友好**；(b) 真正接通 `IRenderPass` `AfterPostProcess` hook，让游戏自起 ImGui pass；(c) 仅暴露 ImGui context + descriptor pool 句柄让消费者自建（引擎改动最少但消费者样板最多）。**倾向 (a)**。
+2. **参考现有起法**：`tools/OrangeEditor/EditorRenderLayer.cpp` 已有 ImGui context 创建 + backend init + per-frame `NewFrame` + swapchain pass 内 `ImGui_ImplVulkan_RenderDrawData` 全套——把这套从编辑器私有**上提**为引擎可复用件即可。
+3. **header isolation 决策点**：`OnImGui` 不能在公共头暴露 ImGui 类型。要么消费者自 `#include <imgui.h>`（引擎把 imgui include dir 标成 `OrangeEngine::orange_engine` 的 INTERFACE，与 STATIC 库发布一致），要么引擎提供自家薄封装 debug-UI API。这点需与"公共头不漏第三方"invariant 一起拍。
+4. **验收 sample**：建议 `samples/17_imgui_overlay`——窗口上叠一个 ImGui 窗，slider 实时改场景参数、不重编。
+
+### 期望验收
+
+- 一个仅经公共 API 的消费者（游戏 / sample）能在画面上叠 ImGui 窗 + slider，改值实时生效、不重编不重启；
+- header isolation invariant 仍绿（`scripts/check_invariants.py`）；
+- 编辑器自身 ImGui 行为不回归。
+
+### 备注
+
+- 纯引擎（+ 可能需 OrangeRender swapchain pass 配合）改动。与下条 [[GAP-2026-05-27-builtin-shaders-not-installed-for-consumers]] 同属"**外部消费者就绪度**"一束，建议**同一引擎 session 一起处理**——两条都是 OrangeGames 真正能消费引擎跑起来的前置。
+- 优先级：**P1（用户拍板提到 Spike 1 前置）**——区别于本文件多数"撞到再拉动"的 P3 预留条目。
+
+---
+
+## GAP-2026-05-27-builtin-shaders-not-installed-for-consumers
+
+- **发现方**：OrangeGames 首游 Spike 1 scaffold session（核对引擎 `install()` 规则时发现）
+- **发现日期**：2026-05-27
+- **一句话定性**：引擎 `install(EXPORT ...)` 只装了 lib + 公共头 + cmake config，**未装 builtin 编译产物 shader**——`shaders/orange_engine/*.spv` 只在顶层 `CMakeLists.txt` 被 copy 到 **build tree** 的 `RUNTIME_OUTPUT_DIRECTORY`（行 195/219），**无对应 `install()` 规则**（install 段行 679-748 只有 TARGETS / include 目录 / EXPORT / config）。外部消费者 `find_package` + 链接后**能编过，但运行期跑不起来**：`Pipeline::Initialize` / `MaterialSystem::RegisterBuiltins` 按 ".exe 相对 `shaders/orange_engine/*.spv`" 加载会扑空。
+- **状态**：**仅登记，未实现**。
+
+### 触发场景
+
+OrangeGames 经 `find_package(OrangeEngine CONFIG)` 消费引擎跑首个窗口，`MaterialSystem::RegisterBuiltins()` + `CreateInstance("textured"/"toon"/...)` 需要 builtin material 的 `.spv`。`samples/` 因 in-tree 与引擎共享同一 `RUNTIME_OUTPUT_DIRECTORY` 不暴露此问题——**只有外部消费者撞到**。这也是为什么 `D:\sdk` 下只有 `orange-render`、从未真正产出过可被外部游戏消费的 `orange-engine` SDK。
+
+### 缺什么
+
+1. **install builtin shaders**：install 段补 `install(DIRECTORY/FILES ...)` 把编译出的 `shaders/orange_engine/*.spv` 装到消费者可定位的位置（如 `<prefix>/bin/shaders/orange_engine` 或 `<prefix>/share/OrangeEngine/shaders`），并提供机制（cmake var / config 暴露路径 / 安装到消费者 runtime dir）让游戏 `.exe` 旁能拿到这些 spv。
+2. **（连带）消费者 cmake helper**：`orange_engine_set_compiler_options`（`cmake/CompilerOptions.cmake`）等 in-tree helper **不在** `OrangeEngineConfig` 导出，外部 CMake 用不到——消费者需自设 C++20。可选：把消费者也想要的 helper 纳入 install 的 cmake module，或在 config 里给 target 设 `INTERFACE cxx_std_20`。
+
+### 期望验收
+
+- `cmake --install` 后，一个**仅 `find_package(OrangeEngine CONFIG)`** 的外部最小 consumer 能编 + 跑出窗口（builtin material 正常显示），**不需手动从引擎 build tree 拷 shader**；
+- `tests/install/` 的 install/config smoke 可扩一条"外部 consumer 跑起来"的端到端校验。
+
+### 备注
+
+- 与 [[GAP-2026-05-27-consumer-imgui-tuning-hook]] 同属外部消费者就绪度，建议同 session。
+- **OrangeGames 侧当前 workaround**（不等引擎修）：游戏 CMake 用一个 cache var（`ORANGE_ENGINE_SHADER_DIR`）指向引擎 build tree 的 `bin/<config>/shaders/orange_engine`，`add_custom_command(POST_BUILD)` copy 到游戏 `.exe` 旁。见 `OrangeGames/prototypes/spike-01-blob/CMakeLists.txt` 注释。
+
+---
+
+## GAP-2026-05-27-play-in-editor
+
+- **发现方**：OrangeGames Spike 1 scaffold session 讨论 editor ↔ game 工作流时
+- **发现日期**：2026-05-27
+- **一句话定性**：引擎 / 编辑器**无 play-in-editor (PIE)**——OrangeEditor 只**编辑数据**（scene / material / prefab，schema-first），无法在编辑器内**加载并运行游戏玩法代码**。当前游戏代码是独立 `find_package(OrangeEngine)` 消费的 exe（如 `OrangeGames/prototypes/spike-01-blob`），与编辑器是两个进程、互不加载；引擎既无**脚本运行时**也无**游戏模块热加载**（roadmap 已把 `Hot reload / C# 脚本` 列为 v1.x 长尾、未开工）。所以"在编辑器里摆好关卡 → 点 Play 立刻在视口试玩"这条迭代闭环不存在。
+- **状态**：**仅登记，未实现**。用户 2026-05-27 拍板：**属大型架构能力，等关卡 / prefab 编辑工作流实际成熟、手感 spike 验证完后，由 editor 侧独立 session（很可能多个）推进**，现在不排期。
+
+### 触发场景
+
+Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会越来越需要"点 Play 在编辑器内试玩"——这是 Unity / Godot（脚本运行时热加载）、Unreal（C++ 模块 Live Coding + PIE）的核心迭代闭环。没有 PIE 时，每次试玩都得切到独立游戏 exe、重编、重启、走回测试点，与手感 / 关卡迭代的连续性严重相悖。graybox / 纯手感 spike 阶段**不需要**（spike 自己的 exe 够用），所以非当前阻塞。
+
+### 缺什么 / 两条主路线（待评审拍板）
+
+让编辑器能**实例化并 tick 游戏侧 World + 系统**。两条事实标准路线：
+
+| 路线 | 玩法逻辑形态 | 编辑器怎么跑它 | 参考 |
+|---|---|---|---|
+| (a) 脚本运行时 | C# / Lua / 自家脚本 | 编辑器嵌运行时，热加载脚本执行 | Unity (C#) / Godot (GDScript) |
+| (b) 游戏模块热加载 | C++ 编成 dll | 编辑器运行时 `load`/`reload` 该 module，PIE 内 tick 其 systems/components | Unreal Live Coding + PIE |
+
+两条都共需的基础设施：
+
+1. **游戏侧 `ISystem` / 自定义 component 注册能被编辑器发现**（与 schema-first / plugin-first 架构 ADR-001 + custom-component 扩展点对齐）。
+2. **PIE 播放 / 暂停 / 停止状态机**：进 Play 时 clone editing world → runtime world（依赖现有 scene 序列化做深拷贝），退出 Play 还原到编辑前状态，编辑期改动不被 play 期污染。
+3. **输入 / 相机在 editing 模式 vs play 模式切换**（编辑期 fly-cam + gizmo；play 期游戏自己的相机 + 输入上下文）。
+4. **前置依赖**：编辑器需先能把外部游戏仓当项目打开（**workspace / 项目模型**——本 session 讨论过，OrangeEditor 当前焊死在自己仓 `assets/`，无"打开外部项目"概念）+ 发现该项目的游戏代码。PIE 落地前这条 workspace 模型基本是硬前置。
+
+### 期望验收
+
+- 编辑器里摆一个挂了**游戏侧自定义 system**（如一个移动 component）的场景 → 点 **Play** → 视口内该 system 实际 tick（component 真的动）→ 点 **Stop** → 场景**还原到编辑前状态**；
+- editing 期的相机 / gizmo 与 play 期的游戏输入互不干扰。
+
+### 备注
+
+- 大件，非 critical path，但是 editor ↔ game 闭环的关键长杆。优先级 **P3+（成熟后拉动）**。
+- 与 [[GAP-2026-05-27-consumer-imgui-tuning-hook]]（消费者 ImGui hook）正交但同属"让游戏真正用上引擎 / 编辑器"一束；PIE 的 workspace 前置也与那条同期更自然。
+- roadmap 的 `C# 脚本` 长尾条目若推进，是路线 (a) 的落点；若选 (b) 则属新架构方向，需独立 ADR。
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
