@@ -1,7 +1,7 @@
-# OrangeEngine 扩展点设计（已迁至 Wiki）
+# OrangeEditor 使用手册（已迁至 Wiki）
 
 > 本文档已按文档分层决策（amends [ADR-006](../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-006-wiki-ecosystem-knowledge-base.md)）归档到生态知识库 Orange-Wiki。
 >
-> **canonical 正文 / 维护位置**：[`Orange-Wiki/case-studies/orange-engine/reference/extension-points.md`](../../Orange-Wiki/case-studies/orange-engine/reference/extension-points.md)
+> **canonical 正文 / 维护位置**：[`Orange-Wiki/case-studies/orange-engine/reference/editor-user-guide.md`](../../Orange-Wiki/case-studies/orange-engine/reference/editor-user-guide.md)
 >
 > 此处仅保留重定向指针，避免历史相对链接失效。请到 Wiki 阅读与更新正文。

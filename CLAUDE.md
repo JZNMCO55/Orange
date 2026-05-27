@@ -19,8 +19,8 @@ The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in th
   - `docs/roadmap.md` — Phase 6+ long-term roadmap（含 Phase 6.5 outline 入口）
   - `docs/editor-roadmap.md` — OrangeEditor v0.x 路线（独立 semver）
   - `docs/engine-known-gaps.md` — 编辑器 / sample 撞上的引擎缺口登记
-  - `docs/extension-points.md` — public API extension surface and project-level invariants
-  - `docs/coding-standards.md` — naming, guards, API macro (delta vs OrangeRender)
+  - `../Orange-Wiki/case-studies/orange-engine/reference/extension-points.md` — public API extension surface and project-level invariants（已迁 Wiki；`docs/extension-points.md` 留重定向 stub）
+  - `../Orange-Wiki/case-studies/orange-engine/reference/coding-standards.md` — naming, guards, API macro (delta vs OrangeRender)（已迁 Wiki；`docs/coding-standards.md` 留重定向 stub）
   - `docs/milestone-start-checklist.md` — 任意 milestone 开工前的 5–10 分钟 ritual
   - `docs/milestone-end-checklist.md` — 任意 milestone 标 ✅ 前的 5–10 分钟 ritual
   - `docs/decisions/README.md` — Architecture Decision Records 入口（实际 ADR 已迁 `../Orange-Wiki/case-studies/orange-engine/decisions/`，本 README 维护索引 + "什么进 ADR" 节）
@@ -342,7 +342,7 @@ milestone-end-checklist （前置：标 ✅ 之前）
 When given a task in this repo, default to this workflow:
 
 1. **Read `docs/design-plan.md`** to confirm which Phase the task belongs to and what its outputs are. Reject scope that crosses Phase boundaries.
-2. **Read `docs/extension-points.md`** if the task touches any extension surface (custom components / shaders / asset types / render passes / animator backends / save game).
+2. **Read `../Orange-Wiki/case-studies/orange-engine/reference/extension-points.md`** if the task touches any extension surface (custom components / shaders / asset types / render passes / animator backends / save game).（已迁 Wiki；`docs/extension-points.md` 留重定向 stub）
 3. **Consult `../Orange-Wiki/`** for algorithmic / architectural decisions. Cite specific pages.
 4. **Check the invariants in this file** before adding any `#include`. The header isolation rules are checked in code review.
 5. **Match OrangeRender's coding conventions**. Header guards, naming, brace style, namespace nesting — all aligned.

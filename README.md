@@ -8,6 +8,7 @@ Windows-first C++20 game framework，承载基于 `OrangeEngine::orange_engine` 
 |---|---|
 | 第一次接触本项目，想理解整体工作流与文档组织 | [`../Orange-Wiki/case-studies/orange-engine/onboarding.md`](../Orange-Wiki/case-studies/orange-engine/onboarding.md)（**强烈推荐先读**） |
 | 当下整体状态 + 编码 / 架构纪律 | [`CLAUDE.md`](CLAUDE.md) |
+| **用 OrangeEditor 编辑场景 / 资产（操作手册）** | [`editor-user-guide.md`](../Orange-Wiki/case-studies/orange-engine/reference/editor-user-guide.md)（已迁 Wiki） |
 | Phase 1–5.5 历史任务表 | [`docs/design-plan.md`](docs/design-plan.md) |
 | Phase 6+ 长期路线 | [`docs/roadmap.md`](docs/roadmap.md) |
 | 编辑器演进路线 | [`docs/editor-roadmap.md`](docs/editor-roadmap.md) |

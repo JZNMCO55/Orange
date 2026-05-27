@@ -3,6 +3,10 @@
 OrangeEngine 的关卡 / 粒子 / 材质编辑器，目标是把 game content 生产从
 "程序员手写 JSON" 过渡到"美术 / 关卡设计师交互式编辑"。
 
+> 📖 **怎么用这个编辑器**（界面 / 面板 / 每个组件的参数 / 资产导入 / 场景保存 /
+> 快捷键 / 设置）：见 [`editor-user-guide.md`](../../../Orange-Wiki/case-studies/orange-engine/reference/editor-user-guide.md)（已迁 Wiki）。
+> 本 README 只讲**构建与运行**。
+
 **当前状态**：v0.0.2 scaffold + ImGui + Vulkan 集成 + multi-viewport 编排
 已就位。Vulkan loader 路径统一已落地——ImGui 静态库以 `IMGUI_IMPL_VULKAN_NO_PROTOTYPES`
 编译，启动期通过 `Interop::GetVulkanGetInstanceProcAddr()`（OrangeRender
