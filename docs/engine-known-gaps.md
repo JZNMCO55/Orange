@@ -1714,6 +1714,49 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 ---
 
+## GAP-2026-05-27-postprocess-component-local-volume
+
+- **发现方**：渲染推进 session（铺完 post 特效 + 写后处理参考页 `rendering-post-process.md` 时回看 PostProcessComponent 作用域语义）
+- **发现日期**：2026-05-27
+- **一句话定性**：`PostProcessComponent` v1 作为**全局单例**消费（`Pipeline` find-first + `SyncPostProcessFromWorld` 每帧把首个组件灌进全局 `postXxx` 参数），无**局部 post-process volume**——场景挂多个组件时只有 first-found 生效，无法做"进洞穴压暗调色 / 进 boss 房切氛围"这类**按相机位置分区**的 post。组件已为此预留 `Mode{Global,Local}` / `localExtent` / `priority` / `blendDistance` 占位字段（`include/orange/engine/render/PostProcessComponent.h`），但 Pipeline 当前只走 `Global` 分支
+- **状态**：**仅登记，未实现**（方向性预留，**无排期 / 无触发条件承诺**；本 session 只铺特效 + 写参考页时顺手发现占位字段意图未登记，记一条防止丢失）
+
+### 触发场景
+
+首游 Ori-like 关卡天然分区（地表 / 洞穴 / boss 房 / 水下），各区想要不同 post look——洞穴压暗 + 偏冷调色、boss 房高对比 + 暗角加重、水下蓝绿色偏 + 轻模糊。v1 全局单例只能整张关卡一套 post，切区域得手写脚本改全局组件字段（突变、无过渡）。Local volume + 相机位置混合是 UE PostProcessVolume / Unity Volume Framework 的事实标准。**非阻塞**：灰盒 / 早期关卡用单一全局 look 完全够，等关卡氛围设计真正撞上分区需求再拉动。
+
+### 缺什么 / 现状对照（已核实代码）
+
+| 能力 | v1 现状 | v2 目标 |
+|---|---|---|
+| 作用域 | 全局单例（`mode` 字段保留但只走 `Global`）| `Local`：实体 Transform 处 `localExtent` 半尺寸盒 |
+| 多组件 | find-first，其余忽略 | collect-all，按相机位置 + `priority` 选 / 叠 |
+| 过渡 | 无（切换即突变）| `blendDistance`：盒边界外这段距离线性淡入 |
+| Pipeline 消费 | `SyncPostProcessFromWorld` 灌首个组件 → 全局 post 参数 | 收集所有 Local volume + Global 底，按相机位置逐字段混合 |
+| scene schema | 占位字段已序列化（全 optional，向后兼容）| **零 schema 改动**（v1 已铺路，老场景兼容）|
+
+### 落地设计要点（供独立 session 执行）
+
+1. **占位字段已就位**（header 已核实）：`enum class Mode : std::uint8_t { Global = 0, Local = 1 }` + `localExtent`（vec3 半尺寸盒）+ `priority`（重叠谁压谁）+ `blendDistance`（边界淡入）。v1 `ComponentSerializers.cpp` 已带这些字段（全 optional），**v2 不动 scene schema**（这是 v1 刻意预留的核心收益）。
+2. **Pipeline 改 collect-all**：`SyncPostProcessFromWorld` 从 "find-first 灌全局" 改为 "收集 world 内所有 PostProcessComponent → 按相机 world 位置判断落在哪些 Local 盒内 → 按 `priority` 排序 + `blendDistance` 算每个 volume 权重 → 逐字段加权混合（Global 组件作 priority 最低的底）"。
+3. **混合语义需定清**（设计决策点）：标量 / 颜色类字段线性 lerp；bool enable 类字段按"最高 priority 命中的 volume 接管"还是 OR 语义需落地时拍板，并同步写进 `rendering-post-process.md` 的作用域段。
+4. **编辑器侧**：`Local` 模式下 gizmo 画 `localExtent` 线框盒（参现有 PointLight range 圆环 gizmo plugin 模板）；schema 已 driven，`mode` / `localExtent` 等字段自动出控件，无需新 Inspector 代码。
+5. **验证**：两个 PostProcessComponent（一个 Global 底 + 一个 Local 高对比盒），相机移入 / 移出盒，看 post 在 `blendDistance` 内平滑过渡；用 `--capture` 出盒内 / 盒外 / 过渡带三张对比图肉眼核对（现有 demo 的 ±10 场景需要专门 fixture 体现分区）。
+
+### 期望验收
+
+- 单 Global 组件场景与 v1 逐像素一致（增量安全网）；
+- 多 volume 下相机进出 Local 盒时 post 在 `blendDistance` 内平滑淡入淡出、无突变；priority 重叠仲裁符合预期；
+- 老 scene（v1 写的、字段全 optional）直接 Load 行为不变；ctest 全绿 + lint/drift 干净。
+
+### 备注
+
+- 纯 OrangeEngine `Pipeline` + 编辑器 gizmo 改动，**不需跨仓提 feature**（OrangeRender 侧 post pass 资源已齐）。
+- 与 [[GAP-2026-05-27-tonemap-operator-selection]] **正交**：那条是 HDR→LDR 收尾曲线（tonemap/bloom 刻意**不进**组件，属 stage-A/B 收尾），本条是**已在组件内**那批 post 字段（SSAO/SSR/接触阴影/DoF/TAA/色彩分级/motion blur/Lens/Sharpen + PCSS）的作用域升级——tonemap/bloom 不参与 volume 混合。
+- 优先级：**P3（方向性预留，非 critical path）**——首游关卡氛围设计实际撞分区 post 需求时拉动；登记本身只为防止 v1 预留的 volume 占位字段意图丢失，**不构成排期承诺**（符合本文件"登记 ≠ 承诺要做"门槛）。
+
+---
+
 ## 处理记录
 
 - **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
