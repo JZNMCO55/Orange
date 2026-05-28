@@ -36,6 +36,7 @@
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
+#include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/VfxSystem.h>
 
 #include "render/EditorGridAuxPassProvider.h"
@@ -117,6 +118,14 @@ private:
     // （inclusive/exclusive ms + call count）。数据源是 Core::Profiler
     // 单例（AppHost 主循环帧末 FinalizeFrame 写入的 snapshot）。
     void DrawProfilerPanel(const Orange::Engine::FrameContext& frame);
+    // v1.3.1：Render Settings 面板（GAP-2026-05-28-editor-render-settings-panel）。
+    // ShadowConfig 全字段（cascadeCount / debugCascadeTint / pcssLightSize /
+    // pcfKernelRadius / mapResolution / depthBias / normalBias）的 ImGui 编辑
+    // 控件，编辑直写 mShadowConfig，DrawScenePanel 每帧 push 到 mpScenePipeline，
+    // 编辑后下一帧 viewport 立即可见效果。浮动面板，默认隐藏（View 菜单切换），
+    // 与 Settings / Profiler 同款 mShow* gating 模式。实现见
+    // panels/RenderSettingsPanel.cpp。
+    void DrawRenderSettingsPanel();
     // ---- panels/LayersPanel.cpp (v0.6 c5) -------------------------------
     // Layer manifest 编辑：visibility 切换 / 添加 / 删除。
     // Hierarchy panel 的 layer 列 + 右键 "Move to layer >" 在
@@ -217,6 +226,23 @@ private:
     bool                                              mShowSettingsPanel{false};
     // v0.9 Profiler：是否显示 Profiler 面板（默认不显示，由 View 菜单切换）。
     bool                                              mShowProfilerPanel{false};
+    // v1.3.1 Render Settings：是否显示 Render Settings 浮动面板（默认不显示，
+    // 由 View 菜单切换）。GAP-2026-05-28-editor-render-settings-panel。
+    bool                                              mShowRenderSettingsPanel{false};
+
+    // v1.3.1 ShadowConfig 编辑器档默认值 —— 历史上 ScenePanel.cpp 在
+    // EnsureScenePipeline 首次成功后 hardcode 一行 SetShadowConfig(2048 +
+    // pcssLightSize 12) 完成初始化；现在该 hardcode 改为读本字段并每帧 push
+    // 到 mpScenePipeline，Render Settings 面板直接编辑本字段。
+    //
+    // designated initializer 跳过中间未改字段（pcfKernelRadius / depthBias /
+    // normalBias / cascadeCount=3 默认 / debugCascadeTint=false 默认），与
+    // ShadowConfig 字段声明顺序对齐（mapResolution 第 1 / pcssLightSize 第 5）。
+    // mapResolution=2048 + pcssLightSize=12 = 与历史 hardcode 完全等价的默认。
+    Orange::Engine::Render::ShadowConfig              mShadowConfig{
+        .mapResolution = 2048,
+        .pcssLightSize = 12.0f,
+    };
     // v1.1 T2：File→Import... 菜单点击时置 true，下次 ApplyPendingImports
     // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
     // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。

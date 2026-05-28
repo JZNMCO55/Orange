@@ -221,6 +221,11 @@ void EditorRenderLayer::DrawScenePanel()
             mpEditorGridProvider->SetEnabled(sViewportGridEnabled);
         }
         mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
+        // v1.3.1 Render Settings 面板编辑后下一帧立即生效 —— mShadowConfig 是
+        // panel UI 直写字段，每帧 push（by-value 32 bytes 拷贝到 mpImpl，开销
+        // 可忽略）。mapResolution 变化时 Pipeline EnsureShadowMap 下帧自重建
+        // shadow target；其余字段当帧立即对 ubo 生效。
+        mpScenePipeline->SetShadowConfig(mShadowConfig);
 
         // v0.9 c2 DebugDraw 接通 + Collider 可视化（v0.9.5 后置补丁）：dbg
         // 通道由 Debug Draw / Colliders 两个独立 toggle 共享，任一开启即启用
@@ -647,12 +652,13 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
 
         // PCSS 软阴影 + 2048 阴影图（directional + spot；与 sample 一致）。
-        {
-            R::ShadowConfig sc{};
-            sc.mapResolution = 2048;
-            sc.pcssLightSize = 12.0f;
-            mpScenePipeline->SetShadowConfig(sc);
-        }
+        // v1.3.1 GAP-2026-05-28-editor-render-settings-panel：hardcode 撤掉，
+        // 编辑器档默认值挂 EditorRenderLayer::mShadowConfig（designated init
+        // mapResolution=2048 + pcssLightSize=12，等价历史 hardcode）；本处
+        // first-time push 一次让 Pipeline initial shadow target 按编辑器档分
+        // 辨率创建。每帧后续 push 在 DrawScenePanel 入口（让 Render Settings
+        // 面板编辑立即生效），见下方"viewport toolbar toggle → Pipeline"段。
+        mpScenePipeline->SetShadowConfig(mShadowConfig);
 
         // v1.3.0 grid 真迁出：编辑器自家 EditorGridAuxPassProvider 实现
         // IAuxPassProvider，通过 Pipeline::SetAuxPassProvider 注册到 engine

@@ -2278,3 +2278,67 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
   - **gizmo 长度随 entity rotation 波动**（c10 顺手修，非 GAP 登记）—— DirectionalLight / ParticleEmitter gizmo 的旧实现用"投 origin + 1*X 量像素 / 单位"再 `tipWorld = origin + dirN * worldUnitsPerHandle` 反推世界长度。perspective 投影下"沿 +X 1 单位的 px"≠"沿 dirN 1 单位的 px"，dirN 朝/背相机时投影几乎为 0 → 屏幕长度随 dir 方向剧烈波动，entity 旋转时 gizmo 长度肉眼可见变化。修法：直接在屏幕空间钉死箭头长度 —— 投 `origin + dirN` 取归一化屏幕方向，`tipScreen = projOrigin + dirN2D * kHandleScreenLengthPx`，长度恒定与 dir 方向解耦。dir 投影退化时不画箭头（朝/背相机一面无法表达方向，后续可补 ⊙/⊗ icon，本 patch 范围外）。涉及文件：`tools/OrangeEditor/plugin/DirectionalLightGizmoPlugin.cpp` / `ParticleEmitterGizmoPlugin.cpp`
   - **DemoWorld → BuiltinAssets 拆分**（c11 架构归位，非 GAP 登记）—— `tools/OrangeEditor/DemoWorld.{h,cpp}` 原杂糅 3 层职责：(1) builtin mesh 工厂 (Make{Plane,Cube,Sphere}Mesh) (2) 启动期资产 bootstrap (InitializeEditorAssets + BeepWav helpers + lazy bake .mesh/.material/.wav) (3) demo 场景填充 (SeedDemoWorld / SeedPbrShowcaseWorld)。前 2 类是"编辑器永远需要的"基础设施，命名却挂"Demo"令读者误以为可拿掉；v1.0.1 cube winding 修复期间已被该命名误导一次。修法：新增 `BuiltinAssets.{h,cpp}` 承接 mesh 工厂 + InitializeEditorAssets + BuildNamedMaterialInstances + BeepWav helpers；DemoWorld 仅保留 Seed 函数（命名与内容真正对齐）。零行为变化（move 函数 + update includes + CMakeLists 加 BuiltinAssets.cpp，调用点 `main.cpp` / `EditorRenderLayer.cpp` / `MaterialAssetInspectorPlugin.cpp` 加 `#include "BuiltinAssets.h"`）。`InitializeEditorAssets` 内 SeedDemoWorld 不再被启动期默认调用（v1.0 验收期间已落地），所以拆出后 DemoWorld 真正只在 `File → Reset to Demo Scene` 等候选入口被消费
   - 关键改动文件：`tools/OrangeEditor/schema/ComponentSchema.h` / `schema/ComponentSchemaRegistry.h` / `schema/SchemaInspector.cpp` / `schema/RegisterBuiltinSchemas.cpp` / `EditorRenderLayer.h` / `EditorRenderLayer.cpp` / `panels/EntityTreePanel.cpp` / `DemoWorld.cpp`（cube winding 修）/ `CMakeLists.txt`（VERSION bump）/ `src/render/Pipeline.cpp`（IBL fallback bump）/ `docs/editor-roadmap.md`（v1.0.1 段）/ `docs/engine-known-gaps.md`（5 个 GAP 关闭 + cube winding GAP 登记+关闭）/ `vendor/Orange-Wiki/case-studies/orange-engine/milestones/editor/editor-v1.0.1-acceptance-checklist.md`（新增）/ `assets/meshes/cube.mesh`（删除让启动期 rebake）
+
+## GAP-2026-05-28-editor-render-settings-panel ✅
+
+- **发现方**：Orange-Ecosystem umbrella session 中用户提问"CSM 也集成到 OrangeEditor 了嘛？"
+- **发现日期**：2026-05-28（与 GAP-2026-05-27-cascaded-shadow-maps 全套主线落地同 session 顺手 follow-up）
+- **一句话定性**：CSM 主线（GAP-2026-05-27）完整落地后，编辑器视口里 directional 阴影**默认就走 3 级 CSM**（`ShadowConfig::cascadeCount{3}` 默认值生效），视觉效果"被动启用" —— 但 OrangeEditor 内**没有任何 ShadowConfig 字段的 UI 控件**：`tools/OrangeEditor/panels/ScenePanel.cpp` 651-655 只 hardcode 了 `mapResolution = 2048 + pcssLightSize = 12.0f`，cascadeCount / debugCascadeTint / pcfKernelRadius / depthBias / normalBias 均不可在 GUI 编辑，调级数 / 看 cascade 染色必须改 ScenePanel.cpp 重编。CSM 视觉戏剧化 polish（sample 18 的 `--tint` / `--motion` CLI flag）在编辑器里完全无入口
+- **状态**：**✅ 2026-05-28 落地**（与 CSM GAP 同 session 顺手 follow-up），方案 B（新做 Render Settings panel）实施完成
+
+### 决策与方案
+
+候选方案分析：
+
+| 方案 | 形态 | 取舍 |
+|---|---|---|
+| A. Schema 注册 ShadowConfig | 参 `RegisterBuiltinSchemas.cpp` 里 `PP::` PostProcess 的 `.Field<>` 写法 | 不适用：ShadowConfig 不是 component，是 Pipeline 全局 config，schema 框架当前没这个范畴（schema 是 per-component / per-asset Inspector 路径） |
+| B. 新做 Render Settings 浮动面板 | 类似 Unity Project Settings → Quality → Shadows / Godot Project Settings → Rendering → Lights and Shadows | **选定**：杠杆最高 —— 未来 GI / Reflection / Anti-aliasing 等 Pipeline 级全局开关都能复用本 panel + 当下 ShadowConfig 编辑 UI 一并解决 |
+| C. 暂时不做 | sample 18 CLI flag 足够内部验证 | 拒：用户已直接问"是否集成"，且编辑器架构纪律 v0.2.5 的"不允许 hardcode"侧约束，hardcode 路径越久越债务 |
+
+**vendor/LumixEngine 没有对应面板**（Lumix shadow config 走 per-light component property），架构差异：Orange 走 per-pipeline `ShadowConfig`（一份全局），Lumix 走 per-light prop。Lumix 模式拒绝原因：每个 directional light 独立 `cascadeCount` 等价于 OrangeEngine 多 directional light not-yet 决策的扩展面，不是当下 ShadowConfig 模型该走的路。
+
+### 落地范围
+
+**与 mShowSettingsPanel / mShowProfilerPanel 同款"浮动面板 + View 菜单 toggle"模式**，避免占用 dock 默认面板格栅（ShadowConfig 是低频编辑，不该常驻像 Inspector / Hierarchy 那样的固定位）。
+
+- `EditorRenderLayer.h`：
+  - `#include <orange/engine/render/ShadowConfig.h>`
+  - 新增 `void DrawRenderSettingsPanel();` 成员函数声明
+  - 新增 `bool mShowRenderSettingsPanel{false};`（与 mShowSettingsPanel / mShowProfilerPanel 并列）
+  - 新增 `Orange::Engine::Render::ShadowConfig mShadowConfig{ .mapResolution = 2048, .pcssLightSize = 12.0f };`（C++20 designated initializer 跳过中间未改字段，与原 ScenePanel hardcode 等价）
+- `EditorRenderLayer.cpp`：
+  - OnImGui 调用链：`if (mShowRenderSettingsPanel) DrawRenderSettingsPanel();`（与 mShowSettingsPanel / mShowProfilerPanel 同款 gating 模式）
+  - View 菜单：`ImGui::MenuItem("Render Settings", nullptr, &mShowRenderSettingsPanel);`
+- `panels/RenderSettingsPanel.cpp`（新增 ~170 行）：实现 `EditorRenderLayer::DrawRenderSettingsPanel()`，3 个 CollapsingHeader 分段：
+  - **Shadow · Cascaded Shadow Maps**：SliderInt cascadeCount [1, 4] + Checkbox debugCascadeTint
+  - **Shadow · Filter (PCSS / PCF)**：DragFloat pcssLightSize [0, 32] + SliderInt pcfKernelRadius [0, 2]
+  - **Shadow · Resolution & Bias**：Combo mapResolution {1024, 2048, 4096} + DragFloat depthBias / normalBias
+  - 所有控件配 ImGui::SetTooltip 说明字段含义；pcssLightSize / mapResolution 控件 tooltip 末尾标注 "⚠ 若场景含 PostProcessComponent，本值会被组件覆盖"（对照 `src/render/Pipeline.cpp:2117-2123` GatherShadowParamsFromComponents 覆盖路径）
+  - 底部 "Reset Shadow Settings to Editor Defaults" 按钮：`sc = ShadowConfig{ .mapResolution = 2048, .pcssLightSize = 12.0f };` 与字段默认值同款
+- `panels/ScenePanel.cpp`：
+  - `EnsureScenePipeline` 首次成功后：`R::ShadowConfig sc{}; sc.mapResolution = 2048; sc.pcssLightSize = 12.0f; mpScenePipeline->SetShadowConfig(sc);` hardcode 块**撤掉**，改为 `mpScenePipeline->SetShadowConfig(mShadowConfig);`（首次 push 让 initial shadow target 按编辑器档分辨率创建）
+  - `DrawScenePanel` 每帧入口（在 SetSkyEnabled 之后、Render 之前）追加 `mpScenePipeline->SetShadowConfig(mShadowConfig);`（让 Render Settings 面板编辑后下一帧 viewport 立即生效；by-value 32 bytes 拷贝到 mpImpl，开销可忽略）
+- `tools/OrangeEditor/CMakeLists.txt`：sources 列表加 `panels/RenderSettingsPanel.cpp`
+
+**架构纪律对照**（CLAUDE.md "OrangeEditor 架构纪律"段）：
+- ✅ 不在 EditorState 上无脑加字段：mShadowConfig 加在 EditorRenderLayer 上而非 EditorHost / EditorState，与 mEditorTime / mShowSettingsPanel / mShowProfilerPanel 等运行时状态字段同类（这些都是 panel 局部状态而非全编辑器共享 context）
+- ✅ 浮动面板模式复用既有 mShow* gating 模板（与 Settings / Profiler 同款），不引入新 panel 注册机制
+- ✅ schema 注册形式不适用 ShadowConfig（per-pipeline config 非 component），按方案 B 走独立 panel；将来若 PipelineConfig 类似的全局配置增多，可考虑独立 PropertySchema 范畴
+
+### 验收
+
+- 全 52 ctest 通过（含 editor_build_smoke）
+- `python scripts/check_invariants.py` → `All invariants OK. (7 grandfathered by baseline)`
+- `python scripts/check_claude_md_drift.py` → `none detected.`
+- 视觉验证：CSM 主线视觉效果在 sample 18 polish 阶段（commit `63a4ad3` `--tint` / `--motion`）已充分验证；本次 GAP 仅把同一份功能从 CLI flag 暴露到编辑器 UI，不涉及渲染路径改动 —— UI 控件路径由 ImGui 标准控件 + 直写字段 + 每帧 SetShadowConfig 三件套组成，无独立视觉风险
+
+### 关键改动文件
+
+`tools/OrangeEditor/EditorRenderLayer.h`（include ShadowConfig.h + Draw 声明 + 2 字段） / `tools/OrangeEditor/EditorRenderLayer.cpp`（OnImGui chain + View 菜单 MenuItem） / `tools/OrangeEditor/panels/RenderSettingsPanel.cpp`（新增） / `tools/OrangeEditor/panels/ScenePanel.cpp`（hardcode 撤掉 + 每帧 push） / `tools/OrangeEditor/CMakeLists.txt`（sources 加 RenderSettingsPanel.cpp） / `docs/engine-known-gaps.md`（本条目登记+关闭）
+
+### 留待后续
+
+- **持久化**：mShadowConfig 不写盘，每次启动编辑器回归 designated init 默认值；后续若用户期望 per-project 持久化（与 EditorSettings / EditorKeybindings 同档），按 EditorSettings.cpp 的写盘路径扩展 —— 但需要先确认 ShadowConfig 是"项目级"还是"全局编辑器偏好"（前者落 .scene.json 或同目录 .render-settings.json，后者落 ~/.orange-editor/settings.json），独立 GAP 触发
+- **PostProcess 覆盖语义**：当前 RenderSettingsPanel 调 pcssLightSize / mapResolution 仅 tooltip 标注会被 PostProcessComponent 覆盖；将来可考虑在控件外侧加状态指示（"被组件 X 覆盖中"），独立 GAP 触发
+- **未来 Pipeline 全局配置**：本面板设计为 Render Settings 总入口，将来 GI / Reflection / AA / Tonemap 等若引入 per-pipeline 全局开关，新开 CollapsingHeader 段加入即可，无需新建 panel

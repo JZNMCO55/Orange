@@ -344,6 +344,10 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     {
         DrawProfilerPanel(frame);
     }
+    if (mShowRenderSettingsPanel)
+    {
+        DrawRenderSettingsPanel();
+    }
 
     // v0.6 c2：未保存确认 popup —— 必须在 ApplyPendingSceneOp 之前，让
     // popup 的 Save 按钮设置的 pendingSceneOp 在同帧 ApplyPendingSceneOp
@@ -677,6 +681,7 @@ void EditorRenderLayer::DrawMainMenuBar()
     {
         ImGui::MenuItem("Settings", nullptr, &mShowSettingsPanel);
         ImGui::MenuItem("Profiler", nullptr, &mShowProfilerPanel);
+        ImGui::MenuItem("Render Settings", nullptr, &mShowRenderSettingsPanel);
         ImGui::EndMenu();
     }
 

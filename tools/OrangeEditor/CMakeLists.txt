@@ -125,6 +125,7 @@ add_executable(OrangeEditor
     panels/EntityTreePanel.cpp
     panels/InspectorPanel.cpp
     panels/LayersPanel.cpp
+    panels/RenderSettingsPanel.cpp
     panels/ScenePanel.cpp
     panels/ToolbarPanel.cpp
     command/AnimFsmCommands.cpp
