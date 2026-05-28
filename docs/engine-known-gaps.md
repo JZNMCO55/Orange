@@ -33,11 +33,12 @@
 
 ---
 
-## GAP-2026-05-11-point-light-and-visible-halo
+## GAP-2026-05-11-point-light-and-visible-halo ✅
 
 - **发现方**：OrangeEditor v0.1 / v0.1.5 Demo Scene 设计
 - **发现日期**：2026-05-11
 - **一句话定性**：Render 公共面缺 PointLight / SpotLight 与可见光晕能力，导致 "点光源照亮黑暗环境 + 光体本身可见" 的典型场景（Ori-like 史莱姆发光 / 灯泡照明）无法实现
+- **状态**：**✅ 2026-05-28 G3 落地**（G1+G2 已落地 2026-05-20；G3 commit `cb8041c`，落地详见本文件"G3 落地记录"段）
 
 ### 触发场景
 
@@ -99,10 +100,58 @@
 ### 状态
 
 - **登记**：2026-05-11
-- **处理**：G1 + G2 已落地（2026-05-20，与音频集成 + GAP-2 cmake gate 同 session）；G3 halo billboard 留 v1.x Ori-like 视觉子模式拉动。详细落地点见本文件"处理记录"段
+- **处理**：G1 + G2 已落地（2026-05-20，与音频集成 + GAP-2 cmake gate 同 session）；G3 已落地（2026-05-28，commit `cb8041c`，见下方"G3 落地记录"段）
 - **关联**：editor-roadmap.md v0.1.5 demo scene / v1.x Ori-like 视觉子模式
 - **归属**：`docs/roadmap.md` Phase 10 · 渲染深化 Task 10-07（2026-05-12 拍板）
 - **v0.7 retro 复审（2026-05-19）**：backlog 状态有效；非 v0.7 critical path 上；第一款游戏 fork 启动前不主动开工，与 v1.x Ori-like 视觉子模式同节奏（仅登记需求，撞上即升格）
+
+### G3 落地记录（2026-05-28，与 PostProcess V2 sample 19 + Gizmo plugin 同 session）
+
+**触发**：PostProcess V2 sample 19 + Gizmo plugin 闭环后用户拍板继续推 menu 候选；菜单首选选 A 方案"PointLight 内嵌字段 + Pipeline 自动 halo pass"（用户接受 ~3-4h 工作量），不走 GAP G3 字面"editor 侧消费"的 B 方案 —— 让 halo 成为 PointLight 自带视觉表现，编辑器一勾选即得（UX 优先于零破坏面）。
+
+**实施清单**（11 文件 / 1 commit `cb8041c` / +461 -14）：
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| 字段 | `include/orange/engine/render/LightComponent.h` | PointLight struct +3 字段（haloEnabled / haloRadius=0.15m / haloIntensity=1.0），与 castsShadow 正交 |
+| 序列化 | `src/scene/ComponentSerializers.cpp` | Write/Read 加 3 字段 optional read，老 scene 不带=默认 off（schema 兼容） |
+| schema | `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp` | PointLightComponent schema 加 3 字段 + Range + DragSpeed + Tooltip |
+| shader | `src/render/builtin_shaders/halo.{vert,frag}.glsl` | 新 2 shader，复用 mesh vertex input + 144B push constant {uMVP, uModel, uHaloColorIntensity}；vert 算 color * intensity 传 varying，frag 直接 output |
+| build | `CMakeLists.txt` | halo.vert/.frag 编译条目 + install list（参 emissive 同款） |
+| material | `include/orange/engine/render/BuiltinMaterials.h` + `.cpp` | LoadHalo template（uniforms uMVP + uModel + uHaloColorIntensity），不进 MaterialSystem 公开列表（Pipeline 内部持有） |
+| Pipeline | `src/render/pipeline/PipelineImpl.h` | haloMaterial / haloLoaded + haloSphereVertex/IndexBuffer / IndexCount 成员 + EnsureHaloMaterial / EnsureHaloSphereMesh helper + RecordOffscreenPass 签名加 World* pWorld |
+| Pipeline | `src/render/Pipeline.cpp` | EnsureHaloSphereMesh 实现（lazy procedural UV sphere 32×16 + InterleaveMesh + CreateBuffer + UploadBuffer）+ RecordOffscreenPass mesh forward 后 / EndRendering 前 halo loop（按 World view<TransformComponent, PointLight> 遍历，haloEnabled 才画；首次 bound 时 BindGraphicsPipeline + SetDescriptorSet(mainDescSet) + BindBuffer 一次，per-light SetPushConstants 144B + DrawIndexed）+ 2 个调用点传 &world + Shutdown 显式 halo buffer reset() |
+| sample | `samples/16_light_family_shadows/main.cpp` | --halo CLI flag toggle PointLight haloEnabled + haloRadius=0.25m + haloIntensity=0.5 |
+
+**架构决策**：
+
+- **PointLight 内嵌 halo 字段** vs editor 侧手挂 RenderableComponent —— 选前者，UX 优先；halo 是 PointLight 自带视觉表现而非通用 emissive surface；用户只需勾 haloEnabled 即得视觉
+- **复用 GetOrCompilePipeline** 路径 —— LoadHalo 返回 Material desc，Pipeline 自动创建 RHI pipeline 复用主 forward 的 mainDescLayout + 144B push constant；不走独立 graphics pipeline 创建（与 tonemap pipeline 模式相区分，避免重复 layout / shader module 管理）
+- **halo loop 共享 mainDescSet** —— halo shader 占位声明 binding 0/1（与 emissive.frag.glsl 同款），dead-code-elim；halo pipeline 切换后 SetDescriptorSet(0, mainDescSet) 直接复用主 forward 已绑定的 light UBO + shadow map
+- **vert stage 预乘 color × intensity 传 varying** —— 避免 frag stage 也读 push constant（Vulkan 跨 stage push constant 需 layout stage flag VS|FS），与 emissive vertex shader "push constant only VS" 模式一致
+- **bool 字段不 lerp / halo emissive 不参与 light 计算** —— halo 是纯视觉表现，shading pass 走 PointLight color/intensity/range/attenuation 正常路径（与 G1+G2 已落 ECS view 共存，halo 仅追加 record，不改 lighting math）
+- **共享 unit sphere mesh** —— 所有 haloEnabled PointLight 共享一个 procedural unit sphere，draw 时按 model = translate(position) * scale(haloRadius) 缩放定位；减少 GPU mesh 管理负担
+
+**bug 顺手修**（同 commit）：
+
+- **VMA assertion 漏修**：首次 capture 测试发现 `Some allocations were not freed before destruction of this memory block` —— Pipeline::Shutdown 显式 .clear() meshCache + templatePipelines + shaderModules 但漏了 halo 资源，unique_ptr 析构晚于 VMA shutdown 触发 assertion。修复：Shutdown 加 haloSphereVertex/IndexBuffer.reset() + haloLoaded=false（与 meshCache.clear 同款 fail-safe）。
+
+**视觉验收**（build/captures/）：
+
+- `16_no-halo.png` 509KB：sample 16 三球场景，右球被暖橙 PointLight 照亮但**光源本身不可见**（halo 落地前的视觉）
+- `16_halo.png` 519KB：完全相同场景，**右球右上方多了一颗暖橙发光球**（PointLight 位置 (3.5, 2.6, 2.4) + halo sphere 半径 0.25m + 周围 BloomPass 自然 glow）—— G3 视觉证据成功
+
+**测试 / lint / drift**：
+
+- python scripts/check_invariants.py → All invariants OK (7 grandfathered)
+- python scripts/check_claude_md_drift.py → none detected
+- 52/52 ctest passed（含 light_and_shadow_test，PointLight 字段扩展无回归）
+
+### G3 留待后续
+
+- **Editor halo 字段 fold-out 分组**：当前 schema 字段一字排开，与其他 PointLight 字段（color/intensity/range/castsShadow）平铺；可考虑加 schema-side group/foldout 让 halo 三字段折叠成 "Visual Halo" 子段。需要 ComponentSchemaBuilder 支持 group/fold API（独立 GAP 触发）
+- **PointLight halo 视觉变体**：本期 halo = solid emissive sphere + bloom glow。后续可考虑：(a) billboard quad 替代 3D sphere（更便宜但需 shader 算 camera-facing）；(b) radial gradient + alpha blend（中心更亮边缘渐隐，更"光球"感）；(c) lens flare（视线对准时屏幕空间叠加）—— 都属 v1.x Ori-like 视觉子模式拉动
+- **halo 阴影回避**：当前 halo emissive sphere 也接收 sceneDepth test，进入其他几何时会被遮挡（按 Unity / Unreal lens-flare 模式应该穿透）；可考虑改成 depth test off / additive blend 让 halo 在几何前永远可见。本期不动（防"halo 永远穿透看上去突兀"反向问题），独立 polish GAP 触发
 
 ---
 
