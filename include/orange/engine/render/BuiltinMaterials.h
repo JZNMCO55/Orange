@@ -67,6 +67,15 @@ ORANGE_ENGINE_API Material LoadDissolve(Asset::AssetRegistry& registry);
 // 拾取产出光晕。颜色 / 强度参数 hardcode 同 toon / rim_light。
 ORANGE_ENGINE_API Material LoadEmissive(Asset::AssetRegistry& registry);
 
+// 加载内置 halo 模板：PointLight halo 可见光晕路径（GAP-2026-05-11 G3）。
+// 与 emissive 同款自发光出 HDR 路径，但 color × intensity 经 push constant
+// uHaloColorIntensity (.rgb=color, .a=intensity) 由 Pipeline halo loop
+// per-light 喂入，让每个 PointLight halo 与 light 自身 color / intensity 同步。
+// 由 Pipeline 内部持有 + GetOrCompilePipeline 复用主 forward layout，**不**
+// 经 MaterialSystem::RegisterBuiltins 暴露给用户（halo 是 PointLight 内嵌
+// 视觉表现，挂 RenderableComponent 路径走 emissive 即可）。
+ORANGE_ENGINE_API Material LoadHalo(Asset::AssetRegistry& registry);
+
 // 加载内置 PBR 模板：monolithic Cook-Torrance + GGX + Smith correlated +
 // Schlick + Lambert + IBL split-sum 三槽位。push-constant 与现有 toon /
 // rim_light 同款 {uMVP, uModel} = 128 B。当前五通道材质参数（baseColor /

@@ -615,10 +615,16 @@ void WritePointLight(JsonWriter& writer,
     if (light == nullptr) { return; }
 
     const float color[3] = {light->color.x, light->color.y, light->color.z};
-    writer.WriteFloatArray(Join(componentPath, "color"),       color, 3);
-    writer.WriteFloat(     Join(componentPath, "intensity"),   light->intensity);
-    writer.WriteFloat(     Join(componentPath, "range"),       light->range);
-    writer.WriteBool(      Join(componentPath, "castsShadow"), light->castsShadow);
+    writer.WriteFloatArray(Join(componentPath, "color"),         color, 3);
+    writer.WriteFloat(     Join(componentPath, "intensity"),     light->intensity);
+    writer.WriteFloat(     Join(componentPath, "range"),         light->range);
+    writer.WriteBool(      Join(componentPath, "castsShadow"),   light->castsShadow);
+    // GAP-2026-05-11 G3 halo 字段。全 optional + 默认值与 LightComponent.h
+    // struct ctor 默认一致——老 scene 不带这 3 字段 Load 后行为不变（halo
+    // 默认 off，与 G3 落地前等价）。
+    writer.WriteBool(      Join(componentPath, "haloEnabled"),   light->haloEnabled);
+    writer.WriteFloat(     Join(componentPath, "haloRadius"),    light->haloRadius);
+    writer.WriteFloat(     Join(componentPath, "haloIntensity"), light->haloIntensity);
 }
 
 bool ReadPointLight(const JsonReader& reader,
@@ -636,12 +642,19 @@ bool ReadPointLight(const JsonReader& reader,
             return false;
         }
     }
-    light.color       = {color[0], color[1], color[2]};
-    light.intensity   = static_cast<float>(reader.GetFloat(
-        Join(componentPath, "intensity"), light.intensity));
-    light.range       = static_cast<float>(reader.GetFloat(
-        Join(componentPath, "range"),     light.range));
-    light.castsShadow = reader.GetBool(Join(componentPath, "castsShadow"), false);
+    light.color         = {color[0], color[1], color[2]};
+    light.intensity     = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "intensity"),     light.intensity));
+    light.range         = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "range"),         light.range));
+    light.castsShadow   = reader.GetBool(Join(componentPath, "castsShadow"), false);
+    // GAP-2026-05-11 G3 halo 字段（optional read，老 scene 不带 = 默认 off）。
+    light.haloEnabled   = reader.GetBool(Join(componentPath, "haloEnabled"),
+                                         light.haloEnabled);
+    light.haloRadius    = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "haloRadius"),    light.haloRadius));
+    light.haloIntensity = static_cast<float>(reader.GetFloat(
+        Join(componentPath, "haloIntensity"), light.haloIntensity));
 
     ctx.world.AddComponent(entity, light);
     return true;

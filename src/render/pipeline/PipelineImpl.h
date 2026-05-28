@@ -132,6 +132,24 @@ struct Pipeline::Impl
     Material builtinDefaultMaterial;
     bool     builtinDefaultLoaded{false};
 
+    // PointLight halo material（GAP-2026-05-11 G3）。与 builtinDefaultMaterial
+    // 同款 lazy-init 模式（EnsureHaloMaterial），不进 MaterialSystem，
+    // 由 RecordOffscreenPass 的 halo loop 通过 GetOrCompilePipeline 拿
+    // RHIPipeline 走主 forward 同款 layout。push constant 144B = uMVP +
+    // uModel + uHaloColorIntensity（.rgb=light.color, .a=light.intensity *
+    // light.haloIntensity）；shader = halo.vert/frag.glsl。
+    Material haloMaterial;
+    bool     haloLoaded{false};
+
+    // Halo sphere mesh GPU buffer（lazy upload by EnsureHaloSphereMesh
+    // on first halo loop record）。所有 haloEnabled PointLight 共享这一
+    // 个 unit sphere，draw 时按 light position + haloRadius 算 model
+    // matrix 缩放定位。Mesh 是 32×16 UV sphere（与 sample 18/19 同款
+    // 拓扑），InterleavedVertex stride 与主 forward 一致。
+    std::unique_ptr<Orange::Rhi::RHIBuffer> haloSphereVertexBuffer;
+    std::unique_ptr<Orange::Rhi::RHIBuffer> haloSphereIndexBuffer;
+    std::uint32_t                           haloSphereIndexCount{0};
+
     // ShaderModule 缓存：键 = AssetHandle<ShaderAsset>::Value()。同 .spv
     // 跨 Material 复用。
     std::unordered_map<std::uint64_t, std::unique_ptr<Orange::Rhi::RHIShaderModule>> shaderModules;
@@ -898,6 +916,32 @@ struct Pipeline::Impl
         return &builtinDefaultMaterial;
     }
 
+    // Lazy-init PointLight halo material（GAP-2026-05-11 G3）。与
+    // EnsureBuiltinDefaultMaterial 同款模式，被 RecordOffscreenPass 的
+    // halo loop 在第一次需要时调用。assets nullptr 时返回 nullptr
+    // —— halo loop 自行跳过（与"halo 全场关闭"等价 fail-safe）。
+    const Material* EnsureHaloMaterial()
+    {
+        if (haloLoaded)
+        {
+            return &haloMaterial;
+        }
+        if (assets == nullptr)
+        {
+            return nullptr;
+        }
+        haloMaterial = BuiltinMaterials::LoadHalo(*assets);
+        haloLoaded   = true;
+        return &haloMaterial;
+    }
+
+    // Lazy upload halo unit sphere mesh 到 GPU buffer（与 EnsureMeshGpuCache
+    // 同款 InterleaveMesh + CreateBuffer + UploadBuffer 路径）。第一次 halo
+    // loop record 时调用一次；后续 halo loop 命中 haloSphereVertexBuffer
+    // 非空 fast path 直接 BindBuffer + DrawIndexed。返回是否上传成功——
+    // 失败时 halo loop 跳过。
+    bool EnsureHaloSphereMesh();
+
     Orange::Rhi::RHIShaderModule* GetOrCreateShaderModule(
         const Asset::AssetHandle<Asset::ShaderAsset>& handle,
         Orange::Rhi::ShaderStage                       stage,
@@ -1030,7 +1074,12 @@ struct Pipeline::Impl
     void EnsureMeshGpuCache();
 
     // 自管 cmd list 跑离屏 HDR 主 pass。
-    bool RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor = false);
+    // pWorld 非 nullptr 时在 mesh forward loop 后、EndRendering 前
+    // record halo loop（GAP-2026-05-11 G3 PointLight halo）。nullptr 时
+    // 跳过 halo loop（与 "halo 全场关闭" fail-safe 等价，仍按主 forward
+    // 路径正常出 HDR）。
+    bool RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor = false,
+                             Orange::Engine::World* pWorld = nullptr);
 
     // 在已经 Begin 的 offscreenCmd 上追加 6 round downsample + 5 round upsample。
     bool RecordBloomChain(const BloomPass& bloomDesc);

@@ -204,6 +204,34 @@ Material LoadEmissive(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/emissive.frag.spv");
 }
 
+Material LoadHalo(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "halo";
+
+    // GAP-2026-05-11 G3 PointLight halo 路径。与 emissive 同款 mesh vertex
+    // input（pos+uv+normal，stride 48B），push constant 多一个 Vec4 槽位
+    // uHaloColorIntensity（.rgb = light.color，.a = light.intensity *
+    // light.haloIntensity）—— Pipeline halo loop 按 per-light 喂入，让 halo
+    // 视觉强度与 light 自身字段同步。emissive surface 本质（无光照计算 + 不
+    // 读 shadow map），靠 BloomPass 自然散光产生 glow。
+    //
+    // Total push constant size = 64B (mat4) + 64B (mat4) + 16B (vec4) = 144B
+    // （与 Vulkan minSpec 128B 上限相比超出 16B；本生态下游 spec 是 RTX 系列
+    // 普遍 256B+，运行无忧——若移植到 minSpec 设备需把 color/intensity 改成
+    // descriptor set 1 UBO 路径）。
+    desc.uniforms = {
+        {"uMVP",                MaterialUniformType::Mat4},
+        {"uModel",              MaterialUniformType::Mat4},
+        {"uHaloColorIntensity", MaterialUniformType::Vec4},
+    };
+    desc.textureSlots = {};
+
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/halo.vert.spv",
+                         "shaders/orange_engine/halo.frag.spv");
+}
+
 Material LoadPbr(Asset::AssetRegistry& registry)
 {
     Material desc;

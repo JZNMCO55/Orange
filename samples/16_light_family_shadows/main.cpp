@@ -220,6 +220,10 @@ int main(int argc, char** argv)
     bool        disableGrade = false;
     bool        disableLens = false;
     bool        disableSharpen = false;
+    // GAP-2026-05-11 G3 PointLight halo toggle —— --halo 让 PointLight 挂
+    // emissive sphere（Pipeline 自动 record），可见光晕由 BloomPass 自然散
+    // 光；不传 flag 时不画 halo（与 G3 落地前视觉一致）。
+    bool        enableHalo = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -234,6 +238,7 @@ int main(int argc, char** argv)
         else if (a == "--no-grade")           { disableGrade = true; }
         else if (a == "--no-lens")            { disableLens = true; }
         else if (a == "--no-sharpen")         { disableSharpen = true; }
+        else if (a == "--halo")               { enableHalo = true; }
     }
 
     AppConfig cfg{};
@@ -347,6 +352,7 @@ int main(int argc, char** argv)
     }
 
     // PointLight：右区贴近右球（右上前），暖橙 radial 照明 + 全向阴影。
+    // --halo 时挂 emissive sphere 让光源本身可见（GAP-2026-05-11 G3）。
     {
         Entity e = world.CreateEntity();
         TransformComponent xf{};
@@ -357,6 +363,14 @@ int main(int argc, char** argv)
         pl.intensity   = 40.0f;
         pl.range       = 9.0f;
         pl.castsShadow = true;
+        if (enableHalo)
+        {
+            pl.haloEnabled   = true;
+            pl.haloRadius    = 0.25f;
+            pl.haloIntensity = 0.5f;   // light intensity=40 比较高，halo 乘子
+                                       //  降到 0.5 让球体不刺眼但 bloom 散光
+                                       //  依然显眼
+        }
         world.AddComponent(e, pl);
     }
 

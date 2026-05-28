@@ -86,6 +86,22 @@ void RegisterPointLightSchema()
         .Field<&PL::castsShadow>("castsShadow", "Casts Shadow")
             .Tooltip("勾选后 Pipeline 为该点光烘 6 面 cubemap omnidirectional 阴影。\n"
                      "多 shadow caster 架构落地后生效。")
+        // —— 可见光晕（GAP-2026-05-11 G3）——
+        .Field<&PL::haloEnabled>("haloEnabled", "Halo Enabled")
+            .Tooltip("勾选后 Pipeline 在 entity.Transform.position 画一个 emissive\n"
+                     "sphere（半径 haloRadius、emissive 颜色 = color * intensity *\n"
+                     "haloIntensity），让用户在 viewport 看到光源本身（典型 Ori-like\n"
+                     "发光主角 / 灯泡 prop 用法）。BloomPass 自然散光产生 glow。\n"
+                     "与 castsShadow 正交——halo 只影响视觉，不参与光照计算。")
+        .Field<&PL::haloRadius>("haloRadius", "Halo Radius (m)")
+            .Range(0.01f, 5.0f).DragSpeed(0.01f)
+            .Tooltip("halo sphere 的世界半径（米）。典型 0.1–0.3m 灯泡级；过大\n"
+                     "会让 halo 吞掉真正的 mesh，过小会被 bloom 完全糊掉看不到形状。")
+        .Field<&PL::haloIntensity>("haloIntensity", "Halo Intensity")
+            .Range(0.0f, 10.0f).DragSpeed(0.02f)
+            .Tooltip("halo emissive 强度的额外乘子（与 PointLight.intensity 独立）。\n"
+                     "1.0 = halo 视觉强度直接跟随 light intensity；>1 加强 halo glow；\n"
+                     "<1 减弱 halo。最终 emissive 颜色 = color * intensity * haloIntensity。")
         .Addable()
         .Removable()
         .Register();

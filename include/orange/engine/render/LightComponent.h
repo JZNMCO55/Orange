@@ -91,6 +91,28 @@ struct PointLight
     // true 时 Pipeline 为该 point light 烘 6 面 cubemap omnidirectional
     // shadow（多 shadow caster 架构落地后生效）。
     bool castsShadow{false};
+
+    // —— 可见光晕（GAP-2026-05-11 G3）——
+    //
+    // true 时 Pipeline 在 entity.Transform.position 画一个 emissive sphere
+    // mesh，让用户在 viewport 看到光源本身（典型 Ori-like 发光主角 / 灯泡
+    // prop 用法）。emissive 颜色 = color * intensity * haloIntensity，由
+    // BloomPass 自然散光产生 glow（GAP G3 字面 "billboard 自发光 sphere
+    // mesh + bloom 自动散光近似"，实现走 3D sphere 而非 billboard 让 halo
+    // 在 PointLight 朝任意角度时都能从视线方向看到球面）。
+    //
+    // 与 castsShadow 正交（halo 只影响视觉表现，不参与光照 / 阴影计算）。
+    bool  haloEnabled{false};
+
+    // halo sphere 的世界尺寸（米，半径）。典型 0.1-0.3m（灯泡级）。过大
+    // 会让 halo 视觉吞掉真正的 mesh，过小会被 bloom 完全糊掉看不到形状。
+    float haloRadius{0.15f};
+
+    // halo emissive 强度的额外乘子（与 PointLight.intensity 独立）。
+    // 1.0 = halo 视觉强度直接跟随 light intensity；>1 加强 halo glow（适合
+    // 需要"小光大晕"的视觉风格）；<1 减弱 halo（适合"光强但本体不显眼"
+    // 的场景）。最终 emissive 颜色 = color * intensity * haloIntensity。
+    float haloIntensity{1.0f};
 };
 
 // 聚光 ECS component。

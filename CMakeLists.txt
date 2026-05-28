@@ -309,6 +309,12 @@ orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/emissive.frag.glsl"
     ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV)
 orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/halo.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_HALO_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/halo.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_HALO_FS_SPV)
+orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/god_rays.frag.glsl"
     ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV)
 orange_engine_compile_builtin_shader(
@@ -416,6 +422,8 @@ set(ORANGE_ENGINE_ALL_BUILTIN_SPV
     "${ORANGE_ENGINE_BUILTIN_DISSOLVE_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_EMISSIVE_VS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_HALO_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_HALO_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_SSAO_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV}"

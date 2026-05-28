@@ -415,6 +415,15 @@ void Pipeline::Shutdown()
     impl.meshCache.clear();
     impl.templatePipelines.clear();
     impl.shaderModules.clear();
+    // halo sphere mesh GPU buffers（GAP-2026-05-11 G3）显式释放——与
+    // meshCache 同款理由：unique_ptr 析构晚于 VMA shutdown 会触发 "Some
+    // allocations were not freed before destruction of this memory block"
+    // assertion。haloMaterial 是 stand-alone struct 无 RHI 资源，不需 reset；
+    // halo pipeline 已在 templatePipelines.clear 里随 cache 一并 clear。
+    impl.haloSphereVertexBuffer.reset();
+    impl.haloSphereIndexBuffer.reset();
+    impl.haloSphereIndexCount = 0;
+    impl.haloLoaded           = false;
 
     // 先释放 game-side InsertPass —— 它们的析构可能依赖 RHI 句柄
     // （pipeline / descriptor 等），必须在 renderDevice 还活着时跑。
@@ -1233,7 +1242,8 @@ namespace
 
 }  // namespace
 
-bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor)
+bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadColor,
+                                         Orange::Engine::World* pWorld)
 {
     ORANGE_PROFILE_SCOPE("MainPass");
     auto& impl = *this;
@@ -1440,6 +1450,92 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
         cmd.DrawIndexed(gpu.indexCount, /*instanceCount=*/1,
                         /*firstIndex=*/0, /*vertexOffset=*/0,
                         /*firstInstance=*/0);
+    }
+
+    // ---- PointLight halo pass（GAP-2026-05-11 G3）---------------------------
+    //
+    // 在 mesh forward drawable loop 之后、EndRendering 之前 inject —— 复用
+    // 主 forward render pass 的 attachment 状态（HDR color + sceneDepth）+ 复
+    // 用 mainDescSet（halo shader 占位 binding 0/1 与 mainDescLayout 兼容，
+    // dead-code-elim）。Mode=Local 时为每个 haloEnabled PointLight 画一个
+    // emissive sphere（model = translate(light.position) * scale(haloRadius)），
+    // 颜色 × 强度走 push constant 槽位 uHaloColorIntensity；HDR 出来的高
+    // 亮度由 BloomPass 自然散光产生 glow。
+    //
+    // pWorld 为 nullptr（调用方未传或 fallback）/ haloMaterial 加载失败 /
+    // halo sphere mesh upload 失败 → halo 整段跳过（fail-safe，与"halo 全
+    // 场关闭"等价）。每帧只 BindGraphicsPipeline + BindVertex/IndexBuffer 一
+    // 次（首次命中 haloEnabled 时），per-light 只 SetPushConstants + DrawIndexed。
+    if (pWorld != nullptr)
+    {
+        const Material* haloMat = impl.EnsureHaloMaterial();
+        if (haloMat != nullptr && impl.EnsureHaloSphereMesh())
+        {
+            Orange::Rhi::RHIPipeline* haloPipeline =
+                impl.GetOrCompilePipeline(*haloMat);
+            if (haloPipeline != nullptr)
+            {
+                auto& haloReg = pWorld->Registry();
+                using TC = Orange::Engine::Scene::TransformComponent;
+                auto haloView = haloReg.view<TC, PointLight>();
+                bool haloBound = false;
+                for (auto entity : haloView)
+                {
+                    const auto& pl = haloView.template get<PointLight>(entity);
+                    if (!pl.haloEnabled) { continue; }
+                    const auto& tc = haloView.template get<TC>(entity);
+
+                    if (!haloBound)
+                    {
+                        cmd.BindGraphicsPipeline(*haloPipeline);
+                        // pipeline 切换后 layout 兼容则 mainDescSet 仍可复
+                        // 用——halo shader 与主 forward 同 mainDescLayout。
+                        if (mainDescSet)
+                        {
+                            cmd.SetDescriptorSet(0, *mainDescSet);
+                        }
+                        cmd.BindVertexBuffer(0, *impl.haloSphereVertexBuffer,
+                                             /*offset=*/0);
+                        cmd.BindIndexBuffer(*impl.haloSphereIndexBuffer,
+                                            /*offset=*/0,
+                                            Orange::Rhi::IndexFormat::UInt32);
+                        haloBound = true;
+                        pLastPipeline = haloPipeline;
+                    }
+
+                    const glm::mat4 model =
+                        glm::translate(glm::mat4(1.0f), tc.position) *
+                        glm::scale(glm::mat4(1.0f), glm::vec3(pl.haloRadius));
+                    const glm::mat4 mvp = viewProj * model;
+
+                    // push constant 144B = mat4 uMVP + mat4 uModel + vec4
+                    // uHaloColorIntensity（.rgb=light.color, .a=light.intensity *
+                    // light.haloIntensity）。布局与 halo.vert.glsl push constant
+                    // block 严格对齐（mat4 64B + mat4 64B + vec4 16B = 144B）。
+                    struct PushHalo
+                    {
+                        glm::mat4 mvp;
+                        glm::mat4 model;
+                        glm::vec4 colorIntensity;
+                    };
+                    PushHalo push{};
+                    push.mvp            = mvp;
+                    push.model          = model;
+                    push.colorIntensity = glm::vec4(pl.color,
+                                                    pl.intensity * pl.haloIntensity);
+
+                    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                         /*offset=*/0,
+                                         static_cast<std::uint32_t>(sizeof(PushHalo)),
+                                         &push);
+                    cmd.DrawIndexed(impl.haloSphereIndexCount,
+                                    /*instanceCount=*/1,
+                                    /*firstIndex=*/0,
+                                    /*vertexOffset=*/0,
+                                    /*firstInstance=*/0);
+                }
+            }
+        }
     }
 
     cmd.EndRendering();
@@ -1724,7 +1820,8 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         // 主 HDR pass
         if (ok)
         {
-            ok = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew);
+            ok = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew,
+                                          /*pWorld=*/&world);
         }
 
         // 粒子 pass —— 与窗口模式路径对称，插在主 pass 之后、passthrough 之前。
@@ -2017,6 +2114,118 @@ void Pipeline::Impl::EnsureMeshGpuCache()
         gpu.indexCount = static_cast<std::uint32_t>(indices.size());
         impl.meshCache.emplace(key, std::move(gpu));
     }
+}
+
+bool Pipeline::Impl::EnsureHaloSphereMesh()
+{
+    auto& impl = *this;
+    if (impl.haloSphereVertexBuffer != nullptr)
+    {
+        return true;  // 已上传 fast path
+    }
+    if (impl.renderDevice == nullptr || impl.upload == nullptr)
+    {
+        return false;
+    }
+
+    // procedural UV unit sphere（半径 1.0，32 lon × 16 lat → 528 vertex /
+    // ~960 triangle，与 sample 18/19 MakeSphereMesh 同款拓扑）。Pipeline 共
+    // 享这一个 mesh，所有 haloEnabled PointLight 在 halo loop 按 model 矩
+    // 阵 (translate(light.position) * scale(haloRadius)) 缩放定位 draw。
+    constexpr float          kRadius = 1.0f;
+    constexpr std::uint32_t  kLon    = 32;
+    constexpr std::uint32_t  kLat    = 16;
+
+    std::vector<Asset::VertexPosition3> positions;
+    std::vector<Asset::VertexUV2>       uvs;
+    std::vector<std::uint32_t>          indices;
+    positions.reserve((kLat + 1) * (kLon + 1));
+    uvs.reserve((kLat + 1) * (kLon + 1));
+    indices.reserve(kLat * kLon * 6);
+    for (std::uint32_t i = 0; i <= kLat; ++i)
+    {
+        const float v     = static_cast<float>(i) / static_cast<float>(kLat);
+        const float theta = v * glm::pi<float>();
+        const float sinT  = std::sin(theta);
+        const float cosT  = std::cos(theta);
+        for (std::uint32_t j = 0; j <= kLon; ++j)
+        {
+            const float u   = static_cast<float>(j) / static_cast<float>(kLon);
+            const float phi = u * glm::two_pi<float>();
+            positions.push_back({kRadius * sinT * std::cos(phi),
+                                 kRadius * cosT,
+                                 kRadius * sinT * std::sin(phi)});
+            uvs.push_back({u, 1.0f - v});
+        }
+    }
+    for (std::uint32_t i = 0; i < kLat; ++i)
+    {
+        for (std::uint32_t j = 0; j < kLon; ++j)
+        {
+            const std::uint32_t a = i * (kLon + 1) + j;
+            const std::uint32_t b = (i + 1) * (kLon + 1) + j;
+            const std::uint32_t c = (i + 1) * (kLon + 1) + (j + 1);
+            const std::uint32_t d = i * (kLon + 1) + (j + 1);
+            indices.push_back(a); indices.push_back(c); indices.push_back(b);
+            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+        }
+    }
+
+    Asset::MeshAsset mesh(std::move(positions), std::move(uvs), std::move(indices));
+    mesh.ComputeSmoothNormalsFromTriangles();
+
+    const auto          vertices    = InterleaveMesh(mesh);
+    const auto&         finalIdx    = mesh.Indices();
+    const std::uint64_t vertexBytes = vertices.size() * sizeof(InterleavedVertex);
+    const std::uint64_t indexBytes  = finalIdx.size() * sizeof(std::uint32_t);
+    if (vertexBytes == 0 || indexBytes == 0)
+    {
+        return false;
+    }
+
+    auto& rhi = impl.renderDevice->GetRhiDevice();
+
+    Orange::Rhi::BufferDesc vbDesc{};
+    vbDesc.mSize        = vertexBytes;
+    vbDesc.mUsage       = Orange::Rhi::BufferUsage::Vertex
+                        | Orange::Rhi::BufferUsage::Transfer;
+    vbDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuOnly;
+    impl.haloSphereVertexBuffer = rhi.CreateBuffer(vbDesc);
+
+    Orange::Rhi::BufferDesc ibDesc{};
+    ibDesc.mSize        = indexBytes;
+    ibDesc.mUsage       = Orange::Rhi::BufferUsage::Index
+                        | Orange::Rhi::BufferUsage::Transfer;
+    ibDesc.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuOnly;
+    impl.haloSphereIndexBuffer = rhi.CreateBuffer(ibDesc);
+
+    if (!impl.haloSphereVertexBuffer || !impl.haloSphereIndexBuffer)
+    {
+        ORANGE_LOG_ERROR("Pipeline: EnsureHaloSphereMesh CreateBuffer 失败");
+        impl.haloSphereVertexBuffer.reset();
+        impl.haloSphereIndexBuffer.reset();
+        return false;
+    }
+
+    if (Orange::Failed(impl.upload->UploadBuffer(*impl.haloSphereVertexBuffer, 0,
+                                                  vertices.data(), vertexBytes)))
+    {
+        ORANGE_LOG_ERROR("Pipeline: EnsureHaloSphereMesh UploadBuffer(vertex) 失败");
+        impl.haloSphereVertexBuffer.reset();
+        impl.haloSphereIndexBuffer.reset();
+        return false;
+    }
+    if (Orange::Failed(impl.upload->UploadBuffer(*impl.haloSphereIndexBuffer, 0,
+                                                  finalIdx.data(), indexBytes)))
+    {
+        ORANGE_LOG_ERROR("Pipeline: EnsureHaloSphereMesh UploadBuffer(index) 失败");
+        impl.haloSphereVertexBuffer.reset();
+        impl.haloSphereIndexBuffer.reset();
+        return false;
+    }
+
+    impl.haloSphereIndexCount = static_cast<std::uint32_t>(finalIdx.size());
+    return true;
 }
 
 const BloomPass* Pipeline::Impl::FindActiveBloomPass() const noexcept
@@ -2670,7 +2879,8 @@ void Pipeline::Render(Orange::Engine::World& world)
 
             if (offscreenOk)
             {
-                offscreenOk = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew);
+                offscreenOk = impl.RecordOffscreenPass(viewProj, /*loadColor=*/skyDrew,
+                                                       /*pWorld=*/&world);
             }
 
             // 粒子 pass 插在主 pass 与 bloom 之间——粒子写到同一 HDR
