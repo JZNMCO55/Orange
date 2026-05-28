@@ -33,8 +33,18 @@ if (_ORANGE_ENGINE_NEEDS_SPDLOG)
 endif ()
 
 # 引入 install(EXPORT ...) 生成的 namespaced imported target
-# `OrangeEngine::orange_engine`（+ PUBLIC 依赖 OrangeEngine::imgui）。
+# `OrangeEngine::orange_engine`（+ PUBLIC 依赖 OrangeEngine::orange_engine_imgui）。
 include("${CMAKE_CURRENT_LIST_DIR}/OrangeEngineTargets.cmake")
+
+# Build-tree 的 `OrangeEngine::imgui` 短别名（顶层 CMakeLists.txt
+# `add_library(... ALIAS)` 创建）**不通过 install(EXPORT) 传播**——消费者侧
+# 只看到真名 `OrangeEngine::orange_engine_imgui`。在 Config 阶段重建别名让
+# in-tree / installed 两种语境下消费者都能按 `OrangeEngine::imgui` link
+# （OrangeEditor / OrangeGames consumer 已按短名引用）。CMake 3.18+ 支持
+# imported target 的 alias；项目要求 3.28+，满足。
+if (TARGET OrangeEngine::orange_engine_imgui AND NOT TARGET OrangeEngine::imgui)
+    add_library(OrangeEngine::imgui ALIAS OrangeEngine::orange_engine_imgui)
+endif ()
 
 # ---------------------------------------------------------------------------
 # 内置 SPIR-V shader 路径 + 拷贝 helper（GAP-2026-05-27-builtin-shaders-not-
