@@ -2342,3 +2342,61 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 - **持久化**：mShadowConfig 不写盘，每次启动编辑器回归 designated init 默认值；后续若用户期望 per-project 持久化（与 EditorSettings / EditorKeybindings 同档），按 EditorSettings.cpp 的写盘路径扩展 —— 但需要先确认 ShadowConfig 是"项目级"还是"全局编辑器偏好"（前者落 .scene.json 或同目录 .render-settings.json，后者落 ~/.orange-editor/settings.json），独立 GAP 触发
 - **PostProcess 覆盖语义**：当前 RenderSettingsPanel 调 pcssLightSize / mapResolution 仅 tooltip 标注会被 PostProcessComponent 覆盖；将来可考虑在控件外侧加状态指示（"被组件 X 覆盖中"），独立 GAP 触发
 - **未来 Pipeline 全局配置**：本面板设计为 Render Settings 总入口，将来 GI / Reflection / AA / Tonemap 等若引入 per-pipeline 全局开关，新开 CollapsingHeader 段加入即可，无需新建 panel
+
+## GAP-2026-05-28-editor-post-process-defaults-too-aggressive ✅
+
+- **发现方**：Orange-Ecosystem umbrella session 中用户提问"现在是不是默认显示后处理效果？我没有加入 PostProcessComponent 就已经有效果了，逻辑不对"
+- **发现日期**：2026-05-28（与 GAP-2026-05-28-editor-render-settings-panel 同 session 顺手 follow-up）
+- **一句话定性**：`tools/OrangeEditor/panels/ScenePanel.cpp` EnsureScenePipeline 历史上 hardcode 创建了 9 个 post pass 的 chain（BuiltinPostProcessChain::CreateDefault 的 HDR + Bloom + GodRays + Tonemap + LUT 5 个，再追加 SsaoPass / SsrPass / ContactShadowPass / DofPass / TaaPass / ColorGradePass 6 个"美术效果"）；Pipeline 自身默认行为是中性的（无 chain + 无组件 → 0 post），但编辑器侧 hardcode 让用户**没挂任何 PostProcessComponent 就看到全套 fancy effect**，违反"组件即语义"工业惯例（Unity / Unreal / Godot 编辑器视口默认均不带这类 pass）
+- **状态**：**✅ 2026-05-28 落地**（梯度 2 方案）
+
+### 业界对照
+
+| 引擎 | 编辑器 viewport 默认 | 用户启用方式 |
+|---|---|---|
+| **Unity** | 默认无 post | 加 Volume + Post-Process Volume 组件 |
+| **Unreal** | 默认带 Tonemap + AA，其余无 | 加 PostProcessVolume |
+| **Godot** | 默认无 post | 加 WorldEnvironment node |
+| **OrangeEditor 修正前** | 全套 9 pass hardcode 开 | （已经开着，撤不掉） |
+| **OrangeEditor 修正后（梯度 2）** | 仅 HDR pipeline 必需 5 pass（HDR + Bloom + GodRays disabled + Tonemap + LUT） | 加 PostProcessComponent；组件按 `SyncPostProcessFromWorld` 压过 chain |
+
+### 决策与方案
+
+候选梯度（用户决策走梯度 2）：
+
+| 梯度 | 内容 | 取舍 |
+|---|---|---|
+| 1（最干净）| 完全空 chain | PBR linear 0.3-0.4 直出偏暗，emissive HDR > 1 硬边 clamp；用户首屏会以为引擎 bug |
+| **2（推荐 / 选定）** | **仅 BuiltinPostProcessChain::CreateDefault**（HDR + Bloom + GodRays disabled + Tonemap + LUT） | HDR pipeline 正确显示的最低线，与 sample 13/14 同款；GTAO / SSR / ContactShadow / DoF / TAA / ColorGrade 6 个"美术效果"撤掉 |
+| 3 | 三件套 + TAA | TAA 在编辑器静态时易出 ghosting 残影，被误判为 bug |
+| 4 | 加 toolbar checkbox "Preview Effects" 默认 OFF | 引入新 UI，复杂度抬高；与 PostProcessComponent 路径职责重叠 |
+
+### 落地范围
+
+`tools/OrangeEditor/panels/ScenePanel.cpp` 的 EnsureScenePipeline 内：
+- **撤掉** 6 个 hardcode 美术 pass（SsaoPass GTAO / SsrPass / ContactShadowPass / DofPass / TaaPass / ColorGradePass）+ `namespace R = Orange::Engine::Render;` alias（其余地方未用）
+- **保留** `BuiltinPostProcessChain::CreateDefault()`（HDR + Bloom + GodRays disabled + Tonemap + LUT）+ `SetPostProcessChain`
+- **撤掉** `#include <orange/engine/render/PostProcessPasses.h>`（不再消费 PostProcess pass 具体类型，BuiltinPostProcessChain.h 内部封装）
+- 改注释 12 行（撤代码 ~40 行）：把"WYSIWYG 与 sample 16 一致"取舍说明替换为"组件即语义 / 工业惯例对齐"说明，引导用户挂 PostProcessComponent 获取美术效果
+
+### 验收
+
+- 全 52 ctest 通过（含 editor_build_smoke）
+- `python scripts/check_invariants.py` → `All invariants OK. (7 grandfathered)`
+- `python scripts/check_claude_md_drift.py` → `none detected.`
+
+### 视觉变化（已知 + 接受）
+
+编辑器视口与 sample 16_light_family_shadows 不再 WYSIWYG 一致（sample 16 仍走 chain 路径，自带美术效果），这是 acceptance：
+- 用户在编辑器里看到的是"基线 PBR" —— 不含 SSAO 暗角 / SSR 反射 / 接触阴影 / 景深 / TAA 抗锯齿 / Color Grading
+- 想看 sample 16 同款观感：在场景里挂 `PostProcessComponent`，按需开 `ssaoEnabled` / `ssrEnabled` / `contactShadowEnabled` / `dofEnabled` / `taaEnabled` / `colorGradeEnabled` 字段
+- 这与 GAP-2026-05-27-postprocess-component-local-volume（PostProcess v2 设计）的方向一致 —— component 才是 long-term 的 post 配置入口
+
+### 关键改动文件
+
+`tools/OrangeEditor/panels/ScenePanel.cpp`（撤 6 个 pass + 撤 PostProcessPasses.h include + 改注释）/ `docs/engine-known-gaps.md`（本条目登记+关闭）
+
+### 留待后续
+
+- **sample 16 是否也走 component 路径**：当前 sample 16 仍走 PostProcessChain 路径（hardcode 6 个美术 pass）；后续可考虑迁移到 PostProcessComponent 路径，让 sample 也展示"组件即语义"用法，但 sample 是引擎演示场所，hardcode chain 自有展示价值，独立 GAP 触发
+- **PostProcessComponent 工厂 preset**：编辑器可考虑提供"Add Component → PostProcess → Cinema Preset / Outdoor Preset"等模板（按场景类型一键挂带预设参数的 PostProcessComponent），降低用户挂组件的摩擦门槛，独立 GAP 触发

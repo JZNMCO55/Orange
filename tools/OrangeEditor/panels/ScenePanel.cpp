@@ -19,7 +19,6 @@
 #include "../schema/ComponentSchemaRegistry.h"
 
 #include <orange/engine/render/BuiltinPostProcessChain.h>
-#include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/DebugDrawScene.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -598,57 +597,25 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
             mScenePipelineFailed = true;
             return false;
         }
-        // 默认 PostProcessChain（Bloom + Tonemap + LUT）—— sample 14_pbr_ibl /
-        // 13_pbr_direct 同款。让 HDR pipeline 走完整路径：emissive HDR > 1
-        // 像素经 bloom 柔化扩散、PBR 物体经 ACES tonemap 曲线提亮。漏接时
-        // 视觉症状：emissive 物体硬边 clamp 像染色周围像素 + PBR cube 偏暗
-        // （没 tonemap 曲线把 linear 0.3-0.4 提到 ~0.5 显示）。
+        // 默认 PostProcessChain —— 仅 HDR pipeline 必需的 BuiltinPostProcessChain
+        // ::CreateDefault()（HDR + Bloom + GodRays(disabled) + Tonemap + LUT 5
+        // pass，sample 13_pbr_direct / 14_pbr_ibl 同款）。漏接时视觉症状：
+        // emissive 物体硬边 clamp + PBR cube 偏暗（没 tonemap 曲线把 linear
+        // 0.3-0.4 提到 ~0.5 显示），所以这一份不能撤。
+        //
+        // v1.3.2 GAP-2026-05-28-editor-post-process-defaults-too-aggressive：
+        // 历史上本块还 hardcode 追加了 GTAO / SSR / ContactShadow / DoF / TAA /
+        // ColorGrade 6 个"美术效果"pass，目的是让编辑器视口与 sample
+        // 16_light_family_shadows WYSIWYG 一致 —— 但代价是用户没挂任何
+        // PostProcessComponent 就已经看到一堆 fancy effect，违反"组件即语义"
+        // 的工业惯例（Unity / UE / Godot 编辑器默认均不带这类 pass，要
+        // PostProcessVolume / WorldEnvironment 才生效）。本期撤掉这 6 个
+        // hardcode，与 Pipeline 内部"无组件 / 无 chain → 0 post"的中性默认对
+        // 齐。用户想要这些效果：在场景里挂 PostProcessComponent，组件按
+        // SyncPostProcessFromWorld（src/render/Pipeline.cpp:2064）压过 chain。
         mpScenePostProcessChain = std::make_unique<
             Orange::Engine::Render::PostProcessChain>(
                 Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
-        // 全套屏幕空间 post —— engine RenderOffscreen 已把以下 pass 全部接进
-        // offscreen 视口路径（含 bloom WYSIWYG），编辑器视口与 sample
-        // 16_light_family_shadows 观感一致：GTAO 环境光遮蔽 / SSR 反射 / 接触
-        // 阴影 / 景深 / TAA 抗锯齿+去噪 / 色彩分级。参数对齐 sample。
-        namespace R = Orange::Engine::Render;
-        {
-            auto ssao = std::make_unique<R::SsaoPass>();
-            ssao->useGtao = true;   // GTAO（horizon-based，比半球 kernel 更准）
-            ssao->radius = 0.6f; ssao->strength = 1.0f; ssao->power = 2.0f;
-            mpScenePostProcessChain->AddPass(std::move(ssao));
-        }
-        {
-            auto ssr = std::make_unique<R::SsrPass>();
-            ssr->maxDistance = 14.0f; ssr->maxSteps = 40.0f;
-            ssr->thickness = 0.8f; ssr->strength = 0.7f;
-            mpScenePostProcessChain->AddPass(std::move(ssr));
-        }
-        {
-            auto cs = std::make_unique<R::ContactShadowPass>();
-            cs->length = 0.15f; cs->thickness = 0.3f; cs->bias = 0.015f; cs->strength = 0.9f;
-            mpScenePostProcessChain->AddPass(std::move(cs));
-        }
-        {
-            // 景深：编辑器相机可移动，对焦面固定在 view 空间 focusDistance 处；
-            // focusRange 取大一些（10）让在焦带宽、导航时不至大面积虚化。
-            auto dof = std::make_unique<R::DofPass>();
-            dof->focusDistance = 10.0f; dof->focusRange = 10.0f; dof->maxCoCRadius = 0.012f;
-            mpScenePostProcessChain->AddPass(std::move(dof));
-        }
-        {
-            // TAA：编辑器连续渲染，jitter 累积去噪 + 抗锯齿；相机运动靠重投影 +
-            // 邻域 clamp。overlay（grid/gizmo/debug）用未 jitter 的 viewProj（engine
-            // 侧已处理）故不 shimmer。
-            auto taa = std::make_unique<R::TaaPass>();
-            taa->feedback = 0.9f;
-            mpScenePostProcessChain->AddPass(std::move(taa));
-        }
-        {
-            auto grade = std::make_unique<R::ColorGradePass>();
-            grade->exposure = 0.15f; grade->contrast = 1.1f;
-            grade->saturation = 1.15f; grade->temperature = 0.25f;
-            mpScenePostProcessChain->AddPass(std::move(grade));
-        }
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
 
         // PCSS 软阴影 + 2048 阴影图（directional + spot；与 sample 一致）。
