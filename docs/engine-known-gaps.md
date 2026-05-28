@@ -1993,7 +1993,7 @@ if (csmCascade < cascadeCountFromHost - 1) {
 
 ### 留待后续
 
-- **sample 14_pbr_ibl `--tonemap=aces|agx|reinhard|linear` CLI flag** + 4 张 capture 对照图（与 sample 18 `--tint` 同款无人值守视觉回归路径），让 PR review 能直接看到算子差异；独立 GAP / commit 触发
+- **sample 14_pbr_ibl `--tonemap=aces|agx|reinhard|linear` CLI flag** + 4 张 capture 对照图 ✅ 2026-05-28（与 sample 18 `--tint` 同款无人值守视觉回归路径），让 PR review 能直接看到算子差异；落地时顺手暴露 + 修 [[BUG-2026-05-28-pipeline-capture-tonemap-hardcoded-aces]]（capture CPU 端 tonemap 与 stage B shader 不一致的第三现场）
 - **passthrough.frag 切算子**：仅当 sample 端真撞上"不挂 chain 但要切 tonemap"场景时触发；当前编辑器 + 主线 sample 都走 chain 路径，passthrough 是边缘 fallback
 - **PushTonemap struct 抽出共享**：两处 use site 都在 Pipeline.cpp 同一 TU，function-local 定义足够；待 PostProcess v2（GAP-2026-05-27-postprocess-component-local-volume）一并整骨
 
@@ -2566,3 +2566,61 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 - **sample 16 是否也走 component 路径**：当前 sample 16 仍走 PostProcessChain 路径（hardcode 6 个美术 pass）；后续可考虑迁移到 PostProcessComponent 路径，让 sample 也展示"组件即语义"用法，但 sample 是引擎演示场所，hardcode chain 自有展示价值，独立 GAP 触发
 - **PostProcessComponent 工厂 preset**：编辑器可考虑提供"Add Component → PostProcess → Cinema Preset / Outdoor Preset"等模板（按场景类型一键挂带预设参数的 PostProcessComponent），降低用户挂组件的摩擦门槛，独立 GAP 触发
+
+---
+
+## BUG-2026-05-28-pipeline-capture-tonemap-hardcoded-aces ✅
+
+- **发现方**：sample 14 `--tonemap` CLI 落地 session（GAP-2026-05-27-tonemap-operator-selection 留待后续 #1 执行时）
+- **发现日期**：2026-05-28
+- **一句话定性**：`Pipeline::Impl::FinalizeCapture()`（`src/render/pipeline/PipelineCapture.cpp`）的 HDR → PNG CPU 端转换**hardcode 跑 ACES Narkowicz**，完全忽略 `chain.TonemapPass.op` 与 `exposure`，导致 sample 14 `--tonemap=aces|agx|reinhard|linear` CLI 在 capture 上看不出差异
+- **状态**：**✅ 2026-05-28 落地**（与 GAP-2026-05-27 留待后续 #1 同 commit，作为 #1 真正可验收的前置）
+
+### 触发场景
+
+sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...` 接线**全链路正确**（main path 在 Pipeline.cpp:3160 读 `activeTonemap->op` 灌 push constant），但走 `--capture <path>` 时 4 算子产物 MD5 完全相同。诊断 print 确认 `tm->op` 设置成功，于是定位到 capture 路径在 stage A 末尾抓 HDR offscreen → CPU 端固定 ACES tonemap → PNG，与 stage B shader 路径完全无连。
+
+这是**同款 wire-up 漏写第三现场**：
+- 第一处（**已修**）：编辑器 viewport stage B 路径 `Pipeline.cpp:1514` 历史 hardcode `exposure=1.0` —— [[BUG-2026-05-28-editor-viewport-tonemap-exposure-not-wired]]
+- 第二处（**已修**）：编辑器 viewport stage B 路径 `Pipeline.cpp:1514-1621` 历史 hardcode `op=ACES_Narkowicz` —— GAP-2026-05-27-tonemap-operator-selection 落地时已与第一处同时修
+- 第三处（**本条**）：capture 路径 `PipelineCapture.cpp:177-179` 历史 hardcode `AcesNarkowicz(x)` —— 本 BUG 修
+
+3 个现场源出同一漏写模式：tonemap 算子加 enum 时只升级了"主路径 shader push constant"，没顺手扫所有用 hardcode 公式的副路径。capture 是其中最容易漏的——它在 CPU 端复刻 GPU 算法，不参与 shader 系统，shader push constant 升级不会自然连过来。
+
+### 缺什么 / 现状对照
+
+| 字段 | 修前 | 修后 |
+|---|---|---|
+| capture CPU tonemap | `AcesNarkowicz(x)` hardcode | `ApplyTonemap(hdr * exposure, op)` 4 算子 switch |
+| 读 chain.TonemapPass.op | ❌（忽略） | ✅ `FindActiveTonemapPass()` |
+| 读 chain.TonemapPass.exposure | ❌（隐式 1.0）| ✅ `tm->exposure`（链没 TonemapPass 时退回 1.0） |
+| AgX CPU 实现 | ❌ | ✅ 与 `tonemap.frag.glsl` 同矩阵 + 多项式拟合 |
+| Reinhard CPU 实现 | ❌ | ✅ per-channel `x / (1 + x)` |
+| Linear CPU 实现 | ❌（落入 ACES）| ✅ `clamp(x, 0, 1)` |
+
+### 落地范围
+
+`src/render/pipeline/PipelineCapture.cpp`：
+- 新增 CPU 端 AgX（含 sRGB↔AgX 矩阵 + 6 系数多项式 sigmoid fit）/ Reinhard / LinearClamp 实现，与 `src/render/builtin_shaders/tonemap.frag.glsl` 4 算子一一对应
+- `ApplyTonemap(hdr, op)` switch dispatch（与 shader 路径同语义）
+- `FinalizeCapture()` 主循环：调 `FindActiveTonemapPass()` 取 `op` + `exposure`，每像素 `ApplyTonemap(hdr * exposure, op)`；chain 无 TonemapPass → 退回 ACES + exposure=1（与历史兼容）
+- 头注释更新：从"ACES tonemap 后存 PNG"改为"按 chain 活动 TonemapPass.op + exposure 选算子"，并显式记 bloom 不参与 capture 合成（与 stage B `hdr + bloom * intensity` shader 路径的 visual 偏差留 GAP-后续）
+
+### 验收
+
+- 4 张 `build/captures/14_tonemap_{aces,agx,reinhard,linear}.png` MD5 互异（修前全相同 `bb6d9c03...`，修后 4 unique hash + 文件尺寸 162K-196K 区间分化）
+- ACES capture MD5 与修前一致 → 向下兼容
+- 视觉一致性目测：metallic 球高光区 ACES（暖偏色压暗）vs AgX（去饱和不偏色）vs Reinhard（整体压扁）vs Linear（硬 clamp 高对比）4 档分明
+- `python scripts/check_invariants.py` → `All invariants OK. (7 grandfathered)`
+
+### 关键改动文件
+
+`src/render/pipeline/PipelineCapture.cpp`（新增 3 算子 CPU 实现 + ApplyTonemap dispatch + FinalizeCapture 接 chain；注释更新）/ `samples/14_pbr_ibl/main.cpp`（GAP-2026-05-27 #1 落地 CLI parsing + chain.FindByName 接线）/ `docs/engine-known-gaps.md`（本条目登记+关闭，标 GAP-2026-05-27 #1 ✅）
+
+4 张 fixture `build/captures/14_tonemap_{aces,agx,reinhard,linear}.png` 落本机 build 目录（`.gitignore` 规则同 sample 16 halo 等历史 fixture），不入库；重跑命令固化在 sample 14 头注释 + 本条目"验收"段。
+
+### 留待后续
+
+- **capture 路径接 bloom 合成**：CPU 端 capture 当前不含 bloom contribution（stage A hdrColor 抓回 CPU 时 bloom 还没合成），与 stage B shader `hdr + bloom * intensity` 路径在 emissive / 高 HDR 区域有 visible 偏差。需要"capture 与 shader 像素级一致"时拉动；典型 PR review 4 算子对照已够，**不构成排期承诺**
+- **stage B swap-chain capture 接口**：当前 `RequestCapture` 抓 stage A HDR，看不到 godrays / LUT 等 stage B 末段效果；需要"截 swap-chain 最终图"时拉动；编辑器 dock 模式下还涉及 ImGui overlay 抓不抓的取舍——非平凡设计
+- **AgX CPU 与 GPU 数值精度对照**：CPU `std::log2` + scalar 浮点 vs GPU `log2` + vec3 SIMD 浮点在 fp32 精度边缘像素可能差 ±1 LSB；当前不阻塞但若 capture 用作 pixel-exact regression baseline 需复核

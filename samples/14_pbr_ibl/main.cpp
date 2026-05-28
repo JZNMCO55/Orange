@@ -16,7 +16,15 @@
 //   全白（包括纯金属 / 纯粗糙塑料 / 五颜六色 baseColor）。偏暗 = BRDF 能量
 //   损失；偏亮 = 重复计入。视觉对照 wiki environment-lighting.md §furnace test。
 //
-//   `14_pbr_ibl`（无参数）—— 默认走真实 HDR 路径
+//   `14_pbr_ibl --tonemap=<op>` —— 切换收尾 tonemap 算子，`<op>` 取
+//   `aces` / `agx` / `reinhard` / `linear`，默认 `aces`。配合 `--capture`
+//   可在同一帧场景上做 4 算子 PR-review 对照（见 build/captures/14_tonemap_*.png）：
+//     * `aces` 暖偏色但稳定（历史固定行为，与不带 flag 视觉等价）
+//     * `agx` 过亮区 desaturate 更克制，金属球饱和色更接近 PBR 线性意图
+//     * `reinhard` 整体压缩、高光更软，暗部抬升（学术 reference）
+//     * `linear` 不压缩硬 clamp，HDR > 1 像素直接削顶（暴露 raw HDR 异常）
+//
+//   `14_pbr_ibl`（无参数）—— 默认走真实 HDR 路径 + ACES tonemap
 //
 // **资产前置**：默认模式需要 `assets/environments/default_outdoor.hdr`
 // 实际存在；用户按 `assets/environments/README.md` 步骤从 PolyHaven 下载
@@ -43,6 +51,7 @@
 #include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
+#include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/scene/Entity.h>
@@ -86,6 +95,8 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::TonemapOperator;
+using Orange::Engine::Render::TonemapPass;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
@@ -210,12 +221,15 @@ int main(int argc, char** argv)
 {
     // 命令行参数：
     //   --furnace                  white furnace test 模式
+    //   --tonemap=<op>             收尾 tonemap 算子：aces|agx|reinhard|linear（默认 aces）
     //   --capture <path>           第 (exit-after - 1) 帧 RequestCapture 写 PNG 落盘
     //   --exit-after <N>           第 N 帧后 RequestExit（无人值守视觉验证）
     //   其它参数 silent ignore（与 sample 1-13 一致）
     bool                  furnaceMode      = false;
     std::filesystem::path capturePath{};
     int                   exitAfterFrames  = -1;
+    TonemapOperator       tonemapOp        = TonemapOperator::ACES_Narkowicz;
+    std::string_view      tonemapOpLabel   = "aces";
     for (int i = 1; i < argc; ++i)
     {
         const std::string_view arg{argv[i]};
@@ -231,7 +245,26 @@ int main(int argc, char** argv)
         {
             exitAfterFrames = std::atoi(argv[++i]);
         }
+        else if (arg.substr(0, 10) == "--tonemap=")
+        {
+            // `--tonemap=<op>` 单 token 形式（与 sample 18 `--tint=<rgb>` 一致），
+            // 比 `--tonemap <op>` 双 token 在 shell capture 脚本里更省心。
+            const std::string_view opName = arg.substr(10);
+            if      (opName == "aces")     { tonemapOp = TonemapOperator::ACES_Narkowicz; tonemapOpLabel = "aces"; }
+            else if (opName == "agx")      { tonemapOp = TonemapOperator::AgX;            tonemapOpLabel = "agx"; }
+            else if (opName == "reinhard") { tonemapOp = TonemapOperator::Reinhard;       tonemapOpLabel = "reinhard"; }
+            else if (opName == "linear")   { tonemapOp = TonemapOperator::Linear;         tonemapOpLabel = "linear"; }
+            else
+            {
+                std::fprintf(stderr, "[14_pbr_ibl] WARNING: 未知 --tonemap=%.*s，退回默认 aces。\n",
+                             static_cast<int>(opName.size()), opName.data());
+            }
+        }
     }
+
+    std::printf("[14_pbr_ibl] tonemap=%.*s%s\n",
+                static_cast<int>(tonemapOpLabel.size()), tonemapOpLabel.data(),
+                furnaceMode ? "  furnace=on" : "");
 
     AppConfig cfg{};
     cfg.window.title  = furnaceMode
@@ -415,6 +448,14 @@ int main(int argc, char** argv)
         return 1;
     }
     PostProcessChain chain = CreateDefault();
+    // CLI 切 tonemap 算子（GAP-2026-05-27-tonemap-operator-selection 留待后续 #1）：
+    // BuiltinPostProcessChain::CreateDefault 把 TonemapPass 放第 4 个（HDR → Bloom
+    // → GodRays → Tonemap → LUT），名字 "tonemap"。FindByName + dynamic_cast 拿到
+    // 后改 op 字段即可，下帧 Render 自动用新算子。
+    if (auto* tm = dynamic_cast<TonemapPass*>(chain.FindByName("tonemap")))
+    {
+        tm->op = tonemapOp;
+    }
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
     pipeline.SetShadowConfig(ShadowConfig{});
