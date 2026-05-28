@@ -2045,9 +2045,9 @@ if (csmCascade < cascadeCountFromHost - 1) {
 
 ### 留待后续
 
-- **PostProcess Local Volume Gizmo plugin**：参 `PointLightGizmoPlugin` 模板，Local 模式下在 entity.Transform.position 处画 localExtent 半尺寸 wireframe box + blendDistance 外环；让用户在 viewport 直接看到 volume 范围。独立 commit 触发
+- **PostProcess Local Volume Gizmo plugin ✅**（2026-05-28，commit `e54dc9f`）：`tools/OrangeEditor/plugin/PostProcessVolumeGizmoPlugin.{h,cpp}` 参 `CameraFrustumGizmoPlugin` 12 段画法模板 + `PointLightGizmoPlugin` typeName 字符串过滤模板。Mode=Local 时画两层 wireframe box：内层（紫色实色 220 alpha + 2px 粗）= localExtent 边界 weight=1 区，外层（同色 100 alpha + 1.5px 细）= (localExtent + blendDistance) smoothstep 淡入末端；blendDistance ≤ 0 时不画外层。Mode=Global 跳过（无几何边界）。center 取 entity.Transform.position（与 Pipeline.cpp v2 boxCenter 取法严格一致，AABB 不考虑 rotation）。任一 corner 投影失败整盒跳过（fail-safe 同 CameraFrustum）
 - **Multi-Global warning chip**：参 `mSingletonOverflowDirLight` 模板加 `mSingletonOverflowPostProcess`，让用户在 Entity Tree 看到"多个 Global PostProcess 时第 2+ 个不生效"提示。独立 commit 触发
-- **Sample fixture**：参 sample 18 的 fixture 模式做 `samples/19_postprocess_volume`：Global 底（中性 grading）+ 两个 Local 盒（一个高对比 + 一个色温偏冷），相机沿轨道移动穿过盒，capture 出"盒内 / 盒外 / 过渡带" 三张对照图；与 sample 18 `--motion` 同款无人值守视觉回归路径
+- **Sample fixture ✅**（2026-05-28，commit `73a1bf2`）：`samples/19_postprocess_volume/main.cpp` 参 sample 18 的 fixture 模式：1 Global 中性底 + 2 Local 盒（高对比 grading box-a + 冷色温 grading box-b），相机沿 -Z→+Z 推进穿过双盒。`--position {outside|box-a|transition|box-b}` 预设 4 个相机 z 出 capture，`--motion` 6 秒推进互动看 blendDistance 平滑过渡，`--capture <path>` 单帧出图后退。transition 位置取 z=6.5（box-a 边界外 0.5m，smoothstep weight≈0.74）是真"过渡带" —— 初版取 z=8 落在两盒 blendDistance 之外的纯 Global 区与 outside 视觉等价，迭代修正后能看到 box-a grading 部分淡入混合 Global 底（4 张 capture PNG 文件大小：outside 272KB / transition 467KB / box-a 472KB / box-b 419KB，transition 接近 box-a 印证 V2 collect-all + smoothstep 算法生效）。验收：52/52 ctest passed（含 light_and_shadow_test V1→V2 等价性回归）
 - **后续 multi-camera / multi-RT 真触发时 (`GAP-2026-05-24-pipeline-cannot-render-to-arbitrary-rt`)**：把 `post*` 全局 mutable state 外置到 RenderContext，让每个相机/RT 独立持后处理状态
 
 ---
