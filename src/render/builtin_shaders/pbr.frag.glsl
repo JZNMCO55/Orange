@@ -31,17 +31,24 @@ const float kPi = 3.14159265359;
 // set 0 与 textured_mesh / toon / rim_light / dissolve / emissive 全套共
 // 用——Pipeline 在 Initialize 期统一布局。binding 2/3/4 由 PBR shader
 // 引入，其他 shader 不引用即 dead-code，Vulkan spec 允许 shader-USED ⊆
-// layout-DECLARED。
-layout(set = 0, binding = 0) uniform sampler2D   uShadowMap;
+// layout-DECLARED。CSM additive（GAP-2026-05-27-cascaded-shadow-maps）：
+// binding 0 类型升 sampler2DArray（layer = cascade）；LightUbo 末尾追加
+// uCascadeViewProj[4] + uCascadeNdcSplits。其他 shader 只读到 uIblFactor
+// 不引用新字段仍 std140 layout-compatible；shadow 采样侧改 Array 变体（layer=0
+// 等价单 cascade），cascadeCount=1 默认零回归。
+#define ORANGE_MAX_SHADOW_CASCADES 4
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
-    mat4 uLightViewProj;
-    vec4 uLightDirIntensity;  // xyz = world direction（光从该方向"射出"），w = intensity
-    vec4 uLightColor;         // xyz = rgb，w 未用
-    vec4 uShadowParams;       // x = pcfKernelRadius，y = depthBias，z = PCSS lightSize(0=关)，w 预留
-    vec4 uCameraWorldPos;     // xyz = camera worldPos
-    vec4 uFrameInfo;          // x = time 秒，y/z/w 预留
-    vec4 uIblFactor;          // xyz = EnvironmentComponent.tint * intensity（host 端预乘），w 预留
+    mat4 uLightViewProj;       // = uCascadeViewProj[0] backward-compat alias
+    vec4 uLightDirIntensity;   // xyz = world direction（光从该方向"射出"），w = intensity
+    vec4 uLightColor;          // xyz = rgb，w 未用
+    vec4 uShadowParams;        // x = pcfKernelRadius，y = depthBias，z = PCSS lightSize(0=关)，w 预留
+    vec4 uCameraWorldPos;      // xyz = camera worldPos
+    vec4 uFrameInfo;           // x = time 秒，y/z/w 预留
+    vec4 uIblFactor;           // xyz = EnvironmentComponent.tint * intensity（host 端预乘），w 预留
+    mat4 uCascadeViewProj[ORANGE_MAX_SHADOW_CASCADES];   // CSM：per-cascade light view-proj
+    vec4 uCascadeNdcSplits;    // x..w = cascade i 远端 NDC z（gl_FragCoord.z > splits[i] → cascade = i+1）
 } light;
 layout(set = 0, binding = 2) uniform samplerCube uIrradiance;       // diffuse IBL — dummy zero in direct-only baseline
 layout(set = 0, binding = 3) uniform samplerCube uPrefilteredEnv;   // specular IBL — dummy zero in direct-only baseline
@@ -241,12 +248,20 @@ void main()
     vec3 diffuse  = kD * baseColor / kPi;
 
     vec3  radiance = light.uLightColor.rgb * light.uLightDirIntensity.w;
+    // CSM cascade 选择：用 gl_FragCoord.z（与 cascadeNdcSplits 同 NDC z 坐标
+    // 系，host 端预先按相机投影把 view-z 转过来）。cascadeCount=1 时 splits
+    // 全 = 1.0，gl_FragCoord.z 不会越过任何阈值，恒走 cascade 0（等价历史
+    // 单张 shadow map 行为）。
+    int csmCascade = 0;
+    if (gl_FragCoord.z > light.uCascadeNdcSplits.x) csmCascade = 1;
+    if (gl_FragCoord.z > light.uCascadeNdcSplits.y) csmCascade = 2;
+    if (gl_FragCoord.z > light.uCascadeNdcSplits.z) csmCascade = 3;
     // PCSS（uShadowParams.z = lightSize，0 → 内部退回固定半径 PCF）。
-    float shadow   = SamplePcssShadow(uShadowMap, vWorldPos,
-                                      light.uLightViewProj,
-                                      int(light.uShadowParams.x),
-                                      light.uShadowParams.y,
-                                      light.uShadowParams.z);
+    float shadow   = SamplePcssShadowArray(uShadowMap, csmCascade, vWorldPos,
+                                           light.uCascadeViewProj[csmCascade],
+                                           int(light.uShadowParams.x),
+                                           light.uShadowParams.y,
+                                           light.uShadowParams.z);
     vec3 directLo  = (diffuse + specular) * radiance * NoL * shadow;
 
     // ---- IBL（split-sum 近似；dummy 纹理全 0 → 贡献 = 0）-------------------

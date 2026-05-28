@@ -10,7 +10,8 @@
 
 #include "include/shadow_pcf.glsl.inc"
 
-layout(set = 0, binding = 0) uniform sampler2D uShadowMap;
+// CSM additive：升 sampler2DArray，固定 layer=0（同 toon 取舍）。
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;
 
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
@@ -50,10 +51,10 @@ void main()
     // 主光 NdotL + 阴影因子；rim 不受阴影抑制（边沿光本身就是逆光时最亮）。
     vec3  lightDir = normalize(-light.uLightDirIntensity.xyz);
     float NdotL    = max(dot(normal, lightDir), 0.0);
-    float shadow   = SamplePcfShadow(uShadowMap, vWorldPos,
-                                     light.uLightViewProj,
-                                     int(light.uShadowParams.x),
-                                     light.uShadowParams.y);
+    float shadow   = SamplePcfShadowArray(uShadowMap, 0, vWorldPos,
+                                          light.uLightViewProj,
+                                          int(light.uShadowParams.x),
+                                          light.uShadowParams.y);
 
     // 极小 ambient 防纯黑（背光面 + 阴影内仍可读 silhouette），main 项
     // 走标准 NdotL 不做 wrap——保留 rim_light 原本"暗内"风格。

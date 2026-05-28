@@ -598,6 +598,11 @@ void Pipeline::Shutdown()
     impl.skyFs.reset();
     impl.skySetBoundCube = nullptr;
     impl.shadowCasterPipeline.reset();
+    // CSM shadow map array：per-layer view 必须先于 array texture 释放
+    // （Vulkan spec：VkImageView 是 VkImage 的 child，device destroy 前
+    // 所有 child 必须先 destroy；漏 reset 导致 vkDestroyDevice 跳 validation
+    // error → SEGFAULT）。
+    for (auto& v : impl.shadowMapLayerViews) { v.reset(); }
     impl.shadowMap.reset();
     impl.shadowMapResolution = 0;
     impl.shadowMapLayoutShaderReadOnly = false;
@@ -1594,11 +1599,21 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         impl.EnsureShadowMap();
         impl.EnsureSpotShadowArray();
         impl.EnsurePointShadowCube();
-        const glm::mat4 lightVP   = activeLight ? impl.ComputeLightViewProj(activeLightDir)
-                                                : glm::mat4(1.0f);
+        if (activeLight)
+        {
+            impl.ComputeCascadeViewProjs(activeLightDir);
+        }
+        else
+        {
+            // 无 directional 时 cascade 矩阵保持上一帧 / 默认值；shader 端
+            // shadow 比较以 1.0 远深度退化为全亮（光源缺失时 lightDirIntensity.w
+            // 由 UpdateLightUbo 用 neutral light fallback 写入）。
+            for (auto& m : impl.cascadeViewProjs) { m = glm::mat4(1.0f); }
+            impl.cascadeNdcSplits = glm::vec4(1.0f);
+        }
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         cameraWorldPos            = glm::vec3(invView[3]);
-        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
+        impl.UpdateLightUbo(activeLight, activeLightDir, cameraWorldPos, iblTintIntensity);
         impl.UpdatePointLightsUbo(world);
         impl.UpdateSpotLightsUbo(world);
     }
@@ -1628,13 +1643,12 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         const glm::mat4 baseViewProj    = impl.scene.MainCamera().projection
                                         * impl.scene.MainCamera().view;
         const glm::mat4 invBaseViewProj = glm::inverse(baseViewProj);
-        const glm::mat4 lightVP  = activeLight ? impl.ComputeLightViewProj(activeLightDir)
-                                               : glm::mat4(1.0f);
-
-        // shadow pre-pass：directional 单张 2D map + spot 透视 shadow array。
+        // CSM cascade 矩阵已在上方 prepare 段 ComputeCascadeViewProjs 算好；
+        // RecordShadowPass 内部 loop 各 layer 用 cascadeViewProjs[i]。
+        // shadow pre-pass：directional CSM Tex2DArray + spot 透视 shadow array。
         if (impl.shadowMap)
         {
-            ok = impl.RecordShadowPass(activeLight, lightVP);
+            ok = impl.RecordShadowPass(activeLight);
         }
         if (impl.spotShadowArray)
         {
@@ -2326,14 +2340,23 @@ void Pipeline::Render(Orange::Engine::World& world)
         impl.EnsureShadowMap();
         impl.EnsureSpotShadowArray();
         impl.EnsurePointShadowCube();
-        const glm::mat4 lightVP = activeLight ? impl.ComputeLightViewProj(activeLightDir)
-                                              : glm::mat4(1.0f);
+        if (activeLight)
+        {
+            impl.ComputeCascadeViewProjs(activeLightDir);
+        }
+        else
+        {
+            // 无 directional 时 cascade 矩阵清单位阵；shader 端 shadow 比较以
+            // 1.0 远深度退化为全亮（neutral light fallback 由 UpdateLightUbo 写入）。
+            for (auto& m : impl.cascadeViewProjs) { m = glm::mat4(1.0f); }
+            impl.cascadeNdcSplits = glm::vec4(1.0f);
+        }
         // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
         // 取 inverse 后的第 4 列即为相机在 world 中的位置。供 rim_light
         // / 后续 specular 类 fragment 取真 viewDir + sky-dome pass 反推。
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         cameraWorldPos            = glm::vec3(invView[3]);
-        impl.UpdateLightUbo(activeLight, activeLightDir, lightVP, cameraWorldPos, iblTintIntensity);
+        impl.UpdateLightUbo(activeLight, activeLightDir, cameraWorldPos, iblTintIntensity);
         impl.UpdatePointLightsUbo(world);
         impl.UpdateSpotLightsUbo(world);
     }
@@ -2361,14 +2384,13 @@ void Pipeline::Render(Orange::Engine::World& world)
             // 未激活 TAA 时 base == viewProj。
             const glm::mat4 baseViewProj = impl.scene.MainCamera().projection
                                          * impl.scene.MainCamera().view;
-            const glm::mat4 lightVP =
-                activeLight ? impl.ComputeLightViewProj(activeLightDir) : glm::mat4(1.0f);
-
+            // CSM cascade 矩阵已在上方 prepare 段 ComputeCascadeViewProjs 算好；
+            // RecordShadowPass 内部 loop 各 layer 用 cascadeViewProjs[i]。
             // Shadow 预 pass：在主 pass 之前把场景从 light 视角渲到
             // shadow map（depth-only）。无 light 时跳过实际绘制，只清深度。
             if (impl.shadowMap)
             {
-                offscreenOk = impl.RecordShadowPass(activeLight, lightVP);
+                offscreenOk = impl.RecordShadowPass(activeLight);
             }
             if (impl.spotShadowArray)
             {

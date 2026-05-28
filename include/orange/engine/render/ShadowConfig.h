@@ -56,6 +56,15 @@ struct ShadowConfig
     //     filter 半径。8~16 在 1024 分辨率下是可见的柔和档位。
     // 仅 directional + spot 阴影消费（point cubemap 仍走固定 PCF）。
     float pcssLightSize{0.0f};
+
+    // CSM（Cascaded Shadow Maps）级联数（GAP-2026-05-27-cascaded-shadow-maps）。
+    //   * 1（默认）= 单 cascade，等价于历史 ±10 ortho box 行为（零回归安全网）；
+    //   * 3 / 4 = 真 CSM：按相机视锥分段，每段独立 light-space ortho，近段
+    //     高分辨率近景锐 / 远段覆盖大范围。资源上限 kMaxCascades = 4。
+    // 仅 directional 阴影消费；spot/point 各自独立 shadow map / cubemap。
+    // PCSS 与 cascade 交互：远 cascade 的 ortho 覆盖范围更大，pcssLightSize
+    // 按 per-cascade 尺度缩放（C2 落地，C1 阶段所有 cascade 等同处理）。
+    std::uint32_t cascadeCount{1};
 };
 
 }  // namespace Orange::Engine::Render

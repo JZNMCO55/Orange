@@ -1643,7 +1643,7 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 - **发现方**：渲染推进 session（post-process 特效铺完后回看 directional 阴影质量）
 - **发现日期**：2026-05-27
 - **一句话定性**：directional 阴影用**固定 ±10 ortho box**（`PipelineShadow.cpp::ComputeLightViewProj` 硬编码 `kHalfExtent = 10`）覆盖整个场景，shadow map 分辨率均摊到 20×20 单位 → 近景阴影边缘锯齿粗、远景浪费；缺 **CSM（Cascaded Shadow Maps）**——按相机视锥分级、近景高分辨率，是户外大场景 directional 阴影的工业标准
-- **状态**：**仅登记，未实现**（本 session 只铺 post-process 特效 + 写本设计笔记；CSM 改核心阴影路径 + pbr.frag + LightUbo，破坏面大，留**独立 session** 执行）
+- **状态**：**C1 ✅ 落地（2026-05-28）—— infrastructure + cascadeCount=1 默认零回归基线**；C2（真实视锥分段拟合 + texel snap + per-cascade PCSS scale + 拉长地面 fixture）+ C3（cross-cascade dither/blend，optional polish）留后续 session
 
 ### 触发场景
 
@@ -1679,6 +1679,31 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 - 与 GAP-2026-05-26-complete-light-source-family-and-shadows（已落地 spot/point 阴影）**正交**：那条做的是"多光源各自的阴影"，本条做的是"directional 单光源的阴影质量分级"。spot 用的 `Tex2DArray + per-layer view` 基建可直接复用到 CSM 的 cascade array。
 - OrangeRender 侧能力**充足**（Tex2DArray + per-layer depth view + ortho depth-only 渲染都已在 spot/point 阴影用上），**不需要跨仓提 feature**——纯 OrangeEngine 内 Pipeline + shader 改动。
+
+### C1 落地记录（2026-05-28）
+
+infrastructure 闭环，**默认 `cascadeCount=1` 行为与昨日逐像素一致**（零回归安全网）。改面：
+
+- `ShadowConfig` 加 `cascadeCount{1}` 字段
+- `PipelineImpl.h`：`kMaxCascades=4` 常量；`shadowMap` 改 `Tex2DArray`（layer = cascade）+ `shadowMapLayerViews[4]` per-layer Tex2D depth view（仿 `spotShadowArray` 模式）；`cascadeViewProjs[4]` + `cascadeNdcSplits` 本帧 cache；`LightUboData` 末尾 additive 追加 `cascadeViewProj[4]` + `cascadeNdcSplits`（160B → 432B，static_assert 同步）
+- `PipelineShadow.cpp`：`EnsureShadowMap` 重写为 Tex2DArray + per-layer view；新 `ComputeCascadeViewProjs(lightDir)`（C1 单 cascade：所有 slot 填同一 ±10 box 矩阵 + splits 全 1.0 → cascade selection 恒 0）；`RecordShadowPass` 改 loop kMaxCascades layer，cascadeCount 之外的 layer 仍 Clear 到 1.0；`UpdateLightUbo` 删 `lightViewProj` 参数（改读成员 cascadeViewProjs[]）
+- `Pipeline.cpp`：6 处 caller（window + offscreen path 各 3：prepare 段 ComputeCascadeViewProjs + UpdateLightUbo + RecordShadowPass）同步；`Shutdown` 加 `shadowMapLayerViews` reset（**SEGFAULT 真因**：漏 reset 导致 vkDestroyDevice 报 VkImageView leak，pipeline_template_cache_test / pipeline_hdr_target_test / bloom_chain_test 当场 SEGFAULT，加 reset 后 100% pass）
+- shader：8 个 set 0/binding 0 sampler 全升 `sampler2DArray`（pbr/toon/rim_light/water_basic/textured_mesh/dissolve/emissive/unlit）；消费 shadow 的 4 个 shader（pbr/toon/rim_light/water_basic/textured_mesh）`SamplePcfShadow` → `SamplePcfShadowArray(layer=0, ..)`；pbr.frag 唯一额外加 cascade selection（`gl_FragCoord.z` vs `uCascadeNdcSplits`）+ 调 `SamplePcssShadowArray` 走真 CSM 路径；其他 7 shader 的 LightUbo 块**不动**（additive 字段不读即可，std140 layout-compatible）
+
+**关键 implementation 取舍**：
+
+1. **additive LightUbo layout**：保留 `lightViewProj` 在原偏移 0 作 cascade[0] backward-compat alias；新 cascade 字段追加末尾，把 shader 改面从 ~13 文件压到 ~10（非 pbr shader 仍按旧字段名读 cascade 0 等效矩阵）
+2. **cascade selection 用 `gl_FragCoord.z`（NDC z）而非 view-space 深度**：避免引入新 varying / 新 UBO 字段（如 camera forward）；host 端 NDC 转换由相机 proj 隐式提供。C1 时 cascadeNdcSplits 全 = 1.0 → `gl_FragCoord.z > splits[i]` 永不命中，cascade 恒 0
+3. **EnsureSpotShadowArray 是 CSM 完整模板**：per-layer view 创建 / transition 整阵 / loop layer 渲染逐字搬
+
+**验收**：
+
+- `shadow_occlusion_test` ✅（CSM C1 核心回归守门员，光遮挡判定与昨日字节一致）
+- 全 52 ctest ✅（含 pipeline_template_cache_test / pipeline_hdr_target_test / bloom_chain_test / editor_build_smoke）
+- invariant lint 7 grandfathered 无新增 + drift 干净
+- 顺手发现 + 修一条 0b16593 遗留：`OrangeEngineConfig.cmake.in` 缺 `OrangeEngine::imgui` alias 重建（install EXPORT 不传播 build-tree alias，editor_build_smoke 当场暴露）→ 独立 commit 单修
+
+**关联**：[[GAP-2026-05-26-complete-light-source-family-and-shadows]]（spot Tex2DArray 模板被 CSM C1 复用）；C2 待开工事项见上面"落地设计要点"段 2 + 5 + 6
 
 ---
 
@@ -1915,6 +1940,102 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 - **优先级**：P3（撞上即升格）。当前首游处于 graybox / 手感 spike 阶段，用内置 `cube.mesh` / `plane.mesh` + GUI 摆位 / 手写少量 scene.json 已够；**全 CLI 管线在"程序化批量生成场景道具"成为实际瓶颈时才升格**。
 - **归属候选**：G1 属 OrangeEditor（headless 入口形态，importer 核心解耦）；G2 可引擎侧 CLI 或独立 Python 工具；待独立 session 评审拆解，不在当前 critical path。
 - **关联**：[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（GUI importer 前置，本条补其 headless 维度）；[[GAP-2026-05-27-play-in-editor]] / workspace 项目模型（同属"工具链闭环 + 让游戏真正用上引擎"一束，CLI 内容管线与 PIE 正交但同向）。
+
+---
+
+## GAP-2026-05-28-gltf-scene-level-import-not-flattened
+
+- **发现方**：Orange-Ecosystem umbrella session 讨论"关卡场景搭建工作流（in-engine vs 外部 DCC）"时
+- **发现日期**：2026-05-28
+- **一句话定性**：现 `GltfImporter` 把 multi-mesh / multi-primitive 的 `.gltf / .glb` **塌平合并成单一 `MeshAsset`**，丢失 transform 层级 / per-mesh material 划分 / scene-level lights & cameras —— 用户在 Blender 摆好整场景后导入引擎等于一切摆位 / 材质 / 灯光归零，DCC 的"场景组装"价值无法被引擎消费；当前 importer 只覆盖了"asset import"维度，未覆盖工业标配的"scene import"维度
+
+### 触发场景
+
+- 用户在 umbrella session 明确表达："验证完玩法后，场景搭建大概率从 Blender 做起"——即首游过完 graybox / 玩法 spike 阶段后，关卡视觉迭代需要 DCC scene-level 工作流支撑
+- 工业 DCC 流程：在 Blender 用 transform tree 组织几十个 prop（树 / 石 / 灯柱 / 机关本体 / 地形块）+ 每个挂独立材质 + 摆几盏点光 + 设几个 reference camera → 导出 `.glb` → 期望引擎里 `File → Import Scene` 直接吃回原样
+- 现状（`tools/OrangeEditor/import/GltfImporter.h` 的 T4 范围限制注释直接写明，**非 importer bug，是设计取舍**）：
+  - "多 primitive / 多 mesh **合并**为单个 `MeshAsset`，丢失 per-primitive material 划分"——transform tree 整树被压平、各 mesh 的位置 / 旋转 / 缩放全归零
+  - "只接受 triangle primitive"
+  - "skinning / morph targets / animation 全部 skip"
+  - per-primitive material 不读（受 ADR-008 决策"PBR material 解析延 v1.2"约束）
+  - glTF scene/nodes/lights/cameras 等 scene-level 概念**完全不消费**
+- 业内对照（OrangeEditor 唯一空白）：
+
+| 引擎 | scene-level import 形态 | 入口 |
+|---|---|---|
+| Unity | `.fbx / .gltf` → Model prefab（保留 hierarchy + 多 mesh + per-mesh material slot + lights） | 拖入 Project 视图 |
+| Unreal | `.fbx scene import` 选 "Combine Meshes = OFF" 后保留 hierarchy + 各 Actor | File → Import Into Level |
+| Godot | `.glb as scene` 直接生成 `.tscn` 等价物 | 拖入 FileSystem 视图 |
+| Lumix | `.fbx` / `.gltf` 拆 per-mesh + 保留 transform tree | Asset 浏览器右键 Import |
+| OrangeEditor | ❌ **塌平合并** | 仅 `File → Import` 单 mesh 形态 |
+
+### 证据
+
+- `tools/OrangeEditor/import/GltfImporter.h` 第 13–19 行的 "T4 范围限制" 注释段直接说明合并策略与延后项
+- `tools/OrangeEditor/import/ImportDispatcher.h` 的 `ImportKind` enum 只有 `Texture / ObjMesh / GltfMesh / Unsupported` 四种——**无 `GltfScene` 路径**；signature `ImportGltfMesh` 名字本身已表达"只导 mesh，不导 scene"的范围限制
+- `vendor` 内未持有任何 fbx SDK（`Glob '**/*fbx*'` / `'**/*assimp*'` 均 0 命中），整个 Orange-Ecosystem 无 .fbx 解析能力——本 GAP 不依赖补 fbx，但 G4 顺路覆盖该维度
+- `assets/scenes/demo.scene.json` 的 schema 已支持 entity hierarchy + transform + RenderableComponent + LightComponent 等所有 scene-level 概念——**落盘 schema 已经够用**，缺的纯粹是 "从 glTF scene/nodes 反向生成这份 .scene.json + 多个 .mesh" 的 import-time 翻译层
+
+### 缺什么（按依赖拆）
+
+#### G1 · scene-level glTF import 主路径（hierarchy + 多 mesh 不塌平）
+
+- `ImportKind` 加 `GltfScene`；`ImportDispatcher::Dispatch` 路由——如何区分"作为 mesh 导"还是"作为 scene 导"待 ADR 拆解（候选：按 glTF `scenes.length > 0 && nodes.length > 1` 判断；或加 File → Import Mesh / Import Scene 两菜单让用户选；或 Asset 浏览器右键多选）
+- 新增 `ImportGltfScene` 实现：
+  - 遍历 glTF `scenes[0].nodes`（递归）→ 在 OrangeEngine World 内建对应 Entity 树（每 node 一 Entity，挂 `TransformComponent` + `HierarchyComponent` + `NameComponent` 沿 node.name）
+  - 每个 `mesh.primitives[i]` → **单独**写出 `.mesh`（**不合并**），命名 `<basename>_<meshname>_<primIdx>.mesh`；多 primitive / 多 mesh 不再压平
+  - 各 Entity 挂 `RenderableComponent` 指向对应 mesh AssetHandle
+- 落盘形态：产出 `assets/scenes/<basename>.scene.json` + 多个 `assets/Models/<basename>/<meshname>.mesh` + co-locate texture/material（G2 接管）
+- `.meta` sidecar 仍按 ADR-008 落（4 件套不绕开）；scene 自己也有 `.meta` 记 source path + hash
+- 关键设计取舍：scene import 后用户可以再编辑 → 是否保持 source link / re-import 不覆盖手工修改 → 留 ADR；参 Unity 的 "model prefab + override" 形态 / Lumix 的 .fbx as prefab + scene instance 两层
+
+#### G2 · per-mesh PBR material 划分
+
+- **前置依赖**：[[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 落地（mikktspace tangent + texture binding 基础设施一束）+ ADR-008 中 "PBR material 解析延 v1.2" 真正开工
+- glTF `materials[i]` → `MaterialInstance`，对每个 primitive 的 material slot 分配独立 `MaterialInstance`；输出 `assets/materials/<basename>/<matname>.material`
+- baseColor / normal / metallicRoughness / occlusion / emissive 贴图 co-locate import 到 `assets/Models/<basename>/textures/`，材质字段用 `assets/...` 相对路径引用（沿用现 `MaterialInstance` 路径约定）
+- **本 G2 与 [[GAP-2026-05-22-editor-dcc-import-pipeline-missing]] "剩余延后项" 中 "glTF PBR material 解析 → v1.2" 是同一拆解，不重复登记**；本 GAP 在 scene-level 维度 inherit 它，落地节奏与那条同步
+
+#### G3 · scene-level extension（lights / cameras）
+
+- glTF `KHR_lights_punctual` extension → 引擎 `DirectionalLightComponent` / `PointLightComponent` / `SpotLightComponent`（SpotLight 待 [[GAP-2026-05-26-complete-light-source-family-and-shadows]] 落地后接通）
+- glTF `cameras[i]` + 引用该 camera 的 node → 引擎 `CameraComponent`（仅 perspective；orthographic 视需求接）
+- 后处理 volume / 雾 等非标准 extension：多数 DCC 走 vendor-specific extras（KHR_materials_volume / extras 字段），可移植性差，**G3 范围内不保证**，留 G5+ 按拉动触发
+
+#### G4 ·（可选，更长期）`.fbx` scene-level import
+
+- ADR-008 的 4 件套路径已铺好，加 `FbxImporter` 模块即可（vendor 选型候选 OpenFBX MIT / Autodesk FBX SDK 商业 + 体积大）
+- 范围与 G1 同（hierarchy + multi-mesh + material slot），仅文件格式 vendor 差异
+- 在玩法验证完成 + DCC 工作流真正成为主路径**之后**再评估——`.glb` 通常已足够，`.fbx` 是 Maya / 3ds Max 主导工作流的对齐项
+
+#### G5 ·（可选，更长期）re-import workflow + override 持久
+
+- 用户在 Blender 修改场景 → 重新导出 `.glb` → 引擎再 import 时**保留**用户在引擎里加的 component / 手工调过的 transform，仅 sync 新增 / 改动的 mesh
+- Unity model prefab override / UE actor preserve-on-reimport 同款机制
+- 现状内置 `assets/<TypeDir>/<file>.meta` 已记 sourcePath + sourceHash，**前置基础设施已有**；缺的是 reconcile 算法 + UX
+
+### 期望验收
+
+- 用户在 Blender 摆 5+ prop 的简易场景（树 / 石 / 灯柱 / 机关，每个独立材质 + transform + 1~2 盏 PointLight），导出 `.glb`
+- 编辑器 `File → Import Scene` 选该文件 → 引擎产出：
+  - `assets/scenes/<basename>.scene.json` 含与 Blender 同构的 Entity 树
+  - `assets/Models/<basename>/*.mesh` 每个 prop 单独 .mesh，**不合并**
+  - `assets/materials/<basename>/*.material` 每个材质独立（G2 后）
+- `Open Scene` 加载该 scene → viewport 内每个 prop 在 Blender 摆好的世界位置 / 旋转 / 缩放上 + 各自材质生效（G2 后）+ 灯光符合 Blender 摆位（G3 后）
+- Hierarchy panel 显示 Blender 的 transform tree 结构（父子关系保留）
+- 序列化 round-trip：import 后 Save → 关 Open Scene → 字节级稳定（沿用 [[GAP-2026-05-23-editor-play-stop-entity-tree-order-reversed]] 同款 entity-index 排序约束）
+
+### 状态
+
+- **仅登记，未实现 / 未排期**。本条是 ADR-010 work-queue 登记动作（纯文档，不实现不消费），登记 session 不碰代码
+- **优先级**：P2（预防性登记，玩法验证完成后升格）。**触发升格条件**：首款 Ori-like 玩法 spike 闭环 + 首游进入 visual polish 阶段、用户尝试在 Blender 摆完整关卡时（按用户在 umbrella session 表达的工作流意图，这是个**可预期**而非偶发的需求）。在那之前用 G1 子集（手工组装内置 cube / plane + GUI 摆位）已够灰盒
+- **归属候选**：OrangeEditor v1.2 范畴（与 PBR material 解析 G2 同 milestone，与 ADR-008 "PBR material 延 v1.2" 对齐）；G4 .fbx 可继续延后到 importer family 完整覆盖时再做；G5 re-import override 单独 minor milestone
+- **关联**：
+  - [[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（前置 ✅；本条在 scene 维度补完，单 mesh 维度它已覆盖）
+  - [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]]（G2 前置——material binding + tangent 基础设施）
+  - [[GAP-2026-05-27-headless-asset-import-and-scene-generation-cli]]（正交：headless CLI 维度 vs scene-level 维度，可独立推进；两者合流后形成"DCC scene → 引擎全自动管线"终极形态）
+  - [[GAP-2026-05-26-complete-light-source-family-and-shadows]] ✅（G3 SpotLight 前置已具备）
+  - ADR-008（DCC import 4 件套路径——本 GAP 不破纪律，仅在 scene 维度增加新 importer 形态）
 
 ---
 

@@ -16,7 +16,8 @@
 
 #include "include/shadow_pcf.glsl.inc"
 
-layout(set = 0, binding = 0) uniform sampler2D uShadowMap;
+// CSM additive：升 sampler2DArray，固定 layer=0（同 toon 取舍）。
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;
 
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
@@ -44,10 +45,10 @@ void main()
     base      *= 0.85 + 0.15 * vec3(vUV.x, vUV.y, 1.0 - vUV.x);
 
     // shadow factor —— 1 = 全亮，0 = 全阴影。
-    float shadow = SamplePcfShadow(uShadowMap, vWorldPos,
-                                   light.uLightViewProj,
-                                   int(light.uShadowParams.x),
-                                   light.uShadowParams.y);
+    float shadow = SamplePcfShadowArray(uShadowMap, 0, vWorldPos,
+                                        light.uLightViewProj,
+                                        int(light.uShadowParams.x),
+                                        light.uShadowParams.y);
 
     // shadow 区域降到 30% 亮度（不全黑——让 checker pattern 仍可读）。
     float lighting = mix(0.3, 1.0, shadow);

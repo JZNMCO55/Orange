@@ -19,7 +19,10 @@
 
 #include "include/shadow_pcf.glsl.inc"
 
-layout(set = 0, binding = 0) uniform sampler2D uShadowMap;
+// CSM additive（GAP-2026-05-27）：sampler 升 sampler2DArray，shadow 采样侧
+// 改 Array 变体（固定 layer=0 = cascade 0；toon 不消费 CSM cascade selection，
+// 始终采近段 cascade 即可，多 cascade 时远景不投影属可接受的 stylized 退化）。
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;
 
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
@@ -50,10 +53,10 @@ void main()
     float NdotL    = max(dot(normal, lightDir), 0.0);
 
     // 阴影系数：1 = 完全照亮，0 = 完全阴影。
-    float shadow = SamplePcfShadow(uShadowMap, vWorldPos,
-                                   light.uLightViewProj,
-                                   int(light.uShadowParams.x),
-                                   light.uShadowParams.y);
+    float shadow = SamplePcfShadowArray(uShadowMap, 0, vWorldPos,
+                                        light.uLightViewProj,
+                                        int(light.uShadowParams.x),
+                                        light.uShadowParams.y);
 
     // 三阶 cel banding：阈值 0.25 / 0.65 把 litness 划成 cool / mid / warm
     // 三段。比单阈 step(0.5) 多出一段中间色，cube 的多个面在常见光照

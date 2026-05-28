@@ -15,7 +15,8 @@
 
 // set 0 layout 与主 pass 其它内置模板对齐——shader 即使不读 binding 0/1，
 // 也得在 layout 里声明，否则 SetDescriptorSet 会失败。
-layout(set = 0, binding = 0) uniform sampler2D uShadowMap;
+// CSM additive：升 sampler2DArray，类型必须与 descriptor 一致。
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
     mat4 uLightViewProj;

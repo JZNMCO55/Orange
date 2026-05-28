@@ -491,27 +491,48 @@ struct Pipeline::Impl
     // ---- Shadow pass + Light UBO 资源 -----------------------
     ShadowConfig shadowConfig{};
 
-    std::unique_ptr<Orange::Rhi::RHITexture> shadowMap;
+    // CSM（GAP-2026-05-27-cascaded-shadow-maps）级联上限。shadowConfig.cascadeCount
+    // ≤ 本上限；shadowMap 升为 Tex2DArray + per-layer Tex2D depth view（仿
+    // spotShadowArray 模式），cascadeCount=1 默认行为退化为单 cascade = 历史
+    // 单张 shadow map 行为（零回归安全网）。
+    static constexpr std::uint32_t kMaxCascades = 4;
+
+    std::unique_ptr<Orange::Rhi::RHITexture> shadowMap;   // Tex2DArray（layer = cascade）
     std::uint32_t                            shadowMapResolution{0};
     bool                                     shadowMapLayoutShaderReadOnly{false};
+    std::array<std::unique_ptr<Orange::Rhi::RHITextureView>, kMaxCascades>
+        shadowMapLayerViews;
+
+    // 本帧 cascade 矩阵 + NDC z split 距离。ComputeCascadeViewProjs 计算，
+    // RecordShadowPass 按 layer 渲染消费 matrices，UpdateLightUbo 写进 UBO。
+    // cascadeCount=1 时 [0..3] 全部 = 单 directional ortho 矩阵，splits 全 1.0
+    // → shader cascade selection 恒返回 0（行为等价历史 single shadow map）。
+    std::array<glm::mat4, kMaxCascades> cascadeViewProjs{};
+    glm::vec4                           cascadeNdcSplits{1.0f, 1.0f, 1.0f, 1.0f};
 
     Asset::AssetHandle<Asset::ShaderAsset> shadowCasterVsHandle;
     Asset::AssetHandle<Asset::ShaderAsset> shadowCasterFsHandle;
     std::unique_ptr<Orange::Rhi::RHIPipeline> shadowCasterPipeline;
 
     // Light UBO：per-frame 写一次（std140 layout，对齐 16 字节）。
+    // CSM additive（GAP-2026-05-27）：cascadeViewProj[0..3] + cascadeNdcSplits
+    // 追加到原 160B 末尾；老 shader 只读到 iblFactor 仍 layout-compatible（std140
+    // 末尾未引用字段不影响布局）。pbr.frag 是唯一消费新字段的 builtin。
     struct LightUboData
     {
-        glm::mat4 lightViewProj;
-        glm::vec4 lightDirIntensity;  // xyz = direction, w = intensity
-        glm::vec4 lightColor;         // xyz = rgb, w = unused
-        glm::vec4 shadowParams;       // x = pcfKernelRadius, y = depthBias, z/w pad
-        glm::vec4 cameraWorldPos;     // xyz = camera worldPos（rim/spec 类 shader 取 viewDir）, w = unused
-        glm::vec4 frameInfo;          // x = time（seconds），y/z/w 预留（deltaTime / frameCount / vsyncFps）
-        glm::vec4 iblFactor;          // xyz = EnvironmentComponent.tint * intensity, w pad；PBR shader IBL 段乘子
+        glm::mat4 lightViewProj;       // = cascadeViewProj[0] backward-compat alias
+        glm::vec4 lightDirIntensity;   // xyz = direction, w = intensity
+        glm::vec4 lightColor;          // xyz = rgb, w = unused
+        glm::vec4 shadowParams;        // x = pcfKernelRadius, y = depthBias, z = pcssLightSize, w pad
+        glm::vec4 cameraWorldPos;      // xyz = camera worldPos, w = unused
+        glm::vec4 frameInfo;           // x = time（seconds），y/z/w 预留
+        glm::vec4 iblFactor;           // xyz = EnvironmentComponent.tint * intensity, w pad
+        // ─── CSM additive ─────────────────────────────────────────────────
+        glm::mat4 cascadeViewProj[kMaxCascades];   // 256 B；[0..N-1] 实际 cascade
+        glm::vec4 cascadeNdcSplits;                // 16 B；x..w = cascade i 远端 NDC z
     };
-    static_assert(sizeof(LightUboData) == 64 + 16 * 6,
-                  "LightUboData std140 size mismatch (expected 160 bytes)");
+    static_assert(sizeof(LightUboData) == 64 + 16 * 6 + 64 * kMaxCascades + 16,
+                  "LightUboData std140 size mismatch (expected 432 bytes after CSM additive)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
 
     // PointLights UBO（GAP-2026-05-11 G2；GAP-2026-05-26 G3 加 shadowParams）。
@@ -1129,11 +1150,13 @@ struct Pipeline::Impl
     bool EnsureBloomResources();
     void ReleaseBloomResources();
 
-    // 创建 / 重建 shadow map。
+    // 创建 / 重建 shadow map（Tex2DArray，layer = cascade）+ per-layer view。
     bool EnsureShadowMap();
 
-    // 把场景从 light 视角渲到 shadow map（depth-only）。
-    bool RecordShadowPass(const DirectionalLight* light, const glm::mat4& lightViewProj);
+    // 把场景从 directional light 视角渲到 shadowMap 各 cascade layer
+    //（depth-only）。每帧由 ComputeCascadeViewProjs 预先填好 cascadeViewProjs[]，
+    // 本函数按 layer loop（cascadeCount 之外的 layer 仍 Clear 到 1.0 避免残留）。
+    bool RecordShadowPass(const DirectionalLight* light);
 
     // 离屏模式专用：HDR → viewportColor 的 passthrough。
     bool RecordPassthroughToViewport();
@@ -1149,10 +1172,12 @@ struct Pipeline::Impl
     bool RecordCaptureCopy(Orange::Rhi::RHICommandList& cmd);
     void FinalizeCapture();
 
-    // 把 light 数据写入 lightUbo。
+    // 把 light 数据写入 lightUbo。CSM cascade 数据由本函数从成员
+    // cascadeViewProjs[] + cascadeNdcSplits 读取（ComputeCascadeViewProjs
+    // 已在调用前填好）。lightViewProj 字段写 cascadeViewProjs[0] 作 backward-
+    // compat alias，老 shader 仍可读旧字段名。
     void UpdateLightUbo(const DirectionalLight* light,
                         const glm::vec3&        lightWorldDir,
-                        const glm::mat4&        lightViewProj,
                         const glm::vec3&        cameraWorldPos,
                         const glm::vec3&        iblTintIntensity);
 
@@ -1187,8 +1212,17 @@ struct Pipeline::Impl
     //（90° perspective depth-only，复用 shadow_caster pipeline）。
     bool RecordPointShadowPass();
 
-    // 计算 light view-proj。
+    // 计算单 cascade 的 light view-proj（历史 ±10 ortho box；ComputeCascadeViewProjs
+    // 在 cascadeCount=1 时直接复用本函数填所有 slot）。
     glm::mat4 ComputeLightViewProj(const glm::vec3& lightWorldDir) const;
+
+    // CSM：按相机视锥分段拟合每 cascade 的 light view-proj，结果写入成员
+    // cascadeViewProjs[] + cascadeNdcSplits（NDC z 划分点，pbr.frag 用
+    // gl_FragCoord.z 与之比较选 cascade）。cascadeCount=1 时退化为单 cascade
+    // = ComputeLightViewProj 旧行为 + splits 全 1.0（cascade 选择恒返回 0）。
+    // C1 实现：cascadeCount>1 时各 cascade 仍用同一 ±10 box（splits 按线性
+    // 分布）—— 单 cascade 行为继承，多 cascade 真实分段拟合留 C2 落地。
+    void ComputeCascadeViewProjs(const glm::vec3& lightWorldDir);
 
     // 创建 / 重建 HDR off-screen target。
     bool EnsureHdrTarget()

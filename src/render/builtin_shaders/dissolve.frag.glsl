@@ -14,7 +14,7 @@
 // 后这里再迁回 per-instance 描述符）：noise scale / edge width / edge
 // color 都写在常量里。
 
-layout(set = 0, binding = 0) uniform sampler2D uShadowMap;  // 不消费，但 set 0 layout 要求声明
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;  // CSM additive：不消费但 set 0 layout 要求 sampler2DArray 类型
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
     mat4 uLightViewProj;

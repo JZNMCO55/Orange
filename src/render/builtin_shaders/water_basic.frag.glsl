@@ -20,7 +20,8 @@
 
 #include "include/shadow_pcf.glsl.inc"
 
-layout(set = 0, binding = 0) uniform sampler2D uShadowMap;
+// CSM additive：升 sampler2DArray，固定 layer=0（同 toon 取舍）。
+layout(set = 0, binding = 0) uniform sampler2DArray uShadowMap;
 layout(set = 0, binding = 1, std140) uniform LightUbo
 {
     mat4 uLightViewProj;
@@ -105,10 +106,10 @@ void main()
     vec3  edge = vec3(fresnel) * lightCol;
 
     // shadow factor —— 1 = 全亮，0 = 全阴影；与 textured.frag 同源 PCF。
-    float shadow = SamplePcfShadow(uShadowMap, vWorldPos,
-                                   light.uLightViewProj,
-                                   int(light.uShadowParams.x),
-                                   light.uShadowParams.y);
+    float shadow = SamplePcfShadowArray(uShadowMap, 0, vWorldPos,
+                                        light.uLightViewProj,
+                                        int(light.uShadowParams.x),
+                                        light.uShadowParams.y);
     float lighting = mix(0.4, 1.0, shadow);
 
     vec3 lit = (diffuse + edge) * lighting + baseLit * 0.15;  // 底色环境光基线

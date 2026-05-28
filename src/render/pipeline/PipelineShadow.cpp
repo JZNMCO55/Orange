@@ -1,7 +1,9 @@
 // Pipeline::Impl 的 shadow / light UBO 系列实现：EnsureShadowMap /
-// ComputeLightViewProj / UpdateLightUbo / UpdatePointLightsUbo /
-// RecordShadowPass。directional light + 简化 ortho frustum；point light 上
-// 限 kMaxPointLights 走独立 UBO。
+// ComputeLightViewProj / ComputeCascadeViewProjs / UpdateLightUbo /
+// UpdatePointLightsUbo / RecordShadowPass。directional light 走 CSM
+// （GAP-2026-05-27-cascaded-shadow-maps；C1：Tex2DArray + cascadeCount=1
+// 默认零回归基线，多 cascade 真实拟合留 C2）；point light 上限 kMaxPointLights
+// 走独立 UBO；spot light 走 spotShadowArray Tex2DArray 各 caster 占一层。
 
 #include "PipelineImpl.h"
 
@@ -34,27 +36,54 @@ bool Pipeline::Impl::EnsureShadowMap()
         return false;
     }
     renderDevice->WaitIdle();
+    for (auto& v : shadowMapLayerViews) { v.reset(); }
     shadowMap.reset();
 
+    auto& rhi = renderDevice->GetRhiDevice();
+
+    // CSM Tex2DArray（kMaxCascades layer）：仿 EnsureSpotShadowArray 模式。
+    // cascadeCount=1 默认时仅 layer 0 被渲染消费，其他 layer Clear 到 1.0
+    // 不影响采样（pbr.frag cascade selection 退化恒返回 0）。
     Orange::Rhi::TextureDesc t{};
-    t.mWidth     = targetRes;
-    t.mHeight    = targetRes;
-    t.mFormat    = Orange::Rhi::TextureFormat::D32Float;
-    t.mUsage     = Orange::Rhi::TextureUsage::DepthStencil
-                 | Orange::Rhi::TextureUsage::Sampled;
-    auto tex = renderDevice->GetRhiDevice().CreateTexture(t);
+    t.mWidth       = targetRes;
+    t.mHeight      = targetRes;
+    t.mFormat      = Orange::Rhi::TextureFormat::D32Float;
+    t.mDimension   = Orange::Rhi::TextureDimension::Tex2D;   // 多层 2D array
+    t.mArrayLayers = kMaxCascades;
+    t.mUsage       = Orange::Rhi::TextureUsage::DepthStencil
+                   | Orange::Rhi::TextureUsage::Sampled;
+    auto tex = rhi.CreateTexture(t);
     if (!tex)
     {
-        ORANGE_LOG_ERROR("Pipeline: shadow map CreateTexture 失败 ({}x{} D32Float)",
-                         targetRes, targetRes);
+        ORANGE_LOG_ERROR("Pipeline: shadow map array CreateTexture 失败 ({}x{}x{} D32Float)",
+                         targetRes, targetRes, kMaxCascades);
         return false;
     }
     shadowMap                      = std::move(tex);
     shadowMapResolution            = targetRes;
     shadowMapLayoutShaderReadOnly  = false;
 
-    // 把 main desc set 的 binding 0 重新指向新 shadow view。binding 1 已
-    // 在 EnsureMainDescriptorSetBinding 时绑过 lightUbo。
+    // per-layer Tex2D depth view（cascade i 作 depth attachment 单独渲）。
+    for (std::uint32_t i = 0; i < kMaxCascades; ++i)
+    {
+        Orange::Rhi::TextureViewDesc vd{};
+        vd.mViewDimension  = Orange::Rhi::TextureDimension::Tex2D;
+        vd.mBaseMipLevel   = 0;
+        vd.mLevelCount     = 1;
+        vd.mBaseArrayLayer = i;
+        vd.mLayerCount     = 1;
+        auto view = rhi.CreateTextureView(*shadowMap, vd);
+        if (!view)
+        {
+            ORANGE_LOG_ERROR("Pipeline: shadow map array CreateTextureView(layer={}) 失败", i);
+            return false;
+        }
+        shadowMapLayerViews[i] = std::move(view);
+    }
+
+    // 把 main desc set 的 binding 0 重新指向新 shadow array 的默认 view
+    //（Tex2DArray view）。binding 1 已在 EnsureMainDescriptorSetBinding 时
+    // 绑过 lightUbo。
     if (mainDescSet && hdrSampler)
     {
         Orange::Rhi::DescriptorWrite write{};
@@ -62,7 +91,7 @@ bool Pipeline::Impl::EnsureShadowMap()
         write.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
         write.mImageInfo.mpTexture = shadowMap.get();
         write.mImageInfo.mpSampler = hdrSampler.get();  // 与 HDR sampler 共用一个 linear sampler
-        renderDevice->GetRhiDevice().UpdateDescriptorSet(*mainDescSet, &write, 1);
+        rhi.UpdateDescriptorSet(*mainDescSet, &write, 1);
     }
     return true;
 }
@@ -100,9 +129,20 @@ glm::mat4 Pipeline::Impl::ComputeLightViewProj(const glm::vec3& lightWorldDir) c
     return proj * view;
 }
 
+void Pipeline::Impl::ComputeCascadeViewProjs(const glm::vec3& lightWorldDir)
+{
+    // C1（GAP-2026-05-27-cascaded-shadow-maps）：单 cascade 安全网。所有 slot
+    // 填同一 ±10 ortho box，cascadeNdcSplits 全 = 1.0 → pbr.frag 的 cascade
+    // 选择（`if (gl_FragCoord.z > splits[i]) cascade = i+1`）恒落在 0，行为
+    // 等价历史单张 shadow map。多 cascade 真实视锥分段拟合 + 8 角点 fit +
+    // texel snap 留 C2 落地。
+    const glm::mat4 singleVp = ComputeLightViewProj(lightWorldDir);
+    for (auto& m : cascadeViewProjs) { m = singleVp; }
+    cascadeNdcSplits = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
 void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
                                     const glm::vec3&        lightWorldDir,
-                                    const glm::mat4&        lightViewProj,
                                     const glm::vec3&        cameraWorldPos,
                                     const glm::vec3&        iblTintIntensity)
 {
@@ -111,7 +151,16 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
         return;
     }
     LightUboData data{};
-    data.lightViewProj = lightViewProj;
+    // CSM additive：lightViewProj 字段写 cascade 0 作 backward-compat alias，
+    // 老 shader（toon / rim_light / water_basic / 等）仍可按 `uLightViewProj`
+    // 读到等效矩阵。pbr.frag 真正消费 cascadeViewProj[] + cascadeNdcSplits。
+    data.lightViewProj = cascadeViewProjs[0];
+    for (std::uint32_t i = 0; i < kMaxCascades; ++i)
+    {
+        data.cascadeViewProj[i] = cascadeViewProjs[i];
+    }
+    data.cascadeNdcSplits = cascadeNdcSplits;
+
     if (light != nullptr)
     {
         data.lightDirIntensity = glm::vec4(lightWorldDir, light->intensity);
@@ -472,8 +521,7 @@ bool Pipeline::Impl::RecordSpotShadowPass()
     return true;
 }
 
-bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
-                                      const glm::mat4& lightViewProj)
+bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light)
 {
     ORANGE_PROFILE_SCOPE("Shadow");
     if (!shadowMap || offscreenCmd == nullptr)
@@ -482,75 +530,85 @@ bool Pipeline::Impl::RecordShadowPass(const DirectionalLight* light,
     }
     auto& cmd = *offscreenCmd;
 
+    // 整张 array 一次 transition（TransitionTexture 覆盖所有 layer）。
     const auto fromLayout = shadowMapLayoutShaderReadOnly
         ? Orange::Rhi::TextureLayout::ShaderReadOnly
         : Orange::Rhi::TextureLayout::Undefined;
     cmd.TransitionTexture(*shadowMap, fromLayout,
                           Orange::Rhi::TextureLayout::DepthStencilAttachment);
 
-    Orange::Rhi::DepthStencilAttachment depth{};
-    depth.mpView          = shadowMap->GetDefaultView();
-    depth.mDepthLoadOp    = Orange::Rhi::LoadOp::Clear;
-    depth.mDepthStoreOp   = Orange::Rhi::StoreOp::Store;
-    depth.mClear.mDepth   = 1.0f;
-
-    Orange::Rhi::RenderingDesc rd{};
-    rd.mRenderArea.mWidth  = shadowMapResolution;
-    rd.mRenderArea.mHeight = shadowMapResolution;
-    rd.mDepthStencil       = depth;
-    cmd.BeginRendering(rd);
-
-    Orange::Rhi::RHIViewport vp{};
-    vp.mWidth    = static_cast<float>(shadowMapResolution);
-    vp.mHeight   = static_cast<float>(shadowMapResolution);
-    vp.mMinDepth = 0.0f;
-    vp.mMaxDepth = 1.0f;
-    cmd.SetViewport(vp);
-    Orange::Rhi::RHIScissor sc{};
-    sc.mWidth  = shadowMapResolution;
-    sc.mHeight = shadowMapResolution;
-    cmd.SetScissor(sc);
-
     // 光源不投影 / 缺失时——清完深度 = 1.0 即"远深度"，shadow_pcf 取
     // currentDepth <= 1.0 → 总是 1（全亮），等价于"无阴影"。
     const bool runCaster = (light != nullptr && light->castsShadow && shadowCasterPipeline);
-    if (runCaster)
+    const std::uint32_t cascadeCount = std::min<std::uint32_t>(
+        std::max<std::uint32_t>(shadowConfig.cascadeCount, 1u), kMaxCascades);
+
+    // 逐 cascade layer 渲 depth-only。cascadeCount 之外的 layer 仍 Clear 到
+    // 1.0（远深度 = 全亮，等价无阴影），避免残留 + 满足 ShaderReadOnly 入参。
+    for (std::uint32_t layer = 0; layer < kMaxCascades; ++layer)
     {
-        cmd.BindGraphicsPipeline(*shadowCasterPipeline);
+        Orange::Rhi::DepthStencilAttachment depth{};
+        depth.mpView        = shadowMapLayerViews[layer].get();
+        depth.mDepthLoadOp  = Orange::Rhi::LoadOp::Clear;
+        depth.mDepthStoreOp = Orange::Rhi::StoreOp::Store;
+        depth.mClear.mDepth = 1.0f;
 
-        for (const auto& drawable : scene.Drawables())
+        Orange::Rhi::RenderingDesc rd{};
+        rd.mRenderArea.mWidth  = shadowMapResolution;
+        rd.mRenderArea.mHeight = shadowMapResolution;
+        rd.mDepthStencil       = depth;
+        cmd.BeginRendering(rd);
+
+        Orange::Rhi::RHIViewport vp{};
+        vp.mWidth    = static_cast<float>(shadowMapResolution);
+        vp.mHeight   = static_cast<float>(shadowMapResolution);
+        vp.mMinDepth = 0.0f;
+        vp.mMaxDepth = 1.0f;
+        cmd.SetViewport(vp);
+        Orange::Rhi::RHIScissor sc{};
+        sc.mWidth  = shadowMapResolution;
+        sc.mHeight = shadowMapResolution;
+        cmd.SetScissor(sc);
+
+        if (runCaster && layer < cascadeCount)
         {
-            if (!drawable.castsShadow)
-            {
-                continue;  // 主 pass 仍会绘，只是不进 shadow map
-            }
-            if (!drawable.mesh.IsValid())
-            {
-                continue;
-            }
-            auto cacheIt = meshCache.find(drawable.mesh.Value());
-            if (cacheIt == meshCache.end())
-            {
-                continue;
-            }
-            const auto& gpu = cacheIt->second;
+            cmd.BindGraphicsPipeline(*shadowCasterPipeline);
+            const glm::mat4& lightVP = cascadeViewProjs[layer];
 
-            // shadow_caster 的 push constant：uLightViewProj(64) + uModel(64) = 128 B
-            struct ShadowCasterPush { glm::mat4 lightVP; glm::mat4 model; };
-            ShadowCasterPush data{};
-            data.lightVP = lightViewProj;
-            data.model   = drawable.worldMatrix;
-            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
-                                 0, static_cast<std::uint32_t>(sizeof(data)),
-                                 &data);
+            for (const auto& drawable : scene.Drawables())
+            {
+                if (!drawable.castsShadow)
+                {
+                    continue;  // 主 pass 仍会绘，只是不进 shadow map
+                }
+                if (!drawable.mesh.IsValid())
+                {
+                    continue;
+                }
+                auto cacheIt = meshCache.find(drawable.mesh.Value());
+                if (cacheIt == meshCache.end())
+                {
+                    continue;
+                }
+                const auto& gpu = cacheIt->second;
 
-            cmd.BindVertexBuffer(0, *gpu.vertexBuffer, 0);
-            cmd.BindIndexBuffer(*gpu.indexBuffer, 0, Orange::Rhi::IndexFormat::UInt32);
-            cmd.DrawIndexed(gpu.indexCount, 1, 0, 0, 0);
+                // shadow_caster 的 push constant：uLightViewProj(64) + uModel(64) = 128 B
+                struct ShadowCasterPush { glm::mat4 lightVP; glm::mat4 model; };
+                ShadowCasterPush data{};
+                data.lightVP = lightVP;
+                data.model   = drawable.worldMatrix;
+                cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                     0, static_cast<std::uint32_t>(sizeof(data)),
+                                     &data);
+
+                cmd.BindVertexBuffer(0, *gpu.vertexBuffer, 0);
+                cmd.BindIndexBuffer(*gpu.indexBuffer, 0, Orange::Rhi::IndexFormat::UInt32);
+                cmd.DrawIndexed(gpu.indexCount, 1, 0, 0, 0);
+            }
         }
-    }
 
-    cmd.EndRendering();
+        cmd.EndRendering();
+    }
 
     cmd.TransitionTexture(*shadowMap,
                           Orange::Rhi::TextureLayout::DepthStencilAttachment,
