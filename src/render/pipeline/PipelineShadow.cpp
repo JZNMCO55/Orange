@@ -318,10 +318,15 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
         data.lightDirIntensity = glm::vec4(0.3f, -1.0f, 0.4f, 1.0f);
         data.lightColor        = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
     }
+    // shadowParams.w（GAP-2026-05-27 C3）：cascadeCount 喂给 pbr.frag，决定
+    // cross-cascade blend 是否触发（仅 csmCascade < cascadeCount-1 时才与下一
+    // cascade smoothstep blend；最后 cascade 的 filler slot 不参与，省 5% 多余采样）。
+    const float cascadeCountForShader = static_cast<float>(std::min<std::uint32_t>(
+        std::max<std::uint32_t>(shadowConfig.cascadeCount, 1u), kMaxCascades));
     data.shadowParams = glm::vec4(static_cast<float>(shadowConfig.pcfKernelRadius),
                                   shadowConfig.depthBias,
                                   shadowConfig.pcssLightSize,  // z = PCSS 半影尺度（0=关）
-                                  0.0f);
+                                  cascadeCountForShader);      // w = CSM cascadeCount
     data.cameraWorldPos = glm::vec4(cameraWorldPos, 0.0f);
     data.frameInfo      = glm::vec4(frameTime, 0.0f, 0.0f, 0.0f);
     data.iblFactor      = glm::vec4(iblTintIntensity, 0.0f);

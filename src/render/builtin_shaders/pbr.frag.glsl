@@ -268,6 +268,33 @@ void main()
                                            int(light.uShadowParams.x),
                                            light.uShadowParams.y,
                                            csmPcssLightSize);
+
+    // C3 cross-cascade blend（GAP-2026-05-27-cascaded-shadow-maps）：在当前
+    // cascade 远端最后 5% NDC z 范围内 smoothstep blend 下一 cascade，消除
+    // cascade 边界硬切（典型表现：穿越 cascade 边界时阴影锐度突然变化）。
+    // 仅在 (a) 不是最后 cascade（csmCascade < cascadeCount-1）+ (b) 落入 blend
+    // 区时才采下一 cascade —— 避免 filler slot（host 把 cascadeCount 之外的
+    // slot 填为最后有效 cascade 复制 + splits=1.0）做无意义二次采样。
+    // cascadeCount 由 host 经 uShadowParams.w 传入（int 转 float 经 UBO）。
+    int   cascadeCountFromHost = int(light.uShadowParams.w);
+    if (csmCascade < cascadeCountFromHost - 1)
+    {
+        float thisFar     = light.uCascadeNdcSplits[csmCascade];
+        float blendWidth  = thisFar * 0.05;
+        float blendStart  = thisFar - blendWidth;
+        float blendFactor = smoothstep(blendStart, thisFar, gl_FragCoord.z);
+        if (blendFactor > 0.0)
+        {
+            int   nextCascade        = csmCascade + 1;
+            float nextPcssLightSize  = light.uShadowParams.z * light.uCascadePcssScales[nextCascade];
+            float shadowNext = SamplePcssShadowArray(uShadowMap, nextCascade, vWorldPos,
+                                                     light.uCascadeViewProj[nextCascade],
+                                                     int(light.uShadowParams.x),
+                                                     light.uShadowParams.y,
+                                                     nextPcssLightSize);
+            shadow = mix(shadow, shadowNext, blendFactor);
+        }
+    }
     vec3 directLo  = (diffuse + specular) * radiance * NoL * shadow;
 
     // ---- IBL（split-sum 近似；dummy 纹理全 0 → 贡献 = 0）-------------------

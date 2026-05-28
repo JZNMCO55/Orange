@@ -1643,7 +1643,7 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 - **发现方**：渲染推进 session（post-process 特效铺完后回看 directional 阴影质量）
 - **发现日期**：2026-05-27
 - **一句话定性**：directional 阴影用**固定 ±10 ortho box**（`PipelineShadow.cpp::ComputeLightViewProj` 硬编码 `kHalfExtent = 10`）覆盖整个场景，shadow map 分辨率均摊到 20×20 单位 → 近景阴影边缘锯齿粗、远景浪费；缺 **CSM（Cascaded Shadow Maps）**——按相机视锥分级、近景高分辨率，是户外大场景 directional 阴影的工业标准
-- **状态**：**C1 ✅ + C2 ✅ 落地（2026-05-28）—— C1 infrastructure + C2 真实 per-cascade fit + texel snap + per-cascade PCSS scale + 默认 cascadeCount=3**；专用 large-scene showcase sample（拉长地面 fixture）+ C3 cross-cascade dither/blend（optional polish）留后续 session
+- **状态**：**C1 ✅ + C2 ✅ + C3 ✅ 全部落地（2026-05-28，同 session 连续推进）—— C1 infrastructure + C2 真实 per-cascade fit + texel snap + per-cascade PCSS scale + 默认 cascadeCount=3 + C3 cross-cascade smoothstep blend**；专用 large-scene showcase sample（拉长地面 fixture，验"CSM 真在大场景里赢"）留 follow-up
 
 ### 触发场景
 
@@ -1740,8 +1740,42 @@ infrastructure 闭环，**默认 `cascadeCount=1` 行为与昨日逐像素一致
 
 **未做 / 后续**：
 
-- **专用 large-scene showcase fixture sample**（`samples/18_csm_large_scene`，拉长 ground 100×10 + 远近 cube column）—— 验"CSM 真在大场景里赢"的视觉证据。代码不复杂（fork sample 16 改 scene scale），但本 commit 已大（13 file diff），独立 commit 更清晰
-- **C3 cross-cascade dither/blend**（pbr.frag 在每段尾 5% 做 smoothstep blend 消硬切，参 Wiki `shadow-mapping.md` §CSM 模板）—— optional polish，C2 完工后视实际感官需要决定是否做
+- **专用 large-scene showcase fixture sample**（`samples/18_csm_large_scene`，拉长 ground 100×10 + 远近 cube column）—— 验"CSM 真在大场景里赢 + cascade 边界 blend 是否肉眼平滑"的视觉证据。代码不复杂（fork sample 16 改 scene scale），但本 commit 已大（13 file diff），独立 commit 更清晰
+
+### C3 落地记录（2026-05-28，与 C1 + C2 同 session 连续推完）
+
+**Cross-cascade smoothstep blend ✅** —— pbr.frag 在当前 cascade 远端最后 5% NDC z 范围内对下一 cascade 做 smoothstep blend，消除"穿越 cascade 边界时阴影锐度突变"的硬切感。code path 参 Wiki `shadow-mapping.md` §CSM 模板：
+
+```glsl
+if (csmCascade < cascadeCountFromHost - 1) {
+    float thisFar     = uCascadeNdcSplits[csmCascade];
+    float blendStart  = thisFar - thisFar * 0.05;
+    float blendFactor = smoothstep(blendStart, thisFar, gl_FragCoord.z);
+    if (blendFactor > 0.0) {
+        // sample next cascade with its own pcss scale, mix(shadow, shadowNext, blendFactor)
+    }
+}
+```
+
+**关键设计**：
+
+- **`cascadeCount` 经 `uShadowParams.w` 传 shader**（原本是 pad float），让 blend 只在真实 cascade 边界触发，跳过 host filler slot（cascadeCount<4 时 host 把多余 slot 填为最后有效 cascade 的复制 + splits=1.0；shader 不知道这是 filler 就会做无意义重复采样，性能浪费）
+- **blend width = thisFar × 0.05**（5% of cascade 远端 NDC z）—— 简单可控的相对宽度。严格按 view-space cascade 宽度需多传一组 uniform，stylized polish 不值得
+- **blend 区只多一次 SamplePcssShadowArray**（约 5% 的 fragment）—— 性能开销 < 5%（绝大多数 fragment 走单次采样路径）
+- **safety net**：`csmCascade < cascadeCount-1` gate + 默认 1.0 splits 让单 cascade（cascadeCount=1）路径 csmCascade=0、cascadeCount-1=0、条件 false → blend 全跳过，C1 fallback 行为零回归
+
+**改面**（2 文件）：
+
+- `src/render/pipeline/PipelineShadow.cpp` —— `UpdateLightUbo` 把 cascadeCount 写进 `shadowParams.w`（原 pad 0.0）
+- `src/render/builtin_shaders/pbr.frag.glsl` —— shadow 采样后接 cross-cascade blend 代码块
+
+**验收**：
+
+- ✅ 全 52 ctest 全绿（含 `shadow_occlusion_test`，单 cascade fallback 路径无回归 + 多 cascade blend 不破光遮挡判定）
+- ✅ sample 16 一帧 capture 与 C2 一帧 capture 视觉等价（±10 场景太小没 fragment 落入 blend 区，blend 几乎不触发 = 没破任何观感）
+- ✅ invariant lint + drift 干净
+
+**真 C3 视觉收益**（边界平滑度）**仍需 large-scene showcase sample 才能戏剧性体现**——cascade 边界在大场景里跨越大世界距离才显眼。与 C2 同一条 backlog 留 follow-up。
 
 ---
 
