@@ -90,6 +90,7 @@
 #include "plugin/MaterialAssetInspectorPlugin.h"
 #include "plugin/ParticleEmitterGizmoPlugin.h"
 #include "plugin/PointLightGizmoPlugin.h"
+#include "plugin/PostProcessVolumeGizmoPlugin.h"
 #include "plugin/SpotLightGizmoPlugin.h"
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
@@ -636,6 +637,12 @@ int main()
     // DirectionalLight / ParticleEmitter 模式纯装饰 overlay，不接管 LMB 拖动。
     editorHost.gizmoPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::PointLightGizmoPlugin>());
+    // PostProcessComponent Mode=Local 时画 localExtent 半尺寸盒（紫色内层
+    // 实色 = weight=1 全效区）+ (localExtent + blendDistance) 外层框（浅色
+    // = smoothstep 淡入末端）。让用户在 viewport 直接看到 V2 volume 边界，
+    // 不再盯 Inspector 数字想象。Mode=Global 时 plugin 跳过。
+    editorHost.gizmoPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::PostProcessVolumeGizmoPlugin>());
     // SpotLight 锥体 wireframe overlay（apex + base ring + 4 条侧棱）。同款纯
     // 装饰 overlay，方向 / 位置随 entity Transform 即时跟随。
     editorHost.gizmoPlugins.push_back(

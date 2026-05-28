@@ -157,6 +157,7 @@ add_executable(OrangeEditor
     plugin/MaterialAssetInspectorPlugin.cpp
     plugin/ParticleEmitterGizmoPlugin.cpp
     plugin/PointLightGizmoPlugin.cpp
+    plugin/PostProcessVolumeGizmoPlugin.cpp
     plugin/SpotLightGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
     branding/EditorWindowIcon.cpp
