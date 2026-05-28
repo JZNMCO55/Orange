@@ -66,6 +66,12 @@ struct ShadowConfig
     // 按 per-cascade 尺度（cascadePcssScales[i] = orthoExtent_0 / orthoExtent_i）
     // 缩放，保 world-space 半影宽度跨 cascade 大致一致。
     std::uint32_t cascadeCount{3};
+
+    // CSM cascade 染色 overlay（GAP-2026-05-27-cascaded-shadow-maps sample 18
+    // polish）：true 时 pbr.frag 在最终输出上 mix 一层 per-cascade tint（cascade
+    // 0=红 / 1=绿 / 2=蓝 / 3=黄），让 cascade 边界直观可见——CSM 调试 / sample
+    // 18 视觉演示用，shipping 永远 false。
+    bool debugCascadeTint{false};
 };
 
 }  // namespace Orange::Engine::Render

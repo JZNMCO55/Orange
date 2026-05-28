@@ -18,6 +18,13 @@
 //               阴影也粗（分辨率均摊到 20×20 单位）
 //   --pcss N  : 启用 PCSS 软阴影，lightSize=N texel（默认 0 = 关，纯 PCF 锐边
 //               便于辨识 CSM 分辨率差异）
+//   --tint    : cascade tint overlay —— pbr.frag 在最终输出上 mix per-cascade
+//               颜色（cascade 0=红 / 1=绿 / 2=蓝 / 3=黄），让 cascade 分段直观
+//               可见。配合 --no-csm 看到整画面单色（cascade 0），开 CSM 看到
+//               场景按距离染三段色 = CSM 分段的最直白证据
+//   --motion  : 相机 sin-wave 左右 + 前后摇摆 —— 验 texel snap anti-shimmer
+//               是否工作（CSM 路径阴影 edge 应沿 caster 稳定，不抖；C1 fallback
+//               同样不抖因为 ortho 也是世界静止）
 //   --capture <path>  : 渲一帧 PNG 后自动退（CI / 文档无人值守出图）
 //
 // 故意不挂的：spot / point light（干扰纯 directional CSM 分析）+ SSAO/SSR/DoF/TAA
@@ -149,12 +156,28 @@ class RenderLayer : public Layer
 {
 public:
     RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
-                std::string capturePath)
+                std::string capturePath, bool motionEnabled, Entity cameraEntity)
         : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
-          mCapturePath(std::move(capturePath)) {}
+          mCapturePath(std::move(capturePath)),
+          mMotionEnabled(motionEnabled),
+          mCameraEntity(cameraEntity) {}
 
     void OnUpdate(const FrameContext& /*frame*/) override
     {
+        // 运动相机：每帧改 Camera.view（sin-wave 左右 + 前后摇摆）。capture 模式
+        // 在 kCaptureFrame 那一帧的位置可复现（mFrame 是单调递增）；交互模式肉眼
+        // 看 shadow edge 跟 caster 稳定不抖 = texel snap anti-shimmer 工作。
+        if (mMotionEnabled)
+        {
+            const float t = static_cast<float>(mFrame) * (1.0f / 60.0f);   // 假设 ~60fps
+            const float swayX = std::sin(t * 0.7f) * 6.0f;
+            const float swayZ = std::cos(t * 0.5f) * 4.0f;
+            auto& cam = mWorld.Registry().get<Camera>(World::ToEntt(mCameraEntity));
+            cam.view = glm::lookAt(glm::vec3(swayX, 3.5f, -6.0f + swayZ),
+                                   glm::vec3(swayX * 0.3f, 0.5f, 30.0f),
+                                   glm::vec3(0.0f, 1.0f, 0.0f));
+        }
+
         if (!mCapturePath.empty() && mFrame == kCaptureFrame)
         {
             mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
@@ -182,6 +205,8 @@ private:
     World&            mWorld;
     Platform::Window& mWindow;
     std::string       mCapturePath;
+    bool              mMotionEnabled{false};
+    Entity            mCameraEntity{};
     std::uint64_t     mFrame{0};
 };
 
@@ -208,11 +233,15 @@ int main(int argc, char** argv)
     std::string capturePath;
     bool        forceSingleCascade = false;
     float       pcssLightSize       = 0.0f;
+    bool        tintEnabled         = false;
+    bool        motionEnabled       = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
         if (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
         else if (a == "--no-csm")             { forceSingleCascade = true; }
+        else if (a == "--tint")               { tintEnabled = true; }
+        else if (a == "--motion")             { motionEnabled = true; }
         else if (a == "--pcss" && i + 1 < argc)
         {
             pcssLightSize = static_cast<float>(std::atof(argv[i + 1]));
@@ -221,9 +250,14 @@ int main(int argc, char** argv)
     }
 
     AppConfig cfg{};
-    cfg.window.title  = forceSingleCascade
-        ? "OrangeEngine - 18 csm_large_scene (--no-csm fallback)"
-        : "OrangeEngine - 18 csm_large_scene (CSM cascadeCount=3)";
+    {
+        std::string title = "OrangeEngine - 18 csm_large_scene (";
+        title += forceSingleCascade ? "C1 fallback cascadeCount=1" : "CSM cascadeCount=3";
+        if (tintEnabled)   { title += " | tint"; }
+        if (motionEnabled) { title += " | motion"; }
+        title += ")";
+        cfg.window.title = title;
+    }
     cfg.window.width  = 1280;
     cfg.window.height = 720;
 
@@ -324,16 +358,18 @@ int main(int argc, char** argv)
     }
 
     // Camera：低角度看向 +Z，eye=(0, 3.5, -6) 让 ground 拉成远方延伸；fov=60°
-    // / near=0.5 / far=120 给 CSM 一个真实大 frustum 做 split。
+    // / near=0.5 / far=120 给 CSM 一个真实大 frustum 做 split。--motion 启用
+    // 时 RenderLayer 每帧改 view 矩阵（sway 模式）。
+    Entity cameraEntity;
     {
-        Entity e = world.CreateEntity();
+        cameraEntity = world.CreateEntity();
         const float aspect = static_cast<float>(cfg.window.width)
                            / static_cast<float>(cfg.window.height);
         Camera cam = Camera::Perspective(glm::radians(60.0f), aspect, 0.5f, 120.0f);
         cam.view = glm::lookAt(glm::vec3(0.0f, 3.5f, -6.0f),
                                glm::vec3(0.0f, 0.5f, 30.0f),
                                glm::vec3(0.0f, 1.0f, 0.0f));
-        world.AddComponent(e, cam);
+        world.AddComponent(cameraEntity, cam);
     }
 
     Pipeline pipeline;
@@ -358,14 +394,15 @@ int main(int argc, char** argv)
         sc.pcfKernelRadius = 1;   // 3×3 PCF 轻软边，仍能看清 cascade 分辨率差异
         sc.depthBias       = 0.0008f;
         sc.pcssLightSize   = pcssLightSize;
-        sc.cascadeCount    = forceSingleCascade ? 1u : 3u;
+        sc.cascadeCount      = forceSingleCascade ? 1u : 3u;
+        sc.debugCascadeTint  = tintEnabled;
         pipeline.SetShadowConfig(sc);
     }
     // 一点环境补光防阴影区全黑
     pipeline.SetDummyIblAmbient(0.08f, 0.085f, 0.10f);
 
     host->PushLayer(std::make_unique<RenderLayer>(pipeline, world, host->GetWindow(),
-                                                  capturePath));
+                                                  capturePath, motionEnabled, cameraEntity));
 
     const int rc = host->Run();
     pipeline.Shutdown();

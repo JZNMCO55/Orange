@@ -537,9 +537,10 @@ struct Pipeline::Impl
         glm::mat4 cascadeViewProj[kMaxCascades];   // 256 B；[0..N-1] 实际 cascade
         glm::vec4 cascadeNdcSplits;                // 16 B；x..w = cascade i 远端 NDC z
         glm::vec4 cascadePcssScales;               // 16 B；x..w = orthoExtent_0 / orthoExtent_i（PCSS 半影 world-space 一致）
+        glm::vec4 debugFlags;                      // 16 B；x = cascade tint overlay 开关 (1=on/0=off)，y/z/w pad
     };
-    static_assert(sizeof(LightUboData) == 64 + 16 * 6 + 64 * kMaxCascades + 16 * 2,
-                  "LightUboData std140 size mismatch (expected 448 bytes after CSM additive)");
+    static_assert(sizeof(LightUboData) == 64 + 16 * 6 + 64 * kMaxCascades + 16 * 3,
+                  "LightUboData std140 size mismatch (expected 464 bytes after CSM additive + debugFlags)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
 
     // PointLights UBO（GAP-2026-05-11 G2；GAP-2026-05-26 G3 加 shadowParams）。

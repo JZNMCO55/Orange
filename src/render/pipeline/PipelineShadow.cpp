@@ -305,6 +305,9 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
     }
     data.cascadeNdcSplits  = cascadeNdcSplits;
     data.cascadePcssScales = cascadePcssScales;
+    // CSM cascade tint overlay flag（sample 18 polish；shipping 永远 0）
+    data.debugFlags = glm::vec4(shadowConfig.debugCascadeTint ? 1.0f : 0.0f,
+                                0.0f, 0.0f, 0.0f);
 
     if (light != nullptr)
     {

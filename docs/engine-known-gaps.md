@@ -1769,7 +1769,59 @@ infrastructure 闭环，**默认 `cascadeCount=1` 行为与昨日逐像素一致
 
 ---
 
-至此 `GAP-2026-05-27-cascaded-shadow-maps` **主线 4 段全部 ✅**（C1 infra + C2 真 fit + C3 blend + sample 18 fixture）。剩余仅 backlog polish（视觉戏剧化，见 sample 18 段末尾）和独立 OrangeGames spike，不影响 CSM GAP 关闭。
+至此 `GAP-2026-05-27-cascaded-shadow-maps` **主线 4 段全部 ✅ + sample 18 视觉戏剧化 polish ✅**（C1 infra + C2 真 fit + C3 blend + sample 18 fixture + cascade tint overlay + 运动相机）。CSM GAP 完整闭环。
+
+### Sample 18 视觉戏剧化 polish 落地（2026-05-28，与 CSM 主线同 session 收尾）
+
+CSM 主线落地后，原 sample 18 的两张 capture 视觉差异未达预期（C1 fallback 的 ±10 box 配合 lightDir 倾斜实际覆盖深度 ~40 单位，远 caster 仍能进 shadow map）。本 polish 补完 sample 18 的视觉戏剧化三件套，把 CSM 工作机理变得**肉眼直白**：
+
+**1. Cascade tint overlay**（核心收益）
+
+`pbr.frag` 在最终输出上 mix per-cascade 颜色（cascade 0=红 / 1=绿 / 2=蓝 / 3=黄），让 cascade 分段直接画在地面上。配合 `--no-csm` flag 做 A/B：
+
+- **CSM cascadeCount=3 + tint**：地面 3 段彩色（红前景 / 绿中景 / 蓝远景），球体按所处 cascade 染色，cascade 边界用 C3 smoothstep blend 平滑过渡 = CSM 三段划分的最直白视觉证据
+- **`--no-csm` + tint**：整画面单一红色（cascadeCount=1 强制走 cascade 0）= C1 fallback 没有分段的视觉证明
+
+**架构改面**（4 文件，全部 additive）：
+
+- `include/orange/engine/render/ShadowConfig.h` —— 加 `bool debugCascadeTint{false}`
+- `src/render/pipeline/PipelineImpl.h` —— `LightUboData` 再 additive 加 `glm::vec4 debugFlags`（x = tint 开关 0/1，y/z/w pad），static_assert 448 → **464B**
+- `src/render/pipeline/PipelineShadow.cpp::UpdateLightUbo` —— 写 `debugFlags.x = shadowConfig.debugCascadeTint ? 1.0 : 0.0`
+- `src/render/builtin_shaders/pbr.frag.glsl` —— `LightUbo` 块加 `vec4 uDebugFlags`；最终输出前 `if (uDebugFlags.x > 0.5) color = mix(color, color * cascadeTints[csmCascade], 0.55)`；shipping 时 host 永远写 0，GPU dynamic uniform branch 短路 = 零额外开销
+
+**2. 运动相机**（验 anti-shimmer）
+
+`samples/18_csm_large_scene` 加 `--motion` flag：`RenderLayer` 每帧用 `World::ToEntt(cameraEntity)` 取 Camera 组件改 `view` 矩阵，sin-wave 左右 (swayX) + cos-wave 前后 (swayZ) 摇摆。配合 `--tint` 看：camera sway 时 cascade 染色边界**仍然干净整齐**（无锯齿破碎 / 闪烁）= C2 的 bounding sphere fit + ceil(R×16)/16 半径量化 + snap-on-center texel snap 三件套**真在工作**。
+
+**3. CLI flag 全集**
+
+```bash
+# 基线 + A/B
+18_csm_large_scene                          # CSM 默认 cascadeCount=3
+18_csm_large_scene --no-csm                 # C1 fallback cascadeCount=1
+# 视觉戏剧化
+18_csm_large_scene --tint                   # cascade 染色 overlay（CSM 路径 → 3 段彩色）
+18_csm_large_scene --no-csm --tint          # 单 cascade 染色 → 整画面单色（A/B 对照）
+18_csm_large_scene --motion                 # 相机 sway 模式
+18_csm_large_scene --tint --motion          # 集大成
+18_csm_large_scene --pcss 8                 # PCSS 软阴影 lightSize=8 texel
+18_csm_large_scene --capture <path>         # 出一张 PNG 后退（CI / 文档无人值守）
+```
+
+**改面**（5 文件）：
+
+- engine 侧 4 个（ShadowConfig.h / PipelineImpl.h / PipelineShadow.cpp / pbr.frag.glsl）—— cascade tint infra
+- `samples/18_csm_large_scene/main.cpp` —— `--tint` / `--motion` 双 flag + RenderLayer 持 cameraEntity 每帧动画 + `shadowConfig.debugCascadeTint = tintEnabled`
+
+**验收**：
+
+- ✅ Build 通过 + 全 52 ctest 全绿（LightUboData 448 → 464B 不破任何 std140 layout-compatible 消费 shader）
+- ✅ 4 张 capture 跨 (CSM/no-csm) × (tint/motion) 全部正确出图
+- ✅ Tint 路径下 cascade 边界视觉戏剧化 = CSM 工作机理的最直白证明
+- ✅ Motion 路径下 cascade 边界保持稳定 = C2 anti-shimmer 验收过
+- ✅ invariant lint + drift 干净
+
+---
 
 ### C3 落地记录（2026-05-28，与 C1 + C2 同 session 连续推完）
 

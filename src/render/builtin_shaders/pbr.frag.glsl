@@ -50,6 +50,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
     mat4 uCascadeViewProj[ORANGE_MAX_SHADOW_CASCADES];   // CSM：per-cascade light view-proj
     vec4 uCascadeNdcSplits;    // x..w = cascade i 远端 NDC z（gl_FragCoord.z > splits[i] → cascade = i+1）
     vec4 uCascadePcssScales;   // x..w = orthoExtent_0 / orthoExtent_i（PCSS lightSize 跨 cascade 一致 world-space 半影）
+    vec4 uDebugFlags;          // x = cascade tint overlay 开关（1=on/0=off），y/z/w 预留
 } light;
 layout(set = 0, binding = 2) uniform samplerCube uIrradiance;       // diffuse IBL — dummy zero in direct-only baseline
 layout(set = 0, binding = 3) uniform samplerCube uPrefilteredEnv;   // specular IBL — dummy zero in direct-only baseline
@@ -455,5 +456,21 @@ void main()
 
     // ---- 合成 ----
     vec3 color = directLo + ptLo + spotLo + iblLo;
+
+    // CSM cascade tint overlay（GAP-2026-05-27 sample 18 polish）：开关时
+    // 用 per-cascade 颜色 mix 一层到最终输出，让 cascade 边界肉眼直观可见
+    //（cascade 0=红 / 1=绿 / 2=蓝 / 3=黄）。shipping 时 host 把 uDebugFlags.x
+    // 永远写 0，整个 if 分支被 GPU 短路（NV/AMD 都做 dynamic uniform branch 优化）。
+    if (light.uDebugFlags.x > 0.5)
+    {
+        vec3 cascadeTints[4] = vec3[4](
+            vec3(1.0, 0.30, 0.30),   // cascade 0: 红
+            vec3(0.30, 1.0, 0.30),   // cascade 1: 绿
+            vec3(0.30, 0.30, 1.0),   // cascade 2: 蓝
+            vec3(1.0, 1.0, 0.30)     // cascade 3: 黄
+        );
+        color = mix(color, color * cascadeTints[csmCascade], 0.55);
+    }
+
     outColor   = vec4(color, 1.0);
 }
