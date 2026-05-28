@@ -49,6 +49,7 @@ layout(set = 0, binding = 1, std140) uniform LightUbo
     vec4 uIblFactor;           // xyz = EnvironmentComponent.tint * intensity（host 端预乘），w 预留
     mat4 uCascadeViewProj[ORANGE_MAX_SHADOW_CASCADES];   // CSM：per-cascade light view-proj
     vec4 uCascadeNdcSplits;    // x..w = cascade i 远端 NDC z（gl_FragCoord.z > splits[i] → cascade = i+1）
+    vec4 uCascadePcssScales;   // x..w = orthoExtent_0 / orthoExtent_i（PCSS lightSize 跨 cascade 一致 world-space 半影）
 } light;
 layout(set = 0, binding = 2) uniform samplerCube uIrradiance;       // diffuse IBL — dummy zero in direct-only baseline
 layout(set = 0, binding = 3) uniform samplerCube uPrefilteredEnv;   // specular IBL — dummy zero in direct-only baseline
@@ -257,11 +258,16 @@ void main()
     if (gl_FragCoord.z > light.uCascadeNdcSplits.y) csmCascade = 2;
     if (gl_FragCoord.z > light.uCascadeNdcSplits.z) csmCascade = 3;
     // PCSS（uShadowParams.z = lightSize，0 → 内部退回固定半径 PCF）。
+    // per-cascade PCSS scale：远 cascade 的 ortho 覆盖范围更大、每 texel 覆盖
+    // 的 world 距离也更大，若 lightSize 不缩，远景半影 in world 会爆。乘以
+    // cascadePcssScales[c] = orthoExtent_0 / orthoExtent_c 后，cascade 0 不动、
+    // 远 cascade 等比缩小，保半影 world-space 宽度一致。
+    float csmPcssLightSize = light.uShadowParams.z * light.uCascadePcssScales[csmCascade];
     float shadow   = SamplePcssShadowArray(uShadowMap, csmCascade, vWorldPos,
                                            light.uCascadeViewProj[csmCascade],
                                            int(light.uShadowParams.x),
                                            light.uShadowParams.y,
-                                           light.uShadowParams.z);
+                                           csmPcssLightSize);
     vec3 directLo  = (diffuse + specular) * radiance * NoL * shadow;
 
     // ---- IBL（split-sum 近似；dummy 纹理全 0 → 贡献 = 0）-------------------

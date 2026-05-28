@@ -1643,7 +1643,7 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 - **发现方**：渲染推进 session（post-process 特效铺完后回看 directional 阴影质量）
 - **发现日期**：2026-05-27
 - **一句话定性**：directional 阴影用**固定 ±10 ortho box**（`PipelineShadow.cpp::ComputeLightViewProj` 硬编码 `kHalfExtent = 10`）覆盖整个场景，shadow map 分辨率均摊到 20×20 单位 → 近景阴影边缘锯齿粗、远景浪费；缺 **CSM（Cascaded Shadow Maps）**——按相机视锥分级、近景高分辨率，是户外大场景 directional 阴影的工业标准
-- **状态**：**C1 ✅ 落地（2026-05-28）—— infrastructure + cascadeCount=1 默认零回归基线**；C2（真实视锥分段拟合 + texel snap + per-cascade PCSS scale + 拉长地面 fixture）+ C3（cross-cascade dither/blend，optional polish）留后续 session
+- **状态**：**C1 ✅ + C2 ✅ 落地（2026-05-28）—— C1 infrastructure + C2 真实 per-cascade fit + texel snap + per-cascade PCSS scale + 默认 cascadeCount=3**；专用 large-scene showcase sample（拉长地面 fixture）+ C3 cross-cascade dither/blend（optional polish）留后续 session
 
 ### 触发场景
 
@@ -1703,7 +1703,45 @@ infrastructure 闭环，**默认 `cascadeCount=1` 行为与昨日逐像素一致
 - invariant lint 7 grandfathered 无新增 + drift 干净
 - 顺手发现 + 修一条 0b16593 遗留：`OrangeEngineConfig.cmake.in` 缺 `OrangeEngine::imgui` alias 重建（install EXPORT 不传播 build-tree alias，editor_build_smoke 当场暴露）→ 独立 commit 单修
 
-**关联**：[[GAP-2026-05-26-complete-light-source-family-and-shadows]]（spot Tex2DArray 模板被 CSM C1 复用）；C2 待开工事项见上面"落地设计要点"段 2 + 5 + 6
+**关联**：[[GAP-2026-05-26-complete-light-source-family-and-shadows]]（spot Tex2DArray 模板被 CSM C1 复用）
+
+### C2 落地记录（2026-05-28，与 C1 同 session 趋热收尾）
+
+**真 per-cascade 视锥分段拟合 + texel snap + per-cascade PCSS scale 全部落地**。代码改造：
+
+- `ShadowConfig.cascadeCount` 默认值 1 → **3**（真 CSM 默认启用）
+- `LightUboData` 再 additive 追加 `cascadePcssScales` (vec4, 16B)；总大小 432 → **448B**，static_assert 同步
+- `PipelineImpl::cascadePcssScales` 成员 cache + UpdateLightUbo 写进 UBO
+- `ComputeCascadeViewProjs` 重写：参数加 `cameraView` + `cameraProj`，实现真 CSM 数学：
+  1. 反推相机 near/far（Vulkan z[0,1] perspective 公式：`near = proj[3][2]/proj[2][2]`、`far = proj[3][2]/(proj[2][2]+1)`）
+  2. **Practical PSSM split**（λ=0.5 mix log + uniform，Engel/Dimitrov GPU Pro 同款）
+  3. NDC 8 角点 × `inverse(viewProj)` → world，slice 沿 ray α-lerp
+  4. **Bounding sphere fit**（非 AABB）—— 旋转不变性 + ceil 量化半径，相机仅旋转时 sphere 不变 → 配合 snap-on-center 实现完整 anti-shimmer
+  5. **Texel snap**：球心转 light view → `floor(centerLV.xy / texelSize) * texelSize`
+  6. ortho zNear/zFar 沿光方向加 `frontPad=5R / backPad=0.5R` 自适应捕捉 caster
+  7. cascadeNdcSplits[i] = cascade i 远端在主相机 NDC z（`-proj[2][2] + proj[3][2] / splitDist`，pbr.frag 用 `gl_FragCoord.z` 比较选 cascade）
+  8. cascadePcssScales[i] = `orthoExtent_0 / orthoExtent_i`（保 world-space PCSS 半影宽度跨 cascade 一致）
+  9. cascadeCount=1 路径保留作零回归 fallback；cascadeCount 之外的 slot 用最后有效 cascade 填作越界 fallback
+- `Pipeline.cpp` 两 caller 传 `scene.MainCamera().view + projection` 到 `ComputeCascadeViewProjs`
+- `pbr.frag`：LightUbo 加 `uCascadePcssScales`，shadow 采样侧 `csmPcssLightSize = uShadowParams.z * uCascadePcssScales[csmCascade]` 然后喂 `SamplePcssShadowArray`
+
+**关键 implementation 取舍**：
+
+1. **Bounding sphere vs AABB fit**：sphere 旋转不变（相机仅旋转 sphere 中心 / 半径不变），AABB 会随相机方向重排 → 蜷曲的 extent 变化引发 shimmer。sphere 拿一点 fit 过松（shadow map 利用率略低）换稳定。是 The Witness / Frostbite / UE 等大量引擎的 stabilization 标配。
+2. **Camera 在 light view 原点**而非"放在 sphere 后面 N 单位"：放在原点 → light view 坐标系对 world 静止点恒定 → snap-on-center 真正稳定；放在 sphere 后面 → eye 跟 sphereCenter 走 → snap 在 light view 里的坐标抖。
+3. **cascadeNdcSplits 用 NDC z 而非 view-space z**：pbr.frag 直接拿 `gl_FragCoord.z` 比较，免传 camera near/far + linearization。host 端用 proj 公式预先转换。
+4. **per-cascade PCSS scale 按 ortho extent 比**：cascade 0 PCSS lightSize 不动；远 cascade 的 lightSize 等比缩小（cascade 0/N 倍），保 world-space 半影宽度一致；否则远景 penumbra 在 world 中爆出过大软边。
+
+**验收对照期望**：
+
+- ✅ `cascadeCount=1` 与现状逐像素一致（`shadow_occlusion_test` 全 cascadeCount 配置下都过 = 单 cascade fallback 路径仍是历史 ±10 box 行为）
+- ✅ **多 cascade 视觉无破损**（sample 16 默认 cascadeCount=3 一帧 capture：3 球阴影 + spot/point 罩色 + 后处理链全部正确，与 C1 前观感等价；±10 场景太小看不出戏剧性 CSM 收益，但证 CSM 数学 + 接线对）。**完整"近景锐 + 远景仍有阴影 + 拉相机无 shimmer"showcase 需要专用拉长地面 fixture sample**（落地时 prep 了 `samples/18_csm_large_scene/` 目录但留空作待办——避免本 commit scope 蔓延），留独立 follow-up commit / session
+- ✅ ctest 52/52 全绿 + invariant lint + drift 干净
+
+**未做 / 后续**：
+
+- **专用 large-scene showcase fixture sample**（`samples/18_csm_large_scene`，拉长 ground 100×10 + 远近 cube column）—— 验"CSM 真在大场景里赢"的视觉证据。代码不复杂（fork sample 16 改 scene scale），但本 commit 已大（13 file diff），独立 commit 更清晰
+- **C3 cross-cascade dither/blend**（pbr.frag 在每段尾 5% 做 smoothstep blend 消硬切，参 Wiki `shadow-mapping.md` §CSM 模板）—— optional polish，C2 完工后视实际感官需要决定是否做
 
 ---
 

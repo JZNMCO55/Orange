@@ -1599,17 +1599,19 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
         impl.EnsureShadowMap();
         impl.EnsureSpotShadowArray();
         impl.EnsurePointShadowCube();
-        if (activeLight)
+        if (activeLight && impl.scene.HasCamera())
         {
-            impl.ComputeCascadeViewProjs(activeLightDir);
+            impl.ComputeCascadeViewProjs(activeLightDir,
+                                         impl.scene.MainCamera().view,
+                                         impl.scene.MainCamera().projection);
         }
         else
         {
-            // 无 directional 时 cascade 矩阵保持上一帧 / 默认值；shader 端
-            // shadow 比较以 1.0 远深度退化为全亮（光源缺失时 lightDirIntensity.w
-            // 由 UpdateLightUbo 用 neutral light fallback 写入）。
+            // 无 directional / 无相机 时 cascade 矩阵清单位阵；shader 端 shadow
+            // 比较以 1.0 远深度退化为全亮（neutral light fallback 由 UpdateLightUbo 写入）。
             for (auto& m : impl.cascadeViewProjs) { m = glm::mat4(1.0f); }
-            impl.cascadeNdcSplits = glm::vec4(1.0f);
+            impl.cascadeNdcSplits  = glm::vec4(1.0f);
+            impl.cascadePcssScales = glm::vec4(1.0f);
         }
         const glm::mat4 invView   = glm::inverse(impl.scene.MainCamera().view);
         cameraWorldPos            = glm::vec3(invView[3]);
@@ -2340,16 +2342,19 @@ void Pipeline::Render(Orange::Engine::World& world)
         impl.EnsureShadowMap();
         impl.EnsureSpotShadowArray();
         impl.EnsurePointShadowCube();
-        if (activeLight)
+        if (activeLight && impl.scene.HasCamera())
         {
-            impl.ComputeCascadeViewProjs(activeLightDir);
+            impl.ComputeCascadeViewProjs(activeLightDir,
+                                         impl.scene.MainCamera().view,
+                                         impl.scene.MainCamera().projection);
         }
         else
         {
-            // 无 directional 时 cascade 矩阵清单位阵；shader 端 shadow 比较以
-            // 1.0 远深度退化为全亮（neutral light fallback 由 UpdateLightUbo 写入）。
+            // 无 directional / 无相机 时 cascade 矩阵清单位阵；shader 端 shadow
+            // 比较以 1.0 远深度退化为全亮（neutral light fallback 由 UpdateLightUbo 写入）。
             for (auto& m : impl.cascadeViewProjs) { m = glm::mat4(1.0f); }
-            impl.cascadeNdcSplits = glm::vec4(1.0f);
+            impl.cascadeNdcSplits  = glm::vec4(1.0f);
+            impl.cascadePcssScales = glm::vec4(1.0f);
         }
         // 相机 worldPos：scene.MainCamera().view 是 world→view 矩阵，
         // 取 inverse 后的第 4 列即为相机在 world 中的位置。供 rim_light

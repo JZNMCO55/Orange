@@ -58,13 +58,14 @@ struct ShadowConfig
     float pcssLightSize{0.0f};
 
     // CSM（Cascaded Shadow Maps）级联数（GAP-2026-05-27-cascaded-shadow-maps）。
-    //   * 1（默认）= 单 cascade，等价于历史 ±10 ortho box 行为（零回归安全网）；
-    //   * 3 / 4 = 真 CSM：按相机视锥分段，每段独立 light-space ortho，近段
-    //     高分辨率近景锐 / 远段覆盖大范围。资源上限 kMaxCascades = 4。
+    //   * 1 = 单 cascade，退化为历史 ±10 ortho box 行为（零回归调试用）；
+    //   * 3（默认 C2 起）/ 4 = 真 CSM：按相机视锥分段，每段独立 light-space
+    //     ortho，近段高分辨率近景锐 / 远段覆盖大范围。资源上限 kMaxCascades = 4。
     // 仅 directional 阴影消费；spot/point 各自独立 shadow map / cubemap。
     // PCSS 与 cascade 交互：远 cascade 的 ortho 覆盖范围更大，pcssLightSize
-    // 按 per-cascade 尺度缩放（C2 落地，C1 阶段所有 cascade 等同处理）。
-    std::uint32_t cascadeCount{1};
+    // 按 per-cascade 尺度（cascadePcssScales[i] = orthoExtent_0 / orthoExtent_i）
+    // 缩放，保 world-space 半影宽度跨 cascade 大致一致。
+    std::uint32_t cascadeCount{3};
 };
 
 }  // namespace Orange::Engine::Render

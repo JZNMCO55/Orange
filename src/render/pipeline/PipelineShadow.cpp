@@ -129,16 +129,160 @@ glm::mat4 Pipeline::Impl::ComputeLightViewProj(const glm::vec3& lightWorldDir) c
     return proj * view;
 }
 
-void Pipeline::Impl::ComputeCascadeViewProjs(const glm::vec3& lightWorldDir)
+void Pipeline::Impl::ComputeCascadeViewProjs(const glm::vec3& lightWorldDir,
+                                              const glm::mat4& cameraView,
+                                              const glm::mat4& cameraProj)
 {
-    // C1（GAP-2026-05-27-cascaded-shadow-maps）：单 cascade 安全网。所有 slot
-    // 填同一 ±10 ortho box，cascadeNdcSplits 全 = 1.0 → pbr.frag 的 cascade
-    // 选择（`if (gl_FragCoord.z > splits[i]) cascade = i+1`）恒落在 0，行为
-    // 等价历史单张 shadow map。多 cascade 真实视锥分段拟合 + 8 角点 fit +
-    // texel snap 留 C2 落地。
-    const glm::mat4 singleVp = ComputeLightViewProj(lightWorldDir);
-    for (auto& m : cascadeViewProjs) { m = singleVp; }
-    cascadeNdcSplits = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    const std::uint32_t cascadeCount = std::min<std::uint32_t>(
+        std::max<std::uint32_t>(shadowConfig.cascadeCount, 1u), kMaxCascades);
+
+    // ─── C1 退化路径：cascadeCount=1 = 历史 ±10 ortho box 行为（零回归调试用）
+    if (cascadeCount == 1)
+    {
+        const glm::mat4 singleVp = ComputeLightViewProj(lightWorldDir);
+        for (auto& m : cascadeViewProjs) { m = singleVp; }
+        cascadeNdcSplits  = glm::vec4(1.0f);
+        cascadePcssScales = glm::vec4(1.0f);
+        return;
+    }
+
+    // ─── C2 真 CSM 路径（GAP-2026-05-27-cascaded-shadow-maps）─────────────
+    const glm::vec3 lightDir = glm::normalize(lightWorldDir);
+    glm::vec3       up       = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (std::abs(lightDir.y) > 0.99f)
+    {
+        up = glm::vec3(0.0f, 0.0f, 1.0f);   // 光接近垂直 → 切 Z 轴避奇异
+    }
+
+    // 1. 从相机 proj 反推 near/far（Vulkan z[0,1] perspective 约定）：
+    //    Camera::Perspective 写 proj[2][2] = far/(near-far)，proj[3][2] = near*far/(near-far)
+    //    → near = proj[3][2] / proj[2][2]，far = proj[3][2] / (proj[2][2] + 1)
+    const float camNear = cameraProj[3][2] / cameraProj[2][2];
+    const float camFar  = cameraProj[3][2] / (cameraProj[2][2] + 1.0f);
+
+    // 2. Practical PSSM split（λ=0.5 mix log + uniform，Engel/Dimitrov GPU Pro 同款）
+    constexpr float kLambda = 0.5f;
+    float splitDist[kMaxCascades + 1]{};
+    splitDist[0] = camNear;
+    for (std::uint32_t i = 1; i < cascadeCount; ++i)
+    {
+        const float p         = static_cast<float>(i) / static_cast<float>(cascadeCount);
+        const float logSplit  = camNear * std::pow(camFar / camNear, p);
+        const float unifSplit = camNear + (camFar - camNear) * p;
+        splitDist[i] = kLambda * logSplit + (1.0f - kLambda) * unifSplit;
+    }
+    splitDist[cascadeCount] = camFar;
+
+    // 3. NDC 8 角点 → world，留作各 cascade slice 沿 ray lerp 的 base
+    const glm::mat4 invViewProj = glm::inverse(cameraProj * cameraView);
+    glm::vec3       worldCornersNear[4]{};
+    glm::vec3       worldCornersFar[4]{};
+    {
+        int idx = 0;
+        for (int y = -1; y <= 1; y += 2)
+        {
+            for (int x = -1; x <= 1; x += 2)
+            {
+                const glm::vec4 nNdc = invViewProj * glm::vec4(float(x), float(y), 0.0f, 1.0f);
+                const glm::vec4 fNdc = invViewProj * glm::vec4(float(x), float(y), 1.0f, 1.0f);
+                worldCornersNear[idx] = glm::vec3(nNdc) / nNdc.w;
+                worldCornersFar[idx]  = glm::vec3(fNdc) / fNdc.w;
+                ++idx;
+            }
+        }
+    }
+
+    // 4. 单一 lightView（camera 在 world 原点 + lookAt(+lightDir)）—— 所有 cascade
+    //    共享此矩阵；texel snap 在此 lightView 坐标系下做，让相机平移只移球心、
+    //    不改 cascade extent → shadow texel 恒定，消 shimmer。
+    const glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), lightDir, up);
+
+    const float res          = static_cast<float>(shadowMapResolution > 0 ? shadowMapResolution : 1024u);
+    float       cascade0Diam = 1.0f;   // cascade 0 的 ortho extent（= 2 * sphereRadius），给 PCSS scale 用
+
+    // 5. 每 cascade：bounding sphere 求 fit（旋转不变 → 相机仅旋转时 sphere 不变
+    //    → snap-on-center 让 shadow edge 稳定，不抖）。
+    for (std::uint32_t c = 0; c < cascadeCount; ++c)
+    {
+        const float nearI = splitDist[c];
+        const float farI  = splitDist[c + 1];
+
+        // slice 8 角点 = lerp(camera near/far, α 沿 ray) —— world ray 线性、深
+        // 度也线性，故 α = (depthFromNear) / (totalDepth)
+        const float alphaNear = (nearI - camNear) / (camFar - camNear);
+        const float alphaFar  = (farI  - camNear) / (camFar - camNear);
+
+        glm::vec3 sliceCorners[8];
+        for (int i = 0; i < 4; ++i)
+        {
+            sliceCorners[i]     = glm::mix(worldCornersNear[i], worldCornersFar[i], alphaNear);
+            sliceCorners[i + 4] = glm::mix(worldCornersNear[i], worldCornersFar[i], alphaFar);
+        }
+
+        // bounding sphere of slice corners
+        glm::vec3 sphereCenter(0.0f);
+        for (const auto& sc : sliceCorners) { sphereCenter += sc; }
+        sphereCenter /= 8.0f;
+        float sphereRadius = 0.0f;
+        for (const auto& sc : sliceCorners)
+        {
+            sphereRadius = std::max(sphereRadius, glm::length(sc - sphereCenter));
+        }
+        // 半径向上量化到 1/16 单位 —— 让 sphereRadius 在相机微动时仅离散跳动，
+        // 配合 snap-on-center 实现完整 anti-shimmer。
+        sphereRadius = std::ceil(sphereRadius * 16.0f) / 16.0f;
+
+        // 球心转 light view → snap xy 到 shadow texel 网格
+        glm::vec3   centerLV  = glm::vec3(lightView * glm::vec4(sphereCenter, 1.0f));
+        const float texelSize = 2.0f * sphereRadius / res;
+        centerLV.x = std::floor(centerLV.x / texelSize) * texelSize;
+        centerLV.y = std::floor(centerLV.y / texelSize) * texelSize;
+
+        // ortho z range：centerLV.z 为负（slice 在 light view -z 方向）；正向
+        // 距离（zNear/zFar）= 取反。frontPad 在球前面（更靠近 light camera）多
+        // 留一段，捕捉 caster 在 slice 与 light 之间的部分；backPad 给点 self-
+        // shadow safety。Pad 用 sphereRadius 倍数自适应不同 cascade 尺度。
+        const float frontPad = sphereRadius * 5.0f;
+        const float backPad  = sphereRadius * 0.5f;
+        const float zNear    = -(centerLV.z + sphereRadius + frontPad);
+        const float zFar     = -(centerLV.z - sphereRadius - backPad);
+
+        // 手写 Vulkan-style ortho（z[0,1] + y-flip）。中心 (centerLV.xy)：
+        //   x_ndc = (x_view - centerLV.x) / sphereRadius
+        //   y_ndc = -(y_view - centerLV.y) / sphereRadius  （y-flip）
+        glm::mat4 ortho(1.0f);
+        ortho[0][0] =  1.0f / sphereRadius;
+        ortho[1][1] = -1.0f / sphereRadius;
+        ortho[2][2] =  1.0f / (zNear - zFar);
+        ortho[3][0] = -centerLV.x / sphereRadius;
+        ortho[3][1] =  centerLV.y / sphereRadius;
+        ortho[3][2] =  zNear / (zNear - zFar);
+
+        cascadeViewProjs[c] = ortho * lightView;
+
+        const float diam = 2.0f * sphereRadius;
+        if (c == 0) { cascade0Diam = diam; }
+        cascadePcssScales[c] = (diam > 1e-6f) ? (cascade0Diam / diam) : 1.0f;
+    }
+
+    // 6. cascadeNdcSplits[i] = cascade i 远端在主相机投影下的 NDC z
+    //    pbr.frag 按 gl_FragCoord.z 与之比较选 cascade。Vulkan z[0,1]：
+    //    ndcZ = -proj[2][2] + proj[3][2] / splitDist  （viewZ = -splitDist 代入）
+    //    验：splitDist=near → 0；splitDist=far → 1
+    cascadeNdcSplits = glm::vec4(1.0f);   // default 1.0 防 cascade 选择越界
+    for (std::uint32_t c = 0; c + 1 < cascadeCount; ++c)
+    {
+        const float viewDepth = splitDist[c + 1];
+        cascadeNdcSplits[c] = -cameraProj[2][2] + cameraProj[3][2] / viewDepth;
+    }
+
+    // 7. cascadeCount 之外的 slot 用最后一个有效 cascade 填，让 pbr.frag 在
+    //    cascade 选择越界（极罕见 / 浮点边界）时有合理 fallback
+    for (std::uint32_t c = cascadeCount; c < kMaxCascades; ++c)
+    {
+        cascadeViewProjs[c]  = cascadeViewProjs[cascadeCount - 1];
+        cascadePcssScales[c] = cascadePcssScales[cascadeCount - 1];
+    }
 }
 
 void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
@@ -159,7 +303,8 @@ void Pipeline::Impl::UpdateLightUbo(const DirectionalLight* light,
     {
         data.cascadeViewProj[i] = cascadeViewProjs[i];
     }
-    data.cascadeNdcSplits = cascadeNdcSplits;
+    data.cascadeNdcSplits  = cascadeNdcSplits;
+    data.cascadePcssScales = cascadePcssScales;
 
     if (light != nullptr)
     {

@@ -503,12 +503,18 @@ struct Pipeline::Impl
     std::array<std::unique_ptr<Orange::Rhi::RHITextureView>, kMaxCascades>
         shadowMapLayerViews;
 
-    // 本帧 cascade 矩阵 + NDC z split 距离。ComputeCascadeViewProjs 计算，
-    // RecordShadowPass 按 layer 渲染消费 matrices，UpdateLightUbo 写进 UBO。
-    // cascadeCount=1 时 [0..3] 全部 = 单 directional ortho 矩阵，splits 全 1.0
-    // → shader cascade selection 恒返回 0（行为等价历史 single shadow map）。
+    // 本帧 cascade 矩阵 + NDC z split 距离 + per-cascade PCSS scale。
+    // ComputeCascadeViewProjs 计算，RecordShadowPass 按 layer 渲染消费
+    // matrices，UpdateLightUbo 写进 UBO。
+    //   * cascadeCount=1 时 [0..3] 全部 = 单 directional ortho 矩阵，
+    //     splits 全 1.0 → shader cascade selection 恒返回 0（等价历史单 map）；
+    //   * cascadeCount=3/4 时 [0..N-1] 真实视锥分段拟合，splits 是各 cascade
+    //     远端 NDC z（pbr.frag 用 gl_FragCoord.z 比较选 cascade）。
+    // cascadePcssScales[i] = orthoExtent_0 / orthoExtent_i —— pbr.frag 把
+    // pcssLightSize 乘该 scale 以保 world-space 半影宽度跨 cascade 一致。
     std::array<glm::mat4, kMaxCascades> cascadeViewProjs{};
     glm::vec4                           cascadeNdcSplits{1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec4                           cascadePcssScales{1.0f, 1.0f, 1.0f, 1.0f};
 
     Asset::AssetHandle<Asset::ShaderAsset> shadowCasterVsHandle;
     Asset::AssetHandle<Asset::ShaderAsset> shadowCasterFsHandle;
@@ -530,9 +536,10 @@ struct Pipeline::Impl
         // ─── CSM additive ─────────────────────────────────────────────────
         glm::mat4 cascadeViewProj[kMaxCascades];   // 256 B；[0..N-1] 实际 cascade
         glm::vec4 cascadeNdcSplits;                // 16 B；x..w = cascade i 远端 NDC z
+        glm::vec4 cascadePcssScales;               // 16 B；x..w = orthoExtent_0 / orthoExtent_i（PCSS 半影 world-space 一致）
     };
-    static_assert(sizeof(LightUboData) == 64 + 16 * 6 + 64 * kMaxCascades + 16,
-                  "LightUboData std140 size mismatch (expected 432 bytes after CSM additive)");
+    static_assert(sizeof(LightUboData) == 64 + 16 * 6 + 64 * kMaxCascades + 16 * 2,
+                  "LightUboData std140 size mismatch (expected 448 bytes after CSM additive)");
     std::unique_ptr<Orange::Rhi::RHIBuffer> lightUbo;
 
     // PointLights UBO（GAP-2026-05-11 G2；GAP-2026-05-26 G3 加 shadowParams）。
@@ -1217,12 +1224,19 @@ struct Pipeline::Impl
     glm::mat4 ComputeLightViewProj(const glm::vec3& lightWorldDir) const;
 
     // CSM：按相机视锥分段拟合每 cascade 的 light view-proj，结果写入成员
-    // cascadeViewProjs[] + cascadeNdcSplits（NDC z 划分点，pbr.frag 用
-    // gl_FragCoord.z 与之比较选 cascade）。cascadeCount=1 时退化为单 cascade
-    // = ComputeLightViewProj 旧行为 + splits 全 1.0（cascade 选择恒返回 0）。
-    // C1 实现：cascadeCount>1 时各 cascade 仍用同一 ±10 box（splits 按线性
-    // 分布）—— 单 cascade 行为继承，多 cascade 真实分段拟合留 C2 落地。
-    void ComputeCascadeViewProjs(const glm::vec3& lightWorldDir);
+    // cascadeViewProjs[] + cascadeNdcSplits + cascadePcssScales。
+    //   * cascadeCount=1：退化为 ComputeLightViewProj 旧 ±10 ortho box，
+    //     splits 全 1.0、scales 全 1.0（cascade 选择恒返回 0）；
+    //   * cascadeCount>1（C2 起 default=3）：practical PSSM 划分（λ=0.5 mix
+    //     log+uniform）→ 每段视锥 8 角点变换到 world → light view 空间 AABB
+    //     → 手写 Vulkan ortho（z[0,1]+y-flip，不用 glm::ortho 防裁半 frustum）
+    //     → texel snap 防 shimmer。cascadeNdcSplits[i] = cascade i 远端在 main
+    //     相机投影下的 NDC z（pbr.frag 用 gl_FragCoord.z 比较）。
+    //     cascadePcssScales[i] = orthoExtent_0 / orthoExtent_i（PCSS 跨 cascade
+    //     一致 world-space 半影宽度）。
+    void ComputeCascadeViewProjs(const glm::vec3& lightWorldDir,
+                                 const glm::mat4& cameraView,
+                                 const glm::mat4& cameraProj);
 
     // 创建 / 重建 HDR off-screen target。
     bool EnsureHdrTarget()
