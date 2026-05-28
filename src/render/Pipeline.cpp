@@ -1495,23 +1495,30 @@ bool Pipeline::Impl::RecordPassthroughToViewport()
     cmd.SetScissor(sc);
 
     // bloom 接 offscreen（编辑器视口 WYSIWYG）：活动 BloomPass + bloom mip 就绪时
-    // 走 tonemap 合成（HDR + bloom → ACES，复用窗口 tonemapPipeline + bloomCombineSet；
-    // viewportColor 与 swap-chain 同 BGRA8Unorm，格式合法）。否则纯 passthrough（ACES）。
-    // exposure=1（与 passthrough.frag 的隐式曝光一致）。
+    // 走 tonemap 合成（HDR + bloom → ACES/AgX/...，复用窗口 tonemapPipeline +
+    // bloomCombineSet；viewportColor 与 swap-chain 同 BGRA8Unorm，格式合法）。
+    // 否则纯 passthrough。tonemap 的 exposure / op 与窗口主路径同款，取活动
+    // TonemapPass 字段——让编辑器 RenderSettings panel 的 Exposure 滑块 /
+    // Operator Combo 在 viewport 实时生效。
     const BloomPass* bloomPass = impl.FindActiveBloomPass();
     if (bloomPass != nullptr && impl.bloomMipsReady && impl.bloomCombineSet
         && impl.tonemapPipeline)
     {
-        // v1.3.3 GAP-2026-05-27-tonemap-operator-selection：pad0 → uint
-        // uOperator 槽位（与 tonemap.frag.glsl push constant 对齐）。本路径
-        // 是编辑器 RenderOffscreen 的 stage B fallback，bloomMipsReady 但
-        // 没活动 TonemapPass 时仍走这里 —— 此时取默认 ACES_Narkowicz（活
-        // 动 TonemapPass 由下方 SubmitItem 路径 / Pipeline::Render window
-        // 路径独立处理）。
+        // GAP-2026-05-27-tonemap-operator-selection：pad0 → uint uOperator
+        // 槽位（与 tonemap.frag.glsl push constant 对齐）。本路径是编辑器
+        // RenderOffscreen 的 stage B 合成出口。活动 TonemapPass 在 → 取它
+        // 的 exposure / op（与窗口主路径 line 2941 同款语义）；不在 → 退化
+        // 为 exposure=1 + ACES_Narkowicz 兜底（与历史 passthrough 视觉等价）。
+        //
+        // 注：早期实现把 exposure hardcode 为 1.0，导致 Operator Combo 切换
+        // 生效但 Exposure 滑块无视觉变化——BUG-2026-05-28-editor-viewport-
+        // tonemap-exposure-not-wired，与本 dispatch op 字段一并接通修复。
         struct PushTonemap { float exposure; float bloomIntensity; std::uint32_t op; float pad1; };
         const TonemapPass* offscreenTonemap = impl.FindActiveTonemapPass();
         PushTonemap pcData{};
-        pcData.exposure       = 1.0f;
+        pcData.exposure       = (offscreenTonemap != nullptr)
+                              ? offscreenTonemap->exposure
+                              : 1.0f;
         pcData.bloomIntensity = bloomPass->intensity;
         pcData.op             = static_cast<std::uint32_t>(
             offscreenTonemap != nullptr ? offscreenTonemap->op
