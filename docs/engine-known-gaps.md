@@ -1643,7 +1643,7 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 - **发现方**：渲染推进 session（post-process 特效铺完后回看 directional 阴影质量）
 - **发现日期**：2026-05-27
 - **一句话定性**：directional 阴影用**固定 ±10 ortho box**（`PipelineShadow.cpp::ComputeLightViewProj` 硬编码 `kHalfExtent = 10`）覆盖整个场景，shadow map 分辨率均摊到 20×20 单位 → 近景阴影边缘锯齿粗、远景浪费；缺 **CSM（Cascaded Shadow Maps）**——按相机视锥分级、近景高分辨率，是户外大场景 directional 阴影的工业标准
-- **状态**：**C1 ✅ + C2 ✅ + C3 ✅ 全部落地（2026-05-28，同 session 连续推进）—— C1 infrastructure + C2 真实 per-cascade fit + texel snap + per-cascade PCSS scale + 默认 cascadeCount=3 + C3 cross-cascade smoothstep blend**；专用 large-scene showcase sample（拉长地面 fixture，验"CSM 真在大场景里赢"）留 follow-up
+- **状态**：**C1 ✅ + C2 ✅ + C3 ✅ + sample 18 ✅ 全部落地（2026-05-28，同 session 连续推进）—— C1 infrastructure + C2 真实 per-cascade fit + texel snap + per-cascade PCSS scale + 默认 cascadeCount=3 + C3 cross-cascade smoothstep blend + `samples/18_csm_large_scene` 大场景 fixture（`--no-csm` flag 做 A/B）**；CSM 主线 GAP 全部完成。
 
 ### 触发场景
 
@@ -1738,9 +1738,38 @@ infrastructure 闭环，**默认 `cascadeCount=1` 行为与昨日逐像素一致
 - ✅ **多 cascade 视觉无破损**（sample 16 默认 cascadeCount=3 一帧 capture：3 球阴影 + spot/point 罩色 + 后处理链全部正确，与 C1 前观感等价；±10 场景太小看不出戏剧性 CSM 收益，但证 CSM 数学 + 接线对）。**完整"近景锐 + 远景仍有阴影 + 拉相机无 shimmer"showcase 需要专用拉长地面 fixture sample**（落地时 prep 了 `samples/18_csm_large_scene/` 目录但留空作待办——避免本 commit scope 蔓延），留独立 follow-up commit / session
 - ✅ ctest 52/52 全绿 + invariant lint + drift 干净
 
-**未做 / 后续**：
+### Sample 18 落地记录（2026-05-28，CSM 主线视觉 fixture 收尾）
 
-- **专用 large-scene showcase fixture sample**（`samples/18_csm_large_scene`，拉长 ground 100×10 + 远近 cube column）—— 验"CSM 真在大场景里赢 + cascade 边界 blend 是否肉眼平滑"的视觉证据。代码不复杂（fork sample 16 改 scene scale），但本 commit 已大（13 file diff），独立 commit 更清晰
+**`samples/18_csm_large_scene` ✅** —— GAP-2026-05-27-cascaded-shadow-maps C1+C2+C3 视觉验收 fixture。100×100 ground + 5 个 sphere caster 沿 +Z 摆 (3, 10, 22, 40, 70)，相机低角度看向 +Z 让 ground 拉成"远方延伸"。CLI flag：
+
+- `--no-csm` —— 强制 `cascadeCount=1` 回到 C1 fallback 路径，与默认 cascadeCount=3 做 A/B 对比
+- `--pcss N` —— 启用 PCSS 软阴影，lightSize=N texel
+- `--capture <path>` —— 渲一帧 PNG 后退（CI / 文档无人值守）
+- 故意不挂 spot/point/SSAO/SSR/DoF/TAA，保留纯 directional + bloom + tonemap 让 CSM 分析清晰
+
+**视觉对比 honest 观察**：两路径产生的 capture 比预期更接近。原因：C1 fallback 的 ±10 ortho box 配合 sceneCenter 后退 + zFar=40 实际覆盖深度 > ±10（lightDir 沿 -Y 倾斜让 light view 沿光方向有效覆盖 ~40 单位 world depth），故远到 z=70 的 caster 也能进 shadow map，只是分辨率均摊到 20×20 单位 → 锯齿粗。CSM 真正的优势在**近景分辨率分配** + **任意大场景覆盖**，本 sample 没把这个差异放足够大。
+
+进一步戏剧化 backlog（独立 polish session 不阻塞 CSM GAP）：
+- 相机更低 + 更近地面 → 把远景 shadow 拉到屏幕大比例区域
+- 加 cascade index 染色 debug overlay（pbr.frag 出 cascade ID）→ 视觉色块直接看 cascade 切换
+- 加运动相机模式 → 看 texel snap anti-shimmer 效果
+
+**改面**（3 文件 +）：
+
+- `samples/18_csm_large_scene/main.cpp` —— 新增（fork sample 16 helper + 简化 scene）
+- `samples/18_csm_large_scene/CMakeLists.txt` —— 新增（仿 sample 17 pattern）
+- `samples/CMakeLists.txt` —— 注册 sample 18
+
+**验收**：
+
+- ✅ Build 通过（CMake reconfigure + build sample 18 target 全绿）
+- ✅ 跑通：CSM 默认 + `--no-csm` fallback 两种模式都正常出图 + 截图
+- ✅ 全 52 ctest 全绿（无回归）
+- ✅ invariant lint + drift 干净
+
+---
+
+至此 `GAP-2026-05-27-cascaded-shadow-maps` **主线 4 段全部 ✅**（C1 infra + C2 真 fit + C3 blend + sample 18 fixture）。剩余仅 backlog polish（视觉戏剧化，见 sample 18 段末尾）和独立 OrangeGames spike，不影响 CSM GAP 关闭。
 
 ### C3 落地记录（2026-05-28，与 C1 + C2 同 session 连续推完）
 
