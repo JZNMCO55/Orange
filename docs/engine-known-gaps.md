@@ -1950,12 +1950,12 @@ if (csmCascade < cascadeCountFromHost - 1) {
 
 ---
 
-## GAP-2026-05-27-postprocess-component-local-volume
+## GAP-2026-05-27-postprocess-component-local-volume ✅
 
 - **发现方**：渲染推进 session（铺完 post 特效 + 写后处理参考页 `rendering-post-process.md` 时回看 PostProcessComponent 作用域语义）
 - **发现日期**：2026-05-27
 - **一句话定性**：`PostProcessComponent` v1 作为**全局单例**消费（`Pipeline` find-first + `SyncPostProcessFromWorld` 每帧把首个组件灌进全局 `postXxx` 参数），无**局部 post-process volume**——场景挂多个组件时只有 first-found 生效，无法做"进洞穴压暗调色 / 进 boss 房切氛围"这类**按相机位置分区**的 post。组件已为此预留 `Mode{Global,Local}` / `localExtent` / `priority` / `blendDistance` 占位字段（`include/orange/engine/render/PostProcessComponent.h`），但 Pipeline 当前只走 `Global` 分支
-- **状态**：**仅登记，未实现**（方向性预留，**无排期 / 无触发条件承诺**；本 session 只铺特效 + 写参考页时顺手发现占位字段意图未登记，记一条防止丢失）
+- **状态**：**✅ 2026-05-28 落地**（与编辑器 Render Settings panel + 撤美术 post + tonemap 算子同 session 连续推进；用户在"撤完编辑器 hardcode post chain，让 PostProcessComponent 成为美术效果的真正入口"主题下顺手把 v1 first-found 升级到 v2 collect-all + 相机位置混合）
 
 ### 触发场景
 
@@ -1990,6 +1990,65 @@ if (csmCascade < cascadeCountFromHost - 1) {
 - 纯 OrangeEngine `Pipeline` + 编辑器 gizmo 改动，**不需跨仓提 feature**（OrangeRender 侧 post pass 资源已齐）。
 - 与 [[GAP-2026-05-27-tonemap-operator-selection]] **正交**：那条是 HDR→LDR 收尾曲线（tonemap/bloom 刻意**不进**组件，属 stage-A/B 收尾），本条是**已在组件内**那批 post 字段（SSAO/SSR/接触阴影/DoF/TAA/色彩分级/motion blur/Lens/Sharpen + PCSS）的作用域升级——tonemap/bloom 不参与 volume 混合。
 - 优先级：**P3（方向性预留，非 critical path）**——首游关卡氛围设计实际撞分区 post 需求时拉动；登记本身只为防止 v1 预留的 volume 占位字段意图丢失，**不构成排期承诺**（符合本文件"登记 ≠ 承诺要做"门槛）。
+
+### 落地记录（2026-05-28，与编辑器 RenderSettings panel + 撤美术 post + tonemap 算子同 session）
+
+**触发**：用户在"撤完编辑器 hardcode post chain → 让 PostProcessComponent 成为美术效果唯一入口" 后，自然下一问："那场景里挂多个 PostProcessComponent 会不会冲突 / 能分区生效不？" —— V1 first-found 全局单例语义直接撞这个需求，触发本 GAP 提前推进（原 P3 预留，按用户主题契合度推上来）。
+
+**实施清单**（2 个文件改动 + 0 新文件，scene schema 零改动是 V1 铺路的核心收益）：
+
+1. `src/render/Pipeline.cpp`（`SyncPostProcessFromWorld` 重写 ~210 行）：
+   - 抽出 `ApplyToImpl(const PostProcessComponent&)` lambda（v1 的 50 行字段赋值，fast path + 通用路径共用）
+   - 拿相机 world 位置 `cameraWorldPos = glm::vec3(glm::inverse(scene.MainCamera().view)[3])`（无相机时回退 origin）
+   - **收集分组**：遍历 view，按 `pp.mode` 分 Global first-found base + Local 候选；Local 候选拿 `entity.Transform.position` 算 box 中心
+   - **Local volume 权重**：`outside = max(|cameraPos - boxCenter| - localExtent)` 沿各轴取 max；outside ≤ 0 → w=1；outside ∈ (0, blendDistance) → w = `1 - smoothstep(0, blendDistance, outside)`；超过 blendDistance → 不参与（continue）
+   - **Fast path 1**：单 Global + 无 Local hit → 直接 `ApplyToImpl(globalBase)` 与 v1 逐像素等价（零 mix 计算开销，acceptance "增量安全网" 必达）
+   - **Fast path 2**：无 Global 且无 Local hit（全场只 Local volume 但相机全在外）→ first-found 兜底，与 v1 "view 非空必有组件生效" 语义对偶
+   - **通用路径**：base = Global（或 default ctor），按 priority 升序 lerp Local volume 的所有标量字段（高 priority 最后 apply 更 dominant，与 UE PostProcessVolume / Unity Volume 语义一致）；bool / enum / uint32 离散字段按 weight>0 中最高 priority 接管（不 lerp 离散值，避免 SSAO enabled 出现 0.5 半开状态）
+   - 加 `#include <limits>`（std::numeric_limits<float>::infinity()）；algorithm + vector 已有
+
+2. `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp`（`RegisterPostProcessComponentSchema` 暴露 4 volume 字段）：
+   - `FieldEnum<&PP::mode>("mode", "Mode")` + `kModeNames[] = {"Global", "Local"}` + `static_assert` 锁 enum drift（与 BodyType / 其他 enum schema 同款模板）
+   - `Field<&PP::localExtent>("localExtent", ...)`（glm::vec3 半尺寸盒，Range 0.01-100m）
+   - `Field<&PP::priority>(...)` + `Field<&PP::blendDistance>(...)`（Range 0-20m）
+   - 每个字段配 Tooltip 说明语义（Mode 解释 Global/Local 差异；localExtent 说明半尺寸 axis-aligned box；priority 说明仲裁规则；blendDistance 说明 smoothstep 淡出 + 0 = 硬切换）
+   - Helper 注释更新：去掉 "只有第一个 PostProcessComponent 生效"，换为 V2 collect-all + Global/Local 语义说明
+
+**混合算法细节**：
+
+| 字段类型 | 算法 |
+|---|---|
+| `float` 标量（ssaoRadius / ssrStrength / dofFocusDistance / gradeExposure / blendDistance 等 24 个）| `result = mix(result, hit.pp, hit.weight)`，按 priority 升序 |
+| `glm::vec3` 颜色/向量（gradeTint 等，本期暂无显式 vec3 字段需 lerp，localExtent 是 volume 本身的字段不参与混合）| 同 float，glm::mix 元素级 lerp |
+| `bool enabled` 类（ssao/ssr/contact/dof/taa/grade/motionBlur/lens/sharpen 9 个）| weight>0 中最高 priority 接管（离散值无 lerp 语义）|
+| `bool` 算子选择（ssaoUseGtao）| 同 bool enabled |
+| `std::uint32_t shadowMapResolution` | 同 bool enabled（mapResolution 整数，lerp 出非 2 幂值无意义）|
+| `std::int32_t motionBlurSampleCount` | weight ≥ 0.5 切换（中点阈值，避免 lerp 出小数采样数）|
+| Volume 容器字段（mode / localExtent / priority / blendDistance）| **不参与混合**——它们是 volume 自身的几何/仲裁元数据，非 post 效果参数 |
+
+**架构决策**：
+
+- **不抽 PostProcessConfig 外置类**：v2 仍走 ECS 组件路径，SyncPostProcessFromWorld 内部本期把混合结果回灌进 `post*` 成员（与 v1 同款），保持下游 RecordSsao/Ssr/... 路径零改动。后续若 multi-camera / multi-RT 真撞上"每相机独立 post 状态" 需求（GAP-2026-05-24 RenderToTexture 触发），再考虑把 `post*` 状态外置到 RenderContext。
+- **bool 字段不 lerp**：UE PostProcessVolume / Unity Volume Framework 也都是 bool 离散仲裁（按 priority 接管）。lerp bool 在视觉上会出现 SSAO/SSR 从有到无的渐变带，物理上无意义（前向渲染 post pass 是开关，没"半开"）。
+- **multi-Global 取 first-found**：与 multi-DirectionalLight / multi-Environment 同款 "first-found + 编辑器侧 warning chip" 语义保留余地。本 GAP 不动 EntityTreePanel 的 overflow set 路径（独立 polish），后续可参 `mSingletonOverflowDirLight` 模板加 `mSingletonOverflowPostProcess`。
+- **Gizmo plugin 推 follow-up**：Local 模式画 localExtent 线框盒（参 PointLightGizmoPlugin）属锦上添花；用户当前可通过 Inspector 的 `localExtent` 三个 DragFloat 数值看 box 尺寸，结合 Transform position 推 box 中心位置。本 session 已 13+ commits，gizmo plugin 独立 commit 触发更合适。
+
+**验收**：
+- 全 52 ctest 通过（含 `light_and_shadow_test` —— 关键回归保护：v1 单 PostProcessComponent 用例必须逐像素等价）
+- `python scripts/check_invariants.py` → `All invariants OK. (7 grandfathered)`
+- `python scripts/check_claude_md_drift.py` → `none detected.`
+- **scene schema 零改动**：v1 写的 .scene.json 字段全 optional + 默认 Mode=Global，Load 后行为不变（ComponentSerializers.cpp 早已带兼容路径，本 GAP 验证此设计意图）
+
+### 关键改动文件
+
+`src/render/Pipeline.cpp`（SyncPostProcessFromWorld 重写 + 加 `<limits>` include） / `tools/OrangeEditor/schema/RegisterBuiltinSchemas.cpp`（暴露 4 volume 字段 + Helper 注释更新） / `docs/engine-known-gaps.md`（本条目登记 + 关闭）
+
+### 留待后续
+
+- **PostProcess Local Volume Gizmo plugin**：参 `PointLightGizmoPlugin` 模板，Local 模式下在 entity.Transform.position 处画 localExtent 半尺寸 wireframe box + blendDistance 外环；让用户在 viewport 直接看到 volume 范围。独立 commit 触发
+- **Multi-Global warning chip**：参 `mSingletonOverflowDirLight` 模板加 `mSingletonOverflowPostProcess`，让用户在 Entity Tree 看到"多个 Global PostProcess 时第 2+ 个不生效"提示。独立 commit 触发
+- **Sample fixture**：参 sample 18 的 fixture 模式做 `samples/19_postprocess_volume`：Global 底（中性 grading）+ 两个 Local 盒（一个高对比 + 一个色温偏冷），相机沿轨道移动穿过盒，capture 出"盒内 / 盒外 / 过渡带" 三张对照图；与 sample 18 `--motion` 同款无人值守视觉回归路径
+- **后续 multi-camera / multi-RT 真触发时 (`GAP-2026-05-24-pipeline-cannot-render-to-arbitrary-rt`)**：把 `post*` 全局 mutable state 外置到 RenderContext，让每个相机/RT 独立持后处理状态
 
 ---
 

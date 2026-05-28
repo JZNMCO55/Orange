@@ -79,6 +79,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -2069,67 +2070,247 @@ const GodRaysPass* Pipeline::Impl::FindActiveGodRaysPass() const noexcept
 // PostProcessComponent 在场（postComponentActive）时 FindActive* 走组件填好的
 // post* 成员（数据驱动）；否则退回 chain dynamic_cast（sample/test 等 chain 用法
 // 兼容）。SyncPostProcessFromWorld 每帧渲染前更新 postComponentActive + post* 成员。
+//
+// V2 GAP-2026-05-27-postprocess-component-local-volume：从 V1 first-found 全局单
+// 例升级为 collect-all + 相机位置混合的局部 volume 系统：
+//
+//   1. 收集所有 PostProcessComponent，按 mode 分 Global / Local 两组
+//   2. Global first-found 作 base 底（多 Global 取第一个；编辑器侧后续可像
+//      multi-DirectionalLight 同款做 first-found warning chip 提示）
+//   3. Local volume 按相机 world 位置判定：
+//      - 相机在 entity.Transform.position ± localExtent 盒内 → weight = 1
+//      - 相机在盒外 blendDistance 内 → weight = smoothstep(1, 0, dist/blendDist)
+//      - 相机在 blendDistance 外 → 不参与
+//   4. 标量 / 颜色字段：base 起，按 priority 升序 lerp 每个有效 Local（高 priority
+//      最后 apply 更 dominant；同 priority 按 entt 遍历序）
+//   5. bool / enum / uint32 类字段（enabled / useGtao / shadowMapResolution）：按
+//      "weight > 0 中最高 priority 的命中 volume" 接管（不 lerp 离散值；UE
+//      PostProcessVolume / Unity Volume 同款语义）
+//
+// 兼容性保证（acceptance "单 Global 组件场景与 v1 逐像素一致"）：
+//   - 单 Global + 无 Local hit → 走 v1 fast path（直接灌 first-found，零 mix）
+//   - 旧 scene 所有组件 mode=Global（默认值），未挂 Local → 等价 v1
+//   - 老 scene 字段 mode/localExtent/priority/blendDistance 全 optional，
+//     ComponentSerializers.cpp ReadPostProcess 已带兼容路径
 void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
 {
     postComponentActive = false;
-    auto view = world.Registry().view<PostProcessComponent>();
+    auto& reg  = world.Registry();
+    auto  view = reg.view<PostProcessComponent>();
     if (view.empty())
     {
         return;   // 无组件 → FindActive* 退回 chain
     }
-    const PostProcessComponent& pp = view.get<PostProcessComponent>(view.front());
-    postComponentActive = true;
 
-    postSsao.enabled  = pp.ssaoEnabled;
-    postSsao.useGtao  = pp.ssaoUseGtao;
-    postSsao.radius   = pp.ssaoRadius;
-    postSsao.strength = pp.ssaoStrength;
-    postSsao.power    = pp.ssaoPower;
+    // ApplyToImpl —— v1 的 50 行字段赋值抽出来；本期被 fast path 与通用路径共
+    // 用。captures by-ref this，调用方传 const PostProcessComponent& 即可。
+    auto ApplyToImpl = [this](const PostProcessComponent& pp) {
+        postSsao.enabled  = pp.ssaoEnabled;
+        postSsao.useGtao  = pp.ssaoUseGtao;
+        postSsao.radius   = pp.ssaoRadius;
+        postSsao.strength = pp.ssaoStrength;
+        postSsao.power    = pp.ssaoPower;
 
-    postSsr.enabled     = pp.ssrEnabled;
-    postSsr.maxDistance = pp.ssrMaxDistance;
-    postSsr.thickness   = pp.ssrThickness;
-    postSsr.strength    = pp.ssrStrength;
+        postSsr.enabled     = pp.ssrEnabled;
+        postSsr.maxDistance = pp.ssrMaxDistance;
+        postSsr.thickness   = pp.ssrThickness;
+        postSsr.strength    = pp.ssrStrength;
 
-    postContact.enabled   = pp.contactEnabled;
-    postContact.length    = pp.contactLength;
-    postContact.thickness = pp.contactThickness;
-    postContact.strength  = pp.contactStrength;
+        postContact.enabled   = pp.contactEnabled;
+        postContact.length    = pp.contactLength;
+        postContact.thickness = pp.contactThickness;
+        postContact.strength  = pp.contactStrength;
 
-    postDof.enabled       = pp.dofEnabled;
-    postDof.focusDistance = pp.dofFocusDistance;
-    postDof.focusRange    = pp.dofFocusRange;
-    postDof.maxCoCRadius  = pp.dofMaxCoCRadius;
+        postDof.enabled       = pp.dofEnabled;
+        postDof.focusDistance = pp.dofFocusDistance;
+        postDof.focusRange    = pp.dofFocusRange;
+        postDof.maxCoCRadius  = pp.dofMaxCoCRadius;
 
-    postTaa.enabled  = pp.taaEnabled;
-    postTaa.feedback = pp.taaFeedback;
+        postTaa.enabled  = pp.taaEnabled;
+        postTaa.feedback = pp.taaFeedback;
 
-    postGrade.enabled     = pp.gradeEnabled;
-    postGrade.exposure    = pp.gradeExposure;
-    postGrade.contrast    = pp.gradeContrast;
-    postGrade.saturation  = pp.gradeSaturation;
-    postGrade.temperature = pp.gradeTemperature;
-    postGrade.tint        = pp.gradeTint;
+        postGrade.enabled     = pp.gradeEnabled;
+        postGrade.exposure    = pp.gradeExposure;
+        postGrade.contrast    = pp.gradeContrast;
+        postGrade.saturation  = pp.gradeSaturation;
+        postGrade.temperature = pp.gradeTemperature;
+        postGrade.tint        = pp.gradeTint;
 
-    postMotionBlur.enabled     = pp.motionBlurEnabled;
-    postMotionBlur.intensity   = pp.motionBlurIntensity;
-    postMotionBlur.maxRadius   = pp.motionBlurMaxRadius;
-    postMotionBlur.sampleCount = pp.motionBlurSampleCount;
+        postMotionBlur.enabled     = pp.motionBlurEnabled;
+        postMotionBlur.intensity   = pp.motionBlurIntensity;
+        postMotionBlur.maxRadius   = pp.motionBlurMaxRadius;
+        postMotionBlur.sampleCount = pp.motionBlurSampleCount;
 
-    postLens.enabled             = pp.lensEnabled;
-    postLens.chromaticAberration = pp.lensChromaticAberration;
-    postLens.vignetteIntensity   = pp.lensVignetteIntensity;
-    postLens.vignetteSmoothness  = pp.lensVignetteSmoothness;
+        postLens.enabled             = pp.lensEnabled;
+        postLens.chromaticAberration = pp.lensChromaticAberration;
+        postLens.vignetteIntensity   = pp.lensVignetteIntensity;
+        postLens.vignetteSmoothness  = pp.lensVignetteSmoothness;
 
-    postSharpen.enabled   = pp.sharpenEnabled;
-    postSharpen.sharpness = pp.sharpenStrength;
+        postSharpen.enabled   = pp.sharpenEnabled;
+        postSharpen.sharpness = pp.sharpenStrength;
 
-    // PCSS / 阴影分辨率：组件在场时驱动 shadowConfig（压过手动 SetShadowConfig）。
-    shadowConfig.pcssLightSize = pp.pcssLightSize;
-    if (pp.shadowMapResolution != 0)
+        // PCSS / 阴影分辨率：组件在场时驱动 shadowConfig（压过手动 SetShadowConfig）。
+        shadowConfig.pcssLightSize = pp.pcssLightSize;
+        if (pp.shadowMapResolution != 0)
+        {
+            shadowConfig.mapResolution = pp.shadowMapResolution;
+        }
+    };
+
+    // 拿相机 world 位置（用于 Local volume 判定）。无相机时 cameraWorldPos = 原
+    // 点 —— 仍允许 Local volume 在原点 ± localExtent 范围生效，但典型场景无相
+    // 机时 Pipeline::Render 早退（HasCamera 检查在外层），本路径仍稳健。
+    glm::vec3 cameraWorldPos{0.0f};
+    if (scene.HasCamera())
     {
-        shadowConfig.mapResolution = pp.shadowMapResolution;
+        const glm::mat4 invView = glm::inverse(scene.MainCamera().view);
+        cameraWorldPos          = glm::vec3(invView[3]);
     }
+
+    using TC = Orange::Engine::Scene::TransformComponent;
+
+    // 收集：分 Global first-found base + Local 命中（含 weight + priority）
+    const PostProcessComponent* globalBase = nullptr;
+    float                       globalPri  = 0.0f;
+
+    struct LocalHit
+    {
+        const PostProcessComponent* pp;
+        float                       weight;     // [0, 1]
+        float                       priority;
+    };
+    std::vector<LocalHit> localHits;
+    localHits.reserve(8);   // 典型场景 ≤ 4 个 volume，reserve 8 留余量避 realloc
+
+    for (auto e : view)
+    {
+        const auto& pp = view.get<PostProcessComponent>(e);
+        if (pp.mode == PostProcessComponent::Mode::Global)
+        {
+            if (globalBase == nullptr)
+            {
+                globalBase = &pp;
+                globalPri  = pp.priority;
+            }
+            continue;
+        }
+        // Local：拿 entity Transform 算 box 中心；无 Transform 视为原点
+        glm::vec3 boxCenter{0.0f};
+        if (auto* tc = reg.try_get<TC>(e))
+        {
+            boxCenter = tc->position;
+        }
+        // 相机到 box 中心的距离按 box 半尺寸归一化：d 三轴都 ≤ 0 时相机在盒内
+        const glm::vec3 ext = glm::max(pp.localExtent, glm::vec3(1e-4f));  // 防 0 尺寸
+        const glm::vec3 d   = glm::abs(cameraWorldPos - boxCenter) - ext;
+        const float     outside = glm::max(glm::max(d.x, d.y), d.z);
+
+        float w;
+        if (outside <= 0.0f)
+        {
+            w = 1.0f;
+        }
+        else if (pp.blendDistance > 1e-4f && outside < pp.blendDistance)
+        {
+            // smoothstep 反向：outside=0（刚出盒）→ w=1，outside=blendDist → w=0
+            const float t = outside / pp.blendDistance;
+            w = 1.0f - t * t * (3.0f - 2.0f * t);
+        }
+        else
+        {
+            continue;   // 出 blend band（含 blendDistance=0 时 outside>0 直接跳过）
+        }
+        localHits.push_back({&pp, w, pp.priority});
+    }
+
+    // Fast path：单 Global + 无 Local → 与 v1 逐像素等价（零 mix 计算开销）
+    if (globalBase != nullptr && localHits.empty())
+    {
+        ApplyToImpl(*globalBase);
+        postComponentActive = true;
+        return;
+    }
+
+    // Fallback：无 Global 也无 Local hit（全场只有 Local volume 且相机都在外）
+    // → first-found 任意 PostProcessComponent 兜底，避免突然回 chain 引入视觉
+    // 差异（与 v1 "view 非空必有组件生效" 语义对偶）
+    if (globalBase == nullptr && localHits.empty())
+    {
+        const auto& fallback = view.get<PostProcessComponent>(view.front());
+        ApplyToImpl(fallback);
+        postComponentActive = true;
+        return;
+    }
+
+    // 通用路径：base = Global（或 default ctor）；按 priority 升序 lerp Local
+    PostProcessComponent result = (globalBase != nullptr) ? *globalBase
+                                                          : PostProcessComponent{};
+    const PostProcessComponent* topPp  = globalBase;
+    float                       topPri = (globalBase != nullptr) ? globalPri
+                                                                 : -std::numeric_limits<float>::infinity();
+
+    std::sort(localHits.begin(), localHits.end(),
+              [](const LocalHit& a, const LocalHit& b) { return a.priority < b.priority; });
+
+    for (const auto& h : localHits)
+    {
+        const auto& pp = *h.pp;
+        const float w  = h.weight;
+        // 标量 / 颜色字段：result = mix(result, pp, w)（高 priority 最后 apply）
+        result.ssaoRadius             = glm::mix(result.ssaoRadius,             pp.ssaoRadius,             w);
+        result.ssaoStrength           = glm::mix(result.ssaoStrength,           pp.ssaoStrength,           w);
+        result.ssaoPower              = glm::mix(result.ssaoPower,              pp.ssaoPower,              w);
+        result.ssrMaxDistance         = glm::mix(result.ssrMaxDistance,         pp.ssrMaxDistance,         w);
+        result.ssrThickness           = glm::mix(result.ssrThickness,           pp.ssrThickness,           w);
+        result.ssrStrength            = glm::mix(result.ssrStrength,            pp.ssrStrength,            w);
+        result.contactLength          = glm::mix(result.contactLength,          pp.contactLength,          w);
+        result.contactThickness       = glm::mix(result.contactThickness,       pp.contactThickness,       w);
+        result.contactStrength        = glm::mix(result.contactStrength,        pp.contactStrength,        w);
+        result.dofFocusDistance       = glm::mix(result.dofFocusDistance,       pp.dofFocusDistance,       w);
+        result.dofFocusRange          = glm::mix(result.dofFocusRange,          pp.dofFocusRange,          w);
+        result.dofMaxCoCRadius        = glm::mix(result.dofMaxCoCRadius,        pp.dofMaxCoCRadius,        w);
+        result.taaFeedback            = glm::mix(result.taaFeedback,            pp.taaFeedback,            w);
+        result.gradeExposure          = glm::mix(result.gradeExposure,          pp.gradeExposure,          w);
+        result.gradeContrast          = glm::mix(result.gradeContrast,          pp.gradeContrast,          w);
+        result.gradeSaturation        = glm::mix(result.gradeSaturation,        pp.gradeSaturation,        w);
+        result.gradeTemperature       = glm::mix(result.gradeTemperature,       pp.gradeTemperature,       w);
+        result.gradeTint              = glm::mix(result.gradeTint,              pp.gradeTint,              w);
+        result.motionBlurIntensity    = glm::mix(result.motionBlurIntensity,    pp.motionBlurIntensity,    w);
+        result.motionBlurMaxRadius    = glm::mix(result.motionBlurMaxRadius,    pp.motionBlurMaxRadius,    w);
+        result.lensChromaticAberration= glm::mix(result.lensChromaticAberration,pp.lensChromaticAberration,w);
+        result.lensVignetteIntensity  = glm::mix(result.lensVignetteIntensity,  pp.lensVignetteIntensity,  w);
+        result.lensVignetteSmoothness = glm::mix(result.lensVignetteSmoothness, pp.lensVignetteSmoothness, w);
+        result.sharpenStrength        = glm::mix(result.sharpenStrength,        pp.sharpenStrength,        w);
+        result.pcssLightSize          = glm::mix(result.pcssLightSize,          pp.pcssLightSize,          w);
+        // motionBlurSampleCount 是 int32，按 weight ≥ 0.5 切换（lerp 离散值无意义）
+        if (w >= 0.5f) { result.motionBlurSampleCount = pp.motionBlurSampleCount; }
+
+        // 最高 priority 命中（含 weight > 0 已隐含 by entering loop）
+        if (h.priority >= topPri)
+        {
+            topPp  = h.pp;
+            topPri = h.priority;
+        }
+    }
+
+    // bool / enum / uint32 离散字段：按 topPp 接管（最高 priority + weight > 0）
+    if (topPp != nullptr)
+    {
+        result.ssaoEnabled         = topPp->ssaoEnabled;
+        result.ssaoUseGtao         = topPp->ssaoUseGtao;
+        result.ssrEnabled          = topPp->ssrEnabled;
+        result.contactEnabled      = topPp->contactEnabled;
+        result.dofEnabled          = topPp->dofEnabled;
+        result.taaEnabled          = topPp->taaEnabled;
+        result.gradeEnabled        = topPp->gradeEnabled;
+        result.motionBlurEnabled   = topPp->motionBlurEnabled;
+        result.lensEnabled         = topPp->lensEnabled;
+        result.sharpenEnabled      = topPp->sharpenEnabled;
+        result.shadowMapResolution = topPp->shadowMapResolution;
+    }
+
+    ApplyToImpl(result);
+    postComponentActive = true;
 }
 
 const SsaoPass* Pipeline::Impl::FindActiveSsaoPass() const noexcept

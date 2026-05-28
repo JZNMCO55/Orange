@@ -499,15 +499,50 @@ void RegisterEnvironmentComponentSchema()
 }
 
 // PostProcessComponent 的 Inspector schema —— 屏幕空间 post + PCSS 的数据驱动控制
-// 面板（取代 ScenePanel/sample hardcode）。全局单例语义（Pipeline find-first）。
-// volume 容器字段（mode/extent/priority/blendDistance）是 v2 局部 volume 占位，
-// V1 不暴露。bloom/tonemap 不在本组件（由默认 chain 管）。
+// 面板（取代 ScenePanel/sample hardcode）。
+//
+// V2 GAP-2026-05-27-postprocess-component-local-volume 落地：Pipeline 升级为
+// collect-all + 相机位置混合的 volume 系统后，本 schema 暴露 4 个 volume 容器字
+// 段（mode/localExtent/priority/blendDistance）让用户在 Inspector 创建 Local
+// 体积；scene 序列化（ComponentSerializers.cpp）此前已带这些字段（v1 即铺路），
+// 老 scene Load 行为不变（所有 mode 默认 Global，等价 v1 first-found）。
+// bloom/tonemap 不在本组件（由默认 chain 管，参 GAP-2026-05-27-tonemap-operator-
+// selection）。
 void RegisterPostProcessComponentSchema()
 {
     using PP = Orange::Engine::Render::PostProcessComponent;
+
+    // Mode enum 项名表 —— 顺序与 enum class Mode 定义 (Global=0, Local=1) 严格
+    // 对齐。静态生命周期；EnumNames 不复制。
+    static const char* const kModeNames[] = {"Global", "Local"};
+    static_assert(static_cast<int>(PP::Mode::Global) == 0, "PostProcess::Mode enum drift");
+    static_assert(static_cast<int>(PP::Mode::Local)  == 1, "PostProcess::Mode enum drift");
+
     ComponentSchemaBuilder<PP>("PostProcess", "Post Process")
-        .Helper("全局后处理设置（场景中只有第一个 PostProcessComponent 生效）。\n"
+        .Helper("场景后处理设置（V2 local volume：多组件按相机位置混合）。\n"
+                "  Global：作 base 底，全局生效\n"
+                "  Local ：实体 Transform 处 localExtent 半尺寸盒，相机进入按\n"
+                "          blendDistance smoothstep 淡入，按 priority 仲裁\n"
                 "bloom / tonemap 由默认渲染链管理，不在此组件。")
+        // —— Volume 容器（V2 GAP-2026-05-27-postprocess-component-local-volume）——
+        .FieldEnum<&PP::mode>("mode", "Mode")
+            .EnumNames(kModeNames, 2)
+            .Tooltip("Global = 全局作用（多个 Global 取场景内第一个）；\n"
+                     "Local  = 实体 Transform 位置 ± localExtent 半尺寸盒内生效，\n"
+                     "         相机出盒后 blendDistance 内 smoothstep 淡出。")
+        .Field<&PP::localExtent>("localExtent", "Local Extent (m)")
+            .Range(0.01f, 100.0f).DragSpeed(0.05f)
+            .Tooltip("Mode=Local 时生效：盒半尺寸（相机到 entity.Transform.position\n"
+                     "                  各轴距离 ≤ 对应分量则视为盒内 weight=1）。")
+        .Field<&PP::priority>("priority", "Priority")
+            .DragSpeed(0.01f)
+            .Tooltip("多 volume 重叠时仲裁谁压谁：标量字段按 priority 升序 lerp\n"
+                     "（高 priority 最后 apply 更 dominant）；bool / 离散字段按\n"
+                     "weight>0 中最高 priority 接管。Global 底也参与排序。")
+        .Field<&PP::blendDistance>("blendDistance", "Blend Distance (m)")
+            .Range(0.0f, 20.0f).DragSpeed(0.05f)
+            .Tooltip("Mode=Local 时生效：相机出盒后这段距离内按 smoothstep 从 1 淡\n"
+                     "到 0；blendDistance=0 = 硬切换无过渡。")
         // —— SSAO / GTAO ——
         .Field<&PP::ssaoEnabled>("ssaoEnabled", "SSAO Enabled")
         .Field<&PP::ssaoUseGtao>("ssaoUseGtao", "Use GTAO")
