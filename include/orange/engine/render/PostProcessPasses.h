@@ -20,6 +20,8 @@
 
 #include <glm/vec3.hpp>
 
+#include <cstdint>
+
 namespace Orange::Engine::Render
 {
 
@@ -51,14 +53,44 @@ public:
     void        Execute(PostProcessExecuteContext& ctx) override;
 };
 
+// Tonemap 算子枚举（GAP-2026-05-27-tonemap-operator-selection）。
+//   * ACES_Narkowicz —— Krzysztof Narkowicz 2015 5-系数拟合 ACES filmic（历
+//     史默认，与 sample 13/14 视觉等价）。优点：单步 ALU 不需要 LUT；缺
+//     点：对鲜艳饱和色（红 / 黄 / 紫）会出现偏色压暗（典型现象：饱和的
+//     emissive 物体显色不准，AAA 引擎已在 2020+ 切到 AgX）。
+//   * AgX —— Troy Sobotka 设计的现代 tonemap，分 sigmoid 曲线 + 色彩空间
+//     变换；Blender 4.0+ 默认 tonemap，UE 5.4+ 引擎 ToolKit 支持。对饱和色
+//     处理远优于 ACES，过亮区域不偏色。本仓走 Sobotka 公开的 minimal 拟合
+//     版本（无 OCIO 依赖），shader 内 ~30 行可实现。
+//   * Reinhard —— 经典 `x / (1 + x)`（Reinhard 2002）。最简单，无饱和色保
+//     护，所有颜色统一压缩，HDR 高光被强压；适合学术调试 / 风格化对照。
+//   * Linear —— 不做曲线压缩，直接 clamp 到 [0, 1]。HDR > 1 像素硬 clamp，
+//     emissive 物体边缘"硬边亮带染色"——用于调试 raw HDR 值是否符合预期，
+//     不适合 shipping。
+//
+// 枚举值固定为 uint32，对应 tonemap.frag.glsl push constant 的 `uOperator`
+// 槽位（与 BloomPass.intensity 同 padding 内复用，不增加 push 总尺寸）。
+enum class TonemapOperator : std::uint32_t
+{
+    ACES_Narkowicz = 0,
+    AgX            = 1,
+    Reinhard       = 2,
+    Linear         = 3,
+};
+
 class ORANGE_ENGINE_API TonemapPass final : public IPostProcessPass
 {
 public:
     // 曝光乘子。1.0 = 原 HDR 输入直接喂给 tonemap 算子；线性 stop 调整
-    // 走 `exposure *= 2.0^stops`。Tonemap 算子（Reinhard / ACES / 自定
-    // 义）当前固定，等到写实际 tonemap shader 时再决定是否引
-    // 入 enum 选项。
+    // 走 `exposure *= 2.0^stops`。
     float exposure{1.0f};
+
+    // Tonemap 算子选择（GAP-2026-05-27-tonemap-operator-selection 落地）。
+    // 默认 ACES_Narkowicz 与历史固定行为视觉等价。OrangeEditor Render
+    // Settings 面板 "Color · Tonemap" 段直接编辑本字段；sample 端调用方
+    // 可在 BuiltinPostProcessChain::CreateDefault() 后 dynamic_cast 取
+    // TonemapPass* 修改本字段切算子。
+    TonemapOperator op{TonemapOperator::ACES_Narkowicz};
 
     const char* Name() const noexcept override;
     void        Setup(PostProcessSetupContext& ctx) override;

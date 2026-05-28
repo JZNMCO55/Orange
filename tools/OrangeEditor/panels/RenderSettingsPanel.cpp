@@ -171,5 +171,67 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
         };
     }
 
+    // ---- Color · Tonemap (GAP-2026-05-27-tonemap-operator-selection) ----
+    // 直接编辑 chain 内 TonemapPass 的 op / exposure 字段，编辑后下一帧
+    // Pipeline 录制 stage B tonemap pass 时按新 op 写 push constant，
+    // viewport 立即生效。mpTonemapPassRef nullptr 时（chain 还没初始化 / 不
+    // 含 TonemapPass）整段 disabled 显示。
+    if (ImGui::CollapsingHeader("Color · Tonemap",
+                                ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        if (mpTonemapPassRef == nullptr)
+        {
+            ImGui::TextDisabled("(chain 不含 TonemapPass —— 编辑器视口尚未初始化或 chain 被外部替换)");
+        }
+        else
+        {
+            namespace R = Orange::Engine::Render;
+            auto& tp = *mpTonemapPassRef;
+
+            // Combo 4 选项 —— index 与 R::TonemapOperator enum 一一对应
+            // （ACES_Narkowicz=0 / AgX=1 / Reinhard=2 / Linear=3）。
+            constexpr const char* kOpLabels[] = {
+                "ACES Narkowicz",
+                "AgX (Troy Sobotka)",
+                "Reinhard",
+                "Linear (debug, no curve)",
+            };
+            int currentOp = static_cast<int>(tp.op);
+            if (ImGui::Combo("Operator", &currentOp, kOpLabels, 4))
+            {
+                tp.op = static_cast<R::TonemapOperator>(currentOp);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip(
+                    "Tonemap 算子 —— HDR linear → LDR [0,1] 的曲线选择：\n"
+                    "  ACES Narkowicz：2015 5-系数拟合 ACES filmic\n"
+                    "                  AAA 2015-2020 事实标准；饱和色偏色压暗\n"
+                    "  AgX           ：Troy Sobotka 设计，Blender 4.0+ 默认\n"
+                    "                  分段 sigmoid + 色彩空间矩阵；饱和色处理优于 ACES\n"
+                    "  Reinhard      ：经典 x/(1+x)；学术 baseline，HDR 高光被强压\n"
+                    "  Linear        ：clamp 到 [0,1]，无曲线\n"
+                    "                  调试用，emissive 物体硬边亮带染色\n"
+                    "默认 ACES Narkowicz（与历史固定行为视觉等价）。");
+            }
+
+            ImGui::DragFloat("Exposure", &tp.exposure, 0.01f, 0.0f, 10.0f, "%.3f");
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip(
+                    "曝光乘子（multiplicative）。1.0 = 原 HDR 输入直接喂给算子；\n"
+                    "  线性 stop 调整：exposure *= 2.0^stops\n"
+                    "  按算子映射前作用（与 ColorGradePass.exposure 在 tonemap 前\n"
+                    "  作用同位置，但 grade 是 stops 单位、tonemap 是线性乘子）");
+            }
+
+            if (ImGui::Button("Reset Tonemap to Editor Defaults"))
+            {
+                tp.op       = R::TonemapOperator::ACES_Narkowicz;
+                tp.exposure = 1.0f;
+            }
+        }
+    }
+
     ImGui::End();
 }

@@ -1860,12 +1860,12 @@ if (csmCascade < cascadeCountFromHost - 1) {
 
 ---
 
-## GAP-2026-05-27-tonemap-operator-selection
+## GAP-2026-05-27-tonemap-operator-selection ✅
 
 - **发现方**：渲染推进 session（铺完 post 特效后回看 HDR→LDR 收尾算子）
 - **发现日期**：2026-05-27
 - **一句话定性**：tonemap 算子**写死 ACES Narkowicz 5 系数 fit**（`tonemap.frag.glsl::ACESNarkowicz`），无算子选择。ACES Narkowicz 对**高饱和亮色**会偏色/过饱（known issue），对首游明亮多彩的 Ori-like 画风不理想；缺 **AgX**（Blender 4.0+ / Godot 4.3 默认，对鲜艳色 hue 更稳）/ Reinhard 等算子选择
-- **状态**：**仅登记，未实现**（本 session 只铺 post 特效；tonemap 是全引擎 HDR→LDR **核心收尾曲线**，改动影响每个 sample + 编辑器，且 push struct 多处内联，应放专门 session 一并理顺一致性）
+- **状态**：**✅ 2026-05-28 落地**（与编辑器 Render Settings panel 同 session 顺手 follow-up，承接用户"刚撤了美术 post，那 tonemap 算子是不是也能换"的自然下一问）
 
 ### 触发场景
 
@@ -1889,6 +1889,64 @@ if (csmCascade < cascadeCountFromHost - 1) {
 
 - 纯 OrangeEngine shader + Pipeline 改动，**不需跨仓提 feature**。
 - 优先级：美术定调（pre-game）阶段触发；非 critical path，可与"窗口 vs offscreen tonemap 路径统一"一并做。
+
+### 落地记录（2026-05-28，与编辑器 Render Settings panel + 撤美术 post 同 session）
+
+**触发**：用户在 OrangeEditor `light_family_shadows` 场景里截图 Render Settings panel 后问"现在是不是默认显示后处理效果？我没加 PostProcessComponent 就有效果了，逻辑不对" —— 落地撤 6 美术 pass + 保留 HDR 必需 5 pass（含 Tonemap）后，"那 tonemap 算子是不是也能换" 成为自然下一问，触发本 GAP 推进。
+
+**实施清单**（5 个文件改动 + 0 个新文件，shader + push struct + UI 一气呵成）：
+
+1. `include/orange/engine/render/PostProcessPasses.h`：
+   - 加 `enum class TonemapOperator : std::uint32_t { ACES_Narkowicz=0, AgX=1, Reinhard=2, Linear=3 };`（4 算子，注释详述每个的视觉特征 / 适用场景 / 历史背景）
+   - `TonemapPass` 加 `TonemapOperator op{TonemapOperator::ACES_Narkowicz};` 字段（默认与历史固定行为视觉等价）
+   - 删除注释 "Tonemap 算子（Reinhard / ACES / 自定义）当前固定，等到写实际 tonemap shader 时再决定是否引入 enum 选项" —— 此设计点已落地
+
+2. `src/render/builtin_shaders/tonemap.frag.glsl`：
+   - push constant `pad0 → uint uOperator` 槽位（与 Pipeline.cpp 两处 PushTonemap struct 同步，不增加 push 总尺寸）
+   - 加 4 个 tonemap 函数：`ACESNarkowicz`（保留现行）/ `AgX`（Sobotka minimal fit，含 input/output 3x3 矩阵 + 6 系数 sigmoid 多项式 + log2 编码 [min_ev, max_ev] = [-12.47393, 4.026069]）/ `Reinhard`（`x/(1+x)` per-channel）/ `LinearClamp`（仅 clamp）
+   - `ApplyTonemap(hdr, op)` switch dispatcher（fragment shader 内所有 fragment 共享同一 push constant，无 divergence，GPU 静态分支预测性能等价 if-elseif）
+   - `main()` 改为 `ApplyTonemap(combined, pc.uOperator)`
+
+3. `src/render/Pipeline.cpp`：两处 `struct PushTonemap` 同步改 pad0 → uint32_t op：
+   - 行 1504（offscreen RecordPassthroughToViewport 路径，编辑器视口 stage B fallback）：取 `FindActiveTonemapPass()->op` 或回退 ACES
+   - 行 2745（window SubmitItem 路径）：取 `activeTonemap->op` 直接写入
+   - 注释同步说明 GAP-2026-05-27 落地点 + uOperator 槽位与 shader 对齐
+
+4. `tools/OrangeEditor/EditorRenderLayer.h`：
+   - `#include <orange/engine/render/PostProcessPasses.h>`（之前只 include PostProcessChain.h，没拿到 TonemapPass 定义）
+   - 加 `Orange::Engine::Render::TonemapPass* mpTonemapPassRef{nullptr};` —— 非拥有指针缓存，chain 持 unique_ptr ownership
+
+5. `tools/OrangeEditor/panels/ScenePanel.cpp`：EnsureScenePipeline 创建 chain 后 dynamic_cast 拿 TonemapPass* 缓存到 mpTonemapPassRef（BuiltinPostProcessChain::CreateDefault 5-pass 顺序 HDR(0) / Bloom(1) / GodRays(2) / Tonemap(3) / LUT(4)，索引 3 是 TonemapPass；防御性走 dynamic_cast loop，失败 silent skip 让 UI 段做 null 守卫）
+
+6. `tools/OrangeEditor/panels/RenderSettingsPanel.cpp`：加 "Color · Tonemap" CollapsingHeader：
+   - Combo "Operator" 4 选项（ACES Narkowicz / AgX / Reinhard / Linear）+ tooltip 详述每算子取舍
+   - DragFloat "Exposure" [0, 10] + tooltip 说明 stops 换算
+   - Reset 按钮回归 ACES_Narkowicz + exposure 1.0
+   - mpTonemapPassRef nullptr 时整段 disabled 文本 "(chain 不含 TonemapPass ...)"
+
+**架构决策**：
+
+- **tonemap operator 不进 PostProcessComponent**：与 BloomPass.intensity 同档，tonemap 是 stage-A/B 收尾概念，与 PostProcessComponent 的"per-camera 美术配置"语义不同（PostProcessComponent.h 顶注释明确写"不含 bloom / tonemap"）。本 GAP 走 `TonemapPass.op` chain-internal 字段路径，不动 scene schema。
+- **passthrough.frag 不动**：passthrough 是 chain 为空 / 不含 TonemapPass 的应急 fallback（编辑器实际不走 —— 编辑器 chain 含 TonemapPass），保持其 ACES Narkowicz fixed。后续若 sample 端真需要 passthrough 切算子，独立 GAP。
+- **PushTonemap 多处内联**保留（原 acceptance 提到"先抽共享 struct"作为顺手债）：两处实际 use site 都在 Pipeline.cpp 同一 TU，function-local 定义不影响一致性（同 TU 编译期一次性 ABI 验证），抽出反而增加 PipelineImpl.h header 膨胀。同步改两处 ~3 行差异已足够，进一步抽象推 v1.4 PostProcess v2 一并整骨。
+
+**验收**：
+- 全 52 ctest 通过（含 editor_build_smoke standalone consumer 验证）
+- `python scripts/check_invariants.py` → `All invariants OK. (7 grandfathered)`
+- `python scripts/check_claude_md_drift.py` → `none detected.`
+- 编译期 ABI 验证：tonemap.frag.glsl 的 push constant `uOperator: uint` slot offset 8、Pipeline.cpp 的 `PushTonemap.op: std::uint32_t` 字段 offset 8 一致（std430 layout 自然对齐，4-byte 槽 × 4 = 16 B push 总尺寸不变）
+
+**视觉验证留待 follow-up**：原 acceptance 第 4 步建议用 `samples/16_light_family_shadows --capture` 出 ACES/Reinhard/AgX 三张对比图，本 session 范围限定在"功能落地 + UI 暴露"，sample 16 capture 路径未跑（CLI flag 也未加，sample 16 当前固定参数）。用户在 OrangeEditor Render Settings 面板 Combo 切算子即可肉眼对比；正式 capture 对照可作为 sample 14_pbr_ibl 后续 polish 任务，独立 GAP / commit 触发。
+
+### 关键改动文件
+
+`include/orange/engine/render/PostProcessPasses.h` / `src/render/builtin_shaders/tonemap.frag.glsl` / `src/render/Pipeline.cpp`（两处 PushTonemap struct） / `tools/OrangeEditor/EditorRenderLayer.h` / `tools/OrangeEditor/panels/ScenePanel.cpp` / `tools/OrangeEditor/panels/RenderSettingsPanel.cpp` / `docs/engine-known-gaps.md`（本条目登记 + 关闭）
+
+### 留待后续
+
+- **sample 14_pbr_ibl `--tonemap=aces|agx|reinhard|linear` CLI flag** + 4 张 capture 对照图（与 sample 18 `--tint` 同款无人值守视觉回归路径），让 PR review 能直接看到算子差异；独立 GAP / commit 触发
+- **passthrough.frag 切算子**：仅当 sample 端真撞上"不挂 chain 但要切 tonemap"场景时触发；当前编辑器 + 主线 sample 都走 chain 路径，passthrough 是边缘 fallback
+- **PushTonemap struct 抽出共享**：两处 use site 都在 Pipeline.cpp 同一 TU，function-local 定义足够；待 PostProcess v2（GAP-2026-05-27-postprocess-component-local-volume）一并整骨
 
 ---
 

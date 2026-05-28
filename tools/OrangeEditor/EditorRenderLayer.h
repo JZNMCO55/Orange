@@ -36,6 +36,7 @@
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/render/PostProcessChain.h>
+#include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/VfxSystem.h>
 
@@ -243,6 +244,15 @@ private:
         .mapResolution = 2048,
         .pcssLightSize = 12.0f,
     };
+
+    // v1.3.3 GAP-2026-05-27-tonemap-operator-selection：缓存 mpScenePostProcessChain
+    // 内 TonemapPass* 的非拥有指针，让 Render Settings 面板 "Color · Tonemap"
+    // 段直接读写其 op / exposure 字段（chain 持 unique_ptr ownership；本指针
+    // 仅在 EnsureScenePipeline 创建 chain 后 dynamic_cast 一次缓存，析构由
+    // chain reset 时自动失效——layer 析构反序确保 chain 在本指针被访问前未释放）。
+    // EnsureScenePipeline 失败 / chain reset 路径下保持 nullptr，UI 段做 null
+    // 守卫早退。
+    Orange::Engine::Render::TonemapPass*              mpTonemapPassRef{nullptr};
     // v1.1 T2：File→Import... 菜单点击时置 true，下次 ApplyPendingImports
     // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
     // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。

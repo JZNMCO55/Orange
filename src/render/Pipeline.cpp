@@ -1501,10 +1501,20 @@ bool Pipeline::Impl::RecordPassthroughToViewport()
     if (bloomPass != nullptr && impl.bloomMipsReady && impl.bloomCombineSet
         && impl.tonemapPipeline)
     {
-        struct PushTonemap { float exposure; float bloomIntensity; float pad0; float pad1; };
+        // v1.3.3 GAP-2026-05-27-tonemap-operator-selection：pad0 → uint
+        // uOperator 槽位（与 tonemap.frag.glsl push constant 对齐）。本路径
+        // 是编辑器 RenderOffscreen 的 stage B fallback，bloomMipsReady 但
+        // 没活动 TonemapPass 时仍走这里 —— 此时取默认 ACES_Narkowicz（活
+        // 动 TonemapPass 由下方 SubmitItem 路径 / Pipeline::Render window
+        // 路径独立处理）。
+        struct PushTonemap { float exposure; float bloomIntensity; std::uint32_t op; float pad1; };
+        const TonemapPass* offscreenTonemap = impl.FindActiveTonemapPass();
         PushTonemap pcData{};
         pcData.exposure       = 1.0f;
         pcData.bloomIntensity = bloomPass->intensity;
+        pcData.op             = static_cast<std::uint32_t>(
+            offscreenTonemap != nullptr ? offscreenTonemap->op
+                                        : TonemapOperator::ACES_Narkowicz);
         // 必须先 BindGraphicsPipeline 再 SetPushConstants —— push constant 落到
         // 当前已绑 pipeline 的 layout 上；先 push 会落到上一个（主 pass mesh，
         // Vertex/64）的 layout 造成 stage/size 不匹配 validation error。
@@ -2735,17 +2745,21 @@ void Pipeline::Render(Orange::Engine::World& world)
         if (activeTonemap != nullptr)
         {
             // Tonemap 路径：tonemap pipeline + 双 binding (HDR + bloom)
-            // → ACES Narkowicz → swap-chain。activeTonemap 非空已经隐含
-            // activeBloom 非空 + bloomMipsReady（在上面的过滤里保证），
-            // 所以 bloomCombineSet 一定可用。
+            // → 所选算子（ACES_Narkowicz / AgX / Reinhard / Linear）→
+            // swap-chain。activeTonemap 非空已经隐含 activeBloom 非空 +
+            // bloomMipsReady（在上面的过滤里保证），所以 bloomCombineSet
+            // 一定可用。
+            // v1.3.3 GAP-2026-05-27-tonemap-operator-selection：pad0 → uint
+            // uOperator 槽位，与 tonemap.frag.glsl push constant 对齐。
             item.mpPipeline          = impl.tonemapPipeline.get();
             item.mpDescriptorSets[0] = impl.bloomCombineSet.get();
             item.mDescriptorSetCount = 1;
 
-            struct PushTonemap { float exposure; float bloomIntensity; float pad0, pad1; };
+            struct PushTonemap { float exposure; float bloomIntensity; std::uint32_t op; float pad1; };
             PushTonemap pcData{};
             pcData.exposure       = activeTonemap->exposure;
             pcData.bloomIntensity = activeBloom ? activeBloom->intensity : 0.0f;
+            pcData.op             = static_cast<std::uint32_t>(activeTonemap->op);
             std::memcpy(item.mPushConstantData.data(), &pcData, sizeof(pcData));
             item.mPushConstantSize   = static_cast<std::uint32_t>(sizeof(pcData));
             item.mPushConstantOffset = 0;

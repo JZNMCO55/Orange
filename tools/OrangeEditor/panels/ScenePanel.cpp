@@ -618,6 +618,23 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
                 Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
 
+        // v1.3.3 GAP-2026-05-27-tonemap-operator-selection：缓存 chain 内
+        // TonemapPass* 让 Render Settings 面板"Color · Tonemap" 段读写 op
+        // 字段。BuiltinPostProcessChain::CreateDefault 的 5-pass 顺序为
+        // HDR(0) / Bloom(1) / GodRays(2) / Tonemap(3) / LUT(4)，索引 3
+        // 是 TonemapPass；防御性走 dynamic_cast + 失败 silent skip（Pass
+        // 顺序变更后 chain 失锁，cast 失败让 UI 段做 null 守卫）。
+        mpTonemapPassRef = nullptr;
+        for (std::size_t i = 0; i < mpScenePostProcessChain->PassCount(); ++i)
+        {
+            if (auto* tp = dynamic_cast<Orange::Engine::Render::TonemapPass*>(
+                    mpScenePostProcessChain->PassAt(i)))
+            {
+                mpTonemapPassRef = tp;
+                break;
+            }
+        }
+
         // PCSS 软阴影 + 2048 阴影图（directional + spot；与 sample 一致）。
         // v1.3.1 GAP-2026-05-28-editor-render-settings-panel：hardcode 撤掉，
         // 编辑器档默认值挂 EditorRenderLayer::mShadowConfig（designated init
