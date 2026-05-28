@@ -109,7 +109,7 @@
       "components": {
         "Hierarchy": {
           "firstChild": 0,
-          "nextSibling": -1,
+          "nextSibling": 15,
           "parent": 12,
           "prevSibling": 3
         },
@@ -553,7 +553,7 @@
         },
         "Hierarchy": {
           "firstChild": -1,
-          "nextSibling": -1,
+          "nextSibling": 13,
           "parent": 2,
           "prevSibling": 9
         },
@@ -682,11 +682,175 @@
         }
       },
       "id": 12
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": 14,
+          "parent": 2,
+          "prevSibling": 10
+        },
+        "Name": {
+          "name": "duck"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/Models/Duck/Duck.material",
+          "mesh": "assets/Models/Duck/Duck.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            -3.216703414916992,
+            0.0,
+            2.6371102333068848
+          ],
+          "rotation": [
+            4.371250739154675e-08,
+            1.910783297470113e-15,
+            4.371250739154675e-08,
+            1.0
+          ],
+          "scale": [
+            0.009999999776482582,
+            0.009999999776482582,
+            0.009999999776482582
+          ]
+        }
+      },
+      "id": 13
+    },
+    {
+      "components": {
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": -1,
+          "parent": 2,
+          "prevSibling": 13
+        },
+        "Name": {
+          "name": "Avocado"
+        },
+        "Renderable": {
+          "castsShadow": true,
+          "materialInstanceId": "assets/Models/Avocado/Avocado.material",
+          "mesh": "assets/Models/Avocado/Avocado.mesh",
+          "visible": true
+        },
+        "Transform": {
+          "position": [
+            6.081718921661377,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -4.371139183945161e-08,
+            -4.371138473402425e-08,
+            -4.371139183945161e-08,
+            1.0
+          ],
+          "scale": [
+            50.0,
+            50.0,
+            50.0
+          ]
+        }
+      },
+      "id": 14
+    },
+    {
+      "components": {
+        "Environment": {
+          "cubemap": "",
+          "intensity": 1.0,
+          "tint": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "Hierarchy": {
+          "firstChild": -1,
+          "nextSibling": -1,
+          "parent": 12,
+          "prevSibling": 2
+        },
+        "Name": {
+          "name": "Evironment"
+        },
+        "PostProcess": {
+          "blendDistance": 1.0,
+          "contactEnabled": false,
+          "contactLength": 0.15000000596046448,
+          "contactStrength": 0.8999999761581421,
+          "contactThickness": 0.30000001192092896,
+          "dofEnabled": false,
+          "dofFocusDistance": 10.0,
+          "dofFocusRange": 10.0,
+          "dofMaxCoCRadius": 0.012000000104308128,
+          "gradeContrast": 1.0,
+          "gradeEnabled": false,
+          "gradeExposure": 0.0,
+          "gradeSaturation": 1.0,
+          "gradeTemperature": 0.0,
+          "gradeTint": 0.0,
+          "lensChromaticAberration": 0.0,
+          "lensEnabled": false,
+          "lensVignetteIntensity": 0.0,
+          "lensVignetteSmoothness": 0.5,
+          "localExtent": [
+            5.0,
+            5.0,
+            5.0
+          ],
+          "mode": 0,
+          "motionBlurEnabled": false,
+          "motionBlurIntensity": 0.5,
+          "motionBlurMaxRadius": 0.05000000074505806,
+          "motionBlurSampleCount": 8,
+          "pcssLightSize": 0.0,
+          "priority": 0.0,
+          "shadowMapResolution": 1024,
+          "sharpenEnabled": false,
+          "sharpenStrength": 0.4000000059604645,
+          "ssaoEnabled": true,
+          "ssaoPower": 1.7999999523162842,
+          "ssaoRadius": 0.6000000238418579,
+          "ssaoStrength": 1.0,
+          "ssaoUseGtao": true,
+          "ssrEnabled": true,
+          "ssrMaxDistance": 12.0,
+          "ssrStrength": 0.6000000238418579,
+          "ssrThickness": 0.6000000238418579,
+          "taaEnabled": false,
+          "taaFeedback": 0.8999999761581421
+        },
+        "Transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "id": 15
     }
   ],
   "schemaVersion": {
     "major": 1,
-    "minor": 5,
+    "minor": 10,
     "namespace": "scene/world"
   }
 }
