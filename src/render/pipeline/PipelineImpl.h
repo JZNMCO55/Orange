@@ -53,6 +53,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -66,8 +67,23 @@ class World;  // 仅作 ref / ptr 参数类型；不暴露完整定义
 namespace Orange::Engine::Render
 {
 
+// 引擎托管 ImGui overlay 的全部 Vulkan / backend 状态。完整定义只在
+// src/render/pipeline/PipelineImGui.cpp（唯一 #include <imgui.h> / vulkan.h
+// 的 TU）里出现，避免把 imgui / vulkan 头拽进所有 include PipelineImpl.h
+// 的 pass .cpp。Impl 仅持一个 unique_ptr<PipelineImGuiState>（PIMPL 套
+// PIMPL），故 Impl 的析构必须 out-of-line（见 ~Impl 声明）。
+struct PipelineImGuiState;
+
 struct Pipeline::Impl
 {
+    // 构造 + 析构都 out-of-line（定义在 PipelineImGui.cpp）—— 让
+    // unique_ptr<PipelineImGuiState>（不完整类型）在持有 / 构造 Impl 的 TU
+    // （Pipeline.cpp 的 make_unique<Impl>）里不需要看到完整定义：构造函数同
+    // 样会实例化成员的析构（异常清理路径），故 ctor 也必须 out-of-line。
+    // 其余成员都是完整类型，两者 = default 即可。
+    Impl();
+    ~Impl();
+
     RenderScene                            scene;
     Asset::AssetRegistry*                  assets{nullptr};
     Platform::Window*                      window{nullptr};
@@ -806,6 +822,22 @@ struct Pipeline::Impl
     // pass 完成后 Render 内调用 RenderAuxPass。Pipeline 不持所有权 ——
     // 见 IAuxPassProvider.h 调用约定。
     IAuxPassProvider*                                     pAuxPassProvider{nullptr};
+
+    // ---- 引擎托管 ImGui overlay（GAP-2026-05-27-consumer-imgui-tuning-hook）----
+    // 游戏侧无 PIE，需要在自己进程里叠即时模式 debug-UI 调参/调试。Pipeline
+    // 托管 ImGui context + GLFW/Vulkan backend + descriptor pool；消费者经
+    // Layer::OnImGui 提交 widget（经 imguiSubmit 回调驱动）。仅 window 模式
+    // 接通；编辑器走自管路径不碰这套。imguiState 完整定义在 PipelineImGui.cpp。
+    std::unique_ptr<PipelineImGuiState> imguiState;
+    std::function<void()>               imguiSubmit;
+    bool                                imguiEnabled{false};
+
+    // 以下三个 helper 的实现都在 PipelineImGui.cpp（唯一接触 imgui / vulkan
+    // 头的 TU），声明放这里供 Pipeline.cpp / Pipeline 公共方法转发调用。
+    // 签名零 imgui / vulkan 类型，故可在本 header 安全声明。
+    Result<void, ResultCode> EnableImGuiImpl();   // EnableImGui 的真正落地
+    void                     ShutdownImGuiImpl();  // Shutdown 顶部调（释放 imgui 资源）
+    void                     ImGuiBeginFrameAndSubmit();  // Render 顶部调（NewFrame + submit + Render）
 
     // ---- v1.3.0 · 公共面中性化字段 ------------------------------------
     // engine 默认值彻底中性化（无 ambient fallback + shipping 深蓝灰 clear）；

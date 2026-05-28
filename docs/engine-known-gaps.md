@@ -1757,12 +1757,12 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 ---
 
-## GAP-2026-05-27-consumer-imgui-tuning-hook
+## GAP-2026-05-27-consumer-imgui-tuning-hook ✅
 
 - **发现方**：OrangeGames 首游 Spike 1 scaffold session（搭消费骨架时核对引擎公共面有无消费者 ImGui 接线）
 - **发现日期**：2026-05-27
 - **一句话定性**：引擎公共面**无面向消费者（游戏）的 ImGui / debug-UI 提交 hook**。`Layer` 基类只有 `OnAttach/OnDetach/OnUpdate/OnEvent`，**无 `OnImGui`**；ImGui 仅由 `tools/OrangeEditor`（`EditorRenderLayer.cpp` + `main.cpp`）用引擎私有路径自起；`IRenderPass::InsertPass` 扩展点虽存在但 0.x **"暂未真正接通"**（`Pipeline.h:17` / `:113` 注释，InsertPass 走 fallback）。结果：Spike 1 手感调试方法论里列为**"第一优先级地基"**的"热重载 ImGui 调参面板"在游戏侧无法实现。
-- **状态**：**仅登记，未实现**。用户 2026-05-27 已拍板：**下一步开独立 OrangeEngine session 优先处理本条**（提到 Spike 1 critical path 之上——调参面板是手感 spike 的前置地基），再回 OrangeGames 用真 slider 继续 spike。
+- **状态**：**2026-05-27 落地 ✅**（独立 OrangeEngine session；与 [[GAP-2026-05-27-builtin-shaders-not-installed-for-consumers]] 同 session 一起做）。选定**方案 A（引擎独占 ImGui + PUBLIC 暴露）**——动机经用户确认是"无 PIE，需在游戏侧 live-debug 任意效果"，故要完整 ImGui 而非薄封装；落地点见本文件"处理记录"段。**与 play-in-editor 正交**（见 [[GAP-2026-05-27-play-in-editor]]：PIE 落地后本 hook 不冗余）。
 
 ### 触发场景
 
@@ -1796,12 +1796,12 @@ Spike 1 软体史莱姆手感调试需把一批旋钮（约束 stiffness/damping
 
 ---
 
-## GAP-2026-05-27-builtin-shaders-not-installed-for-consumers
+## GAP-2026-05-27-builtin-shaders-not-installed-for-consumers ✅
 
 - **发现方**：OrangeGames 首游 Spike 1 scaffold session（核对引擎 `install()` 规则时发现）
 - **发现日期**：2026-05-27
 - **一句话定性**：引擎 `install(EXPORT ...)` 只装了 lib + 公共头 + cmake config，**未装 builtin 编译产物 shader**——`shaders/orange_engine/*.spv` 只在顶层 `CMakeLists.txt` 被 copy 到 **build tree** 的 `RUNTIME_OUTPUT_DIRECTORY`（行 195/219），**无对应 `install()` 规则**（install 段行 679-748 只有 TARGETS / include 目录 / EXPORT / config）。外部消费者 `find_package` + 链接后**能编过，但运行期跑不起来**：`Pipeline::Initialize` / `MaterialSystem::RegisterBuiltins` 按 ".exe 相对 `shaders/orange_engine/*.spv`" 加载会扑空。
-- **状态**：**仅登记，未实现**。
+- **状态**：**2026-05-27 落地 ✅**（与 [[GAP-2026-05-27-consumer-imgui-tuning-hook]] 同 session）。install 装 47 个 spv 到 `<prefix>/share/OrangeEngine/shaders/orange_engine/`，config 暴露 `OrangeEngine_SHADER_DIR` + helper `orange_engine_copy_builtin_shaders(<target>)`；顺带 `target_compile_features(orange_engine PUBLIC cxx_std_20)` 让消费者免自设 C++20。已用临时外部 consumer（仅 `find_package` + helper）端到端验证：47 spv 拷到 consumer.exe 旁。落地点见"处理记录"段。**OrangeGames 侧后续可移除 `ORANGE_ENGINE_SHADER_DIR` cache var + 手写 POST_BUILD copy 的 workaround，改用 `orange_engine_copy_builtin_shaders(<target>)`**（待 bump engine pointer 后）。
 
 ### 触发场景
 
@@ -1864,8 +1864,70 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ---
 
+## GAP-2026-05-27-headless-asset-import-and-scene-generation-cli
+
+- **发现方**：Orange-Ecosystem umbrella session 讨论 "CLI 建模工具 → 关卡内容" 工作流时
+- **发现日期**：2026-05-27
+- **一句话定性**：引擎 / 编辑器**无 headless / CLI 的资产导入 + 场景生成路径**。把外部 `.obj / .gltf` 转成引擎自有 `.mesh` 的能力**锁死在 OrangeEditor GUI importer 入口**（`tools/OrangeEditor/import/ImportDispatcher.h` 明示入口只有 "File→Import 菜单" + "OS drag-drop" 两路，都要 GUI 在跑）；`.scene.json` 虽是纯文本 + `schemaVersion`、理论上可脚本生成，但**没有官方生成器 / schema 校验器**。结果："脚本生成 mesh → 批量转 `.mesh` → 程序化生成 `.scene.json` → 跑起来" 这条**全 CLI 内容管线断在'转 .mesh'与'生成关卡'两环**，无法不开 GUI 闭环。
+
+### 触发场景
+
+- 用户想用 CLI 建模工具（**Blender headless** `--background --python` / **CadQuery** Assembly → `.glb` / OpenSCAD 经转换桥）**程序化批量生成场景道具**再放进关卡——这是渲染出身、代码驱动工作流的自然诉求。
+- 这些工具都能产出 OBJ 或 glTF/glb，正好命中现有 importer 吃的格式，但**进引擎那一环（转 `.mesh` + 入 AssetRegistry）只有 GUI 入口**：每个模型都得人手在编辑器里 File→Import 或拖拽，批量 / 自动化 / CI 场景下不可用。
+- `.scene.json` 是普通 JSON（见 `assets/scenes/*.scene.json`），手写 / 脚本吐**技术上可行**，但 entity 的 `Hierarchy` 索引链（parent/firstChild/nextSibling/prevSibling）+ 各组件字段 + `schemaVersion` 都要手工对齐，无校验器时极易和引擎实际 schema 漂移，悄悄生成"加载即崩 / 字段被忽略"的脏关卡。
+
+### 现状对照（避免与已闭环 gap 重复）
+
+| 能力 | 现状 | 备注 |
+|---|---|---|
+| GUI mesh / texture importer | ✅ | [[GAP-2026-05-22-editor-dcc-import-pipeline-missing]] 已闭环（.obj + .gltf/.glb → .mesh，.png/.jpg/.tga/.hdr texture，ADR-008 四件套）。**本 gap 是它的 headless 维度补充，不是重复** |
+| importer headless / CLI 入口 | ❌ | `ImportDispatcher.h` 入口仅 GUI 菜单 + drag-drop；`Dispatch(srcPath, EditorHost&)` 签名硬依赖 `EditorHost`（GUI 宿主），无脱 GUI 的调用路径 |
+| `MeshLoader::Save` 暴露给 CLI | ❌ | `include/orange/engine/asset/MeshLoader.h` 的 `Save` 是引擎内 C++ API，但没有独立命令行工具暴露它 |
+| `.scene.json` 程序化生成 / 校验 | ❌ | 纯文本可手写，但无生成器、无导出的 JSON schema、无 round-trip 校验工具 |
+
+### 缺什么（按依赖拆）
+
+#### G1 · headless mesh import CLI
+
+- 独立 CLI 工具或 `OrangeEditor --headless-import <file>` 子命令：吃 `.obj / .gltf / .glb`，走 ADR-008 四件套（转 `.mesh` + copy 源 + 写 `.meta` + 入 AssetRegistry）但**不拉起 GUI**。
+- 实现侧：把 `ImportDispatcher::Dispatch` 对 `EditorHost` 的依赖剥成一个轻量"无 GUI 的 import context"（只需 `AssetRegistry` 句柄 + 目标目录），GUI 路径与 headless 路径共用同一 importer 核心，避免逻辑二次实现。
+- importer 模块仍须留在 `tools/OrangeEditor/import/`（不污染 `src/asset/` runtime，沿用 ADR-008 约束）；headless CLI 作为 OrangeEditor 的另一种入口形态。
+
+#### G2 · `.scene.json` 生成 / 校验工具
+
+- 导出一份机器可读的 scene/component **JSON schema**（或等价校验器），让外部脚本生成 `.scene.json` 后能校验 `schemaVersion` + 各组件字段 + `Hierarchy` 索引链自洽（无悬挂 parent/sibling 引用）。
+- 提供最小**生成器辅助**（Python helper 或引擎侧 CLI）：给定 entity 列表（mesh 路径 + transform + 材质 + 可选父子关系），吐出合法 `.scene.json`，自动维护 Hierarchy 索引链。
+
+#### G3 ·（可选，更长期）端到端 CLI 管线编排
+
+- 把 G1 + G2 串成一条命令：给一个目录的 `.glb` + 一份布局描述（YAML/JSON：哪个 mesh 放哪、什么材质、父子关系）→ 自动转好全部 `.mesh` + 生成完整 `.scene.json`，全程零 GUI。
+- 这才真正打通"CLI 建模工具 → 可直接加载的关卡"全自动管线，适配 CI / 批量 / 程序化关卡生成。
+
+### 期望验收
+
+- 不启动 GUI，命令行 `<tool> import-mesh foo.glb` 产出 `assets/Models/foo/foo.mesh` + `.meta`，与 GUI 导入产物字节级等价。
+- 外部脚本生成的 `.scene.json` 经校验器确认合法后，能被 OrangeEditor **和** runtime 正确加载，渲染结果与 GUI 手摆一致。
+- （G3）给定一组 `.glb` + 布局描述，一条命令产出可直接 `Open Scene` 加载的完整关卡。
+
+### 状态
+
+- **仅登记，未实现 / 未排期**。本条是 ADR-010 work-queue 登记动作（纯文档，不实现不消费），登记 session 不碰代码。
+- **优先级**：P3（撞上即升格）。当前首游处于 graybox / 手感 spike 阶段，用内置 `cube.mesh` / `plane.mesh` + GUI 摆位 / 手写少量 scene.json 已够；**全 CLI 管线在"程序化批量生成场景道具"成为实际瓶颈时才升格**。
+- **归属候选**：G1 属 OrangeEditor（headless 入口形态，importer 核心解耦）；G2 可引擎侧 CLI 或独立 Python 工具；待独立 session 评审拆解，不在当前 critical path。
+- **关联**：[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（GUI importer 前置，本条补其 headless 维度）；[[GAP-2026-05-27-play-in-editor]] / workspace 项目模型（同属"工具链闭环 + 让游戏真正用上引擎"一束，CLI 内容管线与 PIE 正交但同向）。
+
+---
+
 ## 处理记录
 
+- **GAP-2026-05-27-consumer-imgui-tuning-hook + GAP-2026-05-27-builtin-shaders-not-installed-for-consumers**（2026-05-27 同 session 落地，"外部消费者就绪度"一束）：
+  - **架构决策（方案 A）**：引擎成为 ImGui 的**唯一 owner** + **PUBLIC 暴露**给消费者。动机经用户确认 = "无 play-in-editor，游戏侧要 live-debug 任意效果"，故选完整 ImGui（消费者 `#include <imgui.h>` 直接调）而非薄封装。**这反转了 CLAUDE.md 「Box2D / DragonBones / miniaudio / ImGui / stb 一律 PRIVATE」中 imgui 的那条**——记入 ADR（Orange-Wiki `case-studies/orange-engine/decisions/`）。`Layer::OnImGui()` 公共签名仍零 imgui 类型，header isolation invariant（公共头不漏第三方）不破；invariant lint 全绿。
+  - **集成形态**：`Layer::OnImGui()` 新增虚函数（默认空，零开销）+ `AppHost::DispatchImGui()`（遍历 LayerStack 调各 OnImGui）+ `Pipeline::EnableImGui()` / `SetImGuiSubmit()` / `IsImGuiEnabled()`。Pipeline（window 模式）托管 ImGui context + GLFW/Vulkan backend + descriptor pool；`Render()` 顶部 NewFrame → 回调 submit（消费者把 `host->DispatchImGui` 接进来）→ `ImGui::Render`，内部 renderer 的 swap-chain overlay 录 `RenderDrawData`；`Shutdown()` 顶部按序拆。复用编辑器 VulkanLoaderShim 同款 **KHR-trampoline 补丁**（vkCmdBegin/EndRenderingKHR → core 名，经 vkGetDeviceProcAddr）。offscreen 模式（编辑器路径）拒绝 EnableImGui。
+  - **唯一 imgui owner**：imgui 从 `tools/OrangeEditor` 自 vendor（`orange_editor_imgui`）上提到引擎根 `orange_engine_imgui`（FetchContent v1.91.5-docking，PUBLIC 链入 orange_engine + 进 install/export，`OrangeEngine::imgui` alias）。**编辑器改为复用这一份**（CMake 去 `orange_editor_imgui`、链 `OrangeEngine::imgui`，main.cpp 的 ImGui 代码零改动）——否则两份静态 imgui 在编辑器 exe 撞 ODR。
+  - **gap 2（shader install）**：全部 47 个 builtin spv 汇成 `ORANGE_ENGINE_ALL_BUILTIN_SPV` 列表，`install(FILES ...)`（支持 `$<CONFIG>` genex）装到 `<prefix>/share/OrangeEngine/shaders/orange_engine/`；`OrangeEngineConfig.cmake.in` 暴露 `OrangeEngine_SHADER_DIR`（`set_and_check`）+ helper `orange_engine_copy_builtin_shaders(<target>)`（POST_BUILD `copy_directory` 到消费者 `$<TARGET_FILE_DIR>/shaders/orange_engine`）。`target_compile_features(orange_engine PUBLIC cxx_std_20)` 让消费者免自设标准（连带项）。config 加 `find_dependency(Vulkan)`（imgui PRIVATE 链 Vulkan 在 STATIC 下作 LINK_ONLY 传播，target 须可解析）。
+  - **验收**（全绿）：① 引擎 + `samples/17_imgui_overlay` 编过 + 5s 冒烟无崩溃；② 编辑器编过（**无重复符号**，证 ODR 已消）+ 6s 冒烟无崩溃；③ invariant lint 7 grandfathered 无新增 + drift none；④ `cmake --install` → 47 spv + imgui 头（core+backends）+ `OrangeEngine::imgui` lib + config 全部落位；⑤ **临时外部 consumer**（仅 `find_package(OrangeEngine)` + `#include <imgui.h>` 写 `Layer::OnImGui` + `orange_engine_copy_builtin_shaders`）端到端编过 + 链过 + 47 spv 拷到 consumer.exe 旁 + C++20 特性免自设标准编过 —— 两 gap 的"仅经公共 API 的消费者跑得起来 + 叠 ImGui slider"验收同时兑现。
+  - **关键改动文件**：`include/orange/engine/app/Layer.h`（OnImGui）/ `include/orange/engine/app/AppHost.h` + `src/app/AppHost.cpp`（DispatchImGui）/ `include/orange/engine/render/Pipeline.h`（EnableImGui/SetImGuiSubmit/IsImGuiEnabled）/ `src/render/pipeline/PipelineImpl.h`（imgui 字段 + out-of-line ctor/dtor + 3 helper 声明）/ `src/render/pipeline/PipelineImGui.cpp`（**新增**，唯一 imgui/vulkan TU）/ `src/render/Pipeline.cpp`（Render 顶 + Shutdown 顶 hook）/ `CMakeLists.txt`（imgui target + PUBLIC 链 + cxx_std_20 + spv 列表 + install spv/imgui）/ `cmake/Dependencies.cmake`（find_package Vulkan）/ `cmake/OrangeEngineConfig.cmake.in`（shader dir + helper + find_dependency Vulkan）/ `tools/OrangeEditor/CMakeLists.txt`（去 orange_editor_imgui，链 OrangeEngine::imgui + Vulkan::Vulkan）/ `samples/17_imgui_overlay/`（**新增** main.cpp + CMakeLists）/ `samples/CMakeLists.txt`（注册 17）
+  - **未做 / 后续**：play-in-editor（[[GAP-2026-05-27-play-in-editor]]，用户明确不排期）；OrangeGames 侧把 shader workaround 换成 helper（待 bump engine pointer 的新 session）；`tests/install/` 端到端 consumer ctest（本次用临时 consumer 手验过，可后续固化进 CI）。
 - **GAP-2026-05-24-editor-asset-browser-create-material-missing**（2026-05-24 落地 G1，OrangeEditor v1.1.1 milestone）：`tools/OrangeEditor/EditorRenderLayer.cpp` 单文件改动——
   - **入口**：`DrawAssetFileList` 末尾挂 `BeginPopupContextWindow("##asset_list_ctx", MouseButtonRight | NoOpenOverItems)` 弹 `Create → Material` 嵌套菜单。`NoOpenOverItems` 让单文件右键照旧走既有 `BeginPopupContextItem`（行 1362 Pick / Reimport 菜单）不冲突
   - **状态机**：anonymous namespace file-scope `sPendingOpenCreateMaterial` / `sPendingOpenOverwriteConfirm` 标志位与 `AboutOrangeEditor` 同款 pending-pattern——menu item 内只 set 标志位（不直接 OpenPopup，因 menu 处于 context popup 的 ID stack 内嵌套 OpenPopup 会跟着 context popup 一起被关闭），下一帧 `DrawAssetsPanel` 内 `ImGui::End()` **之后**消费标志位 → `OpenPopup + BeginPopupModal` 在 viewport-level ID stack 绘制

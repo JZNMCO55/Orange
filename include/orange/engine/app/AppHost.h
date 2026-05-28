@@ -57,6 +57,14 @@ public:
     Layer* PushLayer(std::unique_ptr<Layer> layer);
     Layer* PushOverlay(std::unique_ptr<Layer> overlay);
 
+    // 按 stack 正向遍历，依次调每个 Layer 的 OnImGui()。这是把引擎托管的
+    // ImGui overlay 接到 LayerStack 的标准胶水：消费者 `pipeline.EnableImGui()`
+    // 后，把本方法接到 `pipeline.SetImGuiSubmit([h]{ h->DispatchImGui(); })`，
+    // Pipeline 每帧在 ImGui NewFrame 与 Render 之间回调它，各 Layer 的
+    // OnImGui 便得到提交时机。AppHost 自身不持 ImGui 状态、不依赖任何
+    // 第三方头——纯转发，签名零 ImGui 类型。
+    void DispatchImGui();
+
     Platform::Window& GetWindow() noexcept;
     LayerStack&       GetLayerStack() noexcept;
 

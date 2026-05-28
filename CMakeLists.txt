@@ -122,6 +122,7 @@ add_library(orange_engine STATIC
     src/render/pipeline/PipelineLens.cpp
     src/render/pipeline/PipelineSharpen.cpp
     src/render/pipeline/PipelineSky.cpp
+    src/render/pipeline/PipelineImGui.cpp
     src/render/PostProcessChain.cpp
     src/render/PostProcessPasses.cpp
     src/render/RenderScene.cpp
@@ -388,55 +389,62 @@ orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/procedural_sky.frag.glsl"
     ORANGE_ENGINE_BUILTIN_PROCEDURAL_SKY_FS_SPV)
 
+# 全部内置 SPIR-V 产物路径汇成一个列表 —— 既喂 custom target 的 DEPENDS，
+# 也喂下方 install(FILES ...)（GAP-2026-05-27-builtin-shaders-not-installed-
+# for-consumers：外部 find_package 消费者过去拿不到这些 spv，链接过但运行期
+# 加载 builtin material/shadow/vfx shader 扑空跑不起来）。每项含 $<CONFIG>
+# 生成表达式，install(FILES) 支持 genex，install(DIRECTORY) 不支持，故走 FILES。
+set(ORANGE_ENGINE_ALL_BUILTIN_SPV
+    "${ORANGE_ENGINE_BUILTIN_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_TOON_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_TOON_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_RIM_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_RIM_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SHADOW_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SHADOW_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_FULLSCREEN_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_BLOOM_DOWN_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_BLOOM_UP_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_COMBINE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_TONEMAP_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_TONEMAP_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PARTICLE_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PARTICLE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_DISSOLVE_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_DISSOLVE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_EMISSIVE_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SSAO_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_GTAO_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_CONTACT_SHADOW_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_DOF_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_DOF_COMPOSITE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_TAA_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_COLOR_GRADE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_MOTION_BLUR_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_LENS_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SHARPEN_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SSR_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PBR_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_UNLIT_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_WATER_BASIC_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_IBL_BRDF_LUT_CS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_IBL_IRRADIANCE_CS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_IBL_PREFILTER_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_SKY_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_PROCEDURAL_SKY_FS_SPV}")
+
 add_custom_target(orange_engine_builtin_shaders ALL
-    DEPENDS
-        "${ORANGE_ENGINE_BUILTIN_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_TOON_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_TOON_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_RIM_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_RIM_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SHADOW_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SHADOW_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_FULLSCREEN_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_BLOOM_DOWN_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_BLOOM_UP_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PASSTHROUGH_COMBINE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_TONEMAP_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_TONEMAP_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PARTICLE_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PARTICLE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_DISSOLVE_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_DISSOLVE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_EMISSIVE_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_EMISSIVE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_GODRAYS_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SSAO_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SSAO_APPLY_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_GTAO_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_CONTACT_SHADOW_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_DOF_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_DOF_COMPOSITE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_TAA_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_COLOR_GRADE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_MOTION_BLUR_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_LENS_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SHARPEN_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SSR_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SSR_COMPOSITE_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_NORMAL_PREPASS_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PBR_VS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PBR_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_UNLIT_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_WATER_BASIC_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_IBL_BRDF_LUT_CS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_IBL_IRRADIANCE_CS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_IBL_PREFILTER_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_SKY_FS_SPV}"
-        "${ORANGE_ENGINE_BUILTIN_PROCEDURAL_SKY_FS_SPV}")
+    DEPENDS ${ORANGE_ENGINE_ALL_BUILTIN_SPV})
 
 # 让 orange_engine 在 link 阶段保证 shaders 已经就位。
 add_dependencies(orange_engine orange_engine_builtin_shaders)
@@ -523,8 +531,10 @@ target_include_directories(orange_engine
 #     共头——PRIVATE 链接；
 #   * spdlog（可选）由 Core::Log 包裹；PUBLIC 传播让消费者愿意的话
 #     可以复用同一个 logger 实例，与 OrangeRender 的策略对齐；
-#   * Box2D / DragonBones / miniaudio / ImGui / stb 一律 PRIVATE——
+#   * Box2D / DragonBones / miniaudio / stb 一律 PRIVATE——
 #     越界禁令见 docs/extension-points.md。
+#   * ImGui 例外：自 GAP-2026-05-27 起 PUBLIC（消费者 Layer::OnImGui 用），
+#     见下方 orange_engine_imgui 段 + ADR。
 # ---------------------------------------------------------------------------
 target_link_libraries(orange_engine
     PUBLIC
@@ -545,6 +555,13 @@ target_link_libraries(orange_engine PRIVATE glfw)
 # Box2D 3.x：Physics 后端。PRIVATE，b2 类型只在 src/physics/box2d/ +
 # src/physics/PhysicsWorld.cpp 内出现，公共头零暴露。
 target_link_libraries(orange_engine PRIVATE box2d::box2d)
+
+# Vulkan headers —— src/render/pipeline/PipelineImGui.cpp 直接 #include
+# <vulkan/vulkan.h>（ImGui Vulkan backend 托管）。PRIVATE：仅 orange_engine
+# 自身编译用 include path，不传播 vulkan 头给消费者公共面（消费者 OnImGui 只
+# 用 <imgui.h> core）。NO_PROTOTYPES 全在 imgui lib 侧，本 TU 不直接引用 vk
+# 符号（全走 loader 解析的函数指针），故无需链 vulkan-1.lib。
+target_link_libraries(orange_engine PRIVATE Vulkan::Vulkan)
 
 # ---------------------------------------------------------------------------
 # DragonBones C++ runtime（Phase 4 / Task 02）——in-tree 源码集成
@@ -622,6 +639,79 @@ if (ORANGE_ENGINE_WITH_TRACY)
     target_compile_definitions(orange_engine PRIVATE ORANGE_ENGINE_WITH_TRACY=1)
 endif ()
 
+# ---------------------------------------------------------------------------
+# 内置 ImGui —— 消费者 debug-UI / overlay hook（GAP-2026-05-27-consumer-imgui-
+# tuning-hook）
+#
+# 游戏侧无 play-in-editor，需要在自己进程里叠即时模式 ImGui 调参/调试任意效
+# 果。引擎托管 ImGui context + GLFW/Vulkan backend（src/render/pipeline/
+# PipelineImGui.cpp），消费者经 Layer::OnImGui() 提交 widget。
+#
+# **唯一 owner**：imgui 由本仓在这里统一 vendor（FetchContent，与编辑器
+# 历史用的同一 docking tag）。编辑器 tools/OrangeEditor **复用这一份**
+# （`OrangeEngine::imgui`），不再各自 vendor——否则两份静态 imgui 在编辑器
+# exe 链接期撞重复符号（ODR）。
+#
+# **PUBLIC 暴露**：与其余第三方一律 PRIVATE 的策略不同（见 ADR），imgui 的
+# include 目录 + lib 以 INTERFACE/PUBLIC 形式传播给下游消费者——因为消费者
+# 的 OnImGui() body 要 `#include <imgui.h>` 直接调 ImGui API。这是反转
+# 「ImGui 一律 PRIVATE」invariant 的显式决策，动机见上。`Layer::OnImGui()`
+# 公共签名仍零 imgui 类型，header isolation invariant（公共头不漏第三方）
+# 不破。
+# ---------------------------------------------------------------------------
+include(FetchContent)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.91.5-docking
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(orange_engine_imgui STATIC
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+)
+# BUILD_INTERFACE 指向 FetchContent 源树；INSTALL_INTERFACE 指向 install 后
+# SDK 内的 imgui 头落点（见下方 install 段）。core + backends 两个目录都暴露：
+# 消费者只用 <imgui.h>（core），编辑器还用 <imgui_impl_glfw.h> / <imgui_impl_vulkan.h>。
+target_include_directories(orange_engine_imgui PUBLIC
+    "$<BUILD_INTERFACE:${imgui_SOURCE_DIR}>"
+    "$<BUILD_INTERFACE:${imgui_SOURCE_DIR}/backends>"
+    "$<INSTALL_INTERFACE:include/orange_engine_imgui>"
+    "$<INSTALL_INTERFACE:include/orange_engine_imgui/backends>"
+)
+# NO_PROTOTYPES：imgui_impl_vulkan.cpp 不链静态 vulkan-1.lib stub，改运行时
+# 函数指针（PipelineImGui.cpp / 编辑器 main.cpp 经 LoadFunctions 喂入 loader）。
+# PRIVATE 即可——头不因消费者侧是否定义此宏而 ABI 漂移。
+target_compile_definitions(orange_engine_imgui PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
+# backend .cpp 编译期需要 Vulkan / GLFW 头（PRIVATE：NO_PROTOTYPES 下不链 vk
+# 符号；glfw 仅 impl_glfw 编译期用）。
+target_link_libraries(orange_engine_imgui PRIVATE Vulkan::Vulkan glfw)
+set_target_properties(orange_engine_imgui PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    FOLDER                    "Vendor"
+)
+if (MSVC)
+    target_compile_options(orange_engine_imgui PRIVATE /W0 /utf-8)
+else ()
+    target_compile_options(orange_engine_imgui PRIVATE -w)
+endif ()
+add_library(OrangeEngine::imgui ALIAS orange_engine_imgui)
+
+# PUBLIC 链入 orange_engine：消费者（含 sample 17 / OrangeGames）拿
+# OrangeEngine::orange_engine 即传递性获得 imgui 头 + lib。
+target_link_libraries(orange_engine PUBLIC orange_engine_imgui)
+
+# 消费者无需自设 C++20——把语言要求随公共接口传播（gap 2 连带项：
+# 消费者 CMake 不必重复 set(CMAKE_CXX_STANDARD 20)）。BUILD/INSTALL 两侧生效。
+target_compile_features(orange_engine PUBLIC cxx_std_20)
+
 orange_engine_set_compiler_options(orange_engine)
 
 # 头文件中含中文注释；MSVC 默认按系统代码页（中文 Windows 上常见
@@ -676,12 +766,46 @@ if (ORANGE_ENGINE_INSTALL)
     # OBJECT 库进 install 不发任何文件，仅在 OrangeEngineTargets.cmake
     # 里登记 target name；消费者拿 OrangeEngine::orange_engine 时不会
     # 也无需直接看到这个 OBJECT target。
-    install(TARGETS orange_engine orange_engine_dragonbones
+    # orange_engine_imgui 也进 export：orange_engine PUBLIC 链到它，CMake
+    # 要求被 export 的 target 的所有 PUBLIC 依赖 target 同在一个 export set。
+    # 消费者拿 OrangeEngine::orange_engine 即传递性链到 OrangeEngine::imgui +
+    # 其 imgui 头（INSTALL_INTERFACE 指向下方安装的 include/orange_engine_imgui）。
+    install(TARGETS orange_engine orange_engine_dragonbones orange_engine_imgui
         EXPORT  OrangeEngineTargets
         ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}"
         INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+
+    # imgui 公共头 —— 消费者 OnImGui() body #include <imgui.h>；编辑器
+    # standalone consumer 路径还用 backends 两个头。装到独立子目录
+    # include/orange_engine_imgui/（与 orange_engine_imgui target 的
+    # INSTALL_INTERFACE include 对齐），不混进 <orange/engine/...> layout。
+    install(FILES
+            "${imgui_SOURCE_DIR}/imgui.h"
+            "${imgui_SOURCE_DIR}/imconfig.h"
+            "${imgui_SOURCE_DIR}/imgui_internal.h"
+            "${imgui_SOURCE_DIR}/imstb_textedit.h"
+            "${imgui_SOURCE_DIR}/imstb_rectpack.h"
+            "${imgui_SOURCE_DIR}/imstb_truetype.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/orange_engine_imgui"
+    )
+    install(FILES
+            "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.h"
+            "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/orange_engine_imgui/backends"
+    )
+
+    # 内置 SPIR-V shader —— GAP-2026-05-27-builtin-shaders-not-installed-for-
+    # consumers。装到 <prefix>/share/OrangeEngine/shaders/orange_engine/，由
+    # OrangeEngineConfig.cmake 暴露 OrangeEngine_SHADER_DIR + helper
+    # orange_engine_copy_builtin_shaders(<target>)，让外部消费者在 POST_BUILD
+    # 把它们拷到自己 .exe 旁（引擎运行时按 ".exe 相对 shaders/orange_engine/*.spv"
+    # 加载）。in-tree samples / 编辑器无需 helper——它们与 orange_engine 共享同一
+    # RUNTIME_OUTPUT_DIRECTORY，spv 早已在 .exe 旁。
+    install(FILES ${ORANGE_ENGINE_ALL_BUILTIN_SPV}
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/OrangeEngine/shaders/orange_engine"
     )
 
     # 源树公共头：保留 `<orange/engine/...>` 的 layout。FILES_MATCHING

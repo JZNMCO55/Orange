@@ -38,7 +38,8 @@ The engine sits on top of `OrangeRender` (a Vulkan renderer also developed in th
 - Required third-party (resolved via `find_package`, expected under a single prefix such as `D:\3rdparty`):
   - Inherited transitively from OrangeRender: `Vulkan`, `glfw3`, `glm`, `volk`, `VulkanMemoryAllocator`
   - Engine-direct PUBLIC: `EnTT`, `nlohmann_json`
-  - Engine-direct PRIVATE: `Box2D` (3.x), `miniaudio`, `stb_image`, `stb_truetype`, `Dear ImGui`, DragonBones C++ runtime
+  - Engine-direct PRIVATE: `Box2D` (3.x), `miniaudio`, `stb_image`, `stb_truetype`, DragonBones C++ runtime
+  - Engine-direct PUBLIC（消费者可见）: `Dear ImGui`（FetchContent vendored 为 `OrangeEngine::imgui`，PUBLIC 暴露给游戏侧 `Layer::OnImGui()` 写 debug-UI；自 GAP-2026-05-27-consumer-imgui-tuning-hook 起从 PRIVATE 升 PUBLIC，决策见 ADR；编辑器复用同一份不再自 vendor）
 - Optional: `spdlog` (gated by `ORANGE_ENGINE_WITH_SPDLOG`, default OFF until Phase 1 / Task 04 wires Core::Log against it), `tracy` (gated by `ORANGE_ENGINE_WITH_TRACY`, default OFF).
 - The LunarG Vulkan SDK must be installed with `VULKAN_SDK` set (transitively required by OrangeRender).
 

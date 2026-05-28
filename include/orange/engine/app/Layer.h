@@ -9,6 +9,14 @@
 // 生命周期：
 //   OnAttach          —— Layer 进入 stack 时调用一次
 //   OnUpdate(frame)   —— 每帧调用；Layer 不应在这里阻塞
+//   OnImGui()         —— 每帧 debug-UI 提交点（可选）。仅当宿主接通了引擎
+//                       托管的 ImGui overlay（`Pipeline::EnableImGui` +
+//                       把 `AppHost::DispatchImGui` 接到 `Pipeline::
+//                       SetImGuiSubmit`）时才会被调用，时机在引擎内部
+//                       `ImGui::NewFrame` 之后、`ImGui::Render` 之前。
+//                       Layer 在此直接调 ImGui API（消费者自行 `#include
+//                       <imgui.h>`）提交调参 / 调试窗口。未接通 overlay
+//                       时本回调永不触发，default 空实现零开销。
 //   OnEvent(event)    —— 每个平台事件都会调用；返回 true 表示已消费、
 //                       不再向更低优先级的 Layer 传递
 //   OnDetach          —— Layer 离开 stack 时调用一次
@@ -47,6 +55,10 @@ public:
     virtual void OnAttach() {}
     virtual void OnDetach() {}
     virtual void OnUpdate(const FrameContext& /*frame*/) {}
+
+    // debug-UI 提交点。签名刻意不出现任何 ImGui 类型——公共头不漏第三方
+    // （consumer 在 .cpp 里自行 #include <imgui.h>）。见上方生命周期说明。
+    virtual void OnImGui() {}
 
     virtual bool OnEvent(const Platform::WindowEvent& /*event*/) { return false; }
 

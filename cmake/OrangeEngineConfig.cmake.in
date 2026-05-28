@@ -19,6 +19,10 @@ find_dependency(EnTT 3.13 CONFIG)
 find_dependency(nlohmann_json 3 CONFIG)
 find_dependency(glfw3 CONFIG)
 find_dependency(box2d CONFIG)
+# Vulkan：内置 imgui target（OrangeEngine::imgui）PRIVATE 链 Vulkan::Vulkan，
+# STATIC 库下作为 LINK_ONLY 传播到消费者——必须能解析 Vulkan::Vulkan target。
+# NO_PROTOTYPES 下 imgui 不真引用 vk 符号，但 CMake 要求该 imported target 存在。
+find_dependency(Vulkan)
 
 # spdlog 仍是可选——是否在 link 接口里出现取决于 build 时的 gate；
 # 由顶层 CMakeLists.txt 在 configure_package_config_file 之前根据当
@@ -29,7 +33,38 @@ if (_ORANGE_ENGINE_NEEDS_SPDLOG)
 endif ()
 
 # 引入 install(EXPORT ...) 生成的 namespaced imported target
-# `OrangeEngine::orange_engine`。
+# `OrangeEngine::orange_engine`（+ PUBLIC 依赖 OrangeEngine::imgui）。
 include("${CMAKE_CURRENT_LIST_DIR}/OrangeEngineTargets.cmake")
+
+# ---------------------------------------------------------------------------
+# 内置 SPIR-V shader 路径 + 拷贝 helper（GAP-2026-05-27-builtin-shaders-not-
+# installed-for-consumers）
+#
+# 引擎运行时按 ".exe 相对 shaders/orange_engine/*.spv" 加载内置 material /
+# shadow / vfx / IBL shader。外部 find_package 消费者的 .exe 旁默认没有这些
+# spv（它们装在 SDK 的 share/ 下），故提供：
+#   * OrangeEngine_SHADER_DIR ——  已安装 spv 目录的绝对路径
+#   * orange_engine_copy_builtin_shaders(<target>) —— 给消费者 exe target 挂
+#     一个 POST_BUILD 步骤，把 spv 拷到 $<TARGET_FILE_DIR:target>/shaders/
+#     orange_engine/，这样运行时相对路径就能命中。
+#
+# 典型用法（消费者 CMakeLists）：
+#     add_executable(my_game ...)
+#     target_link_libraries(my_game PRIVATE OrangeEngine::orange_engine)
+#     orange_engine_copy_builtin_shaders(my_game)
+# ---------------------------------------------------------------------------
+set_and_check(OrangeEngine_SHADER_DIR
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/OrangeEngine/shaders/orange_engine")
+
+function(orange_engine_copy_builtin_shaders target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:${target}>/shaders/orange_engine"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${OrangeEngine_SHADER_DIR}"
+                "$<TARGET_FILE_DIR:${target}>/shaders/orange_engine"
+        COMMENT "OrangeEngine: 拷贝内置 SPIR-V 到 ${target} 输出目录"
+        VERBATIM)
+endfunction()
 
 check_required_components(OrangeEngine)

@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 
 namespace Orange::Engine
@@ -398,6 +399,40 @@ public:
     //
     // 未 Initialize 时仍接受调用（字段持下来，Initialize 后生效）。
     void SetAuxPassProvider(IAuxPassProvider* pProvider) noexcept;
+
+    // 接通引擎托管的 ImGui debug-UI overlay（消费者在游戏侧 live-debug /
+    // 调参的统一入口；与 play-in-editor 正交——这是游戏自己进程里的即时
+    // 模式调试 UI）。一次性创建 ImGui context + GLFW/Vulkan backend +
+    // descriptor pool，并在内部 renderer 的 swap-chain overlay 注册一次
+    // `RenderDrawData`。此后每帧 `Render()` 在内部 `ImGui::NewFrame` 之后、
+    // `ImGui::Render` 之前回调 `SetImGuiSubmit` 注册的提交函数，再把生成的
+    // draw data 录进 swap-chain image。
+    //
+    // 约束：
+    //   * 仅 **window 模式**（`Initialize(window, ...)`）支持；offscreen 模
+    //     式（编辑器路径，自管 ImGui）调用返回 `InvalidArgument`。
+    //   * 必须在 `Initialize` 成功之后调；未 Initialize 返回 `NotInitialized`。
+    //   * 重复调用返回 `AlreadyInitialized`。
+    //   * 进程内同一时刻只应有一个 Pipeline 接通 ImGui（ImGui context 是
+    //     进程级单例）。
+    //
+    // ImGui 资源在 `Shutdown()` 内按正确顺序释放（WaitIdle → 清 overlay →
+    // backend shutdown → DestroyContext → descriptor pool）。
+    //
+    // 消费者侧 `OnImGui()` body 自行 `#include <imgui.h>`（引擎把 imgui
+    // include 目录以 INTERFACE 形式 PUBLIC 暴露，与 STATIC 库发布一致）。
+    Result<void, ResultCode> EnableImGui();
+
+    bool IsImGuiEnabled() const noexcept;
+
+    // 注册每帧 ImGui 提交回调。Pipeline 在 `Render()` 内 `ImGui::NewFrame`
+    // 之后、`ImGui::Render` 之前调一次本回调，消费者在其中提交 ImGui 窗口
+    // / widget。典型接法把 `AppHost::DispatchImGui`（遍历 LayerStack 调各
+    // `Layer::OnImGui`）接进来：
+    //   pipeline.SetImGuiSubmit([h = host.get()]{ h->DispatchImGui(); });
+    // 未 EnableImGui 时仍可调用（仅存字段，EnableImGui 后生效）。传空函数
+    // 等于"本帧不提交任何 ImGui"。
+    void SetImGuiSubmit(std::function<void()> submit);
 
     // 天空盒（sky-dome）显隐开关（默认开）。开启时若 EnvironmentComponent
     // cubemap 已烘焙（BakeIblFromWorld 走过且成功），Pipeline 在主几何

@@ -72,68 +72,24 @@ endif ()
 find_package(Vulkan REQUIRED)
 
 # ---------------------------------------------------------------------------
-# ImGui (docking branch) —— Phase 6 / Task 06-02：编辑器整套 UI 走 ImGui。
-# 用 FetchContent 拉取，pin 一个稳定的 docking-branch commit，避免编辑器
-# 集成跟随上游 mainline 漂移。
-# ---------------------------------------------------------------------------
-
-include(FetchContent)
-FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    # docking 分支的稳定 tag —— v1.91.5-docking。pin 具体 sha 让 build 可重复
-    GIT_TAG        v1.91.5-docking
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(imgui)
-
-# ImGui 仓没自带 CMakeLists，手工把 core + impl_glfw + impl_vulkan 编成
-# 一个静态 lib。
+# ImGui —— 复用引擎统一 vendor 的那一份（OrangeEngine::imgui）
 #
-# 关键编译宏 IMGUI_IMPL_VULKAN_NO_PROTOTYPES：让 impl_vulkan 不再 extern
-# 引用 vulkan-1.lib 的静态 vkXxx 符号，转为模块内函数指针变量；启动期
-# `ImGui_ImplVulkan_LoadFunctions` 通过一个 loader callback 把所有 vkXxx
-# 解析到运行时函数指针。这样 ImGui 跟 OrangeRender 共用同一个 volk loader
-# 解析路径，避免"消费者侧静态 vulkan-1.lib stub 与 OrangeRender 内部 volk
-# 已加载的 loader entry 是两条独立解析路径"的 dispatch 状态错位。
-# 配套的 loader callback + Interop::GetVulkanGetInstanceProcAddr() 在
-# main.cpp 内串起来。
-add_library(orange_editor_imgui STATIC
-    "${imgui_SOURCE_DIR}/imgui.cpp"
-    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
-    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
-    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
-    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
-)
-target_include_directories(orange_editor_imgui PUBLIC
-    "${imgui_SOURCE_DIR}"
-    "${imgui_SOURCE_DIR}/backends"
-)
-# PRIVATE 即可——头文件 imgui_impl_vulkan.h 不会因为消费者侧没定义
-# NO_PROTOTYPES 而 ABI 漂移（仅 struct 定义 + 函数声明，不含 inline 调
-# 用 vkXxx 的代码）。把宏放 PRIVATE 让 main.cpp 仍能 include vulkan.h
-# 拿到 PFN_* / Vk* 类型，但不会再链 vulkan-1.lib 的 vkXxx 静态 stub。
-target_compile_definitions(orange_editor_imgui PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES)
-# Vulkan::Vulkan 提供 vulkan.h 的 include path；vulkan-1.lib 的链接在
-# NO_PROTOTYPES 下不再被 ImGui TU 引用（主 exe 也不直接调 vk*，全部走
-# Interop::GetVulkanGetInstanceProcAddr() 解析出的运行时指针），剩下的
-# 静态链是无害死重，留着以免破坏 include path 的传递。
-target_link_libraries(orange_editor_imgui PUBLIC Vulkan::Vulkan)
-# ImGui core 本身不需要 OrangeEngine —— 只 impl_glfw 需要 GLFW headers。
-# GLFW 是 OrangeRender 的 PRIVATE 依赖；编辑器自己也开窗（AppHost 内
-# 部用 GLFW，编辑器跟它共享同一 GLFWwindow*）所以需要直接 find。
+# 历史上编辑器自己 FetchContent + 编 orange_editor_imgui。自
+# GAP-2026-05-27-consumer-imgui-tuning-hook 起，引擎把 ImGui 上提为唯一
+# owner（PUBLIC 暴露给消费者，供游戏侧 Layer::OnImGui 用），编辑器随之改为
+# **复用** OrangeEngine::imgui——否则两份静态 imgui 在本 exe 链接期撞重复符号
+# （ODR）。imgui 头（imgui.h / imgui_impl_glfw.h / imgui_impl_vulkan.h）经
+# OrangeEngine::imgui 的 PUBLIC/INTERFACE include 传递性可见，main.cpp /
+# EditorRenderLayer.cpp 的 ImGui 调用代码无需改动。
+#
+# in-tree（开发期主路径）：OrangeEngine::imgui 由父 CMake 创建（ALIAS）；
+# standalone consumer（editor_build_smoke）：由 find_package(OrangeEngine) 的
+# OrangeEngineTargets.cmake 引入（imgui 在 export set 内、头随 SDK 安装）。
+#
+# Vulkan 头 / glfw：编辑器自身 TU（VulkanLoaderShim.cpp 等）直接 #include
+# <vulkan/vulkan.h> + 与 AppHost 共享 GLFWwindow*，仍需各自 find。
+# ---------------------------------------------------------------------------
 find_package(glfw3 CONFIG REQUIRED)
-target_link_libraries(orange_editor_imgui PUBLIC glfw)
-
-# 关掉 ImGui 自身的 warning（避免编辑器的 /WX /Werror 把 ImGui 内部
-# 警告升级为 error）。
-if (MSVC)
-    target_compile_options(orange_editor_imgui PRIVATE /W0)
-else ()
-    target_compile_options(orange_editor_imgui PRIVATE -w)
-endif ()
 
 # ---------------------------------------------------------------------------
 # OrangeEditor exe
@@ -213,7 +169,8 @@ add_executable(OrangeEditor
 # link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。
 target_link_libraries(OrangeEditor PRIVATE
     OrangeEngine::orange_engine
-    orange_editor_imgui
+    OrangeEngine::imgui
+    Vulkan::Vulkan
     glfw)
 
 # v1.1 T3：tinyobjloader 单 header（MIT）vendored 到 `vendor/tinyobjloader/`，

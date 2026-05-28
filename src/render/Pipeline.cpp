@@ -401,6 +401,11 @@ void Pipeline::Shutdown()
     }
     auto& impl = *mpImpl;
 
+    // 先拆引擎托管 ImGui overlay（若接通）—— 必须在 renderer / renderDevice
+    // 释放之前跑（内部自带 WaitIdle + 清 overlay callback + backend shutdown +
+    // DestroyContext + descriptor pool）。未接通时 no-op。
+    impl.ShutdownImGuiImpl();
+
     if (impl.renderDevice)
     {
         impl.renderDevice->WaitIdle();
@@ -2165,6 +2170,12 @@ void Pipeline::Render(Orange::Engine::World& world)
     ORANGE_PROFILE_SCOPE("Render");
 
     auto& impl = *mpImpl;
+
+    // 引擎托管 ImGui overlay（仅 window 模式 EnableImGui 后）：在本帧任何
+    // swap-chain 录制之前完成 NewFrame + 消费者 OnImGui 提交 + ImGui::Render，
+    // 生成的 draw data 在下面 renderer EndFrame 的 swap-chain overlay 里被录制。
+    // 未接通时内部 no-op、零开销。
+    impl.ImGuiBeginFrameAndSubmit();
 
     impl.scene.Clear();
     impl.scene.Collect(world, impl.worldPartition);

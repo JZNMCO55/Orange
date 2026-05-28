@@ -173,6 +173,17 @@ Layer* AppHost::PushOverlay(std::unique_ptr<Layer> overlay)
     return mpImpl->stack.PushOverlay(std::move(overlay));
 }
 
+void AppHost::DispatchImGui()
+{
+    for (auto& layer : mpImpl->stack)
+    {
+        if (layer)
+        {
+            layer->OnImGui();
+        }
+    }
+}
+
 Platform::Window& AppHost::GetWindow() noexcept
 {
     return *mpImpl->pWindow;

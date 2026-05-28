@@ -19,7 +19,12 @@
 #                                     nlohmann::json 类型）
 # * `box2d::box2d`                 → PRIVATE（仅允许出现在
 #                                     src/physics/box2d/）
-# * `imgui::imgui`                 → PRIVATE（编辑器 / overlay 用）
+# * ImGui                          → PUBLIC（自 GAP-2026-05-27 起；引擎在根
+#                                     CMakeLists FetchContent vendor 为
+#                                     orange_engine_imgui / OrangeEngine::imgui，
+#                                     PUBLIC 暴露给消费者 Layer::OnImGui。不再走
+#                                     下方 find_package(imgui)——那条 QUIET 探测
+#                                     现已 vestigial，仅历史遗留）
 # * `stb` 头                       → PRIVATE include（header-only）
 # * `miniaudio.h`                  → PRIVATE include（header-only；只
 #                                     允许出现在 src/audio/miniaudio/）
@@ -84,6 +89,17 @@ find_package(nlohmann_json 3 CONFIG REQUIRED)
 # <GLFW/glfw3.h>。
 # ---------------------------------------------------------------------------
 find_package(glfw3 CONFIG REQUIRED)
+
+# ---------------------------------------------------------------------------
+# Required：Vulkan（headers）
+#
+# 自 GAP-2026-05-27-consumer-imgui-tuning-hook 起，引擎在 src/render/pipeline/
+# PipelineImGui.cpp 内托管 ImGui 的 Vulkan backend（imgui_impl_vulkan.cpp），
+# 后者编译期需要 <vulkan/vulkan.h>。运行期 vk* 入口全部走 OrangeRender 暴露
+# 的 vkGetInstanceProcAddr（NO_PROTOTYPES），不依赖静态 vulkan-1.lib——这里
+# 只为拿 include path。VULKAN_SDK 是引擎的既有前置（LunarG SDK 已装）。
+# ---------------------------------------------------------------------------
+find_package(Vulkan REQUIRED)
 
 # ---------------------------------------------------------------------------
 # 可选开关
