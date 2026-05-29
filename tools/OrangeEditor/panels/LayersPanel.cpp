@@ -10,10 +10,10 @@
 //     重写 N 个 entity 的 LayerComponent，按 EntityTreePanel
 //     pendingDelete 同款约定：直接 mutate + Clear cmdStack）
 //
-// 不在 c5 范围（v0.6 后续 patch / 子 milestone）：
-//   * 重命名 layer（displayName 编辑）
-//   * 拖动调整 layer 顺序
-//   * per-layer entity count 显示
+// per-layer entity count 显示：2026-05-29 落地（[N] chip，gap 报告 §2.7 Layer 子项）。
+// 仍不在范围（后续）：
+//   * 重命名 layer（displayName 编辑）—— 需 per-layer rename 输入状态
+//   * 拖动调整 layer 顺序 —— 需 WorldPartition 加 reorder 方法（引擎侧）
 //   * Drag & drop entity → layer chip 一步改归属
 //
 // 设计参考：
@@ -37,6 +37,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace
 {
@@ -151,6 +152,18 @@ void EditorRenderLayer::DrawLayersPanel()
     // GetLayers() 返回 const& 到 manifest 内部 vector；遍历期间不能调
     // RemoveLayer 否则迭代器失效 —— 用 pendingRemoveId 延迟到帧末执行。
     std::string pendingRemoveId;
+
+    // per-layer entity count（gap 报告 §2.7 Layer 子项）：按 LayerComponent.layerId
+    // 计数（持有该组件的实体）。每帧重算（实体数通常不大，O(N) 可忽略）。
+    std::unordered_map<std::string, std::size_t> layerCounts;
+    {
+        using LC  = Orange::Engine::Scene::LayerComponent;
+        auto& reg = mHost.scene.pWorld->Registry();
+        for (auto e : reg.view<LC>()) {
+            ++layerCounts[reg.get<LC>(e).layerId];
+        }
+    }
+
     const auto& layers = mHost.scene.partition.GetLayers();
     for (const auto& layer : layers) {
         ImGui::PushID(layer.id.c_str());
@@ -185,6 +198,12 @@ void EditorRenderLayer::DrawLayersPanel()
         } else {
             ImGui::Text("%s", layer.id.c_str());
         }
+
+        // entity count chip —— 该 layer 下挂 LayerComponent 的实体数。
+        ImGui::SameLine();
+        const auto cit = layerCounts.find(layer.id);
+        ImGui::TextDisabled("[%zu]",
+                            cit != layerCounts.end() ? cit->second : std::size_t{0});
 
         // [×] 删除按钮（Codicons CLOSE）—— default 禁掉。
         const bool isDefault = (layer.id == kDefaultLayerId);
