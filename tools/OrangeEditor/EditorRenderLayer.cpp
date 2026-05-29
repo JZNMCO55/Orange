@@ -1252,9 +1252,15 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             //     能被丢弃，回到 Play 前的编辑状态。
             {
                 namespace fs = std::filesystem;
+                // 文件名带进程 id —— 兑现 EditorSceneContext.h "temp dir 下唯一
+                // 文件名" 的承诺：多编辑器实例同时 Play 时各自快照不互相覆盖
+                // （否则一个实例 Stop 会从另一个的快照还原错 World）。Stop 时
+                // remove + editor 退出清理；崩溃残留按 pid 隔离，不污染新实例。
                 mHost.scene.playSnapshotPath =
                     (fs::temp_directory_path() /
-                     "OrangeEditor_play_snapshot.scene.json").string();
+                     ("OrangeEditor_play_snapshot_"
+                      + std::to_string(GetCurrentProcessId())
+                      + ".scene.json")).string();
                 
                 Orange::Engine::Scene::SaveOptions saveOpts;
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
