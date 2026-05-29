@@ -350,9 +350,11 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     const bool  selected = (mHost.selection.selectedEntity == entity);
     const bool  renaming = (mHost.selection.renamingEntity == entity);
 
+    // 不挂 OpenOnDoubleClick：双击节点名留给"进入重命名"（见下），展开 / 折叠
+    // 只走左侧三角（OpenOnArrow），与 Unreal / Godot 的 scene tree 同款手感 ——
+    // 否则双击父节点会被"展开"吃掉、永远进不了重命名。
     ImGuiTreeNodeFlags flags =
           ImGuiTreeNodeFlags_OpenOnArrow
-        | ImGuiTreeNodeFlags_OpenOnDoubleClick
         | ImGuiTreeNodeFlags_SpanAvailWidth
         | ImGuiTreeNodeFlags_DefaultOpen
         | ImGuiTreeNodeFlags_AllowOverlap;
@@ -428,6 +430,17 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             }
             // B3 修：互斥选择，详见 ScenePanel viewport pick 同名注释。
             mHost.assets.selectedAssetPath.clear();
+        }
+
+        // 双击节点名进入重命名（Edit 态才允许）。与 DnD 同理，IsItemHovered 必须
+        // 在 TreeNode 仍是 last item 时查 —— 放到下面 SameLine chip 之后会锚到 chip，
+        // 双击节点名无反应（这正是之前的 bug）。已去掉 OpenOnDoubleClick，双击不再
+        // 触发展开；!IsItemToggledOpen 仅在双击三角时为真，保留作保险。
+        if (canEditNode
+            && ImGui::IsItemHovered()
+            && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
+            && !ImGui::IsItemToggledOpen()) {
+            BeginRename(entity);
         }
 
         // —— 行级 DnD（拖拽重排 / reparent）必须在 TreeNode 仍是 ImGui
@@ -588,13 +601,6 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             }
         }
 
-        // 双击 entry-body 进入重命名（Edit 态才允许）
-        if (canEditNode
-            && ImGui::IsItemHovered()
-            && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
-            && !ImGui::IsItemToggledOpen()) {
-            BeginRename(entity);
-        }
     }
     // 节点右键菜单 —— 选中始终允许；结构性操作（Create/Rename/Delete）
     // 受 canEditNode 约束。

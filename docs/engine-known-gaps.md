@@ -2695,7 +2695,8 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 
 ### 留待后续（同根因、未在本 fix 内动）
 
-- **双击 entry-body 重命名**（`IsItemHovered()` 在 chip 之后）与**右键 context menu**（`BeginPopupContextItem` 走 `IsItemHovered`，imgui.cpp 12596）**疑似同款 chip 锚点 bug** —— 双击节点名 / 右键节点名可能不触发，只在 chip 上才触发。因有 F2 / Del / Rename 键盘 + 菜单兜底路径长期没暴露。本 fix 只动了用户报障的 DnD；这两处需各自把 query / 菜单锚点也前移到 node。等用户确认是否同样失灵后处理（避免改没法 GUI 实测的区域）。
+- **双击节点名重命名 ✅ 已确认同款 + 已修**（commit 见 git log "double-click rename + OpenOnDoubleClick"）：用户实测"双击节点没法重命名"坐实——`IsItemHovered()` 在 chip 之后同样被锚到 chip。修法：把双击 query 前移到 selection 之后（node 仍是 last item），并**去掉 `ImGuiTreeNodeFlags_OpenOnDoubleClick`** —— 否则双击父节点会被"展开"吃掉、永进不了重命名；展开改只走三角（OpenOnArrow），Unreal/Godot 同款。
+- **右键 context menu：用户实测正常**（右键能弹出 Create/Rename/Delete 菜单）——故 `BeginPopupContextItem` 那条"疑似 chip 锚点"撤回，不动。
 
 ---
 
