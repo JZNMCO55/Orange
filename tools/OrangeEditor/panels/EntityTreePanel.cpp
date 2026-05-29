@@ -265,61 +265,97 @@ void EditorRenderLayer::DrawEntityTreePanel()
         mHost.selection.pendingReparent.valid = false;
 
         Orange::Engine::World* const pW = mHost.scene.pWorld.get();
-        const Orange::Engine::Entity src = pr.child;
+        const Orange::Engine::Entity dragged = pr.child;
 
-        // 计算"最终父"用于防环 + 合法性：Into 取 newParent；Before/After 取
-        // refSibling 当前的父（src 将成为 refSibling 的同父兄弟）。
+        // 计算"最终父"（防环 + 跨 layer 基准，批量里每个 src 一致）：Into 取
+        // newParent；Before/After 取 refSibling 当前的父。
         Orange::Engine::Entity finalParent = pr.newParent;
         bool                   refOk       = true;
         if (pr.where != PR::Where::IntoAsLastChild) {
             const auto* rh = (pW != nullptr) ? pW->GetComponent<HC>(pr.refSibling) : nullptr;
             finalParent = (rh != nullptr) ? rh->parent : Orange::Engine::Entity::Invalid();
-            refOk = (pW != nullptr) && pW->IsValid(pr.refSibling) && (src != pr.refSibling);
+            refOk = (pW != nullptr) && pW->IsValid(pr.refSibling);
         }
 
-        // 跨 layer 父子拒绝：per-layer 序列化下跨 layer hierarchy 关系会被
-        // **静默丢弃**（src/scene/SceneSerialization.cpp SaveImpl 注释明示该
-        // 设计选择 + "editor 应 attach-time 拒绝建立跨 layer parent-child"）。
-        // 这里落地该拒绝——finalParent 有效且与 src 不同 layer → warn + 不 reparent。
-        // 多数实体无 LayerComponent（GetLayerOf 返回 "default"），仅真·跨 layer 触发。
-        bool crossLayer = false;
-        if (pW != nullptr && finalParent.IsValid()
-            && src.IsValid() && pW->IsValid(src) && pW->IsValid(finalParent))
+        const PR::Where              where   = pr.where;
+        const Orange::Engine::Entity dstInto = pr.newParent;
+        const Orange::Engine::Entity refSib  = pr.refSibling;
+
+        // 批量 reparent（hierarchy gap §3 P0 三件套最后一件）：拖的是 primary 且
+        // 多选 → reparent 整个选区，否则单个。每候选 src 单独校验：存活 + 非
+        // finalParent + （before/after 时）非 ref 自身 + 防环（IsAncestorOf）+
+        // 非跨 layer（per-layer 序列化会静默丢，见 SceneSerialization SaveImpl，
+        // warn + 跳过）。再过滤掉"祖先也在选区内"的实体（随被选中祖先一起移，
+        // 避免双移破坏子树）。最终 srcs 整批一个 cmdStack group = 一次 Undo。
+        std::vector<Orange::Engine::Entity> srcs;
+        if (pW != nullptr && refOk)
         {
-            const auto srcLayer = mHost.scene.partition.GetLayerOf(*pW, src);
-            const auto dstLayer = mHost.scene.partition.GetLayerOf(*pW, finalParent);
-            if (srcLayer != dstLayer)
-            {
-                crossLayer = true;
-                ORANGE_LOG_WARN("[OrangeEditor] reparent 拒绝：跨 layer 父子"
-                                "（layer '{}' → '{}'）—— per-layer 序列化不会保存该"
-                                "关系；请先把两者放到同一 layer 再 reparent",
-                                std::string{srcLayer}, std::string{dstLayer});
+            auto inSelection = [&](Orange::Engine::Entity e) {
+                if (e == mHost.selection.selectedEntity) { return true; }
+                for (const auto a : mHost.selection.additionalSelectedEntities) {
+                    if (a == e) { return true; }
+                }
+                return false;
+            };
+            auto anyAncestorSelected = [&](Orange::Engine::Entity e) {
+                const auto* hh = pW->GetComponent<HC>(e);
+                Orange::Engine::Entity p =
+                    (hh != nullptr) ? hh->parent : Orange::Engine::Entity::Invalid();
+                while (p.IsValid()) {
+                    if (inSelection(p)) { return true; }
+                    const auto* ph = pW->GetComponent<HC>(p);
+                    p = (ph != nullptr) ? ph->parent : Orange::Engine::Entity::Invalid();
+                }
+                return false;
+            };
+            auto consider = [&](Orange::Engine::Entity e) {
+                if (!pW->IsValid(e) || e == finalParent) { return; }
+                if (where != PR::Where::IntoAsLastChild && e == refSib) { return; }
+                if (EditorHierarchy::IsAncestorOf(*pW, e, finalParent)) { return; }  // 防环
+                if (finalParent.IsValid()) {
+                    const auto sL = mHost.scene.partition.GetLayerOf(*pW, e);
+                    const auto dL = mHost.scene.partition.GetLayerOf(*pW, finalParent);
+                    if (sL != dL) {
+                        ORANGE_LOG_WARN("[OrangeEditor] reparent 拒绝：跨 layer 父子"
+                                        "（layer '{}' → '{}'）—— per-layer 序列化不会"
+                                        "保存；先放到同一 layer 再 reparent",
+                                        std::string{sL}, std::string{dL});
+                        return;
+                    }
+                }
+                srcs.push_back(e);
+            };
+
+            const bool batch = (dragged == mHost.selection.selectedEntity)
+                            && !mHost.selection.additionalSelectedEntities.empty();
+            if (batch) {
+                consider(mHost.selection.selectedEntity);
+                for (const auto a : mHost.selection.additionalSelectedEntities) {
+                    if (!anyAncestorSelected(a)) { consider(a); }
+                }
+            } else {
+                consider(dragged);
             }
         }
 
-        // 防环（finalParent 不能落在 src 子树内，含 src 自身）+ src 存活 + ref 合法
-        // + 非跨 layer（见上）。
-        if (pW != nullptr && src.IsValid() && pW->IsValid(src) && refOk
-            && src != finalParent
-            && !crossLayer
-            && !EditorHierarchy::IsAncestorOf(*pW, src, finalParent))
+        // 批量（>1）打 group → 一次 Undo；单个不开 group（与原单 reparent 行为
+        // 逐字节一致：consider 单跑一次、push 同一条 "reparent" 命令）。
+        const bool grouped = srcs.size() > 1;
+        if (grouped) {
+            mHost.cmdStack.BeginGroup("Reparent (batch)", MergeMode::Disable);
+        }
+        for (const auto src : srcs)
         {
             // 记录旧**精确位置**（parent + prevSibling）：Undo 用 MoveToPosition 原
-            // 位复位，不再像旧实现那样退回时丢失兄弟顺序。
+            // 位复位，不丢兄弟顺序。
             const auto* hc = pW->GetComponent<HC>(src);
             const Orange::Engine::Entity oldParent =
                 (hc != nullptr) ? hc->parent : Orange::Engine::Entity::Invalid();
             const Orange::Engine::Entity oldPrev =
                 (hc != nullptr) ? hc->prevSibling : Orange::Engine::Entity::Invalid();
 
-            const PR::Where              where   = pr.where;
-            const Orange::Engine::Entity dstInto = pr.newParent;
-            const Orange::Engine::Entity refSib  = pr.refSibling;
-
             // c14 解 World* 强耦合：lambda 捕获 EditorHost* 而非裸 World*，调用时
-            // `pH->scene.pWorld.get()` 间接解——切场景时 host 解到新 World 或
-            // nullptr，命令走 nullptr 防御分支 no-op 而非 dangling 崩溃。
+            // 间接解 World——切场景走 nullptr 防御分支 no-op 而非 dangling 崩溃。
             mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
                 "reparent",
                 [pH = &mHost, src, where, dstInto, refSib]() {
@@ -346,6 +382,9 @@ void EditorRenderLayer::DrawEntityTreePanel()
                     }
                 }
             ));
+        }
+        if (grouped) {
+            mHost.cmdStack.EndGroup();
         }
     }
     if (mHost.selection.pendingCreate.valid) {
