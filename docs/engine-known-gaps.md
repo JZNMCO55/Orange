@@ -2671,3 +2671,28 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 3. **World 级根序 list**：`std::vector<Entity> rootOrder` 独立于组件——非 archetype 友好但根数少；要进 scene 序列化
 
 非阻塞，按"用户真的需要拖拽顶层顺序 + 要存盘"实际拉动触发。当前编辑器内 `MoveBefore/MoveAfter` 对根 target 退化为 detach-to-root（无序），UI 也只对有父子节点显示 before/after 指示线，语义诚实不骗人。
+
+---
+
+## BUG-2026-05-29-entity-tree-dnd-anchored-to-trailing-chip ✅
+
+- **发现方**：用户 dogfood —— sibling-reorder 落地后实测"**任何节点都拖不动**"
+- **发现日期**：2026-05-29
+- **一句话定性**：`DrawEntityNodeRecursive` 的 `BeginDragDropSource` / `BeginDragDropTarget` 调用位置在行尾 layer/warning chip（`SameLine` + `TextDisabled`）**之后**，ImGui 把 DnD 锚到"最后一个 item"=那个无 ID 的小 chip。`BeginDragDropSource` 对无 ID item 走 `SourceAllowNullID` 分支（imgui.cpp 14509：需 hover 该 item 矩形才激活），于是**只能从右侧小 chip 起拖、拖节点名无反应**；drop target 同理只认 chip 矩形。宽面板（chip 会画）下整条 tree DnD（reparent / detach / 新加的 reorder）全部失效——**预存 bug**，因键删/F2 等键盘路径可用且没人从 chip 拖过，长期未暴露。
+- **状态**：**✅ 2026-05-29 落地**（与 sibling-reorder 同一 dogfood 线；本 fix 是 reorder 真正可用的前置）
+
+### 根因（imgui 语义实证）
+
+`BeginDragDropSource` 取 `source_id = g.LastItemData.ID`（imgui.cpp 14497）。`TextDisabled` 是 `ItemAdd(bb, 0)` 的无 ID item → `source_id==0` → 走 uncommon 分支，要求 `LastItemData.StatusFlags & HoveredRect`（chip 矩形被 hover）才能起拖。TreeNode 行（`SpanAvailWidth`，有 PushID+"##node" 的 ID）若是 last item 则走 common 分支（`ActiveId==source_id`，按住节点即激活），整行可拖。
+
+### 修复
+
+把 `BeginDragDropSource` + `BeginDragDropTarget` 从 chip 之后**前置到 TreeNodeEx + selection click 之后、chip 块之前**，使 last item = 整行 TreeNode（有 ID 走 common 路径）。drop 落点判定继续用 TreeNodeEx 后捕获的 `nodeMin/nodeMax`（与 last-item 解耦）。
+
+### 关键改动文件
+
+`tools/OrangeEditor/panels/EntityTreePanel.cpp`（DnD source+target 前移）/ `docs/engine-known-gaps.md`（本条目）。
+
+### 留待后续（同根因、未在本 fix 内动）
+
+- **双击 entry-body 重命名**（`IsItemHovered()` 在 chip 之后）与**右键 context menu**（`BeginPopupContextItem` 走 `IsItemHovered`，imgui.cpp 12596）**疑似同款 chip 锚点 bug** —— 双击节点名 / 右键节点名可能不触发，只在 chip 上才触发。因有 F2 / Del / Rename 键盘 + 菜单兜底路径长期没暴露。本 fix 只动了用户报障的 DnD；这两处需各自把 query / 菜单锚点也前移到 node。等用户确认是否同样失灵后处理（避免改没法 GUI 实测的区域）。

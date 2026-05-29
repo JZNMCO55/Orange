@@ -430,6 +430,75 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             mHost.assets.selectedAssetPath.clear();
         }
 
+        // —— 行级 DnD（拖拽重排 / reparent）必须在 TreeNode 仍是 ImGui
+        // "last item" 时建立！下面用 SameLine 画的 layer / warning chip 是无 ID
+        // 的 Text item，会把 last-item 锚点偷走：BeginDragDropSource 对无 ID item
+        // 走 "hover 该 item 矩形才激活" 路径（imgui.cpp SourceAllowNullID 分支），
+        // 于是只能从右侧那个小 chip 起拖、拖节点名无反应（同理 drop target 只认
+        // chip 矩形）。故 source / target 前置到 chip 之前，锚定整行 TreeNode（有
+        // ID，走 ActiveId 常规路径）。
+        if (canEditNode
+            && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+            ImGui::SetDragDropPayload(kEntityPayload, &entity, sizeof(entity));
+            ImGui::Text("Move %s",
+                        (name != nullptr && !name->name.empty())
+                            ? name->name.c_str() : "(unnamed)");
+            ImGui::EndDragDropSource();
+        }
+        // DnD target：entity drop 按鼠标 Y 相对节点 rect 分三区——上 1/4 = 插到
+        // 该兄弟之前、下 1/4 = 之后（reorder）、中间 = 挂进该节点（reparent into）。
+        // before/after 仅对**有父的子节点**提供（根之间无顺序表示，root 只给
+        // into）。ORANGE_ASSET drop 与落点无关，恒按 into 语义 apply 到 entity。
+        if (canEditNode && ImGui::BeginDragDropTarget()) {
+            using PR = EditorSelection::PendingReparent;
+            const bool  targetIsChild = (h != nullptr) && h->parent.IsValid();
+            const float rowH = nodeMax.y - nodeMin.y;
+            const float t    = (rowH > 0.0f)
+                ? (ImGui::GetMousePos().y - nodeMin.y) / rowH : 0.5f;
+            PR::Where where = PR::Where::IntoAsLastChild;
+            if (targetIsChild && t < 0.25f)      { where = PR::Where::BeforeSibling; }
+            else if (targetIsChild && t > 0.75f) { where = PR::Where::AfterSibling; }
+
+            // 插入指示线：before 画节点上沿、after 画下沿（into 用 ImGui 默认
+            // 矩形高亮表达，不另画线）。
+            if (where != PR::Where::IntoAsLastChild) {
+                const float ly = (where == PR::Where::BeforeSibling) ? nodeMin.y : nodeMax.y;
+                ImGui::GetWindowDrawList()->AddLine(
+                    ImVec2{nodeMin.x, ly}, ImVec2{nodeMax.x, ly},
+                    ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+            }
+
+            if (const ImGuiPayload* p =
+                    ImGui::AcceptDragDropPayload(kEntityPayload)) {
+                Orange::Engine::Entity src{};
+                std::memcpy(&src, p->Data, sizeof(src));
+                PR pr;
+                pr.child = src;
+                pr.where = where;
+                if (where == PR::Where::IntoAsLastChild) {
+                    pr.newParent = entity;
+                } else {
+                    pr.refSibling = entity;   // 与 entity 同父，插到其前 / 后
+                }
+                pr.valid = true;
+                mHost.selection.pendingReparent = pr;
+            }
+            // v1.2.3 patch · ORANGE_ASSET DnD：按文件扩展名 apply 到 entity 对应
+            // component 字段（.material → Renderable.materialInstance / .mesh →
+            // Renderable.mesh / .wav 等 → AudioSource.sound）。详 EditorAssetDrop
+            // Handler.h 调用约定 + 失败语义（宽容口径 silent skip + log）。
+            if (const ImGuiPayload* p =
+                    ImGui::AcceptDragDropPayload("ORANGE_ASSET")) {
+                const std::size_t len = (p->DataSize > 0)
+                    ? static_cast<std::size_t>(p->DataSize) - 1 : 0;
+                const std::string path(static_cast<const char*>(p->Data), len);
+                if (!path.empty()) {
+                    Orange::Editor::ApplyAssetDropToEntity(mHost, entity, path);
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
         // v0.6 c5：行尾 layer chip —— 让用户一眼看到每个 entity 所属
         // layer。chip 显示 LayerComponent.layerId（缺则 "default"），灰色
         // 弱化避免抢主名字。SameLine + 右对齐：用 GetContentRegionAvail
@@ -526,15 +595,6 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             && !ImGui::IsItemToggledOpen()) {
             BeginRename(entity);
         }
-        // DnD source —— Play / Paused 期间禁止拖拽（防止触发 reparent）
-        if (canEditNode
-            && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-            ImGui::SetDragDropPayload(kEntityPayload, &entity, sizeof(entity));
-            ImGui::Text("Move %s",
-                        (name != nullptr && !name->name.empty())
-                            ? name->name.c_str() : "(unnamed)");
-            ImGui::EndDragDropSource();
-        }
     }
     // 节点右键菜单 —— 选中始终允许；结构性操作（Create/Rename/Delete）
     // 受 canEditNode 约束。
@@ -603,61 +663,6 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         }
         ImGui::EndDisabled();
         ImGui::EndPopup();
-    }
-
-    // DnD target —— Play / Paused 期间不接受 drop。
-    // entity drop 按鼠标 Y 相对节点 rect 分三区：上 1/4 = 插到该兄弟之前、
-    // 下 1/4 = 之后（reorder）、中间 = 挂进该节点（reparent into）。before/after
-    // 仅对**有父的子节点**提供 —— 根节点之间无顺序表示（root 不在兄弟链里），
-    // 根只给 into。ORANGE_ASSET drop 与落点无关，恒按 into 语义 apply 到 entity。
-    if (canEditNode && ImGui::BeginDragDropTarget()) {
-        using PR = EditorSelection::PendingReparent;
-        const bool  targetIsChild = (h != nullptr) && h->parent.IsValid();
-        const float rowH = nodeMax.y - nodeMin.y;
-        const float t    = (rowH > 0.0f)
-            ? (ImGui::GetMousePos().y - nodeMin.y) / rowH : 0.5f;
-        PR::Where where = PR::Where::IntoAsLastChild;
-        if (targetIsChild && t < 0.25f)      { where = PR::Where::BeforeSibling; }
-        else if (targetIsChild && t > 0.75f) { where = PR::Where::AfterSibling; }
-
-        // 插入指示线：before 画节点上沿、after 画下沿（into 用 ImGui 默认矩形
-        // 高亮表达，不另画线）。仅悬停时这里每帧重画，drop 完即消失。
-        if (where != PR::Where::IntoAsLastChild) {
-            const float ly = (where == PR::Where::BeforeSibling) ? nodeMin.y : nodeMax.y;
-            ImGui::GetWindowDrawList()->AddLine(
-                ImVec2{nodeMin.x, ly}, ImVec2{nodeMax.x, ly},
-                ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
-        }
-
-        if (const ImGuiPayload* p =
-                ImGui::AcceptDragDropPayload(kEntityPayload)) {
-            Orange::Engine::Entity src{};
-            std::memcpy(&src, p->Data, sizeof(src));
-            PR pr;
-            pr.child = src;
-            pr.where = where;
-            if (where == PR::Where::IntoAsLastChild) {
-                pr.newParent = entity;
-            } else {
-                pr.refSibling = entity;   // 与 entity 同父，插到其前 / 后
-            }
-            pr.valid = true;
-            mHost.selection.pendingReparent = pr;
-        }
-        // v1.2.3 patch · ORANGE_ASSET DnD：按文件扩展名 apply 到 entity 对
-        // 应 component 字段（.material → Renderable.materialInstance / .mesh
-        // → Renderable.mesh / .wav 等 → AudioSource.sound）。详 EditorAsset
-        // DropHandler.h 调用约定 + 失败语义（宽容口径 silent skip + log）。
-        if (const ImGuiPayload* p =
-                ImGui::AcceptDragDropPayload("ORANGE_ASSET")) {
-            const std::size_t len = (p->DataSize > 0)
-                ? static_cast<std::size_t>(p->DataSize) - 1 : 0;
-            const std::string path(static_cast<const char*>(p->Data), len);
-            if (!path.empty()) {
-                Orange::Editor::ApplyAssetDropToEntity(mHost, entity, path);
-            }
-        }
-        ImGui::EndDragDropTarget();
     }
 
     if (open) {
