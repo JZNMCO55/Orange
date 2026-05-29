@@ -17,10 +17,14 @@
 // 与逻辑分离 —— 状态在本 struct，逻辑在 EditorTranslateGizmo.cpp /
 // EditorRotateGizmo.cpp / EditorScaleGizmo.cpp。
 
+#include <orange/engine/scene/Entity.h>
+
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec3.hpp>
 
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 struct EditorGizmoState
 {
@@ -87,6 +91,13 @@ struct EditorGizmoState
     // 鼠标 ray 与拖动轴线的最近点 world 坐标（按下 LMB 那一帧）。每帧用
     // 最新鼠标 ray 重算最近点，与本字段相减得到沿轴位移增量。
     glm::vec3 dragStartHitOnAxis = glm::vec3(0.0f);
+
+    // ---- 多选群组 translate 专用 ---------------------------------------
+    // 按下 LMB 那一帧，除 primary 外其余选中实体的 (entity, position) 快照。
+    // 群组 translate：每帧 newPos = 其 start + (primary newPos - primary
+    // dragStart)，让它们随 primary 刚体平移。空 = 单选（无群组）。仅 translate
+    // 用（rotate/scale 绕 pivot 的群组接线留后续，数学核心见 EditorGroupTransform.h）。
+    std::vector<std::pair<Orange::Engine::Entity, glm::vec3>> dragStartAdditional;
 
     // ---- Rotate 专用 ---------------------------------------------------
     // 拖动起点：mouse ray 与 axis 平面交点相对 entity 的向量在 axis 平

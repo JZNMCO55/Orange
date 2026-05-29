@@ -241,6 +241,17 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                 host.gizmo.draggingAxis       = host.gizmo.hoveredAxis;
                 host.gizmo.dragStartEntityPos = entityWorldPos;
                 host.gizmo.dragStartHitOnAxis = *hit;
+                // 多选群组 translate：快照其余选中实体的起点 position（与
+                // primary 同样直接取 component.position，保持 gizmo 既有
+                // "position 当 world" 的一致语义）。单选时集合为空。
+                host.gizmo.dragStartAdditional.clear();
+                for (const auto& other : host.selection.additionalSelectedEntities)
+                {
+                    if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
+                    {
+                        host.gizmo.dragStartAdditional.emplace_back(other, pOtherTC->position);
+                    }
+                }
                 host.cmdStack.BeginGroup("Translate Drag", MergeMode::Ends);
             }
         }
@@ -293,6 +304,32 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                             host.gizmo.dragStartEntityPos,  // oldVal 锁定到拖动起点
                             newPos,
                             MakeTransformPositionApply(&host, entity)));
+                    }
+
+                    // 多选群组 translate：其余选中实体随 primary 刚体平移。
+                    // groupDelta = primary 当前 newPos - primary 拖动起点（含
+                    // snap）；各 follower = 自身起点 + groupDelta。单选时
+                    // dragStartAdditional 空 → 整个循环不执行 = 零回归。每个
+                    // follower 一条 SetFieldValueCommand，按 (entity,fieldKey)
+                    // 在 "Translate Drag" group 内各自 coalesce；EndGroup 把整组
+                    // 包成一次 Undo → 撤销时所有实体一起回退。
+                    const glm::vec3 groupDelta = newPos - host.gizmo.dragStartEntityPos;
+                    for (const auto& [other, otherStart] : host.gizmo.dragStartAdditional)
+                    {
+                        if (!pWorld->IsValid(other)) { continue; }
+                        auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other);
+                        if (pOtherTC == nullptr) { continue; }
+                        const glm::vec3 otherNew = otherStart + groupDelta;
+                        if (otherNew != pOtherTC->position)
+                        {
+                            pOtherTC->position = otherNew;
+                            host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                                other,
+                                std::string("Transform.position"),
+                                otherStart,
+                                otherNew,
+                                MakeTransformPositionApply(&host, other)));
+                        }
                     }
                 }
             }
