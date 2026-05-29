@@ -1182,23 +1182,34 @@ void EditorRenderLayer::UpdateAutosave(float dt)
         }
     }
 
-    // 每帧把 scheduler 存在性与 settings.autosaveEnabled 对齐——让 Settings 面板
-    // 开关 live 生效。interval 改动在"关再开"重建时随之生效（见 Settings 段提示）。
-    // (std::max) 加括号抑制 windows.h 的 max 宏（本 TU 经 glfw3native.h 引入
-    // windows.h，裸 std::max( 会被宏展开破坏）。
-    if (mHost.settings.autosaveEnabled && mpAutosave == nullptr)
+    // 每帧把 scheduler 与 settings 对齐——让 Settings 面板的 Enable **和**
+    // Interval 改动都 live 生效。（dogfood 实测：之前只 Enable live、Interval
+    // 改了不重建 → scheduler 仍用启动时的 180s，"改 Interval 后等不到 autosave"
+    // 的根因。）(std::max) 加括号抑制 windows.h 的 max 宏（本 TU 经 glfw3native.h
+    // 引入 windows.h，裸 std::max( 会被宏展开破坏）。
+    if (!mHost.settings.autosaveEnabled)
     {
-        Orange::Engine::Save::AutosaveScheduler::Config cfg;
-        cfg.intervalSeconds = (std::max)(
-            10.0, static_cast<double>(mHost.settings.autosaveIntervalSeconds));
-        cfg.minSecondsBetween = (std::max)(
-            0.0, static_cast<double>(mHost.settings.autosaveMinIntervalSeconds));
-        mpAutosave = std::make_unique<Orange::Engine::Save::AutosaveScheduler>(
-            cfg, [this] { DoAutosave(); });
+        mpAutosave.reset();  // 关闭：销毁 scheduler（已 null 则 no-op）
     }
-    else if (!mHost.settings.autosaveEnabled && mpAutosave != nullptr)
+    else
     {
-        mpAutosave.reset();
+        const double wantInterval = (std::max)(
+            10.0, static_cast<double>(mHost.settings.autosaveIntervalSeconds));
+        const double wantMin = (std::max)(
+            0.0, static_cast<double>(mHost.settings.autosaveMinIntervalSeconds));
+        // 不存在 / interval / throttle 变了 → (重)建 scheduler。重建重置计时
+        // （从 0 起算新周期），符合"改完 Interval 重新倒计时"直觉。比较稳定：
+        // 同一 settings 值每帧得同一 double，未变则不重建（不会每帧重置计时）。
+        if (mpAutosave == nullptr
+            || mpAutosave->GetConfig().intervalSeconds   != wantInterval
+            || mpAutosave->GetConfig().minSecondsBetween != wantMin)
+        {
+            Orange::Engine::Save::AutosaveScheduler::Config cfg;
+            cfg.intervalSeconds   = wantInterval;
+            cfg.minSecondsBetween = wantMin;
+            mpAutosave = std::make_unique<Orange::Engine::Save::AutosaveScheduler>(
+                cfg, [this] { DoAutosave(); });
+        }
     }
 
     // 仅 Edit 态推进；Play/Paused 有独立快照机制不叠加。恢复 modal 未决前不
@@ -2369,7 +2380,7 @@ void EditorRenderLayer::DrawSettingsPanel()
         ImGui::DragFloat("Min between (s)", &s.autosaveMinIntervalSeconds,
                          1.0f, 0.0f, 600.0f, "%.0f");
         ImGui::EndDisabled();
-        ImGui::TextDisabled("Interval 改动在关闭再开启 autosave（或重启）后生效。");
+        ImGui::TextDisabled("Enable / Interval 改动即时生效（改 Interval 会重置当前倒计时）。");
     }
 
     if (ImGui::CollapsingHeader("Keybindings", ImGuiTreeNodeFlags_DefaultOpen))

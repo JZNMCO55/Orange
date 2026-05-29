@@ -573,7 +573,8 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
 
     if (ImGui::BeginPopup("##saved_notice"))
     {
-        ImGui::TextUnformatted("已保存到 .material 文件。");
+        ImGui::TextUnformatted("已保存到：");
+        ImGui::TextDisabled("%s", materialPath.c_str());  // 显示具体文件全路径
         ImGui::Separator();
         if (templateDirty)
         {

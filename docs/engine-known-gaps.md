@@ -2839,7 +2839,7 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 **验收**：`OrangeEditor.exe` 编译链接通过，invariant lint + drift 干净。⚠️ **崩溃恢复流程 dogfood-critical 待作者实机验**：(1) 编辑后等 ~180s（或 Settings 调小 interval）看 console `[autosave] 自动存档`；(2) kill 进程模拟崩溃 → 重启 → 弹"发现自动存档"modal → 恢复后内容回来且标未保存 / 丢弃后无残留；(3) 手动 Save 后 autosave 删除、重启不再提示。
 
-**Settings 面板 autosave 段 ✅**（后续 commit 补）：View>Settings 加 "Autosave" CollapsingHeader（Enable 勾选 + Interval / Min between DragFloat）；**Enable 开关 live 生效**——`UpdateAutosave` 改为每帧对齐 scheduler 存在性与 `settings.autosaveEnabled`（建/毁 scheduler），interval 改动在关再开重建时生效。
+**Settings 面板 autosave 段 ✅**：View>Settings 加 "Autosave" CollapsingHeader（Enable 勾选 + Interval / Min between DragFloat）；**Enable + Interval 改动均 live 生效**——`UpdateAutosave` 每帧对齐 scheduler 与 settings：enabled 翻转建/毁 scheduler，interval/throttle 变了也重建（dogfood 修正：初版只 Enable live、改 Interval 等不到 autosave，根因是 scheduler 仍用启动 180s）。
 
 ---
 
