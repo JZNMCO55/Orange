@@ -230,12 +230,10 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 链遍历。同帧内 delete + reparent 同时发生时 delete 优先（被
     // delete 的实体即使有 pendingReparent 也失效）。
     if (mHost.selection.pendingDelete.IsValid()) {
+        using HCd = Orange::Engine::Scene::HierarchyComponent;
         auto& sel = mHost.selection;
         auto* pW  = mHost.scene.pWorld.get();
-        // 批量删除（hierarchy gap 报告 §3 P0：多选批量操作消费 additional set）：
-        // 删的若是 primary 且有多选 → 连同整个选区一起删；否则只删单个。
-        // 各 entity 单独 IsValid 守卫（删父后子已失效、Undo 已销毁的死句柄都跳过，
-        // DestroySubtree 不会撞死实体）。删除整体不可撤销 → 与单删一致清 undo 栈。
+        // 批量删除（消费 additional set）：删 primary 且多选 → 连同选区一起删。
         std::vector<Orange::Engine::Entity> toDelete;
         toDelete.push_back(sel.pendingDelete);
         if (sel.pendingDelete == sel.selectedEntity) {
@@ -243,23 +241,102 @@ void EditorRenderLayer::DrawEntityTreePanel()
                 if (a != sel.pendingDelete) { toDelete.push_back(a); }
             }
         }
-        bool anyDeleted = false;
-        for (const auto e : toDelete) {
-            if (pW != nullptr && pW->IsValid(e)) {
-                if (sel.selectedEntity == e) {
-                    sel.selectedEntity = Orange::Engine::Entity::Invalid();
+        // 顶层过滤：祖先也在删除集的实体随祖先子树一起删，不单独序列化/恢复。
+        auto ancestorInDelete = [&](Orange::Engine::Entity e) {
+            if (pW == nullptr) { return false; }
+            const auto* h0 = pW->GetComponent<HCd>(e);
+            Orange::Engine::Entity p =
+                (h0 != nullptr) ? h0->parent : Orange::Engine::Entity::Invalid();
+            while (p.IsValid()) {
+                if (std::find(toDelete.begin(), toDelete.end(), p) != toDelete.end()) {
+                    return true;
                 }
-                if (sel.renamingEntity == e) { CancelRename(); }
-                EditorHierarchy::DestroySubtree(*pW, e);
-                anyDeleted = true;
+                const auto* ph = pW->GetComponent<HCd>(p);
+                p = (ph != nullptr) ? ph->parent : Orange::Engine::Entity::Invalid();
+            }
+            return false;
+        };
+
+        // 删除现在**可 Undo**（消费子树序列化基建 + RemoveComponent-undo 同款
+        // no-Clear 安全性）：每个顶层 root 删前 SaveSubtreeToString + 记位置
+        // （parent/prevSibling），do=DestroySubtree、undo=LoadFromString 恢复 +
+        // MoveToPosition 精确复位。rootPtr 追踪"当前实体"——undo 重建是新 id，
+        // redo 须删新 id（捕获原 id 会失效→no-op→redo 漏删）。grouped 一次 Undo。
+        // 不再 Clear()：旧字段编辑命令对已删 entity 走 schema.get nullptr-guard
+        // 安全（delete 命令在栈顶，undo 先恢复实体；与 RemoveComponent-undo 一致）。
+        Orange::Engine::Scene::SaveOptions delSaveOpts;
+        delSaveOpts.assetRegistry          = mHost.assets.pAssets.get();
+        delSaveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+        delSaveOpts.extraSerializers       = mHost.extraSerializers;
+
+        std::vector<Orange::Engine::Entity> delRoots;
+        for (const auto e : toDelete) {
+            if (pW != nullptr && pW->IsValid(e) && !ancestorInDelete(e)) {
+                delRoots.push_back(e);
             }
         }
-        if (anyDeleted) {
-            sel.ClearAdditional();
-            // 删除不可撤销（子树已析构）—— 清 undo 历史，防止后续 Undo 访问
-            // 已销毁 entity 的命令 lambda。
-            mHost.cmdStack.Clear();
+
+        const bool delGrouped = delRoots.size() > 1;
+        if (delGrouped) { mHost.cmdStack.BeginGroup("Delete (batch)", MergeMode::Disable); }
+        bool anyDeleted = false;
+        for (const auto root : delRoots) {
+            const auto* rh = pW->GetComponent<HCd>(root);
+            const Orange::Engine::Entity capParent =
+                (rh != nullptr) ? rh->parent : Orange::Engine::Entity::Invalid();
+            const Orange::Engine::Entity capPrev =
+                (rh != nullptr) ? rh->prevSibling : Orange::Engine::Entity::Invalid();
+
+            if (sel.selectedEntity == root) {
+                sel.selectedEntity = Orange::Engine::Entity::Invalid();
+            }
+            if (sel.renamingEntity == root) { CancelRename(); }
+
+            const std::vector<Orange::Engine::Entity> oneRoot{root};
+            auto blobRes = Orange::Engine::Scene::SaveSubtreeToString(*pW, oneRoot, delSaveOpts);
+            if (blobRes.IsErr()) {
+                // 序列化失败兜底：直接销毁（本条不可 undo），不阻塞删除。
+                EditorHierarchy::DestroySubtree(*pW, root);
+                anyDeleted = true;
+                continue;
+            }
+            const std::string blob = blobRes.Value();
+            auto*             pH   = &mHost;
+            auto rootPtr = std::make_shared<Orange::Engine::Entity>(root);
+            mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                "delete_entity",
+                [pH, rootPtr]() {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr) { return; }
+                    if (rootPtr->IsValid() && w->IsValid(*rootPtr)) {
+                        EditorHierarchy::DestroySubtree(*w, *rootPtr);
+                    }
+                },
+                [pH, rootPtr, blob, capParent, capPrev]() {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr) { return; }
+                    Orange::Engine::Scene::LoadOptions lo;
+                    lo.assetRegistry          = pH->assets.pAssets.get();
+                    lo.animatorRegistry       = pH->assets.pAnimators.get();
+                    lo.namedMaterialInstances = &pH->assets.namedMaterialInstances;
+                    lo.extraSerializers       = pH->extraSerializers;
+                    std::vector<Orange::Engine::Entity> created;
+                    if (Orange::Engine::Scene::LoadFromString(blob, *w, lo, &created).IsErr()) {
+                        return;
+                    }
+                    for (const auto ce : created) {
+                        const auto* eh = w->GetComponent<HCd>(ce);
+                        if (eh == nullptr || !eh->parent.IsValid()) {
+                            *rootPtr = ce;  // 追踪重建实体，供 redo 删对
+                            EditorHierarchy::MoveToPosition(*w, ce, capParent, capPrev);
+                            break;
+                        }
+                    }
+                }
+            ));
+            anyDeleted = true;
         }
+        if (delGrouped) { mHost.cmdStack.EndGroup(); }
+        if (anyDeleted) { sel.ClearAdditional(); }
         sel.pendingDelete            = Orange::Engine::Entity::Invalid();
         sel.pendingReparent.valid    = false;  // 同帧 reparent 已无意义
     }
