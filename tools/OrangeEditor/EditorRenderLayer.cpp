@@ -726,17 +726,18 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::Separator();
         if (ImGui::BeginMenu("Camera Bookmarks"))
         {
-            auto& cam = mHost.camera;
+            auto& cam       = mHost.camera;             // live 轨道相机
+            auto& bookmarks = mHost.settings.cameraBookmarks;  // 持久化（随 settings 存盘）
             if (ImGui::BeginMenu("Save current to"))
             {
-                for (int i = 0; i < EditorCameraState::kBookmarkSlots; ++i)
+                for (int i = 0; i < EditorSettings::kCameraBookmarkSlots; ++i)
                 {
                     const std::string label =
                         "Slot " + std::to_string(i + 1)
-                        + (cam.savedViews[i].valid ? " (overwrite)" : "");
+                        + (bookmarks[i].valid ? " (overwrite)" : "");
                     if (ImGui::MenuItem(label.c_str()))
                     {
-                        auto& bm       = cam.savedViews[i];
+                        auto& bm       = bookmarks[i];
                         bm.pivot       = cam.pivot;
                         bm.azimuth     = cam.azimuth;
                         bm.elevation   = cam.elevation;
@@ -751,9 +752,9 @@ void EditorRenderLayer::DrawMainMenuBar()
             }
             if (ImGui::BeginMenu("Go to"))
             {
-                for (int i = 0; i < EditorCameraState::kBookmarkSlots; ++i)
+                for (int i = 0; i < EditorSettings::kCameraBookmarkSlots; ++i)
                 {
-                    const auto& bm = cam.savedViews[i];
+                    const auto& bm = bookmarks[i];
                     const std::string label = "Slot " + std::to_string(i + 1);
                     if (ImGui::MenuItem(label.c_str(), nullptr, false, bm.valid))
                     {

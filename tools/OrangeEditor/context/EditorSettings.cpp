@@ -27,6 +27,21 @@ void WriteVec4(JsonWriter& out, std::string_view path, const glm::vec4& v)
     out.WriteFloatArray(path, arr, 4);
 }
 
+void ReadVec3(const JsonReader& in, std::string_view path, glm::vec3& out)
+{
+    float buf[3];
+    if (in.ReadFloatArray(path, buf, 3))
+    {
+        out = glm::vec3(buf[0], buf[1], buf[2]);
+    }
+}
+
+void WriteVec3(JsonWriter& out, std::string_view path, const glm::vec3& v)
+{
+    const float arr[3] = { v.x, v.y, v.z };
+    out.WriteFloatArray(path, arr, 3);
+}
+
 // 读 float（用便利接口 GetFloat 自带默认值；本路径下默认值由 caller
 // 传入 settings 字段已存在的当前值）
 void ReadFloat(const JsonReader& in, std::string_view path, float& out)
@@ -71,13 +86,28 @@ void ReadEditorSettings(const JsonReader& in, EditorSettings& out)
     in.ReadBool("autosave/enabled",            out.autosaveEnabled);
     ReadFloat(in, "autosave/intervalSeconds",  out.autosaveIntervalSeconds);
     ReadFloat(in, "autosave/minIntervalSeconds", out.autosaveMinIntervalSeconds);
+
+    // schema minor 3：相机书签。缺段（minor ≤2）时 valid 默认 false（无书签）。
+    for (int i = 0; i < EditorSettings::kCameraBookmarkSlots; ++i)
+    {
+        const std::string base = "camera/bookmarks/" + std::to_string(i) + "/";
+        auto& bm = out.cameraBookmarks[i];
+        ReadVec3(in, base + "pivot", bm.pivot);
+        ReadFloat(in, base + "azimuth",     bm.azimuth);
+        ReadFloat(in, base + "elevation",   bm.elevation);
+        ReadFloat(in, base + "radius",      bm.radius);
+        ReadFloat(in, base + "fovYDegrees", bm.fovYDegrees);
+        ReadFloat(in, base + "zNear",       bm.zNear);
+        ReadFloat(in, base + "zFar",        bm.zFar);
+        in.ReadBool(base + "valid", bm.valid);
+    }
 }
 
 void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
 {
     out.WriteString("schemaVersion/namespace", "editor/settings");
     out.WriteInt("schemaVersion/major", 1);
-    out.WriteInt("schemaVersion/minor", 2);   // minor 2：+autosave（1：视口显示开关）
+    out.WriteInt("schemaVersion/minor", 3);   // minor 3：+相机书签（2：autosave / 1：视口显示开关）
 
     out.WriteFloat("gizmo/lineWidth/translateIdle",      s.gizmoLineWidthTranslateIdle);
     out.WriteFloat("gizmo/lineWidth/translateHighlight", s.gizmoLineWidthTranslateHighlight);
@@ -104,4 +134,18 @@ void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
     out.WriteBool("autosave/enabled",             s.autosaveEnabled);
     out.WriteFloat("autosave/intervalSeconds",    s.autosaveIntervalSeconds);
     out.WriteFloat("autosave/minIntervalSeconds", s.autosaveMinIntervalSeconds);
+
+    for (int i = 0; i < EditorSettings::kCameraBookmarkSlots; ++i)
+    {
+        const std::string base = "camera/bookmarks/" + std::to_string(i) + "/";
+        const auto& bm = s.cameraBookmarks[i];
+        WriteVec3(out, base + "pivot", bm.pivot);
+        out.WriteFloat(base + "azimuth",     bm.azimuth);
+        out.WriteFloat(base + "elevation",   bm.elevation);
+        out.WriteFloat(base + "radius",      bm.radius);
+        out.WriteFloat(base + "fovYDegrees", bm.fovYDegrees);
+        out.WriteFloat(base + "zNear",       bm.zNear);
+        out.WriteFloat(base + "zFar",        bm.zFar);
+        out.WriteBool(base + "valid", bm.valid);
+    }
 }

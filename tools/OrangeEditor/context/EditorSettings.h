@@ -29,9 +29,12 @@
 //   * Panel layout 偏好（ImGui::SaveIniSettingsToDisk 已自动处理）
 //   * 输入 / Keybinding（v0.8 另一条 deliverable，独立 struct）
 
+#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
 #include <orange/engine/core/Serialization.h>
+
+#include <array>
 
 struct EditorSettings
 {
@@ -77,6 +80,25 @@ struct EditorSettings
     bool  autosaveEnabled            = true;
     float autosaveIntervalSeconds    = 180.0f;  // 周期触发（秒）；clamp ≥10
     float autosaveMinIntervalSeconds = 30.0f;   // 节流：两次写入最小间隔（秒）
+
+    // ---- 相机书签 / saved views（gap 报告 §4 #4） ------------------------
+    // 快照 viewport 轨道相机的 7 个视图参数（不含 dragging / 灵敏度等 live 输入
+    // 态）。View 菜单 "Camera Bookmarks" Save / Go 消费；放在 EditorSettings 而非
+    // EditorCameraState 是为复用既有序列化 + 随启动/退出自动读写（同视口显示开关
+    // 先例）。schema minor 3 新增；老文件缺段时 valid 全默认 false（无书签）。
+    struct CameraBookmark
+    {
+        glm::vec3 pivot{0.0f, 0.5f, 0.0f};
+        float     azimuth     = 0.0f;
+        float     elevation   = 0.19f;
+        float     radius      = 8.15f;
+        float     fovYDegrees = 45.0f;
+        float     zNear       = 0.1f;
+        float     zFar        = 100.0f;
+        bool      valid       = false;  // false = 该槽未保存过，Go 置灰
+    };
+    static constexpr int kCameraBookmarkSlots = 4;
+    std::array<CameraBookmark, kCameraBookmarkSlots> cameraBookmarks{};
 };
 
 // JSON 持久化：与项目内 Core::Serialization 同节奏（手写 Read / Write，无

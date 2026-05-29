@@ -35,6 +35,11 @@ bool Vec4Eq(const glm::vec4& a, const glm::vec4& b)
         && FloatEq(a.z, b.z) && FloatEq(a.w, b.w);
 }
 
+bool Vec3Eq(const glm::vec3& a, const glm::vec3& b)
+{
+    return FloatEq(a.x, b.x) && FloatEq(a.y, b.y) && FloatEq(a.z, b.z);
+}
+
 // 全字段往返：设非默认值（用 2 的幂 / 半数等可精确表示的 float，避免
 // float→double→float 精度抖动），Write → Read 后逐字段比对。
 void TestRoundTrip()
@@ -61,6 +66,19 @@ void TestRoundTrip()
     s.autosaveEnabled            = false;  // 默认 true → 翻
     s.autosaveIntervalSeconds    = 240.0f;
     s.autosaveMinIntervalSeconds = 45.0f;
+    // 相机书签：slot 0 全字段非默认 + valid；slot 2 仅 valid + radius；slot 1/3
+    // 留默认（valid=false）以验证 per-slot 独立 + 未设槽不被误置 valid。
+    auto& bm0       = s.cameraBookmarks[0];
+    bm0.pivot       = glm::vec3(1.0f, 2.0f, 3.0f);
+    bm0.azimuth     = 0.5f;
+    bm0.elevation   = 0.25f;
+    bm0.radius      = 12.0f;
+    bm0.fovYDegrees = 60.0f;
+    bm0.zNear       = 0.5f;
+    bm0.zFar        = 200.0f;
+    bm0.valid       = true;
+    s.cameraBookmarks[2].valid  = true;
+    s.cameraBookmarks[2].radius = 4.0f;
 
     JsonWriter writer;
     WriteEditorSettings(writer, s);
@@ -91,6 +109,21 @@ void TestRoundTrip()
     assert(out.autosaveEnabled == s.autosaveEnabled);
     assert(FloatEq(out.autosaveIntervalSeconds,    s.autosaveIntervalSeconds));
     assert(FloatEq(out.autosaveMinIntervalSeconds, s.autosaveMinIntervalSeconds));
+
+    // 相机书签：slot 0 全字段；slot 2 部分 + valid；slot 1/3 未设保持 valid=false。
+    const auto& o0 = out.cameraBookmarks[0];
+    assert(o0.valid == true);
+    assert(Vec3Eq(o0.pivot, s.cameraBookmarks[0].pivot));
+    assert(FloatEq(o0.azimuth,     s.cameraBookmarks[0].azimuth));
+    assert(FloatEq(o0.elevation,   s.cameraBookmarks[0].elevation));
+    assert(FloatEq(o0.radius,      s.cameraBookmarks[0].radius));
+    assert(FloatEq(o0.fovYDegrees, s.cameraBookmarks[0].fovYDegrees));
+    assert(FloatEq(o0.zNear,       s.cameraBookmarks[0].zNear));
+    assert(FloatEq(o0.zFar,        s.cameraBookmarks[0].zFar));
+    assert(out.cameraBookmarks[1].valid == false);
+    assert(out.cameraBookmarks[2].valid == true);
+    assert(FloatEq(out.cameraBookmarks[2].radius, 4.0f));
+    assert(out.cameraBookmarks[3].valid == false);
 
     std::fprintf(stdout, "  [PASS] EditorSettings round-trip\n");
 }
