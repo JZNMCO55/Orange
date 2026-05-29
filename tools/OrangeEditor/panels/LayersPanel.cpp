@@ -10,10 +10,11 @@
 //     重写 N 个 entity 的 LayerComponent，按 EntityTreePanel
 //     pendingDelete 同款约定：直接 mutate + Clear cmdStack）
 //
-// per-layer entity count 显示：2026-05-29 落地（[N] chip，gap 报告 §2.7 Layer 子项）。
+// 2026-05-29 落地（gap 报告 §2.7 Layer 子项）：
+//   * per-layer entity count 显示（名后 [N] chip）
+//   * 重命名 layer（双击名进 InputText 编辑 displayName，走 cmdStack 可 Undo）
+//   * 拖动调整 layer 顺序（[↑][↓] 按钮 → WorldPartition::MoveLayer，可 Undo）
 // 仍不在范围（后续）：
-//   * 重命名 layer（displayName 编辑）—— 需 per-layer rename 输入状态
-//   * 拖动调整 layer 顺序 —— 需 WorldPartition 加 reorder 方法（引擎侧）
 //   * Drag & drop entity → layer chip 一步改归属
 //
 // 设计参考：
@@ -34,6 +35,7 @@
 
 #include <imgui.h>
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -45,6 +47,13 @@ namespace
 // 默认 layer id —— 与 WorldPartition::DefaultLayerId() 同款常量；放在本
 // TU 内 fileScope 避免每次 hit 都做 string_view 比较的不必要分配。
 constexpr std::string_view kDefaultLayerId = "default";
+
+// 重命名 layer 的 in-flight 状态（per-panel file-scope；同时只能 rename
+// 一条）。空串 = 当前没在重命名；双击某 layer 名进入，Enter / 失焦提交、
+// Esc 取消。sRenameFocusPending 让进入重命名的首帧把键盘焦点打到 InputText。
+std::string sRenamingLayerId;
+char        sRenameBuf[64]      = "";
+bool        sRenameFocusPending = false;
 
 // 删 layer 时把所有挂这个 layer 的 entity 归到 default（与 partition
 // RemoveLayer 接口注释里 "RemoveLayer 不动 World 内任何 LayerComponent，
@@ -195,13 +204,63 @@ void EditorRenderLayer::DrawLayersPanel()
         ImGui::SameLine();
 
         // displayName 优先；空则显示 id。后跟灰色的 id 让 user 知道实际
-        // partition lookup 用的 key。
-        if (!layer.displayName.empty() && layer.displayName != layer.id) {
-            ImGui::Text("%s", layer.displayName.c_str());
-            ImGui::SameLine();
-            ImGui::TextDisabled("(%s)", layer.id.c_str());
+        // partition lookup 用的 key。双击名字进入重命名（编辑 displayName，
+        // 不动 id —— id 是 LayerComponent 引用的稳定 key）。
+        const bool renamingThis = (sRenamingLayerId == layer.id);
+        if (renamingThis) {
+            if (sRenameFocusPending) {
+                ImGui::SetKeyboardFocusHere();
+                sRenameFocusPending = false;
+            }
+            ImGui::SetNextItemWidth(ImGui::CalcTextSize("MMMMMMMMMMMMMMMM").x);
+            const bool entered = ImGui::InputText(
+                "##rename_layer", sRenameBuf, sizeof(sRenameBuf),
+                ImGuiInputTextFlags_EnterReturnsTrue);
+            const bool deactivated = ImGui::IsItemDeactivated();
+            // Esc 优先：ImGui 此时已把 buffer 还原到进入时的值，直接取消不提交。
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                sRenamingLayerId.clear();
+            } else if (entered || deactivated) {
+                const std::string newName = sRenameBuf;
+                const std::string oldName = layer.displayName;
+                if (!newName.empty() && newName != oldName) {
+                    const std::string idStr = layer.id;
+                    auto* pH = &mHost;
+                    mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                        "rename_layer",
+                        [pH, idStr, newName]() {
+                            if (auto* L = pH->scene.partition.GetLayer(idStr)) {
+                                L->displayName = newName;
+                            }
+                        },
+                        [pH, idStr, oldName]() {
+                            if (auto* L = pH->scene.partition.GetLayer(idStr)) {
+                                L->displayName = oldName;
+                            }
+                        }
+                    ));
+                }
+                sRenamingLayerId.clear();
+            }
         } else {
-            ImGui::Text("%s", layer.id.c_str());
+            if (!layer.displayName.empty() && layer.displayName != layer.id) {
+                ImGui::Text("%s", layer.displayName.c_str());
+            } else {
+                ImGui::Text("%s", layer.id.c_str());
+            }
+            // 双击名字 → 进入重命名（用 displayName 作种子，空则用 id）。
+            if (canEdit && ImGui::IsItemHovered()
+                && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                sRenamingLayerId    = layer.id;
+                sRenameFocusPending = true;
+                const std::string& seed =
+                    !layer.displayName.empty() ? layer.displayName : layer.id;
+                std::snprintf(sRenameBuf, sizeof(sRenameBuf), "%s", seed.c_str());
+            }
+            if (!layer.displayName.empty() && layer.displayName != layer.id) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(%s)", layer.id.c_str());
+            }
         }
 
         // entity count chip —— 该 layer 下挂 LayerComponent 的实体数。
