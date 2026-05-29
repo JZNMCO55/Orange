@@ -81,6 +81,15 @@ struct EditorSettings
     float autosaveIntervalSeconds    = 180.0f;  // 周期触发（秒）；clamp ≥10
     float autosaveMinIntervalSeconds = 30.0f;   // 节流：两次写入最小间隔（秒）
 
+    // ---- Gizmo snap（gap 报告 §3 P0；schema minor 4） --------------------
+    // 拖动 gizmo 时把结果量化到步长。默认关 = 对现有 gizmo 零回归（snap 关时
+    // 走原连续拖动路径）。translate=世界网格(米) / rotate=角度(度) / scale=比例步。
+    // 量化走 EditorMathUtil::SnapToStep。老文件缺字段走默认。
+    bool  snapEnabled        = false;
+    float snapTranslateStep  = 0.5f;   // 世界米
+    float snapRotateStepDeg  = 15.0f;  // 度
+    float snapScaleStep      = 0.1f;   // 比例
+
     // ---- 相机书签 / saved views（gap 报告 §4 #4） ------------------------
     // 快照 viewport 轨道相机的 7 个视图参数（不含 dragging / 灵敏度等 live 输入
     // 态）。View 菜单 "Camera Bookmarks" Save / Go 消费；放在 EditorSettings 而非

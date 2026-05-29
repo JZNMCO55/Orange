@@ -2423,6 +2423,26 @@ void EditorRenderLayer::DrawSettingsPanel()
         }
     }
 
+    if (ImGui::CollapsingHeader("Gizmo Snap", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Enable snap", &s.snapEnabled);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "拖动 gizmo 时量化到步长。当前 **translate 网格已接入**；"
+                "rotate/scale 步长字段已存但 gizmo 接入留后续。默认关=零回归。");
+        }
+        ImGui::BeginDisabled(!s.snapEnabled);
+        ImGui::DragFloat("Translate grid (m)", &s.snapTranslateStep,
+                         0.05f, 0.01f, 100.0f, "%.2f");
+        ImGui::DragFloat("Rotate step (deg)",  &s.snapRotateStepDeg,
+                         1.0f, 1.0f, 180.0f, "%.0f");
+        ImGui::DragFloat("Scale step",         &s.snapScaleStep,
+                         0.01f, 0.01f, 10.0f, "%.2f");
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("（rotate/scale 仅记录步长，尚未接入 gizmo）");
+    }
+
     if (ImGui::CollapsingHeader("Autosave", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Checkbox("Enable autosave", &s.autosaveEnabled);

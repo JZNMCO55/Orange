@@ -87,6 +87,12 @@ void ReadEditorSettings(const JsonReader& in, EditorSettings& out)
     ReadFloat(in, "autosave/intervalSeconds",  out.autosaveIntervalSeconds);
     ReadFloat(in, "autosave/minIntervalSeconds", out.autosaveMinIntervalSeconds);
 
+    // schema minor 4：gizmo snap。缺字段走默认（snapEnabled=false=不影响行为）。
+    in.ReadBool("snap/enabled",            out.snapEnabled);
+    ReadFloat(in, "snap/translateStep",    out.snapTranslateStep);
+    ReadFloat(in, "snap/rotateStepDeg",    out.snapRotateStepDeg);
+    ReadFloat(in, "snap/scaleStep",        out.snapScaleStep);
+
     // schema minor 3：相机书签。缺段（minor ≤2）时 valid 默认 false（无书签）。
     for (int i = 0; i < EditorSettings::kCameraBookmarkSlots; ++i)
     {
@@ -107,7 +113,7 @@ void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
 {
     out.WriteString("schemaVersion/namespace", "editor/settings");
     out.WriteInt("schemaVersion/major", 1);
-    out.WriteInt("schemaVersion/minor", 3);   // minor 3：+相机书签（2：autosave / 1：视口显示开关）
+    out.WriteInt("schemaVersion/minor", 4);   // minor 4：+gizmo snap（3：相机书签 / 2：autosave / 1：视口开关）
 
     out.WriteFloat("gizmo/lineWidth/translateIdle",      s.gizmoLineWidthTranslateIdle);
     out.WriteFloat("gizmo/lineWidth/translateHighlight", s.gizmoLineWidthTranslateHighlight);
@@ -134,6 +140,11 @@ void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
     out.WriteBool("autosave/enabled",             s.autosaveEnabled);
     out.WriteFloat("autosave/intervalSeconds",    s.autosaveIntervalSeconds);
     out.WriteFloat("autosave/minIntervalSeconds", s.autosaveMinIntervalSeconds);
+
+    out.WriteBool("snap/enabled",          s.snapEnabled);
+    out.WriteFloat("snap/translateStep",   s.snapTranslateStep);
+    out.WriteFloat("snap/rotateStepDeg",   s.snapRotateStepDeg);
+    out.WriteFloat("snap/scaleStep",       s.snapScaleStep);
 
     for (int i = 0; i < EditorSettings::kCameraBookmarkSlots; ++i)
     {

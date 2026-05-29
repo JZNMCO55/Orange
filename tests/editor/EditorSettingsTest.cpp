@@ -66,6 +66,10 @@ void TestRoundTrip()
     s.autosaveEnabled            = false;  // 默认 true → 翻
     s.autosaveIntervalSeconds    = 240.0f;
     s.autosaveMinIntervalSeconds = 45.0f;
+    s.snapEnabled       = true;   // 默认 false → 翻
+    s.snapTranslateStep = 0.75f;
+    s.snapRotateStepDeg = 30.0f;
+    s.snapScaleStep     = 0.25f;
     // 相机书签：slot 0 全字段非默认 + valid；slot 2 仅 valid + radius；slot 1/3
     // 留默认（valid=false）以验证 per-slot 独立 + 未设槽不被误置 valid。
     auto& bm0       = s.cameraBookmarks[0];
@@ -109,6 +113,10 @@ void TestRoundTrip()
     assert(out.autosaveEnabled == s.autosaveEnabled);
     assert(FloatEq(out.autosaveIntervalSeconds,    s.autosaveIntervalSeconds));
     assert(FloatEq(out.autosaveMinIntervalSeconds, s.autosaveMinIntervalSeconds));
+    assert(out.snapEnabled == s.snapEnabled);
+    assert(FloatEq(out.snapTranslateStep, s.snapTranslateStep));
+    assert(FloatEq(out.snapRotateStepDeg, s.snapRotateStepDeg));
+    assert(FloatEq(out.snapScaleStep,     s.snapScaleStep));
 
     // 相机书签：slot 0 全字段；slot 2 部分 + valid；slot 1/3 未设保持 valid=false。
     const auto& o0 = out.cameraBookmarks[0];

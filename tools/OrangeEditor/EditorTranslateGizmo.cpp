@@ -2,6 +2,7 @@
 
 #include "EditorCameraControl.h"
 #include "EditorGizmoMath.h"
+#include "EditorMathUtil.h"  // Util::SnapToStep（gizmo 网格 snap）
 #include "command/SetFieldValueCommand.h"
 
 #include <orange/engine/render/Camera.h>
@@ -258,8 +259,18 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                 if (hit.has_value())
                 {
                     const glm::vec3 delta   = *hit - host.gizmo.dragStartHitOnAxis;
-                    const glm::vec3 newPos  = host.gizmo.dragStartEntityPos
+                    glm::vec3       newPos  = host.gizmo.dragStartEntityPos
                                             + axisDir * glm::dot(delta, axisDir);
+                    // 网格 snap（gap 报告 §3 P0）：把沿拖动轴的世界分量量化到
+                    // snapTranslateStep。snapEnabled=false 时不进入=零回归。axisDir
+                    // 是单位世界轴 → 量化其分量即把该轴世界坐标对齐到网格。
+                    if (host.settings.snapEnabled)
+                    {
+                        const float comp    = glm::dot(newPos, axisDir);
+                        const float snapped = Orange::Editor::Util::SnapToStep(
+                            comp, host.settings.snapTranslateStep);
+                        newPos += axisDir * (snapped - comp);
+                    }
                     const glm::vec3 oldPos  = pTC->position;
                     if (newPos != oldPos)
                     {
