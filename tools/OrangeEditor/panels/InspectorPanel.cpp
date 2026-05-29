@@ -68,16 +68,65 @@ void EditorRenderLayer::DrawInspectorPanel()
     const Orange::Engine::Entity e = mHost.selection.selectedEntity;
 
     // v0.8 多选 Inspector：primary 仍正常显示，additional 集合非空时上方
-    // 加 banner 提示 "N entities selected"。当前 schema-first 渲染路径
-    // 还未支持"异构多选 → 共有属性"模式，仅做选区指示 + 用户提示。完整
-    // multi-edit（共有属性写到所有选中 entity）留作 v0.8 patch / v0.9 拓展。
+    // 加 banner。multi-edit 读侧（共有属性求交摘要）已落地——遍历 schema
+    // registry 统计选区内各 component 类型的持有数，列出"全员共有"（一旦
+    // 接通写回广播即作用于全部）与"部分持有"。写回广播（共有属性写到所有
+    // 选中 entity）需 inspector 字段拖动分组基建（让一次多选拖动 = 一次
+    // Undo，而非每实体一条），留后续；本段仅只读展示，不改字段写路径。
     const std::size_t selCount = mHost.selection.SelectedCount();
     if (selCount > 1)
     {
         ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertWarn(),
                            "%zu entities selected (showing primary)",
                            selCount);
-        ImGui::TextDisabled("[ Multi-edit not yet wired; click single entity to edit ]");
+
+        auto& world = *mHost.scene.pWorld;
+        // 选区内某 schema 的持有数（primary + 有效 additional）。
+        auto countHaving = [&](const auto& schema) -> std::size_t {
+            if (schema.has == nullptr) { return 0; }
+            std::size_t n = schema.has(world, e) ? 1u : 0u;
+            for (const auto a : mHost.selection.additionalSelectedEntities)
+            {
+                if (world.IsValid(a) && schema.has(world, a)) { ++n; }
+            }
+            return n;
+        };
+
+        std::string commonList;
+        std::string partialList;
+        for (const auto& schema : Orange::Editor::Schema::ComponentSchemaRegistry::Instance().All())
+        {
+            const std::size_t n = countHaving(schema);
+            if (n == 0) { continue; }
+            const char* nm = (schema.displayName != nullptr)
+                           ? schema.displayName
+                           : (schema.typeName ? schema.typeName : "?");
+            if (n == selCount)
+            {
+                if (!commonList.empty()) { commonList += ", "; }
+                commonList += nm;
+            }
+            else
+            {
+                if (!partialList.empty()) { partialList += ", "; }
+                partialList += nm;
+                partialList += " (" + std::to_string(n) + "/" + std::to_string(selCount) + ")";
+            }
+        }
+
+        if (!commonList.empty())
+        {
+            ImGui::TextDisabled("shared by all: %s", commonList.c_str());
+        }
+        else
+        {
+            ImGui::TextDisabled("(no component shared by all selected)");
+        }
+        if (!partialList.empty())
+        {
+            ImGui::TextDisabled("partial: %s", partialList.c_str());
+        }
+        ImGui::TextDisabled("[ editing below applies to primary only (write-back broadcast pending) ]");
         ImGui::Separator();
     }
 
