@@ -113,6 +113,18 @@ target_include_directories(command_stack_test PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
 orange_engine_set_compiler_options(command_stack_test)
 add_test(NAME command_stack_test COMMAND command_stack_test)
+
+# EditorSettings（tools/OrangeEditor）—— JSON 序列化往返 + 前向兼容（缺字段走
+# 默认）。helper 源不属引擎 lib，直接编进测试 exe + 加 include path（同
+# material_file_io_test 模式）。仅依赖 Core::Serialization + glm，零 ImGui。
+add_executable(editor_settings_test
+    editor/EditorSettingsTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/context/EditorSettings.cpp")
+target_link_libraries(editor_settings_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(editor_settings_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(editor_settings_test)
+add_test(NAME editor_settings_test COMMAND editor_settings_test)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
 orange_engine_add_test(save_game_system_test    save/SaveGameSystemTest.cpp)
 orange_engine_add_test(save_path_test           save/SavePathTest.cpp)
