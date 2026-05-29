@@ -2624,3 +2624,50 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 - **capture 路径接 bloom 合成**：CPU 端 capture 当前不含 bloom contribution（stage A hdrColor 抓回 CPU 时 bloom 还没合成），与 stage B shader `hdr + bloom * intensity` 路径在 emissive / 高 HDR 区域有 visible 偏差。需要"capture 与 shader 像素级一致"时拉动；典型 PR review 4 算子对照已够，**不构成排期承诺**
 - **stage B swap-chain capture 接口**：当前 `RequestCapture` 抓 stage A HDR，看不到 godrays / LUT 等 stage B 末段效果；需要"截 swap-chain 最终图"时拉动；编辑器 dock 模式下还涉及 ImGui overlay 抓不抓的取舍——非平凡设计
 - **AgX CPU 与 GPU 数值精度对照**：CPU `std::log2` + scalar 浮点 vs GPU `log2` + vec3 SIMD 浮点在 fp32 精度边缘像素可能差 ±1 LSB；当前不阻塞但若 capture 用作 pixel-exact regression baseline 需复核
+
+---
+
+## GAP-2026-05-29-entity-tree-sibling-reorder ✅
+
+- **发现方**：用户 dogfood 提问"EntityTree 是不是不能拖到任意 parent 下 / 拖出 / 更改顺序"
+- **发现日期**：2026-05-29
+- **一句话定性**：Entity Tree DnD 此前只支持 reparent（拖到节点上 → 挂为末子）与 detach-to-root（拖到面板空白），**不支持兄弟间重排**（无"插到兄弟前/后"的 drop zone，reparent 恒 `LinkAsLastChild` 挂尾）；且根节点按 EnTT 存储序枚举、增删组件后帧间跳位
+- **状态**：**✅ 2026-05-29 落地**（commits `1c399a1` EditorHierarchy 原语 + 本次 EntityTreePanel 接线）
+
+### 触发场景
+
+用户想在 Entity Tree 里调整同级实体顺序（同 Unity/Unreal/Godot 的 scene tree 拖拽重排手感），发现只能改父子归属、改不了同级排第几。
+
+### 落地内容
+
+- `EditorHierarchy` 加 `MoveToPosition / MoveBefore / MoveAfter`（commit `1c399a1`）——复用现有双向兄弟链做精确位置插入，O(1) 摘链 + 重链；**零序列化改动**（子节点顺序本就靠 `firstChild/nextSibling` 持久化）
+- `EntityTreePanel` drop target 改三区：节点 rect 上 1/4 = 插到该兄弟之前、下 1/4 = 之后、中间 = reparent into；before/after 仅对**有父的子节点**提供，悬停画 `ImGuiCol_DragDropTarget` 色插入指示线。落点判定用 TreeNodeEx 后捕获的 node rect（不依赖"最后一个 item"）
+- `EditorSelection::PendingReparent` 扩 `Where{Into/Before/After}` + `refSibling`
+- 帧末 apply 按 Where 分派 ReparentTo / MoveBefore / MoveAfter；**Undo 统一用 `MoveToPosition(src, oldParent, oldPrev)` 精确复位**（顺带修了旧 reparent undo 退回时丢失兄弟顺序的问题）
+- 顺带：根节点改按 entity id 稳定排序后再画，消除"根节点帧间跳位"UX 瑕疵
+
+### 关键改动文件
+
+`tools/OrangeEditor/EditorHierarchy.{h,cpp}`（3 个位置原语）/ `tools/OrangeEditor/context/EditorSelection.h`（PendingReparent 扩 Where+refSibling）/ `tools/OrangeEditor/panels/EntityTreePanel.cpp`（drop 三区 + 指示线 + apply 重写 + 根稳定排序 + `<vector>`）/ `docs/engine-known-gaps.md`（本条目）。纯编辑器 UI，build-green 验收（无对应 ctest，同 DirLight/Env warning chip 先例）。
+
+### 留待后续
+
+见下条 GAP-2026-05-29-entity-tree-root-reorder-not-supported。
+
+---
+
+## GAP-2026-05-29-entity-tree-root-reorder-not-supported
+
+- **发现方**：同上（GAP-2026-05-29-entity-tree-sibling-reorder 落地时识别的边界）
+- **发现日期**：2026-05-29
+- **一句话定性**：**根节点之间**无法拖拽重排——根不在任何兄弟链里（`parent==Invalid`，无父锚 `firstChild`），当前只能按 entity id 稳定排序展示，用户改不了顶层实体的相对顺序
+- **状态**：**未排期**（开 follow-up；子节点重排已满足绝大多数"调整顺序"需求）
+
+### 缺什么 / 架构取舍
+
+要让根可拖拽重排且**持久化**，需要给"根序"一个表示，三选一（带取舍，落地前需小 ADR）：
+1. **隐藏 scene-root 实体**：所有顶层实体成其 children，全树统一走兄弟链——最干净，但改"什么是 root"语义，牵动序列化 + 每处 `isRoot` 判定 + 迭代 + AppHost
+2. **`HierarchyComponent` 加 `sortIndex`**：简单，但与既有兄弟链顺序双轨、冗余，且 `HierarchyComponent` 序列化要升 schema_version（"出厂即冻结"约束）
+3. **World 级根序 list**：`std::vector<Entity> rootOrder` 独立于组件——非 archetype 友好但根数少；要进 scene 序列化
+
+非阻塞，按"用户真的需要拖拽顶层顺序 + 要存盘"实际拉动触发。当前编辑器内 `MoveBefore/MoveAfter` 对根 target 退化为 detach-to-root（无序），UI 也只对有父子节点显示 before/after 指示线，语义诚实不骗人。

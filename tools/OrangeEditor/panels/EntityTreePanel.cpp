@@ -29,6 +29,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <vector>
 
 void EditorRenderLayer::DrawEntityTreePanel()
 {
@@ -105,18 +106,28 @@ void EditorRenderLayer::DrawEntityTreePanel()
         }
     }
 
-    // 列出所有 root 实体（无 HierarchyComponent 或 parent invalid），
-    // 然后递归画子树。EnTT view 遍历的是组件存储不是创建顺序 —— 编
-    // 辑器侧不关心顺序稳定性（同根实体在两帧之间显示位置可能不同），
-    // 后续 task 真要稳定排序时再加 SortIndex 之类。
+    // 列出所有 root 实体（无 HierarchyComponent 或 parent invalid），按 entity
+    // id 稳定排序后再递归画子树。直接按 `reg.view` 的 EnTT 存储序枚举会让根的
+    // 相对位置在增删组件后帧间跳动（root 不在兄弟链里、无顺序表示）；id 序稳定
+    // 且近似创建序，先消除"根节点跳位"这个 UX 瑕疵。子节点顺序由兄弟链本身决定
+    // （DrawEntityNodeRecursive 按 firstChild→nextSibling 画），可经 DnD 重排。
+    // 真·可拖拽的**根之间**排序需持久化根序，是独立件，见 engine-known-gaps.md
+    // GAP-2026-05-29-entity-tree-root-reorder-not-supported。
     auto& reg = mHost.scene.pWorld->Registry();
     using HC = Orange::Engine::Scene::HierarchyComponent;
+    std::vector<entt::entity> roots;
     for (auto e : reg.view<entt::entity>()) {
         const auto* h = reg.try_get<HC>(e);
-        const bool isRoot = (h == nullptr) || !h->parent.IsValid();
-        if (isRoot) {
-            DrawEntityNodeRecursive(Orange::Engine::World::FromEntt(e));
+        if (h == nullptr || !h->parent.IsValid()) {
+            roots.push_back(e);
         }
+    }
+    std::sort(roots.begin(), roots.end(),
+              [](entt::entity a, entt::entity b) {
+                  return entt::to_integral(a) < entt::to_integral(b);
+              });
+    for (entt::entity e : roots) {
+        DrawEntityNodeRecursive(Orange::Engine::World::FromEntt(e));
     }
 
     // 面板剩余空白区域 = "drop here to unparent" 区。Dummy 占满残余
@@ -130,9 +141,12 @@ void EditorRenderLayer::DrawEntityTreePanel()
                     ImGui::AcceptDragDropPayload(kEntityPayload)) {
                 Orange::Engine::Entity src{};
                 std::memcpy(&src, p->Data, sizeof(src));
-                mHost.selection.pendingReparent = {src,
-                                          Orange::Engine::Entity::Invalid(),
-                                          true};
+                EditorSelection::PendingReparent pr;
+                pr.child     = src;
+                pr.newParent = Orange::Engine::Entity::Invalid();   // 提到 root
+                pr.where     = EditorSelection::PendingReparent::Where::IntoAsLastChild;
+                pr.valid     = true;
+                mHost.selection.pendingReparent = pr;
             }
             ImGui::EndDragDropTarget();
         }
@@ -183,36 +197,67 @@ void EditorRenderLayer::DrawEntityTreePanel()
         mHost.selection.pendingReparent.valid = false;  // 同帧 reparent 已无意义
     }
     if (mHost.selection.pendingReparent.valid) {
-        const Orange::Engine::Entity src = mHost.selection.pendingReparent.child;
-        const Orange::Engine::Entity dst = mHost.selection.pendingReparent.newParent;
+        using PR = EditorSelection::PendingReparent;
+        using HC = Orange::Engine::Scene::HierarchyComponent;
+        const PR pr = mHost.selection.pendingReparent;   // 值拷贝后立刻清标志
         mHost.selection.pendingReparent.valid = false;
-        // 防环 + 防自挂自 + 防"挂到当前父亲"重复操作
-        if (src.IsValid() && mHost.scene.pWorld->IsValid(src) && src != dst
-            && !EditorHierarchy::IsAncestorOf(*mHost.scene.pWorld, src, dst))
+
+        Orange::Engine::World* const pW = mHost.scene.pWorld.get();
+        const Orange::Engine::Entity src = pr.child;
+
+        // 计算"最终父"用于防环 + 合法性：Into 取 newParent；Before/After 取
+        // refSibling 当前的父（src 将成为 refSibling 的同父兄弟）。
+        Orange::Engine::Entity finalParent = pr.newParent;
+        bool                   refOk       = true;
+        if (pr.where != PR::Where::IntoAsLastChild) {
+            const auto* rh = (pW != nullptr) ? pW->GetComponent<HC>(pr.refSibling) : nullptr;
+            finalParent = (rh != nullptr) ? rh->parent : Orange::Engine::Entity::Invalid();
+            refOk = (pW != nullptr) && pW->IsValid(pr.refSibling) && (src != pr.refSibling);
+        }
+
+        // 防环（finalParent 不能落在 src 子树内，含 src 自身）+ src 存活 + ref 合法。
+        if (pW != nullptr && src.IsValid() && pW->IsValid(src) && refOk
+            && src != finalParent
+            && !EditorHierarchy::IsAncestorOf(*pW, src, finalParent))
         {
-            // 记录旧 parent，用于 Undo 还原层级关系。
-            using HC = Orange::Engine::Scene::HierarchyComponent;
-            const auto*                  hc        = mHost.scene.pWorld->GetComponent<HC>(src);
-            const Orange::Engine::Entity oldParent = (hc != nullptr)
-                ? hc->parent
-                : Orange::Engine::Entity::Invalid();
-            // c14 解 World* 强耦合：lambda 捕获 EditorHost* 而非裸 World*，
-            // 调用时 `pH->scene.pWorld.get()` 间接解——切场景时 host 解到
-            // 新 World 或 nullptr，命令走 nullptr 防御分支 no-op 而非 dangling
-            // 崩溃。详见 command/EntityCommands.h 顶注释。
+            // 记录旧**精确位置**（parent + prevSibling）：Undo 用 MoveToPosition 原
+            // 位复位，不再像旧实现那样退回时丢失兄弟顺序。
+            const auto* hc = pW->GetComponent<HC>(src);
+            const Orange::Engine::Entity oldParent =
+                (hc != nullptr) ? hc->parent : Orange::Engine::Entity::Invalid();
+            const Orange::Engine::Entity oldPrev =
+                (hc != nullptr) ? hc->prevSibling : Orange::Engine::Entity::Invalid();
+
+            const PR::Where              where   = pr.where;
+            const Orange::Engine::Entity dstInto = pr.newParent;
+            const Orange::Engine::Entity refSib  = pr.refSibling;
+
+            // c14 解 World* 强耦合：lambda 捕获 EditorHost* 而非裸 World*，调用时
+            // `pH->scene.pWorld.get()` 间接解——切场景时 host 解到新 World 或
+            // nullptr，命令走 nullptr 防御分支 no-op 而非 dangling 崩溃。
             mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
                 "reparent",
-                [pH = &mHost, src, dst]() {
-                    if (auto* pW = pH->scene.pWorld.get()) {
-                        EditorHierarchy::ReparentTo(*pW, src, dst);
+                [pH = &mHost, src, where, dstInto, refSib]() {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr || !w->IsValid(src)) { return; }
+                    switch (where) {
+                        case PR::Where::IntoAsLastChild:
+                            EditorHierarchy::ReparentTo(*w, src, dstInto);
+                            break;
+                        case PR::Where::BeforeSibling:
+                            if (w->IsValid(refSib)) { EditorHierarchy::MoveBefore(*w, src, refSib); }
+                            break;
+                        case PR::Where::AfterSibling:
+                            if (w->IsValid(refSib)) { EditorHierarchy::MoveAfter(*w, src, refSib); }
+                            break;
                     }
                 },
-                [pH = &mHost, src, oldParent]() {
-                    auto* pW = pH->scene.pWorld.get();
-                    if (pW == nullptr) { return; }
+                [pH = &mHost, src, oldParent, oldPrev]() {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr) { return; }
                     // Undo 时 src 可能已被其他命令销毁（EnTT version check）
-                    if (pW->IsValid(src)) {
-                        EditorHierarchy::ReparentTo(*pW, src, oldParent);
+                    if (w->IsValid(src)) {
+                        EditorHierarchy::MoveToPosition(*w, src, oldParent, oldPrev);
                     }
                 }
             ));
@@ -319,6 +364,11 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     ImGui::PushID(static_cast<int>(static_cast<std::uint32_t>(entity.Value())));
 
     bool open = false;
+    // TreeNodeEx 行 rect —— 紧跟 TreeNodeEx 后捕获（此时它是 last item）。
+    // 后面 DnD target 在画完 chips / context menu 之后才求值，那时 last item
+    // 已不是 node，故用本对局部变量算 drop 落点 Y 分区，稳定可靠。
+    ImVec2 nodeMin{0.0f, 0.0f};
+    ImVec2 nodeMax{0.0f, 0.0f};
     // 节点级编辑权限 —— 与 DrawEntityTreePanel 顶部的 canEdit 同逻辑，
     // 但 DrawEntityNodeRecursive 是独立调用栈，所以这里重新取一次。
     const bool canEditNode = (mHost.scene.playState == PlayState::Edit);
@@ -327,6 +377,8 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         // 空 label + SameLine InputText —— TreeNode 三角仍可用，
         // label 区域被 InputText 接管。
         open = ImGui::TreeNodeEx("##node", flags, "%s", "");
+        nodeMin = ImGui::GetItemRectMin();
+        nodeMax = ImGui::GetItemRectMax();
         ImGui::SameLine();
         if (mHost.selection.renameJustStarted) {
             ImGui::SetKeyboardFocusHere();
@@ -357,6 +409,8 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             ? name->name.c_str()
             : "(unnamed)";
         open = ImGui::TreeNodeEx("##node", flags, "%s", label);
+        nodeMin = ImGui::GetItemRectMin();
+        nodeMax = ImGui::GetItemRectMax();
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
             // v0.8 多选：Ctrl-click toggle 加入 / 移出 additional set；regular
             // click 清空 additional + 切 primary。Shift-click 范围选择留到
@@ -551,13 +605,44 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         ImGui::EndPopup();
     }
 
-    // DnD target —— Play / Paused 期间不接受 drop
+    // DnD target —— Play / Paused 期间不接受 drop。
+    // entity drop 按鼠标 Y 相对节点 rect 分三区：上 1/4 = 插到该兄弟之前、
+    // 下 1/4 = 之后（reorder）、中间 = 挂进该节点（reparent into）。before/after
+    // 仅对**有父的子节点**提供 —— 根节点之间无顺序表示（root 不在兄弟链里），
+    // 根只给 into。ORANGE_ASSET drop 与落点无关，恒按 into 语义 apply 到 entity。
     if (canEditNode && ImGui::BeginDragDropTarget()) {
+        using PR = EditorSelection::PendingReparent;
+        const bool  targetIsChild = (h != nullptr) && h->parent.IsValid();
+        const float rowH = nodeMax.y - nodeMin.y;
+        const float t    = (rowH > 0.0f)
+            ? (ImGui::GetMousePos().y - nodeMin.y) / rowH : 0.5f;
+        PR::Where where = PR::Where::IntoAsLastChild;
+        if (targetIsChild && t < 0.25f)      { where = PR::Where::BeforeSibling; }
+        else if (targetIsChild && t > 0.75f) { where = PR::Where::AfterSibling; }
+
+        // 插入指示线：before 画节点上沿、after 画下沿（into 用 ImGui 默认矩形
+        // 高亮表达，不另画线）。仅悬停时这里每帧重画，drop 完即消失。
+        if (where != PR::Where::IntoAsLastChild) {
+            const float ly = (where == PR::Where::BeforeSibling) ? nodeMin.y : nodeMax.y;
+            ImGui::GetWindowDrawList()->AddLine(
+                ImVec2{nodeMin.x, ly}, ImVec2{nodeMax.x, ly},
+                ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+        }
+
         if (const ImGuiPayload* p =
                 ImGui::AcceptDragDropPayload(kEntityPayload)) {
             Orange::Engine::Entity src{};
             std::memcpy(&src, p->Data, sizeof(src));
-            mHost.selection.pendingReparent = {src, entity, true};
+            PR pr;
+            pr.child = src;
+            pr.where = where;
+            if (where == PR::Where::IntoAsLastChild) {
+                pr.newParent = entity;
+            } else {
+                pr.refSibling = entity;   // 与 entity 同父，插到其前 / 后
+            }
+            pr.valid = true;
+            mHost.selection.pendingReparent = pr;
         }
         // v1.2.3 patch · ORANGE_ASSET DnD：按文件扩展名 apply 到 entity 对
         // 应 component 字段（.material → Renderable.materialInstance / .mesh

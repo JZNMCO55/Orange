@@ -83,9 +83,19 @@ struct EditorSelection
 
     struct PendingReparent
     {
+        // drop 落点：Into = 挂为 newParent 末子（newParent Invalid = 提到 root）；
+        // Before/After = 插到 refSibling 同父链的前 / 后（兄弟重排，或跨父定位）。
+        enum class Where : std::uint8_t
+        {
+            IntoAsLastChild = 0,
+            BeforeSibling   = 1,
+            AfterSibling    = 2,
+        };
         Orange::Engine::Entity child;
-        Orange::Engine::Entity newParent;  // Invalid 表示提到 root
-        bool                   valid = false;
+        Orange::Engine::Entity newParent  = Orange::Engine::Entity::Invalid();  // Into 用
+        Orange::Engine::Entity refSibling = Orange::Engine::Entity::Invalid();  // Before/After 用
+        Where                  where      = Where::IntoAsLastChild;
+        bool                   valid      = false;
     } pendingReparent;
 
     enum class PendingCreateKind : std::uint8_t
