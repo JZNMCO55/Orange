@@ -796,6 +796,50 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         if (ImGui::MenuItem("Rename", "F2")) {
             BeginRename(entity);
         }
+        // 批量重命名（hierarchy gap §2 / P2）：右键的是 primary 且多选 → 给整个
+        // 选区按 "base_NNN" 编号重命名（3 位零填充，primary 起 001，顺序 = primary
+        // 后接 additional）。每实体一条 RenameCommand（可 undo），整批一个 group。
+        if (entity == mHost.selection.selectedEntity
+            && !mHost.selection.additionalSelectedEntities.empty()) {
+            const std::size_t selN = 1 + mHost.selection.additionalSelectedEntities.size();
+            if (ImGui::BeginMenu("Batch rename")) {
+                static char sBatchBaseBuf[96] = "Entity";
+                ImGui::SetNextItemWidth(ImGui::CalcTextSize("MMMMMMMMMMMMMM").x);
+                ImGui::InputText("##batch_base", sBatchBaseBuf, sizeof(sBatchBaseBuf));
+                ImGui::TextDisabled("-> %s_001 .. _%03zu (%zu entities)",
+                                    sBatchBaseBuf, selN, selN);
+                ImGui::BeginDisabled(sBatchBaseBuf[0] == '\0');
+                if (ImGui::Button("Apply")) {
+                    std::vector<Orange::Engine::Entity> order;
+                    order.push_back(mHost.selection.selectedEntity);
+                    for (const auto a : mHost.selection.additionalSelectedEntities) {
+                        order.push_back(a);
+                    }
+                    mHost.cmdStack.BeginGroup("Batch rename", MergeMode::Disable);
+                    int idx = 1;
+                    for (const auto e : order) {
+                        if (mHost.scene.pWorld->IsValid(e)) {
+                            const auto* nc = mHost.scene.pWorld->GetComponent<
+                                Orange::Engine::Scene::NameComponent>(e);
+                            const std::string oldName =
+                                (nc != nullptr) ? nc->name : std::string{};
+                            char numbered[128];
+                            std::snprintf(numbered, sizeof(numbered),
+                                          "%s_%03d", sBatchBaseBuf, idx);
+                            if (oldName != numbered) {
+                                mHost.cmdStack.Push(std::make_unique<RenameCommand>(
+                                    mHost, e, oldName, std::string{numbered}));
+                            }
+                        }
+                        ++idx;
+                    }
+                    mHost.cmdStack.EndGroup();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndDisabled();
+                ImGui::EndMenu();
+            }
+        }
         if (ImGui::MenuItem("Delete", "Del")) {
             mHost.selection.pendingDelete = entity;
         }
