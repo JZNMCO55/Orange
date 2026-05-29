@@ -177,9 +177,32 @@ ORANGE_ENGINE_API Result<void, ResultCode> Save(const World& world,
 //   * 必填字段缺失 / 类型错误   → InvalidArgument（World 不被改动）
 //
 // 未识别的 component 名 → 仅记录 warning 后继续（forward-compat）。
+//
+// fromString=true 时 `path` 直接是 JSON 文本（内存路径，供 LoadFromString
+// 复用本实现，避免临时文件）。outCreated 非空时回填本次新建的全部 Entity
+// （子树 clone 的选中 + undo-delete 追踪用）。两参默认值保持旧调用方不变。
 ORANGE_ENGINE_API Result<void, ResultCode> Load(std::string_view path,
                                                 World& world,
-                                                const LoadOptions& options = {});
+                                                const LoadOptions& options = {},
+                                                bool fromString = false,
+                                                std::vector<Entity>* outCreated = nullptr);
+
+// 把 `world` 中以 `roots` 为根的子树（每个 root + 其全部后代）序列化为 JSON
+// 文本（不落盘）。Duplicate / Copy-Paste / delete-undo 的共同基建：配
+// LoadFromString 即可"复制一棵子树并把内部引用重映射到新实体"。复用 Save
+// 核心（同一份 per-component 序列化器）。失败语义同 Save。
+ORANGE_ENGINE_API Result<std::string, ResultCode> SaveSubtreeToString(
+    const World& world,
+    std::span<const Entity> roots,
+    const SaveOptions& options = {});
+
+// 从内存 JSON 文本追加加载到 `world`（语义同 Load 的追加 + 持久 ID 重映射）。
+// outCreated 非空时回填新建的 Entity。失败语义同 Load。
+ORANGE_ENGINE_API Result<void, ResultCode> LoadFromString(
+    std::string_view blob,
+    World& world,
+    const LoadOptions& options = {},
+    std::vector<Entity>* outCreated = nullptr);
 
 // ---------------------------------------------------------------------------
 // SaveSplit / LoadSplit —— 多文件 + manifest 序列化。

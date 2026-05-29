@@ -18,6 +18,7 @@
 #include "orange/engine/physics/PhysicsWorld.h"
 #include "orange/engine/physics/RigidBodyComponent.h"
 #include "orange/engine/scene/Entity.h"
+#include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/LayerComponent.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
@@ -115,10 +116,13 @@ std::string ComponentPath(const std::string& entityBase, std::string_view compon
 // 引用因此**不会被正确序列化**——是已知设计选择：跨 layer 的 hierarchy
 // 关系本来就违反 "per-layer 独立编辑" 的工程意图；遇到时 layer 编辑器
 // 应在 attach-time 拒绝建立跨 layer parent-child。
+// outString 非空时：把 JSON Dump 到 *outString（内存）而非落盘——子树
+// clone（Duplicate / Copy-Paste / delete-undo 基建）复用本核心，避免临时文件。
 Result<void, ResultCode> SaveImpl(const World& world,
                                   std::string_view path,
                                   const SaveOptions& options,
-                                  const std::function<bool(Entity)>& entityFilter)
+                                  const std::function<bool(Entity)>& entityFilter,
+                                  std::string* outString = nullptr)
 {
     // 1) 收集所有 live entity（可选过滤），按 entity index 升序分配 0..N-1
     //    持久 ID。
@@ -227,7 +231,12 @@ Result<void, ResultCode> SaveImpl(const World& world,
         }
     }
 
-    // 4) 落盘。
+    // 4) 落盘 or 转字符串（outString 非空 = 内存 clone 路径，Dump 而非写文件）。
+    if (outString != nullptr)
+    {
+        *outString = writer.Dump();
+        return Result<void, ResultCode>{};
+    }
     auto saveResult = writer.SaveToFile(path);
     if (saveResult.IsErr())
     {
@@ -248,6 +257,36 @@ Result<void, ResultCode> Save(const World& world,
 {
     // 直接走 SaveImpl 不带 filter——单文件路径写出整 world。
     return SaveImpl(world, path, options, {});
+}
+
+Result<std::string, ResultCode> SaveSubtreeToString(const World& world,
+                                                    std::span<const Entity> roots,
+                                                    const SaveOptions& options)
+{
+    // 收集子树集：每个 root + 其全部后代（经 HierarchyComponent firstChild /
+    // nextSibling 递归）。子树规模小，用 vector + linear find 即可。
+    std::vector<Entity>          subtree;
+    std::function<void(Entity)>  collect = [&](Entity e) {
+        if (!world.IsValid(e)) { return; }
+        if (std::find(subtree.begin(), subtree.end(), e) != subtree.end()) { return; }
+        subtree.push_back(e);
+        const auto* h = world.GetComponent<HierarchyComponent>(e);
+        Entity c = (h != nullptr) ? h->firstChild : Entity::Invalid();
+        while (c.IsValid()) {
+            collect(c);
+            const auto* ch = world.GetComponent<HierarchyComponent>(c);
+            c = (ch != nullptr) ? ch->nextSibling : Entity::Invalid();
+        }
+    };
+    for (const Entity r : roots) { collect(r); }
+
+    const auto filter = [&subtree](Entity e) {
+        return std::find(subtree.begin(), subtree.end(), e) != subtree.end();
+    };
+    std::string out;
+    auto res = SaveImpl(world, {}, options, filter, &out);
+    if (res.IsErr()) { return res.Error(); }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,10 +314,14 @@ void RollbackCreatedEntities(World& world, const std::vector<Entity>& created)
 
 Result<void, ResultCode> Load(std::string_view path,
                               World& world,
-                              const LoadOptions& options)
+                              const LoadOptions& options,
+                              bool fromString,
+                              std::vector<Entity>* outCreated)
 {
-    // 1) 打开并解析 JSON。
-    auto readerResult = JsonReader::FromFile(path);
+    // 1) 打开并解析 JSON。fromString=true 时 path 即 JSON 文本（内存 clone 路径，
+    //    见 LoadFromString）；否则按文件路径读。
+    auto readerResult = fromString ? JsonReader::FromString(path)
+                                   : JsonReader::FromFile(path);
     if (readerResult.IsErr())
     {
         // ParseError.code 区分 IO（文件不存在 / 不可读）与 parse（语法错）。
@@ -571,7 +614,23 @@ Result<void, ResultCode> Load(std::string_view path,
         }
     }
 
+    // 报告本次新建的实体（内存 clone 路径用：选中 + undo-delete 追踪）。
+    if (outCreated != nullptr)
+    {
+        *outCreated = created;
+    }
     return Result<void, ResultCode>{};
+}
+
+Result<void, ResultCode> LoadFromString(std::string_view blob,
+                                        World& world,
+                                        const LoadOptions& options,
+                                        std::vector<Entity>* outCreated)
+{
+    // 从内存 JSON 文本追加加载（子树 clone：SaveSubtreeToString → LoadFromString
+    // → 新实体 + 内部引用按持久 ID 重映射到新实体）。复用 Load 全部逻辑（含
+    // schema 校验 / 持久 ID→Entity 双向映射 / Hierarchy 引用回填 / 失败回滚）。
+    return Load(blob, world, options, /*fromString=*/true, outCreated);
 }
 
 // ---------------------------------------------------------------------------
