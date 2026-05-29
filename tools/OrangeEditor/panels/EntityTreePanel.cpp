@@ -63,6 +63,26 @@ bool SubtreeMatchesName(Orange::Engine::World&  world,
     return false;
 }
 
+// entity + 其全部后代追加到 out（Isolate 的 keep-set 用）。按 firstChild→
+// nextSibling 递归，与序列化 / 删除子树同款遍历。
+void CollectSubtree(Orange::Engine::World&               world,
+                    Orange::Engine::Entity               entity,
+                    std::vector<Orange::Engine::Entity>& out)
+{
+    using HC = Orange::Engine::Scene::HierarchyComponent;
+    if (!world.IsValid(entity)) { return; }
+    out.push_back(entity);
+    const auto* h = world.GetComponent<HC>(entity);
+    Orange::Engine::Entity child =
+        (h != nullptr) ? h->firstChild : Orange::Engine::Entity::Invalid();
+    while (child.IsValid())
+    {
+        CollectSubtree(world, child, out);
+        const auto* ch = world.GetComponent<HC>(child);
+        child = (ch != nullptr) ? ch->nextSibling : Orange::Engine::Entity::Invalid();
+    }
+}
+
 }  // namespace
 
 void EditorRenderLayer::DrawEntityTreePanel()
@@ -1184,6 +1204,36 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                 mHost.scene.partition.IsEntityHidden(entity);
             if (ImGui::MenuItem(hidden ? "Show" : "Hide")) {
                 mHost.scene.partition.SetEntityHidden(entity, !hidden);
+            }
+        }
+        // Isolate Selected（hierarchy gap §3，聚焦工作流，复用 per-entity hidden
+        // 基建）：把 target 子树以外的所有实体隐藏，只留 target + 后代可见。
+        // target = 右键的是 primary 且多选 → 整个选区；否则 = {entity}（与批删/
+        // 批移同款"右键 primary 消费 additional"规则）。可经 Unhide All 还原。
+        if (ImGui::MenuItem("Isolate Selected")) {
+            std::vector<Orange::Engine::Entity> targets;
+            if (entity == mHost.selection.selectedEntity
+                && !mHost.selection.additionalSelectedEntities.empty()) {
+                targets.push_back(mHost.selection.selectedEntity);
+                for (const auto a : mHost.selection.additionalSelectedEntities) {
+                    targets.push_back(a);
+                }
+            } else {
+                targets.push_back(entity);
+            }
+            std::vector<Orange::Engine::Entity> keep;
+            for (const auto t : targets) {
+                CollectSubtree(*mHost.scene.pWorld, t, keep);
+            }
+            auto inKeep = [&](Orange::Engine::Entity e) {
+                for (const auto k : keep) { if (k == e) { return true; } }
+                return false;
+            };
+            // 枚举全实体（含折叠 / 不在 tree flat order 的），逐个定显隐。
+            auto& reg = mHost.scene.pWorld->Registry();
+            for (auto raw : reg.view<entt::entity>()) {
+                const auto e = Orange::Engine::World::FromEntt(raw);
+                mHost.scene.partition.SetEntityHidden(e, !inKeep(e));
             }
         }
         ImGui::Separator();
