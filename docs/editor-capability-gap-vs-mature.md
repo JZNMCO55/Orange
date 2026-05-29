@@ -23,6 +23,26 @@ OrangeEditor 已是一个**架构纪律扎实、数据通路（schema-first Insp
 
 ---
 
+## 1.5 落地进度（2026-05-29 sweep，本地未 push 待 dogfood）
+
+> 本节记录依本报告自主推进的落地状态。**下表所有 ✅ 项均本地 commit 未 push**，
+> 逐项交互验证清单见 `build/dogfood-checklist.md`（gitignored）。dogfood 通过后
+> push。证据纪律：交互/手感件标 ✅ = 已编译+lint+（可测核心）单测，**手感仍待 dogfood**。
+
+**已落地（✅，按 §3 优先级）**：
+- **P0 全清**：材质 dirty 追踪（facet-1 关窗拦截 + facet-2 持久 uniformDirty）/ autosave 接线+崩溃恢复 / Undo-redo 动作名 / **Gizmo snap 三轴**（translate 网格 + rotate 角 + scale 步，可测核心 `editor_math_util_test`）/ **Gizmo Local/World 切换** / **视口 Ctrl 多选 + 相机 MMB pan**。
+- **P1 单仓件**：资产浏览器**搜索 + 类型过滤**（谓词 `editor_text_util_test`）/ **Layer count + 重命名 + 排序**（reorder 引擎 `WorldPartition::MoveLayer` + `scene_world_partition_test`）/ **多选群组变换 translate+rotate+scale 三模式**（pivot 数学 `editor_group_transform_test`，pivot = primary 位置，单选零回归）。
+- **Quick-Win**：Save-As-New 材质 / view-toggle 持久化 / 相机书签持久化 / Console 大小写搜索 + 时间戳列 / 未注册 component warning / Play snapshot 唯一名。#5 HDR-color、#6 RegisterComponentSchema 经 verify-gate 判 speculative / stale-doc **不做**。
+
+**剩余（逐一调查确认为 L 基建 / 重交互，需设计方向 + dogfood，不盲推）**：
+- **Inspector multi-edit 共有属性写回** —— 字段写回须改 `SchemaInspector` 通用组件编辑路径（核心路径回归风险）。
+- **破坏性操作 undo** —— 删实体需 EnTT id 稳定引用基建（绑 GUID/prefab P2，`SceneSerialization` 仅 whole-world）；RemoveComponent-undo 需 schema↔serializer 耦合做组件状态快照/恢复。
+- **资产删除/重命名 + 依赖追踪** —— 需先建依赖图基础设施。
+- **Layer DnD entity→layer** —— DnD，本仓有 trailing-chip anchor-bug 前科，必 dogfood。
+- **§3 P2 全部** —— 跨仓（OrangeRender / 引擎序列化前置），ADR-009 禁同 session 双向。
+
+---
+
 ## 2. 按子系统分节的 gap 表
 
 > 工作量口径：**S** = 1-commit 级（对标 warning chip / sibling reorder）；**M** = 数 commit / 单 session 可收口；**L** = 跨多 session 或需引擎侧前置能力。
