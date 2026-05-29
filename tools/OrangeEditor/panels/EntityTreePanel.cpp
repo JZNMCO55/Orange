@@ -17,6 +17,7 @@
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/SceneSerialization.h>  // 子树 clone（Ctrl+D Duplicate）
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 #include <orange/engine/scene/WorldPartition.h>
@@ -101,6 +102,10 @@ void EditorRenderLayer::DrawEntityTreePanel()
         }
         if (ImGui::IsKeyPressed(kb.deleteEntity)) {
             mHost.selection.pendingDelete = mHost.selection.selectedEntity;
+        }
+        // Ctrl+D：复制 primary 子树（hierarchy gap §3 P2，消费子树序列化基建）。
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
+            mHost.selection.pendingDuplicate = true;
         }
     }
 
@@ -440,6 +445,77 @@ void EditorRenderLayer::DrawEntityTreePanel()
         // Inspector 焦点拉回实体模式，不让 Material 子模式残留。
         mHost.assets.selectedAssetPath.clear();
         BeginRename(e);
+    }
+
+    // 帧末 Duplicate（Ctrl+D）：复制 primary 的子树。复用子树序列化基建
+    // （SaveSubtreeToString → LoadFromString，内部引用自动 remap 到克隆）。
+    // 可 undo：do = clone + 把克隆根 reparent 到原根的父（作 sibling）+ 选中；
+    // undo = DestroySubtree 克隆根（createdPtr 里"父不在 created 集"者）。
+    if (mHost.selection.pendingDuplicate) {
+        mHost.selection.pendingDuplicate = false;
+        using HC2 = Orange::Engine::Scene::HierarchyComponent;
+        auto* pW = mHost.scene.pWorld.get();
+        const Orange::Engine::Entity root = mHost.selection.selectedEntity;
+        if (pW != nullptr && root.IsValid() && pW->IsValid(root)) {
+            Orange::Engine::Scene::SaveOptions saveOpts;
+            saveOpts.assetRegistry          = mHost.assets.pAssets.get();
+            saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+            saveOpts.extraSerializers       = mHost.extraSerializers;
+            const std::vector<Orange::Engine::Entity> dupRoots{root};
+            auto blobRes = Orange::Engine::Scene::SaveSubtreeToString(*pW, dupRoots, saveOpts);
+            if (blobRes.IsOk()) {
+                const auto* rh = pW->GetComponent<HC2>(root);
+                const Orange::Engine::Entity origParent =
+                    (rh != nullptr) ? rh->parent : Orange::Engine::Entity::Invalid();
+                const std::string blob = blobRes.Value();
+                auto* pH = &mHost;
+                auto createdPtr = std::make_shared<std::vector<Orange::Engine::Entity>>();
+                mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                    "duplicate",
+                    [pH, blob, origParent, createdPtr]() {
+                        auto* w = pH->scene.pWorld.get();
+                        if (w == nullptr) { return; }
+                        Orange::Engine::Scene::LoadOptions lo;
+                        lo.assetRegistry          = pH->assets.pAssets.get();
+                        lo.animatorRegistry       = pH->assets.pAnimators.get();
+                        lo.namedMaterialInstances = &pH->assets.namedMaterialInstances;
+                        lo.extraSerializers       = pH->extraSerializers;
+                        std::vector<Orange::Engine::Entity> created;
+                        auto r = Orange::Engine::Scene::LoadFromString(blob, *w, lo, &created);
+                        if (r.IsErr()) { return; }
+                        *createdPtr = created;
+                        // 克隆根 = created 中父失效者（原父在子树外未序列化）。单根
+                        // duplicate 只有一个；reparent 到原根的父 + 选中。
+                        for (const auto ce : created) {
+                            const auto* eh = w->GetComponent<HC2>(ce);
+                            if (eh == nullptr || !eh->parent.IsValid()) {
+                                if (origParent.IsValid() && w->IsValid(origParent)) {
+                                    EditorHierarchy::ReparentTo(*w, ce, origParent);
+                                }
+                                pH->selection.selectedEntity = ce;
+                                pH->selection.ClearAdditional();
+                                pH->assets.selectedAssetPath.clear();
+                                break;
+                            }
+                        }
+                    },
+                    [pH, createdPtr]() {
+                        auto* w = pH->scene.pWorld.get();
+                        if (w == nullptr) { return; }
+                        // 删克隆：对每个"父不在 created 集内"的 created 实体（克隆子树
+                        // 根）DestroySubtree，其后代也在 created、由 DestroySubtree 一并销毁。
+                        for (const auto ce : *createdPtr) {
+                            if (!w->IsValid(ce)) { continue; }
+                            const auto* eh = w->GetComponent<HC2>(ce);
+                            const bool isRoot = (eh == nullptr) || !eh->parent.IsValid()
+                                || std::find(createdPtr->begin(), createdPtr->end(),
+                                             eh->parent) == createdPtr->end();
+                            if (isRoot) { EditorHierarchy::DestroySubtree(*w, ce); }
+                        }
+                    }
+                ));
+            }
+        }
     }
 }
 

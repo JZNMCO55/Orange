@@ -94,6 +94,10 @@ struct EditorSelection
 
     Orange::Engine::Entity pendingDelete = Orange::Engine::Entity::Invalid();
 
+    // Ctrl+D：帧末复制 primary 的子树（序列化 + 重映射内部引用，见
+    // SceneSerialization::SaveSubtreeToString / LoadFromString）。
+    bool pendingDuplicate = false;
+
     struct PendingReparent
     {
         // drop 落点：Into = 挂为 newParent 末子（newParent Invalid = 提到 root）；
