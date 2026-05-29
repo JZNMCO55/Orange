@@ -1671,6 +1671,21 @@ bool DoesAssetTriggerInspectorSubMode(const std::string& path)
 // 当前目录文件列表（不递归）。文件类型按扩展名前缀 [M]/[Mat]/[T]/[S]/[J]/[?]
 // 显示，点选写入 `assets.selectedAssetPath`；BeginDragDropSource 起 DnD payload
 // "ORANGE_ASSET" 携带 path 字符串供 v0.5 c4 Inspector AssetRef 字段接收。
+// 资产类型分类（供类型过滤下拉用）。返回值对齐 kAssetTypeNames 索引：
+// 0=All（占位，不用于文件）/ 1=Mesh / 2=Material / 3=Texture / 4=Sound /
+// 5=Scene / 6=Other。比 icon 分类粗（hdr/exr 归 Texture）——过滤够用。
+int AssetCategoryOf(const std::string& name, const std::string& ext)
+{
+    if (ext == ".mesh" || ext == ".obj") { return 1; }
+    if (ext == ".material") { return 2; }
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".ktx"
+        || ext == ".hdr" || ext == ".exr") { return 3; }
+    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac") { return 4; }
+    if (name.size() >= 11
+        && name.compare(name.size() - 11, 11, ".scene.json") == 0) { return 5; }
+    return 6;
+}
+
 void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
 {
     namespace fs = std::filesystem;
@@ -1695,7 +1710,14 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
     // 资产名搜索过滤（大小写不敏感，复用 ContainsCaseInsensitive）。空串=不过滤。
     // 资产变多后按名查找用（gap 报告 §2.2）。buffer 文件级 static（单 Assets 面板）。
     static char sAssetSearchBuf[128] = {};
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);  // 填满列宽（禁像素字面量）
+    static int  sAssetTypeFilter     = 0;  // 0=All；1..6 对齐 AssetCategoryOf
+    static const char* const kAssetTypeNames[] = {
+        "All", "Mesh", "Material", "Texture", "Sound", "Scene", "Other" };
+    ImGui::SetNextItemWidth(ImGui::CalcTextSize("Material____").x);  // 容下最长项+箭头
+    ImGui::Combo("##asset_type", &sAssetTypeFilter,
+                 kAssetTypeNames, IM_ARRAYSIZE(kAssetTypeNames));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);  // 填满剩余列宽（禁像素字面量）
     ImGui::InputTextWithHint("##asset_search", "search assets...",
                              sAssetSearchBuf, sizeof(sAssetSearchBuf));
     const std::string_view assetSearch{sAssetSearchBuf};
@@ -1705,9 +1727,11 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
     {
         const std::string path = f.generic_string();
         const std::string name = f.filename().string();
-        if (!Orange::Editor::Util::ContainsCaseInsensitive(name, assetSearch)) { continue; }
-        ++shownCount;
         const std::string ext  = f.extension().string();
+        if (!Orange::Editor::Util::ContainsCaseInsensitive(name, assetSearch)) { continue; }
+        if (sAssetTypeFilter != 0
+            && AssetCategoryOf(name, ext) != sAssetTypeFilter) { continue; }
+        ++shownCount;
 
         const char* icon = "[?]";
         if      (ext == ".mesh" || ext == ".obj")   icon = "[M]";
@@ -1929,10 +1953,10 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         }
     }
 
-    // 搜索过滤后无匹配（与"空目录"区分：空目录在函数顶部已早退）。
-    if (shownCount == 0 && !assetSearch.empty())
+    // 搜索 / 类型过滤后无匹配（与"空目录"区分：空目录在函数顶部已早退）。
+    if (shownCount == 0 && (!assetSearch.empty() || sAssetTypeFilter != 0))
     {
-        ImGui::TextDisabled("(no assets match \"%s\")", sAssetSearchBuf);
+        ImGui::TextDisabled("(no assets match current filter)");
     }
 
     // v1.1.1 · 面板空白处右键 "Create" 菜单（关闭
