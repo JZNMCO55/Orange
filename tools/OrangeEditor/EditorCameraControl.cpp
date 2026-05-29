@@ -158,54 +158,69 @@ bool FrameSelectedCamera(EditorHost& host)
     const Entity sel = host.selection.selectedEntity;
     if (!sel.IsValid() || host.scene.pWorld == nullptr) { return false; }
 
-    const auto* pXform = host.scene.pWorld->GetComponent<Scene::TransformComponent>(sel);
-    if (pXform == nullptr) { return false; }
+    // 多选 Frame（hierarchy gap 报告 §4 quick-win #3）：把整个选区（primary +
+    // additional set）的世界 bounds 合并。单选时仅一个 entity → 与原行为一致。
+    auto&     world = *host.scene.pWorld;
+    glm::vec3 wmn(std::numeric_limits<float>::max());
+    glm::vec3 wmx(std::numeric_limits<float>::lowest());
+    bool      any = false;
 
-    // ---- 默认（无 Renderable mesh）：对准 Transform 位置 + 默认 radius -----
-    // 灯光 / 空 entity 没有几何，至少把 pivot 移过去让它居中。
-    glm::vec3 center = pXform->position;
-    float     sphereR = 0.0f;
-
-    // ---- 有 Renderable mesh：算世界 AABB → 中心 + 包围球半径 --------------
-    const auto* pRC = host.scene.pWorld->GetComponent<Render::RenderableComponent>(sel);
-    if (pRC != nullptr && host.assets.pAssets != nullptr)
-    {
-        const auto* pMesh = host.assets.pAssets->Get(pRC->mesh);
-        if (pMesh != nullptr && !pMesh->Empty())
+    // 累加一个 entity 的世界 bounds：有 Renderable mesh → 世界 AABB（local 8
+    // 角点过 world matrix，与 picking 同款粗 AABB）；否则（灯光 / 空 entity）→
+    // 该 entity 的 Transform 位置作退化点。无 Transform → 不贡献。
+    auto accumulate = [&](Entity e) {
+        if (!world.IsValid(e)) { return; }
+        const auto* pXform = world.GetComponent<Scene::TransformComponent>(e);
+        if (pXform == nullptr) { return; }
+        bool        addedMesh = false;
+        const auto* pRC = world.GetComponent<Render::RenderableComponent>(e);
+        if (pRC != nullptr && host.assets.pAssets != nullptr)
         {
-            const auto& positions = pMesh->Positions();
-            if (!positions.empty())
+            const auto* pMesh = host.assets.pAssets->Get(pRC->mesh);
+            if (pMesh != nullptr && !pMesh->Empty())
             {
-                glm::vec3 mn(std::numeric_limits<float>::max());
-                glm::vec3 mx(std::numeric_limits<float>::lowest());
-                for (const auto& p : positions)
+                const auto& positions = pMesh->Positions();
+                if (!positions.empty())
                 {
-                    mn.x = std::min(mn.x, p.x);  mx.x = std::max(mx.x, p.x);
-                    mn.y = std::min(mn.y, p.y);  mx.y = std::max(mx.y, p.y);
-                    mn.z = std::min(mn.z, p.z);  mx.z = std::max(mx.z, p.z);
+                    glm::vec3 mn(std::numeric_limits<float>::max());
+                    glm::vec3 mx(std::numeric_limits<float>::lowest());
+                    for (const auto& p : positions)
+                    {
+                        mn.x = std::min(mn.x, p.x);  mx.x = std::max(mx.x, p.x);
+                        mn.y = std::min(mn.y, p.y);  mx.y = std::max(mx.y, p.y);
+                        mn.z = std::min(mn.z, p.z);  mx.z = std::max(mx.z, p.z);
+                    }
+                    const glm::mat4 worldMat = ComposeWorldMatrix(*pXform);
+                    const glm::vec3 corners[8] = {
+                        {mn.x, mn.y, mn.z}, {mx.x, mn.y, mn.z},
+                        {mn.x, mx.y, mn.z}, {mx.x, mx.y, mn.z},
+                        {mn.x, mn.y, mx.z}, {mx.x, mn.y, mx.z},
+                        {mn.x, mx.y, mx.z}, {mx.x, mx.y, mx.z},
+                    };
+                    for (const auto& c : corners)
+                    {
+                        const glm::vec3 w = glm::vec3(worldMat * glm::vec4(c, 1.0f));
+                        wmn = glm::min(wmn, w);
+                        wmx = glm::max(wmx, w);
+                    }
+                    addedMesh = true;
                 }
-                // local AABB 8 角点过 world matrix 取新 min/max（粗 AABB，
-                // 与 picking 同款；居中 / 取距离用途已足够）。
-                const glm::mat4 worldMat = ComposeWorldMatrix(*pXform);
-                const glm::vec3 corners[8] = {
-                    {mn.x, mn.y, mn.z}, {mx.x, mn.y, mn.z},
-                    {mn.x, mx.y, mn.z}, {mx.x, mx.y, mn.z},
-                    {mn.x, mn.y, mx.z}, {mx.x, mn.y, mx.z},
-                    {mn.x, mx.y, mx.z}, {mx.x, mx.y, mx.z},
-                };
-                glm::vec3 wmn(std::numeric_limits<float>::max());
-                glm::vec3 wmx(std::numeric_limits<float>::lowest());
-                for (const auto& c : corners)
-                {
-                    const glm::vec3 w = glm::vec3(worldMat * glm::vec4(c, 1.0f));
-                    wmn = glm::min(wmn, w);
-                    wmx = glm::max(wmx, w);
-                }
-                center  = (wmn + wmx) * 0.5f;
-                sphereR = glm::length(wmx - wmn) * 0.5f;
             }
         }
-    }
+        if (!addedMesh)
+        {
+            wmn = glm::min(wmn, pXform->position);
+            wmx = glm::max(wmx, pXform->position);
+        }
+        any = true;
+    };
+
+    accumulate(sel);
+    for (const auto a : host.selection.additionalSelectedEntities) { accumulate(a); }
+    if (!any) { return false; }
+
+    const glm::vec3 center  = (wmn + wmx) * 0.5f;
+    const float     sphereR = glm::length(wmx - wmn) * 0.5f;
 
     ec.pivot = center;
 
