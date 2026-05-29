@@ -107,6 +107,22 @@ void EditorRenderLayer::DrawEntityTreePanel()
         if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
             mHost.selection.pendingDuplicate = true;
         }
+        // Ctrl+C：把 primary 子树 SaveSubtreeToString 存进进程内剪贴板。
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C)) {
+            Orange::Engine::Scene::SaveOptions cpOpts;
+            cpOpts.assetRegistry          = mHost.assets.pAssets.get();
+            cpOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+            cpOpts.extraSerializers       = mHost.extraSerializers;
+            const std::vector<Orange::Engine::Entity> cpRoots{mHost.selection.selectedEntity};
+            auto blobRes = Orange::Engine::Scene::SaveSubtreeToString(
+                *mHost.scene.pWorld, cpRoots, cpOpts);
+            if (blobRes.IsOk()) { mEntityClipboard = blobRes.Value(); }
+        }
+        // Ctrl+V：剪贴板非空时帧末粘贴一份（作 primary 的 sibling）。
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V)
+            && !mEntityClipboard.empty()) {
+            mHost.selection.pendingPaste = true;
+        }
     }
 
     // v1.0.1 c3：每帧 build "singleton-style component overflow" 集合 —— Pipeline
@@ -592,6 +608,67 @@ void EditorRenderLayer::DrawEntityTreePanel()
                     }
                 ));
             }
+        }
+    }
+
+    // 帧末 Paste（Ctrl+V）：从剪贴板 blob 粘贴一份子树，作当前 primary 的
+    // sibling（无 primary → root）。LoadFromString 内部引用 remap；可 undo
+    // （do=clone+reparent+选中，undo=DestroySubtree 克隆根），同 Duplicate 模式。
+    if (mHost.selection.pendingPaste) {
+        mHost.selection.pendingPaste = false;
+        using HCp = Orange::Engine::Scene::HierarchyComponent;
+        auto* pWp = mHost.scene.pWorld.get();
+        if (pWp != nullptr && !mEntityClipboard.empty()) {
+            Orange::Engine::Entity tgtParent = Orange::Engine::Entity::Invalid();
+            const Orange::Engine::Entity primary = mHost.selection.selectedEntity;
+            if (primary.IsValid() && pWp->IsValid(primary)) {
+                const auto* ph = pWp->GetComponent<HCp>(primary);
+                tgtParent = (ph != nullptr) ? ph->parent : Orange::Engine::Entity::Invalid();
+            }
+            const std::string blob = mEntityClipboard;
+            auto* pH = &mHost;
+            auto createdPtr = std::make_shared<std::vector<Orange::Engine::Entity>>();
+            mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                "paste",
+                [pH, blob, tgtParent, createdPtr]() {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr) { return; }
+                    Orange::Engine::Scene::LoadOptions lo;
+                    lo.assetRegistry          = pH->assets.pAssets.get();
+                    lo.animatorRegistry       = pH->assets.pAnimators.get();
+                    lo.namedMaterialInstances = &pH->assets.namedMaterialInstances;
+                    lo.extraSerializers       = pH->extraSerializers;
+                    std::vector<Orange::Engine::Entity> created;
+                    if (Orange::Engine::Scene::LoadFromString(blob, *w, lo, &created).IsErr()) {
+                        return;
+                    }
+                    *createdPtr = created;
+                    for (const auto ce : created) {
+                        const auto* eh = w->GetComponent<HCp>(ce);
+                        if (eh == nullptr || !eh->parent.IsValid()) {
+                            if (tgtParent.IsValid() && w->IsValid(tgtParent)) {
+                                EditorHierarchy::ReparentTo(*w, ce, tgtParent);
+                            }
+                            pH->selection.selectedEntity = ce;
+                            pH->selection.ClearAdditional();
+                            pH->assets.selectedAssetPath.clear();
+                            break;
+                        }
+                    }
+                },
+                [pH, createdPtr]() {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr) { return; }
+                    for (const auto ce : *createdPtr) {
+                        if (!w->IsValid(ce)) { continue; }
+                        const auto* eh = w->GetComponent<HCp>(ce);
+                        const bool isRoot = (eh == nullptr) || !eh->parent.IsValid()
+                            || std::find(createdPtr->begin(), createdPtr->end(),
+                                         eh->parent) == createdPtr->end();
+                        if (isRoot) { EditorHierarchy::DestroySubtree(*w, ce); }
+                    }
+                }
+            ));
         }
     }
 }

@@ -98,6 +98,9 @@ struct EditorSelection
     // SceneSerialization::SaveSubtreeToString / LoadFromString）。
     bool pendingDuplicate = false;
 
+    // Ctrl+V：帧末从 EditorRenderLayer::mEntityClipboard 粘贴一份子树。
+    bool pendingPaste = false;
+
     struct PendingReparent
     {
         // drop 落点：Into = 挂为 newParent 末子（newParent Invalid = 提到 root）；

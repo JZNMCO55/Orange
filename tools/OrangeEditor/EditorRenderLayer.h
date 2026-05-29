@@ -360,6 +360,11 @@ public:
     std::vector<Orange::Engine::Entity> mTreeFlatOrder;
     std::vector<Orange::Engine::Entity> mTreeFlatOrderBuilding;
 
+    // Entity 剪贴板（Ctrl+C/V，消费子树序列化基建）：Ctrl+C 把 primary 子树
+    // SaveSubtreeToString 存进来，Ctrl+V 用 LoadFromString 粘贴（可多次）。
+    // 进程内 in-memory blob；空 = 剪贴板空。
+    std::string                         mEntityClipboard;
+
     // ---- Autosave 运行时（GAP-2026-05-29-editor-autosave-wiring）---------
     // mpAutosave：引擎侧 scheduler；首帧 lazy-init（此时 settings 已加载完）。
     //   autosaveEnabled=false 时保持 null，不推进。callback 捕 this 调 DoAutosave。
