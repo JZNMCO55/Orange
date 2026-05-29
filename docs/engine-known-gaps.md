@@ -2837,7 +2837,9 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 | 恢复信号设计 | = "autosave 文件存在"（正常 Save/New/Open/Discard 都删它，启动还在 = 上次崩溃/强杀）。不依赖 mtime，简单稳健 |
 | 坑 | `std::max(` 被 windows.h（经 glfw3native.h 引入）的 `max` 宏破坏 → 编译错 C2589/C2059，改 `(std::max)(` 抑制宏 |
 
-**验收**：`OrangeEditor.exe` 编译链接通过，invariant lint + drift 干净。⚠️ **崩溃恢复流程 dogfood-critical 待作者实机验**：(1) 编辑后等 ~180s（或临时调小 interval）看 console `[autosave] 自动存档`；(2) kill 进程模拟崩溃 → 重启 → 弹"发现自动存档"modal → 恢复后内容回来且标未保存 / 丢弃后无残留；(3) 手动 Save 后 autosave 删除、重启不再提示。**Settings 面板 autosave 开关 UI 未做**（默认值可用，改 `editor_settings.json` 可调），按需补。
+**验收**：`OrangeEditor.exe` 编译链接通过，invariant lint + drift 干净。⚠️ **崩溃恢复流程 dogfood-critical 待作者实机验**：(1) 编辑后等 ~180s（或 Settings 调小 interval）看 console `[autosave] 自动存档`；(2) kill 进程模拟崩溃 → 重启 → 弹"发现自动存档"modal → 恢复后内容回来且标未保存 / 丢弃后无残留；(3) 手动 Save 后 autosave 删除、重启不再提示。
+
+**Settings 面板 autosave 段 ✅**（后续 commit 补）：View>Settings 加 "Autosave" CollapsingHeader（Enable 勾选 + Interval / Min between DragFloat）；**Enable 开关 live 生效**——`UpdateAutosave` 改为每帧对齐 scheduler 存在性与 `settings.autosaveEnabled`（建/毁 scheduler），interval 改动在关再开重建时生效。
 
 ---
 

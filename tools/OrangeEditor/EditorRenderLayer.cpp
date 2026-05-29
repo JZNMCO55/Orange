@@ -1116,9 +1116,8 @@ void EditorRenderLayer::DoAutosave()
 
 void EditorRenderLayer::UpdateAutosave(float dt)
 {
-    // 首帧一次性：残留 autosave 检测（崩溃恢复）+ lazy-init scheduler（此时
-    // settings 已由 main 启动期加载完）。恢复检测独立于 autosaveEnabled——
-    // 即便现在关了 autosave，上次崩溃留下的存档仍应给用户恢复机会。
+    // 首帧一次性：残留 autosave 检测（崩溃恢复，独立于 autosaveEnabled——即便
+    // 现在关了 autosave，上次崩溃留下的存档仍应给用户恢复机会）。
     if (!mAutosaveInitChecked)
     {
         mAutosaveInitChecked = true;
@@ -1129,18 +1128,25 @@ void EditorRenderLayer::UpdateAutosave(float dt)
             std::ifstream originIn(AutosaveOriginPathStr());
             if (originIn) { std::getline(originIn, mAutosaveRecoverOrigin); }
         }
-        if (mHost.settings.autosaveEnabled)
-        {
-            Orange::Engine::Save::AutosaveScheduler::Config cfg;
-            // (std::max) 加括号抑制 windows.h 的 max 宏（本 TU 经 glfw3native.h
-            // 引入 windows.h，裸 std::max( 会被宏展开破坏）。
-            cfg.intervalSeconds = (std::max)(
-                10.0, static_cast<double>(mHost.settings.autosaveIntervalSeconds));
-            cfg.minSecondsBetween = (std::max)(
-                0.0, static_cast<double>(mHost.settings.autosaveMinIntervalSeconds));
-            mpAutosave = std::make_unique<Orange::Engine::Save::AutosaveScheduler>(
-                cfg, [this] { DoAutosave(); });
-        }
+    }
+
+    // 每帧把 scheduler 存在性与 settings.autosaveEnabled 对齐——让 Settings 面板
+    // 开关 live 生效。interval 改动在"关再开"重建时随之生效（见 Settings 段提示）。
+    // (std::max) 加括号抑制 windows.h 的 max 宏（本 TU 经 glfw3native.h 引入
+    // windows.h，裸 std::max( 会被宏展开破坏）。
+    if (mHost.settings.autosaveEnabled && mpAutosave == nullptr)
+    {
+        Orange::Engine::Save::AutosaveScheduler::Config cfg;
+        cfg.intervalSeconds = (std::max)(
+            10.0, static_cast<double>(mHost.settings.autosaveIntervalSeconds));
+        cfg.minSecondsBetween = (std::max)(
+            0.0, static_cast<double>(mHost.settings.autosaveMinIntervalSeconds));
+        mpAutosave = std::make_unique<Orange::Engine::Save::AutosaveScheduler>(
+            cfg, [this] { DoAutosave(); });
+    }
+    else if (!mHost.settings.autosaveEnabled && mpAutosave != nullptr)
+    {
+        mpAutosave.reset();
     }
 
     // 仅 Edit 态推进；Play/Paused 有独立快照机制不叠加。恢复 modal 未决前不
@@ -2288,6 +2294,24 @@ void EditorRenderLayer::DrawSettingsPanel()
         {
             s = EditorSettings{};
         }
+    }
+
+    if (ImGui::CollapsingHeader("Autosave", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Enable autosave", &s.autosaveEnabled);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "Edit 态下场景有未保存改动时周期写 .autosave；\n"
+                "崩溃 / 异常退出后下次启动可恢复。开关 live 生效。");
+        }
+        ImGui::BeginDisabled(!s.autosaveEnabled);
+        ImGui::DragFloat("Interval (s)", &s.autosaveIntervalSeconds,
+                         5.0f, 10.0f, 1800.0f, "%.0f");
+        ImGui::DragFloat("Min between (s)", &s.autosaveMinIntervalSeconds,
+                         1.0f, 0.0f, 600.0f, "%.0f");
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("Interval 改动在关闭再开启 autosave（或重启）后生效。");
     }
 
     if (ImGui::CollapsingHeader("Keybindings", ImGuiTreeNodeFlags_DefaultOpen))
