@@ -353,6 +353,13 @@ public:
     // 空 = 不过滤；非空时仅显示名字匹配 **或子树含匹配** 的节点（保留祖先链）。
     char                                mEntityTreeFilterBuf[128]{};
 
+    // Entity Tree 可见节点的 DFS 扁平序（hierarchy gap P1 Shift 范围选）：
+    // DrawEntityNodeRecursive 每帧把"实际渲染（过滤后 + 未折叠）的节点"按 DFS
+    // 顺序追加进 mTreeFlatOrderBuilding；帧首 swap 到 mTreeFlatOrder 供 Shift-click
+    // 用（上一帧完整序，树帧间不变时正确）。
+    std::vector<Orange::Engine::Entity> mTreeFlatOrder;
+    std::vector<Orange::Engine::Entity> mTreeFlatOrderBuilding;
+
     // ---- Autosave 运行时（GAP-2026-05-29-editor-autosave-wiring）---------
     // mpAutosave：引擎侧 scheduler；首帧 lazy-init（此时 settings 已加载完）。
     //   autosaveEnabled=false 时保持 null，不推进。callback 捕 this 调 DoAutosave。

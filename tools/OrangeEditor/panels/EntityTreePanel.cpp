@@ -73,6 +73,11 @@ void EditorRenderLayer::DrawEntityTreePanel()
         return;
     }
 
+    // Shift 范围选用：帧首把上一帧建好的可见节点 DFS 扁平序换入 mTreeFlatOrder，
+    // 开新一帧的累积。DrawEntityNodeRecursive 渲染每个可见节点时 push 进 building。
+    mTreeFlatOrder.swap(mTreeFlatOrderBuilding);
+    mTreeFlatOrderBuilding.clear();
+
     // Play / Paused 期间禁止结构性编辑；Edit 态才允许。
     // 这里统一给"一帧内所有结构性操作的入口"加防护；帧末 apply 处不
     // 再重复检查 —— 保证 pendingXxx 只在 canEdit 为 true 时被写入。
@@ -431,6 +436,10 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         return;
     }
 
+    // 本节点确定渲染 → 记入可见节点 DFS 扁平序（Shift 范围选用，按 pre-order
+    // 追加；折叠的子节点不会递归到这里，自然不入序）。
+    mTreeFlatOrderBuilding.push_back(entity);
+
     using HC = Orange::Engine::Scene::HierarchyComponent;
     using NameComponent = Orange::Engine::Scene::NameComponent;
 
@@ -516,11 +525,38 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         nodeMin = ImGui::GetItemRectMin();
         nodeMax = ImGui::GetItemRectMax();
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-            // v0.8 多选：Ctrl-click toggle 加入 / 移出 additional set；regular
-            // click 清空 additional + 切 primary。Shift-click 范围选择留到
-            // v0.8 patch（需要节点顺序扁平化映射）。
+            // 多选：Shift-click 范围选（hierarchy gap P1）；Ctrl-click toggle
+            // 加入/移出 additional；regular click 清空 additional + 切 primary。
             const ImGuiIO& io = ImGui::GetIO();
-            if (io.KeyCtrl && mHost.selection.selectedEntity.IsValid()
+            if (io.KeyShift && mHost.selection.selectedEntity.IsValid()
+                && entity != mHost.selection.selectedEntity)
+            {
+                // 用上一帧的可见节点扁平序，选中 anchor（当前 primary）↔ clicked
+                // 之间的全部可见节点。primary 保持 anchor 不变（重复 Shift-click
+                // 从同一 anchor 伸缩），区间内其余入 additional。
+                const auto& flat = mTreeFlatOrder;
+                int ai = -1;
+                int ci = -1;
+                for (int i = 0; i < static_cast<int>(flat.size()); ++i) {
+                    if (flat[i] == mHost.selection.selectedEntity) { ai = i; }
+                    if (flat[i] == entity)                          { ci = i; }
+                }
+                if (ai >= 0 && ci >= 0) {
+                    const int lo = (ai < ci) ? ai : ci;
+                    const int hi = (ai < ci) ? ci : ai;
+                    mHost.selection.ClearAdditional();
+                    for (int i = lo; i <= hi; ++i) {
+                        if (flat[i] != mHost.selection.selectedEntity) {
+                            mHost.selection.additionalSelectedEntities.push_back(flat[i]);
+                        }
+                    }
+                } else {
+                    // anchor/clicked 不在上帧序里（罕见：刚展开/过滤变化）→ 退化单选。
+                    mHost.selection.selectedEntity = entity;
+                    mHost.selection.ClearAdditional();
+                }
+            }
+            else if (io.KeyCtrl && mHost.selection.selectedEntity.IsValid()
                 && entity != mHost.selection.selectedEntity)
             {
                 mHost.selection.ToggleAdditional(entity);
