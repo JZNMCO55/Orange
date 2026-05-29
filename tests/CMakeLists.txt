@@ -154,6 +154,18 @@ target_include_directories(editor_group_transform_test PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
 orange_engine_set_compiler_options(editor_group_transform_test)
 add_test(NAME editor_group_transform_test COMMAND editor_group_transform_test)
+
+# EditorGizmoMath（tools/OrangeEditor）—— gizmo 反投影 / 最近点 / ray-plane /
+# 屏幕投影数学（translate/rotate/scale 三 gizmo 拖动+hit-test 地基）。纯 glm，
+# helper 源不属引擎 lib，编进测试 exe + include path（同 editor_hierarchy_test）。
+add_executable(editor_gizmo_math_test
+    editor/EditorGizmoMathTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/EditorGizmoMath.cpp")
+target_link_libraries(editor_gizmo_math_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(editor_gizmo_math_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(editor_gizmo_math_test)
+add_test(NAME editor_gizmo_math_test COMMAND editor_gizmo_math_test)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
 orange_engine_add_test(save_game_system_test    save/SaveGameSystemTest.cpp)
 orange_engine_add_test(save_path_test           save/SavePathTest.cpp)
