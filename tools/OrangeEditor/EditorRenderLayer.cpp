@@ -1703,10 +1703,21 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
     }
     std::sort(files.begin(), files.end());
 
+    // 资产名搜索过滤（大小写不敏感，复用 ContainsCaseInsensitive）。空串=不过滤。
+    // 资产变多后按名查找用（gap 报告 §2.2）。buffer 文件级 static（单 Assets 面板）。
+    static char sAssetSearchBuf[128] = {};
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);  // 填满列宽（禁像素字面量）
+    ImGui::InputTextWithHint("##asset_search", "search assets...",
+                             sAssetSearchBuf, sizeof(sAssetSearchBuf));
+    const std::string_view assetSearch{sAssetSearchBuf};
+    int shownCount = 0;
+
     for (const auto& f : files)
     {
         const std::string path = f.generic_string();
         const std::string name = f.filename().string();
+        if (!ContainsCaseInsensitive(name, assetSearch)) { continue; }
+        ++shownCount;
         const std::string ext  = f.extension().string();
 
         const char* icon = "[?]";
@@ -1927,6 +1938,12 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         {
             ImGui::SetTooltip("%s", path.c_str());
         }
+    }
+
+    // 搜索过滤后无匹配（与"空目录"区分：空目录在函数顶部已早退）。
+    if (shownCount == 0 && !assetSearch.empty())
+    {
+        ImGui::TextDisabled("(no assets match \"%s\")", sAssetSearchBuf);
     }
 
     // v1.1.1 · 面板空白处右键 "Create" 菜单（关闭
