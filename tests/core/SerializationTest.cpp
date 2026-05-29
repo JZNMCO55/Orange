@@ -10,12 +10,14 @@
 #include <orange/engine/core/SchemaVersion.h>
 #include <orange/engine/core/Serialization.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 using Orange::Engine::BinaryReader;
 using Orange::Engine::BinaryWriter;
@@ -120,6 +122,43 @@ void TestJsonRoundTrip()
     std::fprintf(stdout, "  [PASS] JSON round-trip\n");
 }
 
+void TestJsonListKeys()
+{
+    // 构造嵌套对象 components/{Transform, Renderable, UnknownThing}（模拟 Scene
+    // 序列化结构），验证 ListKeys 枚举对象直接 key——Scene::Load 用它对未注册
+    // component 发 warning（数据丢失防护）。
+    JsonWriter writer;
+    writer.WriteInt("components/Transform/x", 1);
+    writer.WriteInt("components/Renderable/mesh", 2);
+    writer.WriteBool("components/UnknownThing/flag", true);
+    writer.WriteString("topLevel", "v");
+
+    auto readerResult = JsonReader::FromString(writer.Dump());
+    assert(readerResult.IsOk());
+    const JsonReader& reader = readerResult.Value();
+
+    const std::vector<std::string> keys = reader.ListKeys("components");
+    assert(keys.size() == 3);  // 顺序不假设，按集合判定
+    const auto has = [&](const char* k) {
+        return std::find(keys.begin(), keys.end(), std::string{k}) != keys.end();
+    };
+    assert(has("Transform") && has("Renderable") && has("UnknownThing"));
+
+    // 不存在的 path → 空。
+    assert(reader.ListKeys("nope").empty());
+    // 指向非对象叶子（int）→ 空。
+    assert(reader.ListKeys("components/Transform/x").empty());
+    // 指向数组（WriteFloatArray）→ 空（ListKeys 仅对象）。
+    JsonWriter arrW;
+    const float v[2] = {1.0f, 2.0f};
+    arrW.WriteFloatArray("arr", v, 2);
+    auto arrReader = JsonReader::FromString(arrW.Dump());
+    assert(arrReader.IsOk());
+    assert(arrReader.Value().ListKeys("arr").empty());
+
+    std::fprintf(stdout, "  [PASS] JSON ListKeys\n");
+}
+
 void TestJsonParseError()
 {
     auto result = JsonReader::FromString("{ this is not json ");
@@ -201,6 +240,7 @@ int main()
     TestSchemaCanReadMajorMismatch();
     TestSchemaCanReadMinorTooNew();
     TestJsonRoundTrip();
+    TestJsonListKeys();
     TestJsonParseError();
     TestBinaryRoundTrip();
     std::fprintf(stdout, "[SerializationTest] all tests passed.\n");

@@ -212,6 +212,22 @@ std::size_t JsonReader::ArraySize(std::string_view path) const
     return node->size();
 }
 
+std::vector<std::string> JsonReader::ListKeys(std::string_view path) const
+{
+    const Json* node = FindByPath(mpImpl->root, path);
+    if (node == nullptr || !node->is_object())
+    {
+        return {};
+    }
+    std::vector<std::string> keys;
+    keys.reserve(node->size());
+    for (auto it = node->begin(); it != node->end(); ++it)
+    {
+        keys.push_back(it.key());
+    }
+    return keys;
+}
+
 bool JsonReader::ReadBool(std::string_view path, bool& out) const
 {
     const Json* node = FindByPath(mpImpl->root, path);

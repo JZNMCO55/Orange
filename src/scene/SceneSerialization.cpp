@@ -396,10 +396,30 @@ Result<void, ResultCode> Load(std::string_view path,
             }
         }
 
-        // 未识别的 component key（forward-compat 路径）此处理论上要
-        // warn + skip。当前 JsonReader 没有"列出对象 key"接口，所以仅
-        // 做"跳过"行为，不发 warning——后续若需要逐个识别未知字段，
-        // 再扩 reader API。
+        // 未识别的 component key（forward-compat / 未注册 component）：
+        // JsonReader::ListKeys 枚举 components 对象的直接 key，对任何未被内置
+        // serializer 或 extraSerializer 认领的 key 发 warning——否则 round-trip
+        // （用不认识该 component 的 editor / 进程打开再保存）会**静默丢弃**该
+        // component 的数据。仅 warn 不阻断 Load（skip 行为不变，保持 forward-compat）。
+        // 已知名集合从 serializers + extraSerializers 的 .name 现算（含 PureData +
+        // BackendDependent；后者本 Pass 尚未处理但仍是已知名，不该误报）。
+        const std::string componentsBase = base + "/components";
+        for (const std::string& key : reader.ListKeys(componentsBase))
+        {
+            const bool known =
+                std::any_of(serializers.begin(), serializers.end(),
+                            [&](const auto& s) { return s.name == key; })
+                || std::any_of(options.extraSerializers.begin(),
+                               options.extraSerializers.end(),
+                               [&](const auto& s) { return s.name == key; });
+            if (!known)
+            {
+                ORANGE_LOG_WARN(
+                    "[Scene::Load] entity #{} 含未注册 component '{}'，已跳过——"
+                    "重新保存会丢失该 component 数据（无对应 serializer 注册）",
+                    i, key);
+            }
+        }
     }
 
     // 5) Pass 2：Backend-dependent 组件。

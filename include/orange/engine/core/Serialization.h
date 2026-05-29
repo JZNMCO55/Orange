@@ -77,6 +77,11 @@ public:
     // 路径分隔符仍然是 '/'；纯数字路径段在数组节点上当作下标。
     std::size_t ArraySize(std::string_view path) const;
 
+    // 列出 `path` 处对象节点的直接 key（成员名），用于"枚举未知字段"等
+    // forward-compat 场景（如 Scene::Load 对未注册 component 发 warning）。
+    // path 不存在 / 不指向对象 → 返回空 vector。key 顺序 = JSON 内成员顺序。
+    std::vector<std::string> ListKeys(std::string_view path) const;
+
     // 严格读取——key 缺失或类型不对都返回 false。失败时不修改 out
     // 引用，因此调用方预先填好的默认值仍然保留。
     bool ReadBool(std::string_view path, bool& out) const;
