@@ -106,6 +106,7 @@ add_executable(OrangeEditor
     ColliderDebugDraw.cpp
     ColliderVertexEdit.cpp
     CoplanarDetector.cpp
+    EditorAssetReferences.cpp
     EditorCameraControl.cpp
     EditorHierarchy.cpp
     EditorGizmoMath.cpp

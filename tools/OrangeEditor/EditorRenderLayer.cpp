@@ -7,6 +7,7 @@
 
 #include "BuiltinAssets.h"  // BuildNamedMaterialInstances（v1.0.1 c11 拆出）
 #include "DemoWorld.h"      // SeedDemoWorld / SeedPbrShowcaseWorld
+#include "EditorAssetReferences.h"  // FindAssetReferences（资产引用只读扫描）
 #include "EditorHierarchy.h"
 #include "EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Console + Asset 搜索共用）
 #include "VulkanLoaderShim.h"
@@ -1736,6 +1737,36 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
     ImGui::InputTextWithHint("##asset_search", "search assets...",
                              sAssetSearchBuf, sizeof(sAssetSearchBuf));
     const std::string_view assetSearch{sAssetSearchBuf};
+
+    // 选中资产的引用计数（只读依赖扫描，删/改资产前看牵连——gap §2.2 依赖
+    // 追踪第一步；写侧 rename/delete + 批量改引用留 focused session）。仅选中
+    // 某文件时显示；hover 列出引用它的 (entity, component.field)。
+    if (!assets.selectedAssetPath.empty())
+    {
+        const auto refs = Orange::Editor::FindAssetReferences(host, assets.selectedAssetPath);
+        if (refs.empty())
+        {
+            ImGui::TextDisabled("selected asset: no entity references");
+        }
+        else
+        {
+            ImGui::TextDisabled("selected asset: referenced by %zu field(s)", refs.size());
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::BeginTooltip();
+                for (const auto& r : refs)
+                {
+                    ImGui::Text("entity #%u — %s.%s",
+                                static_cast<unsigned>(
+                                    static_cast<std::uint32_t>(r.entity.Value())),
+                                r.componentType, r.fieldName);
+                }
+                ImGui::EndTooltip();
+            }
+        }
+        ImGui::Separator();
+    }
+
     int shownCount = 0;
 
     for (const auto& f : files)
