@@ -144,6 +144,16 @@ target_include_directories(editor_math_util_test PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
 orange_engine_set_compiler_options(editor_math_util_test)
 add_test(NAME editor_math_util_test COMMAND editor_math_util_test)
+
+# EditorGroupTransform（tools/OrangeEditor）—— header-only 多选群组变换 pivot
+# 数学基元（绕 pivot rotate/scale + 质心）。仅需 glm（经 orange_engine PUBLIC
+# 传递）+ include path，无 helper .cpp。同 editor_math_util_test 模式。
+add_executable(editor_group_transform_test editor/EditorGroupTransformTest.cpp)
+target_link_libraries(editor_group_transform_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(editor_group_transform_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(editor_group_transform_test)
+add_test(NAME editor_group_transform_test COMMAND editor_group_transform_test)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
 orange_engine_add_test(save_game_system_test    save/SaveGameSystemTest.cpp)
 orange_engine_add_test(save_path_test           save/SavePathTest.cpp)
