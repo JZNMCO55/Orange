@@ -11,6 +11,8 @@
 #include "orange/engine/scene/LayerComponent.h"
 #include "orange/engine/scene/World.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <utility>
 
 namespace Orange::Engine::Scene
@@ -80,6 +82,50 @@ void WorldPartition::ResetLayers(std::vector<LayerInfo> layers)
     mLayers = std::move(layers);
     RebuildIndex();
     EnsureDefault();
+}
+
+bool WorldPartition::MoveLayer(std::string_view id, int delta)
+{
+    if (delta == 0)
+    {
+        return false;
+    }
+    auto it = mIndex.find(std::string{id});
+    if (it == mIndex.end())
+    {
+        return false;
+    }
+    const std::ptrdiff_t cur  = static_cast<std::ptrdiff_t>(it->second);
+    const std::ptrdiff_t last = static_cast<std::ptrdiff_t>(mLayers.size()) - 1;
+    std::ptrdiff_t       dst  = cur + delta;
+    if (dst < 0)
+    {
+        dst = 0;
+    }
+    if (dst > last)
+    {
+        dst = last;
+    }
+    if (dst == cur)
+    {
+        // 已在目标边界，没真正移动——不重建索引、不报 dirty。
+        return false;
+    }
+    // 把 cur 处元素挪到 dst：std::rotate 平移中间区段，其余条目相对序不变。
+    if (dst > cur)
+    {
+        std::rotate(mLayers.begin() + cur,
+                    mLayers.begin() + cur + 1,
+                    mLayers.begin() + dst + 1);
+    }
+    else
+    {
+        std::rotate(mLayers.begin() + dst,
+                    mLayers.begin() + cur,
+                    mLayers.begin() + cur + 1);
+    }
+    RebuildIndex();
+    return true;
 }
 
 bool WorldPartition::HasLayer(std::string_view id) const noexcept

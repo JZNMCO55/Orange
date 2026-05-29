@@ -152,6 +152,10 @@ void EditorRenderLayer::DrawLayersPanel()
     // GetLayers() 返回 const& 到 manifest 内部 vector；遍历期间不能调
     // RemoveLayer 否则迭代器失效 —— 用 pendingRemoveId 延迟到帧末执行。
     std::string pendingRemoveId;
+    // reorder 同理延迟：MoveLayer 会 rotate mLayers，迭代途中改它会让
+    // range-for 迭代器失效。pendingMoveDelta = -1 上移 / +1 下移。
+    std::string pendingMoveId;
+    int         pendingMoveDelta = 0;
 
     // per-layer entity count（gap 报告 §2.7 Layer 子项）：按 LayerComponent.layerId
     // 计数（持有该组件的实体）。每帧重算（实体数通常不大，O(N) 可忽略）。
@@ -165,6 +169,7 @@ void EditorRenderLayer::DrawLayersPanel()
     }
 
     const auto& layers = mHost.scene.partition.GetLayers();
+    std::size_t layerIdx = 0;
     for (const auto& layer : layers) {
         ImGui::PushID(layer.id.c_str());
 
@@ -205,12 +210,38 @@ void EditorRenderLayer::DrawLayersPanel()
         ImGui::TextDisabled("[%zu]",
                             cit != layerCounts.end() ? cit->second : std::size_t{0});
 
-        // [×] 删除按钮（Codicons CLOSE）—— default 禁掉。
-        const bool isDefault = (layer.id == kDefaultLayerId);
+        // ---- 右对齐按钮簇：[↑ 上移] [↓ 下移] [× 删除] ----
+        // 边界禁用：第一条无法上移、最后一条无法下移；default 不可删。
+        const bool  isDefault = (layer.id == kDefaultLayerId);
+        const bool  isFirst   = (layerIdx == 0);
+        const bool  isLast    = (layerIdx + 1 == layers.size());
+        const char* upIcon    = Orange::Editor::Theme::Icon::GetArrowUp();
+        const char* downIcon  = Orange::Editor::Theme::Icon::GetArrowDown();
         const char* closeIcon = Orange::Editor::Theme::Icon::GetClose();
-        const float buttonW   = ImGui::CalcTextSize(closeIcon).x
-                              + ImGui::GetStyle().FramePadding.x * 2.0f;
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - buttonW);
+        const float pad        = ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float spacing    = ImGui::GetStyle().ItemSpacing.x;
+        const float clusterW   = ImGui::CalcTextSize(upIcon).x + pad
+                               + ImGui::CalcTextSize(downIcon).x + pad
+                               + ImGui::CalcTextSize(closeIcon).x + pad
+                               + spacing * 2.0f;
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - clusterW);
+
+        ImGui::BeginDisabled(!canEdit || isFirst);
+        if (ImGui::SmallButton(upIcon)) {
+            pendingMoveId    = layer.id;
+            pendingMoveDelta = -1;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+
+        ImGui::BeginDisabled(!canEdit || isLast);
+        if (ImGui::SmallButton(downIcon)) {
+            pendingMoveId    = layer.id;
+            pendingMoveDelta = +1;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+
         ImGui::BeginDisabled(!canEdit || isDefault);
         if (ImGui::SmallButton(closeIcon)) {
             pendingRemoveId = layer.id;
@@ -221,6 +252,7 @@ void EditorRenderLayer::DrawLayersPanel()
         }
 
         ImGui::PopID();
+        ++layerIdx;
     }
 
     ImGui::End();
@@ -238,5 +270,20 @@ void EditorRenderLayer::DrawLayersPanel()
             mHost.cmdStack.Clear();
             mHost.scene.dirty = true;
         }
+    }
+
+    // 帧末执行 reorder —— 走 cmdStack 可 Undo（纯顺序变更，逆操作 = 反向
+    // MoveLayer）。上/下按钮只发 delta = ±1 且边界已禁用，所以 forward 必
+    // 然成功移动 1 步、undo 反移 1 步精确还原。dirty 由 cmdStack onChanged
+    // 钩子自动置（layer 顺序进 manifest 序列化）。
+    if (!pendingMoveId.empty() && pendingMoveDelta != 0) {
+        auto*             pH    = &mHost;
+        const std::string idStr = pendingMoveId;
+        const int         delta = pendingMoveDelta;
+        mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+            "move_layer",
+            [pH, idStr, delta]() { pH->scene.partition.MoveLayer(idStr, delta); },
+            [pH, idStr, delta]() { pH->scene.partition.MoveLayer(idStr, -delta); }
+        ));
     }
 }

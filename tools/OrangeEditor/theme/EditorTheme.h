@@ -222,7 +222,8 @@ const char* GetStop();     // ICON_CI_DEBUG_STOP
 const char* GetClose();    // ICON_CI_CLOSE / CHROME_CLOSE，用于 "×" 取消按钮
 const char* GetSearch();   // ICON_CI_SEARCH，用于 "Pick" asset 选择
 const char* GetAdd();      // ICON_CI_ADD，用于 "+" 新增按钮
-const char* GetArrowUp();  // ICON_CI_ARROW_UP，用于 ".." 上级目录
+const char* GetArrowUp();   // ICON_CI_ARROW_UP，用于 ".." 上级目录 / 列表上移
+const char* GetArrowDown(); // ICON_CI_ARROW_DOWN，用于列表下移
 const char* GetFolder();   // ICON_CI_FOLDER
 const char* GetGear();     // ICON_CI_GEAR，用于 Settings 入口
 

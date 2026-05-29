@@ -195,7 +195,8 @@ const char* GetStop()    { return ICON_CI_DEBUG_STOP;  }
 const char* GetClose()   { return ICON_CI_CLOSE;       }
 const char* GetSearch()  { return ICON_CI_SEARCH;      }
 const char* GetAdd()     { return ICON_CI_ADD;         }
-const char* GetArrowUp() { return ICON_CI_ARROW_UP;    }
+const char* GetArrowUp()   { return ICON_CI_ARROW_UP;   }
+const char* GetArrowDown() { return ICON_CI_ARROW_DOWN; }
 const char* GetFolder()  { return ICON_CI_FOLDER;      }
 const char* GetGear()    { return ICON_CI_GEAR;        }
 

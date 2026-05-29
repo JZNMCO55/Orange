@@ -96,6 +96,13 @@ public:
     // 自动补回（若入参里没有）。
     void ResetLayers(std::vector<LayerInfo> layers);
 
+    // 把 id 对应的 layer 在 manifest 顺序里移动 delta 步（正=向后 / UI 下移，
+    // 负=向前 / UI 上移）。目标下标 clamp 到 [0, count-1]，其余条目相对序
+    // 保持。返回 false 表示 id 不存在、delta==0、或已在边界无法移动。
+    // 仅改顺序，不动任何 layer 字段或 entity 归属；Editor UI 的 up/down
+    // 按钮即调本函数（delta = ±1）。GetLayers() 顺序即随之变化。
+    bool MoveLayer(std::string_view id, int delta);
+
     bool HasLayer(std::string_view id) const noexcept;
     const LayerInfo* GetLayer(std::string_view id) const noexcept;
     LayerInfo*       GetLayer(std::string_view id) noexcept;
