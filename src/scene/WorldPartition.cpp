@@ -235,6 +235,16 @@ bool WorldPartition::IsEntityHidden(Entity entity) const noexcept
     return false;
 }
 
+void WorldPartition::ClearEntityHidden() noexcept
+{
+    mHiddenEntities.clear();
+}
+
+std::size_t WorldPartition::HiddenEntityCount() const noexcept
+{
+    return mHiddenEntities.size();
+}
+
 void WorldPartition::SetLayerOf(World& world, Entity entity, std::string_view layerId)
 {
     if (!world.IsValid(entity))

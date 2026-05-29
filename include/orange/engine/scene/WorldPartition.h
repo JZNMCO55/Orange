@@ -144,6 +144,11 @@ public:
     void SetEntityHidden(Entity entity, bool hidden);
     bool IsEntityHidden(Entity entity) const noexcept;
 
+    // 全部取消隐藏 + 当前隐藏数。编辑器"Unhide All (N)"逃生口用：批量藏了
+    // 很多实体后，逐个 unhide 太繁；一键清空。N==0 时菜单项 disable。
+    void        ClearEntityHidden() noexcept;
+    std::size_t HiddenEntityCount() const noexcept;
+
     // 把 entity 挂到指定 layer（添加或修改 LayerComponent）。layerId 在
     // manifest 里不存在不阻塞——只是接受字符串，warn 由调用方关心；
     // 这条 API 故意保持薄，便于 deserialization 不依赖 manifest 已加载完。

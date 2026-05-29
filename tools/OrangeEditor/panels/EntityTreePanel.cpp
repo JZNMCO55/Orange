@@ -123,6 +123,22 @@ void EditorRenderLayer::DrawEntityTreePanel()
             && !mEntityClipboard.empty()) {
             mHost.selection.pendingPaste = true;
         }
+        // Ctrl+X：剪切 = 拷进剪贴板（同 Ctrl+C）+ 帧末删除（走可撤销删除路径，
+        // 见 pendingDelete 处理）。仅在拷贝成功时才删，避免"剪了但没进剪贴板"。
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X)
+            && mHost.selection.selectedEntity.IsValid()) {
+            Orange::Engine::Scene::SaveOptions cutOpts;
+            cutOpts.assetRegistry          = mHost.assets.pAssets.get();
+            cutOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+            cutOpts.extraSerializers       = mHost.extraSerializers;
+            const std::vector<Orange::Engine::Entity> cutRoots{mHost.selection.selectedEntity};
+            auto cutRes = Orange::Engine::Scene::SaveSubtreeToString(
+                *mHost.scene.pWorld, cutRoots, cutOpts);
+            if (cutRes.IsOk()) {
+                mEntityClipboard               = cutRes.Value();
+                mHost.selection.pendingDelete  = mHost.selection.selectedEntity;
+            }
+        }
     }
 
     // v1.0.1 c3：每帧 build "singleton-style component overflow" 集合 —— Pipeline
@@ -236,6 +252,19 @@ void EditorRenderLayer::DrawEntityTreePanel()
                                     EditorSelection::PendingCreateKind::Light, true};
         }
         ImGui::EndDisabled();
+        // Unhide All 逃生口：批量 Hide 后一键全部显示。N==0 disable。
+        // 不受 canEdit 约束——显隐是 view 态，只读场景也该能恢复可见性。
+        {
+            const std::size_t hiddenN = mHost.scene.partition.HiddenEntityCount();
+            ImGui::Separator();
+            ImGui::BeginDisabled(hiddenN == 0);
+            char unhideLabel[48];
+            std::snprintf(unhideLabel, sizeof(unhideLabel), "Unhide All (%zu)", hiddenN);
+            if (ImGui::MenuItem(unhideLabel)) {
+                mHost.scene.partition.ClearEntityHidden();
+            }
+            ImGui::EndDisabled();
+        }
         ImGui::EndPopup();
     }
 
@@ -1044,6 +1073,42 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         ImGui::Separator();
         if (ImGui::MenuItem("Rename", "F2")) {
             BeginRename(entity);
+        }
+        // 剪贴板 / 复制组（hierarchy gap §3）：键盘已有 Ctrl+C/X/V/D，这里补右键
+        // 入口（快捷键不可见，菜单提供可发现性）。统一作用于"右键的这个节点"——
+        // Copy/Cut 自包含序列化它的子树；Duplicate/Paste 先把选中切到该节点（清
+        // additional）再走帧末 pendingDuplicate/pendingPaste，保证"右键谁就对谁"。
+        {
+            auto serializeSubtree = [&](Orange::Engine::Entity root) {
+                Orange::Engine::Scene::SaveOptions o;
+                o.assetRegistry          = mHost.assets.pAssets.get();
+                o.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+                o.extraSerializers       = mHost.extraSerializers;
+                const std::vector<Orange::Engine::Entity> rs{root};
+                return Orange::Engine::Scene::SaveSubtreeToString(
+                    *mHost.scene.pWorld, rs, o);
+            };
+            if (ImGui::MenuItem("Copy", "Ctrl+C")) {
+                auto r = serializeSubtree(entity);
+                if (r.IsOk()) { mEntityClipboard = r.Value(); }
+            }
+            if (ImGui::MenuItem("Cut", "Ctrl+X")) {
+                auto r = serializeSubtree(entity);
+                if (r.IsOk()) {
+                    mEntityClipboard              = r.Value();
+                    mHost.selection.pendingDelete = entity;
+                }
+            }
+            if (ImGui::MenuItem("Paste", "Ctrl+V", false, !mEntityClipboard.empty())) {
+                mHost.selection.selectedEntity = entity;
+                mHost.selection.ClearAdditional();
+                mHost.selection.pendingPaste = true;
+            }
+            if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+                mHost.selection.selectedEntity = entity;
+                mHost.selection.ClearAdditional();
+                mHost.selection.pendingDuplicate = true;
+            }
         }
         // 批量重命名（hierarchy gap §2 / P2）：右键的是 primary 且多选 → 给整个
         // 选区按 "base_NNN" 编号重命名（3 位零填充，primary 起 001，顺序 = primary
