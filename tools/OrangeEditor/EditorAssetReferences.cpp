@@ -57,4 +57,52 @@ std::vector<AssetReference> FindAssetReferences(EditorHost& host, std::string_vi
     return refs;
 }
 
+std::size_t RemapAssetReferences(EditorHost& host, std::string_view fromPath, std::string_view toPath)
+{
+    std::size_t changed = 0;
+    if (fromPath.empty() || toPath.empty()) { return 0; }
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return 0; }
+
+    auto& reg          = pWorld->Registry();
+    auto& schemaReg    = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
+    const std::string toStr{toPath};
+
+    for (auto e : reg.view<entt::entity>())
+    {
+        const Orange::Engine::Entity entity = Orange::Engine::World::FromEntt(e);
+        for (const auto& schema : schemaReg.All())
+        {
+            if (schema.get == nullptr) { continue; }
+
+            bool hasAssetRef = false;
+            for (const auto& prop : schema.properties)
+            {
+                if (prop.assetRefGet != nullptr && prop.assetRefSet != nullptr)
+                {
+                    hasAssetRef = true;
+                    break;
+                }
+            }
+            if (!hasAssetRef) { continue; }
+
+            void* component = schema.get(*pWorld, entity);
+            if (component == nullptr) { continue; }
+
+            for (const auto& prop : schema.properties)
+            {
+                if (prop.assetRefGet == nullptr || prop.assetRefSet == nullptr) { continue; }
+                std::string cur;
+                prop.assetRefGet(component, host.assets, &cur);
+                if (cur == fromPath)
+                {
+                    prop.assetRefSet(component, host.assets, &toStr);
+                    ++changed;
+                }
+            }
+        }
+    }
+    return changed;
+}
+
 }  // namespace Orange::Editor

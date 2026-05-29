@@ -11,6 +11,7 @@
 #include "EditorHierarchy.h"
 #include "EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Console + Asset 搜索共用）
 #include "VulkanLoaderShim.h"
+#include "command/LambdaCommand.h"  // 资产 rename 可 undo（文件+.meta+引用）
 #include "command/SetFieldValueCommand.h"
 #include "MaterialFileIO.h"  // v1.1.1 · Asset Browser Create Material modal
 #include "import/ImportDispatcher.h"
@@ -1989,6 +1990,108 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                         oldPath, path, std::move(apply)));
             }
             ImGui::EndDisabled();
+
+            // ---- Rename（仅 handle 类资产：mesh/texture/sound/普通 data）----
+            // material 因 MaterialInstance ptr 跨 BuildNamedMaterialInstances
+            // 重建身份会变、rename 不可靠 → 禁用；.scene.json 路径由场景系统
+            // 管理也不在此 rename。可逆：cmdStack do = fs::rename 文件 + .meta +
+            // RemapAssetReferences(old→new)（handle 类经 assetRefSet 内部 Load
+            // 新 path 拿新 handle）；undo = 反向。filesystem mutation 但 reversible。
+            ImGui::Separator();
+            {
+                namespace fs = std::filesystem;
+                const bool isMaterial = (ext == ".material");
+                const bool isScene = (name.size() >= 11
+                    && name.compare(name.size() - 11, 11, ".scene.json") == 0);
+                const bool renamable = !isMaterial && !isScene && !ext.empty();
+                if (!renamable)
+                {
+                    ImGui::TextDisabled(isMaterial
+                        ? "(rename: material not supported — instance remap)"
+                        : "(rename: not supported for this asset)");
+                }
+                else
+                {
+                    static char sAssetRenameBuf[256] = {};
+                    if (ImGui::IsWindowAppearing())
+                    {
+                        std::snprintf(sAssetRenameBuf, sizeof(sAssetRenameBuf),
+                                      "%s", name.c_str());
+                    }
+                    ImGui::SetNextItemWidth(ImGui::CalcTextSize("MMMMMMMMMMMMMMMMMMMM").x);
+                    ImGui::InputText("##asset_rename", sAssetRenameBuf,
+                                     sizeof(sAssetRenameBuf));
+                    const std::string newName = sAssetRenameBuf;
+                    const auto        slash    = path.find_last_of('/');
+                    const std::string dir      = (slash != std::string::npos)
+                        ? path.substr(0, slash) : std::string{};
+                    const std::string newPath  = dir.empty()
+                        ? newName : (dir + "/" + newName);
+                    std::error_code rec;
+                    const bool sameExt = (fs::path(newName).extension().string() == ext);
+                    const bool exists  = fs::exists(newPath, rec);
+                    const bool valid   = !newName.empty() && newName != name
+                                      && sameExt && !exists;
+
+                    const auto refs = Orange::Editor::FindAssetReferences(host, path);
+                    ImGui::TextDisabled("renames file + .meta + %zu reference(s)",
+                                        refs.size());
+                    if (!sameExt && !newName.empty())
+                    {
+                        ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertWarn(),
+                                           "keep extension %s", ext.c_str());
+                    }
+                    else if (exists)
+                    {
+                        ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertWarn(),
+                                           "target already exists");
+                    }
+
+                    ImGui::BeginDisabled(!valid);
+                    if (ImGui::Button("Rename"))
+                    {
+                        const std::string oldP    = path;
+                        const std::string newP    = newPath;
+                        const std::string oldMeta = ::Orange::Editor::Import::MetaPathFor(oldP);
+                        const std::string newMeta = ::Orange::Editor::Import::MetaPathFor(newP);
+                        std::error_code   mec;
+                        const bool        hasMeta = fs::exists(oldMeta, mec) && !mec;
+                        auto*             pH      = &host;
+                        host.cmdStack.Push(std::make_unique<LambdaCommand>(
+                            "rename_asset",
+                            [pH, oldP, newP, oldMeta, newMeta, hasMeta]() {
+                                std::error_code ec;
+                                std::filesystem::rename(oldP, newP, ec);
+                                if (ec) { return; }  // rename 失败 → 不动引用
+                                if (hasMeta) {
+                                    std::error_code mec2;
+                                    std::filesystem::rename(oldMeta, newMeta, mec2);
+                                }
+                                Orange::Editor::RemapAssetReferences(*pH, oldP, newP);
+                                if (pH->assets.selectedAssetPath == oldP) {
+                                    pH->assets.selectedAssetPath = newP;
+                                }
+                            },
+                            [pH, oldP, newP, oldMeta, newMeta, hasMeta]() {
+                                std::error_code ec;
+                                std::filesystem::rename(newP, oldP, ec);
+                                if (ec) { return; }
+                                if (hasMeta) {
+                                    std::error_code mec2;
+                                    std::filesystem::rename(newMeta, oldMeta, mec2);
+                                }
+                                Orange::Editor::RemapAssetReferences(*pH, newP, oldP);
+                                if (pH->assets.selectedAssetPath == newP) {
+                                    pH->assets.selectedAssetPath = oldP;
+                                }
+                            }));
+                        ORANGE_LOG_INFO("[OrangeEditor] renamed asset '{}' -> '{}'",
+                                        oldP, newP);
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndDisabled();
+                }
+            }
 
             ImGui::EndPopup();
         }

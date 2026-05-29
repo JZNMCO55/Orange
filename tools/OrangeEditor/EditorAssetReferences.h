@@ -38,6 +38,14 @@ struct AssetReference
 // 找出 World 内所有引用 assetPath 的字段。assetPath 空 / 无 World → 空 vector。
 std::vector<AssetReference> FindAssetReferences(EditorHost& host, std::string_view assetPath);
 
+// 把所有引用 fromPath 的组件字段改指向 toPath（prop.assetRefSet），返回改了
+// 几个字段。资产 rename 时用：先 fs::rename 文件，再 Remap(old→new) 让组件
+// 引用跟上——handle 类（mesh/texture/sound）的 assetRefSet 内部 Load(toPath)
+// 拿新 handle，故**要求 toPath 文件已存在**（rename 必须先于 Remap）。可逆：
+// undo 时 fs::rename 回 + Remap(new→old)。仅作用 assetRefGet+assetRefSet 双非空
+// 的字段（material 的 ptr 语义不在此可靠 remap，rename 入口已排除 material 文件）。
+std::size_t RemapAssetReferences(EditorHost& host, std::string_view fromPath, std::string_view toPath);
+
 }  // namespace Orange::Editor
 
 #endif  // ORANGE_EDITOR_EDITOR_ASSET_REFERENCES_H
