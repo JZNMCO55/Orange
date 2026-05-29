@@ -462,16 +462,32 @@ void EditorRenderLayer::DrawScenePanel()
                     const float ndcY = (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
                     const Orange::Engine::Entity picked =
                         PickEntityAt(mHost, glm::vec2(ndcX, ndcY), aspect);
-                    mHost.selection.selectedEntity = picked;
-                    // 切实体 → Euler 编辑缓存失效（与 Quat case 行为一致）
-                    mHost.selection.transformEulerCacheEntity =
-                        Orange::Engine::Entity::Invalid();
-                    // B3 修：选了 valid 实体 → 清 asset 选中，让 Inspector 从
-                    // Material 子模式切回实体模式（互斥选择，匹配 Cocos/Unity
-                    // 惯例：viewport 点选总是把焦点拉回实体 Inspector）。
-                    if (picked.IsValid())
+                    // 视口多选（gap 报告 §3 P0）：Ctrl+点**另一个**实体 = 加入 /
+                    // 移出 additional set（与 Entity Tree Ctrl-toggle 同款
+                    // ToggleAdditional，gizmo/Inspector 仍只作用 primary，与既有
+                    // 多选语义一致）；普通单击 = 切 primary + 清 additional（点空白
+                    // = 全清）；Ctrl+空白 / Ctrl+当前 primary = 保持不变（no-op）。
+                    const ImGuiIO& pickIo = ImGui::GetIO();
+                    if (pickIo.KeyCtrl && picked.IsValid()
+                        && mHost.selection.selectedEntity.IsValid()
+                        && picked != mHost.selection.selectedEntity)
                     {
-                        mHost.assets.selectedAssetPath.clear();
+                        mHost.selection.ToggleAdditional(picked);
+                    }
+                    else if (!pickIo.KeyCtrl)
+                    {
+                        mHost.selection.selectedEntity = picked;
+                        mHost.selection.ClearAdditional();
+                        // 切 primary → Euler 编辑缓存失效（与 Quat case 一致）。
+                        mHost.selection.transformEulerCacheEntity =
+                            Orange::Engine::Entity::Invalid();
+                        // B3 修：选了 valid 实体 → 清 asset 选中，让 Inspector 从
+                        // Material 子模式切回实体模式（互斥选择，匹配 Cocos/Unity
+                        // 惯例：viewport 点选总是把焦点拉回实体 Inspector）。
+                        if (picked.IsValid())
+                        {
+                            mHost.assets.selectedAssetPath.clear();
+                        }
                     }
                 }
             }
