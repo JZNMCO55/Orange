@@ -763,10 +763,17 @@ int main()
     // ImGui_ImplGlfw_InitForVulkan(install_callbacks=true) 不安装
     // WindowCloseCallback（仅 Key/Char/MouseButton/Scroll/Cursor*/Focus
     // /Monitor），所以本 callback 独占该 hook。
-    glfwSetWindowUserPointer(glfwWindow, &editorHost);
+    //
+    // ⚠️ 不能用 glfwSetWindowUserPointer 存 EditorHost —— 该 user pointer 归引擎
+    // Window 所有（Window::Create 设为 Window::Impl*，引擎所有 GLFW 回调经 ImplFrom
+    // 当 Window::Impl* 读取）。覆盖它会让引擎 OnChar/OnKey/OnSize 等把 EditorHost
+    // 误读成 Window::Impl —— OnChar 路径 impl->callback 调到垃圾 std::function 直接
+    // 崩溃，OnSize 还会往 EditorHost 写 width/height 静默腐蚀内存。改用文件级静态
+    // 指针：non-capturing lambda 可按名引用静态变量、仍能转成 GLFW C 回调函数指针。
+    static EditorHost* spEditorHost = &editorHost;
     glfwSetWindowCloseCallback(glfwWindow, [](GLFWwindow* w)
     {
-        auto* pHost = static_cast<EditorHost*>(glfwGetWindowUserPointer(w));
+        EditorHost* pHost = spEditorHost;
         if (pHost == nullptr) { return; }
         if (pHost->scene.dirty)
         {
@@ -784,9 +791,9 @@ int main()
     // 安装 DropCallback —— 本回调独占该 hook。callback 内仅 push 路径到
     // EditorHost.pendingImports；真正的 Dispatch 在 EditorRenderLayer::
     // ApplyPendingImports 帧末 drain（与 dialog 模态阻塞节奏一致）。
-    glfwSetDropCallback(glfwWindow, [](GLFWwindow* w, int count, const char** paths)
+    glfwSetDropCallback(glfwWindow, [](GLFWwindow*, int count, const char** paths)
     {
-        auto* pHost = static_cast<EditorHost*>(glfwGetWindowUserPointer(w));
+        EditorHost* pHost = spEditorHost;
         if (pHost == nullptr || paths == nullptr) { return; }
         for (int i = 0; i < count; ++i)
         {

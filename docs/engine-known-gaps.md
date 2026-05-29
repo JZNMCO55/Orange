@@ -2696,3 +2696,32 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 ### 留待后续（同根因、未在本 fix 内动）
 
 - **双击 entry-body 重命名**（`IsItemHovered()` 在 chip 之后）与**右键 context menu**（`BeginPopupContextItem` 走 `IsItemHovered`，imgui.cpp 12596）**疑似同款 chip 锚点 bug** —— 双击节点名 / 右键节点名可能不触发，只在 chip 上才触发。因有 F2 / Del / Rename 键盘 + 菜单兜底路径长期没暴露。本 fix 只动了用户报障的 DnD；这两处需各自把 query / 菜单锚点也前移到 node。等用户确认是否同样失灵后处理（避免改没法 GUI 实测的区域）。
+
+---
+
+## BUG-2026-05-29-editor-clobbers-glfw-user-pointer ✅
+
+- **发现方**：用户 dogfood —— **右键节点 → Rename 崩溃**，崩在 `Window.cpp` `Dispatch` 的 `impl->callback(event)`
+- **发现日期**：2026-05-29
+- **一句话定性**：`tools/OrangeEditor/main.cpp` 用 `glfwSetWindowUserPointer(glfwWindow, &editorHost)` 把 GLFW window user pointer 设成 `EditorHost*`，**但该 user pointer 归引擎 `Window` 所有**——`Window::Create` 设为 `Window::Impl*`，引擎全部 GLFW 回调（`OnChar`/`OnKey`/`OnSize`/`OnMouseButton`…）经 `ImplFrom`=`glfwGetWindowUserPointer` 当 `Window::Impl*` 读。被覆盖后引擎回调把 `EditorHost` 误读成 `Window::Impl`。
+- **状态**：**✅ 2026-05-29 落地**（编辑器侧改用文件级静态 `spEditorHost` 给 close/drop 回调用，不再占 user pointer）
+
+### 崩溃机理（调试器实证）
+
+ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(ImplFrom(handle), CharEvent)`。`ImplFrom` 返回被覆盖的 `&editorHost`（栈地址）当 `Window::Impl*`。调试器实测 `impl = 0x..{ pHandle=0xf, title=<NULL>, width=4294967295 }`——纯垃圾。`impl->callback` 读到 `EditorHost` 在 `offsetof(Window::Impl,callback)` 处的字节当 `std::function` 调用 → 崩。
+
+"为何偏偏 rename 崩、平时不崩"：那段被误当 callback 的 `EditorHost` 字节随编辑器状态变化——平时读出来像空 `std::function`（guard 失败 no-op），rename 时恰好非空 → guard 通过 → 调垃圾崩溃。典型 UB（同一坏指针、不同字节）。
+
+**附带危害**：`OnSize`（`Window.cpp:129`）会往 `impl->width/height` **写**——每次窗口 resize 都往 `EditorHost` 偏移 40/44 写垃圾，静默腐蚀内存（可能是其他偶发诡异行为的根源）。
+
+### 修复
+
+`main.cpp`：删掉 `glfwSetWindowUserPointer(glfwWindow, &editorHost)`，user pointer 留给引擎（保持 `Window::Impl*`）。close / drop 这两个编辑器独占的 GLFW C 回调改用文件级静态 `static EditorHost* spEditorHost = &editorHost;`（non-capturing lambda 可按名引用静态变量、仍转成函数指针）。修复后引擎回调读到正确 `Window::Impl`：`OnChar` 走真 `callback`（AppHost lambda → layer `OnEvent`，editor 对 char 直接 return false）不再崩，`OnSize` 写回真 `Impl` 不再腐蚀 `EditorHost`，Esc-quit via OnEvent 也恢复。
+
+### 关键改动文件
+
+`tools/OrangeEditor/main.cpp`（删 user-pointer 覆盖 + 加 `spEditorHost` + close/drop 改用之）/ `docs/engine-known-gaps.md`（本条目）。纯编辑器侧修复（不改引擎 Window），build-green；**交互验证待用户实机右键 Rename + 拖拽确认**。
+
+### 关联
+
+与 [[BUG-2026-05-29-entity-tree-dnd-anchored-to-trailing-chip]] 同一轮 dogfood 暴露：前者是 DnD 锚点放错位置，本条是 user pointer 被抢。两者都因"编辑器密集交互前没人深用 tree / 打字"长期潜伏。
