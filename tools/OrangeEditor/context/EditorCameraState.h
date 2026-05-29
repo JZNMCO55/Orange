@@ -17,6 +17,8 @@
 
 #include <glm/vec3.hpp>
 
+#include <array>
+
 struct EditorCameraState
 {
     glm::vec3 pivot{0.0f, 0.5f, 0.0f};  // 轨道中心，暂定场景中心
@@ -26,6 +28,23 @@ struct EditorCameraState
     float     fovYDegrees = 45.0f;
     float     zNear       = 0.1f;
     float     zFar        = 100.0f;
+
+    // Saved views（相机书签，gap 报告 §4 #4）—— 快照 7 个视图参数（不含 dragging
+    // / 灵敏度等 live 输入态）。View 菜单 "Camera Bookmarks" Save / Go 消费。
+    // 当前 **in-memory 单 session**（跨重启持久化留待后续：序列化进 editor_settings.json）。
+    struct ViewBookmark
+    {
+        glm::vec3 pivot{0.0f, 0.5f, 0.0f};
+        float     azimuth     = 0.0f;
+        float     elevation   = 0.19f;
+        float     radius      = 8.15f;
+        float     fovYDegrees = 45.0f;
+        float     zNear       = 0.1f;
+        float     zFar        = 100.0f;
+        bool      valid       = false;  // false = 该槽未保存过，Go 置灰
+    };
+    static constexpr int kBookmarkSlots = 4;
+    std::array<ViewBookmark, kBookmarkSlots> savedViews{};
 
     // 操作灵敏度（编辑器经验值，未来可暴露给 Preferences）
     float     lookSensitivity = 0.0035f;  // 弧度 / pixel

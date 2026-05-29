@@ -720,6 +720,57 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::MenuItem("Settings", nullptr, &mShowSettingsPanel);
         ImGui::MenuItem("Profiler", nullptr, &mShowProfilerPanel);
         ImGui::MenuItem("Render Settings", nullptr, &mShowRenderSettingsPanel);
+
+        // 相机书签（gap 报告 §4 #4）：快照 / 跳转 viewport 轨道相机视角。
+        // in-memory 单 session（持久化留待后续）。
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Camera Bookmarks"))
+        {
+            auto& cam = mHost.camera;
+            if (ImGui::BeginMenu("Save current to"))
+            {
+                for (int i = 0; i < EditorCameraState::kBookmarkSlots; ++i)
+                {
+                    const std::string label =
+                        "Slot " + std::to_string(i + 1)
+                        + (cam.savedViews[i].valid ? " (overwrite)" : "");
+                    if (ImGui::MenuItem(label.c_str()))
+                    {
+                        auto& bm       = cam.savedViews[i];
+                        bm.pivot       = cam.pivot;
+                        bm.azimuth     = cam.azimuth;
+                        bm.elevation   = cam.elevation;
+                        bm.radius      = cam.radius;
+                        bm.fovYDegrees = cam.fovYDegrees;
+                        bm.zNear       = cam.zNear;
+                        bm.zFar        = cam.zFar;
+                        bm.valid       = true;
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Go to"))
+            {
+                for (int i = 0; i < EditorCameraState::kBookmarkSlots; ++i)
+                {
+                    const auto& bm = cam.savedViews[i];
+                    const std::string label = "Slot " + std::to_string(i + 1);
+                    if (ImGui::MenuItem(label.c_str(), nullptr, false, bm.valid))
+                    {
+                        // 只还原视图参数，不动 dragging / 灵敏度（live 输入态）。
+                        cam.pivot       = bm.pivot;
+                        cam.azimuth     = bm.azimuth;
+                        cam.elevation   = bm.elevation;
+                        cam.radius      = bm.radius;
+                        cam.fovYDegrees = bm.fovYDegrees;
+                        cam.zNear       = bm.zNear;
+                        cam.zFar        = bm.zFar;
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndMenu();
     }
 
