@@ -179,22 +179,38 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 链遍历。同帧内 delete + reparent 同时发生时 delete 优先（被
     // delete 的实体即使有 pendingReparent 也失效）。
     if (mHost.selection.pendingDelete.IsValid()) {
-        // 额外检查实体是否仍在 registry 中 —— Undo 可能已销毁它，此时
-        // pendingDelete 持有的是死实体句柄，DestroySubtree 会崩溃。
-        if (mHost.scene.pWorld->IsValid(mHost.selection.pendingDelete)) {
-            if (mHost.selection.selectedEntity == mHost.selection.pendingDelete) {
-                mHost.selection.selectedEntity = Orange::Engine::Entity::Invalid();
+        auto& sel = mHost.selection;
+        auto* pW  = mHost.scene.pWorld.get();
+        // 批量删除（hierarchy gap 报告 §3 P0：多选批量操作消费 additional set）：
+        // 删的若是 primary 且有多选 → 连同整个选区一起删；否则只删单个。
+        // 各 entity 单独 IsValid 守卫（删父后子已失效、Undo 已销毁的死句柄都跳过，
+        // DestroySubtree 不会撞死实体）。删除整体不可撤销 → 与单删一致清 undo 栈。
+        std::vector<Orange::Engine::Entity> toDelete;
+        toDelete.push_back(sel.pendingDelete);
+        if (sel.pendingDelete == sel.selectedEntity) {
+            for (const auto a : sel.additionalSelectedEntities) {
+                if (a != sel.pendingDelete) { toDelete.push_back(a); }
             }
-            if (mHost.selection.renamingEntity == mHost.selection.pendingDelete) {
-                CancelRename();
+        }
+        bool anyDeleted = false;
+        for (const auto e : toDelete) {
+            if (pW != nullptr && pW->IsValid(e)) {
+                if (sel.selectedEntity == e) {
+                    sel.selectedEntity = Orange::Engine::Entity::Invalid();
+                }
+                if (sel.renamingEntity == e) { CancelRename(); }
+                EditorHierarchy::DestroySubtree(*pW, e);
+                anyDeleted = true;
             }
-            EditorHierarchy::DestroySubtree(*mHost.scene.pWorld, mHost.selection.pendingDelete);
-            // 删除操作不可撤销（子树已析构）—— 清掉 undo 历史，防止后续 Undo
-            // 尝试访问已销毁 entity 的 SetFieldValueCommand lambda。
+        }
+        if (anyDeleted) {
+            sel.ClearAdditional();
+            // 删除不可撤销（子树已析构）—— 清 undo 历史，防止后续 Undo 访问
+            // 已销毁 entity 的命令 lambda。
             mHost.cmdStack.Clear();
         }
-        mHost.selection.pendingDelete = Orange::Engine::Entity::Invalid();
-        mHost.selection.pendingReparent.valid = false;  // 同帧 reparent 已无意义
+        sel.pendingDelete            = Orange::Engine::Entity::Invalid();
+        sel.pendingReparent.valid    = false;  // 同帧 reparent 已无意义
     }
     if (mHost.selection.pendingReparent.valid) {
         using PR = EditorSelection::PendingReparent;
@@ -663,29 +679,46 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                                               ? (item + "  (current)")
                                               : item;
                 if (ImGui::MenuItem(label.c_str(), nullptr, false, !isCurrent)) {
-                    const std::string oldId{curId};
                     const std::string newId = info.id;
-                    auto*       pH         = &mHost;
-                    Orange::Engine::Entity capturedEntity = entity;
-                    mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
-                        "set_entity_layer",
-                        [pH, capturedEntity, newId]() {
-                            if (auto* pW = pH->scene.pWorld.get()) {
-                                if (pW->IsValid(capturedEntity)) {
-                                    pH->scene.partition.SetLayerOf(
-                                        *pW, capturedEntity, newId);
-                                }
-                            }
-                        },
-                        [pH, capturedEntity, oldId]() {
-                            if (auto* pW = pH->scene.pWorld.get()) {
-                                if (pW->IsValid(capturedEntity)) {
-                                    pH->scene.partition.SetLayerOf(
-                                        *pW, capturedEntity, oldId);
-                                }
-                            }
+                    auto*             pH    = &mHost;
+                    // 批量 move-to-layer（hierarchy gap 报告 §3 P0）：右键的是
+                    // primary 且多选 → 移整个选区；否则单个。每 entity 记自身
+                    // oldId，整批打成一条 LambdaCommand = 一次 Undo。
+                    std::vector<std::pair<Orange::Engine::Entity, std::string>> moves;
+                    auto addMove = [&](Orange::Engine::Entity e) {
+                        if (!mHost.scene.pWorld->IsValid(e)) { return; }
+                        std::string old{mHost.scene.partition.GetLayerOf(*mHost.scene.pWorld, e)};
+                        if (old != newId) { moves.emplace_back(e, std::move(old)); }
+                    };
+                    addMove(entity);
+                    if (entity == mHost.selection.selectedEntity) {
+                        for (const auto a : mHost.selection.additionalSelectedEntities) {
+                            addMove(a);
                         }
-                    ));
+                    }
+                    if (!moves.empty()) {
+                        mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                            "set_entity_layer",
+                            [pH, moves, newId]() {
+                                if (auto* pW = pH->scene.pWorld.get()) {
+                                    for (const auto& [e, oldId] : moves) {
+                                        if (pW->IsValid(e)) {
+                                            pH->scene.partition.SetLayerOf(*pW, e, newId);
+                                        }
+                                    }
+                                }
+                            },
+                            [pH, moves]() {
+                                if (auto* pW = pH->scene.pWorld.get()) {
+                                    for (const auto& [e, oldId] : moves) {
+                                        if (pW->IsValid(e)) {
+                                            pH->scene.partition.SetLayerOf(*pW, e, oldId);
+                                        }
+                                    }
+                                }
+                            }
+                        ));
+                    }
                 }
             }
             ImGui::EndMenu();
