@@ -16,6 +16,7 @@
 #include "../BuiltinAssets.h"   // EnsureMaterialInstance（Material AssetRef lazy 注册）
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
+#include "../command/LambdaCommand.h"
 #include "../command/SetFieldValueCommand.h"
 #include "../plugin/IEditorInspectorPlugin.h"
 #include "../theme/EditorTheme.h"
@@ -38,8 +39,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Orange::Editor::Schema
 {
@@ -184,6 +187,60 @@ void BroadcastFieldToSelection(EditorHost&                  host,
             other, fieldKey, otherOld, newVal,
             MakeFieldApply<T>(&host, other, &schema, prop.set)));
     }
+}
+
+// RemoveComponent-undo 基建：移除组件前，按 schema 字段把当前值快照成一组
+// "restorer" 闭包（每个闭包持有该字段的值副本 + setter，给定新组件指针即把
+// 该字段写回）。undo 时先 schema.add 重建默认组件、再跑所有 restorer 还原
+// 原始字段值——实现"删组件可 Undo 且数据不丢"（gap 报告 §2.4/P1 破坏性
+// undo，限实体存活的组件级，绕开删实体的 EnTT id 稳定性难题）。
+//
+// 覆盖普通 get/set 字段（Float/Int/UInt/Bool/Vec2/3/4/Quat/Enum/EntityRef）
+// + AssetRef（assetRefGet/Set，restorer 持 host 拿 EditorAssetContext）。
+// group-only / readOnly（无 set）字段跳过（无从还原）。
+std::vector<std::function<void(void*)>>
+CaptureComponentState(EditorHost& host, const ComponentSchema& schema, const void* component)
+{
+    std::vector<std::function<void(void*)>> restorers;
+    for (const auto& prop : schema.properties)
+    {
+        // AssetRef：用 assetRefGet 取路径字符串，restorer 经 host.assets 写回。
+        if (prop.assetRefGet != nullptr && prop.assetRefSet != nullptr)
+        {
+            std::string v;
+            prop.assetRefGet(component, host.assets, &v);
+            const PropertyDescriptor::AssetRefSetFn setFn = prop.assetRefSet;
+            auto* pH = &host;
+            restorers.push_back([v, setFn, pH](void* c) { setFn(c, pH->assets, &v); });
+            continue;
+        }
+        if (prop.get == nullptr || prop.set == nullptr) { continue; }
+        const PropertyDescriptor::SetFn setFn = prop.set;
+        switch (prop.type)
+        {
+            case PropertyType::Float:
+            { float v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::Int:
+            case PropertyType::Enum:
+            { int v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::UInt:
+            { unsigned int v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::Bool:
+            { bool v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::Vec2:
+            { glm::vec2 v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::Vec3:
+            { glm::vec3 v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::Vec4:
+            { glm::vec4 v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::Quat:
+            { glm::quat v{1.0f, 0.0f, 0.0f, 0.0f}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::EntityRef:
+            { Orange::Engine::Entity v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            default: break;
+        }
+    }
+    return restorers;
 }
 
 // 单个 property 的 ImGui 控件渲染 + 命令推送。**调用前提**：caller 已在
@@ -1093,19 +1150,49 @@ void DrawComponentSchemaSection(EditorHost&                  host,
 
     if (requestRemove && schema.remove != nullptr)
     {
-        schema.remove(*pWorld, entity);
         // Transform Euler 缓存与 selectedEntity 联动；任意 component 被
-        // Remove 都顺手 invalidate 一下：避免 Remove Transform 后再
-        // AddComponent 时 cacheEntity 仍等于当前 entity → Quat case 直接
-        // 走旧 cache 值（导致显示错位）。invalidate 无害——下一帧 Quat
-        // case 看到 cacheEntity != entity 会从最新 quat 重算 Euler；如果
-        // 该 entity 已经没有 TransformComponent，Quat case 根本不会进入。
+        // Remove 都顺手 invalidate（Quat case 下一帧从最新 quat 重算 Euler）。
         host.selection.transformEulerCacheEntity =
             Orange::Engine::Entity::Invalid();
-        // 破坏性操作清掉 undo 历史——同 v0.2 期 DrawInspectorXxx 移除路径
-        // 的一贯做法（命令栈内的字段编辑 lambda 仍指向已 destroy 的
-        // component 槽位，下一次 Undo 会触发 entt assert）。
-        host.cmdStack.Clear();
+
+        if (schema.add != nullptr && schema.get != nullptr)
+        {
+            // 可 Undo：移除前把组件字段快照成 restorer；undo = schema.add 重建
+            // 默认组件 + 跑 restorer 还原原值。component 是本段当前组件指针。
+            // 不再 Clear cmdStack——remove 在栈顶，Undo 先命中它重建组件，之后
+            // 才轮到更早的字段编辑命令（届时组件已在，schema.get 非空安全）。
+            auto                       restorers = CaptureComponentState(host, schema, component);
+            auto*                      pH        = &host;
+            const ComponentSchema::RemoveFn removeFn = schema.remove;
+            const ComponentSchema::AddFn    addFn    = schema.add;
+            const ComponentSchema::GetFn    getFn    = schema.get;
+            host.cmdStack.Push(std::make_unique<LambdaCommand>(
+                "remove_component",
+                [pH, entity, removeFn]() {
+                    if (pH->scene.pWorld) { removeFn(*pH->scene.pWorld, entity); }
+                    pH->selection.transformEulerCacheEntity =
+                        Orange::Engine::Entity::Invalid();
+                },
+                [pH, entity, addFn, getFn, restorers]() {
+                    addFn(*pH, entity);
+                    if (pH->scene.pWorld) {
+                        void* c = getFn(*pH->scene.pWorld, entity);
+                        if (c != nullptr) {
+                            for (const auto& r : restorers) { r(c); }
+                        }
+                    }
+                    pH->selection.transformEulerCacheEntity =
+                        Orange::Engine::Entity::Invalid();
+                }));
+        }
+        else
+        {
+            // 无 add fn（不可重建，如 Name / Hierarchy / Animator）→ 保留原
+            // 破坏性路径：直接 remove + Clear（栈内旧命令引用已失效 component
+            // 槽位，无法安全 Undo）。
+            schema.remove(*pWorld, entity);
+            host.cmdStack.Clear();
+        }
     }
 }
 
