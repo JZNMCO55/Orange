@@ -35,12 +35,13 @@ OrangeEditor 已是一个**架构纪律扎实、数据通路（schema-first Insp
 - **可测核心硬化**：`EditorGizmoMath`（三 gizmo 反投影/最近点/ray-plane/屏幕投影地基）补 `editor_gizmo_math_test`。
 - **Layer DnD entity→layer**（§2.7 Layer 子系统收尾）：拖 Entity Tree 实体落 layer 名 → SetLayerOf 改归属，drop target 锚名字 Text 避 anchor 坑，帧末 cmdStack 可 Undo。Layer 四件套 count/rename/reorder/DnD 全闭环。
 - **RemoveComponent 可 Undo**（§2.4/P1 破坏性 undo 的组件级）：`CaptureComponentState` 移除前按 schema 字段快照值，undo = schema.add 重建 + restorer 还原原值；可重建组件不再 Clear cmdStack。删实体级（需 EnTT id 稳定 / prefab P2）未做。
-- **资产引用只读扫描**（§2.2 依赖追踪只读半场）：`EditorAssetReferences::FindAssetReferences` 全实体 × AssetRef-schema 扫引用，资产浏览器"referenced by N"+ hover 列引用方。删/改资产前看牵连。**只读零文件系统风险**；写侧 rename/delete 留下方。
+- **资产引用只读扫描**（§2.2 依赖追踪只读半场）：`EditorAssetReferences::FindAssetReferences` 全实体 × AssetRef-schema 扫引用，资产浏览器"referenced by N"+ hover 列引用方。
+- **资产 rename**（§2.2 写半场可逆核心）：右键 context menu 内联 rename + 校验 + 引用计数；`RemapAssetReferences` 重扫改引用；cmdStack 可 undo（fs::rename 文件+.meta+Remap，顺序：先 rename 再 Remap）。仅 handle 类（mesh/texture/sound）；material 禁用（ptr 身份）；触碰真实文件但可逆。
 - **Quick-Win**：Save-As-New 材质 / view-toggle 持久化 / 相机书签持久化 / Console 大小写搜索 + 时间戳列 / 未注册 component warning / Play snapshot 唯一名。#5 HDR-color、#6 RegisterComponentSchema 经 verify-gate 判 speculative / stale-doc **不做**。
 
 **剩余（focused-session + 增量 dogfood，不盲堆到本已 25-deep 未验证批）**：
 - **破坏性 undo 的删实体级** —— 删整个实体需 EnTT id 稳定引用基建（绑 GUID/prefab P2，`SceneSerialization` 仅 whole-world）。组件级 RemoveComponent-undo 已落地（见上）。
-- **资产删除/重命名 的"写半场"** —— 只读依赖扫描内核已落地（见上 §1.5）。剩余仅 filesystem mutation 部分：rename/delete 磁盘文件 + .meta sidecar + 批量改引用（复用扫描结果）+ AssetRegistry handle 重映射 + 全程 undo。**唯一会不可逆改文件系统**（dogfood 在操作后才发生，兜不住误删/孤立），且需先调查 AssetRegistry/.meta/handle 交互 → 必须 focused session 谨慎做，不一次性盲推。
+- **资产 delete** —— 依赖扫描 + rename（可逆写）已落地（见上 §1.5）；剩余仅 delete。delete 真不可逆（fs 删无备份）→ 需设计决策：软删除（move 到 trash 可 undo）+ 清引用并捕获恢复（Remap 不适用，清空后扫不到，需 capture 原 refs 列表，扩 AssetReference 带 schema/prop 或 re-resolve）+ 强确认显示牵连。是需慎重拍板的 focused session 件。
 - **§3 P2 全部** —— 跨仓（OrangeRender / 引擎序列化前置），ADR-009 禁同 session 双向。
 
 ---
