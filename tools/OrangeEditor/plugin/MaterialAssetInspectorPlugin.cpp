@@ -16,6 +16,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -461,27 +462,27 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     ImGui::Separator();
     const bool templateDirty = (host.assets.editingTemplateName != originalTemplate);
     const bool dirty         = templateDirty || host.assets.editingMaterialUniformDirty;
-    ImGui::BeginDisabled(!dirty);
-    if (ImGui::Button("Save"))
-    {
+
+    // 从当前编辑态构造 MaterialFileData（Save 写回原路径 / Save As New 写新路
+    // 径共用）。从运行时 instance 抽 override（含 PBR 编辑的 uBaseColor / uMRA），
+    // templateName 走用户在 Combo 的选择（instance 持有的 Material* 仍可能是旧
+    // 模板——Combo 切 template 不重建 instance，运行时重启才切，避免悬挂 Renderable）。
+    auto buildMaterialData = [&]() {
         ::Orange::Editor::Material::MaterialFileData data;
         if (liveInstance != nullptr)
         {
-            // 从运行时 instance 抽 override（含 PBR 编辑的 uBaseColor /
-            // uMRA），再覆盖 templateName 字段——templateName 走用户在
-            // Combo 的选择，而 instance 持有的 Material* 仍可能是旧模板
-            // （Combo 切换 template 不会重建 instance，运行时直到重启才
-            // 切换；本设计与 c5 阶段一致，避免悬挂 Renderable 指针）。
             data = ::Orange::Editor::Material::BuildDataFromInstance(
                 *liveInstance, host.assets.editingTemplateName,
                 host.assets.pAssets.get());
-            data.templateName = host.assets.editingTemplateName;
         }
-        else
-        {
-            data.templateName = host.assets.editingTemplateName;
-        }
-        ::Orange::Editor::Material::WriteMaterialFile(materialPath, data);
+        data.templateName = host.assets.editingTemplateName;
+        return data;
+    };
+
+    ImGui::BeginDisabled(!dirty);
+    if (ImGui::Button("Save"))
+    {
+        ::Orange::Editor::Material::WriteMaterialFile(materialPath, buildMaterialData());
         // 写盘成功 → 清持久 uniform dirty（template dirty 下一帧重读
         // originalTemplate 自动归零）。
         host.assets.editingMaterialUniformDirty = false;
@@ -511,6 +512,65 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
                 "注意：编辑器关闭 / 切到其它资产不会自动保存材质改动。");
         }
     }
+
+    // Save As New —— 把当前编辑态（含未保存改动）另存为同目录下的新 .material，
+    // 派生材质变体（GAP 报告 §2.3/§4 #2）。写完切到新材质继续编辑。modal 文件名
+    // buffer 用函数局部 static（单 Inspector，同一时刻仅一个 modal）。
+    static char sSaveAsNameBuf[128] = {};
+    ImGui::SameLine();
+    if (ImGui::Button("Save As New..."))
+    {
+        const std::string stem = std::filesystem::path(materialPath).stem().string();
+        std::snprintf(sSaveAsNameBuf, sizeof(sSaveAsNameBuf),
+                      "%s_copy.material", stem.c_str());
+        ImGui::OpenPopup("##save_as_new_mat");
+    }
+    if (ImGui::BeginPopup("##save_as_new_mat"))
+    {
+        ImGui::TextUnformatted("另存为新材质（写到当前 .material 同目录）：");
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize("M").x * 30.0f);
+        ImGui::InputText("##save_as_name", sSaveAsNameBuf, sizeof(sSaveAsNameBuf));
+
+        const std::filesystem::path dir =
+            std::filesystem::path(materialPath).parent_path();
+        const std::string newPathStr = (dir / sSaveAsNameBuf).generic_string();
+        const std::string name{sSaveAsNameBuf};
+        const bool endsWithMat =
+            name.size() > 9 && name.compare(name.size() - 9, 9, ".material") == 0;
+        const bool nameValid = endsWithMat && newPathStr != materialPath;
+
+        if (!endsWithMat)
+        {
+            ImGui::TextDisabled("文件名需以 .material 结尾。");
+        }
+        else
+        {
+            std::error_code ec;
+            if (std::filesystem::exists(newPathStr, ec))
+            {
+                ImGui::TextColored(Orange::Editor::Theme::Color::GetAlertWarn(),
+                                   "%s", "文件已存在，Create 将覆盖。");
+            }
+        }
+
+        ImGui::BeginDisabled(!nameValid);
+        if (ImGui::Button("Create"))
+        {
+            ::Orange::Editor::Material::WriteMaterialFile(
+                newPathStr, buildMaterialData());
+            // 切到新材质继续编辑：改 selectedAssetPath，下一帧 Inspector 以新
+            // 路径重入 DrawMaterialSubMode（editingMaterialPath 差异触发重载缓存
+            // + EnsureMaterialInstance lazy-create 新 .material 的运行时实例）。
+            host.assets.selectedAssetPath           = newPathStr;
+            host.assets.editingMaterialUniformDirty = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) { ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
+
     if (ImGui::BeginPopup("##saved_notice"))
     {
         ImGui::TextUnformatted("已保存到 .material 文件。");
