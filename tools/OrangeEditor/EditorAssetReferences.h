@@ -25,6 +25,12 @@
 
 struct EditorHost;
 
+namespace Orange::Editor::Schema
+{
+struct ComponentSchema;
+struct PropertyDescriptor;
+}
+
 namespace Orange::Editor
 {
 
@@ -45,6 +51,26 @@ std::vector<AssetReference> FindAssetReferences(EditorHost& host, std::string_vi
 // undo 时 fs::rename 回 + Remap(new→old)。仅作用 assetRefGet+assetRefSet 双非空
 // 的字段（material 的 ptr 语义不在此可靠 remap，rename 入口已排除 material 文件）。
 std::size_t RemapAssetReferences(EditorHost& host, std::string_view fromPath, std::string_view toPath);
+
+// 被清空的一条资产引用快照——记下 (entity, schema, prop) 以便 undo 时按原 path
+// 恢复。schema/prop 是 registry 内的稳定指针（进程期不失效）。
+struct ClearedAssetRef
+{
+    Orange::Engine::Entity                   entity;
+    const Orange::Editor::Schema::ComponentSchema*    schema;
+    const Orange::Editor::Schema::PropertyDescriptor* prop;
+};
+
+// 把所有引用 assetPath 的组件字段**清空**（assetRefSet 空串 → 字段置 none），
+// 同时返回被清字段的快照列表，供后续 RestoreAssetReferences 还原。资产 delete
+// 用：软删除文件后清掉悬空引用；undo 时还原文件 + 调 RestoreAssetReferences。
+std::vector<ClearedAssetRef> ClearAssetReferences(EditorHost& host, std::string_view assetPath);
+
+// 把 ClearAssetReferences 返回的快照列表里每条字段重新指向 assetPath
+// （assetRefSet）。entity 已失效则跳过。
+void RestoreAssetReferences(EditorHost& host,
+                            const std::vector<ClearedAssetRef>& cleared,
+                            std::string_view assetPath);
 
 }  // namespace Orange::Editor
 

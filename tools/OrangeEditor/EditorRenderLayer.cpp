@@ -1662,7 +1662,9 @@ void DrawAssetTreeRecursive(EditorAssetContext& assets, const std::string& dir)
         std::vector<std::string> subdirs;
         for (auto& entry : fs::directory_iterator(dir, ec))
         {
-            if (entry.is_directory(ec))
+            // 跳过点前缀目录（如软删除 .trash）—— 不在资产树里展示。
+            if (entry.is_directory(ec)
+                && entry.path().filename().string().rfind('.', 0) != 0)
             {
                 subdirs.push_back(entry.path().generic_string());
             }
@@ -2093,6 +2095,67 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                 }
             }
 
+            // ---- Delete（软删除：move 到 <dir>/.trash/，可 Undo）----
+            // 不真 fs::remove（不可逆）；move 到同目录 .trash 子目录 + 清空所有
+            // 引用本资产的组件字段（避免悬空）。cmdStack 可 undo（move 回 + 还原
+            // 引用）。适用所有类型——material 的 assetRefSet("") 也清 ptr，undo
+            // 还原文件后 RestoreAssetReferences 经 assetRefSet(path) 重指。
+            ImGui::Separator();
+            {
+                namespace fs = std::filesystem;
+                const auto refsDel = Orange::Editor::FindAssetReferences(host, path);
+                ImGui::TextDisabled("delete -> .trash, clears %zu reference(s) (undoable)",
+                                    refsDel.size());
+                if (ImGui::Button("Delete (move to .trash)"))
+                {
+                    const std::string oldP  = path;
+                    const auto        slashD = oldP.find_last_of('/');
+                    const std::string dirD   = (slashD != std::string::npos)
+                        ? oldP.substr(0, slashD) : std::string{};
+                    const std::string fname  = (slashD != std::string::npos)
+                        ? oldP.substr(slashD + 1) : oldP;
+                    const std::string trashDir = dirD.empty()
+                        ? std::string(".trash") : (dirD + "/.trash");
+                    const std::string trashP   = trashDir + "/" + fname;
+                    const std::string oldMetaD   = ::Orange::Editor::Import::MetaPathFor(oldP);
+                    const std::string trashMetaD = ::Orange::Editor::Import::MetaPathFor(trashP);
+                    std::error_code   mecD;
+                    const bool        hasMetaD = fs::exists(oldMetaD, mecD) && !mecD;
+                    auto*             pH       = &host;
+                    auto              clearedPtr =
+                        std::make_shared<std::vector<Orange::Editor::ClearedAssetRef>>();
+                    host.cmdStack.Push(std::make_unique<LambdaCommand>(
+                        "delete_asset",
+                        [pH, oldP, trashP, trashDir, oldMetaD, trashMetaD, hasMetaD, clearedPtr]() {
+                            std::error_code ec;
+                            std::filesystem::create_directories(trashDir, ec);
+                            std::filesystem::rename(oldP, trashP, ec);
+                            if (ec) { return; }
+                            if (hasMetaD) {
+                                std::error_code m2;
+                                std::filesystem::rename(oldMetaD, trashMetaD, m2);
+                            }
+                            *clearedPtr = Orange::Editor::ClearAssetReferences(*pH, oldP);
+                            if (pH->assets.selectedAssetPath == oldP) {
+                                pH->assets.selectedAssetPath.clear();
+                            }
+                        },
+                        [pH, oldP, trashP, oldMetaD, trashMetaD, hasMetaD, clearedPtr]() {
+                            std::error_code ec;
+                            std::filesystem::rename(trashP, oldP, ec);
+                            if (ec) { return; }
+                            if (hasMetaD) {
+                                std::error_code m2;
+                                std::filesystem::rename(trashMetaD, oldMetaD, m2);
+                            }
+                            Orange::Editor::RestoreAssetReferences(*pH, *clearedPtr, oldP);
+                        }));
+                    ORANGE_LOG_INFO("[OrangeEditor] soft-deleted asset '{}' -> '{}'",
+                                    oldP, trashP);
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+
             ImGui::EndPopup();
         }
 
@@ -2375,7 +2438,9 @@ void EditorRenderLayer::DrawAssetsPanel()
             std::vector<std::string> topDirs;
             for (auto& entry : fs::directory_iterator("assets", ec))
             {
-                if (entry.is_directory(ec))
+                // 跳过点前缀目录（如软删除 .trash）。
+                if (entry.is_directory(ec)
+                    && entry.path().filename().string().rfind('.', 0) != 0)
                 {
                     topDirs.push_back(entry.path().generic_string());
                 }
