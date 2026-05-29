@@ -291,6 +291,7 @@ public:
     {
         Orange::Engine::Log::Level level;
         std::string                message;
+        std::string                timestamp;  // 入队时刻本地 "HH:MM:SS"
     };
 
 private:
@@ -301,6 +302,7 @@ private:
     int                                               mConsoleMinLevel{0};  // Level::Trace 起
     char                                              mConsoleSearchBuf[128]{};
     bool                                              mConsoleAutoScroll{true};
+    bool                                              mConsoleShowTimestamp{true};
 
     // 静态 sink callback —— 由 main 注册到 Core::Log。userdata 是 this 指针。
 public:

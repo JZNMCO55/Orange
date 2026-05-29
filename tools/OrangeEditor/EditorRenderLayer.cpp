@@ -60,7 +60,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -68,6 +70,19 @@
 
 namespace
 {
+
+// Console 日志条目入队时刻，格式化为本地 "HH:MM:SS"。sink 在任意线程触发，
+// 用线程安全的 localtime_s（MSVC）；编辑器 Windows-first，无需跨平台分支。
+std::string FormatWallClockNow()
+{
+    const auto      now = std::chrono::system_clock::now();
+    const std::time_t t  = std::chrono::system_clock::to_time_t(now);
+    std::tm         tm{};
+    localtime_s(&tm, &t);
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
+    return std::string{buf};
+}
 
 // Esc 全局退出（与 Input::KeyCode::Escape 同值）；仅本 TU 用。
 constexpr std::int32_t kEscapeKeyRaw = 256;
@@ -2315,6 +2330,8 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
         ImGui::SameLine();
         ImGui::Checkbox("Auto", &mConsoleAutoScroll);
         ImGui::SameLine();
+        ImGui::Checkbox("Time", &mConsoleShowTimestamp);
+        ImGui::SameLine();
         if (ImGui::SmallButton("Quit"))
         {
             mAppHost.RequestExit();
@@ -2354,6 +2371,13 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
                 case Orange::Engine::Log::Level::Critical: color = Orange::Editor::Theme::Color::GetAlertError();    tag = "CRT"; break;
                 default:                                   color = Orange::Editor::Theme::Color::GetTextPrimary();   break;
             }
+            // 时间戳列（可关）：dim 前缀 + SameLine 接彩色 [TAG] message。
+            // HH:MM:SS 定宽，列天然对齐。
+            if (mConsoleShowTimestamp && !e.timestamp.empty())
+            {
+                ImGui::TextDisabled("%s", e.timestamp.c_str());
+                ImGui::SameLine();
+            }
             ImGui::TextColored(color, "[%s] %s", tag, e.message.c_str());
         }
     }
@@ -2380,7 +2404,7 @@ void EditorRenderLayer::LogSinkCallback(Orange::Engine::Log::Level level,
     {
         pLayer->mLogEntries.pop_front();
     }
-    pLayer->mLogEntries.push_back({level, std::string{message}});
+    pLayer->mLogEntries.push_back({level, std::string{message}, FormatWallClockNow()});
 }
 
 // v0.8 Settings 面板 —— gizmo 视觉常量集中编辑入口（消除 L13）。窗口浮动
