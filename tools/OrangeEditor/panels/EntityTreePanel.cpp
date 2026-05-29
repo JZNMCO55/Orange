@@ -6,6 +6,7 @@
 #include "../EditorAssetDropHandler.h"  // v1.2.3 patch · ORANGE_ASSET DnD
 #include "../EditorHierarchy.h"
 #include "../EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Entity Tree 名称过滤）
+#include "../theme/codicons/IconsCodicons.h"  // 节点类型图标前缀
 #include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
 
@@ -499,7 +500,19 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         const char* label = (name != nullptr && !name->name.empty())
             ? name->name.c_str()
             : "(unnamed)";
-        open = ImGui::TreeNodeEx("##node", flags, "%s", label);
+        // 类型图标前缀（hierarchy gap §4 quick-win #4）：按组件分类 ——
+        // 有 Directional/Point light → 灯泡；有 Renderable → object；否则
+        // generic（空 / Transform-only）。codicon 已并入主字体可直接渲染。
+        namespace R = Orange::Engine::Render;
+        const bool isLight =
+            mHost.scene.pWorld->GetComponent<R::DirectionalLight>(entity) != nullptr
+            || mHost.scene.pWorld->GetComponent<R::PointLight>(entity) != nullptr;
+        const bool isMesh =
+            mHost.scene.pWorld->GetComponent<R::RenderableComponent>(entity) != nullptr;
+        const char* typeIcon = isLight ? ICON_CI_LIGHTBULB
+                             : isMesh  ? ICON_CI_SYMBOL_OBJECT
+                                       : ICON_CI_SYMBOL_NAMESPACE;
+        open = ImGui::TreeNodeEx("##node", flags, "%s %s", typeIcon, label);
         nodeMin = ImGui::GetItemRectMin();
         nodeMax = ImGui::GetItemRectMax();
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
