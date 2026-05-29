@@ -8,6 +8,7 @@
 #include "BuiltinAssets.h"  // BuildNamedMaterialInstances（v1.0.1 c11 拆出）
 #include "DemoWorld.h"      // SeedDemoWorld / SeedPbrShowcaseWorld
 #include "EditorHierarchy.h"
+#include "EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Console + Asset 搜索共用）
 #include "VulkanLoaderShim.h"
 #include "command/SetFieldValueCommand.h"
 #include "MaterialFileIO.h"  // v1.1.1 · Asset Browser Create Material modal
@@ -71,20 +72,8 @@ namespace
 // Esc 全局退出（与 Input::KeyCode::Escape 同值）；仅本 TU 用。
 constexpr std::int32_t kEscapeKeyRaw = 256;
 
-// 大小写不敏感子串匹配（Console search 用）。needle 空 → true（不过滤）。
-// 用 std::search + tolower 比较器，无额外分配（不预先 lowercase 整串）。
-bool ContainsCaseInsensitive(std::string_view haystack, std::string_view needle)
-{
-    if (needle.empty()) { return true; }
-    const auto it = std::search(
-        haystack.begin(), haystack.end(),
-        needle.begin(), needle.end(),
-        [](char a, char b) {
-            return std::tolower(static_cast<unsigned char>(a))
-                 == std::tolower(static_cast<unsigned char>(b));
-        });
-    return it != haystack.end();
-}
+// 大小写不敏感子串匹配已抽到 EditorTextUtil.h（Console + Asset 搜索共用，单测
+// editor_text_util_test）；用 Orange::Editor::Util::ContainsCaseInsensitive。
 
 }  // namespace
 
@@ -1716,7 +1705,7 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
     {
         const std::string path = f.generic_string();
         const std::string name = f.filename().string();
-        if (!ContainsCaseInsensitive(name, assetSearch)) { continue; }
+        if (!Orange::Editor::Util::ContainsCaseInsensitive(name, assetSearch)) { continue; }
         ++shownCount;
         const std::string ext  = f.extension().string();
 
@@ -2322,7 +2311,7 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
             {
                 continue;
             }
-            if (!ContainsCaseInsensitive(e.message, searchView))
+            if (!Orange::Editor::Util::ContainsCaseInsensitive(e.message, searchView))
             {
                 continue;
             }

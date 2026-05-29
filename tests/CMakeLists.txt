@@ -125,6 +125,15 @@ target_include_directories(editor_settings_test PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
 orange_engine_set_compiler_options(editor_settings_test)
 add_test(NAME editor_settings_test COMMAND editor_settings_test)
+
+# EditorTextUtil（tools/OrangeEditor）—— header-only Util::ContainsCaseInsensitive
+# （Console + Asset 搜索共用谓词）。纯 std 头，仅需 include path（无 helper .cpp）。
+add_executable(editor_text_util_test editor/EditorTextUtilTest.cpp)
+target_link_libraries(editor_text_util_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(editor_text_util_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(editor_text_util_test)
+add_test(NAME editor_text_util_test COMMAND editor_text_util_test)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
 orange_engine_add_test(save_game_system_test    save/SaveGameSystemTest.cpp)
 orange_engine_add_test(save_path_test           save/SavePathTest.cpp)
