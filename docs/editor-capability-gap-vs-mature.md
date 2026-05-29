@@ -37,12 +37,12 @@ OrangeEditor 已是一个**架构纪律扎实、数据通路（schema-first Insp
 - **RemoveComponent 可 Undo**（§2.4/P1 破坏性 undo 的组件级）：`CaptureComponentState` 移除前按 schema 字段快照值，undo = schema.add 重建 + restorer 还原原值；可重建组件不再 Clear cmdStack。删实体级（需 EnTT id 稳定 / prefab P2）未做。
 - **资产引用只读扫描**（§2.2 依赖追踪只读半场）：`EditorAssetReferences::FindAssetReferences` 全实体 × AssetRef-schema 扫引用，资产浏览器"referenced by N"+ hover 列引用方。
 - **资产 rename**（§2.2 写半场可逆核心）：右键 context menu 内联 rename + 校验 + 引用计数；`RemapAssetReferences` 重扫改引用；cmdStack 可 undo（fs::rename 文件+.meta+Remap，顺序：先 rename 再 Remap）。仅 handle 类（mesh/texture/sound）；material 禁用（ptr 身份）；触碰真实文件但可逆。
+- **资产 delete**（§2.2 写半场收尾，资产 CRUD 完整）：软删除避 fs::remove 不可逆——move 到 `<dir>/.trash/` + `ClearAssetReferences` 清引用，cmdStack 可 undo（move 回 + `RestoreAssetReferences` 按快照还原）。点前缀目录从浏览器过滤。适用所有类型。
 - **Quick-Win**：Save-As-New 材质 / view-toggle 持久化 / 相机书签持久化 / Console 大小写搜索 + 时间戳列 / 未注册 component warning / Play snapshot 唯一名。#5 HDR-color、#6 RegisterComponentSchema 经 verify-gate 判 speculative / stale-doc **不做**。
 
-**剩余（focused-session + 增量 dogfood，不盲堆到本已 25-deep 未验证批）**：
-- **破坏性 undo 的删实体级** —— 删整个实体需 EnTT id 稳定引用基建（绑 GUID/prefab P2，`SceneSerialization` 仅 whole-world）。组件级 RemoveComponent-undo 已落地（见上）。
-- **资产 delete** —— 依赖扫描 + rename（可逆写）已落地（见上 §1.5）；剩余仅 delete。delete 真不可逆（fs 删无备份）→ 需设计决策：软删除（move 到 trash 可 undo）+ 清引用并捕获恢复（Remap 不适用，清空后扫不到，需 capture 原 refs 列表，扩 AssetReference 带 schema/prop 或 re-resolve）+ 强确认显示牵连。是需慎重拍板的 focused session 件。
-- **§3 P2 全部** —— 跨仓（OrangeRender / 引擎序列化前置），ADR-009 禁同 session 双向。
+**剩余 = 仅 P2 跨仓（编辑器 gap 报告单仓范围已全部落地）**：
+- **破坏性 undo 的删实体级** —— 删整个实体需 EnTT id 稳定引用基建（绑 GUID/prefab P2，`SceneSerialization` 仅 whole-world）。组件级 RemoveComponent-undo + 资产 delete 已落地（见上）。
+- **§3 P2 全部** —— wireframe/G-buffer debug view、缩略图/预览球、shader 热重载、prefab、PIE、时间轴/曲线/blend tree——全需 OrangeRender 或引擎序列化/动画模型前置，按 ADR-009 走"子仓 session 实现 → umbrella bump → 编辑器 session 消费"三段式，禁同 session 双向。
 
 ---
 
