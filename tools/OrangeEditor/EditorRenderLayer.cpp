@@ -2429,8 +2429,8 @@ void EditorRenderLayer::DrawSettingsPanel()
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip(
-                "拖动 gizmo 时量化到步长。当前 **translate 网格已接入**；"
-                "rotate/scale 步长字段已存但 gizmo 接入留后续。默认关=零回归。");
+                "拖动 gizmo 时量化到步长：translate=世界网格 / rotate=增量角 /\n"
+                "scale=各轴比例（clamp ≥step）。默认关=零回归。");
         }
         ImGui::BeginDisabled(!s.snapEnabled);
         ImGui::DragFloat("Translate grid (m)", &s.snapTranslateStep,
@@ -2440,7 +2440,6 @@ void EditorRenderLayer::DrawSettingsPanel()
         ImGui::DragFloat("Scale step",         &s.snapScaleStep,
                          0.01f, 0.01f, 10.0f, "%.2f");
         ImGui::EndDisabled();
-        ImGui::TextDisabled("（rotate/scale 仅记录步长，尚未接入 gizmo）");
     }
 
     if (ImGui::CollapsingHeader("Autosave", ImGuiTreeNodeFlags_DefaultOpen))

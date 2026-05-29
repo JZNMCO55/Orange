@@ -2,7 +2,10 @@
 
 #include "EditorCameraControl.h"
 #include "EditorGizmoMath.h"
+#include "EditorMathUtil.h"  // Util::SnapToStep（角度 snap）
 #include "command/SetFieldValueCommand.h"
+
+#include <glm/trigonometric.hpp>  // glm::radians
 
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -320,7 +323,15 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                         const float dotPart  = glm::dot(host.gizmo.dragStartRotateRef, currentRef);
                         const glm::vec3 cr   = glm::cross(host.gizmo.dragStartRotateRef, currentRef);
                         const float crossPart = glm::dot(cr, axisDir);
-                        const float deltaAngle = std::atan2(crossPart, dotPart);
+                        float deltaAngle = std::atan2(crossPart, dotPart);
+                        // 角度 snap（gap 报告 §3 P0）：把相对拖动起点的增量角量化到
+                        // snapRotateStepDeg（增量 snap，非绝对——四元数下绝对角较难且
+                        // 多数编辑器即增量 step 旋转；snapEnabled=false 不进入=零回归）。
+                        if (host.settings.snapEnabled)
+                        {
+                            deltaAngle = Orange::Editor::Util::SnapToStep(
+                                deltaAngle, glm::radians(host.settings.snapRotateStepDeg));
+                        }
 
                         const glm::quat deltaQ = glm::angleAxis(deltaAngle, axisDir);
                         const glm::quat newRot = deltaQ * host.gizmo.dragStartEntityRot;

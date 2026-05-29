@@ -2,6 +2,7 @@
 
 #include "EditorCameraControl.h"
 #include "EditorGizmoMath.h"
+#include "EditorMathUtil.h"  // Util::SnapToStep（比例 snap）
 #include "command/SetFieldValueCommand.h"
 
 #include <orange/engine/render/Camera.h>
@@ -325,6 +326,20 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                         hasUpdate = true;
                     }
                 }
+            }
+
+            // 比例 snap（gap 报告 §3 P0）：各分量量化到 snapScaleStep；clamp 到
+            // ≥step 避免 snap 到 0 的退化 scale（snapEnabled=false 不进入=零回归）。
+            if (hasUpdate && host.settings.snapEnabled)
+            {
+                const float step = host.settings.snapScaleStep;
+                auto snapAxis = [step](float v) {
+                    const float s = Orange::Editor::Util::SnapToStep(v, step);
+                    return s <= 0.0f ? step : s;
+                };
+                newScale.x = snapAxis(newScale.x);
+                newScale.y = snapAxis(newScale.y);
+                newScale.z = snapAxis(newScale.z);
             }
 
             if (hasUpdate && newScale != pTC->scale)
