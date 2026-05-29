@@ -57,6 +57,7 @@
 #include <backends/imgui_impl_vulkan.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,21 @@ namespace
 
 // Esc 全局退出（与 Input::KeyCode::Escape 同值）；仅本 TU 用。
 constexpr std::int32_t kEscapeKeyRaw = 256;
+
+// 大小写不敏感子串匹配（Console search 用）。needle 空 → true（不过滤）。
+// 用 std::search + tolower 比较器，无额外分配（不预先 lowercase 整串）。
+bool ContainsCaseInsensitive(std::string_view haystack, std::string_view needle)
+{
+    if (needle.empty()) { return true; }
+    const auto it = std::search(
+        haystack.begin(), haystack.end(),
+        needle.begin(), needle.end(),
+        [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a))
+                 == std::tolower(static_cast<unsigned char>(b));
+        });
+    return it != haystack.end();
+}
 
 }  // namespace
 
@@ -2186,7 +2202,7 @@ void EditorRenderLayer::DrawConsolePanel(const Orange::Engine::FrameContext& fra
             {
                 continue;
             }
-            if (!searchView.empty() && e.message.find(searchView) == std::string::npos)
+            if (!ContainsCaseInsensitive(e.message, searchView))
             {
                 continue;
             }
