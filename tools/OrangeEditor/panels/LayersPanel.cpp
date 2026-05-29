@@ -165,6 +165,10 @@ void EditorRenderLayer::DrawLayersPanel()
     // range-for 迭代器失效。pendingMoveDelta = -1 上移 / +1 下移。
     std::string pendingMoveId;
     int         pendingMoveDelta = 0;
+    // DnD：从 Entity Tree 拖实体落到 layer 名 → 改该实体归属本 layer。延迟到
+    // 帧末经 cmdStack 执行（可 Undo），与 reorder/remove 同款"先记下、帧末做"。
+    Orange::Engine::Entity pendingAssignEntity = Orange::Engine::Entity::Invalid();
+    std::string            pendingAssignLayer;
 
     // per-layer entity count（gap 报告 §2.7 Layer 子项）：按 LayerComponent.layerId
     // 计数（持有该组件的实体）。每帧重算（实体数通常不大，O(N) 可忽略）。
@@ -257,6 +261,22 @@ void EditorRenderLayer::DrawLayersPanel()
                     !layer.displayName.empty() ? layer.displayName : layer.id;
                 std::snprintf(sRenameBuf, sizeof(sRenameBuf), "%s", seed.c_str());
             }
+            // DnD drop target：锚在刚画的名字 Text（带 label 的中行 item，
+            // 非行尾 chip——避开本仓 trailing-chip anchor-bug 前科）。接受
+            // Entity Tree 的 kEntityPayload，帧末改该实体归属本 layer。
+            if (canEdit && ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* pl =
+                        ImGui::AcceptDragDropPayload(kEntityPayload)) {
+                    if (pl->Data != nullptr
+                        && pl->DataSize == static_cast<int>(sizeof(Orange::Engine::Entity))) {
+                        Orange::Engine::Entity dropped{};
+                        std::memcpy(&dropped, pl->Data, sizeof(dropped));
+                        pendingAssignEntity = dropped;
+                        pendingAssignLayer  = layer.id;
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
             if (!layer.displayName.empty() && layer.displayName != layer.id) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%s)", layer.id.c_str());
@@ -344,5 +364,35 @@ void EditorRenderLayer::DrawLayersPanel()
             [pH, idStr, delta]() { pH->scene.partition.MoveLayer(idStr, delta); },
             [pH, idStr, delta]() { pH->scene.partition.MoveLayer(idStr, -delta); }
         ));
+    }
+
+    // 帧末执行 DnD 改归属 —— 走 cmdStack 可 Undo（逆操作 = SetLayerOf 回旧
+    // layer）。SetLayerOf 改的是 entity 的 LayerComponent，不动 mLayers，故不
+    // 撞 layer 列表迭代；延迟仍为统一"UI 期间不 mutate world"风格。lambda 内
+    // 守 pWorld 非空（scene swap 后 Clear 不会让旧命令悬挂，仍防御）。
+    if (pendingAssignEntity.IsValid() && !pendingAssignLayer.empty()) {
+        auto& world = *mHost.scene.pWorld;
+        if (world.IsValid(pendingAssignEntity)) {
+            const std::string oldLayer{mHost.scene.partition.GetLayerOf(world, pendingAssignEntity)};
+            const std::string newLayer = pendingAssignLayer;
+            if (oldLayer != newLayer) {
+                auto*                        pH  = &mHost;
+                const Orange::Engine::Entity ent = pendingAssignEntity;
+                mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                    "assign_layer",
+                    [pH, ent, newLayer]() {
+                        if (pH->scene.pWorld) {
+                            pH->scene.partition.SetLayerOf(*pH->scene.pWorld, ent, newLayer);
+                        }
+                    },
+                    [pH, ent, oldLayer]() {
+                        if (pH->scene.pWorld) {
+                            pH->scene.partition.SetLayerOf(*pH->scene.pWorld, ent, oldLayer);
+                        }
+                    }
+                ));
+                ORANGE_LOG_INFO("[OrangeEditor] entity assigned to layer '{}'", newLayer);
+            }
+        }
     }
 }
