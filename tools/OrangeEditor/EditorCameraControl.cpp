@@ -77,6 +77,35 @@ void UpdateEditorCameraFromInput(EditorHost& host)
         if (ec.elevation < -kMaxElev) ec.elevation = -kMaxElev;
     }
 
+    // MMB 平移 pivot（capture-on-press，同 LMB orbit 状态机语义）。MMB 未被
+    // orbit(LMB) / zoom(滚轮) / gizmo(LMB) 占用 → 与它们正交不冲突；gizmoBusy
+    // 时同样冻结（与 collider 编辑等互斥，保持一致）。导航刚需（gap 报告 §3 P0）。
+    if (ec.panning && (!ImGui::IsMouseDown(ImGuiMouseButton_Middle) || gizmoBusy))
+    {
+        ec.panning = false;
+    }
+    if (!ec.panning && hovered
+        && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && !gizmoBusy)
+    {
+        ec.panning = true;
+    }
+    if (ec.panning)
+    {
+        const ImVec2 d = io.MouseDelta;
+        // 相机基向量从 az/el 推（与 BuildEditorCamera 的 offset 同源）。
+        const float     cosE = std::cos(ec.elevation);
+        const glm::vec3 offset(cosE * std::sin(ec.azimuth),
+                               std::sin(ec.elevation),
+                               cosE * std::cos(ec.azimuth));
+        const glm::vec3 fwd   = -glm::normalize(offset);  // 相机 → pivot
+        const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
+        const glm::vec3 up    = glm::cross(right, fwd);
+        // grab-pan：拖右(d.x>0)→内容右移→pivot 左移；拖下(d.y>0，屏幕 y-down)→
+        // 内容下移→pivot 上移。速度随 radius 缩放保持手感一致。
+        const float scale = ec.radius * ec.panSensitivity;
+        ec.pivot += (-right * d.x + up * d.y) * scale;
+    }
+
     // 滚轮：缩放 radius（推近 / 拉远）；hover 才生效避免误触其它面板滚动条。
     // 不被 gizmo gate 影响——滚轮缩放与 gizmo drag 不冲突（gizmo 不消费滚轮）。
     if (hovered && io.MouseWheel != 0.0f)

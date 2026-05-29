@@ -34,10 +34,16 @@ struct EditorCameraState
     // 操作灵敏度（编辑器经验值，未来可暴露给 Preferences）
     float     lookSensitivity = 0.0035f;  // 弧度 / pixel
     float     zoomSensitivity = 0.6f;     // radius units / wheel notch
+    // MMB 平移灵敏度：world 单位 / pixel / radius（pan 速度随距离缩放，远拉近推
+    // 手感一致）。近似 grab-pan（精确需视口高度，经验值足够，dogfood 可调）。
+    float     panSensitivity  = 0.0020f;
 
     // LMB 拖动状态机：按下时（且鼠标在 Scene 面板内）置 true，进入"无
     // 论鼠标是否仍 hover 都吃 MouseDelta"模式；释放时清零。
     bool      dragging = false;
+    // MMB 平移状态机（同 capture-on-press 语义；与 LMB orbit / 滚轮 zoom /
+    // gizmo 拖动均不冲突——MMB 未被它们占用）。
+    bool      panning  = false;
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_CAMERA_STATE_H
