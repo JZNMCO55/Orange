@@ -2726,3 +2726,132 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 ### 关联
 
 与 [[BUG-2026-05-29-entity-tree-dnd-anchored-to-trailing-chip]] 同一轮 dogfood 暴露：前者是 DnD 锚点放错位置，本条是 user pointer 被抢。两者都因"编辑器密集交互前没人深用 tree / 打字"长期潜伏。
+
+---
+
+## GAP-2026-05-29-editor-material-asset-dirty-tracking
+
+- **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（P0 + Quick Win #1）复核时坐实，并在复核中发现比报告更严重的次生 bug
+- **发现日期**：2026-05-29
+- **一句话定性**：`.material` 资产编辑**没有持久化的 dirty 追踪**——Material Inspector 子模式既不接 `EditorSceneContext.dirty` / 未保存确认拦截，也不进命令栈；更严重的是它**连自己的 Save 按钮可用性都靠每帧 transient 信号**，导致 uniform-only 编辑松手后根本存不下去
+- **状态**：**登记（未排期）**。本 session 仅复核 + 登记，不实现（同 CLAUDE.md "发现 gap 的 session 只做登记"纪律）
+
+### 触发场景
+
+渲染出身作者在 Material Inspector 调 PBR / 自定义模板的 uniform（颜色 / metallic / roughness 等），调完关掉编辑器或切走，期望像调 Inspector 字段一样"有未保存提示 / Ctrl+Z 可撤 / 关窗拦截"。实际三者全无。
+
+### 缺什么（两个facet，第 2 个是复核新发现）
+
+#### facet 1 · 旁路 scene dirty + 命令栈（报告原有结论，复核确认仍成立）
+
+- `MaterialAssetInspectorPlugin::DrawMaterialSubMode`（`tools/OrangeEditor/plugin/MaterialAssetInspectorPlugin.cpp`）的 Save 直接 `WriteMaterialFile` 写盘（`:474` 附近），**不置 `EditorSceneContext.dirty`、不 Push 任何 ICommand**。
+- 后果：改了材质 uniform / template 后，编辑器顶层 dirty 仍是 false → 关窗 / Esc / File>New 的未保存确认 modal（`EditorRenderLayer.cpp` 的 `PendingCloseAction` 路径）**不会拦截材质改动** → 用户改了材质没存就关 = 静默丢失。这是报告标的"真陷阱"。
+- 同时材质编辑不进命令栈，Ctrl+Z 撤不了材质改动（与 Inspector 字段编辑的 `SetFieldValueCommand` 体验不一致）。
+
+#### facet 2 · Save 按钮可用性靠 per-frame transient 信号（复核新发现，比报告更严重）
+
+- `dirty = templateDirty || uniformDirty`（`MaterialAssetInspectorPlugin.cpp:452-453`），`Save` 按钮包在 `ImGui::BeginDisabled(!dirty)` 里（`:454-455`）。
+- `templateDirty` 是持久比较（`editingTemplateName != originalTemplate`，盘上读的原值），没问题。
+- **但 `uniformDirty`（`:392` 初始化 false，`:439-443` 累积）只在 `RenderUniformWidget` 当帧返回 true 时为 true**，而 `RenderUniformWidget` 的 `changed` 只在 `ImGui::DragFloat/SliderFloat/ColorEdit` 当帧返回 true（即"值在这一帧被改了"）时为真。
+- 推论（ImGui 控件返回值语义确定）：用户拖 slider 改完 uniform、**松手后下一帧 `uniformDirty` 即归 false** → 若没同时切 template，则 `dirty=false` → Save 按钮立即置灰 + 显示"(no changes to save)"（`:481-485`）。
+- 净后果：**uniform-only 的材质编辑实际上存不进盘**——要点 Save 必须在拖拽过程中点，单鼠标做不到。live instance 视觉已变、磁盘 `.material` 没变，下次启动 `ApplyDataToInstance` 还原成旧值，编辑丢失。
+- ⚠️ **此 facet 的 UX 结论靠代码 + ImGui 语义推断，未实机 dogfood**（遵循项目"交互功能勿凭读代码判定"纪律）。落地前/评审时应作者实机点一次确认；但代码机制（transient uniformDirty）本身是确定的。
+
+### 期望验收（落地时，非本 session）
+
+- Material Inspector 维护**持久 per-asset dirty 状态**（不是每帧重算的 transient）：首次编辑（template 切换 / 任一 uniform 改动）置 true，Save / 切走 / reload 该 `.material` 后清回 false。
+- uniform-only 编辑松手后 Save 按钮**保持可用**直到真正存盘。
+- 材质未保存时，编辑器顶层未保存确认路径（关窗 / Esc / New / Open）能拦截并提示（最小版：把材质 dirty 并进 `scene.dirty` 的判定；完整版：独立"有未保存资产"集合）。
+- （可选，报告标 M）材质编辑进命令栈，支持 Ctrl+Z；体量比前两项大，可拆独立条目。
+- 纯逻辑部分（dirty 状态机迁移、save→load uniform 往返等价）可单测兜底；Save 按钮手感 + 确认 modal 焦点必须作者 GUI dogfood。
+
+### 关联
+
+- 报告原文：`docs/editor-capability-gap-vs-mature.md` §2.3「材质参数旁路命令栈/dirty」`:86`、§2.7「Dirty 跟踪」`:159`、§3 P0 `:189`、§4 Quick Win #1 `:228`。
+- scene 级 dirty / 未保存确认基建见 [[GAP-2026-05-22-new-scene-actually-seeds-demo]] 同期建立的 `EditorSceneContext.dirty` + `PendingCloseAction`（`context/EditorSceneContext.h:116`）——本 gap 是"资产级 dirty"缺口，与"场景级 dirty"正交。
+- 材质资产体系背景见 [[GAP-2026-05-24-material-template-library-and-custom-hook]] / [[GAP-2026-05-24-editor-asset-browser-create-material-missing]]。
+
+---
+
+## GAP-2026-05-29-editor-autosave-wiring
+
+- **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（§2.7 `:158` + P0 `:193`），2026-05-29 复核坐实
+- **发现日期**：2026-05-29
+- **一句话定性**：引擎侧 `Orange::Engine::Save::AutosaveScheduler` + 单测早已就绪，但 **OrangeEditor 对它零接线**——编辑器崩溃 / 误关 = 丢全部未存场景，无任何自动存档兜底
+- **状态**：**登记（未排期）**。本 session 仅复核 + 登记，不实现
+
+### 触发场景
+
+编辑器内长时间摆场景（拼关卡 / 调光 / 调材质），中途崩溃（本项目近期就连踩 GLFW user-pointer 崩溃、rename 崩溃等预存 bug）或手滑关窗 Discard，**自上次手动 Save 起的全部改动直接蒸发**。成熟编辑器（Unity / Unreal / Godot）都有周期性 autosave + 崩溃后恢复入口。
+
+### 现状证据（复核）
+
+- `tools/OrangeEditor/` 全目录 grep `AutosaveScheduler` / `autosave` **零命中**——编辑器完全没用它。
+- 引擎侧已就绪：`include/orange/engine/save/AutosaveScheduler.h` / `src/save/AutosaveScheduler.cpp` / `tests/save/AutosaveSchedulerTest.cpp` / 在 `samples/11_save_load_demo` 有消费先例。
+
+### 缺什么（scheduler 可直接复用，缺的是编辑器侧接线 + 几处决策）
+
+`AutosaveScheduler` 是**纯时间逻辑 + 通用无参 `TriggerCallback`**，与具体存档实现解耦（不读系统时钟、无 IO、单线程串行）——编辑器可直接 own 一个实例，无需改引擎。缺的是：
+
+- **持有 + 喂帧**：`EditorHost` / `EditorRenderLayer` own 一个 `AutosaveScheduler`，每帧用编辑器真实帧 delta 调 `Update(dt)`（编辑器已有帧计时）。
+- **触发 gate**：仅 `PlayState::Edit` 态推进（Play / Paused 已有独立 snapshot 机制，别叠加）；callback 内先看 `scene.dirty`，**clean 场景不写**（避免无谓落盘 + 反复覆盖恢复文件）。
+- **落盘 callback**：把当前 `pWorld` 序列化到 autosave 落点（建议 temp dir 唯一名，或 `currentScenePath` 旁的 `.autosave` sidecar；Untitled 未命名场景也要能存）。复用现有 `SceneSerialization` 写路径。
+- **手动 Save 后 `Reset()`**：避免手动存盘后立刻又被 autosave 一次。
+- **崩溃恢复 UX**：编辑器启动时检测到比目标 scene 文件更新的 autosave 落点 → 弹"发现未保存的自动存档，是否恢复？"。这是 autosave 真正兑现价值的一半，别只做"写"不做"读回"。
+- **Config 暴露**：`intervalSeconds`（默认 300）/ `minSecondsBetween`（默认 30）按编辑器口味调 + 进 `EditorSettings`（可关、可改周期）。
+
+### 期望验收（落地时，非本 session）
+
+- Edit 态下场景 dirty 时，每 N 秒自动落盘一次 autosave 文件；clean 场景不写；手动 Save 后计时归零。
+- 模拟崩溃（kill 进程）后重启编辑器，能检测到 autosave 并恢复到接近崩溃前的状态。
+- 纯逻辑（scheduler 调度、save→load 往返）已有 / 可补单测兜底；落盘节流不卡帧 + 恢复 modal 焦点需作者 GUI dogfood。
+
+### 关联
+
+- 引擎 scheduler 接口：`include/orange/engine/save/AutosaveScheduler.h`（Phase 5.5 Save 模块）。
+- 与 [[GAP-2026-05-29-editor-material-asset-dirty-tracking]] 共享"编辑器 dirty / 数据丢失防护"主题：那条是材质资产 dirty 缺口，本条是场景级 autosave 兜底，正交但同属"别丢用户工作"。
+- scene 级 dirty 判定基建（`context/EditorSceneContext.h:116` 的 `scene.dirty`）是本 gap 的 trigger gate 依赖。
+
+---
+
+## GAP-2026-05-29-editor-undo-redo-action-label
+
+- **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（§2.8 `:172` + Quick Win #7 `:234`），2026-05-29 复核坐实
+- **发现日期**：2026-05-29
+- **一句话定性**：Edit 菜单的 Undo / Redo 是**固定文案**"Undo" / "Redo"，不显示将要撤销/重做的**具体动作名**（"Undo Move Entity" / "Redo Transform Drag"）；缺的不只是 UI 文案，是命令层根本没有"人类可读 label"这个数据
+- **状态**：**登记（未排期）**。本 session 仅复核 + 登记，不实现
+
+### 触发场景
+
+连续做多步编辑后想撤销，菜单只写"Undo"，不知道下一次 Ctrl+Z 会撤掉哪一步（是刚才的 reparent 还是更早的字段编辑？）。成熟编辑器在菜单项上直接写"Undo Move Entity"，并常配命令历史面板让用户看整条栈。
+
+### 现状证据（复核）
+
+- `EditorRenderLayer.cpp:664/670`：`ImGui::MenuItem("Undo", "Ctrl+Z", …)` / `ImGui::MenuItem("Redo", "Ctrl+Y", …)`——硬写死，行号与报告一致无漂移。
+- 命令层缺 label 数据源：`tools/OrangeEditor/command/ICommand.h` 只有 `GetType()`（返回类型字面量，**仅供 coalesce 同类判断**，非面向用户的可读名）；`CommandStack`（`command/CommandStack.h`）的 group `name` 只在 BeginGroup..EndGroup 期间存活，**不按栈条目留存**，也没有 peek 栈顶 / 待重做条目 label 的对外 API。
+
+### 缺什么（按依赖拆）
+
+- **命令层加 label**（前置）：给 `ICommand` 加 `virtual const char* GetLabel() const { return GetType(); }`（默认回退到 type，不强迫每个命令都改）；`CommandGroup`（`.cpp` 内实现）override 返回其 group `name`（"Transform Drag" 等已是天然 label）；具名命令（`SetFieldValueCommand` / Rename / Reparent）按需 override 出更友好的名。
+- **CommandStack 暴露 peek**：加 `const char* PeekUndoLabel() const`（返回 `mStack[mIndex]` 的 label，空栈返回 nullptr）/ `const char* PeekRedoLabel() const`（`mStack[mIndex+1]`）。
+- **菜单接线**：`EditorRenderLayer.cpp:664/670` 把 `"Undo"` 改成 `CanUndo()` 时格式化 `"Undo %s"`、否则纯 `"Undo"`；Redo 同理。
+- **（可选，体量 M，可拆独立条目）命令历史面板**：列整条栈 + 高亮当前 index + 点击跳转到任意历史点。报告把它与 label 并列，但 label 是 Quick Win、历史面板是 M——建议先做 label。
+
+### 期望验收（落地时，非本 session）
+
+- 做一步可撤销操作后，Edit 菜单显示"Undo <动作名>"；空栈时回退到纯"Undo"且置灰。
+- group 命令（如 gizmo 拖动）显示其 group name。
+- label 生成是纯逻辑（命令 → 字符串），可单测；菜单文案显示 + 截断观感顺手 dogfood 一眼即可。
+
+### 关联
+
+- 命令栈基建见 `command/CommandStack.h` / `command/ICommand.h`；coalesce / group 语义见 `CommandStack.h` 顶注释。
+- 与 [[GAP-2026-05-29-editor-material-asset-dirty-tracking]] facet 1 同源：材质编辑不进命令栈，若未来材质入栈，其 label 也应一并供本 gap 的菜单消费。
+
+### 同批复核的三项接线（verify 结论）
+
+本 session 同时复核了报告里另外三项接线现状：
+
+- **autosave**：`tools/OrangeEditor/` 全目录 grep `AutosaveScheduler` / `autosave` **零命中**，引擎侧 scheduler + 单测已就绪但编辑器零接线。报告 §2.7 `:158` + P0 `:193` 成立 → **已升格** [[GAP-2026-05-29-editor-autosave-wiring]]。
+- **Undo-label**：仍固定文案 `MenuItem("Undo","Ctrl+Z")` / `("Redo","Ctrl+Y")`（`EditorRenderLayer.cpp:664/670`，无漂移），未接命令名。报告 §2.8 `:172` + Quick Win #7 成立 → **已升格** [[GAP-2026-05-29-editor-undo-redo-action-label]]。
+- **Ctrl-toggle**：Entity Tree 的 Ctrl-click 多选 toggle **已接线**（`panels/EntityTreePanel.cpp:416-433`，走 `EditorSelection::ToggleAdditional`）；**视口（ScenePanel）单击 picking 仍不读修饰键**（`panels/ScenePanel.cpp:465` 直接覆盖 `selectedEntity`）—— 报告 §2.1「视口 Ctrl/Shift 多选」缺失结论成立，行号由 `:472` 漂到 `:465`。视口侧缺口归入报告 §2.1 gizmo/视口大类（与框选 marquee / 相机 pan 同批），**暂不单独升格**；Entity Tree 侧曾踩过 Ctrl-toggle 交互 bug，已接线但手感仍需 dogfood。
