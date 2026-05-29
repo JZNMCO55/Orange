@@ -126,7 +126,7 @@ void EditorRenderLayer::DrawInspectorPanel()
         {
             ImGui::TextDisabled("partial: %s", partialList.c_str());
         }
-        ImGui::TextDisabled("[ editing below applies to primary only (write-back broadcast pending) ]");
+        ImGui::TextDisabled("[ editing a shared field writes to all selected that have it ]");
         ImGui::Separator();
     }
 

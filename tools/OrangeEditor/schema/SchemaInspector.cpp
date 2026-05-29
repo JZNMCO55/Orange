@@ -152,6 +152,40 @@ auto MakeAssetRefFieldApply(EditorHost*                          pHost,
     };
 }
 
+// multi-edit 写回广播（§2.4/P1）：把 primary 刚改的字段值写到选区其余选中
+// 实体的**同 component 同字段**，每个 follower 一条 SetFieldValueCommand
+// （其自身旧值→新值）。caller 在 selCount>1 时围绕本次拖动开 cmdStack group，
+// 把 primary + 所有 follower 命令收束成一次 Undo。
+//
+// 零回归保证：additionalSelectedEntities 为空（单选）→ 立即返回，不触碰任何
+// 状态。follower 缺该 component（异构多选）→ schema.get 返回 nullptr 跳过。
+// 仅普通 get/set 字段走本路径（Float/Int/UInt/Bool/Vec2/3/4/Quat/Enum）；
+// AssetRef（assetRefGet/Set + EditorAssetContext）/ EntityRef（只读）不广播。
+template <typename T>
+void BroadcastFieldToSelection(EditorHost&                  host,
+                               const ComponentSchema&       schema,
+                               const PropertyDescriptor&    prop,
+                               const std::string&           fieldKey,
+                               const T&                     newVal)
+{
+    if (host.selection.additionalSelectedEntities.empty()) { return; }
+    if (schema.get == nullptr || prop.get == nullptr || prop.set == nullptr) { return; }
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return; }
+    for (const auto other : host.selection.additionalSelectedEntities)
+    {
+        if (!pWorld->IsValid(other)) { continue; }
+        void* otherComp = schema.get(*pWorld, other);
+        if (otherComp == nullptr) { continue; }  // 该实体无此 component → 跳过
+        T otherOld{};
+        prop.get(otherComp, &otherOld);
+        prop.set(otherComp, &newVal);
+        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<T>>(
+            other, fieldKey, otherOld, newVal,
+            MakeFieldApply<T>(&host, other, &schema, prop.set)));
+    }
+}
+
 // 单个 property 的 ImGui 控件渲染 + 命令推送。**调用前提**：caller 已在
 // PropertyTable 内（Widgets::BeginPropertyTable 已 return true），DrawProperty
 // 内通过 Widgets::PropertyLabel 写左列 label + 触发右列 SetNextItemWidth
@@ -205,6 +239,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<float>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<float>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -221,6 +256,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<int>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<int>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -241,6 +277,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<unsigned int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<unsigned int>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<unsigned int>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -255,6 +292,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<bool>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<bool>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -272,6 +310,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<glm::vec2>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<glm::vec2>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -299,6 +338,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<glm::vec3>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<glm::vec3>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -325,6 +365,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec4>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<glm::vec4>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<glm::vec4>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -392,6 +433,8 @@ void DrawProperty(EditorHost&                  host,
                         void* c = pSchema->get(*pW, entity);
                         if (c != nullptr) { setFn(c, &v); }
                     }));
+                // follower 不显示，无需 Euler 缓存，走通用 quat set 广播即可。
+                BroadcastFieldToSelection<glm::quat>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -426,6 +469,7 @@ void DrawProperty(EditorHost&                  host,
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<int>(&host, entity, &schema, prop.set)));
+                BroadcastFieldToSelection<int>(host, schema, prop, fieldKey, newVal);
             }
             break;
         }
@@ -857,6 +901,24 @@ void DrawProperty(EditorHost&                  host,
                     MakeFieldApply<std::string>(&host, entity, &schema, prop.set)));
             }
             break;
+        }
+    }
+
+    // multi-edit 拖动分组：仅多选时围绕本字段控件的一次拖动，把 primary +
+    // 所有 follower 广播命令收束成一次 Undo。IsItemActivated 开 group（控件
+    // 首次激活，早于任何值变化帧）/ IsItemDeactivated 关（释放，含未改值的
+    // 空组——EndGroup 自动丢弃空组）。MergeMode::Disable 让每次拖动独立成一
+    // 条 Undo。单选（additional 空）不开 group → 保持原 per-field coalesce
+    // 行为 = 零回归。本段在 switch 之后，IsItem* 指向刚画的字段控件。
+    if (!host.selection.additionalSelectedEntities.empty())
+    {
+        if (ImGui::IsItemActivated())
+        {
+            host.cmdStack.BeginGroup(fieldKey.c_str(), MergeMode::Disable);
+        }
+        if (ImGui::IsItemDeactivated() && host.cmdStack.InGroup())
+        {
+            host.cmdStack.EndGroup();
         }
     }
 
