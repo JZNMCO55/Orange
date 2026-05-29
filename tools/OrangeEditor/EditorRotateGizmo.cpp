@@ -2,6 +2,7 @@
 
 #include "EditorCameraControl.h"
 #include "EditorGizmoMath.h"
+#include "EditorGroupTransform.h"  // Util::RotateAroundPivot（多选群组公转）
 #include "EditorMathUtil.h"  // Util::SnapToStep（角度 snap）
 #include "command/SetFieldValueCommand.h"
 
@@ -121,6 +122,22 @@ auto MakeTransformRotationApply(EditorHost* pHost, Orange::Engine::Entity entity
         if (pTC == nullptr) { return; }
         pTC->rotation = value;
         pHost->selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    };
+}
+
+// 群组 rotate 时 follower 绕 pivot 公转会改 position —— 本 TU 需要 position
+// apply（translate TU 的同名工厂是 file-local 不可见，匿名 namespace 内部
+// 链接同名不冲突）。
+auto MakeTransformPositionApply(EditorHost* pHost, Orange::Engine::Entity entity)
+{
+    return [pHost, entity](const glm::vec3& value)
+    {
+        if (pHost == nullptr) { return; }
+        auto* pWorld = pHost->scene.pWorld.get();
+        if (pWorld == nullptr) { return; }
+        auto* pTC = pWorld->GetComponent<Orange::Engine::Scene::TransformComponent>(entity);
+        if (pTC == nullptr) { return; }
+        pTC->position = value;
     };
 }
 
@@ -296,6 +313,17 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                     host.gizmo.draggingAxis       = host.gizmo.hoveredAxis;
                     host.gizmo.dragStartEntityRot = pTC->rotation;
                     host.gizmo.dragStartRotateRef = fromCenter / len;
+                    // 多选群组 rotate：快照其余选中实体的 pos+rot（pivot = primary
+                    // 位置，rotate 期不动）。单选时集合为空。
+                    host.gizmo.dragStartAdditional.clear();
+                    for (const auto& other : host.selection.additionalSelectedEntities)
+                    {
+                        if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
+                        {
+                            host.gizmo.dragStartAdditional.push_back(
+                                {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                        }
+                    }
                     host.cmdStack.BeginGroup("Rotate Drag", MergeMode::Ends);
                 }
             }
@@ -362,6 +390,30 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                                 host.gizmo.dragStartEntityRot,  // oldVal 锁定到拖动起点
                                 newRot,
                                 MakeTransformRotationApply(&host, entity)));
+
+                            // 多选群组 rotate：follower 绕 primary 位置（pivot）
+                            // 公转 deltaQ + 自身朝向左乘 deltaQ。单选时快照空 →
+                            // 不执行 = 零回归。pos/rot 各一条 SetFieldValueCommand，
+                            // 在 "Rotate Drag" group 内按 (entity,fieldKey) coalesce。
+                            for (const auto& snap : host.gizmo.dragStartAdditional)
+                            {
+                                if (!pWorld->IsValid(snap.entity)) { continue; }
+                                auto* pFTC = pWorld->GetComponent<TransformComponent>(snap.entity);
+                                if (pFTC == nullptr) { continue; }
+                                const glm::vec3 nPos = Orange::Editor::Util::RotateAroundPivot(
+                                    snap.position, entityPos, deltaQ);
+                                const glm::quat nRot = deltaQ * snap.rotation;
+                                pFTC->position = nPos;
+                                pFTC->rotation = nRot;
+                                host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                                    snap.entity, std::string("Transform.position"),
+                                    snap.position, nPos,
+                                    MakeTransformPositionApply(&host, snap.entity)));
+                                host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
+                                    snap.entity, std::string("Transform.rotation"),
+                                    snap.rotation, nRot,
+                                    MakeTransformRotationApply(&host, snap.entity)));
+                            }
                         }
                     }
                 }

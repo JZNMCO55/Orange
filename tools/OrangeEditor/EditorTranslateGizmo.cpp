@@ -249,7 +249,8 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                 {
                     if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
                     {
-                        host.gizmo.dragStartAdditional.emplace_back(other, pOtherTC->position);
+                        host.gizmo.dragStartAdditional.push_back(
+                            {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
                     }
                 }
                 host.cmdStack.BeginGroup("Translate Drag", MergeMode::Ends);
@@ -314,21 +315,21 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                     // 在 "Translate Drag" group 内各自 coalesce；EndGroup 把整组
                     // 包成一次 Undo → 撤销时所有实体一起回退。
                     const glm::vec3 groupDelta = newPos - host.gizmo.dragStartEntityPos;
-                    for (const auto& [other, otherStart] : host.gizmo.dragStartAdditional)
+                    for (const auto& snap : host.gizmo.dragStartAdditional)
                     {
-                        if (!pWorld->IsValid(other)) { continue; }
-                        auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other);
+                        if (!pWorld->IsValid(snap.entity)) { continue; }
+                        auto* pOtherTC = pWorld->GetComponent<TransformComponent>(snap.entity);
                         if (pOtherTC == nullptr) { continue; }
-                        const glm::vec3 otherNew = otherStart + groupDelta;
+                        const glm::vec3 otherNew = snap.position + groupDelta;
                         if (otherNew != pOtherTC->position)
                         {
                             pOtherTC->position = otherNew;
                             host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                                other,
+                                snap.entity,
                                 std::string("Transform.position"),
-                                otherStart,
+                                snap.position,
                                 otherNew,
-                                MakeTransformPositionApply(&host, other)));
+                                MakeTransformPositionApply(&host, snap.entity)));
                         }
                     }
                 }

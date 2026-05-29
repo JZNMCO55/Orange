@@ -92,12 +92,19 @@ struct EditorGizmoState
     // 最新鼠标 ray 重算最近点，与本字段相减得到沿轴位移增量。
     glm::vec3 dragStartHitOnAxis = glm::vec3(0.0f);
 
-    // ---- 多选群组 translate 专用 ---------------------------------------
-    // 按下 LMB 那一帧，除 primary 外其余选中实体的 (entity, position) 快照。
-    // 群组 translate：每帧 newPos = 其 start + (primary newPos - primary
-    // dragStart)，让它们随 primary 刚体平移。空 = 单选（无群组）。仅 translate
-    // 用（rotate/scale 绕 pivot 的群组接线留后续，数学核心见 EditorGroupTransform.h）。
-    std::vector<std::pair<Orange::Engine::Entity, glm::vec3>> dragStartAdditional;
+    // ---- 多选群组变换专用 ----------------------------------------------
+    // 按下 LMB 那一帧，除 primary 外其余选中实体的 transform 快照。群组
+    // translate/rotate/scale 都以 primary 位置为 pivot，让 follower 随 primary
+    // 刚体联动（translate 用 position；rotate 用 position+rotation；scale 用
+    // position+scale）。空 = 单选（无群组）。绕 pivot 的数学见 EditorGroupTransform.h。
+    struct GroupDragSnapshot
+    {
+        Orange::Engine::Entity entity;
+        glm::vec3              position = glm::vec3(0.0f);
+        glm::quat              rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::vec3              scale    = glm::vec3(1.0f);
+    };
+    std::vector<GroupDragSnapshot> dragStartAdditional;
 
     // ---- Rotate 专用 ---------------------------------------------------
     // 拖动起点：mouse ray 与 axis 平面交点相对 entity 的向量在 axis 平
