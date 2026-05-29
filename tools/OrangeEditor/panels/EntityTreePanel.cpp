@@ -790,10 +790,15 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         const char* typeIcon = isLight ? ICON_CI_LIGHTBULB
                              : isMesh  ? ICON_CI_SYMBOL_OBJECT
                                        : ICON_CI_SYMBOL_NAMESPACE;
-        open = ImGui::TreeNodeEx("##node", flags, "%s %s", typeIcon, label);
+        // 锁定指示：locked 时名字前加锁图标（hierarchy gap §3 P1）。
+        const char* lockPrefix = IsEntityLocked(entity) ? (ICON_CI_LOCK " ") : "";
+        open = ImGui::TreeNodeEx("##node", flags, "%s%s %s", lockPrefix, typeIcon, label);
         nodeMin = ImGui::GetItemRectMin();
         nodeMax = ImGui::GetItemRectMax();
-        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        // 锁定实体不可 tree-click 选中（防误编辑，hierarchy gap §3 P1）；解锁
+        // 经右键 context menu Unlock（不依赖选中）。
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()
+            && !IsEntityLocked(entity)) {
             // 多选：Shift-click 范围选（hierarchy gap P1）；Ctrl-click toggle
             // 加入/移出 additional；regular click 清空 additional + 切 primary。
             const ImGuiIO& io = ImGui::GetIO();
@@ -857,7 +862,7 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         // 于是只能从右侧那个小 chip 起拖、拖节点名无反应（同理 drop target 只认
         // chip 矩形）。故 source / target 前置到 chip 之前，锚定整行 TreeNode（有
         // ID，走 ActiveId 常规路径）。
-        if (canEditNode
+        if (canEditNode && !IsEntityLocked(entity)
             && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
             ImGui::SetDragDropPayload(kEntityPayload, &entity, sizeof(entity));
             ImGui::Text("Move %s",
@@ -1072,6 +1077,24 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         }
         if (ImGui::MenuItem("Delete", "Del")) {
             mHost.selection.pendingDelete = entity;
+        }
+        // Lock / Unlock 切换（hierarchy gap §3 P1）：锁定 = 不可 pick/tree-click
+        // 选中、不可拖拽（防误编辑）；session-only，经本菜单解锁。
+        {
+            const bool locked = IsEntityLocked(entity);
+            if (ImGui::MenuItem(locked ? "Unlock" : "Lock")) {
+                if (locked) {
+                    for (auto it = mLockedEntities.begin(); it != mLockedEntities.end(); ++it) {
+                        if (*it == entity) { mLockedEntities.erase(it); break; }
+                    }
+                } else {
+                    mLockedEntities.push_back(entity);
+                    // 锁定时若它正被选中，清掉（保持"锁定=不可选"一致）。
+                    if (mHost.selection.selectedEntity == entity) {
+                        mHost.selection.selectedEntity = Orange::Engine::Entity::Invalid();
+                    }
+                }
+            }
         }
         ImGui::Separator();
         // v0.6 c5："Move to layer >" 子菜单 —— 遍历 partition.GetLayers()

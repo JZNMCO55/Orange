@@ -472,19 +472,23 @@ void EditorRenderLayer::DrawScenePanel()
                     const float ndcY = (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
                     const Orange::Engine::Entity picked =
                         PickEntityAt(mHost, glm::vec2(ndcX, ndcY), aspect);
+                    // 锁定实体不可 pick 选中（防误编辑，hierarchy gap §3 P1）：
+                    // 点到锁定实体 = no-op（保持当前选择，下面 select/toggle 跳过）；
+                    // 点空白仍正常清空。
+                    const bool pickedLocked = picked.IsValid() && IsEntityLocked(picked);
                     // 视口多选（gap 报告 §3 P0）：Ctrl+点**另一个**实体 = 加入 /
                     // 移出 additional set（与 Entity Tree Ctrl-toggle 同款
                     // ToggleAdditional，gizmo/Inspector 仍只作用 primary，与既有
                     // 多选语义一致）；普通单击 = 切 primary + 清 additional（点空白
                     // = 全清）；Ctrl+空白 / Ctrl+当前 primary = 保持不变（no-op）。
                     const ImGuiIO& pickIo = ImGui::GetIO();
-                    if (pickIo.KeyCtrl && picked.IsValid()
+                    if (pickIo.KeyCtrl && picked.IsValid() && !pickedLocked
                         && mHost.selection.selectedEntity.IsValid()
                         && picked != mHost.selection.selectedEntity)
                     {
                         mHost.selection.ToggleAdditional(picked);
                     }
-                    else if (!pickIo.KeyCtrl)
+                    else if (!pickIo.KeyCtrl && !pickedLocked)
                     {
                         mHost.selection.selectedEntity = picked;
                         mHost.selection.ClearAdditional();

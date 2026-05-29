@@ -365,6 +365,16 @@ public:
     // 进程内 in-memory blob；空 = 剪贴板空。
     std::string                         mEntityClipboard;
 
+    // 编辑器侧实体锁定（hierarchy gap §3 P1，防误编辑）：锁定实体不可被
+    // viewport pick / tree-click 选中、不可拖拽 reparent；右键菜单 Lock/Unlock
+    // 切换。session-only（不序列化）。规模小，vector + 线性查即可。
+    std::vector<Orange::Engine::Entity> mLockedEntities;
+    bool IsEntityLocked(Orange::Engine::Entity e) const
+    {
+        for (const auto le : mLockedEntities) { if (le == e) { return true; } }
+        return false;
+    }
+
     // ---- Autosave 运行时（GAP-2026-05-29-editor-autosave-wiring）---------
     // mpAutosave：引擎侧 scheduler；首帧 lazy-init（此时 settings 已加载完）。
     //   autosaveEnabled=false 时保持 null，不推进。callback 捕 this 调 DoAutosave。
