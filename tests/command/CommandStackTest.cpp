@@ -130,6 +130,47 @@ int main()
         assert(s.PeekRedoLabel() == nullptr);
     }
 
+    // 7. SetOnChanged：dirty 追踪钩子契约（编辑器靠它把 scene.dirty 置 true，
+    //    撑起 unsaved-confirm 拦截 + autosave dirty gate）。触发时机：成功 Push
+    //    （含组内 Push）/ Undo / Redo / 非空 EndGroup；**不**在 Clear 触发
+    //    （Clear 是破坏性操作后清栈，不代表新脏化）；空组 EndGroup 不触发。
+    {
+        CommandStack s;
+        int changes = 0;
+        s.SetOnChanged([&] { ++changes; });
+
+        s.Push(MakeLabeled("a", "A"));
+        assert(changes == 1);
+        s.Push(MakeLabeled("b", "B"));
+        assert(changes == 2);
+
+        s.Undo();
+        assert(changes == 3);
+        s.Redo();
+        assert(changes == 4);
+
+        // 关键：Clear 不触发（破坏性操作清栈不应再次置 dirty）。
+        s.Clear();
+        assert(changes == 4);
+
+        // 非空组：组内 Push 触发 1 次 + 非空 EndGroup 触发 1 次 = +2。
+        s.BeginGroup("g", MergeMode::Disable);
+        s.Push(MakeLabeled("c", "C"));
+        assert(changes == 5);
+        s.EndGroup();
+        assert(changes == 6);
+
+        // 空组 EndGroup 不触发（无 visible 效果，不脏化）。
+        s.BeginGroup("empty", MergeMode::Disable);
+        s.EndGroup();
+        assert(changes == 6);
+
+        // nullptr 关闭通知，后续操作不回调（不崩）。
+        s.SetOnChanged(nullptr);
+        s.Push(MakeLabeled("d", "D"));
+        assert(changes == 6);
+    }
+
     std::printf("command_stack_test: all assertions passed\n");
     return 0;
 }
