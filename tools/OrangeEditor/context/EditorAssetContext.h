@@ -95,6 +95,17 @@ struct EditorAssetContext
     std::string editingMaterialPath   = {};
     std::string editingTemplateName   = {};
 
+    // GAP-2026-05-29-editor-material-asset-dirty-tracking facet 2：uniform 编辑
+    // 的**持久** dirty 追踪。ImGui DragFloat/Slider/ColorEdit 仅在"值在当帧被
+    // 改"时返回 changed，松手下一帧即归 false——若 Save 按钮直接吃这个 transient
+    // 信号，uniform-only 编辑松手后 Save 立即置灰、根本存不下。故用持久 flag 累积
+    // "自进入本 .material 编辑会话 / 上次 Save 以来 uniform 是否改过"。
+    //   * 置位：DrawMaterialSubMode 内任一 uniform widget 当帧返回 changed
+    //   * 清零：切到另一个 .material（editingMaterialPath 变） / Save 成功
+    // template 切换的 dirty 仍走 editingTemplateName vs 盘上值的实时比较（无需
+    // 持久化，本就跨帧稳定），与本 flag 在 Save 按钮处 OR 起来。
+    bool editingMaterialUniformDirty = false;
+
     // v1.2.2 patch · 用户新建（v1.1.1 Create Material UI）/ 手动 copy 进
     // assets/ / 老 .material 等"非 8 个内置 hardcode + PBR showcase 18 个"
     // 的 .material 文件，在 MaterialAssetInspectorPlugin 首次访问时按

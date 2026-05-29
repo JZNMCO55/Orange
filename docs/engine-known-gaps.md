@@ -2729,12 +2729,12 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 ---
 
-## GAP-2026-05-29-editor-material-asset-dirty-tracking
+## GAP-2026-05-29-editor-material-asset-dirty-tracking ✅（facet 2）
 
 - **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（P0 + Quick Win #1）复核时坐实，并在复核中发现比报告更严重的次生 bug
 - **发现日期**：2026-05-29
 - **一句话定性**：`.material` 资产编辑**没有持久化的 dirty 追踪**——Material Inspector 子模式既不接 `EditorSceneContext.dirty` / 未保存确认拦截，也不进命令栈；更严重的是它**连自己的 Save 按钮可用性都靠每帧 transient 信号**，导致 uniform-only 编辑松手后根本存不下去
-- **状态**：**登记（未排期）**。本 session 仅复核 + 登记，不实现（同 CLAUDE.md "发现 gap 的 session 只做登记"纪律）
+- **状态**：**facet 2 ✅ 2026-05-29 落地**（持久 uniform dirty flag + 可见"未保存"指示器，登记后同 session /goal 自主推进，见下方落地记录）；**facet 1 留待**（关窗 / 切资产确认拦截材质改动 = 资产级 dirty 追踪**设计件**，且 modal Save 语义与场景存盘冲突、需 dogfood，本轮不盲做）
 
 ### 触发场景
 
@@ -2770,6 +2770,20 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 - 报告原文：`docs/editor-capability-gap-vs-mature.md` §2.3「材质参数旁路命令栈/dirty」`:86`、§2.7「Dirty 跟踪」`:159`、§3 P0 `:189`、§4 Quick Win #1 `:228`。
 - scene 级 dirty / 未保存确认基建见 [[GAP-2026-05-22-new-scene-actually-seeds-demo]] 同期建立的 `EditorSceneContext.dirty` + `PendingCloseAction`（`context/EditorSceneContext.h:116`）——本 gap 是"资产级 dirty"缺口，与"场景级 dirty"正交。
 - 材质资产体系背景见 [[GAP-2026-05-24-material-template-library-and-custom-hook]] / [[GAP-2026-05-24-editor-asset-browser-create-material-missing]]。
+
+### facet 2 落地记录（2026-05-29，登记后同 session /goal 自主推进）
+
+只修 contained 的 facet 2（transient uniformDirty → uniform-only 编辑存不下），facet 1 设计件留待：
+
+| 文件 | 改动 |
+|---|---|
+| `context/EditorAssetContext.h` | 加 `bool editingMaterialUniformDirty`——持久累积"自进入本 .material 会话 / 上次 Save 以来 uniform 是否改过"，替代每帧 transient 信号 |
+| `plugin/MaterialAssetInspectorPlugin.cpp` | (a) 切到新 `.material` 时 reset flag；(b) 任一 uniform widget 当帧 changed → 累积置 true；(c) Save 按钮 dirty 判定改 `templateDirty \|\| editingMaterialUniformDirty`（松手后 Save 仍可用直到写盘）；(d) Save 成功后 reset；(e) dirty 时 Save 旁画橙色"* 未保存"指示 + tooltip 提示"关闭/切走不会自动保存" |
+| token 纪律 | 指示器色走 `Theme::Color::GetAccentPrimary()`（文档明定用于 "Save dirty 高亮"），**不用字面量 ImVec4**——invariant lint `editor-literal-rgba` 红线一次拦下初版字面量，已改 token |
+
+**验收**：`OrangeEditor.exe` 编译链接通过，invariant lint 干净（含 editor-literal-rgba 红线）。**无 headless 单测**——dirty 累积/清零逻辑嵌在 ImGui draw（控件返回值驱动），无纯逻辑切点（与 undo-label 不同），靠 compile + review + **dogfood**。⚠️ **待作者实机确认**：拖 uniform 松手后 Save 仍可点 + 存盘后置灰 + "* 未保存"指示出现/消失正确。
+
+**facet 1 留待的设计点**（下次独立 session + dogfood）：`DrawUnsavedConfirmPopup`（关窗/Esc/New/Open）目前只看 `scene.dirty`，且 modal "Save"→`SceneOp::Save`（存场景非材质）。拦截材质改动需：(1) close 条件 OR 进材质 dirty；(2) modal 能"保存脏材质"（走 WriteMaterialFile）或分独立确认；(3) 切走未 Save 的 material 丢内存 override → switch 前确认。cycle-1 已警告"盲设 scene.dirty 会误报场景脏"，非一行可了。facet 2 的可见指示器已先堵住"用户不知道没存"的主要陷阱。
 
 ---
 

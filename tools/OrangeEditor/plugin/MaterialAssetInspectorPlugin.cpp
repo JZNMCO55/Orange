@@ -4,6 +4,7 @@
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../MaterialFileIO.h"
+#include "../theme/EditorTheme.h"  // dirty 指示器走 accent token（禁字面量 RGBA）
 #include "../ShaderTemplateMetaIO.h"  // v1.2 T2 · 数据驱动 widget 元数据
 
 #include <orange/engine/render/MaterialInstance.h>
@@ -324,6 +325,9 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     {
         host.assets.editingMaterialPath = materialPath;
         host.assets.editingTemplateName = originalTemplate;
+        // 切到新 .material → 清持久 uniform dirty（新会话无 pending 编辑）。
+        // facet 1 留待：切走未 Save 仍丢内存 override，需切换前确认（设计件）。
+        host.assets.editingMaterialUniformDirty = false;
     }
 
     // 从 MaterialSystem 实时取所有已注册模板（含游戏侧自定义）。注：游戏侧
@@ -448,9 +452,15 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
 
     // Save 按钮：以 v1.1 schema 写回。template 切换或任一 uniform 编辑
     // 都标 dirty；live instance 不存在时仅按 template 差异判 dirty。
+    //
+    // facet 2 修复：uniformDirty 是 ImGui 控件**当帧** changed 的 transient
+    // 信号，松手即归 false——必须累积进持久 flag，否则用户拖完松手再点 Save
+    // 时按钮已置灰、uniform 编辑根本存不下。template dirty 走 editingTemplateName
+    // vs 盘上值的实时比较（跨帧稳定，不需持久化）。
+    if (uniformDirty) { host.assets.editingMaterialUniformDirty = true; }
     ImGui::Separator();
     const bool templateDirty = (host.assets.editingTemplateName != originalTemplate);
-    const bool dirty         = templateDirty || uniformDirty;
+    const bool dirty         = templateDirty || host.assets.editingMaterialUniformDirty;
     ImGui::BeginDisabled(!dirty);
     if (ImGui::Button("Save"))
     {
@@ -472,6 +482,9 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
             data.templateName = host.assets.editingTemplateName;
         }
         ::Orange::Editor::Material::WriteMaterialFile(materialPath, data);
+        // 写盘成功 → 清持久 uniform dirty（template dirty 下一帧重读
+        // originalTemplate 自动归零）。
+        host.assets.editingMaterialUniformDirty = false;
         // 内存 MaterialInstance 的 SetUniform override 已在编辑过程中
         // 应用到 live instance，视觉立即更新；磁盘 .material 文件本步
         // 落盘下次启动按 ApplyDataToInstance 重新加载相同的 override。
@@ -482,6 +495,21 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     {
         ImGui::SameLine();
         ImGui::TextDisabled("(no changes to save)");
+    }
+    else
+    {
+        // 可见"未保存"指示——缓解 facet 1（关窗 / 切资产不拦截材质改动 → 静默
+        // 丢失）：完整的关窗确认拦截是设计件留待后续，本步至少让用户在面板上
+        // 看到"还没写盘"，配合 facet 2 修复（Save 松手后仍可用）堵住主要陷阱。
+        ImGui::SameLine();
+        ImGui::TextColored(Orange::Editor::Theme::Color::GetAccentPrimary(),
+                           "%s", "* 未保存");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "材质有未保存改动——点 Save 写回 .material。\n"
+                "注意：编辑器关闭 / 切到其它资产不会自动保存材质改动。");
+        }
     }
     if (ImGui::BeginPopup("##saved_notice"))
     {
