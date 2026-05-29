@@ -88,6 +88,19 @@ orange_engine_add_test(post_process_roundtrip_test scene/PostProcessRoundTripTes
 orange_engine_add_test(scene_file_load_test     scene/SceneFileLoadTest.cpp)
 target_compile_definitions(scene_file_load_test PRIVATE
     "ORANGE_ENGINE_REPO_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\"")
+
+# EditorHierarchy 图操作（tools/OrangeEditor）—— Entity Tree DnD reparent / reorder
+# 的底座。逻辑纯 World + HierarchyComponent、零 ImGui/GLFW/Vulkan 依赖，故同
+# material_file_io_test 模式：直接把 helper 源编进测试 exe + 加 include path（该源
+# 不属引擎 lib）。覆盖编辑器侧 ImGui DnD 交互无法 headless 验证的那层图逻辑。
+add_executable(editor_hierarchy_test
+    scene/EditorHierarchyTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/EditorHierarchy.cpp")
+target_link_libraries(editor_hierarchy_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(editor_hierarchy_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(editor_hierarchy_test)
+add_test(NAME editor_hierarchy_test COMMAND editor_hierarchy_test)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
 orange_engine_add_test(save_game_system_test    save/SaveGameSystemTest.cpp)
 orange_engine_add_test(save_path_test           save/SavePathTest.cpp)

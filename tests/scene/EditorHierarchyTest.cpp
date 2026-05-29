@@ -1,0 +1,312 @@
+// EditorHierarchy 图操作单元测试。
+//
+// EditorHierarchy（tools/OrangeEditor）维护 HierarchyComponent 的双向兄弟链，是
+// Entity Tree 拖拽 reparent / reorder 的底座。这套逻辑是纯 World + HierarchyComponent
+// 运算、零 GUI 依赖，故可像 material_file_io_test 一样直接把 helper 源编进测试 exe
+// 验证（编辑器侧的 ImGui DnD 交互无法 headless 驱动，但这层图逻辑能在此被完整覆盖）。
+//
+// 覆盖：
+//   * LinkAsLastChild / Detach（头/中/尾）/ ReparentTo
+//   * MoveToPosition（插最前 / 插某兄弟后 / parent==Invalid 提 root / afterSibling
+//     不属 parent 的防御性挂尾）
+//   * MoveBefore / MoveAfter（同父重排 + 跨父定位 + 相邻 no-op）
+//   * IsAncestorOf（自身 / 直接 / 传递 / 无关）
+//   * Undo 往返：MoveToPosition(oldParent, oldPrev) 精确复位
+//   * DestroySubtree 递归销毁 + 从父链摘除
+
+#include "EditorHierarchy.h"
+
+#include <orange/engine/scene/Entity.h>
+#include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/World.h>
+
+#include <cassert>
+#include <cstdio>
+#include <vector>
+
+using Orange::Engine::Entity;
+using Orange::Engine::World;
+using HC = Orange::Engine::Scene::HierarchyComponent;
+
+namespace
+{
+
+// 走兄弟链收集 parent 的子节点顺序，同时**正反向**校验：每个子的 parent 指回
+// parent、prevSibling 指向上一个（首子为 Invalid）。任何链断裂 / 反向不一致都
+// 会在此 assert 失败，故各测试用例只需对比返回的顺序向量。
+std::vector<Entity> ChildrenOf(World& world, Entity parent)
+{
+    std::vector<Entity> out;
+    const HC* ph = world.GetComponent<HC>(parent);
+    Entity    cur  = (ph != nullptr) ? ph->firstChild : Entity::Invalid();
+    Entity    prev = Entity::Invalid();
+    while (cur.IsValid())
+    {
+        const HC* ch = world.GetComponent<HC>(cur);
+        assert(ch != nullptr);
+        assert(ch->parent == parent);       // 子的 parent 必须指回
+        assert(ch->prevSibling == prev);     // 双向链反向一致
+        out.push_back(cur);
+        prev = cur;
+        cur  = ch->nextSibling;
+    }
+    return out;
+}
+
+bool IsDetachedRoot(World& world, Entity e)
+{
+    const HC* h = world.GetComponent<HC>(e);
+    if (h == nullptr) { return true; }   // 无 HC 视为 root
+    return !h->parent.IsValid()
+        && !h->prevSibling.IsValid()
+        && !h->nextSibling.IsValid();
+}
+
+// 造一个 root 下挂 n 个子（按传入顺序）的场景，返回 [root, child0, child1, ...]。
+std::vector<Entity> MakeRootWithChildren(World& world, int n)
+{
+    std::vector<Entity> ids;
+    Entity root = world.CreateEntity();
+    ids.push_back(root);
+    for (int i = 0; i < n; ++i)
+    {
+        Entity c = world.CreateEntity();
+        EditorHierarchy::LinkAsLastChild(world, root, c);
+        ids.push_back(c);
+    }
+    return ids;
+}
+
+void TestLinkAsLastChild()
+{
+    World world;
+    auto   ids  = MakeRootWithChildren(world, 3);   // root, a, b, c
+    Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+
+    assert(ChildrenOf(world, root) == (std::vector<Entity>{a, b, c}));
+    assert(world.GetComponent<HC>(root)->firstChild == a);
+    assert(IsDetachedRoot(world, root));   // root 自身仍是 root
+
+    std::fprintf(stdout, "  [PASS] LinkAsLastChild builds ordered chain\n");
+}
+
+void TestDetachHeadMiddleTail()
+{
+    {   // 摘中间
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::Detach(world, b);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{a, c}));
+        assert(IsDetachedRoot(world, b));
+    }
+    {   // 摘头
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::Detach(world, a);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{b, c}));
+        assert(world.GetComponent<HC>(root)->firstChild == b);
+        assert(IsDetachedRoot(world, a));
+    }
+    {   // 摘尾
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::Detach(world, c);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{a, b}));
+        assert(IsDetachedRoot(world, c));
+    }
+    {   // 摘已是 root 的实体：no-op，不崩
+        World  world;
+        Entity r = world.CreateEntity();
+        world.AddComponent<HC>(r, {});
+        EditorHierarchy::Detach(world, r);
+        assert(IsDetachedRoot(world, r));
+    }
+    std::fprintf(stdout, "  [PASS] Detach head/middle/tail/root\n");
+}
+
+void TestReparentTo()
+{
+    World world;
+    auto   ids  = MakeRootWithChildren(world, 2);   // root, a, b
+    Entity root = ids[0], a = ids[1], b = ids[2];
+    Entity p2   = world.CreateEntity();
+    world.AddComponent<HC>(p2, {});
+
+    EditorHierarchy::ReparentTo(world, a, p2);   // a 挂到 p2 末尾
+    assert(ChildrenOf(world, root) == (std::vector<Entity>{b}));
+    assert(ChildrenOf(world, p2) == (std::vector<Entity>{a}));
+    assert(world.GetComponent<HC>(a)->parent == p2);
+
+    EditorHierarchy::ReparentTo(world, b, Entity::Invalid());   // b 提到 root
+    assert(ChildrenOf(world, root).empty());
+    assert(IsDetachedRoot(world, b));
+
+    std::fprintf(stdout, "  [PASS] ReparentTo (to parent tail / to root)\n");
+}
+
+void TestMoveToPosition()
+{
+    {   // afterSibling == Invalid → 插到子链最前
+        World world;
+        auto   ids = MakeRootWithChildren(world, 2);   // root, a, b
+        Entity root = ids[0], a = ids[1], b = ids[2];
+        Entity x = world.CreateEntity();
+        EditorHierarchy::MoveToPosition(world, x, root, Entity::Invalid());
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{x, a, b}));
+    }
+    {   // afterSibling 有效 → 插到它之后
+        World world;
+        auto   ids = MakeRootWithChildren(world, 2);
+        Entity root = ids[0], a = ids[1], b = ids[2];
+        Entity x = world.CreateEntity();
+        EditorHierarchy::MoveToPosition(world, x, root, a);   // a 之后
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{a, x, b}));
+    }
+    {   // parent == Invalid → 仅摘成 root（afterSibling 忽略）
+        World world;
+        auto   ids = MakeRootWithChildren(world, 2);
+        Entity root = ids[0], a = ids[1];
+        EditorHierarchy::MoveToPosition(world, a, Entity::Invalid(), Entity::Invalid());
+        assert(IsDetachedRoot(world, a));
+        assert(world.GetComponent<HC>(root)->firstChild == ids[2]);  // b 顶上来
+    }
+    {   // afterSibling 不属于 parent → 防御性挂尾，不破链
+        World world;
+        auto   idsA = MakeRootWithChildren(world, 2);   // pA, m, n
+        Entity pA = idsA[0], m = idsA[1], n = idsA[2];
+        Entity pB = world.CreateEntity();
+        world.AddComponent<HC>(pB, {});
+        Entity stray = world.CreateEntity();
+        EditorHierarchy::LinkAsLastChild(world, pB, stray);   // stray 属 pB
+        Entity x = world.CreateEntity();
+        EditorHierarchy::MoveToPosition(world, x, pA, stray);  // afterSibling 不属 pA
+        assert(ChildrenOf(world, pA) == (std::vector<Entity>{m, n, x}));  // 挂到 pA 尾
+        (void)m; (void)n;
+    }
+    std::fprintf(stdout, "  [PASS] MoveToPosition (front/after/root/defensive-tail)\n");
+}
+
+void TestMoveBeforeAfter()
+{
+    {   // MoveBefore：[a,b,c] → c 移到 a 前 → [c,a,b]
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::MoveBefore(world, c, a);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{c, a, b}));
+    }
+    {   // MoveAfter：[a,b,c] → a 移到 c 后 → [b,c,a]
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::MoveAfter(world, a, c);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{b, c, a}));
+    }
+    {   // 相邻 no-op：[a,b,c]，MoveBefore(b, c) b 本就在 c 前 → 链不变
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::MoveBefore(world, b, c);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{a, b, c}));
+    }
+    {   // 相邻 no-op：[a,b,c]，MoveAfter(b, a) b 本就在 a 后 → 链不变
+        World world;
+        auto   ids = MakeRootWithChildren(world, 3);
+        Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+        EditorHierarchy::MoveAfter(world, b, a);
+        assert(ChildrenOf(world, root) == (std::vector<Entity>{a, b, c}));
+    }
+    {   // 跨父定位：pA=[x]，pB=[t]，MoveBefore(x, t) → x 改挂 pB、在 t 前
+        World world;
+        Entity pA = world.CreateEntity(); world.AddComponent<HC>(pA, {});
+        Entity pB = world.CreateEntity(); world.AddComponent<HC>(pB, {});
+        Entity x = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, pA, x);
+        Entity t = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, pB, t);
+        EditorHierarchy::MoveBefore(world, x, t);
+        assert(ChildrenOf(world, pA).empty());
+        assert(ChildrenOf(world, pB) == (std::vector<Entity>{x, t}));
+        assert(world.GetComponent<HC>(x)->parent == pB);
+    }
+    std::fprintf(stdout, "  [PASS] MoveBefore/MoveAfter (reorder/cross-parent/adjacent no-op)\n");
+}
+
+void TestUndoRoundTrip()
+{
+    // 模拟 EntityTreePanel 帧末 apply 的 undo：记录旧 (parent, prevSibling)，
+    // 一次 reorder 后用 MoveToPosition 原位复位，链必须逐位还原。
+    World world;
+    auto   ids = MakeRootWithChildren(world, 3);   // root, a, b, c
+    Entity root = ids[0], a = ids[1], b = ids[2], c = ids[3];
+
+    // 记录 b 的旧位置
+    const HC*    bh        = world.GetComponent<HC>(b);
+    const Entity oldParent = bh->parent;        // root
+    const Entity oldPrev   = bh->prevSibling;   // a
+
+    EditorHierarchy::MoveAfter(world, b, c);                  // [a,c,b]
+    assert(ChildrenOf(world, root) == (std::vector<Entity>{a, c, b}));
+
+    EditorHierarchy::MoveToPosition(world, b, oldParent, oldPrev);  // undo
+    assert(ChildrenOf(world, root) == (std::vector<Entity>{a, b, c}));
+
+    std::fprintf(stdout, "  [PASS] undo round-trip restores exact sibling position\n");
+}
+
+void TestIsAncestorOf()
+{
+    // root → mid → leaf；sib 是 root 的另一个子
+    World  world;
+    Entity root = world.CreateEntity(); world.AddComponent<HC>(root, {});
+    Entity mid  = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, root, mid);
+    Entity leaf = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, mid, leaf);
+    Entity sib  = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, root, sib);
+
+    assert(EditorHierarchy::IsAncestorOf(world, root, root));   // 含自身
+    assert(EditorHierarchy::IsAncestorOf(world, root, mid));    // 直接
+    assert(EditorHierarchy::IsAncestorOf(world, root, leaf));   // 传递
+    assert(EditorHierarchy::IsAncestorOf(world, mid, leaf));
+    assert(!EditorHierarchy::IsAncestorOf(world, leaf, root));  // 反向不成立
+    assert(!EditorHierarchy::IsAncestorOf(world, sib, leaf));   // 无关
+    assert(!EditorHierarchy::IsAncestorOf(world, Entity::Invalid(), leaf));
+
+    std::fprintf(stdout, "  [PASS] IsAncestorOf (self/direct/transitive/negatives)\n");
+}
+
+void TestDestroySubtree()
+{
+    // root → [c1 → gc, c2]；DestroySubtree(c1) 应销毁 c1+gc、root 只剩 c2
+    World  world;
+    Entity root = world.CreateEntity(); world.AddComponent<HC>(root, {});
+    Entity c1   = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, root, c1);
+    Entity gc   = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, c1, gc);
+    Entity c2   = world.CreateEntity(); EditorHierarchy::LinkAsLastChild(world, root, c2);
+
+    EditorHierarchy::DestroySubtree(world, c1);
+
+    assert(!world.IsValid(c1));
+    assert(!world.IsValid(gc));
+    assert(world.IsValid(c2));
+    assert(ChildrenOf(world, root) == (std::vector<Entity>{c2}));
+
+    std::fprintf(stdout, "  [PASS] DestroySubtree (recursive + detach from parent)\n");
+}
+
+}  // namespace
+
+int main()
+{
+    std::fprintf(stdout, "[EditorHierarchyTest] running\n");
+    TestLinkAsLastChild();
+    TestDetachHeadMiddleTail();
+    TestReparentTo();
+    TestMoveToPosition();
+    TestMoveBeforeAfter();
+    TestUndoRoundTrip();
+    TestIsAncestorOf();
+    TestDestroySubtree();
+    std::fprintf(stdout, "[EditorHierarchyTest] all tests passed.\n");
+    return 0;
+}
