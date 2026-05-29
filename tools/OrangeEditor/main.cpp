@@ -775,7 +775,11 @@ int main()
     {
         EditorHost* pHost = spEditorHost;
         if (pHost == nullptr) { return; }
-        if (pHost->scene.dirty)
+        // 未保存确认拦截 = 场景 dirty 或材质有未写盘改动（facet 1：与 EditorRenderLayer
+        // ::HasUnsavedMaterial 同义，回调里直接查 host 字段，避免依赖 layer 实例）。
+        const bool unsavedMaterial = !pHost->assets.editingMaterialPath.empty()
+                                  && pHost->assets.editingMaterialDirty;
+        if (pHost->scene.dirty || unsavedMaterial)
         {
             glfwSetWindowShouldClose(w, GLFW_FALSE);
             if (pHost->scene.pendingCloseAction == PendingCloseAction::None)

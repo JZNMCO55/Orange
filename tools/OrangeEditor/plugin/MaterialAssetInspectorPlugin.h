@@ -29,6 +29,13 @@ public:
     void Draw(EditorHost& host, const std::string& assetPath) override;
 };
 
+// 把当前正在编辑的 .material（host.assets.editingMaterialPath）以当前编辑态
+// 写回磁盘并清 editingMaterialDirty。canonical 材质保存路径——Material Inspector
+// 的 Save 按钮 + 关窗未保存确认（EditorRenderLayer）共用，避免两条 save 路径漂移。
+// editingMaterialPath 为空（未在编辑任何材质）时 no-op 返回 false。
+// GAP-2026-05-29-editor-material-asset-dirty-tracking facet 1。
+bool SaveEditingMaterialToDisk(EditorHost& host);
+
 }  // namespace Orange::Editor::Plugin
 
 #endif  // ORANGE_EDITOR_PLUGIN_MATERIAL_ASSET_INSPECTOR_PLUGIN_H

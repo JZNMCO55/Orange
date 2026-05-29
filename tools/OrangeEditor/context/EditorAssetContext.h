@@ -95,16 +95,16 @@ struct EditorAssetContext
     std::string editingMaterialPath   = {};
     std::string editingTemplateName   = {};
 
-    // GAP-2026-05-29-editor-material-asset-dirty-tracking facet 2：uniform 编辑
-    // 的**持久** dirty 追踪。ImGui DragFloat/Slider/ColorEdit 仅在"值在当帧被
-    // 改"时返回 changed，松手下一帧即归 false——若 Save 按钮直接吃这个 transient
-    // 信号，uniform-only 编辑松手后 Save 立即置灰、根本存不下。故用持久 flag 累积
-    // "自进入本 .material 编辑会话 / 上次 Save 以来 uniform 是否改过"。
-    //   * 置位：DrawMaterialSubMode 内任一 uniform widget 当帧返回 changed
-    //   * 清零：切到另一个 .material（editingMaterialPath 变） / Save 成功
-    // template 切换的 dirty 仍走 editingTemplateName vs 盘上值的实时比较（无需
-    // 持久化，本就跨帧稳定），与本 flag 在 Save 按钮处 OR 起来。
-    bool editingMaterialUniformDirty = false;
+    // GAP-2026-05-29-editor-material-asset-dirty-tracking：当前编辑的 .material
+    // 是否有**未写盘**改动（持久追踪，跨帧 / 跨切到实体后仍成立）。
+    //   facet 2：ImGui 控件仅"值当帧被改"时返回 changed，松手即归 false——
+    //   若 Save 按钮直接吃 transient 信号，uniform-only 编辑松手后存不下。故用
+    //   持久 flag 累积"自进入本会话 / 上次 Save 以来是否改过（uniform 或 template）"。
+    //   facet 1：关窗 / New / Open 未保存确认（EditorRenderLayer::HasUnsavedMaterial）
+    //   也读它，让"改了材质没存就关"被拦截（不再静默丢失）。
+    //   * 置位：任一 uniform widget 当帧 changed / template Combo 切换
+    //   * 清零：切到另一个 .material（editingMaterialPath 变）/ Save 成功 / Discard
+    bool editingMaterialDirty = false;
 
     // v1.2.2 patch · 用户新建（v1.1.1 Create Material UI）/ 手动 copy 进
     // assets/ / 老 .material 等"非 8 个内置 hardcode + PBR showcase 18 个"

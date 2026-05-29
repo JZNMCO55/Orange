@@ -109,6 +109,10 @@ private:
     // Discard 路径直接调；Save 路径在 dirty 清零后由 DrawUnsavedConfirmPopup
     // 早退分支自动调。
     void DispatchPendingCloseAction();
+    // 当前是否有未写盘的材质改动（GAP-2026-05-29 facet 1）。关窗 / New / Open
+    // 的未保存确认除 scene.dirty 外也查它，避免"改了材质没存就关"静默丢失。
+    // = 正在编辑某 .material（assets.editingMaterialPath 非空）且 editingMaterialDirty。
+    bool HasUnsavedMaterial() const;
     // GAP-2026-05-29-editor-autosave-wiring：编辑器自动存档接线。引擎侧
     // Save::AutosaveScheduler 是纯时间逻辑，本层负责喂帧 / dirty gate / 序列化
     // 落盘 / 启动崩溃恢复。UpdateAutosave 每帧 OnUpdate 调（首帧顺带 lazy-init

@@ -2729,12 +2729,12 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 ---
 
-## GAP-2026-05-29-editor-material-asset-dirty-tracking ✅（facet 2）
+## GAP-2026-05-29-editor-material-asset-dirty-tracking ✅
 
 - **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（P0 + Quick Win #1）复核时坐实，并在复核中发现比报告更严重的次生 bug
 - **发现日期**：2026-05-29
 - **一句话定性**：`.material` 资产编辑**没有持久化的 dirty 追踪**——Material Inspector 子模式既不接 `EditorSceneContext.dirty` / 未保存确认拦截，也不进命令栈；更严重的是它**连自己的 Save 按钮可用性都靠每帧 transient 信号**，导致 uniform-only 编辑松手后根本存不下去
-- **状态**：**facet 2 ✅ 2026-05-29 落地**（持久 uniform dirty flag + 可见"未保存"指示器，登记后同 session /goal 自主推进，见下方落地记录）；**facet 1 留待**（关窗 / 切资产确认拦截材质改动 = 资产级 dirty 追踪**设计件**，且 modal Save 语义与场景存盘冲突、需 dogfood，本轮不盲做）
+- **状态**：**✅ 2026-05-29 全落地**（facet 2 持久 dirty + "未保存"指示；facet 1 关窗 / New / Open 未保存确认拦截材质改动 + modal 同步存材质——dogfood 循环中用户在场时落地，见下方两段落地记录）。切到其它资产仍不拦（接受语义）
 
 ### 触发场景
 
@@ -2783,7 +2783,20 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 **验收**：`OrangeEditor.exe` 编译链接通过，invariant lint 干净（含 editor-literal-rgba 红线）。**无 headless 单测**——dirty 累积/清零逻辑嵌在 ImGui draw（控件返回值驱动），无纯逻辑切点（与 undo-label 不同），靠 compile + review + **dogfood**。⚠️ **待作者实机确认**：拖 uniform 松手后 Save 仍可点 + 存盘后置灰 + "* 未保存"指示出现/消失正确。
 
-**facet 1 留待的设计点**（下次独立 session + dogfood）：`DrawUnsavedConfirmPopup`（关窗/Esc/New/Open）目前只看 `scene.dirty`，且 modal "Save"→`SceneOp::Save`（存场景非材质）。拦截材质改动需：(1) close 条件 OR 进材质 dirty；(2) modal 能"保存脏材质"（走 WriteMaterialFile）或分独立确认；(3) 切走未 Save 的 material 丢内存 override → switch 前确认。cycle-1 已警告"盲设 scene.dirty 会误报场景脏"，非一行可了。facet 2 的可见指示器已先堵住"用户不知道没存"的主要陷阱。
+### facet 1 落地记录（2026-05-29，dogfood 循环中用户在场时落地）
+
+facet 2（指示器 + 可保存）后，"改了材质没存就关窗"仍会静默丢失——facet 1 把材质改动也纳入未保存确认拦截。因触及关键 unsaved 状态机（丢全场景工作的最后防线），刻意等到用户处于活跃 dogfood 循环时才做（盲改风险高），并附专门 dogfood 项含 scene-dirty 回归。
+
+| 文件 | 改动 |
+|---|---|
+| `context/EditorAssetContext.h` | `editingMaterialUniformDirty` 改名 `editingMaterialDirty`（现覆盖 uniform + template；facet 2 + facet 1 共用的持久 dirty 信号） |
+| `plugin/MaterialAssetInspectorPlugin.{h,cpp}` | template Combo 切换也置 dirty；导出 canonical `SaveEditingMaterialToDisk(host)`（build+write editingMaterialPath+clear，Save 按钮路径保持原样仅清同一 flag，关窗确认共用此函数） |
+| `EditorRenderLayer.{h,cpp}` | `HasUnsavedMaterial()`；File New/Open/OpenSplit/Exit 拦截条件 `scene.dirty` → `|| HasUnsavedMaterial()`；`DrawUnsavedConfirmPopup` 早退 + 自适应文案（场景/材质/两者）+ Save 同步存材质&deferred 存场景 + Discard 清材质 dirty |
+| `main.cpp` | 窗口 × / Esc 关闭回调同样 `scene.dirty \|\| 材质未存` 才拦 |
+
+**关键设计**：modal Save 路径——材质同步 `SaveEditingMaterialToDisk`（立即 clean）+ 场景 deferred `SceneOp::Save`；两者 clean 后下帧早退分支 dispatch 原动作。**scene-only 路径行为完全不变**（matDirty=false 时只走原 pendingSceneOp=Save）→ 零回归（已纳入 dogfood 回归项）。**切到其它资产**仍不拦（接受语义：切走=放弃旧材质未存编辑，见 switch-reset 注释）。
+
+**验收**：`OrangeEditor.exe` 编译链接通过，invariant lint + drift 干净。⚠️ **待 dogfood**：(1) 改材质不存 → 关窗/New/Open → 弹"材质有未保存改动"→ Save 写盘后继续 / Discard 丢弃 / Cancel 留下；(2) **回归**：纯场景 dirty（无材质改动）关窗确认行为与之前一致。
 
 ---
 

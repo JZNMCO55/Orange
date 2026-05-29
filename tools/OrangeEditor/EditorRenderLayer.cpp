@@ -13,6 +13,7 @@
 #include "MaterialFileIO.h"  // v1.1.1 · Asset Browser Create Material modal
 #include "import/ImportDispatcher.h"
 #include "import/MetaSidecar.h"
+#include "plugin/MaterialAssetInspectorPlugin.h"  // SaveEditingMaterialToDisk（关窗确认存材质）
 #include "theme/EditorTheme.h"
 
 #include <orange/engine/asset/AssetHandle.h>
@@ -557,6 +558,13 @@ void EditorRenderLayer::DispatchPendingCloseAction()
     mHost.scene.pendingCloseAction = PendingCloseAction::None;
 }
 
+bool EditorRenderLayer::HasUnsavedMaterial() const
+{
+    // 正在编辑某 .material 且有未写盘改动（GAP-2026-05-29 facet 1）。
+    return !mHost.assets.editingMaterialPath.empty()
+        && mHost.assets.editingMaterialDirty;
+}
+
 // v0.6 c2：未保存改动 modal 确认。状态机：
 //   pendingCloseAction != None + dirty=true   → 显示 popup
 //   pendingCloseAction != None + dirty=false  → 静默 dispatch（Save 完成后路径）
@@ -567,9 +575,11 @@ void EditorRenderLayer::DispatchPendingCloseAction()
 void EditorRenderLayer::DrawUnsavedConfirmPopup()
 {
     if (mHost.scene.pendingCloseAction == PendingCloseAction::None) { return; }
-    if (!mHost.scene.dirty)
+    const bool sceneDirty = mHost.scene.dirty;
+    const bool matDirty   = HasUnsavedMaterial();  // facet 1：材质改动也纳入拦截
+    if (!sceneDirty && !matDirty)
     {
-        DispatchPendingCloseAction();
+        DispatchPendingCloseAction();  // 无未保存改动（含 Save 完成后）→ 静默继续
         return;
     }
 
@@ -578,12 +588,28 @@ void EditorRenderLayer::DrawUnsavedConfirmPopup()
     if (ImGui::BeginPopupModal(kPopupId, nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::TextUnformatted("当前 scene 有未保存的改动。");
+        // 文案按"场景 / 材质 / 两者"自适应。
+        if (sceneDirty && matDirty)
+        {
+            ImGui::TextUnformatted("场景和材质都有未保存的改动。");
+        }
+        else if (matDirty)
+        {
+            ImGui::TextUnformatted("当前材质有未保存的改动。");
+        }
+        else
+        {
+            ImGui::TextUnformatted("当前 scene 有未保存的改动。");
+        }
         ImGui::TextDisabled("Save = 保存后继续  /  Discard = 丢弃改动继续  /  Cancel = 取消");
         ImGui::Separator();
         if (ImGui::Button("Save"))
         {
-            mHost.scene.pendingSceneOp = SceneOp::Save;
+            // 材质同步存盘（立即清 editingMaterialDirty）；场景走 deferred
+            // SceneOp::Save（下帧 ApplyPendingSceneOp 执行）。两者都 clean 后，
+            // 下帧本函数早退分支 DispatchPendingCloseAction 继续原动作。
+            if (matDirty)   { Orange::Editor::Plugin::SaveEditingMaterialToDisk(mHost); }
+            if (sceneDirty) { mHost.scene.pendingSceneOp = SceneOp::Save; }
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
@@ -592,6 +618,8 @@ void EditorRenderLayer::DrawUnsavedConfirmPopup()
             // 用户主动丢弃未保存改动 → autosave 持有的正是这些改动，一并删，
             // 否则下次启动会提示恢复已被丢弃的工作（自相矛盾）。Exit 路径靠
             // 此清；New/Open 路径帧末 ApplyPendingSceneOp 的 clean 基线清也会兜。
+            // 材质 dirty 一并清（disk 不写；内存 override 保留到 reload）。
+            mHost.assets.editingMaterialDirty = false;
             ClearAutosaveFile();
             DispatchPendingCloseAction();
             ImGui::CloseCurrentPopup();
@@ -623,14 +651,14 @@ void EditorRenderLayer::DrawMainMenuBar()
         if (ImGui::MenuItem("New Scene")) {
             // v0.6 c2：dirty 时拦截走未保存确认 popup（DispatchPendingCloseAction
             // 在 popup 走完 Save/Discard 后会重设 pendingSceneOp）。
-            if (mHost.scene.dirty) {
+            if (mHost.scene.dirty || HasUnsavedMaterial()) {
                 mHost.scene.pendingCloseAction = PendingCloseAction::NewScene;
             } else {
                 mHost.scene.pendingSceneOp = SceneOp::New;
             }
         }
         if (ImGui::MenuItem("Open Scene...")) {
-            if (mHost.scene.dirty) {
+            if (mHost.scene.dirty || HasUnsavedMaterial()) {
                 mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
             } else {
                 mHost.scene.pendingSceneOp = SceneOp::Open;
@@ -664,7 +692,7 @@ void EditorRenderLayer::DrawMainMenuBar()
             mHost.scene.pendingSceneOp = SceneOp::SaveSplitAs;
         }
         if (ImGui::MenuItem("Open Split...")) {
-            if (mHost.scene.dirty) {
+            if (mHost.scene.dirty || HasUnsavedMaterial()) {
                 mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
             } else {
                 mHost.scene.pendingSceneOp = SceneOp::OpenSplit;
@@ -673,7 +701,7 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::Separator();
         if (ImGui::MenuItem("Exit")) {
             // v0.6 c2：dirty 时拦截走未保存确认 popup。
-            if (mHost.scene.dirty) {
+            if (mHost.scene.dirty || HasUnsavedMaterial()) {
                 mHost.scene.pendingCloseAction = PendingCloseAction::Exit;
             } else {
                 mAppHost.RequestExit();

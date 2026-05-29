@@ -326,9 +326,10 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     {
         host.assets.editingMaterialPath = materialPath;
         host.assets.editingTemplateName = originalTemplate;
-        // 切到新 .material → 清持久 uniform dirty（新会话无 pending 编辑）。
-        // facet 1 留待：切走未 Save 仍丢内存 override，需切换前确认（设计件）。
-        host.assets.editingMaterialUniformDirty = false;
+        // 切到新 .material → 清 dirty（新会话无 pending 编辑）。注意：切走时旧材质
+        // 的内存 override 不回滚（disk 未写），但 editingMaterialDirty 清掉后关窗
+        // 确认不再为旧材质拦截——这是"切走=放弃旧材质未存编辑"的接受语义。
+        host.assets.editingMaterialDirty = false;
     }
 
     // 从 MaterialSystem 实时取所有已注册模板（含游戏侧自定义）。注：游戏侧
@@ -368,6 +369,8 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
             && curTemplateIdx < static_cast<int>(templateNames.size()))
         {
             host.assets.editingTemplateName = templateNames[curTemplateIdx];
+            // template 切换也算未保存改动 → 让关窗确认（facet 1）能拦截。
+            host.assets.editingMaterialDirty = true;
         }
     }
     if (templateNameCStrs.empty())
@@ -458,10 +461,10 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     // 信号，松手即归 false——必须累积进持久 flag，否则用户拖完松手再点 Save
     // 时按钮已置灰、uniform 编辑根本存不下。template dirty 走 editingTemplateName
     // vs 盘上值的实时比较（跨帧稳定，不需持久化）。
-    if (uniformDirty) { host.assets.editingMaterialUniformDirty = true; }
+    if (uniformDirty) { host.assets.editingMaterialDirty = true; }
     ImGui::Separator();
     const bool templateDirty = (host.assets.editingTemplateName != originalTemplate);
-    const bool dirty         = templateDirty || host.assets.editingMaterialUniformDirty;
+    const bool dirty         = templateDirty || host.assets.editingMaterialDirty;
 
     // 从当前编辑态构造 MaterialFileData（Save 写回原路径 / Save As New 写新路
     // 径共用）。从运行时 instance 抽 override（含 PBR 编辑的 uBaseColor / uMRA），
@@ -483,9 +486,10 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     if (ImGui::Button("Save"))
     {
         ::Orange::Editor::Material::WriteMaterialFile(materialPath, buildMaterialData());
-        // 写盘成功 → 清持久 uniform dirty（template dirty 下一帧重读
-        // originalTemplate 自动归零）。
-        host.assets.editingMaterialUniformDirty = false;
+        // 写盘成功 → 清持久 dirty（template dirty 下一帧重读 originalTemplate
+        // 自动归零）。canonical 保存逻辑见 SaveEditingMaterialToDisk（关窗确认共用
+        // 同款 build+write+clear；本按钮路径已 dogfood，保持原样仅清同一 flag）。
+        host.assets.editingMaterialDirty = false;
         // 内存 MaterialInstance 的 SetUniform override 已在编辑过程中
         // 应用到 live instance，视觉立即更新；磁盘 .material 文件本步
         // 落盘下次启动按 ApplyDataToInstance 重新加载相同的 override。
@@ -499,9 +503,9 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
     }
     else
     {
-        // 可见"未保存"指示——缓解 facet 1（关窗 / 切资产不拦截材质改动 → 静默
-        // 丢失）：完整的关窗确认拦截是设计件留待后续，本步至少让用户在面板上
-        // 看到"还没写盘"，配合 facet 2 修复（Save 松手后仍可用）堵住主要陷阱。
+        // 可见"未保存"指示。facet 1 落地后：关窗 / New / Open 会被未保存确认
+        // 拦截（不再静默丢失）；但**切到其它资产**仍不拦（接受语义，见 switch-reset
+        // 注释）——故 tooltip 仍提醒"切走不自动保存"。
         ImGui::SameLine();
         ImGui::TextColored(Orange::Editor::Theme::Color::GetAccentPrimary(),
                            "%s", "* 未保存");
@@ -509,7 +513,7 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
         {
             ImGui::SetTooltip(
                 "材质有未保存改动——点 Save 写回 .material。\n"
-                "注意：编辑器关闭 / 切到其它资产不会自动保存材质改动。");
+                "关窗 / New / Open 会提示确认；但切到其它资产不会自动保存。");
         }
     }
 
@@ -561,8 +565,8 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
             // 切到新材质继续编辑：改 selectedAssetPath，下一帧 Inspector 以新
             // 路径重入 DrawMaterialSubMode（editingMaterialPath 差异触发重载缓存
             // + EnsureMaterialInstance lazy-create 新 .material 的运行时实例）。
-            host.assets.selectedAssetPath           = newPathStr;
-            host.assets.editingMaterialUniformDirty = false;
+            host.assets.selectedAssetPath    = newPathStr;
+            host.assets.editingMaterialDirty = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndDisabled();
@@ -603,6 +607,25 @@ bool MaterialAssetInspectorPlugin::CanHandle(const std::string& assetPath) const
 void MaterialAssetInspectorPlugin::Draw(EditorHost& host, const std::string& assetPath)
 {
     DrawMaterialSubMode(host, assetPath);
+}
+
+bool SaveEditingMaterialToDisk(EditorHost& host)
+{
+    const std::string& path = host.assets.editingMaterialPath;
+    if (path.empty()) { return false; }  // 未在编辑任何 .material → no-op
+
+    // 与 Save 按钮同款 build+write：从 live instance 抽 override（含 PBR uBaseColor /
+    // uMRA）+ 当前 editingTemplateName。EnsureMaterialInstance lazy-create 兜底。
+    ::Orange::Editor::Material::MaterialFileData data;
+    if (auto* inst = EnsureMaterialInstance(host, path); inst != nullptr)
+    {
+        data = ::Orange::Editor::Material::BuildDataFromInstance(
+            *inst, host.assets.editingTemplateName, host.assets.pAssets.get());
+    }
+    data.templateName = host.assets.editingTemplateName;
+    ::Orange::Editor::Material::WriteMaterialFile(path, data);
+    host.assets.editingMaterialDirty = false;
+    return true;
 }
 
 }  // namespace Orange::Editor::Plugin
