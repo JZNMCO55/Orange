@@ -10,6 +10,7 @@
 
 #include <orange/engine/render/EnvironmentComponent.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/LayerComponent.h>
@@ -65,16 +66,19 @@ void EditorRenderLayer::DrawEntityTreePanel()
     }
 
     // v1.0.1 c3：每帧 build "singleton-style component overflow" 集合 —— Pipeline
-    // 对 DirectionalLight / EnvironmentComponent 走 first-found 路径，多余实例
-    // 静默忽略。DrawEntityNodeRecursive 查表后在 entity 行尾画 ⚠ chip + tooltip，
-    // 让用户立即看见"这条不生效"。first-found 序定义：与 Pipeline RenderScene
-    // 走的 `view.front()` 同款 EnTT view 顺序，保证 UI 标注与渲染端取舍一致。
+    // 对 DirectionalLight / EnvironmentComponent / PostProcess(Global) 走 first-found
+    // 路径，多余实例静默忽略。DrawEntityNodeRecursive 查表后在 entity 行尾画 ⚠ chip
+    // + tooltip，让用户立即看见"这条不生效"。first-found 序定义：与 Pipeline
+    // RenderScene / SyncPostProcessFromWorld 走的 `view` 同款 EnTT 顺序，保证 UI
+    // 标注与渲染端取舍一致。
     mSingletonOverflowDirLight.clear();
     mSingletonOverflowEnvironment.clear();
+    mSingletonOverflowPostProcess.clear();
     {
         auto& regForOverflow = mHost.scene.pWorld->Registry();
         using DL = Orange::Engine::Render::DirectionalLight;
         using EC = Orange::Engine::Render::EnvironmentComponent;
+        using PP = Orange::Engine::Render::PostProcessComponent;
         bool firstDirLightSeen = false;
         for (auto e : regForOverflow.view<DL>()) {
             if (!firstDirLightSeen) { firstDirLightSeen = true; continue; }
@@ -85,6 +89,18 @@ void EditorRenderLayer::DrawEntityTreePanel()
         for (auto e : regForOverflow.view<EC>()) {
             if (!firstEnvSeen) { firstEnvSeen = true; continue; }
             mSingletonOverflowEnvironment.push_back(
+                Orange::Engine::World::FromEntt(e));
+        }
+        // PostProcess 只有 Global 模式是 first-found 单例：Pipeline 取第一个 Global
+        // 作 base 底，第 2+ 个 Global 被静默丢弃。Local volume 按相机位置混合、各自
+        // 都可能生效，不算 overflow（与 SyncPostProcessFromWorld 的 collect 循环同款
+        // 取舍 —— 那里也是 `if mode==Global && globalBase==null` 才认 base）。
+        auto ppView = regForOverflow.view<PP>();
+        bool firstGlobalPostSeen = false;
+        for (auto e : ppView) {
+            if (ppView.get<PP>(e).mode != PP::Mode::Global) { continue; }
+            if (!firstGlobalPostSeen) { firstGlobalPostSeen = true; continue; }
+            mSingletonOverflowPostProcess.push_back(
                 Orange::Engine::World::FromEntt(e));
         }
     }
@@ -375,10 +391,10 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             const std::string layerText{layerId};
             const ImVec2 chipSize = ImGui::CalcTextSize(layerText.c_str());
 
-            // overflow 查表 —— linear scan，N ≤ 3 完全可接受。warning
-            // tooltip 文案根据 overflow 类型分支；同一 entity 可能同时撞
-            // 两类（典型：开发者把 DirLight + Environment 都挂到同一辅助
-            // entity 上做测试），合并展示。
+            // overflow 查表 —— linear scan，N ≤ 3 完全可接受。同一 entity
+            // 可能同时撞多类（典型：开发者把 DirLight + Environment +
+            // PostProcess 都挂到同一辅助 entity 上做测试），tooltip 逐类
+            // 拼行合并展示（见下，避免 3 个独立布尔的组合爆炸分支）。
             const bool overflowDirLight = std::find(
                 mSingletonOverflowDirLight.begin(),
                 mSingletonOverflowDirLight.end(), entity)
@@ -387,7 +403,12 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                 mSingletonOverflowEnvironment.begin(),
                 mSingletonOverflowEnvironment.end(), entity)
                 != mSingletonOverflowEnvironment.end();
-            const bool hasWarning = overflowDirLight || overflowEnv;
+            const bool overflowPostProcess = std::find(
+                mSingletonOverflowPostProcess.begin(),
+                mSingletonOverflowPostProcess.end(), entity)
+                != mSingletonOverflowPostProcess.end();
+            const bool hasWarning =
+                overflowDirLight || overflowEnv || overflowPostProcess;
 
             const char* warnText = "(!)";
             const ImVec2 warnSize = hasWarning
@@ -410,22 +431,28 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                     ImGui::TextUnformatted(warnText);
                     ImGui::PopStyleColor();
                     if (ImGui::IsItemHovered()) {
-                        if (overflowDirLight && overflowEnv) {
-                            ImGui::SetTooltip(
-                                "此 entity 上的 DirectionalLight 与 Environment 都不生效：\n"
-                                "  Pipeline 取 first-found 实例，多余的会被静默忽略。\n"
-                                "若想生效，请删除其他 entity 上的同名组件，或停用本 entity。");
-                        } else if (overflowDirLight) {
-                            ImGui::SetTooltip(
-                                "此 entity 的 DirectionalLight 不生效：\n"
-                                "  场景中已有另一个 DirectionalLight 作为主光（first-found）。\n"
-                                "DirLight 当前为全局单例语义；建议删除其他 DirLight 后再用本条。");
-                        } else {
-                            ImGui::SetTooltip(
-                                "此 entity 的 Environment 不生效：\n"
-                                "  场景中已有另一个 EnvironmentComponent 作为全局环境（first-found）。\n"
-                                "Environment 当前为全局单例语义；建议每个 scene 至多挂一个。");
+                        // 三类 first-found 单例 overflow 可任意组合命中；逐类拼
+                        // 行而非硬编码 2^N 组合分支。SetTooltip 用 "%s" 喂拼好的
+                        // 字符串（与下方 layer chip tooltip 同款安全格式）。
+                        std::string tip{
+                            "此 entity 上的以下组件不生效 —— Pipeline 取 first-found "
+                            "实例，多余的被静默忽略：\n"};
+                        if (overflowDirLight) {
+                            tip += "  • DirectionalLight：场景中已有另一个作为主光；"
+                                   "DirLight 为全局单例语义。\n";
                         }
+                        if (overflowEnv) {
+                            tip += "  • Environment：场景中已有另一个作为全局环境；"
+                                   "建议每 scene 至多挂一个。\n";
+                        }
+                        if (overflowPostProcess) {
+                            tip += "  • PostProcess (Global)：场景中已有另一个 Global "
+                                   "后处理作 base 底；把本组件 Mode 改为 Local 可按"
+                                   "相机位置叠加生效。\n";
+                        }
+                        tip += "若想生效：删除其他 entity 上的同名组件，或改用支持"
+                               "多实例的模式（如 PostProcess 的 Local volume）。";
+                        ImGui::SetTooltip("%s", tip.c_str());
                     }
                     cursorX += warnSize.x + innerSpacing;
                 }

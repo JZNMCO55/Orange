@@ -323,11 +323,14 @@ public:
     // Singleton-style component 的 overflow 集合 —— 每帧 DrawEntityTreePanel
     // 入口重建，记下"非 first-found 的、Pipeline 实际忽略"的 entity。
     // DrawEntityNodeRecursive 内查表，在 entity 行尾画 ⚠ chip + tooltip。
-    // 覆盖 DirectionalLight + EnvironmentComponent 两类 first-found 语义。
+    // 覆盖三类 first-found 语义：DirectionalLight / EnvironmentComponent /
+    // PostProcessComponent（仅 mode==Global —— Local volume 按相机位置混合，
+    // 每个都可能生效，不算 overflow，详见 Pipeline::SyncPostProcessFromWorld）。
     // vector 而非 set：场景里此类 component 实例通常 ≤ 3 个，linear scan
     // 比 hash 查更便宜，也避免给 Entity 引入 std::hash 特化。
     std::vector<Orange::Engine::Entity> mSingletonOverflowDirLight;
     std::vector<Orange::Engine::Entity> mSingletonOverflowEnvironment;
+    std::vector<Orange::Engine::Entity> mSingletonOverflowPostProcess;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_RENDER_LAYER_H
