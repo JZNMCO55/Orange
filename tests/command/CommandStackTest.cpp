@@ -171,6 +171,78 @@ int main()
         assert(changes == 6);
     }
 
+    // 8. Coalesce + group MergeMode 契约（命令栈核心：让一次 DragFloat 拖动 /
+    //    gizmo 拖动塌缩成单条 undo）。用 Merge() 返回 true 的测试命令验证——
+    //    `LabeledCommand` 不 Merge，覆盖不到这条路径。
+    {
+        // 同 type 时 Merge 吸收 newer 的 target 值并返回 true → 栈不增长、
+        // 栈顶 re-execute 反映最新值（CommandStack::Push coalesce 分支）。
+        struct MergeCmd : public ICommand
+        {
+            MergeCmd(const char* t, int* v, int tgt) : type(t), pv(v), target(tgt) {}
+            void        Execute() override { *pv = target; }
+            void        Undo() override {}
+            const char* GetType() const override { return type; }
+            bool        Merge(ICommand& n) override
+            {
+                target = static_cast<MergeCmd&>(n).target;
+                return true;
+            }
+            const char* type;
+            int*        pv;
+            int         target;
+        };
+        // 全撤完计栈条目数（无 size() 访问器，用 Undo 深度推断）。
+        auto depth = [](CommandStack& st) {
+            int n = 0;
+            while (st.CanUndo()) { st.Undo(); ++n; }
+            return n;
+        };
+
+        // 同 type + Merge=true → 三次 Push coalesce 成单条；value=最新。
+        {
+            CommandStack s;
+            int v = 0;
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 1));
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 2));
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 3));
+            assert(v == 3);
+            assert(depth(s) == 1);
+        }
+        // 不同 type → 不 coalesce，独立条目。
+        {
+            CommandStack s;
+            int v = 0;
+            s.Push(std::make_unique<MergeCmd>("a", &v, 1));
+            s.Push(std::make_unique<MergeCmd>("b", &v, 2));
+            assert(depth(s) == 2);
+        }
+        // Group MergeMode::Ends：两个同名 group 合并成单条（栈顶同名 merge）。
+        {
+            CommandStack s;
+            int v = 0;
+            s.BeginGroup("Drag", MergeMode::Ends);
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 1));
+            s.EndGroup();
+            s.BeginGroup("Drag", MergeMode::Ends);
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 2));
+            s.EndGroup();
+            assert(depth(s) == 1);
+        }
+        // Group MergeMode::Disable：两个同名 group 不合并，各自独立条目。
+        {
+            CommandStack s;
+            int v = 0;
+            s.BeginGroup("Drag", MergeMode::Disable);
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 1));
+            s.EndGroup();
+            s.BeginGroup("Drag", MergeMode::Disable);
+            s.Push(std::make_unique<MergeCmd>("drag", &v, 2));
+            s.EndGroup();
+            assert(depth(s) == 2);
+        }
+    }
+
     std::printf("command_stack_test: all assertions passed\n");
     return 0;
 }
