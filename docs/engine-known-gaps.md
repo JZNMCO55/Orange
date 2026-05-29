@@ -2911,3 +2911,42 @@ facet 2（指示器 + 可保存）后，"改了材质没存就关窗"仍会静�
 - **autosave**：复核时 `tools/OrangeEditor/` 全目录 grep `AutosaveScheduler` / `autosave` **零命中**，引擎侧 scheduler + 单测已就绪但编辑器零接线。报告 §2.7 `:158` + P0 `:193` 成立 → 升格 [[GAP-2026-05-29-editor-autosave-wiring]] 并已 **✅ 同 session 落地**（周期写 + dirty gate + 启动崩溃恢复 modal + Settings 配置；恢复流程待 dogfood）。
 - **Undo-label**：复核时仍固定文案 `MenuItem("Undo","Ctrl+Z")` / `("Redo","Ctrl+Y")`（`EditorRenderLayer.cpp:664/670`，无漂移），未接命令名。报告 §2.8 `:172` + Quick Win #7 成立 → 升格 [[GAP-2026-05-29-editor-undo-redo-action-label]] 并已 **✅ 同 session 落地**（GetLabel + Peek API + 菜单接线 + 单测）。
 - **Ctrl-toggle**：Entity Tree 的 Ctrl-click 多选 toggle **已接线**（`panels/EntityTreePanel.cpp:416-433`，走 `EditorSelection::ToggleAdditional`）；**视口（ScenePanel）单击 picking 仍不读修饰键**（`panels/ScenePanel.cpp:465` 直接覆盖 `selectedEntity`）—— 报告 §2.1「视口 Ctrl/Shift 多选」缺失结论成立，行号由 `:472` 漂到 `:465`。视口侧缺口归入报告 §2.1 gizmo/视口大类（与框选 marquee / 相机 pan 同批），**暂不单独升格**；Entity Tree 侧曾踩过 Ctrl-toggle 交互 bug，已接线但手感仍需 dogfood。
+
+---
+
+## GAP-2026-05-30-prefab-asset-and-entity-guid
+
+- **发现方**：`docs/editor-hierarchy-gap-vs-lumix.md` Gap 表（报告点名"**最大空白**"）+ 本轮层级编辑能力补齐 session 收口时识别——Copy/Paste/Cut/Duplicate/delete-undo 全部落地后，**唯一剩下的层级结构空白就是 prefab**
+- **发现日期**：2026-05-30
+- **一句话定性**：引擎 / 编辑器**无 prefab 资产概念**——能复制子树（`SaveSubtreeToString`/`LoadFromString` 已落地，Duplicate/Copy-Paste 在用）但复制出来是**一次性脱钩拷贝**，没有"可复用模板 + 多实例 + 改模板批量同步"的 prefab 语义。全仓 grep `prefab` 场景层零命中；`HierarchyComponent` 是裸数据，无 prefab loader / 实例化路径 / 实例↔资产双向 map
+- **状态**：**仅登记，未实现 + 跨仓跨 session**（引擎能力 → umbrella bump → 编辑器消费，三 session 分离，ADR-009 纪律）
+
+### 为什么不在本 session 做（跨仓边界）
+
+prefab 的**链接式实例**（编辑模板 → 所有实例更新，Unity 蓝条 / Lumix `.fab` + PrefabSystem）依赖一个**引擎层新概念：稳定 EntityGUID**——实例与资产、override 与基准都靠跨会话稳定的 ID 对应。当前持久 ID 是序列化期 `persistentId`（每次 Save 重新分配的 remap key，见 `SceneSerialization`），**不是**跨场景/跨会话恒定的 entity 身份。引入 EntityGUID 触及：
+
+1. **引擎层**：`World` / 组件给 entity 一个稳定 GUID（生成策略 + 存储 + 序列化）——是 schema bump（"出厂即冻结"约束，需 ADR）
+2. **序列化层**：prefab 资产格式（`.prefab.json`？复用 subtree 序列化 + GUID 锚）+ 实例化时的 GUID 重映射 / 链接保留
+3. **编辑器层**：prefab browser、拖入实例化、override 标记（蓝条）、revert / apply 右键
+
+按 ADR-009：引擎能力（EntityGUID + prefab loader）必须先在 OrangeEngine 子仓独立 session 落地 + 验收 + commit，再 umbrella bump pointer，再开新 session 在编辑器消费。**不可单 session 速成**——否则把"还没稳定的 EntityGUID API"当既成事实写进编辑器。
+
+### 缺什么 / 落地前需小 ADR 的选型
+
+- **EntityGUID 生成 + 存储**：随机 128-bit vs 递增 64-bit + World 命名空间；存 `HierarchyComponent` 扩展字段 vs 独立 `GuidComponent` vs World 级 map
+- **override 颗粒度**：逐属性 diff（Unity 强、复杂）vs 整体解耦（Lumix 弱、简单）——报告指出 Lumix override 颗粒度本就弱，可先做"整体实例化 + 无 override"的 MVP
+- **嵌套 prefab**：递归实例化复杂度，依赖前两者先落地
+
+### 已具备的前置（降低后续成本）
+
+子树序列化基建**已就绪**：`SaveSubtreeToString` / `LoadFromString`（内部引用重映射已测，见 `tests/scene/SceneSubtreeCloneTest.cpp`）。prefab 资产的"存模板 / 实例化拷贝"骨架可直接复用，**真正缺的只是 EntityGUID 这层稳定身份** + 链接/override 语义。即 prefab 不是从零，是"subtree clone + 稳定 ID + 资产化"。
+
+### 关联
+
+- 复用 [[GAP-2026-05-29-entity-tree-sibling-reorder]] 落地的子树序列化基建
+- 与 [[GAP-2026-05-27-play-in-editor]] 同属"关卡 / prefab 编辑工作流成熟后拉动"的大型架构能力，非当前阻塞
+- 根序持久化 [[GAP-2026-05-29-entity-tree-root-reorder-not-supported]] 的方案 3（World 级 list + schema）与 EntityGUID 的 World 级存储可一并在同一引擎 session 考量
+
+### 编辑器侧已补齐的"非 prefab"层级能力（本轮 session 收口，供后续 prefab 设计参考现状）
+
+prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑器 / 单引擎子仓内可做，已 commit 待 dogfood）：delete-undo（子树快照可撤销删除）、Copy/Cut/Paste/Duplicate（剪贴板 + 右键）、批量操作（批删 / 批移 layer / 批 reparent / 批 rename 消费 additional set）、Shift 范围选、名字过滤、类型图标、**可见性 toggle**（per-entity hidden override，WorldPartition 非序列化集，render 零改动复用 `IsEntityVisible`）、**锁定 toggle**（pick/tree-click/DnD 多路径拦截）、**Isolate Selected + Unhide All**（复用 hidden 基建）。**剩 prefab（本条）+ 根 reorder（已登记）需跨仓 / 大设计。**
