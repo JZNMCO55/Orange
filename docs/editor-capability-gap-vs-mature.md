@@ -34,11 +34,12 @@ OrangeEditor 已是一个**架构纪律扎实、数据通路（schema-first Insp
 - **P1 单仓件**：资产浏览器**搜索 + 类型过滤**（谓词 `editor_text_util_test`）/ **Layer count + 重命名 + 排序**（reorder 引擎 `WorldPartition::MoveLayer` + `scene_world_partition_test`）/ **多选群组变换 translate+rotate+scale 三模式**（pivot 数学 `editor_group_transform_test`，pivot = primary 位置，单选零回归）/ **Inspector multi-edit**（读侧共有组件求交摘要 + 写侧 `BroadcastFieldToSelection<T>` 把共有字段编辑广播到全部选中 + 仅多选才开的拖动分组收成一次 Undo；9 编辑型 case 覆盖，单选零回归；AssetRef/EntityRef 不广播）。
 - **可测核心硬化**：`EditorGizmoMath`（三 gizmo 反投影/最近点/ray-plane/屏幕投影地基）补 `editor_gizmo_math_test`。
 - **Layer DnD entity→layer**（§2.7 Layer 子系统收尾）：拖 Entity Tree 实体落 layer 名 → SetLayerOf 改归属，drop target 锚名字 Text 避 anchor 坑，帧末 cmdStack 可 Undo。Layer 四件套 count/rename/reorder/DnD 全闭环。
+- **RemoveComponent 可 Undo**（§2.4/P1 破坏性 undo 的组件级）：`CaptureComponentState` 移除前按 schema 字段快照值，undo = schema.add 重建 + restorer 还原原值；可重建组件不再 Clear cmdStack。删实体级（需 EnTT id 稳定 / prefab P2）未做。
 - **Quick-Win**：Save-As-New 材质 / view-toggle 持久化 / 相机书签持久化 / Console 大小写搜索 + 时间戳列 / 未注册 component warning / Play snapshot 唯一名。#5 HDR-color、#6 RegisterComponentSchema 经 verify-gate 判 speculative / stale-doc **不做**。
 
-**剩余（逐一调查确认需新基建 / 重交互 → focused-session + 增量 dogfood，不盲堆到 21-deep 未验证批）**：
-- **破坏性操作 undo** —— 删实体需 EnTT id 稳定引用基建（绑 GUID/prefab P2，`SceneSerialization` 仅 whole-world）；RemoveComponent-undo 需组件状态快照/恢复（schema 字段逐型 capture/restore 双 switch，或耦合 ComponentSerializerEntry 走 JSON 往返）。
-- **资产删除/重命名 + 依赖追踪** —— 需依赖图基建：先建"扫全 World 的 AssetRef 字段找引用某 path 的实体"（用 schema assetRefGet），再 rename 文件 + 批量改引用 + undo。
+**剩余（focused-session + 增量 dogfood，不盲堆到本已 25-deep 未验证批）**：
+- **破坏性 undo 的删实体级** —— 删整个实体需 EnTT id 稳定引用基建（绑 GUID/prefab P2，`SceneSerialization` 仅 whole-world）。组件级 RemoveComponent-undo 已落地（见上）。
+- **资产删除/重命名 + 依赖追踪** —— 唯一剩余单仓件，也最重最 filesystem-risky：需 ① 全实体迭代 + schema assetRefGet 扫"引用某 path 的实体"② rename 磁盘文件 + .meta sidecar ③ 批量改引用 + AssetRegistry handle ④ 全程 undo。先建 + 单测依赖扫描内核，再接 rename/update/undo，逐步 dogfood。
 - **§3 P2 全部** —— 跨仓（OrangeRender / 引擎序列化前置），ADR-009 禁同 session 双向。
 
 ---
