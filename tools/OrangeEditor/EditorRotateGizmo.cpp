@@ -198,10 +198,19 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
         std::array<glm::vec2, kRingSegments> screenPts;
         bool any_visible = false;
     };
+    // space-aware 轴向（gap §3 P0 Local/World）：Local 时把世界轴绕给定 rotation
+    // 旋到 local。draw/hit 用当前 pTC->rotation（环随实体朝向）；apply 用
+    // dragStartEntityRot（drag 期 rotation 在变，固定到起点轴避免旋转漂移）。
+    const auto axisIn = [](EditorGizmoState::Space space, const glm::quat& rot,
+                           Axis a) -> glm::vec3 {
+        const glm::vec3 base = AxisDir(a);
+        return (space == EditorGizmoState::Space::Local)
+                   ? glm::normalize(rot * base) : base;
+    };
     std::array<RingProjected, 3> rings{{
-        {Axis::X, AxisDir(Axis::X), {}, false},
-        {Axis::Y, AxisDir(Axis::Y), {}, false},
-        {Axis::Z, AxisDir(Axis::Z), {}, false},
+        {Axis::X, axisIn(host.gizmo.space, pTC->rotation, Axis::X), {}, false},
+        {Axis::Y, axisIn(host.gizmo.space, pTC->rotation, Axis::Y), {}, false},
+        {Axis::Z, axisIn(host.gizmo.space, pTC->rotation, Axis::Z), {}, false},
     }};
     for (auto& rp : rings)
     {
@@ -273,7 +282,8 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                                                    invViewProj);
         if (mouseRay.has_value())
         {
-            const glm::vec3 axisDir = AxisDir(host.gizmo.hoveredAxis);
+            const glm::vec3 axisDir = axisIn(host.gizmo.space, pTC->rotation,
+                                             host.gizmo.hoveredAxis);
             const auto t = GM::RayPlaneIntersect(mouseRay->origin, mouseRay->dir,
                                                  entityPos, axisDir);
             if (t.has_value())
@@ -307,7 +317,9 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                                                       invViewProj);
             if (mouseRay.has_value())
             {
-                const glm::vec3 axisDir = AxisDir(host.gizmo.draggingAxis);
+                const glm::vec3 axisDir = axisIn(host.gizmo.space,
+                                                 host.gizmo.dragStartEntityRot,
+                                                 host.gizmo.draggingAxis);
                 const auto t = GM::RayPlaneIntersect(mouseRay->origin, mouseRay->dir,
                                                     entityPos, axisDir);
                 if (t.has_value())

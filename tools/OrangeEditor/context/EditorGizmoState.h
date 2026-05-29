@@ -40,6 +40,16 @@ struct EditorGizmoState
         Center = 4,  // Scale gizmo 中心 uniform-scale handle；其他 mode 不用
     };
 
+    // 变换参考系（gap 报告 §3 P0）。X 键切换。默认 World = 历史行为（零回归）。
+    // 作用 Translate / Rotate（轴向 = World 全局 / Local 跟实体 rotation）；
+    // Scale 历史即 local（写死 entityRot*axis），不受本枚举影响（保持不变）。
+    enum class Space : std::uint8_t
+    {
+        World = 0,
+        Local = 1,
+    };
+    Space space = Space::World;
+
     // 当前 gizmo 模式（W / E / R 切换）。键盘快捷键由 ScenePanel 内 ImGui
     // hotkey 探测路径写本字段；切换时若 draggingAxis != None 暂保持模式不变
     // 到 LMB 释放，避免 mid-drag 切模式撞坑。

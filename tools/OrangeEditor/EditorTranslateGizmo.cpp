@@ -167,10 +167,19 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
         glm::vec2 tipScreen;
         bool      tipVisible;
     };
+    // space-aware 轴向（gap 报告 §3 P0 Local/World）：Local 时把世界轴绕实体
+    // rotation 旋到 local 空间。translate 期 rotation 不变 → drag 期轴向稳定；
+    // space 切换被 ScenePanel gate（!IsDragging），不会 mid-drag 变。
+    const auto axisDirSpace = [&](Axis a) -> glm::vec3 {
+        const glm::vec3 base = AxisDir(a);
+        return (host.gizmo.space == EditorGizmoState::Space::Local)
+                   ? glm::normalize(pTC->rotation * base)
+                   : base;
+    };
     std::array<AxisProjected, 3> axes{{
-        {Axis::X, AxisDir(Axis::X), {}, false},
-        {Axis::Y, AxisDir(Axis::Y), {}, false},
-        {Axis::Z, AxisDir(Axis::Z), {}, false},
+        {Axis::X, axisDirSpace(Axis::X), {}, false},
+        {Axis::Y, axisDirSpace(Axis::Y), {}, false},
+        {Axis::Z, axisDirSpace(Axis::Z), {}, false},
     }};
     for (auto& ap : axes)
     {
@@ -224,7 +233,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                                                    invViewProj);
         if (mouseRay.has_value())
         {
-            const glm::vec3 axisDir = AxisDir(host.gizmo.hoveredAxis);
+            const glm::vec3 axisDir = axisDirSpace(host.gizmo.hoveredAxis);
             const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
                                                         entityWorldPos, axisDir);
             if (hit.has_value())
@@ -252,7 +261,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                                                       invViewProj);
             if (mouseRay.has_value())
             {
-                const glm::vec3 axisDir = AxisDir(host.gizmo.draggingAxis);
+                const glm::vec3 axisDir = axisDirSpace(host.gizmo.draggingAxis);
                 const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
                                                             host.gizmo.dragStartEntityPos,
                                                             axisDir);

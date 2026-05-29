@@ -2397,6 +2397,11 @@ void EditorRenderLayer::DrawSettingsPanel()
 
     if (ImGui::CollapsingHeader("Gizmo", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        // 参考系只读显示（gap §3 P0 Local/World）。X 键在 viewport 切换。
+        ImGui::Text("Space: %s",
+            mHost.gizmo.space == EditorGizmoState::Space::Local ? "Local" : "World");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(viewport 内按 X 切换；作用 translate/rotate)");
         ImGui::SeparatorText("Line Width (px)");
         ImGui::DragFloat("Translate idle",      &s.gizmoLineWidthTranslateIdle,      0.1f, 0.5f, 12.0f);
         ImGui::DragFloat("Translate highlight", &s.gizmoLineWidthTranslateHighlight, 0.1f, 0.5f, 12.0f);

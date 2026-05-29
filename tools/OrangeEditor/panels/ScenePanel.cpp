@@ -350,6 +350,16 @@ void EditorRenderLayer::DrawScenePanel()
                 {
                     mHost.gizmo.mode = EditorGizmoState::Mode::Scale;
                 }
+                else if (ImGui::IsKeyPressed(ImGuiKey_X, false))
+                {
+                    // X：切 gizmo 参考系 World ⇄ Local（gap 报告 §3 P0；作用
+                    // translate/rotate 轴向，scale 始终 local）。X 为硬编码（同
+                    // 报告约定，未走 EditorKeybindings rebind 表）。
+                    mHost.gizmo.space =
+                        (mHost.gizmo.space == EditorGizmoState::Space::World)
+                            ? EditorGizmoState::Space::Local
+                            : EditorGizmoState::Space::World;
+                }
                 // F：聚焦选中物体 —— 相机 pivot 移到选中 entity 世界 AABB
                 // 中心 + 拉到合适距离 + 按尺度重算 near/far。解决导入模型
                 // （Duck 165 单位 / Avocado 0.04 单位）尺寸悬殊看不到 / 被裁。
