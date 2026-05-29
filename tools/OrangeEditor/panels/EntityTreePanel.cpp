@@ -215,9 +215,32 @@ void EditorRenderLayer::DrawEntityTreePanel()
             refOk = (pW != nullptr) && pW->IsValid(pr.refSibling) && (src != pr.refSibling);
         }
 
-        // 防环（finalParent 不能落在 src 子树内，含 src 自身）+ src 存活 + ref 合法。
+        // 跨 layer 父子拒绝：per-layer 序列化下跨 layer hierarchy 关系会被
+        // **静默丢弃**（src/scene/SceneSerialization.cpp SaveImpl 注释明示该
+        // 设计选择 + "editor 应 attach-time 拒绝建立跨 layer parent-child"）。
+        // 这里落地该拒绝——finalParent 有效且与 src 不同 layer → warn + 不 reparent。
+        // 多数实体无 LayerComponent（GetLayerOf 返回 "default"），仅真·跨 layer 触发。
+        bool crossLayer = false;
+        if (pW != nullptr && finalParent.IsValid()
+            && src.IsValid() && pW->IsValid(src) && pW->IsValid(finalParent))
+        {
+            const auto srcLayer = mHost.scene.partition.GetLayerOf(*pW, src);
+            const auto dstLayer = mHost.scene.partition.GetLayerOf(*pW, finalParent);
+            if (srcLayer != dstLayer)
+            {
+                crossLayer = true;
+                ORANGE_LOG_WARN("[OrangeEditor] reparent 拒绝：跨 layer 父子"
+                                "（layer '{}' → '{}'）—— per-layer 序列化不会保存该"
+                                "关系；请先把两者放到同一 layer 再 reparent",
+                                std::string{srcLayer}, std::string{dstLayer});
+            }
+        }
+
+        // 防环（finalParent 不能落在 src 子树内，含 src 自身）+ src 存活 + ref 合法
+        // + 非跨 layer（见上）。
         if (pW != nullptr && src.IsValid() && pW->IsValid(src) && refOk
             && src != finalParent
+            && !crossLayer
             && !EditorHierarchy::IsAncestorOf(*pW, src, finalParent))
         {
             // 记录旧**精确位置**（parent + prevSibling）：Undo 用 MoveToPosition 原
