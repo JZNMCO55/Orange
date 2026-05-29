@@ -2,6 +2,7 @@
 
 #include "EditorCameraControl.h"
 #include "EditorGizmoMath.h"
+#include "EditorGroupTransform.h"  // Util::ScaleAroundPivot（多选群组缩放）
 #include "EditorMathUtil.h"  // Util::SnapToStep（比例 snap）
 #include "command/SetFieldValueCommand.h"
 
@@ -92,6 +93,22 @@ auto MakeTransformScaleApply(EditorHost* pHost, Orange::Engine::Entity entity)
         auto* pTC = pWorld->GetComponent<Orange::Engine::Scene::TransformComponent>(entity);
         if (pTC == nullptr) { return; }
         pTC->scale = value;
+    };
+}
+
+// 群组 scale 时 follower 绕 pivot 缩放会改 position —— 本 TU 需要 position
+// apply（translate TU 的同名工厂 file-local 不可见；匿名 namespace 内部链接
+// 同名不冲突）。
+auto MakeTransformPositionApply(EditorHost* pHost, Orange::Engine::Entity entity)
+{
+    return [pHost, entity](const glm::vec3& value)
+    {
+        if (pHost == nullptr) { return; }
+        auto* pWorld = pHost->scene.pWorld.get();
+        if (pWorld == nullptr) { return; }
+        auto* pTC = pWorld->GetComponent<Orange::Engine::Scene::TransformComponent>(entity);
+        if (pTC == nullptr) { return; }
+        pTC->position = value;
     };
 }
 
@@ -237,7 +254,18 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
             // uniform center scale：记录鼠标屏幕坐标作为 ref；不需要 axis 解算
             host.gizmo.draggingAxis        = Axis::Center;
             host.gizmo.dragStartEntityScale = pTC->scale;
+            host.gizmo.dragStartEntityPos   = entityPos;  // 群组 scale pivot
             host.gizmo.dragStartMouseScreen = glm::vec3(mousePos.x, mousePos.y, 0.0f);
+            // 多选群组 scale：快照其余选中实体的 pos+scale（pivot = primary 位置）。
+            host.gizmo.dragStartAdditional.clear();
+            for (const auto& other : host.selection.additionalSelectedEntities)
+            {
+                if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
+                {
+                    host.gizmo.dragStartAdditional.push_back(
+                        {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                }
+            }
             host.cmdStack.BeginGroup("Scale Drag", MergeMode::Ends);
         }
         else
@@ -262,6 +290,16 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                         host.gizmo.dragStartEntityScale   = pTC->scale;
                         host.gizmo.dragStartEntityPos     = entityPos;
                         host.gizmo.dragStartScaleRefSigned = signedDist;
+                        // 多选群组 scale：快照其余选中实体的 pos+scale。
+                        host.gizmo.dragStartAdditional.clear();
+                        for (const auto& other : host.selection.additionalSelectedEntities)
+                        {
+                            if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
+                            {
+                                host.gizmo.dragStartAdditional.push_back(
+                                    {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                            }
+                        }
                         host.cmdStack.BeginGroup("Scale Drag", MergeMode::Ends);
                     }
                 }
@@ -351,6 +389,36 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                     host.gizmo.dragStartEntityScale,
                     newScale,
                     MakeTransformScaleApply(&host, entity)));
+
+                // 多选群组 scale：follower 绕 primary 位置（pivot）按 factorVec
+                // 缩放位置 + 自身 scale 乘 factorVec。factorVec = primary newScale /
+                // dragStartScale（含 snap，逐分量 guard 起点 0）。单选时快照空 →
+                // 不执行 = 零回归。pos/scale 各一条命令在 "Scale Drag" group 内
+                // 按 (entity,fieldKey) coalesce，EndGroup 一次 Undo 撤全组。
+                const glm::vec3& s0 = host.gizmo.dragStartEntityScale;
+                const glm::vec3 factorVec(
+                    std::abs(s0.x) > 1e-6f ? newScale.x / s0.x : 1.0f,
+                    std::abs(s0.y) > 1e-6f ? newScale.y / s0.y : 1.0f,
+                    std::abs(s0.z) > 1e-6f ? newScale.z / s0.z : 1.0f);
+                for (const auto& snap : host.gizmo.dragStartAdditional)
+                {
+                    if (!pWorld->IsValid(snap.entity)) { continue; }
+                    auto* pFTC = pWorld->GetComponent<TransformComponent>(snap.entity);
+                    if (pFTC == nullptr) { continue; }
+                    const glm::vec3 nPos = Orange::Editor::Util::ScaleAroundPivot(
+                        snap.position, host.gizmo.dragStartEntityPos, factorVec);
+                    const glm::vec3 nScale = snap.scale * factorVec;
+                    pFTC->position = nPos;
+                    pFTC->scale    = nScale;
+                    host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                        snap.entity, std::string("Transform.position"),
+                        snap.position, nPos,
+                        MakeTransformPositionApply(&host, snap.entity)));
+                    host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
+                        snap.entity, std::string("Transform.scale"),
+                        snap.scale, nScale,
+                        MakeTransformScaleApply(&host, snap.entity)));
+                }
             }
 
             if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
