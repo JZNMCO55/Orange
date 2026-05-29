@@ -5,6 +5,7 @@
 
 #include "../EditorAssetDropHandler.h"  // v1.2.3 patch · ORANGE_ASSET DnD
 #include "../EditorHierarchy.h"
+#include "../EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Entity Tree 名称过滤）
 #include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
 
@@ -30,6 +31,37 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace
+{
+
+// 递归判断 entity 子树是否含名字匹配 needle 的节点 —— Entity Tree 名称过滤的
+// "保留祖先链"语义：节点显示 ⟺ 自身名字匹配 或 任一后代匹配（否则整子树隐藏）。
+bool SubtreeMatchesName(Orange::Engine::World&  world,
+                        Orange::Engine::Entity  entity,
+                        std::string_view        needle)
+{
+    using HC            = Orange::Engine::Scene::HierarchyComponent;
+    using NameComponent = Orange::Engine::Scene::NameComponent;
+    if (!world.IsValid(entity)) { return false; }
+    const auto* name = world.GetComponent<NameComponent>(entity);
+    const std::string_view nm = (name != nullptr && !name->name.empty())
+                                    ? std::string_view{name->name}
+                                    : std::string_view{};
+    if (Orange::Editor::Util::ContainsCaseInsensitive(nm, needle)) { return true; }
+    const auto* h     = world.GetComponent<HC>(entity);
+    Orange::Engine::Entity child =
+        (h != nullptr) ? h->firstChild : Orange::Engine::Entity::Invalid();
+    while (child.IsValid())
+    {
+        if (SubtreeMatchesName(world, child, needle)) { return true; }
+        const auto* ch = world.GetComponent<HC>(child);
+        child = (ch != nullptr) ? ch->nextSibling : Orange::Engine::Entity::Invalid();
+    }
+    return false;
+}
+
+}  // namespace
 
 void EditorRenderLayer::DrawEntityTreePanel()
 {
@@ -126,6 +158,14 @@ void EditorRenderLayer::DrawEntityTreePanel()
               [](entt::entity a, entt::entity b) {
                   return entt::to_integral(a) < entt::to_integral(b);
               });
+
+    // 名称过滤框（hierarchy gap §4 quick-win #5）：大小写不敏感子串，空 = 不
+    // 过滤。非空时 DrawEntityNodeRecursive 跳过"自身及子树均不匹配"的节点，
+    // 命中节点的祖先链因 SubtreeMatchesName 自然保留。
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##entity_filter", "filter entities...",
+                             mEntityTreeFilterBuf, sizeof(mEntityTreeFilterBuf));
+
     for (entt::entity e : roots) {
         DrawEntityNodeRecursive(Orange::Engine::World::FromEntt(e));
     }
@@ -380,6 +420,16 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
     // 这里，但防御性 early-out 避免万一出现 ghost 引用时 GetComponent /
     // PushID 对死实体操作导致 EnTT assert / UB。
     if (!mHost.scene.pWorld->IsValid(entity)) { return; }
+
+    // 名称过滤（hierarchy gap §4 quick-win #5）：filter 非空且本子树无名字
+    // 匹配 → 整子树隐藏。在 PushID 之前 return 保持 ImGui ID 栈平衡；
+    // SubtreeMatchesName 已查过子树，false 即无任何后代匹配，安全全隐。
+    if (mEntityTreeFilterBuf[0] != '\0'
+        && !SubtreeMatchesName(*mHost.scene.pWorld, entity,
+                               std::string_view{mEntityTreeFilterBuf})) {
+        return;
+    }
+
     using HC = Orange::Engine::Scene::HierarchyComponent;
     using NameComponent = Orange::Engine::Scene::NameComponent;
 

@@ -349,6 +349,10 @@ public:
     std::vector<Orange::Engine::Entity> mSingletonOverflowEnvironment;
     std::vector<Orange::Engine::Entity> mSingletonOverflowPostProcess;
 
+    // Entity Tree 名称过滤（hierarchy gap §4 quick-win #5）：大小写不敏感子串，
+    // 空 = 不过滤；非空时仅显示名字匹配 **或子树含匹配** 的节点（保留祖先链）。
+    char                                mEntityTreeFilterBuf[128]{};
+
     // ---- Autosave 运行时（GAP-2026-05-29-editor-autosave-wiring）---------
     // mpAutosave：引擎侧 scheduler；首帧 lazy-init（此时 settings 已加载完）。
     //   autosaveEnabled=false 时保持 null，不推进。callback 捕 this 调 DoAutosave。
