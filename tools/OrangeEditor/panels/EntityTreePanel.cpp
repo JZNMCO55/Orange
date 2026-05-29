@@ -792,7 +792,21 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                                        : ICON_CI_SYMBOL_NAMESPACE;
         // 锁定指示：locked 时名字前加锁图标（hierarchy gap §3 P1）。
         const char* lockPrefix = IsEntityLocked(entity) ? (ICON_CI_LOCK " ") : "";
-        open = ImGui::TreeNodeEx("##node", flags, "%s%s %s", lockPrefix, typeIcon, label);
+        // 隐藏指示：hidden 时加 eye-closed 图标 + 整行文字 dim（Unity/Lumix
+        // 同款"隐藏物体灰显"）。dim 色取 ImGuiCol_TextDisabled（style 查询，
+        // 非字面 ImVec4，符合 lint）。
+        const bool  entityHidden =
+            mHost.scene.partition.IsEntityHidden(entity);
+        const char* hidePrefix = entityHidden ? (ICON_CI_EYE_CLOSED " ") : "";
+        if (entityHidden) {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                                  ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        }
+        open = ImGui::TreeNodeEx("##node", flags, "%s%s%s %s", hidePrefix, lockPrefix,
+                                 typeIcon, label);
+        if (entityHidden) {
+            ImGui::PopStyleColor();
+        }
         nodeMin = ImGui::GetItemRectMin();
         nodeMax = ImGui::GetItemRectMax();
         // 锁定实体不可 tree-click 选中（防误编辑，hierarchy gap §3 P1）；解锁
@@ -1094,6 +1108,17 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                         mHost.selection.selectedEntity = Orange::Engine::Entity::Invalid();
                     }
                 }
+            }
+        }
+        // Show / Hide 切换（hierarchy gap §3 P1）：隐藏 = render 跳过这一个
+        // entity（经 WorldPartition per-entity hidden override，RenderScene
+        // 已逐 entity 调 IsEntityVisible）；session-only，不序列化，仍可选中
+        // / 编辑（与 Lock 正交：Lock 管"能不能动"，Hide 管"画不画"）。
+        {
+            const bool hidden =
+                mHost.scene.partition.IsEntityHidden(entity);
+            if (ImGui::MenuItem(hidden ? "Show" : "Hide")) {
+                mHost.scene.partition.SetEntityHidden(entity, !hidden);
             }
         }
         ImGui::Separator();

@@ -192,7 +192,47 @@ std::string_view WorldPartition::GetLayerOf(const World& world, Entity entity) c
 
 bool WorldPartition::IsEntityVisible(const World& world, Entity entity) const
 {
+    // per-entity hidden override 优先：藏了就直接不可见，不再看 layer。
+    if (IsEntityHidden(entity))
+    {
+        return false;
+    }
     return IsLayerVisible(GetLayerOf(world, entity));
+}
+
+void WorldPartition::SetEntityHidden(Entity entity, bool hidden)
+{
+    if (!entity.IsValid())
+    {
+        return;
+    }
+    for (auto it = mHiddenEntities.begin(); it != mHiddenEntities.end(); ++it)
+    {
+        if (*it == entity)
+        {
+            if (!hidden)
+            {
+                mHiddenEntities.erase(it);
+            }
+            return;  // 已在集合里：hidden=true 无需重复 push，false 已 erase。
+        }
+    }
+    if (hidden)
+    {
+        mHiddenEntities.push_back(entity);
+    }
+}
+
+bool WorldPartition::IsEntityHidden(Entity entity) const noexcept
+{
+    for (const auto e : mHiddenEntities)
+    {
+        if (e == entity)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void WorldPartition::SetLayerOf(World& world, Entity entity, std::string_view layerId)

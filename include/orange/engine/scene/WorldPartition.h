@@ -126,7 +126,23 @@ public:
 
     // entity 应否被渲染 / 物理 tick。等价于
     // `IsLayerVisible(GetLayerOf(world, entity))`，让消费者只调一次。
+    // 另外叠加 per-entity hidden override（见下）：hidden 实体直接 false，
+    // 不再看它所在 layer。
     bool IsEntityVisible(const World& world, Entity entity) const;
+
+    // ---- Per-entity render hidden override（临时隐藏 / editor-hide） ----
+    //
+    // 与 layer.visible 正交的、按单个 entity 的渲染隐藏开关。语义是
+    // "暂时别画这一个"，独立于它所在 layer 的可见性，也独立于运行时
+    // enabled——典型用途是编辑器里临时藏掉挡视线的物件。
+    //
+    // 关键纪律：这个集合 **不序列化**（SceneSerialization 只写 layer
+    // manifest，不碰 hidden set）。所以它是 session / view 级状态，Open
+    // 场景重建 partition 时自然清空；运行时 game 永远是空集 → 零开销零
+    // 影响。RenderScene 已逐 entity 调 IsEntityVisible，所以隐藏一个
+    // entity 不需要改 render 路径。
+    void SetEntityHidden(Entity entity, bool hidden);
+    bool IsEntityHidden(Entity entity) const noexcept;
 
     // 把 entity 挂到指定 layer（添加或修改 LayerComponent）。layerId 在
     // manifest 里不存在不阻塞——只是接受字符串，warn 由调用方关心；
@@ -137,6 +153,11 @@ private:
     // layer 顺序 + 数据；查找用 mIndex（O(1)）。
     std::vector<LayerInfo>                       mLayers;
     std::unordered_map<std::string, std::size_t> mIndex;
+
+    // per-entity 渲染隐藏集（见 SetEntityHidden）。不序列化、运行时为空。
+    // 用 vector 而非 set：隐藏的 entity 数量天然少（编辑器临时藏几个），
+    // 线性查足够，且不引入 Entity 的 hash 依赖。
+    std::vector<Entity>                          mHiddenEntities;
 
     void EnsureDefault();
     void RebuildIndex();
