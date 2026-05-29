@@ -661,13 +661,23 @@ void EditorRenderLayer::DrawMainMenuBar()
     {
         const bool canEditCmd = (mHost.scene.playState == PlayState::Edit)
                              && !ImGui::GetIO().WantTextInput;
-        if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
+        // 菜单项文案带上具体动作名（"Undo Rename Entity" / "Redo Translate
+        // Drag" 等）——label 取自栈顶命令的 GetLabel；空栈时 Peek 返回 nullptr，
+        // 退回纯 "Undo" / "Redo"。拼成临时 std::string，c_str() 仅在本次
+        // MenuItem 调用内有效（Peek 返回的指针不跨帧缓存，见 CommandStack.h）。
+        const char* undoLabel = mHost.cmdStack.PeekUndoLabel();
+        const char* redoLabel = mHost.cmdStack.PeekRedoLabel();
+        const std::string undoText =
+            undoLabel != nullptr ? "Undo " + std::string(undoLabel) : "Undo";
+        const std::string redoText =
+            redoLabel != nullptr ? "Redo " + std::string(redoLabel) : "Redo";
+        if (ImGui::MenuItem(undoText.c_str(), "Ctrl+Z", false,
                             canEditCmd && mHost.cmdStack.CanUndo()))
         {
             mHost.cmdStack.Undo();
             ValidateEntityHandles();
         }
-        if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
+        if (ImGui::MenuItem(redoText.c_str(), "Ctrl+Y", false,
                             canEditCmd && mHost.cmdStack.CanRedo()))
         {
             mHost.cmdStack.Redo();

@@ -2814,12 +2814,12 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 ---
 
-## GAP-2026-05-29-editor-undo-redo-action-label
+## GAP-2026-05-29-editor-undo-redo-action-label ✅
 
 - **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（§2.8 `:172` + Quick Win #7 `:234`），2026-05-29 复核坐实
 - **发现日期**：2026-05-29
 - **一句话定性**：Edit 菜单的 Undo / Redo 是**固定文案**"Undo" / "Redo"，不显示将要撤销/重做的**具体动作名**（"Undo Move Entity" / "Redo Transform Drag"）；缺的不只是 UI 文案，是命令层根本没有"人类可读 label"这个数据
-- **状态**：**登记（未排期）**。本 session 仅复核 + 登记，不实现
+- **状态**：**✅ 2026-05-29 落地**（登记后同 session 由 /goal 自主推进；单子仓 OrangeEditor 纯逻辑改动 + 单测，见下方落地记录）
 
 ### 触发场景
 
@@ -2848,10 +2848,24 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 - 命令栈基建见 `command/CommandStack.h` / `command/ICommand.h`；coalesce / group 语义见 `CommandStack.h` 顶注释。
 - 与 [[GAP-2026-05-29-editor-material-asset-dirty-tracking]] facet 1 同源：材质编辑不进命令栈，若未来材质入栈，其 label 也应一并供本 gap 的菜单消费。
 
+### 落地记录（2026-05-29，登记后同 session /goal 自主推进）
+
+按"缺什么"三步走，纯逻辑内核单测兜底，菜单文案手感留作者 dogfood：
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| 命令接口 | `command/ICommand.h` | 加 `virtual const char* GetLabel() const { return GetType(); }`——默认回退到 type，与 coalesce 键 `GetType` 分离（GetType 是稳定机器串不可美化，GetLabel 是展示文案） |
+| 友好命名 | `command/EntityCommands.h` | `CreateEntityCommand`/`RenameCommand`/`SwitchAnimatorBackendCommand` 各 override `GetLabel()` → "Create Entity" / "Rename Entity" / "Switch Animator Backend"（机器味 type 不直接进菜单）；`CommandGroup`（gizmo "Translate/Rotate/Scale Drag"）与 `SetFieldValueCommand`（字段键）走默认回退即够友好 |
+| 栈查询 | `command/CommandStack.{h,cpp}` | 加 `PeekUndoLabel()`（`CanUndo()? mStack[mIndex]->GetLabel() : nullptr`）/ `PeekRedoLabel()`（`CanRedo()? mStack[mIndex+1]->GetLabel() : nullptr`）；游标语义与 `Undo()`/`Redo()` 一致 |
+| 菜单接线 | `EditorRenderLayer.cpp:664/670` | `MenuItem("Undo",…)` → 拼 `"Undo " + label`（label 取自 Peek，空栈回退纯 "Undo"/"Redo"）；Redo 同理 |
+| 单测 | `tests/command/CommandStackTest.cpp` + `tests/CMakeLists.txt` | 新 `command_stack_test` target（同 `editor_hierarchy_test` 模式编 `CommandStack.cpp`）：覆盖空栈 nullptr / GetLabel 默认回退 + override / Undo-Redo 游标跟随 / CommandGroup label==组名 / Push 截断 redo 6 组断言 |
+
+**验收**：`command_stack_test` + `editor_hierarchy_test` 全绿（ctest Debug），`OrangeEditor.exe` 编译链接通过，invariant lint 干净（7 grandfathered）。菜单文案"Undo Rename Entity"等的**视觉/截断/焦点**留作者实机 dogfood 一眼（纯逻辑 label 数据已单测锁定）。**命令历史面板**（报告并列的 M 级项）未做，按需另开。
+
 ### 同批复核的三项接线（verify 结论）
 
 本 session 同时复核了报告里另外三项接线现状：
 
 - **autosave**：`tools/OrangeEditor/` 全目录 grep `AutosaveScheduler` / `autosave` **零命中**，引擎侧 scheduler + 单测已就绪但编辑器零接线。报告 §2.7 `:158` + P0 `:193` 成立 → **已升格** [[GAP-2026-05-29-editor-autosave-wiring]]。
-- **Undo-label**：仍固定文案 `MenuItem("Undo","Ctrl+Z")` / `("Redo","Ctrl+Y")`（`EditorRenderLayer.cpp:664/670`，无漂移），未接命令名。报告 §2.8 `:172` + Quick Win #7 成立 → **已升格** [[GAP-2026-05-29-editor-undo-redo-action-label]]。
+- **Undo-label**：复核时仍固定文案 `MenuItem("Undo","Ctrl+Z")` / `("Redo","Ctrl+Y")`（`EditorRenderLayer.cpp:664/670`，无漂移），未接命令名。报告 §2.8 `:172` + Quick Win #7 成立 → 升格 [[GAP-2026-05-29-editor-undo-redo-action-label]] 并已 **✅ 同 session 落地**（GetLabel + Peek API + 菜单接线 + 单测）。
 - **Ctrl-toggle**：Entity Tree 的 Ctrl-click 多选 toggle **已接线**（`panels/EntityTreePanel.cpp:416-433`，走 `EditorSelection::ToggleAdditional`）；**视口（ScenePanel）单击 picking 仍不读修饰键**（`panels/ScenePanel.cpp:465` 直接覆盖 `selectedEntity`）—— 报告 §2.1「视口 Ctrl/Shift 多选」缺失结论成立，行号由 `:472` 漂到 `:465`。视口侧缺口归入报告 §2.1 gizmo/视口大类（与框选 marquee / 相机 pan 同批），**暂不单独升格**；Entity Tree 侧曾踩过 Ctrl-toggle 交互 bug，已接线但手感仍需 dogfood。

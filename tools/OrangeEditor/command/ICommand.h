@@ -19,6 +19,14 @@ public:
     // 是否同类，同类后才调 Merge 做进一步检查。
     virtual const char* GetType() const = 0;
 
+    // 返回面向用户的可读动作名，供 Edit 菜单显示 "Undo <label>" / 未来命令
+    // 历史面板用。与 GetType 刻意分离：GetType 是 coalesce 配对键（稳定机器
+    // 串，绝不可本地化 / 美化，改了会破坏合并语义），GetLabel 是纯展示文案。
+    // 默认回退到 GetType()——对组名本就友好的 CommandGroup（GetType==组名）
+    // 与"字段键即标签"的 SetFieldValue 已够用；机器味重的命令（create_entity
+    // 等）按需 override 成 "Create Entity"。返回指针生命周期同命令本身。
+    virtual const char* GetLabel() const { return GetType(); }
+
     // 尝试把 newer（更新的同类命令）的变化吸收进本命令。
     // 返回 true 表示合并成功——调用方将重新 Execute 本命令而不 push newer。
     // 默认不合并；需要 coalesce 的命令（SetFieldValue / Rename）覆盖此方法。

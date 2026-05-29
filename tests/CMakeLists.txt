@@ -101,6 +101,18 @@ target_include_directories(editor_hierarchy_test PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
 orange_engine_set_compiler_options(editor_hierarchy_test)
 add_test(NAME editor_hierarchy_test COMMAND editor_hierarchy_test)
+
+# CommandStack（tools/OrangeEditor）—— Undo/Redo 栈 + coalesce/group + Undo-label
+# peek。纯 ICommand + std，零 ImGui/GLFW/Vulkan 依赖，故同 editor_hierarchy_test
+# 模式：把 CommandStack.cpp 编进测试 exe + 加 include path（该源不属引擎 lib）。
+add_executable(command_stack_test
+    command/CommandStackTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/command/CommandStack.cpp")
+target_link_libraries(command_stack_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(command_stack_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(command_stack_test)
+add_test(NAME command_stack_test COMMAND command_stack_test)
 orange_engine_add_test(save_game_registry_test  save/SaveGameRegistryTest.cpp)
 orange_engine_add_test(save_game_system_test    save/SaveGameSystemTest.cpp)
 orange_engine_add_test(save_path_test           save/SavePathTest.cpp)

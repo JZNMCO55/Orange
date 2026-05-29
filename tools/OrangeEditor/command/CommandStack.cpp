@@ -325,3 +325,18 @@ bool CommandStack::CanRedo() const
 {
     return mIndex + 1 < static_cast<int>(mStack.size());
 }
+
+const char* CommandStack::PeekUndoLabel() const
+{
+    // 下一次 Undo 作用在 mStack[mIndex]（见 Undo()）——空栈 / 全撤销时
+    // CanUndo 为 false，返回 nullptr。
+    if (!CanUndo()) { return nullptr; }
+    return mStack[static_cast<std::size_t>(mIndex)]->GetLabel();
+}
+
+const char* CommandStack::PeekRedoLabel() const
+{
+    // 下一次 Redo 作用在 mStack[mIndex + 1]（见 Redo()）。
+    if (!CanRedo()) { return nullptr; }
+    return mStack[static_cast<std::size_t>(mIndex + 1)]->GetLabel();
+}

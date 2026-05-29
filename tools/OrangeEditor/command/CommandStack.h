@@ -104,6 +104,17 @@ public:
     bool CanUndo() const;
     bool CanRedo() const;
 
+    // 返回下一次 Undo / Redo 将作用的命令的可读 label（`ICommand::GetLabel`），
+    // 供 Edit 菜单显示 "Undo <label>" / "Redo <label>"。无可 Undo / Redo 时
+    // 返回 nullptr（调用方退回纯 "Undo" / "Redo" 文案）。
+    //
+    // 生命周期：返回指针指向命令持有的字符串（字面量或命令内 std::string），
+    // 与对应栈条目同生命周期——**只在同帧内即用即弃**，不缓存跨帧（下一次
+    // Push / Undo / Clear 可能让指针失效）。BeginGroup..EndGroup 进行中时仅
+    // 反映已入栈条目，不含 pending group（菜单不在组操作中途绘制，无影响）。
+    const char* PeekUndoLabel() const;
+    const char* PeekRedoLabel() const;
+
     // 注册 "栈发生有效变更" 回调。触发时机：成功 Push（含组内 Push）/ Undo /
     // Redo / 非空组 EndGroup —— 任一调用都意味着 world 状态已被改动一次。
     // **不**在 Clear() 触发：Clear 是破坏性操作的后置清理（如 RemoveComponent

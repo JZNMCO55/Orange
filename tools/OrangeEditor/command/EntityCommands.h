@@ -37,6 +37,7 @@ public:
     void Execute() override;
     void Undo()    override;
     const char* GetType() const override { return "create_entity"; }
+    const char* GetLabel() const override { return "Create Entity"; }
 
     Orange::Engine::Entity CreatedEntity() const { return mCreated; }
 
@@ -59,6 +60,7 @@ public:
     void Execute() override;
     void Undo()    override;
     const char* GetType() const override { return "rename_entity"; }
+    const char* GetLabel() const override { return "Rename Entity"; }
     bool Merge(ICommand& newer) override;
 
 private:
@@ -92,6 +94,7 @@ public:
     void Execute() override;
     void Undo()    override;
     const char* GetType() const override { return "switch_animator_backend"; }
+    const char* GetLabel() const override { return "Switch Animator Backend"; }
 
 private:
     EditorHost*            mpHost;
