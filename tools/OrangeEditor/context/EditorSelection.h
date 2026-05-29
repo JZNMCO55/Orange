@@ -57,11 +57,24 @@ struct EditorSelection
         return selectedEntity.IsValid() ? (1 + additionalSelectedEntities.size()) : 0;
     }
 
-    // Toggle entity in additional set；若 entity 是 primary 则 no-op
-    // （要清 primary 需走 selectedEntity = Invalid 路径）。
+    // Toggle entity in additional set。Ctrl-click primary 自身 = 取消它：
+    // promote 最后一个 additional 为新 primary（无 additional 则清空选中）——
+    // 与 Unity/Unreal "Ctrl 点已选项取消选择"一致（hierarchy gap §4 quick-win #1）。
     void ToggleAdditional(Orange::Engine::Entity e)
     {
-        if (e == selectedEntity) { return; }
+        if (e == selectedEntity)
+        {
+            if (!additionalSelectedEntities.empty())
+            {
+                selectedEntity = additionalSelectedEntities.back();
+                additionalSelectedEntities.pop_back();
+            }
+            else
+            {
+                selectedEntity = Orange::Engine::Entity::Invalid();
+            }
+            return;
+        }
         auto it = std::find(additionalSelectedEntities.begin(),
                             additionalSelectedEntities.end(), e);
         if (it != additionalSelectedEntities.end())
