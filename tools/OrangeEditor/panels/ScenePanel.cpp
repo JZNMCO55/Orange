@@ -34,20 +34,13 @@
 #include <cstdio>
 #include <initializer_list>
 
-// viewport 工具栏 grid / sky 开关持久状态。本期只用 file-static（不进 Editor
-// Settings 持久化），与 ScenePanel.cpp 的 toolbar 局部 UI 状态同节奏；后续
-// v0.8 EditorSettings 整骨 milestone 若要在重启间保留，再迁移到 settings。
-// Grid 默认开（地面参考线对编辑器主战场最有用）；Sky 默认开（cubemap 未烘焙
-// 时 Pipeline 内部 fallback 到原 clear color，开关也不会让 viewport 黑屏）。
-// Debug Draw 默认关 —— 是 opt-in 的 v0.9 调试工具，普通编辑器用户大多数
-// 时间不需要，开启后才会画原点坐标轴 + selected entity 位置 sphere。
-// Colliders 默认开 —— 与 Grid 同档，物理碰撞盒可视化是 collider 编辑工作流
-// 的关键反馈（用户不开 Inspector 也能确认碰撞盒在哪 / 多大），开销极低
-// （typical scene < 50 个 collider，每个 < 32 段线，DebugDraw 一帧 < 0.1ms）。
-static bool sViewportGridEnabled      = true;
-static bool sViewportSkyEnabled       = true;
-static bool sViewportDebugDrawEnabled = false;
-static bool sViewportCollidersEnabled = true;
+// viewport 工具栏 grid / sky / debug-draw / colliders 开关。已迁入
+// EditorSettings（`mHost.settings.viewport*Enabled`），随 settings 在进程退出时
+// 持久化、跨重启保留——此前是 file-static 的"暂不持久化"遗留状态，v0.8 整骨
+// 本次补完迁移。默认值（Grid/Sky/Colliders 开、Debug Draw 关）见 EditorSettings.h：
+//   * Grid/Sky 默认开（地面参考线 + cubemap 未烘焙时 fallback clear color 不黑屏）
+//   * Debug Draw 默认关（opt-in 调试：原点坐标轴 + selected sphere）
+//   * Colliders 默认开（碰撞盒可视化是 collider 工作流关键反馈，开销极低）
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -80,7 +73,7 @@ void EditorRenderLayer::DrawScenePanel()
     }
 
     ImGui::SameLine();
-    ImGui::Checkbox("Grid", &sViewportGridEnabled);
+    ImGui::Checkbox("Grid", &mHost.settings.viewportGridEnabled);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("地面参考网格（Y=0 平面，每 1 m 细线 + 每 10 m 粗线）\n"
@@ -88,7 +81,7 @@ void EditorRenderLayer::DrawScenePanel()
     }
 
     ImGui::SameLine();
-    ImGui::Checkbox("Sky", &sViewportSkyEnabled);
+    ImGui::Checkbox("Sky", &mHost.settings.viewportSkyEnabled);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("天空盒背景（采 EnvironmentComponent.cubemap）\n"
@@ -96,7 +89,7 @@ void EditorRenderLayer::DrawScenePanel()
     }
 
     ImGui::SameLine();
-    ImGui::Checkbox("Debug Draw", &sViewportDebugDrawEnabled);
+    ImGui::Checkbox("Debug Draw", &mHost.settings.viewportDebugDrawEnabled);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("v0.9 调试几何 overlay：原点坐标轴 + selected entity 位置 sphere\n"
@@ -105,7 +98,7 @@ void EditorRenderLayer::DrawScenePanel()
     }
 
     ImGui::SameLine();
-    ImGui::Checkbox("Colliders", &sViewportCollidersEnabled);
+    ImGui::Checkbox("Colliders", &mHost.settings.viewportCollidersEnabled);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("物理碰撞盒可视化（绿 = 未选中 / 黄 = 选中）\n"
@@ -217,9 +210,9 @@ void EditorRenderLayer::DrawScenePanel()
         //（不再走 engine 公共 API），engine 端无任何 grid 资源残留。
         if (mpEditorGridProvider)
         {
-            mpEditorGridProvider->SetEnabled(sViewportGridEnabled);
+            mpEditorGridProvider->SetEnabled(mHost.settings.viewportGridEnabled);
         }
-        mpScenePipeline->SetSkyEnabled(sViewportSkyEnabled);
+        mpScenePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
         // v1.3.1 Render Settings 面板编辑后下一帧立即生效 —— mShadowConfig 是
         // panel UI 直写字段，每帧 push（by-value 32 bytes 拷贝到 mpImpl，开销
         // 可忽略）。mapResolution 变化时 Pipeline EnsureShadowMap 下帧自重建
@@ -232,10 +225,10 @@ void EditorRenderLayer::DrawScenePanel()
         if (auto* dbg = mpScenePipeline->GetDebugDrawScene())
         {
             const bool anyDebugGeom =
-                sViewportDebugDrawEnabled || sViewportCollidersEnabled;
+                mHost.settings.viewportDebugDrawEnabled || mHost.settings.viewportCollidersEnabled;
             dbg->SetEnabled(anyDebugGeom);
 
-            if (sViewportDebugDrawEnabled)
+            if (mHost.settings.viewportDebugDrawEnabled)
             {
                 // 原点 3 轴坐标（X 红 / Y 绿 / Z 蓝，长度 1.5）—— ABGR
                 // packed：低 8 位 R，高 8 位 A。
@@ -263,7 +256,7 @@ void EditorRenderLayer::DrawScenePanel()
                 }
             }
 
-            if (sViewportCollidersEnabled)
+            if (mHost.settings.viewportCollidersEnabled)
             {
                 Orange::Editor::DrawColliders(
                     *dbg,
@@ -651,7 +644,7 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         mpEditorGridProvider = std::make_unique<EditorGridAuxPassProvider>();
         if (mpEditorGridProvider->Initialize(mRenderDevice))
         {
-            mpEditorGridProvider->SetEnabled(sViewportGridEnabled);
+            mpEditorGridProvider->SetEnabled(mHost.settings.viewportGridEnabled);
             mpScenePipeline->SetAuxPassProvider(mpEditorGridProvider.get());
         }
         else

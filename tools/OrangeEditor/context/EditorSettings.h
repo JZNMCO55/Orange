@@ -58,6 +58,15 @@ struct EditorSettings
     glm::vec4 gizmoColorYHighlight         {0.706f, 1.000f, 0.471f, 1.0f};
     glm::vec4 gizmoColorZIdle              {0.235f, 0.471f, 0.941f, 1.0f};
     glm::vec4 gizmoColorZHighlight         {0.549f, 0.784f, 1.000f, 1.0f};
+
+    // ---- 视口显示开关（编辑器偏好，退出时随 settings 持久化） --------------
+    // 迁自 ScenePanel.cpp 的 file-static（v0.8 整骨遗留的"暂不持久化"状态）。
+    // 默认对齐原 hardcode：Grid / Sky / Colliders 开，Debug Draw 关。schema
+    // minor 1 新增；老 editor_settings.json 缺这些字段时 ReadBool 保留默认值。
+    bool viewportGridEnabled      = true;
+    bool viewportSkyEnabled       = true;
+    bool viewportDebugDrawEnabled = false;
+    bool viewportCollidersEnabled = true;
 };
 
 // JSON 持久化：与项目内 Core::Serialization 同节奏（手写 Read / Write，无
