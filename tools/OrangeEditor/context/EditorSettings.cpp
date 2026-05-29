@@ -66,13 +66,18 @@ void ReadEditorSettings(const JsonReader& in, EditorSettings& out)
     in.ReadBool("viewport/sky",       out.viewportSkyEnabled);
     in.ReadBool("viewport/debugDraw", out.viewportDebugDrawEnabled);
     in.ReadBool("viewport/colliders", out.viewportCollidersEnabled);
+
+    // schema minor 2：autosave。缺字段（minor ≤1）走默认值。
+    in.ReadBool("autosave/enabled",            out.autosaveEnabled);
+    ReadFloat(in, "autosave/intervalSeconds",  out.autosaveIntervalSeconds);
+    ReadFloat(in, "autosave/minIntervalSeconds", out.autosaveMinIntervalSeconds);
 }
 
 void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
 {
     out.WriteString("schemaVersion/namespace", "editor/settings");
     out.WriteInt("schemaVersion/major", 1);
-    out.WriteInt("schemaVersion/minor", 1);   // minor 1：+视口显示开关
+    out.WriteInt("schemaVersion/minor", 2);   // minor 2：+autosave（1：视口显示开关）
 
     out.WriteFloat("gizmo/lineWidth/translateIdle",      s.gizmoLineWidthTranslateIdle);
     out.WriteFloat("gizmo/lineWidth/translateHighlight", s.gizmoLineWidthTranslateHighlight);
@@ -95,4 +100,8 @@ void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
     out.WriteBool("viewport/sky",       s.viewportSkyEnabled);
     out.WriteBool("viewport/debugDraw", s.viewportDebugDrawEnabled);
     out.WriteBool("viewport/colliders", s.viewportCollidersEnabled);
+
+    out.WriteBool("autosave/enabled",             s.autosaveEnabled);
+    out.WriteFloat("autosave/intervalSeconds",    s.autosaveIntervalSeconds);
+    out.WriteFloat("autosave/minIntervalSeconds", s.autosaveMinIntervalSeconds);
 }

@@ -39,6 +39,7 @@
 #include <orange/engine/render/PostProcessPasses.h>
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/VfxSystem.h>
+#include <orange/engine/save/AutosaveScheduler.h>
 
 #include "render/EditorGridAuxPassProvider.h"
 #include <orange/engine/scene/Entity.h>
@@ -108,6 +109,16 @@ private:
     // Discard 路径直接调；Save 路径在 dirty 清零后由 DrawUnsavedConfirmPopup
     // 早退分支自动调。
     void DispatchPendingCloseAction();
+    // GAP-2026-05-29-editor-autosave-wiring：编辑器自动存档接线。引擎侧
+    // Save::AutosaveScheduler 是纯时间逻辑，本层负责喂帧 / dirty gate / 序列化
+    // 落盘 / 启动崩溃恢复。UpdateAutosave 每帧 OnUpdate 调（首帧顺带 lazy-init
+    // + 残留 autosave 检测）；DoAutosave 是 scheduler 触发的 callback；
+    // DrawAutosaveRecoveryPopup 启动期弹恢复 modal；ClearAutosaveFile 在手动
+    // Save / New / Open 成功后删 autosave（基线干净）。实现见 EditorRenderLayer.cpp。
+    void UpdateAutosave(float dt);
+    void DoAutosave();
+    void ClearAutosaveFile();
+    void DrawAutosaveRecoveryPopup();
     void DrawAssetsPanel();
     static void DrawAnimationPanel();
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
@@ -331,6 +342,18 @@ public:
     std::vector<Orange::Engine::Entity> mSingletonOverflowDirLight;
     std::vector<Orange::Engine::Entity> mSingletonOverflowEnvironment;
     std::vector<Orange::Engine::Entity> mSingletonOverflowPostProcess;
+
+    // ---- Autosave 运行时（GAP-2026-05-29-editor-autosave-wiring）---------
+    // mpAutosave：引擎侧 scheduler；首帧 lazy-init（此时 settings 已加载完）。
+    //   autosaveEnabled=false 时保持 null，不推进。callback 捕 this 调 DoAutosave。
+    // mAutosaveInitChecked：首帧一次性 guard（lazy-init + 残留检测）。
+    // mPendingAutosaveRecovery：启动检测到残留 autosave，待恢复 modal 决策；
+    //   未决前不推进 scheduler（避免覆盖待恢复文件）。
+    // mAutosaveRecoverOrigin：残留 autosave 对应的原 scene 路径（可空=未命名）。
+    std::unique_ptr<Orange::Engine::Save::AutosaveScheduler> mpAutosave;
+    bool        mAutosaveInitChecked{false};
+    bool        mPendingAutosaveRecovery{false};
+    std::string mAutosaveRecoverOrigin;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_RENDER_LAYER_H

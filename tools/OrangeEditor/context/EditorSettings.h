@@ -67,6 +67,16 @@ struct EditorSettings
     bool viewportSkyEnabled       = true;
     bool viewportDebugDrawEnabled = false;
     bool viewportCollidersEnabled = true;
+
+    // ---- Autosave（GAP-2026-05-29-editor-autosave-wiring） ----------------
+    // Edit 态下场景 dirty 时，按 interval 周期把当前 World 序列化到 temp 的
+    // .autosave 文件；崩溃 / 异常退出后下次启动检测到残留 autosave → 弹恢复
+    // 提示。手动 Save / New / Open 成功后删除 autosave（基线已干净）。底层走
+    // 引擎 `Save::AutosaveScheduler`（纯时间逻辑 + 节流），编辑器只接线。
+    // schema minor 2 新增；老 editor_settings.json 缺字段时保留 struct 默认值。
+    bool  autosaveEnabled            = true;
+    float autosaveIntervalSeconds    = 180.0f;  // 周期触发（秒）；clamp ≥10
+    float autosaveMinIntervalSeconds = 30.0f;   // 节流：两次写入最小间隔（秒）
 };
 
 // JSON 持久化：与项目内 Core::Serialization 同节奏（手写 Read / Write，无

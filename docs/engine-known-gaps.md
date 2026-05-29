@@ -2787,12 +2787,12 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 ---
 
-## GAP-2026-05-29-editor-autosave-wiring
+## GAP-2026-05-29-editor-autosave-wiring ✅
 
 - **发现方**：`docs/editor-capability-gap-vs-mature.md` 全编辑器 gap 报告（§2.7 `:158` + P0 `:193`），2026-05-29 复核坐实
 - **发现日期**：2026-05-29
 - **一句话定性**：引擎侧 `Orange::Engine::Save::AutosaveScheduler` + 单测早已就绪，但 **OrangeEditor 对它零接线**——编辑器崩溃 / 误关 = 丢全部未存场景，无任何自动存档兜底
-- **状态**：**登记（未排期）**。本 session 仅复核 + 登记，不实现
+- **状态**：**✅ 2026-05-29 落地**（登记后同 session /goal 自主推进；周期写 + dirty gate + 启动崩溃恢复 modal，见下方落地记录）
 
 ### 触发场景
 
@@ -2825,6 +2825,19 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 - 引擎 scheduler 接口：`include/orange/engine/save/AutosaveScheduler.h`（Phase 5.5 Save 模块）。
 - 与 [[GAP-2026-05-29-editor-material-asset-dirty-tracking]] 共享"编辑器 dirty / 数据丢失防护"主题：那条是材质资产 dirty 缺口，本条是场景级 autosave 兜底，正交但同属"别丢用户工作"。
 - scene 级 dirty 判定基建（`context/EditorSceneContext.h:116` 的 `scene.dirty`）是本 gap 的 trigger gate 依赖。
+
+### 落地记录（2026-05-29，登记后同 session /goal 自主推进）
+
+按 scope 全套落地（周期写 + dirty gate + 崩溃恢复 + Settings 配置），逻辑内核（scheduler 调度 + save→load 往返）已由引擎侧 `autosave_scheduler_test` / `scene_serialization_test` 覆盖，编辑器接线靠 compile + dogfood：
+
+| 文件 | 改动 |
+|---|---|
+| `context/EditorSettings.{h,cpp}` | +`autosaveEnabled`(默认 on) / `autosaveIntervalSeconds`(180) / `autosaveMinIntervalSeconds`(30)；Read/Write + schema minor 1→2（老文件缺字段走默认） |
+| `EditorRenderLayer.{h,cpp}` | own `unique_ptr<AutosaveScheduler>`（首帧 lazy-init，此时 settings 已加载）；`UpdateAutosave(dt)` 每帧 OnUpdate 调（仅 `PlayState::Edit` 推进，恢复 modal 未决前不推进）；`DoAutosave` callback = dirty gate + `Scene::Save` 写 temp `.autosave` + origin sidecar（复用 Play 快照同款 `Scene::Save`/`Load`）；`DrawAutosaveRecoveryPopup` 启动期检测残留 autosave → 恢复 modal（恢复=Load+重建 partition+dirty=true / 丢弃=删文件）；`ClearAutosaveFile` 在 `ApplyPendingSceneOp` clean 基线后 + 关窗 Discard 删 autosave |
+| 恢复信号设计 | = "autosave 文件存在"（正常 Save/New/Open/Discard 都删它，启动还在 = 上次崩溃/强杀）。不依赖 mtime，简单稳健 |
+| 坑 | `std::max(` 被 windows.h（经 glfw3native.h 引入）的 `max` 宏破坏 → 编译错 C2589/C2059，改 `(std::max)(` 抑制宏 |
+
+**验收**：`OrangeEditor.exe` 编译链接通过，invariant lint + drift 干净。⚠️ **崩溃恢复流程 dogfood-critical 待作者实机验**：(1) 编辑后等 ~180s（或临时调小 interval）看 console `[autosave] 自动存档`；(2) kill 进程模拟崩溃 → 重启 → 弹"发现自动存档"modal → 恢复后内容回来且标未保存 / 丢弃后无残留；(3) 手动 Save 后 autosave 删除、重启不再提示。**Settings 面板 autosave 开关 UI 未做**（默认值可用，改 `editor_settings.json` 可调），按需补。
 
 ---
 
@@ -2880,6 +2893,6 @@ ImGui `install_callbacks=true` 链式转发到引擎 `OnChar` → `Dispatch(Impl
 
 本 session 同时复核了报告里另外三项接线现状：
 
-- **autosave**：`tools/OrangeEditor/` 全目录 grep `AutosaveScheduler` / `autosave` **零命中**，引擎侧 scheduler + 单测已就绪但编辑器零接线。报告 §2.7 `:158` + P0 `:193` 成立 → **已升格** [[GAP-2026-05-29-editor-autosave-wiring]]。
+- **autosave**：复核时 `tools/OrangeEditor/` 全目录 grep `AutosaveScheduler` / `autosave` **零命中**，引擎侧 scheduler + 单测已就绪但编辑器零接线。报告 §2.7 `:158` + P0 `:193` 成立 → 升格 [[GAP-2026-05-29-editor-autosave-wiring]] 并已 **✅ 同 session 落地**（周期写 + dirty gate + 启动崩溃恢复 modal + Settings 配置；恢复流程待 dogfood）。
 - **Undo-label**：复核时仍固定文案 `MenuItem("Undo","Ctrl+Z")` / `("Redo","Ctrl+Y")`（`EditorRenderLayer.cpp:664/670`，无漂移），未接命令名。报告 §2.8 `:172` + Quick Win #7 成立 → 升格 [[GAP-2026-05-29-editor-undo-redo-action-label]] 并已 **✅ 同 session 落地**（GetLabel + Peek API + 菜单接线 + 单测）。
 - **Ctrl-toggle**：Entity Tree 的 Ctrl-click 多选 toggle **已接线**（`panels/EntityTreePanel.cpp:416-433`，走 `EditorSelection::ToggleAdditional`）；**视口（ScenePanel）单击 picking 仍不读修饰键**（`panels/ScenePanel.cpp:465` 直接覆盖 `selectedEntity`）—— 报告 §2.1「视口 Ctrl/Shift 多选」缺失结论成立，行号由 `:472` 漂到 `:465`。视口侧缺口归入报告 §2.1 gizmo/视口大类（与框选 marquee / 相机 pan 同批），**暂不单独升格**；Entity Tree 侧曾踩过 Ctrl-toggle 交互 bug，已接线但手感仍需 dogfood。

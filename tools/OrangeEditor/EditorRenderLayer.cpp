@@ -59,6 +59,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <variant>
 
@@ -179,6 +180,10 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // 无论 Play/Edit 状态都推进编辑器时间，供 dissolve 等时间驱动 shader 预览
     const float dt = static_cast<float>(frame.time.deltaSeconds);
     mEditorTime += dt;
+
+    // 自动存档推进（首帧顺带 lazy-init + 残留 autosave 崩溃恢复检测）。仅 Edit
+    // 态推进，dirty gate 在 DoAutosave 内。GAP-2026-05-29-editor-autosave-wiring。
+    UpdateAutosave(dt);
     if (mpScenePipeline != nullptr)
     {
         mpScenePipeline->SetFrameTime(mEditorTime);
@@ -354,6 +359,9 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // 内被消费；popup 自身用 BeginPopupModal 阻塞 ImGui 帧逻辑（背后
     // panels 仍画但不响应输入），用户点 Save/Discard/Cancel 后才继续。
     DrawUnsavedConfirmPopup();
+    // 启动期残留 autosave 恢复 modal（崩溃恢复）。与 unsaved-confirm 互斥出现
+    // （恢复发生在启动、unsaved 发生在编辑后），同款 BeginPopupModal 阻塞模式。
+    DrawAutosaveRecoveryPopup();
 
     // 帧末统一 apply 场景级操作。放在 panel 绘制完之后、ImGui::Render
     // 之前 —— 文件对话框是模态阻塞窗口，它内部会 pump 一些消息但不
@@ -565,6 +573,10 @@ void EditorRenderLayer::DrawUnsavedConfirmPopup()
         ImGui::SameLine();
         if (ImGui::Button("Discard"))
         {
+            // 用户主动丢弃未保存改动 → autosave 持有的正是这些改动，一并删，
+            // 否则下次启动会提示恢复已被丢弃的工作（自相矛盾）。Exit 路径靠
+            // 此清；New/Open 路径帧末 ApplyPendingSceneOp 的 clean 基线清也会兜。
+            ClearAutosaveFile();
             DispatchPendingCloseAction();
             ImGui::CloseCurrentPopup();
         }
@@ -1019,6 +1031,184 @@ void EditorRenderLayer::ApplyPendingSceneOp()
         }
         case SceneOp::None:
             break;  // unreachable, 上面已 early return
+    }
+
+    // 任一 scene op 使场景回到 clean 基线（New / Open / Save 系列成功后
+    // dirty=false）→ 删残留 autosave：它已过时，且避免下次启动误报"未正常退出"。
+    // 失败 / Cancel 路径 dirty 不变（仍 dirty 则保留 autosave 不动）。
+    if (!mHost.scene.dirty) { ClearAutosaveFile(); }
+}
+
+// ---------------------------------------------------------------------------
+// Autosave —— GAP-2026-05-29-editor-autosave-wiring
+//
+// 引擎侧 Save::AutosaveScheduler 是纯时间逻辑（无 IO / 不读系统时钟），编辑器
+// 这层负责：(1) 每帧喂 dt（仅 Edit 态）；(2) scheduler 触发时把 dirty 的 World
+// 序列化到 temp 的 .autosave（复用 Scene::Save，与 Play 快照同款）；(3) 手动
+// Save / New / Open 后删 autosave；(4) 启动时检测残留 autosave（= 上次未正常
+// 退出）→ 弹恢复 modal。
+//
+// 恢复信号 = "autosave 文件存在"：正常路径 Save/New/Open 都删它，所以启动时还
+// 在 = 上次崩溃 / 强杀没走到删除。不依赖 mtime 比较，简单稳健。
+// ---------------------------------------------------------------------------
+namespace
+{
+std::string AutosaveScenePathStr()
+{
+    namespace fs = std::filesystem;
+    return (fs::temp_directory_path() / "OrangeEditor_autosave.scene.json").string();
+}
+std::string AutosaveOriginPathStr()
+{
+    namespace fs = std::filesystem;
+    return (fs::temp_directory_path() / "OrangeEditor_autosave.origin.txt").string();
+}
+}  // namespace
+
+void EditorRenderLayer::ClearAutosaveFile()
+{
+    std::error_code ec;
+    std::filesystem::remove(AutosaveScenePathStr(), ec);
+    std::filesystem::remove(AutosaveOriginPathStr(), ec);
+}
+
+void EditorRenderLayer::DoAutosave()
+{
+    // scheduler 触发的 callback。dirty gate 在此：clean 场景不写（省 IO + 不
+    // 覆盖待恢复点）。autosave 不清 scene.dirty —— 它不等价于"用户已保存"。
+    if (!mHost.scene.dirty || mHost.scene.pWorld == nullptr) { return; }
+
+    Orange::Engine::Scene::SaveOptions saveOpts;
+    saveOpts.assetRegistry          = mHost.assets.pAssets.get();
+    saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+    saveOpts.extraSerializers       = mHost.extraSerializers;
+    const auto rc = Orange::Engine::Scene::Save(
+        *mHost.scene.pWorld, AutosaveScenePathStr(), saveOpts);
+    if (rc.IsErr())
+    {
+        ORANGE_LOG_WARN("[autosave] 写盘失败 (code={})",
+                        static_cast<unsigned>(rc.Error()));
+        return;
+    }
+    // origin sidecar：记当前 scene 路径（可空=未命名），恢复时回填 currentScenePath。
+    {
+        std::ofstream originOut(AutosaveOriginPathStr(), std::ios::trunc);
+        if (originOut) { originOut << mHost.scene.currentScenePath; }
+    }
+    ORANGE_LOG_INFO("[autosave] 自动存档 → {}", AutosaveScenePathStr());
+}
+
+void EditorRenderLayer::UpdateAutosave(float dt)
+{
+    // 首帧一次性：残留 autosave 检测（崩溃恢复）+ lazy-init scheduler（此时
+    // settings 已由 main 启动期加载完）。恢复检测独立于 autosaveEnabled——
+    // 即便现在关了 autosave，上次崩溃留下的存档仍应给用户恢复机会。
+    if (!mAutosaveInitChecked)
+    {
+        mAutosaveInitChecked = true;
+        std::error_code ec;
+        if (std::filesystem::exists(AutosaveScenePathStr(), ec))
+        {
+            mPendingAutosaveRecovery = true;
+            std::ifstream originIn(AutosaveOriginPathStr());
+            if (originIn) { std::getline(originIn, mAutosaveRecoverOrigin); }
+        }
+        if (mHost.settings.autosaveEnabled)
+        {
+            Orange::Engine::Save::AutosaveScheduler::Config cfg;
+            // (std::max) 加括号抑制 windows.h 的 max 宏（本 TU 经 glfw3native.h
+            // 引入 windows.h，裸 std::max( 会被宏展开破坏）。
+            cfg.intervalSeconds = (std::max)(
+                10.0, static_cast<double>(mHost.settings.autosaveIntervalSeconds));
+            cfg.minSecondsBetween = (std::max)(
+                0.0, static_cast<double>(mHost.settings.autosaveMinIntervalSeconds));
+            mpAutosave = std::make_unique<Orange::Engine::Save::AutosaveScheduler>(
+                cfg, [this] { DoAutosave(); });
+        }
+    }
+
+    // 仅 Edit 态推进；Play/Paused 有独立快照机制不叠加。恢复 modal 未决前不
+    // 推进（避免 autosave 覆盖待恢复文件）。
+    if (mpAutosave != nullptr
+        && mHost.scene.playState == PlayState::Edit
+        && !mPendingAutosaveRecovery)
+    {
+        mpAutosave->Update(static_cast<double>(dt));
+    }
+}
+
+void EditorRenderLayer::DrawAutosaveRecoveryPopup()
+{
+    if (!mPendingAutosaveRecovery) { return; }
+
+    static constexpr const char* kPopupId = "##autosave_recover";
+    ImGui::OpenPopup(kPopupId);
+    if (ImGui::BeginPopupModal(kPopupId, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("发现自动存档 —— 上次 OrangeEditor 可能未正常退出。");
+        ImGui::TextDisabled("对应场景：%s",
+                            mAutosaveRecoverOrigin.empty()
+                                ? "(未命名)"
+                                : mAutosaveRecoverOrigin.c_str());
+        ImGui::Separator();
+        ImGui::TextDisabled("恢复 = 加载自动存档（标记为未保存）  /  丢弃 = 删除自动存档");
+        ImGui::Separator();
+
+        if (ImGui::Button("恢复"))
+        {
+            auto pNew = std::make_unique<Orange::Engine::World>();
+            Orange::Engine::Scene::LoadOptions loadOpts;
+            loadOpts.assetRegistry          = mHost.assets.pAssets.get();
+            loadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
+            loadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+            loadOpts.materialResolver       =
+                [this](const std::string& id) { return ::EnsureMaterialInstance(mHost, id); };
+            loadOpts.extraSerializers       = mHost.extraSerializers;
+            const auto rc = Orange::Engine::Scene::Load(
+                AutosaveScenePathStr(), *pNew, loadOpts);
+            if (rc.IsErr())
+            {
+                ORANGE_LOG_ERROR("[autosave] 恢复加载失败 (code={})，保留当前场景",
+                                 static_cast<unsigned>(rc.Error()));
+            }
+            else
+            {
+                mHost.scene.pWorld = std::move(pNew);
+                // 重建 partition（同单文件 Open 路径：扫 LayerComponent 自动 AddLayer）。
+                mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
+                {
+                    auto& reg = mHost.scene.pWorld->Registry();
+                    using LC  = Orange::Engine::Scene::LayerComponent;
+                    for (auto e : reg.view<LC>())
+                    {
+                        const auto& lc = reg.get<LC>(e);
+                        if (lc.layerId.empty()) { continue; }
+                        if (mHost.scene.partition.HasLayer(lc.layerId)) { continue; }
+                        Orange::Engine::Scene::LayerInfo info;
+                        info.id          = lc.layerId;
+                        info.displayName = lc.layerId;
+                        info.visible     = true;
+                        mHost.scene.partition.AddLayer(std::move(info));
+                    }
+                }
+                mHost.scene.currentScenePath = mAutosaveRecoverOrigin;
+                mHost.scene.dirty = true;  // 恢复内容尚未真正写回原文件
+                ResetEntityLocalState();
+                mHost.cmdStack.Clear();
+                ORANGE_LOG_INFO("[autosave] 已恢复自动存档（标记为未保存）");
+            }
+            mPendingAutosaveRecovery = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("丢弃"))
+        {
+            ClearAutosaveFile();
+            mPendingAutosaveRecovery = false;
+            ImGui::CloseCurrentPopup();
+            ORANGE_LOG_INFO("[autosave] 用户丢弃自动存档");
+        }
+        ImGui::EndPopup();
     }
 }
 
