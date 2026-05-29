@@ -8,7 +8,8 @@
 // 06-03 描述里"不引入新公共 API"一致。
 //
 // 同时该组也是后续 DnD reparent 的底座；当前提供 LinkAsLastChild /
-// Detach / IsAncestorOf / ReparentTo / DestroySubtree 完整集合。
+// Detach / IsAncestorOf / ReparentTo / MoveToPosition / MoveBefore /
+// MoveAfter（精确位置重排）/ DestroySubtree 完整集合。
 
 #include <orange/engine/scene/Entity.h>  // Entity 按值传，需要完整定义
 
@@ -36,10 +37,35 @@ bool IsAncestorOf(Orange::Engine::World& world,
                   Orange::Engine::Entity descendant);
 
 // child 改挂到 newParent 下；newParent == Invalid 时把 child 提到 root。
-// 调用方负责防环（IsAncestorOf 检查），本函数不再二次校验。
+// 挂为 newParent 的**末子**（位置不精确）。调用方负责防环（IsAncestorOf
+// 检查），本函数不再二次校验。
 void ReparentTo(Orange::Engine::World& world,
                 Orange::Engine::Entity child,
                 Orange::Engine::Entity newParent);
+
+// 把 child 移到 `parent` 子链中、紧跟在 `afterSibling` 之后。
+//   * parent == Invalid：仅把 child 摘成 root（afterSibling 忽略——根无顺序）。
+//   * afterSibling == Invalid：插到 parent 子链最前（成为新 firstChild）。
+//   * afterSibling 有效：插到它之后；afterSibling 须当前就是 parent 的子，
+//     否则退化为挂尾（防御，不破链）。
+// 内部先 Detach(child)，原位置自动让出；child 自身子树随之整体移动。调用方
+// 负责防环。这是 reorder 与"精确 undo 复位"共用的底层原语。
+void MoveToPosition(Orange::Engine::World& world,
+                    Orange::Engine::Entity child,
+                    Orange::Engine::Entity parent,
+                    Orange::Engine::Entity afterSibling);
+
+// 把 child 移成 target 的前一个兄弟（同父）。target 为 root（无父）时退化为
+// 把 child 摘到 root。child 已紧邻 target 之前则 no-op。调用方负责防环。
+void MoveBefore(Orange::Engine::World& world,
+                Orange::Engine::Entity child,
+                Orange::Engine::Entity target);
+
+// 把 child 移成 target 的后一个兄弟（同父）。target 为 root 时退化为把 child
+// 摘到 root。child 已紧邻 target 之后则 no-op。调用方负责防环。
+void MoveAfter(Orange::Engine::World& world,
+               Orange::Engine::Entity child,
+               Orange::Engine::Entity target);
 
 // 递归销毁 e 及其整个子树。先收集 child 列表（不能边遍历兄弟链边
 // destroy，destroy 会把组件抽走 sibling 字段失效），再依次递归销毁，最

@@ -93,6 +93,62 @@ void ReparentTo(World& world, Entity child, Entity newParent)
     }
 }
 
+void MoveToPosition(World& world, Entity child, Entity parent, Entity afterSibling)
+{
+    Detach(world, child);                  // 先让出原位置，child 变 root
+    if (!parent.IsValid()) { return; }     // 提到 root —— afterSibling 对根无意义
+
+    HC& cc = GetOrAdd(world, child);
+    HC& pc = GetOrAdd(world, parent);
+    cc.parent = parent;
+
+    if (!afterSibling.IsValid()) {
+        // 插到子链最前（新 firstChild）
+        const Entity oldFirst = pc.firstChild;
+        pc.firstChild  = child;
+        cc.prevSibling = Entity::Invalid();
+        cc.nextSibling = oldFirst;
+        if (oldFirst.IsValid()) {
+            if (HC* oh = world.GetComponent<HC>(oldFirst)) { oh->prevSibling = child; }
+        }
+        return;
+    }
+
+    HC* ah = world.GetComponent<HC>(afterSibling);
+    if (ah == nullptr || ah->parent != parent) {
+        // 防御：afterSibling 不在 / 不属于 parent —— 退化为挂尾，保证不破链
+        LinkAsLastChild(world, parent, child);
+        return;
+    }
+    const Entity next = ah->nextSibling;
+    ah->nextSibling = child;
+    cc.prevSibling  = afterSibling;
+    cc.nextSibling  = next;
+    if (next.IsValid()) {
+        if (HC* nh = world.GetComponent<HC>(next)) { nh->prevSibling = child; }
+    }
+}
+
+void MoveBefore(World& world, Entity child, Entity target)
+{
+    if (child == target) { return; }
+    HC* th = world.GetComponent<HC>(target);
+    if (th == nullptr) { return; }
+    if (th->prevSibling == child) { return; }   // 已紧邻 target 之前，no-op
+    // th->parent / th->prevSibling 按值传入；MoveToPosition 内 Detach(child)
+    // 不会改动这两个捕获值（child 与它们非同一节点——相邻情形已上面 no-op）。
+    MoveToPosition(world, child, th->parent, th->prevSibling);
+}
+
+void MoveAfter(World& world, Entity child, Entity target)
+{
+    if (child == target) { return; }
+    HC* th = world.GetComponent<HC>(target);
+    if (th == nullptr) { return; }
+    if (th->nextSibling == child) { return; }   // 已紧邻 target 之后，no-op
+    MoveToPosition(world, child, th->parent, target);
+}
+
 void DestroySubtree(World& world, Entity e)
 {
     if (!e.IsValid()) { return; }
