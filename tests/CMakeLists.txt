@@ -186,6 +186,7 @@ orange_engine_add_test(material_schema_test     render/MaterialSchemaTest.cpp)
 orange_engine_add_test(pipeline_template_cache_test render/PipelineTemplateCacheTest.cpp)
 orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.cpp)
 orange_engine_add_test(pipeline_offscreen_test     render/PipelineOffscreenTest.cpp)
+orange_engine_add_test(pipeline_halo_conditional_test render/PipelineHaloConditionalTest.cpp)
 orange_engine_add_test(pbr_scene_black_repro_test  render/PbrSceneBlackReproTest.cpp)
 target_compile_definitions(pbr_scene_black_repro_test PRIVATE
     "ORANGE_ENGINE_REPO_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\"")

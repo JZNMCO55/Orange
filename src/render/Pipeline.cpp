@@ -1462,79 +1462,90 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
     // 颜色 × 强度走 push constant 槽位 uHaloColorIntensity；HDR 出来的高
     // 亮度由 BloomPass 自然散光产生 glow。
     //
-    // pWorld 为 nullptr（调用方未传或 fallback）/ haloMaterial 加载失败 /
-    // halo sphere mesh upload 失败 → halo 整段跳过（fail-safe，与"halo 全
-    // 场关闭"等价）。每帧只 BindGraphicsPipeline + BindVertex/IndexBuffer 一
-    // 次（首次命中 haloEnabled 时），per-light 只 SetPushConstants + DrawIndexed。
+    // pWorld 为 nullptr（调用方未传或 fallback）/ 场景无 haloEnabled PointLight /
+    // haloMaterial 加载失败 / halo sphere mesh upload 失败 → halo 整段跳过
+    // （fail-safe，与"halo 全场关闭"等价）。
+    //
+    // halo 资源（material / sphere mesh / pipeline template）按需 lazy 准备：
+    // 仅在**首个 haloEnabled PointLight** 命中时才 EnsureHaloMaterial /
+    // EnsureHaloSphereMesh / GetOrCompilePipeline + bind。没有任何 haloEnabled
+    // PointLight 的场景循环全 continue、完全不触发——不编 halo template、不占
+    // template cache（见 GAP-2026-05-30：此前在 PointLight 遍历前无条件预编 halo
+    // template，令无点光场景也常驻一个永不用的 pipeline）。代价是首个 haloEnabled
+    // PointLight 出现的那一帧 lazy 编译（一次性），换取无点光场景零 halo 开销。
+    // per-light 只 SetPushConstants + DrawIndexed。
     if (pWorld != nullptr)
     {
-        const Material* haloMat = impl.EnsureHaloMaterial();
-        if (haloMat != nullptr && impl.EnsureHaloSphereMesh())
+        auto& haloReg = pWorld->Registry();
+        using TC = Orange::Engine::Scene::TransformComponent;
+        auto haloView = haloReg.view<TC, PointLight>();
+        bool haloBound = false;
+        for (auto entity : haloView)
         {
-            Orange::Rhi::RHIPipeline* haloPipeline =
-                impl.GetOrCompilePipeline(*haloMat);
-            if (haloPipeline != nullptr)
+            const auto& pl = haloView.template get<PointLight>(entity);
+            if (!pl.haloEnabled) { continue; }
+            const auto& tc = haloView.template get<TC>(entity);
+
+            if (!haloBound)
             {
-                auto& haloReg = pWorld->Registry();
-                using TC = Orange::Engine::Scene::TransformComponent;
-                auto haloView = haloReg.view<TC, PointLight>();
-                bool haloBound = false;
-                for (auto entity : haloView)
+                // 首个 haloEnabled PointLight：lazy 准备 halo 资源 + 编 template。
+                const Material* haloMat = impl.EnsureHaloMaterial();
+                if (haloMat == nullptr || !impl.EnsureHaloSphereMesh())
                 {
-                    const auto& pl = haloView.template get<PointLight>(entity);
-                    if (!pl.haloEnabled) { continue; }
-                    const auto& tc = haloView.template get<TC>(entity);
-
-                    if (!haloBound)
-                    {
-                        cmd.BindGraphicsPipeline(*haloPipeline);
-                        // pipeline 切换后 layout 兼容则 mainDescSet 仍可复
-                        // 用——halo shader 与主 forward 同 mainDescLayout。
-                        if (mainDescSet)
-                        {
-                            cmd.SetDescriptorSet(0, *mainDescSet);
-                        }
-                        cmd.BindVertexBuffer(0, *impl.haloSphereVertexBuffer,
-                                             /*offset=*/0);
-                        cmd.BindIndexBuffer(*impl.haloSphereIndexBuffer,
-                                            /*offset=*/0,
-                                            Orange::Rhi::IndexFormat::UInt32);
-                        haloBound = true;
-                        pLastPipeline = haloPipeline;
-                    }
-
-                    const glm::mat4 model =
-                        glm::translate(glm::mat4(1.0f), tc.position) *
-                        glm::scale(glm::mat4(1.0f), glm::vec3(pl.haloRadius));
-                    const glm::mat4 mvp = viewProj * model;
-
-                    // push constant 144B = mat4 uMVP + mat4 uModel + vec4
-                    // uHaloColorIntensity（.rgb=light.color, .a=light.intensity *
-                    // light.haloIntensity）。布局与 halo.vert.glsl push constant
-                    // block 严格对齐（mat4 64B + mat4 64B + vec4 16B = 144B）。
-                    struct PushHalo
-                    {
-                        glm::mat4 mvp;
-                        glm::mat4 model;
-                        glm::vec4 colorIntensity;
-                    };
-                    PushHalo push{};
-                    push.mvp            = mvp;
-                    push.model          = model;
-                    push.colorIntensity = glm::vec4(pl.color,
-                                                    pl.intensity * pl.haloIntensity);
-
-                    cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
-                                         /*offset=*/0,
-                                         static_cast<std::uint32_t>(sizeof(PushHalo)),
-                                         &push);
-                    cmd.DrawIndexed(impl.haloSphereIndexCount,
-                                    /*instanceCount=*/1,
-                                    /*firstIndex=*/0,
-                                    /*vertexOffset=*/0,
-                                    /*firstInstance=*/0);
+                    break;  // 资源加载失败 → fail-safe，halo 整段跳过
                 }
+                Orange::Rhi::RHIPipeline* haloPipeline =
+                    impl.GetOrCompilePipeline(*haloMat);
+                if (haloPipeline == nullptr)
+                {
+                    break;  // 编译失败 → fail-safe
+                }
+                cmd.BindGraphicsPipeline(*haloPipeline);
+                // pipeline 切换后 layout 兼容则 mainDescSet 仍可复用——halo
+                // shader 与主 forward 同 mainDescLayout。
+                if (mainDescSet)
+                {
+                    cmd.SetDescriptorSet(0, *mainDescSet);
+                }
+                cmd.BindVertexBuffer(0, *impl.haloSphereVertexBuffer,
+                                     /*offset=*/0);
+                cmd.BindIndexBuffer(*impl.haloSphereIndexBuffer,
+                                    /*offset=*/0,
+                                    Orange::Rhi::IndexFormat::UInt32);
+                haloBound = true;
+                pLastPipeline = haloPipeline;
             }
+
+            const glm::mat4 model =
+                glm::translate(glm::mat4(1.0f), tc.position) *
+                glm::scale(glm::mat4(1.0f), glm::vec3(pl.haloRadius));
+            const glm::mat4 mvp = viewProj * model;
+
+            // push constant 144B = mat4 uMVP + mat4 uModel + vec4
+            // uHaloColorIntensity（.rgb=light.color, .a=light.intensity *
+            // light.haloIntensity）。布局与 halo.vert.glsl push constant
+            // block 严格对齐（mat4 64B + mat4 64B + vec4 16B = 144B）。
+            struct PushHalo
+            {
+                glm::mat4 mvp;
+                glm::mat4 model;
+                glm::vec4 colorIntensity;
+            };
+            PushHalo push{};
+            push.mvp            = mvp;
+            push.model          = model;
+            push.colorIntensity = glm::vec4(pl.color,
+                                            pl.intensity * pl.haloIntensity);
+
+            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                 /*offset=*/0,
+                                 static_cast<std::uint32_t>(sizeof(PushHalo)),
+                                 &push);
+            cmd.DrawIndexed(impl.haloSphereIndexCount,
+                            /*instanceCount=*/1,
+                            /*firstIndex=*/0,
+                            /*vertexOffset=*/0,
+                            /*firstInstance=*/0);
         }
     }
 

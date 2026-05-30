@@ -2972,7 +2972,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - **发现方**：2026-05-30 EntityGuid core session 收尾跑全套 ctest 时撞上（非本 session 改动引入——见"归因"）
 - **发现日期**：2026-05-30
 - **一句话定性**：3 个 render pipeline 集成测试 `pipeline_template_cache_test` / `pipeline_hdr_target_test` / `pipeline_offscreen_test` **assert 失败** `pipeline.TemplatePipelineCount() == 1`（Debug assert 弹窗 → ctest 卡到 timeout）；validation 同时报 `Vertex attribute at location 3 not consumed by vertex shader`
-- **状态**：**仅登记，未诊断根因 + 未修**（疑似跨 OrangeRender SDK，需独立 session）
+- **状态**：**✅ 2026-05-30 修复（方案 b：halo 条件编）**——root cause 是 OE 自身（halo G3 在 PointLight 遍历前无条件预编 halo template），非跨仓 SDK
 
 ### 归因（为什么判定与 EntityGuid 改动无关）
 
@@ -2989,7 +2989,18 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - (b) **halo template 条件编**：把 `GetOrCompilePipeline(*haloMat)` 移进"存在 haloEnabled PointLight"分支，无 PointLight 不占 template。更省（免无谓编译 + 内存），但改 render 逻辑、需验证 halo G3 功能不破 + 重跑全套。
   - location 3 warning 同源（textured 被 `MaterialUsesTextureSet` 误判声明 tangent），可顺带解耦 `MaterialUsesTextureSet`（独立小修）。
 
+### 落地记录（方案 b，2026-05-30）
+
+选 **方案 b（halo 条件编）** 落地（用户拍板：halo 预编非必要，按需更干净）：
+
+- **改动**（`Pipeline.cpp` halo pass）：把 `EnsureHaloMaterial` / `EnsureHaloSphereMesh` / `GetOrCompilePipeline(*haloMat)` + bind 从"PointLight 遍历前无条件"**推迟为循环内首个 `haloEnabled` PointLight 命中时 lazy 准备**。无 haloEnabled PointLight 的场景循环全 continue、完全不触发——不编 halo template、不占 cache。代价：首个 haloEnabled PointLight 出现帧一次性 lazy 编译（换无点光场景零 halo 开销）。
+- **验证**：
+  - 3 个原 render 测试（`pipeline_template_cache` / `hdr_target` / `offscreen`）**无需改期望即通过**（无 PointLight → count 回到 drawable material 数）。
+  - 新增 `tests/render/PipelineHaloConditionalTest.cpp` 锁两个方向：haloEnabled=false / 无 PointLight → count=1（不编）；haloEnabled PointLight → count=2（halo lazy 编 + Render 不崩，填补此前"有 PointLight halo"零 headless 覆盖）。
+  - **全套 ctest 63/63 通过、30s**（修复前 59/62 + 3 个 assert 弹窗 hang 到 timeout 共 ~15min）。
+- **遗留**：(1) halo **视觉**正确性（球位置/颜色/glow）仍需 sample 16（`--halo`）GUI dogfood——headless 只验证不崩 + template 编。(2) location 3 warning（`MaterialUsesTextureSet` 耦合"用贴图 set"与"用 tangent 顶点"，textured 被误声明 tangent）**未动**，是独立小修，留后续。
+
 ### 关联
 
-- 疑似与 [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 的 tangent vertex 属性引入同源（location 3）。
+- 与 [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 的 tangent vertex 属性引入同源（location 3 warning，本次未修）。
 - 非阻塞 EntityGuid 交付（独立健康度问题）。
