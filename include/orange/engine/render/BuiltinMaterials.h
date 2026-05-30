@@ -102,6 +102,13 @@ ORANGE_ENGINE_API Material LoadDebugNormals(Asset::AssetRegistry& registry);
 // Pipeline 在 Unlit mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
 ORANGE_ENGINE_API Material LoadDebugUnlit(Asset::AssetRegistry& registry);
 
+// 加载内置 debug-view overdraw 模板（DebugViewMode::Overdraw）：每片段输出小
+// 常量色，靠 material 的 additiveBlend + disableDepthTest 渲染状态把重叠绘制
+// 累加成 overdraw 热图（亮 = 同像素被覆盖多次 = 过绘严重）。push constant
+// {uMVP, uModel} = 128 B（同 debug_normals）。Pipeline 在 Overdraw mode 时用它
+// 替换 drawable material。纯诊断，不经 RegisterBuiltins。
+ORANGE_ENGINE_API Material LoadDebugOverdraw(Asset::AssetRegistry& registry);
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
 
 #endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

@@ -152,6 +152,12 @@ struct Pipeline::Impl
     Material debugUnlitMaterial;
     bool     debugUnlitLoaded{false};
 
+    // Lazy-init debug-view overdraw material（DebugViewMode::Overdraw）。同模式；
+    // material 开 additiveBlend + disableDepthTest，drawable loop 在 Overdraw mode
+    // 用它替换 drawable material（过绘热图）。
+    Material debugOverdrawMaterial;
+    bool     debugOverdrawLoaded{false};
+
     // Halo sphere mesh GPU buffer（lazy upload by EnsureHaloSphereMesh
     // on first halo loop record）。所有 haloEnabled PointLight 共享这一
     // 个 unit sphere，draw 时按 light position + haloRadius 算 model
@@ -983,6 +989,23 @@ struct Pipeline::Impl
         return &debugUnlitMaterial;
     }
 
+    // Lazy-init debug-view overdraw material（DebugViewMode::Overdraw）。同
+    // EnsureDebugNormalsMaterial 模式。
+    const Material* EnsureDebugOverdrawMaterial()
+    {
+        if (debugOverdrawLoaded)
+        {
+            return &debugOverdrawMaterial;
+        }
+        if (assets == nullptr)
+        {
+            return nullptr;
+        }
+        debugOverdrawMaterial = BuiltinMaterials::LoadDebugOverdraw(*assets);
+        debugOverdrawLoaded   = true;
+        return &debugOverdrawMaterial;
+    }
+
     // Lazy upload halo unit sphere mesh 到 GPU buffer（与 EnsureMeshGpuCache
     // 同款 InterleaveMesh + CreateBuffer + UploadBuffer 路径）。第一次 halo
     // loop record 时调用一次；后续 halo loop 命中 haloSphereVertexBuffer
@@ -1071,10 +1094,26 @@ struct Pipeline::Impl
         desc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
         desc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;
         desc.mRasterizer.mFrontFace   = Orange::Rhi::FrontFace::CounterClockwise;
-        desc.mDepthStencil.mDepthTestEnable  = true;
-        desc.mDepthStencil.mDepthWriteEnable = true;
+        // depth：标准 material depth test + write on；disableDepthTest material
+        // （如 overdraw debug view）两者全关，让重叠 fragment 都画出。
+        desc.mDepthStencil.mDepthTestEnable  = !mat.disableDepthTest;
+        desc.mDepthStencil.mDepthWriteEnable = !mat.disableDepthTest;
         desc.mDepthStencil.mDepthCompareOp   = Orange::Rhi::CompareOp::LessOrEqual;
-        desc.mColorBlend.mAttachments.push_back({});
+        // color blend：默认不透明（无 blend）；additiveBlend material（如 overdraw
+        // debug view）改加性 src ONE + dst ONE，每次绘制把片段色叠加累积。
+        {
+            Orange::Rhi::ColorBlendAttachmentDesc att{};
+            if (mat.additiveBlend)
+            {
+                att.mBlendEnable         = true;
+                att.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
+                att.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
+                att.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+                att.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+                att.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+            }
+            desc.mColorBlend.mAttachments.push_back(att);
+        }
         desc.mRenderTargets.mColorFormats.push_back(PipelineDetail::kHdrColorFormat);
         desc.mRenderTargets.mDepthStencilFormat = Orange::Rhi::TextureFormat::D32Float;
 

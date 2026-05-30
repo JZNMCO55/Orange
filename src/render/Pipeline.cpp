@@ -1383,6 +1383,16 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
                 mat = dbg;
             }
         }
+        else if (impl.debugViewMode == DebugViewMode::Overdraw)
+        {
+            // Overdraw：debug overdraw material 开 additiveBlend + disableDepthTest
+            //（见 GetOrCompilePipeline），每片段输出小常量色累加成过绘热图——同
+            // 像素被覆盖越多次越亮。
+            if (const Material* dbg = impl.EnsureDebugOverdrawMaterial())
+            {
+                mat = dbg;
+            }
+        }
 
         Orange::Rhi::RHIPipeline* rhiPipeline = impl.GetOrCompilePipeline(*mat);
         if (rhiPipeline == nullptr)

@@ -383,6 +383,12 @@ orange_engine_compile_builtin_shader(
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/debug_unlit.frag.glsl"
     ORANGE_ENGINE_BUILTIN_DEBUG_UNLIT_FS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/debug_overdraw.vert.glsl"
+    ORANGE_ENGINE_BUILTIN_DEBUG_OVERDRAW_VS_SPV)
+orange_engine_compile_builtin_shader(
+    "src/render/builtin_shaders/debug_overdraw.frag.glsl"
+    ORANGE_ENGINE_BUILTIN_DEBUG_OVERDRAW_FS_SPV)
 # v1.2 T3 · unlit 模板（复用 pbr.vert SPV，仅新增 frag）
 orange_engine_compile_builtin_shader(
     "src/render/builtin_shaders/unlit.frag.glsl"
@@ -461,6 +467,8 @@ set(ORANGE_ENGINE_ALL_BUILTIN_SPV
     "${ORANGE_ENGINE_BUILTIN_DEBUG_NORMALS_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_DEBUG_UNLIT_VS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_DEBUG_UNLIT_FS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_DEBUG_OVERDRAW_VS_SPV}"
+    "${ORANGE_ENGINE_BUILTIN_DEBUG_OVERDRAW_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_UNLIT_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_WATER_BASIC_FS_SPV}"
     "${ORANGE_ENGINE_BUILTIN_IBL_EQUIRECT_CS_SPV}"

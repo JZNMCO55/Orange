@@ -315,4 +315,23 @@ Material LoadDebugUnlit(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/debug_unlit.frag.spv");
 }
 
+Material LoadDebugOverdraw(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "debug_overdraw";
+    // push constant {uMVP, uModel} = 128 B（同 debug_normals，drawable loop 的
+    // pcSize>=128 分支喂 mvp+model）。overdraw 靠渲染状态而非 shader 数据：开
+    // additiveBlend（每次覆盖把片段色叠加）+ disableDepthTest（重叠 fragment
+    // 不被 depth 剔除，全部累加）——二者合起来形成 overdraw 热图。
+    desc.uniforms = {
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
+    };
+    desc.additiveBlend    = true;
+    desc.disableDepthTest = true;
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/debug_overdraw.vert.spv",
+                         "shaders/orange_engine/debug_overdraw.frag.spv");
+}
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials

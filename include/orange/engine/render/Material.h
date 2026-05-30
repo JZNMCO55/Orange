@@ -51,6 +51,16 @@ struct Material
     // 用贴图 ≠ 用 tangent（textured 用贴图但不读 tangent，不应声明 location 3，
     // 否则触发 validation "location 3 not consumed" 警告）。
     bool usesTangentVertex{false};
+
+    // 渲染状态覆盖。默认 false = 标准不透明（depth test/write on + 无 blend）。
+    // 特殊 material（典型 debug view）按需打开：
+    //   additiveBlend     —— color/alpha blend 改加性（src ONE + dst ONE，叠加
+    //                        累积），overdraw 热图 / 粒子用；
+    //   disableDepthTest  —— 关 depth test + depth write，让重叠 fragment 全部
+    //                        画出（overdraw 计数需要：否则前面的 fragment 写了
+    //                        depth，后面重叠的被剔除就无从累加）。
+    bool additiveBlend{false};
+    bool disableDepthTest{false};
 };
 
 }  // namespace Orange::Engine::Render
