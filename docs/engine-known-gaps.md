@@ -2983,7 +2983,9 @@ prefab 引擎层 MVP（整体实例化 + **无 override** + **无嵌套** + 仅�
 
 **prefab 缩略图 ✅ 已落地**（2026-05-30，OE `5abf4ad`，"干到十点" goal session）：Asset Browser `.prefab.json` 从 `[Prefab]` 文本变真实 scene snapshot 预览。`ThumbnailService` 扩展 `ThumbKind`（Material/Prefab）分派 + 公共尾段 `FinalizeBake` 共用（材质零回归）；`BakePrefabThumbnail` = `Load<PrefabAsset>` → 常驻 prefab-scratch world 实例化 → **算 world AABB 框相机**（复刻 EditorPicking 的 ComputeMeshLocalAABB/ComposeWorldMatrix/TransformAABB，3/4 视角 dir=(1,0.8,1)、dist=r/sin(fov/2)*1.1 padding、退化兜底防 NaN）→ RenderToTexture → DestroySubtree 清实例。**RAII InstanceGuard** 任何退出路径都 DestroySubtree（防 scratch 实体泄漏污染下次 AABB，最易错点）。content hash=blob FNV。验收 `PrefabThumbnailBakeTest`（偏离原点 prefab 与居中 lum 一致 = 框定真跟随 AABB），ctest 69/69 材质零回归。两 agent 接力（前一个 API 断连中断、后一个接手）。
 
-**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）+ 蓝条 UI + 右键 apply-revert / 嵌套 prefab / **mesh + scene snapshot 缩略图**（ThumbKind 可平滑扩 Mesh/Scene）+ prefab 缩略图磁盘缓存 / 挂任意 parent 实例化（用户现可实例化后自己 `ReparentTo`）/ Ensure→Save 主流程自动接线。
+**mesh thumbnail ✅ 已落地**（2026-05-30，OE `285a1ec`）：Asset Browser `.mesh` 从 `[M]` 文本变真实预览。`ThumbKind::Mesh` 顺手扩——`BakeMeshThumbnail` 复用 mesh-scratch（常驻 renderable 换 mesh 指针 + 默认 PBR 材质，无 DestroySubtree）+ 抽 `FrameCameraToAABB` 共用 helper（prefab+mesh 复用"AABB→摆相机"数学）。`MeshThumbnailBakeTest`，ctest 70/70 三类缩略图（material/prefab/mesh）零回归。
+
+**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）+ 蓝条 UI + 右键 apply-revert / 嵌套 prefab / **scene snapshot 缩略图**（ThumbKind 可平滑扩 Scene）+ 缩略图磁盘缓存 / 挂任意 parent 实例化（用户现可实例化后自己 `ReparentTo`）/ Ensure→Save 主流程自动接线。
 
 > 措辞修正：prefab 引擎能力 + OrangeEditor 消费**同属 OrangeEngine 单子仓**（编辑器在 `tools/OrangeEditor/`），**非** ADR-009 跨 submodule（不经 umbrella bump pointer）；分 session 仅因体量，按"引擎能力 session → 编辑器消费 session"推进。
 
