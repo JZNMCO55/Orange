@@ -155,20 +155,21 @@ void EditorRenderLayer::DrawScenePanel()
     {
         // 渲染调试视图（debug render views）：Lit（正常）+ Normals（world-normal
         // as-RGB）已实现，选中即调 Pipeline::SetDebugViewMode（下方每帧 push）。
-        // Wireframe（需 OrangeRender device feature，SDK reinstall）后续接入
-        //（GAP-2026-05-30-debug-render-views-engine-side）。
-        const char* kDebugViews[] = {"Lit", "Normals", "Unlit", "Overdraw"};
+        // 全 5 mode（Lit/Normals/Unlit/Overdraw/Wireframe）已接；Wireframe 用
+        // device feature fillModeNonSolid（不支持则 GetOrCompilePipeline fallback
+        // Fill，退化为实心绿）。
+        const char* kDebugViews[] = {"Lit", "Normals", "Unlit", "Overdraw", "Wireframe"};
         ImGui::SetNextItemWidth(comboItemWidth({"Lit", "Normals", "Wireframe"}));
         ImGui::Combo("##DebugView", &sViewportDebugViewMode, kDebugViews,
                      IM_ARRAYSIZE(kDebugViews));
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip("渲染调试视图\n"
-                              "  Lit      —— 正常 PBR / forward 渲染\n"
-                              "  Normals  —— world-space normal 映射到 RGB（诊断法线朝向）\n"
-                              "  Unlit    —— 直出 base color，无光照（诊断 albedo）\n"
-                              "  Overdraw —— 过绘热图（同像素覆盖越多越亮）\n"
-                              "Wireframe 后续接入");
+                              "  Lit       —— 正常 PBR / forward 渲染\n"
+                              "  Normals   —— world-space normal 映射到 RGB（诊断法线朝向）\n"
+                              "  Unlit     —— 直出 base color，无光照（诊断 albedo）\n"
+                              "  Overdraw  —— 过绘热图（同像素覆盖越多越亮）\n"
+                              "  Wireframe —— 线框（polygonMode=Line，诊断网格密度 / 拓扑）");
         }
     }
 
@@ -233,6 +234,7 @@ void EditorRenderLayer::DrawScenePanel()
             sViewportDebugViewMode == 1   ? Orange::Engine::Render::DebugViewMode::Normals
             : sViewportDebugViewMode == 2 ? Orange::Engine::Render::DebugViewMode::Unlit
             : sViewportDebugViewMode == 3 ? Orange::Engine::Render::DebugViewMode::Overdraw
+            : sViewportDebugViewMode == 4 ? Orange::Engine::Render::DebugViewMode::Wireframe
                                           : Orange::Engine::Render::DebugViewMode::Lit);
         // v1.3.1 Render Settings 面板编辑后下一帧立即生效 —— mShadowConfig 是
         // panel UI 直写字段，每帧 push（by-value 32 bytes 拷贝到 mpImpl，开销

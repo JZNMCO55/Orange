@@ -1393,6 +1393,16 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
                 mat = dbg;
             }
         }
+        else if (impl.debugViewMode == DebugViewMode::Wireframe)
+        {
+            // Wireframe：debug wireframe material 的 wireframe=true 让
+            // GetOrCompilePipeline 设 polygonMode=Line（需 device feature
+            // fillModeNonSolid，否则 fallback Fill 退化为实心绿）。
+            if (const Material* dbg = impl.EnsureDebugWireframeMaterial())
+            {
+                mat = dbg;
+            }
+        }
 
         Orange::Rhi::RHIPipeline* rhiPipeline = impl.GetOrCompilePipeline(*mat);
         if (rhiPipeline == nullptr)

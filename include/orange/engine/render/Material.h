@@ -61,6 +61,11 @@ struct Material
     //                        depth，后面重叠的被剔除就无从累加）。
     bool additiveBlend{false};
     bool disableDepthTest{false};
+
+    // 线框渲染（debug view Wireframe）：true → pipeline 用 polygonMode=Line 画
+    // 三角形边线而非填充。需 device feature fillModeNonSolid（GetOrCompilePipeline
+    // 查 capability，不支持则 fallback Fill）。
+    bool wireframe{false};
 };
 
 }  // namespace Orange::Engine::Render

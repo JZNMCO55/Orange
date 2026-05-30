@@ -3022,7 +3022,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - **发现方**：用户拉动（渲染出身最想要的诊断能力）；`editor-capability-gap-vs-mature.md` §3 P2
 - **发现日期**：2026-05-30
 - **一句话定性**：编辑器缺渲染调试视图（wireframe / unlit / normals / overdraw）。OrangeRender device feature（`fillModeNonSolid` for wireframe）已落地（7bc8c57）；引擎侧需 Pipeline debug-view mode + 各 mode 渲染实现 + 编辑器 UI
-- **状态**：**进行中**——前置 + 公共 API 地基 ✅ 2026-05-30；各 mode 渲染实现 + 编辑器 UI 后续（多 session）
+- **状态**：**✅ 2026-05-30 全 5 mode 落地**——前置（OrangeRender 7bc8c57 device feature install 到 `D:/3rdparty/install`）+ 公共 API（`DebugViewMode` enum + `Set`/`GetDebugViewMode`）+ 全 5 mode 渲染实现（Lit/Normals/Unlit/Overdraw/Wireframe）+ 编辑器 combo 5 项 + `PipelineHaloConditionalTest` 每 mode count+1 覆盖 + 全套 ctest 63/63 零回归。**仅 GUI 视觉正确性待 dogfood**。
 
 ### 已落地（2026-05-30）
 
@@ -3031,16 +3031,18 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - ✅ **Normals mode 渲染实现**：`debug_normals.vert/frag.glsl`（world-normal-as-RGB，CMake 编 SPIR-V）+ `BuiltinMaterials::LoadDebugNormals` + Pipeline lazy `EnsureDebugNormalsMaterial`；drawable loop 在 `Normals` mode **替换 drawable material 为 debug normals material**（复用 GetOrCompilePipeline / push constant 128B {mvp,model} / draw，最小侵入）。headless 验证 debug pipeline 真编出（`PipelineHaloConditionalTest` count+1，非 shader 缺失跳过）+ ctest 63/63 零回归。**视觉正确性待 GUI dogfood**。
 - ✅ **Unlit mode 渲染实现**：`debug_unlit.vert/frag.glsl`（直出 base color）+ `LoadDebugUnlit`（复用 PBR 160B push，drawable loop 喂 drawable material instance 的 uBaseColor override）+ `EnsureDebugUnlitMaterial` + drawable loop `Unlit` 分支 + 编辑器 combo +Unlit item。`PipelineHaloConditionalTest` 验证 debug pipeline 真编出；ctest 63/63 零回归。**视觉待 dogfood**。
 - ✅ **Overdraw mode 渲染实现**：`debug_overdraw.vert/frag.glsl`（每片段输出小常量色）+ Material 新增 `additiveBlend` / `disableDepthTest` 渲染状态字段（`GetOrCompilePipeline` 读取：additive = src ONE + dst ONE，depth test/write off，默认 false 保持原行为零回归）+ `LoadDebugOverdraw` + `EnsureDebugOverdrawMaterial` + drawable loop `Overdraw` 分支 + 编辑器 combo +Overdraw item。重叠绘制加性累加成过绘热图（亮 = 同像素覆盖多次）。`PipelineHaloConditionalTest` 验证 additive blend pipeline 真编出；ctest 63/63 零回归。**视觉待 dogfood**。
+- ✅ **Wireframe mode 渲染实现 + OrangeRender 7bc8c57 device feature 端到端消费**：SDK reinstall（OrangeRender 7bc8c57 重编 install 到 `D:/3rdparty/install`，含 `fillModeNonSolid`/`wideLines`/`imageCubeArray`）+ Material 新增 `wireframe` 标志（`GetOrCompilePipeline` 查 `GetCapabilities().mFeatures.mFillModeNonSolid` → 设 `polygonMode=Line`，不支持则 fallback Fill）+ `debug_wireframe.vert/frag.glsl`（纯亮绿边线）+ `LoadDebugWireframe` + `EnsureDebugWireframeMaterial` + drawable loop `Wireframe` 分支 + 编辑器 combo +Wireframe item。`PipelineHaloConditionalTest` 验证 polygonMode pipeline 真编出；全套 ctest 63/63 零回归（含 OrangeRender 升级 7bc8c57 后现有功能零回归）。**视觉待 dogfood**。
 
-### 后续（逐 mode，多 session）
+> **debug render views 全 5 mode（Lit/Normals/Unlit/Overdraw/Wireframe）端到端完成** —— 引擎渲染（替换 drawable material 套路 + Material 渲染状态字段 `additiveBlend`/`disableDepthTest`/`wireframe`）+ 编辑器 combo 5 项 + `PipelineHaloConditionalTest` 全覆盖（每 mode count+1 锁 debug pipeline 真编出）。OrangeRender device feature 端到端消费闭环（7bc8c57 → install → `fillModeNonSolid` → wireframe）。**仅 GUI 视觉正确性待 dogfood**。
 
-- **SDK reinstall**（wireframe 硬前置）：当前 SDK（`D:/sdk/orange-render`，5月19）**不含** 7bc8c57 device feature；wireframe（`polygonMode=LINE`）需 SDK 用 7bc8c57 重编 install，否则 validation 拒（VUID-…-polygonMode-01507）。
-- **剩余 mode 渲染实现**（Render 路径按 `debugViewMode` 切换，**复用 Normals 的"替换 drawable material"模式**——最薄套路已验证；Normals/Unlit/Overdraw 均已落地）：
-  - **Wireframe**（剩唯一未落地 mode）：material template pipeline 的 `polygonMode=LINE` 变体（**需 SDK device feature** fillModeNonSolid，前置 SDK reinstall）。Overdraw 已落地的 Material `additiveBlend`/`disableDepthTest` 渲染状态字段机制可作 wireframe 加 `polygonMode` 字段的参照（同样 default 安全 + GetOrCompilePipeline 读取）。
-- **编辑器** ✅ **viewport combo Lit/Normals/Unlit/Overdraw 已接**：ScenePanel toolbar 把原 disabled "Shading" 占位 combo 替换为 debug-view combo（session-only file-static，每帧 push `Pipeline::SetDebugViewMode`）；Wireframe 待 SDK reinstall + mode 渲染实现后加 combo item。**Normals/Unlit/Overdraw viewport 视觉待 dogfood**。
+### 后续（全 mode 已落地，剩可选项）
+
+- ✅ ~~SDK reinstall（wireframe 硬前置）~~：OrangeRender 7bc8c57 已重编 install 到 `D:/3rdparty/install`，`fillModeNonSolid` 端到端消费。
+- ✅ ~~剩余 mode 渲染实现~~：全 5 mode（Lit/Normals/Unlit/Overdraw/Wireframe）已落地。
+- **编辑器** ✅ **viewport combo 全 5 项（Lit/Normals/Unlit/Overdraw/Wireframe）已接**：ScenePanel toolbar debug-view combo（session-only file-static，每帧 push `Pipeline::SetDebugViewMode`）。**全 5 mode viewport 视觉待 dogfood**。
 - **G-buffer 通道可视化**：已被既有离屏 RT（`FEATURE-2026-05-07`）+ `VulkanInterop::GetVulkanImageView` 覆盖，按需接。
 
 ### 关联
 
-- OrangeRender `FEATURE-2026-05-30-editor-debug-render-views`（device feature 侧已 ✅；评审判 unlit/normals/overdraw 变体归引擎侧）。
+- OrangeRender `FEATURE-2026-05-30-editor-debug-render-views`（device feature 侧 ✅ 7bc8c57；引擎侧 normals/unlit/overdraw/wireframe 变体全 ✅，device feature 已端到端消费闭环）。
 - `editor-capability-gap-vs-mature.md` §3 P2 debug-view 行。

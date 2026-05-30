@@ -231,6 +231,21 @@ int main()
         std::fprintf(stdout, "  [PASS] DebugViewMode::Overdraw Render 不崩 + debug pipeline 编出\n");
     }
 
+    // ---- debug-view Wireframe mode：drawable 用 debug wireframe material（polygon
+    //      Mode=Line；device 不支持 fillModeNonSolid 则 GetOrCompilePipeline fallback
+    //      Fill，pipeline 仍创建），验证 debug pipeline 真编出 --------------------
+    {
+        World world;
+        AddCamera(world);
+        AddTexturedDrawable(world, meshHandle, texInst.get());
+        const std::size_t before = pipeline.TemplatePipelineCount();
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Wireframe);
+        pipeline.Render(world);
+        assert(pipeline.TemplatePipelineCount() == before + 1);  // debug wireframe pipeline 编出
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);
+        std::fprintf(stdout, "  [PASS] DebugViewMode::Wireframe Render 不崩 + debug pipeline 编出\n");
+    }
+
     std::fprintf(stdout, "[PipelineHaloConditionalTest] all passed\n");
     return 0;
 }

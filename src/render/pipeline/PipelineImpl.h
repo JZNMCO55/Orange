@@ -158,6 +158,12 @@ struct Pipeline::Impl
     Material debugOverdrawMaterial;
     bool     debugOverdrawLoaded{false};
 
+    // Lazy-init debug-view wireframe material（DebugViewMode::Wireframe）。同模式；
+    // material wireframe=true，GetOrCompilePipeline 设 polygonMode=Line（需 device
+    // feature fillModeNonSolid）。
+    Material debugWireframeMaterial;
+    bool     debugWireframeLoaded{false};
+
     // Halo sphere mesh GPU buffer（lazy upload by EnsureHaloSphereMesh
     // on first halo loop record）。所有 haloEnabled PointLight 共享这一
     // 个 unit sphere，draw 时按 light position + haloRadius 算 model
@@ -1006,6 +1012,23 @@ struct Pipeline::Impl
         return &debugOverdrawMaterial;
     }
 
+    // Lazy-init debug-view wireframe material（DebugViewMode::Wireframe）。同
+    // EnsureDebugNormalsMaterial 模式。
+    const Material* EnsureDebugWireframeMaterial()
+    {
+        if (debugWireframeLoaded)
+        {
+            return &debugWireframeMaterial;
+        }
+        if (assets == nullptr)
+        {
+            return nullptr;
+        }
+        debugWireframeMaterial = BuiltinMaterials::LoadDebugWireframe(*assets);
+        debugWireframeLoaded   = true;
+        return &debugWireframeMaterial;
+    }
+
     // Lazy upload halo unit sphere mesh 到 GPU buffer（与 EnsureMeshGpuCache
     // 同款 InterleaveMesh + CreateBuffer + UploadBuffer 路径）。第一次 halo
     // loop record 时调用一次；后续 halo loop 命中 haloSphereVertexBuffer
@@ -1094,6 +1117,14 @@ struct Pipeline::Impl
         desc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
         desc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;
         desc.mRasterizer.mFrontFace   = Orange::Rhi::FrontFace::CounterClockwise;
+        // wireframe material（debug view Wireframe）：polygonMode=Line 画三角形
+        // 边线而非填充。需 device feature fillModeNonSolid——查 capability，不
+        // 支持则 fallback Fill（避免 unsupported polygonMode 被 validation 拒）。
+        if (mat.wireframe &&
+            renderDevice->GetRhiDevice().GetCapabilities().mFeatures.mFillModeNonSolid)
+        {
+            desc.mRasterizer.mPolygonMode = Orange::Rhi::PolygonMode::Line;
+        }
         // depth：标准 material depth test + write on；disableDepthTest material
         // （如 overdraw debug view）两者全关，让重叠 fragment 都画出。
         desc.mDepthStencil.mDepthTestEnable  = !mat.disableDepthTest;

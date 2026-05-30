@@ -109,6 +109,12 @@ ORANGE_ENGINE_API Material LoadDebugUnlit(Asset::AssetRegistry& registry);
 // 替换 drawable material。纯诊断，不经 RegisterBuiltins。
 ORANGE_ENGINE_API Material LoadDebugOverdraw(Asset::AssetRegistry& registry);
 
+// 加载内置 debug-view wireframe 模板（DebugViewMode::Wireframe）：纯亮绿边线，
+// 靠 material 的 wireframe 标志让 pipeline 用 polygonMode=Line（需 device feature
+// fillModeNonSolid）。push constant {uMVP, uModel} = 128 B。Pipeline 在 Wireframe
+// mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
+ORANGE_ENGINE_API Material LoadDebugWireframe(Asset::AssetRegistry& registry);
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
 
 #endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

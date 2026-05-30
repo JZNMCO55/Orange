@@ -334,4 +334,22 @@ Material LoadDebugOverdraw(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/debug_overdraw.frag.spv");
 }
 
+Material LoadDebugWireframe(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "debug_wireframe";
+    // push constant {uMVP, uModel} = 128 B（同 debug_normals，drawable loop 的
+    // pcSize>=128 分支喂 mvp+model）。wireframe 靠渲染状态：wireframe=true 让
+    // GetOrCompilePipeline 设 polygonMode=Line（前提 device feature
+    // fillModeNonSolid，否则 fallback Fill）。
+    desc.uniforms = {
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
+    };
+    desc.wireframe = true;
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/debug_wireframe.vert.spv",
+                         "shaders/orange_engine/debug_wireframe.frag.spv");
+}
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
