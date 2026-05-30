@@ -2939,7 +2939,7 @@ facet 2（指示器 + 可保存）后，"改了材质没存就关窗"仍会静�
 - **发现方**：`docs/editor-hierarchy-gap-vs-lumix.md` Gap 表（报告点名"**最大空白**"）+ 本轮层级编辑能力补齐 session 收口时识别——Copy/Paste/Cut/Duplicate/delete-undo 全部落地后，**唯一剩下的层级结构空白就是 prefab**
 - **发现日期**：2026-05-30
 - **一句话定性**：引擎 / 编辑器**无 prefab 资产概念**——能复制子树（`SaveSubtreeToString`/`LoadFromString` 已落地，Duplicate/Copy-Paste 在用）但复制出来是**一次性脱钩拷贝**，没有"可复用模板 + 多实例 + 改模板批量同步"的 prefab 语义。全仓 grep `prefab` 场景层零命中；`HierarchyComponent` 是裸数据，无 prefab loader / 实例化路径 / 实例↔资产双向 map
-- **状态**：**EntityGuid 身份层 ✅（ADR-013）+ 引擎层 MVP ✅ 2026-05-30 落地（PrefabAsset + InstantiatePrefab + 链接组件，OE `4293c05`）；剩 override / 嵌套 / 编辑器消费**
+- **状态**：**EntityGuid 身份层 ✅（ADR-013）+ 引擎层 MVP ✅（OE `4293c05`）+ 编辑器消费 MVP ✅（创建/显示/拖入实例化，OE `6d00c87`）2026-05-30 全落地；剩 override / 蓝条 / 嵌套 / apply-revert**
 
 ### EntityGuid 身份层落地记录（2026-05-30，本 session）
 
@@ -2962,7 +2962,19 @@ prefab 引擎层 MVP（整体实例化 + **无 override** + **无嵌套** + 仅�
 - **验收**：`tests/scene/PrefabTest`（T1 资产 round-trip 形态 B 字节保真 + 坏 schema 拦截；T2 实例化结构；T3 GUID 分离实测两实例 4 实体两两互异且 ≠ 模板；T4 链接三字段；T5 链接经 `Scene::Save→Load` 保真；T6 错误路径）。**ctest 65/65 零回归**（scene 序列化哨兵经 1.12→1.13 向后兼容全绿 + config_smoke/editor_build_smoke 验新公共头可 install + find_package 消费）。
 - **⚠ 待 ADR-015（Wiki）**：prefab MVP 引入 `prefab/asset` 1.0 + scene 1.13 两处 schema（"出厂即冻结"纪律需 ADR 备案）+ 上述架构选型（形态 B / 链接组件 / GUID 角色 / parent 限制）。决策已在本条详记，ADR-015 形式化写入 Wiki 待 doc session（跨仓纯文档，ADR-010 豁免）。
 
-**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）/ 嵌套 prefab / **编辑器消费**（prefab browser + 拖入实例化 + 蓝条 + 右键 apply-revert + 挂任意 parent 接 `ReparentTo`，独立 editor session）/ Ensure→Save 主流程自动接线（非 critical path）。
+### 编辑器消费 MVP 落地记录（2026-05-30，本 session）
+
+让引擎层 prefab 真正可用的编辑器 UI 闭环（OE `6d00c87`，"干到十点" goal session；同 OrangeEngine 单子仓，引擎 API 已 commit+测试+ADR 稳定 → 编辑器消费不存在半成品 API 风险）：
+
+- **创建**：Hierarchy 节点右键 "Create Prefab..." → modal 填名（默认 = 源实体名）→ `SaveSubtreeToString({选中根})` → `PrefabLoader::Save(browserCurrentDir/名.prefab.json)`。纯 IO 不进命令栈（同 Create Material）。MVP 单根（多选取 primary）。
+- **显示**：Asset Browser `DrawAssetFileList` 加 `.prefab.json → [Prefab]` icon（**必须先判完整后缀**，因 `extension()` 返回 `.json` 会被 `.json`/`.scene.json` 分支抢）；DnD source 复用统一 `ORANGE_ASSET` payload，prefab 自动可拖、无需改 source。
+- **拖入实例化**：viewport（ScenePanel）drop target **先判** `.prefab.json` → `InstantiatePrefabFromPath`（`Load<PrefabAsset>` → push 命令），**否则**才走 `ApplyAssetDropToEntity`（顺序写反则 prefab 落进"不识别扩展名"warn 静默失败）。
+- **`InstantiatePrefabCommand`**（命令栈 undo/redo）：Execute = `InstantiatePrefab`（parent=Invalid 作新根 + LoadOptions 填全 4 字段，漏填实例丢材质/animator）；Undo = `EditorHierarchy::DestroySubtree(root)`。**两个关键正确性**：① 用 `shared_ptr<Entity>` 追踪实例根——redo 重新实例化是**新 EnTT id**，必须回写（delete-undo 踩过的同坑）；② Undo 用 `World::IsValid`（EnTT version 检查）甄别"句柄非零但已销毁"的死实体，避免 double-destroy → EnTT assert。
+- **PrefabLoader 注册**：`InitializeEditorAssets` 加 `RegisterLoader<PrefabAsset>`（Asset Browser 直接 `fs::directory_iterator` 扫盘，Create 后下一帧自动显示，无需 refresh）。
+- **schema-first**：逻辑抽 `EditorPrefabActions.{h,cpp}` + `command/PrefabCommands.{h,cpp}` 独立 TU；跨 TU modal 状态（菜单在 EntityTreePanel、modal 在 EditorRenderLayer）走 module-level `Request/ConsumeCreatePrefabRequest` 桥接，**不堆 mega-class / 不加 EditorSelection god struct**。
+- **验收**：`tests/editor/EditorPrefabActionsTest`（T1 创建 round-trip 字节保真；T2 Execute→Undo→Redo→再 Undo 实体增删 + 实例根 PrefabInstanceComponent + redo 新 id 删干净）+ ctest 67/67 零回归 + editor_build_smoke。**右键菜单 / modal / DnD 拖入手感 / 实例位置（作新根走模板 Transform 不跟光标）/ undo-redo Hierarchy 刷新待视觉 dogfood**。
+
+**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）+ 蓝条 UI + 右键 apply-revert / 嵌套 prefab / prefab 缩略图（scene snapshot 复用 ThumbnailService）/ 挂任意 parent 实例化（用户现可实例化后自己 `ReparentTo`）/ Ensure→Save 主流程自动接线。
 
 > 措辞修正：prefab 引擎能力 + OrangeEditor 消费**同属 OrangeEngine 单子仓**（编辑器在 `tools/OrangeEditor/`），**非** ADR-009 跨 submodule（不经 umbrella bump pointer）；分 session 仅因体量，按"引擎能力 session → 编辑器消费 session"推进。
 
