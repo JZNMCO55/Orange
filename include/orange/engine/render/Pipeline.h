@@ -516,6 +516,22 @@ public:
     bool DebugReadbackPixel(std::uint32_t x, std::uint32_t y,
                             float outRGBA[4]) const;
 
+    // 用本 Pipeline 已有的全套资源（IBL / shadow / material / mesh）把任意
+    // world 渲染到调用方提供的外部 RT。material 缩略图 / mesh thumbnail /
+    // scene snapshot 等编辑器 mini-render 的统一入口，免去各自复刻 mini-pipeline。
+    //
+    // 仅离屏模式（InitializeOffscreen 已成功）支持；window 模式返回 InvalidArgument。
+    // target 要求：格式 == kSwapchainColorFormat（BGRA8Unorm）+ usage 含
+    // RenderTarget | Sampled（若调用方要 readback 再加 TransferSrc）；width/height > 0。
+    // 渲染范围（S1）：shadow + sky + 主 PBR pass + passthrough，**不含**后处理
+    // （SSAO/SSR/Bloom/Tonemap 等一律 skip，与缩略图需求一致）。
+    //
+    // 帧外一次性调用（内部自管 cmd Begin/Submit/WaitIdle）。返回成功后 target
+    // 处于 ShaderReadOnly，调用方可直接采样（ImGui::Image 等）。本调用**不影响**
+    // 当前 viewport 的 GetOffscreenColor 缓存（独立 scratch，互不干扰）。
+    Result<void, ResultCode> RenderToTexture(World& world, ::Orange::Rhi::RHITexture* target,
+                                             std::uint32_t width, std::uint32_t height);
+
 private:
     // 共享 RHI 资源创建逻辑（sampler / passthrough / bloom / tonemap /
     // godrays / 主 pass UBO / shadow caster pipeline / offscreen cmd list）。

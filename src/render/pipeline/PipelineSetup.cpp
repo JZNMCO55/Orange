@@ -84,8 +84,10 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
     }
 
     Orange::Rhi::DescriptorPoolDesc poolDesc{};
-    poolDesc.mMaxSets   = 1;
-    poolDesc.mPoolSizes = {{Orange::Rhi::DescriptorType::CombinedImageSampler, 1}};
+    // maxSets / count = 2：primary passthroughSet + RenderToTexture scratch 的
+    // rttPassthroughSet 各占一个（GAP-2026-05-24 G1）。
+    poolDesc.mMaxSets   = 2;
+    poolDesc.mPoolSizes = {{Orange::Rhi::DescriptorType::CombinedImageSampler, 2}};
     poolDesc.mpDebugName = "orange_engine.passthrough.pool";
     impl.passthroughPool = rhi.CreateDescriptorPool(poolDesc);
     if (!impl.passthroughPool)

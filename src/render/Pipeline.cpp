@@ -394,6 +394,78 @@ bool Pipeline::DebugReadbackPixel(std::uint32_t x, std::uint32_t y,
     return true;
 }
 
+Result<void, ResultCode> Pipeline::RenderToTexture(World& world,
+                                                   ::Orange::Rhi::RHITexture* target,
+                                                   std::uint32_t width,
+                                                   std::uint32_t height)
+{
+    auto& impl = *mpImpl;
+    if (!impl.initialized)   { return ResultCode::NotInitialized; }
+    if (!impl.offscreenMode) { return ResultCode::InvalidArgument; }  // 仅离屏模式
+    if (target == nullptr || width == 0 || height == 0)
+    {
+        return ResultCode::InvalidArgument;
+    }
+
+    if (!impl.EnsureRttScratch(width, height))
+    {
+        return ResultCode::InternalError;
+    }
+
+    // 从 world 收集本帧 RenderScene（与 Render() 顶部同款）——RenderOffscreen
+    // 消费 impl.scene，必须在调用前填好。**不**应用 editorCameraOverride：缩略图
+    // world 自带相机；**不**触发 IBL re-bake：复用本 Pipeline 已烘焙的环境资源。
+    impl.scene.Clear();
+    impl.scene.Collect(world, impl.worldPartition);
+
+    // ---- 临时把活动 frame targets swap 成 scratch + 隔离 post chain ----
+    // RAII：构造时 swap-in，析构时 swap-out，保证任何早退/异常都恢复。
+    struct RttScope
+    {
+        Pipeline::Impl& impl;
+        // 保存的 primary 状态
+        std::uint32_t savedHdrW, savedHdrH, savedPendingW, savedPendingH;
+        bool savedHdrDirty, savedHdrRO, savedDepthRO;
+        PostProcessChain* savedChain;
+        RttScope(Pipeline::Impl& i, ::Orange::Rhi::RHITexture* tgt,
+                 std::uint32_t w, std::uint32_t h) : impl(i)
+        {
+            std::swap(impl.hdrColor, impl.rttHdr);
+            std::swap(impl.sceneDepth, impl.rttDepth);
+            std::swap(impl.passthroughSet, impl.rttPassthroughSet);
+            savedHdrW = impl.hdrWidth; savedHdrH = impl.hdrHeight;
+            savedPendingW = impl.pendingWidth; savedPendingH = impl.pendingHeight;
+            savedHdrDirty = impl.hdrDirty;
+            savedHdrRO = impl.hdrLayoutShaderReadOnly;
+            savedDepthRO = impl.sceneDepthLayoutShaderReadOnly;
+            savedChain = impl.postProcessChain;
+            impl.hdrWidth = w; impl.hdrHeight = h;
+            impl.pendingWidth = w; impl.pendingHeight = h;
+            impl.hdrDirty = false;                 // scratch 已是目标尺寸，EnsureHdrTarget 缓存命中不重建
+            impl.hdrLayoutShaderReadOnly = false;  // scratch 本帧首次写
+            impl.sceneDepthLayoutShaderReadOnly = false;
+            impl.postProcessChain = nullptr;       // 一处挡掉全部 post pass
+            impl.rttExternalTarget = tgt;
+        }
+        ~RttScope()
+        {
+            impl.rttExternalTarget = nullptr;
+            impl.postProcessChain = savedChain;
+            impl.sceneDepthLayoutShaderReadOnly = savedDepthRO;
+            impl.hdrLayoutShaderReadOnly = savedHdrRO;
+            impl.hdrDirty = savedHdrDirty;
+            impl.pendingWidth = savedPendingW; impl.pendingHeight = savedPendingH;
+            impl.hdrWidth = savedHdrW; impl.hdrHeight = savedHdrH;
+            std::swap(impl.passthroughSet, impl.rttPassthroughSet);
+            std::swap(impl.sceneDepth, impl.rttDepth);
+            std::swap(impl.hdrColor, impl.rttHdr);
+        }
+    } scope(impl, target, width, height);
+
+    impl.RenderOffscreen(world);  // 渲到 scratch hdr → passthrough → 外部 target
+    return Result<void, ResultCode>{};
+}
+
 void Pipeline::Shutdown()
 {
     if (!mpImpl)
@@ -1616,22 +1688,30 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
 bool Pipeline::Impl::RecordPassthroughToViewport()
 {
     auto& impl = *this;
-    if (!impl.viewportColor)
+    // 最终目标解析：RenderToTexture 进行中渲外部 target，否则渲 primary
+    // viewportColor。尺寸 / fromLayout 随之分流（GAP-2026-05-24 G1）。
+    Orange::Rhi::RHITexture* finalRt =
+        impl.rttExternalTarget ? impl.rttExternalTarget : impl.viewportColor.get();
+    if (finalRt == nullptr)
     {
         return false;
     }
+    const std::uint32_t fw = impl.rttExternalTarget ? impl.rttCachedWidth  : impl.viewportWidth;
+    const std::uint32_t fh = impl.rttExternalTarget ? impl.rttCachedHeight : impl.viewportHeight;
     auto& cmd = *impl.offscreenCmd;
 
     // viewportColor 初始或上一帧末翻到 ShaderReadOnly；现在写回 ColorAttachment。
     // 首帧 viewportLayoutShaderReadOnly == false（Undefined），与 hdrColor 同模式。
-    const auto fromLayout = impl.viewportLayoutShaderReadOnly
-        ? Orange::Rhi::TextureLayout::ShaderReadOnly
-        : Orange::Rhi::TextureLayout::Undefined;
-    cmd.TransitionTexture(*impl.viewportColor, fromLayout,
+    // 外部 target 一次性渲染，丢弃旧内容（Undefined）；viewport 走跨帧 layout 跟踪。
+    const auto fromLayout = impl.rttExternalTarget
+        ? Orange::Rhi::TextureLayout::Undefined
+        : (impl.viewportLayoutShaderReadOnly ? Orange::Rhi::TextureLayout::ShaderReadOnly
+                                             : Orange::Rhi::TextureLayout::Undefined);
+    cmd.TransitionTexture(*finalRt, fromLayout,
                           Orange::Rhi::TextureLayout::ColorAttachment);
 
     Orange::Rhi::ColorAttachment att{};
-    att.mpView           = impl.viewportColor->GetDefaultView();
+    att.mpView           = finalRt->GetDefaultView();
     att.mLoadOp          = Orange::Rhi::LoadOp::Clear;
     att.mStoreOp         = Orange::Rhi::StoreOp::Store;
     att.mClear.mColor[0] = 0.0f;
@@ -1640,20 +1720,20 @@ bool Pipeline::Impl::RecordPassthroughToViewport()
     att.mClear.mColor[3] = 1.0f;
 
     Orange::Rhi::RenderingDesc rd{};
-    rd.mRenderArea.mWidth  = impl.viewportWidth;
-    rd.mRenderArea.mHeight = impl.viewportHeight;
+    rd.mRenderArea.mWidth  = fw;
+    rd.mRenderArea.mHeight = fh;
     rd.mColorAttachments.push_back(att);
     cmd.BeginRendering(rd);
 
     Orange::Rhi::RHIViewport vp{};
-    vp.mWidth    = static_cast<float>(impl.viewportWidth);
-    vp.mHeight   = static_cast<float>(impl.viewportHeight);
+    vp.mWidth    = static_cast<float>(fw);
+    vp.mHeight   = static_cast<float>(fh);
     vp.mMinDepth = 0.0f;
     vp.mMaxDepth = 1.0f;
     cmd.SetViewport(vp);
     Orange::Rhi::RHIScissor sc{};
-    sc.mWidth  = impl.viewportWidth;
-    sc.mHeight = impl.viewportHeight;
+    sc.mWidth  = fw;
+    sc.mHeight = fh;
     cmd.SetScissor(sc);
 
     // bloom 接 offscreen（编辑器视口 WYSIWYG）：活动 BloomPass + bloom mip 就绪时
@@ -1702,10 +1782,13 @@ bool Pipeline::Impl::RecordPassthroughToViewport()
     }
     cmd.EndRendering();
 
-    cmd.TransitionTexture(*impl.viewportColor,
-                          Orange::Rhi::TextureLayout::ColorAttachment,
+    cmd.TransitionTexture(*finalRt, Orange::Rhi::TextureLayout::ColorAttachment,
                           Orange::Rhi::TextureLayout::ShaderReadOnly);
-    impl.viewportLayoutShaderReadOnly = true;
+    // 外部 target override 时不碰 viewport 的跨帧 layout 状态。
+    if (impl.rttExternalTarget == nullptr)
+    {
+        impl.viewportLayoutShaderReadOnly = true;
+    }
     return true;
 }
 
@@ -2377,6 +2460,14 @@ const GodRaysPass* Pipeline::Impl::FindActiveGodRaysPass() const noexcept
 void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
 {
     postComponentActive = false;
+    // RenderToTexture（缩略图 S1）进行中：强制无后处理。postComponentActive
+    // 留 false + 上游已把 postProcessChain 置 nullptr —— 两条 FindActive* 路径
+    // （组件 / chain）一并挡掉，即便缩略图 world 自带 PostProcessComponent
+    // （典型 scene snapshot）也不跑 SSAO/SSR/Bloom/Tonemap 等（GAP-2026-05-24 G1）。
+    if (rttExternalTarget != nullptr)
+    {
+        return;
+    }
     auto& reg  = world.Registry();
     auto  view = reg.view<PostProcessComponent>();
     if (view.empty())

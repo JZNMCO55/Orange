@@ -1481,6 +1481,12 @@ struct Pipeline::Impl
     // 创建 / 重建 viewportColor（离屏 final output）。
     bool EnsureViewportTarget()
     {
+        // RenderToTexture 进行中：最终输出落到外部 target，不建/不写 primary
+        // viewportColor（避免被 scratch 尺寸顶掉缓存）。
+        if (rttExternalTarget != nullptr)
+        {
+            return true;
+        }
         if (!offscreenMode)
         {
             return false;
@@ -1525,6 +1531,68 @@ struct Pipeline::Impl
     // viewportColor 当前 build 出来的实际尺寸。
     std::uint32_t viewportWidth{0};
     std::uint32_t viewportHeight{0};
+
+    // ---- RenderToTexture scratch（GAP-2026-05-24 G1）----------------------
+    // 独立于 viewport 的 hdr/depth/passthroughSet，按目标尺寸 lazy 建 + 缓存，
+    // 渲染时临时 swap 进活动槽位（hdrColor/sceneDepth/passthroughSet），渲完
+    // swap 回——使 RenderToTexture 任意尺寸不破坏 viewport 缓存。
+    std::unique_ptr<Orange::Rhi::RHITexture>       rttHdr;
+    std::unique_ptr<Orange::Rhi::RHITexture>       rttDepth;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet> rttPassthroughSet;
+    std::uint32_t                                  rttCachedWidth{0};
+    std::uint32_t                                  rttCachedHeight{0};
+    // 非 nullptr = RenderToTexture 进行中，最终 passthrough 渲它而非 viewportColor。
+    Orange::Rhi::RHITexture*                       rttExternalTarget{nullptr};
+
+    // 按 (w,h) 准备 rttHdr/rttDepth/rttPassthroughSet（尺寸命中则复用）。
+    bool EnsureRttScratch(std::uint32_t w, std::uint32_t h)
+    {
+        if (rttHdr && rttDepth && rttPassthroughSet
+            && rttCachedWidth == w && rttCachedHeight == h)
+        {
+            return true;
+        }
+        if (renderDevice == nullptr || !hdrSampler || w == 0 || h == 0)
+        {
+            return false;
+        }
+        renderDevice->WaitIdle();
+        auto& rhi = renderDevice->GetRhiDevice();
+
+        Orange::Rhi::TextureDesc t{};
+        t.mWidth  = w;
+        t.mHeight = h;
+        t.mFormat = PipelineDetail::kHdrColorFormat;
+        t.mUsage  = Orange::Rhi::TextureUsage::RenderTarget
+                  | Orange::Rhi::TextureUsage::Sampled
+                  | Orange::Rhi::TextureUsage::TransferSrc;
+        rttHdr = rhi.CreateTexture(t);
+        if (!rttHdr) { ORANGE_LOG_ERROR("Pipeline::EnsureRttScratch: CreateTexture(HDR) 失败 ({}x{})", w, h); return false; }
+
+        Orange::Rhi::TextureDesc dt{};
+        dt.mWidth  = w;
+        dt.mHeight = h;
+        dt.mFormat = Orange::Rhi::TextureFormat::D32Float;
+        dt.mUsage  = Orange::Rhi::TextureUsage::DepthStencil | Orange::Rhi::TextureUsage::Sampled;
+        rttDepth = rhi.CreateTexture(dt);
+        if (!rttDepth) { ORANGE_LOG_ERROR("Pipeline::EnsureRttScratch: CreateTexture(depth) 失败 ({}x{})", w, h); return false; }
+
+        if (!rttPassthroughSet)
+        {
+            rttPassthroughSet = rhi.AllocateDescriptorSet(*passthroughPool, *passthroughLayout);
+            if (!rttPassthroughSet) { ORANGE_LOG_ERROR("Pipeline::EnsureRttScratch: AllocateDescriptorSet 失败"); return false; }
+        }
+        Orange::Rhi::DescriptorWrite wr{};
+        wr.mBinding             = 0;
+        wr.mType                = Orange::Rhi::DescriptorType::CombinedImageSampler;
+        wr.mImageInfo.mpTexture = rttHdr.get();
+        wr.mImageInfo.mpSampler = hdrSampler.get();
+        rhi.UpdateDescriptorSet(*rttPassthroughSet, &wr, 1);
+
+        rttCachedWidth  = w;
+        rttCachedHeight = h;
+        return true;
+    }
 };
 
 }  // namespace Orange::Engine::Render
