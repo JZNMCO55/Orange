@@ -2938,7 +2938,7 @@ facet 2（指示器 + 可保存）后，"改了材质没存就关窗"仍会静�
 - **发现方**：`docs/editor-hierarchy-gap-vs-lumix.md` Gap 表（报告点名"**最大空白**"）+ 本轮层级编辑能力补齐 session 收口时识别——Copy/Paste/Cut/Duplicate/delete-undo 全部落地后，**唯一剩下的层级结构空白就是 prefab**
 - **发现日期**：2026-05-30
 - **一句话定性**：引擎 / 编辑器**无 prefab 资产概念**——能复制子树（`SaveSubtreeToString`/`LoadFromString` 已落地，Duplicate/Copy-Paste 在用）但复制出来是**一次性脱钩拷贝**，没有"可复用模板 + 多实例 + 改模板批量同步"的 prefab 语义。全仓 grep `prefab` 场景层零命中；`HierarchyComponent` 是裸数据，无 prefab loader / 实例化路径 / 实例↔资产双向 map
-- **状态**：**EntityGuid 身份层 ✅ 2026-05-30 落地（本 session，ADR-013）；prefab 上层（资产化 / 实例化 / override）待后续 session**
+- **状态**：**EntityGuid 身份层 ✅（ADR-013）+ 引擎层 MVP ✅ 2026-05-30 落地（PrefabAsset + InstantiatePrefab + 链接组件，OE `4293c05`）；剩 override / 嵌套 / 编辑器消费**
 
 ### EntityGuid 身份层落地记录（2026-05-30，本 session）
 
@@ -2950,7 +2950,18 @@ facet 2（指示器 + 可保存）后，"改了材质没存就关窗"仍会静�
 - 序列化：scene schema `scene/world` 1.10 → **1.11**（"Guid" optional 段，向后兼容）。
 - 测试：`tests/scene/EntityGuidTest.cpp`（生成/往返/幂等/Reassign/序列化往返 + clone 身份分离），ctest 全过。
 
-**剩余（prefab 上层，后续 OrangeEngine session）**：`.prefab.json` 资产格式 + GUID 锚 / 实例化拷贝 + 链接 / override 颗粒度（先 MVP 无 override）/ 编辑器 prefab browser + 拖入实例化 + 蓝条；接线 Ensure→Save + Reassign→Duplicate 一并做。
+### 引擎层 MVP 落地记录（2026-05-30，本 session）
+
+prefab 引擎层 MVP（整体实例化 + **无 override** + **无嵌套** + 仅引擎层，OE `4293c05`）落地。核心 = "subtree clone + 稳定 ID + 资产化"，复用已就绪的 `SaveSubtreeToString`/`LoadFromString`（remap 已测）+ EntityGuid（ADR-013），**零新序列化核心**：
+
+- **PrefabAsset + PrefabLoader**：`.prefab.json` 独立 schema **`prefab/asset` 1.0**（不复用 scene/world，让 prefab 外壳与场景各自冻结演进）；**形态 B** —— template 存为 JSON 字符串字段（= `SaveSubtreeToString` 原文），PrefabAsset 持 `mTemplateBlob`，实例化 = `Get→TemplateBlob→LoadFromString` 零二次解析。JSON 走 `Core::Serialization`（header isolation 合规）。
+- **`InstantiatePrefab(World, registry, handle, options)`**（`scene/PrefabInstantiation.h`）：`Get`→`LoadFromString`→**`ReassignEntityGuids(created)`**（关键：模板 blob 保留 GuidComponent，不换则克隆体与模板共享 GUID → 同 world 实例化两次碰撞）→ 找实例根（parent remap 成 Invalid 的）→ 给每个 created 挂链接组件。**MVP 仅支持 parent=Invalid（作为新根）**：挂任意 parent 是 hierarchy 图操作，引擎刻意不做（HierarchyComponent.h 纪律），留编辑器 `EditorHierarchy::ReparentTo`（非 Invalid → 返回 InvalidArgument）。
+- **`PrefabInstanceComponent`**（链接）：`sourcePrefabPath`（存路径而非 handle —— 跨会话稳定，仿 Renderable.mesh 走 PathOf）+ `instanceId`（一次实例化一个 id）+ `isInstanceRoot`（仅根 true）；每实例实体挂、仅根标 root，为将来 override 按实例聚合留锚。`PathOf` 返回的 string_view 生存期只到下次 registry 改动 → 实现里 LoadFromString 前先拷成 std::string。
+- **scene/world schema bump 1.12 → 1.13**（PrefabInstance optional 段，minor bump 向后兼容，旧文件无该段实体不挂组件）。坏 instanceId（FromString 失败）→ Read 返回 false 整体回滚（与 Guid 同款严格）。
+- **验收**：`tests/scene/PrefabTest`（T1 资产 round-trip 形态 B 字节保真 + 坏 schema 拦截；T2 实例化结构；T3 GUID 分离实测两实例 4 实体两两互异且 ≠ 模板；T4 链接三字段；T5 链接经 `Scene::Save→Load` 保真；T6 错误路径）。**ctest 65/65 零回归**（scene 序列化哨兵经 1.12→1.13 向后兼容全绿 + config_smoke/editor_build_smoke 验新公共头可 install + find_package 消费）。
+- **⚠ 待 ADR-015（Wiki）**：prefab MVP 引入 `prefab/asset` 1.0 + scene 1.13 两处 schema（"出厂即冻结"纪律需 ADR 备案）+ 上述架构选型（形态 B / 链接组件 / GUID 角色 / parent 限制）。决策已在本条详记，ADR-015 形式化写入 Wiki 待 doc session（跨仓纯文档，ADR-010 豁免）。
+
+**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）/ 嵌套 prefab / **编辑器消费**（prefab browser + 拖入实例化 + 蓝条 + 右键 apply-revert + 挂任意 parent 接 `ReparentTo`，独立 editor session）/ Ensure→Save 主流程自动接线（非 critical path）。
 
 > 措辞修正：prefab 引擎能力 + OrangeEditor 消费**同属 OrangeEngine 单子仓**（编辑器在 `tools/OrangeEditor/`），**非** ADR-009 跨 submodule（不经 umbrella bump pointer）；分 session 仅因体量，按"引擎能力 session → 编辑器消费 session"推进。
 
