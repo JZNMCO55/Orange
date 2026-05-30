@@ -36,6 +36,24 @@ ORANGE_ENGINE_API std::size_t EnsureEntityGuids(World& world);
 ORANGE_ENGINE_API std::size_t ReassignEntityGuids(World& world,
                                                   std::span<const Entity> entities);
 
+// clone 后"身份分离"一站式入口：把一次子树 clone（SaveSubtreeToString →
+// LoadFromString）新建出来的 created 实体与源彻底解耦。做两件事：
+//
+//   1) ReassignEntityGuids(world, created) —— 给每个有 GuidComponent 的克隆体
+//      换全新 per-entity GUID（无 GuidComponent 的实体不受影响，幂等安全）。
+//   2) 重映射 PrefabInstanceComponent.instanceId —— blob 字节保真复制了源的
+//      instanceId（"哪一次实例化"的分组 key）。clone 出来的是**新的**一次实例
+//      化，必须换新 instanceId，否则会被误认为与源实例属于同一次实例化（整组
+//      选中 / 删除 / 未来 override 都会错连）。重映射保留**分组关系**：同一旧
+//      instanceId 的克隆体共享同一个新 instanceId；不同旧 instanceId 映射到
+//      不同新 instanceId（覆盖"clone 一棵含多个独立实例的子树"的情形）。
+//      sourcePrefabPath / isInstanceRoot 不动（仍指向同一源 prefab、根标记不变）。
+//
+// 返回实际换过 instanceId 的实体数（仅统计带 PrefabInstanceComponent 的）。
+// Duplicate / Copy-Paste 等消费方在 clone 完成后调用本函数即可。
+ORANGE_ENGINE_API std::size_t SeparateClonedIdentities(World& world,
+                                                       std::span<const Entity> created);
+
 }  // namespace Orange::Engine::Scene
 
 #endif  // ORANGE_ENGINE_SCENE_ENTITY_GUID_H

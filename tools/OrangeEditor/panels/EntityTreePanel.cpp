@@ -15,6 +15,7 @@
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/scene/EntityGuid.h>  // clone 后身份分离（GUID + prefab instanceId）
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/LayerComponent.h>
 #include <orange/engine/scene/NameComponent.h>
@@ -631,6 +632,13 @@ void EditorRenderLayer::DrawEntityTreePanel()
                         auto r = Orange::Engine::Scene::LoadFromString(blob, *w, lo, &created);
                         if (r.IsErr()) { return; }
                         *createdPtr = created;
+                        // 身份分离：blob 字节保真复制了源的 GuidComponent +
+                        // PrefabInstanceComponent.instanceId。Duplicate 出来的是
+                        // 全新实体 / 全新一次实例化，必须换新 per-entity GUID +
+                        // 新 instanceId，否则与源碰撞（同 world 两实体共享 GUID /
+                        // 被误认为同一次 prefab 实例化）。对无这些组件的普通实体
+                        // 无副作用，幂等安全。
+                        Orange::Engine::Scene::SeparateClonedIdentities(*w, created);
                         // 克隆根 = created 中父失效者（原父在子树外未序列化）。单根
                         // duplicate 只有一个；reparent 到原根的父 + 选中。
                         for (const auto ce : created) {
@@ -697,6 +705,10 @@ void EditorRenderLayer::DrawEntityTreePanel()
                         return;
                     }
                     *createdPtr = created;
+                    // 同 Duplicate：剪贴板 blob 也字节保真复制了 GUID + prefab
+                    // instanceId，Paste 出来的是新实体 / 新一次实例化，换新身份避
+                    // 免与剪贴板源（及之前多次 Paste 出来的副本）碰撞。
+                    Orange::Engine::Scene::SeparateClonedIdentities(*w, created);
                     for (const auto ce : created) {
                         const auto* eh = w->GetComponent<HCp>(ce);
                         if (eh == nullptr || !eh->parent.IsValid()) {
