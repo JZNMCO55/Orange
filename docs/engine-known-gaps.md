@@ -1609,6 +1609,13 @@ G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已
 - **回归门**：`tests/render/PbrSceneBlackReproTest.cpp` —— 走编辑器 `RegisterTemplatesFromDirectory` 路径 + 加载真实 `sphere.mesh` + `Pipeline::DebugReadbackPixel` 像素读回，assert PBR 中心非黑。配套新增 `Pipeline::DebugReadbackPixel`（viewportColor 加 TransferSrc）作为 PBR 像素级回归基础设施。
 - **教训**：① 编辑器材质来自 `.template.json`（`RegisterTemplatesFromDirectory`），**不是** `BuiltinMaterials::LoadPbr`——两者必须同步；② shader 需要的 descriptor set / 顶点属性必须**无条件**声明，不能依赖材质数据（textureSlots）；③ GPU 渲染回归测试必须走**真实消费方（编辑器模板）路径 + 像素 readback**，合成的 `RegisterBuiltins` 会放过这类 bug。
 - **剩余**：G3（glTF material 自动导入，Inc5）代码已成、端到端待真实 glTF 资产验；acceptance checklist + CMake VERSION bump 待 Orange-Wiki 子仓单独 session（单子仓纪律）。
+  - **2026-05-30 ✅ G3 端到端验证 + AO bug 修复**（OE `5c2c06d`，"干到十点" goal session）：把 "glTF material → `.material`" 导入链锁进 headless 端到端测试，并修一个**确定的 bug**。
+    - **AO factor bug**：`GltfImporter` 把 uMRA 的 AO 位（uMRA.z）**写死 1.0**，忽略 glTF 的 occlusionStrength（cgltf `material->occlusion_texture.scale`）。修复读 strength 填 uMRA.z，语义对齐 `pbr.frag.glsl:204` 的 `ao = clamp(uMRA.z * aoTex.r)` 乘法模型。**关键坑**：cgltf 对无 occlusionTexture 的 material zero-init（scale==0），直接读会把 AO 压全黑 → 以 `occlusion_texture.texture != nullptr` 为门，无 AO 贴图保持中性 1.0。
+    - **可测性重构**：material 解析（`ExtractGltfMaterial` + `BuildMaterialFileData`）从 `RunGltfImport`（拖 EditorHost/AudioEngine/Vulkan 太重、无法 headless）抽到 `import/GltfMaterialParse.{h,cpp}` seam；`RunGltfImport` 改调它，测试覆盖**真实 import 用的同一份逻辑**（occlusionStrength 真流到 `.material` 落盘，bug 真修到）。
+    - **测试** `tests/editor/GltfMaterialImportTest`（headless，`if(EXISTS)` 门控 Avocado fixture，干净 checkout skip）：cgltf 解析 Avocado → factor + 3 贴图 binding(0/1/2) + 无 AO 时 uMRA.z=1.0；**合成 occlusionStrength=0.5 case 独立锁 bug 修复**（不依赖 fixture 有 AO 贴图）。ctest 67/67 零回归。
+    - **emissive 不在 scope**：pbr.frag set 1 只有 binding 0-3（baseColor/normal/metalRough/AO），**无 emissive 通道**——glTF emissiveTexture/Factor 留后续独立 gap（需先在 shader 加 emissive 通道）。
+    - **顺带确认的其他 glTF 导入 gap**（留后续）：① 多 material per mesh —— `RunGltfImport` 合并 primitive 成单 MeshAsset 只取 firstMat，多材质模型丢非首材质（需引擎 sub-mesh + 多 material slot）；② tangent fallback（缺 UV/normal 落 Lengyel）无端到端验证；③ `.glb` 内嵌贴图 / data: URI 贴图不支持（`ResolveTextureSource` 返空落 default 贴图）。
+    - **视觉 dogfood**：导入 Avocado / **DamagedHelmet（有 AO 贴图）** → viewport 看 baseColor/normal 扰动/metalRough 区分/**AO 阴影区不过黑过亮（任务 A 修复最该 dogfood 的点，Avocado 无 AO 贴图验不到真实 strength 视觉）**。
 
 ---
 
