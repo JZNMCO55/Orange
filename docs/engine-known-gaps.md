@@ -2987,7 +2987,9 @@ prefab 引擎层 MVP（整体实例化 + **无 override** + **无嵌套** + 仅�
 
 **Reassign→Duplicate ✅ 已落地**（2026-05-30，OE `638cb86`）：修了一个真 bug —— Duplicate/Paste 走 SaveSubtreeToString→LoadFromString 字节保真，复制带 GuidComponent/PrefabInstanceComponent 的实体（典型 prefab 实例）会让克隆体共享原 GUID + instanceId（碰撞 → 整组选中/删除/未来 override 错连）。新增 `Scene::SeparateClonedIdentities`（ReassignEntityGuids + instanceId 旧→新重映射保留分组），EntityTreePanel Duplicate+Paste 两处接线。EntityGuidTest 3 测试坐实 bug + 验证分离。**Ensure→Save 评估后决定不做**：违反 `Scene::Save` const 契约 + autosave 定时触发会隐蔽给全量实体加 GUID 污染 world + 文件膨胀无现实消费者；留到 override 真需要时只在 prefab 实例化路径保证（已做）。
 
-**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）+ 蓝条 UI + 右键 apply-revert / 嵌套 prefab / **scene snapshot 缩略图**（ThumbKind 可平滑扩 Scene）+ 缩略图磁盘缓存 / 挂任意 parent 实例化（用户现可实例化后自己 `ReparentTo`）。
+**scene snapshot 缩略图 ✅ 已落地**（2026-05-30，OE `4450e36`）：Asset Browser `.scene.json` 从 `[S]` 文本变真实场景预览。`ThumbKind::Scene` —— `BakeSceneThumbnail`（ReadFileToString 读 `.scene.json` → LoadFromString 到常驻 scene-scratch → AABB 框相机 → RenderToTexture）；**多根清理 SceneGuard**（scene 多根，析构遍历 created 逐个 DestroySubtree，IsValid 跳已连带销毁的，防累积污染——测试断言 residentAfter=2 无残留）；scene 自带 camera 忽略用 scratch 框定 + 自带 light 生效。**至此 ThumbnailService 四类（material/prefab/mesh/scene）全闭环**。`SceneThumbnailBakeTest`，ctest 71/71 四类零回归。
+
+**剩余（后续迭代 / session）**：override（逐属性 diff vs 整体解耦，链接组件已留 instanceId 锚）+ 蓝条 UI + 右键 apply-revert / 嵌套 prefab / 缩略图磁盘缓存（跨 session 复用免重烘）/ 挂任意 parent 实例化（用户现可实例化后自己 `ReparentTo`）。
 
 > 措辞修正：prefab 引擎能力 + OrangeEditor 消费**同属 OrangeEngine 单子仓**（编辑器在 `tools/OrangeEditor/`），**非** ADR-009 跨 submodule（不经 umbrella bump pointer）；分 session 仅因体量，按"引擎能力 session → 编辑器消费 session"推进。
 
