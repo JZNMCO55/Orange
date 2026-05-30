@@ -141,6 +141,12 @@ struct Pipeline::Impl
     Material haloMaterial;
     bool     haloLoaded{false};
 
+    // Lazy-init debug-view normals material（DebugViewMode::Normals）。同 halo
+    // 模式；drawable loop 在 Normals mode 用它替换 drawable material（渲染
+    // world-normal-as-RGB）。shader = debug_normals.vert/frag.glsl。
+    Material debugNormalsMaterial;
+    bool     debugNormalsLoaded{false};
+
     // Halo sphere mesh GPU buffer（lazy upload by EnsureHaloSphereMesh
     // on first halo loop record）。所有 haloEnabled PointLight 共享这一
     // 个 unit sphere，draw 时按 light position + haloRadius 算 model
@@ -934,6 +940,25 @@ struct Pipeline::Impl
         haloMaterial = BuiltinMaterials::LoadHalo(*assets);
         haloLoaded   = true;
         return &haloMaterial;
+    }
+
+    // Lazy-init debug-view normals material（DebugViewMode::Normals）。同
+    // EnsureHaloMaterial 模式；drawable loop 在 Normals mode 调用，用它替换
+    // drawable 自身 material（渲染 world-normal-as-RGB）。assets nullptr 返回
+    // nullptr（caller 退回正常渲染）。
+    const Material* EnsureDebugNormalsMaterial()
+    {
+        if (debugNormalsLoaded)
+        {
+            return &debugNormalsMaterial;
+        }
+        if (assets == nullptr)
+        {
+            return nullptr;
+        }
+        debugNormalsMaterial = BuiltinMaterials::LoadDebugNormals(*assets);
+        debugNormalsLoaded   = true;
+        return &debugNormalsMaterial;
     }
 
     // Lazy upload halo unit sphere mesh 到 GPU buffer（与 EnsureMeshGpuCache

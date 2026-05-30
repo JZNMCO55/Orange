@@ -90,6 +90,12 @@ ORANGE_ENGINE_API Material LoadHalo(Asset::AssetRegistry& registry);
 // fallback。
 ORANGE_ENGINE_API Material LoadPbr(Asset::AssetRegistry& registry);
 
+// 加载内置 debug-view normals 模板（DebugViewMode::Normals）：把 world-space
+// normal 映射到 RGB 作可视化，无光照 / 无贴图。push constant {uMVP, uModel}
+// = 128 B（同 toon/pbr）；Pipeline 在 Normals mode 时用它替换 drawable
+// material 渲染所有 drawable。不经 RegisterBuiltins 暴露给用户（纯诊断）。
+ORANGE_ENGINE_API Material LoadDebugNormals(Asset::AssetRegistry& registry);
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
 
 #endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

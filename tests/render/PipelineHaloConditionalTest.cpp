@@ -187,6 +187,22 @@ int main()
         std::fprintf(stdout, "  [PASS] haloEnabled PointLight：count=2（halo lazy 编 + Render 不崩）\n");
     }
 
+    // ---- debug-view Normals mode：用 debug normals material 渲染所有 drawable
+    //      （world-normal-as-RGB），验证不崩 + debug pipeline 编出 -------------
+    {
+        World world;
+        AddCamera(world);
+        AddTexturedDrawable(world, meshHandle, texInst.get());
+        const std::size_t before = pipeline.TemplatePipelineCount();
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Normals);
+        pipeline.Render(world);                          // drawable 改用 debug normals material
+        // debug normals pipeline **真编出**（count +1），而非 shader 缺失跳过
+        // （后者会让 count 不变）——这是 normals debug view 真正生效的关键断言。
+        assert(pipeline.TemplatePipelineCount() == before + 1);
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);  // 复位
+        std::fprintf(stdout, "  [PASS] DebugViewMode::Normals Render 不崩 + debug pipeline 编出\n");
+    }
+
     std::fprintf(stdout, "[PipelineHaloConditionalTest] all passed\n");
     return 0;
 }

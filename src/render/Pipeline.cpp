@@ -1360,6 +1360,20 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
         {
             continue;
         }
+
+        // debug view（Normals）：用 debug normals material 替换 drawable
+        // material——渲染所有 drawable 为 world-normal-as-RGB，忽略各自 material。
+        // 其余 drawable loop 逻辑（GetOrCompilePipeline / push constant 128B /
+        // draw）自动按 debug material（pcSize=128 → {mvp,model}，无 descriptor
+        // set 1）。其他 mode（Wireframe/Unlit/Overdraw）渲染实现后续。
+        if (impl.debugViewMode == DebugViewMode::Normals)
+        {
+            if (const Material* dbg = impl.EnsureDebugNormalsMaterial())
+            {
+                mat = dbg;
+            }
+        }
+
         Orange::Rhi::RHIPipeline* rhiPipeline = impl.GetOrCompilePipeline(*mat);
         if (rhiPipeline == nullptr)
         {

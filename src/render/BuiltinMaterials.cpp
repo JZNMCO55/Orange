@@ -280,4 +280,20 @@ Material LoadPbr(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/pbr.frag.spv");
 }
 
+Material LoadDebugNormals(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "debug_normals";
+    // push constant {uMVP, uModel} = 128 B（drawable loop 的 pcSize>=128 分支
+    // 喂 mvp+model）。无 textureSlots / 不用 descriptor set 1；usesTangentVertex
+    // 默认 false（debug normals 用 vertex normal，不用 tangent）。
+    desc.uniforms = {
+        {"uMVP",   MaterialUniformType::Mat4},
+        {"uModel", MaterialUniformType::Mat4},
+    };
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/debug_normals.vert.spv",
+                         "shaders/orange_engine/debug_normals.frag.spv");
+}
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
