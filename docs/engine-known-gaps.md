@@ -2919,9 +2919,23 @@ facet 2（指示器 + 可保存）后，"改了材质没存就关窗"仍会静�
 - **发现方**：`docs/editor-hierarchy-gap-vs-lumix.md` Gap 表（报告点名"**最大空白**"）+ 本轮层级编辑能力补齐 session 收口时识别——Copy/Paste/Cut/Duplicate/delete-undo 全部落地后，**唯一剩下的层级结构空白就是 prefab**
 - **发现日期**：2026-05-30
 - **一句话定性**：引擎 / 编辑器**无 prefab 资产概念**——能复制子树（`SaveSubtreeToString`/`LoadFromString` 已落地，Duplicate/Copy-Paste 在用）但复制出来是**一次性脱钩拷贝**，没有"可复用模板 + 多实例 + 改模板批量同步"的 prefab 语义。全仓 grep `prefab` 场景层零命中；`HierarchyComponent` 是裸数据，无 prefab loader / 实例化路径 / 实例↔资产双向 map
-- **状态**：**仅登记，未实现 + 跨仓跨 session**（引擎能力 → umbrella bump → 编辑器消费，三 session 分离，ADR-009 纪律）
+- **状态**：**EntityGuid 身份层 ✅ 2026-05-30 落地（本 session，ADR-013）；prefab 上层（资产化 / 实例化 / override）待后续 session**
 
-### 为什么不在本 session 做（跨仓边界）
+### EntityGuid 身份层落地记录（2026-05-30，本 session）
+
+按 ADR-013，prefab 的硬前置"稳定 EntityGuid"已落地为可独立验收的 core 基建（纯新增能力，刻意**不接线主流程**，scene 序列化测试零回归）：
+
+- `Core::Guid`（128-bit，`include/orange/engine/core/Guid.h` + `src/core/Guid.cpp`）：随机生成 + 32-hex 字符串往返。
+- `Scene::GuidComponent`（`include/orange/engine/scene/GuidComponent.h`）：挂稳定身份，走现有 optional component 序列化机制。
+- `Scene::EnsureEntityGuids` / `ReassignEntityGuids`（`include/orange/engine/scene/EntityGuid.h` + `src/scene/EntityGuid.cpp`）：惰性分配（幂等）/ clone 后换新。
+- 序列化：scene schema `scene/world` 1.10 → **1.11**（"Guid" optional 段，向后兼容）。
+- 测试：`tests/scene/EntityGuidTest.cpp`（生成/往返/幂等/Reassign/序列化往返 + clone 身份分离），ctest 全过。
+
+**剩余（prefab 上层，后续 OrangeEngine session）**：`.prefab.json` 资产格式 + GUID 锚 / 实例化拷贝 + 链接 / override 颗粒度（先 MVP 无 override）/ 编辑器 prefab browser + 拖入实例化 + 蓝条；接线 Ensure→Save + Reassign→Duplicate 一并做。
+
+> 措辞修正：prefab 引擎能力 + OrangeEditor 消费**同属 OrangeEngine 单子仓**（编辑器在 `tools/OrangeEditor/`），**非** ADR-009 跨 submodule（不经 umbrella bump pointer）；分 session 仅因体量，按"引擎能力 session → 编辑器消费 session"推进。
+
+### 为什么 prefab 上层仍需独立 session（设计背景）
 
 prefab 的**链接式实例**（编辑模板 → 所有实例更新，Unity 蓝条 / Lumix `.fab` + PrefabSystem）依赖一个**引擎层新概念：稳定 EntityGUID**——实例与资产、override 与基准都靠跨会话稳定的 ID 对应。当前持久 ID 是序列化期 `persistentId`（每次 Save 重新分配的 remap key，见 `SceneSerialization`），**不是**跨场景/跨会话恒定的 entity 身份。引入 EntityGUID 触及：
 

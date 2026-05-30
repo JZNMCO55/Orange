@@ -28,6 +28,7 @@
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
+#include "orange/engine/scene/GuidComponent.h"
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/LayerComponent.h"
 #include "orange/engine/scene/NameComponent.h"
@@ -259,6 +260,50 @@ bool ReadName(const JsonReader& reader,
         return false;
     }
     ctx.world.AddComponent(entity, n);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// GuidComponent
+//
+// 稳定实体身份（ADR-013）。序列化为单个 32-hex 字符串字段 "value"，走对象
+// 形态便于将来扩字段。FromString 失败（坏格式）视为数据坏 → Read 返回 false。
+// ---------------------------------------------------------------------------
+
+bool HasGuid(const World& world, Entity entity)
+{
+    return world.HasComponent<GuidComponent>(entity);
+}
+
+void WriteGuid(JsonWriter& writer,
+               std::string_view componentPath,
+               Entity entity,
+               const SaveContext& ctx)
+{
+    const auto* g = ctx.world.GetComponent<GuidComponent>(entity);
+    if (g == nullptr)
+    {
+        return;
+    }
+    writer.WriteString(Join(componentPath, "value"), g->guid.ToString());
+}
+
+bool ReadGuid(const JsonReader& reader,
+              std::string_view componentPath,
+              Entity entity,
+              const LoadContext& ctx)
+{
+    std::string text;
+    if (!reader.ReadString(Join(componentPath, "value"), text))
+    {
+        return false;
+    }
+    GuidComponent g;
+    if (!Core::Guid::FromString(text, g.guid))
+    {
+        return false;
+    }
+    ctx.world.AddComponent(entity, g);
     return true;
 }
 
@@ -1719,6 +1764,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Transform",        ComponentKind::PureData,         &HasTransform,        &WriteTransform,        &ReadTransform},
         {"Hierarchy",        ComponentKind::PureData,         &HasHierarchy,        &WriteHierarchy,        &ReadHierarchy},
         {"Name",             ComponentKind::PureData,         &HasName,             &WriteName,             &ReadName},
+        {"Guid",             ComponentKind::PureData,         &HasGuid,             &WriteGuid,             &ReadGuid},
         {"Layer",            ComponentKind::PureData,         &HasLayer,            &WriteLayer,            &ReadLayer},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},

@@ -69,9 +69,12 @@ namespace
 // 旧 1.8 文件无这些字段时保留默认值——lens 默认关，观感不变）。
 // 1.9 → 1.10：PostProcessComponent 新增锐化字段（sharpenEnabled / sharpenStrength；
 // 同款 optional，旧 1.9 文件无这些字段时保留默认值——sharpen 默认关，观感不变）。
+// 1.10 → 1.11：新增 GuidComponent（稳定实体身份，prefab 地基，ADR-013；同款
+// optional component 路径，旧 1.10 文件无 "Guid" 段时实体不挂 GuidComponent，
+// 由 Scene::EnsureEntityGuids 在需要稳定身份时惰性补全）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 10};
+    static const SchemaVersion kVersion{"scene/world", 1, 11};
     return kVersion;
 }
 

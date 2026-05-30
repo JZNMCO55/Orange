@@ -53,6 +53,7 @@ add_library(orange_engine STATIC
 
     # Core：Serialization + Config
     src/core/Config.cpp
+    src/core/Guid.cpp
     src/core/SchemaVersion.cpp
     src/core/Serialization.cpp
 
@@ -84,6 +85,7 @@ add_library(orange_engine STATIC
     src/scene/World.cpp
     src/scene/SceneSerialization.cpp
     src/scene/ComponentSerializers.cpp
+    src/scene/EntityGuid.cpp
     src/scene/WorldPartition.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
