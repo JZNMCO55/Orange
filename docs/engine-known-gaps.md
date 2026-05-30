@@ -3036,7 +3036,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - **剩余 mode 渲染实现**（Render 路径按 `debugViewMode` 切换，**复用 Normals 的"替换 drawable material"模式**——最薄套路已验证）：
   - **Unlit / Overdraw**：同 Normals 套路（`debug_*.vert/frag.glsl` + CMake 编 + `BuiltinMaterials::LoadDebug*` + Pipeline `EnsureDebug*Material` + drawable loop 分支）。Unlit = 直出 base color；Overdraw = 加性 blend 计数热图。
   - **Wireframe**：material template pipeline 的 `polygonMode=LINE` 变体（**需 SDK device feature** fillModeNonSolid，前置 SDK reinstall）。
-- **编辑器**：viewport toolbar debug-view 切换 UI（调 `Pipeline::SetDebugViewMode`）+ dogfood（debug 视觉）。
+- **编辑器** ✅ **viewport combo Lit/Normals 已接**：ScenePanel toolbar 把原 disabled "Shading" 占位 combo 替换为 debug-view combo（session-only file-static，每帧 push `Pipeline::SetDebugViewMode`）；Wireframe/Unlit/Overdraw 待对应 mode 渲染实现后加 combo item。**Normals viewport 视觉待 dogfood**。
 - **G-buffer 通道可视化**：已被既有离屏 RT（`FEATURE-2026-05-07`）+ `VulkanInterop::GetVulkanImageView` 覆盖，按需接。
 
 ### 关联

@@ -19,6 +19,7 @@
 #include "../schema/ComponentSchemaRegistry.h"
 
 #include <orange/engine/render/BuiltinPostProcessChain.h>
+#include <orange/engine/render/Pipeline.h>  // DebugViewMode
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/DebugDrawScene.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -41,6 +42,15 @@
 //   * Grid/Sky 默认开（地面参考线 + cubemap 未烘焙时 fallback clear color 不黑屏）
 //   * Debug Draw 默认关（opt-in 调试：原点坐标轴 + selected sphere）
 //   * Colliders 默认开（碰撞盒可视化是 collider 工作流关键反馈，开销极低）
+
+// debug render views 的 viewport 切换状态（session-only，诊断功能无需持久化）：
+// 0=Lit（正常渲染）/ 1=Normals（world-normal-as-RGB）。toolbar combo 写它，
+// DrawScenePanel 每帧 push 给 Pipeline::SetDebugViewMode。Wireframe/Unlit/
+// Overdraw 后续接入（见 GAP-2026-05-30-debug-render-views-engine-side）。
+namespace
+{
+int sViewportDebugViewMode = 0;
+}  // namespace
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -143,17 +153,20 @@ void EditorRenderLayer::DrawScenePanel()
 
     ImGui::SameLine();
     {
-        ImGui::BeginDisabled();
-        const char* kShadingModes[] = {"Shaded"};
-        int curShading = 0;
-        ImGui::SetNextItemWidth(comboItemWidth({"Shaded", "Wireframe", "Shaded+Wireframe"}));
-        ImGui::Combo("##Shading", &curShading, kShadingModes, IM_ARRAYSIZE(kShadingModes));
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        // 渲染调试视图（debug render views）：Lit（正常）+ Normals（world-normal
+        // as-RGB）已实现，选中即调 Pipeline::SetDebugViewMode（下方每帧 push）。
+        // Wireframe（需 OrangeRender device feature，SDK reinstall）/ Unlit /
+        // Overdraw 后续接入（GAP-2026-05-30-debug-render-views-engine-side）。
+        const char* kDebugViews[] = {"Lit", "Normals"};
+        ImGui::SetNextItemWidth(comboItemWidth({"Lit", "Normals", "Wireframe"}));
+        ImGui::Combo("##DebugView", &sViewportDebugViewMode, kDebugViews,
+                     IM_ARRAYSIZE(kDebugViews));
+        if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Shading (Shaded / Wireframe / Shaded+Wireframe) 未实现\n"
-                              "依赖 OrangeRender wireframe pass —— 按 engine-known-gaps\n"
-                              "工作流推到 OrangeRender incoming_feature 单独 session");
+            ImGui::SetTooltip("渲染调试视图\n"
+                              "  Lit     —— 正常 PBR / forward 渲染\n"
+                              "  Normals —— world-space normal 映射到 RGB（诊断法线朝向）\n"
+                              "Wireframe / Unlit / Overdraw 后续接入");
         }
     }
 
@@ -213,6 +226,11 @@ void EditorRenderLayer::DrawScenePanel()
             mpEditorGridProvider->SetEnabled(mHost.settings.viewportGridEnabled);
         }
         mpScenePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
+        // debug-view mode（toolbar combo）每帧 push。0=Lit / 1=Normals。
+        mpScenePipeline->SetDebugViewMode(
+            sViewportDebugViewMode == 1
+                ? Orange::Engine::Render::DebugViewMode::Normals
+                : Orange::Engine::Render::DebugViewMode::Lit);
         // v1.3.1 Render Settings 面板编辑后下一帧立即生效 —— mShadowConfig 是
         // panel UI 直写字段，每帧 push（by-value 32 bytes 拷贝到 mpImpl，开销
         // 可忽略）。mapResolution 变化时 Pipeline EnsureShadowMap 下帧自重建
