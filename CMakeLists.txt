@@ -73,6 +73,7 @@ add_library(orange_engine STATIC
     src/asset/AssetRegistry.cpp
     src/asset/MeshAsset.cpp
     src/asset/MeshLoader.cpp
+    src/asset/PrefabLoader.cpp
     src/asset/SpirvDiskLoader.cpp
     src/asset/TextureLoader.cpp
     src/asset/ShaderLoader.cpp
@@ -86,6 +87,7 @@ add_library(orange_engine STATIC
     src/scene/SceneSerialization.cpp
     src/scene/ComponentSerializers.cpp
     src/scene/EntityGuid.cpp
+    src/scene/PrefabInstantiation.cpp
     src/scene/WorldPartition.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口

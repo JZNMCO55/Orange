@@ -75,9 +75,13 @@ namespace
 // 1.11 → 1.12：HierarchyComponent 新增 sortIndex（根节点之间的持久排序，ADR-014；
 // 旧 1.11 文件无 "sortIndex" 字段时默认 0 = 退化到 entity id 序，与现状一致；非根
 // 节点忽略该字段，顺序仍由兄弟链决定）。
+// 1.12 → 1.13：新增 PrefabInstanceComponent（prefab 实例链接组件，把实例化产物
+// 绑回源 prefab 资源；同款 optional component 路径，旧 1.12 文件无 "PrefabInstance"
+// 段时实体不挂该组件，行为不变）。prefab 资源本身是独立 schema namespace
+// "prefab/asset" 1.0，不复用本版本号。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 12};
+    static const SchemaVersion kVersion{"scene/world", 1, 13};
     return kVersion;
 }
 

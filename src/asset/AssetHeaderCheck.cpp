@@ -8,6 +8,8 @@
 #include "orange/engine/asset/IAssetLoader.h"
 #include "orange/engine/asset/MeshAsset.h"
 #include "orange/engine/asset/MeshLoader.h"
+#include "orange/engine/asset/PrefabAsset.h"
+#include "orange/engine/asset/PrefabLoader.h"
 #include "orange/engine/asset/ShaderAsset.h"
 #include "orange/engine/asset/ShaderLoader.h"
 #include "orange/engine/asset/TextureAsset.h"

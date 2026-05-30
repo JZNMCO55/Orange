@@ -32,6 +32,7 @@
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/LayerComponent.h"
 #include "orange/engine/scene/NameComponent.h"
+#include "orange/engine/scene/PrefabInstanceComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 
@@ -315,6 +316,66 @@ bool ReadGuid(const JsonReader& reader,
         return false;
     }
     ctx.world.AddComponent(entity, g);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// PrefabInstanceComponent
+//
+// prefab 实例链接组件（实例化产物绑回源 prefab 资源）。序列化为对象形态，
+// 三个字段：
+//   * sourcePrefabPath —— 字符串，源 prefab 资源路径（跨会话稳定 key）。
+//   * instanceId       —— 32-hex 字符串，标识"哪一次实例化"。坏格式 → Read
+//     返回 false（数据坏，整体回滚 Load），与 Guid 同款严格。
+//   * isInstanceRoot   —— bool，仅实例根 true。
+// 三字段全为必填——本组件只由 InstantiatePrefab 程序化挂载，落盘时必然写齐，
+// 不需要 optional 兜底。
+// ---------------------------------------------------------------------------
+
+bool HasPrefabInstance(const World& world, Entity entity)
+{
+    return world.HasComponent<PrefabInstanceComponent>(entity);
+}
+
+void WritePrefabInstance(JsonWriter& writer,
+                         std::string_view componentPath,
+                         Entity entity,
+                         const SaveContext& ctx)
+{
+    const auto* p = ctx.world.GetComponent<PrefabInstanceComponent>(entity);
+    if (p == nullptr)
+    {
+        return;
+    }
+    writer.WriteString(Join(componentPath, "sourcePrefabPath"), p->sourcePrefabPath);
+    writer.WriteString(Join(componentPath, "instanceId"), p->instanceId.ToString());
+    writer.WriteBool(Join(componentPath, "isInstanceRoot"), p->isInstanceRoot);
+}
+
+bool ReadPrefabInstance(const JsonReader& reader,
+                        std::string_view componentPath,
+                        Entity entity,
+                        const LoadContext& ctx)
+{
+    PrefabInstanceComponent p;
+    if (!reader.ReadString(Join(componentPath, "sourcePrefabPath"), p.sourcePrefabPath))
+    {
+        return false;
+    }
+    std::string idText;
+    if (!reader.ReadString(Join(componentPath, "instanceId"), idText))
+    {
+        return false;
+    }
+    if (!Core::Guid::FromString(idText, p.instanceId))
+    {
+        return false;
+    }
+    if (!reader.ReadBool(Join(componentPath, "isInstanceRoot"), p.isInstanceRoot))
+    {
+        return false;
+    }
+    ctx.world.AddComponent(entity, std::move(p));
     return true;
 }
 
@@ -1776,6 +1837,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"Hierarchy",        ComponentKind::PureData,         &HasHierarchy,        &WriteHierarchy,        &ReadHierarchy},
         {"Name",             ComponentKind::PureData,         &HasName,             &WriteName,             &ReadName},
         {"Guid",             ComponentKind::PureData,         &HasGuid,             &WriteGuid,             &ReadGuid},
+        {"PrefabInstance",   ComponentKind::PureData,         &HasPrefabInstance,   &WritePrefabInstance,   &ReadPrefabInstance},
         {"Layer",            ComponentKind::PureData,         &HasLayer,            &WriteLayer,            &ReadLayer},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
