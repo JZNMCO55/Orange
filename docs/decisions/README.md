@@ -88,3 +88,4 @@ ADR 与 roadmap 内嵌决策的关系：**roadmap 是计划，ADR 是决策**。
 | ADR-011 | 活的项目参考文档迁入 Wiki `case-studies/<project>/reference/`（amends ADR-006 docs 分层） | accepted | 2026-05-27 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-011-reference-docs-to-wiki.md) |
 | ADR-012 | ImGui 从 PRIVATE 升为 PUBLIC consumer-facing 依赖 —— 引擎托管的消费者 debug-UI hook（`Layer::OnImGui` + `Pipeline::EnableImGui`） | accepted | 2026-05-27 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-012-imgui-public-consumer-debug-ui-hook.md) |
 | ADR-013 | 引入稳定 EntityGuid（128-bit Core::Guid + GuidComponent + 惰性 EnsureEntityGuids）作为 prefab / 跨会话实体引用的身份基建 | accepted | 2026-05-30 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-013-entity-guid.md) |
+| ADR-014 | 根节点 reorder 用 HierarchyComponent.sortIndex（方案 2）+ 右键 Move Up/Down | accepted | 2026-05-30 | [Wiki](../../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-014-root-reorder-sortindex.md) |

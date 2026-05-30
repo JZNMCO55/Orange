@@ -36,6 +36,12 @@ struct HierarchyComponent
     Engine::Entity firstChild{Engine::Entity::Invalid()};
     Engine::Entity nextSibling{Engine::Entity::Invalid()};
     Engine::Entity prevSibling{Engine::Entity::Invalid()};
+
+    // 根序：仅根节点（parent==Invalid）有意义——根不在兄弟链里，用 sortIndex
+    // 决定根之间的显示/遍历顺序（小在前；相同则退化到 entity id 序）。非根节点
+    // 忽略此字段（其顺序由兄弟链决定）。裸数据，由编辑器维护（引擎不做图操作，
+    // 见 EditorHierarchy）；详见 ADR-014。
+    int sortIndex{0};
 };
 
 }  // namespace Orange::Engine::Scene

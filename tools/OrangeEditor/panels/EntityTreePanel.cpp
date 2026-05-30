@@ -201,13 +201,12 @@ void EditorRenderLayer::DrawEntityTreePanel()
         }
     }
 
-    // 列出所有 root 实体（无 HierarchyComponent 或 parent invalid），按 entity
-    // id 稳定排序后再递归画子树。直接按 `reg.view` 的 EnTT 存储序枚举会让根的
-    // 相对位置在增删组件后帧间跳动（root 不在兄弟链里、无顺序表示）；id 序稳定
-    // 且近似创建序，先消除"根节点跳位"这个 UX 瑕疵。子节点顺序由兄弟链本身决定
-    // （DrawEntityNodeRecursive 按 firstChild→nextSibling 画），可经 DnD 重排。
-    // 真·可拖拽的**根之间**排序需持久化根序，是独立件，见 engine-known-gaps.md
-    // GAP-2026-05-29-entity-tree-root-reorder-not-supported。
+    // 列出所有 root 实体（无 HierarchyComponent 或 parent invalid），按根序
+    // （HierarchyComponent.sortIndex，ADR-014）升序递归画子树。sortIndex 相同
+    // （含旧场景全 0）退化到 entity id 序——稳定、近似创建序，与历史行为兼容。
+    // 根序可经根节点右键 "Move Up / Move Down" 调整并持久化（GAP-2026-05-29
+    // 落地）。子节点顺序由兄弟链决定（DrawEntityNodeRecursive 按 firstChild→
+    // nextSibling 画），可经 DnD 重排。
     auto& reg = mHost.scene.pWorld->Registry();
     using HC = Orange::Engine::Scene::HierarchyComponent;
     std::vector<entt::entity> roots;
@@ -218,7 +217,12 @@ void EditorRenderLayer::DrawEntityTreePanel()
         }
     }
     std::sort(roots.begin(), roots.end(),
-              [](entt::entity a, entt::entity b) {
+              [&reg](entt::entity a, entt::entity b) {
+                  const auto* ha = reg.try_get<HC>(a);
+                  const auto* hb = reg.try_get<HC>(b);
+                  const int sa = (ha != nullptr) ? ha->sortIndex : 0;
+                  const int sb = (hb != nullptr) ? hb->sortIndex : 0;
+                  if (sa != sb) { return sa < sb; }
                   return entt::to_integral(a) < entt::to_integral(b);
               });
 
@@ -1176,6 +1180,34 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         }
         if (ImGui::MenuItem("Delete", "Del")) {
             mHost.selection.pendingDelete = entity;
+        }
+        // 根节点专属：Move Up / Move Down 调整根序（HierarchyComponent.sortIndex，
+        // ADR-014）。仅根（parent==Invalid）显示——非根顺序由兄弟链 DnD 管。直接
+        // 执行（改 sortIndex 不删/加 entity，不破坏本帧 tree 迭代，下帧按新序枚举）；
+        // 边界 no-op（MoveRootRelative 返回 false）不记 Undo。
+        {
+            const auto* nodeHc = mHost.scene.pWorld->GetComponent<
+                Orange::Engine::Scene::HierarchyComponent>(entity);
+            const bool isRoot = (nodeHc == nullptr || !nodeHc->parent.IsValid());
+            if (isRoot) {
+                ImGui::Separator();
+                const auto rootMove = [&](int delta) {
+                    if (EditorHierarchy::MoveRootRelative(*mHost.scene.pWorld, entity, delta)) {
+                        Orange::Engine::World* pW = &(*mHost.scene.pWorld);
+                        const Orange::Engine::Entity capE = entity;
+                        mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                            "MoveRoot",
+                            [pW, capE, delta]() {
+                                EditorHierarchy::MoveRootRelative(*pW, capE, delta);
+                            },
+                            [pW, capE, delta]() {
+                                EditorHierarchy::MoveRootRelative(*pW, capE, -delta);
+                            }));
+                    }
+                };
+                if (ImGui::MenuItem("Move Up"))   { rootMove(-1); }
+                if (ImGui::MenuItem("Move Down")) { rootMove(+1); }
+            }
         }
         // Lock / Unlock 切换（hierarchy gap §3 P1）：锁定 = 不可 pick/tree-click
         // 选中、不可拖拽（防误编辑）；session-only，经本菜单解锁。

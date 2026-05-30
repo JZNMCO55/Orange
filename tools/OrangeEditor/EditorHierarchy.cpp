@@ -5,6 +5,10 @@
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/World.h>
 
+#include <entt/entt.hpp>
+
+#include <algorithm>
+#include <cstdint>
 #include <vector>
 
 namespace
@@ -169,6 +173,56 @@ void DestroySubtree(World& world, Entity e)
     }
     Detach(world, e);
     world.DestroyEntity(e);
+}
+
+bool MoveRootRelative(World& world, Entity root, int delta)
+{
+    const HC* rh = world.GetComponent<HC>(root);
+    if (rh == nullptr || rh->parent.IsValid() || delta == 0) { return false; }
+
+    // 收集所有根，按当前 (sortIndex, entity id) 排序——id 作为 sortIndex 相同时
+    // 的稳定 tie-break（与 EntityTreePanel 根枚举一致）。
+    struct RootEntry { Entity e; int sortIndex; std::uint32_t id; };
+    std::vector<RootEntry> roots;
+    for (auto ent : world.Registry().view<entt::entity>()) {
+        const Entity e = World::FromEntt(ent);
+        const HC*    h = world.GetComponent<HC>(e);
+        if (h == nullptr || !h->parent.IsValid()) {
+            roots.push_back({e, (h != nullptr) ? h->sortIndex : 0,
+                             static_cast<std::uint32_t>(entt::to_integral(ent))});
+        }
+    }
+    if (roots.size() < 2) { return false; }
+    std::sort(roots.begin(), roots.end(),
+              [](const RootEntry& a, const RootEntry& b) {
+                  if (a.sortIndex != b.sortIndex) { return a.sortIndex < b.sortIndex; }
+                  return a.id < b.id;
+              });
+
+    std::size_t idx = roots.size();
+    for (std::size_t i = 0; i < roots.size(); ++i) {
+        if (roots[i].e == root) { idx = i; break; }
+    }
+    if (idx == roots.size()) { return false; }
+
+    long target = static_cast<long>(idx) + delta;
+    if (target < 0) { target = 0; }
+    if (target > static_cast<long>(roots.size()) - 1) {
+        target = static_cast<long>(roots.size()) - 1;
+    }
+    if (static_cast<std::size_t>(target) == idx) { return false; }  // 已在边界
+
+    // 在排序列表里把 root 从 idx 挪到 target，再把所有根 sortIndex 规整为
+    // 0..n-1——规整确保反复 reorder 不让 sortIndex 漂移，且相邻 Move 可逆。
+    const RootEntry moved = roots[idx];
+    roots.erase(roots.begin() + static_cast<long>(idx));
+    roots.insert(roots.begin() + target, moved);
+    for (std::size_t i = 0; i < roots.size(); ++i) {
+        if (HC* h = world.GetComponent<HC>(roots[i].e)) {
+            h->sortIndex = static_cast<int>(i);
+        }
+    }
+    return true;
 }
 
 }  // namespace EditorHierarchy

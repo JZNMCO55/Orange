@@ -2661,7 +2661,7 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 - **发现方**：同上（GAP-2026-05-29-entity-tree-sibling-reorder 落地时识别的边界）
 - **发现日期**：2026-05-29
 - **一句话定性**：**根节点之间**无法拖拽重排——根不在任何兄弟链里（`parent==Invalid`，无父锚 `firstChild`），当前只能按 entity id 稳定排序展示，用户改不了顶层实体的相对顺序
-- **状态**：**未排期**（开 follow-up；子节点重排已满足绝大多数"调整顺序"需求）
+- **状态**：**✅ 2026-05-30 落地（方案 2：HierarchyComponent.sortIndex + 右键 Move Up/Down，ADR-014）**
 
 ### 缺什么 / 架构取舍
 
@@ -2671,6 +2671,16 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 3. **World 级根序 list**：`std::vector<Entity> rootOrder` 独立于组件——非 archetype 友好但根数少；要进 scene 序列化
 
 非阻塞，按"用户真的需要拖拽顶层顺序 + 要存盘"实际拉动触发。当前编辑器内 `MoveBefore/MoveAfter` 对根 target 退化为 detach-to-root（无序），UI 也只对有父子节点显示 before/after 指示线，语义诚实不骗人。
+
+### 落地记录（方案 2，2026-05-30，ADR-014）
+
+选 **方案 2（HierarchyComponent.sortIndex）**——复用 component serializer + SaveSplit 自动支持，不碰 root 语义 / 序列化顶层 / World 中立性（选型权衡见 ADR-014）：
+
+- **引擎层**：`HierarchyComponent` 加 `int sortIndex{0}`（裸数据，仅根有意义）；`ComponentSerializers` 读写 sortIndex；scene schema `scene/world` 1.11 → **1.12**（向后兼容，旧文件无 sortIndex → 默认 0 = id 序退化）。
+- **编辑器**：`EditorHierarchy::MoveRootRelative(world, root, delta)`（收集根 → 按 (sortIndex, id) 排序 → 移动 → 规整 sortIndex=0..n-1，可逆）；`EntityTreePanel` 根枚举改按 sortIndex；根节点右键 **Move Up / Move Down**（直接执行 + 边界 no-op 不记 Undo + LambdaCommand 反向 undo）。
+- **测试**：`EditorHierarchyTest` 加 `MoveRootRelative`（上移/下移/clamp/undo/非根/单根）+ sortIndex 序列化往返 + 根序保持；全套 ctest 63/63 零回归。
+- **UI 选型**：右键 Move Up/Down 而非 DnD before/after（确定性点击、dogfood 风险低，参考 Layer reorder）；**DnD 根 reorder 留后续**。
+- **遗留 dogfood**：右键 Move Up/Down 的点击手感 + Undo 视觉需编辑器实机确认（逻辑核心已 headless 覆盖）。
 
 ---
 

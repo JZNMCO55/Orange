@@ -18,15 +18,21 @@
 
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/World.h>
 
+#include <entt/entt.hpp>
+
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
 using Orange::Engine::Entity;
 using Orange::Engine::World;
 using HC = Orange::Engine::Scene::HierarchyComponent;
+namespace Scene = Orange::Engine::Scene;
 
 namespace
 {
@@ -60,6 +66,32 @@ bool IsDetachedRoot(World& world, Entity e)
     return !h->parent.IsValid()
         && !h->prevSibling.IsValid()
         && !h->nextSibling.IsValid();
+}
+
+// 收集所有根（parent==Invalid），按 (sortIndex, entity id) 排序——与
+// EditorHierarchy::MoveRootRelative / EntityTreePanel 根枚举同序（ADR-014）。
+std::vector<Entity> RootOrder(World& world)
+{
+    struct RE { Entity e; int s; std::uint32_t id; };
+    std::vector<RE> rs;
+    for (auto ent : world.Registry().view<entt::entity>())
+    {
+        const Entity e = World::FromEntt(ent);
+        const HC*    h = world.GetComponent<HC>(e);
+        if (h == nullptr || !h->parent.IsValid())
+        {
+            rs.push_back({e, (h != nullptr) ? h->sortIndex : 0,
+                          static_cast<std::uint32_t>(entt::to_integral(ent))});
+        }
+    }
+    std::sort(rs.begin(), rs.end(), [](const RE& a, const RE& b) {
+        if (a.s != b.s) { return a.s < b.s; }
+        return a.id < b.id;
+    });
+    std::vector<Entity> out;
+    out.reserve(rs.size());
+    for (const auto& r : rs) { out.push_back(r.e); }
+    return out;
 }
 
 // 造一个 root 下挂 n 个子（按传入顺序）的场景，返回 [root, child0, child1, ...]。
@@ -294,6 +326,82 @@ void TestDestroySubtree()
     std::fprintf(stdout, "  [PASS] DestroySubtree (recursive + detach from parent)\n");
 }
 
+void TestMoveRootRelative()
+{
+    // 3 个根 A,B,C（sortIndex 全默认 0 → 初始按 entity id 序 = 创建序 A,B,C）。
+    World  world;
+    Entity A = world.CreateEntity(); world.AddComponent<HC>(A, {});
+    Entity B = world.CreateEntity(); world.AddComponent<HC>(B, {});
+    Entity C = world.CreateEntity(); world.AddComponent<HC>(C, {});
+    assert(RootOrder(world) == (std::vector<Entity>{A, B, C}));
+
+    // C 上移一位 → A,C,B
+    assert(EditorHierarchy::MoveRootRelative(world, C, -1));
+    assert(RootOrder(world) == (std::vector<Entity>{A, C, B}));
+
+    // C 再上移 → C,A,B
+    assert(EditorHierarchy::MoveRootRelative(world, C, -1));
+    assert(RootOrder(world) == (std::vector<Entity>{C, A, B}));
+
+    // C 已在最前，再上移 → clamp no-op、返回 false、序不变
+    assert(!EditorHierarchy::MoveRootRelative(world, C, -1));
+    assert(RootOrder(world) == (std::vector<Entity>{C, A, B}));
+
+    // A 下移一位 → C,B,A
+    assert(EditorHierarchy::MoveRootRelative(world, A, +1));
+    assert(RootOrder(world) == (std::vector<Entity>{C, B, A}));
+
+    // undo 语义（编辑器 LambdaCommand 反向）：MoveRootRelative(A,-1) 还原 → C,A,B
+    assert(EditorHierarchy::MoveRootRelative(world, A, -1));
+    assert(RootOrder(world) == (std::vector<Entity>{C, A, B}));
+
+    // 非根不可移：把 A 挂到 C 下成非根，MoveRootRelative(A,...) → false
+    EditorHierarchy::ReparentTo(world, A, C);
+    assert(!EditorHierarchy::MoveRootRelative(world, A, -1));
+
+    // 单根：no-op、false
+    {
+        World  w2;
+        Entity only = w2.CreateEntity(); w2.AddComponent<HC>(only, {});
+        assert(!EditorHierarchy::MoveRootRelative(w2, only, -1));
+    }
+
+    std::fprintf(stdout, "  [PASS] MoveRootRelative (up/down/clamp/undo/non-root/single)\n");
+}
+
+void TestSortIndexSerializationRoundTrip()
+{
+    // reorder 后 sortIndex 必须随 HierarchyComponent 序列化往返保持（schema 1.12）。
+    World  world;
+    Entity A = world.CreateEntity(); world.AddComponent<HC>(A, {});
+    Entity B = world.CreateEntity(); world.AddComponent<HC>(B, {});
+    Entity C = world.CreateEntity(); world.AddComponent<HC>(C, {});
+    EditorHierarchy::MoveRootRelative(world, C, -1);
+    EditorHierarchy::MoveRootRelative(world, C, -1);  // 规整后 C=0, A=1, B=2
+
+    const std::vector<Entity> roots{A, B, C};
+    auto blob = Scene::SaveSubtreeToString(world, roots);
+    assert(!blob.IsErr());
+
+    World               world2;
+    std::vector<Entity> created;
+    auto rc = Scene::LoadFromString(blob.Value(), world2, {}, &created);
+    assert(!rc.IsErr());
+    assert(created.size() == 3);
+
+    // 新 world 根序按 sortIndex：第 i 个根的 sortIndex == i（0,1,2 原样保持）。
+    const auto order = RootOrder(world2);
+    assert(order.size() == 3);
+    for (std::size_t i = 0; i < order.size(); ++i)
+    {
+        const HC* h = world2.GetComponent<HC>(order[i]);
+        assert(h != nullptr);
+        assert(h->sortIndex == static_cast<int>(i));
+    }
+
+    std::fprintf(stdout, "  [PASS] sortIndex 序列化往返 + 根序保持\n");
+}
+
 }  // namespace
 
 int main()
@@ -307,6 +415,8 @@ int main()
     TestUndoRoundTrip();
     TestIsAncestorOf();
     TestDestroySubtree();
+    TestMoveRootRelative();
+    TestSortIndexSerializationRoundTrip();
     std::fprintf(stdout, "[EditorHierarchyTest] all tests passed.\n");
     return 0;
 }

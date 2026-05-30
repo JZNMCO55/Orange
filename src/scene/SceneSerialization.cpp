@@ -72,9 +72,12 @@ namespace
 // 1.10 → 1.11：新增 GuidComponent（稳定实体身份，prefab 地基，ADR-013；同款
 // optional component 路径，旧 1.10 文件无 "Guid" 段时实体不挂 GuidComponent，
 // 由 Scene::EnsureEntityGuids 在需要稳定身份时惰性补全）。
+// 1.11 → 1.12：HierarchyComponent 新增 sortIndex（根节点之间的持久排序，ADR-014；
+// 旧 1.11 文件无 "sortIndex" 字段时默认 0 = 退化到 entity id 序，与现状一致；非根
+// 节点忽略该字段，顺序仍由兄弟链决定）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 11};
+    static const SchemaVersion kVersion{"scene/world", 1, 12};
     return kVersion;
 }
 

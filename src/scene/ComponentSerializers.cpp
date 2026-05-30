@@ -170,6 +170,8 @@ void WriteHierarchy(JsonWriter& writer,
     writer.WriteInt(Join(componentPath, "firstChild"),  PersistentIdOf(h->firstChild,  ctx.entityToId));
     writer.WriteInt(Join(componentPath, "nextSibling"), PersistentIdOf(h->nextSibling, ctx.entityToId));
     writer.WriteInt(Join(componentPath, "prevSibling"), PersistentIdOf(h->prevSibling, ctx.entityToId));
+    // 根序（ADR-014）——仅根节点有意义；非根写出来读回也被忽略，无害。
+    writer.WriteInt(Join(componentPath, "sortIndex"),   h->sortIndex);
 }
 
 bool ReadHierarchy(const JsonReader& reader,
@@ -183,6 +185,7 @@ bool ReadHierarchy(const JsonReader& reader,
     std::int64_t firstChild  = kInvalidPersistentId;
     std::int64_t nextSibling = kInvalidPersistentId;
     std::int64_t prevSibling = kInvalidPersistentId;
+    std::int64_t sortIndex   = 0;  // 根序（ADR-014）；缺字段默认 0 = id 序退化
 
     // 缺字段视为 -1（无引用）；类型不匹配则抛 false。这种宽容度让"只
     // 想表达 parent 关系的旧版 scene"在 schema 升级后仍可被读出来。
@@ -214,11 +217,19 @@ bool ReadHierarchy(const JsonReader& reader,
             return false;
         }
     }
+    if (reader.Has(Join(componentPath, "sortIndex")))
+    {
+        if (!reader.ReadInt(Join(componentPath, "sortIndex"), sortIndex))
+        {
+            return false;
+        }
+    }
 
     h.parent      = EntityForPersistentId(parent,      ctx.idToEntity);
     h.firstChild  = EntityForPersistentId(firstChild,  ctx.idToEntity);
     h.nextSibling = EntityForPersistentId(nextSibling, ctx.idToEntity);
     h.prevSibling = EntityForPersistentId(prevSibling, ctx.idToEntity);
+    h.sortIndex   = static_cast<int>(sortIndex);
 
     ctx.world.AddComponent(entity, h);
     return true;
