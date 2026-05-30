@@ -271,6 +271,9 @@ Material LoadPbr(Asset::AssetRegistry& registry)
         {2, "uMetalRoughTex"},
         {3, "uAoTex"},
     };
+    // pbr.vert 消费 tangent（location 3）做切线空间法线贴图——唯一需要声明
+    // tangent vertex 属性的内置模板（其余模板 usesTangentVertex 保持默认 false）。
+    desc.usesTangentVertex = true;
 
     return BuildMaterial(registry, std::move(desc),
                          "shaders/orange_engine/pbr.vert.spv",

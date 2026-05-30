@@ -44,6 +44,13 @@ struct Material
     // 不匹配则 no-op。
     std::vector<MaterialUniformDesc>     uniforms;
     std::vector<MaterialTextureSlotDesc> textureSlots;
+
+    // 顶点是否声明 tangent 属性（location 3）。仅"消费 tangent 的 shader"
+    // （如 pbr.vert 做切线空间法线贴图）置 true——Pipeline 据此声明 vertex
+    // attribute location 3。与"是否用 descriptor set 1 贴图"是两个正交概念：
+    // 用贴图 ≠ 用 tangent（textured 用贴图但不读 tangent，不应声明 location 3，
+    // 否则触发 validation "location 3 not consumed" 警告）。
+    bool usesTangentVertex{false};
 };
 
 }  // namespace Orange::Engine::Render

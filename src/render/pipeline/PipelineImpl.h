@@ -1013,9 +1013,12 @@ struct Pipeline::Impl
         desc.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,   vsModule, "main"});
         desc.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment, fsModule, "main"});
 
-        // PBR 模板声明 location 3 (tangent)；其余模板不声明（避免 unconsumed
-        // attribute validation 警告，stride 仍 48B）。
-        PipelineDetail::FillVertexInputLayout(desc, MaterialUsesTextureSet(mat));
+        // location 3 (tangent) 仅由"消费 tangent 的 material"（mat.usesTangentVertex，
+        // 如 pbr.vert 做切线空间法线贴图）声明——与"是否用贴图 descriptor set"
+        // （MaterialUsesTextureSet，见下 set 1 判断）解耦：textured 用贴图但不读
+        // tangent，不应声明 location 3（否则触发 validation "location 3 not
+        // consumed" 警告）。stride 仍 48B，缺声明只是该 attribute 不被读取。
+        PipelineDetail::FillVertexInputLayout(desc, mat.usesTangentVertex);
 
         desc.mInputAssembly.mTopology = Orange::Rhi::PrimitiveTopology::TriangleList;
         desc.mRasterizer.mCullMode    = Orange::Rhi::CullMode::Back;

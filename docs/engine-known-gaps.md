@@ -3008,7 +3008,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - 3 个原 render 测试（`pipeline_template_cache` / `hdr_target` / `offscreen`）**无需改期望即通过**（无 PointLight → count 回到 drawable material 数）。
   - 新增 `tests/render/PipelineHaloConditionalTest.cpp` 锁两个方向：haloEnabled=false / 无 PointLight → count=1（不编）；haloEnabled PointLight → count=2（halo lazy 编 + Render 不崩，填补此前"有 PointLight halo"零 headless 覆盖）。
   - **全套 ctest 63/63 通过、30s**（修复前 59/62 + 3 个 assert 弹窗 hang 到 timeout 共 ~15min）。
-- **遗留**：(1) halo **视觉**正确性（球位置/颜色/glow）仍需 sample 16（`--halo`）GUI dogfood——headless 只验证不崩 + template 编。(2) location 3 warning（`MaterialUsesTextureSet` 耦合"用贴图 set"与"用 tangent 顶点"，textured 被误声明 tangent）**未动**，是独立小修，留后续。
+- **遗留**：(1) halo **视觉**正确性（球位置/颜色/glow）仍需 sample 16（`--halo`）GUI dogfood——headless 只验证不崩 + template 编。(2) location 3 warning **✅ 同 session 已修**：`Material` 加 `usesTangentVertex` 标志解耦"用 tangent 顶点"与"用贴图 descriptor set"，只 pbr material 置 true，`PipelineImpl` 改用 `mat.usesTangentVertex` 作 tangent 声明判据；textured 不再声明 location 3、warning 消失，pbr 仍声明（normal mapping 不破，`pbr_scene_black_repro_test` + 全套 ctest 63/63 通过）。pbr normal mapping **视觉**仍待 GUI dogfood。
 
 ### 关联
 
