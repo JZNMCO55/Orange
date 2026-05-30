@@ -157,7 +157,7 @@ void EditorRenderLayer::DrawScenePanel()
         // as-RGB）已实现，选中即调 Pipeline::SetDebugViewMode（下方每帧 push）。
         // Wireframe（需 OrangeRender device feature，SDK reinstall）/ Unlit /
         // Overdraw 后续接入（GAP-2026-05-30-debug-render-views-engine-side）。
-        const char* kDebugViews[] = {"Lit", "Normals"};
+        const char* kDebugViews[] = {"Lit", "Normals", "Unlit"};
         ImGui::SetNextItemWidth(comboItemWidth({"Lit", "Normals", "Wireframe"}));
         ImGui::Combo("##DebugView", &sViewportDebugViewMode, kDebugViews,
                      IM_ARRAYSIZE(kDebugViews));
@@ -166,7 +166,8 @@ void EditorRenderLayer::DrawScenePanel()
             ImGui::SetTooltip("渲染调试视图\n"
                               "  Lit     —— 正常 PBR / forward 渲染\n"
                               "  Normals —— world-space normal 映射到 RGB（诊断法线朝向）\n"
-                              "Wireframe / Unlit / Overdraw 后续接入");
+                              "  Unlit   —— 直出 base color，无光照（诊断 albedo）\n"
+                              "Wireframe / Overdraw 后续接入");
         }
     }
 
@@ -228,9 +229,9 @@ void EditorRenderLayer::DrawScenePanel()
         mpScenePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
         // debug-view mode（toolbar combo）每帧 push。0=Lit / 1=Normals。
         mpScenePipeline->SetDebugViewMode(
-            sViewportDebugViewMode == 1
-                ? Orange::Engine::Render::DebugViewMode::Normals
-                : Orange::Engine::Render::DebugViewMode::Lit);
+            sViewportDebugViewMode == 1   ? Orange::Engine::Render::DebugViewMode::Normals
+            : sViewportDebugViewMode == 2 ? Orange::Engine::Render::DebugViewMode::Unlit
+                                          : Orange::Engine::Render::DebugViewMode::Lit);
         // v1.3.1 Render Settings 面板编辑后下一帧立即生效 —— mShadowConfig 是
         // panel UI 直写字段，每帧 push（by-value 32 bytes 拷贝到 mpImpl，开销
         // 可忽略）。mapResolution 变化时 Pipeline EnsureShadowMap 下帧自重建

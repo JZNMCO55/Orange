@@ -96,6 +96,12 @@ ORANGE_ENGINE_API Material LoadPbr(Asset::AssetRegistry& registry);
 // material 渲染所有 drawable。不经 RegisterBuiltins 暴露给用户（纯诊断）。
 ORANGE_ENGINE_API Material LoadDebugNormals(Asset::AssetRegistry& registry);
 
+// 加载内置 debug-view unlit 模板（DebugViewMode::Unlit）：直出 material base
+// color、无光照。push constant 复用 PBR {uMVP, uModel, uBaseColor, uMRA}
+// = 160 B（drawable loop 喂 drawable material instance 的 uBaseColor）；
+// Pipeline 在 Unlit mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
+ORANGE_ENGINE_API Material LoadDebugUnlit(Asset::AssetRegistry& registry);
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
 
 #endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

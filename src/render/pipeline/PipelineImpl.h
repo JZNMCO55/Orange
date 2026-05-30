@@ -147,6 +147,11 @@ struct Pipeline::Impl
     Material debugNormalsMaterial;
     bool     debugNormalsLoaded{false};
 
+    // Lazy-init debug-view unlit material（DebugViewMode::Unlit）。同模式；
+    // drawable loop 在 Unlit mode 用它替换 drawable material（直出 base color）。
+    Material debugUnlitMaterial;
+    bool     debugUnlitLoaded{false};
+
     // Halo sphere mesh GPU buffer（lazy upload by EnsureHaloSphereMesh
     // on first halo loop record）。所有 haloEnabled PointLight 共享这一
     // 个 unit sphere，draw 时按 light position + haloRadius 算 model
@@ -959,6 +964,23 @@ struct Pipeline::Impl
         debugNormalsMaterial = BuiltinMaterials::LoadDebugNormals(*assets);
         debugNormalsLoaded   = true;
         return &debugNormalsMaterial;
+    }
+
+    // Lazy-init debug-view unlit material（DebugViewMode::Unlit）。同
+    // EnsureDebugNormalsMaterial 模式。
+    const Material* EnsureDebugUnlitMaterial()
+    {
+        if (debugUnlitLoaded)
+        {
+            return &debugUnlitMaterial;
+        }
+        if (assets == nullptr)
+        {
+            return nullptr;
+        }
+        debugUnlitMaterial = BuiltinMaterials::LoadDebugUnlit(*assets);
+        debugUnlitLoaded   = true;
+        return &debugUnlitMaterial;
     }
 
     // Lazy upload halo unit sphere mesh 到 GPU buffer（与 EnsureMeshGpuCache

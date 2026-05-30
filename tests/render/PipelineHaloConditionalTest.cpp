@@ -203,6 +203,20 @@ int main()
         std::fprintf(stdout, "  [PASS] DebugViewMode::Normals Render 不崩 + debug pipeline 编出\n");
     }
 
+    // ---- debug-view Unlit mode：drawable 用 debug unlit material 渲染（直出
+    //      base color），验证 debug pipeline 真编出 ----------------------------
+    {
+        World world;
+        AddCamera(world);
+        AddTexturedDrawable(world, meshHandle, texInst.get());
+        const std::size_t before = pipeline.TemplatePipelineCount();
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Unlit);
+        pipeline.Render(world);
+        assert(pipeline.TemplatePipelineCount() == before + 1);  // debug unlit pipeline 编出
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);
+        std::fprintf(stdout, "  [PASS] DebugViewMode::Unlit Render 不崩 + debug pipeline 编出\n");
+    }
+
     std::fprintf(stdout, "[PipelineHaloConditionalTest] all passed\n");
     return 0;
 }

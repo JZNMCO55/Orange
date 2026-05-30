@@ -1373,6 +1373,16 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
                 mat = dbg;
             }
         }
+        else if (impl.debugViewMode == DebugViewMode::Unlit)
+        {
+            // Unlit：直出 base color。debug unlit material 复用 PBR 160B push，
+            // drawable loop 下方 pcSize>=160 分支会喂 drawable.materialInstance
+            // 的 uBaseColor override（即 drawable 自身 albedo），shader 直出。
+            if (const Material* dbg = impl.EnsureDebugUnlitMaterial())
+            {
+                mat = dbg;
+            }
+        }
 
         Orange::Rhi::RHIPipeline* rhiPipeline = impl.GetOrCompilePipeline(*mat);
         if (rhiPipeline == nullptr)

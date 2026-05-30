@@ -3029,14 +3029,15 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - ✅ **umbrella bump OrangeRender → 7bc8c57**（device feature: fillModeNonSolid / wideLines / imageCubeArray）。
 - ✅ **Pipeline 公共 API 地基**：`DebugViewMode` enum（Lit / Wireframe / Unlit / Normals / Overdraw）+ `SetDebugViewMode` / `GetDebugViewMode` + impl state（默认 Lit，零回归）+ headless 测试（`PipelineHdrTargetTest` API 往返）。编辑器 / 消费者据此设 mode，各 mode 渲染实现逐个接到这个 API。
 - ✅ **Normals mode 渲染实现**：`debug_normals.vert/frag.glsl`（world-normal-as-RGB，CMake 编 SPIR-V）+ `BuiltinMaterials::LoadDebugNormals` + Pipeline lazy `EnsureDebugNormalsMaterial`；drawable loop 在 `Normals` mode **替换 drawable material 为 debug normals material**（复用 GetOrCompilePipeline / push constant 128B {mvp,model} / draw，最小侵入）。headless 验证 debug pipeline 真编出（`PipelineHaloConditionalTest` count+1，非 shader 缺失跳过）+ ctest 63/63 零回归。**视觉正确性待 GUI dogfood**。
+- ✅ **Unlit mode 渲染实现**：`debug_unlit.vert/frag.glsl`（直出 base color）+ `LoadDebugUnlit`（复用 PBR 160B push，drawable loop 喂 drawable material instance 的 uBaseColor override）+ `EnsureDebugUnlitMaterial` + drawable loop `Unlit` 分支 + 编辑器 combo +Unlit item。`PipelineHaloConditionalTest` 验证 debug pipeline 真编出；ctest 63/63 零回归。**视觉待 dogfood**。
 
 ### 后续（逐 mode，多 session）
 
 - **SDK reinstall**（wireframe 硬前置）：当前 SDK（`D:/sdk/orange-render`，5月19）**不含** 7bc8c57 device feature；wireframe（`polygonMode=LINE`）需 SDK 用 7bc8c57 重编 install，否则 validation 拒（VUID-…-polygonMode-01507）。
 - **剩余 mode 渲染实现**（Render 路径按 `debugViewMode` 切换，**复用 Normals 的"替换 drawable material"模式**——最薄套路已验证）：
-  - **Unlit / Overdraw**：同 Normals 套路（`debug_*.vert/frag.glsl` + CMake 编 + `BuiltinMaterials::LoadDebug*` + Pipeline `EnsureDebug*Material` + drawable loop 分支）。Unlit = 直出 base color；Overdraw = 加性 blend 计数热图。
+  - **Overdraw**：同套路但需 **additive blend pipeline**（`GetOrCompilePipeline` 当前 ColorBlendState 固定默认 blend，要扩 per-material blend 字段或专用 pipeline 创建）。每 fragment 输出小常量色 + 加性 blend → overdraw 热图。
   - **Wireframe**：material template pipeline 的 `polygonMode=LINE` 变体（**需 SDK device feature** fillModeNonSolid，前置 SDK reinstall）。
-- **编辑器** ✅ **viewport combo Lit/Normals 已接**：ScenePanel toolbar 把原 disabled "Shading" 占位 combo 替换为 debug-view combo（session-only file-static，每帧 push `Pipeline::SetDebugViewMode`）；Wireframe/Unlit/Overdraw 待对应 mode 渲染实现后加 combo item。**Normals viewport 视觉待 dogfood**。
+- **编辑器** ✅ **viewport combo Lit/Normals/Unlit 已接**：ScenePanel toolbar 把原 disabled "Shading" 占位 combo 替换为 debug-view combo（session-only file-static，每帧 push `Pipeline::SetDebugViewMode`）；Wireframe/Overdraw 待对应 mode 渲染实现后加 combo item。**Normals/Unlit viewport 视觉待 dogfood**。
 - **G-buffer 通道可视化**：已被既有离屏 RT（`FEATURE-2026-05-07`）+ `VulkanInterop::GetVulkanImageView` 覆盖，按需接。
 
 ### 关联

@@ -296,4 +296,23 @@ Material LoadDebugNormals(Asset::AssetRegistry& registry)
                          "shaders/orange_engine/debug_normals.frag.spv");
 }
 
+Material LoadDebugUnlit(Asset::AssetRegistry& registry)
+{
+    Material desc;
+    desc.name = "debug_unlit";
+    // push constant 复用 PBR 160 B {uMVP, uModel, uBaseColor, uMRA}——drawable
+    // loop 的 pcSize>=160 分支会喂 drawable material instance 的 uBaseColor
+    // override（即 drawable 的 albedo）。unlit shader 只读 uBaseColor 直出，
+    // 忽略 uMRA。无 textureSlots / usesTangentVertex 默认 false。
+    desc.uniforms = {
+        {"uMVP",       MaterialUniformType::Mat4},
+        {"uModel",     MaterialUniformType::Mat4},
+        {"uBaseColor", MaterialUniformType::Vec4},
+        {"uMRA",       MaterialUniformType::Vec4},
+    };
+    return BuildMaterial(registry, std::move(desc),
+                         "shaders/orange_engine/debug_unlit.vert.spv",
+                         "shaders/orange_engine/debug_unlit.frag.spv");
+}
+
 }  // namespace Orange::Engine::Render::BuiltinMaterials
