@@ -65,12 +65,14 @@ namespace Orange::Editor::Render
 
 // 缩略图种类 —— 决定"如何构造被渲染的 scratch world"与"content hash 源"。
 // Material：材质球（sphere + .material instance）；Prefab：prefab 实例化预览；
-// Mesh：DCC 导入的 .mesh 用默认材质渲染的单 mesh 预览。
+// Mesh：DCC 导入的 .mesh 用默认材质渲染的单 mesh 预览；Scene：整张 .scene.json
+// 加载到 scratch world 后框相机渲染的场景快照预览（snapshot）。
 enum class ThumbKind
 {
     Material,
     Prefab,
     Mesh,
+    Scene,
 };
 
 class ThumbnailService
@@ -115,6 +117,13 @@ public:
     // 缓存。content-hash 源是 mesh 路径的 FNV（mesh 文件内容变化罕见，路径 hash
     // 足够；mesh 缩略图 invalidate 需求低）。
     ImTextureID GetOrRequestMeshThumbnail(const std::string& meshPath);
+
+    // scene snapshot 缩略图入口（与上面对位，第四类 / 最后一类）。读 .scene.json
+    // 文件内容 → LoadFromString 追加进 scene-scratch world → 遍历 (Transform,
+    // Renderable) 算合并 world AABB 框相机 → RenderToTexture → 缓存 → 清掉本次
+    // 加载的全部实体（多根，RAII 守卫遍历 created 列表 DestroySubtree）。content
+    // -hash 源是 scene 文件内容的 FNV（文件内容变了 → hash 变 → 自动重烘）。
+    ImTextureID GetOrRequestSceneThumbnail(const std::string& scenePath);
 
     // 帧外安全点调用（viewport Render 已 WaitIdle、ImGui 未提交、引擎 BeginFrame
     // 未开始）：取 ≤ maxPerFrame 个 pending 逐个 bake；顺带做 LRU 淘汰。
@@ -178,6 +187,13 @@ private:
     // local AABB（identity transform）框相机 → FinalizeBake。mesh scratch 不像
     // prefab 那样实例化新子树，renderable 常驻，无需 DestroySubtree。
     bool BakeMeshThumbnail(const std::string& meshPath, std::uint64_t frameIndex);
+
+    // scene snapshot 烘焙：读 .scene.json 文件内容 → LoadFromString 把整张场景
+    // 追加进 scene scratch world（常驻 camera + dir-light 兜底）→ 算合并 world
+    // AABB 框相机 → FinalizeBake → RAII 守卫遍历本次 created 实体逐个
+    // DestroySubtree 清干净（scene 是多根，不像 prefab 单根）。任何退出路径都
+    // 清理，否则下次 bake 累积污染 AABB。content hash = scene 文件内容 FNV。
+    bool BakeSceneThumbnail(const std::string& scenePath, std::uint64_t frameIndex);
 
     // 公共烘焙尾段（material / prefab 共用）：取 / 建 entry.pRt → RenderToTexture
     // 渲 scratchWorld 到该 RT → AddTexture 包 descriptor set → 写缓存元数据
@@ -244,6 +260,15 @@ private:
     Orange::Engine::Entity mMeshCameraEntity{};
     Orange::Engine::Entity mMeshRenderableEntity{};
     bool                   mMeshScratchBuilt{false};
+
+    // 可复用的 scene scratch world —— 持有常驻 camera + dir-light entity（兜底
+    // 光，scene 自带 light 也会一起渲染）。每次 scene bake 把整张 .scene.json
+    // LoadFromString 追加进来（多根，新增若干实体）、算合并 AABB 摆相机、渲完后
+    // 遍历本次 created 列表逐个 DestroySubtree 清掉，只留常驻 camera + light
+    // （下次 bake 复用）。相机姿态每次按当前 scene AABB 重设。
+    std::unique_ptr<Orange::Engine::World> mpSceneScratchWorld;
+    Orange::Engine::Entity mSceneCameraEntity{};
+    bool                   mSceneScratchBuilt{false};
 };
 
 }  // namespace Orange::Editor::Render

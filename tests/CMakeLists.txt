@@ -235,6 +235,7 @@ orange_engine_add_test(pipeline_render_to_texture_test render/PipelineRenderToTe
 orange_engine_add_test(material_thumbnail_bake_test render/MaterialThumbnailBakeTest.cpp)
 orange_engine_add_test(prefab_thumbnail_bake_test  render/PrefabThumbnailBakeTest.cpp)
 orange_engine_add_test(mesh_thumbnail_bake_test    render/MeshThumbnailBakeTest.cpp)
+orange_engine_add_test(scene_thumbnail_bake_test   render/SceneThumbnailBakeTest.cpp)
 orange_engine_add_test(pbr_scene_black_repro_test  render/PbrSceneBlackReproTest.cpp)
 target_compile_definitions(pbr_scene_black_repro_test PRIVATE
     "ORANGE_ENGINE_REPO_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\"")

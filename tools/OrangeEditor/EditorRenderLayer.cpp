@@ -1875,6 +1875,24 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                 drewThumb = true;
             }
         }
+        // .scene.json：与 .material / .prefab.json / .mesh 对位走 scene snapshot
+        // 缩略图（整张场景 LoadFromString 到 scratch world → 算合并 AABB 框相机 →
+        // RT 预览）。命中 → 画 64×64 缩略图替代 "[S]" 文本 icon；未命中（首次见 /
+        // Pipeline 未就绪 / 烘焙中）→ GetOrRequestSceneThumbnail 已入 pending，
+        // 本帧回退文本 icon。.scene.json 必须按完整后缀 name 判定（与上面 icon
+        // 赋值同纪律——extension() 返回 ".json"，会被 .prefab.json / 普通 .json 撞）。
+        else if (host.thumbnails && name.size() >= 11
+              && name.compare(name.size() - 11, 11, ".scene.json") == 0)
+        {
+            const ImTextureID thumbId =
+                host.thumbnails->GetOrRequestSceneThumbnail(path);
+            if (thumbId != 0)
+            {
+                ImGui::Image(thumbId, ImVec2(64.0f, 64.0f));
+                ImGui::SameLine();
+                drewThumb = true;
+            }
+        }
 
         char labelBuf[512];
         std::snprintf(labelBuf, sizeof(labelBuf), "%s %s",

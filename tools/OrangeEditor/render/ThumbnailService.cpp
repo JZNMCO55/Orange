@@ -33,8 +33,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fstream>
+#include <ios>
+#include <iterator>
 #include <limits>
 #include <optional>
+#include <string>
 
 namespace Orange::Editor::Render
 {
@@ -61,6 +65,19 @@ std::uint64_t HashBytes(std::uint64_t seed, const void* data, std::size_t size)
 std::uint64_t HashString(std::uint64_t seed, std::string_view s)
 {
     return HashBytes(seed, s.data(), s.size());
+}
+
+// 把整文件内容读成 string。scene 缩略图直接吃磁盘上的 .scene.json（不走
+// AssetRegistry::Load——scene 不是注册资源，是直接文件），用 ifstream 二进制
+// 流式读（避开 MSVC /WX 下 fopen 的 C4996 deprecation，与 MetaSidecar.cpp 一致）。
+// 失败（文件不存在 / IO 错误）→ 返回 false，outBlob 不保证内容；调用方据此中止。
+bool ReadFileToString(const std::string& path, std::string& outBlob)
+{
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) { return false; }
+    outBlob.assign(std::istreambuf_iterator<char>(stream),
+                   std::istreambuf_iterator<char>());
+    return !stream.bad();
 }
 
 // ---- AABB 框相机数学 -----------------------------------------------------
@@ -293,6 +310,11 @@ ImTextureID ThumbnailService::GetOrRequestMeshThumbnail(const std::string& meshP
     return RequestThumbnail(meshPath, ThumbKind::Mesh);
 }
 
+ImTextureID ThumbnailService::GetOrRequestSceneThumbnail(const std::string& scenePath)
+{
+    return RequestThumbnail(scenePath, ThumbKind::Scene);
+}
+
 ImTextureID ThumbnailService::RequestThumbnail(const std::string& path, ThumbKind kind)
 {
     if (path.empty()) { return 0; }
@@ -325,11 +347,22 @@ ImTextureID ThumbnailService::RequestThumbnail(const std::string& path, ThumbKin
                 }
             }
         }
-        else  // Mesh
+        else if (kind == ThumbKind::Mesh)
         {
             // mesh content hash = 路径 FNV（与 bake 时一致）。mesh 文件内容变化
             // 罕见，路径 hash 足够稳定，命中后必相等，不触发无谓重烘。
             return HashString(kFnvOffset, path);
+        }
+        else  // Scene
+        {
+            // scene content hash = 文件内容 FNV（与 bake 时一致）。文件内容变了
+            // → hash 变 → 命中比对不相等 → 重入 pending 自动重烘。读不到文件
+            // （删除 / IO 错误）→ nullopt：跳过比对，命中直接返回旧缩略图。
+            std::string blob;
+            if (ReadFileToString(path, blob))
+            {
+                return HashString(kFnvOffset, blob);
+            }
         }
         return std::nullopt;
     };
@@ -425,6 +458,8 @@ void ThumbnailService::Shutdown()
     mPrefabScratchBuilt = false;
     mpMeshScratchWorld.reset();
     mMeshScratchBuilt = false;
+    mpSceneScratchWorld.reset();
+    mSceneScratchBuilt = false;
     DestroySampler();
 }
 
@@ -440,6 +475,7 @@ bool ThumbnailService::BakeThumbnail(const std::string& path, ThumbKind kind,
         case ThumbKind::Material: return BakeMaterialThumbnail(path, frameIndex);
         case ThumbKind::Prefab:   return BakePrefabThumbnail(path, frameIndex);
         case ThumbKind::Mesh:     return BakeMeshThumbnail(path, frameIndex);
+        case ThumbKind::Scene:    return BakeSceneThumbnail(path, frameIndex);
     }
     return false;
 }
@@ -806,6 +842,143 @@ bool ThumbnailService::BakeMeshThumbnail(const std::string& meshPath,
     ThumbEntry& entry = mCache[meshPath];
     const std::uint64_t hash = HashString(kFnvOffset, meshPath);
     return FinalizeBake(entry, meshPath, world, frameIndex, hash, ThumbKind::Mesh);
+}
+
+bool ThumbnailService::BakeSceneThumbnail(const std::string& scenePath,
+                                          std::uint64_t      frameIndex)
+{
+    using namespace Orange::Engine;
+    using Orange::Engine::Render::Camera;
+    using Orange::Engine::Render::DirectionalLight;
+    using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
+    using Orange::Engine::Render::RenderableComponent;
+    using Orange::Engine::Scene::LoadOptions;
+    using Orange::Engine::Scene::TransformComponent;
+
+    auto* pReg = mHost.assets.pAssets.get();
+    if (pReg == nullptr) { return false; }
+
+    // 1) 读 .scene.json 文件内容（scene 不是注册资源，直接文件流式读）。读不到
+    //    （删除 / IO 错误）→ return false 出队（不无限重试，文件出现后重入队）。
+    std::string sceneBlob;
+    if (!ReadFileToString(scenePath, sceneBlob)) { return false; }
+
+    // 2) 确保 scene scratch world 就位（首次建常驻 camera + dir-light entity；
+    //    dir-light 作兜底，scene 自带的 light 加载进来也会一起生效）。
+    if (!mSceneScratchBuilt)
+    {
+        mpSceneScratchWorld = std::make_unique<World>();
+        World& w = *mpSceneScratchWorld;
+
+        // 相机：姿态每次 bake 按当前 scene AABB 重设；先建好 entity + 占位 Camera。
+        mSceneCameraEntity = w.CreateEntity();
+        Camera cam = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        cam.view   = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                 glm::vec3(0.0f, 0.0f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
+        w.AddComponent(mSceneCameraEntity, cam);
+
+        // 兜底方向光：与材质球 / prefab / mesh 同款左上前方侧光。若 scene 文件
+        // 自带 dir-light，加载进来会叠加；MVP 接受（多光叠加只会更亮，缩略图
+        // 仍可读）。若 scene 无光，这盏兜底光保证场景不全黑。
+        Entity lightE = w.CreateEntity();
+        TransformComponent lt{};
+        lt.rotation =
+            MakeDirectionalLightRotationFromDir(glm::vec3(-0.4f, -0.5f, -1.0f));
+        w.AddComponent(lightE, lt);
+        w.AddComponent(lightE, DirectionalLight{});
+
+        mSceneScratchBuilt = true;
+    }
+
+    World& world = *mpSceneScratchWorld;
+
+    // 3) LoadFromString 把整张 scene 追加进 scratch world。LoadOptions 填全
+    //    （抄 Open Scene 路径 EditorRenderLayer.cpp）——让 Renderable / Animator
+    //    等组件正确认领 mesh / material / animator；materialResolver 兜底让
+    //    DCC 导入的 .material 从磁盘 lazy-create 恢复，避免缩略图丢材质。
+    //    outCreated 回填本次新建的全部实体，供下方多根清理。
+    LoadOptions lo;
+    lo.assetRegistry          = pReg;
+    lo.animatorRegistry       = mHost.assets.pAnimators.get();
+    lo.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+    lo.materialResolver       =
+        [this](const std::string& id) { return ::EnsureMaterialInstance(mHost, id); };
+    lo.extraSerializers       = mHost.extraSerializers;
+
+    std::vector<Entity> created;
+    const auto loadRes =
+        Orange::Engine::Scene::LoadFromString(sceneBlob, world, lo, &created);
+
+    // RAII 守卫：任何退出路径（load 失败 / render 失败 / early-return）都遍历
+    // 本次 created 列表逐个 DestroySubtree 清干净。scene 是多根（不像 prefab
+    // 单根），所以遍历 created 全部根（DestroySubtree 连带销子，遍历时跳已被
+    // 上一次 destroy 连带销掉的——IsValid 检查）。这是本函数最需小心的实现点：
+    // 漏清会让下次 bake 在残留实体上重复算 AABB 累积污染。
+    struct SceneGuard
+    {
+        World*               pWorld;
+        std::vector<Entity>* pCreated;
+        ~SceneGuard()
+        {
+            if (pWorld == nullptr || pCreated == nullptr) { return; }
+            for (const Entity e : *pCreated)
+            {
+                // 跳已被连带销毁的（前一个根的子树里含本实体时）+ 死句柄。
+                if (e.IsValid() && pWorld->IsValid(e))
+                {
+                    EditorHierarchy::DestroySubtree(*pWorld, e);
+                }
+            }
+        }
+    } guard{&world, &created};
+
+    if (loadRes.IsErr()) { return false; }  // 守卫清掉已部分建出的实体
+
+    // 4) 算合并 world AABB：遍历 scratch world 的 (Transform, Renderable) view
+    //    （常驻 camera 无 Renderable，不干扰；scene 自带 camera 实体若无
+    //    Renderable 同样不干扰）。
+    glm::vec3 aabbMin(std::numeric_limits<float>::max());
+    glm::vec3 aabbMax(std::numeric_limits<float>::lowest());
+    bool      hasGeometry = false;
+    {
+        auto& reg  = world.Registry();
+        auto  view = reg.view<Orange::Engine::Scene::TransformComponent,
+                              Orange::Engine::Render::RenderableComponent>();
+        for (auto e : view)
+        {
+            const auto& xform = view.get<Orange::Engine::Scene::TransformComponent>(e);
+            const auto& rc    = view.get<Orange::Engine::Render::RenderableComponent>(e);
+            if (!rc.visible) { continue; }
+            const auto* pMesh = pReg->Get(rc.mesh);
+            if (pMesh == nullptr || pMesh->Empty()) { continue; }
+
+            const LocalAABB localAABB = ComputeMeshLocalAABB(*pMesh);
+            const glm::mat4 worldMat  = ComposeWorldMatrix(xform);
+            const LocalAABB worldAABB = TransformAABB(localAABB, worldMat);
+            aabbMin     = glm::min(aabbMin, worldAABB.min);
+            aabbMax     = glm::max(aabbMax, worldAABB.max);
+            hasGeometry = true;
+        }
+    }
+
+    // 5) 据 AABB 摆相机（共用 helper，与 prefab / mesh 同一段相机数学）。本 MVP
+    //    用 scratch camera 框定覆盖，忽略 scene 自带 camera（scene 的 camera 视角
+    //    不一定适合缩略图框定）。返回 false = 相机 entity 无 Camera 组件，中止。
+    if (!FrameCameraToAABB(world, mSceneCameraEntity, aabbMin, aabbMax, hasGeometry))
+    {
+        return false;
+    }
+
+    // 6) 公共尾段。content hash = scene 文件内容 FNV（与 RequestThumbnail 比对源
+    //    一致；文件内容变了 → hash 变 → 自动重烘）。
+    ThumbEntry& entry = mCache[scenePath];
+    const std::uint64_t hash = HashString(kFnvOffset, sceneBlob);
+    const bool ok = FinalizeBake(entry, scenePath, world, frameIndex, hash,
+                                 ThumbKind::Scene);
+
+    // 7) 本次加载的实体清理由 guard 析构统一执行（无论 ok 与否）。
+    return ok;
 }
 
 void ThumbnailService::ReleaseEntry(ThumbEntry& entry)
