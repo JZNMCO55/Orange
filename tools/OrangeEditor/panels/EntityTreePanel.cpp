@@ -5,6 +5,7 @@
 
 #include "../EditorAssetDropHandler.h"  // v1.2.3 patch · ORANGE_ASSET DnD
 #include "../EditorHierarchy.h"
+#include "../EditorPrefabActions.h"  // Create Prefab... 右键入口（跨帧请求 modal）
 #include "../EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Entity Tree 名称过滤）
 #include "../theme/codicons/IconsCodicons.h"  // 节点类型图标前缀
 #include "../command/EntityCommands.h"
@@ -1132,6 +1133,13 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
                 mHost.selection.selectedEntity = entity;
                 mHost.selection.ClearAdditional();
                 mHost.selection.pendingDuplicate = true;
+            }
+            // Create Prefab...：从右键的这个子树创建 .prefab.json。MVP 单根
+            // （多选只取右键的 entity）。仅登记跨帧请求 + 记源根；modal 由
+            // DrawAssetsPanel 末尾承接（不在 context popup 内直接 OpenPopup，
+            // 同 Create Material 的 sPendingOpenCreateMaterial pattern）。
+            if (ImGui::MenuItem("Create Prefab...")) {
+                Orange::Editor::Prefab::RequestCreatePrefab(entity);
             }
         }
         // 批量重命名（hierarchy gap §2 / P2）：右键的是 primary 且多选 → 给整个

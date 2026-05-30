@@ -9,6 +9,7 @@
 #include "DemoWorld.h"      // SeedDemoWorld / SeedPbrShowcaseWorld
 #include "EditorAssetReferences.h"  // FindAssetReferences（资产引用只读扫描）
 #include "EditorHierarchy.h"
+#include "EditorPrefabActions.h"  // Create Prefab modal 承接 + 写盘 helper
 #include "EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Console + Asset 搜索共用）
 #include "VulkanLoaderShim.h"
 #include "command/LambdaCommand.h"  // 资产 rename 可 undo（文件+.meta+引用）
@@ -1620,6 +1621,17 @@ int  sNewMaterialTemplateIdx      = 0;
 // overwrite 二级 modal 共用，避免二级 modal 重复拼路径产生歧义。
 std::string sNewMaterialTargetPath;
 
+// Create Prefab modal 的跨帧状态（与 Create Material 同 pattern；prefab 专属
+// 故另起一组 static，不复用材质组）。源根经 EditorPrefabActions 的跨 TU 请求
+// 队列从 EntityTreePanel 传来，这里只持 modal 自身的 buffer + open 标志 +
+// overwrite 二级 modal 跨帧状态。
+bool        sPrefabModalOpen           = false;  // 主 modal 当前是否应打开
+bool        sPendingOpenPrefabOverwrite = false; // 文件已存在 → 触发二级 modal
+Orange::Engine::Entity sPrefabSourceRoot =
+    Orange::Engine::Entity::Invalid();            // 源根（modal 期间持有）
+char        sNewPrefabFilenameBuf[128] = "new.prefab.json";
+std::string sNewPrefabTargetPath;                 // 主 + overwrite 二级共用
+
 // 内部 helper：执行 WriteMaterialFile + 落盘成功时切 selectedAssetPath 让
 // Material Inspector 子模式立刻接管；失败仅 log，不弹错误 modal（与
 // MaterialFileIO 既有失败口径一致——stderr 已经记录）。
@@ -1802,6 +1814,11 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         else if (ext == ".hdr" || ext == ".exr")    icon = "[HDR]";
         else if (ext == ".wav" || ext == ".ogg"
               || ext == ".mp3" || ext == ".flac")   icon = "[SND]";
+        // .prefab.json 必须先于 .scene.json / .json 判定：三者 extension() 都
+        // 返回 ".json"，按完整后缀 name 区分。
+        else if (name.size() >= 12
+              && name.compare(name.size() - 12, 12, ".prefab.json") == 0)
+                                                    icon = "[Prefab]";
         else if (name.size() >= 11
               && name.compare(name.size() - 11, 11, ".scene.json") == 0)
                                                     icon = "[S]";
@@ -2407,6 +2424,183 @@ void DrawOverwriteConfirmModal(EditorAssetContext& assets)
     ImGui::EndPopup();
 }
 
+// prefab 创建 modal —— 仿 DrawCreateMaterialModal：filename InputText +
+// Create / Cancel。承接 EntityTreePanel "Create Prefab..." 右键的跨 TU 请求
+// （ConsumeCreatePrefabRequest）。Create 命中既存文件时关本 modal + 触发
+// overwrite 二级 modal（复用同款二级 modal pattern）。
+//
+// 写盘走 EditorPrefabActions::CommitNewPrefabFile（纯 IO，不进命令栈，同
+// CommitNewMaterialFile 口径）。源根在收到请求时锁存到 sPrefabSourceRoot。
+void DrawCreatePrefabModal(EditorHost& host)
+{
+    namespace Prefab = Orange::Editor::Prefab;
+    constexpr const char* kPopupId = "Create Prefab##create_prefab";
+
+    // 跨帧请求：从 prefab TU 取出源根 + 初始化 buffer（默认文件名 = 源实体
+    // NameComponent.name + ".prefab.json"）。在 OpenPopup 前消费，避免与
+    // context popup ID stack 嵌套冲突（同 sPendingOpenCreateMaterial pattern）。
+    {
+        Orange::Engine::Entity reqRoot = Orange::Engine::Entity::Invalid();
+        if (Prefab::ConsumeCreatePrefabRequest(&reqRoot))
+        {
+            sPrefabSourceRoot = reqRoot;
+            std::string base = "new";
+            auto* pWorld = host.scene.pWorld.get();
+            if (pWorld != nullptr && pWorld->IsValid(reqRoot))
+            {
+                const auto* nc = pWorld->GetComponent<
+                    Orange::Engine::Scene::NameComponent>(reqRoot);
+                if (nc != nullptr && !nc->name.empty()) { base = nc->name; }
+            }
+            std::snprintf(sNewPrefabFilenameBuf, sizeof(sNewPrefabFilenameBuf),
+                          "%s.prefab.json", base.c_str());
+            sPrefabModalOpen = true;
+        }
+    }
+
+    if (sPrefabModalOpen)
+    {
+        ImGui::OpenPopup(kPopupId);
+        sPrefabModalOpen = false;
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(kPopupId, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize
+            | ImGuiWindowFlags_NoSavedSettings))
+    {
+        return;
+    }
+
+    const float kInputW = ImGui::CalcTextSize("M").x * 30.0f;
+
+    ImGui::TextUnformatted("Filename:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(kInputW);
+    ImGui::InputText("##new_prefab_filename",
+                     sNewPrefabFilenameBuf,
+                     sizeof(sNewPrefabFilenameBuf));
+
+    // 完整目标路径预览（灰字）。targetPath = browserCurrentDir + "/" + filename。
+    const std::string targetPath = host.assets.browserCurrentDir
+                                 + "/"
+                                 + std::string{sNewPrefabFilenameBuf};
+    ImGui::Separator();
+    ImGui::TextDisabled("Path: %s", targetPath.c_str());
+    ImGui::Separator();
+
+    const bool nameNonEmpty = (std::strlen(sNewPrefabFilenameBuf) > 0);
+    auto* pWorld = host.scene.pWorld.get();
+    const bool srcValid = (pWorld != nullptr)
+                       && sPrefabSourceRoot.IsValid()
+                       && pWorld->IsValid(sPrefabSourceRoot);
+    if (!srcValid)
+    {
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1),
+                           "(source entity no longer valid)");
+    }
+    const bool canCreate = nameNonEmpty && srcValid;
+
+    // prefabName = filename 去 .prefab.json 后缀（无后缀则用整名）。
+    auto stripPrefabSuffix = [](const std::string& fn) -> std::string {
+        constexpr const char* kSuffix = ".prefab.json";
+        constexpr std::size_t kSuffixLen = 12;
+        if (fn.size() > kSuffixLen
+            && fn.compare(fn.size() - kSuffixLen, kSuffixLen, kSuffix) == 0)
+        {
+            return fn.substr(0, fn.size() - kSuffixLen);
+        }
+        return fn;
+    };
+
+    ImGui::BeginDisabled(!canCreate);
+    if (ImGui::Button("Create", ImVec2(120, 0)))
+    {
+        sNewPrefabTargetPath = targetPath;
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const bool exists = fs::exists(sNewPrefabTargetPath, ec) && !ec;
+        if (exists)
+        {
+            sPendingOpenPrefabOverwrite = true;
+            ImGui::CloseCurrentPopup();
+        }
+        else
+        {
+            Prefab::CommitNewPrefabFile(
+                host, sPrefabSourceRoot, sNewPrefabTargetPath,
+                stripPrefabSuffix(std::string{sNewPrefabFilenameBuf}));
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+    {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+// prefab 文件名冲突时的二级 modal（仿 DrawOverwriteConfirmModal）。Overwrite
+// 直接覆盖落盘；Cancel 返回（不重弹主 modal）。
+void DrawPrefabOverwriteConfirmModal(EditorHost& host)
+{
+    namespace Prefab = Orange::Editor::Prefab;
+    constexpr const char* kPopupId = "Overwrite?##overwrite_prefab";
+    if (sPendingOpenPrefabOverwrite)
+    {
+        ImGui::OpenPopup(kPopupId);
+        sPendingOpenPrefabOverwrite = false;
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(kPopupId, nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize
+            | ImGuiWindowFlags_NoSavedSettings))
+    {
+        return;
+    }
+
+    ImGui::TextUnformatted("文件已存在：");
+    ImGui::TextDisabled("%s", sNewPrefabTargetPath.c_str());
+    ImGui::Separator();
+    ImGui::TextWrapped("Overwrite 将覆盖现有 .prefab.json；Cancel 返回上一步。");
+    ImGui::Separator();
+
+    auto* pWorld = host.scene.pWorld.get();
+    const bool srcValid = (pWorld != nullptr)
+                       && sPrefabSourceRoot.IsValid()
+                       && pWorld->IsValid(sPrefabSourceRoot);
+
+    auto stripPrefabSuffix = [](const std::string& fn) -> std::string {
+        constexpr const char* kSuffix = ".prefab.json";
+        constexpr std::size_t kSuffixLen = 12;
+        if (fn.size() > kSuffixLen
+            && fn.compare(fn.size() - kSuffixLen, kSuffixLen, kSuffix) == 0)
+        {
+            return fn.substr(0, fn.size() - kSuffixLen);
+        }
+        return fn;
+    };
+
+    ImGui::BeginDisabled(!srcValid);
+    if (ImGui::Button("Overwrite", ImVec2(120, 0)))
+    {
+        Prefab::CommitNewPrefabFile(
+            host, sPrefabSourceRoot, sNewPrefabTargetPath,
+            stripPrefabSuffix(std::string{sNewPrefabFilenameBuf}));
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+    {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 }  // anonymous namespace
 
 // v0.5 c3：Asset 浏览器面板。左侧目录树（assets/ 递归扫描）+ 右侧当前
@@ -2506,6 +2700,11 @@ void EditorRenderLayer::DrawAssetsPanel()
     // 避免 popup 父级挂在 "Assets" 窗口而被其布局影响。
     DrawCreateMaterialModal(assets);
     DrawOverwriteConfirmModal(assets);
+    // prefab 创建 modal + overwrite 二级 modal —— 与材质 modal 同位（End()
+    // 之后，viewport-level ID stack）。承接 EntityTreePanel 右键 "Create
+    // Prefab..." 的跨 TU 请求并写盘。
+    DrawCreatePrefabModal(mHost);
+    DrawPrefabOverwriteConfirmModal(mHost);
 }
 
 // v0.5 c2：底部 tab 容器加 Animation 占位面板（Assets / Console / Animation

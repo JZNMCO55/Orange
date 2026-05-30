@@ -8,6 +8,7 @@
 #include "../ColliderDebugDraw.h"
 #include "../ColliderVertexEdit.h"
 #include "../EditorAssetDropHandler.h"  // v1.2.3 patch · viewport ORANGE_ASSET DnD
+#include "../EditorPrefabActions.h"  // prefab 拖入实例化（drop 先判 .prefab.json）
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
 #include "../EditorRotateGizmo.h"
@@ -319,7 +320,19 @@ void EditorRenderLayer::DrawScenePanel()
                         ? static_cast<std::size_t>(p->DataSize) - 1 : 0;
                     const std::string assetPath(
                         static_cast<const char*>(p->Data), plen);
-                    if (!assetPath.empty() && panelW > 0 && panelH > 0)
+                    // **务必先判 prefab**：.prefab.json 走实例化为新根（不需
+                    // PickEntityAt，命令栈可 undo）。否则落进 ApplyAssetDropToEntity
+                    // 的"不识别扩展名"分支静默 warn 失败。
+                    const bool isPrefab =
+                        assetPath.size() >= 12
+                        && assetPath.compare(assetPath.size() - 12, 12,
+                                             ".prefab.json") == 0;
+                    if (isPrefab)
+                    {
+                        Orange::Editor::Prefab::InstantiatePrefabFromPath(
+                            mHost, assetPath);
+                    }
+                    else if (!assetPath.empty() && panelW > 0 && panelH > 0)
                     {
                         const ImVec2 mp = ImGui::GetMousePos();
                         const float lx = mp.x - itemMin.x;

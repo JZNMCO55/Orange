@@ -14,6 +14,8 @@
 #include <orange/engine/animation/ProceduralAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshLoader.h>
+#include <orange/engine/asset/PrefabAsset.h>
+#include <orange/engine/asset/PrefabLoader.h>
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/asset/SkeletonAsset.h>
@@ -339,6 +341,20 @@ void InitializeEditorAssets(EditorHost& host)
         reg.IsErr())
     {
         ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<SoundAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
+    }
+
+    // 注册 PrefabLoader —— Asset 浏览器拖入 .prefab.json 时走
+    // AssetRegistry::Load<PrefabAsset>(path) 拿 handle 后由 InstantiatePrefab
+    // 实例化；漏注册则 Load 立刻返回 Unsupported，拖入静默失败。
+    using Orange::Engine::Asset::PrefabAsset;
+    using Orange::Engine::Asset::PrefabLoader;
+    if (auto reg = host.assets.pAssets->RegisterLoader<PrefabAsset>(
+            std::make_unique<PrefabLoader>());
+        reg.IsErr())
+    {
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<PrefabAsset> 失败 "
                          "(code={})",
                          static_cast<unsigned>(reg.Error()));
     }

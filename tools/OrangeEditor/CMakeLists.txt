@@ -111,6 +111,7 @@ add_executable(OrangeEditor
     EditorHierarchy.cpp
     EditorGizmoMath.cpp
     EditorPicking.cpp
+    EditorPrefabActions.cpp
     EditorRenderLayer.cpp
     EditorRotateGizmo.cpp
     EditorScaleGizmo.cpp
@@ -132,6 +133,7 @@ add_executable(OrangeEditor
     command/AnimFsmCommands.cpp
     command/CommandStack.cpp
     command/EntityCommands.cpp
+    command/PrefabCommands.cpp
     import/GltfImporter.cpp
     import/ImportDispatcher.cpp
     import/MeshTangentGen.cpp

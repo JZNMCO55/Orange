@@ -106,6 +106,23 @@ target_include_directories(editor_hierarchy_test PRIVATE
 orange_engine_set_compiler_options(editor_hierarchy_test)
 add_test(NAME editor_hierarchy_test COMMAND editor_hierarchy_test)
 
+# EditorPrefabActions（tools/OrangeEditor）—— prefab 编辑器消费 MVP 的命令逻辑
+# 层：资产创建 round-trip（SaveSubtreeToString → PrefabLoader::Save → Load）+
+# 实例化命令 Execute/Undo/Redo 契约（InstantiatePrefab / DestroySubtree / 再
+# InstantiatePrefab 的实体数增删 + shared_ptr 追踪新根）。纯 World + AssetRegistry
+# + EditorHierarchy 图操作，零 ImGui/GLFW/Vulkan/EditorHost 依赖，故同
+# editor_hierarchy_test 模式：把 EditorHierarchy.cpp 编进测试 exe + 加 include
+# path（该源不属引擎 lib）。覆盖编辑器 prefab 消费层无法 headless 验证的 UI 之下
+# 那层命令逻辑。
+add_executable(editor_prefab_actions_test
+    editor/EditorPrefabActionsTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/EditorHierarchy.cpp")
+target_link_libraries(editor_prefab_actions_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(editor_prefab_actions_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(editor_prefab_actions_test)
+add_test(NAME editor_prefab_actions_test COMMAND editor_prefab_actions_test)
+
 # CommandStack（tools/OrangeEditor）—— Undo/Redo 栈 + coalesce/group + Undo-label
 # peek。纯 ICommand + std，零 ImGui/GLFW/Vulkan 依赖，故同 editor_hierarchy_test
 # 模式：把 CommandStack.cpp 编进测试 exe + 加 include path（该源不属引擎 lib）。
