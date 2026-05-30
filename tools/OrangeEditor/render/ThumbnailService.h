@@ -1,11 +1,16 @@
 #ifndef ORANGE_EDITOR_RENDER_THUMBNAIL_SERVICE_H
 #define ORANGE_EDITOR_RENDER_THUMBNAIL_SERVICE_H
 
-// ThumbnailService —— Asset Browser 里 .material 的"材质球缩略图"服务。
+// ThumbnailService —— Asset Browser 里 .material / .prefab.json 的"渲染缩略图"服务。
 //
-// 职责：把任意 .material 应用到内置 sphere mesh，用编辑器 viewport 的同一个
-// Pipeline 实例渲到一张 96×96 离屏 RT，再经 ImGui_ImplVulkan_AddTexture 包成
-// ImTextureID 供 Asset Browser 的 ImGui::Image 显示，替代原 "[Mat]" 文本 icon。
+// 职责：把任意 .material 应用到内置 sphere mesh（材质球）、或把任意 .prefab.json
+// 实例化到 scratch world（prefab 预览），用编辑器 viewport 的同一个 Pipeline 实例
+// 渲到一张 96×96 离屏 RT，再经 ImGui_ImplVulkan_AddTexture 包成 ImTextureID 供
+// Asset Browser 的 ImGui::Image 显示，替代原 "[Mat]" / "[Prefab]" 文本 icon。
+//
+// 两类缩略图（ThumbKind）共用同一套 lazy / 缓存 / LRU / descriptor 机制 + 公共
+// 烘焙尾段 FinalizeBake（RT 取建 + RenderToTexture + AddTexture + 元数据写入）；
+// 仅"如何构造被渲染的 scratch world"与"content hash 算法"按 kind 分派。
 //
 // 设计要点（schema-first，挂在 EditorHost 作全局编辑器服务，与 audioEngine 同
 // 位）：
@@ -58,6 +63,14 @@ class Pipeline;
 namespace Orange::Editor::Render
 {
 
+// 缩略图种类 —— 决定"如何构造被渲染的 scratch world"与"content hash 源"。
+// Material：材质球（sphere + .material instance）；Prefab：prefab 实例化预览。
+enum class ThumbKind
+{
+    Material,
+    Prefab,
+};
+
 class ThumbnailService
 {
 public:
@@ -90,6 +103,11 @@ public:
     // 命中时顺带刷新 lastUsedFrame（LRU），所以本帧引用的条目不会被淘汰。
     ImTextureID GetOrRequestThumbnail(const std::string& materialPath);
 
+    // prefab 缩略图入口（与上面 material 入口对位）。实例化 .prefab.json 到
+    // scratch world → 算 AABB 框相机 → RenderToTexture → 缓存。content-hash
+    // 源是 PrefabAsset 的 templateBlob（编辑或重存后会变 → 自动重烘）。
+    ImTextureID GetOrRequestPrefabThumbnail(const std::string& prefabPath);
+
     // 帧外安全点调用（viewport Render 已 WaitIdle、ImGui 未提交、引擎 BeginFrame
     // 未开始）：取 ≤ maxPerFrame 个 pending 逐个 bake；顺带做 LRU 淘汰。
     // frameIndex 用于 lastUsedFrame 记账 + "只淘汰非本帧引用"判定。
@@ -109,17 +127,54 @@ private:
         VkDescriptorSet                          descriptorSet{VK_NULL_HANDLE};
         std::uint64_t                            contentHash{0};
         std::uint64_t                            lastUsedFrame{0};
+        // 该条目属于哪类缩略图——命中时按它选 content hash 源，bake 时分派。
+        ThumbKind                                kind{ThumbKind::Material};
+    };
+
+    // 待烘队列元素：path + kind。material / prefab 共用同一队列，FlushPending
+    // 帧外按 kind 分派到对应 bake 路径。
+    struct PendingItem
+    {
+        std::string path;
+        ThumbKind   kind{ThumbKind::Material};
     };
 
     // 自建 LINEAR / CLAMP sampler（复用 ScenePanel 的 sampler 创建逻辑）。
     void CreateSampler();
     void DestroySampler();
 
-    // 对 path 烘一张缩略图（取 EnsureMaterialInstance → 建 / 取 RT →
-    // RenderToTexture → AddTexture → 写缓存）。返回 false 表示本次 bake 失败
-    // （Pipeline 缺失 / instance 缺失 / mesh 无效 / RT 建失败 / Render Err），
-    // 调用方据此把 path 从 pending 移除（失败不无限重试）。
-    bool BakeThumbnail(const std::string& materialPath, std::uint64_t frameIndex);
+    // material / prefab 两个 GetOrRequest 入口的公共实现：命中比对（按 kind 取
+    // content hash 源）→ 一致返回旧 ImTextureID，变了入 pending；未命中入 pending
+    // 返回 0。把 kind 写进 entry / pending，FlushPending 据此分派烘焙路径。
+    ImTextureID RequestThumbnail(const std::string& path, ThumbKind kind);
+
+    // mPending 里是否已含 path（按 path 去重，与 kind 无关——同 path 只可能一类）。
+    bool IsPending(const std::string& path) const;
+
+    // 按 entry.kind 分派烘焙：Material → BakeMaterialThumbnail；Prefab →
+    // BakePrefabThumbnail。两者构造各自的 scratch world 后都收敛到 FinalizeBake。
+    // 返回 false 表示本次 bake 失败，调用方据此把 path 从 pending 移除（不无限重试）。
+    bool BakeThumbnail(const std::string& path, ThumbKind kind, std::uint64_t frameIndex);
+
+    // 材质球烘焙：取 EnsureMaterialInstance → 复用 / 建材质 scratch world →
+    // FinalizeBake。
+    bool BakeMaterialThumbnail(const std::string& materialPath, std::uint64_t frameIndex);
+
+    // prefab 烘焙：Load<PrefabAsset> → 实例化到 prefab scratch world → 算 AABB
+    // 框相机 → FinalizeBake → DestroySubtree 清实例（RAII 守卫保证任何退出路径
+    // 都清理，避免实例残留污染下次 AABB）。
+    bool BakePrefabThumbnail(const std::string& prefabPath, std::uint64_t frameIndex);
+
+    // 公共烘焙尾段（material / prefab 共用）：取 / 建 entry.pRt → RenderToTexture
+    // 渲 scratchWorld 到该 RT → AddTexture 包 descriptor set → 写缓存元数据
+    // （contentHash / lastUsedFrame / kind）。返回 false 表示 RT 建失败 / 渲染失败
+    // / descriptor 包失败。
+    bool FinalizeBake(ThumbEntry&                   entry,
+                      const std::string&            path,
+                      Orange::Engine::World&        scratchWorld,
+                      std::uint64_t                 frameIndex,
+                      std::uint64_t                 contentHash,
+                      ThumbKind                     kind);
 
     // 释放单条 entry 的 descriptor set + RT（帧外调用，安全）。
     void ReleaseEntry(ThumbEntry& entry);
@@ -141,9 +196,9 @@ private:
 
     std::unordered_map<std::string, ThumbEntry> mCache;
 
-    // 待烘队列（按入队顺序）。GetOrRequestThumbnail 未命中时 push（去重）；
-    // FlushPending 帧外逐个 pop。
-    std::vector<std::string> mPending;
+    // 待烘队列（按入队顺序）。RequestThumbnail 未命中时 push（按 path 去重）；
+    // FlushPending 帧外逐个 pop 并按 kind 分派。
+    std::vector<PendingItem> mPending;
 
     // 本帧被 GetOrRequestThumbnail 命中（即 Asset Browser 正在显示）的 path
     // 集合。FlushPending 帧外把这些条目的 lastUsedFrame 推到当前帧——LRU 据
@@ -152,12 +207,20 @@ private:
     // 且帧内不碰缓存元数据更省心。
     std::vector<std::string> mReferencedThisFrame;
 
-    // 可复用的 scratch world —— 每次 bake 只换 entity 的 materialInstance 指针，
-    // 免重建 camera / light / entity（择简：单 entity，BakeThumbnail 内按需建好）。
+    // 可复用的材质球 scratch world —— 每次 bake 只换 entity 的 materialInstance
+    // 指针，免重建 camera / light / entity（择简：单 entity，按需建好）。
     std::unique_ptr<Orange::Engine::World> mpScratchWorld;
     // scratch world 内承载 sphere + material 的那个 entity（首次 bake 时建好）。
     Orange::Engine::Entity mScratchRenderableEntity{};
     bool                   mScratchBuilt{false};
+
+    // 可复用的 prefab scratch world —— 持有常驻 camera + dir-light entity。每次
+    // prefab bake 把 prefab 实例化进来（新增若干实体）、算 AABB 摆相机、渲完后
+    // DestroySubtree 清掉实例，只留 camera + light（下次 bake 复用）。相机姿态
+    // 每次按当前 prefab AABD 重设（写 mPrefabCameraEntity 的 Camera 组件）。
+    std::unique_ptr<Orange::Engine::World> mpPrefabScratchWorld;
+    Orange::Engine::Entity mPrefabCameraEntity{};
+    bool                   mPrefabScratchBuilt{false};
 };
 
 }  // namespace Orange::Editor::Render

@@ -1843,6 +1843,22 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                 drewThumb = true;
             }
         }
+        // .prefab.json：与 .material 对位走 prefab 缩略图（实例化到 scratch
+        // world → 算 AABB 框相机 → RT 预览）。命中 → 画 64×64 缩略图替代
+        // "[Prefab]" 文本 icon；未命中（首次见 / Pipeline 未就绪 / 烘焙中）→
+        // GetOrRequestPrefabThumbnail 已入 pending，本帧回退文本 icon。
+        else if (host.thumbnails && name.size() >= 12
+              && name.compare(name.size() - 12, 12, ".prefab.json") == 0)
+        {
+            const ImTextureID thumbId =
+                host.thumbnails->GetOrRequestPrefabThumbnail(path);
+            if (thumbId != 0)
+            {
+                ImGui::Image(thumbId, ImVec2(64.0f, 64.0f));
+                ImGui::SameLine();
+                drewThumb = true;
+            }
+        }
 
         char labelBuf[512];
         std::snprintf(labelBuf, sizeof(labelBuf), "%s %s",

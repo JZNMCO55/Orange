@@ -2,6 +2,7 @@
 
 #include "EditorHost.h"
 #include "command/PrefabCommands.h"
+#include "render/ThumbnailService.h"  // Invalidate（重存 prefab 后失效旧缩略图）
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/PrefabAsset.h>
@@ -88,6 +89,15 @@ bool CommitNewPrefabFile(EditorHost&            host,
 
     ORANGE_LOG_INFO("Asset Browser: created prefab '{}' (name '{}')",
                     targetPath, prefabName);
+
+    // 失效该路径的旧缩略图：覆盖写已有 .prefab.json 时，缓存里可能还留着上一版
+    // 的预览图。Invalidate 把 content-hash 置哨兵 + 入 pending，下一帧 FlushPending
+    // 帧外重烘（content-hash 本就会逮到 templateBlob 变化，这里显式失效让重烘
+    // 不等下次 hash 比对，立即生效）。
+    if (host.thumbnails)
+    {
+        host.thumbnails->Invalidate(targetPath);
+    }
     return true;
 }
 
