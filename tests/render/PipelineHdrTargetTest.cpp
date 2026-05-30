@@ -176,6 +176,19 @@ int main()
     }
     assert(pipeline.TemplatePipelineCount() == 0);  // 还没 Render
 
+    // debug-view mode 公共 API 往返（默认 Lit + Set/Get 一致，零回归基线）。
+    {
+        using Orange::Engine::Render::DebugViewMode;
+        assert(pipeline.GetDebugViewMode() == DebugViewMode::Lit);  // 默认
+        pipeline.SetDebugViewMode(DebugViewMode::Wireframe);
+        assert(pipeline.GetDebugViewMode() == DebugViewMode::Wireframe);
+        pipeline.SetDebugViewMode(DebugViewMode::Normals);
+        assert(pipeline.GetDebugViewMode() == DebugViewMode::Normals);
+        pipeline.SetDebugViewMode(DebugViewMode::Lit);  // 复位，避免影响后续
+        assert(pipeline.GetDebugViewMode() == DebugViewMode::Lit);
+        std::fprintf(stdout, "  [PASS] debug-view mode API 往返（默认 Lit + Set/Get）\n");
+    }
+
     // ---- 3. Render 空 World（无 camera / 无 drawable）---------------
     {
         World empty;

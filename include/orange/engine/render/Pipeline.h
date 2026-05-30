@@ -75,6 +75,23 @@ class PostProcessChain;
 class VfxSystem;
 struct ShadowConfig;
 
+// 渲染调试视图模式（debug render views）。Lit = 正常渲染（默认，零回归）；其余
+// 为诊断模式，渲染时替换着色 / 光栅化方式：
+//   * Wireframe —— polygonMode=LINE（需 OrangeRender fillModeNonSolid device
+//     feature，7bc8c57 起可用；SDK 须含该 commit）；
+//   * Unlit     —— 忽略光照，直出 base color；
+//   * Normals   —— world-space normal 映射到 RGB；
+//   * Overdraw  —— 加性 blend 计数 overdraw 热图。
+// 本次仅落地公共 API + mode 状态（Lit 生效）；各 mode 渲染实现逐个后续接入。
+enum class DebugViewMode
+{
+    Lit,
+    Wireframe,
+    Unlit,
+    Normals,
+    Overdraw,
+};
+
 class ORANGE_ENGINE_API Pipeline
 {
 public:
@@ -443,6 +460,12 @@ public:
     // 按 BakeIblFromWorld 结果接通 PBR shader，与是否画 sky-dome 解耦。
     void SetSkyEnabled(bool enabled) noexcept;
     bool IsSkyEnabled() const noexcept;
+
+    // 设 / 取渲染调试视图模式（见 DebugViewMode）。默认 Lit（零回归）。编辑器
+    // viewport toolbar 据此切换；各 mode 渲染实现逐个后续接入。未 Initialize 时
+    // Set 安全 no-op、Get 返回 Lit。
+    void          SetDebugViewMode(DebugViewMode mode) noexcept;
+    DebugViewMode GetDebugViewMode() const noexcept;
 
     // 取 Pipeline 内置 DebugDrawScene 引用。Pipeline 自己管 Initialize /
     // Render 内 SetViewProj+Flush / Shutdown 三段生命周期；消费者拿到指针

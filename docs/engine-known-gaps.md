@@ -3012,5 +3012,33 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 
 ### 关联
 
-- 与 [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 的 tangent vertex 属性引入同源（location 3 warning，本次未修）。
+- 与 [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 的 tangent vertex 属性引入同源（location 3 warning，已在本 session 解耦修复，见本条落地记录 (2)）。
 - 非阻塞 EntityGuid 交付（独立健康度问题）。
+
+---
+
+## GAP-2026-05-30-debug-render-views-engine-side
+
+- **发现方**：用户拉动（渲染出身最想要的诊断能力）；`editor-capability-gap-vs-mature.md` §3 P2
+- **发现日期**：2026-05-30
+- **一句话定性**：编辑器缺渲染调试视图（wireframe / unlit / normals / overdraw）。OrangeRender device feature（`fillModeNonSolid` for wireframe）已落地（7bc8c57）；引擎侧需 Pipeline debug-view mode + 各 mode 渲染实现 + 编辑器 UI
+- **状态**：**进行中**——前置 + 公共 API 地基 ✅ 2026-05-30；各 mode 渲染实现 + 编辑器 UI 后续（多 session）
+
+### 已落地（2026-05-30）
+
+- ✅ **umbrella bump OrangeRender → 7bc8c57**（device feature: fillModeNonSolid / wideLines / imageCubeArray）。
+- ✅ **Pipeline 公共 API 地基**：`DebugViewMode` enum（Lit / Wireframe / Unlit / Normals / Overdraw）+ `SetDebugViewMode` / `GetDebugViewMode` + impl state（默认 Lit，零回归）+ headless 测试（`PipelineHdrTargetTest` API 往返）。编辑器 / 消费者据此设 mode，各 mode 渲染实现逐个接到这个 API。
+
+### 后续（逐 mode，多 session）
+
+- **SDK reinstall**（wireframe 硬前置）：当前 SDK（`D:/sdk/orange-render`，5月19）**不含** 7bc8c57 device feature；wireframe（`polygonMode=LINE`）需 SDK 用 7bc8c57 重编 install，否则 validation 拒（VUID-…-polygonMode-01507）。
+- **各 mode 渲染实现**（Render 路径按 `debugViewMode` 切换）：
+  - **Wireframe**：material template pipeline 的 `polygonMode=LINE` 变体（需 SDK device feature）。
+  - **Unlit / Normals / Overdraw**：新 debug fragment shader（`builtin_shaders/*.glsl` + CMake 编译 SPIR-V）+ Pipeline debug pass / 全局 override 变体。
+- **编辑器**：viewport toolbar debug-view 切换 UI + dogfood（debug 视觉）。
+- **G-buffer 通道可视化**：已被既有离屏 RT（`FEATURE-2026-05-07`）+ `VulkanInterop::GetVulkanImageView` 覆盖，按需接。
+
+### 关联
+
+- OrangeRender `FEATURE-2026-05-30-editor-debug-render-views`（device feature 侧已 ✅；评审判 unlit/normals/overdraw 变体归引擎侧）。
+- `editor-capability-gap-vs-mature.md` §3 P2 debug-view 行。

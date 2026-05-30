@@ -919,6 +919,17 @@ bool Pipeline::IsSkyEnabled() const noexcept
     return mpImpl && mpImpl->skyEnabled;
 }
 
+void Pipeline::SetDebugViewMode(DebugViewMode mode) noexcept
+{
+    if (!mpImpl) { return; }
+    mpImpl->debugViewMode = mode;
+}
+
+DebugViewMode Pipeline::GetDebugViewMode() const noexcept
+{
+    return mpImpl ? mpImpl->debugViewMode : DebugViewMode::Lit;
+}
+
 DebugDrawScene* Pipeline::GetDebugDrawScene() noexcept
 {
     return mpImpl ? mpImpl->debugDrawScene.get() : nullptr;

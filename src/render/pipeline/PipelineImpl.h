@@ -859,6 +859,7 @@ struct Pipeline::Impl
     std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       skySet;
     Orange::Rhi::RHITexture*                              skySetBoundCube{nullptr};
     bool                                                  skyEnabled{true};
+    DebugViewMode                                         debugViewMode{DebugViewMode::Lit};
 
     // ---- Procedural sky pass GPU 资源 ----------------------------------
     std::unique_ptr<Orange::Rhi::RHIShaderModule> proceduralSkyFs;
