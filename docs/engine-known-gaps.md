@@ -2964,3 +2964,32 @@ prefab 的**链接式实例**（编辑模板 → 所有实例更新，Unity 蓝�
 ### 编辑器侧已补齐的"非 prefab"层级能力（本轮 session 收口，供后续 prefab 设计参考现状）
 
 prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑器 / 单引擎子仓内可做，已 commit 待 dogfood）：delete-undo（子树快照可撤销删除）、Copy/Cut/Paste/Duplicate（剪贴板 + 右键）、批量操作（批删 / 批移 layer / 批 reparent / 批 rename 消费 additional set）、Shift 范围选、名字过滤、类型图标、**可见性 toggle**（per-entity hidden override，WorldPartition 非序列化集，render 零改动复用 `IsEntityVisible`）、**锁定 toggle**（pick/tree-click/DnD 多路径拦截）、**Isolate Selected + Unhide All**（复用 hidden 基建）。**剩 prefab（本条）+ 根 reorder（已登记）需跨仓 / 大设计。**
+
+---
+
+## GAP-2026-05-30-render-pipeline-template-count-test-regression
+
+- **发现方**：2026-05-30 EntityGuid core session 收尾跑全套 ctest 时撞上（非本 session 改动引入——见"归因"）
+- **发现日期**：2026-05-30
+- **一句话定性**：3 个 render pipeline 集成测试 `pipeline_template_cache_test` / `pipeline_hdr_target_test` / `pipeline_offscreen_test` **assert 失败** `pipeline.TemplatePipelineCount() == 1`（Debug assert 弹窗 → ctest 卡到 timeout）；validation 同时报 `Vertex attribute at location 3 not consumed by vertex shader`
+- **状态**：**仅登记，未诊断根因 + 未修**（疑似跨 OrangeRender SDK，需独立 session）
+
+### 归因（为什么判定与 EntityGuid 改动无关）
+
+- 失败测试只调 `pipeline.Render(world)`（`PipelineHdrTargetTest.cpp:206`），grep 确认**零调用** scene 序列化 / GuidComponent / ComponentSerializers；EntityGuid 改动只在 scene 序列化路径执行，**代码路径不相交**（确定性，非概率）。
+- 被测 `Pipeline.cpp`、测试代码、OrangeRender SDK（`D:/sdk/orange-render`）本 session 均未改动；`orange_engine.lib` 重编不改 Pipeline 行为。故这 3 个测试今天的结果 = 改动前的结果 = **预存**。
+- 全套 ctest 59/62 通过；scene 序列化测试组 10/10 全过（EntityGuid 零回归）。
+
+### 现象线索 / 待诊断
+
+- **location 3 warning 根因已定位（是 OE Pipeline 逻辑，非 SDK）**：`PipelineImpl.h:1018` 按 `MaterialUsesTextureSet(mat)` 决定是否声明 location 3 (tangent)；该判据（`PipelineImpl.h:704`）= `!mat.textureSlots.empty() || ComputePushConstantSize(mat) >= 160`。`"textured"` material 有 textureSlots → 判 true → 声明 tangent，但 textured 的 VS 不读 tangent → validation 报 location 3 unconsumed。与 `PipelineImpl.h:1016` 注释意图"只 PBR 模板声明 tangent、其余不声明"**矛盾**——`MaterialUsesTextureSet` 把"用 descriptor set 1 贴图"与"用 tangent 顶点属性"两个概念耦合在一个判据里，textured（用贴图但不用 tangent）被误卷入。疑似 PBR tangent infra commit 引入（git 历史指向近期 render feature：CSM / tonemap / PostProcess / halo）。
+- **`TemplatePipelineCount()` 实测 = 2（期望 1），root cause 完全定位（OE 侧，非 SDK）**：运行时诊断（临时改 `PipelineHdrTargetTest:206` 打印 + 提前退出）确认 Render 1 个 textured drawable 后 `templatePipelines` 含 **2 个 entry**。第二个是 **`haloMaterial`**（`PipelineImpl.h:141` + `EnsureHaloMaterial` / `BuiltinMaterials::LoadHalo`），由 **PointLight halo G3（commit cb8041c）** 引入：主 render 的 halo pass（`Pipeline.cpp:1471-1475`）在**遍历 PointLight 之前、无条件** `GetOrCompilePipeline(*haloMat)`——只要 halo material + sphere mesh 加载成功就编 halo template，**与场景有无 PointLight 无关**（空 world 无 camera 不走主 render，故 `:177/:189` 的 `==0` 仍 PASS；有 camera+drawable 即编 textured+halo=2）。`normalPrepassPipeline`（`:499`）是独立成员、不进此 map。结论：3 个测试 count 期望 = drawable 唯一 material 数 + **1（halo，首个有 camera 的 Render 起常驻 cache）**，halo G3 之前写的期望全部过时。
+- 修复路径（OE 单仓，**需 halo 设计判断 → 留有 render context 者决定 a vs b，勿盲改**）：
+  - (a) **更新测试期望 +1**：`PipelineHdrTargetTest`/`PipelineOffscreenTest` 的 1→2、`PipelineTemplateCacheTest` 的 1/2/3→2/3/4（未 Render / 空 world / shutdown 的 `==0` 不变）。简单、低风险，但等于**承认"无 PointLight 也常驻编 halo template"是 intended**（预热避免首个 PointLight 出现时 pipeline 编译卡顿——`:1471` 结构看似有意预编）。
+  - (b) **halo template 条件编**：把 `GetOrCompilePipeline(*haloMat)` 移进"存在 haloEnabled PointLight"分支，无 PointLight 不占 template。更省（免无谓编译 + 内存），但改 render 逻辑、需验证 halo G3 功能不破 + 重跑全套。
+  - location 3 warning 同源（textured 被 `MaterialUsesTextureSet` 误判声明 tangent），可顺带解耦 `MaterialUsesTextureSet`（独立小修）。
+
+### 关联
+
+- 疑似与 [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 的 tangent vertex 属性引入同源（location 3）。
+- 非阻塞 EntityGuid 交付（独立健康度问题）。
