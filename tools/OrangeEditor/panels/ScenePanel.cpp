@@ -15,6 +15,7 @@
 #include "../EditorTranslateGizmo.h"
 #include "../plugin/GizmoContext.h"
 #include "../plugin/IEditorGizmoPlugin.h"
+#include "../render/ThumbnailService.h"  // mHost.thumbnails->SetPipeline（完整类型）
 #include "../schema/ComponentSchema.h"
 #include "../schema/ComponentSchemaRegistry.h"
 
@@ -641,6 +642,9 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
                              static_cast<unsigned>(r.Error()));
             mpScenePipeline.reset();
             mScenePipelineFailed = true;
+            // 缩略图服务失去 Pipeline：清空注入，pending 不再烘（GetOrRequest
+            // 回退文本 icon）。
+            if (mHost.thumbnails) { mHost.thumbnails->SetPipeline(nullptr); }
             return false;
         }
         // 默认 PostProcessChain —— 仅 HDR pipeline 必需的 BuiltinPostProcessChain
@@ -709,6 +713,15 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
 
         mScenePanelWidth  = width;
         mScenePanelHeight = height;
+
+        // 缩略图服务复用 viewport 的同一个 Pipeline 实例渲材质球。Pipeline 刚
+        // InitializeOffscreen 成功 → 注入；此后每帧 EnsureScenePipeline 走复用
+        // 路径不重复 SetPipeline（指针稳定）。FlushPending 由 EditorRenderLayer
+        // 在帧外安全点驱动。
+        if (mHost.thumbnails)
+        {
+            mHost.thumbnails->SetPipeline(mpScenePipeline.get());
+        }
     }
     else if (width != mScenePanelWidth || height != mScenePanelHeight) {
         mpScenePipeline->ResizeOffscreen(width, height);

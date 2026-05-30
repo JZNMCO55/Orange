@@ -17,6 +17,7 @@
 #include "import/ImportDispatcher.h"
 #include "import/MetaSidecar.h"
 #include "plugin/MaterialAssetInspectorPlugin.h"  // SaveEditingMaterialToDisk（关窗确认存材质）
+#include "render/ThumbnailService.h"  // 材质球缩略图（FlushPending + GetOrRequestThumbnail）
 #include "theme/EditorTheme.h"
 
 #include <orange/engine/asset/AssetHandle.h>
@@ -393,6 +394,17 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     ApplyPendingSceneOp();
     ApplyPendingPlayOp();
     ApplyPendingImports();
+
+    // 材质球缩略图烘焙 —— 这是唯一安全的帧外点：DrawScenePanel 内 viewport
+    // Render 已 WaitIdle（GPU 排空）、ImGui 尚未 Render（draw data 未提交）、
+    // 引擎 BeginFrame 在下方才开始。FlushPending 在此每帧最多烘 3 张（含
+    // RenderToTexture + ImGui_ImplVulkan_AddTexture/RemoveTexture，全部要求帧外）。
+    // mpScenePipeline 为空（viewport 未就绪 / 初始化失败）时 thumbnails 内部
+    // SetPipeline(nullptr) 已让 FlushPending 早退，这里再加一道 null 守卫。
+    if (mpScenePipeline && mHost.thumbnails)
+    {
+        mHost.thumbnails->FlushPending(frame.time.frameIndex, 3);
+    }
 
     ImGui::Render();
 
@@ -1796,9 +1808,28 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         else if (ext == ".json")                    icon = "[J]";
 
         const bool selected = (path == assets.selectedAssetPath);
+
+        // .material：尝试取渲染缩略图（材质球 RT）。命中 → 在文件名左侧画
+        // 64×64 缩略图 + SameLine，替代 "[Mat]" 文本 icon；未命中（首次见 /
+        // Pipeline 未就绪 / 烘焙中）→ GetOrRequestThumbnail 已入 pending，本帧
+        // 回退文本 icon，烘好后下一帧自动出图。DnD source / 右键 ContextItem /
+        // 选中逻辑全部锚到下方 Selectable item，缩略图只是其左侧的视觉装饰。
+        bool drewThumb = false;
+        if (ext == ".material" && host.thumbnails)
+        {
+            const ImTextureID thumbId =
+                host.thumbnails->GetOrRequestThumbnail(path);
+            if (thumbId != 0)
+            {
+                ImGui::Image(thumbId, ImVec2(64.0f, 64.0f));
+                ImGui::SameLine();
+                drewThumb = true;
+            }
+        }
+
         char labelBuf[512];
         std::snprintf(labelBuf, sizeof(labelBuf), "%s %s",
-                      icon, name.c_str());
+                      drewThumb ? "" : icon, name.c_str());
         if (ImGui::Selectable(labelBuf, selected))
         {
             assets.selectedAssetPath = path;

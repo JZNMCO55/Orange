@@ -4,6 +4,7 @@
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../MaterialFileIO.h"
+#include "../render/ThumbnailService.h"  // Save 后 Invalidate 缩略图（content-hash 优化）
 #include "../theme/EditorTheme.h"  // dirty 指示器走 accent token（禁字面量 RGBA）
 #include "../ShaderTemplateMetaIO.h"  // v1.2 T2 · 数据驱动 widget 元数据
 
@@ -625,6 +626,9 @@ bool SaveEditingMaterialToDisk(EditorHost& host)
     data.templateName = host.assets.editingTemplateName;
     ::Orange::Editor::Material::WriteMaterialFile(path, data);
     host.assets.editingMaterialDirty = false;
+    // 缩略图失效：content-hash 本会逮到 uniform / template 变化，这里显式
+    // Invalidate 让下一帧 FlushPending 立即重烘（便宜：仅置哨兵 hash + 入队）。
+    if (host.thumbnails) { host.thumbnails->Invalidate(path); }
     return true;
 }
 

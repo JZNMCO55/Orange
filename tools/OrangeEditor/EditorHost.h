@@ -58,6 +58,15 @@
 #include <memory>
 #include <vector>
 
+// ThumbnailService 前向声明 —— thumbnails 字段是 unique_ptr，本头只需不完整
+// 类型。完整定义（拖 Vulkan / ImGui / RHITexture 重量级头）只在 main.cpp 构造
+// / 析构 EditorHost 的 TU + ThumbnailService.cpp 内可见，不传染所有 include
+// EditorHost.h 的编辑器 TU（尤其避免 vulkan.h → windows.h min/max 宏污染）。
+namespace Orange::Editor::Render
+{
+class ThumbnailService;
+}
+
 struct EditorHost
 {
     EditorSelection    selection;
@@ -149,6 +158,18 @@ struct EditorHost
     // 路径（PlayOneShot / CreateInstance）已是 no-op 安全（参 AudioEngine.h
     // 头注释"游戏没声卡的机器仍能跑"）。
     Orange::Engine::Audio::AudioEngine audioEngine;
+
+    // 材质球缩略图服务（Asset Browser 里 .material 显示渲染缩略图，替代
+    // "[Mat]" 文本 icon）。与 audioEngine 同位：编辑器进程级全局服务，挂在
+    // EditorHost 而非塞进 EditorRenderLayer / EditorState mega-class（schema-
+    // first 纪律）。
+    //
+    // unique_ptr 而非值成员：构造需要 RenderDevice + ImGui descriptor pool +
+    // EditorHost& 自引用，这些在 main 启动期 ImGui / Renderer init 之后才就绪，
+    // 故由 main 在那一刻 make_unique（EditorHost 是无构造函数的聚合，不能在
+    // 成员初始化里自引用）。viewport Pipeline 由 EditorRenderLayer 经
+    // SetPipeline 注入；layer 析构前后的 Shutdown 时机见 main / ScenePanel。
+    std::unique_ptr<Orange::Editor::Render::ThumbnailService> thumbnails;
 };
 
 #endif  // ORANGE_EDITOR_EDITOR_HOST_H

@@ -92,6 +92,7 @@
 #include "plugin/PointLightGizmoPlugin.h"
 #include "plugin/PostProcessVolumeGizmoPlugin.h"
 #include "plugin/SpotLightGizmoPlugin.h"
+#include "render/ThumbnailService.h"
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
 
@@ -561,6 +562,14 @@ int main()
     InitializeEditorAssets(editorHost);
     editorHost.extraSerializers.push_back(DemoGame::GetHealthSerializerEntry());
 
+    // 材质球缩略图服务：ImGui / Renderer 已 init（imguiDescPool 就绪），
+    // InitializeEditorAssets 已建好 sphereMeshHandle —— 此刻构造一次到位。
+    // viewport Pipeline 尚未创建（lazy 在 ScenePanel 首帧），由 EditorRenderLayer
+    // 经 SetPipeline 注入；在此之前 GetOrRequestThumbnail 只入队不烘。
+    editorHost.thumbnails =
+        std::make_unique<Orange::Editor::Render::ThumbnailService>(
+            editorHost, *pRenderDevice, imguiDescPool);
+
     // v0.8 EditorSettings + EditorKeybindings 持久化：启动时尝试从 editor_
     // settings.json 加载（含 settings 段 + keybindings 段共享同文件），缺失
     // / 解析失败保留默认值。文件相对路径（ChdirToRepoRoot 之后）。
@@ -852,6 +861,12 @@ int main()
     // 段冲突：layer 想先 reset，window 想后 reset。出路是手工先把
     // overlay callback 清空，再做 ImGui shutdown 与 host.reset。
     pRenderDevice->WaitIdle();
+    // 缩略图服务先于 ImGui Vulkan backend 关停：Shutdown 内调
+    // ImGui_ImplVulkan_RemoveTexture 释放每张缩略图的 descriptor set，必须在
+    // ImGui_ImplVulkan_Shutdown 之前（backend 销毁后 RemoveTexture 失效）。
+    // WaitIdle 已排空 GPU 工作，RemoveTexture 安全。editorHost 值成员析构发生
+    // 在 main 返回时（晚于此），届时 thumbnails 已 reset，二次 Shutdown 幂等。
+    if (editorHost.thumbnails) { editorHost.thumbnails->Shutdown(); }
     pRenderer->SetSwapchainOverlayCallback({});  // layer dtor 之外手工提前清
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();

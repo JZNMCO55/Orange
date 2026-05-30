@@ -142,6 +142,7 @@ add_executable(OrangeEditor
     # runtime 不接（ADR-008 importer-only invariant）。warning 见下方 /W0。
     ../../vendor/mikktspace/mikktspace.c
     render/EditorGridAuxPassProvider.cpp
+    render/ThumbnailService.cpp
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp
