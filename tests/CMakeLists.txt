@@ -82,6 +82,32 @@ if (EXISTS "${_orange_mikkt_fixture}")
 else ()
     message(STATUS "mikktspace_real_model_test 跳过：未找到 fixture ${_orange_mikkt_fixture}")
 endif ()
+
+# glTF material 导入端到端 —— 锁 "glTF material factor / 贴图 → .material 字段"
+# 链（GAP-2026-05-25 G3 验证 + AO factor 修复回归守卫）。走 GltfMaterialParse
+# seam（ExtractGltfMaterial / BuildMaterialFileData）+ MaterialFileIO round-trip，
+# 不链接整套 EditorHost（AudioEngine / ThumbnailService / Vulkan / ImGui）。复用
+# 与 mikktspace_real_model_test 同款 Avocado fixture + `if(EXISTS)` 门控。helper
+# 源（GltfMaterialParse.cpp / MaterialFileIO.cpp）在 tools/OrangeEditor 不属引擎
+# lib，直接编进测试 exe（同 material_file_io_test 模式）。cgltf CGLTF_IMPLEMENTATION
+# 在测试 TU expand；GltfMaterialParse.cpp 只取声明不 expand，两份不冲突。
+if (EXISTS "${_orange_mikkt_fixture}")
+    add_executable(gltf_material_import_test
+        editor/GltfMaterialImportTest.cpp
+        "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp")
+    target_link_libraries(gltf_material_import_test PRIVATE OrangeEngine::orange_engine)
+    target_include_directories(gltf_material_import_test PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/OrangeEditor"
+        "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+        "${CMAKE_SOURCE_DIR}/vendor/cgltf")
+    target_compile_definitions(gltf_material_import_test PRIVATE
+        "ORANGE_ENGINE_GLTF_FIXTURE=\"${_orange_mikkt_fixture}\"")
+    orange_engine_set_compiler_options(gltf_material_import_test)
+    add_test(NAME gltf_material_import_test COMMAND gltf_material_import_test)
+else ()
+    message(STATUS "gltf_material_import_test 跳过：未找到 fixture ${_orange_mikkt_fixture}")
+endif ()
 orange_engine_add_test(scene_world_test         scene/SceneWorldTest.cpp)
 orange_engine_add_test(scene_world_partition_test scene/WorldPartitionTest.cpp)
 orange_engine_add_test(scene_subtree_clone_test scene/SceneSubtreeCloneTest.cpp)

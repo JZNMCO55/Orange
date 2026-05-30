@@ -1,5 +1,6 @@
 #include "GltfImporter.h"
 
+#include "GltfMaterialParse.h"  // ExtractGltfMaterial / BuildMaterialFileData（可独立测试的 material seam）
 #include "ImportDispatcher.h"   // ImportTexture（复用纹理导入路径）
 #include "MeshTangentGen.h"     // GenerateMikkTSpaceTangents（高质量切线）
 #include "MetaSidecar.h"
@@ -11,8 +12,6 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
-
-#include <glm/vec4.hpp>
 
 // cgltf 单 header IMPLEMENTATION 仅在本 TU 内 expand。MSVC noisy warning
 // 关掉 —— cgltf 是 C99 风格代码，narrowing / unused / deprecated 全套都
@@ -33,7 +32,6 @@
 #endif
 
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -81,54 +79,8 @@ const char* CgltfResultToString(cgltf_result r)
     }
 }
 
-// glTF material 通道解析的中间结果（GAP-2026-05-25 A2 / Inc5）。在 cgltf_free
-// 之前从 cgltf_material 抽出，free 之后用于 import 贴图 + 写 .material。
-// 贴图字段存"源文件绝对/相对路径"（gltfDir/uri 解析后），空 = 该通道无贴图。
-struct GltfMatInfo
-{
-    bool        present{false};
-    std::string baseColorSrc;
-    std::string normalSrc;
-    std::string metalRoughSrc;
-    std::string aoSrc;
-    float       baseColor[4]{1.0f, 1.0f, 1.0f, 1.0f};
-    float       metallic{1.0f};
-    float       roughness{1.0f};
-};
-
-// 把一个 cgltf_texture_view 解析成源文件路径（相对 gltf 所在目录）。仅支持
-// 外部 uri 引用的 image；.glb 内嵌（buffer_view，uri==null）或 data: URI 暂
-// 不支持，返回空（caller 跳过该通道 → 用 default 贴图，graceful）。
-std::string ResolveTextureSource(const cgltf_texture_view& view,
-                                 const std::filesystem::path& gltfDir)
-{
-    if (view.texture == nullptr || view.texture->image == nullptr)
-    {
-        return {};
-    }
-    const char* uri = view.texture->image->uri;
-    if (uri == nullptr || uri[0] == '\0')
-    {
-        return {};  // 内嵌 image（.glb buffer view）/ 无 uri
-    }
-    // data: URI（base64 内嵌）暂不支持。
-    if (std::strncmp(uri, "data:", 5) == 0)
-    {
-        return {};
-    }
-    // percent-decode（cgltf 提供就地解码；在 uri 副本上做）。
-    std::string decoded(uri);
-    cgltf_decode_uri(decoded.data());
-    decoded.resize(std::strlen(decoded.c_str()));  // 解码可能缩短
-
-    std::error_code ec;
-    std::filesystem::path full = gltfDir / decoded;
-    if (!std::filesystem::exists(full, ec))
-    {
-        return {};  // 源贴图缺失 → 跳过（caller 落 default）
-    }
-    return full.generic_string();
-}
+// GltfMatInfo / ResolveTextureSource / ExtractGltfMaterial / BuildMaterialFileData
+// 已抽到 import/GltfMaterialParse.{h,cpp}（可独立 headless 测试的 material seam）。
 }  // namespace
 
 ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
@@ -341,28 +293,10 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
-    // A2/Inc5：在 cgltf_free 之前从 firstMat 抽出 PBR 通道（贴图源路径 + 标量
-    // factor）。贴图源路径相对 gltf 所在目录解析；free 之后用于 import + 写 .material。
-    GltfMatInfo matInfo{};
-    if (firstMat != nullptr)
-    {
-        matInfo.present = true;
-        const std::filesystem::path gltfDir = src.parent_path();
-        if (firstMat->has_pbr_metallic_roughness)
-        {
-            const auto& pmr = firstMat->pbr_metallic_roughness;
-            matInfo.baseColor[0] = pmr.base_color_factor[0];
-            matInfo.baseColor[1] = pmr.base_color_factor[1];
-            matInfo.baseColor[2] = pmr.base_color_factor[2];
-            matInfo.baseColor[3] = pmr.base_color_factor[3];
-            matInfo.metallic     = pmr.metallic_factor;
-            matInfo.roughness    = pmr.roughness_factor;
-            matInfo.baseColorSrc  = ResolveTextureSource(pmr.base_color_texture, gltfDir);
-            matInfo.metalRoughSrc = ResolveTextureSource(pmr.metallic_roughness_texture, gltfDir);
-        }
-        matInfo.normalSrc = ResolveTextureSource(firstMat->normal_texture, gltfDir);
-        matInfo.aoSrc     = ResolveTextureSource(firstMat->occlusion_texture, gltfDir);
-    }
+    // 在 cgltf_free 之前从 firstMat 抽出 PBR 通道（贴图源路径 + 标量 factor +
+    // occlusionStrength）。贴图源路径相对 gltf 所在目录解析；free 之后用于
+    // import + 写 .material。逻辑在 GltfMaterialParse.cpp（与测试共用同一份）。
+    const GltfMatInfo matInfo = ExtractGltfMaterial(firstMat, src.parent_path());
 
     cgltf_free(data);  // 不再需要 cgltf 内部结构，data 已经拷出来
 
@@ -376,7 +310,7 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
 
     // 每模型一个子目录 assets/Models/<stem>/ —— mesh / material / source copy /
     // 该模型的贴图全部 co-locate 进去，避免贴图被甩到 assets/Textures/ 后跨
-    // 目录找（用户反馈）。下面 importSlot 会把贴图也写进同一 modelDir。
+    // 目录找（用户反馈）。下面 material 段的贴图 resolver 把贴图也写进同一 modelDir。
     // .gltf 的外部 .bin 仍只做单文件 copy 起步，用户可手动同步 .bin。
     const std::string stem = src.stem().generic_string();
     fs::path destDir = fs::path(kModelsDir) / stem;
@@ -483,48 +417,29 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
-    // A2/Inc5：解析出 material 通道时 import 各贴图 + 写 .material sidecar。
-    // 贴图走 ImportTexture（copy 到 assets/Textures + load + .meta）；.material
-    // 落 .mesh 同目录（assets/Models/<stem>.material），templateName=pbr，texture
-    // 槽 binding 与 pbr set 1 对齐（0 baseColor / 1 normal / 2 metalRough / 3 ao），
-    // uniform 覆盖 uBaseColor=baseColorFactor、uMRA=(metallic,roughness,ao=1,_=0)。
+    // 解析出 material 通道时 import 各贴图 + 写 .material sidecar。
+    // .material 落 .mesh 同目录（assets/Models/<stem>.material），templateName=pbr，
+    // texture 槽 binding 与 pbr set 1 对齐（0 baseColor / 1 normal / 2 metalRough /
+    // 3 ao），uniform 覆盖 uBaseColor=baseColorFactor、
+    // uMRA=(metallic, roughness, occlusionStrength, 0)。
     // 引擎不自动 mesh↔material 绑定（GAP 已记），用户在编辑器把 .material 指给 entity。
     if (matInfo.present)
     {
-        Material::MaterialFileData mdata;
-        mdata.templateName = "pbr";
-
-        auto importSlot = [&](const std::string& srcTexPath, std::uint32_t binding) {
-            if (srcTexPath.empty()) { return; }
-            // 贴图落进模型自己的 assets/Models/<stem>/ 子目录而非共享 Textures。
+        // resolver：把贴图源路径走 ImportTexture（copy 到模型自己的
+        // assets/Models/<stem>/ 子目录而非共享 Textures + load + .meta）后回填
+        // destPath；失败返回空 → BuildMaterialFileData 跳过该槽。factor / binding /
+        // AO 映射逻辑全在 BuildMaterialFileData（与 headless 测试共用同一份）。
+        auto resolver = [&](const std::string& srcTexPath) -> std::string {
             ImportResult tr = ImportTexture(srcTexPath, host, modelDirStr);
             if (tr.status == ImportStatus::Success && !tr.destPath.empty())
             {
-                mdata.textures.push_back({binding, tr.destPath});
+                return tr.destPath;
             }
-            else
-            {
-                ORANGE_LOG_WARN("GltfImporter: material 贴图 '{}' import 失败，跳过该槽",
-                                srcTexPath);
-            }
+            ORANGE_LOG_WARN("GltfImporter: material 贴图 '{}' import 失败，跳过该槽",
+                            srcTexPath);
+            return {};
         };
-        importSlot(matInfo.baseColorSrc,  0u);
-        importSlot(matInfo.normalSrc,     1u);
-        importSlot(matInfo.metalRoughSrc, 2u);
-        importSlot(matInfo.aoSrc,         3u);
-
-        Material::UniformOverrideValue uBase;
-        uBase.name  = "uBaseColor";
-        uBase.type  = ::Orange::Engine::Render::MaterialUniformType::Vec4;
-        uBase.value = glm::vec4(matInfo.baseColor[0], matInfo.baseColor[1],
-                                matInfo.baseColor[2], matInfo.baseColor[3]);
-        mdata.uniforms.push_back(uBase);
-
-        Material::UniformOverrideValue uMra;
-        uMra.name  = "uMRA";
-        uMra.type  = ::Orange::Engine::Render::MaterialUniformType::Vec4;
-        uMra.value = glm::vec4(matInfo.metallic, matInfo.roughness, 1.0f, 0.0f);
-        mdata.uniforms.push_back(uMra);
+        Material::MaterialFileData mdata = BuildMaterialFileData(matInfo, resolver);
 
         const std::string matPath = (destDir / (stem + ".material")).generic_string();
         if (Material::WriteMaterialFile(matPath, mdata))
