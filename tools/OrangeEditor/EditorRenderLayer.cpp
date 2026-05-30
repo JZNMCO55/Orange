@@ -1859,6 +1859,22 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                 drewThumb = true;
             }
         }
+        // .mesh：与 .material / .prefab.json 对位走 mesh 缩略图（用默认 PBR 材质
+        // 渲单 mesh → 算 local AABB 框相机 → RT 预览）。命中 → 画 64×64 缩略图
+        // 替代 "[M]" 文本 icon；未命中（首次见 / Pipeline 未就绪 / 烘焙中）→
+        // GetOrRequestMeshThumbnail 已入 pending，本帧回退文本 icon。.obj 是导入
+        // 源（非引擎 .mesh 格式，AssetRegistry 不直接 Load），仍走文本 icon。
+        else if (ext == ".mesh" && host.thumbnails)
+        {
+            const ImTextureID thumbId =
+                host.thumbnails->GetOrRequestMeshThumbnail(path);
+            if (thumbId != 0)
+            {
+                ImGui::Image(thumbId, ImVec2(64.0f, 64.0f));
+                ImGui::SameLine();
+                drewThumb = true;
+            }
+        }
 
         char labelBuf[512];
         std::snprintf(labelBuf, sizeof(labelBuf), "%s %s",

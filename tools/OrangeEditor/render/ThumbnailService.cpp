@@ -133,6 +133,50 @@ TransformAABB(const LocalAABB& local, const glm::mat4& worldMat) noexcept
     return LocalAABB{mn, mx};
 }
 
+// 据合并出的 world-space AABB（aabbMin / aabbMax）把缩略图相机摆到 3/4 视角并
+// 框满几何，写进 world 的 cameraEntity 的 Camera 组件。prefab（多实体合并 AABB）
+// 与 mesh（单 mesh local AABB）两条烘焙路径共用——抽出避免复制这段相机数学。
+//
+// 算法：3/4 视角方向 dir = normalize(1, 0.8, 1)，dist = r / sin(fov/2) 框满再
+// *1.1 留 ~10% padding，near/far 据包围球半径夹出。
+// 退化兜底：hasGeometry == false 或 AABB 退化（半径≈0）→ 固定相机 eye=(0,0,3)
+// 看原点 + 默认 near/far（防除零 / NaN）。
+// 返回 false 表示 cameraEntity 上没有 Camera 组件（调用方据此中止本次 bake）。
+bool FrameCameraToAABB(Orange::Engine::World& world,
+                       Orange::Engine::Entity cameraEntity,
+                       const glm::vec3& aabbMin, const glm::vec3& aabbMax,
+                       bool hasGeometry) noexcept
+{
+    using Orange::Engine::Render::Camera;
+
+    const glm::vec3 dir = glm::normalize(glm::vec3(1.0f, 0.8f, 1.0f));
+    constexpr float kFovY = glm::radians(45.0f);
+
+    glm::vec3 center(0.0f);
+    glm::vec3 eye(0.0f, 0.0f, 3.0f);
+    float     near = 0.1f;
+    float     far  = 100.0f;
+
+    const glm::vec3 extent = aabbMax - aabbMin;
+    const float     radius = hasGeometry ? glm::length(extent) * 0.5f : 0.0f;
+    if (hasGeometry && radius > 1e-4f)
+    {
+        center = (aabbMin + aabbMax) * 0.5f;
+        // dist = r / sin(fov/2) 框满，再 *1.1 留 10% padding。
+        const float dist = (radius / std::sin(kFovY * 0.5f)) * 1.1f;
+        eye  = center + dir * dist;
+        near = std::max(0.01f, dist - radius * 2.0f);
+        far  = dist + radius * 2.0f;
+    }
+    // else：退化兜底——保持初始 eye=(0,0,3) 看原点 + 默认 near/far。
+
+    auto* cam = world.GetComponent<Camera>(cameraEntity);
+    if (cam == nullptr) { return false; }
+    *cam = Camera::Perspective(kFovY, 1.0f, near, far);
+    cam->view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
+    return true;
+}
+
 }  // namespace
 
 std::uint64_t ThumbnailService::ComputeContentHash(
@@ -244,6 +288,11 @@ ImTextureID ThumbnailService::GetOrRequestPrefabThumbnail(const std::string& pre
     return RequestThumbnail(prefabPath, ThumbKind::Prefab);
 }
 
+ImTextureID ThumbnailService::GetOrRequestMeshThumbnail(const std::string& meshPath)
+{
+    return RequestThumbnail(meshPath, ThumbKind::Mesh);
+}
+
 ImTextureID ThumbnailService::RequestThumbnail(const std::string& path, ThumbKind kind)
 {
     if (path.empty()) { return 0; }
@@ -260,7 +309,7 @@ ImTextureID ThumbnailService::RequestThumbnail(const std::string& path, ThumbKin
                 return ComputeContentHash(*inst);
             }
         }
-        else  // Prefab
+        else if (kind == ThumbKind::Prefab)
         {
             if (mHost.assets.pAssets != nullptr)
             {
@@ -275,6 +324,12 @@ ImTextureID ThumbnailService::RequestThumbnail(const std::string& path, ThumbKin
                     }
                 }
             }
+        }
+        else  // Mesh
+        {
+            // mesh content hash = 路径 FNV（与 bake 时一致）。mesh 文件内容变化
+            // 罕见，路径 hash 足够稳定，命中后必相等，不触发无谓重烘。
+            return HashString(kFnvOffset, path);
         }
         return std::nullopt;
     };
@@ -368,6 +423,8 @@ void ThumbnailService::Shutdown()
     mScratchBuilt = false;
     mpPrefabScratchWorld.reset();
     mPrefabScratchBuilt = false;
+    mpMeshScratchWorld.reset();
+    mMeshScratchBuilt = false;
     DestroySampler();
 }
 
@@ -377,11 +434,12 @@ bool ThumbnailService::BakeThumbnail(const std::string& path, ThumbKind kind,
     if (mpPipeline == nullptr) { return false; }
     if (mSampler == VK_NULL_HANDLE) { return false; }
 
-    // 按 kind 分派到对应烘焙路径。两者各自构造 scratch world 后收敛到 FinalizeBake。
+    // 按 kind 分派到对应烘焙路径。各路径各自构造 scratch world 后收敛到 FinalizeBake。
     switch (kind)
     {
         case ThumbKind::Material: return BakeMaterialThumbnail(path, frameIndex);
         case ThumbKind::Prefab:   return BakePrefabThumbnail(path, frameIndex);
+        case ThumbKind::Mesh:     return BakeMeshThumbnail(path, frameIndex);
     }
     return false;
 }
@@ -626,35 +684,11 @@ bool ThumbnailService::BakePrefabThumbnail(const std::string& prefabPath,
         }
     }
 
-    // 5) 据 AABB 摆相机。3/4 视角方向 dir = normalize(1, 0.8, 1)，dist 据
-    //    包围球半径 + fov 留 ~10% padding。退化兜底：无带 mesh 的 renderable /
-    //    AABB 退化（半径≈0）→ 固定相机 eye=(0,0,3) 看原点（防除零 / NaN）。
+    // 5) 据 AABB 摆相机（共用 helper，prefab / mesh 同一段相机数学）。返回 false
+    //    表示相机 entity 上没有 Camera 组件 —— 中止（守卫会清实例）。
+    if (!FrameCameraToAABB(world, mPrefabCameraEntity, aabbMin, aabbMax, hasGeometry))
     {
-        const glm::vec3 dir = glm::normalize(glm::vec3(1.0f, 0.8f, 1.0f));
-        constexpr float kFovY = glm::radians(45.0f);
-
-        glm::vec3 center(0.0f);
-        glm::vec3 eye(0.0f, 0.0f, 3.0f);
-        float     near = 0.1f;
-        float     far  = 100.0f;
-
-        const glm::vec3 extent = aabbMax - aabbMin;
-        const float     radius = hasGeometry ? glm::length(extent) * 0.5f : 0.0f;
-        if (hasGeometry && radius > 1e-4f)
-        {
-            center = (aabbMin + aabbMax) * 0.5f;
-            // dist = r / sin(fov/2) 框满，再 *1.1 留 10% padding。
-            const float dist = (radius / std::sin(kFovY * 0.5f)) * 1.1f;
-            eye  = center + dir * dist;
-            near = std::max(0.01f, dist - radius * 2.0f);
-            far  = dist + radius * 2.0f;
-        }
-        // else：退化兜底——保持初始 eye=(0,0,3) 看原点 + 默认 near/far。
-
-        auto* cam = world.GetComponent<Camera>(mPrefabCameraEntity);
-        if (cam == nullptr) { return false; }  // 守卫会清实例
-        *cam = Camera::Perspective(kFovY, 1.0f, near, far);
-        cam->view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
+        return false;
     }
 
     // 6) 公共尾段。content hash = prefab templateBlob 的 FNV。
@@ -665,6 +699,113 @@ bool ThumbnailService::BakePrefabThumbnail(const std::string& prefabPath,
 
     // 7) 实例清理由 guard 析构统一执行（无论 ok 与否）。
     return ok;
+}
+
+bool ThumbnailService::BakeMeshThumbnail(const std::string& meshPath,
+                                         std::uint64_t      frameIndex)
+{
+    using namespace Orange::Engine;
+    using Orange::Engine::Render::Camera;
+    using Orange::Engine::Render::DirectionalLight;
+    using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
+    using Orange::Engine::Render::RenderableComponent;
+    using Orange::Engine::Scene::TransformComponent;
+
+    auto* pReg = mHost.assets.pAssets.get();
+    if (pReg == nullptr) { return false; }
+
+    // 1) Load<MeshAsset> 拿 handle（失败 return false 出队，不无限重试）。
+    auto loaded = pReg->Load<Orange::Engine::Asset::MeshAsset>(meshPath);
+    if (loaded.IsErr()) { return false; }
+    const auto meshHandle = loaded.Value();
+    const auto* pMesh = pReg->Get(meshHandle);
+    if (pMesh == nullptr) { return false; }
+
+    // 2) 默认材质 —— mesh 自身无材质，固定用内置 PBR baseline 着色（pPbrMaterial，
+    //    Cook-Torrance，最能体现 DCC 模型的形体）。缺失则回退默认 renderable 材质
+    //    （textured）；两者都没有则中止（无法着色）。
+    Orange::Engine::Render::MaterialInstance* defaultMat =
+        mHost.assets.pPbrMaterial.get();
+    if (defaultMat == nullptr)
+    {
+        defaultMat = mHost.assets.pDefaultRenderableMaterial.get();
+    }
+    if (defaultMat == nullptr) { return false; }
+
+    // 3) 确保 mesh scratch world 就位（首次建常驻 camera + dir-light + 单个
+    //    renderable entity；后续 bake 只换 rc.mesh 指针、按 AABB 重摆相机）。
+    if (!mMeshScratchBuilt)
+    {
+        mpMeshScratchWorld = std::make_unique<World>();
+        World& w = *mpMeshScratchWorld;
+
+        // 相机：姿态每次 bake 按当前 mesh AABB 重设（FrameCameraToAABB 覆写），
+        // 此处先建好 entity + 占位 Camera。
+        mMeshCameraEntity = w.CreateEntity();
+        Camera cam = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        cam.view   = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                 glm::vec3(0.0f, 0.0f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
+        w.AddComponent(mMeshCameraEntity, cam);
+
+        // 方向光：与材质球 / prefab 同款左上前方侧光。
+        Entity lightE = w.CreateEntity();
+        TransformComponent lt{};
+        lt.rotation =
+            MakeDirectionalLightRotationFromDir(glm::vec3(-0.4f, -0.5f, -1.0f));
+        w.AddComponent(lightE, lt);
+        w.AddComponent(lightE, DirectionalLight{});
+
+        // 单个 renderable entity：identity Transform + Renderable{mesh, 默认材质}。
+        // mesh / material 指针每次 bake 更新（见下）。
+        mMeshRenderableEntity = w.CreateEntity();
+        w.AddComponent(mMeshRenderableEntity, TransformComponent{});
+        RenderableComponent rc;
+        rc.mesh             = meshHandle;
+        rc.materialInstance = defaultMat;
+        w.AddComponent(mMeshRenderableEntity, rc);
+
+        mMeshScratchBuilt = true;
+    }
+    else
+    {
+        // 复用 scratch：仅更新 mesh handle + material 指针（camera / light 不变，
+        // 相机姿态下面按当前 AABB 重设）。
+        auto* rc = mpMeshScratchWorld->GetComponent<RenderableComponent>(
+            mMeshRenderableEntity);
+        if (rc == nullptr) { return false; }
+        rc->mesh             = meshHandle;
+        rc->materialInstance = defaultMat;
+    }
+
+    World& world = *mpMeshScratchWorld;
+
+    // 4) 算单 mesh 的 world AABB —— identity transform（mesh 摆原点不旋转不缩放），
+    //    所以 world AABB == local AABB。空 mesh → hasGeometry=false 走退化兜底。
+    glm::vec3 aabbMin(0.0f);
+    glm::vec3 aabbMax(0.0f);
+    bool      hasGeometry = false;
+    if (!pMesh->Empty())
+    {
+        const LocalAABB localAABB = ComputeMeshLocalAABB(*pMesh);
+        const LocalAABB worldAABB =
+            TransformAABB(localAABB, ComposeWorldMatrix(TransformComponent{}));
+        aabbMin     = worldAABB.min;
+        aabbMax     = worldAABB.max;
+        hasGeometry = true;
+    }
+
+    // 5) 据 AABB 摆相机（与 prefab 共用 helper）。
+    if (!FrameCameraToAABB(world, mMeshCameraEntity, aabbMin, aabbMax, hasGeometry))
+    {
+        return false;
+    }
+
+    // 6) 公共尾段。content hash = mesh 路径 FNV（与 RequestThumbnail 比对源一致）。
+    //    renderable 常驻、只换指针，无 prefab 那样的实例子树，无需 DestroySubtree。
+    ThumbEntry& entry = mCache[meshPath];
+    const std::uint64_t hash = HashString(kFnvOffset, meshPath);
+    return FinalizeBake(entry, meshPath, world, frameIndex, hash, ThumbKind::Mesh);
 }
 
 void ThumbnailService::ReleaseEntry(ThumbEntry& entry)

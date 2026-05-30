@@ -64,11 +64,13 @@ namespace Orange::Editor::Render
 {
 
 // 缩略图种类 —— 决定"如何构造被渲染的 scratch world"与"content hash 源"。
-// Material：材质球（sphere + .material instance）；Prefab：prefab 实例化预览。
+// Material：材质球（sphere + .material instance）；Prefab：prefab 实例化预览；
+// Mesh：DCC 导入的 .mesh 用默认材质渲染的单 mesh 预览。
 enum class ThumbKind
 {
     Material,
     Prefab,
+    Mesh,
 };
 
 class ThumbnailService
@@ -107,6 +109,12 @@ public:
     // scratch world → 算 AABB 框相机 → RenderToTexture → 缓存。content-hash
     // 源是 PrefabAsset 的 templateBlob（编辑或重存后会变 → 自动重烘）。
     ImTextureID GetOrRequestPrefabThumbnail(const std::string& prefabPath);
+
+    // mesh 缩略图入口（与上面对位）。Load<MeshAsset> → 用默认 PBR 材质渲到
+    // mesh-scratch world → 算单 mesh local AABB 框相机 → RenderToTexture →
+    // 缓存。content-hash 源是 mesh 路径的 FNV（mesh 文件内容变化罕见，路径 hash
+    // 足够；mesh 缩略图 invalidate 需求低）。
+    ImTextureID GetOrRequestMeshThumbnail(const std::string& meshPath);
 
     // 帧外安全点调用（viewport Render 已 WaitIdle、ImGui 未提交、引擎 BeginFrame
     // 未开始）：取 ≤ maxPerFrame 个 pending 逐个 bake；顺带做 LRU 淘汰。
@@ -165,6 +173,12 @@ private:
     // 都清理，避免实例残留污染下次 AABB）。
     bool BakePrefabThumbnail(const std::string& prefabPath, std::uint64_t frameIndex);
 
+    // mesh 烘焙：Load<MeshAsset> → 复用 mesh scratch world（常驻 camera + light +
+    // 单个 renderable，每次只换 rc.mesh，material 固定为默认 PBR）→ 算单 mesh
+    // local AABB（identity transform）框相机 → FinalizeBake。mesh scratch 不像
+    // prefab 那样实例化新子树，renderable 常驻，无需 DestroySubtree。
+    bool BakeMeshThumbnail(const std::string& meshPath, std::uint64_t frameIndex);
+
     // 公共烘焙尾段（material / prefab 共用）：取 / 建 entry.pRt → RenderToTexture
     // 渲 scratchWorld 到该 RT → AddTexture 包 descriptor set → 写缓存元数据
     // （contentHash / lastUsedFrame / kind）。返回 false 表示 RT 建失败 / 渲染失败
@@ -221,6 +235,15 @@ private:
     std::unique_ptr<Orange::Engine::World> mpPrefabScratchWorld;
     Orange::Engine::Entity mPrefabCameraEntity{};
     bool                   mPrefabScratchBuilt{false};
+
+    // 可复用的 mesh scratch world —— 持有常驻 camera + dir-light + 单个 renderable
+    // entity。每次 mesh bake 只换 renderable 的 rc.mesh 指针（material 固定为默认
+    // PBR）、按当前 mesh 的 local AABB 重摆相机。与材质球 scratch 模式同构（复用、
+    // 只换指针），区别在于 mesh 可变、material 固定，而材质球反之。
+    std::unique_ptr<Orange::Engine::World> mpMeshScratchWorld;
+    Orange::Engine::Entity mMeshCameraEntity{};
+    Orange::Engine::Entity mMeshRenderableEntity{};
+    bool                   mMeshScratchBuilt{false};
 };
 
 }  // namespace Orange::Editor::Render
