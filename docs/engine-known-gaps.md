@@ -580,7 +580,7 @@ case SceneOp::New: {
 
 ---
 
-## GAP-2026-05-22-editor-material-create-and-thumbnail-missing ✅（G1）
+## GAP-2026-05-22-editor-material-create-and-thumbnail-missing ✅（G1+G2）
 
 - **发现方**：用户 v1.0 验收后试搭场景观察（"想新建一个材质 / 想看 Asset 浏览器里材质长什么样"）
 - **发现日期**：2026-05-22
@@ -636,6 +636,7 @@ case SceneOp::New: {
 - **处理**：
   - **2026-05-23（v1.1.1 patch）✅ G1 完整闭环**：Asset Browser 右键 → Create → Material modal + 自动 lazy create live instance + DnD 应用到实体 + Inspector cache 同步（v1.2.x patch 系列共 7 个 patch 把"新材质工作流"打磨到不写代码完成日常工作的水平）。Lumix / Unity 工业惯例 1:1 对位
   - **2026-05-24（v1.3.0 minor）trim 决策**：原拟 G2 缩略图与 grid pass 迁出 + Pipeline 中性化合并到 v1.3.0 bundle，本 session 评估后判断球体真渲染需复刻 mini-pipeline（PSO + scene descriptor set + dummy lights + IBL bind + push constants）500-800 LOC 独立设计点，与本 GAP 状态字段"留独立议题讨论后立项"原意匹配 —— trim 出去到 v1.4.0 minor 独立议题。v1.3.0 走 2 完整功能区（中性化 + grid 迁出）满足 [[feedback-minor-bump-must-carry-multiple-features]] 门槛
+  - **2026-05-30 ✅ G2 缩略图落地**（OE `5bacd12`，"继续找事情做到六点" goal session）：走当初列的**候选 (c)**——复用 Pipeline 渲染到任意 RT。前置 `Pipeline::RenderToTexture`（[[GAP-2026-05-24-pipeline-cannot-render-to-arbitrary-rt]] G1，本 session 落地，OE `be0bb24`）就位后，编辑器侧新 `ThumbnailService`（`tools/OrangeEditor/render/`，schema-first 独立模块挂 EditorHost 服务字段，**不塞 mega-class**）**复用 viewport 同一个 Pipeline 实例**渲材质球（sphere mesh + 侧光 + 复用 viewport IBL）到 96×96 RT → `ImGui_ImplVulkan_AddTexture` → Asset Browser `ImGui::Image` 替代 `[Mat]` 文本。lazy bake（可见才入 pending）+ 帧限额（≤3/帧）+ per-session LRU 缓存 + content-hash invalidate（template + 排序 uniform + texture binding，不依赖 UI 信号）+ Save 显式 invalidate。**关键正确性**：① bake 时机 = OnUpdate 所有 Draw*Panel 后、`ImGui::Render` 前（viewport Render 已 WaitIdle、ImGui 未提交、引擎 BeginFrame 前，唯一帧外安全点）；② descriptor set 生命周期 = RT 96×96 固定 → view 句柄不变 → set 首次 AddTexture 后永久有效（重烘只重渲 RT 不重建 set），`RemoveTexture` 只在 LRU evict/Shutdown（帧外），`Invalidate` 帧内只置哨兵 hash 不释放（避免释放本帧 draw data 引用的 set）。验收 `tests/render/MaterialThumbnailBakeTest`（sphere+PBR → RenderToTexture → 中心非黑 lum=1.533/1.561）+ ctest 66/66 零回归 + editor_build_smoke。**缩略图布局/识别度/滚动手感/invalidate 实时性待视觉 dogfood**。G3（Save Inspector overrides as new material）仍 backlog。**未做**：磁盘缓存 `.thumb.png` / mesh thumbnail / scene snapshot（复用同 ThumbnailService + RenderToTexture，只换 scratch world）
 - **技术方案讨论 placeholder（v1.4.0 议题准备）**：thumbnail 烘培走哪条 Pipeline 路径 —— 候选 (a) 编辑器侧 mini-pipeline（独立 PSO + scene desc set + 内置球体 mesh + dummy 1 dir light + 复用 dummy IBL + 复用 material push constant 公共部分）；候选 (b) Lumix 简化路径（仅 base color 着色 tile，无真球体渲染，适用于 50+ 材质快速识别，球体保真度低）；候选 (c) 复用 Pipeline 改造为可渲染到任意 RT（侵入 engine，工作量最大）。缓存策略：per-session 内存 vs 磁盘 .material.thumb.png；触发器：lazy on visible vs 启动期 batch；G3 vs G1 优先级
 - **关联**：[[GAP-2026-05-16-builtin-asset-disk-serialization]] / [[GAP-2026-05-16-material-system-enumerate-and-instance-overrides]] / [[GAP-2026-05-14-renderable-material-instance-round-trip]]（前置已落地基础）；[[reference-polyhaven-hdri]] / [[reference-lumix-ibl-filter]]（参考方案）
 
