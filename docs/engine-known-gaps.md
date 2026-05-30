@@ -1496,7 +1496,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-24-pipeline-cannot-render-to-arbitrary-rt
+## GAP-2026-05-24-pipeline-cannot-render-to-arbitrary-rt ✅（G1 落地）
 
 - **发现方**：v1.3.0 minor planning（材质球缩略图 GAP-2026-05-22 G2 trim 决策评估）
 - **发现日期**：2026-05-24
@@ -1540,6 +1540,7 @@ src/render/
 ### 状态
 
 - **登记**：2026-05-24
+- **✅ 落地（G1，2026-05-30）**：`Pipeline::RenderToTexture(World&, RHITexture* target, w, h)` 公共面落地（OE `be0bb24`）。选 **G1**（不走 G2 MiniRenderer / G3 编辑器自建）—— 复用 `RenderOffscreen` 整条逻辑（shadow/sky/主 PBR/passthrough），RAII swap 一套独立缓存的 scratch frame-targets（`rttHdr`/`rttDepth`/`rttPassthroughSet` 按 target 尺寸 lazy 建）进活动槽位渲任意尺寸，渲完 swap 回——`RenderOffscreen` 本身**零改动** + viewport 缓存不被破坏。**3 个关键实现认知**（踩坑沉淀）：① OrangeRender RHI **无 texture→texture copy**（只有 CopyBuffer/CopyBufferToTexture/CopyTextureToBuffer）→ 最终 passthrough **直接渲外部 target**，不能渲内部 scratch 再 copy；② offscreen 路径已接全套 post pass（SSAO/SSR/ContactShadow/DoF/Bloom），且 `FindActive*Pass` 走 **`postComponentActive`（组件）+ `postProcessChain`（chain）两条**判定 → RTT 隔离需 `postProcessChain=nullptr` **+** `SyncPostProcessFromWorld` early-return **双 gate**（单 swap chain=nullptr 挡不住组件路径，是实测发现）；③ `passthroughPool` maxSets 1→2（primary + rtt scratch 各一 set）。**`RenderToTexture` 内须先 `impl.scene.Clear()+Collect(world)`**（RenderOffscreen 消费 impl.scene）。验收 headless 像素级（`tests/render/PipelineRenderToTextureTest`：亮色 PBR quad 渲进外部 64×64 BGRA8、中心像素非黑 + 不破坏 viewport + scratch 缓存复用），全套 **ctest 64/64 零回归**。**下游解锁**：材质球缩略图（[[GAP-2026-05-22-editor-material-create-and-thumbnail-missing]] G2）/ mesh thumbnail / scene snapshot 现可走统一入口，编辑器消费（接 `ImGui::Image`）是后续 **editor session**。**未实施**：G2 MiniRenderer（更模块化但工作量大，G1 够用）；后处理在 RTT 路径（S1 故意 skip，缩略图不需要 SSAO/bloom）。
 - **优先级**：**P2（架构 enabler）** —— 不阻塞当前功能，但 5+ 候选未来 milestone 都堵在它上面；越早决策 G1 vs G2 vs G3 后续多 milestone 累积返工成本越低
 - **归属**：v1.4.0 minor 议题第一性问题（与材质球缩略图 GAP-2026-05-22 G2 同 session 讨论；G2 拉动条件 = 本 GAP 决策结果决定 thumbnail 走哪条路径）
 - **议题候选**：G1 / G2 / G3 的 trade-off 评估；OR 端是否需要任何 RHI 接口扩展（当前评估不需要 —— FEATURE-2026-05-24 已提供完整 RT 公共面）
