@@ -26,6 +26,7 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/SoundAsset.h>
 
+#include <orange/engine/animation/AnimationSystem.h>
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/audio/AudioEngine.h>
 #include <orange/engine/audio/AudioSourceComponent.h>
@@ -257,16 +258,10 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
             }
         }
 
-        // Animator tick
-        {
-            using namespace Orange::Engine::Animation;
-            for (auto e : mHost.scene.pWorld->Registry().view<AnimatorComponent>()) {
-                auto& ac = mHost.scene.pWorld->Registry().get<AnimatorComponent>(e);
-                if (ac.animator != nullptr) {
-                    ac.animator->Tick(dt);
-                }
-            }
-        }
+        // Animator tick —— 走引擎层 Animation::TickAnimators（单一真相源，
+        // 游戏侧消费同一入口；DRY）。行为与此前内联循环一致：遍历所有
+        // AnimatorComponent，对非空 animator 调 Tick(dt)。
+        Orange::Engine::Animation::TickAnimators(*mHost.scene.pWorld, dt);
 
         // Audio: 同步 component 字段 → 已实例化的 SoundInstance（用户在
         // Play 期改 volume / pitch / loop slider 时声音实时跟随）。pitch /

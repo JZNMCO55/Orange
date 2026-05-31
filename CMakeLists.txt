@@ -136,6 +136,7 @@ add_library(orange_engine STATIC
     # AnimatorRegistry 公共接口（Phase 4 / Task 01）。Skeletal /
     # Procedural 后端实现见 src/animation/dragonbones / Task 03 / 04。
     src/animation/AnimationStateMachine.cpp
+    src/animation/AnimationSystem.cpp
     src/animation/AnimatorRegistry.cpp
     src/animation/ProceduralAnimator.cpp
 

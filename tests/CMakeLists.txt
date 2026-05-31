@@ -24,6 +24,10 @@ orange_engine_add_test(core_serialization_test  core/SerializationTest.cpp)
 orange_engine_add_test(asset_registry_test      asset/AssetRegistryTest.cpp)
 orange_engine_add_test(async_asset_test         asset/AsyncAssetTest.cpp)
 orange_engine_add_test(mesh_tangent_loader_test asset/MeshTangentLoaderTest.cpp)
+# Animation：AnimationSystem / TickAnimators 的 ECS 集成（World 上所有
+# AnimatorComponent 每帧 tick）。纯 orange_engine（World + AnimatorComponent +
+# ProceduralAnimator + MaterialInstance），无 Vulkan/GUI/dragonbones。
+orange_engine_add_test(animation_system_test    animation/AnimationSystemTest.cpp)
 orange_engine_add_test(spirv_disk_loader_test  asset/SpirvDiskLoaderTest.cpp)
 
 # MikkTSpace 切线生成（A2 Inc2）—— 测的是 OrangeEditor import helper
