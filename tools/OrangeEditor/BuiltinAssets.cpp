@@ -548,6 +548,26 @@ void InitializeEditorAssets(EditorHost& host)
     host.assets.pLightObjectMaterial       = bakeAndLoadMaterial(
         "assets/materials/builtin/light_object.material", "emissive");
 
+    // 程序化动画史莱姆专属材质 —— 必须用 pbr 模板（160B push constant，
+    // Pipeline drawable loop 才走 uBaseColor / uMRA 喂入分支；toon / textured /
+    // emissive 是 128B，uBaseColor override 不进 push constant → 看不到脉动）。
+    // 直接 CreateInstance 不经磁盘 .material（无 warn、不污染
+    // BuildNamedMaterialInstances）。独占实例不与其它共用，避免动画污染别的物体。
+    // 初值给史莱姆绿；Play 模式下 ProceduralAnimator 每帧覆写 uBaseColor 做呼吸脉动。
+    host.assets.pAnimatedMaterial = host.assets.pMaterials->CreateInstance("pbr");
+    if (host.assets.pAnimatedMaterial != nullptr)
+    {
+        host.assets.pAnimatedMaterial->SetUniform("uBaseColor",
+            glm::vec4(0.12f, 0.75f, 0.40f, 1.0f));  // 史莱姆绿初值
+        host.assets.pAnimatedMaterial->SetUniform("uMRA",
+            glm::vec4(0.0f, 0.55f, 1.0f, 0.0f));    // 非金属 + 中等粗糙 + ao=1
+    }
+    else
+    {
+        ORANGE_LOG_WARN("[OrangeEditor] CreateInstance('pbr') for animated "
+                        "material 返回 null —— 动画史莱姆将不可见");
+    }
+
     // PBR showcase 18 个 MaterialInstance —— 两组 3×3 球阵的 per-instance
     // 配置。lazy bake 写到 assets/materials/pbr_showcase/，pbr_showcase.scene.json
     // 通过 materialInstanceId 字符串引用。第一次启动时若 .material 不存在则
@@ -630,21 +650,31 @@ void InitializeEditorAssets(EditorHost& host)
     // dragonbones 后端依赖 DragonBonesContext + skeleton asset，编辑器 demo
     // 暂不消费，等 v0.7 Animation 子模式上线后再注册。
     //
-    // factory 捕获 dissolve material 的裸指针——pDissolveMaterial 由本
-    // context 拥有，生命周期 ≥ AnimatorRegistry，指针稳定。channel 列表
-    // 故意只塞一条占位 dissolve_t，目的是让 c4 IEditorInspectorPlugin
-    // mini-preview 能读到 ChannelCount > 0；UBO 通路未接通前 channel 写入
-    // 不会真正影响 GPU 端 uniform（参 ProceduralAnimator.h 头注释）。
+    // factory 捕获动画史莱姆材质的裸指针——pAnimatedMaterial 由本 context
+    // 拥有，生命周期 ≥ AnimatorRegistry，指针稳定。channel 写 uBaseColor 做
+    // 绿色呼吸脉动：Pipeline 的 pbr 路径每帧读 MaterialInstance 的 uBaseColor
+    // override 进 push constant（见 Pipeline.cpp drawable loop pcSize>=160 分支），
+    // 故 Play 模式下挂了本 backend + Renderable(pAnimatedMaterial) 的实体能看到
+    // 颜色脉动。factory 是 Scene::Load 重建 AnimatorComponent 的真相源，故
+    // Save/Load 后动画行为与 New Scene 一致。
     host.assets.pAnimators = std::make_unique<Orange::Engine::Animation::AnimatorRegistry>();
     {
-        auto* pDissolveTarget = host.assets.pDissolveMaterial.get();
-        auto factory = [pDissolveTarget]()
+        auto* pAnimTarget = host.assets.pAnimatedMaterial.get();
+        auto factory = [pAnimTarget]()
             -> std::unique_ptr<Orange::Engine::Animation::IAnimator>
         {
             auto anim = std::make_unique<
-                Orange::Engine::Animation::ProceduralAnimator>(pDissolveTarget);
-            anim->AddChannel<float>("dissolve_t",
-                                    [](float t) { return t * 0.5f; });
+                Orange::Engine::Animation::ProceduralAnimator>(pAnimTarget);
+            // 绿色史莱姆呼吸：绿色分量在亮暗间脉动，红蓝低位微调营造果冻质感。
+            anim->AddChannel<glm::vec4>(
+                "uBaseColor",
+                [](float t) {
+                    const float pulse = 0.5f + 0.5f * std::sin(t * 2.2f);
+                    return glm::vec4(0.08f + 0.10f * pulse,
+                                     0.45f + 0.45f * pulse,
+                                     0.30f + 0.15f * pulse,
+                                     1.0f);
+                });
             return anim;
         };
         if (auto rb = host.assets.pAnimators->RegisterBackend("procedural", factory);

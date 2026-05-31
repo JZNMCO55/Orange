@@ -51,6 +51,10 @@ struct EditorAssetContext
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pRimLightMaterial; // fresnel rim glow
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pDissolveMaterial; // noise 溶解 + 发光边沿
     std::unique_ptr<Orange::Engine::Render::MaterialInstance> pPbrMaterial;      // Cook-Torrance PBR baseline
+    // 程序化动画史莱姆专属材质（pbr 模板 —— 160B push constant 走 uBaseColor
+    // 喂入分支，让 ProceduralAnimator 每帧写的 uBaseColor 脉动真到 GPU）。
+    // 独占实例，不与 pPbrMaterial/pToonMaterial 共用，避免动画污染其它物体。
+    std::unique_ptr<Orange::Engine::Render::MaterialInstance> pAnimatedMaterial;
 
     // "Create Light Object" / "Add Renderable Component" 等编辑器创建路径
     // 共用的默认 material instance：

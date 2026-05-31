@@ -396,16 +396,32 @@ void SeedDemoWorld(EditorHost& host)
         world.AddComponent<ParticleEmitterComponent>(sparkleEmitter, pec);
     }
 
-    // ---- Slime Doll（Animator-only，无 Renderable）-----------------------
-    // 位置贴在 Glow Box 上方，方便在 Inspector 选实体时 viewport 大致定位；
-    // 没有 Renderable 是刻意决定（参 entity 创建段注释）。
+    // ---- Slime Doll（procedural Animator + Renderable）-------------------
+    // "编辑器内动画播放"端到端可见 demo：sphere + pAnimatedMaterial（pbr 模板），
+    // 挂 procedural Animator。Enter Play → EditorRenderLayer 每帧 Tick animator →
+    // ProceduralAnimator 覆写 pAnimatedMaterial 的 uBaseColor → Pipeline pbr 路径
+    // 每帧读 override 进 push constant → 球做绿色呼吸脉动。位置贴在 Glow Box 上方。
     {
         auto* tc = world.GetComponent<TransformComponent>(slimeDoll);
-        if (tc != nullptr) { tc->position = glm::vec3(0.8f, 1.2f, 0.5f); }
+        if (tc != nullptr) { tc->position = glm::vec3(0.8f, 1.6f, 0.5f); }
+
+        // Renderable —— sphere mesh + 动画专属材质。pAnimatedMaterial 为空（pbr
+        // 模板未注册等极端情况）时退化为不挂 Renderable，仅保留 Animator 段。
+        if (host.assets.pAnimatedMaterial != nullptr)
+        {
+            RenderableComponent rc{};
+            rc.mesh             = host.assets.sphereMeshHandle;
+            rc.materialInstance = host.assets.pAnimatedMaterial.get();
+            rc.visible          = true;
+            rc.castsShadow      = true;
+            world.AddComponent<RenderableComponent>(slimeDoll, rc);
+        }
 
         AnimatorComponent ac{};
         if (host.assets.pAnimators != nullptr)
         {
+            // factory 已把 target 设为 pAnimatedMaterial + 注册 uBaseColor 呼吸
+            // channel（见 BuiltinAssets.cpp AnimatorRegistry 段）。
             ac.animator = host.assets.pAnimators->Create("procedural");
         }
         world.AddComponent<AnimatorComponent>(slimeDoll, std::move(ac));
