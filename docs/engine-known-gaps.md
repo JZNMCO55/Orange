@@ -2272,12 +2272,12 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ### 状态
 
-- **G1（headless mesh import）✅ 2026-05-31 落地**（OE `6f8ba0e`，goal session "自主打磨引擎 gap"）；G2（.scene.json 生成 / 校验工具）+ G3（端到端 CLI 管线编排）仍仅登记、未排期。
+- **G1（headless mesh import）✅ 2026-05-31 落地**（OE `08646d8`，goal session "自主打磨引擎 gap"）；G2（.scene.json 生成 / 校验工具）+ G3（端到端 CLI 管线编排）仍仅登记、未排期。
 - **优先级**：P3（撞上即升格）。当前首游处于 graybox / 手感 spike 阶段，用内置 `cube.mesh` / `plane.mesh` + GUI 摆位 / 手写少量 scene.json 已够；**G2/G3 全 CLI 管线在"程序化批量生成场景道具"成为实际瓶颈时才升格**。
 - **归属**：G1 ✅ 属 OrangeEditor（headless 入口形态，importer 核心解耦——已落地）；G2 可引擎侧 CLI 或独立 Python 工具；待独立 session 评审拆解，不在当前 critical path。
 - **关联**：[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（GUI importer 前置，本条补其 headless 维度）；[[GAP-2026-05-27-play-in-editor]] / workspace 项目模型（同属"工具链闭环 + 让游戏真正用上引擎"一束，CLI 内容管线与 PIE 正交但同向）。
 
-### G1 落地记录（headless mesh import seam + CLI，2026-05-31，OE `6f8ba0e`）
+### G1 落地记录（headless mesh import seam + CLI，2026-05-31，OE `08646d8`）
 
 把资产导入从"只能 GUI 调用"解耦出**registry-only seam**——不拉起 GLFW / Vulkan / ImGui / AudioEngine / ThumbnailService 即可吃 `.obj / .gltf / .glb` 走 ADR-008 四件套（转 `.mesh` + copy 源 + 写 `.meta` + 入 AssetRegistry）。复核确认 importer 对 `EditorHost` 的真实耦合面：obj / texture 仅 `host.assets.pAssets`；gltf 额外一处 `EnsureMaterialInstance(host, ...)`（写出 `.material` 后注册进编辑器 namedMaterialInstances 缓存，纯编辑器态副作用）。
 
