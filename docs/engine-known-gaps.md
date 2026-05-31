@@ -2225,7 +2225,7 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ---
 
-## GAP-2026-05-27-headless-asset-import-and-scene-generation-cli
+## GAP-2026-05-27-headless-asset-import-and-scene-generation-cli ✅（G1 headless mesh import）
 
 - **发现方**：Orange-Ecosystem umbrella session 讨论 "CLI 建模工具 → 关卡内容" 工作流时
 - **发现日期**：2026-05-27
@@ -2272,10 +2272,21 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ### 状态
 
-- **仅登记，未实现 / 未排期**。本条是 ADR-010 work-queue 登记动作（纯文档，不实现不消费），登记 session 不碰代码。
-- **优先级**：P3（撞上即升格）。当前首游处于 graybox / 手感 spike 阶段，用内置 `cube.mesh` / `plane.mesh` + GUI 摆位 / 手写少量 scene.json 已够；**全 CLI 管线在"程序化批量生成场景道具"成为实际瓶颈时才升格**。
-- **归属候选**：G1 属 OrangeEditor（headless 入口形态，importer 核心解耦）；G2 可引擎侧 CLI 或独立 Python 工具；待独立 session 评审拆解，不在当前 critical path。
+- **G1（headless mesh import）✅ 2026-05-31 落地**（OE `6f8ba0e`，goal session "自主打磨引擎 gap"）；G2（.scene.json 生成 / 校验工具）+ G3（端到端 CLI 管线编排）仍仅登记、未排期。
+- **优先级**：P3（撞上即升格）。当前首游处于 graybox / 手感 spike 阶段，用内置 `cube.mesh` / `plane.mesh` + GUI 摆位 / 手写少量 scene.json 已够；**G2/G3 全 CLI 管线在"程序化批量生成场景道具"成为实际瓶颈时才升格**。
+- **归属**：G1 ✅ 属 OrangeEditor（headless 入口形态，importer 核心解耦——已落地）；G2 可引擎侧 CLI 或独立 Python 工具；待独立 session 评审拆解，不在当前 critical path。
 - **关联**：[[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（GUI importer 前置，本条补其 headless 维度）；[[GAP-2026-05-27-play-in-editor]] / workspace 项目模型（同属"工具链闭环 + 让游戏真正用上引擎"一束，CLI 内容管线与 PIE 正交但同向）。
+
+### G1 落地记录（headless mesh import seam + CLI，2026-05-31，OE `6f8ba0e`）
+
+把资产导入从"只能 GUI 调用"解耦出**registry-only seam**——不拉起 GLFW / Vulkan / ImGui / AudioEngine / ThumbnailService 即可吃 `.obj / .gltf / .glb` 走 ADR-008 四件套（转 `.mesh` + copy 源 + 写 `.meta` + 入 AssetRegistry）。复核确认 importer 对 `EditorHost` 的真实耦合面：obj / texture 仅 `host.assets.pAssets`；gltf 额外一处 `EnsureMaterialInstance(host, ...)`（写出 `.material` 后注册进编辑器 namedMaterialInstances 缓存，纯编辑器态副作用）。
+
+- **seam**：`ImportDispatcher` 加 `DispatchToRegistry` / `ImportObjMeshToRegistry` / `ImportGltfMeshToRegistry` / `ImportTextureToRegistry`——只依赖 `Orange::Engine::Asset::AssetRegistry&`，签名里不出现 `EditorHost`。gltf material 注册抽成可选 `MaterialRegisterFn` 回调（GUI 注入 `EnsureMaterialInstance`，headless 传空 = 不进编辑器缓存，`.material` 仍照常落盘）。
+- **`ImportHostBridge.cpp`（新 TU）**：集中所有 `EditorHost` 薄壳（`Dispatch` / `Import*` / `RunObjImport` / `RunGltfImport`），委托到 seam + 保留 `pAssets==nullptr` 守卫——**GUI 路径（File→Import 菜单 / drag-drop）行为零变化**。隔离到单独 TU 是硬需求：让 importer 实现 TU（含 tinyobjloader / cgltf `IMPLEMENTATION` 宏）保持 headless 可链，否则测试编译时会拽进 `EnsureMaterialInstance`（定义在不编的 `BuiltinAssets.cpp`）→ LNK2019。
+- **工厂**：`BuiltinAssets` 抽 `RegisterImportLoaders` / `CreateImportAssetRegistry`（仅 Mesh + Texture loader，均纯 CPU，零 GPU/GUI 依赖）；`InitializeEditorAssets` 复用（DRY，行为不变）。
+- **CLI 壳**：`main(argc,argv)`，在**任何** GLFW/Vulkan/ImGui init 之前判 `argv[1]==import-mesh|import` 走 headless 导入后退出（成功 0 / 缺路径 2 / registry 失败 3 / 导入失败 1）。dogfood 确认全程不拉 GUI、干净退出。
+- **验收**：`tests/editor/HeadlessMeshImportTest`（程序化写最小立方体 `.obj` → headless 导入 → 断言 `.mesh`(36 索引) + `.meta`(sourcePath/sourceHash) + 源 copy + `MeshLoader` 读回 + 两次导入字节一致（确定性）+ `DispatchToRegistry` ext 路由；`.gltf` 走 Avocado fixture `if(EXISTS)` 门控）。只链 `orange_engine`，零 Vulkan/GUI。**ctest 72/72**（新增 `headless_mesh_import_test`，含 `editor_build_smoke` standalone 消费链不回归）；`check_invariants` All OK。schema 未动（`.mesh` v4 / `.meta` 不变）。
+- **遗留 / 待 dogfood**：gltf headless 路径不注册编辑器材质缓存（有意，headless 无编辑器态）；`.glb` 内嵌贴图 / 多 material per mesh 是 importer 既有 gap（[[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]] 已记），本任务未触及；CLI `import-mesh` 真机批量调用手感待 dogfood。
 
 ---
 
@@ -2673,7 +2684,7 @@ sample 14 `--tonemap=<op>` CLI parsing + `chain.FindByName("tonemap")->op = ...`
 
 ---
 
-## GAP-2026-05-29-entity-tree-root-reorder-not-supported
+## GAP-2026-05-29-entity-tree-root-reorder-not-supported ✅
 
 - **发现方**：同上（GAP-2026-05-29-entity-tree-sibling-reorder 落地时识别的边界）
 - **发现日期**：2026-05-29
@@ -3025,7 +3036,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 
 ---
 
-## GAP-2026-05-30-render-pipeline-template-count-test-regression
+## GAP-2026-05-30-render-pipeline-template-count-test-regression ✅
 
 - **发现方**：2026-05-30 EntityGuid core session 收尾跑全套 ctest 时撞上（非本 session 改动引入——见"归因"）
 - **发现日期**：2026-05-30
@@ -3065,7 +3076,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 
 ---
 
-## GAP-2026-05-30-debug-render-views-engine-side
+## GAP-2026-05-30-debug-render-views-engine-side ✅
 
 - **发现方**：用户拉动（渲染出身最想要的诊断能力）；`editor-capability-gap-vs-mature.md` §3 P2
 - **发现日期**：2026-05-30
