@@ -9,11 +9,19 @@
 //
 // **磁盘 binary 格式（MeshLoader）演进**：v1 仅 positions+indices；
 // v2 追加可选 UV 段；v3 在 v2 之后追加可选 normal 段；v4 再追加可选
-// tangent 段（vec4：xyz 方向 + w 手性符号）。Load 兼容全部四个版本，
-// 缺失 normal 时由 loader 调用 ComputeSmoothNormalsFromTriangles 补算，
-// 缺失 tangent 但有 UV+normal 时调 ComputeTangentsFromTriangles 补算
-// （UV-based Lengyel fallback；高质量版由 importer 侧 mikktspace 在
-// import 期烘进 v4）。Save 始终写 v4。
+// tangent 段（vec4：xyz 方向 + w 手性符号）；v5 在末尾追加 sub-mesh 段
+// （每条 indexOffset / indexCount / materialSlot，支持单 mesh 拆多段、
+// 各段对应不同 material slot）。Load 兼容全部五个版本，缺失 normal 时
+// 由 loader 调用 ComputeSmoothNormalsFromTriangles 补算，缺失 tangent
+// 但有 UV+normal 时调 ComputeTangentsFromTriangles 补算（UV-based
+// Lengyel fallback；高质量版由 importer 侧 mikktspace 在 import 期烘进
+// v4）。Save 始终写 v5。
+//
+// sub-mesh 语义：mSubMeshes 为空 = 整 mesh 视作单一 sub-mesh、materialSlot
+// 0（向后兼容，旧 v1..v4 文件读出后保持空）；非空时每条 SubMesh 描述
+// indices[indexOffset, indexOffset+indexCount) 这一段三角形归属哪个
+// material slot。顶点 / 索引 buffer 仍是整 mesh 共享一份，sub-mesh 只是
+// 索引区间 + slot 路由信息。
 //
 // 这一层不做任何 GPU 上传——上传发生在 Render 模块把 MeshAsset 翻
 // 成 OrangeRender RHI buffer 的时刻。Asset 层只保证字节正确进了内存。
@@ -61,6 +69,18 @@ struct VertexTangent4
     float w{1.0f};
 };
 
+// 子网格（sub-mesh）—— 把一个 mesh 的索引缓冲切成若干连续区间，每个
+// 区间对应一个 material slot。indices[indexOffset, indexOffset+indexCount)
+// 是本段三角形的索引；materialSlot 是渲染端用来在 per-entity 的 material
+// slot 列表里挑材质的下标。所有 sub-mesh 共享整 mesh 的同一对 vertex /
+// index buffer（GPU 端不拆 buffer，只用 firstIndex / indexCount 分段绘制）。
+struct SubMesh
+{
+    std::uint32_t indexOffset{0};
+    std::uint32_t indexCount{0};
+    std::uint32_t materialSlot{0};
+};
+
 class ORANGE_ENGINE_API MeshAsset
 {
 public:
@@ -97,6 +117,7 @@ public:
     const std::vector<VertexNormal3>&   Normals() const noexcept { return mNormals; }
     const std::vector<VertexTangent4>&  Tangents() const noexcept { return mTangents; }
     const std::vector<std::uint32_t>&   Indices() const noexcept { return mIndices; }
+    const std::vector<SubMesh>&         SubMeshes() const noexcept { return mSubMeshes; }
 
     // tangent 通道与 normal / UV 不同，没有进构造函数（避免 5 参重载爆炸）——
     // loader / importer 构造完 mesh 后用本 setter 注入。空 vector 清除 tangent。
@@ -105,9 +126,17 @@ public:
         mTangents = std::move(tangents);
     }
 
+    // sub-mesh 列表与 normal / tangent 同款：构造后由 loader / importer 注入。
+    // 空 vector 清除分段（退化回整 mesh 单段、slot 0）。
+    void SetSubMeshes(std::vector<SubMesh> subMeshes) noexcept
+    {
+        mSubMeshes = std::move(subMeshes);
+    }
+
     bool        HasUVs() const noexcept { return !mUVs.empty(); }
     bool        HasNormals() const noexcept { return !mNormals.empty(); }
     bool        HasTangents() const noexcept { return !mTangents.empty(); }
+    bool        HasSubMeshes() const noexcept { return !mSubMeshes.empty(); }
     std::size_t VertexCount() const noexcept { return mPositions.size(); }
     std::size_t IndexCount() const noexcept { return mIndices.size(); }
 
@@ -140,6 +169,8 @@ private:
     std::vector<VertexNormal3>   mNormals;
     std::vector<VertexTangent4>  mTangents;
     std::vector<std::uint32_t>   mIndices;
+    // 空 = 整 mesh 单段、slot 0（向后兼容）；非空 = 显式分段。
+    std::vector<SubMesh>         mSubMeshes;
 };
 
 }  // namespace Orange::Engine::Asset

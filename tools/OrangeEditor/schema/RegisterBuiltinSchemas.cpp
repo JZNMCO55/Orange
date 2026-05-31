@@ -345,6 +345,12 @@ void RegisterRenderableComponentSchema()
 {
     using RC = Orange::Engine::Render::RenderableComponent;
 
+    // 配套组件 SubMeshMaterialsComponent（单 mesh 多 material 的 slot → material
+    // 映射）暂未在此注册 Inspector schema：它唯一的字段是
+    // std::vector<MaterialInstance*> 数组，而当前 ComponentSchemaBuilder /
+    // PropertyType 没有"AssetRef 数组"字段类型（FieldAssetRef 只表达单个 ref），
+    // 无法表达数组型 Inspector UI。引擎层 + scene 序列化层已闭环（component 存在
+    // 且能 by-id round-trip），数组编辑 UI 留待后续在 builder 支持数组字段后补。
     // c10 落地 Renderable 自定义 add 路径：v0.1 期 +Add Component 在挂 Renderable
     // 时**预绑** cubeMesh + defaultMaterial（让用户立刻在 viewport 看到一个白色
     // 立方体，而不是 mesh=Invalid / material=nullptr 的"隐形"挂法）。c7 schema

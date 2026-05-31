@@ -16,6 +16,7 @@
 
 #include "orange/engine/render/Camera.h"
 #include "orange/engine/render/RenderableComponent.h"
+#include "orange/engine/render/SubMeshMaterialsComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
@@ -92,7 +93,14 @@ void RenderScene::Collect(const Orange::Engine::World& world,
         d.mesh             = renderable.mesh;
         d.materialInstance = renderable.materialInstance;
         d.castsShadow      = renderable.castsShadow;
-        mDrawables.emplace_back(d);
+        // 可选的 SubMeshMaterialsComponent：有则把 slot → material 列表拷进
+        // drawable（单 mesh 多 material）。没挂该组件的 entity 保持空列表，
+        // 渲染端走整 mesh 单 material 路径。
+        if (const auto* subMats = world.GetComponent<SubMeshMaterialsComponent>(entity))
+        {
+            d.subMeshMaterials = subMats->slots;
+        }
+        mDrawables.emplace_back(std::move(d));
     }
 }
 

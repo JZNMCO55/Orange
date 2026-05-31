@@ -1419,164 +1419,215 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
             continue;
         }
 
-        const Material* mat = nullptr;
-        if (drawable.materialInstance != nullptr)
-        {
-            mat = drawable.materialInstance->GetMaterial();
-        }
-        if (mat == nullptr)
-        {
-            mat = impl.EnsureBuiltinDefaultMaterial();
-        }
-        if (mat == nullptr)
-        {
-            continue;
-        }
-
-        // debug view（Normals）：用 debug normals material 替换 drawable
-        // material——渲染所有 drawable 为 world-normal-as-RGB，忽略各自 material。
-        // 其余 drawable loop 逻辑（GetOrCompilePipeline / push constant 128B /
-        // draw）自动按 debug material（pcSize=128 → {mvp,model}，无 descriptor
-        // set 1）。其他 mode（Wireframe/Unlit/Overdraw）渲染实现后续。
-        if (impl.debugViewMode == DebugViewMode::Normals)
-        {
-            if (const Material* dbg = impl.EnsureDebugNormalsMaterial())
-            {
-                mat = dbg;
-            }
-        }
-        else if (impl.debugViewMode == DebugViewMode::Unlit)
-        {
-            // Unlit：直出 base color。debug unlit material 复用 PBR 160B push，
-            // drawable loop 下方 pcSize>=160 分支会喂 drawable.materialInstance
-            // 的 uBaseColor override（即 drawable 自身 albedo），shader 直出。
-            if (const Material* dbg = impl.EnsureDebugUnlitMaterial())
-            {
-                mat = dbg;
-            }
-        }
-        else if (impl.debugViewMode == DebugViewMode::Overdraw)
-        {
-            // Overdraw：debug overdraw material 开 additiveBlend + disableDepthTest
-            //（见 GetOrCompilePipeline），每片段输出小常量色累加成过绘热图——同
-            // 像素被覆盖越多次越亮。
-            if (const Material* dbg = impl.EnsureDebugOverdrawMaterial())
-            {
-                mat = dbg;
-            }
-        }
-        else if (impl.debugViewMode == DebugViewMode::Wireframe)
-        {
-            // Wireframe：debug wireframe material 的 wireframe=true 让
-            // GetOrCompilePipeline 设 polygonMode=Line（需 device feature
-            // fillModeNonSolid，否则 fallback Fill 退化为实心绿）。
-            if (const Material* dbg = impl.EnsureDebugWireframeMaterial())
-            {
-                mat = dbg;
-            }
-        }
-
-        Orange::Rhi::RHIPipeline* rhiPipeline = impl.GetOrCompilePipeline(*mat);
-        if (rhiPipeline == nullptr)
-        {
-            continue;
-        }
-
-        if (rhiPipeline != pLastPipeline)
-        {
-            cmd.BindGraphicsPipeline(*rhiPipeline);
-            pLastPipeline = rhiPipeline;
-
-            // 主 pass 每次 BindGraphicsPipeline 后必须重新 SetDescriptorSet
-            // —— pipeline 切换可能让上一次绑定失效（layout 不兼容时）。
-            // mainDescSet 一旦绑过 binding 0/1，跨 drawable 内容稳定。
-            if (mainDescSet)
-            {
-                cmd.SetDescriptorSet(0, *mainDescSet);
-            }
-        }
-
-        // set 1 = per-instance material 贴图（仅 PBR 模板，GAP-2026-05-25 A2/G1）。
-        // per-draw 绑定——不同 MaterialInstance 用不同 set。预通道
-        // EnsureMaterialDescriptors 已 build + 上传贴图，这里命中缓存（不触
-        // GPU 写，录制期安全）；非 PBR 模板（textured/toon/...）无 set 1，跳过。
-        if (MaterialUsesTextureSet(*mat))
-        {
-            Orange::Rhi::RHIDescriptorSet* matSet =
-                EnsureMaterialDescriptorSet(drawable.materialInstance);
-            if (matSet != nullptr)
-            {
-                cmd.SetDescriptorSet(1, *matSet);
-            }
-        }
-
-        // push constant 按 Material.uniforms 推算的尺寸打包。
-        //   *  64 B → uMVP 单独（textured-only schema，已被 fallback 切走，
-        //              保留兼容外部 sample 自定义 schema）
-        //   * 128 B → uMVP + uModel（toon / rim_light / dissolve / emissive /
-        //              内置 textured 实际 schema）
-        //   * 160 B → uMVP + uModel + uBaseColor + uMRA（pbr）
-        // 其他尺寸为半残 schema，按 64 B 处理。
         const glm::mat4 mvp = viewProj * drawable.worldMatrix;
-        const std::uint32_t pcSize = ComputePushConstantSize(*mat);
-        if (pcSize >= 160)
+
+        // 单段录制 helper：给定本段的 MaterialInstance，完成 material 解析 +
+        // debug-view 覆盖 + pipeline bind（带 pLastPipeline dedup）+ set 0/1
+        // descriptor bind + push constant 喂入。返回 true 表示本段可以接着
+        // DrawIndexed；false 表示 material 解析 / pipeline 编译失败，本段跳过。
+        // ⚠️ push constant 是历史反复漏写的副路径——这里把"算 pcSize + 填 push
+        // + SetPushConstants"集中进一个 helper，sub-mesh 每段各调一次，保证每段
+        // 都按本段 material 重算 uBaseColor / uMRA override。
+        const auto recordSegment =
+            [&](const MaterialInstance* segMaterialInstance) -> bool
         {
-            // PBR 路径：MaterialInstance 的 uBaseColor / uMRA override 优先；
-            // 缺省时 fallback 到 PBR 中性默认（与 BuiltinMaterials::LoadPbr
-            // 注释一致：灰塑料 + 非金属 + 中等粗糙 + AO 满）。
-            struct PushPbr {
-                glm::mat4 mvp;
-                glm::mat4 model;
-                glm::vec4 baseColor;
-                glm::vec4 mra;
-            };
-            PushPbr data{};
-            data.mvp       = mvp;
-            data.model     = drawable.worldMatrix;
-            data.baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-            data.mra       = glm::vec4(0.0f, 0.5f, 1.0f, 0.0f);
-            if (drawable.materialInstance != nullptr)
+            const Material* mat = nullptr;
+            if (segMaterialInstance != nullptr)
             {
-                if (auto over = drawable.materialInstance->GetUniformVec4("uBaseColor"))
+                mat = segMaterialInstance->GetMaterial();
+            }
+            if (mat == nullptr)
+            {
+                mat = impl.EnsureBuiltinDefaultMaterial();
+            }
+            if (mat == nullptr)
+            {
+                return false;
+            }
+
+            // debug view（Normals）：用 debug normals material 替换本段
+            // material——渲染所有 drawable 为 world-normal-as-RGB，忽略各自 material。
+            // 其余逻辑（GetOrCompilePipeline / push constant 128B / draw）自动按
+            // debug material（pcSize=128 → {mvp,model}，无 descriptor set 1）。
+            if (impl.debugViewMode == DebugViewMode::Normals)
+            {
+                if (const Material* dbg = impl.EnsureDebugNormalsMaterial())
                 {
-                    data.baseColor = *over;
-                }
-                if (auto over = drawable.materialInstance->GetUniformVec4("uMRA"))
-                {
-                    data.mra = *over;
+                    mat = dbg;
                 }
             }
-            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
-                                 /*offset=*/0,
-                                 /*size=*/sizeof(PushPbr),
-                                 &data);
-        }
-        else if (pcSize >= 128)
-        {
-            struct PushMvpModel { glm::mat4 mvp; glm::mat4 model; };
-            PushMvpModel data{};
-            data.mvp   = mvp;
-            data.model = drawable.worldMatrix;
-            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
-                                 /*offset=*/0,
-                                 /*size=*/128,
-                                 &data);
-        }
-        else
-        {
-            cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
-                                 /*offset=*/0,
-                                 static_cast<std::uint32_t>(sizeof(glm::mat4)),
-                                 &mvp);
-        }
+            else if (impl.debugViewMode == DebugViewMode::Unlit)
+            {
+                // Unlit：直出 base color。debug unlit material 复用 PBR 160B push，
+                // 下方 pcSize>=160 分支会喂本段 material 的 uBaseColor override
+                //（即该 sub-mesh 自身 albedo），shader 直出。
+                if (const Material* dbg = impl.EnsureDebugUnlitMaterial())
+                {
+                    mat = dbg;
+                }
+            }
+            else if (impl.debugViewMode == DebugViewMode::Overdraw)
+            {
+                // Overdraw：debug overdraw material 开 additiveBlend + disableDepthTest
+                //（见 GetOrCompilePipeline），每片段输出小常量色累加成过绘热图——同
+                // 像素被覆盖越多次越亮。
+                if (const Material* dbg = impl.EnsureDebugOverdrawMaterial())
+                {
+                    mat = dbg;
+                }
+            }
+            else if (impl.debugViewMode == DebugViewMode::Wireframe)
+            {
+                // Wireframe：debug wireframe material 的 wireframe=true 让
+                // GetOrCompilePipeline 设 polygonMode=Line（需 device feature
+                // fillModeNonSolid，否则 fallback Fill 退化为实心绿）。
+                if (const Material* dbg = impl.EnsureDebugWireframeMaterial())
+                {
+                    mat = dbg;
+                }
+            }
+
+            Orange::Rhi::RHIPipeline* rhiPipeline = impl.GetOrCompilePipeline(*mat);
+            if (rhiPipeline == nullptr)
+            {
+                return false;
+            }
+
+            if (rhiPipeline != pLastPipeline)
+            {
+                cmd.BindGraphicsPipeline(*rhiPipeline);
+                pLastPipeline = rhiPipeline;
+
+                // 主 pass 每次 BindGraphicsPipeline 后必须重新 SetDescriptorSet
+                // —— pipeline 切换可能让上一次绑定失效（layout 不兼容时）。
+                // mainDescSet 一旦绑过 binding 0/1，跨段 / 跨 drawable 内容稳定。
+                if (mainDescSet)
+                {
+                    cmd.SetDescriptorSet(0, *mainDescSet);
+                }
+            }
+
+            // set 1 = per-instance material 贴图（仅 PBR 模板，GAP-2026-05-25 A2/G1）。
+            // per-draw 绑定——不同 MaterialInstance 用不同 set。预通道
+            // EnsureMaterialDescriptors 已 build + 上传贴图，这里命中缓存（不触
+            // GPU 写，录制期安全）；非 PBR 模板（textured/toon/...）无 set 1，跳过。
+            if (MaterialUsesTextureSet(*mat))
+            {
+                Orange::Rhi::RHIDescriptorSet* matSet =
+                    EnsureMaterialDescriptorSet(segMaterialInstance);
+                if (matSet != nullptr)
+                {
+                    cmd.SetDescriptorSet(1, *matSet);
+                }
+            }
+
+            // push constant 按 Material.uniforms 推算的尺寸打包。
+            //   *  64 B → uMVP 单独（textured-only schema，已被 fallback 切走，
+            //              保留兼容外部 sample 自定义 schema）
+            //   * 128 B → uMVP + uModel（toon / rim_light / dissolve / emissive /
+            //              内置 textured 实际 schema）
+            //   * 160 B → uMVP + uModel + uBaseColor + uMRA（pbr）
+            // 其他尺寸为半残 schema，按 64 B 处理。
+            const std::uint32_t pcSize = ComputePushConstantSize(*mat);
+            if (pcSize >= 160)
+            {
+                // PBR 路径：本段 MaterialInstance 的 uBaseColor / uMRA override
+                // 优先；缺省时 fallback 到 PBR 中性默认（与 BuiltinMaterials::
+                // LoadPbr 注释一致：灰塑料 + 非金属 + 中等粗糙 + AO 满）。
+                struct PushPbr {
+                    glm::mat4 mvp;
+                    glm::mat4 model;
+                    glm::vec4 baseColor;
+                    glm::vec4 mra;
+                };
+                PushPbr data{};
+                data.mvp       = mvp;
+                data.model     = drawable.worldMatrix;
+                data.baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+                data.mra       = glm::vec4(0.0f, 0.5f, 1.0f, 0.0f);
+                if (segMaterialInstance != nullptr)
+                {
+                    if (auto over = segMaterialInstance->GetUniformVec4("uBaseColor"))
+                    {
+                        data.baseColor = *over;
+                    }
+                    if (auto over = segMaterialInstance->GetUniformVec4("uMRA"))
+                    {
+                        data.mra = *over;
+                    }
+                }
+                cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                     /*offset=*/0,
+                                     /*size=*/sizeof(PushPbr),
+                                     &data);
+            }
+            else if (pcSize >= 128)
+            {
+                struct PushMvpModel { glm::mat4 mvp; glm::mat4 model; };
+                PushMvpModel data{};
+                data.mvp   = mvp;
+                data.model = drawable.worldMatrix;
+                cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                     /*offset=*/0,
+                                     /*size=*/128,
+                                     &data);
+            }
+            else
+            {
+                cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                     /*offset=*/0,
+                                     static_cast<std::uint32_t>(sizeof(glm::mat4)),
+                                     &mvp);
+            }
+            return true;
+        };
 
         const auto& gpu = cacheIt->second;
         cmd.BindVertexBuffer(0, *gpu.vertexBuffer, /*offset=*/0);
         cmd.BindIndexBuffer(*gpu.indexBuffer, /*offset=*/0,
                             Orange::Rhi::IndexFormat::UInt32);
-        cmd.DrawIndexed(gpu.indexCount, /*instanceCount=*/1,
-                        /*firstIndex=*/0, /*vertexOffset=*/0,
-                        /*firstInstance=*/0);
+
+        // sub-mesh 解析：通过 AssetRegistry 拿 CPU MeshAsset，判断是否分段。
+        // 顶点 / 索引 buffer 是整 mesh 共享的同一对（上方已 bind），sub-mesh
+        // 只改 firstIndex / indexCount 分段绘制，不拆 buffer。
+        const Asset::MeshAsset* meshAsset =
+            (impl.assets != nullptr) ? impl.assets->Get(drawable.mesh) : nullptr;
+
+        if (meshAsset != nullptr && meshAsset->HasSubMeshes())
+        {
+            // 单 mesh 多 material：逐 sub-mesh 段，按 materialSlot 选材质，每段
+            // 独立 bind material + push constant + DrawIndexed。
+            for (const auto& sm : meshAsset->SubMeshes())
+            {
+                // 选本段 material：slot 命中且指针非空用 slot material，否则
+                // 回退 drawable.materialInstance（slot 0 / 默认兜底）。
+                const MaterialInstance* segMaterial = drawable.materialInstance;
+                if (sm.materialSlot < drawable.subMeshMaterials.size()
+                    && drawable.subMeshMaterials[sm.materialSlot] != nullptr)
+                {
+                    segMaterial = drawable.subMeshMaterials[sm.materialSlot];
+                }
+
+                if (!recordSegment(segMaterial))
+                {
+                    continue;
+                }
+                cmd.DrawIndexed(sm.indexCount, /*instanceCount=*/1,
+                                /*firstIndex=*/sm.indexOffset, /*vertexOffset=*/0,
+                                /*firstInstance=*/0);
+            }
+        }
+        else
+        {
+            // 无 sub-mesh：单次 DrawIndexed 整 mesh 的原路径。
+            if (!recordSegment(drawable.materialInstance))
+            {
+                continue;
+            }
+            cmd.DrawIndexed(gpu.indexCount, /*instanceCount=*/1,
+                            /*firstIndex=*/0, /*vertexOffset=*/0,
+                            /*firstInstance=*/0);
+        }
     }
 
     // ---- PointLight halo pass（GAP-2026-05-11 G3）---------------------------

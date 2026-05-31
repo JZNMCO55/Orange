@@ -33,9 +33,10 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
     {
         return ResultCode::InvalidArgument;
     }
-    // 接受 v1 / v2 / v3 / v4；其他 version 拒绝（前向兼容由 Save 时 bump version 处理）。
+    // 接受 v1 / v2 / v3 / v4 / v5；其他 version 拒绝（前向兼容由 Save 时 bump version 处理）。
     if (version != kVersionV1 && version != kVersionV2
-        && version != kVersionV3 && version != kVersionV4)
+        && version != kVersionV3 && version != kVersionV4
+        && version != kVersionV5)
     {
         return ResultCode::SchemaMismatch;
     }
@@ -135,6 +136,35 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         }
     }
 
+    // v5 追加段：subMeshCount (uint32) + 每条 (indexOffset, indexCount,
+    // materialSlot)。v1..v4 文件读到这里已经到 EOF，subMeshes 留空 =
+    // 整 mesh 单段（渲染端按整 mesh 单 material 路径处理）。
+    std::vector<SubMesh> subMeshes;
+    if (version >= kVersionV5)
+    {
+        std::uint32_t subMeshCount = 0;
+        if (!reader.Read(subMeshCount))
+        {
+            return ResultCode::InvalidArgument;
+        }
+        // 软上限：sub-mesh 段数远小于索引数；用 indexCount 上限的同款防御，
+        // 避免坏文件 count 字段诱导一口气分配巨量内存。
+        if (subMeshCount > kMaxCount)
+        {
+            return ResultCode::OutOfRange;
+        }
+        subMeshes.resize(subMeshCount);
+        for (std::uint32_t i = 0; i < subMeshCount; ++i)
+        {
+            if (!reader.Read(subMeshes[i].indexOffset)
+                || !reader.Read(subMeshes[i].indexCount)
+                || !reader.Read(subMeshes[i].materialSlot))
+            {
+                return ResultCode::InvalidArgument;
+            }
+        }
+    }
+
     std::unique_ptr<MeshAsset> asset;
     if (uvs.empty() && normals.empty())
     {
@@ -187,6 +217,14 @@ Result<std::unique_ptr<MeshAsset>, ResultCode> MeshLoader::Load(std::string_view
         {
             asset->ComputeTangentsFromTriangles();
         }
+    }
+
+    // sub-mesh 段（v5）原样注入；v1..v4 文件 subMeshes 为空，保持整 mesh
+    // 单段语义。这里不校验 indexOffset/indexCount 是否越界——渲染端按段
+    // 绘制时自然受 GPU index buffer 边界保护，loader 层不强加几何约束。
+    if (asset != nullptr && !subMeshes.empty())
+    {
+        asset->SetSubMeshes(std::move(subMeshes));
     }
     return asset;
 }
@@ -250,6 +288,18 @@ Result<void, ResultCode> MeshLoader::Save(std::string_view path, const MeshAsset
     if (hasTangents)
     {
         writer.WriteBytes(tangents.data(), tangents.size() * sizeof(VertexTangent4));
+    }
+
+    // v5 sub-mesh 段：subMeshCount + 每条 (indexOffset, indexCount,
+    // materialSlot)。空则写 count=0，等价于整 mesh 单段。SubMesh 是
+    // POD（3 个 uint32），但逐字段写以免依赖结构 padding 假设。
+    const auto& subMeshes = mesh.SubMeshes();
+    writer.Write<std::uint32_t>(static_cast<std::uint32_t>(subMeshes.size()));
+    for (const auto& sm : subMeshes)
+    {
+        writer.Write<std::uint32_t>(sm.indexOffset);
+        writer.Write<std::uint32_t>(sm.indexCount);
+        writer.Write<std::uint32_t>(sm.materialSlot);
     }
 
     return writer.SaveToFile(path);

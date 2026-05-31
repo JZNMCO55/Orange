@@ -79,9 +79,14 @@ namespace
 // 绑回源 prefab 资源；同款 optional component 路径，旧 1.12 文件无 "PrefabInstance"
 // 段时实体不挂该组件，行为不变）。prefab 资源本身是独立 schema namespace
 // "prefab/asset" 1.0，不复用本版本号。
+// 1.13 → 1.14：新增 SubMeshMaterialsComponent（单 mesh 多 material 的 slot →
+// material 映射；同款 optional component 路径，旧 1.13 文件无 "SubMeshMaterials"
+// 段时实体不挂该组件，渲染端按整 mesh 单 material 路径绘制，行为不变——additive
+// 向后兼容）。slot material 用与 Renderable.materialInstance 同一张
+// namedMaterialInstances / materialResolver 表按 id 解析。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 13};
+    static const SchemaVersion kVersion{"scene/world", 1, 14};
     return kVersion;
 }
 

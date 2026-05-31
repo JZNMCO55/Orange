@@ -53,6 +53,11 @@ struct Drawable
     // 非拥有 MaterialInstance 指针，由 RenderableComponent 透传。Pipeline
     // 后续按本字段路由 per-template Pipeline 缓存；nullptr 走 fallback。
     MaterialInstance*                    materialInstance{nullptr};
+    // 单 mesh 多 material 的 slot → material 映射，由 SubMeshMaterialsComponent
+    // 透传（非拥有指针）。空 = 该 entity 没挂多材质组件，渲染端用
+    // materialInstance 兜底画整 mesh；非空 = 按 mesh sub-mesh 的 materialSlot
+    // 索引本列表选材质，越界 / nullptr 仍回退 materialInstance。
+    std::vector<MaterialInstance*>       subMeshMaterials;
     // 由 RenderableComponent.castsShadow 透传：false 时 Pipeline shadow
     // pass 跳过本 drawable，主 pass 仍正常绘制。
     bool                                 castsShadow{true};

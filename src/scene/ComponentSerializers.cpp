@@ -28,6 +28,7 @@
 #include "orange/engine/render/LightComponent.h"
 #include "orange/engine/render/ParticleEmitterComponent.h"
 #include "orange/engine/render/RenderableComponent.h"
+#include "orange/engine/render/SubMeshMaterialsComponent.h"
 #include "orange/engine/scene/GuidComponent.h"
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/LayerComponent.h"
@@ -618,6 +619,139 @@ bool ReadRenderable(const JsonReader& reader,
     }
 
     ctx.world.AddComponent(entity, r);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// SubMeshMaterialsComponent —— 与 Renderable 配对的可选组件（单 mesh 多
+// material）。slots 里每个 MaterialInstance* 用与 Renderable.materialInstance
+// 完全相同的 by-id 机制持久化：写时把指针反查成 namedMaterialInstances 里
+// 的 name 字符串、落成字符串数组；读时把数组里每个 id 解析回 MaterialInstance*
+// （先查 namedMaterialInstances，未命中走 materialResolver 从磁盘 lazy-create）。
+// 空 slot（nullptr）落空字符串、读回 nullptr——保持"该 slot 回退默认材质"语义。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// MaterialInstance* → id 字符串：复刻 WriteRenderable 里的 O(N) 反查。
+// 命中返回 name；nullptr 或查不到返回空字符串。
+std::string MaterialInstanceToId(const Render::MaterialInstance* instance,
+                                 const SaveContext& ctx)
+{
+    if (instance == nullptr || ctx.namedMaterialInstances == nullptr)
+    {
+        return std::string{};
+    }
+    for (const auto& [name, ptr] : *ctx.namedMaterialInstances)
+    {
+        if (ptr == instance)
+        {
+            return name;
+        }
+    }
+    return std::string{};
+}
+
+// id 字符串 → MaterialInstance*：复刻 ReadRenderable 的解析路径（builtin/
+// 前缀 remap + namedMaterialInstances 查表 + materialResolver lazy 兜底）。
+// 空字符串直接返回 nullptr（对应空 slot）。
+Render::MaterialInstance* MaterialIdToInstance(const std::string& rawId,
+                                               const LoadContext& ctx)
+{
+    if (rawId.empty())
+    {
+        return nullptr;
+    }
+    std::string materialId = rawId;
+    if (materialId.rfind("builtin/", 0) == 0)
+    {
+        std::string remapped = "assets/materials/";
+        remapped.append(materialId);
+        remapped.append(".material");
+        materialId = std::move(remapped);
+    }
+
+    Render::MaterialInstance* resolved = nullptr;
+    if (ctx.namedMaterialInstances != nullptr)
+    {
+        auto it = ctx.namedMaterialInstances->find(materialId);
+        if (it != ctx.namedMaterialInstances->end())
+        {
+            resolved = it->second;
+        }
+    }
+    if (resolved == nullptr && ctx.materialResolver)
+    {
+        resolved = ctx.materialResolver(materialId);
+    }
+    return resolved;
+}
+
+}  // namespace
+
+bool HasSubMeshMaterials(const World& world, Entity entity)
+{
+    return world.HasComponent<Render::SubMeshMaterialsComponent>(entity);
+}
+
+void WriteSubMeshMaterials(JsonWriter& writer,
+                           std::string_view componentPath,
+                           Entity entity,
+                           const SaveContext& ctx)
+{
+    const auto* c = ctx.world.GetComponent<Render::SubMeshMaterialsComponent>(entity);
+    if (c == nullptr)
+    {
+        return;
+    }
+
+    // 每个 slot 反查成 id 字符串，落成字符串数组（顺序即 slot index）。
+    // string 数组无专用 helper：BeginArray 声明长度 + 索引 WriteString
+    // （与 ParticleEmitter polygon 顶点的数组写法同款）。
+    const std::string slotsPath = Join(componentPath, "slots");
+    writer.BeginArray(slotsPath, c->slots.size());
+    for (std::size_t i = 0; i < c->slots.size(); ++i)
+    {
+        const Render::MaterialInstance* instance = c->slots[i];
+        std::string id = MaterialInstanceToId(instance, ctx);
+        if (instance != nullptr && id.empty())
+        {
+            ORANGE_LOG_WARN(
+                "Scene save: SubMeshMaterialsComponent slot material not found in "
+                "namedMaterialInstances; writing empty id for that slot.");
+        }
+        writer.WriteString(slotsPath + "/" + std::to_string(i), id);
+    }
+}
+
+bool ReadSubMeshMaterials(const JsonReader& reader,
+                          std::string_view componentPath,
+                          Entity entity,
+                          const LoadContext& ctx)
+{
+    const std::string slotsPath = Join(componentPath, "slots");
+    const std::size_t count = reader.ArraySize(slotsPath);
+
+    Render::SubMeshMaterialsComponent c;
+    c.slots.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        // 缺字段 / 类型不符的 slot 当空 id（→ nullptr，回退默认材质），不
+        // 整盘拒绝 Load——与 Renderable.materialInstance 缺省 nullptr 同款宽松。
+        std::string id = reader.GetString(slotsPath + "/" + std::to_string(i), "");
+        Render::MaterialInstance* resolved = MaterialIdToInstance(id, ctx);
+        if (!id.empty() && resolved == nullptr)
+        {
+            ORANGE_LOG_WARN(
+                "Scene load: SubMeshMaterialsComponent slot id '{}' could not be "
+                "resolved; leaving that slot null (falls back to default material).",
+                id);
+        }
+        c.slots.push_back(resolved);
+    }
+
+    ctx.world.AddComponent(entity, std::move(c));
     return true;
 }
 
@@ -1840,6 +1974,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"PrefabInstance",   ComponentKind::PureData,         &HasPrefabInstance,   &WritePrefabInstance,   &ReadPrefabInstance},
         {"Layer",            ComponentKind::PureData,         &HasLayer,            &WriteLayer,            &ReadLayer},
         {"Renderable",       ComponentKind::PureData,         &HasRenderable,       &WriteRenderable,       &ReadRenderable},
+        {"SubMeshMaterials", ComponentKind::PureData,         &HasSubMeshMaterials, &WriteSubMeshMaterials, &ReadSubMeshMaterials},
         {"DirectionalLight", ComponentKind::PureData,         &HasDirectionalLight, &WriteDirectionalLight, &ReadDirectionalLight},
         {"PointLight",       ComponentKind::PureData,         &HasPointLight,       &WritePointLight,       &ReadPointLight},
         {"SpotLight",        ComponentKind::PureData,         &HasSpotLight,        &WriteSpotLight,        &ReadSpotLight},

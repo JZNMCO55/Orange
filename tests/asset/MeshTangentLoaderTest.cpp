@@ -9,6 +9,8 @@
 //   3. migrator：手写 v3 文件（无 tangent 段）在 v4 loader 下成功 Load +
 //      fallback 补 tangent；手写 v1 文件（无 UV）Load 成功但 HasTangents()=false。
 //   4. 无 UV mesh：ComputeTangentsFromTriangles 清空，HasTangents()=false。
+//   5. v5 sub-mesh round-trip：多段 indexOffset / indexCount / materialSlot
+//      Save → Load 字段一致；不设 sub-mesh 的 Save 后 HasSubMeshes()=false。
 //
 // 走最小 <cassert> + 独立 main()，exit 0 即通过（与其余引擎测试一致）。
 
@@ -227,6 +229,55 @@ void TestNoUvMeshHasNoTangent()
     std::printf("[ok] no-UV mesh has no tangent\n");
 }
 
+// ---- 5a. v5 sub-mesh round-trip：2 段，各自 offset / count / slot --------
+void TestSubMeshRoundTrip(const fs::path& root)
+{
+    MeshAsset quad = MakeQuad();  // 4 顶点 / 6 索引（2 三角形）
+    std::vector<SubMesh> subMeshes = {
+        {0u, 3u, 0u},  // 第 1 个三角形 → material slot 0
+        {3u, 3u, 1u},  // 第 2 个三角形 → material slot 1
+    };
+    quad.SetSubMeshes(subMeshes);
+    assert(quad.HasSubMeshes());
+
+    const fs::path meshPath = root / "quad_submesh_v5.mesh";
+    auto saveRes = MeshLoader::Save(meshPath.generic_string(), quad);
+    assert(saveRes.IsOk());
+
+    MeshLoader loader;
+    auto loadRes = loader.Load(meshPath.generic_string());
+    assert(loadRes.IsOk());
+    const MeshAsset& loaded = *loadRes.Value();
+    assert(loaded.HasSubMeshes() && "v5 sub-mesh 段应被读回");
+    assert(loaded.SubMeshes().size() == 2);
+    assert(loaded.SubMeshes()[0].indexOffset == 0u);
+    assert(loaded.SubMeshes()[0].indexCount == 3u);
+    assert(loaded.SubMeshes()[0].materialSlot == 0u);
+    assert(loaded.SubMeshes()[1].indexOffset == 3u);
+    assert(loaded.SubMeshes()[1].indexCount == 3u);
+    assert(loaded.SubMeshes()[1].materialSlot == 1u);
+    std::printf("[ok] v5 sub-mesh round-trip\n");
+}
+
+// ---- 5b. 不设 sub-mesh 的 Save（v5 subMeshCount=0）→ Load 无 sub-mesh -----
+void TestNoSubMeshSavesEmpty(const fs::path& root)
+{
+    MeshAsset quad = MakeQuad();  // 无 sub-mesh
+    assert(!quad.HasSubMeshes());
+
+    const fs::path meshPath = root / "quad_no_submesh_v5.mesh";
+    auto saveRes = MeshLoader::Save(meshPath.generic_string(), quad);
+    assert(saveRes.IsOk());
+
+    MeshLoader loader;
+    auto loadRes = loader.Load(meshPath.generic_string());
+    assert(loadRes.IsOk());
+    const MeshAsset& loaded = *loadRes.Value();
+    assert(!loaded.HasSubMeshes() && "不设 sub-mesh 的 Save 后应无 sub-mesh");
+    assert(loaded.SubMeshes().empty());
+    std::printf("[ok] no sub-mesh -> v5 subMeshCount=0 round-trip\n");
+}
+
 }  // namespace
 
 int main()
@@ -238,6 +289,8 @@ int main()
     TestV3FileLoadsUnderV4Loader(root);
     TestV1FileLoadsNoTangent(root);
     TestNoUvMeshHasNoTangent();
+    TestSubMeshRoundTrip(root);
+    TestNoSubMeshSavesEmpty(root);
 
     std::printf("all mesh tangent loader cases passed\n");
     return 0;
