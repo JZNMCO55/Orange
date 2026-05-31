@@ -33,13 +33,20 @@
 // （及其 CGLTF_IMPLEMENTATION expand）拖进每个 include 本头的 TU。
 struct cgltf_material;
 struct cgltf_texture_view;
+struct cgltf_data;
 
 namespace Orange::Editor::Import
 {
 
 // glTF material 通道解析的中间结果。在 cgltf_free 之前从 cgltf_material 抽出，
-// free 之后用于 import 贴图 + 写 .material。贴图字段存"源文件路径"（gltfDir/
-// uri 解析后），空 = 该通道无贴图。
+// free 之后用于 import 贴图 + 写 .material。
+//
+// 每个贴图槽有两种来源（互斥）：
+//   * 外部文件 uri → 对应 *Src 存"源文件磁盘路径"（gltfDir/uri 解析后）。
+//   * 内嵌图像（.glb buffer_view / data: URI）→ 对应 *Src 为空，*ImageIndex
+//     存该 image 在 cgltf_data::images[] 的下标（>= 0）；由 importer 层在
+//     cgltf_free 之前取字节落盘后再回填 *Src，交给现有贴图 co-locate 流程。
+// 两者都空 / index < 0 表示该通道无贴图。
 struct GltfMatInfo
 {
     bool        present{false};
@@ -47,6 +54,10 @@ struct GltfMatInfo
     std::string normalSrc;
     std::string metalRoughSrc;
     std::string aoSrc;
+    int         baseColorImageIndex{-1};
+    int         normalImageIndex{-1};
+    int         metalRoughImageIndex{-1};
+    int         aoImageIndex{-1};
     float       baseColor[4]{1.0f, 1.0f, 1.0f, 1.0f};
     float       metallic{1.0f};
     float       roughness{1.0f};
@@ -57,17 +68,25 @@ struct GltfMatInfo
     float       occlusionStrength{1.0f};
 };
 
-// 把一个 cgltf_texture_view 解析成源文件路径（相对 gltf 所在目录）。仅支持
-// 外部 uri 引用的 image；.glb 内嵌（buffer_view，uri==null）或 data: URI 暂
-// 不支持，返回空（caller 跳过该通道 → 用 default 贴图，graceful）。
+// 把一个 cgltf_texture_view 解析成外部源文件路径（相对 gltf 所在目录）。仅解析
+// 外部 uri 引用且磁盘存在的 image；.glb 内嵌（buffer_view，uri==null）或 data:
+// URI 在这里返回空——内嵌来源改走 ResolveImageIndex + importer 层提取。
 std::string ResolveTextureSource(const cgltf_texture_view& view,
                                  const std::filesystem::path& gltfDir);
 
-// 从 cgltf_material 抽出 PBR 通道（factor + 贴图源路径 + occlusionStrength）。
-// mat == nullptr 时返回 present=false 的空 info。gltfDir 用于把 image uri 解
-// 析成绝对/相对路径。不触碰文件系统以外的任何引擎状态（无 host 依赖）。
+// 把一个 cgltf_texture_view 解析成内嵌 image 的 images[] 下标（仅当该 image
+// 是内嵌来源：buffer_view 非空，或 uri 为 data: 前缀）。非内嵌 / 无 image /
+// data 为 null 时返回 -1。data 用于 cgltf_image_index 定位下标。
+int ResolveImageIndex(const cgltf_texture_view& view, const cgltf_data* data);
+
+// 从 cgltf_material 抽出 PBR 通道（factor + 外部贴图源路径 + 内嵌 image 下标 +
+// occlusionStrength）。mat == nullptr 时返回 present=false 的空 info。gltfDir 用
+// 于把外部 image uri 解析成路径；data 用于把内嵌 image 解析成 images[] 下标
+// （data 为 null 时跳过内嵌下标解析，外部 uri 路径仍正常——保持旧 caller 兼容）。
+// 不触碰文件系统以外的任何引擎状态（无 host 依赖）。
 GltfMatInfo ExtractGltfMaterial(const cgltf_material* mat,
-                                const std::filesystem::path& gltfDir);
+                                const std::filesystem::path& gltfDir,
+                                const cgltf_data* data = nullptr);
 
 // 贴图槽 resolver 回调：输入"贴图源路径"，输出"落盘后可写进 .material 的
 // path"。真实 importer 走 ImportTexture（copy + load + .meta）后回填 destPath；

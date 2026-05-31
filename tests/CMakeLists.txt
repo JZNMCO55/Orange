@@ -195,6 +195,42 @@ else ()
 endif ()
 add_test(NAME headless_mesh_import_test COMMAND headless_mesh_import_test)
 
+# glTF 内嵌贴图导入（.glb buffer_view / data: URI）—— 锁 ".glb 内嵌 baseColor PNG
+# 被提取成 assets/Models/<stem>/ 下真实磁盘文件 + 回填 .material baseColor 槽" 这条
+# 链（GAP-2026-05-25 内嵌贴图子缺口）。自包含：最小内嵌 .glb 以字节数组嵌进测试
+# .cpp（由 tests/fixtures/gen_embedded_glb.py --carray 生成），干净 checkout 也跑，
+# 不依赖外部 fixture。链接方式同 headless_mesh_import_test：直接编译真实 importer
+# 源（ImportDispatcher / ObjImporter / GltfImporter / GltfMaterialParse / MetaSidecar
+# / MeshTangentGen / MaterialFileIO）+ vendor 单 header，只链 orange_engine。
+add_executable(gltf_embedded_texture_import_test
+    editor/GltfEmbeddedTextureImportTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ImportDispatcher.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ObjImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c")
+target_link_libraries(gltf_embedded_texture_import_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(gltf_embedded_texture_import_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+    "${CMAKE_SOURCE_DIR}/vendor/tinyobjloader"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace"
+    "${CMAKE_SOURCE_DIR}/vendor/cgltf")
+orange_engine_set_compiler_options(gltf_embedded_texture_import_test)
+if (MSVC)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "/W0")
+else ()
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "-w")
+endif ()
+add_test(NAME gltf_embedded_texture_import_test COMMAND gltf_embedded_texture_import_test)
+
 # CommandStack（tools/OrangeEditor）—— Undo/Redo 栈 + coalesce/group + Undo-label
 # peek。纯 ICommand + std，零 ImGui/GLFW/Vulkan 依赖，故同 editor_hierarchy_test
 # 模式：把 CommandStack.cpp 编进测试 exe + 加 include path（该源不属引擎 lib）。

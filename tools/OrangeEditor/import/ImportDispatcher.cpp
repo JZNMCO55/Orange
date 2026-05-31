@@ -121,14 +121,25 @@ ImportResult ImportTextureToRegistry(std::string_view srcPath,
         return result;
     }
 
-    fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec);
-    if (ec)
+    // same-file 守卫：源已经就在目标位置时跳过 copy（否则 copy_file(self, self)
+    // 在标准下报错）。典型场景是 gltf 内嵌贴图——importer 已把内嵌 image 字节直接
+    // 落到模型自己的 assets/Models/<stem>/ 目录，再走本函数 co-locate 时 src==dest。
+    // 此时文件已在位，直接进 Load + 写 .meta 即可。equivalent 要求两端都存在，dest
+    // 不存在（常规外部贴图首次导入）时 ec 置位 → 视为非同一文件，照常 copy。
+    std::error_code eqEc;
+    const bool sameFile =
+        fs::exists(dest, eqEc) && fs::equivalent(src, dest, eqEc) && !eqEc;
+    if (!sameFile)
     {
-        result.status  = ImportStatus::CopyFailed;
-        result.message = "copy_file failed: " + ec.message();
-        ORANGE_LOG_ERROR("ImportTexture: '{}' -> '{}': {}",
-                         srcPath, dest.generic_string(), result.message);
-        return result;
+        fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+        {
+            result.status  = ImportStatus::CopyFailed;
+            result.message = "copy_file failed: " + ec.message();
+            ORANGE_LOG_ERROR("ImportTexture: '{}' -> '{}': {}",
+                             srcPath, dest.generic_string(), result.message);
+            return result;
+        }
     }
 
     const std::string destStr = dest.generic_string();

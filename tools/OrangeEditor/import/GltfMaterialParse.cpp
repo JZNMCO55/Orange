@@ -61,8 +61,27 @@ std::string ResolveTextureSource(const cgltf_texture_view& view,
     return full.generic_string();
 }
 
+int ResolveImageIndex(const cgltf_texture_view& view, const cgltf_data* data)
+{
+    if (data == nullptr || view.texture == nullptr || view.texture->image == nullptr)
+    {
+        return -1;
+    }
+    const cgltf_image* image = view.texture->image;
+    // 内嵌判定：GLB buffer_view 非空，或 uri 是 data: 前缀。
+    const bool embedded =
+        image->buffer_view != nullptr ||
+        (image->uri != nullptr && std::strncmp(image->uri, "data:", 5) == 0);
+    if (!embedded)
+    {
+        return -1;
+    }
+    return static_cast<int>(cgltf_image_index(data, image));
+}
+
 GltfMatInfo ExtractGltfMaterial(const cgltf_material* mat,
-                                const std::filesystem::path& gltfDir)
+                                const std::filesystem::path& gltfDir,
+                                const cgltf_data* data)
 {
     GltfMatInfo info{};
     if (mat == nullptr)
@@ -82,9 +101,13 @@ GltfMatInfo ExtractGltfMaterial(const cgltf_material* mat,
         info.roughness    = pmr.roughness_factor;
         info.baseColorSrc  = ResolveTextureSource(pmr.base_color_texture, gltfDir);
         info.metalRoughSrc = ResolveTextureSource(pmr.metallic_roughness_texture, gltfDir);
+        info.baseColorImageIndex  = ResolveImageIndex(pmr.base_color_texture, data);
+        info.metalRoughImageIndex = ResolveImageIndex(pmr.metallic_roughness_texture, data);
     }
     info.normalSrc = ResolveTextureSource(mat->normal_texture, gltfDir);
     info.aoSrc     = ResolveTextureSource(mat->occlusion_texture, gltfDir);
+    info.normalImageIndex = ResolveImageIndex(mat->normal_texture, data);
+    info.aoImageIndex     = ResolveImageIndex(mat->occlusion_texture, data);
 
     // occlusionStrength —— 仅当确有 occlusion texture 时才读 cgltf 的
     // occlusion_texture.scale（cgltf 文档：scale 等价于 occlusionTexture.strength）。

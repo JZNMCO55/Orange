@@ -29,8 +29,12 @@
 #  pragma warning(pop)
 #endif
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <map>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -79,6 +83,129 @@ const char* CgltfResultToString(cgltf_result r)
 
 // GltfMatInfo / ResolveTextureSource / ExtractGltfMaterial / BuildMaterialFileData
 // 已抽到 import/GltfMaterialParse.{h,cpp}（可独立 headless 测试的 material seam）。
+
+// 解码 data: URI 的 base64 负载（payload 指向逗号后的 base64 串）。失败返回空。
+std::vector<unsigned char> DecodeBase64(const char* payload)
+{
+    const auto charValue = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') { return c - 'A'; }
+        if (c >= 'a' && c <= 'z') { return c - 'a' + 26; }
+        if (c >= '0' && c <= '9') { return c - '0' + 52; }
+        if (c == '+') { return 62; }
+        if (c == '/') { return 63; }
+        return -1;  // '=' padding / 空白 / 非法字符
+    };
+
+    std::vector<unsigned char> out;
+    int accum = 0;
+    int bits = 0;
+    for (const char* p = payload; *p != '\0'; ++p)
+    {
+        const int v = charValue(*p);
+        if (v < 0) { continue; }  // 跳过 padding / 空白
+        accum = (accum << 6) | v;
+        bits += 6;
+        if (bits >= 8)
+        {
+            bits -= 8;
+            out.push_back(static_cast<unsigned char>((accum >> bits) & 0xFF));
+        }
+    }
+    return out;
+}
+
+// 由 mime_type / magic 推断内嵌图像扩展名（不含点）。默认 png。
+std::string EmbeddedImageExtension(const cgltf_image& image,
+                                   const unsigned char* bytes, std::size_t size)
+{
+    if (image.mime_type != nullptr)
+    {
+        if (std::strstr(image.mime_type, "jpeg") != nullptr ||
+            std::strstr(image.mime_type, "jpg") != nullptr)
+        {
+            return "jpg";
+        }
+        if (std::strstr(image.mime_type, "png") != nullptr)
+        {
+            return "png";
+        }
+    }
+    // 退化：JPEG magic FF D8 FF，其余按 PNG。
+    if (size >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+    {
+        return "jpg";
+    }
+    return "png";
+}
+
+// 取出内嵌图像原始字节：优先 GLB buffer_view，其次 data: URI。拿不到返回空。
+std::vector<unsigned char> ReadEmbeddedImageBytes(const cgltf_image& image)
+{
+    if (image.buffer_view != nullptr)
+    {
+        const cgltf_size size = image.buffer_view->size;
+        const std::uint8_t* p = cgltf_buffer_view_data(image.buffer_view);
+        if (p != nullptr && size > 0)
+        {
+            return std::vector<unsigned char>(p, p + size);
+        }
+    }
+    if (image.uri != nullptr && std::strncmp(image.uri, "data:", 5) == 0)
+    {
+        const char* comma = std::strchr(image.uri, ',');
+        if (comma != nullptr)
+        {
+            return DecodeBase64(comma + 1);
+        }
+    }
+    return {};
+}
+
+// 把内嵌图像写到 destDirStr（assets/Models/<stem>/），返回写出的磁盘路径。
+// 命名：优先 image->name，空则 image_<idx>；清洗路径分隔符防写到目录外。失败返回空。
+// 注意：仅写盘，不入 registry —— 调用方拿到路径后与外部贴图走同一条
+// ImportTextureToRegistry co-locate 流程（copy 到同目录覆盖自身 + ORTX + .meta +
+// Load），避免二次实现解码 / 注册逻辑。
+std::string ExtractEmbeddedImageToDisk(const cgltf_image& image, cgltf_size imageIndex,
+                                       const std::string& destDirStr)
+{
+    namespace fs = std::filesystem;
+
+    const std::vector<unsigned char> bytes = ReadEmbeddedImageBytes(image);
+    if (bytes.empty())
+    {
+        ORANGE_LOG_WARN("GltfImporter: embedded image [{}] has no bytes, skip", imageIndex);
+        return {};
+    }
+
+    const std::string ext = EmbeddedImageExtension(image, bytes.data(), bytes.size());
+
+    std::string baseName =
+        (image.name != nullptr && image.name[0] != '\0')
+            ? std::string(image.name)
+            : ("image_" + std::to_string(imageIndex));
+    for (char& c : baseName)
+    {
+        if (c == '/' || c == '\\') { c = '_'; }
+    }
+
+    std::error_code ec;
+    fs::path destDir(destDirStr);
+    fs::create_directories(destDir, ec);
+    const fs::path dst = destDir / (baseName + "." + ext);
+
+    std::ofstream ofs(dst, std::ios::binary);
+    if (!ofs)
+    {
+        ORANGE_LOG_WARN("GltfImporter: open embedded texture for write failed: {}",
+                        dst.generic_string());
+        return {};
+    }
+    ofs.write(reinterpret_cast<const char*>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    ofs.close();
+    return dst.generic_string();
+}
 }  // namespace
 
 ImportResult RunGltfImportToRegistry(std::string_view srcPath,
@@ -286,10 +413,59 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    // 在 cgltf_free 之前从 firstMat 抽出 PBR 通道（贴图源路径 + 标量 factor +
-    // occlusionStrength）。贴图源路径相对 gltf 所在目录解析；free 之后用于
-    // import + 写 .material。逻辑在 GltfMaterialParse.cpp（与测试共用同一份）。
-    const GltfMatInfo matInfo = ExtractGltfMaterial(firstMat, src.parent_path());
+    // 在 cgltf_free 之前从 firstMat 抽出 PBR 通道（外部贴图源路径 + 内嵌 image
+    // 下标 + 标量 factor + occlusionStrength）。外部贴图源路径相对 gltf 所在目录
+    // 解析；内嵌图像（.glb buffer_view / data: URI）先解析出 images[] 下标，下面
+    // 在 cgltf_free 之前取字节落盘并回填到 matInfo 的 *Src。逻辑在
+    // GltfMaterialParse.cpp（与测试共用同一份）。
+    GltfMatInfo matInfo = ExtractGltfMaterial(firstMat, src.parent_path(), data);
+
+    // 内嵌贴图提取：必须在 cgltf_free 之前做（要读 buffer_view / data: 字节）。
+    // 把内嵌 image 写到模型自己的 assets/Models/<stem>/ 目录，回填 matInfo 的
+    // *Src 为该磁盘路径，之后与外部贴图走同一条 ImportTextureToRegistry co-locate
+    // 流程（copy + ORTX + .meta + Load）。同一 image 被多个槽引用时只写盘一次。
+    if (matInfo.present)
+    {
+        const std::string embeddedDir =
+            (fs::path(kModelsDir) / src.stem().generic_string()).generic_string();
+        std::map<int, std::string> embeddedCache;  // images[] 下标 → 落盘路径
+
+        auto resolveEmbedded = [&](int imageIndex) -> std::string {
+            if (imageIndex < 0 ||
+                static_cast<cgltf_size>(imageIndex) >= data->images_count)
+            {
+                return {};
+            }
+            auto it = embeddedCache.find(imageIndex);
+            if (it != embeddedCache.end())
+            {
+                return it->second;  // 已写盘，复用
+            }
+            const std::string path = ExtractEmbeddedImageToDisk(
+                data->images[imageIndex], static_cast<cgltf_size>(imageIndex),
+                embeddedDir);
+            embeddedCache[imageIndex] = path;
+            return path;
+        };
+
+        // 仅当外部 uri 解析为空（即该槽不是外部文件）才尝试内嵌提取。
+        if (matInfo.baseColorSrc.empty())
+        {
+            matInfo.baseColorSrc = resolveEmbedded(matInfo.baseColorImageIndex);
+        }
+        if (matInfo.normalSrc.empty())
+        {
+            matInfo.normalSrc = resolveEmbedded(matInfo.normalImageIndex);
+        }
+        if (matInfo.metalRoughSrc.empty())
+        {
+            matInfo.metalRoughSrc = resolveEmbedded(matInfo.metalRoughImageIndex);
+        }
+        if (matInfo.aoSrc.empty())
+        {
+            matInfo.aoSrc = resolveEmbedded(matInfo.aoImageIndex);
+        }
+    }
 
     cgltf_free(data);  // 不再需要 cgltf 内部结构，data 已经拷出来
 
