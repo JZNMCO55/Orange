@@ -20,10 +20,16 @@
 //     Inspector 段加可写 GUI（参 editor-roadmap.md L17 / v1.x 长尾）
 // ---------------------------------------------------------------------------
 
+#include <functional>
 #include <string>
 #include <string_view>
 
 struct EditorHost;
+
+namespace Orange::Engine::Asset
+{
+class AssetRegistry;
+}
 
 namespace Orange::Editor::Import
 {
@@ -58,6 +64,55 @@ struct ImportResult
 
 // 按小写扩展名分类。"png" / "obj" 不带 '.'；'.png' / 'png' 都接受。
 ImportKind ClassifyByExt(std::string_view ext);
+
+// ---------------------------------------------------------------------------
+// Headless seam（GAP-2026-05-27 G1）：只依赖 Orange::Engine::Asset::AssetRegistry
+// 的导入入口 —— 不出现 EditorHost 类型，可在不拉起 GUI（无 GLFW / Vulkan /
+// ImGui / AudioEngine / ThumbnailService）的进程里复用，也是 headless ctest 锁
+// 的那条链。GUI 路径（File→Import 菜单 / OS drag-drop）下面的 Dispatch /
+// ImportTexture / ... 版本统一委托到这层 seam，行为零变化。
+//
+// gltf material 注册回调：RunGltfImport 在写出 .material sidecar 后需要把它
+// 注册进编辑器的 namedMaterialInstances / userMaterials 缓存（否则刚导入的材质
+// 在 Inspector Material 下拉里选不到）。这一步是纯编辑器态副作用，headless 不需
+// 要——故抽成可选回调：GUI 路径注入 EnsureMaterialInstance，headless 路径传空
+// （材质文件仍照常写盘，只是不进编辑器内存缓存）。
+// ---------------------------------------------------------------------------
+
+// gltf importer 写出 .material 后的注册回调（仅 GUI 路径需要）。
+using MaterialRegisterFn = std::function<void(const std::string& materialPath)>;
+
+// 单点 headless 入口：按 ext 路由到具体 registry-only importer。
+//
+// srcPath:  OS 文件绝对或相对路径；不能为空。
+// registry: 注入资产的目标 AssetRegistry（须已注册 Mesh / Texture loader，
+//           见 BuiltinAssets::RegisterImportLoaders）。
+// onMaterialWritten: gltf 路径写出 .material 后的注册回调；为空 = 不注册
+//           （headless 默认）。obj / texture 路径忽略本参数。
+ImportResult DispatchToRegistry(std::string_view srcPath,
+                                ::Orange::Engine::Asset::AssetRegistry& registry,
+                                const MaterialRegisterFn& onMaterialWritten = {});
+
+// Texture importer（registry-only）：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
+// destDirOverride 语义同 GUI 版（空 → assets/Textures/<basename>）。
+ImportResult ImportTextureToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry,
+                                     std::string_view destDirOverride = {});
+
+// Obj mesh importer（registry-only）：T3 接通。
+ImportResult ImportObjMeshToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry);
+
+// Gltf mesh importer（registry-only）：T4 接通。onMaterialWritten 见上。
+ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
+                                      ::Orange::Engine::Asset::AssetRegistry& registry,
+                                      const MaterialRegisterFn& onMaterialWritten = {});
+
+// ---------------------------------------------------------------------------
+// GUI 入口（保留原签名，零行为变化）：内部委托到上面的 registry-only seam，
+// 取 host.assets.pAssets 当 AssetRegistry，gltf 路径注入 EnsureMaterialInstance
+// 作为 onMaterialWritten 回调。
+// ---------------------------------------------------------------------------
 
 // 单点入口：按 ext 路由到具体 importer。
 //

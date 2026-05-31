@@ -137,6 +137,7 @@ add_executable(OrangeEditor
     import/GltfImporter.cpp
     import/GltfMaterialParse.cpp
     import/ImportDispatcher.cpp
+    import/ImportHostBridge.cpp
     import/MeshTangentGen.cpp
     import/MetaSidecar.cpp
     import/ObjImporter.cpp

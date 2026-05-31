@@ -149,6 +149,52 @@ target_include_directories(editor_prefab_actions_test PRIVATE
 orange_engine_set_compiler_options(editor_prefab_actions_test)
 add_test(NAME editor_prefab_actions_test COMMAND editor_prefab_actions_test)
 
+# Headless mesh 导入端到端（GAP-2026-05-27 G1）—— 锁 "资产导入不拉起 GUI" 的
+# 解耦链：ImportDispatcher 的 registry-only seam（DispatchToRegistry /
+# ImportObjMeshToRegistry / ImportGltfMeshToRegistry）把 .obj / .gltf 导入一个仅
+# 注册 Mesh + Texture loader 的最小 AssetRegistry，断言 .mesh + .meta 产出 +
+# 可读回 + 确定性。直接编译真实 importer 源（ImportDispatcher / ObjImporter /
+# GltfImporter / GltfMaterialParse / MetaSidecar / MeshTangentGen / MaterialFileIO）
+# + vendor 单 header（tinyobjloader / cgltf / mikktspace），只链 orange_engine。
+# 这些 importer 源 #include EditorHost.h 做 GUI 委托——后者只拉引擎公共头 +
+# glm（ThumbnailService 仅前向声明），无 Vulkan/ImGui/GLFW，故 headless 链得通。
+# IMPLEMENTATION 宏分布：tinyobjloader 仅 ObjImporter.cpp expand；cgltf 仅
+# GltfImporter.cpp expand（GltfMaterialParse.cpp 只取声明），两份不冲突。
+# .obj 路径自给 fixture（程序化写立方体），干净 checkout 也跑；.gltf 路径走
+# Avocado fixture + ORANGE_ENGINE_GLTF_FIXTURE 注入（缺则编译期短路 SKIP）。
+add_executable(headless_mesh_import_test
+    editor/HeadlessMeshImportTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ImportDispatcher.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ObjImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c")
+target_link_libraries(headless_mesh_import_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(headless_mesh_import_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+    "${CMAKE_SOURCE_DIR}/vendor/tinyobjloader"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace"
+    "${CMAKE_SOURCE_DIR}/vendor/cgltf")
+if (EXISTS "${_orange_mikkt_fixture}")
+    target_compile_definitions(headless_mesh_import_test PRIVATE
+        "ORANGE_ENGINE_GLTF_FIXTURE=\"${_orange_mikkt_fixture}\"")
+endif ()
+orange_engine_set_compiler_options(headless_mesh_import_test)
+if (MSVC)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "/W0")
+else ()
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "-w")
+endif ()
+add_test(NAME headless_mesh_import_test COMMAND headless_mesh_import_test)
+
 # CommandStack（tools/OrangeEditor）—— Undo/Redo 栈 + coalesce/group + Undo-label
 # peek。纯 ICommand + std，零 ImGui/GLFW/Vulkan 依赖，故同 editor_hierarchy_test
 # 模式：把 CommandStack.cpp 编进测试 exe + 加 include path（该源不属引擎 lib）。

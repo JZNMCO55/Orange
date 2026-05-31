@@ -28,6 +28,11 @@
 #include <string>
 #include <unordered_map>
 
+namespace Orange::Engine::Asset
+{
+class AssetRegistry;
+}
+
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakePlaneMesh(float halfSize);
 
@@ -39,6 +44,18 @@ MakeCubeMesh(float halfSize);
 // 14_pbr_ibl 同款，编辑器 PBR showcase scene 复用。
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat);
+
+// 注册 headless 资产导入（ImportDispatcher::DispatchToRegistry）落盘所必需的
+// loader —— 当前是 Mesh + Texture（MeshLoader::Save/Load + TextureLoader 解码，
+// 二者都纯 CPU，不依赖 Vulkan/GLFW/ImGui/RenderDevice/ThumbnailService）。
+// InitializeEditorAssets 复用它（DRY），headless CLI / 测试也用它建一个最小
+// AssetRegistry。每个 RegisterLoader 失败仅 log，不抛。
+void RegisterImportLoaders(Orange::Engine::Asset::AssetRegistry& registry);
+
+// 工厂：建一个仅注册了 import 必需 loader（Mesh + Texture）的最小 AssetRegistry，
+// 供 headless 导入路径（CLI / ctest）使用。不触碰任何 GPU / GUI 子系统，也不
+// 建 MaterialSystem / 内置 mesh-bake / 材质实例——纯 import 落盘够用。
+std::unique_ptr<Orange::Engine::Asset::AssetRegistry> CreateImportAssetRegistry();
 
 void InitializeEditorAssets(EditorHost& host);
 

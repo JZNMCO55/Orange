@@ -28,14 +28,26 @@
 
 #include "ImportDispatcher.h"
 
+struct EditorHost;
+
+namespace Orange::Engine::Asset
+{
+class AssetRegistry;
+}
+
 namespace Orange::Editor::Import
 {
 
-// 实现签名按 ImportDispatcher.h 暴露的 ImportObjMesh 一致；本头只是把
-// 实际实现挪出 ImportDispatcher.cpp 让 tinyobjloader IMPLEMENTATION 宏只
-// 在 ObjImporter.cpp 一处 expand，避免多 TU 重定义（v0.7 Pipeline.cpp 拆
-// 分时撞 stb single-header 多 TU 冲突的教训，参 [[project-pipeline-split-
-// in-progress]] memory）。
+// Headless 核心实现（GAP-2026-05-27 G1）：只依赖 AssetRegistry&，不出现
+// EditorHost。把实际实现挪出 ImportDispatcher.cpp 让 tinyobjloader
+// IMPLEMENTATION 宏只在 ObjImporter.cpp 一处 expand，避免多 TU 重定义
+// （v0.7 Pipeline.cpp 拆分时撞 stb single-header 多 TU 冲突的教训，参
+// [[project-pipeline-split-in-progress]] memory）。
+ImportResult RunObjImportToRegistry(std::string_view srcPath,
+                                    ::Orange::Engine::Asset::AssetRegistry& registry);
+
+// GUI 包装：委托到 RunObjImportToRegistry（obj 无 material 注册副作用，
+// 直接转发 host.assets.pAssets）。
 ImportResult RunObjImport(std::string_view srcPath, EditorHost& host);
 
 }  // namespace Orange::Editor::Import

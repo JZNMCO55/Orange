@@ -76,6 +76,7 @@
 #include "EditorHost.h"
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
+#include "import/ImportDispatcher.h"
 #include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
 #include "plugin/AnimFsmAssetInspectorPlugin.h"
@@ -175,6 +176,42 @@ void ChdirToRepoRoot()
     }
 }
 
+// Headless 资产导入 CLI（GAP-2026-05-27 G1）。在任何 GLFW / Vulkan / ImGui
+// init 之前由 main 判 argv 调用：用 CreateImportAssetRegistry 建一个最小
+// AssetRegistry（仅 Mesh + Texture loader，零 GPU / GUI 依赖）→ DispatchToRegistry
+// 导入 srcPath → 打印 ImportResult。返回进程退出码（成功 0 / 失败非 0）。
+//
+// 用法：OrangeEditor import-mesh <path>（import 亦接受）。产物落 assets/Models/
+// <stem>/（与 GUI 导入一致；ChdirToRepoRoot 已把 cwd 切到仓库根）。
+// gltf material 注册回调留空 —— headless 不需要编辑器 namedMaterialInstances
+// 缓存，.material / .mesh / .meta 仍照常写盘。
+int RunHeadlessImport(const char* srcPath)
+{
+    if (srcPath == nullptr || srcPath[0] == '\0')
+    {
+        std::fprintf(stderr, "[OrangeEditor] import: missing source path\n"
+                             "usage: OrangeEditor import-mesh <path>\n");
+        return 2;
+    }
+
+    auto registry = CreateImportAssetRegistry();
+    if (registry == nullptr)
+    {
+        std::fprintf(stderr, "[OrangeEditor] import: CreateImportAssetRegistry failed\n");
+        return 3;
+    }
+
+    const auto result =
+        Orange::Editor::Import::DispatchToRegistry(srcPath, *registry);
+
+    const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
+    std::fprintf(ok ? stdout : stderr,
+                 "[OrangeEditor] import '%s' -> '%s': %s (status=%d)\n",
+                 srcPath, result.destPath.c_str(), result.message.c_str(),
+                 static_cast<int>(result.status));
+    return ok ? 0 : 1;
+}
+
 // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
 // 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
 //   EditorHost            → EditorHost.h（顶层 hub，聚合 4 sub-context + cmdStack）
@@ -194,7 +231,7 @@ void ChdirToRepoRoot()
 
 }  // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     using namespace Orange::Engine;
 
@@ -208,8 +245,19 @@ int main()
 
     // 必须在任何相对路径 IO（Scene::Load / asset lazy-bake / shader 编译
     // 缓存等）之前完成 chdir，否则 build/bin/Debug 启动场景会产生 stale
-    // build 产物 assets/ 子树污染。
+    // build 产物 assets/ 子树污染。headless import 路径同样依赖它把产物落到
+    // 仓库根 assets/Models/。
     ChdirToRepoRoot();
+
+    // Headless 资产导入分支（GAP-2026-05-27 G1）：在**任何** GLFW / Vulkan /
+    // ImGui init 之前判 argv，命中即走纯 CPU 导入路径后直接退出，全程不碰 GUI。
+    // 其余情况照常进下面的 GUI 主循环。
+    if (argc >= 2 && argv[1] != nullptr &&
+        (std::strcmp(argv[1], "import-mesh") == 0 ||
+         std::strcmp(argv[1], "import") == 0))
+    {
+        return RunHeadlessImport(argc >= 3 ? argv[2] : nullptr);
+    }
 
     // ---- AppHost（窗口 + 主循环）---------------------------------------
     AppConfig cfg{};

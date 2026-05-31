@@ -263,34 +263,19 @@ MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     return pMesh;
 }
 
-// 一次性建好 AssetRegistry + 注册 ShaderLoader + 内置 mesh + MaterialSystem
-// + 所有内置材质实例。失败仅 log，不抛；SeedDemoWorld 仍能工作（Renderable
-// 退化到 nullptr material），只是 Scene 视口看不到几何。
-void InitializeEditorAssets(EditorHost& host)
+void RegisterImportLoaders(Orange::Engine::Asset::AssetRegistry& registry)
 {
-    using Orange::Engine::Asset::AssetRegistry;
     using Orange::Engine::Asset::MeshAsset;
-    using Orange::Engine::Asset::ShaderAsset;
-    using Orange::Engine::Asset::ShaderLoader;
-    using Orange::Engine::Render::MaterialSystem;
+    using Orange::Engine::Asset::MeshLoader;
+    using Orange::Engine::Asset::TextureAsset;
+    using Orange::Engine::Asset::TextureLoader;
 
-    host.assets.pAssets = std::make_unique<AssetRegistry>();
-    if (auto reg = host.assets.pAssets->RegisterLoader<ShaderAsset>(
-            std::make_unique<ShaderLoader>());
-        reg.IsErr())
-    {
-        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<ShaderAsset> 失败 "
-                         "(code={})",
-                         static_cast<unsigned>(reg.Error()));
-    }
     // GAP-2026-05-16 G1：注册 MeshLoader 让 RenderableComponent.mesh 字段
     // 走 "assets/meshes/*.mesh" 磁盘路径 Load 路径（取代旧的内存 named
     // "editor/cube" Insert 路径）。MeshLoader v2 支持 UV 段（同 commit 落
     // 地的引擎扩展），textured / toon material 在烘焙后的 .mesh 上 UV 不
-    // 丢失。
-    using Orange::Engine::Asset::MeshLoader;
-    if (auto reg = host.assets.pAssets->RegisterLoader<MeshAsset>(
-            std::make_unique<MeshLoader>());
+    // 丢失。也是 headless mesh import（GAP-2026-05-27 G1）Load 回读的必需 loader。
+    if (auto reg = registry.RegisterLoader<MeshAsset>(std::make_unique<MeshLoader>());
         reg.IsErr())
     {
         ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<MeshAsset> 失败 "
@@ -305,16 +290,49 @@ void InitializeEditorAssets(EditorHost& host)
     // 用户视觉上等同 "Environment 拖放和数值调节都没反应"。原 GAP-2026-05-19
     // -editor-environment-component-wiring fix 漏了这一步：当时只看 sample
     // 14_pbr_ibl 通了（sample 自己注册了 TextureLoader），编辑器没真走 GUI 验。
-    using Orange::Engine::Asset::TextureAsset;
-    using Orange::Engine::Asset::TextureLoader;
-    if (auto reg = host.assets.pAssets->RegisterLoader<TextureAsset>(
-            std::make_unique<TextureLoader>());
+    // headless gltf import 的贴图 co-locate（ImportTexture）同样走它（CPU 解码，
+    // 不上传 GPU，headless 安全）。
+    if (auto reg = registry.RegisterLoader<TextureAsset>(std::make_unique<TextureLoader>());
         reg.IsErr())
     {
         ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<TextureAsset> 失败 "
                          "(code={})",
                          static_cast<unsigned>(reg.Error()));
     }
+}
+
+std::unique_ptr<Orange::Engine::Asset::AssetRegistry> CreateImportAssetRegistry()
+{
+    auto registry = std::make_unique<Orange::Engine::Asset::AssetRegistry>();
+    RegisterImportLoaders(*registry);
+    return registry;
+}
+
+// 一次性建好 AssetRegistry + 注册 ShaderLoader + 内置 mesh + MaterialSystem
+// + 所有内置材质实例。失败仅 log，不抛；SeedDemoWorld 仍能工作（Renderable
+// 退化到 nullptr material），只是 Scene 视口看不到几何。
+void InitializeEditorAssets(EditorHost& host)
+{
+    using Orange::Engine::Asset::AssetRegistry;
+    using Orange::Engine::Asset::MeshAsset;
+    using Orange::Engine::Asset::MeshLoader;  // bakeIfMissingThenLoad 下面用 MeshLoader::Save
+    using Orange::Engine::Asset::ShaderAsset;
+    using Orange::Engine::Asset::ShaderLoader;
+    using Orange::Engine::Render::MaterialSystem;
+
+    host.assets.pAssets = std::make_unique<AssetRegistry>();
+    if (auto reg = host.assets.pAssets->RegisterLoader<ShaderAsset>(
+            std::make_unique<ShaderLoader>());
+        reg.IsErr())
+    {
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<ShaderAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
+    }
+
+    // Mesh + Texture loader 走共享工厂（headless import 路径同款），DRY：见
+    // RegisterImportLoaders 头注释。
+    RegisterImportLoaders(*host.assets.pAssets);
 
     // v0.7 c3：注册 SkeletonLoader 让 DragonBonesAssetInspectorPlugin
     // 可加载 _ske.json / _ske.dbbin 资源浏览 metadata。无参 ctor 内部

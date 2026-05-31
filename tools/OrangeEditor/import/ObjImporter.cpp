@@ -2,7 +2,6 @@
 
 #include "MeshTangentGen.h"
 #include "MetaSidecar.h"
-#include "../EditorHost.h"
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -76,7 +75,8 @@ struct FaceVertexKeyHash
 };
 }  // namespace
 
-ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
+ImportResult RunObjImportToRegistry(std::string_view srcPath,
+                                    ::Orange::Engine::Asset::AssetRegistry& registry)
 {
     using ::Orange::Engine::Asset::AssetRegistry;
     using ::Orange::Engine::Asset::MeshAsset;
@@ -88,13 +88,6 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
     namespace fs = std::filesystem;
 
     ImportResult result{};
-    if (host.assets.pAssets == nullptr)
-    {
-        result.status  = ImportStatus::AssetLoadFailed;
-        result.message = "AssetRegistry not initialized";
-        ORANGE_LOG_ERROR("ObjImporter: '{}': {}", srcPath, result.message);
-        return result;
-    }
 
     fs::path src(srcPath.begin(), srcPath.end());
     std::error_code ec;
@@ -334,7 +327,7 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
     }
 
     // AssetRegistry::Load 走 MeshLoader::Load 路径读回 + dedup by path。
-    auto loadRes = host.assets.pAssets->Load<MeshAsset>(destMeshStr);
+    auto loadRes = registry.Load<MeshAsset>(destMeshStr);
     if (loadRes.IsErr())
     {
         result.status  = ImportStatus::AssetLoadFailed;
@@ -379,5 +372,9 @@ ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
                     HashToHexString(meta.sourceHash));
     return result;
 }
+
+// GUI 包装 RunObjImport(host) 在 ImportHostBridge.cpp —— 把所有引用 EditorHost
+// 的薄壳集中到那个单独 TU，让本 TU（含 tinyobjloader IMPLEMENTATION）保持
+// headless 可链（不引 EditorHost / EnsureMaterialInstance）。
 
 }  // namespace Orange::Editor::Import

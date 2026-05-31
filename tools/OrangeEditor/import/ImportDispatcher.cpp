@@ -3,7 +3,6 @@
 #include "GltfImporter.h"
 #include "MetaSidecar.h"
 #include "ObjImporter.h"
-#include "../EditorHost.h"
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/TextureAsset.h>
@@ -70,19 +69,13 @@ ImportKind ClassifyByExt(std::string_view ext)
     return ImportKind::Unsupported;
 }
 
-ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
-                           std::string_view destDirOverride)
+ImportResult ImportTextureToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry,
+                                     std::string_view destDirOverride)
 {
     namespace fs = std::filesystem;
 
     ImportResult result{};
-    if (host.assets.pAssets == nullptr)
-    {
-        result.status  = ImportStatus::AssetLoadFailed;
-        result.message = "AssetRegistry not initialized";
-        ORANGE_LOG_ERROR("ImportTexture: '{}': {}", srcPath, result.message);
-        return result;
-    }
 
     fs::path src(srcPath.begin(), srcPath.end());
     std::error_code ec;
@@ -143,8 +136,7 @@ ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
     // 让 AssetRegistry 走 TextureLoader::Load 路径加载。dedup by path：同
     // path 已存在 entry 时 reuse 旧 handle，但底层文件已被 copy_file 覆盖
     // —— Load 内部会重新解码新文件。
-    auto loadRes = host.assets.pAssets
-        ->Load<::Orange::Engine::Asset::TextureAsset>(destStr);
+    auto loadRes = registry.Load<::Orange::Engine::Asset::TextureAsset>(destStr);
     if (loadRes.IsErr())
     {
         result.status  = ImportStatus::AssetLoadFailed;
@@ -180,29 +172,35 @@ ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
     return result;
 }
 
-ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host)
+ImportResult ImportObjMeshToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry)
 {
     // v1.1 T3 路由到 ObjImporter 模块（tinyobjloader IMPLEMENTATION 仅在
     // ObjImporter.cpp 单 TU expand）。
-    return RunObjImport(srcPath, host);
+    return RunObjImportToRegistry(srcPath, registry);
 }
 
-ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host)
+ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
+                                      ::Orange::Engine::Asset::AssetRegistry& registry,
+                                      const MaterialRegisterFn& onMaterialWritten)
 {
     // v1.1 T4 路由到 GltfImporter 模块（cgltf IMPLEMENTATION 仅在
     // GltfImporter.cpp 单 TU expand）。
-    return RunGltfImport(srcPath, host);
+    return RunGltfImportToRegistry(srcPath, registry, onMaterialWritten);
 }
 
-ImportResult Dispatch(std::string_view srcPath, EditorHost& host)
+ImportResult DispatchToRegistry(std::string_view srcPath,
+                                ::Orange::Engine::Asset::AssetRegistry& registry,
+                                const MaterialRegisterFn& onMaterialWritten)
 {
     const auto ext = ExtractExt(srcPath);
     const ImportKind kind = ClassifyByExt(ext);
     switch (kind)
     {
-        case ImportKind::Texture:  return ImportTexture(srcPath, host);
-        case ImportKind::ObjMesh:  return ImportObjMesh(srcPath, host);
-        case ImportKind::GltfMesh: return ImportGltfMesh(srcPath, host);
+        case ImportKind::Texture:  return ImportTextureToRegistry(srcPath, registry);
+        case ImportKind::ObjMesh:  return ImportObjMeshToRegistry(srcPath, registry);
+        case ImportKind::GltfMesh: return ImportGltfMeshToRegistry(srcPath, registry,
+                                                                   onMaterialWritten);
         case ImportKind::Unsupported:
         default:
         {
@@ -215,5 +213,10 @@ ImportResult Dispatch(std::string_view srcPath, EditorHost& host)
         }
     }
 }
+
+// GUI 入口（Dispatch / ImportTexture / ImportObjMesh / ImportGltfMesh，全部
+// 取 EditorHost&）在 ImportHostBridge.cpp —— 集中所有引用 EditorHost /
+// EnsureMaterialInstance 的薄壳到那个单独 TU，让本 TU 保持 headless 可链
+// （只依赖 AssetRegistry，不引编辑器态）。
 
 }  // namespace Orange::Editor::Import

@@ -1,11 +1,9 @@
 #include "GltfImporter.h"
 
 #include "GltfMaterialParse.h"  // ExtractGltfMaterial / BuildMaterialFileData（可独立测试的 material seam）
-#include "ImportDispatcher.h"   // ImportTexture（复用纹理导入路径）
+#include "ImportDispatcher.h"   // ImportTextureToRegistry（复用纹理导入路径）
 #include "MeshTangentGen.h"     // GenerateMikkTSpaceTangents（高质量切线）
 #include "MetaSidecar.h"
-#include "../BuiltinAssets.h"   // EnsureMaterialInstance（注册进 namedMaterialInstances）
-#include "../EditorHost.h"
 #include "../MaterialFileIO.h"  // WriteMaterialFile（写 .material sidecar）
 
 #include <orange/engine/asset/AssetRegistry.h>
@@ -83,7 +81,9 @@ const char* CgltfResultToString(cgltf_result r)
 // 已抽到 import/GltfMaterialParse.{h,cpp}（可独立 headless 测试的 material seam）。
 }  // namespace
 
-ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
+ImportResult RunGltfImportToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry,
+                                     const MaterialRegisterFn& onMaterialWritten)
 {
     using ::Orange::Engine::Asset::AssetRegistry;
     using ::Orange::Engine::Asset::MeshAsset;
@@ -95,13 +95,6 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     namespace fs = std::filesystem;
 
     ImportResult result{};
-    if (host.assets.pAssets == nullptr)
-    {
-        result.status  = ImportStatus::AssetLoadFailed;
-        result.message = "AssetRegistry not initialized";
-        ORANGE_LOG_ERROR("GltfImporter: '{}': {}", srcPath, result.message);
-        return result;
-    }
 
     fs::path src(srcPath.begin(), srcPath.end());
     std::error_code ec;
@@ -386,7 +379,7 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         return result;
     }
 
-    auto loadRes = host.assets.pAssets->Load<MeshAsset>(destMeshStr);
+    auto loadRes = registry.Load<MeshAsset>(destMeshStr);
     if (loadRes.IsErr())
     {
         result.status  = ImportStatus::AssetLoadFailed;
@@ -425,12 +418,12 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     // 引擎不自动 mesh↔material 绑定（GAP 已记），用户在编辑器把 .material 指给 entity。
     if (matInfo.present)
     {
-        // resolver：把贴图源路径走 ImportTexture（copy 到模型自己的
+        // resolver：把贴图源路径走 ImportTextureToRegistry（copy 到模型自己的
         // assets/Models/<stem>/ 子目录而非共享 Textures + load + .meta）后回填
         // destPath；失败返回空 → BuildMaterialFileData 跳过该槽。factor / binding /
         // AO 映射逻辑全在 BuildMaterialFileData（与 headless 测试共用同一份）。
         auto resolver = [&](const std::string& srcTexPath) -> std::string {
-            ImportResult tr = ImportTexture(srcTexPath, host, modelDirStr);
+            ImportResult tr = ImportTextureToRegistry(srcTexPath, registry, modelDirStr);
             if (tr.status == ImportStatus::Success && !tr.destPath.empty())
             {
                 return tr.destPath;
@@ -446,17 +439,16 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
         {
             ORANGE_LOG_INFO("GltfImporter: wrote material '{}' (textures={})",
                             matPath, mdata.textures.size());
-            // 立刻注册进 namedMaterialInstances —— 否则刚导入的 .material 不在
-            // 表里,Renderable 的 Material 字段(materialSet 只查表不 lazy load)
-            // 选不到、赋不上(GAP-2026-05-25 用户反馈:导入的材质拖不到 entity)。
-            // EnsureMaterialInstance 内 ReadMaterialFile + CreateInstance +
-            // ApplyDataToInstance(应用 uBaseColor/uMRA + 贴图 override)+ own 到
-            // userMaterials + 写 namedMaterialInstances → 导入后即可在 Inspector
-            // Material 下拉选中。
-            if (::EnsureMaterialInstance(host, matPath) != nullptr)
+            // 写出 .material 后回调注册（仅 GUI 路径注入；headless 传空跳过）。
+            // 否则刚导入的 .material 不在编辑器 namedMaterialInstances 表里，
+            // Renderable 的 Material 字段(materialSet 只查表不 lazy load)选不到、
+            // 赋不上(GAP-2026-05-25 用户反馈:导入的材质拖不到 entity)。回调内
+            // （GUI = EnsureMaterialInstance）做 ReadMaterialFile + CreateInstance
+            // + ApplyDataToInstance + own 到 userMaterials + 写 namedMaterialInstances。
+            // headless 路径不需要编辑器缓存，材质文件已照常落盘。
+            if (onMaterialWritten)
             {
-                ORANGE_LOG_INFO("GltfImporter: material '{}' 已注册 → 可在 Renderable "
-                                "Material 字段选用", matPath);
+                onMaterialWritten(matPath);
             }
         }
         else
@@ -474,5 +466,9 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
                     HashToHexString(meta.sourceHash));
     return result;
 }
+
+// GUI 包装 RunGltfImport(host)（注入 EnsureMaterialInstance 注册回调）在
+// ImportHostBridge.cpp —— 把所有引用 EditorHost / EnsureMaterialInstance 的薄壳
+// 集中到那个单独 TU，让本 TU（含 cgltf IMPLEMENTATION）保持 headless 可链。
 
 }  // namespace Orange::Editor::Import
