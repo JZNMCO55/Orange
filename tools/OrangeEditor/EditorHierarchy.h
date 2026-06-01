@@ -75,11 +75,16 @@ void DestroySubtree(Orange::Engine::World& world, Orange::Engine::Entity e);
 // 把 root 在根序（HierarchyComponent.sortIndex，ADR-014）里移动 delta 位
 // （delta<0=更靠前/上移，>0=更靠后/下移）。仅作用于根节点（parent==Invalid）；
 // 非根 / 单根 / 已在边界 → 不动并返回 false。会把所有根的 sortIndex 规整为
-// 0..n-1（确保反复 reorder 不漂移、Move 可逆）。返回是否真的发生移动——编辑器
-// 据此决定是否记 Undo 命令。
+// 0..n-1（无 HC 的根一并补 HC；确保反复 reorder 不漂移、Move 可逆）。返回是否
+// 真的发生移动——编辑器据此决定是否记 Undo 命令。
+//
+// dryRun=true：只做同样的"能否移动"判断（非根 / 单根 / 边界），**不改任何
+// 状态、不补 HC、不写 sortIndex**。给调用方做预检——避免"判断时执行一次 + 命令
+// 栈 Execute 再执行一次"导致移两位（reorder 直接跳顶/底 bug）。
 bool MoveRootRelative(Orange::Engine::World& world,
                       Orange::Engine::Entity root,
-                      int delta);
+                      int delta,
+                      bool dryRun = false);
 
 }  // namespace EditorHierarchy
 

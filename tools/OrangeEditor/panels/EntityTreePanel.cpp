@@ -1212,7 +1212,12 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             if (isRoot) {
                 ImGui::Separator();
                 const auto rootMove = [&](int delta) {
-                    if (EditorHierarchy::MoveRootRelative(*mHost.scene.pWorld, entity, delta)) {
+                    // 用 dryRun 预检"能否移动"——**不在此真执行**；真正的移动只交给
+                    // 下面命令栈 Push 的 Execute 跑一次。否则"判断时执行一次 + 命令
+                    // 栈 Execute 再执行一次" = 移两位，reorder 直接跳顶/底
+                    // （BUG-2026-06-01-root-reorder-double-apply）。
+                    if (EditorHierarchy::MoveRootRelative(*mHost.scene.pWorld, entity,
+                                                          delta, /*dryRun*/ true)) {
                         Orange::Engine::World* pW = &(*mHost.scene.pWorld);
                         const Orange::Engine::Entity capE = entity;
                         mHost.cmdStack.Push(std::make_unique<LambdaCommand>(

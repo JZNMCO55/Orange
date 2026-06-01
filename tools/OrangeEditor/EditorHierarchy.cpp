@@ -175,10 +175,17 @@ void DestroySubtree(World& world, Entity e)
     world.DestroyEntity(e);
 }
 
-bool MoveRootRelative(World& world, Entity root, int delta)
+bool MoveRootRelative(World& world, Entity root, int delta, bool dryRun)
 {
+    if (delta == 0) { return false; }
     const HC* rh = world.GetComponent<HC>(root);
-    if (rh == nullptr || rh->parent.IsValid() || delta == 0) { return false; }
+    // 有 HC 且 parent 有效 = 非根，不参与根序 reorder。
+    if (rh != nullptr && rh->parent.IsValid()) { return false; }
+    // root 无 HC（典型：编辑器新建的 root 实体只挂 Name/Transform，未挂
+    // HierarchyComponent）也按根处理——下面收集阶段"无 HC 视为根"纳入，规整
+    // 阶段统一给**所有**参与根补 HC + 写 sortIndex（见末段）。这样新建节点能
+    // 参与 Move Up/Down（BUG-2026-06-01-new-root-entity-move-noop），且多个无
+    // HC 新建根混在一起 reorder 也稳定（不会因只规整了部分根而排序错乱）。
 
     // 收集所有根，按当前 (sortIndex, entity id) 排序——id 作为 sortIndex 相同时
     // 的稳定 tie-break（与 EntityTreePanel 根枚举一致）。
@@ -212,15 +219,27 @@ bool MoveRootRelative(World& world, Entity root, int delta)
     }
     if (static_cast<std::size_t>(target) == idx) { return false; }  // 已在边界
 
+    // dryRun：到这里说明"能移动"（非根 / 单根 / 边界都已在上面 return false 排
+    // 除）。不改任何状态直接返回 true，让调用方把真正的移动交给命令栈 Execute
+    // 执行一次——避免"判断时执行一次 + 命令栈再执行一次"导致移两位（跳顶/底）。
+    if (dryRun) { return true; }
+
     // 在排序列表里把 root 从 idx 挪到 target，再把所有根 sortIndex 规整为
     // 0..n-1——规整确保反复 reorder 不让 sortIndex 漂移，且相邻 Move 可逆。
     const RootEntry moved = roots[idx];
     roots.erase(roots.begin() + static_cast<long>(idx));
     roots.insert(roots.begin() + target, moved);
     for (std::size_t i = 0; i < roots.size(); ++i) {
-        if (HC* h = world.GetComponent<HC>(roots[i].e)) {
-            h->sortIndex = static_cast<int>(i);
+        HC* h = world.GetComponent<HC>(roots[i].e);
+        if (h == nullptr) {
+            // 无 HC 的根（新建节点）一并补默认 HC（parent invalid 合法根），
+            // 使其与其它根一样持有 sortIndex——否则混合根（部分有 HC、部分新
+            // 建无 HC）只规整了有 HC 的那些，无 HC 根 sortIndex 恒为 0，被 Move
+            // 的根排序错乱（看似跳到顶/底或 Move 无效）。
+            world.AddComponent<HC>(roots[i].e, HC{});
+            h = world.GetComponent<HC>(roots[i].e);
         }
+        if (h != nullptr) { h->sortIndex = static_cast<int>(i); }
     }
     return true;
 }
