@@ -17,6 +17,7 @@
   3. 看 viewport 里名为 **"Slime Doll"** 的球（位置约 `(0.8, 1.6, 0.5)`，贴 Glow Box 上方）
 - **看什么 / 通过判据**：
   - 球做**绿色呼吸脉动**（绿色分量在亮暗间周期变化，约 2.2 rad/s，肉眼可见明显起伏）
+    - ⚠️ 2026-06-01 根因已修（`BUG-2026-06-01-slime-doll-invisible-and-mute-on-scene-load`）：之前"Slime Doll 是空的/看不见" = 启动加载的 `demo.scene.json`（commit 早于 `dd8f64b` 3 天）里该实体**无 Renderable** + 动画材质 `pAnimatedMaterial` 不可被 `materialInstanceId` 反查（独占实例不在 named 表）。已补 Renderable（sphere + 虚拟 id `editor/animated_slime.material`）+ 把动画材质纳入 `BuildNamedMaterialInstances`。**重新 dogfood：球应可见（贴 Glow Box 上方）且 Play 时绿色呼吸脉动；Stop 后停止。**
   - 点 **Stop / 回 Edit** 后脉动停止（仅 Play 模式 tick）
   - 选中 Slime Doll → Inspector 的 Animator 段显示 backend = `procedural` + channel 列表含 `uBaseColor`
   - Save 场景 → 重启 → Load → 再 Play，呼吸行为一致（factory 重建）

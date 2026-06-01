@@ -3111,3 +3111,77 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 
 - OrangeRender `FEATURE-2026-05-30-editor-debug-render-views`（device feature 侧 ✅ 7bc8c57；引擎侧 normals/unlit/overdraw/wireframe 变体全 ✅，device feature 已端到端消费闭环）。
 - `editor-capability-gap-vs-mature.md` §3 P2 debug-view 行。
+
+---
+
+## BUG-2026-06-01-slime-doll-invisible-and-mute-on-scene-load ✅
+
+- **发现方**：用户 dogfood（`docs/dogfood-checklist.md` 2026-05-31 批 item 1）——默认 demo 场景里 "Slime Doll" 球看不见，绿色 uBaseColor 呼吸 demo 无从验证
+- **发现日期**：2026-06-01（根因诊断）
+- **一句话定性**：编辑器启动**优先加载** `assets/scenes/demo.scene.json`（`main.cpp:737`），仅文件缺失才回退 `SeedDemoWorld`。该 json 是 `ffff811`(2026-05-28) commit 的，**早于** `dd8f64b`(2026-05-31，给 factory 的 Slime Doll 加 Renderable+呼吸) 3 天 → json 里 Slime Doll 只有 Animator/Hierarchy/Name/Transform、**无 Renderable**（无 mesh → 看不见）；且 `pAnimatedMaterial` 是匿名独占实例（不在 `namedMaterialInstances`、无磁盘 path），`Renderable.materialInstanceId` 按 id 字符串持久化时反查不到它（`ComponentSerializers.cpp` WriteRenderable 写空串 / ReadRenderable resolve 成 null）→ 即便补 Renderable，Animator 覆写的 `pAnimatedMaterial` 与球实际用的材质也非同一实例（**不呼吸**）。`dd8f64b` 的 factory 修复因加载路径优先 json 而**从未生效**
+- **状态**：**✅ 2026-06-01 修复（编译通过，呼吸视觉待 dogfood）**
+  - `BuiltinAssets.cpp`：`pAnimatedMaterial` 用 `editor/` 前缀虚拟 id `"editor/animated_slime.material"` 纳入 `BuildNamedMaterialInstances`（**不建磁盘文件** → Asset Browser 扫磁盘故不显示它，保留"不进用户材质列表"原意）。于是 WriteRenderable 能反查到 id、ReadRenderable resolve 回同一独占实例（= ProceduralAnimator 的 target）→ json 加载路径下 Play 模式也呼吸。
+  - `demo.scene.json`：给 Slime Doll 补 `Renderable`（`assets/meshes/sphere.mesh` + 该虚拟 id）+ position 拉回 `(0.8,1.6,0.5)`（贴 Glow Box 上方）。**提交版 = 干净 demo（无本地 dogfood 导入）**；工作树版（含本地导入的 Avocado/Duck，引用 gitignored `assets/Models/`，不可提交）同步修好供用户即时 dogfood。
+  - 增量编译重生成 `OrangeEditor.exe` 通过（clangd include-path 噪音忽略，以 MSVC 为准）。**Play 模式呼吸脉动视觉待 dogfood**。
+- **关联**：[[GAP-2026-06-01-animation-editor-integration-missing]]（史莱姆呼吸是编辑器**唯一活体动画 demo**，故此 bug 重要性远超一颗球）；`reference_orangeengine_animation_state`（ProceduralAnimator 对 pbr 材质 160B push 路径实时可见）；`reference_orangeengine_models_gitignored_local_demo`（工作树 demo.scene.json 常驻 dirty 不可提交）
+
+---
+
+## GAP-2026-06-01-animation-editor-integration-missing
+
+- **发现方**：用户 dogfood 史莱姆 procedural 呼吸 demo 时追问"动画是不是完全没有集成到编辑器里？导入其他软件制作的动画能不能观看？底部 Animation 面板是不是空壳？" → 触发对动画系统编辑器集成度的全面诊断
+- **发现日期**：2026-06-01
+- **一句话定性**：动画 **runtime 层完整真实**（`ProceduralAnimator` / `SkeletalAnimator`(DragonBones) / `AnimationStateMachine` 均真实现，有 `samples/05_skeletal_animation` + `tests/animation/SkeletalAnimatorTest.cpp` 证明可跑），但**编辑器集成层 ≈ 零**：动画几乎无法在编辑器里制作 / 导入 / 预览。**唯一能在编辑器看到的动画 = 史莱姆 procedural 呼吸**（且只在 Play 模式 + channel 硬编码在 C++ + 刚由 [[BUG-2026-06-01-slime-doll-invisible-and-mute-on-scene-load]] 修复可见）
+- **状态**：**未开工（登记）**。三个子缺口按首游 boss 战实际拉动排期
+
+### 需求上下文（用户 2026-06-01 拍板，决定优先级）
+
+首游 Ori-like 流体史莱姆：**主角动画走 shader / procedural（代码驱动，不阻塞）**，但用户明确——**其他 boss 的攻击模组（动作）走传统骨骼 / 导入动画路线**。故 **G2（glTF / 骨骼动画导入 + skinning）对首游 boss 战是硬需求，非可选**；G1（procedural channel 编辑器可配）贴合主角迭代手感；G3（时间轴 / 状态机图）是成熟编辑器长尾。优先级：先攒诊断，按 boss 战实际拉动 G2。
+
+### 三个子缺口
+
+- **G1 · AnimatorComponent 编辑器可配置**（中，**单引擎子仓可做**）
+  - 现状：`RegisterBuiltinSchemas.cpp:946 RegisterAnimatorComponentSchema` —— **不 Addable / 不 Removable，Inspector 仅一个只读 backend 名 String**（"procedural"/"(no backend)"）。`SchemaInspector.cpp:1190` 注释明示 Animator 无 add fn 不可重建。procedural channel **只能 C++ lambda**（史莱姆呼吸 = `BuiltinAssets.cpp` factory 里硬编码 `0.5+0.5*sin(t*2.2)`），编辑器里改不了一根曲线。
+  - 要做：AnimatorComponent 可 Add Component（需"构造抽象 IAnimator 子类"入口，schema builder 扩 backend 选择）+ Inspector 选 backend / 配 procedural channel（uniform 名 + 曲线参数）。
+- **G2 · 外部动画导入 + 渲染端 skinning**（大，**大概率跨 OrangeRender**）
+  - 现状：`tools/OrangeEditor/import/` **无任何 animation importer**（只有 Obj/Gltf 的 mesh+material）；`GltfImporter.cpp` grep 不到 `skin`/`joint`/`animation`/`keyframe` —— Blender/Maya 做的 glTF/glb 动画导入后**只剩静态 mesh，动画数据全丢**。DragonBones（`_ske.json`/`_dbbin`）runtime 能加载（sample 层），但编辑器 `DragonBonesAssetInspectorPlugin.cpp:144,156,169` "Preview" 按钮 = "单 clip 预览留 v1.x" 占位，只读元数据。
+  - 要做：(a) glTF importer 解析 skin/joint/animation/keyframe → 引擎骨骼动画资产（走 DCC import 4 件套路径）；(b) **渲染端 GPU skinning**（顶点按骨骼矩阵变形）——OrangeEngine `src/render/` 无 skinning 路径，bone palette / skinned vertex 大概率需 OrangeRender 提供 RHI 能力 → 按 ADR-009 拆"OrangeRender feature session → bump → 引擎消费 session"，先登记 `OrangeRender/docs/incoming_feature.md`。
+  - **boss 攻击模组硬需求**（见上需求上下文）。
+- **G3 · Animation 面板真正落地**（大 milestone）
+  - 现状：`EditorRenderLayer.cpp:2759 DrawAnimationPanel` 整个函数 2 行 `TextDisabled`（"timeline / state-machine graph editor — v0.7 实施" + "动画 backend 切换 / 状态机编辑仅 Inspector 字段路径可用"）= **纯空壳**，dock 在底部。`editor-roadmap.md` "v0.7 Animation 子模式留待需求触发" 从未实施。
+  - 要做：时间轴（关键帧编辑 / 播放预览）+ 状态机图编辑器（节点图 UI），参 Lumix `src/editor` 动画相关 + Godot AnimationPlayer/AnimationTree。
+
+### 关联
+
+- [[BUG-2026-06-01-slime-doll-invisible-and-mute-on-scene-load]] —— 本 session 修复的唯一活体动画 demo
+- [[GAP-2026-05-22-editor-dcc-import-pipeline-missing]] —— DCC import 4 件套路径（动画 importer 须走同路径：vendor 单 header → 引擎二进制 → .meta sidecar → AssetRegistry）
+- [[GAP-2026-05-28-gltf-scene-level-import-not-flattened]] —— 同属 glTF importer 能力扩展
+- memory `project_first_game_orilike_strategy`（主角 procedural / boss 传统）、`reference_orangeengine_animation_state`（runtime 现状）
+
+---
+
+## BUG-2026-06-01-new-root-entity-move-noop ✅
+
+- **发现方**：用户 dogfood（memory `project_dogfood_findings_backlog` item 3）——"刚创建的节点，没有办法使用 Move Up 和 Move Down"（其余 reorder 路径 ✅）
+- **发现日期**：2026-06-01
+- **一句话定性**：用户报"新建节点 Move Up/Down 无效"。dogfood 逐层逼出**三层**根因——① 新建 root 只挂 Name/Transform、缺 HierarchyComponent → `MoveRootRelative` 取空 return false（原始 no-op）；② 修 ① 后规整只写有 HC 的根 → 多个无 HC 新建节点混在一起 reorder 排序错乱；③（真正主因）`EntityTreePanel::rootMove` 双重执行 `MoveRootRelative`（判断时一次 + 命令栈 Execute 一次）= **移两位**，表现为"直接跳到顶/底"
+- **状态**：**✅ 2026-06-01 修复（三层全清；headless 测试通过，GUI 待复测）**
+  - **① 缺 HC（原始 no-op）**：`MoveRootRelative` 收集阶段"无 HC 视为根"纳入、规整阶段统一给无 HC 根补默认 HC + 写 sortIndex，使新建节点能参与 reorder。
+  - **② 规整只写有 HC（混合错乱）**：改为规整时给**所有**参与根补 HC，sortIndex 一致 0..n-1，混合根 reorder 稳定。
+  - **③ rootMove 双重执行（移两位 = 跳顶/底，主因）**：旧写法 `if (MoveRootRelative(delta)) { Push(do=MoveRootRelative(delta)) }` —— 判断执行一次 + 命令栈 Push 的 Execute 再执行一次。此前被 ① 的 no-op 掩盖（return false 不进 Push），修 ① 后暴露。给 `MoveRootRelative` 加 `dryRun` 参数：rootMove 用 `dryRun=true` 预检（不改状态），真正移动只交命令栈 Execute 跑一次。
+  - 测试：`editor_hierarchy_test` 13/13（新增 LazyHierarchy / MixedHierarchy / DryRun 三用例）。
+  - **复测**：新建 **3+** 节点 → 对中间那个 Move Up/Down → 应**一次移一位**（非跳顶/底）；连点逐步移动；Undo 回退。
+- **关联**：[[GAP-2026-05-29-entity-tree-sibling-reorder]]（根序 sortIndex / ADR-014）
+
+## BUG-2026-06-01-multi-edit-group-undo-incomplete ✅
+
+- **发现方**：用户 dogfood（memory `project_dogfood_findings_backlog` item 2）——多选 2+ 实体拖共有字段后，Ctrl+Z 一次"不能回到最初始的状态"
+- **发现日期**：2026-06-01
+- **一句话定性**：`SchemaInspector::DrawProperty` 的 multi-edit 群组开关用 `ImGui::IsItemActivated()`（switch 之后）决定 `BeginGroup`，但 **`DragFloat2/3/4`（Vec 字段如 position/scale）内部是 ImGui `BeginGroup` + N 个子 DragScalar，EndGroup 后 last-item 是无 ID 的布局 group**——`IsItemActivated()` 对它匹配不到 ActiveId 而失效，拖 x/y/z 轴时命令组**根本不开**，primary + N follower 命令每帧散落上栈（相邻 entity 不同 → coalesce 也失效），Ctrl+Z 一次只撤一条。**次因**：`BeginGroup(fieldKey.c_str())` 传 DrawProperty 局部 `std::string` 的 c_str()，但 CommandStack 要求 name 静态生命周期不复制（group 跨帧存活）→ `mGroupName` 悬空
+- **状态**：**✅ 2026-06-01 修复（两轮：dogfood 逮到第一轮关组回归后改对；CommandStack 契约 headless 测试通过，GUI 待复测）**
+  - **开组**：改为**在各 case 产生命令之前**由 `EnsureMultiEditGroup` 完成（"多选 + 尚未开组"即开，不依赖失效的 IsItemActivated）→ 第一条命令必落组内。group name 用静态字面量修悬空。
+  - **关组（含第一轮回归修正）**：第一轮误用 switch 后的 `IsItemDeactivated`——以为 EndGroup 会把子项 deactivated 聚合到 DragFloatN 布局 group，**实测不可靠**：释放帧 `IsItemDeactivated()` 返回 false → EndGroup 永不触发 → **组泄漏**（当帧 pending 未入栈 = "无法 Undo" + `mInGroup` 滞留 true，下次 gizmo `BeginGroup` 撞 `assert(!mInGroup)` 崩溃，dogfood 逮到）。改用 `!ImGui::IsAnyItemActive()`（DragFloatN 释放后全局 ActiveId 归 0，是 ImGui 底层状态、对多分量可靠）+ file-static `sMultiEditGroupOpen`（只关 multi-edit 自己开的组，不误关 gizmo 的 group），见 `CloseMultiEditGroupIfDone`。
+  - 单选（additional 空）helper no-op = 零回归。
+  - 测试：`tests/command/CommandStackTest.cpp` 用例 9（多实体共享 fieldKey、Merge 按 entityId 不互相合并 + 一次 group Undo 全部回初值），`command_stack_test` 全过。**关组时序是 ImGui 全局状态耦合、不可 headless，靠 dogfood**。
+  - **待复测**：① 多选拖 position（Vec 字段）→ Ctrl+Z 一次回初值；② multi-edit 后再切 gizmo 操作不崩溃（第一轮回归点）。
+- **关联**：multi-edit 写回闭环（OE `d3a5b54`）；[[feedback_no_works_claim_from_codereading_interactive]]（交互靠 dogfood——本 bug 的"IsItemDeactivated 对 DragFloatN 可靠"误判正是读代码判错、dogfood 逮到的又一例）
