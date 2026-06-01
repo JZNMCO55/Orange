@@ -189,6 +189,59 @@ void BroadcastFieldToSelection(EditorHost&                  host,
     }
 }
 
+// multi-edit 拖动分组：在写入本字段的**第一条**命令之前调，确保 primary +
+// 所有 follower 命令落入同一 cmdStack group → 一次 Undo 撤全部。单选
+// （additionalSelectedEntities 空）时 no-op = 零回归。
+//
+// 为何不沿用 switch 之后的 IsItemActivated 开组（旧实现 bug，dogfood 暴露
+// "多选拖共有字段后 Ctrl+Z 一次回不到初值"）：DragFloat2/3/4（Vec 字段如
+// position / scale）内部是 ImGui BeginGroup + N 个子 DragScalar，EndGroup 后
+// last-item 是无 ID 的布局 group——IsItemActivated() / IsItemActive() 对它匹配
+// 不到 ActiveId 而失效，拖 x/y/z 轴时 group 根本不开，primary + follower 命令
+// 每帧散落上栈（相邻 entity 不同 → coalesce 也失效），Ctrl+Z 一次只撤一条。
+// 改为"本帧值已变 + 尚未开组"即开组（在产生命令前调，不依赖 IsItem* 激活检测），
+// 对单分量 / 多分量 / Checkbox / Combo 一致可靠。关组仍由 switch 之后的
+// IsItemDeactivated 负责——EndGroup 把子项 Deactivated 聚合到布局 group，对
+// 多分量可靠（ImGui "拖动结束提交" 官方用法）。
+//
+// group name 用静态字面量而非 fieldKey.c_str()——CommandStack 不复制 name 且
+// group 跨帧存活（开组在拖动起帧、关组在释放帧），传 DrawProperty 局部
+// std::string 的 c_str() 会悬空（见 CommandStack.h / CommandStack.cpp name
+// 生命周期契约）。Disable 模式下 name 仅作 label、不参与 merge，固定字面量即可。
+// 标记 multi-edit 自己开启、尚未关闭的 group —— 区别于 gizmo 等其它 group 来
+// 源，让关组只收束自己开的组（也不被别人的 group 误关）。file-scope 单飞：同
+// 一时刻只有一个字段控件在拖动，不会并发开多组。
+bool sMultiEditGroupOpen = false;
+
+inline void EnsureMultiEditGroup(EditorHost& host)
+{
+    if (!host.selection.additionalSelectedEntities.empty()
+        && !host.cmdStack.InGroup())
+    {
+        host.cmdStack.BeginGroup("Edit Field (multi-select)", MergeMode::Disable);
+        sMultiEditGroupOpen = true;
+    }
+}
+
+// 关组：仅当本文件开的 multi-edit group 仍开着（sMultiEditGroupOpen）且拖动 /
+// 编辑已结束（全局无任何 ImGui item active）时收束。
+//
+// 为何不用 IsItemDeactivated（旧实现，dogfood 实测崩溃暴露）：DragFloat2/3/4 的
+// 无 ID 布局 group 让 IsItemDeactivated() 在释放帧返回 false → EndGroup 永不触发
+// → 组泄漏：当帧 pending 未打包入栈"无法 Undo"，且 mInGroup 滞留 true，下次
+// gizmo 等再调 BeginGroup 撞 `assert(!mInGroup)` 崩溃。改用 !IsAnyItemActive：
+// DragFloatN 释放后 ActiveId 归 0，对多分量可靠。sMultiEditGroupOpen 守住"只关
+// 自己的组"——gizmo 拖动期间（其自有 group）本检查 sMultiEditGroupOpen==false
+// 不会误关。
+inline void CloseMultiEditGroupIfDone(EditorHost& host)
+{
+    if (sMultiEditGroupOpen && !ImGui::IsAnyItemActive())
+    {
+        if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
+        sMultiEditGroupOpen = false;
+    }
+}
+
 // RemoveComponent-undo 基建：移除组件前，按 schema 字段把当前值快照成一组
 // "restorer" 闭包（每个闭包持有该字段的值副本 + setter，给定新组件指针即把
 // 该字段写回）。undo 时先 schema.add 重建默认组件、再跑所有 restorer 还原
@@ -293,6 +346,7 @@ void DrawProperty(EditorHost&                  host,
             if (ImGui::DragFloat("##v", &newVal, prop.attribs.dragSpeed, minV, maxV))
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<float>(&host, entity, &schema, prop.set)));
@@ -310,6 +364,7 @@ void DrawProperty(EditorHost&                  host,
             if (ImGui::DragInt("##v", &newVal, prop.attribs.dragSpeed, minV, maxV))
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<int>(&host, entity, &schema, prop.set)));
@@ -331,6 +386,7 @@ void DrawProperty(EditorHost&                  host,
                                   prop.attribs.dragSpeed, &minV, &maxV))
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<unsigned int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<unsigned int>(&host, entity, &schema, prop.set)));
@@ -346,6 +402,7 @@ void DrawProperty(EditorHost&                  host,
             if (ImGui::Checkbox("##v", &newVal))
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<bool>(&host, entity, &schema, prop.set)));
@@ -364,6 +421,7 @@ void DrawProperty(EditorHost&                  host,
                                   prop.attribs.dragSpeed, minV, maxV))
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<glm::vec2>(&host, entity, &schema, prop.set)));
@@ -392,6 +450,7 @@ void DrawProperty(EditorHost&                  host,
             if (changed)
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<glm::vec3>(&host, entity, &schema, prop.set)));
@@ -419,6 +478,7 @@ void DrawProperty(EditorHost&                  host,
             if (changed)
             {
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec4>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<glm::vec4>(&host, entity, &schema, prop.set)));
@@ -475,6 +535,7 @@ void DrawProperty(EditorHost&                  host,
                 auto*                       pHost      = &host;
                 PropertyDescriptor::SetFn   setFn      = prop.set;
                 const ComponentSchema*      pSchema    = &schema;
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
                     entity, fieldKey, oldVal, newVal,
                     [pHost, entity, pSchema, setFn]
@@ -523,6 +584,7 @@ void DrawProperty(EditorHost&                  host,
             {
                 newVal = displayIdx;
                 prop.set(component, &newVal);
+                EnsureMultiEditGroup(host);
                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
                     entity, fieldKey, oldVal, newVal,
                     MakeFieldApply<int>(&host, entity, &schema, prop.set)));
@@ -961,23 +1023,10 @@ void DrawProperty(EditorHost&                  host,
         }
     }
 
-    // multi-edit 拖动分组：仅多选时围绕本字段控件的一次拖动，把 primary +
-    // 所有 follower 广播命令收束成一次 Undo。IsItemActivated 开 group（控件
-    // 首次激活，早于任何值变化帧）/ IsItemDeactivated 关（释放，含未改值的
-    // 空组——EndGroup 自动丢弃空组）。MergeMode::Disable 让每次拖动独立成一
-    // 条 Undo。单选（additional 空）不开 group → 保持原 per-field coalesce
-    // 行为 = 零回归。本段在 switch 之后，IsItem* 指向刚画的字段控件。
-    if (!host.selection.additionalSelectedEntities.empty())
-    {
-        if (ImGui::IsItemActivated())
-        {
-            host.cmdStack.BeginGroup(fieldKey.c_str(), MergeMode::Disable);
-        }
-        if (ImGui::IsItemDeactivated() && host.cmdStack.InGroup())
-        {
-            host.cmdStack.EndGroup();
-        }
-    }
+    // multi-edit 关组：见 CloseMultiEditGroupIfDone 注释——本文件开的 group 在
+    // 拖动 / 编辑结束（全局无 active item）时收束。放在 switch 之后、PopID 之前，
+    // 此刻字段控件已绘制完（DragFloatN 已处理本帧 mouse-release、ActiveId 归 0）。
+    CloseMultiEditGroupIfDone(host);
 
     ImGui::PopID();
 

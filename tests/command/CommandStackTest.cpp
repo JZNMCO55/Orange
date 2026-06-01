@@ -243,6 +243,59 @@ int main()
         }
     }
 
+    // 9. multi-edit 群组 Undo 回初值（复刻 SchemaInspector 多选编辑的命令序列，
+    //    锁 BUG-2026-06-01-multi-edit-group-undo-incomplete 的 CommandStack 侧
+    //    契约）。多个"实体"共享同一 fieldKey（GetType），但 Merge 按 entityId
+    //    区分——组内不同实体的命令**不**互相 coalesce、各自保留；一次 Undo 经
+    //    CommandGroup 反序撤销把所有实体回到拖动前初值（而非只回到第一帧）。
+    {
+        // SetFieldValueCommand 的关键行为复刻：Execute/Undo 设值；GetType=key
+        // （coalesce 配对键）；Merge 仅同 entityId 才吸收（不同实体拒绝合并，
+        // 正是 SetFieldValueCommand::Merge 的 entity 检查）。不直接用
+        // SetFieldValueCommand 以保持本测试零引擎依赖（无 Entity.h）。
+        struct FieldCmd : public ICommand
+        {
+            FieldCmd(int* v, const char* key, int eid, int oldV, int newV)
+                : pv(v), k(key), entityId(eid), oldVal(oldV), newVal(newV) {}
+            void        Execute() override { *pv = newVal; }
+            void        Undo() override    { *pv = oldVal; }
+            const char* GetType() const override { return k; }
+            bool        Merge(ICommand& n) override
+            {
+                auto& o = static_cast<FieldCmd&>(n);
+                if (o.entityId != entityId) { return false; }  // 不同实体不合并
+                newVal = o.newVal;
+                return true;
+            }
+            int* pv; const char* k; int entityId; int oldVal; int newVal;
+        };
+
+        CommandStack s;
+        int vP = 0, vF1 = 0, vF2 = 0;  // primary + 2 follower，初值 0
+        s.BeginGroup("Edit Field (multi-select)", MergeMode::Disable);
+        // 帧 1：三个实体 0→1（同 key 不同 entityId → 组内各自 append、不合并）。
+        s.Push(std::make_unique<FieldCmd>(&vP,  "Transform.position", 1, 0, 1));
+        s.Push(std::make_unique<FieldCmd>(&vF1, "Transform.position", 2, 0, 1));
+        s.Push(std::make_unique<FieldCmd>(&vF2, "Transform.position", 3, 0, 1));
+        // 帧 2：三个实体 1→5（继续拖动）。
+        s.Push(std::make_unique<FieldCmd>(&vP,  "Transform.position", 1, 1, 5));
+        s.Push(std::make_unique<FieldCmd>(&vF1, "Transform.position", 2, 1, 5));
+        s.Push(std::make_unique<FieldCmd>(&vF2, "Transform.position", 3, 1, 5));
+        s.EndGroup();
+        assert(vP == 5 && vF1 == 5 && vF2 == 5);  // live preview 到最终值
+
+        // 关键断言：一次 Undo 把三个实体**全部**回到初值 0（修复前因命令游离
+        // 组外，一次 Undo 只撤一条、回不到初值）。整组是单条栈条目，撤完即空。
+        s.Undo();
+        assert(vP == 0 && vF1 == 0 && vF2 == 0);
+        assert(!s.CanUndo());
+
+        // 一次 Redo 恢复到最终值（CommandGroup 顺序 Execute）。
+        s.Redo();
+        assert(vP == 5 && vF1 == 5 && vF2 == 5);
+        assert(!s.CanRedo());
+    }
+
     std::printf("command_stack_test: all assertions passed\n");
     return 0;
 }
