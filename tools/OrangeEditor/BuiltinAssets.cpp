@@ -551,8 +551,13 @@ void InitializeEditorAssets(EditorHost& host)
     // 程序化动画史莱姆专属材质 —— 必须用 pbr 模板（160B push constant，
     // Pipeline drawable loop 才走 uBaseColor / uMRA 喂入分支；toon / textured /
     // emissive 是 128B，uBaseColor override 不进 push constant → 看不到脉动）。
-    // 直接 CreateInstance 不经磁盘 .material（无 warn、不污染
-    // BuildNamedMaterialInstances）。独占实例不与其它共用，避免动画污染别的物体。
+    // 直接 CreateInstance 不经磁盘 .material（无 warn、不出现在 Asset Browser
+    // 的磁盘材质列表里）。但仍通过 editor/ 前缀虚拟 id 纳入 BuildNamedMaterial-
+    // Instances 可解析表（见该函数末尾），让 demo.scene.json 的 Slime Doll
+    // Renderable.materialInstanceId 能 by-id resolve 回这个独占实例——与
+    // ProceduralAnimator 的 target 同一指针，故从 json 加载路径也能看到呼吸。
+    // （早期"独占实例不进可解析表"导致 Slime Doll 加载后 Renderable 反查不到
+    // id → 看不见/不呼吸，是本次修复的根因。）
     // 初值给史莱姆绿；Play 模式下 ProceduralAnimator 每帧覆写 uBaseColor 做呼吸脉动。
     host.assets.pAnimatedMaterial = host.assets.pMaterials->CreateInstance("pbr");
     if (host.assets.pAnimatedMaterial != nullptr)
@@ -712,6 +717,13 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
         m["assets/materials/builtin/default.material"]      = assets.pDefaultRenderableMaterial.get();
     if (assets.pLightObjectMaterial)
         m["assets/materials/builtin/light_object.material"] = assets.pLightObjectMaterial.get();
+    // 程序化动画史莱姆材质 —— editor/ 前缀虚拟 id（无磁盘文件，不进 Asset
+    // Browser 磁盘材质列表），让 demo.scene.json 的 Slime Doll Renderable 能
+    // by-id resolve 回这个独占实例（与 ProceduralAnimator target 同一指针），
+    // 从而 json 加载路径下 Play 模式也能看到呼吸。见 InitializeEditorAssets
+    // 内 pAnimatedMaterial 创建段注释。
+    if (assets.pAnimatedMaterial)
+        m["editor/animated_slime.material"] = assets.pAnimatedMaterial.get();
 
     // PBR showcase 18 个 material —— 与 pbr_showcase.scene.json 的 Renderable
     // materialInstanceId 字段一一对应。InitializeEditorAssets 内 pbrShowcaseMaterials
