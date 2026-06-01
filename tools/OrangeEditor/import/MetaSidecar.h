@@ -43,6 +43,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Orange::Editor::Import
 {
@@ -67,6 +68,14 @@ struct TextureMetaV1
     std::uint64_t       sourceHash{0};
     std::uint64_t       handleId{0};
     TextureImportParams importParams;
+    // 多 material mesh 导入产物：按 material slot 顺序排列的 .material 落盘
+    // 路径（slot i 用第 i 项；某 slot 的 primitive 无 material 时该项为空）。
+    // 仅多 material gltf 导入会填它；drop .mesh 到 entity 时回读它挂
+    // SubMeshMaterialsComponent。单 material / texture / obj 导入留空——
+    // schema minor 维持 0、.meta 字节与历史一致；非空时 minor bump 到 1 并
+    // 写出 "subMeshMaterials" 段（已发版本字段语义不变，新字段走 minor bump
+    // + reader 容忍缺失，符合 CLAUDE.md serialization 纪律）。
+    std::vector<std::string> subMeshMaterials;
 };
 
 // 计算文件 FNV-1a 64-bit hash。文件不存在 / 不可读 → nullopt。

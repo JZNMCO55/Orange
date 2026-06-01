@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -289,10 +290,28 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
     bool fileHasUVs     = false;
     bool fileHasNormals = false;
     std::size_t skippedPrimitives = 0;
-    // 第一个带 material 的三角 primitive 的 cgltf_material —— A2/Inc5 取它解析
-    // PBR 通道。unified mesh 合并多 primitive 丢失 per-primitive material 边界
-    // （GAP 已记），v1 单材质常见模型够用；多材质留后续 per-primitive 拆分。
+    // 第一个带 material 的三角 primitive 的 cgltf_material —— 取它解析 slot 0
+    // 的 PBR 通道，并作为 RenderableComponent.materialInstance 兜底。
     const cgltf_material* firstMat = nullptr;
+
+    // 多 material 收集：按"首次出现顺序"去重每个 primitive 的 cgltf_material；
+    // orderedMats 的下标即 materialSlot。nullptr（无 material 的 primitive）也
+    // 收进来占一个 slot —— 它对应引擎默认材质，落地端不写专属 .material。
+    // 同一 cgltf_material* 复用同一 slot（去重，避免重复 .material 文件）。
+    std::vector<const cgltf_material*> orderedMats;
+    auto slotForMaterial = [&orderedMats](const cgltf_material* m) -> std::uint32_t {
+        for (std::size_t i = 0; i < orderedMats.size(); ++i)
+        {
+            if (orderedMats[i] == m) { return static_cast<std::uint32_t>(i); }
+        }
+        orderedMats.push_back(m);
+        return static_cast<std::uint32_t>(orderedMats.size() - 1);
+    };
+
+    // per-primitive 边界（统一 index buffer 全局区间）+ 归属 slot。下面在
+    // orderedMats.size() <= 1 时整段丢弃（退化回单 mesh 单 material 路径，
+    // 向后兼容现有所有单材质导入，零行为变化）。
+    std::vector<::Orange::Engine::Asset::SubMesh> subMeshes;
 
     for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
     {
@@ -316,6 +335,13 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
             {
                 firstMat = prim.material;
             }
+
+            // 本 primitive 在合并后 index buffer 里的起点 + 归属 slot。indexCount
+            // 在下面 append 完索引后回填（用 indices.size() 差值，自动覆盖 indexed
+            // / 非 indexed 两条路径）。
+            const std::uint32_t subMeshIndexOffset =
+                static_cast<std::uint32_t>(indices.size());
+            const std::uint32_t subMeshSlot = slotForMaterial(prim.material);
 
             const cgltf_accessor* nrmAcc = FindAttribute(prim, cgltf_attribute_type_normal);
             const cgltf_accessor* uvAcc  = FindAttribute(prim, cgltf_attribute_type_texcoord, 0);
@@ -396,6 +422,16 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
                     indices.push_back(baseIdx + static_cast<std::uint32_t>(v));
                 }
             }
+
+            // 回填本 primitive 在合并后 index buffer 的区间长度（覆盖 indexed /
+            // 非 indexed 两条路径）。仅当确实 append 了索引才记录 sub-mesh。
+            const std::uint32_t subMeshIndexCount =
+                static_cast<std::uint32_t>(indices.size()) - subMeshIndexOffset;
+            if (subMeshIndexCount > 0)
+            {
+                subMeshes.push_back(
+                    {subMeshIndexOffset, subMeshIndexCount, subMeshSlot});
+            }
         }
     }
 
@@ -413,58 +449,85 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    // 在 cgltf_free 之前从 firstMat 抽出 PBR 通道（外部贴图源路径 + 内嵌 image
-    // 下标 + 标量 factor + occlusionStrength）。外部贴图源路径相对 gltf 所在目录
-    // 解析；内嵌图像（.glb buffer_view / data: URI）先解析出 images[] 下标，下面
-    // 在 cgltf_free 之前取字节落盘并回填到 matInfo 的 *Src。逻辑在
-    // GltfMaterialParse.cpp（与测试共用同一份）。
-    GltfMatInfo matInfo = ExtractGltfMaterial(firstMat, src.parent_path(), data);
+    // 在 cgltf_free 之前从每个 material（orderedMats，按 slot 顺序）抽出 PBR
+    // 通道（外部贴图源路径 + 内嵌 image 下标 + 标量 factor + occlusionStrength）。
+    // 外部贴图源路径相对 gltf 所在目录解析；内嵌图像（.glb buffer_view /
+    // data: URI）先解析出 images[] 下标，在 cgltf_free 之前取字节落盘并回填到
+    // matInfo 的 *Src。逻辑在 GltfMaterialParse.cpp（与测试共用同一份）。
+    // slotMatInfos[i] 对应 materialSlot i；nullptr material（无 material 的
+    // primitive 占位 slot）的 info.present==false，落地端用引擎默认材质兜底。
+    //
+    // 内嵌贴图提取必须在 cgltf_free 之前做（要读 buffer_view / data: 字节）。把
+    // 内嵌 image 写到模型自己的 assets/Models/<stem>/ 目录，回填 *Src 为磁盘
+    // 路径，之后与外部贴图走同一条 ImportTextureToRegistry co-locate 流程。同一
+    // image 被多个槽 / 多个 material 引用时只写盘一次（embeddedCache 跨 material
+    // 共享）。
+    const std::string embeddedDir =
+        (fs::path(kModelsDir) / src.stem().generic_string()).generic_string();
+    std::map<int, std::string> embeddedCache;  // images[] 下标 → 落盘路径
+    auto resolveEmbedded = [&](int imageIndex) -> std::string {
+        if (imageIndex < 0 ||
+            static_cast<cgltf_size>(imageIndex) >= data->images_count)
+        {
+            return {};
+        }
+        auto it = embeddedCache.find(imageIndex);
+        if (it != embeddedCache.end())
+        {
+            return it->second;  // 已写盘，复用
+        }
+        const std::string path = ExtractEmbeddedImageToDisk(
+            data->images[imageIndex], static_cast<cgltf_size>(imageIndex),
+            embeddedDir);
+        embeddedCache[imageIndex] = path;
+        return path;
+    };
 
-    // 内嵌贴图提取：必须在 cgltf_free 之前做（要读 buffer_view / data: 字节）。
-    // 把内嵌 image 写到模型自己的 assets/Models/<stem>/ 目录，回填 matInfo 的
-    // *Src 为该磁盘路径，之后与外部贴图走同一条 ImportTextureToRegistry co-locate
-    // 流程（copy + ORTX + .meta + Load）。同一 image 被多个槽引用时只写盘一次。
-    if (matInfo.present)
+    // 单 material（含全无 material）退化路径下 orderedMats 仍至少有一项；用
+    // firstMat 当 slot 0 兜底保证即便 orderedMats[0] 是 nullptr（首 primitive
+    // 无 material 但后续 primitive 有）时 slot 0 仍能拿到一个真实 material。
+    std::vector<GltfMatInfo> slotMatInfos;
+    slotMatInfos.reserve(orderedMats.empty() ? 1 : orderedMats.size());
+    // 与 slotMatInfos 同序抽出每个 slot 的 material name —— 必须在 cgltf_free
+    // 之前做：orderedMats 存的是 cgltf_material* 裸指针，cgltf_free(data) 后全部
+    // 悬空，写 .material 循环里（slot>=1 的 sanitizedMaterialName）不能再解引用
+    // orderedMats[slot]->name（use-after-free → SEGFAULT）。空 name 留空串，
+    // sanitizedMaterialName 退化用 slot 序号。
+    std::vector<std::string> slotMatNames;
+    slotMatNames.reserve(orderedMats.empty() ? 1 : orderedMats.size());
+    if (orderedMats.empty())
     {
-        const std::string embeddedDir =
-            (fs::path(kModelsDir) / src.stem().generic_string()).generic_string();
-        std::map<int, std::string> embeddedCache;  // images[] 下标 → 落盘路径
-
-        auto resolveEmbedded = [&](int imageIndex) -> std::string {
-            if (imageIndex < 0 ||
-                static_cast<cgltf_size>(imageIndex) >= data->images_count)
+        // 理论上不会发生（前面已 return 空几何），保险起见给一个 firstMat slot。
+        orderedMats.push_back(firstMat);
+    }
+    for (const cgltf_material* m : orderedMats)
+    {
+        slotMatNames.push_back(
+            (m != nullptr && m->name != nullptr && m->name[0] != '\0')
+                ? std::string(m->name)
+                : std::string{});
+        GltfMatInfo info = ExtractGltfMaterial(m, src.parent_path(), data);
+        if (info.present)
+        {
+            // 仅当外部 uri 解析为空（即该槽不是外部文件）才尝试内嵌提取。
+            if (info.baseColorSrc.empty())
             {
-                return {};
+                info.baseColorSrc = resolveEmbedded(info.baseColorImageIndex);
             }
-            auto it = embeddedCache.find(imageIndex);
-            if (it != embeddedCache.end())
+            if (info.normalSrc.empty())
             {
-                return it->second;  // 已写盘，复用
+                info.normalSrc = resolveEmbedded(info.normalImageIndex);
             }
-            const std::string path = ExtractEmbeddedImageToDisk(
-                data->images[imageIndex], static_cast<cgltf_size>(imageIndex),
-                embeddedDir);
-            embeddedCache[imageIndex] = path;
-            return path;
-        };
-
-        // 仅当外部 uri 解析为空（即该槽不是外部文件）才尝试内嵌提取。
-        if (matInfo.baseColorSrc.empty())
-        {
-            matInfo.baseColorSrc = resolveEmbedded(matInfo.baseColorImageIndex);
+            if (info.metalRoughSrc.empty())
+            {
+                info.metalRoughSrc = resolveEmbedded(info.metalRoughImageIndex);
+            }
+            if (info.aoSrc.empty())
+            {
+                info.aoSrc = resolveEmbedded(info.aoImageIndex);
+            }
         }
-        if (matInfo.normalSrc.empty())
-        {
-            matInfo.normalSrc = resolveEmbedded(matInfo.normalImageIndex);
-        }
-        if (matInfo.metalRoughSrc.empty())
-        {
-            matInfo.metalRoughSrc = resolveEmbedded(matInfo.metalRoughImageIndex);
-        }
-        if (matInfo.aoSrc.empty())
-        {
-            matInfo.aoSrc = resolveEmbedded(matInfo.aoImageIndex);
-        }
+        slotMatInfos.push_back(std::move(info));
     }
 
     cgltf_free(data);  // 不再需要 cgltf 内部结构，data 已经拷出来
@@ -544,6 +607,16 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
         mesh->SetTangents(std::move(tangents));
     }
 
+    // 多 material（orderedMats.size() > 1）才写 sub-mesh 段；单 material（含
+    // 全无 material）退化回整 mesh 单段 / slot 0，subMeshes 留空 ——
+    // .mesh 仍是 v5 但 HasSubMeshes()==false，与单材质导入路径字节兼容、
+    // 渲染端走整 mesh 单 material 路径，现有所有单材质导入零行为变化。
+    const bool multiMaterial = orderedMats.size() > 1;
+    if (multiMaterial)
+    {
+        mesh->SetSubMeshes(std::move(subMeshes));
+    }
+
     const std::string destMeshStr = destMesh.generic_string();
     auto saveRes = MeshLoader::Save(destMeshStr, *mesh);
     if (saveRes.IsErr())
@@ -577,51 +650,93 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
     meta.sourceHash = hashOpt.value();
     meta.handleId   = 0;
     const std::string metaPath = MetaPathFor(destMeshStr);
-    if (!WriteTextureMeta(metaPath, meta))
-    {
-        result.status  = ImportStatus::MetaWriteFailed;
-        result.message = ".meta write failed";
-        ORANGE_LOG_ERROR("GltfImporter: '{}' -> '{}': {}",
-                         srcPath, metaPath, result.message);
-        return result;
-    }
+    // .meta 实际落盘推迟到 material 段之后 —— 多 material 时要把按 slot 排列的
+    // .material 路径写进 subMeshMaterials 段（drop .mesh 到 entity 时回读它挂
+    // SubMeshMaterialsComponent）。单 material 时该段为空，.meta 字节与历史一致。
 
-    // 解析出 material 通道时 import 各贴图 + 写 .material sidecar。
-    // .material 落 .mesh 同目录（assets/Models/<stem>.material），templateName=pbr，
+    // 解析出 material 通道时 import 各贴图 + 写 .material sidecar，按 slot 顺序
+    // 逐个落盘。.material 落 .mesh 同目录（assets/Models/<stem>/），templateName=pbr，
     // texture 槽 binding 与 pbr set 1 对齐（0 baseColor / 1 normal / 2 metalRough /
     // 3 ao），uniform 覆盖 uBaseColor=baseColorFactor、
     // uMRA=(metallic, roughness, occlusionStrength, 0)。
-    // 引擎不自动 mesh↔material 绑定（GAP 已记），用户在编辑器把 .material 指给 entity。
-    if (matInfo.present)
-    {
-        // resolver：把贴图源路径走 ImportTextureToRegistry（copy 到模型自己的
-        // assets/Models/<stem>/ 子目录而非共享 Textures + load + .meta）后回填
-        // destPath；失败返回空 → BuildMaterialFileData 跳过该槽。factor / binding /
-        // AO 映射逻辑全在 BuildMaterialFileData（与 headless 测试共用同一份）。
-        auto resolver = [&](const std::string& srcTexPath) -> std::string {
-            ImportResult tr = ImportTextureToRegistry(srcTexPath, registry, modelDirStr);
-            if (tr.status == ImportStatus::Success && !tr.destPath.empty())
-            {
-                return tr.destPath;
-            }
-            ORANGE_LOG_WARN("GltfImporter: material 贴图 '{}' import 失败，跳过该槽",
-                            srcTexPath);
-            return {};
-        };
-        Material::MaterialFileData mdata = BuildMaterialFileData(matInfo, resolver);
+    //
+    // 命名规约（向后兼容）：slot 0 仍写 <stem>.material（与历史单材质导入完全
+    // 一致，单 material 模型字节 / 路径不变）；slot >= 1 写
+    // <stem>_<materialName 或 slot 序号>.material（清洗路径分隔符防写到目录外，
+    // 同名冲突时退化用序号）。某 slot 的 material info.present==false（无
+    // material 的 primitive 占位 slot）→ 不写 .material，materialPaths 该项留空，
+    // 落地端用引擎默认材质兜底。
+    auto resolver = [&](const std::string& srcTexPath) -> std::string {
+        ImportResult tr = ImportTextureToRegistry(srcTexPath, registry, modelDirStr);
+        if (tr.status == ImportStatus::Success && !tr.destPath.empty())
+        {
+            return tr.destPath;
+        }
+        ORANGE_LOG_WARN("GltfImporter: material 贴图 '{}' import 失败，跳过该槽",
+                        srcTexPath);
+        return {};
+    };
 
-        const std::string matPath = (destDir / (stem + ".material")).generic_string();
+    // 清洗 material name 成文件名安全片段；空则退化用 slot 序号。name 取自
+    // cgltf_free 之前缓存的 slotMatNames（不能解引用已悬空的 orderedMats）。
+    auto sanitizedMaterialName = [&](std::size_t slot) -> std::string {
+        std::string name = (slot < slotMatNames.size() && !slotMatNames[slot].empty())
+                               ? slotMatNames[slot]
+                               : ("mat" + std::to_string(slot));
+        for (char& c : name)
+        {
+            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+                c == '"' || c == '<' || c == '>' || c == '|')
+            {
+                c = '_';
+            }
+        }
+        return name;
+    };
+
+    result.materialPaths.assign(slotMatInfos.size(), std::string{});
+    std::set<std::string> usedMatFileNames;  // 同名 material 去重，退化用序号
+    for (std::size_t slot = 0; slot < slotMatInfos.size(); ++slot)
+    {
+        const GltfMatInfo& info = slotMatInfos[slot];
+        if (!info.present)
+        {
+            continue;  // 无 material 的 slot：留空，落地端走默认材质
+        }
+
+        // slot 0 用 <stem>.material（历史命名）；其余 <stem>_<name>.material。
+        std::string fileStem;
+        if (slot == 0)
+        {
+            fileStem = stem;
+        }
+        else
+        {
+            std::string nm = sanitizedMaterialName(slot);
+            fileStem = stem + "_" + nm;
+            // 同名冲突（两个 material 同名）→ 退化拼 slot 序号，保证唯一。
+            if (usedMatFileNames.count(fileStem) != 0)
+            {
+                fileStem = stem + "_" + nm + "_" + std::to_string(slot);
+            }
+        }
+        usedMatFileNames.insert(fileStem);
+
+        Material::MaterialFileData mdata = BuildMaterialFileData(info, resolver);
+        const std::string matPath =
+            (destDir / (fileStem + ".material")).generic_string();
         if (Material::WriteMaterialFile(matPath, mdata))
         {
-            ORANGE_LOG_INFO("GltfImporter: wrote material '{}' (textures={})",
-                            matPath, mdata.textures.size());
+            ORANGE_LOG_INFO("GltfImporter: wrote material '{}' (slot={} textures={})",
+                            matPath, slot, mdata.textures.size());
+            result.materialPaths[slot] = matPath;
             // 写出 .material 后回调注册（仅 GUI 路径注入；headless 传空跳过）。
             // 否则刚导入的 .material 不在编辑器 namedMaterialInstances 表里，
             // Renderable 的 Material 字段(materialSet 只查表不 lazy load)选不到、
-            // 赋不上(GAP-2026-05-25 用户反馈:导入的材质拖不到 entity)。回调内
-            // （GUI = EnsureMaterialInstance）做 ReadMaterialFile + CreateInstance
-            // + ApplyDataToInstance + own 到 userMaterials + 写 namedMaterialInstances。
-            // headless 路径不需要编辑器缓存，材质文件已照常落盘。
+            // 赋不上。回调内（GUI = EnsureMaterialInstance）做 ReadMaterialFile +
+            // CreateInstance + ApplyDataToInstance + own 到 userMaterials + 写
+            // namedMaterialInstances。headless 路径不需要编辑器缓存，材质文件已
+            // 照常落盘。
             if (onMaterialWritten)
             {
                 onMaterialWritten(matPath);
@@ -631,6 +746,23 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
         {
             ORANGE_LOG_WARN("GltfImporter: WriteMaterialFile '{}' 失败", matPath);
         }
+    }
+
+    // 多 material（mesh 真带 sub-mesh 分段）才把按 slot 排列的 .material 路径写
+    // 进 .meta 的 subMeshMaterials 段，供 drop .mesh 到 entity 时挂
+    // SubMeshMaterialsComponent。单 material（materialPaths.size() <= 1）留空，
+    // .meta 维持 v1.0 字节（向后兼容，零行为变化）。
+    if (multiMaterial)
+    {
+        meta.subMeshMaterials = result.materialPaths;
+    }
+    if (!WriteTextureMeta(metaPath, meta))
+    {
+        result.status  = ImportStatus::MetaWriteFailed;
+        result.message = ".meta write failed";
+        ORANGE_LOG_ERROR("GltfImporter: '{}' -> '{}': {}",
+                         srcPath, metaPath, result.message);
+        return result;
     }
 
     result.status   = ImportStatus::Success;

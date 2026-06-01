@@ -164,6 +164,21 @@ std::optional<TextureMetaV1> ReadTextureMeta(std::string_view path)
 
     // importParams 当前 v1 空 object；不读字段。v1.2+ 加字段时在此扩展。
 
+    // subMeshMaterials（v1.1 可选段）：多 material mesh 的 .meta 才有；旧
+    // v1.0 / 单 material / texture 的 .meta 无此键 → ArraySize 返回 0，列表
+    // 留空（向后兼容）。string 数组无专用 helper：按 "subMeshMaterials/i"
+    // 索引 path 逐条 ReadString（与 ComponentSerializers slots 同款手法）。
+    const std::size_t subMatCount = reader.ArraySize("subMeshMaterials");
+    meta.subMeshMaterials.reserve(subMatCount);
+    for (std::size_t i = 0; i < subMatCount; ++i)
+    {
+        const std::string itemPath = "subMeshMaterials/" + std::to_string(i);
+        std::string item;
+        // 空字符串槽（无 material 的 slot 占位）也保留，维持 slot 对齐。
+        reader.ReadString(itemPath, item);
+        meta.subMeshMaterials.push_back(std::move(item));
+    }
+
     return meta;
 }
 
@@ -173,12 +188,33 @@ bool WriteTextureMeta(std::string_view path, const TextureMetaV1& meta)
     using ::Orange::Engine::SchemaVersion;
 
     JsonWriter writer;
-    SchemaVersion sv{kSchemaNamespace, kSchemaMajor, kSchemaMinor};
+    // 带 subMeshMaterials 时写 minor=1（v1.1）；否则维持 kSchemaMinor（0）让单
+    // material / texture / obj 的 .meta 字节与历史完全一致（向后兼容）。reader
+    // 只校验 namespace + major，对 minor 前向兼容，旧 reader 读 v1.1 也正常。
+    const std::uint16_t writeMinor = meta.subMeshMaterials.empty()
+                                         ? kSchemaMinor
+                                         : static_cast<std::uint16_t>(1);
+    SchemaVersion sv{kSchemaNamespace, kSchemaMajor, writeMinor};
     writer.WriteSchemaVersion("schemaVersion", sv);
 
     writer.WriteString("sourcePath", meta.sourcePath);
     writer.WriteString("sourceHash", HashToHexString(meta.sourceHash));
     writer.WriteInt("handleId", static_cast<std::int64_t>(meta.handleId));
+
+    // subMeshMaterials（v1.1 可选段）：仅多 material mesh 导入填它。空则完全
+    // 不写本键，让单 material / texture / obj 的 .meta 字节与历史一致（向后
+    // 兼容，零行为变化）；reader 端对缺键容忍（ArraySize 返回 <=0）。
+    if (!meta.subMeshMaterials.empty())
+    {
+        // string 数组无专用 helper：BeginArray 声明长度 + "subMeshMaterials/i"
+        // 索引 path 逐条 WriteString（与 ComponentSerializers slots 同款手法）。
+        writer.BeginArray("subMeshMaterials", meta.subMeshMaterials.size());
+        for (std::size_t i = 0; i < meta.subMeshMaterials.size(); ++i)
+        {
+            const std::string itemPath = "subMeshMaterials/" + std::to_string(i);
+            writer.WriteString(itemPath, meta.subMeshMaterials[i]);
+        }
+    }
 
     // importParams 写空 object 占位，未来扩字段时此处变成多个 WriteXxx 调用。
     // JsonWriter 不直接暴露 "建空 object" 入口，但首次访问 importParams/X

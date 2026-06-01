@@ -132,6 +132,58 @@ bool FileContains(const std::string& path, const std::string& needle)
     return content.find(needle) != std::string::npos;
 }
 
+// 写一个最小的"双 material" 内嵌 .gltf fixture：一个 quad（4 顶点）拆成 2 个
+// triangle primitive，各引用一个独立 material（slot 0 红 / slot 1 绿）。顶点 /
+// 索引数据走 base64 data: URI 的单一 buffer（cgltf_load_buffers 自动解码），无
+// 外部 .bin 依赖，干净 checkout 也能跑。导入后应产出：mesh 带 2 段 sub-mesh、
+// 2 个 .material、materialSlot 覆盖 {0,1}。
+//
+// buffer 布局（小端 float / uint16，共 60 字节）：
+//   positions: 4 × vec3 = 48 字节（offset 0）
+//   indices  : prim0 {0,1,2} + prim1 {0,2,3} = 6 × uint16 = 12 字节（offset 48）
+// base64 由 Python 预生成硬编码（避免测试里再实现 base64 编码器）。
+void WriteTwoMaterialGltf(const std::string& path)
+{
+    // positions=(0,0,0)(1,0,0)(1,1,0)(0,1,0)；indices=0,1,2,0,2,3 的 base64。
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMA";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0]}],\n"
+        "  \"nodes\": [{\"mesh\": 0}],\n"
+        "  \"meshes\": [{\"primitives\": [\n"
+        "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0},\n"
+        "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 2, \"material\": 1}\n"
+        "  ]}],\n"
+        "  \"materials\": [\n"
+        "    {\"name\": \"RedMat\",   \"pbrMetallicRoughness\": "
+        "{\"baseColorFactor\": [1.0, 0.0, 0.0, 1.0]}},\n"
+        "    {\"name\": \"GreenMat\", \"pbrMetallicRoughness\": "
+        "{\"baseColorFactor\": [0.0, 1.0, 0.0, 1.0]}}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 3, "
+        "\"type\": \"SCALAR\"},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 3, "
+        "\"type\": \"SCALAR\", \"byteOffset\": 6}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
 }  // namespace
 
 int main()
@@ -271,6 +323,87 @@ int main()
 #else
     std::fprintf(stdout, "  [SKIP] .gltf 路径未编入（无 ORANGE_ENGINE_GLTF_FIXTURE）\n");
 #endif
+
+    // ===== 5. 多 material gltf headless 导入（自给 fixture，恒跑）=====
+    // 程序化写一个双 material 内嵌 .gltf（不依赖外部文件），断言：
+    //   * mesh 带 >= 2 段 sub-mesh
+    //   * materialSlot 覆盖 [0..N-1] 连续、无空洞
+    //   * sub-mesh 的 indexOffset/indexCount 之和 == 总 indexCount 且不重叠不留空
+    //   * 生成 N 个 .material 文件 + ImportResult.materialPaths 对应填好
+    //   * .meta 含 subMeshMaterials 段（drop 落地端据此挂 SubMeshMaterialsComponent）
+    {
+        const fs::path srcDir = testRoot / "multimat_src";
+        fs::create_directories(srcDir, ec);
+        const std::string gltfPath =
+            (srcDir / "two_material.gltf").generic_string();
+        WriteTwoMaterialGltf(gltfPath);
+
+        auto registry = MakeImportRegistry();
+        const ImportNS::ImportResult r =
+            ImportNS::ImportGltfMeshToRegistry(gltfPath, *registry);
+        assert(r.status == ImportNS::ImportStatus::Success &&
+               "多 material gltf headless 导入应 Success");
+        assert(!r.destPath.empty() && fs::exists(r.destPath) &&
+               "多 material gltf 产物 .mesh 应存在");
+
+        // materialPaths：两个 slot 都应有非空 .material 路径 + 文件落盘。
+        assert(r.materialPaths.size() == 2 &&
+               "两 material 模型应有 2 项 materialPaths");
+        for (std::size_t i = 0; i < r.materialPaths.size(); ++i)
+        {
+            assert(!r.materialPaths[i].empty() &&
+                   "每个有 material 的 slot 应填 materialPaths");
+            assert(fs::exists(r.materialPaths[i]) && ".material 文件应落盘");
+        }
+        // slot 0 沿用 <stem>.material 历史命名。
+        assert(r.materialPaths[0].find("two_material.material") != std::string::npos &&
+               "slot 0 应是 <stem>.material 历史命名");
+
+        // 读回 .mesh：sub-mesh >= 2，slot 覆盖 [0..N-1] 连续，区间无重叠无空隙。
+        AssetNS::MeshLoader loader;
+        auto loadRes = loader.Load(r.destPath);
+        assert(loadRes.IsOk() && "MeshLoader::Load 应读回多 material .mesh");
+        const auto& mesh = *loadRes.Value();
+        const auto& subs = mesh.SubMeshes();
+        assert(subs.size() >= 2 && "多 material mesh 应有 >= 2 段 sub-mesh");
+
+        std::uint32_t maxSlot = 0;
+        std::vector<bool> slotSeen;
+        std::uint64_t coveredIndices = 0;
+        std::uint32_t expectOffset = 0;
+        for (const auto& s : subs)
+        {
+            if (s.materialSlot >= slotSeen.size())
+            {
+                slotSeen.resize(s.materialSlot + 1, false);
+            }
+            slotSeen[s.materialSlot] = true;
+            if (s.materialSlot > maxSlot) { maxSlot = s.materialSlot; }
+            // 按 importer 输出顺序，区间连续拼接（offset == 累计前缀）。
+            assert(s.indexOffset == expectOffset &&
+                   "sub-mesh indexOffset 应紧接上一段（不重叠不留空）");
+            expectOffset += s.indexCount;
+            coveredIndices += s.indexCount;
+        }
+        for (std::uint32_t sl = 0; sl <= maxSlot; ++sl)
+        {
+            assert(sl < slotSeen.size() && slotSeen[sl] &&
+                   "materialSlot 应覆盖 [0..maxSlot] 连续，无空洞");
+        }
+        assert(coveredIndices == mesh.Indices().size() &&
+               "sub-mesh indexCount 之和应等于总 indexCount");
+
+        // .meta 应含 subMeshMaterials 段（落地端 drop 时回读挂多材质组件）。
+        assert(FileContains(r.destPath + ".meta", "subMeshMaterials") &&
+               ".meta 应含 subMeshMaterials 段");
+
+        std::fprintf(stdout,
+                     "  [PASS] 多 material gltf：sub-mesh=%zu material=%zu "
+                     "idx 覆盖=%llu/%zu\n",
+                     subs.size(), r.materialPaths.size(),
+                     static_cast<unsigned long long>(coveredIndices),
+                     mesh.Indices().size());
+    }
 
     // 清理临时目录（切回上层先，避免删 cwd）。
     fs::current_path(fs::temp_directory_path(), ec);

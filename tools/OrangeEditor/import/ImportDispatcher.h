@@ -23,6 +23,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct EditorHost;
 
@@ -60,6 +61,15 @@ struct ImportResult
     ImportStatus status{ImportStatus::Success};
     std::string  destPath;      // assets/<TypeDir>/<filename>，成功时填
     std::string  message;       // 人类可读 + 用于 log
+
+    // gltf 多 material 导入产物：按 material slot 顺序排列的 .material 落盘
+    // 路径（slot i 用 materialPaths[i]）。单 material 模型只有一项（= slot 0，
+    // 与历史单材质导入一致）；某 slot 的 primitive 无 material（nullptr）时该项
+    // 为空字符串（落地端用引擎默认材质兜底）。mesh 实际带 sub-mesh 分段
+    // （多 material）时 materialPaths.size() >= 2，落地端据此挂
+    // SubMeshMaterialsComponent；否则只设 RenderableComponent.materialInstance。
+    // texture / obj 导入路径不填本字段。
+    std::vector<std::string> materialPaths;
 };
 
 // 按小写扩展名分类。"png" / "obj" 不带 '.'；'.png' / 'png' 都接受。
