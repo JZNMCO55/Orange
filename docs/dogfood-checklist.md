@@ -54,6 +54,23 @@
 - **背景**：headless 路径已有完整 ctest（程序化立方体 + Avocado fixture）；**真机批量调用手感 + 大模型表现待 dogfood**。
 - **批量用法提示**：可写 shell/python 循环对一个目录的 `.glb` 批量 `import-mesh`，验证代码驱动内容管线（首游程序化批量生成场景道具的诉求）。
 
+## 2026-06-01 session（多 material per mesh 导入 + drop 消费）
+
+### 4. 多 material per mesh —— drop 多材质 .mesh 各段显示不同材质
+
+- **commit**：`a795c10` feat(editor): 多 material per mesh 导入侧 + drop 消费 + headless 测试（承接引擎核心 `774956d`）
+- **怎么触发**：
+  1. 在 Blender 给**一个 mesh 分配 2+ 个 material slot**（如立方体不同面用不同材质），导出 `.glb` / `.gltf`
+  2. 编辑器 import 该模型 → 看 `assets/Models/<stem>/`：应出现 `.mesh` + **多个 `.material`**（slot 0 = `<stem>.material`、slot≥1 = `<stem>_<matname>.material`）+ `.meta`（含 `subMeshMaterials` 段）
+  3. 把该 `.mesh` 拖到场景一个 entity（或新建 Renderable 指向它）
+- **看什么 / 通过判据**：
+  - mesh 的不同 sub-mesh 段在 viewport 里显示**各自不同的材质**（slot 0 / 1 / … 各自 baseColor），而非整体单一材质
+  - 选中 entity → 应挂上 `SubMeshMaterialsComponent`，slots 数 = material 数，逐项指向对应 `.material`
+  - `Renderable.materialInstance` = slot 0（兜底语义，与单 material 一致）
+  - **单 material 模型 drop 行为不变**：不挂 `SubMeshMaterialsComponent`，整 mesh 单材质（向后兼容回归）
+- **背景**：headless `headless_mesh_import_test` 74/74 已验 importer 解析（SubMesh / materialSlot 连续 / indexOffset 紧接 / materialPaths 落盘）+ `.meta` `subMeshMaterials` 读写对称 + 消费侧逻辑；本 session 顺带修了一个 **use-after-free SEGFAULT**（`sanitizedMaterialName` 解引用 `cgltf_free` 后悬空的 `orderedMats[slot]->name`，slot≥1 必崩）。**drop 到 viewport 的多段材质渲染视觉 + GUI 手感待真机确认**。
+- **推荐 fixture**：Blender 立方体不同面分 2 个材质导 `.glb`；或现成带多 primitive/material 的 glTF 资产。
+
 ---
 
 ## 维护约定
