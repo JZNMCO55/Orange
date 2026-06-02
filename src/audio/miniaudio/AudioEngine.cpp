@@ -194,6 +194,20 @@ struct SoundInstance::Impl
     // 本 Impl 需要在 SoundAsset 字节缓冲被释放后仍能播——所以拷一份字节。
     // 大文件场景可优化为 shared 引用计数；0.x 阶段保稳定。
     std::vector<std::uint8_t> bytesCopy;
+
+    // miniaudio 资源的 uninit 放在 **Impl 析构**（而非 SoundInstance 析构）——关键：
+    // SoundInstance 的 move-assign 是 defaulted，`a = std::move(b)`（a 已持活 sound）时
+    // unique_ptr<Impl> move-assign 会 delete a 的旧 Impl，但 delete 只调 Impl 析构、**不**调
+    // SoundInstance 析构。若 uninit 只在 SoundInstance 析构，旧 sound 就不会 ma_sound_uninit，
+    // 其节点仍挂在 ma_engine 图上而 Impl 内存已释放 → 泄漏 + 混音/关闭时 use-after-free。
+    // 放进 Impl 析构后，任何 delete Impl 的路径（析构 / move-assign 覆盖）都正确清理。
+    // 顺序：先 uninit sound（依赖 decoder）→ 再 uninit decoder（依赖 bytesCopy）→ 析构体返回
+    // 后才销毁 bytesCopy，故 decoder 在引用其内存被释放前已 uninit。
+    ~Impl()
+    {
+        if (soundInited)   { ma_sound_uninit(&sound); }
+        if (decoderInited) { ma_decoder_uninit(&decoder); }
+    }
 };
 
 SoundInstance::SoundInstance() noexcept = default;
@@ -202,23 +216,10 @@ SoundInstance::SoundInstance(std::unique_ptr<Impl> impl) noexcept
 {
 }
 
-SoundInstance::~SoundInstance()
-{
-    if (!mpImpl)
-    {
-        return;
-    }
-    if (mpImpl->soundInited)
-    {
-        ma_sound_uninit(&mpImpl->sound);
-        mpImpl->soundInited = false;
-    }
-    if (mpImpl->decoderInited)
-    {
-        ma_decoder_uninit(&mpImpl->decoder);
-        mpImpl->decoderInited = false;
-    }
-}
+// uninit 逻辑已移入 SoundInstance::Impl 析构（见上）——这样 move-assign 覆盖旧实例时
+// unique_ptr delete 旧 Impl 也能正确清理（defaulted move-assign 不调本析构）。本析构
+// = default 即可：成员 unique_ptr<Impl> 析构会 delete Impl → 触发 Impl::~Impl 的 uninit。
+SoundInstance::~SoundInstance() = default;
 
 SoundInstance::SoundInstance(SoundInstance&&) noexcept            = default;
 SoundInstance& SoundInstance::operator=(SoundInstance&&) noexcept = default;
