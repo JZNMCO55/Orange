@@ -422,9 +422,14 @@
 - **③ glTF scene import 现在写 local（需重导旧产物）**：
   - 之前 import 的 glTF 场景是 world-bake 的旧产物——**重新跑** `import-scene <glb>`（或 File→Import glTF Scene），新产物 importer 写 local TRS。
   - 打开新 scene.json → viewport 里层级摆位应正确（父在某位置，子在"父+local"的世界位置），且**移动父带动子**。用 `scripts/dogfood_make_scene_hierarchy_lights.py` 那个层级 fixture 验。
+- **④ picking（选中）已跟上 ✅**：parented mesh 在它的**世界位置**可被点选（之前 picking 测 local，非原点父的 mesh 选不中）。选中后 Inspector 可编辑、Del/Ctrl+D 可用。
 - **范围限制（dogfood 时注意，不是 bug）**：
-  - **只切了 mesh drawable**。**光源方向 / 物理 collider / gizmo 还没切**到 world cache（后续 increment）——所以：把一盏**灯**或带 **collider** 的实体 parent 到一个**非原点**父下，移动父时**灯的方向 / collider 不跟随**（mesh 跟随）。这是**预期**，不是 bug。glTF 导入的灯通常是 scene-root 子（父在原点），方向仍对。
-  - **reparent 到非原点父会跳位**（A1.3 keep-world 还没做）：把 B parent 到一个**已经移动过**（非原点）的 A 下，B 会**跳一下**（因为 B 的 local 现在被当成相对 A 解释）。reparent 到原点父不跳。A1.3 落地后修。**dogfood 时先 parent 再移动父**（顺序对就不跳）。
+  - **已切：mesh 渲染 + picking**。**未切：gizmo 放置/拖动、光源方向、物理 collider**（后续 increment）——具体表现：
+    - **gizmo 仍画在 local 位置**：选中一个**非原点父**下的 mesh，gizmo 会画在它的 local 偏移处（不在 mesh 上）；拖 gizmo 仍写 local。可发现性受影响但能编辑（Inspector / 拖动仍改 local）。**这是预期**，A1.3 + gizmo 切换后修。
+    - **光源方向 / collider 不随父旋转**：把灯/collider parent 到旋转父下，方向/collider 不跟随（mesh 跟随）。glTF 导入的灯方向仍对（importer 把世界光向编码进 local）。
+  - **reparent 到非原点父会跳位**（A1.3 keep-world 未做）：把 B parent 到**已移动过**（非原点）的 A 下，B 会**跳一下**（local 被当相对 A 解释）。reparent 到原点父不跳。**dogfood 时先 parent 再移动父**（顺序对就不跳）。A1.3 落地后修。
+
+> **A1 剩余 consumer 完成清单**（给后续 session）：gizmo 放置+拖动读 world / world→local apply（防 parented 拖偏）· A1.3 reparent keep-world（重算 local 防跳）· 光源方向读 world rotation（+ importer 去 world-dir 编码改 R 桥接）· 物理 collider 读 world（2D，subtler）。详见 `docs/maturity-roadmap.md` A1.1 step 2。
 
 ---
 

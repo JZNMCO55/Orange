@@ -45,9 +45,10 @@
   - **A1.0 ADR ✅**（2026-06-02 落地，**ADR-016**）：world matrix 计算策略选型 → **选方案 A：每帧 `TransformSystem` 自顶向下 DFS 重算并缓存 world matrix**（非 dirty-flag，避免隐蔽派生状态 bug；2.5D 中等规模全量重算成本可忽略）。dirty-flag 留未来 profiling 拉动。详见 `../Orange-Wiki/case-studies/orange-engine/decisions/ADR-016-transform-hierarchy-propagation.md`。
   - **A1.1 引擎核心**（分两步降风险）：
     - **step 1 ✅ 2026-06-02**：加 `TransformSystem::PropagateWorldTransforms` + `WorldTransformComponent`（派生 cache）——每帧从 hierarchy 自顶向下累积 world matrix。**additive、零消费者、零行为变化**（只产 cache，渲染/光源仍走旧路径）。headless `scene_transform_system_test`（3 层累积 / 旋转父真矩阵乘 / flat entity / 幂等）；ctest 76/76 零回归。
-    - **step 2 进行中**：drawable / light / physics / gizmo **逐个**改读 `WorldTransformComponent`：
+    - **step 2 进行中**：drawable / picking / light / physics / gizmo **逐个**改读 `WorldTransformComponent`：
       - **drawable/mesh ✅ 2026-06-02**（RenderScene.cpp）：`Collect` 顶部跑 `PropagateWorldTransforms`，drawable 读 world cache（fallback local）。mesh parenting 生效；committed 场景父全在原点 → 零行为变化（ctest 76/76 全 render/light/shadow 测试零回归印证）。
-      - **light 方向 / physics / gizmo 待切**：仍读 entity local；非原点父下灯/collider 不随父动（mesh 随）—— dogfood item 31「已知未切」。
+      - **picking ✅ 2026-06-02**（EditorPicking.cpp）：ray-AABB 测 world cache（fallback local）→ parented mesh 按世界位置可选中。
+      - **gizmo / light 方向 / physics 待切**：仍读 entity local。gizmo 画在 local 偏移处（拖动写 local，parented 非原点父需 world→local apply）；非原点父下灯方向/collider 不随父动（mesh+picking 随）。光源方向当前由 importer 把世界光向编码进 local，glTF 灯仍对；切 light consumer 时改 R 桥接（-Z→-Y）+ 去 importer 编码。dogfood item 31「已知未切」。
   - **A1.2 内容迁移**：committed 场景（pbr_showcase/demo）父全在原点 → **无需迁移**（累积==local）。**glTF scene import 已回退 world-bake → local TRS ✅ 2026-06-02**（end-to-end 测验 local+累积=正确 world）。
   - **A1.3 编辑器 reparent 保持世界位姿** ★A1.1 mesh 切换后**变必需**：reparent mesh 到非原点父会跳位（local 被当相对父解释），需 keep-world 重算 local。**下一步开工**。
 - **跨仓**：否（引擎 Scene/Render 交界）。**headless 可测**：是（world matrix 数值 + 嵌套累积）。**dogfood**：移动父节点子节点跟随。
