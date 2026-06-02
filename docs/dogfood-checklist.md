@@ -318,6 +318,26 @@
   - **不误触**：Inspector 文本框输入时 Ctrl+S 不触发保存
 - **背景**：菜单宣传了快捷键却没接线（注释自承"留后续"），用户按了会困惑。补接线，对齐所有成熟编辑器。**保存/新建/打开 + 未保存确认流程待真机确认**。
 
+### 25. 拖 gizmo 时按住 Ctrl 临时吸附
+
+- **commit**：`bb4ace6` feat(editor): 拖 gizmo 时按住 Ctrl 临时吸附（Unity 标准）
+- **怎么触发**：**Snap 开关保持关闭**，选中实体用 translate / rotate / scale gizmo 拖动时**按住 Ctrl**
+- **看什么 / 通过判据**：
+  - 按住 Ctrl 拖 → 按步进吸附（同 Snap 开关开时的效果）；松开 Ctrl → 连续自由拖
+  - Snap 开关已开时按 Ctrl 不影响（仍吸附）
+  - 三个 gizmo（移/转/缩）都生效；步进值同 Settings 里的 snap 步进
+- **背景**：之前吸附只能靠全局 Snap 开关；补 Unity 标准"拖动中按 Ctrl 临时吸附"。Snap tooltip 也加了这行提示。**吸附手感 + Ctrl 时机待真机确认**。
+
+### 26. Asset 浏览器双击 .scene.json 打开场景
+
+- **commit**：`f0e2df1` feat(editor): Asset 浏览器双击 .scene.json 打开场景
+- **怎么触发**：Asset 浏览器文件列表里**双击**一个 `.scene.json`（[S] 图标 / 场景快照缩略图）
+- **看什么 / 通过判据**：
+  - 双击 → 直接打开该场景（等价 File→Open 选它）
+  - **有未保存改动时先弹"未保存确认"popup**（与菜单 Open 同一条路径）
+  - 单击仍只是选中（不打开）；双击其它类型文件（.mesh/.material）不触发打开
+- **背景**：之前双击场景文件无反应，只能走 File→Open 对话框 / Open Recent。补 Unity/Lumix 标准双击打开。**双击打开 + 未保存确认流程待真机确认**。
+
 ---
 
 ## 维护约定
