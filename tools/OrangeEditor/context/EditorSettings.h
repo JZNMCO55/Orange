@@ -35,6 +35,8 @@
 #include <orange/engine/core/Serialization.h>
 
 #include <array>
+#include <string>
+#include <vector>
 
 struct EditorSettings
 {
@@ -108,6 +110,17 @@ struct EditorSettings
     };
     static constexpr int kCameraBookmarkSlots = 4;
     std::array<CameraBookmark, kCameraBookmarkSlots> cameraBookmarks{};
+
+    // ---- 最近场景（File → Open Recent，schema minor 5）-------------------
+    // 最近打开 / 另存的 .scene.json 路径，front = 最近。持久化进 editor_settings
+    // .json（固定 kMaxRecentScenes 槽序列化，空串占位 = 未用）。对齐各编辑器
+    // File → Open Recent。
+    static constexpr int kMaxRecentScenes = 10;
+    std::vector<std::string> recentScenes;
+
+    // 把一个场景路径加进最近列表（去重后置顶 + cap kMaxRecentScenes）。空 path
+    // no-op。Open / SaveAs 成功后调。
+    void AddRecentScene(const std::string& path);
 };
 
 // JSON 持久化：与项目内 Core::Serialization 同节奏（手写 Read / Write，无

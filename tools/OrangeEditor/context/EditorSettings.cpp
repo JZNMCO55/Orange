@@ -8,6 +8,22 @@
 using Orange::Engine::JsonReader;
 using Orange::Engine::JsonWriter;
 
+void EditorSettings::AddRecentScene(const std::string& path)
+{
+    if (path.empty()) { return; }
+    // 去重：移除已存在的同路径（手动 erase 避免 <algorithm> 依赖）。
+    for (auto it = recentScenes.begin(); it != recentScenes.end(); )
+    {
+        if (*it == path) { it = recentScenes.erase(it); }
+        else             { ++it; }
+    }
+    recentScenes.insert(recentScenes.begin(), path);  // 最近置顶
+    if (static_cast<int>(recentScenes.size()) > kMaxRecentScenes)
+    {
+        recentScenes.resize(static_cast<std::size_t>(kMaxRecentScenes));
+    }
+}
+
 namespace
 {
 
@@ -107,13 +123,24 @@ void ReadEditorSettings(const JsonReader& in, EditorSettings& out)
         ReadFloat(in, base + "zFar",        bm.zFar);
         in.ReadBool(base + "valid", bm.valid);
     }
+
+    // schema minor 5：最近场景。缺段（minor ≤4）→ recentScenes 留空。
+    out.recentScenes.clear();
+    for (int i = 0; i < EditorSettings::kMaxRecentScenes; ++i)
+    {
+        std::string p;
+        if (in.ReadString("recentScenes/" + std::to_string(i), p) && !p.empty())
+        {
+            out.recentScenes.push_back(p);
+        }
+    }
 }
 
 void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
 {
     out.WriteString("schemaVersion/namespace", "editor/settings");
     out.WriteInt("schemaVersion/major", 1);
-    out.WriteInt("schemaVersion/minor", 4);   // minor 4：+gizmo snap（3：相机书签 / 2：autosave / 1：视口开关）
+    out.WriteInt("schemaVersion/minor", 5);   // minor 5：+最近场景（4：gizmo snap / 3：相机书签 / 2：autosave / 1：视口开关）
 
     out.WriteFloat("gizmo/lineWidth/translateIdle",      s.gizmoLineWidthTranslateIdle);
     out.WriteFloat("gizmo/lineWidth/translateHighlight", s.gizmoLineWidthTranslateHighlight);
@@ -158,5 +185,14 @@ void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
         out.WriteFloat(base + "zNear",       bm.zNear);
         out.WriteFloat(base + "zFar",        bm.zFar);
         out.WriteBool(base + "valid", bm.valid);
+    }
+
+    // 最近场景（固定 kMaxRecentScenes 槽，空串占位 = 未用）。
+    for (int i = 0; i < EditorSettings::kMaxRecentScenes; ++i)
+    {
+        const std::string val =
+            (i < static_cast<int>(s.recentScenes.size())) ? s.recentScenes[i]
+                                                          : std::string{};
+        out.WriteString("recentScenes/" + std::to_string(i), val);
     }
 }

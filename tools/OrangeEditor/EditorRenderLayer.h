@@ -272,6 +272,9 @@ private:
     // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
     // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。
     bool                                              mPendingImportDialog{false};
+    // File → Open Recent：点最近场景项时设为目标路径 + 触发 SceneOp::Open，
+    // ApplyPendingSceneOp 的 Open 分支非空时用它（跳过文件对话框）；用完清空。
+    std::string                                       mPendingOpenScenePath;
     // v0.9 Profiler 帧耗时 ring buffer —— PlotLines 喂数据用。capped 大小 +
     // 写指针 + 当前长度三件套。push 新值时按 ring 节奏覆盖最老值。
     static constexpr std::size_t                      kProfilerFrameRingCap = 128;

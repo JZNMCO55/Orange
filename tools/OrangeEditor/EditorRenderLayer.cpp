@@ -673,10 +673,37 @@ void EditorRenderLayer::DrawMainMenuBar()
             }
         }
         if (ImGui::MenuItem("Open Scene...")) {
+            mPendingOpenScenePath.clear();  // 常规 Open 走文件对话框（清 recent 残留）
             if (mHost.scene.dirty || HasUnsavedMaterial()) {
                 mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
             } else {
                 mHost.scene.pendingSceneOp = SceneOp::Open;
+            }
+        }
+        // Open Recent 子菜单：最近打开 / 另存的场景（front = 最近）。点击 → 设
+        // mPendingOpenScenePath（跳过对话框）+ 走 Open 流程（含未保存确认）。
+        // 空列表时整个子菜单 disabled。
+        {
+            const auto& recent = mHost.settings.recentScenes;
+            if (ImGui::BeginMenu("Open Recent", !recent.empty())) {
+                for (const std::string& sp : recent) {
+                    const auto slash = sp.find_last_of("/\\");
+                    const std::string shortName =
+                        (slash == std::string::npos) ? sp : sp.substr(slash + 1);
+                    if (ImGui::MenuItem(shortName.c_str())) {
+                        mPendingOpenScenePath = sp;
+                        if (mHost.scene.dirty || HasUnsavedMaterial()) {
+                            mHost.scene.pendingCloseAction =
+                                PendingCloseAction::OpenScene;
+                        } else {
+                            mHost.scene.pendingSceneOp = SceneOp::Open;
+                        }
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", sp.c_str());
+                    }
+                }
+                ImGui::EndMenu();
             }
         }
         ImGui::Separator();
@@ -960,7 +987,13 @@ void EditorRenderLayer::ApplyPendingSceneOp()
         }
         case SceneOp::Open: {
             std::string path;
-            if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) { break; }
+            // Open Recent：mPendingOpenScenePath 非空 → 直接用它（跳过文件对话框）。
+            if (!mPendingOpenScenePath.empty()) {
+                path = mPendingOpenScenePath;
+                mPendingOpenScenePath.clear();
+            } else if (!ShowSceneFileDialog(/*isSave=*/false, hwnd, path)) {
+                break;
+            }
             auto pNew = std::make_unique<Orange::Engine::World>();
             
             Orange::Engine::Scene::LoadOptions openLoadOpts;
@@ -1001,6 +1034,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 }
             }
             mHost.scene.currentScenePath = path;
+            mHost.settings.AddRecentScene(path);  // File → Open Recent
             mHost.scene.dirty = false;
             ResetEntityLocalState();
             mHost.cmdStack.Clear();
@@ -1050,6 +1084,7 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 break;
             }
             mHost.scene.currentScenePath = std::move(path);
+            mHost.settings.AddRecentScene(mHost.scene.currentScenePath);  // Open Recent
             mHost.scene.dirty = false;
             ORANGE_LOG_INFO("[OrangeEditor] saved scene as: {}",
                             mHost.scene.currentScenePath);
