@@ -62,6 +62,7 @@
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
+#include "orange/engine/scene/WorldTransformComponent.h"
 
 #include "orange/core/Log.h"
 #include "orange/renderer/RenderDevice.h"
@@ -1931,10 +1932,24 @@ void Pipeline::Impl::RenderOffscreen(Orange::Engine::World& world)
             // 方向由 entity.Transform.rotation 派生；没挂 Transform 视为
             // identity rotation（光向下 -Y）。Pipeline 不感知"哪是 forward"
             // 约定细节，全部走 LightComponent.h 的统一公式。
-            using TC = Orange::Engine::Scene::TransformComponent;
-            const auto* tc = reg.try_get<TC>(entity);
-            const glm::quat rot = (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-            activeLightDir = ComputeDirectionalLightWorldDir(rot);
+            // 方向取 TransformSystem 累积的 world matrix（含父变换，ADR-016 /
+            // A1.1 step 2）：world * (0,-1,0) 即世界光向（normalize 去 scale）。
+            // root 灯 world==local 结果不变（零回归）；reparent 到旋转父则方向随
+            // 父转。cache 缺失（首帧/未渲染）退回 entity local rotation 兜底。
+            using TC  = Orange::Engine::Scene::TransformComponent;
+            using WTC = Orange::Engine::Scene::WorldTransformComponent;
+            if (const auto* wtc = reg.try_get<WTC>(entity))
+            {
+                activeLightDir = glm::normalize(glm::vec3(
+                    wtc->world * glm::vec4(kDirectionalLightLocalForward, 0.0f)));
+            }
+            else
+            {
+                const auto* tc = reg.try_get<TC>(entity);
+                const glm::quat rot =
+                    (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                activeLightDir = ComputeDirectionalLightWorldDir(rot);
+            }
         }
         // EnvironmentComponent first-found：与 DirectionalLight 同款选取；
         // 多个时取迭代器第一个（baseline 单 World 全局环境，多 environment
@@ -2978,10 +2993,24 @@ void Pipeline::Render(Orange::Engine::World& world)
             // 方向由 entity.Transform.rotation 派生（identity = -Y 朝下）；
             // 没挂 Transform 视为 identity，与本函数另一分支 neutral 默认
             // 不冲突——neutral 默认仅在 activeLight==nullptr 时生效。
-            using TC = Orange::Engine::Scene::TransformComponent;
-            const auto* tc = reg.try_get<TC>(entity);
-            const glm::quat rot = (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-            activeLightDir = ComputeDirectionalLightWorldDir(rot);
+            // 方向取 TransformSystem 累积的 world matrix（含父变换，ADR-016 /
+            // A1.1 step 2）：world * (0,-1,0) 即世界光向（normalize 去 scale）。
+            // root 灯 world==local 结果不变（零回归）；reparent 到旋转父则方向随
+            // 父转。cache 缺失（首帧/未渲染）退回 entity local rotation 兜底。
+            using TC  = Orange::Engine::Scene::TransformComponent;
+            using WTC = Orange::Engine::Scene::WorldTransformComponent;
+            if (const auto* wtc = reg.try_get<WTC>(entity))
+            {
+                activeLightDir = glm::normalize(glm::vec3(
+                    wtc->world * glm::vec4(kDirectionalLightLocalForward, 0.0f)));
+            }
+            else
+            {
+                const auto* tc = reg.try_get<TC>(entity);
+                const glm::quat rot =
+                    (tc != nullptr) ? tc->rotation : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                activeLightDir = ComputeDirectionalLightWorldDir(rot);
+            }
         }
         // EnvironmentComponent first-found：详细注释参见 RenderOffscreen 内
         // 同款代码块。envTint / envIntensity 单独留下给 sky-dome pass 用；
