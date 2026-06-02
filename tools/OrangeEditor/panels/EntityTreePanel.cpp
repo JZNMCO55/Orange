@@ -1210,6 +1210,35 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         if (ImGui::MenuItem("Rename", "F2")) {
             BeginRename(entity);
         }
+        // Reset Transform（Unity 标准）—— 把该实体 TransformComponent 重置为本地
+        // identity（position 0 / rotation 单位 quat / scale 1）。可 Undo。对导入
+        // 模型 transform 异常 / 手滑挪偏后归位有用。defensive 重解引（capE+IsValid）
+        // 同 Paste Values；cmdStack.onChanged 自动置 dirty，无需手动标。
+        {
+            using ::Orange::Engine::Entity;
+            using TC = ::Orange::Engine::Scene::TransformComponent;
+            auto* pW = mHost.scene.pWorld.get();
+            const bool hasTC = pW != nullptr && pW->IsValid(entity)
+                            && pW->GetComponent<TC>(entity) != nullptr;
+            if (ImGui::MenuItem("Reset Transform", nullptr, false, hasTC)) {
+                const TC      oldTc = *pW->GetComponent<TC>(entity);
+                auto*         pH    = &mHost;
+                const Entity  capE  = entity;
+                auto applyTc = [pH, capE](const TC& v) {
+                    auto* w = pH->scene.pWorld.get();
+                    if (w == nullptr || !w->IsValid(capE)) { return; }
+                    auto* t = w->GetComponent<TC>(capE);
+                    if (t == nullptr) { return; }
+                    *t = v;
+                    // 让 Inspector 旋转 euler 缓存重读重置后的值。
+                    pH->selection.transformEulerCacheEntity = Entity::Invalid();
+                };
+                mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
+                    "Reset Transform",
+                    [applyTc]()        { applyTc(TC{}); },
+                    [applyTc, oldTc]() { applyTc(oldTc); }));
+            }
+        }
         // 剪贴板 / 复制组（hierarchy gap §3）：键盘已有 Ctrl+C/X/V/D，这里补右键
         // 入口（快捷键不可见，菜单提供可发现性）。统一作用于"右键的这个节点"——
         // Copy/Cut 自包含序列化它的子树；Duplicate/Paste 先把选中切到该节点（清
