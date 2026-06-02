@@ -212,6 +212,28 @@
   - 步进值在 Settings 面板 Snap 段可调，工具栏开关与 Settings 双向同步（同一个 settings.snapEnabled）
 - **背景**：snap 功能（3 个 gizmo 都已消费 snapEnabled）之前只埋在 Settings，加 viewport 快捷开关提升可发现性。对齐 Unity/Lumix snap toggle。**开关 + 吸附手感待真机确认**。
 
+### 15. viewport 统计 overlay
+
+- **commit**：`5b722b9` feat(editor): viewport 统计 overlay
+- **怎么触发**：打开 OrangeEditor，看 viewport **左上角**
+- **看什么 / 通过判据**：
+  - 半透黑底的两行文字：`Entities N | Renderables M | Tris T` + `Selected: <名字>`
+  - 数字随场景变化（建/删实体、Hide/Unhide、选中切换）实时更新；Tris = 所有可见 Renderable 的三角总数
+  - 选中实体 → 第二行显示其名字；未选 → `(none)`
+- **背景**：对齐 Lumix StudioApp / Unity scene stats。始终显示（紧凑半透不挡视野）。**overlay 视觉位置 + 计数准确性待真机确认**。
+
+### 16. RMB+WASD 飞行相机导航
+
+- **commit**：`f151fa6` feat(editor): RMB+WASD 飞行相机导航
+- **怎么触发**：在 viewport 内**按住鼠标右键（RMB）**，同时按 **WASD / Q / E**
+- **看什么 / 通过判据**：
+  - RMB 拖动 → 视角原地转动（look-in-place，相机不绕物体转，是"原地环顾"）
+  - RMB 按住 + **W/S** 前进/后退、**A/D** 左移/右移、**Q/E** 下降/上升（沿当前视向飞行）
+  - 按住 **Shift** 飞行加速 ×3
+  - **不冲突**：RMB 按住时按 W 不会切到 translate gizmo（只飞行）；松开 RMB 后 W/E/R 恢复切 gizmo mode
+  - LMB 轨道 / MMB 平移 / 滚轮缩放 行为不变
+- **背景**：之前相机纯轨道（orbit），大场景穿行不便。补 Unreal/Unity 标准 RMB+WASD 自由飞行。**纯交互功能 headless 测不了** —— RMB-look 方向是否顺手 / WASD 方向对不对 / 飞行速度合不合适，全靠真机 dogfood（若方向反了/速度不对，告诉我调 lookSensitivity 符号 / flySpeed）。
+
 ---
 
 ## 维护约定
