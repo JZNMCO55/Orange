@@ -79,6 +79,7 @@
   - **B1.3 Play/Pause/Stop 状态机 ⚠️ 部分已存在**：编辑器**已有** `PlayState`(Edit/Play/Paused) 状态机 + `EnterPlay` 的 World 快照落盘/Stop 还原（`EditorRenderLayer.cpp:1488` S2）+ Play tick 跑 physics（`:223`）——脚本生命周期挂进这套即可，不必重造。剩 = 进 Play clone 的 EntityGuid 稳定性（**依赖 A2**）+ 脚本 OnStart/OnUpdate/OnDestroy 接入。
   - **B1.4 输入/相机 editing vs play 模式切换**（编辑期 fly-cam+gizmo / play 期游戏相机+输入栈）。
   - **B1.5 运行时落地**：按 B1.0 选脚本运行时 OR dll 热加载。
+  - **C# 脚本 SDK 骨架 ✅ 已落地 2026-06-02**：`csharp/OrangeScriptSDK/`——`OrangeScript` 基类（OnStart/OnUpdate/OnDestroy + Entity，对标 MonoBehaviour）+ 托管 `Entity` 句柄（uint64，不持裸指针）+ `Vec3`（blittable 同 glm 布局）+ `EngineInterop` P/Invoke 绑定声明 + net8.0 csproj + 示例。脚本侧 API 契约就位；C++ CLR host + 导出符号是 B1.0/B1.1（本机无 .NET SDK，未 dotnet build 编译验证，随 host spike 一起编）。
 - **跨仓**：路线 (a) 脚本可能引擎侧；(b) dll 热加载属新架构方向。**dogfood**：核心（PIE 是交互闭环）。**验收**：编辑器摆挂游戏侧自定义 system 的场景 → Play → 视口内 system 真 tick → Stop → 还原。
 
 ### B2 · 动画时序编辑 ★重点
