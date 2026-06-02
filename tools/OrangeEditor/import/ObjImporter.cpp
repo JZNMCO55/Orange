@@ -231,68 +231,125 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
     // 三角形）。先按总 face-vertex 数 / 4 reserve dedup，避免 rehash。
     std::size_t totalFaceVerts = 0;
     for (const auto& sh : shapes) { totalFaceVerts += sh.mesh.indices.size(); }
+
+    // 多 material per mesh：先把 dedup 后的索引按**面（三角）顺序**收进 faceVertIdx
+    // （3 个 / 三角）+ 记每个三角的 material slot（triSlot）；orderedObjMat 按
+    // 首次出现顺序去重 tinyobj material id（slot 下标 = orderedObjMat 下标，-1 =
+    // 无 material 的面）。单 material / 无 material（orderedObjMat.size()<=1）后续
+    // 退化回整 mesh 单段 face-order 路径，零回归。
+    std::vector<std::uint32_t> faceVertIdx;
+    std::vector<std::uint32_t> triSlot;
+    std::vector<int>           orderedObjMat;
+    auto slotForObjMat = [&orderedObjMat](int objMatId) -> std::uint32_t {
+        for (std::size_t i = 0; i < orderedObjMat.size(); ++i)
+        {
+            if (orderedObjMat[i] == objMatId)
+            {
+                return static_cast<std::uint32_t>(i);
+            }
+        }
+        orderedObjMat.push_back(objMatId);
+        return static_cast<std::uint32_t>(orderedObjMat.size() - 1);
+    };
     if (totalFaceVerts > 0)
     {
         dedup.reserve(totalFaceVerts / 4 + 1);
-        indices.reserve(totalFaceVerts);
+        faceVertIdx.reserve(totalFaceVerts);
+        triSlot.reserve(totalFaceVerts / 3 + 1);
     }
 
     for (const auto& sh : shapes)
     {
         const auto& meshIndices = sh.mesh.indices;
-        for (std::size_t fvi = 0; fvi < meshIndices.size(); ++fvi)
+        const auto& matIds      = sh.mesh.material_ids;  // 每三角一个（triangulate）
+        const std::size_t triCount = meshIndices.size() / 3;
+        for (std::size_t tri = 0; tri < triCount; ++tri)
         {
-            const auto& fv = meshIndices[fvi];
-            const FaceVertexKey key{fv.vertex_index, fv.normal_index, fv.texcoord_index};
-
-            auto it = dedup.find(key);
-            if (it == dedup.end())
+            const int objMat = (tri < matIds.size()) ? matIds[tri] : -1;
+            triSlot.push_back(slotForObjMat(objMat));
+            for (int k = 0; k < 3; ++k)
             {
-                const auto newIdx = static_cast<std::uint32_t>(positions.size());
-                dedup.emplace(key, newIdx);
+                const auto& fv = meshIndices[tri * 3 + static_cast<std::size_t>(k)];
+                const FaceVertexKey key{fv.vertex_index, fv.normal_index, fv.texcoord_index};
 
-                // position：vertex_index 必须 >= 0（tinyobj 保证 face vertex
-                // 一定带 pos）。attrib.vertices 是 float[3] interleaved。
-                VertexPosition3 p{};
-                if (fv.vertex_index >= 0
-                    && static_cast<std::size_t>(fv.vertex_index) * 3 + 2 < attrib.vertices.size())
+                auto it = dedup.find(key);
+                if (it == dedup.end())
                 {
-                    p.x = attrib.vertices[fv.vertex_index * 3 + 0];
-                    p.y = attrib.vertices[fv.vertex_index * 3 + 1];
-                    p.z = attrib.vertices[fv.vertex_index * 3 + 2];
-                }
-                positions.push_back(p);
+                    const auto newIdx = static_cast<std::uint32_t>(positions.size());
+                    dedup.emplace(key, newIdx);
 
-                VertexUV2 uv{};
-                if (fv.texcoord_index >= 0
-                    && static_cast<std::size_t>(fv.texcoord_index) * 2 + 1 < attrib.texcoords.size())
+                    // position：vertex_index 必须 >= 0（tinyobj 保证 face vertex
+                    // 一定带 pos）。attrib.vertices 是 float[3] interleaved。
+                    VertexPosition3 p{};
+                    if (fv.vertex_index >= 0
+                        && static_cast<std::size_t>(fv.vertex_index) * 3 + 2 < attrib.vertices.size())
+                    {
+                        p.x = attrib.vertices[fv.vertex_index * 3 + 0];
+                        p.y = attrib.vertices[fv.vertex_index * 3 + 1];
+                        p.z = attrib.vertices[fv.vertex_index * 3 + 2];
+                    }
+                    positions.push_back(p);
+
+                    VertexUV2 uv{};
+                    if (fv.texcoord_index >= 0
+                        && static_cast<std::size_t>(fv.texcoord_index) * 2 + 1 < attrib.texcoords.size())
+                    {
+                        uv.u = attrib.texcoords[fv.texcoord_index * 2 + 0];
+                        // .obj texcoord origin 在左下；引擎纹理坐标默认左上为 (0,0)
+                        // （与 Vulkan 一致）。1 - v 翻转避免贴图上下颠倒。
+                        uv.v = 1.0f - attrib.texcoords[fv.texcoord_index * 2 + 1];
+                        fileHasUVs = true;
+                    }
+                    uvs.push_back(uv);
+
+                    VertexNormal3 nrm{};
+                    if (fv.normal_index >= 0
+                        && static_cast<std::size_t>(fv.normal_index) * 3 + 2 < attrib.normals.size())
+                    {
+                        nrm.x = attrib.normals[fv.normal_index * 3 + 0];
+                        nrm.y = attrib.normals[fv.normal_index * 3 + 1];
+                        nrm.z = attrib.normals[fv.normal_index * 3 + 2];
+                        fileHasNormals = true;
+                    }
+                    normals.push_back(nrm);
+
+                    faceVertIdx.push_back(newIdx);
+                }
+                else
                 {
-                    uv.u = attrib.texcoords[fv.texcoord_index * 2 + 0];
-                    // .obj texcoord origin 在左下；引擎纹理坐标默认左上为 (0,0)
-                    // （与 Vulkan 一致）。1 - v 翻转避免贴图上下颠倒。
-                    uv.v = 1.0f - attrib.texcoords[fv.texcoord_index * 2 + 1];
-                    fileHasUVs = true;
+                    faceVertIdx.push_back(it->second);
                 }
-                uvs.push_back(uv);
-
-                VertexNormal3 nrm{};
-                if (fv.normal_index >= 0
-                    && static_cast<std::size_t>(fv.normal_index) * 3 + 2 < attrib.normals.size())
-                {
-                    nrm.x = attrib.normals[fv.normal_index * 3 + 0];
-                    nrm.y = attrib.normals[fv.normal_index * 3 + 1];
-                    nrm.z = attrib.normals[fv.normal_index * 3 + 2];
-                    fileHasNormals = true;
-                }
-                normals.push_back(nrm);
-
-                indices.push_back(newIdx);
-            }
-            else
-            {
-                indices.push_back(it->second);
             }
         }
+    }
+
+    // 索引装配：多 material → 按 slot 分组重排 indices + 建 SubMesh 段；单 /
+    // 无 material → 直接 face-order（与历史一致，零回归）。
+    std::vector<::Orange::Engine::Asset::SubMesh> subMeshes;
+    const bool multiMaterial = orderedObjMat.size() > 1;
+    if (multiMaterial)
+    {
+        indices.reserve(faceVertIdx.size());
+        for (std::uint32_t slot = 0; slot < orderedObjMat.size(); ++slot)
+        {
+            const std::uint32_t offset = static_cast<std::uint32_t>(indices.size());
+            for (std::size_t tri = 0; tri < triSlot.size(); ++tri)
+            {
+                if (triSlot[tri] == slot)
+                {
+                    indices.push_back(faceVertIdx[tri * 3 + 0]);
+                    indices.push_back(faceVertIdx[tri * 3 + 1]);
+                    indices.push_back(faceVertIdx[tri * 3 + 2]);
+                }
+            }
+            const std::uint32_t count =
+                static_cast<std::uint32_t>(indices.size()) - offset;
+            if (count > 0) { subMeshes.push_back({offset, count, slot}); }
+        }
+    }
+    else
+    {
+        indices = std::move(faceVertIdx);
     }
 
     if (positions.empty() || indices.empty())
@@ -376,6 +433,15 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
         mesh->SetTangents(std::move(tangents));
     }
 
+    // 多 material OBJ：写 sub-mesh 段（各 slot 一段连续索引区间）。索引装配时
+    // 已按 slot 分组重排 + 建好 subMeshes；mikktspace re-weld 保留三角形顺序
+    // （与 gltf 同款依赖），故区间在 re-weld 后仍有效。单 / 无 material 时
+    // subMeshes 为空，HasSubMeshes()==false，渲染端走整 mesh 单 material 路径。
+    if (multiMaterial && !subMeshes.empty())
+    {
+        mesh->SetSubMeshes(std::move(subMeshes));
+    }
+
     const std::string destMeshStr = destMesh.generic_string();
     auto saveRes = MeshLoader::Save(destMeshStr, *mesh);
     if (saveRes.IsErr())
@@ -415,32 +481,61 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
     meta.sourceHash = hashOpt.value();
     meta.handleId   = 0;
 
-    // .mtl 单材质导入：恰好 1 个 material 时生成 .material（pbr 模板，scalar
-    // 通道）+ 写进 .meta subMeshMaterials —— drop 时自动设 Renderable.material
-    // Instance（与 gltf 单材质路径一致，对齐 Lumix/Unity 导 OBJ 带材质）。0 个
-    // 材质（纯几何 obj）→ 不生成（行为不变）；多材质（需 per-face 拆 sub-mesh）
-    // 留后续，本次仅导几何 + log 提示。
-    if (materials.size() == 1)
+    // .mtl 材质导入：按 slot（orderedObjMat 顺序）逐个生成 .material（pbr 模板，
+    // scalar 通道）+ 写进 .meta subMeshMaterials —— drop 时自动应用（单材质设
+    // Renderable.materialInstance / 多材质挂 SubMeshMaterialsComponent，与 gltf
+    // 路径一致，对齐 Lumix/Unity 导 OBJ 带材质）。命名：slot 0 = <stem>.material
+    // （单材质字节/路径与历史一致），slot>=1 = <stem>_<matname>.material（清洗
+    // 路径分隔符）。无 material 的 slot（objMat<0，纯几何）该项留空、不写。
+    auto sanitizeObjMatName = [&](int objMat, std::uint32_t slot) -> std::string {
+        std::string name = (objMat >= 0
+                            && static_cast<std::size_t>(objMat) < materials.size()
+                            && !materials[objMat].name.empty())
+                               ? materials[objMat].name
+                               : ("mat" + std::to_string(slot));
+        for (char& c : name)
+        {
+            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+                c == '"' || c == '<' || c == '>' || c == '|')
+            {
+                c = '_';
+            }
+        }
+        return name;
+    };
+    std::vector<std::string> objMaterialPaths(orderedObjMat.size());
+    for (std::uint32_t slot = 0; slot < orderedObjMat.size(); ++slot)
     {
-        const std::string matPath =
-            (destDir / (stem + ".material")).generic_string();
-        const auto mdata = BuildObjMaterialFileData(materials[0]);
+        const int objMat = orderedObjMat[slot];
+        if (objMat < 0 || static_cast<std::size_t>(objMat) >= materials.size())
+        {
+            continue;  // 无 material 的 slot（纯几何面）—— 该项留空
+        }
+        const std::string fileName = (slot == 0)
+            ? (stem + ".material")
+            : (stem + "_" + sanitizeObjMatName(objMat, slot) + ".material");
+        const std::string matPath = (destDir / fileName).generic_string();
+        const auto mdata = BuildObjMaterialFileData(materials[objMat]);
         if (::Orange::Editor::Material::WriteMaterialFile(matPath, mdata))
         {
-            meta.subMeshMaterials = {matPath};
-            result.materialPaths  = {matPath};
-            ORANGE_LOG_INFO("ObjImporter: wrote material '{}'", matPath);
+            objMaterialPaths[slot] = matPath;
+            ORANGE_LOG_INFO("ObjImporter: wrote material '{}' (slot={})",
+                            matPath, slot);
         }
         else
         {
             ORANGE_LOG_WARN("ObjImporter: WriteMaterialFile '{}' 失败", matPath);
         }
     }
-    else if (materials.size() > 1)
+    bool anyObjMaterial = false;
+    for (const auto& m : objMaterialPaths)
     {
-        ORANGE_LOG_INFO("ObjImporter: '{}' 含 {} 个 .mtl material —— 多材质 OBJ "
-                        "材质导入（per-face 拆 sub-mesh）留后续，本次仅导几何",
-                        srcPath, materials.size());
+        if (!m.empty()) { anyObjMaterial = true; break; }
+    }
+    if (anyObjMaterial)
+    {
+        meta.subMeshMaterials = objMaterialPaths;
+        result.materialPaths  = objMaterialPaths;
     }
 
     const std::string metaPath = MetaPathFor(destMeshStr);

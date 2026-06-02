@@ -295,6 +295,43 @@ void WriteCubeObjWithMtl(const std::string& objPath, const std::string& mtlName)
     ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";
 }
 
+// 写一个**两材质** OBJ（usemtl 分两组：前 3 面 MatA / 后 3 面 MatB）。验证 OBJ
+// 多材质导入 → per-face 拆 sub-mesh（2 段）+ 2 个 .material。
+void WriteCubeObjWithTwoMtl(const std::string& objPath, const std::string& mtlName)
+{
+    const fs::path mtlFsPath = fs::path(objPath).parent_path() / mtlName;
+    {
+        std::ofstream mtl(mtlFsPath, std::ios::binary | std::ios::trunc);
+        assert(mtl.is_open() && "写双材质 .mtl fixture 应成功");
+        mtl << "newmtl MatA\n";
+        mtl << "Kd 1.0 0.2 0.1\n";  // 红
+        mtl << "Ns 30.0\n";
+        mtl << "newmtl MatB\n";
+        mtl << "Kd 0.1 0.3 1.0\n";  // 蓝
+        mtl << "Ke 0.0 0.4 0.8\n";  // 自发光
+    }
+    std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写双材质 .obj fixture 应成功");
+    ofs << "mtllib " << mtlName << "\n";
+    ofs << "v -0.5 -0.5 -0.5\n";  ofs << "v  0.5 -0.5 -0.5\n";
+    ofs << "v  0.5  0.5 -0.5\n";  ofs << "v -0.5  0.5 -0.5\n";
+    ofs << "v -0.5 -0.5  0.5\n";  ofs << "v  0.5 -0.5  0.5\n";
+    ofs << "v  0.5  0.5  0.5\n";  ofs << "v -0.5  0.5  0.5\n";
+    ofs << "vn  0.0  0.0 -1.0\n";  ofs << "vn  0.0  0.0  1.0\n";
+    ofs << "vn -1.0  0.0  0.0\n";  ofs << "vn  1.0  0.0  0.0\n";
+    ofs << "vn  0.0 -1.0  0.0\n";  ofs << "vn  0.0  1.0  0.0\n";
+    // MatA：前 3 面（-Z / +Z / -X，共 6 三角）。
+    ofs << "usemtl MatA\n";
+    ofs << "f 1//1 2//1 3//1\n";  ofs << "f 1//1 3//1 4//1\n";
+    ofs << "f 5//2 6//2 7//2\n";  ofs << "f 5//2 7//2 8//2\n";
+    ofs << "f 1//3 4//3 8//3\n";  ofs << "f 1//3 8//3 5//3\n";
+    // MatB：后 3 面（+X / -Y / +Y）。
+    ofs << "usemtl MatB\n";
+    ofs << "f 2//4 6//4 7//4\n";  ofs << "f 2//4 7//4 3//4\n";
+    ofs << "f 1//5 5//5 6//5\n";  ofs << "f 1//5 6//5 2//5\n";
+    ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";
+}
+
 }  // namespace
 
 int main()
@@ -659,6 +696,59 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] OBJ .mtl 单材质：.material(pbr+uBaseColor+uMRA+"
                      "uEmissive) + .meta subMeshMaterials\n");
+    }
+
+    // ===== 9. OBJ 多材质（usemtl 分组 → per-face 拆 sub-mesh + 2 .material）=====
+    // 之前多材质 OBJ 只导几何（材质丢）。本段验证：2 个 .material（slot 0 =
+    // <stem>.material / slot 1 = <stem>_MatB.material）+ .mesh 拆 2 个 sub-mesh 段
+    // （连续 / 覆盖全索引）+ .meta subMeshMaterials（drop 挂 SubMeshMaterials）。
+    {
+        const fs::path srcDir = testRoot / "src_obj2mtl";
+        fs::create_directories(srcDir, ec);
+        const std::string objPath = (srcDir / "two_mtl_cube.obj").generic_string();
+        WriteCubeObjWithTwoMtl(objPath, "two_mtl_cube.mtl");
+
+        auto registry = MakeImportRegistry();
+        const ImportNS::ImportResult r =
+            ImportNS::ImportObjMeshToRegistry(objPath, *registry);
+        assert(r.status == ImportNS::ImportStatus::Success &&
+               "双材质 .obj 导入应 Success");
+        assert(fs::exists(r.destPath) && ".mesh 应存在");
+
+        // 2 个 .material（slot 0 stem / slot 1 stem_<matname>）。
+        const fs::path modelDir = fs::path(r.destPath).parent_path();
+        assert(fs::exists(modelDir / "two_mtl_cube.material") &&
+               "slot 0 = <stem>.material 应生成");
+        assert(fs::exists(modelDir / "two_mtl_cube_MatB.material") &&
+               "slot 1 = <stem>_MatB.material 应生成");
+        assert(r.materialPaths.size() == 2 &&
+               !r.materialPaths[0].empty() && !r.materialPaths[1].empty() &&
+               "materialPaths 恰 2 条非空");
+
+        const std::string metaPath = r.destPath + ".meta";
+        assert(FileContains(metaPath, "subMeshMaterials") &&
+               "多材质 .meta 应含 subMeshMaterials");
+
+        // .mesh 拆 2 个 sub-mesh：连续 + 覆盖全索引。
+        AssetNS::MeshLoader loader;
+        auto loadRes = loader.Load(r.destPath);
+        assert(loadRes.IsOk() && "多材质 .mesh 应能 Load");
+        const auto& mesh = *loadRes.Value();
+        assert(mesh.HasSubMeshes() && "多材质 OBJ → HasSubMeshes()==true");
+        const auto& subs = mesh.SubMeshes();
+        assert(subs.size() == 2 && "恰 2 个 sub-mesh 段");
+        std::uint64_t covered = 0;
+        for (const auto& sm : subs) { covered += sm.indexCount; }
+        assert(covered == mesh.Indices().size() &&
+               "sub-mesh 覆盖全部索引");
+        assert(subs[0].indexOffset == 0 && "slot 0 从索引 0 起");
+        assert(subs[1].indexOffset == subs[0].indexCount &&
+               "slot 1 紧接 slot 0（indexOffset 连续）");
+        assert(subs[0].materialSlot == 0 && subs[1].materialSlot == 1 &&
+               "materialSlot 连续 0/1");
+        std::fprintf(stdout,
+                     "  [PASS] OBJ 多材质：2 .material(slot0/1) + 2 sub-mesh 段"
+                     "（连续+覆盖全索引）+ .meta subMeshMaterials\n");
     }
 
     // 清理临时目录（切回上层先，避免删 cwd）。
