@@ -518,6 +518,27 @@ int main()
         std::fprintf(stdout, "  [PASS] CrossFadeTo fade-中-再切换无 pop（保持 50→25，非跳 100）\n");
     }
 
+    // ===== 22. Stop 取消进行中的过渡混合 → 落到当前 clip 纯 t0 姿势 =====
+    {
+        Scene::TransformComponent tc;
+        ClipAnimator anim(Anim::AnimationClip{}, &tc);
+        Anim::AnimationClip clipA;  // position.x 恒 100
+        clipA.duration = 1.0f;
+        clipA.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(100, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(100, 0, 0, 0))}));
+        anim.CrossFadeTo(clipA, 1.0f);
+        anim.Tick(0.5f);  // 半程 x=50，fading
+        assert(anim.IsFading() && Near(tc.position.x, 50.0f));
+
+        anim.Stop();
+        // Stop 取消 fade → 落到 clipA 纯 t0（x=100），而非 fade 混合的 50；IsFading 转 false。
+        assert(!anim.IsFading() && "Stop 取消进行中的 fade");
+        assert(Near(tc.position.x, 100.0f) &&
+               "Stop 落到当前 clip 纯 t0（100），非 fade 混合值 50");
+        std::fprintf(stdout, "  [PASS] Stop 取消过渡混合 → 当前 clip 纯 t0（100，非 50）\n");
+    }
+
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
     return 0;
 }

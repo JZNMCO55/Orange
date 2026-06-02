@@ -89,6 +89,11 @@ void ClipAnimator::Stop()
 {
     mPlaying        = false;
     mElapsedSeconds = 0.0f;
+    // 取消任何进行中的过渡混合——Stop 应确定性落到当前 clip 的纯 t0 姿势，而非 fade 相关
+    // 的混合结果（清后 ApplyPose 走非 fade 分支）。
+    mFadeRemaining = 0.0f;
+    mFadeDuration  = 0.0f;
+    mFadeFromClip  = AnimationClip{};
     ApplyPose();
 }
 
