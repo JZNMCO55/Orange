@@ -65,10 +65,7 @@
 
 - **现状/缺口**：无脚本运行时 / 无 C++ 模块热加载 / 无 PIE / 无 workspace 项目模型——编辑器只 tick 引擎内置子系统，加载不了游戏玩法代码（`GAP-2026-05-27-play-in-editor`）。这是 OrangeEditor 仍是"数据编辑器"而非"游戏制作环境"的根本原因。
 - **里程碑**（XL，多 session）：
-  - **B1.0 ADR（大决策）**：玩法逻辑形态二选一——
-    - (a) **脚本运行时**（Lua / C# / 自家脚本，编辑器嵌运行时热加载）——参 Unity(C#) / Godot(GDScript)；
-    - (b) **C++ 模块热加载**（游戏编成 dll，编辑器 load/reload tick 其 systems/components）——参 Unreal Live Coding。
-    - **此决策定整条 epic 走向，必须先拍**（见本文末"待你拍板"）。
+  - **B1.0 ADR（大决策）✅ 形态已拍板**：玩法逻辑形态 = **脚本运行时，语言 = C#**（用户 2026-06-02 定，参 Unity）。**剩待 ADR 细化** = C# runtime 选型（.NET CoreCLR via hostfxr / Mono 嵌入 / NativeAOT-interop）+ C++↔C# 互操作层（component/system 绑定、marshaling、GC 与 ECS 生命周期）+ 玩法 assembly 热加载机制。PIE 真启动时开 B1.0 ADR 落这些。
   - **B1.1 workspace / 项目模型**：编辑器能"打开外部游戏项目"（当前焊死自己仓 `assets/`）。**硬前置**。
   - **B1.2 游戏侧自定义 system / component 被编辑器发现**（与 schema-first / plugin-first 架构 + custom-component 扩展点对齐）。
   - **B1.3 Play/Pause/Stop 状态机**：进 Play 时 clone editing world → runtime world（复用 scene 序列化深拷贝），退出还原编辑前状态。**依赖 A2**（EntityGuid 稳定 clone）。
@@ -130,6 +127,6 @@
 ## 已拍板（2026-06-02 用户决策）
 
 1. **排序 = 地基优先**（用户"按你的节奏"→采纳推荐）：先做 **A1 Transform 层级传播**，再 A2 EntityGUID，然后并行开 B1/B2。理由：A1 越晚改迁移越贵 + 会回退本 session scene import 的 world-bake workaround；A1 纯逻辑+headless 可测，最适合自主推进。**→ 下一步 = A1.0 ADR + A1.1 实现。**
-2. **B1 PIE 路线 = 脚本运行时**（Lua / C# / 自家脚本，编辑器嵌运行时热加载）：用户拍板走脚本路线（非 C++ dll 热加载）。具体脚本语言选型（Lua vs C# vs 自家）留 B1.0 ADR 在 PIE 真启动时细化；架构方向已定 = 脚本 VM 嵌入 + 热加载，参 Unity(C#)/Godot(GDScript)。B1.5 落地按此。
+2. **B1 PIE 路线 = 脚本运行时，语言 = C#**（用户 2026-06-02 两步拍板）：① 走脚本路线（非 C++ dll 热加载）；② **脚本语言 = C#**（参 Unity；候选运行时如 .NET CoreCLR / Mono / hostfxr 嵌入 + C# 玩法程序集热加载，具体 runtime 选型留 B1.0 ADR）。架构方向定 = 嵌 C# 运行时 + 玩法 assembly 热加载，编辑器 PIE 内 tick 游戏侧 C# system/component。
 
 > 维护：每个 epic 开工时在对应 `GAP-*` 条目记落地进度；标志变化（✅/规模/跨仓）回灌本表与 `engine-known-gaps.md`。dogfood 残留按 `docs/dogfood-checklist.md` 格式登记。
