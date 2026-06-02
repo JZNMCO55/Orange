@@ -348,6 +348,17 @@
   - Top/Bottom 不会翻转/抖动（钳到 ±89° 避 gimbal）
 - **背景**：低 dogfood 风险（只设相机角度，对就是对）。对 2.5D 对齐 / 摆位有用。注：当前仍是透视投影（未切正交），后续可加 ortho 切换。
 
+### 28. Hierarchy 右键 Reset Transform
+
+- **commit**：`f1f25c1` feat(editor): Hierarchy 右键 Reset Transform（可 Undo）
+- **怎么触发**：Entity Tree 里右键一个实体 → **Reset Transform**
+- **看什么 / 通过判据**：
+  - 把该实体的 position 归 0、rotation 归单位、scale 归 1（回到本地 identity）；viewport 里物体跳回父空间原点 / 无旋转 / 原始大小
+  - **Ctrl+Z 可撤销**（恢复重置前的 transform）
+  - Inspector 的 Position/Rotation/Scale 同步刷新成 0/0/1（rotation euler 也对）
+  - 无 TransformComponent 的实体该项灰禁
+- **背景**：导入模型 transform 异常 / 手滑挪偏后一键归位，对齐 Unity 的 Transform → Reset。**重置 + undo + Inspector 刷新待真机确认**。
+
 ---
 
 ## 维护约定
