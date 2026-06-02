@@ -907,6 +907,75 @@ void TestClipAnimatorRoundTrip()
     std::fprintf(stdout, "  [PASS] ClipAnimator clip+target round-trip（旁路 registry）\n");
 }
 
+// Bezier 缓动经完整 scene "clip" backend 持久化管线后端到端保真：clip 创作 → clipJson
+// 序列化 → Load 重建 → ClipAnimator 重采样产出**缓动后**的值（非线性中点）。锁住本 session
+// 的 InterpMode::Bezier 真时序缓动（切线时间方向 .x）流经 scene 持久化不丢切线、不退化线性。
+void TestClipAnimatorBezierRoundTrip()
+{
+    const auto path = MakeTempScenePath("clip_animator_bezier");
+
+    World  source;
+    Entity e = source.CreateEntity();
+    source.AddComponent(e, TransformComponent{});
+
+    // ease-in（cubic-bezier(0.42,0,1,1)）：k0 出柄时间方向 0.42、值方向 0；k1 默认柄。
+    AnimationClip clip;
+    clip.name     = "bezier_clip";
+    clip.duration = 1.0f;
+    clip.loop     = false;
+    AnimationTrack track;
+    track.targetName = "position.x";
+    track.valueType  = TrackValueType::Float;
+    Keyframe k0;
+    k0.time       = 0.0f;
+    k0.value      = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    k0.interp     = InterpMode::Bezier;
+    k0.outTangent = glm::vec2(0.42f, 0.0f);
+    Keyframe k1;
+    k1.time   = 1.0f;
+    k1.value  = glm::vec4(100.0f, 0.0f, 0.0f, 0.0f);
+    k1.interp = InterpMode::Bezier;
+    track.keys.push_back(k0);
+    track.keys.push_back(k1);
+    clip.tracks.push_back(track);
+
+    AnimatorComponent ac;
+    ac.animator = std::make_unique<ClipAnimator>(clip, source.GetComponent<TransformComponent>(e));
+    source.AddComponent(e, std::move(ac));
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    World loaded;
+    auto  loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+
+    auto&  reg     = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<AnimatorComponent>()) { loadedE = World::FromEntt(ent); }
+    assert(loadedE.IsValid());
+
+    auto* loadedAc = loaded.GetComponent<AnimatorComponent>(loadedE);
+    assert(loadedAc != nullptr && loadedAc->animator != nullptr);
+    auto* loadedClip = static_cast<ClipAnimator*>(loadedAc->animator.get());
+
+    // interp + 切线经 clipJson round-trip 保真。
+    const auto& lk0 = loadedClip->Clip().tracks[0].keys[0];
+    assert(lk0.interp == InterpMode::Bezier && "interp 经 scene 持久化保真");
+    assert(FloatEq(lk0.outTangent.x, 0.42f) && "outTangent.x 经 scene 持久化保真");
+
+    // 重采样：tick 半程 → 缓动值（ease-in 慢启动 ≈ 31.5），**显著低于线性中点 50**——
+    // 证明 Bezier 时序缓动经整条 scene 持久化管线后未丢切线、未退化为线性插值。
+    loadedClip->Tick(0.5f);
+    const float midX = loaded.GetComponent<TransformComponent>(loadedE)->position.x;
+    assert(midX < 45.0f && "Bezier ease-in：缓动中点显著低于线性 50（经管线未退化线性）");
+    assert(midX > 25.0f && midX < 38.0f && "缓动中点落在 ease-in 预期带（≈31.5）");
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] ClipAnimator Bezier 缓动经 scene 持久化端到端保真（mid=%.1f<50）\n",
+                 midX);
+}
+
 // B2.6 改点 1：ClipAnimator 来自 .anim 资产时，scene 只存 clipSource 引用，Load 端
 // 经 assetRegistry 从 .anim 加载 clip + 重连 source path（与 mesh 同款资产引用）。
 void TestClipAnimatorAssetSourceRoundTrip()
@@ -1191,6 +1260,7 @@ int main()
     TestAnimatorBackendNameRoundTrip();
     TestAnimatorWithoutRegistryGraceful();
     TestClipAnimatorRoundTrip();
+    TestClipAnimatorBezierRoundTrip();
     TestClipAnimatorAssetSourceRoundTrip();
     TestClipAnimatorAssetSourceNoRegistryGraceful();
     TestParticleEmitterRoundTrip();
