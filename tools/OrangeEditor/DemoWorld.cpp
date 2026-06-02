@@ -10,6 +10,7 @@
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/animation/ProceduralAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshLoader.h>
@@ -92,6 +93,7 @@ void SeedDemoWorld(EditorHost& host)
     using ::Orange::Engine::Physics::PolygonDesc;
     using ::Orange::Engine::Physics::RigidBodyComponent;
     using ::Orange::Engine::Animation::AnimatorComponent;
+    using ::Orange::Engine::Animation::ClipAnimator;
 
     auto& world = *host.scene.pWorld;
     auto make = [&](const char* name) -> Entity {
@@ -127,6 +129,7 @@ void SeedDemoWorld(EditorHost& host)
     //     仅作为 schema 段渲染样本——切换到这三个实体看 Inspector 即可验
     //     c8 三个 visibleIf 互斥段。
     Entity slimeDoll       = make("Slime Doll");
+    Entity clipCube        = make("Animated Cube (clip)");
     Entity testFighter     = make("Test Fighter");
     Entity staticCircle    = make("Static Circle (demo)");
     Entity staticPolygon   = make("Static Polygon (demo)");
@@ -425,6 +428,72 @@ void SeedDemoWorld(EditorHost& host)
             ac.animator = host.assets.pAnimators->Create("procedural");
         }
         world.AddComponent<AnimatorComponent>(slimeDoll, std::move(ac));
+    }
+
+    // ---- Animated Cube（ClipAnimator + Renderable）----------------------
+    // B2.2 端到端可见 demo：cube + 标准 toon 材质，挂数据驱动的 ClipAnimator。
+    // Enter Play → TickAnimators 每帧 Tick → ClipAnimator 采样 AnimationClip 的
+    // position.y / rotation.euler 轨道写进本地 Transform → cube 上下浮动 + 绕 Y
+    // 自旋。与 Slime Doll（ProceduralAnimator 写 material uniform）对照：这一条
+    // 是写 Transform 的路径。clip 数据随 scene 序列化（"clip" backend 形态 B 嵌入），
+    // Enter-Play 快照 / Stop 还原后由 SceneSerialization 重建 + 自动接回本实体
+    // Transform，故跨 Play 循环稳健。位置贴在 Slime Doll 左侧对称处。
+    {
+        namespace Anim = ::Orange::Engine::Animation;
+
+        constexpr float baseY = 1.4f;
+        auto*           tc    = world.GetComponent<TransformComponent>(clipCube);
+        if (tc != nullptr) { tc->position = glm::vec3(-0.8f, baseY, 0.5f); }
+
+        if (host.assets.pToonMaterial != nullptr)
+        {
+            RenderableComponent rc{};
+            rc.mesh             = host.assets.cubeMeshHandle;
+            rc.materialInstance = host.assets.pToonMaterial.get();
+            rc.visible          = true;
+            rc.castsShadow      = true;
+            world.AddComponent<RenderableComponent>(clipCube, rc);
+        }
+
+        // 程序化构造一个 2s loop 的 bob+spin clip（实际工程里 clip 来自 timeline
+        // 编辑 + .anim 资产；此处内联仅为 demo 可见）。
+        auto floatKey = [](float t, float v) {
+            Anim::Keyframe k;
+            k.time  = t;
+            k.value = glm::vec4(v, 0.0f, 0.0f, 0.0f);
+            return k;
+        };
+        auto vec3Key = [](float t, glm::vec3 v) {
+            Anim::Keyframe k;
+            k.time  = t;
+            k.value = glm::vec4(v, 0.0f);
+            return k;
+        };
+
+        Anim::AnimationClip clip;
+        clip.name     = "cube_bob_spin";
+        clip.duration = 2.0f;
+        clip.loop     = true;
+
+        Anim::AnimationTrack bob;
+        bob.targetName = "position.y";
+        bob.valueType  = Anim::TrackValueType::Float;
+        bob.keys.push_back(floatKey(0.0f, baseY));
+        bob.keys.push_back(floatKey(1.0f, baseY + 0.5f));
+        bob.keys.push_back(floatKey(2.0f, baseY));
+        clip.tracks.push_back(std::move(bob));
+
+        Anim::AnimationTrack spin;
+        spin.targetName = "rotation.euler";
+        spin.valueType  = Anim::TrackValueType::Vec3;
+        spin.keys.push_back(vec3Key(0.0f, glm::vec3(0.0f)));
+        spin.keys.push_back(vec3Key(2.0f, glm::vec3(0.0f, 360.0f, 0.0f)));
+        clip.tracks.push_back(std::move(spin));
+
+        AnimatorComponent ac{};
+        ac.animator = std::make_unique<ClipAnimator>(
+            std::move(clip), world.GetComponent<TransformComponent>(clipCube));
+        world.AddComponent<AnimatorComponent>(clipCube, std::move(ac));
     }
 
     // ---- Test Fighter（HealthComponent 验收前置实体）----------------------
