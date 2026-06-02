@@ -28,6 +28,7 @@
 #include <orange/engine/asset/TextureLoader.h>
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -109,6 +110,39 @@ void WriteMinimalCubeObj(const std::string& path)
     // +Y 面（4,3,7,8）
     ofs << "f 4/1/6 3/2/6 7/3/6\n";
     ofs << "f 4/1/6 7/3/6 8/4/6\n";
+}
+
+// 写一个**无 UV** 的立方体 .obj（含 v / vn，无 vt；face 用 `v//vn` 格式）。
+// 用于验证 tangent fallback 端到端路径：缺 UV → importer 跳过 MikkTSpace →
+// 写出 .mesh（hasTangents=0 + 全零 UV 占位 + normal）→ Load 端 Lengyel
+// （ComputeTangentsFromTriangles）对全零 UV 每三角 det=0 跳过、每顶点落
+// ArbitraryTangent，产出与法线正交的有效 TBN（GAP-2026-05-25 gap ②）。
+void WriteCubeObjNoUV(const std::string& path)
+{
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写无 UV .obj fixture 应成功");
+    ofs << "# cube without UV for tangent-fallback end-to-end test\n";
+    ofs << "v -0.5 -0.5 -0.5\n";
+    ofs << "v  0.5 -0.5 -0.5\n";
+    ofs << "v  0.5  0.5 -0.5\n";
+    ofs << "v -0.5  0.5 -0.5\n";
+    ofs << "v -0.5 -0.5  0.5\n";
+    ofs << "v  0.5 -0.5  0.5\n";
+    ofs << "v  0.5  0.5  0.5\n";
+    ofs << "v -0.5  0.5  0.5\n";
+    ofs << "vn  0.0  0.0 -1.0\n";  // -Z
+    ofs << "vn  0.0  0.0  1.0\n";  // +Z
+    ofs << "vn -1.0  0.0  0.0\n";  // -X
+    ofs << "vn  1.0  0.0  0.0\n";  // +X
+    ofs << "vn  0.0 -1.0  0.0\n";  // -Y
+    ofs << "vn  0.0  1.0  0.0\n";  // +Y
+    // face 格式 v//vn（无 vt）。每面拆 2 三角。
+    ofs << "f 1//1 2//1 3//1\n";  ofs << "f 1//1 3//1 4//1\n";  // -Z
+    ofs << "f 5//2 6//2 7//2\n";  ofs << "f 5//2 7//2 8//2\n";  // +Z
+    ofs << "f 1//3 4//3 8//3\n";  ofs << "f 1//3 8//3 5//3\n";  // -X
+    ofs << "f 2//4 6//4 7//4\n";  ofs << "f 2//4 7//4 3//4\n";  // +X
+    ofs << "f 1//5 5//5 6//5\n";  ofs << "f 1//5 6//5 2//5\n";  // -Y
+    ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";  // +Y
 }
 
 // 读整个文件为字节，做确定性比较用。
@@ -403,6 +437,61 @@ int main()
                      subs.size(), r.materialPaths.size(),
                      static_cast<unsigned long long>(coveredIndices),
                      mesh.Indices().size());
+    }
+
+    // ===== 6. tangent fallback 端到端：无 UV .obj → Lengyel 兜底有效 TBN =====
+    // GAP-2026-05-25 gap ②。缺 UV 时 importer 跳过 MikkTSpace（GenerateMikkTSpace
+    // Tangents 前置 uvs/normals 非空不满足）→ 写 .mesh（hasTangents=0 + 全零 UV
+    // 占位 + normal）→ Load 端 ComputeTangentsFromTriangles（Lengyel）对全零 UV
+    // 每三角 det=0 跳过、每顶点落 ArbitraryTangent → HasTangents()=true 且每条
+    // 切线单位长 + 与对应 normal 正交 + w=±1（TBN 非奇异，shader 不会 0×NaN）。
+    {
+        const fs::path srcDir = testRoot / "src_nouv";
+        fs::create_directories(srcDir, ec);
+        const std::string objPath = (srcDir / "cube_nouv.obj").generic_string();
+        WriteCubeObjNoUV(objPath);
+
+        auto registry = MakeImportRegistry();
+        const ImportNS::ImportResult r =
+            ImportNS::ImportObjMeshToRegistry(objPath, *registry);
+        assert(r.status == ImportNS::ImportStatus::Success &&
+               "无 UV .obj 导入应 Success（importer 不得因缺 UV 崩溃 / 失败）");
+        assert(!r.destPath.empty() && "destPath 应非空");
+
+        AssetNS::MeshLoader loader;
+        auto loadRes = loader.Load(r.destPath);
+        assert(loadRes.IsOk() && "无 UV mesh 应能 Load 读回");
+        const auto& mesh = *loadRes.Value();
+        assert(!mesh.Positions().empty() && "读回顶点 > 0");
+        assert(mesh.Indices().size() == 36 && "立方体 36 索引");
+
+        // 关键：normal 在（OBJ 自带 / 缺则 loader 补算）；tangent 经 Lengyel
+        // 兜底落地（HasTangents 为真）。
+        assert(mesh.HasNormals() && "无 UV mesh 应仍有 normal");
+        assert(mesh.HasTangents() &&
+               "缺 UV → Load 端 Lengyel 兜底应产出 tangent（HasTangents=true）");
+        assert(mesh.Tangents().size() == mesh.Positions().size() &&
+               "tangent 与顶点一一对应");
+
+        // 逐顶点验 TBN 有效性：切线单位长 + 与 normal 正交 + w=±1（非 NaN）。
+        const auto& tans = mesh.Tangents();
+        const auto& norms = mesh.Normals();
+        for (std::size_t i = 0; i < tans.size(); ++i)
+        {
+            const auto& t = tans[i];
+            const float len = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
+            assert(std::isfinite(len) && "切线分量必须有限（无 NaN/Inf）");
+            assert(std::fabs(len - 1.0f) < 1e-3f && "Lengyel 兜底切线应单位长");
+            assert(std::fabs(std::fabs(t.w) - 1.0f) < 1e-3f && "handedness w=±1");
+            const auto& n = norms[i];
+            const float dotTN = t.x * n.x + t.y * n.y + t.z * n.z;
+            assert(std::fabs(dotTN) < 1e-2f &&
+                   "切线应与法线正交（Gram-Schmidt 后 |dot(T,N)|≈0）");
+        }
+        std::fprintf(stdout,
+                     "  [PASS] tangent fallback：无 UV .obj → Lengyel 兜底有效 TBN "
+                     "(vtx=%zu, 全切线单位长+正交+w=±1)\n",
+                     mesh.Positions().size());
     }
 
     // 清理临时目录（切回上层先，避免删 cwd）。
