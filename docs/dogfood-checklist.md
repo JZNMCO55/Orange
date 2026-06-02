@@ -234,6 +234,24 @@
   - LMB 轨道 / MMB 平移 / 滚轮缩放 行为不变
 - **背景**：之前相机纯轨道（orbit），大场景穿行不便。补 Unreal/Unity 标准 RMB+WASD 自由飞行。**纯交互功能 headless 测不了** —— RMB-look 方向是否顺手 / WASD 方向对不对 / 飞行速度合不合适，全靠真机 dogfood（若方向反了/速度不对，告诉我调 lookSensitivity 符号 / flySpeed）。
 
+### 17. Frame All（Home 键聚焦全场景）
+
+- **commit**：`931023d` feat(editor): Frame All（Home 键 frame 全场景）
+- **怎么触发**：viewport 内按 **Home** 键（无文本输入焦点时）
+- **看什么 / 通过判据**：相机拉到能看**全场景所有几何**的距离（合并所有 entity 世界 bounds）；对比 **F** 键（只聚焦当前选中）。空场景按 Home 无反应。
+- **背景**：F 聚焦选中（已有）+ Home 聚焦全场景（新增），对齐 Unity/Unreal。**视觉待真机确认**。
+
+### 18. pbr 材质 inspector 可调 emissive
+
+- **commit**：`009a6e4` feat(editor): pbr 材质 inspector 暴露 uEmissive + emissive 贴图槽
+- **怎么触发**：选中一个 `.material`（pbr 模板）进 Material 子模式 inspector（或新建 pbr 材质）
+- **看什么 / 通过判据**：
+  - inspector 出现 **Emissive R / G / B** 三个 slider（range 0~8，可 > 1）
+  - 调高某通道（如 B 到 3.0）→ viewport 该材质物体**自发光**（配 bloom 发光晕）
+  - 出现 emissive 贴图槽（binding 4 uEmissiveTex），可拖贴图进去
+  - 导入带 emissive 的模型（如早上的 multimat_emissive_cube GlowMat）选其 .material → Emissive 值已是导入的（factor×strength）
+- **背景**：早上加了 emissive 渲染通道（0d14e21）但漏了编辑器 meta（pbr.template.json）→ 之前调不了。本次补上，emissive 编辑闭环。**Material 子模式 emissive 控件 + viewport 实时性待真机确认**。
+
 ---
 
 ## 维护约定
