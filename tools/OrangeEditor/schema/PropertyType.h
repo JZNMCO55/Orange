@@ -56,6 +56,20 @@ enum class PropertyType : std::uint8_t
              // 控件路径分两期：c1 仅显示当前 path（无控件 / 与 readOnly 同款
              // Text + TextDisabled）；c4 加 DnD 接收 + clear 按钮 + 浏览器
              // popup 选择
+    AssetRefArray, // AssetRef 的"数组"变体 —— 一个字段持有 N 个资源引用，
+             // get/set 类型擦除媒介是 std::vector<std::string>（每元素一个
+             // 资源相对路径）。复用 AssetRef 同款 assetRefGet/Set + ctx 双向
+             // accessor 槽位（out/in 指向 vector<string> 而非 string），由
+             // PropertyType 区分整体 marshal 形态。控件走 SchemaInspector 的
+             // AssetRefArray case：逐 slot 一行 [短名/(none)] [×清除] + DnD
+             // 接收，整体回写 + Push SetFieldValueCommand<vector<string>>。
+             // slot 数由 component 自身决定（典型 = mesh 的 sub-mesh 数），
+             // 本控件只编辑各 slot 指向的资源，不增删行。
+             //
+             // 唯一消费者（首例）：SubMeshMaterialsComponent.slots（单 mesh
+             // 多 material 的 slot → MaterialInstance* 映射，assetKind =
+             // Material）。其它"固定/半固定长度的资源引用数组"字段走同款
+             // FieldAssetRefArray + 此 case 路径。
     PolygonVertices,   // Box2D Polygon shape 顶点表（kMaxVertices = 8）。
                        // get/set 类型擦除媒介是 Physics::PolygonDesc 整值
                        // ——表格 UI 整体读出 → 用户编辑 → 整体回写 → Push

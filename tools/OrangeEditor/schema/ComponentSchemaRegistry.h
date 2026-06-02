@@ -308,6 +308,34 @@ public:
         return *this;
     }
 
+    // AssetRef 数组字段注册入口（PropertyType::AssetRefArray）。与 FieldAssetRef
+    // 同款 ctx-accessor 槽位（assetRefGet/Set），唯一差别：get/set 的 out/in
+    // 指向 std::vector<std::string>（每元素一个资源相对路径）而非单个 string。
+    // caller 在 getFn / setFn 内自行实现 component 数组字段（典型
+    // std::vector<MaterialInstance*>）↔ vector<path> 的双向映射。
+    //
+    // 控件由 SchemaInspector 的 AssetRefArray case 渲染（逐 slot 一行 +
+    // DnD + 清除）；命令栈走 SetFieldValueCommand<std::vector<std::string>>。
+    // assetKind 对**每个元素**生效（Asset 浏览器过滤 / DnD payload 校验 /
+    // Material lazy 注册判定）。
+    //
+    // 首例消费者：SubMeshMaterialsComponent.slots（assetKind = Material）。
+    ComponentSchemaBuilder& FieldAssetRefArray(const char* name, const char* label,
+                                               AssetKind                         kind,
+                                               PropertyDescriptor::AssetRefGetFn getFn,
+                                               PropertyDescriptor::AssetRefSetFn setFn)
+    {
+        PropertyDescriptor pd{};
+        pd.name              = name;
+        pd.label             = label;
+        pd.type              = PropertyType::AssetRefArray;
+        pd.attribs.assetKind = kind;
+        pd.assetRefGet       = getFn;
+        pd.assetRefSet       = setFn;
+        mSchema.properties.push_back(pd);
+        return *this;
+    }
+
     // ---- 最近一次 Field 的 attribute 修饰 -----------------------------
 
     ComponentSchemaBuilder& Range(float minV, float maxV)

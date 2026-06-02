@@ -257,14 +257,25 @@ CaptureComponentState(EditorHost& host, const ComponentSchema& schema, const voi
     std::vector<std::function<void(void*)>> restorers;
     for (const auto& prop : schema.properties)
     {
-        // AssetRef：用 assetRefGet 取路径字符串，restorer 经 host.assets 写回。
+        // AssetRef / AssetRefArray：用 assetRefGet 取路径，restorer 经
+        // host.assets 写回。两者 marshal 形态不同（string vs vector<string>），
+        // 必须按 prop.type 分流——否则把 vector<string> 内存当 string 读会损坏。
         if (prop.assetRefGet != nullptr && prop.assetRefSet != nullptr)
         {
-            std::string v;
-            prop.assetRefGet(component, host.assets, &v);
             const PropertyDescriptor::AssetRefSetFn setFn = prop.assetRefSet;
             auto* pH = &host;
-            restorers.push_back([v, setFn, pH](void* c) { setFn(c, pH->assets, &v); });
+            if (prop.type == PropertyType::AssetRefArray)
+            {
+                std::vector<std::string> v;
+                prop.assetRefGet(component, host.assets, &v);
+                restorers.push_back([v, setFn, pH](void* c) { setFn(c, pH->assets, &v); });
+            }
+            else
+            {
+                std::string v;
+                prop.assetRefGet(component, host.assets, &v);
+                restorers.push_back([v, setFn, pH](void* c) { setFn(c, pH->assets, &v); });
+            }
             continue;
         }
         if (prop.get == nullptr || prop.set == nullptr) { continue; }
@@ -803,6 +814,137 @@ void DrawProperty(EditorHost&                  host,
                     ImGui::SetTooltip("写入 Asset 浏览器当前选中:\n%s",
                                       browserSel.c_str());
                 }
+            }
+            break;
+        }
+        case PropertyType::AssetRefArray:
+        {
+            // AssetRef 数组（首例：SubMeshMaterialsComponent.slots）。整段读
+            // std::vector<std::string>（每元素一个资源相对路径）→ 逐 slot 一行
+            // [Slot i] [短名/(none)] [×清除] + DnD 接收 → 整体回写 + Push
+            // SetFieldValueCommand<std::vector<std::string>>。slot 数由 component
+            // 决定（典型 = mesh 的 sub-mesh 数），本控件只编辑各 slot 指向的
+            // 资源、不增删行。
+            //
+            // 与单 AssetRef case 的差异：accessor 的 out/in 指向 vector<string>；
+            // EnsureMaterialInstance lazy 注册对每个非空 slot 路径执行；命令栈
+            // 的 T = vector<string>（Merge 整体替换，一次 Undo 撤回本帧改动）。
+            if (prop.assetRefGet == nullptr) { break; }
+            std::vector<std::string> oldVal;
+            prop.assetRefGet(component, host.assets, &oldVal);
+            std::vector<std::string> newVal = oldVal;
+            bool changed = false;
+
+            const bool canWrite = (prop.assetRefSet != nullptr);
+            const ImGuiStyle& s = ImGui::GetStyle();
+            const float btnXW =
+                ImGui::CalcTextSize(Orange::Editor::Theme::Icon::GetClose()).x
+                + s.FramePadding.x * 2.0f;
+
+            ImGui::BeginGroup();
+            if (newVal.empty())
+            {
+                // slot 数为 0（component 挂了但 mesh 无 sub-mesh / 已清空）——
+                // 给个提示行，避免空段看起来像 bug。
+                ImGui::TextDisabled("（无 sub-mesh slot）");
+            }
+            for (std::size_t i = 0; i < newVal.size(); ++i)
+            {
+                ImGui::PushID(static_cast<int>(i));
+
+                const std::string& cur = newVal[i];
+                std::string_view displayLabel;
+                std::string      shortNameBuf;
+                if (cur.empty())
+                {
+                    displayLabel = std::string_view{"(none)"};
+                }
+                else
+                {
+                    const auto slash = cur.find_last_of('/');
+                    shortNameBuf = (slash == std::string::npos)
+                        ? cur : cur.substr(slash + 1);
+                    displayLabel = shortNameBuf;
+                }
+
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("Slot %zu", i);
+                ImGui::SameLine();
+
+                // 短名 Selectable（DnD target 要求上一 item 有 ID；Selectable
+                // 有，TextUnformatted 没有）。宽度 = 行内剩余 - 清除按钮宽。
+                float nameW =
+                    ImGui::GetContentRegionAvail().x - btnXW - s.ItemSpacing.x;
+                if (nameW < 48.0f) { nameW = 48.0f; }
+                ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                                      s.Colors[ImGuiCol_FrameBgHovered]);
+                ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+                                      s.Colors[ImGuiCol_FrameBgActive]);
+                ImGui::Selectable(std::string(displayLabel).c_str(), false,
+                                  ImGuiSelectableFlags_AllowDoubleClick,
+                                  ImVec2(nameW, 0));
+                ImGui::PopStyleColor(3);
+                if (!cur.empty() && ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("%s", cur.c_str());
+                }
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload =
+                            ImGui::AcceptDragDropPayload("ORANGE_ASSET"))
+                    {
+                        const char* pData =
+                            static_cast<const char*>(payload->Data);
+                        std::string dropped{pData};
+                        if (canWrite && dropped != newVal[i])
+                        {
+                            newVal[i] = std::move(dropped);
+                            changed = true;
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
+                // 清除按钮：把本 slot 置空（渲染端回退到
+                // RenderableComponent.materialInstance）。
+                ImGui::SameLine();
+                ImGui::BeginDisabled(cur.empty() || !canWrite);
+                const std::string clearLabel =
+                    std::string(Orange::Editor::Theme::Icon::GetClose()) + "##clr";
+                if (ImGui::SmallButton(clearLabel.c_str()))
+                {
+                    newVal[i].clear();
+                    changed = true;
+                }
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                {
+                    ImGui::SetTooltip("清除本 slot（回退到 Renderable 的默认材质）");
+                }
+
+                ImGui::PopID();
+            }
+            ImGui::EndGroup();
+
+            if (changed && canWrite)
+            {
+                // Material slot：写入前 lazy 注册路径到 namedMaterialInstances，
+                // 否则 setter 反查不到 ptr → slot 变 nullptr（与单 AssetRef
+                // writePath 同款保证；刚导入 / 新建的 .material 不在表里）。
+                if (prop.attribs.assetKind == AssetKind::Material)
+                {
+                    for (const auto& p : newVal)
+                    {
+                        if (!p.empty()) { (void)::EnsureMaterialInstance(host, p); }
+                    }
+                }
+                prop.assetRefSet(component, host.assets, &newVal);
+                host.cmdStack.Push(
+                    std::make_unique<SetFieldValueCommand<std::vector<std::string>>>(
+                        entity, fieldKey, oldVal, newVal,
+                        MakeAssetRefFieldApply<std::vector<std::string>>(
+                            &host, entity, &schema, prop.assetRefSet)));
             }
             break;
         }

@@ -26,6 +26,7 @@
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/render/SubMeshMaterialsComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -346,11 +347,11 @@ void RegisterRenderableComponentSchema()
     using RC = Orange::Engine::Render::RenderableComponent;
 
     // 配套组件 SubMeshMaterialsComponent（单 mesh 多 material 的 slot → material
-    // 映射）暂未在此注册 Inspector schema：它唯一的字段是
-    // std::vector<MaterialInstance*> 数组，而当前 ComponentSchemaBuilder /
-    // PropertyType 没有"AssetRef 数组"字段类型（FieldAssetRef 只表达单个 ref），
-    // 无法表达数组型 Inspector UI。引擎层 + scene 序列化层已闭环（component 存在
-    // 且能 by-id round-trip），数组编辑 UI 留待后续在 builder 支持数组字段后补。
+    // 映射）的 Inspector schema 见下方 RegisterSubMeshMaterialsComponentSchema()
+    // ——它唯一的字段是 std::vector<MaterialInstance*> 数组，由新增的
+    // PropertyType::AssetRefArray + Builder::FieldAssetRefArray 表达（之前缺
+    // "AssetRef 数组"字段类型而留为后续；本次补齐）。注册顺序紧接 Renderable，
+    // 让多材质实体的 slot 面板紧贴 Renderable 段显示。
     // c10 落地 Renderable 自定义 add 路径：v0.1 期 +Add Component 在挂 Renderable
     // 时**预绑** cubeMesh + defaultMaterial（让用户立刻在 viewport 看到一个白色
     // 立方体，而不是 mesh=Invalid / material=nullptr 的"隐形"挂法）。c7 schema
@@ -447,6 +448,77 @@ void RegisterRenderableComponentSchema()
                      "近景特效）。与 DirectionalLight 的同名 flag 是 AND 关系：两个都\n"
                      "必须为 true 才会真投影。")
         .AddableWith(renderableAddWithPreset)
+        .Removable()
+        .Register();
+}
+
+// SubMeshMaterialsComponent 的 Inspector schema —— 单 mesh 多 material 时
+// 各 sub-mesh 段的 slot → MaterialInstance* 映射面板。导入多材质模型
+// （glTF 多 primitive material）/ drop 时由 EditorAssetDropHandler 自动挂上；
+// 本 schema 让用户在 Inspector 里可见并逐 slot 重指派材质。
+//
+// 唯一字段 slots（std::vector<MaterialInstance*>）走新增的
+// PropertyType::AssetRefArray —— 与 Renderable.materialInstance 同款 path↔ptr
+// 反查（O(N) 扫 namedMaterialInstances，slot 数 < 10 可忽略），只是整体
+// marshal 成 std::vector<std::string>。slot 数由 mesh 几何决定，本面板不增删行。
+//
+// 注册顺序紧接 Renderable（见 RegisterBuiltinSchemas() 调用次序），让多材质
+// 实体的 slot 面板紧贴 Renderable 段。不挂 Addable（slot 数由 mesh 派生，
+// 手动挂空壳无意义）；挂 Removable 让用户可退回整 mesh 单材质（误删走
+// CaptureComponentState 的 AssetRefArray 分支可 Undo 还原）。
+void RegisterSubMeshMaterialsComponentSchema()
+{
+    using SMC = Orange::Engine::Render::SubMeshMaterialsComponent;
+    using MaterialInstance = Orange::Engine::Render::MaterialInstance;
+
+    // slots → vector<path>：逐 slot 反查 ptr → path（nullptr / 查不到留空串，
+    // 控件显示 "(none)"，渲染端回退 Renderable.materialInstance）。
+    static const auto slotsGet = +[](const void* c,
+                                     const EditorAssetContext& ctx,
+                                     void* out) {
+        auto* smc  = static_cast<const SMC*>(c);
+        auto* vOut = static_cast<std::vector<std::string>*>(out);
+        vOut->clear();
+        vOut->reserve(smc->slots.size());
+        for (const MaterialInstance* inst : smc->slots)
+        {
+            std::string path;
+            if (inst != nullptr)
+            {
+                for (const auto& [p, ptr] : ctx.namedMaterialInstances)
+                {
+                    if (ptr == inst) { path = p; break; }
+                }
+            }
+            vOut->push_back(std::move(path));
+        }
+    };
+    // vector<path> → slots：按 path 查 namedMaterialInstances 写回 ptr。控件层
+    // （SchemaInspector AssetRefArray case）已对非空 path 做过 EnsureMaterialInstance
+    // lazy 注册，故此处 find 命中；Undo/Redo replay 时材质已在表里同样命中。
+    // resize 到 paths.size()（控件不增删行 → 长度不变；防御性 resize 兼容
+    // 外部 replay 任意长度）。
+    static const auto slotsSet = +[](void* c,
+                                     const EditorAssetContext& ctx,
+                                     const void* in) {
+        auto* smc         = static_cast<SMC*>(c);
+        const auto& paths = *static_cast<const std::vector<std::string>*>(in);
+        smc->slots.resize(paths.size());
+        for (std::size_t i = 0; i < paths.size(); ++i)
+        {
+            if (paths[i].empty()) { smc->slots[i] = nullptr; continue; }
+            auto it = ctx.namedMaterialInstances.find(paths[i]);
+            smc->slots[i] = (it != ctx.namedMaterialInstances.end())
+                ? it->second : nullptr;
+        }
+    };
+
+    ComponentSchemaBuilder<SMC>("SubMeshMaterials", "Sub-Mesh Materials")
+        .Helper("单 mesh 多 material 时各 sub-mesh 段的材质映射。\n"
+                "Slot 下标对应 mesh 的 sub-mesh materialSlot；留空的 slot 渲染时回退到 Renderable 的 Material。\n"
+                "slot 数由 mesh 几何决定（导入多材质模型时自动生成），本面板只重指派各 slot 的材质、不增删 slot。")
+        .FieldAssetRefArray("slots", "Slots", AssetKind::Material,
+                            slotsGet, slotsSet)
         .Removable()
         .Register();
 }
@@ -1095,6 +1167,7 @@ void RegisterBuiltinSchemas()
     RegisterEnvironmentComponentSchema();
     RegisterPostProcessComponentSchema();
     RegisterRenderableComponentSchema();
+    RegisterSubMeshMaterialsComponentSchema();
     RegisterRigidBodyComponentSchema();
     RegisterColliderComponentSchema();
     RegisterParticleEmitterComponentSchema();
