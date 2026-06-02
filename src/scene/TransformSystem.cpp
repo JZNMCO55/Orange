@@ -3,11 +3,9 @@
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/TransformMath.h>  // ComposeLocalMatrix（单一真相源）
 #include <orange/engine/scene/World.h>
 #include <orange/engine/scene/WorldTransformComponent.h>
-
-#include <glm/gtc/matrix_transform.hpp>  // glm::translate / glm::scale
-#include <glm/gtc/quaternion.hpp>        // glm::mat4_cast
 
 #include <vector>
 
@@ -15,18 +13,6 @@ namespace Orange::Engine::Scene
 {
 namespace
 {
-
-// 单实体 local TRS → mat4，与 RenderScene::ComposeWorldMatrix 同款合成顺序
-// T * R * S（列向量惯例：worldVec = M * localVec）。A1.1 step 2 切消费者后
-// RenderScene 那份 file-local helper 可删，统一走本 pass。
-glm::mat4 LocalMatrix(const TransformComponent& t)
-{
-    glm::mat4 m(1.0f);
-    m = glm::translate(m, t.position);
-    m = m * glm::mat4_cast(t.rotation);
-    m = glm::scale(m, t.scale);
-    return m;
-}
 
 // 层级递归深度上限——畸形/损坏 scene.json 可能含 firstChild 环（A→B→A），DFS
 // 会无限递归直至栈溢出硬崩。编辑器 reparent 有 IsAncestorOf 禁环，正常用不会出
@@ -49,7 +35,7 @@ void PropagateRecursive(World& world, Entity e, const glm::mat4& parentWorld, in
     }
 
     const auto* t = world.GetComponent<TransformComponent>(e);
-    const glm::mat4 local  = (t != nullptr) ? LocalMatrix(*t) : glm::mat4(1.0f);
+    const glm::mat4 local  = (t != nullptr) ? ComposeLocalMatrix(*t) : glm::mat4(1.0f);
     const glm::mat4 worldM = parentWorld * local;
     world.AddComponent<WorldTransformComponent>(e, WorldTransformComponent{worldM});
 
