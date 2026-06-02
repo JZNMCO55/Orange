@@ -103,6 +103,19 @@ int main()
         std::fprintf(stdout, "  [PASS] identity 父 local==world\n");
     }
 
+    // ===== 6. 零 scale 轴退化保护：position 仍正确、不崩（kEps guard）=====
+    {
+        TransformComponent t;
+        t.position = glm::vec3(1.0f, 2.0f, 3.0f);
+        t.scale    = glm::vec3(0.0f, 1.0f, 1.0f);  // x 轴退化
+        const glm::mat4 m = Scene::ComposeLocalMatrix(t);
+        // 不崩（kEps 防除零）；position 永远来自 local[3]，与 scale 无关 → 仍正确。
+        const TransformComponent got = Scene::DecomposeToLocalTransform(m, glm::mat4(1.0f));
+        assert(NearV3(got.position, glm::vec3(1.0f, 2.0f, 3.0f)) &&
+               "零 scale 轴下 position 仍正确（不除零、不崩）");
+        std::fprintf(stdout, "  [PASS] 零 scale 轴退化保护\n");
+    }
+
     std::fprintf(stdout, "TransformMathTest: all passed\n");
     return 0;
 }
