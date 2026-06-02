@@ -73,10 +73,10 @@
 
 - **现状/缺口**：无脚本运行时 / 无 C++ 模块热加载 / 无 PIE / 无 workspace 项目模型——编辑器只 tick 引擎内置子系统，加载不了游戏玩法代码（`GAP-2026-05-27-play-in-editor`）。这是 OrangeEditor 仍是"数据编辑器"而非"游戏制作环境"的根本原因。
 - **里程碑**（XL，多 session）：
-  - **B1.0 ADR（大决策）✅ 形态已拍板**：玩法逻辑形态 = **脚本运行时，语言 = C#**（用户 2026-06-02 定，参 Unity）。**剩待 ADR 细化** = C# runtime 选型（.NET CoreCLR via hostfxr / Mono 嵌入 / NativeAOT-interop）+ C++↔C# 互操作层（component/system 绑定、marshaling、GC 与 ECS 生命周期）+ 玩法 assembly 热加载机制。PIE 真启动时开 B1.0 ADR 落这些。
+  - **B1.0 ADR（大决策）✅ 形态已拍板**：玩法逻辑形态 = **脚本运行时，语言 = C#**（用户 2026-06-02 定，参 Unity）。**剩待 ADR 细化** = C# runtime 选型（.NET CoreCLR via hostfxr / Mono 嵌入 / NativeAOT-interop）+ C++↔C# 互操作层（component/system 绑定、marshaling、GC 与 ECS 生命周期）+ 玩法 assembly 热加载机制。📄 **设计提案地基已出**：`docs/pie-csharp-scripting-design.md`（扎在真实 PlayState/EnterPlay 代码 + Wiki scripting-system 页：runtime host 三方案对比〔推荐 CoreCLR + 可卸载 ALC 热重载〕 + binding 层 + ScriptComponent 模型 + 挂进现有 EnterPlay-snapshot 的生命周期 + 5 步分期 + 待裁定开放问题）。PIE 真启动时据此开 B1.0 ADR。
   - **B1.1 workspace / 项目模型**：编辑器能"打开外部游戏项目"（当前焊死自己仓 `assets/`）。**硬前置**。
   - **B1.2 游戏侧自定义 system / component 被编辑器发现**（与 schema-first / plugin-first 架构 + custom-component 扩展点对齐）。
-  - **B1.3 Play/Pause/Stop 状态机**：进 Play 时 clone editing world → runtime world（复用 scene 序列化深拷贝），退出还原编辑前状态。**依赖 A2**（EntityGuid 稳定 clone）。
+  - **B1.3 Play/Pause/Stop 状态机 ⚠️ 部分已存在**：编辑器**已有** `PlayState`(Edit/Play/Paused) 状态机 + `EnterPlay` 的 World 快照落盘/Stop 还原（`EditorRenderLayer.cpp:1488` S2）+ Play tick 跑 physics（`:223`）——脚本生命周期挂进这套即可，不必重造。剩 = 进 Play clone 的 EntityGuid 稳定性（**依赖 A2**）+ 脚本 OnStart/OnUpdate/OnDestroy 接入。
   - **B1.4 输入/相机 editing vs play 模式切换**（编辑期 fly-cam+gizmo / play 期游戏相机+输入栈）。
   - **B1.5 运行时落地**：按 B1.0 选脚本运行时 OR dll 热加载。
 - **跨仓**：路线 (a) 脚本可能引擎侧；(b) dll 热加载属新架构方向。**dogfood**：核心（PIE 是交互闭环）。**验收**：编辑器摆挂游戏侧自定义 system 的场景 → Play → 视口内 system 真 tick → Stop → 还原。
