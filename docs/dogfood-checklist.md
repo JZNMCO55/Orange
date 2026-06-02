@@ -449,6 +449,38 @@
   - ⏳ **ProceduralAnimator 数据 channel 实时可见**：把一条 .anim track 喂给 slime 材质
     uniform，Play 看 shader 效果按曲线变化（pbr 材质 UBO 已接，应可见）。
 
+> 其中第一项「ClipAnimator 写 Transform」已落地 → 见下方 item 33（视觉待 dogfood）。
+
+## 2026-06-02 session（成熟度地基 B2.2：ClipAnimator + .anim 序列化）
+
+### 33. ClipAnimator —— 数据曲线驱动实体 Transform（编辑器 Play 可见）
+
+- **commit**：`0951a50`（ClipAnimator core）+ `a79cef3`（scene round-trip）+ `ddc2e3c`（SeedDemoWorld demo）；序列化 commit 同 session。
+- **怎么触发**（⚠️ 新实体在 `SeedDemoWorld` 里，**现有 demo.scene.json 不含它**）：
+  1. 把 `assets/scenes/demo.scene.json` **临时挪开 / 改名**（保留你的本地 dogfood 状态用副本），
+     使启动时 `Scene::Load` 失败 → 回退 `SeedDemoWorld`（main.cpp:778-782 的回退路径）。
+  2. 启动 OrangeEditor（`build/bin/Debug/OrangeEditor.exe`）→ 加载 seeded demo world。
+  3. 看 viewport 里名为 **"Animated Cube (clip)"** 的 cube（位置约 `(-0.8, 1.4, 0.5)`，
+     Slime Doll 左侧对称处）。
+  4. 点 **Play**（进 PlayState::Play）。
+- **看什么 / 通过判据**：
+  - cube **上下浮动**（position.y 在 1.4↔1.9 之间，2s 一个来回）**同时绕 Y 自旋**（2s 转一圈），
+    动作平滑连续、loop 无跳变（rotation 0°↔360° 接缝无视觉跳）。
+  - 点 **Stop / 回 Edit** 后停在某一帧（仅 Play 模式 tick）。
+  - 选中 cube → Inspector 的 Animator 段 backend = `clip`。
+  - **Save 场景 → 重启 → Load → 再 Play，bob+spin 行为一致**（验证 "clip" backend 形态 B
+    嵌入 clipJson + Load 重建 + target 自动接回 self Transform 的 round-trip；此路径
+    headless 已由 `scene_serialization_test::TestClipAnimatorRoundTrip` 锁住，**人工再确认
+    Play 快照/Stop 还原后不退化**）。
+  - （可选叠加 A1）若把另一实体 reparent 到该 cube 下，Play 时子实体应随 cube 的
+    bob+spin 一起动（ClipAnimator 写本地 + TransformSystem 累积父变换）。
+- **背景 / 对照**：与 item 1 的 Slime Doll（ProceduralAnimator 写 material uniform）并列，
+  这条是引擎"双后端"中**写 Transform** 的路径。clip 此处由 `SeedDemoWorld` 内联构造；实际
+  工程里 clip 来自 timeline 编辑 + `.anim` 资产（序列化已就绪：`AnimationClipToJson` /
+  `LoadAnimationClip`，schema `animation/Clip` v1.0）。
+- **关键确认点**：这是首游"流体史莱姆 = 代码/数据驱动动画"路线里 **关键帧动画**地基；
+  Transform 动画的视觉正确性（缓动手感、loop 接缝、与渲染同步）务必真机确认。
+
 ---
 
 ## 维护约定
