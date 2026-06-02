@@ -7,10 +7,12 @@
 //   * Drawable：view<TransformComponent, RenderableComponent>()，对每
 //     个命中实体把 TRS 合成 world matrix、过滤 visible=false。
 //
-// **未做的事**：Hierarchy 父子链的世界变换合成。当前 sample 都是
-// 单层实体，flat=local 即可；引入复合 matrix 路径会同时拉进"depth-
-// first 还是按拓扑序"、"是否缓存计算结果"等设计问题，留待
-// 关卡复杂化时一并解决。
+// **Hierarchy 父子链的世界变换合成**（ADR-016 / maturity-roadmap A1.1 step 2）：
+// Collect 顶部先跑 `Scene::PropagateWorldTransforms` 从 hierarchy 自顶向下累积
+// 每个 entity 的 world matrix 进 WorldTransformComponent（cache），drawable loop
+// 读它而非各自单实体合成——让 parenting 真正生效（移动父带动子）。flat / 原点
+// 父的 entity 累积结果 == 单实体 local（零行为变化），只有非原点父的子才被父
+// 变换带动。cache 缺失时退回单实体 local 兜底。
 
 #include "orange/engine/render/RenderScene.h"
 
@@ -18,8 +20,10 @@
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/render/SubMeshMaterialsComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
+#include "orange/engine/scene/TransformSystem.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
+#include "orange/engine/scene/WorldTransformComponent.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -53,11 +57,16 @@ void RenderScene::Clear() noexcept
 void RenderScene::Collect(const Orange::Engine::World& world,
                           const Orange::Engine::Scene::WorldPartition* partition)
 {
-    // 取 const reference 看似一致，但 entt::view 的迭代需要 mutable
-    // registry 引用——本实现保证仅读 component，所以做一次内部
-    // const_cast 在语义上是安全的。RenderScene::Collect 的契约是
-    // "World 不被修改"，对调用方来说签名 `const World&` 仍然成立。
-    auto& registry = const_cast<Orange::Engine::World&>(world).Registry();
+    // entt::view 迭代 + 下面的 transform 传播都需要 mutable World——做一次内部
+    // const_cast。RenderScene::Collect 对调用方的契约从"World 不被修改"放宽为
+    // "只写 WorldTransformComponent 派生 cache（ADR-016）"——其余 component 仍只读。
+    auto& mutableWorld = const_cast<Orange::Engine::World&>(world);
+    auto& registry     = mutableWorld.Registry();
+
+    // ADR-016：先从 hierarchy 自顶向下累积 world matrix 进各 entity 的
+    // WorldTransformComponent。每帧全量重算（方案 A）；放在 Collect 顶部让所有
+    // render 路径（window / offscreen / thumbnail）自动获得最新 world transform。
+    Orange::Engine::Scene::PropagateWorldTransforms(mutableWorld);
 
     // 主相机：取首个挂 Camera 组件的实体。后续若需要"指定主相机"语
     // 义，引入 ActiveCameraTag 之类的 marker component 即可。
@@ -89,7 +98,11 @@ void RenderScene::Collect(const Orange::Engine::World& world,
         const auto& xform = drawView.get<Scene::TransformComponent>(e);
 
         Drawable d;
-        d.worldMatrix      = ComposeWorldMatrix(xform);
+        // world matrix 取 TransformSystem 累积的 cache（含父变换，ADR-016）；
+        // PropagateWorldTransforms 已给每个 reachable entity 填好，cache 缺失
+        // （hierarchy 链不一致等罕见情况）时退回单实体 local 合成兜底。
+        const auto* wt = world.GetComponent<Scene::WorldTransformComponent>(entity);
+        d.worldMatrix      = (wt != nullptr) ? wt->world : ComposeWorldMatrix(xform);
         d.mesh             = renderable.mesh;
         d.materialInstance = renderable.materialInstance;
         d.castsShadow      = renderable.castsShadow;
