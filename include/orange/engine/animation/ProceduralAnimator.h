@@ -87,6 +87,13 @@ public:
     // "曲线是 C++ lambda" 升级到 "曲线是可编辑/可序列化数据" 的接入点。
     void AddDataChannel(std::string_view name, const AnimationTrack& track);
 
+    // 把一整个 AnimationClip 的所有 track 作为数据 channel 注册（B2.2）：每条
+    // track 以其 targetName 为 uniform 名调 AddDataChannel。让**同一份**授权
+    // clip（.anim）既能经 ClipAnimator 驱动 Transform，也能经本路径驱动 material
+    // uniform —— 双后端消费同一数据。clip.loop/duration 不在此消费（ProceduralAnimator
+    // 自管 elapsed、IsFinished 恒 false）；调用方按需自己处理时长语义。
+    void AddClipChannels(const AnimationClip& clip);
+
     // 清空所有 channel。elapsed 不重置——这是"换皮"路径（同一 procedural
     // 时序、不同 channel 集），与 SkeletalAnimator::Play 的 fade 心智不同。
     void ClearChannels() noexcept;
@@ -173,6 +180,14 @@ inline void ProceduralAnimator::AddDataChannel(std::string_view name, const Anim
         case TrackValueType::Vec4:
             AddChannel<glm::vec4>(n, [track](float t) { return SampleTrack(track, t); });
             break;
+    }
+}
+
+inline void ProceduralAnimator::AddClipChannels(const AnimationClip& clip)
+{
+    for (const AnimationTrack& track : clip.tracks)
+    {
+        AddDataChannel(track.targetName, track);
     }
 }
 

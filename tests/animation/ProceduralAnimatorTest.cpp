@@ -217,6 +217,48 @@ void TestDataChannelFromTrack()
            "数据 channel 超末 key → clamp 到末值 100");
 }
 
+// B2.2：AddClipChannels 把整个 AnimationClip 的所有 track 按 targetName 注册成
+// uniform channel —— 同一份 clip 数据驱动 material uniform（与 ClipAnimator 驱动
+// Transform 对称）。
+void TestAddClipChannels()
+{
+    auto material = MakeTwoSlotMaterial();
+    Rd::MaterialInstance mi(&material);
+    Ani::ProceduralAnimator anim(&mi);
+
+    Ani::AnimationClip clip;
+    clip.duration = 2.0f;
+
+    // track.targetName 充当 uniform 名 —— 对应 MakeTwoSlotMaterial 的两个槽。
+    Ani::AnimationTrack ftrack;
+    ftrack.targetName = "noise_amp";
+    ftrack.valueType  = Ani::TrackValueType::Float;
+    Ani::Keyframe fk0; fk0.time = 0.0f; fk0.value = glm::vec4(0.0f);
+    Ani::Keyframe fk1; fk1.time = 2.0f; fk1.value = glm::vec4(100.0f, 0, 0, 0);
+    ftrack.keys = {fk0, fk1};
+    clip.tracks.push_back(ftrack);
+
+    Ani::AnimationTrack vtrack;
+    vtrack.targetName = "tint";
+    vtrack.valueType  = Ani::TrackValueType::Vec3;
+    Ani::Keyframe vk0; vk0.time = 0.0f; vk0.value = glm::vec4(0.0f);
+    Ani::Keyframe vk1; vk1.time = 2.0f; vk1.value = glm::vec4(2, 4, 6, 0);
+    vtrack.keys = {vk0, vk1};
+    clip.tracks.push_back(vtrack);
+
+    anim.AddClipChannels(clip);
+    assert(anim.ChannelCount() == 2 && "clip 两 track → 两 channel");
+
+    anim.Tick(1.0f);  // 区间中点
+    auto fv = mi.GetUniformFloat("noise_amp");
+    auto vv = mi.GetUniformVec3("tint");
+    assert(fv.has_value() && std::fabs(*fv - 50.0f) <= 1e-3f &&
+           "clip channel: noise_amp t=1 → 50");
+    assert(vv.has_value() && std::fabs(vv->x - 1.0f) <= 1e-3f &&
+           std::fabs(vv->y - 2.0f) <= 1e-3f && std::fabs(vv->z - 3.0f) <= 1e-3f &&
+           "clip channel: tint t=1 → (1,2,3)");
+}
+
 }  // namespace
 
 int main()
@@ -227,5 +269,6 @@ int main()
     TestResetAndClear();
     TestIAnimatorContract();
     TestDataChannelFromTrack();
+    TestAddClipChannels();
     return 0;
 }
