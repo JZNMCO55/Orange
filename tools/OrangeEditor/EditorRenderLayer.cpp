@@ -827,6 +827,17 @@ void EditorRenderLayer::DrawMainMenuBar()
             mHost.cmdStack.Redo();
             ValidateEntityHandles();
         }
+        ImGui::Separator();
+        // Duplicate / Delete 选中实体 —— Ctrl+D / Del 的菜单可发现入口。与
+        // Hierarchy / viewport 快捷键走同一组 host 幂等标志（帧末统一处理）。
+        const bool hasSel = (mHost.scene.playState == PlayState::Edit)
+                         && mHost.selection.selectedEntity.IsValid();
+        if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, hasSel)) {
+            mHost.selection.pendingDuplicate = true;
+        }
+        if (ImGui::MenuItem("Delete", "Del", false, hasSel)) {
+            mHost.selection.pendingDelete = mHost.selection.selectedEntity;
+        }
         ImGui::EndMenu();
     }
 
