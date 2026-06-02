@@ -17,6 +17,7 @@
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
+#include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
@@ -52,9 +53,9 @@ std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
     return registry;
 }
 
-// 写一个 3-node 层级 .gltf：RootGroup（无 mesh，translation (1,2,3)）→
-// {ChildA(mesh 0, translation (0.5,0,0)), ChildB(mesh 1, translation (-0.5,0,0))}。
-// 两个 mesh 各 1 primitive，共享同一 buffer 的 position / index accessor。
+// 写一个 5-node 层级 .gltf：RootGroup（无 mesh，translation (1,2,3)）→
+// {ChildA(mesh 0), ChildB(mesh 1), SunLight(directional), Lamp(point)}。
+// 两个 mesh 各 1 primitive，共享同一 buffer。灯光走 KHR_lights_punctual。
 void WriteSceneHierarchyGltf(const std::string& path)
 {
     // positions=(0,0,0)(1,0,0)(1,1,0)(0,1,0) 48B + indices 0,1,2,0,2,3（12B）。
@@ -67,13 +68,24 @@ void WriteSceneHierarchyGltf(const std::string& path)
     ofs <<
         "{\n"
         "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
+        "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
+        "    {\"name\": \"Sun\",  \"type\": \"directional\", "
+        "\"color\": [1.0, 0.9, 0.8], \"intensity\": 2.5},\n"
+        "    {\"name\": \"Bulb\", \"type\": \"point\", "
+        "\"color\": [0.2, 0.4, 1.0], \"intensity\": 5.0, \"range\": 8.0}\n"
+        "  ]}},\n"
         "  \"scene\": 0,\n"
         "  \"scenes\": [{\"nodes\": [0]}],\n"
         "  \"nodes\": [\n"
         "    {\"name\": \"RootGroup\", \"translation\": [1.0, 2.0, 3.0], "
-        "\"children\": [1, 2]},\n"
+        "\"children\": [1, 2, 3, 4]},\n"
         "    {\"name\": \"ChildA\", \"translation\": [0.5, 0.0, 0.0], \"mesh\": 0},\n"
-        "    {\"name\": \"ChildB\", \"translation\": [-0.5, 0.0, 0.0], \"mesh\": 1}\n"
+        "    {\"name\": \"ChildB\", \"translation\": [-0.5, 0.0, 0.0], \"mesh\": 1},\n"
+        "    {\"name\": \"SunLight\", "
+        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}},\n"
+        "    {\"name\": \"Lamp\", \"translation\": [2.0, 1.0, 0.0], "
+        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 1}}}\n"
         "  ],\n"
         "  \"meshes\": [\n"
         "    {\"name\": \"Crate\",  \"primitives\": [{\"attributes\": "
@@ -164,10 +176,10 @@ int main()
         auto loadRes = SceneNS::Load(r.destPath, world, opts);
         assert(loadRes.IsOk() && "产出的 .scene.json 应能被 Scene::Load 加载");
 
-        // 3 个实体（RootGroup + ChildA + ChildB）。
+        // 5 个实体（RootGroup + ChildA + ChildB + SunLight + Lamp）。
         std::size_t named = 0;
         for (auto e : world.Registry().view<SceneNS::NameComponent>()) { (void)e; ++named; }
-        assert(named == 3 && "应有 3 个实体（保留 node 树，含 group 根）");
+        assert(named == 5 && "应有 5 个实体（保留 node 树，含 group 根 + 2 灯光 node）");
 
         const Entity root   = FindByName(world, "RootGroup");
         const Entity childA = FindByName(world, "ChildA");
@@ -222,8 +234,56 @@ int main()
                "ChildA / ChildB 应指向各自独立的 mesh（不塌平共享）");
 
         std::fprintf(stdout,
-                     "  [PASS] Scene::Load round-trip：3 实体 + RootGroup→{ChildA,ChildB} "
+                     "  [PASS] Scene::Load round-trip：5 实体 + RootGroup→{ChildA,ChildB,...} "
                      "层级 + transform + 各自独立 mesh handle\n");
+
+        // ===== KHR_lights_punctual → 引擎光源 component（G3）=====
+        namespace RenderNS = ::Orange::Engine::Render;
+
+        // SunLight：DirectionalLight，color (1,0.9,0.8) intensity 2.5；方向沿
+        // glTF -Z 转引擎 -Y —— node 无 rotation → world 光向 (0,0,-1)，
+        // ComputeDirectionalLightWorldDir(编码后 rotation) 应 ≈ (0,0,-1)。
+        const Entity sun = FindByName(world, "SunLight");
+        assert(world.IsValid(sun) && "SunLight 实体应存在");
+        const auto* sunH = world.GetComponent<SceneNS::HierarchyComponent>(sun);
+        assert(sunH != nullptr && sunH->parent == root &&
+               "SunLight 应挂在 RootGroup 下");
+        const auto* dl = world.GetComponent<RenderNS::DirectionalLight>(sun);
+        assert(dl != nullptr && "SunLight 应有 DirectionalLight component");
+        assert(std::fabs(dl->color.r - 1.0f) < 1e-4f &&
+               std::fabs(dl->color.g - 0.9f) < 1e-4f &&
+               std::fabs(dl->color.b - 0.8f) < 1e-4f &&
+               "DirectionalLight color 应 = glTF (1,0.9,0.8)");
+        assert(std::fabs(dl->intensity - 2.5f) < 1e-4f &&
+               "DirectionalLight intensity 应透传 glTF 2.5（单位未映射，忠实透传）");
+        const auto* sunT = world.GetComponent<SceneNS::TransformComponent>(sun);
+        assert(sunT != nullptr && "SunLight 应有 Transform");
+        const glm::vec3 sunDir = RenderNS::ComputeDirectionalLightWorldDir(sunT->rotation);
+        assert(std::fabs(sunDir.x - 0.0f) < 1e-3f &&
+               std::fabs(sunDir.y - 0.0f) < 1e-3f &&
+               std::fabs(sunDir.z - (-1.0f)) < 1e-3f &&
+               "光向应沿 glTF -Z 转引擎约定后为 world (0,0,-1)（方向编码正确）");
+
+        // Lamp：PointLight，color (0.2,0.4,1.0) intensity 5 range 8；位置
+        // world-baked = 父(1,2,3) + 本地(2,1,0) = (3,3,3)。
+        const Entity lamp = FindByName(world, "Lamp");
+        assert(world.IsValid(lamp) && "Lamp 实体应存在");
+        const auto* pl = world.GetComponent<RenderNS::PointLight>(lamp);
+        assert(pl != nullptr && "Lamp 应有 PointLight component");
+        assert(std::fabs(pl->color.b - 1.0f) < 1e-4f &&
+               std::fabs(pl->intensity - 5.0f) < 1e-4f &&
+               std::fabs(pl->range - 8.0f) < 1e-4f &&
+               "PointLight color/intensity/range 应 = glTF (蓝/5/8)");
+        const auto* lampT = world.GetComponent<SceneNS::TransformComponent>(lamp);
+        assert(lampT != nullptr &&
+               std::fabs(lampT->position.x - 3.0f) < 1e-4f &&
+               std::fabs(lampT->position.y - 3.0f) < 1e-4f &&
+               std::fabs(lampT->position.z - 3.0f) < 1e-4f &&
+               "Lamp 位置 world-baked = 父(1,2,3)+本地(2,1,0) = (3,3,3)");
+
+        std::fprintf(stdout,
+                     "  [PASS] KHR_lights_punctual：SunLight=DirectionalLight(方向编码"
+                     "正确) + Lamp=PointLight(color/intensity/range + world 位置)\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);

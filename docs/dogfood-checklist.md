@@ -388,7 +388,8 @@
   - 同一 mesh 被多 node 引用时只生成一个 `.mesh` 文件（多实体共享同一 handle）。
 - **G1 范围限制（dogfood 时注意，不是 bug）**：
   - **材质全是默认材质**（灰 pbr）—— per-mesh PBR material 划分是 **G2**（未做），G1 只保几何 + 层级。所以即便 DCC 里有材质，导入后也是默认材质，这是预期。
-  - **不消费 glTF 灯光 / 相机**（G3 未做）；skinning / morph / 非 triangle primitive 全 skip。
+  - **灯光已导入（G3）但 intensity 单位未映射**：glTF 灯光（directional/point/spot，KHR_lights_punctual）会导入成对应引擎光源，**方向 / 颜色 / 位置 / range / 锥角应正确**；但 **intensity 是 glTF 单位（lux/candela）忠实透传**，引擎 intensity 无单位，所以**导入后可能整体偏亮/偏暗，需在 Inspector 手调亮度**——这是预期（G3 单位映射子缺口）。**相机不导入**（G3 cameras 未做）。skinning / morph / 非 triangle primitive 全 skip。
+  - **灯光 dogfood 看什么**：导入带灯光的 .glb 后，viewport 里光的**方向**（directional 太阳角度 / spot 锥指向）和**颜色**应与 DCC 一致；若方向反了 / 偏 90°，告诉我（可能是 -Z→-Y 转换或 has_matrix 分解问题）；亮度不对是已知 intensity 单位缺口、手调即可，不算 bug。
   - **transform 是 world-baked**：因引擎渲染不累积 hierarchy 父变换（见 `GAP-2026-06-02-hierarchy-transform-not-propagated`），导入时把每个 node 的 world 变换 flatten 进各自 TransformComponent。**所以摆位视觉是对的**（每个 prop 在 DCC 世界位置），但**导入后在编辑器移动父节点不会带动子节点**（沿用引擎现有限制，非本导入的 bug）。dogfood 看"初始摆位对不对"即可，别期望父子联动。
 - **推荐 fixture**：在 Blender 摆 3~5 个 prop（各自不同 transform，组织成 1~2 层父子，比如一个 Empty 父节点下挂几个 mesh），导出 `.glb`（**勾选 +Y up，glTF 默认**）。或现成带 node 层级的多 mesh glTF 资产（如 KHR sample 里的 `BoxAnimated` / 任意场景型 .glb）。
 - **若发现问题**：摆位错位（可能是 has_matrix 分解 / 坐标轴问题）/ 层级反了 / mesh 被错误合并 → 在 `docs/engine-known-gaps.md` 登记，link 回 GAP-2026-05-28。

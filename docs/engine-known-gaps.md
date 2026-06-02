@@ -2307,7 +2307,7 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ---
 
-## GAP-2026-05-28-gltf-scene-level-import-not-flattened ✅（G1）
+## GAP-2026-05-28-gltf-scene-level-import-not-flattened ✅（G1 + G3 lights）
 
 - **发现方**：Orange-Ecosystem umbrella session 讨论"关卡场景搭建工作流（in-engine vs 外部 DCC）"时
 - **发现日期**：2026-05-28
@@ -2391,7 +2391,8 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ### 状态
 
-- **G1（scene-level import 主路径：hierarchy + 每 mesh 单独不塌平）✅ 2026-06-02 落地**（OrangeEditor，autonomous goal session "贴近 Lumix 成熟度"）。G2（per-mesh PBR material 划分）/ G3（lights / cameras）/ G4（.fbx）/ G5（re-import override）仍仅登记、未排期。
+- **G1（scene-level import 主路径：hierarchy + 每 mesh 单独不塌平）✅ 2026-06-02 落地**（OrangeEditor，autonomous goal session "贴近 Lumix 成熟度"）。
+- **G3 lights（KHR_lights_punctual → DirectionalLight / PointLight / SpotLight）✅ 2026-06-02 同 session 落地**（方向沿 glTF -Z 转引擎 -Y；intensity 单位未映射，忠实透传待手调）。**剩**：G2（per-mesh PBR material 划分，需 MaterialInstance 构造）/ G3 cameras / G3 intensity 单位映射 / G4（.fbx）/ G5（re-import override）仍未排期。
 - **优先级**：P2（预防性登记，玩法验证完成后升格）。**触发升格条件**：首款 Ori-like 玩法 spike 闭环 + 首游进入 visual polish 阶段、用户尝试在 Blender 摆完整关卡时（按用户在 umbrella session 表达的工作流意图，这是个**可预期**而非偶发的需求）。在那之前用 G1 子集（手工组装内置 cube / plane + GUI 摆位）已够灰盒
 - **归属候选**：OrangeEditor v1.2 范畴（与 PBR material 解析 G2 同 milestone，与 ADR-008 "PBR material 延 v1.2" 对齐）；G4 .fbx 可继续延后到 importer family 完整覆盖时再做；G5 re-import override 单独 minor milestone
 
@@ -2408,6 +2409,18 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 - **验收**：新增 `tests/editor/GltfSceneImportTest.cpp`（自包含 3-node 层级 fixture `RootGroup → {ChildA, ChildB}` + 2 mesh，base64 data: URI 无外部依赖）—— 断言 import 产出 `.scene.json` + 2 个独立 `.mesh`（不塌平）+ `Scene::Load` round-trip 回 World 验实体数 3 / 父子关系 / transform 摆位 / 两 child 指向**各自独立** mesh handle。`gltf_scene_import_test` 编入 `tests/CMakeLists.txt`（链接同 headless_mesh_import_test 模式）。**ctest 75/75**（新增 1，零回归）；`check_invariants` All OK（7 grandfathered）；drift none。CLI exe 端到端 dogfood（临时多 node .gltf → `import-scene` → exit 0 + scene.json 结构正确）已过。
 - **待 dogfood**（headless 无 viewport 渲染）：真实 Blender 多 prop 场景导入后在 viewport 的视觉摆位 / 层级正确性，见 `docs/dogfood-checklist.md`。
 - **关键改动文件**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}`（新增）/ `tools/OrangeEditor/main.cpp`（import-scene CLI）/ `tools/OrangeEditor/CMakeLists.txt`（源列表）/ `tests/editor/GltfSceneImportTest.cpp`（新增）/ `tests/CMakeLists.txt`（test target）
+
+### G3 lights 落地记录（KHR_lights_punctual → 引擎光源，2026-06-02 同 session）
+
+scene import 顺势消费 glTF 灯光（Lumix / Unity / Godot 的 scene import 都带灯光）：
+
+- **映射**：cgltf `node->light`（KHR_lights_punctual，cgltf 默认解析）→ `AddGltfLight`：`directional` → `DirectionalLight`、`point` → `PointLight`（range==0 退默认 10m）、`spot` → `SpotLight`（range 退默认 15m + inner/outer cone 直接映射）。color 直接映射。
+- **方向坑（已处理）**：glTF 灯光沿 node 本地 **-Z** 照射；引擎 `ComputeDirectionalLightWorldDir/ComputeSpotLightWorldDir = rotation*(0,-1,0)`（本地 **-Y**，且不累积 hierarchy）。故对 directional/spot：算 `worldLightDir = bakedWorldRotation*(0,0,-1)`，再 `MakeDirectionalLightRotationFromDir(worldLightDir)` 编码进 entity rotation（point 无方向，保留 node 姿态 + world 位置）。
+- **intensity 单位缺口（G3 剩余）**：glTF directional 用 lux、point/spot 用 candela，引擎 intensity 是无单位乘子。**忠实透传 glTF 值，不做归一化**（无 viewport 无法验证缩放合理性，瞎缩放比诚实透传更糟）。导入后可能偏亮/偏暗，需在 Inspector 手调——属 G3 剩余的单位映射子缺口（撞上即按真实 Blender 导出标定一个经验缩放）。
+- **空场景放宽**：`writtenMeshes==0` 不再致命（纯灯光 / 纯空 group 场景可导入），改用 `entityCount==0` 兜底。
+- **验收**：`GltfSceneImportTest` fixture 加 2 灯光 node（Sun directional / Bulb point）—— 断言光源 component 存在 + color/intensity/range 透传 + **方向编码**（无 rotation 的 directional → world 光向 `(0,0,-1)`）+ point world 位置 `(3,3,3)`。ctest 75/75；invariant + drift 全绿。
+- **待 dogfood**：真实 Blender 场景灯光导入后 viewport 的方向 / 颜色对不对 + intensity 是否需要缩放（见 dogfood item 30）。
+- **改动文件**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}`（AddGltfLight / 方向编码 / 空判放宽）/ `tests/editor/GltfSceneImportTest.cpp`（灯光 fixture + 断言）
 - **关联**：
   - [[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（前置 ✅；本条在 scene 维度补完，单 mesh 维度它已覆盖）
   - [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]]（G2 前置——material binding + tangent 基础设施）

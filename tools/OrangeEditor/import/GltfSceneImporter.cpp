@@ -7,6 +7,7 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
+#include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
@@ -47,7 +48,10 @@ using ::Orange::Engine::Asset::VertexNormal3;
 using ::Orange::Engine::Asset::VertexPosition3;
 using ::Orange::Engine::Asset::VertexTangent4;
 using ::Orange::Engine::Asset::VertexUV2;
+using ::Orange::Engine::Render::DirectionalLight;
+using ::Orange::Engine::Render::PointLight;
 using ::Orange::Engine::Render::RenderableComponent;
+using ::Orange::Engine::Render::SpotLight;
 using ::Orange::Engine::Scene::HierarchyComponent;
 using ::Orange::Engine::Scene::NameComponent;
 using ::Orange::Engine::Scene::TransformComponent;
@@ -266,6 +270,62 @@ void NodeWorldTransform(const cgltf_node& node, glm::vec3& outPos, glm::quat& ou
     glm::decompose(m, outScale, outRot, outPos, skew, perspective);
 }
 
+// 该光是否需要方向（directional / spot）—— 决定 ProcessNode 是否把 world 光向
+// 编码进 entity rotation（point 光无方向，rotation 保留 node 自身姿态）。
+bool LightNeedsDirection(const cgltf_light* light)
+{
+    return light != nullptr &&
+           (light->type == cgltf_light_type_directional ||
+            light->type == cgltf_light_type_spot);
+}
+
+// KHR_lights_punctual → 引擎光源 component。color / range / cone 直接映射；
+// **intensity 单位说明**：glTF directional 用 lux、point/spot 用 candela，引擎
+// intensity 是无单位乘子 —— 此处忠实透传 glTF 值，**不做归一化**（无 viewport
+// 无法验证缩放是否合理，瞎缩放比诚实透传更糟）。导入后可能偏亮/偏暗，需在
+// Inspector 按视觉手调，属 G3 已知单位映射缺口（见 dogfood / gap 文档）。
+// 方向（directional/spot）已由调用方编码进 entity rotation，本函数只填 component
+// 的 color/intensity/range/cone 等"非几何"字段。
+void AddGltfLight(World& world, Entity e, const cgltf_light& light)
+{
+    const glm::vec3 color(light.color[0], light.color[1], light.color[2]);
+    switch (light.type)
+    {
+        case cgltf_light_type_directional:
+        {
+            DirectionalLight d;
+            d.color     = color;
+            d.intensity = light.intensity;
+            world.AddComponent<DirectionalLight>(e, d);
+            break;
+        }
+        case cgltf_light_type_point:
+        {
+            PointLight p;
+            p.color     = color;
+            p.intensity = light.intensity;
+            // glTF range == 0 表示"无限 / 未指定"——退回引擎默认。
+            p.range     = (light.range > 0.0f) ? light.range : 10.0f;
+            world.AddComponent<PointLight>(e, p);
+            break;
+        }
+        case cgltf_light_type_spot:
+        {
+            SpotLight s;
+            s.color          = color;
+            s.intensity      = light.intensity;
+            s.range          = (light.range > 0.0f) ? light.range : 15.0f;
+            s.innerConeAngle = light.spot_inner_cone_angle;
+            s.outerConeAngle = light.spot_outer_cone_angle;
+            world.AddComponent<SpotLight>(e, s);
+            break;
+        }
+        default:
+            ORANGE_LOG_WARN("GltfSceneImporter: 未知 glTF light 类型，跳过");
+            break;
+    }
+}
+
 // 递归把 node 子树建进 World，返回本 node 对应的 Entity。本 node 的 parent /
 // 兄弟链由调用方填（调用方知道兄弟顺序）；本函数负责 firstChild + 各子节点的
 // parent / 兄弟链 + 子树递归。
@@ -289,7 +349,22 @@ Entity ProcessNode(World& world, const cgltf_node& node,
     glm::vec3 pos{}, scl{};
     glm::quat rot{};
     NodeWorldTransform(node, pos, rot, scl);
-    world.AddComponent<TransformComponent>(e, TransformComponent{pos, rot, scl});
+
+    // 光源（directional/spot）方向沿 glTF 本地 -Z；引擎 ComputeXxxWorldDir =
+    // rotation*(0,-1,0)（本地 -Y，且不累积 hierarchy）。把 world 光向编码进
+    // entity rotation，保证引擎读出正确世界方向。point 光无方向，保留 node 姿态。
+    glm::quat finalRot = rot;
+    if (LightNeedsDirection(node.light))
+    {
+        const glm::vec3 worldLightDir = glm::normalize(rot * glm::vec3(0.0f, 0.0f, -1.0f));
+        finalRot = ::Orange::Engine::Render::MakeDirectionalLightRotationFromDir(worldLightDir);
+    }
+    world.AddComponent<TransformComponent>(e, TransformComponent{pos, finalRot, scl});
+
+    if (node.light != nullptr)
+    {
+        AddGltfLight(world, e, *node.light);
+    }
 
     if (node.mesh != nullptr)
     {
@@ -458,13 +533,13 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         }
     }
 
+    // writtenMeshes == 0 不再致命 —— 纯灯光 / 纯空 group 场景仍可导入（产出
+    // 只含 light / group entity 的 scene）。真正"无内容"由下方 entityCount == 0
+    // 兜底。
     if (writtenMeshes == 0)
     {
-        result.status  = ImportStatus::SourceReadFailed;
-        result.message = "glTF scene has no triangulated mesh geometry";
-        ORANGE_LOG_ERROR("GltfSceneImporter: '{}': {}", srcPath, result.message);
-        cgltf_free(data);
-        return result;
+        ORANGE_LOG_WARN("GltfSceneImporter: '{}' 无三角 mesh 几何（仅灯光 / 空 node？）",
+                        srcPath);
     }
 
     // 选 scene：优先 data->scene；否则 scenes[0]；都没有则退回全部 nodes 当根。
@@ -502,6 +577,15 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         {
             h->sortIndex = static_cast<int>(ri);
         }
+    }
+
+    if (entityCount == 0)
+    {
+        result.status  = ImportStatus::SourceReadFailed;
+        result.message = "glTF scene has no importable nodes";
+        ORANGE_LOG_ERROR("GltfSceneImporter: '{}': {}", srcPath, result.message);
+        cgltf_free(data);
+        return result;
     }
 
     cgltf_free(data);  // World 已持有几何 handle，cgltf 结构不再需要
