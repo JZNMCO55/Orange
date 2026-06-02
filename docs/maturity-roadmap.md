@@ -42,7 +42,7 @@
 
 - **现状/缺口**：`RenderScene::Collect` 对每个 entity 直接 `ComposeWorldMatrix(自身 local Transform)`，**不沿 HierarchyComponent 累积父变换**——parenting 对渲染位置无效（`GAP-2026-06-02-hierarchy-transform-not-propagated`）。与 Unity `localToWorld` / Godot `global_transform` / Lumix universe transform 传播相悖。
 - **里程碑**：
-  - **A1.0 ADR**：world matrix 计算策略选型——(a) 每帧 `TransformSystem` 自顶向下 DFS 重算并缓存 world matrix；(b) dirty-flag 传播（只重算被动子树）；(c) `Collect` 内即时沿 parent 链累乘 + memoize。权衡见 Wiki transform/scene-graph 页。
+  - **A1.0 ADR ✅**（2026-06-02 落地，**ADR-016**）：world matrix 计算策略选型 → **选方案 A：每帧 `TransformSystem` 自顶向下 DFS 重算并缓存 world matrix**（非 dirty-flag，避免隐蔽派生状态 bug；2.5D 中等规模全量重算成本可忽略）。dirty-flag 留未来 profiling 拉动。详见 `../Orange-Wiki/case-studies/orange-engine/decisions/ADR-016-transform-hierarchy-propagation.md`。
   - **A1.1 引擎核心**：drawable / light / physics / gizmo 全部改读累积后的 world matrix。
   - **A1.2 内容迁移**：现有 scene / sample / demo 的"local 当 world"假设迁移；**glTF scene import 从 world-bake workaround 改回 local TRS**（依赖 A1.1，去掉本 session 的 flatten）。
   - **A1.3 编辑器 reparent 保持世界位姿**（Unity "keep world position"——drag 到新父时重算 local TRS 使 world 不变）。
@@ -125,9 +125,9 @@
 
 ---
 
-## 待你拍板（影响排期走向的两个决策）
+## 已拍板（2026-06-02 用户决策）
 
-1. **排序：地基优先 vs 直接开重点 epic**——是先把 A1 Transform 传播 + A2 EntityGUID 做扎实（让 B/C 建在干净地基上、避免后期迁移），还是直接开 B1 PIE / B2 动画（地基边做边补）？建议**地基优先**（A1 越晚改迁移越贵，且会回退本 session 的 scene import workaround）。
-2. **B1 PIE 路线：脚本运行时 vs C++ 模块热加载**——这是定 PIE 整条 epic 走向的大 ADR（影响是否引入脚本语言 vmm、是否走 dll 热加载架构）。可先不定、等 A 地基做完、B1 真排到时开专门 ADR。
+1. **排序 = 地基优先**（用户"按你的节奏"→采纳推荐）：先做 **A1 Transform 层级传播**，再 A2 EntityGUID，然后并行开 B1/B2。理由：A1 越晚改迁移越贵 + 会回退本 session scene import 的 world-bake workaround；A1 纯逻辑+headless 可测，最适合自主推进。**→ 下一步 = A1.0 ADR + A1.1 实现。**
+2. **B1 PIE 路线 = 脚本运行时**（Lua / C# / 自家脚本，编辑器嵌运行时热加载）：用户拍板走脚本路线（非 C++ dll 热加载）。具体脚本语言选型（Lua vs C# vs 自家）留 B1.0 ADR 在 PIE 真启动时细化；架构方向已定 = 脚本 VM 嵌入 + 热加载，参 Unity(C#)/Godot(GDScript)。B1.5 落地按此。
 
 > 维护：每个 epic 开工时在对应 `GAP-*` 条目记落地进度；标志变化（✅/规模/跨仓）回灌本表与 `engine-known-gaps.md`。dogfood 残留按 `docs/dogfood-checklist.md` 格式登记。
