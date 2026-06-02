@@ -169,14 +169,24 @@ void UpdateEditorCameraFromInput(EditorHost& host)
         }
     }
 
-    // 滚轮：缩放 radius（推近 / 拉远）；hover 才生效避免误触其它面板滚动条。
-    // 不被 gizmo gate 影响——滚轮缩放与 gizmo drag 不冲突（gizmo 不消费滚轮）。
+    // 滚轮：飞行中（RMB 按住）= 调飞行速度（Unreal/Unity 标准，每格 ±10%
+    // 乘改，clamp [0.1,200]）；非飞行 = 缩放 radius（推近 / 拉远）。hover 才生效
+    // 避免误触其它面板滚动条。不被 gizmo gate 影响——gizmo 不消费滚轮。
     if (hovered && io.MouseWheel != 0.0f)
     {
-        ec.radius -= io.MouseWheel * ec.zoomSensitivity;
-        // 下限从 0.5 降到 0.02 —— 让 Frame Selected 聚焦到 Avocado 这种
-        // 0.04 单位级小模型后，滚轮仍能贴近观察而不被 clamp 弹远。
-        if (ec.radius < 0.02f) ec.radius = 0.02f;
+        if (ec.flying)
+        {
+            ec.flySpeed *= std::pow(1.1f, io.MouseWheel);
+            if (ec.flySpeed < 0.1f)   ec.flySpeed = 0.1f;
+            if (ec.flySpeed > 200.0f) ec.flySpeed = 200.0f;
+        }
+        else
+        {
+            ec.radius -= io.MouseWheel * ec.zoomSensitivity;
+            // 下限从 0.5 降到 0.02 —— 让 Frame Selected 聚焦到 Avocado 这种
+            // 0.04 单位级小模型后，滚轮仍能贴近观察而不被 clamp 弹远。
+            if (ec.radius < 0.02f) ec.radius = 0.02f;
+        }
     }
 }
 
