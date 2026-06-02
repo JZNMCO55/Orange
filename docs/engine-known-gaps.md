@@ -2207,7 +2207,7 @@ OrangeGames 经 `find_package(OrangeEngine CONFIG)` 消费引擎跑首个窗口�
 - **发现方**：OrangeGames Spike 1 scaffold session 讨论 editor ↔ game 工作流时
 - **发现日期**：2026-05-27
 - **一句话定性**：引擎 / 编辑器**无 play-in-editor (PIE)**——OrangeEditor 只**编辑数据**（scene / material / prefab，schema-first），无法在编辑器内**加载并运行游戏玩法代码**。当前游戏代码是独立 `find_package(OrangeEngine)` 消费的 exe（如 `OrangeGames/prototypes/spike-01-blob`），与编辑器是两个进程、互不加载；引擎既无**脚本运行时**也无**游戏模块热加载**（roadmap 已把 `Hot reload / C# 脚本` 列为 v1.x 长尾、未开工）。所以"在编辑器里摆好关卡 → 点 Play 立刻在视口试玩"这条迭代闭环不存在。
-- **状态**：**仅登记，未实现**。用户 2026-05-27 拍板：**属大型架构能力，等关卡 / prefab 编辑工作流实际成熟、手感 spike 验证完后，由 editor 侧独立 session（很可能多个）推进**，现在不排期。
+- **状态**：**仅登记，未实现**。~~用户 2026-05-27 拍板现在不排期~~ → **2026-06-02 用户改判：纳入排期，列为重点 epic**（见 `docs/maturity-roadmap.md` **B1**）。属大型 XL epic，先决 ADR = 玩法逻辑形态（脚本运行时 vs C++ 模块热加载），前置 = workspace 项目模型 + A2 EntityGUID（world clone）。建议 A 地基（A1 transform 传播 + A2 EntityGUID）做完后开。
 
 ### 触发场景
 
@@ -3241,6 +3241,6 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - **G2 · 编辑器 reparent 保持世界位姿**：在编辑器把 B drag 到 A 下时，重算 B 的 local TRS 使其 world 不变（Unity "keep world position" reparent）。依赖 G1。
   - **G3 ·（可选）dirty 传播优化**：只重算被移动子树的 world（avoid 每帧全量 DFS）。profiling 拉动。
 - **期望验收**：把 B parent 到 A（A 在 (5,0,0)）→ B 跟着出现在 A 附近；移动 / 旋转 A → B 在 viewport 实时跟随（保持相对位姿）；嵌套多层同样正确累乘。
-- **状态**：**仅登记，未实现 / 未排期**。**优先级**：P2（成熟度空白，可预期升格）。**触发升格条件**：① 用户在编辑器手动搭父子层级并期望联动时；② glTF scene import 进入"导入后在引擎里继续编辑层级"工作流（G5 re-import override）时；③ prefab 嵌套 / 复杂实例化需要子件世界摆位联动时。在那之前 G1 scene import 的 world-bake workaround + 手工摆位已够灰盒。
+- **状态**：~~仅登记，未排期~~ → **2026-06-02 纳入排期，列为地基首选**（见 `docs/maturity-roadmap.md` **A1**，建议先行——越晚改迁移越贵，且 A1 落地后要回退本 session glTF scene import 的 world-bake workaround 改回 local TRS）。先决 ADR = world matrix 计算策略（每帧 DFS 重算 / dirty-flag 传播 / Collect 内即时累乘 + memoize）。**优先级**：地基 P1。原触发条件（手动父子联动 / re-import override / prefab 嵌套世界摆位）均已被排期覆盖。
 - **归属**：引擎核心（Scene / Render 交界的 transform 系统），非编辑器侧；属较大改动（涉及 drawable 收集 / 光源 / 物理 / gizmo 全部改读 world matrix），建议独立 ADR + session。
 - **关联**：[[GAP-2026-05-28-gltf-scene-level-import-not-flattened]]（本 gap 是其子节点世界摆位正确性的引擎前置，G1 已用 world-bake workaround 绕过）；[[GAP-2026-05-30-prefab-asset-and-entity-guid]]（prefab 子件世界摆位同受影响）

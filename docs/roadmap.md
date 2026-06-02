@@ -7,6 +7,8 @@
 
 > **关于 Phase 6+ 的实际节奏**：与 Phase 1–5 必须按依赖顺序串行不同，Phase 6+ 可以**乱序、跳跃、并行**。它们更像独立的能力包，而不是流水线。这份路线图给出的是一个建议优先级排序，而不是必须遵守的执行顺序。
 
+> **🎯 成熟度排期（2026-06-02）**：与 Unity/Unreal/Godot/Lumix 的结构性差距（Transform 层级传播 / Play-in-Editor / 动画时序编辑 / Prefab override / 资产格式广度 / Shader 热重载）的依赖有序阶段表，见 [`maturity-roadmap.md`](./maturity-roadmap.md)。用户 2026-06-02 拍板：大世界 + 网络多人非目标；3D 物理垫底；其余全排期，重点 = PIE + 动画时序。
+
 ---
 
 ## Phase 6 · 编辑器 v0.1
