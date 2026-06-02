@@ -390,6 +390,8 @@ orange_engine_add_test(animation_clip_test          animation/AnimationClipTest.
 orange_engine_add_test(clip_animator_test           animation/ClipAnimatorTest.cpp)
 # AnimationClip .anim JSON 序列化 round-trip（B2.2，走 Core::Serialization）
 orange_engine_add_test(animation_clip_serialization_test animation/AnimationClipSerializationTest.cpp)
+# AnimationClipLoader：.anim 经 AssetRegistry 加载（B2.2）
+orange_engine_add_test(animation_clip_loader_test   animation/AnimationClipLoaderTest.cpp)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path
