@@ -238,6 +238,25 @@ int main()
         std::fprintf(stdout, "  [PASS] ComputeClipDuration + WrapClipTime（loop/clamp）\n");
     }
 
+    // ===== 10b. ComputeClipDuration 纳入 events（修复：末尾/纯事件 clip 不被截断）=====
+    {
+        // 事件晚于末关键帧：duration 必须覆盖事件，否则 ClipAnimator 据此推导出过小
+        // duration、WrapClipTime clamp 掉、该事件永不触发（bug 回归锁）。
+        Anim::AnimationClip clip;
+        clip.tracks.push_back(MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Linear),
+                                              Key(1.0f, 1.0f, InterpMode::Linear)}));
+        Anim::AddClipEvent(clip, Anim::AnimationEvent{1.5f, "late"});
+        assert(Near(Anim::ComputeClipDuration(clip), 1.5f) &&
+               "ComputeClipDuration 取 max(末 key 1.0, 事件 1.5)=1.5");
+
+        // 纯事件 clip（无 track）：duration = max 事件 time，非 0。
+        Anim::AnimationClip pureEvents;
+        Anim::AddClipEvent(pureEvents, Anim::AnimationEvent{2.0f, "boom"});
+        assert(Near(Anim::ComputeClipDuration(pureEvents), 2.0f) &&
+               "纯事件 clip 内容时长 = max 事件 time = 2（非 0）");
+        std::fprintf(stdout, "  [PASS] ComputeClipDuration 纳入 events（末尾/纯事件不截断）\n");
+    }
+
     // ===== 11. AddKeyframeSorted：编辑器打键维持升序 + 同时间覆盖 =====
     {
         Anim::AnimationTrack tr;

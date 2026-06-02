@@ -357,6 +357,25 @@ int main()
         assert(fired.empty() && "Seek scrub 不触发事件");
 
         std::fprintf(stdout, "  [PASS] 动画事件正向触发 + 倒放/scrub 不触发\n");
+
+        // 15b. 事件晚于末关键帧 + duration 自动推导：事件仍触发（ComputeClipDuration 含 events）。
+        // track 末 key t=1.0、事件 t=1.5 晚于它、**不显式设 duration** → 构造时自动推导。
+        // 修复前推出 1.0 → WrapClipTime clamp 掉 elapsed → 事件被截断永不触发（回归锁）。
+        Anim::AnimationClip lateClip;  // duration 留 0 → 触发自动推导
+        lateClip.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                            {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                             LinKey(1.0f, glm::vec4(10, 0, 0, 0))}));
+        lateClip.events.push_back(Anim::AnimationEvent{1.5f, "late"});
+
+        std::vector<std::string> lateFired;
+        ClipAnimator lateAnim(lateClip, nullptr);  // 构造 duration<=0 → ComputeClipDuration
+        assert(Near(lateAnim.Duration(), 1.5f) &&
+               "duration 自动推导覆盖晚于末 key 的事件 = 1.5");
+        lateAnim.SetEventCallback([&lateFired](std::string_view n) { lateFired.emplace_back(n); });
+        lateAnim.Tick(2.0f);  // 0→1.5(clamp) 越过 1.5 → "late"
+        assert(lateFired.size() == 1 && lateFired[0] == "late" &&
+               "晚于末 key 的事件在自动推导 duration 下仍触发（修复前被截断不触发）");
+        std::fprintf(stdout, "  [PASS] 事件晚于末 key + 自动 duration：仍触发\n");
     }
 
     // ===== 16. 动画事件 loop 跨界分段触发 =====

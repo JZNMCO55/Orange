@@ -286,6 +286,14 @@ inline float ComputeClipDuration(const AnimationClip& clip) noexcept
     {
         if (!tr.keys.empty()) { maxT = std::max(maxT, tr.keys.back().time); }
     }
+    // 事件也是 clip 的"内容"——末尾事件（或纯事件 clip，无任何 track）晚于末关键帧时，
+    // duration 必须覆盖它：否则 ClipAnimator 在 duration<=0 时据此推导出过小的 duration，
+    // 非 loop 播放被 WrapClipTime clamp、loop 播放被取模，该事件永不被 FireEvents 越过触发。
+    // events 不保证有序（见 AnimationClip::events 注释），故遍历取 max 而非取 back。
+    for (const AnimationEvent& ev : clip.events)
+    {
+        maxT = std::max(maxT, ev.time);
+    }
     return maxT;
 }
 
