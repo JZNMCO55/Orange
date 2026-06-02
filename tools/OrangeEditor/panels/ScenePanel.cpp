@@ -137,6 +137,39 @@ void EditorRenderLayer::DrawScenePanel()
             mHost.settings.snapScaleStep);
     }
 
+    // Gizmo 变换工具按钮（Move / Rotate / Scale + World/Local）—— W/E/R/X 快捷键
+    // 的可点 + 可发现入口，对齐 Unity 左上变换工具栏。激活态高亮。
+    ImGui::SameLine();
+    {
+        using GMode  = EditorGizmoState::Mode;
+        using GSpace = EditorGizmoState::Space;
+        auto modeButton = [&](const char* label, GMode m, const char* tip) {
+            const bool active = (mHost.gizmo.mode == m);
+            if (active) {
+                ImGui::PushStyleColor(
+                    ImGuiCol_Button,
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            }
+            if (ImGui::SmallButton(label)) { mHost.gizmo.mode = m; }
+            if (active) { ImGui::PopStyleColor(); }
+            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", tip); }
+            ImGui::SameLine();
+        };
+        modeButton("Move",   GMode::Translate, "平移 gizmo（快捷键 W）");
+        modeButton("Rotate", GMode::Rotate,    "旋转 gizmo（快捷键 E）");
+        modeButton("Scale",  GMode::Scale,     "缩放 gizmo（快捷键 R）");
+        const char* spaceLabel =
+            (mHost.gizmo.space == GSpace::Local) ? "Local" : "World";
+        if (ImGui::SmallButton(spaceLabel)) {
+            mHost.gizmo.space = (mHost.gizmo.space == GSpace::Local)
+                ? GSpace::World : GSpace::Local;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Gizmo 参考系 World ⇄ Local 切换（快捷键 X）\n"
+                              "作用 translate / rotate 轴向；scale 始终 local");
+        }
+    }
+
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
