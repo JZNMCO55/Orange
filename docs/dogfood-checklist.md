@@ -396,7 +396,7 @@
     build/bin/Debug/OrangeEditor.exe import-scene scripts/scene_hierarchy_lights.glb
     # 然后 GUI File→Open assets/scenes/scene_hierarchy_lights.scene.json
     ```
-    已端到端验证（importer 侧）：5 entity + PropGroup→{CrateProp,BarrelProp} 层级 + DirectionalLight/PointLight + 各独立 .mesh + Z-up→Y-up 正确。**剩 viewport 视觉**（层级摆位 / 灯光方向颜色 / 亮度）待人工 dogfood。
+    **已用 HEAD 二进制端到端验证**（CLI 路径）：import 日志 `entities=5 meshes=2 lights=2`；scene.json = 5 entity + PropGroup→{CrateProp,BarrelProp} 层级 + DirectionalLight/PointLight + 各独立 .mesh + Z-up→Y-up 正确；**intensity ÷683 实测落引擎尺度**（SunLight=3.0 / LampLight=7.96，非 raw 2049/5435）；二次导入 hash-skip 生效。**剩待人工 dogfood**：① **GUI File→Import glTF Scene... 菜单运行时**（我无显示无法验）；② **viewport 视觉**（层级摆位 / 灯光方向颜色 / 整体亮度是否合适）。
   - **transform 是 world-baked**：因引擎渲染不累积 hierarchy 父变换（见 `GAP-2026-06-02-hierarchy-transform-not-propagated`），导入时把每个 node 的 world 变换 flatten 进各自 TransformComponent。**所以摆位视觉是对的**（每个 prop 在 DCC 世界位置），但**导入后在编辑器移动父节点不会带动子节点**（沿用引擎现有限制，非本导入的 bug）。dogfood 看"初始摆位对不对"即可，别期望父子联动。
 - **推荐 fixture**：在 Blender 摆 3~5 个 prop（各自不同 transform，组织成 1~2 层父子，比如一个 Empty 父节点下挂几个 mesh），导出 `.glb`（**勾选 +Y up，glTF 默认**）。或现成带 node 层级的多 mesh glTF 资产（如 KHR sample 里的 `BoxAnimated` / 任意场景型 .glb）。
 - **若发现问题**：摆位错位（可能是 has_matrix 分解 / 坐标轴问题）/ 层级反了 / mesh 被错误合并 → 在 `docs/engine-known-gaps.md` 登记，link 回 GAP-2026-05-28。
