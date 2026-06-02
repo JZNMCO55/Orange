@@ -304,6 +304,36 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
             mHost.cmdStack.Redo();
             ValidateEntityHandles();  // 清除可能被 Redo 恢复/销毁的实体句柄
         }
+
+        // Ctrl+S / Ctrl+Shift+S / Ctrl+N / Ctrl+O 文件操作快捷键。菜单 label
+        // 早已宣传这些 chord，此前却只是显示文本未接线（DrawMainMenuBar 注释
+        // 自承"留给后续微调"）。在此补上：设与对应菜单项完全相同的 pending op，
+        // 真正的 dialog + Save/Load 仍走帧末 ApplyPendingSceneOp（节奏一致）+
+        // dirty 时的未保存确认 popup 一并复用。IsKeyChordPressed 精确匹配 mods
+        // （Ctrl+S 与 Ctrl+Shift+S 互斥，同 Z/Y），F2/Del 无 Ctrl 不冲突。
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
+            mHost.scene.pendingSceneOp = SceneOp::SaveAs;
+        }
+        else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+            // dirty 才存（对齐菜单 Save 的 canQuickSave 灰禁）；空路径时 Save
+            // 分支会自动转 SaveAs。
+            if (mHost.scene.dirty) { mHost.scene.pendingSceneOp = SceneOp::Save; }
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_N)) {
+            if (mHost.scene.dirty || HasUnsavedMaterial()) {
+                mHost.scene.pendingCloseAction = PendingCloseAction::NewScene;
+            } else {
+                mHost.scene.pendingSceneOp = SceneOp::New;
+            }
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
+            mPendingOpenScenePath.clear();  // 走文件对话框（清 recent 残留）
+            if (mHost.scene.dirty || HasUnsavedMaterial()) {
+                mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
+            } else {
+                mHost.scene.pendingSceneOp = SceneOp::Open;
+            }
+        }
     }
 
     // 顶部固定 UI 的渲染顺序（v0.6.5 c0 起）：
