@@ -96,7 +96,7 @@
     - **`.anim` 接 AssetRegistry ✅**（`AnimationClipLoader : IAssetLoader<AnimationClip>`，animation 模块；AnimationClip 直接当 asset 无 wrapper）：`AssetRegistry::Load<AnimationClip>(path)` → loader → `LoadAnimationClip`。`animation_clip_loader_test` 3 例（注册/Load/Get + dedup + 缺文件 Err）。
     - **剩**：timeline/dopesheet/曲线 UI（B2.3/B2.4）+ AnimatorComponent Add-Component/Inspector 引用 `.anim` asset + 创作 clip（B2.6）——纯编辑器 GUI 层，需 dogfood。
   - **B2.2 GPU skinning**：骨骼蒙皮上 GPU（**跨仓 OrangeRender**——bone matrix palette + vertex skinning shader；当前骨骼动画在 viewport 看不到形变）。**按 ADR-009 三段式**：OrangeRender session 落地 → umbrella bump → 引擎消费。
-  - **B2.3 Timeline / dopesheet UI**（编辑器层 ImGui）——轨道 + 关键帧拖动 + scrub。
+  - **B2.3 Timeline / dopesheet UI**（编辑器层 ImGui）——轨道 + 关键帧拖动 + scrub。**精确 spec 已出**：`docs/b2.3-timeline-dopesheet-spec.md`（接入点 `DrawAnimationPanel` 空壳 EditorRenderLayer.cpp:2966 + 数据原语↔交互映射表〔scrub→Seek/打键→UpsertKeyframe/拖 key→MoveKeyframeTime/...〕全是已落地原语的可视化壳 + 3 设计点〔clip 可变访问走 copy-SetClip 命令栈 / 编辑期单 animator tick 预览 / .anim 写回〕 + 实施顺序 + dogfood）。数据层零缺口，纯 UI 壳。
   - **B2.4 曲线编辑器**（curve editor，缓动/Bezier handle）。
   - **B2.5 状态机图编辑器 ⚠️ 数据底座已就绪**：AnimationStateMachine **已有数据驱动 `.anim_fsm`**（`ConditionExpr{param,op,threshold}` 可序列化，ADR-005 v0.7）+ `AnimFsmAssetInspectorPlugin` 列表式编辑——**只缺节点图可视化 UI**（状态=节点/transition=边），不重做数据层。
   - **B2.6 AnimatorComponent Add-Component + clip 引用 + channel 可视化创作**（当前 channel 只能 C++ lambda；接 schema 注册 + UI 选 target/channel）。**精确 spec 已出**：`docs/b2.6-animator-clip-authoring-spec.md`（基于真实 schema 代码：AnimatorComponent "clip" backend 可 Addable〔Renderable c10 自定义 add 路径〕+ `AssetKind::AnimationClip` + FieldAssetRef 拖 .anim + ClipAnimator 记来源路径 + Inspector 播放控制/编辑期预览 tick；改点 file:line + 零回归 + dogfood 计划 + 实施顺序）。下个编辑器 session 照此执行。
