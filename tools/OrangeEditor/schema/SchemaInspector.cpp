@@ -65,9 +65,13 @@ namespace
 // 色带覆盖（折叠箭头 ▶ 通常在色带右侧 framePadding 处，不受影响）。
 bool ComponentHeaderLocal(const char* label, bool* outRemove,
                           bool removable, const ImVec4& bandColor,
-                          bool defaultOpen = true)
+                          bool defaultOpen = true,
+                          bool* outCopy = nullptr, bool* outPaste = nullptr,
+                          bool canPaste = false)
 {
     if (outRemove != nullptr) { *outRemove = false; }
+    if (outCopy   != nullptr) { *outCopy   = false; }
+    if (outPaste  != nullptr) { *outPaste  = false; }
     int flags = ImGuiTreeNodeFlags_AllowOverlap;
     if (defaultOpen) { flags |= ImGuiTreeNodeFlags_DefaultOpen; }
     const bool open = ImGui::CollapsingHeader(label, flags);
@@ -87,9 +91,26 @@ bool ComponentHeaderLocal(const char* label, bool* outRemove,
             bandU32);
     }
 
-    if (removable && outRemove != nullptr && ImGui::BeginPopupContextItem(label))
+    // 组件头右键菜单：Copy / Paste Values（参 Lumix / Unity）+ Remove。任一
+    // 入口存在即开菜单。Paste 仅在剪贴板同类型（canPaste）时可点。
+    const bool wantMenu = (removable && outRemove != nullptr)
+                       || outCopy != nullptr || outPaste != nullptr;
+    if (wantMenu && ImGui::BeginPopupContextItem(label))
     {
-        if (ImGui::MenuItem("Remove Component")) { *outRemove = true; }
+        if (outCopy != nullptr && ImGui::MenuItem("Copy Values"))
+        {
+            *outCopy = true;
+        }
+        if (outPaste != nullptr
+            && ImGui::MenuItem("Paste Values", nullptr, false, canPaste))
+        {
+            *outPaste = true;
+        }
+        if (removable && outRemove != nullptr)
+        {
+            if (outCopy != nullptr || outPaste != nullptr) { ImGui::Separator(); }
+            if (ImGui::MenuItem("Remove Component")) { *outRemove = true; }
+        }
         ImGui::EndPopup();
     }
     return open;
@@ -1222,6 +1243,12 @@ void DrawComponentSchemaSection(EditorHost&                  host,
     if (component == nullptr) { return; }
 
     bool requestRemove = false;
+    bool requestCopy   = false;
+    bool requestPaste  = false;
+    // Copy/Paste Values：剪贴板有快照且类型与本组件一致才允许 Paste。
+    const bool canPaste = host.componentClipboard.valid
+                       && schema.typeName != nullptr
+                       && host.componentClipboard.typeName == schema.typeName;
     // v0.6.5 c5：色带色按 schema.typeName 查表（"Transform" → 绿、
     // "Renderable" → 蓝、...）；未注册 typeName 走 GetDefault 浅灰 fallback。
     const ImVec4& bandColor =
@@ -1229,7 +1256,45 @@ void DrawComponentSchemaSection(EditorHost&                  host,
     const bool open = ComponentHeaderLocal(
         schema.displayName ? schema.displayName : schema.typeName,
         &requestRemove, /*removable=*/schema.remove != nullptr,
-        bandColor);
+        bandColor, /*defaultOpen=*/true,
+        &requestCopy, &requestPaste, canPaste);
+
+    // Copy Values：快照本组件各 property 值进剪贴板（同 remove-undo 的
+    // CaptureComponentState 机制）+ 记类型名。
+    if (requestCopy)
+    {
+        host.componentClipboard.typeName  =
+            (schema.typeName != nullptr) ? schema.typeName : "";
+        host.componentClipboard.restorers =
+            CaptureComponentState(host, schema, component);
+        host.componentClipboard.valid     = true;
+    }
+    // Paste Values：可 Undo 的整组件值粘贴。快照目标当前值（old）+ 剪贴板
+    // 值（new），命令 Execute 应用 new、Undo 应用 old。restorers 取 component
+    // 指针，命令内经 schema.get + entity 重新解引（防 component 地址迁移 /
+    // 切场景；与 MakeFieldApply 同款 defensive 路径）。
+    if (requestPaste && canPaste)
+    {
+        auto oldState = CaptureComponentState(host, schema, component);
+        auto newState = host.componentClipboard.restorers;  // 复制，剪贴板保留
+        auto*                  pH      = &host;
+        const ComponentSchema* pSchema = &schema;
+        const Orange::Engine::Entity capE = entity;
+        auto applyState =
+            [pH, capE, pSchema](const std::vector<std::function<void(void*)>>& rs)
+        {
+            auto* pW = pH->scene.pWorld.get();
+            if (pW == nullptr || pSchema->get == nullptr) { return; }
+            if (!pW->IsValid(capE)) { return; }
+            void* comp = pSchema->get(*pW, capE);
+            if (comp == nullptr) { return; }
+            for (const auto& r : rs) { if (r) { r(comp); } }
+        };
+        host.cmdStack.Push(std::make_unique<LambdaCommand>(
+            "Paste Component Values",
+            [applyState, newState]() { applyState(newState); },
+            [applyState, oldState]() { applyState(oldState); }));
+    }
 
     if (open)
     {

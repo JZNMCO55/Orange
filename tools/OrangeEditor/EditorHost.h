@@ -55,7 +55,9 @@
 #include <orange/engine/audio/AudioEngine.h>
 #include <orange/engine/scene/ComponentSerializerEntry.h>
 
+#include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 // ThumbnailService 前向声明 —— thumbnails 字段是 unique_ptr，本头只需不完整
@@ -77,6 +79,19 @@ struct EditorHost
     EditorColliderEditState colliderEdit;
     EditorSettings     settings;
     EditorKeybindings  keybindings;
+
+    // Component 值剪贴板（右键组件头 Copy / Paste Values，参 Lumix StudioApp /
+    // Unity "Copy Component / Paste Component Values"）。Copy 把源组件各 property
+    // 值快照成 restorer 闭包（SchemaInspector::CaptureComponentState）+ 记类型名；
+    // Paste 仅当目标组件 schema.typeName 与剪贴板一致时把快照应用到目标（可 Undo）。
+    // entity 子树剪贴板（mEntityClipboard，在 EditorRenderLayer）是另一层级，互不干扰。
+    struct ComponentValueClipboard
+    {
+        std::string                             typeName;   // 源组件类型；Paste 校验
+        std::vector<std::function<void(void*)>> restorers;  // 各 property 值快照
+        bool                                    valid = false;
+    };
+    ComponentValueClipboard componentClipboard;
 
     // 命令栈是编辑器全局单例：所有 mutate 走它产生 / Undo / Redo。
     // 值成员（非 unique_ptr）—— 没有跨 host 共享需求，少一层间接 + 免
