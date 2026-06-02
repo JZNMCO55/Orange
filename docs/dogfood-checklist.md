@@ -168,6 +168,29 @@
   - 多材质模型 drop 行为不变（仍挂 SubMeshMaterials + 各段材质）
 - **背景**：之前单材质模型 drop 后是默认材质（导入的 .material 不自动应用，要手动指派）。对齐 Lumix/Unity 拖模型进场景自动带材质。headless section 7 已验导入侧 .meta 写 subMeshMaterials；**drop 后 viewport 材质视觉待真机确认**。推荐 fixture：KHR Avocado.glb。
 
+### 11. 拖 mesh 到 viewport 空白处创建实体
+
+- **commit**：`59f2401` feat(editor): 拖 mesh 到 viewport 空白处创建实体
+- **怎么触发**：从资产浏览器拖一个 `.mesh`（如 cube.mesh / 导入的模型）到 viewport **没有物体的空白区域**松手
+- **看什么 / 通过判据**：
+  - 在松手处的**地面落点**（射线 ∩ y=0 平面）出现一个新实体，带该 mesh + 材质（单/多材质都按 Task C/10 自动应用），自动选中
+  - 名字 = mesh 文件名（stem）
+  - 朝天空拖（射线不交地面）→ 落到相机前方固定距离，不丢失
+  - 拖到**已有物体上** → 仍是替换该物体的 mesh（原 ApplyMesh 行为，不创建新的）
+  - 拖**非 mesh**（材质 / 音频）到空白 → 无反应（需既有实体承载）
+  - Ctrl+Z 撤销 = 删掉新建的实体
+- **背景**：对齐 Unity / Lumix 拖模型进空场景生成 GameObject。headless 无 GUI 拖放路径，**落点准确性 + 拖放手感 + 自动带材质 viewport 视觉待真机确认**。
+
+### 12. OBJ .mtl 单材质导入
+
+- **commit**：`36f2651` feat(editor): OBJ .mtl 单材质导入 + 修 mtl_basedir 缺尾斜杠
+- **怎么触发**：导入一个带 `.mtl`（单材质）的 `.obj` 模型（Blender/其他 DCC 导出 OBJ 勾选材质，或手写 .obj + .mtl，确保 .mtl 与 .obj 同目录）
+- **看什么 / 通过判据**：
+  - `assets/Models/<stem>/` 下生成 `<stem>.material`（pbr 模板），其 uBaseColor = .mtl 的 Kd、uMRA.y = Ns 推导的 roughness、有 Ke 时含 uEmissive
+  - 把该 `.mesh` 拖到场景（或拖空白处建实体）→ viewport 显示模型自带的 OBJ 材质颜色（橙色/对应 Kd），有 Ke 的发光（配 bloom）
+  - 之前同样的 OBJ 导入后只有几何（默认灰材质）
+- **背景**：之前 OBJ importer 解析 .mtl 但不消费。本次单材质 .mtl → pbr 材质（scalar：Kd/Ns/Ke，贴图 map_Kd 等留后续）。顺手修了 tinyobj mtl_basedir 缺尾斜杠的潜在 bug。headless section 8 已验导入侧；**OBJ 模型 viewport 材质视觉 + 多材质 OBJ（暂只导几何）待 dogfood**。
+
 ---
 
 ## 维护约定
