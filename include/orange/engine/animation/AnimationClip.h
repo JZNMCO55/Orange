@@ -73,13 +73,22 @@ struct AnimationTrack
     std::vector<Keyframe> keys;
 };
 
-// 一个动画 clip：时长 + 是否循环 + 多条 track。
+// 动画事件：在 clip 时间线上某时刻触发的具名通知（gameplay 用，如"攻击判定生成"
+// "脚步声"）。ClipAnimator 正向播放越过该 time 时回调消费者。name 语义由游戏侧解释。
+struct AnimationEvent
+{
+    float       time{0.0f};  // 触发时刻（秒，clip-local）
+    std::string name;        // 事件名（游戏侧 dispatch 键）
+};
+
+// 一个动画 clip：时长 + 是否循环 + 多条 track + 事件。
 struct AnimationClip
 {
     std::string                 name;
     float                       duration{0.0f};
     bool                        loop{false};
     std::vector<AnimationTrack> tracks;
+    std::vector<AnimationEvent> events;  // 按 time 升序（非强制；ClipAnimator 不假设有序）
 };
 
 // ---- 采样（header-only inline，语言无关算法，headless 可测）-------------

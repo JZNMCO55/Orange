@@ -183,6 +183,34 @@ int main()
         std::fprintf(stdout, "  [PASS] 文件 Save / Load round-trip\n");
     }
 
+    // ===== 9. events round-trip（schema minor 1）=====
+    {
+        Anim::AnimationClip clip;
+        clip.name     = "with_events";
+        clip.duration = 2.0f;
+        clip.events.push_back(Anim::AnimationEvent{0.5f, "hit"});
+        clip.events.push_back(Anim::AnimationEvent{1.5f, "recover"});
+
+        auto parsed = Anim::AnimationClipFromJson(Anim::AnimationClipToJson(clip));
+        assert(parsed.IsOk());
+        const auto& got = parsed.Value();
+        assert(got.events.size() == 2);
+        assert(Near(got.events[0].time, 0.5f) && got.events[0].name == "hit");
+        assert(Near(got.events[1].time, 1.5f) && got.events[1].name == "recover");
+        std::fprintf(stdout, "  [PASS] events round-trip\n");
+    }
+
+    // ===== 10. 旧 minor 0 文件（无 events）→ 读为空（向后兼容）=====
+    {
+        const char* oldFile =
+            R"({"schemaVersion":{"namespace":"animation/Clip","major":1,"minor":0},)"
+            R"("name":"legacy","duration":1.0,"loop":false,"tracks":[]})";
+        auto parsed = Anim::AnimationClipFromJson(oldFile);
+        assert(parsed.IsOk() && "minor 0 文件应被 minor 1 reader 接受");
+        assert(parsed.Value().events.empty() && "无 events 字段 → 空");
+        std::fprintf(stdout, "  [PASS] 旧 minor 0 文件向后兼容（events 空）\n");
+    }
+
     std::fprintf(stdout, "AnimationClipSerializationTest: all passed\n");
     return 0;
 }

@@ -106,6 +106,56 @@ float ClipAnimator::Speed() const noexcept
     return mSpeed;
 }
 
+void ClipAnimator::SetEventCallback(EventCallback callback)
+{
+    mEventCallback = std::move(callback);
+}
+
+void ClipAnimator::FireEvents(float oldT, float advance, float newT) const
+{
+    // 仅正向触发（advance>0）；倒放 / scrub / 暂停不触发。
+    if (advance <= 0.0f || mClip.events.empty() || !mEventCallback)
+    {
+        return;
+    }
+
+    // 触发 (lo, hi] 内的事件（半开：playhead 严格越过 event.time）。
+    const auto fireRange = [this](float lo, float hi) {
+        for (const AnimationEvent& e : mClip.events)
+        {
+            if (e.time > lo && e.time <= hi) { mEventCallback(e.name); }
+        }
+    };
+
+    const float dur = mClip.duration;
+
+    if (!mClip.loop || dur <= 0.0f)
+    {
+        // 非 loop：newT 已 clamp 到 [0,dur]，单段。
+        fireRange(oldT, newT);
+        return;
+    }
+
+    // loop：advance>=dur（极大 dt，整圈以上）→ 全部触发一次（避免漏 / 重复多次）。
+    if (advance >= dur)
+    {
+        for (const AnimationEvent& e : mClip.events) { mEventCallback(e.name); }
+        return;
+    }
+
+    const float raw = oldT + advance;  // 未回卷的目标时间
+    if (raw <= dur)
+    {
+        fireRange(oldT, raw);  // 未跨界，单段
+    }
+    else
+    {
+        // 跨一次 loop 边界：(oldT, dur] ∪ (0, newT]（newT = raw - dur）。
+        fireRange(oldT, dur);
+        fireRange(0.0f, newT);
+    }
+}
+
 void ClipAnimator::SetLoop(bool loop) noexcept
 {
     mClip.loop = loop;
@@ -204,7 +254,10 @@ void ClipAnimator::Tick(float dt)
     }
     // WrapClipTime 同时处理 loop（fmod，负值回卷）与非 loop（clamp 到 [0,dur]）。
     // dt<0 或 speed<0 时 elapsed 后退，由 WrapClipTime 兜底，符合 IAnimator "负 dt 后端自决"。
-    mElapsedSeconds = WrapClipTime(mClip, mElapsedSeconds + dt * mSpeed);
+    const float advance = dt * mSpeed;
+    const float oldT    = mElapsedSeconds;
+    mElapsedSeconds     = WrapClipTime(mClip, oldT + advance);
+    FireEvents(oldT, advance, mElapsedSeconds);  // 在 elapsed 更新后用 old/new 判定越过
     ApplyPose();
 }
 

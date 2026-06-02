@@ -30,9 +30,11 @@ namespace Orange::Engine::Animation
 {
 
 // schema 标识（reader 端期望值；major 硬墙、minor 向后兼容）。
+// minor 1（2026-06-02）：新增 events 数组（旧 minor 0 文件无此字段 → 读为空，CanRead
+// 接受 file.minor<=reader.minor）。
 inline constexpr std::string_view kAnimationClipSchemaNamespace = "animation/Clip";
 inline constexpr std::uint16_t    kAnimationClipSchemaMajor     = 1;
-inline constexpr std::uint16_t    kAnimationClipSchemaMinor     = 0;
+inline constexpr std::uint16_t    kAnimationClipSchemaMinor     = 1;
 
 // enum ↔ 字符串（序列化稳定名；同样供编辑器 combo 标签复用）。
 ORANGE_ENGINE_API std::string_view ToString(TrackValueType type) noexcept;

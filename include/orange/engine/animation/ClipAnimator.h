@@ -33,6 +33,7 @@
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/scene/TransformComponent.h>
 
+#include <functional>
 #include <string_view>
 
 namespace Orange::Engine::Animation
@@ -110,6 +111,13 @@ public:
     // 播到几成"）/ timeline 进度条 / 按进度触发事件。loop clip 在每个循环内 [0,1)。
     float Progress() const noexcept;
 
+    // 动画事件回调：正向播放越过 clip.events 里某事件的 time 时调用，参数 = 事件名。
+    // gameplay 用（如"攻击判定生成"在攻击 clip 第 N 秒触发）。设 nullptr 清除。
+    // **仅正向触发**（dt*speed>0）：倒放 / scrub(Seek) / 暂停不触发——与 Unity
+    // AnimationEvent 同款，避免 scrub 误触发 gameplay。loop 跨界分段触发。
+    using EventCallback = std::function<void(std::string_view)>;
+    void SetEventCallback(EventCallback callback);
+
     // 按当前 elapsed 把 clip 采样应用到 target（不推进时间）。target==nullptr 安全
     // no-op。供编辑器 timeline scrubbing / 显式重应用用。
     void ApplyPose() const;
@@ -122,11 +130,17 @@ public:
     std::string_view BackendName() const noexcept override;
 
 private:
+    // 触发 oldT 到 newT（推进量 advance = dt*speed）这次 Tick 越过的事件。仅正向
+    // （advance>0）触发；loop 跨界拆成 (oldT,dur] ∪ (0,newT] 两段；advance>=dur（极大
+    // dt）全部触发一次。半开区间 (lo,hi]：playhead 严格越过 event.time 才触发。
+    void FireEvents(float oldT, float advance, float newT) const;
+
     AnimationClip              mClip;
     Scene::TransformComponent* mpTarget{nullptr};
     float                      mElapsedSeconds{0.0f};
     bool                       mPlaying{true};
     float                      mSpeed{1.0f};
+    EventCallback              mEventCallback;
     std::string                mSourceAssetPath;  // 空 = 内联 clip（见 SourceAssetPath 注释）
 };
 

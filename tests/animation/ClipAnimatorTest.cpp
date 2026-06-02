@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -324,6 +325,58 @@ int main()
         anim.Tick(0.5f);  // 0.5 + 0.5*0.5 = 0.75
         assert(Near(anim.ElapsedSeconds(), 0.75f) && "0.5x 速率：推进 0.25");
         std::fprintf(stdout, "  [PASS] SetSpeed 播放速率（2x/倒放/慢放）\n");
+    }
+
+    // ===== 15. 动画事件：正向越过 time 触发；倒放/scrub 不触发；loop 跨界 =====
+    {
+        Anim::AnimationClip clip;
+        clip.duration = 2.0f;
+        clip.events.push_back(Anim::AnimationEvent{0.5f, "hit"});
+        clip.events.push_back(Anim::AnimationEvent{1.5f, "recover"});
+
+        std::vector<std::string> fired;
+        ClipAnimator anim(clip, nullptr);
+        anim.SetEventCallback([&fired](std::string_view n) { fired.emplace_back(n); });
+
+        anim.Tick(0.6f);  // 0→0.6 越过 0.5 → "hit"
+        assert(fired.size() == 1 && fired[0] == "hit" && "越过 0.5 → hit");
+        anim.Tick(1.0f);  // 0.6→1.6 越过 1.5 → "recover"
+        assert(fired.size() == 2 && fired[1] == "recover" && "越过 1.5 → recover");
+        anim.Tick(1.0f);  // 1.6→2.0(clamp) 无事件
+        assert(fired.size() == 2 && "末段无更多事件");
+
+        // 倒放不触发。
+        anim.SetSpeed(-1.0f);
+        anim.Tick(2.0f);  // 倒回到 0，越过 0.5/1.5 但倒放不 fire
+        assert(fired.size() == 2 && "倒放不触发事件");
+
+        // scrub（Seek）不触发。
+        fired.clear();
+        anim.SetSpeed(1.0f);
+        anim.Seek(1.6f);  // 直接跳过 0.5/1.5，不 fire
+        assert(fired.empty() && "Seek scrub 不触发事件");
+
+        std::fprintf(stdout, "  [PASS] 动画事件正向触发 + 倒放/scrub 不触发\n");
+    }
+
+    // ===== 16. 动画事件 loop 跨界分段触发 =====
+    {
+        Anim::AnimationClip clip;
+        clip.duration = 2.0f;
+        clip.loop     = true;
+        clip.events.push_back(Anim::AnimationEvent{0.3f, "loopStart"});
+        clip.events.push_back(Anim::AnimationEvent{1.8f, "loopEnd"});
+
+        std::vector<std::string> fired;
+        ClipAnimator anim(clip, nullptr);
+        anim.SetEventCallback([&fired](std::string_view n) { fired.emplace_back(n); });
+
+        anim.Seek(1.7f);                 // 落在 loopEnd 前（Seek 不触发）
+        assert(fired.empty());
+        anim.Tick(0.6f);  // 1.7→(2.3 raw, wrap)→0.3：越 1.8（段1 (1.7,2.0]）+ 越 0.3（段2 (0,0.3]）
+        assert(fired.size() == 2 && fired[0] == "loopEnd" && fired[1] == "loopStart" &&
+               "loop 跨界：先 (oldT,dur] 的 loopEnd 再 (0,newT] 的 loopStart");
+        std::fprintf(stdout, "  [PASS] 动画事件 loop 跨界分段触发\n");
     }
 
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");

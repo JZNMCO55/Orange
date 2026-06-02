@@ -61,6 +61,16 @@ void WriteClipToWriter(JsonWriter& writer, const AnimationClip& clip)
             writer.WriteFloatArray(Join(kp, "outTangent"), &key.outTangent.x, 2);
         }
     }
+
+    // events（schema minor 1）。
+    writer.BeginArray("events", clip.events.size());
+    for (std::size_t i = 0; i < clip.events.size(); ++i)
+    {
+        const AnimationEvent& ev = clip.events[i];
+        const std::string     ep = "events/" + std::to_string(i);
+        writer.WriteFloat(Join(ep, "time"), static_cast<double>(ev.time));
+        writer.WriteString(Join(ep, "name"), ev.name);
+    }
 }
 
 // 从已解析的 reader 读出 clip —— FromJson / LoadAnimationClip 共用。
@@ -114,6 +124,18 @@ AnimationClip ParseClipPayload(const JsonReader& reader)
         }
 
         clip.tracks.push_back(std::move(track));
+    }
+
+    // events（schema minor 1；旧 minor 0 文件无此字段 → ArraySize 0 → 空）。
+    const std::size_t eventCount = reader.ArraySize("events");
+    clip.events.reserve(eventCount);
+    for (std::size_t i = 0; i < eventCount; ++i)
+    {
+        const std::string ep = "events/" + std::to_string(i);
+        AnimationEvent    ev;
+        ev.time = static_cast<float>(reader.GetFloat(Join(ep, "time"), 0.0));
+        ev.name = reader.GetString(Join(ep, "name"), "");
+        clip.events.push_back(std::move(ev));
     }
 
     return clip;
