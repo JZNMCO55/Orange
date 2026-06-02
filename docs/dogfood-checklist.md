@@ -189,7 +189,27 @@
   - `assets/Models/<stem>/` 下生成 `<stem>.material`（pbr 模板），其 uBaseColor = .mtl 的 Kd、uMRA.y = Ns 推导的 roughness、有 Ke 时含 uEmissive
   - 把该 `.mesh` 拖到场景（或拖空白处建实体）→ viewport 显示模型自带的 OBJ 材质颜色（橙色/对应 Kd），有 Ke 的发光（配 bloom）
   - 之前同样的 OBJ 导入后只有几何（默认灰材质）
-- **背景**：之前 OBJ importer 解析 .mtl 但不消费。本次单材质 .mtl → pbr 材质（scalar：Kd/Ns/Ke，贴图 map_Kd 等留后续）。顺手修了 tinyobj mtl_basedir 缺尾斜杠的潜在 bug。headless section 8 已验导入侧；**OBJ 模型 viewport 材质视觉 + 多材质 OBJ（暂只导几何）待 dogfood**。
+- **背景**：之前 OBJ importer 解析 .mtl 但不消费。单材质 .mtl → pbr 材质（scalar：Kd/Ns/Ke，贴图 map_Kd 等留后续）。顺手修了 tinyobj mtl_basedir 缺尾斜杠的潜在 bug。
+- **2026-06-02 补**：**多材质 OBJ 也已支持**（`6739df2`，与 gltf 对等）—— usemtl 分组的 OBJ 导入后拆 sub-mesh + 生成多个 .material（slot 0=`<stem>.material` / slot≥1=`<stem>_<matname>.material`），drop 后各段显示各自材质。dogfood 多材质 OBJ：cube 用 Blender/手写分 2+ usemtl 组导出 .obj。
+
+### 13. Asset 浏览器右键 mesh "Add to Scene"
+
+- **commit**：`73e1807` feat(editor): Asset 浏览器右键 mesh "Add to Scene" + Pick-to-mesh 同步 SubMeshMaterials
+- **怎么触发**：资产浏览器里**右键**一个 `.mesh` / `.obj` → `Add to Scene`（不需先选中场景实体）
+- **看什么 / 通过判据**：
+  - 在相机焦点（pivot ≈ 视野中心）处出现一个带该 mesh + 导入材质的新实体并选中（与拖到空白处 item 11 同款落地）
+  - **Pick to Renderable.mesh** 一致性：选中一个实体 → 右键多材质 `.mesh` → "Pick to Renderable.mesh" → 该实体也正确挂上 SubMeshMaterials（各段材质），之前只换 mesh handle 不挂组件
+- **背景**：给"把模型放进场景"一个菜单入口（拖放之外），对齐 Lumix/Unity instantiate。**菜单交互 + Pick 多材质同步 viewport 待真机确认**。
+
+### 14. viewport 工具栏 Snap 开关
+
+- **commit**：`7313ba5` feat(editor): viewport 工具栏 Snap 开关
+- **怎么触发**：viewport 顶部工具栏（Gizmos / Grid / Sky / Debug Draw / Colliders 那排）勾选 **Snap**
+- **看什么 / 通过判据**：
+  - 勾上后用 translate / rotate / scale gizmo 拖动物体 → 按步进对齐（translate 默认步进 / rotate 角度步进 / scale 步进，hover Snap 看 tooltip 显示当前步进值）
+  - 取消勾选 → 连续自由拖动（无吸附）
+  - 步进值在 Settings 面板 Snap 段可调，工具栏开关与 Settings 双向同步（同一个 settings.snapEnabled）
+- **背景**：snap 功能（3 个 gizmo 都已消费 snapEnabled）之前只埋在 Settings，加 viewport 快捷开关提升可发现性。对齐 Unity/Lumix snap toggle。**开关 + 吸附手感待真机确认**。
 
 ---
 
