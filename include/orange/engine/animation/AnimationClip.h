@@ -22,6 +22,7 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -156,6 +157,32 @@ inline bool IsTrackSorted(const AnimationTrack& track) noexcept
         if (track.keys[i].time < track.keys[i - 1].time) { return false; }
     }
     return true;
+}
+
+// 各 track 末 key 时间的最大值——clip 的"内容时长"。供编辑器校验 / 派生
+// AnimationClip::duration（用户可能手设 duration 与 key 不符，本函数给真实下界）。
+// 假设各 track 已升序（末 key 时间最大）；空 track 贡献 0。
+inline float ComputeClipDuration(const AnimationClip& clip) noexcept
+{
+    float maxT = 0.0f;
+    for (const AnimationTrack& tr : clip.tracks)
+    {
+        if (!tr.keys.empty()) { maxT = std::max(maxT, tr.keys.back().time); }
+    }
+    return maxT;
+}
+
+// 把播放 elapsed 时间换算到 clip-local 采样时间：loop 时按 duration 取模
+//（含负值规整到 [0,duration)），非 loop 时 clamp 到 [0,duration]。供 playhead /
+// ClipAnimator 把累计时间喂给 SampleTrack 前调用。duration<=0 直接返 0（退化）。
+inline float WrapClipTime(const AnimationClip& clip, float t) noexcept
+{
+    const float dur = clip.duration;
+    if (dur <= 0.0f) { return 0.0f; }
+    if (!clip.loop)  { return glm::clamp(t, 0.0f, dur); }
+    float wrapped = std::fmod(t, dur);
+    if (wrapped < 0.0f) { wrapped += dur; }
+    return wrapped;
 }
 
 }  // namespace Orange::Engine::Animation

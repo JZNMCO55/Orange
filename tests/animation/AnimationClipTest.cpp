@@ -149,6 +149,26 @@ int main()
         std::fprintf(stdout, "  [PASS] SortTrackKeys/IsTrackSorted：维护升序不变量\n");
     }
 
+    // ===== 10. ComputeClipDuration / WrapClipTime（loop / clamp）=====
+    {
+        Anim::AnimationClip clip;
+        clip.duration = 4.0f;
+        // track A 末 key t=2，track B 末 key t=3 → 内容时长 max = 3。
+        clip.tracks.push_back(MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Linear),
+                                              Key(2.0f, 1.0f, InterpMode::Linear)}));
+        clip.tracks.push_back(MakeFloatTrack({Key(1.0f, 0.0f, InterpMode::Linear),
+                                              Key(3.0f, 1.0f, InterpMode::Linear)}));
+        assert(Near(Anim::ComputeClipDuration(clip), 3.0f) && "内容时长 = max 末 key = 3");
+
+        clip.loop = false;
+        assert(Near(Anim::WrapClipTime(clip, 5.0f), 4.0f) && "非 loop t=5 → clamp 到 duration 4");
+        assert(Near(Anim::WrapClipTime(clip, -1.0f), 0.0f) && "非 loop t=-1 → clamp 0");
+        clip.loop = true;
+        assert(Near(Anim::WrapClipTime(clip, 5.0f), 1.0f) && "loop t=5 → 5 mod 4 = 1");
+        assert(Near(Anim::WrapClipTime(clip, -1.0f), 3.0f) && "loop t=-1 → 负值规整到 3");
+        std::fprintf(stdout, "  [PASS] ComputeClipDuration + WrapClipTime（loop/clamp）\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }
