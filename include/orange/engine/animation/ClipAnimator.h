@@ -90,7 +90,9 @@ public:
     // idle↔walk↔attack 等状态切换的平滑过渡。**真两-clip cross-fade**：出场 clip 在
     // fade 期间按同一 speed 继续推进、逐帧实时采样（如 run cycle 的腿部摆动在淡入 jump
     // 时仍在动），而非冻结某一帧。出场 clip 未驱动的字段回退到过渡起点的冻结基线
-    //（mFadeFromPose），避免无源字段读到被混合结果产生反馈。fadeSeconds<=0 → 瞬切。
+    //（mFadeFromPose），避免无源字段读到被混合结果产生反馈。在上次 fade 未结束时再次
+    // CrossFade，出场源降级为冻结基线（避免单 clip 实时采样覆盖上次混合贡献而 pop）。
+    // fadeSeconds<=0 → 瞬切。
     void CrossFadeTo(AnimationClip newClip, float fadeSeconds);
     // 当前是否在过渡混合中（fade 剩余 > 0）。
     bool IsFading() const noexcept;

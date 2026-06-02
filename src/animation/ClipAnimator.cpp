@@ -171,13 +171,18 @@ void ClipAnimator::CrossFadeTo(AnimationClip newClip, float fadeSeconds)
 {
     // 冻结过渡起点 target 姿势作基线——供出场 clip 未驱动的字段（无源字段若从被混合的
     // target 读会反馈）。无 target → 默认姿势，混合实际无效但不崩。
+    const bool wasFading = IsFading();
     if (mpTarget != nullptr)
     {
         mFadeFromPose = *mpTarget;
     }
     // 捕获出场 clip 与其 playhead：fade 期间它按同一 speed 继续推进、逐帧实时采样（真
     // 两-clip cross-fade，非冻结一帧）。必须在 SetClip 覆写 mClip / mElapsedSeconds 前抓取。
-    mFadeFromClip    = std::move(mClip);
+    // **例外**：本次 CrossFade 发生在上次 fade 未结束时（wasFading），出场源退化为冻结基线
+    //（mFadeFromPose 此刻已是上次的**混合**姿势）——否则用单一出场 clip 的实时采样覆盖混合
+    // 结果会在切换帧丢弃混合中另一 clip 的贡献而产生 pop。常见的"从稳定态切换"仍走真两-clip；
+    // 仅这种 fade-中-再切换优雅降级为冻结淡入（与升级前 MVP 同款、无 pop）。
+    mFadeFromClip    = wasFading ? AnimationClip{} : std::move(mClip);
     mFadeFromElapsed = mElapsedSeconds;
     SetClip(std::move(newClip));  // 替换 clip + 重算 duration
     mElapsedSeconds  = 0.0f;      // 新 clip 从头播

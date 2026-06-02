@@ -486,6 +486,38 @@ int main()
         std::fprintf(stdout, "  [PASS] CrossFadeTo 未驱动字段回退冻结基线（scale=3 不漂移）\n");
     }
 
+    // ===== 21. CrossFadeTo fade-中-再切换：切换帧无 pop（出场源降级冻结基线）=====
+    {
+        Scene::TransformComponent tc;  // x=0
+        ClipAnimator anim(Anim::AnimationClip{}, &tc);
+
+        Anim::AnimationClip clipA;  // position.x 恒 100
+        clipA.duration = 1.0f;
+        clipA.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(100, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(100, 0, 0, 0))}));
+        anim.CrossFadeTo(clipA, 1.0f);
+        anim.Tick(0.5f);  // 从 0 淡入 100 半程 → x=50，仍在 fade
+        assert(Near(tc.position.x, 50.0f) && "第一次 fade 半程 x=50");
+        assert(anim.IsFading());
+
+        // fade 中再切到 clipB（恒 0）。此刻 target=50（混合中含 clipA 50% 贡献）。
+        Anim::AnimationClip clipB;
+        clipB.duration = 1.0f;
+        clipB.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(0, 0, 0, 0))}));
+        anim.CrossFadeTo(clipB, 1.0f);
+        // 切换帧 w=0：应保持 50（出场源降级冻结基线）。**修复前** bug 会用 clipA 实时采样
+        // 覆盖混合结果 → 瞬跳到 clipA 纯值 100（pop）。
+        assert(Near(tc.position.x, 50.0f) &&
+               "fade-中-再切换切换帧无 pop：保持 50（非跳到出场 clip 纯值 100）");
+
+        anim.Tick(0.5f);  // w=0.5：mix(冻结 50, clipB 0, 0.5)=25，平滑
+        assert(Near(tc.position.x, 25.0f) && "再切换半程平滑混合到 25");
+        std::fprintf(stdout, "  [PASS] CrossFadeTo fade-中-再切换无 pop（保持 50→25，非跳 100）\n");
+    }
+
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
     return 0;
 }
