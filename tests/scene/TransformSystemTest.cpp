@@ -165,6 +165,31 @@ int main()
         std::fprintf(stdout, "  [PASS] sibling 独立：两子各自累积互不影响\n");
     }
 
+    // ===== 7. 组合 TRS 穿层级：父旋转+平移作用于子的 local 偏移 =====
+    // 这是所有 consumer（render/picking/光源/reparent）依赖的核心：父的旋转必须
+    // 作用于子的 local 偏移，再叠父平移。父 P 在 (5,0,0) 绕 Y 转 90°；子 C 本地
+    // (1,0,0)。绕 +Y 90° 把 (1,0,0) 转到 (0,0,-1)，再叠父平移 → C 世界 (5,0,-1)。
+    {
+        World ws;
+        Entity tp = ws.CreateEntity();
+        const glm::quat rotY90b = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 1, 0));
+        ws.AddComponent<TransformComponent>(tp, MakeTC({5.0f, 0.0f, 0.0f}, rotY90b));
+        ws.AddComponent<HierarchyComponent>(tp, HierarchyComponent{});
+        Entity tc = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(tc, MakeTC({1.0f, 0.0f, 0.0f}));
+        HierarchyComponent htc;
+        htc.parent = tp;
+        ws.AddComponent<HierarchyComponent>(tc, htc);
+        ws.GetComponent<HierarchyComponent>(tp)->firstChild = tc;
+
+        PropagateWorldTransforms(ws);
+        assert(Near(WorldPos(ws, tc), {5.0f, 0.0f, -1.0f}, 1e-3f) &&
+               "组合 TRS：父旋转 90°(Y) 作用于子 local(1,0,0)=(0,0,-1) 再叠父平移(5,0,0) "
+               "→ 子世界 (5,0,-1)（真矩阵复合，非位置/方向各自相加）");
+        std::fprintf(stdout,
+                     "  [PASS] 组合 TRS 穿层级：父旋转作用于子偏移 + 父平移 → (5,0,-1)\n");
+    }
+
     std::fprintf(stdout, "[TransformSystemTest] all tests passed.\n");
     return 0;
 }
