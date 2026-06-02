@@ -359,6 +359,13 @@
   - 无 TransformComponent 的实体该项灰禁
 - **背景**：导入模型 transform 异常 / 手滑挪偏后一键归位，对齐 Unity 的 Transform → Reset。**重置 + undo + Inspector 刷新待真机确认**。
 
+### 29. Edit 菜单 Duplicate / Delete 入口（低风险）
+
+- **commit**：`fc6d2ff` feat(editor): Edit 菜单加 Duplicate / Delete 入口
+- **怎么触发**：选中实体 → 菜单 **Edit → Duplicate (Ctrl+D) / Delete (Del)**
+- **看什么 / 通过判据**：点 Duplicate 复制选中、Delete 删除选中（与快捷键 / Hierarchy 右键同效）；无选中时灰禁。
+- **背景**：低风险（只是给既有 host 标志加菜单可发现入口）。Edit 菜单之前只有 Undo/Redo。
+
 ---
 
 ## 维护约定
