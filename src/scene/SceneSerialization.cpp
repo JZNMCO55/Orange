@@ -9,8 +9,10 @@
 
 #include "orange/engine/scene/SceneSerialization.h"
 
+#include "orange/engine/animation/AnimationClipSerialization.h"
 #include "orange/engine/animation/AnimatorComponent.h"
 #include "orange/engine/animation/AnimatorRegistry.h"
+#include "orange/engine/animation/ClipAnimator.h"
 #include "orange/engine/animation/IAnimator.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Serialization.h"
@@ -20,6 +22,7 @@
 #include "orange/engine/scene/Entity.h"
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/LayerComponent.h"
+#include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
 
@@ -567,24 +570,56 @@ Result<void, ResultCode> Load(std::string_view path,
             }
 
             Animation::AnimatorComponent ac{};
-            if (options.animatorRegistry != nullptr)
+            if (backendName == "clip")
             {
-                ac.animator = options.animatorRegistry->Create(backendName);
-                if (ac.animator == nullptr)
+                // "clip" backend（B2.2）：从嵌入的 clipJson 直接重建 ClipAnimator，
+                // 绕过 AnimatorRegistry（clip 数据 per-entity，无法走 factory），
+                // 再把 target 接到 entity 自身的 TransformComponent（pass 1 已 attach）。
+                Animation::AnimationClip clip;
+                std::string              clipJson;
+                if (ReadAnimatorClipJson(reader, animPath, clipJson))
                 {
-                    ORANGE_LOG_WARN(
-                        "Scene load: animator backend '{}' not registered with "
-                        "AnimatorRegistry; component will hold a null animator.",
-                        backendName);
+                    auto parsed = Animation::AnimationClipFromJson(clipJson);
+                    if (parsed.IsOk())
+                    {
+                        clip = std::move(parsed.Value());
+                    }
+                    else
+                    {
+                        ORANGE_LOG_WARN(
+                            "Scene load: ClipAnimator clipJson parse failed; "
+                            "rebuilding with empty clip.");
+                    }
                 }
+                auto                    clipAnim = std::make_unique<Animation::ClipAnimator>(std::move(clip));
+                Animation::ClipAnimator* rawClip  = clipAnim.get();
+                ac.animator                       = std::move(clipAnim);
+                world.AddComponent(entity, std::move(ac));
+                // SetTarget 必须在 component attach 之后；target = 本 entity 的
+                // Transform（无则 nullptr，ClipAnimator 安全 no-op）。
+                rawClip->SetTarget(world.GetComponent<TransformComponent>(entity));
             }
             else
             {
-                ORANGE_LOG_WARN(
-                    "Scene load: AnimatorComponent present but no AnimatorRegistry "
-                    "supplied; component will hold a null animator.");
+                if (options.animatorRegistry != nullptr)
+                {
+                    ac.animator = options.animatorRegistry->Create(backendName);
+                    if (ac.animator == nullptr)
+                    {
+                        ORANGE_LOG_WARN(
+                            "Scene load: animator backend '{}' not registered with "
+                            "AnimatorRegistry; component will hold a null animator.",
+                            backendName);
+                    }
+                }
+                else
+                {
+                    ORANGE_LOG_WARN(
+                        "Scene load: AnimatorComponent present but no AnimatorRegistry "
+                        "supplied; component will hold a null animator.");
+                }
+                world.AddComponent(entity, std::move(ac));
             }
-            world.AddComponent(entity, std::move(ac));
         }
 
         // extra BackendDependent 组件——不走内置 RigidBody / Animator 配对逻辑，

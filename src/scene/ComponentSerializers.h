@@ -48,6 +48,15 @@ bool ReadAnimatorBackendName(const JsonReader& reader,
                              std::string_view  componentPath,
                              std::string&      outBackendName);
 
+// "clip" backend 例外（B2.2）：ClipAnimator 的关键帧数据可纯数据化，故除
+// backend 名外额外以"形态 B"嵌入 clip 的 JSON 字符串（见 AnimationClipToJson）。
+// Load 端读出后 AnimationClipFromJson 重建 + SetTarget 指向 entity 自身 Transform，
+// 绕过 AnimatorRegistry（clip 数据 per-entity，不适合 factory 模型）。
+// componentPath 处无 clipJson 字段（非 clip backend / 旧 scene）→ 返回 false。
+bool ReadAnimatorClipJson(const JsonReader& reader,
+                          std::string_view  componentPath,
+                          std::string&      outClipJson);
+
 }  // namespace Orange::Engine::Scene
 
 #endif  // ORANGE_ENGINE_SRC_SCENE_COMPONENT_SERIALIZERS_H

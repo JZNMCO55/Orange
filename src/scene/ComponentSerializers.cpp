@@ -11,7 +11,9 @@
 
 #include "scene/ComponentSerializers.h"
 
+#include "orange/engine/animation/AnimationClipSerialization.h"
 #include "orange/engine/animation/AnimatorComponent.h"
+#include "orange/engine/animation/ClipAnimator.h"
 #include "orange/engine/animation/IAnimator.h"
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/asset/MeshAsset.h"
@@ -1683,6 +1685,16 @@ void WriteAnimator(JsonWriter& writer,
     }
 
     writer.WriteString(Join(componentPath, "backend"), ac->animator->BackendName());
+
+    // "clip" backend 例外（B2.2）：ClipAnimator 的关键帧数据可纯数据化，
+    // 额外以"形态 B"嵌入 clip 的 JSON 字符串（紧凑、单字段）。其它 backend
+    // （procedural / skeletal）仍只持久化名字，由 AnimatorRegistry factory 重建。
+    if (ac->animator->BackendName() == "clip")
+    {
+        const auto* clipAnim = static_cast<const Animation::ClipAnimator*>(ac->animator.get());
+        writer.WriteString(Join(componentPath, "clipJson"),
+                           Animation::AnimationClipToJson(clipAnim->Clip(), -1));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1961,6 +1973,13 @@ bool ReadAnimatorBackendName(const JsonReader& reader,
                              std::string&      outBackendName)
 {
     return reader.ReadString(Join(componentPath, "backend"), outBackendName);
+}
+
+bool ReadAnimatorClipJson(const JsonReader& reader,
+                          std::string_view  componentPath,
+                          std::string&      outClipJson)
+{
+    return reader.ReadString(Join(componentPath, "clipJson"), outClipJson);
 }
 
 const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()

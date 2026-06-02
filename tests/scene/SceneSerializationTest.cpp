@@ -7,8 +7,10 @@
 //   * schemaVersion 缺失 / mismatch → 拒绝读，World 保持原状
 //   * 损坏 JSON → 拒绝读，World 保持原状
 
+#include <orange/engine/animation/AnimationClip.h>
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -25,6 +27,8 @@
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
+#include <glm/vec4.hpp>
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -36,9 +40,15 @@
 using Orange::Engine::Entity;
 using Orange::Engine::ResultCode;
 using Orange::Engine::World;
+using Orange::Engine::Animation::AnimationClip;
+using Orange::Engine::Animation::AnimationTrack;
 using Orange::Engine::Animation::AnimatorComponent;
 using Orange::Engine::Animation::AnimatorRegistry;
+using Orange::Engine::Animation::ClipAnimator;
 using Orange::Engine::Animation::IAnimator;
+using Orange::Engine::Animation::InterpMode;
+using Orange::Engine::Animation::Keyframe;
+using Orange::Engine::Animation::TrackValueType;
 using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::MeshAsset;
 using Orange::Engine::Physics::BodyType;
@@ -821,6 +831,80 @@ void TestAnimatorBackendNameRoundTrip()
     std::fprintf(stdout, "  [PASS] animator backend name round-trip\n");
 }
 
+// "clip" backend 例外（B2.2）：ClipAnimator 的关键帧数据嵌入 scene（形态 B），
+// Load 端不靠 registry 而是从 clipJson 重建 + 把 target 重连到 entity 自身的
+// TransformComponent。验证 clip 数据 round-trip + target 重连后 tick 真写 transform。
+void TestClipAnimatorRoundTrip()
+{
+    const auto path = MakeTempScenePath("clip_animator");
+
+    World  source;
+    Entity e = source.CreateEntity();
+    source.AddComponent(e, TransformComponent{});
+
+    AnimationClip clip;
+    clip.name     = "scene_clip";
+    clip.duration = 1.0f;
+    clip.loop     = false;
+    AnimationTrack track;
+    track.targetName = "position.x";
+    track.valueType  = TrackValueType::Float;
+    Keyframe k0;
+    k0.time  = 0.0f;
+    k0.value = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    Keyframe k1;
+    k1.time  = 1.0f;
+    k1.value = glm::vec4(10.0f, 0.0f, 0.0f, 0.0f);
+    track.keys.push_back(k0);
+    track.keys.push_back(k1);
+    clip.tracks.push_back(track);
+
+    AnimatorComponent ac;
+    ac.animator = std::make_unique<ClipAnimator>(clip, source.GetComponent<TransformComponent>(e));
+    source.AddComponent(e, std::move(ac));
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    // 关键：Load 不提供 animatorRegistry —— clip backend 完全旁路 registry。
+    World loaded;
+    auto  loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto&  reg     = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<AnimatorComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+
+    const auto* loadedAc = loaded.GetComponent<AnimatorComponent>(loadedE);
+    assert(loadedAc != nullptr && loadedAc->animator != nullptr);
+    assert(loadedAc->animator->BackendName() == "clip");
+
+    auto* loadedClip = static_cast<ClipAnimator*>(loadedAc->animator.get());
+    // clip 数据 round-trip。
+    assert(loadedClip->Clip().name == "scene_clip");
+    assert(loadedClip->Clip().tracks.size() == 1);
+    assert(loadedClip->Clip().tracks[0].targetName == "position.x");
+    assert(loadedClip->Clip().tracks[0].keys.size() == 2);
+    assert(FloatEq(loadedClip->Clip().tracks[0].keys[1].value.x, 10.0f));
+
+    // target 已重连到 loaded entity 自身 Transform。
+    const auto* loadedTc = loaded.GetComponent<TransformComponent>(loadedE);
+    assert(loadedTc != nullptr);
+    assert(loadedClip->GetTarget() == loadedTc && "Load 应把 target 接到 self Transform");
+
+    // tick 半程 → position.x 应为 5（证明 target 真接通、写得进去）。
+    loadedClip->Tick(0.5f);
+    assert(FloatEq(loaded.GetComponent<TransformComponent>(loadedE)->position.x, 5.0f));
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] ClipAnimator clip+target round-trip（旁路 registry）\n");
+}
+
 void TestParticleEmitterRoundTrip()
 {
     const auto path = MakeTempScenePath("particle_emitter");
@@ -984,6 +1068,7 @@ int main()
     TestPolygonAndEdgeChainShapesRoundTrip();
     TestAnimatorBackendNameRoundTrip();
     TestAnimatorWithoutRegistryGraceful();
+    TestClipAnimatorRoundTrip();
     TestParticleEmitterRoundTrip();
     TestSaveLoadSaveByteStable();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
