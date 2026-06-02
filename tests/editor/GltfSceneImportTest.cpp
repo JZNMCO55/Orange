@@ -201,6 +201,42 @@ void WriteInstancedMeshGltf(const std::string& path)
         "}\n";
 }
 
+// 第五个 fixture：**无 scenes 数组**的 glTF（spec 允许省略 scene/scenes）。
+// 验证 importer 的 fallback 分支：无 scene 定义时退回"所有 parent-less node 当根"。
+void WriteNoScenesGltf(const std::string& path)
+{
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMA";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写无 scenes .gltf fixture 应成功");
+    // 故意不写 "scene" / "scenes" key。
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"Lone\", \"translation\": [4.0, 0.0, 0.0], \"mesh\": 0}\n"
+        "  ],\n"
+        "  \"meshes\": [\n"
+        "    {\"name\": \"Solo\", \"primitives\": [{\"attributes\": "
+        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+        "\"type\": \"SCALAR\"}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
 // 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
 Entity FindByName(World& world, const std::string& name)
 {
@@ -538,6 +574,28 @@ int main()
         assert(cnt == 2 && "重导后应是 v2 的 2 实体（确认真重导覆盖了 v1）");
         std::fprintf(stdout,
                      "  [PASS] hash-skip 正确性：源改了真重导（5→2 实体），不 over-skip\n");
+    }
+
+    // ===== 第五组：无 scenes 数组 → fallback 取 parent-less node 当根 =====
+    {
+        const std::string nsPath = (srcDir / "no_scenes.gltf").generic_string();
+        WriteNoScenesGltf(nsPath);
+        auto reg = MakeImportRegistry();
+        const auto rn = ImportNS::RunGltfSceneImportToRegistry(nsPath, *reg);
+        assert(rn.status == ImportNS::ImportStatus::Success &&
+               "无 scenes 的 glTF 应走 fallback 成功导入（不崩）");
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg.get();
+        auto lr = SceneNS::Load(rn.destPath, w, opts);
+        assert(lr.IsOk() && "no_scenes scene 应能 Load");
+        const Entity lone = FindByName(w, "Lone");
+        assert(w.IsValid(lone) && "fallback 应把 parent-less node 'Lone' 当根导入");
+        assert(w.GetComponent<::Orange::Engine::Render::RenderableComponent>(lone) != nullptr &&
+               "Lone 应有 Renderable");
+        std::fprintf(stdout,
+                     "  [PASS] 无 scenes 数组：fallback 取 parent-less node 当根\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);
