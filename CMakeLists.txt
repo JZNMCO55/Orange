@@ -139,6 +139,7 @@ add_library(orange_engine STATIC
     src/animation/AnimationStateMachine.cpp
     src/animation/AnimationSystem.cpp
     src/animation/AnimatorRegistry.cpp
+    src/animation/ClipAnimator.cpp
     src/animation/ProceduralAnimator.cpp
 
     # Animation：DragonBones runtime 接入层（Phase 4 / Task 02 + 03）。

@@ -386,6 +386,8 @@ orange_engine_add_test(animator_registry_test       animation/AnimatorRegistryTe
 orange_engine_add_test(procedural_animator_test     animation/ProceduralAnimatorTest.cpp)
 # AnimationClip 数据模型 + 采样（B2.1 地基，纯数据 + header-only 采样）
 orange_engine_add_test(animation_clip_test          animation/AnimationClipTest.cpp)
+# ClipAnimator：AnimationClip → 实体 TransformComponent 的运行时消费（B2.2）
+orange_engine_add_test(clip_animator_test           animation/ClipAnimatorTest.cpp)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path
