@@ -481,6 +481,19 @@
 - **关键确认点**：这是首游"流体史莱姆 = 代码/数据驱动动画"路线里 **关键帧动画**地基；
   Transform 动画的视觉正确性（缓动手感、loop 接缝、与渲染同步）务必真机确认。
 
+### 34. ClipAnimator 运行时特性（事件 / 过渡混合 / 速率）—— **headless 全测，手感待游戏消费时 dogfood**
+
+- **commits**：`4e3afee`（动画事件）/ `0f3a86f`（SetSpeed）/ `aa66fab`（Progress）/ `12a3e5a`（CrossFadeTo）。
+- 已 headless 全测（`clip_animator_test` 17 例 + 序列化），**这层不需要现在专门 dogfood**；
+  **触发点在游戏/demo 真实消费后**（预登记，届时打开）：
+  - ⏳ **动画事件**：boss 攻击 clip 第 N 秒触发"生成判定 / 脚步声"——游戏侧接 `SetEventCallback`
+    后，**事件时刻与视觉帧对齐**（判定不早不晚）、loop clip 每圈触发一次、倒放/scrub 不误触发。
+  - ⏳ **过渡混合 CrossFadeTo**：idle↔walk↔attack 切换时**视觉平滑无 pop**（起点不跳）、
+    fade 时长手感合适、rotation slerp 走最短弧不翻转。
+  - ⏳ **播放速率 SetSpeed**：slow-mo（boss 蓄力）/ 倒放调试视觉正确；速率 0 等价暂停。
+- 这些是**首游 boss 战动作时序**的运行时地基（GAP-2026-06-01 列 boss 攻击为硬需求）；
+  数据/序列化/运行时已就绪，缺的是游戏侧脚本消费（C# PIE 落地后）+ 编辑器创作 UI（B2.3/B2.6 spec）。
+
 ---
 
 ## 维护约定
