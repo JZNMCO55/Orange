@@ -14,6 +14,7 @@
 #include "SchemaInspector.h"
 
 #include "../BuiltinAssets.h"   // EnsureMaterialInstance（Material AssetRef lazy 注册）
+#include "../EditorAssetDropHandler.h"  // SyncSubMeshMaterialsForMesh（mesh AssetRef 设值后同步多材质 slot）
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
 #include "../command/LambdaCommand.h"
@@ -686,9 +687,38 @@ void DrawProperty(EditorHost&                  host,
                 {
                     prop.set(component, &v);
                 }
+                // mesh AssetRef（典型 Renderable.mesh）：设 mesh 后同步多材质 slot
+                // → SubMeshMaterialsComponent，与 viewport / tree drop 的 ApplyMesh
+                // 一致（否则 Inspector 设/拖 mesh 字段挂不上 slot，dogfood 暴露的
+                // 不一致）。entity-level 挂兄弟组件需 World+Entity，schema setter
+                // 仅拿到 component 指针，故在此 host/entity 都在的层做。
+                if (prop.attribs.assetKind == AssetKind::Mesh)
+                {
+                    ::Orange::Editor::SyncSubMeshMaterialsForMesh(host, entity, v);
+                }
             };
             auto makeApply = [&]() -> SetFieldValueCommand<std::string>::ApplyFn
             {
+                // mesh AssetRef：undo/redo 重放时也要"设 mesh + 同步 SubMeshMaterials"
+                // （否则撤销/重做 mesh 后 slot 组件 stale）。setFn 设 mesh handle，
+                // 随后 SyncSubMeshMaterialsForMesh 按当时 mesh 重新派生 slot。
+                if (prop.attribs.assetKind == AssetKind::Mesh && useCtxAccessor)
+                {
+                    return [pH = &host, capE = entity, pSchema = &schema,
+                            setFn = prop.assetRefSet](const std::string& value)
+                    {
+                        if (pH == nullptr || pSchema == nullptr
+                            || pSchema->get == nullptr || setFn == nullptr)
+                        {
+                            return;
+                        }
+                        auto* pW = pH->scene.pWorld.get();
+                        if (pW == nullptr) { return; }
+                        void* comp = pSchema->get(*pW, capE);
+                        if (comp != nullptr) { setFn(comp, pH->assets, &value); }
+                        ::Orange::Editor::SyncSubMeshMaterialsForMesh(*pH, capE, value);
+                    };
+                }
                 if (useCtxAccessor)
                 {
                     return MakeAssetRefFieldApply<std::string>(
