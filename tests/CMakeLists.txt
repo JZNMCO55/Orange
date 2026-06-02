@@ -235,6 +235,41 @@ else ()
 endif ()
 add_test(NAME gltf_embedded_texture_import_test COMMAND gltf_embedded_texture_import_test)
 
+# glTF scene-level 导入（GAP-2026-05-28 G1）—— 锁 "多 node / 多 mesh .gltf 导入后
+# 保留 transform 层级 + 每 mesh 单独 .mesh + 产出可 Scene::Load 的 .scene.json" 这条
+# 链（区别于 headless_mesh_import_test 的整文件塌平合并）。自包含 3-node 层级 fixture，
+# 干净 checkout 也跑。链接方式同上：GltfSceneImporter.cpp + GltfImporter.cpp（提供
+# cgltf IMPLEMENTATION）+ 其余 importer 源 + vendor 单 header，只链 orange_engine。
+add_executable(gltf_scene_import_test
+    editor/GltfSceneImportTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfSceneImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ImportDispatcher.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ObjImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c")
+target_link_libraries(gltf_scene_import_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(gltf_scene_import_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+    "${CMAKE_SOURCE_DIR}/vendor/tinyobjloader"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace"
+    "${CMAKE_SOURCE_DIR}/vendor/cgltf")
+orange_engine_set_compiler_options(gltf_scene_import_test)
+if (MSVC)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "/W0")
+else ()
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        PROPERTIES COMPILE_FLAGS "-w")
+endif ()
+add_test(NAME gltf_scene_import_test COMMAND gltf_scene_import_test)
+
 # CommandStack（tools/OrangeEditor）—— Undo/Redo 栈 + coalesce/group + Undo-label
 # peek。纯 ICommand + std，零 ImGui/GLFW/Vulkan 依赖，故同 editor_hierarchy_test
 # 模式：把 CommandStack.cpp 编进测试 exe + 加 include path（该源不属引擎 lib）。

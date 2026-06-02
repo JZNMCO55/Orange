@@ -77,6 +77,7 @@
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
 #include "import/ImportDispatcher.h"
+#include "import/GltfSceneImporter.h"
 #include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
 #include "plugin/AnimFsmAssetInspectorPlugin.h"
@@ -212,6 +213,41 @@ int RunHeadlessImport(const char* srcPath)
     return ok ? 0 : 1;
 }
 
+// Headless glTF scene-level 导入 CLI（GAP-2026-05-28 G1）。区别于 import-mesh
+// （整文件塌平成单 mesh），本路径保留 glTF transform 层级 + 每 mesh 单独 .mesh，
+// 产出 assets/scenes/<basename>.scene.json（可直接 File→Open / 双击打开）。
+//
+// 用法：OrangeEditor import-scene <path.gltf|.glb>。产物：
+//   assets/Models/<basename>/<basename>_<meshname>.mesh（每 cgltf mesh 一个）
+//   assets/scenes/<basename>.scene.json（node 树 → Entity 层级）
+// G1 不消费 per-mesh material（默认材质）；material / lights 留 G2 / G3。
+int RunHeadlessSceneImport(const char* srcPath)
+{
+    if (srcPath == nullptr || srcPath[0] == '\0')
+    {
+        std::fprintf(stderr, "[OrangeEditor] import-scene: missing source path\n"
+                             "usage: OrangeEditor import-scene <path.gltf|.glb>\n");
+        return 2;
+    }
+
+    auto registry = CreateImportAssetRegistry();
+    if (registry == nullptr)
+    {
+        std::fprintf(stderr, "[OrangeEditor] import-scene: CreateImportAssetRegistry failed\n");
+        return 3;
+    }
+
+    const auto result =
+        Orange::Editor::Import::RunGltfSceneImportToRegistry(srcPath, *registry);
+
+    const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
+    std::fprintf(ok ? stdout : stderr,
+                 "[OrangeEditor] import-scene '%s' -> '%s': %s (status=%d)\n",
+                 srcPath, result.destPath.c_str(), result.message.c_str(),
+                 static_cast<int>(result.status));
+    return ok ? 0 : 1;
+}
+
 // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
 // 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
 //   EditorHost            → EditorHost.h（顶层 hub，聚合 4 sub-context + cmdStack）
@@ -252,6 +288,11 @@ int main(int argc, char** argv)
     // Headless 资产导入分支（GAP-2026-05-27 G1）：在**任何** GLFW / Vulkan /
     // ImGui init 之前判 argv，命中即走纯 CPU 导入路径后直接退出，全程不碰 GUI。
     // 其余情况照常进下面的 GUI 主循环。
+    if (argc >= 2 && argv[1] != nullptr &&
+        std::strcmp(argv[1], "import-scene") == 0)
+    {
+        return RunHeadlessSceneImport(argc >= 3 ? argv[2] : nullptr);
+    }
     if (argc >= 2 && argv[1] != nullptr &&
         (std::strcmp(argv[1], "import-mesh") == 0 ||
          std::strcmp(argv[1], "import") == 0))
