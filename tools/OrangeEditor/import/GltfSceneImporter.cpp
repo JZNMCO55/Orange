@@ -17,6 +17,7 @@
 
 // glm 矩阵分解（has_matrix 的 node）走 gtx 实验扩展；仅本 TU 私有打开。
 #define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 
@@ -268,23 +269,7 @@ void NodeLocalTransform(const cgltf_node& node, glm::vec3& outPos, glm::quat& ou
     glm::decompose(m, outScale, outRot, outPos, skew, perspective);
 }
 
-// 取 node 的 **world** rotation（沿父累积）—— 仅光源方向编码用。引擎的光源
-// 消费者（Pipeline 取光向）目前仍读 entity 自身 local rotation（不累积 hierarchy，
-// A1.1 后续 increment 才切），所以要把 world 光向编码进 entity 的 rotation，光源
-// 才指对世界方向。glTF 灯光通常是 scene-root 直接子（local==world），编码后即正确。
-glm::quat NodeWorldRotation(const cgltf_node& node)
-{
-    float world[16] = {0};
-    cgltf_node_transform_world(&node, world);
-    const glm::mat4 m = glm::make_mat4(world);
-    glm::vec3 scale{}, translation{}, skew{};
-    glm::vec4 perspective{};
-    glm::quat  rotation{};
-    glm::decompose(m, scale, rotation, translation, skew, perspective);
-    return rotation;
-}
-
-// 该光是否需要方向（directional / spot）—— 决定 ProcessNode 是否把 world 光向
+// 该光是否需要方向（directional / spot）—— 决定 ProcessNode 是否把 -Z→-Y 桥接
 // 编码进 entity rotation（point 光无方向，rotation 保留 node 自身姿态）。
 bool LightNeedsDirection(const cgltf_light* light)
 {
@@ -372,17 +357,17 @@ Entity ProcessNode(World& world, const cgltf_node& node,
     glm::quat rot{};
     NodeLocalTransform(node, pos, rot, scl);
 
-    // 光源（directional/spot）方向沿 glTF 本地 -Z；引擎 ComputeXxxWorldDir =
-    // rotation*(0,-1,0)。光源消费者目前读 entity local rotation（未累积 hierarchy），
-    // 故把 **world** 光向（从 node world rotation 算）编码进 entity rotation。
+    // 光源（directional/spot）方向沿 glTF node 本地 -Z；引擎 ComputeXxxWorldDir =
+    // rotation*(0,-1,0)（本地 -Y 为前向）。光源消费者现读 **world** rotation
+    //（A1.1 step 2 已切，沿 hierarchy 累积），故只需把 node **local** rotation 桥接
+    // -Z→-Y（绕 +X 转 90°，把 -Y 映到 -Z）写进 entity local rotation——引擎累积父
+    // 变换后 consumer 得正确世界方向（root 灯 + 非 root〔含旋转父〕灯都对）。这比旧
+    // 的"world 光向直接编码进 local"更对：旧法在非 root 灯上会被父旋转二次应用。
     // mesh node + point 光保留 local rotation（mesh 走 Collect 累积，point 无方向）。
     glm::quat finalRot = rot;
     if (LightNeedsDirection(node.light))
     {
-        const glm::quat worldRot = NodeWorldRotation(node);
-        const glm::vec3 worldLightDir =
-            glm::normalize(worldRot * glm::vec3(0.0f, 0.0f, -1.0f));
-        finalRot = ::Orange::Engine::Render::MakeDirectionalLightRotationFromDir(worldLightDir);
+        finalRot = rot * glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     }
     world.AddComponent<TransformComponent>(e, TransformComponent{pos, finalRot, scl});
 

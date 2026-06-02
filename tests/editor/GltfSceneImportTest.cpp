@@ -27,6 +27,11 @@
 #include <orange/engine/scene/World.h>
 #include <orange/engine/scene/WorldTransformComponent.h>
 
+#include <glm/geometric.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
+
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -236,6 +241,36 @@ void WriteNoScenesGltf(const std::string& path)
         "  ],\n"
         "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
         "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
+// 第六个 fixture：**旋转父下的 directional 灯**（lights-only，无 mesh/buffer）——
+// 验 A1.1 后 importer 的 R-bridging 与"光源消费者读 world rotation"配套。父 RotParent
+// 绕 +Y 转 90°（glTF quat [x,y,z,w]=[0, √½, 0, √½]）→ 子 ChildSun（directional，无自身
+// rotation）。glTF 灯沿 node 本地 -Z，父把 (0,0,-1) 转到世界 (-1,0,0)。importer 只写
+// local rotation（-Z→-Y 桥接），引擎 PropagateWorldTransforms 累积父旋转后，消费者
+// 同款公式算出的世界光向应 = (-1,0,0)。旧的"world 光向直接编码进 local"会在这里被父
+// 旋转二次应用得到错误方向 → 本例锁住修正。
+void WriteRotatedParentLightGltf(const std::string& path)
+{
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写旋转父灯光 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
+        "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
+        "    {\"name\": \"Sun\", \"type\": \"directional\", "
+        "\"color\": [1.0, 1.0, 1.0], \"intensity\": 1.0}\n"
+        "  ]}},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0]}],\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"RotParent\", "
+        "\"rotation\": [0.0, 0.70710678, 0.0, 0.70710678], \"children\": [1]},\n"
+        "    {\"name\": \"ChildSun\", "
+        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
+        "  ]\n"
         "}\n";
 }
 
@@ -629,6 +664,46 @@ int main()
                "Lone 应有 Renderable");
         std::fprintf(stdout,
                      "  [PASS] 无 scenes 数组：fallback 取 parent-less node 当根\n");
+    }
+
+    // ===== 第六组：旋转父下的 directional 灯 —— R-bridging + 消费者读 world 配套 =====
+    // 父绕 Y 90°、子 directional 灯无自身 rotation。glTF 灯本地 -Z 被父转到世界
+    // (-1,0,0)。importer 写 local（-Z→-Y 桥接），引擎累积父旋转后，按消费者同款公式
+    // normalize(world * (0,-1,0,0)) 算世界光向应 ≈ (-1,0,0)。旧 world-dir 编码会得错误
+    // 方向（父旋转二次应用），故本例直接锁住"importer + A1.1 消费者"端到端正确。
+    {
+        const std::string rpPath = (srcDir / "rot_parent_light.gltf").generic_string();
+        WriteRotatedParentLightGltf(rpPath);
+        auto reg = MakeImportRegistry();
+        const auto rp = ImportNS::RunGltfSceneImportToRegistry(rpPath, *reg);
+        assert(rp.status == ImportNS::ImportStatus::Success &&
+               "旋转父灯光 scene 应导入 Success");
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg.get();
+        auto lr = SceneNS::Load(rp.destPath, w, opts);
+        assert(lr.IsOk() && "旋转父灯光 scene 应能 Load");
+
+        const Entity sun = FindByName(w, "ChildSun");
+        assert(w.IsValid(sun) && "ChildSun 实体应存在");
+        assert(w.GetComponent<::Orange::Engine::Render::DirectionalLight>(sun) != nullptr &&
+               "ChildSun 应有 DirectionalLight component");
+
+        ::Orange::Engine::Scene::PropagateWorldTransforms(w);
+        const auto* sunWT =
+            w.GetComponent<::Orange::Engine::Scene::WorldTransformComponent>(sun);
+        assert(sunWT != nullptr && "ChildSun 应有 world transform cache");
+        // 消费者（Pipeline.cpp）同款公式：世界光向 = normalize(world * 本地前向 (0,-1,0,0))。
+        const glm::vec3 worldDir =
+            glm::normalize(glm::vec3(sunWT->world * glm::vec4(0.0f, -1.0f, 0.0f, 0.0f)));
+        assert(std::fabs(worldDir.x - (-1.0f)) < 1e-3f &&
+               std::fabs(worldDir.y) < 1e-3f &&
+               std::fabs(worldDir.z) < 1e-3f &&
+               "父绕 Y 90° 把灯本地 -Z 转到世界 (-1,0,0)：R-bridging + 累积父旋转后世界光向 "
+               "应 = (-1,0,0)（旧 world-dir 编码会被父旋转二次应用得错误方向）");
+        std::fprintf(stdout,
+                     "  [PASS] 旋转父下 directional 灯：R-bridging + 累积父旋转 → 世界光向 (-1,0,0)\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);
