@@ -8,6 +8,7 @@
 #include <orange/engine/render/Camera.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <imgui.h>
 
@@ -71,10 +72,19 @@ void CameraFrustumGizmoPlugin::Draw(
     // ---- view: 从 entity.Transform 推 ----
     // Camera"看向 -Z"是工业惯例（OpenGL / GLTF / Vulkan 同款）。entity
     // rotation 决定 forward / up 方向。
-    const glm::vec3 forward = pTC->rotation * glm::vec3(0.0f, 0.0f, -1.0f);
-    const glm::vec3 up      = pTC->rotation * glm::vec3(0.0f, 1.0f, 0.0f);
-    const glm::vec3 eye     = pTC->position;
-    const glm::mat4 view    = glm::lookAt(eye, eye + forward, up);
+    // eye + forward/up 取累积后 world matrix（ADR-016 / A1.1 step 2）；parented
+    // 相机的 frustum 对齐世界位姿。cache 缺失退回 entity local 兜底。
+    glm::vec3 forward = pTC->rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 up      = pTC->rotation * glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 eye     = pTC->position;
+    if (const auto* wtc =
+            pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity))
+    {
+        forward = glm::normalize(glm::vec3(wtc->world * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+        up      = glm::normalize(glm::vec3(wtc->world * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)));
+        eye     = glm::vec3(wtc->world[3]);
+    }
+    const glm::mat4 view = glm::lookAt(eye, eye + forward, up);
 
     // ---- frustum 8 corners：NDC → world ----
     // Vulkan NDC: x/y ∈ [-1, 1], z = 0 (near) / 1 (far)。
