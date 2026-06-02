@@ -110,6 +110,27 @@ void EditorRenderLayer::DrawEntityTreePanel()
     // 全局快捷键：F2 重命名选中、Del 删除选中。重命名进行中不响应
     // —— 否则 InputText 里按 Del 删字符会同时触发实体删除。
     const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    // Ctrl+A：全选所有用户实体（带 Name）。与下面 per-selection 快捷键不同，
+    // **不要求已有选中**，故单独成块。多选 infra（additionalSelectedEntities）
+    // 承接，便于批量变换 / 删除。对齐 Unity/Lumix 层级 Ctrl+A。
+    if (canEdit && focused
+        && !mHost.selection.renamingEntity.IsValid()
+        && mHost.scene.pWorld != nullptr
+        && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A))
+    {
+        std::vector<Orange::Engine::Entity> all;
+        auto view = mHost.scene.pWorld->Registry()
+            .view<Orange::Engine::Scene::NameComponent>();
+        for (auto e : view) { all.push_back(Orange::Engine::World::FromEntt(e)); }
+        if (!all.empty())
+        {
+            mHost.selection.selectedEntity = all[0];
+            mHost.selection.additionalSelectedEntities.assign(
+                all.begin() + 1, all.end());
+            mHost.assets.selectedAssetPath.clear();
+        }
+    }
+
     // Entity::IsValid() 只检测哨兵 null；Undo 可能已销毁实体，补一次
     // World::IsValid 以防操作死实体触发 EnTT assert / UB。
     if (canEdit && focused
