@@ -20,6 +20,7 @@
 #include "orange/engine/render/RenderableComponent.h"
 #include "orange/engine/render/SubMeshMaterialsComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
+#include "orange/engine/scene/TransformMath.h"  // ComposeLocalMatrix（单一真相源）
 #include "orange/engine/scene/TransformSystem.h"
 #include "orange/engine/scene/World.h"
 #include "orange/engine/scene/WorldPartition.h"
@@ -30,22 +31,6 @@
 
 namespace Orange::Engine::Render
 {
-namespace
-{
-
-glm::mat4 ComposeWorldMatrix(const Scene::TransformComponent& xform) noexcept
-{
-    // 标准 TRS 合成：T * R * S，按列向量惯例对应 `worldVec = M *
-    // localVec`。glm::translate / scale 走原矩阵基础上后乘；旋转用
-    // mat4_cast(quat) 得到 4x4 旋转矩阵后参与乘法。
-    glm::mat4 m(1.0f);
-    m = glm::translate(m, xform.position);
-    m = m * glm::mat4_cast(xform.rotation);
-    m = glm::scale(m, xform.scale);
-    return m;
-}
-
-}  // namespace
 
 void RenderScene::Clear() noexcept
 {
@@ -102,7 +87,7 @@ void RenderScene::Collect(const Orange::Engine::World& world,
         // PropagateWorldTransforms 已给每个 reachable entity 填好，cache 缺失
         // （hierarchy 链不一致等罕见情况）时退回单实体 local 合成兜底。
         const auto* wt = world.GetComponent<Scene::WorldTransformComponent>(entity);
-        d.worldMatrix      = (wt != nullptr) ? wt->world : ComposeWorldMatrix(xform);
+        d.worldMatrix      = (wt != nullptr) ? wt->world : Scene::ComposeLocalMatrix(xform);
         d.mesh             = renderable.mesh;
         d.materialInstance = renderable.materialInstance;
         d.castsShadow      = renderable.castsShadow;
