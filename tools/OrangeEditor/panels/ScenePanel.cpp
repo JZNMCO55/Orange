@@ -548,6 +548,28 @@ void EditorRenderLayer::DrawScenePanel()
                 {
                     FrameAllCamera(mHost);
                 }
+
+                // Delete / Ctrl+D：viewport 聚焦时也响应删除 / 复制选中实体
+                // （对齐 Unity/Lumix——此前只 Hierarchy 面板响应）。二者都只设
+                // EditorHost 上的幂等标志（pendingDelete=同一 entity、
+                // pendingDuplicate=bool true），与 Hierarchy 同帧重复 set 无害，
+                // 实际删除/复制走各自既有可撤销路径。独立 if（不入上面 else-if 链）。
+                // World::IsValid 补一道防操作死实体（Undo 可能已销毁）。
+                if (mHost.selection.selectedEntity.IsValid()
+                    && mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity)
+                    && !mHost.selection.renamingEntity.IsValid())
+                {
+                    if (ImGui::IsKeyPressed(mHost.keybindings.deleteEntity, false))
+                    {
+                        mHost.selection.pendingDelete =
+                            mHost.selection.selectedEntity;
+                    }
+                    if (ImGui::GetIO().KeyCtrl
+                        && ImGui::IsKeyPressed(ImGuiKey_D, false))
+                    {
+                        mHost.selection.pendingDuplicate = true;
+                    }
+                }
             }
 
             bool gizmoActive = false;
