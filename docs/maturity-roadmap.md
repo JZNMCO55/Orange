@@ -99,7 +99,7 @@
   - **B2.3 Timeline / dopesheet UI**（编辑器层 ImGui）——轨道 + 关键帧拖动 + scrub。
   - **B2.4 曲线编辑器**（curve editor，缓动/Bezier handle）。
   - **B2.5 状态机图编辑器 ⚠️ 数据底座已就绪**：AnimationStateMachine **已有数据驱动 `.anim_fsm`**（`ConditionExpr{param,op,threshold}` 可序列化，ADR-005 v0.7）+ `AnimFsmAssetInspectorPlugin` 列表式编辑——**只缺节点图可视化 UI**（状态=节点/transition=边），不重做数据层。
-  - **B2.6 AnimatorComponent Add-Component + channel 可视化创作**（当前 channel 只能 C++ lambda；接 schema 注册 + UI 选 target/channel）。
+  - **B2.6 AnimatorComponent Add-Component + clip 引用 + channel 可视化创作**（当前 channel 只能 C++ lambda；接 schema 注册 + UI 选 target/channel）。**精确 spec 已出**：`docs/b2.6-animator-clip-authoring-spec.md`（基于真实 schema 代码：AnimatorComponent "clip" backend 可 Addable〔Renderable c10 自定义 add 路径〕+ `AssetKind::AnimationClip` + FieldAssetRef 拖 .anim + ClipAnimator 记来源路径 + Inspector 播放控制/编辑期预览 tick；改点 file:line + 零回归 + dogfood 计划 + 实施顺序）。下个编辑器 session 照此执行。
 - **跨仓**：B2.2 是。其余编辑器/引擎单仓。**依赖**：A1 部分（骨骼是 transform hierarchy）。**dogfood**：核心（动画手感、timeline 交互全靠真机）。
 - **建议起点**：B2.2 GPU skinning（让骨骼动画先"看得见"，是这条 epic 的视觉地基）+ B2.6（让 animator 至少能在编辑器挂上）。
 
