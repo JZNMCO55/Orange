@@ -19,12 +19,16 @@
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
+#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <entt/entt.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/vec3.hpp>
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -494,11 +498,56 @@ void TestSortIndexSerializationRoundTrip()
     std::fprintf(stdout, "  [PASS] sortIndex 序列化往返 + 根序保持\n");
 }
 
+// ReparentToKeepWorld / MoveToPositionKeepWorld（ADR-016 / A1.3）——reparent 改父
+// 链前后保持 child 世界位姿不变（A1.1 累积 hierarchy 后防跳位）。自逆：undo 复位
+// 也保 world、还原原始 local。
+void TestReparentKeepWorld()
+{
+    using TC = Orange::Engine::Scene::TransformComponent;
+    World world;
+
+    // A 在世界 (5,0,0)，B 在世界 (0,0,0)，都是 root。
+    Entity a = world.CreateEntity();
+    world.AddComponent<TC>(a, TC{glm::vec3(5.0f, 0.0f, 0.0f),
+                                 glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                 glm::vec3(1.0f)});
+    Entity b = world.CreateEntity();
+    world.AddComponent<TC>(b, TC{glm::vec3(0.0f, 0.0f, 0.0f),
+                                 glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                                 glm::vec3(1.0f)});
+
+    // keep-world reparent B 到 A 下：B 世界仍 (0,0,0) → B.local = inv(A 世界
+    // (5,0,0)) * (0,0,0) = (-5,0,0)。
+    EditorHierarchy::ReparentToKeepWorld(world, b, a);
+    const TC* bt = world.GetComponent<TC>(b);
+    assert(bt != nullptr);
+    assert(std::fabs(bt->position.x - (-5.0f)) < 1e-4f &&
+           std::fabs(bt->position.y - 0.0f) < 1e-4f &&
+           std::fabs(bt->position.z - 0.0f) < 1e-4f &&
+           "keep-world reparent：B.local 应 = (-5,0,0)，使 A(5,0,0)×local = world(0,0,0) 不变");
+    const HC* bh = world.GetComponent<HC>(b);
+    assert(bh != nullptr && bh->parent == a && "B 应已 parent 到 A");
+
+    // 自逆：reparent B 回 root（MoveToPositionKeepWorld parent=Invalid）→ B.local
+    // 应还原原始 (0,0,0)（world 仍 (0,0,0)）。
+    EditorHierarchy::MoveToPositionKeepWorld(world, b, Entity::Invalid(), Entity::Invalid());
+    bt = world.GetComponent<TC>(b);
+    assert(bt != nullptr &&
+           std::fabs(bt->position.x - 0.0f) < 1e-4f &&
+           std::fabs(bt->position.y - 0.0f) < 1e-4f &&
+           std::fabs(bt->position.z - 0.0f) < 1e-4f &&
+           "keep-world 自逆：reparent 回 root 后 B.local 应还原 (0,0,0)");
+
+    std::fprintf(stdout,
+                 "  [PASS] keep-world reparent：B 世界位姿保持 (B.local (-5,0,0)) + 自逆还原\n");
+}
+
 }  // namespace
 
 int main()
 {
     std::fprintf(stdout, "[EditorHierarchyTest] running\n");
+    TestReparentKeepWorld();
     TestLinkAsLastChild();
     TestDetachHeadMiddleTail();
     TestReparentTo();

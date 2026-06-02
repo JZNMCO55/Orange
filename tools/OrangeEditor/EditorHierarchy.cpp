@@ -3,9 +3,18 @@
 #include "EditorHierarchy.h"
 
 #include <orange/engine/scene/HierarchyComponent.h>
+#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <entt/entt.hpp>
+
+// keep-world 变体需要矩阵分解（local TRS ↔ world matrix）。gtx 实验扩展仅本 TU 私有打开。
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/matrix.hpp>  // glm::inverse
 
 #include <algorithm>
 #include <cstdint>
@@ -22,6 +31,60 @@ HC& GetOrAdd(World& world, Entity e)
 {
     if (auto* p = world.GetComponent<HC>(e)) { return *p; }
     return world.AddComponent<HC>(e, HC{});
+}
+
+// ---- keep-world helper ----------------------------------------------------
+using TC = ::Orange::Engine::Scene::TransformComponent;
+
+// 单实体 local TRS → mat4（T*R*S，与引擎 TransformSystem / RenderScene 同款）。
+glm::mat4 LocalMatrix(const TC& t)
+{
+    glm::mat4 m(1.0f);
+    m = glm::translate(m, t.position);
+    m = m * glm::mat4_cast(t.rotation);
+    m = glm::scale(m, t.scale);
+    return m;
+}
+
+// 沿 parent 链累积 world matrix（与引擎 TransformSystem 同款；编辑器侧自算，
+// 不依赖 WorldTransformComponent cache 是否已被 render pass 填充）。
+glm::mat4 ComputeWorldMatrix(World& world, Entity e)
+{
+    if (!e.IsValid()) { return glm::mat4(1.0f); }
+    const TC* tc          = world.GetComponent<TC>(e);
+    const glm::mat4 local = (tc != nullptr) ? LocalMatrix(*tc) : glm::mat4(1.0f);
+    const HC* h           = world.GetComponent<HC>(e);
+    if (h != nullptr && h->parent.IsValid())
+    {
+        return ComputeWorldMatrix(world, h->parent) * local;
+    }
+    return local;
+}
+
+// 改链**之后**调用：设 child.local 使其 world == keepWorld（新父从 child 当前
+// HC.parent 取）。newLocal = inverse(新父 world) * keepWorld，decompose 写回 TC。
+void SetLocalKeepingWorld(World& world, Entity child, const glm::mat4& keepWorld)
+{
+    const HC* h            = world.GetComponent<HC>(child);
+    const Entity newParent = (h != nullptr) ? h->parent : Entity::Invalid();
+    const glm::mat4 parentWorld =
+        newParent.IsValid() ? ComputeWorldMatrix(world, newParent) : glm::mat4(1.0f);
+    const glm::mat4 newLocal = glm::inverse(parentWorld) * keepWorld;
+
+    glm::vec3 scale{}, translation{}, skew{};
+    glm::vec4 perspective{};
+    glm::quat rotation{};
+    glm::decompose(newLocal, scale, rotation, translation, skew, perspective);
+    if (TC* tc = world.GetComponent<TC>(child))
+    {
+        tc->position = translation;
+        tc->rotation = rotation;
+        tc->scale    = scale;
+    }
+    else
+    {
+        world.AddComponent<TC>(child, TC{translation, rotation, scale});
+    }
 }
 
 }  // namespace
@@ -151,6 +214,35 @@ void MoveAfter(World& world, Entity child, Entity target)
     if (th == nullptr) { return; }
     if (th->nextSibling == child) { return; }   // 已紧邻 target 之后，no-op
     MoveToPosition(world, child, th->parent, target);
+}
+
+// ---- keep-world 变体（捕获旧 world → 改链 → 重算 local 保 world）-----------
+void ReparentToKeepWorld(World& world, Entity child, Entity newParent)
+{
+    const glm::mat4 keepWorld = ComputeWorldMatrix(world, child);
+    ReparentTo(world, child, newParent);
+    SetLocalKeepingWorld(world, child, keepWorld);
+}
+
+void MoveToPositionKeepWorld(World& world, Entity child, Entity parent, Entity afterSibling)
+{
+    const glm::mat4 keepWorld = ComputeWorldMatrix(world, child);
+    MoveToPosition(world, child, parent, afterSibling);
+    SetLocalKeepingWorld(world, child, keepWorld);
+}
+
+void MoveBeforeKeepWorld(World& world, Entity child, Entity target)
+{
+    const glm::mat4 keepWorld = ComputeWorldMatrix(world, child);
+    MoveBefore(world, child, target);
+    SetLocalKeepingWorld(world, child, keepWorld);
+}
+
+void MoveAfterKeepWorld(World& world, Entity child, Entity target)
+{
+    const glm::mat4 keepWorld = ComputeWorldMatrix(world, child);
+    MoveAfter(world, child, target);
+    SetLocalKeepingWorld(world, child, keepWorld);
 }
 
 void DestroySubtree(World& world, Entity e)

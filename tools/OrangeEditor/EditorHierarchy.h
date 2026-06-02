@@ -67,6 +67,30 @@ void MoveAfter(Orange::Engine::World& world,
                Orange::Engine::Entity child,
                Orange::Engine::Entity target);
 
+// ---- keep-world 变体（ADR-016 / maturity-roadmap A1.3）---------------------
+// A1.1 让引擎沿 hierarchy 累积 world transform 后，reparent 到**非原点**父会让
+// 子跳位（child 的 local 被当成相对新父解释）。下面的 *KeepWorld 变体在改父链
+// **前后**保持 child 的**世界位姿不变**：捕获 child 旧 world matrix → 改链 →
+// 重算 child.local = inverse(新父 world) * 旧 world（写回 TransformComponent）。
+// 与 Unity "keep world position" reparent 同款。
+//
+// **自逆**：keep-world 是可逆操作——do 用 *KeepWorld、undo 也用 MoveToPosition
+// KeepWorld 复位，world 对称保持、自然还原原始 local，命令无需额外捕获 old local。
+// 同父 reorder（父不变）下 world 不变 = no-op 退化。
+void ReparentToKeepWorld(Orange::Engine::World& world,
+                         Orange::Engine::Entity child,
+                         Orange::Engine::Entity newParent);
+void MoveToPositionKeepWorld(Orange::Engine::World& world,
+                             Orange::Engine::Entity child,
+                             Orange::Engine::Entity parent,
+                             Orange::Engine::Entity afterSibling);
+void MoveBeforeKeepWorld(Orange::Engine::World& world,
+                         Orange::Engine::Entity child,
+                         Orange::Engine::Entity target);
+void MoveAfterKeepWorld(Orange::Engine::World& world,
+                        Orange::Engine::Entity child,
+                        Orange::Engine::Entity target);
+
 // 递归销毁 e 及其整个子树。先收集 child 列表（不能边遍历兄弟链边
 // destroy，destroy 会把组件抽走 sibling 字段失效），再依次递归销毁，最
 // 后把 e 自己从父链摘下并销毁。

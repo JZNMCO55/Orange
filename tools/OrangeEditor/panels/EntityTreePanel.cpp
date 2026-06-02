@@ -552,18 +552,22 @@ void EditorRenderLayer::DrawEntityTreePanel()
             // 间接解 World——切场景走 nullptr 防御分支 no-op 而非 dangling 崩溃。
             mHost.cmdStack.Push(std::make_unique<LambdaCommand>(
                 "reparent",
+                // keep-world（ADR-016 / A1.3）：reparent 后保持 src 世界位姿不变
+                // ——A1.1 累积 hierarchy 后，不 keep-world 会让 src 跳位（local 被当
+                // 相对新父解释）。keep-world 自逆，undo 的 MoveToPositionKeepWorld
+                // 复位时同样保 world、自然还原原始 local。
                 [pH = &mHost, src, where, dstInto, refSib]() {
                     auto* w = pH->scene.pWorld.get();
                     if (w == nullptr || !w->IsValid(src)) { return; }
                     switch (where) {
                         case PR::Where::IntoAsLastChild:
-                            EditorHierarchy::ReparentTo(*w, src, dstInto);
+                            EditorHierarchy::ReparentToKeepWorld(*w, src, dstInto);
                             break;
                         case PR::Where::BeforeSibling:
-                            if (w->IsValid(refSib)) { EditorHierarchy::MoveBefore(*w, src, refSib); }
+                            if (w->IsValid(refSib)) { EditorHierarchy::MoveBeforeKeepWorld(*w, src, refSib); }
                             break;
                         case PR::Where::AfterSibling:
-                            if (w->IsValid(refSib)) { EditorHierarchy::MoveAfter(*w, src, refSib); }
+                            if (w->IsValid(refSib)) { EditorHierarchy::MoveAfterKeepWorld(*w, src, refSib); }
                             break;
                     }
                 },
@@ -572,7 +576,7 @@ void EditorRenderLayer::DrawEntityTreePanel()
                     if (w == nullptr) { return; }
                     // Undo 时 src 可能已被其他命令销毁（EnTT version check）
                     if (w->IsValid(src)) {
-                        EditorHierarchy::MoveToPosition(*w, src, oldParent, oldPrev);
+                        EditorHierarchy::MoveToPositionKeepWorld(*w, src, oldParent, oldPrev);
                     }
                 }
             ));
