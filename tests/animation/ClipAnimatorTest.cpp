@@ -408,6 +408,25 @@ int main()
         anim2.CrossFadeTo(clipB, 0.0f);
         assert(!anim2.IsFading() && Near(tc2.position.x, 10.0f) && "fade<=0 → 瞬切纯新 clip");
         std::fprintf(stdout, "  [PASS] CrossFadeTo 过渡混合（无 pop / 半程混合 / 瞬切）\n");
+
+        // rotation slerp 路径：from=identity → clipC(绕 Y 90°)，半程应为 45°（slerp 走最短弧）。
+        Scene::TransformComponent tc3;  // identity rotation
+        ClipAnimator anim3(Anim::AnimationClip{}, &tc3);
+        Anim::AnimationClip clipC;
+        clipC.duration = 1.0f;
+        clipC.tracks.push_back(MakeTrack("rotation", TrackValueType::Vec3,
+                                         {LinKey(0.0f, glm::vec4(0, 90, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(0, 90, 0, 0))}));
+        anim3.CrossFadeTo(clipC, 1.0f);
+        anim3.Tick(0.5f);  // w=0.5：slerp(identity, 90°Y, 0.5) = 45°Y
+        const glm::quat expected45 = glm::slerp(glm::quat(1, 0, 0, 0),
+                                                glm::quat(glm::radians(glm::vec3(0, 90, 0))), 0.5f);
+        assert(NearQuat(tc3.rotation, expected45, 1e-3f) && "rotation 过渡半程 = slerp 45°");
+        // 旋转 +Z 向量验证朝向合理（45°Y：(0,0,1)→约(0.707,0,0.707)）。
+        const glm::vec3 dir = tc3.rotation * glm::vec3(0, 0, 1);
+        assert(Near(dir.x, 0.7071f, 2e-3f) && Near(dir.z, 0.7071f, 2e-3f) &&
+               "45°Y 旋转把 +Z 转到约 (0.707,0,0.707)");
+        std::fprintf(stdout, "  [PASS] CrossFadeTo rotation slerp 半程 45°\n");
     }
 
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
