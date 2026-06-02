@@ -7,6 +7,7 @@
 
 #include "BuiltinAssets.h"  // BuildNamedMaterialInstances（v1.0.1 c11 拆出）
 #include "DemoWorld.h"      // SeedDemoWorld / SeedPbrShowcaseWorld
+#include "EditorAssetDropHandler.h"  // CreateEntityFromMeshAsset / SyncSubMeshMaterialsForMesh
 #include "EditorAssetReferences.h"  // FindAssetReferences（资产引用只读扫描）
 #include "EditorHierarchy.h"
 #include "EditorPrefabActions.h"  // Create Prefab modal 承接 + 写盘 helper
@@ -1944,6 +1945,25 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
             const bool canPickMaterial = (rc != nullptr)
                                       && (ext == ".material");
 
+            // "Add to Scene"：直接在相机焦点处建一个带该 mesh + 材质的新实体
+            // （不需要先选中实体；对齐 Lumix/Unity 从 Asset 浏览器 instantiate）。
+            // 与拖到 viewport 空白处（ScenePanel）同一条 CreateEntityFromMeshAsset。
+            const bool canAddToScene = (ext == ".mesh" || ext == ".obj")
+                                    && host.scene.pWorld != nullptr;
+            ImGui::BeginDisabled(!canAddToScene);
+            if (ImGui::MenuItem("Add to Scene"))
+            {
+                const Entity created = ::Orange::Editor::CreateEntityFromMeshAsset(
+                    host, path, host.camera.pivot);
+                if (created.IsValid())
+                {
+                    host.selection.selectedEntity = created;
+                    host.selection.ClearAdditional();
+                    host.assets.selectedAssetPath.clear();
+                }
+            }
+            ImGui::EndDisabled();
+
             if (!selValid) {
                 ImGui::TextDisabled("(no entity selected)");
             } else if (rc == nullptr) {
@@ -1967,12 +1987,18 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                     if (pW == nullptr || !pW->IsValid(capE)) { return; }
                     auto* pRC = pW->GetComponent<RenderableComponent>(capE);
                     if (pRC == nullptr) { return; }
-                    if (p.empty()) { pRC->mesh = {}; return; }
-                    auto* pReg = pH->assets.pAssets.get();
-                    if (pReg == nullptr) { return; }
-                    auto lr = pReg->Load<
-                        ::Orange::Engine::Asset::MeshAsset>(p);
-                    if (lr.IsOk()) { pRC->mesh = lr.Value(); }
+                    if (p.empty()) { pRC->mesh = {}; }
+                    else {
+                        auto* pReg = pH->assets.pAssets.get();
+                        if (pReg == nullptr) { return; }
+                        auto lr = pReg->Load<
+                            ::Orange::Engine::Asset::MeshAsset>(p);
+                        if (lr.IsOk()) { pRC->mesh = lr.Value(); }
+                    }
+                    // 设 mesh 后同步多材质 slot → SubMeshMaterialsComponent（与
+                    // viewport drop / Inspector 设 mesh 一致；单材质设
+                    // materialInstance，空 path 撤组件）。
+                    ::Orange::Editor::SyncSubMeshMaterialsForMesh(*pH, capE, p);
                 };
                 host.cmdStack.Push(
                     std::make_unique<SetFieldValueCommand<std::string>>(
