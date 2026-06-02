@@ -571,11 +571,16 @@ void EditorRenderLayer::DrawEntityTreePanel()
         auto* const pPrimMat  = mHost.assets.pPbrMaterial
             ? mHost.assets.pPbrMaterial.get()
             : mHost.assets.pDefaultRenderableMaterial.get();
+        // 基本体在相机焦点（轨道 pivot ≈ 视野中心）处生成，避免在原点看不见
+        // （相机看别处时"新建 Cube 怎么没出现"）。Empty / Light 保持原点（容器 /
+        // 方向光位置无关，零行为变化）。
+        const glm::vec3 primSpawnPos = mHost.camera.pivot;
         mHost.selection.pendingCreate.valid = false;
 
         auto cmd = std::make_unique<CreateEntityCommand>(
             mHost,
-            [parent, kind, cubeMesh, sphereMesh, planeMesh, pLightMat, pPrimMat]
+            [parent, kind, cubeMesh, sphereMesh, planeMesh, pLightMat, pPrimMat,
+             primSpawnPos]
             (Orange::Engine::World& w) -> Orange::Engine::Entity
             {
                 using PCK = EditorSelection::PendingCreateKind;
@@ -590,8 +595,13 @@ void EditorRenderLayer::DrawEntityTreePanel()
                 }
                 w.AddComponent<Orange::Engine::Scene::NameComponent>(
                     e, Orange::Engine::Scene::NameComponent{initialName});
-                w.AddComponent<Orange::Engine::Scene::TransformComponent>(
-                    e, Orange::Engine::Scene::TransformComponent{});
+                // 基本体在相机焦点生成；Empty / Light 在原点（默认 Transform）。
+                Orange::Engine::Scene::TransformComponent tc{};
+                if (kind == PCK::Cube || kind == PCK::Sphere
+                    || kind == PCK::Plane) {
+                    tc.position = primSpawnPos;
+                }
+                w.AddComponent<Orange::Engine::Scene::TransformComponent>(e, tc);
 
                 using ::Orange::Engine::Render::DirectionalLight;
                 using ::Orange::Engine::Render::RenderableComponent;
