@@ -125,6 +125,26 @@
 
 ---
 
+## 2026-06-02 autonomous session（贴近 Lumix 成熟度：编辑器能力补完）
+
+> 目标：参考 gap 文档，自主找任务让引擎更贴近 Lumix 成熟度。本段登记该 session 落地能力里"headless 绿但视觉/交互待人工 dogfood"的残留。
+
+### 8. Create 3D Object —— 一键创建 Cube / Sphere / Plane 基本体
+
+- **commit**：`c5242b1` feat(editor): Create 3D Object 基本体（Cube / Sphere / Plane）
+- **怎么触发**：
+  1. Entity Tree 空白处**右键** → `Create 3D Object (root)` → 选 Cube / Sphere / Plane
+  2. 或在某个实体节点上**右键** → `Create 3D Object (Child)` → 选基本体（挂为该节点末子）
+- **看什么 / 通过判据**：
+  - viewport 立刻出现对应几何：**Cube**（立方体）/ **Sphere**（光滑球，lat-lon UV 球）/ **Plane**（平面，地面/墙面）—— 都带 pbr 材质（非隐形）
+  - 新建实体自动选中 + 进入重命名（名字默认 Cube/Sphere/Plane）
+  - 选中后 Inspector 有 Renderable（mesh = 对应内置 mesh，material = pbr，castsShadow 勾上）
+  - child 形式创建的挂在父节点下（Hierarchy 缩进体现父子）
+  - Ctrl+Z 撤销 = 删掉刚建的实体（走 CreateEntityCommand 命令栈）
+- **背景**：之前只能 Create Entity（空壳）+ Create Light Object，得"建空实体 → Add Renderable → 选 mesh"三步才有可见几何。本项对齐 Unity GameObject→3D Object / Godot 节点创建。headless 无 GUI 菜单测试路径，**菜单交互 + 三种几何 viewport 视觉待真机确认**。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。
