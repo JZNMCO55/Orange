@@ -169,6 +169,23 @@ int main()
         std::fprintf(stdout, "  [PASS] ComputeClipDuration + WrapClipTime（loop/clamp）\n");
     }
 
+    // ===== 11. AddKeyframeSorted：编辑器打键维持升序 + 同时间覆盖 =====
+    {
+        Anim::AnimationTrack tr;
+        tr.valueType = Anim::TrackValueType::Float;
+        Anim::AddKeyframeSorted(tr, Key(2.0f, 20.0f, InterpMode::Linear));
+        Anim::AddKeyframeSorted(tr, Key(0.0f, 0.0f, InterpMode::Linear));   // 插到最前
+        Anim::AddKeyframeSorted(tr, Key(1.0f, 10.0f, InterpMode::Linear));  // 插中间
+        assert(tr.keys.size() == 3 && Anim::IsTrackSorted(tr) && "3 个乱序打键 → 有序");
+        assert(Near(tr.keys[0].time, 0.0f) && Near(tr.keys[1].time, 1.0f) &&
+               Near(tr.keys[2].time, 2.0f) && "打键后 time 升序排列");
+        // 同时间重打键 → 覆盖值，不新增 key。
+        Anim::AddKeyframeSorted(tr, Key(1.0f, 99.0f, InterpMode::Step));
+        assert(tr.keys.size() == 3 && "同 time 重打键 → 覆盖不新增");
+        assert(Near(Anim::SampleTrack(tr, 1.0f).x, 99.0f) && "重打键值覆盖为 99（Step 保持）");
+        std::fprintf(stdout, "  [PASS] AddKeyframeSorted：打键维持升序 + 同时间覆盖\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }

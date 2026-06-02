@@ -159,6 +159,28 @@ inline bool IsTrackSorted(const AnimationTrack& track) noexcept
     return true;
 }
 
+// 在维持 time 升序的前提下插入一个 keyframe——编辑器在 playhead 处「打键」（K）用。
+// 若已存在相同 time 的 key（容差内）则覆盖其值/插值（同时间重打键 = 覆盖，与 Unity
+// 一致），否则插到正确有序位置。保持 SampleTrack 依赖的升序不变量，免去整轨 re-sort。
+inline void AddKeyframeSorted(AnimationTrack& track, const Keyframe& key)
+{
+    constexpr float kEps = 1e-6f;
+    for (std::size_t i = 0; i < track.keys.size(); ++i)
+    {
+        if (std::fabs(track.keys[i].time - key.time) <= kEps)
+        {
+            track.keys[i] = key;  // 同时间重打键 → 覆盖
+            return;
+        }
+        if (track.keys[i].time > key.time)
+        {
+            track.keys.insert(track.keys.begin() + static_cast<std::ptrdiff_t>(i), key);
+            return;
+        }
+    }
+    track.keys.push_back(key);  // 比所有 key 都晚 → 追加末尾
+}
+
 // 各 track 末 key 时间的最大值——clip 的"内容时长"。供编辑器校验 / 派生
 // AnimationClip::duration（用户可能手设 duration 与 key 不符，本函数给真实下界）。
 // 假设各 track 已升序（末 key 时间最大）；空 track 贡献 0。
