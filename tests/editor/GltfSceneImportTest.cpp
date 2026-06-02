@@ -108,6 +108,59 @@ void WriteSceneHierarchyGltf(const std::string& path)
         "}\n";
 }
 
+// 第二个 fixture：覆盖真实 Blender 导出的风险路径 ——
+//   * node 用 "matrix"（列主序 4x4）而非 TRS → 验 glm::decompose 路径
+//   * 3 层深嵌套（L1→L2→L3）→ 验 world 变换穿 2 层祖先累积
+//   * spot light → 验 SpotLight 锥角映射 + 方向编码
+void WriteMatrixAndDeepNestGltf(const std::string& path)
+{
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMA";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写 matrix/深嵌套 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
+        "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
+        "    {\"name\": \"Torch\", \"type\": \"spot\", \"color\": [1.0, 0.5, 0.0], "
+        "\"intensity\": 3.0, \"range\": 12.0, "
+        "\"spot\": {\"innerConeAngle\": 0.2, \"outerConeAngle\": 0.5}}\n"
+        "  ]}},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0, 3, 4]}],\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"L1\", \"translation\": [10.0, 0.0, 0.0], \"children\": [1]},\n"
+        "    {\"name\": \"L2\", \"translation\": [0.0, 5.0, 0.0], \"children\": [2]},\n"
+        "    {\"name\": \"L3\", \"translation\": [0.0, 0.0, 2.0], \"mesh\": 0},\n"
+        // 列主序 translate(3,4,5)*scale(2,2,2)：col0(2,0,0,0) col1(0,2,0,0)
+        // col2(0,0,2,0) col3(3,4,5,1)。
+        "    {\"name\": \"MatrixNode\", \"matrix\": "
+        "[2,0,0,0, 0,2,0,0, 0,0,2,0, 3,4,5,1], \"mesh\": 0},\n"
+        "    {\"name\": \"SpotNode\", "
+        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
+        "  ],\n"
+        "  \"meshes\": [\n"
+        "    {\"name\": \"M\", \"primitives\": [{\"attributes\": "
+        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+        "\"type\": \"SCALAR\"}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
 // 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
 Entity FindByName(World& world, const std::string& name)
 {
@@ -284,6 +337,71 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] KHR_lights_punctual：SunLight=DirectionalLight(方向编码"
                      "正确) + Lamp=PointLight(color/intensity/range + world 位置)\n");
+    }
+
+    // ===== 第二组：has_matrix 分解 + 3 层深嵌套 world 累积 + spot light =====
+    {
+        const std::string mPath = (srcDir / "matrix_deep.gltf").generic_string();
+        WriteMatrixAndDeepNestGltf(mPath);
+
+        auto reg2 = MakeImportRegistry();
+        const ImportNS::ImportResult r2 =
+            ImportNS::RunGltfSceneImportToRegistry(mPath, *reg2);
+        assert(r2.status == ImportNS::ImportStatus::Success && "matrix/深嵌套 导入应 Success");
+        assert(fs::exists(r2.destPath) && "matrix_deep.scene.json 应落盘");
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg2.get();
+        auto lr = SceneNS::Load(r2.destPath, w, opts);
+        assert(lr.IsOk() && "matrix_deep scene 应能 Load");
+
+        std::size_t cnt = 0;
+        for (auto e : w.Registry().view<SceneNS::NameComponent>()) { (void)e; ++cnt; }
+        assert(cnt == 5 && "应有 5 实体（L1/L2/L3/MatrixNode/SpotNode）");
+
+        // L3：3 层累积 world = (10,0,0)+(0,5,0)+(0,0,2) = (10,5,2)。
+        const Entity l3 = FindByName(w, "L3");
+        const auto* l3T = w.GetComponent<SceneNS::TransformComponent>(l3);
+        assert(l3T != nullptr &&
+               std::fabs(l3T->position.x - 10.0f) < 1e-3f &&
+               std::fabs(l3T->position.y - 5.0f) < 1e-3f &&
+               std::fabs(l3T->position.z - 2.0f) < 1e-3f &&
+               "L3 world 应穿 2 层祖先累积为 (10,5,2)");
+
+        // MatrixNode：has_matrix 列主序 translate(3,4,5)*scale(2,2,2) →
+        // decompose position (3,4,5) + scale (2,2,2)。
+        const Entity mn = FindByName(w, "MatrixNode");
+        const auto* mnT = w.GetComponent<SceneNS::TransformComponent>(mn);
+        assert(mnT != nullptr &&
+               std::fabs(mnT->position.x - 3.0f) < 1e-3f &&
+               std::fabs(mnT->position.y - 4.0f) < 1e-3f &&
+               std::fabs(mnT->position.z - 5.0f) < 1e-3f &&
+               "MatrixNode position 应从 matrix 分解为 (3,4,5)");
+        assert(std::fabs(mnT->scale.x - 2.0f) < 1e-3f &&
+               std::fabs(mnT->scale.y - 2.0f) < 1e-3f &&
+               std::fabs(mnT->scale.z - 2.0f) < 1e-3f &&
+               "MatrixNode scale 应从 matrix 分解为 (2,2,2)");
+
+        // SpotNode：SpotLight，cone 角映射 + 方向编码（无 rotation → (0,0,-1)）。
+        namespace RenderNS = ::Orange::Engine::Render;
+        const Entity spot = FindByName(w, "SpotNode");
+        const auto* sl = w.GetComponent<RenderNS::SpotLight>(spot);
+        assert(sl != nullptr && "SpotNode 应有 SpotLight component");
+        assert(std::fabs(sl->intensity - 3.0f) < 1e-4f &&
+               std::fabs(sl->range - 12.0f) < 1e-4f &&
+               std::fabs(sl->innerConeAngle - 0.2f) < 1e-4f &&
+               std::fabs(sl->outerConeAngle - 0.5f) < 1e-4f &&
+               "SpotLight intensity/range/cone 应 = glTF (3/12/0.2/0.5)");
+        const auto* spotT = w.GetComponent<SceneNS::TransformComponent>(spot);
+        const glm::vec3 spotDir = RenderNS::ComputeSpotLightWorldDir(spotT->rotation);
+        assert(std::fabs(spotDir.z - (-1.0f)) < 1e-3f &&
+               std::fabs(spotDir.x) < 1e-3f && std::fabs(spotDir.y) < 1e-3f &&
+               "spot 方向应沿 glTF -Z 转引擎约定后为 (0,0,-1)");
+
+        std::fprintf(stdout,
+                     "  [PASS] has_matrix 分解 + 3 层深嵌套 world 累积 (10,5,2) + "
+                     "SpotLight 锥角/方向\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);
