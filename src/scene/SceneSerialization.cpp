@@ -14,6 +14,7 @@
 #include "orange/engine/animation/AnimatorRegistry.h"
 #include "orange/engine/animation/ClipAnimator.h"
 #include "orange/engine/animation/IAnimator.h"
+#include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Serialization.h"
 #include "orange/engine/physics/ColliderComponent.h"
@@ -572,28 +573,69 @@ Result<void, ResultCode> Load(std::string_view path,
             Animation::AnimatorComponent ac{};
             if (backendName == "clip")
             {
-                // "clip" backend（B2.2）：从嵌入的 clipJson 直接重建 ClipAnimator，
-                // 绕过 AnimatorRegistry（clip 数据 per-entity，无法走 factory），
-                // 再把 target 接到 entity 自身的 TransformComponent（pass 1 已 attach）。
+                // "clip" backend（B2.2）：重建 ClipAnimator，绕过 AnimatorRegistry
+                //（clip 数据 per-entity，无法走 factory），再把 target 接到 entity 自身
+                // 的 TransformComponent（pass 1 已 attach）。clip 数据两种来源：
+                //   * clipSource（B2.6 改点 1）：来自 .anim 资产 → assetRegistry 加载；
+                //   * clipJson（形态 B）：内联 / 程序化 clip → 就地解析。
                 Animation::AnimationClip clip;
-                std::string              clipJson;
-                if (ReadAnimatorClipJson(reader, animPath, clipJson))
+                std::string              clipSource;
+                const bool               hasSource =
+                    ReadAnimatorClipSource(reader, animPath, clipSource) && !clipSource.empty();
+                if (hasSource)
                 {
-                    auto parsed = Animation::AnimationClipFromJson(clipJson);
-                    if (parsed.IsOk())
+                    if (options.assetRegistry != nullptr)
                     {
-                        clip = std::move(parsed.Value());
+                        auto handleRes =
+                            options.assetRegistry->Load<Animation::AnimationClip>(clipSource);
+                        if (handleRes.IsOk())
+                        {
+                            const auto* loaded = options.assetRegistry
+                                ->Get<Animation::AnimationClip>(handleRes.Value());
+                            if (loaded != nullptr) { clip = *loaded; }
+                            else
+                            {
+                                ORANGE_LOG_WARN(
+                                    "Scene load: ClipAnimator clipSource '{}' loaded but Get "
+                                    "returned null; empty clip.", clipSource);
+                            }
+                        }
+                        else
+                        {
+                            ORANGE_LOG_WARN(
+                                "Scene load: ClipAnimator clipSource '{}' failed to load; "
+                                "empty clip.", clipSource);
+                        }
                     }
                     else
                     {
                         ORANGE_LOG_WARN(
-                            "Scene load: ClipAnimator clipJson parse failed; "
-                            "rebuilding with empty clip.");
+                            "Scene load: ClipAnimator has clipSource '{}' but no AssetRegistry "
+                            "supplied; empty clip.", clipSource);
+                    }
+                }
+                else
+                {
+                    std::string clipJson;
+                    if (ReadAnimatorClipJson(reader, animPath, clipJson))
+                    {
+                        auto parsed = Animation::AnimationClipFromJson(clipJson);
+                        if (parsed.IsOk())
+                        {
+                            clip = std::move(parsed.Value());
+                        }
+                        else
+                        {
+                            ORANGE_LOG_WARN(
+                                "Scene load: ClipAnimator clipJson parse failed; "
+                                "rebuilding with empty clip.");
+                        }
                     }
                 }
                 auto                    clipAnim = std::make_unique<Animation::ClipAnimator>(std::move(clip));
                 Animation::ClipAnimator* rawClip  = clipAnim.get();
-                ac.animator                       = std::move(clipAnim);
+                if (hasSource) { rawClip->SetSourceAssetPath(clipSource); }
+                ac.animator = std::move(clipAnim);
                 world.AddComponent(entity, std::move(ac));
                 // SetTarget 必须在 component attach 之后；target = 本 entity 的
                 // Transform（无则 nullptr，ClipAnimator 安全 no-op）。

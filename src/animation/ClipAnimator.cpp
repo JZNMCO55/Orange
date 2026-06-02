@@ -64,6 +64,16 @@ const AnimationClip& ClipAnimator::Clip() const noexcept
     return mClip;
 }
 
+void ClipAnimator::SetSourceAssetPath(std::string_view path)
+{
+    mSourceAssetPath.assign(path.data(), path.size());
+}
+
+std::string_view ClipAnimator::SourceAssetPath() const noexcept
+{
+    return mSourceAssetPath;
+}
+
 void ClipAnimator::Play() noexcept
 {
     mPlaying = true;

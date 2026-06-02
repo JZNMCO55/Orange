@@ -8,6 +8,8 @@
 //   * 损坏 JSON → 拒绝读，World 保持原状
 
 #include <orange/engine/animation/AnimationClip.h>
+#include <orange/engine/animation/AnimationClipLoader.h>
+#include <orange/engine/animation/AnimationClipSerialization.h>
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
 #include <orange/engine/animation/ClipAnimator.h>
@@ -905,6 +907,84 @@ void TestClipAnimatorRoundTrip()
     std::fprintf(stdout, "  [PASS] ClipAnimator clip+target round-trip（旁路 registry）\n");
 }
 
+// B2.6 改点 1：ClipAnimator 来自 .anim 资产时，scene 只存 clipSource 引用，Load 端
+// 经 assetRegistry 从 .anim 加载 clip + 重连 source path（与 mesh 同款资产引用）。
+void TestClipAnimatorAssetSourceRoundTrip()
+{
+    namespace Anim         = Orange::Engine::Animation;
+    const auto  scenePath  = MakeTempScenePath("clip_animator_asset");
+    const auto  animPath   = (std::filesystem::temp_directory_path() /
+                            "orange_engine_scene_test_src.anim").string();
+
+    // 先落一个 .anim 资产到盘。
+    {
+        Anim::AnimationClip clip;
+        clip.name     = "asset_clip";
+        clip.duration = 1.0f;
+        Anim::AnimationTrack t;
+        t.targetName = "position.x";
+        t.valueType  = Anim::TrackValueType::Float;
+        Anim::Keyframe k0; k0.time = 0.0f; k0.value = glm::vec4(0, 0, 0, 0);
+        Anim::Keyframe k1; k1.time = 1.0f; k1.value = glm::vec4(6, 0, 0, 0);
+        t.keys.push_back(k0); t.keys.push_back(k1);
+        clip.tracks.push_back(t);
+        auto sr = Anim::SaveAnimationClip(clip, animPath);
+        assert(sr.IsOk());
+    }
+
+    // 源 World：entity 挂 ClipAnimator，clip 来自上面的 .anim（设 source path）。
+    World  source;
+    Entity e = source.CreateEntity();
+    source.AddComponent(e, TransformComponent{});
+    {
+        Anim::AnimationClip placeholder;  // 内容无关——save 走 clipSource 引用，不嵌 clipJson
+        auto up = std::make_unique<ClipAnimator>(placeholder,
+                                                 source.GetComponent<TransformComponent>(e));
+        up->SetSourceAssetPath(animPath);
+        AnimatorComponent ac;
+        ac.animator = std::move(up);
+        source.AddComponent(e, std::move(ac));
+    }
+
+    auto saveRes = SceneSerialization::Save(source, scenePath.string());
+    assert(saveRes.IsOk());
+
+    // Load：提供带 AnimationClipLoader 的 AssetRegistry，scene 经 clipSource 加载 clip。
+    AssetRegistry reg;
+    assert(reg.RegisterLoader<Anim::AnimationClip>(
+               std::make_unique<Anim::AnimationClipLoader>()).IsOk());
+
+    World loaded;
+    auto  loadRes = SceneSerialization::Load(
+        scenePath.string(), loaded,
+        SceneSerialization::LoadOptions{.assetRegistry = &reg});
+    assert(loadRes.IsOk());
+
+    auto&  lreg    = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : lreg.view<AnimatorComponent>()) { loadedE = World::FromEntt(ent); }
+    assert(loadedE.IsValid());
+    const auto* lac = loaded.GetComponent<AnimatorComponent>(loadedE);
+    assert(lac != nullptr && lac->animator != nullptr &&
+           lac->animator->BackendName() == "clip");
+
+    auto* lclip = static_cast<ClipAnimator*>(lac->animator.get());
+    // clip 内容来自 .anim 资产。
+    assert(lclip->Clip().name == "asset_clip" && "clip 应从 .anim 资产加载");
+    assert(lclip->Clip().tracks.size() == 1 &&
+           FloatEq(lclip->Clip().tracks[0].keys[1].value.x, 6.0f));
+    // source path round-trip。
+    assert(lclip->SourceAssetPath() == animPath && "clipSource 路径应 round-trip");
+    // target 重连 + tick 真写。
+    lclip->Tick(0.5f);
+    assert(FloatEq(loaded.GetComponent<TransformComponent>(loadedE)->position.x, 3.0f));
+
+    RemoveIfExists(scenePath);
+    std::error_code ec;
+    std::filesystem::remove(animPath, ec);
+    std::fprintf(stdout, "  [PASS] ClipAnimator .anim 资产引用 round-trip（clipSource）\n");
+}
+
 void TestParticleEmitterRoundTrip()
 {
     const auto path = MakeTempScenePath("particle_emitter");
@@ -1069,6 +1149,7 @@ int main()
     TestAnimatorBackendNameRoundTrip();
     TestAnimatorWithoutRegistryGraceful();
     TestClipAnimatorRoundTrip();
+    TestClipAnimatorAssetSourceRoundTrip();
     TestParticleEmitterRoundTrip();
     TestSaveLoadSaveByteStable();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");

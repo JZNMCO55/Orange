@@ -84,6 +84,13 @@ public:
     void                 SetClip(AnimationClip clip);
     const AnimationClip& Clip() const noexcept;
 
+    // 来源 .anim 资产路径（空 = 内联构造、非来自资产）。非空时 scene 序列化只存
+    // 引用（clipSource）而非内联整个 clip（clipJson），与 RenderableComponent.mesh
+    // 同款"scene 存路径、资产文件持数据"，避免双源真相。编辑器拖 .anim 进 Inspector
+    // 时设置（见 docs/b2.6-animator-clip-authoring-spec.md 改点 1/3）。
+    void             SetSourceAssetPath(std::string_view path);
+    std::string_view SourceAssetPath() const noexcept;
+
     // 播放控制。Play/Pause 只切 mPlaying（Tick 据此决定是否推进）。
     void  Play() noexcept;
     void  Pause() noexcept;
@@ -111,6 +118,7 @@ private:
     Scene::TransformComponent* mpTarget{nullptr};
     float                      mElapsedSeconds{0.0f};
     bool                       mPlaying{true};
+    std::string                mSourceAssetPath;  // 空 = 内联 clip（见 SourceAssetPath 注释）
 };
 
 }  // namespace Orange::Engine::Animation

@@ -1691,9 +1691,20 @@ void WriteAnimator(JsonWriter& writer,
     // （procedural / skeletal）仍只持久化名字，由 AnimatorRegistry factory 重建。
     if (ac->animator->BackendName() == "clip")
     {
-        const auto* clipAnim = static_cast<const Animation::ClipAnimator*>(ac->animator.get());
-        writer.WriteString(Join(componentPath, "clipJson"),
-                           Animation::AnimationClipToJson(clipAnim->Clip(), -1));
+        const auto*            clipAnim = static_cast<const Animation::ClipAnimator*>(ac->animator.get());
+        const std::string_view src      = clipAnim->SourceAssetPath();
+        if (!src.empty())
+        {
+            // 资产化 clip：scene 只存 .anim 引用，clip 数据由资产文件持有
+            //（与 RenderableComponent.mesh 同款，避免双源真相）。
+            writer.WriteString(Join(componentPath, "clipSource"), src);
+        }
+        else
+        {
+            // 内联 / 程序化 clip：整段嵌入（形态 B）。
+            writer.WriteString(Join(componentPath, "clipJson"),
+                               Animation::AnimationClipToJson(clipAnim->Clip(), -1));
+        }
     }
 }
 
@@ -1980,6 +1991,13 @@ bool ReadAnimatorClipJson(const JsonReader& reader,
                           std::string&      outClipJson)
 {
     return reader.ReadString(Join(componentPath, "clipJson"), outClipJson);
+}
+
+bool ReadAnimatorClipSource(const JsonReader& reader,
+                            std::string_view  componentPath,
+                            std::string&      outClipSource)
+{
+    return reader.ReadString(Join(componentPath, "clipSource"), outClipSource);
 }
 
 const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()

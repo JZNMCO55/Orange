@@ -57,6 +57,12 @@ bool ReadAnimatorClipJson(const JsonReader& reader,
                           std::string_view  componentPath,
                           std::string&      outClipJson);
 
+// "clip" backend 的资产引用变体（B2.6 改点 1）：clip 来自 .anim 资产时，scene 只存
+// 路径引用（clipSource）。componentPath 处无 clipSource → false（走 clipJson 内联路径）。
+bool ReadAnimatorClipSource(const JsonReader& reader,
+                            std::string_view  componentPath,
+                            std::string&      outClipSource);
+
 }  // namespace Orange::Engine::Scene
 
 #endif  // ORANGE_ENGINE_SRC_SCENE_COMPONENT_SERIALIZERS_H
