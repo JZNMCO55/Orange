@@ -985,6 +985,48 @@ void TestClipAnimatorAssetSourceRoundTrip()
     std::fprintf(stdout, "  [PASS] ClipAnimator .anim 资产引用 round-trip（clipSource）\n");
 }
 
+// B2.6 改点 1 降级路径：clipSource 存在但 Load 未提供 assetRegistry —— 不崩，
+// animator 仍 attach（空 clip），且 source path 保留（下次 Save 不丢引用）。
+void TestClipAnimatorAssetSourceNoRegistryGraceful()
+{
+    namespace Anim        = Orange::Engine::Animation;
+    const auto  scenePath = MakeTempScenePath("clip_animator_noreg");
+    const char* srcPath   = "some/unresolved/clip.anim";
+
+    World  source;
+    Entity e = source.CreateEntity();
+    source.AddComponent(e, TransformComponent{});
+    {
+        auto up = std::make_unique<ClipAnimator>(Anim::AnimationClip{},
+                                                 source.GetComponent<TransformComponent>(e));
+        up->SetSourceAssetPath(srcPath);
+        AnimatorComponent ac;
+        ac.animator = std::move(up);
+        source.AddComponent(e, std::move(ac));
+    }
+    assert(SceneSerialization::Save(source, scenePath.string()).IsOk());
+
+    // Load 不提供 assetRegistry —— clipSource 无法解析，应 graceful。
+    World loaded;
+    auto  loadRes = SceneSerialization::Load(scenePath.string(), loaded);
+    assert(loadRes.IsOk() && "无 registry 也不应整体失败");
+
+    auto&  lreg    = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : lreg.view<AnimatorComponent>()) { loadedE = World::FromEntt(ent); }
+    assert(loadedE.IsValid());
+    const auto* lac = loaded.GetComponent<AnimatorComponent>(loadedE);
+    assert(lac != nullptr && lac->animator != nullptr &&
+           lac->animator->BackendName() == "clip" && "animator 仍 attach");
+
+    auto* lclip = static_cast<ClipAnimator*>(lac->animator.get());
+    assert(lclip->Clip().tracks.empty() && "无 registry → 空 clip（不崩）");
+    assert(lclip->SourceAssetPath() == srcPath && "source path 保留，下次 Save 不丢引用");
+
+    RemoveIfExists(scenePath);
+    std::fprintf(stdout, "  [PASS] ClipAnimator clipSource 无 registry → graceful（空 clip + 保留引用）\n");
+}
+
 void TestParticleEmitterRoundTrip()
 {
     const auto path = MakeTempScenePath("particle_emitter");
@@ -1150,6 +1192,7 @@ int main()
     TestAnimatorWithoutRegistryGraceful();
     TestClipAnimatorRoundTrip();
     TestClipAnimatorAssetSourceRoundTrip();
+    TestClipAnimatorAssetSourceNoRegistryGraceful();
     TestParticleEmitterRoundTrip();
     TestSaveLoadSaveByteStable();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
