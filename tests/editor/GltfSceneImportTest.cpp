@@ -512,6 +512,34 @@ int main()
                      "  [PASS] mesh instancing：2 node 共用 mesh → 1 .mesh + 共享 handle\n");
     }
 
+    // ===== 第四组：hash-skip 正确性反向验证 —— 源改了不该 over-skip =====
+    {
+        const std::string mutPath = (srcDir / "mutate.gltf").generic_string();
+        // v1：5 实体的层级场景。
+        WriteSceneHierarchyGltf(mutPath);
+        auto reg1 = MakeImportRegistry();
+        const auto rv1 = ImportNS::RunGltfSceneImportToRegistry(mutPath, *reg1);
+        assert(rv1.status == ImportNS::ImportStatus::Success && "v1 导入应 Success");
+        // v2：把同一源文件覆盖成 2 实体的实例化场景（源 hash 变）。
+        WriteInstancedMeshGltf(mutPath);
+        auto reg2 = MakeImportRegistry();
+        const auto rv2 = ImportNS::RunGltfSceneImportToRegistry(mutPath, *reg2);
+        assert(rv2.status == ImportNS::ImportStatus::Success && "v2 导入应 Success");
+        assert(rv2.message.find("unchanged") == std::string::npos &&
+               "源改了 → 不应 over-skip（hash 不匹配应真重导，而非永远跳过）");
+        // 重导后 scene.json 反映 v2（2 实体，而非 v1 残留的 5）。
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg2.get();
+        auto lr = SceneNS::Load(rv2.destPath, w, opts);
+        assert(lr.IsOk() && "v2 scene 应能 Load");
+        std::size_t cnt = 0;
+        for (auto e : w.Registry().view<SceneNS::NameComponent>()) { (void)e; ++cnt; }
+        assert(cnt == 2 && "重导后应是 v2 的 2 实体（确认真重导覆盖了 v1）");
+        std::fprintf(stdout,
+                     "  [PASS] hash-skip 正确性：源改了真重导（5→2 实体），不 over-skip\n");
+    }
+
     fs::current_path(fs::temp_directory_path(), ec);
     fs::remove_all(testRoot, ec);
 
