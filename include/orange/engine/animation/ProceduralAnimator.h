@@ -33,8 +33,13 @@
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
+#include <orange/engine/animation/AnimationClip.h>
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/render/MaterialInstance.h>
+
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstddef>
 #include <functional>
@@ -73,6 +78,14 @@ public:
     // 调 ClearChannels 再重 Add。
     template <typename T>
     void AddChannel(std::string_view name, std::function<T(float)> fn);
+
+    // 数据驱动 channel（B2.1）：把一条 AnimationTrack 的关键帧采样曲线包成
+    // channel，与上面的 lambda channel **并存于同一容器**（runtime/Tick 零改）。
+    // 按 track.valueType 分派到对应 AddChannel<T>（取采样 vec4 的前 N 维）。
+    // track 按值拷贝进 channel —— 调用方无需保活原 track。Tick 时每帧
+    // SampleTrack(track, elapsed) → SetUniform。这是让 ProceduralAnimator 从
+    // "曲线是 C++ lambda" 升级到 "曲线是可编辑/可序列化数据" 的接入点。
+    void AddDataChannel(std::string_view name, const AnimationTrack& track);
 
     // 清空所有 channel。elapsed 不重置——这是"换皮"路径（同一 procedural
     // 时序、不同 channel 集），与 SkeletalAnimator::Play 的 fade 心智不同。
@@ -141,6 +154,26 @@ template <typename T>
 void ProceduralAnimator::AddChannel(std::string_view name, std::function<T(float)> fn)
 {
     mChannels.emplace_back(std::make_unique<TypedChannel<T>>(std::string{name}, std::move(fn)));
+}
+
+inline void ProceduralAnimator::AddDataChannel(std::string_view name, const AnimationTrack& track)
+{
+    const std::string n{name};
+    switch (track.valueType)
+    {
+        case TrackValueType::Float:
+            AddChannel<float>(n, [track](float t) { return SampleTrack(track, t).x; });
+            break;
+        case TrackValueType::Vec2:
+            AddChannel<glm::vec2>(n, [track](float t) { return glm::vec2(SampleTrack(track, t)); });
+            break;
+        case TrackValueType::Vec3:
+            AddChannel<glm::vec3>(n, [track](float t) { return glm::vec3(SampleTrack(track, t)); });
+            break;
+        case TrackValueType::Vec4:
+            AddChannel<glm::vec4>(n, [track](float t) { return SampleTrack(track, t); });
+            break;
+    }
 }
 
 }  // namespace Orange::Engine::Animation

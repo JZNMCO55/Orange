@@ -10,6 +10,7 @@
 //   4. SetTarget 切换目标后继续工作；
 //   5. ChannelCount / ElapsedSeconds / ResetElapsed 行为正确。
 
+#include "orange/engine/animation/AnimationClip.h"
 #include "orange/engine/animation/ProceduralAnimator.h"
 #include "orange/engine/render/Material.h"
 #include "orange/engine/render/MaterialInstance.h"
@@ -167,6 +168,55 @@ void TestIAnimatorContract()
     assert(anim.ElapsedSeconds() == before);
 }
 
+// B2.1：AddDataChannel 把 AnimationTrack 的关键帧采样曲线驱动 uniform
+//（数据 channel 与 lambda channel 并存、同一 Tick）。
+void TestDataChannelFromTrack()
+{
+    auto material = MakeTwoSlotMaterial();
+    Rd::MaterialInstance mi(&material);
+    Ani::ProceduralAnimator anim(&mi);
+
+    // Float track：t=0→0, t=2→100（线性）。
+    Ani::AnimationTrack ftrack;
+    ftrack.valueType = Ani::TrackValueType::Float;
+    Ani::Keyframe fk0; fk0.time = 0.0f; fk0.value = glm::vec4(0.0f);
+    fk0.interp = Ani::InterpMode::Linear;
+    Ani::Keyframe fk1; fk1.time = 2.0f; fk1.value = glm::vec4(100.0f, 0, 0, 0);
+    fk1.interp = Ani::InterpMode::Linear;
+    ftrack.keys = {fk0, fk1};
+
+    // Vec3 track：t=0→(0,0,0), t=2→(2,4,6)（线性）。
+    Ani::AnimationTrack vtrack;
+    vtrack.valueType = Ani::TrackValueType::Vec3;
+    Ani::Keyframe vk0; vk0.time = 0.0f; vk0.value = glm::vec4(0.0f);
+    vk0.interp = Ani::InterpMode::Linear;
+    Ani::Keyframe vk1; vk1.time = 2.0f; vk1.value = glm::vec4(2, 4, 6, 0);
+    vk1.interp = Ani::InterpMode::Linear;
+    vtrack.keys = {vk0, vk1};
+
+    anim.AddDataChannel("noise_amp", ftrack);
+    anim.AddDataChannel("tint", vtrack);
+    assert(anim.ChannelCount() == 2);
+
+    // Tick 到 elapsed=1.0（两 track 区间中点）→ noise_amp=50, tint=(1,2,3)。
+    anim.Tick(1.0f);
+    auto fv = mi.GetUniformFloat("noise_amp");
+    auto vv = mi.GetUniformVec3("tint");
+    assert(fv.has_value() && std::fabs(*fv - 50.0f) <= 1e-3f &&
+           "Float 数据 channel t=1 → 线性中点 50");
+    assert(vv.has_value() &&
+           std::fabs(vv->x - 1.0f) <= 1e-3f &&
+           std::fabs(vv->y - 2.0f) <= 1e-3f &&
+           std::fabs(vv->z - 3.0f) <= 1e-3f &&
+           "Vec3 数据 channel t=1 → (1,2,3)");
+
+    // clamp：Tick 过末 key（elapsed=3.0 > duration 2.0）→ 末 key 值。
+    anim.Tick(2.0f);
+    auto fv2 = mi.GetUniformFloat("noise_amp");
+    assert(fv2.has_value() && std::fabs(*fv2 - 100.0f) <= 1e-3f &&
+           "数据 channel 超末 key → clamp 到末值 100");
+}
+
 }  // namespace
 
 int main()
@@ -176,5 +226,6 @@ int main()
     TestNullTargetSafe();
     TestResetAndClear();
     TestIAnimatorContract();
+    TestDataChannelFromTrack();
     return 0;
 }
