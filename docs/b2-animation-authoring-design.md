@@ -1,8 +1,15 @@
 # Phase B2 设计提案：动画时序编辑（数据模型 + timeline）
 
-> 状态：**设计提案（未实现）**。用户 2026-06-02「PIE + 动画时序编辑」重点排期下的 B2 地基调研。
-> 与 `docs/maturity-roadmap.md` B2.1~B2.6 配套——本文聚焦**最该先做的 B2.1 数据模型**（headless
-> 可建可测，是所有 timeline/curve UI 的根基），并校正 B2.5 现状。落地前关键决策升 ADR。
+> 状态：**B2.1/B2.1b 数据+运行时+序列化+资产层已全部落地（2026-06-02）；剩编辑器 GUI**。
+> 本文是当初的地基调研提案，保留作设计依据。**当前状态以 `docs/maturity-roadmap.md` B2 节为准**：
+> - ✅ **已落地（headless 全测，ctest 80/80）**：B2.1 数据模型（AnimationClip/Track/Keyframe +
+>   SampleTrack + clip/keyframe CRUD 原语）+ B2.1b 运行时消费（`ClipAnimator` 写 Transform /
+>   `.anim` 序列化 / `AnimationClipLoader` AssetRegistry / scene round-trip〔clipJson + clipSource
+>   引用〕/ `ProceduralAnimator::AddClipChannels`）。
+> - 📄 **剩编辑器 GUI，精确 spec 已出**：`docs/b2.6-animator-clip-authoring-spec.md`（Inspector 挂
+>   clip / 引用 .anim，改点 1 已落地）+ `docs/b2.3-timeline-dopesheet-spec.md`（timeline/dopesheet，
+>   数据层零缺口、纯 UI 壳）。
+> - 下文「2. B2.1 数据模型」的提案结构与最终落地基本一致（落地细节见各头文件 + 上述 spec）。
 
 ## 1. 现状精确盘点（读真实头文件后）
 
