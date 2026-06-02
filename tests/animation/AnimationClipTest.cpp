@@ -1,0 +1,140 @@
+// AnimationClip 数据模型 + 采样的 headless 单元测试（B2.1 地基）。
+// 锁住 SampleTrack 的 step / linear / bezier 插值 + clamp 边界 + 二分多段，
+// 是后续 timeline / 曲线编辑器 / ProceduralAnimator 数据 channel 的正确性基线。
+// 纯数据 + 纯函数，无 GPU / 无 World 依赖。
+
+#include <orange/engine/animation/AnimationClip.h>
+
+#include <glm/vec2.hpp>
+#include <glm/vec4.hpp>
+
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <initializer_list>
+#include <vector>
+
+namespace Anim = ::Orange::Engine::Animation;
+
+namespace
+{
+
+bool Near(float a, float b, float eps = 1e-4f)
+{
+    return std::fabs(a - b) < eps;
+}
+
+// 造一条 Float track，给定 (time, value, interp) 列表（值放 vec4.x）。
+Anim::AnimationTrack MakeFloatTrack(std::initializer_list<Anim::Keyframe> ks)
+{
+    Anim::AnimationTrack t;
+    t.valueType = Anim::TrackValueType::Float;
+    t.keys      = std::vector<Anim::Keyframe>(ks);
+    return t;
+}
+
+Anim::Keyframe Key(float time, float v, Anim::InterpMode interp,
+                   glm::vec2 inT = glm::vec2(0.0f), glm::vec2 outT = glm::vec2(0.0f))
+{
+    Anim::Keyframe k;
+    k.time       = time;
+    k.value      = glm::vec4(v, 0.0f, 0.0f, 0.0f);
+    k.interp     = interp;
+    k.inTangent  = inT;
+    k.outTangent = outT;
+    return k;
+}
+
+}  // namespace
+
+int main()
+{
+    using Anim::InterpMode;
+
+    // ===== 1. 空 track → 零 =====
+    {
+        Anim::AnimationTrack empty;
+        const glm::vec4 v = Anim::SampleTrack(empty, 0.5f);
+        assert(Near(v.x, 0.0f) && Near(v.y, 0.0f) && Near(v.z, 0.0f) && Near(v.w, 0.0f) &&
+               "空 track 采样应返回 (0,0,0,0)");
+        std::fprintf(stdout, "  [PASS] 空 track → 零\n");
+    }
+
+    // ===== 2. clamp：t 在首 key 前 / 末 key 后 =====
+    {
+        auto tr = MakeFloatTrack({Key(1.0f, 10.0f, InterpMode::Linear),
+                                  Key(3.0f, 30.0f, InterpMode::Linear)});
+        assert(Near(Anim::SampleTrack(tr, 0.0f).x, 10.0f) && "t<首key → 首key值（无外插）");
+        assert(Near(Anim::SampleTrack(tr, 5.0f).x, 30.0f) && "t>末key → 末key值（无外插）");
+        assert(Near(Anim::SampleTrack(tr, 1.0f).x, 10.0f) && "t==首key → 首key值");
+        assert(Near(Anim::SampleTrack(tr, 3.0f).x, 30.0f) && "t==末key → 末key值");
+        std::fprintf(stdout, "  [PASS] clamp：首key前/末key后/端点\n");
+    }
+
+    // ===== 3. 线性插值中点 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Linear),
+                                  Key(2.0f, 100.0f, InterpMode::Linear)});
+        assert(Near(Anim::SampleTrack(tr, 1.0f).x, 50.0f) && "线性 t=1（区间中点）→ 50");
+        assert(Near(Anim::SampleTrack(tr, 0.5f).x, 25.0f) && "线性 t=0.5 → 25");
+        std::fprintf(stdout, "  [PASS] 线性插值：中点/四分点\n");
+    }
+
+    // ===== 4. step 插值：保持 k0 值直到 k1 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 7.0f, InterpMode::Step),
+                                  Key(2.0f, 99.0f, InterpMode::Step)});
+        assert(Near(Anim::SampleTrack(tr, 1.999f).x, 7.0f) && "step：区间内保持 k0=7");
+        assert(Near(Anim::SampleTrack(tr, 2.0f).x, 99.0f) && "step：到 k1 跳到 99（末key clamp）");
+        std::fprintf(stdout, "  [PASS] step：区间内保持 k0\n");
+    }
+
+    // ===== 5. Bezier 零切线 = 中点退化为线性中点 =====
+    // 切线 m0=m1=0 时 Hermite → h00*P0 + h01*P1；u=0.5 时 h00=h01=0.5 → 中点。
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier),
+                                  Key(2.0f, 80.0f, InterpMode::Bezier)});
+        assert(Near(Anim::SampleTrack(tr, 1.0f).x, 40.0f) &&
+               "Bezier 零切线 t=1（中点）→ 40（退化为线性中点）");
+        // 端点必须精确命中 P0 / P1（u=0 → h00=1；u→1 → h01=1）。
+        assert(Near(Anim::SampleTrack(tr, 0.0f).x, 0.0f) && "Bezier u=0 → P0");
+        std::fprintf(stdout, "  [PASS] Bezier 零切线退化为线性中点 + 端点命中\n");
+    }
+
+    // ===== 6. Bezier 正出切线 → 中点高于线性（ease-out 抬升）=====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.0f, 1.0f)),
+                                  Key(2.0f, 80.0f, InterpMode::Bezier)});
+        const float mid = Anim::SampleTrack(tr, 1.0f).x;
+        assert(mid > 40.0f && "Bezier outTangent.y>0 → 中点高于线性中点 40（缓动抬升）");
+        std::fprintf(stdout, "  [PASS] Bezier 正切线抬升中点（mid=%.2f > 40）\n", mid);
+    }
+
+    // ===== 7. 多 key 二分：3 段中采样中间段 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Linear),
+                                  Key(1.0f, 10.0f, InterpMode::Linear),
+                                  Key(2.0f, 10.0f, InterpMode::Linear),
+                                  Key(3.0f, 40.0f, InterpMode::Linear)});
+        assert(Near(Anim::SampleTrack(tr, 0.5f).x, 5.0f) && "段[0,1] t=0.5 → 5");
+        assert(Near(Anim::SampleTrack(tr, 1.5f).x, 10.0f) && "段[1,2] 平台 t=1.5 → 10");
+        assert(Near(Anim::SampleTrack(tr, 2.5f).x, 25.0f) && "段[2,3] t=2.5 → 25");
+        std::fprintf(stdout, "  [PASS] 多 key 二分：3 段各自命中正确区间\n");
+    }
+
+    // ===== 8. Vec3 track：多维同时插值 =====
+    {
+        Anim::AnimationTrack tr;
+        tr.valueType = Anim::TrackValueType::Vec3;
+        Anim::Keyframe a; a.time = 0.0f; a.value = glm::vec4(0, 0, 0, 0); a.interp = InterpMode::Linear;
+        Anim::Keyframe b; b.time = 1.0f; b.value = glm::vec4(2, 4, 6, 0); b.interp = InterpMode::Linear;
+        tr.keys = {a, b};
+        const glm::vec4 v = Anim::SampleTrack(tr, 0.5f);
+        assert(Near(v.x, 1.0f) && Near(v.y, 2.0f) && Near(v.z, 3.0f) &&
+               "Vec3 track t=0.5 → (1,2,3)（各维独立线性）");
+        std::fprintf(stdout, "  [PASS] Vec3 track 多维同时线性插值\n");
+    }
+
+    std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
+    return 0;
+}

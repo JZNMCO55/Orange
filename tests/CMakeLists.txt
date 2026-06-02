@@ -384,6 +384,8 @@ add_test(NAME material_file_io_test COMMAND material_file_io_test)
 orange_engine_add_test(animation_state_machine_test animation/AnimationStateMachineTest.cpp)
 orange_engine_add_test(animator_registry_test       animation/AnimatorRegistryTest.cpp)
 orange_engine_add_test(procedural_animator_test     animation/ProceduralAnimatorTest.cpp)
+# AnimationClip 数据模型 + 采样（B2.1 地基，纯数据 + header-only 采样）
+orange_engine_add_test(animation_clip_test          animation/AnimationClipTest.cpp)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path
