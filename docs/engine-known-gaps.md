@@ -3172,7 +3172,10 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - **发现方**：用户 dogfood 史莱姆 procedural 呼吸 demo 时追问"动画是不是完全没有集成到编辑器里？导入其他软件制作的动画能不能观看？底部 Animation 面板是不是空壳？" → 触发对动画系统编辑器集成度的全面诊断
 - **发现日期**：2026-06-01
 - **一句话定性**：动画 **runtime 层完整真实**（`ProceduralAnimator` / `SkeletalAnimator`(DragonBones) / `AnimationStateMachine` 均真实现，有 `samples/05_skeletal_animation` + `tests/animation/SkeletalAnimatorTest.cpp` 证明可跑），但**编辑器集成层 ≈ 零**：动画几乎无法在编辑器里制作 / 导入 / 预览。**唯一能在编辑器看到的动画 = 史莱姆 procedural 呼吸**（且只在 Play 模式 + channel 硬编码在 C++ + 刚由 [[BUG-2026-06-01-slime-doll-invisible-and-mute-on-scene-load]] 修复可见）
-- **状态**：**未开工（登记）**。三个子缺口按首游 boss 战实际拉动排期
+- **状态**：**部分推进（2026-06-02 B2.1/B2.1b 补齐 G1+G3 的 headless 数据/运行时/序列化/资产基础；剩编辑器 GUI + G2 跨仓）**
+  - **G1+G3 的 headless 地基已落地**（2026-06-02 /goal session，OE `0951a50`/`12626e8`/`a79cef3`/`937a00a`/`51d1a69`/`8f5976d` 等）：数据驱动 `AnimationClip`/`Track`/`Keyframe` + `SampleTrack`（替代硬编码 lambda 曲线）+ clip/keyframe CRUD 原语 + 写 Transform 的 `ClipAnimator`（数据曲线驱动实体位姿，G1 "channel 改不了一根曲线" 的数据底座）+ `.anim` 序列化（schema `animation/Clip` v1.0）+ `AnimationClipLoader`（AssetRegistry）+ scene round-trip（"clip" backend）+ `ProceduralAnimator::AddClipChannels`（同 clip 驱动 material uniform）。**G1 剩纯编辑器 GUI**：AnimatorComponent 可 Add "clip" backend + Inspector 拖 .anim/播放控制——**精确 spec 已出 `docs/b2.6-animator-clip-authoring-spec.md`**（4 改点 file:line）。**G3 剩 timeline/dopesheet/曲线 UI**（消费已就绪的 clip/keyframe CRUD 原语）。
+  - **G2（外部动画导入 + GPU skinning）未动**——大概率跨 OrangeRender（bone palette / skinned vertex），按 ADR-009 三段式，boss 战实际拉动时先登记 `OrangeRender/docs/incoming_feature.md`。
+  - 详见 memory `project_maturity_roadmap_and_A1_transform_propagation`（B2.1b 段）+ `docs/maturity-roadmap.md` B2 节。
 
 ### 需求上下文（用户 2026-06-01 拍板，决定优先级）
 
