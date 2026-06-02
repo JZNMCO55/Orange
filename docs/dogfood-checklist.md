@@ -368,6 +368,32 @@
 
 ---
 
+## 2026-06-02 autonomous session（贴近 Lumix：glTF scene-level 导入）
+
+> 目标续上一段（贴近 Lumix 成熟度）。本段登记 GAP-2026-05-28 G1 落地里"headless 绿但视觉/层级待人工 dogfood"的残留。
+
+### 30. glTF scene-level 导入 —— 保留 transform 层级 + 每 mesh 单独不塌平
+
+- **commit**：见本 session `feat(editor): glTF scene-level 导入`（GAP-2026-05-28 G1）。
+- **背景**：此前 glTF importer 只有"asset import"维度（multi-mesh / multi-primitive **塌平合并成单个 MeshAsset**，丢失 transform 层级 / per-mesh 划分）。本次补"scene import"维度：遍历 `scenes[0].nodes` 的 transform 树，**每个 cgltf mesh 单独写一个 `.mesh`（不塌平）**，产出与 DCC 摆位同构的 `.scene.json`。对齐 Unity model prefab / Unreal scene import / Godot ".glb as scene" / Lumix per-mesh import。
+- **怎么触发**（CLI，headless，不开 GUI）：
+  ```
+  build/bin/Debug/OrangeEditor.exe import-scene path/to/scene.glb
+  ```
+  产物：`assets/scenes/<basename>.scene.json` + `assets/Models/<basename>/<basename>_<meshname>.mesh`（每 cgltf mesh 一个）+ 各 `.meta`。然后在 GUI 里 **File → Open**（或资产浏览器双击）该 `.scene.json`。
+- **看什么 / 通过判据**：
+  - viewport 里每个 prop 出现在 **Blender/DCC 摆好的世界位置 / 旋转 / 缩放** 上（不再全部叠在原点）；
+  - **Hierarchy panel 显示与 DCC 同构的 transform tree**（父子关系保留；group 空节点也在，作为分组父节点）；
+  - 每个 mesh 是**独立实体 + 独立 `.mesh`**（可单独选中 / 各自的 Renderable 指向不同 mesh），而非整包一个 mesh；
+  - 同一 mesh 被多 node 引用时只生成一个 `.mesh` 文件（多实体共享同一 handle）。
+- **G1 范围限制（dogfood 时注意，不是 bug）**：
+  - **材质全是默认材质**（灰 pbr）—— per-mesh PBR material 划分是 **G2**（未做），G1 只保几何 + 层级。所以即便 DCC 里有材质，导入后也是默认材质，这是预期。
+  - **不消费 glTF 灯光 / 相机**（G3 未做）；skinning / morph / 非 triangle primitive 全 skip。
+- **推荐 fixture**：在 Blender 摆 3~5 个 prop（各自不同 transform，组织成 1~2 层父子，比如一个 Empty 父节点下挂几个 mesh），导出 `.glb`（**勾选 +Y up，glTF 默认**）。或现成带 node 层级的多 mesh glTF 资产（如 KHR sample 里的 `BoxAnimated` / 任意场景型 .glb）。
+- **若发现问题**：摆位错位（可能是 has_matrix 分解 / 坐标轴问题）/ 层级反了 / mesh 被错误合并 → 在 `docs/engine-known-gaps.md` 登记，link 回 GAP-2026-05-28。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。

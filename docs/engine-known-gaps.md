@@ -2307,7 +2307,7 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ---
 
-## GAP-2026-05-28-gltf-scene-level-import-not-flattened
+## GAP-2026-05-28-gltf-scene-level-import-not-flattened ✅（G1）
 
 - **发现方**：Orange-Ecosystem umbrella session 讨论"关卡场景搭建工作流（in-engine vs 外部 DCC）"时
 - **发现日期**：2026-05-28
@@ -2391,9 +2391,22 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 
 ### 状态
 
-- **仅登记，未实现 / 未排期**。本条是 ADR-010 work-queue 登记动作（纯文档，不实现不消费），登记 session 不碰代码
+- **G1（scene-level import 主路径：hierarchy + 每 mesh 单独不塌平）✅ 2026-06-02 落地**（OrangeEditor，autonomous goal session "贴近 Lumix 成熟度"）。G2（per-mesh PBR material 划分）/ G3（lights / cameras）/ G4（.fbx）/ G5（re-import override）仍仅登记、未排期。
 - **优先级**：P2（预防性登记，玩法验证完成后升格）。**触发升格条件**：首款 Ori-like 玩法 spike 闭环 + 首游进入 visual polish 阶段、用户尝试在 Blender 摆完整关卡时（按用户在 umbrella session 表达的工作流意图，这是个**可预期**而非偶发的需求）。在那之前用 G1 子集（手工组装内置 cube / plane + GUI 摆位）已够灰盒
 - **归属候选**：OrangeEditor v1.2 范畴（与 PBR material 解析 G2 同 milestone，与 ADR-008 "PBR material 延 v1.2" 对齐）；G4 .fbx 可继续延后到 importer family 完整覆盖时再做；G5 re-import override 单独 minor milestone
+
+### G1 落地记录（scene-level glTF import，2026-06-02）
+
+把 glTF 从"只能塌平成单 mesh"扩出 **scene import 维度** —— 遍历 `scenes[0].nodes` 的 transform 树，**每个 cgltf mesh 单独写一个 `.mesh`（不跨 mesh 合并、不丢层级）**，产出与 DCC 摆位同构的 `.scene.json` + 多个 `.mesh`。对齐 Unity model prefab / Unreal scene import / Godot ".glb as scene" / Lumix per-mesh import。
+
+- **新模块**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}` —— `RunGltfSceneImportToRegistry(srcPath, AssetRegistry&)`，registry-only headless seam（不出现 EditorHost，与 GAP-2026-05-27 G1 同款解耦）。cgltf `IMPLEMENTATION` 宏仍只在 `GltfImporter.cpp` 一处 expand，本 TU 只取声明。
+- **流程**：① 为每个被 node 引用的 cgltf mesh `BuildMeshAssetFromGltfMesh`（merge 该 mesh 自身 primitive，不跨 mesh）→ `MeshLoader::Save` 到 `assets/Models/<basename>/<basename>_<meshname>.mesh` + `.meta` → `registry.Load<MeshAsset>` 拿 handle；同一 mesh 被多 node 引用按指针去重只写一次。② 递归 `ProcessNode` 建 `World`：每 node 一 Entity，挂 `NameComponent`（node.name / `Node_<i>`）+ `TransformComponent`（`has_matrix` 走 `glm::decompose`，否则直接用 TRS；glTF 右手 Y-up 与引擎一致无需轴转换）+ `HierarchyComponent`（parent / firstChild / 双向兄弟链由调用方 patch，根用 sortIndex 排序）；带 mesh 的 node 加 `RenderableComponent` 指向对应 handle。③ `Scene::Save(world, scenePath, {.assetRegistry=&reg})` 复用引擎序列化写出 `assets/scenes/<basename>.scene.json`（Hierarchy 索引链由序列化层保证自洽，不手写 JSON 避免 schema 漂移）+ scene `.meta`。
+- **关键纪律点**：不跨 `CreateEntity` / `AddComponent` 持有 component 指针（entt storage realloc 会悬空）—— firstChild / 子链 patch 全部在子树建完、不再新增实体之后用现取指针写。
+- **CLI 入口**：`tools/OrangeEditor/main.cpp` 加 `import-scene` 子命令（`RunHeadlessSceneImport`），镜像 `import-mesh`，在任何 GLFW/Vulkan/ImGui init 之前判 argv 走纯 CPU 路径后退出（成功 0 / 缺路径 2 / registry 失败 3 / 导入失败 1）。用法 `OrangeEditor.exe import-scene <path.gltf|.glb>`。
+- **G1 范围限制（与上文拆解对齐）**：RenderableComponent.material **留空（默认材质）**—— per-mesh PBR material（G2）需 MaterialInstance 对象做 `Scene::Save` 反查，headless 不构造，留 G2（基础设施已落地，单列子缺口）；lights / cameras（G3）暂不消费；只接受 triangle primitive；skinning / morph / animation skip。
+- **验收**：新增 `tests/editor/GltfSceneImportTest.cpp`（自包含 3-node 层级 fixture `RootGroup → {ChildA, ChildB}` + 2 mesh，base64 data: URI 无外部依赖）—— 断言 import 产出 `.scene.json` + 2 个独立 `.mesh`（不塌平）+ `Scene::Load` round-trip 回 World 验实体数 3 / 父子关系 / transform 摆位 / 两 child 指向**各自独立** mesh handle。`gltf_scene_import_test` 编入 `tests/CMakeLists.txt`（链接同 headless_mesh_import_test 模式）。**ctest 75/75**（新增 1，零回归）；`check_invariants` All OK（7 grandfathered）；drift none。CLI exe 端到端 dogfood（临时多 node .gltf → `import-scene` → exit 0 + scene.json 结构正确）已过。
+- **待 dogfood**（headless 无 viewport 渲染）：真实 Blender 多 prop 场景导入后在 viewport 的视觉摆位 / 层级正确性，见 `docs/dogfood-checklist.md`。
+- **关键改动文件**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}`（新增）/ `tools/OrangeEditor/main.cpp`（import-scene CLI）/ `tools/OrangeEditor/CMakeLists.txt`（源列表）/ `tests/editor/GltfSceneImportTest.cpp`（新增）/ `tests/CMakeLists.txt`（test target）
 - **关联**：
   - [[GAP-2026-05-22-editor-dcc-import-pipeline-missing]]（前置 ✅；本条在 scene 维度补完，单 mesh 维度它已覆盖）
   - [[GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra]]（G2 前置——material binding + tangent 基础设施）
