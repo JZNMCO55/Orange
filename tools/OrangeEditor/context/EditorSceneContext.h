@@ -130,6 +130,13 @@ struct EditorSceneContext
     // 帧 EditorRenderLayer 弹 modal popup；用户选 Save/Discard/Cancel 后
     // 决定怎么走 pendingCloseAction（执行 / 重置）。
     PendingCloseAction pendingCloseAction = PendingCloseAction::None;
+
+    // Asset 浏览器双击 .scene.json → 请求打开该场景（跳过文件对话框）。
+    // DrawAssetFileList（自由函数）只能写 host 级字段，无法直接碰
+    // EditorRenderLayer 的 mPendingOpenScenePath；故经此桥接：EditorRenderLayer
+    // OnUpdate 帧首消费——非空则路由到与 Open Recent 完全相同的打开流程
+    // （注入 mPendingOpenScenePath + dirty 时走未保存确认）后清空。
+    std::string requestedOpenScenePath;
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_SCENE_CONTEXT_H

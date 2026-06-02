@@ -336,6 +336,21 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
         }
     }
 
+    // Asset 浏览器双击 .scene.json 的打开请求（DrawAssetFileList 经 host.scene
+    // 桥接，见 requestedOpenScenePath 注释）：路由到与 Open Recent 完全相同的流程
+    // （注入 mPendingOpenScenePath 跳过对话框 + dirty 时走未保存确认）。仅 Edit 态。
+    if (mHost.scene.playState == PlayState::Edit
+        && !mHost.scene.requestedOpenScenePath.empty())
+    {
+        mPendingOpenScenePath = mHost.scene.requestedOpenScenePath;
+        mHost.scene.requestedOpenScenePath.clear();
+        if (mHost.scene.dirty || HasUnsavedMaterial()) {
+            mHost.scene.pendingCloseAction = PendingCloseAction::OpenScene;
+        } else {
+            mHost.scene.pendingSceneOp = SceneOp::Open;
+        }
+    }
+
     // 顶部固定 UI 的渲染顺序（v0.6.5 c0 起）：
     //   1. DrawMainMenuBar    —— BeginMainMenuBar 占主 viewport 顶部一行
     //   2. DrawMainToolbar    —— BeginViewportSideBar(Up) 占第二行
@@ -1985,6 +2000,16 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
                 host.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
                 host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
             }
+        }
+        // 双击 .scene.json → 请求打开该场景（Unity/Lumix 标准）。Selectable 单击
+        // 已设 selectedAssetPath；这里叠加双击 = 打开。经 host.scene 桥接到
+        // EditorRenderLayer 的 Open 流程（见 requestedOpenScenePath 注释）。
+        if (ImGui::IsItemHovered()
+            && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
+            && name.size() >= 11
+            && name.compare(name.size() - 11, 11, ".scene.json") == 0)
+        {
+            host.scene.requestedOpenScenePath = path;
         }
         // DnD source：path 字符串（含 '\0' 终止符）作为 payload 数据；
         // v0.5 c4 接收方在 Inspector AssetRef 字段内 AcceptDragDropPayload
