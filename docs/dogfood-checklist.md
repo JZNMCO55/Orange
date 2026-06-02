@@ -265,6 +265,12 @@
   - **持久化**：关编辑器重开，Open Recent 列表仍在（存进 editor_settings.json）
 - **背景**：File 菜单之前没有最近场景，每个成熟编辑器都有。**菜单 + 持久化待 dogfood**。
 
+### 20. 小补完一束（低 dogfood 风险，顺手扫一眼即可）
+
+- `5a3a9a0` **viewport overlay 加 gizmo 状态**：左上角 overlay 第三行 `Gizmo: <Move/Rotate/Scale> [<World/Local>]` —— 切 W/E/R 模式 + X 键切 World/Local 时该行实时变。
+- `b90a662` **相机聚焦菜单入口**：Entity Tree 节点右键有 **Focus**（聚焦该实体）；View 菜单有 **Frame Selected (F)** / **Frame All (Home)**。
+- `8311bd3` **Ctrl+A 全选**：Entity Tree 焦点时 Ctrl+A → 全选所有实体（看 overlay Selected / 多选高亮）。
+
 ---
 
 ## 维护约定
