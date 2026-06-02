@@ -52,8 +52,13 @@ enum class TrackValueType : std::uint8_t
 };
 
 // 单个关键帧。value 按 track 的 valueType 用前 N 维；其余维忽略。
-// inTangent / outTangent 仅 Bezier 用——(dx, dy) 控制柄，dx 为时间方向、
-// dy 为值方向（这里值取 .x 维近似；多维 Bezier 后续可扩成每维独立切线）。
+// inTangent / outTangent 仅 Bezier 用——单位方框内的归一化控制柄 (dx, dy)，
+// 语义对标 CSS cubic-bezier / After Effects：把相邻两帧的过渡看成 (0,0)→(1,1)
+// 的单位三次 Bezier，outTangent 是从本帧 (0,0) 出发的控制点偏移 c1，inTangent 是
+// 落到下一帧 (1,1) 的控制点偏移（c2 = (1,1) + inTangent，故 inTangent.x 通常为负，
+// 指回前一帧方向）。dx 控制 **时间方向** 缓动（ease-in/out 的非线性时序，夹到 [0,1]
+// 保 X 单调）、dy 控制值方向抬升（可超出 [0,1] 实现 overshoot / 回弹）。多维 value
+// 共享同一标量时序曲线（各维同步缓动）。
 struct Keyframe
 {
     float      time{0.0f};
@@ -100,6 +105,56 @@ struct AnimationClip
 //   * 否则二分找包住 t 的相邻 k0,k1，按 k0.interp 插值。
 // 不变量：keys 必须按 time 升序（编辑器插入时维持；本函数不排序）。
 // 复杂度：O(log N)（N = key 数）的二分。
+// 单位三次 Bezier 缓动求解（CSS cubic-bezier / After Effects 时间缓动模型）。
+// 控制点 P0=(0,0)、P3=(1,1)，c1=(c1x,c1y)、c2=(c2x,c2y) 落在单位方框内。给定线性
+// 时间分数 x∈[0,1]，先反解参数 s 使 BezierX(s)=x（Newton-Raphson 起步 + bisection
+// 兜底），再取 BezierY(s) 作缓动后的值分数。这让控制柄的 **时间方向（.x）** 真正参与，
+// 可表达 ease-in / ease-out / ease-in-out 的非线性 *时序*（旧 MVP 只用 .y 抬升值、时间
+// 恒线性）。c1x/c2x 夹到 [0,1] 保证 X(s) 单调（合法缓动函数前提）；c1y/c2y 不夹，允许
+// overshoot / 回弹。x 越界端点精确返回 0 / 1（端点命中性质）。
+inline float CubicBezierEase(float c1x, float c1y, float c2x, float c2y, float x) noexcept
+{
+    c1x = glm::clamp(c1x, 0.0f, 1.0f);
+    c2x = glm::clamp(c2x, 0.0f, 1.0f);
+    if (x <= 0.0f) { return 0.0f; }
+    if (x >= 1.0f) { return 1.0f; }
+
+    // P0=0、P3=1 的三次 Bezier 分量值与其对 s 的导数（a=c1 分量、b=c2 分量）。
+    const auto bez = [](float s, float a, float b) noexcept
+    {
+        const float oms = 1.0f - s;
+        return 3.0f * oms * oms * s * a + 3.0f * oms * s * s * b + s * s * s;
+    };
+    const auto dbez = [](float s, float a, float b) noexcept
+    {
+        const float oms = 1.0f - s;
+        return 3.0f * oms * oms * a + 6.0f * oms * s * (b - a) + 3.0f * s * s * (1.0f - b);
+    };
+
+    // Newton-Raphson 反解 BezierX(s)=x，初值 s=x（X 近线性时几次即收敛）。
+    float s = x;
+    for (int i = 0; i < 8; ++i)
+    {
+        const float err = bez(s, c1x, c2x) - x;
+        if (std::fabs(err) < 1e-6f) { return bez(s, c1y, c2y); }
+        const float d = dbez(s, c1x, c2x);
+        if (std::fabs(d) < 1e-6f) { break; }  // 导数过小 → 转 bisection
+        s -= err / d;
+    }
+    // bisection 兜底：Newton 不收敛 / 跑出 [0,1] 时稳收敛。
+    float lo = 0.0f;
+    float hi = 1.0f;
+    s        = glm::clamp(s, 0.0f, 1.0f);
+    for (int i = 0; i < 40; ++i)
+    {
+        const float xs = bez(s, c1x, c2x);
+        if (std::fabs(xs - x) < 1e-6f) { break; }
+        if (xs < x) { lo = s; } else { hi = s; }
+        s = 0.5f * (lo + hi);
+    }
+    return bez(s, c1y, c2y);
+}
+
 inline glm::vec4 SampleTrack(const AnimationTrack& track, float t) noexcept
 {
     const auto& keys = track.keys;
@@ -131,22 +186,14 @@ inline glm::vec4 SampleTrack(const AnimationTrack& track, float t) noexcept
             return glm::mix(k0.value, k1.value, u);
         case InterpMode::Bezier:
         {
-            // 三次 Bezier 的标准 de Casteljau 权重。控制点：
-            //   P0 = k0.value，P3 = k1.value；
-            //   P1 = P0 + outTangent（值方向用 .y 抬升所有维，时间方向用 .x
-            //        缩放——MVP 先用标量参数 u 直接走 Bezier 基函数，切线的
-            //        值分量(.y)按比例作用到全维差值上，够 timeline 缓动用）。
-            // MVP：用 outTangent.y / inTangent.y 作为进/出缓动强度，落在
-            // [P0,P3] 区间内的三次 Bezier（Hermite 等价形式）。
-            const float u2 = u * u;
-            const float u3 = u2 * u;
-            const float h00 = 2.0f * u3 - 3.0f * u2 + 1.0f;  // P0 基
-            const float h10 = u3 - 2.0f * u2 + u;            // m0 基
-            const float h01 = -2.0f * u3 + 3.0f * u2;        // P1 基
-            const float h11 = u3 - u2;                       // m1 基
-            const glm::vec4 m0 = (k1.value - k0.value) * k0.outTangent.y;
-            const glm::vec4 m1 = (k1.value - k0.value) * k1.inTangent.y;
-            return h00 * k0.value + h10 * m0 + h01 * k1.value + h11 * m1;
+            // 切线作单位方框 (0,0)→(1,1) 内的 2D 控制柄：c1 = k0.outTangent（从 (0,0)
+            // 出发的控制点偏移）、c2 = (1,1) + k1.inTangent（落到 (1,1) 的控制点偏移，
+            // inTangent.x 通常为负）。先按线性时间分数 u 反解 Bezier 参数得 **缓动后的
+            // 值分数**（时间方向 .x 真正参与 → 支持 ease-in/out 时序），再用它在 k0→k1
+            // 值之间插值；多维值共享同一标量缓动分数（CSS 式：一条时序曲线作用整段过渡）。
+            const float eased = CubicBezierEase(k0.outTangent.x, k0.outTangent.y,
+                                                1.0f + k1.inTangent.x, 1.0f + k1.inTangent.y, u);
+            return glm::mix(k0.value, k1.value, eased);
         }
     }
     return k0.value;  // 不可达（switch 全覆盖），守编译器

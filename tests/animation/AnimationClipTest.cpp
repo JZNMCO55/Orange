@@ -90,7 +90,8 @@ int main()
     }
 
     // ===== 5. Bezier 零切线 = 中点退化为线性中点 =====
-    // 切线 m0=m1=0 时 Hermite → h00*P0 + h01*P1；u=0.5 时 h00=h01=0.5 → 中点。
+    // 零切线 → 控制点 c1=(0,0)、c2=(1,1)，即 cubic-bezier(0,0,1,1) 恒等于线性缓动
+    //（X(s)≡Y(s) → eased=u）；u=0.5 时 eased=0.5 → 中点 40。
     {
         auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier),
                                   Key(2.0f, 80.0f, InterpMode::Bezier)});
@@ -108,6 +109,74 @@ int main()
         const float mid = Anim::SampleTrack(tr, 1.0f).x;
         assert(mid > 40.0f && "Bezier outTangent.y>0 → 中点高于线性中点 40（缓动抬升）");
         std::fprintf(stdout, "  [PASS] Bezier 正切线抬升中点（mid=%.2f > 40）\n", mid);
+    }
+
+    // ===== 6b. ease-in（cubic-bezier(0.42,0,1,1)）：纯 *时间* 切线（.y=0）改变时序 =====
+    // 关键：两端切线值方向 .y 全 0 —— 旧 Hermite-MVP 只看 .y，会退化成线性中点 50；
+    // 新模型用 .x 反解时间 → 慢启动，时间分数 0.5 处值仍落后（< 50）。这是旧实现做不到的。
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.42f, 0.0f)),
+                                  Key(2.0f, 100.0f, InterpMode::Bezier)});
+        const float mid = Anim::SampleTrack(tr, 1.0f).x;  // 时间分数 u=0.5
+        assert(mid < 50.0f &&
+               "ease-in（时间柄 .x>0、值柄 .y=0）中点应低于线性 50（慢启动；旧 MVP 退化线性）");
+        std::fprintf(stdout, "  [PASS] Bezier ease-in 时序缓动（mid=%.2f < 50）\n", mid);
+    }
+
+    // ===== 6c. ease-out（cubic-bezier(0,0,0.58,1)）：快启动 → 中点高于线性 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier),
+                                  Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.42f, 0.0f), {})});
+        const float mid = Anim::SampleTrack(tr, 1.0f).x;
+        assert(mid > 50.0f &&
+               "ease-out（下一帧 inTangent.x=-0.42、.y=0）中点应高于线性 50（快启动）");
+        std::fprintf(stdout, "  [PASS] Bezier ease-out 时序缓动（mid=%.2f > 50）\n", mid);
+    }
+
+    // ===== 6d. ease-in-out 对称（cubic-bezier(0.42,0,0.58,1)）：中点精确 50、两侧对称 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.42f, 0.0f)),
+                                  Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.42f, 0.0f), {})});
+        const float q1  = Anim::SampleTrack(tr, 0.5f).x;  // u=0.25
+        const float mid = Anim::SampleTrack(tr, 1.0f).x;  // u=0.5
+        const float q3  = Anim::SampleTrack(tr, 1.5f).x;  // u=0.75
+        assert(Near(mid, 50.0f, 0.5f) && "对称缓动中点精确 50");
+        assert(q1 < 50.0f && q3 > 50.0f && "ease-in-out：前慢（q1<50）后快（q3>50）");
+        assert(Near(q1 + q3, 100.0f, 1.0f) && "前后四分点关于中点对称（q1+q3≈100）");
+        std::fprintf(stdout, "  [PASS] Bezier ease-in-out 对称（q1=%.2f mid=%.2f q3=%.2f）\n",
+                     q1, mid, q3);
+    }
+
+    // ===== 6e. 纯时间缓动是单调映射 + 端点精确（合法 [0,1]→[0,1] 缓动函数）=====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.25f, 0.0f)),
+                                  Key(4.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.25f, 0.0f), {})});
+        assert(Near(Anim::SampleTrack(tr, 0.0f).x, 0.0f) && "Bezier 端点 u=0 → 0");
+        assert(Near(Anim::SampleTrack(tr, 4.0f).x, 100.0f) && "Bezier 端点 u=1 → 100");
+        float prev = -1.0f;
+        for (int i = 0; i <= 40; ++i)
+        {
+            const float t = 4.0f * static_cast<float>(i) / 40.0f;
+            const float v = Anim::SampleTrack(tr, t).x;
+            assert(v >= prev - 1e-3f && "纯时间缓动：采样值随 t 单调非降");
+            prev = v;
+        }
+        std::fprintf(stdout, "  [PASS] Bezier 纯时间缓动单调 + 端点精确\n");
+    }
+
+    // ===== 6f. 值方向 overshoot（.y 超出 [0,1]）→ 中段越过端点值（anticipation / 回弹）=====
+    // squash-stretch 的"juice"：过渡中段值临时冲过目标再回落。值柄 .y>1 由 glm::mix 外插实现。
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.3f, 1.6f)),
+                                  Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.3f, 1.6f), {})});
+        float peak = 0.0f;
+        for (int i = 0; i <= 40; ++i)
+        {
+            const float t = 2.0f * static_cast<float>(i) / 40.0f;
+            peak = std::max(peak, Anim::SampleTrack(tr, t).x);
+        }
+        assert(peak > 100.0f && "值方向 overshoot 柄 → 中段峰值越过端点 100（回弹）");
+        std::fprintf(stdout, "  [PASS] Bezier 值方向 overshoot 回弹（peak=%.2f > 100）\n", peak);
     }
 
     // ===== 7. 多 key 二分：3 段中采样中间段 =====
