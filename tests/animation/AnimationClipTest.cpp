@@ -260,6 +260,24 @@ int main()
         std::fprintf(stdout, "  [PASS] clip 级 track 管理：Find/Upsert/Remove/UpsertKeyframe\n");
     }
 
+    // ===== 15. RecomputeClipDuration：按内容刷新 duration =====
+    {
+        Anim::AnimationClip clip;
+        clip.duration = 0.0f;
+        Anim::UpsertKeyframe(clip, "position.x", Anim::TrackValueType::Float,
+                             Key(0.0f, 0.0f, InterpMode::Linear));
+        Anim::UpsertKeyframe(clip, "position.x", Anim::TrackValueType::Float,
+                             Key(3.5f, 10.0f, InterpMode::Linear));
+        Anim::RecomputeClipDuration(clip);
+        assert(Near(clip.duration, 3.5f) && "duration 应刷新为末 key 时间 3.5");
+        // 删掉末 key 后再刷新 → 缩短。
+        auto* tr = Anim::FindTrack(clip, "position.x");
+        Anim::RemoveKeyframe(*tr, 1);
+        Anim::RecomputeClipDuration(clip);
+        assert(Near(clip.duration, 0.0f) && "删末 key 后 duration 回到 0（仅剩 t=0 key）");
+        std::fprintf(stdout, "  [PASS] RecomputeClipDuration 按内容刷新\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }

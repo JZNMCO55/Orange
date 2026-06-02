@@ -233,6 +233,15 @@ inline float ComputeClipDuration(const AnimationClip& clip) noexcept
     return maxT;
 }
 
+// 把 clip.duration 刷新为各 track 关键帧的实际时长（ComputeClipDuration）。编辑器在
+// 增 / 删 / 拖 key 改变了关键帧分布后调用，使 duration 与内容同步（dopesheet 编辑流
+// 直接用，见 docs/b2.3-timeline-dopesheet-spec.md）。注：这会**覆盖**用户手设的
+// trailing-hold duration——只在"按内容自动定时长"语义下调用。
+inline void RecomputeClipDuration(AnimationClip& clip) noexcept
+{
+    clip.duration = ComputeClipDuration(clip);
+}
+
 // 把播放 elapsed 时间换算到 clip-local 采样时间：loop 时按 duration 取模
 //（含负值规整到 [0,duration)），非 loop 时 clamp 到 [0,duration]。供 playhead /
 // ClipAnimator 把累计时间喂给 SampleTrack 前调用。duration<=0 直接返 0（退化）。
