@@ -162,6 +162,45 @@ void WriteMatrixAndDeepNestGltf(const std::string& path)
         "}\n";
 }
 
+// 第三个 fixture：mesh instancing —— 2 个 node 引用**同一** cgltf mesh。
+// 验证 importer 按指针去重：只写一个 .mesh，两个 entity 的 Renderable 指向同一
+// mesh 路径（真实 DCC 场景大量用实例化，如 10 棵同款树共享一个 mesh）。
+void WriteInstancedMeshGltf(const std::string& path)
+{
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMA";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写实例化 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0, 1]}],\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"InstA\", \"translation\": [0.0, 0.0, 0.0], \"mesh\": 0},\n"
+        "    {\"name\": \"InstB\", \"translation\": [3.0, 0.0, 0.0], \"mesh\": 0}\n"
+        "  ],\n"
+        "  \"meshes\": [\n"
+        "    {\"name\": \"Tree\", \"primitives\": [{\"attributes\": "
+        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+        "\"type\": \"SCALAR\"}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
 // 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
 Entity FindByName(World& world, const std::string& name)
 {
@@ -431,6 +470,46 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] has_matrix 分解 + 3 层深嵌套 world 累积 (10,5,2) + "
                      "SpotLight 锥角/方向\n");
+    }
+
+    // ===== 第三组：mesh instancing —— 多 node 共用同一 mesh 去重 =====
+    {
+        const std::string iPath = (srcDir / "instanced.gltf").generic_string();
+        WriteInstancedMeshGltf(iPath);
+
+        auto reg = MakeImportRegistry();
+        const ImportNS::ImportResult ri =
+            ImportNS::RunGltfSceneImportToRegistry(iPath, *reg);
+        assert(ri.status == ImportNS::ImportStatus::Success && "实例化导入应 Success");
+        // 2 node 共用 mesh 0 → 只写 1 个 .mesh（按指针去重）。
+        assert(ri.message.find("meshes=1") != std::string::npos &&
+               "2 node 共用同一 mesh → 只写 1 个 .mesh（按指针去重）");
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg.get();
+        auto lr = SceneNS::Load(ri.destPath, w, opts);
+        assert(lr.IsOk() && "实例化 scene 应能 Load");
+
+        const Entity a = FindByName(w, "InstA");
+        const Entity b = FindByName(w, "InstB");
+        const auto* aR = w.GetComponent<::Orange::Engine::Render::RenderableComponent>(a);
+        const auto* bR = w.GetComponent<::Orange::Engine::Render::RenderableComponent>(b);
+        assert(aR != nullptr && bR != nullptr &&
+               aR->mesh.IsValid() && bR->mesh.IsValid() &&
+               "两实例都应有有效 Renderable");
+        assert(aR->mesh.Value() == bR->mesh.Value() &&
+               "两实例应指向同一 mesh handle（去重共享，不是各写一份）");
+
+        std::size_t meshFiles = 0;
+        for (const auto& de : fs::directory_iterator(fs::path("assets/Models/instanced")))
+        {
+            if (de.path().extension() == ".mesh") { ++meshFiles; }
+        }
+        assert(meshFiles == 1 && "实例化只应产出 1 个 .mesh 文件（不是 2 份）");
+
+        std::fprintf(stdout,
+                     "  [PASS] mesh instancing：2 node 共用 mesh → 1 .mesh + 共享 handle\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);
