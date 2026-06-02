@@ -10,6 +10,8 @@
 #include <orange/engine/core/Log.h>
 
 #include <orange/engine/animation/AnimatorRegistry.h>
+#include <orange/engine/animation/AnimationClip.h>
+#include <orange/engine/animation/AnimationClipLoader.h>
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/animation/ProceduralAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
@@ -296,6 +298,18 @@ void RegisterImportLoaders(Orange::Engine::Asset::AssetRegistry& registry)
         reg.IsErr())
     {
         ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<TextureAsset> 失败 "
+                         "(code={})",
+                         static_cast<unsigned>(reg.Error()));
+    }
+
+    // .anim 关键帧动画资产（B2.2）：让编辑器 / headless CLI 能 Load<AnimationClip>。
+    // 完成 AnimationClipLoader 的运行时接线——scene 的 ClipAnimator clipSource 引用
+    // （B2.6 改点 1）在真实编辑器里据此加载 .anim。纯 CPU（走 Core::Serialization）。
+    if (auto reg = registry.RegisterLoader<Orange::Engine::Animation::AnimationClip>(
+            std::make_unique<Orange::Engine::Animation::AnimationClipLoader>());
+        reg.IsErr())
+    {
+        ORANGE_LOG_ERROR("[OrangeEditor] AssetRegistry::RegisterLoader<AnimationClip> 失败 "
                          "(code={})",
                          static_cast<unsigned>(reg.Error()));
     }
