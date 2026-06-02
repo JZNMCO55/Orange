@@ -1735,8 +1735,16 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
                 pLastPipeline = haloPipeline;
             }
 
+            // 位置取累积后 world matrix 平移列（含父变换，ADR-016 / A1.1 step 2）；
+            // root 灯 world==local 零回归，cache 缺失退回 local。
+            glm::vec3 haloPos = tc.position;
+            if (const auto* wtc =
+                    haloReg.try_get<Orange::Engine::Scene::WorldTransformComponent>(entity))
+            {
+                haloPos = glm::vec3(wtc->world[3]);
+            }
             const glm::mat4 model =
-                glm::translate(glm::mat4(1.0f), tc.position) *
+                glm::translate(glm::mat4(1.0f), haloPos) *
                 glm::scale(glm::mat4(1.0f), glm::vec3(pl.haloRadius));
             const glm::mat4 mvp = viewProj * model;
 
@@ -2673,9 +2681,14 @@ void Pipeline::Impl::SyncPostProcessFromWorld(Orange::Engine::World& world)
             }
             continue;
         }
-        // Local：拿 entity Transform 算 box 中心；无 Transform 视为原点
+        // Local：box 中心取累积后 world matrix 平移列（含父变换，ADR-016 / A1.1
+        // step 2）；无 cache 退回 local，无 Transform 视为原点。
         glm::vec3 boxCenter{0.0f};
-        if (auto* tc = reg.try_get<TC>(e))
+        if (const auto* wtc = reg.try_get<Orange::Engine::Scene::WorldTransformComponent>(e))
+        {
+            boxCenter = glm::vec3(wtc->world[3]);
+        }
+        else if (auto* tc = reg.try_get<TC>(e))
         {
             boxCenter = tc->position;
         }
