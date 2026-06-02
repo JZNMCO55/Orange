@@ -216,6 +216,50 @@ int main()
         std::fprintf(stdout, "  [PASS] MoveKeyframeTime：拖 key 改时间维持升序 + value 随迁\n");
     }
 
+    // ===== 14. clip 级 track 管理：Find/Upsert/Remove/UpsertKeyframe =====
+    {
+        Anim::AnimationClip clip;
+
+        // FindTrack 空 clip → nullptr。
+        assert(Anim::FindTrack(clip, "position") == nullptr && "空 clip 找不到 track");
+
+        // UpsertTrack 新建。
+        Anim::AnimationTrack& pos = Anim::UpsertTrack(clip, "position", Anim::TrackValueType::Vec3);
+        assert(clip.tracks.size() == 1 && pos.targetName == "position" &&
+               pos.valueType == Anim::TrackValueType::Vec3 && "UpsertTrack 新建 Vec3 轨道");
+
+        // UpsertTrack 已存在 → 返回同一轨道、不改 valueType、不新增。
+        Anim::AnimationTrack& pos2 = Anim::UpsertTrack(clip, "position", Anim::TrackValueType::Float);
+        assert(clip.tracks.size() == 1 && &pos2 == &clip.tracks[0] &&
+               pos2.valueType == Anim::TrackValueType::Vec3 && "已存在 → 复用且不改类型");
+
+        // FindTrack const 重载命中。
+        const Anim::AnimationClip& cclip = clip;
+        assert(Anim::FindTrack(cclip, "position") != nullptr && "const FindTrack 命中");
+
+        // UpsertKeyframe：在 rotation 轨道（自动建）上打 2 个键，维持升序。
+        Anim::UpsertKeyframe(clip, "rotation", Anim::TrackValueType::Vec3,
+                             Key(1.0f, 90.0f, InterpMode::Linear));
+        Anim::UpsertKeyframe(clip, "rotation", Anim::TrackValueType::Vec3,
+                             Key(0.0f, 0.0f, InterpMode::Linear));
+        const Anim::AnimationTrack* rot = Anim::FindTrack(clip, "rotation");
+        assert(clip.tracks.size() == 2 && rot != nullptr && rot->keys.size() == 2 &&
+               Anim::IsTrackSorted(*rot) && "UpsertKeyframe 自动建轨 + 打键升序");
+        // 同时间覆盖（沿用 AddKeyframeSorted 语义）。
+        Anim::UpsertKeyframe(clip, "rotation", Anim::TrackValueType::Vec3,
+                             Key(1.0f, 45.0f, InterpMode::Step));
+        rot = Anim::FindTrack(clip, "rotation");
+        assert(rot->keys.size() == 2 && Near(rot->keys[1].value.x, 45.0f) &&
+               rot->keys[1].interp == InterpMode::Step && "同时间打键覆盖");
+
+        // RemoveTrack。
+        assert(Anim::RemoveTrack(clip, "position") && clip.tracks.size() == 1 &&
+               "RemoveTrack 删 position");
+        assert(!Anim::RemoveTrack(clip, "nonexistent") && "删不存在 track → false");
+        assert(Anim::FindTrack(clip, "rotation") != nullptr && "rotation 仍在");
+        std::fprintf(stdout, "  [PASS] clip 级 track 管理：Find/Upsert/Remove/UpsertKeyframe\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }

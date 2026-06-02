@@ -26,6 +26,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Orange::Engine::Animation
@@ -242,6 +244,68 @@ inline float WrapClipTime(const AnimationClip& clip, float t) noexcept
     float wrapped = std::fmod(t, dur);
     if (wrapped < 0.0f) { wrapped += dur; }
     return wrapped;
+}
+
+// ---- clip 级 track 管理（编辑器创作 API，承接上面的 keyframe 级原语）----
+// 注：C++17 无 std::string / std::string_view 异构 operator==，统一把 targetName
+// 提升成 string_view 比较。
+
+// 按 targetName 找首个匹配 track。不存在 → nullptr。返回的指针在对 clip.tracks
+// 做增删（可能 reallocate）前有效。
+inline AnimationTrack* FindTrack(AnimationClip& clip, std::string_view targetName) noexcept
+{
+    for (AnimationTrack& tr : clip.tracks)
+    {
+        if (std::string_view(tr.targetName) == targetName) { return &tr; }
+    }
+    return nullptr;
+}
+
+inline const AnimationTrack* FindTrack(const AnimationClip& clip,
+                                       std::string_view      targetName) noexcept
+{
+    for (const AnimationTrack& tr : clip.tracks)
+    {
+        if (std::string_view(tr.targetName) == targetName) { return &tr; }
+    }
+    return nullptr;
+}
+
+// find-or-create：返回 targetName 对应 track 的引用。已存在则直接返回（**不**改其
+// valueType——避免静默改写已有轨道类型）；不存在则用给定 valueType 新建并 push。
+inline AnimationTrack& UpsertTrack(AnimationClip& clip, std::string_view targetName,
+                                   TrackValueType valueType)
+{
+    if (AnimationTrack* existing = FindTrack(clip, targetName)) { return *existing; }
+    AnimationTrack tr;
+    tr.targetName = std::string(targetName);
+    tr.valueType  = valueType;
+    clip.tracks.push_back(std::move(tr));
+    return clip.tracks.back();
+}
+
+// 删除首个 targetName 匹配的 track（编辑器删轨道用）。不存在 → false。
+inline bool RemoveTrack(AnimationClip& clip, std::string_view targetName)
+{
+    for (std::size_t i = 0; i < clip.tracks.size(); ++i)
+    {
+        if (std::string_view(clip.tracks[i].targetName) == targetName)
+        {
+            clip.tracks.erase(clip.tracks.begin() + static_cast<std::ptrdiff_t>(i));
+            return true;
+        }
+    }
+    return false;
+}
+
+// 在 targetName 轨道上打一个 key —— dopesheet "K 插入键"在 clip 级的入口：
+// UpsertTrack（按需建轨）+ AddKeyframeSorted（同时间覆盖，维持升序）。返回该 track。
+inline AnimationTrack& UpsertKeyframe(AnimationClip& clip, std::string_view targetName,
+                                      TrackValueType valueType, const Keyframe& key)
+{
+    AnimationTrack& tr = UpsertTrack(clip, targetName, valueType);
+    AddKeyframeSorted(tr, key);
+    return tr;
 }
 
 }  // namespace Orange::Engine::Animation
