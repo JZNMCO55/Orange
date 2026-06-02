@@ -432,6 +432,23 @@
 
 > **A1 剩余 consumer 完成清单**（给后续 session）：gizmo 放置+拖动读 world / world→local apply（防 parented 拖偏）· A1.3 reparent keep-world（重算 local 防跳）· 光源方向读 world rotation（+ importer 去 world-dir 编码改 R 桥接）· 物理 collider 读 world（2D，subtler）。详见 `docs/maturity-roadmap.md` A1.1 step 2。
 
+## 2026-06-02 session（成熟度地基 B2.1：动画 clip 数据模型）
+
+### 32. 动画 clip 数据层（B2.1）—— **当前纯数据，全 headless 已验，暂无需 dogfood**
+
+- 已落地的 `AnimationClip` / `SampleTrack` / `ProceduralAnimator::AddDataChannel` + keyframe
+  CRUD 数据原语（Sort/Duration/Wrap/Add/Find/Remove/Move）**全是纯数据 + 纯函数**，
+  AnimationClipTest 13 例 headless 覆盖采样/插值/边界/CRUD——**这层不需要人工 dogfood**。
+- **dogfood 触发点在后续 increment 落地后**（预登记，届时打开对应项）：
+  - ⏳ **ClipAnimator 写 Transform**：clip 驱动实体 pos/rot/scale 后，Play/scrub 看实体按曲线
+    动；parent 到移动物体的实体动画**叠加父变换正确**（靠 A1 hierarchy 传播）。
+  - ⏳ **Timeline / dopesheet UI**：拖 playhead scrub 预览实时跟随；dopesheet 上拖 key 改时间、
+    点选/删除 key、打键（K）插入——**交互手感全靠真机**（参 transform gizmo 的"读代码判能用
+    会翻车"教训）。
+  - ⏳ **曲线编辑器**：Bezier handle 拖动改缓动，曲线视图与实际插值一致。
+  - ⏳ **ProceduralAnimator 数据 channel 实时可见**：把一条 .anim track 喂给 slime 材质
+    uniform，Play 看 shader 效果按曲线变化（pbr 材质 UBO 已接，应可见）。
+
 ---
 
 ## 维护约定
