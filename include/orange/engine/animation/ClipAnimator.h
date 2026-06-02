@@ -85,6 +85,15 @@ public:
     void                 SetClip(AnimationClip clip);
     const AnimationClip& Clip() const noexcept;
 
+    // 过渡到新 clip：捕获当前 target 姿势作为 from-pose，切到 newClip 从头播，在
+    // fadeSeconds 内把 target 从 from-pose 混合到 newClip 采样姿势（position/scale
+    // 线性、rotation slerp）。idle↔walk↔attack 等状态切换的平滑过渡。
+    // 说明：这是"从冻结姿势淡入新 clip"的 MVP 近似（旧 clip 不继续播放），非两 clip
+    // 同时运行的全 cross-fade；视觉上足够多数过渡。fadeSeconds<=0 → 瞬切。
+    void CrossFadeTo(AnimationClip newClip, float fadeSeconds);
+    // 当前是否在过渡混合中（fade 剩余 > 0）。
+    bool IsFading() const noexcept;
+
     // 来源 .anim 资产路径（空 = 内联构造、非来自资产）。非空时 scene 序列化只存
     // 引用（clipSource）而非内联整个 clip（clipJson），与 RenderableComponent.mesh
     // 同款"scene 存路径、资产文件持数据"，避免双源真相。编辑器拖 .anim 进 Inspector
@@ -130,6 +139,10 @@ public:
     std::string_view BackendName() const noexcept override;
 
 private:
+    // 把 clip 在时间 t 的采样姿势写进 out（只覆写 clip 驱动的字段，未驱动字段保持
+    // out 原值）。ApplyPose / CrossFade 混合共用——纯函数、无副作用于 mpTarget。
+    void SampleClipPose(const AnimationClip& clip, float t, Scene::TransformComponent& out) const;
+
     // 触发 oldT 到 newT（推进量 advance = dt*speed）这次 Tick 越过的事件。仅正向
     // （advance>0）触发；loop 跨界拆成 (oldT,dur] ∪ (0,newT] 两段；advance>=dur（极大
     // dt）全部触发一次。半开区间 (lo,hi]：playhead 严格越过 event.time 才触发。
@@ -141,6 +154,11 @@ private:
     bool                       mPlaying{true};
     float                      mSpeed{1.0f};
     EventCallback              mEventCallback;
+    // 过渡混合状态：mFadeRemaining>0 时 ApplyPose 把 mFadeFromPose → 当前 clip 采样姿势
+    // 按 weight=1-mFadeRemaining/mFadeDuration 混合写 target。
+    Scene::TransformComponent  mFadeFromPose;
+    float                      mFadeRemaining{0.0f};
+    float                      mFadeDuration{0.0f};
     std::string                mSourceAssetPath;  // 空 = 内联 clip（见 SourceAssetPath 注释）
 };
 

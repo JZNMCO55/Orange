@@ -379,6 +379,37 @@ int main()
         std::fprintf(stdout, "  [PASS] 动画事件 loop 跨界分段触发\n");
     }
 
+    // ===== 17. CrossFadeTo：过渡混合（无 pop / 半程混合 / 瞬切）=====
+    {
+        Scene::TransformComponent tc;  // 起始姿势 A：position.x = 0（默认）
+        ClipAnimator anim(Anim::AnimationClip{}, &tc);
+
+        Anim::AnimationClip clipB;  // position.x 恒为 10
+        clipB.duration = 1.0f;
+        clipB.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(10, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(10, 0, 0, 0))}));
+
+        anim.CrossFadeTo(clipB, 1.0f);
+        assert(anim.IsFading() && "fade>0 → IsFading");
+        assert(Near(tc.position.x, 0.0f) && "过渡起点 w=0 → 保持 from-pose（无 pop）");
+
+        anim.Tick(0.5f);  // w=0.5 → mix(0,10,0.5)=5
+        assert(Near(tc.position.x, 5.0f) && "过渡半程 → 混合 5");
+        assert(anim.IsFading());
+
+        anim.Tick(0.5f);  // fade 完，纯 clipB → 10
+        assert(Near(tc.position.x, 10.0f) && "过渡完成 → 纯新 clip 10");
+        assert(!anim.IsFading() && "fade 结束 → IsFading false");
+
+        // 瞬切（fade<=0）：直接纯新 clip。
+        Scene::TransformComponent tc2;
+        ClipAnimator anim2(Anim::AnimationClip{}, &tc2);
+        anim2.CrossFadeTo(clipB, 0.0f);
+        assert(!anim2.IsFading() && Near(tc2.position.x, 10.0f) && "fade<=0 → 瞬切纯新 clip");
+        std::fprintf(stdout, "  [PASS] CrossFadeTo 过渡混合（无 pop / 半程混合 / 瞬切）\n");
+    }
+
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
     return 0;
 }

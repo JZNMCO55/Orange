@@ -2,8 +2,9 @@
 
 #include "orange/engine/animation/ClipAnimator.h"
 
-#include <glm/gtc/quaternion.hpp>
-#include <glm/trigonometric.hpp>  // glm::radians
+#include <glm/common.hpp>          // glm::mix
+#include <glm/gtc/quaternion.hpp>  // glm::slerp
+#include <glm/trigonometric.hpp>   // glm::radians
 
 #include <utility>
 
@@ -166,6 +167,27 @@ bool ClipAnimator::IsLooping() const noexcept
     return mClip.loop;
 }
 
+void ClipAnimator::CrossFadeTo(AnimationClip newClip, float fadeSeconds)
+{
+    // 捕获当前 target 姿势作为 from-pose（无 target → 默认姿势，混合实际无效但不崩）。
+    if (mpTarget != nullptr)
+    {
+        mFadeFromPose = *mpTarget;
+    }
+    SetClip(std::move(newClip));  // 替换 clip + 重算 duration
+    mElapsedSeconds = 0.0f;       // 新 clip 从头播
+    mFadeDuration   = fadeSeconds;
+    mFadeRemaining  = fadeSeconds > 0.0f ? fadeSeconds : 0.0f;
+    mPlaying        = true;
+    // 立即应用：fade>0 时 w=0（纯 from-pose，无 pop）；fade<=0 时直接纯新 clip（瞬切）。
+    ApplyPose();
+}
+
+bool ClipAnimator::IsFading() const noexcept
+{
+    return mFadeRemaining > 0.0f;
+}
+
 void ClipAnimator::Seek(float seconds)
 {
     mElapsedSeconds = WrapClipTime(mClip, seconds);
@@ -189,14 +211,10 @@ float ClipAnimator::Progress() const noexcept
     return mClip.duration > 0.0f ? mElapsedSeconds / mClip.duration : 0.0f;
 }
 
-void ClipAnimator::ApplyPose() const
+void ClipAnimator::SampleClipPose(const AnimationClip& clip, float t,
+                                 Scene::TransformComponent& out) const
 {
-    if (mpTarget == nullptr)
-    {
-        return;
-    }
-
-    for (const AnimationTrack& track : mClip.tracks)
+    for (const AnimationTrack& track : clip.tracks)
     {
         const TransformTarget field = ParseTransformTarget(track.targetName);
         if (field == TransformTarget::Unknown)
@@ -205,44 +223,48 @@ void ClipAnimator::ApplyPose() const
         }
 
         // SampleTrack 返回 vec4：Vec3/Vec2 track 取前 N 维，标量（Float track）落在 .x。
-        const glm::vec4 v = SampleTrack(track, mElapsedSeconds);
+        const glm::vec4 v = SampleTrack(track, t);
 
         switch (field)
         {
-            case TransformTarget::Position:
-                mpTarget->position = glm::vec3(v);
-                break;
-            case TransformTarget::PositionX:
-                mpTarget->position.x = v.x;
-                break;
-            case TransformTarget::PositionY:
-                mpTarget->position.y = v.x;
-                break;
-            case TransformTarget::PositionZ:
-                mpTarget->position.z = v.x;
-                break;
+            case TransformTarget::Position:      out.position = glm::vec3(v); break;
+            case TransformTarget::PositionX:     out.position.x = v.x; break;
+            case TransformTarget::PositionY:     out.position.y = v.x; break;
+            case TransformTarget::PositionZ:     out.position.z = v.x; break;
             case TransformTarget::RotationEuler:
                 // Vec3 角度制 → 弧度 → 合成四元数（glm 按 vec3 构造的固定欧拉序）。
-                mpTarget->rotation = glm::quat(glm::radians(glm::vec3(v)));
+                out.rotation = glm::quat(glm::radians(glm::vec3(v)));
                 break;
-            case TransformTarget::Scale:
-                mpTarget->scale = glm::vec3(v);
-                break;
-            case TransformTarget::ScaleX:
-                mpTarget->scale.x = v.x;
-                break;
-            case TransformTarget::ScaleY:
-                mpTarget->scale.y = v.x;
-                break;
-            case TransformTarget::ScaleZ:
-                mpTarget->scale.z = v.x;
-                break;
-            case TransformTarget::ScaleUniform:
-                mpTarget->scale = glm::vec3(v.x);
-                break;
-            case TransformTarget::Unknown:
-                break;  // 上面已 continue，不会到这；列出以满足 -Wswitch
+            case TransformTarget::Scale:         out.scale = glm::vec3(v); break;
+            case TransformTarget::ScaleX:        out.scale.x = v.x; break;
+            case TransformTarget::ScaleY:        out.scale.y = v.x; break;
+            case TransformTarget::ScaleZ:        out.scale.z = v.x; break;
+            case TransformTarget::ScaleUniform:  out.scale = glm::vec3(v.x); break;
+            case TransformTarget::Unknown:       break;  // 上面已 continue
         }
+    }
+}
+
+void ClipAnimator::ApplyPose() const
+{
+    if (mpTarget == nullptr)
+    {
+        return;
+    }
+    if (mFadeRemaining > 0.0f && mFadeDuration > 0.0f)
+    {
+        // 过渡混合：from-pose → 当前 clip 采样姿势，weight 0→1。未被 clip 驱动的字段在
+        // from / to 两端相同（toPose 初始化自 from-pose）→ 混合后不变。
+        Scene::TransformComponent toPose = mFadeFromPose;
+        SampleClipPose(mClip, mElapsedSeconds, toPose);
+        const float w = 1.0f - mFadeRemaining / mFadeDuration;
+        mpTarget->position = glm::mix(mFadeFromPose.position, toPose.position, w);
+        mpTarget->rotation = glm::slerp(mFadeFromPose.rotation, toPose.rotation, w);
+        mpTarget->scale    = glm::mix(mFadeFromPose.scale, toPose.scale, w);
+    }
+    else
+    {
+        SampleClipPose(mClip, mElapsedSeconds, *mpTarget);
     }
 }
 
@@ -258,6 +280,12 @@ void ClipAnimator::Tick(float dt)
     const float oldT    = mElapsedSeconds;
     mElapsedSeconds     = WrapClipTime(mClip, oldT + advance);
     FireEvents(oldT, advance, mElapsedSeconds);  // 在 elapsed 更新后用 old/new 判定越过
+    // 过渡混合按真实时间 dt 推进（不受 speed 影响——fade 是切换时长，非播放速率）。
+    if (mFadeRemaining > 0.0f)
+    {
+        mFadeRemaining -= dt;
+        if (mFadeRemaining < 0.0f) { mFadeRemaining = 0.0f; }
+    }
     ApplyPose();
 }
 
