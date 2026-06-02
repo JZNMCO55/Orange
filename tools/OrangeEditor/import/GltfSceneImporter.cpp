@@ -478,7 +478,6 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     // 同一 mesh 被多 node 引用只写一次（按指针去重）。命名 <basename>_<meshname>.mesh，
     // 同名 / 匿名退化用 mesh 序号。
     std::map<const cgltf_mesh*, ::Orange::Engine::Asset::AssetHandle<MeshAsset>> meshHandles;
-    std::map<const cgltf_mesh*, std::string> meshPaths;
     std::set<std::string> usedMeshStems;
     std::size_t writtenMeshes = 0;
 
@@ -528,7 +527,6 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         WriteTextureMeta(MetaPathFor(meshPath), meta);
 
         meshHandles[m] = loadRes.Value();
-        meshPaths[m]   = meshPath;
         ++writtenMeshes;
         return true;
     };
