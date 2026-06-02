@@ -4,6 +4,7 @@
 #include "../EditorRenderLayer.h"
 
 #include "../EditorAssetDropHandler.h"  // v1.2.3 patch · ORANGE_ASSET DnD
+#include "../EditorCameraControl.h"  // FrameSelectedCamera（右键 Focus）
 #include "../EditorHierarchy.h"
 #include "../EditorPrefabActions.h"  // Create Prefab... 右键入口（跨帧请求 modal）
 #include "../EditorTextUtil.h"  // Util::ContainsCaseInsensitive（Entity Tree 名称过滤）
@@ -1179,6 +1180,12 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
             ImGui::EndMenu();
         }
         ImGui::Separator();
+        // Focus（聚焦相机到该实体）—— 右键已把选中切到本节点，直接复用
+        // FrameSelectedCamera（与 viewport F 键同款）。Entity Tree 里也能聚焦，
+        // 不必先切到 viewport 按 F。
+        if (ImGui::MenuItem("Focus", "F")) {
+            FrameSelectedCamera(mHost);
+        }
         if (ImGui::MenuItem("Rename", "F2")) {
             BeginRename(entity);
         }

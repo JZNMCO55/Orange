@@ -8,6 +8,7 @@
 #include "BuiltinAssets.h"  // BuildNamedMaterialInstances（v1.0.1 c11 拆出）
 #include "DemoWorld.h"      // SeedDemoWorld / SeedPbrShowcaseWorld
 #include "EditorAssetDropHandler.h"  // CreateEntityFromMeshAsset / SyncSubMeshMaterialsForMesh
+#include "EditorCameraControl.h"  // FrameSelectedCamera / FrameAllCamera（View 菜单）
 #include "EditorAssetReferences.h"  // FindAssetReferences（资产引用只读扫描）
 #include "EditorHierarchy.h"
 #include "EditorPrefabActions.h"  // Create Prefab modal 承接 + 写盘 helper
@@ -790,6 +791,19 @@ void EditorRenderLayer::DrawMainMenuBar()
         ImGui::MenuItem("Settings", nullptr, &mShowSettingsPanel);
         ImGui::MenuItem("Profiler", nullptr, &mShowProfilerPanel);
         ImGui::MenuItem("Render Settings", nullptr, &mShowRenderSettingsPanel);
+
+        // 相机聚焦（菜单提供 F / Home 快捷键的可发现入口；快捷键本身在 viewport
+        // 内已绑）。Frame Selected 需有选中实体才可点。
+        ImGui::Separator();
+        if (ImGui::MenuItem("Frame Selected", "F", false,
+                            mHost.selection.selectedEntity.IsValid()))
+        {
+            FrameSelectedCamera(mHost);
+        }
+        if (ImGui::MenuItem("Frame All", "Home"))
+        {
+            FrameAllCamera(mHost);
+        }
 
         // 相机书签（gap 报告 §4 #4）：快照 / 跳转 viewport 轨道相机视角。
         // in-memory 单 session（持久化留待后续）。
