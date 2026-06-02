@@ -191,6 +191,7 @@
   - 之前同样的 OBJ 导入后只有几何（默认灰材质）
 - **背景**：之前 OBJ importer 解析 .mtl 但不消费。单材质 .mtl → pbr 材质（scalar：Kd/Ns/Ke，贴图 map_Kd 等留后续）。顺手修了 tinyobj mtl_basedir 缺尾斜杠的潜在 bug。
 - **2026-06-02 补**：**多材质 OBJ 也已支持**（`6739df2`，与 gltf 对等）—— usemtl 分组的 OBJ 导入后拆 sub-mesh + 生成多个 .material（slot 0=`<stem>.material` / slot≥1=`<stem>_<matname>.material`），drop 后各段显示各自材质。dogfood 多材质 OBJ：cube 用 Blender/手写分 2+ usemtl 组导出 .obj。
+- **2026-06-02 再补**：**OBJ 贴图也已导入**（`fcbe5b8` + `aa7d534`，OBJ 与 gltf 完全对等）—— map_Kd→baseColor / norm(或 map_bump)→normal / map_Ke→emissive 经 ImportTextureToRegistry co-locate 到模型目录 + 写进 .material texture 槽。dogfood：带 map_Kd 贴图的 .obj（贴图文件与 .obj/.mtl 同目录）导入后 viewport 应显示贴图（而非纯 Kd 色）。
 
 ### 13. Asset 浏览器右键 mesh "Add to Scene"
 
