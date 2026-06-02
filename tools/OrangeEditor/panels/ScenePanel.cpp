@@ -426,11 +426,21 @@ void EditorRenderLayer::DrawScenePanel()
                         const auto* nc = pStatsWorld->GetComponent<NameComponent>(sel);
                         if (nc != nullptr && !nc->name.empty()) { selName = nc->name; }
                     }
-                    char buf[192];
+                    // gizmo 模式 + 参考系（X 键切 World/Local 之前无视觉反馈）。
+                    const char* gizModeName =
+                        (mHost.gizmo.mode == EditorGizmoState::Mode::Rotate) ? "Rotate"
+                      : (mHost.gizmo.mode == EditorGizmoState::Mode::Scale)  ? "Scale"
+                                                                            : "Move";
+                    const char* gizSpaceName =
+                        (mHost.gizmo.space == EditorGizmoState::Space::Local) ? "Local"
+                                                                             : "World";
+                    char buf[224];
                     std::snprintf(buf, sizeof(buf),
-                        "Entities %zu  |  Renderables %zu  |  Tris %llu\nSelected: %s",
+                        "Entities %zu  |  Renderables %zu  |  Tris %llu\n"
+                        "Selected: %s\nGizmo: %s [%s]",
                         entityCount, visRenderables,
-                        static_cast<unsigned long long>(triCount), selName.c_str());
+                        static_cast<unsigned long long>(triCount), selName.c_str(),
+                        gizModeName, gizSpaceName);
 
                     ImDrawList* dl = ImGui::GetWindowDrawList();
                     const ImVec2 pad(8.0f, 5.0f);
