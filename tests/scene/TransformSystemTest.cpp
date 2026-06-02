@@ -190,6 +190,43 @@ int main()
                      "  [PASS] 组合 TRS 穿层级：父旋转作用于子偏移 + 父平移 → (5,0,-1)\n");
     }
 
+    // ===== 8. 环兜底：root 可达的 firstChild 环不应栈溢出 =====
+    // 畸形/损坏 scene 可能有 R→A→B→A 的 firstChild 环（编辑器 IsAncestorOf 禁环，
+    // 但手改场景文件能造出）。无 kMaxHierarchyDepth 守卫时 DFS 会无限递归直至栈溢出。
+    // 本例锁住：PropagateWorldTransforms 应正常返回（截断递归、不崩不挂）。
+    {
+        World ws;
+        Entity cr = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(cr, MakeTC({0.0f, 0.0f, 0.0f}));
+        Entity ca = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(ca, MakeTC({1.0f, 0.0f, 0.0f}));
+        Entity cb = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(cb, MakeTC({0.0f, 1.0f, 0.0f}));
+
+        // R（root，无 parent）.firstChild=A；A.parent=R, A.firstChild=B；
+        // B.parent=A, B.firstChild=A（制造 A↔B 环）。
+        HierarchyComponent cyhR;
+        cyhR.firstChild = ca;
+        ws.AddComponent<HierarchyComponent>(cr, cyhR);
+        HierarchyComponent cyhA;
+        cyhA.parent = cr;
+        cyhA.firstChild = cb;
+        ws.AddComponent<HierarchyComponent>(ca, cyhA);
+        HierarchyComponent cyhB;
+        cyhB.parent = ca;
+        cyhB.firstChild = ca;  // 环：B 的子又指回 A
+        ws.AddComponent<HierarchyComponent>(cb, cyhB);
+
+        // 不崩不挂即通过（kMaxHierarchyDepth 截断递归）。环中实体在截断前已写过
+        // world cache。
+        PropagateWorldTransforms(ws);
+        assert(ws.GetComponent<WorldTransformComponent>(ca) != nullptr &&
+               ws.GetComponent<WorldTransformComponent>(cb) != nullptr &&
+               "环中实体应拿到 world cache（截断前已写），且整体不栈溢出");
+        std::fprintf(stdout,
+                     "  [PASS] 环兜底：root 可达 firstChild 环不栈溢出，正常返回\n");
+    }
+
     std::fprintf(stdout, "[TransformSystemTest] all tests passed.\n");
     return 0;
 }

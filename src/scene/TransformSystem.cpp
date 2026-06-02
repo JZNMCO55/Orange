@@ -28,12 +28,26 @@ glm::mat4 LocalMatrix(const TransformComponent& t)
     return m;
 }
 
+// 层级递归深度上限——畸形/损坏 scene.json 可能含 firstChild 环（A→B→A），DFS
+// 会无限递归直至栈溢出硬崩。编辑器 reparent 有 IsAncestorOf 禁环，正常用不会出
+// 环；本上限是对"手改/损坏场景文件"的兜底（成熟引擎不该被畸形数据栈溢出）。
+// 真实场景层级远浅于此（深嵌套骨架/group 也罕见过百），撞上限即停、不递归更深，
+// 避免硬崩；无堆分配，每帧 hot-path 仅多一个 int 比较。
+constexpr int kMaxHierarchyDepth = 1024;
+
 // 递归：本 entity world = parentWorld * local，写 cache，再递归子节点。
 // 不跨 AddComponent 持有 HierarchyComponent 指针——firstChild 先读进局部，
 // 子循环每轮重取 nextSibling（AddComponent<WorldTransform> 不动 Hierarchy
 // pool，但稳妥从严）。
-void PropagateRecursive(World& world, Entity e, const glm::mat4& parentWorld)
+void PropagateRecursive(World& world, Entity e, const glm::mat4& parentWorld, int depth)
 {
+    // 超深（含环）兜底：停止递归，避免栈溢出。本 entity 的 world cache 仍写入
+    //（按当前 parentWorld 累积），只是不再向更深子节点传播。
+    if (depth >= kMaxHierarchyDepth)
+    {
+        return;
+    }
+
     const auto* t = world.GetComponent<TransformComponent>(e);
     const glm::mat4 local  = (t != nullptr) ? LocalMatrix(*t) : glm::mat4(1.0f);
     const glm::mat4 worldM = parentWorld * local;
@@ -47,7 +61,7 @@ void PropagateRecursive(World& world, Entity e, const glm::mat4& parentWorld)
     Entity child = h->firstChild;
     while (world.IsValid(child))
     {
-        PropagateRecursive(world, child, worldM);
+        PropagateRecursive(world, child, worldM, depth + 1);
         const auto* hc = world.GetComponent<HierarchyComponent>(child);
         child = (hc != nullptr) ? hc->nextSibling : Entity::Invalid();
     }
@@ -76,7 +90,7 @@ void PropagateWorldTransforms(World& world)
 
     for (const Entity r : roots)
     {
-        PropagateRecursive(world, r, glm::mat4(1.0f));
+        PropagateRecursive(world, r, glm::mat4(1.0f), 0);
     }
 }
 
