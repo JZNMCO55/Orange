@@ -181,6 +181,30 @@ inline void AddKeyframeSorted(AnimationTrack& track, const Keyframe& key)
     track.keys.push_back(key);  // 比所有 key 都晚 → 追加末尾
 }
 
+// 找到 time 最接近 t（容差内）的 keyframe 索引——编辑器点选 dopesheet 上的 key 用。
+// 无命中返回 keys.size()（"未找到"哨兵，调用方与 size 比较判定）。多个等距取先到的。
+inline std::size_t FindKeyframeIndexNear(const AnimationTrack& track, float t,
+                                         float tolerance) noexcept
+{
+    std::size_t best     = track.keys.size();
+    float       bestDist = tolerance;
+    for (std::size_t i = 0; i < track.keys.size(); ++i)
+    {
+        const float d = std::fabs(track.keys[i].time - t);
+        if (d <= bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+}
+
+// 删除 index 处的 keyframe——编辑器删键用。index 越界 → no-op 返 false。
+// vector erase 保序，删除不破坏剩余 key 的升序不变量。
+inline bool RemoveKeyframe(AnimationTrack& track, std::size_t index)
+{
+    if (index >= track.keys.size()) { return false; }
+    track.keys.erase(track.keys.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 // 各 track 末 key 时间的最大值——clip 的"内容时长"。供编辑器校验 / 派生
 // AnimationClip::duration（用户可能手设 duration 与 key 不符，本函数给真实下界）。
 // 假设各 track 已升序（末 key 时间最大）；空 track 贡献 0。

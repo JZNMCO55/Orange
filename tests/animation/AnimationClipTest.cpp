@@ -186,6 +186,21 @@ int main()
         std::fprintf(stdout, "  [PASS] AddKeyframeSorted：打键维持升序 + 同时间覆盖\n");
     }
 
+    // ===== 12. FindKeyframeIndexNear / RemoveKeyframe：编辑器选键 + 删键 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Linear),
+                                  Key(1.0f, 10.0f, InterpMode::Linear),
+                                  Key(2.0f, 20.0f, InterpMode::Linear)});
+        assert(Anim::FindKeyframeIndexNear(tr, 1.05f, 0.1f) == 1 && "近 t=1（点1.05）→ index 1");
+        assert(Anim::FindKeyframeIndexNear(tr, 0.5f, 0.1f) == tr.keys.size() &&
+               "无近邻（点0.5容差0.1）→ size 哨兵");
+        assert(Anim::RemoveKeyframe(tr, 1) && tr.keys.size() == 2 && Anim::IsTrackSorted(tr) &&
+               "删 index 1 → 剩 2 仍升序");
+        assert(Near(tr.keys[1].time, 2.0f) && "删中间 key 后 index1 = 原末 key t=2");
+        assert(!Anim::RemoveKeyframe(tr, 99) && tr.keys.size() == 2 && "越界删 → no-op false");
+        std::fprintf(stdout, "  [PASS] FindKeyframeIndexNear/RemoveKeyframe：选键 + 删键\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }
