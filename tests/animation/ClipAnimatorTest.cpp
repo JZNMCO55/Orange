@@ -429,6 +429,63 @@ int main()
         std::fprintf(stdout, "  [PASS] CrossFadeTo rotation slerp 半程 45°\n");
     }
 
+    // ===== 19. CrossFadeTo 真两-clip：出场 clip 在 fade 期间继续推进（非冻结一帧）=====
+    {
+        Scene::TransformComponent tc;
+        // 出场 clip A：position.x 线性 0→100，duration 2（非 loop）→ x(t)=50t。
+        Anim::AnimationClip clipA;
+        clipA.duration = 2.0f;
+        clipA.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                          LinKey(2.0f, glm::vec4(100, 0, 0, 0))}));
+        ClipAnimator anim(clipA, &tc);
+        anim.Tick(0.4f);  // 出场 clip 推进到 t=0.4 → x=20
+        assert(Near(tc.position.x, 20.0f) && "出场 clip 起播 t=0.4 → x=20");
+
+        // 入场 clip B：position.x 恒 0。CrossFade 1.0s。
+        Anim::AnimationClip clipB;
+        clipB.duration = 1.0f;
+        clipB.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(0, 0, 0, 0))}));
+        anim.CrossFadeTo(clipB, 1.0f);
+        assert(Near(tc.position.x, 20.0f) && "过渡起点 w=0 → 纯出场姿势 20（无 pop）");
+
+        anim.Tick(0.5f);  // 入场 elapsed=0.5；出场 playhead=0.4+0.5=0.9 → x=45；w=0.5
+        // 真两-clip：mix(出场 45, 入场 0, 0.5)=22.5（出场 clip 推进了！）。
+        // 若是旧冻结 MVP：mix(冻结 20, 0, 0.5)=10。22.5≠10 → 证明出场继续播放。
+        assert(Near(tc.position.x, 22.5f, 0.1f) &&
+               "fade 半程：出场 clip 推进到 x=45 → mix(45,0,0.5)=22.5（冻结 MVP 会得 10）");
+
+        anim.Tick(0.5f);  // fade 完 → 纯入场 clipB x=0
+        assert(!anim.IsFading() && Near(tc.position.x, 0.0f) && "fade 完 → 纯入场 0");
+        std::fprintf(stdout, "  [PASS] CrossFadeTo 真两-clip：出场 fade 期间继续推进（x=22.5≠冻结 10）\n");
+    }
+
+    // ===== 20. CrossFadeTo：出场 clip 未驱动的字段回退冻结基线（无反馈）=====
+    {
+        Scene::TransformComponent tc;
+        tc.scale = glm::vec3(3.0f);  // 起始 scale=3（无任何 clip 驱动 scale）
+        // 出场 clip 只驱动 position.x；入场 clip 也只驱动 position.x。两者都不碰 scale。
+        Anim::AnimationClip clipA;
+        clipA.duration = 1.0f;
+        clipA.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(0, 0, 0, 0))}));
+        ClipAnimator anim(clipA, &tc);
+        Anim::AnimationClip clipB;
+        clipB.duration = 1.0f;
+        clipB.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                         {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                          LinKey(1.0f, glm::vec4(0, 0, 0, 0))}));
+        anim.CrossFadeTo(clipB, 1.0f);
+        anim.Tick(0.5f);  // fade 半程
+        // scale 两 clip 都不驱动 → 冻结基线 3 在 from/to 两端一致 → 混合后仍 3（不被位置反馈污染）。
+        assert(NearV3(tc.scale, glm::vec3(3.0f)) &&
+               "两 clip 都不驱动的 scale 在 fade 中保持基线 3（无反馈漂移）");
+        std::fprintf(stdout, "  [PASS] CrossFadeTo 未驱动字段回退冻结基线（scale=3 不漂移）\n");
+    }
+
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
     return 0;
 }

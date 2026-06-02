@@ -85,11 +85,12 @@ public:
     void                 SetClip(AnimationClip clip);
     const AnimationClip& Clip() const noexcept;
 
-    // 过渡到新 clip：捕获当前 target 姿势作为 from-pose，切到 newClip 从头播，在
-    // fadeSeconds 内把 target 从 from-pose 混合到 newClip 采样姿势（position/scale
-    // 线性、rotation slerp）。idle↔walk↔attack 等状态切换的平滑过渡。
-    // 说明：这是"从冻结姿势淡入新 clip"的 MVP 近似（旧 clip 不继续播放），非两 clip
-    // 同时运行的全 cross-fade；视觉上足够多数过渡。fadeSeconds<=0 → 瞬切。
+    // 过渡到新 clip：切到 newClip 从头播，在 fadeSeconds 内把 target 从**出场 clip 的
+    // 实时姿势**混合到 newClip 采样姿势（position/scale 线性、rotation slerp）。
+    // idle↔walk↔attack 等状态切换的平滑过渡。**真两-clip cross-fade**：出场 clip 在
+    // fade 期间按同一 speed 继续推进、逐帧实时采样（如 run cycle 的腿部摆动在淡入 jump
+    // 时仍在动），而非冻结某一帧。出场 clip 未驱动的字段回退到过渡起点的冻结基线
+    //（mFadeFromPose），避免无源字段读到被混合结果产生反馈。fadeSeconds<=0 → 瞬切。
     void CrossFadeTo(AnimationClip newClip, float fadeSeconds);
     // 当前是否在过渡混合中（fade 剩余 > 0）。
     bool IsFading() const noexcept;
@@ -154,9 +155,14 @@ private:
     bool                       mPlaying{true};
     float                      mSpeed{1.0f};
     EventCallback              mEventCallback;
-    // 过渡混合状态：mFadeRemaining>0 时 ApplyPose 把 mFadeFromPose → 当前 clip 采样姿势
-    // 按 weight=1-mFadeRemaining/mFadeDuration 混合写 target。
+    // 过渡混合状态：mFadeRemaining>0 时 ApplyPose 把出场姿势 → 当前 clip 采样姿势按
+    // weight=1-mFadeRemaining/mFadeDuration 混合写 target。出场姿势 = 冻结基线
+    // mFadeFromPose（过渡起点 target 快照，供出场 clip 未驱动的字段）叠加出场 clip
+    // mFadeFromClip 在 mFadeFromElapsed（fade 期间按同一 speed 持续推进）处的实时采样
+    // → 真两-clip cross-fade。fade 结束后 mFadeFromClip 清空释放。
     Scene::TransformComponent  mFadeFromPose;
+    AnimationClip              mFadeFromClip;           // 出场 clip（fade 期间继续播放）
+    float                      mFadeFromElapsed{0.0f};  // 出场 clip 的 playhead
     float                      mFadeRemaining{0.0f};
     float                      mFadeDuration{0.0f};
     std::string                mSourceAssetPath;  // 空 = 内联 clip（见 SourceAssetPath 注释）

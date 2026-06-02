@@ -169,17 +169,22 @@ bool ClipAnimator::IsLooping() const noexcept
 
 void ClipAnimator::CrossFadeTo(AnimationClip newClip, float fadeSeconds)
 {
-    // 捕获当前 target 姿势作为 from-pose（无 target → 默认姿势，混合实际无效但不崩）。
+    // 冻结过渡起点 target 姿势作基线——供出场 clip 未驱动的字段（无源字段若从被混合的
+    // target 读会反馈）。无 target → 默认姿势，混合实际无效但不崩。
     if (mpTarget != nullptr)
     {
         mFadeFromPose = *mpTarget;
     }
+    // 捕获出场 clip 与其 playhead：fade 期间它按同一 speed 继续推进、逐帧实时采样（真
+    // 两-clip cross-fade，非冻结一帧）。必须在 SetClip 覆写 mClip / mElapsedSeconds 前抓取。
+    mFadeFromClip    = std::move(mClip);
+    mFadeFromElapsed = mElapsedSeconds;
     SetClip(std::move(newClip));  // 替换 clip + 重算 duration
-    mElapsedSeconds = 0.0f;       // 新 clip 从头播
-    mFadeDuration   = fadeSeconds;
-    mFadeRemaining  = fadeSeconds > 0.0f ? fadeSeconds : 0.0f;
-    mPlaying        = true;
-    // 立即应用：fade>0 时 w=0（纯 from-pose，无 pop）；fade<=0 时直接纯新 clip（瞬切）。
+    mElapsedSeconds  = 0.0f;      // 新 clip 从头播
+    mFadeDuration    = fadeSeconds;
+    mFadeRemaining   = fadeSeconds > 0.0f ? fadeSeconds : 0.0f;
+    mPlaying         = true;
+    // 立即应用：fade>0 时 w=0（纯出场姿势，无 pop）；fade<=0 时直接纯新 clip（瞬切）。
     ApplyPose();
 }
 
@@ -253,14 +258,18 @@ void ClipAnimator::ApplyPose() const
     }
     if (mFadeRemaining > 0.0f && mFadeDuration > 0.0f)
     {
-        // 过渡混合：from-pose → 当前 clip 采样姿势，weight 0→1。未被 clip 驱动的字段在
-        // from / to 两端相同（toPose 初始化自 from-pose）→ 混合后不变。
+        // 真两-clip 过渡混合：出场姿势 → 入场姿势，weight 0→1。
+        // 出场姿势 = 冻结基线（出场 clip 未驱动的字段）叠加出场 clip 在其 playhead 的
+        // **实时**采样（驱动字段 → 出场 clip 在 fade 期间继续动）。入场姿势同基线 + 入场
+        // clip 采样——两端共享 mFadeFromPose 基线，使两 clip 都不驱动的字段混合后不变。
+        Scene::TransformComponent fromPose = mFadeFromPose;
+        SampleClipPose(mFadeFromClip, mFadeFromElapsed, fromPose);
         Scene::TransformComponent toPose = mFadeFromPose;
         SampleClipPose(mClip, mElapsedSeconds, toPose);
         const float w = 1.0f - mFadeRemaining / mFadeDuration;
-        mpTarget->position = glm::mix(mFadeFromPose.position, toPose.position, w);
-        mpTarget->rotation = glm::slerp(mFadeFromPose.rotation, toPose.rotation, w);
-        mpTarget->scale    = glm::mix(mFadeFromPose.scale, toPose.scale, w);
+        mpTarget->position = glm::mix(fromPose.position, toPose.position, w);
+        mpTarget->rotation = glm::slerp(fromPose.rotation, toPose.rotation, w);
+        mpTarget->scale    = glm::mix(fromPose.scale, toPose.scale, w);
     }
     else
     {
@@ -280,11 +289,17 @@ void ClipAnimator::Tick(float dt)
     const float oldT    = mElapsedSeconds;
     mElapsedSeconds     = WrapClipTime(mClip, oldT + advance);
     FireEvents(oldT, advance, mElapsedSeconds);  // 在 elapsed 更新后用 old/new 判定越过
-    // 过渡混合按真实时间 dt 推进（不受 speed 影响——fade 是切换时长，非播放速率）。
+    // 过渡混合：fade 计时按真实 dt（fade 是切换时长，非播放速率）；出场 clip 的 playhead
+    // 按 advance=dt*speed 推进（与入场 clip 同速继续播放）→ 真两-clip cross-fade。
     if (mFadeRemaining > 0.0f)
     {
+        mFadeFromElapsed = WrapClipTime(mFadeFromClip, mFadeFromElapsed + advance);
         mFadeRemaining -= dt;
-        if (mFadeRemaining < 0.0f) { mFadeRemaining = 0.0f; }
+        if (mFadeRemaining <= 0.0f)
+        {
+            mFadeRemaining = 0.0f;
+            mFadeFromClip  = AnimationClip{};  // fade 完，释放出场 clip 拷贝
+        }
     }
     ApplyPose();
 }
