@@ -86,7 +86,7 @@
 - **现状/缺口**：runtime 齐全（骨骼/程序化/状态机都真实现，见 [[reference_orangeengine_animation_state]]），但**创作侧几乎为零**——零时间轴/dopesheet/曲线编辑器/状态机图编辑器，动画退化成"start→end 线性"或 C++ lambda channel；**无 GPU skinning**（骨骼动画动不了 mesh，大概率跨 OrangeRender）；AnimatorComponent 还不能 Add-Component（`GAP-2026-06-01-animation-editor-integration-missing`）。
 - **里程碑**（XL，多 session）：
   - 📄 **设计提案地基已出**：`docs/b2-animation-authoring-design.md`（读真实头文件后：现状盘点〔Procedural channel 是 lambda 非数据 / FSM 已有数据底座〕 + B2.1 clip/track/keyframe 数据结构 + 采样算法 + 与现有 animator 接通〔数据 channel 与 lambda 并存零改 runtime〕 + UI 线 + 实施顺序）。
-  - **B2.1 动画数据模型 ★先做最高杠杆**：keyframe track + curve（引擎层；当前 runtime 无 keyframe 编辑数据结构，Procedural channel 是 C++ lambda）。schema-first，可序列化 `.anim`；**采样 headless 可测**——像 A1 地基一样纯逻辑可自主推进、不需 dogfood，所有 timeline/curve UI 的根基。
+  - **B2.1 动画数据模型 ✅ 已落地（数据模型 + animator 接入）2026-06-02**：`AnimationClip`/`AnimationTrack`/`Keyframe` + `InterpMode`{Step/Linear/Bezier} + header-only `SampleTrack`（二分 + 插值 + clamp，`include/orange/engine/animation/AnimationClip.h`）；`ProceduralAnimator::AddDataChannel` 把 track 采样接进现有 channel 机制（runtime 零改）。headless 测（AnimationClipTest 8 例 + ProceduralAnimatorTest 数据 channel 例），ctest 77/77。**剩**：写 TransformComponent 的 `ClipAnimator`（靠 A1 hierarchy 传播子跟随）+ `.anim` 序列化（走 Core::Serialization）。
   - **B2.2 GPU skinning**：骨骼蒙皮上 GPU（**跨仓 OrangeRender**——bone matrix palette + vertex skinning shader；当前骨骼动画在 viewport 看不到形变）。**按 ADR-009 三段式**：OrangeRender session 落地 → umbrella bump → 引擎消费。
   - **B2.3 Timeline / dopesheet UI**（编辑器层 ImGui）——轨道 + 关键帧拖动 + scrub。
   - **B2.4 曲线编辑器**（curve editor，缓动/Bezier handle）。
