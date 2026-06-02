@@ -290,9 +290,6 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
     bool fileHasUVs     = false;
     bool fileHasNormals = false;
     std::size_t skippedPrimitives = 0;
-    // 第一个带 material 的三角 primitive 的 cgltf_material —— 取它解析 slot 0
-    // 的 PBR 通道，并作为 RenderableComponent.materialInstance 兜底。
-    const cgltf_material* firstMat = nullptr;
 
     // 多 material 收集：按"首次出现顺序"去重每个 primitive 的 cgltf_material；
     // orderedMats 的下标即 materialSlot。nullptr（无 material 的 primitive）也
@@ -331,11 +328,6 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
                 ++skippedPrimitives;
                 continue;
             }
-            if (firstMat == nullptr && prim.material != nullptr)
-            {
-                firstMat = prim.material;
-            }
-
             // 本 primitive 在合并后 index buffer 里的起点 + 归属 slot。indexCount
             // 在下面 append 完索引后回填（用 indices.size() 差值，自动覆盖 indexed
             // / 非 indexed 两条路径）。
@@ -483,9 +475,9 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
         return path;
     };
 
-    // 单 material（含全无 material）退化路径下 orderedMats 仍至少有一项；用
-    // firstMat 当 slot 0 兜底保证即便 orderedMats[0] 是 nullptr（首 primitive
-    // 无 material 但后续 primitive 有）时 slot 0 仍能拿到一个真实 material。
+    // slot 与 orderedMats 下标一一对应。orderedMats[i]==nullptr（该 slot 的
+    // primitive 无 material）→ slot 用引擎默认材质，这是正确的 glTF 语义（不该强塞
+    // 别的 material 进去），下面 ExtractGltfMaterial(nullptr) 自然得 present=false。
     std::vector<GltfMatInfo> slotMatInfos;
     slotMatInfos.reserve(orderedMats.empty() ? 1 : orderedMats.size());
     // 与 slotMatInfos 同序抽出每个 slot 的 material name —— 必须在 cgltf_free
@@ -497,8 +489,9 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
     slotMatNames.reserve(orderedMats.empty() ? 1 : orderedMats.size());
     if (orderedMats.empty())
     {
-        // 理论上不会发生（前面已 return 空几何），保险起见给一个 firstMat slot。
-        orderedMats.push_back(firstMat);
+        // 理论上不会发生（前面有几何才会到这；无几何已提前 return 空）。保险起见给
+        // 一个 nullptr slot（→ 引擎默认材质），保证后续按 slot 的循环至少跑一轮。
+        orderedMats.push_back(nullptr);
     }
     for (const cgltf_material* m : orderedMats)
     {
