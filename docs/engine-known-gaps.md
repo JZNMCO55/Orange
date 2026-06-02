@@ -1549,7 +1549,7 @@ src/render/
 
 ---
 
-## GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra
+## GAP-2026-05-25-pbr-material-texture-binding-and-tangent-infra ✅
 
 - **发现方**：A 部分推进侦察（DCC import v1.2 增强落地前置核查）
 - **发现日期**：2026-05-25
@@ -1622,6 +1622,17 @@ G1（per-instance material 贴图渲染）+ G2（tangent 通道 + .mesh v4）已
     - **验收**：`tests/editor/GltfEmbeddedTextureImportTest`（**自包含字节数组 fixture**，`tests/fixtures/gen_embedded_glb.py --carray` 生成，不依赖外部 fixture / Vulkan / GUI）：导内嵌 `.glb` → 断言内嵌 PNG 提取成 co-located 磁盘文件（PNG magic + TextureLoader 读回）+ `.material` texture 槽 path 指向该文件。**ctest 73/73**（新增 1；`gltf_material_import_test` 外部贴图路径同时 Passed 印证零回归）；`check_invariants` All OK；schema 未动。
     - **剩余 glTF 导入 gap**：emissive 通道（需先在 shader 加）+ 多 material per mesh + tangent fallback 端到端验证。**视觉 dogfood**：用 Blender 导一个内嵌贴图 `.glb` 进编辑器看 baseColor 是否正确（非 default 白）。
     - **视觉 dogfood**：导入 Avocado / **DamagedHelmet（有 AO 贴图）** → viewport 看 baseColor/normal 扰动/metalRough 区分/**AO 阴影区不过黑过亮（任务 A 修复最该 dogfood 的点，Avocado 无 AO 贴图验不到真实 strength 视觉）**。
+
+### ✅ 2026-06-02 整条 GAP 闭环（最后 3 个 follow-up 全落地）
+
+1611/1617/1623 行历次记录里反复留底的"剩余 glTF 导入 gap"（emissive 通道 / 多 material per mesh / tangent fallback 端到端验证）在 2026-05-31 ~ 06-02 两个 goal session 全部落地，本 GAP 整条标 ✅：
+
+- **emissive 通道**：早上 session 加 pbr shader emissive 路径（`pbr.vert` push constant 160B→176B 加 `uEmissive` + `pbr.frag` set 1 binding 4 `uEmissiveTex`，`color += emissive`）+ GltfImporter 解析 emissiveFactor/KHR_materials_emissive_strength/emissiveTexture + ObjImporter 解析 `Ke`/`map_Ke`；本 session `009a6e4` 补 `pbr.template.json` 的 uEmissive uniform（Material 子模式 inspector：Emissive R/G/B HDR slider range[0,8]）+ binding 4 槽 → **编辑器可调 + 导入自动填，emissive 编辑闭环**。
+- **多 material per mesh**：gltf 侧 2026-05-31 已 ✅（OE `774956d` 引擎 SubMeshMaterialsComponent + `.mesh` sub-mesh + a795c10 导入消费）；本 session `6739df2` 补 **OBJ 多材质对等**（per-face usemtl → sub-mesh + per-slot `.material`），并 `ff53bfe` 让单材质也写 `.meta subMeshMaterials` + `SyncSubMeshMaterialsForMesh` 统一所有"设 mesh"路径自动挂材质槽。
+- **tangent fallback 端到端验证**：本 session `HeadlessMeshImportTest` section 6 加"无 UV 的 obj 导入"用例，验证缺 UV/normal 时落 Lengyel fallback 不崩 + `.mesh` 顶点 tangent 通道（v4）正确产出。
+- **顺带（本 session 同源）**：OBJ importer 与 gltf **完全对等**——几何 + 单/多材质（scalar Kd/Ns/Pm/Ke）+ baseColor/normal/emissive 贴图（map_Kd/norm/map_Ke）+ sub-mesh + `.meta subMeshMaterials` 自动应用；并修 tinyobj v1.0.6 `mtl_basedir` 缺尾斜杠真 bug。
+- **验收**：ctest 74/74（HeadlessMeshImportTest section 6-10 覆盖 tangent fallback / 单+多材质 / map_Kd 贴图）；clean rebuild 全绿；`check_invariants` All OK。**剩纯视觉 dogfood**（emissive 自发光 + bloom / 多材质 viewport 分段 / AO strength）已登记 dogfood-checklist.md。
+- **关联**：[[GAP-2026-05-19-pbr-push-constant-exceeds-spec-min]] 仍开放（emissive 让 push constant 增至 176B，更超 128B spec min，per-instance material UBO 迁移仍是独立后续）。
 
 ---
 
