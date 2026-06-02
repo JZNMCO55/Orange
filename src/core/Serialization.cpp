@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -60,6 +61,27 @@ bool IsAllDigits(std::string_view part) noexcept
     return true;
 }
 
+// 把纯数字 part 解析成数组下标，检测 std::size_t 溢出。溢出（超长数字串 / 恶意路径）→
+// 返回 false，调用方按"非法下标"处理：避免 idx*10 无符号回绕命中错误数组元素（读路径）
+// 或 EnsureByPath 用回绕后的巨大 idx 做无界 insert 触发 OOM（写路径）。引擎自身的 path
+// 索引来自 to_string(i)（有界），本守护针对损坏 / 被篡改的输入。前置：调用方已 IsAllDigits。
+bool ParseArrayIndex(std::string_view part, std::size_t& out) noexcept
+{
+    constexpr std::size_t kMax = (std::numeric_limits<std::size_t>::max)();
+    std::size_t           idx  = 0;
+    for (char c : part)
+    {
+        const std::size_t d = static_cast<std::size_t>(c - '0');
+        if (idx > (kMax - d) / 10)  // idx*10 + d 会溢出
+        {
+            return false;
+        }
+        idx = idx * 10 + d;
+    }
+    out = idx;
+    return true;
+}
+
 const Json* FindByPath(const Json& root, std::string_view path) noexcept
 {
     auto parts = SplitPath(path);
@@ -82,13 +104,9 @@ const Json* FindByPath(const Json& root, std::string_view path) noexcept
         }
         else if (node->is_array() && IsAllDigits(part))
         {
-            // path 段是纯数字 → 当作数组下标。越界返 nullptr。
+            // path 段是纯数字 → 当作数组下标。越界 / 解析溢出返 nullptr。
             std::size_t idx = 0;
-            for (char c : part)
-            {
-                idx = idx * 10 + static_cast<std::size_t>(c - '0');
-            }
-            if (idx >= node->size())
+            if (!ParseArrayIndex(part, idx) || idx >= node->size())
             {
                 return nullptr;
             }
@@ -118,13 +136,9 @@ Json& EnsureByPath(Json& root, std::string_view path)
     Json* node = &root;
     for (auto part : parts)
     {
-        if (node->is_array() && IsAllDigits(part))
+        std::size_t idx = 0;
+        if (node->is_array() && IsAllDigits(part) && ParseArrayIndex(part, idx))
         {
-            std::size_t idx = 0;
-            for (char c : part)
-            {
-                idx = idx * 10 + static_cast<std::size_t>(c - '0');
-            }
             if (idx >= node->size())
             {
                 node->insert(node->end(),
@@ -134,6 +148,8 @@ Json& EnsureByPath(Json& root, std::string_view path)
             node = &((*node)[idx]);
             continue;
         }
+        // 解析溢出（恶意巨大下标）→ 不进数组分支，落到下方按 object key 处理（有界、
+        // 不触发无界 insert）。引擎正常 path 不会到这（下标都来自有界 to_string(i)）。
 
         if (!node->is_object())
         {
@@ -335,10 +351,20 @@ Result<SchemaVersion, ResultCode> JsonReader::ReadSchemaVersion(std::string_view
     {
         return ResultCode::InvalidArgument;
     }
+    // major/minor 是 uint16；显式范围校验后再 narrowing。无校验的静默 static_cast 会让
+    // 超界值绕过版本兼容硬墙——如 major=65537 截断成 1、major=-1 截断成 0xFFFF，使本应被
+    // 拒的不兼容 / 损坏文件误判可读、进 payload 解析产出语义错乱的数据（正是 SchemaVersion
+    // 机制要防的"看似成功实则错乱"）。
+    const std::int64_t majorRaw = majorIt->get<std::int64_t>();
+    const std::int64_t minorRaw = minorIt->get<std::int64_t>();
+    if (majorRaw < 0 || majorRaw > 0xFFFF || minorRaw < 0 || minorRaw > 0xFFFF)
+    {
+        return ResultCode::InvalidArgument;
+    }
     return SchemaVersion{
         nsIt->get<std::string>(),
-        static_cast<std::uint16_t>(majorIt->get<std::int64_t>()),
-        static_cast<std::uint16_t>(minorIt->get<std::int64_t>())};
+        static_cast<std::uint16_t>(majorRaw),
+        static_cast<std::uint16_t>(minorRaw)};
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +477,11 @@ Result<void, ResultCode> BinaryWriter::SaveToFile(std::string_view path) const
 
 bool BinaryReader::ReadBytes(void* out, std::size_t count) noexcept
 {
-    if (mCursor + count > mSize)
+    // 用 Remaining()（溢出安全：mCursor<mSize ? mSize-mCursor : 0）做边界判断，
+    // 而非 `mCursor + count > mSize`——后者在 count 极大时无符号回绕成小值、绕过检查，
+    // 随后 memcpy 用真实的巨大 count 越界读 mpData（损坏 / 被篡改的 length-prefix blob，
+    // 如坏 .mesh / .scene 二进制即可触发堆越界读）。
+    if (count > Remaining())
     {
         return false;
     }

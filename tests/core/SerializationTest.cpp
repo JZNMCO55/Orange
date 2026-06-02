@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -230,6 +231,83 @@ void TestBinaryRoundTrip()
     std::fprintf(stdout, "  [PASS] Binary round-trip\n");
 }
 
+// 安全加固 #1：ReadBytes 的 count 极大时不得无符号回绕绕过边界检查（堆越界读防护）。
+void TestBinaryReadBytesOverflowGuard()
+{
+    std::uint8_t buf[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    BinaryReader reader{buf, sizeof(buf)};
+
+    std::int32_t v = 0;
+    assert(reader.Read<std::int32_t>(v));      // cursor 推进到 4
+    assert(reader.Position() == 4);
+
+    // count 选成 cursor(4)+count 在 size_t 下回绕成小值。修复前会绕过 `cursor+count>size`
+    // → memcpy 巨量越界读；修复后 `count > Remaining()(=4)` 直接返 false。
+    std::uint8_t        dst[8] = {};
+    const std::size_t   huge   = (std::numeric_limits<std::size_t>::max)() - 1;
+    assert(!reader.ReadBytes(dst, huge) && "ReadBytes 巨大 count 必须返 false,不越界读");
+    assert(reader.Position() == 4 && "失败的 ReadBytes 不推进 cursor");
+
+    // 正常边界仍正确：读完剩余 4 字节成功,再多 1 字节失败。
+    assert(reader.ReadBytes(dst, 4) && "读完剩余 4 字节成功");
+    assert(!reader.ReadBytes(dst, 1) && "已到末尾再读失败");
+    std::fprintf(stdout, "  [PASS] ReadBytes 巨大 count 不越界（溢出安全）\n");
+}
+
+// 安全加固 #2：ReadSchemaVersion 对超出 uint16 范围的 major/minor 必须拒绝（不静默截断
+// 绕过版本兼容硬墙）。
+void TestSchemaVersionOutOfRangeRejected()
+{
+    // major=65537(0x10001) 静默 narrowing 会变 1,绕过 major 硬墙 → 应拒。
+    {
+        auto rd = JsonReader::FromString(
+            R"({"schema":{"namespace":"test","major":65537,"minor":0}})");
+        assert(rd.IsOk());
+        assert(rd.Value().ReadSchemaVersion("schema").IsErr() &&
+               "major 超 uint16 范围必须拒绝(不截断成 1)");
+    }
+    // major=-1 → narrowing 成 0xFFFF → 应拒。
+    {
+        auto rd = JsonReader::FromString(
+            R"({"schema":{"namespace":"test","major":-1,"minor":0}})");
+        assert(rd.IsOk());
+        assert(rd.Value().ReadSchemaVersion("schema").IsErr() &&
+               "负 major 必须拒绝(不截断成 0xFFFF)");
+    }
+    // 合法范围(major=1,minor=2)仍正常读出。
+    {
+        auto rd = JsonReader::FromString(
+            R"({"schema":{"namespace":"test","major":1,"minor":2}})");
+        assert(rd.IsOk());
+        auto ver = rd.Value().ReadSchemaVersion("schema");
+        const SchemaVersion expected{"test", 1, 2};
+        assert(ver.IsOk() && ver.Value() == expected && "合法 major/minor 仍正常读出");
+    }
+    std::fprintf(stdout, "  [PASS] ReadSchemaVersion 超 uint16 范围拒绝（不绕过硬墙）\n");
+}
+
+// 安全加固 #3：数组下标 path 段解析溢出不得回绕命中错误元素（读）/ 不得无界分配（写）。
+void TestPathIndexOverflowGuard()
+{
+    // 读路径：超长数字下标(20+ 位必溢出 64-bit size_t)→ 当非法下标读失败,不回绕命中 arr[小值]。
+    {
+        auto rd = JsonReader::FromString(R"({"arr":[10,20,30]})");
+        assert(rd.IsOk());
+        std::int64_t v = -1;
+        assert(!rd.Value().ReadInt("arr/99999999999999999999999", v) &&
+               "溢出下标读失败,不回绕命中错误元素");
+        assert(rd.Value().ReadInt("arr/1", v) && v == 20 && "正常下标仍工作");
+    }
+    // 写路径：超长数字下标退化为 object key,不触发无界 insert(修复前 idx 回绕后 insert 天量
+    // 对象 OOM)。能跑完 Dump 即过。
+    {
+        JsonWriter w;
+        w.WriteInt("arr/99999999999999999999999", 5);
+        assert(!w.Dump().empty() && "溢出写路径退化 object key,不 OOM,能正常 Dump");
+    }
+    std::fprintf(stdout, "  [PASS] path 下标解析溢出守护（读不回绕/写不 OOM）\n");
+}
+
 }  // namespace
 
 int main()
@@ -243,6 +321,9 @@ int main()
     TestJsonListKeys();
     TestJsonParseError();
     TestBinaryRoundTrip();
+    TestBinaryReadBytesOverflowGuard();
+    TestSchemaVersionOutOfRangeRejected();
+    TestPathIndexOverflowGuard();
     std::fprintf(stdout, "[SerializationTest] all tests passed.\n");
     return 0;
 }
