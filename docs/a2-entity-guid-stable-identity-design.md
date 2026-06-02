@@ -111,7 +111,7 @@ scene schema **1.12 → 1.13**（minor，加 guid-based 引用，向后兼容读
 照 B2.6「改点 1 先行」先例（headless 可测的那部分先做先验），A2 也有几块**低风险、纯引擎、headless 可测**的先行件，能在不碰互引用主键迁移的前提下先落：
 
 - **S1 · Save 前普遍补 guid（可选 SaveOption）**：给 `SaveOptions` 加 `ensureGuids`（默认开），在 Save 的**调用方**（非 const SaveImpl 内部）先 `EnsureEntityGuids(world)` 再 Save——把"guid 零散"变"guid 普遍"。纯 additive，旧消费者不传则行为不变。round-trip 测：补 guid → Save → Load → 每 entity 有 guid 且与 Save 前一致。
-- **S2 · World guid→entity 查找索引**：`Scene::FindEntityByGuid(World&, Core::Guid)`（Load 后 / 运行时按 guid 反查 entity）。prefab 锚定 / 跨会话引用 / PIE clone 都要它。纯函数 + 可测（建表、命中、未命中、重复 guid 防御）。**这是 A2.2/A2.3 的公共底座**，先落零风险。
+- **S2 · World guid→entity 查找 ✅ 已落地（2026-06-02，commit `b2cad7b`）**：`Scene::FindEntityByGuid(const World&, const Core::Guid&)`（`EntityGuid.h/.cpp`）——线性扫 `view<GuidComponent>` 返回首个 guid 匹配 entity，无匹配 / guid 非法(全 0) → `Entity::Invalid()`。**只读、决策中立**（不分配、不改序列化、与 A2.1 主键迁移正交），照本节"先落零风险"如期落。`scene_entity_guid_test::TestFindEntityByGuid`（命中/未命中/零 guid 判负/Reassign 后旧失效新命中/无 GuidComponent 不被零 guid 误匹配）。非 hot-path 线性足够，成热点再加缓存索引。**这是 A2.2/A2.3 的公共底座**。
 - **S3 · guid round-trip 不变性测试加固**：锁住"Save→Load guid 逐字节稳定""ReassignEntityGuids 后旧 guid 不复现""EnsureEntityGuids 幂等"——部分已在 `EntityGuidTest`，补 scene 级 round-trip。
 
 S1+S2+S3 都不动 parent 互引用主键（§4 的迁移留给 A2.1 正式开工 + ADR），但把"普遍分配 + 反查底座 + 不变性锁"三块地基先夯实，使 A2.1 的主键迁移只剩"parent 写/读切 guid"这一处集中改动。
