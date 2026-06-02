@@ -7,6 +7,7 @@
 
 #include <orange/engine/render/PostProcessComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <imgui.h>
@@ -121,7 +122,14 @@ void PostProcessVolumeGizmoPlugin::Draw(
     if (pWorld == nullptr) { return; }
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
-    const glm::vec3 center = pTC->position;
+    // box 中心取累积后 world 位置（与 Pipeline 的 PostProcess volume 消费同源，
+    // ADR-016 / A1.1 step 2）；cache 缺失退回 local。
+    glm::vec3 center = pTC->position;
+    if (const auto* wtc =
+            pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity))
+    {
+        center = glm::vec3(wtc->world[3]);
+    }
 
     // 内层 box（localExtent 边界）= V2 weight=1 区，画面 100% 受该 volume 影响
     DrawWireframeBox(ctx.drawList, center, pPP->localExtent,

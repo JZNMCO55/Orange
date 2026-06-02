@@ -8,6 +8,7 @@
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <imgui.h>
 
@@ -62,7 +63,14 @@ void ParticleEmitterGizmoPlugin::Draw(
 
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
-    const glm::vec3 origin = pTC->position;
+    // spawn box 中心取累积后 world 位置（ADR-016 / A1.1 step 2）；emitter parent
+    // 到移动物体时 spawn box 对齐世界位置。cache 缺失退回 local。
+    glm::vec3 origin = pTC->position;
+    if (const auto* wtc =
+            pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity))
+    {
+        origin = glm::vec3(wtc->world[3]);
+    }
 
     // ---- 1. Spawn box（entity world XY 平面内 4 角）----
     // VfxSystem 当前 spawn 时仅 entity.position.xy + offset（component 注释
