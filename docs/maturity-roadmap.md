@@ -93,7 +93,8 @@
     - **`.anim` JSON 序列化**（`AnimationClipSerialization.{h,cpp}`，同 session commit）：走 Core::Serialization，schema `animation/Clip` v1.0；enum 按字符串（未知 fail-soft）、数值按定长数组；`AnimationClipToJson`/`FromJson` + `Save`/`LoadAnimationClip`。`animation_clip_serialization_test` 8 例 round-trip。
     - **scene round-trip**（commit `a79cef3`）：AnimatorComponent 的 "clip" backend 例外——Save 嵌入 clipJson（形态 B），Load pass 2 旁路 AnimatorRegistry 重建 ClipAnimator + SetTarget 到 entity 自身 Transform。**这让 ClipAnimator 跨 Enter-Play 快照/Stop 还原稳健**（此前只持 backend 名、靠 factory 重建 → clip 数据 per-entity 无 factory 会悬空）。`scene_serialization_test::TestClipAnimatorRoundTrip`。
     - **编辑器可见 demo**（commit `ddc2e3c`）：`SeedDemoWorld` 加 "Animated Cube (clip)"（bob position.y + spin rotation.euler，2s loop）；视觉待 dogfood（[dogfood-checklist](dogfood-checklist.md) item 33，含 demo.scene.json 需挪开触发 SeedDemoWorld 的指引）。ctest 79/79（含 editor_build_smoke）。
-    - **剩**：timeline/dopesheet/曲线 UI（B2.3/B2.4）+ AnimatorComponent Add-Component/Inspector 创作 clip（B2.6）；`.anim` 接 AssetRegistry/IAssetLoader（编辑器资产浏览）。
+    - **`.anim` 接 AssetRegistry ✅**（`AnimationClipLoader : IAssetLoader<AnimationClip>`，animation 模块；AnimationClip 直接当 asset 无 wrapper）：`AssetRegistry::Load<AnimationClip>(path)` → loader → `LoadAnimationClip`。`animation_clip_loader_test` 3 例（注册/Load/Get + dedup + 缺文件 Err）。
+    - **剩**：timeline/dopesheet/曲线 UI（B2.3/B2.4）+ AnimatorComponent Add-Component/Inspector 引用 `.anim` asset + 创作 clip（B2.6）——纯编辑器 GUI 层，需 dogfood。
   - **B2.2 GPU skinning**：骨骼蒙皮上 GPU（**跨仓 OrangeRender**——bone matrix palette + vertex skinning shader；当前骨骼动画在 viewport 看不到形变）。**按 ADR-009 三段式**：OrangeRender session 落地 → umbrella bump → 引擎消费。
   - **B2.3 Timeline / dopesheet UI**（编辑器层 ImGui）——轨道 + 关键帧拖动 + scrub。
   - **B2.4 曲线编辑器**（curve editor，缓动/Bezier handle）。
