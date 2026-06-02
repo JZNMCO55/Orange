@@ -2400,7 +2400,8 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 把 glTF 从"只能塌平成单 mesh"扩出 **scene import 维度** —— 遍历 `scenes[0].nodes` 的 transform 树，**每个 cgltf mesh 单独写一个 `.mesh`（不跨 mesh 合并、不丢层级）**，产出与 DCC 摆位同构的 `.scene.json` + 多个 `.mesh`。对齐 Unity model prefab / Unreal scene import / Godot ".glb as scene" / Lumix per-mesh import。
 
 - **新模块**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}` —— `RunGltfSceneImportToRegistry(srcPath, AssetRegistry&)`，registry-only headless seam（不出现 EditorHost，与 GAP-2026-05-27 G1 同款解耦）。cgltf `IMPLEMENTATION` 宏仍只在 `GltfImporter.cpp` 一处 expand，本 TU 只取声明。
-- **流程**：① 为每个被 node 引用的 cgltf mesh `BuildMeshAssetFromGltfMesh`（merge 该 mesh 自身 primitive，不跨 mesh）→ `MeshLoader::Save` 到 `assets/Models/<basename>/<basename>_<meshname>.mesh` + `.meta` → `registry.Load<MeshAsset>` 拿 handle；同一 mesh 被多 node 引用按指针去重只写一次。② 递归 `ProcessNode` 建 `World`：每 node 一 Entity，挂 `NameComponent`（node.name / `Node_<i>`）+ `TransformComponent`（`has_matrix` 走 `glm::decompose`，否则直接用 TRS；glTF 右手 Y-up 与引擎一致无需轴转换）+ `HierarchyComponent`（parent / firstChild / 双向兄弟链由调用方 patch，根用 sortIndex 排序）；带 mesh 的 node 加 `RenderableComponent` 指向对应 handle。③ `Scene::Save(world, scenePath, {.assetRegistry=&reg})` 复用引擎序列化写出 `assets/scenes/<basename>.scene.json`（Hierarchy 索引链由序列化层保证自洽，不手写 JSON 避免 schema 漂移）+ scene `.meta`。
+- **流程**：① 为每个被 node 引用的 cgltf mesh `BuildMeshAssetFromGltfMesh`（merge 该 mesh 自身 primitive，不跨 mesh）→ `MeshLoader::Save` 到 `assets/Models/<basename>/<basename>_<meshname>.mesh` + `.meta` → `registry.Load<MeshAsset>` 拿 handle；同一 mesh 被多 node 引用按指针去重只写一次。② 递归 `ProcessNode` 建 `World`：每 node 一 Entity，挂 `NameComponent`（node.name / `Node_<i>`）+ `TransformComponent`（**bake world 变换** —— `cgltf_node_transform_world` 沿父累积 + `glm::decompose` 拆 TRS；glTF 右手 Y-up 与引擎一致无需轴转换）+ `HierarchyComponent`（parent / firstChild / 双向兄弟链由调用方 patch，根用 sortIndex 排序）；带 mesh 的 node 加 `RenderableComponent` 指向对应 handle。③ `Scene::Save(world, scenePath, {.assetRegistry=&reg})` 复用引擎序列化写出 `assets/scenes/<basename>.scene.json`（Hierarchy 索引链由序列化层保证自洽，不手写 JSON 避免 schema 漂移）+ scene `.meta`。
+- **为什么 bake world 而非 local TRS**：引擎 `RenderScene::Collect` 对每个 entity 直接 `ComposeWorldMatrix(自身 TransformComponent)`，**不沿 hierarchy 累积父变换**（parenting 当前对渲染位置无效，见新登记的 [[GAP-2026-06-02-hierarchy-transform-not-propagated]]）。若只写 local TRS，子节点会渲染在 local 偏移、忽略父摆位 → DCC 世界摆位视觉错误。故 flatten world 变换进各 TransformComponent，同时保留 HierarchyComponent 链供 tree view（结构 + 视觉两不误）。代价：导入后在编辑器移动父节点不带动子节点（沿用引擎现有限制，非本导入引入）。
 - **关键纪律点**：不跨 `CreateEntity` / `AddComponent` 持有 component 指针（entt storage realloc 会悬空）—— firstChild / 子链 patch 全部在子树建完、不再新增实体之后用现取指针写。
 - **CLI 入口**：`tools/OrangeEditor/main.cpp` 加 `import-scene` 子命令（`RunHeadlessSceneImport`），镜像 `import-mesh`，在任何 GLFW/Vulkan/ImGui init 之前判 argv 走纯 CPU 路径后退出（成功 0 / 缺路径 2 / registry 失败 3 / 导入失败 1）。用法 `OrangeEditor.exe import-scene <path.gltf|.glb>`。
 - **G1 范围限制（与上文拆解对齐）**：RenderableComponent.material **留空（默认材质）**—— per-mesh PBR material（G2）需 MaterialInstance 对象做 `Scene::Save` 反查，headless 不构造，留 G2（基础设施已落地，单列子缺口）；lights / cameras（G3）暂不消费；只接受 triangle primitive；skinning / morph / animation skip。
@@ -3209,3 +3210,22 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - 测试：`tests/command/CommandStackTest.cpp` 用例 9（多实体共享 fieldKey、Merge 按 entityId 不互相合并 + 一次 group Undo 全部回初值），`command_stack_test` 全过。**关组时序是 ImGui 全局状态耦合、不可 headless，靠 dogfood**。
   - **待复测**：① 多选拖 position（Vec 字段）→ Ctrl+Z 一次回初值；② multi-edit 后再切 gizmo 操作不崩溃（第一轮回归点）。
 - **关联**：multi-edit 写回闭环（OE `d3a5b54`）；[[feedback_no_works_claim_from_codereading_interactive]]（交互靠 dogfood——本 bug 的"IsItemDeactivated 对 DragFloatN 可靠"误判正是读代码判错、dogfood 逮到的又一例）
+
+## GAP-2026-06-02-hierarchy-transform-not-propagated
+
+- **发现方**：GAP-2026-05-28 G1（glTF scene-level 导入）落地时，确认子节点世界摆位正确性需要的引擎前置能力
+- **发现日期**：2026-06-02
+- **一句话定性**：引擎**渲染时不沿 `HierarchyComponent` 累积父变换** —— `RenderScene::Collect`（`src/render/RenderScene.cpp`）对每个 drawable 直接 `ComposeWorldMatrix(自身 TransformComponent)`（单 entity 的 TRS），**完全不读 parent 链**。结果：把实体 B parent 到 A 后移动 A，B 在 viewport **不跟随**；TransformComponent 存的 local TRS 被当 world 直接用。这与 Unity / Unreal / Godot / Lumix 的"父变换沿 hierarchy 传播给子"工业标准相悖，是 transform 系统的成熟度空白。
+- **证据**：`src/render/RenderScene.cpp` 的 `ComposeWorldMatrix(const Scene::TransformComponent&)` 只吃单个 component；`Collect` 的 drawable 循环 `d.worldMatrix = ComposeWorldMatrix(xform)` 无 parent 累积。`Pipeline.cpp` 取 DirectionalLight 方向也用 entity 自身 `tc->rotation`（local），同样不累积。
+- **现状影响 / workaround**：
+  - **glTF scene import（GAP-2026-05-28 G1）已 workaround**：导入时 bake **world** 变换（`cgltf_node_transform_world`）进每个 entity 的 TransformComponent（flatten），保留 Hierarchy 链供 tree view —— 摆位视觉正确，但移动父节点不带动子（沿用本 gap 的限制）。
+  - 编辑器手动 parent + 移动父节点：子节点视觉不跟随（用户若依赖 Unity 式父子联动会困惑）。
+  - prefab 实例化 / 嵌套 prefab 的子件世界摆位同样受此限制。
+- **缺什么（按依赖拆）**：
+  - **G1 · world-transform 传播**：在收集 drawable（+ 光源 / 物理 / gizmo）前，按 Hierarchy 自顶向下算每个 entity 的 world 矩阵（典型：一个 `TransformSystem` 每帧 DFS 根→叶累乘 local，缓存 world matrix；或 `RenderScene::Collect` 内即时沿 parent 链累乘 + memoize）。参 Unity `Transform.localToWorldMatrix` / Godot `Node3D` global transform / Lumix `Universe` 的 transform 传播。
+  - **G2 · 编辑器 reparent 保持世界位姿**：在编辑器把 B drag 到 A 下时，重算 B 的 local TRS 使其 world 不变（Unity "keep world position" reparent）。依赖 G1。
+  - **G3 ·（可选）dirty 传播优化**：只重算被移动子树的 world（avoid 每帧全量 DFS）。profiling 拉动。
+- **期望验收**：把 B parent 到 A（A 在 (5,0,0)）→ B 跟着出现在 A 附近；移动 / 旋转 A → B 在 viewport 实时跟随（保持相对位姿）；嵌套多层同样正确累乘。
+- **状态**：**仅登记，未实现 / 未排期**。**优先级**：P2（成熟度空白，可预期升格）。**触发升格条件**：① 用户在编辑器手动搭父子层级并期望联动时；② glTF scene import 进入"导入后在引擎里继续编辑层级"工作流（G5 re-import override）时；③ prefab 嵌套 / 复杂实例化需要子件世界摆位联动时。在那之前 G1 scene import 的 world-bake workaround + 手工摆位已够灰盒。
+- **归属**：引擎核心（Scene / Render 交界的 transform 系统），非编辑器侧；属较大改动（涉及 drawable 收集 / 光源 / 物理 / gizmo 全部改读 world matrix），建议独立 ADR + session。
+- **关联**：[[GAP-2026-05-28-gltf-scene-level-import-not-flattened]]（本 gap 是其子节点世界摆位正确性的引擎前置，G1 已用 world-bake workaround 绕过）；[[GAP-2026-05-30-prefab-asset-and-entity-guid]]（prefab 子件世界摆位同受影响）

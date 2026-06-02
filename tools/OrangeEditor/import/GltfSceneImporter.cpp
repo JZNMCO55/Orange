@@ -243,31 +243,27 @@ std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
     return out;
 }
 
-// 从 cgltf node 取本地 TRS：has_matrix → glm::decompose；否则直接用 TRS 字段。
-// glTF rotation 是 (x,y,z,w) 顺序；glm::quat 构造序是 (w,x,y,z)。
-void NodeLocalTransform(const cgltf_node& node, glm::vec3& outPos, glm::quat& outRot,
+// 取 node 的 **world** 变换（沿父累积）分解成 TRS，bake 进 TransformComponent。
+//
+// 为什么 bake world 而非 local：引擎 RenderScene::Collect 对每个 entity 直接
+// `ComposeWorldMatrix(自身 TransformComponent)`，**不沿 HierarchyComponent 累积
+// 父变换**（parenting 当前对渲染位置无效，是引擎已知限制）。若导入时只写 local
+// TRS，子节点会渲染在 local 偏移、忽略父摆位 —— DCC 世界摆位视觉上就错了。故
+// 把每个 node 的 world 变换 flatten 进各自 TransformComponent，同时保留
+// HierarchyComponent 链供 tree view（结构 + 视觉两不误）。代价：导入后在编辑器里
+// 移动父节点不会带动子节点（沿用引擎现有 parenting 不传播变换的限制，非本导入引入）。
+//
+// cgltf_node_transform_world 内部对每个祖先调 transform_local（已处理 has_matrix /
+// TRS 两种 node 形态），返回列主序 world 矩阵；glm::decompose 拆 TRS。
+void NodeWorldTransform(const cgltf_node& node, glm::vec3& outPos, glm::quat& outRot,
                         glm::vec3& outScale)
 {
-    if (node.has_matrix)
-    {
-        const glm::mat4 m = glm::make_mat4(node.matrix);
-        glm::vec3 skew{};
-        glm::vec4 perspective{};
-        glm::decompose(m, outScale, outRot, outPos, skew, perspective);
-    }
-    else
-    {
-        outPos = node.has_translation
-                     ? glm::vec3(node.translation[0], node.translation[1], node.translation[2])
-                     : glm::vec3(0.0f);
-        outRot = node.has_rotation
-                     ? glm::quat(node.rotation[3], node.rotation[0],
-                                 node.rotation[1], node.rotation[2])
-                     : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        outScale = node.has_scale
-                       ? glm::vec3(node.scale[0], node.scale[1], node.scale[2])
-                       : glm::vec3(1.0f);
-    }
+    float world[16] = {0};
+    cgltf_node_transform_world(&node, world);
+    const glm::mat4 m = glm::make_mat4(world);
+    glm::vec3 skew{};
+    glm::vec4 perspective{};
+    glm::decompose(m, outScale, outRot, outPos, skew, perspective);
 }
 
 // 递归把 node 子树建进 World，返回本 node 对应的 Entity。本 node 的 parent /
@@ -292,7 +288,7 @@ Entity ProcessNode(World& world, const cgltf_node& node,
 
     glm::vec3 pos{}, scl{};
     glm::quat rot{};
-    NodeLocalTransform(node, pos, rot, scl);
+    NodeWorldTransform(node, pos, rot, scl);
     world.AddComponent<TransformComponent>(e, TransformComponent{pos, rot, scl});
 
     if (node.mesh != nullptr)

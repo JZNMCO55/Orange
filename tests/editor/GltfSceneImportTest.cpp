@@ -198,9 +198,16 @@ int main()
             world.GetComponent<::Orange::Engine::Render::RenderableComponent>(childA);
         assert(aR != nullptr && aR->mesh.IsValid() &&
                "ChildA 应有 Renderable 指向有效 mesh handle");
+        // Transform 是 world-baked（importer 把 node world 变换 flatten 进
+        // TransformComponent，因引擎渲染不累积 hierarchy；详见 GltfSceneImporter
+        // NodeWorldTransform 注释）。ChildA world = RootGroup(1,2,3) × local(0.5,0,0)
+        // = (1.5, 2, 3)。
         const auto* aT = world.GetComponent<SceneNS::TransformComponent>(childA);
-        assert(aT != nullptr && std::fabs(aT->position.x - 0.5f) < 1e-4f &&
-               "ChildA transform 应是 (0.5,0,0)");
+        assert(aT != nullptr &&
+               std::fabs(aT->position.x - 1.5f) < 1e-4f &&
+               std::fabs(aT->position.y - 2.0f) < 1e-4f &&
+               std::fabs(aT->position.z - 3.0f) < 1e-4f &&
+               "ChildA transform 应是 world-baked (1.5,2,3)（父变换已 flatten 进子）");
 
         // ChildB：parent==RootGroup；有 Renderable。两 child mesh 应不同 handle
         // （各自独立 .mesh，没被塌平共享）。

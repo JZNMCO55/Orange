@@ -389,6 +389,7 @@
 - **G1 范围限制（dogfood 时注意，不是 bug）**：
   - **材质全是默认材质**（灰 pbr）—— per-mesh PBR material 划分是 **G2**（未做），G1 只保几何 + 层级。所以即便 DCC 里有材质，导入后也是默认材质，这是预期。
   - **不消费 glTF 灯光 / 相机**（G3 未做）；skinning / morph / 非 triangle primitive 全 skip。
+  - **transform 是 world-baked**：因引擎渲染不累积 hierarchy 父变换（见 `GAP-2026-06-02-hierarchy-transform-not-propagated`），导入时把每个 node 的 world 变换 flatten 进各自 TransformComponent。**所以摆位视觉是对的**（每个 prop 在 DCC 世界位置），但**导入后在编辑器移动父节点不会带动子节点**（沿用引擎现有限制，非本导入的 bug）。dogfood 看"初始摆位对不对"即可，别期望父子联动。
 - **推荐 fixture**：在 Blender 摆 3~5 个 prop（各自不同 transform，组织成 1~2 层父子，比如一个 Empty 父节点下挂几个 mesh），导出 `.glb`（**勾选 +Y up，glTF 默认**）。或现成带 node 层级的多 mesh glTF 资产（如 KHR sample 里的 `BoxAnimated` / 任意场景型 .glb）。
 - **若发现问题**：摆位错位（可能是 has_matrix 分解 / 坐标轴问题）/ 层级反了 / mesh 被错误合并 → 在 `docs/engine-known-gaps.md` 登记，link 回 GAP-2026-05-28。
 
