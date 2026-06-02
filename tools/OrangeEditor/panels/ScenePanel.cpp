@@ -118,6 +118,21 @@ void EditorRenderLayer::DrawScenePanel()
                           "走 OrangeRender DebugDraw immediate-mode，不被场景几何遮挡");
     }
 
+    // Snap 开关 —— gizmo 网格吸附的快捷切换（之前只在 Settings 面板埋着）。
+    // 对齐 Unity / Lumix viewport snap toggle；步进值仍在 Settings 调。
+    ImGui::SameLine();
+    ImGui::Checkbox("Snap", &mHost.settings.snapEnabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Gizmo 网格吸附：translate / rotate / scale 拖动时按步进对齐。\n"
+            "步进 translate=%.3g  rotate=%.3g°  scale=%.3g（Settings 面板 Snap 段可调）。\n"
+            "对齐 Unity / Lumix snap 开关；关闭时连续拖动（零回归）。",
+            mHost.settings.snapTranslateStep,
+            mHost.settings.snapRotateStepDeg,
+            mHost.settings.snapScaleStep);
+    }
+
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
