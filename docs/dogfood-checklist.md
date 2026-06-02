@@ -403,6 +403,31 @@
 
 ---
 
+## 2026-06-02 session（成熟度地基 A1：Transform 层级传播）
+
+> 目标：贴近 Lumix 成熟度，开始排期 + 开发。A1 = Transform 层级传播（`maturity-roadmap.md` 地基首位 / ADR-016）。本段登记 A1.1 step 2（首消费者 mesh 切换）的视觉 dogfood —— 这是有**真实视觉变化**的改动，必须真机验证。
+
+### 31. Transform 层级传播（mesh 路径）—— 移动父节点带动子 mesh
+
+- **commit**：本 session `feat(render): RenderScene::Collect 读 WorldTransformComponent`（A1.1 step 2 首消费者）+ `feat(editor): glTF scene import 回退 world-bake 为 local TRS`（A1.2）。引擎层 ADR-016 / `TransformSystem::PropagateWorldTransforms`。
+- **背景**：此前引擎渲染**不沿 hierarchy 累积父变换**（`GAP-2026-06-02-hierarchy-transform-not-propagated`）——parenting 对世界位置无效，移动父节点子节点不动。本次让 **mesh drawable** 沿 hierarchy 累积 world matrix（Unity/Godot/Lumix table-stakes）。
+- **① 新行为：parenting 现在传播（看什么 / 通过判据）**：
+  1. 编辑器里建两个有 mesh 的实体 A、B（如两个 Cube）。
+  2. 把 B **parent 到 A 下**（Entity Tree 拖 B 到 A，或右键）。
+  3. 选中 A，用 gizmo **移动 / 旋转 / 缩放 A** → **B 应跟着动**（保持相对位姿）——这是新行为（之前 B 纹丝不动）。
+  4. 嵌套多层（A→B→C）→ 移动 A，B、C 都跟随；移动 B，只 C 跟随。
+- **② 回归检查：现有场景渲染不变（重要）**：
+  - 打开 **pbr_showcase** 场景（File→Open 或 Reset to Demo）→ 18 个球阵 + demo 几何的**摆位应与之前完全一致**（因 group 父节点 root/warmGroup/whiteGroup/geometry 都在原点，累积==local，零变化）。
+  - **若有任何物体跳位 / 消失 / 整体偏移 → 报告我**（说明累积或 cache 有 bug）。
+- **③ glTF scene import 现在写 local（需重导旧产物）**：
+  - 之前 import 的 glTF 场景是 world-bake 的旧产物——**重新跑** `import-scene <glb>`（或 File→Import glTF Scene），新产物 importer 写 local TRS。
+  - 打开新 scene.json → viewport 里层级摆位应正确（父在某位置，子在"父+local"的世界位置），且**移动父带动子**。用 `scripts/dogfood_make_scene_hierarchy_lights.py` 那个层级 fixture 验。
+- **范围限制（dogfood 时注意，不是 bug）**：
+  - **只切了 mesh drawable**。**光源方向 / 物理 collider / gizmo 还没切**到 world cache（后续 increment）——所以：把一盏**灯**或带 **collider** 的实体 parent 到一个**非原点**父下，移动父时**灯的方向 / collider 不跟随**（mesh 跟随）。这是**预期**，不是 bug。glTF 导入的灯通常是 scene-root 子（父在原点），方向仍对。
+  - **reparent 到非原点父会跳位**（A1.3 keep-world 还没做）：把 B parent 到一个**已经移动过**（非原点）的 A 下，B 会**跳一下**（因为 B 的 local 现在被当成相对 A 解释）。reparent 到原点父不跳。A1.3 落地后修。**dogfood 时先 parent 再移动父**（顺序对就不跳）。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。

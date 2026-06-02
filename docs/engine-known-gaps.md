@@ -3241,6 +3241,12 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - **G2 · 编辑器 reparent 保持世界位姿**：在编辑器把 B drag 到 A 下时，重算 B 的 local TRS 使其 world 不变（Unity "keep world position" reparent）。依赖 G1。
   - **G3 ·（可选）dirty 传播优化**：只重算被移动子树的 world（avoid 每帧全量 DFS）。profiling 拉动。
 - **期望验收**：把 B parent 到 A（A 在 (5,0,0)）→ B 跟着出现在 A 附近；移动 / 旋转 A → B 在 viewport 实时跟随（保持相对位姿）；嵌套多层同样正确累乘。
-- **状态**：~~仅登记，未排期~~ → **2026-06-02 纳入排期，列为地基首选**（见 `docs/maturity-roadmap.md` **A1**，建议先行——越晚改迁移越贵，且 A1 落地后要回退本 session glTF scene import 的 world-bake workaround 改回 local TRS）。**A1.0 ADR ✅ 落地（ADR-016：选方案 A 每帧 TransformSystem DFS 重算 world matrix，非 dirty-flag）**；A1.1 实现（加累积 pass + cache → 逐消费者切）/ A1.2 内容迁移 / A1.3 reparent keep-world 待开工。**优先级**：地基 P1。
+- **状态**：~~未排期~~ → **2026-06-02 排期 + 大幅落地**（`docs/maturity-roadmap.md` A1，地基首位）：
+  - **A1.0 ADR-016 ✅**：选方案 A（每帧 TransformSystem DFS 全量重算 world matrix + transient cache，非 dirty-flag）。
+  - **A1.1 step 1 ✅**：`Scene::PropagateWorldTransforms` + `WorldTransformComponent`（additive cache，零行为变化）；`scene_transform_system_test`。
+  - **A1.1 step 2（mesh 消费者）✅**：`RenderScene::Collect` 读 world cache → **mesh parenting 真正生效**。committed 场景父全在原点 → 零回归（ctest 76/76）。
+  - **A1.2（importer）✅**：glTF scene import 回退 world-bake → local TRS（end-to-end 测验累积）。
+  - **待开工**：A1.1 step 2 剩余消费者（光源方向 / physics / gizmo 仍读 local）/ **A1.3 reparent keep-world**（mesh 切换后变必需——reparent 到非原点父会跳位）。
+  - dogfood item 31（移动父带动子 mesh + 现有场景零回归 + 已知未切项）见 `docs/dogfood-checklist.md`。**优先级**：地基 P1。
 - **归属**：引擎核心（Scene / Render 交界的 transform 系统），非编辑器侧；属较大改动（涉及 drawable 收集 / 光源 / 物理 / gizmo 全部改读 world matrix），建议独立 ADR + session。
 - **关联**：[[GAP-2026-05-28-gltf-scene-level-import-not-flattened]]（本 gap 是其子节点世界摆位正确性的引擎前置，G1 已用 world-bake workaround 绕过）；[[GAP-2026-05-30-prefab-asset-and-entity-guid]]（prefab 子件世界摆位同受影响）
