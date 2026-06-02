@@ -10,6 +10,7 @@
 #include "orange/engine/core/Profiler.h"
 #include "orange/engine/render/Camera.h"
 #include "orange/engine/scene/TransformComponent.h"
+#include "orange/engine/scene/WorldTransformComponent.h"
 #include "orange/engine/scene/World.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -369,8 +370,16 @@ void Pipeline::Impl::UpdatePointLightsUbo(Orange::Engine::World& world)
             continue;
         }
         const auto& pl = view.get<PointLight>(entity);
+        // 位置取累积后的 world matrix 的平移列（含父变换，ADR-016 / A1.1 step 2）；
+        // root 灯 world==local 零回归。cache 缺失退回 local 兜底。
         glm::vec3 pos{0.0f};
-        if (const auto* tc = reg.try_get<Orange::Engine::Scene::TransformComponent>(entity))
+        if (const auto* wtc =
+                reg.try_get<Orange::Engine::Scene::WorldTransformComponent>(entity))
+        {
+            pos = glm::vec3(wtc->world[3]);
+        }
+        else if (const auto* tc =
+                     reg.try_get<Orange::Engine::Scene::TransformComponent>(entity))
         {
             pos = tc->position;
         }
@@ -431,9 +440,19 @@ void Pipeline::Impl::UpdateSpotLightsUbo(Orange::Engine::World& world)
         }
         const auto& sl = view.get<SpotLight>(entity);
 
+        // 位置 + 方向取累积后的 world matrix（含父变换，ADR-016 / A1.1 step 2）：
+        // 平移列 = world 位置；world × (0,-1,0) = world 锥光向（normalize 去 scale）。
+        // root 灯 world==local 零回归。cache 缺失退回 entity local 兜底。
         glm::vec3 pos{0.0f};
         glm::vec3 dir = kSpotLightLocalForward;  // 缺 Transform → 默认向下
-        if (const auto* tc = reg.try_get<Orange::Engine::Scene::TransformComponent>(entity))
+        if (const auto* wtc =
+                reg.try_get<Orange::Engine::Scene::WorldTransformComponent>(entity))
+        {
+            pos = glm::vec3(wtc->world[3]);
+            dir = glm::normalize(glm::vec3(wtc->world * glm::vec4(kSpotLightLocalForward, 0.0f)));
+        }
+        else if (const auto* tc =
+                     reg.try_get<Orange::Engine::Scene::TransformComponent>(entity))
         {
             pos = tc->position;
             dir = ComputeSpotLightWorldDir(tc->rotation);
