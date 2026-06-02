@@ -205,6 +205,19 @@ inline bool RemoveKeyframe(AnimationTrack& track, std::size_t index)
     return true;
 }
 
+// 把 index 处 keyframe 移到新 time——编辑器在 dopesheet 上水平拖 key 用。移动后重新
+// 维持升序（该 key 索引位置可能变）；若新 time 与另一 key 重合则覆盖那个（沿用
+// AddKeyframeSorted 的同时间覆盖语义）。index 越界 → no-op false。value/插值/切线随迁。
+inline bool MoveKeyframeTime(AnimationTrack& track, std::size_t index, float newTime)
+{
+    if (index >= track.keys.size()) { return false; }
+    Keyframe moved = track.keys[index];
+    moved.time = newTime;
+    track.keys.erase(track.keys.begin() + static_cast<std::ptrdiff_t>(index));
+    AddKeyframeSorted(track, moved);
+    return true;
+}
+
 // 各 track 末 key 时间的最大值——clip 的"内容时长"。供编辑器校验 / 派生
 // AnimationClip::duration（用户可能手设 duration 与 key 不符，本函数给真实下界）。
 // 假设各 track 已升序（末 key 时间最大）；空 track 贡献 0。

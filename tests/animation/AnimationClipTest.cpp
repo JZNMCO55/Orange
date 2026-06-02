@@ -201,6 +201,21 @@ int main()
         std::fprintf(stdout, "  [PASS] FindKeyframeIndexNear/RemoveKeyframe：选键 + 删键\n");
     }
 
+    // ===== 13. MoveKeyframeTime：dopesheet 水平拖 key 改时间 =====
+    {
+        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Linear),
+                                  Key(1.0f, 10.0f, InterpMode::Linear),
+                                  Key(2.0f, 20.0f, InterpMode::Linear)});
+        // 把 index 1（t=1,val=10）拖到 t=2.5 → 应重排到末尾、仍升序。
+        assert(Anim::MoveKeyframeTime(tr, 1, 2.5f) && Anim::IsTrackSorted(tr) &&
+               "拖 key 到 t=2.5 → 重排仍升序");
+        assert(tr.keys.size() == 3 && Near(tr.keys[2].time, 2.5f) &&
+               Near(tr.keys[2].value.x, 10.0f) && "拖后末 key t=2.5 且 value 随迁=10");
+        // 越界拖 → no-op。
+        assert(!Anim::MoveKeyframeTime(tr, 9, 0.0f) && "越界拖 → no-op false");
+        std::fprintf(stdout, "  [PASS] MoveKeyframeTime：拖 key 改时间维持升序 + value 随迁\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }
