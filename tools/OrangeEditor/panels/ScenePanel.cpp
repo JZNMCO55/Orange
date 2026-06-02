@@ -20,10 +20,14 @@
 #include "../schema/ComponentSchema.h"
 #include "../schema/ComponentSchemaRegistry.h"
 
+#include <orange/engine/asset/AssetRegistry.h>   // 统计 overlay 取 mesh 三角数
+#include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/render/BuiltinPostProcessChain.h>
 #include <orange/engine/render/Pipeline.h>  // DebugViewMode
+#include <orange/engine/render/RenderableComponent.h>  // 统计 overlay
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/DebugDrawScene.h>
+#include <orange/engine/scene/NameComponent.h>  // 统计 overlay 选中名
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
@@ -388,6 +392,58 @@ void EditorRenderLayer::DrawScenePanel()
                     }
                 }
                 ImGui::EndDragDropTarget();
+            }
+
+            // viewport 统计 overlay（左上角紧凑半透）：实体 / 可见 Renderable /
+            // 三角 / 选中名 —— 对齐 Lumix StudioApp / Unity scene stats。轻量
+            // （每帧扫一遍 Renderable view，几十 entity 可忽略），始终显示。
+            {
+                using ::Orange::Engine::Entity;
+                using ::Orange::Engine::Render::RenderableComponent;
+                using ::Orange::Engine::Scene::NameComponent;
+                using ::Orange::Engine::Scene::TransformComponent;
+                auto* pStatsWorld = mHost.scene.pWorld.get();
+                if (pStatsWorld != nullptr)
+                {
+                    const std::size_t entityCount = pStatsWorld->Size();
+                    std::size_t   visRenderables = 0;
+                    std::uint64_t triCount       = 0;
+                    auto statsView = pStatsWorld->Registry()
+                        .view<TransformComponent, RenderableComponent>();
+                    for (auto e : statsView)
+                    {
+                        const auto& rc = statsView.get<RenderableComponent>(e);
+                        if (!rc.visible || mHost.assets.pAssets == nullptr) { continue; }
+                        const auto* pMesh = mHost.assets.pAssets->Get(rc.mesh);
+                        if (pMesh == nullptr || pMesh->Empty()) { continue; }
+                        ++visRenderables;
+                        triCount += pMesh->Indices().size() / 3;
+                    }
+                    std::string selName = "(none)";
+                    const Entity sel = mHost.selection.selectedEntity;
+                    if (sel.IsValid() && pStatsWorld->IsValid(sel))
+                    {
+                        const auto* nc = pStatsWorld->GetComponent<NameComponent>(sel);
+                        if (nc != nullptr && !nc->name.empty()) { selName = nc->name; }
+                    }
+                    char buf[192];
+                    std::snprintf(buf, sizeof(buf),
+                        "Entities %zu  |  Renderables %zu  |  Tris %llu\nSelected: %s",
+                        entityCount, visRenderables,
+                        static_cast<unsigned long long>(triCount), selName.c_str());
+
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    const ImVec2 pad(8.0f, 5.0f);
+                    const ImVec2 anchor(imageOrigin.x + 8.0f, imageOrigin.y + 8.0f);
+                    const ImVec2 ts = ImGui::CalcTextSize(buf);
+                    dl->AddRectFilled(
+                        anchor,
+                        ImVec2(anchor.x + ts.x + pad.x * 2.0f,
+                               anchor.y + ts.y + pad.y * 2.0f),
+                        IM_COL32(0, 0, 0, 140), 4.0f);
+                    dl->AddText(ImVec2(anchor.x + pad.x, anchor.y + pad.y),
+                                IM_COL32(225, 225, 225, 255), buf);
+                }
             }
 
             // viewport gizmo —— v0.4 c2 translate；c3 起 W/E/R 切换 +
