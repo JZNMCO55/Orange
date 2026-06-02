@@ -14,14 +14,22 @@ A1 已把所有**读**类 consumer（render mesh / picking / 3 类光源 / halo 
 
 ## 共同前提：world→local 数学 + 零回归性质
 
+> **2026-06-02 更新**：world→local 的引擎层数学**已落地**——`Scene::DecomposeToLocalTransform(worldMatrix, parentWorld)`
+> （`include/orange/engine/scene/TransformMath.h`，OE `TransformMath` commit）：`localMatrix =
+> inverse(parentWorld) * worldMatrix` 再分解回 TRS，gizmo 拿到新 world 位姿后直接调它得 local
+> 写回 `TransformComponent`，无需在编辑器侧重写矩阵分解。配套 `ComposeLocalMatrix(t)`（local
+> TRS→mat4 单一真相源）。`transform_math_test` 5 例锁住（含 identity 父 local==world 零回归）。
+> 下面是当时的手算公式说明（与 DecomposeToLocalTransform 一致），保留供理解。
+
 - 引擎每帧 `Scene::PropagateWorldTransforms(World&)` 在 `WorldTransformComponent.world`
   写入累积世界矩阵。父的世界矩阵 `parentWorld` 可由 entity 的 `HierarchyComponent.parent`
   取其 `WorldTransformComponent.world`，或复用 `EditorHierarchy::ComputeWorldMatrix(world, parent)`
   （走父链，已有）。无父 / 父无 cache → `parentWorld = identity`。
 - 把一个目标**世界**位置 `pWorld` 写成 entity 的 **local** position：
-  `newLocal = vec3( inverse(parentWorld) * vec4(pWorld, 1) )`。
-- 朝向同理：`newLocalRot = inverse(parentWorldRot) * targetWorldRot`（可复用
-  `EditorHierarchy::SetLocalKeepingWorld` 的 decompose 思路）。
+  `newLocal = vec3( inverse(parentWorld) * vec4(pWorld, 1) )`——即 `DecomposeToLocalTransform`
+  的 position 分量（gizmo 给完整 world 矩阵时直接用它，一并拿 rotation/scale）。
+- 朝向同理：`newLocalRot = inverse(parentWorldRot) * targetWorldRot`（`DecomposeToLocalTransform`
+  已含此分解，或复用 `EditorHierarchy::SetLocalKeepingWorld` 的 decompose 思路）。
 - **零回归性质（关键）**：root / 原点父实体 `parentWorld == identity` →
   `inverse(identity) = identity` → `newLocal == pWorld`，与现状逐字节相同。所有 committed
   场景的 group 父都在原点 → 本改动对既有内容**零回归**。只有 parent 到**非原点**实体的
