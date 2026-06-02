@@ -48,7 +48,8 @@
     - **step 2 进行中**：drawable / picking / light / physics / gizmo **逐个**改读 `WorldTransformComponent`：
       - **drawable/mesh ✅ 2026-06-02**（RenderScene.cpp）：`Collect` 顶部跑 `PropagateWorldTransforms`，drawable 读 world cache（fallback local）。mesh parenting 生效；committed 场景父全在原点 → 零行为变化（ctest 76/76 全 render/light/shadow 测试零回归印证）。
       - **picking ✅ 2026-06-02**（EditorPicking.cpp）：ray-AABB 测 world cache（fallback local）→ parented mesh 按世界位置可选中。
-      - **gizmo / light 方向 / physics 待切**：仍读 entity local。gizmo 画在 local 偏移处（拖动写 local，parented 非原点父需 world→local apply）；非原点父下灯方向/collider 不随父动（mesh+picking 随）。光源方向当前由 importer 把世界光向编码进 local，glTF 灯仍对；切 light consumer 时改 R 桥接（-Z→-Y）+ 去 importer 编码。dogfood item 31「已知未切」。
+      - **DirectionalLight 方向 ✅ 2026-06-02**（Pipeline.cpp 两处）：读 world matrix（normalize(world×(0,-1,0))），方向随父变换传播；root 灯零回归（ctest 76/76）。
+      - **gizmo / point·spot light / physics 待切**：仍读 entity local。gizmo 画在 local 偏移处（拖动写 local，parented 非原点父需 world→local apply，可复用 EditorHierarchy ComputeWorldMatrix）；point/spot 灯位置 + spot 方向（UpdatePointLightsUbo/UpdateSpotLightsUbo）+ collider 不随父动。非 root 导入的 directional 灯需 importer R-bridging（-Z→-Y，angleAxis(90°,X)）才完全对（rare）。dogfood item 31「已知未切」。
   - **A1.2 内容迁移**：committed 场景（pbr_showcase/demo）父全在原点 → **无需迁移**（累积==local）。**glTF scene import 已回退 world-bake → local TRS ✅ 2026-06-02**（end-to-end 测验 local+累积=正确 world）。
   - **A1.3 编辑器 reparent 保持世界位姿 ✅ 2026-06-02**（主 DnD reparent 路径）：`EditorHierarchy::*KeepWorld` 变体（捕获旧 world → 改链 → 重算 local = inverse(新父 world)×旧 world）；keep-world 自逆，命令 do/undo 都调它。`TestReparentKeepWorld`。剩余 reparent 站点（duplicate/clone）clone 已复制正确 local 不需。
 - **跨仓**：否（引擎 Scene/Render 交界）。**headless 可测**：是（world matrix 数值 + 嵌套累积）。**dogfood**：移动父节点子节点跟随。
