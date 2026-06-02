@@ -115,6 +115,56 @@ int main()
            "PropagateWorldTransforms 幂等（重跑数值不漂移）");
     std::fprintf(stdout, "  [PASS] 幂等重跑数值稳定\n");
 
+    // ===== 5. 非均匀 scale 传播：父缩放影响子的世界位置 =====
+    // 父 sp scale (2,1,1) 在原点；子 sq 本地 (1,0,0) → sq 世界 = sp 缩放后 = (2,0,0)。
+    {
+        World ws;
+        Entity sp = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(
+            sp, MakeTC({0.0f, 0.0f, 0.0f}, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                       glm::vec3(2.0f, 1.0f, 1.0f)));
+        ws.AddComponent<HierarchyComponent>(sp, HierarchyComponent{});
+        Entity sq = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(sq, MakeTC({1.0f, 0.0f, 0.0f}));
+        HierarchyComponent hsq;
+        hsq.parent = sp;
+        ws.AddComponent<HierarchyComponent>(sq, hsq);
+        ws.GetComponent<HierarchyComponent>(sp)->firstChild = sq;
+
+        PropagateWorldTransforms(ws);
+        assert(Near(WorldPos(ws, sq), {2.0f, 0.0f, 0.0f}) &&
+               "父 scale (2,1,1) → 子本地 (1,0,0) 世界 = (2,0,0)（scale 沿 hierarchy 传播）");
+        std::fprintf(stdout, "  [PASS] 非均匀 scale 传播：子世界位置被父缩放\n");
+    }
+
+    // ===== 6. sibling 独立：同父的两个子各自累积、互不影响 =====
+    {
+        World ws;
+        Entity bp = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(bp, MakeTC({10.0f, 0.0f, 0.0f}));
+        ws.AddComponent<HierarchyComponent>(bp, HierarchyComponent{});
+        Entity c1 = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(c1, MakeTC({1.0f, 0.0f, 0.0f}));
+        Entity c2 = ws.CreateEntity();
+        ws.AddComponent<TransformComponent>(c2, MakeTC({0.0f, 2.0f, 0.0f}));
+        HierarchyComponent h1;
+        h1.parent = bp;
+        h1.nextSibling = c2;
+        ws.AddComponent<HierarchyComponent>(c1, h1);
+        HierarchyComponent h2;
+        h2.parent = bp;
+        h2.prevSibling = c1;
+        ws.AddComponent<HierarchyComponent>(c2, h2);
+        ws.GetComponent<HierarchyComponent>(bp)->firstChild = c1;
+
+        PropagateWorldTransforms(ws);
+        assert(Near(WorldPos(ws, c1), {11.0f, 0.0f, 0.0f}) &&
+               "c1 世界 = 父(10,0,0)+本地(1,0,0) = (11,0,0)");
+        assert(Near(WorldPos(ws, c2), {10.0f, 2.0f, 0.0f}) &&
+               "c2 世界 = 父(10,0,0)+本地(0,2,0) = (10,2,0)，与 c1 互不影响");
+        std::fprintf(stdout, "  [PASS] sibling 独立：两子各自累积互不影响\n");
+    }
+
     std::fprintf(stdout, "[TransformSystemTest] all tests passed.\n");
     return 0;
 }
