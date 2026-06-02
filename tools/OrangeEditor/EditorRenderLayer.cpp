@@ -850,6 +850,29 @@ void EditorRenderLayer::DrawMainMenuBar()
             FrameAllCamera(mHost);
         }
 
+        // 标准视角（Front/Back/Left/Right/Top/Bottom）—— 把轨道相机角度吸附到
+        // 沿世界轴看 pivot 的方向（保持 pivot + radius）。对 2.5D 对齐 / DCC
+        // 摆位很有用。offset=(cosE·sinAz, sinEl, cosE·cosAz) 且看向 pivot，故
+        // Front=az0/el0（相机在 +Z 看 -Z）。Top/Bottom 钳到 ±89° 避免 el=±90°
+        // 的 gimbal 退化（与 EditorCameraControl 的 kMaxElev 一致）。
+        if (ImGui::BeginMenu("Standard Views"))
+        {
+            auto& cam = mHost.camera;
+            constexpr float kPi   = 3.14159265358979323846f;
+            constexpr float kTopE = 1.5533430343f;  // radians(89°)
+            auto setView = [&cam](float az, float el) {
+                cam.azimuth   = az;
+                cam.elevation = el;
+            };
+            if (ImGui::MenuItem("Front"))  { setView(0.0f,         0.0f);  }
+            if (ImGui::MenuItem("Back"))   { setView(kPi,          0.0f);  }
+            if (ImGui::MenuItem("Right"))  { setView(kPi * 0.5f,   0.0f);  }
+            if (ImGui::MenuItem("Left"))   { setView(-kPi * 0.5f,  0.0f);  }
+            if (ImGui::MenuItem("Top"))    { setView(0.0f,         kTopE); }
+            if (ImGui::MenuItem("Bottom")) { setView(0.0f,        -kTopE); }
+            ImGui::EndMenu();
+        }
+
         // 相机书签（gap 报告 §4 #4）：快照 / 跳转 viewport 轨道相机视角。
         // in-memory 单 session（持久化留待后续）。
         ImGui::Separator();
