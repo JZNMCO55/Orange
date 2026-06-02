@@ -85,11 +85,12 @@
 
 - **现状/缺口**：runtime 齐全（骨骼/程序化/状态机都真实现，见 [[reference_orangeengine_animation_state]]），但**创作侧几乎为零**——零时间轴/dopesheet/曲线编辑器/状态机图编辑器，动画退化成"start→end 线性"或 C++ lambda channel；**无 GPU skinning**（骨骼动画动不了 mesh，大概率跨 OrangeRender）；AnimatorComponent 还不能 Add-Component（`GAP-2026-06-01-animation-editor-integration-missing`）。
 - **里程碑**（XL，多 session）：
-  - **B2.1 动画数据模型**：keyframe track + curve（引擎层；当前 runtime 无 keyframe 编辑数据结构）。schema-first，可序列化。
+  - 📄 **设计提案地基已出**：`docs/b2-animation-authoring-design.md`（读真实头文件后：现状盘点〔Procedural channel 是 lambda 非数据 / FSM 已有数据底座〕 + B2.1 clip/track/keyframe 数据结构 + 采样算法 + 与现有 animator 接通〔数据 channel 与 lambda 并存零改 runtime〕 + UI 线 + 实施顺序）。
+  - **B2.1 动画数据模型 ★先做最高杠杆**：keyframe track + curve（引擎层；当前 runtime 无 keyframe 编辑数据结构，Procedural channel 是 C++ lambda）。schema-first，可序列化 `.anim`；**采样 headless 可测**——像 A1 地基一样纯逻辑可自主推进、不需 dogfood，所有 timeline/curve UI 的根基。
   - **B2.2 GPU skinning**：骨骼蒙皮上 GPU（**跨仓 OrangeRender**——bone matrix palette + vertex skinning shader；当前骨骼动画在 viewport 看不到形变）。**按 ADR-009 三段式**：OrangeRender session 落地 → umbrella bump → 引擎消费。
   - **B2.3 Timeline / dopesheet UI**（编辑器层 ImGui）——轨道 + 关键帧拖动 + scrub。
   - **B2.4 曲线编辑器**（curve editor，缓动/Bezier handle）。
-  - **B2.5 状态机图编辑器**（AnimationStateMachine 已有 runtime，缺节点图 UI + 过渡条件可视化编辑）。
+  - **B2.5 状态机图编辑器 ⚠️ 数据底座已就绪**：AnimationStateMachine **已有数据驱动 `.anim_fsm`**（`ConditionExpr{param,op,threshold}` 可序列化，ADR-005 v0.7）+ `AnimFsmAssetInspectorPlugin` 列表式编辑——**只缺节点图可视化 UI**（状态=节点/transition=边），不重做数据层。
   - **B2.6 AnimatorComponent Add-Component + channel 可视化创作**（当前 channel 只能 C++ lambda；接 schema 注册 + UI 选 target/channel）。
 - **跨仓**：B2.2 是。其余编辑器/引擎单仓。**依赖**：A1 部分（骨骼是 transform hierarchy）。**dogfood**：核心（动画手感、timeline 交互全靠真机）。
 - **建议起点**：B2.2 GPU skinning（让骨骼动画先"看得见"，是这条 epic 的视觉地基）+ B2.6（让 animator 至少能在编辑器挂上）。
