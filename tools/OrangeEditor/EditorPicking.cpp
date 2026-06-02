@@ -8,6 +8,7 @@
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/mat4x4.hpp>
@@ -175,7 +176,14 @@ PickEntityAt(EditorHost& host, glm::vec2 ndc, float aspect)
         if (pMesh->Empty()) { continue; }
 
         const LocalAABB localAABB = ComputeMeshLocalAABB(*pMesh);
-        const glm::mat4 worldMat  = ComposeWorldMatrix(xform);
+        // world matrix 取 TransformSystem 累积的 cache（含父变换，ADR-016 / A1.1
+        // step 2）—— 与 RenderScene::Collect 渲染用的同一份，让 picking 命中
+        // parented mesh 的真实世界位置（之前 picking 测 local，非原点父的 mesh
+        // 选不中）。cache 缺失（首帧 / 未渲染）退回单实体 local 兜底。
+        const auto entity = Orange::Engine::World::FromEntt(e);
+        const auto* wt =
+            host.scene.pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity);
+        const glm::mat4 worldMat  = (wt != nullptr) ? wt->world : ComposeWorldMatrix(xform);
         const LocalAABB worldAABB = TransformAABB(localAABB, worldMat);
 
         const auto t = RayAABBIntersect(origin, dir, worldAABB.min, worldAABB.max);
@@ -183,7 +191,7 @@ PickEntityAt(EditorHost& host, glm::vec2 ndc, float aspect)
         if (*t < bestT)
         {
             bestT      = *t;
-            bestEntity = Orange::Engine::World::FromEntt(e);
+            bestEntity = entity;
         }
     }
 
