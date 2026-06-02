@@ -56,7 +56,9 @@
 
 ## 2026-06-01 session（多 material per mesh 导入 + drop 消费）
 
-### 4. 多 material per mesh —— drop 多材质 .mesh 各段显示不同材质
+### ✅ 4. 多 material per mesh —— drop 多材质 .mesh 各段显示不同材质
+
+> **2026-06-02 dogfood 通过**（用户实测，multimat_emissive_cube 各段显示不同材质）。同轮修了 Inspector 设 mesh 字段不挂组件的路径分叉 bug（`e64e5c5`，详见下方 item 5）。
 
 - **commit**：`a795c10` feat(editor): 多 material per mesh 导入侧 + drop 消费 + headless 测试（承接引擎核心 `774956d`）
 - **怎么触发**：
@@ -85,7 +87,9 @@
 > - 已 headless `import-mesh` 导入到 `assets/Models/multimat_emissive_cube/`（gitignore 但**存活 clean build** + 源 `.glb` 经 ADR-008 co-locate 一并落此目录，**编辑器资产浏览器直接可见**），产物：`.mesh` + slot 0 `multimat_emissive_cube.material`（OrangeMat 橙色不发光）+ slot 1 `multimat_emissive_cube_GlowMat.material`（GlowMat 蓝光自发光）+ `.meta`（subMeshMaterials 两条）。重新导入：`build/bin/Debug/OrangeEditor.exe import-mesh <glb>`（从仓库根 cwd 跑）
 > - **导入侧已自动验证**（真实 Blender 导出，非合成 fixture）：slot 1 的 `uEmissive = (0.3, 1.8, 3.0, 0)` = emissiveFactor (0.1,0.6,1.0) × emissiveStrength 3.0；slot 0 无 uEmissive（不发光零回归）；`.meta` subMeshMaterials 两条路径对齐。**剩 viewport 视觉 + Inspector 交互待人工 dogfood**（无 headless viewport 渲染路径）。
 
-### 5. SubMeshMaterials Inspector —— drop 多材质后 Inspector 可见/逐 slot 改材质
+### ✅ 5. SubMeshMaterials Inspector —— drop 多材质后 Inspector 可见/逐 slot 改材质
+
+> **2026-06-02 dogfood 通过**（用户实测确认）。第一轮逮到 bug：**Inspector 设 Mesh 字段**（vs viewport/tree drop）不挂 SubMeshMaterialsComponent → 无 Sub-Mesh Materials 段。根因=两路径分叉（schema meshSet 只设 handle、拿不到 World/Entity 挂兄弟组件）。修复 `e64e5c5`：抽 `SyncSubMeshMaterialsForMesh` 让 drop 与 Inspector 设 mesh 复用同一份。修后 Inspector 正常弹 Sub-Mesh Materials 段 + slot 0/1 材质。
 
 - **commit**：`ff13b41` feat(editor): SubMeshMaterialsComponent Inspector（AssetRef 数组字段类型）
 - **怎么触发**：
@@ -100,7 +104,9 @@
   - **空 slot / 单材质 mesh**：单材质模型 drop 后不挂本组件、Inspector 无此段（向后兼容）
 - **背景**：headless ctest 74/74 验 schema 注册 + AssetRefArray get/set + 命令栈 round-trip；**数组型 AssetRef 控件的 DnD / 清除 / Undo 手感 + 逐 slot 重指派的 viewport 实时性待真机确认**。
 
-### 6. PBR emissive 自发光通道 —— GlowMat 半边发蓝光
+### ✅ 6. PBR emissive 自发光通道 —— GlowMat 半边发蓝光
+
+> **2026-06-02 dogfood 通过**（用户实测确认 multimat_emissive_cube：一半橙色 PBR + 一半 GlowMat 蓝色自发光）。shader（pbr.vert 176B push + pbr.frag set 1 binding 4）+ 导入 uEmissive 预乘 GPU 端视觉正确。
 
 - **commit**：`0d14e21` feat(render): PBR emissive 自发光通道（shader + 导入消费）
 - **怎么触发**：
