@@ -461,7 +461,11 @@ void EditorRenderLayer::DrawScenePanel()
             const bool colliderEditing = Orange::Editor::HandleColliderVertexEdit(
                 mHost, imageOrigin, imageSize, aspect);
 
-            if (!colliderEditing && !mHost.gizmo.IsDragging() && !ImGui::IsAnyItemActive())
+            // RMB 按住（飞行导航）时不响应 W/E/R 切 gizmo mode —— 让 WASD 给
+            // 相机飞行用，避免 W 既切 translate gizmo 又前进的冲突。
+            const bool flyNavActive = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            if (!colliderEditing && !mHost.gizmo.IsDragging()
+                && !ImGui::IsAnyItemActive() && !flyNavActive)
             {
                 // v0.8 keybinding：从 EditorKeybindings 读绑定的 key（默认
                 // W/E/R，可在 Settings 面板内 rebind）。

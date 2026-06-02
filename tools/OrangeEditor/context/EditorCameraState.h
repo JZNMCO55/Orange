@@ -38,12 +38,19 @@ struct EditorCameraState
     // 手感一致）。近似 grab-pan（精确需视口高度，经验值足够，dogfood 可调）。
     float     panSensitivity  = 0.0020f;
 
+    // RMB-held 飞行导航速度（world 单位 / 秒，Shift 加速 ×3）。Unreal/Unity 同款
+    // RMB+WASD 飞行；经验值，未来可暴露 Preferences。
+    float     flySpeed = 5.0f;
+
     // LMB 拖动状态机：按下时（且鼠标在 Scene 面板内）置 true，进入"无
     // 论鼠标是否仍 hover 都吃 MouseDelta"模式；释放时清零。
     bool      dragging = false;
     // MMB 平移状态机（同 capture-on-press 语义；与 LMB orbit / 滚轮 zoom /
     // gizmo 拖动均不冲突——MMB 未被它们占用）。
     bool      panning  = false;
+    // RMB 飞行状态机（同 capture-on-press；RMB 拖动 look-in-place + WASD/QE
+    // 沿视向移动。RMB 未被 orbit/pan/zoom/gizmo 占用，正交）。
+    bool      flying   = false;
 };
 
 #endif  // ORANGE_EDITOR_CONTEXT_EDITOR_CAMERA_STATE_H

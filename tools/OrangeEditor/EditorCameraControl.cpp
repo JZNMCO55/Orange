@@ -106,6 +106,68 @@ void UpdateEditorCameraFromInput(EditorHost& host)
         ec.pivot += (-right * d.x + up * d.y) * scale;
     }
 
+    // ---- RMB-held 飞行导航（Unreal/Unity 标准 RMB+WASD）-------------------
+    // RMB 拖动 = look-in-place（保持相机位置不动、只转视角，与轨道 LMB 区别）；
+    // RMB 按住时 WASD/QE 沿视向飞行（移动 pivot → 相机随之移动，offset 不变）。
+    // RMB gate 让 WASD 不与 W/E/R gizmo 快捷键冲突（ScenePanel 侧 RMB 按住时
+    // 不切 gizmo mode）。与 LMB orbit / MMB pan / 滚轮 zoom 正交（RMB 未占用）。
+    if (ec.flying && (!ImGui::IsMouseDown(ImGuiMouseButton_Right) || gizmoBusy))
+    {
+        ec.flying = false;
+    }
+    if (!ec.flying && hovered
+        && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !gizmoBusy)
+    {
+        ec.flying = true;
+    }
+    if (ec.flying)
+    {
+        // 当前（旋转前）相机世界位置——look-in-place 锚点。
+        const float cosE0 = std::cos(ec.elevation);
+        const glm::vec3 off0(ec.radius * cosE0 * std::sin(ec.azimuth),
+                             ec.radius * std::sin(ec.elevation),
+                             ec.radius * cosE0 * std::cos(ec.azimuth));
+        const glm::vec3 camPos = ec.pivot + off0;
+
+        // RMB 拖动看（与 LMB orbit 同方向，但锚定相机位置不动）。
+        const ImVec2 d = io.MouseDelta;
+        ec.azimuth   -= d.x * ec.lookSensitivity;
+        ec.elevation += d.y * ec.lookSensitivity;
+        constexpr float kMaxElev = 1.5533430343f;   // glm::radians(89°)
+        if (ec.elevation >  kMaxElev) ec.elevation =  kMaxElev;
+        if (ec.elevation < -kMaxElev) ec.elevation = -kMaxElev;
+
+        // 旋转后保持相机位置不动：pivot = camPos - newOffset（look-in-place）。
+        const float cosE1 = std::cos(ec.elevation);
+        const glm::vec3 off1(ec.radius * cosE1 * std::sin(ec.azimuth),
+                             ec.radius * std::sin(ec.elevation),
+                             ec.radius * cosE1 * std::cos(ec.azimuth));
+        ec.pivot = camPos - off1;
+
+        // WASD/QE 沿视向飞行（仅无文本输入焦点时，避免抢键）。
+        if (!io.WantTextInput)
+        {
+            const glm::vec3 fwd   = -glm::normalize(off1);  // 相机 → 视线前方
+            const glm::vec3 right = glm::normalize(
+                glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
+            const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+            const float dt = (io.DeltaTime > 0.0f && io.DeltaTime < 0.2f)
+                                 ? io.DeltaTime : 0.016f;
+            const float speed = ec.flySpeed * (io.KeyShift ? 3.0f : 1.0f) * dt;
+            glm::vec3 move(0.0f);
+            if (ImGui::IsKeyDown(ImGuiKey_W)) { move += fwd; }
+            if (ImGui::IsKeyDown(ImGuiKey_S)) { move -= fwd; }
+            if (ImGui::IsKeyDown(ImGuiKey_D)) { move += right; }
+            if (ImGui::IsKeyDown(ImGuiKey_A)) { move -= right; }
+            if (ImGui::IsKeyDown(ImGuiKey_E)) { move += worldUp; }
+            if (ImGui::IsKeyDown(ImGuiKey_Q)) { move -= worldUp; }
+            if (glm::length(move) > 1e-5f)
+            {
+                ec.pivot += glm::normalize(move) * speed;
+            }
+        }
+    }
+
     // 滚轮：缩放 radius（推近 / 拉远）；hover 才生效避免误触其它面板滚动条。
     // 不被 gizmo gate 影响——滚轮缩放与 gizmo drag 不冲突（gizmo 不消费滚轮）。
     if (hovered && io.MouseWheel != 0.0f)
