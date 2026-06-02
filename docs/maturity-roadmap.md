@@ -50,7 +50,7 @@
       - **picking ✅ 2026-06-02**（EditorPicking.cpp）：ray-AABB 测 world cache（fallback local）→ parented mesh 按世界位置可选中。
       - **gizmo / light 方向 / physics 待切**：仍读 entity local。gizmo 画在 local 偏移处（拖动写 local，parented 非原点父需 world→local apply）；非原点父下灯方向/collider 不随父动（mesh+picking 随）。光源方向当前由 importer 把世界光向编码进 local，glTF 灯仍对；切 light consumer 时改 R 桥接（-Z→-Y）+ 去 importer 编码。dogfood item 31「已知未切」。
   - **A1.2 内容迁移**：committed 场景（pbr_showcase/demo）父全在原点 → **无需迁移**（累积==local）。**glTF scene import 已回退 world-bake → local TRS ✅ 2026-06-02**（end-to-end 测验 local+累积=正确 world）。
-  - **A1.3 编辑器 reparent 保持世界位姿** ★A1.1 mesh 切换后**变必需**：reparent mesh 到非原点父会跳位（local 被当相对父解释），需 keep-world 重算 local。**下一步开工**。
+  - **A1.3 编辑器 reparent 保持世界位姿 ✅ 2026-06-02**（主 DnD reparent 路径）：`EditorHierarchy::*KeepWorld` 变体（捕获旧 world → 改链 → 重算 local = inverse(新父 world)×旧 world）；keep-world 自逆，命令 do/undo 都调它。`TestReparentKeepWorld`。剩余 reparent 站点（duplicate/clone）clone 已复制正确 local 不需。
 - **跨仓**：否（引擎 Scene/Render 交界）。**headless 可测**：是（world matrix 数值 + 嵌套累积）。**dogfood**：移动父节点子节点跟随。
 - **风险**：会和本 session 的 world-bake scene import 设计交互（A1.2 要回退它）；改 drawable 收集是热路径，注意性能。
 

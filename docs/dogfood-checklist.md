@@ -427,7 +427,7 @@
   - **已切：mesh 渲染 + picking**。**未切：gizmo 放置/拖动、光源方向、物理 collider**（后续 increment）——具体表现：
     - **gizmo 仍画在 local 位置**：选中一个**非原点父**下的 mesh，gizmo 会画在它的 local 偏移处（不在 mesh 上）；拖 gizmo 仍写 local。可发现性受影响但能编辑（Inspector / 拖动仍改 local）。**这是预期**，A1.3 + gizmo 切换后修。
     - **光源方向 / collider 不随父旋转**：把灯/collider parent 到旋转父下，方向/collider 不跟随（mesh 跟随）。glTF 导入的灯方向仍对（importer 把世界光向编码进 local）。
-  - **reparent 到非原点父会跳位**（A1.3 keep-world 未做）：把 B parent 到**已移动过**（非原点）的 A 下，B 会**跳一下**（local 被当相对 A 解释）。reparent 到原点父不跳。**dogfood 时先 parent 再移动父**（顺序对就不跳）。A1.3 落地后修。
+  - **reparent keep-world ✅**（A1.3 主 DnD 路径已落）：把 B 拖到**已移动过**（非原点）的 A 下，B **应保持原世界位置不跳**（keep-world 重算 local）；Ctrl+Z 撤回 B 也回原位。**dogfood 重点验**：拖 reparent 到移动过的父，物体不跳位 + undo 还原。（注：duplicate/Ctrl+D 的 reparent 不走 keep-world——clone 复制原 local，行为同原对象。）
 
 > **A1 剩余 consumer 完成清单**（给后续 session）：gizmo 放置+拖动读 world / world→local apply（防 parented 拖偏）· A1.3 reparent keep-world（重算 local 防跳）· 光源方向读 world rotation（+ importer 去 world-dir 编码改 R 桥接）· 物理 collider 读 world（2D，subtler）。详见 `docs/maturity-roadmap.md` A1.1 step 2。
 
