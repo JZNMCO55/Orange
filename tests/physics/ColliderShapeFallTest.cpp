@@ -80,6 +80,26 @@ int main()
         // 不崩即过;AddBody 应跳过 fixture → invalid handle → drop=-1。
         assert(d < 0.0f && "退化多边形应被跳过(invalid handle),且不崩");
     }
+    // count 上界保护:count 超过 kMaxVertices=8（malformed / 反序列化坏数据）应被夹到 8、
+    // 不越界读 hull.points、仍产出有效多边形。修复前 hull.count 直接取 count>8 →
+    // b2MakePolygon 读 hull.points[8..] 越界（hull.points 固定 8 元素;debug 触 b2 assert /
+    // release UB）。这里谎报 count=10 但只填 8 个有效八边形顶点（vertices 也只有 8 槽）。
+    {
+        ColliderComponent cc;
+        PolygonDesc p;
+        p.count       = 10;  // 谎报 10
+        p.vertices[0] = glm::vec2(-0.5f, -0.25f);
+        p.vertices[1] = glm::vec2(-0.25f, -0.5f);
+        p.vertices[2] = glm::vec2(0.25f, -0.5f);
+        p.vertices[3] = glm::vec2(0.5f, -0.25f);
+        p.vertices[4] = glm::vec2(0.5f, 0.25f);
+        p.vertices[5] = glm::vec2(0.25f, 0.5f);
+        p.vertices[6] = glm::vec2(-0.25f, 0.5f);
+        p.vertices[7] = glm::vec2(-0.5f, 0.25f);
+        cc.shape      = p;
+        const float d = SimulateFall(cc, "polygon-count-overflow(count=10,clamp->8)");
+        assert(d > 0.5f && "count>8 夹到 8 后仍是有效多边形,dynamic body 掉落(不越界/不崩)");
+    }
     // EdgeChain（A3 编辑产出）—— 3 顶点折线。在 dynamic body 上必须不崩
     // （之前 b2CreateChain 对非 static body assert 崩 → 编辑器进 Play 崩）。
     {

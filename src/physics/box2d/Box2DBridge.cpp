@@ -52,8 +52,15 @@ namespace
 b2Polygon BuildPolygonFromDesc(const PolygonDesc& desc) noexcept
 {
     b2Hull hull{};
-    hull.count = static_cast<int>(desc.count);
-    for (std::uint32_t i = 0; i < desc.count && i < B2_MAX_POLYGON_VERTICES; ++i)
+    // count 夹到 B2_MAX_POLYGON_VERTICES（== hull.points 固定容量，也 == PolygonDesc::
+    // kMaxVertices）。若调用方 / 反序列化坏数据给了 count>8（PolygonDesc::vertices 也只
+    // 有 8 槽），不夹会让 hull.count 超过已拷贝点数与数组容量 → b2MakePolygon 读
+    // hull.points[8..] 越界（debug 靠 b2 内部 assert，release 无 assert = UB）。与下方
+    // PolygonDesc count<3 的下界校验对称补上上界。
+    const std::uint32_t n =
+        std::min<std::uint32_t>(desc.count, static_cast<std::uint32_t>(B2_MAX_POLYGON_VERTICES));
+    hull.count = static_cast<int>(n);
+    for (std::uint32_t i = 0; i < n; ++i)
     {
         hull.points[i] = ToB2(desc.vertices[i]);
     }
