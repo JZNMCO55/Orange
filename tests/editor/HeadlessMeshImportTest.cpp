@@ -332,6 +332,54 @@ void WriteCubeObjWithTwoMtl(const std::string& objPath, const std::string& mtlNa
     ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";
 }
 
+// 写一个最小可解的 2×2 24-bit 未压缩 TGA（stb_image 支持），给 OBJ map_Kd 用。
+void WriteMinimalTga(const std::string& path)
+{
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    assert(f.is_open() && "写 TGA fixture 应成功");
+    // TGA 头 18 字节：imageType=2（未压缩 true-color），width=2,height=2,bpp=24。
+    const unsigned char hdr[18] = {
+        0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 24, 0};
+    f.write(reinterpret_cast<const char*>(hdr), 18);
+    const unsigned char px[3] = {0, 0, 255};  // BGR = 红
+    for (int i = 0; i < 4; ++i) { f.write(reinterpret_cast<const char*>(px), 3); }
+}
+
+// 写一个带 map_Kd 贴图的单材质 .obj（+ .mtl + .tga 同目录）。验证 OBJ 贴图导入。
+void WriteCubeObjWithTexturedMtl(const std::string& objPath,
+                                 const std::string& mtlName,
+                                 const std::string& texName)
+{
+    const fs::path dir = fs::path(objPath).parent_path();
+    WriteMinimalTga((dir / texName).generic_string());
+    {
+        std::ofstream mtl((dir / mtlName), std::ios::binary | std::ios::trunc);
+        assert(mtl.is_open() && "写带贴图 .mtl 应成功");
+        mtl << "newmtl TexMat\n";
+        mtl << "Kd 1.0 1.0 1.0\n";
+        mtl << "map_Kd " << texName << "\n";
+    }
+    std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写带贴图 .obj 应成功");
+    ofs << "mtllib " << mtlName << "\n";
+    ofs << "v -0.5 -0.5 -0.5\n";  ofs << "v  0.5 -0.5 -0.5\n";
+    ofs << "v  0.5  0.5 -0.5\n";  ofs << "v -0.5  0.5 -0.5\n";
+    ofs << "v -0.5 -0.5  0.5\n";  ofs << "v  0.5 -0.5  0.5\n";
+    ofs << "v  0.5  0.5  0.5\n";  ofs << "v -0.5  0.5  0.5\n";
+    ofs << "vt 0.0 0.0\n";  ofs << "vt 1.0 0.0\n";
+    ofs << "vt 1.0 1.0\n";  ofs << "vt 0.0 1.0\n";
+    ofs << "vn  0.0  0.0 -1.0\n";  ofs << "vn  0.0  0.0  1.0\n";
+    ofs << "vn -1.0  0.0  0.0\n";  ofs << "vn  1.0  0.0  0.0\n";
+    ofs << "vn  0.0 -1.0  0.0\n";  ofs << "vn  0.0  1.0  0.0\n";
+    ofs << "usemtl TexMat\n";
+    ofs << "f 1/1/1 2/2/1 3/3/1\n";  ofs << "f 1/1/1 3/3/1 4/4/1\n";
+    ofs << "f 5/1/2 6/2/2 7/3/2\n";  ofs << "f 5/1/2 7/3/2 8/4/2\n";
+    ofs << "f 1/1/3 4/2/3 8/3/3\n";  ofs << "f 1/1/3 8/3/3 5/4/3\n";
+    ofs << "f 2/1/4 6/2/4 7/3/4\n";  ofs << "f 2/1/4 7/3/4 3/4/4\n";
+    ofs << "f 1/1/5 5/2/5 6/3/5\n";  ofs << "f 1/1/5 6/3/5 2/4/5\n";
+    ofs << "f 4/1/6 3/2/6 7/3/6\n";  ofs << "f 4/1/6 7/3/6 8/4/6\n";
+}
+
 }  // namespace
 
 int main()
@@ -749,6 +797,33 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] OBJ 多材质：2 .material(slot0/1) + 2 sub-mesh 段"
                      "（连续+覆盖全索引）+ .meta subMeshMaterials\n");
+    }
+
+    // ===== 10. OBJ map_Kd 贴图导入（.mtl 贴图 → .material texture 槽）=====
+    // 之前 OBJ 材质只导 scalar（Kd/Ns/Ke），贴图丢。本段验证 map_Kd → binding 0
+    // baseColor 贴图经 ImportTextureToRegistry co-locate + 写进 .material textures。
+    {
+        const fs::path srcDir = testRoot / "src_objtex";
+        fs::create_directories(srcDir, ec);
+        const std::string objPath = (srcDir / "tex_cube.obj").generic_string();
+        WriteCubeObjWithTexturedMtl(objPath, "tex_cube.mtl", "tex_cube_kd.tga");
+
+        auto registry = MakeImportRegistry();
+        const ImportNS::ImportResult r =
+            ImportNS::ImportObjMeshToRegistry(objPath, *registry);
+        assert(r.status == ImportNS::ImportStatus::Success &&
+               "带贴图 .obj 导入应 Success");
+
+        const fs::path modelDir = fs::path(r.destPath).parent_path();
+        const fs::path matFile  = modelDir / "tex_cube.material";
+        assert(fs::exists(matFile) && ".material 应生成");
+        // .material textures 段非空（map_Kd → binding 0）。v1.1 textures 项含
+        // "binding" 字段；空 textures（"textures":[]）则无 —— 据此判贴图已写入。
+        assert(FileContains(matFile.generic_string(), "\"binding\"") &&
+               "map_Kd → .material 应含 texture binding 槽");
+        std::fprintf(stdout,
+                     "  [PASS] OBJ map_Kd 贴图：ImportTextureToRegistry co-locate + "
+                     ".material texture 槽\n");
     }
 
     // 清理临时目录（切回上层先，避免删 cwd）。

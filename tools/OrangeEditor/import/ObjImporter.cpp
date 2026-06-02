@@ -1,6 +1,7 @@
 #include "ObjImporter.h"
 
-#include "../MaterialFileIO.h"  // .mtl → .material（单材质 OBJ 材质导入）
+#include "../MaterialFileIO.h"  // .mtl → .material（OBJ 材质导入）
+#include "ImportDispatcher.h"   // ImportTextureToRegistry（map_Kd / map_bump 贴图）
 #include "MeshTangentGen.h"
 #include "MetaSidecar.h"
 
@@ -515,7 +516,40 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
             ? (stem + ".material")
             : (stem + "_" + sanitizeObjMatName(objMat, slot) + ".material");
         const std::string matPath = (destDir / fileName).generic_string();
-        const auto mdata = BuildObjMaterialFileData(materials[objMat]);
+        auto mdata = BuildObjMaterialFileData(materials[objMat]);
+
+        // 贴图：map_Kd → binding 0（baseColor）、map_bump → binding 1（normal）。
+        // 路径相对 mtl_basedir（baseDir 已带尾斜杠）解析 + 经
+        // ImportTextureToRegistry co-locate 到模型目录（与 gltf 同一条纹理导入
+        // 路径）。缺失 / import 失败该槽跳过（不写 texture，渲染端喂 default）。
+        // 其它 map_Ks / map_Ns / map_Ka 不在 pbr set 1 通道里，暂不导。
+        const std::string objDestDir = destDir.generic_string();
+        auto addObjTexture = [&](const std::string& texName,
+                                 std::uint32_t       binding) {
+            if (texName.empty()) { return; }
+            const std::string texSrc = baseDir + texName;
+            std::error_code   tec;
+            if (!fs::exists(texSrc, tec))
+            {
+                ORANGE_LOG_WARN("ObjImporter: material 贴图 '{}' 不存在，跳过该槽",
+                                texSrc);
+                return;
+            }
+            ImportResult tr =
+                ImportTextureToRegistry(texSrc, registry, objDestDir);
+            if (tr.status == ImportStatus::Success && !tr.destPath.empty())
+            {
+                mdata.textures.push_back({binding, tr.destPath});
+            }
+            else
+            {
+                ORANGE_LOG_WARN("ObjImporter: 贴图 '{}' import 失败，跳过该槽",
+                                texSrc);
+            }
+        };
+        addObjTexture(materials[objMat].diffuse_texname, 0u);
+        addObjTexture(materials[objMat].bump_texname,    1u);
+
         if (::Orange::Editor::Material::WriteMaterialFile(matPath, mdata))
         {
             objMaterialPaths[slot] = matPath;
