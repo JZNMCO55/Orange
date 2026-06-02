@@ -47,12 +47,45 @@
           { "label": "Reserved", "widget": "hidden" }
         ]
       }
+    },
+    {
+      "name": "uEmissive",
+      "type": "vec4",
+      "default": [0.0, 0.0, 0.0, 0.0],
+      "editor": {
+        "widget": "components",
+        "components": [
+          {
+            "label": "Emissive R",
+            "widget": "slider",
+            "range": [0.0, 8.0],
+            "step": 0.01,
+            "tooltip": "自发光红通道（可 > 1，HDR；> 1 经 bloom 发光晕）"
+          },
+          {
+            "label": "Emissive G",
+            "widget": "slider",
+            "range": [0.0, 8.0],
+            "step": 0.01,
+            "tooltip": "自发光绿通道（可 > 1，HDR）"
+          },
+          {
+            "label": "Emissive B",
+            "widget": "slider",
+            "range": [0.0, 8.0],
+            "step": 0.01,
+            "tooltip": "自发光蓝通道（可 > 1，HDR）"
+          },
+          { "label": "Reserved", "widget": "hidden" }
+        ]
+      }
     }
   ],
   "textureSlots": [
     { "binding": 0, "name": "uBaseColorTex" },
     { "binding": 1, "name": "uNormalTex" },
     { "binding": 2, "name": "uMetalRoughTex" },
-    { "binding": 3, "name": "uAoTex" }
+    { "binding": 3, "name": "uAoTex" },
+    { "binding": 4, "name": "uEmissiveTex" }
   ]
 }
