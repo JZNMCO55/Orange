@@ -21,6 +21,9 @@
 //   * vWorldTangent —— inTangent.xyz 经 mat3(uModel) 翻到 world space；frag
 //                  端 Gram-Schmidt 正交化后与 vNormal 构 TBN 采法线贴图。
 //   * vTangentSign —— inTangent.w 手性符号，frag 端 bitangent = cross(N,T)*sign。
+//   * vEmissive  —— per-instance 自发光（rgb = emissiveFactor × emissiveStrength，
+//                  host 端预乘；a 预留）。frag 端 × set 1 binding 4 emissive 贴图
+//                  后直接叠加到最终色，参与 HDR + bloom 发光。
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
@@ -34,12 +37,19 @@ layout(location = 3) out vec4  vBaseColor;
 layout(location = 4) out vec4  vMRA;
 layout(location = 5) out vec3  vWorldTangent;
 layout(location = 6) out float vTangentSign;
+layout(location = 7) out vec4  vEmissive;
 
+// push constant 在原 160 B {uMVP, uModel, uBaseColor, uMRA} 基础上扩一条
+// vec4 uEmissive = 176 B，仍在桌面级 GPU 的 maxPushConstantsSize（普遍 256 B）
+// 以内。emissive 是 vec3 色（塞不进 uBaseColor.w / uMRA.w 两个 reserved 标量），
+// 故新增整条 vec4。OrangeRender PushConstantRange 仅 Vertex stage → 经 vEmissive
+// varying 透传给 frag（与 uBaseColor / uMRA 同款 transport）。
 layout(push_constant, std430) uniform Push {
     mat4 uMVP;        //   0  64
     mat4 uModel;      //  64  64
     vec4 uBaseColor;  // 128  16
     vec4 uMRA;        // 144  16   (metallic, roughness, ao, _reserved)
+    vec4 uEmissive;   // 160  16   (rgb = emissiveFactor×strength, a reserved)
 } pc;
 
 void main()
@@ -52,5 +62,6 @@ void main()
     vMRA           = pc.uMRA;
     vWorldTangent  = mat3(pc.uModel) * inTangent.xyz;
     vTangentSign   = inTangent.w;
+    vEmissive      = pc.uEmissive;
     gl_Position    = pc.uMVP * vec4(inPosition, 1.0);
 }

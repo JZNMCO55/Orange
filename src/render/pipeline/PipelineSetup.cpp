@@ -1707,9 +1707,13 @@ Result<void, ResultCode> Pipeline::SetupRhiResources()
             rhi.AllocateDescriptorSet(*impl.materialTexPool, *impl.materialTexLayout);
         if (impl.defaultMaterialSet)
         {
+            // binding 0..4：baseColor / normal / metalRough / ao / emissive。
+            // emissive 默认白（与 EnsureMaterialDescriptorSet defaults 一致）——
+            // 未绑 emissive 贴图的 PBR draw 走本 default set，emissive = factor×白。
             Orange::Rhi::RHITexture* defs[Pipeline::Impl::kMaterialTexBindings] = {
                 impl.defaultWhiteTex.get(), impl.defaultNormalTex.get(),
-                impl.defaultWhiteTex.get(), impl.defaultWhiteTex.get()};
+                impl.defaultWhiteTex.get(), impl.defaultWhiteTex.get(),
+                impl.defaultWhiteTex.get()};
             Orange::Rhi::DescriptorWrite w[Pipeline::Impl::kMaterialTexBindings]{};
             for (std::uint32_t b = 0; b < Pipeline::Impl::kMaterialTexBindings; ++b)
             {

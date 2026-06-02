@@ -116,10 +116,13 @@ layout(set = 0, binding = 10) uniform samplerCube uPointShadowCube1;
 //   binding 1: tangent-space normal map（RGB 编码 [0,1] → [-1,1]）
 //   binding 2: metalRough（glTF 约定 G=roughness, B=metallic）
 //   binding 3: ambient occlusion（R 通道）
+//   binding 4: emissive（自发光色，× vEmissive.rgb 叠加到最终色；未绑时喂
+//              default 白 → 仅 emissiveFactor 生效，factor=0 时零发光 = 零回归）
 layout(set = 1, binding = 0) uniform sampler2D uBaseColorTex;
 layout(set = 1, binding = 1) uniform sampler2D uNormalTex;
 layout(set = 1, binding = 2) uniform sampler2D uMetalRoughTex;
 layout(set = 1, binding = 3) uniform sampler2D uAoTex;
+layout(set = 1, binding = 4) uniform sampler2D uEmissiveTex;
 
 layout(location = 0) in vec2  vUV;
 layout(location = 1) in vec3  vWorldPos;
@@ -128,6 +131,7 @@ layout(location = 3) in vec4  vBaseColor;
 layout(location = 4) in vec4  vMRA;
 layout(location = 5) in vec3  vWorldTangent;
 layout(location = 6) in float vTangentSign;
+layout(location = 7) in vec4  vEmissive;
 
 layout(location = 0) out vec4 outColor;
 
@@ -202,6 +206,12 @@ void main()
     float metallic  = clamp(vMRA.x * mrTex.b, 0.0, 1.0);
     float roughness = clamp(vMRA.y * mrTex.g, 0.04, 1.0);  // 下限避开 D_GGX α→0 奇异
     float ao        = clamp(vMRA.z * texture(uAoTex, vUV).r, 0.0, 1.0);
+
+    // 自发光（glTF emissiveFactor×strength × emissiveTexture）。vEmissive.rgb 已
+    // 在 host 端预乘 emissiveStrength；未绑 emissive 贴图时 set 1 binding 4 喂
+    // default 白 → emissive = vEmissive.rgb（factor=0 默认 → 0，零回归）。合成
+    // 阶段直接叠加，> 1 的 HDR 值经 bloom 发光（与 emissive 模板同款机制）。
+    vec3  emissive  = vEmissive.rgb * texture(uEmissiveTex, vUV).rgb;
 
     // α = roughness²（Disney convention，感知线性）
     float alpha = roughness * roughness;
@@ -455,7 +465,7 @@ void main()
     }
 
     // ---- 合成 ----
-    vec3 color = directLo + ptLo + spotLo + iblLo;
+    vec3 color = directLo + ptLo + spotLo + iblLo + emissive;
 
     // CSM cascade tint overlay（GAP-2026-05-27 sample 18 polish）：开关时
     // 用 per-cascade 颜色 mix 一层到最终输出，让 cascade 边界肉眼直观可见

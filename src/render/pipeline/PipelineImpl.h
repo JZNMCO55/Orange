@@ -697,7 +697,10 @@ struct Pipeline::Impl
     // 1=normal / 2=metalRough / 3=ao，全 CombinedImageSampler、Fragment stage。
     // 未绑的槽喂 default 贴图（白 / flat-normal）→ 采样 ×scalar = scalar、法线不
     // 扰动 → 没绑贴图时输出与纯 scalar PBR 完全一致（零回归）。
-    static constexpr std::uint32_t kMaterialTexBindings = 4;
+    // set 1 per-instance material 贴图槽数：baseColor / normal / metalRough /
+    // ao / emissive（binding 0..4）。与 pbr.frag set=1 声明 + BuiltinMaterials
+    // pbr 模板 textureSlots 严格对齐——任一处增减贴图通道必须三处同步。
+    static constexpr std::uint32_t kMaterialTexBindings = 5;
     static constexpr std::uint32_t kMaxMaterialSets     = 128;
     std::unique_ptr<Orange::Rhi::RHISampler>             materialSampler;
     std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> materialTexLayout;
@@ -819,9 +822,13 @@ struct Pipeline::Impl
             entry = &it->second;
         }
 
+        // 顺序对齐 binding 0..4：baseColor / normal / metalRough / ao / emissive。
+        // emissive 默认白（非黑）—— 渲染端 emissive = vEmissive.rgb × tex，未绑
+        // 贴图时喂白让 emissiveFactor 单独生效（factor 默认 0 → 零发光 = 零回归）。
         Orange::Rhi::RHITexture* defaults[kMaterialTexBindings] = {
             defaultWhiteTex.get(), defaultNormalTex.get(),
-            defaultWhiteTex.get(), defaultWhiteTex.get()};
+            defaultWhiteTex.get(), defaultWhiteTex.get(),
+            defaultWhiteTex.get()};
         Orange::Rhi::DescriptorWrite writes[kMaterialTexBindings]{};
         for (std::uint32_t b = 0; b < kMaterialTexBindings; ++b)
         {

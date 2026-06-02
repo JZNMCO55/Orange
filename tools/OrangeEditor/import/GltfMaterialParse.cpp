@@ -106,8 +106,22 @@ GltfMatInfo ExtractGltfMaterial(const cgltf_material* mat,
     }
     info.normalSrc = ResolveTextureSource(mat->normal_texture, gltfDir);
     info.aoSrc     = ResolveTextureSource(mat->occlusion_texture, gltfDir);
+    info.emissiveSrc = ResolveTextureSource(mat->emissive_texture, gltfDir);
     info.normalImageIndex = ResolveImageIndex(mat->normal_texture, data);
     info.aoImageIndex     = ResolveImageIndex(mat->occlusion_texture, data);
+    info.emissiveImageIndex = ResolveImageIndex(mat->emissive_texture, data);
+
+    // emissive —— emissiveFactor（vec3，cgltf 默认 zero-init = glTF 默认 0）+
+    // KHR_materials_emissive_strength（可选标量，默认 1；> 1 时让自发光进 HDR
+    // 触发 bloom）。factor 与 normal/ao 不同，无 texture 时默认 0 即 glTF 语义，
+    // 不需要 occlusionStrength 那样的"非零门控"。
+    info.emissiveFactor[0] = mat->emissive_factor[0];
+    info.emissiveFactor[1] = mat->emissive_factor[1];
+    info.emissiveFactor[2] = mat->emissive_factor[2];
+    if (mat->has_emissive_strength)
+    {
+        info.emissiveStrength = mat->emissive_strength.emissive_strength;
+    }
 
     // occlusionStrength —— 仅当确有 occlusion texture 时才读 cgltf 的
     // occlusion_texture.scale（cgltf 文档：scale 等价于 occlusionTexture.strength）。
@@ -153,6 +167,7 @@ BuildMaterialFileData(const GltfMatInfo& info, const TextureSlotResolver& resolv
     addSlot(info.normalSrc,     1u);
     addSlot(info.metalRoughSrc, 2u);
     addSlot(info.aoSrc,         3u);
+    addSlot(info.emissiveSrc,   4u);
 
     // uBaseColor = baseColorFactor（vec4）。
     Orange::Editor::Material::UniformOverrideValue uBase;
@@ -171,6 +186,26 @@ BuildMaterialFileData(const GltfMatInfo& info, const TextureSlotResolver& resolv
     uMra.type  = MaterialUniformType::Vec4;
     uMra.value = glm::vec4(info.metallic, info.roughness, info.occlusionStrength, 0.0f);
     mdata.uniforms.push_back(uMra);
+
+    // uEmissive = emissiveFactor × emissiveStrength（rgb，a=0）。仅在确有自发光
+    // （factor 非零 / 有 emissive 贴图）时写 override —— 历史无 emissive 的 glTF
+    // 不写本 uniform，.material 保持精简且运行时默认 (0,0,0,0) 零回归。emissive
+    // 贴图但 factor=0 仍写（glTF 语义 emissive = factor × tex，factor 0 → 0；多数
+    // 模型用 emissive 贴图时会把 factor 设 (1,1,1)）。
+    const float es = info.emissiveStrength;
+    const glm::vec3 emissive(info.emissiveFactor[0] * es,
+                             info.emissiveFactor[1] * es,
+                             info.emissiveFactor[2] * es);
+    const bool hasEmissiveTex =
+        !info.emissiveSrc.empty() || info.emissiveImageIndex >= 0;
+    if (emissive != glm::vec3(0.0f) || hasEmissiveTex)
+    {
+        Orange::Editor::Material::UniformOverrideValue uEmis;
+        uEmis.name  = "uEmissive";
+        uEmis.type  = MaterialUniformType::Vec4;
+        uEmis.value = glm::vec4(emissive, 0.0f);
+        mdata.uniforms.push_back(uEmis);
+    }
 
     return mdata;
 }

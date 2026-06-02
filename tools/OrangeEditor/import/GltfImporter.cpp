@@ -526,6 +526,10 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
             {
                 info.aoSrc = resolveEmbedded(info.aoImageIndex);
             }
+            if (info.emissiveSrc.empty())
+            {
+                info.emissiveSrc = resolveEmbedded(info.emissiveImageIndex);
+            }
         }
         slotMatInfos.push_back(std::move(info));
     }

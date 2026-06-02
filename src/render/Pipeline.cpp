@@ -1526,14 +1526,54 @@ bool Pipeline::Impl::RecordOffscreenPass(const glm::mat4& viewProj, bool loadCol
             //              保留兼容外部 sample 自定义 schema）
             //   * 128 B → uMVP + uModel（toon / rim_light / dissolve / emissive /
             //              内置 textured 实际 schema）
-            //   * 160 B → uMVP + uModel + uBaseColor + uMRA（pbr）
+            //   * 160 B → uMVP + uModel + uBaseColor + uMRA（unlit / debug_unlit）
+            //   * 176 B → 上 + uEmissive（pbr，自发光通道）
             // 其他尺寸为半残 schema，按 64 B 处理。
             const std::uint32_t pcSize = ComputePushConstantSize(*mat);
-            if (pcSize >= 160)
+            if (pcSize >= 176)
             {
-                // PBR 路径：本段 MaterialInstance 的 uBaseColor / uMRA override
-                // 优先；缺省时 fallback 到 PBR 中性默认（与 BuiltinMaterials::
-                // LoadPbr 注释一致：灰塑料 + 非金属 + 中等粗糙 + AO 满）。
+                // PBR + emissive 路径（pbr 模板）：uBaseColor / uMRA / uEmissive
+                // override 优先；缺省时 fallback 到 PBR 中性默认（与
+                // BuiltinMaterials::LoadPbr 注释一致：灰塑料 + 非金属 + 中等
+                // 粗糙 + AO 满 + 无自发光）。emissive 默认 0 → 零回归。
+                struct PushPbrEmissive {
+                    glm::mat4 mvp;
+                    glm::mat4 model;
+                    glm::vec4 baseColor;
+                    glm::vec4 mra;
+                    glm::vec4 emissive;
+                };
+                PushPbrEmissive data{};
+                data.mvp       = mvp;
+                data.model     = drawable.worldMatrix;
+                data.baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+                data.mra       = glm::vec4(0.0f, 0.5f, 1.0f, 0.0f);
+                data.emissive  = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+                if (segMaterialInstance != nullptr)
+                {
+                    if (auto over = segMaterialInstance->GetUniformVec4("uBaseColor"))
+                    {
+                        data.baseColor = *over;
+                    }
+                    if (auto over = segMaterialInstance->GetUniformVec4("uMRA"))
+                    {
+                        data.mra = *over;
+                    }
+                    if (auto over = segMaterialInstance->GetUniformVec4("uEmissive"))
+                    {
+                        data.emissive = *over;
+                    }
+                }
+                cmd.SetPushConstants(Orange::Rhi::ShaderStage::Vertex,
+                                     /*offset=*/0,
+                                     /*size=*/sizeof(PushPbrEmissive),
+                                     &data);
+            }
+            else if (pcSize >= 160)
+            {
+                // unlit / debug_unlit 路径（160B，无 emissive）：本段
+                // MaterialInstance 的 uBaseColor / uMRA override 优先；缺省时
+                // fallback 到 PBR 中性默认（unlit 只读 uBaseColor 直出，忽略 uMRA）。
                 struct PushPbr {
                     glm::mat4 mvp;
                     glm::mat4 model;

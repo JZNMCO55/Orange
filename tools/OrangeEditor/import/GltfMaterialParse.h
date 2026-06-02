@@ -54,10 +54,12 @@ struct GltfMatInfo
     std::string normalSrc;
     std::string metalRoughSrc;
     std::string aoSrc;
+    std::string emissiveSrc;
     int         baseColorImageIndex{-1};
     int         normalImageIndex{-1};
     int         metalRoughImageIndex{-1};
     int         aoImageIndex{-1};
+    int         emissiveImageIndex{-1};
     float       baseColor[4]{1.0f, 1.0f, 1.0f, 1.0f};
     float       metallic{1.0f};
     float       roughness{1.0f};
@@ -66,6 +68,13 @@ struct GltfMatInfo
     // uMRA.z，与 pbr.frag.glsl 的 `ao = uMRA.z * aoTex.r` 乘法语义对齐
     // （无 ao 贴图时 default 白贴图 r=1 → ao=1·1=1 中性）。
     float       occlusionStrength{1.0f};
+    // emissive —— glTF emissiveFactor（vec3，默认 0 = 无自发光）+
+    // KHR_materials_emissive_strength.emissiveStrength（标量，默认 1，可 > 1
+    // 触发 HDR bloom）。BuildMaterialFileData 把 factor × strength 预乘进
+    // uEmissive.rgb，与 pbr.frag.glsl `emissive = vEmissive.rgb * emissiveTex`
+    // 对齐（无 emissive 贴图时 default 白贴图 → emissive = factor×strength）。
+    float       emissiveFactor[3]{0.0f, 0.0f, 0.0f};
+    float       emissiveStrength{1.0f};
 };
 
 // 把一个 cgltf_texture_view 解析成外部源文件路径（相对 gltf 所在目录）。仅解析
@@ -97,7 +106,9 @@ using TextureSlotResolver = std::function<std::string(const std::string& srcTexP
 //   * templateName = "pbr"
 //   * uBaseColor = baseColorFactor（vec4）
 //   * uMRA = (metallic, roughness, occlusionStrength, 0)（vec4）
-//   * textures：binding 0 baseColor / 1 normal / 2 metalRough / 3 ao，
+//   * uEmissive = (emissiveFactor × emissiveStrength, 0)（vec4；默认 0 = 无自发光，
+//     只在非零时写 override 省得污染历史无 emissive 模型的 .material）
+//   * textures：binding 0 baseColor / 1 normal / 2 metalRough / 3 ao / 4 emissive，
 //     每个非空源路径经 resolver 转成落盘 path 后入数组（resolver 返回空则跳过）
 //
 // info.present == false 时返回空壳（仅 templateName="pbr"，无 uniform / texture）。

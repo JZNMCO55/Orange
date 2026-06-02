@@ -139,20 +139,22 @@ void TestRegisterBuiltins()
     assert(pbr->fragmentShader.IsValid());
 
     // textured / toon / rim_light push-constant 收为 {uMVP, uModel} = 2 项；
-    // textured 多带一个 textureSlot 占位。pbr 扩出 uBaseColor + uMRA 两条
-    // vec4，共 4 项（uMVP / uModel / uBaseColor / uMRA）；textureSlots 自
-    // GAP-2026-05-25 A2/G1 起为 set 1 的 4 槽（baseColor / normal / metalRough /
-    // ao，binding 0..3），Pipeline 按 MaterialInstance 绑定（未绑喂 default 贴图）。
+    // textured 多带一个 textureSlot 占位。pbr 扩出 uBaseColor + uMRA + uEmissive
+    // 三条 vec4，共 5 项（uMVP / uModel / uBaseColor / uMRA / uEmissive）；
+    // textureSlots 自 GAP-2026-05-25 A2/G1 起为 set 1 的贴图槽（baseColor /
+    // normal / metalRough / ao，binding 0..3），emissive 通道落地后加 binding 4
+    // emissive，共 5 槽，Pipeline 按 MaterialInstance 绑定（未绑喂 default 贴图）。
     assert(textured->uniforms.size()     == 2);
     assert(textured->textureSlots.size() == 1);
     assert(toon->uniforms.size() == 2);
     assert(rim->uniforms.size()  == 2);
-    assert(pbr->uniforms.size()     == 4);
-    assert(pbr->textureSlots.size() == 4);
+    assert(pbr->uniforms.size()     == 5);
+    assert(pbr->textureSlots.size() == 5);
     assert(pbr->textureSlots[0].binding == 0 && pbr->textureSlots[0].name == "uBaseColorTex");
     assert(pbr->textureSlots[1].binding == 1 && pbr->textureSlots[1].name == "uNormalTex");
     assert(pbr->textureSlots[2].binding == 2 && pbr->textureSlots[2].name == "uMetalRoughTex");
     assert(pbr->textureSlots[3].binding == 3 && pbr->textureSlots[3].name == "uAoTex");
+    assert(pbr->textureSlots[4].binding == 4 && pbr->textureSlots[4].name == "uEmissiveTex");
 
     std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr\n");
 }

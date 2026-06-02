@@ -165,7 +165,16 @@ int main()
     // （而非 cgltf zero-init 的 0.0——那会把 AO 压全黑）。
     assert(FloatEq(info.occlusionStrength, 1.0f)
            && "无 occlusion texture → occlusionStrength 中性 1.0");
-    std::fprintf(stdout, "  [PASS] ExtractGltfMaterial：factor 默认值 + 三贴图源 + 无 AO 中性 1.0\n");
+    // emissive：Avocado 无 emissiveFactor / emissiveTexture / KHR_emissive_strength
+    // → factor 默认 0、strength 默认 1、emissiveSrc 空。
+    assert(FloatEq(info.emissiveFactor[0], 0.0f)
+           && FloatEq(info.emissiveFactor[1], 0.0f)
+           && FloatEq(info.emissiveFactor[2], 0.0f)
+           && "Avocado 无 emissiveFactor → 默认 (0,0,0)");
+    assert(FloatEq(info.emissiveStrength, 1.0f)
+           && "无 KHR_materials_emissive_strength → strength 默认 1.0");
+    assert(info.emissiveSrc.empty() && "Avocado 无 emissive 贴图 → emissiveSrc 空");
+    std::fprintf(stdout, "  [PASS] ExtractGltfMaterial：factor 默认值 + 三贴图源 + 无 AO 中性 1.0 + 无 emissive\n");
 
     // ===== 2. BuildMaterialFileData（identity resolver：源路径直接当落盘 path）=====
     auto identity = [](const std::string& s) { return s; };
@@ -206,8 +215,14 @@ int main()
     assert(t1 != nullptr && t1->path == info.normalSrc     && "binding 1 = normal 源路径");
     assert(t2 != nullptr && t2->path == info.metalRoughSrc && "binding 2 = metalRough 源路径");
     assert(t3 == nullptr && "Avocado 无 AO 贴图 → 无 binding 3 槽");
+    const MatIO::TextureOverrideEntry* t4 = FindTexture(mdata, 4u);
+    assert(t4 == nullptr && "Avocado 无 emissive 贴图 → 无 binding 4 槽");
     assert(mdata.textures.size() == 3 && "恰 3 个 texture 槽");
-    std::fprintf(stdout, "  [PASS] BuildMaterialFileData：pbr + uBaseColor + uMRA(AO=1) + binding 0/1/2\n");
+    // 无自发光 → 不写 uEmissive override（历史无 emissive 模型 .material 保持精简，
+    // 运行时默认 (0,0,0,0) 零回归）。
+    assert(FindUniform(mdata, "uEmissive") == nullptr
+           && "Avocado 无自发光 → 无 uEmissive override");
+    std::fprintf(stdout, "  [PASS] BuildMaterialFileData：pbr + uBaseColor + uMRA(AO=1) + binding 0/1/2 + 无 emissive\n");
 
     // ===== 3. .material 文件 round-trip（锁住落盘字段）=====
     {
@@ -264,6 +279,60 @@ int main()
         assert(s0 != nullptr && s0->path == "fake/base.png" && "binding 0 = baseColor");
         assert(s3 != nullptr && s3->path == "fake/ao.png"   && "binding 3 = AO 贴图槽");
         std::fprintf(stdout, "  [PASS] 合成 occlusionStrength=0.5 → uMRA.z=0.5 + binding 3 AO 槽\n");
+    }
+
+    // ===== 5. 合成 emissive（锁住 emissiveFactor × emissiveStrength 预乘 + binding 4）=====
+    // 手造一个 emissiveFactor=(1,0.5,0.2) + emissiveStrength=2.0 + emissiveSrc 的
+    // GltfMatInfo，验证 BuildMaterialFileData 把 factor×strength 预乘进 uEmissive.rgb
+    // （=(2.0,1.0,0.4,0)）+ 落 binding 4 emissive 贴图槽。
+    {
+        ImportNS::GltfMatInfo synth{};
+        synth.present          = true;
+        synth.emissiveFactor[0] = 1.0f;
+        synth.emissiveFactor[1] = 0.5f;
+        synth.emissiveFactor[2] = 0.2f;
+        synth.emissiveStrength  = 2.0f;   // KHR_materials_emissive_strength（HDR glow）
+        synth.emissiveSrc       = "fake/emissive.png";
+        synth.baseColorSrc      = "fake/base.png";
+
+        auto idr = [](const std::string& s) { return s; };
+        MatIO::MaterialFileData sd = ImportNS::BuildMaterialFileData(synth, idr);
+
+        const MatIO::UniformOverrideValue* sEmis = FindUniform(sd, "uEmissive");
+        assert(sEmis != nullptr && sEmis->type == Render::MaterialUniformType::Vec4
+               && "有自发光 → uEmissive 应存在且为 vec4");
+        auto ev = std::get<glm::vec4>(sEmis->value);
+        assert(FloatEq(ev.x, 2.0f) && "uEmissive.r = factor.r × strength = 1.0×2.0");
+        assert(FloatEq(ev.y, 1.0f) && "uEmissive.g = factor.g × strength = 0.5×2.0");
+        assert(FloatEq(ev.z, 0.4f) && "uEmissive.b = factor.b × strength = 0.2×2.0");
+        assert(FloatEq(ev.w, 0.0f) && "uEmissive.a 预留 0");
+
+        const MatIO::TextureOverrideEntry* s4 = FindTexture(sd, 4u);
+        assert(s4 != nullptr && s4->path == "fake/emissive.png"
+               && "binding 4 = emissive 贴图槽");
+        std::fprintf(stdout,
+            "  [PASS] 合成 emissive：factor×strength 预乘 uEmissive=(2,1,0.4,0) + binding 4 槽\n");
+    }
+
+    // ===== 6. 合成"有 emissive 贴图但 factor=0"（glTF 语义 emissive = factor×tex）=====
+    // factor 默认 (0,0,0) + 有 emissive 贴图 → 仍写 uEmissive=(0,0,0,0)（让 binding 4
+    // 贴图被导入；运行时 emissive = 0×tex = 0，与 glTF spec 一致）。
+    {
+        ImportNS::GltfMatInfo synth{};
+        synth.present      = true;
+        synth.emissiveSrc  = "fake/emissive_only.png";  // factor 保持默认 0
+
+        auto idr = [](const std::string& s) { return s; };
+        MatIO::MaterialFileData sd = ImportNS::BuildMaterialFileData(synth, idr);
+
+        const MatIO::UniformOverrideValue* sEmis = FindUniform(sd, "uEmissive");
+        assert(sEmis != nullptr && "有 emissive 贴图 → 即便 factor=0 也写 uEmissive override");
+        auto ev = std::get<glm::vec4>(sEmis->value);
+        assert(FloatEq(ev.x, 0.0f) && FloatEq(ev.y, 0.0f) && FloatEq(ev.z, 0.0f)
+               && "factor 默认 0 → uEmissive=(0,0,0)（glTF emissive=factor×tex）");
+        const MatIO::TextureOverrideEntry* s4 = FindTexture(sd, 4u);
+        assert(s4 != nullptr && "binding 4 emissive 贴图仍落地");
+        std::fprintf(stdout, "  [PASS] 合成 emissive 贴图 + factor=0 → uEmissive=(0,0,0) + binding 4\n");
     }
 
     std::fprintf(stdout, "[GltfMaterialImportTest] all tests passed.\n");
