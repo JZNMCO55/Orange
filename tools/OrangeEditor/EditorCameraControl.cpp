@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 void UpdateEditorCameraFromInput(EditorHost& host)
 {
@@ -212,16 +213,18 @@ ComposeWorldMatrix(const Orange::Engine::Scene::TransformComponent& xform) noexc
 
 }  // anonymous namespace
 
-bool FrameSelectedCamera(EditorHost& host)
+namespace
+{
+
+// 把一组 entity 的世界 bounds 合并后塞进相机视野 —— FrameSelected（选区）与
+// FrameAll（全场景）共用。entities 空 / 全无效 → 不动相机、返回 false。
+bool FrameEntitiesCamera(EditorHost&                                host,
+                         const std::vector<Orange::Engine::Entity>& entities)
 {
     using namespace Orange::Engine;
+    if (host.scene.pWorld == nullptr || entities.empty()) { return false; }
 
-    auto& ec = host.camera;
-    const Entity sel = host.selection.selectedEntity;
-    if (!sel.IsValid() || host.scene.pWorld == nullptr) { return false; }
-
-    // 多选 Frame（hierarchy gap 报告 §4 quick-win #3）：把整个选区（primary +
-    // additional set）的世界 bounds 合并。单选时仅一个 entity → 与原行为一致。
+    auto&     ec    = host.camera;
     auto&     world = *host.scene.pWorld;
     glm::vec3 wmn(std::numeric_limits<float>::max());
     glm::vec3 wmx(std::numeric_limits<float>::lowest());
@@ -277,8 +280,7 @@ bool FrameSelectedCamera(EditorHost& host)
         any = true;
     };
 
-    accumulate(sel);
-    for (const auto a : host.selection.additionalSelectedEntities) { accumulate(a); }
+    for (const auto e : entities) { accumulate(e); }
     if (!any) { return false; }
 
     const glm::vec3 center  = (wmn + wmx) * 0.5f;
@@ -304,4 +306,38 @@ bool FrameSelectedCamera(EditorHost& host)
         ec.radius = std::max(ec.radius, 4.0f);
     }
     return true;
+}
+
+}  // anonymous namespace
+
+bool FrameSelectedCamera(EditorHost& host)
+{
+    using namespace Orange::Engine;
+    const Entity sel = host.selection.selectedEntity;
+    if (!sel.IsValid()) { return false; }
+
+    // 多选 Frame（hierarchy gap 报告 §4 quick-win #3）：把整个选区（primary +
+    // additional set）的世界 bounds 合并。单选时仅一个 entity → 与原行为一致。
+    std::vector<Entity> ents;
+    ents.push_back(sel);
+    for (const auto a : host.selection.additionalSelectedEntities)
+    {
+        ents.push_back(a);
+    }
+    return FrameEntitiesCamera(host, ents);
+}
+
+bool FrameAllCamera(EditorHost& host)
+{
+    using namespace Orange::Engine;
+    if (host.scene.pWorld == nullptr) { return false; }
+
+    // 全场景 Frame（Home 键 / View 菜单）：合并所有带 Transform 的 entity 世界
+    // bounds（有 mesh 的算世界 AABB、无 mesh 的算位置点），把相机拉到能看全场景
+    // 的距离。空场景 → false。对齐 Unity/Unreal "Frame All / Home"。
+    std::vector<Entity> ents;
+    auto view = host.scene.pWorld->Registry()
+                    .view<Orange::Engine::Scene::TransformComponent>();
+    for (auto e : view) { ents.push_back(World::FromEntt(e)); }
+    return FrameEntitiesCamera(host, ents);
 }

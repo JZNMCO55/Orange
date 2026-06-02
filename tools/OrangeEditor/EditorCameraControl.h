@@ -45,4 +45,10 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect);
 // 默认 radius"（聚焦灯光 / 空 entity 仍居中），此分支返回 true。
 bool FrameSelectedCamera(EditorHost& host);
 
+// 全场景 Frame —— 把相机拉到能看全场景所有几何的距离（合并所有带 Transform
+// 的 entity 世界 bounds）。Home 键 / View 菜单触发，对齐 Unity/Unreal "Frame All"。
+// 空场景 / World 缺失 → no-op 返回 false。FrameSelected 的全场景版（共用
+// FrameEntitiesCamera）。
+bool FrameAllCamera(EditorHost& host);
+
 #endif  // ORANGE_EDITOR_EDITOR_CAMERA_CONTROL_H

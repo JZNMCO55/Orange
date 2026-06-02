@@ -499,6 +499,12 @@ void EditorRenderLayer::DrawScenePanel()
                 {
                     FrameSelectedCamera(mHost);
                 }
+                // Home：Frame All（全场景 bounds）—— 对齐 Unity/Unreal。F 聚焦
+                // 选中、Home 看全场景。硬编码 Home（与 X 切坐标系同款非 rebind 键）。
+                else if (ImGui::IsKeyPressed(ImGuiKey_Home, false))
+                {
+                    FrameAllCamera(mHost);
+                }
             }
 
             bool gizmoActive = false;
