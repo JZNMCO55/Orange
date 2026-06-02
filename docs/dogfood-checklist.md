@@ -294,6 +294,30 @@
   - 速度有上下限（极慢仍能动、极快不失控）；Shift 加速（×3）在新速度基础上叠加
 - **背景**：补完 item 16 飞行导航，对齐 Unreal/Unity scene 飞行——大场景调快、精修调慢。**纯手感，连同飞行方向/速度一起 dogfood**。
 
+### 23. viewport 聚焦时 Delete / Ctrl+D
+
+- **commit**：`7b20468` feat(editor): viewport 聚焦时也响应 Delete / Ctrl+D
+- **怎么触发**：在 **viewport 里**点选一个实体（不切到 Hierarchy 面板），按 **Delete** 或 **Ctrl+D**
+- **看什么 / 通过判据**：
+  - Delete → 选中实体被删（可 Ctrl+Z 撤销）
+  - Ctrl+D → 复制出一份选中子树（作 sibling），新副本被选中
+  - 之前这俩**只在 Hierarchy 面板聚焦时**生效，viewport 里按没反应；现在 viewport 聚焦也行（对齐 Unity/Lumix）
+  - **不误触**：在 Inspector 文本框输入时按 Delete 是删字符不删实体；RMB 飞行按住时按 D 是右移不复制
+  - **不重复**：Hierarchy 和 viewport 不会同帧各删一次 / 各复制一次（幂等标志）
+- **背景**：最高频的两个场景操作，此前被面板焦点限制。**删除/复制行为 + 不误触待真机确认**。
+
+### 24. 文件快捷键 Ctrl+S / Ctrl+Shift+S / Ctrl+N / Ctrl+O
+
+- **commit**：`48fe776` feat(editor): 接线 Ctrl+S / Ctrl+Shift+S / Ctrl+N / Ctrl+O 文件快捷键
+- **怎么触发**：编辑器内（非文本输入焦点）按 **Ctrl+S**（保存）/ **Ctrl+Shift+S**（另存为）/ **Ctrl+N**（新场景）/ **Ctrl+O**（打开场景）
+- **看什么 / 通过判据**：
+  - Ctrl+S：场景有改动（标题/菜单 Save 亮）时存盘；无改动时无操作（不弹框）；当前无路径时自动转另存对话框
+  - Ctrl+Shift+S → 弹另存对话框
+  - Ctrl+N / Ctrl+O → 新建 / 打开；**有未保存改动时先弹"未保存确认"popup**（与菜单点击同一条路径）
+  - 这些快捷键 File 菜单里**早就显示**了（label），之前按却**没反应**；现在真生效
+  - **不误触**：Inspector 文本框输入时 Ctrl+S 不触发保存
+- **背景**：菜单宣传了快捷键却没接线（注释自承"留后续"），用户按了会困惑。补接线，对齐所有成熟编辑器。**保存/新建/打开 + 未保存确认流程待真机确认**。
+
 ---
 
 ## 维护约定
