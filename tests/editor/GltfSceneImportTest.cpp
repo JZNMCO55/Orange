@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -337,6 +338,32 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] KHR_lights_punctual：SunLight=DirectionalLight(方向编码"
                      "正确) + Lamp=PointLight(color/intensity/range + world 位置)\n");
+    }
+
+    // ===== hash-skip 增量短路：改 scene.json 后重导同源应跳过（不覆盖手工编辑）=====
+    {
+        // 往已产出的 scene.json 写一个 marker（模拟用户手工编辑），重导同一
+        // .gltf（源 hash 未变）应命中 scene .meta 的 hash 短路 → 跳过 Scene::Save，
+        // marker 保留（与单 mesh importer T5 同款语义）。
+        const std::string scenePath = r.destPath;
+        {
+            std::ofstream ofs(scenePath, std::ios::binary | std::ios::trunc);
+            ofs << "MANUAL_EDIT_MARKER";
+        }
+        auto reg = MakeImportRegistry();
+        const ImportNS::ImportResult r2 =
+            ImportNS::RunGltfSceneImportToRegistry(gltfPath, *reg);
+        assert(r2.status == ImportNS::ImportStatus::Success &&
+               "重导未改源应 Success（hash 短路）");
+        assert(r2.message.find("unchanged") != std::string::npos &&
+               "重导未改源应走 hash 短路（message 含 unchanged）");
+        std::ifstream ifs(scenePath, std::ios::binary);
+        const std::string content((std::istreambuf_iterator<char>(ifs)),
+                                  std::istreambuf_iterator<char>());
+        assert(content == "MANUAL_EDIT_MARKER" &&
+               "源未改 → hash 短路跳过，scene.json 手工编辑应保留（不被覆盖）");
+        std::fprintf(stdout,
+                     "  [PASS] hash-skip：改 scene.json 后重导同源跳过，手工编辑保留\n");
     }
 
     // ===== 第二组：has_matrix 分解 + 3 层深嵌套 world 累积 + spot light =====

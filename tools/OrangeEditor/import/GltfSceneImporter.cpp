@@ -435,6 +435,25 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         return result;
     }
 
+    // 增量短路（与单 mesh importer 的 T5 hash 短路同款）：源 hash 与已存在 scene
+    // .meta 的 sourceHash 匹配则跳过整套（cgltf 解析 + mesh 写盘 + Scene::Save）——
+    // 既省功，也避免重导覆盖用户对 .scene.json 的手工编辑（G5 re-import override
+    // 落地前，至少做到"没改源就不动产物"）。
+    const std::string basename = SanitizeName(src.stem().generic_string());
+    const std::string scenePath =
+        (fs::path(kScenesDir) / (basename + ".scene.json")).generic_string();
+    const auto earlyHashOpt = ComputeFileHashFnv1a(srcPath);
+    if (earlyHashOpt.has_value() &&
+        MetaSourceHashMatches(scenePath, earlyHashOpt.value()))
+    {
+        result.status   = ImportStatus::Success;
+        result.destPath = scenePath;
+        result.message  = "gltf scene unchanged, skipped reimport";
+        ORANGE_LOG_INFO("GltfSceneImporter: '{}' unchanged (hash={}), skip",
+                        srcPath, HashToHexString(earlyHashOpt.value()));
+        return result;
+    }
+
     const std::string srcStr(srcPath);
     cgltf_options options{};
     cgltf_data* data = nullptr;
@@ -456,8 +475,6 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         cgltf_free(data);
         return result;
     }
-
-    const std::string basename = SanitizeName(src.stem().generic_string());
 
     // 每模型一个子目录 assets/Models/<basename>/ —— 各 mesh + 源 copy co-locate。
     fs::path modelDir = fs::path(kModelsDir) / basename;
@@ -597,9 +614,8 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     cgltf_free(data);  // World 已持有几何 handle，cgltf 结构不再需要
 
     // Scene::Save —— assetRegistry 反查 mesh handle → 相对路径写进 scene.json。
+    // scenePath / basename 已在函数顶部（hash 短路处）算好。
     fs::create_directories(kScenesDir, ec);
-    const std::string scenePath =
-        (fs::path(kScenesDir) / (basename + ".scene.json")).generic_string();
 
     ::Orange::Engine::Scene::SaveOptions saveOpts;
     saveOpts.assetRegistry = &registry;

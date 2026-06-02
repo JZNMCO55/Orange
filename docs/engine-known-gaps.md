@@ -2407,8 +2407,10 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 - **CLI 入口**：`tools/OrangeEditor/main.cpp` 加 `import-scene` 子命令（`RunHeadlessSceneImport`），镜像 `import-mesh`，在任何 GLFW/Vulkan/ImGui init 之前判 argv 走纯 CPU 路径后退出（成功 0 / 缺路径 2 / registry 失败 3 / 导入失败 1）。用法 `OrangeEditor.exe import-scene <path.gltf|.glb>`。
 - **G1 范围限制（与上文拆解对齐）**：RenderableComponent.material **留空（默认材质）**—— per-mesh PBR material（G2）需 MaterialInstance 对象做 `Scene::Save` 反查，headless 不构造，留 G2（基础设施已落地，单列子缺口）；lights / cameras（G3）暂不消费；只接受 triangle primitive；skinning / morph / animation skip。
 - **验收**：新增 `tests/editor/GltfSceneImportTest.cpp`（自包含 3-node 层级 fixture `RootGroup → {ChildA, ChildB}` + 2 mesh，base64 data: URI 无外部依赖）—— 断言 import 产出 `.scene.json` + 2 个独立 `.mesh`（不塌平）+ `Scene::Load` round-trip 回 World 验实体数 3 / 父子关系 / transform 摆位 / 两 child 指向**各自独立** mesh handle。`gltf_scene_import_test` 编入 `tests/CMakeLists.txt`（链接同 headless_mesh_import_test 模式）。**ctest 75/75**（新增 1，零回归）；`check_invariants` All OK（7 grandfathered）；drift none。CLI exe 端到端 dogfood（临时多 node .gltf → `import-scene` → exit 0 + scene.json 结构正确）已过。
+- **hash-skip 增量短路**：函数顶部算源 FNV-1a hash，若已存在 scene `.meta` 的 sourceHash 匹配则早退 Success（与单 mesh importer T5 同款）——重导未改的 `.glb` 跳过整套，**且不覆盖用户对 `.scene.json` 的手工编辑**（G5 re-import override 落地前先做到"没改源就不动产物"）。测试验：改 scene.json 写 marker → 重导同源 → 走短路 + marker 保留。
+- **GUI 入口**：File → Import glTF Scene...（`EditorRenderLayer` 的 `mPendingImportSceneDialog`，镜像 Import... 延迟弹窗，import-only 不自动 swap World）—— 编译验证过，**运行时待 dogfood**（无显示环境无法验证菜单交互）。
 - **待 dogfood**（headless 无 viewport 渲染）：真实 Blender 多 prop 场景导入后在 viewport 的视觉摆位 / 层级正确性，见 `docs/dogfood-checklist.md`。
-- **关键改动文件**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}`（新增）/ `tools/OrangeEditor/main.cpp`（import-scene CLI）/ `tools/OrangeEditor/CMakeLists.txt`（源列表）/ `tests/editor/GltfSceneImportTest.cpp`（新增）/ `tests/CMakeLists.txt`（test target）
+- **关键改动文件**：`tools/OrangeEditor/import/GltfSceneImporter.{h,cpp}`（新增）/ `tools/OrangeEditor/main.cpp`（import-scene CLI）/ `tools/OrangeEditor/EditorRenderLayer.{h,cpp}`（GUI 菜单入口）/ `tools/OrangeEditor/CMakeLists.txt`（源列表）/ `tests/editor/GltfSceneImportTest.cpp`（新增）/ `tests/CMakeLists.txt`（test target）/ `scripts/dogfood_make_scene_hierarchy_lights.py`（Blender fixture）
 
 ### G3 lights 落地记录（KHR_lights_punctual → 引擎光源，2026-06-02 同 session）
 
