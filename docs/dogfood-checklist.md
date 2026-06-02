@@ -338,6 +338,16 @@
   - 单击仍只是选中（不打开）；双击其它类型文件（.mesh/.material）不触发打开
 - **背景**：之前双击场景文件无反应，只能走 File→Open 对话框 / Open Recent。补 Unity/Lumix 标准双击打开。**双击打开 + 未保存确认流程待真机确认**。
 
+### 27. View → Standard Views（标准视角）
+
+- **commit**：`ece850c` feat(editor): View 菜单加 Standard Views
+- **怎么触发**：菜单 **View → Standard Views → Front / Back / Left / Right / Top / Bottom**
+- **看什么 / 通过判据**：
+  - 点 Front → 相机正对 -Z 看（场景从 +Z 正视）；Top → 俯视（从上往下看 XY 面）；Right/Left/Back 各沿对应世界轴
+  - pivot 和距离（radius）保持不变，只换角度
+  - Top/Bottom 不会翻转/抖动（钳到 ±89° 避 gimbal）
+- **背景**：低 dogfood 风险（只设相机角度，对就是对）。对 2.5D 对齐 / 摆位有用。注：当前仍是透视投影（未切正交），后续可加 ortho 切换。
+
 ---
 
 ## 维护约定
