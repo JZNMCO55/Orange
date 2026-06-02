@@ -23,7 +23,9 @@
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/TransformSystem.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <cassert>
 #include <cmath>
@@ -341,16 +343,15 @@ int main()
             world.GetComponent<::Orange::Engine::Render::RenderableComponent>(childA);
         assert(aR != nullptr && aR->mesh.IsValid() &&
                "ChildA 应有 Renderable 指向有效 mesh handle");
-        // Transform 是 world-baked（importer 把 node world 变换 flatten 进
-        // TransformComponent，因引擎渲染不累积 hierarchy；详见 GltfSceneImporter
-        // NodeWorldTransform 注释）。ChildA world = RootGroup(1,2,3) × local(0.5,0,0)
-        // = (1.5, 2, 3)。
+        // Transform 现在是 **local**（A1.1 step 2 / ADR-016 后引擎累积 hierarchy，
+        // importer 写 local，world 由引擎 PropagateWorldTransforms 累积）。
+        // ChildA local = (0.5,0,0)。
         const auto* aT = world.GetComponent<SceneNS::TransformComponent>(childA);
         assert(aT != nullptr &&
-               std::fabs(aT->position.x - 1.5f) < 1e-4f &&
-               std::fabs(aT->position.y - 2.0f) < 1e-4f &&
-               std::fabs(aT->position.z - 3.0f) < 1e-4f &&
-               "ChildA transform 应是 world-baked (1.5,2,3)（父变换已 flatten 进子）");
+               std::fabs(aT->position.x - 0.5f) < 1e-4f &&
+               std::fabs(aT->position.y - 0.0f) < 1e-4f &&
+               std::fabs(aT->position.z - 0.0f) < 1e-4f &&
+               "ChildA local transform 应是 (0.5,0,0)（importer 写 local，非 world-bake）");
 
         // ChildB：parent==RootGroup；有 Renderable。两 child mesh 应不同 handle
         // （各自独立 .mesh，没被塌平共享）。
@@ -395,8 +396,9 @@ int main()
                std::fabs(sunDir.z - (-1.0f)) < 1e-3f &&
                "光向应沿 glTF -Z 转引擎约定后为 world (0,0,-1)（方向编码正确）");
 
-        // Lamp：PointLight，color (0.2,0.4,1.0) intensity 5 range 8；位置
-        // world-baked = 父(1,2,3) + 本地(2,1,0) = (3,3,3)。
+        // Lamp：PointLight，color (0.2,0.4,1.0) intensity 5 range 8；位置 local
+        // = (2,1,0)（importer 写 local；point 光的世界位置由引擎累积——点光消费者
+        // 切到 world cache 是后续 increment，glTF 灯光通常 root 子 local==world）。
         const Entity lamp = FindByName(world, "Lamp");
         assert(world.IsValid(lamp) && "Lamp 实体应存在");
         const auto* pl = world.GetComponent<RenderNS::PointLight>(lamp);
@@ -407,14 +409,36 @@ int main()
                "PointLight color/intensity(÷683)/range 应 = glTF (蓝/5÷683/8)");
         const auto* lampT = world.GetComponent<SceneNS::TransformComponent>(lamp);
         assert(lampT != nullptr &&
-               std::fabs(lampT->position.x - 3.0f) < 1e-4f &&
-               std::fabs(lampT->position.y - 3.0f) < 1e-4f &&
-               std::fabs(lampT->position.z - 3.0f) < 1e-4f &&
-               "Lamp 位置 world-baked = 父(1,2,3)+本地(2,1,0) = (3,3,3)");
+               std::fabs(lampT->position.x - 2.0f) < 1e-4f &&
+               std::fabs(lampT->position.y - 1.0f) < 1e-4f &&
+               std::fabs(lampT->position.z - 0.0f) < 1e-4f &&
+               "Lamp local 位置 = (2,1,0)（importer 写 local）");
 
         std::fprintf(stdout,
                      "  [PASS] KHR_lights_punctual：SunLight=DirectionalLight(方向编码"
-                     "正确) + Lamp=PointLight(color/intensity/range + world 位置)\n");
+                     "正确) + Lamp=PointLight(color/intensity/range + local 位置)\n");
+
+        // ===== end-to-end：importer local + 引擎 PropagateWorldTransforms 累积 = 正确 world =====
+        // ChildA world = RootGroup(1,2,3) × local(0.5,0,0) = (1.5,2,3)；Lamp world =
+        // (1,2,3) × (2,1,0) = (3,3,3)。验证"importer 写 local"+"引擎累积"端到端对位。
+        ::Orange::Engine::Scene::PropagateWorldTransforms(world);
+        const auto* aWT =
+            world.GetComponent<::Orange::Engine::Scene::WorldTransformComponent>(childA);
+        assert(aWT != nullptr &&
+               std::fabs(aWT->world[3].x - 1.5f) < 1e-4f &&
+               std::fabs(aWT->world[3].y - 2.0f) < 1e-4f &&
+               std::fabs(aWT->world[3].z - 3.0f) < 1e-4f &&
+               "end-to-end：ChildA local(0.5,0,0) 经引擎累积 → world (1.5,2,3)");
+        const auto* lWT =
+            world.GetComponent<::Orange::Engine::Scene::WorldTransformComponent>(lamp);
+        assert(lWT != nullptr &&
+               std::fabs(lWT->world[3].x - 3.0f) < 1e-4f &&
+               std::fabs(lWT->world[3].y - 3.0f) < 1e-4f &&
+               std::fabs(lWT->world[3].z - 3.0f) < 1e-4f &&
+               "end-to-end：Lamp local(2,1,0) 经引擎累积 → world (3,3,3)");
+        std::fprintf(stdout,
+                     "  [PASS] end-to-end：importer 写 local + 引擎累积 → ChildA world "
+                     "(1.5,2,3) / Lamp world (3,3,3)\n");
     }
 
     // ===== hash-skip 增量短路：改 scene.json 后重导同源应跳过（不覆盖手工编辑）=====
@@ -464,14 +488,23 @@ int main()
         for (auto e : w.Registry().view<SceneNS::NameComponent>()) { (void)e; ++cnt; }
         assert(cnt == 5 && "应有 5 实体（L1/L2/L3/MatrixNode/SpotNode）");
 
-        // L3：3 层累积 world = (10,0,0)+(0,5,0)+(0,0,2) = (10,5,2)。
+        // L3：importer 写 **local** = (0,0,2)；其 world 由引擎累积穿 2 层祖先
+        // L1(10,0,0)→L2(0,5,0)→L3(0,0,2) = (10,5,2)（下方 end-to-end 验）。
         const Entity l3 = FindByName(w, "L3");
         const auto* l3T = w.GetComponent<SceneNS::TransformComponent>(l3);
         assert(l3T != nullptr &&
-               std::fabs(l3T->position.x - 10.0f) < 1e-3f &&
-               std::fabs(l3T->position.y - 5.0f) < 1e-3f &&
+               std::fabs(l3T->position.x - 0.0f) < 1e-3f &&
+               std::fabs(l3T->position.y - 0.0f) < 1e-3f &&
                std::fabs(l3T->position.z - 2.0f) < 1e-3f &&
-               "L3 world 应穿 2 层祖先累积为 (10,5,2)");
+               "L3 local 应是 (0,0,2)（importer 写 local）");
+        ::Orange::Engine::Scene::PropagateWorldTransforms(w);
+        const auto* l3WT =
+            w.GetComponent<::Orange::Engine::Scene::WorldTransformComponent>(l3);
+        assert(l3WT != nullptr &&
+               std::fabs(l3WT->world[3].x - 10.0f) < 1e-3f &&
+               std::fabs(l3WT->world[3].y - 5.0f) < 1e-3f &&
+               std::fabs(l3WT->world[3].z - 2.0f) < 1e-3f &&
+               "end-to-end：L3 local(0,0,2) 经引擎累积穿 2 层祖先 → world (10,5,2)");
 
         // MatrixNode：has_matrix 列主序 translate(3,4,5)*scale(2,2,2) →
         // decompose position (3,4,5) + scale (2,2,2)。

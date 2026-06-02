@@ -247,27 +247,41 @@ std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
     return out;
 }
 
-// 取 node 的 **world** 变换（沿父累积）分解成 TRS，bake 进 TransformComponent。
+// 取 node 的 **local** 变换分解成 TRS，写进 TransformComponent（A1.1 step 2 /
+// ADR-016）。引擎 RenderScene::Collect 现在跑 TransformSystem 沿 HierarchyComponent
+// 累积 world matrix（parenting 真正生效），故导入只需写 local TRS——子节点的
+// world 摆位由引擎累积，编辑器移动父节点也带动子。
 //
-// 为什么 bake world 而非 local：引擎 RenderScene::Collect 对每个 entity 直接
-// `ComposeWorldMatrix(自身 TransformComponent)`，**不沿 HierarchyComponent 累积
-// 父变换**（parenting 当前对渲染位置无效，是引擎已知限制）。若导入时只写 local
-// TRS，子节点会渲染在 local 偏移、忽略父摆位 —— DCC 世界摆位视觉上就错了。故
-// 把每个 node 的 world 变换 flatten 进各自 TransformComponent，同时保留
-// HierarchyComponent 链供 tree view（结构 + 视觉两不误）。代价：导入后在编辑器里
-// 移动父节点不会带动子节点（沿用引擎现有 parenting 不传播变换的限制，非本导入引入）。
+// （历史：A1 之前引擎不累积 hierarchy，本导入曾 bake world flatten 进 local 绕过，
+// A1 落地后回退为 local。）
 //
-// cgltf_node_transform_world 内部对每个祖先调 transform_local（已处理 has_matrix /
-// TRS 两种 node 形态），返回列主序 world 矩阵；glm::decompose 拆 TRS。
-void NodeWorldTransform(const cgltf_node& node, glm::vec3& outPos, glm::quat& outRot,
+// cgltf_node_transform_local 已处理 has_matrix / TRS 两种 node 形态，返回列主序
+// 本地矩阵；glm::decompose 拆 TRS。
+void NodeLocalTransform(const cgltf_node& node, glm::vec3& outPos, glm::quat& outRot,
                         glm::vec3& outScale)
+{
+    float local[16] = {0};
+    cgltf_node_transform_local(&node, local);
+    const glm::mat4 m = glm::make_mat4(local);
+    glm::vec3 skew{};
+    glm::vec4 perspective{};
+    glm::decompose(m, outScale, outRot, outPos, skew, perspective);
+}
+
+// 取 node 的 **world** rotation（沿父累积）—— 仅光源方向编码用。引擎的光源
+// 消费者（Pipeline 取光向）目前仍读 entity 自身 local rotation（不累积 hierarchy，
+// A1.1 后续 increment 才切），所以要把 world 光向编码进 entity 的 rotation，光源
+// 才指对世界方向。glTF 灯光通常是 scene-root 直接子（local==world），编码后即正确。
+glm::quat NodeWorldRotation(const cgltf_node& node)
 {
     float world[16] = {0};
     cgltf_node_transform_world(&node, world);
     const glm::mat4 m = glm::make_mat4(world);
-    glm::vec3 skew{};
+    glm::vec3 scale{}, translation{}, skew{};
     glm::vec4 perspective{};
-    glm::decompose(m, outScale, outRot, outPos, skew, perspective);
+    glm::quat  rotation{};
+    glm::decompose(m, scale, rotation, translation, skew, perspective);
+    return rotation;
 }
 
 // 该光是否需要方向（directional / spot）—— 决定 ProcessNode 是否把 world 光向
@@ -356,15 +370,18 @@ Entity ProcessNode(World& world, const cgltf_node& node,
 
     glm::vec3 pos{}, scl{};
     glm::quat rot{};
-    NodeWorldTransform(node, pos, rot, scl);
+    NodeLocalTransform(node, pos, rot, scl);
 
     // 光源（directional/spot）方向沿 glTF 本地 -Z；引擎 ComputeXxxWorldDir =
-    // rotation*(0,-1,0)（本地 -Y，且不累积 hierarchy）。把 world 光向编码进
-    // entity rotation，保证引擎读出正确世界方向。point 光无方向，保留 node 姿态。
+    // rotation*(0,-1,0)。光源消费者目前读 entity local rotation（未累积 hierarchy），
+    // 故把 **world** 光向（从 node world rotation 算）编码进 entity rotation。
+    // mesh node + point 光保留 local rotation（mesh 走 Collect 累积，point 无方向）。
     glm::quat finalRot = rot;
     if (LightNeedsDirection(node.light))
     {
-        const glm::vec3 worldLightDir = glm::normalize(rot * glm::vec3(0.0f, 0.0f, -1.0f));
+        const glm::quat worldRot = NodeWorldRotation(node);
+        const glm::vec3 worldLightDir =
+            glm::normalize(worldRot * glm::vec3(0.0f, 0.0f, -1.0f));
         finalRot = ::Orange::Engine::Render::MakeDirectionalLightRotationFromDir(worldLightDir);
     }
     world.AddComponent<TransformComponent>(e, TransformComponent{pos, finalRot, scl});
