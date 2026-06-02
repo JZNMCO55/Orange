@@ -270,6 +270,34 @@ int main()
         std::fprintf(stdout, "  [PASS] World + TickAnimators 端到端\n");
     }
 
+    // ===== 13. Progress：播放进度 [0,1] =====
+    {
+        Anim::AnimationClip clip;
+        clip.duration = 2.0f;  // 显式时长
+        clip.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                        {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                         LinKey(2.0f, glm::vec4(20, 0, 0, 0))}));
+        ClipAnimator anim(clip, nullptr);  // 无 target，仅测进度
+        assert(Near(anim.Progress(), 0.0f) && "起始进度 0");
+        anim.Tick(1.0f);
+        assert(Near(anim.Progress(), 0.5f) && "t=1/dur=2 → 0.5");
+        anim.Tick(5.0f);  // 非 loop clamp 到 2.0
+        assert(Near(anim.Progress(), 1.0f) && "非 loop 末尾 → 1.0");
+
+        // loop clip：回卷后进度落在 [0,1)。
+        Anim::AnimationClip lclip = clip;
+        lclip.loop = true;
+        ClipAnimator lanim(lclip, nullptr);
+        lanim.Tick(3.0f);  // 3 % 2 = 1 → progress 0.5
+        assert(Near(lanim.Progress(), 0.5f) && "loop 回卷进度 0.5");
+
+        // 空 / 零时长 clip → 0（退化）。
+        ClipAnimator eanim(Anim::AnimationClip{}, nullptr);
+        eanim.Tick(1.0f);
+        assert(Near(eanim.Progress(), 0.0f) && "duration<=0 → 进度 0");
+        std::fprintf(stdout, "  [PASS] Progress 播放进度 [0,1]\n");
+    }
+
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
     return 0;
 }

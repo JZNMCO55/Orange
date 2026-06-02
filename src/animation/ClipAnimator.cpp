@@ -122,6 +122,13 @@ float ClipAnimator::Duration() const noexcept
     return mClip.duration;
 }
 
+float ClipAnimator::Progress() const noexcept
+{
+    // mElapsedSeconds 已被 WrapClipTime 约束在 [0,duration]（非 loop）/ [0,duration)（loop），
+    // 故无需再 clamp；duration<=0 退化为 0。
+    return mClip.duration > 0.0f ? mElapsedSeconds / mClip.duration : 0.0f;
+}
+
 void ClipAnimator::ApplyPose() const
 {
     if (mpTarget == nullptr)

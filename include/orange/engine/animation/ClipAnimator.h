@@ -101,6 +101,9 @@ public:
     void  Seek(float seconds);  // 设 elapsed（按 loop/clamp wrap）+ 应用 pose
     float ElapsedSeconds() const noexcept;
     float Duration() const noexcept;
+    // 播放进度 [0,1] = elapsed / duration（duration<=0 → 0）。供游戏逻辑（"攻击动画
+    // 播到几成"）/ timeline 进度条 / 按进度触发事件。loop clip 在每个循环内 [0,1)。
+    float Progress() const noexcept;
 
     // 按当前 elapsed 把 clip 采样应用到 target（不推进时间）。target==nullptr 安全
     // no-op。供编辑器 timeline scrubbing / 显式重应用用。
