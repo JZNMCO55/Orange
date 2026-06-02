@@ -210,6 +210,8 @@ int main()
     assert(r.destPath.find(".scene.json") != std::string::npos &&
            "destPath 应是 .scene.json");
     assert(fs::exists(r.destPath) && ".scene.json 应落盘");
+    assert(r.message.find("lights=2") != std::string::npos &&
+           "result message 应含 lights=2（Sun + Bulb 两灯被计数）");
     std::fprintf(stdout, "  [PASS] 导入产出 scene: %s (%s)\n",
                  r.destPath.c_str(), r.message.c_str());
 

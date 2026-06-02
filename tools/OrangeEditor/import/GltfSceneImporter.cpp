@@ -343,7 +343,7 @@ void AddGltfLight(World& world, Entity e, const cgltf_light& light)
 // 新增实体"之后用现取的指针写。
 Entity ProcessNode(World& world, const cgltf_node& node,
                    const std::map<const cgltf_mesh*, ::Orange::Engine::Asset::AssetHandle<MeshAsset>>& meshHandles,
-                   std::size_t& outEntityCount)
+                   std::size_t& outEntityCount, std::size_t& outLightCount)
 {
     Entity e = world.CreateEntity();
     ++outEntityCount;
@@ -372,6 +372,7 @@ Entity ProcessNode(World& world, const cgltf_node& node,
     if (node.light != nullptr)
     {
         AddGltfLight(world, e, *node.light);
+        ++outLightCount;
     }
 
     if (node.mesh != nullptr)
@@ -395,7 +396,7 @@ Entity ProcessNode(World& world, const cgltf_node& node,
     for (cgltf_size ci = 0; ci < node.children_count; ++ci)
     {
         childEntities.push_back(
-            ProcessNode(world, *node.children[ci], meshHandles, outEntityCount));
+            ProcessNode(world, *node.children[ci], meshHandles, outEntityCount, outLightCount));
     }
 
     // 子树建完，不再新增实体 —— 现在 patch firstChild + 子节点 parent / 兄弟链。
@@ -592,9 +593,10 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     // 建 World 镜像 node 树。
     World world;
     std::size_t entityCount = 0;
+    std::size_t lightCount  = 0;
     for (std::size_t ri = 0; ri < roots.size(); ++ri)
     {
-        Entity rootE = ProcessNode(world, *roots[ri], meshHandles, entityCount);
+        Entity rootE = ProcessNode(world, *roots[ri], meshHandles, entityCount, lightCount);
         // 根：parent 留 Invalid，用 sortIndex 定根间顺序（HierarchyComponent 约定）。
         if (auto* h = world.GetComponent<HierarchyComponent>(rootE))
         {
@@ -646,9 +648,10 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     result.status   = ImportStatus::Success;
     result.destPath = scenePath;
     result.message  = "imported gltf scene (entities=" + std::to_string(entityCount) +
-                      " meshes=" + std::to_string(writtenMeshes) + ")";
-    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={})",
-                    srcPath, scenePath, entityCount, writtenMeshes);
+                      " meshes=" + std::to_string(writtenMeshes) +
+                      " lights=" + std::to_string(lightCount) + ")";
+    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} lights={})",
+                    srcPath, scenePath, entityCount, writtenMeshes, lightCount);
     return result;
 }
 
