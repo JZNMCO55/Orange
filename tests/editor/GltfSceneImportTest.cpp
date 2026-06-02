@@ -307,8 +307,8 @@ int main()
                std::fabs(dl->color.g - 0.9f) < 1e-4f &&
                std::fabs(dl->color.b - 0.8f) < 1e-4f &&
                "DirectionalLight color 应 = glTF (1,0.9,0.8)");
-        assert(std::fabs(dl->intensity - 2.5f) < 1e-4f &&
-               "DirectionalLight intensity 应透传 glTF 2.5（单位未映射，忠实透传）");
+        assert(std::fabs(dl->intensity - 2.5f / 683.0f) < 1e-5f &&
+               "DirectionalLight intensity 应 = glTF 2.5 ÷683 luminous efficacy（映射引擎尺度）");
         const auto* sunT = world.GetComponent<SceneNS::TransformComponent>(sun);
         assert(sunT != nullptr && "SunLight 应有 Transform");
         const glm::vec3 sunDir = RenderNS::ComputeDirectionalLightWorldDir(sunT->rotation);
@@ -324,9 +324,9 @@ int main()
         const auto* pl = world.GetComponent<RenderNS::PointLight>(lamp);
         assert(pl != nullptr && "Lamp 应有 PointLight component");
         assert(std::fabs(pl->color.b - 1.0f) < 1e-4f &&
-               std::fabs(pl->intensity - 5.0f) < 1e-4f &&
+               std::fabs(pl->intensity - 5.0f / 683.0f) < 1e-4f &&
                std::fabs(pl->range - 8.0f) < 1e-4f &&
-               "PointLight color/intensity/range 应 = glTF (蓝/5/8)");
+               "PointLight color/intensity(÷683)/range 应 = glTF (蓝/5÷683/8)");
         const auto* lampT = world.GetComponent<SceneNS::TransformComponent>(lamp);
         assert(lampT != nullptr &&
                std::fabs(lampT->position.x - 3.0f) < 1e-4f &&
@@ -388,11 +388,11 @@ int main()
         const Entity spot = FindByName(w, "SpotNode");
         const auto* sl = w.GetComponent<RenderNS::SpotLight>(spot);
         assert(sl != nullptr && "SpotNode 应有 SpotLight component");
-        assert(std::fabs(sl->intensity - 3.0f) < 1e-4f &&
+        assert(std::fabs(sl->intensity - 3.0f / 683.0f) < 1e-4f &&
                std::fabs(sl->range - 12.0f) < 1e-4f &&
                std::fabs(sl->innerConeAngle - 0.2f) < 1e-4f &&
                std::fabs(sl->outerConeAngle - 0.5f) < 1e-4f &&
-               "SpotLight intensity/range/cone 应 = glTF (3/12/0.2/0.5)");
+               "SpotLight intensity(÷683)/range/cone 应 = glTF (3÷683/12/0.2/0.5)");
         const auto* spotT = w.GetComponent<SceneNS::TransformComponent>(spot);
         const glm::vec3 spotDir = RenderNS::ComputeSpotLightWorldDir(spotT->rotation);
         assert(std::fabs(spotDir.z - (-1.0f)) < 1e-3f &&

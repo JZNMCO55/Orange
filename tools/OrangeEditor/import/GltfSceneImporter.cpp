@@ -279,23 +279,31 @@ bool LightNeedsDirection(const cgltf_light* light)
             light->type == cgltf_light_type_spot);
 }
 
-// KHR_lights_punctual → 引擎光源 component。color / range / cone 直接映射；
-// **intensity 单位说明**：glTF directional 用 lux、point/spot 用 candela，引擎
-// intensity 是无单位乘子 —— 此处忠实透传 glTF 值，**不做归一化**（无 viewport
-// 无法验证缩放是否合理，瞎缩放比诚实透传更糟）。导入后可能偏亮/偏暗，需在
-// Inspector 按视觉手调，属 G3 已知单位映射缺口（见 dogfood / gap 文档）。
-// 方向（directional/spot）已由调用方编码进 entity rotation，本函数只填 component
-// 的 color/intensity/range/cone 等"非几何"字段。
+// glTF KHR_lights_punctual 用**光度（photometric）单位**：directional = lux、
+// point/spot = candela（lm/sr）。引擎 intensity 是无单位乘子（content-scale：
+// 现有 DirectionalLight 内容用 1.2~2.5、PointLight ~40）。683 lm/W 是 555nm 的
+// 标准光视效能（luminous efficacy）—— glTF 导出器（Blender 等）正是用它把
+// W → lux/candela，÷683 即反推回内容尺度的乘子（radiant per-sr，与引擎 point/spot
+// 的 I/d² 衰减模型一致）。实测 Blender sun 3 W/m² → glTF 2049 lux → ÷683 = 3.0，
+// 正好落在引擎 DirectionalLight 1.2~2.5 的尺度 —— 故用单一 ÷683 而非 raw 透传
+// （raw 会让 viewport 直接过曝纯白）。仍是近似（引擎 intensity 非物理标定），
+// 导入后可微调，但已落在可用范围，不再是"必须手调否则全白"。
+constexpr float kGltfLuminousEfficacy = 683.0f;
+
+// KHR_lights_punctual → 引擎光源 component。color / range / cone 直接映射，
+// intensity ÷683（见上）。方向（directional/spot）已由调用方编码进 entity
+// rotation，本函数只填 component 的 color/intensity/range/cone 等"非几何"字段。
 void AddGltfLight(World& world, Entity e, const cgltf_light& light)
 {
     const glm::vec3 color(light.color[0], light.color[1], light.color[2]);
+    const float intensity = light.intensity / kGltfLuminousEfficacy;
     switch (light.type)
     {
         case cgltf_light_type_directional:
         {
             DirectionalLight d;
             d.color     = color;
-            d.intensity = light.intensity;
+            d.intensity = intensity;
             world.AddComponent<DirectionalLight>(e, d);
             break;
         }
@@ -303,7 +311,7 @@ void AddGltfLight(World& world, Entity e, const cgltf_light& light)
         {
             PointLight p;
             p.color     = color;
-            p.intensity = light.intensity;
+            p.intensity = intensity;
             // glTF range == 0 表示"无限 / 未指定"——退回引擎默认。
             p.range     = (light.range > 0.0f) ? light.range : 10.0f;
             world.AddComponent<PointLight>(e, p);
@@ -313,7 +321,7 @@ void AddGltfLight(World& world, Entity e, const cgltf_light& light)
         {
             SpotLight s;
             s.color          = color;
-            s.intensity      = light.intensity;
+            s.intensity      = intensity;
             s.range          = (light.range > 0.0f) ? light.range : 15.0f;
             s.innerConeAngle = light.spot_inner_cone_angle;
             s.outerConeAngle = light.spot_outer_cone_angle;

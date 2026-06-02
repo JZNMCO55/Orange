@@ -2392,7 +2392,7 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 ### 状态
 
 - **G1（scene-level import 主路径：hierarchy + 每 mesh 单独不塌平）✅ 2026-06-02 落地**（OrangeEditor，autonomous goal session "贴近 Lumix 成熟度"）。
-- **G3 lights（KHR_lights_punctual → DirectionalLight / PointLight / SpotLight）✅ 2026-06-02 同 session 落地**（方向沿 glTF -Z 转引擎 -Y；intensity 单位未映射，忠实透传待手调）。**剩**：G2（per-mesh PBR material 划分，需 MaterialInstance 构造）/ G3 cameras / G3 intensity 单位映射 / G4（.fbx）/ G5（re-import override）仍未排期。
+- **G3 lights（KHR_lights_punctual → DirectionalLight / PointLight / SpotLight）✅ 2026-06-02 同 session 落地**（方向沿 glTF -Z 转引擎 -Y；intensity ÷683 luminous efficacy 映射到引擎 content-scale，实测 Blender sun→3.0；真实 Blender 导出已端到端验证层级+灯光，见 `scripts/dogfood_make_scene_hierarchy_lights.py`）。**剩**：G2（per-mesh PBR material 划分，需 MaterialInstance 构造）/ G3 cameras / G4（.fbx）/ G5（re-import override）仍未排期。
 - **优先级**：P2（预防性登记，玩法验证完成后升格）。**触发升格条件**：首款 Ori-like 玩法 spike 闭环 + 首游进入 visual polish 阶段、用户尝试在 Blender 摆完整关卡时（按用户在 umbrella session 表达的工作流意图，这是个**可预期**而非偶发的需求）。在那之前用 G1 子集（手工组装内置 cube / plane + GUI 摆位）已够灰盒
 - **归属候选**：OrangeEditor v1.2 范畴（与 PBR material 解析 G2 同 milestone，与 ADR-008 "PBR material 延 v1.2" 对齐）；G4 .fbx 可继续延后到 importer family 完整覆盖时再做；G5 re-import override 单独 minor milestone
 
@@ -2416,7 +2416,7 @@ scene import 顺势消费 glTF 灯光（Lumix / Unity / Godot 的 scene import �
 
 - **映射**：cgltf `node->light`（KHR_lights_punctual，cgltf 默认解析）→ `AddGltfLight`：`directional` → `DirectionalLight`、`point` → `PointLight`（range==0 退默认 10m）、`spot` → `SpotLight`（range 退默认 15m + inner/outer cone 直接映射）。color 直接映射。
 - **方向坑（已处理）**：glTF 灯光沿 node 本地 **-Z** 照射；引擎 `ComputeDirectionalLightWorldDir/ComputeSpotLightWorldDir = rotation*(0,-1,0)`（本地 **-Y**，且不累积 hierarchy）。故对 directional/spot：算 `worldLightDir = bakedWorldRotation*(0,0,-1)`，再 `MakeDirectionalLightRotationFromDir(worldLightDir)` 编码进 entity rotation（point 无方向，保留 node 姿态 + world 位置）。
-- **intensity 单位缺口（G3 剩余）**：glTF directional 用 lux、point/spot 用 candela，引擎 intensity 是无单位乘子。**忠实透传 glTF 值，不做归一化**（无 viewport 无法验证缩放合理性，瞎缩放比诚实透传更糟）。导入后可能偏亮/偏暗，需在 Inspector 手调——属 G3 剩余的单位映射子缺口（撞上即按真实 Blender 导出标定一个经验缩放）。
+- **intensity 单位映射（÷683 luminous efficacy）**：glTF directional 用 lux、point/spot 用 candela（光度单位），引擎 intensity 是无单位 content-scale 乘子（现有 DirectionalLight 内容 1.2~2.5、PointLight ~40）。683 lm/W 是 555nm 标准光视效能，glTF 导出器（Blender 等）正是用它把 W→lux/candela，故 **÷683 反推回内容尺度**（radiant per-sr，与引擎 point/spot 的 I/d² 衰减一致）。**实测**真实 Blender 导出：sun 3 W/m² → glTF **2049 lux** → ÷683 = **3.0**（正落引擎 directional 1.2~2.5 尺度）；point 100 W → 5435 candela → ÷683 = 7.96。raw 透传会让 viewport 直接过曝纯白，÷683 后落可用范围（仍近似，可微调）。**剩余**：引擎 intensity 非物理标定，point/spot 的 ÷683 是 order-of-magnitude 近似，真机 dogfood 若仍偏可再标定。
 - **空场景放宽**：`writtenMeshes==0` 不再致命（纯灯光 / 纯空 group 场景可导入），改用 `entityCount==0` 兜底。
 - **验收**：`GltfSceneImportTest` fixture 加 2 灯光 node（Sun directional / Bulb point）—— 断言光源 component 存在 + color/intensity/range 透传 + **方向编码**（无 rotation 的 directional → world 光向 `(0,0,-1)`）+ point world 位置 `(3,3,3)`。ctest 75/75；invariant + drift 全绿。
 - **待 dogfood**：真实 Blender 场景灯光导入后 viewport 的方向 / 颜色对不对 + intensity 是否需要缩放（见 dogfood item 30）。

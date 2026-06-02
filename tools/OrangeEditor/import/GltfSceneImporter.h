@@ -24,9 +24,10 @@
 // 范围（与 gap 文档 GAP-2026-05-28 拆解对齐）：
 //   - G1 ✅ hierarchy + 每 mesh 单独不塌平 + transform 树。
 //   - G3（部分 ✅）scene-level lights：消费 KHR_lights_punctual →
-//     DirectionalLight / PointLight / SpotLight（方向沿 glTF -Z 转引擎 -Y）。
-//     **intensity 单位未映射**（glTF lux/candela vs 引擎无单位乘子，忠实透传，
-//     导入后需手调）；cameras 仍延后。
+//     DirectionalLight / PointLight / SpotLight（方向沿 glTF -Z 转引擎 -Y；
+//     intensity ÷683 luminous efficacy 把 glTF 光度单位 lux/candela 映射到引擎
+//     content-scale 乘子，实测 Blender sun → 3.0 落在引擎 1.2~2.5 尺度）；
+//     cameras 仍延后。
 //   - G2（未做）per-mesh PBR material 划分：本阶段 RenderableComponent.material
 //     留空（默认材质）。材质需 MaterialInstance 对象做 Scene::Save 反查，
 //     headless 路径不构造 —— 留 G2（PBR material 基础设施已落地，单列子缺口）。
