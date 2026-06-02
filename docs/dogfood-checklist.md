@@ -254,6 +254,19 @@
 
 ---
 
+### 19. File → Open Recent（最近场景）
+
+- **commit**：`58fcc34` feat(editor): File → Open Recent 最近场景列表
+- **怎么触发**：File 菜单 → **Open Recent** 子菜单（打开 / 另存过几个场景后才有内容；空时灰禁）
+- **看什么 / 通过判据**：
+  - 子菜单列出最近打开 / 另存的场景（文件名短名，hover 看完整路径 tooltip），front = 最近
+  - 点一项 → 直接打开该场景（跳过文件对话框；有未保存改动时先弹确认）
+  - 重复打开同一场景 → 该项置顶不重复；最多 10 条
+  - **持久化**：关编辑器重开，Open Recent 列表仍在（存进 editor_settings.json）
+- **背景**：File 菜单之前没有最近场景，每个成熟编辑器都有。**菜单 + 持久化待 dogfood**。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。
