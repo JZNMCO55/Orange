@@ -123,6 +123,12 @@ struct EditorSelection
         Empty = 0,    // Name + Transform，用户后续手动 + Add Component
         Light,        // Name + Transform + DirectionalLight + Renderable(cube + emissive)
                       // —— 一键搭出"看得见的发光物体"
+        // 基本体（"3D Object" 子菜单，Unity/Godot 同款一键可见几何）：Name +
+        // Transform + Renderable(对应内置 mesh + pbr 材质)。省去"Create Entity →
+        // Add Renderable → 选 mesh"三步，灰盒搭场景高频入口。
+        Cube,         // cubeMeshHandle
+        Sphere,       // sphereMeshHandle（lat/lon UV sphere）
+        Plane,        // planeMeshHandle（地面 / 墙面）
     };
 
     struct PendingCreate

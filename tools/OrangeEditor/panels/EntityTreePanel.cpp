@@ -277,6 +277,25 @@ void EditorRenderLayer::DrawEntityTreePanel()
             mHost.selection.pendingCreate = {Orange::Engine::Entity::Invalid(),
                                     EditorSelection::PendingCreateKind::Light, true};
         }
+        // 基本体（"3D Object" 子菜单）—— 一键创建带 Renderable 的可见几何，
+        // root 级。参 Unity GameObject → 3D Object / Godot 节点创建。
+        if (ImGui::BeginMenu("Create 3D Object (root)")) {
+            const Orange::Engine::Entity rootParent =
+                Orange::Engine::Entity::Invalid();
+            if (ImGui::MenuItem("Cube")) {
+                mHost.selection.pendingCreate =
+                    {rootParent, EditorSelection::PendingCreateKind::Cube, true};
+            }
+            if (ImGui::MenuItem("Sphere")) {
+                mHost.selection.pendingCreate =
+                    {rootParent, EditorSelection::PendingCreateKind::Sphere, true};
+            }
+            if (ImGui::MenuItem("Plane")) {
+                mHost.selection.pendingCreate =
+                    {rootParent, EditorSelection::PendingCreateKind::Plane, true};
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndDisabled();
         // Unhide All 逃生口：批量 Hide 后一键全部显示。N==0 disable。
         // 不受 canEdit 约束——显隐是 view 态，只读场景也该能恢复可见性。
@@ -543,35 +562,61 @@ void EditorRenderLayer::DrawEntityTreePanel()
     if (mHost.selection.pendingCreate.valid) {
         const Orange::Engine::Entity         parent         = mHost.selection.pendingCreate.parent;
         const EditorSelection::PendingCreateKind kind           = mHost.selection.pendingCreate.kind;
-        const auto cubeMesh  = mHost.assets.cubeMeshHandle;
+        const auto cubeMesh   = mHost.assets.cubeMeshHandle;
+        const auto sphereMesh = mHost.assets.sphereMeshHandle;
+        const auto planeMesh  = mHost.assets.planeMeshHandle;
         auto* const pLightMat = mHost.assets.pLightObjectMaterial.get();
+        // 基本体材质：优先 PBR baseline；缺席（理论上 InitializeEditorAssets 后不会）
+        // 退化到 default textured（棋盘格 dev-checker，保证可见）。
+        auto* const pPrimMat  = mHost.assets.pPbrMaterial
+            ? mHost.assets.pPbrMaterial.get()
+            : mHost.assets.pDefaultRenderableMaterial.get();
         mHost.selection.pendingCreate.valid = false;
 
         auto cmd = std::make_unique<CreateEntityCommand>(
             mHost,
-            [parent, kind, cubeMesh, pLightMat]
+            [parent, kind, cubeMesh, sphereMesh, planeMesh, pLightMat, pPrimMat]
             (Orange::Engine::World& w) -> Orange::Engine::Entity
             {
+                using PCK = EditorSelection::PendingCreateKind;
                 Orange::Engine::Entity e = w.CreateEntity();
-                const char* initialName = (kind == EditorSelection::PendingCreateKind::Light)
-                    ? "Light Object" : "New Entity";
+                const char* initialName = "New Entity";
+                switch (kind) {
+                    case PCK::Light:  initialName = "Light Object"; break;
+                    case PCK::Cube:   initialName = "Cube";   break;
+                    case PCK::Sphere: initialName = "Sphere"; break;
+                    case PCK::Plane:  initialName = "Plane";  break;
+                    default: break;
+                }
                 w.AddComponent<Orange::Engine::Scene::NameComponent>(
                     e, Orange::Engine::Scene::NameComponent{initialName});
                 w.AddComponent<Orange::Engine::Scene::TransformComponent>(
                     e, Orange::Engine::Scene::TransformComponent{});
 
-                if (kind == EditorSelection::PendingCreateKind::Light) {
+                using ::Orange::Engine::Render::DirectionalLight;
+                using ::Orange::Engine::Render::RenderableComponent;
+                if (kind == PCK::Light) {
                     // 一键搭出"可见的发光物体" —— DirectionalLight 提供光照贡献 +
                     // Renderable(cube + emissive material) 让灯本身在 Scene 视口
                     // 可见（不然方向光是看不见的）。
-                    using ::Orange::Engine::Render::DirectionalLight;
-                    using ::Orange::Engine::Render::RenderableComponent;
                     w.AddComponent<DirectionalLight>(e, DirectionalLight{});
                     RenderableComponent rc{};
                     rc.mesh             = cubeMesh;
                     rc.materialInstance = pLightMat;
                     rc.visible          = true;
                     rc.castsShadow      = false;
+                    w.AddComponent<RenderableComponent>(e, rc);
+                }
+                else if (kind == PCK::Cube || kind == PCK::Sphere
+                         || kind == PCK::Plane) {
+                    // 基本体：一键带 Renderable 的可见几何（pbr 材质 + 对应内置 mesh）。
+                    RenderableComponent rc{};
+                    rc.mesh = (kind == PCK::Sphere) ? sphereMesh
+                            : (kind == PCK::Plane)  ? planeMesh
+                                                    : cubeMesh;
+                    rc.materialInstance = pPrimMat;
+                    rc.visible          = true;
+                    rc.castsShadow      = true;
                     w.AddComponent<RenderableComponent>(e, rc);
                 }
 
@@ -1106,6 +1151,22 @@ void EditorRenderLayer::DrawEntityNodeRecursive(Orange::Engine::Entity entity)
         }
         if (ImGui::MenuItem("Create Light Object (Child)")) {
             mHost.selection.pendingCreate = {entity, EditorSelection::PendingCreateKind::Light, true};
+        }
+        // 基本体子菜单（child 级，挂为右键节点的末子）。
+        if (ImGui::BeginMenu("Create 3D Object (Child)")) {
+            if (ImGui::MenuItem("Cube")) {
+                mHost.selection.pendingCreate =
+                    {entity, EditorSelection::PendingCreateKind::Cube, true};
+            }
+            if (ImGui::MenuItem("Sphere")) {
+                mHost.selection.pendingCreate =
+                    {entity, EditorSelection::PendingCreateKind::Sphere, true};
+            }
+            if (ImGui::MenuItem("Plane")) {
+                mHost.selection.pendingCreate =
+                    {entity, EditorSelection::PendingCreateKind::Plane, true};
+            }
+            ImGui::EndMenu();
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Rename", "F2")) {
