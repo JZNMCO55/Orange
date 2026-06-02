@@ -488,11 +488,34 @@
   **触发点在游戏/demo 真实消费后**（预登记，届时打开）：
   - ⏳ **动画事件**：boss 攻击 clip 第 N 秒触发"生成判定 / 脚步声"——游戏侧接 `SetEventCallback`
     后，**事件时刻与视觉帧对齐**（判定不早不晚）、loop clip 每圈触发一次、倒放/scrub 不误触发。
-  - ⏳ **过渡混合 CrossFadeTo**：idle↔walk↔attack 切换时**视觉平滑无 pop**（起点不跳）、
-    fade 时长手感合适、rotation slerp 走最短弧不翻转。
+  - ⏳ **过渡混合 CrossFadeTo**（2026-06-02 升级为**真两-clip cross-fade**，commit `62cd25c`）：
+    idle↔walk↔attack 切换时**视觉平滑无 pop**（起点不跳）、fade 时长手感合适、rotation slerp 走
+    最短弧不翻转；**出场动画在 fade 期间仍在播放**（如从 run 淡入 jump 时，腿部摆动在淡出过程里
+    继续动、非定格一帧）——这是真两-clip 相对旧冻结-pose MVP 的核心视觉差异，重点确认。
   - ⏳ **播放速率 SetSpeed**：slow-mo（boss 蓄力）/ 倒放调试视觉正确；速率 0 等价暂停。
 - 这些是**首游 boss 战动作时序**的运行时地基（GAP-2026-06-01 列 boss 攻击为硬需求）；
   数据/序列化/运行时已就绪，缺的是游戏侧脚本消费（C# PIE 落地后）+ 编辑器创作 UI（B2.3/B2.6 spec）。
+
+---
+
+## 2026-06-02 session（动画运行时补完：Bezier 真时序缓动 + 真两-clip cross-fade）
+
+### 35. Animated Cube 的 bob 改 Bezier ease-in-out —— 真时序缓动端到端可见
+
+- **commits**：`15a991a`（InterpMode::Bezier 升级真 cubic-bezier 时序缓动）/ `62cd25c`（CrossFadeTo
+  真两-clip）/ demo 接线（本 session 后续 commit，DemoWorld.cpp 的 "Animated Cube (clip)" 把 bob
+  轨道从 Linear 改 Bezier ease-in-out `cubic-bezier(0.42,0,0.58,1)`）。
+- **怎么触发**：与 item 33 同——把 `assets/scenes/demo.scene.json` 暂时挪开 → 启动 OrangeEditor
+  触发 `SeedDemoWorld` → Enter Play → 看 "Animated Cube (clip)"。
+- **看什么**：
+  - cube 上下浮动（bob）现在在**顶/底缓动、中段加速**（ease-in-out 时序），相比旧的匀速线性
+    更**有机、不机械**——这是 `InterpMode::Bezier` 真时序缓动（切线时间方向 .x 真正参与）落到
+    端到端路径 clip → ClipAnimator → 本地 Transform → 渲染的视觉确认点。
+  - spin（绕 Y）仍是 Linear 匀速（旋转匀速才自然，未改）。
+- **背景**：Bezier 缓动是动画 "juice" 的核心（首游 Ori-like 平台跳跃尤其依赖 squash-stretch /
+  anticipation 的非线性时序）。headless 已全测（`animation_clip_test` 6 例时序覆盖：ease-in/out/
+  in-out 对称 / 单调 / overshoot 回弹），此处仅 dogfood 端到端**视觉手感**。
+- **关键确认点**：缓动方向对（不是反的：应顶/底慢、中段快）；loop 接缝处（t=2→0）无突跳。
 
 ---
 

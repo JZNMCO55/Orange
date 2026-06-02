@@ -457,10 +457,18 @@ void SeedDemoWorld(EditorHost& host)
 
         // 程序化构造一个 2s loop 的 bob+spin clip（实际工程里 clip 来自 timeline
         // 编辑 + .anim 资产；此处内联仅为 demo 可见）。
-        auto floatKey = [](float t, float v) {
+        // bob 用 Bezier ease-in-out（cubic-bezier(0.42,0,0.58,1)）：cube 在浮动顶/底缓动、
+        // 中段加速 → 有机、非机械线性。借此端到端展示 InterpMode::Bezier 时序缓动落到
+        // clip → ClipAnimator → 本地 Transform → 渲染的真实路径（dogfood-checklist item 35）。
+        const glm::vec2 easeOut(0.42f, 0.0f);  // 段起点出柄（时间方向延后起步）
+        const glm::vec2 easeIn(-0.42f, 0.0f);  // 段终点入柄（时间方向提前收尾）
+        auto bezKey = [](float t, float v, glm::vec2 inT, glm::vec2 outT) {
             Anim::Keyframe k;
-            k.time  = t;
-            k.value = glm::vec4(v, 0.0f, 0.0f, 0.0f);
+            k.time       = t;
+            k.value      = glm::vec4(v, 0.0f, 0.0f, 0.0f);
+            k.interp     = Anim::InterpMode::Bezier;
+            k.inTangent  = inT;
+            k.outTangent = outT;
             return k;
         };
         auto vec3Key = [](float t, glm::vec3 v) {
@@ -478,9 +486,9 @@ void SeedDemoWorld(EditorHost& host)
         Anim::AnimationTrack bob;
         bob.targetName = "position.y";
         bob.valueType  = Anim::TrackValueType::Float;
-        bob.keys.push_back(floatKey(0.0f, baseY));
-        bob.keys.push_back(floatKey(1.0f, baseY + 0.5f));
-        bob.keys.push_back(floatKey(2.0f, baseY));
+        bob.keys.push_back(bezKey(0.0f, baseY, glm::vec2(0.0f), easeOut));
+        bob.keys.push_back(bezKey(1.0f, baseY + 0.5f, easeIn, easeOut));
+        bob.keys.push_back(bezKey(2.0f, baseY, easeIn, glm::vec2(0.0f)));
         clip.tracks.push_back(std::move(bob));
 
         Anim::AnimationTrack spin;
