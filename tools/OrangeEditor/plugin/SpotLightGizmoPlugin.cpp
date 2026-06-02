@@ -7,6 +7,7 @@
 
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <imgui.h>
@@ -70,8 +71,18 @@ void SpotLightGizmoPlugin::Draw(
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
 
-    const glm::vec3 apex = pTC->position;
-    const glm::vec3 dir  = Orange::Engine::Render::ComputeSpotLightWorldDir(pTC->rotation);
+    // 累积后 world 位置 + 锥光向（ADR-016 / A1.1 step 2，与 Pipeline 光源消费
+    // 同源）；parented 聚光的锥体 gizmo 对齐世界位姿。cache 缺失退回 local。
+    glm::vec3 apex = pTC->position;
+    glm::vec3 dir  = Orange::Engine::Render::ComputeSpotLightWorldDir(pTC->rotation);
+    if (const auto* wtc =
+            pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity))
+    {
+        apex = glm::vec3(wtc->world[3]);
+        dir  = glm::normalize(glm::vec3(
+            wtc->world *
+            glm::vec4(Orange::Engine::Render::kSpotLightLocalForward, 0.0f)));
+    }
 
     // 画 apex "灯泡" 小填充圆。
     const auto projApex = ProjectPt(apex, ctx);

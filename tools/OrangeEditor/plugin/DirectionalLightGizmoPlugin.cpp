@@ -7,6 +7,7 @@
 
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <imgui.h>
@@ -62,13 +63,21 @@ void DirectionalLightGizmoPlugin::Draw(
     // 也由 Transform.rotation 派生，没 Transform 就没有"方向"概念可视化。
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
-    const glm::vec3 origin = pTC->position;
 
-    // 方向 = TC.rotation 派生（identity 表示光向 -Y）。与 Pipeline 内的
-    // 派生公式同源（LightComponent.h `ComputeDirectionalLightWorldDir`），
-    // 保证 gizmo 视觉与 shading 方向永远一致。
-    const glm::vec3 dirN =
+    // origin + 方向取 TransformSystem 累积的 world matrix（与 Pipeline 光源消费
+    // 同一份，ADR-016 / A1.1 step 2）—— parented 灯的箭头也对齐世界位置/方向，
+    // 与 shading 方向一致。cache 缺失（首帧/未渲染）退回 entity local 派生兜底。
+    glm::vec3 origin = pTC->position;
+    glm::vec3 dirN =
         Orange::Engine::Render::ComputeDirectionalLightWorldDir(pTC->rotation);
+    if (const auto* wtc =
+            pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity))
+    {
+        origin = glm::vec3(wtc->world[3]);
+        dirN   = glm::normalize(glm::vec3(
+            wtc->world *
+            glm::vec4(Orange::Engine::Render::kDirectionalLightLocalForward, 0.0f)));
+    }
 
     // v1.0.1 c10：屏幕空间钉死箭头长度（== kHandleScreenLengthPx），与
     // entity rotation / dir 方向解耦。

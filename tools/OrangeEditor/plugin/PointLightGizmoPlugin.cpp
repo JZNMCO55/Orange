@@ -7,6 +7,7 @@
 
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <imgui.h>
@@ -58,7 +59,14 @@ void PointLightGizmoPlugin::Draw(
     if (pWorld == nullptr) { return; }
     auto* pTC = pWorld->GetComponent<TC>(entity);
     if (pTC == nullptr) { return; }
-    const glm::vec3 origin = pTC->position;
+    // 累积后 world 位置（ADR-016 / A1.1 step 2，与 Pipeline 光源消费同源）；
+    // parented 点光的 gizmo 圆环对齐世界位置。cache 缺失退回 local。
+    glm::vec3 origin = pTC->position;
+    if (const auto* wtc =
+            pWorld->GetComponent<Orange::Engine::Scene::WorldTransformComponent>(entity))
+    {
+        origin = glm::vec3(wtc->world[3]);
+    }
 
     // 投影 entity 中心 + range 边界（沿 +X / +Y / +Z 三轴各取一点 → 在屏幕
     // 上画一个简化的 "range 球轮廓" 用三段近似 ellipse arc 可能过重；改用
