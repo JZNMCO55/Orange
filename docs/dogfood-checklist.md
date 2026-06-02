@@ -143,6 +143,31 @@
   - Ctrl+Z 撤销 = 删掉刚建的实体（走 CreateEntityCommand 命令栈）
 - **背景**：之前只能 Create Entity（空壳）+ Create Light Object，得"建空实体 → Add Renderable → 选 mesh"三步才有可见几何。本项对齐 Unity GameObject→3D Object / Godot 节点创建。headless 无 GUI 菜单测试路径，**菜单交互 + 三种几何 viewport 视觉待真机确认**。
 
+### 9. Component Copy / Paste Values —— 跨实体复制组件值
+
+- **commit**：`343444e` feat(editor): Component Copy / Paste Values
+- **怎么触发**：
+  1. 选中实体 A → Inspector 里**右键某个组件头**（如 Transform / Light / Renderable）→ `Copy Values`
+  2. 选中实体 B → 右键**同类型**组件头 → `Paste Values`（不同类型时该项灰禁）
+- **看什么 / 通过判据**：
+  - Paste 后 B 的该组件各字段值 = A 的值（如 Copy A 的 Transform → Paste 到 B → B 的 position/rotation/scale 变成 A 的）
+  - 跨类型禁用：Copy 了 Transform，去 Light 组件头右键 → Paste Values 灰掉不可点
+  - **可 Undo**：Paste 后 Ctrl+Z 把 B 的组件值还原到 paste 前
+  - AssetRef 字段（材质/mesh）也复制（粘贴后指向同一资源）
+- **背景**：对齐 Lumix StudioApp / Unity "Copy Component / Paste Component Values"。复用 schema property get/set + remove-undo 的 CaptureComponentState 机制。右键菜单交互 + 各类型字段粘贴正确性待 dogfood。edge：粘贴 Renderable 的 mesh 不联动 SubMeshMaterials（少见）。
+
+### 10. 单材质模型 drop 自动带材质
+
+- **commit**：`ff53bfe` feat(editor): 单材质 mesh drop 自动应用导入材质
+- **怎么触发**：
+  1. 导入一个**单材质** glTF/glb 模型（如 KHR sample Avocado / Duck，或 Blender 单材质导出）
+  2. 把导入的 `.mesh` 从资产浏览器拖到场景一个实体上（或拖到 viewport 实体上）
+- **看什么 / 通过判据**：
+  - drop 后该实体的 Renderable.Material **自动变成导入的 `<stem>.material`**（而非默认灰 pbr），viewport 显示模型自带的材质/贴图（之前是默认材质）
+  - 不挂 SubMeshMaterialsComponent（单材质无需），Inspector 无 Sub-Mesh Materials 段
+  - 多材质模型 drop 行为不变（仍挂 SubMeshMaterials + 各段材质）
+- **背景**：之前单材质模型 drop 后是默认材质（导入的 .material 不自动应用，要手动指派）。对齐 Lumix/Unity 拖模型进场景自动带材质。headless section 7 已验导入侧 .meta 写 subMeshMaterials；**drop 后 viewport 材质视觉待真机确认**。推荐 fixture：KHR Avocado.glb。
+
 ---
 
 ## 维护约定
