@@ -752,11 +752,19 @@ ImportResult RunGltfImportToRegistry(std::string_view srcPath,
         }
     }
 
-    // 多 material（mesh 真带 sub-mesh 分段）才把按 slot 排列的 .material 路径写
-    // 进 .meta 的 subMeshMaterials 段，供 drop .mesh 到 entity 时挂
-    // SubMeshMaterialsComponent。单 material（materialPaths.size() <= 1）留空，
-    // .meta 维持 v1.0 字节（向后兼容，零行为变化）。
-    if (multiMaterial)
+    // 把按 slot 排列的 .material 路径写进 .meta 的 subMeshMaterials 段，供 drop
+    // .mesh 到 entity 时应用材质。**单 + 多 material 都写**（只要有任一真实
+    // material）：
+    //   * 多 material（mesh 带 sub-mesh）→ drop 时挂 SubMeshMaterialsComponent；
+    //   * 单 material → drop 时直接设 Renderable.materialInstance（让单材质模型
+    //     拖进场景就带上导入的材质，而非默认材质 —— 对齐 Lumix / Unity）。
+    // 全无 material（如纯几何 .obj 经 gltf 路径）→ 留空，.meta 维持历史字节。
+    bool anyMaterial = false;
+    for (const auto& m : result.materialPaths)
+    {
+        if (!m.empty()) { anyMaterial = true; break; }
+    }
+    if (anyMaterial)
     {
         meta.subMeshMaterials = result.materialPaths;
     }

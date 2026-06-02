@@ -218,6 +218,46 @@ void WriteTwoMaterialGltf(const std::string& path)
         "}\n";
 }
 
+// 自包含**单 material** .gltf fixture（1 primitive，1 material）。验证单材质
+// mesh 导入侧也把材质写进 .meta subMeshMaterials（供 drop 时自动设
+// Renderable.materialInstance），不再像历史那样单材质留空。
+void WriteSingleMaterialGltf(const std::string& path)
+{
+    // 同 two-material buffer：4 个 position（48B）+ 6 个 uint16 索引(0,1,2,0,2,3，12B）。
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMA";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写单 material .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0]}],\n"
+        "  \"nodes\": [{\"mesh\": 0}],\n"
+        "  \"meshes\": [{\"primitives\": [\n"
+        "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0}\n"
+        "  ]}],\n"
+        "  \"materials\": [\n"
+        "    {\"name\": \"SoloMat\", \"pbrMetallicRoughness\": "
+        "{\"baseColorFactor\": [0.2, 0.4, 0.8, 1.0]}}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+        "\"type\": \"SCALAR\"}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
 }  // namespace
 
 int main()
@@ -492,6 +532,53 @@ int main()
                      "  [PASS] tangent fallback：无 UV .obj → Lengyel 兜底有效 TBN "
                      "(vtx=%zu, 全切线单位长+正交+w=±1)\n",
                      mesh.Positions().size());
+    }
+
+    // ===== 7. 单 material gltf：导入侧也把材质写进 .meta（供 drop 自动应用）=====
+    // 之前单 material 的 .meta subMeshMaterials 留空 → drop 时材质不自动应用
+    // （单材质模型拖进场景是默认材质，对齐不上 Lumix/Unity）。本段验证导入侧
+    // 修复：单 material 也写 subMeshMaterials（1 条）+ 1 个 .material；mesh 仍
+    // 无 sub-mesh（HasSubMeshes()==false，drop 端据此走"设 Renderable.material
+    // Instance"而非挂 SubMeshMaterialsComponent）。
+    {
+        const fs::path srcDir = testRoot / "src_solo";
+        fs::create_directories(srcDir, ec);
+        const std::string gltfPath = (srcDir / "solo_material.gltf").generic_string();
+        WriteSingleMaterialGltf(gltfPath);
+
+        auto registry = MakeImportRegistry();
+        const ImportNS::ImportResult r =
+            ImportNS::ImportGltfMeshToRegistry(gltfPath, *registry);
+        assert(r.status == ImportNS::ImportStatus::Success &&
+               "单 material gltf 导入应 Success");
+        assert(fs::exists(r.destPath) && ".mesh 产物应存在");
+
+        // .meta 现在含 subMeshMaterials（单材质也写）。
+        const std::string metaPath = r.destPath + ".meta";
+        assert(fs::exists(metaPath) && ".meta 应存在");
+        assert(FileContains(metaPath, "subMeshMaterials") &&
+               "单 material 的 .meta 也应含 subMeshMaterials 段（drop 自动应用材质）");
+        assert(FileContains(metaPath, "solo_material.material") &&
+               ".meta subMeshMaterials 应引用 slot 0 的 .material 路径");
+
+        // slot 0 .material（单材质 = <stem>.material）落盘。
+        const fs::path modelDir = fs::path(r.destPath).parent_path();
+        assert(fs::exists(modelDir / "solo_material.material") &&
+               "单 material slot 0 .material 应落盘");
+
+        // mesh 本身无 sub-mesh（单材质退化路径）。
+        AssetNS::MeshLoader loader;
+        auto loadRes = loader.Load(r.destPath);
+        assert(loadRes.IsOk() && "单 material .mesh 应能 Load");
+        assert(!loadRes.Value()->HasSubMeshes() &&
+               "单 material → 无 sub-mesh（HasSubMeshes()==false）");
+
+        // ImportResult.materialPaths 恰 1 条且非空。
+        assert(r.materialPaths.size() == 1 && !r.materialPaths[0].empty() &&
+               "单 material → materialPaths 恰 1 条非空");
+        std::fprintf(stdout,
+                     "  [PASS] 单 material gltf：.meta 写 subMeshMaterials(1) + "
+                     "1 .material + mesh 无 sub-mesh（drop 自动应用单材质地基）\n");
     }
 
     // 清理临时目录（切回上层先，避免删 cwd）。
