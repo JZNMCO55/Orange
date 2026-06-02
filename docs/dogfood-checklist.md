@@ -376,11 +376,11 @@
 
 - **commit**：见本 session `feat(editor): glTF scene-level 导入`（GAP-2026-05-28 G1）。
 - **背景**：此前 glTF importer 只有"asset import"维度（multi-mesh / multi-primitive **塌平合并成单个 MeshAsset**，丢失 transform 层级 / per-mesh 划分）。本次补"scene import"维度：遍历 `scenes[0].nodes` 的 transform 树，**每个 cgltf mesh 单独写一个 `.mesh`（不塌平）**，产出与 DCC 摆位同构的 `.scene.json`。对齐 Unity model prefab / Unreal scene import / Godot ".glb as scene" / Lumix per-mesh import。
-- **怎么触发**（CLI，headless，不开 GUI）：
-  ```
-  build/bin/Debug/OrangeEditor.exe import-scene path/to/scene.glb
-  ```
-  产物：`assets/scenes/<basename>.scene.json` + `assets/Models/<basename>/<basename>_<meshname>.mesh`（每 cgltf mesh 一个）+ 各 `.meta`。然后在 GUI 里 **File → Open**（或资产浏览器双击）该 `.scene.json`。
+- **怎么触发**（两种入口）：
+  - **CLI**（headless，不开 GUI）：`build/bin/Debug/OrangeEditor.exe import-scene path/to/scene.glb`
+  - **GUI 菜单**（⚠️ 编译验证过、**运行时待 dogfood**——我无法启动 GUI 验证）：编辑器内 **File → Import glTF Scene...** → 选 `.gltf/.glb` → 导入后 ORANGE_LOG 打印产出路径。**注意 GUI 入口当前不自动打开导入的场景**（避免与未保存场景冲突），需再手动 **File → Open** 或资产浏览器双击该 `.scene.json`。
+  - 产物：`assets/scenes/<basename>.scene.json` + `assets/Models/<basename>/<basename>_<meshname>.mesh`（每 cgltf mesh 一个）+ 各 `.meta`。
+  - **GUI 入口专项 dogfood**：File→Import glTF Scene... 菜单点了是否真弹文件框、选 .glb 后是否真产出 scene.json + 控制台 log、有无崩溃 —— 这部分我没法运行验证，**请重点确认**；若菜单无反应 / 崩溃，告诉我（接线在 `EditorRenderLayer::ApplyPendingImports` 的 `mPendingImportSceneDialog` 分支）。
 - **看什么 / 通过判据**：
   - viewport 里每个 prop 出现在 **Blender/DCC 摆好的世界位置 / 旋转 / 缩放** 上（不再全部叠在原点）；
   - **Hierarchy panel 显示与 DCC 同构的 transform tree**（父子关系保留；group 空节点也在，作为分组父节点）；

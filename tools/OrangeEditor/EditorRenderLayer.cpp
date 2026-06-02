@@ -18,6 +18,7 @@
 #include "command/SetFieldValueCommand.h"
 #include "MaterialFileIO.h"  // v1.1.1 · Asset Browser Create Material modal
 #include "import/ImportDispatcher.h"
+#include "import/GltfSceneImporter.h"
 #include "import/MetaSidecar.h"
 #include "plugin/MaterialAssetInspectorPlugin.h"  // SaveEditingMaterialToDisk（关窗确认存材质）
 #include "render/ThumbnailService.h"  // 材质球缩略图（FlushPending + GetOrRequestThumbnail）
@@ -759,6 +760,12 @@ void EditorRenderLayer::DrawMainMenuBar()
         // 避免 dialog 模态阻塞与 ImGui frame 冲突）。
         if (ImGui::MenuItem("Import...")) {
             mPendingImportDialog = true;
+        }
+        // scene-level 导入（GAP-2026-05-28 G1/G3）：吃 .gltf/.glb，保留 node 层级 +
+        // 每 mesh 单独不塌平 + KHR_lights_punctual 灯光，产出 assets/scenes/<name>.scene.json。
+        // 区别于上面 "Import..."（asset import，整文件塌平成单 mesh）。
+        if (ImGui::MenuItem("Import glTF Scene...")) {
+            mPendingImportSceneDialog = true;
         }
         ImGui::Separator();
         // Save 亮判定 = "world 自上次保存/加载后被改过"。currentScenePath 是
@@ -1699,6 +1706,42 @@ void EditorRenderLayer::ApplyPendingImports()
         if (ShowImportFileDialog(hwnd, picked) && !picked.empty())
         {
             mHost.pendingImports.push_back(std::move(picked));
+        }
+    }
+
+    // scene-level 导入（GAP-2026-05-28 G1/G3）—— 与 asset import 不同路径：
+    // 直接走 RunGltfSceneImportToRegistry（保留层级 + 每 mesh 不塌平 + 灯光），
+    // 产出 assets/scenes/<name>.scene.json。不进 pendingImports 队列（那条是
+    // Dispatch 的 asset import）。导入后用户从资产浏览器双击 .scene.json 打开
+    // （或 File→Open），不在此自动 swap World（避免与未保存场景冲突）。
+    if (mPendingImportSceneDialog)
+    {
+        mPendingImportSceneDialog = false;
+        auto* glfwWin = static_cast<GLFWwindow*>(
+            mAppHost.GetWindow().GetGlfwWindowHandle());
+        void* hwnd = (glfwWin != nullptr) ? glfwGetWin32Window(glfwWin) : nullptr;
+        std::string picked;
+        if (ShowImportFileDialog(hwnd, picked) && !picked.empty())
+        {
+            if (mHost.assets.pAssets != nullptr)
+            {
+                const auto r = ::Orange::Editor::Import::RunGltfSceneImportToRegistry(
+                    picked, *mHost.assets.pAssets);
+                if (r.status == ::Orange::Editor::Import::ImportStatus::Success)
+                {
+                    ORANGE_LOG_INFO("Import glTF Scene: '{}' -> '{}' ({})",
+                                    picked, r.destPath, r.message);
+                }
+                else
+                {
+                    ORANGE_LOG_ERROR("Import glTF Scene failed: '{}': {}",
+                                     picked, r.message);
+                }
+            }
+            else
+            {
+                ORANGE_LOG_ERROR("Import glTF Scene: AssetRegistry unavailable");
+            }
         }
     }
 

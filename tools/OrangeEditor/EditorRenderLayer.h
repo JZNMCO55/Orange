@@ -272,6 +272,11 @@ private:
     // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
     // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。
     bool                                              mPendingImportDialog{false};
+    // File→Import glTF Scene... 菜单（GAP-2026-05-28 G1/G3）：点击置 true，下次
+    // ApplyPendingImports 帧首弹 ShowImportFileDialog 拿 .gltf/.glb 路径 → 走
+    // scene-level 导入（保留层级 + 每 mesh 不塌平 + 灯光），产出 .scene.json 后
+    // 用完即清 flag。区别于 mPendingImportDialog（asset import，塌平成单 mesh）。
+    bool                                              mPendingImportSceneDialog{false};
     // File → Open Recent：点最近场景项时设为目标路径 + 触发 SceneOp::Open，
     // ApplyPendingSceneOp 的 Open 分支非空时用它（跳过文件对话框）；用完清空。
     std::string                                       mPendingOpenScenePath;
