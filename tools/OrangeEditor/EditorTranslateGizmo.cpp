@@ -285,7 +285,8 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                     // 网格 snap（gap 报告 §3 P0）：把沿拖动轴的世界分量量化到
                     // snapTranslateStep。snapEnabled=false 时不进入=零回归。axisDir
                     // 是单位世界轴 → 量化其分量即把该轴世界坐标对齐到网格。
-                    if (host.settings.snapEnabled)
+                    // snap 开关开 或 拖拽中按住 Ctrl（Unity 标准临时吸附）。
+                    if (host.settings.snapEnabled || ImGui::GetIO().KeyCtrl)
                     {
                         const float comp    = glm::dot(newPos, axisDir);
                         const float snapped = Orange::Editor::Util::SnapToStep(

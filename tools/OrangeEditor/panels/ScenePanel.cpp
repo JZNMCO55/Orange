@@ -131,7 +131,8 @@ void EditorRenderLayer::DrawScenePanel()
         ImGui::SetTooltip(
             "Gizmo 网格吸附：translate / rotate / scale 拖动时按步进对齐。\n"
             "步进 translate=%.3g  rotate=%.3g°  scale=%.3g（Settings 面板 Snap 段可调）。\n"
-            "对齐 Unity / Lumix snap 开关；关闭时连续拖动（零回归）。",
+            "对齐 Unity / Lumix snap 开关；关闭时连续拖动（零回归）。\n"
+            "提示：开关关闭时，拖动中按住 Ctrl 可临时吸附（Unity 标准）。",
             mHost.settings.snapTranslateStep,
             mHost.settings.snapRotateStepDeg,
             mHost.settings.snapScaleStep);

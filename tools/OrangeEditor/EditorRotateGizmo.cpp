@@ -367,7 +367,8 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                         // 角度 snap（gap 报告 §3 P0）：把相对拖动起点的增量角量化到
                         // snapRotateStepDeg（增量 snap，非绝对——四元数下绝对角较难且
                         // 多数编辑器即增量 step 旋转；snapEnabled=false 不进入=零回归）。
-                        if (host.settings.snapEnabled)
+                        // snap 开关开 或 拖拽中按住 Ctrl（Unity 标准临时吸附）。
+                        if (host.settings.snapEnabled || ImGui::GetIO().KeyCtrl)
                         {
                             deltaAngle = Orange::Editor::Util::SnapToStep(
                                 deltaAngle, glm::radians(host.settings.snapRotateStepDeg));

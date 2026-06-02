@@ -368,7 +368,8 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
 
             // 比例 snap（gap 报告 §3 P0）：各分量量化到 snapScaleStep；clamp 到
             // ≥step 避免 snap 到 0 的退化 scale（snapEnabled=false 不进入=零回归）。
-            if (hasUpdate && host.settings.snapEnabled)
+            // snap 开关开 或 拖拽中按住 Ctrl（Unity 标准临时吸附）。
+            if (hasUpdate && (host.settings.snapEnabled || ImGui::GetIO().KeyCtrl))
             {
                 const float step = host.settings.snapScaleStep;
                 auto snapAxis = [step](float v) {
