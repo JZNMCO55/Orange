@@ -278,6 +278,33 @@ int main()
         std::fprintf(stdout, "  [PASS] RecomputeClipDuration 按内容刷新\n");
     }
 
+    // ===== 16. clip 事件管理：AddClipEvent 升序 / Sort / Remove =====
+    {
+        Anim::AnimationClip clip;
+        Anim::AddClipEvent(clip, Anim::AnimationEvent{1.0f, "b"});
+        Anim::AddClipEvent(clip, Anim::AnimationEvent{0.5f, "a"});
+        Anim::AddClipEvent(clip, Anim::AnimationEvent{2.0f, "d"});
+        Anim::AddClipEvent(clip, Anim::AnimationEvent{0.5f, "a2"});  // 同 time 并存
+        assert(clip.events.size() == 4 && "同 time 事件并存");
+        // 升序（同 time 保持插入序：a 在 a2 前）。
+        assert(Near(clip.events[0].time, 0.5f) && clip.events[0].name == "a");
+        assert(clip.events[1].name == "a2" && "同 time 插入序保持");
+        assert(Near(clip.events[2].time, 1.0f) && Near(clip.events[3].time, 2.0f) &&
+               "AddClipEvent 维持升序");
+
+        // RemoveClipEvent 越界 → false。
+        assert(!Anim::RemoveClipEvent(clip, 99) && "越界删 → false");
+        assert(Anim::RemoveClipEvent(clip, 0) && clip.events.size() == 3 && "删 index 0");
+
+        // SortClipEvents：乱序后排序。
+        Anim::AnimationClip c2;
+        c2.events = {{3.0f, "x"}, {1.0f, "y"}, {2.0f, "z"}};
+        Anim::SortClipEvents(c2);
+        assert(Near(c2.events[0].time, 1.0f) && Near(c2.events[1].time, 2.0f) &&
+               Near(c2.events[2].time, 3.0f) && "SortClipEvents 升序");
+        std::fprintf(stdout, "  [PASS] clip 事件管理：Add/Sort/Remove\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }

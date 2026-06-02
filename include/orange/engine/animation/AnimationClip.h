@@ -326,6 +326,31 @@ inline AnimationTrack& UpsertKeyframe(AnimationClip& clip, std::string_view targ
     return tr;
 }
 
+// ---- clip 事件管理（timeline 事件轨道创作；与 keyframe CRUD 同款）----
+// 按 time 升序稳定排序事件（同 time 保持插入序，允许同时刻多事件）。ClipAnimator
+// 触发不要求有序，但编辑器展示 / 二分查找受益。
+inline void SortClipEvents(AnimationClip& clip)
+{
+    std::stable_sort(clip.events.begin(), clip.events.end(),
+                     [](const AnimationEvent& a, const AnimationEvent& b) { return a.time < b.time; });
+}
+
+// 插入一个事件并维持升序（同 time 允许并存——不同 name 的多事件可同时触发）。
+inline void AddClipEvent(AnimationClip& clip, const AnimationEvent& ev)
+{
+    auto pos = std::upper_bound(clip.events.begin(), clip.events.end(), ev.time,
+                                [](float t, const AnimationEvent& e) { return t < e.time; });
+    clip.events.insert(pos, ev);
+}
+
+// 删除 index 处事件。越界 → no-op false。
+inline bool RemoveClipEvent(AnimationClip& clip, std::size_t index)
+{
+    if (index >= clip.events.size()) { return false; }
+    clip.events.erase(clip.events.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 }  // namespace Orange::Engine::Animation
 
 #endif  // ORANGE_ENGINE_ANIMATION_ANIMATION_CLIP_H
