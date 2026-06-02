@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
+#include <orange/engine/core/Guid.h>
 #include <orange/engine/scene/Entity.h>
 
 #include <cstddef>
@@ -53,6 +54,14 @@ ORANGE_ENGINE_API std::size_t ReassignEntityGuids(World& world,
 // Duplicate / Copy-Paste 等消费方在 clone 完成后调用本函数即可。
 ORANGE_ENGINE_API std::size_t SeparateClonedIdentities(World& world,
                                                        std::span<const Entity> created);
+
+// 按稳定身份 GUID 反查实体——A2.2 prefab 实例↔模板锚定 / A2.3 PIE world-clone / 跨会话
+// 引用解析的公共底座（见 docs/a2-entity-guid-stable-identity-design.md S2）。线性扫描所有
+// 挂 GuidComponent 的实体，返回首个 guid 匹配者；无匹配 → Entity::Invalid()。guid 非法
+//（全 0 = 未分配）直接判负，不会匹配到恰好未分配的实体。**只读**（const World&），不分配、
+// 不改任何状态、不预判身份方案迁移（与 A2.1 主键迁移正交）。非 hot-path（load / link 时
+// 调用，非每帧），线性扫描足够；将来若成热点再加缓存索引（guid→entity map）。
+ORANGE_ENGINE_API Entity FindEntityByGuid(const World& world, const Core::Guid& guid);
 
 }  // namespace Orange::Engine::Scene
 

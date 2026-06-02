@@ -100,4 +100,24 @@ std::size_t SeparateClonedIdentities(World& world, std::span<const Entity> creat
     return count;
 }
 
+Entity FindEntityByGuid(const World& world, const Core::Guid& guid)
+{
+    // guid 非法（全 0 = 未分配）直接判负——否则会匹配到恰好也未分配的实体（语义错误）。
+    if (!guid.IsValid())
+    {
+        return Entity::Invalid();
+    }
+    // 只扫挂了 GuidComponent 的实体（view<GuidComponent>），无 guid 的实体天然跳过。
+    auto& reg     = world.Registry();
+    auto  guidView = reg.view<GuidComponent>();
+    for (auto e : guidView)
+    {
+        if (guidView.get<GuidComponent>(e).guid == guid)
+        {
+            return World::FromEntt(e);
+        }
+    }
+    return Entity::Invalid();
+}
+
 }  // namespace Orange::Engine::Scene

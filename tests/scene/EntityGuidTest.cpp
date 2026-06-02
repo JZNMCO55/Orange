@@ -293,6 +293,42 @@ void TestSeparateClonedIdentitiesKeepsDistinctInstancesDistinct()
     std::printf("  [ok] SeparateClonedIdentities 保持不同实例的 instanceId 互异\n");
 }
 
+// FindEntityByGuid（A2 先行 slice S2）：按稳定 guid 反查 entity——命中 / 未命中 /
+// 非法 guid 判负 / Reassign 后旧失效新命中 / 无 GuidComponent 实体不被零 guid 误匹配。
+void TestFindEntityByGuid()
+{
+    World        w;
+    const Entity a = w.CreateEntity();
+    const Entity b = w.CreateEntity();
+    Scene::EnsureEntityGuids(w);  // a,b 全补 guid
+
+    const Guid ga = w.GetComponent<GuidComponent>(a)->guid;
+    const Guid gb = w.GetComponent<GuidComponent>(b)->guid;
+
+    // 命中：按 guid 反查回对应 entity。
+    assert(Scene::FindEntityByGuid(w, ga) == a);
+    assert(Scene::FindEntityByGuid(w, gb) == b);
+
+    // 未命中：无关 guid → Invalid。
+    assert(!Scene::FindEntityByGuid(w, Guid::Generate()).IsValid());
+
+    // 非法 guid（全 0）→ Invalid（即使存在未分配实体也不误匹配）。
+    assert(!Scene::FindEntityByGuid(w, Guid{}).IsValid());
+
+    // Reassign 后：旧 guid 失效、新 guid 命中同一 entity。
+    const std::vector<Entity> targets{a};
+    Scene::ReassignEntityGuids(w, targets);
+    assert(!Scene::FindEntityByGuid(w, ga).IsValid());
+    const Guid gaNew = w.GetComponent<GuidComponent>(a)->guid;
+    assert(gaNew != ga && Scene::FindEntityByGuid(w, gaNew) == a);
+
+    // 无 GuidComponent 的新实体不被零 guid 误匹配。
+    w.CreateEntity();
+    assert(!Scene::FindEntityByGuid(w, Guid{}).IsValid());
+
+    std::printf("  [ok] FindEntityByGuid hit / miss / zero-guid / reassign\n");
+}
+
 }  // namespace
 
 int main()
@@ -301,6 +337,7 @@ int main()
     TestGuidGenerateAndStringRoundTrip();
     TestEnsureAssignsUniqueAndIdempotent();
     TestReassignChangesGuid();
+    TestFindEntityByGuid();
     TestSerializationRoundTripAndCloneReassign();
     TestSeparateClonedIdentitiesReassignsGuid();
     TestSeparateClonedIdentitiesRemapsPrefabInstanceId();
