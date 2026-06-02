@@ -518,11 +518,12 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
         const std::string matPath = (destDir / fileName).generic_string();
         auto mdata = BuildObjMaterialFileData(materials[objMat]);
 
-        // 贴图：map_Kd → binding 0（baseColor）、map_bump → binding 1（normal）。
-        // 路径相对 mtl_basedir（baseDir 已带尾斜杠）解析 + 经
-        // ImportTextureToRegistry co-locate 到模型目录（与 gltf 同一条纹理导入
-        // 路径）。缺失 / import 失败该槽跳过（不写 texture，渲染端喂 default）。
-        // 其它 map_Ks / map_Ns / map_Ka 不在 pbr set 1 通道里，暂不导。
+        // 贴图 → pbr set 1 通道：map_Kd → binding 0（baseColor）、normal/map_bump
+        // → binding 1（normal）、map_Ke → binding 4（emissive）。路径相对
+        // mtl_basedir（baseDir 已带尾斜杠）解析 + 经 ImportTextureToRegistry
+        // co-locate 到模型目录（与 gltf 同一条纹理导入路径）。缺失 / import 失败
+        // 该槽跳过（不写 texture，渲染端喂 default）。metalRough(binding 2) / ao
+        // (binding 3) 在标准 .mtl 里无直接对应（map_Ks/map_Ns 是 Phong 高光），暂不导。
         const std::string objDestDir = destDir.generic_string();
         auto addObjTexture = [&](const std::string& texName,
                                  std::uint32_t       binding) {
@@ -547,8 +548,15 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
                                 texSrc);
             }
         };
-        addObjTexture(materials[objMat].diffuse_texname, 0u);
-        addObjTexture(materials[objMat].bump_texname,    1u);
+        addObjTexture(materials[objMat].diffuse_texname, 0u);  // map_Kd → baseColor
+        // normal：优先 normal_texname（norm，切线空间法线贴图），缺则 bump_texname
+        // （map_bump，height/bump 兜底）。
+        const std::string& objNormalTex =
+            !materials[objMat].normal_texname.empty()
+                ? materials[objMat].normal_texname
+                : materials[objMat].bump_texname;
+        addObjTexture(objNormalTex,                       1u);  // norm/map_bump → normal
+        addObjTexture(materials[objMat].emissive_texname, 4u);  // map_Ke → emissive
 
         if (::Orange::Editor::Material::WriteMaterialFile(matPath, mdata))
         {
