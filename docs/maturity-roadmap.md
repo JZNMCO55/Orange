@@ -43,7 +43,9 @@
 - **现状/缺口**：`RenderScene::Collect` 对每个 entity 直接 `ComposeWorldMatrix(自身 local Transform)`，**不沿 HierarchyComponent 累积父变换**——parenting 对渲染位置无效（`GAP-2026-06-02-hierarchy-transform-not-propagated`）。与 Unity `localToWorld` / Godot `global_transform` / Lumix universe transform 传播相悖。
 - **里程碑**：
   - **A1.0 ADR ✅**（2026-06-02 落地，**ADR-016**）：world matrix 计算策略选型 → **选方案 A：每帧 `TransformSystem` 自顶向下 DFS 重算并缓存 world matrix**（非 dirty-flag，避免隐蔽派生状态 bug；2.5D 中等规模全量重算成本可忽略）。dirty-flag 留未来 profiling 拉动。详见 `../Orange-Wiki/case-studies/orange-engine/decisions/ADR-016-transform-hierarchy-propagation.md`。
-  - **A1.1 引擎核心**：drawable / light / physics / gizmo 全部改读累积后的 world matrix。
+  - **A1.1 引擎核心**（分两步降风险）：
+    - **step 1 ✅ 2026-06-02**：加 `TransformSystem::PropagateWorldTransforms` + `WorldTransformComponent`（派生 cache）——每帧从 hierarchy 自顶向下累积 world matrix。**additive、零消费者、零行为变化**（只产 cache，渲染/光源仍走旧路径）。headless `scene_transform_system_test`（3 层累积 / 旋转父真矩阵乘 / flat entity / 幂等）；ctest 76/76 零回归。
+    - **step 2 待开工**：drawable / light / physics / gizmo **逐个**改读 `WorldTransformComponent`（每切一个验回归 + 视觉 dogfood）。
   - **A1.2 内容迁移**：现有 scene / sample / demo 的"local 当 world"假设迁移；**glTF scene import 从 world-bake workaround 改回 local TRS**（依赖 A1.1，去掉本 session 的 flatten）。
   - **A1.3 编辑器 reparent 保持世界位姿**（Unity "keep world position"——drag 到新父时重算 local TRS 使 world 不变）。
 - **跨仓**：否（引擎 Scene/Render 交界）。**headless 可测**：是（world matrix 数值 + 嵌套累积）。**dogfood**：移动父节点子节点跟随。

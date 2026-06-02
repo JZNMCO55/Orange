@@ -118,6 +118,7 @@ orange_engine_add_test(scene_subtree_clone_test scene/SceneSubtreeCloneTest.cpp)
 orange_engine_add_test(scene_serialization_test scene/SceneSerializationTest.cpp)
 orange_engine_add_test(scene_entity_guid_test   scene/EntityGuidTest.cpp)
 orange_engine_add_test(scene_prefab_test        scene/PrefabTest.cpp)
+orange_engine_add_test(scene_transform_system_test scene/TransformSystemTest.cpp)
 orange_engine_add_test(post_process_roundtrip_test scene/PostProcessRoundTripTest.cpp)
 orange_engine_add_test(scene_file_load_test     scene/SceneFileLoadTest.cpp)
 target_compile_definitions(scene_file_load_test PRIVATE

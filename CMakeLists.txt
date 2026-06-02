@@ -89,6 +89,7 @@ add_library(orange_engine STATIC
     src/scene/EntityGuid.cpp
     src/scene/PrefabInstantiation.cpp
     src/scene/WorldPartition.cpp
+    src/scene/TransformSystem.cpp
 
     # Render：Camera / RenderableComponent / Pipeline 公共接口
     # + RenderScene 收集（World → drawable list）+ Pipeline 接通
