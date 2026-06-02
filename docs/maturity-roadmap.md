@@ -63,6 +63,7 @@
 
 - **现状/缺口**：EntityGuid core 已落地（ADR-013，见 [[project_entityguid_core_landed]]），但 persistentId 在序列化里仍主要是 remap key；prefab 链接 / 跨会话身份 / re-import override 都需要把 EntityGuid 当**稳定身份**贯通。
 - **里程碑**：A2.1 scene 序列化以 EntityGuid 为持久身份（而非顺序 remap key）；A2.2 prefab 实例链接用 EntityGuid 锚定；A2.3 PIE world-clone 用 EntityGuid 保稳定引用。
+- **设计提案已出 📄 2026-06-02**：`docs/a2-entity-guid-stable-identity-design.md`（扎在真实序列化代码：现状=顺序 int 主键〔SaveImpl ~193〕+ parent/sibling 用顺序 int 互链〔WriteHierarchy ~173〕+ guid 仅可选 component 不当主键〔WriteGuid ~293〕+ guid 零散非普遍〔Save 是 const World& 不自动补〕；断裂面=re-save id 漂移/跨文件锚定/跨会话引用/re-import override；**推荐选项 B**=guid 当主键 + 顺序 int 降级本地序号 + 双键过渡〔向后兼容、字节稳定保留、schema 1.12→1.13 minor〕；**headless 安全先行 slice** S1 Save 前普遍补 guid / S2 FindEntityByGuid 索引 / S3 不变性测试；待裁定 5 问留 A2.0 ADR；实施顺序）。下个专门 session 开 A2.0 ADR 据此裁定。
 - **跨仓**：否。**headless 可测**：是。**前置**：C1 prefab override + B1 PIE world clone 都依赖它。
 
 ---
