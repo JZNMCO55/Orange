@@ -6,6 +6,7 @@
 
 #include "BuiltinAssets.h"
 #include "EditorHost.h"
+#include "command/EntityCommands.h"     // CreateEntityCommand（拖 mesh 到空白处建实体）
 #include "command/SetFieldValueCommand.h"
 #include "import/MetaSidecar.h"  // ReadTextureMeta（mesh .meta 的 subMeshMaterials 段）
 
@@ -16,6 +17,8 @@
 #include <orange/engine/core/Log.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/SubMeshMaterialsComponent.h>
+#include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
 #include <memory>
@@ -306,6 +309,105 @@ bool ApplyAssetDropToEntity(EditorHost&                 host,
     ORANGE_LOG_WARN("ApplyAssetDropToEntity: 不识别的扩展名 (path={}, ext={})",
                     assetPath, ext);
     return false;
+}
+
+Orange::Engine::Entity
+CreateEntityFromMeshAsset(EditorHost&        host,
+                          const std::string& meshPath,
+                          const glm::vec3&   position)
+{
+    using ::Orange::Engine::Entity;
+    using ::Orange::Engine::World;
+    using ::Orange::Engine::Asset::MeshAsset;
+    using ::Orange::Engine::Render::MaterialInstance;
+    using ::Orange::Engine::Render::RenderableComponent;
+    using ::Orange::Engine::Render::SubMeshMaterialsComponent;
+    using ::Orange::Engine::Scene::NameComponent;
+    using ::Orange::Engine::Scene::TransformComponent;
+
+    const std::string ext = GetExtension(meshPath);
+    if (!IsMeshExt(ext))
+    {
+        ORANGE_LOG_WARN("CreateEntityFromMeshAsset: 非 mesh 扩展名 (path={}, ext={})",
+                        meshPath, ext);
+        return Entity::Invalid();
+    }
+    auto* pReg = host.assets.pAssets.get();
+    auto* pW   = host.scene.pWorld.get();
+    if (pReg == nullptr || pW == nullptr) { return Entity::Invalid(); }
+
+    auto lr = pReg->Load<MeshAsset>(meshPath);
+    if (lr.IsErr())
+    {
+        ORANGE_LOG_WARN("CreateEntityFromMeshAsset: mesh 加载失败 '{}'", meshPath);
+        return Entity::Invalid();
+    }
+    const auto       meshHandle = lr.Value();
+    const MeshAsset* pMesh      = pReg->Get<MeshAsset>(meshHandle);
+    const bool       hasSubs    = (pMesh != nullptr && pMesh->HasSubMeshes());
+
+    // 预解析材质（host 在手）：读 .meta subMeshMaterials → EnsureMaterialInstance。
+    // 解析出的指针由 host.assets 持有（生命周期跟 host），capture 进 factory 后
+    // undo/redo 重放仍有效。
+    std::vector<MaterialInstance*> resolved;
+    const std::string metaPath = ::Orange::Editor::Import::MetaPathFor(meshPath);
+    const auto        metaOpt  = ::Orange::Editor::Import::ReadTextureMeta(metaPath);
+    if (metaOpt.has_value())
+    {
+        for (const std::string& m : metaOpt->subMeshMaterials)
+        {
+            resolved.push_back(m.empty() ? nullptr
+                                         : ::EnsureMaterialInstance(host, m));
+        }
+    }
+    // 默认材质兜底（无 .meta 材质 / slot 0 空时让新物体仍可见）。
+    MaterialInstance* defMat = host.assets.pPbrMaterial
+        ? host.assets.pPbrMaterial.get()
+        : host.assets.pDefaultRenderableMaterial.get();
+    MaterialInstance* primary = defMat;
+    for (MaterialInstance* m : resolved)
+    {
+        if (m != nullptr) { primary = m; break; }
+    }
+    const bool multi = hasSubs && resolved.size() > 1;
+
+    // 实体名 = mesh 文件 stem。
+    std::string name;
+    {
+        const auto slash = meshPath.find_last_of("/\\");
+        const std::string file =
+            (slash == std::string::npos) ? meshPath : meshPath.substr(slash + 1);
+        const auto dot = file.find_last_of('.');
+        name = (dot == std::string::npos) ? file : file.substr(0, dot);
+        if (name.empty()) { name = "Mesh"; }
+    }
+
+    auto cmd = std::make_unique<CreateEntityCommand>(
+        host,
+        [meshHandle, primary, resolved, multi, position, name](World& w) -> Entity
+        {
+            Entity e = w.CreateEntity();
+            w.AddComponent<NameComponent>(e, NameComponent{name});
+            TransformComponent tc{};
+            tc.position = position;
+            w.AddComponent<TransformComponent>(e, tc);
+            RenderableComponent rc{};
+            rc.mesh             = meshHandle;
+            rc.materialInstance = primary;
+            rc.visible          = true;
+            rc.castsShadow      = true;
+            w.AddComponent<RenderableComponent>(e, rc);
+            if (multi)
+            {
+                SubMeshMaterialsComponent smc;
+                smc.slots = resolved;
+                w.AddComponent<SubMeshMaterialsComponent>(e, std::move(smc));
+            }
+            return e;
+        });
+    auto* raw = cmd.get();
+    host.cmdStack.Push(std::move(cmd));
+    return raw->CreatedEntity();
 }
 
 }  // namespace Orange::Editor

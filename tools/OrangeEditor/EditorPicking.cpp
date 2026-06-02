@@ -189,3 +189,43 @@ PickEntityAt(EditorHost& host, glm::vec2 ndc, float aspect)
 
     return bestEntity;
 }
+
+glm::vec3
+ScreenRayToGround(EditorHost& host, glm::vec2 ndc, float aspect, float groundY)
+{
+    // 反投影 NDC → world ray（与 PickEntityAt 同款 invVP）。
+    const auto cam     = BuildEditorCamera(host.camera, aspect);
+    const glm::mat4 vp = cam.projection * cam.view;
+    const glm::mat4 invVP = glm::inverse(vp);
+
+    const glm::vec4 nearH = invVP * glm::vec4(ndc.x, ndc.y, 0.0f, 1.0f);
+    const glm::vec4 farH  = invVP * glm::vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+
+    // 退化兜底点：相机轨道中心（pivot）—— 反投影病态（w≈0）时用它。
+    const glm::vec3 fallbackPivot = host.camera.pivot;
+    if (std::abs(nearH.w) < 1e-9f || std::abs(farH.w) < 1e-9f)
+    {
+        return fallbackPivot;
+    }
+    const glm::vec3 origin = glm::vec3(nearH) / nearH.w;
+    const glm::vec3 farPt  = glm::vec3(farH)  / farH.w;
+    const glm::vec3 diff   = farPt - origin;
+    const float     len    = glm::length(diff);
+    if (len < 1e-6f) { return fallbackPivot; }
+    const glm::vec3 dir = diff / len;
+
+    // ray-plane（y = groundY）：t = (groundY - origin.y) / dir.y。
+    // dir.y ≈ 0（射线平行地面）或 t < 0（地面在相机后方 / 朝上看不交）→ 退化到
+    // 相机前方固定距离的射线点，保证总有合理落点（参 Unity 拖资源到天空时的处理）。
+    constexpr float kFallbackDist = 8.0f;
+    if (std::abs(dir.y) < 1e-4f)
+    {
+        return origin + dir * kFallbackDist;
+    }
+    const float t = (groundY - origin.y) / dir.y;
+    if (t <= 0.0f || t > 1e5f)
+    {
+        return origin + dir * kFallbackDist;
+    }
+    return origin + dir * t;
+}

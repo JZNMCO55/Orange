@@ -350,6 +350,26 @@ void EditorRenderLayer::DrawScenePanel()
                             Orange::Editor::ApplyAssetDropToEntity(
                                 mHost, picked, assetPath);
                         }
+                        else
+                        {
+                            // 拖到空白处（没命中实体）：mesh 资源 → 在地面落点
+                            // 创建一个新实体（带 mesh + 导入材质），对齐 Unity /
+                            // Lumix 拖模型进空场景生成物体。非 mesh（材质 / 音频
+                            // 等需要既有实体承载）→ 静默忽略（CreateEntityFromMesh
+                            // Asset 内部判扩展名）。命令栈可 Undo。
+                            const glm::vec3 dropPos =
+                                ScreenRayToGround(mHost,
+                                                  glm::vec2(ndcX, ndcY), aspect);
+                            const Orange::Engine::Entity created =
+                                Orange::Editor::CreateEntityFromMeshAsset(
+                                    mHost, assetPath, dropPos);
+                            if (created.IsValid())
+                            {
+                                mHost.selection.selectedEntity = created;
+                                mHost.selection.ClearAdditional();
+                                mHost.assets.selectedAssetPath.clear();
+                            }
+                        }
                     }
                 }
                 ImGui::EndDragDropTarget();

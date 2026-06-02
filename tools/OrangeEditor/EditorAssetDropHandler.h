@@ -27,6 +27,8 @@
 
 #include <orange/engine/scene/Entity.h>
 
+#include <glm/vec3.hpp>
+
 #include <string>
 
 struct EditorHost;
@@ -37,6 +39,18 @@ namespace Orange::Editor
 bool ApplyAssetDropToEntity(EditorHost&                 host,
                             Orange::Engine::Entity      target,
                             const std::string&          assetPath);
+
+// 把一个 .mesh / .obj 资源在指定世界位置创建成一个新实体（拖资源到 viewport
+// 空白处时用 —— 对齐 Unity / Lumix 拖模型进空场景生成 GameObject）。新实体挂
+// Name(<stem>) + Transform(position) + Renderable(mesh + 材质)；多材质 mesh 一并
+// 挂 SubMeshMaterialsComponent。走 CreateEntityCommand 命令栈（可 Undo / Redo
+// ——材质在 factory 内由**预解析**的 MaterialInstance* 构建，redo 重放一致）。
+// 非 mesh 扩展名 / mesh 加载失败 / world 缺失 → 返回 Invalid + log warn，不创建。
+// 返回创建出的实体（caller 可据此设选中）。
+Orange::Engine::Entity
+CreateEntityFromMeshAsset(EditorHost&        host,
+                          const std::string& meshPath,
+                          const glm::vec3&   position);
 
 // 把一个（已设到 entity 的 Renderable 上的）mesh 的多材质 slot 同步到
 // SubMeshMaterialsComponent —— 多 material mesh（MeshAsset::HasSubMeshes()）回读
