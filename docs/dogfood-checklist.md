@@ -426,7 +426,8 @@
 - **范围限制（dogfood 时注意，不是 bug）**：
   - **已切：mesh 渲染 + picking**。**未切：gizmo 放置/拖动、光源方向、物理 collider**（后续 increment）——具体表现：
     - **gizmo 仍画在 local 位置**：选中一个**非原点父**下的 mesh，gizmo 会画在它的 local 偏移处（不在 mesh 上）；拖 gizmo 仍写 local。可发现性受影响但能编辑（Inspector / 拖动仍改 local）。**这是预期**，A1.3 + gizmo 切换后修。
-    - **光源全 3 类 + halo + 后处理体积已随父传播 ✅**：平行光方向 + 点光/聚光位置 + 聚光方向 + 点光 halo 球 + PostProcess local volume box 都跟随父变换。root 灯零回归。**仍未切：gizmo 放置/拖动、物理 collider（2D）**——这两个是"写/apply"类（需 world→local），parent 到非原点父下：gizmo 画在 local 偏移处 + 拖动按 local；collider 不随父动（mesh+灯+halo 都随）。glTF 导入的灯（通常 root 子）仍对；非 root 导入灯方向可能偏（rare）。
+    - **光源全 3 类 + halo + 后处理体积 + 装饰 overlay 已随父传播 ✅**：平行光方向 + 点光/聚光位置 + 聚光方向 + 点光 halo 球 + PostProcess local volume + 所有装饰 gizmo overlay（光源箭头/圆环/锥体 + 相机 frustum + emitter spawn box + volume box）都跟随父变换。root 实体零回归。
+    - **仍未切：transform gizmo（移动/旋转/缩放手柄）+ 物理 collider（2D）**——这两个是"写/apply"类（需 world→local）：parent 到非原点父下，**transform gizmo 手柄画在 local 偏移处（不在 mesh 上）+ 拖动按 local 空间**（picking 选中仍对、Inspector 编辑仍对，只是手柄位置/拖动方向偏）；collider 不随父动（mesh+灯+overlay 都随）。这俩是编辑器主操作工具 + 双向 sim，需 world→local apply，留专门 session 做 + dogfood。glTF 导入的灯（通常 root 子）仍对；非 root 导入灯方向可能偏（rare）。
   - **reparent keep-world ✅**（A1.3 主 DnD 路径已落）：把 B 拖到**已移动过**（非原点）的 A 下，B **应保持原世界位置不跳**（keep-world 重算 local）；Ctrl+Z 撤回 B 也回原位。**dogfood 重点验**：拖 reparent 到移动过的父，物体不跳位 + undo 还原。（注：duplicate/Ctrl+D 的 reparent 不走 keep-world——clone 复制原 local，行为同原对象。）
 
 > **A1 剩余 consumer 完成清单**（给后续 session）：gizmo 放置+拖动读 world / world→local apply（防 parented 拖偏）· A1.3 reparent keep-world（重算 local 防跳）· 光源方向读 world rotation（+ importer 去 world-dir 编码改 R 桥接）· 物理 collider 读 world（2D，subtler）。详见 `docs/maturity-roadmap.md` A1.1 step 2。
