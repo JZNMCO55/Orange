@@ -258,6 +258,43 @@ void WriteSingleMaterialGltf(const std::string& path)
         "}\n";
 }
 
+// 写一个带 .mtl 单材质的立方体 .obj（+ 同目录 .mtl）。验证 OBJ .mtl 材质导入：
+// 单材质 → 生成 .material（scalar：Kd/Ns/Ke）+ 写 .meta subMeshMaterials。
+void WriteCubeObjWithMtl(const std::string& objPath, const std::string& mtlName)
+{
+    const fs::path objFsPath(objPath);
+    const fs::path mtlFsPath = objFsPath.parent_path() / mtlName;
+    {
+        std::ofstream mtl(mtlFsPath, std::ios::binary | std::ios::trunc);
+        assert(mtl.is_open() && "写 .mtl fixture 应成功");
+        mtl << "newmtl SoloMat\n";
+        mtl << "Kd 0.80 0.30 0.10\n";   // 暖橙基色 → uBaseColor
+        mtl << "Ns 60.0\n";             // Phong 高光指数 → roughness
+        mtl << "Ke 0.0 0.5 1.0\n";      // 蓝绿自发光 → uEmissive（验 emissive 通道）
+    }
+    std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写带 mtl 的 .obj fixture 应成功");
+    ofs << "mtllib " << mtlName << "\n";
+    ofs << "v -0.5 -0.5 -0.5\n";
+    ofs << "v  0.5 -0.5 -0.5\n";
+    ofs << "v  0.5  0.5 -0.5\n";
+    ofs << "v -0.5  0.5 -0.5\n";
+    ofs << "v -0.5 -0.5  0.5\n";
+    ofs << "v  0.5 -0.5  0.5\n";
+    ofs << "v  0.5  0.5  0.5\n";
+    ofs << "v -0.5  0.5  0.5\n";
+    ofs << "vn  0.0  0.0 -1.0\n";  ofs << "vn  0.0  0.0  1.0\n";
+    ofs << "vn -1.0  0.0  0.0\n";  ofs << "vn  1.0  0.0  0.0\n";
+    ofs << "vn  0.0 -1.0  0.0\n";  ofs << "vn  0.0  1.0  0.0\n";
+    ofs << "usemtl SoloMat\n";
+    ofs << "f 1//1 2//1 3//1\n";  ofs << "f 1//1 3//1 4//1\n";
+    ofs << "f 5//2 6//2 7//2\n";  ofs << "f 5//2 7//2 8//2\n";
+    ofs << "f 1//3 4//3 8//3\n";  ofs << "f 1//3 8//3 5//3\n";
+    ofs << "f 2//4 6//4 7//4\n";  ofs << "f 2//4 7//4 3//4\n";
+    ofs << "f 1//5 5//5 6//5\n";  ofs << "f 1//5 6//5 2//5\n";
+    ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";
+}
+
 }  // namespace
 
 int main()
@@ -579,6 +616,49 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] 单 material gltf：.meta 写 subMeshMaterials(1) + "
                      "1 .material + mesh 无 sub-mesh（drop 自动应用单材质地基）\n");
+    }
+
+    // ===== 8. OBJ .mtl 单材质导入（scalar：Kd/Ns/Ke → uBaseColor/uMRA/uEmissive）=====
+    // 之前 OBJ importer 解析 .mtl 但不消费 → OBJ 模型导入只剩几何、材质全丢。
+    // 本段验证单材质 .mtl 导入：生成 .material（pbr 模板）+ 写 .meta
+    // subMeshMaterials（drop 自动应用，复用单材质路径）。
+    {
+        const fs::path srcDir = testRoot / "src_objmtl";
+        fs::create_directories(srcDir, ec);
+        const std::string objPath = (srcDir / "mtl_cube.obj").generic_string();
+        WriteCubeObjWithMtl(objPath, "mtl_cube.mtl");
+
+        auto registry = MakeImportRegistry();
+        const ImportNS::ImportResult r =
+            ImportNS::ImportObjMeshToRegistry(objPath, *registry);
+        assert(r.status == ImportNS::ImportStatus::Success &&
+               "带 .mtl 的 .obj 导入应 Success");
+        assert(fs::exists(r.destPath) && ".mesh 应存在");
+
+        // .material 生成（单材质 = <stem>.material）。
+        const fs::path modelDir = fs::path(r.destPath).parent_path();
+        const fs::path matFile  = modelDir / "mtl_cube.material";
+        assert(fs::exists(matFile) && "OBJ .mtl 单材质 → 应生成 .material");
+
+        // .meta subMeshMaterials 引用它（drop 自动应用地基）。
+        const std::string metaPath = r.destPath + ".meta";
+        assert(FileContains(metaPath, "subMeshMaterials") &&
+               "OBJ 单材质 .meta 应含 subMeshMaterials");
+        assert(FileContains(metaPath, "mtl_cube.material") &&
+               ".meta 应引用生成的 .material 路径");
+
+        // .material 内容：pbr 模板 + uBaseColor + uMRA + uEmissive（Ke 非零）。
+        const std::string matPath = matFile.generic_string();
+        assert(FileContains(matPath, "\"pbr\"") && ".material templateName=pbr");
+        assert(FileContains(matPath, "uBaseColor") && "应写 uBaseColor（Kd）");
+        assert(FileContains(matPath, "uMRA") && "应写 uMRA（Ns→roughness）");
+        assert(FileContains(matPath, "uEmissive") &&
+               "Ke 非零 → 应写 uEmissive（OBJ emissive 通道）");
+        assert(r.materialPaths.size() == 1 && !r.materialPaths[0].empty() &&
+               "materialPaths 恰 1 条");
+        std::fprintf(stdout,
+                     "  [PASS] OBJ .mtl 单材质：.material(pbr+uBaseColor+uMRA+"
+                     "uEmissive) + .meta subMeshMaterials\n");
     }
 
     // 清理临时目录（切回上层先，避免删 cwd）。

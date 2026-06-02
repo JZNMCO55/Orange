@@ -1,5 +1,6 @@
 #include "ObjImporter.h"
 
+#include "../MaterialFileIO.h"  // .mtl → .material（单材质 OBJ 材质导入）
 #include "MeshTangentGen.h"
 #include "MetaSidecar.h"
 
@@ -7,6 +8,11 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
+#include <orange/engine/render/MaterialTypes.h>
+
+#include <glm/vec4.hpp>
+
+#include <cmath>
 
 // tinyobjloader 单 header IMPLEMENTATION 仅在本 TU 内 expand —— 与
 // stb_image / stb_image_write 等单 header 库同款做法（避多 TU 重定义）。
@@ -39,6 +45,57 @@ namespace Orange::Editor::Import
 namespace
 {
 constexpr const char* kModelsDir = "assets/Models";
+
+// 把一个 .mtl material（tinyobj::material_t）翻成 pbr 模板的 MaterialFileData。
+// 纯标量映射（Phong/PBR ext → uBaseColor / uMRA / uEmissive）；贴图（map_Kd 等）
+// 留后续（需接 ImportTextureToRegistry co-locate，本 commit 先做 scalar）。
+//   * uBaseColor = (Kd.rgb, dissolve d)
+//   * uMRA       = (metallic Pm, roughness, ao=1, 0)；roughness 优先 PBR ext Pr，
+//                  缺省（Pr==0）按 Phong 高光指数 Ns 推导 sqrt(2/(Ns+2))（Ns 越大
+//                  越光滑），clamp[0.04,1]
+//   * uEmissive  = (Ke.rgb, 0)，仅 Ke 非零时写（pbr emissive 通道，HDR>1 进 bloom）
+Orange::Editor::Material::MaterialFileData
+BuildObjMaterialFileData(const tinyobj::material_t& m)
+{
+    using ::Orange::Engine::Render::MaterialUniformType;
+    Orange::Editor::Material::MaterialFileData mdata;
+    mdata.templateName = "pbr";
+
+    const float d = (m.dissolve > 0.0f) ? m.dissolve : 1.0f;
+    Orange::Editor::Material::UniformOverrideValue uBase;
+    uBase.name  = "uBaseColor";
+    uBase.type  = MaterialUniformType::Vec4;
+    uBase.value = glm::vec4(m.diffuse[0], m.diffuse[1], m.diffuse[2], d);
+    mdata.uniforms.push_back(uBase);
+
+    // roughness：PBR ext Pr（m.roughness）非 0 直接用；否则 Phong Ns 推导。
+    float roughness = m.roughness;
+    if (roughness <= 0.0f)
+    {
+        const float ns = (m.shininess > 0.0f) ? m.shininess : 0.0f;
+        roughness = std::sqrt(2.0f / (ns + 2.0f));
+    }
+    if (roughness < 0.04f) { roughness = 0.04f; }
+    if (roughness > 1.0f)  { roughness = 1.0f; }
+    float metallic = m.metallic;  // Pm；缺省 0 = 非金属（合理）
+    if (metallic < 0.0f) { metallic = 0.0f; }
+    if (metallic > 1.0f) { metallic = 1.0f; }
+    Orange::Editor::Material::UniformOverrideValue uMra;
+    uMra.name  = "uMRA";
+    uMra.type  = MaterialUniformType::Vec4;
+    uMra.value = glm::vec4(metallic, roughness, 1.0f, 0.0f);
+    mdata.uniforms.push_back(uMra);
+
+    if (m.emission[0] > 0.0f || m.emission[1] > 0.0f || m.emission[2] > 0.0f)
+    {
+        Orange::Editor::Material::UniformOverrideValue uEmis;
+        uEmis.name  = "uEmissive";
+        uEmis.type  = MaterialUniformType::Vec4;
+        uEmis.value = glm::vec4(m.emission[0], m.emission[1], m.emission[2], 0.0f);
+        mdata.uniforms.push_back(uEmis);
+    }
+    return mdata;
+}
 
 // face-vertex 三元组键 —— tinyobj::index_t 是 (vertex, normal, texcoord)
 // 三个 int 索引；我们 dedup 这个三元组 = 一个 unified vertex。负数（-1）
@@ -131,7 +188,11 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
     std::vector<tinyobj::material_t> materials;
     std::string err;
     const std::string srcStr(srcPath);
-    const std::string baseDir = src.parent_path().generic_string();
+    // mtl_basedir 必须以 '/' 结尾：tinyobj v1.0.6 MaterialFileReader 是
+    // `m_mtlBaseDir + matId` 直接拼接、不插分隔符，缺尾斜杠会拼成
+    // `.../dirmtl.mtl` 加载失败（"Failed to load material file(s)"）。
+    std::string baseDir = src.parent_path().generic_string();
+    if (!baseDir.empty() && baseDir.back() != '/') { baseDir += '/'; }
     const bool ok = tinyobj::LoadObj(
         &attrib, &shapes, &materials, &err,
         srcStr.c_str(),
@@ -353,6 +414,35 @@ ImportResult RunObjImportToRegistry(std::string_view srcPath,
     meta.sourcePath = src.generic_string();
     meta.sourceHash = hashOpt.value();
     meta.handleId   = 0;
+
+    // .mtl 单材质导入：恰好 1 个 material 时生成 .material（pbr 模板，scalar
+    // 通道）+ 写进 .meta subMeshMaterials —— drop 时自动设 Renderable.material
+    // Instance（与 gltf 单材质路径一致，对齐 Lumix/Unity 导 OBJ 带材质）。0 个
+    // 材质（纯几何 obj）→ 不生成（行为不变）；多材质（需 per-face 拆 sub-mesh）
+    // 留后续，本次仅导几何 + log 提示。
+    if (materials.size() == 1)
+    {
+        const std::string matPath =
+            (destDir / (stem + ".material")).generic_string();
+        const auto mdata = BuildObjMaterialFileData(materials[0]);
+        if (::Orange::Editor::Material::WriteMaterialFile(matPath, mdata))
+        {
+            meta.subMeshMaterials = {matPath};
+            result.materialPaths  = {matPath};
+            ORANGE_LOG_INFO("ObjImporter: wrote material '{}'", matPath);
+        }
+        else
+        {
+            ORANGE_LOG_WARN("ObjImporter: WriteMaterialFile '{}' 失败", matPath);
+        }
+    }
+    else if (materials.size() > 1)
+    {
+        ORANGE_LOG_INFO("ObjImporter: '{}' 含 {} 个 .mtl material —— 多材质 OBJ "
+                        "材质导入（per-face 拆 sub-mesh）留后续，本次仅导几何",
+                        srcPath, materials.size());
+    }
+
     const std::string metaPath = MetaPathFor(destMeshStr);
     if (!WriteTextureMeta(metaPath, meta))
     {
