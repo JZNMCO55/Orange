@@ -135,6 +135,20 @@ int main()
         std::fprintf(stdout, "  [PASS] Vec3 track 多维同时线性插值\n");
     }
 
+    // ===== 9. SortTrackKeys / IsTrackSorted：维护升序不变量 =====
+    {
+        auto tr = MakeFloatTrack({Key(2.0f, 20.0f, InterpMode::Linear),
+                                  Key(0.0f, 0.0f, InterpMode::Linear),
+                                  Key(1.0f, 10.0f, InterpMode::Linear)});
+        assert(!Anim::IsTrackSorted(tr) && "乱序插入 → IsTrackSorted=false");
+        Anim::SortTrackKeys(tr);
+        assert(Anim::IsTrackSorted(tr) && "SortTrackKeys 后 → 升序");
+        // 排序后采样正确（乱序时二分会失效）。
+        assert(Near(Anim::SampleTrack(tr, 0.5f).x, 5.0f) && "排序后段[0,1] t=0.5 → 5");
+        assert(Near(Anim::SampleTrack(tr, 1.5f).x, 15.0f) && "排序后段[1,2] t=1.5 → 15");
+        std::fprintf(stdout, "  [PASS] SortTrackKeys/IsTrackSorted：维护升序不变量\n");
+    }
+
     std::fprintf(stdout, "[AnimationClipTest] all tests passed.\n");
     return 0;
 }

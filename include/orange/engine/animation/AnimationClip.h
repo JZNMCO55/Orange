@@ -21,6 +21,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -137,6 +138,24 @@ inline glm::vec4 SampleTrack(const AnimationTrack& track, float t) noexcept
         }
     }
     return k0.value;  // 不可达（switch 全覆盖），守编译器
+}
+
+// 把 track 关键帧按 time 升序稳定排序——维护 SampleTrack 依赖的升序不变量。
+// 编辑器在任意时间插入 / 拖动 key 后调用。stable_sort 保 time 相等时相对顺序。
+inline void SortTrackKeys(AnimationTrack& track)
+{
+    std::stable_sort(track.keys.begin(), track.keys.end(),
+                     [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; });
+}
+
+// 校验 track 是否已按 time 非降序——供 assert / 编辑器保存前校验。空 / 单 key 视为有序。
+inline bool IsTrackSorted(const AnimationTrack& track) noexcept
+{
+    for (std::size_t i = 1; i < track.keys.size(); ++i)
+    {
+        if (track.keys[i].time < track.keys[i - 1].time) { return false; }
+    }
+    return true;
 }
 
 }  // namespace Orange::Engine::Animation
