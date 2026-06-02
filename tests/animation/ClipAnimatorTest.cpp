@@ -298,6 +298,34 @@ int main()
         std::fprintf(stdout, "  [PASS] Progress 播放进度 [0,1]\n");
     }
 
+    // ===== 14. SetSpeed：播放速率（含倒放）=====
+    {
+        Anim::AnimationClip clip;
+        clip.duration = 2.0f;
+        clip.tracks.push_back(MakeTrack("position.x", TrackValueType::Float,
+                                        {LinKey(0.0f, glm::vec4(0, 0, 0, 0)),
+                                         LinKey(2.0f, glm::vec4(20, 0, 0, 0))}));
+        Scene::TransformComponent tc;
+        ClipAnimator anim(clip, &tc);
+        assert(Near(anim.Speed(), 1.0f) && "默认速率 1.0");
+
+        anim.SetSpeed(2.0f);
+        anim.Tick(0.5f);  // 0.5 * 2 = 1.0 推进
+        assert(Near(anim.ElapsedSeconds(), 1.0f) && "2x 速率：dt=0.5 → 推进 1.0");
+        assert(Near(tc.position.x, 10.0f) && "elapsed 1.0 → position.x 10");
+
+        // 倒放：speed=-1，从 elapsed 1.0 退回。
+        anim.SetSpeed(-1.0f);
+        anim.Tick(0.5f);  // 1.0 + 0.5*(-1) = 0.5
+        assert(Near(anim.ElapsedSeconds(), 0.5f) && "倒放：elapsed 退回 0.5");
+
+        // 慢放：speed=0.5。
+        anim.SetSpeed(0.5f);
+        anim.Tick(0.5f);  // 0.5 + 0.5*0.5 = 0.75
+        assert(Near(anim.ElapsedSeconds(), 0.75f) && "0.5x 速率：推进 0.25");
+        std::fprintf(stdout, "  [PASS] SetSpeed 播放速率（2x/倒放/慢放）\n");
+    }
+
     std::fprintf(stdout, "ClipAnimatorTest: all passed\n");
     return 0;
 }

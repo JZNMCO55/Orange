@@ -96,6 +96,11 @@ public:
     void  Pause() noexcept;
     void  Stop();  // mPlaying=false + elapsed=0 + 立即应用 t0 pose
     bool  IsPlaying() const noexcept;
+    // 播放速率倍数（默认 1.0）。Tick 推进 dt*speed。<0 = 倒放（WrapClipTime 处理负向：
+    // loop 回卷 / 非 loop clamp 到 0）。slow-mo / 快进 / 调试用。IsFinished 仍按"正向到
+    // duration"判定（倒放到 0 不算 finished）。
+    void  SetSpeed(float speed) noexcept;
+    float Speed() const noexcept;
     void  SetLoop(bool loop) noexcept;
     bool  IsLooping() const noexcept;
     void  Seek(float seconds);  // 设 elapsed（按 loop/clamp wrap）+ 应用 pose
@@ -121,6 +126,7 @@ private:
     Scene::TransformComponent* mpTarget{nullptr};
     float                      mElapsedSeconds{0.0f};
     bool                       mPlaying{true};
+    float                      mSpeed{1.0f};
     std::string                mSourceAssetPath;  // 空 = 内联 clip（见 SourceAssetPath 注释）
 };
 

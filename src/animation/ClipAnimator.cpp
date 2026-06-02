@@ -96,6 +96,16 @@ bool ClipAnimator::IsPlaying() const noexcept
     return mPlaying;
 }
 
+void ClipAnimator::SetSpeed(float speed) noexcept
+{
+    mSpeed = speed;
+}
+
+float ClipAnimator::Speed() const noexcept
+{
+    return mSpeed;
+}
+
 void ClipAnimator::SetLoop(bool loop) noexcept
 {
     mClip.loop = loop;
@@ -193,8 +203,8 @@ void ClipAnimator::Tick(float dt)
         return;
     }
     // WrapClipTime 同时处理 loop（fmod，负值回卷）与非 loop（clamp 到 [0,dur]）。
-    // dt<0 时 elapsed 后退，由 WrapClipTime 兜底，符合 IAnimator "负 dt 后端自决"。
-    mElapsedSeconds = WrapClipTime(mClip, mElapsedSeconds + dt);
+    // dt<0 或 speed<0 时 elapsed 后退，由 WrapClipTime 兜底，符合 IAnimator "负 dt 后端自决"。
+    mElapsedSeconds = WrapClipTime(mClip, mElapsedSeconds + dt * mSpeed);
     ApplyPose();
 }
 
