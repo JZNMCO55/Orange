@@ -273,6 +273,29 @@
 
 ---
 
+### 21. viewport 工具栏 gizmo 变换工具按钮
+
+- **commit**：`e63d986` feat(editor): viewport 工具栏 gizmo 变换工具按钮（Move/Rotate/Scale + World/Local）
+- **怎么触发**：看 viewport 顶部工具栏（Snap 开关右侧），有 **[Move][Rotate][Scale]** + **[World/Local]** 按钮
+- **看什么 / 通过判据**：
+  - 当前 gizmo 模式对应的按钮**高亮**（如默认 Move 高亮）；点 Rotate → Rotate 高亮 + 选中实体 gizmo 变旋转环
+  - 键盘 W/E/R 切模式时，对应按钮的高亮**同步**变（双向一致）
+  - 点 World/Local 按钮在两态间切，按钮文字随之变 World⇄Local；与 X 键同步
+  - hover 各按钮有 tooltip 标快捷键（W/E/R/X）
+- **背景**：gizmo 模式/坐标系之前只有隐蔽快捷键，无可点入口。对齐 Unity 左上变换工具栏 / Lumix scene toolbar。**按钮高亮 + 双向同步待真机确认**。
+
+### 22. 飞行模式滚轮调速
+
+- **commit**：`845c14c` feat(editor): 飞行模式滚轮调速（Unreal/Unity 标准）
+- **怎么触发**：viewport 内**按住右键**进入飞行（见 item 16），飞行中**滚动滚轮**
+- **看什么 / 通过判据**：
+  - 飞行中（RMB 按住）滚轮**不再推近/拉远**，而是改飞行速度——向上滚 WASD 移动变快，向下滚变慢
+  - 松开右键后滚轮恢复正常 zoom（缩放 orbit radius）
+  - 速度有上下限（极慢仍能动、极快不失控）；Shift 加速（×3）在新速度基础上叠加
+- **背景**：补完 item 16 飞行导航，对齐 Unreal/Unity scene 飞行——大场景调快、精修调慢。**纯手感，连同飞行方向/速度一起 dogfood**。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。
