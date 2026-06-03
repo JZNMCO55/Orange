@@ -519,6 +519,53 @@
 
 ---
 
+## 2026-06-03 session（B2.6：AnimatorComponent 挂 ClipAnimator + .anim 引用 + 播放控制）
+
+> 目标：把 B2 动画 clip 创作变成编辑器里**可挂、可引用、可播放控制**的功能（B2.3 timeline 的前置）。spec：`docs/b2.6-animator-clip-authoring-spec.md`。本段全是 ImGui 交互 / viewport 视觉，headless 测不到，逐条 dogfood。
+>
+> headless 已验：OrangeEditor.exe 编出 + 全量 ctest 85/85（含新增 `clip_animator_asset_reassign_test` 锁住 clipSet 数据序列 + `editor_build_smoke`）+ check_invariants OK（无新 hardcode / schema-first 合规）。
+
+### 36. +Add Component → "Animator (Clip)" —— 挂空 ClipAnimator
+
+- **改点**：spec 改点 4。schema `AddableWith`（Renderable c10 同款自定义 add 路径）建空 ClipAnimator（`AnimationClip{}` + target=self Transform）。displayName "Animator (Clip)"，typeName 仍 "Animator"。
+- **怎么触发**：选中一个实体（确保有 TransformComponent）→ Inspector 底部 **+Add Component** → 菜单里点 **"Animator (Clip)"**。
+- **看什么 / 通过判据**：
+  - 实体多出 **Animator** 段，backend = `clip`（只读 Backend 字段显示 "clip"）。
+  - 段内出现 **Clip**（AssetRef，初始 "(none)"）+ **Loop** checkbox（仅 clip backend 可见）。
+  - 已挂 Animator 的实体，菜单里 "Animator (Clip)" 不再出现（schema.has 过滤）。
+  - **Skeletal / Procedural 仍不在 +Add 菜单**（只开 clip）。
+  - 段头右键 → **Remove Component** 可删（Removable）；删后 Ctrl+Z 还原（命令栈 CaptureComponentState 认 clip AssetRef + loop bool）。
+
+### 37. 拖 .anim 进 Clip 字段 —— clip 引用 / 重指派
+
+- **改点**：spec 改点 2（AssetKind::AnimationClip + 资产浏览器认 .anim）+ 改点 3（clip FieldAssetRef）。clipGet 读 `ClipAnimator::SourceAssetPath()`；clipSet 解析 path → `AssetRegistry::Load<AnimationClip>` → Get → `SetClip(*loaded)` + `SetSourceAssetPath`。
+- **前置**：需要一个 `.anim` 文件在 `assets/` 下（当前无内置 .anim demo 资产——可用 headless 序列化造一个，或等 B2.3 timeline 能存 .anim 后再 dogfood）。
+- **怎么触发**：
+  1. 资产浏览器进有 `.anim` 的目录 → 应看到 **[Anim]** 图标的卡片（类型过滤下拉新增 **"Animation"** 项）。
+  2. 把 `.anim` **拖到** Animator 段的 **Clip** 字段（或选中 .anim 后点字段的 **Pick** 按钮）。
+- **看什么 / 通过判据**：
+  - Clip 字段显示 `.anim` 短名（hover 看完整路径 tooltip）。
+  - scrub slider 范围变成新 clip 的 duration（见 item 38）。
+  - **Ctrl+Z** 撤回重指派（命令栈 SetFieldValueCommand<string>）；**×** 清除字段 → 回 "(none)" + 空 clip。
+  - **数据序列已 headless 锁住**（`clip_animator_asset_reassign_test`：Load→Get→SetClip+SetSourceAssetPath→duration/source path/Seek pose/清空 全验）；**拖放 / Pick / Undo 的 GUI 手感待真机**。
+
+### 38. Play / Pause + playhead scrub —— 编辑期预览 tick（**重点 dogfood**）
+
+- **改点**：spec 改点 3 播放控制 + 核心新机制"编辑期预览 tick"。控件在 `AnimatorMiniPreviewPlugin::ParseEnd`（clip backend 时渲 Play/Pause 按钮 + scrub slider）；预览状态在新 `EditorAnimationPreviewState`（host.animPreview，**不序列化**）；tick 在 `EditorRenderLayer::OnUpdate` 的 Edit 分支只对单个 animator 推进。
+- **怎么触发**：选中一个挂了 clip（引用了真 .anim、duration>0）的实体 → Inspector Animator 段底部。
+- **看什么 / 通过判据**：
+  - **scrub slider**：拖动 → 实体按 clip 曲线**实时变位姿**（直接 Seek，Edit 模式即可见，不依赖 Play 按钮）。
+  - **Play 按钮**：点后实体在 **Edit 模式**自动按 clip 动（编辑期预览 tick，**不进 PlayState::Play**）；"(previewing)" 提示出现。
+  - **Pause 按钮**：停在当前帧（pose 不归位）。
+  - **切换选中到另一个实体** → 旧预览停止 + 旧 animator **归位 t0**（Seek(0)）。
+  - **与 PlayState::Play 互斥（关键）**：进 Play（点工具栏 Play）前预览自动停 + 归位；Play 期由全量 TickAnimators 驱动，Inspector 的 Play/Pause/scrub **灰禁**（仅 Edit 模式可用）。Stop 回 Edit 后预览态已清空（不会残留双 tick）。
+  - **Undo/Redo / 切场景**：删掉被预览的 animator（Undo）/ New / Open 场景 → 预览态自动清（不持野指针）。
+- **背景**：编辑期预览 tick 是**新机制**（B2.3 timeline 也复用）。务必验证：① 预览真能在 Edit 模式动；② 切走 / Stop 归位；③ **绝不与 Play 模式全量 tick 并存双写 elapsed**（若发现进 Play 后动画"跳"或 Stop 后还在动，是互斥没做对，告诉我）。
+
+> **dogfood 阻碍**：当前 `assets/` 无内置 `.anim` 资产（SeedDemoWorld 的 "Animated Cube (clip)" 是内联 clip，非 .anim 引用）。item 37/38 的完整 dogfood 需要先有一个 .anim 文件——可临时用 headless 序列化（`SaveAnimationClip`）造一个放进 `assets/`，或等 B2.3 timeline 落地后能在编辑器内存 .anim 再走完整闭环。item 36（+Add Component 挂空 ClipAnimator）+ scrub（空 clip duration=0 时禁用，有内联 clip 实体时可拖）可先验。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。

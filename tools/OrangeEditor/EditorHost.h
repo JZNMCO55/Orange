@@ -40,6 +40,7 @@
 // 这些都在本 host 上挂出来，不再走"加字段到 EditorState"的老路。
 
 #include "command/CommandStack.h"
+#include "context/EditorAnimationPreviewState.h"
 #include "context/EditorAssetContext.h"
 #include "context/EditorCameraState.h"
 #include "context/EditorColliderEditState.h"
@@ -79,6 +80,10 @@ struct EditorHost
     EditorColliderEditState colliderEdit;
     EditorSettings     settings;
     EditorKeybindings  keybindings;
+
+    // Edit 模式动画 clip 预览状态（Inspector 的 Play/Pause/scrub → 单 animator
+    // 的 edit-time tick）。纯 view 态不序列化；与 PlayState::Play 全量 tick 互斥。
+    EditorAnimationPreviewState animPreview;
 
     // Component 值剪贴板（右键组件头 Copy / Paste Values，参 Lumix StudioApp /
     // Unity "Copy Component / Paste Component Values"）。Copy 把源组件各 property

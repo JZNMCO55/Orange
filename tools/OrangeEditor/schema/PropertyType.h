@@ -103,6 +103,7 @@ enum class AssetKind : std::uint8_t
     Texture,  // .png / .jpg / .ktx 等 → AssetHandle<TextureAsset>
     Scene,    // .scene.json → 不持 handle，仅作为路径引用（场景拖入打开）
     Sound,    // .wav / .ogg / .mp3 等 → AssetHandle<SoundAsset>
+    AnimationClip, // .anim → AssetHandle<AnimationClip>（ClipAnimator 的 clip 来源）
 };
 
 }  // namespace Orange::Editor::Schema

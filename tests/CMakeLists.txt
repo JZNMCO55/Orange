@@ -394,6 +394,8 @@ orange_engine_add_test(clip_animator_test           animation/ClipAnimatorTest.c
 orange_engine_add_test(animation_clip_serialization_test animation/AnimationClipSerializationTest.cpp)
 # AnimationClipLoader：.anim 经 AssetRegistry 加载（B2.2）
 orange_engine_add_test(animation_clip_loader_test   animation/AnimationClipLoaderTest.cpp)
+# ClipAnimator clip 重指派：Inspector clipSet 序列的纯数据语义（B2.6）
+orange_engine_add_test(clip_animator_asset_reassign_test animation/ClipAnimatorAssetReassignTest.cpp)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path

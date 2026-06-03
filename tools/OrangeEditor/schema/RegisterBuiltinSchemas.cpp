@@ -13,7 +13,9 @@
 #include "../context/EditorAssetContext.h"
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/animation/AnimationClip.h>
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/asset/SoundAsset.h>
 #include <orange/engine/asset/TextureAsset.h>
@@ -1017,29 +1019,22 @@ void RegisterColliderComponentSchema()
 
 void RegisterAnimatorComponentSchema()
 {
-    using AC = Orange::Engine::Animation::AnimatorComponent;
+    using AC          = Orange::Engine::Animation::AnimatorComponent;
+    using ClipAnimator = Orange::Engine::Animation::ClipAnimator;
+    using AnimationClip = Orange::Engine::Animation::AnimationClip;
+    using TC          = Orange::Engine::Scene::TransformComponent;
 
-    // AnimatorComponent.animator 是 std::unique_ptr<IAnimator>——IAnimator 是
-    // 抽象基类，构造 AnimatorComponent 需要具体子类实例（SkeletalAnimator /
-    // ProceduralAnimator / 游戏自注册的 backend）。schema 当前没有"构造抽象
-    // 子类"的入口，所以本组件 **不 Addable**——与 v0.1 期 +Add Component
-    // popup 内显式跳过 Animator 的行为一致。
-    //
-    // 也不 Removable —— v0.1 期 hardcode 段用裸 CollapsingHeader，无 Remove
-    // 入口；本期保持一致。后续 v0.7 Animation 子模式可能引入 backend 切换
-    // 路径，那时再决定 schema 是否 Addable / Removable。
-    //
-    // 字段：仅一个 backend 名只读 String。v0.1 hardcode 显示 `Animator
-    // (runtime) : <ptr>` 原始指针 + TextDisabled "(animator backend editing
-    // — later task)" 占位；c9 升级为更可读的 backend name 字符串（如
-    // "skeletal_dragonbones" / "procedural"），通过 c9 同步引入的 ReadOnly
-    // attribute 显示。指针地址显示与 later-task 占位文本本期接受视觉变更
-    // ——backend name 信息量严格高于指针地址。
-    //
-    // getter 捕获 unique_ptr 可能为 null 的情况——AnimatorComponent 默认
-    // 构造时 animator 是空 unique_ptr，理论上不应进入 Inspector 段（v0.1
-    // hardcode 也没 guard，进了就显示 nullptr 指针），但 schema 路径保留
-    // defensive guard：null 显示 "(no backend)"，与"未挂 backend"语义一致。
+    // 取 AnimatorComponent 内的 ClipAnimator*（仅 backend=="clip" 时非空）。
+    // backend 是 skeletal / procedural / null 时返回 nullptr —— clip 专属字段
+    // 据此 visibleIf 门控 + get/set 早退。dynamic_cast 安全（IAnimator 多态）。
+    static const auto asClipAnimator = +[](const AC* ac) -> ClipAnimator*
+    {
+        if (ac == nullptr || !ac->animator) { return nullptr; }
+        return dynamic_cast<ClipAnimator*>(ac->animator.get());
+    };
+
+    // backend 名只读 String —— null 显示 "(no backend)"，与"未挂 backend"
+    // 语义一致。
     static const auto getBackendName = +[](const void* c, void* out)
     {
         const auto* ac = static_cast<const AC*>(c);
@@ -1053,16 +1048,106 @@ void RegisterAnimatorComponentSchema()
             *static_cast<std::string*>(out) = "(no backend)";
         }
     };
-    // setter 是 no-op —— readOnly 路径下 SchemaInspector 不会调用 set，留
-    // nullptr 也行（c9 同步放宽了 set==nullptr 早退检查），但保留显式 no-op
-    // 让 FieldCustom 调用站点更对称（caller 一眼能看出"这是 read-only"）。
+    // setter 是 no-op —— readOnly 路径下 SchemaInspector 不会调用 set。
     static const auto setBackendNameNoOp = +[](void*, const void*) { };
 
-    ComponentSchemaBuilder<AC>("Animator", "Animator")
+    // ---- 仅 backend=="clip" 时有意义的字段（visibleIf 门控）----------------
+    // 谓词：本 AnimatorComponent 的 backend 是不是 clip。参 Collider shape
+    // 的 holds_alternative 互斥 visibleIf。
+    static const auto isClipBackend = +[](const void* c) -> bool
+    {
+        return asClipAnimator(static_cast<const AC*>(c)) != nullptr;
+    };
+
+    // clip AssetRef：读 ClipAnimator::SourceAssetPath()；写时解析 path →
+    // AssetRegistry::Load<AnimationClip> → Get → SetClip + SetSourceAssetPath。
+    // 走 ADR-004 方案 B 的 AssetRefGetFn/SetFn 专用槽（带 EditorAssetContext）。
+    static const auto clipGet = +[](const void* c,
+                                    const EditorAssetContext& ctx,
+                                    void* out)
+    {
+        (void)ctx;
+        auto* sOut = static_cast<std::string*>(out);
+        sOut->clear();
+        ClipAnimator* clip = asClipAnimator(static_cast<const AC*>(c));
+        if (clip != nullptr)
+        {
+            *sOut = std::string(clip->SourceAssetPath());
+        }
+    };
+    static const auto clipSet = +[](void* c,
+                                    const EditorAssetContext& ctx,
+                                    const void* in)
+    {
+        ClipAnimator* clip = asClipAnimator(static_cast<AC*>(c));
+        if (clip == nullptr) { return; }
+        const auto& path = *static_cast<const std::string*>(in);
+        if (path.empty())
+        {
+            // 清空字段：换成空 clip + 清来源路径（pose 留当前帧，下次 Seek
+            // 才更新；与 mesh 字段清空"换 Invalid handle"对位）。
+            clip->SetClip(AnimationClip{});
+            clip->SetSourceAssetPath({});
+            return;
+        }
+        if (ctx.pAssets == nullptr) { return; }
+        auto lr = ctx.pAssets->Load<AnimationClip>(path);
+        if (lr.IsErr()) { return; }
+        const AnimationClip* loaded = ctx.pAssets->Get<AnimationClip>(lr.Value());
+        if (loaded == nullptr) { return; }
+        clip->SetClip(*loaded);
+        clip->SetSourceAssetPath(path);
+    };
+
+    // loop checkbox：桥接 ClipAnimator::IsLooping() / SetLoop()。
+    static const auto loopGet = +[](const void* c, void* out)
+    {
+        ClipAnimator* clip = asClipAnimator(static_cast<const AC*>(c));
+        *static_cast<bool*>(out) = (clip != nullptr) && clip->IsLooping();
+    };
+    static const auto loopSet = +[](void* c, const void* in)
+    {
+        ClipAnimator* clip = asClipAnimator(static_cast<AC*>(c));
+        if (clip != nullptr) { clip->SetLoop(*static_cast<const bool*>(in)); }
+    };
+
+    // ---- "Animator (Clip)" 自定义 add 路径（c10 Renderable 同款）----------
+    // 默认构造抽象 IAnimator 不可能；走 AddableWith 显式建 ClipAnimator
+    // （空 clip + target=self Transform）。capture-less +lambda 才能转 AddFn
+    // 函数指针；world / entity 在 lambda 内运行时取。
+    static const auto animatorClipAddWith =
+        +[](EditorHost& host, Orange::Engine::Entity e)
+        {
+            auto* pWorld = host.scene.pWorld.get();
+            if (pWorld == nullptr) { return; }
+            TC* target = pWorld->GetComponent<TC>(e);  // self Transform 作写目标
+            AC ac{};
+            ac.animator = std::make_unique<ClipAnimator>(AnimationClip{}, target);
+            pWorld->AddComponent<AC>(e, std::move(ac));
+        };
+
+    // displayName "Animator (Clip)" —— +Add Component 菜单显示该名；schema
+    // typeName 仍是 "Animator"（plugin CanHandle / 序列化器都按此匹配）。
+    // Skeletal / Procedural 仍不 Addable（需 skeleton / channel 参数，不适合
+    // 默认构造）；只开 clip。
+    ComponentSchemaBuilder<AC>("Animator", "Animator (Clip)")
         .FieldCustom<std::string>("backend", "Backend",
                                   getBackendName, setBackendNameNoOp)
             .ReadOnly()
-        // 不 Addable / 不 Removable —— 见函数顶注释
+        // clip AssetRef（仅 clip backend 可见，可拖 .anim / Undo 重指派）。
+        .FieldAssetRef("clip", "Clip",
+                       AssetKind::AnimationClip, clipGet, clipSet)
+            .VisibleIf(isClipBackend)
+        // loop 勾选（仅 clip backend 可见）。Play/Pause/scrub 播放控制走
+        // AnimatorMiniPreviewPlugin 的 ParseEnd（自定义 ImGui + 编辑期预览
+        // 状态接线，超出 schema 字段"纯数据"语义——与 AudioSource Play/Stop
+        // 走 plugin 同款分工）。
+        .FieldCustom<bool>("loop", "Loop", loopGet, loopSet)
+            .VisibleIf(isClipBackend)
+            .Tooltip("勾选后 clip 播放到结尾循环回卷；取消则到结尾停在末帧。\n"
+                     "桥接 ClipAnimator::SetLoop()，与 .anim 资产内的 loop 标记独立。")
+        .AddableWith(animatorClipAddWith)
+        .Removable()
         .Register();
 }
 

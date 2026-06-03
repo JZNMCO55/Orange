@@ -8,6 +8,7 @@
 
 #include <orange/engine/animation/AnimatorComponent.h>
 #include <orange/engine/animation/AnimatorRegistry.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/animation/IAnimator.h>
 #include <orange/engine/animation/ProceduralAnimator.h>
 
@@ -131,6 +132,73 @@ void AnimatorMiniPreviewPlugin::ParseEnd(
     ImGui::TextDisabled("Backend: %.*s",
                         static_cast<int>(backendName.size()),
                         backendName.data());
+
+    // ---- clip backend：编辑期播放控制（Play / Pause + playhead scrub）------
+    // 编辑器 Edit 模式不跑 Animation::TickAnimators（那是 Play 模式全量入口）。
+    // 要在 Inspector 看到 clip 动，需要一条只对本 animator 推进的 edit-time
+    // tick：Play 把 host.animPreview 指向本 entity + 置 previewPlaying，
+    // EditorRenderLayer 的 Edit 模式 OnUpdate 据此每帧 Tick 单 animator。
+    // scrub slider 直接 Seek（不依赖 previewPlaying，内部 ApplyPose 立即出 pose）。
+    // 与 PlayState::Play 全量 tick 互斥：进 Play 前 EditorRenderLayer 清预览态。
+    if (backendName == std::string_view{"clip"})
+    {
+        auto* pClip = dynamic_cast<Orange::Engine::Animation::ClipAnimator*>(
+            pAc->animator.get());
+        if (pClip != nullptr)
+        {
+            ImGui::Spacing();
+
+            // 播放控制仅 Edit 模式可用 —— Play 模式由全量 TickAnimators 驱动，
+            // 编辑期预览与之互斥（避免双写 elapsed）。
+            const bool canPreview = (host.scene.playState == PlayState::Edit);
+            ImGui::BeginDisabled(!canPreview);
+
+            // 本 entity 是否就是当前正被预览的 animator（决定 Play/Pause 哪个高亮）。
+            const bool isPreviewTarget =
+                host.animPreview.previewEntity.IsValid()
+                && host.animPreview.previewEntity == entity;
+            const bool isPlaying = isPreviewTarget && host.animPreview.previewPlaying;
+
+            // Play：把预览指向本 entity 并启动（切到另一个 entity 的 animator
+            // 会自动接管预览——单一 previewEntity 字段，旧目标自然停推进）。
+            if (ImGui::Button("Play##clip_preview"))
+            {
+                host.animPreview.previewEntity  = entity;
+                host.animPreview.previewPlaying = true;
+                pClip->Play();
+            }
+            ImGui::SameLine();
+            // Pause：停推进，pose 留当前帧（不归位）。
+            if (ImGui::Button("Pause##clip_preview"))
+            {
+                pClip->Pause();
+                if (isPreviewTarget) { host.animPreview.previewPlaying = false; }
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled(isPlaying ? "(previewing)" : "");
+
+            // playhead scrub slider —— 直接 Seek（看得到 pose）。duration<=0
+            // 时禁用（空 clip / 无关键帧无可 scrub）。
+            const float duration = pClip->Duration();
+            float elapsed = pClip->ElapsedSeconds();
+            ImGui::BeginDisabled(duration <= 0.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);  // 填满剩余列宽
+            if (ImGui::SliderFloat("##clip_playhead", &elapsed,
+                                   0.0f, duration > 0.0f ? duration : 1.0f,
+                                   "t = %.3fs"))
+            {
+                pClip->Seek(elapsed);
+            }
+            ImGui::EndDisabled();
+
+            ImGui::EndDisabled();
+
+            if (!canPreview)
+            {
+                ImGui::TextDisabled("(预览仅 Edit 模式可用；Play 模式由全量 tick 驱动)");
+            }
+        }
+    }
 
     // v0.7 c4：procedural backend 时显示 channel name 列表 + 占位说明。
     // 完整 channel fn 编辑 UI 需要 Material UBO 通路 + channel 表达式 DSL（同

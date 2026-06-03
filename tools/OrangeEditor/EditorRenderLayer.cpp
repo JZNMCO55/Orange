@@ -31,6 +31,7 @@
 
 #include <orange/engine/animation/AnimationSystem.h>
 #include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/audio/AudioEngine.h>
 #include <orange/engine/audio/AudioSourceComponent.h>
 #include <orange/engine/audio/SoundInstance.h>
@@ -283,6 +284,55 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
                 }
             }
         }
+    }
+
+    // ---- Edit 态动画 clip 预览 tick（B2.6）------------------------------
+    // 编辑器 Edit 模式**不**跑全量 TickAnimators；Inspector 的 Play 按钮把
+    // host.animPreview 指向某 entity 的 ClipAnimator，这里**只对该一个**
+    // animator 推进 Tick(dt)，让用户在不进 PlayState::Play 的前提下预览 clip。
+    // 与上方 Play 模式全量 tick 互斥（playState 分支二选一），不会双写 elapsed。
+    // 每帧从 previewEntity 重新解析 ClipAnimator（实体 / 组件可能被 Undo /
+    // 切场景销毁）——解析失败即自动清预览，避免持野指针。
+    if (mHost.scene.playState == PlayState::Edit
+        && mHost.animPreview.previewPlaying
+        && mHost.animPreview.previewEntity.IsValid()
+        && mHost.scene.pWorld != nullptr)
+    {
+        using AC = Orange::Engine::Animation::AnimatorComponent;
+        AC* pAc = mHost.scene.pWorld->GetComponent<AC>(mHost.animPreview.previewEntity);
+        auto* pClip = (pAc != nullptr && pAc->animator)
+            ? dynamic_cast<Orange::Engine::Animation::ClipAnimator*>(pAc->animator.get())
+            : nullptr;
+        if (pClip != nullptr)
+        {
+            pClip->Tick(dt);
+        }
+        else
+        {
+            // 预览目标没了（实体删除 / backend 被切走）→ 停预览，避免空转。
+            mHost.animPreview.Clear();
+        }
+    }
+
+    // 切换选中实体时清预览并把旧目标归位（Seek(0)）—— 预览跟随 Inspector
+    // 当前选中实体；切走后旧 animator 不应继续在 viewport 动。仅 Edit 态有
+    // 预览态需要维护。
+    if (mHost.scene.playState == PlayState::Edit
+        && mHost.animPreview.previewEntity.IsValid()
+        && mHost.animPreview.previewEntity != mHost.selection.selectedEntity)
+    {
+        if (mHost.scene.pWorld != nullptr)
+        {
+            using AC = Orange::Engine::Animation::AnimatorComponent;
+            AC* pAc = mHost.scene.pWorld->GetComponent<AC>(
+                mHost.animPreview.previewEntity);
+            auto* pClip = (pAc != nullptr && pAc->animator)
+                ? dynamic_cast<Orange::Engine::Animation::ClipAnimator*>(
+                      pAc->animator.get())
+                : nullptr;
+            if (pClip != nullptr) { pClip->Seek(0.0f); }  // 归位 t0
+        }
+        mHost.animPreview.Clear();
     }
 
     // ---- ImGui 帧开始 ---------------------------------------------
@@ -1034,6 +1084,12 @@ void EditorRenderLayer::ValidateEntityHandles()
         && !w.IsValid(mHost.selection.transformEulerCacheEntity)) {
         mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
     }
+    // B2.6：被预览的 clip animator 若被 Undo / Redo 销毁，清预览态（避免持
+    // 失效 entity 句柄继续 tick）。
+    if (mHost.animPreview.previewEntity.IsValid()
+        && !w.IsValid(mHost.animPreview.previewEntity)) {
+        mHost.animPreview.Clear();
+    }
     // pendingDelete / pendingReparent / pendingCreate 是帧内消耗完的一次性
     // 标志（DrawEntityTreePanel 末尾 apply），跨帧不存活，无需在此验证。
 }
@@ -1051,6 +1107,9 @@ void EditorRenderLayer::ResetEntityLocalState()
     mHost.selection.pendingReparent.valid     = false;
     mHost.selection.pendingCreate.valid       = false;
     mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+    // B2.6：切 world 后预览目标 entity 身份失效，清预览态（不归位——旧 world
+    // 已销毁，无 animator 可 Seek）。
+    mHost.animPreview.Clear();
 }
 
 // 帧末统一 apply 用户菜单点击的场景操作。dialog 阻塞期 ImGui 主循环
@@ -1488,6 +1547,24 @@ void EditorRenderLayer::ApplyPendingPlayOp()
         case PlayOp::EnterPlay: {
             if (mHost.scene.playState != PlayState::Edit) { break; }
 
+            // B2.6：进 Play 前停掉编辑期 clip 预览并归位（Seek(0)）。预览与
+            // Play 模式的全量 TickAnimators 互斥——绝不让两者并存双写同一
+            // animator 的 elapsed。归位让 Play 从 t0 一致开始（且 Play 期对
+            // ECS 的修改在 Stop 时由快照还原，与归位语义不冲突）。
+            if (mHost.animPreview.previewEntity.IsValid()
+                && mHost.scene.pWorld != nullptr)
+            {
+                using AC = Orange::Engine::Animation::AnimatorComponent;
+                AC* pAc = mHost.scene.pWorld->GetComponent<AC>(
+                    mHost.animPreview.previewEntity);
+                auto* pClip = (pAc != nullptr && pAc->animator)
+                    ? dynamic_cast<Orange::Engine::Animation::ClipAnimator*>(
+                          pAc->animator.get())
+                    : nullptr;
+                if (pClip != nullptr) { pClip->Seek(0.0f); }
+            }
+            mHost.animPreview.Clear();
+
             // S2: World 快照落盘 —— Stop 时从此路径还原，保证 Play 期
             //     对 ECS 的所有修改（物理驱动 Transform / 粒子spawn）都
             //     能被丢弃，回到 Play 前的编辑状态。
@@ -1883,7 +1960,7 @@ bool DoesAssetTriggerInspectorSubMode(const std::string& path)
 // "ORANGE_ASSET" 携带 path 字符串供 v0.5 c4 Inspector AssetRef 字段接收。
 // 资产类型分类（供类型过滤下拉用）。返回值对齐 kAssetTypeNames 索引：
 // 0=All（占位，不用于文件）/ 1=Mesh / 2=Material / 3=Texture / 4=Sound /
-// 5=Scene / 6=Other。比 icon 分类粗（hdr/exr 归 Texture）——过滤够用。
+// 5=Scene / 6=Animation / 7=Other。比 icon 分类粗（hdr/exr 归 Texture）——过滤够用。
 int AssetCategoryOf(const std::string& name, const std::string& ext)
 {
     if (ext == ".mesh" || ext == ".obj") { return 1; }
@@ -1893,7 +1970,8 @@ int AssetCategoryOf(const std::string& name, const std::string& ext)
     if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac") { return 4; }
     if (name.size() >= 11
         && name.compare(name.size() - 11, 11, ".scene.json") == 0) { return 5; }
-    return 6;
+    if (ext == ".anim") { return 6; }  // 关键帧动画 clip（ClipAnimator 的 clip 来源）
+    return 7;
 }
 
 void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
@@ -1920,9 +1998,9 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
     // 资产名搜索过滤（大小写不敏感，复用 ContainsCaseInsensitive）。空串=不过滤。
     // 资产变多后按名查找用（gap 报告 §2.2）。buffer 文件级 static（单 Assets 面板）。
     static char sAssetSearchBuf[128] = {};
-    static int  sAssetTypeFilter     = 0;  // 0=All；1..6 对齐 AssetCategoryOf
+    static int  sAssetTypeFilter     = 0;  // 0=All；1..7 对齐 AssetCategoryOf
     static const char* const kAssetTypeNames[] = {
-        "All", "Mesh", "Material", "Texture", "Sound", "Scene", "Other" };
+        "All", "Mesh", "Material", "Texture", "Sound", "Scene", "Animation", "Other" };
     ImGui::SetNextItemWidth(ImGui::CalcTextSize("Material____").x);  // 容下最长项+箭头
     ImGui::Combo("##asset_type", &sAssetTypeFilter,
                  kAssetTypeNames, IM_ARRAYSIZE(kAssetTypeNames));
@@ -1981,6 +2059,7 @@ void DrawAssetFileList(EditorHost& host, EditorAssetContext& assets)
         else if (ext == ".hdr" || ext == ".exr")    icon = "[HDR]";
         else if (ext == ".wav" || ext == ".ogg"
               || ext == ".mp3" || ext == ".flac")   icon = "[SND]";
+        else if (ext == ".anim")                    icon = "[Anim]";
         // .prefab.json 必须先于 .scene.json / .json 判定：三者 extension() 都
         // 返回 ".json"，按完整后缀 name 区分。
         else if (name.size() >= 12
