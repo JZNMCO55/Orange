@@ -120,6 +120,15 @@ struct SaveOptions
     // 重复（重复时 Save 立即返回 AlreadyExists）。
     // span 指向的数据生命周期须覆盖 Save 调用期间。
     std::span<const ComponentSerializerEntry> extraSerializers{};
+
+    // Save 前是否普遍补全实体的稳定身份 guid（A2 选项 B / ADR-018）。开时
+    // 把"guid 零散分配"规整成"guid 普遍存在"，让 Hierarchy 的 guid 主键有
+    // 普遍可写的被引用 guid。默认开——纯 additive，旧调用方不受影响。
+    //
+    // 注意：补 guid 需要 mutate world，只有**非 const 入口** Save(World&, ...)
+    // 会执行（见下方重载注释）；const 入口 Save(const World&, ...) 物理上无法
+    // mutate，本字段在 const 入口被忽略（行为与升级前完全一致）。
+    bool ensureGuids{true};
 };
 
 struct LoadOptions
@@ -162,6 +171,20 @@ struct LoadOptions
 };
 
 // 把 `world` 写到 `path`。覆盖目标文件。
+//
+// 两个重载共享同一份序列化核心，区别只在"能否 Save 前补 guid"：
+//   * 非 const 入口 Save(World&, ...)：当 options.ensureGuids 为 true（默认）时
+//     先 EnsureEntityGuids(world)（普遍补全稳定身份 guid，A2 选项 B / ADR-018），
+//     再走只读核心。编辑器 / 工具 / 游戏存盘的常规路径——传非 const World 即享
+//     guid 主键升级。
+//   * const 入口 Save(const World&, ...)：物理上无法 mutate world，故**不**补
+//     guid（ensureGuids 被忽略），行为与历史完全一致——只把当前已有的 guid 当
+//     主键写出，无 guid 的实体的 Hierarchy 引用回退顺序 int。const 数据 / 测试
+//     fixture / 不愿被 Save 改动的 world 走这条。
+ORANGE_ENGINE_API Result<void, ResultCode> Save(World& world,
+                                                std::string_view path,
+                                                const SaveOptions& options = {});
+
 ORANGE_ENGINE_API Result<void, ResultCode> Save(const World& world,
                                                 std::string_view path,
                                                 const SaveOptions& options = {});

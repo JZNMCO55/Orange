@@ -89,6 +89,52 @@ Entity EntityForPersistentId(std::int64_t id, const PersistentIdToEntity& table)
 }
 
 // ---------------------------------------------------------------------------
+// Entity reference 的 guid 主键写 / 读（A2 选项 B / ADR-018）。与上面顺序 int
+// 双键并存：guid 是跨 Save/跨文件/跨会话稳定的持久身份主键，顺序 int 降级为
+// 本文件内可读局部编号。
+//
+// 写：被引用实体有 GuidComponent 且 guid 合法 → 写 guid 字符串；否则（空链接
+// kInvalid / 被引用实体无 guid）写空串。Save 前调用方普遍补 guid（S1）后，普通
+// 链接基本都能写出 guid。
+//
+// 读：guid 字符串非空且能在本次 Load 的 guid 索引（LoadContext::guidToEntity）命
+// 中 → 用该 entity；否则回退顺序 int（读旧文件 / guid 缺失 / 索引未命中）。
+
+// 被引用实体的稳定身份 guid 字符串；无 GuidComponent / guid 非法 / 实体无效 →
+// 空串（读端据此回退顺序 int）。
+std::string GuidStringOf(Entity entity, const World& world)
+{
+    if (!entity.IsValid())
+    {
+        return std::string{};
+    }
+    const auto* g = world.GetComponent<GuidComponent>(entity);
+    if (g == nullptr || !g->guid.IsValid())
+    {
+        return std::string{};
+    }
+    return g->guid.ToString();
+}
+
+// 优先 guid 回退 int 的统一解析：guid 字符串非空且命中索引即用；否则按顺序 int
+// 反查。guidIndex 为空（无索引）时直接走 int 回退。
+Entity ResolveEntityRef(const std::string& guidText,
+                        std::int64_t        persistentId,
+                        const LoadContext&  ctx)
+{
+    if (!guidText.empty() && ctx.guidToEntity != nullptr)
+    {
+        auto it = ctx.guidToEntity->find(guidText);
+        if (it != ctx.guidToEntity->end())
+        {
+            return it->second;
+        }
+        // guid 写了但索引没命中（被引用实体无 guid / 坏数据）→ 落回顺序 int。
+    }
+    return EntityForPersistentId(persistentId, ctx.idToEntity);
+}
+
+// ---------------------------------------------------------------------------
 // TransformComponent
 // ---------------------------------------------------------------------------
 
@@ -171,10 +217,18 @@ void WriteHierarchy(JsonWriter& writer,
         return;
     }
 
+    // 顺序 int（本地序号，保留——diff / 人读友好 + 旧 reader 回退路径）。
     writer.WriteInt(Join(componentPath, "parent"),      PersistentIdOf(h->parent,      ctx.entityToId));
     writer.WriteInt(Join(componentPath, "firstChild"),  PersistentIdOf(h->firstChild,  ctx.entityToId));
     writer.WriteInt(Join(componentPath, "nextSibling"), PersistentIdOf(h->nextSibling, ctx.entityToId));
     writer.WriteInt(Join(componentPath, "prevSibling"), PersistentIdOf(h->prevSibling, ctx.entityToId));
+    // guid 主键（A2 选项 B / ADR-018）——被引用实体稳定身份；空链接 / 被引用实体
+    // 无 guid 时写空串，读端据此回退顺序 int。Save 前 EnsureEntityGuids（S1）后普
+    // 通链接基本都能写出 guid。
+    writer.WriteString(Join(componentPath, "parentGuid"),      GuidStringOf(h->parent,      ctx.world));
+    writer.WriteString(Join(componentPath, "firstChildGuid"),  GuidStringOf(h->firstChild,  ctx.world));
+    writer.WriteString(Join(componentPath, "nextSiblingGuid"), GuidStringOf(h->nextSibling, ctx.world));
+    writer.WriteString(Join(componentPath, "prevSiblingGuid"), GuidStringOf(h->prevSibling, ctx.world));
     // 根序（ADR-014）——仅根节点有意义；非根写出来读回也被忽略，无害。
     writer.WriteInt(Join(componentPath, "sortIndex"),   h->sortIndex);
 }
@@ -230,10 +284,19 @@ bool ReadHierarchy(const JsonReader& reader,
         }
     }
 
-    h.parent      = EntityForPersistentId(parent,      ctx.idToEntity);
-    h.firstChild  = EntityForPersistentId(firstChild,  ctx.idToEntity);
-    h.nextSibling = EntityForPersistentId(nextSibling, ctx.idToEntity);
-    h.prevSibling = EntityForPersistentId(prevSibling, ctx.idToEntity);
+    // guid 主键字段（A2 选项 B / ADR-018，schema 1.16+）。旧文件无这些字段时
+    // GetString 返回空串 → ResolveEntityRef 全程回退顺序 int（向后兼容）。空串
+    // 也表示空链接 / 被引用实体当时无 guid，同样回退 int。
+    const std::string parentGuid      = reader.GetString(Join(componentPath, "parentGuid"),      "");
+    const std::string firstChildGuid  = reader.GetString(Join(componentPath, "firstChildGuid"),  "");
+    const std::string nextSiblingGuid = reader.GetString(Join(componentPath, "nextSiblingGuid"), "");
+    const std::string prevSiblingGuid = reader.GetString(Join(componentPath, "prevSiblingGuid"), "");
+
+    // 互引用解析：优先 guid（非空且命中本次 Load 的 guid 索引），否则回退顺序 int。
+    h.parent      = ResolveEntityRef(parentGuid,      parent,      ctx);
+    h.firstChild  = ResolveEntityRef(firstChildGuid,  firstChild,  ctx);
+    h.nextSibling = ResolveEntityRef(nextSiblingGuid, nextSibling, ctx);
+    h.prevSibling = ResolveEntityRef(prevSiblingGuid, prevSibling, ctx);
     h.sortIndex   = static_cast<int>(sortIndex);
 
     ctx.world.AddComponent(entity, h);

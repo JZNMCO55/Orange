@@ -22,7 +22,10 @@
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/ParticleEmitterComponent.h>
 #include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/core/Guid.h>
 #include <orange/engine/scene/Entity.h>
+#include <orange/engine/scene/EntityGuid.h>
+#include <orange/engine/scene/GuidComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
@@ -66,6 +69,8 @@ using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::ParticleEmitterComponent;
 using Orange::Engine::Render::ParticleEmitterDesc;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Core::Guid;
+using Orange::Engine::Scene::GuidComponent;
 using Orange::Engine::Scene::HierarchyComponent;
 using Orange::Engine::Scene::NameComponent;
 using Orange::Engine::Scene::TransformComponent;
@@ -1325,6 +1330,394 @@ void TestOldSceneWithoutScriptComponentLoads()
     std::fprintf(stdout, "  [PASS] old scene without Script component loads (backward compat)\n");
 }
 
+// ---------------------------------------------------------------------------
+// A2 EntityGuid 持久身份主键迁移（ADR-018，选项 B 双键过渡）
+// ---------------------------------------------------------------------------
+
+// 小工具：按 Name 在 loaded world 里反查 entity。
+Entity FindByName(const World& w, const char* name)
+{
+    auto& reg = const_cast<World&>(w).Registry();
+    for (auto ent : reg.view<NameComponent>())
+    {
+        if (reg.get<NameComponent>(ent).name == name)
+        {
+            return World::FromEntt(ent);
+        }
+    }
+    return Entity::Invalid();
+}
+
+// 读整文件字节。
+std::string ReadFileBytes(const std::filesystem::path& p)
+{
+    std::ifstream in(p, std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// 构造一棵 root → [a, b, c] 的小层级，全员带 Name + Hierarchy。
+void BuildHierarchyFixture(World& w, Entity& root, Entity& a, Entity& b, Entity& c)
+{
+    root = w.CreateEntity();
+    a    = w.CreateEntity();
+    b    = w.CreateEntity();
+    c    = w.CreateEntity();
+    w.AddComponent<NameComponent>(root, {"root"});
+    w.AddComponent<NameComponent>(a,    {"a"});
+    w.AddComponent<NameComponent>(b,    {"b"});
+    w.AddComponent<NameComponent>(c,    {"c"});
+    w.AddComponent<HierarchyComponent>(root, {});
+    w.AddComponent<HierarchyComponent>(a, {});
+    w.AddComponent<HierarchyComponent>(b, {});
+    w.AddComponent<HierarchyComponent>(c, {});
+    auto* rootH = w.GetComponent<HierarchyComponent>(root);
+    auto* aH    = w.GetComponent<HierarchyComponent>(a);
+    auto* bH    = w.GetComponent<HierarchyComponent>(b);
+    auto* cH    = w.GetComponent<HierarchyComponent>(c);
+    rootH->firstChild = a;
+    aH->parent = root;  aH->nextSibling = b;
+    bH->parent = root;  bH->prevSibling = a;  bH->nextSibling = c;
+    cH->parent = root;  cH->prevSibling = b;
+}
+
+// 验证 loaded world 的 root→[a,b,c] 拓扑正确（无论经 guid 还是 int 解析）。
+void AssertHierarchyTopology(const World& w)
+{
+    const Entity lroot = FindByName(w, "root");
+    const Entity la    = FindByName(w, "a");
+    const Entity lb    = FindByName(w, "b");
+    const Entity lc    = FindByName(w, "c");
+    assert(lroot.IsValid() && la.IsValid() && lb.IsValid() && lc.IsValid());
+    const auto* rh = w.GetComponent<HierarchyComponent>(lroot);
+    const auto* ah = w.GetComponent<HierarchyComponent>(la);
+    const auto* bh = w.GetComponent<HierarchyComponent>(lb);
+    const auto* ch = w.GetComponent<HierarchyComponent>(lc);
+    assert(rh && ah && bh && ch);
+    assert(rh->firstChild == la);
+    assert(ah->parent == lroot && ah->nextSibling == lb);
+    assert(bh->parent == lroot && bh->prevSibling == la && bh->nextSibling == lc);
+    assert(ch->parent == lroot && ch->prevSibling == lb);
+}
+
+// S1：SaveOptions.ensureGuids（默认开）—— 非 const Save 路径在 Save 前普遍补 guid。
+// 补 guid → Save → Load → 每 entity 有 guid 且与 Save 前一致。
+void TestSaveEnsuresGuids()
+{
+    const auto path = MakeTempScenePath("s1_ensure_guids");
+
+    World source;
+    Entity e0 = source.CreateEntity();
+    Entity e1 = source.CreateEntity();
+    source.AddComponent<NameComponent>(e0, {"n0"});
+    source.AddComponent<NameComponent>(e1, {"n1"});
+    // Save 前**没有**任何 GuidComponent。
+    assert(source.GetComponent<GuidComponent>(e0) == nullptr);
+    assert(source.GetComponent<GuidComponent>(e1) == nullptr);
+
+    // 非 const Save（默认 ensureGuids=true）→ Save 前普遍补 guid（mutate source）。
+    auto sv = SceneSerialization::Save(source, path.string());
+    assert(sv.IsOk());
+    // Save 后 source 上的实体已被补 guid（EnsureEntityGuids 的副作用）。
+    const auto* sg0 = source.GetComponent<GuidComponent>(e0);
+    const auto* sg1 = source.GetComponent<GuidComponent>(e1);
+    assert(sg0 != nullptr && sg0->guid.IsValid());
+    assert(sg1 != nullptr && sg1->guid.IsValid());
+    const Guid savedG0 = sg0->guid;
+    const Guid savedG1 = sg1->guid;
+
+    // Load → 每 entity 有 guid 且与 Save 前一致。
+    World loaded;
+    auto lv = SceneSerialization::Load(path.string(), loaded);
+    assert(lv.IsOk());
+    assert(loaded.Size() == 2);
+    const Entity ln0 = FindByName(loaded, "n0");
+    const Entity ln1 = FindByName(loaded, "n1");
+    assert(ln0.IsValid() && ln1.IsValid());
+    const auto* lg0 = loaded.GetComponent<GuidComponent>(ln0);
+    const auto* lg1 = loaded.GetComponent<GuidComponent>(ln1);
+    assert(lg0 != nullptr && lg0->guid == savedG0);
+    assert(lg1 != nullptr && lg1->guid == savedG1);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] S1: Save(World&) ensures guids universally + round-trips\n");
+}
+
+// S1：ensureGuids=false → 非 const Save 不补 guid（行为与历史一致）。
+void TestSaveEnsureGuidsFalseNoOp()
+{
+    const auto path = MakeTempScenePath("s1_ensure_false");
+
+    World source;
+    Entity e = source.CreateEntity();
+    source.AddComponent<NameComponent>(e, {"n"});
+
+    SceneSerialization::SaveOptions opt;
+    opt.ensureGuids = false;
+    auto sv = SceneSerialization::Save(source, path.string(), opt);
+    assert(sv.IsOk());
+    // 关：不补 guid。
+    assert(source.GetComponent<GuidComponent>(e) == nullptr);
+
+    World loaded;
+    assert(SceneSerialization::Load(path.string(), loaded).IsOk());
+    assert(loaded.Size() == 1);
+    const Entity ln = FindByName(loaded, "n");
+    assert(ln.IsValid());
+    assert(loaded.GetComponent<GuidComponent>(ln) == nullptr);  // 无 guid 段
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] S1: ensureGuids=false leaves world without guids\n");
+}
+
+// S1：const Save 入口物理上不补 guid（ensureGuids 被忽略）。
+void TestConstSaveDoesNotEnsureGuids()
+{
+    const auto path = MakeTempScenePath("s1_const_save");
+
+    World source;
+    Entity e = source.CreateEntity();
+    source.AddComponent<NameComponent>(e, {"n"});
+
+    // 经 const 引用调 Save —— 选到 const 重载，不 mutate、不补 guid。
+    const World& cref = source;
+    auto sv = SceneSerialization::Save(cref, path.string());  // 默认 ensureGuids=true，但 const 入口忽略
+    assert(sv.IsOk());
+    assert(source.GetComponent<GuidComponent>(e) == nullptr);  // 未被补 guid
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] S1: const Save ignores ensureGuids (no mutation)\n");
+}
+
+// S3：scene 级 guid 不变性 —— Save→Load guid 逐 entity 稳定 + EnsureEntityGuids 幂等 +
+// ReassignEntityGuids 后旧 guid 不复现于序列化产物。
+void TestGuidInvariantsSceneLevel()
+{
+    const auto path = MakeTempScenePath("s3_guid_invariants");
+
+    World source;
+    Entity e0 = source.CreateEntity();
+    Entity e1 = source.CreateEntity();
+    source.AddComponent<NameComponent>(e0, {"i0"});
+    source.AddComponent<NameComponent>(e1, {"i1"});
+
+    // 显式补 guid（非 Save 副作用），记下。
+    assert(SceneSerialization::EnsureEntityGuids(source) == 2);
+    // 幂等：再 Ensure 返回 0。
+    assert(SceneSerialization::EnsureEntityGuids(source) == 0);
+    const Guid g0 = source.GetComponent<GuidComponent>(e0)->guid;
+    const Guid g1 = source.GetComponent<GuidComponent>(e1)->guid;
+
+    // Save→Load guid 逐 entity 稳定。
+    assert(SceneSerialization::Save(source, path.string()).IsOk());
+    World loaded;
+    assert(SceneSerialization::Load(path.string(), loaded).IsOk());
+    assert(loaded.GetComponent<GuidComponent>(FindByName(loaded, "i0"))->guid == g0);
+    assert(loaded.GetComponent<GuidComponent>(FindByName(loaded, "i1"))->guid == g1);
+
+    // ReassignEntityGuids(e0) 后旧 guid 不复现：再 Save 的文件里不含旧 g0 字符串。
+    const std::vector<Entity> targets{e0};
+    SceneSerialization::ReassignEntityGuids(source, targets);
+    assert(source.GetComponent<GuidComponent>(e0)->guid != g0);
+    const auto path2 = MakeTempScenePath("s3_reassigned");
+    assert(SceneSerialization::Save(source, path2.string()).IsOk());
+    const std::string bytes = ReadFileBytes(path2);
+    assert(bytes.find(g0.ToString()) == std::string::npos &&
+           "Reassign 后旧 guid 不应再出现在序列化产物里");
+    assert(bytes.find(g1.ToString()) != std::string::npos && "未 Reassign 的 guid 仍在");
+
+    RemoveIfExists(path);
+    RemoveIfExists(path2);
+    std::fprintf(stdout, "  [PASS] S3: scene-level guid invariants (stable / idempotent / reassign)\n");
+}
+
+// A2.1 ①新写：Save（有 guid）→ Load → 父子拓扑经 guid 解析正确。
+// 间接验 guid 路径：Save 前补 guid，文件里 *Guid 字段非空；Load 时若 guid 索引
+// 命中即走 guid（顺序 int 仍在但作回退）。拓扑正确即证明双键解析无误。
+void TestHierarchyGuidKeyNewWrite()
+{
+    const auto path = MakeTempScenePath("a21_new_write");
+
+    World source;
+    Entity root, a, b, c;
+    BuildHierarchyFixture(source, root, a, b, c);
+
+    // 非 const Save 默认补 guid → 写出 *Guid 字段。
+    assert(SceneSerialization::Save(source, path.string()).IsOk());
+
+    // 文件应含 parentGuid 字段名（schema 1.16 增写）+ 实体 guid 字符串。
+    const std::string bytes = ReadFileBytes(path);
+    assert(bytes.find("parentGuid") != std::string::npos && "1.16 应增写 parentGuid 字段");
+    assert(bytes.find("firstChildGuid") != std::string::npos);
+    // a 的 guid 应作为 root.firstChildGuid 出现。
+    const Guid ga = source.GetComponent<GuidComponent>(a)->guid;
+    assert(bytes.find(ga.ToString()) != std::string::npos);
+
+    World loaded;
+    assert(SceneSerialization::Load(path.string(), loaded).IsOk());
+    assert(loaded.Size() == 4);
+    AssertHierarchyTopology(loaded);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] A2.1 ①: hierarchy guid-key new-write round-trip\n");
+}
+
+// A2.1 ②旧读：手造旧版纯 int scene（schema 1.15，无 *Guid 字段）→ Load → 走 int
+// 回退，拓扑正确。锁住向后兼容（选项 B 核心卖点）。
+void TestHierarchyOldPureIntScene()
+{
+    const auto path = MakeTempScenePath("a21_old_int");
+
+    {
+        std::ofstream out(path);
+        out <<
+            R"({
+              "schemaVersion": { "namespace": "scene/world", "major": 1, "minor": 15 },
+              "entities": [
+                { "id": 0, "components": {
+                    "Name": { "name": "root" },
+                    "Hierarchy": { "parent": -1, "firstChild": 1, "nextSibling": -1, "prevSibling": -1 } } },
+                { "id": 1, "components": {
+                    "Name": { "name": "a" },
+                    "Hierarchy": { "parent": 0, "firstChild": -1, "nextSibling": 2, "prevSibling": -1 } } },
+                { "id": 2, "components": {
+                    "Name": { "name": "b" },
+                    "Hierarchy": { "parent": 0, "firstChild": -1, "nextSibling": 3, "prevSibling": 1 } } },
+                { "id": 3, "components": {
+                    "Name": { "name": "c" },
+                    "Hierarchy": { "parent": 0, "firstChild": -1, "nextSibling": -1, "prevSibling": 2 } } }
+              ]
+            })";
+    }
+
+    World loaded;
+    auto lv = SceneSerialization::Load(path.string(), loaded);
+    assert(lv.IsOk() && "旧 1.15 纯 int 文件必须仍能 Load（向后兼容）");
+    assert(loaded.Size() == 4);
+    AssertHierarchyTopology(loaded);
+    // 旧文件无 Guid 段 → 实体不挂 GuidComponent。
+    assert(loaded.GetComponent<GuidComponent>(FindByName(loaded, "root")) == nullptr);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] A2.1 ②: old pure-int scene (no *Guid) loads via int fallback\n");
+}
+
+// A2.1 ③混合：部分实体有 guid、部分缺。被引用实体无 guid 时该链接经 int 回退；
+// 有 guid 的链接经 guid 解析。两条路径都得拓扑正确。
+void TestHierarchyMixedGuidAndInt()
+{
+    const auto path = MakeTempScenePath("a21_mixed");
+
+    World source;
+    Entity root, a, b, c;
+    BuildHierarchyFixture(source, root, a, b, c);
+    // 只给 root 和 a 补 guid（b / c 无 guid）。
+    const std::vector<Entity> withGuid{root, a};
+    SceneSerialization::ReassignEntityGuids(source, withGuid);  // 给这两个分配 guid
+    // 确认 b / c 仍无 guid。
+    assert(source.GetComponent<GuidComponent>(b) == nullptr);
+    assert(source.GetComponent<GuidComponent>(c) == nullptr);
+
+    // const Save：不补 guid（保留"部分缺"的混合态）。ensureGuids 对 const 入口无效，
+    // 但这里显式用 const 引用，绝不补。
+    const World& cref = source;
+    assert(SceneSerialization::Save(cref, path.string()).IsOk());
+
+    const std::string bytes = ReadFileBytes(path);
+    // root / a 的 guid 应出现（firstChildGuid = a.guid，a.parentGuid = root.guid）。
+    assert(bytes.find(source.GetComponent<GuidComponent>(a)->guid.ToString()) != std::string::npos);
+
+    World loaded;
+    assert(SceneSerialization::Load(path.string(), loaded).IsOk());
+    assert(loaded.Size() == 4);
+    // 混合解析后拓扑仍正确：root.firstChild→a（guid 路径），a.nextSibling→b（b 无
+    // guid，a 写出的 nextSiblingGuid 为空串 → 回退 int），b.nextSibling→c（int），等。
+    AssertHierarchyTopology(loaded);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] A2.1 ③: mixed guid/int hierarchy resolves correctly\n");
+}
+
+// A2.1 ④字节稳定：guid 普遍后 Save→Load→Save 字节一致（顺序排序前提不破）。
+void TestHierarchyGuidByteStable()
+{
+    const auto path1 = MakeTempScenePath("a21_byte1");
+    const auto path2 = MakeTempScenePath("a21_byte2");
+
+    World source;
+    Entity root, a, b, c;
+    BuildHierarchyFixture(source, root, a, b, c);
+
+    // 第一次 Save（非 const，补 guid）。
+    assert(SceneSerialization::Save(source, path1.string()).IsOk());
+
+    World loaded;
+    assert(SceneSerialization::Load(path1.string(), loaded).IsOk());
+    assert(loaded.Size() == 4);
+
+    // 第二次 Save（非 const，guid 已普遍存在 → Ensure 幂等不新增）。
+    assert(SceneSerialization::Save(loaded, path2.string()).IsOk());
+
+    const std::string a1 = ReadFileBytes(path1);
+    const std::string a2 = ReadFileBytes(path2);
+    assert(!a1.empty());
+    assert(a1 == a2 && "guid 普遍后 Save→Load→Save 字节稳定（含 *Guid 字段）");
+
+    RemoveIfExists(path1);
+    RemoveIfExists(path2);
+    std::fprintf(stdout, "  [PASS] A2.1 ④: hierarchy guid round-trip byte-stable\n");
+}
+
+// A2.1 加固：guid 主键真生效——构造一个"顺序 int 故意指向错误实体、但 guid 指向
+// 正确实体"的文件，验证读端**优先 guid**（拓扑按 guid 而非 int）。这是双键里"guid
+// 当主键"的判定性证据（否则无法区分 guid 路径是否被真正走到）。
+void TestHierarchyGuidWinsOverWrongInt()
+{
+    const auto path = MakeTempScenePath("a21_guid_wins");
+
+    // 两个实体 P（parent）和 K（child）。给定 guid。K.parent 的顺序 int 故意写成
+    // 一个**不存在**的 id（99）→ 若读端走 int 必得 Invalid parent；但 parentGuid
+    // 写 P 的 guid → 走 guid 应得 P。
+    const Guid gP{0x1111111111111111ull, 0x2222222222222222ull};
+    const Guid gK{0x3333333333333333ull, 0x4444444444444444ull};
+    {
+        std::ofstream out(path);
+        out <<
+            R"({
+              "schemaVersion": { "namespace": "scene/world", "major": 1, "minor": 16 },
+              "entities": [
+                { "id": 0, "components": {
+                    "Name": { "name": "P" },
+                    "Guid": { "value": ")" << gP.ToString() << R"(" },
+                    "Hierarchy": { "parent": -1, "firstChild": 1, "firstChildGuid": ")" << gK.ToString() << R"(",
+                                   "nextSibling": -1, "prevSibling": -1, "parentGuid": "" } } },
+                { "id": 1, "components": {
+                    "Name": { "name": "K" },
+                    "Guid": { "value": ")" << gK.ToString() << R"(" },
+                    "Hierarchy": { "parent": 99, "parentGuid": ")" << gP.ToString() << R"(",
+                                   "firstChild": -1, "nextSibling": -1, "prevSibling": -1 } } }
+              ]
+            })";
+    }
+
+    World loaded;
+    auto lv = SceneSerialization::Load(path.string(), loaded);
+    assert(lv.IsOk());
+    assert(loaded.Size() == 2);
+
+    const Entity lp = FindByName(loaded, "P");
+    const Entity lk = FindByName(loaded, "K");
+    assert(lp.IsValid() && lk.IsValid());
+    const auto* kh = loaded.GetComponent<HierarchyComponent>(lk);
+    assert(kh != nullptr);
+    // 关键断言：parent 经 guid 解析为 P（而非 int=99 的 Invalid）。
+    assert(kh->parent == lp && "读端应优先 guid（int 故意指向不存在的 id 99）");
+    const auto* ph = loaded.GetComponent<HierarchyComponent>(lp);
+    assert(ph != nullptr && ph->firstChild == lk && "firstChild 经 guid 解析");
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] A2.1: guid key wins over (deliberately wrong) int\n");
+}
+
 }  // namespace
 
 int main()
@@ -1353,6 +1746,16 @@ int main()
     TestSaveLoadSaveByteStable();
     TestScriptComponentRoundTrip();
     TestOldSceneWithoutScriptComponentLoads();
+    // A2 EntityGuid 持久身份主键迁移（ADR-018）
+    TestSaveEnsuresGuids();
+    TestSaveEnsureGuidsFalseNoOp();
+    TestConstSaveDoesNotEnsureGuids();
+    TestGuidInvariantsSceneLevel();
+    TestHierarchyGuidKeyNewWrite();
+    TestHierarchyOldPureIntScene();
+    TestHierarchyMixedGuidAndInt();
+    TestHierarchyGuidByteStable();
+    TestHierarchyGuidWinsOverWrongInt();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
     return 0;
 }

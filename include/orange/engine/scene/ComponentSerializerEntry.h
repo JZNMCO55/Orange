@@ -111,6 +111,14 @@ struct LoadContext
     // 空 → 维持旧行为（查表失败即留 null）。
     std::function<Render::MaterialInstance*(const std::string& materialId)>
         materialResolver{};
+
+    // guid 字符串（GuidComponent::guid 的 ToString 形态，32 hex）→ 本次 Load
+    // 预创建出的 Entity 的反查表（A2 主键迁移 / ADR-018）。Load 主流程在创建完
+    // 所有实体后、回填 component 前一次性建好，供 ReadHierarchy 等"互引用解析优
+    // 先 guid、回退顺序 int"。键用 guid 字符串而非 Core::Guid，避免给 Core::Guid
+    // 加全局 std::hash 特化（侵入公共面）；空 / 非法 guid 的实体不入表。
+    // 空 → 读端无 guid 索引可用，互引用全回退顺序 int（读旧文件 / guid 缺失）。
+    const std::unordered_map<std::string, Entity>* guidToEntity{nullptr};
 };
 
 // 区分 Pass 1（纯数据，无 backend 依赖）与 Pass 2（需先建 backend 再 attach）。

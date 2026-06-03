@@ -17,6 +17,8 @@
 #include "orange/engine/asset/AssetRegistry.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/core/Serialization.h"
+#include "orange/engine/scene/EntityGuid.h"
+#include "orange/engine/scene/GuidComponent.h"
 #include "orange/engine/physics/ColliderComponent.h"
 #include "orange/engine/physics/PhysicsWorld.h"
 #include "orange/engine/physics/RigidBodyComponent.h"
@@ -92,9 +94,17 @@ namespace
 // typeName 两字符串字段）。同款 optional component 路径，旧 1.14 文件无 "Script"
 // 段时实体不挂该组件，运行期无脚本驱动，行为不变——additive 向后兼容。
 // ScriptComponent 自带 "component/Script" 子 schema 版本承载字段级演进。
+// 1.15 → 1.16：HierarchyComponent 的互引用从"顺序 int 单主键"升级为"guid 主键 +
+// 顺序 int 降级本地序号 + 双键过渡"（A2 选项 B，ADR-018）。parent/firstChild/
+// nextSibling/prevSibling 在保留原顺序 int 字段（仍作本文件内可读局部编号）之外，
+// **增写** parentGuid/firstChildGuid/nextSiblingGuid/prevSiblingGuid（被引用实体
+// GuidComponent 的 guid 字符串；空链接 / 被引用实体无 guid 时写空串）。读时优先
+// *Guid（非空且能在本次 Load 的 guid 索引命中即用），否则回退顺序 int（读旧 1.15
+// 及更早纯 int 文件 / guid 缺失）。已 shipped 的顺序 int 字段语义不改，仅 additive
+// 增 *Guid 字段——旧文件无 *Guid 段时全程走 int 回退，向后兼容（选项 B 核心卖点）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 15};
+    static const SchemaVersion kVersion{"scene/world", 1, 16};
     return kVersion;
 }
 
@@ -274,11 +284,28 @@ Result<void, ResultCode> SaveImpl(const World& world,
 // Save
 // ---------------------------------------------------------------------------
 
+Result<void, ResultCode> Save(World& world,
+                              std::string_view path,
+                              const SaveOptions& options)
+{
+    // 非 const 入口：options.ensureGuids 开（默认）时先普遍补全 guid（A2 选项 B /
+    // ADR-018），把"guid 零散"规整成"guid 普遍"，使 Hierarchy 的 guid 主键有可写
+    // 的被引用 guid。EnsureEntityGuids 幂等——已有 guid 的实体不动。补完再委托只读
+    // 核心。ensureGuids=false 时与 const 入口行为一致（不补，只写已有 guid）。
+    if (options.ensureGuids)
+    {
+        EnsureEntityGuids(world);
+    }
+    return SaveImpl(world, path, options, {});
+}
+
 Result<void, ResultCode> Save(const World& world,
                               std::string_view path,
                               const SaveOptions& options)
 {
-    // 直接走 SaveImpl 不带 filter——单文件路径写出整 world。
+    // const 入口：物理上无法 mutate world，故不补 guid（options.ensureGuids 被
+    // 忽略）——只把当前已有 guid 当主键写出，无 guid 实体的 Hierarchy 引用回退顺
+    // 序 int。行为与历史完全一致。直接走 SaveImpl 不带 filter——单文件写整 world。
     return SaveImpl(world, path, options, {});
 }
 
@@ -394,12 +421,39 @@ Result<void, ResultCode> Load(std::string_view path,
         idTable.push_back(e);
     }
 
+    // 3.5) 建 guid 字符串 → 预创建 Entity 的反查索引（A2 主键迁移 / ADR-018）。
+    //      在所有实体创建之后、回填 component 之前一次性扫一遍 JSON 的
+    //      "entities[i].components.Guid.value" 字段——此刻 GuidComponent 尚未被
+    //      Pass 1 attach，没法靠 FindEntityByGuid（扫 view<GuidComponent>），故
+    //      直接从 JSON 读 guid 字符串映射到已建 entity。ReadHierarchy 等"优先
+    //      guid"解析消费它。空 / 非法 guid 不入表；重复 guid（坏数据）保留首次
+    //      映射（与 FindEntityByGuid 取首个匹配的语义一致）。
+    std::unordered_map<std::string, Entity> guidToEntity;
+    guidToEntity.reserve(entityCount);
+    for (std::size_t i = 0; i < entityCount; ++i)
+    {
+        const std::string guidValuePath =
+            ComponentPath(EntityBasePath(i), "Guid") + "/value";
+        std::string guidText;
+        if (reader.ReadString(guidValuePath, guidText) && !guidText.empty())
+        {
+            // 仅收能解析成合法（non-zero）guid 的——坏格式 / 全 0 不入表（与
+            // FindEntityByGuid 对非法 guid 判负一致）。
+            Core::Guid guid{};
+            if (Core::Guid::FromString(guidText, guid) && guid.IsValid())
+            {
+                guidToEntity.emplace(std::move(guidText), idTable[i]);
+            }
+        }
+    }
+
     const LoadContext ctx{world, idTable,
                           options.assetRegistry,
                           options.physicsWorld,
                           options.animatorRegistry,
                           options.namedMaterialInstances,
-                          options.materialResolver};
+                          options.materialResolver,
+                          &guidToEntity};
 
     const auto& serializers = GetBuiltinComponentSerializers();
 
