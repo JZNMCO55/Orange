@@ -281,9 +281,9 @@ bool ShowImportFileDialog(void* parentHwnd, std::string& outPath)
     // 1 = All Supported，让用户拖任意支持格式都能直接看到。defaultExt
     // 留空（import 不存盘到固定扩展名，纯 open 路径）。
     const COMDLG_FILTERSPEC filterSpec[] = {
-        { L"All Supported (*.obj;*.gltf;*.glb;*.png;*.jpg;*.jpeg;*.tga;*.hdr)",
-          L"*.obj;*.gltf;*.glb;*.png;*.jpg;*.jpeg;*.tga;*.hdr" },
-        { L"Mesh (*.obj;*.gltf;*.glb)",      L"*.obj;*.gltf;*.glb" },
+        { L"All Supported (*.obj;*.gltf;*.glb;*.fbx;*.png;*.jpg;*.jpeg;*.tga;*.hdr)",
+          L"*.obj;*.gltf;*.glb;*.fbx;*.png;*.jpg;*.jpeg;*.tga;*.hdr" },
+        { L"Mesh (*.obj;*.gltf;*.glb;*.fbx)", L"*.obj;*.gltf;*.glb;*.fbx" },
         { L"Image (*.png;*.jpg;*.jpeg;*.tga)", L"*.png;*.jpg;*.jpeg;*.tga" },
         { L"HDR Image (*.hdr)",              L"*.hdr" },
         { L"All Files (*.*)",                L"*.*" },

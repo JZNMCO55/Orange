@@ -120,7 +120,7 @@
 - **现状/缺口**：只有 OBJ/glTF/GLB；无 FBX/DAE/USD；无 EXR/KTX/DDS/BC7 压缩纹理；无离线 texture cook（mipmap/压缩）；无 file watcher 自动 reimport。
 - **里程碑**（各自独立，ADR-008 4 件套路径，可并行）：
   - C2.1 **glTF scene import G2 ✅ 2026-06-03**（per-mesh PBR 材质）：单 material → `Renderable.materialInstance` / 多 material → `SubMeshMaterialsComponent`（各 sub-mesh 段独立材质 + slot 0 兜底），去 G1"合并单段走默认材质"workaround；全局按 `cgltf_material*` 去重；**headless 难点解法** = sentinel `MaterialInstance(nullptr)`（unique_ptr 拥有，Save 用完即随 scratch world 析构）+ `namedMaterialInstances` 反查写 `.material` 路径进 scene.json，Load 端 `materialResolver` lazy-create 真实 instance 对称；cgltf 生命周期严守（material 解析全在 cgltf_free 前）；`GltfSceneImportTest` +3 case；ctest 84/84。**剩 G3 cameras**（per-mesh 材质已闭环）。
-  - C2.2 **FBX importer**（OpenFBX MIT vendor，hierarchy+multi-mesh+material slot）。
+  - C2.2 **FBX importer ✅ 2026-06-03**（静态 mesh + 材质 MVP）：OpenFBX MIT vendored 到 `vendor/OpenFBX/`（ofbx + libdeflate，C/C++ 混编 per-TU /W0）；`FbxImporter`（tools/OrangeEditor/import/）对标 GltfImporter——塌平合并多 mesh + 多 material 拆 sub-mesh slot + MikkTSpace 切线 + ImportTexture co-locate + `.mesh`/`.material`/`.meta` + AssetRegistry；**坐标系转换**（Z-up→Y-up `(x,y,z)→(x,z,-y)`，信任已烘米单位）；ImportDispatcher 注册 `.fbx`。Blender headless 自生成 `cube_two_material.fbx` fixture（自有几何可 commit）+ `FbxImportTest`（轴正确性靠绿 sub-mesh 法线落 ±Y 锁住、多材质 sub-mesh、确定性）；ctest 88/88。**剩**：scene-level 层级导入（像 glTF G1）/ skinning/animation / 真 cm 单位文件（已知 MVP 限制偏大 100×）。
   - C2.3 压缩纹理 + 离线 cook（性能 milestone，部分跨仓）。
   - C2.4 file watcher 自动 reimport（平台文件监控）。
 - 规模 M each。多数引擎/编辑器单仓（cook 部分跨仓）。

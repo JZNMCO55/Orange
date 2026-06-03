@@ -136,6 +136,7 @@ add_executable(OrangeEditor
     command/EntityCommands.cpp
     command/PrefabCommands.cpp
     command/SetAnimationClipCommand.cpp
+    import/FbxImporter.cpp
     import/GltfImporter.cpp
     import/GltfMaterialParse.cpp
     import/GltfSceneImporter.cpp
@@ -148,6 +149,12 @@ add_executable(OrangeEditor
     # cgltf / tinyobjloader 同款 in-tree vendor。仅 OrangeEditor 消费——引擎
     # runtime 不接（ADR-008 importer-only invariant）。warning 见下方 /W0。
     ../../vendor/mikktspace/mikktspace.c
+    # OpenFBX（vendor/OpenFBX，MIT）—— FBX 解析。不像 cgltf/tinyobjloader 是纯
+    # header：ofbx.cpp（C++）+ libdeflate.c（C，ofbx.cpp 本地 include）需编译。
+    # 仅 OrangeEditor 消费（ADR-008 importer-only invariant）。vendored 源**不改**，
+    # warning 用下方 per-TU /W0 压（C/C++ 混编：libdeflate.c 走 C 编译器）。
+    ../../vendor/OpenFBX/ofbx.cpp
+    ../../vendor/OpenFBX/libdeflate.c
     render/EditorGridAuxPassProvider.cpp
     render/ThumbnailService.cpp
     schema/ComponentSchemaRegistry.cpp
@@ -195,7 +202,8 @@ target_link_libraries(OrangeEditor PRIVATE
 target_include_directories(OrangeEditor PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../vendor/tinyobjloader"
     "${CMAKE_CURRENT_LIST_DIR}/../../vendor/cgltf"
-    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace")
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace"
+    "${CMAKE_CURRENT_LIST_DIR}/../../vendor/OpenFBX")
 
 # MikkTSpace 是第三方 C 源——不享受编辑器的 /W4 /WX。单独把它的 warning
 # 关掉（与 orange_editor_imgui 的 /W0 同款豁免），避免 /WX 把 vendor 代码
@@ -203,10 +211,14 @@ target_include_directories(OrangeEditor PRIVATE
 if (MSVC)
     set_source_files_properties(
         "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace/mikktspace.c"
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/OpenFBX/ofbx.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/OpenFBX/libdeflate.c"
         PROPERTIES COMPILE_FLAGS "/W0")
 else ()
     set_source_files_properties(
         "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace/mikktspace.c"
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/OpenFBX/ofbx.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../../vendor/OpenFBX/libdeflate.c"
         PROPERTIES COMPILE_FLAGS "-w")
 endif ()
 

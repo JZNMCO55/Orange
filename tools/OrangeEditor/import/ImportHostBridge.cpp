@@ -13,6 +13,7 @@
 // 回调，把刚写出的 .material 注册进编辑器 namedMaterialInstances / userMaterials
 // 缓存（导入后即可在 Inspector Material 下拉选中）。
 
+#include "FbxImporter.h"
 #include "GltfImporter.h"
 #include "ImportDispatcher.h"
 #include "ObjImporter.h"
@@ -81,6 +82,26 @@ ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     return RunGltfImportToRegistry(srcPath, *registry, registerMaterial);
 }
 
+ImportResult RunFbxImport(std::string_view srcPath, EditorHost& host)
+{
+    ImportResult result{};
+    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+    if (!ResolveHostRegistry(host, "FbxImporter", srcPath, registry, result))
+    {
+        return result;
+    }
+    // GUI 路径注入 EnsureMaterialInstance（同 gltf 路径），把刚写出的 .material
+    // 注册进编辑器 namedMaterialInstances / userMaterials 缓存。
+    auto registerMaterial = [&host](const std::string& matPath) {
+        if (::EnsureMaterialInstance(host, matPath) != nullptr)
+        {
+            ORANGE_LOG_INFO("FbxImporter: material '{}' 已注册 → 可在 Renderable "
+                            "Material 字段选用", matPath);
+        }
+    };
+    return RunFbxImportToRegistry(srcPath, *registry, registerMaterial);
+}
+
 ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
                            std::string_view destDirOverride)
 {
@@ -101,6 +122,11 @@ ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host)
 ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host)
 {
     return RunGltfImport(srcPath, host);
+}
+
+ImportResult ImportFbxMesh(std::string_view srcPath, EditorHost& host)
+{
+    return RunFbxImport(srcPath, host);
 }
 
 ImportResult Dispatch(std::string_view srcPath, EditorHost& host)

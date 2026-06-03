@@ -1,5 +1,6 @@
 #include "ImportDispatcher.h"
 
+#include "FbxImporter.h"
 #include "GltfImporter.h"
 #include "MetaSidecar.h"
 #include "ObjImporter.h"
@@ -65,6 +66,10 @@ ImportKind ClassifyByExt(std::string_view ext)
     if (ExtMatches(ext, "gltf") || ExtMatches(ext, "glb"))
     {
         return ImportKind::GltfMesh;
+    }
+    if (ExtMatches(ext, "fbx"))
+    {
+        return ImportKind::FbxMesh;
     }
     return ImportKind::Unsupported;
 }
@@ -200,6 +205,15 @@ ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
     return RunGltfImportToRegistry(srcPath, registry, onMaterialWritten);
 }
 
+ImportResult ImportFbxMeshToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry,
+                                     const MaterialRegisterFn& onMaterialWritten)
+{
+    // 路由到 FbxImporter 模块（OpenFBX 头声明只在 FbxImporter.cpp 引用；
+    // ofbx.cpp / libdeflate.c 作为独立 TU 由 CMake 接进 target）。
+    return RunFbxImportToRegistry(srcPath, registry, onMaterialWritten);
+}
+
 ImportResult DispatchToRegistry(std::string_view srcPath,
                                 ::Orange::Engine::Asset::AssetRegistry& registry,
                                 const MaterialRegisterFn& onMaterialWritten)
@@ -212,6 +226,8 @@ ImportResult DispatchToRegistry(std::string_view srcPath,
         case ImportKind::ObjMesh:  return ImportObjMeshToRegistry(srcPath, registry);
         case ImportKind::GltfMesh: return ImportGltfMeshToRegistry(srcPath, registry,
                                                                    onMaterialWritten);
+        case ImportKind::FbxMesh:  return ImportFbxMeshToRegistry(srcPath, registry,
+                                                                  onMaterialWritten);
         case ImportKind::Unsupported:
         default:
         {

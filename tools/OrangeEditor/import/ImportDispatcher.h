@@ -41,6 +41,7 @@ enum class ImportKind
     Texture,      // .png / .jpg / .jpeg / .tga / .hdr
     ObjMesh,      // .obj
     GltfMesh,     // .gltf / .glb
+    FbxMesh,      // .fbx
     Unsupported,  // 其它
 };
 
@@ -118,6 +119,12 @@ ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
                                       ::Orange::Engine::Asset::AssetRegistry& registry,
                                       const MaterialRegisterFn& onMaterialWritten = {});
 
+// Fbx mesh importer（registry-only）：OpenFBX 静态 mesh + 材质 MVP。
+// onMaterialWritten 见上（写出 .material 后回调，headless 传空）。
+ImportResult ImportFbxMeshToRegistry(std::string_view srcPath,
+                                     ::Orange::Engine::Asset::AssetRegistry& registry,
+                                     const MaterialRegisterFn& onMaterialWritten = {});
+
 // ---------------------------------------------------------------------------
 // GUI 入口（保留原签名，零行为变化）：内部委托到上面的 registry-only seam，
 // 取 host.assets.pAssets 当 AssetRegistry，gltf 路径注入 EnsureMaterialInstance
@@ -144,6 +151,9 @@ ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host);
 
 // Gltf mesh importer：T4 接通。T2 阶段 stub 返回 NotImplemented。
 ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host);
+
+// Fbx mesh importer：OpenFBX 静态 mesh + 材质 MVP。
+ImportResult ImportFbxMesh(std::string_view srcPath, EditorHost& host);
 
 }  // namespace Orange::Editor::Import
 
