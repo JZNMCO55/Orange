@@ -566,6 +566,98 @@
 
 ---
 
+## 2026-06-03 session（B2.3：timeline / dopesheet 面板）
+
+> 目标：把底部 Animation 面板从占位（v0.7 留的 2 行 TextDisabled）升级成**编辑选中实体 ClipAnimator clip 的时间轴**。建在 B2.6（`8e43084`，animator 可挂 + 引用 .anim + 编辑期预览 tick）之上。spec：`docs/b2.3-timeline-dopesheet-spec.md`。
+>
+> headless 已验：OrangeEditor.exe 编出（`/W4 /WX` 零警告新增 TU）+ 全量 ctest 86/86（含新增 `timeline_edit_primitives_test` 锁住命令 do/undo 对称 + clip CRUD 原语 + .anim 写回保真 + `editor_build_smoke` standalone 消费）+ check_invariants OK（无新 hardcode / 像素字面量，颜色全走 Theme token、尺寸全走 GetContentRegionAvail / CalcTextSize / 字号派生）。
+>
+> 架构关键：clip 编辑走 **copy-modify-SetClip 命令**（`command/SetAnimationClipCommand.{h,cpp}`，设计点 1b，不加 MutableClip）——每次编辑 = 拷当前 clip → 副本上调 AnimationClip.h 原语 → RecomputeDuration → 新建命令压栈，do/undo 都 SetClip。连续拖键 merge 成一条（参 MoveEntityCommand merge）。▶/⏸ **复用 B2.6 的 host.animPreview**（不新造 tick 路径）。所有 ImGui 像素 / 拖拽 / hit-test headless 测不到，逐条 dogfood（参"读代码判能用会翻车"教训）。
+>
+> **dogfood 阻碍同 B2.6 item 37/38**：`assets/` 无内置 `.anim` 资产 → 完整闭环（含资产化 clip 的 "Save to .anim" 写回）需先有一个 .anim 文件。可临时用 headless `SaveAnimationClip` 造一个放 `assets/`，**或直接用 B2.3 本身**——选 SeedDemoWorld 的 "Animated Cube (clip)"（内联 clip，无 source）即可验大部分 timeline 编辑（只 "Save to .anim" 按钮不出现，因内联 clip 随 scene 存 clipJson 不需写回）。
+
+### 39. 空态 + 只读 timeline 绘制 —— 轨道行 / 关键帧点 / playhead / 标尺
+
+- **改点**：`tools/OrangeEditor/panels/AnimationTimelinePanel.cpp` 的 `DrawAnimationPanel`（从 static 改成员函数，需访问 mHost）。
+- **怎么触发**：
+  1. 底部把 **Animation** tab 切到前台（与 Assets / Console 同 slot）。
+  2. **空态**：未选实体 / 选中实体没有 clip backend → 看友好提示文案。
+  3. **有 clip**：选中挂了 clip（内联或引用 .anim、duration>0）的实体（如 SeedDemoWorld 的 "Animated Cube (clip)"，需先把 demo.scene.json 挪开触发 seed，见 item 33）。
+- **看什么 / 通过判据**：
+  - 空态两种提示分别正确（无选中 vs 有选中但无 clip backend），文案友好不报错。
+  - 有 clip 时画出：**左列轨道标签**（每 track 一行 targetName，如 `position.y` / `rotation`）+ **关键帧菱形**（按 time 横向定位，duration 映射到时间轴宽度）+ **顶部时间标尺**（0 / 中 / 末三档刻度 + 秒数）+ **playhead 竖线游标**（橙色，顶部三角）。
+  - 行交替底色 + 标签列分隔线清晰；菱形位置与 key.time 成比例（首键贴左、末键贴右）。
+  - transport 行：▶/⏸/⏹ + Loop checkbox + speed DragFloat + `t = X / Y` readout 都在。
+- **背景**：只读层验"画得对"——headless 已验数据映射（time→x、duration），但**像素布局 / 菱形位置 / 标尺读数视觉只能真机**。若菱形错位 / 标签串行 / playhead 偏，告诉我（布局 helper 在 TU 顶 `RowHeight`/`KeyRadius`/`TimeToScreenX`）。
+
+### 40. playhead scrub —— 拖游标实体实时跟随
+
+- **怎么触发**：有 clip 的实体选中（Edit 模式），在 timeline 时间轴区（标签列右侧）**点击 / 拖动空白处**（非关键帧 / 非事件）。
+- **看什么 / 通过判据**：
+  - 点击 / 拖动 → playhead 跳到点击时刻 + **实体按 clip 曲线实时变位姿**（直接 `Seek(t)`，Edit 模式写 Transform 即时可见，不依赖 ▶）。
+  - 拖动连续 scrub → 实体平滑跟随（如 "Animated Cube" 上下浮 + 自旋随 playhead 走）。
+  - **仅 Edit 模式可用**：进 Play（工具栏 Play）后 timeline 交互全禁（与 B2.6 预览互斥纪律一致）。
+- **背景**：scrub 是 timeline 最高频交互。**拖拽手感 + 实体跟随实时性靠真机**（hit-test 区分点中 key vs 空白的容差是否合适，告诉我调 `HitRadius`）。
+
+### 41. 打键 / 删键 —— K 插入 + Del 删除（命令栈）
+
+- **怎么触发**（面板需聚焦）：
+  - **打键**：移 playhead 到某时刻（scrub）→ 点某轨道行选中它（点中该轨的某 key，或默认第一条轨）→ 按 **K** 或底部 **Key (K)** 按钮。
+  - **删键**：点中一个关键帧菱形（变橙高亮）→ 按 **Del**。
+- **看什么 / 通过判据**：
+  - 打键 → 在 playhead 时刻该轨出现新菱形；新键值 = 当前曲线在该时刻的采样值（**打键不跳变**，曲线视觉连续）。同时刻重打覆盖。
+  - 删键 → 选中菱形消失；曲线在该段重新插值。
+  - **Ctrl+Z 一步回退**（打键撤回 = 删该键；删键撤回 = 恢复该键），Redo 恢复。每次打 / 删各占一条撤销步（离散编辑唯一 merge key，不互相合并）。
+- **背景**：走 `SetAnimationClipCommand`（整 clip 快照命令）。**命令 do/undo 数据语义 headless 已锁**（`timeline_edit_primitives_test` 段 1/3）；**K/Del 键捕获时机 + 选中高亮 + Undo 逐步真机验**。注意 K/Del 仅在 Animation 面板聚焦时响应（避免与 viewport Del 删实体冲突）。
+
+### 42. 拖关键帧改时间 —— 水平拖 + 连续拖 merge 成一条
+
+- **怎么触发**：点中一个关键帧菱形 → **水平拖动**到新时刻松手。
+- **看什么 / 通过判据**：
+  - 拖动中菱形跟随鼠标横移，松手后 key.time = 落点时刻；曲线随之重定时；duration 若末键被拖远则**实时重算**（标尺末档跟着变）。
+  - **连续拖动整段在撤销栈只留一条**（merge：拖动期每帧 push 同 merge key 命令合并），Ctrl+Z 一步回到拖动起点（参 MoveEntityCommand merge 心智）。
+  - 拖过相邻 key 时维持升序（MoveKeyframeTime 重排）；拖动期选中跟踪正确（不丢选）。
+- **背景**：**拖拽 + merge headless 测不到**（数据层 MoveKeyframeTime + duration 重算已由 `timeline_edit_primitives_test` 段 2 锁）。重点验：① 拖动跟手；② **整段拖动 Undo 一步回退**（不是每帧一条）；③ 拖动后选中不丢。若拖动卡顿 / Undo 要按多次 / 拖完选丢，告诉我。
+
+### 43. ▶ 播放预览 —— 复用 B2.6 host.animPreview（不新造 tick）
+
+- **怎么触发**：有 clip 的实体选中（Edit 模式）→ timeline transport 行点 **▶**（播放）/ 再点变 **⏸**（暂停）/ **⏹**（停止归位）。
+- **看什么 / 通过判据**：
+  - ▶ → 实体在 **Edit 模式**自动按 clip 动（编辑期预览 tick，**不进 PlayState::Play**）；playhead 随之推进；按钮变 ⏸。
+  - ⏸ → 停在当前帧（pose 不归位）；⏹ → 归位 t0 + 停。
+  - **与 B2.6 Inspector 的 Play/Pause 同一套 host.animPreview**：在 Inspector 点 Play 和在 timeline 点 ▶ 驱动同一预览态（切到另一实体自动接管）。
+  - **与 PlayState::Play 互斥**：进 Play 前预览自动停 + 归位；Play 期 timeline 交互灰禁。
+- **背景**：**复用 B2.6 已落地的预览 tick**（`EditorRenderLayer::OnUpdate` Edit 分支单 animator 推进），本面板只置 `host.animPreview.previewPlaying`。务必验证与 B2.6 item 38 行为一致（不双 tick / 切走归位 / 与 Play 互斥）。
+
+### 44. 轨道增删 + .anim 写回 —— Add/Remove Track + Save to .anim
+
+- **怎么触发**（底部工具行，Edit 模式）：
+  - **加轨道**：选 targetName 下拉（position / position.x / rotation / scale / scale.uniform 等约定名）→ **Add Track**。
+  - **删轨道**：点中某轨道的一个 key 选中该轨 → **Remove Track**。
+  - **写回**（仅引用 .anim 的 clip）：编辑后点 transport 行的 **Save to .anim** 按钮。
+- **看什么 / 通过判据**：
+  - Add Track → timeline 多一行（空轨，无 key），可在其上打键。Remove Track → 该行消失。都可 Ctrl+Z。
+  - **资产化 clip（引用 .anim，SourceAssetPath 非空）**：transport 行出现 **Save to .anim** 按钮 + "(资产化 clip：编辑后须写回 .anim)" 提示；点它把 in-memory clip 写回 .anim 文件（Console 打 `已写回 <path>`）。重开该 .anim（或重 Load 引用它的 scene）→ 编辑仍在。
+  - **内联 clip（无 source，随 scene 存 clipJson）**：**不出现** Save to .anim 按钮（编辑随 scene 存即可，无需单独写回）。
+- **背景**：UpsertTrack/RemoveTrack do/undo + SaveAnimationClip round-trip **headless 已锁**（`timeline_edit_primitives_test` 段 4/6）；**Add/Remove Track 工具行交互 + .anim 写回后重开保真 + 内联 vs 资产化 clip 分支的按钮可见性真机验**。注意：内联 clip 改动若不保存 scene 会随关闭丢（与所有 scene 编辑一致）。
+
+### 45. 事件 marker 行 —— 加 / 删 / 拖 / 改名事件
+
+- **怎么触发**（Edit 模式）：
+  - **加事件**：移 playhead 到某时刻 → 底部 **Add Event**（在 playhead 时刻加一个名 "event" 的事件）。
+  - **选 / 拖**：点中标尺行内的事件三角 marker（变橙高亮）→ 水平拖改 time。
+  - **改名**：选中事件 → 工具行下方出现 **Event Name** InputText，输入新名回车。
+  - **删**：选中事件 → 按 **Del**。
+- **看什么 / 通过判据**：
+  - 事件以**小三角 marker** 显示在顶部标尺行（按 time 横向定位 + 旁边显示 name）。
+  - 加 → marker 出现在 playhead 处；拖 → marker 横移改 time（维持升序）；改名 → marker 旁文字变；删 → marker 消失。全部 Ctrl+Z 可撤。
+  - **Del 优先删选中事件**（若有事件选中），否则删选中 key——两者不冲突。
+- **背景**：用已落地的 `AddClipEvent`/`RemoveClipEvent` 事件原语（B2.2）。**事件 do/undo headless 已锁**（`timeline_edit_primitives_test` 段 5）；**marker 绘制位置 + 点选/拖动 hit-test + 改名 InputText 手感真机验**。事件最终供游戏侧 `SetEventCallback`（boss 攻击判定时序），timeline 是其创作壳。
+
+> **B2.3 不含**（后续单独做）：曲线编辑器（B2.4，Bezier handle 拖动改 inTangent/outTangent.y 缓动）；状态机图编辑器（B2.5）。本面板是 dopesheet（key 时间编辑），不是 curve editor（key 值/缓动编辑）。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。

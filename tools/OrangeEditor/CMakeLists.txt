@@ -124,6 +124,7 @@ add_executable(OrangeEditor
     VulkanLoaderShim.cpp
     context/EditorKeybindings.cpp
     context/EditorSettings.cpp
+    panels/AnimationTimelinePanel.cpp
     panels/EntityTreePanel.cpp
     panels/InspectorPanel.cpp
     panels/LayersPanel.cpp
@@ -134,6 +135,7 @@ add_executable(OrangeEditor
     command/CommandStack.cpp
     command/EntityCommands.cpp
     command/PrefabCommands.cpp
+    command/SetAnimationClipCommand.cpp
     import/GltfImporter.cpp
     import/GltfMaterialParse.cpp
     import/GltfSceneImporter.cpp

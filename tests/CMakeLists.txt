@@ -396,6 +396,9 @@ orange_engine_add_test(animation_clip_serialization_test animation/AnimationClip
 orange_engine_add_test(animation_clip_loader_test   animation/AnimationClipLoaderTest.cpp)
 # ClipAnimator clip 重指派：Inspector clipSet 序列的纯数据语义（B2.6）
 orange_engine_add_test(clip_animator_asset_reassign_test animation/ClipAnimatorAssetReassignTest.cpp)
+# Timeline / dopesheet 编辑数据层 round-trip（B2.3）：SetAnimationClipCommand
+# 等价的 do/undo 对称 + clip CRUD 原语 + .anim 写回保真（纯数据，不链编辑器 TU）
+orange_engine_add_test(timeline_edit_primitives_test animation/TimelineEditPrimitivesTest.cpp)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path

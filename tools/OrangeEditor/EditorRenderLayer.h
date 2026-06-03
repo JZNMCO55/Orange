@@ -60,6 +60,10 @@
 #include <unordered_map>
 #include <vector>
 
+// 前向声明：DrawTimelineToolbar 形参用到 ClipAnimator&，但本头不需要其完整
+// 定义（实现 TU panels/AnimationTimelinePanel.cpp 自行 include ClipAnimator.h）。
+namespace Orange::Engine::Animation { class ClipAnimator; }
+
 class EditorRenderLayer : public Orange::Engine::Layer
 {
 public:
@@ -124,7 +128,16 @@ private:
     void ClearAutosaveFile();
     void DrawAutosaveRecoveryPopup();
     void DrawAssetsPanel();
-    static void DrawAnimationPanel();
+    // B2.3 timeline / dopesheet 面板（实现在 panels/AnimationTimelinePanel.cpp）：
+    // 编辑当前选中实体 AnimatorComponent 里 ClipAnimator 的 clip——轨道行 +
+    // 关键帧点 + playhead scrub + 打/删/拖键 + 事件 marker 行 + .anim 写回。
+    // 改编辑走 SetAnimationClipCommand（copy-modify-SetClip 整快照命令栈）；
+    // ▶/⏸ 复用 host.animPreview（B2.6 的 Edit 期单 animator 预览 tick）。
+    // 从 static 改成成员函数：需要访问 mHost.{selection,scene,cmdStack,assets}。
+    void DrawAnimationPanel();
+    // timeline 底部工具行（加/删轨道 / 打键 / 加/改事件）—— 从 DrawAnimationPanel
+    // 拆出避免巨函数化（架构纪律）。两者都在 panels/AnimationTimelinePanel.cpp。
+    void DrawTimelineToolbar(Orange::Engine::Animation::ClipAnimator& clip);
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
     // v0.8：Settings 面板 —— gizmo 线宽 / 配色 / handle 长度 / hit threshold
     // 的 ImGui 编辑控件；写回 host.settings + 标记 dirty 触发持久化（仅在

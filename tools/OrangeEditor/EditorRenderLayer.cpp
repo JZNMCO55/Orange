@@ -3038,19 +3038,9 @@ void EditorRenderLayer::DrawAssetsPanel()
     DrawPrefabOverwriteConfirmModal(mHost);
 }
 
-// v0.5 c2：底部 tab 容器加 Animation 占位面板（Assets / Console / Animation
-// 三 tab 与 Cocos Creator 3.6.0 底部布局对齐）。本期仅占位，状态机图编辑
-// 由 v0.7 实施。BuildDefaultLayoutOnce 内把 Animation window dock 到 bottom
-// 节点（与 Assets / Console 同 slot 自动变 tab）。
-void EditorRenderLayer::DrawAnimationPanel()
-{
-    ImGui::Begin("Animation");
-    ImGui::TextDisabled("animation timeline / state-machine graph editor "
-                        "— v0.7 实施");
-    ImGui::TextDisabled("当前接受视觉降级：动画 backend 切换 / 状态机编辑 "
-                        "仅 Inspector 字段路径可用");
-    ImGui::End();
-}
+// DrawAnimationPanel 的实现已迁到 panels/AnimationTimelinePanel.cpp（B2.3
+// timeline / dopesheet）。底部 tab 容器（Assets / Console / Animation 三 tab）
+// 的 dock 布局仍由 BuildDefaultLayoutOnce 建。
 
 // v0.8 Console 面板：接 Core::Log SetLogSink 路径，渲染 ring buffer 内
 // 的日志条目；filter by level + search 字符串。Header 仍保留旧的 frame
