@@ -399,6 +399,9 @@ orange_engine_add_test(clip_animator_asset_reassign_test animation/ClipAnimatorA
 # Timeline / dopesheet 编辑数据层 round-trip（B2.3）：SetAnimationClipCommand
 # 等价的 do/undo 对称 + clip CRUD 原语 + .anim 写回保真（纯数据，不链编辑器 TU）
 orange_engine_add_test(timeline_edit_primitives_test animation/TimelineEditPrimitivesTest.cpp)
+# 曲线编辑器切线编辑数据层（B2.4）：手柄屏幕落点 ↔ 切线逆/正运算 round-trip +
+# 改 inTangent/outTangent → SampleTrack 值按预期变 + do/undo 对称（纯数据，不链编辑器 TU）
+orange_engine_add_test(curve_editor_primitives_test animation/CurveEditorPrimitivesTest.cpp)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path

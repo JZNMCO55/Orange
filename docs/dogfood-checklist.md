@@ -658,6 +658,55 @@
 
 ---
 
+## 2026-06-03 session（B2.4：曲线编辑器）
+
+> 目标：B2.3 timeline 的收尾件——在 Animation 面板加**曲线编辑器视图**，让用户可视化编辑关键帧的 Bezier 缓动手柄。建在 B2.3（`98d543c`）之上。spec：`docs/b2.3-timeline-dopesheet-spec.md` 实施顺序第 6 步。
+>
+> headless 已验：OrangeEditor.exe 编出（`/W4 /WX` 零警告）+ 全量 ctest 87/87（含新增 `curve_editor_primitives_test` 锁住手柄屏幕落点↔切线逆/正运算 round-trip + 改 inTangent/outTangent → SampleTrack 值按预期变 + do/undo 对称 + 段隔离 + `editor_build_smoke`）+ check_invariants OK（无新 hardcode / 像素字面量，颜色全走 Theme token、尺寸全派生 GetContentRegionAvail / CalcTextSize / 字号）。
+>
+> 架构关键：① 曲线**用 SampleTrack 密集采样画折线**（display == playback 的正确性核心，不自己重算插值）；② 切线手柄屏幕位置按 CubicBezierEase 控制柄约定从 outTangent/inTangent 推算（单位方框 (0,0)=k0、(1,1)=k1，out 控制柄 c1=outTangent、in 控制柄 c2=(1,1)+inTangent），拖手柄走与之一致的逆运算反推切线；③ 编辑全走 **`SetAnimationClipCommand`**（复用 B2.3，copy-modify-SetClip 整快照命令；连续拖同一手柄按 merge key `anim_curve_handle:<track>:<key>:<handle>` 合并一条），改完曲线实时重画（SampleTrack 读新切线）；④ ▶/⏸/⏹ + scrub + 模式切换复用 B2.3 transport 行 + host.animPreview。所有 ImGui 像素 / 拖拽 / hit-test headless 测不到，逐条 dogfood（参"读代码判能用会翻车"教训）。
+>
+> **dogfood 阻碍同 B2.3**：完整闭环（资产化 clip "Save to .anim"）需先有 `.anim` 文件，但曲线编辑本身可直接用 SeedDemoWorld 的 "Animated Cube (clip)"（内联 clip，bob 轨道已是 Bezier ease-in-out，见 item 35）验——选它 → Animation 面板 → 切 Curve 模式即可拖手柄。
+
+### 46. Dopesheet ↔ Curve 模式切换 + 曲线绘制（用 SampleTrack）
+
+- **改点**：`tools/OrangeEditor/panels/AnimationTimelinePanel.cpp` 的 `DrawTransportRow`（加模式切换按钮）+ 新 `DrawCurveEditor` 成员函数（curve 模式整块绘制 + 交互）。
+- **怎么触发**：
+  1. 选中挂了 clip（内联或引用 .anim、duration>0、有 Bezier key）的实体（如 SeedDemoWorld 的 "Animated Cube (clip)"，需先把 demo.scene.json 挪开触发 seed，见 item 33）。
+  2. Animation 面板 transport 行点 **"Curve >"** 按钮 → 切到曲线视图；再点 **"< Dopesheet"** 切回。
+- **看什么 / 通过判据**：
+  - 切到 Curve 模式后画出：**横轴 time、纵轴 value 的曲线**（左侧值标签 min/mid/max + 网格线）+ 每个 key 的菱形点 + playhead 竖线。
+  - **曲线形状与实际播放插值完全一致**（关键正确性）：曲线用 `SampleTrack` 密集采样画——bob 轨道的 Bezier ease-in-out 在曲线视图里应是**顶/底缓、中段陡**的 S 形（与 item 35 的实体运动手感对应）；Linear 段是直线、Step 段是阶梯。**若曲线形状与 Play 时实体运动不符，告诉我**（display==playback 是本任务核心，不符说明绘制没用 SampleTrack 或采样有 bug）。
+  - track 选择下拉（左上）可切看哪条轨道的曲线（沿用选中 track）。
+- **背景**：曲线视图用 SampleTrack 画是 display==playback 一致性的核心。headless 无 GUI 绘制路径，**曲线形状视觉 / 模式切换按钮 / track 下拉手感待真机**。
+
+### 47. Bezier 切线手柄拖动改缓动（**重点 dogfood**）
+
+- **怎么触发**（Curve 模式，Edit 模式）：找一个 **InterpMode::Bezier** 的 key（如 bob 轨道的 key），它会显示**橙色切线手柄**（一条线 + 末端小圆点）——out 手柄（从本 key 出发控制后一段）/ in 手柄（落到本 key 控制前一段）。**拖动手柄圆点**。
+- **看什么 / 通过判据**：
+  - 拖 **out 手柄往上** → 该段缓动**值方向抬升**（outTangent.y 增大），曲线在该段隆起、SampleTrack 中点变高 → 实体在该段运动幅度变化；拖 **左右** → 改时间方向缓动（outTangent.x，ease-in/out 时序），曲线时序变（顶/底缓的程度变）。
+  - 拖 **in 手柄** → 同理改 inTangent（落到本 key 的那段的收尾缓动）。
+  - **手柄拖动即时重画曲线**（因 SampleTrack 读新切线）+ 实体在 scrub/预览时按新缓动动。
+  - **连续拖同一手柄 Ctrl+Z 一步回退**（merge：拖动期每帧 push 同 merge key 命令合并），不是每帧一条。
+  - 拖 out 手柄时间方向夹在 [0,1]（不越过段）、in 手柄夹在 [-1,0]（指回前帧）；值方向不夹（可拖出 overshoot 回弹）。
+  - **平直段（相邻两 key 值相同，如 bob 顶点附近）**：值方向 .y 无法从屏幕落点反推（dv≈0），拖手柄的值方向不变——这是预期（除零保护），时间方向仍可拖。
+- **背景**：手柄屏幕↔切线值的正逆映射是本任务摩擦点。**逆运算数据正确性 headless 已锁**（`curve_editor_primitives_test`：手柄落点→切线→落点 round-trip + 改 outTangent.y → SampleTrack 中点抬高 + ease-out 时序 + overshoot do/undo）；**手柄 hit-test 容差 / 拖动跟手 / 整段拖动 Undo 一步 / 改完曲线实时重画的视觉待真机**。若手柄拖不动（hit-test 太小）/ 拖动方向反了 / Undo 要按多次，告诉我（调 `HitRadius` / 检查 Solve*Tangent 符号 / merge key）。
+
+### 48. 右键 key 切 InterpMode（Step / Linear / Bezier）
+
+- **怎么触发**（Curve 模式，Edit 模式）：**右键**曲线视图里的一个 key 菱形 → 弹 "Interpolation" 菜单 → 选 Step / Linear / Bezier。
+- **看什么 / 通过判据**：
+  - 切 **Bezier** → 该 key 出现可拖的橙色切线手柄（若原切线全零，自动给个**平滑默认** `cubic-bezier(0.42,0,0.58,1)` 同款，曲线立刻可见缓动而非退化线性）。
+  - 切 **Linear** → 手柄消失，该段变直线；切 **Step** → 该段变阶梯（保持 k0 值到 k1）。
+  - 曲线形状随之实时变（SampleTrack 读新 interp）；当前 interp 在菜单里打勾。
+  - **Ctrl+Z 撤回**模式切换（走 SetAnimationClipCommand）。
+  - 非 Bezier 段（Step/Linear）**无切线手柄**（只读，底部提示 "右键 key 切 Bezier"）。
+- **背景**：右键菜单 + 默认平滑切线是 spec 第 6 步的"可选"项，已实现。**右键 hit-test + 菜单交互 + 默认切线视觉待真机**。
+
+> **B2.4 实现细节**（dogfood 时参考）：曲线模式与 dopesheet 共享 `sTimelineSel`（选中 track/key）+ transport 行 + host.animPreview 预览 tick。曲线视图**只编辑 key 的值/缓动维度**（切线 + interp），**key 的时间编辑仍留 dopesheet**（点 key 只选中不拖时间）——curve 编辑 value/缓动、dopesheet 编辑 time，职责分明。多分量 track（Vec3 如 position）当前画首个驱动分量的曲线 + 编辑它的缓动（多维共享同一标量时序缓动，spec 现状）。
+
+---
+
 ## 维护约定
 
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。

@@ -138,6 +138,12 @@ private:
     // timeline 底部工具行（加/删轨道 / 打键 / 加/改事件）—— 从 DrawAnimationPanel
     // 拆出避免巨函数化（架构纪律）。两者都在 panels/AnimationTimelinePanel.cpp。
     void DrawTimelineToolbar(Orange::Engine::Animation::ClipAnimator& clip);
+    // B2.4 曲线编辑器视图：对选中 track 用 SampleTrack 密集采样画曲线（display 与
+    // playback 一致）+ 每 key 画点 + Bezier 段 in/out 切线手柄；拖手柄反推改
+    // inTangent/outTangent（走 SetAnimationClipCommand）；右键 key 切 InterpMode。
+    // 与 DrawTimelineToolbar 同拆出避免巨函数化，同在 AnimationTimelinePanel.cpp。
+    // duration 由 transport 行算好传入，避免重复 ComputeClipDuration。
+    void DrawCurveEditor(Orange::Engine::Animation::ClipAnimator& clip, float duration);
     void DrawConsolePanel(const Orange::Engine::FrameContext& frame);
     // v0.8：Settings 面板 —— gizmo 线宽 / 配色 / handle 长度 / hit threshold
     // 的 ImGui 编辑控件；写回 host.settings + 标记 dirty 触发持久化（仅在

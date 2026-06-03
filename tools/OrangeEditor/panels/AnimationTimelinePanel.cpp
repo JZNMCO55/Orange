@@ -15,6 +15,11 @@
 //   6. 轨道增删 + .anim 写回：UpsertTrack/RemoveTrack；clip 来自 .anim 资产
 //      （SourceAssetPath 非空）时显式 "Save to .anim" → SaveAnimationClip。
 //   7. 事件轨道（marker 行）：clip.events 展示 + 加/删/拖。
+//   8. 曲线编辑器（B2.4）：transport 行 Dopesheet ↔ Curve 模式切换；curve 模式
+//      对选中 track 用 SampleTrack 密集采样画曲线（display 与 playback 完全一致——
+//      不自己重算插值）+ 每 key 画点 + Bezier 段的 in/out 切线手柄；拖手柄反推改
+//      该 key 的 inTangent/outTangent（与 CubicBezierEase 控制柄约定一致的逆运算）；
+//      右键 key 切 InterpMode（Step/Linear/Bezier）。编辑同样走 SetAnimationClipCommand。
 //
 // 架构纪律：clip 编辑一律走 copy-modify-SetClip（拷当前 clip → 在副本上调
 // AnimationClip.h 数据原语 → RecomputeClipDuration → 新建 SetAnimationClipCommand
@@ -41,7 +46,10 @@
 
 #include <imgui.h>
 
+#include <glm/vec2.hpp>
+
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -155,6 +163,35 @@ struct TimelineSelection
 TimelineSelection sTimelineSel;
 constexpr std::size_t kInvalidIdx = static_cast<std::size_t>(-1);
 
+// 面板视图模式：dopesheet（key 时间编辑）vs curve（key 值/缓动编辑，B2.4）。
+// transport 行的切换按钮在两者间切，curve 模式复用同一选中实体 / track / 命令栈。
+enum class TimelineMode
+{
+    Dopesheet,
+    Curve,
+};
+
+TimelineMode sTimelineMode = TimelineMode::Dopesheet;
+
+// curve 模式专属拖动态：正在拖某 key 的哪个 Bezier 切线手柄。两套句柄
+// （out = 控制本 key 出发段的缓动起手柄；in = 控制落到本 key 的段的收手柄）。
+enum class CurveHandle
+{
+    None,
+    Out,  // k.outTangent（从本 key (0,0) 出发的控制柄 c1）
+    In,   // k.inTangent（落到本 key (1,1) 的控制柄 c2 偏移）
+};
+
+struct CurveDragState
+{
+    bool        dragging = false;
+    std::size_t track    = kInvalidIdx;
+    std::size_t key      = kInvalidIdx;
+    CurveHandle handle   = CurveHandle::None;
+};
+
+CurveDragState sCurveDrag;
+
 // 提交一次 clip 编辑：拷 oldClip→在 newClip 上已被调用方改好→RecomputeDuration
 // → 压 SetAnimationClipCommand。mergeKey 决定是否与后续命令合并（拖动用稳定
 // key，离散编辑用唯一 key），label 是 Undo 菜单展示名。
@@ -240,6 +277,15 @@ float DrawTransportRow(EditorHost& host, ClipAnimator& clip)
     ImGui::SameLine();
     ImGui::TextDisabled("t = %.3fs / %.3fs", clip.ElapsedSeconds(), duration);
 
+    // 视图模式切换：Dopesheet（key 时间）↔ Curve（key 值 / 缓动，B2.4）。同一选中
+    // 实体 / track / 命令栈，仅换可视化与编辑维度。
+    ImGui::SameLine();
+    if (ImGui::Button(sTimelineMode == TimelineMode::Dopesheet ? "Curve >" : "< Dopesheet"))
+    {
+        sTimelineMode = (sTimelineMode == TimelineMode::Dopesheet) ? TimelineMode::Curve
+                                                                   : TimelineMode::Dopesheet;
+    }
+
     if (!canPreview)
     {
         ImGui::TextDisabled("(预览 / scrub 仅 Edit 模式可用；Play 模式由全量 tick 驱动)");
@@ -279,6 +325,111 @@ void DeleteSelectedKey(EditorHost& host, ClipAnimator& clip)
     if (!Anim::RemoveKeyframe(tr, sTimelineSel.selKey)) { return; }
     PushClipEdit(host, clip, std::move(newClip), "anim_key_delete", "Delete Keyframe");
     sTimelineSel.ClearKeySel();
+}
+
+// ---- 曲线编辑器（B2.4）几何 + 切线手柄数学 ------------------------------
+//
+// 取 track 当前用于绘制 / 编辑的标量分量索引（0=x / 1=y / 2=z / 3=w）。多分量
+// track（Vec2/3/4）目前画首个驱动分量的曲线作主曲线 + 编辑它的缓动（spec 现状：
+// track 是单值序列就画单曲线；多分量共享同一标量时序缓动，故编辑任一分量的切线即
+// 改整段时序）。Float track 恒取 .x。切线（inTangent/outTangent）是整段共享的 2D
+// 控制柄，与具体 value 分量无关——值方向 .y 抬升按"被绘制分量"的值跨度可视化。
+int TrackPrimaryComponent(const AnimationTrack&) { return 0; }
+
+// 取 track 的值范围（被绘制分量在所有 key 上的 min/max），用于纵轴映射。空 / 单值
+// 退化时给一个对称小区间避免除零。pad 留出上下边距让曲线不贴边。
+void TrackValueRange(const AnimationTrack& tr, int comp, float& outMin, float& outMax)
+{
+    if (tr.keys.empty()) { outMin = -1.0f; outMax = 1.0f; return; }
+    float lo = tr.keys.front().value[comp];
+    float hi = lo;
+    for (const Keyframe& k : tr.keys)
+    {
+        lo = std::min(lo, k.value[comp]);
+        hi = std::max(hi, k.value[comp]);
+    }
+    // 还要把 Bezier 值方向 overshoot（切线 .y 超出 [0,1]）的控制柄纳入范围，否则
+    // overshoot 手柄会画到视图外拖不到。逐相邻段把控制点的值估进 min/max。
+    for (std::size_t i = 0; i + 1 < tr.keys.size(); ++i)
+    {
+        const Keyframe& k0 = tr.keys[i];
+        const Keyframe& k1 = tr.keys[i + 1];
+        if (k0.interp != Anim::InterpMode::Bezier) { continue; }
+        const float span = k1.value[comp] - k0.value[comp];
+        const float c1 = k0.value[comp] + k0.outTangent.y * span;  // out 手柄值
+        const float c2 = k1.value[comp] + k1.inTangent.y * span;   // in 手柄值
+        lo = std::min({lo, c1, c2});
+        hi = std::max({hi, c1, c2});
+    }
+    if (hi - lo < 1e-4f) { lo -= 1.0f; hi += 1.0f; }  // 平直曲线给个对称区间
+    const float pad = (hi - lo) * 0.12f;
+    outMin = lo - pad;
+    outMax = hi + pad;
+}
+
+// 值 → 屏幕 y：值大的在上方（y 小），按 [valMin,valMax] 线性映射到 [areaY1, areaY0]。
+float ValueToScreenY(float v, float areaY0, float areaH, float valMin, float valMax)
+{
+    if (valMax - valMin < 1e-6f) { return areaY0 + areaH * 0.5f; }
+    const float u = (v - valMin) / (valMax - valMin);
+    return areaY0 + (1.0f - std::clamp(u, -0.5f, 1.5f)) * areaH;  // 留一点越界余量画 overshoot
+}
+
+// 反映射：屏幕 y → 值。
+float ScreenYToValue(float y, float areaY0, float areaH, float valMin, float valMax)
+{
+    if (areaH <= 0.0f) { return valMin; }
+    const float u = 1.0f - (y - areaY0) / areaH;
+    return valMin + u * (valMax - valMin);
+}
+
+// 把某 key 的 Bezier 切线手柄换算到屏幕坐标。约定（与 CubicBezierEase 一致）：
+// 段 k0→k1 的单位方框 (0,0)=(k0.time,k0.value)、(1,1)=(k1.time,k1.value)；
+//   out 手柄（k0 出发，控制点 c1 = k0.outTangent）：
+//     time  = k0.time  + outTangent.x · (k1.time  - k0.time)
+//     value = k0.value + outTangent.y · (k1.value - k0.value)
+//   in 手柄（落到 k1，控制点 c2 = (1,1)+k1.inTangent）：
+//     time  = k1.time  + inTangent.x · (k1.time  - k0.time)
+//     value = k1.value + inTangent.y · (k1.value - k0.value)
+// dt/dv 是该段的 time / value 跨度。返回手柄的 (time, value)。
+struct HandleTV { float time; float value; };
+
+HandleTV OutHandleTV(const Keyframe& k0, int comp, float dt, float dv)
+{
+    return {k0.time + k0.outTangent.x * dt, k0.value[comp] + k0.outTangent.y * dv};
+}
+HandleTV InHandleTV(const Keyframe& k1, int comp, float dt, float dv)
+{
+    return {k1.time + k1.inTangent.x * dt, k1.value[comp] + k1.inTangent.y * dv};
+}
+
+// 逆运算：把手柄落点 (time,value) 反推回切线 (x,y)。dt/dv 是段跨度。
+// 时间方向 .x 由 CubicBezierEase 内部夹到 [0,1] 保 X 单调，这里也夹（out 取
+// [0,1]、in 取 [-1,0]，与"in 指回前一帧"约定一致）；值方向 .y 不夹（允许 overshoot）。
+// dt<=0（段退化）时不改 .x（除零保护）；dv≈0（值平直段）时不改 .y。
+glm::vec2 SolveOutTangent(const Keyframe& k0, int comp, float handleTime, float handleValue,
+                          float dt, float dv)
+{
+    glm::vec2 t = k0.outTangent;
+    if (dt > 1e-6f) { t.x = std::clamp((handleTime - k0.time) / dt, 0.0f, 1.0f); }
+    if (std::fabs(dv) > 1e-6f) { t.y = (handleValue - k0.value[comp]) / dv; }
+    return t;
+}
+glm::vec2 SolveInTangent(const Keyframe& k1, int comp, float handleTime, float handleValue,
+                         float dt, float dv)
+{
+    glm::vec2 t = k1.inTangent;
+    if (dt > 1e-6f) { t.x = std::clamp((handleTime - k1.time) / dt, -1.0f, 0.0f); }
+    if (std::fabs(dv) > 1e-6f) { t.y = (handleValue - k1.value[comp]) / dv; }
+    return t;
+}
+
+// 给 key 切到 Bezier 时一组合理的默认平滑切线（CSS ease-in-out 同款时序、值方向不
+// 抬升）。这样右键切 Bezier 后曲线立刻有可拖的手柄而非退化成线性。
+void AssignSmoothBezierDefault(Keyframe& k)
+{
+    k.outTangent = glm::vec2(0.42f, 0.0f);
+    k.inTangent  = glm::vec2(-0.42f, 0.0f);
 }
 
 }  // namespace
@@ -330,6 +481,14 @@ void EditorRenderLayer::DrawAnimationPanel()
     }
 
     ImGui::Separator();
+
+    // ---- Curve 模式（B2.4）：另走曲线编辑器视图，dopesheet 主体不绘制 --------
+    if (sTimelineMode == TimelineMode::Curve)
+    {
+        DrawCurveEditor(clip, duration);
+        ImGui::End();
+        return;
+    }
 
     // ---- 键盘快捷键：K 打选中轨道键 / Del 删选中 key（仅面板聚焦时）-------
     const bool panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
@@ -733,5 +892,377 @@ void EditorRenderLayer::DrawTimelineToolbar(Orange::Engine::Animation::ClipAnima
                              "Rename Event");
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EditorRenderLayer::DrawCurveEditor —— 曲线编辑器视图（B2.4）
+//
+// 对"选中 track"（selTrack；无则取第 0 条）画一条曲线：横轴 time、纵轴 value。
+// **关键正确性约束**：曲线用 SampleTrack 在时间范围内密集采样画折线——display 与
+// playback 完全一致（不自己重算插值）。每个 key 画点；Bezier 段的 in/out 切线作
+// 单位方框 2D 控制柄（约定见本 TU 顶 OutHandleTV/InHandleTV 注释）画可拖手柄。拖
+// 手柄反推 inTangent/outTangent（SolveOut/InTangent），走 SetAnimationClipCommand
+// （连续拖同手柄 merge 一条），改完曲线实时重画（SampleTrack 读新切线）。右键 key
+// 弹菜单切 InterpMode（Step / Linear / Bezier）。
+// ---------------------------------------------------------------------------
+void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator& clip,
+                                        float duration)
+{
+    const AnimationClip& curClip = clip.Clip();
+    const bool canEdit = (mHost.scene.playState == PlayState::Edit);
+
+    if (curClip.tracks.empty())
+    {
+        ImGui::TextDisabled("当前 clip 无轨道。切回 Dopesheet 用 Add Track 加一条，"
+                            "或在 dopesheet 打键创作后回曲线视图编辑缓动。");
+        return;
+    }
+
+    // ---- 选哪条 track 画：track 选择下拉（沿用选中 track，可在此切）-----------
+    std::size_t curTrack =
+        (sTimelineSel.selTrack != kInvalidIdx && sTimelineSel.selTrack < curClip.tracks.size())
+            ? sTimelineSel.selTrack : 0;
+    {
+        const char* preview = curClip.tracks[curTrack].targetName.c_str();
+        ImGui::SetNextItemWidth(LabelColumnWidth());
+        if (ImGui::BeginCombo("##curve_track", preview))
+        {
+            for (std::size_t ti = 0; ti < curClip.tracks.size(); ++ti)
+            {
+                const bool sel = (ti == curTrack);
+                if (ImGui::Selectable(curClip.tracks[ti].targetName.c_str(), sel))
+                {
+                    sTimelineSel.ClearKeySel();   // 切 track 清旧 key 选中（含 selTrack）
+                    sTimelineSel.selTrack = ti;   // 重设为新 track（曲线视图按它画）
+                    curTrack = ti;
+                }
+                if (sel) { ImGui::SetItemDefaultFocus(); }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("右键 key 切插值模式 · 拖手柄改 Bezier 缓动");
+    }
+
+    const AnimationTrack& track = curClip.tracks[curTrack];
+    const int comp = TrackPrimaryComponent(track);
+
+    // ---- 画布几何（全派生，无像素字面量）------------------------------------
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 avail  = ImGui::GetContentRegionAvail();
+    const float  bodyH  = std::max(avail.y - RowHeight() * 1.5f, ImGui::GetFontSize() * 8.0f);
+    const float  leftW  = LabelColumnWidth() * 0.6f;  // 纵轴值标签列
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float  areaX0 = origin.x + leftW;
+    const float  areaY0 = origin.y;
+    const float  areaW  = std::max(avail.x - leftW, ImGui::GetFontSize() * 4.0f);
+    const float  areaH  = bodyH;
+
+    const float keyR = KeyRadius();
+    const float hitR = HitRadius();
+
+    // 颜色 token（与 dopesheet 同源，禁 hardcode RGBA）。
+    const ImU32 colBg       = ImGui::GetColorU32(Theme::Color::GetBackgroundSecondary());
+    const ImU32 colGrid     = ImGui::GetColorU32(Theme::Color::GetSeparator());
+    const ImU32 colCurve    = ImGui::GetColorU32(Theme::Color::GetTextPrimary());
+    const ImU32 colKey      = ImGui::GetColorU32(Theme::Color::GetTextSecondary());
+    const ImU32 colKeySel   = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
+    const ImU32 colHandle   = ImGui::GetColorU32(Theme::Color::GetAlertWarn());
+    const ImU32 colPlayhead = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
+    const ImU32 colLabel    = ImGui::GetColorU32(Theme::Color::GetTextDisabled());
+
+    // 覆盖整块的 InvisibleButton 捕获点击 / 拖拽（先于自绘，与 dopesheet 同款）。
+    ImGui::InvisibleButton("##anim_curve_canvas", ImVec2(avail.x, bodyH));
+    const bool   canvasHovered = ImGui::IsItemHovered();
+    const ImVec2 mouse         = ImGui::GetIO().MousePos;
+
+    // 背景 + 边框。
+    dl->AddRectFilled(ImVec2(areaX0, areaY0), ImVec2(areaX0 + areaW, areaY0 + areaH), colBg);
+    dl->AddRect(ImVec2(areaX0, areaY0), ImVec2(areaX0 + areaW, areaY0 + areaH), colGrid);
+
+    // 值范围 + 纵轴 min/mid/max 标签。
+    float valMin = 0.0f;
+    float valMax = 1.0f;
+    TrackValueRange(track, comp, valMin, valMax);
+    auto drawValueLabel = [&](float v)
+    {
+        const float y = ValueToScreenY(v, areaY0, areaH, valMin, valMax);
+        dl->AddLine(ImVec2(areaX0, y), ImVec2(areaX0 + areaW, y), colGrid);
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.2f", v);
+        dl->AddText(ImVec2(origin.x + 1.0f, y - ImGui::GetFontSize() * 0.5f), colLabel, buf);
+    };
+    drawValueLabel(valMax);
+    drawValueLabel((valMin + valMax) * 0.5f);
+    drawValueLabel(valMin);
+
+    // 时间 → 屏幕 x（沿用 dopesheet 的 TimeToScreenX，统一 time→x 语义）。
+    auto timeX = [&](float t) { return TimeToScreenX(t, areaX0, areaW, duration); };
+    auto valY  = [&](float v) { return ValueToScreenY(v, areaY0, areaH, valMin, valMax); };
+
+    // ---- 曲线折线：用 SampleTrack 密集采样（display==playback 的正确性核心）----
+    // 采样数按画布宽派生（约每 2px 一个采样点），最少 32 段。
+    if (duration > 0.0f && track.keys.size() >= 1)
+    {
+        const int samples = std::max(32, static_cast<int>(areaW * 0.5f));
+        ImVec2 prev(0.0f, 0.0f);
+        for (int i = 0; i <= samples; ++i)
+        {
+            const float t = duration * static_cast<float>(i) / static_cast<float>(samples);
+            const float v = Anim::SampleTrack(track, t)[comp];
+            const ImVec2 p(timeX(t), valY(v));
+            if (i > 0) { dl->AddLine(prev, p, colCurve, 1.5f); }
+            prev = p;
+        }
+    }
+
+    // ---- 每个 key：点 + （Bezier 段）切线手柄 -------------------------------
+    // 段跨度（time / value）：out 手柄看 [ki, ki+1] 段，in 手柄看 [ki-1, ki] 段。
+    for (std::size_t ki = 0; ki < track.keys.size(); ++ki)
+    {
+        const Keyframe& k = track.keys[ki];
+        const ImVec2 kp(timeX(k.time), valY(k.value[comp]));
+        const bool   selected = (sTimelineSel.selTrack == curTrack && sTimelineSel.selKey == ki);
+        const ImU32  kc = selected ? colKeySel : colKey;
+
+        // out 手柄：当前 key 是某 Bezier 段的起点（k.interp==Bezier 且有后继）。
+        if (k.interp == Anim::InterpMode::Bezier && ki + 1 < track.keys.size())
+        {
+            const Keyframe& k1 = track.keys[ki + 1];
+            const float dt = k1.time - k.time;
+            const float dv = k1.value[comp] - k.value[comp];
+            const HandleTV h = OutHandleTV(k, comp, dt, dv);
+            const ImVec2 hp(timeX(h.time), valY(h.value));
+            dl->AddLine(kp, hp, colHandle, 1.0f);
+            dl->AddCircleFilled(hp, keyR * 0.7f, colHandle);
+        }
+        // in 手柄：当前 key 是某 Bezier 段的终点（前一 key.interp==Bezier）。
+        if (ki > 0 && track.keys[ki - 1].interp == Anim::InterpMode::Bezier)
+        {
+            const Keyframe& k0 = track.keys[ki - 1];
+            const float dt = k.time - k0.time;
+            const float dv = k.value[comp] - k0.value[comp];
+            const HandleTV h = InHandleTV(k, comp, dt, dv);
+            const ImVec2 hp(timeX(h.time), valY(h.value));
+            dl->AddLine(kp, hp, colHandle, 1.0f);
+            dl->AddCircleFilled(hp, keyR * 0.7f, colHandle);
+        }
+
+        // key 点（菱形，与 dopesheet 一致的视觉）。
+        dl->AddQuadFilled(ImVec2(kp.x, kp.y - keyR), ImVec2(kp.x + keyR, kp.y),
+                          ImVec2(kp.x, kp.y + keyR), ImVec2(kp.x - keyR, kp.y), kc);
+    }
+
+    // ---- playhead 竖线 ------------------------------------------------------
+    if (duration > 0.0f)
+    {
+        const float px = timeX(clip.ElapsedSeconds());
+        dl->AddLine(ImVec2(px, areaY0), ImVec2(px, areaY0 + areaH), colPlayhead, 1.5f);
+    }
+
+    // ---- 交互：拖手柄改缓动 / 点 key 选中 / 空白 scrub / 右键切模式 ----------
+    if (canEdit)
+    {
+        // 鼠标按下：优先命中手柄（拖缓动），再命中 key（选中），最后空白 scrub。
+        if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            bool hit = false;
+
+            // 命中手柄？遍历各 key 的 out / in 手柄屏幕位置。
+            for (std::size_t ki = 0; ki < track.keys.size() && !hit; ++ki)
+            {
+                const Keyframe& k = track.keys[ki];
+                // out 手柄
+                if (k.interp == Anim::InterpMode::Bezier && ki + 1 < track.keys.size())
+                {
+                    const Keyframe& k1 = track.keys[ki + 1];
+                    const float dt = k1.time - k.time;
+                    const float dv = k1.value[comp] - k.value[comp];
+                    const HandleTV h = OutHandleTV(k, comp, dt, dv);
+                    const ImVec2 hp(timeX(h.time), valY(h.value));
+                    if (std::fabs(mouse.x - hp.x) <= hitR && std::fabs(mouse.y - hp.y) <= hitR)
+                    {
+                        sCurveDrag = {true, curTrack, ki, CurveHandle::Out};
+                        sTimelineSel.selTrack = curTrack;
+                        sTimelineSel.selKey   = ki;
+                        hit = true;
+                        break;
+                    }
+                }
+                // in 手柄
+                if (ki > 0 && track.keys[ki - 1].interp == Anim::InterpMode::Bezier)
+                {
+                    const Keyframe& k0 = track.keys[ki - 1];
+                    const float dt = k.time - k0.time;
+                    const float dv = k.value[comp] - k0.value[comp];
+                    const HandleTV h = InHandleTV(k, comp, dt, dv);
+                    const ImVec2 hp(timeX(h.time), valY(h.value));
+                    if (std::fabs(mouse.x - hp.x) <= hitR && std::fabs(mouse.y - hp.y) <= hitR)
+                    {
+                        sCurveDrag = {true, curTrack, ki, CurveHandle::In};
+                        sTimelineSel.selTrack = curTrack;
+                        sTimelineSel.selKey   = ki;
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            // 命中 key 点？（选中，不拖——曲线视图改值/缓动，时间编辑留 dopesheet）
+            if (!hit)
+            {
+                for (std::size_t ki = 0; ki < track.keys.size(); ++ki)
+                {
+                    const Keyframe& k = track.keys[ki];
+                    const ImVec2 kp(timeX(k.time), valY(k.value[comp]));
+                    if (std::fabs(mouse.x - kp.x) <= hitR && std::fabs(mouse.y - kp.y) <= hitR)
+                    {
+                        sTimelineSel.selTrack = curTrack;
+                        sTimelineSel.selKey   = ki;
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            // 空白：scrub（横轴时间，与 dopesheet 一致）。
+            if (!hit && mouse.x >= areaX0)
+            {
+                clip.Seek(ScreenXToTime(mouse.x, areaX0, areaW, duration));
+            }
+        }
+
+        // 拖手柄：屏幕落点 → (time,value) → 反推切线 → 改该 key → 命令栈（merge）。
+        if (sCurveDrag.dragging && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+        {
+            AnimationClip newClip = clip.Clip();
+            if (sCurveDrag.track < newClip.tracks.size())
+            {
+                AnimationTrack& tr = newClip.tracks[sCurveDrag.track];
+                const std::size_t ki = sCurveDrag.key;
+                const float handleTime  = ScreenXToTime(mouse.x, areaX0, areaW, duration);
+                const float handleValue = ScreenYToValue(mouse.y, areaY0, areaH, valMin, valMax);
+
+                bool changed = false;
+                if (sCurveDrag.handle == CurveHandle::Out
+                    && ki < tr.keys.size() && ki + 1 < tr.keys.size())
+                {
+                    Keyframe& k0 = tr.keys[ki];
+                    Keyframe& k1 = tr.keys[ki + 1];
+                    const float dt = k1.time - k0.time;
+                    const float dv = k1.value[comp] - k0.value[comp];
+                    k0.outTangent = SolveOutTangent(k0, comp, handleTime, handleValue, dt, dv);
+                    changed = true;
+                }
+                else if (sCurveDrag.handle == CurveHandle::In && ki < tr.keys.size() && ki > 0)
+                {
+                    Keyframe& k1 = tr.keys[ki];
+                    Keyframe& k0 = tr.keys[ki - 1];
+                    const float dt = k1.time - k0.time;
+                    const float dv = k1.value[comp] - k0.value[comp];
+                    k1.inTangent = SolveInTangent(k1, comp, handleTime, handleValue, dt, dv);
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    char mergeKey[128];
+                    std::snprintf(mergeKey, sizeof(mergeKey), "anim_curve_handle:%zu:%zu:%d",
+                                  sCurveDrag.track, sCurveDrag.key,
+                                  static_cast<int>(sCurveDrag.handle));
+                    PushClipEdit(mHost, clip, std::move(newClip), mergeKey, "Edit Bezier Handle");
+                }
+            }
+        }
+
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+            sCurveDrag = CurveDragState{};
+        }
+
+        // 右键 key → 弹菜单切 InterpMode（在选中 key 上；命中谁就对谁开）。
+        if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            for (std::size_t ki = 0; ki < track.keys.size(); ++ki)
+            {
+                const Keyframe& k = track.keys[ki];
+                const ImVec2 kp(timeX(k.time), valY(k.value[comp]));
+                if (std::fabs(mouse.x - kp.x) <= hitR && std::fabs(mouse.y - kp.y) <= hitR)
+                {
+                    sTimelineSel.selTrack = curTrack;
+                    sTimelineSel.selKey   = ki;
+                    ImGui::OpenPopup("##curve_key_interp");
+                    break;
+                }
+            }
+        }
+    }
+
+    // 重新取 clip 真相：上方拖手柄分支可能已 SetClip（curClip / track 引用随之
+    // 失效，B2.3 已踩过的 stale-clip 坑）。popup + 底部 readout 用新鲜引用，避免
+    // 同帧"拖完手柄 + 读旧 track"的悬空读。track 索引 curTrack 不变（拖手柄不增删轨）。
+    const AnimationClip&  freshClip = clip.Clip();
+    const AnimationTrack* freshTrack =
+        (curTrack < freshClip.tracks.size()) ? &freshClip.tracks[curTrack] : nullptr;
+
+    // InterpMode 右键菜单：对选中 key 切 Step / Linear / Bezier（走命令栈）。
+    if (freshTrack != nullptr && ImGui::BeginPopup("##curve_key_interp"))
+    {
+        const AnimationTrack& popupTrack = *freshTrack;
+        const std::size_t ki = sTimelineSel.selKey;
+        const bool valid = (sTimelineSel.selTrack == curTrack && ki != kInvalidIdx
+                            && ki < popupTrack.keys.size());
+        ImGui::TextDisabled("Interpolation");
+        ImGui::Separator();
+        auto setMode = [&](Anim::InterpMode mode, const char* label)
+        {
+            const bool active = valid && popupTrack.keys[ki].interp == mode;
+            if (ImGui::MenuItem(label, nullptr, active, valid && !active))
+            {
+                AnimationClip newClip = clip.Clip();
+                if (sTimelineSel.selTrack < newClip.tracks.size()
+                    && ki < newClip.tracks[sTimelineSel.selTrack].keys.size())
+                {
+                    Keyframe& nk = newClip.tracks[sTimelineSel.selTrack].keys[ki];
+                    nk.interp = mode;
+                    // 切到 Bezier 且当前切线全零 → 给个平滑默认，否则曲线退化无手柄可拖。
+                    if (mode == Anim::InterpMode::Bezier
+                        && nk.outTangent == glm::vec2(0.0f) && nk.inTangent == glm::vec2(0.0f))
+                    {
+                        AssignSmoothBezierDefault(nk);
+                    }
+                    PushClipEdit(mHost, clip, std::move(newClip), "anim_curve_interp",
+                                 "Set Interp Mode");
+                }
+            }
+        };
+        setMode(Anim::InterpMode::Step, "Step");
+        setMode(Anim::InterpMode::Linear, "Linear");
+        setMode(Anim::InterpMode::Bezier, "Bezier");
+        ImGui::EndPopup();
+    }
+
+    // ---- 占位推进 cursor + 底部提示（与 dopesheet 的 Dummy 同款）------------
+    ImGui::Dummy(ImVec2(0.0f, bodyH));
+    if (freshTrack != nullptr && sTimelineSel.selKey != kInvalidIdx
+        && sTimelineSel.selTrack == curTrack
+        && sTimelineSel.selKey < freshTrack->keys.size())
+    {
+        const Keyframe& sk = freshTrack->keys[sTimelineSel.selKey];
+        const char* modeName = (sk.interp == Anim::InterpMode::Step)   ? "Step"
+                               : (sk.interp == Anim::InterpMode::Linear) ? "Linear"
+                                                                         : "Bezier";
+        ImGui::TextDisabled("选中 key  t=%.3f  value=%.3f  interp=%s", sk.time,
+                            sk.value[comp], modeName);
+        if (sk.interp != Anim::InterpMode::Bezier)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(非 Bezier 段无切线手柄；右键 key 切 Bezier)");
+        }
+    }
+    else
+    {
+        ImGui::TextDisabled("点 key 选中 · 右键切插值 · 拖橙色手柄改 Bezier 缓动");
     }
 }
