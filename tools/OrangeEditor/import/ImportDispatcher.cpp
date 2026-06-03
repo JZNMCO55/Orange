@@ -207,16 +207,18 @@ ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
 
 ImportResult ImportFbxMeshToRegistry(std::string_view srcPath,
                                      ::Orange::Engine::Asset::AssetRegistry& registry,
-                                     const MaterialRegisterFn& onMaterialWritten)
+                                     const MaterialRegisterFn& onMaterialWritten,
+                                     float importScale)
 {
     // 路由到 FbxImporter 模块（OpenFBX 头声明只在 FbxImporter.cpp 引用；
     // ofbx.cpp / libdeflate.c 作为独立 TU 由 CMake 接进 target）。
-    return RunFbxImportToRegistry(srcPath, registry, onMaterialWritten);
+    return RunFbxImportToRegistry(srcPath, registry, onMaterialWritten, importScale);
 }
 
 ImportResult DispatchToRegistry(std::string_view srcPath,
                                 ::Orange::Engine::Asset::AssetRegistry& registry,
-                                const MaterialRegisterFn& onMaterialWritten)
+                                const MaterialRegisterFn& onMaterialWritten,
+                                float importScale)
 {
     const auto ext = ExtractExt(srcPath);
     const ImportKind kind = ClassifyByExt(ext);
@@ -226,8 +228,11 @@ ImportResult DispatchToRegistry(std::string_view srcPath,
         case ImportKind::ObjMesh:  return ImportObjMeshToRegistry(srcPath, registry);
         case ImportKind::GltfMesh: return ImportGltfMeshToRegistry(srcPath, registry,
                                                                    onMaterialWritten);
+        // importScale 仅 FBX 路径消费（FBX 单位歧义见 FbxAxisConverter.h）；
+        // obj/gltf/texture 忽略它。
         case ImportKind::FbxMesh:  return ImportFbxMeshToRegistry(srcPath, registry,
-                                                                  onMaterialWritten);
+                                                                  onMaterialWritten,
+                                                                  importScale);
         case ImportKind::Unsupported:
         default:
         {

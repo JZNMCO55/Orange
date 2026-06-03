@@ -62,9 +62,14 @@ namespace Orange::Editor::Import
 // 成功时 result.destPath = 写出的 .scene.json 路径；result.message 含
 // entity / mesh 计数。失败语义复用 ImportStatus（SourceReadFailed /
 // CopyFailed / AssetLoadFailed / MetaWriteFailed）。
+//
+// importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米，对 Blender 默认
+// 导出正确；真 cm 文件传约 0.01）。同时作用于顶点 + node 平移，整场一致缩放。
+// 见 FbxAxisConverter.h 的单位歧义说明。
 ImportResult RunFbxSceneImportToRegistry(
     std::string_view srcPath,
-    ::Orange::Engine::Asset::AssetRegistry& registry);
+    ::Orange::Engine::Asset::AssetRegistry& registry,
+    float importScale = 1.0f);
 
 }  // namespace Orange::Editor::Import
 

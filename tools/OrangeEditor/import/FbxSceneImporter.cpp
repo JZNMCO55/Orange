@@ -461,7 +461,8 @@ Entity ProcessNode(
 }  // namespace
 
 ImportResult RunFbxSceneImportToRegistry(std::string_view srcPath,
-                                         AssetRegistry& registry)
+                                         AssetRegistry& registry,
+                                         float importScale)
 {
     ImportResult result{};
 
@@ -535,7 +536,7 @@ ImportResult RunFbxSceneImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    const AxisConverter conv = MakeAxisConverter(scene->getGlobalSettings());
+    const AxisConverter conv = MakeAxisConverter(scene->getGlobalSettings(), importScale);
 
     // 每模型一个子目录 assets/Models/<basename>/ —— mesh + material + 贴图 + 源
     // copy 全部 co-locate。

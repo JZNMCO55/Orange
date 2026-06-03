@@ -127,6 +127,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -187,12 +188,29 @@ void ChdirToRepoRoot()
 // <stem>/（与 GUI 导入一致；ChdirToRepoRoot 已把 cwd 切到仓库根）。
 // gltf material 注册回调留空 —— headless 不需要编辑器 namedMaterialInstances
 // 缓存，.material / .mesh / .meta 仍照常写盘。
-int RunHeadlessImport(const char* srcPath)
+// 从 argv[startIdx..] 解析可选 `--scale <f>`（FBX 单位 → 米的显式缩放；见
+// FbxAxisConverter.h 的单位歧义说明）。缺省 / 非正数返回 1.0（信任已烘米）。
+// 仅 FBX 导入消费；obj / gltf / texture 忽略。
+float ParseImportScaleFlag(int argc, char** argv, int startIdx)
+{
+    for (int i = startIdx; i + 1 < argc; ++i)
+    {
+        if (argv[i] != nullptr && std::strcmp(argv[i], "--scale") == 0 &&
+            argv[i + 1] != nullptr)
+        {
+            const float s = static_cast<float>(std::strtod(argv[i + 1], nullptr));
+            if (s > 0.0f) { return s; }
+        }
+    }
+    return 1.0f;
+}
+
+int RunHeadlessImport(const char* srcPath, float importScale)
 {
     if (srcPath == nullptr || srcPath[0] == '\0')
     {
         std::fprintf(stderr, "[OrangeEditor] import: missing source path\n"
-                             "usage: OrangeEditor import-mesh <path>\n");
+                             "usage: OrangeEditor import-mesh <path> [--scale <f>]\n");
         return 2;
     }
 
@@ -204,7 +222,7 @@ int RunHeadlessImport(const char* srcPath)
     }
 
     const auto result =
-        Orange::Editor::Import::DispatchToRegistry(srcPath, *registry);
+        Orange::Editor::Import::DispatchToRegistry(srcPath, *registry, {}, importScale);
 
     const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
     std::fprintf(ok ? stdout : stderr,
@@ -225,12 +243,12 @@ int RunHeadlessImport(const char* srcPath)
 // 产物：
 //   assets/Models/<basename>/<basename>_<meshname>.mesh（每 mesh 一个）
 //   assets/scenes/<basename>.scene.json（node 树 → Entity 层级）
-int RunHeadlessSceneImport(const char* srcPath)
+int RunHeadlessSceneImport(const char* srcPath, float importScale)
 {
     if (srcPath == nullptr || srcPath[0] == '\0')
     {
         std::fprintf(stderr, "[OrangeEditor] import-scene: missing source path\n"
-                             "usage: OrangeEditor import-scene <path.gltf|.glb|.fbx>\n");
+                             "usage: OrangeEditor import-scene <path.gltf|.glb|.fbx> [--scale <f>]\n");
         return 2;
     }
 
@@ -247,9 +265,10 @@ int RunHeadlessSceneImport(const char* srcPath)
     const auto dotPos = srcStr.rfind('.');
     const std::string ext =
         (dotPos != std::string::npos) ? srcStr.substr(dotPos + 1) : std::string();
+    // importScale 仅 FBX 路径消费（FBX 单位歧义）；gltf 单位明确（米），忽略。
     const Import::ImportResult result =
         (Import::ClassifyByExt(ext) == Import::ImportKind::FbxMesh)
-            ? Import::RunFbxSceneImportToRegistry(srcPath, *registry)
+            ? Import::RunFbxSceneImportToRegistry(srcPath, *registry, importScale)
             : Import::RunGltfSceneImportToRegistry(srcPath, *registry);
 
     const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
@@ -303,13 +322,15 @@ int main(int argc, char** argv)
     if (argc >= 2 && argv[1] != nullptr &&
         std::strcmp(argv[1], "import-scene") == 0)
     {
-        return RunHeadlessSceneImport(argc >= 3 ? argv[2] : nullptr);
+        return RunHeadlessSceneImport(argc >= 3 ? argv[2] : nullptr,
+                                      ParseImportScaleFlag(argc, argv, 3));
     }
     if (argc >= 2 && argv[1] != nullptr &&
         (std::strcmp(argv[1], "import-mesh") == 0 ||
          std::strcmp(argv[1], "import") == 0))
     {
-        return RunHeadlessImport(argc >= 3 ? argv[2] : nullptr);
+        return RunHeadlessImport(argc >= 3 ? argv[2] : nullptr,
+                                 ParseImportScaleFlag(argc, argv, 3));
     }
 
     // ---- AppHost（窗口 + 主循环）---------------------------------------

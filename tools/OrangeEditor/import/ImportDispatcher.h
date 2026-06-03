@@ -100,9 +100,12 @@ using MaterialRegisterFn = std::function<void(const std::string& materialPath)>;
 //           见 BuiltinAssets::RegisterImportLoaders）。
 // onMaterialWritten: gltf 路径写出 .material 后的注册回调；为空 = 不注册
 //           （headless 默认）。obj / texture 路径忽略本参数。
+// importScale：仅 FBX 路径消费的单位 → 米缩放（默认 1.0 = 信任已烘米；真 cm
+// 文件传约 0.01）。obj / gltf / texture 路径忽略本参数。见 FbxAxisConverter.h。
 ImportResult DispatchToRegistry(std::string_view srcPath,
                                 ::Orange::Engine::Asset::AssetRegistry& registry,
-                                const MaterialRegisterFn& onMaterialWritten = {});
+                                const MaterialRegisterFn& onMaterialWritten = {},
+                                float importScale = 1.0f);
 
 // Texture importer（registry-only）：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
 // destDirOverride 语义同 GUI 版（空 → assets/Textures/<basename>）。
@@ -121,9 +124,12 @@ ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
 
 // Fbx mesh importer（registry-only）：OpenFBX 静态 mesh + 材质 MVP。
 // onMaterialWritten 见上（写出 .material 后回调，headless 传空）。
+// importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米；真 cm 文件传约
+// 0.01）。见 FbxAxisConverter.h 的单位歧义说明。
 ImportResult ImportFbxMeshToRegistry(std::string_view srcPath,
                                      ::Orange::Engine::Asset::AssetRegistry& registry,
-                                     const MaterialRegisterFn& onMaterialWritten = {});
+                                     const MaterialRegisterFn& onMaterialWritten = {},
+                                     float importScale = 1.0f);
 
 // ---------------------------------------------------------------------------
 // GUI 入口（保留原签名，零行为变化）：内部委托到上面的 registry-only seam，

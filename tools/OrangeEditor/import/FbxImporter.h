@@ -42,9 +42,12 @@ namespace Orange::Editor::Import
 // OpenFBX vendor TU（ofbx.cpp / libdeflate.c）的链接边界清晰。onMaterialWritten
 // 在写出 .material sidecar 后回调（GUI 路径注入 EnsureMaterialInstance；headless
 // 传空 = 不注册编辑器缓存，材质文件仍照常写盘）。
+// importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米，对 Blender 默认
+// 导出正确；真 cm 文件传约 0.01）。见 FbxAxisConverter.h 的单位歧义说明。
 ImportResult RunFbxImportToRegistry(std::string_view srcPath,
                                     ::Orange::Engine::Asset::AssetRegistry& registry,
-                                    const MaterialRegisterFn& onMaterialWritten = {});
+                                    const MaterialRegisterFn& onMaterialWritten = {},
+                                    float importScale = 1.0f);
 
 // GUI 包装：委托到 RunFbxImportToRegistry，注入把刚写出的 .material 注册进 host
 // 编辑器缓存的 EnsureMaterialInstance 回调。

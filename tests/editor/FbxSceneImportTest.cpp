@@ -287,6 +287,70 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] hash-skip：改 scene.json 后重导同源跳过，手工编辑保留\n");
     }
+
+    // ===== 6. importScale：FBX 单位 → 米的显式缩放（真 cm 文件修正路径）=====
+    // 把同一 fixture 复制成不同 basename（避 hash-skip + 独立 scene.json），用
+    // importScale=0.5 导入：node 平移 + 顶点都应整体 ×0.5（Parent (2,0,0)→(1,0,0)，
+    // Child local (0,0,-3)→(0,0,-1.5)，world (2,0,-3)→(1,0,-1.5)）。锁住 importScale
+    // 经 MakeAxisConverter→conv.unitScale 流进顶点 + ConjugateNodeLocal 平移两条路径。
+    {
+        const fs::path scaledFbx = testRoot / "src_scaled" / "scaled_hierarchy.fbx";
+        fs::create_directories(scaledFbx.parent_path(), ec);
+        fs::copy_file(fixturePath, scaledFbx,
+                      fs::copy_options::overwrite_existing, ec);
+        assert(!ec && "复制 fixture 到新 basename 应成功");
+
+        auto reg = MakeImportRegistry();
+        const ImportNS::ImportResult rs = ImportNS::RunFbxSceneImportToRegistry(
+            scaledFbx.generic_string(), *reg, 0.5f);
+        assert(rs.status == ImportNS::ImportStatus::Success &&
+               "importScale=0.5 导入应 Success");
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg.get();
+        auto lr = SceneNS::Load(rs.destPath, w, opts);
+        assert(lr.IsOk() && "scaled scene 应能 Load");
+
+        const Entity parent = FindByName(w, "Parent");
+        const Entity child  = FindByName(w, "Child");
+        assert(w.IsValid(parent) && w.IsValid(child) &&
+               "scaled 场景的 Parent / Child 应存在");
+
+        // Parent local (2,0,0) × 0.5 = (1,0,0)。
+        const auto* pT = w.GetComponent<SceneNS::TransformComponent>(parent);
+        assert(pT != nullptr &&
+               std::fabs(pT->position.x - 1.0f) < 2e-3f &&
+               std::fabs(pT->position.y - 0.0f) < 2e-3f &&
+               std::fabs(pT->position.z - 0.0f) < 2e-3f &&
+               "importScale=0.5：Parent local (2,0,0) 应缩成 (1,0,0)");
+
+        // Child local (0,0,-3) × 0.5 = (0,0,-1.5)（共轭后的引擎 -Z 平移也被缩）。
+        const auto* cT = w.GetComponent<SceneNS::TransformComponent>(child);
+        assert(cT != nullptr &&
+               std::fabs(cT->position.x - 0.0f) < 2e-3f &&
+               std::fabs(cT->position.y - 0.0f) < 2e-3f &&
+               std::fabs(cT->position.z - (-1.5f)) < 2e-3f &&
+               "importScale=0.5：Child local (0,0,-3) 应缩成 (0,0,-1.5)");
+
+        // importScale 只缩平移 + 顶点，不改 node scale（scale 无量纲）。
+        assert(std::fabs(cT->scale.x - 1.0f) < 1e-2f &&
+               std::fabs(cT->scale.y - 1.0f) < 1e-2f &&
+               std::fabs(cT->scale.z - 1.0f) < 1e-2f &&
+               "importScale 不应改 node scale（只缩平移 + 顶点）");
+
+        // end-to-end world：(2,0,-3) × 0.5 = (1,0,-1.5)。
+        SceneNS::PropagateWorldTransforms(w);
+        const auto* cWT = w.GetComponent<SceneNS::WorldTransformComponent>(child);
+        assert(cWT != nullptr &&
+               std::fabs(cWT->world[3].x - 1.0f) < 3e-3f &&
+               std::fabs(cWT->world[3].y - 0.0f) < 3e-3f &&
+               std::fabs(cWT->world[3].z - (-1.5f)) < 3e-3f &&
+               "importScale=0.5：Child world (2,0,-3) 应缩成 (1,0,-1.5)");
+        std::fprintf(stdout,
+                     "  [PASS] importScale=0.5：node 平移整体 ×0.5（Parent (1,0,0) / "
+                     "Child local (0,0,-1.5) / world (1,0,-1.5)）\n");
+    }
 #else
     std::fprintf(stdout,
                  "  [SKIP] FBX scene fixture 未编入（无 ORANGE_ENGINE_FBX_SCENE_FIXTURE）\n");

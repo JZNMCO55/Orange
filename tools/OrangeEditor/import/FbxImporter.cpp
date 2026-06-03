@@ -77,7 +77,8 @@ std::string SanitizeName(const std::string& raw, const std::string& fallback)
 
 ImportResult RunFbxImportToRegistry(std::string_view srcPath,
                                     ::Orange::Engine::Asset::AssetRegistry& registry,
-                                    const MaterialRegisterFn& onMaterialWritten)
+                                    const MaterialRegisterFn& onMaterialWritten,
+                                    float importScale)
 {
     using ::Orange::Engine::Asset::AssetRegistry;
     using ::Orange::Engine::Asset::MeshAsset;
@@ -158,7 +159,7 @@ ImportResult RunFbxImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    const AxisConverter conv = MakeAxisConverter(scene->getGlobalSettings());
+    const AxisConverter conv = MakeAxisConverter(scene->getGlobalSettings(), importScale);
 
     // unified arrays —— 所有 mesh / 所有 material partition 的顶点拼接；indices
     // 同步 offset 调整。FBX geometry 是 per-face-vertex（VecNAttributes），无原生

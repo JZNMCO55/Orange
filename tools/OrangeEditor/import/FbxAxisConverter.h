@@ -14,10 +14,14 @@
 //     烘进顶点的**元数据 —— Blender 导出 Z-up FBX 时顶点确实是 Z-up，靠本旋转
 //     转正。标准换轴（保持右手系、不引入镜像）：(x,y,z)_fbx → (x,z,-y)_engine。
 //     Y-up / UNKNOWN 文件直接透传。
-//   * unit scale：positions 默认**信任已烘单位**（unitScale=1）。主流导出器
-//     （尤其 Blender，apply_unit_scale=True）会把单位烘进顶点 → 顶点已是米，
-//     而 UnitScaleFactor 仍写 1.0。直接按 /100 折算会把已是米的几何缩成 1/100。
-//     故取"信任烘好的米"，不做单位折算（真正未烘的 cm 文件偏大 100× 是已知限制）。
+//   * unit scale：FBX 单位是**经典歧义**——UnitScaleFactor 是"cm/unit"，但
+//     USF=1 的文件，顶点既可能是米（Blender 默认 apply_unit_scale 把单位烘进顶点，
+//     顶点已是米却仍写 USF=1）也可能是 cm（Maya/3ds Max 真 cm 文件，1 unit=1cm）。
+//     **UnitScaleFactor 单独无法区分这两类**——盲目 ×USF/100 会把 Blender 烘好的米
+//     几何缩成 1/100。故采用工业标准做法（Unity/Unreal/Godot 同款）：**显式
+//     importScale 参数**，由调用方/CLI 决定。默认 importScale=1.0 = 信任已烘米
+//     （对 Blender 默认导出正确、零破坏）；真 cm 文件传 importScale≈0.01 折算到米。
+//     MakeAxisConverter 会日志打印文件的 UnitScaleFactor 供调用方判断该传什么。
 //
 // 换轴用一个 3x3 旋转 + 标量缩放表达；位置走 (rot * pos) * unitScale，法线走
 // normalize(rot * normal)。本头不引 ofbx.h —— MakeAxisConverter 接 GlobalSettings
@@ -93,9 +97,11 @@ struct AxisConverter
     }
 };
 
-// 从 GlobalSettings 构造换轴器。UpAxis 决定换轴矩阵；单位 MVP 信任已烘（=1）。
-// 实现在 FbxAxisConverter.cpp（取 ofbx 声明那一侧）。
-AxisConverter MakeAxisConverter(const ofbx::GlobalSettings* settings);
+// 从 GlobalSettings 构造换轴器。UpAxis 决定换轴矩阵；unitScale = importScale
+// （默认 1.0 = 信任已烘米；真 cm 文件传 ≈0.01）。实现在 FbxAxisConverter.cpp
+// （取 ofbx 声明那一侧），会日志打印文件的 UnitScaleFactor 供调用方判断该传什么。
+AxisConverter MakeAxisConverter(const ofbx::GlobalSettings* settings,
+                                float importScale = 1.0f);
 
 }  // namespace Orange::Editor::Import
 
