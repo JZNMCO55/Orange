@@ -690,6 +690,97 @@ if (ORANGE_ENGINE_WITH_TRACY)
 endif ()
 
 # ---------------------------------------------------------------------------
+# C# 脚本运行时 host —— CoreCLR via nethost / hostfxr（ADR-017，B1.0 spike）
+#
+# 默认 OFF：未开启时 src/script/dotnet/ 不参与编译、不链任何 .NET 库，现有
+# 构建零影响。开启后把 ScriptHost.cpp（唯一消费 CLR hosting 头的源）编进
+# orange_engine，链静态 libnethost.lib（免拷 nethost.dll），并把 Host pack 的
+# native 头目录**只**加到该源文件的 include 路径（不污染引擎其余 TU / 公共面）。
+#
+# native 目录定位：本机 .NET SDK 把 hosting 头 + libnethost.lib 放在
+#   <dotnet-root>/packs/Microsoft.NETCore.App.Host.win-x64/<ver>/runtimes/win-x64/native/
+# 取最高可用版本；可被 cache 变量 ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR 覆盖。
+# ---------------------------------------------------------------------------
+option(ORANGE_ENGINE_WITH_DOTNET "Embed CoreCLR (nethost/hostfxr) C# script host" OFF)
+
+if (ORANGE_ENGINE_WITH_DOTNET)
+    set(ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR "" CACHE PATH
+        "Path to Microsoft.NETCore.App.Host.win-x64 <ver>/runtimes/win-x64/native（含 nethost.h / hostfxr.h / libnethost.lib）。留空则自动探测最高版本。")
+
+    if (NOT ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR)
+        # dotnet root：优先环境变量 DOTNET_ROOT，否则回退到默认安装路径。
+        set(_orange_dotnet_root "$ENV{DOTNET_ROOT}")
+        if (NOT _orange_dotnet_root)
+            set(_orange_dotnet_root "C:/Program Files/dotnet")
+        endif ()
+        set(_orange_host_pack_dir
+            "${_orange_dotnet_root}/packs/Microsoft.NETCore.App.Host.win-x64")
+        if (NOT EXISTS "${_orange_host_pack_dir}")
+            message(FATAL_ERROR
+                "OrangeEngine: ORANGE_ENGINE_WITH_DOTNET=ON 但没找到 .NET Host pack："
+                " ${_orange_host_pack_dir}。请装 .NET SDK，或显式设 "
+                "ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR 指向 runtimes/win-x64/native/。")
+        endif ()
+        # 列出所有版本子目录，取版本号最高的一个（字典序对 8.0.19 / 9.0.8 够用，
+        # 但用 VERSION 比较更稳妥）。
+        file(GLOB _orange_host_versions
+            RELATIVE "${_orange_host_pack_dir}" "${_orange_host_pack_dir}/*")
+        set(_orange_best_version "")
+        foreach (_v IN LISTS _orange_host_versions)
+            if (IS_DIRECTORY "${_orange_host_pack_dir}/${_v}")
+                if (_orange_best_version STREQUAL "" OR
+                    "${_v}" VERSION_GREATER "${_orange_best_version}")
+                    set(_orange_best_version "${_v}")
+                endif ()
+            endif ()
+        endforeach ()
+        if (_orange_best_version STREQUAL "")
+            message(FATAL_ERROR
+                "OrangeEngine: ${_orange_host_pack_dir} 下没有任何版本子目录。")
+        endif ()
+        set(ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR
+            "${_orange_host_pack_dir}/${_orange_best_version}/runtimes/win-x64/native"
+            CACHE PATH "" FORCE)
+    endif ()
+
+    # 校验 native 目录关键件齐全（头 + import 库 + DLL）。
+    if (NOT EXISTS "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/nethost.h" OR
+        NOT EXISTS "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/hostfxr.h" OR
+        NOT EXISTS "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/nethost.lib" OR
+        NOT EXISTS "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/nethost.dll")
+        message(FATAL_ERROR
+            "OrangeEngine: ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR "
+            "(${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}) 缺 nethost.h / hostfxr.h / "
+            "nethost.lib / nethost.dll 之一。请指向 .NET Host pack 的 runtimes/win-x64/native/。")
+    endif ()
+    message(STATUS "OrangeEngine: .NET host native dir = ${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}")
+    # nethost.dll 的绝对路径暴露给 tests 子目录，供消费 exe 在 post-build 拷到
+    # 自身目录（CLR host 运行期需要它在 DLL 搜索路径上）。
+    set(ORANGE_ENGINE_DOTNET_NETHOST_DLL
+        "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/nethost.dll"
+        CACHE FILEPATH "" FORCE)
+
+    # 把 host 源加进引擎库。CLR hosting 头只在这一个 TU 消费——include 路径
+    # 用 set_source_files_properties 精确限定到 ScriptHost.cpp，不传播到其余
+    # TU / 公共 INTERFACE（header isolation：nethost.h / hostfxr.h /
+    # coreclr_delegates.h 仅 src/script/dotnet/** 可见）。
+    target_sources(orange_engine PRIVATE
+        src/script/dotnet/ScriptHost.cpp)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/script/dotnet/ScriptHost.cpp"
+        PROPERTIES INCLUDE_DIRECTORIES "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}")
+
+    # 链 import 库 nethost.lib（+ 运行期 nethost.dll）。**不**用静态 libnethost.lib：
+    # 后者带自己的 /MT 静态 release CRT，与引擎 / 测试默认的 /MDd（Debug）撞
+    # _ITERATOR_DEBUG_LEVEL / RuntimeLibrary 不匹配（LNK2038）。import 库无 CRT
+    # 对象，任意配置都干净。get_hostfxr_path 经它 + nethost.dll 解析，内部再
+    # LoadLibrary 本机 hostfxr.dll（.NET runtime 安装提供）。PRIVATE：不暴露公共面。
+    target_link_libraries(orange_engine PRIVATE
+        "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/nethost.lib")
+    target_compile_definitions(orange_engine PRIVATE ORANGE_ENGINE_WITH_DOTNET=1)
+endif ()
+
+# ---------------------------------------------------------------------------
 # 内置 ImGui —— 消费者 debug-UI / overlay hook（GAP-2026-05-27-consumer-imgui-
 # tuning-hook）
 #

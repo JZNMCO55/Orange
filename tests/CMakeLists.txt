@@ -443,6 +443,64 @@ target_compile_definitions(action_map_test PRIVATE
 orange_engine_add_test(audio_engine_smoke_test  audio/AudioEngineSmokeTest.cpp)
 
 # ---------------------------------------------------------------------------
+# Script：CoreCLR host spike（ADR-017 B1.0）—— 仅 ORANGE_ENGINE_WITH_DOTNET=ON 加入
+#
+# 证明 C++ host 初始化 .NET 运行时 → 加载托管 probe assembly → 取
+# [UnmanagedCallersOnly] 方法函数指针 → 调用断言返回值 + 错误路径不崩。
+#
+# fixture 构建：用 dotnet build 出 HostProbe.dll + HostProbe.runtimeconfig.json
+# 到 csharp/HostProbe/bin/<Config>/net8.0/。custom target 串成测试的构建依赖；
+# 产物绝对路径经 target_compile_definitions 注入测试 TU。
+# ---------------------------------------------------------------------------
+if (ORANGE_ENGINE_WITH_DOTNET)
+    find_program(ORANGE_ENGINE_DOTNET_EXE NAMES dotnet
+        HINTS "$ENV{DOTNET_ROOT}" "C:/Program Files/dotnet")
+    if (NOT ORANGE_ENGINE_DOTNET_EXE)
+        message(FATAL_ERROR
+            "OrangeEngine: ORANGE_ENGINE_WITH_DOTNET=ON 但 PATH / DOTNET_ROOT 下没找到 dotnet。"
+            " dotnet_host_test 需要它构建托管 probe fixture。")
+    endif ()
+
+    set(_orange_probe_proj
+        "${CMAKE_SOURCE_DIR}/csharp/HostProbe/HostProbe.csproj")
+    # dotnet build -c <cfg> 落到 bin/<cfg>/net8.0/。ctest -C 的配置经 $<CONFIG>
+    # 传进来；single-config 生成器下 $<CONFIG> 多为空，这里仍按显式配置目录走。
+    set(_orange_probe_out_dir
+        "${CMAKE_SOURCE_DIR}/csharp/HostProbe/bin/$<CONFIG>/net8.0")
+    set(_orange_probe_dll "${_orange_probe_out_dir}/HostProbe.dll")
+    set(_orange_probe_cfg "${_orange_probe_out_dir}/HostProbe.runtimeconfig.json")
+
+    # custom command：用 dotnet build 产出 probe 程序集。OUTPUT 用 .dll 让
+    # 增量构建可跳过；DEPENDS 源 .cs / .csproj 触发重建。
+    add_custom_command(
+        OUTPUT  "${_orange_probe_dll}" "${_orange_probe_cfg}"
+        COMMAND "${ORANGE_ENGINE_DOTNET_EXE}" build "${_orange_probe_proj}"
+                -c $<CONFIG> --nologo -v quiet
+        DEPENDS "${CMAKE_SOURCE_DIR}/csharp/HostProbe/Probe.cs"
+                "${_orange_probe_proj}"
+        COMMENT "OrangeEngine: 构建托管 probe fixture（HostProbe.dll + runtimeconfig）"
+        VERBATIM)
+    add_custom_target(orange_engine_host_probe ALL
+        DEPENDS "${_orange_probe_dll}" "${_orange_probe_cfg}")
+
+    add_executable(dotnet_host_test script/dotnet_host_test.cpp)
+    add_dependencies(dotnet_host_test orange_engine_host_probe)
+    target_link_libraries(dotnet_host_test PRIVATE OrangeEngine::orange_engine)
+    target_compile_definitions(dotnet_host_test PRIVATE
+        "ORANGE_PROBE_ASSEMBLY_PATH=\"${_orange_probe_dll}\""
+        "ORANGE_PROBE_RUNTIMECONFIG_PATH=\"${_orange_probe_cfg}\"")
+    orange_engine_set_compiler_options(dotnet_host_test)
+    # nethost.dll 必须在测试 exe 的 DLL 搜索路径上（get_hostfxr_path 经它解析）。
+    # 引擎链 import 库 nethost.lib，运行期 DLL 由此 post-build 拷到 exe 目录。
+    add_custom_command(TARGET dotnet_host_test POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${ORANGE_ENGINE_DOTNET_NETHOST_DLL}"
+                "$<TARGET_FILE_DIR:dotnet_host_test>"
+        VERBATIM)
+    add_test(NAME dotnet_host_test COMMAND dotnet_host_test)
+endif ()
+
+# ---------------------------------------------------------------------------
 # install_smoke / config_smoke
 #
 # 仅在引擎自身要发 install 规则时（即 ORANGE_ENGINE_INSTALL=ON）才注

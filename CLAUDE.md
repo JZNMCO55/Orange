@@ -95,6 +95,7 @@ The engine is organized **horizontally by module**, not as a vertical pyramid. S
 │   src/animation/dragonbones/   ★ ONLY DragonBones region  │
 │   src/physics/box2d/           ★ ONLY Box2D region        │
 │   src/audio/miniaudio/         ★ ONLY miniaudio region    │
+│   src/script/dotnet/           ★ ONLY CLR hosting region  │
 └───────────────────────────────────────────────────────────┘
                            │ find_package(OrangeRender)
                            ▼
@@ -153,17 +154,20 @@ These are not suggestions. Violating them is treated as an architectural bug.
   - `<box2d/...>`, `<box2d.h>`
   - `<dragonBones/...>`
   - `"miniaudio.h"`
+  - `<nethost.h>`, `<hostfxr.h>`, `<coreclr_delegates.h>` (and any CLR hosting header)
   - `<vulkan/...>`, `<volk.h>`, `<vk_mem_alloc.h>`
 - **`<orange/...>` is allowed only in `src/render/**`**. If you need OrangeRender from another module, you are doing it wrong — route through Render's public API.
 - **`<box2d/...>` is allowed only in `src/physics/box2d/**`**.
 - **`<dragonBones/...>` is allowed only in `src/animation/dragonbones/**`**.
 - **`"miniaudio.h"` is allowed only in `src/audio/miniaudio/**`**.
+- **`<nethost.h>` / `<hostfxr.h>` / `<coreclr_delegates.h>` (CLR hosting headers) are allowed only in `src/script/dotnet/**`** (ADR-017). The public façade `include/orange/engine/script/` must not expose any CLR / hostfxr type (PIMPL hides the hostfxr handle).
 
 ### Game-specific concepts forbidden in engine
 - Engine code must not contain identifiers like `Slime`, `Boss`, `Player`, `Form`, or any other first-game term. If a feature is needed only for the first game, it belongs in the game repository as a custom component / system / shader, consumed via the engine's extension points.
 
 ### Serialization and reflection
 - **No reflection libraries.** Phase 1–6 forbids `entt::meta`, RTTR, cereal-with-reflection, or any AST codegen. All `Read` / `Write` functions are hand-written.
+- **C# 脚本 tweakable 反射不破本禁令**（ADR-017）：`ScriptComponent` 的 Inspector tweakable 字段枚举发生在 **C# 托管侧（`System.Reflection`）/ 编辑器工具侧**，引擎 runtime C++ 仍**零反射库**——CLR host（`src/script/dotnet/`）只经 hostfxr 取托管函数指针，不在 C++ 引入任何反射依赖。
 - **No bare `nlohmann::json` calls.** All serialization must go through `Core::Serialization` (`JsonReader` / `JsonWriter` / `BinaryReader` / `BinaryWriter`). The public API does not expose `nlohmann::json` types.
 - **Every serializable type declares `SchemaVersion`.** The read path validates version before parsing.
 - **A schema version that has shipped to a player or to the game repo never changes.** Add a new version + migrator instead.

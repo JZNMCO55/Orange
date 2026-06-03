@@ -113,6 +113,11 @@ HEADER_ISOLATION_MAP: list[tuple[re.Pattern[str], str, str]] = [
         "miniaudio 头仅允许在 src/audio/miniaudio/**",
     ),
     (
+        re.compile(r'^\s*#\s*include\s*[<"](nethost\.h|hostfxr\.h|coreclr_delegates\.h)[>"]'),
+        "src/script/dotnet/",
+        "CLR hosting 头（nethost / hostfxr / coreclr_delegates）仅允许在 src/script/dotnet/**",
+    ),
+    (
         re.compile(r'^\s*#\s*include\s*[<"](vulkan/[^>"]+|volk\.h|vk_mem_alloc\.h)[>"]'),
         "src/",  # 任何 src/ 子目录都允许，但 include/ 公共头不允许
         "Vulkan/volk/VMA 头不得出现在公共头（include/orange/engine/**）",

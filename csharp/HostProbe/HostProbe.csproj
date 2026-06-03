@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- CoreCLR host spike 的托管 probe fixture（ADR-017 B1.0）。dotnet build 产出
+       HostProbe.dll + HostProbe.runtimeconfig.json，供 C++ ScriptHost 加载并取
+       [UnmanagedCallersOnly] 方法的函数指针调用。net8.0 与设计文档推荐的 CoreCLR
+       (.NET 8) host 对齐。AllowUnsafeBlocks=true 是 [UnmanagedCallersOnly] 必需。 -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>HostProbe</AssemblyName>
+    <RootNamespace>OrangeProbe</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <!-- 库工程默认不产 runtimeconfig.json，但 hostfxr_initialize_for_runtime_config
+         需要它来定位运行时框架。强制生成，让 .dll 旁出 HostProbe.runtimeconfig.json。 -->
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+
+</Project>
