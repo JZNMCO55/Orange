@@ -63,25 +63,31 @@ bool IsIdentityComponent(std::string_view componentName)
         || componentName == "Hierarchy";
 }
 
-// 把单个 entity 的 present component（排除身份/链接 component）经已注册的内置
-// ComponentSerializer 写成 JSON 文本，挂在 kComponentsRoot 下。复用 SaveImpl 的
+// 把 entity 的非身份 component（排除身份/链接 component）经已注册的内置
+// ComponentSerializer 写进既有 writer（挂在 kComponentsRoot 下）。复用 SaveImpl 的
 // 逐 entity 序列化循环：建一个只含本 entity（持久 id = 0）的最小 SaveContext，
-// 遍历注册表，对 Has 命中的 component 调其 Write。
+// 遍历注册表，对 Has 命中的 component 调其 Write。entity 无效 → writer 不变。
+// 返回实际写出的 component 名（CS2 的 merge / write-back 据此枚举要回写哪些 component）。
 //
-// 返回 JsonWriter::Dump() 的 JSON 文本。entity 无效 → 返回空对象文本（"{}"），
-// diff 时与"无任何 component"等价。
+// 这是 SerializeEntityComponents 与 CS2 共享的核心：CS1 取其 Dump() 文本做 diff；
+// CS2 既取 dump 文本（diff + 配对 reader），又直接拿 writer（在其上就地覆盖 override
+// 叶子——数组叶子已是正确 JSON array，覆盖 array 元素需要 writer 里数组已成形）。
 //
 // 注意：不传 assetRegistry / namedMaterialInstances（nullptr）——序列化层对这两个
 // 走 graceful 退化（mesh / material 写出空字符串 + warn）。对 diff 而言这是**对称
 // 无害**的：实例侧与模板侧用完全相同的退化路径，未被 override 的 mesh/material 在
 // 两侧都写成同一空串，diff 不误报；真正被改的 mesh/material 各自反查 path 失败时
 // 两侧都为空——这是已知局限（见汇报"摩擦"段），但不影响标量/数组字段的精确 diff。
-std::string SerializeEntityComponents(const World& world, Entity entity)
+// CS2 写回侧同理：未改 mesh/material 在 refresh 后两侧仍是空串，asset-ref 不被
+// 重设（与 CS1 对称），对未改资产引用无害。
+std::vector<std::string> SerializeEntityComponentsToWriter(const World& world,
+                                                           Entity entity,
+                                                           JsonWriter& writer)
 {
-    JsonWriter writer;
+    std::vector<std::string> writtenNames;
     if (!world.IsValid(entity))
     {
-        return writer.Dump();  // "{}"
+        return writtenNames;
     }
 
     // 单 entity 持久 id 表：本 entity → 0。Hierarchy 等被排除，故互引用反查
@@ -105,9 +111,22 @@ std::string SerializeEntityComponents(const World& world, Entity entity)
             if (entry.Write != nullptr)
             {
                 entry.Write(writer, componentPath, entity, ctx);
+                writtenNames.emplace_back(entry.name);
             }
         }
     }
+    return writtenNames;
+}
+
+// 把单个 entity 的 present component（排除身份/链接 component）经已注册的内置
+// ComponentSerializer 写成 JSON 文本，挂在 kComponentsRoot 下。
+//
+// 返回 JsonWriter::Dump() 的 JSON 文本。entity 无效 → 返回空对象文本（"{}"），
+// diff 时与"无任何 component"等价。
+std::string SerializeEntityComponents(const World& world, Entity entity)
+{
+    JsonWriter writer;
+    SerializeEntityComponentsToWriter(world, entity, writer);
     return writer.Dump();
 }
 
@@ -264,6 +283,136 @@ std::vector<OverrideField> DiffComponentJson(const std::string& instJson,
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// CS2 · refresh-from-template 的 merge + write-back。
+// ---------------------------------------------------------------------------
+
+// 把 srcReader 在 path 处的单个叶子标量值，按类型探测（bool→int→float→string，
+// 同 LeafValueKey 顺序）拷进 dstWriter 的同一 path。已存在叶子被覆盖；当目标父节
+// 点已是 JSON array 且本段是数字下标时，EnsureByPath 走数组分支就地改元素（故覆
+// 盖 override 的数组叶子要求 dstWriter 里数组已成形——由先 replay 模板 Write 保证）。
+// 源处无标量值（不存在 / 空容器）→ 不写（保留 dst 原值）。
+void CopyLeafValue(const JsonReader& srcReader,
+                   std::string_view path,
+                   JsonWriter& dstWriter)
+{
+    bool b = false;
+    if (srcReader.ReadBool(path, b))
+    {
+        dstWriter.WriteBool(path, b);
+        return;
+    }
+    std::int64_t i = 0;
+    if (srcReader.ReadInt(path, i))
+    {
+        dstWriter.WriteInt(path, i);
+        return;
+    }
+    double d = 0.0;
+    if (srcReader.ReadFloat(path, d))
+    {
+        dstWriter.WriteFloat(path, d);
+        return;
+    }
+    std::string s;
+    if (srcReader.ReadString(path, s))
+    {
+        dstWriter.WriteString(path, s);
+        return;
+    }
+    // 源无标量值：override 叶子在实例侧消失（罕见，本期固定 schema 下不发生）→
+    // 保留 dst（模板值）不动。
+}
+
+// 产出 merged component JSON 文本 M = 新模板（theirs）为底、真 override 叶子用实例
+// 值就地覆盖。
+//
+//   newWriter  —— 已 replay 过新模板（theirs）entity 的非身份 component Write（含正确
+//                 数组形态），在其上就地覆盖真 override 叶子（直接 mutate，调用方不再
+//                 复用它）。
+//   instReader —— 实例（mine）entity 的 component JSON（真 override 叶子的实例值来源）。
+//   overrides  —— CS1 diff(mine, base) 出的真 override 字段集（componentName + 相对
+//                 component 根的叶子路径）。逐条把实例值贴回 newWriter 对应绝对路径。
+//
+// 返回 newWriter.Dump()——未 override 叶子=新模板值（replay 时已写）、override 叶子=
+// 实例值（本步覆盖）。身份 component 从一开始就不在 newWriter 里，故 M 不含它们。
+std::string BuildMergedComponentJson(JsonWriter& newWriter,
+                                     const JsonReader& instReader,
+                                     const std::vector<OverrideField>& overrides)
+{
+    for (const OverrideField& field : overrides)
+    {
+        const std::string componentAbs = Join(kComponentsRoot, field.componentName);
+        const std::string leafAbs =
+            field.fieldPath.empty() ? componentAbs : Join(componentAbs, field.fieldPath);
+        CopyLeafValue(instReader, leafAbs, newWriter);
+    }
+    return newWriter.Dump();
+}
+
+// 把 merged JSON M 的各 component 经已注册 ComponentSerializer 的 Read 反序列化
+// **写回 instEntity**（AddComponent 走 emplace_or_replace，整段替换该 component）。
+//
+// componentNames = M 里要回写的 component 名（即模板 entity 写出过的非身份 component）。
+// 仅这些被回写——身份 component 不在 M 里、也不在本表里，故绝不触碰。
+//
+// LoadContext 只填能填的：world = 实例 world；idToEntity 把持久 id 0 → instEntity
+// （非身份 component 自包含、不含跨实体引用，这张表实际不会被用到，仅满足契约）；
+// 其余 backend / registry 指针留空——非身份 component（Transform/Name/Renderable…）
+// 的 Read 对这些走 graceful 退化（与序列化侧对称）。
+//
+// 任一 component 的 Read 返回 false（数据坏）→ 记 false 但继续其余 component（部分
+// 刷新好过整盘拒绝；正常路径 M 来自自家 Write 不会坏）。整体成功 → true。
+bool WriteBackMergedComponents(World& instWorld,
+                               Entity instEntity,
+                               const std::string& mergedJson,
+                               const std::vector<std::string>& componentNames)
+{
+    auto readerRes = JsonReader::FromString(mergedJson);
+    if (readerRes.IsErr())
+    {
+        return false;  // 自家 Dump 理应永远可解析；解析失败属内部错误。
+    }
+    const JsonReader& reader = readerRes.Value();
+
+    // 持久 id 0 → instEntity（满足 LoadContext 契约；非身份 component 不解引用它）。
+    PersistentIdToEntity idToEntity;
+    idToEntity.push_back(instEntity);
+
+    const LoadContext ctx{instWorld, idToEntity, /*assetRegistry=*/nullptr,
+                          /*physicsWorld=*/nullptr, /*animatorRegistry=*/nullptr};
+
+    const auto& serializers = GetBuiltinComponentSerializers();
+    bool allOk = true;
+    for (const std::string& name : componentNames)
+    {
+        // 在注册表里找同名 entry 的 Read（PureData 组件才有 Read；身份 component
+        // 已被排除在 componentNames 之外）。
+        const ComponentSerializerEntry* entry = nullptr;
+        for (const auto& e : serializers)
+        {
+            if (e.name == name)
+            {
+                entry = &e;
+                break;
+            }
+        }
+        if (entry == nullptr || entry->Read == nullptr)
+        {
+            // backend-dependent 组件（RigidBody/Collider/Animator）Read 为 nullptr：
+            // 它们的 attach 需 backend，本期 refresh 不重建 backend → 跳过（保留实例
+            // 现有该 component 不动，不视为失败）。
+            continue;
+        }
+        const std::string componentPath = Join(kComponentsRoot, name);
+        if (!entry->Read(reader, componentPath, instEntity, ctx))
+        {
+            allOk = false;  // 继续其余 component（部分刷新好过整盘拒绝）。
+        }
+    }
+    return allOk;
+}
+
 }  // namespace
 
 std::vector<OverrideField> ComputeEntityOverrides(
@@ -315,6 +464,96 @@ std::vector<OverrideField> ComputeInstanceOverrides(
     }
 
     return ComputeEntityOverrides(instWorld, instEntity, scratchWorld, tmplEntity);
+}
+
+bool RefreshEntityFromTemplate(World& instWorld, Entity instEntity,
+                               const World& baseWorld, Entity baseEntity,
+                               const World& newWorld, Entity newEntity)
+{
+    if (!instWorld.IsValid(instEntity) || !baseWorld.IsValid(baseEntity)
+        || !newWorld.IsValid(newEntity))
+    {
+        return false;
+    }
+
+    // ① theirs（新模板）entity 的非身份 component → writer（含正确数组形态），
+    //    同时拿到模板写出过的 component 名（write-back 的回写集）。无任何非身份
+    //    component → 没什么可刷的，merged 即空对象，写回 no-op，成功返回 true。
+    JsonWriter mergedWriter;
+    const std::vector<std::string> componentNames =
+        SerializeEntityComponentsToWriter(newWorld, newEntity, mergedWriter);
+
+    // ② mine（实例）+ base（bake 时模板）→ JSON。
+    const std::string instJson = SerializeEntityComponents(instWorld, instEntity);
+    const std::string baseJson = SerializeEntityComponents(baseWorld, baseEntity);
+    auto instReaderRes = JsonReader::FromString(instJson);
+    if (instReaderRes.IsErr())
+    {
+        return false;  // 自家 Dump 理应可解析。
+    }
+    const JsonReader& instReader = instReaderRes.Value();
+
+    // ③ CS1 diff(mine, base)：实例相对 bake 时模板的**真 override** 叶子集
+    //    （区别于"实例 vs 新模板"——后者把模板演进也误当 override，见头注释）。
+    const std::vector<OverrideField> overrides = DiffComponentJson(instJson, baseJson);
+
+    // ④ merged M = 新模板为底、真 override 叶子贴回实例值。
+    const std::string mergedJson =
+        BuildMergedComponentJson(mergedWriter, instReader, overrides);
+
+    // ⑤ 把 M 的各 component Read 写回实例实体（emplace_or_replace 整段替换）。
+    return WriteBackMergedComponents(instWorld, instEntity, mergedJson, componentNames);
+}
+
+bool RefreshInstanceFromTemplate(World& instWorld, Entity instEntity,
+                                 const Asset::PrefabAsset& baseTmpl,
+                                 const Asset::PrefabAsset& newTmpl)
+{
+    if (!instWorld.IsValid(instEntity))
+    {
+        return false;
+    }
+
+    // 取实例实体的模板锚（A2.2）。无 PrefabInstanceComponent / templateEntityGuid
+    // 为空（旧数据）→ 无从配对，no-op。
+    const auto* link = instWorld.GetComponent<PrefabInstanceComponent>(instEntity);
+    if (link == nullptr || !link->templateEntityGuid.IsValid())
+    {
+        return false;
+    }
+
+    // base / new 两个模板 blob → 各自 scratch world（同 ComputeInstanceOverrides
+    // 的配对逻辑）。不传 assetRegistry——与序列化对称退化一致。
+    World baseWorld;
+    World newWorld;
+    if (Scene::LoadFromString(baseTmpl.TemplateBlob(), baseWorld).IsErr()
+        || Scene::LoadFromString(newTmpl.TemplateBlob(), newWorld).IsErr())
+    {
+        return false;
+    }
+
+    // 经 templateEntityGuid 在两个模板 world 里各自反查对应模板实体（S2 /
+    // FindEntityByGuid）。base 锚定的是同一 guid（实例 bake 时与演进后模板共享
+    // per-entity guid——模板演进改字段值不换 guid）。任一未命中 → no-op，不崩。
+    const Entity baseEntity =
+        Scene::FindEntityByGuid(baseWorld, link->templateEntityGuid);
+    const Entity newEntity =
+        Scene::FindEntityByGuid(newWorld, link->templateEntityGuid);
+    if (!baseEntity.IsValid() || !newEntity.IsValid())
+    {
+        return false;
+    }
+
+    return RefreshEntityFromTemplate(instWorld, instEntity,
+                                     baseWorld, baseEntity, newWorld, newEntity);
+}
+
+bool RefreshInstanceFromTemplate(World& instWorld, Entity instEntity,
+                                 const Asset::PrefabAsset& tmpl)
+{
+    // 单模板便利重载：base == new（未演进）→ 退化为"丢弃实例的非真 override 漂移、
+    // 拉回模板值"。委托三方重载，两个模板参数同传。
+    return RefreshInstanceFromTemplate(instWorld, instEntity, tmpl, tmpl);
 }
 
 }  // namespace Orange::Engine::Scene
