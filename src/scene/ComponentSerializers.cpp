@@ -390,13 +390,17 @@ bool ReadGuid(const JsonReader& reader,
 // PrefabInstanceComponent
 //
 // prefab 实例链接组件（实例化产物绑回源 prefab 资源）。序列化为对象形态，
-// 三个字段：
-//   * sourcePrefabPath —— 字符串，源 prefab 资源路径（跨会话稳定 key）。
-//   * instanceId       —— 32-hex 字符串，标识"哪一次实例化"。坏格式 → Read
+// 字段：
+//   * sourcePrefabPath   —— 字符串，源 prefab 资源路径（跨会话稳定 key）。
+//   * instanceId         —— 32-hex 字符串，标识"哪一次实例化"。坏格式 → Read
 //     返回 false（数据坏，整体回滚 Load），与 Guid 同款严格。
-//   * isInstanceRoot   —— bool，仅实例根 true。
-// 三字段全为必填——本组件只由 InstantiatePrefab 程序化挂载，落盘时必然写齐，
-// 不需要 optional 兜底。
+//   * isInstanceRoot     —— bool，仅实例根 true。
+//   * templateEntityGuid —— 32-hex 字符串，逐实体模板锚定（A2.2 / ADR-018，
+//     schema 1.17+）：该实例实体对应模板实体的 guid。**additive + graceful**：
+//     旧 1.16 文件无此字段时 GetString 返回空串 → 读为空 guid（= 未知 / 旧数据），
+//     向后兼容。非空但坏格式 → Read 返回 false（与 instanceId 同款严格）。空字符串
+//     合法表示空 guid。前三字段必填语义不变（本组件只由 InstantiatePrefab 程序化
+//     挂载，必然写齐）。
 // ---------------------------------------------------------------------------
 
 bool HasPrefabInstance(const World& world, Entity entity)
@@ -417,6 +421,10 @@ void WritePrefabInstance(JsonWriter& writer,
     writer.WriteString(Join(componentPath, "sourcePrefabPath"), p->sourcePrefabPath);
     writer.WriteString(Join(componentPath, "instanceId"), p->instanceId.ToString());
     writer.WriteBool(Join(componentPath, "isInstanceRoot"), p->isInstanceRoot);
+    // templateEntityGuid：空 guid 的 ToString() 是 32 个 '0'，原样落盘；读侧
+    // FromString 解析后 IsValid() 仍为 false，语义"未知/旧数据"保持。
+    writer.WriteString(Join(componentPath, "templateEntityGuid"),
+                       p->templateEntityGuid.ToString());
 }
 
 bool ReadPrefabInstance(const JsonReader& reader,
@@ -439,6 +447,16 @@ bool ReadPrefabInstance(const JsonReader& reader,
         return false;
     }
     if (!reader.ReadBool(Join(componentPath, "isInstanceRoot"), p.isInstanceRoot))
+    {
+        return false;
+    }
+    // templateEntityGuid（schema 1.17+，additive + graceful）：缺字段（旧 1.16
+    // 文件）→ GetString 返回空串 → templateEntityGuid 留默认空 guid。空串显式跳过
+    // FromString（空 guid 语义），非空串坏格式 → 数据坏返回 false。
+    const std::string templateGuidText =
+        reader.GetString(Join(componentPath, "templateEntityGuid"), "");
+    if (!templateGuidText.empty()
+        && !Core::Guid::FromString(templateGuidText, p.templateEntityGuid))
     {
         return false;
     }

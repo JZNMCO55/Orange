@@ -102,9 +102,14 @@ namespace
 // *Guid（非空且能在本次 Load 的 guid 索引命中即用），否则回退顺序 int（读旧 1.15
 // 及更早纯 int 文件 / guid 缺失）。已 shipped 的顺序 int 字段语义不改，仅 additive
 // 增 *Guid 字段——旧文件无 *Guid 段时全程走 int 回退，向后兼容（选项 B 核心卖点）。
+// 1.16 → 1.17：PrefabInstanceComponent 新增 templateEntityGuid（逐实体模板锚定，
+// A2.2 / ADR-018 §6 问题 4）。该实例实体对应模板实体的 guid（实例化时在
+// ReassignEntityGuids 换新实例 guid 前捕获）。同款 optional 字段路径，旧 1.16 文件
+// 无 "templateEntityGuid" 段时读为空 guid（= 未知 / 旧数据），向后兼容；前三字段
+// 语义不变。为 prefab override / re-apply 提供稳定的实例↔模板逐实体匹配。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 16};
+    static const SchemaVersion kVersion{"scene/world", 1, 17};
     return kVersion;
 }
 

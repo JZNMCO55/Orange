@@ -6,8 +6,10 @@
 #include "orange/engine/scene/PrefabInstantiation.h"
 
 #include "orange/engine/asset/AssetRegistry.h"
+#include "orange/engine/core/Guid.h"
 #include "orange/engine/core/Log.h"
 #include "orange/engine/scene/EntityGuid.h"
+#include "orange/engine/scene/GuidComponent.h"
 #include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/PrefabInstanceComponent.h"
 #include "orange/engine/scene/SceneSerialization.h"
@@ -67,8 +69,22 @@ Result<Entity, ResultCode> InstantiatePrefab(World& world,
         return ResultCode::InvalidArgument;
     }
 
-    // 2) 换新身份：模板 blob 保留了 GuidComponent，不换的话克隆体与模板
-    //    共享 GUID。对全部新建实体强制 Reassign。
+    // 2a) 逐实体模板锚定（A2.2 / ADR-018 §6 问题 4）：在 Reassign 换新实例
+    //     guid **之前**，先把每个 created 实体当前的 GuidComponent.guid 捕获
+    //     下来——此刻它仍是模板 blob 保真的**模板实体 guid**。Reassign 后这些
+    //     实体就换上全新实例 guid 了，模板 guid 不可再得，故必须先于 Reassign
+    //     捕获。无 GuidComponent 的 created 实体留空 guid（防御；正常 prefab
+    //     模板 Save 前会 EnsureEntityGuids 普遍补全，这里兜底不崩）。
+    std::vector<Core::Guid> templateGuids;
+    templateGuids.reserve(created.size());
+    for (const Entity e : created)
+    {
+        const auto* g = world.GetComponent<GuidComponent>(e);
+        templateGuids.push_back(g != nullptr ? g->guid : Core::Guid{});
+    }
+
+    // 2b) 换新身份：模板 blob 保留了 GuidComponent，不换的话克隆体与模板
+    //     共享 GUID。对全部新建实体强制 Reassign。
     Scene::ReassignEntityGuids(world, created);
 
     // 3) 定位实例根：克隆出来后子树根的 parent 被 remap 成 Invalid（脱钩成
@@ -94,14 +110,18 @@ Result<Entity, ResultCode> InstantiatePrefab(World& world,
     }
 
     // 4) 给每个新建实体挂 PrefabInstanceComponent：同一 sourcePrefabPath +
-    //    同一 instanceId（标识"本次实例化"），仅根 isInstanceRoot=true。
+    //    同一 instanceId（标识"本次实例化"），仅根 isInstanceRoot=true +
+    //    逐实体 templateEntityGuid（2a 在 Reassign 前捕获的模板实体 guid，与
+    //    created 同序——按 index 配对）。
     const Core::Guid instanceId = Core::Guid::Generate();
-    for (const Entity e : created)
+    for (std::size_t i = 0; i < created.size(); ++i)
     {
+        const Entity e = created[i];
         PrefabInstanceComponent link;
-        link.sourcePrefabPath = sourcePrefabPath;
-        link.instanceId       = instanceId;
-        link.isInstanceRoot   = (e == instanceRoot);
+        link.sourcePrefabPath   = sourcePrefabPath;
+        link.instanceId         = instanceId;
+        link.isInstanceRoot     = (e == instanceRoot);
+        link.templateEntityGuid = templateGuids[i];
         world.AddComponent(e, std::move(link));
     }
 

@@ -19,10 +19,20 @@
 //   * isInstanceRoot —— 仅实例根实体（克隆出来后 HierarchyComponent.parent
 //     为 Invalid 的那个）为 true，其余后代为 false。便于"对实例做整体操作时
 //     先定位根"。
+//   * templateEntityGuid —— 该实例实体在**模板内对应实体的 GUID**（逐实体模板
+//     锚定，ADR-018 §6 问题 4 裁定"按模板内 guid"）。实例化时 created 实体的
+//     GuidComponent 仍是模板 blob 保真的模板 guid，在 ReassignEntityGuids 换新
+//     实例 guid **之前**捕获存入本字段；之后实例实体自身换上全新 per-entity
+//     guid，但本字段恒指回模板侧那个稳定 guid。用途：prefab override / re-apply
+//     时按 guid 在实例↔模板间稳定匹配"哪个实例实体对应哪个模板实体"（顺序 int
+//     在两套独立 id 空间间无法跨锚，见 a2-entity-guid-stable-identity-design.md
+//     §2 问题 2）。空 guid（全 0）= 未知 / 旧数据（无 GuidComponent 的模板实体
+//     或 schema 1.16 及更早落盘的旧实例）。子树 clone（Duplicate / Copy-Paste）
+//     不动本字段——克隆体仍对应同一模板实体，模板锚定保持不变。
 //
-// MVP 不做：override（实例相对模板的局部修改记录）/ 嵌套 prefab / 实例 GUID
-// 与模板 GUID 的映射表。这些都是后续 milestone 的事；本组件字段一次冻结，
-// 后续扩字段走 scene/world schema 的 minor bump。
+// MVP 不做：override（实例相对模板的局部修改记录）/ 嵌套 prefab。逐实体的实例
+// GUID ↔ 模板 GUID 锚定已由 templateEntityGuid 落地（ADR-018 A2.2）。后续扩字段
+// 走 scene/world schema 的 minor bump。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/core/Guid.h>
@@ -37,6 +47,7 @@ struct PrefabInstanceComponent
     std::string sourcePrefabPath;
     Core::Guid  instanceId;
     bool        isInstanceRoot{false};
+    Core::Guid  templateEntityGuid;  // 对应模板实体的 GUID；空 = 未知 / 旧数据
 };
 
 }  // namespace Orange::Engine::Scene
