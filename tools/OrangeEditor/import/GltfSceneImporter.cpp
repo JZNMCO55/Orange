@@ -1,14 +1,19 @@
 #include "GltfSceneImporter.h"
 
+#include "GltfMaterialParse.h"  // ExtractGltfMaterial / BuildMaterialFileData（material seam，与单 mesh importer 共用）
+#include "ImportDispatcher.h"   // ImportTextureToRegistry（贴图 co-locate 导入）
 #include "MeshTangentGen.h"  // GenerateMikkTSpaceTangents（高质量切线）
 #include "MetaSidecar.h"
+#include "../MaterialFileIO.h"  // WriteMaterialFile（写 .material sidecar）
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/render/SubMeshMaterialsComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
@@ -27,12 +32,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 
 namespace Orange::Editor::Import
@@ -50,9 +58,11 @@ using ::Orange::Engine::Asset::VertexPosition3;
 using ::Orange::Engine::Asset::VertexTangent4;
 using ::Orange::Engine::Asset::VertexUV2;
 using ::Orange::Engine::Render::DirectionalLight;
+using ::Orange::Engine::Render::MaterialInstance;
 using ::Orange::Engine::Render::PointLight;
 using ::Orange::Engine::Render::RenderableComponent;
 using ::Orange::Engine::Render::SpotLight;
+using ::Orange::Engine::Render::SubMeshMaterialsComponent;
 using ::Orange::Engine::Scene::HierarchyComponent;
 using ::Orange::Engine::Scene::NameComponent;
 using ::Orange::Engine::Scene::TransformComponent;
@@ -61,6 +71,17 @@ namespace fs = std::filesystem;
 
 constexpr const char* kModelsDir = "assets/Models";
 constexpr const char* kScenesDir = "assets/scenes";
+
+// 一个 cgltf mesh 抽出的全部产物：几何 handle + 该 mesh 自身 slot 顺序的
+// material 指针列表。slot 顺序与 MeshAsset 的 SubMesh.materialSlot 一一对应
+// （第 i 段挂 slotMaterials[i]）；nullptr 表示该 slot 的 primitive 无 material
+// （落地端用引擎默认材质兜底）。单 primitive / 单 material 的 mesh 退化为
+// slotMaterials.size()==1 且不写 sub-mesh 段。
+struct MeshBuildResult
+{
+    ::Orange::Engine::Asset::AssetHandle<MeshAsset> handle{};
+    std::vector<const cgltf_material*>              slotMaterials;
+};
 
 const cgltf_accessor* FindAttribute(const cgltf_primitive& prim,
                                     cgltf_attribute_type wanted,
@@ -110,11 +131,25 @@ std::string SanitizeName(const std::string& in)
     return out;
 }
 
-// 把一个 cgltf mesh（其全部 triangle primitive 合并，不跨 mesh）抽成 MeshAsset。
-// 与 GltfImporter 的整文件合并路径同款 attribute 读取，但单位是"一个 mesh"。
-// G1 不消费 material —— 不写 sub-mesh（合并成单段，渲染走默认材质）。失败返回 nullptr。
-std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
+// 把一个 cgltf mesh（其全部 triangle primitive，不跨 mesh）抽成 MeshAsset，
+// 并按 primitive 切 sub-mesh、每段挂自己的 material slot —— 与单 mesh
+// importer（GltfImporter）的多 material 处理同款，只是单位是"一个 mesh"。
+//
+// material 划分（G2）：按"首次出现顺序"去重本 mesh 各 primitive 的
+// cgltf_material，orderedMats 下标即 materialSlot。nullptr（无 material 的
+// primitive）也占一个 slot —— 对应引擎默认材质，落地端不挂专属 instance。
+// 同一 cgltf_material* 在本 mesh 内复用同一 slot。单 material（含全无
+// material）退化回整 mesh 单段（不写 sub-mesh，渲染走整 mesh 单 material
+// 路径），与 G1 字节兼容。
+//
+// 返回的 slotMaterials 即 orderedMats（slot 顺序的 material 指针，含 nullptr）。
+// 失败返回空 handle 的 result。
+MeshBuildResult BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh,
+                                           const std::string& meshPath,
+                                           AssetRegistry& registry)
 {
+    MeshBuildResult result;
+
     std::vector<VertexPosition3> positions;
     std::vector<VertexUV2>       uvs;
     std::vector<VertexNormal3>   normals;
@@ -122,6 +157,21 @@ std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
 
     bool fileHasUVs     = false;
     bool fileHasNormals = false;
+
+    // material slot 去重（按指针，首次出现顺序）。nullptr 也占一个 slot。
+    std::vector<const cgltf_material*>& orderedMats = result.slotMaterials;
+    auto slotForMaterial = [&orderedMats](const cgltf_material* m) -> std::uint32_t {
+        for (std::size_t i = 0; i < orderedMats.size(); ++i)
+        {
+            if (orderedMats[i] == m) { return static_cast<std::uint32_t>(i); }
+        }
+        orderedMats.push_back(m);
+        return static_cast<std::uint32_t>(orderedMats.size() - 1);
+    };
+
+    // per-primitive 索引区间 + 归属 slot；下面在 orderedMats.size() <= 1 时
+    // 整段丢弃（退化回单段，向后兼容 G1 单材质路径）。
+    std::vector<::Orange::Engine::Asset::SubMesh> subMeshes;
 
     for (cgltf_size pi = 0; pi < mesh.primitives_count; ++pi)
     {
@@ -135,6 +185,12 @@ std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
         {
             continue;
         }
+        // 本 primitive 在合并后 index buffer 里的起点 + 归属 slot。indexCount
+        // 在 append 完索引后用差值回填（自动覆盖 indexed / 非 indexed 两路）。
+        const std::uint32_t subMeshIndexOffset =
+            static_cast<std::uint32_t>(indices.size());
+        const std::uint32_t subMeshSlot = slotForMaterial(prim.material);
+
         const cgltf_accessor* nrmAcc = FindAttribute(prim, cgltf_attribute_type_normal);
         const cgltf_accessor* uvAcc  = FindAttribute(prim, cgltf_attribute_type_texcoord, 0);
 
@@ -201,11 +257,21 @@ std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
                 indices.push_back(baseIdx + static_cast<std::uint32_t>(v));
             }
         }
+
+        // 回填本 primitive 区间长度（覆盖 indexed / 非 indexed）。仅当确实
+        // append 了索引才记录 sub-mesh。
+        const std::uint32_t subMeshIndexCount =
+            static_cast<std::uint32_t>(indices.size()) - subMeshIndexOffset;
+        if (subMeshIndexCount > 0)
+        {
+            subMeshes.push_back({subMeshIndexOffset, subMeshIndexCount, subMeshSlot});
+        }
     }
 
     if (positions.empty() || indices.empty())
     {
-        return nullptr;
+        result.slotMaterials.clear();
+        return result;  // handle 留空 → caller 视作失败
     }
 
     if (!fileHasNormals) { normals.clear(); }
@@ -245,7 +311,31 @@ std::unique_ptr<MeshAsset> BuildMeshAssetFromGltfMesh(const cgltf_mesh& mesh)
     {
         out->SetTangents(std::move(tangents));
     }
-    return out;
+
+    // 多 material（orderedMats.size() > 1）才写 sub-mesh 段；单 material（含
+    // 全无 material）退化回整 mesh 单段，subMeshes 留空 —— 与 G1 字节兼容、
+    // 渲染端走整 mesh 单 material 路径。
+    if (orderedMats.size() > 1)
+    {
+        out->SetSubMeshes(std::move(subMeshes));
+    }
+
+    auto saveRes = MeshLoader::Save(meshPath, *out);
+    if (saveRes.IsErr())
+    {
+        ORANGE_LOG_ERROR("GltfSceneImporter: MeshLoader::Save '{}' 失败", meshPath);
+        result.slotMaterials.clear();
+        return result;
+    }
+    auto loadRes = registry.Load<MeshAsset>(meshPath);
+    if (loadRes.IsErr())
+    {
+        ORANGE_LOG_ERROR("GltfSceneImporter: registry.Load<MeshAsset> '{}' 失败", meshPath);
+        result.slotMaterials.clear();
+        return result;
+    }
+    result.handle = loadRes.Value();
+    return result;
 }
 
 // 取 node 的 **local** 变换分解成 TRS，写进 TransformComponent（A1.1 step 2 /
@@ -333,16 +423,70 @@ void AddGltfLight(World& world, Entity e, const cgltf_light& light)
     }
 }
 
+// 把一个 mesh 的 slot material 列表（cgltf_material* → sentinel MaterialInstance*）
+// 接到 entity 的 Renderable / SubMeshMaterialsComponent 上（G2）。
+//
+// 材质实例是 headless sentinel（见 RunGltfSceneImportToRegistry 顶部说明）：
+// Scene::Save 只需把它在 namedMaterialInstances 表里反查成 .material 路径写进
+// scene.json，运行期不解引用该指针。Load 端（编辑器）经 materialResolver
+// 从 .material 文件 lazy-create 真实 instance。
+//
+// 单 material（slotMaterials.size() <= 1）→ 设 Renderable.materialInstance
+// （与单材质模型 drop 行为对齐，scene 加载即带材质而非默认）。
+// 多 material → 挂 SubMeshMaterialsComponent（各 sub-mesh 段独立材质）+ slot 0
+// 当 Renderable.materialInstance 兜底（与 SyncSubMeshMaterialsForMesh 同款语义）。
+void AttachMeshMaterials(
+    World& world, Entity e, RenderableComponent& rc,
+    const std::vector<const cgltf_material*>& slotMaterials,
+    const std::unordered_map<const cgltf_material*, MaterialInstance*>& matInstances)
+{
+    if (slotMaterials.empty())
+    {
+        return;  // 纯几何无 material → 默认材质
+    }
+
+    auto resolve = [&](const cgltf_material* m) -> MaterialInstance* {
+        if (m == nullptr) { return nullptr; }
+        auto it = matInstances.find(m);
+        return (it != matInstances.end()) ? it->second : nullptr;
+    };
+
+    if (slotMaterials.size() == 1)
+    {
+        // 单 material：直接设 Renderable.materialInstance（slot 0）。
+        rc.materialInstance = resolve(slotMaterials[0]);
+        return;
+    }
+
+    // 多 material：各 slot 解析成 instance，挂 SubMeshMaterialsComponent。
+    SubMeshMaterialsComponent smc;
+    smc.slots.reserve(slotMaterials.size());
+    for (const cgltf_material* m : slotMaterials)
+    {
+        smc.slots.push_back(resolve(m));
+    }
+    // slot 0 兜底到 Renderable.materialInstance（与单 material 语义一致，渲染端
+    // 越界 / 空 slot 回退到它）。
+    if (!smc.slots.empty() && smc.slots[0] != nullptr)
+    {
+        rc.materialInstance = smc.slots[0];
+    }
+    world.AddComponent<SubMeshMaterialsComponent>(e, std::move(smc));
+}
+
 // 递归把 node 子树建进 World，返回本 node 对应的 Entity。本 node 的 parent /
 // 兄弟链由调用方填（调用方知道兄弟顺序）；本函数负责 firstChild + 各子节点的
 // parent / 兄弟链 + 子树递归。
 //
 // 关键：不跨 AddComponent / CreateEntity 持有 component 指针（entt storage
 // realloc 会悬空）—— firstChild / 子链的 patch 全部在"该 node 子树建完、不再
-// 新增实体"之后用现取的指针写。
-Entity ProcessNode(World& world, const cgltf_node& node,
-                   const std::map<const cgltf_mesh*, ::Orange::Engine::Asset::AssetHandle<MeshAsset>>& meshHandles,
-                   std::size_t& outEntityCount, std::size_t& outLightCount)
+// 新增实体"之后用现取的指针写。SubMeshMaterialsComponent 的 AddComponent 也
+// 在 mesh 那一步之后立即做（此时不再取 rc 指针，先把 rc 值填好再 Add）。
+Entity ProcessNode(
+    World& world, const cgltf_node& node,
+    const std::map<const cgltf_mesh*, MeshBuildResult>& meshResults,
+    const std::unordered_map<const cgltf_material*, MaterialInstance*>& matInstances,
+    std::size_t& outEntityCount, std::size_t& outLightCount)
 {
     Entity e = world.CreateEntity();
     ++outEntityCount;
@@ -379,12 +523,15 @@ Entity ProcessNode(World& world, const cgltf_node& node,
 
     if (node.mesh != nullptr)
     {
-        auto it = meshHandles.find(node.mesh);
-        if (it != meshHandles.end() && it->second.IsValid())
+        auto it = meshResults.find(node.mesh);
+        if (it != meshResults.end() && it->second.handle.IsValid())
         {
             RenderableComponent rc;
-            rc.mesh = it->second;
-            // G1：material 留空（默认材质）；G2 接 per-mesh PBR material。
+            rc.mesh = it->second.handle;
+            // G2：接 per-mesh PBR material。单 material → Renderable.materialInstance；
+            // 多 material → SubMeshMaterialsComponent（先把 rc 值填好，AttachMeshMaterials
+            // 内再 AddComponent<SubMeshMaterialsComponent>，不持有 rc 指针）。
+            AttachMeshMaterials(world, e, rc, it->second.slotMaterials, matInstances);
             world.AddComponent<RenderableComponent>(e, rc);
         }
     }
@@ -398,7 +545,8 @@ Entity ProcessNode(World& world, const cgltf_node& node,
     for (cgltf_size ci = 0; ci < node.children_count; ++ci)
     {
         childEntities.push_back(
-            ProcessNode(world, *node.children[ci], meshHandles, outEntityCount, outLightCount));
+            ProcessNode(world, *node.children[ci], meshResults, matInstances,
+                        outEntityCount, outLightCount));
     }
 
     // 子树建完，不再新增实体 —— 现在 patch firstChild + 子节点 parent / 兄弟链。
@@ -479,9 +627,11 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    // 每模型一个子目录 assets/Models/<basename>/ —— 各 mesh + 源 copy co-locate。
+    // 每模型一个子目录 assets/Models/<basename>/ —— 各 mesh + material + 贴图 +
+    // 源 copy 全部 co-locate。
     fs::path modelDir = fs::path(kModelsDir) / basename;
     fs::create_directories(modelDir, ec);
+    const std::string modelDirStr = modelDir.generic_string();
 
     // copy 源（ADR-008 4 件套之 copy 源）。失败不致命 —— 只是后续 reimport
     // 找不到原文件，几何已落盘。
@@ -494,16 +644,17 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         ec.clear();
     }
 
-    // 为每个被任何 node 引用的 cgltf mesh 写一个 .mesh + .meta，Load 进 registry。
-    // 同一 mesh 被多 node 引用只写一次（按指针去重）。命名 <basename>_<meshname>.mesh，
+    // 为每个被任何 node 引用的 cgltf mesh 写一个 .mesh + .meta，Load 进 registry，
+    // 同时拿到该 mesh 的 slot material 列表（按 primitive 切 sub-mesh，G2）。
+    // 同一 mesh 被多 node 引用只建一次（按指针去重）。命名 <basename>_<meshname>.mesh，
     // 同名 / 匿名退化用 mesh 序号。
-    std::map<const cgltf_mesh*, ::Orange::Engine::Asset::AssetHandle<MeshAsset>> meshHandles;
+    std::map<const cgltf_mesh*, MeshBuildResult> meshResults;
     std::set<std::string> usedMeshStems;
     std::size_t writtenMeshes = 0;
 
     const auto ensureMesh = [&](const cgltf_mesh* m) -> bool {
         if (m == nullptr) { return false; }
-        if (meshHandles.count(m) != 0) { return true; }
+        if (meshResults.count(m) != 0) { return true; }
 
         const std::size_t meshIdx =
             static_cast<std::size_t>(m - data->meshes);
@@ -517,24 +668,12 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         }
         usedMeshStems.insert(fileStem);
 
-        std::unique_ptr<MeshAsset> meshAsset = BuildMeshAssetFromGltfMesh(*m);
-        if (meshAsset == nullptr)
-        {
-            ORANGE_LOG_WARN("GltfSceneImporter: mesh '{}' 无可用三角几何，跳过", fileStem);
-            return false;
-        }
-
         const std::string meshPath = (modelDir / (fileStem + ".mesh")).generic_string();
-        auto saveRes = MeshLoader::Save(meshPath, *meshAsset);
-        if (saveRes.IsErr())
+        MeshBuildResult mb = BuildMeshAssetFromGltfMesh(*m, meshPath, registry);
+        if (!mb.handle.IsValid())
         {
-            ORANGE_LOG_ERROR("GltfSceneImporter: MeshLoader::Save '{}' 失败", meshPath);
-            return false;
-        }
-        auto loadRes = registry.Load<MeshAsset>(meshPath);
-        if (loadRes.IsErr())
-        {
-            ORANGE_LOG_ERROR("GltfSceneImporter: registry.Load<MeshAsset> '{}' 失败", meshPath);
+            ORANGE_LOG_WARN("GltfSceneImporter: mesh '{}' 无可用三角几何 / 写盘失败，跳过",
+                            fileStem);
             return false;
         }
 
@@ -546,7 +685,7 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         meta.handleId   = 0;
         WriteTextureMeta(MetaPathFor(meshPath), meta);
 
-        meshHandles[m] = loadRes.Value();
+        meshResults[m] = std::move(mb);
         ++writtenMeshes;
         return true;
     };
@@ -556,6 +695,208 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         if (data->nodes[i].mesh != nullptr)
         {
             ensureMesh(data->nodes[i].mesh);
+        }
+    }
+
+    // ---- per-mesh PBR material（G2）：为每个被引用 mesh 的每个 slot material 写
+    //      .material + import 贴图，全局按 cgltf_material* 去重（同一 material 被
+    //      多 mesh / 多 primitive 引用只写一个 .material + 一个 instance）。
+    //
+    // 关键 cgltf 生命周期：ExtractGltfMaterial 必须在 cgltf_free 之前做（读
+    //      cgltf_material / image / buffer_view 字节）；material name 也在这里 copy
+    //      出来。下面所有解引用 cgltf_material* 的逻辑都在 cgltf_free 之前完成，
+    //      之后 matInstances 只用裸指针当 key（不解引用，仅做 map 查找）。
+    //
+    // 内嵌贴图（.glb buffer_view / data: URI）提取复用单 mesh importer 的落盘 +
+    //      co-locate 流程：先把 image 字节写到 modelDir，再回填到 GltfMatInfo 的
+    //      *Src，之后与外部贴图走同一条 ImportTextureToRegistry。同一 image 被多
+    //      material 引用只写盘一次（embeddedCache 跨 material 共享）。
+    std::vector<const cgltf_material*> orderedGlobalMats;  // 全局首次出现顺序去重
+    {
+        std::set<const cgltf_material*> seen;
+        for (const auto& [meshPtr, mb] : meshResults)
+        {
+            for (const cgltf_material* m : mb.slotMaterials)
+            {
+                if (m != nullptr && seen.insert(m).second)
+                {
+                    orderedGlobalMats.push_back(m);
+                }
+            }
+        }
+    }
+
+    // 内嵌 image 提取走单 mesh importer 同款 ExtractEmbeddedImageToDisk —— 它是
+    // GltfImporter.cpp 的 file-static helper，本 TU 取不到。改用最简等价：仅外部
+    // uri 贴图经 ResolveTextureSource 解析（ExtractGltfMaterial 已做）；内嵌 image
+    // 在本 scene importer 暂走"按 images[] 下标取字节落盘"的本地实现（与单 mesh
+    // importer 行为对齐：内嵌 baseColor 等被提取成 modelDir 下真实文件）。
+    auto extractEmbeddedToDisk = [&](int imageIndex) -> std::string {
+        if (imageIndex < 0 ||
+            static_cast<cgltf_size>(imageIndex) >= data->images_count)
+        {
+            return {};
+        }
+        const cgltf_image& image = data->images[static_cast<cgltf_size>(imageIndex)];
+
+        // 取字节：优先 GLB buffer_view，其次 data: URI（base64）。
+        std::vector<unsigned char> bytes;
+        if (image.buffer_view != nullptr)
+        {
+            const cgltf_size size = image.buffer_view->size;
+            const std::uint8_t* p = cgltf_buffer_view_data(image.buffer_view);
+            if (p != nullptr && size > 0)
+            {
+                bytes.assign(p, p + size);
+            }
+        }
+        else if (image.uri != nullptr && std::strncmp(image.uri, "data:", 5) == 0)
+        {
+            const char* comma = std::strchr(image.uri, ',');
+            if (comma != nullptr)
+            {
+                // base64 解码（与单 mesh importer 同款最小实现）。
+                const auto charValue = [](char c) -> int {
+                    if (c >= 'A' && c <= 'Z') { return c - 'A'; }
+                    if (c >= 'a' && c <= 'z') { return c - 'a' + 26; }
+                    if (c >= '0' && c <= '9') { return c - '0' + 52; }
+                    if (c == '+') { return 62; }
+                    if (c == '/') { return 63; }
+                    return -1;
+                };
+                int accum = 0, bits = 0;
+                for (const char* q = comma + 1; *q != '\0'; ++q)
+                {
+                    const int v = charValue(*q);
+                    if (v < 0) { continue; }
+                    accum = (accum << 6) | v;
+                    bits += 6;
+                    if (bits >= 8)
+                    {
+                        bits -= 8;
+                        bytes.push_back(static_cast<unsigned char>((accum >> bits) & 0xFF));
+                    }
+                }
+            }
+        }
+        if (bytes.empty()) { return {}; }
+
+        // 扩展名：mime_type / magic（JPEG FF D8 FF）→ jpg，否则 png。
+        std::string ext = "png";
+        if (image.mime_type != nullptr &&
+            (std::strstr(image.mime_type, "jpeg") != nullptr ||
+             std::strstr(image.mime_type, "jpg") != nullptr))
+        {
+            ext = "jpg";
+        }
+        else if (bytes.size() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 &&
+                 bytes[2] == 0xFF)
+        {
+            ext = "jpg";
+        }
+
+        std::string baseName = (image.name != nullptr && image.name[0] != '\0')
+                                   ? std::string(image.name)
+                                   : ("image_" + std::to_string(imageIndex));
+        baseName = SanitizeName(baseName);
+
+        const fs::path dst = modelDir / (baseName + "." + ext);
+        std::ofstream ofs(dst, std::ios::binary);
+        if (!ofs)
+        {
+            ORANGE_LOG_WARN("GltfSceneImporter: 内嵌贴图写盘失败 '{}'",
+                            dst.generic_string());
+            return {};
+        }
+        ofs.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+        ofs.close();
+        return dst.generic_string();
+    };
+
+    std::map<int, std::string> embeddedCache;  // images[] 下标 → 落盘路径
+    auto resolveEmbedded = [&](int imageIndex) -> std::string {
+        if (imageIndex < 0) { return {}; }
+        auto it = embeddedCache.find(imageIndex);
+        if (it != embeddedCache.end()) { return it->second; }
+        const std::string path = extractEmbeddedToDisk(imageIndex);
+        embeddedCache[imageIndex] = path;
+        return path;
+    };
+
+    // 贴图 resolver：源路径 → 经 ImportTextureToRegistry co-locate 到 modelDir 后
+    // 的落盘 path（与单 mesh importer 同款）。失败返回空 → 该槽不写。
+    auto texResolver = [&](const std::string& srcTexPath) -> std::string {
+        ImportResult tr = ImportTextureToRegistry(srcTexPath, registry, modelDirStr);
+        if (tr.status == ImportStatus::Success && !tr.destPath.empty())
+        {
+            return tr.destPath;
+        }
+        ORANGE_LOG_WARN("GltfSceneImporter: material 贴图 '{}' import 失败，跳过该槽",
+                        srcTexPath);
+        return {};
+    };
+
+    // cgltf_material* → .material 落盘路径（写盘 + dedup 都在 cgltf_free 之前）。
+    std::map<const cgltf_material*, std::string> matPaths;
+    std::set<std::string> usedMatFileNames;
+    for (std::size_t mi = 0; mi < orderedGlobalMats.size(); ++mi)
+    {
+        const cgltf_material* m = orderedGlobalMats[mi];
+        GltfMatInfo info = ExtractGltfMaterial(m, src.parent_path(), data);
+        if (!info.present)
+        {
+            continue;  // 理论上不会（orderedGlobalMats 已过滤 nullptr）
+        }
+        // 内嵌图像（外部 uri 解析为空时）回填 *Src。
+        if (info.baseColorSrc.empty())
+        {
+            info.baseColorSrc = resolveEmbedded(info.baseColorImageIndex);
+        }
+        if (info.normalSrc.empty())
+        {
+            info.normalSrc = resolveEmbedded(info.normalImageIndex);
+        }
+        if (info.metalRoughSrc.empty())
+        {
+            info.metalRoughSrc = resolveEmbedded(info.metalRoughImageIndex);
+        }
+        if (info.aoSrc.empty())
+        {
+            info.aoSrc = resolveEmbedded(info.aoImageIndex);
+        }
+        if (info.emissiveSrc.empty())
+        {
+            info.emissiveSrc = resolveEmbedded(info.emissiveImageIndex);
+        }
+
+        // material name → 文件名安全片段；空 / 同名退化用全局序号。命名
+        // <basename>_<materialName 或 mat 序号>.material（与单 mesh importer
+        // 的 slot>=1 命名同风格；scene importer 无"slot 0 = <stem>.material"
+        // 的历史约束，统一带 material 名后缀，多个 mesh 的材质也不冲突）。
+        std::string matName = (m->name != nullptr && m->name[0] != '\0')
+                                  ? SanitizeName(m->name)
+                                  : ("mat" + std::to_string(mi));
+        std::string fileStem = basename + "_" + matName;
+        if (usedMatFileNames.count(fileStem) != 0)
+        {
+            fileStem = basename + "_" + matName + "_" + std::to_string(mi);
+        }
+        usedMatFileNames.insert(fileStem);
+
+        ::Orange::Editor::Material::MaterialFileData mdata =
+            BuildMaterialFileData(info, texResolver);
+        const std::string matPath =
+            (modelDir / (fileStem + ".material")).generic_string();
+        if (::Orange::Editor::Material::WriteMaterialFile(matPath, mdata))
+        {
+            ORANGE_LOG_INFO("GltfSceneImporter: wrote material '{}' (textures={})",
+                            matPath, mdata.textures.size());
+            matPaths[m] = matPath;
+        }
+        else
+        {
+            ORANGE_LOG_WARN("GltfSceneImporter: WriteMaterialFile '{}' 失败", matPath);
         }
     }
 
@@ -569,6 +910,7 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     }
 
     // 选 scene：优先 data->scene；否则 scenes[0]；都没有则退回全部 nodes 当根。
+    // roots 在 cgltf_free 之前收集（存裸 node 指针，下面 World 建完才 free）。
     std::vector<const cgltf_node*> roots;
     const cgltf_scene* scene =
         (data->scene != nullptr) ? data->scene
@@ -592,13 +934,37 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         }
     }
 
+    // ---- 建 headless sentinel MaterialInstance：一个 .material 路径一个实例。
+    //      Scene::Save 只需把 entity 上的 materialInstance* 在 namedMaterialInstances
+    //      表里反查成 .material 路径写进 scene.json（运行期不解引用该指针，故
+    //      sentinel 绑 null Material 即可，构造廉价、无 Vulkan 依赖）。Load 端
+    //      （编辑器）经 materialResolver / EnsureMaterialInstance 从 .material 文件
+    //      lazy-create 真实 instance，与 mesh 的磁盘加载对称。
+    //
+    //      ownedInstances 持有实例生命周期，须覆盖 Scene::Save 调用（World 在它
+    //      之前析构 / 先用完）。matInstances 给 ProcessNode 按 cgltf_material* 查
+    //      sentinel；named 给 Scene::Save 按指针反查路径。
+    std::vector<std::unique_ptr<MaterialInstance>> ownedInstances;
+    std::unordered_map<const cgltf_material*, MaterialInstance*> matInstances;
+    std::unordered_map<std::string, MaterialInstance*> named;
+    ownedInstances.reserve(matPaths.size());
+    for (const auto& [matPtr, matPath] : matPaths)
+    {
+        auto inst = std::make_unique<MaterialInstance>(nullptr);
+        MaterialInstance* raw = inst.get();
+        ownedInstances.push_back(std::move(inst));
+        matInstances[matPtr] = raw;
+        named[matPath] = raw;
+    }
+
     // 建 World 镜像 node 树。
     World world;
     std::size_t entityCount = 0;
     std::size_t lightCount  = 0;
     for (std::size_t ri = 0; ri < roots.size(); ++ri)
     {
-        Entity rootE = ProcessNode(world, *roots[ri], meshHandles, entityCount, lightCount);
+        Entity rootE = ProcessNode(world, *roots[ri], meshResults, matInstances,
+                                   entityCount, lightCount);
         // 根：parent 留 Invalid，用 sortIndex 定根间顺序（HierarchyComponent 约定）。
         if (auto* h = world.GetComponent<HierarchyComponent>(rootE))
         {
@@ -615,14 +981,16 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    cgltf_free(data);  // World 已持有几何 handle，cgltf 结构不再需要
+    cgltf_free(data);  // World 已持有几何 handle + sentinel；cgltf 结构不再需要
 
-    // Scene::Save —— assetRegistry 反查 mesh handle → 相对路径写进 scene.json。
-    // scenePath / basename 已在函数顶部（hash 短路处）算好。
+    // Scene::Save —— assetRegistry 反查 mesh handle → 相对路径；namedMaterialInstances
+    // 反查 materialInstance* → .material 路径写进 scene.json（materialInstanceId /
+    // subMeshMaterials slots）。scenePath / basename 已在函数顶部（hash 短路处）算好。
     fs::create_directories(kScenesDir, ec);
 
     ::Orange::Engine::Scene::SaveOptions saveOpts;
-    saveOpts.assetRegistry = &registry;
+    saveOpts.assetRegistry          = &registry;
+    saveOpts.namedMaterialInstances = &named;
     auto saveRes = ::Orange::Engine::Scene::Save(world, scenePath, saveOpts);
     if (saveRes.IsErr())
     {
@@ -651,9 +1019,11 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     result.destPath = scenePath;
     result.message  = "imported gltf scene (entities=" + std::to_string(entityCount) +
                       " meshes=" + std::to_string(writtenMeshes) +
+                      " materials=" + std::to_string(matPaths.size()) +
                       " lights=" + std::to_string(lightCount) + ")";
-    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} lights={})",
-                    srcPath, scenePath, entityCount, writtenMeshes, lightCount);
+    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={} lights={})",
+                    srcPath, scenePath, entityCount, writtenMeshes, matPaths.size(),
+                    lightCount);
     return result;
 }
 

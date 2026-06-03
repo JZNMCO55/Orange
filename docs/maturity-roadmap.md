@@ -119,7 +119,7 @@
 
 - **现状/缺口**：只有 OBJ/glTF/GLB；无 FBX/DAE/USD；无 EXR/KTX/DDS/BC7 压缩纹理；无离线 texture cook（mipmap/压缩）；无 file watcher 自动 reimport。
 - **里程碑**（各自独立，ADR-008 4 件套路径，可并行）：
-  - C2.1 **glTF scene import G2/G3 补完**（per-mesh 材质 + cameras）——续本 session（G1 已落），最顺手的下一步。
+  - C2.1 **glTF scene import G2 ✅ 2026-06-03**（per-mesh PBR 材质）：单 material → `Renderable.materialInstance` / 多 material → `SubMeshMaterialsComponent`（各 sub-mesh 段独立材质 + slot 0 兜底），去 G1"合并单段走默认材质"workaround；全局按 `cgltf_material*` 去重；**headless 难点解法** = sentinel `MaterialInstance(nullptr)`（unique_ptr 拥有，Save 用完即随 scratch world 析构）+ `namedMaterialInstances` 反查写 `.material` 路径进 scene.json，Load 端 `materialResolver` lazy-create 真实 instance 对称；cgltf 生命周期严守（material 解析全在 cgltf_free 前）；`GltfSceneImportTest` +3 case；ctest 84/84。**剩 G3 cameras**（per-mesh 材质已闭环）。
   - C2.2 **FBX importer**（OpenFBX MIT vendor，hierarchy+multi-mesh+material slot）。
   - C2.3 压缩纹理 + 离线 cook（性能 milestone，部分跨仓）。
   - C2.4 file watcher 自动 reimport（平台文件监控）。

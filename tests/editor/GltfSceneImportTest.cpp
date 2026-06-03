@@ -18,7 +18,9 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/render/LightComponent.h>
+#include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/RenderableComponent.h>
+#include <orange/engine/render/SubMeshMaterialsComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
@@ -39,8 +41,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace ImportNS = ::Orange::Editor::Import;
 namespace AssetNS  = ::Orange::Engine::Asset;
@@ -271,6 +275,69 @@ void WriteRotatedParentLightGltf(const std::string& path)
         "    {\"name\": \"ChildSun\", "
         "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
         "  ]\n"
+        "}\n";
+}
+
+// 第七个 fixture：**per-mesh PBR material**（G2）—— 覆盖：
+//   * 单 material mesh（SoloNode 引用 mesh 0，1 primitive → material "Red"）
+//   * 多 material mesh（MultiNode 引用 mesh 1，2 primitive → material "Red" / "Blue"）
+//   * material 去重：material "Red" 被 mesh 0 + mesh 1 的 primitive 0 共用 →
+//     全局只写一个 <basename>_Red.material（不是每次新建）。
+// 期望产物：2 个 .material（Red + Blue）；SoloNode 的 Renderable.materialInstanceId
+// 指向 Red.material；MultiNode 的 SubMeshMaterials slots = [Red.material, Blue.material]。
+void WriteMaterialSceneGltf(const std::string& path)
+{
+    // positions 48B（accessor 0）+ idxA 12B（6 idx，accessor 1）+ idxB 6B
+    // （3 idx，accessor 2）。bufferView 0 = pos[0,48)，1 = idxA[48,60)，
+    // 2 = idxB[60,66)。mesh 1 两 primitive 各用一个 index accessor + material。
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMAAAACAAMA";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写 material 场景 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0, 1]}],\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"SoloNode\",  \"mesh\": 0},\n"
+        "    {\"name\": \"MultiNode\", \"mesh\": 1}\n"
+        "  ],\n"
+        "  \"materials\": [\n"
+        "    {\"name\": \"Red\",  \"pbrMetallicRoughness\": "
+        "{\"baseColorFactor\": [1.0, 0.0, 0.0, 1.0], "
+        "\"metallicFactor\": 0.1, \"roughnessFactor\": 0.7}},\n"
+        "    {\"name\": \"Blue\", \"pbrMetallicRoughness\": "
+        "{\"baseColorFactor\": [0.0, 0.0, 1.0, 1.0], "
+        "\"metallicFactor\": 0.9, \"roughnessFactor\": 0.2}}\n"
+        "  ],\n"
+        "  \"meshes\": [\n"
+        // mesh 0：单 primitive，material 0（Red）。
+        "    {\"name\": \"Solo\", \"primitives\": [{\"attributes\": "
+        "{\"POSITION\": 0}, \"indices\": 1, \"material\": 0}]},\n"
+        // mesh 1：两 primitive，material 0（Red）+ material 1（Blue）。
+        "    {\"name\": \"Multi\", \"primitives\": [\n"
+        "      {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0},\n"
+        "      {\"attributes\": {\"POSITION\": 0}, \"indices\": 2, \"material\": 1}\n"
+        "    ]}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+        "\"type\": \"SCALAR\"},\n"
+        "    {\"bufferView\": 2, \"componentType\": 5123, \"count\": 3, "
+        "\"type\": \"SCALAR\"}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 60, \"byteLength\": 6}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 66, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
         "}\n";
 }
 
@@ -704,6 +771,118 @@ int main()
                "应 = (-1,0,0)（旧 world-dir 编码会被父旋转二次应用得错误方向）");
         std::fprintf(stdout,
                      "  [PASS] 旋转父下 directional 灯：R-bridging + 累积父旋转 → 世界光向 (-1,0,0)\n");
+    }
+
+    // ===== 第七组：per-mesh PBR material（G2）—— 单 material / 多 material /
+    //       material 去重 + Save→Load round-trip 保住材质引用 =====
+    {
+        namespace RenderNS = ::Orange::Engine::Render;
+
+        const std::string mPath = (srcDir / "mat_scene.gltf").generic_string();
+        WriteMaterialSceneGltf(mPath);
+
+        auto reg = MakeImportRegistry();
+        const ImportNS::ImportResult rm =
+            ImportNS::RunGltfSceneImportToRegistry(mPath, *reg);
+        assert(rm.status == ImportNS::ImportStatus::Success && "material 场景导入应 Success");
+        // material "Red" 被 mesh 0 + mesh 1 primitive 0 共用 → 全局去重为 2 个
+        // material（Red + Blue），不是 3 个。
+        assert(rm.message.find("materials=2") != std::string::npos &&
+               "Red 被两 mesh 共用 → 全局去重为 2 个 material（result message materials=2）");
+
+        // ----- .material 文件落盘 + 去重：恰好 2 个 .material（Red + Blue）-----
+        const fs::path matModelDir = fs::path("assets/Models/mat_scene");
+        const fs::path redMat  = matModelDir / "mat_scene_Red.material";
+        const fs::path blueMat = matModelDir / "mat_scene_Blue.material";
+        assert(fs::exists(redMat) && "Red material 应写出 mat_scene_Red.material");
+        assert(fs::exists(blueMat) && "Blue material 应写出 mat_scene_Blue.material");
+        std::size_t matFiles = 0;
+        for (const auto& de : fs::directory_iterator(matModelDir))
+        {
+            if (de.path().extension() == ".material") { ++matFiles; }
+        }
+        assert(matFiles == 2 &&
+               "恰好 2 个 .material（Red 被两 mesh 共用，全局去重不重复写）");
+        std::fprintf(stdout,
+                     "  [PASS] G2 .material 落盘 + 去重：Red/Blue 各一份（共用 material 不重复写）\n");
+
+        // ----- 原始 scene.json 文本断言：material id 用 .material 路径 -----
+        // Save 把 sentinel materialInstance 经 namedMaterialInstances 反查成
+        // .material 路径写进 materialInstanceId / subMeshMaterials slots。
+        std::ifstream ifs(rm.destPath, std::ios::binary);
+        const std::string json((std::istreambuf_iterator<char>(ifs)),
+                               std::istreambuf_iterator<char>());
+        assert(json.find("mat_scene_Red.material") != std::string::npos &&
+               "scene.json 应含 Red .material 路径作为 material id");
+        assert(json.find("mat_scene_Blue.material") != std::string::npos &&
+               "scene.json 应含 Blue .material 路径作为 material id");
+        assert(json.find("\"materialInstanceId\"") != std::string::npos &&
+               "scene.json 应写出 materialInstanceId 字段（单 material mesh 路径）");
+        assert(json.find("\"SubMeshMaterials\"") != std::string::npos &&
+               "scene.json 应写出 SubMeshMaterials 段（多 material mesh 路径）");
+        std::fprintf(stdout,
+                     "  [PASS] G2 scene.json：materialInstanceId + SubMeshMaterials 用 .material 路径\n");
+
+        // ----- Save→Load round-trip：注入 materialResolver（path → sentinel
+        //       instance），断言单 material 实体 materialInstance 非空 + 多
+        //       material 实体 SubMeshMaterials slots 各段材质正确 -----
+        std::vector<std::unique_ptr<RenderNS::MaterialInstance>> owned;
+        std::map<std::string, RenderNS::MaterialInstance*> byPath;
+        auto resolver = [&](const std::string& matId) -> RenderNS::MaterialInstance* {
+            auto it = byPath.find(matId);
+            if (it != byPath.end()) { return it->second; }
+            owned.push_back(std::make_unique<RenderNS::MaterialInstance>(nullptr));
+            RenderNS::MaterialInstance* raw = owned.back().get();
+            byPath[matId] = raw;
+            return raw;
+        };
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry    = reg.get();
+        opts.materialResolver = resolver;
+        auto lr = SceneNS::Load(rm.destPath, w, opts);
+        assert(lr.IsOk() && "material 场景应能 Load");
+
+        // SoloNode：单 material → Renderable.materialInstance 非空（= Red sentinel）。
+        const Entity solo = FindByName(w, "SoloNode");
+        assert(w.IsValid(solo) && "SoloNode 实体应存在");
+        const auto* soloR = w.GetComponent<RenderNS::RenderableComponent>(solo);
+        assert(soloR != nullptr && soloR->mesh.IsValid() &&
+               "SoloNode 应有 Renderable + 有效 mesh");
+        assert(soloR->materialInstance != nullptr &&
+               "SoloNode 单 material → Renderable.materialInstance 应非空（Red）");
+        // resolver 是按 id 缓存的，Red 的 sentinel 应等于 byPath[Red 路径]。
+        RenderNS::MaterialInstance* redInst =
+            byPath.at(redMat.generic_string());
+        assert(soloR->materialInstance == redInst &&
+               "SoloNode materialInstance 应解析到 Red .material（id 路径正确）");
+        assert(!w.HasComponent<RenderNS::SubMeshMaterialsComponent>(solo) &&
+               "单 material mesh 不应挂 SubMeshMaterialsComponent");
+
+        // MultiNode：多 material → SubMeshMaterials slots = [Red, Blue]。
+        const Entity multi = FindByName(w, "MultiNode");
+        assert(w.IsValid(multi) && "MultiNode 实体应存在");
+        const auto* multiR = w.GetComponent<RenderNS::RenderableComponent>(multi);
+        assert(multiR != nullptr && multiR->mesh.IsValid() &&
+               "MultiNode 应有 Renderable + 有效 mesh");
+        const auto* smc =
+            w.GetComponent<RenderNS::SubMeshMaterialsComponent>(multi);
+        assert(smc != nullptr && "MultiNode 多 material → 应挂 SubMeshMaterialsComponent");
+        assert(smc->slots.size() == 2 &&
+               "MultiNode 两 primitive → 2 个 slot（Red / Blue）");
+        RenderNS::MaterialInstance* blueInst =
+            byPath.at(blueMat.generic_string());
+        assert(smc->slots[0] == redInst &&
+               "slot 0 应是 Red（primitive 0 material 0，与 mesh sub-mesh 段顺序对齐）");
+        assert(smc->slots[1] == blueInst &&
+               "slot 1 应是 Blue（primitive 1 material 1，段顺序对齐）");
+        // slot 0 兜底到 Renderable.materialInstance（与导入侧 AttachMeshMaterials 一致）。
+        assert(multiR->materialInstance == redInst &&
+               "MultiNode Renderable.materialInstance 应兜底到 slot 0（Red）");
+        std::fprintf(stdout,
+                     "  [PASS] G2 round-trip：单 material→materialInstance(Red) / "
+                     "多 material→SubMeshMaterials[Red,Blue] + slot 顺序对齐\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);
