@@ -37,11 +37,16 @@
 //     namedMaterialInstances 让 Scene::Save 反查 .material 路径写进 scene.json；
 //     Load 端（编辑器）经 materialResolver / EnsureMaterialInstance 从 .material
 //     文件 lazy-create 真实 instance，与 mesh 的磁盘加载对称。
-//   - G3（部分 ✅）scene-level lights：消费 KHR_lights_punctual →
-//     DirectionalLight / PointLight / SpotLight（方向沿 glTF -Z 转引擎 -Y；
-//     intensity ÷683 luminous efficacy 把 glTF 光度单位 lux/candela 映射到引擎
-//     content-scale 乘子，实测 Blender sun → 3.0 落在引擎 1.2~2.5 尺度）；
-//     cameras 仍延后。
+//   - G3 ✅ scene-level lights + cameras：
+//     * lights：消费 KHR_lights_punctual → DirectionalLight / PointLight /
+//       SpotLight（方向沿 glTF -Z 转引擎 -Y；intensity ÷683 luminous efficacy 把
+//       glTF 光度单位 lux/candela 映射到引擎 content-scale 乘子，实测 Blender sun →
+//       3.0 落在引擎 1.2~2.5 尺度）。
+//     * cameras：消费 node.camera → Render::Camera（perspective yfov/aspect/znear/
+//       zfar 烘成 Camera::Perspective；orthographic xmag/ymag 半宽高映成
+//       left/right/bottom/top 调 Camera::Orthographic；aspect/zfar 缺省取 16:9 / 1000；
+//       相机看本地 -Z 与引擎约定一致，位姿由 entity Transform 决定故 view 留单位、
+//       不做灯光那种 -Z→-Y 桥接）。
 //   - 只接受 triangle primitive；skinning / morph / animation skip（v1.x 长尾）。
 //
 // cgltf IMPLEMENTATION 宏仅在 GltfImporter.cpp 一处 expand；本 TU 只取 cgltf

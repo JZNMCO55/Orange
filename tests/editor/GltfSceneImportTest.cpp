@@ -17,6 +17,7 @@
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -338,6 +339,37 @@ void WriteMaterialSceneGltf(const std::string& path)
         "  ],\n"
         "  \"buffers\": [{\"byteLength\": 66, \"uri\": "
         "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
+        "}\n";
+}
+
+// 第八个 fixture：**glTF cameras**（G3）—— camera-only，无 mesh/buffer。覆盖：
+//   * 透视相机（全参 yfov/aspectRatio/znear/zfar）
+//   * 透视相机（仅 yfov/znear，缺 aspectRatio/zfar → 验导入侧默认 16:9 / far 1000）
+//   * 正交相机（xmag/ymag/znear/zfar → 半宽高映 left/right/bottom/top）
+// 验 node.camera → Render::Camera component，投影矩阵烘焙正确（与 Camera::Perspective /
+// Orthographic 工厂逐元素对位）+ Save→Load round-trip 保住 projection。
+void WriteCameraSceneGltf(const std::string& path)
+{
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写相机场景 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0, 1, 2]}],\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"PerspCam\", \"translation\": [0.0, 1.0, 5.0], \"camera\": 0},\n"
+        "    {\"name\": \"PerspDefaultCam\", \"camera\": 1},\n"
+        "    {\"name\": \"OrthoCam\", \"camera\": 2}\n"
+        "  ],\n"
+        "  \"cameras\": [\n"
+        "    {\"name\": \"Persp\", \"type\": \"perspective\", \"perspective\": "
+        "{\"yfov\": 0.6981317, \"aspectRatio\": 1.5, \"znear\": 0.1, \"zfar\": 100.0}},\n"
+        "    {\"name\": \"PerspDefault\", \"type\": \"perspective\", \"perspective\": "
+        "{\"yfov\": 0.5, \"znear\": 0.2}},\n"
+        "    {\"name\": \"Ortho\", \"type\": \"orthographic\", \"orthographic\": "
+        "{\"xmag\": 4.0, \"ymag\": 3.0, \"znear\": 0.1, \"zfar\": 50.0}}\n"
+        "  ]\n"
         "}\n";
 }
 
@@ -883,6 +915,78 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] G2 round-trip：单 material→materialInstance(Red) / "
                      "多 material→SubMeshMaterials[Red,Blue] + slot 顺序对齐\n");
+    }
+
+    // ===== 第八组：glTF cameras（G3）—— node.camera → Render::Camera 投影烘焙 =====
+    // camera-only 场景（无 mesh/buffer）。验透视/正交相机的投影矩阵烘焙正确（逐元素
+    // 对位 Camera::Perspective/Orthographic 工厂）+ aspect/zfar 缺省默认 + Transform
+    // 位姿（importer 不桥接，直接写 node translation）+ Save→Load round-trip 保 projection。
+    {
+        namespace RenderNS = ::Orange::Engine::Render;
+        using RenderNS::Camera;
+
+        const std::string cPath = (srcDir / "camera_scene.gltf").generic_string();
+        WriteCameraSceneGltf(cPath);
+
+        auto reg = MakeImportRegistry();
+        const ImportNS::ImportResult rc =
+            ImportNS::RunGltfSceneImportToRegistry(cPath, *reg);
+        assert(rc.status == ImportNS::ImportStatus::Success && "相机场景导入应 Success");
+        assert(rc.message.find("cameras=3") != std::string::npos &&
+               "result message 应含 cameras=3（3 个相机 node 被计数）");
+
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg.get();
+        auto lr = SceneNS::Load(rc.destPath, w, opts);
+        assert(lr.IsOk() && "相机场景应能 Load（Camera component round-trip）");
+
+        // 逐元素比较投影矩阵（serialization round-trip 后用 1e-4 容差）。
+        auto projMatches = [](const glm::mat4& a, const glm::mat4& b) -> bool {
+            for (int c = 0; c < 4; ++c)
+                for (int r = 0; r < 4; ++r)
+                    if (std::fabs(a[c][r] - b[c][r]) > 1e-4f) { return false; }
+            return true;
+        };
+
+        // PerspCam：全参 → Camera::Perspective(yfov 0.6981317, aspect 1.5, near 0.1, far 100)。
+        const Entity persp = FindByName(w, "PerspCam");
+        assert(w.IsValid(persp) && "PerspCam 实体应存在");
+        const auto* pc = w.GetComponent<Camera>(persp);
+        assert(pc != nullptr && "PerspCam 应有 Camera component");
+        const glm::mat4 expectPersp =
+            Camera::Perspective(0.6981317f, 1.5f, 0.1f, 100.0f).projection;
+        assert(projMatches(pc->projection, expectPersp) &&
+               "PerspCam projection 应 = Camera::Perspective(0.6981317,1.5,0.1,100) 烘焙结果");
+        // 相机位姿在 Transform（importer 不桥接，直接写 node translation）。
+        const auto* pcT = w.GetComponent<SceneNS::TransformComponent>(persp);
+        assert(pcT != nullptr &&
+               std::fabs(pcT->position.x - 0.0f) < 1e-4f &&
+               std::fabs(pcT->position.y - 1.0f) < 1e-4f &&
+               std::fabs(pcT->position.z - 5.0f) < 1e-4f &&
+               "PerspCam 位姿应在 Transform = glTF translation (0,1,5)（无 -Z→-Y 桥接）");
+
+        // PerspDefaultCam：缺 aspectRatio/zfar → 导入侧默认 16:9 / far 1000。
+        const Entity perspDef = FindByName(w, "PerspDefaultCam");
+        const auto* pdc = w.GetComponent<Camera>(perspDef);
+        assert(pdc != nullptr && "PerspDefaultCam 应有 Camera component");
+        const glm::mat4 expectDef =
+            Camera::Perspective(0.5f, 16.0f / 9.0f, 0.2f, 1000.0f).projection;
+        assert(projMatches(pdc->projection, expectDef) &&
+               "PerspDefaultCam 缺 aspect/zfar → 应用默认 16:9 / far 1000 烘焙");
+
+        // OrthoCam：xmag 4 / ymag 3 → Orthographic(-4,4,-3,3, 0.1, 50)（半宽高映盒子）。
+        const Entity ortho = FindByName(w, "OrthoCam");
+        const auto* oc = w.GetComponent<Camera>(ortho);
+        assert(oc != nullptr && "OrthoCam 应有 Camera component");
+        const glm::mat4 expectOrtho =
+            Camera::Orthographic(-4.0f, 4.0f, -3.0f, 3.0f, 0.1f, 50.0f).projection;
+        assert(projMatches(oc->projection, expectOrtho) &&
+               "OrthoCam projection 应 = Camera::Orthographic(-4,4,-3,3,0.1,50)（xmag/ymag 半宽高）");
+
+        std::fprintf(stdout,
+                     "  [PASS] glTF cameras（G3）：perspective(全参+默认 aspect/far) + "
+                     "orthographic 投影烘焙 + Transform 位姿 + round-trip\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);

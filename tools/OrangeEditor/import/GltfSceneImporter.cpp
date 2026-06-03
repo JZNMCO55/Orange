@@ -10,6 +10,7 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/LightComponent.h>
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/RenderableComponent.h>
@@ -57,6 +58,7 @@ using ::Orange::Engine::Asset::VertexNormal3;
 using ::Orange::Engine::Asset::VertexPosition3;
 using ::Orange::Engine::Asset::VertexTangent4;
 using ::Orange::Engine::Asset::VertexUV2;
+using ::Orange::Engine::Render::Camera;
 using ::Orange::Engine::Render::DirectionalLight;
 using ::Orange::Engine::Render::MaterialInstance;
 using ::Orange::Engine::Render::PointLight;
@@ -423,6 +425,50 @@ void AddGltfLight(World& world, Entity e, const cgltf_light& light)
     }
 }
 
+// glTF perspective camera 的 aspectRatio / zfar 是可选字段（aspect 缺省语义 =
+// "跟视口宽高比"、zfar 缺省 = 无限远）。本 importer 把投影**烘成** Camera.projection
+// （现有 Render::Camera component 只存 view/projection 矩阵对，不存参数化 fov/near/far），
+// 故对缺省值取保守默认：aspect 16/9、far 1000。烘焙的代价是 re-import / re-edit 按矩阵
+// 不按原始 fov 字段——Camera 当前无参数化字段是已知 MVP 限制（真要可重编 fov 需扩
+// Camera 加 fov/aspect/near/far + Inspector，属后续）。
+constexpr float kGltfDefaultCameraAspect = 16.0f / 9.0f;
+constexpr float kGltfDefaultCameraFar    = 1000.0f;
+
+// glTF camera → 引擎 Render::Camera component。透视用 yfov/aspect/znear/zfar 烘成
+// Camera::Perspective；正交的 xmag/ymag 是视图半宽 / 半高，映成 left/right/bottom/top
+// 调 Camera::Orthographic。相机位姿（eye/forward/up）不进 component —— view 留单位，
+// 由 entity Transform 决定（CameraFrustumGizmoPlugin 从 Transform 推 forward = rotation*-Z）。
+// glTF 相机同样看本地 -Z（与引擎约定一致），故 ProcessNode 不对相机 node 做灯光那种
+// -Z→-Y 桥接，直接写 node local rotation 即可（finalRot 默认 = node rotation）。
+void AddGltfCamera(World& world, Entity e, const cgltf_camera& camera)
+{
+    switch (camera.type)
+    {
+        case cgltf_camera_type_perspective:
+        {
+            const cgltf_camera_perspective& p = camera.data.perspective;
+            const float aspect = (p.has_aspect_ratio && p.aspect_ratio > 0.0f)
+                                     ? p.aspect_ratio : kGltfDefaultCameraAspect;
+            const float zfar = (p.has_zfar && p.zfar > 0.0f)
+                                   ? p.zfar : kGltfDefaultCameraFar;
+            world.AddComponent<Camera>(
+                e, Camera::Perspective(p.yfov, aspect, p.znear, zfar));
+            break;
+        }
+        case cgltf_camera_type_orthographic:
+        {
+            const cgltf_camera_orthographic& o = camera.data.orthographic;
+            world.AddComponent<Camera>(
+                e, Camera::Orthographic(-o.xmag, o.xmag, -o.ymag, o.ymag,
+                                        o.znear, o.zfar));
+            break;
+        }
+        default:
+            ORANGE_LOG_WARN("GltfSceneImporter: 未知 glTF camera 类型，跳过");
+            break;
+    }
+}
+
 // 把一个 mesh 的 slot material 列表（cgltf_material* → sentinel MaterialInstance*）
 // 接到 entity 的 Renderable / SubMeshMaterialsComponent 上（G2）。
 //
@@ -486,7 +532,7 @@ Entity ProcessNode(
     World& world, const cgltf_node& node,
     const std::map<const cgltf_mesh*, MeshBuildResult>& meshResults,
     const std::unordered_map<const cgltf_material*, MaterialInstance*>& matInstances,
-    std::size_t& outEntityCount, std::size_t& outLightCount)
+    std::size_t& outEntityCount, std::size_t& outLightCount, std::size_t& outCameraCount)
 {
     Entity e = world.CreateEntity();
     ++outEntityCount;
@@ -521,6 +567,12 @@ Entity ProcessNode(
         ++outLightCount;
     }
 
+    if (node.camera != nullptr)
+    {
+        AddGltfCamera(world, e, *node.camera);
+        ++outCameraCount;
+    }
+
     if (node.mesh != nullptr)
     {
         auto it = meshResults.find(node.mesh);
@@ -546,7 +598,7 @@ Entity ProcessNode(
     {
         childEntities.push_back(
             ProcessNode(world, *node.children[ci], meshResults, matInstances,
-                        outEntityCount, outLightCount));
+                        outEntityCount, outLightCount, outCameraCount));
     }
 
     // 子树建完，不再新增实体 —— 现在 patch firstChild + 子节点 parent / 兄弟链。
@@ -961,10 +1013,11 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     World world;
     std::size_t entityCount = 0;
     std::size_t lightCount  = 0;
+    std::size_t cameraCount = 0;
     for (std::size_t ri = 0; ri < roots.size(); ++ri)
     {
         Entity rootE = ProcessNode(world, *roots[ri], meshResults, matInstances,
-                                   entityCount, lightCount);
+                                   entityCount, lightCount, cameraCount);
         // 根：parent 留 Invalid，用 sortIndex 定根间顺序（HierarchyComponent 约定）。
         if (auto* h = world.GetComponent<HierarchyComponent>(rootE))
         {
@@ -1020,10 +1073,11 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
     result.message  = "imported gltf scene (entities=" + std::to_string(entityCount) +
                       " meshes=" + std::to_string(writtenMeshes) +
                       " materials=" + std::to_string(matPaths.size()) +
-                      " lights=" + std::to_string(lightCount) + ")";
-    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={} lights={})",
+                      " lights=" + std::to_string(lightCount) +
+                      " cameras=" + std::to_string(cameraCount) + ")";
+    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={} lights={} cameras={})",
                     srcPath, scenePath, entityCount, writtenMeshes, matPaths.size(),
-                    lightCount);
+                    lightCount, cameraCount);
     return result;
 }
 
