@@ -88,6 +88,7 @@ add_library(orange_engine STATIC
     src/scene/ComponentSerializers.cpp
     src/scene/EntityGuid.cpp
     src/scene/PrefabInstantiation.cpp
+    src/scene/PrefabOverride.cpp
     src/scene/WorldPartition.cpp
     src/scene/TransformSystem.cpp
 

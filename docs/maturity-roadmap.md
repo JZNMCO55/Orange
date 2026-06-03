@@ -113,7 +113,9 @@
 ### C1 · Prefab override / 嵌套 / 变体
 
 - **现状**：prefab MVP 已落（能实例化，见 [[project_prefab_engine_mvp_landed]]），缺 override（实例改不回灌母体）/ 嵌套 prefab / apply-revert / 变体。成熟引擎靠这套批量构建内容。
-- **里程碑**：C1.1 override（实例字段 delta，不回灌母体，蓝条标记）；C1.2 嵌套 prefab；C1.3 apply/revert；C1.4 prefab 变体。**依赖 A2** EntityGuid。规模 L。dogfood：编辑器交互。
+- **里程碑**：C1.1 override（实例字段 delta，不回灌母体，蓝条标记）；C1.2 嵌套 prefab；C1.3 apply/revert；C1.4 prefab 变体。**依赖 A2** EntityGuid（A2.1+A2.2 已落 ✅）。规模 L。dogfood：编辑器交互。
+- **设计提案已出 📄 2026-06-03**：`docs/c1-prefab-override-design.md`（现状=实例全 bake 撑不起 override；**存储模型选项 A〔全 bake + 派生 diff，零破坏 MVP〕vs B〔template+delta 自动传播但大重构〕，推荐 A 起步**；headless 安全先行件 CS1 实例↔模板 diff〔决策中立，A/B 都用得上，消费 A2.2 templateEntityGuid〕；6 问留 C1.0 ADR）。
+- **CS1 ✅ 2026-06-03**（决策中立 headless 先行件，OE 待 commit）：`PrefabOverride.{h,cpp}`——`ComputeInstanceOverrides`/`ComputeEntityOverrides` field 级 diff（复用 serializer 注册表序列化单 entity + structured JSON leaf 比较 typed 防跨类型误判 + 过滤 Guid/PrefabInstance/Hierarchy 身份 component + 经 templateEntityGuid+FindEntityByGuid 配对，全失败 graceful）。`prefab_override_test` 6 例；ctest 89/89。已知局限：mesh/material asset-ref 退化对称无误报但不敏感（两侧传同 registry 即可，留 UI 期）。**剩 C1.0 ADR**（存储模型，待用户拍板）+ CS2 refresh + **C1.1 编辑器蓝条/revert/apply UI（dogfood-gated）**。
 
 ### C2 · 资产格式广度
 
