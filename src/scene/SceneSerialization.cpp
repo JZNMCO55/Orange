@@ -107,9 +107,14 @@ namespace
 // ReassignEntityGuids 换新实例 guid 前捕获）。同款 optional 字段路径，旧 1.16 文件
 // 无 "templateEntityGuid" 段时读为空 guid（= 未知 / 旧数据），向后兼容；前三字段
 // 语义不变。为 prefab override / re-apply 提供稳定的实例↔模板逐实体匹配。
+// 1.17 → 1.18：PrefabInstanceComponent 新增 overriddenPaths（显式 override 字段路径集，
+// C1 / ADR-019 问题 4）。字符串数组，每项 "componentName/fieldPath"。同款 optional
+// 字段路径，旧 1.17 及更早文件无 "overriddenPaths" 段时读为空 vector（= 无显式
+// override 记录），向后兼容；其余字段语义不变。为 prefab override refresh 提供持久化的
+// 显式 override 集（免每次运行时 diff 推断 + 区分用户手改 vs 模板演进）。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 17};
+    static const SchemaVersion kVersion{"scene/world", 1, 18};
     return kVersion;
 }
 

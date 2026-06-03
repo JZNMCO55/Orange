@@ -29,15 +29,27 @@
 //     §2 问题 2）。空 guid（全 0）= 未知 / 旧数据（无 GuidComponent 的模板实体
 //     或 schema 1.16 及更早落盘的旧实例）。子树 clone（Duplicate / Copy-Paste）
 //     不动本字段——克隆体仍对应同一模板实体，模板锚定保持不变。
+//   * overriddenPaths —— 该实例实体相对模板被**显式 override** 的字段路径集
+//     （C1 / ADR-019 问题 4，schema 1.18+）。每项是扁平串 "componentName/fieldPath"
+//     （如 "Transform/position/0" / "Renderable/visible"），与 PrefabOverride 的
+//     OverrideField{componentName, fieldPath} 一一对应（用 '/' 拼接两段）。语义：
+//     用户在实例上手改某字段时由编辑器命令栈钩子记下该 path（RecordOverridePath），
+//     refresh 时作**显式 override 集**——集合内字段保留实例值、其余取模板值
+//     （RefreshInstanceWithRecordedOverrides）；蓝条标记 / revert 也据此查询。
+//     空 = 无显式 override 记录（旧 1.17 及更早数据无此字段、或实例未被手改过）。
+//     与逐字段 diff 推断（PrefabOverride::ComputeInstanceOverrides）的区别：本字段
+//     是**持久化的显式记录**，refresh 不再需要 bake 时的 base 模板快照来区分
+//     "用户手改" vs "模板演进"。
 //
-// MVP 不做：override（实例相对模板的局部修改记录）/ 嵌套 prefab。逐实体的实例
-// GUID ↔ 模板 GUID 锚定已由 templateEntityGuid 落地（ADR-018 A2.2）。后续扩字段
-// 走 scene/world schema 的 minor bump。
+// MVP 不做：嵌套 prefab。逐实体的实例 GUID ↔ 模板 GUID 锚定已由 templateEntityGuid
+// 落地（ADR-018 A2.2），字段级显式 override 持久化由 overriddenPaths 落地（ADR-019）。
+// 后续扩字段走 scene/world schema 的 minor bump。
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/core/Guid.h>
 
 #include <string>
+#include <vector>
 
 namespace Orange::Engine::Scene
 {
@@ -48,6 +60,8 @@ struct PrefabInstanceComponent
     Core::Guid  instanceId;
     bool        isInstanceRoot{false};
     Core::Guid  templateEntityGuid;  // 对应模板实体的 GUID；空 = 未知 / 旧数据
+    // 显式 override 字段路径集（"componentName/fieldPath" 扁平串）；空 = 无记录。
+    std::vector<std::string> overriddenPaths;
 };
 
 }  // namespace Orange::Engine::Scene

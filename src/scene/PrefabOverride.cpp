@@ -413,6 +413,27 @@ bool WriteBackMergedComponents(World& instWorld,
     return allOk;
 }
 
+// 把 overriddenPaths 里的扁平串 "componentName/fieldPath" 拆回 OverrideField
+// （componentName = 第一段，fieldPath = 余下全部，可含 '/'）。无 '/' → fieldPath 空
+// （整 component 级 override，本期罕见但合法）。空串跳过（返回 false）。
+bool SplitOverridePath(std::string_view flat, OverrideField& out)
+{
+    if (flat.empty())
+    {
+        return false;
+    }
+    const std::size_t slash = flat.find('/');
+    if (slash == std::string_view::npos)
+    {
+        out.componentName.assign(flat);
+        out.fieldPath.clear();
+        return true;
+    }
+    out.componentName.assign(flat.substr(0, slash));
+    out.fieldPath.assign(flat.substr(slash + 1));
+    return true;
+}
+
 }  // namespace
 
 std::vector<OverrideField> ComputeEntityOverrides(
@@ -554,6 +575,138 @@ bool RefreshInstanceFromTemplate(World& instWorld, Entity instEntity,
     // 单模板便利重载：base == new（未演进）→ 退化为"丢弃实例的非真 override 漂移、
     // 拉回模板值"。委托三方重载，两个模板参数同传。
     return RefreshInstanceFromTemplate(instWorld, instEntity, tmpl, tmpl);
+}
+
+// ---------------------------------------------------------------------------
+// 持久化 overriddenPaths 的记录 / 查询 / 移除（C1 / ADR-019 问题 4）。
+// ---------------------------------------------------------------------------
+
+std::string MakeOverridePath(std::string_view componentName, std::string_view fieldPath)
+{
+    if (fieldPath.empty())
+    {
+        return std::string(componentName);
+    }
+    std::string out;
+    out.reserve(componentName.size() + 1 + fieldPath.size());
+    out.append(componentName);
+    out.push_back('/');
+    out.append(fieldPath);
+    return out;
+}
+
+bool RecordOverridePath(PrefabInstanceComponent& link,
+                        std::string_view componentName,
+                        std::string_view fieldPath)
+{
+    const std::string path = MakeOverridePath(componentName, fieldPath);
+    // dedup：已存在则不重复加。
+    if (std::find(link.overriddenPaths.begin(), link.overriddenPaths.end(), path)
+        != link.overriddenPaths.end())
+    {
+        return false;
+    }
+    link.overriddenPaths.push_back(path);
+    return true;
+}
+
+bool IsPathOverridden(const PrefabInstanceComponent& link,
+                      std::string_view componentName,
+                      std::string_view fieldPath)
+{
+    const std::string path = MakeOverridePath(componentName, fieldPath);
+    return std::find(link.overriddenPaths.begin(), link.overriddenPaths.end(), path)
+           != link.overriddenPaths.end();
+}
+
+bool ClearOverridePath(PrefabInstanceComponent& link,
+                       std::string_view componentName,
+                       std::string_view fieldPath)
+{
+    const std::string path = MakeOverridePath(componentName, fieldPath);
+    const auto it =
+        std::find(link.overriddenPaths.begin(), link.overriddenPaths.end(), path);
+    if (it == link.overriddenPaths.end())
+    {
+        return false;
+    }
+    link.overriddenPaths.erase(it);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// RefreshInstanceWithRecordedOverrides —— 用持久化 overriddenPaths 当显式 override 集
+// 做 refresh（C1 / ADR-019 问题 4）。复用 CS2 的 merge 机器，只把 override 叶子集来源
+// 换成实例的 overriddenPaths（不再需要 bake 时 base 快照）。
+// ---------------------------------------------------------------------------
+
+bool RefreshInstanceWithRecordedOverrides(World& instWorld, Entity instEntity,
+                                          const Asset::PrefabAsset& tmpl)
+{
+    if (!instWorld.IsValid(instEntity))
+    {
+        return false;
+    }
+
+    // 取实例实体的模板锚 + 显式 override 集（A2.2 + ADR-019）。无
+    // PrefabInstanceComponent / templateEntityGuid 为空（旧数据）→ 无从配对，no-op。
+    const auto* link = instWorld.GetComponent<PrefabInstanceComponent>(instEntity);
+    if (link == nullptr || !link->templateEntityGuid.IsValid())
+    {
+        return false;
+    }
+
+    // 模板 blob → scratch world（同 ComputeInstanceOverrides 的配对逻辑）。
+    // 不传 assetRegistry——与序列化对称退化一致（mesh/material 留空 handle）。
+    World tmplWorld;
+    if (Scene::LoadFromString(tmpl.TemplateBlob(), tmplWorld).IsErr())
+    {
+        return false;
+    }
+
+    // 经 templateEntityGuid 在模板 world 反查对应模板实体（S2 / FindEntityByGuid）。
+    // 未命中（guid 在模板里不存在 / 坏数据）→ no-op，不崩。
+    const Entity tmplEntity =
+        Scene::FindEntityByGuid(tmplWorld, link->templateEntityGuid);
+    if (!tmplEntity.IsValid())
+    {
+        return false;
+    }
+
+    // 把持久化 overriddenPaths 扁平串拆回 OverrideField 集（CS2 merge 的输入形态）。
+    // 这正是与 CS2 三方 merge 的区别点：override 集来源是"持久化的显式记录"而非
+    // "CS1 diff(mine, base)"——故无需 base 模板快照。
+    std::vector<OverrideField> overrides;
+    overrides.reserve(link->overriddenPaths.size());
+    for (const std::string& flat : link->overriddenPaths)
+    {
+        OverrideField field;
+        if (SplitOverridePath(flat, field))
+        {
+            overrides.push_back(std::move(field));
+        }
+    }
+
+    // ① theirs（模板）entity 的非身份 component → writer（含正确数组形态）+ 回写集。
+    JsonWriter mergedWriter;
+    const std::vector<std::string> componentNames =
+        SerializeEntityComponentsToWriter(tmplWorld, tmplEntity, mergedWriter);
+
+    // ② mine（实例）entity 的 component JSON（override 叶子的实例值来源）。
+    const std::string instJson = SerializeEntityComponents(instWorld, instEntity);
+    auto instReaderRes = JsonReader::FromString(instJson);
+    if (instReaderRes.IsErr())
+    {
+        return false;  // 自家 Dump 理应可解析。
+    }
+    const JsonReader& instReader = instReaderRes.Value();
+
+    // ③ merged M = 模板为底、overriddenPaths 指定的叶子用实例值就地覆盖。
+    const std::string mergedJson =
+        BuildMergedComponentJson(mergedWriter, instReader, overrides);
+
+    // ④ 把 M 的各 component Read 写回实例实体（emplace_or_replace 整段替换）。
+    return WriteBackMergedComponents(instWorld, instEntity, mergedJson, componentNames);
 }
 
 }  // namespace Orange::Engine::Scene

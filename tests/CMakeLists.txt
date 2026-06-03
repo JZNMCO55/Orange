@@ -120,6 +120,7 @@ orange_engine_add_test(scene_entity_guid_test   scene/EntityGuidTest.cpp)
 orange_engine_add_test(scene_prefab_test        scene/PrefabTest.cpp)
 orange_engine_add_test(prefab_override_test     scene/PrefabOverrideTest.cpp)
 orange_engine_add_test(prefab_refresh_test      scene/PrefabRefreshTest.cpp)
+orange_engine_add_test(prefab_overridden_paths_test scene/PrefabOverriddenPathsTest.cpp)
 orange_engine_add_test(scene_transform_system_test scene/TransformSystemTest.cpp)
 # local TRS ↔ world matrix 合成/分解（A1 gizmo 写回路径地基；纯数学 header-only）
 orange_engine_add_test(transform_math_test       scene/TransformMathTest.cpp)

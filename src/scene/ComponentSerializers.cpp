@@ -401,6 +401,10 @@ bool ReadGuid(const JsonReader& reader,
 //     向后兼容。非空但坏格式 → Read 返回 false（与 instanceId 同款严格）。空字符串
 //     合法表示空 guid。前三字段必填语义不变（本组件只由 InstantiatePrefab 程序化
 //     挂载，必然写齐）。
+//   * overriddenPaths —— 字符串数组，显式 override 字段路径集（C1 / ADR-019，
+//     schema 1.18+）。每项是 "componentName/fieldPath" 扁平串。**additive +
+//     graceful**：旧 1.17 及更早文件无此字段时 ArraySize 返回 0 → 读为空 vector
+//     （= 无显式 override 记录），向后兼容。空数组合法（落盘 []）。其余字段语义不变。
 // ---------------------------------------------------------------------------
 
 bool HasPrefabInstance(const World& world, Entity entity)
@@ -425,6 +429,14 @@ void WritePrefabInstance(JsonWriter& writer,
     // FromString 解析后 IsValid() 仍为 false，语义"未知/旧数据"保持。
     writer.WriteString(Join(componentPath, "templateEntityGuid"),
                        p->templateEntityGuid.ToString());
+    // overriddenPaths：string 数组无专用 helper → BeginArray 声明长度 + 索引
+    // WriteString（与 SubMeshMaterials slots 同款）。空 vector 落空数组 []。
+    const std::string pathsKey = Join(componentPath, "overriddenPaths");
+    writer.BeginArray(pathsKey, p->overriddenPaths.size());
+    for (std::size_t i = 0; i < p->overriddenPaths.size(); ++i)
+    {
+        writer.WriteString(pathsKey + "/" + std::to_string(i), p->overriddenPaths[i]);
+    }
 }
 
 bool ReadPrefabInstance(const JsonReader& reader,
@@ -459,6 +471,22 @@ bool ReadPrefabInstance(const JsonReader& reader,
         && !Core::Guid::FromString(templateGuidText, p.templateEntityGuid))
     {
         return false;
+    }
+    // overriddenPaths（schema 1.18+，additive + graceful）：缺字段（旧 1.17 及
+    // 更早文件）→ ArraySize 返回 0 → overriddenPaths 留空。各项缺字段 / 类型不符
+    // 当空串跳过，不整盘拒绝 Load（与其他 additive 字段同款宽松）。
+    {
+        const std::string pathsKey = Join(componentPath, "overriddenPaths");
+        const std::size_t count = reader.ArraySize(pathsKey);
+        p.overriddenPaths.reserve(count);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            std::string entryPath = reader.GetString(pathsKey + "/" + std::to_string(i), "");
+            if (!entryPath.empty())
+            {
+                p.overriddenPaths.push_back(std::move(entryPath));
+            }
+        }
     }
     ctx.world.AddComponent(entity, std::move(p));
     return true;

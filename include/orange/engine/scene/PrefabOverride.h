@@ -34,6 +34,7 @@
 #include <orange/engine/scene/Entity.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Orange::Engine
@@ -48,6 +49,8 @@ class PrefabAsset;
 
 namespace Orange::Engine::Scene
 {
+
+struct PrefabInstanceComponent;
 
 // 一条被 override 的字段。
 //   * componentName —— scene JSON 里 "components/<name>" 这一级的 component 名
@@ -155,6 +158,66 @@ ORANGE_ENGINE_API bool RefreshInstanceFromTemplate(
     const Asset::PrefabAsset& baseTmpl, const Asset::PrefabAsset& newTmpl);
 
 ORANGE_ENGINE_API bool RefreshInstanceFromTemplate(
+    World& instWorld, Entity instEntity, const Asset::PrefabAsset& tmpl);
+
+// ---------------------------------------------------------------------------
+// 持久化 overriddenPaths —— 显式 override 集的记录 / 查询 / 移除（C1 / ADR-019 问题 4）。
+//
+// PrefabInstanceComponent.overriddenPaths 是**持久化的显式 override 字段集**：用户在
+// 实例上手改某字段时记下该 path（编辑器命令栈钩子调 RecordOverridePath），作 refresh
+// 的显式 override 集 + 蓝条 / revert 的数据源。每项是扁平串 "componentName/fieldPath"
+// （componentName + '/' + OverrideField.fieldPath；fieldPath 为空时即 componentName）。
+//
+// 与运行时 diff（ComputeInstanceOverrides）的关系：diff 是"每次从模板推断 override"；
+// 本组是"显式记录的 override 集"。有了持久化集后，RefreshInstanceWithRecordedOverrides
+// 不再需要 bake 时 base 快照来区分"用户手改" vs "模板演进"——集合本身就是真 override。
+// ---------------------------------------------------------------------------
+
+// 把 "componentName/fieldPath" 拼成 overriddenPaths 里的扁平串（fieldPath 为空 →
+// 仅 componentName）。RecordOverridePath / IsPathOverridden / ClearOverridePath 与
+// 序列化共用同一格式。
+ORANGE_ENGINE_API std::string MakeOverridePath(std::string_view componentName,
+                                               std::string_view fieldPath);
+
+// 记录一条 override path 到 link.overriddenPaths（dedup：已存在则不重复加）。
+// 格式经 MakeOverridePath 规范化。返回 true 表示新增了一条；false 表示已存在（no-op）。
+ORANGE_ENGINE_API bool RecordOverridePath(PrefabInstanceComponent& link,
+                                          std::string_view componentName,
+                                          std::string_view fieldPath);
+
+// 查询某 path 是否已在 link.overriddenPaths 里（蓝条标记用）。
+ORANGE_ENGINE_API bool IsPathOverridden(const PrefabInstanceComponent& link,
+                                        std::string_view componentName,
+                                        std::string_view fieldPath);
+
+// 从 link.overriddenPaths 移除一条 override path（revert 单字段用）。返回 true 表示
+// 确实移除了一条；false 表示原本就不在（no-op）。
+ORANGE_ENGINE_API bool ClearOverridePath(PrefabInstanceComponent& link,
+                                         std::string_view componentName,
+                                         std::string_view fieldPath);
+
+// ---------------------------------------------------------------------------
+// RefreshInstanceWithRecordedOverrides —— 用持久化 overriddenPaths 当显式 override 集
+// 做 refresh（C1 / ADR-019 问题 4）。
+//
+// 比 CS2 的三方 merge 更干净：有了持久化的显式 override 集，就**不需要** bake 时的
+// base 模板快照来区分"用户手改" vs "模板演进"——overriddenPaths 直接给出真 override
+// 叶子集。规则（每个非身份 component 的每个叶子）：
+//   * 该叶子在 overriddenPaths 里 → 保留实例值（mine）。
+//   * 否则 → 取模板值（theirs）。
+// 即：序列化模板（theirs）为底 + overriddenPaths 指定的叶子用实例（mine）覆盖 → 写回。
+// 复用 CS2 的 merge 机器（BuildMergedComponentJson / WriteBackMergedComponents），只把
+// override 叶子集的来源从"CS1 diff(mine, base)"换成"实例 PrefabInstanceComponent.
+// overriddenPaths"。
+//
+// 配对走 templateEntityGuid + FindEntityByGuid（同 CS2 / ComputeInstanceOverrides）。
+//
+// 空 overriddenPaths → 全取模板值（实例完全跟随模板，无 override 保留）。
+//
+// 失败 graceful（均 no-op 返回 false，不崩）：instEntity 无效 / 无
+// PrefabInstanceComponent / templateEntityGuid 为空（旧数据） / 模板 blob 载入失败 /
+// 模板里 guid 未命中。成功 → true。
+ORANGE_ENGINE_API bool RefreshInstanceWithRecordedOverrides(
     World& instWorld, Entity instEntity, const Asset::PrefabAsset& tmpl);
 
 }  // namespace Orange::Engine::Scene
