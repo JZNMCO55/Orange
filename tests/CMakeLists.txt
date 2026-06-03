@@ -179,6 +179,8 @@ add_executable(headless_mesh_import_test
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxAxisConverter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
@@ -227,6 +229,8 @@ add_executable(gltf_embedded_texture_import_test
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxAxisConverter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
@@ -270,6 +274,8 @@ add_executable(gltf_scene_import_test
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxAxisConverter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
@@ -312,6 +318,8 @@ add_test(NAME gltf_scene_import_test COMMAND gltf_scene_import_test)
 add_executable(fbx_import_test
     editor/FbxImportTest.cpp
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxAxisConverter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxMaterialParse.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ImportDispatcher.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ObjImporter.cpp"
     "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
@@ -350,6 +358,59 @@ else ()
         PROPERTIES COMPILE_FLAGS "-w")
 endif ()
 add_test(NAME fbx_import_test COMMAND fbx_import_test)
+
+# FBX scene-level 导入端到端 —— 锁 ".fbx → OpenFBX 解析 + 保留 node 层级 + 每
+# mesh node 单独不塌平 + node local transform 经 R·M·R⁻¹ 共轭换轴 + 产出可
+# Scene::Load 的 .scene.json" 这条链（区别于 fbx_import_test 的整文件塌平合并）。
+# 链接方式同 gltf_scene_import_test：FbxSceneImporter.cpp + 共享 importer 源 +
+# vendor（OpenFBX ofbx.cpp / libdeflate.c + mikktspace.c），只链 orange_engine。
+# 层级 fixture（cube_hierarchy.fbx，parent + 非平凡 local transform 的 child）经
+# ORANGE_ENGINE_FBX_SCENE_FIXTURE 注入 + if(EXISTS) 门控（缺则编译期 SKIP 几何
+# 段，仍测 importer 可链 + 缺文件路径）。
+add_executable(fbx_scene_import_test
+    editor/FbxSceneImportTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxSceneImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxAxisConverter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/FbxMaterialParse.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ImportDispatcher.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/ObjImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfImporter.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/GltfMaterialParse.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MetaSidecar.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import/MeshTangentGen.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+    "${CMAKE_SOURCE_DIR}/vendor/OpenFBX/ofbx.cpp"
+    "${CMAKE_SOURCE_DIR}/vendor/OpenFBX/libdeflate.c")
+target_link_libraries(fbx_scene_import_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(fbx_scene_import_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/import"
+    "${CMAKE_SOURCE_DIR}/vendor/tinyobjloader"
+    "${CMAKE_SOURCE_DIR}/vendor/mikktspace"
+    "${CMAKE_SOURCE_DIR}/vendor/cgltf"
+    "${CMAKE_SOURCE_DIR}/vendor/OpenFBX")
+set(_orange_fbx_scene_fixture "${CMAKE_SOURCE_DIR}/tests/fixtures/cube_hierarchy.fbx")
+if (EXISTS "${_orange_fbx_scene_fixture}")
+    target_compile_definitions(fbx_scene_import_test PRIVATE
+        "ORANGE_ENGINE_FBX_SCENE_FIXTURE=\"${_orange_fbx_scene_fixture}\"")
+endif ()
+orange_engine_set_compiler_options(fbx_scene_import_test)
+if (MSVC)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        "${CMAKE_SOURCE_DIR}/vendor/OpenFBX/ofbx.cpp"
+        "${CMAKE_SOURCE_DIR}/vendor/OpenFBX/libdeflate.c"
+        PROPERTIES COMPILE_FLAGS "/W0")
+else ()
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/vendor/mikktspace/mikktspace.c"
+        "${CMAKE_SOURCE_DIR}/vendor/OpenFBX/ofbx.cpp"
+        "${CMAKE_SOURCE_DIR}/vendor/OpenFBX/libdeflate.c"
+        PROPERTIES COMPILE_FLAGS "-w")
+endif ()
+add_test(NAME fbx_scene_import_test COMMAND fbx_scene_import_test)
 
 # CommandStack（tools/OrangeEditor）—— Undo/Redo 栈 + coalesce/group + Undo-label
 # peek。纯 ICommand + std，零 ImGui/GLFW/Vulkan 依赖，故同 editor_hierarchy_test

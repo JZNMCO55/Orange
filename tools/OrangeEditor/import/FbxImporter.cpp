@@ -1,5 +1,7 @@
 #include "FbxImporter.h"
 
+#include "FbxAxisConverter.h"   // AxisConverter / MakeAxisConverter（与 scene importer 共用）
+#include "FbxMaterialParse.h"   // BuildFbxMaterialFileData / StageFbxTextureSources（共用）
 #include "ImportDispatcher.h"   // ImportTextureToRegistry（复用纹理导入路径）
 #include "MeshTangentGen.h"     // GenerateMikkTSpaceTangents（高质量切线）
 #include "MetaSidecar.h"
@@ -9,9 +11,6 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
-#include <orange/engine/render/MaterialTypes.h>
-
-#include <glm/vec4.hpp>
 
 // OpenFBX vendor 头 —— 仅取声明（ofbx.cpp / libdeflate.c 作为独立 TU 编译，由
 // CMake 接进 OrangeEditor / 测试 target，并 per-TU 压 warning，不在本 TU expand）。
@@ -54,104 +53,8 @@ using ::Orange::Engine::Asset::VertexPosition3;
 using ::Orange::Engine::Asset::VertexTangent4;
 using ::Orange::Engine::Asset::VertexUV2;
 
-// FBX 坐标系 → 引擎坐标系的转换器。
-//
-// 引擎约定：右手 Y-up、单位米（与 glTF 一致）。FBX 文件可能是 Z-up（Blender /
-// 3ds Max 默认）或 Y-up（Maya）。
-//
-//   * up-axis：FBX GlobalSettings.UpAxis==Z 时需把 Z-up 旋到 Y-up。这是**未被
-//     烘进顶点的**元数据——Blender 导出 Z-up FBX 时顶点确实是 Z-up（实测：顶/底
-//     面法线 (0,0,±1)），靠本旋转转正。标准换轴（保持右手系、不引入镜像）：
-//     (x, y, z)_fbx → (x, z, -y)_engine。Y-up / UNKNOWN 文件直接透传。
-//   * unit scale：positions 默认**信任已烘单位**（unitScale=1）。FBX 的
-//     UnitScaleFactor 名义是"每文件单位多少 cm"，但主流导出器（尤其本项目用的
-//     Blender，apply_unit_scale=True）会把单位烘进顶点 → 顶点已是米（米场景下
-//     cube 顶点 ±0.5）而 UnitScaleFactor 仍写 1.0（场景 unit scale，非 cm/unit）。
-//     直接按 /100 折算会把已是米的几何缩成 1/100。故 MVP 取"信任烘好的米"，
-//     不做单位折算。真正未烘单位的 cm 文件（顶点 ±50 + UnitScaleFactor=100）会
-//     被导大 100×——这是已知限制，留待后续按 import 参数让用户显式指定 scale。
-//
-// 整个换轴用一个 3x3 旋转 + 标量缩放表达；位置走 (rot * pos) * unitScale，
-// 法线走 normalize(rot * normal)（旋转不破坏单位长，仍重新单位化兜浮点误差）。
-struct AxisConverter
-{
-    // 旋转矩阵按行存（rowX / rowY / rowZ 是输出各分量对输入的线性组合）。
-    float rowX[3]{1.0f, 0.0f, 0.0f};
-    float rowY[3]{0.0f, 1.0f, 0.0f};
-    float rowZ[3]{0.0f, 0.0f, 1.0f};
-    float unitScale{1.0f};  // FBX 单位 → 米
-
-    VertexPosition3 Position(double x, double y, double z) const
-    {
-        const float fx = static_cast<float>(x);
-        const float fy = static_cast<float>(y);
-        const float fz = static_cast<float>(z);
-        VertexPosition3 p;
-        p.x = (rowX[0] * fx + rowX[1] * fy + rowX[2] * fz) * unitScale;
-        p.y = (rowY[0] * fx + rowY[1] * fy + rowY[2] * fz) * unitScale;
-        p.z = (rowZ[0] * fx + rowZ[1] * fy + rowZ[2] * fz) * unitScale;
-        return p;
-    }
-
-    VertexNormal3 Normal(double x, double y, double z) const
-    {
-        const float fx = static_cast<float>(x);
-        const float fy = static_cast<float>(y);
-        const float fz = static_cast<float>(z);
-        VertexNormal3 n;
-        n.x = rowX[0] * fx + rowX[1] * fy + rowX[2] * fz;
-        n.y = rowY[0] * fx + rowY[1] * fy + rowY[2] * fz;
-        n.z = rowZ[0] * fx + rowZ[1] * fy + rowZ[2] * fz;
-        const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-        if (len > 1e-8f)
-        {
-            n.x /= len;
-            n.y /= len;
-            n.z /= len;
-        }
-        return n;
-    }
-};
-
-// 从 GlobalSettings 构造换轴器。UpAxis 决定换轴矩阵；UnitScaleFactor 决定缩放。
-AxisConverter MakeAxisConverter(const ofbx::GlobalSettings* settings)
-{
-    AxisConverter conv;
-    if (settings == nullptr)
-    {
-        return conv;  // 缺设置：恒等（Y-up + 米），保守不动几何
-    }
-
-    // 单位：MVP 信任已烘单位（unitScale=1，见上方头注释的 Blender 烘单位说明）。
-    // 不按 UnitScaleFactor/100 折算——那会把 Blender 烘好的米几何缩成 1/100。
-    conv.unitScale = 1.0f;
-
-    // up-axis：仅区分 Z-up vs Y-up（FrontAxis 的细分朝向 MVP 不处理——绝大多数
-    // DCC 导出落在标准 Z-up/-Y-front 或 Y-up/-Z-front 两套）。
-    //   Z-up（FBX 默认）→ 引擎 Y-up：(x,y,z) → (x, z, -y)
-    //   Y-up（Maya）    → 引擎 Y-up：恒等
-    const bool zUp = (settings->UpAxis == ofbx::CoordinateAxis::POSITIVE_Z ||
-                      settings->UpAxis == ofbx::CoordinateAxis::NEGATIVE_Z);
-    if (zUp)
-    {
-        // out.x = in.x ; out.y = in.z ; out.z = -in.y
-        conv.rowX[0] = 1.0f; conv.rowX[1] = 0.0f; conv.rowX[2] = 0.0f;
-        conv.rowY[0] = 0.0f; conv.rowY[1] = 0.0f; conv.rowY[2] = 1.0f;
-        conv.rowZ[0] = 0.0f; conv.rowZ[1] = -1.0f; conv.rowZ[2] = 0.0f;
-    }
-    return conv;
-}
-
-// 把 DataView（FBX 字符串）拷成 std::string（裸字节区间）。
-std::string DataViewToString(const ofbx::DataView& dv)
-{
-    if (dv.begin == nullptr || dv.end <= dv.begin)
-    {
-        return {};
-    }
-    return std::string(reinterpret_cast<const char*>(dv.begin),
-                       reinterpret_cast<const char*>(dv.end));
-}
+// AxisConverter / MakeAxisConverter 已迁 FbxAxisConverter.{h,cpp}（与
+// FbxSceneImporter 共用，保证两条导入路径换轴一致）。
 
 // 清洗成文件名安全片段（去路径分隔符 / 非法字符）。空 → 退化用 fallback。
 std::string SanitizeName(const std::string& raw, const std::string& fallback)
@@ -168,137 +71,8 @@ std::string SanitizeName(const std::string& raw, const std::string& fallback)
     return name;
 }
 
-// 从 FBX material 的某类贴图取源文件磁盘路径（相对 .fbx 所在目录解析）。FBX
-// 贴图记两种文件名：绝对 filename（导出机器路径，常失效）+ 相对 relativeFileName。
-// 优先相对路径相对 fbxDir 解析；其次绝对 filename 直接试；都不存在返回空。
-std::string ResolveFbxTexture(const ofbx::Material* mat,
-                              ofbx::Texture::TextureType type,
-                              const std::filesystem::path& fbxDir)
-{
-    if (mat == nullptr) { return {}; }
-    const ofbx::Texture* tex = mat->getTexture(type);
-    if (tex == nullptr) { return {}; }
-
-    namespace fs = std::filesystem;
-    std::error_code ec;
-
-    // 1) 相对路径相对 .fbx 目录解析。
-    const std::string rel = DataViewToString(tex->getRelativeFileName());
-    if (!rel.empty())
-    {
-        std::string relNorm = rel;
-        for (char& c : relNorm) { if (c == '\\') { c = '/'; } }
-        const fs::path full = fbxDir / relNorm;
-        if (fs::exists(full, ec) && fs::is_regular_file(full, ec))
-        {
-            return full.generic_string();
-        }
-        // 相对路径常带导出机器的多级前缀；退化只用文件名在 fbxDir 找。
-        const fs::path byName = fbxDir / fs::path(relNorm).filename();
-        if (fs::exists(byName, ec) && fs::is_regular_file(byName, ec))
-        {
-            return byName.generic_string();
-        }
-    }
-
-    // 2) 绝对 filename 直接试（导出机器路径，常失效但偶尔同机有效）。
-    const std::string abs = DataViewToString(tex->getFileName());
-    if (!abs.empty())
-    {
-        fs::path absPath(abs);
-        if (fs::exists(absPath, ec) && fs::is_regular_file(absPath, ec))
-        {
-            return absPath.generic_string();
-        }
-        // 退化：绝对路径的文件名在 fbxDir 找。
-        const fs::path byName = fbxDir / absPath.filename();
-        if (fs::exists(byName, ec) && fs::is_regular_file(byName, ec))
-        {
-            return byName.generic_string();
-        }
-    }
-    return {};
-}
-
-// FBX material → pbr 模板的 MaterialFileData（scalar + 贴图）。
-//   * uBaseColor = (diffuseColor.rgb × diffuseFactor, opacity)
-//   * uMRA       = (0, roughness, 1, 0)；roughness 由 Phong shininess 推导
-//                  sqrt(2/(shininess+2))，clamp[0.04,1]；FBX 标准无金属度通道，
-//                  metallic 取 0（非金属，合理默认）
-//   * uEmissive  = (emissiveColor.rgb × emissiveFactor, 0)，仅非零时写
-//   * textures   : DIFFUSE → binding 0（baseColor）、NORMAL → binding 1、
-//                  EMISSIVE → binding 4。经 resolver（ImportTexture）落盘后入数组
-Material::MaterialFileData BuildFbxMaterialFileData(
-    const ofbx::Material* mat, const std::filesystem::path& fbxDir,
-    const std::function<std::string(const std::string&)>& resolver)
-{
-    using ::Orange::Engine::Render::MaterialUniformType;
-    Material::MaterialFileData mdata;
-    mdata.templateName = "pbr";
-    if (mat == nullptr) { return mdata; }
-
-    const ofbx::Color diffuse = mat->getDiffuseColor();
-    const double diffuseFactor = mat->getDiffuseFactor();
-    const double opacity = mat->getOpacity();
-    Material::UniformOverrideValue uBase;
-    uBase.name  = "uBaseColor";
-    uBase.type  = MaterialUniformType::Vec4;
-    uBase.value = glm::vec4(
-        static_cast<float>(diffuse.r * diffuseFactor),
-        static_cast<float>(diffuse.g * diffuseFactor),
-        static_cast<float>(diffuse.b * diffuseFactor),
-        (opacity > 0.0) ? static_cast<float>(opacity) : 1.0f);
-    mdata.uniforms.push_back(uBase);
-
-    // roughness：由 Phong shininess（高光指数）推导。shininess 越大越光滑。
-    double shininess = mat->getShininess();
-    if (shininess <= 0.0) { shininess = mat->getShininessExponent(); }
-    float roughness = static_cast<float>(std::sqrt(2.0 / (shininess + 2.0)));
-    if (roughness < 0.04f) { roughness = 0.04f; }
-    if (roughness > 1.0f)  { roughness = 1.0f; }
-    Material::UniformOverrideValue uMra;
-    uMra.name  = "uMRA";
-    uMra.type  = MaterialUniformType::Vec4;
-    uMra.value = glm::vec4(0.0f, roughness, 1.0f, 0.0f);  // metallic=0 / ao=1 中性
-    mdata.uniforms.push_back(uMra);
-
-    const ofbx::Color emissive = mat->getEmissiveColor();
-    const double emissiveFactor = mat->getEmissiveFactor();
-    const glm::vec3 emis(static_cast<float>(emissive.r * emissiveFactor),
-                         static_cast<float>(emissive.g * emissiveFactor),
-                         static_cast<float>(emissive.b * emissiveFactor));
-    if (emis != glm::vec3(0.0f))
-    {
-        Material::UniformOverrideValue uEmis;
-        uEmis.name  = "uEmissive";
-        uEmis.type  = MaterialUniformType::Vec4;
-        uEmis.value = glm::vec4(emis, 0.0f);
-        mdata.uniforms.push_back(uEmis);
-    }
-
-    // 贴图槽：DIFFUSE → 0 / NORMAL → 1 / EMISSIVE → 4（binding 与 pbr set 1 对齐，
-    // 与 Obj/Gltf importer 一致）。FBX 标准无 metalRough(2)/ao(3) 直接贴图。
-    // resolver==null（scalar-only 蓝本抽取阶段）时不填贴图——贴图源由调用方在
-    // import 阶段单独解析 + 经真实 ImportTexture 落盘后回填，避免把未落盘的源
-    // 路径误写进 .material。
-    if (resolver)
-    {
-        auto addTex = [&](ofbx::Texture::TextureType type, std::uint32_t binding) {
-            const std::string src = ResolveFbxTexture(mat, type, fbxDir);
-            if (src.empty()) { return; }
-            const std::string dest = resolver(src);
-            if (!dest.empty())
-            {
-                mdata.textures.push_back({binding, dest});
-            }
-        };
-        addTex(ofbx::Texture::DIFFUSE,  0u);
-        addTex(ofbx::Texture::NORMAL,   1u);
-        addTex(ofbx::Texture::EMISSIVE, 4u);
-    }
-
-    return mdata;
-}
+// ResolveFbxTexture / BuildFbxMaterialFileData / StageFbxTextureSources 已迁
+// FbxMaterialParse.{h,cpp}（与 FbxSceneImporter 共用 material 提取）。
 }  // namespace
 
 ImportResult RunFbxImportToRegistry(std::string_view srcPath,
@@ -552,14 +326,7 @@ ImportResult RunFbxImportToRegistry(std::string_view srcPath,
             // resolver → BuildFbxMaterialFileData 只填 scalar，贴图源单独抽。
             s.scalarData = BuildFbxMaterialFileData(m, fbxDir, nullptr);
             // 贴图源路径（不入 registry，仅磁盘路径），destroy 后落盘。
-            const auto addSrc = [&](ofbx::Texture::TextureType type,
-                                    std::uint32_t binding) {
-                const std::string p = ResolveFbxTexture(m, type, fbxDir);
-                if (!p.empty()) { s.textureSrc.emplace_back(binding, p); }
-            };
-            addSrc(ofbx::Texture::DIFFUSE,  0u);
-            addSrc(ofbx::Texture::NORMAL,   1u);
-            addSrc(ofbx::Texture::EMISSIVE, 4u);
+            s.textureSrc = StageFbxTextureSources(m, fbxDir);
         }
         staged.push_back(std::move(s));
     }

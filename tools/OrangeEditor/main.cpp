@@ -77,6 +77,7 @@
 #include "EditorRenderLayer.h"
 #include "VulkanLoaderShim.h"
 #include "import/ImportDispatcher.h"
+#include "import/FbxSceneImporter.h"
 #include "import/GltfSceneImporter.h"
 #include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
@@ -213,20 +214,23 @@ int RunHeadlessImport(const char* srcPath)
     return ok ? 0 : 1;
 }
 
-// Headless glTF scene-level 导入 CLI（GAP-2026-05-28 G1）。区别于 import-mesh
-// （整文件塌平成单 mesh），本路径保留 glTF transform 层级 + 每 mesh 单独 .mesh，
-// 产出 assets/scenes/<basename>.scene.json（可直接 File→Open / 双击打开）。
+// Headless scene-level 导入 CLI（glTF：GAP-2026-05-28；FBX：承接单 mesh
+// FbxImporter）。区别于 import-mesh（整文件塌平成单 mesh），本路径保留源 DCC 的
+// transform 层级 + 每 mesh 单独 .mesh，产出 assets/scenes/<basename>.scene.json
+// （可直接 File→Open / 双击打开）。
 //
-// 用法：OrangeEditor import-scene <path.gltf|.glb>。产物：
-//   assets/Models/<basename>/<basename>_<meshname>.mesh（每 cgltf mesh 一个）
+// 用法：OrangeEditor import-scene <path.gltf|.glb|.fbx>。按扩展名路由：
+//   .gltf/.glb → RunGltfSceneImportToRegistry（cgltf，含 material / lights）
+//   .fbx       → RunFbxSceneImportToRegistry（OpenFBX，含 material；轴转换共轭）
+// 产物：
+//   assets/Models/<basename>/<basename>_<meshname>.mesh（每 mesh 一个）
 //   assets/scenes/<basename>.scene.json（node 树 → Entity 层级）
-// G1 不消费 per-mesh material（默认材质）；material / lights 留 G2 / G3。
 int RunHeadlessSceneImport(const char* srcPath)
 {
     if (srcPath == nullptr || srcPath[0] == '\0')
     {
         std::fprintf(stderr, "[OrangeEditor] import-scene: missing source path\n"
-                             "usage: OrangeEditor import-scene <path.gltf|.glb>\n");
+                             "usage: OrangeEditor import-scene <path.gltf|.glb|.fbx>\n");
         return 2;
     }
 
@@ -237,8 +241,16 @@ int RunHeadlessSceneImport(const char* srcPath)
         return 3;
     }
 
-    const auto result =
-        Orange::Editor::Import::RunGltfSceneImportToRegistry(srcPath, *registry);
+    // 按扩展名分派：.fbx 走 FbxSceneImporter，其余（.gltf/.glb）走 Gltf 路径。
+    namespace Import = Orange::Editor::Import;
+    const std::string srcStr(srcPath);
+    const auto dotPos = srcStr.rfind('.');
+    const std::string ext =
+        (dotPos != std::string::npos) ? srcStr.substr(dotPos + 1) : std::string();
+    const Import::ImportResult result =
+        (Import::ClassifyByExt(ext) == Import::ImportKind::FbxMesh)
+            ? Import::RunFbxSceneImportToRegistry(srcPath, *registry)
+            : Import::RunGltfSceneImportToRegistry(srcPath, *registry);
 
     const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
     std::fprintf(ok ? stdout : stderr,

@@ -136,7 +136,10 @@ add_executable(OrangeEditor
     command/EntityCommands.cpp
     command/PrefabCommands.cpp
     command/SetAnimationClipCommand.cpp
+    import/FbxAxisConverter.cpp
     import/FbxImporter.cpp
+    import/FbxMaterialParse.cpp
+    import/FbxSceneImporter.cpp
     import/GltfImporter.cpp
     import/GltfMaterialParse.cpp
     import/GltfSceneImporter.cpp
