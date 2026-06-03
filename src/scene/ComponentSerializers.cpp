@@ -38,6 +38,7 @@
 #include "orange/engine/scene/PrefabInstanceComponent.h"
 #include "orange/engine/scene/TransformComponent.h"
 #include "orange/engine/scene/World.h"
+#include "orange/engine/script/ScriptComponent.h"
 
 #include <cstdint>
 #include <string>
@@ -1924,6 +1925,66 @@ bool ReadEdgeChainShape(const JsonReader& reader, std::string_view shapePath, Ph
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// ScriptComponent（Script 模块的 PureData 组件，ADR-017 B1.2）
+//
+// 两个字符串字段：assemblyPath（game assembly 路径）+ typeName（assembly-
+// qualified 类型全名）。纯字符串持久化，**不**依赖 CLR——含脚本组件的场景
+// 在没开 dotnet 的构建里也能 round-trip（只是不会被实际运行）。
+//
+// 字段语义版本由组件自带的 ScriptComponentSchemaVersion 承载，写到组件段内的
+// "schemaVersion"；读路径先验版本再读字段（缺版本 = 旧 / 坏数据，graceful 走
+// 默认空字符串）。后续加 fieldOverrides 等字段是 additive minor bump。
+// ---------------------------------------------------------------------------
+
+bool HasScript(const World& world, Entity entity)
+{
+    return world.HasComponent<Script::ScriptComponent>(entity);
+}
+
+void WriteScript(JsonWriter& writer,
+                 std::string_view componentPath,
+                 Entity entity,
+                 const SaveContext& ctx)
+{
+    const auto* sc = ctx.world.GetComponent<Script::ScriptComponent>(entity);
+    if (sc == nullptr)
+    {
+        return;
+    }
+    writer.WriteSchemaVersion(Join(componentPath, "schemaVersion"),
+                              Script::ScriptComponentSchemaVersion());
+    writer.WriteString(Join(componentPath, "assemblyPath"), sc->assemblyPath);
+    writer.WriteString(Join(componentPath, "typeName"),     sc->typeName);
+}
+
+bool ReadScript(const JsonReader& reader,
+                std::string_view componentPath,
+                Entity entity,
+                const LoadContext& ctx)
+{
+    // schemaVersion 兼容性：有版本字段就验（namespace / major 不匹配 = 拒绝），
+    // 没有则按"旧版本无版本号"宽容处理（与缺 optional 字段同款 graceful）。
+    if (reader.Has(Join(componentPath, "schemaVersion")))
+    {
+        auto versionResult = reader.ReadSchemaVersion(Join(componentPath, "schemaVersion"));
+        if (versionResult.IsErr() ||
+            !Script::ScriptComponentSchemaVersion().CanRead(versionResult.Value()))
+        {
+            return false;
+        }
+    }
+
+    Script::ScriptComponent sc;
+    // 两个字段都按"缺字段→空字符串"语义，便于 minor schema 升级 + 容错；空脚本
+    // 引用在运行期由 ScriptRuntime::CreateInstance 自然失败并跳过，不崩 Load。
+    sc.assemblyPath = reader.GetString(Join(componentPath, "assemblyPath"), "");
+    sc.typeName     = reader.GetString(Join(componentPath, "typeName"),     "");
+
+    ctx.world.AddComponent(entity, std::move(sc));
+    return true;
+}
+
 }  // namespace
 
 bool ReadColliderDesc(const JsonReader& reader,
@@ -2020,6 +2081,7 @@ const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers()
         {"ParticleEmitter",  ComponentKind::PureData,         &HasParticleEmitter,  &WriteParticleEmitter,  &ReadParticleEmitter},
         {"AudioSource",      ComponentKind::PureData,         &HasAudioSource,      &WriteAudioSource,      &ReadAudioSource},
         {"Camera",           ComponentKind::PureData,         &HasCamera,           &WriteCamera,           &ReadCamera},
+        {"Script",           ComponentKind::PureData,         &HasScript,           &WriteScript,           &ReadScript},
 
         // Backend-dependent：Pass 2 由 SceneSerialization 主流程按 entity
         // 配对调用 PhysicsWorld::AddBody / AnimatorRegistry::Create；这里

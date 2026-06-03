@@ -554,6 +554,35 @@ if (ORANGE_ENGINE_WITH_DOTNET)
                 "$<TARGET_FILE_DIR:script_runtime_test>"
         VERBATIM)
     add_test(NAME script_runtime_test COMMAND script_runtime_test)
+
+    # -----------------------------------------------------------------------
+    # script_system_test（ADR-017 B1.2）—— ScriptComponent + ScriptSystem 的
+    # 批量实例化 + 生命周期 tick 端到端验证。建 World（实体带 Transform 在原点
+    # + ScriptComponent 指向 ScriptFixtures 的 Mover）→ ScriptRuntime.Initialize
+    # → ScriptSystem.StartWorld（批量 CreateInstance + OnStart）→ Tick ×2 →
+    # StopWorld（OnDestroy + Release）→ 断言引擎侧 Transform：y==100 / x==2 /
+    # z==7（OnStart / 两次 Tick / OnDestroy 各被调对应次数）。
+    #
+    # 复用 script_runtime_test 同款 fixture（orange_engine_script_fixtures 产出
+    # ScriptFixtures.dll / runtimeconfig + OrangeScriptSDK.dll），三者绝对路径经
+    # target_compile_definitions 注入。进程内 CoreCLR 单次启动约束同 runtime
+    # 测试：本测试只一次真 ScriptRuntime.Initialize。
+    # -----------------------------------------------------------------------
+    add_executable(script_system_test script/script_system_test.cpp)
+    add_dependencies(script_system_test orange_engine_script_fixtures)
+    target_link_libraries(script_system_test PRIVATE OrangeEngine::orange_engine)
+    target_compile_definitions(script_system_test PRIVATE
+        "ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH=\"${_orange_fixtures_dll}\""
+        "ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH=\"${_orange_fixtures_cfg}\""
+        "ORANGE_SCRIPT_SDK_ASSEMBLY_PATH=\"${_orange_fixtures_sdk_dll}\"")
+    orange_engine_set_compiler_options(script_system_test)
+    # nethost.dll 必须在测试 exe 的 DLL 搜索路径上（get_hostfxr_path 经它解析）。
+    add_custom_command(TARGET script_system_test POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${ORANGE_ENGINE_DOTNET_NETHOST_DLL}"
+                "$<TARGET_FILE_DIR:script_system_test>"
+        VERBATIM)
+    add_test(NAME script_system_test COMMAND script_system_test)
 endif ()
 
 # ---------------------------------------------------------------------------

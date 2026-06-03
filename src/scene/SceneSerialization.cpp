@@ -88,9 +88,13 @@ namespace
 // 段时实体不挂该组件，渲染端按整 mesh 单 material 路径绘制，行为不变——additive
 // 向后兼容）。slot material 用与 Renderable.materialInstance 同一张
 // namedMaterialInstances / materialResolver 表按 id 解析。
+// 1.14 → 1.15：新增 ScriptComponent（C# 脚本引用，ADR-017 B1.2；assemblyPath +
+// typeName 两字符串字段）。同款 optional component 路径，旧 1.14 文件无 "Script"
+// 段时实体不挂该组件，运行期无脚本驱动，行为不变——additive 向后兼容。
+// ScriptComponent 自带 "component/Script" 子 schema 版本承载字段级演进。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 14};
+    static const SchemaVersion kVersion{"scene/world", 1, 15};
     return kVersion;
 }
 

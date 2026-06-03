@@ -28,6 +28,7 @@
 #include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/script/ScriptComponent.h>
 
 #include <glm/vec4.hpp>
 
@@ -68,6 +69,7 @@ using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Scene::HierarchyComponent;
 using Orange::Engine::Scene::NameComponent;
 using Orange::Engine::Scene::TransformComponent;
+using Orange::Engine::Script::ScriptComponent;
 namespace SceneSerialization = Orange::Engine::Scene;
 
 namespace
@@ -1239,6 +1241,90 @@ void TestSaveLoadSaveByteStable()
                          "entity tree order reversal)\n");
 }
 
+// ScriptComponent（ADR-017 B1.2）round-trip —— 不依赖 CLR：纯字符串字段
+// assemblyPath / typeName 经 Save → Load 保真。验证含脚本组件的场景在不开
+// dotnet 的构建里也能 round-trip（本测试始终编译，不门控）。
+void TestScriptComponentRoundTrip()
+{
+    const auto path = MakeTempScenePath("script_component");
+
+    World source;
+    Entity e = source.CreateEntity();
+    source.AddComponent<NameComponent>(e, {"scripted"});
+    ScriptComponent sc;
+    sc.assemblyPath = "assets/scripts/Game.dll";
+    sc.typeName     = "Game.SlimePatrol, Game";
+    source.AddComponent(e, sc);
+
+    auto saveResult = SceneSerialization::Save(source, path.string());
+    assert(saveResult.IsOk());
+
+    World loaded;
+    auto loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto& reg = loaded.Registry();
+    int hits = 0;
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<ScriptComponent>())
+    {
+        ++hits;
+        loadedE = World::FromEntt(ent);
+    }
+    assert(hits == 1);
+
+    const auto* loadedSc = loaded.GetComponent<ScriptComponent>(loadedE);
+    assert(loadedSc != nullptr);
+    assert(loadedSc->assemblyPath == "assets/scripts/Game.dll");
+    assert(loadedSc->typeName == "Game.SlimePatrol, Game");
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] script component round-trip (no CLR)\n");
+}
+
+// 旧版本场景向后兼容：一个 scene/world 1.0 文件（不含 Script 段）应正常读，
+// 实体不挂 ScriptComponent，其余组件照常装回——additive schema 的核心承诺。
+void TestOldSceneWithoutScriptComponentLoads()
+{
+    const auto path = MakeTempScenePath("script_backward_compat");
+
+    {
+        std::ofstream out(path);
+        out <<
+            R"({
+              "schemaVersion": { "namespace": "scene/world", "major": 1, "minor": 0 },
+              "entities": [
+                {
+                  "id": 0,
+                  "components": {
+                    "Name": { "name": "legacy_entity" }
+                  }
+                }
+              ]
+            })";
+    }
+
+    World loaded;
+    auto loadResult = SceneSerialization::Load(path.string(), loaded);
+    assert(loadResult.IsOk());
+    assert(loaded.Size() == 1);
+
+    auto& reg = loaded.Registry();
+    Entity loadedE = Entity::Invalid();
+    for (auto ent : reg.view<NameComponent>())
+    {
+        loadedE = World::FromEntt(ent);
+    }
+    assert(loadedE.IsValid());
+    assert(loaded.GetComponent<NameComponent>(loadedE)->name == "legacy_entity");
+    // 旧文件无 Script 段 → 实体不挂 ScriptComponent。
+    assert(loaded.GetComponent<ScriptComponent>(loadedE) == nullptr);
+
+    RemoveIfExists(path);
+    std::fprintf(stdout, "  [PASS] old scene without Script component loads (backward compat)\n");
+}
+
 }  // namespace
 
 int main()
@@ -1265,6 +1351,8 @@ int main()
     TestClipAnimatorAssetSourceNoRegistryGraceful();
     TestParticleEmitterRoundTrip();
     TestSaveLoadSaveByteStable();
+    TestScriptComponentRoundTrip();
+    TestOldSceneWithoutScriptComponentLoads();
     std::fprintf(stdout, "[SceneSerializationTest] all tests passed.\n");
     return 0;
 }

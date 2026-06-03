@@ -769,10 +769,15 @@ if (ORANGE_ENGINE_WITH_DOTNET)
     # （建在 ScriptHost 上的高层门面）同属 src/script/dotnet/ 唯一 CLR 消费区，
     # 但二者**不**直接 include 任何 CLR / hostfxr 头（纯引擎公共面 + C ABI），
     # 故不需要 host native include 目录。
+    #
+    # ScriptSystem.cpp 在 src/script/（**非** dotnet/）—— 它只经 ScriptRuntime
+    # 公共门面驱动脚本生命周期，零 CLR 头依赖，但依赖 ScriptRuntime 故同样
+    # 门控在 WITH_DOTNET。
     target_sources(orange_engine PRIVATE
         src/script/dotnet/ScriptHost.cpp
         src/script/dotnet/ScriptBindings.cpp
-        src/script/dotnet/ScriptRuntime.cpp)
+        src/script/dotnet/ScriptRuntime.cpp
+        src/script/ScriptSystem.cpp)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/script/dotnet/ScriptHost.cpp"
         PROPERTIES INCLUDE_DIRECTORIES "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}")
