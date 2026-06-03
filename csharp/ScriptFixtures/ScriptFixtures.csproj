@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- script_runtime_test 的托管脚本 fixture（ADR-017 B1.1）。dotnet build 产出
+       ScriptFixtures.dll + ScriptFixtures.runtimeconfig.json（+ 顺带编出依赖的
+       OrangeScriptSDK.dll 到同目录）。C++ ScriptRuntime 用本 runtimeconfig 起
+       CoreCLR、加载 OrangeScriptSDK 的托管 glue、再实例化本程序集里的 Mover。
+       net8.0 与 host 对齐；GenerateRuntimeConfigurationFiles 让库工程也产出
+       runtimeconfig.json（hostfxr_initialize_for_runtime_config 需要它定位框架）。
+       AllowUnsafeBlocks 随 SDK（继承编译；脚本本身不需，但保持一致无害）。 -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ScriptFixtures</AssemblyName>
+    <RootNamespace>OrangeFixtures</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OrangeScriptSDK\OrangeScriptSDK.csproj" />
+  </ItemGroup>
+
+</Project>

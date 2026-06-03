@@ -760,12 +760,19 @@ if (ORANGE_ENGINE_WITH_DOTNET)
         "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}/nethost.dll"
         CACHE FILEPATH "" FORCE)
 
-    # 把 host 源加进引擎库。CLR hosting 头只在这一个 TU 消费——include 路径
-    # 用 set_source_files_properties 精确限定到 ScriptHost.cpp，不传播到其余
+    # 把 host 源加进引擎库。CLR hosting 头只在 ScriptHost.cpp 这一个 TU 消费
+    # ——include 路径用 set_source_files_properties 精确限定到它，不传播到其余
     # TU / 公共 INTERFACE（header isolation：nethost.h / hostfxr.h /
     # coreclr_delegates.h 仅 src/script/dotnet/** 可见）。
+    #
+    # ScriptBindings.cpp（脚本调引擎的 native 绑定函数表）+ ScriptRuntime.cpp
+    # （建在 ScriptHost 上的高层门面）同属 src/script/dotnet/ 唯一 CLR 消费区，
+    # 但二者**不**直接 include 任何 CLR / hostfxr 头（纯引擎公共面 + C ABI），
+    # 故不需要 host native include 目录。
     target_sources(orange_engine PRIVATE
-        src/script/dotnet/ScriptHost.cpp)
+        src/script/dotnet/ScriptHost.cpp
+        src/script/dotnet/ScriptBindings.cpp
+        src/script/dotnet/ScriptRuntime.cpp)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/script/dotnet/ScriptHost.cpp"
         PROPERTIES INCLUDE_DIRECTORIES "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}")

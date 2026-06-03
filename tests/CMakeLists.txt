@@ -498,6 +498,62 @@ if (ORANGE_ENGINE_WITH_DOTNET)
                 "$<TARGET_FILE_DIR:dotnet_host_test>"
         VERBATIM)
     add_test(NAME dotnet_host_test COMMAND dotnet_host_test)
+
+    # -----------------------------------------------------------------------
+    # script_runtime_test（ADR-017 B1.1）—— C# 脚本经函数指针表操作引擎实体的
+    # 端到端验证。建 World + 实体 → ScriptRuntime 起 CoreCLR + 取托管 glue +
+    # Bootstrap 推绑定表 → 实例化 OrangeFixtures.Mover → OnStart/OnUpdate →
+    # 脚本 Entity.Position += (1,0,0) 回调进 C++ → 断言 TransformComponent
+    # 真变了 + Entity_IsValid 正确。
+    #
+    # fixture：dotnet build ScriptFixtures.csproj（ProjectReference 到
+    # OrangeScriptSDK，会顺带编出 OrangeScriptSDK.dll 到同 bin 目录）产出
+    # ScriptFixtures.dll + ScriptFixtures.runtimeconfig.json + OrangeScriptSDK.dll。
+    # 三者绝对路径经 target_compile_definitions 注入测试 TU。
+    # -----------------------------------------------------------------------
+    set(_orange_fixtures_proj
+        "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/ScriptFixtures.csproj")
+    set(_orange_fixtures_out_dir
+        "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/bin/$<CONFIG>/net8.0")
+    set(_orange_fixtures_dll "${_orange_fixtures_out_dir}/ScriptFixtures.dll")
+    set(_orange_fixtures_cfg "${_orange_fixtures_out_dir}/ScriptFixtures.runtimeconfig.json")
+    set(_orange_fixtures_sdk_dll "${_orange_fixtures_out_dir}/OrangeScriptSDK.dll")
+
+    add_custom_command(
+        OUTPUT  "${_orange_fixtures_dll}" "${_orange_fixtures_cfg}" "${_orange_fixtures_sdk_dll}"
+        COMMAND "${ORANGE_ENGINE_DOTNET_EXE}" build "${_orange_fixtures_proj}"
+                -c $<CONFIG> --nologo -v quiet
+        DEPENDS "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Mover.cs"
+                "${_orange_fixtures_proj}"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/ScriptRuntime.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/EngineInterop.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/Entity.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/OrangeScript.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/OrangeScriptSDK.csproj"
+        COMMENT "OrangeEngine: 构建托管脚本 fixture（ScriptFixtures + OrangeScriptSDK glue）"
+        VERBATIM)
+    add_custom_target(orange_engine_script_fixtures ALL
+        DEPENDS "${_orange_fixtures_dll}" "${_orange_fixtures_cfg}" "${_orange_fixtures_sdk_dll}")
+
+    add_executable(script_runtime_test script/script_runtime_test.cpp)
+    add_dependencies(script_runtime_test orange_engine_script_fixtures)
+    target_link_libraries(script_runtime_test PRIVATE OrangeEngine::orange_engine)
+    # src/script/dotnet include 路径取 ScriptBindings.h（纯 C ABI 声明，无 CLR
+    # 头）——测试直接验 native 绑定函数 Entity_IsValid 等。
+    target_include_directories(script_runtime_test PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/script/dotnet")
+    target_compile_definitions(script_runtime_test PRIVATE
+        "ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH=\"${_orange_fixtures_dll}\""
+        "ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH=\"${_orange_fixtures_cfg}\""
+        "ORANGE_SCRIPT_SDK_ASSEMBLY_PATH=\"${_orange_fixtures_sdk_dll}\"")
+    orange_engine_set_compiler_options(script_runtime_test)
+    # nethost.dll 必须在测试 exe 的 DLL 搜索路径上（get_hostfxr_path 经它解析）。
+    add_custom_command(TARGET script_runtime_test POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${ORANGE_ENGINE_DOTNET_NETHOST_DLL}"
+                "$<TARGET_FILE_DIR:script_runtime_test>"
+        VERBATIM)
+    add_test(NAME script_runtime_test COMMAND script_runtime_test)
 endif ()
 
 # ---------------------------------------------------------------------------

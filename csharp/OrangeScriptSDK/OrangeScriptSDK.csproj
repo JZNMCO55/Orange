@@ -1,15 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- OrangeEngine C# 脚本 SDK（B1 骨架）。游戏侧玩法脚本引用本程序集、继承
+  <!-- OrangeEngine C# 脚本 SDK。游戏侧玩法脚本引用本程序集、继承
        Orange.OrangeScript。目标 net8.0 与 docs/pie-csharp-scripting-design.md
-       推荐的 CoreCLR (.NET 8) host 对齐。本程序集只含脚本侧 API 契约，不依赖
-       任何引擎二进制——绑定经 P/Invoke 在运行时由 CLR host 解析（B1.1 落地）。 -->
+       推荐的 CoreCLR (.NET 8) host 对齐。除脚本侧 API 契约（OrangeScript /
+       Entity / Vec3）外，还含 internal 运行时 glue（ScriptRuntime /
+       EngineInterop）：C++ host 经 hostfxr 取 ScriptRuntime 的
+       [UnmanagedCallersOnly] 入口，绑定走 C++ 推来的函数指针表（非 DllImport）。
+       不依赖任何引擎二进制——绑定在运行时由 CLR host 推入解析。
+       AllowUnsafeBlocks=true 是函数指针 + [UnmanagedCallersOnly] 必需。 -->
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>OrangeScriptSDK</AssemblyName>
     <RootNamespace>Orange</RootNamespace>
     <LangVersion>latest</LangVersion>
