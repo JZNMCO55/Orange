@@ -117,10 +117,23 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
         }
         else if constexpr (std::is_same_v<T, EdgeChainDesc>)
         {
-            if (shape.count < 2u)
+            // 上界 clamp（与 Polygon 分支 BuildPolygonFromDesc 对称）：EdgeChainDesc
+            // 是公共 POD，游戏侧 C++ 可直填 count > kMaxVertices；下方 pts[kMaxVertices]
+            // 与 shape.vertices[] 均定长数组，不夹取会越界读写。
+            const std::uint32_t count =
+                (shape.count > EdgeChainDesc::kMaxVertices)
+                    ? EdgeChainDesc::kMaxVertices
+                    : shape.count;
+            if (count != shape.count)
+            {
+                ORANGE_LOG_WARN("Box2DBridge: EdgeChainDesc count={} 超过上限 {}，夹取",
+                                shape.count,
+                                static_cast<unsigned>(EdgeChainDesc::kMaxVertices));
+            }
+            if (count < 2u)
             {
                 ORANGE_LOG_WARN("Box2DBridge: EdgeChainDesc count={} < 2，跳过 fixture",
-                                shape.count);
+                                count);
                 return false;
             }
             // **关键**：Box2D 的 chain shape 只能挂在 static body —— 对非 static
@@ -130,17 +143,17 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
             // collision）；其余（非 static / count<4）降级为逐段 b2Segment fixture
             // —— segment 在任意 body type + 任意 count>=2 合法。
             const b2BodyType bt = b2Body_GetType(bodyId);
-            if (bt == b2_staticBody && shape.count >= 4u)
+            if (bt == b2_staticBody && count >= 4u)
             {
                 b2ChainDef cd = b2DefaultChainDef();
                 // chain 自己持 points 拷贝（文档承诺），本地 array 可栈分配。
                 b2Vec2 pts[EdgeChainDesc::kMaxVertices];
-                for (std::uint32_t i = 0; i < shape.count; ++i)
+                for (std::uint32_t i = 0; i < count; ++i)
                 {
                     pts[i] = ToB2(shape.vertices[i]);
                 }
                 cd.points        = pts;
-                cd.count         = static_cast<int>(shape.count);
+                cd.count         = static_cast<int>(count);
                 b2SurfaceMaterial mat{};
                 mat.friction     = col.friction;
                 mat.restitution  = col.restitution;
@@ -152,12 +165,12 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
             }
             // 降级:逐段 segment。isLoop 时末点连回首点。
             const std::uint32_t segCount =
-                shape.isLoop ? shape.count : (shape.count - 1u);
+                shape.isLoop ? count : (count - 1u);
             for (std::uint32_t i = 0; i < segCount; ++i)
             {
                 b2Segment seg{};
                 seg.point1 = ToB2(shape.vertices[i]);
-                seg.point2 = ToB2(shape.vertices[(i + 1u) % shape.count]);
+                seg.point2 = ToB2(shape.vertices[(i + 1u) % count]);
                 (void)b2CreateSegmentShape(bodyId, &sd, &seg);
             }
             if (bt != b2_staticBody)

@@ -62,6 +62,26 @@ struct AudioEngine::Impl
     {
         return ma_engine_init(/*config*/ nullptr, &engine);
     }
+
+    // 析构必须在 Impl 内完成 uninit（而非仅靠 ~AudioEngine）：公共头声明了
+    // move 赋值，operator=(AudioEngine&&) 会让 LHS 的旧 mpImpl 被替换析构。
+    // 若 uninit 只在 ~AudioEngine、Impl 析构平凡，则 move-assign 释放旧 Impl
+    // 时跳过 ma_engine_uninit/ma_context_uninit → ma_engine 内部设备线程仍
+    // 引用已 free 的内存（潜在 UAF）+ 资源泄漏。RAII 化到 Impl 后，无论经
+    // ~AudioEngine 还是 move-assign 销毁旧 Impl，都正确 uninit。
+    ~Impl()
+    {
+        if (initialized)
+        {
+            ma_engine_uninit(&engine);
+            initialized = false;
+        }
+        if (contextInited)
+        {
+            ma_context_uninit(&context);
+            contextInited = false;
+        }
+    }
 };
 
 AudioEngine::AudioEngine()
@@ -84,23 +104,9 @@ AudioEngine::AudioEngine(const AudioEngineDesc& desc)
     }
 }
 
-AudioEngine::~AudioEngine()
-{
-    if (!mpImpl)
-    {
-        return;
-    }
-    if (mpImpl->initialized)
-    {
-        ma_engine_uninit(&mpImpl->engine);
-        mpImpl->initialized = false;
-    }
-    if (mpImpl->contextInited)
-    {
-        ma_context_uninit(&mpImpl->context);
-        mpImpl->contextInited = false;
-    }
-}
+// uninit 已 RAII 化到 Impl::~Impl（见上）——销毁 mpImpl 即正确清理，无论经
+// 此析构还是 move-assign 替换旧 mpImpl。
+AudioEngine::~AudioEngine() = default;
 
 AudioEngine::AudioEngine(AudioEngine&&) noexcept            = default;
 AudioEngine& AudioEngine::operator=(AudioEngine&&) noexcept = default;
@@ -112,39 +118,17 @@ bool AudioEngine::IsInitialized() const noexcept
 
 bool AudioEngine::PlayOneShot(const Asset::SoundAsset& asset, float volume)
 {
-    if (!IsInitialized() || asset.Empty())
-    {
-        return false;
-    }
-    // 直接走 ma_sound_init_from_memory。ma_engine_play_sound 仅接受文件路
-    // 径——本侧的 SoundAsset 是字节缓冲。返回的 ma_sound 由 miniaudio 内
-    // 部 group 持有所有权（设 endCallback 时由 caller 释放，此处不传 → 走
-    // 自动 oneshot 路径）。
-    auto* snd = new (std::nothrow) ma_sound{};
-    if (snd == nullptr)
-    {
-        return false;
-    }
-    auto bytes = asset.Bytes();
-    ma_result r = ma_sound_init_from_data_source(
-        &mpImpl->engine,
-        nullptr,  // 占位——下面用 init_from_memory 替代
-        MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION,
-        nullptr,
-        snd);
-    // 上面留作占位——miniaudio 没有"直接从 byte buffer 一步到 ma_sound"
-    // 的 helper；正确路径是先 ma_decoder_init_memory 再 ma_sound_init_from_data_source。
-    // 本任务范围内 PlayOneShot 还原到 caller-managed 路径：用临时 decoder
-    // 走完整生命周期——decoder 与 sound 同生死，调用方等 sound 播完才能
-    // 释放 decoder。简化起见这里先不暴露 oneshot 完整路径，返回 false 表
-    // 示"不支持 oneshot 内存播放"——CreateInstance 路径覆盖控制播放。
-    if (r == MA_SUCCESS)
-    {
-        ma_sound_uninit(snd);
-    }
-    delete snd;
+    (void)asset;
     (void)volume;
-    (void)bytes;
+    // 内存字节缓冲的 fire-and-forget one-shot 尚未实现：miniaudio 没有"byte
+    // buffer 一步到 ma_sound"的 helper，正确路径需 ma_decoder_init_memory +
+    // ma_sound_init_from_data_source，且 decoder 生命周期必须管到 sound 播完
+    // （endCallback 回收）。在该路径落地前，本函数恒返回 false——播放经
+    // CreateInstance（caller 持 SoundInstance 控制生命周期）覆盖。
+    //
+    // 注：旧实现里"new ma_sound + 用 nullptr data source 调 init + 条件 uninit
+    // + 恒 return false"是死代码且有副作用（把 group 节点挂到 engine endpoint），
+    // 已删除——不做一步实现不了的事，避免误导调用方以为可用。
     return false;
 }
 

@@ -2,22 +2,39 @@
 
 #include <orange/engine/core/Serialization.h>
 
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 using Orange::Engine::JsonReader;
 using Orange::Engine::JsonWriter;
 
+// 把一个场景路径归一成稳定的去重 / 显示键：同一场景常以相对 vs 绝对、不同分隔符
+// （/ vs \）、含 ./ .. 的形式传入（Open 对话框给绝对、Save / 双击 / Open Recent 各
+// 不同），纯字符串相等去重会漏判而出现重复项（dogfood Bug "Open Recent 会出现相同
+// 路径的场景文件"）。absolute 把相对路径按当前工作目录（编辑器恒为仓库根）补全、
+// lexically_normal 折叠 ./ ..、generic_string 统一为正斜杠——不要求文件存在、不碰
+// 磁盘（不解析 symlink），足以消除上述差异。
+static std::string NormalizeScenePathKey(const std::string& path)
+{
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::absolute(std::filesystem::path(path), ec);
+    if (ec) { return path; }  // 退化：保留原串（不至于更糟）
+    return p.lexically_normal().generic_string();
+}
+
 void EditorSettings::AddRecentScene(const std::string& path)
 {
     if (path.empty()) { return; }
-    // 去重：移除已存在的同路径（手动 erase 避免 <algorithm> 依赖）。
+    const std::string key = NormalizeScenePathKey(path);
+    // 去重：按归一化键移除已存在项（手动 erase 避免 <algorithm> 依赖）。
     for (auto it = recentScenes.begin(); it != recentScenes.end(); )
     {
-        if (*it == path) { it = recentScenes.erase(it); }
-        else             { ++it; }
+        if (NormalizeScenePathKey(*it) == key) { it = recentScenes.erase(it); }
+        else                                   { ++it; }
     }
-    recentScenes.insert(recentScenes.begin(), path);  // 最近置顶
+    recentScenes.insert(recentScenes.begin(), key);  // 存归一化形式 + 最近置顶
     if (static_cast<int>(recentScenes.size()) > kMaxRecentScenes)
     {
         recentScenes.resize(static_cast<std::size_t>(kMaxRecentScenes));

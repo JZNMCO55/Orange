@@ -55,6 +55,12 @@ public:
     const std::string& GetSelectedStateName() const noexcept { return mSelectedStateName; }
     void               SetSelectedStateName(std::string name) { mSelectedStateName = std::move(name); }
 
+    // 删 state 会级联删 transitions 并重排剩余 transition 的索引——选中的
+    // mSelectedTransitionIndex 即便仍在界内也会指向「别的」transition，后续编辑
+    // conditions 会写错对象。Delete 命令 Execute/Undo 调本方法把选中清回未选，
+    // 避免索引漂移（自愈逻辑只兜越界，兜不了「指向变了但仍合法」）。
+    void ClearSelectedTransition() noexcept { mSelectedTransitionIndex = static_cast<std::size_t>(-1); }
+
 private:
     // editing 副本与 assetPath 不一致时从盘 reload + Clear 命令栈；reload
     // 失败 → mEditingValid = false。

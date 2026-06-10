@@ -561,6 +561,22 @@ Result<void, ResultCode> Load(std::string_view path,
     //      RegisterBackend 时 capture，scene 不下钻。
     //    各 registry / world 指针为空时分别走 graceful 退化（component
     //    attach 但 backend 字段留空 / nullptr）。
+    //
+    // Pass 2 已经 AddBody 注册进 PhysicsWorld 的 body 必须在回滚时一并 RemoveBody——
+    // 否则 RollbackCreatedEntities 只 DestroyEntity（无物理级联，World 无 on_destroy
+    // 钩子销 body），已建的 b2 body 会成孤儿留在 b2World（泄漏）。逐个记录 handle，
+    // 回滚走 rollbackWithBodies 先 RemoveBody 再销实体。
+    std::vector<Physics::BodyHandle> addedBodies;
+    const auto rollbackWithBodies = [&]() {
+        if (options.physicsWorld != nullptr)
+        {
+            for (const Physics::BodyHandle& h : addedBodies)
+            {
+                options.physicsWorld->RemoveBody(h);
+            }
+        }
+        RollbackCreatedEntities(world, created);
+    };
     for (std::size_t i = 0; i < entityCount; ++i)
     {
         const std::string base   = EntityBasePath(i);
@@ -583,7 +599,7 @@ Result<void, ResultCode> Load(std::string_view path,
         {
             if (!ReadRigidBodyDesc(reader, rigidPath, rigid))
             {
-                RollbackCreatedEntities(world, created);
+                rollbackWithBodies();
                 return ResultCode::InvalidArgument;
             }
             readRigid = true;
@@ -592,7 +608,7 @@ Result<void, ResultCode> Load(std::string_view path,
         {
             if (!ReadColliderDesc(reader, colliderPath, collider))
             {
-                RollbackCreatedEntities(world, created);
+                rollbackWithBodies();
                 return ResultCode::InvalidArgument;
             }
             readCollider = true;
@@ -603,6 +619,7 @@ Result<void, ResultCode> Load(std::string_view path,
             if (options.physicsWorld != nullptr)
             {
                 rigid.handle = options.physicsWorld->AddBody(rigid, collider);
+                if (rigid.handle.IsValid()) { addedBodies.push_back(rigid.handle); }
             }
             else
             {
@@ -634,7 +651,7 @@ Result<void, ResultCode> Load(std::string_view path,
             std::string backendName;
             if (!ReadAnimatorBackendName(reader, animPath, backendName))
             {
-                RollbackCreatedEntities(world, created);
+                rollbackWithBodies();
                 return ResultCode::InvalidArgument;
             }
 
@@ -751,7 +768,7 @@ Result<void, ResultCode> Load(std::string_view path,
             }
             if (!entry.Read(reader, componentPath, entity, ctx))
             {
-                RollbackCreatedEntities(world, created);
+                rollbackWithBodies();
                 return ResultCode::InvalidArgument;
             }
         }

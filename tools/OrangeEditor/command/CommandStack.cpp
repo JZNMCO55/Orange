@@ -227,6 +227,15 @@ void CommandStack::EndGroup()
         std::make_unique<CommandGroup>(mGroupName, std::move(mPendingGroup));
     mPendingGroup.clear();  // move 后 source 可能保持已分配 capacity，显式 clear
 
+    // 先截断 redo 历史（与 Push 无组路径对齐）：insertion point 之后的命令在
+    // 任何新条目（无论 merge 进既有 group 还是新 push）落地后都不再可达。若放到
+    // merge 之后只在 !merged 分支截断，则"撤销若干步后再拖同名 gizmo 触发 merge"
+    // 会让已被撤销的 redo 条目残活（CanRedo 误返 true，Redo 出陈旧命令）。
+    if (mIndex + 1 < static_cast<int>(mStack.size()))
+    {
+        mStack.resize(static_cast<std::size_t>(mIndex + 1));
+    }
+
     // ---- MergeMode 三档分派 --------------------------------------------
     //
     // Disable: 跳过 merge，直接 push。
@@ -256,12 +265,9 @@ void CommandStack::EndGroup()
 
     if (!merged)
     {
-        // 清除 redo 历史 + 正常 push。grouped 内部已经 Execute 过子命令（Push
-        // 进 pending 时已执行），这里不再调 Execute——避免对字段值二次应用。
-        if (mIndex + 1 < static_cast<int>(mStack.size()))
-        {
-            mStack.resize(static_cast<std::size_t>(mIndex + 1));
-        }
+        // 正常 push。redo 历史已在 merge 前统一截断（见上）。grouped 内部已经
+        // Execute 过子命令（Push 进 pending 时已执行），这里不再调 Execute——
+        // 避免对字段值二次应用。
         mStack.push_back(std::move(grouped));
         ++mIndex;
         while (static_cast<int>(mStack.size()) > kMaxSize)

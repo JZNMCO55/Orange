@@ -144,6 +144,12 @@ struct TimelineSelection
     // 正在拖动的事件 marker。
     bool        draggingEvent = false;
     std::size_t dragEventIdx  = static_cast<std::size_t>(-1);
+    // 单调递增的拖动会话 id：每次开始拖 key / event 自增一次，作命令 merge key
+    // 的稳定后缀。不能用 dragKey/dragEventIdx 作 merge key——它们在拖动中会因
+    // 升序重排而变（同一次拖动跨帧 key 不再合并），且 track-only 的旧 merge key
+    // 会把"同一轨先后拖两个不同 key"误并成一条 Undo（bug-hunt 发现）。会话 id
+    // 在一次拖动内稳定、跨拖动唯一，既能合并单次拖动的逐帧命令、又能区分两次拖动。
+    std::uint64_t dragSession  = 0;
 
     void ResetIfOwnerChanged(Orange::Engine::Entity e)
     {
@@ -334,7 +340,30 @@ void DeleteSelectedKey(EditorHost& host, ClipAnimator& clip)
 // track 是单值序列就画单曲线；多分量共享同一标量时序缓动，故编辑任一分量的切线即
 // 改整段时序）。Float track 恒取 .x。切线（inTangent/outTangent）是整段共享的 2D
 // 控制柄，与具体 value 分量无关——值方向 .y 抬升按"被绘制分量"的值跨度可视化。
-int TrackPrimaryComponent(const AnimationTrack&) { return 0; }
+int TrackPrimaryComponent(const AnimationTrack& tr)
+{
+    // 选值跨度最大的标量分量作主曲线显示。rotation.euler 这类多分量 track 真实动画
+    // 常落在 .y（如绕 Y 自旋 0→360），恒返回 0 会画出 .x 的平直线（无意义、误导）。
+    // Float track（position.y 等）只有 .x 承载值（.y/.z/.w 恒 0），自然选回 0。切线是
+    // 整段共享的 2D 控制柄（编辑任一分量即改共享时序缓动），故按"最有信息量的分量"
+    // 显示不破坏编辑语义。
+    if (tr.keys.size() < 2) { return 0; }
+    int   best      = 0;
+    float bestRange = -1.0f;
+    for (int c = 0; c < 4; ++c)
+    {
+        float lo = tr.keys.front().value[c];
+        float hi = lo;
+        for (const Keyframe& k : tr.keys)
+        {
+            lo = std::min(lo, k.value[c]);
+            hi = std::max(hi, k.value[c]);
+        }
+        const float range = hi - lo;
+        if (range > bestRange) { bestRange = range; best = c; }
+    }
+    return best;
+}
 
 // 取 track 的值范围（被绘制分量在所有 key 上的 min/max），用于纵轴映射。空 / 单值
 // 退化时给一个对称小区间避免除零。pad 留出上下边距让曲线不贴边。
@@ -639,6 +668,7 @@ void EditorRenderLayer::DrawAnimationPanel()
                         sTimelineSel.draggingKey = true;
                         sTimelineSel.dragTrack   = ti;
                         sTimelineSel.dragKey     = ki;
+                        ++sTimelineSel.dragSession;  // 新拖动会话（merge key 用）
                         hitSomething      = true;
                         break;
                     }
@@ -661,6 +691,7 @@ void EditorRenderLayer::DrawAnimationPanel()
                             sTimelineSel.ClearKeySel();
                             sTimelineSel.draggingEvent = true;
                             sTimelineSel.dragEventIdx  = ei;
+                            ++sTimelineSel.dragSession;  // 新拖动会话（merge key 用）
                             hitSomething        = true;
                             break;
                         }
@@ -695,8 +726,10 @@ void EditorRenderLayer::DrawAnimationPanel()
                     Anim::MoveKeyframeTime(newClip.tracks[sTimelineSel.dragTrack],
                                            sTimelineSel.dragKey, newT);
                     char mergeKey[128];
-                    std::snprintf(mergeKey, sizeof(mergeKey), "anim_drag_key:%zu",
-                                  sTimelineSel.dragTrack);
+                    // merge key 用稳定的拖动会话 id（非 dragTrack）——同一轨先后拖
+                    // 两个不同 key 是两次会话、两条 Undo，不被错误合并成一条。
+                    std::snprintf(mergeKey, sizeof(mergeKey), "anim_drag_key:%llu",
+                                  static_cast<unsigned long long>(sTimelineSel.dragSession));
                     PushClipEdit(mHost, clip, std::move(newClip), mergeKey, "Move Keyframe");
                     const AnimationClip& after = clip.Clip();
                     if (sTimelineSel.dragTrack < after.tracks.size())
@@ -726,7 +759,10 @@ void EditorRenderLayer::DrawAnimationPanel()
                 ev.time = newT;
                 Anim::RemoveClipEvent(newClip, sTimelineSel.dragEventIdx);
                 Anim::AddClipEvent(newClip, ev);
-                PushClipEdit(mHost, clip, std::move(newClip), "anim_drag_event",
+                char evMergeKey[128];
+                std::snprintf(evMergeKey, sizeof(evMergeKey), "anim_drag_event:%llu",
+                              static_cast<unsigned long long>(sTimelineSel.dragSession));
+                PushClipEdit(mHost, clip, std::move(newClip), evMergeKey,
                              "Move Event");
                 // 回查新索引（events 升序，取 time 最近的）。
                 std::size_t bestIdx = kInvalidIdx;

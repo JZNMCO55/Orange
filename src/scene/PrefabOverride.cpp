@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -149,10 +150,16 @@ std::string LeafValueKey(const JsonReader& reader, std::string_view path)
     double d = 0.0;
     if (reader.ReadFloat(path, d))
     {
-        // double → 文本：用足够精度的定点/科学表示，保证"相等的 double 得相同串、
-        // 不同的得不同串"。ReadFloat 已含 int 路径（is_number 覆盖整型），但上面
-        // ReadInt 先命中纯整数，这里只处理真正的浮点。
-        return std::string("f") + std::to_string(d);
+        // double → 文本必须"相等的 double 得相同串、不同的得不同串"。曾用
+        // std::to_string(double)（%f 6 位小数）——绝对差 <5e-7 的两个**不同** double
+        // 会碰撞成同一串，使 override diff 漏检（Refresh 用模板值静默覆盖用户改动）。
+        // 改用 bit-pattern：把 double 位型 memcpy 成 uint64 再十进制化，每个不同位型
+        // 唯一串、零碰撞。ReadFloat 已含 int 路径（is_number 覆盖整型），但上面 ReadInt
+        // 先命中纯整数，这里只处理真正的浮点。
+        std::uint64_t bits = 0;
+        static_assert(sizeof(bits) == sizeof(d), "double 必须为 64 位");
+        std::memcpy(&bits, &d, sizeof(bits));
+        return std::string("f") + std::to_string(bits);
     }
     std::string s;
     if (reader.ReadString(path, s))

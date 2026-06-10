@@ -152,6 +152,9 @@ void AnimFsmDeleteStateCommand::Execute()
     {
         mpPlugin->SetSelectedStateName(std::string{});
     }
+    // 级联删 transition 后，选中的 transition index 会指向别的 transition（或越界）——
+    // 清选中，避免后续 condition 编辑写错对象（自愈只兜越界）。
+    mpPlugin->ClearSelectedTransition();
 
     mpPlugin->MarkDirty();
 }
@@ -178,6 +181,9 @@ void AnimFsmDeleteStateCommand::Undo()
     }
 
     if (mWasInitialState) { fsm.initialState = mStateName; }
+
+    // 对称清选中：Undo 把 transitions 插回会再次重排索引，选中态同样可能漂移。
+    mpPlugin->ClearSelectedTransition();
 
     mpPlugin->MarkDirty();
 }
@@ -280,6 +286,14 @@ bool AnimFsmRenameStateCommand::Merge(ICommand& newer)
     // 仅链式 rename 合并：newer.mOldName 必须等于本命令的 mNewName。
     // 这样 stack 内最终保留 (mOldName -> p->mNewName) 的单条 Undo。
     if (p->mOldName != mNewName) { return false; }
+    // 关键：CommandStack 在 Merge 返回 true 后会 **re-Execute** 本命令
+    // （见 CommandStack::Push），re-Execute 以 mOldName 为重命名起点。但此刻
+    // FSM 已是旧 mNewName（本命令上一次 Execute 的结果），直接把 mNewName
+    // 滚到新值后 re-Execute 会调 RenameStateInFsm(mOldName→新名)——FSM 里没有
+    // mOldName 故 no-op，新名丢失且 Undo 也 no-op（rename 是唯一非幂等命令）。
+    // 先 Undo() 把 FSM 从旧 mNewName 还原回 mOldName，再吸收新值，re-Execute
+    // 才以 mOldName 为正确起点。
+    Undo();
     mNewName = p->mNewName;
     return true;
 }

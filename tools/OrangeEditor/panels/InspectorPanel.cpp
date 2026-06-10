@@ -33,7 +33,16 @@
 
 void EditorRenderLayer::DrawInspectorPanel()
 {
-    ImGui::Begin("Inspector");
+    // 必须检查 Begin 返回值：窗口折叠 / 处于非活动 tab 时 SkipItems=true，此时
+    // 下方任一绘制路径——尤其 asset plugin 内的 ImGui::BeginTable——会返回 false，
+    // 而其后的 PropertyLabel/TableNextRow 在 null table 上执行即空指针崩溃（折叠
+    // Inspector + 选中 .material 必崩）。提前 End + return 一次性挡住所有 asset
+    // plugin 与实体 Inspector 的绘制。
+    if (!ImGui::Begin("Inspector"))
+    {
+        ImGui::End();
+        return;
+    }
 
     // v0.7 c0：按选中资源类型分派 Inspector 整段——遍历 host.assetInspector
     // Plugins 注册表，第一条 CanHandle(selectedAssetPath) == true 的 plugin

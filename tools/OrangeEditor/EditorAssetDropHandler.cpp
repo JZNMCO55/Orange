@@ -21,6 +21,7 @@
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -358,6 +359,29 @@ CreateEntityFromMeshAsset(EditorHost&        host,
         {
             resolved.push_back(m.empty() ? nullptr
                                          : ::EnsureMaterialInstance(host, m));
+        }
+    }
+    // 回退：.meta 无 subMeshMaterials（单材质**旧产物** / hash-skip 未重导入）时，
+    // 按 ADR-008 约定取同目录 <stem>.material（导入一律 co-locate 该文件）。文件存在
+    // 才用——否则 EnsureMaterialInstance 会 lazy-create 一个灰默认材质，与下面 defMat
+    // 兜底无异、白费。修复单材质模型拖到 viewport 空白 / 右键 Add to Scene 仍是默认
+    // 灰 PBR 材质（dogfood item 10 / 13；新实体无既有材质可保留，应用导入材质语义明确）。
+    {
+        bool anyResolved = false;
+        for (MaterialInstance* m : resolved) { if (m != nullptr) { anyResolved = true; break; } }
+        if (!anyResolved)
+        {
+            const auto dot = meshPath.find_last_of('.');
+            const std::string convMat =
+                (dot == std::string::npos ? meshPath : meshPath.substr(0, dot)) + ".material";
+            std::error_code ec;
+            if (std::filesystem::exists(convMat, ec))
+            {
+                if (MaterialInstance* m = ::EnsureMaterialInstance(host, convMat))
+                {
+                    resolved.assign(1, m);  // 单 material 语义（不挂 SubMeshMaterials）
+                }
+            }
         }
     }
     // 默认材质兜底（无 .meta 材质 / slot 0 空时让新物体仍可见）。

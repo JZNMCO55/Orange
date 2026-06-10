@@ -101,16 +101,21 @@ void LinkAsLastChild(World& world, Entity parent, Entity child)
         pc.firstChild = child;
         return;
     }
-    // 走到尾兄弟
+    // 走到尾兄弟。两层防御损坏 scene（loader 不校验链一致性）：
+    //  (a) nextSibling 成环 → 计数上界保护，避免死循环（引擎 TransformSystem
+    //      侧 DFS 已有同款上限；编辑器侧此前缺失）。
+    //  (b) 链中某 nextSibling 指向无 HC 的实体 → cur 的 HC 为 null，旧代码
+    //      break 后再 GetComponent 仍 null → tail->nextSibling 空解引用崩溃。
+    //      下面尾节点改用 GetOrAdd 兜底建 HC，保证非空。
+    constexpr std::size_t kMaxSiblingWalk = 1u << 20;  // 远超任何真实兄弟链，仅防环
     Entity cur = pc.firstChild;
-    while (true) {
+    for (std::size_t guard = 0; guard < kMaxSiblingWalk; ++guard) {
         HC* h = world.GetComponent<HC>(cur);
         if (h == nullptr || !h->nextSibling.IsValid()) { break; }
         cur = h->nextSibling;
     }
-    HC* tail = world.GetComponent<HC>(cur);
-    tail->nextSibling = child;
-    cc.prevSibling    = cur;
+    GetOrAdd(world, cur).nextSibling = child;  // GetOrAdd 保证尾节点 HC 非空
+    cc.prevSibling = cur;
 }
 
 void Detach(World& world, Entity e)

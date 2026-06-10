@@ -358,27 +358,33 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
             break;
         }
     }
-    Orange::Editor::Widgets::BeginPropertyTable("##matprops", 100.0f);
-    Orange::Editor::Widgets::PropertyLabel("Template",
-        "材质模板（决定 shader + uniform 布局）");
-    if (!templateNameCStrs.empty()
-        && ImGui::Combo("##template", &curTemplateIdx,
-                        templateNameCStrs.data(),
-                        static_cast<int>(templateNameCStrs.size())))
+    // 守卫 BeginPropertyTable 返回值（EditorWidgets.h 契约：false 时不可调
+    // EndPropertyTable，且其后 PropertyLabel 会对 null table 崩溃）。窗口被
+    // SkipItems 时上层 InspectorPanel 已提前 return，本处守卫是防御性冗余，
+    // 兼容第三方 / 未来直接调用本 plugin 的路径。
+    if (Orange::Editor::Widgets::BeginPropertyTable("##matprops", 100.0f))
     {
-        if (curTemplateIdx >= 0
-            && curTemplateIdx < static_cast<int>(templateNames.size()))
+        Orange::Editor::Widgets::PropertyLabel("Template",
+            "材质模板（决定 shader + uniform 布局）");
+        if (!templateNameCStrs.empty()
+            && ImGui::Combo("##template", &curTemplateIdx,
+                            templateNameCStrs.data(),
+                            static_cast<int>(templateNameCStrs.size())))
         {
-            host.assets.editingTemplateName = templateNames[curTemplateIdx];
-            // template 切换也算未保存改动 → 让关窗确认（facet 1）能拦截。
-            host.assets.editingMaterialDirty = true;
+            if (curTemplateIdx >= 0
+                && curTemplateIdx < static_cast<int>(templateNames.size()))
+            {
+                host.assets.editingTemplateName = templateNames[curTemplateIdx];
+                // template 切换也算未保存改动 → 让关窗确认（facet 1）能拦截。
+                host.assets.editingMaterialDirty = true;
+            }
         }
+        if (templateNameCStrs.empty())
+        {
+            ImGui::TextDisabled("(no templates registered)");
+        }
+        Orange::Editor::Widgets::EndPropertyTable();
     }
-    if (templateNameCStrs.empty())
-    {
-        ImGui::TextDisabled("(no templates registered)");
-    }
-    Orange::Editor::Widgets::EndPropertyTable();
 
     // v1.2.4 patch · 统一调 EnsureMaterialInstance helper（含 lazy create
     // 兜底）。8 个内置 hardcode + PBR showcase 18 个直接命中；新建 /
@@ -437,20 +443,25 @@ void DrawMaterialSubMode(EditorHost& host, const std::string& materialPath)
             {
                 ImGui::Separator();
                 ImGui::TextUnformatted("材质参数");
-                Orange::Editor::Widgets::BeginPropertyTable(
-                    "##matparams", 100.0f);
-                for (const auto& u : meta->uniforms)
+                // 守卫返回值（同 ##matprops，防 null table 崩溃）。RenderUniformWidget
+                // 内部对 Components 型 uniform 会 break/reopen 本 table——只在本表成功
+                // open（窗口非 SkipItems）时才进入循环，故内部 break/reopen 同样有效。
+                if (Orange::Editor::Widgets::BeginPropertyTable(
+                        "##matparams", 100.0f))
                 {
-                    if (u.widget == ShaderMeta::UniformWidget::Hidden)
+                    for (const auto& u : meta->uniforms)
                     {
-                        continue;
+                        if (u.widget == ShaderMeta::UniformWidget::Hidden)
+                        {
+                            continue;
+                        }
+                        if (RenderUniformWidget(u, *liveInstance))
+                        {
+                            uniformDirty = true;
+                        }
                     }
-                    if (RenderUniformWidget(u, *liveInstance))
-                    {
-                        uniformDirty = true;
-                    }
+                    Orange::Editor::Widgets::EndPropertyTable();
                 }
-                Orange::Editor::Widgets::EndPropertyTable();
             }
         }
     }

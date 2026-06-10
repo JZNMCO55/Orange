@@ -608,6 +608,7 @@ void SeedDemoWorld(EditorHost& host)
     EditorHierarchy::LinkAsLastChild(world, geometry, fireEmitter);
     EditorHierarchy::LinkAsLastChild(world, geometry, sparkleEmitter);
     EditorHierarchy::LinkAsLastChild(world, geometry, slimeDoll);
+    EditorHierarchy::LinkAsLastChild(world, geometry, clipCube);
     EditorHierarchy::LinkAsLastChild(world, geometry, testFighter);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticCircle);
     EditorHierarchy::LinkAsLastChild(world, geometry, staticPolygon);

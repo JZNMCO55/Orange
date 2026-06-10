@@ -129,7 +129,7 @@
 
 > 目标：参考 gap 文档，自主找任务让引擎更贴近 Lumix 成熟度。本段登记该 session 落地能力里"headless 绿但视觉/交互待人工 dogfood"的残留。
 
-### 8. Create 3D Object —— 一键创建 Cube / Sphere / Plane 基本体
+### ✅ 8. Create 3D Object —— 一键创建 Cube / Sphere / Plane 基本体
 
 - **commit**：`c5242b1` feat(editor): Create 3D Object 基本体（Cube / Sphere / Plane）
 - **怎么触发**：
@@ -148,7 +148,9 @@
 - **commit**：`343444e` feat(editor): Component Copy / Paste Values
 - **怎么触发**：
   1. 选中实体 A → Inspector 里**右键某个组件头**（如 Transform / Light / Renderable）→ `Copy Values`
-  2. 选中实体 B → 右键**同类型**组件头 → `Paste Values`（不同类型时该项灰禁）
+  2. 选中实体 B → 右键**同类型**组件头 → `Paste Values`（不同类型时该项灰禁） 
+  - [bug]Hierarchy没有置灰
+  - Paste 到slime的Transform 后，entity位置发生变化，但不显示了
 - **看什么 / 通过判据**：
   - Paste 后 B 的该组件各字段值 = A 的值（如 Copy A 的 Transform → Paste 到 B → B 的 position/rotation/scale 变成 A 的）
   - 跨类型禁用：Copy 了 Transform，去 Light 组件头右键 → Paste Values 灰掉不可点
@@ -164,6 +166,7 @@
   2. 把导入的 `.mesh` 从资产浏览器拖到场景一个实体上（或拖到 viewport 实体上）
 - **看什么 / 通过判据**：
   - drop 后该实体的 Renderable.Material **自动变成导入的 `<stem>.material`**（而非默认灰 pbr），viewport 显示模型自带的材质/贴图（之前是默认材质）
+    - [bug] 拖入到 viewport 空白处，仍然时默认的灰色PBR材质
   - 不挂 SubMeshMaterialsComponent（单材质无需），Inspector 无 Sub-Mesh Materials 段
   - 多材质模型 drop 行为不变（仍挂 SubMeshMaterials + 各段材质）
 - **背景**：之前单材质模型 drop 后是默认材质（导入的 .material 不自动应用，要手动指派）。对齐 Lumix/Unity 拖模型进场景自动带材质。headless section 7 已验导入侧 .meta 写 subMeshMaterials；**drop 后 viewport 材质视觉待真机确认**。推荐 fixture：KHR Avocado.glb。
@@ -199,10 +202,11 @@
 - **怎么触发**：资产浏览器里**右键**一个 `.mesh` / `.obj` → `Add to Scene`（不需先选中场景实体）
 - **看什么 / 通过判据**：
   - 在相机焦点（pivot ≈ 视野中心）处出现一个带该 mesh + 导入材质的新实体并选中（与拖到空白处 item 11 同款落地）
+    - [bug] Add to Scene后，仍然是默认的灰色PBR材质
   - **Pick to Renderable.mesh** 一致性：选中一个实体 → 右键多材质 `.mesh` → "Pick to Renderable.mesh" → 该实体也正确挂上 SubMeshMaterials（各段材质），之前只换 mesh handle 不挂组件
 - **背景**：给"把模型放进场景"一个菜单入口（拖放之外），对齐 Lumix/Unity instantiate。**菜单交互 + Pick 多材质同步 viewport 待真机确认**。
 
-### 14. viewport 工具栏 Snap 开关
+### ✅ 14. viewport 工具栏 Snap 开关
 
 - **commit**：`7313ba5` feat(editor): viewport 工具栏 Snap 开关
 - **怎么触发**：viewport 顶部工具栏（Gizmos / Grid / Sky / Debug Draw / Colliders 那排）勾选 **Snap**
@@ -212,7 +216,7 @@
   - 步进值在 Settings 面板 Snap 段可调，工具栏开关与 Settings 双向同步（同一个 settings.snapEnabled）
 - **背景**：snap 功能（3 个 gizmo 都已消费 snapEnabled）之前只埋在 Settings，加 viewport 快捷开关提升可发现性。对齐 Unity/Lumix snap toggle。**开关 + 吸附手感待真机确认**。
 
-### 15. viewport 统计 overlay
+### ✅ 15. viewport 统计 overlay
 
 - **commit**：`5b722b9` feat(editor): viewport 统计 overlay
 - **怎么触发**：打开 OrangeEditor，看 viewport **左上角**
@@ -222,7 +226,7 @@
   - 选中实体 → 第二行显示其名字；未选 → `(none)`
 - **背景**：对齐 Lumix StudioApp / Unity scene stats。始终显示（紧凑半透不挡视野）。**overlay 视觉位置 + 计数准确性待真机确认**。
 
-### 16. RMB+WASD 飞行相机导航
+### ✅ 16. RMB+WASD 飞行相机导航
 
 - **commit**：`f151fa6` feat(editor): RMB+WASD 飞行相机导航
 - **怎么触发**：在 viewport 内**按住鼠标右键（RMB）**，同时按 **WASD / Q / E**
@@ -240,8 +244,9 @@
 - **怎么触发**：viewport 内按 **Home** 键（无文本输入焦点时）
 - **看什么 / 通过判据**：相机拉到能看**全场景所有几何**的距离（合并所有 entity 世界 bounds）；对比 **F** 键（只聚焦当前选中）。空场景按 Home 无反应。
 - **背景**：F 聚焦选中（已有）+ Home 聚焦全场景（新增），对齐 Unity/Unreal。**视觉待真机确认**。
+  - [bug] 按完后，viewport Snap 勾选框橙色高亮
 
-### 18. pbr 材质 inspector 可调 emissive
+### ✅ 18. pbr 材质 inspector 可调 emissive
 
 - **commit**：`009a6e4` feat(editor): pbr 材质 inspector 暴露 uEmissive + emissive 贴图槽
 - **怎么触发**：选中一个 `.material`（pbr 模板）进 Material 子模式 inspector（或新建 pbr 材质）
@@ -254,7 +259,7 @@
 
 ---
 
-### 19. File → Open Recent（最近场景）
+### ✅ 19. File → Open Recent（最近场景）
 
 - **commit**：`58fcc34` feat(editor): File → Open Recent 最近场景列表
 - **怎么触发**：File 菜单 → **Open Recent** 子菜单（打开 / 另存过几个场景后才有内容；空时灰禁）
@@ -265,7 +270,7 @@
   - **持久化**：关编辑器重开，Open Recent 列表仍在（存进 editor_settings.json）
 - **背景**：File 菜单之前没有最近场景，每个成熟编辑器都有。**菜单 + 持久化待 dogfood**。
 
-### 20. 小补完一束（低 dogfood 风险，顺手扫一眼即可）
+### ✅ 20. 小补完一束（低 dogfood 风险，顺手扫一眼即可）
 
 - `5a3a9a0` **viewport overlay 加 gizmo 状态**：左上角 overlay 第三行 `Gizmo: <Move/Rotate/Scale> [<World/Local>]` —— 切 W/E/R 模式 + X 键切 World/Local 时该行实时变。
 - `b90a662` **相机聚焦菜单入口**：Entity Tree 节点右键有 **Focus**（聚焦该实体）；View 菜单有 **Frame Selected (F)** / **Frame All (Home)**。
@@ -273,7 +278,7 @@
 
 ---
 
-### 21. viewport 工具栏 gizmo 变换工具按钮
+### ✅ 21. viewport 工具栏 gizmo 变换工具按钮
 
 - **commit**：`e63d986` feat(editor): viewport 工具栏 gizmo 变换工具按钮（Move/Rotate/Scale + World/Local）
 - **怎么触发**：看 viewport 顶部工具栏（Snap 开关右侧），有 **[Move][Rotate][Scale]** + **[World/Local]** 按钮
@@ -284,7 +289,7 @@
   - hover 各按钮有 tooltip 标快捷键（W/E/R/X）
 - **背景**：gizmo 模式/坐标系之前只有隐蔽快捷键，无可点入口。对齐 Unity 左上变换工具栏 / Lumix scene toolbar。**按钮高亮 + 双向同步待真机确认**。
 
-### 22. 飞行模式滚轮调速
+### ✅ 22. 飞行模式滚轮调速
 
 - **commit**：`845c14c` feat(editor): 飞行模式滚轮调速（Unreal/Unity 标准）
 - **怎么触发**：viewport 内**按住右键**进入飞行（见 item 16），飞行中**滚动滚轮**
@@ -294,7 +299,7 @@
   - 速度有上下限（极慢仍能动、极快不失控）；Shift 加速（×3）在新速度基础上叠加
 - **背景**：补完 item 16 飞行导航，对齐 Unreal/Unity scene 飞行——大场景调快、精修调慢。**纯手感，连同飞行方向/速度一起 dogfood**。
 
-### 23. viewport 聚焦时 Delete / Ctrl+D
+### ✅ 23. viewport 聚焦时 Delete / Ctrl+D
 
 - **commit**：`7b20468` feat(editor): viewport 聚焦时也响应 Delete / Ctrl+D
 - **怎么触发**：在 **viewport 里**点选一个实体（不切到 Hierarchy 面板），按 **Delete** 或 **Ctrl+D**
@@ -306,7 +311,7 @@
   - **不重复**：Hierarchy 和 viewport 不会同帧各删一次 / 各复制一次（幂等标志）
 - **背景**：最高频的两个场景操作，此前被面板焦点限制。**删除/复制行为 + 不误触待真机确认**。
 
-### 24. 文件快捷键 Ctrl+S / Ctrl+Shift+S / Ctrl+N / Ctrl+O
+### ✅ 24. 文件快捷键 Ctrl+S / Ctrl+Shift+S / Ctrl+N / Ctrl+O
 
 - **commit**：`48fe776` feat(editor): 接线 Ctrl+S / Ctrl+Shift+S / Ctrl+N / Ctrl+O 文件快捷键
 - **怎么触发**：编辑器内（非文本输入焦点）按 **Ctrl+S**（保存）/ **Ctrl+Shift+S**（另存为）/ **Ctrl+N**（新场景）/ **Ctrl+O**（打开场景）
@@ -318,7 +323,7 @@
   - **不误触**：Inspector 文本框输入时 Ctrl+S 不触发保存
 - **背景**：菜单宣传了快捷键却没接线（注释自承"留后续"），用户按了会困惑。补接线，对齐所有成熟编辑器。**保存/新建/打开 + 未保存确认流程待真机确认**。
 
-### 25. 拖 gizmo 时按住 Ctrl 临时吸附
+### ✅ 25. 拖 gizmo 时按住 Ctrl 临时吸附
 
 - **commit**：`bb4ace6` feat(editor): 拖 gizmo 时按住 Ctrl 临时吸附（Unity 标准）
 - **怎么触发**：**Snap 开关保持关闭**，选中实体用 translate / rotate / scale gizmo 拖动时**按住 Ctrl**
@@ -328,7 +333,7 @@
   - 三个 gizmo（移/转/缩）都生效；步进值同 Settings 里的 snap 步进
 - **背景**：之前吸附只能靠全局 Snap 开关；补 Unity 标准"拖动中按 Ctrl 临时吸附"。Snap tooltip 也加了这行提示。**吸附手感 + Ctrl 时机待真机确认**。
 
-### 26. Asset 浏览器双击 .scene.json 打开场景
+### ✅ 26. Asset 浏览器双击 .scene.json 打开场景
 
 - **commit**：`f0e2df1` feat(editor): Asset 浏览器双击 .scene.json 打开场景
 - **怎么触发**：Asset 浏览器文件列表里**双击**一个 `.scene.json`（[S] 图标 / 场景快照缩略图）
@@ -338,7 +343,7 @@
   - 单击仍只是选中（不打开）；双击其它类型文件（.mesh/.material）不触发打开
 - **背景**：之前双击场景文件无反应，只能走 File→Open 对话框 / Open Recent。补 Unity/Lumix 标准双击打开。**双击打开 + 未保存确认流程待真机确认**。
 
-### 27. View → Standard Views（标准视角）
+### ✅ 27. View → Standard Views（标准视角）
 
 - **commit**：`ece850c` feat(editor): View 菜单加 Standard Views
 - **怎么触发**：菜单 **View → Standard Views → Front / Back / Left / Right / Top / Bottom**
@@ -348,7 +353,7 @@
   - Top/Bottom 不会翻转/抖动（钳到 ±89° 避 gimbal）
 - **背景**：低 dogfood 风险（只设相机角度，对就是对）。对 2.5D 对齐 / 摆位有用。注：当前仍是透视投影（未切正交），后续可加 ortho 切换。
 
-### 28. Hierarchy 右键 Reset Transform
+### ✅ 28. Hierarchy 右键 Reset Transform
 
 - **commit**：`f1f25c1` feat(editor): Hierarchy 右键 Reset Transform（可 Undo）
 - **怎么触发**：Entity Tree 里右键一个实体 → **Reset Transform**
@@ -359,7 +364,7 @@
   - 无 TransformComponent 的实体该项灰禁
 - **背景**：导入模型 transform 异常 / 手滑挪偏后一键归位，对齐 Unity 的 Transform → Reset。**重置 + undo + Inspector 刷新待真机确认**。
 
-### 29. Edit 菜单 Duplicate / Delete 入口（低风险）
+### ✅29. Edit 菜单 Duplicate / Delete 入口（低风险）
 
 - **commit**：`fc6d2ff` feat(editor): Edit 菜单加 Duplicate / Delete 入口
 - **怎么触发**：选中实体 → 菜单 **Edit → Duplicate (Ctrl+D) / Delete (Del)**
@@ -407,7 +412,7 @@
 
 > 目标：贴近 Lumix 成熟度，开始排期 + 开发。A1 = Transform 层级传播（`maturity-roadmap.md` 地基首位 / ADR-016）。本段登记 A1.1 step 2（首消费者 mesh 切换）的视觉 dogfood —— 这是有**真实视觉变化**的改动，必须真机验证。
 
-### 31. Transform 层级传播（mesh 路径）—— 移动父节点带动子 mesh
+### ✅ 31. Transform 层级传播（mesh 路径）—— 移动父节点带动子 mesh
 
 - **commit**：本 session `feat(render): RenderScene::Collect 读 WorldTransformComponent`（A1.1 step 2 首消费者）+ `feat(editor): glTF scene import 回退 world-bake 为 local TRS`（A1.2）。引擎层 ADR-016 / `TransformSystem::PropagateWorldTransforms`。
 - **背景**：此前引擎渲染**不沿 hierarchy 累积父变换**（`GAP-2026-06-02-hierarchy-transform-not-propagated`）——parenting 对世界位置无效，移动父节点子节点不动。本次让 **mesh drawable** 沿 hierarchy 累积 world matrix（Unity/Godot/Lumix table-stakes）。
@@ -712,3 +717,44 @@
 - 新 feature 落地后，若有"headless 绿但视觉/手感待验"的残留，追加到本文件对应 session 段。
 - dogfood 通过的条目：在标题前加 ✅，并可在条目内记一句实测结果（截图路径 / 发现的问题）。
 - dogfood 发现 bug：在 `docs/engine-known-gaps.md` 登记新 GAP / BUG，本条目内 link 过去。
+
+## Bug
+
+> **2026-06-10 修复批次**（结合早上的全仓 code-review `Orange-Ecosystem/.claude/reviews/code-review-2026-06-10.md`）：
+> 见下方"## 2026-06-10 bug 修复批次"段。全量 ctest 92/92 绿，待重新 dogfood 确认。
+
+- 1. Open Recent 会出现相同路径的场景文件 —— **✅ 已修**（`AddRecentScene` 改路径归一化去重：相对/绝对/斜杠不同的同一场景不再重复。重新 dogfood：多次以不同形式打开同一场景，列表应只一条置顶）
+- 2. [31] Transform 层级传播（mesh 路径）—— 移动父节点带动子 mesh，但 —— ⚠️ 描述被截断，**待补充**：父节点带动子 mesh 后具体看到什么异常？（位置偏移 / 不跟随 / 跳变？）补全后单独排查。
+- 3. [33] 打开后崩溃 —— **✅ 已定位并修复（真根因，非动画）**。用户提供崩溃栈确诊：`main → ImFontAtlas::AddFontFromFileTTF → ImGui::ErrorLog → BeginErrorTooltip → ImGui::Begin → IM_ASSERT(g.WithinFrameScope)`。根因链：**dogfood 指示"把 demo.scene.json 改名/挪开" → `main.cpp::ChdirToRepoRoot` 用单文件 `assets/scenes/demo.scene.json` 作仓库根标记，改名后找不到 → 不 chdir → cwd 停在 build/bin/Debug（VS 默认）→ 相对路径字体 `codicon.ttf` 加载失败 → ImGui 新版字体缺失不返回 null 而走 ErrorLog→Begin，初始化期（无 frame）触发 assert 崩溃**。修复两层（详见下方批次"动画崩溃"段）：① ChdirToRepoRoot 改用稳健标记（`assets/`+`src/` 目录同时存在，不受场景改名影响）；② 所有 AddFontFromFileTTF 前先查文件存在（缺失降级为 '?' 占位，绝不进 assert 路径）。已模拟用户场景（build/bin/Debug 作 cwd + demo.scene.json 缺失）验证不再崩。
+
+---
+
+## 2026-06-10 bug 修复批次
+
+本批次 = dogfood-checklist 登记 bug + 早上全仓 code-review（`.claude/reviews/code-review-2026-06-10.md`）OrangeEngine 侧 20 条。全量 ctest **92/92** 绿、增量 build 全过。**所有改动 headless 已验，GUI/视觉残留待重新 dogfood**。OrangeRender 侧 6 条按 per-session 单子仓纪律仅登记到 `../OrangeRender/docs/incoming_bugs.md`（留独立 session 修）。
+
+### 动画崩溃（item 33 "打开后崩溃"）—— ✅ 真根因已修
+- **真根因（用户崩溃栈确诊，非动画代码）**：栈 = `main:601 → AddFontFromFileTTF → ImGui::ErrorLog → BeginErrorTooltip → ImGui::Begin → IM_ASSERT(g.WithinFrameScope)`。链条：item 33 dogfood 指示"把 demo.scene.json 改名/挪开" → `main.cpp::ChdirToRepoRoot` 用**单文件 `assets/scenes/demo.scene.json`** 作仓库根标记，改名后失配 → 不 chdir → cwd 停在 `build/bin/Debug`（VS 默认 cwd）→ **相对路径字体 `tools/OrangeEditor/theme/codicons/codicon.ttf` 加载失败** → ImGui 新版字体缺失不返回 null 而走 ErrorLog→Begin，初始化期（无 frame）触发 assert 崩溃（604 行的 null 检查根本到不了）。
+- **修复两层**（`main.cpp`）：
+  1. `ChdirToRepoRoot` 标记改 `is_directory(assets) && is_directory(src)`——`src/` 只在仓库根、绝不在 build 产物、与任何可改名场景文件无关，**改名/挪开任意场景都不影响 cwd 定位**。
+  2. 所有 `AddFontFromFileTTF`（msyh.ttc / segoeui.ttf / codicon.ttf）前先 `std::filesystem::exists` 检查，缺失降级为返回 null / 跳过（icon '?' 占位，不致命），**绝不进 ImGui 缺失字体的 assert 路径**。
+- **已验证**：模拟用户场景（`build/bin/Debug` 作 cwd + demo.scene.json 缺失）启动，SeedDemoWorld 正常加载、字体加载、跑满 25s 不崩。
+- **教训**：① 用户可改名/删除的内容文件不适合做"仓库根/资产根"探测标记，应用结构性目录（src/）；② 相对路径资源加载在非仓库根 cwd 下会静默失败，且 ImGui 新版字体缺失走 assert 而非 null，必须前置 exists 检查。
+- 另注：H1（Inspector 折叠 + 绘制 table 空指针崩）是**另一个独立真 bug**（见下 P0），也已修——它会在"折叠 Inspector + 选中 .material/实体"时崩，与本字体崩独立。
+- 顺带修（bug-hunt agent 发现，关系到 timeline dogfood items 41/42/46/47）：timeline 拖 key 的 merge key 只含 track index（同轨连续拖两个不同 key 被错误合并成一条 Undo）→ 改用稳定拖动会话 id；curve 编辑器 rotation 轨恒显示 component 0（恒 0 平直线）→ 改为显示值跨度最大的分量。
+
+### dogfood-checklist 登记 bug
+- **item 9（Copy/Paste Values）**：
+  - (a) "Hierarchy 没置灰" —— Inspector 组件头 Paste Values 的置灰门控（`canPaste` 按 `componentClipboard.typeName == schema.typeName` 比较）**当前代码正确**：跨类型 / 剪贴板空时 Paste 项灰禁。若 6月5 旧 exe 没置灰，rebuild 即修。**重测确认**；若指的是别处（如 Entity Tree 右键）请指明。
+  - (b) "Paste 到 slime Transform 后位置变了但不显示" —— Paste 忠实复制源的 position/rotation/scale 整套；**若源实体在相机视野外 / scale 退化（接近 0）**，slime 会随之移出视野 / 缩到不可见（属"复制了什么就得到什么"，非 paste 本身的 bug）。**真实修复**：补了 Paste 后 invalidate Inspector 的 Euler 缓存（否则 rotation 字段下一帧仍显示 paste 前旧 Euler）。**重测**：若 paste 一个正常 scale≈1、视野内位置的 Transform 后 slime 仍消失，请告诉我源实体是谁。
+- **item 10 / 13（单材质模型 drop 到 viewport 空白 / Add to Scene 后仍默认灰 PBR）**：**✅ 已修**。根因 = `CreateEntityFromMeshAsset` 只读 `.meta` 的 `subMeshMaterials`，而用户本地 Avocado 等**旧 .meta 无该字段**（导入早于该特性 + hash-skip 未重导）→ 解析空 → 回退默认灰。修复：`.meta` 无材质时**回退到 ADR-008 约定的同目录 `<stem>.material`**（存在才用）。Avocado.material 已 co-located，重测应带材质。（注：新导入的模型 .meta 已写 subMeshMaterials，无需 fallback；fallback 专治旧产物。）
+- **item 17（按 Home 后 viewport Snap 勾选框橙色高亮）**：⏳ **未修（cosmetic，已定位）**。根因 = 编辑器启用了 `ImGuiConfigFlags_NavEnableKeyboard`，Home 是 ImGui 键盘导航键，在 NewFrame 的 NavUpdate 阶段就把 nav 焦点移到了 toolbar 首个可导航控件（Snap 勾选框）并画橙色 focus 环；我们在 Draw 里处理 Home（Frame All）已晚于 nav。**纯视觉**（Snap 状态不变、不影响功能）。干净修复需给 toolbar 控件加 `ImGuiItemFlags_NoNav`（imgui_internal）或调整全局 nav 配置，风险偏高，留后续。
+
+### code-review OrangeEngine 侧（20 条，按严重度）
+- **P0**：H1 Inspector 折叠空表崩（`InspectorPanel.cpp` Begin 守卫 + `MaterialAssetInspectorPlugin` 两处 `BeginPropertyTable` 返回值守卫）· H2 AnimFsm 链式 rename 丢失（Merge 内吸收新值前先 Undo）· H3 `AssetRegistry::WaitForErased` UAF（删持久 slot 引用、重索引）· M4 Remove Component / Copy-Paste undo 丢 String/Polygon/EdgeChain 顶点（`CaptureComponentState` 补三 case）。
+- **P1**：H4/M12 AudioEngine move-assign 泄漏（Impl 析构 RAII 化）+ PlayOneShot 删死代码 · M5 AnimFsm 删 state 后清选中 transition · M1/M2 scale gizmo 用按下帧旋转基准 + follower 在 primary local 系缩放 · M6 scene load 回滚补 RemoveBody · M3/L3 LinkAsLastChild 空解引用兜底 + 环上界 · M8 Box2DBridge EdgeChain count 上界 clamp。
+- **P2**：L4 CommandStack EndGroup merge 前截断 redo · L5 Pipeline RTT 无相机返回 InvalidArgument · L6 PrefabOverride float key 改 bit-pattern 防碰撞 · L7 AnimationStateMachine Tick 拷 to/condition 防回调再入 UAF · L2 EditorCameraControl near/far 改每帧按 radius 推导（不持久化）。
+- **未修留待**：L1 EditorRotateGizmo 圆环侧视（视线近平行旋转平面）hover 高亮但点击 RayPlaneIntersect 失败无 fallback → 点不动（low，需屏幕空间切向 fallback 设计，留后续）。
+
+### 顺带发现（非本次修复，登记待办）
+- **toon 材质 Location 3 顶点属性缺失**：运行时 Vulkan validation error `pVertexAttributeDescriptions does not have a Location 3 but vertex shader has an input variable at that Location`——Animated Cube 用的 toon 材质，顶点 shader 声明了 Location 3（tangent）输入但顶点布局没提供（`Material.usesTangentVertex` 与 toon shader 顶点输入不匹配）。NV 上仅 validation warning 不崩，严格驱动上 pipeline 创建可能失败。建议在 `docs/engine-known-gaps.md` 登记后单独修（toon shader 去掉 Location 3，或 toon 材质置 usesTangentVertex）。

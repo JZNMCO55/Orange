@@ -323,6 +323,12 @@ CaptureComponentState(EditorHost& host, const ComponentSchema& schema, const voi
             { glm::quat v{1.0f, 0.0f, 0.0f, 0.0f}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
             case PropertyType::EntityRef:
             { Orange::Engine::Entity v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::String:
+            { std::string v; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::PolygonVertices:
+            { Orange::Engine::Physics::PolygonDesc v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
+            case PropertyType::EdgeChainVertices:
+            { Orange::Engine::Physics::EdgeChainDesc v{}; prop.get(component, &v); restorers.push_back([v, setFn](void* c){ setFn(c, &v); }); break; }
             default: break;
         }
     }
@@ -1289,6 +1295,10 @@ void DrawComponentSchemaSection(EditorHost&                  host,
             void* comp = pSchema->get(*pW, capE);
             if (comp == nullptr) { return; }
             for (const auto& r : rs) { if (r) { r(comp); } }
+            // Paste / Undo 直接写组件字段（含 Transform rotation 的 quat）后，必须
+            // invalidate Inspector 的 Euler 缓存——否则下一帧 rotation 字段仍显示
+            // paste 前的旧 Euler（与 Remove-undo 同款处理）。无 Transform 时无害。
+            pH->selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
         };
         host.cmdStack.Push(std::make_unique<LambdaCommand>(
             "Paste Component Values",

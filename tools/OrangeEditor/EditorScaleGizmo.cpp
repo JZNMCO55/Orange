@@ -255,6 +255,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
             host.gizmo.draggingAxis        = Axis::Center;
             host.gizmo.dragStartEntityScale = pTC->scale;
             host.gizmo.dragStartEntityPos   = entityPos;  // 群组 scale pivot
+            host.gizmo.dragStartEntityRot   = pTC->rotation;  // 按下帧旋转作 drag 基准
             host.gizmo.dragStartMouseScreen = glm::vec3(mousePos.x, mousePos.y, 0.0f);
             // 多选群组 scale：快照其余选中实体的 pos+scale（pivot = primary 位置）。
             host.gizmo.dragStartAdditional.clear();
@@ -289,6 +290,7 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                         host.gizmo.draggingAxis           = host.gizmo.hoveredAxis;
                         host.gizmo.dragStartEntityScale   = pTC->scale;
                         host.gizmo.dragStartEntityPos     = entityPos;
+                        host.gizmo.dragStartEntityRot     = pTC->rotation;  // 按下帧旋转作 drag 基准
                         host.gizmo.dragStartScaleRefSigned = signedDist;
                         // 多选群组 scale：快照其余选中实体的 pos+scale。
                         host.gizmo.dragStartAdditional.clear();
@@ -338,12 +340,15 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                                                           invViewProj);
                 if (mouseRay.has_value())
                 {
-                    // 注意：dragStartEntityPos 在 drag 起点 capture，但 entityRot
-                    // 用每帧最新的 pTC->rotation——Scale drag 期间没有任何路径
-                    // 写 pTC->rotation（Rotate gizmo 在 mode != Scale 时不响应），
-                    // 所以两者帧间一致；若以后 Animator 在 Edit Mode tick 时改
-                    // rotation，需要把 entityRot 也 capture 到 dragStart*。
-                    const glm::vec3 axisDir = entityRot * AxisDir(host.gizmo.draggingAxis);
+                    // axisDir 必须用**按下帧捕获**的 dragStartEntityRot，而非每帧最新
+                    // pTC->rotation：dragStartScaleRefSigned 是按下帧用该旋转算的沿轴
+                    // 参考距离，drag 更新若改用别的旋转基准则 factor 失配。B2.6 编辑期
+                    // 动画预览 tick 会在 drag 期间每帧改 selectedEntity 的 rotation（预览
+                    // 实体==选中实体时），推翻了旧注释"drag 期间无人写 rotation"的假设——
+                    // 故必须用捕获基准，否则旋转中拖 scale 轴会抖动 / 缩放方向跳变。
+                    const glm::vec3 axisDir =
+                        glm::mat3_cast(host.gizmo.dragStartEntityRot)
+                        * AxisDir(host.gizmo.draggingAxis);
                     const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
                                                                 host.gizmo.dragStartEntityPos,
                                                                 axisDir);
@@ -406,8 +411,15 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                     if (!pWorld->IsValid(snap.entity)) { continue; }
                     auto* pFTC = pWorld->GetComponent<TransformComponent>(snap.entity);
                     if (pFTC == nullptr) { continue; }
-                    const glm::vec3 nPos = Orange::Editor::Util::ScaleAroundPivot(
-                        snap.position, host.gizmo.dragStartEntityPos, factorVec);
+                    // follower 位置缩放须在 primary 按下帧 local 系内做（factorVec 是
+                    // 沿 primary local 轴的乘数）：旋转过的 primary 下，若按世界轴分量缩
+                    // 放 follower 偏移，群组形变会与拖动轴脱钩。把偏移用 primary 旋转的
+                    // 共轭转进 local 系缩放、再转回世界系。primary 未旋转（q=identity）时
+                    // 退化为旧 ScaleAroundPivot 的世界轴分量缩放，零回归。
+                    const glm::quat q   = host.gizmo.dragStartEntityRot;
+                    const glm::vec3 off = snap.position - host.gizmo.dragStartEntityPos;
+                    const glm::vec3 nPos = host.gizmo.dragStartEntityPos
+                        + q * (factorVec * (glm::conjugate(q) * off));
                     const glm::vec3 nScale = snap.scale * factorVec;
                     pFTC->position = nPos;
                     pFTC->scale    = nScale;

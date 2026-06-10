@@ -419,6 +419,16 @@ Result<void, ResultCode> Pipeline::RenderToTexture(World& world,
     impl.scene.Clear();
     impl.scene.Collect(world, impl.worldPartition);
 
+    // 契约硬化（Pipeline.h RenderToTexture）：无相机时 RenderOffscreen 只会把
+    // 主 viewportColor 清黑，外部 target 不被任何 pass 写入而停在 Undefined 布局，
+    // 却仍返回 Ok——调用方拿到一张布局未定义的纹理（采样 UB）。当前 in-tree 唯一
+    // 调用方（缩略图）world 必带相机故潜伏，但作为公共 API 须给最后防线：无相机
+    // 直接 InvalidArgument，不产出半成品 target。
+    if (!impl.scene.HasCamera())
+    {
+        return ResultCode::InvalidArgument;
+    }
+
     // ---- 临时把活动 frame targets swap 成 scratch + 隔离 post chain ----
     // RAII：构造时 swap-in，析构时 swap-out，保证任何早退/异常都恢复。
     struct RttScope

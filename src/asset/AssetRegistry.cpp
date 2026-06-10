@@ -192,9 +192,13 @@ void AssetRegistry::Impl::WorkerLoop()
         }
         auto& tab = tableIt->second;
         const std::size_t idx = static_cast<std::size_t>(job.handleValue - 1);
-        if (idx >= tab.slots.size() || !tab.slots[idx].live)
+        // 仅判 live 不够：slot 可能在 IO 期间被 Unload 后**复用**绑到另一 path
+        // （live 又翻回 true）。补 path 校验——slot 当前 path 不再是本 job 的
+        // path 则视为孤儿，释放产物并 drop，避免回写污染他人 slot。
+        if (idx >= tab.slots.size() || !tab.slots[idx].live
+            || tab.slots[idx].path != job.path)
         {
-            // slot 在 IO 期间被 Unload —— 资源孤儿了，释放并 drop。
+            // slot 在 IO 期间被 Unload / 复用 —— 资源孤儿了，释放并 drop。
             if (assetRaw && loaderSnapshot.assetDeleter)
             {
                 loaderSnapshot.assetDeleter(assetRaw);
@@ -414,6 +418,23 @@ ResultCode AssetRegistry::LoadErased(const std::type_info& type,
     lock.lock();
 
     auto& slotAfter = mpImpl->tables[key].slots[static_cast<std::size_t>(slotIndex)];
+
+    // IO 期间释放了 tablesMutex：本 Pending slot 可能被 Unload（idx 进 freeList）
+    // 并被另一次 Load 复用、绑定到**不同 path**（live 又翻回 true）。仅判 live
+    // 不足——必须同时校验 path 仍是 pathKey 且仍 Pending，否则无条件回写会把本次
+    // 加载结果写进别人的 slot（张冠李戴）+ 泄漏。不再属于本次 Load 时，释放刚加载
+    // 出来的孤儿 asset 并以错误返回（本次 Load 已在 IO 期间被 Unload 取消）。
+    if (!slotAfter.live || slotAfter.path != pathKey
+        || slotAfter.status != LoadStatus::Pending)
+    {
+        if (assetRaw && loaderSnapshot.assetDeleter)
+        {
+            loaderSnapshot.assetDeleter(assetRaw);
+        }
+        mpImpl->readyCv.notify_all();
+        return ResultCode::InternalError;
+    }
+
     if (rc != ResultCode::Ok)
     {
         if (assetRaw && loaderSnapshot.assetDeleter)
@@ -734,14 +755,21 @@ bool AssetRegistry::WaitForErased(const std::type_info& type,
     {
         return false;
     }
-    auto& slot = table.slots[idx];
-    if (slot.status != LoadStatus::Pending)
+    // 不能持久化 `table.slots[idx]` 的引用跨 readyCv.wait：wait 期间释放
+    // tablesMutex，并发 Load/Insert 的 slots.emplace_back 可能让 vector
+    // 扩容重分配，使该引用悬垂 → predicate / 返回语句读 slot.status 即 UAF。
+    // slots 只增不缩（Unload 走 freeList 标记，不 erase），故 idx 恒有效——
+    // predicate 与返回每次重索引 table.slots[idx] 取当前有效地址。
+    // （table 是 map mapped value 的引用，对 map/unordered_map 的 insert 都
+    // 稳定，可安全保留。）
+    if (table.slots[idx].status != LoadStatus::Pending)
     {
         return true;  // 已经 Ready / Failed
     }
 
     auto pred = [&]() {
-        return slot.status != LoadStatus::Pending || mpImpl->shutdown.load();
+        return table.slots[idx].status != LoadStatus::Pending
+               || mpImpl->shutdown.load();
     };
 
     if (timeoutMs <= 0)
@@ -759,8 +787,8 @@ bool AssetRegistry::WaitForErased(const std::type_info& type,
         }
     }
     // shutdown 触发的也算"不再 Pending"；调用方拿到 false 时是从
-    // IsLoaded 判定 Ready/Failed。
-    return slot.status != LoadStatus::Pending;
+    // IsLoaded 判定 Ready/Failed。重索引（理由同上，不持悬垂引用）。
+    return table.slots[idx].status != LoadStatus::Pending;
 }
 
 }  // namespace Orange::Engine::Asset

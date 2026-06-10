@@ -264,16 +264,23 @@ void AnimationStateMachine::Tick(float dt)
         mpImpl->currentElapsed,
         &mpImpl->parameters,
     };
-    for (const auto& t : mpImpl->transitions)
+    // index 迭代 + 拷出本迭代字段：transition 的 condition 是用户回调，若回调
+    // 再入 AddTransition 会让 transitions 扩容重分配，使持有的元素引用悬垂——
+    // 之后读 t.to（EnterState 参数）或执行期访问 std::function 内部状态即 UAF。
+    // 拷 toState（迭代后跳转用）与 condition（执行期 vector 可能 realloc 移动
+    // 该 std::function 自身）到局部，与容器解耦后再求值。
+    for (std::size_t i = 0; i < mpImpl->transitions.size(); ++i)
     {
-        if (t.from != mpImpl->currentStateName)
+        if (mpImpl->transitions[i].from != mpImpl->currentStateName)
         {
             continue;
         }
-        if (t.condition(ctx))
+        const std::string toState   = mpImpl->transitions[i].to;
+        const auto        condition = mpImpl->transitions[i].condition;
+        if (condition && condition(ctx))
         {
             mpImpl->ExitCurrentState();
-            mpImpl->EnterState(t.to);
+            mpImpl->EnterState(toState);
             mpImpl->ResetAllTriggers();
             return;
         }

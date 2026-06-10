@@ -195,8 +195,15 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect)
 {
     using ::Orange::Engine::Render::Camera;
     const float safeAspect = (aspect > 0.0f) ? aspect : 1.0f;
+    // near/far 每帧由当前轨道半径（= 相机到 pivot 距离）推导，而非用 Frame 时
+    // 写死的持久值：否则 Frame 大物体后 zNear 被永久推大，再 zoom 看近处小物体
+    // 会被近裁直到再次 Frame（gap）。随 radius 推导后，zoom 改 radius 时近 / 远
+    // 面自动跟随；关注的几何总在 distance≈radius 处，恒落在 [radius*0.01,
+    // radius*50+100] 内不被裁，ratio≈5000 深度精度对 24-bit depth 充足。
+    const float nearPlane = std::max(0.01f, ec.radius * 0.01f);
+    const float farPlane  = ec.radius * 50.0f + 100.0f;
     Camera cam = Camera::Perspective(glm::radians(ec.fovYDegrees),
-                                     safeAspect, ec.zNear, ec.zFar);
+                                     safeAspect, nearPlane, farPlane);
     const float cosElev = std::cos(ec.elevation);
     const glm::vec3 offset(
         ec.radius * cosElev * std::sin(ec.azimuth),
@@ -305,10 +312,9 @@ bool FrameEntitiesCamera(EditorHost&                                host,
         const float halfFov = glm::radians(ec.fovYDegrees) * 0.5f;
         const float sinHalf = std::max(0.01f, std::sin(halfFov));
         ec.radius = (sphereR / sinHalf) * 1.25f;
-        // 按物体尺度重算近 / 远裁剪面，跨 0.04 单位（Avocado）~ 165 单位
-        // （Duck）都能完整 bracket，不被 zNear/zFar 裁。
-        ec.zNear = std::max(0.001f, sphereR * 0.02f);
-        ec.zFar  = ec.radius + sphereR * 4.0f + 1.0f;
+        // near/far 不再在此持久化——改由 BuildEditorCamera 每帧按 radius 推导
+        // （见该函数注释），故只需把 radius 调到能完整看到包围球的距离，跨
+        // 0.04 单位（Avocado）~ 165 单位（Duck）的 near/far bracket 自动跟随。
     }
     else
     {
