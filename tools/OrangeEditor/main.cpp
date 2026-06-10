@@ -153,9 +153,15 @@ constexpr float kDesignFontSizePx = 18.0f;
 // 看到 build 产物自创建的 assets/ 子集 meshes + materials/builtin，而看不
 // 到仓库根真实 assets/ 里的 scenes / configs）。
 //
-// 标记选用 "assets/scenes/demo.scene.json" 而非 "assets/" 本身 —— 后者
-// 在 build/bin/Debug 下也会存在（DemoWorld lazy-bake fallback 写出来），
-// 无法区分仓库根与 build 产物。.scene.json 只在仓库根有。
+// 仓库根标记：**同时**存在 `assets/` 与 `src/` 两个目录。
+//   * 不能只看 `assets/` —— build/bin/Debug 下 DemoWorld lazy-bake 会写出
+//     assets/ 子集（materials/builtin + meshes），无法区分仓库根与 build 产物。
+//   * 早先用单个文件 `assets/scenes/demo.scene.json` 作标记 —— **脆弱**：用户按
+//     dogfood 指示把该场景改名 / 挪开后，标记消失 → 不 chdir → cwd 停在
+//     build/bin/Debug → 相对路径字体（codicon.ttf）加载失败 → ImGui 在初始化期
+//     （无 frame）走 ErrorLog→Begin 触发 IM_ASSERT(WithinFrameScope) 崩溃。
+//   * `src/` 目录只在仓库根、绝不在 build 产物里，且与任何用户可改名的场景文件
+//     无关 —— `assets/ && src/` 同时存在 = 仓库根的稳健签名。
 void ChdirToRepoRoot()
 {
     namespace fs = std::filesystem;
@@ -168,7 +174,7 @@ void ChdirToRepoRoot()
     for (int i = 0; i < kMaxWalkUp; ++i)
     {
         std::error_code ec;
-        if (fs::exists(dir / "assets" / "scenes" / "demo.scene.json", ec))
+        if (fs::is_directory(dir / "assets", ec) && fs::is_directory(dir / "src", ec))
         {
             fs::current_path(dir, ec);
             return;
@@ -541,13 +547,25 @@ int main(int argc, char** argv)
     }
     {
         const ImWchar* cjkRanges = sCustomGlyphRanges.Data;
-        ImFont* fontMain = io.Fonts->AddFontFromFileTTF(
-            "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges);
+        // **必须先查文件存在再 AddFontFromFileTTF**：ImGui 新版在字体文件缺失时
+        // 不返回 null，而是走内部 ErrorLog → BeginErrorTooltip → Begin；此处尚在
+        // 初始化期（未 NewFrame）→ 触发 IM_ASSERT(WithinFrameScope) 直接崩溃，
+        // 下面的 `== nullptr` fallback 链根本到不了。先 exists 检查把缺失降级为
+        // 返回 null，让 msyh → segoeui → ImGui 默认字体的兜底链正常工作。
+        std::error_code fontEc;
+        ImFont* fontMain =
+            std::filesystem::exists("C:\\Windows\\Fonts\\msyh.ttc", fontEc)
+                ? io.Fonts->AddFontFromFileTTF(
+                      "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges)
+                : nullptr;
         if (fontMain == nullptr) {
             ORANGE_LOG_WARN("[OrangeEditor] msyh.ttc 加载失败，回退 segoeui.ttf "
                             "(ASCII only, 中文会显示成 '?')");
-            fontMain = io.Fonts->AddFontFromFileTTF(
-                "C:\\Windows\\Fonts\\segoeui.ttf", fontPx);
+            fontMain =
+                std::filesystem::exists("C:\\Windows\\Fonts\\segoeui.ttf", fontEc)
+                    ? io.Fonts->AddFontFromFileTTF(
+                          "C:\\Windows\\Fonts\\segoeui.ttf", fontPx)
+                    : nullptr;
         }
         if (fontMain == nullptr) {
             ImFontConfig fontCfg;
@@ -598,12 +616,22 @@ int main(int argc, char** argv)
         codiconsCfg.PixelSnapH       = true;
         codiconsCfg.GlyphMinAdvanceX = fontPx;
         codiconsCfg.GlyphOffset.y    = std::floor(fontPx * 0.15f);
-        ImFont* fontCodicons = io.Fonts->AddFontFromFileTTF(
-            "tools/OrangeEditor/theme/codicons/codicon.ttf",
-            fontPx, &codiconsCfg, kCodiconsRange);
-        if (fontCodicons == nullptr) {
-            ORANGE_LOG_WARN("[OrangeEditor] codicon.ttf 加载失败 —— Codicons icon "
-                            "将显示为 '?' 占位（不致命）");
+        // 同主字体：先查文件存在（codicon.ttf 是**相对路径**，cwd 非仓库根时
+        // 必缺失——正是 ChdirToRepoRoot 标记被改名场景破坏后的崩溃现场）。缺失时
+        // 跳过合并，icon 显示为 '?'（不致命），绝不进 ImGui 缺失字体的 assert 路径。
+        const char*     kCodiconPath = "tools/OrangeEditor/theme/codicons/codicon.ttf";
+        std::error_code codiconEc;
+        if (std::filesystem::exists(kCodiconPath, codiconEc)) {
+            ImFont* fontCodicons = io.Fonts->AddFontFromFileTTF(
+                kCodiconPath, fontPx, &codiconsCfg, kCodiconsRange);
+            if (fontCodicons == nullptr) {
+                ORANGE_LOG_WARN("[OrangeEditor] codicon.ttf 加载失败 —— Codicons icon "
+                                "将显示为 '?' 占位（不致命）");
+            }
+        } else {
+            ORANGE_LOG_WARN("[OrangeEditor] codicon.ttf 未找到（{}）—— 跳过 Codicons "
+                            "合并，icon 显示为 '?'（不致命；常见原因 cwd 非仓库根）",
+                            kCodiconPath);
         }
     }
 
