@@ -48,6 +48,7 @@ enum class TransformTarget
     PositionY,     // 标量 → position.y
     PositionZ,     // 标量 → position.z
     RotationEuler, // Vec3（角度制 XYZ）→ rotation（合成单位四元数）
+    RotationQuat,  // Quat（value.xyzw）→ rotation（直接采样，最短弧 slerp，避欧拉 gimbal）
     Scale,         // Vec3 全量 → scale
     ScaleX,        // 标量 → scale.x
     ScaleY,        // 标量 → scale.y
@@ -58,6 +59,7 @@ enum class TransformTarget
 // 解析 track.targetName → TransformTarget。约定名（大小写敏感）：
 //   "position" / "position.x" / "position.y" / "position.z"
 //   "rotation"（等价 "rotation.euler"，Vec3 角度制）
+//   "rotation.quat"（Quat track，value.xyzw 直接采样为四元数，避欧拉 gimbal——DCC 导入用）
 //   "scale" / "scale.x" / "scale.y" / "scale.z" / "scale.uniform"
 // 其它 → Unknown。标量字段读采样 vec4 的 .x 维（Float track 的值落在 .x）。
 ORANGE_ENGINE_API TransformTarget ParseTransformTarget(std::string_view targetName) noexcept;

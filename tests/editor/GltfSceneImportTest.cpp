@@ -14,6 +14,8 @@
 
 #include "GltfSceneImporter.h"
 
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
@@ -31,7 +33,9 @@
 #include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>   // glm::quat / glm::slerp（动画 quat 轨道断言）
 #include <glm/mat4x4.hpp>
+#include <glm/trigonometric.hpp>    // glm::radians
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
@@ -370,6 +374,71 @@ void WriteCameraSceneGltf(const std::string& path)
         "    {\"name\": \"Ortho\", \"type\": \"orthographic\", \"orthographic\": "
         "{\"xmag\": 4.0, \"ymag\": 3.0, \"znear\": 0.1, \"zfar\": 50.0}}\n"
         "  ]\n"
+        "}\n";
+}
+
+// 第九个 fixture：**node TRS animation**（DCC→clip 桥）—— 单 node（带 mesh）被一条
+// translation channel + 一条 rotation channel 驱动（2 帧，LINEAR）。验 importer 把
+// cgltf animation 解析成 AnimationClip 挂 AnimatorComponent(ClipAnimator)：
+//   * translation → "position" Vec3 轨道：(0,0,0) @t0 → (2,0,0) @t1
+//   * rotation    → "rotation.quat" Quat 轨道：identity @t0 → 90°Y @t1（最短弧 slerp）
+//   * duration = 1.0；Seek(0.5) → position (1,0,0) + rotation 45°Y
+// buffer 布局（base64，4-byte 对齐，由 tests 内联生成脚本算出）：
+//   acc0 pos VEC3×4 [0,48) / acc1 idx u16×6 [48,60) / acc2 time f32×2 [60,68) /
+//   acc3 trans VEC3×2 [68,92) / acc4 rot VEC4×2 [92,124)。
+void WriteAnimatedNodeGltf(const std::string& path)
+{
+    static const char* kBufferB64 =
+        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+        "AAABAAIAAAACAAMAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAA"
+        "AAAAAAAAAAAAAIA/AAAAAPMENT8AAAAA8wQ1Pw==";
+
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    assert(ofs.is_open() && "写动画 .gltf fixture 应成功");
+    ofs <<
+        "{\n"
+        "  \"asset\": {\"version\": \"2.0\"},\n"
+        "  \"scene\": 0,\n"
+        "  \"scenes\": [{\"nodes\": [0]}],\n"
+        "  \"nodes\": [\n"
+        "    {\"name\": \"Spinner\", \"mesh\": 0}\n"
+        "  ],\n"
+        "  \"meshes\": [\n"
+        "    {\"name\": \"Quad\", \"primitives\": [{\"attributes\": "
+        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+        "  ],\n"
+        "  \"animations\": [\n"
+        "    {\"name\": \"Spin\",\n"
+        "     \"samplers\": [\n"
+        "       {\"input\": 2, \"output\": 3, \"interpolation\": \"LINEAR\"},\n"
+        "       {\"input\": 2, \"output\": 4, \"interpolation\": \"LINEAR\"}\n"
+        "     ],\n"
+        "     \"channels\": [\n"
+        "       {\"sampler\": 0, \"target\": {\"node\": 0, \"path\": \"translation\"}},\n"
+        "       {\"sampler\": 1, \"target\": {\"node\": 0, \"path\": \"rotation\"}}\n"
+        "     ]}\n"
+        "  ],\n"
+        "  \"accessors\": [\n"
+        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+        "\"type\": \"SCALAR\"},\n"
+        "    {\"bufferView\": 2, \"componentType\": 5126, \"count\": 2, "
+        "\"type\": \"SCALAR\", \"min\": [0.0], \"max\": [1.0]},\n"
+        "    {\"bufferView\": 3, \"componentType\": 5126, \"count\": 2, "
+        "\"type\": \"VEC3\"},\n"
+        "    {\"bufferView\": 4, \"componentType\": 5126, \"count\": 2, "
+        "\"type\": \"VEC4\"}\n"
+        "  ],\n"
+        "  \"bufferViews\": [\n"
+        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 60, \"byteLength\": 8},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 68, \"byteLength\": 24},\n"
+        "    {\"buffer\": 0, \"byteOffset\": 92, \"byteLength\": 32}\n"
+        "  ],\n"
+        "  \"buffers\": [{\"byteLength\": 124, \"uri\": "
+        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
         "}\n";
 }
 
@@ -987,6 +1056,103 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] glTF cameras（G3）：perspective(全参+默认 aspect/far) + "
                      "orthographic 投影烘焙 + Transform 位姿 + round-trip\n");
+    }
+
+    // ===== 第九组：node TRS animation（DCC→clip 桥）—— translation/rotation channel
+    //       → AnimatorComponent(ClipAnimator)，quat 轨道最短弧 slerp + Save→Load 仍可播 =====
+    {
+        namespace AnimNS = ::Orange::Engine::Animation;
+
+        const std::string aPath = (srcDir / "animated_node.gltf").generic_string();
+        WriteAnimatedNodeGltf(aPath);
+
+        auto reg = MakeImportRegistry();
+        const ImportNS::ImportResult ra =
+            ImportNS::RunGltfSceneImportToRegistry(aPath, *reg);
+        assert(ra.status == ImportNS::ImportStatus::Success && "动画场景导入应 Success");
+        // 一个 node 被 translation + rotation 两 channel 驱动 → 合并成 1 个 clip
+        // （per-node 一个 ClipAnimator）→ animations=1。
+        assert(ra.message.find("animations=1") != std::string::npos &&
+               "result message 应含 animations=1（被驱动 node 挂 1 个 ClipAnimator）");
+        std::fprintf(stdout, "  [PASS] 导入产出动画 clip：%s\n", ra.message.c_str());
+
+        // Save→Load round-trip：Scene::Load 重建 ClipAnimator（消费内联 clipJson）+
+        // SetTarget 到本 entity Transform。取出 ClipAnimator，Seek 后断言插值数值。
+        World w;
+        SceneNS::LoadOptions opts;
+        opts.assetRegistry = reg.get();
+        auto lr = SceneNS::Load(ra.destPath, w, opts);
+        assert(lr.IsOk() && "动画场景应能 Load（AnimatorComponent/clipJson round-trip）");
+
+        const Entity spinner = FindByName(w, "Spinner");
+        assert(w.IsValid(spinner) && "Spinner 实体应存在");
+        const auto* ac = w.GetComponent<AnimNS::AnimatorComponent>(spinner);
+        assert(ac != nullptr && ac->animator != nullptr &&
+               "Spinner 应有 AnimatorComponent（被动画驱动）");
+        assert(ac->animator->BackendName() == "clip" &&
+               "应是 ClipAnimator backend（clip）");
+        auto* clipAnim = static_cast<AnimNS::ClipAnimator*>(ac->animator.get());
+
+        // duration = 末关键帧时间 = 1.0（ParseAnimations RecomputeClipDuration）。
+        assert(std::fabs(clipAnim->Duration() - 1.0f) < 1e-4f &&
+               "clip duration 应 = 1.0（末关键帧时间）");
+
+        // clip 应有 2 条轨道：position(Vec3) + rotation.quat(Quat)。
+        const AnimNS::AnimationClip& clip = clipAnim->Clip();
+        assert(clip.tracks.size() == 2 && "应有 position + rotation.quat 两条轨道");
+        const AnimNS::AnimationTrack* posTr = AnimNS::FindTrack(clip, "position");
+        const AnimNS::AnimationTrack* rotTr = AnimNS::FindTrack(clip, "rotation.quat");
+        assert(posTr != nullptr && posTr->valueType == AnimNS::TrackValueType::Vec3 &&
+               "position 轨道应为 Vec3");
+        assert(rotTr != nullptr && rotTr->valueType == AnimNS::TrackValueType::Quat &&
+               "rotation 轨道应为 Quat（quat 轨道，避欧拉 gimbal）");
+
+        // SetTarget 必须由 Scene::Load 接到本 entity Transform——验 Seek 真写 Transform。
+        const auto* tc = w.GetComponent<SceneNS::TransformComponent>(spinner);
+        assert(tc != nullptr && "Spinner 应有 Transform（ClipAnimator 写目标）");
+
+        // t=0：position (0,0,0) + rotation identity。
+        clipAnim->Seek(0.0f);
+        assert(std::fabs(tc->position.x - 0.0f) < 1e-4f &&
+               std::fabs(tc->position.y - 0.0f) < 1e-4f &&
+               std::fabs(tc->position.z - 0.0f) < 1e-4f &&
+               "t=0：position 应为 (0,0,0)");
+        const glm::quat ident = glm::quat(1, 0, 0, 0);
+        assert(std::fabs(tc->rotation.x - ident.x) < 1e-3f &&
+               std::fabs(tc->rotation.y - ident.y) < 1e-3f &&
+               std::fabs(tc->rotation.z - ident.z) < 1e-3f &&
+               std::fabs(std::fabs(tc->rotation.w) - 1.0f) < 1e-3f &&
+               "t=0：rotation 应为 identity");
+
+        // t=0.5：position 线性中点 (1,0,0)；rotation 最短弧 slerp 中点 = 45°Y。
+        clipAnim->Seek(0.5f);
+        assert(std::fabs(tc->position.x - 1.0f) < 1e-4f &&
+               std::fabs(tc->position.y - 0.0f) < 1e-4f &&
+               std::fabs(tc->position.z - 0.0f) < 1e-4f &&
+               "t=0.5：position 线性中点应为 (1,0,0)");
+        // 期望 = slerp(identity, 90°Y, 0.5) = 45°Y。把 +Z 转到约 (0.707,0,0.707)。
+        const glm::quat expect45 =
+            glm::slerp(glm::quat(1, 0, 0, 0),
+                       glm::quat(glm::radians(glm::vec3(0, 90, 0))), 0.5f);
+        // quat 与 -quat 表示同一旋转：用 |dot| 近 1 判定（避符号歧义）。
+        const float qdot = std::fabs(glm::dot(tc->rotation, expect45));
+        assert(qdot > 1.0f - 1e-3f &&
+               "t=0.5：rotation 最短弧 slerp 中点应 = 45°Y（quat 轨道，非逐分量 mix）");
+        const glm::vec3 dir = tc->rotation * glm::vec3(0, 0, 1);
+        assert(std::fabs(dir.x - 0.7071f) < 2e-3f && std::fabs(dir.z - 0.7071f) < 2e-3f &&
+               "45°Y 把 +Z 转到约 (0.707,0,0.707)（quat 插值朝向正确）");
+
+        // t=1：position 终点 (2,0,0) + rotation 90°Y。
+        clipAnim->Seek(1.0f);
+        assert(std::fabs(tc->position.x - 2.0f) < 1e-4f &&
+               "t=1：position 终点应为 (2,0,0)");
+        const glm::vec3 dir1 = tc->rotation * glm::vec3(0, 0, 1);
+        assert(std::fabs(dir1.x - 1.0f) < 2e-3f && std::fabs(dir1.z - 0.0f) < 2e-3f &&
+               "t=1：90°Y 把 +Z 转到约 (1,0,0)");
+
+        std::fprintf(stdout,
+                     "  [PASS] node TRS animation：position Vec3 + rotation.quat Quat 轨道 + "
+                     "duration 1.0 + Seek 插值（含 quat 最短弧中点 45°Y）+ Save→Load 可播\n");
     }
 
     fs::current_path(fs::temp_directory_path(), ec);

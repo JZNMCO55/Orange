@@ -172,6 +172,7 @@ std::string_view ToString(TrackValueType type) noexcept
         case TrackValueType::Vec2:  return "Vec2";
         case TrackValueType::Vec3:  return "Vec3";
         case TrackValueType::Vec4:  return "Vec4";
+        case TrackValueType::Quat:  return "Quat";
     }
     return "Float";
 }
@@ -193,6 +194,7 @@ bool TrackValueTypeFromString(std::string_view text, TrackValueType& out) noexce
     if (text == "Vec2")  { out = TrackValueType::Vec2;  return true; }
     if (text == "Vec3")  { out = TrackValueType::Vec3;  return true; }
     if (text == "Vec4")  { out = TrackValueType::Vec4;  return true; }
+    if (text == "Quat")  { out = TrackValueType::Quat;  return true; }
     return false;
 }
 

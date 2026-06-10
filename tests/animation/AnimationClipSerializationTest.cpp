@@ -206,9 +206,61 @@ int main()
             R"({"schemaVersion":{"namespace":"animation/Clip","major":1,"minor":0},)"
             R"("name":"legacy","duration":1.0,"loop":false,"tracks":[]})";
         auto parsed = Anim::AnimationClipFromJson(oldFile);
-        assert(parsed.IsOk() && "minor 0 文件应被 minor 1 reader 接受");
+        assert(parsed.IsOk() && "minor 0 文件应被 minor 2 reader 接受");
         assert(parsed.Value().events.empty() && "无 events 字段 → 空");
         std::fprintf(stdout, "  [PASS] 旧 minor 0 文件向后兼容（events 空）\n");
+    }
+
+    // ===== 11. Quat 轨道 round-trip（schema minor 2）=====
+    // DCC（glTF）node rotation 走 quat 轨道（value.xyzw 四元数），避欧拉 gimbal。
+    {
+        assert(Anim::ToString(TrackValueType::Quat) == "Quat");
+        TrackValueType vt = TrackValueType::Float;
+        assert(Anim::TrackValueTypeFromString("Quat", vt) && vt == TrackValueType::Quat);
+
+        Anim::AnimationClip clip;
+        clip.name     = "spin_quat";
+        clip.duration = 1.0f;
+        Anim::AnimationTrack rot;
+        rot.targetName = "rotation.quat";
+        rot.valueType  = TrackValueType::Quat;
+        // identity (0,0,0,1) → 90°Y ≈ (0, 0.7071, 0, 0.7071)，按 (x,y,z,w) 存。
+        rot.keys.push_back(MakeKey(0.0f, glm::vec4(0, 0, 0, 1), InterpMode::Linear));
+        rot.keys.push_back(MakeKey(1.0f, glm::vec4(0.0f, 0.70710678f, 0.0f, 0.70710678f),
+                                   InterpMode::Linear));
+        clip.tracks.push_back(rot);
+
+        auto parsed = Anim::AnimationClipFromJson(Anim::AnimationClipToJson(clip));
+        assert(parsed.IsOk() && "Quat 轨道 clip 应 round-trip");
+        const auto& got = parsed.Value();
+        assert(got.tracks.size() == 1);
+        assert(got.tracks[0].targetName == "rotation.quat");
+        assert(got.tracks[0].valueType == TrackValueType::Quat &&
+               "valueType 应还原为 Quat（schema minor 2 新增）");
+        assert(got.tracks[0].keys.size() == 2);
+        assert(Near(got.tracks[0].keys[1].value.x, 0.0f) &&
+               Near(got.tracks[0].keys[1].value.y, 0.70710678f) &&
+               Near(got.tracks[0].keys[1].value.z, 0.0f) &&
+               Near(got.tracks[0].keys[1].value.w, 0.70710678f) &&
+               "quat value.xyzw 应原样还原");
+        std::fprintf(stdout, "  [PASS] Quat 轨道 round-trip（schema minor 2）\n");
+    }
+
+    // ===== 12. 旧 minor 1 文件（无 Quat 轨道）→ minor 2 reader 向后兼容读 =====
+    {
+        const char* oldFile =
+            R"({"schemaVersion":{"namespace":"animation/Clip","major":1,"minor":1},)"
+            R"("name":"legacy_v1","duration":2.0,"loop":true,"tracks":[)"
+            R"({"targetName":"position","valueType":"Vec3","keys":[)"
+            R"({"time":0.0,"value":[1,2,3,0],"interp":"Linear","inTangent":[0,0],"outTangent":[0,0]}]}],)"
+            R"("events":[]})";
+        auto parsed = Anim::AnimationClipFromJson(oldFile);
+        assert(parsed.IsOk() && "minor 1 文件应被 minor 2 reader 接受（向后兼容）");
+        const auto& c = parsed.Value();
+        assert(c.name == "legacy_v1" && c.tracks.size() == 1 &&
+               c.tracks[0].valueType == TrackValueType::Vec3 &&
+               "旧 minor 1 文件（无 Quat 轨道）应正常读出 Vec3 轨道");
+        std::fprintf(stdout, "  [PASS] 旧 minor 1 文件向后兼容（minor 2 reader 读 Vec3 轨道）\n");
     }
 
     std::fprintf(stdout, "AnimationClipSerializationTest: all passed\n");

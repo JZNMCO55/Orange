@@ -18,6 +18,7 @@ TransformTarget ParseTransformTarget(std::string_view targetName) noexcept
     if (targetName == "position.y") { return TransformTarget::PositionY; }
     if (targetName == "position.z") { return TransformTarget::PositionZ; }
     if (targetName == "rotation" || targetName == "rotation.euler") { return TransformTarget::RotationEuler; }
+    if (targetName == "rotation.quat") { return TransformTarget::RotationQuat; }
     if (targetName == "scale") { return TransformTarget::Scale; }
     if (targetName == "scale.x") { return TransformTarget::ScaleX; }
     if (targetName == "scale.y") { return TransformTarget::ScaleY; }
@@ -249,6 +250,11 @@ void ClipAnimator::SampleClipPose(const AnimationClip& clip, float t,
             case TransformTarget::RotationEuler:
                 // Vec3 角度制 → 弧度 → 合成四元数（glm 按 vec3 构造的固定欧拉序）。
                 out.rotation = glm::quat(glm::radians(glm::vec3(v)));
+                break;
+            case TransformTarget::RotationQuat:
+                // Quat track：SampleTrack 已在四元数空间走最短弧 slerp + normalize，
+                // 返回 vec4(x,y,z,w)；直接构造 glm::quat（构造取 (w,x,y,z)）写入。
+                out.rotation = glm::quat(v.w, v.x, v.y, v.z);
                 break;
             case TransformTarget::Scale:         out.scale = glm::vec3(v); break;
             case TransformTarget::ScaleX:        out.scale.x = v.x; break;

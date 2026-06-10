@@ -6,6 +6,9 @@
 #include "MetaSidecar.h"
 #include "../MaterialFileIO.h"  // WriteMaterialFile（写 .material sidecar）
 
+#include <orange/engine/animation/AnimationClip.h>
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/ClipAnimator.h>
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
@@ -51,6 +54,13 @@ namespace
 {
 using ::Orange::Engine::Entity;
 using ::Orange::Engine::World;
+using ::Orange::Engine::Animation::AnimationClip;
+using ::Orange::Engine::Animation::AnimationTrack;
+using ::Orange::Engine::Animation::AnimatorComponent;
+using ::Orange::Engine::Animation::ClipAnimator;
+using ::Orange::Engine::Animation::InterpMode;
+using ::Orange::Engine::Animation::Keyframe;
+using ::Orange::Engine::Animation::TrackValueType;
 using ::Orange::Engine::Asset::AssetRegistry;
 using ::Orange::Engine::Asset::MeshAsset;
 using ::Orange::Engine::Asset::MeshLoader;
@@ -520,6 +530,156 @@ void AttachMeshMaterials(
     world.AddComponent<SubMeshMaterialsComponent>(e, std::move(smc));
 }
 
+// glTF sampler interpolation → 引擎 InterpMode。CUBICSPLINE 降级 Linear（引擎曲线
+// 模型用 keyframe 切线表达 Bezier 时序缓动，与 glTF CUBICSPLINE 的"每帧带 in/out 切线
+// 向量"语义不同——MVP 不做 cubic-spline 重建，仅取关键帧值做线性插值）。降级在调用处
+// 发 WARN（这里纯映射，不发日志）。
+InterpMode GltfInterpToInterpMode(cgltf_interpolation_type interp)
+{
+    switch (interp)
+    {
+        case cgltf_interpolation_type_step:   return InterpMode::Step;
+        case cgltf_interpolation_type_linear: return InterpMode::Linear;
+        case cgltf_interpolation_type_cubic_spline:
+            return InterpMode::Linear;  // 降级（见上）
+        default:                              return InterpMode::Linear;
+    }
+}
+
+// 从一条 cgltf animation channel 抽出关键帧，append 进给定 track。sampler.input 是
+// 关键帧时间（标量 accessor），sampler.output 是值 accessor（translation/scale =
+// VEC3、rotation = VEC4 四元数）。compsPerKey = 每帧取几个分量（3 或 4）。
+// CUBICSPLINE 的 output 每帧有 3 组（in-tangent / value / out-tangent），降级时只取
+// 中间的 value（stride 3、偏移 1）。
+//
+// cgltf 生命周期：本函数读 accessor 字节，必须在 cgltf_free 之前调用。
+void AppendChannelKeys(const cgltf_animation_channel& channel, AnimationTrack& track,
+                       int compsPerKey)
+{
+    const cgltf_animation_sampler* sampler = channel.sampler;
+    if (sampler == nullptr || sampler->input == nullptr || sampler->output == nullptr)
+    {
+        return;
+    }
+    const cgltf_accessor* timeAcc = sampler->input;
+    const cgltf_accessor* valAcc  = sampler->output;
+    const cgltf_size       keyCount = timeAcc->count;
+    if (keyCount == 0) { return; }
+
+    const InterpMode interp = GltfInterpToInterpMode(sampler->interpolation);
+    const bool       cubic  = (sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+    // CUBICSPLINE：output 每帧 3 组（tangent_in / value / tangent_out）→ stride 3、取
+    // 中间组。非 cubic：每帧 1 组。
+    const cgltf_size valuesPerKey = cubic ? 3 : 1;
+    const cgltf_size valueSlot    = cubic ? 1 : 0;  // 取 value 组（cubic 跳过 in-tangent）
+
+    track.keys.reserve(track.keys.size() + keyCount);
+    for (cgltf_size k = 0; k < keyCount; ++k)
+    {
+        float t = 0.0f;
+        cgltf_accessor_read_float(timeAcc, k, &t, 1);
+
+        Keyframe key;
+        key.time   = t;
+        key.interp = interp;
+        // value accessor 的元素下标：cubic 时每帧跨 3 组，取中间 value 组。
+        const cgltf_size valIndex = k * valuesPerKey + valueSlot;
+        float buf[4] = {0, 0, 0, 0};
+        cgltf_accessor_read_float(valAcc, valIndex, buf,
+                                  static_cast<cgltf_size>(compsPerKey));
+        key.value = glm::vec4(buf[0], buf[1], buf[2], buf[3]);
+        track.keys.push_back(key);
+    }
+}
+
+// 解析 cgltf_data 里所有 animation，构建"被驱动 node → 合并 AnimationClip"映射。
+// 一个 node 被多条 channel（含跨多个 glTF animation）驱动时，全部 channel 合并进该
+// node 的单个 clip（per-node 一个 ClipAnimator）。targetName 约定：
+//   translation → "position"（Vec3）、scale → "scale"（Vec3）、
+//   rotation    → "rotation.quat"（Quat，最短弧 slerp，避欧拉 gimbal）。
+// weights（morph target）跳过（引擎暂无 morph 通道）。
+//
+// MVP 限制：多个 glTF animation 被合并（不保留 animation 名 / 不分 clip 切换）；
+// 单 animation 的常见 DCC 导出完全正确。坐标系：node TRS 是 local（A1.2 后导入走
+// local），动画 key 同为 node-local TRS，直接进 local track，无需轴桥接（与 mesh
+// node transform 同款；不学灯光的 R-bridging）。
+//
+// cgltf 生命周期：必须在 cgltf_free 之前调用（读 accessor 字节 + node 指针）。
+// 返回的 clip 用裸 node 指针当 key（仅 map 查找，不解引用）。
+std::map<const cgltf_node*, AnimationClip> ParseAnimations(const cgltf_data& data)
+{
+    std::map<const cgltf_node*, AnimationClip> nodeClips;
+    bool warnedCubic = false;
+
+    for (cgltf_size ai = 0; ai < data.animations_count; ++ai)
+    {
+        const cgltf_animation& anim = data.animations[ai];
+        for (cgltf_size ci = 0; ci < anim.channels_count; ++ci)
+        {
+            const cgltf_animation_channel& channel = anim.channels[ci];
+            const cgltf_node*              targetNode = channel.target_node;
+            if (targetNode == nullptr || channel.sampler == nullptr)
+            {
+                continue;
+            }
+            if (channel.target_path == cgltf_animation_path_type_weights ||
+                channel.target_path == cgltf_animation_path_type_invalid)
+            {
+                continue;  // morph weights / 非法 path 跳过
+            }
+
+            if (channel.sampler->interpolation == cgltf_interpolation_type_cubic_spline &&
+                !warnedCubic)
+            {
+                ORANGE_LOG_WARN("GltfSceneImporter: animation 含 CUBICSPLINE 插值，降级为 "
+                                "Linear（仅取关键帧值，不重建样条切线）");
+                warnedCubic = true;
+            }
+
+            AnimationClip& clip = nodeClips[targetNode];  // 按需建该 node 的 clip
+            const char*    targetName = nullptr;
+            TrackValueType vt         = TrackValueType::Vec3;
+            int            comps      = 3;
+            switch (channel.target_path)
+            {
+                case cgltf_animation_path_type_translation:
+                    targetName = "position"; vt = TrackValueType::Vec3; comps = 3; break;
+                case cgltf_animation_path_type_scale:
+                    targetName = "scale"; vt = TrackValueType::Vec3; comps = 3; break;
+                case cgltf_animation_path_type_rotation:
+                    targetName = "rotation.quat"; vt = TrackValueType::Quat; comps = 4; break;
+                default:
+                    continue;  // 已在上面过滤
+            }
+
+            // 同一 node 同一 path 多 channel（异常但 spec 不禁）→ 复用同名 track。
+            ::Orange::Engine::Animation::AnimationTrack* tr = FindTrack(clip, targetName);
+            if (tr == nullptr)
+            {
+                AnimationTrack newTrack;
+                newTrack.targetName = targetName;
+                newTrack.valueType  = vt;
+                clip.tracks.push_back(std::move(newTrack));
+                tr = &clip.tracks.back();
+            }
+            AppendChannelKeys(channel, *tr, comps);
+            ::Orange::Engine::Animation::SortTrackKeys(*tr);  // 维持 SampleTrack 升序不变量
+        }
+    }
+
+    // 每个 clip 命名 + 据关键帧推时长 + 默认 **play-once（loop=false）**。glTF 不定义
+    // loop，loop 是播放策略而非数据——默认不循环（Unity 风格：用户在编辑器按需开 loop）
+    // 更可预测：loop 时 Seek(duration) 会 fmod 回卷到 t0，导入动画到末帧应停在末值而非
+    // 跳回起点。
+    for (auto& [node, clip] : nodeClips)
+    {
+        clip.name = "imported_anim";
+        clip.loop = false;
+        ::Orange::Engine::Animation::RecomputeClipDuration(clip);
+    }
+    return nodeClips;
+}
+
 // 递归把 node 子树建进 World，返回本 node 对应的 Entity。本 node 的 parent /
 // 兄弟链由调用方填（调用方知道兄弟顺序）；本函数负责 firstChild + 各子节点的
 // parent / 兄弟链 + 子树递归。
@@ -532,7 +692,10 @@ Entity ProcessNode(
     World& world, const cgltf_node& node,
     const std::map<const cgltf_mesh*, MeshBuildResult>& meshResults,
     const std::unordered_map<const cgltf_material*, MaterialInstance*>& matInstances,
-    std::size_t& outEntityCount, std::size_t& outLightCount, std::size_t& outCameraCount)
+    const std::map<const cgltf_node*, AnimationClip>& nodeClips,
+    std::vector<std::pair<Entity, ClipAnimator*>>& outAnimTargets,
+    std::size_t& outEntityCount, std::size_t& outLightCount, std::size_t& outCameraCount,
+    std::size_t& outAnimCount)
 {
     Entity e = world.CreateEntity();
     ++outEntityCount;
@@ -588,6 +751,27 @@ Entity ProcessNode(
         }
     }
 
+    // 动画：该 node 被任意 channel 驱动 → 挂 AnimatorComponent(ClipAnimator)。clip 在
+    // ParseAnimations 阶段已据 channel 构建（position/scale Vec3 + rotation.quat Quat）。
+    // 此处只设 target=nullptr 挂上；SetTarget 必须延后到**所有实体建完**——子节点的
+    // CreateEntity 会让 TransformComponent storage realloc，跨建期持 Transform 指针会
+    // 悬空（与 firstChild patch 同款约束）。收集 (entity, ClipAnimator*) 待最后统一接。
+    // ClipAnimator* 取自 unique_ptr 指向的堆对象，跨 AnimatorComponent storage 搬动稳定
+    //（move 只搬 unique_ptr 指针、堆对象不动），故可安全跨建期持有。
+    {
+        auto cit = nodeClips.find(&node);
+        if (cit != nodeClips.end() && !cit->second.tracks.empty())
+        {
+            auto clipAnim = std::make_unique<ClipAnimator>(cit->second);  // clip 拷入
+            ClipAnimator* raw = clipAnim.get();
+            AnimatorComponent ac;
+            ac.animator = std::move(clipAnim);
+            world.AddComponent<AnimatorComponent>(e, std::move(ac));
+            outAnimTargets.emplace_back(e, raw);
+            ++outAnimCount;
+        }
+    }
+
     // 先挂一个全 Invalid 的 Hierarchy（parent / 兄弟由调用方 patch）。
     world.AddComponent<HierarchyComponent>(e, HierarchyComponent{});
 
@@ -598,7 +782,8 @@ Entity ProcessNode(
     {
         childEntities.push_back(
             ProcessNode(world, *node.children[ci], meshResults, matInstances,
-                        outEntityCount, outLightCount, outCameraCount));
+                        nodeClips, outAnimTargets, outEntityCount, outLightCount,
+                        outCameraCount, outAnimCount));
     }
 
     // 子树建完，不再新增实体 —— 现在 patch firstChild + 子节点 parent / 兄弟链。
@@ -1009,20 +1194,38 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         named[matPath] = raw;
     }
 
+    // ---- 解析 node TRS 动画 → per-node AnimationClip（必须在 cgltf_free 之前，读
+    //      sampler accessor 字节 + target node 指针）。被驱动 node 的实体在 ProcessNode
+    //      挂 AnimatorComponent(ClipAnimator)；rotation 走 Quat 轨道（最短弧 slerp，
+    //      避欧拉 gimbal）。
+    const std::map<const cgltf_node*, AnimationClip> nodeClips = ParseAnimations(*data);
+
     // 建 World 镜像 node 树。
     World world;
     std::size_t entityCount = 0;
     std::size_t lightCount  = 0;
     std::size_t cameraCount = 0;
+    std::size_t animCount   = 0;
+    // 被动画驱动实体的 (entity, ClipAnimator*)：建完全部实体后统一 SetTarget——建期
+    // CreateEntity 会 realloc TransformComponent storage，跨建期持 Transform 指针悬空。
+    std::vector<std::pair<Entity, ClipAnimator*>> animTargets;
     for (std::size_t ri = 0; ri < roots.size(); ++ri)
     {
         Entity rootE = ProcessNode(world, *roots[ri], meshResults, matInstances,
-                                   entityCount, lightCount, cameraCount);
+                                   nodeClips, animTargets, entityCount, lightCount,
+                                   cameraCount, animCount);
         // 根：parent 留 Invalid，用 sortIndex 定根间顺序（HierarchyComponent 约定）。
         if (auto* h = world.GetComponent<HierarchyComponent>(rootE))
         {
             h->sortIndex = static_cast<int>(ri);
         }
+    }
+
+    // 全部实体建完（storage 不再增长）→ 把各 ClipAnimator 的 target 接到本 entity 的
+    // TransformComponent（与 Scene::Load 重建路径同款"attach 后 SetTarget"心智）。
+    for (const auto& [animEntity, clipAnim] : animTargets)
+    {
+        clipAnim->SetTarget(world.GetComponent<TransformComponent>(animEntity));
     }
 
     if (entityCount == 0)
@@ -1034,7 +1237,7 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    cgltf_free(data);  // World 已持有几何 handle + sentinel；cgltf 结构不再需要
+    cgltf_free(data);  // World 已持有几何 handle + sentinel + clip 数据；cgltf 结构不再需要
 
     // Scene::Save —— assetRegistry 反查 mesh handle → 相对路径；namedMaterialInstances
     // 反查 materialInstance* → .material 路径写进 scene.json（materialInstanceId /
@@ -1074,10 +1277,11 @@ ImportResult RunGltfSceneImportToRegistry(std::string_view srcPath,
                       " meshes=" + std::to_string(writtenMeshes) +
                       " materials=" + std::to_string(matPaths.size()) +
                       " lights=" + std::to_string(lightCount) +
-                      " cameras=" + std::to_string(cameraCount) + ")";
-    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={} lights={} cameras={})",
+                      " cameras=" + std::to_string(cameraCount) +
+                      " animations=" + std::to_string(animCount) + ")";
+    ORANGE_LOG_INFO("GltfSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={} lights={} cameras={} animations={})",
                     srcPath, scenePath, entityCount, writtenMeshes, matPaths.size(),
-                    lightCount, cameraCount);
+                    lightCount, cameraCount, animCount);
     return result;
 }
 

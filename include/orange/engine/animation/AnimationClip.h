@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 #include <glm/common.hpp>      // glm::clamp / glm::mix
+#include <glm/gtc/quaternion.hpp>  // glm::quat / glm::slerp / glm::dot（Quat track 最短弧）
 #include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
@@ -49,6 +50,7 @@ enum class TrackValueType : std::uint8_t
     Vec2,   // value.xy
     Vec3,   // value.xyz
     Vec4,   // value.xyzw
+    Quat,   // value.xyzw 解释为四元数 (x,y,z,w)；采样走最短弧 slerp/nlerp 而非逐分量 mix
 };
 
 // 单个关键帧。value 按 track 的 valueType 用前 N 维；其余维忽略。
@@ -178,25 +180,31 @@ inline glm::vec4 SampleTrack(const AnimationTrack& track, float t) noexcept
     if (span <= 0.0f) { return k0.value; }  // 退化（重复 time）防除零
     const float u = (t - k0.time) / span;
 
-    switch (k0.interp)
+    // 求插值分数 frac：Step 走 k0（下方提前返回）、Linear 直接 u、Bezier 反解缓动。
+    // 切线作单位方框 (0,0)→(1,1) 内的 2D 控制柄：c1 = k0.outTangent（从 (0,0)
+    // 出发的控制点偏移）、c2 = (1,1) + k1.inTangent（落到 (1,1) 的控制点偏移，
+    // inTangent.x 通常为负）。先按线性时间分数 u 反解 Bezier 参数得 **缓动后的
+    // 值分数**（时间方向 .x 真正参与 → 支持 ease-in/out 时序），再用它在 k0→k1
+    // 值之间插值；多维值共享同一标量缓动分数（CSS 式：一条时序曲线作用整段过渡）。
+    if (k0.interp == InterpMode::Step) { return k0.value; }
+    const float frac = (k0.interp == InterpMode::Bezier)
+                           ? CubicBezierEase(k0.outTangent.x, k0.outTangent.y,
+                                             1.0f + k1.inTangent.x, 1.0f + k1.inTangent.y, u)
+                           : u;  // Linear
+
+    // Quat track：value.xyzw 是四元数，按最短弧 slerp（dot<0 取反保最短弧），不能逐
+    // 分量 mix（会得非单位 / 绕远弧）。从 value 构造 glm::quat 注意内存序——glm 构造
+    // 取 (w,x,y,z)，成员是 .x/.y/.z/.w；约定 value 存 (x,y,z,w)。结果打包回 vec4(xyzw)。
+    if (track.valueType == TrackValueType::Quat)
     {
-        case InterpMode::Step:
-            return k0.value;
-        case InterpMode::Linear:
-            return glm::mix(k0.value, k1.value, u);
-        case InterpMode::Bezier:
-        {
-            // 切线作单位方框 (0,0)→(1,1) 内的 2D 控制柄：c1 = k0.outTangent（从 (0,0)
-            // 出发的控制点偏移）、c2 = (1,1) + k1.inTangent（落到 (1,1) 的控制点偏移，
-            // inTangent.x 通常为负）。先按线性时间分数 u 反解 Bezier 参数得 **缓动后的
-            // 值分数**（时间方向 .x 真正参与 → 支持 ease-in/out 时序），再用它在 k0→k1
-            // 值之间插值；多维值共享同一标量缓动分数（CSS 式：一条时序曲线作用整段过渡）。
-            const float eased = CubicBezierEase(k0.outTangent.x, k0.outTangent.y,
-                                                1.0f + k1.inTangent.x, 1.0f + k1.inTangent.y, u);
-            return glm::mix(k0.value, k1.value, eased);
-        }
+        glm::quat q0(k0.value.w, k0.value.x, k0.value.y, k0.value.z);
+        glm::quat q1(k1.value.w, k1.value.x, k1.value.y, k1.value.z);
+        if (glm::dot(q0, q1) < 0.0f) { q1 = -q1; }  // 取反邻接四元数 → 走最短弧
+        const glm::quat q = glm::normalize(glm::slerp(q0, q1, frac));
+        return glm::vec4(q.x, q.y, q.z, q.w);
     }
-    return k0.value;  // 不可达（switch 全覆盖），守编译器
+
+    return glm::mix(k0.value, k1.value, frac);
 }
 
 // 把 track 关键帧按 time 升序稳定排序——维护 SampleTrack 依赖的升序不变量。

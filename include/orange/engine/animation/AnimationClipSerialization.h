@@ -32,9 +32,13 @@ namespace Orange::Engine::Animation
 // schema 标识（reader 端期望值；major 硬墙、minor 向后兼容）。
 // minor 1（2026-06-02）：新增 events 数组（旧 minor 0 文件无此字段 → 读为空，CanRead
 // 接受 file.minor<=reader.minor）。
+// minor 2（2026-06-11）：新增 TrackValueType::Quat（value.xyzw 解释为四元数，最短弧
+// slerp 采样）——DCC（glTF）node rotation 走 quat 轨道避 gimbal。旧 minor 0/1 文件无
+// Quat 轨道，读路径 graceful（不会出现该 valueType 串）；新写出含 Quat 串的文件被旧
+// minor 1 reader 读时 valueType fail-soft 落 Float（数据仍读出，仅类型语义降级）。
 inline constexpr std::string_view kAnimationClipSchemaNamespace = "animation/Clip";
 inline constexpr std::uint16_t    kAnimationClipSchemaMajor     = 1;
-inline constexpr std::uint16_t    kAnimationClipSchemaMinor     = 1;
+inline constexpr std::uint16_t    kAnimationClipSchemaMinor     = 2;
 
 // enum ↔ 字符串（序列化稳定名；同样供编辑器 combo 标签复用）。
 ORANGE_ENGINE_API std::string_view ToString(TrackValueType type) noexcept;
