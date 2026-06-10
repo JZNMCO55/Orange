@@ -121,6 +121,8 @@ orange_engine_add_test(scene_prefab_test        scene/PrefabTest.cpp)
 orange_engine_add_test(prefab_override_test     scene/PrefabOverrideTest.cpp)
 orange_engine_add_test(prefab_refresh_test      scene/PrefabRefreshTest.cpp)
 orange_engine_add_test(prefab_overridden_paths_test scene/PrefabOverriddenPathsTest.cpp)
+# C1.3 prefab apply/revert 引擎层原语（revert 单 leaf 回模板值 + apply 重建模板 blob guid 映回）
+orange_engine_add_test(prefab_apply_revert_test scene/prefab_apply_revert_test.cpp)
 orange_engine_add_test(scene_transform_system_test scene/TransformSystemTest.cpp)
 # local TRS ↔ world matrix 合成/分解（A1 gizmo 写回路径地基；纯数学 header-only）
 orange_engine_add_test(transform_math_test       scene/TransformMathTest.cpp)

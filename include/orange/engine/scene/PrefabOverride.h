@@ -31,6 +31,7 @@
 // ---------------------------------------------------------------------------
 
 #include <orange/engine/OrangeEngineExport.h>
+#include <orange/engine/core/Result.h>
 #include <orange/engine/scene/Entity.h>
 
 #include <string>
@@ -219,6 +220,68 @@ ORANGE_ENGINE_API bool ClearOverridePath(PrefabInstanceComponent& link,
 // 模板里 guid 未命中。成功 → true。
 ORANGE_ENGINE_API bool RefreshInstanceWithRecordedOverrides(
     World& instWorld, Entity instEntity, const Asset::PrefabAsset& tmpl);
+
+// ---------------------------------------------------------------------------
+// RevertEntityOverridePath —— 把实例某个 field path 回退到模板值（C1.3）。
+//
+// = CS2 三方 merge 机器的"单 leaf 版"：对该 path 用模板**当前值**覆盖实例字段，
+// 其余字段（含同 component 内其它 override）一律不动。语义上是"撤销这一条 override"。
+//
+// 实现复用 CS2 的 merge 机器（BuildMergedComponentJson / WriteBackMergedComponents），
+// 但底与 CS2 相反——以**实例**当前 JSON 为底（保留实例所有字段），仅把 path 这**一个
+// 叶子**用**模板**值覆盖，然后只把该 path 所属 component 写回实例（不碰其余 component）。
+// 这样精确达成"只回退这一条字段、同 component 其它 override 原样保留"，无副作用。
+// 写回后调 ClearOverridePath 清掉该 path 的 override 记录；其余 override 记录不动。
+//
+// 入参风格对偶 RefreshEntityFromTemplate（要 templateWorld/templateEntity +
+// instanceWorld/instanceEntity + path）：
+//   * instWorld/instEntity —— 实例侧（被写回 + 被 ClearOverridePath）。
+//   * tmplWorld/tmplEntity —— 模板侧（path 回退值的来源；通常由调用方经
+//     LoadFromString(tmpl.TemplateBlob()) + FindEntityByGuid(templateEntityGuid) 取得）。
+//   * componentName/fieldPath —— 要回退的那一条 override 字段（OverrideField 两段）。
+//
+// 失败 graceful（均 no-op 返回 false，不崩）：任一 entity 无效 / 实例无
+// PrefabInstanceComponent / 序列化内部错误。成功（含"该 path 原本就没被 override"
+// 也照常用模板值覆盖并尝试 Clear）→ true。
+ORANGE_ENGINE_API bool RevertEntityOverridePath(
+    World& instWorld, Entity instEntity,
+    const World& tmplWorld, Entity tmplEntity,
+    std::string_view componentName, std::string_view fieldPath);
+
+// 便利入口：给定实例实体 + 它的模板 PrefabAsset，经 templateEntityGuid 自动配对
+// 模板实体后回退单条 override path（同 ComputeInstanceOverrides / CS2 的配对逻辑）。
+//
+// 失败 graceful（均 no-op 返回 false，不崩）：instEntity 无效 / 无
+// PrefabInstanceComponent / templateEntityGuid 为空（旧数据） / 模板 blob 载入失败 /
+// 模板里 guid 未命中。成功 → true。
+ORANGE_ENGINE_API bool RevertInstanceOverridePath(
+    World& instWorld, Entity instEntity, const Asset::PrefabAsset& tmpl,
+    std::string_view componentName, std::string_view fieldPath);
+
+// ---------------------------------------------------------------------------
+// ApplyInstanceToTemplate —— 以实例当前态重建模板 blob（C1.3）。
+//
+// "apply" = 把用户在实例上的修改回灌成新模板：序列化实例子树为新的模板 blob 字符串
+// （供调用方写回 .prefab 文件）。关键不变量：**实例实体的 guid 必须映回它锚定的
+// templateEntityGuid 再写出**——否则新模板里的实体 guid 变成实例 guid，其它实例的
+// A2.2 锚定（PrefabInstanceComponent.templateEntityGuid → 模板内 guid）全部断链。
+//
+// 做法（不污染原实例 world）：
+//   ① SaveSubtreeToString(instWorld, {instEntity}) → 实例子树 blob；
+//   ② LoadFromString 到 scratch world（得到含 GuidComponent=实例 guid +
+//      PrefabInstanceComponent.templateEntityGuid 的完整克隆）；
+//   ③ 遍历 scratch 每个实体：把 GuidComponent.guid 改成它的 templateEntityGuid
+//      （锚有效时）+ 移除 PrefabInstanceComponent（模板里不该有链接组件）；
+//   ④ SaveSubtreeToString(scratch, {scratchRoot}) → 新模板 blob 返回。
+//      由于 Hierarchy / 引用走 GuidStringOf 读当前 GuidComponent.guid，③ 改 guid
+//      后 ④ 写出的引用自动指向模板侧稳定 guid，无需手工重写引用。
+//
+// 同时清空本实例的 overriddenPaths（apply 后实例 == 模板，无 override 残留）。
+//
+// 失败 graceful（返回空 optional / 空字符串语义见 Result）：instEntity 无效 /
+// 子树序列化失败 / 重载入 scratch 失败 / scratch 内找不到根。成功 → 返回新模板 blob。
+ORANGE_ENGINE_API Result<std::string, ResultCode> ApplyInstanceToTemplate(
+    World& instWorld, Entity instEntity);
 
 }  // namespace Orange::Engine::Scene
 

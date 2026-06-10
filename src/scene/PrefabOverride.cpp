@@ -17,6 +17,8 @@
 #include "orange/engine/core/Guid.h"
 #include "orange/engine/core/Serialization.h"
 #include "orange/engine/scene/EntityGuid.h"
+#include "orange/engine/scene/GuidComponent.h"
+#include "orange/engine/scene/HierarchyComponent.h"
 #include "orange/engine/scene/PrefabInstanceComponent.h"
 #include "orange/engine/scene/SceneSerialization.h"
 #include "orange/engine/scene/World.h"
@@ -24,6 +26,7 @@
 #include "scene/ComponentSerializers.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -714,6 +717,221 @@ bool RefreshInstanceWithRecordedOverrides(World& instWorld, Entity instEntity,
 
     // ④ 把 M 的各 component Read 写回实例实体（emplace_or_replace 整段替换）。
     return WriteBackMergedComponents(instWorld, instEntity, mergedJson, componentNames);
+}
+
+// ---------------------------------------------------------------------------
+// C1.3 · revert 单条 override path —— 用模板值覆盖实例的单个叶子（CS2 merge 的
+// "单 leaf 版"），其余字段（含同 component 内其它 override）原样保留。
+// ---------------------------------------------------------------------------
+
+bool RevertEntityOverridePath(World& instWorld, Entity instEntity,
+                              const World& tmplWorld, Entity tmplEntity,
+                              std::string_view componentName, std::string_view fieldPath)
+{
+    if (!instWorld.IsValid(instEntity) || !tmplWorld.IsValid(tmplEntity))
+    {
+        return false;
+    }
+    if (componentName.empty())
+    {
+        return false;  // 无 component 名无从定位叶子。
+    }
+
+    // 实例无 PrefabInstanceComponent → 不是 prefab 实例，没有 override 概念可 revert。
+    auto* link = instWorld.GetComponent<PrefabInstanceComponent>(instEntity);
+    if (link == nullptr)
+    {
+        return false;
+    }
+
+    // ① 以**实例**当前态为底序列化进 writer（含正确数组形态 + 实例所有字段值）。
+    //    这是与 CS2 的关键区别：CS2 以模板为底、override 叶子贴实例值；revert 反过来
+    //    ——以实例为底、仅 path 这一个叶子贴模板值，从而"只回退这一条、其余全留"。
+    JsonWriter mergedWriter;
+    const std::vector<std::string> componentNames =
+        SerializeEntityComponentsToWriter(instWorld, instEntity, mergedWriter);
+
+    // ② 模板侧序列化成 reader（path 回退值的来源）。
+    const std::string tmplJson = SerializeEntityComponents(tmplWorld, tmplEntity);
+    auto tmplReaderRes = JsonReader::FromString(tmplJson);
+    if (tmplReaderRes.IsErr())
+    {
+        return false;  // 自家 Dump 理应可解析。
+    }
+    const JsonReader& tmplReader = tmplReaderRes.Value();
+
+    // ③ 仅把 path 这一个叶子用模板值覆盖进 writer（CopyLeafValue 源无标量值时不写——
+    //    例如该字段是身份/链接 component 被过滤掉了，或 path 不存在 → 实例值保留不动）。
+    const std::string componentAbs = Join(kComponentsRoot, componentName);
+    const std::string leafAbs =
+        fieldPath.empty() ? componentAbs : Join(componentAbs, std::string(fieldPath));
+    CopyLeafValue(tmplReader, leafAbs, mergedWriter);
+
+    // ④ 只回写 path 所属的那个 component（不碰其余 component）。componentName 必须确实
+    //    在实例写出过的非身份 component 集里，否则没什么可写回（身份 component 已被过滤）。
+    const bool componentPresent =
+        std::find(componentNames.begin(), componentNames.end(), std::string(componentName))
+        != componentNames.end();
+    bool writeOk = true;
+    if (componentPresent)
+    {
+        const std::array<std::string, 1> only{std::string(componentName)};
+        const std::vector<std::string> writeNames(only.begin(), only.end());
+        writeOk = WriteBackMergedComponents(instWorld, instEntity, mergedWriter.Dump(),
+                                            writeNames);
+    }
+
+    // ⑤ 清掉该 path 的 override 记录（其余 override 记录不动）。原本就不在记录里 →
+    //    ClearOverridePath 返回 false（no-op），不影响本函数成功语义。
+    ClearOverridePath(*link, componentName, fieldPath);
+
+    return writeOk;
+}
+
+bool RevertInstanceOverridePath(World& instWorld, Entity instEntity,
+                                const Asset::PrefabAsset& tmpl,
+                                std::string_view componentName, std::string_view fieldPath)
+{
+    if (!instWorld.IsValid(instEntity))
+    {
+        return false;
+    }
+
+    // 取实例实体的模板锚（A2.2）。无 PrefabInstanceComponent / templateEntityGuid
+    // 为空（旧数据）→ 无从配对，no-op。
+    const auto* link = instWorld.GetComponent<PrefabInstanceComponent>(instEntity);
+    if (link == nullptr || !link->templateEntityGuid.IsValid())
+    {
+        return false;
+    }
+
+    // 模板 blob → scratch world，经 guid 反查模板实体（同 CS2 的配对逻辑）。
+    World tmplWorld;
+    if (Scene::LoadFromString(tmpl.TemplateBlob(), tmplWorld).IsErr())
+    {
+        return false;
+    }
+    const Entity tmplEntity =
+        Scene::FindEntityByGuid(tmplWorld, link->templateEntityGuid);
+    if (!tmplEntity.IsValid())
+    {
+        return false;
+    }
+
+    return RevertEntityOverridePath(instWorld, instEntity, tmplWorld, tmplEntity,
+                                    componentName, fieldPath);
+}
+
+// ---------------------------------------------------------------------------
+// C1.3 · ApplyInstanceToTemplate —— 以实例当前态重建模板 blob。
+//
+// 关键：把实例实体的 guid **映回它锚定的 templateEntityGuid** 再写出，否则新模板里的
+// 实体 guid 变成实例 guid，其它实例的 A2.2 锚定全断。做法走 scratch world，不污染
+// 原实例 world（只在末尾清空本实例的 overriddenPaths）。
+// ---------------------------------------------------------------------------
+
+Result<std::string, ResultCode> ApplyInstanceToTemplate(World& instWorld, Entity instEntity)
+{
+    if (!instWorld.IsValid(instEntity))
+    {
+        return ResultCode::InvalidArgument;
+    }
+
+    // ① 序列化实例子树（instEntity 为根 + 全部后代）→ blob。SaveSubtreeToString 走
+    //    const World&，不改原 world；天然写出 GuidComponent + PrefabInstanceComponent。
+    const std::array<Entity, 1> roots{instEntity};
+    auto subtreeRes = Scene::SaveSubtreeToString(instWorld, roots);
+    if (subtreeRes.IsErr())
+    {
+        return subtreeRes.Error();
+    }
+
+    // ② 重载入 scratch world（得到含实例 guid + templateEntityGuid 锚的完整克隆，
+    //    引用已 remap）。在 scratch 上 mutate，原实例 world 不受影响。
+    World scratchWorld;
+    auto loadRc = Scene::LoadFromString(subtreeRes.Value(), scratchWorld);
+    if (loadRc.IsErr())
+    {
+        return loadRc.Error();
+    }
+
+    // ③ 遍历 scratch 每个带 GuidComponent 的实体：guid 映回它的 templateEntityGuid
+    //    （锚有效时；无效锚=旧数据 → 保留现 guid 兜底，不崩），再移除 PrefabInstance
+    //    （模板里不该有链接组件）。先收集实体再改，避免在 view 迭代中改组件结构。
+    {
+        std::vector<Entity> scratchEntities;
+        auto guidView = scratchWorld.Registry().view<GuidComponent>();
+        for (const auto e : guidView)
+        {
+            scratchEntities.push_back(World::FromEntt(e));
+        }
+        for (const Entity e : scratchEntities)
+        {
+            auto* g = scratchWorld.GetComponent<GuidComponent>(e);
+            const auto* pl = scratchWorld.GetComponent<PrefabInstanceComponent>(e);
+            if (g != nullptr && pl != nullptr && pl->templateEntityGuid.IsValid())
+            {
+                g->guid = pl->templateEntityGuid;
+            }
+        }
+    }
+    // 移除所有 PrefabInstanceComponent（独立一轮，键在 PrefabInstanceComponent 上）。
+    {
+        std::vector<Entity> linked;
+        auto linkView = scratchWorld.Registry().view<PrefabInstanceComponent>();
+        for (const auto e : linkView)
+        {
+            linked.push_back(World::FromEntt(e));
+        }
+        for (const Entity e : linked)
+        {
+            scratchWorld.RemoveComponent<PrefabInstanceComponent>(e);
+        }
+    }
+
+    // ④ 在 scratch 里定位实例根（parent 被 remap 成 Invalid 的那个；无 Hierarchy
+    //    亦视为根候选），从它 SaveSubtreeToString → 新模板 blob。④ 写出的 Hierarchy /
+    //    引用走 GuidStringOf 读当前 GuidComponent.guid，③ 改 guid 后自动指向模板侧
+    //    稳定 guid，无需手工重写引用。
+    Entity scratchRoot = Entity::Invalid();
+    {
+        std::vector<Entity> all;
+        // 用任一覆盖全实体的 view 找根：GuidComponent 覆盖普遍补 guid 的子树即可；
+        // 退化兜底——若某实体无 GuidComponent 也无 Hierarchy（极罕见），用 instEntity
+        // 序列化天然包含它，但找根仍以 parent==Invalid 为准。这里遍历 GuidComponent 视图
+        // 找首个 parent 为 Invalid 的实体作为根。
+        auto guidView = scratchWorld.Registry().view<GuidComponent>();
+        for (const auto e : guidView)
+        {
+            const Entity ent = World::FromEntt(e);
+            const auto* h = scratchWorld.GetComponent<HierarchyComponent>(ent);
+            if (h == nullptr || !h->parent.IsValid())
+            {
+                scratchRoot = ent;
+                break;
+            }
+        }
+    }
+    if (!scratchRoot.IsValid())
+    {
+        return ResultCode::InternalError;  // 子树非空时必有根；防御性兜底。
+    }
+
+    const std::array<Entity, 1> scratchRoots{scratchRoot};
+    auto tmplBlobRes = Scene::SaveSubtreeToString(scratchWorld, scratchRoots);
+    if (tmplBlobRes.IsErr())
+    {
+        return tmplBlobRes.Error();
+    }
+
+    // ⑤ 清空本实例（原实例 world 侧）的 overriddenPaths —— apply 后实例 == 模板，
+    //    无 override 残留。仅清根实体的记录；调用方若需清整子树各实体由其遍历。
+    if (auto* link = instWorld.GetComponent<PrefabInstanceComponent>(instEntity))
+    {
+        link->overriddenPaths.clear();
+    }
+
+    return tmplBlobRes.Value();
 }
 
 }  // namespace Orange::Engine::Scene
