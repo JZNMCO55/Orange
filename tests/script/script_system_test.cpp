@@ -203,6 +203,86 @@ int main()
     }
     std::fprintf(stdout, "  [PASS] destructor releases leftover handles (no StopWorld)\n");
 
+    // --- B1.3 fieldOverrides：authored 值在 OnStart 前经托管反射注入 public 字段 ---
+    // Tweakable.Speed 默认 1.0，OnUpdate 每帧 position.x += Speed。
+    //   * 带 override Speed="2.5"：4 帧后 x == 10.0（2.5×4）；若 override 没生效
+    //     会落到默认 1.0×4 == 4.0；
+    //   * 不带 override（对照）：4 帧后 x == 4.0（证明默认值 + 测试非空）。
+    using Orange::Engine::Script::ScriptFieldType;
+    const std::string kTweakableType = "OrangeFixtures.Tweakable, ScriptFixtures";
+
+    // (a) 带 override 的实体 —— 单独 World 隔离活实例计数。
+    {
+        World world3;
+        Entity e3 = world3.CreateEntity();
+        world3.AddComponent(e3, TransformComponent{});  // 原点
+        {
+            ScriptComponent sc;
+            sc.assemblyPath = kFixturesAssembly;
+            sc.typeName     = kTweakableType;
+            sc.fieldOverrides.push_back({"Speed", ScriptFieldType::Float, "2.5"});
+            world3.AddComponent(e3, sc);
+        }
+
+        ScriptSystem scripts3(rt);
+        scripts3.StartWorld(world3);
+        assert(scripts3.ActiveInstanceCount() == 1);
+        for (int i = 0; i < 4; ++i)
+        {
+            scripts3.Tick(world3, 1.0f);
+        }
+        {
+            const auto* t = world3.GetComponent<TransformComponent>(e3);
+            assert(t != nullptr);
+            if (!ApproxEqual(t->position.x, 10.0f))
+            {
+                std::fprintf(stderr,
+                    "  [FAIL] override Speed=2.5 后 4 帧 position.x = %f（期望 10.0；"
+                    "若得 4.0 说明 override 未生效）\n", t->position.x);
+                return 1;
+            }
+        }
+        scripts3.StopWorld(world3);
+        std::fprintf(stdout,
+            "  [PASS] fieldOverrides applied: Speed=2.5 -> position.x = 10.0\n");
+    }
+
+    // (b) 对照：不带 override，默认 Speed=1.0 —— 4 帧后 x == 4.0。
+    {
+        World world4;
+        Entity e4 = world4.CreateEntity();
+        world4.AddComponent(e4, TransformComponent{});
+        {
+            ScriptComponent sc;
+            sc.assemblyPath = kFixturesAssembly;
+            sc.typeName     = kTweakableType;
+            // 故意不加 fieldOverrides —— 验证默认值路径。
+            world4.AddComponent(e4, sc);
+        }
+
+        ScriptSystem scripts4(rt);
+        scripts4.StartWorld(world4);
+        assert(scripts4.ActiveInstanceCount() == 1);
+        for (int i = 0; i < 4; ++i)
+        {
+            scripts4.Tick(world4, 1.0f);
+        }
+        {
+            const auto* t = world4.GetComponent<TransformComponent>(e4);
+            assert(t != nullptr);
+            if (!ApproxEqual(t->position.x, 4.0f))
+            {
+                std::fprintf(stderr,
+                    "  [FAIL] 无 override 默认 Speed=1.0 后 4 帧 position.x = %f（期望 4.0）\n",
+                    t->position.x);
+                return 1;
+            }
+        }
+        scripts4.StopWorld(world4);
+        std::fprintf(stdout,
+            "  [PASS] no override default: Speed=1.0 -> position.x = 4.0\n");
+    }
+
     std::fprintf(stdout, "[script_system_test] all tests passed.\n");
     return 0;
 }

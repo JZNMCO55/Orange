@@ -1258,7 +1258,13 @@ void TestScriptComponentRoundTrip()
     source.AddComponent<NameComponent>(e, {"scripted"});
     ScriptComponent sc;
     sc.assemblyPath = "assets/scripts/Game.dll";
-    sc.typeName     = "Game.SlimePatrol, Game";
+    sc.typeName     = "Game.Patrol, Game";
+    // B1.3 fieldOverrides round-trip：3 条不同类型，验证 name/type/value 保真。
+    using Orange::Engine::Script::ScriptFieldType;
+    sc.fieldOverrides.push_back({"Speed",   ScriptFieldType::Float,  "2.5"});
+    sc.fieldOverrides.push_back({"MaxHits", ScriptFieldType::Int,    "3"});
+    sc.fieldOverrides.push_back({"Looping", ScriptFieldType::Bool,   "true"});
+    sc.fieldOverrides.push_back({"Tag",     ScriptFieldType::String, "patrol-A"});
     source.AddComponent(e, sc);
 
     auto saveResult = SceneSerialization::Save(source, path.string());
@@ -1282,10 +1288,25 @@ void TestScriptComponentRoundTrip()
     const auto* loadedSc = loaded.GetComponent<ScriptComponent>(loadedE);
     assert(loadedSc != nullptr);
     assert(loadedSc->assemblyPath == "assets/scripts/Game.dll");
-    assert(loadedSc->typeName == "Game.SlimePatrol, Game");
+    assert(loadedSc->typeName == "Game.Patrol, Game");
+
+    // fieldOverrides 数量 + 每条 name/type/value 完全一致。
+    assert(loadedSc->fieldOverrides.size() == 4);
+    assert(loadedSc->fieldOverrides[0].name == "Speed");
+    assert(loadedSc->fieldOverrides[0].type == ScriptFieldType::Float);
+    assert(loadedSc->fieldOverrides[0].value == "2.5");
+    assert(loadedSc->fieldOverrides[1].name == "MaxHits");
+    assert(loadedSc->fieldOverrides[1].type == ScriptFieldType::Int);
+    assert(loadedSc->fieldOverrides[1].value == "3");
+    assert(loadedSc->fieldOverrides[2].name == "Looping");
+    assert(loadedSc->fieldOverrides[2].type == ScriptFieldType::Bool);
+    assert(loadedSc->fieldOverrides[2].value == "true");
+    assert(loadedSc->fieldOverrides[3].name == "Tag");
+    assert(loadedSc->fieldOverrides[3].type == ScriptFieldType::String);
+    assert(loadedSc->fieldOverrides[3].value == "patrol-A");
 
     RemoveIfExists(path);
-    std::fprintf(stdout, "  [PASS] script component round-trip (no CLR)\n");
+    std::fprintf(stdout, "  [PASS] script component round-trip (no CLR; +fieldOverrides)\n");
 }
 
 // 旧版本场景向后兼容：一个 scene/world 1.0 文件（不含 Script 段）应正常读，

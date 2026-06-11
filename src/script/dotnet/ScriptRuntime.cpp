@@ -8,8 +8,9 @@
 //
 // 流程：
 //   Initialize：ScriptHost.Initialize（起 runtime）→ 取 ScriptRuntime.cs 的
-//     6 个托管入口（Bootstrap / CreateInstance / InvokeStart / InvokeUpdate /
-//     InvokeDestroy / Release）→ 调 Bootstrap 把 GetScriptBindingTable() 推过去。
+//     7 个托管入口（Bootstrap / CreateInstance / InvokeStart / InvokeUpdate /
+//     InvokeDestroy / Release / SetInstanceField）→ 调 Bootstrap 把
+//     GetScriptBindingTable() 推过去。
 //   CreateInstance：EncodeEntityId → 调托管 CreateInstance（加载 game
 //     assembly、Activator 构造、注入 Entity、GCHandle 保活）→ 句柄包成
 //     ScriptInstanceHandle。
@@ -47,6 +48,9 @@ using InvokeUpdateFn = void (*)(void*, float);
 using InvokeDestroyFn = void (*)(void*);
 //   Release(IntPtr h)
 using ReleaseFn = void (*)(void*);
+//   SetInstanceField(IntPtr h, IntPtr fieldNameUtf8, int fieldType,
+//                    IntPtr valueUtf8) -> int（1 成功 / 0 失败）
+using SetInstanceFieldFn = int (*)(void*, const char*, int, const char*);
 
 // 把 ScriptInstanceHandle 的不透明 uint64 与托管 GCHandle 的 IntPtr（void*）
 // 互转。MVP 直接把指针位模式塞进 uint64（64-bit 平台指针 ≤ 64 位）。
@@ -65,18 +69,19 @@ ScriptInstanceHandle PtrToHandle(void* p) noexcept
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Impl —— 持有 ScriptHost + 6 个托管入口函数指针。
+// Impl —— 持有 ScriptHost + 7 个托管入口函数指针。
 // ---------------------------------------------------------------------------
 struct ScriptRuntime::Impl
 {
     ScriptHost host;
 
-    BootstrapFn      bootstrapFn = nullptr;
-    CreateInstanceFn createInstanceFn = nullptr;
-    InvokeStartFn    invokeStartFn = nullptr;
-    InvokeUpdateFn   invokeUpdateFn = nullptr;
-    InvokeDestroyFn  invokeDestroyFn = nullptr;
-    ReleaseFn        releaseFn = nullptr;
+    BootstrapFn        bootstrapFn = nullptr;
+    CreateInstanceFn   createInstanceFn = nullptr;
+    InvokeStartFn      invokeStartFn = nullptr;
+    InvokeUpdateFn     invokeUpdateFn = nullptr;
+    InvokeDestroyFn    invokeDestroyFn = nullptr;
+    ReleaseFn          releaseFn = nullptr;
+    SetInstanceFieldFn setInstanceFieldFn = nullptr;
 
     bool initialized = false;
 };
@@ -93,7 +98,7 @@ ScriptRuntime::ScriptRuntime(ScriptRuntime&&) noexcept = default;
 ScriptRuntime& ScriptRuntime::operator=(ScriptRuntime&&) noexcept = default;
 
 // ---------------------------------------------------------------------------
-// Initialize —— 起 runtime → 取 6 个托管入口 → Bootstrap 推绑定表。
+// Initialize —— 起 runtime → 取 7 个托管入口 → Bootstrap 推绑定表。
 // ---------------------------------------------------------------------------
 Result<void> ScriptRuntime::Initialize(const std::string& runtimeConfigPath,
                                        const std::string& sdkAssemblyPath)
@@ -110,7 +115,7 @@ Result<void> ScriptRuntime::Initialize(const std::string& runtimeConfigPath,
         return initResult.Error();
     }
 
-    // 取托管 glue 的 6 个 [UnmanagedCallersOnly] 入口函数指针。任一缺失即视为
+    // 取托管 glue 的 7 个 [UnmanagedCallersOnly] 入口函数指针。任一缺失即视为
     // glue 与 host 不匹配，返回 Err。
     auto getFn = [&](const char* method, void** out) -> bool {
         auto r = mpImpl->host.GetManagedFunction(sdkAssemblyPath, kGlueTypeName, method);
@@ -128,12 +133,14 @@ Result<void> ScriptRuntime::Initialize(const std::string& runtimeConfigPath,
     void* invokeUpdate = nullptr;
     void* invokeDestroy = nullptr;
     void* release = nullptr;
+    void* setInstanceField = nullptr;
     if (!getFn("Bootstrap", &bootstrap) ||
         !getFn("CreateInstance", &createInstance) ||
         !getFn("InvokeStart", &invokeStart) ||
         !getFn("InvokeUpdate", &invokeUpdate) ||
         !getFn("InvokeDestroy", &invokeDestroy) ||
-        !getFn("Release", &release))
+        !getFn("Release", &release) ||
+        !getFn("SetInstanceField", &setInstanceField))
     {
         return ResultCode::InternalError;
     }
@@ -144,6 +151,7 @@ Result<void> ScriptRuntime::Initialize(const std::string& runtimeConfigPath,
     mpImpl->invokeUpdateFn = reinterpret_cast<InvokeUpdateFn>(invokeUpdate);
     mpImpl->invokeDestroyFn = reinterpret_cast<InvokeDestroyFn>(invokeDestroy);
     mpImpl->releaseFn = reinterpret_cast<ReleaseFn>(release);
+    mpImpl->setInstanceFieldFn = reinterpret_cast<SetInstanceFieldFn>(setInstanceField);
 
     // 把 C++ 绑定函数指针表推给托管侧（C# EngineInterop 存为函数指针）。
     mpImpl->bootstrapFn(GetScriptBindingTable());
@@ -221,6 +229,35 @@ void ScriptRuntime::Release(ScriptInstanceHandle handle)
         return;
     }
     mpImpl->releaseFn(HandleToPtr(handle));
+}
+
+// ---------------------------------------------------------------------------
+// SetInstanceField —— 转调托管 SetInstanceField（反射设 public 字段）。
+// 失败（0 返回）映射成 Err；语义最贴的现有 ResultCode 是 NotFound（字段不
+// 存在 / 解析失败 / 句柄解不出实例都归"目标拿不到"）。
+// ---------------------------------------------------------------------------
+Result<void> ScriptRuntime::SetInstanceField(ScriptInstanceHandle handle,
+                                             const std::string& fieldName,
+                                             int fieldType,
+                                             const std::string& valueUtf8)
+{
+    if (!mpImpl->initialized || mpImpl->setInstanceFieldFn == nullptr)
+    {
+        return ResultCode::NotInitialized;
+    }
+    if (!handle.IsValid())
+    {
+        return ResultCode::InvalidArgument;
+    }
+
+    const int ok = mpImpl->setInstanceFieldFn(
+        HandleToPtr(handle), fieldName.c_str(), fieldType, valueUtf8.c_str());
+    if (ok != 1)
+    {
+        // 托管侧已 catch 异常 + 标 stderr（字段不存在 / 解析失败 / 转换抛异常）。
+        return ResultCode::NotFound;
+    }
+    return Result<void>{};
 }
 
 bool ScriptRuntime::IsInitialized() const noexcept

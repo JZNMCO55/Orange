@@ -76,6 +76,23 @@ void ScriptSystem::StartWorld(World& world)
 
         const ScriptInstanceHandle handle = instanceResult.Value();
         mInstances.emplace(entity, handle);
+
+        // authored 值在 OnStart 前注入（对标 Unity 序列化字段先于 Start 设好）：
+        // 逐条经托管反射写脚本对象的 public 字段。单条失败（字段不存在 / 解析
+        // 失败）只 warn 不中断——一个坏 override 不该拖垮整个实体。
+        for (const ScriptFieldOverride& ov : sc.fieldOverrides)
+        {
+            auto setResult = mpRuntime->SetInstanceField(
+                handle, ov.name, static_cast<int>(ov.type), ov.value);
+            if (setResult.IsErr())
+            {
+                ORANGE_LOG_WARN(
+                    "ScriptSystem::StartWorld: failed to apply field override '{}' = '{}' "
+                    "on script type '{}'; skipping that override.",
+                    ov.name, ov.value, sc.typeName);
+            }
+        }
+
         mpRuntime->InvokeStart(handle);
     }
 }

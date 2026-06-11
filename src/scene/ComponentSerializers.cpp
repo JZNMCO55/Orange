@@ -2043,7 +2043,8 @@ bool ReadEdgeChainShape(const JsonReader& reader, std::string_view shapePath, Ph
 //
 // 字段语义版本由组件自带的 ScriptComponentSchemaVersion 承载，写到组件段内的
 // "schemaVersion"；读路径先验版本再读字段（缺版本 = 旧 / 坏数据，graceful 走
-// 默认空字符串）。后续加 fieldOverrides 等字段是 additive minor bump。
+// 默认空字符串）。1.1 additive 加 fieldOverrides 对象数组（B1.3），缺字段
+// （旧 1.0 文件）→ 空 vector。
 // ---------------------------------------------------------------------------
 
 bool HasScript(const World& world, Entity entity)
@@ -2065,6 +2066,20 @@ void WriteScript(JsonWriter& writer,
                               Script::ScriptComponentSchemaVersion());
     writer.WriteString(Join(componentPath, "assemblyPath"), sc->assemblyPath);
     writer.WriteString(Join(componentPath, "typeName"),     sc->typeName);
+
+    // fieldOverrides：对象数组，每元素 { name, type(int), value }。type 落 int
+    // （ScriptFieldType 的整数值）。空 vector 落空数组 []（与 overriddenPaths /
+    // SubMeshMaterials slots 同款 BeginArray + 索引下钻写法）。
+    const std::string overridesKey = Join(componentPath, "fieldOverrides");
+    writer.BeginArray(overridesKey, sc->fieldOverrides.size());
+    for (std::size_t i = 0; i < sc->fieldOverrides.size(); ++i)
+    {
+        const Script::ScriptFieldOverride& ov = sc->fieldOverrides[i];
+        const std::string base = overridesKey + "/" + std::to_string(i);
+        writer.WriteString(base + "/name",  ov.name);
+        writer.WriteInt(base + "/type",     static_cast<std::int64_t>(ov.type));
+        writer.WriteString(base + "/value", ov.value);
+    }
 }
 
 bool ReadScript(const JsonReader& reader,
@@ -2089,6 +2104,36 @@ bool ReadScript(const JsonReader& reader,
     // 引用在运行期由 ScriptRuntime::CreateInstance 自然失败并跳过，不崩 Load。
     sc.assemblyPath = reader.GetString(Join(componentPath, "assemblyPath"), "");
     sc.typeName     = reader.GetString(Join(componentPath, "typeName"),     "");
+
+    // fieldOverrides（schema 1.1+，additive + graceful）：缺字段（旧 1.0 文件）
+    // → ArraySize 返回 0 → 空 vector。各项 name/value 缺省空串、type 缺省 0
+    // （Float）；type 越界（非 0..3）graceful clamp 到 Float，不整盘拒绝 Load。
+    {
+        const std::string overridesKey = Join(componentPath, "fieldOverrides");
+        const std::size_t count = reader.ArraySize(overridesKey);
+        sc.fieldOverrides.reserve(count);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const std::string base = overridesKey + "/" + std::to_string(i);
+            Script::ScriptFieldOverride ov;
+            ov.name  = reader.GetString(base + "/name", "");
+            ov.value = reader.GetString(base + "/value", "");
+
+            const std::int64_t rawType = reader.GetInt(base + "/type", 0);
+            // 合法枚举范围 0..3（Float/Int/Bool/String）；越界取 Float。
+            if (rawType >= 0 &&
+                rawType <= static_cast<std::int64_t>(Script::ScriptFieldType::String))
+            {
+                ov.type = static_cast<Script::ScriptFieldType>(rawType);
+            }
+            else
+            {
+                ov.type = Script::ScriptFieldType::Float;
+            }
+
+            sc.fieldOverrides.push_back(std::move(ov));
+        }
+    }
 
     ctx.world.AddComponent(entity, std::move(sc));
     return true;

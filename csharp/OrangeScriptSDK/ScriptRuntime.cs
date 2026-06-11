@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
@@ -169,6 +170,68 @@ internal static class ScriptRuntime
         catch (Exception ex)
         {
             LogBoundaryException(nameof(Release), ex);
+        }
+    }
+
+    /// <summary>
+    /// 按 authored 值写脚本对象的一个 public 实例字段（B1.3 tweakable）。
+    /// 实例化后、OnStart 前由 C++ ScriptSystem 逐条调用。
+    ///
+    /// <paramref name="fieldType"/> 是 C++ ScriptFieldType 的 int 值
+    /// （0=Float / 1=Int / 2=Bool / 3=String）；<paramref name="valueUtf8"/> 是
+    /// 字符串形态的值，按 fieldType 用 InvariantCulture 解析后再
+    /// Convert.ChangeType 适配字段真实类型（兼容字段是 int 而 authored 是 long
+    /// 等）。成功返回 1；任何失败（句柄解不出 / 字段不存在 / 解析或转换抛异常）
+    /// 标 stderr 后返回 0，**绝不**让异常穿回 C++。
+    /// </summary>
+    [UnmanagedCallersOnly]
+    public static int SetInstanceField(IntPtr handlePtr, IntPtr fieldNameUtf8, int fieldType, IntPtr valueUtf8)
+    {
+        try
+        {
+            OrangeScript? script = Resolve(handlePtr);
+            if (script == null)
+            {
+                return 0;
+            }
+
+            string? fieldName = Marshal.PtrToStringUTF8(fieldNameUtf8);
+            if (string.IsNullOrEmpty(fieldName))
+            {
+                return 0;
+            }
+            // value 允许为空串（如 String 类型 authored ""）；用 "" 兜底 null。
+            string value = Marshal.PtrToStringUTF8(valueUtf8) ?? string.Empty;
+
+            FieldInfo? field = script.GetType().GetField(
+                fieldName, BindingFlags.Public | BindingFlags.Instance);
+            if (field == null)
+            {
+                Console.Error.WriteLine(
+                    $"[OrangeScript] SetInstanceField: 类型 '{script.GetType().FullName}' 上找不到 public 字段 '{fieldName}'。");
+                return 0;
+            }
+
+            // 按 fieldType 解析 value 字符串为目标值（InvariantCulture 避免
+            // 语言环境小数点 / 千分位差异）。解析失败抛异常 → 下方 catch 返回 0。
+            object parsed = fieldType switch
+            {
+                0 => float.Parse(value, CultureInfo.InvariantCulture),  // Float
+                1 => long.Parse(value, CultureInfo.InvariantCulture),   // Int（再 ChangeType 适配 int/long）
+                2 => value == "true" || value == "1",                   // Bool
+                _ => value,                                             // String（含 3 及其它）
+            };
+
+            // 适配到字段真实类型（如 authored long → 字段 int，authored float →
+            // 字段 double）。转换抛异常 → catch 返回 0。
+            object converted = Convert.ChangeType(parsed, field.FieldType, CultureInfo.InvariantCulture);
+            field.SetValue(script, converted);
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            LogBoundaryException(nameof(SetInstanceField), ex);
+            return 0;
         }
     }
 

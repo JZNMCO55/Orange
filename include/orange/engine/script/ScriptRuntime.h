@@ -95,6 +95,20 @@ public:
     // 释放托管 GCHandle（解保活，允许 GC 回收实例）。Release 后句柄失效。
     void Release(ScriptInstanceHandle handle);
 
+    // 按 authored 值写脚本对象的一个 public 实例字段（B1.3 tweakable）。
+    //   * handle    —— 目标脚本实例句柄；
+    //   * fieldName —— public 字段名；
+    //   * fieldType —— ScriptFieldType 的 int 值（0=Float / 1=Int / 2=Bool /
+    //     3=String）。本头**不**得 include ScriptComponent.h（跨模块），故这里
+    //     用 int 而非枚举；调用方传 static_cast<int>(ScriptFieldType)；
+    //   * valueUtf8 —— 字符串形态的值；托管侧按 fieldType 解析后用
+    //     System.Reflection 设字段（再 Convert.ChangeType 适配字段真实类型）。
+    // 未初始化 / 无效句柄 / 字段不存在 / 解析失败均返回 Err，绝不崩。
+    Result<void> SetInstanceField(ScriptInstanceHandle handle,
+                                  const std::string& fieldName,
+                                  int fieldType,
+                                  const std::string& valueUtf8);
+
     // 是否已成功 Initialize。
     bool IsInitialized() const noexcept;
 

@@ -685,6 +685,7 @@ if (ORANGE_ENGINE_WITH_DOTNET)
         COMMAND "${ORANGE_ENGINE_DOTNET_EXE}" build "${_orange_fixtures_proj}"
                 -c $<CONFIG> --nologo -v quiet
         DEPENDS "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Mover.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Tweakable.cs"
                 "${_orange_fixtures_proj}"
                 "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/ScriptRuntime.cs"
                 "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/EngineInterop.cs"
