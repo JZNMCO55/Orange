@@ -188,6 +188,13 @@ std::optional<ShaderTemplateDesc> LoadTemplateDescFromFile(
         desc.textureSlots.push_back(std::move(sd));
     }
 
+    // usesTangentVertex 可选（schema minor 2 起）；缺省 false。漏写会让消费
+    // tangent（location 3）的模板（pbr）在数据驱动路径下出现 layout 失配
+    // validation error——与 BuiltinMaterials 内置路径的同名字段对齐。
+    bool usesTangent = false;
+    reader.ReadBool("usesTangentVertex", usesTangent);
+    desc.usesTangentVertex = usesTangent;
+
     return desc;
 }
 
@@ -225,9 +232,10 @@ Result<void, ResultCode> MaterialSystem::RegisterTemplate(const ShaderTemplateDe
     // shader handle 通过 registry.Load<ShaderAsset> 拿到——失败则保留无
     // 效 handle，与 BuiltinMaterials::LoadToon 失败语义一致。
     Material mat;
-    mat.name          = desc.name;
-    mat.uniforms      = desc.uniforms;
-    mat.textureSlots  = desc.textureSlots;
+    mat.name             = desc.name;
+    mat.uniforms         = desc.uniforms;
+    mat.textureSlots     = desc.textureSlots;
+    mat.usesTangentVertex = desc.usesTangentVertex;
 
     bool loadFailed = false;
 

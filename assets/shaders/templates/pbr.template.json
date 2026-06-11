@@ -1,8 +1,9 @@
 {
-  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 1 },
+  "schemaVersion": { "namespace": "render/shader_template", "major": 1, "minor": 2 },
   "templateName": "pbr",
   "vertexSpv": "shaders/orange_engine/pbr.vert.spv",
   "fragmentSpv": "shaders/orange_engine/pbr.frag.spv",
+  "usesTangentVertex": true,
   "uniforms": [
     { "name": "uMVP",   "type": "mat4", "editor": { "widget": "hidden" } },
     { "name": "uModel", "type": "mat4", "editor": { "widget": "hidden" } },

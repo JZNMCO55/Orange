@@ -156,6 +156,15 @@ void TestRegisterBuiltins()
     assert(pbr->textureSlots[3].binding == 3 && pbr->textureSlots[3].name == "uAoTex");
     assert(pbr->textureSlots[4].binding == 4 && pbr->textureSlots[4].name == "uEmissiveTex");
 
+    // usesTangentVertex：只有 pbr（切线空间法线贴图）置 true，其余默认 false。
+    // 内置路径的真值——下面 parity 测试会把它与数据驱动 JSON 路径对齐。
+    assert(pbr->usesTangentVertex      == true);
+    assert(toon->usesTangentVertex     == false);
+    assert(textured->usesTangentVertex == false);
+    assert(rim->usesTangentVertex      == false);
+    assert(dissolve->usesTangentVertex == false);
+    assert(emissive->usesTangentVertex == false);
+
     std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr\n");
 }
 
@@ -332,6 +341,68 @@ void TestInstanceUniformRouting()
     std::fprintf(stdout, "  [PASS] system-managed instance 的 uniform 路由\n");
 }
 
+// 7. 数据驱动模板漂移防护：RegisterTemplatesFromDirectory（真实
+//    assets/shaders/templates/*.template.json）产出的 Material 关键字段必须
+//    与 RegisterBuiltins（BuiltinMaterials 内置路径）对齐。锁住"以后给
+//    Material 加渲染状态字段又忘了同步进 JSON schema / 模板文件"整类 bug——
+//    本测试因 pbr.template.json 漏写 usesTangentVertex（→ location 3 layout
+//    失配 validation error）而新增。
+void TestTemplateJsonParity()
+{
+#ifdef ORANGE_ENGINE_REPO_ASSETS_DIR
+    namespace fs = std::filesystem;
+    const fs::path templatesDir = fs::path(ORANGE_ENGINE_REPO_ASSETS_DIR) /
+                                  "shaders" / "templates";
+    if (!fs::exists(templatesDir))
+    {
+        std::fprintf(stdout, "  [SKIP] templates 目录不存在: %s\n",
+                     templatesDir.string().c_str());
+        return;
+    }
+
+    // 内置路径。
+    AssetRegistry builtinReg;
+    assert(builtinReg.RegisterLoader<ShaderAsset>(
+               std::make_unique<ShaderLoader>()).IsOk());
+    MaterialSystem builtinSys(builtinReg);
+    assert(builtinSys.RegisterBuiltins().IsOk());
+
+    // 数据驱动 JSON 路径（真实模板目录）。
+    AssetRegistry jsonReg;
+    assert(jsonReg.RegisterLoader<ShaderAsset>(
+               std::make_unique<ShaderLoader>()).IsOk());
+    MaterialSystem jsonSys(jsonReg);
+    auto jr = jsonSys.RegisterTemplatesFromDirectory(templatesDir.string());
+    (void)jr;  // 半残（SPIR-V 缺失）也落表，按字段对比即可。
+
+    // 对每个内置模板名：若 JSON 路径也有同名模板，usesTangentVertex 必须一致。
+    bool comparedPbr = false;
+    for (const std::string& name : builtinSys.GetTemplateNames())
+    {
+        const Material* b = builtinSys.FindTemplate(name);
+        const Material* j = jsonSys.FindTemplate(name);
+        if (b == nullptr || j == nullptr) { continue; }
+        assert(b->usesTangentVertex == j->usesTangentVertex &&
+               "数据驱动模板 usesTangentVertex 应与内置路径一致（schema 漂移防护）");
+        if (name == "pbr") { comparedPbr = true; }
+    }
+    // pbr 必须两路径都存在且都为 true（本测试针对的真 bug）。
+    const Material* pbrJson = jsonSys.FindTemplate("pbr");
+    assert(pbrJson != nullptr && "数据驱动路径应有 pbr 模板");
+    assert(pbrJson->usesTangentVertex == true &&
+           "pbr.template.json 必须声明 usesTangentVertex=true（否则 pbr.vert "
+           "location 3 layout 失配 validation error）");
+    assert(comparedPbr && "应已对 pbr 做内置 vs JSON parity 比对");
+
+    std::fprintf(stdout,
+                 "  [PASS] 模板 JSON 路径 usesTangentVertex 与内置路径 parity"
+                 "（pbr=true 已锁）\n");
+#else
+    std::fprintf(stdout,
+                 "  [SKIP] 模板 parity 测试未编入（无 ORANGE_ENGINE_REPO_ASSETS_DIR）\n");
+#endif
+}
+
 }  // namespace
 
 int main()
@@ -345,6 +416,7 @@ int main()
     TestCreateInstance();
     TestGetTemplateNames();
     TestInstanceUniformRouting();
+    TestTemplateJsonParity();
 
     std::fprintf(stdout, "[MaterialSystemTest] all tests passed.\n");
     return 0;

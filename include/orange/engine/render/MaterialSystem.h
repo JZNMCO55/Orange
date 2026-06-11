@@ -65,6 +65,14 @@ struct ShaderTemplateDesc
     // descriptor binding 一一对应。
     std::vector<MaterialUniformDesc>     uniforms;
     std::vector<MaterialTextureSlotDesc> textureSlots;
+
+    // 顶点 shader 是否消费 tangent 属性（location 3）。仅切线空间法线贴图的
+    // 模板（如 pbr）需置 true，使 Pipeline::FillVertexInputLayout 声明 location 3
+    // tangent 输入；其余模板默认 false。RegisterTemplate 把它原样拷进
+    // Material.usesTangentVertex（与 BuiltinMaterials 内置路径对齐——数据驱动
+    // 模板 JSON 若漏写此字段，pbr.vert.spv 会出现 location 3 layout 失配的
+    // validation error）。
+    bool usesTangentVertex{false};
 };
 
 class ORANGE_ENGINE_API MaterialSystem
@@ -126,13 +134,17 @@ public:
     // `ShaderTemplateDesc` 后调 `RegisterTemplate` 注册。schema:
     //
     //   {
-    //     "schemaVersion": {"namespace":"render/shader_template","major":1,"minor":0},
+    //     "schemaVersion": {"namespace":"render/shader_template","major":1,"minor":2},
     //     "templateName":  "<unique-name>",
     //     "vertexSpv":     "<path-to-vert.spv>",
     //     "fragmentSpv":   "<path-to-frag.spv>",
     //     "uniforms":      [{"name":"<uniform-name>","type":"mat4|vec2|vec3|vec4|float|int"}],
-    //     "textureSlots":  [{"binding":<uint>,"name":"<slot-name>"}]
+    //     "textureSlots":  [{"binding":<uint>,"name":"<slot-name>"}],
+    //     "usesTangentVertex": <bool, 可选, 默认 false>   // minor 2 起；pbr 须 true
     //   }
+    //
+    // minor 向后兼容（additive）：解析只校验 major==1，旧 minor 文件省略
+    // usesTangentVertex 时取默认 false。
     //
     // SPIR-V 路径解析约定（T1 阶段）：相对路径以 GetExecutableDir() 为
     // 基（与 BuiltinMaterials 同款），让 .template.json 写 "shaders/

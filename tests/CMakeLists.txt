@@ -498,6 +498,10 @@ orange_engine_add_test(material_interface_test  render/MaterialInterfaceTest.cpp
 orange_engine_add_test(builtin_materials_test   render/BuiltinMaterialsTest.cpp)
 orange_engine_add_test(postprocess_chain_test   render/PostProcessChainTest.cpp)
 orange_engine_add_test(material_system_test     render/MaterialSystemTest.cpp)
+# REPO_ASSETS_DIR：让 parity 测试加载真实 assets/shaders/templates/ 与
+# RegisterBuiltins 内置路径对比 usesTangentVertex（数据驱动模板漂移防护）。
+target_compile_definitions(material_system_test PRIVATE
+    "ORANGE_ENGINE_REPO_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\"")
 orange_engine_add_test(light_and_shadow_test    render/LightAndShadowTest.cpp)
 orange_engine_add_test(material_schema_test     render/MaterialSchemaTest.cpp)
 orange_engine_add_test(pipeline_template_cache_test render/PipelineTemplateCacheTest.cpp)
