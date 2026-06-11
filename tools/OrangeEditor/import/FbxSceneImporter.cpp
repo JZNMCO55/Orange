@@ -11,6 +11,7 @@
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
 #include <orange/engine/core/Log.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/render/SubMeshMaterialsComponent.h>
@@ -26,6 +27,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/trigonometric.hpp>  // glm::radians（相机桥接 / FOV 退默认）
 
 // OpenFBX vendor 头 —— 仅取声明（ofbx.cpp / libdeflate.c 作为独立 TU 编译）。
 #if defined(_MSC_VER)
@@ -38,6 +40,7 @@
 #  pragma warning(pop)
 #endif
 
+#include <cmath>  // std::atan / std::tan（相机 FOV 计算）
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -66,6 +69,7 @@ using ::Orange::Engine::Asset::VertexNormal3;
 using ::Orange::Engine::Asset::VertexPosition3;
 using ::Orange::Engine::Asset::VertexTangent4;
 using ::Orange::Engine::Asset::VertexUV2;
+using ::Orange::Engine::Render::Camera;
 using ::Orange::Engine::Render::MaterialInstance;
 using ::Orange::Engine::Render::RenderableComponent;
 using ::Orange::Engine::Render::SubMeshMaterialsComponent;
@@ -320,6 +324,60 @@ glm::mat4 FbxMatrixToGlm(const ofbx::DMatrix& dm)
     return m;
 }
 
+// FBX camera → 引擎 Render::Camera component（投影部分）。朝向不在此处——FBX 相机
+// 看 node 本地 +X，由 ProcessNode 对挂相机的 node 的 rotation 做 -Z→+X 桥接（见那里）；
+// view 留单位，位姿由 entity Transform 决定（CameraFrustumGizmoPlugin 取 rotation*-Z）。
+//
+// 投影：
+//   * perspective：film aperture 是**英寸**（OpenFBX getFilmWidth/Height，实测
+//     Blender 36mm sensor → 1.4173 inch）→ ×25.4 转 mm；水平 FOV =
+//     2·atan(filmW_mm/(2·focal_mm))，垂直 FOV = 2·atan(tan(hFOV/2)/aspect)
+//     （水平拟合，对标 Blender sensor_fit HORIZONTAL）→ Camera::Perspective。
+//   * orthographic：orthoZoom ≈ 视图较大维度世界尺寸（Blender ortho_scale）→
+//     半宽 = orthoZoom/2，半高 = 半宽/aspect → Camera::Orthographic。
+//   * aspect 取 aspectWidth/Height（渲染分辨率比，实测 1920/1080）；缺失退 16:9。
+//   * near/far 是 FBX 单位距离，按 conv.unitScale（importScale）折算到米。
+// 已知 MVP 限制：gate-fit（film 比 vs 渲染比不一致时的裁切）按水平拟合近似；
+// Render::Camera 只存矩阵故为烘焙导入（re-edit 按矩阵不按 fov，同 glTF 相机）。
+void AddFbxCamera(World& world, Entity e, const ofbx::Camera& camera,
+                  const AxisConverter& conv)
+{
+    const float nearP = static_cast<float>(camera.getNearPlane()) * conv.unitScale;
+    const float farP  = static_cast<float>(camera.getFarPlane()) * conv.unitScale;
+    const float nearZ = (nearP > 1e-4f) ? nearP : 0.1f;
+    const float farZ  = (farP > nearZ) ? farP : (nearZ + 1000.0f);
+
+    const double aspW = camera.getAspectWidth();
+    const double aspH = camera.getAspectHeight();
+    const float aspect = (aspW > 0.0 && aspH > 0.0)
+                             ? static_cast<float>(aspW / aspH) : (16.0f / 9.0f);
+
+    if (camera.getProjectionType() == ofbx::Camera::ProjectionType::ORTHOGRAPHIC)
+    {
+        const float halfW =
+            static_cast<float>(camera.getOrthoZoom()) * 0.5f * conv.unitScale;
+        const float halfH = (aspect > 1e-4f) ? (halfW / aspect) : halfW;
+        world.AddComponent<Camera>(
+            e, Camera::Orthographic(-halfW, halfW, -halfH, halfH, nearZ, farZ));
+        return;
+    }
+
+    constexpr float kInchToMm = 25.4f;
+    const float focal   = static_cast<float>(camera.getFocalLength());
+    const float filmWmm = static_cast<float>(camera.getFilmWidth()) * kInchToMm;
+    float vfov;
+    if (focal > 1e-4f && filmWmm > 1e-4f && aspect > 1e-4f)
+    {
+        const float hfov = 2.0f * std::atan(filmWmm / (2.0f * focal));
+        vfov = 2.0f * std::atan(std::tan(hfov * 0.5f) / aspect);
+    }
+    else
+    {
+        vfov = glm::radians(50.0f);  // 参数缺失退默认垂直 FOV
+    }
+    world.AddComponent<Camera>(e, Camera::Perspective(vfov, aspect, nearZ, farZ));
+}
+
 // 把一个 mesh 的 slot material 列表（ofbx::Material* → sentinel MaterialInstance*）
 // 接到 entity 的 Renderable / SubMeshMaterialsComponent 上。
 //
@@ -389,7 +447,8 @@ Entity ProcessNode(
     World& world, const ofbx::Object& node, const AxisConverter& conv,
     const std::map<const ofbx::Mesh*, MeshBuildResult>& meshResults,
     const std::unordered_map<const ofbx::Material*, MaterialInstance*>& matInstances,
-    std::size_t& outEntityCount)
+    const std::map<const ofbx::Object*, const ofbx::Camera*>& nodeCameras,
+    std::size_t& outEntityCount, std::size_t& outCameraCount)
 {
     Entity e = world.CreateEntity();
     ++outEntityCount;
@@ -408,7 +467,26 @@ Entity ProcessNode(
     glm::vec3 skew{};
     glm::vec4 perspective{};
     glm::decompose(engLocal, scl, rot, pos, skew, perspective);
+
+    // FBX 相机看 node 本地 +X（FBX 约定，实测 Blender 导出的 camera node rotation
+    // 经共轭后 rot*(+X) 落到正确世界 aim）；引擎 / CameraFrustumGizmoPlugin 看 -Z。
+    // 若本 node 挂 camera attribute，给 rotation 后乘桥接 B（绕 +Y 转 -90°，把引擎
+    // 本地 -Z 映到 +X、固定 up +Y）→ q_final*(-Z) = q_node*(+X) = 正确世界方向。
+    // 注：桥接进 entity rotation，camera node 的子节点（罕见）会随之转——与 glTF 灯光
+    // 桥接同款取舍（相机 / 灯几乎不带 mesh 子）。
+    const auto camIt = nodeCameras.find(&node);
+    const bool isCameraNode = (camIt != nodeCameras.end());
+    if (isCameraNode)
+    {
+        rot = rot * glm::angleAxis(glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    }
     world.AddComponent<TransformComponent>(e, TransformComponent{pos, rot, scl});
+
+    if (isCameraNode)
+    {
+        AddFbxCamera(world, e, *camIt->second, conv);
+        ++outCameraCount;
+    }
 
     // mesh node：挂 Renderable + per-mesh material。OpenFBX Mesh 继承 Object，
     // 用 getType()==MESH 判，再向下取指针查 meshResults。
@@ -435,7 +513,8 @@ Entity ProcessNode(
     for (const ofbx::Object* child : children)
     {
         childEntities.push_back(
-            ProcessNode(world, *child, conv, meshResults, matInstances, outEntityCount));
+            ProcessNode(world, *child, conv, meshResults, matInstances, nodeCameras,
+                        outEntityCount, outCameraCount));
     }
 
     // 子树建完，不再新增实体 —— patch firstChild + 子节点 parent / 兄弟链。
@@ -514,11 +593,11 @@ ImportResult RunFbxSceneImportToRegistry(std::string_view srcPath,
         return result;
     }
 
-    // 解析：忽略动画 / skin / 灯光 / 相机（同 FbxImporter MVP，只取静态几何 +
-    // 材质 + node 层级）。注意**不**设 IGNORE_MODELS —— scene import 需要 node。
+    // 解析：忽略动画 / skin / 灯光（MVP）；**保留 cameras**（scene import 导相机 →
+    // Render::Camera）。只取静态几何 + 材质 + node 层级 + 相机。注意**不**设
+    // IGNORE_MODELS —— scene import 需要 node（相机也挂在 NULL_NODE 上）。
     const ofbx::LoadFlags flags =
         ofbx::LoadFlags::IGNORE_BLEND_SHAPES |
-        ofbx::LoadFlags::IGNORE_CAMERAS |
         ofbx::LoadFlags::IGNORE_LIGHTS |
         ofbx::LoadFlags::IGNORE_SKIN |
         ofbx::LoadFlags::IGNORE_BONES |
@@ -537,6 +616,22 @@ ImportResult RunFbxSceneImportToRegistry(std::string_view srcPath,
     }
 
     const AxisConverter conv = MakeAxisConverter(scene->getGlobalSettings(), importScale);
+
+    // FBX camera 是 NodeAttribute（isNode==false），挂在一个 NULL_NODE 的 model node
+    // 下（camera.getParent() == 该 node）。建 node→camera 索引，ProcessNode 遇到该
+    // node 时挂 Render::Camera。必须在 scene->destroy() 之前建（Camera* destroy 后悬空）。
+    std::map<const ofbx::Object*, const ofbx::Camera*> nodeCameras;
+    {
+        const int camCount = scene->getCameraCount();
+        for (int ci = 0; ci < camCount; ++ci)
+        {
+            const ofbx::Camera* cam = scene->getCamera(ci);
+            if (cam != nullptr && cam->getParent() != nullptr)
+            {
+                nodeCameras[cam->getParent()] = cam;
+            }
+        }
+    }
 
     // 每模型一个子目录 assets/Models/<basename>/ —— mesh + material + 贴图 + 源
     // copy 全部 co-locate。
@@ -729,10 +824,12 @@ ImportResult RunFbxSceneImportToRegistry(std::string_view srcPath,
     // getLocalTransform / getType / resolveObjectLink，故必须在 destroy **之前**建完。
     World world;
     std::size_t entityCount = 0;
+    std::size_t cameraCount = 0;
     for (std::size_t ri = 0; ri < roots.size(); ++ri)
     {
         Entity rootE =
-            ProcessNode(world, *roots[ri], conv, meshResults, matInstances, entityCount);
+            ProcessNode(world, *roots[ri], conv, meshResults, matInstances, nodeCameras,
+                        entityCount, cameraCount);
         if (auto* h = world.GetComponent<HierarchyComponent>(rootE))
         {
             h->sortIndex = static_cast<int>(ri);
@@ -782,9 +879,11 @@ ImportResult RunFbxSceneImportToRegistry(std::string_view srcPath,
     result.destPath = scenePath;
     result.message  = "imported fbx scene (entities=" + std::to_string(entityCount) +
                       " meshes=" + std::to_string(writtenMeshes) +
-                      " materials=" + std::to_string(matPaths.size()) + ")";
-    ORANGE_LOG_INFO("FbxSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={})",
-                    srcPath, scenePath, entityCount, writtenMeshes, matPaths.size());
+                      " materials=" + std::to_string(matPaths.size()) +
+                      " cameras=" + std::to_string(cameraCount) + ")";
+    ORANGE_LOG_INFO("FbxSceneImporter: '{}' -> '{}' (entities={} meshes={} materials={} cameras={})",
+                    srcPath, scenePath, entityCount, writtenMeshes, matPaths.size(),
+                    cameraCount);
     return result;
 }
 

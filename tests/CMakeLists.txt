@@ -398,6 +398,14 @@ if (EXISTS "${_orange_fbx_scene_fixture}")
     target_compile_definitions(fbx_scene_import_test PRIVATE
         "ORANGE_ENGINE_FBX_SCENE_FIXTURE=\"${_orange_fbx_scene_fixture}\"")
 endif ()
+# 相机 fixture（cube_with_camera.fbx，RefCube mesh + Cam camera node）经
+# ORANGE_ENGINE_FBX_CAMERA_FIXTURE 注入 + if(EXISTS) 门控，验 FBX camera node →
+# Render::Camera（投影 + 朝向桥接）。与层级 fixture 独立，各自缺失各自 SKIP。
+set(_orange_fbx_camera_fixture "${CMAKE_SOURCE_DIR}/tests/fixtures/cube_with_camera.fbx")
+if (EXISTS "${_orange_fbx_camera_fixture}")
+    target_compile_definitions(fbx_scene_import_test PRIVATE
+        "ORANGE_ENGINE_FBX_CAMERA_FIXTURE=\"${_orange_fbx_camera_fixture}\"")
+endif ()
 orange_engine_set_compiler_options(fbx_scene_import_test)
 if (MSVC)
     set_source_files_properties(

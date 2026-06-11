@@ -36,7 +36,11 @@
 //     贴图 co-locate）。单 material → Renderable.materialInstance；多 material
 //     → SubMeshMaterialsComponent。
 //   - 只接受三角化几何（OpenFBX triangulate）。skinning / animation / blend
-//     shape / camera / light skip（OpenFBX 全 IGNORE，与 FbxImporter 一致）。
+//     shape / light skip（OpenFBX IGNORE）。**camera 导入** → Render::Camera：
+//     相机是 NodeAttribute（挂在 NULL_NODE 上，camera.getParent()==该 node），
+//     投影 perspective 从 film aperture（英寸→mm）+ focal + aspect 算垂直 FOV、
+//     orthographic 从 orthoZoom 算；**朝向桥接**——FBX 相机看本地 +X，对挂相机的
+//     node rotation 后乘绕 +Y 转 -90°（-Z→+X）让引擎相机看 -Z 时落到正确世界方向。
 //
 // OpenFBX 头声明只在 .cpp 引用（ofbx.cpp / libdeflate.c 作为独立 TU 由 CMake
 // 接进 target），本头不引 ofbx.h —— 保持链接边界清晰（与 FbxImporter.h 同款）。

@@ -26,6 +26,7 @@
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/asset/MeshLoader.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
@@ -354,6 +355,116 @@ int main()
 #else
     std::fprintf(stdout,
                  "  [SKIP] FBX scene fixture 未编入（无 ORANGE_ENGINE_FBX_SCENE_FIXTURE）\n");
+#endif
+
+    // ===== 7. FBX camera node → Render::Camera（投影 + 朝向桥接）=====
+    // fixture：cube_with_camera.fbx —— RefCube（原点 mesh，验相机与 mesh 共存）+
+    // Cam（Blender 世界 (0,0,5)，无旋转 = 看本地 -Z 俯看原点；focal 35mm /
+    // sensor 36mm / clip 0.1~100）。经 Z-up→Y-up 换轴 (x,y,z)→(x,z,-y)：相机位置
+    // (0,0,5)→(0,5,0)，朝向应仍俯看原点 = 引擎 forward(rotation·-Z) ≈ (0,-1,0)。
+#ifdef ORANGE_ENGINE_FBX_CAMERA_FIXTURE
+    {
+        namespace RenderNS = ::Orange::Engine::Render;
+        using RenderNS::Camera;
+
+        const std::string camFixture = ORANGE_ENGINE_FBX_CAMERA_FIXTURE;
+        if (!fs::exists(camFixture))
+        {
+            std::fprintf(stdout, "  [SKIP] FBX camera fixture 不存在: %s\n",
+                         camFixture.c_str());
+        }
+        else
+        {
+            auto reg = MakeImportRegistry();
+            const ImportNS::ImportResult rc =
+                ImportNS::RunFbxSceneImportToRegistry(camFixture, *reg);
+            assert(rc.status == ImportNS::ImportStatus::Success &&
+                   "FBX camera 场景导入应 Success");
+            assert(rc.message.find("cameras=1") != std::string::npos &&
+                   "result message 应含 cameras=1（1 个相机 node 被计数）");
+            std::fprintf(stdout, "  [PASS] camera 导入产出 scene (%s)\n",
+                         rc.message.c_str());
+
+            World w;
+            SceneNS::LoadOptions opts;
+            opts.assetRegistry = reg.get();
+            auto lr = SceneNS::Load(rc.destPath, w, opts);
+            assert(lr.IsOk() && "相机场景应能 Load（Camera component round-trip）");
+
+            // 恰好 1 个 Camera component；RefCube mesh 与相机共存。
+            std::size_t camCount = 0;
+            for (auto e : w.Registry().view<Camera>()) { (void)e; ++camCount; }
+            assert(camCount == 1 && "应恰好 1 个 Camera component");
+
+            const Entity cam     = FindByName(w, "Cam");
+            const Entity refCube = FindByName(w, "RefCube");
+            assert(w.IsValid(cam) && "Cam 实体应存在（相机 node 保留名字）");
+            assert(w.IsValid(refCube) && "RefCube 实体应存在（mesh 与相机共存）");
+            const auto* cubeR =
+                w.GetComponent<RenderNS::RenderableComponent>(refCube);
+            assert(cubeR != nullptr && cubeR->mesh.IsValid() &&
+                   "RefCube 应有有效 Renderable（相机不吞 mesh）");
+
+            const auto* cc = w.GetComponent<Camera>(cam);
+            assert(cc != nullptr && "Cam 应挂 Camera component");
+
+            // ---- 位置：Blender 世界 (0,0,5) 经换轴 (x,z,-y) → 引擎 (0,5,0) ----
+            const auto* cT = w.GetComponent<SceneNS::TransformComponent>(cam);
+            assert(cT != nullptr && "Cam 应有 Transform");
+            std::fprintf(stdout,
+                         "  [info] Cam local pos = (%.4f, %.4f, %.4f)\n",
+                         cT->position.x, cT->position.y, cT->position.z);
+            assert(std::fabs(cT->position.x - 0.0f) < 1e-2f &&
+                   std::fabs(cT->position.y - 5.0f) < 1e-2f &&
+                   std::fabs(cT->position.z - 0.0f) < 1e-2f &&
+                   "Cam 位置应 ≈ (0,5,0)（Blender (0,0,5) 换轴 (x,z,-y)）");
+
+            // ---- 朝向桥接：引擎 forward = rotation·(0,0,-1) 应俯看原点 ≈ (0,-1,0) ----
+            const glm::vec3 fwd = cT->rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+            std::fprintf(stdout,
+                         "  [info] Cam forward (rot·-Z) = (%.4f, %.4f, %.4f)\n",
+                         fwd.x, fwd.y, fwd.z);
+            assert(std::fabs(fwd.x - 0.0f) < 2e-2f &&
+                   std::fabs(fwd.y - (-1.0f)) < 2e-2f &&
+                   std::fabs(fwd.z - 0.0f) < 2e-2f &&
+                   "Cam forward 应 ≈ (0,-1,0)（FBX 相机看 +X，桥接到引擎 -Z 后俯看原点）");
+
+            // ---- 投影：perspective + near/far + 水平 FOV（focal35/sensor36）----
+            const glm::mat4& p = cc->projection;
+            std::fprintf(stdout,
+                         "  [info] proj p00=%.5f p11=%.5f p22=%.5f p23=%.5f p32=%.5f p33=%.5f\n",
+                         p[0][0], p[1][1], p[2][2], p[2][3], p[3][2], p[3][3]);
+            // perspective 判据：p[2][3]==-1（w=-view-z）、p[3][3]==0。
+            assert(std::fabs(p[2][3] - (-1.0f)) < 1e-4f &&
+                   std::fabs(p[3][3] - 0.0f) < 1e-4f &&
+                   "应是透视投影（p[2][3]==-1, p[3][3]==0）");
+            // 从投影反推 near/far（Camera::Perspective 矩阵布局）：
+            //   p[2][2]=zFar/(zNear-zFar)，p[3][2]=zNear·zFar/(zNear-zFar)
+            //   → zNear = p[3][2]/p[2][2]；zFar = p[2][2]·zNear/(1+p[2][2])。
+            const float recNear = p[3][2] / p[2][2];
+            const float recFar  = p[2][2] * recNear / (1.0f + p[2][2]);
+            std::fprintf(stdout, "  [info] recovered near=%.4f far=%.4f\n",
+                         recNear, recFar);
+            assert(std::fabs(recNear - 0.1f) < 5e-3f &&
+                   "投影应保住 near ≈ 0.1（clip_start）");
+            assert(std::fabs(recFar - 100.0f) < 1.0f &&
+                   "投影应保住 far ≈ 100（clip_end）");
+            // 水平 FOV（aspect 无关）：p[0][0] = 1/tan(hfov/2)，
+            //   hfov = 2·atan(filmW_mm/(2·focal)) = 2·atan(36/70) ≈ 0.9485 rad
+            //   → p[0][0] ≈ 1/tan(0.4743) ≈ 1.944。锁 focal/sensor 不回归。
+            std::fprintf(stdout, "  [info] p00=%.5f (期望 ≈ 1.944, hfov focal35/sensor36)\n",
+                         p[0][0]);
+            assert(std::fabs(p[0][0] - 1.944f) < 0.08f &&
+                   "水平 FOV 应来自 focal 35mm / sensor 36mm（p[0][0] ≈ 1.944）");
+
+            std::fprintf(stdout,
+                         "  [PASS] FBX camera：→ Render::Camera（位置换轴 + 朝向桥接俯看原点 + "
+                         "透视投影 near/far/hfov 正确）\n");
+        }
+    }
+#else
+    std::fprintf(stdout,
+                 "  [SKIP] FBX camera fixture 未编入（无 ORANGE_ENGINE_FBX_CAMERA_FIXTURE）\n");
 #endif
 
     fs::current_path(fs::temp_directory_path(), ec);
