@@ -88,6 +88,7 @@
 #include "plugin/CameraFrustumGizmoPlugin.h"
 #include "plugin/ColliderEditInspectorPlugin.h"
 #include "plugin/DirectionalLightGizmoPlugin.h"
+#include "plugin/ScriptFieldOverridesInspectorPlugin.h"
 #include "plugin/DragonBonesAssetInspectorPlugin.h"
 #include "plugin/ImportMetaAssetInspectorPlugin.h"
 #include "plugin/MaterialAssetInspectorPlugin.h"
@@ -748,6 +749,10 @@ int main(int argc, char** argv)
     // Polygon / Edge Chain shape 时进入 viewport 顶点编辑子模式。
     editorHost.inspectorPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::ColliderEditInspectorPlugin>());
+    // Script 段末 fieldOverrides 列表编辑（ADR-017 B1.3 authored tweakable）——
+    // 增/删/编辑每条 override 的 name/type/value（plugin 装饰式扩展，schema 管标量字段）。
+    editorHost.inspectorPlugins.push_back(
+        std::make_unique<Orange::Editor::Plugin::ScriptFieldOverridesInspectorPlugin>());
 
     // 注册第一个 IEditorAssetInspectorPlugin —— v0.7 c0 落地（消除 L16）。
     // 当 Asset 浏览器选中 .material 文件时接管 Inspector 整段；与

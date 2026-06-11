@@ -856,3 +856,20 @@
   - 三个按钮在 **Play / Paused** 期 disabled（灰显，hover 有 tooltip）。
 - **失败上报**：Apply 后其它实例与模板的关联断裂（蓝条全亮 / Refresh 失效）；banner 出现在非 prefab 实例上。
 - **需主循环 / 用户拍板的设计点**：Apply / Revert All / Refresh **均不进命令栈（不可 Undo）**——apply/revert all 是磁盘/批量动作，refresh 缺 typed in-place 逆写原语。若 dogfood 觉得 Refresh / Revert All 需要 Undo，需引擎层补 typed by-path 写原语（下个 session 跨能力，登记到 engine-known-gaps）。当前以"显式用户动作 + tooltip 标注不可撤销"落地。
+
+---
+
+## 2026-06-12 通宵 session（B1 PIE 编辑器侧：ScriptComponent Inspector）
+
+### 56. ScriptComponent Add-Component + Inspector 编辑（assemblyPath/typeName + fieldOverrides 列表）
+
+- **commit**：本 session（RegisterScriptComponentSchema + ScriptFieldOverridesInspectorPlugin）。引擎层 ScriptComponent / ScriptSystem / fieldOverrides 已 headless 真验（B1.2 `e558861` + B1.3 `f72429e`），本项是**编辑器侧数据编辑接线**（纯数据，不需 dotnet runtime）。
+- **怎么触发**：
+  1. 选中一个实体 → Inspector 底部 **+Add Component** → 菜单点 **"Script"**。
+  2. 实体多出 **Script** 段，含 **Assembly Path** / **Type Name** 两个 string 字段 + 段末 **Field Overrides** 列表。
+- **看什么 / 通过判据**：
+  - Assembly Path 填 game assembly 相对路径（如 `ScriptFixtures.dll`）、Type Name 填 assembly-qualified 全名（如 `OrangeFixtures.Mover, ScriptFixtures`）；可编辑、随场景 Save/Load round-trip。
+  - **Field Overrides 列表**：点 **+ Add Override** 加一行 → 每行 `[name 输入] [type 下拉 Float/Int/Bool/String] [value 输入] [x 删除]`；增/删/编辑即时改 `ScriptComponent.fieldOverrides`。
+  - 段头右键 **Remove Component** 可删；已挂 Script 的实体 +Add 菜单不再出现 "Script"。
+- **重要限制（dogfood 注意，非 bug）**：**EnterPlay 尚未接 ScriptSystem**（需 dotnet runtime + 开 `ORANGE_ENGINE_WITH_DOTNET`，本 session 为隔离风险未碰 build 配置）。所以编辑了 assemblyPath/typeName/fieldOverrides 后 **Play 时脚本不会真运行**——当前仅作**数据编辑 + 序列化**。Play 驱动脚本留专门 dotnet session（见 item 50）。
+- **背景**：B1 PIE 重点 epic 编辑器侧地基。运行时全齐（headless 验过），缺 ① 本项（数据编辑 UI，已落地）② EnterPlay 接 ScriptSystem（dotnet-gated 留待）③ workspace 外部项目模型。

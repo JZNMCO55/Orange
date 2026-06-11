@@ -32,6 +32,7 @@
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/script/ScriptComponent.h>
 
 #include <string>
 #include <variant>
@@ -1235,6 +1236,42 @@ void RegisterAudioSourceComponentSchema()
         .Register();
 }
 
+// ScriptComponent 的 Inspector schema —— C# 脚本引用（ADR-017）的纯数据编辑面板。
+//
+// ScriptComponent 是纯数据组件（assemblyPath / typeName 两字符串 + fieldOverrides
+// 列表），**不**受 ORANGE_ENGINE_WITH_DOTNET 门控——含脚本组件的场景在无 dotnet
+// 构建里也能 round-trip。因此本 schema 的注册同样始终编译，与运行脚本的能力
+// （ScriptSystem / ScriptRuntime，dotnet-gated）解耦：编辑器始终能 Add-Component +
+// 编辑 (assemblyPath, typeName)，只是 Play 时是否真实例化脚本由 dotnet 构建决定。
+//
+// 本 schema 仅暴露两个 string 字段（P0）：
+//   * assemblyPath —— game assembly（含脚本类型）的相对路径。
+//   * typeName     —— assembly-qualified 类型全名，如
+//                     "OrangeFixtures.Mover, ScriptFixtures"。
+//
+// fieldOverrides（authored tweakable 列表）是"动态长度 + 每行 3 异构字段"的
+// struct 数组，超出 schema 通用 PropertyType 的标量 / 固定数组表达力——走
+// ScriptFieldOverridesInspectorPlugin 的 ParseEnd 钩子做自定义列表 UI（与
+// AudioSource Play / Collider 顶点编辑同款"plugin 承载超出字段控件的 UI"分工），
+// 不为它新增 PropertyType + 改 SchemaInspector。
+void RegisterScriptComponentSchema()
+{
+    using SC = Orange::Engine::Script::ScriptComponent;
+    ComponentSchemaBuilder<SC>("Script", "Script")
+        .Helper("挂一个托管 C# 脚本类（OrangeScript 子类）到本实体（ADR-017）。\n"
+                "Assembly Path = game assembly 相对路径；Type Name = assembly-qualified 类型全名"
+                "（如 \"OrangeFixtures.Mover, ScriptFixtures\"）。\n"
+                "Field Overrides 在下方列表编辑（实例化后、OnStart 前注入脚本 public 字段）。\n"
+                "脚本实际运行需 dotnet 构建（Play 时由 ScriptSystem 驱动）；无 dotnet 构建仅作数据保存。")
+        .Field<&SC::assemblyPath>("assemblyPath", "Assembly Path")
+            .Tooltip("含脚本类型的 game assembly 路径（运行期由 ScriptRuntime 解析）。")
+        .Field<&SC::typeName>("typeName", "Type Name")
+            .Tooltip("assembly-qualified 类型全名，如 \"OrangeFixtures.Mover, ScriptFixtures\"。")
+        .Addable()
+        .Removable()
+        .Register();
+}
+
 }  // anonymous namespace
 
 void RegisterBuiltinSchemas()
@@ -1259,6 +1296,7 @@ void RegisterBuiltinSchemas()
     RegisterAudioSourceComponentSchema();
     RegisterAnimatorComponentSchema();
     RegisterCameraComponentSchema();
+    RegisterScriptComponentSchema();
     // 所有内置组件 schema 已全数迁完。后续 commit（c10）改 Add Component 菜
     // 单走 schema 注册表枚举驱动；c11 / c12 引入 IEditor*Plugin 抽象。
 }
