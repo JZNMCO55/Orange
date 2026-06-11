@@ -559,6 +559,19 @@ orange_engine_add_test(timeline_edit_primitives_test animation/TimelineEditPrimi
 # 曲线编辑器切线编辑数据层（B2.4）：手柄屏幕落点 ↔ 切线逆/正运算 round-trip +
 # 改 inTangent/outTangent → SampleTrack 值按预期变 + do/undo 对称（纯数据，不链编辑器 TU）
 orange_engine_add_test(curve_editor_primitives_test animation/CurveEditorPrimitivesTest.cpp)
+# AnimFsmFileIO round-trip（B2.5 状态机图）—— 锁 .anim_fsm 读写对称 + 节点画布
+# 坐标（editorPos = state.layout）持久化 + 旧文件缺 layout 向后兼容。AnimFsmFileIO.cpp
+# helper 源在 tools/OrangeEditor 不属引擎 lib，直接编进测试 exe + 加 include path
+# （同 material_file_io_test 模式）。纯 Core::Serialization + AnimFsmModel POD，零
+# ImGui/GLFW/Vulkan；节点图所有 ImGui 交互须 dogfood，此测试只覆盖 IO seam。
+add_executable(anim_fsm_file_io_test
+    editor/AnimFsmFileIORoundTripTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/AnimFsmFileIO.cpp")
+target_link_libraries(anim_fsm_file_io_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(anim_fsm_file_io_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(anim_fsm_file_io_test)
+add_test(NAME anim_fsm_file_io_test COMMAND anim_fsm_file_io_test)
 
 # Animation：DragonBones runtime 接入 smoke（Phase 4 / Task 02）。
 # 这一档不走 orange_engine_add_test：它需要把 src/ 加进 include path
