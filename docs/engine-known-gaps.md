@@ -1721,7 +1721,7 @@ mikktspace 高质量切线（A2 命名交付物之一）落地，替换 importer
 
 ---
 
-## GAP-2026-05-27-cascaded-shadow-maps
+## GAP-2026-05-27-cascaded-shadow-maps ✅
 
 - **发现方**：渲染推进 session（post-process 特效铺完后回看 directional 阴影质量）
 - **发现日期**：2026-05-27
