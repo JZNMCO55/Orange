@@ -134,7 +134,7 @@ S1+S2+S3 都不动 parent 互引用主键（§4 的迁移留给 A2.1 正式开�
 2. **先行 slice（headless，可与 ADR 同 session 或紧随）**：S1（Save 前普遍补 guid 的 SaveOption）→ S2（FindEntityByGuid 索引）→ S3（不变性测试加固）。每步独立 commit + ctest。
 3. **A2.1 主键迁移**：HierarchyComponent parent/sibling 增写 `*Guid` + 读优先 guid 回退 int；scene schema 1.13；round-trip 测（新写 guid、旧读 int、混合）。
 4. **A2.2 prefab 锚定**：实例 ↔ 模板用 guid（消费 S2）。
-5. **A2.3 PIE clone 稳定性**：随 B1 PIE 落地，进 Play 的 world-clone 保 guid 稳定（消费 S1/S2）。
+5. **A2.3 PIE clone 稳定性 ✅ 2026-06-11**：进 Play 的 world-clone 保 guid 稳定（消费 S1/S2）。**判定为情况 A——事实已满足，无需修复**：编辑器 EnterPlay 走 **`Scene::Save(World&, path)` 非 const 入口**（`ensureGuids` 默认 true）落盘磁盘快照、Stop 走 `Scene::Load` 还原全新 World，是**序列化往返**而非内存 clone；非 const Save 补全 guid + A2.1 Hierarchy guid 主键锚定 → runtime world 实体 guid 与 editing world 相同（无重分配/漂移），**不**走 `SeparateClonedIdentities`/`ReassignEntityGuids` 换新路径。交付 = headless 测试 `scene_play_snapshot_guid_test`（`tests/scene/PlaySnapshotGuidTest.cpp`）复刻 EnterPlay→Stop 的 Save→Load 路径锁住"快照往返后 guid 稳定 + FindEntityByGuid 命中同一逻辑实体 + Transform/Name/层级一致 + 反复进出 Play 不漂移"。全量 ctest 94/94。
 
 每步 headless round-trip 可测；不涉 GUI、不跨仓。dogfood 仅在 prefab override / PIE 真消费时验"跨会话/跨 Play 引用不丢"。
 

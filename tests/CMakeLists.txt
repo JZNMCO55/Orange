@@ -117,6 +117,10 @@ orange_engine_add_test(scene_world_partition_test scene/WorldPartitionTest.cpp)
 orange_engine_add_test(scene_subtree_clone_test scene/SceneSubtreeCloneTest.cpp)
 orange_engine_add_test(scene_serialization_test scene/SceneSerializationTest.cpp)
 orange_engine_add_test(scene_entity_guid_test   scene/EntityGuidTest.cpp)
+# PIE world-clone 的 EntityGuid 稳定性（A2.3）：复刻 EnterPlay Save(World&) 快照 →
+# Stop Load 还原路径，断言 guid 跨 snapshot/restore 稳定 + FindEntityByGuid 命中
+# 同一逻辑实体 + Transform/Name/层级一致。纯序列化 + World，走真实磁盘 Save/Load。
+orange_engine_add_test(scene_play_snapshot_guid_test scene/PlaySnapshotGuidTest.cpp)
 orange_engine_add_test(scene_prefab_test        scene/PrefabTest.cpp)
 orange_engine_add_test(prefab_override_test     scene/PrefabOverrideTest.cpp)
 orange_engine_add_test(prefab_refresh_test      scene/PrefabRefreshTest.cpp)
