@@ -6,8 +6,11 @@
 #include "command/SetFieldValueCommand.h"
 
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
+#include <orange/engine/scene/TransformMath.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <imgui.h>
 
@@ -71,6 +74,37 @@ glm::vec3 AxisDir(EditorGizmoState::Axis axis) noexcept
         case EditorGizmoState::Axis::Z: return glm::vec3(0.0f, 0.0f, 1.0f);
         default:                        return glm::vec3(0.0f);
     }
+}
+
+// ---- A1 层级（world→local）辅助 ---------------------------------------
+// 取实体的父世界矩阵：从 HierarchyComponent.parent 找父，读其每帧由
+// PropagateWorldTransforms 缓存的 WorldTransformComponent.world。无父 / 父无
+// cache → identity（→ world==local，零回归）。
+glm::mat4 ParentWorldMatrix(Orange::Engine::World& world, Orange::Engine::Entity entity)
+{
+    using Orange::Engine::Scene::HierarchyComponent;
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* h = world.GetComponent<HierarchyComponent>(entity);
+    if (h == nullptr || !h->parent.IsValid()) { return glm::mat4(1.0f); }
+    const auto* pwtc = world.GetComponent<WorldTransformComponent>(h->parent);
+    return (pwtc != nullptr) ? pwtc->world : glm::mat4(1.0f);
+}
+
+// 取实体的世界 position：优先读 WorldTransformComponent.world（gizmo 画在 mesh
+// 的世界位置）；无 cache fallback 到 local position（root：world==local）。
+glm::vec3 EntityWorldPosition(Orange::Engine::World& world, Orange::Engine::Entity entity,
+                              const Orange::Engine::Scene::TransformComponent& tc)
+{
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
+    return (wtc != nullptr) ? glm::vec3(wtc->world[3]) : tc.position;
+}
+
+// 把世界 position 转成实体的 local position（parentWorld 逆变换）。root /
+// 原点父：parentWorld==identity → 原样返回（零回归）。
+glm::vec3 WorldPosToLocal(const glm::mat4& parentWorld, const glm::vec3& worldPos)
+{
+    return glm::vec3(glm::inverse(parentWorld) * glm::vec4(worldPos, 1.0f));
 }
 
 // ---- Transform 写回 apply lambda（捕获 EditorHost*，c14 风格弱引用解 World）
@@ -137,7 +171,9 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     const glm::mat4 viewProj   = cam.projection * cam.view;
     const glm::mat4 invViewProj = glm::inverse(viewProj);
 
-    const glm::vec3 entityWorldPos = pTC->position;
+    // A1 层级：gizmo 画在实体的**世界**位置（读 WorldTransformComponent），
+    // 而非把 local position 当 world。root：world==local → 零回归。
+    const glm::vec3 entityWorldPos = EntityWorldPosition(*pWorld, entity, *pTC);
 
     // ---- gizmo 屏幕尺寸自适应：选取 world-space handle 长度，使其投影到
     //      屏幕约 host.settings.gizmoHandleScreenLengthPx 像素。探针用相机
@@ -239,18 +275,24 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
             if (hit.has_value())
             {
                 host.gizmo.draggingAxis       = host.gizmo.hoveredAxis;
-                host.gizmo.dragStartEntityPos = entityWorldPos;
+                host.gizmo.dragStartEntityPos = entityWorldPos;          // 世界起点
+                host.gizmo.dragStartEntityLocalPos = pTC->position;      // local 起点（命令 oldVal）
                 host.gizmo.dragStartHitOnAxis = *hit;
-                // 多选群组 translate：快照其余选中实体的起点 position（与
-                // primary 同样直接取 component.position，保持 gizmo 既有
-                // "position 当 world" 的一致语义）。单选时集合为空。
+                // 多选群组 translate：快照其余选中实体的起点。position 存 local
+                // （命令 oldVal），worldStart 存世界（groupDelta 在世界空间施加）。
+                // root：worldStart==position → 零回归。单选时集合为空。
                 host.gizmo.dragStartAdditional.clear();
                 for (const auto& other : host.selection.additionalSelectedEntities)
                 {
                     if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
                     {
-                        host.gizmo.dragStartAdditional.push_back(
-                            {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                        EditorGizmoState::GroupDragSnapshot snap;
+                        snap.entity     = other;
+                        snap.position   = pOtherTC->position;   // local 起点
+                        snap.rotation   = pOtherTC->rotation;
+                        snap.scale      = pOtherTC->scale;
+                        snap.worldStart = EntityWorldPosition(*pWorld, other, *pOtherTC);
+                        host.gizmo.dragStartAdditional.push_back(snap);
                     }
                 }
                 host.cmdStack.BeginGroup("Translate Drag", MergeMode::Ends);
@@ -293,18 +335,25 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                             comp, host.settings.snapTranslateStep);
                         newPos += axisDir * (snapped - comp);
                     }
-                    const glm::vec3 oldPos  = pTC->position;
-                    if (newPos != oldPos)
+                    // A1 层级：newPos 在世界空间算（含世界轴 snap），写回
+                    // TransformComponent.position 前转 local（parentWorld 逆变换）。
+                    // root/原点父：parentWorld==identity → newLocal==newPos，与
+                    // 既有逐字节一致（零回归）。
+                    const glm::mat4 parentWorld = ParentWorldMatrix(*pWorld, entity);
+                    const glm::vec3 newLocal    = WorldPosToLocal(parentWorld, newPos);
+                    const glm::vec3 oldLocal    = pTC->position;
+                    if (newLocal != oldLocal)
                     {
-                        pTC->position = newPos;
+                        pTC->position = newLocal;
                         // fieldKey 与 SchemaInspector 的 Transform.position
                         // 路径同字符串拼接（"Transform" + "." + "position"）；
-                        // intra-group coalesce 按 fieldKey + entity 匹配。
+                        // intra-group coalesce 按 fieldKey + entity 匹配。oldVal
+                        // 锁定到拖动起点的 **local**（undo 目标），非世界起点。
                         host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                             entity,
                             std::string("Transform.position"),
-                            host.gizmo.dragStartEntityPos,  // oldVal 锁定到拖动起点
-                            newPos,
+                            host.gizmo.dragStartEntityLocalPos,
+                            newLocal,
                             MakeTransformPositionApply(&host, entity)));
                     }
 
@@ -321,15 +370,23 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                         if (!pWorld->IsValid(snap.entity)) { continue; }
                         auto* pOtherTC = pWorld->GetComponent<TransformComponent>(snap.entity);
                         if (pOtherTC == nullptr) { continue; }
-                        const glm::vec3 otherNew = snap.position + groupDelta;
-                        if (otherNew != pOtherTC->position)
+                        // groupDelta 是**世界**刚体位移：follower 新世界 =
+                        // worldStart + groupDelta，再经各自 parentWorld 转 local
+                        // 写回。root：worldStart==snap.position、parentWorld==identity
+                        // → otherNewLocal==snap.position+groupDelta（零回归）。
+                        const glm::vec3 otherNewWorld = snap.worldStart + groupDelta;
+                        const glm::mat4 otherParentWorld =
+                            ParentWorldMatrix(*pWorld, snap.entity);
+                        const glm::vec3 otherNewLocal =
+                            WorldPosToLocal(otherParentWorld, otherNewWorld);
+                        if (otherNewLocal != pOtherTC->position)
                         {
-                            pOtherTC->position = otherNew;
+                            pOtherTC->position = otherNewLocal;
                             host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                                 snap.entity,
                                 std::string("Transform.position"),
-                                snap.position,
-                                otherNew,
+                                snap.position,        // local 起点（undo 目标）
+                                otherNewLocal,
                                 MakeTransformPositionApply(&host, snap.entity)));
                         }
                     }

@@ -759,3 +759,32 @@
 ### 顺带发现（非本次修复，登记待办）
 - **~~toon 材质 Location 3 顶点属性缺失~~ → ✅ 2026-06-11 已修（真根因是 pbr 模板，非 toon）**：运行时 Vulkan validation error `pVertexAttributeDescriptions does not have a Location 3 but vertex shader has an input variable at that Location`。**原误归因到 Animated Cube 的 toon 材质——错**：解析编译产物 `toon.vert.spv` 实测输入 location = `[0,1,2]`，toon 顶点 shader **不**消费 location 3。真根因 = 数据驱动模板路径：编辑器经 `RegisterTemplatesFromDirectory` 加载 `pbr.template.json`，而该 JSON **没有 `usesTangentVertex` 字段**（`ShaderTemplateDesc` 当时也没有这个字段、解析与 `RegisterTemplate` 都不传播它）→ 编辑器里的 **pbr** 模板 `usesTangentVertex=false`，但 `pbr.vert.spv` 消费 location 3 → 失配 validation error（validation 消息不带实体名，旁边的 pbr drawable 才是源头，被误当成 toon）。不只是噪声：pbr normal mapping 还读到未定义的 tangent 输入。**修复**：`ShaderTemplateDesc` 加 `usesTangentVertex` 字段 + `LoadTemplateDescFromFile` 解析（可选，schema minor 1.1→1.2）+ `RegisterTemplate` 传播到 `Material` + `pbr.template.json` 声明 `"usesTangentVertex": true`。新增 `MaterialSystemTest` parity 测试锁住"内置路径 vs JSON 路径 usesTangentVertex 一致"（防同类 schema 漂移）。
   - **需要你做的 dogfood 验证**：① 启动 OrangeEditor，在 viewport 放一个用 **pbr 材质** + 带法线贴图的模型（或既有 demo 的 pbr drawable）。② 看控制台/输出：之前刷屏的 `Location 3` validation error 应**消失**。③ 看带法线贴图的 pbr 表面：法线细节应正确（修复前 tangent 输入未定义，法线贴图方向可能错乱/闪烁）。若仍有 Location 3 报错，记下是哪个材质模板的 drawable。
+
+---
+
+## 2026-06-11 session（Lumix 成熟度推进：FBX 相机 + pbr tangent + PIE 字段 + gizmo 层级）
+
+> 本 session headless 全绿（ctest 93/93），下列为视觉/交互待人工 dogfood 项。FBX 相机导入（`746592a`）是 **headless 真验**（投影/朝向/位置断言），无需 dogfood，故不在此列。
+
+### 49. A1 transform gizmo —— parented 实体的 translate world→local（`746592a` 后续 commit）
+
+- **commit**：translate gizmo 改 origin 读世界 + apply 转 local（rotate / scale / physics 仍**未**改，见下"剩余"）。
+- **怎么触发**：
+  1. 建实体 A（如 Cube），用 gizmo 把它挪到非原点（如 `(3, 1, 0)`）。
+  2. 建实体 B（如 Sphere），在 Hierarchy 里把 B 拖到 A 下成为**子节点**。
+  3. 选中 B，用 **W**（translate）gizmo 拖动 X / Y / Z。
+- **看什么 / 通过判据**：
+  - gizmo 画在 B 的 **mesh 世界位置**上（修复前画在 B 的 local 偏移处，即原点附近，不在 mesh 上）。
+  - 拖动方向跟世界轴（World space 模式），B 沿该世界轴平滑移动**不跳变**。
+  - 松手后 Inspector 里 B 的 **local** position 是换算后的值（= 世界位移经父逆变换）。
+  - 之后再移动父 A，B 跟随父一起动（层级保持）。
+  - **零回归（务必确认）**：选一个**无父 / 父在原点**的实体（如既有 demo 的 root 实体）拖 gizmo —— 行为应与之前**完全一致**（gizmo 在 mesh 上、拖动手感不变、Undo 一步回退）。
+  - 多选群组：parented + 非 parented 混选一起拖，整体世界刚体平移；Ctrl+Z 一次回退全部。
+- **失败上报**：若 root 实体拖动行为变了（回归！）、或 parented 实体拖动时飞走/抖动，请说明父实体的 position 数值。
+- **剩余（本 session 未做，下次续）**：rotate gizmo（world→local 旋转）、scale gizmo（origin 读世界，父带旋转的 non-uniform scale 是公认难点）、physics collider 双向 world↔local（见 `docs/A1-gizmo-physics-hierarchy-followup.md`）。这些**仍是旧行为**——parented 实体的 rotate/scale gizmo 仍画在 local 偏移处。
+
+### 50. PIE C# 脚本 ScriptComponent fieldOverrides（`f72429e`，引擎层 headless 已验）
+
+- **状态说明**：fieldOverrides 的**引擎层闭环已 headless 真验**（`script_system_test`：override Speed=2.5 → 4 帧后 position.x=10）。但 **Inspector 里编辑 fieldOverrides 的 GUI + EnterPlay 驱动 ScriptComponent 都尚未接线**（见下"前置缺口"），故当前**无法在编辑器内 dogfood**——本条登记为"等编辑器接线后再 dogfood"。
+- **前置缺口（下次 session 任务）**：① 编辑器 EnterPlay 接 ScriptSystem（Play 时实例化 + tick + 应用 fieldOverrides）；② ScriptComponent 的 Inspector schema 注册（填 assemblyPath/typeName + 编辑 fieldOverrides 列表）。② 依赖编辑器侧暴露 `ORANGE_ENGINE_WITH_DOTNET` 编译定义（当前只 PRIVATE 给 orange_engine）。
+- **接线后的 dogfood 步骤（草稿，待前置缺口落地后启用）**：给实体加 Script 组件 → assemblyPath 指向 `ScriptFixtures.dll`、typeName 填 `OrangeFixtures.Tweakable, ScriptFixtures` → 在 Inspector 加一条 fieldOverride `Speed = 2.5` → Play → 实体每帧沿 +X 移动 2.5（不加 override 是 1.0）；改 override 值重 Play 速度随之变。

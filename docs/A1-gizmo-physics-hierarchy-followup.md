@@ -1,7 +1,10 @@
 # A1 收尾 follow-up：transform gizmo + physics 的层级（world↔local）支持
 
-> 状态：**未实现**（A1 ~92% 已落地，剩此两项）。本文是基于真实代码读后的**精确实现 spec**，
-> 供下一个**专门 session + dogfood** 执行。两项都是"写/apply"类（需 world→local 反向变换），
+> 状态：**translate gizmo 已落地（2026-06-11，dogfood-pending）**——primary + 群组 followers
+> 的 origin 改读世界 + apply 经 parentWorld 逆变换转 local 写回，root/原点父零回归（identity-
+> parent fast path），dogfood 步骤见 `docs/dogfood-checklist.md` item 49。**剩余未做**：rotate
+> gizmo、scale gizmo、physics collider 双向（下面 spec 的对应段仍有效）。本文是基于真实代码读后的
+> **精确实现 spec**，供后续 session + dogfood 执行。剩余几项都是"写/apply"类（需 world→local 反向变换），
 > 且 **GUI / 双向 sim 无法 headless 验证**，是编辑器主操作工具 / Play 模式核心——故从
 > A1 自主 session 中剥离，避免盲改（参 `feedback_no_works_claim_from_codereading_interactive`
 > 的教训：GUI 行为靠运行时，读代码判"能用"会被 dogfood 打脸）。

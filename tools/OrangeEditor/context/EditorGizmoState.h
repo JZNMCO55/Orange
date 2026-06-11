@@ -92,6 +92,13 @@ struct EditorGizmoState
     // 最新鼠标 ray 重算最近点，与本字段相减得到沿轴位移增量。
     glm::vec3 dragStartHitOnAxis = glm::vec3(0.0f);
 
+    // ---- A1 层级（world→local）：primary 拖动起点的 **local** position --
+    // dragStartEntityPos 自 A1 起存**世界**起点（gizmo 画在 mesh 世界位置 + 沿
+    // 世界轴 drag）；但写回 TransformComponent.position 是 **local**，命令的
+    // oldValue（undo 目标）必须是拖动起点的 local。两者对 root / 原点父实体
+    // 相等（world==local）→ 零回归；仅 parent 到非原点实体时分叉。
+    glm::vec3 dragStartEntityLocalPos = glm::vec3(0.0f);
+
     // ---- 多选群组变换专用 ----------------------------------------------
     // 按下 LMB 那一帧，除 primary 外其余选中实体的 transform 快照。群组
     // translate/rotate/scale 都以 primary 位置为 pivot，让 follower 随 primary
@@ -100,9 +107,13 @@ struct EditorGizmoState
     struct GroupDragSnapshot
     {
         Orange::Engine::Entity entity;
-        glm::vec3              position = glm::vec3(0.0f);
+        glm::vec3              position = glm::vec3(0.0f);   // 拖动起点 local position（命令 oldVal）
         glm::quat              rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
         glm::vec3              scale    = glm::vec3(1.0f);
+        // A1 层级：拖动起点的 **world** position。群组 translate 的 groupDelta
+        // 是世界位移，follower 新世界 = worldStart + groupDelta，再经各自
+        // parentWorld 转 local 写回。root/原点父：worldStart==position → 零回归。
+        glm::vec3              worldStart = glm::vec3(0.0f);
     };
     std::vector<GroupDragSnapshot> dragStartAdditional;
 
