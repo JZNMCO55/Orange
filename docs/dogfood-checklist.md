@@ -822,3 +822,37 @@
   - 多选群组：parented + 非 parented 混选拖 scale，follower 绕 primary 世界位置缩放；Ctrl+Z 一次回退全部。
 - **⚠️ 已知限制（明确不支持，非 bug）**：**父链带旋转 + 对子做 non-uniform scale**（如父绕 Y 旋 45°，子只拖 X 轴 handle）。此时沿世界朝向轴拖出的 factor 直接乘到子 local scale 分量，是个近似——父旋转会让"沿世界轴的非均匀缩放"在子 local 空间 shear，无法用纯对角 scale 表示。**dogfood 时此场景视觉可能偏斜/不直观，属预期限制，不要当 bug 上报**。父无旋转的 non-uniform scale、以及任意父下的 uniform / center scale 都应正确。
 - **失败上报**：若 root 实体（无父无旋转）拖 scale 行为变了（回归！）、或父**无旋转**的 parented 实体 scale 异常，请说明父实体 transform 数值。父带旋转 + non-uniform 的偏斜属已知限制，不计。
+
+## 2026-06-12 session（C1.1 prefab override 编辑器 UI）
+
+> 引擎层地基（CS1 diff / CS2 refresh / overriddenPaths 持久化 / C1.3 apply·revert）已 commit 并 headless 验证；本 session 落地编辑器消费层（蓝条 / 右键 revert / Prefab Instance banner 的 Apply·Revert All·Refresh）。**所有交互均 GUI 行为，headless 测不到（仅编译 + ctest 94/94 + invariant lint 绿），全部 dogfood-pending**。新增 TU `tools/OrangeEditor/PrefabOverrideUI.{h,cpp}`，钩入 `schema/SchemaInspector.cpp`（蓝条 + 字段右键 + 帧首 BeginFrame / 帧末 SyncRecordedOverrides）、`panels/InspectorPanel.cpp`（Prefab Instance banner）、`EditorWidgets.cpp`（PropertyLabel overridden 参数）、`theme/EditorTheme.cpp`（`Color::GetPrefabOverride()` 蓝 token）。
+
+### 53. prefab override 蓝条 + 持久化记录
+
+- **怎么触发**：
+  1. 启动 OrangeEditor，在 Asset Browser 选一个 `.prefab.json`（或右键某子树 Create Prefab... 先造一个），拖进 viewport 实例化。
+  2. 选中实例（或其子节点），在 Inspector 改某个字段（如 Transform.Position 拖一下、Renderable.Visible 取消勾选、某 Light 的 Intensity 改值）。
+- **看什么 / 通过判据**：
+  - 被改的字段行**左缘出现一道蓝色竖条**，且字段名 label **变蓝**（Unity prefab override 同款）。未改的字段无蓝条。
+  - 改 Vec3（Position/Scale/Rotation）任一分量 → 整字段行蓝条（因为底层是 `position/0..2` 叶子，prop 前缀匹配命中）。
+  - Save 场景 → 重启 → Load → 选中该实例 → **蓝条仍在**（overriddenPaths 已持久化进 scene，schema 1.18）。
+- **失败上报**：普通（非 prefab 实例）实体的字段**绝不应**出现蓝条（回归）；蓝条出现在没改过的字段；改了字段却没蓝条。
+
+### 54. 字段右键 Revert to Prefab
+
+- **怎么触发**：在一个带蓝条的 override 字段 label 上**右键** → "Revert to Prefab"。
+- **看什么 / 通过判据**：
+  - 该字段值**立即回到模板值**，蓝条消失（同 component 内其它 override 字段不受影响）。
+  - Vec3 字段 revert → 三个分量都回模板值。
+- **⚠️ 已知限制（非 bug）**：**revert 不可 Undo**（Ctrl+Z 不恢复）。原因：引擎层无 typed by-path 标量逆写原语，type-erased 的精确 Undo 做不出来（见 PrefabOverrideUI.cpp 头注释）。误点了只能手动改回或 Refresh。dogfood 时确认"revert 生效"即可，**不要把"Ctrl+Z 不回退"当 bug 上报**。
+
+### 55. Prefab Instance banner —— Apply to Prefab / Revert All / Refresh
+
+- **怎么触发**：选中一个 prefab 实例（建议选**实例根**），Inspector 顶部 `Entity #N` 下出现蓝色 "Prefab Instance" 标题 + 三个按钮。
+- **看什么 / 通过判据**：
+  - **Apply to Prefab**：把实例当前态推回模板 `.prefab.json`（重写文件）。改一个字段 → Apply → 再拖一个**新**实例进来，新实例应带上刚 apply 的改动。**关键**：Apply 后其它已存在实例的 templateEntityGuid 锚不应断（A2.2，引擎层 ApplyInstanceToTemplate 保证 guid 映回模板）。⚠️ **不可 Undo**（改磁盘文件）。
+  - **Revert All**：丢弃该实例所有 override，全部字段回模板值，所有蓝条消失。⚠️ 不可 Undo。
+  - **Refresh**：用持久化 override 集从模板重拉非 override 字段（模板演进后，未手改字段更新成新模板值、手改字段保留）。验证需要"先改模板再 Refresh 实例"的多步场景。⚠️ 不可 Undo。
+  - 三个按钮在 **Play / Paused** 期 disabled（灰显，hover 有 tooltip）。
+- **失败上报**：Apply 后其它实例与模板的关联断裂（蓝条全亮 / Refresh 失效）；banner 出现在非 prefab 实例上。
+- **需主循环 / 用户拍板的设计点**：Apply / Revert All / Refresh **均不进命令栈（不可 Undo）**——apply/revert all 是磁盘/批量动作，refresh 缺 typed in-place 逆写原语。若 dogfood 觉得 Refresh / Revert All 需要 Undo，需引擎层补 typed by-path 写原语（下个 session 跨能力，登记到 engine-known-gaps）。当前以"显式用户动作 + tooltip 标注不可撤销"落地。

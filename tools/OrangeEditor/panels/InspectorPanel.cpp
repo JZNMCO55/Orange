@@ -7,6 +7,7 @@
 #include "../EditorRenderLayer.h"
 
 #include "../CoplanarDetector.h"
+#include "../PrefabOverrideUI.h"  // C1.1 prefab 实例 banner（Apply / Revert All / Refresh）
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 #include "../theme/EditorTheme.h"
@@ -142,6 +143,52 @@ void EditorRenderLayer::DrawInspectorPanel()
     ImGui::Text("Entity #%u",
                 static_cast<unsigned>(static_cast<std::uint32_t>(e.Value())));
     ImGui::Separator();
+
+    // C1.1 prefab 实例 banner：仅 prefab 实例（挂 PrefabInstanceComponent +
+    // templateEntityGuid 有效）显示，提供整实例级 Apply / Revert All / Refresh。
+    // 单字段 revert 在各字段 label 的右键（蓝条字段 "Revert to Prefab"）。普通
+    // 实体不显示本段。Play / Paused 期同样 disabled（canEdit gate 在下方，但这
+    // 些是结构性动作，提前在此 gate）。
+    if (Orange::Editor::Prefab::IsPrefabInstance(mHost, e))
+    {
+        const bool prefabEditable = (mHost.scene.playState == PlayState::Edit);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              Orange::Editor::Theme::Color::GetPrefabOverride());
+        ImGui::TextUnformatted("Prefab Instance");
+        ImGui::PopStyleColor();
+        ImGui::BeginDisabled(!prefabEditable);
+        if (ImGui::SmallButton("Apply to Prefab"))
+        {
+            Orange::Editor::Prefab::ApplyInstanceToPrefab(mHost, e);
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("把本实例当前态推回模板 .prefab.json\n"
+                              "（重写模板文件，不可 Undo）");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Revert All"))
+        {
+            Orange::Editor::Prefab::RevertAllFields(mHost, e);
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("丢弃本实例所有 override，全部字段拉回模板值\n"
+                              "（不可 Undo）");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Refresh"))
+        {
+            Orange::Editor::Prefab::RefreshInstanceFromPrefab(mHost, e);
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("从（演进后的）模板重拉非 override 字段\n"
+                              "（override 字段保留，不可 Undo）");
+        }
+        ImGui::EndDisabled();
+        ImGui::Separator();
+    }
 
     // Geometry Warnings —— 当前选中 entity 的 mesh 与场景内邻居 mesh 是否
     // 存在 ε 共面（典型：cube 底面 y 与 ground 顶面 y 完全相同，主 pass

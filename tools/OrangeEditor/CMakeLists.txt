@@ -112,6 +112,7 @@ add_executable(OrangeEditor
     EditorGizmoMath.cpp
     EditorPicking.cpp
     EditorPrefabActions.cpp
+    PrefabOverrideUI.cpp
     EditorRenderLayer.cpp
     EditorRotateGizmo.cpp
     EditorScaleGizmo.cpp

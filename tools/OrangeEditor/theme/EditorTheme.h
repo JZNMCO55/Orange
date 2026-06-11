@@ -131,6 +131,11 @@ const ImVec4& GetAlertWarn();
 const ImVec4& GetAlertError();
 const ImVec4& GetAlertSuccess();
 
+// prefab override 蓝（C1.1）：承载"该字段相对 prefab 模板被 override"语义
+// （Inspector 蓝条 + override label 着色 + Prefab Instance banner 标题）。
+// 与 brand 橙 / alert 三色色相拉开。
+const ImVec4& GetPrefabOverride();
+
 }  // namespace Color
 
 // ---- Spacing --------------------------------------------------------

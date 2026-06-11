@@ -2,6 +2,8 @@
 
 #include "EditorWidgets.h"
 
+#include "theme/EditorTheme.h"  // Color::GetPrefabOverride（C1.1 override 蓝条）
+
 #include <imgui.h>
 
 #include <cfloat>
@@ -31,14 +33,39 @@ bool BeginPropertyTable(const char* id, float labelColTextWidth)
     return true;
 }
 
-void PropertyLabel(const char* label, const char* tooltip)
+void PropertyLabel(const char* label, const char* tooltip, bool overridden)
 {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     // 让 label 与右列控件的 FramePadding 中线对齐 —— 控件高 FrameHeight，
     // label 是纯文本，不 align 的话 label 会贴 cell 顶（视觉错位）。
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label != nullptr ? label : "?");
+    const char* text = (label != nullptr) ? label : "?";
+    if (overridden)
+    {
+        // prefab override 蓝条：用 Selectable（有 ID，caller 可挂右键菜单）承载
+        // label，selected=false + 透明 Header 色使外观与普通 label 一致（不染整
+        // 行）。绘制后用 item rect 在 cell 左缘画 3px 蓝竖条（同 ComponentHeader
+        // Local 的 band 技法）。
+        const ImVec4& overrideBlue = Orange::Editor::Theme::Color::GetPrefabOverride();
+        ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive,  ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Text,          overrideBlue);
+        ImGui::Selectable(text, false, ImGuiSelectableFlags_None);
+        ImGui::PopStyleColor(4);
+
+        const ImVec2 itemMin = ImGui::GetItemRectMin();
+        const ImVec2 itemMax = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImVec2(itemMin.x - 2.0f, itemMin.y),
+            ImVec2(itemMin.x + 1.0f, itemMax.y),
+            ImGui::ColorConvertFloat4ToU32(overrideBlue));
+    }
+    else
+    {
+        ImGui::TextUnformatted(text);
+    }
     if (tooltip != nullptr && ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("%s", tooltip);

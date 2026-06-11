@@ -97,6 +97,11 @@ const ImVec4 kAlertWarn   {0.961f, 0.749f, 0.169f, 1.000f};  // #F5BF2B 黄
 const ImVec4 kAlertError  {0.890f, 0.310f, 0.310f, 1.000f};  // #E34F4F 红
 const ImVec4 kAlertSuccess{0.330f, 0.780f, 0.420f, 1.000f};  // #54C76B 绿
 
+// prefab override 蓝（C1.1）：与 brand 橙 / alert 三色都拉开色相，承载"该字段
+// 相对 prefab 模板被 override"的语义（蓝条 + label 着色 + Prefab Instance banner）。
+// Unity prefab override 蓝同色系 #3385EB。
+const ImVec4 kPrefabOverride{0.200f, 0.520f, 0.920f, 1.000f};  // #3385EB 蓝
+
 }  // namespace
 
 const ImVec4& GetBackgroundPrimary()    { return kBackgroundPrimary;    }
@@ -121,6 +126,7 @@ const ImVec4& GetAccentSelection()      { return kAccentSelection;      }
 const ImVec4& GetAlertWarn()            { return kAlertWarn;            }
 const ImVec4& GetAlertError()           { return kAlertError;           }
 const ImVec4& GetAlertSuccess()         { return kAlertSuccess;         }
+const ImVec4& GetPrefabOverride()       { return kPrefabOverride;       }
 
 }  // namespace Color
 

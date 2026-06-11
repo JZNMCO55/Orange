@@ -17,6 +17,7 @@
 #include "../EditorAssetDropHandler.h"  // SyncSubMeshMaterialsForMesh（mesh AssetRef 设值后同步多材质 slot）
 #include "../EditorHost.h"
 #include "../EditorWidgets.h"
+#include "../PrefabOverrideUI.h"  // C1.1 prefab override 蓝条 / 记录 / revert / apply / refresh
 #include "../command/LambdaCommand.h"
 #include "../command/SetFieldValueCommand.h"
 #include "../plugin/IEditorInspectorPlugin.h"
@@ -359,17 +360,44 @@ void DrawProperty(EditorHost&                  host,
     auto* pWorld = host.scene.pWorld.get();
     if (pWorld == nullptr) { return; }
 
-    // 左列 label + 右列 SetNextItemWidth(-FLT_MIN)；tooltip 挂在 label 上
-    // 而非控件上（控件拖拽 / 编辑状态时 hover 会被打断；label hover 更稳定）。
-    Orange::Editor::Widgets::PropertyLabel(prop.label, prop.attribs.tooltip);
+    // C1.1 prefab override 蓝条：该字段相对模板被 override 时，在 label 行左缘
+    // 画一道蓝色竖条（Unity prefab override 蓝条同款）。查询走 PrefabOverrideUI
+    // 当帧缓存（BeginFrameForEntity 已在 DrawEntityViaSchemas 入口算过）——非
+    // prefab 实例 / 未 override 时恒 false，不影响普通实体。
+    const bool fieldOverridden = Orange::Editor::Prefab::IsFieldOverridden(
+        schema.typeName != nullptr ? schema.typeName : "",
+        prop.name != nullptr ? prop.name : "");
 
     // PushID(prop.name) 隔离同一 component schema 段内多个控件的 ImGui ID。
     // v0.4.5 c1 修复：之前所有控件 label 用同一个 "##v"，ImGui ID =
     // hash("##v") + ID stack 在同 Table 内**共享**——hover 一个控件会让
     // 所有同 ID 控件被算作 hover，红色高亮 + tooltip 在错误位置弹出。
-    // PropertyLabel 内 TextUnformatted 不产生 ID，所以 PushID 放在 Label
-    // 之后、控件之前都可——这里放控件之前最直观。
+    // C1.1 起 PushID 上移到 PropertyLabel **之前**：让本字段的 override 蓝条
+    // 右键 popup（BeginPopupContextItem("##revert_field")）的 ID 也落在 prop
+    // 名命名空间下，避免相邻 override 字段的 popup id 撞车（右键 A 弹出 B 菜单）。
     ImGui::PushID(prop.name != nullptr ? prop.name : "?");
+
+    // 左列 label + 右列 SetNextItemWidth(-FLT_MIN)；tooltip 挂在 label 上
+    // 而非控件上（控件拖拽 / 编辑状态时 hover 会被打断；label hover 更稳定）。
+    // overridden=true 时 PropertyLabel 在左列 cell 左缘画 prefab override 蓝条
+    // （band 几何用 label 自身 item rect，在列 0 内取，稳定）。
+    Orange::Editor::Widgets::PropertyLabel(prop.label, prop.attribs.tooltip,
+                                           fieldOverridden);
+
+    // C1.1：override 字段右键 "Revert to Prefab"。PropertyLabel 在 overridden
+    // 路径下用 Selectable（有 ID）承载 label，使 BeginPopupContextItem 能挂到
+    // label item 上。非 override（普通 TextUnformatted 无 ID）不开此菜单。
+    if (fieldOverridden && ImGui::BeginPopupContextItem("##revert_field"))
+    {
+        if (ImGui::MenuItem("Revert to Prefab"))
+        {
+            Orange::Editor::Prefab::RevertField(
+                host, entity,
+                schema.typeName != nullptr ? schema.typeName : "",
+                prop.name != nullptr ? prop.name : "");
+        }
+        ImGui::EndPopup();
+    }
 
     // 紧跟 PropertyLabel 的下一个 ImGui 控件占满右列。控件 label 一律用
     // "##" 前缀隐藏 —— 真实 label 已经被 PropertyLabel 写在左列。
@@ -1494,11 +1522,24 @@ void DrawComponentSchemaSection(EditorHost&                  host,
 
 void DrawEntityViaSchemas(EditorHost& host, Orange::Engine::Entity entity)
 {
+    // C1.1：进入字段渲染前，按当前实体算一次 prefab override 叶子集缓存（非
+    // prefab 实例 → 缓存无效，蓝条全 false）。蓝条查询（IsFieldOverridden）+
+    // 单字段 revert 都读这份缓存，一帧一个实体只算一次（一次 LoadFromString）。
+    Orange::Editor::Prefab::BeginFrameForEntity(host, entity);
+
     auto& reg = ComponentSchemaRegistry::Instance();
     for (const auto& schema : reg.All())
     {
         DrawComponentSchemaSection(host, entity, schema);
     }
+
+    // 字段渲染 + 编辑命令落地后，把"实例相对模板的真实 override 叶子集"同步进
+    // PrefabInstanceComponent.overriddenPaths（持久化显式 override 集，喂 refresh +
+    // 重开场景后的蓝条）。SyncRecordedOverrides 内部强制重算当帧最新 diff（捕获
+    // 本帧字段编辑），与帧首 BeginFrameForEntity 的"编辑前"缓存区分。非 prefab
+    // 实例 → no-op。下一帧 BeginFrameForEntity 重算缓存，蓝条最多滞后一帧（即时
+    // 模式标准行为）。
+    Orange::Editor::Prefab::SyncRecordedOverrides(host, entity);
 }
 
 }  // namespace Orange::Editor::Schema

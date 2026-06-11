@@ -52,7 +52,13 @@ bool BeginPropertyTable(const char* id, float labelColTextWidth);
 // tooltip 非空时 hover 左列 label 触发 SetTooltip；用户对 "鼠标移到字段
 // 名上看说明" 的预期比 "鼠标停在控件上看说明" 更稳定（控件可能在拖动 /
 // 编辑状态，hover 行为被打断）。
-void PropertyLabel(const char* label, const char* tooltip = nullptr);
+//
+// overridden=true（C1.1 prefab override 蓝条）：在左列 cell 左缘画一道蓝色
+// 竖条，并用 Selectable 承载 label（使其有 ID，让 caller 能在其上挂右键
+// "Revert" 菜单）；几何用 label cell 自身 item rect（列 0 内取，稳定）。
+// default false 时走原 TextUnformatted 路径，普通字段零行为变化。
+void PropertyLabel(const char* label, const char* tooltip = nullptr,
+                   bool overridden = false);
 
 void EndPropertyTable();
 
