@@ -9,16 +9,20 @@
 #include <glm/trigonometric.hpp>  // glm::radians
 
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <imgui.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/matrix.hpp>  // glm::inverse / glm::quat_cast
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <array>
 #include <cmath>
@@ -72,6 +76,71 @@ glm::vec3 AxisDir(EditorGizmoState::Axis axis) noexcept
         case EditorGizmoState::Axis::Z: return glm::vec3(0.0f, 0.0f, 1.0f);
         default:                        return glm::vec3(0.0f);
     }
+}
+
+// ---- A1 层级（world→local）辅助 ---------------------------------------
+// 从世界矩阵抽取纯旋转 quat：去掉平移 + 各列归一化（除 scale），再 quat_cast。
+// scale 近 0 的列退化为不归一化（避免除零），与 TransformMath 同款守恒。
+glm::quat RotationFromMatrix(const glm::mat4& m) noexcept
+{
+    constexpr float kEps = 1e-8f;
+    glm::vec3 c0 = glm::vec3(m[0]);
+    glm::vec3 c1 = glm::vec3(m[1]);
+    glm::vec3 c2 = glm::vec3(m[2]);
+    const float l0 = glm::length(c0);
+    const float l1 = glm::length(c1);
+    const float l2 = glm::length(c2);
+    const glm::mat3 rotMat(l0 > kEps ? c0 / l0 : c0,
+                           l1 > kEps ? c1 / l1 : c1,
+                           l2 > kEps ? c2 / l2 : c2);
+    return glm::normalize(glm::quat_cast(rotMat));
+}
+
+// 取实体的父世界矩阵：从 HierarchyComponent.parent 找父，读其每帧由
+// PropagateWorldTransforms 缓存的 WorldTransformComponent.world。无父 / 父无
+// cache → identity（→ world==local，零回归）。
+glm::mat4 ParentWorldMatrix(Orange::Engine::World& world, Orange::Engine::Entity entity)
+{
+    using Orange::Engine::Scene::HierarchyComponent;
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* h = world.GetComponent<HierarchyComponent>(entity);
+    if (h == nullptr || !h->parent.IsValid()) { return glm::mat4(1.0f); }
+    const auto* pwtc = world.GetComponent<WorldTransformComponent>(h->parent);
+    return (pwtc != nullptr) ? pwtc->world : glm::mat4(1.0f);
+}
+
+// 取实体的父世界旋转（圆环 Local 朝向基 / world→local 反变换都需要）。无父 /
+// 原点父 → identity（零回归）。
+glm::quat ParentWorldRotation(Orange::Engine::World& world, Orange::Engine::Entity entity)
+{
+    return RotationFromMatrix(ParentWorldMatrix(world, entity));
+}
+
+// 取实体的世界 position：优先读 WorldTransformComponent.world（gizmo 画在 mesh
+// 世界位置）；无 cache fallback 到 local position（root：world==local）。
+glm::vec3 EntityWorldPosition(Orange::Engine::World& world, Orange::Engine::Entity entity,
+                              const Orange::Engine::Scene::TransformComponent& tc)
+{
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
+    return (wtc != nullptr) ? glm::vec3(wtc->world[3]) : tc.position;
+}
+
+// 取实体的世界 rotation：优先从 WorldTransformComponent.world 抽旋转（圆环朝向 /
+// drag 基准）；无 cache fallback 到 local rotation（root：world==local）。
+glm::quat EntityWorldRotation(Orange::Engine::World& world, Orange::Engine::Entity entity,
+                              const Orange::Engine::Scene::TransformComponent& tc)
+{
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
+    return (wtc != nullptr) ? RotationFromMatrix(wtc->world) : tc.rotation;
+}
+
+// 把目标世界 rotation 转成实体的 local rotation：newLocal = inverse(parentRot)
+// * targetWorld。root / 原点父：parentRot==identity → 原样返回（零回归）。
+glm::quat WorldRotToLocal(const glm::quat& parentWorldRot, const glm::quat& targetWorldRot)
+{
+    return glm::normalize(glm::inverse(parentWorldRot) * targetWorldRot);
 }
 
 // 选两个在 axis 平面内、彼此正交的单位向量，用于 ring 参数化（u * cos +
@@ -186,7 +255,10 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
     const glm::mat4 viewProj    = cam.projection * cam.view;
     const glm::mat4 invViewProj = glm::inverse(viewProj);
 
-    const glm::vec3 entityPos = pTC->position;
+    // A1 层级：gizmo 圆环画在实体的**世界**位置 + 朝向（读 WorldTransform
+    // Component），而非把 local pos/rot 当 world。root：world==local → 零回归。
+    const glm::vec3 entityPos      = EntityWorldPosition(*pWorld, entity, *pTC);
+    const glm::quat entityWorldRot = EntityWorldRotation(*pWorld, entity, *pTC);
 
     // ---- gizmo 半径自适应（同 translate）。探针用相机右向量而非 world X
     //      轴 —— 见 GizmoMath::ComputeWorldUnitsForScreenLength 注释（防止
@@ -216,8 +288,10 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
         bool any_visible = false;
     };
     // space-aware 轴向（gap §3 P0 Local/World）：Local 时把世界轴绕给定 rotation
-    // 旋到 local。draw/hit 用当前 pTC->rotation（环随实体朝向）；apply 用
-    // dragStartEntityRot（drag 期 rotation 在变，固定到起点轴避免旋转漂移）。
+    // 旋到该朝向。A1 层级：rotation 一律用**世界**旋转（draw/hit 用当前
+    // entityWorldRot，环随 mesh 世界朝向；apply 用 dragStartEntityWorldRot，
+    // drag 期实体世界 rot 在变，固定到起点轴避免旋转漂移）。World 模式与
+    // rotation 无关 → 零回归。
     const auto axisIn = [](EditorGizmoState::Space space, const glm::quat& rot,
                            Axis a) -> glm::vec3 {
         const glm::vec3 base = AxisDir(a);
@@ -225,9 +299,9 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                    ? glm::normalize(rot * base) : base;
     };
     std::array<RingProjected, 3> rings{{
-        {Axis::X, axisIn(host.gizmo.space, pTC->rotation, Axis::X), {}, false},
-        {Axis::Y, axisIn(host.gizmo.space, pTC->rotation, Axis::Y), {}, false},
-        {Axis::Z, axisIn(host.gizmo.space, pTC->rotation, Axis::Z), {}, false},
+        {Axis::X, axisIn(host.gizmo.space, entityWorldRot, Axis::X), {}, false},
+        {Axis::Y, axisIn(host.gizmo.space, entityWorldRot, Axis::Y), {}, false},
+        {Axis::Z, axisIn(host.gizmo.space, entityWorldRot, Axis::Z), {}, false},
     }};
     for (auto& rp : rings)
     {
@@ -299,7 +373,7 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                                                    invViewProj);
         if (mouseRay.has_value())
         {
-            const glm::vec3 axisDir = axisIn(host.gizmo.space, pTC->rotation,
+            const glm::vec3 axisDir = axisIn(host.gizmo.space, entityWorldRot,
                                              host.gizmo.hoveredAxis);
             const auto t = GM::RayPlaneIntersect(mouseRay->origin, mouseRay->dir,
                                                  entityPos, axisDir);
@@ -310,18 +384,27 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                 const float len = glm::length(fromCenter);
                 if (len > 1e-4f)
                 {
-                    host.gizmo.draggingAxis       = host.gizmo.hoveredAxis;
-                    host.gizmo.dragStartEntityRot = pTC->rotation;
-                    host.gizmo.dragStartRotateRef = fromCenter / len;
-                    // 多选群组 rotate：快照其余选中实体的 pos+rot（pivot = primary
-                    // 位置，rotate 期不动）。单选时集合为空。
+                    host.gizmo.draggingAxis          = host.gizmo.hoveredAxis;
+                    host.gizmo.dragStartEntityRot      = pTC->rotation;   // local 起点（命令 oldVal）
+                    host.gizmo.dragStartEntityWorldRot = entityWorldRot;  // world 起点（drag deltaQ 基准）
+                    host.gizmo.dragStartRotateRef      = fromCenter / len;
+                    // 多选群组 rotate：快照其余选中实体的 pos+rot。position 存
+                    // **world**（绕 world pivot 公转），rotation 存 local（命令 oldVal）
+                    // 及 world（公转基准）。pivot = primary world 位置，rotate 期不动。
+                    // 单选时集合为空。root：world==local → 零回归。
                     host.gizmo.dragStartAdditional.clear();
                     for (const auto& other : host.selection.additionalSelectedEntities)
                     {
                         if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
                         {
-                            host.gizmo.dragStartAdditional.push_back(
-                                {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                            EditorGizmoState::GroupDragSnapshot snap;
+                            snap.entity     = other;
+                            snap.position   = pOtherTC->position;   // local 起点（命令 oldVal）
+                            snap.rotation   = pOtherTC->rotation;   // local 起点（命令 oldVal）
+                            snap.scale      = pOtherTC->scale;
+                            snap.worldStart = EntityWorldPosition(*pWorld, other, *pOtherTC);
+                            snap.worldRot   = EntityWorldRotation(*pWorld, other, *pOtherTC);
+                            host.gizmo.dragStartAdditional.push_back(snap);
                         }
                     }
                     host.cmdStack.BeginGroup("Rotate Drag", MergeMode::Ends);
@@ -345,8 +428,10 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                                                       invViewProj);
             if (mouseRay.has_value())
             {
+                // A1 层级：axisDir 用拖动起点的**世界** rotation（Local 模式轴随
+                // mesh 世界朝向，固定到起点避免旋转漂移）。World 模式与 rot 无关。
                 const glm::vec3 axisDir = axisIn(host.gizmo.space,
-                                                 host.gizmo.dragStartEntityRot,
+                                                 host.gizmo.dragStartEntityWorldRot,
                                                  host.gizmo.draggingAxis);
                 const auto t = GM::RayPlaneIntersect(mouseRay->origin, mouseRay->dir,
                                                     entityPos, axisDir);
@@ -375,7 +460,15 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                         }
 
                         const glm::quat deltaQ = glm::angleAxis(deltaAngle, axisDir);
-                        const glm::quat newRot = deltaQ * host.gizmo.dragStartEntityRot;
+                        // A1 层级：deltaQ 在世界空间累乘到拖动起点的**世界** rot
+                        // → targetWorldRot；写回 TransformComponent.rotation 前经
+                        // primary 父 worldRot 逆变换转 local。root/原点父：
+                        // parentWorldRot==identity → newLocal==targetWorld==
+                        // deltaQ*dragStartLocalRot，与旧路径逐字节一致（零回归）。
+                        const glm::quat targetWorldRot =
+                            deltaQ * host.gizmo.dragStartEntityWorldRot;
+                        const glm::quat parentWorldRot = ParentWorldRotation(*pWorld, entity);
+                        const glm::quat newRot = WorldRotToLocal(parentWorldRot, targetWorldRot);
                         const glm::quat oldRot = pTC->rotation;
 
                         // quat 直接 != 比较有 epsilon 风险；用 dot 阈值更稳。
@@ -388,31 +481,41 @@ bool DrawAndHandleRotateGizmo(EditorHost& host,
                             host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
                                 entity,
                                 std::string("Transform.rotation"),
-                                host.gizmo.dragStartEntityRot,  // oldVal 锁定到拖动起点
+                                host.gizmo.dragStartEntityRot,  // oldVal 锁定到拖动起点 local
                                 newRot,
                                 MakeTransformRotationApply(&host, entity)));
 
-                            // 多选群组 rotate：follower 绕 primary 位置（pivot）
-                            // 公转 deltaQ + 自身朝向左乘 deltaQ。单选时快照空 →
-                            // 不执行 = 零回归。pos/rot 各一条 SetFieldValueCommand，
-                            // 在 "Rotate Drag" group 内按 (entity,fieldKey) coalesce。
+                            // 多选群组 rotate：follower 绕 primary **世界**位置（pivot）
+                            // 公转 deltaQ 得新世界位姿，再各自经父 worldRot/parentWorld
+                            // 转 local 写回。单选时快照空 → 不执行 = 零回归。pos/rot
+                            // 各一条 SetFieldValueCommand，在 "Rotate Drag" group 内按
+                            // (entity,fieldKey) coalesce。
                             for (const auto& snap : host.gizmo.dragStartAdditional)
                             {
                                 if (!pWorld->IsValid(snap.entity)) { continue; }
                                 auto* pFTC = pWorld->GetComponent<TransformComponent>(snap.entity);
                                 if (pFTC == nullptr) { continue; }
-                                const glm::vec3 nPos = Orange::Editor::Util::RotateAroundPivot(
-                                    snap.position, entityPos, deltaQ);
-                                const glm::quat nRot = deltaQ * snap.rotation;
+                                // 世界空间：position 绕世界 pivot 公转、世界 rot 左乘 deltaQ。
+                                const glm::vec3 nWorldPos = Orange::Editor::Util::RotateAroundPivot(
+                                    snap.worldStart, entityPos, deltaQ);
+                                const glm::quat nWorldRot = deltaQ * snap.worldRot;
+                                // 转回各 follower 自身 local（其父 worldMatrix / worldRot）。
+                                const glm::mat4 fParentWorld =
+                                    ParentWorldMatrix(*pWorld, snap.entity);
+                                const glm::quat fParentWorldRot =
+                                    ParentWorldRotation(*pWorld, snap.entity);
+                                const glm::vec3 nPos = glm::vec3(
+                                    glm::inverse(fParentWorld) * glm::vec4(nWorldPos, 1.0f));
+                                const glm::quat nRot = WorldRotToLocal(fParentWorldRot, nWorldRot);
                                 pFTC->position = nPos;
                                 pFTC->rotation = nRot;
                                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                                     snap.entity, std::string("Transform.position"),
-                                    snap.position, nPos,
+                                    snap.position, nPos,       // oldVal = local 起点
                                     MakeTransformPositionApply(&host, snap.entity)));
                                 host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::quat>>(
                                     snap.entity, std::string("Transform.rotation"),
-                                    snap.rotation, nRot,
+                                    snap.rotation, nRot,       // oldVal = local 起点
                                     MakeTransformRotationApply(&host, snap.entity)));
                             }
                         }

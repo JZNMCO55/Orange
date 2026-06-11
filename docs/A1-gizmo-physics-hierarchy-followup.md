@@ -1,10 +1,13 @@
 # A1 收尾 follow-up：transform gizmo + physics 的层级（world↔local）支持
 
-> 状态：**translate gizmo 已落地（2026-06-11，dogfood-pending）**——primary + 群组 followers
-> 的 origin 改读世界 + apply 经 parentWorld 逆变换转 local 写回，root/原点父零回归（identity-
-> parent fast path），dogfood 步骤见 `docs/dogfood-checklist.md` item 49。**剩余未做**：rotate
-> gizmo、scale gizmo、physics collider 双向（下面 spec 的对应段仍有效）。本文是基于真实代码读后的
-> **精确实现 spec**，供后续 session + dogfood 执行。剩余几项都是"写/apply"类（需 world→local 反向变换），
+> 状态：**transform gizmo 三件（translate / rotate / scale）全部已落地（translate 2026-06-11，
+> rotate + scale 2026-06-12，均 dogfood-pending）**——primary + 群组 followers 的 origin 改读世界 +
+> apply 经 parentWorld / parentWorldRot 逆变换转 local 写回，root/原点父零回归（identity-parent
+> fast path）。translate dogfood 见 `docs/dogfood-checklist.md` item 49；rotate / scale 见 item 51 /
+> 52。scale 走**保守做法**：origin / handle 轴朝向改读世界，scale 值仍写 local——父带旋转 +
+> non-uniform scale 是公认难点，明确**不支持**（代码注释 + dogfood 条目已标注）。**剩余未做**：
+> physics collider 双向（下面 §二 仍有效）。本文是基于真实代码读后的**精确实现 spec**，供后续
+> session + dogfood 执行。剩余项是"写/apply"类（需 world→local 反向变换），
 > 且 **GUI / 双向 sim 无法 headless 验证**，是编辑器主操作工具 / Play 模式核心——故从
 > A1 自主 session 中剥离，避免盲改（参 `feedback_no_works_claim_from_codereading_interactive`
 > 的教训：GUI 行为靠运行时，读代码判"能用"会被 dogfood 打脸）。
@@ -66,12 +69,24 @@ local 轴。
    `otherNewLocal = inverse(followerParentWorld) * otherNewWorld`。当前 `snap.position`
    存的是 follower 的 local（line 253）——需改存 follower 的**世界**起点，且各 follower
    各自的 `parentWorld`。
-4. **rotate gizmo**（`EditorRotateGizmo.cpp`）：类比——手柄圆画在 world，拖出的
-   `targetWorldRot` 写回前 `newLocalRot = inverse(parentWorldRot) * targetWorldRot`。
-5. **scale gizmo**（`EditorScaleGizmo.cpp`）：scale 通常只作用 local，受父**旋转**影响时
-   non-uniform 会 shear（glm decompose 会失真）——保守只切 origin 画在 world，scale 值
-   仍写 local（父无旋转时正确；父带旋转的 non-uniform scale 是公认难点，可暂不支持 +
-   文档标注）。
+4. **rotate gizmo**（`EditorRotateGizmo.cpp`）——✅ **已落地（2026-06-12）**：圆环 origin +
+   朝向改读世界（`EntityWorldPosition` / `EntityWorldRotation`，从 `WorldTransformComponent.world`
+   抽旋转）；drag 在世界空间累乘 `deltaQ`，`targetWorldRot = deltaQ * dragStartEntityWorldRot`，
+   写回前 `newLocalRot = inverse(parentWorldRot) * targetWorldRot`（`ParentWorldRotation`）。
+   命令 oldVal 锁拖动起点的 **local** rotation（`dragStartEntityRot`，新增 `dragStartEntityWorldRot`
+   存世界起点）。群组 followers 绕世界 pivot 公转得新世界位姿，再各自经父 worldMatrix / worldRot
+   转 local 写回（`GroupDragSnapshot` 新增 `worldRot`）。root / 原点父：parentWorldRot==identity、
+   worldRot==localRot → 与旧路径逐字节一致（零回归，已用独立 epsilon 程序验证 `RotationFromMatrix`
+   ∘ compose 恢复误差 < 1e-6，不触发 similarity 伪变化）。
+5. **scale gizmo**（`EditorScaleGizmo.cpp`）——✅ **已落地（2026-06-12，保守做法）**：origin +
+   handle 轴朝向（`entityRot`）改读世界（`EntityWorldPosition` / `EntityWorldRotation`），handle 画在
+   mesh 世界位置 + 世界朝向；scale 值**仍写 local**。drag 基准 `dragStartEntityRot` 改存世界旋转
+   （与 draw 同基）。群组 follower 位置绕世界 pivot 在 primary local 系内缩放得新世界 pos，再经
+   各自父 worldMatrix 转 local 写回；follower scale 仍乘 factorVec 写 local。root / 父无旋转：
+   worldRot==localRot、世界 pivot==local pivot → 零回归。**⚠️ 明确不支持**：父链带旋转 + non-uniform
+   scale（沿世界朝向轴拖 factor 直接乘 local scale 分量是近似，父旋转会 shear local 缩放，无法用
+   纯对角 scale 表示）——代码注释 + dogfood 条目均标注。uniform / center scale 任意父都正确（各分量
+   等比无 shear）。需精确支持时另起 session 引入完整 world TRS 分解 + 可能的 shear-aware scale 表示。
 
 ### 验证 / dogfood（GUI，必须人工）
 

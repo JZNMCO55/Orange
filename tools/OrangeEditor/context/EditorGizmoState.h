@@ -99,6 +99,14 @@ struct EditorGizmoState
     // 相等（world==local）→ 零回归；仅 parent 到非原点实体时分叉。
     glm::vec3 dragStartEntityLocalPos = glm::vec3(0.0f);
 
+    // ---- A1 层级（world→local）：rotate 拖动起点的 **world** rotation ----
+    // dragStartEntityRot 存的是拖动起点的 **local** rotation（命令 oldVal / undo
+    // 目标）。rotate gizmo 的圆环画在 mesh 世界朝向、drag deltaQ 在世界空间累乘，
+    // 故需另存拖动起点的世界旋转作 drag 基准：targetWorldRot = deltaQ *
+    // dragStartEntityWorldRot，写回前经 inverse(parentWorldRot) 转 local。对
+    // root / 原点父：worldRot==localRot → 两字段相等 → 零回归。
+    glm::quat dragStartEntityWorldRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+
     // ---- 多选群组变换专用 ----------------------------------------------
     // 按下 LMB 那一帧，除 primary 外其余选中实体的 transform 快照。群组
     // translate/rotate/scale 都以 primary 位置为 pivot，让 follower 随 primary
@@ -114,6 +122,10 @@ struct EditorGizmoState
         // 是世界位移，follower 新世界 = worldStart + groupDelta，再经各自
         // parentWorld 转 local 写回。root/原点父：worldStart==position → 零回归。
         glm::vec3              worldStart = glm::vec3(0.0f);
+        // A1 层级：拖动起点的 **world** rotation。群组 rotate 的 deltaQ 在世界
+        // 空间累乘，follower 新世界 rot = deltaQ * worldRot，再经各自父 worldRot
+        // 转 local 写回。root/原点父：worldRot==rotation → 零回归。
+        glm::quat              worldRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     };
     std::vector<GroupDragSnapshot> dragStartAdditional;
 

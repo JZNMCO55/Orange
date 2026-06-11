@@ -781,10 +781,44 @@
   - **零回归（务必确认）**：选一个**无父 / 父在原点**的实体（如既有 demo 的 root 实体）拖 gizmo —— 行为应与之前**完全一致**（gizmo 在 mesh 上、拖动手感不变、Undo 一步回退）。
   - 多选群组：parented + 非 parented 混选一起拖，整体世界刚体平移；Ctrl+Z 一次回退全部。
 - **失败上报**：若 root 实体拖动行为变了（回归！）、或 parented 实体拖动时飞走/抖动，请说明父实体的 position 数值。
-- **剩余（本 session 未做，下次续）**：rotate gizmo（world→local 旋转）、scale gizmo（origin 读世界，父带旋转的 non-uniform scale 是公认难点）、physics collider 双向 world↔local（见 `docs/A1-gizmo-physics-hierarchy-followup.md`）。这些**仍是旧行为**——parented 实体的 rotate/scale gizmo 仍画在 local 偏移处。
+- **剩余（已部分推进）**：~~rotate gizmo~~ → ✅ 2026-06-12 已落地（item 51）；~~scale gizmo~~ → ✅ 2026-06-12 已落地（保守做法，item 52）。仍剩 physics collider 双向 world↔local（见 `docs/A1-gizmo-physics-hierarchy-followup.md` §二）。
 
 ### 50. PIE C# 脚本 ScriptComponent fieldOverrides（`f72429e`，引擎层 headless 已验）
 
 - **状态说明**：fieldOverrides 的**引擎层闭环已 headless 真验**（`script_system_test`：override Speed=2.5 → 4 帧后 position.x=10）。但 **Inspector 里编辑 fieldOverrides 的 GUI + EnterPlay 驱动 ScriptComponent 都尚未接线**（见下"前置缺口"），故当前**无法在编辑器内 dogfood**——本条登记为"等编辑器接线后再 dogfood"。
 - **前置缺口（下次 session 任务）**：① 编辑器 EnterPlay 接 ScriptSystem（Play 时实例化 + tick + 应用 fieldOverrides）；② ScriptComponent 的 Inspector schema 注册（填 assemblyPath/typeName + 编辑 fieldOverrides 列表）。② 依赖编辑器侧暴露 `ORANGE_ENGINE_WITH_DOTNET` 编译定义（当前只 PRIVATE 给 orange_engine）。
 - **接线后的 dogfood 步骤（草稿，待前置缺口落地后启用）**：给实体加 Script 组件 → assemblyPath 指向 `ScriptFixtures.dll`、typeName 填 `OrangeFixtures.Tweakable, ScriptFixtures` → 在 Inspector 加一条 fieldOverride `Speed = 2.5` → Play → 实体每帧沿 +X 移动 2.5（不加 override 是 1.0）；改 override 值重 Play 速度随之变。
+
+---
+
+## 2026-06-12 session（A1 收尾：rotate + scale gizmo 层级 world→local）
+
+> 承接 item 49（translate gizmo）。本 session 把剩余两件 transform gizmo 切到 world→local。headless 全绿（ctest 94/94 零回归 + identity-parent epsilon 等价性独立验证），下列为视觉/交互**必须人工 dogfood** 项（gizmo 拖拽手感是真机的事，读代码不能判"能用"，参 `feedback_no_works_claim_from_codereading_interactive`）。
+
+### 51. A1 rotate gizmo —— parented 实体的 world→local 旋转
+
+- **改动**：`EditorRotateGizmo.cpp` 圆环 origin + 朝向改读 `WorldTransformComponent.world`（位置 + 抽旋转）；drag 在世界空间累乘 deltaQ → targetWorldRot，写回前 `inverse(parentWorldRot) * targetWorldRot` 转 local；命令 oldVal 锁拖动起点 local rotation。群组 follower 绕世界 pivot 公转 → 各自转 local 写回。
+- **怎么触发**：
+  1. 建实体 A（如 Cube），用 translate gizmo 挪到非原点（如 `(3, 1, 0)`）。
+  2. 建实体 B（如 Sphere），Hierarchy 里把 B 拖到 A 下成为**子节点**。
+  3. 选中 B，按 **E**（rotate）gizmo，拖动 X / Y / Z 圆环。
+- **看什么 / 通过判据**：
+  - rotate 圆环画在 B 的 **mesh 世界位置 + 世界朝向**上（修复前画在 B 的 local 偏移处，即原点附近）。
+  - 拖动圆环 B 绕该轴平滑旋转**不跳变**；松手后 Inspector 里 B 的 **local** rotation 是换算后的值。
+  - **Local / World 模式切换（X 键）**：World 模式圆环固定世界轴；Local 模式圆环跟 B 的 mesh 世界朝向（含父链旋转）旋转——切换时圆环朝向都应贴合 mesh。
+  - 父 A 旋转后，再选 B 拖 rotate：圆环朝向 + 旋转结果都正确（B 的世界朝向 = 父旋转 ∘ B local 旋转）。
+  - **零回归（务必确认）**：选**无父 / 父在原点**的实体（如既有 demo root 实体）拖 rotate —— 行为应与之前**完全一致**（圆环在 mesh 上、手感不变、Undo 一步回退）。World 模式尤其要逐项核对（World 模式不读世界旋转走快路径）。
+  - 多选群组：parented + 非 parented 混选一起拖 rotate，整体绕 primary 世界位置刚体公转；Ctrl+Z 一次回退全部。
+- **失败上报**：若 root 实体拖动行为变了（回归！）、parented 实体旋转后飞走/抖动、或圆环朝向与 mesh 脱钩，请说明父实体的 position + rotation 数值。
+
+### 52. A1 scale gizmo —— parented 实体的 origin + handle 朝向读世界（保守做法）
+
+- **改动**：`EditorScaleGizmo.cpp` origin + handle 轴朝向（`entityRot`）改读 `WorldTransformComponent.world`（位置 + 抽旋转），handle 画在 mesh 世界位置 + 世界朝向；**scale 值仍写 local**。drag 基准用世界旋转。群组 follower 位置绕世界 pivot 缩放 → 转 local；follower scale 仍乘 factorVec 写 local。
+- **怎么触发**：同 item 51，但选中 B 后按 **R**（scale）gizmo，拖动轴 handle 或中心 uniform handle。
+- **看什么 / 通过判据**：
+  - scale handle 画在 B 的 **mesh 世界位置 + 世界朝向**上（修复前画在 local 偏移处）。
+  - 拖单轴 handle，B 沿该轴缩放；拖中心 handle，B uniform 缩放——视觉上 handle 跟 mesh 走。
+  - **零回归（务必确认）**：选**无父 / 父在原点 + 无旋转**的实体拖 scale —— 行为与之前**完全一致**（handle 在 mesh 上、factor 手感不变、Undo 一步回退）。
+  - 多选群组：parented + 非 parented 混选拖 scale，follower 绕 primary 世界位置缩放；Ctrl+Z 一次回退全部。
+- **⚠️ 已知限制（明确不支持，非 bug）**：**父链带旋转 + 对子做 non-uniform scale**（如父绕 Y 旋 45°，子只拖 X 轴 handle）。此时沿世界朝向轴拖出的 factor 直接乘到子 local scale 分量，是个近似——父旋转会让"沿世界轴的非均匀缩放"在子 local 空间 shear，无法用纯对角 scale 表示。**dogfood 时此场景视觉可能偏斜/不直观，属预期限制，不要当 bug 上报**。父无旋转的 non-uniform scale、以及任意父下的 uniform / center scale 都应正确。
+- **失败上报**：若 root 实体（无父无旋转）拖 scale 行为变了（回归！）、或父**无旋转**的 parented 实体 scale 异常，请说明父实体 transform 数值。父带旋转 + non-uniform 的偏斜属已知限制，不计。

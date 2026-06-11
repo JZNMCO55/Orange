@@ -7,8 +7,10 @@
 #include "command/SetFieldValueCommand.h"
 
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <imgui.h>
 
@@ -16,7 +18,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat3x3.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/matrix.hpp>  // glm::quat_cast / glm::inverse
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <algorithm>
 #include <array>
@@ -81,6 +85,56 @@ glm::vec3 AxisDir(EditorGizmoState::Axis axis) noexcept
         case EditorGizmoState::Axis::Z: return glm::vec3(0.0f, 0.0f, 1.0f);
         default:                        return glm::vec3(0.0f);
     }
+}
+
+// ---- A1 层级（world→local）辅助 ---------------------------------------
+// 从世界矩阵抽取纯旋转 quat：去平移 + 各列归一化（除 scale），再 quat_cast。
+// scale 近 0 的列退化为不归一化（避免除零）。
+glm::quat RotationFromMatrix(const glm::mat4& m) noexcept
+{
+    constexpr float kEps = 1e-8f;
+    glm::vec3 c0 = glm::vec3(m[0]);
+    glm::vec3 c1 = glm::vec3(m[1]);
+    glm::vec3 c2 = glm::vec3(m[2]);
+    const float l0 = glm::length(c0);
+    const float l1 = glm::length(c1);
+    const float l2 = glm::length(c2);
+    const glm::mat3 rotMat(l0 > kEps ? c0 / l0 : c0,
+                           l1 > kEps ? c1 / l1 : c1,
+                           l2 > kEps ? c2 / l2 : c2);
+    return glm::normalize(glm::quat_cast(rotMat));
+}
+
+// 取实体的世界 position：优先读 WorldTransformComponent.world（gizmo 画在 mesh
+// 世界位置）；无 cache fallback 到 local position（root：world==local）。
+glm::vec3 EntityWorldPosition(Orange::Engine::World& world, Orange::Engine::Entity entity,
+                              const Orange::Engine::Scene::TransformComponent& tc)
+{
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
+    return (wtc != nullptr) ? glm::vec3(wtc->world[3]) : tc.position;
+}
+
+// 取实体的父世界矩阵（群组 follower 的世界 position 转 local 用）。无父 / 父
+// 无 cache → identity（→ world==local，零回归）。
+glm::mat4 ParentWorldMatrix(Orange::Engine::World& world, Orange::Engine::Entity entity)
+{
+    using Orange::Engine::Scene::HierarchyComponent;
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* h = world.GetComponent<HierarchyComponent>(entity);
+    if (h == nullptr || !h->parent.IsValid()) { return glm::mat4(1.0f); }
+    const auto* pwtc = world.GetComponent<WorldTransformComponent>(h->parent);
+    return (pwtc != nullptr) ? pwtc->world : glm::mat4(1.0f);
+}
+
+// 取实体的世界 rotation：优先从 WorldTransformComponent.world 抽旋转（handle 轴
+// 朝向画在 mesh 世界朝向）；无 cache fallback 到 local rotation（root：相等）。
+glm::quat EntityWorldRotation(Orange::Engine::World& world, Orange::Engine::Entity entity,
+                              const Orange::Engine::Scene::TransformComponent& tc)
+{
+    using Orange::Engine::Scene::WorldTransformComponent;
+    const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
+    return (wtc != nullptr) ? RotationFromMatrix(wtc->world) : tc.rotation;
 }
 
 auto MakeTransformScaleApply(EditorHost* pHost, Orange::Engine::Entity entity)
@@ -155,14 +209,30 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
     const glm::mat4 viewProj    = cam.projection * cam.view;
     const glm::mat4 invViewProj = glm::inverse(viewProj);
 
-    const glm::vec3 entityPos = pTC->position;
+    // A1 层级（保守做法，spec §一.5）：origin 改读实体的**世界**位置（handle
+    // 画在 mesh 上，而非 parented 实体的 local 偏移处）。root：world==local →
+    // 零回归。scale 值仍写 **local**（见下方限制说明）。
+    const glm::vec3 entityPos = EntityWorldPosition(*pWorld, entity, *pTC);
     // Scale 必须 local：pTC->scale.xyz 永远表示沿实体局部轴的缩放系数。
     // 实体被 rotate 后若 gizmo 仍画 world XYZ，视觉 handle 与实际缩放方
     // 向脱钩——拖红轴看似沿水平方向拉，实体却沿"局部 X（已旋转）"伸缩。
     // 故 axis 一律 entityRot * worldAxis，绘制 + hit-test + drag math 三
     // 处保持同一基。Translate 也可同样改，但 world-axis translate 是工
     // 业惯例，不动；Rotate 同理。
-    const glm::mat3 entityRot = glm::mat3_cast(pTC->rotation);
+    //
+    // A1 层级：entityRot 改用实体的**世界**旋转（含父链旋转），让 handle 轴朝向
+    // 画在 mesh 的世界朝向上（parented 到旋转父的实体，handle 跟 mesh 视觉一致）。
+    // root / 父无旋转：worldRot==localRot → handle 朝向不变（零回归）。
+    //
+    // ⚠️ 限制（明确不支持，spec §一.5）：当父链**带旋转**且做 **non-uniform
+    // scale** 时——沿世界朝向轴拖出的 factor 直接乘到 local scale 分量，是个
+    // 近似。父旋转会让"沿世界轴的非均匀缩放"在子 local 空间 shear（无法用纯
+    // 对角 scale 表示），故父带旋转 + non-uniform scale 的精确写回是公认难点，
+    // 本实现不强行做（父无旋转时正确；uniform/center scale 任意父都正确——
+    // 各分量等比，无 shear）。需要精确支持时另起 session 引入完整 world TRS
+    // 分解 + 可能的 shear-aware scale 表示。
+    const glm::mat3 entityRot =
+        glm::mat3_cast(EntityWorldRotation(*pWorld, entity, *pTC));
 
     const auto projOrigin = GM::ProjectWorldToScreen(entityPos, viewProj,
                                                      viewportImageOriginScreen,
@@ -254,17 +324,25 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
             // uniform center scale：记录鼠标屏幕坐标作为 ref；不需要 axis 解算
             host.gizmo.draggingAxis        = Axis::Center;
             host.gizmo.dragStartEntityScale = pTC->scale;
-            host.gizmo.dragStartEntityPos   = entityPos;  // 群组 scale pivot
-            host.gizmo.dragStartEntityRot   = pTC->rotation;  // 按下帧旋转作 drag 基准
+            host.gizmo.dragStartEntityPos   = entityPos;  // 群组 scale pivot（A1：世界）
+            // A1 层级：drag 基准用实体的**世界**旋转（与 origin / axis draw 同基）。
+            // root / 父无旋转：worldRot==localRot → 零回归。
+            host.gizmo.dragStartEntityRot   = EntityWorldRotation(*pWorld, entity, *pTC);
             host.gizmo.dragStartMouseScreen = glm::vec3(mousePos.x, mousePos.y, 0.0f);
-            // 多选群组 scale：快照其余选中实体的 pos+scale（pivot = primary 位置）。
+            // 多选群组 scale：快照其余选中实体。position 存 local（命令 oldVal）+
+            // world（绕 world pivot 缩放）；scale 存 local。root：world==local → 零回归。
             host.gizmo.dragStartAdditional.clear();
             for (const auto& other : host.selection.additionalSelectedEntities)
             {
                 if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
                 {
-                    host.gizmo.dragStartAdditional.push_back(
-                        {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                    EditorGizmoState::GroupDragSnapshot snap;
+                    snap.entity     = other;
+                    snap.position   = pOtherTC->position;   // local 起点（命令 oldVal）
+                    snap.rotation   = pOtherTC->rotation;
+                    snap.scale      = pOtherTC->scale;
+                    snap.worldStart = EntityWorldPosition(*pWorld, other, *pOtherTC);
+                    host.gizmo.dragStartAdditional.push_back(snap);
                 }
             }
             host.cmdStack.BeginGroup("Scale Drag", MergeMode::Ends);
@@ -289,17 +367,23 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                     {
                         host.gizmo.draggingAxis           = host.gizmo.hoveredAxis;
                         host.gizmo.dragStartEntityScale   = pTC->scale;
-                        host.gizmo.dragStartEntityPos     = entityPos;
-                        host.gizmo.dragStartEntityRot     = pTC->rotation;  // 按下帧旋转作 drag 基准
+                        host.gizmo.dragStartEntityPos     = entityPos;  // 群组 pivot（A1：世界）
+                        // A1 层级：drag 基准用**世界**旋转（与 origin / axis draw 同基）。
+                        host.gizmo.dragStartEntityRot     = EntityWorldRotation(*pWorld, entity, *pTC);
                         host.gizmo.dragStartScaleRefSigned = signedDist;
-                        // 多选群组 scale：快照其余选中实体的 pos+scale。
+                        // 多选群组 scale：快照 pos(local+world) / rot / scale。
                         host.gizmo.dragStartAdditional.clear();
                         for (const auto& other : host.selection.additionalSelectedEntities)
                         {
                             if (auto* pOtherTC = pWorld->GetComponent<TransformComponent>(other))
                             {
-                                host.gizmo.dragStartAdditional.push_back(
-                                    {other, pOtherTC->position, pOtherTC->rotation, pOtherTC->scale});
+                                EditorGizmoState::GroupDragSnapshot snap;
+                                snap.entity     = other;
+                                snap.position   = pOtherTC->position;   // local 起点（命令 oldVal）
+                                snap.rotation   = pOtherTC->rotation;
+                                snap.scale      = pOtherTC->scale;
+                                snap.worldStart = EntityWorldPosition(*pWorld, other, *pOtherTC);
+                                host.gizmo.dragStartAdditional.push_back(snap);
                             }
                         }
                         host.cmdStack.BeginGroup("Scale Drag", MergeMode::Ends);
@@ -340,7 +424,8 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                                                           invViewProj);
                 if (mouseRay.has_value())
                 {
-                    // axisDir 必须用**按下帧捕获**的 dragStartEntityRot，而非每帧最新
+                    // axisDir 必须用**按下帧捕获**的 dragStartEntityRot（A1 后存
+                    // 实体的**世界**旋转，与 origin/axis draw 同基），而非每帧最新
                     // pTC->rotation：dragStartScaleRefSigned 是按下帧用该旋转算的沿轴
                     // 参考距离，drag 更新若改用别的旋转基准则 factor 失配。B2.6 编辑期
                     // 动画预览 tick 会在 drag 期间每帧改 selectedEntity 的 rotation（预览
@@ -415,17 +500,28 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                     // 沿 primary local 轴的乘数）：旋转过的 primary 下，若按世界轴分量缩
                     // 放 follower 偏移，群组形变会与拖动轴脱钩。把偏移用 primary 旋转的
                     // 共轭转进 local 系缩放、再转回世界系。primary 未旋转（q=identity）时
-                    // 退化为旧 ScaleAroundPivot 的世界轴分量缩放，零回归。
+                    // 退化为旧 ScaleAroundPivot 的世界轴分量缩放。
+                    //
+                    // A1 层级：pivot（dragStartEntityPos）+ q（dragStartEntityRot）+
+                    // off 全在**世界**空间（snap.worldStart 是 follower 世界起点）。
+                    // 算出 follower 新**世界** position 后，再经各自父 worldMatrix 转
+                    // local 写回。follower scale 仍乘 factorVec 写 local（保守，与
+                    // primary 同款"父带旋转 non-uniform 不精确"限制）。root：
+                    // worldStart==position、pivot 世界==local、父 identity → nPos 与
+                    // 旧逐字节一致（零回归）。
                     const glm::quat q   = host.gizmo.dragStartEntityRot;
-                    const glm::vec3 off = snap.position - host.gizmo.dragStartEntityPos;
-                    const glm::vec3 nPos = host.gizmo.dragStartEntityPos
+                    const glm::vec3 off = snap.worldStart - host.gizmo.dragStartEntityPos;
+                    const glm::vec3 nWorldPos = host.gizmo.dragStartEntityPos
                         + q * (factorVec * (glm::conjugate(q) * off));
+                    const glm::mat4 fParentWorld = ParentWorldMatrix(*pWorld, snap.entity);
+                    const glm::vec3 nPos = glm::vec3(
+                        glm::inverse(fParentWorld) * glm::vec4(nWorldPos, 1.0f));
                     const glm::vec3 nScale = snap.scale * factorVec;
                     pFTC->position = nPos;
                     pFTC->scale    = nScale;
                     host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                         snap.entity, std::string("Transform.position"),
-                        snap.position, nPos,
+                        snap.position, nPos,    // oldVal = local 起点
                         MakeTransformPositionApply(&host, snap.entity)));
                     host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                         snap.entity, std::string("Transform.scale"),
