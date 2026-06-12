@@ -783,11 +783,18 @@ void EditorRenderLayer::DrawMainMenuBar()
         {
             const auto& recent = mHost.settings.recentScenes;
             if (ImGui::BeginMenu("Open Recent", !recent.empty())) {
+                int recentIdx = 0;
                 for (const std::string& sp : recent) {
                     const auto slash = sp.find_last_of("/\\");
                     const std::string shortName =
                         (slash == std::string::npos) ? sp : sp.substr(slash + 1);
-                    if (ImGui::MenuItem(shortName.c_str())) {
+                    // 显示用 basename，但不同目录下的同名场景 basename 相同会导致
+                    // ImGui label 撞 ID（"2 visible items with conflicting ID"）。
+                    // 追加 "##<index>" 隐藏后缀：显示名仍是 basename，ID 走全串
+                    // 哈希（## 后内容不显示但参与 ID），逐项唯一。
+                    const std::string label =
+                        shortName + "##recent" + std::to_string(recentIdx++);
+                    if (ImGui::MenuItem(label.c_str())) {
                         mPendingOpenScenePath = sp;
                         if (mHost.scene.dirty || HasUnsavedMaterial()) {
                             mHost.scene.pendingCloseAction =
