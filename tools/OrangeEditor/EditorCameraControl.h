@@ -45,6 +45,12 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect);
 // 默认 radius"（聚焦灯光 / 空 entity 仍居中），此分支返回 true。
 bool FrameSelectedCamera(EditorHost& host);
 
+// FrameEntityCamera —— 把轨道相机聚焦到**指定** entity（不依赖当前选中，不改
+// selection）。语义与 FrameSelectedCamera 完全一致（同走 FrameEntitiesCamera 单
+// entity 路径），只是对象由 caller 显式给出。MCP frame_entity(guid) 复用此入口：
+// AI 对准任意实体看构图，不强制改用户选中。无效 entity / World 缺失 → false。
+bool FrameEntityCamera(EditorHost& host, Orange::Engine::Entity entity);
+
 // 全场景 Frame —— 把相机拉到能看全场景所有几何的距离（合并所有带 Transform
 // 的 entity 世界 bounds）。Home 键 / View 菜单触发，对齐 Unity/Unreal "Frame All"。
 // 空场景 / World 缺失 → no-op 返回 false。FrameSelected 的全场景版（共用

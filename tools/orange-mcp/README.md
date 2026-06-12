@@ -14,9 +14,11 @@ Claude ──MCP(stdio)──> orange-mcp(server.py) ──TCP/NDJSON(127.0.0.1:
 - **OrangeEditor 命令端**（`tools/OrangeEditor/mcp/`，C++）：后台 socket 线程收 NDJSON、
   主线程帧末执行命令（走命令栈 / schema / EntityGuid）。
 
-## 现状（首版 = P0 读写协同闭环，11 tool 全落地）
+## 现状（P0 读写协同闭环 + P1 全集，28 tool 全落地）
 
-M0 spike + M1 读闭环 + M2 写闭环已全部落地并端到端真验：
+M0 spike + M1 读闭环 + M2 写闭环 + M4（P1 全 17 tool）已全部落地：
+
+**P0（首版读写协同闭环，11 tool）**
 
 | tool | 类别 | 说明 |
 |---|---|---|
@@ -28,16 +30,35 @@ M0 spike + M1 读闭环 + M2 写闭环已全部落地并端到端真验：
 | `create_entity` | 写 | 建空实体（可 Undo），返回 guid |
 | `set_field` | 写 | 改任意组件字段（走命令栈，可 Ctrl+Z + coalesce） |
 | `add_component` | 写 | 挂组件（⚠️ 现状不可 Undo） |
-| `delete_entity` | 写 | 删实体子树（⚠️ 不可 Undo，删前确认） |
+| `delete_entity` | 写 | 删实体子树（**已可 Undo**，2026-06-12 命令化） |
 | `select_entity` | 写 | 设编辑器选中（UI 状态） |
 | `save_scene` | 写 | 保存场景（文件 IO，下一帧写盘） |
 
-后续分期（P1/P2）：Play 调试、资产导入、prefab、动画创作、C# 脚本协同——完整 tool
+**P1（E1 协同效率 + E2 资产 + E3 Play，17 tool）**
+
+| tool | 类别 | 说明 |
+|---|---|---|
+| `get_editor_state` | 读 | 状态快照：playState / scenePath / dirty / selectedGuid / gizmo 模式 |
+| `find_entities` | 读 | 按 name 子串 / 组件 / underGuid 子树过滤实体 |
+| `get_camera` / `set_camera` | 相机 | 读 / 写轨道相机（pivot/azimuth/elevation/radius/fov，越界 clamp） |
+| `frame_entity` | 相机 | 相机对准实体（空 guid = Frame All），不改选中 |
+| `duplicate_entity` | 写 | 复制子树（可 Undo），返回克隆根 guid |
+| `reparent_entity` | 写 | 改父（keep-world，可 Undo，环检测） |
+| `remove_component` | 写 | 卸组件（多数可 Undo，复用 Inspector 状态快照） |
+| `begin_undo_group` / `end_undo_group` | 写 | 批量操作合并为一条 Undo（30s/断连自动闭合护栏） |
+| `open_scene` | 写 | 打开 .scene.json（dirty 保护，force 丢弃） |
+| `play` / `pause` / `resume` / `stop` | Play | Play 模式控制（快照往返；脚本 tick 待 B1 接线） |
+| `list_assets` | 读 | 枚举 assets/（按 AssetKind / pathPrefix 过滤） |
+| `import_asset` | 写 | 导入外部资产（.png/.obj/.gltf/.glb/.fbx，FBX scale 参数） |
+
+后续分期（P2）：截图后处理一致、prefab 协同、动画创作、C# 脚本字段——完整 tool
 路线见 [`docs/mcp-requirements.md`](../../docs/mcp-requirements.md) §4/§6。
 
-> **写操作纪律**：`set_field` / `create_entity` 走编辑器命令栈，AI 的操作用户可 Ctrl+Z
-> 撤销。`add_component` / `delete_entity` 受编辑器现状限制不可 Undo（会清 undo 历史），
-> tool 会显式返回 `undoable:false`。Play 模式下写操作默认拒绝（传 `allowInPlay` 逃生门）。
+> **写操作纪律**：`set_field` / `create_entity` / `delete_entity` / `duplicate_entity` /
+> `reparent_entity` / `remove_component`（多数）走编辑器命令栈，AI 的操作用户可 Ctrl+Z 撤销。
+> `add_component` 受编辑器现状限制不可 Undo（会清 undo 历史），tool 显式返回 `undoable:false`。
+> Play 模式下写操作默认拒绝（传 `allowInPlay` 逃生门）。批量操作用 `begin_undo_group` /
+> `end_undo_group` 合并成一条 Undo（有 30s 超时 + 连接断开自动闭合护栏）。
 
 ## 安装
 

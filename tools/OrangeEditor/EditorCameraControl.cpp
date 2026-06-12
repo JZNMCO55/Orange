@@ -357,3 +357,14 @@ bool FrameAllCamera(EditorHost& host)
     for (auto e : view) { ents.push_back(World::FromEntt(e)); }
     return FrameEntitiesCamera(host, ents);
 }
+
+bool FrameEntityCamera(EditorHost& host, Orange::Engine::Entity entity)
+{
+    using namespace Orange::Engine;
+    if (host.scene.pWorld == nullptr || !entity.IsValid()) { return false; }
+    if (!host.scene.pWorld->IsValid(entity)) { return false; }
+    // 单 entity 走与 FrameSelectedCamera 完全相同的 FrameEntitiesCamera 路径——
+    // 不读 / 不改 selection。
+    const std::vector<Entity> ents{entity};
+    return FrameEntitiesCamera(host, ents);
+}

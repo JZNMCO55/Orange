@@ -144,6 +144,12 @@ ImportResult ImportFbxMeshToRegistry(std::string_view srcPath,
 //          有效的 pAssets（否则返 AssetLoadFailed）。
 ImportResult Dispatch(std::string_view srcPath, EditorHost& host);
 
+// 带 importScale 的重载（MCP import_asset 复用）：与上面 Dispatch 行为一致，
+// 额外把 importScale 透传给 FBX 路径（obj/gltf/texture 忽略）。GUI drag-drop /
+// 菜单路径仍走无 scale 版（默认 1.0）；只有需要显式单位缩放（真 cm FBX 传约
+// 0.01）的程序化入口用此重载。见 FbxAxisConverter.h 的单位歧义说明。
+ImportResult Dispatch(std::string_view srcPath, EditorHost& host, float importScale);
+
 // Texture importer：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
 // destDirOverride 空 → dest = assets/Textures/<basename>（独立拖图片的默认）；
 // 非空 → dest = <destDirOverride>/<basename>。模型 importer 把贴图 co-locate

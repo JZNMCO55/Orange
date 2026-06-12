@@ -1264,6 +1264,15 @@ void DrawProperty(EditorHost&                  host,
 
 }  // anonymous namespace
 
+// 公共委托入口（声明见 SchemaInspector.h）：转调匿名命名空间内的 CaptureComponentState
+// （TU 内可见）。让 remove_component 类外部 caller（MCP）复用同一份快照逻辑，避免
+// 在别处重复一套 PropertyType 分派的 marshal 代码（易漏类型 / 内存读错）。
+std::vector<std::function<void(void*)>>
+CaptureComponentValues(EditorHost& host, const ComponentSchema& schema, const void* component)
+{
+    return CaptureComponentState(host, schema, component);
+}
+
 void DrawComponentSchemaSection(EditorHost&                  host,
                                 Orange::Engine::Entity       entity,
                                 const ComponentSchema&       schema)

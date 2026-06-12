@@ -199,6 +199,21 @@ def list_component_types() -> dict[str, Any]:
     return _conn.send("list_component_types")
 
 
+@mcp.tool()
+def get_editor_state() -> dict[str, Any]:
+    """读取编辑器的轻量状态快照（一次往返掌握全局，省试错）。
+
+    返回 {playState, scenePath, sceneName, dirty, selectedGuid, selectedCount,
+    gizmoMode, gizmoSpace, gizmoVisible}：
+    - playState = "Edit" / "Play" / "Paused"——Play/Paused 期写操作（set_field 等）
+      默认被拒，调用前先看这个；
+    - dirty = 是否有未保存改动（决定 open_scene 是否需要 force / 提醒用户先存）；
+    - selectedGuid / selectedCount = 当前选中实体（空串 = 没选）；
+    - gizmoMode = "Translate"/"Rotate"/"Scale"，gizmoSpace = "World"/"Local"。
+    """
+    return _conn.send("get_editor_state")
+
+
 # 截图返回给 vision 的最长边上限（控制图像大小，贴合 Claude vision 输入）。
 CAPTURE_MAX_EDGE = 1280
 
@@ -280,8 +295,8 @@ def add_component(guid: str, component: str) -> dict[str, Any]:
 def delete_entity(guid: str) -> dict[str, Any]:
     """删除实体及其整个子树。
 
-    ⚠️ **不可撤销**（返回 undoable:false，删除会清空 undo 历史）——删前请向用户确认。
-    实际删除在编辑器下一帧发生。
+    现已**可撤销**（返回 undoable:true）：用户 Ctrl+Z 能恢复被删子树（含原层级位置）。
+    实际删除在编辑器下一帧发生。删多实体子树仍建议先 select_entity 让用户看清范围。
     """
     return _conn.send("delete_entity", {"guid": guid})
 
@@ -303,6 +318,187 @@ def save_scene(path: str = "") -> dict[str, Any]:
     path 留空且当前无场景路径时，编辑器会弹文件对话框（GUI），不适合自动化无人值守。
     """
     return _conn.send("save_scene", {"path": path})
+
+
+# ---------------------------------------------------------------------------
+# P1 工具 —— E1 协同效率包 / E2 资产管线 / E3 Play 调试。
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def find_entities(name: str = "", component: str = "", underGuid: str = "") -> dict[str, Any]:
+    """按条件过滤场景实体（多条件 AND，全可选），返回 {count, truncated, entities[]}。
+
+    - name：名字子串（大小写不敏感）；
+    - component：只保留挂了该组件的实体（用 list_component_types 的 typeName）；
+    - underGuid：只保留该实体子树内的（含其自身）。
+    无命中返回空数组（非错误）。比 get_scene_info 更省 token——调试"鳄梨在哪"先 find
+    再 get_entity，避免整树 dump。
+    """
+    return _conn.send("find_entities",
+                      {"name": name, "component": component, "underGuid": underGuid})
+
+
+@mcp.tool()
+def get_camera() -> dict[str, Any]:
+    """读编辑器轨道相机参数：{pivot[x,y,z], azimuth, elevation, radius, fovYDegrees, zNear, zFar}。
+
+    azimuth/elevation 是弧度球坐标，radius 是相机到 pivot 距离。配合 set_camera 做构图。
+    """
+    return _conn.send("get_camera")
+
+
+@mcp.tool()
+def set_camera(pivot: list[float] | None = None, azimuth: float | None = None,
+               elevation: float | None = None, radius: float | None = None,
+               fovYDegrees: float | None = None, zNear: float | None = None,
+               zFar: float | None = None) -> dict[str, Any]:
+    """写编辑器轨道相机（AI 自主构图后 capture_viewport）。所有参数可选，只改传入的。
+
+    pivot=[x,y,z] 轨道中心；azimuth/elevation 弧度（elevation 自动 clamp 到 ±~89° 防翻面）；
+    radius>0 距离；fovYDegrees∈[1,179]。非命令栈（相机非场景数据，不产 undo）。
+    返回生效后的完整相机参数。
+    """
+    args: dict[str, Any] = {}
+    if pivot is not None: args["pivot"] = pivot
+    if azimuth is not None: args["azimuth"] = azimuth
+    if elevation is not None: args["elevation"] = elevation
+    if radius is not None: args["radius"] = radius
+    if fovYDegrees is not None: args["fovYDegrees"] = fovYDegrees
+    if zNear is not None: args["zNear"] = zNear
+    if zFar is not None: args["zFar"] = zFar
+    return _conn.send("set_camera", args)
+
+
+@mcp.tool()
+def frame_entity(guid: str = "") -> dict[str, Any]:
+    """把相机对准实体（自动算距离看全包围盒）。guid 留空 = Frame All（看全场景）。
+
+    不改用户选中（与 select_entity 正交）。非命令栈。返回生效后相机参数。
+    截图前先 frame_entity 调好构图，AI 看得更清。
+    """
+    return _conn.send("frame_entity", {"guid": guid})
+
+
+@mcp.tool()
+def duplicate_entity(guid: str, allowInPlay: bool = False) -> dict[str, Any]:
+    """复制实体子树（克隆体换新 guid + 新 prefab 实例 id），返回新根 guid。
+
+    可 Undo（用户 Ctrl+Z 删掉克隆）。克隆体作原实体的兄弟（同父），并被自动选中。
+    Play 模式默认拒绝（传 allowInPlay=True 覆盖）。
+    """
+    return _conn.send("duplicate_entity", {"guid": guid, "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def reparent_entity(guid: str, newParentGuid: str = "", keepWorld: bool = True,
+                    allowInPlay: bool = False) -> dict[str, Any]:
+    """改实体的父节点。newParentGuid 留空 = 提为根。可 Undo（精确复位原层级位置）。
+
+    keepWorld=True（默认）保持世界位姿不变（Unity "keep world position"）；False 则保
+    local 不变（相对新父重新解释，可能跳位）。环检测：把祖先挂到后代下 / 挂到自己下
+    → 报错拒绝。Play 模式默认拒绝（allowInPlay=True 覆盖）。
+    """
+    return _conn.send("reparent_entity", {"guid": guid, "newParentGuid": newParentGuid,
+                                          "keepWorld": keepWorld, "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def remove_component(guid: str, component: str, allowInPlay: bool = False) -> dict[str, Any]:
+    """卸掉实体上的某组件（component = list_component_types 里 removable=true 的 typeName）。
+
+    多数组件可 Undo（返回 undoable:true，撤销时重建组件并还原原字段值）；少数无法重建的
+    （Name/Hierarchy/Animator 等）不可 Undo（undoable:false，会清空 undo 历史）。
+    Play 模式默认拒绝（allowInPlay=True 覆盖）。
+    """
+    return _conn.send("remove_component", {"guid": guid, "component": component,
+                                           "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def begin_undo_group(label: str = "") -> dict[str, Any]:
+    """开始一个命令组：在 end_undo_group 之前的所有写操作合并为**一条** undo 记录。
+
+    用于"搭一组灰盒平台"这类批量操作——用户一次 Ctrl+Z 即可整组回退，不必撤 N 次。
+    嵌套开组会报错。**护栏**：组打开超过 30s 未关、或 MCP 连接断开，编辑器自动闭合该组
+    （防忘调 end_undo_group 把命令栈卡死）。务必配对调用 end_undo_group。
+    """
+    return _conn.send("begin_undo_group", {"label": label})
+
+
+@mcp.tool()
+def end_undo_group() -> dict[str, Any]:
+    """结束 begin_undo_group 开的命令组：组内命令打包成单条 undo 记录入栈。
+
+    没有打开的组时报错。空组（其间没产生任何写）直接丢弃，不污染栈。
+    """
+    return _conn.send("end_undo_group")
+
+
+@mcp.tool()
+def open_scene(path: str, force: bool = False) -> dict[str, Any]:
+    """打开一个 .scene.json 场景文件（切换当前编辑的场景）。
+
+    **dirty 保护**：当前有未保存改动且 force=False 时报错（防默默丢用户工作）——先 save_scene
+    或显式传 force=True 丢弃改动。仅 Edit 模式可开（Play 中报错）。文件不存在报错。
+    实际切场景在编辑器下一帧执行。
+    """
+    return _conn.send("open_scene", {"path": path, "force": force})
+
+
+@mcp.tool()
+def play() -> dict[str, Any]:
+    """进入 Play 模式（Edit→Play）：World 快照落盘 + 物理/VFX/动画开始 tick。
+
+    已在 Play/Paused 时报错。Stop 时会从快照还原回 Edit 前状态（Play 期改动丢弃）。
+    Play 期读类 tool（get_entity / capture_viewport）照常工作——这正是观察玩法行为的核心；
+    写类 tool 默认被拒（改动会被 Stop 还原）。
+    """
+    return _conn.send("play")
+
+
+@mcp.tool()
+def pause() -> dict[str, Any]:
+    """暂停 Play（Play→Paused）：tick 停在当前帧，便于 get_entity + 截图细看。需当前在 Play。"""
+    return _conn.send("pause")
+
+
+@mcp.tool()
+def resume() -> dict[str, Any]:
+    """从暂停恢复运行（Paused→Play）。需当前在 Paused。"""
+    return _conn.send("resume")
+
+
+@mcp.tool()
+def stop() -> dict[str, Any]:
+    """停止 Play 回 Edit（Play/Paused→Edit）：从快照还原场景，Play 期所有改动丢弃。
+
+    需当前在 Play/Paused。还原后 AI 之前持有的实体 guid 仍有效（guid 跨快照往返稳定）。
+    """
+    return _conn.send("stop")
+
+
+@mcp.tool()
+def list_assets(kind: str = "", pathPrefix: str = "") -> dict[str, Any]:
+    """枚举 assets/ 下的资产文件，返回 {count, truncated, assets[]}；每项 {path, kind}。
+
+    kind 过滤（"Mesh"/"Material"/"Texture"/"Scene"/"Sound"/"AnimationClip"，留空=全部）；
+    pathPrefix 子串过滤。返回的 path 是 forward-slash 相对路径，可直接喂给 set_field 的
+    AssetRef 字段（如 Renderable.mesh / materialInstance）。给字段赋资产前先 list 查合法路径。
+    """
+    return _conn.send("list_assets", {"kind": kind, "pathPrefix": pathPrefix})
+
+
+@mcp.tool()
+def import_asset(srcPath: str, scale: float = 1.0) -> dict[str, Any]:
+    """导入外部资产到 assets/（与编辑器拖拽 / File→Import 同路径）。
+
+    支持 .png/.jpg/.jpeg/.tga/.hdr/.obj/.gltf/.glb/.fbx。返回 {destPath, message, materialPaths[]}
+    ——destPath 是引擎自家格式产物路径（可接着 create_entity + set_field 挂上）；materialPaths
+    是 gltf/fbx 多材质各 slot 的 .material 路径。scale 仅 FBX 用（真 cm 文件传 0.01，默认 1.0
+    信任已烘米）。非命令栈（文件 IO，undoable:false）。配合 Blender MCP 做 DCC→引擎管线。
+    """
+    return _conn.send("import_asset", {"srcPath": srcPath, "scale": scale})
 
 
 def main() -> None:

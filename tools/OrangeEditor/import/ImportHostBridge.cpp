@@ -150,4 +150,24 @@ ImportResult Dispatch(std::string_view srcPath, EditorHost& host)
     return DispatchToRegistry(srcPath, *registry, registerMaterial);
 }
 
+ImportResult Dispatch(std::string_view srcPath, EditorHost& host, float importScale)
+{
+    // 同无 scale 版，仅把 importScale 透传给 DispatchToRegistry（FBX 路径消费，
+    // 其余扩展名忽略）。
+    ImportResult result{};
+    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+    if (!ResolveHostRegistry(host, "ImportDispatcher", srcPath, registry, result))
+    {
+        return result;
+    }
+    auto registerMaterial = [&host](const std::string& matPath) {
+        if (::EnsureMaterialInstance(host, matPath) != nullptr)
+        {
+            ORANGE_LOG_INFO("Importer: material '{}' 已注册 → 可在 Renderable "
+                            "Material 字段选用", matPath);
+        }
+    };
+    return DispatchToRegistry(srcPath, *registry, registerMaterial, importScale);
+}
+
 }  // namespace Orange::Editor::Import

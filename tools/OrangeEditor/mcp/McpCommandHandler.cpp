@@ -1,21 +1,28 @@
 #include "McpCommandHandler.h"
 
+#include "../EditorCameraControl.h"
 #include "../EditorHost.h"
 #include "../EditorHierarchy.h"
 #include "../command/EntityCommands.h"
+#include "../command/LambdaCommand.h"
 #include "../command/SetFieldValueCommand.h"
+#include "../import/ImportDispatcher.h"
 #include "../schema/ComponentSchemaRegistry.h"
+#include "../schema/SchemaInspector.h"
 
 #include "../schema/PropertyDescriptor.h"
 
 #include <orange/engine/core/Guid.h>
+#include <orange/engine/core/Log.h>
 #include <orange/engine/core/Serialization.h>
 #include <orange/engine/physics/ColliderDesc.h>
+#include <orange/engine/render/Camera.h>
 #include <orange/engine/render/Pipeline.h>
 #include <orange/engine/scene/EntityGuid.h>
 #include <orange/engine/scene/GuidComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 
@@ -25,8 +32,11 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -156,6 +166,39 @@ const char* AssetKindName(Schema::AssetKind k)
         case AK::AnimationClip: return "AnimationClip";
     }
     return "Unknown";
+}
+
+// PlayState / gizmo Mode / Space → 稳定字符串名（get_editor_state 用）。
+const char* PlayStateName(PlayState s)
+{
+    switch (s)
+    {
+        case PlayState::Edit:   return "Edit";
+        case PlayState::Play:   return "Play";
+        case PlayState::Paused: return "Paused";
+    }
+    return "Edit";
+}
+
+const char* GizmoModeName(EditorGizmoState::Mode m)
+{
+    switch (m)
+    {
+        case EditorGizmoState::Mode::Translate: return "Translate";
+        case EditorGizmoState::Mode::Rotate:    return "Rotate";
+        case EditorGizmoState::Mode::Scale:     return "Scale";
+    }
+    return "Translate";
+}
+
+const char* GizmoSpaceName(EditorGizmoState::Space sp)
+{
+    switch (sp)
+    {
+        case EditorGizmoState::Space::World: return "World";
+        case EditorGizmoState::Space::Local: return "Local";
+    }
+    return "World";
 }
 
 // Entity → 稳定 guid 字符串（EntityRef 字段编码用）；无效 / 无 guid → ""。
@@ -480,6 +523,40 @@ std::string HandleListComponentTypes(std::int64_t id)
     return DumpLine(w);
 }
 
+// ---- op: get_editor_state --------------------------------------------------
+// 轻量编辑器状态快照：playState（Edit/Play/Paused）、当前场景路径 + 名 + dirty、
+// 当前选中实体 guid + 选中数、gizmo 模式 / 参考系 / 可见开关。AI 每次操作前据此
+// 知道"现在能不能写（Play 期默认拒）、选中了谁、场景脏没脏"，省一轮试错。
+std::string HandleGetEditorState(std::int64_t id, EditorHost& host)
+{
+    namespace Scene = Orange::Engine::Scene;
+
+    // 选中实体的 guid —— 有选中且有 World 时先幂等补 guid 再读。
+    std::string selectedGuid;
+    if (host.selection.selectedEntity.IsValid())
+    {
+        if (auto* pWorld = host.scene.pWorld.get(); pWorld != nullptr)
+        {
+            Scene::EnsureEntityGuids(*pWorld);
+            selectedGuid = EntityGuidString(pWorld->Registry(), host.selection.selectedEntity);
+        }
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteString("result/playState", PlayStateName(host.scene.playState));
+    w.WriteString("result/scenePath", host.scene.currentScenePath);
+    w.WriteString("result/sceneName", SceneDisplayName(host.scene.currentScenePath));
+    w.WriteBool("result/dirty", host.scene.dirty);
+    w.WriteString("result/selectedGuid", selectedGuid);
+    w.WriteInt("result/selectedCount", static_cast<std::int64_t>(host.selection.SelectedCount()));
+    w.WriteString("result/gizmoMode", GizmoModeName(host.gizmo.mode));
+    w.WriteString("result/gizmoSpace", GizmoSpaceName(host.gizmo.space));
+    w.WriteBool("result/gizmoVisible", host.gizmo.visible);
+    return DumpLine(w);
+}
+
 // ---- op: capture_viewport --------------------------------------------------
 // 把当前 viewport 离屏渲染结果（用户屏幕所见，含后处理）回读 → base64。
 // Python 侧解码 → PNG → MCP image content。让 AI「看见」场景（ADR-020 M1 核心）。
@@ -769,9 +846,11 @@ std::string HandleAddComponent(std::int64_t id, EditorHost& host, const JsonRead
 }
 
 // ---- op: delete_entity -----------------------------------------------------
-// 删实体及子树。⚠️ 现状删除走 pendingDelete → DestroySubtree + cmdStack.Clear（ADR-020
-// Q5），**不可 Undo** → undoable:false。实际删除在下一帧消费 pendingDelete 时发生。
-// args: guid, allowInPlay?
+// 删实体及子树。设 pendingDelete，下一帧 EntityTreePanel 消费——该路径现已**可
+// Undo**（SaveSubtreeToString + do=DestroySubtree / undo=LoadFromString 精确复位，
+// 不再 Clear 栈），故 undoable:true（ADR-020 §4.D 预期的"删除命令化后契约升级"，
+// 协议字段不变纯行为增强）。极端兜底：子树序列化失败时该帧退化为不可 undo 的直接
+// 销毁——属罕见边界，契约按常态声明。args: guid, allowInPlay?
 std::string HandleDeleteEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
 {
     namespace Scene = Orange::Engine::Scene;
@@ -790,13 +869,14 @@ std::string HandleDeleteEntity(std::int64_t id, EditorHost& host, const JsonRead
     const Entity e = Scene::FindEntityByGuid(*pWorld, guid);
     if (!e.IsValid()) { return MakeError(id, "entity not found"); }
 
-    // 帧末设 pendingDelete；下一帧 EntityTreePanel 消费（DestroySubtree + 清栈）。
+    // 帧末设 pendingDelete；下一帧 EntityTreePanel 消费（SaveSubtreeToString +
+    // do=DestroySubtree / undo=LoadFromString 复位，可 Undo）。
     host.selection.pendingDelete = e;
 
     JsonWriter w;
     w.WriteInt("id", id);
     w.WriteBool("ok", true);
-    w.WriteBool("result/undoable", false);  // 删除走清栈，不可 undo（删前应向用户确认）
+    w.WriteBool("result/undoable", true);  // 删除已命令化，用户可 Ctrl+Z 撤销
     return DumpLine(w);
 }
 
@@ -859,6 +939,642 @@ std::string HandleSaveScene(std::int64_t id, EditorHost& host, const JsonReader&
     return DumpLine(w);
 }
 
+// ===========================================================================
+// P1 工具 —— E1 协同效率包 / E2 资产管线 / E3 Play 调试。
+// ===========================================================================
+
+// ASCII 小写化（无 locale 依赖；find_entities 大小写不敏感匹配 + list_assets ext）。
+std::string AsciiLower(std::string s)
+{
+    for (auto& c : s) { if (c >= 'A' && c <= 'Z') { c = static_cast<char>(c - 'A' + 'a'); } }
+    return s;
+}
+
+// 按 guid 字符串定位实体（先幂等补 guid）。成功返回有效 Entity；失败置 err 返回
+// Invalid（caller 直接 MakeError(id, err)）。P1 写类 / 相机类 tool 复用。
+Orange::Engine::Entity ResolveEntityByGuid(EditorHost& host, const std::string& guidStr,
+                                           std::string& err)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { err = "no active world"; return Entity::Invalid(); }
+    if (guidStr.empty())   { err = "missing 'guid'"; return Entity::Invalid(); }
+    Guid guid;
+    if (!Guid::FromString(guidStr, guid)) { err = "invalid guid format"; return Entity::Invalid(); }
+    Scene::EnsureEntityGuids(*pWorld);
+    const Entity e = Scene::FindEntityByGuid(*pWorld, guid);
+    if (!e.IsValid()) { err = "entity not found"; return Entity::Invalid(); }
+    return e;
+}
+
+// ---- op: find_entities -----------------------------------------------------
+// 按条件过滤实体（全可选、多条件 AND）：name 子串（大小写不敏感）/ 含某组件
+// （schema typeName）/ underGuid 子树范围（含该实体自身）。返回 {guid, name} 数组。
+// 无命中 → 空数组非 error（NF）。args: name?, component?, underGuid?
+std::string HandleFindEntities(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+    using Orange::Engine::World;
+
+    World* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+    Scene::EnsureEntityGuids(*pWorld);
+    auto& reg = pWorld->Registry();
+
+    std::string nameSub, compName, underGuidStr;
+    req.ReadString("args/name", nameSub);
+    req.ReadString("args/component", compName);
+    req.ReadString("args/underGuid", underGuidStr);
+    const std::string nameSubLower = AsciiLower(nameSub);
+
+    const Schema::ComponentSchema* compSchema = nullptr;
+    if (!compName.empty())
+    {
+        compSchema = FindSchemaByName(compName);
+        if (compSchema == nullptr) { return MakeError(id, "unknown component: " + compName); }
+    }
+
+    Entity under = Entity::Invalid();
+    if (!underGuidStr.empty())
+    {
+        Guid ug;
+        if (!Guid::FromString(underGuidStr, ug)) { return MakeError(id, "invalid underGuid format"); }
+        under = Scene::FindEntityByGuid(*pWorld, ug);
+        if (!under.IsValid()) { return MakeError(id, "underGuid entity not found"); }
+    }
+
+    struct Hit { std::string guid; std::string name; };
+    std::vector<Hit> hits;
+    bool truncated = false;
+    for (auto e : reg.view<entt::entity>())
+    {
+        if (hits.size() >= kMaxSceneEntities) { truncated = true; break; }
+        const Entity entity = World::FromEntt(e);
+
+        std::string nm;
+        if (const auto* nc = reg.try_get<Scene::NameComponent>(e); nc != nullptr) { nm = nc->name; }
+        if (!nameSubLower.empty() && AsciiLower(nm).find(nameSubLower) == std::string::npos) { continue; }
+        if (compSchema != nullptr &&
+            (compSchema->has == nullptr || !compSchema->has(*pWorld, entity))) { continue; }
+        // under 是 entity 的祖先（含自身）== entity 在 under 的子树内。
+        if (under.IsValid() && !EditorHierarchy::IsAncestorOf(*pWorld, under, entity)) { continue; }
+
+        hits.push_back(Hit{EntityGuidString(reg, entity), nm});
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteInt("result/count", static_cast<std::int64_t>(hits.size()));
+    w.WriteBool("result/truncated", truncated);
+    w.BeginArray("result/entities", hits.size());
+    for (std::size_t i = 0; i < hits.size(); ++i)
+    {
+        const std::string base = "result/entities/" + std::to_string(i);
+        w.WriteString(base + "/guid", hits[i].guid);
+        w.WriteString(base + "/name", hits[i].name);
+    }
+    return DumpLine(w);
+}
+
+// 把当前编辑器相机参数写进 writer 的 result（get_camera / set_camera / frame_entity
+// 共用，AI 拿到生效后参数）。
+void WriteCameraResult(JsonWriter& w, const EditorCameraState& ec)
+{
+    const float pivot[3]{ec.pivot.x, ec.pivot.y, ec.pivot.z};
+    w.WriteFloatArray("result/pivot", pivot, 3);
+    w.WriteFloat("result/azimuth", ec.azimuth);
+    w.WriteFloat("result/elevation", ec.elevation);
+    w.WriteFloat("result/radius", ec.radius);
+    w.WriteFloat("result/fovYDegrees", ec.fovYDegrees);
+    w.WriteFloat("result/zNear", ec.zNear);
+    w.WriteFloat("result/zFar", ec.zFar);
+}
+
+// ---- op: get_camera --------------------------------------------------------
+// 读编辑器轨道相机（pivot/azimuth/elevation/radius/fov/near/far）。非命令栈。
+std::string HandleGetCamera(std::int64_t id, EditorHost& host)
+{
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    WriteCameraResult(w, host.camera);
+    return DumpLine(w);
+}
+
+// ---- op: set_camera --------------------------------------------------------
+// 写编辑器轨道相机（AI 自主构图截图，亦覆盖 Standard Views）。各字段可选；非法值
+// clamp 到合法域。非命令栈（相机非场景数据，与手动转相机一致不产 undo）。
+// args: pivot?[3], azimuth?, elevation?, radius?, fovYDegrees?, zNear?, zFar?
+std::string HandleSetCamera(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    auto& ec = host.camera;
+    float p[3];
+    if (req.ReadFloatArray("args/pivot", p, 3)) { ec.pivot = glm::vec3(p[0], p[1], p[2]); }
+    double d;
+    if (req.ReadFloat("args/azimuth", d))   { ec.azimuth = static_cast<float>(d); }
+    if (req.ReadFloat("args/elevation", d))
+    {
+        // clamp 到 ±~89°（1.55334 rad）避免轨道翻面（gimbal flip，相机越过天/地顶）。
+        ec.elevation = std::min(std::max(static_cast<float>(d), -1.55334f), 1.55334f);
+    }
+    if (req.ReadFloat("args/radius", d))      { ec.radius = std::max(static_cast<float>(d), 0.01f); }
+    if (req.ReadFloat("args/fovYDegrees", d)) { ec.fovYDegrees = std::min(std::max(static_cast<float>(d), 1.0f), 179.0f); }
+    if (req.ReadFloat("args/zNear", d))       { ec.zNear = std::max(static_cast<float>(d), 1e-4f); }
+    if (req.ReadFloat("args/zFar", d))        { ec.zFar = std::max(static_cast<float>(d), ec.zNear + 1e-3f); }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    WriteCameraResult(w, ec);
+    return DumpLine(w);
+}
+
+// ---- op: frame_entity ------------------------------------------------------
+// 相机对准实体（复用 FrameEntityCamera；不传 guid = Frame All）。非命令栈。
+// args: guid?
+std::string HandleFrameEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+
+    std::string guidStr;
+    req.ReadString("args/guid", guidStr);
+
+    bool ok = false;
+    if (guidStr.empty())
+    {
+        ok = FrameAllCamera(host);
+    }
+    else
+    {
+        std::string err;
+        const Entity e = ResolveEntityByGuid(host, guidStr, err);
+        if (!e.IsValid()) { return MakeError(id, err); }
+        ok = FrameEntityCamera(host, e);
+    }
+    if (!ok) { return MakeError(id, "frame failed (empty scene / entity lacks transform)"); }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    WriteCameraResult(w, host.camera);
+    return DumpLine(w);
+}
+
+// ---- op: duplicate_entity --------------------------------------------------
+// 复制子树（复用 Duplicate 路径：SaveSubtreeToString → LoadFromString +
+// SeparateClonedIdentities 换新身份 + reparent 到原父）。可 Undo。返回克隆根 guid。
+// args: guid, allowInPlay?
+std::string HandleDuplicateEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Entity;
+    using HC = Scene::HierarchyComponent;
+
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    std::string guidStr;
+    req.ReadString("args/guid", guidStr);
+    std::string err;
+    const Entity root = ResolveEntityByGuid(host, guidStr, err);
+    if (!root.IsValid()) { return MakeError(id, err); }
+
+    auto* pW = host.scene.pWorld.get();
+    Scene::SaveOptions saveOpts;
+    saveOpts.assetRegistry          = host.assets.pAssets.get();
+    saveOpts.namedMaterialInstances = &host.assets.namedMaterialInstances;
+    saveOpts.extraSerializers       = host.extraSerializers;
+    const std::vector<Entity> dupRoots{root};
+    auto blobRes = Scene::SaveSubtreeToString(*pW, dupRoots, saveOpts);
+    if (blobRes.IsErr()) { return MakeError(id, "subtree serialize failed"); }
+
+    const auto* rh = pW->GetComponent<HC>(root);
+    const Entity origParent = (rh != nullptr) ? rh->parent : Entity::Invalid();
+    const std::string blob = blobRes.Value();
+    auto* pH = &host;
+    auto createdPtr = std::make_shared<std::vector<Entity>>();
+    // 与 EntityTreePanel 帧末 Duplicate（Ctrl+D）完全同款 LambdaCommand。
+    host.cmdStack.Push(std::make_unique<LambdaCommand>(
+        "duplicate",
+        [pH, blob, origParent, createdPtr]() {
+            auto* w = pH->scene.pWorld.get();
+            if (w == nullptr) { return; }
+            Scene::LoadOptions lo;
+            lo.assetRegistry          = pH->assets.pAssets.get();
+            lo.animatorRegistry       = pH->assets.pAnimators.get();
+            lo.namedMaterialInstances = &pH->assets.namedMaterialInstances;
+            lo.extraSerializers       = pH->extraSerializers;
+            std::vector<Entity> created;
+            if (Scene::LoadFromString(blob, *w, lo, &created).IsErr()) { return; }
+            *createdPtr = created;
+            Scene::SeparateClonedIdentities(*w, created);
+            for (const auto ce : created) {
+                const auto* eh = w->GetComponent<HC>(ce);
+                if (eh == nullptr || !eh->parent.IsValid()) {
+                    if (origParent.IsValid() && w->IsValid(origParent)) {
+                        EditorHierarchy::ReparentTo(*w, ce, origParent);
+                    }
+                    pH->selection.selectedEntity = ce;
+                    pH->selection.ClearAdditional();
+                    pH->assets.selectedAssetPath.clear();
+                    break;
+                }
+            }
+        },
+        [pH, createdPtr]() {
+            auto* w = pH->scene.pWorld.get();
+            if (w == nullptr) { return; }
+            for (const auto ce : *createdPtr) {
+                if (!w->IsValid(ce)) { continue; }
+                const auto* eh = w->GetComponent<HC>(ce);
+                const bool isRoot = (eh == nullptr) || !eh->parent.IsValid()
+                    || std::find(createdPtr->begin(), createdPtr->end(), eh->parent) == createdPtr->end();
+                if (isRoot) { EditorHierarchy::DestroySubtree(*w, ce); }
+            }
+        }));
+
+    // Push 已执行 do-lambda → createdPtr 已填、SeparateClonedIdentities 已换新
+    // guid。克隆根 = 父不在 created 集内者（reparent 后父=origParent 在集外，或无父）。
+    Entity cloneRoot = Entity::Invalid();
+    for (const auto ce : *createdPtr)
+    {
+        if (!pW->IsValid(ce)) { continue; }
+        const auto* eh = pW->GetComponent<HC>(ce);
+        const bool isRoot = (eh == nullptr) || !eh->parent.IsValid()
+            || std::find(createdPtr->begin(), createdPtr->end(), eh->parent) == createdPtr->end();
+        if (isRoot) { cloneRoot = ce; break; }
+    }
+    std::string newGuid;
+    if (cloneRoot.IsValid())
+    {
+        Scene::EnsureEntityGuids(*pW);
+        newGuid = EntityGuidString(pW->Registry(), cloneRoot);
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    w.WriteString("result/guid", newGuid);
+    return DumpLine(w);
+}
+
+// ---- op: reparent_entity ---------------------------------------------------
+// 改父（复用 EditorHierarchy keep-world 变体，世界位姿保持）。可 Undo（捕获旧
+// parent + prevSibling 精确复位）。环检测：把祖先挂到后代下 → error。
+// args: guid, newParentGuid?(空=提为根), keepWorld?=true, allowInPlay?
+std::string HandleReparentEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+    using HC = Scene::HierarchyComponent;
+
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    auto* pW = host.scene.pWorld.get();
+    if (pW == nullptr) { return MakeError(id, "no active world"); }
+
+    std::string guidStr;
+    req.ReadString("args/guid", guidStr);
+    std::string err;
+    const Entity child = ResolveEntityByGuid(host, guidStr, err);
+    if (!child.IsValid()) { return MakeError(id, err); }
+
+    Entity newParent = Entity::Invalid();
+    std::string npStr;
+    if (req.ReadString("args/newParentGuid", npStr) && !npStr.empty())
+    {
+        Guid np;
+        if (!Guid::FromString(npStr, np)) { return MakeError(id, "invalid newParentGuid format"); }
+        newParent = Scene::FindEntityByGuid(*pW, np);
+        if (!newParent.IsValid()) { return MakeError(id, "new parent entity not found"); }
+    }
+    const bool keepWorld = req.GetBool("args/keepWorld", true);
+
+    // 防环：child 是 newParent 的祖先（IsAncestorOf 含自身）→ 拒绝（含 self-parent）。
+    if (newParent.IsValid() && EditorHierarchy::IsAncestorOf(*pW, child, newParent))
+    {
+        return MakeError(id, "cycle: cannot reparent under itself or its own descendant");
+    }
+
+    const auto* hc = pW->GetComponent<HC>(child);
+    const Entity oldParent = (hc != nullptr) ? hc->parent : Entity::Invalid();
+    const Entity oldPrev   = (hc != nullptr) ? hc->prevSibling : Entity::Invalid();
+
+    auto* pH = &host;
+    // 与 EntityTreePanel DnD reparent 同款 LambdaCommand（keep-world 自逆）。
+    host.cmdStack.Push(std::make_unique<LambdaCommand>(
+        "reparent",
+        [pH, child, newParent, keepWorld]() {
+            auto* w = pH->scene.pWorld.get();
+            if (w == nullptr || !w->IsValid(child)) { return; }
+            if (keepWorld) { EditorHierarchy::ReparentToKeepWorld(*w, child, newParent); }
+            else           { EditorHierarchy::ReparentTo(*w, child, newParent); }
+        },
+        [pH, child, oldParent, oldPrev, keepWorld]() {
+            auto* w = pH->scene.pWorld.get();
+            if (w == nullptr || !w->IsValid(child)) { return; }
+            if (keepWorld) { EditorHierarchy::MoveToPositionKeepWorld(*w, child, oldParent, oldPrev); }
+            else           { EditorHierarchy::MoveToPosition(*w, child, oldParent, oldPrev); }
+        }));
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    return DumpLine(w);
+}
+
+// ---- op: remove_component --------------------------------------------------
+// 卸组件（schema.remove）。复用 Inspector Remove 的状态快照还原路径：有 add+get
+// 的组件 → 可 Undo（CaptureComponentValues + LambdaCommand，undo 重建并还原原值）；
+// 否则（Name/Hierarchy/Animator 等无 add）→ remove + Clear 不可 undo。
+// args: guid, component, allowInPlay?
+std::string HandleRemoveComponent(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    auto* pW = host.scene.pWorld.get();
+    if (pW == nullptr) { return MakeError(id, "no active world"); }
+
+    std::string guidStr, compName;
+    req.ReadString("args/guid", guidStr);
+    if (!req.ReadString("args/component", compName)) { return MakeError(id, "missing 'component'"); }
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    const Schema::ComponentSchema* sc = FindSchemaByName(compName);
+    if (sc == nullptr) { return MakeError(id, "unknown component: " + compName); }
+    if (sc->remove == nullptr) { return MakeError(id, "component not removable: " + compName); }
+    if (sc->has == nullptr || !sc->has(*pW, e)) { return MakeError(id, "component not on entity: " + compName); }
+
+    bool undoable = false;
+    void* comp = (sc->get != nullptr) ? sc->get(*pW, e) : nullptr;
+    if (sc->add != nullptr && comp != nullptr)
+    {
+        // 可 Undo：移除前快照字段 → undo 时 schema.add 重建 + restorer 还原原值。
+        auto restorers = Orange::Editor::Schema::CaptureComponentValues(host, *sc, comp);
+        auto* pH = &host;
+        host.cmdStack.Push(std::make_unique<LambdaCommand>(
+            "remove_component",
+            [pH, e, sc]() {
+                if (pH->scene.pWorld && sc->remove) { sc->remove(*pH->scene.pWorld, e); }
+            },
+            [pH, e, sc, restorers]() {
+                if (sc->add) { sc->add(*pH, e); }
+                if (pH->scene.pWorld && sc->get) {
+                    if (void* c = sc->get(*pH->scene.pWorld, e); c != nullptr) {
+                        for (const auto& r : restorers) { r(c); }
+                    }
+                }
+            }));
+        undoable = true;
+    }
+    else
+    {
+        // 无 add（不可重建）→ 破坏性 remove + 清栈（同 Inspector）。
+        sc->remove(*pW, e);
+        host.cmdStack.Clear();
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", undoable);
+    return DumpLine(w);
+}
+
+// ---- op: begin_undo_group --------------------------------------------------
+// 开命令组：之后的写操作合并为单条 undo 记录（CommandStack::BeginGroup）。开组态
+// 由 mcp 桥记录（含开组时刻 + 客户端代），TickMcpUndoGroupGuard 据此做 30s 超时 /
+// 断连自动闭合护栏。嵌套开组 → error。args: label?（仅信息性，组名固定）
+std::string HandleBeginUndoGroup(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    if (host.cmdStack.InGroup()) { return MakeError(id, "undo group already open"); }
+    // CommandStack 组名要求静态生命周期（不复制），故用固定字面量；label 入参仅
+    // 信息性（未来若需自定义 undo 菜单标签再扩）。
+    (void)req;
+    host.cmdStack.BeginGroup("MCP Batch", MergeMode::Disable);
+    host.mcp.undoGroupOpen      = true;
+    host.mcp.undoGroupClientGen = host.mcp.clientGeneration.load();
+    host.mcp.undoGroupStart     = std::chrono::steady_clock::now();
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoGroupOpen", true);
+    return DumpLine(w);
+}
+
+// ---- op: end_undo_group ----------------------------------------------------
+// 合组（CommandStack::EndGroup）：组内命令打包成单条 undo 记录。无打开的组 → error。
+std::string HandleEndUndoGroup(std::int64_t id, EditorHost& host)
+{
+    if (!host.cmdStack.InGroup())
+    {
+        host.mcp.undoGroupOpen = false;  // 会话态可能因场景切换 Clear 残留，顺手清。
+        return MakeError(id, "no undo group open");
+    }
+    host.cmdStack.EndGroup();
+    host.mcp.undoGroupOpen = false;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoGroupOpen", false);
+    return DumpLine(w);
+}
+
+// ---- op: open_scene --------------------------------------------------------
+// 打开 .scene.json（复用 requestedOpenScenePath 桥接 = 双击打开 / Open Recent 同
+// 路径）。非命令栈（场景切换会 Clear 栈）。dirty 保护：dirty 且未传 force → error
+// （防默默丢用户未保存工作）；force=true 时清 dirty 抑制确认模态（丢弃改动）。
+// 仅 Edit 态可开。实际 swap World 在下一帧帧首消费。args: path, force?=false
+std::string HandleOpenScene(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace fs = std::filesystem;
+    std::string path;
+    if (!req.ReadString("args/path", path) || path.empty()) { return MakeError(id, "missing 'path'"); }
+    if (host.scene.playState != PlayState::Edit) { return MakeError(id, "cannot open scene while in play mode"); }
+
+    std::error_code ec;
+    if (!fs::exists(path, ec)) { return MakeError(id, "scene file not found: " + path); }
+
+    const bool force = req.GetBool("args/force", false);
+    if (host.scene.dirty && !force)
+    {
+        return MakeError(id, "unsaved changes (pass force:true to discard, or save_scene first)");
+    }
+    if (force)
+    {
+        // 丢弃未保存改动 → 抑制帧首 requestedOpenScenePath 的 unsaved-confirm 模态
+        //（模态会阻塞等用户，不适合自动化）。
+        host.scene.dirty = false;
+    }
+    host.scene.requestedOpenScenePath = path;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteBool("result/queued", true);  // 下一帧帧首 swap World
+    w.WriteString("result/path", path);
+    return DumpLine(w);
+}
+
+// ---- op: play / pause / resume / stop --------------------------------------
+// 设 pendingPlayOp，帧末 ApplyPendingPlayOp 执行状态迁移（World 快照 / 物理 / VFX /
+// 动画 tick 启停）。非命令栈（模式切换；快照机制保证 Stop 还原）。状态不符 → error。
+std::string HandleSetPlayOp(std::int64_t id, EditorHost& host, const std::string& opName)
+{
+    const PlayState st = host.scene.playState;
+    PlayOp op = PlayOp::None;
+    if (opName == "play")
+    {
+        if (st != PlayState::Edit) { return MakeError(id, "already in play/paused"); }
+        op = PlayOp::EnterPlay;
+    }
+    else if (opName == "pause")
+    {
+        if (st != PlayState::Play) { return MakeError(id, "not in play (pause requires Play)"); }
+        op = PlayOp::Pause;
+    }
+    else if (opName == "resume")
+    {
+        if (st != PlayState::Paused) { return MakeError(id, "not paused (resume requires Paused)"); }
+        op = PlayOp::Resume;
+    }
+    else if (opName == "stop")
+    {
+        if (st == PlayState::Edit) { return MakeError(id, "already in edit"); }
+        op = PlayOp::Stop;
+    }
+    else
+    {
+        return MakeError(id, "unknown play op: " + opName);
+    }
+    host.scene.pendingPlayOp = op;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/queued", true);  // 帧末执行
+    w.WriteString("result/requestedOp", opName);
+    return DumpLine(w);
+}
+
+// 扩展名 / 文件名 → AssetKind 名（与编辑器 Asset Browser AssetCategoryOf 一致）。
+// 非资产文件（.meta 等）返回空串。
+const char* AssetKindByPath(const std::filesystem::path& p)
+{
+    const std::string ext  = AsciiLower(p.extension().string());
+    const std::string name = p.filename().string();
+    if (name.size() >= 11 && name.compare(name.size() - 11, 11, ".scene.json") == 0) { return "Scene"; }
+    if (ext == ".mesh" || ext == ".obj") { return "Mesh"; }
+    if (ext == ".material") { return "Material"; }
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".ktx"
+        || ext == ".hdr" || ext == ".exr" || ext == ".texture") { return "Texture"; }
+    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac") { return "Sound"; }
+    if (ext == ".anim") { return "AnimationClip"; }
+    return "";
+}
+
+// ---- op: list_assets -------------------------------------------------------
+// 枚举 assets/ 下资产（递归扫文件系统），按 AssetKind 过滤 + pathPrefix 子串过滤。
+// 返回 {path（forward-slash 相对路径，可直接喂 AssetRef 字段）, kind} 数组。
+// 非命令栈。大目录上限 + truncated 标记。args: kind?, pathPrefix?
+std::string HandleListAssets(std::int64_t id, const JsonReader& req)
+{
+    namespace fs = std::filesystem;
+    std::string kindFilter, prefix;
+    req.ReadString("args/kind", kindFilter);
+    req.ReadString("args/pathPrefix", prefix);
+    for (auto& c : prefix) { if (c == '\\') { c = '/'; } }
+
+    constexpr std::size_t kMaxAssets = 4000;  // 大目录护栏（防爆 token / 爆遍历）
+    struct A { std::string path; std::string kind; };
+    std::vector<A> assets;
+    bool truncated = false;
+
+    const std::string root = "assets";
+    std::error_code ec;
+    if (fs::exists(root, ec) && fs::is_directory(root, ec))
+    {
+        for (auto it = fs::recursive_directory_iterator(
+                 root, fs::directory_options::skip_permission_denied, ec);
+             it != fs::recursive_directory_iterator(); it.increment(ec))
+        {
+            if (ec) { break; }
+            if (!it->is_regular_file(ec)) { continue; }
+            const char* kind = AssetKindByPath(it->path());
+            if (kind[0] == '\0') { continue; }                  // 非资产文件跳过
+            if (!kindFilter.empty() && kindFilter != kind) { continue; }
+            std::string rel = it->path().generic_string();      // forward slashes
+            if (!prefix.empty() && rel.find(prefix) == std::string::npos) { continue; }
+            assets.push_back(A{std::move(rel), kind});
+            if (assets.size() >= kMaxAssets) { truncated = true; break; }
+        }
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteInt("result/count", static_cast<std::int64_t>(assets.size()));
+    w.WriteBool("result/truncated", truncated);
+    w.BeginArray("result/assets", assets.size());
+    for (std::size_t i = 0; i < assets.size(); ++i)
+    {
+        const std::string base = "result/assets/" + std::to_string(i);
+        w.WriteString(base + "/path", assets[i].path);
+        w.WriteString(base + "/kind", assets[i].kind);
+    }
+    return DumpLine(w);
+}
+
+// ---- op: import_asset ------------------------------------------------------
+// 导入外部资产（复用 ImportDispatcher，与拖拽 / File→Import 同路径）。同步执行
+// （主线程帧末，与 ApplyPendingImports 同上下文）→ 直接拿产物路径回报。非命令栈
+// （资产文件 IO）。args: srcPath, scale?（FBX importScale，默认 1.0）
+std::string HandleImportAsset(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace fs = std::filesystem;
+    std::string src;
+    if (!req.ReadString("args/srcPath", src) || src.empty()) { return MakeError(id, "missing 'srcPath'"); }
+    std::error_code ec;
+    if (!fs::exists(src, ec)) { return MakeError(id, "source file not found: " + src); }
+
+    double scaleD = 1.0;
+    req.ReadFloat("args/scale", scaleD);
+
+    const auto result =
+        ::Orange::Editor::Import::Dispatch(src, host, static_cast<float>(scaleD));
+    if (result.status != ::Orange::Editor::Import::ImportStatus::Success)
+    {
+        return MakeError(id, "import failed: " + result.message);
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteString("result/destPath", result.destPath);
+    w.WriteString("result/message", result.message);
+    w.BeginArray("result/materialPaths", result.materialPaths.size());
+    for (std::size_t i = 0; i < result.materialPaths.size(); ++i)
+    {
+        w.WriteString("result/materialPaths/" + std::to_string(i), result.materialPaths[i]);
+    }
+    return DumpLine(w);
+}
+
 }  // namespace
 
 std::string ExecuteMcpCommand(const std::string&                requestJson,
@@ -884,6 +1600,7 @@ std::string ExecuteMcpCommand(const std::string&                requestJson,
         if (op == "ping") { return HandlePing(id, host); }
         if (op == "get_scene_info") { return HandleGetSceneInfo(id, host); }
         if (op == "get_entity") { return HandleGetEntity(id, host, r); }
+        if (op == "get_editor_state") { return HandleGetEditorState(id, host); }
         if (op == "list_component_types") { return HandleListComponentTypes(id); }
         if (op == "capture_viewport") { return HandleCaptureViewport(id, viewportPipeline); }
         if (op == "set_field") { return HandleSetField(id, host, r); }
@@ -892,6 +1609,24 @@ std::string ExecuteMcpCommand(const std::string&                requestJson,
         if (op == "delete_entity") { return HandleDeleteEntity(id, host, r); }
         if (op == "select_entity") { return HandleSelectEntity(id, host, r); }
         if (op == "save_scene") { return HandleSaveScene(id, host, r); }
+
+        // ---- P1 ----
+        if (op == "find_entities") { return HandleFindEntities(id, host, r); }
+        if (op == "get_camera") { return HandleGetCamera(id, host); }
+        if (op == "set_camera") { return HandleSetCamera(id, host, r); }
+        if (op == "frame_entity") { return HandleFrameEntity(id, host, r); }
+        if (op == "duplicate_entity") { return HandleDuplicateEntity(id, host, r); }
+        if (op == "reparent_entity") { return HandleReparentEntity(id, host, r); }
+        if (op == "remove_component") { return HandleRemoveComponent(id, host, r); }
+        if (op == "begin_undo_group") { return HandleBeginUndoGroup(id, host, r); }
+        if (op == "end_undo_group") { return HandleEndUndoGroup(id, host); }
+        if (op == "open_scene") { return HandleOpenScene(id, host, r); }
+        if (op == "play" || op == "pause" || op == "resume" || op == "stop")
+        {
+            return HandleSetPlayOp(id, host, op);
+        }
+        if (op == "list_assets") { return HandleListAssets(id, r); }
+        if (op == "import_asset") { return HandleImportAsset(id, host, r); }
 
         return MakeError(id, "unknown op: " + op);
     }
@@ -902,6 +1637,34 @@ std::string ExecuteMcpCommand(const std::string&                requestJson,
     catch (...)
     {
         return MakeError(id, "unknown exception");
+    }
+}
+
+void TickMcpUndoGroupGuard(EditorHost& host)
+{
+    auto& bridge = host.mcp;
+    if (!bridge.undoGroupOpen) { return; }
+
+    // 命令栈已被场景切换（New/Open/Stop）Clear → 组已不在；清会话态即可（不 EndGroup）。
+    if (!host.cmdStack.InGroup())
+    {
+        bridge.undoGroupOpen = false;
+        return;
+    }
+
+    // 开组的那个客户端断开 / 被新连接替换 → 自动闭合（AI 没机会再 end）。
+    const bool disconnected = !bridge.clientConnected.load()
+        || bridge.clientGeneration.load() != bridge.undoGroupClientGen;
+    // 开组超过 30s（AI 忘调 end_undo_group）→ 自动闭合，防栈长期卡在组内。
+    const auto elapsed  = std::chrono::steady_clock::now() - bridge.undoGroupStart;
+    const bool timedOut = elapsed > std::chrono::seconds(30);
+
+    if (disconnected || timedOut)
+    {
+        host.cmdStack.EndGroup();
+        bridge.undoGroupOpen = false;
+        ORANGE_LOG_INFO("[mcp] undo group 自动闭合（{}）",
+                        disconnected ? "客户端断开" : "30s 超时");
     }
 }
 

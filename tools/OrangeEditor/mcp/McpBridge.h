@@ -27,6 +27,7 @@
 // ---------------------------------------------------------------------------
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -51,6 +52,23 @@ struct McpBridge
     // 桥是否在运行。McpServer::Start 置 true、Stop 置 false（Stop 同时 notify
     // outCv 唤醒任何在等响应的 socket 线程，使其在关停时及时退出）。
     std::atomic<bool> running{false};
+
+    // ---- 客户端连接信号（socket 线程写 / 主线程读）------------------------
+    // socket 线程在 accept 到新客户端时置 connected=true 且 generation+1，断开
+    // 时置 connected=false。主线程据此实现 undo-group 的"客户端断开自动闭合"
+    // 护栏（见下方 undoGroup* 字段 + McpCommandHandler 的 guard）。原子访问，
+    // 不需要锁——只是单向标志。
+    std::atomic<bool>          clientConnected{false};
+    std::atomic<std::uint64_t> clientGeneration{0};
+
+    // ---- MCP undo-group 会话态（仅主线程帧末读写，无并发，故不加锁）-------
+    // begin_undo_group 开组时置 undoGroupOpen=true + 记开组时刻 +
+    // clientGeneration；end_undo_group 或自动护栏（30s 超时 / 客户端断连 /
+    // 命令栈被场景切换 Clear）闭合时清回 false。cmdStack.InGroup() 是"组是否
+    // 真在开"的权威，这几个字段只服务于护栏的超时 / 断连判定。
+    bool                                  undoGroupOpen      = false;
+    std::uint64_t                         undoGroupClientGen = 0;
+    std::chrono::steady_clock::time_point undoGroupStart{};
 };
 
 }  // namespace Orange::Editor::Mcp

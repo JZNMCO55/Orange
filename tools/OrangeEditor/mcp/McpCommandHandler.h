@@ -37,6 +37,14 @@ std::string ExecuteMcpCommand(const std::string&                  requestJson,
                               EditorHost&                         host,
                               Orange::Engine::Render::Pipeline*   viewportPipeline);
 
+// undo-group 护栏 —— 每帧（命令 drain 前）在主线程调用，与队列是否有命令无关。
+// 若 begin_undo_group 开着的组满足任一闭合条件就自动 EndGroup + 清会话态：
+//   * 开组已超过 30s（AI 忘调 end_undo_group）；
+//   * 开组的那个 MCP 客户端已断开 / 被新连接替换；
+//   * 命令栈已被场景切换（New/Open/Stop）Clear（InGroup() 变 false）。
+// 防 AI 忘关把命令栈长期卡在组内（ADR-020 §4.E 超时 / 断连护栏）。无开组时 no-op。
+void TickMcpUndoGroupGuard(EditorHost& host);
+
 }  // namespace Orange::Editor::Mcp
 
 #endif  // ORANGE_EDITOR_MCP_MCP_COMMAND_HANDLER_H

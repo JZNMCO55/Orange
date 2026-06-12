@@ -923,8 +923,44 @@
   4. AI `select_entity`：Inspector 联动显示该实体；AI 改动后场景标题出现 dirty 标记。
   5. 走一遍 UC-1（设计 §3）：人口述布局 → AI 搭灰盒（批量 create+set_field）→ `capture_viewport` → 人微调 → save，全程无需人替 AI 执行编辑操作。
 - **重要限制（dogfood 注意，非 bug）**：
-  - `add_component` / `delete_entity` **不可 Undo**（镜像编辑器现状：Add Component 与删除都清空 undo 历史）——加错/删错不能 Ctrl+Z，且会清掉之前 MCP set_field 的 undo。tool 描述已注明。
+  - `add_component` **不可 Undo**（镜像编辑器现状：Add Component 清空 undo 历史）——加错不能 Ctrl+Z，且会清掉之前 MCP set_field 的 undo。tool 描述已注明。（`delete_entity` 自 2026-06-12 起**已可 Undo**，见 item 60-P1。）
   - Play 模式下写操作默认被拒绝（"in play mode" error），需 `allowInPlay=True` 逃生门（改动会被 Stop 还原）。
   - `set_field` 仅支持 11 种标量/向量/字符串/Enum/AssetRef 类型；EntityRef / AssetRefArray / 顶点表首版只读（返回 "not writable in first version"）。
   - `save_scene` 无 path 且当前无场景路径时会弹文件对话框（GUI），自动化勿用空 path。
 - **失败上报**：set_field 后 viewport 实体不动 / Ctrl+Z 撤不掉 AI 操作 / coalesce 失效（N 次微调留 N 条 undo）；create 的实体不可见 / Hierarchy 不出现；delete 后实体残留。
+
+## 2026-06-12 session（OE-MCP M4 · P1 全 17 tool）
+
+> 设计见 `docs/mcp-realtime-coediting-design.md` §13 M4 + 需求 §4.M P1 集。C++ 全编译链接通过 + invariant lint 绿 + `tools/orange-mcp/smoke_test.py` 加 P1 往返覆盖（headless 可跑的 NDJSON 端到端）。下列为**真实 Claude 客户端 + GUI 联动**待人工 dogfood 项。
+
+### 60. OE-MCP P1 —— E1 协同效率包（get_editor_state / find_entities / camera / frame / duplicate / reparent / remove_component / undo group）
+
+- **commit**：本 session（McpCommandHandler 加 P1 handlers + 基础设施导出：`SchemaInspector::CaptureComponentValues` / `FrameEntityCamera` / undo-group 护栏 `TickMcpUndoGroupGuard` + McpBridge 连接信号；Python server 加 9 tool）。
+- **已自动真验（smoke_test，非 dogfood-pending）**：find_entities（name/component/underGuid + 失效组件报错）/ get_camera→set_camera round-trip + 越界 clamp（fov→179、radius→0.01）/ frame_entity(All) / get_editor_state.selectedGuid 反映 select / duplicate→reparent→remove_component 全套 + 环检测拒绝 + reparent 后 child 在子树内 + remove 后组件消失 / begin·end_undo_group + 嵌套报错 + 无组 end 报错。
+- **仍需 dogfood（GUI 联动 + Ctrl+Z）**：
+  1. `begin_undo_group` 摆 N 个实体 `end_undo_group` → 用户**一次 Ctrl+Z 全部回退**（组合并为一条）；组打开 30s 不关 → 编辑器日志出现 `[mcp] undo group 自动闭合（30s 超时）`；MCP 断连 → 自动闭合（`客户端断开`）。
+  2. `reparent_entity(keepWorld=True)` 后实体**世界位姿不跳变**（viewport 无跳动）；Ctrl+Z 精确复位原层级。
+  3. `set_camera` / `frame_entity` 后 viewport 视角实时变化；`get_editor_state` 各字段与编辑器状态栏 / Inspector / gizmo 工具栏一致。
+  4. `duplicate_entity` → Hierarchy 出现克隆体（新名/选中）；Ctrl+Z 删掉克隆。
+  5. `remove_component` → Inspector 该组件段消失；可 Undo 的组件 Ctrl+Z 恢复且**字段值还原**。
+- **失败上报**：undo group 没合并成一条 / 护栏没自动闭合（栈卡死）；reparent 跳位或 undo 不复位；duplicate 克隆体与源共享 guid；remove 后组件残留 / undo 丢字段值。
+
+### 61. OE-MCP P1 —— E2 资产管线（list_assets / import_asset）
+
+- **已自动真验（smoke_test）**：list_assets(all) 返回资产列表 + kind 过滤（Material 只回 .material）；import_asset / open_scene 失效路径 graceful 报错。
+- **仍需 dogfood（真导入 + Blender↔Orange 双 MCP，UC-4）**：
+  1. Blender MCP 导出 .glb/.fbx → orange-mcp `import_asset(srcPath, scale)` → 返回 destPath + materialPaths → `create_entity` + `set_field`(Renderable.mesh = destPath) 挂上 → `capture_viewport` 对照 Blender 渲染图（贴图 / 多材质 sub-mesh / 轴向正确）。
+  2. `list_assets(kind="Mesh")` 返回的 path 能直接喂 `set_field` 的 AssetRef 字段。
+  3. FBX `scale=0.01`（真 cm 文件）导入后尺寸正确。
+- **失败上报**：导入产物路径错 / 挂上后不可见 / 贴图丢失 / 多材质 sub-mesh 错位；list_assets 漏资产或路径不能直接喂 AssetRef。
+
+### 62. OE-MCP P1 —— E3 Play 调试（play / pause / resume / stop）
+
+- **已自动真验（smoke_test）**：play → get_editor_state playState=Play → Play 期 set_field 被拒 → stop → 回 Edit；状态机校验（pause 需 Play / resume 需 Paused / 重复 play 报错）。
+- **仍需 dogfood（GUI + 快照往返）**：
+  1. AI `play` → 用户看到 toolbar 进 Play、物理 / 粒子 / 动画开始 tick；间隔 `capture_viewport` + `get_entity` 观察运行时行为（如物理驱动的 Transform 变化）。
+  2. AI `pause` → tick 停在当前帧，可细看；`resume` 继续。
+  3. AI `stop` → 场景**还原到 Play 前**（快照往返）；AI 之前持有的实体 guid **仍有效**（A2.3 性质：guid 跨快照稳定）。
+  4. Play 期 AI `set_field` 默认收到 "in play mode" error（除非 allowInPlay）。
+- **重要限制（非 bug）**：**EnterPlay 尚未接 ScriptSystem**（需 dotnet runtime + `ORANGE_ENGINE_WITH_DOTNET`，见 item 50）——Play 期 C# 脚本不真跑，UC-5「调玩法手感」的脚本侧待 B1 接线 session。当前 Play 仅物理 / VFX / 动画 tick。
+- **失败上报**：play 后物理 / 动画没 tick；stop 后场景没还原 / guid 失效；快照往返崩溃。

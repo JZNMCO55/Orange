@@ -137,6 +137,26 @@ def main() -> int:
         if "position" not in fnames:
             print("[smoke] FAIL: Transform schema 缺 position 字段"); failures += 1
 
+    # 4b) get_editor_state
+    r = send_recv(sock, buf, {"id": 25, "op": "get_editor_state", "args": {}})
+    res = r.get("result", {})
+    print(f"[smoke] get_editor_state -> ok={r.get('ok')} playState={res.get('playState')!r} "
+          f"dirty={res.get('dirty')} selectedGuid={res.get('selectedGuid','')[:8]!r} "
+          f"selectedCount={res.get('selectedCount')} gizmoMode={res.get('gizmoMode')!r} "
+          f"gizmoSpace={res.get('gizmoSpace')!r}")
+    if not r.get("ok"):
+        print("[smoke] FAIL: get_editor_state ok=false"); failures += 1
+    else:
+        # playState 必须是三态之一；gizmoMode / gizmoSpace 取值合法
+        if res.get("playState") not in ("Edit", "Play", "Paused"):
+            print(f"[smoke] FAIL: playState 非法 {res.get('playState')!r}"); failures += 1
+        if res.get("gizmoMode") not in ("Translate", "Rotate", "Scale"):
+            print(f"[smoke] FAIL: gizmoMode 非法 {res.get('gizmoMode')!r}"); failures += 1
+        if res.get("gizmoSpace") not in ("World", "Local"):
+            print(f"[smoke] FAIL: gizmoSpace 非法 {res.get('gizmoSpace')!r}"); failures += 1
+        if not isinstance(res.get("dirty"), bool):
+            print("[smoke] FAIL: dirty 非 bool"); failures += 1
+
     # 5) capture_viewport（裸校验：base64 解码字节数 == w*h*4；像素视觉对错属 dogfood）
     import base64 as _b64
     r = send_recv(sock, buf, {"id": 30, "op": "capture_viewport", "args": {}})
@@ -230,6 +250,202 @@ def main() -> int:
             print("[smoke] FAIL: delete 后实体仍在场景里"); failures += 1
         else:
             print(f"[smoke]   验证 -> 实体已删除，场景剩 {r.get('result',{}).get('entityCount')} 个")
+
+    # ===== P1 往返 =====
+    # 取一个仍存活、有 Transform 的实体作只读测试基准。
+    r = send_recv(sock, buf, {"id": 50, "op": "get_scene_info", "args": {}})
+    ents2 = r.get("result", {}).get("entities", [])
+    base = next((e for e in ents2 if "Transform" in e.get("components", [])), None)
+
+    # P1-a) find_entities（按名 / 按组件 / 失效组件报错）
+    if base is not None and base.get("name"):
+        sub = base["name"][:3]
+        r = send_recv(sock, buf, {"id": 51, "op": "find_entities", "args": {"name": sub}})
+        fents = r.get("result", {}).get("entities", [])
+        print(f"[smoke] find_entities(name={sub!r}) -> ok={r.get('ok')} count={r.get('result',{}).get('count')}")
+        if not r.get("ok") or not any(base["guid"] == e.get("guid") for e in fents):
+            print("[smoke] FAIL: find_entities 没找到基准实体"); failures += 1
+    r = send_recv(sock, buf, {"id": 52, "op": "find_entities", "args": {"component": "Transform"}})
+    if not r.get("ok") or r.get("result", {}).get("count", 0) < 1:
+        print("[smoke] FAIL: find_entities(component=Transform) 空"); failures += 1
+    else:
+        print(f"[smoke] find_entities(component=Transform) -> count={r.get('result',{}).get('count')}")
+    r = send_recv(sock, buf, {"id": 53, "op": "find_entities", "args": {"component": "NoSuchComp"}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: find_entities 未知组件未报错"); failures += 1
+
+    # P1-b) get_camera / set_camera round-trip
+    r = send_recv(sock, buf, {"id": 54, "op": "get_camera", "args": {}})
+    cam0 = r.get("result", {})
+    print(f"[smoke] get_camera -> radius={cam0.get('radius')} fov={cam0.get('fovYDegrees')}")
+    if not r.get("ok") or "pivot" not in cam0:
+        print("[smoke] FAIL: get_camera 缺字段"); failures += 1
+    r = send_recv(sock, buf, {"id": 55, "op": "set_camera", "args": {"radius": 12.5, "fovYDegrees": 60.0}})
+    cam1 = r.get("result", {})
+    if not r.get("ok") or abs(cam1.get("radius", 0) - 12.5) > 1e-3 or abs(cam1.get("fovYDegrees", 0) - 60.0) > 1e-3:
+        print(f"[smoke] FAIL: set_camera 未生效 {cam1}"); failures += 1
+    else:
+        print(f"[smoke] set_camera(radius=12.5,fov=60) -> radius={cam1.get('radius')} fov={cam1.get('fovYDegrees')}")
+    # 越界 clamp：fov 999 → ≤179；radius -5 → ≥0.01
+    r = send_recv(sock, buf, {"id": 56, "op": "set_camera", "args": {"fovYDegrees": 999.0, "radius": -5.0}})
+    camC = r.get("result", {})
+    if r.get("ok") and (camC.get("fovYDegrees", 999) > 179.0 or camC.get("radius", -1) < 0.0):
+        print(f"[smoke] FAIL: set_camera 越界未 clamp {camC}"); failures += 1
+    else:
+        print(f"[smoke] set_camera(clamp) -> fov={camC.get('fovYDegrees')} radius={camC.get('radius')}")
+
+    # P1-c) frame_entity（Frame All + 指定实体）
+    r = send_recv(sock, buf, {"id": 57, "op": "frame_entity", "args": {}})
+    print(f"[smoke] frame_entity(All) -> ok={r.get('ok')} radius={r.get('result',{}).get('radius')}")
+    if not r.get("ok"):
+        print(f"[smoke] FAIL: frame_entity(All) error={r.get('error')!r}"); failures += 1
+
+    # P1-d) get_editor_state 反映 selectedGuid（先 select 一个）
+    if base is not None:
+        send_recv(sock, buf, {"id": 58, "op": "select_entity", "args": {"guid": base["guid"]}})
+        r = send_recv(sock, buf, {"id": 59, "op": "get_editor_state", "args": {}})
+        if r.get("result", {}).get("selectedGuid") != base["guid"]:
+            print("[smoke] FAIL: get_editor_state.selectedGuid 未反映 select"); failures += 1
+        else:
+            print(f"[smoke] get_editor_state.selectedGuid 反映 select OK")
+
+    # P1-e) duplicate → reparent → remove_component 全套（建临时实体，最后删掉）
+    r = send_recv(sock, buf, {"id": 60, "op": "create_entity", "args": {"name": "P1 Parent"}})
+    pg = r.get("result", {}).get("guid", "")
+    r = send_recv(sock, buf, {"id": 61, "op": "create_entity", "args": {"name": "P1 Child"}})
+    cg = r.get("result", {}).get("guid", "")
+    if pg and cg:
+        # duplicate child
+        r = send_recv(sock, buf, {"id": 62, "op": "duplicate_entity", "args": {"guid": cg}})
+        dg = r.get("result", {}).get("guid", "")
+        print(f"[smoke] duplicate_entity -> ok={r.get('ok')} undoable={r.get('result',{}).get('undoable')} newGuid={dg[:8]}")
+        if not r.get("ok") or not dg or dg == cg:
+            print("[smoke] FAIL: duplicate 未返回新 guid"); failures += 1
+        # reparent child under parent (keepWorld)
+        r = send_recv(sock, buf, {"id": 63, "op": "reparent_entity",
+                                  "args": {"guid": cg, "newParentGuid": pg}})
+        print(f"[smoke] reparent_entity -> ok={r.get('ok')} undoable={r.get('result',{}).get('undoable')}")
+        if not r.get("ok"):
+            print("[smoke] FAIL: reparent_entity"); failures += 1
+        else:
+            r = send_recv(sock, buf, {"id": 64, "op": "get_entity", "args": {"guid": cg}})
+            # parentGuid 在 get_scene_info 才有；这里用 find under 验证
+            r = send_recv(sock, buf, {"id": 65, "op": "find_entities", "args": {"underGuid": pg}})
+            under = {e.get("guid") for e in r.get("result", {}).get("entities", [])}
+            if cg not in under:
+                print("[smoke] FAIL: reparent 后 child 不在 parent 子树内"); failures += 1
+            else:
+                print("[smoke]   验证 -> child 已在 parent 子树内")
+        # reparent 环检测：把 parent 挂到 child 下 → error
+        r = send_recv(sock, buf, {"id": 66, "op": "reparent_entity",
+                                  "args": {"guid": pg, "newParentGuid": cg}})
+        if r.get("ok") is not False:
+            print("[smoke] FAIL: reparent 环未被拒绝"); failures += 1
+        else:
+            print(f"[smoke] reparent(cycle) -> error={r.get('error')!r}")
+        # remove_component：先给 parent 加 Renderable 再 remove
+        send_recv(sock, buf, {"id": 67, "op": "add_component", "args": {"guid": pg, "component": "Renderable"}})
+        r = send_recv(sock, buf, {"id": 68, "op": "remove_component",
+                                  "args": {"guid": pg, "component": "Renderable"}})
+        print(f"[smoke] remove_component(Renderable) -> ok={r.get('ok')} undoable={r.get('result',{}).get('undoable')}")
+        if not r.get("ok"):
+            print("[smoke] FAIL: remove_component"); failures += 1
+        else:
+            r = send_recv(sock, buf, {"id": 69, "op": "get_entity", "args": {"guid": pg}})
+            if "Renderable" in r.get("result", {}).get("componentTypes", []):
+                print("[smoke] FAIL: remove_component 后 Renderable 仍在"); failures += 1
+            else:
+                print("[smoke]   验证 -> Renderable 已移除")
+        # 清理临时实体（parent 删掉会连子树；dg 是独立兄弟，单独删）
+        send_recv(sock, buf, {"id": 70, "op": "delete_entity", "args": {"guid": pg}})
+        if dg:
+            send_recv(sock, buf, {"id": 71, "op": "delete_entity", "args": {"guid": dg}})
+
+    # P1-f) begin/end_undo_group + 错误路径
+    r = send_recv(sock, buf, {"id": 72, "op": "begin_undo_group", "args": {"label": "smoke batch"}})
+    if not r.get("ok"):
+        print("[smoke] FAIL: begin_undo_group"); failures += 1
+    # 嵌套开组 → error
+    r = send_recv(sock, buf, {"id": 73, "op": "begin_undo_group", "args": {}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: 嵌套 begin_undo_group 未报错"); failures += 1
+    # 组内建两个实体
+    r = send_recv(sock, buf, {"id": 74, "op": "create_entity", "args": {"name": "Grouped A"}})
+    ga = r.get("result", {}).get("guid", "")
+    r = send_recv(sock, buf, {"id": 75, "op": "create_entity", "args": {"name": "Grouped B"}})
+    gb = r.get("result", {}).get("guid", "")
+    r = send_recv(sock, buf, {"id": 76, "op": "end_undo_group", "args": {}})
+    print(f"[smoke] undo group(2 creates) -> end ok={r.get('ok')}")
+    if not r.get("ok"):
+        print("[smoke] FAIL: end_undo_group"); failures += 1
+    # 重复 end → error
+    r = send_recv(sock, buf, {"id": 77, "op": "end_undo_group", "args": {}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: 无组 end_undo_group 未报错"); failures += 1
+    # 清理
+    for g in (ga, gb):
+        if g:
+            send_recv(sock, buf, {"id": 78, "op": "delete_entity", "args": {"guid": g}})
+
+    # P1-g) list_assets
+    r = send_recv(sock, buf, {"id": 80, "op": "list_assets", "args": {}})
+    al = r.get("result", {}).get("assets", [])
+    print(f"[smoke] list_assets(all) -> ok={r.get('ok')} count={r.get('result',{}).get('count')}")
+    if not r.get("ok"):
+        print("[smoke] FAIL: list_assets ok=false"); failures += 1
+    else:
+        for a in al[:5]:
+            print(f"        - {a.get('kind'):14} {a.get('path')}")
+        # kind 过滤：Material 只回 .material
+        r = send_recv(sock, buf, {"id": 81, "op": "list_assets", "args": {"kind": "Material"}})
+        mats = r.get("result", {}).get("assets", [])
+        if any(not a.get("path", "").endswith(".material") for a in mats):
+            print("[smoke] FAIL: list_assets(kind=Material) 含非 .material"); failures += 1
+        else:
+            print(f"[smoke] list_assets(kind=Material) -> {len(mats)} 个")
+
+    # P1-h) open_scene / import_asset 错误路径（不真切场景 / 不真导入，避免污染）
+    r = send_recv(sock, buf, {"id": 82, "op": "open_scene", "args": {"path": "no/such/scene.scene.json"}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: open_scene 不存在文件未报错"); failures += 1
+    else:
+        print(f"[smoke] open_scene(bad path) -> error={r.get('error')!r}")
+    r = send_recv(sock, buf, {"id": 83, "op": "import_asset", "args": {"srcPath": "no/such/file.png"}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: import_asset 不存在源未报错"); failures += 1
+    else:
+        print(f"[smoke] import_asset(bad src) -> error={r.get('error')!r}")
+
+    # P1-i) play → get_editor_state(Play) → stop → get_editor_state(Edit)
+    r = send_recv(sock, buf, {"id": 84, "op": "play", "args": {}})
+    print(f"[smoke] play -> ok={r.get('ok')}")
+    if r.get("ok"):
+        time.sleep(0.3)  # 等帧末 ApplyPendingPlayOp 执行状态迁移
+        r = send_recv(sock, buf, {"id": 85, "op": "get_editor_state", "args": {}})
+        ps = r.get("result", {}).get("playState")
+        if ps not in ("Play", "Paused"):
+            print(f"[smoke] FAIL: play 后 playState={ps!r} 非 Play"); failures += 1
+        else:
+            print(f"[smoke]   验证 -> playState={ps}")
+        # set_field 在 Play 期默认被拒
+        if base is not None:
+            r = send_recv(sock, buf, {"id": 86, "op": "set_field",
+                                      "args": {"guid": base["guid"], "component": "Transform",
+                                               "field": "position", "value": [0, 0, 0]}})
+            if r.get("ok") is not False:
+                print("[smoke] WARN: Play 期 set_field 未被拒（检查 allowInPlay 逻辑）")
+            else:
+                print(f"[smoke]   Play 期 set_field 被拒 OK -> {r.get('error')!r}")
+        # stop 还原
+        r = send_recv(sock, buf, {"id": 87, "op": "stop", "args": {}})
+        time.sleep(0.3)
+        r = send_recv(sock, buf, {"id": 88, "op": "get_editor_state", "args": {}})
+        if r.get("result", {}).get("playState") != "Edit":
+            print(f"[smoke] FAIL: stop 后未回 Edit"); failures += 1
+        else:
+            print("[smoke]   验证 -> stop 后回 Edit")
+    else:
+        print(f"[smoke] WARN: play ok=false（可能场景不可进 Play）error={r.get('error')!r}")
 
     # 7) 错误路径：未知 op
     r = send_recv(sock, buf, {"id": 3, "op": "no_such_op", "args": {}})

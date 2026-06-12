@@ -142,6 +142,10 @@ void McpServer::ThreadMain()
             continue;
         }
         mClientSocket.store(FromSock(client));
+        // 连接信号：generation+1 + connected=true，让主线程的 undo-group 护栏
+        // 能识别"开组的那个客户端是否已被换/断"（ADR-020 护栏）。
+        bridge.clientGeneration.fetch_add(1);
+        bridge.clientConnected.store(true);
         ORANGE_LOG_INFO("[mcp] 客户端已连接");
 
         // ---- 单连接的 NDJSON 收发循环 ----------------------------------
@@ -211,6 +215,8 @@ void McpServer::ThreadMain()
 
         const std::uintptr_t cs = mClientSocket.exchange(kInvalid);
         if (cs != kInvalid) { ::closesocket(ToSock(cs)); }
+        // 断连信号：主线程 undo-group 护栏据此自动闭合该客户端开着的组。
+        bridge.clientConnected.store(false);
         ORANGE_LOG_INFO("[mcp] 客户端已断开");
     }
 }

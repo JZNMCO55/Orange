@@ -22,10 +22,22 @@
 
 #include <orange/engine/scene/Entity.h>
 
+#include <functional>
+#include <vector>
+
 struct EditorHost;
 
 namespace Orange::Editor::Schema
 {
+
+// RemoveComponent-undo 基建的公共入口：按 schema 字段把当前组件值快照成一组
+// "restorer" 闭包（给定新组件指针即把各字段写回）。供 remove_component 类操作
+// （Inspector 右键 Remove / MCP remove_component）复用——undo 时先 schema.add
+// 重建默认组件、再跑所有 restorer 还原原值，实现"删组件可 Undo 且数据不丢"。
+// 覆盖普通 get/set 字段 + AssetRef/AssetRefArray；group-only / 无 set 字段跳过。
+// caller 保证 component 指向 entity 上当前挂着的该 schema 组件。
+std::vector<std::function<void(void*)>>
+CaptureComponentValues(EditorHost& host, const ComponentSchema& schema, const void* component);
 
 // 渲染单个 component schema 段。caller 已确认 entity 上挂着该 schema
 // 对应的 component（schema.has(world, entity) == true）。

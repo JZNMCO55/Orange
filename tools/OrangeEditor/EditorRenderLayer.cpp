@@ -1853,6 +1853,10 @@ void EditorRenderLayer::ApplyPendingImports()
 // 与 ApplyPendingImports 同款"swap-drain 避免持锁执行 + 不阻断 ImGui 帧"范式。
 void EditorRenderLayer::ApplyPendingMcpCommands()
 {
+    // undo-group 护栏先于 drain 跑（每帧，与队列空否无关）：自动闭合超时 / 断连
+    // 的 MCP 命令组，防 AI 忘关卡死栈（ADR-020 §4.E）。无开组时 no-op。
+    ::Orange::Editor::Mcp::TickMcpUndoGroupGuard(mHost);
+
     // 快速空检查：无 MCP 连接时队列恒空，仅一次短暂持锁判定即返回。
     std::vector<std::string> batch;
     {

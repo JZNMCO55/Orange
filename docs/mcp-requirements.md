@@ -152,7 +152,7 @@
 | tool | 用途 | 输入 | 输出 | 错误/边界 | 命令栈 | 幂等 | 优先级 |
 |---|---|---|---|---|---|---|---|
 | `create_entity` | 建空实体（Name+Transform+Hierarchy+guid），可指定父 | `name?`, `parentGuid?` | 新实体 `guid` | 父 guid 失效→error 不建 | ✅ CreateEntityCommand | ❌ | **P0** |
-| `delete_entity` | 删实体及子树 | `guid` | `{undoable:false}` | guid 失效→error | ⚠️ **现状不可 undo**（删除走 CommandStack::Clear，ADR-020 Q5）；tool 必须显式返回 undoable:false，且 AI 侧 tool 描述写明「不可撤销，删前向用户确认」 | ✅（重复删已删→error 无副作用） | **P0** |
+| `delete_entity` | 删实体及子树 | `guid` | `{undoable:true}` | guid 失效→error | ✅ **已命令化可 undo**（2026-06-12：editor pendingDelete 消费路径改为 SaveSubtreeToString + do=DestroySubtree / undo=LoadFromString 精确复位，不再 Clear 栈）；契约由 undoable:false 升级为 true（ADR-020 Q5 预留的"命令化后升级"，协议字段不变纯行为增强）。极端兜底：子树序列化失败时该帧退化为不可 undo 的直接销毁 | ✅（重复删已删→error 无副作用） | **P0** |
 | `duplicate_entity` | 复制子树（复用 Duplicate 路径：序列化+SeparateClonedIdentities+ReassignEntityGuids，克隆体新 guid） | `guid` | 新根 `guid` | guid 失效→error | ✅ | ❌ | P1 |
 | `reparent_entity` | 改父（复用 EditorHierarchy keep-world 变体，世界位姿保持） | `guid`, `newParentGuid?`(空=提为根), `keepWorld?=true` | ok | 环检测（把祖先挂到后代下）→error | ✅ | ❌（同参重复=有序无变化，可视为幂等） | P1 |
 | `set_entity_order` | 根级 sibling 重排（sortIndex，对应右键 Move Up/Down） | `guid`, `direction` 或 `index` | ok | 非根实体→error | ✅ | ❌ | P2 |
