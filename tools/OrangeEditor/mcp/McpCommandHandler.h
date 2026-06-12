@@ -20,12 +20,22 @@
 
 struct EditorHost;
 
+namespace Orange::Engine::Render
+{
+class Pipeline;
+}
+
 namespace Orange::Editor::Mcp
 {
 
 // 执行一条 MCP 命令。requestJson = 单行 NDJSON 请求；返回单行 NDJSON 响应。
 // 永不抛异常（内部全兜底）。
-std::string ExecuteMcpCommand(const std::string& requestJson, EditorHost& host);
+//
+// viewportPipeline = 编辑器当前 viewport 离屏 Pipeline（EditorRenderLayer 的
+// mpScenePipeline），供 capture_viewport 回读像素；其它命令不用，可为 nullptr。
+std::string ExecuteMcpCommand(const std::string&                  requestJson,
+                              EditorHost&                         host,
+                              Orange::Engine::Render::Pipeline*   viewportPipeline);
 
 }  // namespace Orange::Editor::Mcp
 

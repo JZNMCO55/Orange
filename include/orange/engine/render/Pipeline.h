@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace Orange::Engine
 {
@@ -515,6 +516,19 @@ public:
     // "ctest 全绿但视觉全黑"）。
     bool DebugReadbackPixel(std::uint32_t x, std::uint32_t y,
                             float outRGBA[4]) const;
+
+    // 把当前 viewport 离屏渲染结果（GetOffscreenColor 那张 viewportColor，即用户
+    // 屏幕上看到的画面——**含已激活的后处理** bloom/tonemap 等）整张回读到 CPU。
+    // 字节序 BGRA8（每像素 4 字节：B, G, R, A，与 kSwapchainColorFormat 一致）。
+    // 成功时 outBgra 被 resize 到 outW*outH*4 并填满像素，返回 true；非离屏模式 /
+    // viewport 尚未渲染 / 设备缺失时返回 false（outBgra 不变）。
+    //
+    // 用途：MCP `capture_viewport`（AI 截图自验）。与 DebugReadbackPixel 同款"帧外
+    // 一次性、内部自管 cmd Begin/Submit/WaitIdle"约束——**仅离屏模式 + 帧边界**调用，
+    // 与 frame 录制冲突。读的是**已渲染好**的 viewportColor，不重新渲染、不动相机，
+    // 故所见即用户所见（区别于 RenderToTexture 的 PBR 直出无后处理路径）。
+    bool CaptureViewportToCpu(std::vector<std::uint8_t>& outBgra,
+                              std::uint32_t& outW, std::uint32_t& outH) const;
 
     // 用本 Pipeline 已有的全套资源（IBL / shadow / material / mesh）把任意
     // world 渲染到调用方提供的外部 RT。material 缩略图 / mesh thumbnail /

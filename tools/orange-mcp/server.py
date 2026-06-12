@@ -19,13 +19,15 @@ M0（spike 通路）：ping / get_scene_info。M1/M2 在此追加读写 tool。
 from __future__ import annotations
 
 import argparse
+import base64
+import io
 import json
 import os
 import socket
 import threading
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 
 # ---------------------------------------------------------------------------
 # 配置
@@ -195,6 +197,42 @@ def list_component_types() -> dict[str, Any]:
     add_component（M2）怎么传值。新增组件 schema 后本表自动出现，无需改 MCP 代码。
     """
     return _conn.send("list_component_types")
+
+
+# 截图返回给 vision 的最长边上限（控制图像大小，贴合 Claude vision 输入）。
+CAPTURE_MAX_EDGE = 1280
+
+
+@mcp.tool()
+def capture_viewport() -> Image:
+    """截取编辑器 viewport 当前画面（用户屏幕所见，含后处理）返回 PNG 图像。
+
+    让 AI「看见」场景——据此判断布局/光照/材质是否符合预期，不再凭代码推测视觉
+    结果。注意：含 WaitIdle，非高频操作（单次可达数百 ms，会让编辑器卡一帧）。
+    尺寸 = viewport 当前尺寸；过大时按最长边 {} 等比缩小以贴合 vision 输入。
+    """.format(CAPTURE_MAX_EDGE)
+    try:
+        from PIL import Image as PILImage
+    except ImportError as e:
+        raise RuntimeError(
+            "capture_viewport 需要 Pillow：pip install pillow（或 -r requirements.txt）"
+        ) from e
+
+    res = _conn.send("capture_viewport")
+    w, h = int(res["width"]), int(res["height"])
+    raw = base64.b64decode(res["base64"])
+    if len(raw) != w * h * 4:
+        raise RuntimeError(f"截图字节数不符：期望 {w*h*4}，实得 {len(raw)}")
+
+    # 命令端字节序 BGRA8 → PIL（用 raw BGRA decoder 直接读，再转 RGB）。
+    img = PILImage.frombuffer("RGBA", (w, h), raw, "raw", "BGRA", 0, 1).convert("RGB")
+    longest = max(w, h)
+    if longest > CAPTURE_MAX_EDGE:
+        scale = CAPTURE_MAX_EDGE / longest
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return Image(data=buf.getvalue(), format="png")
 
 
 def main() -> None:

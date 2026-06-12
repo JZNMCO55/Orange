@@ -1866,7 +1866,8 @@ void EditorRenderLayer::ApplyPendingMcpCommands()
     responses.reserve(batch.size());
     for (const auto& reqJson : batch)
     {
-        responses.push_back(::Orange::Editor::Mcp::ExecuteMcpCommand(reqJson, mHost));
+        responses.push_back(::Orange::Editor::Mcp::ExecuteMcpCommand(
+            reqJson, mHost, mpScenePipeline.get()));
     }
 
     {

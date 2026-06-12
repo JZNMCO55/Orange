@@ -395,6 +395,66 @@ bool Pipeline::DebugReadbackPixel(std::uint32_t x, std::uint32_t y,
     return true;
 }
 
+bool Pipeline::CaptureViewportToCpu(std::vector<std::uint8_t>& outBgra,
+                                    std::uint32_t& outW, std::uint32_t& outH) const
+{
+    if (!mpImpl) { return false; }
+    auto& impl = *mpImpl;
+    if (!impl.offscreenMode || !impl.viewportColor || impl.renderDevice == nullptr
+        || !impl.offscreenCmd || impl.viewportWidth == 0 || impl.viewportHeight == 0)
+    {
+        return false;
+    }
+
+    auto&               rhi = impl.renderDevice->GetRhiDevice();
+    const std::uint32_t w   = impl.viewportWidth;
+    const std::uint32_t h   = impl.viewportHeight;
+    const std::uint64_t bytes = static_cast<std::uint64_t>(w)
+                              * static_cast<std::uint64_t>(h) * 4u;  // BGRA8
+
+    Orange::Rhi::BufferDesc bd{};
+    bd.mSize        = bytes;
+    bd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+    bd.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuToCpu;
+    auto readback = rhi.CreateBuffer(bd);
+    if (!readback) { return false; }
+
+    auto& cmd = *impl.offscreenCmd;
+    if (cmd.Begin() != Orange::ResultCode::Success) { return false; }
+    // viewportColor 在上一帧末为 ShaderReadOnly（供 ImGui 采样）。
+    cmd.TransitionTexture(*impl.viewportColor,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly,
+                          Orange::Rhi::TextureLayout::TransferSrc);
+    {
+        Orange::Rhi::BufferTextureCopyRegion r{};
+        r.mBufferOffset = 0;
+        r.mMipLevel     = 0;
+        r.mArrayLayer   = 0;
+        r.mWidth        = w;
+        r.mHeight       = h;
+        r.mDepth        = 1;
+        cmd.CopyTextureToBuffer(*impl.viewportColor, *readback, r);
+    }
+    cmd.TransitionTexture(*impl.viewportColor,
+                          Orange::Rhi::TextureLayout::TransferSrc,
+                          Orange::Rhi::TextureLayout::ShaderReadOnly);
+    if (cmd.End() != Orange::ResultCode::Success
+        || rhi.SubmitCommandList(cmd) != Orange::ResultCode::Success)
+    {
+        return false;
+    }
+    impl.renderDevice->WaitIdle();
+
+    const void* mapped = readback->Map();
+    if (mapped == nullptr) { return false; }
+    outBgra.resize(static_cast<std::size_t>(bytes));
+    std::memcpy(outBgra.data(), mapped, static_cast<std::size_t>(bytes));
+    readback->Unmap();
+    outW = w;
+    outH = h;
+    return true;
+}
+
 Result<void, ResultCode> Pipeline::RenderToTexture(World& world,
                                                    ::Orange::Rhi::RHITexture* target,
                                                    std::uint32_t width,

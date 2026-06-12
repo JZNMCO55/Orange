@@ -8,6 +8,7 @@
 #include <orange/engine/core/Guid.h>
 #include <orange/engine/core/Serialization.h>
 #include <orange/engine/physics/ColliderDesc.h>
+#include <orange/engine/render/Pipeline.h>
 #include <orange/engine/scene/EntityGuid.h>
 #include <orange/engine/scene/GuidComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
@@ -57,6 +58,49 @@ std::string SceneDisplayName(const std::string& path)
 std::string DumpLine(const JsonWriter& w)
 {
     return w.Dump(-1);
+}
+
+// capture_viewport 截图回读尺寸硬上限（NF-6：防 w*h*4 整数溢出 / 巨帧爆显存与
+// token）。viewport 实际尺寸远小于此；纯防御。
+constexpr std::uint32_t kMaxCaptureDim = 8192;
+
+// 标准 base64 编码（capture_viewport 把 BGRA 像素编成 ASCII 塞进 JSON 字符串）。
+std::string Base64Encode(const std::uint8_t* data, std::size_t len)
+{
+    static const char kTable[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    std::size_t i = 0;
+    for (; i + 2 < len; i += 3)
+    {
+        const std::uint32_t n = (static_cast<std::uint32_t>(data[i]) << 16) |
+                                (static_cast<std::uint32_t>(data[i + 1]) << 8) |
+                                 static_cast<std::uint32_t>(data[i + 2]);
+        out.push_back(kTable[(n >> 18) & 0x3F]);
+        out.push_back(kTable[(n >> 12) & 0x3F]);
+        out.push_back(kTable[(n >> 6) & 0x3F]);
+        out.push_back(kTable[n & 0x3F]);
+    }
+    const std::size_t rem = len - i;
+    if (rem == 1)
+    {
+        const std::uint32_t n = static_cast<std::uint32_t>(data[i]) << 16;
+        out.push_back(kTable[(n >> 18) & 0x3F]);
+        out.push_back(kTable[(n >> 12) & 0x3F]);
+        out.push_back('=');
+        out.push_back('=');
+    }
+    else if (rem == 2)
+    {
+        const std::uint32_t n = (static_cast<std::uint32_t>(data[i]) << 16) |
+                                (static_cast<std::uint32_t>(data[i + 1]) << 8);
+        out.push_back(kTable[(n >> 18) & 0x3F]);
+        out.push_back(kTable[(n >> 12) & 0x3F]);
+        out.push_back(kTable[(n >> 6) & 0x3F]);
+        out.push_back('=');
+    }
+    return out;
 }
 
 // 统一错误响应：{"id":id,"ok":false,"error":msg}
@@ -433,9 +477,40 @@ std::string HandleListComponentTypes(std::int64_t id)
     return DumpLine(w);
 }
 
+// ---- op: capture_viewport --------------------------------------------------
+// 把当前 viewport 离屏渲染结果（用户屏幕所见，含后处理）回读 → base64。
+// Python 侧解码 → PNG → MCP image content。让 AI「看见」场景（ADR-020 M1 核心）。
+std::string HandleCaptureViewport(std::int64_t id, Orange::Engine::Render::Pipeline* pipeline)
+{
+    if (pipeline == nullptr) { return MakeError(id, "viewport pipeline not ready"); }
+
+    std::vector<std::uint8_t> bgra;
+    std::uint32_t             w = 0, h = 0;
+    if (!pipeline->CaptureViewportToCpu(bgra, w, h))
+    {
+        return MakeError(id, "viewport capture failed (not in offscreen mode / not yet rendered)");
+    }
+    if (w == 0 || h == 0 || w > kMaxCaptureDim || h > kMaxCaptureDim
+        || bgra.size() != static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u)
+    {
+        return MakeError(id, "invalid capture dimensions");
+    }
+
+    JsonWriter w2;
+    w2.WriteInt("id", id);
+    w2.WriteBool("ok", true);
+    w2.WriteString("result/format", "BGRA8");
+    w2.WriteInt("result/width", static_cast<std::int64_t>(w));
+    w2.WriteInt("result/height", static_cast<std::int64_t>(h));
+    w2.WriteString("result/base64", Base64Encode(bgra.data(), bgra.size()));
+    return DumpLine(w2);
+}
+
 }  // namespace
 
-std::string ExecuteMcpCommand(const std::string& requestJson, EditorHost& host)
+std::string ExecuteMcpCommand(const std::string&                requestJson,
+                              EditorHost&                       host,
+                              Orange::Engine::Render::Pipeline* viewportPipeline)
 {
     std::int64_t id = 0;
     try
@@ -457,6 +532,7 @@ std::string ExecuteMcpCommand(const std::string& requestJson, EditorHost& host)
         if (op == "get_scene_info") { return HandleGetSceneInfo(id, host); }
         if (op == "get_entity") { return HandleGetEntity(id, host, r); }
         if (op == "list_component_types") { return HandleListComponentTypes(id); }
+        if (op == "capture_viewport") { return HandleCaptureViewport(id, viewportPipeline); }
 
         return MakeError(id, "unknown op: " + op);
     }

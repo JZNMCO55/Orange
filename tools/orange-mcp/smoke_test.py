@@ -137,7 +137,33 @@ def main() -> int:
         if "position" not in fnames:
             print("[smoke] FAIL: Transform schema 缺 position 字段"); failures += 1
 
-    # 5) 错误路径：未知 op
+    # 5) capture_viewport（裸校验：base64 解码字节数 == w*h*4；像素视觉对错属 dogfood）
+    import base64 as _b64
+    r = send_recv(sock, buf, {"id": 30, "op": "capture_viewport", "args": {}})
+    res = r.get("result", {})
+    print(f"[smoke] capture_viewport -> ok={r.get('ok')} "
+          f"fmt={res.get('format')} {res.get('width')}x{res.get('height')} "
+          f"b64len={len(res.get('base64',''))}")
+    if not r.get("ok"):
+        print(f"[smoke] FAIL: capture_viewport ok=false error={r.get('error')!r}")
+        failures += 1
+    else:
+        w0, h0 = int(res.get("width", 0)), int(res.get("height", 0))
+        try:
+            raw = _b64.b64decode(res.get("base64", ""))
+        except Exception as e:  # noqa: BLE001
+            raw = b""
+            print(f"[smoke] FAIL: base64 解码失败 {e}"); failures += 1
+        if w0 <= 0 or h0 <= 0:
+            print("[smoke] FAIL: capture 尺寸非正"); failures += 1
+        elif len(raw) != w0 * h0 * 4:
+            print(f"[smoke] FAIL: 像素字节数 {len(raw)} != {w0*h0*4}"); failures += 1
+        else:
+            # 抽样：非全黑（至少一个像素非零）——证明确实渲染了内容
+            nonzero = any(raw[i] for i in range(0, min(len(raw), 40000), 1))
+            print(f"        像素非全黑={nonzero}（全黑可能是 viewport 未渲染，dogfood 复核）")
+
+    # 6) 错误路径：未知 op
     r = send_recv(sock, buf, {"id": 3, "op": "no_such_op", "args": {}})
     print("[smoke] unknown op ->", json.dumps(r, ensure_ascii=False))
     if r.get("ok") is not False or "unknown op" not in r.get("error", ""):

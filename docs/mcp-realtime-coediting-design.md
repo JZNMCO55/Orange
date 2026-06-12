@@ -216,7 +216,7 @@ cmdStack.Push(make_unique<SetFieldValueCommand<T>>(
 ## 13. 实施顺序（分期）
 
 - **M0 · spike 通路** ✅（2026-06-12 落地）：editor 加 `--mcp-port` + 后台 socket 线程（`tools/OrangeEditor/mcp/McpServer.cpp` winsock）+ in/out 队列（`mcp/McpBridge.h`，挂 EditorHost）+ `ApplyPendingMcpCommands`（EditorRenderLayer 帧末，与 ApplyPendingImports 同位）+ `ping`/`get_scene_info`（`mcp/McpCommandHandler.cpp`，schema 驱动枚举组件）；Python 侧最小 MCP server（`tools/orange-mcp/server.py`，FastMCP）。端到端已用 `tools/orange-mcp/smoke_test.py`（裸 TCP NDJSON）真验通过：ping 握手 / get_scene_info 返回 20 实体树（guid/name/parentGuid/components/position 全对）/ 未知 op graceful 报错 / 断连重连不崩 / 优雅关闭线程 join 干净。技术最高风险点（winsock 线程 + 帧末 marshal + Python 桥）已化解。剩 Python MCP 层 + 真实 Claude 客户端 dogfood（checklist item 57）。
-- **M1 · 读闭环**：`get_entity`（schema 逐字段）+ `capture_viewport`（含 `Pipeline::CaptureToCpu` 引擎 API）。AI 能完整「看」场景结构 + 画面。
+- **M1 · 读闭环** ✅（2026-06-12 落地）：`get_entity`（schema 逐字段，15 种 PropertyType→JSON）+ `list_component_types`（能力自发现，18 组件含字段元数据）+ `capture_viewport`（引擎层加 `Pipeline::CaptureViewportToCpu` 回读 viewportColor → base64 → Python PIL 转 PNG）。**关键偏离设计原案**：`capture_viewport` 不走 RenderToTexture 的 PBR 直出，而是回读**已渲染好的 viewportColor**（= 用户屏幕所见，**含后处理 bloom/tonemap**）——直接化解 Q7 截图色差，且不重新渲染/不动相机。get_entity/list_component_types 已 smoke_test 真验；`capture_viewport` 已**亲眼验证**（截图解码 PNG 看到 demo 场景：绿球 Slime Doll + 发光 Glow Box（带 bloom）+ 火焰粒子 + 楼层 + gizmo 线框，与 get_scene_info 一致）。ctest 95/95 零回归。剩 Python MCP 层（FastMCP capture_viewport 返 Image）+ 真实 Claude 客户端 dogfood（checklist item 58）。
 - **M2 · 写闭环**：`create_entity` / `set_field` / `add_component` / `select_entity` / `save_scene`（全走命令栈）。AI 能「改 + 截图自验」。**首版（读写协同闭环）到此完整**。
 - **M3+（后续分期，非首版）**：Play/Pause/Stop 控制 → 跑 C# 脚本 → 改材质 → 导入资产 → prefab 实例化 → delete 命令化。
 

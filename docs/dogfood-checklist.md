@@ -892,4 +892,21 @@
   - 带 flag：Console / 日志出现 `[mcp] MCP 命令端监听 127.0.0.1:8765`；FastMCP 层 tool 调用返回结果与 smoke_test.py 一致。
   - Python server 断开 / 重连，编辑器不崩、不卡帧。
 - **失败上报**：编辑器带 flag 启动卡死 / 崩；`get_scene_info` 实体数或层级与 Hierarchy 面板不符；关闭编辑器时挂起（MCP 线程 join 不返回）。
-- **背景 / 下一步**：M0 是 spike 通路（技术最高风险点：winsock 后台线程 + 帧末 marshal + Python 桥），已打通。M1 加 `get_entity` / `list_component_types` / `capture_viewport`（读闭环，含引擎层 `Pipeline::CaptureToCpu`）；M2 加写闭环（create/set_field/add_component/delete/select/save，全走命令栈）。tool 全景见 `docs/mcp-requirements.md` §4。
+- **背景 / 下一步**：M0 是 spike 通路（技术最高风险点：winsock 后台线程 + 帧末 marshal + Python 桥），已打通。M1 加 `get_entity` / `list_component_types` / `capture_viewport`（读闭环，含引擎层 `Pipeline::CaptureViewportToCpu`）；M2 加写闭环（create/set_field/add_component/delete/select/save，全走命令栈）。tool 全景见 `docs/mcp-requirements.md` §4。
+
+### 58. OE-MCP M1 —— 读闭环（get_entity / list_component_types / capture_viewport）
+
+- **commit**：本 session（McpCommandHandler 加三 op + 引擎层 `Pipeline::CaptureViewportToCpu` + Python tool）。
+- **已自动真验（非 dogfood-pending）**：
+  - `get_entity`：smoke_test 验返回结构化全字段（Static EdgeChain 的 Transform position/rotation/scale 全对）、失效 guid graceful 报错。
+  - `list_component_types`：smoke_test 验列出 18 组件含字段元数据（含游戏侧 HealthComponent → 证 schema-first NF-10）。
+  - `capture_viewport`：**已亲眼验证**——截图经 PIL 解码成 PNG，看到 demo 场景（绿球 Slime Doll + 发光 Glow Box 带 bloom + 火焰/闪光粒子 + 楼层网格 + 绿色 gizmo 线框），与 get_scene_info 实体一致。回读的是 viewportColor（含后处理，所见即用户所见）。ctest 95/95 零回归。
+- **仍需 dogfood（真实 Claude 客户端经 FastMCP）**：
+  1. `pip install -r requirements.txt`（含 pillow）。
+  2. 编辑器 `--mcp-port 8765` + Claude 注册 orange-mcp。
+  3. 调 `get_entity(guid)` → 字段值与 Inspector 显示一致（含 Enum 名 / AssetRef 路径）。
+  4. 调 `capture_viewport` → Claude 能**正确描述屏幕上看到的场景内容**（用户对照——「AI 看见了」的直接证据）。
+  5. 新挂一个此前没读过的组件类型，`get_entity` 无需改 MCP 代码即正确返回其字段（NF-10）。
+- **看什么 / 通过判据**：`capture_viewport` 返回 PNG 与编辑器 viewport 画面一致（含 bloom/tonemap 后处理）；尺寸 = viewport 当前尺寸，过大时 Python 侧按最长边 1280 缩小。`capture_viewport` 含 WaitIdle，单次数百 ms、让编辑器卡一帧——非高频操作（tool 描述已注明）。
+- **失败上报**：`capture_viewport` 返回全黑 / 尺寸异常 / 与屏幕不符；`get_entity` 字段值与 Inspector 不一致；高频 capture 拖垮帧率。
+- **下一步**：M2 写闭环（create_entity / set_field / add_component / delete_entity / select_entity / save_scene，全走命令栈，AI 操作可被用户 Ctrl+Z）。
