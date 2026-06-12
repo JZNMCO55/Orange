@@ -172,6 +172,31 @@ def get_scene_info() -> dict[str, Any]:
     return _conn.send("get_scene_info")
 
 
+@mcp.tool()
+def get_entity(guid: str) -> dict[str, Any]:
+    """读取单个实体的全部组件字段。
+
+    入参 guid = get_scene_info 返回的实体句柄。返回
+    {guid, name, componentTypes[], components}；components 是
+    {组件名: {字段名: 值}} 结构化字典——向量/quat 是 number array，Enum 是名字符串，
+    AssetRef 是资源路径，EntityRef 是目标实体 guid。用它精确排查某实体的字段值
+    （如"为什么看不见"：Renderable.visible / Transform.scale / mesh 路径）。
+    """
+    return _conn.send("get_entity", {"guid": guid})
+
+
+@mcp.tool()
+def list_component_types() -> dict[str, Any]:
+    """枚举编辑器已注册的全部组件类型及其字段元数据（能力自发现）。
+
+    返回 {componentTypes[]}；每个 {typeName, displayName, addable, removable, fields[]}，
+    每字段 {name, label, type, readable, min?, max?, enumNames?, assetKind?}。
+    调它了解“有哪些组件可加、每个字段是什么类型/取值范围”，再决定 set_field /
+    add_component（M2）怎么传值。新增组件 schema 后本表自动出现，无需改 MCP 代码。
+    """
+    return _conn.send("list_component_types")
+
+
 def main() -> None:
     # stdio transport（MCP 客户端通过 stdin/stdout 拉起本进程）。
     mcp.run()

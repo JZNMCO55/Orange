@@ -100,7 +100,44 @@ def main() -> int:
                 print(f"[smoke] FAIL: 实体 {e.get('name')!r} 的 parentGuid 悬空")
                 failures += 1
 
-    # 3) 错误路径：未知 op
+    # 3) get_entity（取上一步第一个有 Transform 的实体）
+    target = next((e for e in ents if "Transform" in e.get("components", [])), None)
+    if target is not None:
+        r = send_recv(sock, buf, {"id": 10, "op": "get_entity",
+                                  "args": {"guid": target["guid"]}})
+        res = r.get("result", {})
+        comps = res.get("components", {})
+        print(f"[smoke] get_entity({target['name']!r}) -> ok={r.get('ok')} "
+              f"componentTypes={res.get('componentTypes')}")
+        tr = comps.get("Transform", {})
+        print(f"        Transform={tr}")
+        if not r.get("ok"):
+            print("[smoke] FAIL: get_entity ok=false"); failures += 1
+        elif "position" not in tr or len(tr.get("position", [])) != 3:
+            print("[smoke] FAIL: get_entity Transform.position 缺失/非3维"); failures += 1
+        # 失效 guid → error
+        r = send_recv(sock, buf, {"id": 11, "op": "get_entity",
+                                  "args": {"guid": "00000000000000000000000000000001"}})
+        if r.get("ok") is not False:
+            print("[smoke] FAIL: 失效 guid 未报错"); failures += 1
+        else:
+            print(f"[smoke] get_entity(失效 guid) -> error={r.get('error')!r}")
+
+    # 4) list_component_types
+    r = send_recv(sock, buf, {"id": 20, "op": "list_component_types", "args": {}})
+    types = r.get("result", {}).get("componentTypes", [])
+    names = [t.get("typeName") for t in types]
+    print(f"[smoke] list_component_types -> {len(types)} 个组件: {names}")
+    if not r.get("ok") or "Transform" not in names:
+        print("[smoke] FAIL: list_component_types 缺 Transform"); failures += 1
+    else:
+        tdef = next(t for t in types if t.get("typeName") == "Transform")
+        fnames = [f.get("name") for f in tdef.get("fields", [])]
+        print(f"        Transform fields={fnames} addable={tdef.get('addable')}")
+        if "position" not in fnames:
+            print("[smoke] FAIL: Transform schema 缺 position 字段"); failures += 1
+
+    # 5) 错误路径：未知 op
     r = send_recv(sock, buf, {"id": 3, "op": "no_such_op", "args": {}})
     print("[smoke] unknown op ->", json.dumps(r, ensure_ascii=False))
     if r.get("ok") is not False or "unknown op" not in r.get("error", ""):
