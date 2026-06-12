@@ -910,3 +910,21 @@
 - **看什么 / 通过判据**：`capture_viewport` 返回 PNG 与编辑器 viewport 画面一致（含 bloom/tonemap 后处理）；尺寸 = viewport 当前尺寸，过大时 Python 侧按最长边 1280 缩小。`capture_viewport` 含 WaitIdle，单次数百 ms、让编辑器卡一帧——非高频操作（tool 描述已注明）。
 - **失败上报**：`capture_viewport` 返回全黑 / 尺寸异常 / 与屏幕不符；`get_entity` 字段值与 Inspector 不一致；高频 capture 拖垮帧率。
 - **下一步**：M2 写闭环（create_entity / set_field / add_component / delete_entity / select_entity / save_scene，全走命令栈，AI 操作可被用户 Ctrl+Z）。
+
+### 59. OE-MCP M2 —— 写闭环（create/set_field/add_component/delete/select/save，**首版完整**）
+
+- **commit**：本 session（McpCommandHandler 加 6 写 op + Python tool）。**P0 共 11 tool 全落地**=首版读写协同闭环完整。
+- **已自动真验（非 dogfood-pending）**：smoke_test 写往返全过——
+  - `create_entity`（undoable:true）→ 返回新 guid；`set_field`(Transform.position=[1,2,3], undoable:true) → get_entity 确认写入生效 + name 正确；错误组件名 graceful 报错；`add_component`(Renderable, undoable:false) → get_entity 确认挂上；`select_entity` ok；`delete_entity`(undoable:false) → get_scene_info 确认实体从场景消失；`save_scene`(显式路径) → 下一帧真写盘 30KB scene 文件。
+- **仍需 dogfood（真实 Claude 客户端，尤其 GUI 联动 + Ctrl+Z）**：
+  1. AI `create_entity` + `add_component`(Renderable)：用户**实时**看到 viewport 出现白色 cube、Hierarchy 出现新节点。
+  2. AI `set_field` 改 Transform.position：viewport 实体移动；用户 **Ctrl+Z 撤销 AI 的改动**成功、Ctrl+Y 重做成功（set_field 走命令栈的关键验证）。
+  3. AI 连续微调同一字段 N 次：undo 栈合并为一条（coalesce 生效）。
+  4. AI `select_entity`：Inspector 联动显示该实体；AI 改动后场景标题出现 dirty 标记。
+  5. 走一遍 UC-1（设计 §3）：人口述布局 → AI 搭灰盒（批量 create+set_field）→ `capture_viewport` → 人微调 → save，全程无需人替 AI 执行编辑操作。
+- **重要限制（dogfood 注意，非 bug）**：
+  - `add_component` / `delete_entity` **不可 Undo**（镜像编辑器现状：Add Component 与删除都清空 undo 历史）——加错/删错不能 Ctrl+Z，且会清掉之前 MCP set_field 的 undo。tool 描述已注明。
+  - Play 模式下写操作默认被拒绝（"in play mode" error），需 `allowInPlay=True` 逃生门（改动会被 Stop 还原）。
+  - `set_field` 仅支持 11 种标量/向量/字符串/Enum/AssetRef 类型；EntityRef / AssetRefArray / 顶点表首版只读（返回 "not writable in first version"）。
+  - `save_scene` 无 path 且当前无场景路径时会弹文件对话框（GUI），自动化勿用空 path。
+- **失败上报**：set_field 后 viewport 实体不动 / Ctrl+Z 撤不掉 AI 操作 / coalesce 失效（N 次微调留 N 条 undo）；create 的实体不可见 / Hierarchy 不出现；delete 后实体残留。

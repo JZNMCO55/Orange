@@ -235,6 +235,76 @@ def capture_viewport() -> Image:
     return Image(data=buf.getvalue(), format="png")
 
 
+# ---------------------------------------------------------------------------
+# M2 写闭环 tools —— 全部走编辑器命令栈（除 delete/select/save，见各 docstring）。
+# AI 的写操作用户在编辑器里实时可见；可 Undo 的操作用户 Ctrl+Z 即可撤销。
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def create_entity(name: str = "New Entity", parentGuid: str = "") -> dict[str, Any]:
+    """创建一个空实体（带 Name + Transform），返回新实体的 guid。
+
+    parentGuid 非空时挂到该父实体下（保持层级）。走命令栈，用户可 Ctrl+Z 撤销。
+    建完通常接 add_component(Renderable) + set_field(Transform.position) 摆到位。
+    """
+    return _conn.send("create_entity", {"name": name, "parentGuid": parentGuid})
+
+
+@mcp.tool()
+def set_field(guid: str, component: str, field: str, value: Any,
+              allowInPlay: bool = False) -> dict[str, Any]:
+    """改某实体某组件的某字段（与 Inspector 拖字段完全同路径，可 Undo + 合并）。
+
+    component/field 用 list_component_types 给出的 typeName/字段 name；value 的形态按
+    字段 type：数值→number，bool→true/false，Vec2/3/4→number 数组，Quat→[w,x,y,z]，
+    Enum→名字符串（或 int），String/AssetRef→字符串。有 range 的字段会被 clamp。
+    Play 模式默认拒绝写（改动会被 Stop 还原）；确需 Play 中调参传 allowInPlay=True。
+    """
+    return _conn.send("set_field", {"guid": guid, "component": component,
+                                    "field": field, "value": value,
+                                    "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def add_component(guid: str, component: str) -> dict[str, Any]:
+    """给实体挂一个组件（component = list_component_types 里 addable=true 的 typeName）。
+
+    ⚠️ 现状编辑器 Add Component 不进命令栈（会清空 undo 历史），故返回 undoable:false——
+    加错了不能 Ctrl+Z 撤，需 remove 或手动处理。Renderable 会预置 cube+PBR 默认材质。
+    """
+    return _conn.send("add_component", {"guid": guid, "component": component})
+
+
+@mcp.tool()
+def delete_entity(guid: str) -> dict[str, Any]:
+    """删除实体及其整个子树。
+
+    ⚠️ **不可撤销**（返回 undoable:false，删除会清空 undo 历史）——删前请向用户确认。
+    实际删除在编辑器下一帧发生。
+    """
+    return _conn.send("delete_entity", {"guid": guid})
+
+
+@mcp.tool()
+def select_entity(guid: str = "") -> dict[str, Any]:
+    """设置编辑器当前选中实体（让用户在 Inspector / viewport 看到 AI 在操作谁）。
+
+    guid 留空 = 清空选中。非命令栈操作（纯 UI 状态）。
+    """
+    return _conn.send("select_entity", {"guid": guid})
+
+
+@mcp.tool()
+def save_scene(path: str = "") -> dict[str, Any]:
+    """保存当前场景。path 非空 = 另存为该路径（.scene.json）并切为当前场景。
+
+    非命令栈（文件 IO，undoable:false）。实际写盘在编辑器下一帧执行（返回 queued:true）。
+    path 留空且当前无场景路径时，编辑器会弹文件对话框（GUI），不适合自动化无人值守。
+    """
+    return _conn.send("save_scene", {"path": path})
+
+
 def main() -> None:
     # stdio transport（MCP 客户端通过 stdin/stdout 拉起本进程）。
     mcp.run()

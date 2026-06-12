@@ -1,6 +1,9 @@
 #include "McpCommandHandler.h"
 
 #include "../EditorHost.h"
+#include "../EditorHierarchy.h"
+#include "../command/EntityCommands.h"
+#include "../command/SetFieldValueCommand.h"
 #include "../schema/ComponentSchemaRegistry.h"
 
 #include "../schema/PropertyDescriptor.h"
@@ -506,6 +509,356 @@ std::string HandleCaptureViewport(std::int64_t id, Orange::Engine::Render::Pipel
     return DumpLine(w2);
 }
 
+// ===========================================================================
+// M2 写闭环 —— 全部走命令栈（除 delete/select/save，见各注）；ADR-020 invariant ②。
+// ===========================================================================
+
+// 按 typeName 线性查 schema（registry 只有 type_index 索引，MCP 用字符串名寻址）。
+const Schema::ComponentSchema* FindSchemaByName(const std::string& typeName)
+{
+    for (const auto& sc : Schema::ComponentSchemaRegistry::Instance().All())
+        if (sc.typeName != nullptr && typeName == sc.typeName) { return &sc; }
+    return nullptr;
+}
+
+// Play 期写保护（ADR-020 Q-b）：Play 模式下写操作默认拒绝（改动会被 Stop 还原，
+// AI/用户易误以为持久），除非 args.allowInPlay==true 逃生门。返回 true = 应拒绝。
+bool IsPlayBlocked(EditorHost& host, const JsonReader& req)
+{
+    if (host.scene.playState != PlayState::Play) { return false; }
+    return !req.GetBool("args/allowInPlay", false);
+}
+
+// 通用标量/向量字段写命令：读旧值 + 构造 SetFieldValueCommand<T> + Push（自动
+// Execute 应用新值）。apply 闭包按 guid 时刻捕获的 Entity + schema.get 重解组件
+// （对齐 SchemaInspector MakeFieldApply，World 切换走 nullptr 早退）。
+template <typename T>
+void PushFieldSet(EditorHost& host, Orange::Engine::Entity e,
+                  const Schema::ComponentSchema& sc, const Schema::PropertyDescriptor& pd,
+                  const std::string& fieldKey, const T& newVal)
+{
+    auto* pWorld = host.scene.pWorld.get();
+    T     oldVal{};
+    if (pWorld != nullptr)
+    {
+        if (void* comp = sc.get(*pWorld, e); comp != nullptr) { pd.get(comp, &oldVal); }
+    }
+    auto apply = [pHost = &host, e, pSchema = &sc, setFn = pd.set](const T& v) {
+        auto* w = pHost->scene.pWorld.get();
+        if (w == nullptr || pSchema->get == nullptr || setFn == nullptr) { return; }
+        if (void* c = pSchema->get(*w, e); c != nullptr) { setFn(c, &v); }
+    };
+    host.cmdStack.Push(std::make_unique<SetFieldValueCommand<T>>(
+        e, fieldKey, oldVal, newVal, std::move(apply)));
+}
+
+// AssetRef 字段写命令变体：setter 多带 const EditorAssetContext&。
+void PushAssetRefSet(EditorHost& host, Orange::Engine::Entity e,
+                     const Schema::ComponentSchema& sc, const Schema::PropertyDescriptor& pd,
+                     const std::string& fieldKey, const std::string& newVal)
+{
+    auto* pWorld = host.scene.pWorld.get();
+    std::string oldVal;
+    if (pWorld != nullptr && pd.assetRefGet != nullptr)
+    {
+        if (void* comp = sc.get(*pWorld, e); comp != nullptr) { pd.assetRefGet(comp, host.assets, &oldVal); }
+    }
+    auto apply = [pHost = &host, e, pSchema = &sc, setFn = pd.assetRefSet](const std::string& v) {
+        auto* w = pHost->scene.pWorld.get();
+        if (w == nullptr || pSchema->get == nullptr || setFn == nullptr) { return; }
+        if (void* c = pSchema->get(*w, e); c != nullptr) { setFn(c, pHost->assets, &v); }
+    };
+    host.cmdStack.Push(std::make_unique<SetFieldValueCommand<std::string>>(
+        e, fieldKey, oldVal, newVal, std::move(apply)));
+}
+
+float ClampRange(float v, const Schema::PropertyAttributes& a)
+{
+    if (!a.hasRange) { return v; }
+    return std::min(std::max(v, a.minValue), a.maxValue);
+}
+
+// ---- op: set_field ---------------------------------------------------------
+// 改任意组件任意字段（schema get/set → SetFieldValueCommand<T>，与 Inspector 同
+// 路径，可 Undo + coalesce）。args: guid, component, field, value[, allowInPlay]。
+std::string HandleSetField(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+    using PT = Schema::PropertyType;
+
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+    if (IsPlayBlocked(host, req))
+    {
+        return MakeError(id, "in play mode (pass allowInPlay:true to override; changes revert on stop)");
+    }
+
+    std::string guidStr, compName, fieldName;
+    if (!req.ReadString("args/guid", guidStr) || guidStr.empty()) { return MakeError(id, "missing 'guid'"); }
+    if (!req.ReadString("args/component", compName)) { return MakeError(id, "missing 'component'"); }
+    if (!req.ReadString("args/field", fieldName)) { return MakeError(id, "missing 'field'"); }
+    if (!req.Has("args/value")) { return MakeError(id, "missing 'value'"); }
+
+    Guid guid;
+    if (!Guid::FromString(guidStr, guid)) { return MakeError(id, "invalid guid format"); }
+    Scene::EnsureEntityGuids(*pWorld);
+    const Entity e = Scene::FindEntityByGuid(*pWorld, guid);
+    if (!e.IsValid()) { return MakeError(id, "entity not found"); }
+
+    const Schema::ComponentSchema* sc = FindSchemaByName(compName);
+    if (sc == nullptr) { return MakeError(id, "unknown component: " + compName); }
+    if (sc->has == nullptr || !sc->has(*pWorld, e)) { return MakeError(id, "component not on entity: " + compName); }
+
+    const Schema::PropertyDescriptor* pd = nullptr;
+    for (const auto& p : sc->properties)
+        if (p.name != nullptr && fieldName == p.name) { pd = &p; break; }
+    if (pd == nullptr) { return MakeError(id, "unknown field: " + fieldName); }
+
+    const std::string fieldKey = compName + "." + fieldName;
+    const char*       vp       = "args/value";
+
+    switch (pd->type)
+    {
+        case PT::Float: { double d; if (!req.ReadFloat(vp, d)) return MakeError(id, "value must be a number");
+                          PushFieldSet<float>(host, e, *sc, *pd, fieldKey, ClampRange(static_cast<float>(d), pd->attribs)); break; }
+        case PT::Int:   { std::int64_t i; if (!req.ReadInt(vp, i)) return MakeError(id, "value must be an integer");
+                          if (pd->attribs.hasRange) i = static_cast<std::int64_t>(ClampRange(static_cast<float>(i), pd->attribs));
+                          PushFieldSet<int>(host, e, *sc, *pd, fieldKey, static_cast<int>(i)); break; }
+        case PT::UInt:  { std::int64_t i; if (!req.ReadInt(vp, i)) return MakeError(id, "value must be an integer");
+                          if (i < 0) i = 0;
+                          if (pd->attribs.hasRange) i = static_cast<std::int64_t>(ClampRange(static_cast<float>(i), pd->attribs));
+                          PushFieldSet<unsigned>(host, e, *sc, *pd, fieldKey, static_cast<unsigned>(i)); break; }
+        case PT::Bool:  { bool b; if (!req.ReadBool(vp, b)) return MakeError(id, "value must be a bool");
+                          PushFieldSet<bool>(host, e, *sc, *pd, fieldKey, b); break; }
+        case PT::Vec2:  { float a[2]; if (!req.ReadFloatArray(vp, a, 2)) return MakeError(id, "value must be a 2-number array");
+                          PushFieldSet<glm::vec2>(host, e, *sc, *pd, fieldKey, glm::vec2(a[0], a[1])); break; }
+        case PT::Vec3:  { float a[3]; if (!req.ReadFloatArray(vp, a, 3)) return MakeError(id, "value must be a 3-number array");
+                          PushFieldSet<glm::vec3>(host, e, *sc, *pd, fieldKey, glm::vec3(a[0], a[1], a[2])); break; }
+        case PT::Vec4:  { float a[4]; if (!req.ReadFloatArray(vp, a, 4)) return MakeError(id, "value must be a 4-number array");
+                          PushFieldSet<glm::vec4>(host, e, *sc, *pd, fieldKey, glm::vec4(a[0], a[1], a[2], a[3])); break; }
+        case PT::Quat:  { float a[4]; if (!req.ReadFloatArray(vp, a, 4)) return MakeError(id, "value must be a 4-number array [w,x,y,z]");
+                          PushFieldSet<glm::quat>(host, e, *sc, *pd, fieldKey, glm::quat(a[0], a[1], a[2], a[3])); break; }
+        case PT::String:{ std::string s; if (!req.ReadString(vp, s)) return MakeError(id, "value must be a string");
+                          PushFieldSet<std::string>(host, e, *sc, *pd, fieldKey, s); break; }
+        case PT::Enum:  { int idx = -1; std::string name;
+                          if (req.ReadString(vp, name))
+                          {
+                              if (pd->attribs.enumNames != nullptr)
+                                  for (int k = 0; k < pd->attribs.enumCount; ++k)
+                                      if (name == pd->attribs.enumNames[k]) { idx = k; break; }
+                              if (idx < 0) return MakeError(id, "invalid enum name: " + name);
+                          }
+                          else { std::int64_t i; if (!req.ReadInt(vp, i)) return MakeError(id, "value must be enum name or int");
+                                 idx = static_cast<int>(i); }
+                          if (idx < 0 || (pd->attribs.enumCount > 0 && idx >= pd->attribs.enumCount))
+                              return MakeError(id, "enum value out of range");
+                          PushFieldSet<int>(host, e, *sc, *pd, fieldKey, idx); break; }
+        case PT::AssetRef: { std::string s; if (!req.ReadString(vp, s)) return MakeError(id, "value must be an asset path string");
+                          if (pd->assetRefSet == nullptr) return MakeError(id, "asset field not writable");
+                          PushAssetRefSet(host, e, *sc, *pd, fieldKey, s); break; }
+        default:
+            return MakeError(id, "field type not writable in first version (EntityRef / AssetRefArray / vertex tables are read-only)");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    w.WriteString("result/component", compName);
+    w.WriteString("result/field", fieldName);
+    return DumpLine(w);
+}
+
+// ---- op: create_entity -----------------------------------------------------
+// 建空实体（Name+Transform[+Hierarchy 若指定父]），走 CreateEntityCommand（可 Undo）。
+// 返回新实体 guid。args: name?, parentGuid?, allowInPlay?
+std::string HandleCreateEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+    using Orange::Engine::World;
+
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+
+    const std::string name = req.GetString("args/name", "New Entity");
+
+    Entity parent = Entity::Invalid();
+    std::string parentGuidStr;
+    if (req.ReadString("args/parentGuid", parentGuidStr) && !parentGuidStr.empty())
+    {
+        Guid pg;
+        if (!Guid::FromString(parentGuidStr, pg)) { return MakeError(id, "invalid parentGuid format"); }
+        Scene::EnsureEntityGuids(*pWorld);
+        parent = Scene::FindEntityByGuid(*pWorld, pg);
+        if (!parent.IsValid()) { return MakeError(id, "parent entity not found"); }
+    }
+
+    auto cmd = std::make_unique<CreateEntityCommand>(
+        host,
+        [name, parent](World& w) -> Entity {
+            Entity e = w.CreateEntity();
+            w.AddComponent<Scene::NameComponent>(e, Scene::NameComponent{name});
+            w.AddComponent<Scene::TransformComponent>(e, Scene::TransformComponent{});
+            if (parent.IsValid() && w.IsValid(parent)) { EditorHierarchy::LinkAsLastChild(w, parent, e); }
+            return e;
+        });
+    auto* raw = cmd.get();
+    host.cmdStack.Push(std::move(cmd));
+    const Entity created = raw->CreatedEntity();
+    if (!created.IsValid()) { return MakeError(id, "create failed"); }
+
+    // 给新实体补 guid 后回报。
+    Scene::EnsureEntityGuids(*pWorld);
+    std::string newGuid;
+    if (const auto* g = pWorld->Registry().try_get<Scene::GuidComponent>(World::ToEntt(created));
+        g != nullptr && g->guid.IsValid())
+    {
+        newGuid = g->guid.ToString();
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    w.WriteString("result/guid", newGuid);
+    return DumpLine(w);
+}
+
+// ---- op: add_component -----------------------------------------------------
+// 挂组件（schema.add）。⚠️ 现状编辑器 Add Component 走 schema.add + cmdStack.Clear()
+//（无 AddComponentCommand），故**不可 Undo** —— 如实返回 undoable:false（NF-3）。
+// args: guid, component, allowInPlay?
+std::string HandleAddComponent(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+
+    std::string guidStr, compName;
+    if (!req.ReadString("args/guid", guidStr) || guidStr.empty()) { return MakeError(id, "missing 'guid'"); }
+    if (!req.ReadString("args/component", compName)) { return MakeError(id, "missing 'component'"); }
+
+    Guid guid;
+    if (!Guid::FromString(guidStr, guid)) { return MakeError(id, "invalid guid format"); }
+    Scene::EnsureEntityGuids(*pWorld);
+    const Entity e = Scene::FindEntityByGuid(*pWorld, guid);
+    if (!e.IsValid()) { return MakeError(id, "entity not found"); }
+
+    const Schema::ComponentSchema* sc = FindSchemaByName(compName);
+    if (sc == nullptr) { return MakeError(id, "unknown component: " + compName); }
+    if (sc->add == nullptr) { return MakeError(id, "component not addable: " + compName); }
+    if (sc->has != nullptr && sc->has(*pWorld, e)) { return MakeError(id, "component already present: " + compName); }
+
+    sc->add(host, e);
+    host.cmdStack.Clear();  // 镜像 InspectorPanel：Add Component 清栈（不可 Undo）
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);  // 现状清栈，不可 undo（NF-3 显式声明）
+    return DumpLine(w);
+}
+
+// ---- op: delete_entity -----------------------------------------------------
+// 删实体及子树。⚠️ 现状删除走 pendingDelete → DestroySubtree + cmdStack.Clear（ADR-020
+// Q5），**不可 Undo** → undoable:false。实际删除在下一帧消费 pendingDelete 时发生。
+// args: guid, allowInPlay?
+std::string HandleDeleteEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+
+    std::string guidStr;
+    if (!req.ReadString("args/guid", guidStr) || guidStr.empty()) { return MakeError(id, "missing 'guid'"); }
+    Guid guid;
+    if (!Guid::FromString(guidStr, guid)) { return MakeError(id, "invalid guid format"); }
+    Scene::EnsureEntityGuids(*pWorld);
+    const Entity e = Scene::FindEntityByGuid(*pWorld, guid);
+    if (!e.IsValid()) { return MakeError(id, "entity not found"); }
+
+    // 帧末设 pendingDelete；下一帧 EntityTreePanel 消费（DestroySubtree + 清栈）。
+    host.selection.pendingDelete = e;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);  // 删除走清栈，不可 undo（删前应向用户确认）
+    return DumpLine(w);
+}
+
+// ---- op: select_entity -----------------------------------------------------
+// 设编辑器选中（让用户看到 AI 在操作谁，Inspector 联动）。guid 空 = 清空选中。
+// 非命令栈（UI 状态）。args: guid
+std::string HandleSelectEntity(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+
+    auto* pWorld = host.scene.pWorld.get();
+    if (pWorld == nullptr) { return MakeError(id, "no active world"); }
+
+    std::string guidStr;
+    req.ReadString("args/guid", guidStr);
+    if (guidStr.empty())
+    {
+        host.selection.selectedEntity = Entity::Invalid();
+        host.selection.additionalSelectedEntities.clear();
+    }
+    else
+    {
+        Guid guid;
+        if (!Guid::FromString(guidStr, guid)) { return MakeError(id, "invalid guid format"); }
+        Scene::EnsureEntityGuids(*pWorld);
+        const Entity e = Scene::FindEntityByGuid(*pWorld, guid);
+        if (!e.IsValid()) { return MakeError(id, "entity not found"); }
+        host.selection.selectedEntity = e;
+        host.selection.additionalSelectedEntities.clear();
+        host.assets.selectedAssetPath.clear();  // 把 Inspector 焦点拉回实体模式
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    return DumpLine(w);
+}
+
+// ---- op: save_scene --------------------------------------------------------
+// 保存场景（pendingSceneOp=Save；path 非空先设 currentScenePath 走 SaveAs 语义）。
+// 非命令栈（文件 IO）。实际写盘在下一帧 ApplyPendingSceneOp，故 ok 表示"已排队"。
+// args: path?
+std::string HandleSaveScene(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    std::string path;
+    if (req.ReadString("args/path", path) && !path.empty())
+    {
+        host.scene.currentScenePath = path;
+    }
+    host.scene.pendingSceneOp = SceneOp::Save;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteBool("result/queued", true);  // 写盘在下一帧执行
+    w.WriteString("result/path", host.scene.currentScenePath);
+    return DumpLine(w);
+}
+
 }  // namespace
 
 std::string ExecuteMcpCommand(const std::string&                requestJson,
@@ -533,6 +886,12 @@ std::string ExecuteMcpCommand(const std::string&                requestJson,
         if (op == "get_entity") { return HandleGetEntity(id, host, r); }
         if (op == "list_component_types") { return HandleListComponentTypes(id); }
         if (op == "capture_viewport") { return HandleCaptureViewport(id, viewportPipeline); }
+        if (op == "set_field") { return HandleSetField(id, host, r); }
+        if (op == "create_entity") { return HandleCreateEntity(id, host, r); }
+        if (op == "add_component") { return HandleAddComponent(id, host, r); }
+        if (op == "delete_entity") { return HandleDeleteEntity(id, host, r); }
+        if (op == "select_entity") { return HandleSelectEntity(id, host, r); }
+        if (op == "save_scene") { return HandleSaveScene(id, host, r); }
 
         return MakeError(id, "unknown op: " + op);
     }

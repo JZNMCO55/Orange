@@ -14,19 +14,30 @@ Claude ──MCP(stdio)──> orange-mcp(server.py) ──TCP/NDJSON(127.0.0.1:
 - **OrangeEditor 命令端**（`tools/OrangeEditor/mcp/`，C++）：后台 socket 线程收 NDJSON、
   主线程帧末执行命令（走命令栈 / schema / EntityGuid）。
 
-## 现状（M0 · spike 通路）
+## 现状（首版 = P0 读写协同闭环，11 tool 全落地）
 
-已打通端到端通路 + 两个 tool：
+M0 spike + M1 读闭环 + M2 写闭环已全部落地并端到端真验：
 
-| tool | 说明 |
-|---|---|
-| `ping` | 连通性 / 版本握手 → `{editorVersion, protocolVersion, sceneName}` |
-| `get_scene_info` | 当前场景实体树 → 每实体 `{guid, name, parentGuid, components[], position}` |
+| tool | 类别 | 说明 |
+|---|---|---|
+| `ping` | 会话 | 连通性 / 版本握手 → `{editorVersion, protocolVersion, sceneName}` |
+| `list_component_types` | 会话 | 枚举全部组件类型 + 字段元数据（能力自发现） |
+| `get_scene_info` | 读 | 当前场景实体树 → 每实体 `{guid, name, parentGuid, components[], position}` |
+| `get_entity` | 读 | 单实体全字段（schema 逐字段，结构化 `{component:{field:value}}`） |
+| `capture_viewport` | 读 | viewport 截图（含后处理）→ PNG，让 AI「看见」场景 |
+| `create_entity` | 写 | 建空实体（可 Undo），返回 guid |
+| `set_field` | 写 | 改任意组件字段（走命令栈，可 Ctrl+Z + coalesce） |
+| `add_component` | 写 | 挂组件（⚠️ 现状不可 Undo） |
+| `delete_entity` | 写 | 删实体子树（⚠️ 不可 Undo，删前确认） |
+| `select_entity` | 写 | 设编辑器选中（UI 状态） |
+| `save_scene` | 写 | 保存场景（文件 IO，下一帧写盘） |
 
-M1 加 `get_entity` / `list_component_types` / `capture_viewport`（读闭环）；
-M2 加 `create_entity` / `set_field` / `add_component` / `delete_entity` / `select_entity` /
-`save_scene`（写闭环，全走命令栈，AI 操作可被用户 Ctrl+Z）。完整 tool 路线见
-[`docs/mcp-requirements.md`](../../docs/mcp-requirements.md)。
+后续分期（P1/P2）：Play 调试、资产导入、prefab、动画创作、C# 脚本协同——完整 tool
+路线见 [`docs/mcp-requirements.md`](../../docs/mcp-requirements.md) §4/§6。
+
+> **写操作纪律**：`set_field` / `create_entity` 走编辑器命令栈，AI 的操作用户可 Ctrl+Z
+> 撤销。`add_component` / `delete_entity` 受编辑器现状限制不可 Undo（会清 undo 历史），
+> tool 会显式返回 `undoable:false`。Play 模式下写操作默认拒绝（传 `allowInPlay` 逃生门）。
 
 ## 安装
 

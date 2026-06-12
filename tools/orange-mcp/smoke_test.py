@@ -163,7 +163,75 @@ def main() -> int:
             nonzero = any(raw[i] for i in range(0, min(len(raw), 40000), 1))
             print(f"        像素非全黑={nonzero}（全黑可能是 viewport 未渲染，dogfood 复核）")
 
-    # 6) 错误路径：未知 op
+    # ===== M2 写闭环往返 =====
+    # 6) create_entity → set_field → get_entity 验证 → add_component → delete_entity → 验证消失
+    r = send_recv(sock, buf, {"id": 40, "op": "create_entity",
+                              "args": {"name": "MCP Test Box", "parentGuid": ""}})
+    new_guid = r.get("result", {}).get("guid", "")
+    print(f"[smoke] create_entity -> ok={r.get('ok')} undoable={r.get('result',{}).get('undoable')} "
+          f"guid={new_guid[:8]}")
+    if not r.get("ok") or not new_guid:
+        print("[smoke] FAIL: create_entity 未返回 guid"); failures += 1
+    else:
+        # set_field Transform.position = [1,2,3]
+        r = send_recv(sock, buf, {"id": 41, "op": "set_field",
+                                  "args": {"guid": new_guid, "component": "Transform",
+                                           "field": "position", "value": [1.0, 2.0, 3.0]}})
+        print(f"[smoke] set_field(position=[1,2,3]) -> ok={r.get('ok')} "
+              f"undoable={r.get('result',{}).get('undoable')}")
+        if not r.get("ok") or r.get("result", {}).get("undoable") is not True:
+            print("[smoke] FAIL: set_field"); failures += 1
+        # get_entity 验证写入生效
+        r = send_recv(sock, buf, {"id": 42, "op": "get_entity", "args": {"guid": new_guid}})
+        comps = r.get("result", {}).get("components", {})
+        pos = comps.get("Transform", {}).get("position")
+        nm = r.get("result", {}).get("name")
+        print(f"[smoke]   验证 -> name={nm!r} Transform.position={pos}")
+        if pos != [1.0, 2.0, 3.0]:
+            print(f"[smoke] FAIL: set_field 未生效（position={pos}）"); failures += 1
+        if nm != "MCP Test Box":
+            print(f"[smoke] FAIL: create name 不符（{nm!r}）"); failures += 1
+        # set_field 错误组件名 → error
+        r = send_recv(sock, buf, {"id": 43, "op": "set_field",
+                                  "args": {"guid": new_guid, "component": "NoSuchComp",
+                                           "field": "x", "value": 1}})
+        if r.get("ok") is not False:
+            print("[smoke] FAIL: set_field 未知组件未报错"); failures += 1
+        else:
+            print(f"[smoke] set_field(bad comp) -> error={r.get('error')!r}")
+        # add_component Renderable（undoable:false）
+        r = send_recv(sock, buf, {"id": 44, "op": "add_component",
+                                  "args": {"guid": new_guid, "component": "Renderable"}})
+        print(f"[smoke] add_component(Renderable) -> ok={r.get('ok')} "
+              f"undoable={r.get('result',{}).get('undoable')}")
+        if not r.get("ok"):
+            print("[smoke] FAIL: add_component"); failures += 1
+        r = send_recv(sock, buf, {"id": 45, "op": "get_entity", "args": {"guid": new_guid}})
+        if "Renderable" not in r.get("result", {}).get("componentTypes", []):
+            print("[smoke] FAIL: add_component 后无 Renderable"); failures += 1
+        else:
+            print("[smoke]   验证 -> Renderable 已挂")
+        # select_entity
+        r = send_recv(sock, buf, {"id": 46, "op": "select_entity", "args": {"guid": new_guid}})
+        if not r.get("ok"):
+            print("[smoke] FAIL: select_entity"); failures += 1
+        else:
+            print("[smoke] select_entity -> ok")
+        # delete_entity（undoable:false）
+        r = send_recv(sock, buf, {"id": 47, "op": "delete_entity", "args": {"guid": new_guid}})
+        print(f"[smoke] delete_entity -> ok={r.get('ok')} undoable={r.get('result',{}).get('undoable')}")
+        if not r.get("ok"):
+            print("[smoke] FAIL: delete_entity"); failures += 1
+        # 下一帧消费后验证消失（get_scene_info 不含该 guid）
+        time.sleep(0.2)
+        r = send_recv(sock, buf, {"id": 48, "op": "get_scene_info", "args": {}})
+        guids_now = {e.get("guid") for e in r.get("result", {}).get("entities", [])}
+        if new_guid in guids_now:
+            print("[smoke] FAIL: delete 后实体仍在场景里"); failures += 1
+        else:
+            print(f"[smoke]   验证 -> 实体已删除，场景剩 {r.get('result',{}).get('entityCount')} 个")
+
+    # 7) 错误路径：未知 op
     r = send_recv(sock, buf, {"id": 3, "op": "no_such_op", "args": {}})
     print("[smoke] unknown op ->", json.dumps(r, ensure_ascii=False))
     if r.get("ok") is not False or "unknown op" not in r.get("error", ""):
