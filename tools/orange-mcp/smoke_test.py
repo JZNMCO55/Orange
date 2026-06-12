@@ -447,6 +447,98 @@ def main() -> int:
     else:
         print(f"[smoke] WARN: play ok=false（可能场景不可进 Play）error={r.get('error')!r}")
 
+    # ===== P2 往返（happy-path 安全项 + 其余错误路径；真实 prefab/动画/材质创作属 dogfood）=====
+    # P2-a) set_entity_order：建两个根实体，把第二个上移，再清理
+    r = send_recv(sock, buf, {"id": 90, "op": "create_entity", "args": {"name": "P2 Root A"}})
+    ra = r.get("result", {}).get("guid", "")
+    r = send_recv(sock, buf, {"id": 91, "op": "create_entity", "args": {"name": "P2 Root B"}})
+    rb = r.get("result", {}).get("guid", "")
+    if rb:
+        r = send_recv(sock, buf, {"id": 92, "op": "set_entity_order",
+                                  "args": {"guid": rb, "direction": "up"}})
+        print(f"[smoke] set_entity_order(up) -> ok={r.get('ok')} undoable={r.get('result',{}).get('undoable')}")
+        if not r.get("ok"):
+            print(f"[smoke] FAIL: set_entity_order error={r.get('error')!r}"); failures += 1
+        # 非法 direction → error
+        r = send_recv(sock, buf, {"id": 93, "op": "set_entity_order",
+                                  "args": {"guid": rb, "direction": "sideways"}})
+        if r.get("ok") is not False:
+            print("[smoke] FAIL: set_entity_order 非法 direction 未报错"); failures += 1
+    for g in (ra, rb):
+        if g:
+            send_recv(sock, buf, {"id": 94, "op": "delete_entity", "args": {"guid": g}})
+
+    # P2-b) get_editor_log（读，安全）
+    r = send_recv(sock, buf, {"id": 95, "op": "get_editor_log", "args": {"lines": 20}})
+    print(f"[smoke] get_editor_log -> ok={r.get('ok')} count={r.get('result',{}).get('count')}")
+    if not r.get("ok"):
+        print("[smoke] FAIL: get_editor_log ok=false"); failures += 1
+    else:
+        for ln in r.get("result", {}).get("lines", [])[-3:]:
+            print(f"        [{ln.get('level')}] {ln.get('timestamp')} {ln.get('message','')[:60]}")
+
+    # P2-c) prefab 错误路径（不真建文件/不污染 assets）
+    if base is not None:
+        # get_prefab_status / revert_override / apply_instance 在非 prefab 实体 → error
+        for op_ in ("get_prefab_status", "apply_instance"):
+            r = send_recv(sock, buf, {"id": 96, "op": op_, "args": {"guid": base["guid"]}})
+            if r.get("ok") is not False:
+                print(f"[smoke] FAIL: {op_} 非 prefab 未报错"); failures += 1
+            else:
+                print(f"[smoke] {op_}(non-prefab) -> error={r.get('error')!r}")
+    r = send_recv(sock, buf, {"id": 97, "op": "instantiate_prefab",
+                              "args": {"path": "no/such/x.prefab.json"}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: instantiate_prefab 不存在路径未报错"); failures += 1
+
+    # P2-d) 动画错误路径（无 ClipAnimator 实体 → error）。若场景里有挂 Animator 的实体，
+    #       顺带做一次 get_animation_clip round-trip。
+    anim_target = next((e for e in ents2 if "Animator" in e.get("components", [])), None)
+    if anim_target is not None:
+        r = send_recv(sock, buf, {"id": 98, "op": "get_animation_clip",
+                                  "args": {"guid": anim_target["guid"]}})
+        print(f"[smoke] get_animation_clip({anim_target['name']!r}) -> ok={r.get('ok')}")
+        if r.get("ok"):
+            cj = r.get("result", {}).get("clipJson", "")
+            try:
+                json.loads(cj)  # clipJson 必须是合法 JSON
+                print(f"        clipJson 长度={len(cj)}（合法 JSON）")
+                # round-trip：原样写回应成功
+                r2 = send_recv(sock, buf, {"id": 99, "op": "set_animation_clip",
+                                           "args": {"guid": anim_target["guid"], "clipJson": cj}})
+                if not r2.get("ok"):
+                    print(f"[smoke] FAIL: set_animation_clip round-trip error={r2.get('error')!r}"); failures += 1
+                else:
+                    print(f"[smoke] set_animation_clip(round-trip) -> ok undoable={r2.get('result',{}).get('undoable')}")
+            except json.JSONDecodeError:
+                print("[smoke] FAIL: get_animation_clip 返回非法 JSON"); failures += 1
+    else:
+        # 无 Animator 实体：用基准实体验证"无 ClipAnimator → error"
+        if base is not None:
+            r = send_recv(sock, buf, {"id": 98, "op": "get_animation_clip", "args": {"guid": base["guid"]}})
+            if r.get("ok") is not False:
+                print("[smoke] FAIL: get_animation_clip 无 animator 未报错"); failures += 1
+            else:
+                print(f"[smoke] get_animation_clip(no animator) -> error={r.get('error')!r}")
+        print("[smoke] (场景无 Animator 实体，clip round-trip happy-path 属 dogfood)")
+
+    # P2-e) set_script_field 错误路径（无 ScriptComponent → error）
+    if base is not None:
+        r = send_recv(sock, buf, {"id": 100, "op": "set_script_field",
+                                  "args": {"guid": base["guid"], "fieldName": "jumpImpulse", "value": 5.0}})
+        if r.get("ok") is not False:
+            print("[smoke] FAIL: set_script_field 无 ScriptComponent 未报错"); failures += 1
+        else:
+            print(f"[smoke] set_script_field(no script) -> error={r.get('error')!r}")
+
+    # P2-f) set_material_param 错误路径（不存在文件 → error）
+    r = send_recv(sock, buf, {"id": 101, "op": "set_material_param",
+                              "args": {"path": "no/such.material", "param": "ToonColor", "value": [1, 0, 0, 1]}})
+    if r.get("ok") is not False:
+        print("[smoke] FAIL: set_material_param 不存在文件未报错"); failures += 1
+    else:
+        print(f"[smoke] set_material_param(bad path) -> error={r.get('error')!r}")
+
     # 7) 错误路径：未知 op
     r = send_recv(sock, buf, {"id": 3, "op": "no_such_op", "args": {}})
     print("[smoke] unknown op ->", json.dumps(r, ensure_ascii=False))

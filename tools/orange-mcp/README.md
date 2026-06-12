@@ -14,9 +14,9 @@ Claude ──MCP(stdio)──> orange-mcp(server.py) ──TCP/NDJSON(127.0.0.1:
 - **OrangeEditor 命令端**（`tools/OrangeEditor/mcp/`，C++）：后台 socket 线程收 NDJSON、
   主线程帧末执行命令（走命令栈 / schema / EntityGuid）。
 
-## 现状（P0 读写协同闭环 + P1 全集，28 tool 全落地）
+## 现状（全 42 tool 落地：P0 11 + P1 17 + P2 14）
 
-M0 spike + M1 读闭环 + M2 写闭环 + M4（P1 全 17 tool）已全部落地：
+M0 spike + M1 读闭环 + M2 写闭环 + M4（P1 17 tool）+ M5（P2 14 tool）已全部落地：
 
 **P0（首版读写协同闭环，11 tool）**
 
@@ -51,8 +51,26 @@ M0 spike + M1 读闭环 + M2 写闭环 + M4（P1 全 17 tool）已全部落地�
 | `list_assets` | 读 | 枚举 assets/（按 AssetKind / pathPrefix 过滤） |
 | `import_asset` | 写 | 导入外部资产（.png/.obj/.gltf/.glb/.fbx，FBX scale 参数） |
 
-后续分期（P2）：截图后处理一致、prefab 协同、动画创作、C# 脚本字段——完整 tool
-路线见 [`docs/mcp-requirements.md`](../../docs/mcp-requirements.md) §4/§6。
+**P2（E5 prefab + E6 动画 + E7 脚本 + E8 杂项，14 tool）**
+
+| tool | 类别 | 说明 |
+|---|---|---|
+| `create_prefab` | prefab | 子树落盘 .prefab.json（文件 IO） |
+| `instantiate_prefab` | prefab | 实例化 .prefab.json（可 Undo），返回实例根 guid |
+| `get_prefab_status` | prefab | 读实例 override 状态（templatePath + overriddenPaths） |
+| `revert_override` | prefab | 字段 / 全部回退到模板值（⚠️ 不可 Undo） |
+| `apply_instance` | prefab | 实例推回模板（重写 .prefab，⚠️ 不可 Undo） |
+| `get_animation_clip` | 动画 | 读 ClipAnimator / .anim → clip JSON |
+| `set_animation_clip` | 动画 | 整 clip 写回（可 Undo，与 timeline 同命令） |
+| `preview_animation` | 动画 | 编辑期预览 play/pause/seek（与 Play 互斥） |
+| `set_script_field` | 脚本 | 改 ScriptComponent fieldOverride（⚠️ 不可 Undo） |
+| `set_entity_order` | 杂项 | 根级重排 Move Up/Down（可 Undo） |
+| `new_scene` | 杂项 | 新建空场景（dirty 保护） |
+| `create_material` | 杂项 | 建 .material（指定模板，文件 IO） |
+| `set_material_param` | 杂项 | 改 .material uniform 值（文件 IO） |
+| `get_editor_log` | 可观测 | 拉编辑器最近日志（level / timestamp / message） |
+
+完整 tool 路线 + 契约见 [`docs/mcp-requirements.md`](../../docs/mcp-requirements.md) §4/§6。
 
 > **写操作纪律**：`set_field` / `create_entity` / `delete_entity` / `duplicate_entity` /
 > `reparent_entity` / `remove_component`（多数）走编辑器命令栈，AI 的操作用户可 Ctrl+Z 撤销。

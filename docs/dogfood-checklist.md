@@ -964,3 +964,40 @@
   4. Play 期 AI `set_field` 默认收到 "in play mode" error（除非 allowInPlay）。
 - **重要限制（非 bug）**：**EnterPlay 尚未接 ScriptSystem**（需 dotnet runtime + `ORANGE_ENGINE_WITH_DOTNET`，见 item 50）——Play 期 C# 脚本不真跑，UC-5「调玩法手感」的脚本侧待 B1 接线 session。当前 Play 仅物理 / VFX / 动画 tick。
 - **失败上报**：play 后物理 / 动画没 tick；stop 后场景没还原 / guid 失效；快照往返崩溃。
+
+## 2026-06-13 session（OE-MCP M5 · P2 全 14 tool —— 全 42 tool 完整）
+
+> 设计见 `docs/mcp-realtime-coediting-design.md` §13 M5 + 需求 §4.M P2 集。C++ 全编译链接绿 + invariant lint 绿 + smoke_test 加 P2 覆盖（happy-path 安全项 + 错误路径）。下列真实 prefab/clip/material 创作 + GUI 属人工 dogfood。
+
+### 63. OE-MCP P2 —— E5 prefab 协同（create/instantiate/status/revert/apply）
+
+- **commit**：本 session（McpCommandHandler 加 5 prefab handler，复用 EditorPrefabActions::CommitNewPrefabFile / InstantiatePrefabCommand / PrefabOverrideUI 全套；Python 加 5 tool）。
+- **已自动真验（smoke_test）**：get_prefab_status / apply_instance 在非 prefab 实体报错；instantiate_prefab 不存在路径报错。
+- **仍需 dogfood（UC-6 场景审计修复）**：
+  1. 右键/AI `create_prefab(rootGuid, path)` → assets/ 出现 .prefab.json（资产浏览器可见）。
+  2. `instantiate_prefab(path)` → Hierarchy 出现实例（蓝色 prefab 标记）；返回的 guid 可寻址；Ctrl+Z 删实例。
+  3. 改实例某字段 → `get_prefab_status` 的 overriddenPaths 含该字段叶子路径（蓝条数据侧）。
+  4. `revert_override(guid, component, field)` → 该字段回模板值；`revert_override(guid)`（不带 comp/field）→ 全部回退（⚠️ 不可 Undo）。
+  5. `apply_instance(guid)` → 实例改动推回 .prefab，其他同模板实例 refresh 后跟随（⚠️ 改磁盘，不可 Undo）。
+- **失败上报**：create 没出文件 / instantiate 实例错位或 guid 失效 / overriddenPaths 与实际改动不符 / revert 没回模板值 / apply 没写盘。
+
+### 64. OE-MCP P2 —— E6 动画创作 + E7 脚本字段（get/set_animation_clip / preview_animation / set_script_field）
+
+- **commit**：本 session（McpCommandHandler 加 4 handler，复用 AnimationClipToJson/FromJson + SetAnimationClipCommand + EditorAnimationPreviewState + ScriptComponent.fieldOverrides；Python 加 4 tool）。
+- **已自动真验（smoke_test）**：场景有 Animator 实体时 get→set_animation_clip round-trip（clipJson 合法 JSON + 写回 undoable）；无 Animator / 无 ScriptComponent 实体报错；set_animation_clip 校验失败不落。
+- **仍需 dogfood（UC-7 关键帧创作）**：
+  1. 挂 Animator(.anim) 的实体 `get_animation_clip` → 改 position.y 轨道关键帧 + Bezier 缓动 → `set_animation_clip` → timeline GUI 显示改后曲线；Ctrl+Z 撤销。
+  2. `preview_animation(guid, "play")` → viewport 实体动起来（Edit 期预览 tick）；`"seek"` 抽帧 + `capture_viewport` 看运动曲线；与 Play 模式互斥（Play 中调报错）。
+  3. `set_script_field(guid, fieldName, value)` → Inspector Script 段 fieldOverrides 出现/更新该条（⚠️ 不可 Undo）。**注**：Play 期脚本真跑待 B1 接线（item 50），当前仅数据编辑。
+- **失败上报**：clip round-trip 丢轨道/关键帧 / preview 不动或与 Play 双写冲突 / set_script_field 没写进 fieldOverrides。
+
+### 65. OE-MCP P2 —— E8 杂项（set_entity_order / new_scene / create_material / set_material_param / get_editor_log）
+
+- **commit**：本 session（McpCommandHandler 加 5 handler + **McpLogReader 注入** EditorRenderLayer Console ring buffer，ExecuteMcpCommand 增第 4 参数；Python 加 5 tool）。
+- **已自动真验（smoke_test）**：set_entity_order 建双根上移 + 非法 direction 报错；get_editor_log 返回最近日志（level/timestamp/message）；set_material_param 不存在文件报错。
+- **仍需 dogfood**：
+  1. `set_entity_order(guid, "up"/"down")` → Hierarchy 根序变化；Ctrl+Z 复位（仅根节点）。
+  2. `new_scene(force=True)` → 空场景（dirty 时不带 force 报错保护）。
+  3. `create_material(path, "toon")` → assets/ 出现 .material；`set_material_param(path, "ToonColor", [..])` → 文件 uniform 值改变（viewport 热生效与否按现状）。
+  4. `get_editor_log` → 返回的日志与编辑器 Console 面板内容一致；AI 写操作触发的引擎告警（资产加载失败等）可见。
+- **失败上报**：reorder 跳两位/不可 undo / new_scene 没保护 dirty / 材质参数没落盘 / get_editor_log 与 Console 不一致或空。

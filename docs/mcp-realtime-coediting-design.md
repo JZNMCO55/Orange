@@ -224,9 +224,15 @@ cmdStack.Push(make_unique<SetFieldValueCommand<T>>(
   - **E3 Play 调试**：`play`/`pause`/`resume`/`stop`（设 pendingPlayOp，帧末 ApplyPendingPlayOp 执行；状态机校验）。**注**：脚本 tick 仍待 B1 EnterPlay 接 ScriptSystem（用户 session），MCP 不抢跑；无脚本时物理/VFX/动画 tick 已有观察价值。
   - **顺带**：`delete_entity` 契约升级为 `undoable:true`（编辑器 pendingDelete 消费路径已命令化，§4.D 预期的"删除命令化后契约升级"）。
   - C++ 全编译 + 链接通过、invariant lint 绿；smoke_test 加 P1 往返覆盖（find/camera/frame/duplicate/reparent/remove/undo-group/list_assets/play-stop + 错误路径 + 环检测 + clamp + Play 期写保护）。**强 dogfood-gated**（跨进程+GUI+网络，headless 测不到核心路径）。
-- **M5+（后续分期，非首版）**：截图含后处理一致（E4，已部分由 M1 viewportColor 回读化解）→ prefab 协同（E5）→ 动画创作（E6）→ C# 脚本字段（E7，卡 B1）→ 可观测/杂项（E8）。
+- **M5 · P2 全 14 tool** ✅（2026-06-13 落地）：覆盖需求 §4.M 的 P2 集，分四组（**全 42 tool 至此完整**）——
+  - **E5 prefab 协同**：`create_prefab`（复用 Prefab::CommitNewPrefabFile，文件 IO）/ `instantiate_prefab`（复用 InstantiatePrefabCommand，可 Undo，返回实例根 guid；parentGuid 给定时 keep-world reparent，MVP）/ `get_prefab_status`（读 PrefabInstanceComponent.overriddenPaths + sourcePrefabPath）/ `revert_override`（复用 PrefabOverrideUI RevertField/RevertAllFields，不可 Undo）/ `apply_instance`（复用 ApplyInstanceToPrefab，资产 IO 不可 Undo）。
+  - **E6 动画创作**：`get_animation_clip`（ClipAnimator::Clip() / .anim 文件 → AnimationClipToJson）/ `set_animation_clip`（AnimationClipFromJson + SetAnimationClipCommand，与 timeline 同命令可 Undo）/ `preview_animation`（EditorAnimationPreviewState play/pause/seek，与 Play 互斥）。
+  - **E7 脚本字段**：`set_script_field`（改 ScriptComponent.fieldOverrides，按 plugin 直接 mutate 不可 Undo；type 显式或推断）。**注**：EnterPlay 接 ScriptSystem 后才真驱动脚本（当前为数据编辑）。
+  - **E8 杂项**：`set_entity_order`（复用 MoveRootRelative，可 Undo）/ `new_scene`（SceneOp::New + dirty 保护）/ `create_material`·`set_material_param`（复用 MaterialFileIO，文件 IO 不可 Undo）/ `get_editor_log`（**新增 McpLogReader 注入** EditorRenderLayer 的 Console ring buffer，ExecuteMcpCommand 增第 4 参数）。
+  - C++ 全编译 + 链接通过、invariant lint 绿；smoke_test 加 P2 覆盖（set_entity_order/get_editor_log happy-path + prefab/动画/脚本/材质错误路径 + 有 Animator 时 clip round-trip）。**强 dogfood-gated**（真实 prefab/clip/material 创作 + GUI 需人工 dogfood）。
+- **演进项（非新 tool）**：截图含后处理一致（E4）—— 已由 M1 capture_viewport 回读 viewportColor（含 bloom/tonemap）大体化解，像素级一致留后续。
 
-每个 M 是独立可 dogfood 的里程碑。M0–M4 都在 OrangeEngine 单仓（命令端 + 截图 API 是 editor/render 代码；Python server 是 tools 脚本）。
+每个 M 是独立可 dogfood 的里程碑。M0–M5 都在 OrangeEngine 单仓（命令端 + 截图 API 是 editor/render 代码；Python server 是 tools 脚本）。**42 tool 全集（P0 11 + P1 17 + P2 14）至此落地。**
 
 ## 14. dogfood
 

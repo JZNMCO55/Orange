@@ -16,7 +16,9 @@
 // M0 仅实现 ping / get_scene_info；M1/M2 在同一 dispatch 表内追加 op，不改本签名。
 // ---------------------------------------------------------------------------
 
+#include <functional>
 #include <string>
+#include <vector>
 
 struct EditorHost;
 
@@ -28,14 +30,30 @@ class Pipeline;
 namespace Orange::Editor::Mcp
 {
 
+// get_editor_log 的一行日志（编辑器 Console ring buffer 的投影）。level 是
+// Orange::Engine::Log::Level 的 int 值（0=Trace 起）。
+struct McpLogLine
+{
+    int         level;
+    std::string timestamp;
+    std::string message;
+};
+
+// 日志读取回调：编辑器层（EditorRenderLayer）注入，读其 mLogEntries ring buffer，
+// 返回最近不超过 maxLines 条、level>=minLevel 的日志（旧→新）。空回调 =
+// get_editor_log 返回空数组（无日志接入时的降级）。在主线程帧末被调用。
+using McpLogReader = std::function<std::vector<McpLogLine>(int maxLines, int minLevel)>;
+
 // 执行一条 MCP 命令。requestJson = 单行 NDJSON 请求；返回单行 NDJSON 响应。
 // 永不抛异常（内部全兜底）。
 //
 // viewportPipeline = 编辑器当前 viewport 离屏 Pipeline（EditorRenderLayer 的
 // mpScenePipeline），供 capture_viewport 回读像素；其它命令不用，可为 nullptr。
+// logReader = 注入的日志读取回调（get_editor_log 用），可为空。
 std::string ExecuteMcpCommand(const std::string&                  requestJson,
                               EditorHost&                         host,
-                              Orange::Engine::Render::Pipeline*   viewportPipeline);
+                              Orange::Engine::Render::Pipeline*   viewportPipeline,
+                              const McpLogReader&                 logReader = {});
 
 // undo-group 护栏 —— 每帧（命令 drain 前）在主线程调用，与队列是否有命令无关。
 // 若 begin_undo_group 开着的组满足任一闭合条件就自动 EndGroup + 清会话态：

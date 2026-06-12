@@ -3,8 +3,13 @@
 #include "../EditorCameraControl.h"
 #include "../EditorHost.h"
 #include "../EditorHierarchy.h"
+#include "../EditorPrefabActions.h"
+#include "../MaterialFileIO.h"
+#include "../PrefabOverrideUI.h"
 #include "../command/EntityCommands.h"
 #include "../command/LambdaCommand.h"
+#include "../command/PrefabCommands.h"
+#include "../command/SetAnimationClipCommand.h"
 #include "../command/SetFieldValueCommand.h"
 #include "../import/ImportDispatcher.h"
 #include "../schema/ComponentSchemaRegistry.h"
@@ -12,6 +17,13 @@
 
 #include "../schema/PropertyDescriptor.h"
 
+#include <orange/engine/animation/AnimationClip.h>
+#include <orange/engine/animation/AnimationClipSerialization.h>
+#include <orange/engine/animation/AnimatorComponent.h>
+#include <orange/engine/animation/ClipAnimator.h>
+#include <orange/engine/asset/AssetHandle.h>
+#include <orange/engine/asset/AssetRegistry.h>
+#include <orange/engine/asset/PrefabAsset.h>
 #include <orange/engine/core/Guid.h>
 #include <orange/engine/core/Log.h>
 #include <orange/engine/core/Serialization.h>
@@ -22,9 +34,11 @@
 #include <orange/engine/scene/GuidComponent.h>
 #include <orange/engine/scene/HierarchyComponent.h>
 #include <orange/engine/scene/NameComponent.h>
+#include <orange/engine/scene/PrefabInstanceComponent.h>
 #include <orange/engine/scene/SceneSerialization.h>
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
+#include <orange/engine/script/ScriptComponent.h>
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
@@ -1575,11 +1589,635 @@ std::string HandleImportAsset(std::int64_t id, EditorHost& host, const JsonReade
     return DumpLine(w);
 }
 
+// ===========================================================================
+// P2 工具 —— E5 prefab / E6 动画 / E7 脚本 / E8 杂项（可观测 / 材质 / 场景）。
+// 各域数据层均已落地，MCP 层只消费、不重写。
+// ===========================================================================
+
+// 取实体的 ClipAnimator（AnimatorComponent.animator dynamic_cast）。任一环空→nullptr。
+Orange::Engine::Animation::ClipAnimator* GetClipAnimator(EditorHost& host,
+                                                         Orange::Engine::Entity e)
+{
+    namespace Anim = Orange::Engine::Animation;
+    auto* pW = host.scene.pWorld.get();
+    if (pW == nullptr || !pW->IsValid(e)) { return nullptr; }
+    auto* ac = pW->GetComponent<Anim::AnimatorComponent>(e);
+    if (ac == nullptr || !ac->animator) { return nullptr; }
+    return dynamic_cast<Anim::ClipAnimator*>(ac->animator.get());
+}
+
+// ---- op: set_entity_order --------------------------------------------------
+// 根级 sibling 重排（HierarchyComponent.sortIndex，复用 EditorHierarchy::
+// MoveRootRelative，对应右键 Move Up/Down）。可 Undo。非根实体 / 边界 → error。
+// args: guid, direction("up"|"down"), allowInPlay?
+std::string HandleSetEntityOrder(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    auto* pW = host.scene.pWorld.get();
+    if (pW == nullptr) { return MakeError(id, "no active world"); }
+
+    std::string guidStr, dir;
+    req.ReadString("args/guid", guidStr);
+    if (!req.ReadString("args/direction", dir)) { return MakeError(id, "missing 'direction' (up|down)"); }
+    int delta = 0;
+    if (dir == "up")        { delta = -1; }
+    else if (dir == "down") { delta = +1; }
+    else { return MakeError(id, "direction must be 'up' or 'down'"); }
+
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    // dryRun 预检（非根 / 单根 / 已在边界 → 不能移动），避免"判断执行一次 + 命令
+    // Execute 再执行一次"移两位（BUG-2026-06-01-root-reorder-double-apply）。
+    if (!EditorHierarchy::MoveRootRelative(*pW, e, delta, /*dryRun*/ true))
+    {
+        return MakeError(id, "cannot move (not a root entity / single root / already at boundary)");
+    }
+    auto* pH = &host;
+    host.cmdStack.Push(std::make_unique<LambdaCommand>(
+        "MoveRoot",
+        [pH, e, delta]() {
+            if (auto* w = pH->scene.pWorld.get(); w != nullptr && w->IsValid(e))
+                EditorHierarchy::MoveRootRelative(*w, e, delta);
+        },
+        [pH, e, delta]() {
+            if (auto* w = pH->scene.pWorld.get(); w != nullptr && w->IsValid(e))
+                EditorHierarchy::MoveRootRelative(*w, e, -delta);
+        }));
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    return DumpLine(w);
+}
+
+// ---- op: new_scene ---------------------------------------------------------
+// 新建空场景（pendingSceneOp=New，下一帧 ApplyPendingSceneOp swap 空 World）。
+// 非命令栈（场景切换 Clear 栈）。dirty 保护同 open_scene。仅 Edit 态。
+// args: force?=false
+std::string HandleNewScene(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    if (host.scene.playState != PlayState::Edit) { return MakeError(id, "cannot new scene while in play mode"); }
+    const bool force = req.GetBool("args/force", false);
+    if (host.scene.dirty && !force)
+    {
+        return MakeError(id, "unsaved changes (pass force:true to discard, or save_scene first)");
+    }
+    // New 分支无条件 swap 空 World（不读 dirty），故 force 时无需额外抑制模态。
+    host.scene.pendingSceneOp = SceneOp::New;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteBool("result/queued", true);
+    return DumpLine(w);
+}
+
+// ---- op: create_prefab -----------------------------------------------------
+// 子树落盘 .prefab.json（复用 Prefab::CommitNewPrefabFile）。非命令栈（文件 IO）。
+// prefabName 取 path basename（去 .prefab.json）。args: rootGuid, path
+std::string HandleCreatePrefab(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+    std::string rootGuidStr, path;
+    req.ReadString("args/rootGuid", rootGuidStr);
+    if (!req.ReadString("args/path", path) || path.empty()) { return MakeError(id, "missing 'path'"); }
+    std::string err;
+    const Entity root = ResolveEntityByGuid(host, rootGuidStr, err);
+    if (!root.IsValid()) { return MakeError(id, err); }
+
+    // prefabName = 文件名去目录去 .prefab.json / .json 后缀。
+    std::string name = path;
+    if (const auto slash = name.find_last_of("/\\"); slash != std::string::npos) { name = name.substr(slash + 1); }
+    for (const char* suf : {".prefab.json", ".json"})
+    {
+        const std::size_t sl = std::char_traits<char>::length(suf);
+        if (name.size() >= sl && name.compare(name.size() - sl, sl, suf) == 0)
+        {
+            name = name.substr(0, name.size() - sl);
+            break;
+        }
+    }
+
+    if (!Orange::Editor::Prefab::CommitNewPrefabFile(host, root, path, name))
+    {
+        return MakeError(id, "create prefab failed (see editor log)");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteString("result/path", path);
+    w.WriteString("result/prefabName", name);
+    return DumpLine(w);
+}
+
+// ---- op: instantiate_prefab ------------------------------------------------
+// 实例化 .prefab.json（复用 InstantiatePrefabCommand，可 Undo），返回新根 guid。
+// parentGuid 给定时实例化后 reparent 到该父（keep-world，注：undo 销毁整树、redo
+// 重建为根不重放 reparent——MVP 限制）。args: path, parentGuid?, allowInPlay?
+std::string HandleInstantiatePrefab(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    namespace Asset = Orange::Engine::Asset;
+    using Orange::Engine::Core::Guid;
+    using Orange::Engine::Entity;
+
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    auto* pW = host.scene.pWorld.get();
+    if (pW == nullptr) { return MakeError(id, "no active world"); }
+    auto* pReg = host.assets.pAssets.get();
+    if (pReg == nullptr) { return MakeError(id, "AssetRegistry not ready"); }
+
+    std::string path;
+    if (!req.ReadString("args/path", path) || path.empty()) { return MakeError(id, "missing 'path'"); }
+
+    Entity parent = Entity::Invalid();
+    std::string parentGuidStr;
+    if (req.ReadString("args/parentGuid", parentGuidStr) && !parentGuidStr.empty())
+    {
+        Guid pg;
+        if (!Guid::FromString(parentGuidStr, pg)) { return MakeError(id, "invalid parentGuid format"); }
+        Scene::EnsureEntityGuids(*pW);
+        parent = Scene::FindEntityByGuid(*pW, pg);
+        if (!parent.IsValid()) { return MakeError(id, "parent entity not found"); }
+    }
+
+    auto loaded = pReg->Load<Asset::PrefabAsset>(path);
+    if (loaded.IsErr()) { return MakeError(id, "load prefab failed: " + path); }
+
+    auto cmd = std::make_unique<InstantiatePrefabCommand>(host, loaded.Value());
+    auto* raw = cmd.get();
+    host.cmdStack.Push(std::move(cmd));  // Push 自动 Execute → InstanceRoot 有效
+    const Entity root = raw->InstanceRoot();
+    if (!root.IsValid()) { return MakeError(id, "instantiate failed"); }
+
+    // parentGuid 给定 → keep-world reparent（MVP：plain op，非命令；undo 整树销毁仍正确）。
+    if (parent.IsValid() && pW->IsValid(parent))
+    {
+        EditorHierarchy::ReparentToKeepWorld(*pW, root, parent);
+    }
+
+    Scene::EnsureEntityGuids(*pW);
+    const std::string newGuid = EntityGuidString(pW->Registry(), root);
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    w.WriteString("result/guid", newGuid);
+    return DumpLine(w);
+}
+
+// ---- op: get_prefab_status -------------------------------------------------
+// prefab 实例的 override 状态：模板路径 + overriddenPaths 持久化集 + 锚定信息。
+// 非 prefab 实例 → error。非命令栈。args: guid
+std::string HandleGetPrefabStatus(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Scene = Orange::Engine::Scene;
+    using Orange::Engine::Entity;
+    using Orange::Engine::World;
+
+    std::string guidStr;
+    req.ReadString("args/guid", guidStr);
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    if (!Orange::Editor::Prefab::IsPrefabInstance(host, e))
+    {
+        return MakeError(id, "not a prefab instance");
+    }
+    auto* pW = host.scene.pWorld.get();
+    const auto* pi = pW->GetComponent<Scene::PrefabInstanceComponent>(e);
+    if (pi == nullptr) { return MakeError(id, "no PrefabInstanceComponent"); }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/isPrefabInstance", true);
+    w.WriteString("result/templatePath", pi->sourcePrefabPath);
+    w.WriteBool("result/isInstanceRoot", pi->isInstanceRoot);
+    w.WriteInt("result/overrideCount", static_cast<std::int64_t>(pi->overriddenPaths.size()));
+    w.BeginArray("result/overriddenPaths", pi->overriddenPaths.size());
+    for (std::size_t i = 0; i < pi->overriddenPaths.size(); ++i)
+    {
+        w.WriteString("result/overriddenPaths/" + std::to_string(i), pi->overriddenPaths[i]);
+    }
+    return DumpLine(w);
+}
+
+// ---- op: revert_override ---------------------------------------------------
+// 单字段（component+field 都给）或全部（都不给）回退到模板值（复用 PrefabOverrideUI
+// RevertField / RevertAllFields）。⚠️ 引擎层无 typed by-path 逆写原语，**不可 Undo**。
+// args: guid, component?, field?
+std::string HandleRevertOverride(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    std::string guidStr, comp, field;
+    req.ReadString("args/guid", guidStr);
+    req.ReadString("args/component", comp);
+    req.ReadString("args/field", field);
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    if (!Orange::Editor::Prefab::IsPrefabInstance(host, e))
+    {
+        return MakeError(id, "not a prefab instance");
+    }
+
+    bool ok = false;
+    if (!comp.empty() && !field.empty())
+    {
+        ok = Orange::Editor::Prefab::RevertField(host, e, comp, field);
+    }
+    else
+    {
+        ok = Orange::Editor::Prefab::RevertAllFields(host, e);
+    }
+    if (!ok) { return MakeError(id, "revert no-op (field not overridden / no template / no overrides)"); }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);  // 缺 typed 逆写原语，不可 undo（显式声明）
+    return DumpLine(w);
+}
+
+// ---- op: apply_instance ----------------------------------------------------
+// 把实例当前态推回模板（复用 ApplyInstanceToPrefab：重写 .prefab.json + reload +
+// 失效缩略图）。⚠️ 资产层 IO，**不可 Undo**。args: guid
+std::string HandleApplyInstance(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    std::string guidStr;
+    req.ReadString("args/guid", guidStr);
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    if (!Orange::Editor::Prefab::IsPrefabInstance(host, e))
+    {
+        return MakeError(id, "not a prefab instance");
+    }
+    if (!Orange::Editor::Prefab::ApplyInstanceToPrefab(host, e))
+    {
+        return MakeError(id, "apply failed (no template / write failed, see editor log)");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);  // 资产文件 IO，不可 undo（显式声明）
+    return DumpLine(w);
+}
+
+// ---- op: get_animation_clip ------------------------------------------------
+// 读实体 ClipAnimator 当前 clip（或 .anim 文件路径）→ AnimationClipToJson。
+// 非命令栈。args: guid 或 path（二选一，guid 优先）
+std::string HandleGetAnimationClip(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Anim = Orange::Engine::Animation;
+    std::string guidStr, path;
+    req.ReadString("args/guid", guidStr);
+    req.ReadString("args/path", path);
+
+    std::string clipJson;
+    if (!guidStr.empty())
+    {
+        std::string err;
+        const auto e = ResolveEntityByGuid(host, guidStr, err);
+        if (!e.IsValid()) { return MakeError(id, err); }
+        auto* clip = GetClipAnimator(host, e);
+        if (clip == nullptr) { return MakeError(id, "entity has no ClipAnimator"); }
+        clipJson = Anim::AnimationClipToJson(clip->Clip(), -1);
+    }
+    else if (!path.empty())
+    {
+        auto loaded = Anim::LoadAnimationClip(path);
+        if (loaded.IsErr()) { return MakeError(id, "load .anim failed: " + path); }
+        clipJson = Anim::AnimationClipToJson(loaded.Value(), -1);
+    }
+    else
+    {
+        return MakeError(id, "missing 'guid' or 'path'");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    // clip 以紧凑 JSON 字符串回（Python 侧 json.loads）。schema = animation/Clip。
+    w.WriteString("result/clipJson", clipJson);
+    return DumpLine(w);
+}
+
+// ---- op: set_animation_clip ------------------------------------------------
+// 整 clip 写回实体 ClipAnimator（AnimationClipFromJson + SetAnimationClipCommand，
+// 与 timeline GUI 同命令，可 Undo）。clip JSON 校验失败 → error 不落。
+// args: guid, clipJson(string), allowInPlay?
+std::string HandleSetAnimationClip(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Anim = Orange::Engine::Animation;
+    using Orange::Engine::Entity;
+
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    std::string guidStr, clipJson;
+    req.ReadString("args/guid", guidStr);
+    if (!req.ReadString("args/clipJson", clipJson) || clipJson.empty())
+    {
+        return MakeError(id, "missing 'clipJson'");
+    }
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    auto* clip = GetClipAnimator(host, e);
+    if (clip == nullptr) { return MakeError(id, "entity has no ClipAnimator"); }
+
+    auto parsed = Anim::AnimationClipFromJson(clipJson);
+    if (parsed.IsErr()) { return MakeError(id, "invalid clip JSON (schema/key order/interp)"); }
+
+    Anim::AnimationClip oldClip = clip->Clip();
+    Anim::AnimationClip newClip = parsed.Value();
+    host.cmdStack.Push(std::make_unique<SetAnimationClipCommand>(
+        host, e, std::move(oldClip), std::move(newClip),
+        std::string("mcp_set_clip"), std::string("Set Animation Clip")));
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", true);
+    return DumpLine(w);
+}
+
+// ---- op: preview_animation -------------------------------------------------
+// 编辑期预览（EditorAnimationPreviewState：play/pause/seek 单 animator tick；与
+// PlayState::Play 互斥）。非命令栈（预览态不改场景数据）。
+// args: guid, action(play|pause|seek), time?
+std::string HandlePreviewAnimation(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    using Orange::Engine::Entity;
+    if (host.scene.playState == PlayState::Play || host.scene.playState == PlayState::Paused)
+    {
+        return MakeError(id, "in play mode (edit-time preview is mutually exclusive with Play)");
+    }
+    std::string guidStr, action;
+    req.ReadString("args/guid", guidStr);
+    if (!req.ReadString("args/action", action)) { return MakeError(id, "missing 'action' (play|pause|seek)"); }
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+    auto* clip = GetClipAnimator(host, e);
+    if (clip == nullptr) { return MakeError(id, "entity has no ClipAnimator"); }
+
+    if (action == "play")
+    {
+        host.animPreview.previewEntity  = e;
+        host.animPreview.previewPlaying = true;
+    }
+    else if (action == "pause")
+    {
+        host.animPreview.previewPlaying = false;
+    }
+    else if (action == "seek")
+    {
+        double t = 0.0;
+        if (!req.ReadFloat("args/time", t)) { return MakeError(id, "seek requires 'time' (seconds)"); }
+        host.animPreview.previewEntity  = e;
+        host.animPreview.previewPlaying = false;
+        clip->Seek(static_cast<float>(t));
+    }
+    else
+    {
+        return MakeError(id, "action must be play|pause|seek");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteString("result/action", action);
+    w.WriteBool("result/previewPlaying", host.animPreview.previewPlaying);
+    return DumpLine(w);
+}
+
+// ---- op: set_script_field --------------------------------------------------
+// 改 ScriptComponent.fieldOverrides 的某条（B1.3 authored tweakable）。找不到该
+// name 则追加一条。⚠️ 直接 mutate（镜像 ScriptFieldOverridesInspectorPlugin），
+// **不可 Undo**。value 统一字符串持久化；type 可显式给（Float/Int/Bool/String），
+// 否则按 value JSON 形态推断。args: guid, fieldName, value, type?, allowInPlay?
+std::string HandleSetScriptField(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    namespace Script = Orange::Engine::Script;
+    using Orange::Engine::Entity;
+
+    if (IsPlayBlocked(host, req)) { return MakeError(id, "in play mode (pass allowInPlay:true to override)"); }
+    auto* pW = host.scene.pWorld.get();
+    if (pW == nullptr) { return MakeError(id, "no active world"); }
+
+    std::string guidStr, fieldName;
+    req.ReadString("args/guid", guidStr);
+    if (!req.ReadString("args/fieldName", fieldName) || fieldName.empty()) { return MakeError(id, "missing 'fieldName'"); }
+    if (!req.Has("args/value")) { return MakeError(id, "missing 'value'"); }
+    std::string err;
+    const Entity e = ResolveEntityByGuid(host, guidStr, err);
+    if (!e.IsValid()) { return MakeError(id, err); }
+
+    auto* sc = pW->GetComponent<Script::ScriptComponent>(e);
+    if (sc == nullptr) { return MakeError(id, "entity has no ScriptComponent"); }
+
+    // value → (字符串值, type)。显式 type 优先；否则按 JSON 形态推断。
+    std::string valueStr;
+    Script::ScriptFieldType ftype = Script::ScriptFieldType::Float;
+    std::string typeStr;
+    const bool hasExplicitType = req.ReadString("args/type", typeStr);
+    if (hasExplicitType)
+    {
+        if      (typeStr == "Float")  { ftype = Script::ScriptFieldType::Float; }
+        else if (typeStr == "Int")    { ftype = Script::ScriptFieldType::Int; }
+        else if (typeStr == "Bool")   { ftype = Script::ScriptFieldType::Bool; }
+        else if (typeStr == "String") { ftype = Script::ScriptFieldType::String; }
+        else { return MakeError(id, "type must be Float|Int|Bool|String"); }
+    }
+
+    // 取 value 并 marshal 成字符串（按 ftype 或推断）。
+    if (hasExplicitType)
+    {
+        switch (ftype)
+        {
+            case Script::ScriptFieldType::Bool:
+            { bool b; if (!req.ReadBool("args/value", b)) return MakeError(id, "value must be a bool");
+              valueStr = b ? "true" : "false"; break; }
+            case Script::ScriptFieldType::Int:
+            { std::int64_t i; if (!req.ReadInt("args/value", i)) return MakeError(id, "value must be an integer");
+              valueStr = std::to_string(i); break; }
+            case Script::ScriptFieldType::Float:
+            { double d; if (!req.ReadFloat("args/value", d)) return MakeError(id, "value must be a number");
+              valueStr = std::to_string(d); break; }
+            case Script::ScriptFieldType::String:
+            { if (!req.ReadString("args/value", valueStr)) return MakeError(id, "value must be a string"); break; }
+        }
+    }
+    else
+    {
+        // 推断顺序：bool → string → int → float。
+        bool b;
+        std::int64_t i;
+        double d;
+        std::string s;
+        if (req.ReadBool("args/value", b))        { ftype = Script::ScriptFieldType::Bool;  valueStr = b ? "true" : "false"; }
+        else if (req.ReadString("args/value", s)) { ftype = Script::ScriptFieldType::String; valueStr = s; }
+        else if (req.ReadInt("args/value", i))    { ftype = Script::ScriptFieldType::Int;   valueStr = std::to_string(i); }
+        else if (req.ReadFloat("args/value", d))  { ftype = Script::ScriptFieldType::Float; valueStr = std::to_string(d); }
+        else { return MakeError(id, "value must be a number / bool / string"); }
+    }
+
+    // 找现有同名 override 更新，否则追加。
+    bool found = false;
+    for (auto& fo : sc->fieldOverrides)
+    {
+        if (fo.name == fieldName) { fo.type = ftype; fo.value = valueStr; found = true; break; }
+    }
+    if (!found)
+    {
+        sc->fieldOverrides.push_back(Script::ScriptFieldOverride{fieldName, ftype, valueStr});
+    }
+    // 直接 mutate 走 dirty（与 plugin 一致：常规保存承载），但不进命令栈。
+    host.scene.dirty = true;
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);  // fieldOverrides 直接 mutate，不可 undo
+    w.WriteString("result/fieldName", fieldName);
+    w.WriteBool("result/added", !found);
+    return DumpLine(w);
+}
+
+// ---- op: create_material ---------------------------------------------------
+// 建 .material 文件（复用 Material::WriteMaterialFile + 模板名）。非命令栈（文件 IO）。
+// args: path, templateName
+std::string HandleCreateMaterial(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    (void)host;
+    std::string path, templateName;
+    if (!req.ReadString("args/path", path) || path.empty()) { return MakeError(id, "missing 'path'"); }
+    if (!req.ReadString("args/templateName", templateName) || templateName.empty())
+    {
+        return MakeError(id, "missing 'templateName'");
+    }
+    Orange::Editor::Material::MaterialFileData data;
+    data.templateName = templateName;
+    if (!Orange::Editor::Material::WriteMaterialFile(path, data))
+    {
+        return MakeError(id, "write material failed (see editor log)");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteString("result/path", path);
+    return DumpLine(w);
+}
+
+// ---- op: set_material_param ------------------------------------------------
+// 改 .material 的某个 uniform override 值并落盘（ReadMaterialFile → 改 → Write）。
+// 该 uniform 必须已在文件里（按 name 找，按其现有 type 解析 value）；不在 → error。
+// 非命令栈（资产 IO）。args: path, param(uniform name), value
+std::string HandleSetMaterialParam(std::int64_t id, EditorHost& host, const JsonReader& req)
+{
+    (void)host;
+    namespace Mat = Orange::Editor::Material;
+    using MUT = Orange::Engine::Render::MaterialUniformType;
+
+    std::string path, param;
+    if (!req.ReadString("args/path", path) || path.empty()) { return MakeError(id, "missing 'path'"); }
+    if (!req.ReadString("args/param", param) || param.empty()) { return MakeError(id, "missing 'param'"); }
+    if (!req.Has("args/value")) { return MakeError(id, "missing 'value'"); }
+
+    auto loaded = Mat::ReadMaterialFile(path);
+    if (!loaded) { return MakeError(id, "read material failed (missing / bad schema): " + path); }
+    Mat::MaterialFileData data = *loaded;
+
+    Mat::UniformOverrideValue* target = nullptr;
+    for (auto& u : data.uniforms) { if (u.name == param) { target = &u; break; } }
+    if (target == nullptr)
+    {
+        return MakeError(id, "uniform '" + param + "' not present in material (add it in the template first)");
+    }
+
+    // 按现有 type 解析 value 写入 variant。
+    switch (target->type)
+    {
+        case MUT::Float: { double d; if (!req.ReadFloat("args/value", d)) return MakeError(id, "value must be a number");
+                           target->value = static_cast<float>(d); break; }
+        case MUT::Int:   { std::int64_t i; if (!req.ReadInt("args/value", i)) return MakeError(id, "value must be an integer");
+                           target->value = static_cast<std::int32_t>(i); break; }
+        case MUT::Vec2:  { float a[2]; if (!req.ReadFloatArray("args/value", a, 2)) return MakeError(id, "value must be a 2-number array");
+                           target->value = glm::vec2(a[0], a[1]); break; }
+        case MUT::Vec3:  { float a[3]; if (!req.ReadFloatArray("args/value", a, 3)) return MakeError(id, "value must be a 3-number array");
+                           target->value = glm::vec3(a[0], a[1], a[2]); break; }
+        case MUT::Vec4:  { float a[4]; if (!req.ReadFloatArray("args/value", a, 4)) return MakeError(id, "value must be a 4-number array");
+                           target->value = glm::vec4(a[0], a[1], a[2], a[3]); break; }
+        case MUT::Mat4:
+        default:
+            return MakeError(id, "mat4 uniform not writable via MCP");
+    }
+
+    if (!Mat::WriteMaterialFile(path, data))
+    {
+        return MakeError(id, "write material failed (see editor log)");
+    }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteBool("result/undoable", false);
+    w.WriteString("result/path", path);
+    w.WriteString("result/param", param);
+    return DumpLine(w);
+}
+
+// ---- op: get_editor_log ----------------------------------------------------
+// 拉编辑器最近日志（编辑器层经 logReader 注入读 Console ring buffer）。无注入 →
+// 空数组。非命令栈。args: lines?(默认 100), minLevel?(0=Trace 起)
+std::string HandleGetEditorLog(std::int64_t id, const JsonReader& req, const McpLogReader& logReader)
+{
+    const int lines    = static_cast<int>(req.GetInt("args/lines", 100));
+    const int minLevel = static_cast<int>(req.GetInt("args/minLevel", 0));
+
+    std::vector<McpLogLine> entries;
+    if (logReader) { entries = logReader(lines > 0 ? lines : 100, minLevel); }
+
+    JsonWriter w;
+    w.WriteInt("id", id);
+    w.WriteBool("ok", true);
+    w.WriteInt("result/count", static_cast<std::int64_t>(entries.size()));
+    w.BeginArray("result/lines", entries.size());
+    for (std::size_t i = 0; i < entries.size(); ++i)
+    {
+        const std::string base = "result/lines/" + std::to_string(i);
+        w.WriteInt(base + "/level", entries[i].level);
+        w.WriteString(base + "/timestamp", entries[i].timestamp);
+        w.WriteString(base + "/message", entries[i].message);
+    }
+    return DumpLine(w);
+}
+
 }  // namespace
 
 std::string ExecuteMcpCommand(const std::string&                requestJson,
                               EditorHost&                       host,
-                              Orange::Engine::Render::Pipeline* viewportPipeline)
+                              Orange::Engine::Render::Pipeline* viewportPipeline,
+                              const McpLogReader&               logReader)
 {
     std::int64_t id = 0;
     try
@@ -1627,6 +2265,22 @@ std::string ExecuteMcpCommand(const std::string&                requestJson,
         }
         if (op == "list_assets") { return HandleListAssets(id, r); }
         if (op == "import_asset") { return HandleImportAsset(id, host, r); }
+
+        // ---- P2 ----
+        if (op == "set_entity_order") { return HandleSetEntityOrder(id, host, r); }
+        if (op == "new_scene") { return HandleNewScene(id, host, r); }
+        if (op == "create_prefab") { return HandleCreatePrefab(id, host, r); }
+        if (op == "instantiate_prefab") { return HandleInstantiatePrefab(id, host, r); }
+        if (op == "get_prefab_status") { return HandleGetPrefabStatus(id, host, r); }
+        if (op == "revert_override") { return HandleRevertOverride(id, host, r); }
+        if (op == "apply_instance") { return HandleApplyInstance(id, host, r); }
+        if (op == "get_animation_clip") { return HandleGetAnimationClip(id, host, r); }
+        if (op == "set_animation_clip") { return HandleSetAnimationClip(id, host, r); }
+        if (op == "preview_animation") { return HandlePreviewAnimation(id, host, r); }
+        if (op == "set_script_field") { return HandleSetScriptField(id, host, r); }
+        if (op == "create_material") { return HandleCreateMaterial(id, host, r); }
+        if (op == "set_material_param") { return HandleSetMaterialParam(id, host, r); }
+        if (op == "get_editor_log") { return HandleGetEditorLog(id, r, logReader); }
 
         return MakeError(id, "unknown op: " + op);
     }

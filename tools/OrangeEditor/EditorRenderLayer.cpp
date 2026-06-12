@@ -1865,13 +1865,30 @@ void EditorRenderLayer::ApplyPendingMcpCommands()
         batch.swap(mHost.mcp.pendingRequests);
     }
 
-    // 执行不持锁（命令可能较重，如 get_scene_info 遍历 World / 未来截图）。
+    // get_editor_log 的日志读取回调：读本层 mLogEntries ring buffer（持 mLogMutex）。
+    // 取最后 maxLines 条 level>=minLevel 的日志，旧→新返回。
+    auto logReader = [this](int maxLines, int minLevel)
+        -> std::vector<::Orange::Editor::Mcp::McpLogLine>
+    {
+        std::vector<::Orange::Editor::Mcp::McpLogLine> out;
+        std::lock_guard<std::mutex> lk(mLogMutex);
+        for (auto it = mLogEntries.rbegin(); it != mLogEntries.rend(); ++it)
+        {
+            if (static_cast<int>(it->level) < minLevel) { continue; }
+            out.push_back({static_cast<int>(it->level), it->timestamp, it->message});
+            if (static_cast<int>(out.size()) >= maxLines) { break; }
+        }
+        std::reverse(out.begin(), out.end());  // rbegin 收集是新→旧，翻成旧→新
+        return out;
+    };
+
+    // 执行不持锁（命令可能较重，如 get_scene_info 遍历 World / 截图）。
     std::vector<std::string> responses;
     responses.reserve(batch.size());
     for (const auto& reqJson : batch)
     {
         responses.push_back(::Orange::Editor::Mcp::ExecuteMcpCommand(
-            reqJson, mHost, mpScenePipeline.get()));
+            reqJson, mHost, mpScenePipeline.get(), logReader));
     }
 
     {

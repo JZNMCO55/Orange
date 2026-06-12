@@ -501,6 +501,175 @@ def import_asset(srcPath: str, scale: float = 1.0) -> dict[str, Any]:
     return _conn.send("import_asset", {"srcPath": srcPath, "scale": scale})
 
 
+# ---------------------------------------------------------------------------
+# P2 工具 —— E5 prefab / E6 动画 / E7 脚本 / E8 杂项（场景 / 材质 / 可观测）。
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def set_entity_order(guid: str, direction: str, allowInPlay: bool = False) -> dict[str, Any]:
+    """调整**根实体**在 Hierarchy 里的同级顺序（对应右键 Move Up / Move Down）。可 Undo。
+
+    direction = "up" / "down"。仅作用于根节点（无父）；非根 / 单根 / 已在边界 → 报错。
+    """
+    return _conn.send("set_entity_order", {"guid": guid, "direction": direction,
+                                           "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def new_scene(force: bool = False) -> dict[str, Any]:
+    """新建一个空场景。
+
+    **dirty 保护**：当前有未保存改动且 force=False 时报错——先 save_scene 或传 force=True
+    丢弃。仅 Edit 模式可新建。非命令栈（清空 undo 历史）。实际切换在下一帧执行。
+    """
+    return _conn.send("new_scene", {"force": force})
+
+
+@mcp.tool()
+def create_prefab(rootGuid: str, path: str) -> dict[str, Any]:
+    """把一棵实体子树落盘成 .prefab.json 文件（prefab 资产）。
+
+    rootGuid = 子树根；path = 目标 .prefab.json 路径（父目录须已存在）。prefabName 自动
+    取文件名。非命令栈（文件 IO，undoable:false）。建完可用 instantiate_prefab 实例化。
+    """
+    return _conn.send("create_prefab", {"rootGuid": rootGuid, "path": path})
+
+
+@mcp.tool()
+def instantiate_prefab(path: str, parentGuid: str = "", allowInPlay: bool = False) -> dict[str, Any]:
+    """实例化一个 .prefab.json 到场景，返回新实例根 guid。可 Undo。
+
+    parentGuid 给定时实例化后挂到该父下（keep-world）。⚠️ MVP 限制：undo 销毁整树正确，
+    但 undo 后 redo 会重建为根（不重放 reparent）。文件不存在 / 加载失败 → 报错。
+    """
+    return _conn.send("instantiate_prefab", {"path": path, "parentGuid": parentGuid,
+                                             "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def get_prefab_status(guid: str) -> dict[str, Any]:
+    """查 prefab 实例的 override 状态：{isPrefabInstance, templatePath, isInstanceRoot,
+    overrideCount, overriddenPaths[]}。
+
+    overriddenPaths 是实例相对模板真实改过的字段叶子路径（"componentName/fieldPath"）。
+    非 prefab 实例 → 报错。用它审计哪些实例字段偏离了模板。
+    """
+    return _conn.send("get_prefab_status", {"guid": guid})
+
+
+@mcp.tool()
+def revert_override(guid: str, component: str = "", field: str = "") -> dict[str, Any]:
+    """把 prefab 实例的 override 回退到模板值。
+
+    component + field 都给 = 只回退该字段；都不给 = 回退**所有** override。⚠️ 引擎层缺
+    typed 逆写原语，**不可 Undo**（undoable:false）——回退前确认。非 prefab 实例 / 该字段
+    无 override → 报错。
+    """
+    return _conn.send("revert_override", {"guid": guid, "component": component, "field": field})
+
+
+@mcp.tool()
+def apply_instance(guid: str) -> dict[str, Any]:
+    """把 prefab 实例的当前态推回模板（重写 .prefab.json，所有同模板实例下次会跟随）。
+
+    ⚠️ 资产文件 IO，**不可 Undo**（undoable:false）——会改磁盘上的 .prefab。应用前确认。
+    非 prefab 实例 → 报错。
+    """
+    return _conn.send("apply_instance", {"guid": guid})
+
+
+@mcp.tool()
+def get_animation_clip(guid: str = "", path: str = "") -> dict[str, Any]:
+    """读取动画 clip 的 JSON（schema animation/Clip：tracks / keyframes / interp / events）。
+
+    guid = 读该实体 ClipAnimator 当前 clip；path = 读 .anim 文件（guid 优先）。返回
+    {clipJson}（字符串，json.loads 解析）。配合 set_animation_clip 做关键帧创作。
+    """
+    return _conn.send("get_animation_clip", {"guid": guid, "path": path})
+
+
+@mcp.tool()
+def set_animation_clip(guid: str, clipJson: str, allowInPlay: bool = False) -> dict[str, Any]:
+    """把整个 clip 写回实体 ClipAnimator（与 timeline GUI 同一命令，可 Undo）。
+
+    clipJson = animation/Clip schema 的 JSON 字符串（通常先 get_animation_clip 拿到再改）。
+    校验失败（schema / key 乱序 / 未知 interp）→ 报错不落。实体须挂 ClipAnimator backend。
+    """
+    return _conn.send("set_animation_clip", {"guid": guid, "clipJson": clipJson,
+                                             "allowInPlay": allowInPlay})
+
+
+@mcp.tool()
+def preview_animation(guid: str, action: str, time: float | None = None) -> dict[str, Any]:
+    """编辑期预览实体动画（不进 Play 模式，单 animator tick）。
+
+    action = "play"（开始预览播放）/ "pause"（停在当前帧）/ "seek"（跳到 time 秒，需传 time）。
+    与 Play 模式互斥（Play/Paused 中调用报错）。连续 seek + capture_viewport 可抽帧看运动曲线。
+    """
+    args: dict[str, Any] = {"guid": guid, "action": action}
+    if time is not None:
+        args["time"] = time
+    return _conn.send("preview_animation", args)
+
+
+@mcp.tool()
+def set_script_field(guid: str, fieldName: str, value: Any, type: str = "",
+                     allowInPlay: bool = False) -> dict[str, Any]:
+    """改 ScriptComponent 的 fieldOverride（authored tweakable，UC-5 调玩法参数入口）。
+
+    fieldName = C# 脚本的 public 字段名；找不到同名则追加一条。type 可显式给
+    （"Float"/"Int"/"Bool"/"String"），否则按 value 形态推断。⚠️ 直接 mutate，**不可 Undo**
+    （undoable:false）。注：EnterPlay 接 ScriptSystem 后才会真正驱动脚本（当前为数据编辑）。
+    """
+    args: dict[str, Any] = {"guid": guid, "fieldName": fieldName, "value": value,
+                            "allowInPlay": allowInPlay}
+    if type:
+        args["type"] = type
+    return _conn.send("set_script_field", args)
+
+
+@mcp.tool()
+def create_material(path: str, templateName: str) -> dict[str, Any]:
+    """创建一个 .material 文件（指定 shader 模板，uniforms 用模板默认）。
+
+    path = 目标 .material 路径；templateName = shader 模板名（如 "toon" / "pbr"）。
+    非命令栈（文件 IO，undoable:false）。建完可用 set_material_param 调参 / set_field 挂到 Renderable。
+    """
+    return _conn.send("create_material", {"path": path, "templateName": templateName})
+
+
+@mcp.tool()
+def set_material_param(path: str, param: str, value: Any) -> dict[str, Any]:
+    """改 .material 文件里某个 uniform override 的值并落盘。
+
+    param = uniform 名（必须已在该 .material 里）；value 形态按其类型：Float→number、
+    Int→int、Vec2/3/4→number 数组。⚠️ 资产文件 IO，**不可 Undo**（undoable:false）。
+    viewport 是否热生效按编辑器现状（可能需 reload）。
+    """
+    return _conn.send("set_material_param", {"path": path, "param": param, "value": value})
+
+
+# 日志 level 名（与 Orange::Engine::Log::Level int 值对应，便于人读）。
+_LOG_LEVEL_NAMES = ["Trace", "Debug", "Info", "Warn", "Error", "Critical"]
+
+
+@mcp.tool()
+def get_editor_log(lines: int = 100, minLevel: int = 0) -> dict[str, Any]:
+    """拉取编辑器最近日志（AI 操作触发的引擎告警可见——资产加载失败 / shader 告警等）。
+
+    lines = 最多返回条数（默认 100）；minLevel = 最低级别（0=Trace, 2=Info, 3=Warn, 4=Error）。
+    返回 {count, lines[]}；每条 {level(int), levelName, timestamp, message}。AI 写操作后查它
+    确认有没有引擎层报错。
+    """
+    res = _conn.send("get_editor_log", {"lines": lines, "minLevel": minLevel})
+    # 给每条补一个人类可读 levelName，便于 AI / 用户判读。
+    for ln in res.get("lines", []):
+        lv = ln.get("level", 0)
+        ln["levelName"] = _LOG_LEVEL_NAMES[lv] if 0 <= lv < len(_LOG_LEVEL_NAMES) else str(lv)
+    return res
+
+
 def main() -> None:
     # stdio transport（MCP 客户端通过 stdin/stdout 拉起本进程）。
     mcp.run()
