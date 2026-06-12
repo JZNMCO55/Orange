@@ -16,6 +16,7 @@
 #include "VulkanLoaderShim.h"
 #include "command/LambdaCommand.h"  // 资产 rename 可 undo（文件+.meta+引用）
 #include "command/SetFieldValueCommand.h"
+#include "mcp/McpCommandHandler.h"  // MCP 命令帧末执行（ExecuteMcpCommand）
 #include "MaterialFileIO.h"  // v1.1.1 · Asset Browser Create Material modal
 #include "import/ImportDispatcher.h"
 #include "import/GltfSceneImporter.h"
@@ -488,6 +489,9 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     ApplyPendingSceneOp();
     ApplyPendingPlayOp();
     ApplyPendingImports();
+    // MCP 命令帧末 drain（与上面三条 pending-op 同位）。无 --mcp-port 启动时
+    // mHost.mcp 队列恒空，这里只做一次快速空检查，零额外开销。
+    ApplyPendingMcpCommands();
 
     // 材质球缩略图烘焙 —— 这是唯一安全的帧外点：DrawScenePanel 内 viewport
     // Render 已 WaitIdle（GPU 排空）、ImGui 尚未 Render（draw data 未提交）、
@@ -1841,6 +1845,39 @@ void EditorRenderLayer::ApplyPendingImports()
     {
         ::Orange::Editor::Import::Dispatch(src, mHost);
     }
+}
+
+// MCP 命令帧末 drain（ADR-020）。后台 socket 线程把请求行 push 进 mcp.pendingRequests；
+// 本函数在主线程帧末 swap 出整批，逐条 ExecuteMcpCommand（可安全读 World / schema /
+// 走命令栈），把响应行 push 回 mcp.pendingResponses 并 notify socket 线程回写。
+// 与 ApplyPendingImports 同款"swap-drain 避免持锁执行 + 不阻断 ImGui 帧"范式。
+void EditorRenderLayer::ApplyPendingMcpCommands()
+{
+    // 快速空检查：无 MCP 连接时队列恒空，仅一次短暂持锁判定即返回。
+    std::vector<std::string> batch;
+    {
+        std::lock_guard<std::mutex> lk(mHost.mcp.inMutex);
+        if (mHost.mcp.pendingRequests.empty()) { return; }
+        batch.swap(mHost.mcp.pendingRequests);
+    }
+
+    // 执行不持锁（命令可能较重，如 get_scene_info 遍历 World / 未来截图）。
+    std::vector<std::string> responses;
+    responses.reserve(batch.size());
+    for (const auto& reqJson : batch)
+    {
+        responses.push_back(::Orange::Editor::Mcp::ExecuteMcpCommand(reqJson, mHost));
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(mHost.mcp.outMutex);
+        for (auto& resp : responses)
+        {
+            mHost.mcp.pendingResponses.push_back(std::move(resp));
+        }
+    }
+    // 唤醒在 outCv 上等响应的 socket 线程（单 in-flight，但 notify_all 稳妥）。
+    mHost.mcp.outCv.notify_all();
 }
 
 // ---------------------------------------------------------------------------

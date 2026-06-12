@@ -137,6 +137,10 @@ add_executable(OrangeEditor
     command/EntityCommands.cpp
     command/PrefabCommands.cpp
     command/SetAnimationClipCommand.cpp
+    # MCP 实时协同桥（ADR-020）—— 后台 socket 命令端（winsock 集中在 McpServer.cpp）
+    # + 主线程帧末命令执行器。Python MCP server 在 tools/orange-mcp/（不进本 build）。
+    mcp/McpServer.cpp
+    mcp/McpCommandHandler.cpp
     import/FbxAxisConverter.cpp
     import/FbxImporter.cpp
     import/FbxMaterialParse.cpp

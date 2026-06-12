@@ -40,6 +40,7 @@
 // 这些都在本 host 上挂出来，不再走"加字段到 EditorState"的老路。
 
 #include "command/CommandStack.h"
+#include "mcp/McpBridge.h"
 #include "context/EditorAnimationPreviewState.h"
 #include "context/EditorAssetContext.h"
 #include "context/EditorCameraState.h"
@@ -165,6 +166,14 @@ struct EditorHost
     // 在主线程内同步触发，与 OnUpdate 在同一帧但顺序固定（poll 先 push，
     // OnUpdate 后 drain），不需要 mutex。
     std::vector<std::string> pendingImports;
+
+    // MCP 实时协同桥（ADR-020）—— 后台 socket 线程 ↔ 主线程帧末执行的共享队列。
+    // 默认空闲：仅 `--mcp-port <n>` 启动时 main 构造 McpServer 并把它的 socket 线程
+    // 绑到本 bridge。与 pendingImports 的关键区别：那条是 glfwPollEvents 主线程同步
+    // push（无并发、无锁）；本桥是**真后台线程**，故内部 in/out 队列各带 mutex。
+    // socket 线程只读写本桥的队列，绝不碰 World/ImGui/Vulkan（invariant ①）；命令
+    // 在 EditorRenderLayer::ApplyPendingMcpCommands 帧末 drain 执行。
+    Orange::Editor::Mcp::McpBridge mcp;
 
     // 编辑器级别的全局 AudioEngine —— 编辑器的"应用进程音频上下文"，与
     // Inspector 试播按钮 + Asset 浏览器音频预览 + PlayMode 期 AudioSource

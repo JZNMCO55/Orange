@@ -873,3 +873,23 @@
   - 段头右键 **Remove Component** 可删；已挂 Script 的实体 +Add 菜单不再出现 "Script"。
 - **重要限制（dogfood 注意，非 bug）**：**EnterPlay 尚未接 ScriptSystem**（需 dotnet runtime + 开 `ORANGE_ENGINE_WITH_DOTNET`，本 session 为隔离风险未碰 build 配置）。所以编辑了 assemblyPath/typeName/fieldOverrides 后 **Play 时脚本不会真运行**——当前仅作**数据编辑 + 序列化**。Play 驱动脚本留专门 dotnet session（见 item 50）。
 - **背景**：B1 PIE 重点 epic 编辑器侧地基。运行时全齐（headless 验过），缺 ① 本项（数据编辑 UI，已落地）② EnterPlay 接 ScriptSystem（dotnet-gated 留待）③ workspace 外部项目模型。
+
+---
+
+## 2026-06-12 session（OE-MCP M0 · spike 通路）
+
+### 57. OE-MCP M0 —— `--mcp-port` 命令端端到端通路（ping / get_scene_info）
+
+- **commit**：本 session（mcp/McpBridge.h + McpServer.cpp + McpCommandHandler.cpp + EditorHost/EditorRenderLayer/main 接线 + tools/orange-mcp/ Python server）。架构见 ADR-020 + `docs/mcp-realtime-coediting-design.md` §13 M0。
+- **已自动真验（非 dogfood-pending）**：裸 TCP NDJSON 端到端已用 `tools/orange-mcp/smoke_test.py` 跑通——`OrangeEditor.exe --mcp-port 8765` 启动监听、`ping` 返回 `{editorVersion, protocolVersion, sceneName}`、`get_scene_info` 返回 20 实体树（guid/name/parentGuid/components 全对，与 demo 场景一致）、未知 op graceful 报错、断连重连不崩、优雅关闭线程 join 干净（log 见 `[mcp] MCP 命令端已停止` + `clean shutdown`）。
+- **仍需 dogfood（Python MCP 层 + 真实客户端）**：
+  1. `cd tools/orange-mcp && pip install -r requirements.txt`（装 `mcp` 包）。
+  2. 把 orange-mcp 注册给 Claude Code（`.mcp.json`，见 `tools/orange-mcp/README.md`），`ORANGE_MCP_PORT=8765`。
+  3. `OrangeEditor.exe --mcp-port 8765` 启动编辑器。
+  4. 在 Claude 里调 `ping` → 返回编辑器版本；调 `get_scene_info` → 返回的实体树与编辑器 **Hierarchy 面板逐项一致**（用户对照）。
+- **看什么 / 通过判据**：
+  - 不带 `--mcp-port` 启动：行为与现状完全一致，无新监听端口（`netstat -ano | findstr 8765` 为空）。
+  - 带 flag：Console / 日志出现 `[mcp] MCP 命令端监听 127.0.0.1:8765`；FastMCP 层 tool 调用返回结果与 smoke_test.py 一致。
+  - Python server 断开 / 重连，编辑器不崩、不卡帧。
+- **失败上报**：编辑器带 flag 启动卡死 / 崩；`get_scene_info` 实体数或层级与 Hierarchy 面板不符；关闭编辑器时挂起（MCP 线程 join 不返回）。
+- **背景 / 下一步**：M0 是 spike 通路（技术最高风险点：winsock 后台线程 + 帧末 marshal + Python 桥），已打通。M1 加 `get_entity` / `list_component_types` / `capture_viewport`（读闭环，含引擎层 `Pipeline::CaptureToCpu`）；M2 加写闭环（create/set_field/add_component/delete/select/save，全走命令栈）。tool 全景见 `docs/mcp-requirements.md` §4。

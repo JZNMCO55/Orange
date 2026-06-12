@@ -105,6 +105,11 @@ private:
     // 在此处而非 menu draw 内执行的理由与 ApplyPendingSceneOp 一致：
     // dialog 模态阻塞与 ImGui frame 不冲突。
     void ApplyPendingImports();
+    // MCP 实时协同桥（ADR-020）：从 mHost.mcp 的 in 队列 swap-drain 出后台 socket
+    // 线程入队的请求行，逐条在主线程帧末执行（ExecuteMcpCommand），响应 push 回
+    // out 队列让 socket 线程回写。与 ApplyPendingImports 同位、同"帧末原子执行"范式；
+    // 唯一区别：MCP 是真后台线程，故 in/out 队列各带 mutex（drain 时短暂持锁 swap）。
+    void ApplyPendingMcpCommands();
     // v0.6 c2：未保存改动确认 modal。pendingCloseAction != None 触发；
     // Save / Discard / Cancel 三选一分别 →  调 SceneOp::Save 然后等下帧
     // dirty=false 自动 dispatch / 立即 dispatch / 重置 pendingCloseAction。

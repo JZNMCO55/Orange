@@ -78,6 +78,7 @@
 #include "VulkanLoaderShim.h"
 #include "import/ImportDispatcher.h"
 #include "import/FbxSceneImporter.h"
+#include "mcp/McpServer.h"  // MCP 实时协同桥后台 socket 线程（--mcp-port）
 #include "import/GltfSceneImporter.h"
 #include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
@@ -210,6 +211,23 @@ float ParseImportScaleFlag(int argc, char** argv, int startIdx)
         }
     }
     return 1.0f;
+}
+
+// 从 argv 解析可选 `--mcp-port <n>`（MCP 实时协同桥监听端口，ADR-020）。缺省 /
+// 非法 / 越界返回 0 = 不启动 socket 线程、零监听、零行为变化（NF-5 安全默认）。
+// 有效端口范围 1..65535。
+std::uint16_t ParseMcpPortFlag(int argc, char** argv)
+{
+    for (int i = 1; i + 1 < argc; ++i)
+    {
+        if (argv[i] != nullptr && std::strcmp(argv[i], "--mcp-port") == 0 &&
+            argv[i + 1] != nullptr)
+        {
+            const long p = std::strtol(argv[i + 1], nullptr, 10);
+            if (p > 0 && p <= 65535) { return static_cast<std::uint16_t>(p); }
+        }
+    }
+    return 0;
 }
 
 int RunHeadlessImport(const char* srcPath, float importScale)
@@ -982,7 +1000,23 @@ int main(int argc, char** argv)
                     "world entities={}. Esc 退出。",
                     editorHost.scene.pWorld->Size());
 
+    // ---- MCP 实时协同桥（ADR-020）------------------------------------------
+    // 仅当 `--mcp-port <n>` 传入时启动后台 socket 监听线程，绑到 editorHost.mcp。
+    // 不传 flag = mcpPort 0 = 根本不构造监听 = 零行为变化、零监听（NF-5）。
+    // mcpServer 在 editorHost 之后声明 → 析构早于 editorHost → Stop() 时 bridge 仍存活；
+    // 同时下方 Run 返回后显式 Stop，保证 join 在编辑器主循环结束后、shutdown 之前。
+    Orange::Editor::Mcp::McpServer mcpServer;
+    const std::uint16_t            mcpPort = ParseMcpPortFlag(argc, argv);
+    if (mcpPort != 0)
+    {
+        mcpServer.Start(mcpPort, editorHost.mcp);
+    }
+
     const int rc = host->Run();
+
+    // 主循环结束：先停 MCP 桥（关 socket + join 后台线程），再走下方 GPU / ImGui
+    // shutdown。socket 线程只碰 mcp 队列，与 renderer 析构无序依赖，但显式先停更清晰。
+    mcpServer.Stop();
 
     // Console 面板 sink 解绑：layer 即将析构，避免后续日志在 dangling 指
     // 针上 push。

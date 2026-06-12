@@ -215,7 +215,7 @@ cmdStack.Push(make_unique<SetFieldValueCommand<T>>(
 
 ## 13. 实施顺序（分期）
 
-- **M0 · spike 通路**（下个实现 session 起点）：editor 加 `--mcp-port` + 后台 socket 线程 + in/out 队列 + `ApplyPendingMcpCommands` + 一个 `ping`/`get_scene_info`；Python 侧最小 MCP server 连上。先证明端到端能通（技术最高风险点：winsock 线程 + 帧末 marshal + Python 桥）。
+- **M0 · spike 通路** ✅（2026-06-12 落地）：editor 加 `--mcp-port` + 后台 socket 线程（`tools/OrangeEditor/mcp/McpServer.cpp` winsock）+ in/out 队列（`mcp/McpBridge.h`，挂 EditorHost）+ `ApplyPendingMcpCommands`（EditorRenderLayer 帧末，与 ApplyPendingImports 同位）+ `ping`/`get_scene_info`（`mcp/McpCommandHandler.cpp`，schema 驱动枚举组件）；Python 侧最小 MCP server（`tools/orange-mcp/server.py`，FastMCP）。端到端已用 `tools/orange-mcp/smoke_test.py`（裸 TCP NDJSON）真验通过：ping 握手 / get_scene_info 返回 20 实体树（guid/name/parentGuid/components/position 全对）/ 未知 op graceful 报错 / 断连重连不崩 / 优雅关闭线程 join 干净。技术最高风险点（winsock 线程 + 帧末 marshal + Python 桥）已化解。剩 Python MCP 层 + 真实 Claude 客户端 dogfood（checklist item 57）。
 - **M1 · 读闭环**：`get_entity`（schema 逐字段）+ `capture_viewport`（含 `Pipeline::CaptureToCpu` 引擎 API）。AI 能完整「看」场景结构 + 画面。
 - **M2 · 写闭环**：`create_entity` / `set_field` / `add_component` / `select_entity` / `save_scene`（全走命令栈）。AI 能「改 + 截图自验」。**首版（读写协同闭环）到此完整**。
 - **M3+（后续分期，非首版）**：Play/Pause/Stop 控制 → 跑 C# 脚本 → 改材质 → 导入资产 → prefab 实例化 → delete 命令化。
