@@ -6,6 +6,49 @@
 
 ---
 
+## 2026-06-30 自动化 dogfood 批次（Claude + windows-mcp + OE-MCP + CLI）
+
+> 用三种手段自动跑了一轮 dogfood：① **CLI**（`import-mesh`/`import-scene` 退出码+产物）；② **OE-MCP**（`--mcp-port 8765` 走 TCP 驱动编辑器：select/play/preview/set_field/create_prefab… + `capture_viewport` 回读已渲染画面做像素分析）；③ **windows-mcp**（截图 + 点击 ImGui，验 timeline/curve 等 GUI 绘制）。机器随后按指示关机。
+>
+> **工具限制（决定了哪些能严验、哪些不能）**：windows-mcp 的**键盘合成按键送不进 GLFW/Vulkan 编辑器窗口**（Ctrl+O / Home / W·E·R / Del / K 全无效；鼠标点击与**原生文件对话框**输入可进）。所以靠键盘触发的操作（gizmo 模式切换、viewport Del、timeline K 打键、Home Frame All）无法用 windows-mcp 验；改用 OE-MCP 命令或 ImGui 工具栏按钮点击替代。GLFW 窗口在 UIA 里常报 `No active window found`（不影响渲染与鼠标）。
+
+### ✅ 已严格验证通过（automation-verified）
+
+| item | 结论 | 手段 |
+|---|---|---|
+| 1 Slime Doll 呼吸 | **PASS** 绿球绿色分量 Play 期周期起伏跨度 19.7(46.7↔66.4)；ProceduralAnimator 驱动 pbr uBaseColor 实时可见 | OE-MCP play + capture 像素采样 |
+| 2 glb 内嵌贴图 | **PASS（提取层）** CheckerTex.png 从 .glb 提取+co-locate+.material texture 槽 binding0；**视觉 render 见 F1（未确认）** | CLI import + 文件检查 |
+| 3 import-mesh CLI | **PASS** exit 0/1/2 三码全对 + 产物 .mesh/.material(多slot)/.meta | CLI |
+| 12 OBJ+.mtl | **PASS** uBaseColor=Kd[0.9,0.15,0.1] + uMRA.y=Ns 推导 roughness | CLI + 文件 |
+| 30 glTF scene 导入 | **PASS** entities=5/meshes=2/lights=2；层级 PropGroup→{Crate,Barrel} + Sun[Dir]+Lamp[Point] + 每mesh独立.mesh + 子节点 local TRS + 视觉摆位正确(默认材质=G1预期) | CLI + OE-MCP open_scene/get_scene_info/capture |
+| 31 Transform 层级(数据) | **PASS(部分)** 导入子节点为 local TRS、parent=PropGroup | OE-MCP get_entity（视觉父子联动拖动未验） |
+| 33 ClipAnimator bob+spin | **PASS** posY 1.40↔1.90(跨度.49) + rot.z 自旋；backend=clip(数据层正确) | OE-MCP play + Transform 采样 |
+| 35 Bezier ease-in-out | **PASS** posY 增量顶/底小中段大(非线性)；曲线编辑器里呈 dome/S 形再证 | OE-MCP 采样 + item46 曲线 |
+| 38/40/43/64 编辑期预览+scrub/seek | **PASS** Edit 模式预览动(跨度.49) + seek 0.5s→1.65/1.0s→1.9 | OE-MCP preview_animation（须先 select，见 F2） |
+| 39 timeline 绘制 | **PASS** 轨道 position.y/rotation.euler + 关键帧菱形按时间定位 + 标尺0/1/2 + playhead + transport + 工具行 | windows-mcp 截图 |
+| 46 曲线编辑器 | **PASS** Curve> 切换 + SampleTrack 画 dome 曲线(display==playback) + value 轴 + 切线手柄可见 + <Dopesheet 切回 | windows-mcp 点击+截图 |
+| 53 prefab override 蓝条(数据) | **PASS** select 实例后 set_field→overriddenPaths=['Transform/position/0,1,2']（见 F3） | OE-MCP |
+| 54 字段 Revert | **PASS** revert_override 回模板值[0.8,0,0.5] | OE-MCP |
+| 56 Script add+字段(数据) | **PASS** add_component Script + assemblyPath/typeName round-trip | OE-MCP |
+| 57–65 OE-MCP 全 42 tool | **PASS（命令层全过）** smoke_test.py exit 0：ping/scene_info(20)/get_entity/capture_viewport(2272×1215 非黑,亲验内容=DemoWorld)/写闭环/find/camera+clamp/frame/duplicate/reparent+环检测/remove/undo-group/list_assets(73)/import错误路径/play+stop+Play期写拒绝/prefab·anim·script·material 错误路径+round-trip/get_editor_log(16) | smoke_test.py + 亲验 capture PNG + create_material 落盘 |
+
+### ⚠️ 发现（findings，建议登记 GAP / 复核）
+
+- **F1（疑 MCP 缺口）**：`set_field(Renderable.materialInstance, <path>)` 经 OE-MCP **不视觉生效**——红色材质和贴图材质均让 cube 渲染默认白（mesh AssetRef 能加载，material AssetRef 设了路径却没重新加载/绑定）。→ 阻断 item 2/10/12 经 MCP 的视觉确认；可能影响 AI 协同搭场景给材质。
+- **F2**：`preview_animation` 不自动 select（须先 select_entity 才动）；`action=stop` 未归位 t0（停在当前帧，疑 pause 语义）。
+- **F3**：prefab `overriddenPaths` 仅在实例被 select（Inspector 显示）时由帧末 hook 记录；同轮改 `Renderable.castsShadow` 未进 overriddenPaths（仅 Transform 记录）——子字段记录待复核。
+- **F4（工具限制非引擎 bug）**：windows-mcp 键盘进不去 GLFW 编辑器窗口（见上）。
+- 复核确认（非新 bug）：item 33 `[bug]backend 显示为空` = Inspector "Mini-Preview" 的 Backend Combo（Bug 段 item 4，cosmetic，已定位未修）；数据层 backend=clip 正确。`open_scene`/`new_scene` 的 dirty 保护（须 force）工作正常。
+
+### ⏳ 未验证（工具能力外 / 阻塞，留人工 dogfood）
+
+- **键盘/精拖类**：9(Copy/Paste 右键)、10/11/13(拖 mesh 落地+自动材质，且撞 F1)、17(Home，键盘进不去；View 菜单可点)、41(K 打键)、42(拖关键帧)、45(事件拖动)、47(Bezier 手柄拖动，手柄已可见)、48(右键 key 切 interp)、49/51/52(gizmo world→local 精拖+模式切换需键盘)。
+- **功能阻塞**：50(PIE C# 真跑——EnterPlay 未接 ScriptSystem/dotnet，**当前无法 dogfood**)。
+- **磁盘写/多步场景**：55(prefab banner Apply/Refresh——数据侧 revert 已验，Apply 写盘/Refresh 多步未跑)；7(tangent fallback——headless 已端到端覆盖,视觉残留极小)。
+- **OE-MCP 真实 Claude 客户端层**：57–65 的"经 FastMCP 在真 Claude 里调 + 用户 Ctrl+Z 撤 AI 操作"仍待人工（命令层已全过）。
+
+---
+
 ## 2026-05-31 session（headless import + glTF 内嵌贴图 + 编辑器内动画播放）
 
 ### 1. 编辑器内动画播放 —— Slime Doll 绿色呼吸脉动
@@ -458,7 +501,7 @@
 
 ## 2026-06-02 session（成熟度地基 B2.2：ClipAnimator + .anim 序列化）
 
-### 33. ClipAnimator —— 数据曲线驱动实体 Transform（编辑器 Play 可见）
+### ✅ 33. ClipAnimator —— 数据曲线驱动实体 Transform（编辑器 Play 可见）
 
 - **commit**：`0951a50`（ClipAnimator core）+ `a79cef3`（scene round-trip）+ `ddc2e3c`（SeedDemoWorld demo）；序列化 commit 同 session。
 - **怎么触发**（⚠️ 新实体在 `SeedDemoWorld` 里，**现有 demo.scene.json 不含它**）：
@@ -473,6 +516,7 @@
     动作平滑连续、loop 无跳变（rotation 0°↔360° 接缝无视觉跳）。
   - 点 **Stop / 回 Edit** 后停在某一帧（仅 Play 模式 tick）。
   - 选中 cube → Inspector 的 Animator 段 backend = `clip`。
+    - [bug] backend 显示为空
   - **Save 场景 → 重启 → Load → 再 Play，bob+spin 行为一致**（验证 "clip" backend 形态 B
     嵌入 clipJson + Load 重建 + target 自动接回 self Transform 的 round-trip；此路径
     headless 已由 `scene_serialization_test::TestClipAnimatorRoundTrip` 锁住，**人工再确认
@@ -505,7 +549,7 @@
 
 ## 2026-06-02 session（动画运行时补完：Bezier 真时序缓动 + 真两-clip cross-fade）
 
-### 35. Animated Cube 的 bob 改 Bezier ease-in-out —— 真时序缓动端到端可见
+### ✅ 35. Animated Cube 的 bob 改 Bezier ease-in-out —— 真时序缓动端到端可见
 
 - **commits**：`15a991a`（InterpMode::Bezier 升级真 cubic-bezier 时序缓动）/ `62cd25c`（CrossFadeTo
   真两-clip）/ demo 接线（本 session 后续 commit，DemoWorld.cpp 的 "Animated Cube (clip)" 把 bob
@@ -530,7 +574,7 @@
 >
 > headless 已验：OrangeEditor.exe 编出 + 全量 ctest 85/85（含新增 `clip_animator_asset_reassign_test` 锁住 clipSet 数据序列 + `editor_build_smoke`）+ check_invariants OK（无新 hardcode / schema-first 合规）。
 
-### 36. +Add Component → "Animator (Clip)" —— 挂空 ClipAnimator
+### ✅ 36. +Add Component → "Animator (Clip)" —— 挂空 ClipAnimator
 
 - **改点**：spec 改点 4。schema `AddableWith`（Renderable c10 同款自定义 add 路径）建空 ClipAnimator（`AnimationClip{}` + target=self Transform）。displayName "Animator (Clip)"，typeName 仍 "Animator"。
 - **怎么触发**：选中一个实体（确保有 TransformComponent）→ Inspector 底部 **+Add Component** → 菜单里点 **"Animator (Clip)"**。
@@ -726,6 +770,7 @@
 - 1. Open Recent 会出现相同路径的场景文件 —— **✅ 已修**（`AddRecentScene` 改路径归一化去重：相对/绝对/斜杠不同的同一场景不再重复。重新 dogfood：多次以不同形式打开同一场景，列表应只一条置顶）
 - 2. [31] Transform 层级传播（mesh 路径）—— 移动父节点带动子 mesh，但 —— ⚠️ 描述被截断，**待补充**：父节点带动子 mesh 后具体看到什么异常？（位置偏移 / 不跟随 / 跳变？）补全后单独排查。
 - 3. [33] 打开后崩溃 —— **✅ 已定位并修复（真根因，非动画）**。用户提供崩溃栈确诊：`main → ImFontAtlas::AddFontFromFileTTF → ImGui::ErrorLog → BeginErrorTooltip → ImGui::Begin → IM_ASSERT(g.WithinFrameScope)`。根因链：**dogfood 指示"把 demo.scene.json 改名/挪开" → `main.cpp::ChdirToRepoRoot` 用单文件 `assets/scenes/demo.scene.json` 作仓库根标记，改名后找不到 → 不 chdir → cwd 停在 build/bin/Debug（VS 默认）→ 相对路径字体 `codicon.ttf` 加载失败 → ImGui 新版字体缺失不返回 null 而走 ErrorLog→Begin，初始化期（无 frame）触发 assert 崩溃**。修复两层（详见下方批次"动画崩溃"段）：① ChdirToRepoRoot 改用稳健标记（`assets/`+`src/` 目录同时存在，不受场景改名影响）；② 所有 AddFontFromFileTTF 前先查文件存在（缺失降级为 '?' 占位，绝不进 assert 路径）。已模拟用户场景（build/bin/Debug 作 cwd + demo.scene.json 缺失）验证不再崩。
+- 4. [37/38 dogfood 2026-06-13] **Animator (Clip) 的 "Mini-Preview" 段 Backend 切换 Combo 显示空** —— ⏳ **未修（已定位根因）**。现象：选中挂了 ClipAnimator 的实体，Inspector 的 "Mini-Preview (IEditorInspectorPlugin demo)" 段里那个 "Backend" 下拉框是空的。根因 = `AnimatorRegistry` 只注册了 `"procedural"` backend（`BuiltinAssets.cpp:699`），而 ClipAnimator 经 schema `AddableWith` 路径直接 `new`（不走 registry factory），其 backend 名 `"clip"` 不在 `BackendNames()=["procedural"]` 里 → `AnimatorMiniPreviewPlugin.cpp:69` 的 `curIdx=-1` → `ImGui::Combo` 显示空。**隐藏风险**：空 Combo 唯一可选项 `"procedural"`，选中会触发 `SwitchAnimatorBackendCommand` 把 ClipAnimator 破坏性替换为 ProceduralAnimator（丢 clip，虽可 Undo）。**附带**：段标题 `"Mini-Preview (IEditorInspectorPlugin demo)"` 的 "demo" 字样误导（下方 Play/Pause/scrub 是 item 38 正式功能，非 demo）。**最小修法**：`AnimatorMiniPreviewPlugin::ParseEnd` 里仅当 `curIdx >= 0`（当前 backend 确在 registry）才渲染该 Combo —— procedural 照常可切，clip/skeletal 走专门创建路径的不显示（消除空框 + 消除破坏性切换），保留游戏侧动态注册 backend 能力；顺手把标题 "(IEditorInspectorPlugin demo)" 改成正经名（如 "Animator Preview"）。
 
 ---
 
