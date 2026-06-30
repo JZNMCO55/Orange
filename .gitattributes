@@ -1,0 +1,2 @@
+# Golden image 参考图：二进制 PPM，禁止行尾/编码转换以保 byte-stable round-trip。
+tests/golden/data/*.ppm binary

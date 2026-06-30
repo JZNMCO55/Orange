@@ -14,6 +14,10 @@ include_guard(DIRECTORY)
 function(orange_engine_add_test target_name source)
     add_executable(${target_name} ${source})
     target_link_libraries(${target_name} PRIVATE OrangeEngine::orange_engine)
+    # tests 根作为 include 根：让测试可写 #include "support/EngineTestAssert.h"
+    # / #include "golden/GoldenTestHarness.h"（手写 add_executable 的测试各自补
+    # 同款一行）。
+    target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     orange_engine_set_compiler_options(${target_name})
     add_test(NAME ${target_name} COMMAND ${target_name})
 endfunction()
@@ -513,6 +517,19 @@ orange_engine_add_test(pipeline_hdr_target_test    render/PipelineHdrTargetTest.
 orange_engine_add_test(pipeline_offscreen_test     render/PipelineOffscreenTest.cpp)
 orange_engine_add_test(pipeline_halo_conditional_test render/PipelineHaloConditionalTest.cpp)
 orange_engine_add_test(pipeline_render_to_texture_test render/PipelineRenderToTextureTest.cpp)
+
+# 视觉 golden 回归：程序化 PBR 场景 → RenderToTexture → 与参考图逐像素比对。
+# 手写 add_executable（带第二源 golden/GoldenImage.cpp，含 PPM codec/Compare
+# 实现），但只链 orange_engine（RenderToTexture 全在引擎 lib + 传递的 OR 内，
+# 无需编辑器/ImGui/glfw）。goldenDir 作为 argv[1] 传入（= tests/golden/data）。
+add_executable(visual_golden_pbr_test
+    render/VisualGoldenPbrTest.cpp
+    golden/GoldenImage.cpp)
+target_link_libraries(visual_golden_pbr_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(visual_golden_pbr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+orange_engine_set_compiler_options(visual_golden_pbr_test)
+add_test(NAME visual_golden_pbr_test
+         COMMAND visual_golden_pbr_test "${CMAKE_CURRENT_SOURCE_DIR}/golden/data")
 orange_engine_add_test(material_thumbnail_bake_test render/MaterialThumbnailBakeTest.cpp)
 orange_engine_add_test(prefab_thumbnail_bake_test  render/PrefabThumbnailBakeTest.cpp)
 orange_engine_add_test(mesh_thumbnail_bake_test    render/MeshThumbnailBakeTest.cpp)
