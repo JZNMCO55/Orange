@@ -34,7 +34,9 @@
 
 ### ⚠️ 发现（findings，建议登记 GAP / 复核）
 
-- **F1（疑 MCP 缺口）**：`set_field(Renderable.materialInstance, <path>)` 经 OE-MCP **不视觉生效**——红色材质和贴图材质均让 cube 渲染默认白（mesh AssetRef 能加载，material AssetRef 设了路径却没重新加载/绑定）。→ 阻断 item 2/10/12 经 MCP 的视觉确认；可能影响 AI 协同搭场景给材质。
+- **F1 ✅ 已修复 + 已视觉重验（2026-07-01）**：根因=经 MCP 设 material AssetRef 路径后 materialInstance 未 lazy 注册/绑定。修复 `d6e1c51`（set_field 走 `EnsureMaterialInstance` 先 lazy 注册再绑），headless `material_ensure_lazy_register_test` PASS。**2026-07-01 OE-MCP 视觉重验 PASS**：建 cube（`assets/meshes/cube.mesh`）→ capture 默认材质中心 RGB≈[196,194,190]（白灰）→ `set_field(materialInstance, 红色 pbr .material)` → capture 中心 RGB≈[192,11,9]（强红，|delta|≈258）+ 肉眼确认干净红 cube。`set_field(Renderable.materialInstance)` 经 OE-MCP 现在视觉生效。
+  - 历史症状（修复前）：红色/贴图材质均让 cube 渲染默认白，阻断 item 2/10/12 的 MCP 视觉确认。
+  - ⚠️ 关联项 10/13（拖 mesh / Add to Scene 后仍默认灰）走的是**编辑器 drop 路径**（`CreateEntityFromMeshAsset` / `SyncSubMeshMaterialsForMesh`），与 MCP set_field 不同代码路径——F1 根因虽同类，drop 路径是否一并修好仍需**真机 GUI dogfood**确认。
 - **F2**：`preview_animation` 不自动 select（须先 select_entity 才动）；`action=stop` 未归位 t0（停在当前帧，疑 pause 语义）。
 - **F3**：prefab `overriddenPaths` 仅在实例被 select（Inspector 显示）时由帧末 hook 记录；同轮改 `Renderable.castsShadow` 未进 overriddenPaths（仅 Transform 记录）——子字段记录待复核。
 - **F4（工具限制非引擎 bug）**：windows-mcp 键盘进不去 GLFW 编辑器窗口（见上）。
