@@ -3253,3 +3253,18 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - dogfood item 31（移动父带动子 mesh + 现有场景零回归 + 已知未切项）见 `docs/dogfood-checklist.md`。**优先级**：地基 P1。
 - **归属**：引擎核心（Scene / Render 交界的 transform 系统），非编辑器侧；属较大改动（涉及 drawable 收集 / 光源 / 物理 / gizmo 全部改读 world matrix），建议独立 ADR + session。
 - **关联**：[[GAP-2026-05-28-gltf-scene-level-import-not-flattened]]（本 gap 是其子节点世界摆位正确性的引擎前置，G1 已用 world-bake workaround 绕过）；[[GAP-2026-05-30-prefab-asset-and-entity-guid]]（prefab 子件世界摆位同受影响）
+
+## GAP-2026-07-01-physics-no-contact-or-raycast-query
+
+- **发现方**：OrangeGames 首游 Spike 1 Loop A（control point 平台跳跃手感）
+- **发现日期**：2026-07-01
+- **一句话定性**：`Physics::PhysicsWorld` 公共面**无 raycast / overlap / contact 查询** —— 游戏侧拿不到"脚下有没有地面 / 头顶撞没撞天花板 / 某点是否在碰撞体内"这类问题的答案。平台跳跃的接地判定、coyote、corner correction、以及（Loop B）软体 blob 逐点碰撞全都需要它。
+- **触发场景**：Spike 1 control point 需要 grounded 判定 + corner correction；当前只能 `Step` + 回读 body velocity/transform，无法主动问物理世界"脚下/头顶/某区域有什么"。Loop B 的 blob 质点 vs 关卡碰撞同样需要逐点查询。
+- **现状 workaround**：游戏自持一份关卡 AABB 列表（`LevelBox`），用 analytic 几何探针（点 vs AABB）自己算接地 / 角落 / blob 投影，**绕过引擎**。够 spike 用，但**不通用**：tilemap / 斜坡 / 导入的任意 collider / 旋转体一律再撞；软体碰撞几乎必撞。
+- **缺什么**：`PhysicsWorld` 封装 Box2D 3.x 已原生的查询（公共面不暴露 box2d 类型，沿 header isolation）：
+  - raycast（底层 `b2World_CastRayClosest` / `b2World_CastRay`）→ 返回命中 body handle / 法线 / 距离
+  - overlap（底层 `b2World_OverlapAABB`）→ 返回区域内 body handle 列表
+  - （可选）某 body 当前 contact 列表 / 接地法线
+- **期望验收**：游戏侧能问"从点 P 沿方向 D 射线，最近命中在哪、法线是什么" + "AABB 区域内有哪些 body"，据此做接地 / corner / 软体碰撞，删掉 `LevelBox` analytic workaround。
+- **状态**：未排期（登记，低摩擦保留信息）。归属引擎核心 Physics 模块（`src/physics/box2d/`），公共面加查询 API；Box2D 3.x 已有原生函数，封装成本中等。
+- **关联**：OrangeGames `prototypes/spike-01-blob/NOTES-loopA.md`；首游 Spike 1 移动地基依赖（接地 / corner / 软体碰撞）。
