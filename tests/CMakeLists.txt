@@ -116,6 +116,24 @@ if (EXISTS "${_orange_mikkt_fixture}")
 else ()
     message(STATUS "gltf_material_import_test 跳过：未找到 fixture ${_orange_mikkt_fixture}")
 endif ()
+# F1 回归（OE-MCP/GUI set_field materialInstance 不视觉生效根因）：
+# EnsureMaterialInstance 的 lazy 注册契约。走 EditorAssetContext& seam（绕开
+# 无法 headless 链接的 EditorHost）；链 BuiltinAssets + MaterialFileIO +
+# ShaderTemplateMetaIO（均无 import-impl/vulkan）。imgui 仅为编译 EditorHost.h
+# 间接 include 的 plugin 头提供 include path。
+add_executable(material_ensure_lazy_register_test
+    editor/MaterialEnsureLazyRegisterTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/BuiltinAssets.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/MaterialFileIO.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/ShaderTemplateMetaIO.cpp")
+target_link_libraries(material_ensure_lazy_register_test PRIVATE
+    OrangeEngine::orange_engine OrangeEngine::imgui)
+target_include_directories(material_ensure_lazy_register_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(material_ensure_lazy_register_test)
+add_test(NAME material_ensure_lazy_register_test COMMAND material_ensure_lazy_register_test)
+
 orange_engine_add_test(scene_world_test         scene/SceneWorldTest.cpp)
 orange_engine_add_test(scene_world_partition_test scene/WorldPartitionTest.cpp)
 orange_engine_add_test(scene_subtree_clone_test scene/SceneSubtreeCloneTest.cpp)

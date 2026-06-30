@@ -22,6 +22,7 @@
 #include "../command/SetFieldValueCommand.h"
 #include "../plugin/IEditorInspectorPlugin.h"
 #include "../theme/EditorTheme.h"
+#include "AssetRefSideEffects.h"  // PrepareAssetRefWrite / FinishAssetRefWrite（GUI 与 MCP 共用）
 #include "ComponentSchemaRegistry.h"
 
 #include <orange/engine/physics/ColliderDesc.h>
@@ -727,10 +728,7 @@ void DrawProperty(EditorHost&                  host,
                 // 文件 + CreateInstance + ApplyDataToInstance + 写表;之后
                 // materialSet/undo-redo replay 都能查到。非 Material 字段
                 // (Mesh 等)不走此路。
-                if (prop.attribs.assetKind == AssetKind::Material && !v.empty())
-                {
-                    (void)::EnsureMaterialInstance(host, v);
-                }
+                (void)Orange::Editor::PrepareAssetRefWrite(host, prop, v);
                 if (useCtxAccessor)
                 {
                     if (prop.assetRefSet != nullptr)
@@ -747,10 +745,7 @@ void DrawProperty(EditorHost&                  host,
                 // 一致（否则 Inspector 设/拖 mesh 字段挂不上 slot，dogfood 暴露的
                 // 不一致）。entity-level 挂兄弟组件需 World+Entity，schema setter
                 // 仅拿到 component 指针，故在此 host/entity 都在的层做。
-                if (prop.attribs.assetKind == AssetKind::Mesh)
-                {
-                    ::Orange::Editor::SyncSubMeshMaterialsForMesh(host, entity, v);
-                }
+                Orange::Editor::FinishAssetRefWrite(host, entity, prop, v);
             };
             auto makeApply = [&]() -> SetFieldValueCommand<std::string>::ApplyFn
             {

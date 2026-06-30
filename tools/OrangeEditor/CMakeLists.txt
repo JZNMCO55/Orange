@@ -165,6 +165,7 @@ add_executable(OrangeEditor
     ../../vendor/OpenFBX/libdeflate.c
     render/EditorGridAuxPassProvider.cpp
     render/ThumbnailService.cpp
+    schema/AssetRefSideEffects.cpp
     schema/ComponentSchemaRegistry.cpp
     schema/RegisterBuiltinSchemas.cpp
     schema/SchemaInspector.cpp

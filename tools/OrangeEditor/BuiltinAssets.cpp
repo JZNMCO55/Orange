@@ -767,14 +767,22 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
 Orange::Engine::Render::MaterialInstance*
 EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
 {
+    // 转调 EditorAssetContext& 版（本函数只用 host.assets）。下沉动机见
+    // BuiltinAssets.h 该重载声明上方注释（让 headless 测试绕开 EditorHost）。
+    return EnsureMaterialInstance(host.assets, materialPath);
+}
+
+Orange::Engine::Render::MaterialInstance*
+EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPath)
+{
     // 1) 先查既有（含 8 内置 + PBR showcase 18 + userMaterials 已 lazy 过的）
-    const auto named = BuildNamedMaterialInstances(host.assets);
+    const auto named = BuildNamedMaterialInstances(assets);
     auto it = named.find(materialPath);
     if (it != named.end()) { return it->second; }
 
     // 2) 不在 map → lazy create 兜底（v1.2.2 同款路径，提到 helper 让
     //    Inspector / DnD apply 两处都能复用，避免 v1.2.3 验收 bug 复现）。
-    if (host.assets.pMaterials == nullptr)
+    if (assets.pMaterials == nullptr)
     {
         ORANGE_LOG_WARN("EnsureMaterialInstance: MaterialSystem 未就绪 '{}'",
                         materialPath);
@@ -787,7 +795,7 @@ EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
                         "templateName 缺失 '{}'", materialPath);
         return nullptr;
     }
-    auto inst = host.assets.pMaterials->CreateInstance(dataOpt->templateName);
+    auto inst = assets.pMaterials->CreateInstance(dataOpt->templateName);
     if (inst == nullptr)
     {
         ORANGE_LOG_WARN("EnsureMaterialInstance: template '{}' 未注册（path={}）",
@@ -795,7 +803,7 @@ EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
         return nullptr;
     }
     ::Orange::Editor::Material::ApplyDataToInstance(
-        *dataOpt, *inst, host.assets.pAssets.get());
+        *dataOpt, *inst, assets.pAssets.get());
 
     // v1.2.6 patch · 应用 .template.json 默认值（仅当 instance 未 override
     // 该 uniform 时）。v1.1.1 Create Material modal 创建的新 .material
@@ -853,12 +861,12 @@ EnsureMaterialInstance(EditorHost& host, const std::string& materialPath)
     }
 
     auto* rawPtr = inst.get();
-    host.assets.userMaterials[materialPath] = std::move(inst);
+    assets.userMaterials[materialPath] = std::move(inst);
     // v1.2.5 patch · 同步更新 namedMaterialInstances cache —— 否则 schema
     // AssetRef materialGet 反查（RegisterBuiltinSchemas.cpp:359 走 cache
     // 而非 BuildNamedMaterialInstances()）找不到新 path 显示 None；Scene
     // Save / Load 路径同样消费此 cache。main.cpp:642 启动期是 one-shot
     // snapshot，需在每次 lazy create 后增量同步。
-    host.assets.namedMaterialInstances[materialPath] = rawPtr;
+    assets.namedMaterialInstances[materialPath] = rawPtr;
     return rawPtr;
 }

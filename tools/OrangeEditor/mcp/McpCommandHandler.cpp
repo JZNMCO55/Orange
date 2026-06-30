@@ -15,6 +15,7 @@
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 
+#include "../schema/AssetRefSideEffects.h"  // PrepareAssetRefWrite / FinishAssetRefWrite（镜像 GUI 副作用）
 #include "../schema/PropertyDescriptor.h"
 
 #include <orange/engine/animation/AnimationClip.h>
@@ -748,7 +749,14 @@ std::string HandleSetField(std::int64_t id, EditorHost& host, const JsonReader& 
                           PushFieldSet<int>(host, e, *sc, *pd, fieldKey, idx); break; }
         case PT::AssetRef: { std::string s; if (!req.ReadString(vp, s)) return MakeError(id, "value must be an asset path string");
                           if (pd->assetRefSet == nullptr) return MakeError(id, "asset field not writable");
-                          PushAssetRefSet(host, e, *sc, *pd, fieldKey, s); break; }
+                          // 镜像 GUI writePath（SchemaInspector）：Material 写前 lazy 注册 instance，
+                          // 否则 materialSet 查表 miss 静默 no-op（F1：经 MCP 设 materialInstance
+                          // 不视觉生效，但仍返回 ok:true）。ensure 失败显式报错而非静默 ok。
+                          if (!Orange::Editor::PrepareAssetRefWrite(host, *pd, s))
+                              return MakeError(id, "failed to ensure material instance for: " + s);
+                          PushAssetRefSet(host, e, *sc, *pd, fieldKey, s);
+                          Orange::Editor::FinishAssetRefWrite(host, e, *pd, s);  // Mesh 写后同步多材质 slot
+                          break; }
         default:
             return MakeError(id, "field type not writable in first version (EntityRef / AssetRefArray / vertex tables are read-only)");
     }

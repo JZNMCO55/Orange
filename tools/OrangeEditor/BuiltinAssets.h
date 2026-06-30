@@ -84,4 +84,11 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets);
 Orange::Engine::Render::MaterialInstance*
 EnsureMaterialInstance(EditorHost& host, const std::string& materialPath);
 
+// EditorAssetContext& 重载 —— EnsureMaterialInstance 只用 host.assets，故下沉到
+// 此可独立测试的 seam（EditorHost 聚合 ThumbnailService / AudioEngine，拖
+// Vulkan / ImGui 无法 headless 链接，见 GltfMaterialImportTest 注释）。EditorHost&
+// 版仅转调本版，零行为变化。
+Orange::Engine::Render::MaterialInstance*
+EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPath);
+
 #endif  // ORANGE_EDITOR_BUILTIN_ASSETS_H
