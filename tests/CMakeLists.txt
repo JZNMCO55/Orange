@@ -582,6 +582,10 @@ orange_engine_add_test(procedural_animator_test     animation/ProceduralAnimator
 orange_engine_add_test(animation_clip_test          animation/AnimationClipTest.cpp)
 # ClipAnimator：AnimationClip → 实体 TransformComponent 的运行时消费（B2.2）
 orange_engine_add_test(clip_animator_test           animation/ClipAnimatorTest.cpp)
+# BlendSpace：参数化姿势混合（blend space / blend tree）—— N-pose 混合数学 +
+# 1D/2D 求值 + additive 层叠 + BlendSpaceAnimator 后端（纯 CPU header-only 采样，
+# headless 可完整验证混合数学）。
+orange_engine_add_test(blend_space_test             animation/BlendSpaceTest.cpp)
 # AnimationClip .anim JSON 序列化 round-trip（B2.2，走 Core::Serialization）
 orange_engine_add_test(animation_clip_serialization_test animation/AnimationClipSerializationTest.cpp)
 # AnimationClipLoader：.anim 经 AssetRegistry 加载（B2.2）

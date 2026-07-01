@@ -141,6 +141,7 @@ add_library(orange_engine STATIC
     src/animation/AnimationSystem.cpp
     src/animation/AnimatorRegistry.cpp
     src/animation/ClipAnimator.cpp
+    src/animation/BlendSpaceAnimator.cpp
     src/animation/AnimationClipSerialization.cpp
     src/animation/AnimationClipLoader.cpp
     src/animation/ProceduralAnimator.cpp
