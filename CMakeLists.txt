@@ -189,6 +189,14 @@ add_library(orange_engine STATIC
     # 自实现（不引 glm/gtx，避免污染消费者的 GLM_ENABLE_EXPERIMENTAL）。
     src/spline/Spline.cpp
 
+    # Tilemap：2D 瓦片地图内容原语（TileMap 数据 + tileset header-only）+
+    # 贪心碰撞矩形合并（MergeSolidTiles / TileRectToWorldAABB，classic greedy
+    # meshing，降低 physics 静态体数量）+ 从 tilemap 烘焙 NavGrid
+    # （BuildNavGridFromTileMap，一 tile 一 cell 对齐，实心 → 阻挡）。纯数据 +
+    # 算法，公共头只依赖 glm + std + 引擎公共头（nav bake 单独头隔离 nav 依赖）。
+    src/tilemap/TileMapCollision.cpp
+    src/tilemap/TileMapNavBake.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。

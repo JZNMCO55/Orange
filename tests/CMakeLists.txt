@@ -666,6 +666,13 @@ orange_engine_add_test(navigation_test              nav/NavigationTest.cpp)
 # 退化输入。纯数学 headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
 orange_engine_add_test(spline_test                  spline/SplineTest.cpp)
 
+# Tilemap：瓦片数据模型 helper（MakeTileMap / SetTile-GetTile / IsSolidTile 边界
+# / TileCenterToWorld ↔ WorldToTile）+ 贪心碰撞矩形合并（MergeSolidTiles 覆盖完
+# 整性：每实心 tile 恰一 rect / 无 rect 盖非实心 / 面积和守恒）+ TileRectToWorldAABB
+# + 从 tilemap 烘焙 NavGrid（BuildNavGridFromTileMap 实心→不可走 + 网格对齐）。
+# 纯数据 + 算法 headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
+orange_engine_add_test(tilemap_test                 tilemap/TileMapTest.cpp)
+
 # Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）
 orange_engine_add_test(action_map_test         input/ActionMapTest.cpp)
 orange_engine_add_test(input_context_stack_test input/InputContextStackTest.cpp)
