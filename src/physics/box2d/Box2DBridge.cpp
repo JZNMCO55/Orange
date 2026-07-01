@@ -40,6 +40,12 @@ b2ShapeDef MakeShapeDef(const ColliderComponent& col) noexcept
     sd.material.friction   = col.friction;
     sd.material.restitution = col.restitution;
     sd.isSensor            = col.isSensor;
+    // 全量开启 sensor / contact 事件缓冲——两者默认 false（"False by default, even for
+    // sensors"），不开 b2World_GetSensorEvents / GetContactEvents 永远为空。纯 additive，
+    // 不改碰撞响应；enableContactEvents 对 sensor 被 box2d 忽略（无害）。触发器 / 拾取 /
+    // 落地检测等玩法原语依赖这两个开关。
+    sd.enableSensorEvents  = true;
+    sd.enableContactEvents = true;
     return sd;
 }
 
@@ -160,6 +166,10 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
                 cd.materials     = &mat;
                 cd.materialCount = 1;
                 cd.isLoop        = shape.isLoop;
+                // terrain chain 也开 sensor 事件，让 sensor 能检测到地形（b2ChainDef 有此
+                // 字段，默认 false；无 enableContactEvents 字段）。降级 segment 路径走
+                // MakeShapeDef 已开事件的 b2ShapeDef。
+                cd.enableSensorEvents = true;
                 (void)b2CreateChain(bodyId, &cd);
                 return true;
             }

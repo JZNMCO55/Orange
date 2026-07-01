@@ -36,6 +36,29 @@ struct ContactPoint
     glm::vec2  normal{0.0f, 0.0f};     // 接触法线（从被查询 body 指向 other，世界坐标单位向量）
 };
 
+// sensor 触发事件：visitor 进入 / 离开 sensor。begin 与 end 共用此结构。
+struct SensorEvent
+{
+    BodyHandle sensor{};   // sensor body
+    BodyHandle visitor{};  // 进入 / 离开 sensor 的 body（end 事件中 visitor 可能已销毁 → Invalid）
+};
+
+// contact 开始事件：两 body 开始接触，带初始接触点 / 法线（法线从 bodyA 指向 bodyB）。
+struct ContactBeginEvent
+{
+    BodyHandle bodyA{};
+    BodyHandle bodyB{};
+    glm::vec2  point{0.0f, 0.0f};   // 初始接触点（世界坐标；取 manifold 首点，无点则零）
+    glm::vec2  normal{0.0f, 0.0f};  // 接触法线（world，从 bodyA 指向 bodyB；无点则零）
+};
+
+// contact 结束事件：两 body 停止接触（可能因某 body 销毁 → 对应 handle 为 Invalid）。
+struct ContactEndEvent
+{
+    BodyHandle bodyA{};
+    BodyHandle bodyB{};
+};
+
 }  // namespace Orange::Engine::Physics
 
 #endif  // ORANGE_ENGINE_PHYSICS_PHYSICS_QUERY_H

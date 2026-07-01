@@ -132,6 +132,16 @@ public:
     // ContactPoint.normal 从该 body 指向 other。handle 无效 / 未注册 → 空。
     std::vector<ContactPoint> GetContacts(BodyHandle body) const;
 
+    // 返回上一次 Step 产生的 sensor begin / end 事件（visitor 进入 / 离开 sensor）。
+    // 需 Step 后调用；下次 Step 前有效。sensor 与 visitor 两侧 shape 都开了 sensor 事件。
+    std::vector<SensorEvent> GetSensorBeginEvents() const;
+    std::vector<SensorEvent> GetSensorEndEvents() const;
+
+    // 返回上一次 Step 产生的 contact begin / end 事件（两 body 开始 / 停止接触）。
+    // begin 带初始接触点 / 法线；end 仅 body 对（其一可能已销毁 → handle Invalid）。
+    std::vector<ContactBeginEvent> GetContactBeginEvents() const;
+    std::vector<ContactEndEvent>   GetContactEndEvents() const;
+
     // 扫掠一个圆（半径 radius，起点 origin）沿 direction 前进 maxDistance，返回最近命中。
     // 比 raycast 更抗穿透，适合角色移动 / 贴地检测。起点即与某 shape 重叠的
     // initial-overlap 命中被忽略（与 RaycastClosest 一致）；退化输入（maxDistance≤0 /

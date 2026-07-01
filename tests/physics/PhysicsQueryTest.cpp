@@ -71,6 +71,29 @@ Phys::BodyHandle AddBall(Phys::PhysicsWorld& world, glm::vec2 pos)
     return world.AddBody(rb, col);
 }
 
+// static sensor box：不参与碰撞响应，只产生 sensor begin/end 事件。
+Phys::BodyHandle AddSensor(Phys::PhysicsWorld& world, glm::vec2 center, glm::vec2 halfExtents)
+{
+    Phys::RigidBodyComponent rb;
+    rb.type            = Phys::BodyType::Static;
+    rb.initialPosition = center;
+    Phys::ColliderComponent col;
+    col.shape    = Phys::BoxDesc{halfExtents, {0.0f, 0.0f}};
+    col.isSensor = true;
+    return world.AddBody(rb, col);
+}
+
+// 建两个不接触的 static box（用于"无事件"验证）。
+Phys::BodyHandle AddStaticBox(Phys::PhysicsWorld& world, glm::vec2 center, glm::vec2 halfExtents)
+{
+    Phys::RigidBodyComponent rb;
+    rb.type            = Phys::BodyType::Static;
+    rb.initialPosition = center;
+    Phys::ColliderComponent col;
+    col.shape = Phys::BoxDesc{halfExtents, {0.0f, 0.0f}};
+    return world.AddBody(rb, col);
+}
+
 bool Approx(float a, float b, float tol)
 {
     return std::fabs(a - b) <= tol;
@@ -401,6 +424,153 @@ void TestShapeCastDegenerate()
     assert(!world.ShapeCastCapsule({std::nanf(""), 1.0f}, {0.0f, -1.0f}, 0.5f, {0.0f, -1.0f}, 20.0f).hit);
 }
 
+// ---- sensor / contact 事件子测试 -----------------------------------------
+
+void TestSensorBeginEndEvents()
+{
+    Phys::PhysicsWorld world;  // 默认 gravity (0,-9.81)
+    // static sensor box：中心 (0,0) halfExtents (1,1) → 覆盖 y∈[-1,1]。
+    const auto sensor = AddSensor(world, {0.0f, 0.0f}, {1.0f, 1.0f});
+    // dynamic 小圆从上方 (0,5) 自由下落穿过 sensor（sensor 不挡，圆一路落）。
+    const auto ball = AddBall(world, {0.0f, 5.0f});
+    assert(sensor.IsValid());
+    assert(ball.IsValid());
+
+    bool sawBegin = false;
+    bool sawEnd   = false;
+    constexpr float kDt = 1.0f / 60.0f;
+    for (int i = 0; i < 300; ++i)
+    {
+        world.Step(kDt);
+        for (const auto& e : world.GetSensorBeginEvents())
+        {
+            if (e.sensor.Value() == sensor.Value() && e.visitor.Value() == ball.Value())
+            {
+                sawBegin = true;
+            }
+        }
+        for (const auto& e : world.GetSensorEndEvents())
+        {
+            if (e.sensor.Value() == sensor.Value() && e.visitor.Value() == ball.Value())
+            {
+                sawEnd = true;
+            }
+        }
+    }
+    if (!sawBegin)
+    {
+        std::fprintf(stderr, "[PhysicsQueryTest] sensor begin 事件未触发（检查 enableSensorEvents）\n");
+    }
+    if (!sawEnd)
+    {
+        std::fprintf(stderr, "[PhysicsQueryTest] sensor end 事件未触发\n");
+    }
+    assert(sawBegin);  // 圆进入 sensor → begin
+    assert(sawEnd);    // 圆离开 sensor → end
+}
+
+void TestContactBeginEvent()
+{
+    Phys::PhysicsWorld world;
+    const auto         ground = AddGround(world);
+    // 贴近 ground 顶面 (y=-4.5) 上方的球：球心 -3.9、球底 -4.4，落 0.1 米即接触。
+    const auto ball = AddBall(world, {0.0f, -3.9f});
+    assert(ground.IsValid());
+    assert(ball.IsValid());
+
+    bool            sawBegin = false;
+    constexpr float kDt      = 1.0f / 60.0f;
+    for (int i = 0; i < 120 && !sawBegin; ++i)
+    {
+        world.Step(kDt);
+        for (const auto& e : world.GetContactBeginEvents())
+        {
+            const bool isBallGround =
+                (e.bodyA.Value() == ball.Value() && e.bodyB.Value() == ground.Value()) ||
+                (e.bodyA.Value() == ground.Value() && e.bodyB.Value() == ball.Value());
+            if (isBallGround)
+            {
+                sawBegin = true;
+                // 初始接触点在 ground 顶面附近 y≈-4.5；法线近竖直（|normal.y|≈1）。
+                assert(Approx(e.point.y, -4.5f, 0.1f));
+                assert(std::fabs(std::fabs(e.normal.y) - 1.0f) <= 0.1f);
+            }
+        }
+    }
+    if (!sawBegin)
+    {
+        std::fprintf(stderr, "[PhysicsQueryTest] contact begin 事件未触发（检查 enableContactEvents）\n");
+    }
+    assert(sawBegin);
+}
+
+void TestContactEndEvent()
+{
+    Phys::PhysicsWorld world;
+    const auto         ground = AddGround(world);
+    const auto         ball   = AddBall(world, {0.0f, -3.9f});
+    assert(ground.IsValid());
+    assert(ball.IsValid());
+
+    // 先让球落地接触（等到 contact begin）。
+    bool            sawBegin = false;
+    constexpr float kDt      = 1.0f / 60.0f;
+    for (int i = 0; i < 120 && !sawBegin; ++i)
+    {
+        world.Step(kDt);
+        for (const auto& e : world.GetContactBeginEvents())
+        {
+            const bool isBallGround =
+                (e.bodyA.Value() == ball.Value() && e.bodyB.Value() == ground.Value()) ||
+                (e.bodyA.Value() == ground.Value() && e.bodyB.Value() == ball.Value());
+            if (isBallGround)
+            {
+                sawBegin = true;
+            }
+        }
+    }
+    assert(sawBegin);
+
+    // 把球瞬移到高空 + 清零速度 → 与 ground 分离，应产生 contact end 事件。
+    world.SetBodyTransform(ball, {{0.0f, 20.0f}, 0.0f});
+    world.SetLinearVelocity(ball, {0.0f, 0.0f});
+
+    bool sawEnd = false;
+    for (int i = 0; i < 10 && !sawEnd; ++i)
+    {
+        world.Step(kDt);
+        for (const auto& e : world.GetContactEndEvents())
+        {
+            const bool isBallGround =
+                (e.bodyA.Value() == ball.Value() && e.bodyB.Value() == ground.Value()) ||
+                (e.bodyA.Value() == ground.Value() && e.bodyB.Value() == ball.Value());
+            if (isBallGround)
+            {
+                sawEnd = true;
+            }
+        }
+    }
+    if (!sawEnd)
+    {
+        std::fprintf(stderr, "[PhysicsQueryTest] contact end 事件未触发（瞬移分离后）\n");
+    }
+    assert(sawEnd);  // 分离 → end-touch
+}
+
+void TestEventsEmpty()
+{
+    Phys::PhysicsWorld world;
+    // 两个远隔、不接触的 static box → 无 contact、无 sensor 交叠。
+    AddStaticBox(world, {0.0f, 0.0f}, {0.5f, 0.5f});
+    AddStaticBox(world, {100.0f, 100.0f}, {0.5f, 0.5f});
+    world.Step(1.0f / 60.0f);
+
+    assert(world.GetSensorBeginEvents().empty());
+    assert(world.GetSensorEndEvents().empty());
+    assert(world.GetContactBeginEvents().empty());
+    assert(world.GetContactEndEvents().empty());
+}
+
 }  // namespace
 
 int main()
@@ -418,5 +588,9 @@ int main()
     TestShapeCastCatchesWhatRayMisses();
     TestShapeCastCapsuleHitsGround();
     TestShapeCastDegenerate();
+    TestSensorBeginEndEvents();
+    TestContactBeginEvent();
+    TestContactEndEvent();
+    TestEventsEmpty();
     return 0;
 }

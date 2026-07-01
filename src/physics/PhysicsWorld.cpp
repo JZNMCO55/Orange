@@ -55,6 +55,17 @@ std::uint64_t EncodeBodyHandle(b2BodyId id) noexcept
     return v;
 }
 
+// 把 b2ShapeId 解析成 BodyHandle；shape 已销毁（end 事件可能）→ Invalid，避免对
+// 无效 shape 取 body 的 UB。
+BodyHandle ShapeToBodyHandle(b2ShapeId shapeId)
+{
+    if (!b2Shape_IsValid(shapeId))
+    {
+        return BodyHandle::Invalid();
+    }
+    return BodyHandle{EncodeBodyHandle(b2Shape_GetBody(shapeId))};
+}
+
 // ---- 空间查询回调（b2 tree callback）------------------------------------
 // 均与 EncodeBodyHandle 同处匿名 namespace，直接复用 body↔handle 编码。
 // 回调不标 noexcept——内部 push_back 可能抛 bad_alloc；且 b2 的回调 typedef
@@ -510,6 +521,90 @@ std::vector<ContactPoint> PhysicsWorld::GetContacts(BodyHandle body) const
         }
     }
     return contacts;
+}
+
+std::vector<SensorEvent> PhysicsWorld::GetSensorBeginEvents() const
+{
+    std::vector<SensorEvent> events;
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return events;
+    }
+    // b2World_GetSensorEvents 返回上一次 Step 缓冲的 begin/end 事件（下次 Step 前有效）。
+    const b2SensorEvents ev = b2World_GetSensorEvents(mpImpl->worldId);
+    events.reserve(static_cast<std::size_t>(std::max(ev.beginCount, 0)));
+    for (int i = 0; i < ev.beginCount; ++i)
+    {
+        events.push_back(SensorEvent{ShapeToBodyHandle(ev.beginEvents[i].sensorShapeId),
+                                     ShapeToBodyHandle(ev.beginEvents[i].visitorShapeId)});
+    }
+    return events;
+}
+
+std::vector<SensorEvent> PhysicsWorld::GetSensorEndEvents() const
+{
+    std::vector<SensorEvent> events;
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return events;
+    }
+    const b2SensorEvents ev = b2World_GetSensorEvents(mpImpl->worldId);
+    events.reserve(static_cast<std::size_t>(std::max(ev.endCount, 0)));
+    for (int i = 0; i < ev.endCount; ++i)
+    {
+        // end 事件的 sensor / visitor shape 都可能已销毁 → ShapeToBodyHandle 内 guard。
+        events.push_back(SensorEvent{ShapeToBodyHandle(ev.endEvents[i].sensorShapeId),
+                                     ShapeToBodyHandle(ev.endEvents[i].visitorShapeId)});
+    }
+    return events;
+}
+
+std::vector<ContactBeginEvent> PhysicsWorld::GetContactBeginEvents() const
+{
+    std::vector<ContactBeginEvent> events;
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return events;
+    }
+    const b2ContactEvents ev = b2World_GetContactEvents(mpImpl->worldId);
+    events.reserve(static_cast<std::size_t>(std::max(ev.beginCount, 0)));
+    for (int i = 0; i < ev.beginCount; ++i)
+    {
+        const b2ContactBeginTouchEvent& e = ev.beginEvents[i];
+        const b2Manifold&               m = e.manifold;
+        // manifold.normal 从 shapeA 指向 shapeB；point 取首个 manifold 点（世界坐标）。
+        // pointCount==0（speculative 未真正触碰）→ point / normal 保持零。
+        glm::vec2 point{0.0f, 0.0f};
+        glm::vec2 normal{0.0f, 0.0f};
+        if (m.pointCount > 0)
+        {
+            point  = glm::vec2{m.points[0].point.x, m.points[0].point.y};
+            normal = glm::vec2{m.normal.x, m.normal.y};
+        }
+        events.push_back(ContactBeginEvent{ShapeToBodyHandle(e.shapeIdA),
+                                           ShapeToBodyHandle(e.shapeIdB),
+                                           point,
+                                           normal});
+    }
+    return events;
+}
+
+std::vector<ContactEndEvent> PhysicsWorld::GetContactEndEvents() const
+{
+    std::vector<ContactEndEvent> events;
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return events;
+    }
+    const b2ContactEvents ev = b2World_GetContactEvents(mpImpl->worldId);
+    events.reserve(static_cast<std::size_t>(std::max(ev.endCount, 0)));
+    for (int i = 0; i < ev.endCount; ++i)
+    {
+        const b2ContactEndTouchEvent& e = ev.endEvents[i];
+        // end 事件两侧 shape 都可能已销毁 → ShapeToBodyHandle 内 guard，invalid → Invalid handle。
+        events.push_back(ContactEndEvent{ShapeToBodyHandle(e.shapeIdA), ShapeToBodyHandle(e.shapeIdB)});
+    }
+    return events;
 }
 
 RaycastHit PhysicsWorld::ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance) const noexcept
