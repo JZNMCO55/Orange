@@ -316,6 +316,91 @@ void TestGetContactsGrounded()
     assert(world.GetContacts(Phys::BodyHandle::Invalid()).empty());
 }
 
+// ---- shape-cast 子测试 ---------------------------------------------------
+
+void TestShapeCastCircleHitsGround()
+{
+    Phys::PhysicsWorld world;
+    const auto         ground = AddGround(world);
+
+    // 半径 0.5 的圆从 (0,5) 竖直向下扫掠：圆底触及 ground 顶面 y=-4.5 时圆心在 y=-4.0，
+    // 圆心移动 9 米 → fraction = 9/20 = 0.45；接触点在 ground 顶面。
+    const auto hit = world.ShapeCastCircle({0.0f, 5.0f}, 0.5f, {0.0f, -1.0f}, 20.0f);
+    assert(hit.hit);
+    assert(hit.body.Value() == ground.Value());
+    assert(Approx(hit.normal.y, 1.0f, 0.05f));   // ground 顶面法线朝上
+    assert(Approx(hit.fraction, 0.45f, 0.02f));
+    assert(Approx(hit.point.y, -4.5f, 0.05f));
+}
+
+void TestShapeCastCircleMiss()
+{
+    Phys::PhysicsWorld world;
+    AddGround(world);
+    // 向上扫掠（上方无物）→ 未命中。
+    const auto hit = world.ShapeCastCircle({0.0f, 5.0f}, 0.5f, {0.0f, 1.0f}, 5.0f);
+    assert(!hit.hit);
+    assert(!hit.body.IsValid());
+}
+
+void TestShapeCastCatchesWhatRayMisses()
+{
+    Phys::PhysicsWorld world;
+    const auto         ground = AddGround(world);
+
+    // 偏置平台：box 中心 (1,0)、halfExtents (0.5,0.25) → 跨 x[0.5,1.5]，不含 x=0。
+    Phys::BodyHandle platform;
+    {
+        Phys::RigidBodyComponent rb;
+        rb.type            = Phys::BodyType::Static;
+        rb.initialPosition = {1.0f, 0.0f};
+        Phys::ColliderComponent col;
+        col.shape = Phys::BoxDesc{{0.5f, 0.25f}, {0.0f, 0.0f}};
+        platform  = world.AddBody(rb, col);
+    }
+    assert(platform.IsValid());
+
+    // 细射线在 x=0 竖直向下：miss 掉偏置平台（x=0<0.5），只够到下方 ground。
+    const auto ray = world.RaycastClosest({0.0f, 5.0f}, {0.0f, -1.0f}, 20.0f);
+    assert(ray.hit);
+    assert(ray.body.Value() == ground.Value());
+
+    // 半径 0.6 的圆在同一 x=0 竖直向下扫掠：圆右缘 x=0.6>0.5 够到平台左上角 →
+    // 命中平台（比 ground 更近）。这正是 shape-cast 相对 raycast 的价值所在。
+    const auto swept = world.ShapeCastCircle({0.0f, 5.0f}, 0.6f, {0.0f, -1.0f}, 20.0f);
+    assert(swept.hit);
+    assert(swept.body.Value() == platform.Value());
+    assert(swept.fraction < ray.fraction);  // 平台比 ground 更早命中
+}
+
+void TestShapeCastCapsuleHitsGround()
+{
+    Phys::PhysicsWorld world;
+    const auto         ground = AddGround(world);
+
+    // 竖直胶囊：端点 (0,1)/(0,-1) + 半径 0.5 → 最低点 y=-1.5。向下扫掠：最低点触
+    // ground 顶面 y=-4.5 时移动 3 米 → fraction = 3/20 = 0.15。
+    const auto hit = world.ShapeCastCapsule({0.0f, 1.0f}, {0.0f, -1.0f}, 0.5f, {0.0f, -1.0f}, 20.0f);
+    assert(hit.hit);
+    assert(hit.body.Value() == ground.Value());
+    assert(Approx(hit.normal.y, 1.0f, 0.05f));
+    assert(Approx(hit.fraction, 0.15f, 0.02f));
+}
+
+void TestShapeCastDegenerate()
+{
+    Phys::PhysicsWorld world;
+    AddGround(world);
+
+    // maxDistance=0 / 零方向 / 负半径 / NaN → 未命中、不崩。
+    assert(!world.ShapeCastCircle({0.0f, 5.0f}, 0.5f, {0.0f, -1.0f}, 0.0f).hit);
+    assert(!world.ShapeCastCircle({0.0f, 5.0f}, 0.5f, {0.0f, 0.0f}, 20.0f).hit);
+    assert(!world.ShapeCastCircle({0.0f, 5.0f}, -1.0f, {0.0f, -1.0f}, 20.0f).hit);
+    assert(!world.ShapeCastCircle({std::nanf(""), 5.0f}, 0.5f, {0.0f, -1.0f}, 20.0f).hit);
+    assert(!world.ShapeCastCapsule({0.0f, 1.0f}, {0.0f, -1.0f}, 0.5f, {0.0f, 0.0f}, 20.0f).hit);
+    assert(!world.ShapeCastCapsule({std::nanf(""), 1.0f}, {0.0f, -1.0f}, 0.5f, {0.0f, -1.0f}, 20.0f).hit);
+}
+
 }  // namespace
 
 int main()
@@ -328,5 +413,10 @@ int main()
     TestOverlapAABB();
     TestOverlapPoint();
     TestGetContactsGrounded();
+    TestShapeCastCircleHitsGround();
+    TestShapeCastCircleMiss();
+    TestShapeCastCatchesWhatRayMisses();
+    TestShapeCastCapsuleHitsGround();
+    TestShapeCastDegenerate();
     return 0;
 }

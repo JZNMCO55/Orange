@@ -134,6 +134,40 @@ bool IsFiniteVec2(glm::vec2 v)
     return std::isfinite(v.x) && std::isfinite(v.y);
 }
 
+// ShapeCast：扫掠一个 proxy（圆/胶囊）追踪最近命中。回调返回 fraction 裁剪射线，
+// 后续只报更近命中 → 最终写入 best 的即最近。忽略 initial-overlap（proxy 起点即
+// 与某 shape 重叠：fraction≈0 且法线退化）——与 RaycastClosest 行为一致。
+struct ShapeCastClosestContext
+{
+    RaycastHit* best{nullptr};
+};
+
+float ShapeCastClosestCallback(b2ShapeId shapeId, b2Vec2 point, b2Vec2 normal, float fraction, void* context)
+{
+    const float n2 = normal.x * normal.x + normal.y * normal.y;
+    if (fraction <= 0.0f || n2 < 0.25f)
+    {
+        return 1.0f;  // initial-overlap：忽略此命中、不裁剪，继续查找真正的扫掠命中
+    }
+    auto* ctx           = static_cast<ShapeCastClosestContext*>(context);
+    ctx->best->body     = BodyHandle{EncodeBodyHandle(b2Shape_GetBody(shapeId))};
+    ctx->best->point    = glm::vec2{point.x, point.y};
+    ctx->best->normal   = glm::vec2{normal.x, normal.y};
+    ctx->best->fraction = fraction;
+    ctx->best->hit      = true;
+    return fraction;  // 裁剪到当前命中：后续只报更近的
+}
+
+// 用给定 proxy + translation 做最近扫掠命中查询（供 ShapeCastCircle / ShapeCastCapsule 复用）。
+RaycastHit CastProxyClosest(b2WorldId world, const b2ShapeProxy& proxy, b2Vec2 translation)
+{
+    RaycastHit              out;
+    ShapeCastClosestContext ctx;
+    ctx.best = &out;
+    b2World_CastShape(world, &proxy, translation, b2DefaultQueryFilter(), ShapeCastClosestCallback, &ctx);
+    return out;  // 未命中 → out.hit 默认 false
+}
+
 }  // namespace
 
 struct PhysicsWorld::Impl
@@ -476,6 +510,52 @@ std::vector<ContactPoint> PhysicsWorld::GetContacts(BodyHandle body) const
         }
     }
     return contacts;
+}
+
+RaycastHit PhysicsWorld::ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance) const noexcept
+{
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return {};
+    }
+    if (!(maxDistance > 0.0f) || !std::isfinite(maxDistance) || !(radius >= 0.0f) || !std::isfinite(radius) ||
+        !IsFiniteVec2(origin) || !IsFiniteVec2(direction))
+    {
+        return {};
+    }
+    const float len = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+    if (len < 1e-9f)
+    {
+        return {};
+    }
+    const glm::vec2    dir         = direction / len;
+    const b2Vec2       center      = {origin.x, origin.y};
+    const b2ShapeProxy proxy       = b2MakeProxy(&center, 1, radius);  // 圆 = 单点 + 半径
+    const b2Vec2       translation = {dir.x * maxDistance, dir.y * maxDistance};
+    return CastProxyClosest(mpImpl->worldId, proxy, translation);
+}
+
+RaycastHit PhysicsWorld::ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radius, glm::vec2 direction, float maxDistance) const noexcept
+{
+    if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return {};
+    }
+    if (!(maxDistance > 0.0f) || !std::isfinite(maxDistance) || !(radius >= 0.0f) || !std::isfinite(radius) ||
+        !IsFiniteVec2(p1) || !IsFiniteVec2(p2) || !IsFiniteVec2(direction))
+    {
+        return {};
+    }
+    const float len = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+    if (len < 1e-9f)
+    {
+        return {};
+    }
+    const glm::vec2    dir         = direction / len;
+    const b2Vec2       pts[2]      = {{p1.x, p1.y}, {p2.x, p2.y}};
+    const b2ShapeProxy proxy       = b2MakeProxy(pts, 2, radius);  // 胶囊 = 两端点 + 半径
+    const b2Vec2       translation = {dir.x * maxDistance, dir.y * maxDistance};
+    return CastProxyClosest(mpImpl->worldId, proxy, translation);
 }
 
 bool PhysicsWorld::ReplaceFixture(BodyHandle handle, const ColliderComponent& collider)

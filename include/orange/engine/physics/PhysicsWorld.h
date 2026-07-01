@@ -132,6 +132,17 @@ public:
     // ContactPoint.normal 从该 body 指向 other。handle 无效 / 未注册 → 空。
     std::vector<ContactPoint> GetContacts(BodyHandle body) const;
 
+    // 扫掠一个圆（半径 radius，起点 origin）沿 direction 前进 maxDistance，返回最近命中。
+    // 比 raycast 更抗穿透，适合角色移动 / 贴地检测。起点即与某 shape 重叠的
+    // initial-overlap 命中被忽略（与 RaycastClosest 一致）；退化输入（maxDistance≤0 /
+    // radius<0 / 零方向 / NaN / Inf）→ 未命中（hit=false，不崩）。
+    RaycastHit ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance) const noexcept;
+
+    // 扫掠一个胶囊（两端点 p1/p2 + 半径 radius）沿 direction 前进 maxDistance，返回最近
+    // 命中。用于角色 controller 的胶囊体扫掠。initial-overlap 与退化输入处理同
+    // ShapeCastCircle。
+    RaycastHit ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radius, glm::vec2 direction, float maxDistance) const noexcept;
+
     // 原子地把 handle 对应 body 上的 collider 整体换成新 desc。
     //   * 旧 shape（含 chain segment）全部销毁；
     //   * 新 shape 按 collider 重新创建；
