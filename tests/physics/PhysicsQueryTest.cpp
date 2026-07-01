@@ -230,6 +230,9 @@ void TestOverlapAABB()
     // 完全在空旷处 → 空。
     const auto empty = world.OverlapAABB({500.0f, 500.0f}, {510.0f, 510.0f});
     assert(empty.empty());
+
+    // 非有限边界（NaN）→ 空、不崩（Debug 下亦不触发 Box2D b2IsValidAABB assert）。
+    assert(world.OverlapAABB({std::nanf(""), -6.0f}, {60.0f, 1.0f}).empty());
 }
 
 void TestOverlapPoint()
@@ -237,13 +240,37 @@ void TestOverlapPoint()
     Phys::PhysicsWorld world;
     const auto         ground = AddGround(world);
 
+    // 额外放一个 static 圆（半径 1，中心 (20,20)）用于 narrow-phase 判别：
+    // 圆的 AABB 是 [19,21]²，其角点落在 AABB 内（宽相命中）但在圆外（TestPoint 排除），
+    // 用来锁住 OverlapPoint 的精确判定——若退化成纯宽相（去掉 b2Shape_TestPoint），角点会被误纳。
+    Phys::BodyHandle circle;
+    {
+        Phys::RigidBodyComponent rb;
+        rb.type            = Phys::BodyType::Static;
+        rb.initialPosition = {20.0f, 20.0f};
+        Phys::ColliderComponent col;
+        col.shape = Phys::CircleDesc{1.0f, {0.0f, 0.0f}};
+        circle    = world.AddBody(rb, col);
+    }
+    assert(circle.IsValid());
+
     // point 在 ground box 内部（中心）→ 含 ground。
     const auto inside = world.OverlapPoint({0.0f, -5.0f});
     assert(Contains(inside, ground));
 
+    // 圆心 → 含 circle（narrow-phase 命中）。
+    assert(Contains(world.OverlapPoint({20.0f, 20.0f}), circle));
+
+    // 圆 AABB 角点 (20.9,20.9)：距圆心 ≈1.27 > 半径 1，在 AABB 内但在圆外 →
+    // 精确判定应排除。这是相对 OverlapAABB 的唯一增量（narrow-phase）的判别性覆盖。
+    assert(!Contains(world.OverlapPoint({20.9f, 20.9f}), circle));
+
     // 空中一点 → 空。
     const auto outside = world.OverlapPoint({0.0f, 50.0f});
     assert(outside.empty());
+
+    // 非有限坐标（NaN）→ 空、不崩。
+    assert(world.OverlapPoint({std::nanf(""), 0.0f}).empty());
 }
 
 void TestGetContactsGrounded()
@@ -276,8 +303,10 @@ void TestGetContactsGrounded()
         if (c.other.Value() == ground.Value())
         {
             sawGround = true;
-            // ball 落在 ground 上，接触法线应近竖直。
-            assert(std::fabs(std::fabs(c.normal.y) - 1.0f) <= 0.1f);
+            // 契约：normal 从被查询 body(ball) 指向 other(ground)。ball 在 ground 上方，
+            // 故应近竖直**向下**（y≈-1）——用带符号断言锁方向，防"法线反向"的实现假绿通过
+            //（|normal.y| 断言对 +1/-1 都放行，测不出方向 bug）。
+            assert(c.normal.y <= -0.9f);
             assert(std::fabs(c.normal.x) <= 0.1f);
         }
     }

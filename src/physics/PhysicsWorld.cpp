@@ -381,6 +381,12 @@ std::vector<BodyHandle> PhysicsWorld::OverlapAABB(glm::vec2 lowerBound, glm::vec
     {
         return bodies;
     }
+    // 非有限坐标（NaN/Inf）→ 空：不把非法 AABB 喂进 Box2D（Debug 下 b2IsValidAABB
+    // 断言会崩），与 raycast 路径的有限性守卫对齐。
+    if (!IsFiniteVec2(lowerBound) || !IsFiniteVec2(upperBound))
+    {
+        return bodies;
+    }
     const b2Vec2 lo = {std::min(lowerBound.x, upperBound.x), std::min(lowerBound.y, upperBound.y)};
     const b2Vec2 hi = {std::max(lowerBound.x, upperBound.x), std::max(lowerBound.y, upperBound.y)};
     const b2AABB aabb = {lo, hi};
@@ -397,6 +403,11 @@ std::vector<BodyHandle> PhysicsWorld::OverlapPoint(glm::vec2 point) const
 {
     std::vector<BodyHandle> bodies;
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
+    {
+        return bodies;
+    }
+    // 非有限坐标（NaN/Inf）→ 空：不把非法退化 AABB 喂进 Box2D，与 raycast 守卫对齐。
+    if (!IsFiniteVec2(point))
     {
         return bodies;
     }
