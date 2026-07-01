@@ -687,6 +687,14 @@ orange_engine_add_test(noise_test                   noise/NoiseTest.cpp)
 # 确定性 scalar 数学 headless 完全可验（仅 orange_engine + 标准库，无 glm/Vulkan/GUI）。
 orange_engine_add_test(tween_test                   tween/TweenTest.cpp)
 
+# Spatial：均匀网格空间哈希（uniform-grid spatial hash / broad-phase）—— 引擎首个
+# 空间加速结构。覆盖基本 Insert/QueryAABB + 多格 item dedup + QueryPoint + QueryRadius
+# （圆 vs AABB narrow）+ 负坐标（CellCoord floor）+ Remove（摘 cell 干净）+ Update/移动
+# + 边界接触（<= 语义）+ Clear/空 + cellSize<=0 钳制 + ★暴力法交叉验证（N=300 item /
+# M=50 query 与暴力扫描逐一相等，验完备性 + narrow 正确性 + dedup）。纯数据结构 + 几何
+# headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
+orange_engine_add_test(spatial_hash_test            spatial/SpatialHashTest.cpp)
+
 # Event：类型化事件总线（EventBus / typed pub-sub）—— 解耦通信的基础引擎服务。
 # 纯 header-only + 类型擦除模板（无 .cpp、不进 add_library），由测试 TU 实例化。
 # 覆盖发布订阅 / 多处理器顺序 / 类型隔离 / Unsubscribe / 延迟队列 FIFO / 再入

@@ -210,6 +210,13 @@ add_library(orange_engine STATIC
     # easings.net 标准缓动，不进 add_library），TweenManager 运行时实现在 Tween.cpp。
     src/tween/Tween.cpp
 
+    # Spatial：均匀网格空间哈希（uniform-grid spatial hash / broad-phase）—— 引擎首个
+    # 空间加速结构。任意带 AABB 的 item（uint64 id）按 cellSize 网格索引，支持近邻规模
+    # 的区域 / 点 / 半径查询，跨多格 item 登记进所有覆盖 cell、查询做 narrow-phase 精确
+    # 过滤 + dedup。服务 AI 邻居查询 / 剔除 / 生成密度统计。公共头 Aabb2D + AabbOverlap
+    # 为 header-only inline；SpatialHash 类运行时实现在 SpatialHash.cpp。只依赖 glm + std。
+    src/spatial/SpatialHash.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。
