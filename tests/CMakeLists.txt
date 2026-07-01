@@ -673,6 +673,13 @@ orange_engine_add_test(spline_test                  spline/SplineTest.cpp)
 # 纯数据 + 算法 headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
 orange_engine_add_test(tilemap_test                 tilemap/TileMapTest.cpp)
 
+# Noise：程序化生成基础 —— seeded PRNG（splitmix64 确定性 + 范围 / 退化）+ value
+# noise（hash 格点 + 五次 fade 双线性，[0,1] + 连续性）+ Perlin gradient noise 2D/3D
+# （梯度选择 + fade 插值，约 [-1,1] + 整数格点 ≈0 性质 + 连续性）+ fBm 分形（octaves
+# 叠加 + 总振幅归一化 + octaves=1 退化回 Perlin + 多 octaves 增细节）。纯确定性
+# scalar 数学 headless 完全可验（仅 orange_engine + 标准库，无 glm/Vulkan/GUI）。
+orange_engine_add_test(noise_test                   noise/NoiseTest.cpp)
+
 # Event：类型化事件总线（EventBus / typed pub-sub）—— 解耦通信的基础引擎服务。
 # 纯 header-only + 类型擦除模板（无 .cpp、不进 add_library），由测试 TU 实例化。
 # 覆盖发布订阅 / 多处理器顺序 / 类型隔离 / Unsubscribe / 延迟队列 FIFO / 再入

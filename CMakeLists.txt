@@ -197,6 +197,12 @@ add_library(orange_engine STATIC
     src/tilemap/TileMapCollision.cpp
     src/tilemap/TileMapNavBake.cpp
 
+    # Noise：程序化生成基础（seeded PRNG + value/Perlin 噪声 + fBm 分形）。确定性
+    # scalar 数学——供程序化关卡 / 地形高度场 / 摆位扰动，与 tilemap 协同。公共头
+    # 只依赖标准库（纯 float，不引 glm）；Rng.h 为 header-only（不进 add_library），
+    # value/Perlin/fBm 求值实现在 Noise.cpp。
+    src/noise/Noise.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。
