@@ -655,6 +655,12 @@ orange_engine_add_test(physics_query_test           physics/PhysicsQueryTest.cpp
 orange_engine_add_test(collision_filter_test        physics/CollisionFilterTest.cpp)
 target_include_directories(collision_filter_test PRIVATE "${CMAKE_SOURCE_DIR}/src")
 
+# Nav：2D 网格导航 —— NavGrid helper 一致性 + A* 寻路正确性（直线 / 绕障 /
+# 无路 / 退化 / 对角禁切角）+ SimplifyPath LOS 平滑 + BakeWalkableFromPhysics
+# 从 static box collider 烘焙可行走性。纯 orange_engine（NavGrid + Pathfinding
+# + PhysicsWorld），headless 完全可验。
+orange_engine_add_test(navigation_test              nav/NavigationTest.cpp)
+
 # Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）
 orange_engine_add_test(action_map_test         input/ActionMapTest.cpp)
 orange_engine_add_test(input_context_stack_test input/InputContextStackTest.cpp)

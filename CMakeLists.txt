@@ -179,6 +179,11 @@ add_library(orange_engine STATIC
     src/physics/LayerVisibilitySync.cpp
     src/physics/box2d/Box2DBridge.cpp
 
+    # Nav：2D 网格导航 + A* 寻路（NavGrid 数据 header-only；Pathfinding A* +
+    # SimplifyPath 与从物理烘焙可行走性 NavGridBake 编进 lib）
+    src/nav/Pathfinding.cpp
+    src/nav/NavGridBake.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。
