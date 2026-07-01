@@ -217,6 +217,13 @@ add_library(orange_engine STATIC
     # 为 header-only inline；SpatialHash 类运行时实现在 SpatialHash.cpp。只依赖 glm + std。
     src/spatial/SpatialHash.cpp
 
+    # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语
+    # （enemy patrol/chase/attack、UI 流程、关卡阶段等）。状态 + 转移（事件触发 /
+    # guard 自动）+ 生命周期回调（onEnter/onUpdate/onExit），抗再入链式转移靠 pending
+    # 队列。区别于 animation/AnimationStateMachine（那是动画剪辑专用）：本模块纯逻辑，
+    # state/event 是用户自定义 int，与动画 / 渲染解耦。公共头只依赖标准库（不引 glm）。
+    src/fsm/StateMachine.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。

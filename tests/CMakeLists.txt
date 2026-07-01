@@ -695,6 +695,14 @@ orange_engine_add_test(tween_test                   tween/TweenTest.cpp)
 # headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
 orange_engine_add_test(spatial_hash_test            spatial/SpatialHashTest.cpp)
 
+# Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
+# 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
+# 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
+# ★抗再入链式转移（onEnter 里 Fire 走 pending 队列非递归）/ Start-Stop（含重复 Start
+# 先停旧态）/ IsIn/IsRunning/Current + 未注册状态安全 + 编译期不可拷贝/移动断言。
+# 纯逻辑（仅 orange_engine + 标准库，无 glm/Vulkan/GUI），headless 完全可验。
+orange_engine_add_test(state_machine_test           fsm/StateMachineTest.cpp)
+
 # Event：类型化事件总线（EventBus / typed pub-sub）—— 解耦通信的基础引擎服务。
 # 纯 header-only + 类型擦除模板（无 .cpp、不进 add_library），由测试 TU 实例化。
 # 覆盖发布订阅 / 多处理器顺序 / 类型隔离 / Unsubscribe / 延迟队列 FIFO / 再入
