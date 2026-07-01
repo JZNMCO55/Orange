@@ -15,8 +15,20 @@
 
 #include <glm/vec2.hpp>
 
+#include <cstdint>
+
 namespace Orange::Engine::Physics
 {
+
+// 空间查询过滤器：只报告与之匹配的 collider。默认全通过（match all）。
+// 命中规则（对齐 Box2D）：(filter.maskBits & collider.categoryBits) && (collider.maskBits & filter.categoryBits)。
+// 用 std::uint32_t 与 ColliderComponent 的 category/mask 位对齐，扩宽到 Box2D
+// 的 uint64 b2QueryFilter 由 PhysicsWorld 内部隐式完成。
+struct QueryFilter
+{
+    std::uint32_t categoryBits{0xFFFFFFFFu};   // 本次查询“代表”的类
+    std::uint32_t maskBits{0xFFFFFFFFu};        // 本次查询愿命中哪些类
+};
 
 // 单条 raycast 命中结果。未命中时 hit=false、body 为 Invalid、其余为零。
 struct RaycastHit

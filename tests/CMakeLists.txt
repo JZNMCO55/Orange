@@ -645,6 +645,11 @@ orange_engine_add_test(box2d_step_test              physics/Box2DStepTest.cpp)
 orange_engine_add_test(collider_shape_fall_test     physics/ColliderShapeFallTest.cpp)
 orange_engine_add_test(fixture_replace_test         physics/FixtureReplaceTest.cpp)
 orange_engine_add_test(physics_query_test           physics/PhysicsQueryTest.cpp)
+# collision filtering（collider category/mask 位 + 查询 QueryFilter）：碰撞过滤 /
+# 查询过滤 / 序列化 round-trip + 向后兼容。向后兼容子测试直接调内部 seam
+# ReadColliderDesc，故额外加 src include path（同 scene_file_load_test 模式）。
+orange_engine_add_test(collision_filter_test        physics/CollisionFilterTest.cpp)
+target_include_directories(collision_filter_test PRIVATE "${CMAKE_SOURCE_DIR}/src")
 
 # Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）
 orange_engine_add_test(action_map_test         input/ActionMapTest.cpp)

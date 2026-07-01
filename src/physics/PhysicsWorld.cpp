@@ -145,6 +145,16 @@ bool IsFiniteVec2(glm::vec2 v)
     return std::isfinite(v.x) && std::isfinite(v.y);
 }
 
+// 公共 QueryFilter（uint32 category/mask）→ Box2D b2QueryFilter（uint64）。
+// uint32 → uint64 隐式扩宽；默认全 bit 时等价 b2DefaultQueryFilter（全通过）。
+b2QueryFilter ToB2QueryFilter(QueryFilter filter) noexcept
+{
+    b2QueryFilter qf;
+    qf.categoryBits = filter.categoryBits;
+    qf.maskBits     = filter.maskBits;
+    return qf;
+}
+
 // ShapeCast：扫掠一个 proxy（圆/胶囊）追踪最近命中。回调返回 fraction 裁剪射线，
 // 后续只报更近命中 → 最终写入 best 的即最近。忽略 initial-overlap（proxy 起点即
 // 与某 shape 重叠：fraction≈0 且法线退化）——与 RaycastClosest 行为一致。
@@ -170,12 +180,13 @@ float ShapeCastClosestCallback(b2ShapeId shapeId, b2Vec2 point, b2Vec2 normal, f
 }
 
 // 用给定 proxy + translation 做最近扫掠命中查询（供 ShapeCastCircle / ShapeCastCapsule 复用）。
-RaycastHit CastProxyClosest(b2WorldId world, const b2ShapeProxy& proxy, b2Vec2 translation)
+// filter 由调用方从公共 QueryFilter 转换后传入（全通过时等价 b2DefaultQueryFilter）。
+RaycastHit CastProxyClosest(b2WorldId world, const b2ShapeProxy& proxy, b2Vec2 translation, b2QueryFilter filter)
 {
     RaycastHit              out;
     ShapeCastClosestContext ctx;
     ctx.best = &out;
-    b2World_CastShape(world, &proxy, translation, b2DefaultQueryFilter(), ShapeCastClosestCallback, &ctx);
+    b2World_CastShape(world, &proxy, translation, filter, ShapeCastClosestCallback, &ctx);
     return out;  // 未命中 → out.hit 默认 false
 }
 
@@ -351,7 +362,7 @@ void PhysicsWorld::SetLinearVelocity(BodyHandle handle, glm::vec2 velocity)
     b2Body_SetLinearVelocity(it->second, Box2DBridge::ToB2(velocity));
 }
 
-RaycastHit PhysicsWorld::RaycastClosest(glm::vec2 origin, glm::vec2 direction, float maxDistance) const noexcept
+RaycastHit PhysicsWorld::RaycastClosest(glm::vec2 origin, glm::vec2 direction, float maxDistance, QueryFilter filter) const noexcept
 {
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
     {
@@ -374,7 +385,7 @@ RaycastHit PhysicsWorld::RaycastClosest(glm::vec2 origin, glm::vec2 direction, f
     const b2Vec2    translation = {dir.x * maxDistance, dir.y * maxDistance};
 
     const b2RayResult r =
-        b2World_CastRayClosest(mpImpl->worldId, b2Origin, translation, b2DefaultQueryFilter());
+        b2World_CastRayClosest(mpImpl->worldId, b2Origin, translation, ToB2QueryFilter(filter));
     if (!r.hit)
     {
         return {};
@@ -388,7 +399,7 @@ RaycastHit PhysicsWorld::RaycastClosest(glm::vec2 origin, glm::vec2 direction, f
     return out;
 }
 
-std::vector<RaycastHit> PhysicsWorld::RaycastAll(glm::vec2 origin, glm::vec2 direction, float maxDistance) const
+std::vector<RaycastHit> PhysicsWorld::RaycastAll(glm::vec2 origin, glm::vec2 direction, float maxDistance, QueryFilter filter) const
 {
     std::vector<RaycastHit> hits;
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
@@ -411,7 +422,7 @@ std::vector<RaycastHit> PhysicsWorld::RaycastAll(glm::vec2 origin, glm::vec2 dir
 
     RaycastAllContext ctx;
     ctx.hits = &hits;
-    b2World_CastRay(mpImpl->worldId, b2Origin, translation, b2DefaultQueryFilter(), RaycastAllCallback, &ctx);
+    b2World_CastRay(mpImpl->worldId, b2Origin, translation, ToB2QueryFilter(filter), RaycastAllCallback, &ctx);
 
     // b2 回调按 tree 遍历序回来，不保证 fraction 有序——显式按近 → 远排序。
     std::sort(hits.begin(), hits.end(),
@@ -419,7 +430,7 @@ std::vector<RaycastHit> PhysicsWorld::RaycastAll(glm::vec2 origin, glm::vec2 dir
     return hits;
 }
 
-std::vector<BodyHandle> PhysicsWorld::OverlapAABB(glm::vec2 lowerBound, glm::vec2 upperBound) const
+std::vector<BodyHandle> PhysicsWorld::OverlapAABB(glm::vec2 lowerBound, glm::vec2 upperBound, QueryFilter filter) const
 {
     std::vector<BodyHandle> bodies;
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
@@ -440,11 +451,11 @@ std::vector<BodyHandle> PhysicsWorld::OverlapAABB(glm::vec2 lowerBound, glm::vec
     OverlapBodyContext                ctx;
     ctx.bodies = &bodies;
     ctx.seen   = &seen;
-    b2World_OverlapAABB(mpImpl->worldId, aabb, b2DefaultQueryFilter(), OverlapAABBCallback, &ctx);
+    b2World_OverlapAABB(mpImpl->worldId, aabb, ToB2QueryFilter(filter), OverlapAABBCallback, &ctx);
     return bodies;
 }
 
-std::vector<BodyHandle> PhysicsWorld::OverlapPoint(glm::vec2 point) const
+std::vector<BodyHandle> PhysicsWorld::OverlapPoint(glm::vec2 point, QueryFilter filter) const
 {
     std::vector<BodyHandle> bodies;
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
@@ -464,7 +475,7 @@ std::vector<BodyHandle> PhysicsWorld::OverlapPoint(glm::vec2 point) const
     ctx.bodies = &bodies;
     ctx.seen   = &seen;
     ctx.point  = p;
-    b2World_OverlapAABB(mpImpl->worldId, aabb, b2DefaultQueryFilter(), OverlapPointCallback, &ctx);
+    b2World_OverlapAABB(mpImpl->worldId, aabb, ToB2QueryFilter(filter), OverlapPointCallback, &ctx);
     return bodies;
 }
 
@@ -607,7 +618,7 @@ std::vector<ContactEndEvent> PhysicsWorld::GetContactEndEvents() const
     return events;
 }
 
-RaycastHit PhysicsWorld::ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance) const noexcept
+RaycastHit PhysicsWorld::ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance, QueryFilter filter) const noexcept
 {
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
     {
@@ -627,10 +638,10 @@ RaycastHit PhysicsWorld::ShapeCastCircle(glm::vec2 origin, float radius, glm::ve
     const b2Vec2       center      = {origin.x, origin.y};
     const b2ShapeProxy proxy       = b2MakeProxy(&center, 1, radius);  // 圆 = 单点 + 半径
     const b2Vec2       translation = {dir.x * maxDistance, dir.y * maxDistance};
-    return CastProxyClosest(mpImpl->worldId, proxy, translation);
+    return CastProxyClosest(mpImpl->worldId, proxy, translation, ToB2QueryFilter(filter));
 }
 
-RaycastHit PhysicsWorld::ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radius, glm::vec2 direction, float maxDistance) const noexcept
+RaycastHit PhysicsWorld::ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radius, glm::vec2 direction, float maxDistance, QueryFilter filter) const noexcept
 {
     if (!mpImpl || !B2_IS_NON_NULL(mpImpl->worldId))
     {
@@ -650,7 +661,7 @@ RaycastHit PhysicsWorld::ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radi
     const b2Vec2       pts[2]      = {{p1.x, p1.y}, {p2.x, p2.y}};
     const b2ShapeProxy proxy       = b2MakeProxy(pts, 2, radius);  // 胶囊 = 两端点 + 半径
     const b2Vec2       translation = {dir.x * maxDistance, dir.y * maxDistance};
-    return CastProxyClosest(mpImpl->worldId, proxy, translation);
+    return CastProxyClosest(mpImpl->worldId, proxy, translation, ToB2QueryFilter(filter));
 }
 
 bool PhysicsWorld::ReplaceFixture(BodyHandle handle, const ColliderComponent& collider)

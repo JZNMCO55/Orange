@@ -104,29 +104,30 @@ public:
 
     // -------------------------------------------------------------------
     // 空间查询 API（raycast / overlap / point / contact）。
-    // 结果类型见 PhysicsQuery.h；坐标均为世界坐标。本引擎 collider 暂无
-    // category / mask 字段，查询一律走默认 filter（全通过），公共面不暴露
-    // filter 参数。
+    // 结果类型见 PhysicsQuery.h；坐标均为世界坐标。每个查询接受可选的
+    // QueryFilter 尾参（默认 {} = 全 bit 通过），只报告与之匹配的 collider——
+    // 命中规则见 QueryFilter 注释。默认参数与"无过滤"等价（backward-compat），
+    // 游戏侧按类过滤时（如接地检测只打实心地面、忽略触发器）显式传入。
     // -------------------------------------------------------------------
 
     // 从 origin 沿 direction 射线投射 maxDistance 距离，返回最近命中。
     // direction 无需归一化（内部归一化）；maxDistance<=0 或 direction 近零
     // → 未命中（返回 hit=false 的空结果，不崩）。
-    RaycastHit RaycastClosest(glm::vec2 origin, glm::vec2 direction, float maxDistance) const noexcept;
+    RaycastHit RaycastClosest(glm::vec2 origin, glm::vec2 direction, float maxDistance, QueryFilter filter = {}) const noexcept;
 
     // 同上但返回沿射线的全部命中，按 fraction 升序（近 → 远）。
     // 退化输入（maxDistance<=0 / direction 近零）→ 空 vector。
-    std::vector<RaycastHit> RaycastAll(glm::vec2 origin, glm::vec2 direction, float maxDistance) const;
+    std::vector<RaycastHit> RaycastAll(glm::vec2 origin, glm::vec2 direction, float maxDistance, QueryFilter filter = {}) const;
 
     // 返回 fat-AABB 与 [lowerBound,upperBound] 相交的去重 body 列表。宽相
     // / broad-phase，可能过报（shape 本身未必真与查询 AABB 相交）；需要精确
     // 相交由消费方自行 narrow-phase。lower/upper 顺序不敏感（内部按分量取
     // min/max）。
-    std::vector<BodyHandle> OverlapAABB(glm::vec2 lowerBound, glm::vec2 upperBound) const;
+    std::vector<BodyHandle> OverlapAABB(glm::vec2 lowerBound, glm::vec2 upperBound, QueryFilter filter = {}) const;
 
     // 返回“真正包含 point”的去重 body 列表（退化 AABB 宽相收窄候选 +
     // b2Shape_TestPoint 精确判定）。
-    std::vector<BodyHandle> OverlapPoint(glm::vec2 point) const;
+    std::vector<BodyHandle> OverlapPoint(glm::vec2 point, QueryFilter filter = {}) const;
 
     // 返回该 body 当前的接触点列表（需先 Step；sensor 不产生 contact）。
     // ContactPoint.normal 从该 body 指向 other。handle 无效 / 未注册 → 空。
@@ -146,12 +147,12 @@ public:
     // 比 raycast 更抗穿透，适合角色移动 / 贴地检测。起点即与某 shape 重叠的
     // initial-overlap 命中被忽略（与 RaycastClosest 一致）；退化输入（maxDistance≤0 /
     // radius<0 / 零方向 / NaN / Inf）→ 未命中（hit=false，不崩）。
-    RaycastHit ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance) const noexcept;
+    RaycastHit ShapeCastCircle(glm::vec2 origin, float radius, glm::vec2 direction, float maxDistance, QueryFilter filter = {}) const noexcept;
 
     // 扫掠一个胶囊（两端点 p1/p2 + 半径 radius）沿 direction 前进 maxDistance，返回最近
     // 命中。用于角色 controller 的胶囊体扫掠。initial-overlap 与退化输入处理同
     // ShapeCastCircle。
-    RaycastHit ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radius, glm::vec2 direction, float maxDistance) const noexcept;
+    RaycastHit ShapeCastCapsule(glm::vec2 p1, glm::vec2 p2, float radius, glm::vec2 direction, float maxDistance, QueryFilter filter = {}) const noexcept;
 
     // 原子地把 handle 对应 body 上的 collider 整体换成新 desc。
     //   * 旧 shape（含 chain segment）全部销毁；

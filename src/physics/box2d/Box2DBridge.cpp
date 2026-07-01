@@ -40,6 +40,11 @@ b2ShapeDef MakeShapeDef(const ColliderComponent& col) noexcept
     sd.material.friction   = col.friction;
     sd.material.restitution = col.restitution;
     sd.isSensor            = col.isSensor;
+    // collision filtering：uint32 → uint64 隐式扩宽。b2DefaultShapeDef 已把
+    // filter 初始化为默认（category=1 / mask=all / group=0），这里覆盖 category /
+    // mask 两字段，groupIndex 仍留默认 0（本期不用 group 规则）。
+    sd.filter.categoryBits = col.categoryBits;
+    sd.filter.maskBits     = col.maskBits;
     // 全量开启 sensor / contact 事件缓冲——两者默认 false（"False by default, even for
     // sensors"），不开 b2World_GetSensorEvents / GetContactEvents 永远为空。纯 additive，
     // 不改碰撞响应；enableContactEvents 对 sensor 被 box2d 忽略（无害）。触发器 / 拾取 /

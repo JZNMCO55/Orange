@@ -112,9 +112,13 @@ namespace
 // 字段路径，旧 1.17 及更早文件无 "overriddenPaths" 段时读为空 vector（= 无显式
 // override 记录），向后兼容；其余字段语义不变。为 prefab override refresh 提供持久化的
 // 显式 override 集（免每次运行时 diff 推断 + 区分用户手改 vs 模板演进）。
+// 1.18 → 1.19：ColliderComponent 新增 collision filter 字段（categoryBits / maskBits，
+// collider category/mask 位过滤）。同款 optional 字段路径，旧 1.18 及更早文件无这两个
+// 键时 ReadColliderDesc 回退默认（category=1 / mask=0xFFFFFFFF = 与所有 body 碰撞），
+// 向后兼容；两值以 JSON 整数（int64 路径）落盘，整个 uint32 值域位精确，其余字段语义不变。
 const SchemaVersion& SceneSchemaVersion()
 {
-    static const SchemaVersion kVersion{"scene/world", 1, 18};
+    static const SchemaVersion kVersion{"scene/world", 1, 19};
     return kVersion;
 }
 

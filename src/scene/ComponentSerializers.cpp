@@ -1546,6 +1546,10 @@ void WriteCollider(JsonWriter& writer,
     writer.WriteFloat(Join(componentPath, "friction"),    col->friction);
     writer.WriteFloat(Join(componentPath, "restitution"), col->restitution);
     writer.WriteBool( Join(componentPath, "isSensor"),    col->isSensor);
+    // collision filter：uint32 存进 JSON 整数（WriteInt 走 int64 整数路径，非 double），
+    // 整个 uint32 值域（含 0xFFFFFFFF）都能精确 round-trip，无浮点精度损失。
+    writer.WriteInt(Join(componentPath, "categoryBits"), static_cast<std::int64_t>(col->categoryBits));
+    writer.WriteInt(Join(componentPath, "maskBits"),     static_cast<std::int64_t>(col->maskBits));
 }
 
 // ---------------------------------------------------------------------------
@@ -2189,6 +2193,13 @@ bool ReadColliderDesc(const JsonReader& reader,
     col.friction    = static_cast<float>(reader.GetFloat(Join(componentPath, "friction"),    0.3));
     col.restitution = static_cast<float>(reader.GetFloat(Join(componentPath, "restitution"), 0.0));
     col.isSensor    = reader.GetBool(Join(componentPath, "isSensor"), false);
+    // collision filter：带默认值回退读。旧 scene（无这两个键）→ 得默认 category=1 /
+    // mask=0xFFFFFFFF = 与所有 body 碰撞，向后兼容。GetInt 走 int64 整数路径，
+    // static_cast<uint32> 截回，整个 uint32 值域位精确。
+    col.categoryBits = static_cast<std::uint32_t>(
+        reader.GetInt(Join(componentPath, "categoryBits"), static_cast<std::int64_t>(0x0001u)));
+    col.maskBits     = static_cast<std::uint32_t>(
+        reader.GetInt(Join(componentPath, "maskBits"), static_cast<std::int64_t>(0xFFFFFFFFu)));
 
     out = col;
     return true;
