@@ -220,7 +220,9 @@ add_library(orange_engine STATIC
     # CameraRig：2D 相机跟随控制器（deadzone + 临界阻尼 SmoothDamp + 世界边界钳制）——
     # 纯数据 + 数学，不依赖 Render::Camera / World / GPU，只吃/吐 glm::vec2 世界坐标 + params，
     # 消费者把结果写进自己的相机（解耦，任何 2D/2.5D 游戏复用）。确定性、headless 可测。
+    # CameraShake2D：基于 trauma 的相机抖动（juice），自包含 hash 值噪声、确定性可测。
     src/camerarig/CameraFollow.cpp
+    src/camerarig/CameraShake.cpp
 
     # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语
     # （enemy patrol/chase/attack、UI 流程、关卡阶段等）。状态 + 转移（事件触发 /

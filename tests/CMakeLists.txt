@@ -701,6 +701,12 @@ orange_engine_add_test(spatial_hash_test            spatial/SpatialHashTest.cpp)
 # orange_engine + glm，headless 完全可验（无 Vulkan/GUI）。
 orange_engine_add_test(camera_follow_test           camerarig/CameraFollowTest.cpp)
 
+# CameraShake：基于 trauma 的 2D 相机抖动（juice 原语）。覆盖 AddTrauma/SetTrauma 钳制 +
+# trauma 线性衰减到 0 + 零 trauma 零偏移 + 偏移有界（<=maxTranslation）+ 满 trauma 有实际
+# 抖动量 + 强度随 trauma 单调 + 同 seed+dt 确定性 + maxRoll=0 时 roll 恒 0。自包含 hash
+# 值噪声，仅 orange_engine + glm，headless 完全可验。
+orange_engine_add_test(camera_shake_test            camerarig/CameraShakeTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
