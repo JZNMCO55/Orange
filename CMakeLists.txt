@@ -203,6 +203,13 @@ add_library(orange_engine STATIC
     # value/Perlin/fBm 求值实现在 Noise.cpp。
     src/noise/Noise.cpp
 
+    # Tween：代码驱动的缓动补间（tween / easing）运行时。标量从 from→to 在
+    # duration 秒内按缓动曲线插值，每帧 Update(dt) 推进 + 回调消费当前值（对标
+    # DOTween / iTween），支持 Once / Loop / PingPong 循环 + delay + 抗再入。公共头
+    # 只依赖标准库 + Easing.h（纯 scalar，不引 glm）；Easing.h 为 header-only（31 条
+    # easings.net 标准缓动，不进 add_library），TweenManager 运行时实现在 Tween.cpp。
+    src/tween/Tween.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。

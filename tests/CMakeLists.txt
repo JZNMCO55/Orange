@@ -680,6 +680,13 @@ orange_engine_add_test(tilemap_test                 tilemap/TileMapTest.cpp)
 # scalar 数学 headless 完全可验（仅 orange_engine + 标准库，无 glm/Vulkan/GUI）。
 orange_engine_add_test(noise_test                   noise/NoiseTest.cpp)
 
+# Tween：缓动补间（tween / easing）—— 代码驱动的标量插值运行时。覆盖 31 条
+# easings.net 缓动函数（端点严格 0/1 + t clamp + 已知值 + 单调 / InOut 中点 0.5）
+# + TweenManager 运行时（Once/Loop/PingPong 循环语义 + delay + onUpdate/onComplete
+# 回调 + Kill/Clear + 抗再入 Update + 除零守卫 + 不可拷贝/移动 static_assert）。纯
+# 确定性 scalar 数学 headless 完全可验（仅 orange_engine + 标准库，无 glm/Vulkan/GUI）。
+orange_engine_add_test(tween_test                   tween/TweenTest.cpp)
+
 # Event：类型化事件总线（EventBus / typed pub-sub）—— 解耦通信的基础引擎服务。
 # 纯 header-only + 类型擦除模板（无 .cpp、不进 add_library），由测试 TU 实例化。
 # 覆盖发布订阅 / 多处理器顺序 / 类型隔离 / Unsubscribe / 延迟队列 FIFO / 再入
