@@ -3275,5 +3275,6 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - 新公共头 `include/orange/engine/physics/PhysicsQuery.h`（POD `RaycastHit` / `ContactPoint`），实现在 `src/physics/PhysicsWorld.cpp`（复用 `EncodeBodyHandle` 把命中 `b2ShapeId`→`b2Shape_GetBody`→`BodyHandle`，无需 userData / 反查表）。退化输入（maxDistance≤0 / 零方向 / NaN / Inf）→ 空结果不崩。默认 filter（collider 暂无 category/mask）。
   - `Entity` 反查仍交消费方（经 `RigidBodyComponent.handle`，模式见 `LayerVisibilitySync`）——引擎侧不持有 ECS 句柄的既定表态不变。
   - headless 测试 `tests/physics/PhysicsQueryTest.cpp`（8 子测试：raycast 命中/未命中/退化+NaN/Inf/initial-overlap、overlap AABB/point、grounded contact 竖直法线）；ctest 98/98（physics 5/5）；lint 无新违规。
+  - **落地后独立对抗式复核硬化**（follow-up commit）：① `OverlapAABB`/`OverlapPoint` 补 `IsFiniteVec2` 有限性守卫，与 raycast 对齐（此前 overlap 路径漏守卫，Debug 下 NaN 输入会触发 `b2IsValidAABB` 断言崩溃，如鼠标解投影失败得 NaN 再做 overlap 拾取）；② `GetContacts` 测试改带符号断言 `normal.y<=-0.9` 锁"body→other"方向契约（防法线反向假绿）；③ `OverlapPoint` 测试加静态圆 AABB 角点判别真正覆盖 narrow-phase `b2Shape_TestPoint`（此前 inside/outside 两点都只由宽相决定）。
   - **剩（可选后续）**：collider category/mask 位 → 查询暴露 `QueryFilter`（当前所有 body 默认类，暴露无意义）；shape 粒度句柄（当前 1 body = 1 shape，返回 body 粒度足够）；shape-cast（扫掠 proxy）。消费侧：OrangeGames 首游用它替换 `LevelBox` analytic workaround 属游戏仓工作，另仓 session 做。
 - **关联**：OrangeGames `prototypes/spike-01-blob/NOTES-loopA.md`；首游 Spike 1 移动地基依赖（接地 / corner / 软体碰撞）。
