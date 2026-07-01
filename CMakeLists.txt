@@ -184,6 +184,11 @@ add_library(orange_engine STATIC
     src/nav/Pathfinding.cpp
     src/nav/NavGridBake.cpp
 
+    # Spline：样条 / 曲线子系统（Catmull-Rom / Linear 求值 + tangent + 弧长
+    # 参数化匀速遍历）。纯数学，公共头只依赖 glm + std；Catmull-Rom 闭式公式
+    # 自实现（不引 glm/gtx，避免污染消费者的 GLM_ENABLE_EXPERIMENTAL）。
+    src/spline/Spline.cpp
+
     # Save：SaveGameRegistry —— 游戏侧 component 注册容器，供 Save / Load
     # 主流程按 type-erased entry 派发。引擎不内置任何 component 注册，全
     # 部由游戏侧调用 Register<TComp> 手写 read/write 接入。

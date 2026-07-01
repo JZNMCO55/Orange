@@ -661,6 +661,11 @@ target_include_directories(collision_filter_test PRIVATE "${CMAKE_SOURCE_DIR}/sr
 # + PhysicsWorld），headless 完全可验。
 orange_engine_add_test(navigation_test              nav/NavigationTest.cpp)
 
+# Spline：样条 / 曲线求值（Catmull-Rom 过控制点 + Linear）+ tangent + 弧长
+# 参数化匀速遍历（BuildSplineArcTable / EvaluateSplineByDistance）+ 闭合环绕 +
+# 退化输入。纯数学 headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
+orange_engine_add_test(spline_test                  spline/SplineTest.cpp)
+
 # Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）
 orange_engine_add_test(action_map_test         input/ActionMapTest.cpp)
 orange_engine_add_test(input_context_stack_test input/InputContextStackTest.cpp)
