@@ -695,6 +695,12 @@ orange_engine_add_test(tween_test                   tween/TweenTest.cpp)
 # headless 完全可验（仅 orange_engine + glm，无 Vulkan/GUI）。
 orange_engine_add_test(spatial_hash_test            spatial/SpatialHashTest.cpp)
 
+# CameraRig：2D 相机跟随控制器（deadzone + 临界阻尼 SmoothDamp + 世界边界钳制）。覆盖瞬移
+# 模式 + 死区保持/跟随（贴边沿）+ SmoothDamp 收敛（单调逼近 / 不过冲）+ maxSpeed 钳速 +
+# 边界钳制（含某轴 min>max 退化）+ SetPosition 清速度 + dt<=0 不动。纯数据 + 数学，仅
+# orange_engine + glm，headless 完全可验（无 Vulkan/GUI）。
+orange_engine_add_test(camera_follow_test           camerarig/CameraFollowTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
