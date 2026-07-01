@@ -712,6 +712,11 @@ orange_engine_add_test(camera_shake_test            camerarig/CameraShakeTest.cp
 # 退化 + SetZoom 清速度同步目标 + dt<=0 不动。header-only 纯数学，仅 orange_engine + glm。
 orange_engine_add_test(camera_zoom_test             camerarig/CameraZoomTest.cpp)
 
+# CameraRig：follow+shake+zoom 组合装置。覆盖无 shake 时 position==follow + shake 只叠视觉
+# 偏移不污染 follow 真相（GetFollowPosition 恒==target）+ 偏移有界 + zoom 合成 + 便利转发
+# （AddTrauma/SetTargetZoom）。header-only 纯聚合，仅 orange_engine + glm。
+orange_engine_add_test(camera_rig_test              camerarig/CameraRigTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
