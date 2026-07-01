@@ -22,12 +22,14 @@
 #include <orange/engine/OrangeEngineExport.h>
 #include <orange/engine/physics/BodyHandle.h>
 #include <orange/engine/physics/ColliderComponent.h>
+#include <orange/engine/physics/PhysicsQuery.h>
 #include <orange/engine/physics/RigidBodyComponent.h>
 
 #include <glm/vec2.hpp>
 
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace Orange::Engine::Physics
 {
@@ -99,6 +101,36 @@ public:
 
     // 写入 body 线性速度。handle 无效 → no-op。
     void SetLinearVelocity(BodyHandle handle, glm::vec2 velocity);
+
+    // -------------------------------------------------------------------
+    // 空间查询 API（raycast / overlap / point / contact）。
+    // 结果类型见 PhysicsQuery.h；坐标均为世界坐标。本引擎 collider 暂无
+    // category / mask 字段，查询一律走默认 filter（全通过），公共面不暴露
+    // filter 参数。
+    // -------------------------------------------------------------------
+
+    // 从 origin 沿 direction 射线投射 maxDistance 距离，返回最近命中。
+    // direction 无需归一化（内部归一化）；maxDistance<=0 或 direction 近零
+    // → 未命中（返回 hit=false 的空结果，不崩）。
+    RaycastHit RaycastClosest(glm::vec2 origin, glm::vec2 direction, float maxDistance) const noexcept;
+
+    // 同上但返回沿射线的全部命中，按 fraction 升序（近 → 远）。
+    // 退化输入（maxDistance<=0 / direction 近零）→ 空 vector。
+    std::vector<RaycastHit> RaycastAll(glm::vec2 origin, glm::vec2 direction, float maxDistance) const;
+
+    // 返回 fat-AABB 与 [lowerBound,upperBound] 相交的去重 body 列表。宽相
+    // / broad-phase，可能过报（shape 本身未必真与查询 AABB 相交）；需要精确
+    // 相交由消费方自行 narrow-phase。lower/upper 顺序不敏感（内部按分量取
+    // min/max）。
+    std::vector<BodyHandle> OverlapAABB(glm::vec2 lowerBound, glm::vec2 upperBound) const;
+
+    // 返回“真正包含 point”的去重 body 列表（退化 AABB 宽相收窄候选 +
+    // b2Shape_TestPoint 精确判定）。
+    std::vector<BodyHandle> OverlapPoint(glm::vec2 point) const;
+
+    // 返回该 body 当前的接触点列表（需先 Step；sensor 不产生 contact）。
+    // ContactPoint.normal 从该 body 指向 other。handle 无效 / 未注册 → 空。
+    std::vector<ContactPoint> GetContacts(BodyHandle body) const;
 
     // 原子地把 handle 对应 body 上的 collider 整体换成新 desc。
     //   * 旧 shape（含 chain segment）全部销毁；

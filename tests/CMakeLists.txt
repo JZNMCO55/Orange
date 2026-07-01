@@ -644,6 +644,7 @@ orange_engine_add_test(physics_interface_test       physics/PhysicsInterfaceTest
 orange_engine_add_test(box2d_step_test              physics/Box2DStepTest.cpp)
 orange_engine_add_test(collider_shape_fall_test     physics/ColliderShapeFallTest.cpp)
 orange_engine_add_test(fixture_replace_test         physics/FixtureReplaceTest.cpp)
+orange_engine_add_test(physics_query_test           physics/PhysicsQueryTest.cpp)
 
 # Input：ActionMap 状态机 + JSON 加载 + InputContext 栈语义（Phase 4 / Task 08）
 orange_engine_add_test(action_map_test         input/ActionMapTest.cpp)

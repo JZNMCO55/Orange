@@ -3254,7 +3254,7 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
 - **归属**：引擎核心（Scene / Render 交界的 transform 系统），非编辑器侧；属较大改动（涉及 drawable 收集 / 光源 / 物理 / gizmo 全部改读 world matrix），建议独立 ADR + session。
 - **关联**：[[GAP-2026-05-28-gltf-scene-level-import-not-flattened]]（本 gap 是其子节点世界摆位正确性的引擎前置，G1 已用 world-bake workaround 绕过）；[[GAP-2026-05-30-prefab-asset-and-entity-guid]]（prefab 子件世界摆位同受影响）
 
-## GAP-2026-07-01-physics-no-contact-or-raycast-query
+## GAP-2026-07-01-physics-no-contact-or-raycast-query ✅
 
 - **发现方**：OrangeGames 首游 Spike 1 Loop A（control point 平台跳跃手感）
 - **发现日期**：2026-07-01
@@ -3266,5 +3266,14 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - overlap（底层 `b2World_OverlapAABB`）→ 返回区域内 body handle 列表
   - （可选）某 body 当前 contact 列表 / 接地法线
 - **期望验收**：游戏侧能问"从点 P 沿方向 D 射线，最近命中在哪、法线是什么" + "AABB 区域内有哪些 body"，据此做接地 / corner / 软体碰撞，删掉 `LevelBox` analytic workaround。
-- **状态**：未排期（登记，低摩擦保留信息）。归属引擎核心 Physics 模块（`src/physics/box2d/`），公共面加查询 API；Box2D 3.x 已有原生函数，封装成本中等。
+- **状态**：✅ **已落地 2026-07-01**（headless 真验，非 dogfood-pending）。`PhysicsWorld` 新增 5 个查询方法，全部走 Box2D 3.x 原生函数、公共面止步 `BodyHandle`（不暴露 box2d / entt 类型，沿 header isolation）：
+  - `RaycastClosest(origin, direction, maxDistance) → RaycastHit`（最近命中：body / point / normal / fraction）——底层 `b2World_CastRayClosest`；接地判定 / 头顶检测的主力。
+  - `RaycastAll(...) → std::vector<RaycastHit>`（沿射线全部命中，按 fraction 升序；起点在 shape 内的 initial-overlap 零法线命中被过滤，与 RaycastClosest 一致）——底层 `b2World_CastRay` 回调。
+  - `OverlapAABB(lower, upper) → std::vector<BodyHandle>`（区域内去重 body 列表，**宽相/broad-phase**，精确相交由消费方 narrow-phase）——底层 `b2World_OverlapAABB`。
+  - `OverlapPoint(point) → std::vector<BodyHandle>`（**精确**包含 point 的 body：退化 AABB 收窄候选 + `b2Shape_TestPoint`）——回答"某点是否在碰撞体内"。
+  - `GetContacts(body) → std::vector<ContactPoint>`（当前接触点 + normal，normal 约定从被查询 body 指向 other）——接地法线；底层 `b2Body_GetContactData`。
+  - 新公共头 `include/orange/engine/physics/PhysicsQuery.h`（POD `RaycastHit` / `ContactPoint`），实现在 `src/physics/PhysicsWorld.cpp`（复用 `EncodeBodyHandle` 把命中 `b2ShapeId`→`b2Shape_GetBody`→`BodyHandle`，无需 userData / 反查表）。退化输入（maxDistance≤0 / 零方向 / NaN / Inf）→ 空结果不崩。默认 filter（collider 暂无 category/mask）。
+  - `Entity` 反查仍交消费方（经 `RigidBodyComponent.handle`，模式见 `LayerVisibilitySync`）——引擎侧不持有 ECS 句柄的既定表态不变。
+  - headless 测试 `tests/physics/PhysicsQueryTest.cpp`（8 子测试：raycast 命中/未命中/退化+NaN/Inf/initial-overlap、overlap AABB/point、grounded contact 竖直法线）；ctest 98/98（physics 5/5）；lint 无新违规。
+  - **剩（可选后续）**：collider category/mask 位 → 查询暴露 `QueryFilter`（当前所有 body 默认类，暴露无意义）；shape 粒度句柄（当前 1 body = 1 shape，返回 body 粒度足够）；shape-cast（扫掠 proxy）。消费侧：OrangeGames 首游用它替换 `LevelBox` analytic workaround 属游戏仓工作，另仓 session 做。
 - **关联**：OrangeGames `prototypes/spike-01-blob/NOTES-loopA.md`；首游 Spike 1 移动地基依赖（接地 / corner / 软体碰撞）。
