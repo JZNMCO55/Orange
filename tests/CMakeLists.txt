@@ -734,6 +734,13 @@ orange_engine_add_test(particle_system_test         particle/ParticleSystemTest.
 # 守卫无 NaN。仅 orange_engine + glm，headless 完全可验。
 orange_engine_add_test(steering_test                steering/SteeringTest.cpp)
 
+# Timer：gameplay 倒计时 / 冷却原语（CountdownTimer one-shot/looping + Cooldown 门）。
+# header-only 纯 scalar 逻辑无依赖。覆盖 one-shot 触发一次即完成 + Reset + Progress 精确 +
+# looping 补周期（★单次大 dt 跨多周期触发 >1）+ Stop + duration<=0 退化 no-op（★不无限
+# 补周期）+ Cooldown TryTrigger 门控 / Tick 消耗钳 0 / FractionReady / ResetReady /
+# dt<=0 不动 / duration<=0 恒就绪。仅 orange_engine + 标准库，headless 完全可验。
+orange_engine_add_test(timer_test                   timer/TimerTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
