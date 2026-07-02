@@ -741,6 +741,11 @@ orange_engine_add_test(steering_test                steering/SteeringTest.cpp)
 # dt<=0 不动 / duration<=0 恒就绪。仅 orange_engine + 标准库，headless 完全可验。
 orange_engine_add_test(timer_test                   timer/TimerTest.cpp)
 
+# RingBuffer：固定容量环形缓冲（最近 N 项历史，输入缓冲 / 拖尾轨迹）。header-only 模板纯
+# 数据结构。覆盖初始空 + 未满 Push 最新优先下标 + Newest/Oldest + 满后★环形覆盖最旧下标
+# 仍正确 + Clear 保留容量 + 容量 0 退化 no-op。仅 orange_engine + 标准库，headless 可验。
+orange_engine_add_test(ring_buffer_test             container/RingBufferTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
