@@ -717,6 +717,15 @@ orange_engine_add_test(camera_zoom_test             camerarig/CameraZoomTest.cpp
 # （AddTrauma/SetTargetZoom）。header-only 纯聚合，仅 orange_engine + glm。
 orange_engine_add_test(camera_rig_test              camerarig/CameraRigTest.cpp)
 
+# Particle：2D CPU 粒子发射器 + 仿真核（juice 原语，flow 主角喷溅 / 拖尾 / 尘屑）。
+# header-only（复用 Noise::Rng 确定性 + Tween::Easing size-over-life），无 .cpp 不进
+# add_library，由测试 TU 实例化。覆盖 Particle 查询（NormalizedAge/SizeAt/ColorAt/
+# lifetime<=0 守卫）+ Emit 溢出丢弃 + ★确定性逐粒子复现（穿越大量死亡）+ 寿命淘汰 +
+# swap-remove 压缩身份正确 + 半隐式欧拉重力/阻尼积分 + emitRate 小数余量帧率无关 +
+# Disk/Box/Point 形状包含 + spread0 方向速度 + dt<=0 不动 + Clear。仅 orange_engine +
+# glm + 标准库，headless 完全可验（无 Vulkan/GUI）。
+orange_engine_add_test(particle_system_test         particle/ParticleSystemTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
