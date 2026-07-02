@@ -726,6 +726,14 @@ orange_engine_add_test(camera_rig_test              camerarig/CameraRigTest.cpp)
 # glm + 标准库，headless 完全可验（无 Vulkan/GUI）。
 orange_engine_add_test(particle_system_test         particle/ParticleSystemTest.cpp)
 
+# Steering：2D 转向行为库（Reynolds seek/flee/arrive/pursue/evade/wander + 积分 Agent）——
+# 局部自主运动原语，与 nav（全局 A* 寻路）分工。header-only 纯 glm+数学（Wander 随机复用
+# Noise::Rng 确定性）。覆盖 Truncate 钳制 + Seek 力向/闭环收敛 + Flee 背离 + ★Arrive 到点
+# 平滑刹停（末速≈0，对比 Seek 恒全速）+ 减速带力 < Seek + Pursue 预测拦截（力瞄前方）+
+# Wander 同 seed 确定性/有界/angle 扰动 + Agent maxSpeed 钳速/dt<=0 不动。零向量 Normalize
+# 守卫无 NaN。仅 orange_engine + glm，headless 完全可验。
+orange_engine_add_test(steering_test                steering/SteeringTest.cpp)
+
 # Fsm：通用逻辑状态机（gameplay / AI finite state machine）—— 可复用行为原语。
 # 覆盖事件转移 + 回调序（onExit 先于 onEnter）/ guard（假不转、真转、多条取第一条
 # 通过的）/ 自动转移（每次 Update 至多一次 + onUpdate 每次被调）/ onUpdate 里 Fire /
