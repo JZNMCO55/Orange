@@ -143,6 +143,11 @@ The full rule set is OrangeRender's `coding-standards.md` (linked from `../Orang
 - Every header uses `#ifndef`/`#define`/`#endif` guards named `ORANGE_ENGINE_<UPPER_PATH>_H` (e.g. `include/orange/engine/scene/World.h` → `ORANGE_ENGINE_SCENE_WORLD_H`). Do not use `#pragma once`.
 - Public exported types use `ORANGE_ENGINE_API` (analogous to OrangeRender's `ORANGE_API`).
 - Brace style: opening brace on its own line, aligned with the declaration (matches OrangeRender's examples).
+- Comments: terse — only *why* / non-obvious traps / decisions; drop lines that restate the code. ≤2-3 lines per point.
+- Variable names: meaningful, no cryptic abbreviations (on top of the prefix rules above).
+- Namespace body: indent one level (contents track nesting); use collapsed `namespace A::B::C {}` to stay single-level. New code only — existing flat-namespace code is not retrofitted.
+
+> 2026-07-03 用户新增风格约定（注释精炼 / 变量名达意 / namespace 体缩进），going-forward，遇冲突优先于旧 `coding-standards.md`。namespace 缩进有别于 Google/LLVM「不缩进」主流惯例，属用户明确选择。
 
 ## Design guardrails (project-level invariants)
 
