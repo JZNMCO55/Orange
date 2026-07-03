@@ -41,33 +41,33 @@
 namespace Orange::Engine
 {
 
-class ORANGE_ENGINE_API Layer
-{
-public:
-    explicit Layer(std::string_view name = "Layer");
-    virtual ~Layer();
+    class ORANGE_ENGINE_API Layer
+    {
+    public:
+        explicit Layer(std::string_view name = "Layer");
+        virtual ~Layer();
 
-    Layer(const Layer&)            = delete;
-    Layer& operator=(const Layer&) = delete;
-    Layer(Layer&&)                 = delete;
-    Layer& operator=(Layer&&)      = delete;
+        Layer(const Layer&)            = delete;
+        Layer& operator=(const Layer&) = delete;
+        Layer(Layer&&)                 = delete;
+        Layer& operator=(Layer&&)      = delete;
 
-    virtual void OnAttach() {}
-    virtual void OnDetach() {}
-    virtual void OnUpdate(const FrameContext& /*frame*/) {}
+        virtual void OnAttach() {}
+        virtual void OnDetach() {}
+        virtual void OnUpdate(const FrameContext& /*frame*/) {}
 
-    // debug-UI 提交点。签名刻意不出现任何 ImGui 类型——公共头不漏第三方
-    // （consumer 在 .cpp 里自行 #include <imgui.h>）。见上方生命周期说明。
-    virtual void OnImGui() {}
+        // debug-UI 提交点。签名刻意不出现任何 ImGui 类型——公共头不漏第三方
+        // （consumer 在 .cpp 里自行 #include <imgui.h>）。见上方生命周期说明。
+        virtual void OnImGui() {}
 
-    virtual bool OnEvent(const Platform::WindowEvent& /*event*/) { return false; }
+        virtual bool OnEvent(const Platform::WindowEvent& /*event*/) { return false; }
 
-    const std::string& GetName() const noexcept { return mName; }
+        const std::string& GetName() const noexcept { return mName; }
 
-private:
-    std::string mName;
-};
+    private:
+        std::string mName;
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
-#endif  // ORANGE_ENGINE_APP_LAYER_H
+#endif // ORANGE_ENGINE_APP_LAYER_H

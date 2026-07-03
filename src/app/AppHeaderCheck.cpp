@@ -11,10 +11,10 @@
 
 namespace Orange::Engine
 {
-namespace
-{
+    namespace
+    {
 
-[[maybe_unused]] inline constexpr int sAppHeaderCheckSentinel = 0;
+        [[maybe_unused]] inline constexpr int sAppHeaderCheckSentinel = 0;
 
-}  // namespace
-}  // namespace Orange::Engine
+    } // namespace
+} // namespace Orange::Engine

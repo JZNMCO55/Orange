@@ -28,19 +28,19 @@ using Orange::Engine::Asset::VertexUV2;
 namespace
 {
 
-// 单位 XY 四边形：z=0、法线 +Z、UV(u→+X, v→+Y)、两三角 CCW。
-void MakeQuad(std::vector<VertexPosition3>& pos,
-              std::vector<VertexUV2>&       uv,
-              std::vector<VertexNormal3>&   nrm,
-              std::vector<std::uint32_t>&   idx)
-{
-    pos = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
-    uv  = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    nrm = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
-    idx = {0, 1, 2, 0, 2, 3};
-}
+    // 单位 XY 四边形：z=0、法线 +Z、UV(u→+X, v→+Y)、两三角 CCW。
+    void MakeQuad(std::vector<VertexPosition3>& pos,
+                  std::vector<VertexUV2>&       uv,
+                  std::vector<VertexNormal3>&   nrm,
+                  std::vector<std::uint32_t>&   idx)
+    {
+        pos = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
+        uv  = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        nrm = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+        idx = {0, 1, 2, 0, 2, 3};
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -60,8 +60,7 @@ int main()
 
         // re-weld 后所有顶点切线一致（同一平面、同一 UV 方向）→ 不应分裂。
         assert(tangents.size() == pos.size() && "切线数与（re-weld 后）顶点数一致");
-        assert(pos.size() == uv.size() && pos.size() == nrm.size()
-               && "re-weld 后 pos/uv/normal 等长");
+        assert(pos.size() == uv.size() && pos.size() == nrm.size() && "re-weld 后 pos/uv/normal 等长");
         assert(idx.size() == 6 && "两三角索引数不变");
 
         for (const auto& t : tangents)
@@ -72,8 +71,7 @@ int main()
             assert(std::fabs(len - 1.0f) < 1e-3f && "切线单位长");
             // U 沿 +X → 切线方向被 X 主导。
             assert(std::fabs(t.x) > 0.9f && "切线应沿 ±X（U 方向）");
-            assert(std::fabs(t.y) < 0.1f && std::fabs(t.z) < 0.1f
-                   && "切线 Y/Z 分量近 0");
+            assert(std::fabs(t.y) < 0.1f && std::fabs(t.z) < 0.1f && "切线 Y/Z 分量近 0");
             assert(std::fabs(std::fabs(t.w) - 1.0f) < 1e-3f && "handedness w = ±1");
         }
     }
@@ -85,8 +83,8 @@ int main()
         std::vector<VertexNormal3>   nrm;
         std::vector<std::uint32_t>   idx;
         MakeQuad(pos, uv, nrm, idx);
-        uv.clear();  // 模拟无 UV
-        const std::size_t posCountBefore = pos.size();
+        uv.clear(); // 模拟无 UV
+        const std::size_t           posCountBefore = pos.size();
         std::vector<VertexTangent4> tangents;
 
         const bool ok = GenerateMikkTSpaceTangents(pos, uv, nrm, idx, tangents);
@@ -102,7 +100,7 @@ int main()
         std::vector<VertexNormal3>   nrm;
         std::vector<std::uint32_t>   idx;
         MakeQuad(pos, uv, nrm, idx);
-        idx.push_back(0);  // 7 个索引，非 3 倍数
+        idx.push_back(0); // 7 个索引，非 3 倍数
         std::vector<VertexTangent4> tangents;
 
         const bool ok = GenerateMikkTSpaceTangents(pos, uv, nrm, idx, tangents);

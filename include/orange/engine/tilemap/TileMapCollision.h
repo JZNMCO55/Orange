@@ -20,23 +20,23 @@
 namespace Orange::Engine::Tilemap
 {
 
-// 一块合并出的实心矩形（tile 坐标系：左下角 tile (x,y) + 尺寸 w×h 个 tile）。
-struct TileRect
-{
-    int x{0};
-    int y{0};
-    int w{0};
-    int h{0};
-};
+    // 一块合并出的实心矩形（tile 坐标系：左下角 tile (x,y) + 尺寸 w×h 个 tile）。
+    struct TileRect
+    {
+        int x{0};
+        int y{0};
+        int w{0};
+        int h{0};
+    };
 
-// 贪心合并 tilemap 的实心 tile 成尽量少的不重叠矩形（classic greedy meshing）。
-// 保证：每个实心 tile 被恰好一个矩形覆盖、矩形互不重叠；空 / 无实心 → 空 vector。
-ORANGE_ENGINE_API std::vector<TileRect> MergeSolidTiles(const TileMap& map, const TileSet& tileset);
+    // 贪心合并 tilemap 的实心 tile 成尽量少的不重叠矩形（classic greedy meshing）。
+    // 保证：每个实心 tile 被恰好一个矩形覆盖、矩形互不重叠；空 / 无实心 → 空 vector。
+    ORANGE_ENGINE_API std::vector<TileRect> MergeSolidTiles(const TileMap& map, const TileSet& tileset);
 
-// TileRect → 世界 AABB（lower = 左下、upper = 右上；用于建物理静态体）。
-ORANGE_ENGINE_API void TileRectToWorldAABB(const TileMap& map, const TileRect& rect,
-                                           glm::vec2& lowerOut, glm::vec2& upperOut);
+    // TileRect → 世界 AABB（lower = 左下、upper = 右上；用于建物理静态体）。
+    ORANGE_ENGINE_API void TileRectToWorldAABB(const TileMap& map, const TileRect& rect,
+                                               glm::vec2& lowerOut, glm::vec2& upperOut);
 
-}  // namespace Orange::Engine::Tilemap
+} // namespace Orange::Engine::Tilemap
 
-#endif  // ORANGE_ENGINE_TILEMAP_TILE_MAP_COLLISION_H
+#endif // ORANGE_ENGINE_TILEMAP_TILE_MAP_COLLISION_H

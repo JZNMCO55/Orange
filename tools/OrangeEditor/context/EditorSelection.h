@@ -44,10 +44,16 @@ struct EditorSelection
 
     bool IsSelected(Orange::Engine::Entity e) const noexcept
     {
-        if (e == selectedEntity) { return true; }
+        if (e == selectedEntity)
+        {
+            return true;
+        }
         for (const auto& a : additionalSelectedEntities)
         {
-            if (a == e) { return true; }
+            if (a == e)
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -112,28 +118,28 @@ struct EditorSelection
             AfterSibling    = 2,
         };
         Orange::Engine::Entity child;
-        Orange::Engine::Entity newParent  = Orange::Engine::Entity::Invalid();  // Into 用
-        Orange::Engine::Entity refSibling = Orange::Engine::Entity::Invalid();  // Before/After 用
+        Orange::Engine::Entity newParent  = Orange::Engine::Entity::Invalid(); // Into 用
+        Orange::Engine::Entity refSibling = Orange::Engine::Entity::Invalid(); // Before/After 用
         Where                  where      = Where::IntoAsLastChild;
         bool                   valid      = false;
     } pendingReparent;
 
     enum class PendingCreateKind : std::uint8_t
     {
-        Empty = 0,    // Name + Transform，用户后续手动 + Add Component
-        Light,        // Name + Transform + DirectionalLight + Renderable(cube + emissive)
-                      // —— 一键搭出"看得见的发光物体"
+        Empty = 0, // Name + Transform，用户后续手动 + Add Component
+        Light,     // Name + Transform + DirectionalLight + Renderable(cube + emissive)
+                   // —— 一键搭出"看得见的发光物体"
         // 基本体（"3D Object" 子菜单，Unity/Godot 同款一键可见几何）：Name +
         // Transform + Renderable(对应内置 mesh + pbr 材质)。省去"Create Entity →
         // Add Renderable → 选 mesh"三步，灰盒搭场景高频入口。
-        Cube,         // cubeMeshHandle
-        Sphere,       // sphereMeshHandle（lat/lon UV sphere）
-        Plane,        // planeMeshHandle（地面 / 墙面）
+        Cube,   // cubeMeshHandle
+        Sphere, // sphereMeshHandle（lat/lon UV sphere）
+        Plane,  // planeMeshHandle（地面 / 墙面）
     };
 
     struct PendingCreate
     {
-        Orange::Engine::Entity parent;  // Invalid = 创建为 root；否则挂为该 parent 末子
+        Orange::Engine::Entity parent; // Invalid = 创建为 root；否则挂为该 parent 末子
         PendingCreateKind      kind  = PendingCreateKind::Empty;
         bool                   valid = false;
     } pendingCreate;
@@ -153,7 +159,7 @@ struct EditorSelection
     // component。
     Orange::Engine::Entity transformEulerCacheEntity =
         Orange::Engine::Entity::Invalid();
-    glm::vec3              transformEulerCache{0.0f, 0.0f, 0.0f};
+    glm::vec3 transformEulerCache{0.0f, 0.0f, 0.0f};
 };
 
-#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_SELECTION_H
+#endif // ORANGE_EDITOR_CONTEXT_EDITOR_SELECTION_H

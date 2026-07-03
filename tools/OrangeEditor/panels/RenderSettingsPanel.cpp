@@ -49,8 +49,14 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
         int cascadeCount = static_cast<int>(sc.cascadeCount);
         if (ImGui::SliderInt("Cascade Count", &cascadeCount, 1, 4))
         {
-            if (cascadeCount < 1) { cascadeCount = 1; }
-            if (cascadeCount > 4) { cascadeCount = 4; }
+            if (cascadeCount < 1)
+            {
+                cascadeCount = 1;
+            }
+            if (cascadeCount > 4)
+            {
+                cascadeCount = 4;
+            }
             sc.cascadeCount = static_cast<std::uint32_t>(cascadeCount);
         }
         if (ImGui::IsItemHovered())
@@ -94,8 +100,14 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
         int pcfRadius = static_cast<int>(sc.pcfKernelRadius);
         if (ImGui::SliderInt("PCF Kernel Radius", &pcfRadius, 0, 2))
         {
-            if (pcfRadius < 0) { pcfRadius = 0; }
-            if (pcfRadius > 2) { pcfRadius = 2; }
+            if (pcfRadius < 0)
+            {
+                pcfRadius = 0;
+            }
+            if (pcfRadius > 2)
+            {
+                pcfRadius = 2;
+            }
             sc.pcfKernelRadius = static_cast<std::uint32_t>(pcfRadius);
         }
         if (ImGui::IsItemHovered())
@@ -117,10 +129,14 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
         // 持，但 GPU 分块布局可能浪费带宽，编辑器只暴露推荐档位。
         constexpr std::uint32_t kResOptions[] = {1024, 2048, 4096};
         constexpr const char*   kResLabels[]  = {"1024", "2048", "4096"};
-        int currentIdx = 1;  // 默认 2048
+        int                     currentIdx    = 1; // 默认 2048
         for (int i = 0; i < 3; ++i)
         {
-            if (kResOptions[i] == sc.mapResolution) { currentIdx = i; break; }
+            if (kResOptions[i] == sc.mapResolution)
+            {
+                currentIdx = i;
+                break;
+            }
         }
         // 非典型分辨率（用户外部 SetShadowConfig 写入）下 currentIdx 命中
         // default 2048 行，preview 文本下方再用 SmallText 提示真值。
@@ -141,7 +157,7 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
             ImGui::TextDisabled("(actual: %u)", sc.mapResolution);
         }
 
-        ImGui::DragFloat("Depth Bias",  &sc.depthBias,  0.0005f, 0.0f, 0.1f, "%.4f");
+        ImGui::DragFloat("Depth Bias", &sc.depthBias, 0.0005f, 0.0f, 0.1f, "%.4f");
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip(
@@ -151,7 +167,7 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
                 "  scene scale 不同（厘米/公里）需要按比例调整");
         }
 
-        ImGui::DragFloat("Normal Bias", &sc.normalBias, 0.001f,  0.0f, 0.2f, "%.4f");
+        ImGui::DragFloat("Normal Bias", &sc.normalBias, 0.001f, 0.0f, 0.2f, "%.4f");
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip(
@@ -186,7 +202,7 @@ void EditorRenderLayer::DrawRenderSettingsPanel()
         else
         {
             namespace R = Orange::Engine::Render;
-            auto& tp = *mpTonemapPassRef;
+            auto& tp    = *mpTonemapPassRef;
 
             // Combo 4 选项 —— index 与 R::TonemapOperator enum 一一对应
             // （ACES_Narkowicz=0 / AgX=1 / Reinhard=2 / Linear=3）。

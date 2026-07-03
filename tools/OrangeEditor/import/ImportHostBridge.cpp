@@ -17,7 +17,7 @@
 #include "GltfImporter.h"
 #include "ImportDispatcher.h"
 #include "ObjImporter.h"
-#include "../BuiltinAssets.h"  // EnsureMaterialInstance
+#include "../BuiltinAssets.h" // EnsureMaterialInstance
 #include "../EditorHost.h"
 
 #include <orange/engine/asset/AssetRegistry.h>
@@ -28,146 +28,154 @@
 namespace Orange::Editor::Import
 {
 
-namespace
-{
-// 取 host 的 AssetRegistry；未初始化时填好 result 并返回 false（caller 直接
-// 返回错误，与重构前 "pAssets == nullptr → AssetLoadFailed" 行为一致）。
-bool ResolveHostRegistry(EditorHost& host, std::string_view what,
-                         std::string_view srcPath,
-                         ::Orange::Engine::Asset::AssetRegistry*& outRegistry,
-                         ImportResult& result)
-{
-    if (host.assets.pAssets == nullptr)
+    namespace
     {
-        result.status  = ImportStatus::AssetLoadFailed;
-        result.message = "AssetRegistry not initialized";
-        ORANGE_LOG_ERROR("{}: '{}': {}", what, srcPath, result.message);
-        outRegistry = nullptr;
-        return false;
-    }
-    outRegistry = host.assets.pAssets.get();
-    return true;
-}
-}  // namespace
-
-ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
-{
-    ImportResult result{};
-    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
-    if (!ResolveHostRegistry(host, "ObjImporter", srcPath, registry, result))
-    {
-        return result;
-    }
-    return RunObjImportToRegistry(srcPath, *registry);
-}
-
-ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
-{
-    ImportResult result{};
-    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
-    if (!ResolveHostRegistry(host, "GltfImporter", srcPath, registry, result))
-    {
-        return result;
-    }
-    // GUI 路径注入 EnsureMaterialInstance 把刚写出的 .material 注册进编辑器
-    // namedMaterialInstances / userMaterials 缓存。EnsureMaterialInstance 在
-    // ::（全局）命名空间，签名 (EditorHost&, const std::string&)。
-    auto registerMaterial = [&host](const std::string& matPath) {
-        if (::EnsureMaterialInstance(host, matPath) != nullptr)
+        // 取 host 的 AssetRegistry；未初始化时填好 result 并返回 false（caller 直接
+        // 返回错误，与重构前 "pAssets == nullptr → AssetLoadFailed" 行为一致）。
+        bool ResolveHostRegistry(EditorHost& host, std::string_view what,
+                                 std::string_view                         srcPath,
+                                 ::Orange::Engine::Asset::AssetRegistry*& outRegistry,
+                                 ImportResult&                            result)
         {
-            ORANGE_LOG_INFO("GltfImporter: material '{}' 已注册 → 可在 Renderable "
-                            "Material 字段选用", matPath);
+            if (host.assets.pAssets == nullptr)
+            {
+                result.status  = ImportStatus::AssetLoadFailed;
+                result.message = "AssetRegistry not initialized";
+                ORANGE_LOG_ERROR("{}: '{}': {}", what, srcPath, result.message);
+                outRegistry = nullptr;
+                return false;
+            }
+            outRegistry = host.assets.pAssets.get();
+            return true;
         }
-    };
-    return RunGltfImportToRegistry(srcPath, *registry, registerMaterial);
-}
+    } // namespace
 
-ImportResult RunFbxImport(std::string_view srcPath, EditorHost& host)
-{
-    ImportResult result{};
-    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
-    if (!ResolveHostRegistry(host, "FbxImporter", srcPath, registry, result))
+    ImportResult RunObjImport(std::string_view srcPath, EditorHost& host)
     {
-        return result;
-    }
-    // GUI 路径注入 EnsureMaterialInstance（同 gltf 路径），把刚写出的 .material
-    // 注册进编辑器 namedMaterialInstances / userMaterials 缓存。
-    auto registerMaterial = [&host](const std::string& matPath) {
-        if (::EnsureMaterialInstance(host, matPath) != nullptr)
+        ImportResult                            result{};
+        ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+        if (!ResolveHostRegistry(host, "ObjImporter", srcPath, registry, result))
         {
-            ORANGE_LOG_INFO("FbxImporter: material '{}' 已注册 → 可在 Renderable "
-                            "Material 字段选用", matPath);
+            return result;
         }
-    };
-    return RunFbxImportToRegistry(srcPath, *registry, registerMaterial);
-}
-
-ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
-                           std::string_view destDirOverride)
-{
-    ImportResult result{};
-    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
-    if (!ResolveHostRegistry(host, "ImportTexture", srcPath, registry, result))
-    {
-        return result;
+        return RunObjImportToRegistry(srcPath, *registry);
     }
-    return ImportTextureToRegistry(srcPath, *registry, destDirOverride);
-}
 
-ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host)
-{
-    return RunObjImport(srcPath, host);
-}
-
-ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host)
-{
-    return RunGltfImport(srcPath, host);
-}
-
-ImportResult ImportFbxMesh(std::string_view srcPath, EditorHost& host)
-{
-    return RunFbxImport(srcPath, host);
-}
-
-ImportResult Dispatch(std::string_view srcPath, EditorHost& host)
-{
-    // 委托到 registry-only DispatchToRegistry（ext 分类逻辑单点在那里），注入
-    // host registry + EnsureMaterialInstance 回调。gltf 路径才会用到回调，
-    // texture / obj 路径忽略它，行为与逐函数包装完全一致。
-    ImportResult result{};
-    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
-    if (!ResolveHostRegistry(host, "ImportDispatcher", srcPath, registry, result))
+    ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host)
     {
-        return result;
-    }
-    auto registerMaterial = [&host](const std::string& matPath) {
-        if (::EnsureMaterialInstance(host, matPath) != nullptr)
+        ImportResult                            result{};
+        ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+        if (!ResolveHostRegistry(host, "GltfImporter", srcPath, registry, result))
         {
-            ORANGE_LOG_INFO("GltfImporter: material '{}' 已注册 → 可在 Renderable "
-                            "Material 字段选用", matPath);
+            return result;
         }
-    };
-    return DispatchToRegistry(srcPath, *registry, registerMaterial);
-}
-
-ImportResult Dispatch(std::string_view srcPath, EditorHost& host, float importScale)
-{
-    // 同无 scale 版，仅把 importScale 透传给 DispatchToRegistry（FBX 路径消费，
-    // 其余扩展名忽略）。
-    ImportResult result{};
-    ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
-    if (!ResolveHostRegistry(host, "ImportDispatcher", srcPath, registry, result))
-    {
-        return result;
-    }
-    auto registerMaterial = [&host](const std::string& matPath) {
-        if (::EnsureMaterialInstance(host, matPath) != nullptr)
+        // GUI 路径注入 EnsureMaterialInstance 把刚写出的 .material 注册进编辑器
+        // namedMaterialInstances / userMaterials 缓存。EnsureMaterialInstance 在
+        // ::（全局）命名空间，签名 (EditorHost&, const std::string&)。
+        auto registerMaterial = [&host](const std::string& matPath)
         {
-            ORANGE_LOG_INFO("Importer: material '{}' 已注册 → 可在 Renderable "
-                            "Material 字段选用", matPath);
-        }
-    };
-    return DispatchToRegistry(srcPath, *registry, registerMaterial, importScale);
-}
+            if (::EnsureMaterialInstance(host, matPath) != nullptr)
+            {
+                ORANGE_LOG_INFO("GltfImporter: material '{}' 已注册 → 可在 Renderable "
+                                "Material 字段选用",
+                                matPath);
+            }
+        };
+        return RunGltfImportToRegistry(srcPath, *registry, registerMaterial);
+    }
 
-}  // namespace Orange::Editor::Import
+    ImportResult RunFbxImport(std::string_view srcPath, EditorHost& host)
+    {
+        ImportResult                            result{};
+        ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+        if (!ResolveHostRegistry(host, "FbxImporter", srcPath, registry, result))
+        {
+            return result;
+        }
+        // GUI 路径注入 EnsureMaterialInstance（同 gltf 路径），把刚写出的 .material
+        // 注册进编辑器 namedMaterialInstances / userMaterials 缓存。
+        auto registerMaterial = [&host](const std::string& matPath)
+        {
+            if (::EnsureMaterialInstance(host, matPath) != nullptr)
+            {
+                ORANGE_LOG_INFO("FbxImporter: material '{}' 已注册 → 可在 Renderable "
+                                "Material 字段选用",
+                                matPath);
+            }
+        };
+        return RunFbxImportToRegistry(srcPath, *registry, registerMaterial);
+    }
+
+    ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
+                               std::string_view destDirOverride)
+    {
+        ImportResult                            result{};
+        ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+        if (!ResolveHostRegistry(host, "ImportTexture", srcPath, registry, result))
+        {
+            return result;
+        }
+        return ImportTextureToRegistry(srcPath, *registry, destDirOverride);
+    }
+
+    ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host)
+    {
+        return RunObjImport(srcPath, host);
+    }
+
+    ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host)
+    {
+        return RunGltfImport(srcPath, host);
+    }
+
+    ImportResult ImportFbxMesh(std::string_view srcPath, EditorHost& host)
+    {
+        return RunFbxImport(srcPath, host);
+    }
+
+    ImportResult Dispatch(std::string_view srcPath, EditorHost& host)
+    {
+        // 委托到 registry-only DispatchToRegistry（ext 分类逻辑单点在那里），注入
+        // host registry + EnsureMaterialInstance 回调。gltf 路径才会用到回调，
+        // texture / obj 路径忽略它，行为与逐函数包装完全一致。
+        ImportResult                            result{};
+        ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+        if (!ResolveHostRegistry(host, "ImportDispatcher", srcPath, registry, result))
+        {
+            return result;
+        }
+        auto registerMaterial = [&host](const std::string& matPath)
+        {
+            if (::EnsureMaterialInstance(host, matPath) != nullptr)
+            {
+                ORANGE_LOG_INFO("GltfImporter: material '{}' 已注册 → 可在 Renderable "
+                                "Material 字段选用",
+                                matPath);
+            }
+        };
+        return DispatchToRegistry(srcPath, *registry, registerMaterial);
+    }
+
+    ImportResult Dispatch(std::string_view srcPath, EditorHost& host, float importScale)
+    {
+        // 同无 scale 版，仅把 importScale 透传给 DispatchToRegistry（FBX 路径消费，
+        // 其余扩展名忽略）。
+        ImportResult                            result{};
+        ::Orange::Engine::Asset::AssetRegistry* registry = nullptr;
+        if (!ResolveHostRegistry(host, "ImportDispatcher", srcPath, registry, result))
+        {
+            return result;
+        }
+        auto registerMaterial = [&host](const std::string& matPath)
+        {
+            if (::EnsureMaterialInstance(host, matPath) != nullptr)
+            {
+                ORANGE_LOG_INFO("Importer: material '{}' 已注册 → 可在 Renderable "
+                                "Material 字段选用",
+                                matPath);
+            }
+        };
+        return DispatchToRegistry(srcPath, *registry, registerMaterial, importScale);
+    }
+
+} // namespace Orange::Editor::Import

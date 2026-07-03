@@ -32,46 +32,46 @@ namespace Scene = ::Orange::Engine::Scene;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool Near(float a, float b, float eps = 1e-4f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-std::filesystem::path MakeTempAnimPath(const char* tag)
-{
-    auto base = std::filesystem::temp_directory_path();
-    base /= std::string{"orange_engine_clip_reassign_"} + tag + ".anim";
-    std::error_code ec;
-    std::filesystem::remove(base, ec);
-    return base;
-}
+    std::filesystem::path MakeTempAnimPath(const char* tag)
+    {
+        auto base = std::filesystem::temp_directory_path();
+        base /= std::string{"orange_engine_clip_reassign_"} + tag + ".anim";
+        std::error_code ec;
+        std::filesystem::remove(base, ec);
+        return base;
+    }
 
-// 造一个 position.x 0→6 线性、duration=2 的 clip 并落盘。
-Anim::AnimationClip MakeClipFile(const std::filesystem::path& path)
-{
-    Anim::AnimationClip clip;
-    clip.name     = "reassign_clip";
-    clip.duration = 2.0f;
-    clip.loop     = false;
-    Anim::AnimationTrack t;
-    t.targetName = "position.x";
-    t.valueType  = Anim::TrackValueType::Float;
-    Anim::Keyframe k0;
-    k0.time  = 0.0f;
-    k0.value = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-    Anim::Keyframe k1;
-    k1.time  = 2.0f;
-    k1.value = glm::vec4(6.0f, 0.0f, 0.0f, 0.0f);
-    t.keys.push_back(k0);
-    t.keys.push_back(k1);
-    clip.tracks.push_back(t);
+    // 造一个 position.x 0→6 线性、duration=2 的 clip 并落盘。
+    Anim::AnimationClip MakeClipFile(const std::filesystem::path& path)
+    {
+        Anim::AnimationClip clip;
+        clip.name     = "reassign_clip";
+        clip.duration = 2.0f;
+        clip.loop     = false;
+        Anim::AnimationTrack t;
+        t.targetName = "position.x";
+        t.valueType  = Anim::TrackValueType::Float;
+        Anim::Keyframe k0;
+        k0.time  = 0.0f;
+        k0.value = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+        Anim::Keyframe k1;
+        k1.time  = 2.0f;
+        k1.value = glm::vec4(6.0f, 0.0f, 0.0f, 0.0f);
+        t.keys.push_back(k0);
+        t.keys.push_back(k1);
+        clip.tracks.push_back(t);
 
-    auto saveRes = Anim::SaveAnimationClip(clip, path.string());
-    assert(saveRes.IsOk() && "Save .anim 应成功");
-    return clip;
-}
+        auto saveRes = Anim::SaveAnimationClip(clip, path.string());
+        assert(saveRes.IsOk() && "Save .anim 应成功");
+        return clip;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -79,7 +79,7 @@ int main()
     MakeClipFile(path);
 
     Asset::AssetRegistry reg;
-    auto regRes = reg.RegisterLoader<Anim::AnimationClip>(
+    auto                 regRes = reg.RegisterLoader<Anim::AnimationClip>(
         std::make_unique<Anim::AnimationClipLoader>());
     assert(regRes.IsOk() && "RegisterLoader 应成功");
 
@@ -87,10 +87,8 @@ int main()
     Scene::TransformComponent target;
     target.position = glm::vec3(0.0f);
     Anim::ClipAnimator animator(Anim::AnimationClip{}, &target);
-    assert(animator.SourceAssetPath().empty()
-           && "空 clip animator 的来源路径应为空");
-    assert(Near(animator.Duration(), 0.0f)
-           && "空 clip duration 应为 0（无关键帧）");
+    assert(animator.SourceAssetPath().empty() && "空 clip animator 的来源路径应为空");
+    assert(Near(animator.Duration(), 0.0f) && "空 clip duration 应为 0（无关键帧）");
     std::fprintf(stdout, "  [PASS] 空 ClipAnimator 初态\n");
 
     // ===== 2. clipSet 序列：Load → Get → SetClip + SetSourceAssetPath =====
@@ -106,26 +104,21 @@ int main()
     }
 
     // 来源路径已记住（Inspector clipGet 读它显示字段值）。
-    assert(animator.SourceAssetPath() == path.string()
-           && "SetSourceAssetPath 后来源路径应匹配");
+    assert(animator.SourceAssetPath() == path.string() && "SetSourceAssetPath 后来源路径应匹配");
     // duration 跟随新 clip。
-    assert(Near(animator.Duration(), 2.0f)
-           && "重指派后 duration 应为新 clip 的 2.0");
+    assert(Near(animator.Duration(), 2.0f) && "重指派后 duration 应为新 clip 的 2.0");
     std::fprintf(stdout, "  [PASS] 重指派后 source path + duration\n");
 
     // ===== 3. Seek 应用 pose（scrub slider 路径）—— 中点 t=1 → position.x=3 =====
     animator.Seek(1.0f);
-    assert(Near(target.position.x, 3.0f)
-           && "Seek(1.0) 应把 position.x 采样到 3.0（0→6 线性中点）");
+    assert(Near(target.position.x, 3.0f) && "Seek(1.0) 应把 position.x 采样到 3.0（0→6 线性中点）");
     std::fprintf(stdout, "  [PASS] Seek 应用 pose（scrub 路径）\n");
 
     // ===== 4. 清空字段（clipSet path 为空分支）：换空 clip + 清来源 =====
     animator.SetClip(Anim::AnimationClip{});
     animator.SetSourceAssetPath({});
-    assert(animator.SourceAssetPath().empty()
-           && "清空字段后来源路径应为空");
-    assert(Near(animator.Duration(), 0.0f)
-           && "清空字段后 duration 应回 0");
+    assert(animator.SourceAssetPath().empty() && "清空字段后来源路径应为空");
+    assert(Near(animator.Duration(), 0.0f) && "清空字段后 duration 应回 0");
     std::fprintf(stdout, "  [PASS] 清空字段（空 clip + 清来源）\n");
 
     std::error_code ec;

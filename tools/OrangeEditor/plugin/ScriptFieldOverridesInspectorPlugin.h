@@ -26,20 +26,20 @@
 namespace Orange::Editor::Plugin
 {
 
-class ScriptFieldOverridesInspectorPlugin : public IEditorInspectorPlugin
-{
-public:
-    // 按 schema.typeName == "Script" 字符串比较（与 RegisterScriptComponentSchema
-    // 内字面量保持一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class ScriptFieldOverridesInspectorPlugin : public IEditorInspectorPlugin
+    {
+    public:
+        // 按 schema.typeName == "Script" 字符串比较（与 RegisterScriptComponentSchema
+        // 内字面量保持一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // 段末追加 fieldOverrides 列表 UI（增 / 删 / 编辑每条 name / type / value）。
-    void ParseEnd(EditorHost&                                            host,
-                  Orange::Engine::Entity                                 entity,
-                  const Orange::Editor::Schema::ComponentSchema&         schema,
-                  void*                                                  component) override;
-};
+        // 段末追加 fieldOverrides 列表 UI（增 / 删 / 编辑每条 name / type / value）。
+        void ParseEnd(EditorHost&                                    host,
+                      Orange::Engine::Entity                         entity,
+                      const Orange::Editor::Schema::ComponentSchema& schema,
+                      void*                                          component) override;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_SCRIPT_FIELD_OVERRIDES_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_SCRIPT_FIELD_OVERRIDES_INSPECTOR_PLUGIN_H

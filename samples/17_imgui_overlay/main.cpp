@@ -67,110 +67,110 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-// 6 面 24 顶点立方体（与 sample 15 同款）。
-std::unique_ptr<MeshAsset> MakeUnitCubeMesh()
-{
-    constexpr float h = 0.5f;
-    std::array<std::array<VertexPosition3, 4>, 6> faces = {{
-        {{ { h, -h,  h}, { h, -h, -h}, { h,  h, -h}, { h,  h,  h} }},  // +X
-        {{ {-h, -h, -h}, {-h, -h,  h}, {-h,  h,  h}, {-h,  h, -h} }},  // -X
-        {{ {-h,  h,  h}, { h,  h,  h}, { h,  h, -h}, {-h,  h, -h} }},  // +Y
-        {{ {-h, -h, -h}, { h, -h, -h}, { h, -h,  h}, {-h, -h,  h} }},  // -Y
-        {{ {-h, -h,  h}, { h, -h,  h}, { h,  h,  h}, {-h,  h,  h} }},  // +Z
-        {{ { h, -h, -h}, {-h, -h, -h}, {-h,  h, -h}, { h,  h, -h} }},  // -Z
-    }};
-
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24);
-    uvs.reserve(24);
-    indices.reserve(36);
-
-    for (const auto& face : faces)
+    // 6 面 24 顶点立方体（与 sample 15 同款）。
+    std::unique_ptr<MeshAsset> MakeUnitCubeMesh()
     {
-        const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
-        for (int i = 0; i < 4; ++i)
+        constexpr float                               h     = 0.5f;
+        std::array<std::array<VertexPosition3, 4>, 6> faces = {{
+            {{{h, -h, h}, {h, -h, -h}, {h, h, -h}, {h, h, h}}},     // +X
+            {{{-h, -h, -h}, {-h, -h, h}, {-h, h, h}, {-h, h, -h}}}, // -X
+            {{{-h, h, h}, {h, h, h}, {h, h, -h}, {-h, h, -h}}},     // +Y
+            {{{-h, -h, -h}, {h, -h, -h}, {h, -h, h}, {-h, -h, h}}}, // -Y
+            {{{-h, -h, h}, {h, -h, h}, {h, h, h}, {-h, h, h}}},     // +Z
+            {{{h, -h, -h}, {-h, -h, -h}, {-h, h, -h}, {h, h, -h}}}, // -Z
+        }};
+
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+
+        for (const auto& face : faces)
         {
-            positions.push_back(face[i]);
-            uvs.push_back({0.0f, 0.0f});
+            const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
+            for (int i = 0; i < 4; ++i)
+            {
+                positions.push_back(face[i]);
+                uvs.push_back({0.0f, 0.0f});
+            }
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
         }
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// 调参 + 渲染 Layer。OnImGui 提交 Tuning 面板，OnUpdate 把面板状态实时写进
-// 场景（旋转速度 / 主光强度 / clear color），证明改值即时生效。
-class TuningLayer : public Layer
-{
-public:
-    TuningLayer(Pipeline& pipeline, World& world, Entity cube, Entity light)
-        : Layer("TuningLayer"), mPipeline(pipeline), mWorld(world), mCube(cube), mLight(light) {}
-
-    void OnImGui() override
+    // 调参 + 渲染 Layer。OnImGui 提交 Tuning 面板，OnUpdate 把面板状态实时写进
+    // 场景（旋转速度 / 主光强度 / clear color），证明改值即时生效。
+    class TuningLayer : public Layer
     {
-        ImGui::Begin("Tuning (live, no recompile)");
-        ImGui::TextUnformatted("调 slider 看画面实时变化：");
-        ImGui::SliderFloat("rotation speed", &mRotationSpeed, 0.0f, 4.0f);
-        ImGui::SliderFloat("light intensity", &mLightIntensity, 0.0f, 5.0f);
-        ImGui::ColorEdit3("clear color", mClearColor);
-        ImGui::Separator();
-        ImGui::Text("FPS: %.1f (%.3f ms/frame)",
-                    static_cast<double>(ImGui::GetIO().Framerate),
-                    1000.0 / static_cast<double>(ImGui::GetIO().Framerate));
-        ImGui::End();
-    }
+    public:
+        TuningLayer(Pipeline& pipeline, World& world, Entity cube, Entity light)
+            : Layer("TuningLayer"), mPipeline(pipeline), mWorld(world), mCube(cube), mLight(light) {}
 
-    void OnUpdate(const FrameContext& frame) override
-    {
-        mAngle += mRotationSpeed * frame.time.deltaSeconds;
-        if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+        void OnImGui() override
         {
-            const glm::vec3 axis = glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f));
-            xf->rotation         = glm::angleAxis(mAngle, axis);
+            ImGui::Begin("Tuning (live, no recompile)");
+            ImGui::TextUnformatted("调 slider 看画面实时变化：");
+            ImGui::SliderFloat("rotation speed", &mRotationSpeed, 0.0f, 4.0f);
+            ImGui::SliderFloat("light intensity", &mLightIntensity, 0.0f, 5.0f);
+            ImGui::ColorEdit3("clear color", mClearColor);
+            ImGui::Separator();
+            ImGui::Text("FPS: %.1f (%.3f ms/frame)",
+                        static_cast<double>(ImGui::GetIO().Framerate),
+                        1000.0 / static_cast<double>(ImGui::GetIO().Framerate));
+            ImGui::End();
         }
-        if (auto* light = mWorld.GetComponent<DirectionalLight>(mLight))
+
+        void OnUpdate(const FrameContext& frame) override
         {
-            light->intensity = mLightIntensity;
+            mAngle += mRotationSpeed * frame.time.deltaSeconds;
+            if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+            {
+                const glm::vec3 axis = glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f));
+                xf->rotation         = glm::angleAxis(mAngle, axis);
+            }
+            if (auto* light = mWorld.GetComponent<DirectionalLight>(mLight))
+            {
+                light->intensity = mLightIntensity;
+            }
+            mPipeline.SetSceneClearColor(mClearColor[0], mClearColor[1], mClearColor[2]);
+
+            mPipeline.Render(mWorld);
         }
-        mPipeline.SetSceneClearColor(mClearColor[0], mClearColor[1], mClearColor[2]);
 
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        bool OnEvent(const Platform::WindowEvent& event) override
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
         }
-        return false;
-    }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-    Entity    mCube;
-    Entity    mLight;
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+        Entity    mCube;
+        Entity    mLight;
 
-    float mAngle          = 0.0f;
-    float mRotationSpeed  = 0.8f;
-    float mLightIntensity = 1.0f;
-    float mClearColor[3]  = {0.05f, 0.07f, 0.10f};
-};
+        float mAngle          = 0.0f;
+        float mRotationSpeed  = 0.8f;
+        float mLightIntensity = 1.0f;
+        float mClearColor[3]  = {0.05f, 0.07f, 0.10f};
+    };
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -247,17 +247,16 @@ int main()
 
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(2.8f, 2.0f, 3.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(2.8f, 2.0f, 3.0f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 
     Pipeline pipeline;
-    auto initResult = pipeline.Initialize(host->GetWindow(), assets);
+    auto     initResult = pipeline.Initialize(host->GetWindow(), assets);
     if (initResult.IsErr())
     {
         std::fprintf(stderr, "Pipeline::Initialize failed (code=%u)\n",
@@ -273,7 +272,8 @@ int main()
                      static_cast<unsigned>(im.Error()));
         return 1;
     }
-    pipeline.SetImGuiSubmit([h = host.get()]() { h->DispatchImGui(); });
+    pipeline.SetImGuiSubmit([h = host.get()]()
+                            { h->DispatchImGui(); });
 
     host->PushLayer(std::make_unique<TuningLayer>(pipeline, world, cubeEntity, lightEntity));
 

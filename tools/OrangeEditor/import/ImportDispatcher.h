@@ -29,144 +29,144 @@ struct EditorHost;
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 namespace Orange::Editor::Import
 {
 
-// 按扩展名分类。Dispatch 内部用；外部 caller 一般直接调 Dispatch。
-enum class ImportKind
-{
-    Texture,      // .png / .jpg / .jpeg / .tga / .hdr
-    ObjMesh,      // .obj
-    GltfMesh,     // .gltf / .glb
-    FbxMesh,      // .fbx
-    Unsupported,  // 其它
-};
+    // 按扩展名分类。Dispatch 内部用；外部 caller 一般直接调 Dispatch。
+    enum class ImportKind
+    {
+        Texture,     // .png / .jpg / .jpeg / .tga / .hdr
+        ObjMesh,     // .obj
+        GltfMesh,    // .gltf / .glb
+        FbxMesh,     // .fbx
+        Unsupported, // 其它
+    };
 
-// 执行结果状态。Success 表示 import + copy + .meta + AssetRegistry 全部 OK。
-enum class ImportStatus
-{
-    Success,
-    UnsupportedExt,        // 扩展名不在支持清单
-    SourceReadFailed,      // 源文件不存在 / 不可读 / hash 计算失败
-    CopyFailed,            // copy 到 assets/<TypeDir>/ 失败（权限 / 磁盘空间）
-    AssetLoadFailed,       // copy OK 但 AssetRegistry::Load 后处理失败
-    MetaWriteFailed,       // 资产 ready 但 .meta 写盘失败
-    NotImplemented,        // mesh 路径在 T3/T4 接通前的 stub 返回值
-};
+    // 执行结果状态。Success 表示 import + copy + .meta + AssetRegistry 全部 OK。
+    enum class ImportStatus
+    {
+        Success,
+        UnsupportedExt,   // 扩展名不在支持清单
+        SourceReadFailed, // 源文件不存在 / 不可读 / hash 计算失败
+        CopyFailed,       // copy 到 assets/<TypeDir>/ 失败（权限 / 磁盘空间）
+        AssetLoadFailed,  // copy OK 但 AssetRegistry::Load 后处理失败
+        MetaWriteFailed,  // 资产 ready 但 .meta 写盘失败
+        NotImplemented,   // mesh 路径在 T3/T4 接通前的 stub 返回值
+    };
 
-struct ImportResult
-{
-    ImportStatus status{ImportStatus::Success};
-    std::string  destPath;      // assets/<TypeDir>/<filename>，成功时填
-    std::string  message;       // 人类可读 + 用于 log
+    struct ImportResult
+    {
+        ImportStatus status{ImportStatus::Success};
+        std::string  destPath; // assets/<TypeDir>/<filename>，成功时填
+        std::string  message;  // 人类可读 + 用于 log
 
-    // gltf 多 material 导入产物：按 material slot 顺序排列的 .material 落盘
-    // 路径（slot i 用 materialPaths[i]）。单 material 模型只有一项（= slot 0，
-    // 与历史单材质导入一致）；某 slot 的 primitive 无 material（nullptr）时该项
-    // 为空字符串（落地端用引擎默认材质兜底）。mesh 实际带 sub-mesh 分段
-    // （多 material）时 materialPaths.size() >= 2，落地端据此挂
-    // SubMeshMaterialsComponent；否则只设 RenderableComponent.materialInstance。
-    // texture / obj 导入路径不填本字段。
-    std::vector<std::string> materialPaths;
-};
+        // gltf 多 material 导入产物：按 material slot 顺序排列的 .material 落盘
+        // 路径（slot i 用 materialPaths[i]）。单 material 模型只有一项（= slot 0，
+        // 与历史单材质导入一致）；某 slot 的 primitive 无 material（nullptr）时该项
+        // 为空字符串（落地端用引擎默认材质兜底）。mesh 实际带 sub-mesh 分段
+        // （多 material）时 materialPaths.size() >= 2，落地端据此挂
+        // SubMeshMaterialsComponent；否则只设 RenderableComponent.materialInstance。
+        // texture / obj 导入路径不填本字段。
+        std::vector<std::string> materialPaths;
+    };
 
-// 按小写扩展名分类。"png" / "obj" 不带 '.'；'.png' / 'png' 都接受。
-ImportKind ClassifyByExt(std::string_view ext);
+    // 按小写扩展名分类。"png" / "obj" 不带 '.'；'.png' / 'png' 都接受。
+    ImportKind ClassifyByExt(std::string_view ext);
 
-// ---------------------------------------------------------------------------
-// Headless seam（GAP-2026-05-27 G1）：只依赖 Orange::Engine::Asset::AssetRegistry
-// 的导入入口 —— 不出现 EditorHost 类型，可在不拉起 GUI（无 GLFW / Vulkan /
-// ImGui / AudioEngine / ThumbnailService）的进程里复用，也是 headless ctest 锁
-// 的那条链。GUI 路径（File→Import 菜单 / OS drag-drop）下面的 Dispatch /
-// ImportTexture / ... 版本统一委托到这层 seam，行为零变化。
-//
-// gltf material 注册回调：RunGltfImport 在写出 .material sidecar 后需要把它
-// 注册进编辑器的 namedMaterialInstances / userMaterials 缓存（否则刚导入的材质
-// 在 Inspector Material 下拉里选不到）。这一步是纯编辑器态副作用，headless 不需
-// 要——故抽成可选回调：GUI 路径注入 EnsureMaterialInstance，headless 路径传空
-// （材质文件仍照常写盘，只是不进编辑器内存缓存）。
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Headless seam（GAP-2026-05-27 G1）：只依赖 Orange::Engine::Asset::AssetRegistry
+    // 的导入入口 —— 不出现 EditorHost 类型，可在不拉起 GUI（无 GLFW / Vulkan /
+    // ImGui / AudioEngine / ThumbnailService）的进程里复用，也是 headless ctest 锁
+    // 的那条链。GUI 路径（File→Import 菜单 / OS drag-drop）下面的 Dispatch /
+    // ImportTexture / ... 版本统一委托到这层 seam，行为零变化。
+    //
+    // gltf material 注册回调：RunGltfImport 在写出 .material sidecar 后需要把它
+    // 注册进编辑器的 namedMaterialInstances / userMaterials 缓存（否则刚导入的材质
+    // 在 Inspector Material 下拉里选不到）。这一步是纯编辑器态副作用，headless 不需
+    // 要——故抽成可选回调：GUI 路径注入 EnsureMaterialInstance，headless 路径传空
+    // （材质文件仍照常写盘，只是不进编辑器内存缓存）。
+    // ---------------------------------------------------------------------------
 
-// gltf importer 写出 .material 后的注册回调（仅 GUI 路径需要）。
-using MaterialRegisterFn = std::function<void(const std::string& materialPath)>;
+    // gltf importer 写出 .material 后的注册回调（仅 GUI 路径需要）。
+    using MaterialRegisterFn = std::function<void(const std::string& materialPath)>;
 
-// 单点 headless 入口：按 ext 路由到具体 registry-only importer。
-//
-// srcPath:  OS 文件绝对或相对路径；不能为空。
-// registry: 注入资产的目标 AssetRegistry（须已注册 Mesh / Texture loader，
-//           见 BuiltinAssets::RegisterImportLoaders）。
-// onMaterialWritten: gltf 路径写出 .material 后的注册回调；为空 = 不注册
-//           （headless 默认）。obj / texture 路径忽略本参数。
-// importScale：仅 FBX 路径消费的单位 → 米缩放（默认 1.0 = 信任已烘米；真 cm
-// 文件传约 0.01）。obj / gltf / texture 路径忽略本参数。见 FbxAxisConverter.h。
-ImportResult DispatchToRegistry(std::string_view srcPath,
-                                ::Orange::Engine::Asset::AssetRegistry& registry,
-                                const MaterialRegisterFn& onMaterialWritten = {},
-                                float importScale = 1.0f);
+    // 单点 headless 入口：按 ext 路由到具体 registry-only importer。
+    //
+    // srcPath:  OS 文件绝对或相对路径；不能为空。
+    // registry: 注入资产的目标 AssetRegistry（须已注册 Mesh / Texture loader，
+    //           见 BuiltinAssets::RegisterImportLoaders）。
+    // onMaterialWritten: gltf 路径写出 .material 后的注册回调；为空 = 不注册
+    //           （headless 默认）。obj / texture 路径忽略本参数。
+    // importScale：仅 FBX 路径消费的单位 → 米缩放（默认 1.0 = 信任已烘米；真 cm
+    // 文件传约 0.01）。obj / gltf / texture 路径忽略本参数。见 FbxAxisConverter.h。
+    ImportResult DispatchToRegistry(std::string_view                        srcPath,
+                                    ::Orange::Engine::Asset::AssetRegistry& registry,
+                                    const MaterialRegisterFn&               onMaterialWritten = {},
+                                    float                                   importScale       = 1.0f);
 
-// Texture importer（registry-only）：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
-// destDirOverride 语义同 GUI 版（空 → assets/Textures/<basename>）。
-ImportResult ImportTextureToRegistry(std::string_view srcPath,
-                                     ::Orange::Engine::Asset::AssetRegistry& registry,
-                                     std::string_view destDirOverride = {});
+    // Texture importer（registry-only）：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
+    // destDirOverride 语义同 GUI 版（空 → assets/Textures/<basename>）。
+    ImportResult ImportTextureToRegistry(std::string_view                        srcPath,
+                                         ::Orange::Engine::Asset::AssetRegistry& registry,
+                                         std::string_view                        destDirOverride = {});
 
-// Obj mesh importer（registry-only）：T3 接通。
-ImportResult ImportObjMeshToRegistry(std::string_view srcPath,
-                                     ::Orange::Engine::Asset::AssetRegistry& registry);
+    // Obj mesh importer（registry-only）：T3 接通。
+    ImportResult ImportObjMeshToRegistry(std::string_view                        srcPath,
+                                         ::Orange::Engine::Asset::AssetRegistry& registry);
 
-// Gltf mesh importer（registry-only）：T4 接通。onMaterialWritten 见上。
-ImportResult ImportGltfMeshToRegistry(std::string_view srcPath,
-                                      ::Orange::Engine::Asset::AssetRegistry& registry,
-                                      const MaterialRegisterFn& onMaterialWritten = {});
+    // Gltf mesh importer（registry-only）：T4 接通。onMaterialWritten 见上。
+    ImportResult ImportGltfMeshToRegistry(std::string_view                        srcPath,
+                                          ::Orange::Engine::Asset::AssetRegistry& registry,
+                                          const MaterialRegisterFn&               onMaterialWritten = {});
 
-// Fbx mesh importer（registry-only）：OpenFBX 静态 mesh + 材质 MVP。
-// onMaterialWritten 见上（写出 .material 后回调，headless 传空）。
-// importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米；真 cm 文件传约
-// 0.01）。见 FbxAxisConverter.h 的单位歧义说明。
-ImportResult ImportFbxMeshToRegistry(std::string_view srcPath,
-                                     ::Orange::Engine::Asset::AssetRegistry& registry,
-                                     const MaterialRegisterFn& onMaterialWritten = {},
-                                     float importScale = 1.0f);
+    // Fbx mesh importer（registry-only）：OpenFBX 静态 mesh + 材质 MVP。
+    // onMaterialWritten 见上（写出 .material 后回调，headless 传空）。
+    // importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米；真 cm 文件传约
+    // 0.01）。见 FbxAxisConverter.h 的单位歧义说明。
+    ImportResult ImportFbxMeshToRegistry(std::string_view                        srcPath,
+                                         ::Orange::Engine::Asset::AssetRegistry& registry,
+                                         const MaterialRegisterFn&               onMaterialWritten = {},
+                                         float                                   importScale       = 1.0f);
 
-// ---------------------------------------------------------------------------
-// GUI 入口（保留原签名，零行为变化）：内部委托到上面的 registry-only seam，
-// 取 host.assets.pAssets 当 AssetRegistry，gltf 路径注入 EnsureMaterialInstance
-// 作为 onMaterialWritten 回调。
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // GUI 入口（保留原签名，零行为变化）：内部委托到上面的 registry-only seam，
+    // 取 host.assets.pAssets 当 AssetRegistry，gltf 路径注入 EnsureMaterialInstance
+    // 作为 onMaterialWritten 回调。
+    // ---------------------------------------------------------------------------
 
-// 单点入口：按 ext 路由到具体 importer。
-//
-// srcPath: OS 文件绝对或相对路径（drag-drop 或 dialog 选出来的）；不能为空。
-// host:    用 host.assets.pAssets 拿 AssetRegistry 注入资产；host 必须有
-//          有效的 pAssets（否则返 AssetLoadFailed）。
-ImportResult Dispatch(std::string_view srcPath, EditorHost& host);
+    // 单点入口：按 ext 路由到具体 importer。
+    //
+    // srcPath: OS 文件绝对或相对路径（drag-drop 或 dialog 选出来的）；不能为空。
+    // host:    用 host.assets.pAssets 拿 AssetRegistry 注入资产；host 必须有
+    //          有效的 pAssets（否则返 AssetLoadFailed）。
+    ImportResult Dispatch(std::string_view srcPath, EditorHost& host);
 
-// 带 importScale 的重载（MCP import_asset 复用）：与上面 Dispatch 行为一致，
-// 额外把 importScale 透传给 FBX 路径（obj/gltf/texture 忽略）。GUI drag-drop /
-// 菜单路径仍走无 scale 版（默认 1.0）；只有需要显式单位缩放（真 cm FBX 传约
-// 0.01）的程序化入口用此重载。见 FbxAxisConverter.h 的单位歧义说明。
-ImportResult Dispatch(std::string_view srcPath, EditorHost& host, float importScale);
+    // 带 importScale 的重载（MCP import_asset 复用）：与上面 Dispatch 行为一致，
+    // 额外把 importScale 透传给 FBX 路径（obj/gltf/texture 忽略）。GUI drag-drop /
+    // 菜单路径仍走无 scale 版（默认 1.0）；只有需要显式单位缩放（真 cm FBX 传约
+    // 0.01）的程序化入口用此重载。见 FbxAxisConverter.h 的单位歧义说明。
+    ImportResult Dispatch(std::string_view srcPath, EditorHost& host, float importScale);
 
-// Texture importer：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
-// destDirOverride 空 → dest = assets/Textures/<basename>（独立拖图片的默认）；
-// 非空 → dest = <destDirOverride>/<basename>。模型 importer 把贴图 co-locate
-// 进模型自己的 assets/Models/<stem>/ 子目录时传它（避免贴图被甩到
-// assets/Textures/ 后跨目录找）。overwrite 已存在文件（reimport 语义）。
-ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
-                           std::string_view destDirOverride = {});
+    // Texture importer：T1 落地（PNG/JPG/JPEG/TGA/HDR）。
+    // destDirOverride 空 → dest = assets/Textures/<basename>（独立拖图片的默认）；
+    // 非空 → dest = <destDirOverride>/<basename>。模型 importer 把贴图 co-locate
+    // 进模型自己的 assets/Models/<stem>/ 子目录时传它（避免贴图被甩到
+    // assets/Textures/ 后跨目录找）。overwrite 已存在文件（reimport 语义）。
+    ImportResult ImportTexture(std::string_view srcPath, EditorHost& host,
+                               std::string_view destDirOverride = {});
 
-// Obj mesh importer：T3 接通。T2 阶段 stub 返回 NotImplemented。
-ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host);
+    // Obj mesh importer：T3 接通。T2 阶段 stub 返回 NotImplemented。
+    ImportResult ImportObjMesh(std::string_view srcPath, EditorHost& host);
 
-// Gltf mesh importer：T4 接通。T2 阶段 stub 返回 NotImplemented。
-ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host);
+    // Gltf mesh importer：T4 接通。T2 阶段 stub 返回 NotImplemented。
+    ImportResult ImportGltfMesh(std::string_view srcPath, EditorHost& host);
 
-// Fbx mesh importer：OpenFBX 静态 mesh + 材质 MVP。
-ImportResult ImportFbxMesh(std::string_view srcPath, EditorHost& host);
+    // Fbx mesh importer：OpenFBX 静态 mesh + 材质 MVP。
+    ImportResult ImportFbxMesh(std::string_view srcPath, EditorHost& host);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_DISPATCHER_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_DISPATCHER_H

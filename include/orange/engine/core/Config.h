@@ -29,46 +29,46 @@
 namespace Orange::Engine
 {
 
-class ORANGE_ENGINE_API Config
-{
-public:
-    Config();
-    Config(Config&&) noexcept;
-    Config& operator=(Config&&) noexcept;
-    Config(const Config&) = delete;
-    Config& operator=(const Config&) = delete;
-    ~Config();
+    class ORANGE_ENGINE_API Config
+    {
+    public:
+        Config();
+        Config(Config&&) noexcept;
+        Config& operator=(Config&&) noexcept;
+        Config(const Config&)            = delete;
+        Config& operator=(const Config&) = delete;
+        ~Config();
 
-    bool         GetBool(std::string_view path, bool defaultValue) const;
-    std::int64_t GetInt(std::string_view path, std::int64_t defaultValue) const;
-    double       GetFloat(std::string_view path, double defaultValue) const;
-    std::string  GetString(std::string_view path, std::string defaultValue) const;
+        bool         GetBool(std::string_view path, bool defaultValue) const;
+        std::int64_t GetInt(std::string_view path, std::int64_t defaultValue) const;
+        double       GetFloat(std::string_view path, double defaultValue) const;
+        std::string  GetString(std::string_view path, std::string defaultValue) const;
 
-    glm::vec2 GetVec2(std::string_view path, glm::vec2 defaultValue) const;
-    glm::vec3 GetVec3(std::string_view path, glm::vec3 defaultValue) const;
-    glm::vec4 GetVec4(std::string_view path, glm::vec4 defaultValue) const;
+        glm::vec2 GetVec2(std::string_view path, glm::vec2 defaultValue) const;
+        glm::vec3 GetVec3(std::string_view path, glm::vec3 defaultValue) const;
+        glm::vec4 GetVec4(std::string_view path, glm::vec4 defaultValue) const;
 
-    bool Has(std::string_view path) const;
+        bool Has(std::string_view path) const;
 
-private:
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
 
-    friend class ConfigLoader;
-    explicit Config(std::unique_ptr<Impl> impl) noexcept;
-};
+        friend class ConfigLoader;
+        explicit Config(std::unique_ptr<Impl> impl) noexcept;
+    };
 
-class ORANGE_ENGINE_API ConfigLoader
-{
-public:
-    // 返回一个空 Config——任何 getter 都会回落到调用方提供的默认值。
-    // 适用于不发布 config 文件、所有取值都来自编译期默认的场景。
-    static Config Empty();
+    class ORANGE_ENGINE_API ConfigLoader
+    {
+    public:
+        // 返回一个空 Config——任何 getter 都会回落到调用方提供的默认值。
+        // 适用于不发布 config 文件、所有取值都来自编译期默认的场景。
+        static Config Empty();
 
-    static Result<Config, ParseError> LoadFromFile(std::string_view path);
-    static Result<Config, ParseError> LoadFromString(std::string_view text);
-};
+        static Result<Config, ParseError> LoadFromFile(std::string_view path);
+        static Result<Config, ParseError> LoadFromString(std::string_view text);
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
-#endif  // ORANGE_ENGINE_CORE_CONFIG_H
+#endif // ORANGE_ENGINE_CORE_CONFIG_H

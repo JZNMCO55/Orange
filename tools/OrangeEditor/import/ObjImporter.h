@@ -32,24 +32,24 @@ struct EditorHost;
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 namespace Orange::Editor::Import
 {
 
-// Headless 核心实现（GAP-2026-05-27 G1）：只依赖 AssetRegistry&，不出现
-// EditorHost。把实际实现挪出 ImportDispatcher.cpp 让 tinyobjloader
-// IMPLEMENTATION 宏只在 ObjImporter.cpp 一处 expand，避免多 TU 重定义
-// （v0.7 Pipeline.cpp 拆分时撞 stb single-header 多 TU 冲突的教训，参
-// [[project-pipeline-split-in-progress]] memory）。
-ImportResult RunObjImportToRegistry(std::string_view srcPath,
-                                    ::Orange::Engine::Asset::AssetRegistry& registry);
+    // Headless 核心实现（GAP-2026-05-27 G1）：只依赖 AssetRegistry&，不出现
+    // EditorHost。把实际实现挪出 ImportDispatcher.cpp 让 tinyobjloader
+    // IMPLEMENTATION 宏只在 ObjImporter.cpp 一处 expand，避免多 TU 重定义
+    // （v0.7 Pipeline.cpp 拆分时撞 stb single-header 多 TU 冲突的教训，参
+    // [[project-pipeline-split-in-progress]] memory）。
+    ImportResult RunObjImportToRegistry(std::string_view                        srcPath,
+                                        ::Orange::Engine::Asset::AssetRegistry& registry);
 
-// GUI 包装：委托到 RunObjImportToRegistry（obj 无 material 注册副作用，
-// 直接转发 host.assets.pAssets）。
-ImportResult RunObjImport(std::string_view srcPath, EditorHost& host);
+    // GUI 包装：委托到 RunObjImportToRegistry（obj 无 material 注册副作用，
+    // 直接转发 host.assets.pAssets）。
+    ImportResult RunObjImport(std::string_view srcPath, EditorHost& host);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_OBJ_IMPORTER_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_OBJ_IMPORTER_H

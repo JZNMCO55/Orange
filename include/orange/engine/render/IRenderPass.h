@@ -36,48 +36,48 @@
 namespace Orange::Engine::Render
 {
 
-class RenderGraphBuilder;
-class RenderPassContext;
+    class RenderGraphBuilder;
+    class RenderPassContext;
 
-// Pipeline 编排里供 InsertPass 选择的 hook 点。
-enum class PipelineStage : std::uint8_t
-{
-    AfterShadow,        // shadow map 已写完、main pass 还没开始
-    AfterMainPass,      // main + particle 已写完，bloom / godrays / tonemap 还没跑
-    AfterPostProcess,   // stage B 已收尾，swap-chain 已写出
-};
+    // Pipeline 编排里供 InsertPass 选择的 hook 点。
+    enum class PipelineStage : std::uint8_t
+    {
+        AfterShadow,      // shadow map 已写完、main pass 还没开始
+        AfterMainPass,    // main + particle 已写完，bloom / godrays / tonemap 还没跑
+        AfterPostProcess, // stage B 已收尾，swap-chain 已写出
+    };
 
-class ORANGE_ENGINE_API IRenderPass
-{
-public:
-    virtual ~IRenderPass() = default;
+    class ORANGE_ENGINE_API IRenderPass
+    {
+    public:
+        virtual ~IRenderPass() = default;
 
-    IRenderPass()                              = default;
-    IRenderPass(const IRenderPass&)            = delete;
-    IRenderPass& operator=(const IRenderPass&) = delete;
-    IRenderPass(IRenderPass&&)                 = delete;
-    IRenderPass& operator=(IRenderPass&&)      = delete;
+        IRenderPass()                              = default;
+        IRenderPass(const IRenderPass&)            = delete;
+        IRenderPass& operator=(const IRenderPass&) = delete;
+        IRenderPass(IRenderPass&&)                 = delete;
+        IRenderPass& operator=(IRenderPass&&)      = delete;
 
-    // 调试 / FindPass 用名称。同 stage 下名字唯一不强制——Pipeline 不
-    // 做去重，调用方自己负责命名。空字符串合法（debug log 显示 "(unnamed)"）。
-    virtual const char* Name() const noexcept = 0;
+        // 调试 / FindPass 用名称。同 stage 下名字唯一不强制——Pipeline 不
+        // 做去重，调用方自己负责命名。空字符串合法（debug log 显示 "(unnamed)"）。
+        virtual const char* Name() const noexcept = 0;
 
-    // Pipeline 在 InsertPass 时调一次（让 pass 建 GPU 资源——pipeline /
-    // descriptor 等长寿命对象）；HDR target 重建（OnResize / 首次）时
-    // Pipeline 再调一次让 pass 同步刷资源。Setup 应当幂等：多次调用不
-    // 累积副作用。
-    //
-    // RenderGraphBuilder 当前是占位接口（详见 RenderPassContext.h）——
-    // pass 调 Read / Write 声明依赖，0.x Pipeline 忽略；后续真接
-    // RenderGraph 自动调度时这些声明会变成实际的 barrier 推断输入。
-    virtual void Setup(RenderGraphBuilder& builder) = 0;
+        // Pipeline 在 InsertPass 时调一次（让 pass 建 GPU 资源——pipeline /
+        // descriptor 等长寿命对象）；HDR target 重建（OnResize / 首次）时
+        // Pipeline 再调一次让 pass 同步刷资源。Setup 应当幂等：多次调用不
+        // 累积副作用。
+        //
+        // RenderGraphBuilder 当前是占位接口（详见 RenderPassContext.h）——
+        // pass 调 Read / Write 声明依赖，0.x Pipeline 忽略；后续真接
+        // RenderGraph 自动调度时这些声明会变成实际的 barrier 推断输入。
+        virtual void Setup(RenderGraphBuilder& builder) = 0;
 
-    // 每帧到当前 stage hook 点时被 Pipeline 调一次。pass 通过 ctx 获取
-    // 当前 cmd list / HDR target view / 主相机 viewProj 等，自己录制
-    // RHI 命令。具体字段见 RenderPassContext.h。
-    virtual void Execute(RenderPassContext& ctx) = 0;
-};
+        // 每帧到当前 stage hook 点时被 Pipeline 调一次。pass 通过 ctx 获取
+        // 当前 cmd list / HDR target view / 主相机 viewProj 等，自己录制
+        // RHI 命令。具体字段见 RenderPassContext.h。
+        virtual void Execute(RenderPassContext& ctx) = 0;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_I_RENDER_PASS_H
+#endif // ORANGE_ENGINE_RENDER_I_RENDER_PASS_H

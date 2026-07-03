@@ -29,68 +29,68 @@
 #include <vector>
 
 #if defined(_WIN32)
-    #define NOMINMAX
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 namespace
 {
 
-// 解析当前 .exe 所在目录 —— shader spv 路径相对 .exe 解析（与
-// OrangeEngine 内置 shader 同款约定）。
-std::filesystem::path GetExecutableDir()
-{
+    // 解析当前 .exe 所在目录 —— shader spv 路径相对 .exe 解析（与
+    // OrangeEngine 内置 shader 同款约定）。
+    std::filesystem::path GetExecutableDir()
+    {
 #if defined(_WIN32)
-    wchar_t buffer[MAX_PATH];
-    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (len == 0 || len == MAX_PATH)
-    {
-        return std::filesystem::current_path();
-    }
-    return std::filesystem::path{std::wstring_view{buffer, len}}.parent_path();
+        wchar_t     buffer[MAX_PATH];
+        const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        if (len == 0 || len == MAX_PATH)
+        {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path{std::wstring_view{buffer, len}}.parent_path();
 #else
-    return std::filesystem::current_path();
+        return std::filesystem::current_path();
 #endif
-}
-
-std::vector<std::uint32_t> LoadSpirv(const char* relativePath)
-{
-    const auto fullPath = (GetExecutableDir() / relativePath).string();
-    std::ifstream file(fullPath, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
-        ORANGE_LOG_ERROR("EditorGridAuxPassProvider: 无法打开 SPIR-V {}", fullPath);
-        return {};
     }
-    const std::streamsize size = file.tellg();
-    if (size <= 0 || (size % 4) != 0)
-    {
-        ORANGE_LOG_ERROR("EditorGridAuxPassProvider: SPIR-V 大小非法 ({}) for {}",
-                         static_cast<long long>(size), fullPath);
-        return {};
-    }
-    std::vector<std::uint32_t> words(static_cast<std::size_t>(size) / 4);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(words.data()), size);
-    return words;
-}
 
-}  // namespace
+    std::vector<std::uint32_t> LoadSpirv(const char* relativePath)
+    {
+        const auto    fullPath = (GetExecutableDir() / relativePath).string();
+        std::ifstream file(fullPath, std::ios::binary | std::ios::ate);
+        if (!file)
+        {
+            ORANGE_LOG_ERROR("EditorGridAuxPassProvider: 无法打开 SPIR-V {}", fullPath);
+            return {};
+        }
+        const std::streamsize size = file.tellg();
+        if (size <= 0 || (size % 4) != 0)
+        {
+            ORANGE_LOG_ERROR("EditorGridAuxPassProvider: SPIR-V 大小非法 ({}) for {}",
+                             static_cast<long long>(size), fullPath);
+            return {};
+        }
+        std::vector<std::uint32_t> words(static_cast<std::size_t>(size) / 4);
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(words.data()), size);
+        return words;
+    }
+
+} // namespace
 
 struct EditorGridAuxPassProvider::Impl
 {
-    Orange::Renderer::RenderDevice*                       pDevice{nullptr};
-    std::unique_ptr<Orange::Rhi::RHIShaderModule>         vs;
-    std::unique_ptr<Orange::Rhi::RHIShaderModule>         fs;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout>  layout;
-    std::unique_ptr<Orange::Rhi::RHIPipeline>             pipeline;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>       pool;
-    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>        set;
+    Orange::Renderer::RenderDevice*                      pDevice{nullptr};
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        vs;
+    std::unique_ptr<Orange::Rhi::RHIShaderModule>        fs;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSetLayout> layout;
+    std::unique_ptr<Orange::Rhi::RHIPipeline>            pipeline;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorPool>      pool;
+    std::unique_ptr<Orange::Rhi::RHIDescriptorSet>       set;
     // descriptor set 内 binding 0 当前指向的 sceneDepth；与 Pipeline 内
     // sceneDepth 重建（OnResize）对齐重写。同 PipelineGrid.cpp 原版 lazy
     // realloc / per-frame UpdateDescriptorSet 节奏。
-    Orange::Rhi::RHITexture*                              setBoundDepth{nullptr};
+    Orange::Rhi::RHITexture* setBoundDepth{nullptr};
 };
 
 EditorGridAuxPassProvider::EditorGridAuxPassProvider()
@@ -110,7 +110,10 @@ bool EditorGridAuxPassProvider::IsInitialized() const noexcept
 
 bool EditorGridAuxPassProvider::Initialize(Orange::Renderer::RenderDevice& device)
 {
-    if (!mpImpl) { return false; }
+    if (!mpImpl)
+    {
+        return false;
+    }
     if (mpImpl->pipeline != nullptr)
     {
         ORANGE_LOG_WARN("EditorGridAuxPassProvider::Initialize: 重复初始化");
@@ -118,7 +121,7 @@ bool EditorGridAuxPassProvider::Initialize(Orange::Renderer::RenderDevice& devic
     }
 
     mpImpl->pDevice = &device;
-    auto& rhi = device.GetRhiDevice();
+    auto& rhi       = device.GetRhiDevice();
 
     auto vsCode = LoadSpirv("shaders/orange_editor/fullscreen.vert.spv");
     auto fsCode = LoadSpirv("shaders/orange_editor/grid.frag.spv");
@@ -135,13 +138,13 @@ bool EditorGridAuxPassProvider::Initialize(Orange::Renderer::RenderDevice& devic
         sm.mpCode      = vsCode.data();
         sm.mCodeSize   = vsCode.size() * sizeof(std::uint32_t);
         sm.mpDebugName = "orange_editor.fullscreen.vert";
-        mpImpl->vs = rhi.CreateShaderModule(sm);
+        mpImpl->vs     = rhi.CreateShaderModule(sm);
 
         sm.mStage      = Orange::Rhi::ShaderStage::Fragment;
         sm.mpCode      = fsCode.data();
         sm.mCodeSize   = fsCode.size() * sizeof(std::uint32_t);
         sm.mpDebugName = "orange_editor.grid.frag";
-        mpImpl->fs = rhi.CreateShaderModule(sm);
+        mpImpl->fs     = rhi.CreateShaderModule(sm);
 
         if (!mpImpl->vs || !mpImpl->fs)
         {
@@ -159,7 +162,7 @@ bool EditorGridAuxPassProvider::Initialize(Orange::Renderer::RenderDevice& devic
                                      1,
                                      Orange::Rhi::ShaderStage::Fragment});
         layDesc.mpDebugName = "orange_editor.grid.layout";
-        mpImpl->layout = rhi.CreateDescriptorSetLayout(layDesc);
+        mpImpl->layout      = rhi.CreateDescriptorSetLayout(layDesc);
         if (!mpImpl->layout)
         {
             ORANGE_LOG_ERROR("EditorGridAuxPassProvider::Initialize: DescriptorSetLayout 创建失败");
@@ -199,10 +202,10 @@ bool EditorGridAuxPassProvider::Initialize(Orange::Renderer::RenderDevice& devic
         Orange::Rhi::PushConstantRange pcRange{};
         pcRange.mStage  = Orange::Rhi::ShaderStage::Fragment;
         pcRange.mOffset = 0;
-        pcRange.mSize   = 128;  // mat4(64) + mat4(64)
+        pcRange.mSize   = 128; // mat4(64) + mat4(64)
         d.mPushConstantRanges.push_back(pcRange);
 
-        d.mpDebugName = "orange_editor.grid";
+        d.mpDebugName    = "orange_editor.grid";
         mpImpl->pipeline = rhi.CreateGraphicsPipeline(d);
         if (!mpImpl->pipeline)
         {
@@ -217,7 +220,10 @@ bool EditorGridAuxPassProvider::Initialize(Orange::Renderer::RenderDevice& devic
 
 void EditorGridAuxPassProvider::Shutdown()
 {
-    if (!mpImpl) { return; }
+    if (!mpImpl)
+    {
+        return;
+    }
     // 反序释放（Vulkan handle 依赖：set 引 layout / pool；pipeline 引 layout +
     // shader；layout 独立；shader 独立）。
     mpImpl->set.reset();
@@ -227,18 +233,20 @@ void EditorGridAuxPassProvider::Shutdown()
     mpImpl->fs.reset();
     mpImpl->vs.reset();
     mpImpl->setBoundDepth = nullptr;
-    mpImpl->pDevice = nullptr;
+    mpImpl->pDevice       = nullptr;
 }
 
 void EditorGridAuxPassProvider::RenderAuxPass(Orange::Engine::Render::AuxPassContext& ctx)
 {
-    if (!mEnabled) { return; }
+    if (!mEnabled)
+    {
+        return;
+    }
     if (!mpImpl || mpImpl->pipeline == nullptr || mpImpl->layout == nullptr)
     {
         return;
     }
-    if (ctx.pCmd == nullptr || ctx.pHdrColor == nullptr
-        || ctx.pSceneDepth == nullptr || ctx.pHdrSampler == nullptr)
+    if (ctx.pCmd == nullptr || ctx.pHdrColor == nullptr || ctx.pSceneDepth == nullptr || ctx.pHdrSampler == nullptr)
     {
         return;
     }
@@ -261,7 +269,7 @@ void EditorGridAuxPassProvider::RenderAuxPass(Orange::Engine::Render::AuxPassCon
         sz.mCount = 1;
         poolDesc.mPoolSizes.push_back(sz);
         poolDesc.mpDebugName = "orange_editor.grid.pool";
-        mpImpl->pool = rhi.CreateDescriptorPool(poolDesc);
+        mpImpl->pool         = rhi.CreateDescriptorPool(poolDesc);
         if (!mpImpl->pool)
         {
             ORANGE_LOG_ERROR("EditorGridAuxPassProvider: CreateDescriptorPool 失败");
@@ -276,8 +284,8 @@ void EditorGridAuxPassProvider::RenderAuxPass(Orange::Engine::Render::AuxPassCon
             ORANGE_LOG_ERROR("EditorGridAuxPassProvider: AllocateDescriptorSet 失败");
             return;
         }
-        mpImpl->set = std::move(s);
-        mpImpl->setBoundDepth = nullptr;  // 强制走下面 UpdateDescriptorSet
+        mpImpl->set           = std::move(s);
+        mpImpl->setBoundDepth = nullptr; // 强制走下面 UpdateDescriptorSet
     }
     if (mpImpl->setBoundDepth != ctx.pSceneDepth)
     {

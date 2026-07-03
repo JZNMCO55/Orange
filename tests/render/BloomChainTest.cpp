@@ -57,24 +57,27 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> positions = {
-        {-0.5f, -0.5f, 0.0f},
-        { 0.5f, -0.5f, 0.0f},
-        { 0.5f,  0.5f, 0.0f},
-        {-0.5f,  0.5f, 0.0f},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
-}
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
+    {
+        std::vector<VertexPosition3> positions = {
+            {-0.5f, -0.5f, 0.0f},
+            {0.5f, -0.5f, 0.0f},
+            {0.5f, 0.5f, 0.0f},
+            {-0.5f, 0.5f, 0.0f},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        return std::make_unique<MeshAsset>(std::move(positions),
+                                           std::move(uvs),
+                                           std::move(indices));
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -90,7 +93,7 @@ int main()
     winDesc.width   = kInitialW;
     winDesc.height  = kInitialH;
     winDesc.visible = false;
-    auto winResult = Window::Create(winDesc);
+    auto winResult  = Window::Create(winDesc);
     if (winResult.IsErr())
     {
         std::fprintf(stderr, "[BloomChainTest] Window::Create failed (code=%u)\n",
@@ -130,11 +133,11 @@ int main()
         }
     }
     assert(pipeline.IsInitialized());
-    assert(pipeline.BloomMipCount() == 0);  // 没装 chain → bloom 资源不应分配
+    assert(pipeline.BloomMipCount() == 0); // 没装 chain → bloom 资源不应分配
 
     // ---- 1. 没装 chain 时 Render 不分配 bloom 资源 -------------------
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
         Entity e = world.CreateEntity();
@@ -152,11 +155,11 @@ int main()
     // ---- 2. 装载含 BloomPass 的 chain → 6 张 mip 资源 ----------------
     PostProcessChain chain;
     chain.AddPass(std::make_unique<HdrPass>());
-    chain.AddPass(std::make_unique<BloomPass>());  // BloomPass 默认 threshold=1, intensity=0.5
+    chain.AddPass(std::make_unique<BloomPass>()); // BloomPass 默认 threshold=1, intensity=0.5
     pipeline.SetPostProcessChain(&chain);
 
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
         Entity e = world.CreateEntity();
@@ -190,7 +193,7 @@ int main()
     {
         pipeline.OnResize(kResizedW, kResizedH);
 
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
         Entity e = world.CreateEntity();
@@ -215,10 +218,10 @@ int main()
     }
 
     // ---- 4. chain 切回不含 BloomPass → 释放 bloom 资源 ---------------
-    PostProcessChain emptyChain;  // 空 chain，无 BloomPass
+    PostProcessChain emptyChain; // 空 chain，无 BloomPass
     pipeline.SetPostProcessChain(&emptyChain);
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
         pipeline.Render(world);

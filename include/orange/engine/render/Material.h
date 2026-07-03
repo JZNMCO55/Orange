@@ -31,43 +31,43 @@
 namespace Orange::Engine::Render
 {
 
-struct Material
-{
-    std::string name;
+    struct Material
+    {
+        std::string name;
 
-    // 顶点 / 片段 shader handle —— 通过 AssetRegistry 加载，引用稳定。
-    Asset::AssetHandle<Asset::ShaderAsset> vertexShader;
-    Asset::AssetHandle<Asset::ShaderAsset> fragmentShader;
+        // 顶点 / 片段 shader handle —— 通过 AssetRegistry 加载，引用稳定。
+        Asset::AssetHandle<Asset::ShaderAsset> vertexShader;
+        Asset::AssetHandle<Asset::ShaderAsset> fragmentShader;
 
-    // uniform / texture 槽布局。MaterialInstance::SetUniform / SetTexture
-    // 在 SetXxx 时按 name / binding 在这两个列表里查找；找不到 / 类型
-    // 不匹配则 no-op。
-    std::vector<MaterialUniformDesc>     uniforms;
-    std::vector<MaterialTextureSlotDesc> textureSlots;
+        // uniform / texture 槽布局。MaterialInstance::SetUniform / SetTexture
+        // 在 SetXxx 时按 name / binding 在这两个列表里查找；找不到 / 类型
+        // 不匹配则 no-op。
+        std::vector<MaterialUniformDesc>     uniforms;
+        std::vector<MaterialTextureSlotDesc> textureSlots;
 
-    // 顶点是否声明 tangent 属性（location 3）。仅"消费 tangent 的 shader"
-    // （如 pbr.vert 做切线空间法线贴图）置 true——Pipeline 据此声明 vertex
-    // attribute location 3。与"是否用 descriptor set 1 贴图"是两个正交概念：
-    // 用贴图 ≠ 用 tangent（textured 用贴图但不读 tangent，不应声明 location 3，
-    // 否则触发 validation "location 3 not consumed" 警告）。
-    bool usesTangentVertex{false};
+        // 顶点是否声明 tangent 属性（location 3）。仅"消费 tangent 的 shader"
+        // （如 pbr.vert 做切线空间法线贴图）置 true——Pipeline 据此声明 vertex
+        // attribute location 3。与"是否用 descriptor set 1 贴图"是两个正交概念：
+        // 用贴图 ≠ 用 tangent（textured 用贴图但不读 tangent，不应声明 location 3，
+        // 否则触发 validation "location 3 not consumed" 警告）。
+        bool usesTangentVertex{false};
 
-    // 渲染状态覆盖。默认 false = 标准不透明（depth test/write on + 无 blend）。
-    // 特殊 material（典型 debug view）按需打开：
-    //   additiveBlend     —— color/alpha blend 改加性（src ONE + dst ONE，叠加
-    //                        累积），overdraw 热图 / 粒子用；
-    //   disableDepthTest  —— 关 depth test + depth write，让重叠 fragment 全部
-    //                        画出（overdraw 计数需要：否则前面的 fragment 写了
-    //                        depth，后面重叠的被剔除就无从累加）。
-    bool additiveBlend{false};
-    bool disableDepthTest{false};
+        // 渲染状态覆盖。默认 false = 标准不透明（depth test/write on + 无 blend）。
+        // 特殊 material（典型 debug view）按需打开：
+        //   additiveBlend     —— color/alpha blend 改加性（src ONE + dst ONE，叠加
+        //                        累积），overdraw 热图 / 粒子用；
+        //   disableDepthTest  —— 关 depth test + depth write，让重叠 fragment 全部
+        //                        画出（overdraw 计数需要：否则前面的 fragment 写了
+        //                        depth，后面重叠的被剔除就无从累加）。
+        bool additiveBlend{false};
+        bool disableDepthTest{false};
 
-    // 线框渲染（debug view Wireframe）：true → pipeline 用 polygonMode=Line 画
-    // 三角形边线而非填充。需 device feature fillModeNonSolid（GetOrCompilePipeline
-    // 查 capability，不支持则 fallback Fill）。
-    bool wireframe{false};
-};
+        // 线框渲染（debug view Wireframe）：true → pipeline 用 polygonMode=Line 画
+        // 三角形边线而非填充。需 device feature fillModeNonSolid（GetOrCompilePipeline
+        // 查 capability，不支持则 fallback Fill）。
+        bool wireframe{false};
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_MATERIAL_H
+#endif // ORANGE_ENGINE_RENDER_MATERIAL_H

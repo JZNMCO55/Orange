@@ -30,12 +30,12 @@ class InstantiatePrefabCommand : public ICommand
 {
 public:
     InstantiatePrefabCommand(
-        EditorHost& host,
+        EditorHost&                                                            host,
         Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::PrefabAsset> handle);
 
-    void Execute() override;
-    void Undo()    override;
-    const char* GetType()  const override { return "instantiate_prefab"; }
+    void        Execute() override;
+    void        Undo() override;
+    const char* GetType() const override { return "instantiate_prefab"; }
     const char* GetLabel() const override { return "Instantiate Prefab"; }
 
     // 当前追踪的实例根（Execute 后有效；Undo 后回 Invalid）。
@@ -48,4 +48,4 @@ private:
     std::shared_ptr<Orange::Engine::Entity> mRootPtr;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_PREFABCOMMANDS_H
+#endif // ORANGE_EDITOR_COMMAND_PREFABCOMMANDS_H

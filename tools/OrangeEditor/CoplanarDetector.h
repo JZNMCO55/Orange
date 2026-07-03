@@ -34,44 +34,44 @@
 namespace Orange::Editor::Coplanar
 {
 
-// AABB 6 个面的语义命名 —— 与 +X / -X / +Y / -Y / +Z / -Z 对应。
-enum class Face
-{
-    Right,   // +X
-    Left,    // -X
-    Top,     // +Y
-    Bottom,  // -Y
-    Front,   // +Z
-    Back,    // -Z
-};
+    // AABB 6 个面的语义命名 —— 与 +X / -X / +Y / -Y / +Z / -Z 对应。
+    enum class Face
+    {
+        Right,  // +X
+        Left,   // -X
+        Top,    // +Y
+        Bottom, // -Y
+        Front,  // +Z
+        Back,   // -Z
+    };
 
-// 单条共面命中：自己的哪一面 / 与谁 / 对方的哪一面 / 两面在该轴上的距离（绝对值）。
-struct Hit
-{
-    Face                          selfFace;
-    Orange::Engine::Entity        otherEntity;
-    std::string                   otherName;
-    Face                          otherFace;
-    float                         gap;  // |self_face_coord - other_face_coord|；近 0 时即共面
-};
+    // 单条共面命中：自己的哪一面 / 与谁 / 对方的哪一面 / 两面在该轴上的距离（绝对值）。
+    struct Hit
+    {
+        Face                   selfFace;
+        Orange::Engine::Entity otherEntity;
+        std::string            otherName;
+        Face                   otherFace;
+        float                  gap; // |self_face_coord - other_face_coord|；近 0 时即共面
+    };
 
-const char* FaceName(Face f) noexcept;
+    const char* FaceName(Face f) noexcept;
 
-// 选中 entity 在世界中查找邻居 mesh 的共面命中。
-//
-// 入参：
-//   * host       —— 拿 World + AssetRegistry（取 mesh 顶点算 local AABB）
-//   * selected   —— 待检测的 entity；必须 valid + 挂 Transform + Renderable
-//   * eps        —— 两面坐标差 |a - b| <= eps 视为共面，默认 1mm
-//   * maxDist    —— 只查 selected entity 周围这么多米内的 entity，默认 10m
-//
-// 返回空 vector 表示无共面（无警告需显示）。
-std::vector<Hit>
-DetectCoplanar(EditorHost&             host,
-               Orange::Engine::Entity  selected,
-               float                   eps     = 0.001f,
-               float                   maxDist = 10.0f);
+    // 选中 entity 在世界中查找邻居 mesh 的共面命中。
+    //
+    // 入参：
+    //   * host       —— 拿 World + AssetRegistry（取 mesh 顶点算 local AABB）
+    //   * selected   —— 待检测的 entity；必须 valid + 挂 Transform + Renderable
+    //   * eps        —— 两面坐标差 |a - b| <= eps 视为共面，默认 1mm
+    //   * maxDist    —— 只查 selected entity 周围这么多米内的 entity，默认 10m
+    //
+    // 返回空 vector 表示无共面（无警告需显示）。
+    std::vector<Hit>
+    DetectCoplanar(EditorHost&            host,
+                   Orange::Engine::Entity selected,
+                   float                  eps     = 0.001f,
+                   float                  maxDist = 10.0f);
 
-}  // namespace Orange::Editor::Coplanar
+} // namespace Orange::Editor::Coplanar
 
-#endif  // ORANGE_EDITOR_COPLANAR_DETECTOR_H
+#endif // ORANGE_EDITOR_COPLANAR_DETECTOR_H

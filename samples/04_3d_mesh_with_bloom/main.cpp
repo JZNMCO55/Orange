@@ -57,126 +57,129 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::MaterialInstance;
 using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// 立方体 6 个面 × 每面 4 顶点 + UV [0,1]²。从外侧看 outward CCW（BL → BR
-// → TR → TL）；与 04_3d_mesh 同布局。
-struct CubeFace
-{
-    std::array<VertexPosition3, 4> positions;
-};
-
-constexpr std::array<CubeFace, 6> kCubeFaces = {{
-    {{{{ 0.5f, -0.5f,  0.5f},
-       { 0.5f, -0.5f, -0.5f},
-       { 0.5f,  0.5f, -0.5f},
-       { 0.5f,  0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f},
-       {-0.5f, -0.5f,  0.5f},
-       {-0.5f,  0.5f,  0.5f},
-       {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f,  0.5f,  0.5f},
-       { 0.5f,  0.5f,  0.5f},
-       { 0.5f,  0.5f, -0.5f},
-       {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f},
-       { 0.5f, -0.5f, -0.5f},
-       { 0.5f, -0.5f,  0.5f},
-       {-0.5f, -0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f,  0.5f},
-       { 0.5f, -0.5f,  0.5f},
-       { 0.5f,  0.5f,  0.5f},
-       {-0.5f,  0.5f,  0.5f}}}},
-    {{{{ 0.5f, -0.5f, -0.5f},
-       {-0.5f, -0.5f, -0.5f},
-       {-0.5f,  0.5f, -0.5f},
-       { 0.5f,  0.5f, -0.5f}}}},
-}};
-
-constexpr std::array<VertexUV2, 4> kFaceUVs = {{
-    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-}};
-
-std::unique_ptr<MeshAsset> MakeCubeMesh()
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24);
-    uvs.reserve(24);
-    indices.reserve(36);
-
-    for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
+    // 立方体 6 个面 × 每面 4 顶点 + UV [0,1]²。从外侧看 outward CCW（BL → BR
+    // → TR → TL）；与 04_3d_mesh 同布局。
+    struct CubeFace
     {
-        const std::uint32_t base = face * 4;
-        for (int i = 0; i < 4; ++i)
+        std::array<VertexPosition3, 4> positions;
+    };
+
+    constexpr std::array<CubeFace, 6> kCubeFaces = {{
+        {{{{0.5f, -0.5f, 0.5f},
+           {0.5f, -0.5f, -0.5f},
+           {0.5f, 0.5f, -0.5f},
+           {0.5f, 0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f},
+           {-0.5f, -0.5f, 0.5f},
+           {-0.5f, 0.5f, 0.5f},
+           {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, 0.5f, 0.5f},
+           {0.5f, 0.5f, 0.5f},
+           {0.5f, 0.5f, -0.5f},
+           {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f},
+           {0.5f, -0.5f, -0.5f},
+           {0.5f, -0.5f, 0.5f},
+           {-0.5f, -0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, 0.5f},
+           {0.5f, -0.5f, 0.5f},
+           {0.5f, 0.5f, 0.5f},
+           {-0.5f, 0.5f, 0.5f}}}},
+        {{{{0.5f, -0.5f, -0.5f},
+           {-0.5f, -0.5f, -0.5f},
+           {-0.5f, 0.5f, -0.5f},
+           {0.5f, 0.5f, -0.5f}}}},
+    }};
+
+    constexpr std::array<VertexUV2, 4> kFaceUVs = {{
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {1.0f, 1.0f},
+        {0.0f, 1.0f},
+    }};
+
+    std::unique_ptr<MeshAsset> MakeCubeMesh()
+    {
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+
+        for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
         {
-            positions.push_back(kCubeFaces[face].positions[i]);
-            uvs.push_back(kFaceUVs[i]);
+            const std::uint32_t base = face * 4;
+            for (int i = 0; i < 4; ++i)
+            {
+                positions.push_back(kCubeFaces[face].positions[i]);
+                uvs.push_back(kFaceUVs[i]);
+            }
+            // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
+            // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
         }
-        // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
-        // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        // 程序化 mesh 工厂在返回前补算 smooth normal（GAP-2026-05-17）。
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    // 程序化 mesh 工厂在返回前补算 smooth normal（GAP-2026-05-17）。
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, Entity cube)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mCube(cube)
+    class RenderLayer : public Layer
     {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, Entity cube)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mCube(cube)
         {
-            const float     angle = frame.time.totalSeconds * 0.7f;
-            const glm::vec3 axis  = glm::normalize(glm::vec3(0.4f, 1.0f, 0.2f));
-            xf->rotation = glm::angleAxis(angle, axis);
         }
-        mPipeline.Render(mWorld);
-    }
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        void OnUpdate(const FrameContext& frame) override
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+            {
+                const float     angle = frame.time.totalSeconds * 0.7f;
+                const glm::vec3 axis  = glm::normalize(glm::vec3(0.4f, 1.0f, 0.2f));
+                xf->rotation          = glm::angleAxis(angle, axis);
+            }
+            mPipeline.Render(mWorld);
         }
-        return false;
-    }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-    Entity    mCube;
-};
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
 
-}  // namespace
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+        Entity    mCube;
+    };
+
+} // namespace
 
 int main()
 {
@@ -242,17 +245,16 @@ int main()
 
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(2.5f, 1.7f, 3.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(2.5f, 1.7f, 3.0f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 
     Pipeline pipeline;
-    auto initResult = pipeline.Initialize(host->GetWindow(), assets);
+    auto     initResult = pipeline.Initialize(host->GetWindow(), assets);
     if (initResult.IsErr())
     {
         std::fprintf(stderr,
@@ -276,6 +278,6 @@ int main()
     host->PushLayer(std::make_unique<RenderLayer>(pipeline, world, cubeEntity));
 
     const int rc = host->Run();
-    pipeline.Shutdown();   // 必须早于 host 析构（Window 还活着时释放渲染资源）
+    pipeline.Shutdown(); // 必须早于 host 析构（Window 还活着时释放渲染资源）
     return rc;
 }

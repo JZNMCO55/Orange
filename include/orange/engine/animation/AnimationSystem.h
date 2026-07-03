@@ -35,28 +35,28 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Animation
 {
 
-// 遍历 world 上所有 AnimatorComponent，对每个非空 animator 调 Tick(dt)。
-// 返回实际 tick 的 animator 数量（animator == nullptr 的 component 跳过、不计入）。
-// dt 透传给 IAnimator::Tick —— 负值由各后端自行处理（ProceduralAnimator clamp
-// 到 0、不推进 elapsed）。
-ORANGE_ENGINE_API std::size_t TickAnimators(World& world, float dt);
+    // 遍历 world 上所有 AnimatorComponent，对每个非空 animator 调 Tick(dt)。
+    // 返回实际 tick 的 animator 数量（animator == nullptr 的 component 跳过、不计入）。
+    // dt 透传给 IAnimator::Tick —— 负值由各后端自行处理（ProceduralAnimator clamp
+    // 到 0、不推进 elapsed）。
+    ORANGE_ENGINE_API std::size_t TickAnimators(World& world, float dt);
 
-// ISystem 适配：把 TickAnimators 接到"每帧 tick 的 system"调度体系。
-class ORANGE_ENGINE_API AnimationSystem final : public Scene::ISystem
-{
-public:
-    AnimationSystem() = default;
+    // ISystem 适配：把 TickAnimators 接到"每帧 tick 的 system"调度体系。
+    class ORANGE_ENGINE_API AnimationSystem final : public Scene::ISystem
+    {
+    public:
+        AnimationSystem() = default;
 
-    // 用 frame.time.deltaSeconds（秒）调 TickAnimators(world, dt)。
-    void OnUpdate(World& world, const FrameContext& frame) override;
-};
+        // 用 frame.time.deltaSeconds（秒）调 TickAnimators(world, dt)。
+        void OnUpdate(World& world, const FrameContext& frame) override;
+    };
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
-#endif  // ORANGE_ENGINE_ANIMATION_ANIMATION_SYSTEM_H
+#endif // ORANGE_ENGINE_ANIMATION_ANIMATION_SYSTEM_H

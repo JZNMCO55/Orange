@@ -30,23 +30,23 @@
 namespace Orange::Editor::Plugin
 {
 
-class ParticleEmitterGizmoPlugin : public IEditorGizmoPlugin
-{
-public:
-    // 按 schema.typeName == "ParticleEmitter" 字符串比较（与
-    // RegisterParticleEmitterComponentSchema 内 typeName 字面量一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class ParticleEmitterGizmoPlugin : public IEditorGizmoPlugin
+    {
+    public:
+        // 按 schema.typeName == "ParticleEmitter" 字符串比较（与
+        // RegisterParticleEmitterComponentSchema 内 typeName 字面量一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // 画 spawn box（4 角连线）+ initial velocity 平均向量箭头。
-    void Draw(EditorHost&                                            host,
-              Orange::Engine::Entity                                 entity,
-              const Orange::Editor::Schema::ComponentSchema&         schema,
-              void*                                                  component,
-              const GizmoContext&                                    ctx) override;
+        // 画 spawn box（4 角连线）+ initial velocity 平均向量箭头。
+        void Draw(EditorHost&                                    host,
+                  Orange::Engine::Entity                         entity,
+                  const Orange::Editor::Schema::ComponentSchema& schema,
+                  void*                                          component,
+                  const GizmoContext&                            ctx) override;
 
-    // HitTest 走基类默认（false）—— 纯装饰。
-};
+        // HitTest 走基类默认（false）—— 纯装饰。
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_PARTICLE_EMITTER_GIZMO_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_PARTICLE_EMITTER_GIZMO_PLUGIN_H

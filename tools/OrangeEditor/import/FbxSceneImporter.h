@@ -46,35 +46,35 @@
 // 接进 target），本头不引 ofbx.h —— 保持链接边界清晰（与 FbxImporter.h 同款）。
 // ---------------------------------------------------------------------------
 
-#include "ImportDispatcher.h"  // ImportResult / ImportStatus
+#include "ImportDispatcher.h" // ImportResult / ImportStatus
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 namespace Orange::Editor::Import
 {
 
-// Headless 核心实现：只依赖 AssetRegistry&，不出现 EditorHost。
-//
-// srcPath:  .fbx 源文件路径（不能为空）。
-// registry: 注入 mesh 资产的目标 AssetRegistry（须已注册 Mesh loader）。
-//           Scene::Save 用它把 RenderableComponent.mesh handle 反查为
-//           assets/Models/<stem>/<name>.mesh 相对路径写进 scene.json。
-//
-// 成功时 result.destPath = 写出的 .scene.json 路径；result.message 含
-// entity / mesh 计数。失败语义复用 ImportStatus（SourceReadFailed /
-// CopyFailed / AssetLoadFailed / MetaWriteFailed）。
-//
-// importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米，对 Blender 默认
-// 导出正确；真 cm 文件传约 0.01）。同时作用于顶点 + node 平移，整场一致缩放。
-// 见 FbxAxisConverter.h 的单位歧义说明。
-ImportResult RunFbxSceneImportToRegistry(
-    std::string_view srcPath,
-    ::Orange::Engine::Asset::AssetRegistry& registry,
-    float importScale = 1.0f);
+    // Headless 核心实现：只依赖 AssetRegistry&，不出现 EditorHost。
+    //
+    // srcPath:  .fbx 源文件路径（不能为空）。
+    // registry: 注入 mesh 资产的目标 AssetRegistry（须已注册 Mesh loader）。
+    //           Scene::Save 用它把 RenderableComponent.mesh handle 反查为
+    //           assets/Models/<stem>/<name>.mesh 相对路径写进 scene.json。
+    //
+    // 成功时 result.destPath = 写出的 .scene.json 路径；result.message 含
+    // entity / mesh 计数。失败语义复用 ImportStatus（SourceReadFailed /
+    // CopyFailed / AssetLoadFailed / MetaWriteFailed）。
+    //
+    // importScale：FBX 单位 → 米的显式缩放（默认 1.0 = 信任已烘米，对 Blender 默认
+    // 导出正确；真 cm 文件传约 0.01）。同时作用于顶点 + node 平移，整场一致缩放。
+    // 见 FbxAxisConverter.h 的单位歧义说明。
+    ImportResult RunFbxSceneImportToRegistry(
+        std::string_view                        srcPath,
+        ::Orange::Engine::Asset::AssetRegistry& registry,
+        float                                   importScale = 1.0f);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_FBX_SCENE_IMPORTER_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_FBX_SCENE_IMPORTER_H

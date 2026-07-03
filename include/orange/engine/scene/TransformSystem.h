@@ -26,19 +26,19 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Scene
 {
 
-// 自顶向下从 hierarchy 根累积 world matrix 写进每个 entity 的
-// WorldTransformComponent（emplace_or_replace）。无 HierarchyComponent 或
-// parent==Invalid 的 entity 视为根（world = 自身 local matrix）。无
-// TransformComponent 的 entity 取 identity local。要求 hierarchy 无环
-// （编辑器/importer 保证）。
-ORANGE_ENGINE_API void PropagateWorldTransforms(World& world);
+    // 自顶向下从 hierarchy 根累积 world matrix 写进每个 entity 的
+    // WorldTransformComponent（emplace_or_replace）。无 HierarchyComponent 或
+    // parent==Invalid 的 entity 视为根（world = 自身 local matrix）。无
+    // TransformComponent 的 entity 取 identity local。要求 hierarchy 无环
+    // （编辑器/importer 保证）。
+    ORANGE_ENGINE_API void PropagateWorldTransforms(World& world);
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_TRANSFORM_SYSTEM_H
+#endif // ORANGE_ENGINE_SCENE_TRANSFORM_SYSTEM_H

@@ -20,7 +20,7 @@ int main()
     assert(ContainsCaseInsensitive("HelloWorld", "world"));
     assert(ContainsCaseInsensitive("HelloWorld", "HELLO"));
     assert(ContainsCaseInsensitive("foo.MATERIAL", "material"));
-    assert(!ContainsCaseInsensitive("abcdef", "acf"));  // 子串而非子序列：非连续不算命中
+    assert(!ContainsCaseInsensitive("abcdef", "acf")); // 子串而非子序列：非连续不算命中
 
     // 子串边界。
     assert(ContainsCaseInsensitive("abc", "abc"));
@@ -29,7 +29,7 @@ int main()
 
     // 不命中。
     assert(!ContainsCaseInsensitive("hello", "xyz"));
-    assert(!ContainsCaseInsensitive("", "x"));    // 空 haystack + 非空 needle
+    assert(!ContainsCaseInsensitive("", "x"));     // 空 haystack + 非空 needle
     assert(!ContainsCaseInsensitive("ab", "abc")); // needle 比 haystack 长
 
     std::printf("editor_text_util_test: all assertions passed\n");

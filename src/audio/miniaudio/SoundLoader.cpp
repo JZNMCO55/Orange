@@ -13,30 +13,30 @@
 namespace Orange::Engine::Asset
 {
 
-Result<std::unique_ptr<SoundAsset>, ResultCode> SoundLoader::Load(std::string_view path)
-{
-    std::string p{path};
-    std::ifstream f(p, std::ios::binary | std::ios::ate);
-    if (!f)
+    Result<std::unique_ptr<SoundAsset>, ResultCode> SoundLoader::Load(std::string_view path)
     {
-        return ResultCode::NotFound;
-    }
-    const std::streamsize sz = f.tellg();
-    if (sz < 0)
-    {
-        return ResultCode::IoError;
-    }
-    f.seekg(0, std::ios::beg);
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(sz));
-    if (sz > 0)
-    {
-        f.read(reinterpret_cast<char*>(bytes.data()), sz);
+        std::string   p{path};
+        std::ifstream f(p, std::ios::binary | std::ios::ate);
         if (!f)
+        {
+            return ResultCode::NotFound;
+        }
+        const std::streamsize sz = f.tellg();
+        if (sz < 0)
         {
             return ResultCode::IoError;
         }
+        f.seekg(0, std::ios::beg);
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(sz));
+        if (sz > 0)
+        {
+            f.read(reinterpret_cast<char*>(bytes.data()), sz);
+            if (!f)
+            {
+                return ResultCode::IoError;
+            }
+        }
+        return std::make_unique<SoundAsset>(std::move(bytes), std::string{path});
     }
-    return std::make_unique<SoundAsset>(std::move(bytes), std::string{path});
-}
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset

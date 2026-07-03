@@ -2,7 +2,7 @@
 
 #include "EditorCameraControl.h"
 #include "EditorGizmoMath.h"
-#include "EditorMathUtil.h"  // Util::SnapToStep（gizmo 网格 snap）
+#include "EditorMathUtil.h" // Util::SnapToStep（gizmo 网格 snap）
 #include "command/SetFieldValueCommand.h"
 
 #include <orange/engine/render/Camera.h>
@@ -26,114 +26,142 @@
 namespace
 {
 
-namespace GM = OrangeEditor::Internal::GizmoMath;
+    namespace GM = OrangeEditor::Internal::GizmoMath;
 
-// 设计常数（屏幕像素 / 启发式）。Lumix 走 absolute pixel 阈值 + handle 长
-// 度按相机距离自适应，这里取同款。
-// **v0.8 起 handleScreenLength / hitThreshold / 线宽 / 配色从 EditorSettings
-// 读取**（消除 L13）；arrowHead 尺寸暂未纳入 settings，保持 hardcode。
-constexpr float kArrowHeadLengthPx    = 14.0f;  // arrow head 三角高度
-constexpr float kArrowHeadHalfWidthPx = 6.0f;   // arrow head 三角底半宽
+    // 设计常数（屏幕像素 / 启发式）。Lumix 走 absolute pixel 阈值 + handle 长
+    // 度按相机距离自适应，这里取同款。
+    // **v0.8 起 handleScreenLength / hitThreshold / 线宽 / 配色从 EditorSettings
+    // 读取**（消除 L13）；arrowHead 尺寸暂未纳入 settings，保持 hardcode。
+    constexpr float kArrowHeadLengthPx    = 14.0f; // arrow head 三角高度
+    constexpr float kArrowHeadHalfWidthPx = 6.0f;  // arrow head 三角底半宽
 
-// 从 settings 的 glm::vec4 配色（linear 0..1 RGBA）转 ImGui 32-bit RGBA。
-// clamp 防越界后乘 255。
-ImU32 SettingsToImU32(const glm::vec4& c) noexcept
-{
-    auto byteOf = [](float v) -> int
+    // 从 settings 的 glm::vec4 配色（linear 0..1 RGBA）转 ImGui 32-bit RGBA。
+    // clamp 防越界后乘 255。
+    ImU32 SettingsToImU32(const glm::vec4& c) noexcept
     {
-        if (v < 0.0f) { v = 0.0f; }
-        if (v > 1.0f) { v = 1.0f; }
-        return static_cast<int>(v * 255.0f + 0.5f);
-    };
-    return IM_COL32(byteOf(c.r), byteOf(c.g), byteOf(c.b), byteOf(c.a));
-}
-
-ImU32 SettingsAxisColor(const EditorSettings& s,
-                        EditorGizmoState::Axis axis,
-                        bool highlight) noexcept
-{
-    switch (axis)
-    {
-        case EditorGizmoState::Axis::X:
-            return SettingsToImU32(highlight ? s.gizmoColorXHighlight : s.gizmoColorXIdle);
-        case EditorGizmoState::Axis::Y:
-            return SettingsToImU32(highlight ? s.gizmoColorYHighlight : s.gizmoColorYIdle);
-        case EditorGizmoState::Axis::Z:
-            return SettingsToImU32(highlight ? s.gizmoColorZHighlight : s.gizmoColorZIdle);
-        default:
-            return IM_COL32(255, 255, 255, 255);
+        auto byteOf = [](float v) -> int
+        {
+            if (v < 0.0f)
+            {
+                v = 0.0f;
+            }
+            if (v > 1.0f)
+            {
+                v = 1.0f;
+            }
+            return static_cast<int>(v * 255.0f + 0.5f);
+        };
+        return IM_COL32(byteOf(c.r), byteOf(c.g), byteOf(c.b), byteOf(c.a));
     }
-}
 
-glm::vec3 AxisDir(EditorGizmoState::Axis axis) noexcept
-{
-    switch (axis)
+    ImU32 SettingsAxisColor(const EditorSettings&  s,
+                            EditorGizmoState::Axis axis,
+                            bool                   highlight) noexcept
     {
-        case EditorGizmoState::Axis::X: return glm::vec3(1.0f, 0.0f, 0.0f);
-        case EditorGizmoState::Axis::Y: return glm::vec3(0.0f, 1.0f, 0.0f);
-        case EditorGizmoState::Axis::Z: return glm::vec3(0.0f, 0.0f, 1.0f);
-        default:                        return glm::vec3(0.0f);
+        switch (axis)
+        {
+            case EditorGizmoState::Axis::X:
+                return SettingsToImU32(highlight ? s.gizmoColorXHighlight : s.gizmoColorXIdle);
+            case EditorGizmoState::Axis::Y:
+                return SettingsToImU32(highlight ? s.gizmoColorYHighlight : s.gizmoColorYIdle);
+            case EditorGizmoState::Axis::Z:
+                return SettingsToImU32(highlight ? s.gizmoColorZHighlight : s.gizmoColorZIdle);
+            default:
+                return IM_COL32(255, 255, 255, 255);
+        }
     }
-}
 
-// ---- A1 层级（world→local）辅助 ---------------------------------------
-// 取实体的父世界矩阵：从 HierarchyComponent.parent 找父，读其每帧由
-// PropagateWorldTransforms 缓存的 WorldTransformComponent.world。无父 / 父无
-// cache → identity（→ world==local，零回归）。
-glm::mat4 ParentWorldMatrix(Orange::Engine::World& world, Orange::Engine::Entity entity)
-{
-    using Orange::Engine::Scene::HierarchyComponent;
-    using Orange::Engine::Scene::WorldTransformComponent;
-    const auto* h = world.GetComponent<HierarchyComponent>(entity);
-    if (h == nullptr || !h->parent.IsValid()) { return glm::mat4(1.0f); }
-    const auto* pwtc = world.GetComponent<WorldTransformComponent>(h->parent);
-    return (pwtc != nullptr) ? pwtc->world : glm::mat4(1.0f);
-}
-
-// 取实体的世界 position：优先读 WorldTransformComponent.world（gizmo 画在 mesh
-// 的世界位置）；无 cache fallback 到 local position（root：world==local）。
-glm::vec3 EntityWorldPosition(Orange::Engine::World& world, Orange::Engine::Entity entity,
-                              const Orange::Engine::Scene::TransformComponent& tc)
-{
-    using Orange::Engine::Scene::WorldTransformComponent;
-    const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
-    return (wtc != nullptr) ? glm::vec3(wtc->world[3]) : tc.position;
-}
-
-// 把世界 position 转成实体的 local position（parentWorld 逆变换）。root /
-// 原点父：parentWorld==identity → 原样返回（零回归）。
-glm::vec3 WorldPosToLocal(const glm::mat4& parentWorld, const glm::vec3& worldPos)
-{
-    return glm::vec3(glm::inverse(parentWorld) * glm::vec4(worldPos, 1.0f));
-}
-
-// ---- Transform 写回 apply lambda（捕获 EditorHost*，c14 风格弱引用解 World）
-auto MakeTransformPositionApply(EditorHost* pHost, Orange::Engine::Entity entity)
-{
-    return [pHost, entity](const glm::vec3& value)
+    glm::vec3 AxisDir(EditorGizmoState::Axis axis) noexcept
     {
-        if (pHost == nullptr) { return; }
-        auto* pWorld = pHost->scene.pWorld.get();
-        if (pWorld == nullptr) { return; }  // 漏 Clear 安全降级
-        auto* pTC = pWorld->GetComponent<Orange::Engine::Scene::TransformComponent>(entity);
-        if (pTC == nullptr) { return; }     // Transform 被 Remove → no-op
-        pTC->position = value;
-    };
-}
+        switch (axis)
+        {
+            case EditorGizmoState::Axis::X:
+                return glm::vec3(1.0f, 0.0f, 0.0f);
+            case EditorGizmoState::Axis::Y:
+                return glm::vec3(0.0f, 1.0f, 0.0f);
+            case EditorGizmoState::Axis::Z:
+                return glm::vec3(0.0f, 0.0f, 1.0f);
+            default:
+                return glm::vec3(0.0f);
+        }
+    }
 
-// ---- 取消 / 安全终止拖动 -------------------------------------------------
-// 任何"拖动期间撞上 entity 失效 / playState 切换 / Transform 被 Remove /
-// LMB 已不再 down"的情况：立即 EndGroup + 重置 state，避免 pending group
-// 卡死（v0.2.5 c13 BeginGroup 嵌套约束注释明确"漏调 EndGroup 会让后续
-// BeginGroup 覆盖前组" —— 这里主动闭环）。
-void AbortDragIfNeeded(EditorHost& host)
-{
-    if (!host.gizmo.IsDragging()) { return; }
-    if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
-    host.gizmo.draggingAxis = EditorGizmoState::Axis::None;
-}
+    // ---- A1 层级（world→local）辅助 ---------------------------------------
+    // 取实体的父世界矩阵：从 HierarchyComponent.parent 找父，读其每帧由
+    // PropagateWorldTransforms 缓存的 WorldTransformComponent.world。无父 / 父无
+    // cache → identity（→ world==local，零回归）。
+    glm::mat4 ParentWorldMatrix(Orange::Engine::World& world, Orange::Engine::Entity entity)
+    {
+        using Orange::Engine::Scene::HierarchyComponent;
+        using Orange::Engine::Scene::WorldTransformComponent;
+        const auto* h = world.GetComponent<HierarchyComponent>(entity);
+        if (h == nullptr || !h->parent.IsValid())
+        {
+            return glm::mat4(1.0f);
+        }
+        const auto* pwtc = world.GetComponent<WorldTransformComponent>(h->parent);
+        return (pwtc != nullptr) ? pwtc->world : glm::mat4(1.0f);
+    }
 
-}  // anonymous namespace
+    // 取实体的世界 position：优先读 WorldTransformComponent.world（gizmo 画在 mesh
+    // 的世界位置）；无 cache fallback 到 local position（root：world==local）。
+    glm::vec3 EntityWorldPosition(Orange::Engine::World& world, Orange::Engine::Entity entity,
+                                  const Orange::Engine::Scene::TransformComponent& tc)
+    {
+        using Orange::Engine::Scene::WorldTransformComponent;
+        const auto* wtc = world.GetComponent<WorldTransformComponent>(entity);
+        return (wtc != nullptr) ? glm::vec3(wtc->world[3]) : tc.position;
+    }
+
+    // 把世界 position 转成实体的 local position（parentWorld 逆变换）。root /
+    // 原点父：parentWorld==identity → 原样返回（零回归）。
+    glm::vec3 WorldPosToLocal(const glm::mat4& parentWorld, const glm::vec3& worldPos)
+    {
+        return glm::vec3(glm::inverse(parentWorld) * glm::vec4(worldPos, 1.0f));
+    }
+
+    // ---- Transform 写回 apply lambda（捕获 EditorHost*，c14 风格弱引用解 World）
+    auto MakeTransformPositionApply(EditorHost* pHost, Orange::Engine::Entity entity)
+    {
+        return [pHost, entity](const glm::vec3& value)
+        {
+            if (pHost == nullptr)
+            {
+                return;
+            }
+            auto* pWorld = pHost->scene.pWorld.get();
+            if (pWorld == nullptr)
+            {
+                return;
+            } // 漏 Clear 安全降级
+            auto* pTC = pWorld->GetComponent<Orange::Engine::Scene::TransformComponent>(entity);
+            if (pTC == nullptr)
+            {
+                return;
+            } // Transform 被 Remove → no-op
+            pTC->position = value;
+        };
+    }
+
+    // ---- 取消 / 安全终止拖动 -------------------------------------------------
+    // 任何"拖动期间撞上 entity 失效 / playState 切换 / Transform 被 Remove /
+    // LMB 已不再 down"的情况：立即 EndGroup + 重置 state，避免 pending group
+    // 卡死（v0.2.5 c13 BeginGroup 嵌套约束注释明确"漏调 EndGroup 会让后续
+    // BeginGroup 覆盖前组" —— 这里主动闭环）。
+    void AbortDragIfNeeded(EditorHost& host)
+    {
+        if (!host.gizmo.IsDragging())
+        {
+            return;
+        }
+        if (host.cmdStack.InGroup())
+        {
+            host.cmdStack.EndGroup();
+        }
+        host.gizmo.draggingAxis = EditorGizmoState::Axis::None;
+    }
+
+} // anonymous namespace
 
 bool DrawAndHandleTranslateGizmo(EditorHost& host,
                                  glm::vec2   viewportImageOriginScreen,
@@ -158,7 +186,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
         return false;
     }
     const Orange::Engine::Entity entity = host.selection.selectedEntity;
-    auto* pTC = pWorld->GetComponent<TransformComponent>(entity);
+    auto*                        pTC    = pWorld->GetComponent<TransformComponent>(entity);
     if (pTC == nullptr)
     {
         AbortDragIfNeeded(host);
@@ -167,8 +195,8 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     }
 
     // ---- camera + viewProj ----
-    const auto      cam        = BuildEditorCamera(host.camera, aspect);
-    const glm::mat4 viewProj   = cam.projection * cam.view;
+    const auto      cam         = BuildEditorCamera(host.camera, aspect);
+    const glm::mat4 viewProj    = cam.projection * cam.view;
     const glm::mat4 invViewProj = glm::inverse(viewProj);
 
     // A1 层级：gizmo 画在实体的**世界**位置（读 WorldTransformComponent），
@@ -181,9 +209,9 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     //      Length 注释（防止 orbit 相机时 handle 整体伸缩）。----
     const float handleScreenLengthPx = host.settings.gizmoHandleScreenLengthPx;
     const float hitThresholdPx       = host.settings.gizmoHitThresholdPx;
-    const auto projOrigin = GM::ProjectWorldToScreen(entityWorldPos, viewProj,
-                                                     viewportImageOriginScreen,
-                                                     viewportImageSize);
+    const auto  projOrigin           = GM::ProjectWorldToScreen(entityWorldPos, viewProj,
+                                                                viewportImageOriginScreen,
+                                                                viewportImageSize);
     if (!projOrigin.has_value())
     {
         AbortDragIfNeeded(host);
@@ -206,7 +234,8 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     // space-aware 轴向（gap 报告 §3 P0 Local/World）：Local 时把世界轴绕实体
     // rotation 旋到 local 空间。translate 期 rotation 不变 → drag 期轴向稳定；
     // space 切换被 ScenePanel gate（!IsDragging），不会 mid-drag 变。
-    const auto axisDirSpace = [&](Axis a) -> glm::vec3 {
+    const auto axisDirSpace = [&](Axis a) -> glm::vec3
+    {
         const glm::vec3 base = AxisDir(a);
         return (host.gizmo.space == EditorGizmoState::Space::Local)
                    ? glm::normalize(pTC->rotation * base)
@@ -231,7 +260,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     }
 
     // ---- 2D hit-test（拖动期间跳过；强制 hoveredAxis = draggingAxis）-----
-    const ImVec2 mousePosIm = ImGui::GetMousePos();
+    const ImVec2    mousePosIm = ImGui::GetMousePos();
     const glm::vec2 mousePos(mousePosIm.x, mousePosIm.y);
 
     if (!host.gizmo.IsDragging())
@@ -240,7 +269,10 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
         float bestDist = hitThresholdPx;
         for (const auto& ap : axes)
         {
-            if (!ap.tipVisible) { continue; }
+            if (!ap.tipVisible)
+            {
+                continue;
+            }
             const float d = GM::PointSegmentDistance2D(mousePos, projOrigin->screen, ap.tipScreen);
             if (d < bestDist)
             {
@@ -258,10 +290,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     // ---- 输入：按下 / 拖动 / 释放 ----
     const bool imageHovered = ImGui::IsItemHovered();
 
-    if (!host.gizmo.IsDragging()
-        && imageHovered
-        && host.gizmo.IsHovered()
-        && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    if (!host.gizmo.IsDragging() && imageHovered && host.gizmo.IsHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         const auto mouseRay = GM::ScreenToWorldRay(mousePos,
                                                    viewportImageOriginScreen,
@@ -270,14 +299,14 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
         if (mouseRay.has_value())
         {
             const glm::vec3 axisDir = axisDirSpace(host.gizmo.hoveredAxis);
-            const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
-                                                        entityWorldPos, axisDir);
+            const auto      hit     = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
+                                                                  entityWorldPos, axisDir);
             if (hit.has_value())
             {
-                host.gizmo.draggingAxis       = host.gizmo.hoveredAxis;
-                host.gizmo.dragStartEntityPos = entityWorldPos;          // 世界起点
-                host.gizmo.dragStartEntityLocalPos = pTC->position;      // local 起点（命令 oldVal）
-                host.gizmo.dragStartHitOnAxis = *hit;
+                host.gizmo.draggingAxis            = host.gizmo.hoveredAxis;
+                host.gizmo.dragStartEntityPos      = entityWorldPos; // 世界起点
+                host.gizmo.dragStartEntityLocalPos = pTC->position;  // local 起点（命令 oldVal）
+                host.gizmo.dragStartHitOnAxis      = *hit;
                 // 多选群组 translate：快照其余选中实体的起点。position 存 local
                 // （命令 oldVal），worldStart 存世界（groupDelta 在世界空间施加）。
                 // root：worldStart==position → 零回归。单选时集合为空。
@@ -288,7 +317,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                     {
                         EditorGizmoState::GroupDragSnapshot snap;
                         snap.entity     = other;
-                        snap.position   = pOtherTC->position;   // local 起点
+                        snap.position   = pOtherTC->position; // local 起点
                         snap.rotation   = pOtherTC->rotation;
                         snap.scale      = pOtherTC->scale;
                         snap.worldStart = EntityWorldPosition(*pWorld, other, *pOtherTC);
@@ -304,26 +333,28 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     {
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
-            if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
+            if (host.cmdStack.InGroup())
+            {
+                host.cmdStack.EndGroup();
+            }
             host.gizmo.draggingAxis = Axis::None;
         }
         else
         {
             const auto mouseRay = GM::ScreenToWorldRay(mousePos,
-                                                      viewportImageOriginScreen,
-                                                      viewportImageSize,
-                                                      invViewProj);
+                                                       viewportImageOriginScreen,
+                                                       viewportImageSize,
+                                                       invViewProj);
             if (mouseRay.has_value())
             {
                 const glm::vec3 axisDir = axisDirSpace(host.gizmo.draggingAxis);
-                const auto hit = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
-                                                            host.gizmo.dragStartEntityPos,
-                                                            axisDir);
+                const auto      hit     = GM::ClosestPointOnAxisToRay(mouseRay->origin, mouseRay->dir,
+                                                                      host.gizmo.dragStartEntityPos,
+                                                                      axisDir);
                 if (hit.has_value())
                 {
-                    const glm::vec3 delta   = *hit - host.gizmo.dragStartHitOnAxis;
-                    glm::vec3       newPos  = host.gizmo.dragStartEntityPos
-                                            + axisDir * glm::dot(delta, axisDir);
+                    const glm::vec3 delta  = *hit - host.gizmo.dragStartHitOnAxis;
+                    glm::vec3       newPos = host.gizmo.dragStartEntityPos + axisDir * glm::dot(delta, axisDir);
                     // 网格 snap（gap 报告 §3 P0）：把沿拖动轴的世界分量量化到
                     // snapTranslateStep。snapEnabled=false 时不进入=零回归。axisDir
                     // 是单位世界轴 → 量化其分量即把该轴世界坐标对齐到网格。
@@ -367,9 +398,15 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                     const glm::vec3 groupDelta = newPos - host.gizmo.dragStartEntityPos;
                     for (const auto& snap : host.gizmo.dragStartAdditional)
                     {
-                        if (!pWorld->IsValid(snap.entity)) { continue; }
+                        if (!pWorld->IsValid(snap.entity))
+                        {
+                            continue;
+                        }
                         auto* pOtherTC = pWorld->GetComponent<TransformComponent>(snap.entity);
-                        if (pOtherTC == nullptr) { continue; }
+                        if (pOtherTC == nullptr)
+                        {
+                            continue;
+                        }
                         // groupDelta 是**世界**刚体位移：follower 新世界 =
                         // worldStart + groupDelta，再经各自 parentWorld 转 local
                         // 写回。root：worldStart==snap.position、parentWorld==identity
@@ -385,7 +422,7 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                             host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
                                 snap.entity,
                                 std::string("Transform.position"),
-                                snap.position,        // local 起点（undo 目标）
+                                snap.position, // local 起点（undo 目标）
                                 otherNewLocal,
                                 MakeTransformPositionApply(&host, snap.entity)));
                         }
@@ -395,7 +432,10 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
 
             if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
             {
-                if (host.cmdStack.InGroup()) { host.cmdStack.EndGroup(); }
+                if (host.cmdStack.InGroup())
+                {
+                    host.cmdStack.EndGroup();
+                }
                 host.gizmo.draggingAxis = Axis::None;
             }
         }
@@ -407,25 +447,30 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
     {
         for (const auto& ap : axes)
         {
-            if (!ap.tipVisible) { continue; }
-            const bool   highlight = (host.gizmo.hoveredAxis == ap.axis)
-                                  || (host.gizmo.draggingAxis == ap.axis);
+            if (!ap.tipVisible)
+            {
+                continue;
+            }
+            const bool   highlight = (host.gizmo.hoveredAxis == ap.axis) || (host.gizmo.draggingAxis == ap.axis);
             const ImU32  col       = SettingsAxisColor(host.settings, ap.axis, highlight);
             const float  thickness = highlight ? host.settings.gizmoLineWidthTranslateHighlight
                                                : host.settings.gizmoLineWidthTranslateIdle;
             const ImVec2 a{projOrigin->screen.x, projOrigin->screen.y};
-            const ImVec2 b{ap.tipScreen.x,       ap.tipScreen.y};
+            const ImVec2 b{ap.tipScreen.x, ap.tipScreen.y};
             drawList->AddLine(a, b, col, thickness);
 
             // arrow head 三角：朝向 axis 屏幕方向，回缩 kArrowHeadLengthPx
-            const glm::vec2 dir2D    = ap.tipScreen - projOrigin->screen;
-            const float     len2D    = glm::length(dir2D);
-            if (len2D < 1e-3f) { continue; }
-            const glm::vec2 dirN     = dir2D / len2D;
+            const glm::vec2 dir2D = ap.tipScreen - projOrigin->screen;
+            const float     len2D = glm::length(dir2D);
+            if (len2D < 1e-3f)
+            {
+                continue;
+            }
+            const glm::vec2 dirN = dir2D / len2D;
             const glm::vec2 perpN(-dirN.y, dirN.x);
-            const glm::vec2 baseCtr  = ap.tipScreen - dirN * kArrowHeadLengthPx;
-            const glm::vec2 baseL    = baseCtr + perpN * kArrowHeadHalfWidthPx;
-            const glm::vec2 baseR    = baseCtr - perpN * kArrowHeadHalfWidthPx;
+            const glm::vec2 baseCtr = ap.tipScreen - dirN * kArrowHeadLengthPx;
+            const glm::vec2 baseL   = baseCtr + perpN * kArrowHeadHalfWidthPx;
+            const glm::vec2 baseR   = baseCtr - perpN * kArrowHeadHalfWidthPx;
             drawList->AddTriangleFilled(ImVec2(ap.tipScreen.x, ap.tipScreen.y),
                                         ImVec2(baseL.x, baseL.y),
                                         ImVec2(baseR.x, baseR.y),

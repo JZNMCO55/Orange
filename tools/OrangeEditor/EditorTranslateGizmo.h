@@ -61,4 +61,4 @@ bool DrawAndHandleTranslateGizmo(EditorHost& host,
                                  glm::vec2   viewportImageSize,
                                  float       aspect);
 
-#endif  // ORANGE_EDITOR_EDITOR_TRANSLATE_GIZMO_H
+#endif // ORANGE_EDITOR_EDITOR_TRANSLATE_GIZMO_H

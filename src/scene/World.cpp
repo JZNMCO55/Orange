@@ -16,56 +16,56 @@
 namespace Orange::Engine
 {
 
-World::World() = default;
+    World::World() = default;
 
-World::~World() = default;
+    World::~World() = default;
 
-World::World(World&&) noexcept            = default;
-World& World::operator=(World&&) noexcept = default;
+    World::World(World&&) noexcept            = default;
+    World& World::operator=(World&&) noexcept = default;
 
-Entity World::CreateEntity()
-{
-    auto handle = FromEntt(mRegistry.create());
-    ++mLiveCount;
-    return handle;
-}
-
-void World::DestroyEntity(Entity entity)
-{
-    const auto e = ToEntt(entity);
-    if (mRegistry.valid(e))
+    Entity World::CreateEntity()
     {
-        // entt::registry::destroy 会一并卸载所有挂在该实体上的组件、
-        // 并把 entity 句柄回收到 free list；旧 handle 因 generation
-        // 自增而自动失效。
-        mRegistry.destroy(e);
-        if (mLiveCount > 0)
+        auto handle = FromEntt(mRegistry.create());
+        ++mLiveCount;
+        return handle;
+    }
+
+    void World::DestroyEntity(Entity entity)
+    {
+        const auto e = ToEntt(entity);
+        if (mRegistry.valid(e))
         {
-            --mLiveCount;
+            // entt::registry::destroy 会一并卸载所有挂在该实体上的组件、
+            // 并把 entity 句柄回收到 free list；旧 handle 因 generation
+            // 自增而自动失效。
+            mRegistry.destroy(e);
+            if (mLiveCount > 0)
+            {
+                --mLiveCount;
+            }
         }
     }
-}
 
-bool World::IsValid(Entity entity) const noexcept
-{
-    if (!entity.IsValid())
+    bool World::IsValid(Entity entity) const noexcept
     {
-        return false;
+        if (!entity.IsValid())
+        {
+            return false;
+        }
+        return mRegistry.valid(ToEntt(entity));
     }
-    return mRegistry.valid(ToEntt(entity));
-}
 
-std::size_t World::Size() const noexcept
-{
-    // 手动维护的活实体数：在 Create / Destroy 这两条 World 自有路径
-    // 上同步更新。绕过 World 直接走 Registry() 操作实体的代码路径
-    // 不会反映到这里——见 World.h 中 Registry() 的注释。
-    return mLiveCount;
-}
+    std::size_t World::Size() const noexcept
+    {
+        // 手动维护的活实体数：在 Create / Destroy 这两条 World 自有路径
+        // 上同步更新。绕过 World 直接走 Registry() 操作实体的代码路径
+        // 不会反映到这里——见 World.h 中 Registry() 的注释。
+        return mLiveCount;
+    }
 
-bool World::Empty() const noexcept
-{
-    return Size() == 0;
-}
+    bool World::Empty() const noexcept
+    {
+        return Size() == 0;
+    }
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine

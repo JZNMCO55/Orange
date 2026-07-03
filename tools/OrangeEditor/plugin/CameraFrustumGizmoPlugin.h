@@ -28,25 +28,25 @@
 namespace Orange::Editor::Plugin
 {
 
-class CameraFrustumGizmoPlugin : public IEditorGizmoPlugin
-{
-public:
-    // 按 schema.typeName == "Camera" 字符串比较（与 RegisterCameraComponent
-    // Schema 内 typeName 字面量一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class CameraFrustumGizmoPlugin : public IEditorGizmoPlugin
+    {
+    public:
+        // 按 schema.typeName == "Camera" 字符串比较（与 RegisterCameraComponent
+        // Schema 内 typeName 字面量一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // 画 frustum 12 条边线（near rect 4 段 + far rect 4 段 + 连接 4 段）。
-    // 颜色用青色，与 c4 ParticleEmitter spawn box 同色系——表示"这是个
-    // 范围而不是单一对象"。
-    void Draw(EditorHost&                                            host,
-              Orange::Engine::Entity                                 entity,
-              const Orange::Editor::Schema::ComponentSchema&         schema,
-              void*                                                  component,
-              const GizmoContext&                                    ctx) override;
+        // 画 frustum 12 条边线（near rect 4 段 + far rect 4 段 + 连接 4 段）。
+        // 颜色用青色，与 c4 ParticleEmitter spawn box 同色系——表示"这是个
+        // 范围而不是单一对象"。
+        void Draw(EditorHost&                                    host,
+                  Orange::Engine::Entity                         entity,
+                  const Orange::Editor::Schema::ComponentSchema& schema,
+                  void*                                          component,
+                  const GizmoContext&                            ctx) override;
 
-    // HitTest 走基类默认（false）—— 与 c4 同款纯装饰 overlay。
-};
+        // HitTest 走基类默认（false）—— 与 c4 同款纯装饰 overlay。
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_CAMERA_FRUSTUM_GIZMO_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_CAMERA_FRUSTUM_GIZMO_PLUGIN_H

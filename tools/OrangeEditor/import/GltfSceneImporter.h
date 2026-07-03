@@ -53,30 +53,30 @@
 // 声明（同一 lib / test exe 内链 GltfImporter.cpp 提供的实现）。
 // ---------------------------------------------------------------------------
 
-#include "ImportDispatcher.h"  // ImportResult / ImportStatus
+#include "ImportDispatcher.h" // ImportResult / ImportStatus
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 namespace Orange::Editor::Import
 {
 
-// Headless 核心实现：只依赖 AssetRegistry&，不出现 EditorHost。
-//
-// srcPath:  .gltf / .glb 源文件路径（不能为空）。
-// registry: 注入 mesh 资产的目标 AssetRegistry（须已注册 Mesh loader）。
-//           Scene::Save 用它把 RenderableComponent.mesh handle 反查为
-//           assets/Models/<basename>/<name>.mesh 相对路径写进 scene.json。
-//
-// 成功时 result.destPath = 写出的 .scene.json 路径；result.message 含
-// entity / mesh 计数。失败语义复用 ImportStatus（SourceReadFailed /
-// CopyFailed / AssetLoadFailed / MetaWriteFailed）。
-ImportResult RunGltfSceneImportToRegistry(
-    std::string_view srcPath,
-    ::Orange::Engine::Asset::AssetRegistry& registry);
+    // Headless 核心实现：只依赖 AssetRegistry&，不出现 EditorHost。
+    //
+    // srcPath:  .gltf / .glb 源文件路径（不能为空）。
+    // registry: 注入 mesh 资产的目标 AssetRegistry（须已注册 Mesh loader）。
+    //           Scene::Save 用它把 RenderableComponent.mesh handle 反查为
+    //           assets/Models/<basename>/<name>.mesh 相对路径写进 scene.json。
+    //
+    // 成功时 result.destPath = 写出的 .scene.json 路径；result.message 含
+    // entity / mesh 计数。失败语义复用 ImportStatus（SourceReadFailed /
+    // CopyFailed / AssetLoadFailed / MetaWriteFailed）。
+    ImportResult RunGltfSceneImportToRegistry(
+        std::string_view                        srcPath,
+        ::Orange::Engine::Asset::AssetRegistry& registry);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_GLTF_SCENE_IMPORTER_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_GLTF_SCENE_IMPORTER_H

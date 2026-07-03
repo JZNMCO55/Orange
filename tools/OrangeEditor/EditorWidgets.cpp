@@ -2,7 +2,7 @@
 
 #include "EditorWidgets.h"
 
-#include "theme/EditorTheme.h"  // Color::GetPrefabOverride（C1.1 override 蓝条）
+#include "theme/EditorTheme.h" // Color::GetPrefabOverride（C1.1 override 蓝条）
 
 #include <imgui.h>
 
@@ -12,94 +12,95 @@
 namespace Orange::Editor::Widgets
 {
 
-bool BeginPropertyTable(const char* id, float labelColTextWidth)
-{
-    const ImGuiStyle& s = ImGui::GetStyle();
-    // SizingFixedFit 让左列吃 WidthFixed，右列吃 WidthStretch；NoPadOuterX
-    // 让 table 紧贴 CollapsingHeader 缩进位置，不引入额外左缩进。
-    constexpr ImGuiTableFlags kFlags =
-          ImGuiTableFlags_SizingFixedFit
-        | ImGuiTableFlags_NoPadOuterX
-        | ImGuiTableFlags_NoSavedSettings;
-    if (!ImGui::BeginTable(id, 2, kFlags)) { return false; }
-
-    // 左列宽 = max(label text width) + FramePadding * 2 + ItemSpacing。
-    // FramePadding 是 caller 在 PropertyLabel 内可能 AlignTextToFramePadding
-    // 后的左右内边距；ItemSpacing 给 label 与右列控件之间留呼吸。
-    const float labelColW =
-        labelColTextWidth + s.FramePadding.x * 2.0f + s.ItemSpacing.x;
-    ImGui::TableSetupColumn("##label",   ImGuiTableColumnFlags_WidthFixed,   labelColW);
-    ImGui::TableSetupColumn("##control", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-    return true;
-}
-
-void PropertyLabel(const char* label, const char* tooltip, bool overridden)
-{
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    // 让 label 与右列控件的 FramePadding 中线对齐 —— 控件高 FrameHeight，
-    // label 是纯文本，不 align 的话 label 会贴 cell 顶（视觉错位）。
-    ImGui::AlignTextToFramePadding();
-    const char* text = (label != nullptr) ? label : "?";
-    if (overridden)
+    bool BeginPropertyTable(const char* id, float labelColTextWidth)
     {
-        // prefab override 蓝条：用 Selectable（有 ID，caller 可挂右键菜单）承载
-        // label，selected=false + 透明 Header 色使外观与普通 label 一致（不染整
-        // 行）。绘制后用 item rect 在 cell 左缘画 3px 蓝竖条（同 ComponentHeader
-        // Local 的 band 技法）。
-        const ImVec4& overrideBlue = Orange::Editor::Theme::Color::GetPrefabOverride();
-        ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_HeaderActive,  ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_Text,          overrideBlue);
-        ImGui::Selectable(text, false, ImGuiSelectableFlags_None);
-        ImGui::PopStyleColor(4);
+        const ImGuiStyle& s = ImGui::GetStyle();
+        // SizingFixedFit 让左列吃 WidthFixed，右列吃 WidthStretch；NoPadOuterX
+        // 让 table 紧贴 CollapsingHeader 缩进位置，不引入额外左缩进。
+        constexpr ImGuiTableFlags kFlags =
+            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoPadOuterX | ImGuiTableFlags_NoSavedSettings;
+        if (!ImGui::BeginTable(id, 2, kFlags))
+        {
+            return false;
+        }
 
-        const ImVec2 itemMin = ImGui::GetItemRectMin();
-        const ImVec2 itemMax = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRectFilled(
-            ImVec2(itemMin.x - 2.0f, itemMin.y),
-            ImVec2(itemMin.x + 1.0f, itemMax.y),
-            ImGui::ColorConvertFloat4ToU32(overrideBlue));
-    }
-    else
-    {
-        ImGui::TextUnformatted(text);
-    }
-    if (tooltip != nullptr && ImGui::IsItemHovered())
-    {
-        ImGui::SetTooltip("%s", tooltip);
+        // 左列宽 = max(label text width) + FramePadding * 2 + ItemSpacing。
+        // FramePadding 是 caller 在 PropertyLabel 内可能 AlignTextToFramePadding
+        // 后的左右内边距；ItemSpacing 给 label 与右列控件之间留呼吸。
+        const float labelColW =
+            labelColTextWidth + s.FramePadding.x * 2.0f + s.ItemSpacing.x;
+        ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, labelColW);
+        ImGui::TableSetupColumn("##control", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        return true;
     }
 
-    ImGui::TableSetColumnIndex(1);
-    // 让紧跟的下一个 ImGui 控件占满右列。-FLT_MIN 是 ImGui 习语 = "占满
-    // 当前 ContentRegion 减去右 padding"；用 -1.0f 在某些 cell 边界会被
-    // 当成无效值。
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
+    void PropertyLabel(const char* label, const char* tooltip, bool overridden)
+    {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        // 让 label 与右列控件的 FramePadding 中线对齐 —— 控件高 FrameHeight，
+        // label 是纯文本，不 align 的话 label 会贴 cell 顶（视觉错位）。
+        ImGui::AlignTextToFramePadding();
+        const char* text = (label != nullptr) ? label : "?";
+        if (overridden)
+        {
+            // prefab override 蓝条：用 Selectable（有 ID，caller 可挂右键菜单）承载
+            // label，selected=false + 透明 Header 色使外观与普通 label 一致（不染整
+            // 行）。绘制后用 item rect 在 cell 左缘画 3px 蓝竖条（同 ComponentHeader
+            // Local 的 band 技法）。
+            const ImVec4& overrideBlue = Orange::Editor::Theme::Color::GetPrefabOverride();
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_Text, overrideBlue);
+            ImGui::Selectable(text, false, ImGuiSelectableFlags_None);
+            ImGui::PopStyleColor(4);
 
-void EndPropertyTable()
-{
-    ImGui::EndTable();
-}
+            const ImVec2 itemMin = ImGui::GetItemRectMin();
+            const ImVec2 itemMax = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                ImVec2(itemMin.x - 2.0f, itemMin.y),
+                ImVec2(itemMin.x + 1.0f, itemMax.y),
+                ImGui::ColorConvertFloat4ToU32(overrideBlue));
+        }
+        else
+        {
+            ImGui::TextUnformatted(text);
+        }
+        if (tooltip != nullptr && ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("%s", tooltip);
+        }
 
-}  // namespace Orange::Editor::Widgets
+        ImGui::TableSetColumnIndex(1);
+        // 让紧跟的下一个 ImGui 控件占满右列。-FLT_MIN 是 ImGui 习语 = "占满
+        // 当前 ContentRegion 减去右 padding"；用 -1.0f 在某些 cell 边界会被
+        // 当成无效值。
+        ImGui::SetNextItemWidth(-FLT_MIN);
+    }
+
+    void EndPropertyTable()
+    {
+        ImGui::EndTable();
+    }
+
+} // namespace Orange::Editor::Widgets
 
 bool DragVec3Colored(const char* idSuffix, float v[3],
-                     float speed,
-                     float vMin,
-                     float vMax,
+                     float       speed,
+                     float       vMin,
+                     float       vMax,
                      const char* fmt)
 {
-    constexpr ImVec4 kRedX  {0.70f, 0.18f, 0.18f, 1.0f};
-    constexpr ImVec4 kGrnY  {0.27f, 0.55f, 0.27f, 1.0f};
-    constexpr ImVec4 kBluZ  {0.18f, 0.36f, 0.70f, 1.0f};
+    constexpr ImVec4 kRedX{0.70f, 0.18f, 0.18f, 1.0f};
+    constexpr ImVec4 kGrnY{0.27f, 0.55f, 0.27f, 1.0f};
+    constexpr ImVec4 kBluZ{0.18f, 0.36f, 0.70f, 1.0f};
 
     bool changed = false;
     ImGui::PushID(idSuffix);
 
-    const ImGuiStyle& s = ImGui::GetStyle();
-    const float btnH    = ImGui::GetFrameHeight();
+    const ImGuiStyle& s    = ImGui::GetStyle();
+    const float       btnH = ImGui::GetFrameHeight();
 
     // GetContentRegionAvail —— 当前 cell（或 ContentRegion）剩余可用宽。
     // 在 PropertyTable 右列里 = 右列 stretch 后的 cell 宽；在裸 Window 里
@@ -114,17 +115,19 @@ bool DragVec3Colored(const char* idSuffix, float v[3],
     const float dragW =
         (total - 3.0f * (btnH + s.ItemInnerSpacing.x) - 2.0f * axisSpace) / 3.0f;
 
-    auto axis = [&](int idx, const char* name, ImVec4 color) {
-        ImGui::PushStyleColor(ImGuiCol_Button,        color);
+    auto axis = [&](int idx, const char* name, ImVec4 color)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, color);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  color);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, color);
         ImGui::Button(name, ImVec2(btnH, btnH));
         ImGui::PopStyleColor(3);
         ImGui::SameLine(0.0f, s.ItemInnerSpacing.x);
         ImGui::SetNextItemWidth(dragW);
         char id[8];
         std::snprintf(id, sizeof(id), "##%s", name);
-        if (ImGui::DragFloat(id, &v[idx], speed, vMin, vMax, fmt)) {
+        if (ImGui::DragFloat(id, &v[idx], speed, vMin, vMax, fmt))
+        {
             changed = true;
         }
     };

@@ -78,121 +78,127 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-// 正面朝相机（z+）的全屏 quad；CCW 正面（对齐 Pipeline FrontFace::CCW），
-// 带法线供 PBR 着色。
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> pos = {
-        {-0.9f, -0.9f, 0.0f}, {0.9f, -0.9f, 0.0f},
-        {0.9f, 0.9f, 0.0f},   {-0.9f, 0.9f, 0.0f},
-    };
-    std::vector<VertexUV2> uv = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<VertexNormal3> nrm = {
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
-    return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
-                                       std::move(nrm), std::move(idx));
-}
-
-// 构造一个"相机 + 方向光 + 亮色 PBR quad"的确定 world。
-void BuildLitQuadWorld(World& world, AssetHandle<MeshAsset> mesh,
-                       MaterialInstance* inst)
-{
-    Entity camE = world.CreateEntity();
-    Camera cam  = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
-    cam.view    = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
-                              glm::vec3(0.0f, 0.0f, 0.0f),
-                              glm::vec3(0.0f, 1.0f, 0.0f));
-    world.AddComponent(camE, cam);
-
-    Entity lightE = world.CreateEntity();
-    TransformComponent lt{};
-    lt.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, 0.0f, -1.0f));
-    world.AddComponent(lightE, lt);
-    world.AddComponent(lightE, DirectionalLight{});
-
-    Entity e = world.CreateEntity();
-    world.AddComponent(e, TransformComponent{});
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = inst;
-    world.AddComponent(e, rc);
-}
-
-// 把外部 BGRA8 target 整张读回成紧凑 RGBA8（交换 B/R 通道）。target 当前应处于
-// ShaderReadOnly（RenderToTexture 成功后的状态）。仿 PipelineRenderToTextureTest
-// 的 ReadbackCenter，但读整张而非中心像素，并做 BGRA→RGBA 以喂 golden harness
-// 的 MakeRgbFromRgba（它取前 3 字节当 RGB）。
-bool ReadbackFullRgba(Orange::Renderer::RenderDevice& device,
-                      Orange::Rhi::RHITexture& target,
-                      std::uint32_t width, std::uint32_t height,
-                      std::vector<std::uint8_t>& outRgba)
-{
-    auto& rhi = device.GetRhiDevice();
-    const std::uint64_t pixelCount =
-        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
-    const std::uint64_t bytes = pixelCount * 4u;
-
-    Orange::Rhi::BufferDesc bd{};
-    bd.mSize        = bytes;
-    bd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
-    bd.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuToCpu;
-    auto readback = rhi.CreateBuffer(bd);
-    if (!readback)
+    // 正面朝相机（z+）的全屏 quad；CCW 正面（对齐 Pipeline FrontFace::CCW），
+    // 带法线供 PBR 着色。
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
     {
-        return false;
+        std::vector<VertexPosition3> pos = {
+            {-0.9f, -0.9f, 0.0f},
+            {0.9f, -0.9f, 0.0f},
+            {0.9f, 0.9f, 0.0f},
+            {-0.9f, 0.9f, 0.0f},
+        };
+        std::vector<VertexUV2> uv = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<VertexNormal3> nrm = {
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
+        return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
+                                           std::move(nrm), std::move(idx));
     }
 
-    auto cmd = rhi.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
-    if (!cmd || cmd->Begin() != Orange::ResultCode::Success)
+    // 构造一个"相机 + 方向光 + 亮色 PBR quad"的确定 world。
+    void BuildLitQuadWorld(World& world, AssetHandle<MeshAsset> mesh,
+                           MaterialInstance* inst)
     {
-        return false;
-    }
-    cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::ShaderReadOnly,
-                           Orange::Rhi::TextureLayout::TransferSrc);
-    {
-        Orange::Rhi::BufferTextureCopyRegion r{};
-        r.mBufferOffset = 0;
-        r.mMipLevel     = 0;
-        r.mArrayLayer   = 0;
-        r.mWidth        = width;
-        r.mHeight       = height;
-        r.mDepth        = 1;
-        cmd->CopyTextureToBuffer(target, *readback, r);
-    }
-    cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::TransferSrc,
-                           Orange::Rhi::TextureLayout::ShaderReadOnly);
-    if (cmd->End() != Orange::ResultCode::Success
-        || rhi.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
-    {
-        return false;
-    }
-    device.WaitIdle();
+        Entity camE = world.CreateEntity();
+        Camera cam  = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        cam.view    = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                  glm::vec3(0.0f, 0.0f, 0.0f),
+                                  glm::vec3(0.0f, 1.0f, 0.0f));
+        world.AddComponent(camE, cam);
 
-    const void* mapped = readback->Map();
-    if (mapped == nullptr)
-    {
-        return false;
-    }
-    const auto* p = static_cast<const std::uint8_t*>(mapped);
-    outRgba.resize(static_cast<std::size_t>(bytes));
-    for (std::uint64_t i = 0; i < pixelCount; ++i)
-    {
-        // 源 BGRA8 字节序 B,G,R,A → 目标紧凑 RGBA8。
-        outRgba[i * 4 + 0] = p[i * 4 + 2];  // R
-        outRgba[i * 4 + 1] = p[i * 4 + 1];  // G
-        outRgba[i * 4 + 2] = p[i * 4 + 0];  // B
-        outRgba[i * 4 + 3] = p[i * 4 + 3];  // A
-    }
-    readback->Unmap();
-    return true;
-}
+        Entity             lightE = world.CreateEntity();
+        TransformComponent lt{};
+        lt.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, 0.0f, -1.0f));
+        world.AddComponent(lightE, lt);
+        world.AddComponent(lightE, DirectionalLight{});
 
-}  // namespace
+        Entity e = world.CreateEntity();
+        world.AddComponent(e, TransformComponent{});
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = inst;
+        world.AddComponent(e, rc);
+    }
+
+    // 把外部 BGRA8 target 整张读回成紧凑 RGBA8（交换 B/R 通道）。target 当前应处于
+    // ShaderReadOnly（RenderToTexture 成功后的状态）。仿 PipelineRenderToTextureTest
+    // 的 ReadbackCenter，但读整张而非中心像素，并做 BGRA→RGBA 以喂 golden harness
+    // 的 MakeRgbFromRgba（它取前 3 字节当 RGB）。
+    bool ReadbackFullRgba(Orange::Renderer::RenderDevice& device,
+                          Orange::Rhi::RHITexture&        target,
+                          std::uint32_t width, std::uint32_t height,
+                          std::vector<std::uint8_t>& outRgba)
+    {
+        auto&               rhi = device.GetRhiDevice();
+        const std::uint64_t pixelCount =
+            static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+        const std::uint64_t bytes = pixelCount * 4u;
+
+        Orange::Rhi::BufferDesc bd{};
+        bd.mSize        = bytes;
+        bd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+        bd.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuToCpu;
+        auto readback   = rhi.CreateBuffer(bd);
+        if (!readback)
+        {
+            return false;
+        }
+
+        auto cmd = rhi.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
+        if (!cmd || cmd->Begin() != Orange::ResultCode::Success)
+        {
+            return false;
+        }
+        cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::ShaderReadOnly,
+                               Orange::Rhi::TextureLayout::TransferSrc);
+        {
+            Orange::Rhi::BufferTextureCopyRegion r{};
+            r.mBufferOffset = 0;
+            r.mMipLevel     = 0;
+            r.mArrayLayer   = 0;
+            r.mWidth        = width;
+            r.mHeight       = height;
+            r.mDepth        = 1;
+            cmd->CopyTextureToBuffer(target, *readback, r);
+        }
+        cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::TransferSrc,
+                               Orange::Rhi::TextureLayout::ShaderReadOnly);
+        if (cmd->End() != Orange::ResultCode::Success || rhi.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
+        {
+            return false;
+        }
+        device.WaitIdle();
+
+        const void* mapped = readback->Map();
+        if (mapped == nullptr)
+        {
+            return false;
+        }
+        const auto* p = static_cast<const std::uint8_t*>(mapped);
+        outRgba.resize(static_cast<std::size_t>(bytes));
+        for (std::uint64_t i = 0; i < pixelCount; ++i)
+        {
+            // 源 BGRA8 字节序 B,G,R,A → 目标紧凑 RGBA8。
+            outRgba[i * 4 + 0] = p[i * 4 + 2]; // R
+            outRgba[i * 4 + 1] = p[i * 4 + 1]; // G
+            outRgba[i * 4 + 2] = p[i * 4 + 0]; // B
+            outRgba[i * 4 + 3] = p[i * 4 + 3]; // A
+        }
+        readback->Unmap();
+        return true;
+    }
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -213,7 +219,7 @@ int main(int argc, char** argv)
     Orange::Renderer::RenderDeviceDesc deviceDesc{};
     deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
     deviceDesc.mEnableValidation = true;
-    auto pDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
+    auto pDevice                 = Orange::Renderer::RenderDevice::Create(deviceDesc);
     if (!pDevice)
     {
         std::fprintf(stderr,
@@ -273,12 +279,10 @@ int main(int argc, char** argv)
 
     // 外部 BGRA8 target（usage 含 TransferSrc 以便 readback）。
     Orange::Rhi::TextureDesc td{};
-    td.mWidth  = kW;
-    td.mHeight = kH;
-    td.mFormat = Orange::Rhi::TextureFormat::BGRA8Unorm;
-    td.mUsage  = Orange::Rhi::TextureUsage::RenderTarget
-               | Orange::Rhi::TextureUsage::Sampled
-               | Orange::Rhi::TextureUsage::TransferSrc;
+    td.mWidth   = kW;
+    td.mHeight  = kH;
+    td.mFormat  = Orange::Rhi::TextureFormat::BGRA8Unorm;
+    td.mUsage   = Orange::Rhi::TextureUsage::RenderTarget | Orange::Rhi::TextureUsage::Sampled | Orange::Rhi::TextureUsage::TransferSrc;
     auto target = pDevice->GetRhiDevice().CreateTexture(td);
     if (!target)
     {

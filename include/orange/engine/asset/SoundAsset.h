@@ -28,34 +28,33 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API SoundAsset
-{
-public:
-    SoundAsset() = default;
-    SoundAsset(std::vector<std::uint8_t> bytes, std::string sourcePath)
-        : mBytes(std::move(bytes))
-        , mSourcePath(std::move(sourcePath))
+    class ORANGE_ENGINE_API SoundAsset
     {
-    }
+    public:
+        SoundAsset() = default;
+        SoundAsset(std::vector<std::uint8_t> bytes, std::string sourcePath)
+            : mBytes(std::move(bytes)), mSourcePath(std::move(sourcePath))
+        {
+        }
 
-    // 文件原始字节（用于 miniaudio 的 decoder_init_memory）。
-    std::span<const std::uint8_t> Bytes() const noexcept
-    {
-        return std::span<const std::uint8_t>{mBytes.data(), mBytes.size()};
-    }
+        // 文件原始字节（用于 miniaudio 的 decoder_init_memory）。
+        std::span<const std::uint8_t> Bytes() const noexcept
+        {
+            return std::span<const std::uint8_t>{mBytes.data(), mBytes.size()};
+        }
 
-    // 加载来源 path——给 decoder 提示扩展名（miniaudio 通过 magic bytes 自
-    // 检，扩展名仅 fallback；本字段也用于诊断）。
-    std::string_view SourcePath() const noexcept { return mSourcePath; }
+        // 加载来源 path——给 decoder 提示扩展名（miniaudio 通过 magic bytes 自
+        // 检，扩展名仅 fallback；本字段也用于诊断）。
+        std::string_view SourcePath() const noexcept { return mSourcePath; }
 
-    bool        Empty() const noexcept { return mBytes.empty(); }
-    std::size_t Size()  const noexcept { return mBytes.size(); }
+        bool        Empty() const noexcept { return mBytes.empty(); }
+        std::size_t Size() const noexcept { return mBytes.size(); }
 
-private:
-    std::vector<std::uint8_t> mBytes;
-    std::string               mSourcePath;
-};
+    private:
+        std::vector<std::uint8_t> mBytes;
+        std::string               mSourcePath;
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_SOUND_ASSET_H
+#endif // ORANGE_ENGINE_ASSET_SOUND_ASSET_H

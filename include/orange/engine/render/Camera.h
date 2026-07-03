@@ -25,50 +25,50 @@
 namespace Orange::Engine::Render
 {
 
-struct Camera
-{
-    glm::mat4 view{1.0f};
-    glm::mat4 projection{1.0f};
-
-    // 透视投影 —— fovYRadians = 垂直视角（弧度），aspect = 宽高比，
-    // zNear / zFar 为正数。生成的矩阵：右手输入 → Vulkan NDC（y-down，
-    // z ∈ [0,1]）。
-    static Camera Perspective(float fovYRadians,
-                              float aspect,
-                              float zNear,
-                              float zFar) noexcept
+    struct Camera
     {
-        const float f = 1.0f / std::tan(fovYRadians * 0.5f);
-        glm::mat4 p(0.0f);
-        p[0][0] = f / aspect;
-        p[1][1] = -f;                              // y-flip 至 Vulkan NDC
-        p[2][2] = zFar / (zNear - zFar);           // z 映射到 [0,1]（近远反向）
-        p[2][3] = -1.0f;                           // w = -view-z
-        p[3][2] = (zNear * zFar) / (zNear - zFar);
-        Camera cam;
-        cam.projection = p;
-        return cam;
-    }
+        glm::mat4 view{1.0f};
+        glm::mat4 projection{1.0f};
 
-    // 正交投影 —— left/right/bottom/top 是世界空间盒子；y-flip 同样
-    // 内置；z 映射到 [0,1]。
-    static Camera Orthographic(float left,   float right,
-                               float bottom, float top,
-                               float zNear,  float zFar) noexcept
-    {
-        glm::mat4 p(1.0f);
-        p[0][0] =  2.0f / (right - left);
-        p[1][1] = -2.0f / (top - bottom);          // y-flip 至 Vulkan NDC
-        p[2][2] =  1.0f / (zNear - zFar);          // z ∈ [0,1]
-        p[3][0] = -(right + left) / (right - left);
-        p[3][1] =  (top + bottom) / (top - bottom);
-        p[3][2] =  zNear / (zNear - zFar);
-        Camera cam;
-        cam.projection = p;
-        return cam;
-    }
-};
+        // 透视投影 —— fovYRadians = 垂直视角（弧度），aspect = 宽高比，
+        // zNear / zFar 为正数。生成的矩阵：右手输入 → Vulkan NDC（y-down，
+        // z ∈ [0,1]）。
+        static Camera Perspective(float fovYRadians,
+                                  float aspect,
+                                  float zNear,
+                                  float zFar) noexcept
+        {
+            const float f = 1.0f / std::tan(fovYRadians * 0.5f);
+            glm::mat4   p(0.0f);
+            p[0][0] = f / aspect;
+            p[1][1] = -f;                    // y-flip 至 Vulkan NDC
+            p[2][2] = zFar / (zNear - zFar); // z 映射到 [0,1]（近远反向）
+            p[2][3] = -1.0f;                 // w = -view-z
+            p[3][2] = (zNear * zFar) / (zNear - zFar);
+            Camera cam;
+            cam.projection = p;
+            return cam;
+        }
 
-}  // namespace Orange::Engine::Render
+        // 正交投影 —— left/right/bottom/top 是世界空间盒子；y-flip 同样
+        // 内置；z 映射到 [0,1]。
+        static Camera Orthographic(float left, float right,
+                                   float bottom, float top,
+                                   float zNear, float zFar) noexcept
+        {
+            glm::mat4 p(1.0f);
+            p[0][0] = 2.0f / (right - left);
+            p[1][1] = -2.0f / (top - bottom); // y-flip 至 Vulkan NDC
+            p[2][2] = 1.0f / (zNear - zFar);  // z ∈ [0,1]
+            p[3][0] = -(right + left) / (right - left);
+            p[3][1] = (top + bottom) / (top - bottom);
+            p[3][2] = zNear / (zNear - zFar);
+            Camera cam;
+            cam.projection = p;
+            return cam;
+        }
+    };
 
-#endif  // ORANGE_ENGINE_RENDER_CAMERA_H
+} // namespace Orange::Engine::Render
+
+#endif // ORANGE_ENGINE_RENDER_CAMERA_H

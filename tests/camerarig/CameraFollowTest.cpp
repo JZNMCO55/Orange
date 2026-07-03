@@ -24,21 +24,21 @@ using Rig::FollowParams;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-3f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-3f)
     {
-        std::fprintf(stderr, "[CameraFollowTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
+
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[CameraFollowTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
 } // namespace
 
@@ -58,7 +58,7 @@ int main()
     // —— 死区保持：目标在死区内移动，相机不追 ——
     {
         FollowParams p{};
-        p.smoothTime = 0.0f;
+        p.smoothTime         = 0.0f;
         p.deadzoneHalfExtent = {2.0f, 2.0f};
         CameraFollow2D cam(p);
         cam.SetPosition({0.0f, 0.0f});
@@ -69,7 +69,7 @@ int main()
     // —— 死区跟随：目标出死区 → 相机推到"目标恰在死区边沿" ——
     {
         FollowParams p{};
-        p.smoothTime = 0.0f;
+        p.smoothTime         = 0.0f;
         p.deadzoneHalfExtent = {2.0f, 2.0f};
         CameraFollow2D cam(p);
         cam.SetPosition({0.0f, 0.0f});
@@ -85,16 +85,17 @@ int main()
         p.smoothTime = 0.3f;
         CameraFollow2D cam(p);
         cam.SetPosition({0.0f, 0.0f});
-        const float target = 10.0f;
-        const float dt = 1.0f / 60.0f;
-        float prev = 0.0f;
-        float maxReached = 0.0f;
+        const float target     = 10.0f;
+        const float dt         = 1.0f / 60.0f;
+        float       prev       = 0.0f;
+        float       maxReached = 0.0f;
         for (int i = 0; i < 240; ++i) // 4 秒
         {
             const float x = cam.Update({target, 0.0f}, dt).x;
             Check(x >= prev - 1e-4f, "smoothdamp: 单调逼近 (不回退)");
             prev = x;
-            if (x > maxReached) maxReached = x;
+            if (x > maxReached)
+                maxReached = x;
         }
         Check(Near(prev, target, 0.05f), "smoothdamp: 足够时间后收敛到目标");
         Check(maxReached <= target + 0.05f, "smoothdamp: 不显著过冲 (临界阻尼)");
@@ -104,7 +105,7 @@ int main()
     {
         FollowParams p{};
         p.smoothTime = 0.3f;
-        p.maxSpeed = 5.0f;
+        p.maxSpeed   = 5.0f;
         CameraFollow2D cam(p);
         cam.SetPosition({0.0f, 0.0f});
         const float dt = 1.0f / 60.0f;
@@ -121,9 +122,9 @@ int main()
     {
         FollowParams p{};
         p.smoothTime = 0.0f;
-        p.hasBounds = true;
-        p.boundsMin = {-10.0f, -10.0f};
-        p.boundsMax = {10.0f, 10.0f};
+        p.hasBounds  = true;
+        p.boundsMin  = {-10.0f, -10.0f};
+        p.boundsMax  = {10.0f, 10.0f};
         CameraFollow2D cam(p);
         cam.SetPosition({0.0f, 0.0f});
         const glm::vec2 out = cam.Update({100.0f, -100.0f}, 1.0f / 60.0f);
@@ -134,9 +135,9 @@ int main()
     {
         FollowParams p{};
         p.smoothTime = 0.0f;
-        p.hasBounds = true;
-        p.boundsMin = {5.0f, -10.0f};
-        p.boundsMax = {-5.0f, 10.0f}; // x 轴 min>max → 退化不钳；y 正常
+        p.hasBounds  = true;
+        p.boundsMin  = {5.0f, -10.0f};
+        p.boundsMax  = {-5.0f, 10.0f}; // x 轴 min>max → 退化不钳；y 正常
         CameraFollow2D cam(p);
         cam.SetPosition({0.0f, 0.0f});
         const glm::vec2 out = cam.Update({100.0f, 100.0f}, 1.0f / 60.0f);
@@ -157,7 +158,7 @@ int main()
 
     // —— dt<=0：不动 ——
     {
-        FollowParams p{};
+        FollowParams   p{};
         CameraFollow2D cam(p);
         cam.SetPosition({3.0f, 4.0f});
         const glm::vec2 out = cam.Update({99.0f, 99.0f}, 0.0f);

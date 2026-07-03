@@ -15,10 +15,10 @@
 
 namespace Orange::Engine::Scene
 {
-namespace
-{
+    namespace
+    {
 
-[[maybe_unused]] inline constexpr int sSceneHeaderCheckSentinel = 0;
+        [[maybe_unused]] inline constexpr int sSceneHeaderCheckSentinel = 0;
 
-}  // namespace
-}  // namespace Orange::Engine::Scene
+    } // namespace
+} // namespace Orange::Engine::Scene

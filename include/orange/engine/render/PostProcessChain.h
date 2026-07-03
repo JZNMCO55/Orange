@@ -32,43 +32,43 @@
 namespace Orange::Engine::Render
 {
 
-class ORANGE_ENGINE_API PostProcessChain
-{
-public:
-    PostProcessChain()  = default;
-    ~PostProcessChain() = default;
+    class ORANGE_ENGINE_API PostProcessChain
+    {
+    public:
+        PostProcessChain()  = default;
+        ~PostProcessChain() = default;
 
-    PostProcessChain(const PostProcessChain&)            = delete;
-    PostProcessChain& operator=(const PostProcessChain&) = delete;
+        PostProcessChain(const PostProcessChain&)            = delete;
+        PostProcessChain& operator=(const PostProcessChain&) = delete;
 
-    PostProcessChain(PostProcessChain&&) noexcept            = default;
-    PostProcessChain& operator=(PostProcessChain&&) noexcept = default;
+        PostProcessChain(PostProcessChain&&) noexcept            = default;
+        PostProcessChain& operator=(PostProcessChain&&) noexcept = default;
 
-    // pass == nullptr 视为 no-op（与 MaterialInstance silent-ignore 同
-    // 思路——容器不抛异常，调用方靠 PassCount 增减做断言）。
-    void AddPass(std::unique_ptr<IPostProcessPass> pass);
+        // pass == nullptr 视为 no-op（与 MaterialInstance silent-ignore 同
+        // 思路——容器不抛异常，调用方靠 PassCount 增减做断言）。
+        void AddPass(std::unique_ptr<IPostProcessPass> pass);
 
-    // 越界视为 no-op。chain 内位置稳定——RemoveAt 不影响其它 pass 的
-    // 索引（vector::erase 之后的元素往前移，因此索引会变）。这是 vector
-    // 的标准语义，调用方按"删完后从 0 重新拿索引"使用。
-    void RemoveAt(std::size_t index);
+        // 越界视为 no-op。chain 内位置稳定——RemoveAt 不影响其它 pass 的
+        // 索引（vector::erase 之后的元素往前移，因此索引会变）。这是 vector
+        // 的标准语义，调用方按"删完后从 0 重新拿索引"使用。
+        void RemoveAt(std::size_t index);
 
-    void Clear() noexcept;
+        void Clear() noexcept;
 
-    std::size_t PassCount() const noexcept;
-    bool        Empty()     const noexcept { return PassCount() == 0; }
+        std::size_t PassCount() const noexcept;
+        bool        Empty() const noexcept { return PassCount() == 0; }
 
-    IPostProcessPass*       PassAt(std::size_t index) noexcept;
-    const IPostProcessPass* PassAt(std::size_t index) const noexcept;
+        IPostProcessPass*       PassAt(std::size_t index) noexcept;
+        const IPostProcessPass* PassAt(std::size_t index) const noexcept;
 
-    // 命中第一个 Name() 与 name 相等的 pass；不命中返回 nullptr。
-    IPostProcessPass*       FindByName(std::string_view name) noexcept;
-    const IPostProcessPass* FindByName(std::string_view name) const noexcept;
+        // 命中第一个 Name() 与 name 相等的 pass；不命中返回 nullptr。
+        IPostProcessPass*       FindByName(std::string_view name) noexcept;
+        const IPostProcessPass* FindByName(std::string_view name) const noexcept;
 
-private:
-    std::vector<std::unique_ptr<IPostProcessPass>> mPasses;
-};
+    private:
+        std::vector<std::unique_ptr<IPostProcessPass>> mPasses;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_CHAIN_H
+#endif // ORANGE_ENGINE_RENDER_POST_PROCESS_CHAIN_H

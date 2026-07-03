@@ -29,15 +29,15 @@
 
 struct EditorAssetContext
 {
-    std::unique_ptr<Orange::Engine::Asset::AssetRegistry>     pAssets;
-    std::unique_ptr<Orange::Engine::Render::MaterialSystem>   pMaterials;
+    std::unique_ptr<Orange::Engine::Asset::AssetRegistry>        pAssets;
+    std::unique_ptr<Orange::Engine::Render::MaterialSystem>      pMaterials;
     std::unique_ptr<Orange::Engine::Animation::AnimatorRegistry> pAnimators;
 
     // 内置 mesh handle —— SeedDemoWorld 给 Floor 用 plane / Wall 用 cube。
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
-        cubeMeshHandle  {};
+        cubeMeshHandle{};
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
-        planeMeshHandle {};
+        planeMeshHandle{};
     // PBR showcase scene 用的 sphere mesh（lat/lon UV-sphere，与 sample 13/14
     // 同款）。InitializeEditorAssets 内 lazy bake assets/meshes/sphere.mesh。
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::MeshAsset>
@@ -72,16 +72,16 @@ struct EditorAssetContext
     // namedMaterialInstances 映射，让 pbr_showcase.scene.json 的 Renderable
     // materialInstanceId 字段可正确解析。
     std::vector<std::unique_ptr<Orange::Engine::Render::MaterialInstance>>
-        pbrShowcaseMaterials;
-    std::vector<std::string> pbrShowcaseMaterialPaths;  // 与 pbrShowcaseMaterials 一一对应
+                             pbrShowcaseMaterials;
+    std::vector<std::string> pbrShowcaseMaterialPaths; // 与 pbrShowcaseMaterials 一一对应
 
     // v0.5 c3：Asset 浏览器选中状态。
     // browserCurrentDir 是浏览器当前查看的目录（相对仓库根，前缀 "assets/"），
     // 启动期初始化为 "assets/" 根目录，用户点目录树切换；selectedAssetPath
     // 是浏览器当前选中的 asset 文件路径（同款相对路径），空字符串表示未选中。
     // v0.5 c4 DnD 写入 / c5 Material 子模式入口都消费 selectedAssetPath。
-    std::string browserCurrentDir   = "assets";
-    std::string selectedAssetPath   = {};
+    std::string browserCurrentDir = "assets";
+    std::string selectedAssetPath = {};
 
     // 内置 MaterialInstance 命名表，集中到 context 自身（v0.8 整骨消除 L15）。
     // 由 BuildNamedMaterialInstances 在 main 启动期填好；v0.9.5 c3 起 Schema
@@ -96,8 +96,8 @@ struct EditorAssetContext
     // 覆盖回盘上值，用户切换立即被冲掉）。当 editingMaterialPath 与当前
     // selectedAssetPath 不一致时（用户切到另一个 .material）重置缓存重新
     // 从盘读；一致则 editingTemplateName 持续保留用户选择，Save 时落盘。
-    std::string editingMaterialPath   = {};
-    std::string editingTemplateName   = {};
+    std::string editingMaterialPath = {};
+    std::string editingTemplateName = {};
 
     // GAP-2026-05-29-editor-material-asset-dirty-tracking：当前编辑的 .material
     // 是否有**未写盘**改动（持久追踪，跨帧 / 跨切到实体后仍成立）。
@@ -126,4 +126,4 @@ struct EditorAssetContext
         userMaterials;
 };
 
-#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H
+#endif // ORANGE_EDITOR_CONTEXT_EDITOR_ASSET_CONTEXT_H

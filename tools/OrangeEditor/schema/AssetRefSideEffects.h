@@ -23,28 +23,28 @@
 
 namespace Orange::Editor::Schema
 {
-struct PropertyDescriptor;
+    struct PropertyDescriptor;
 }
 
 namespace Orange::Editor
 {
 
-// 写 AssetRef 字段前的副作用。Material 字段先把 path 对应 .material lazy 注册到
-// namedMaterialInstances（否则 materialSet 查表 miss → 静默 no-op）。返回 false
-// 表示 Material instance 创建失败（文件缺失 / 解析失败 / template 未注册），
-// 调用方应中止写入并报错；非 Material 字段 / 空 path 恒返回 true。
-bool PrepareAssetRefWrite(EditorHost&                       host,
-                          const Schema::PropertyDescriptor& prop,
-                          const std::string&                path);
+    // 写 AssetRef 字段前的副作用。Material 字段先把 path 对应 .material lazy 注册到
+    // namedMaterialInstances（否则 materialSet 查表 miss → 静默 no-op）。返回 false
+    // 表示 Material instance 创建失败（文件缺失 / 解析失败 / template 未注册），
+    // 调用方应中止写入并报错；非 Material 字段 / 空 path 恒返回 true。
+    bool PrepareAssetRefWrite(EditorHost&                       host,
+                              const Schema::PropertyDescriptor& prop,
+                              const std::string&                path);
 
-// 写 AssetRef 字段后的副作用。Mesh 字段把多材质 slot 同步到
-// SubMeshMaterialsComponent（前置：caller 已把 mesh 设到 Renderable）。非 Mesh
-// 字段为 no-op。
-void FinishAssetRefWrite(EditorHost&                       host,
-                         Orange::Engine::Entity            entity,
-                         const Schema::PropertyDescriptor& prop,
-                         const std::string&                path);
+    // 写 AssetRef 字段后的副作用。Mesh 字段把多材质 slot 同步到
+    // SubMeshMaterialsComponent（前置：caller 已把 mesh 设到 Renderable）。非 Mesh
+    // 字段为 no-op。
+    void FinishAssetRefWrite(EditorHost&                       host,
+                             Orange::Engine::Entity            entity,
+                             const Schema::PropertyDescriptor& prop,
+                             const std::string&                path);
 
-}  // namespace Orange::Editor
+} // namespace Orange::Editor
 
-#endif  // ORANGE_EDITOR_SCHEMA_ASSET_REF_SIDE_EFFECTS_H
+#endif // ORANGE_EDITOR_SCHEMA_ASSET_REF_SIDE_EFFECTS_H

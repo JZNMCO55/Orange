@@ -25,8 +25,8 @@
 // 链接面：BuiltinAssets.cpp + MaterialFileIO.cpp + ShaderTemplateMetaIO.cpp +
 // orange_engine —— 均无 import-impl / vulkan，headless 可链。
 
-#include "BuiltinAssets.h"   // EnsureMaterialInstance(EditorAssetContext&)
-#include "MaterialFileIO.h"  // MaterialFileData / WriteMaterialFile
+#include "BuiltinAssets.h"  // EnsureMaterialInstance(EditorAssetContext&)
+#include "MaterialFileIO.h" // MaterialFileData / WriteMaterialFile
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/ShaderAsset.h>
@@ -39,29 +39,29 @@
 #include <memory>
 #include <string>
 
+using Orange::Editor::Material::MaterialFileData;
+using Orange::Editor::Material::WriteMaterialFile;
 using Orange::Engine::Asset::AssetRegistry;
 using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Render::MaterialSystem;
-using Orange::Editor::Material::MaterialFileData;
-using Orange::Editor::Material::WriteMaterialFile;
 
 namespace
 {
 
-// 写一份最小 .material（指定 templateName，无 uniform/texture override）到磁盘。
-std::string WriteFixtureMaterial(const std::filesystem::path& path,
-                                 const std::string& templateName)
-{
-    MaterialFileData data;
-    data.templateName = templateName;
-    const std::string p = path.string();
-    const bool wrote = WriteMaterialFile(p, data);
-    assert(wrote && "写 fixture .material 失败");
-    return p;
-}
+    // 写一份最小 .material（指定 templateName，无 uniform/texture override）到磁盘。
+    std::string WriteFixtureMaterial(const std::filesystem::path& path,
+                                     const std::string&           templateName)
+    {
+        MaterialFileData data;
+        data.templateName       = templateName;
+        const std::string p     = path.string();
+        const bool        wrote = WriteMaterialFile(p, data);
+        assert(wrote && "写 fixture .material 失败");
+        return p;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -75,7 +75,7 @@ int main()
             assets.pAssets->RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
         assert(reg.IsOk() && "注册 ShaderLoader 失败");
     }
-    assets.pMaterials = std::make_unique<MaterialSystem>(*assets.pAssets);
+    assets.pMaterials     = std::make_unique<MaterialSystem>(*assets.pAssets);
     const bool builtinsOk = assets.pMaterials->RegisterBuiltins().IsOk();
 
     const std::filesystem::path tmpDir = std::filesystem::temp_directory_path();
@@ -85,15 +85,11 @@ int main()
         const std::string badPath =
             WriteFixtureMaterial(tmpDir / "orange_f1_unknown_template.material",
                                  "__orange_nonexistent_template__");
-        assert(assets.namedMaterialInstances.find(badPath)
-                   == assets.namedMaterialInstances.end());
+        assert(assets.namedMaterialInstances.find(badPath) == assets.namedMaterialInstances.end());
 
         auto* inst = EnsureMaterialInstance(assets, badPath);
-        assert(inst == nullptr
-               && "未注册模板应 ensure 失败返回 nullptr（不静默成功）");
-        assert(assets.namedMaterialInstances.find(badPath)
-                   == assets.namedMaterialInstances.end()
-               && "ensure 失败不应往 namedMaterialInstances 写入");
+        assert(inst == nullptr && "未注册模板应 ensure 失败返回 nullptr（不静默成功）");
+        assert(assets.namedMaterialInstances.find(badPath) == assets.namedMaterialInstances.end() && "ensure 失败不应往 namedMaterialInstances 写入");
         std::filesystem::remove(tmpDir / "orange_f1_unknown_template.material");
         std::fprintf(stdout, "  [PASS] A: 未注册模板 ensure 失败且不写表\n");
     }
@@ -121,20 +117,16 @@ int main()
         const std::string matPath = WriteFixtureMaterial(matFs, "pbr");
 
         // F1 前提：path 不在表 → 修复前 materialSet 会 miss（材质不生效）。
-        assert(assets.namedMaterialInstances.find(matPath)
-                   == assets.namedMaterialInstances.end()
-               && "前提:fixture .material 不应预先在表里");
+        assert(assets.namedMaterialInstances.find(matPath) == assets.namedMaterialInstances.end() && "前提:fixture .material 不应预先在表里");
 
         // 修复核心：EnsureMaterialInstance lazy create + 注册。
         auto* inst = EnsureMaterialInstance(assets, matPath);
-        assert(inst != nullptr
-               && "EnsureMaterialInstance 应对不在表的 pbr .material lazy create 成功");
+        assert(inst != nullptr && "EnsureMaterialInstance 应对不在表的 pbr .material lazy create 成功");
 
         // F1 修复后：path 进表，materialSet 现在能查到（非 nullptr）。
         auto it = assets.namedMaterialInstances.find(matPath);
-        assert(it != assets.namedMaterialInstances.end() && it->second == inst
-               && "F1 回归:ensure 后 .material 应在 namedMaterialInstances 使 "
-                  "materialSet 命中");
+        assert(it != assets.namedMaterialInstances.end() && it->second == inst && "F1 回归:ensure 后 .material 应在 namedMaterialInstances 使 "
+                                                                                  "materialSet 命中");
 
         std::filesystem::remove(matFs);
         std::fprintf(stdout, "  [PASS] B: 不在表的 pbr .material ensure 后进表\n");

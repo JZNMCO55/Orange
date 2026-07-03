@@ -24,18 +24,18 @@
 namespace Orange::Editor::Plugin
 {
 
-class PostProcessVolumeGizmoPlugin : public IEditorGizmoPlugin
-{
-public:
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class PostProcessVolumeGizmoPlugin : public IEditorGizmoPlugin
+    {
+    public:
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    void Draw(EditorHost&                                            host,
-              Orange::Engine::Entity                                 entity,
-              const Orange::Editor::Schema::ComponentSchema&         schema,
-              void*                                                  component,
-              const GizmoContext&                                    ctx) override;
-};
+        void Draw(EditorHost&                                    host,
+                  Orange::Engine::Entity                         entity,
+                  const Orange::Editor::Schema::ComponentSchema& schema,
+                  void*                                          component,
+                  const GizmoContext&                            ctx) override;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_POST_PROCESS_VOLUME_GIZMO_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_POST_PROCESS_VOLUME_GIZMO_PLUGIN_H

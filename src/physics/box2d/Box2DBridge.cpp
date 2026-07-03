@@ -11,81 +11,82 @@
 namespace Orange::Engine::Physics::Box2DBridge
 {
 
-b2WorldDef MakeWorldDef(const PhysicsWorldDesc& desc) noexcept
-{
-    b2WorldDef wd = b2DefaultWorldDef();
-    wd.gravity    = ToB2(desc.gravity);
-    return wd;
-}
-
-b2BodyDef MakeBodyDef(const RigidBodyComponent& rb) noexcept
-{
-    b2BodyDef bd        = b2DefaultBodyDef();
-    bd.type             = ToB2BodyType(rb.type);
-    bd.position         = ToB2(rb.initialPosition);
-    bd.rotation         = b2MakeRot(rb.initialAngle);
-    bd.linearVelocity   = ToB2(rb.linearVelocity);
-    bd.angularVelocity  = rb.angularVelocity;
-    bd.linearDamping    = rb.linearDamping;
-    bd.angularDamping   = rb.angularDamping;
-    bd.fixedRotation    = rb.fixedRotation;
-    bd.gravityScale     = rb.gravityScale;
-    return bd;
-}
-
-b2ShapeDef MakeShapeDef(const ColliderComponent& col) noexcept
-{
-    b2ShapeDef sd          = b2DefaultShapeDef();
-    sd.density             = col.density;
-    sd.material.friction   = col.friction;
-    sd.material.restitution = col.restitution;
-    sd.isSensor            = col.isSensor;
-    // collision filtering：uint32 → uint64 隐式扩宽。b2DefaultShapeDef 已把
-    // filter 初始化为默认（category=1 / mask=all / group=0），这里覆盖 category /
-    // mask 两字段，groupIndex 仍留默认 0（本期不用 group 规则）。
-    sd.filter.categoryBits = col.categoryBits;
-    sd.filter.maskBits     = col.maskBits;
-    // 全量开启 sensor / contact 事件缓冲——两者默认 false（"False by default, even for
-    // sensors"），不开 b2World_GetSensorEvents / GetContactEvents 永远为空。纯 additive，
-    // 不改碰撞响应；enableContactEvents 对 sensor 被 box2d 忽略（无害）。触发器 / 拾取 /
-    // 落地检测等玩法原语依赖这两个开关。
-    sd.enableSensorEvents  = true;
-    sd.enableContactEvents = true;
-    return sd;
-}
-
-namespace
-{
-
-// 单 polygon shape 用 b2MakePolygon(b2Hull*) 构造（Box2D 自己求凸壳 +
-// 处理边界）。下方 hull 直接拷调用方给的顶点序列；count 越界由 b2 内部
-// assert 兜底。
-b2Polygon BuildPolygonFromDesc(const PolygonDesc& desc) noexcept
-{
-    b2Hull hull{};
-    // count 夹到 B2_MAX_POLYGON_VERTICES（== hull.points 固定容量，也 == PolygonDesc::
-    // kMaxVertices）。若调用方 / 反序列化坏数据给了 count>8（PolygonDesc::vertices 也只
-    // 有 8 槽），不夹会让 hull.count 超过已拷贝点数与数组容量 → b2MakePolygon 读
-    // hull.points[8..] 越界（debug 靠 b2 内部 assert，release 无 assert = UB）。与下方
-    // PolygonDesc count<3 的下界校验对称补上上界。
-    const std::uint32_t n =
-        std::min<std::uint32_t>(desc.count, static_cast<std::uint32_t>(B2_MAX_POLYGON_VERTICES));
-    hull.count = static_cast<int>(n);
-    for (std::uint32_t i = 0; i < n; ++i)
+    b2WorldDef MakeWorldDef(const PhysicsWorldDesc& desc) noexcept
     {
-        hull.points[i] = ToB2(desc.vertices[i]);
+        b2WorldDef wd = b2DefaultWorldDef();
+        wd.gravity    = ToB2(desc.gravity);
+        return wd;
     }
-    // radius = 0：sharp edges。多边形带圆角留待消费方需要时显式开。
-    return b2MakePolygon(&hull, /*radius=*/0.0f);
-}
 
-}  // namespace
+    b2BodyDef MakeBodyDef(const RigidBodyComponent& rb) noexcept
+    {
+        b2BodyDef bd       = b2DefaultBodyDef();
+        bd.type            = ToB2BodyType(rb.type);
+        bd.position        = ToB2(rb.initialPosition);
+        bd.rotation        = b2MakeRot(rb.initialAngle);
+        bd.linearVelocity  = ToB2(rb.linearVelocity);
+        bd.angularVelocity = rb.angularVelocity;
+        bd.linearDamping   = rb.linearDamping;
+        bd.angularDamping  = rb.angularDamping;
+        bd.fixedRotation   = rb.fixedRotation;
+        bd.gravityScale    = rb.gravityScale;
+        return bd;
+    }
 
-bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
-{
-    b2ShapeDef sd = MakeShapeDef(col);
+    b2ShapeDef MakeShapeDef(const ColliderComponent& col) noexcept
+    {
+        b2ShapeDef sd           = b2DefaultShapeDef();
+        sd.density              = col.density;
+        sd.material.friction    = col.friction;
+        sd.material.restitution = col.restitution;
+        sd.isSensor             = col.isSensor;
+        // collision filtering：uint32 → uint64 隐式扩宽。b2DefaultShapeDef 已把
+        // filter 初始化为默认（category=1 / mask=all / group=0），这里覆盖 category /
+        // mask 两字段，groupIndex 仍留默认 0（本期不用 group 规则）。
+        sd.filter.categoryBits = col.categoryBits;
+        sd.filter.maskBits     = col.maskBits;
+        // 全量开启 sensor / contact 事件缓冲——两者默认 false（"False by default, even for
+        // sensors"），不开 b2World_GetSensorEvents / GetContactEvents 永远为空。纯 additive，
+        // 不改碰撞响应；enableContactEvents 对 sensor 被 box2d 忽略（无害）。触发器 / 拾取 /
+        // 落地检测等玩法原语依赖这两个开关。
+        sd.enableSensorEvents  = true;
+        sd.enableContactEvents = true;
+        return sd;
+    }
 
-    return std::visit([&](const auto& shape) -> bool {
+    namespace
+    {
+
+        // 单 polygon shape 用 b2MakePolygon(b2Hull*) 构造（Box2D 自己求凸壳 +
+        // 处理边界）。下方 hull 直接拷调用方给的顶点序列；count 越界由 b2 内部
+        // assert 兜底。
+        b2Polygon BuildPolygonFromDesc(const PolygonDesc& desc) noexcept
+        {
+            b2Hull hull{};
+            // count 夹到 B2_MAX_POLYGON_VERTICES（== hull.points 固定容量，也 == PolygonDesc::
+            // kMaxVertices）。若调用方 / 反序列化坏数据给了 count>8（PolygonDesc::vertices 也只
+            // 有 8 槽），不夹会让 hull.count 超过已拷贝点数与数组容量 → b2MakePolygon 读
+            // hull.points[8..] 越界（debug 靠 b2 内部 assert，release 无 assert = UB）。与下方
+            // PolygonDesc count<3 的下界校验对称补上上界。
+            const std::uint32_t n =
+                std::min<std::uint32_t>(desc.count, static_cast<std::uint32_t>(B2_MAX_POLYGON_VERTICES));
+            hull.count = static_cast<int>(n);
+            for (std::uint32_t i = 0; i < n; ++i)
+            {
+                hull.points[i] = ToB2(desc.vertices[i]);
+            }
+            // radius = 0：sharp edges。多边形带圆角留待消费方需要时显式开。
+            return b2MakePolygon(&hull, /*radius=*/0.0f);
+        }
+
+    } // namespace
+
+    bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
+    {
+        b2ShapeDef sd = MakeShapeDef(col);
+
+        return std::visit([&](const auto& shape) -> bool
+                          {
         using T = std::decay_t<decltype(shape)>;
 
         if constexpr (std::is_same_v<T, CircleDesc>)
@@ -199,71 +200,68 @@ bool CreateShapeFor(b2BodyId bodyId, const ColliderComponent& col)
         else
         {
             return false;  // 未知 alternative —— variant 完备性兜底
-        }
-    }, col.shape);
-}
-
-void DestroyAllShapesOnBody(b2BodyId bodyId)
-{
-    if (!B2_IS_NON_NULL(bodyId))
-    {
-        return;
+        } }, col.shape);
     }
 
-    // 第一步：枚举 shape，挑出归属 chain 的 segment，去重收集 b2ChainId。
-    // chain 持有自己的 segment shape，必须从 chain 入口销毁（直接 b2DestroyShape
-    // 一个 chain segment 是非法操作）。独立 shape（非 chain segment）单独清。
-    const int shapeCount = b2Body_GetShapeCount(bodyId);
-    if (shapeCount > 0)
+    void DestroyAllShapesOnBody(b2BodyId bodyId)
     {
-        std::vector<b2ShapeId> shapes(static_cast<std::size_t>(shapeCount));
-        const int gotShapes = b2Body_GetShapes(bodyId, shapes.data(), shapeCount);
-
-        std::vector<b2ChainId> chains;
-        chains.reserve(static_cast<std::size_t>(gotShapes));
-
-        for (int i = 0; i < gotShapes; ++i)
+        if (!B2_IS_NON_NULL(bodyId))
         {
-            const b2ChainId cid = b2Shape_GetParentChain(shapes[static_cast<std::size_t>(i)]);
-            if (!B2_IS_NON_NULL(cid))
-            {
-                continue;
-            }
-            // 用 (index1, generation, world0) 三元组判等。b2 的 ID 都是值类型，
-            // 没有运算符，手动比较。
-            const auto same = [&cid](const b2ChainId& other) noexcept
-            {
-                return other.index1 == cid.index1
-                    && other.generation == cid.generation
-                    && other.world0 == cid.world0;
-            };
-            if (std::find_if(chains.begin(), chains.end(), same) == chains.end())
-            {
-                chains.push_back(cid);
-            }
+            return;
         }
 
-        // 先清 chain（连同它的 segment shape），再清剩余的独立 shape。
-        for (const b2ChainId& cid : chains)
+        // 第一步：枚举 shape，挑出归属 chain 的 segment，去重收集 b2ChainId。
+        // chain 持有自己的 segment shape，必须从 chain 入口销毁（直接 b2DestroyShape
+        // 一个 chain segment 是非法操作）。独立 shape（非 chain segment）单独清。
+        const int shapeCount = b2Body_GetShapeCount(bodyId);
+        if (shapeCount > 0)
         {
-            b2DestroyChain(cid);
+            std::vector<b2ShapeId> shapes(static_cast<std::size_t>(shapeCount));
+            const int              gotShapes = b2Body_GetShapes(bodyId, shapes.data(), shapeCount);
+
+            std::vector<b2ChainId> chains;
+            chains.reserve(static_cast<std::size_t>(gotShapes));
+
+            for (int i = 0; i < gotShapes; ++i)
+            {
+                const b2ChainId cid = b2Shape_GetParentChain(shapes[static_cast<std::size_t>(i)]);
+                if (!B2_IS_NON_NULL(cid))
+                {
+                    continue;
+                }
+                // 用 (index1, generation, world0) 三元组判等。b2 的 ID 都是值类型，
+                // 没有运算符，手动比较。
+                const auto same = [&cid](const b2ChainId& other) noexcept
+                {
+                    return other.index1 == cid.index1 && other.generation == cid.generation && other.world0 == cid.world0;
+                };
+                if (std::find_if(chains.begin(), chains.end(), same) == chains.end())
+                {
+                    chains.push_back(cid);
+                }
+            }
+
+            // 先清 chain（连同它的 segment shape），再清剩余的独立 shape。
+            for (const b2ChainId& cid : chains)
+            {
+                b2DestroyChain(cid);
+            }
+        }
+
+        // 重新拉一遍剩余 shape——chain 销毁后这一遍只会剩独立 shape。
+        const int remaining = b2Body_GetShapeCount(bodyId);
+        if (remaining <= 0)
+        {
+            return;
+        }
+        std::vector<b2ShapeId> rest(static_cast<std::size_t>(remaining));
+        const int              gotRest = b2Body_GetShapes(bodyId, rest.data(), remaining);
+        for (int i = 0; i < gotRest; ++i)
+        {
+            // updateBodyMass=false：销毁阶段不让 b2 中途算 mass，由 ReplaceFixture
+            // 调用方在新 shape 创建后统一 b2Body_ApplyMassFromShapes。
+            b2DestroyShape(rest[static_cast<std::size_t>(i)], /*updateBodyMass=*/false);
         }
     }
 
-    // 重新拉一遍剩余 shape——chain 销毁后这一遍只会剩独立 shape。
-    const int remaining = b2Body_GetShapeCount(bodyId);
-    if (remaining <= 0)
-    {
-        return;
-    }
-    std::vector<b2ShapeId> rest(static_cast<std::size_t>(remaining));
-    const int gotRest = b2Body_GetShapes(bodyId, rest.data(), remaining);
-    for (int i = 0; i < gotRest; ++i)
-    {
-        // updateBodyMass=false：销毁阶段不让 b2 中途算 mass，由 ReplaceFixture
-        // 调用方在新 shape 创建后统一 b2Body_ApplyMassFromShapes。
-        b2DestroyShape(rest[static_cast<std::size_t>(i)], /*updateBodyMass=*/false);
-    }
-}
-
-}  // namespace Orange::Engine::Physics::Box2DBridge
+} // namespace Orange::Engine::Physics::Box2DBridge

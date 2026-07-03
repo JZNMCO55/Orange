@@ -57,50 +57,55 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> positions = {
-        {-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f},
-        {0.5f, 0.5f, 0.0f},   {-0.5f, 0.5f, 0.0f},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                       std::move(indices));
-}
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
+    {
+        std::vector<VertexPosition3> positions = {
+            {-0.5f, -0.5f, 0.0f},
+            {0.5f, -0.5f, 0.0f},
+            {0.5f, 0.5f, 0.0f},
+            {-0.5f, 0.5f, 0.0f},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        return std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                           std::move(indices));
+    }
 
-Entity AddCamera(World& world)
-{
-    Entity camE = world.CreateEntity();
-    world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
-    return camE;
-}
+    Entity AddCamera(World& world)
+    {
+        Entity camE = world.CreateEntity();
+        world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
+        return camE;
+    }
 
-void AddTexturedDrawable(World& world, AssetHandle<MeshAsset> mesh,
-                         Orange::Engine::Render::MaterialInstance* mat)
-{
-    Entity e = world.CreateEntity();
-    world.AddComponent(e, TransformComponent{});
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = mat;
-    world.AddComponent(e, rc);
-}
+    void AddTexturedDrawable(World& world, AssetHandle<MeshAsset> mesh,
+                             Orange::Engine::Render::MaterialInstance* mat)
+    {
+        Entity e = world.CreateEntity();
+        world.AddComponent(e, TransformComponent{});
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = mat;
+        world.AddComponent(e, rc);
+    }
 
-void AddPointLight(World& world, bool haloEnabled)
-{
-    Entity lightE = world.CreateEntity();
-    world.AddComponent(lightE, TransformComponent{});
-    PointLight pl{};
-    pl.haloEnabled   = haloEnabled;
-    pl.haloRadius    = 0.25f;
-    pl.haloIntensity = 0.5f;
-    world.AddComponent(lightE, pl);
-}
+    void AddPointLight(World& world, bool haloEnabled)
+    {
+        Entity lightE = world.CreateEntity();
+        world.AddComponent(lightE, TransformComponent{});
+        PointLight pl{};
+        pl.haloEnabled   = haloEnabled;
+        pl.haloRadius    = 0.25f;
+        pl.haloIntensity = 0.5f;
+        world.AddComponent(lightE, pl);
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -111,7 +116,7 @@ int main()
     winDesc.width   = 320;
     winDesc.height  = 240;
     winDesc.visible = false;
-    auto winResult = Window::Create(winDesc);
+    auto winResult  = Window::Create(winDesc);
     if (winResult.IsErr())
     {
         std::fprintf(stderr, "[PipelineHaloConditionalTest] Window::Create failed (code=%u)\n",
@@ -159,7 +164,7 @@ int main()
         AddPointLight(world, /*haloEnabled=*/false);
 
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == 1);  // 仅 textured，halo 不编
+        assert(pipeline.TemplatePipelineCount() == 1); // 仅 textured，halo 不编
         std::fprintf(stdout, "  [PASS] PointLight 但 haloEnabled=false：count=1（halo 不编）\n");
     }
 
@@ -170,7 +175,7 @@ int main()
         AddTexturedDrawable(world, meshHandle, texInst.get());
 
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == 1);  // cache 命中，仍 1
+        assert(pipeline.TemplatePipelineCount() == 1); // cache 命中，仍 1
         std::fprintf(stdout, "  [PASS] 无 PointLight：count=1（halo 不编）\n");
     }
 
@@ -195,11 +200,11 @@ int main()
         AddTexturedDrawable(world, meshHandle, texInst.get());
         const std::size_t before = pipeline.TemplatePipelineCount();
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Normals);
-        pipeline.Render(world);                          // drawable 改用 debug normals material
+        pipeline.Render(world); // drawable 改用 debug normals material
         // debug normals pipeline **真编出**（count +1），而非 shader 缺失跳过
         // （后者会让 count 不变）——这是 normals debug view 真正生效的关键断言。
         assert(pipeline.TemplatePipelineCount() == before + 1);
-        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);  // 复位
+        pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit); // 复位
         std::fprintf(stdout, "  [PASS] DebugViewMode::Normals Render 不崩 + debug pipeline 编出\n");
     }
 
@@ -212,7 +217,7 @@ int main()
         const std::size_t before = pipeline.TemplatePipelineCount();
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Unlit);
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == before + 1);  // debug unlit pipeline 编出
+        assert(pipeline.TemplatePipelineCount() == before + 1); // debug unlit pipeline 编出
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);
         std::fprintf(stdout, "  [PASS] DebugViewMode::Unlit Render 不崩 + debug pipeline 编出\n");
     }
@@ -226,7 +231,7 @@ int main()
         const std::size_t before = pipeline.TemplatePipelineCount();
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Overdraw);
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == before + 1);  // debug overdraw pipeline 编出
+        assert(pipeline.TemplatePipelineCount() == before + 1); // debug overdraw pipeline 编出
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);
         std::fprintf(stdout, "  [PASS] DebugViewMode::Overdraw Render 不崩 + debug pipeline 编出\n");
     }
@@ -241,7 +246,7 @@ int main()
         const std::size_t before = pipeline.TemplatePipelineCount();
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Wireframe);
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == before + 1);  // debug wireframe pipeline 编出
+        assert(pipeline.TemplatePipelineCount() == before + 1); // debug wireframe pipeline 编出
         pipeline.SetDebugViewMode(Orange::Engine::Render::DebugViewMode::Lit);
         std::fprintf(stdout, "  [PASS] DebugViewMode::Wireframe Render 不崩 + debug pipeline 编出\n");
     }

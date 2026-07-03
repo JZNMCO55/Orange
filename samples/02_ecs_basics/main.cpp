@@ -20,50 +20,51 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-void DumpEntity(const World& world, const char* label, Entity entity)
-{
-    if (!world.IsValid(entity))
+    void DumpEntity(const World& world, const char* label, Entity entity)
     {
-        std::printf("  %-7s = (invalid handle %llu)\n",
-                    label, static_cast<unsigned long long>(entity.Value()));
-        return;
+        if (!world.IsValid(entity))
+        {
+            std::printf("  %-7s = (invalid handle %llu)\n",
+                        label, static_cast<unsigned long long>(entity.Value()));
+            return;
+        }
+        const auto* xform = world.GetComponent<TransformComponent>(entity);
+        if (xform)
+        {
+            std::printf("  %-7s = entity #%llu  pos=(%.1f, %.1f, %.1f)  scale=(%.1f, %.1f, %.1f)\n",
+                        label,
+                        static_cast<unsigned long long>(entity.Value()),
+                        xform->position.x, xform->position.y, xform->position.z,
+                        xform->scale.x, xform->scale.y, xform->scale.z);
+        }
+        else
+        {
+            std::printf("  %-7s = entity #%llu  (no TransformComponent)\n",
+                        label, static_cast<unsigned long long>(entity.Value()));
+        }
     }
-    const auto* xform = world.GetComponent<TransformComponent>(entity);
-    if (xform)
+
+    void DumpHierarchy(const World& world, Entity entity, const char* label)
     {
-        std::printf("  %-7s = entity #%llu  pos=(%.1f, %.1f, %.1f)  scale=(%.1f, %.1f, %.1f)\n",
+        const auto* h = world.GetComponent<HierarchyComponent>(entity);
+        if (h == nullptr)
+        {
+            std::printf("  %-7s = (no HierarchyComponent)\n", label);
+            return;
+        }
+        auto valueOrNull = [](Entity e) -> long long
+        {
+            return e.IsValid() ? static_cast<long long>(e.Value()) : -1;
+        };
+        std::printf("  %-7s = parent=%lld  firstChild=%lld  prev=%lld  next=%lld\n",
                     label,
-                    static_cast<unsigned long long>(entity.Value()),
-                    xform->position.x, xform->position.y, xform->position.z,
-                    xform->scale.x,    xform->scale.y,    xform->scale.z);
+                    valueOrNull(h->parent),
+                    valueOrNull(h->firstChild),
+                    valueOrNull(h->prevSibling),
+                    valueOrNull(h->nextSibling));
     }
-    else
-    {
-        std::printf("  %-7s = entity #%llu  (no TransformComponent)\n",
-                    label, static_cast<unsigned long long>(entity.Value()));
-    }
-}
 
-void DumpHierarchy(const World& world, Entity entity, const char* label)
-{
-    const auto* h = world.GetComponent<HierarchyComponent>(entity);
-    if (h == nullptr)
-    {
-        std::printf("  %-7s = (no HierarchyComponent)\n", label);
-        return;
-    }
-    auto valueOrNull = [](Entity e) -> long long {
-        return e.IsValid() ? static_cast<long long>(e.Value()) : -1;
-    };
-    std::printf("  %-7s = parent=%lld  firstChild=%lld  prev=%lld  next=%lld\n",
-                label,
-                valueOrNull(h->parent),
-                valueOrNull(h->firstChild),
-                valueOrNull(h->prevSibling),
-                valueOrNull(h->nextSibling));
-}
-
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -96,8 +97,8 @@ int main()
         world.AddComponent(shield, t);
     }
     std::printf("\n[2] 创建 3 个实体（hero / sword / shield）并 AddComponent<TransformComponent>：\n");
-    DumpEntity(world, "hero",   hero);
-    DumpEntity(world, "sword",  sword);
+    DumpEntity(world, "hero", hero);
+    DumpEntity(world, "sword", sword);
     DumpEntity(world, "shield", shield);
     std::printf("    World::Size=%zu\n", world.Size());
 
@@ -127,15 +128,15 @@ int main()
         world.AddComponent(shield, h);
     }
     std::printf("\n[4] 用 HierarchyComponent 把 hero 串成 sword + shield 的父：\n");
-    DumpHierarchy(world, hero,   "hero");
-    DumpHierarchy(world, sword,  "sword");
+    DumpHierarchy(world, hero, "hero");
+    DumpHierarchy(world, sword, "sword");
     DumpHierarchy(world, shield, "shield");
 
     // ----- entt::view 遍历：所有挂 Transform 的实体 ------------------------
     std::printf("\n[5] 遍历 view<TransformComponent>（顺序由 EnTT 内部存储决定）：\n");
-    auto& reg = world.Registry();
+    auto&       reg     = world.Registry();
     std::size_t visited = 0;
-    auto view = reg.view<TransformComponent>();
+    auto        view    = reg.view<TransformComponent>();
     for (auto e : view)
     {
         const auto& t = view.get<TransformComponent>(e);
@@ -163,7 +164,7 @@ int main()
 
     std::printf("\n=== 完成。剩余实体：");
     auto remainView = reg.view<TransformComponent>();
-    bool first = true;
+    bool first      = true;
     for (auto e : remainView)
     {
         std::printf("%s#%llu",

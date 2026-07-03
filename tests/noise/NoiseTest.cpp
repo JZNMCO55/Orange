@@ -23,9 +23,12 @@ namespace Noise = ::Orange::Engine::Noise;
 namespace
 {
 
-bool Near(float a, float b, float eps) { return std::fabs(a - b) < eps; }
+    bool Near(float a, float b, float eps)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -50,7 +53,7 @@ int main()
     {
         Noise::Rng a{1u};
         Noise::Rng b{2u};
-        bool anyDiff = false;
+        bool       anyDiff = false;
         for (int i = 0; i < 16; ++i)
         {
             if (a.NextU64() != b.NextU64())
@@ -86,8 +89,8 @@ int main()
     {
         for (int i = 0; i < 200; ++i)
         {
-            const float x = static_cast<float>(i) * 0.37f - 20.0f;  // 含负坐标
-            const float y = static_cast<float>(i) * -0.53f + 11.0f;
+            const float x  = static_cast<float>(i) * 0.37f - 20.0f; // 含负坐标
+            const float y  = static_cast<float>(i) * -0.53f + 11.0f;
             const float n1 = Noise::ValueNoise2D(x, y, 42u);
             const float n2 = Noise::ValueNoise2D(x, y, 42u);
             assert(n1 == n2 && "ValueNoise2D 确定性（逐位相等）");
@@ -113,8 +116,8 @@ int main()
         // 连续性：相邻小 delta 输出变化小（非跳变）。
         for (int i = 0; i < 100; ++i)
         {
-            const float x = static_cast<float>(i) * 0.31f - 5.0f;
-            const float y = static_cast<float>(i) * 0.17f + 3.0f;
+            const float x  = static_cast<float>(i) * 0.31f - 5.0f;
+            const float y  = static_cast<float>(i) * 0.17f + 3.0f;
             const float n0 = Noise::ValueNoise2D(x, y, 7u);
             const float nx = Noise::ValueNoise2D(x + 0.01f, y, 7u);
             const float ny = Noise::ValueNoise2D(x, y + 0.01f, 7u);
@@ -128,8 +131,8 @@ int main()
     {
         for (int i = 0; i < 300; ++i)
         {
-            const float x = static_cast<float>(i) * 0.29f - 30.0f;  // 含负坐标
-            const float y = static_cast<float>(i) * 0.41f - 15.0f;
+            const float x  = static_cast<float>(i) * 0.29f - 30.0f; // 含负坐标
+            const float y  = static_cast<float>(i) * 0.41f - 15.0f;
             const float n1 = Noise::PerlinNoise2D(x, y, 3u);
             const float n2 = Noise::PerlinNoise2D(x, y, 3u);
             assert(n1 == n2 && "PerlinNoise2D 确定性");
@@ -159,8 +162,8 @@ int main()
     {
         for (int i = 0; i < 100; ++i)
         {
-            const float x = static_cast<float>(i) * 0.23f - 4.0f;
-            const float y = static_cast<float>(i) * 0.19f + 2.0f;
+            const float x  = static_cast<float>(i) * 0.23f - 4.0f;
+            const float y  = static_cast<float>(i) * 0.19f + 2.0f;
             const float n0 = Noise::PerlinNoise2D(x, y, 5u);
             const float nx = Noise::PerlinNoise2D(x + 0.01f, y, 5u);
             const float ny = Noise::PerlinNoise2D(x, y + 0.01f, 5u);
@@ -185,9 +188,9 @@ int main()
     {
         for (int i = 0; i < 200; ++i)
         {
-            const float x = static_cast<float>(i) * 0.31f - 10.0f;
-            const float y = static_cast<float>(i) * 0.22f - 5.0f;
-            const float z = static_cast<float>(i) * 0.17f + 1.0f;
+            const float x  = static_cast<float>(i) * 0.31f - 10.0f;
+            const float y  = static_cast<float>(i) * 0.22f - 5.0f;
+            const float z  = static_cast<float>(i) * 0.17f + 1.0f;
             const float n1 = Noise::PerlinNoise3D(x, y, z, 4u);
             const float n2 = Noise::PerlinNoise3D(x, y, z, 4u);
             assert(n1 == n2 && "PerlinNoise3D 确定性");
@@ -216,8 +219,8 @@ int main()
     {
         for (int i = 0; i < 200; ++i)
         {
-            const float x = static_cast<float>(i) * 0.27f - 12.0f;
-            const float y = static_cast<float>(i) * 0.19f - 7.0f;
+            const float x  = static_cast<float>(i) * 0.27f - 12.0f;
+            const float y  = static_cast<float>(i) * 0.19f - 7.0f;
             const float n1 = Noise::Fbm2D(x, y, 4, 2.0f, 0.5f, 8u);
             const float n2 = Noise::Fbm2D(x, y, 4, 2.0f, 0.5f, 8u);
             assert(n1 == n2 && "Fbm2D 确定性");
@@ -230,8 +233,8 @@ int main()
     {
         for (int i = 0; i < 100; ++i)
         {
-            const float x = static_cast<float>(i) * 0.37f - 8.0f;
-            const float y = static_cast<float>(i) * 0.29f + 4.0f;
+            const float x      = static_cast<float>(i) * 0.37f - 8.0f;
+            const float y      = static_cast<float>(i) * 0.29f + 4.0f;
             const float fbm    = Noise::Fbm2D(x, y, 1, 2.0f, 0.5f, 13u);
             const float perlin = Noise::PerlinNoise2D(x, y, 13u);
             assert(Near(fbm, perlin, 1e-5f) && "Fbm2D(octaves=1) ≈ PerlinNoise2D");
@@ -242,9 +245,9 @@ int main()
     // ===== 12. Fbm2D：octaves<1 当 1；多 octaves 增细节（与单层不同）=====
     {
         // octaves=0 / 负 → 视为 1，等价 octaves=1。
-        const float f0  = Noise::Fbm2D(1.3f, 2.7f, 0, 2.0f, 0.5f, 21u);
-        const float fn  = Noise::Fbm2D(1.3f, 2.7f, -5, 2.0f, 0.5f, 21u);
-        const float f1  = Noise::Fbm2D(1.3f, 2.7f, 1, 2.0f, 0.5f, 21u);
+        const float f0 = Noise::Fbm2D(1.3f, 2.7f, 0, 2.0f, 0.5f, 21u);
+        const float fn = Noise::Fbm2D(1.3f, 2.7f, -5, 2.0f, 0.5f, 21u);
+        const float f1 = Noise::Fbm2D(1.3f, 2.7f, 1, 2.0f, 0.5f, 21u);
         assert(Near(f0, f1, 1e-6f) && "Fbm2D(octaves=0) 当 1");
         assert(Near(fn, f1, 1e-6f) && "Fbm2D(octaves<0) 当 1");
 
@@ -252,8 +255,8 @@ int main()
         bool anyDiff = false;
         for (int i = 0; i < 100; ++i)
         {
-            const float x = static_cast<float>(i) * 0.41f - 3.0f;
-            const float y = static_cast<float>(i) * 0.23f + 1.0f;
+            const float x  = static_cast<float>(i) * 0.41f - 3.0f;
+            const float y  = static_cast<float>(i) * 0.23f + 1.0f;
             const float o1 = Noise::Fbm2D(x, y, 1, 2.0f, 0.5f, 21u);
             const float o4 = Noise::Fbm2D(x, y, 4, 2.0f, 0.5f, 21u);
             if (!Near(o1, o4, 1e-4f))
@@ -280,7 +283,7 @@ int main()
         Noise::Rng rng2(777u);
         for (int i = 0; i < 1000; ++i)
         {
-            const int r = rng2.NextInt(-2000000000, 2000000000);  // 跨度 4e9 > INT_MAX
+            const int r = rng2.NextInt(-2000000000, 2000000000); // 跨度 4e9 > INT_MAX
             assert(r >= -2000000000 && r <= 2000000000 && "大跨度 NextInt 结果在范围内");
         }
         std::fprintf(stdout, "  [PASS] NextInt 大/全 int 跨度不崩、在范围内\n");

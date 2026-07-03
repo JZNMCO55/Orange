@@ -32,73 +32,77 @@
 namespace Orange::Engine::Render
 {
 
-struct PostProcessComponent
-{
-    // —— volume 容器（v2 局部混合用；v1 Pipeline 只走 Global）——
-    enum class Mode : std::uint8_t { Global = 0, Local = 1 };
-    Mode      mode          = Mode::Global;
-    glm::vec3 localExtent   = {5.0f, 5.0f, 5.0f};  // Local：实体 Transform 处的半尺寸盒
-    float     priority      = 0.0f;                // 多 volume 重叠时谁压谁
-    float     blendDistance = 1.0f;                // 边界外这段距离线性淡入
+    struct PostProcessComponent
+    {
+        // —— volume 容器（v2 局部混合用；v1 Pipeline 只走 Global）——
+        enum class Mode : std::uint8_t
+        {
+            Global = 0,
+            Local  = 1
+        };
+        Mode      mode          = Mode::Global;
+        glm::vec3 localExtent   = {5.0f, 5.0f, 5.0f}; // Local：实体 Transform 处的半尺寸盒
+        float     priority      = 0.0f;               // 多 volume 重叠时谁压谁
+        float     blendDistance = 1.0f;               // 边界外这段距离线性淡入
 
-    // —— SSAO / GTAO（环境光遮蔽）——
-    bool  ssaoEnabled  = true;
-    bool  ssaoUseGtao  = true;   // true = GTAO（horizon-based）；false = 半球 kernel
-    float ssaoRadius   = 0.6f;
-    float ssaoStrength = 1.0f;
-    float ssaoPower    = 1.8f;
+        // —— SSAO / GTAO（环境光遮蔽）——
+        bool  ssaoEnabled  = true;
+        bool  ssaoUseGtao  = true; // true = GTAO（horizon-based）；false = 半球 kernel
+        float ssaoRadius   = 0.6f;
+        float ssaoStrength = 1.0f;
+        float ssaoPower    = 1.8f;
 
-    // —— SSR（屏幕空间反射）——
-    bool  ssrEnabled     = true;
-    float ssrMaxDistance = 12.0f;
-    float ssrThickness   = 0.6f;
-    float ssrStrength    = 0.6f;
+        // —— SSR（屏幕空间反射）——
+        bool  ssrEnabled     = true;
+        float ssrMaxDistance = 12.0f;
+        float ssrThickness   = 0.6f;
+        float ssrStrength    = 0.6f;
 
-    // —— 接触阴影 ——
-    bool  contactEnabled   = false;
-    float contactLength    = 0.15f;
-    float contactThickness = 0.3f;
-    float contactStrength  = 0.9f;
+        // —— 接触阴影 ——
+        bool  contactEnabled   = false;
+        float contactLength    = 0.15f;
+        float contactThickness = 0.3f;
+        float contactStrength  = 0.9f;
 
-    // —— 景深 ——
-    bool  dofEnabled       = false;
-    float dofFocusDistance = 10.0f;
-    float dofFocusRange    = 10.0f;
-    float dofMaxCoCRadius  = 0.012f;
+        // —— 景深 ——
+        bool  dofEnabled       = false;
+        float dofFocusDistance = 10.0f;
+        float dofFocusRange    = 10.0f;
+        float dofMaxCoCRadius  = 0.012f;
 
-    // —— TAA（时序抗锯齿）——
-    bool  taaEnabled  = false;
-    float taaFeedback = 0.9f;
+        // —— TAA（时序抗锯齿）——
+        bool  taaEnabled  = false;
+        float taaFeedback = 0.9f;
 
-    // —— 色彩分级 ——
-    bool  gradeEnabled     = false;
-    float gradeExposure    = 0.0f;
-    float gradeContrast    = 1.0f;
-    float gradeSaturation  = 1.0f;
-    float gradeTemperature = 0.0f;
-    float gradeTint        = 0.0f;
+        // —— 色彩分级 ——
+        bool  gradeEnabled     = false;
+        float gradeExposure    = 0.0f;
+        float gradeContrast    = 1.0f;
+        float gradeSaturation  = 1.0f;
+        float gradeTemperature = 0.0f;
+        float gradeTint        = 0.0f;
 
-    // —— 相机运动模糊 ——
-    bool          motionBlurEnabled     = false;
-    float         motionBlurIntensity   = 0.5f;
-    float         motionBlurMaxRadius   = 0.05f;
-    std::int32_t  motionBlurSampleCount = 8;
+        // —— 相机运动模糊 ——
+        bool         motionBlurEnabled     = false;
+        float        motionBlurIntensity   = 0.5f;
+        float        motionBlurMaxRadius   = 0.05f;
+        std::int32_t motionBlurSampleCount = 8;
 
-    // —— 镜头效果（色散 + 暗角）——
-    bool  lensEnabled            = false;
-    float lensChromaticAberration = 0.0f;
-    float lensVignetteIntensity   = 0.0f;
-    float lensVignetteSmoothness  = 0.5f;
+        // —— 镜头效果（色散 + 暗角）——
+        bool  lensEnabled             = false;
+        float lensChromaticAberration = 0.0f;
+        float lensVignetteIntensity   = 0.0f;
+        float lensVignetteSmoothness  = 0.5f;
 
-    // —— 锐化（CAS）——
-    bool  sharpenEnabled   = false;
-    float sharpenStrength  = 0.4f;
+        // —— 锐化（CAS）——
+        bool  sharpenEnabled  = false;
+        float sharpenStrength = 0.4f;
 
-    // —— 阴影质量（PCSS 软阴影 + shadow map 分辨率）——
-    float         pcssLightSize       = 0.0f;   // 0 = 固定 PCF；>0 = PCSS 软阴影
-    std::uint32_t shadowMapResolution = 1024;
-};
+        // —— 阴影质量（PCSS 软阴影 + shadow map 分辨率）——
+        float         pcssLightSize       = 0.0f; // 0 = 固定 PCF；>0 = PCSS 软阴影
+        std::uint32_t shadowMapResolution = 1024;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_POST_PROCESS_COMPONENT_H
+#endif // ORANGE_ENGINE_RENDER_POST_PROCESS_COMPONENT_H

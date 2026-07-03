@@ -32,89 +32,89 @@
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
-}  // namespace Orange::Engine::Asset
+    class AssetRegistry;
+} // namespace Orange::Engine::Asset
 
 namespace Orange::Engine::Render::BuiltinMaterials
 {
 
-// 加载内置 textured 模板。复用 Pipeline 既有的 textured_mesh shader 对：
-// 顶点 layout = pos+uv，push-constant block 仅 uMVP(mat4)，textureSlots
-// 声明 binding 0 = "uTexture"——当前 fragment shader 是程序式 checker，
-// 不实际采样这张贴图，但 schema 已对齐，等到 OrangeRender 暴露真 sampler
-// 路径时直接接入即可。语义同 LoadToon。
-ORANGE_ENGINE_API Material LoadTextured(Asset::AssetRegistry& registry);
+    // 加载内置 textured 模板。复用 Pipeline 既有的 textured_mesh shader 对：
+    // 顶点 layout = pos+uv，push-constant block 仅 uMVP(mat4)，textureSlots
+    // 声明 binding 0 = "uTexture"——当前 fragment shader 是程序式 checker，
+    // 不实际采样这张贴图，但 schema 已对齐，等到 OrangeRender 暴露真 sampler
+    // 路径时直接接入即可。语义同 LoadToon。
+    ORANGE_ENGINE_API Material LoadTextured(Asset::AssetRegistry& registry);
 
-// 加载内置 toon 模板，返回完整可用的 Material（含已注册的 ShaderAsset
-// handle）。同 registry 上重复调用幂等，handle 沿用。
-//
-// 失败语义：SPIR-V 不存在 / 解析失败时返回的 Material 仍保留 uniform
-// + textureSlot 描述符，但 vertexShader / fragmentShader 字段为无效
-// handle。调用方按 `material.vertexShader.IsValid()` 判定。
-ORANGE_ENGINE_API Material LoadToon(Asset::AssetRegistry& registry);
+    // 加载内置 toon 模板，返回完整可用的 Material（含已注册的 ShaderAsset
+    // handle）。同 registry 上重复调用幂等，handle 沿用。
+    //
+    // 失败语义：SPIR-V 不存在 / 解析失败时返回的 Material 仍保留 uniform
+    // + textureSlot 描述符，但 vertexShader / fragmentShader 字段为无效
+    // handle。调用方按 `material.vertexShader.IsValid()` 判定。
+    ORANGE_ENGINE_API Material LoadToon(Asset::AssetRegistry& registry);
 
-// 加载内置 rim-light 模板。语义同 LoadToon。
-ORANGE_ENGINE_API Material LoadRimLight(Asset::AssetRegistry& registry);
+    // 加载内置 rim-light 模板。语义同 LoadToon。
+    ORANGE_ENGINE_API Material LoadRimLight(Asset::AssetRegistry& registry);
 
-// 加载内置 dissolve 模板：noise(uv) + 时间驱动阈值 alpha discard，阈值
-// 附近 ±kEdgeWidth 区间输出 HDR > 1 的发光边沿色。dissolve_t 在 frag
-// 内部由 light UBO 的 uFrameInfo.x 自驱（pingpong 0..1..0），调用方无
-// 须手动驱动；per-instance 调速 / 调色等到 Material UBO 接通后再补。
-ORANGE_ENGINE_API Material LoadDissolve(Asset::AssetRegistry& registry);
+    // 加载内置 dissolve 模板：noise(uv) + 时间驱动阈值 alpha discard，阈值
+    // 附近 ±kEdgeWidth 区间输出 HDR > 1 的发光边沿色。dissolve_t 在 frag
+    // 内部由 light UBO 的 uFrameInfo.x 自驱（pingpong 0..1..0），调用方无
+    // 须手动驱动；per-instance 调速 / 调色等到 Material UBO 接通后再补。
+    ORANGE_ENGINE_API Material LoadDissolve(Asset::AssetRegistry& registry);
 
-// 加载内置 emissive 模板：直接输出 HDR > 1 的常量色（带轻微 vignette），
-// 不计算光照——表面"自发光"，颜色超出 LDR 阈值由既有 bloom pass 自动
-// 拾取产出光晕。颜色 / 强度参数 hardcode 同 toon / rim_light。
-ORANGE_ENGINE_API Material LoadEmissive(Asset::AssetRegistry& registry);
+    // 加载内置 emissive 模板：直接输出 HDR > 1 的常量色（带轻微 vignette），
+    // 不计算光照——表面"自发光"，颜色超出 LDR 阈值由既有 bloom pass 自动
+    // 拾取产出光晕。颜色 / 强度参数 hardcode 同 toon / rim_light。
+    ORANGE_ENGINE_API Material LoadEmissive(Asset::AssetRegistry& registry);
 
-// 加载内置 halo 模板：PointLight halo 可见光晕路径（GAP-2026-05-11 G3）。
-// 与 emissive 同款自发光出 HDR 路径，但 color × intensity 经 push constant
-// uHaloColorIntensity (.rgb=color, .a=intensity) 由 Pipeline halo loop
-// per-light 喂入，让每个 PointLight halo 与 light 自身 color / intensity 同步。
-// 由 Pipeline 内部持有 + GetOrCompilePipeline 复用主 forward layout，**不**
-// 经 MaterialSystem::RegisterBuiltins 暴露给用户（halo 是 PointLight 内嵌
-// 视觉表现，挂 RenderableComponent 路径走 emissive 即可）。
-ORANGE_ENGINE_API Material LoadHalo(Asset::AssetRegistry& registry);
+    // 加载内置 halo 模板：PointLight halo 可见光晕路径（GAP-2026-05-11 G3）。
+    // 与 emissive 同款自发光出 HDR 路径，但 color × intensity 经 push constant
+    // uHaloColorIntensity (.rgb=color, .a=intensity) 由 Pipeline halo loop
+    // per-light 喂入，让每个 PointLight halo 与 light 自身 color / intensity 同步。
+    // 由 Pipeline 内部持有 + GetOrCompilePipeline 复用主 forward layout，**不**
+    // 经 MaterialSystem::RegisterBuiltins 暴露给用户（halo 是 PointLight 内嵌
+    // 视觉表现，挂 RenderableComponent 路径走 emissive 即可）。
+    ORANGE_ENGINE_API Material LoadHalo(Asset::AssetRegistry& registry);
 
-// 加载内置 PBR 模板：monolithic Cook-Torrance + GGX + Smith correlated +
-// Schlick + Lambert + IBL split-sum 三槽位。push-constant 与现有 toon /
-// rim_light 同款 {uMVP, uModel} = 128 B。当前五通道材质参数（baseColor /
-// metallic / roughness / normal / AO）在 shader 内 hardcoded；后续把它们
-// 抬进 MaterialInstance + Inspector schema 时 textureSlots 同步扩。当前
-// textureSlots 留空，避免 schema 与 shader 默认值漂移。
-//
-// Pipeline 在 Initialize 期把"drawable.materialInstance == nullptr"的
-// fallback 切到本模板（替代历史 textured 棋盘），所有未显式挂材质的
-// Renderable 自动按 PBR 渲染——这就是 "棋盘塑料 → PBR 真实感" 视觉跃迁
-// 的来源。textured 不删，仍可被 sample 显式 LoadTextured 用作 dev-checker
-// fallback。
-ORANGE_ENGINE_API Material LoadPbr(Asset::AssetRegistry& registry);
+    // 加载内置 PBR 模板：monolithic Cook-Torrance + GGX + Smith correlated +
+    // Schlick + Lambert + IBL split-sum 三槽位。push-constant 与现有 toon /
+    // rim_light 同款 {uMVP, uModel} = 128 B。当前五通道材质参数（baseColor /
+    // metallic / roughness / normal / AO）在 shader 内 hardcoded；后续把它们
+    // 抬进 MaterialInstance + Inspector schema 时 textureSlots 同步扩。当前
+    // textureSlots 留空，避免 schema 与 shader 默认值漂移。
+    //
+    // Pipeline 在 Initialize 期把"drawable.materialInstance == nullptr"的
+    // fallback 切到本模板（替代历史 textured 棋盘），所有未显式挂材质的
+    // Renderable 自动按 PBR 渲染——这就是 "棋盘塑料 → PBR 真实感" 视觉跃迁
+    // 的来源。textured 不删，仍可被 sample 显式 LoadTextured 用作 dev-checker
+    // fallback。
+    ORANGE_ENGINE_API Material LoadPbr(Asset::AssetRegistry& registry);
 
-// 加载内置 debug-view normals 模板（DebugViewMode::Normals）：把 world-space
-// normal 映射到 RGB 作可视化，无光照 / 无贴图。push constant {uMVP, uModel}
-// = 128 B（同 toon/pbr）；Pipeline 在 Normals mode 时用它替换 drawable
-// material 渲染所有 drawable。不经 RegisterBuiltins 暴露给用户（纯诊断）。
-ORANGE_ENGINE_API Material LoadDebugNormals(Asset::AssetRegistry& registry);
+    // 加载内置 debug-view normals 模板（DebugViewMode::Normals）：把 world-space
+    // normal 映射到 RGB 作可视化，无光照 / 无贴图。push constant {uMVP, uModel}
+    // = 128 B（同 toon/pbr）；Pipeline 在 Normals mode 时用它替换 drawable
+    // material 渲染所有 drawable。不经 RegisterBuiltins 暴露给用户（纯诊断）。
+    ORANGE_ENGINE_API Material LoadDebugNormals(Asset::AssetRegistry& registry);
 
-// 加载内置 debug-view unlit 模板（DebugViewMode::Unlit）：直出 material base
-// color、无光照。push constant 复用 PBR {uMVP, uModel, uBaseColor, uMRA}
-// = 160 B（drawable loop 喂 drawable material instance 的 uBaseColor）；
-// Pipeline 在 Unlit mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
-ORANGE_ENGINE_API Material LoadDebugUnlit(Asset::AssetRegistry& registry);
+    // 加载内置 debug-view unlit 模板（DebugViewMode::Unlit）：直出 material base
+    // color、无光照。push constant 复用 PBR {uMVP, uModel, uBaseColor, uMRA}
+    // = 160 B（drawable loop 喂 drawable material instance 的 uBaseColor）；
+    // Pipeline 在 Unlit mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
+    ORANGE_ENGINE_API Material LoadDebugUnlit(Asset::AssetRegistry& registry);
 
-// 加载内置 debug-view overdraw 模板（DebugViewMode::Overdraw）：每片段输出小
-// 常量色，靠 material 的 additiveBlend + disableDepthTest 渲染状态把重叠绘制
-// 累加成 overdraw 热图（亮 = 同像素被覆盖多次 = 过绘严重）。push constant
-// {uMVP, uModel} = 128 B（同 debug_normals）。Pipeline 在 Overdraw mode 时用它
-// 替换 drawable material。纯诊断，不经 RegisterBuiltins。
-ORANGE_ENGINE_API Material LoadDebugOverdraw(Asset::AssetRegistry& registry);
+    // 加载内置 debug-view overdraw 模板（DebugViewMode::Overdraw）：每片段输出小
+    // 常量色，靠 material 的 additiveBlend + disableDepthTest 渲染状态把重叠绘制
+    // 累加成 overdraw 热图（亮 = 同像素被覆盖多次 = 过绘严重）。push constant
+    // {uMVP, uModel} = 128 B（同 debug_normals）。Pipeline 在 Overdraw mode 时用它
+    // 替换 drawable material。纯诊断，不经 RegisterBuiltins。
+    ORANGE_ENGINE_API Material LoadDebugOverdraw(Asset::AssetRegistry& registry);
 
-// 加载内置 debug-view wireframe 模板（DebugViewMode::Wireframe）：纯亮绿边线，
-// 靠 material 的 wireframe 标志让 pipeline 用 polygonMode=Line（需 device feature
-// fillModeNonSolid）。push constant {uMVP, uModel} = 128 B。Pipeline 在 Wireframe
-// mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
-ORANGE_ENGINE_API Material LoadDebugWireframe(Asset::AssetRegistry& registry);
+    // 加载内置 debug-view wireframe 模板（DebugViewMode::Wireframe）：纯亮绿边线，
+    // 靠 material 的 wireframe 标志让 pipeline 用 polygonMode=Line（需 device feature
+    // fillModeNonSolid）。push constant {uMVP, uModel} = 128 B。Pipeline 在 Wireframe
+    // mode 时用它替换 drawable material。纯诊断，不经 RegisterBuiltins。
+    ORANGE_ENGINE_API Material LoadDebugWireframe(Asset::AssetRegistry& registry);
 
-}  // namespace Orange::Engine::Render::BuiltinMaterials
+} // namespace Orange::Engine::Render::BuiltinMaterials
 
-#endif  // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H
+#endif // ORANGE_ENGINE_RENDER_BUILTIN_MATERIALS_H

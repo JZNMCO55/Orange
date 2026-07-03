@@ -20,9 +20,9 @@
 namespace Orange::Engine::Asset
 {
 
-template <typename T>
-using AssetHandle = ::Orange::Engine::TypedHandle<T>;
+    template <typename T>
+    using AssetHandle = ::Orange::Engine::TypedHandle<T>;
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_ASSET_HANDLE_H
+#endif // ORANGE_ENGINE_ASSET_ASSET_HANDLE_H

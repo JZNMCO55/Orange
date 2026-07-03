@@ -33,54 +33,54 @@ struct EditorHost;
 namespace Orange::Editor::Schema
 {
 
-struct ComponentSchema
-{
-    // 类型 id（编译期字面量）。同时充当 SetFieldValueCommand fieldKey 的
-    // 前缀 —— SchemaInspector 拼接 "typeName.propName" 作为 coalesce key。
-    const char* typeName    = nullptr;
+    struct ComponentSchema
+    {
+        // 类型 id（编译期字面量）。同时充当 SetFieldValueCommand fieldKey 的
+        // 前缀 —— SchemaInspector 拼接 "typeName.propName" 作为 coalesce key。
+        const char* typeName = nullptr;
 
-    // 用户可见的 component header label（CollapsingHeader 标题）。
-    const char* displayName = nullptr;
+        // 用户可见的 component header label（CollapsingHeader 标题）。
+        const char* displayName = nullptr;
 
-    // 字段列表。注册顺序 = Inspector 内显示顺序。
-    std::vector<PropertyDescriptor> properties;
+        // 字段列表。注册顺序 = Inspector 内显示顺序。
+        std::vector<PropertyDescriptor> properties;
 
-    // 段顶 helper 文案（可空）。CollapsingHeader 展开后、properties 渲染之前
-    // 显示一行（或多行）TextDisabled + Bullet，用来提示"这个 component 的隐藏
-    // 心智模型"——典型用例：DirectionalLight 方向由 Transform.rotation 派生，
-    // 多实例语义（first-found 生效）等 UI 上不自发现的约定。文案语言跟随
-    // OrangeEditor UI（zh-CN）。
-    // nullptr / 空串都视为"无 helper"，不占垂直空间。
-    const char* helperText = nullptr;
+        // 段顶 helper 文案（可空）。CollapsingHeader 展开后、properties 渲染之前
+        // 显示一行（或多行）TextDisabled + Bullet，用来提示"这个 component 的隐藏
+        // 心智模型"——典型用例：DirectionalLight 方向由 Transform.rotation 派生，
+        // 多实例语义（first-found 生效）等 UI 上不自发现的约定。文案语言跟随
+        // OrangeEditor UI（zh-CN）。
+        // nullptr / 空串都视为"无 helper"，不占垂直空间。
+        const char* helperText = nullptr;
 
-    // ---- 类型擦除的 component-on-entity 访问 ----------------------------
-    //
-    // get 返回 void* —— SchemaInspector 把它喂给每个 PropertyDescriptor 的
-    // get/set。caller 不能 cast 这个指针成任何具体类型；schema 内部 lambda
-    // 内已写死了 reinterpret_cast，外界只当 opaque handle 用。
-    //
-    // add / remove 可选：nullptr 表示该 component 在当前 schema 体系下
-    // 不能通过 Add Component 菜单 / 右键 Remove Component 操作（典型例外：
-    // Hierarchy 由 DnD reparent 管理 / Animator 需要具体 IAnimator 子类）。
-    //
-    // AddFn 签名差异：has / get / remove 只需要 World + Entity，因为这些操
-    // 作完全在 ECS 内部；add 需要 EditorHost 引用——typically default-construct
-    // 即可（走 Builder::Addable()），但部分 component 在 +Add 路径需要预先
-    // 注入 editor-side 资源（典型：Renderable 预绑 cubeMesh + defaultMaterial），
-    // 这些预绑数据存在 EditorAssetContext / 其他 sub-context 内。让 AddFn 拿
-    // EditorHost& 而非只是 World& 就避免了"add fn 通过全局 / 静态指针拿
-    // assets"的丑陋写法。caller 在 add 内通过 `host.scene.pWorld->...` 取 world。
-    using HasFn    = bool  (*)(const Orange::Engine::World& world, Orange::Engine::Entity entity);
-    using GetFn    = void* (*)(Orange::Engine::World&       world, Orange::Engine::Entity entity);
-    using AddFn    = void  (*)(EditorHost&                  host,  Orange::Engine::Entity entity);
-    using RemoveFn = void  (*)(Orange::Engine::World&       world, Orange::Engine::Entity entity);
+        // ---- 类型擦除的 component-on-entity 访问 ----------------------------
+        //
+        // get 返回 void* —— SchemaInspector 把它喂给每个 PropertyDescriptor 的
+        // get/set。caller 不能 cast 这个指针成任何具体类型；schema 内部 lambda
+        // 内已写死了 reinterpret_cast，外界只当 opaque handle 用。
+        //
+        // add / remove 可选：nullptr 表示该 component 在当前 schema 体系下
+        // 不能通过 Add Component 菜单 / 右键 Remove Component 操作（典型例外：
+        // Hierarchy 由 DnD reparent 管理 / Animator 需要具体 IAnimator 子类）。
+        //
+        // AddFn 签名差异：has / get / remove 只需要 World + Entity，因为这些操
+        // 作完全在 ECS 内部；add 需要 EditorHost 引用——typically default-construct
+        // 即可（走 Builder::Addable()），但部分 component 在 +Add 路径需要预先
+        // 注入 editor-side 资源（典型：Renderable 预绑 cubeMesh + defaultMaterial），
+        // 这些预绑数据存在 EditorAssetContext / 其他 sub-context 内。让 AddFn 拿
+        // EditorHost& 而非只是 World& 就避免了"add fn 通过全局 / 静态指针拿
+        // assets"的丑陋写法。caller 在 add 内通过 `host.scene.pWorld->...` 取 world。
+        using HasFn    = bool (*)(const Orange::Engine::World& world, Orange::Engine::Entity entity);
+        using GetFn    = void* (*)(Orange::Engine::World & world, Orange::Engine::Entity entity);
+        using AddFn    = void (*)(EditorHost& host, Orange::Engine::Entity entity);
+        using RemoveFn = void (*)(Orange::Engine::World& world, Orange::Engine::Entity entity);
 
-    HasFn    has    = nullptr;
-    GetFn    get    = nullptr;
-    AddFn    add    = nullptr;
-    RemoveFn remove = nullptr;
-};
+        HasFn    has    = nullptr;
+        GetFn    get    = nullptr;
+        AddFn    add    = nullptr;
+        RemoveFn remove = nullptr;
+    };
 
-}  // namespace Orange::Editor::Schema
+} // namespace Orange::Editor::Schema
 
-#endif  // ORANGE_EDITOR_SCHEMA_COMPONENT_SCHEMA_H
+#endif // ORANGE_EDITOR_SCHEMA_COMPONENT_SCHEMA_H

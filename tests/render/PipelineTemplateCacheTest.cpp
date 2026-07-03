@@ -57,26 +57,29 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-// 程序式造一个两三角形 quad，复用为所有 entity 的 mesh 资源——
-// per-template 缓存的 dedup 关键由 Material 决定，与 mesh 无关。
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> positions = {
-        {-0.5f, -0.5f, 0.0f},
-        { 0.5f, -0.5f, 0.0f},
-        { 0.5f,  0.5f, 0.0f},
-        {-0.5f,  0.5f, 0.0f},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
-}
+    // 程序式造一个两三角形 quad，复用为所有 entity 的 mesh 资源——
+    // per-template 缓存的 dedup 关键由 Material 决定，与 mesh 无关。
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
+    {
+        std::vector<VertexPosition3> positions = {
+            {-0.5f, -0.5f, 0.0f},
+            {0.5f, -0.5f, 0.0f},
+            {0.5f, 0.5f, 0.0f},
+            {-0.5f, 0.5f, 0.0f},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        return std::make_unique<MeshAsset>(std::move(positions),
+                                           std::move(uvs),
+                                           std::move(indices));
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -88,7 +91,7 @@ int main()
     winDesc.width   = 320;
     winDesc.height  = 240;
     winDesc.visible = false;
-    auto winResult = Window::Create(winDesc);
+    auto winResult  = Window::Create(winDesc);
     if (winResult.IsErr())
     {
         std::fprintf(stderr,
@@ -157,7 +160,7 @@ int main()
         }
     }
     assert(pipeline.IsInitialized());
-    assert(pipeline.TemplatePipelineCount() == 0);  // 还没 Render，cache 应空
+    assert(pipeline.TemplatePipelineCount() == 0); // 还没 Render，cache 应空
 
     // 5. 第一遍 Render：两条 textured drawable -------------------------
     {
@@ -166,7 +169,8 @@ int main()
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
 
-        auto addEntity = [&](MaterialInstance* inst) {
+        auto addEntity = [&](MaterialInstance* inst)
+        {
             Entity e = world.CreateEntity();
             world.AddComponent(e, TransformComponent{});
             RenderableComponent rc;
@@ -190,7 +194,8 @@ int main()
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
 
-        auto addEntity = [&](MaterialInstance* inst) {
+        auto addEntity = [&](MaterialInstance* inst)
+        {
             Entity e = world.CreateEntity();
             world.AddComponent(e, TransformComponent{});
             RenderableComponent rc;
@@ -222,7 +227,7 @@ int main()
         world.AddComponent(e, rc);
 
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == 2);  // 没新增
+        assert(pipeline.TemplatePipelineCount() == 2); // 没新增
         std::fprintf(stdout, "  [PASS] 重复 Material 不重复编 pipeline\n");
     }
 
@@ -239,7 +244,7 @@ int main()
         world.AddComponent(e, TransformComponent{});
         RenderableComponent rc;
         rc.mesh             = meshHandle;
-        rc.materialInstance = nullptr;  // 显式 fallback
+        rc.materialInstance = nullptr; // 显式 fallback
         world.AddComponent(e, rc);
 
         pipeline.Render(world);

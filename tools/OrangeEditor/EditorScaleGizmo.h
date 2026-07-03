@@ -40,4 +40,4 @@ bool DrawAndHandleScaleGizmo(EditorHost& host,
                              glm::vec2   viewportImageSize,
                              float       aspect);
 
-#endif  // ORANGE_EDITOR_EDITOR_SCALE_GIZMO_H
+#endif // ORANGE_EDITOR_EDITOR_SCALE_GIZMO_H

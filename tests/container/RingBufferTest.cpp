@@ -18,16 +18,16 @@ using ::Orange::Engine::Container::RingBuffer;
 
 namespace
 {
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
     {
-        std::fprintf(stderr, "[RingBufferTest] FAILED: %s\n", what);
-        assert(cond);
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[RingBufferTest] FAILED: %s\n", what);
+            assert(cond);
+        }
     }
-}
 } // namespace
 
 int main()

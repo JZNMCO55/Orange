@@ -34,56 +34,56 @@
 namespace Orange::Engine::Asset
 {
 
-enum class TextureFormat : std::uint32_t
-{
-    Unknown = 0,
-    R8G8B8A8_UNorm,
-    R32G32B32A32_Float,   // HDR 路径专用（.hdr equirect / IBL bake 源数据）
-};
-
-// 单像素字节数。R8G8B8A8 = 4 byte；RGBA32Float = 16 byte。Unknown 返回 0
-// 让 caller 在错误格式上立刻显式失败而非诡异长度。
-inline constexpr std::size_t BytesPerPixel(TextureFormat format) noexcept
-{
-    switch (format)
+    enum class TextureFormat : std::uint32_t
     {
-        case TextureFormat::R8G8B8A8_UNorm:     return 4;
-        case TextureFormat::R32G32B32A32_Float: return 16;
-        case TextureFormat::Unknown:            return 0;
-    }
-    return 0;
-}
+        Unknown = 0,
+        R8G8B8A8_UNorm,
+        R32G32B32A32_Float, // HDR 路径专用（.hdr equirect / IBL bake 源数据）
+    };
 
-class ORANGE_ENGINE_API TextureAsset
-{
-public:
-    TextureAsset() = default;
-
-    TextureAsset(std::uint32_t width,
-                 std::uint32_t height,
-                 TextureFormat format,
-                 std::vector<std::uint8_t> pixels)
-        : mWidth(width)
-        , mHeight(height)
-        , mFormat(format)
-        , mPixels(std::move(pixels))
+    // 单像素字节数。R8G8B8A8 = 4 byte；RGBA32Float = 16 byte。Unknown 返回 0
+    // 让 caller 在错误格式上立刻显式失败而非诡异长度。
+    inline constexpr std::size_t BytesPerPixel(TextureFormat format) noexcept
     {
+        switch (format)
+        {
+            case TextureFormat::R8G8B8A8_UNorm:
+                return 4;
+            case TextureFormat::R32G32B32A32_Float:
+                return 16;
+            case TextureFormat::Unknown:
+                return 0;
+        }
+        return 0;
     }
 
-    std::uint32_t Width()  const noexcept { return mWidth; }
-    std::uint32_t Height() const noexcept { return mHeight; }
-    TextureFormat Format() const noexcept { return mFormat; }
-    const std::vector<std::uint8_t>& Pixels() const noexcept { return mPixels; }
+    class ORANGE_ENGINE_API TextureAsset
+    {
+    public:
+        TextureAsset() = default;
 
-    bool Empty() const noexcept { return mPixels.empty(); }
+        TextureAsset(std::uint32_t             width,
+                     std::uint32_t             height,
+                     TextureFormat             format,
+                     std::vector<std::uint8_t> pixels)
+            : mWidth(width), mHeight(height), mFormat(format), mPixels(std::move(pixels))
+        {
+        }
 
-private:
-    std::uint32_t mWidth{0};
-    std::uint32_t mHeight{0};
-    TextureFormat mFormat{TextureFormat::Unknown};
-    std::vector<std::uint8_t> mPixels;
-};
+        std::uint32_t                    Width() const noexcept { return mWidth; }
+        std::uint32_t                    Height() const noexcept { return mHeight; }
+        TextureFormat                    Format() const noexcept { return mFormat; }
+        const std::vector<std::uint8_t>& Pixels() const noexcept { return mPixels; }
 
-}  // namespace Orange::Engine::Asset
+        bool Empty() const noexcept { return mPixels.empty(); }
 
-#endif  // ORANGE_ENGINE_ASSET_TEXTURE_ASSET_H
+    private:
+        std::uint32_t             mWidth{0};
+        std::uint32_t             mHeight{0};
+        TextureFormat             mFormat{TextureFormat::Unknown};
+        std::vector<std::uint8_t> mPixels;
+    };
+
+} // namespace Orange::Engine::Asset
+
+#endif // ORANGE_ENGINE_ASSET_TEXTURE_ASSET_H

@@ -24,21 +24,21 @@ using ::Orange::Engine::ResultCode;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-5f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool Near(float a, float b, float eps = 1e-5f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-std::filesystem::path MakeTempAnimPath(const char* tag)
-{
-    auto base = std::filesystem::temp_directory_path();
-    base /= std::string{"orange_engine_clip_loader_"} + tag + ".anim";
-    std::error_code ec;
-    std::filesystem::remove(base, ec);
-    return base;
-}
+    std::filesystem::path MakeTempAnimPath(const char* tag)
+    {
+        auto base = std::filesystem::temp_directory_path();
+        base /= std::string{"orange_engine_clip_loader_"} + tag + ".anim";
+        std::error_code ec;
+        std::filesystem::remove(base, ec);
+        return base;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -69,7 +69,7 @@ int main()
     // ===== 1. 注册 loader → Load → Get 取回 clip =====
     {
         Asset::AssetRegistry reg;
-        auto regRes = reg.RegisterLoader<Anim::AnimationClip>(
+        auto                 regRes = reg.RegisterLoader<Anim::AnimationClip>(
             std::make_unique<Anim::AnimationClipLoader>());
         assert(regRes.IsOk() && "RegisterLoader 应成功");
 
@@ -96,7 +96,7 @@ int main()
     // ===== 3. 文件不存在 → Err（不崩）=====
     {
         Asset::AssetRegistry reg;
-        auto regRes = reg.RegisterLoader<Anim::AnimationClip>(
+        auto                 regRes = reg.RegisterLoader<Anim::AnimationClip>(
             std::make_unique<Anim::AnimationClipLoader>());
         assert(regRes.IsOk());
         auto handleRes = reg.Load<Anim::AnimationClip>("does_not_exist_xyzzy.anim");

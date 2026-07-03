@@ -18,51 +18,51 @@
 
 namespace Orange::Engine::Physics
 {
-struct RigidBodyComponent;
-struct ColliderComponent;
-}  // namespace Orange::Engine::Physics
+    struct RigidBodyComponent;
+    struct ColliderComponent;
+} // namespace Orange::Engine::Physics
 
 namespace Orange::Engine::Scene
 {
 
-const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers();
+    const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers();
 
-// ---------------------------------------------------------------------------
-// Backend-dependent 组件的 Read 辅助函数。
-// SceneSerialization Pass 2 用这些 helper 把 desc 读到本地 var，
-// 再统一调用 PhysicsWorld::AddBody / AnimatorRegistry::Create 完成 backend 绑定。
-// 返回 false 表示数据格式坏（必填字段缺失 / 类型不匹配）。
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Backend-dependent 组件的 Read 辅助函数。
+    // SceneSerialization Pass 2 用这些 helper 把 desc 读到本地 var，
+    // 再统一调用 PhysicsWorld::AddBody / AnimatorRegistry::Create 完成 backend 绑定。
+    // 返回 false 表示数据格式坏（必填字段缺失 / 类型不匹配）。
+    // ---------------------------------------------------------------------------
 
-bool ReadRigidBodyDesc(const JsonReader& reader,
-                       std::string_view  componentPath,
-                       Physics::RigidBodyComponent& out);
+    bool ReadRigidBodyDesc(const JsonReader&            reader,
+                           std::string_view             componentPath,
+                           Physics::RigidBodyComponent& out);
 
-bool ReadColliderDesc(const JsonReader& reader,
-                      std::string_view  componentPath,
-                      Physics::ColliderComponent& out);
+    bool ReadColliderDesc(const JsonReader&           reader,
+                          std::string_view            componentPath,
+                          Physics::ColliderComponent& out);
 
-// Animator 的持久化数据仅是 backend 名字；具体初始化参数由游戏端在
-// AnimatorRegistry 注册 factory 时 capture，序列化层不下钻。
-bool ReadAnimatorBackendName(const JsonReader& reader,
-                             std::string_view  componentPath,
-                             std::string&      outBackendName);
+    // Animator 的持久化数据仅是 backend 名字；具体初始化参数由游戏端在
+    // AnimatorRegistry 注册 factory 时 capture，序列化层不下钻。
+    bool ReadAnimatorBackendName(const JsonReader& reader,
+                                 std::string_view  componentPath,
+                                 std::string&      outBackendName);
 
-// "clip" backend 例外（B2.2）：ClipAnimator 的关键帧数据可纯数据化，故除
-// backend 名外额外以"形态 B"嵌入 clip 的 JSON 字符串（见 AnimationClipToJson）。
-// Load 端读出后 AnimationClipFromJson 重建 + SetTarget 指向 entity 自身 Transform，
-// 绕过 AnimatorRegistry（clip 数据 per-entity，不适合 factory 模型）。
-// componentPath 处无 clipJson 字段（非 clip backend / 旧 scene）→ 返回 false。
-bool ReadAnimatorClipJson(const JsonReader& reader,
-                          std::string_view  componentPath,
-                          std::string&      outClipJson);
+    // "clip" backend 例外（B2.2）：ClipAnimator 的关键帧数据可纯数据化，故除
+    // backend 名外额外以"形态 B"嵌入 clip 的 JSON 字符串（见 AnimationClipToJson）。
+    // Load 端读出后 AnimationClipFromJson 重建 + SetTarget 指向 entity 自身 Transform，
+    // 绕过 AnimatorRegistry（clip 数据 per-entity，不适合 factory 模型）。
+    // componentPath 处无 clipJson 字段（非 clip backend / 旧 scene）→ 返回 false。
+    bool ReadAnimatorClipJson(const JsonReader& reader,
+                              std::string_view  componentPath,
+                              std::string&      outClipJson);
 
-// "clip" backend 的资产引用变体（B2.6 改点 1）：clip 来自 .anim 资产时，scene 只存
-// 路径引用（clipSource）。componentPath 处无 clipSource → false（走 clipJson 内联路径）。
-bool ReadAnimatorClipSource(const JsonReader& reader,
-                            std::string_view  componentPath,
-                            std::string&      outClipSource);
+    // "clip" backend 的资产引用变体（B2.6 改点 1）：clip 来自 .anim 资产时，scene 只存
+    // 路径引用（clipSource）。componentPath 处无 clipSource → false（走 clipJson 内联路径）。
+    bool ReadAnimatorClipSource(const JsonReader& reader,
+                                std::string_view  componentPath,
+                                std::string&      outClipSource);
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SRC_SCENE_COMPONENT_SERIALIZERS_H
+#endif // ORANGE_ENGINE_SRC_SCENE_COMPONENT_SERIALIZERS_H

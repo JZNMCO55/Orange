@@ -59,7 +59,6 @@
 // BuildNamedMaterialInstances 已迁出至 BuiltinAssets.{h,cpp}（v1.0.1 c11
 // 拆分；DemoWorld.cpp 仅保留 Seed 函数）。
 
-
 // demo 世界层级：
 //   Root
 //   ├── Camera           （2.5D 侧视角）
@@ -78,25 +77,26 @@
 void SeedDemoWorld(EditorHost& host)
 {
     using ::Orange::Engine::Entity;
-    using ::Orange::Engine::Scene::NameComponent;
-    using ::Orange::Engine::Scene::TransformComponent;
-    using ::Orange::Engine::Render::Camera;
-    using ::Orange::Engine::Render::DirectionalLight;
-    using ::Orange::Engine::Render::RenderableComponent;
-    using ::Orange::Engine::Render::ParticleEmitterComponent;
-    using ::Orange::Engine::Render::ParticleEmitterDesc;
+    using ::Orange::Engine::Animation::AnimatorComponent;
+    using ::Orange::Engine::Animation::ClipAnimator;
     using ::Orange::Engine::Physics::BodyType;
-    using ::Orange::Engine::Physics::ColliderComponent;
     using ::Orange::Engine::Physics::BoxDesc;
     using ::Orange::Engine::Physics::CircleDesc;
+    using ::Orange::Engine::Physics::ColliderComponent;
     using ::Orange::Engine::Physics::EdgeChainDesc;
     using ::Orange::Engine::Physics::PolygonDesc;
     using ::Orange::Engine::Physics::RigidBodyComponent;
-    using ::Orange::Engine::Animation::AnimatorComponent;
-    using ::Orange::Engine::Animation::ClipAnimator;
+    using ::Orange::Engine::Render::Camera;
+    using ::Orange::Engine::Render::DirectionalLight;
+    using ::Orange::Engine::Render::ParticleEmitterComponent;
+    using ::Orange::Engine::Render::ParticleEmitterDesc;
+    using ::Orange::Engine::Render::RenderableComponent;
+    using ::Orange::Engine::Scene::NameComponent;
+    using ::Orange::Engine::Scene::TransformComponent;
 
     auto& world = *host.scene.pWorld;
-    auto make = [&](const char* name) -> Entity {
+    auto  make  = [&](const char* name) -> Entity
+    {
         Entity e = world.CreateEntity();
         world.AddComponent<NameComponent>(e, NameComponent{name});
         world.AddComponent<TransformComponent>(e, TransformComponent{});
@@ -110,16 +110,16 @@ void SeedDemoWorld(EditorHost& host)
     Entity geometry = make("Geometry");
 
     // ---- Geometry 下的子节点 --------------------------------------------
-    Entity ground          = make("Ground");
-    Entity backdrop        = make("Backdrop");
-    Entity platformLeft    = make("Platform L");
-    Entity platformRight   = make("Platform R");
-    Entity tower           = make("Tower");
-    Entity glowBox         = make("Glow Box");
-    Entity emissivePillar  = make("Emissive Pillar");
-    Entity dynamicBox      = make("Dynamic Box");
-    Entity fireEmitter     = make("Fire Emitter");
-    Entity sparkleEmitter  = make("Sparkle Emitter");
+    Entity ground         = make("Ground");
+    Entity backdrop       = make("Backdrop");
+    Entity platformLeft   = make("Platform L");
+    Entity platformRight  = make("Platform R");
+    Entity tower          = make("Tower");
+    Entity glowBox        = make("Glow Box");
+    Entity emissivePillar = make("Emissive Pillar");
+    Entity dynamicBox     = make("Dynamic Box");
+    Entity fireEmitter    = make("Fire Emitter");
+    Entity sparkleEmitter = make("Sparkle Emitter");
 
     // v0.3 c1：演示 / 验收前置实体。
     //   * slimeDoll：Animator-only 实体，无 Renderable——专门展示 Animator schema
@@ -143,9 +143,9 @@ void SeedDemoWorld(EditorHost& host)
                                          /*aspect=*/1.0f,
                                          /*zNear=*/0.1f,
                                          /*zFar=*/100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 2.0f, 8.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        cam.view   = glm::lookAt(glm::vec3(0.0f, 2.0f, 8.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent<Camera>(camera, cam);
     }
 
@@ -163,16 +163,19 @@ void SeedDemoWorld(EditorHost& host)
         }
 
         DirectionalLight dl{};
-        dl.color       = glm::vec3(1.0f, 0.93f, 0.78f);  // 暖黄阳光
+        dl.color       = glm::vec3(1.0f, 0.93f, 0.78f); // 暖黄阳光
         dl.intensity   = 1.3f;
-        dl.castsShadow = true;  // 开启软阴影
+        dl.castsShadow = true; // 开启软阴影
         world.AddComponent<DirectionalLight>(sun, dl);
     }
 
     // ---- Ground（大平面，textured，静态刚体）----------------------------
     {
         auto* tc = world.GetComponent<TransformComponent>(ground);
-        if (tc != nullptr) { tc->position.y = -0.5f; }
+        if (tc != nullptr)
+        {
+            tc->position.y = -0.5f;
+        }
 
         RenderableComponent rc{};
         rc.mesh             = host.assets.planeMeshHandle;
@@ -216,7 +219,10 @@ void SeedDemoWorld(EditorHost& host)
     // ---- Platform L（左侧平台，toon，静态刚体）--------------------------
     {
         auto* tc = world.GetComponent<TransformComponent>(platformLeft);
-        if (tc != nullptr) { tc->position = glm::vec3(-2.0f, 0.0f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(-2.0f, 0.0f, 0.0f);
+        }
 
         RenderableComponent rc{};
         rc.mesh             = host.assets.cubeMeshHandle;
@@ -241,7 +247,10 @@ void SeedDemoWorld(EditorHost& host)
     // ---- Platform R（右侧平台，toon，静态刚体）--------------------------
     {
         auto* tc = world.GetComponent<TransformComponent>(platformRight);
-        if (tc != nullptr) { tc->position = glm::vec3(2.0f, 0.0f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(2.0f, 0.0f, 0.0f);
+        }
 
         RenderableComponent rc{};
         rc.mesh             = host.assets.cubeMeshHandle;
@@ -298,7 +307,10 @@ void SeedDemoWorld(EditorHost& host)
     // 不需要 game 代码手动驱动——Edit 模式下即可看到溶解 + 发光边沿效果。
     {
         auto* tc = world.GetComponent<TransformComponent>(glowBox);
-        if (tc != nullptr) { tc->position = glm::vec3(0.8f, 0.0f, 0.5f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(0.8f, 0.0f, 0.5f);
+        }
 
         RenderableComponent rc{};
         rc.mesh             = host.assets.cubeMeshHandle;
@@ -330,7 +342,10 @@ void SeedDemoWorld(EditorHost& host)
     // 使用 toon 材质，castsShadow=true，视觉上与静态台面区分。
     {
         auto* tc = world.GetComponent<TransformComponent>(dynamicBox);
-        if (tc != nullptr) { tc->position = glm::vec3(0.0f, 4.0f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(0.0f, 4.0f, 0.0f);
+        }
 
         RenderableComponent rc{};
         rc.mesh             = host.assets.cubeMeshHandle;
@@ -356,46 +371,52 @@ void SeedDemoWorld(EditorHost& host)
     // ---- Fire Emitter（火焰粒子：暖橙 HDR，bloom 自动触发光晕）----------
     {
         auto* tc = world.GetComponent<TransformComponent>(fireEmitter);
-        if (tc != nullptr) { tc->position = glm::vec3(1.5f, -0.3f, 0.5f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(1.5f, -0.3f, 0.5f);
+        }
 
         ParticleEmitterComponent pec{};
-        pec.emitting               = true;
-        pec.desc.emissionRate      = 30.0f;
-        pec.desc.lifetimeMin       = 0.6f;
-        pec.desc.lifetimeMax       = 1.2f;
-        pec.desc.spawnOffsetMin    = glm::vec2{-0.12f, 0.0f};
-        pec.desc.spawnOffsetMax    = glm::vec2{ 0.12f, 0.0f};
+        pec.emitting                = true;
+        pec.desc.emissionRate       = 30.0f;
+        pec.desc.lifetimeMin        = 0.6f;
+        pec.desc.lifetimeMax        = 1.2f;
+        pec.desc.spawnOffsetMin     = glm::vec2{-0.12f, 0.0f};
+        pec.desc.spawnOffsetMax     = glm::vec2{0.12f, 0.0f};
         pec.desc.initialVelocityMin = glm::vec2{-0.25f, 1.2f};
-        pec.desc.initialVelocityMax = glm::vec2{ 0.25f, 2.2f};
-        pec.desc.gravity           = glm::vec2{0.0f, -0.4f};
-        pec.desc.colorStart        = glm::vec4{1.6f, 0.75f, 0.1f, 2.2f};  // HDR 橙黄
-        pec.desc.colorEnd          = glm::vec4{0.7f, 0.15f, 0.0f, 0.0f};  // 红色熄灭
-        pec.desc.sizeStart         = 0.04f;
-        pec.desc.sizeEnd           = 0.09f;
-        pec.desc.maxParticles      = 128u;
+        pec.desc.initialVelocityMax = glm::vec2{0.25f, 2.2f};
+        pec.desc.gravity            = glm::vec2{0.0f, -0.4f};
+        pec.desc.colorStart         = glm::vec4{1.6f, 0.75f, 0.1f, 2.2f}; // HDR 橙黄
+        pec.desc.colorEnd           = glm::vec4{0.7f, 0.15f, 0.0f, 0.0f}; // 红色熄灭
+        pec.desc.sizeStart          = 0.04f;
+        pec.desc.sizeEnd            = 0.09f;
+        pec.desc.maxParticles       = 128u;
         world.AddComponent<ParticleEmitterComponent>(fireEmitter, pec);
     }
 
     // ---- Sparkle Emitter（萤火粒子：蓝白 HDR，飘浮上升）----------------
     {
         auto* tc = world.GetComponent<TransformComponent>(sparkleEmitter);
-        if (tc != nullptr) { tc->position = glm::vec3(-1.5f, 1.2f, 0.8f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(-1.5f, 1.2f, 0.8f);
+        }
 
         ParticleEmitterComponent pec{};
-        pec.emitting               = true;
-        pec.desc.emissionRate      = 10.0f;
-        pec.desc.lifetimeMin       = 2.0f;
-        pec.desc.lifetimeMax       = 3.5f;
-        pec.desc.spawnOffsetMin    = glm::vec2{-0.5f, -0.3f};
-        pec.desc.spawnOffsetMax    = glm::vec2{ 0.5f,  0.3f};
+        pec.emitting                = true;
+        pec.desc.emissionRate       = 10.0f;
+        pec.desc.lifetimeMin        = 2.0f;
+        pec.desc.lifetimeMax        = 3.5f;
+        pec.desc.spawnOffsetMin     = glm::vec2{-0.5f, -0.3f};
+        pec.desc.spawnOffsetMax     = glm::vec2{0.5f, 0.3f};
         pec.desc.initialVelocityMin = glm::vec2{-0.15f, 0.05f};
-        pec.desc.initialVelocityMax = glm::vec2{ 0.15f, 0.35f};
-        pec.desc.gravity           = glm::vec2{0.0f, 0.08f};   // 轻微上浮
-        pec.desc.colorStart        = glm::vec4{0.7f, 0.9f, 3.0f, 3.5f};  // HDR 蓝白（强 bloom）
-        pec.desc.colorEnd          = glm::vec4{0.3f, 0.5f, 1.0f, 0.0f};  // 蓝色消散
-        pec.desc.sizeStart         = 0.025f;
-        pec.desc.sizeEnd           = 0.055f;
-        pec.desc.maxParticles      = 64u;
+        pec.desc.initialVelocityMax = glm::vec2{0.15f, 0.35f};
+        pec.desc.gravity            = glm::vec2{0.0f, 0.08f};            // 轻微上浮
+        pec.desc.colorStart         = glm::vec4{0.7f, 0.9f, 3.0f, 3.5f}; // HDR 蓝白（强 bloom）
+        pec.desc.colorEnd           = glm::vec4{0.3f, 0.5f, 1.0f, 0.0f}; // 蓝色消散
+        pec.desc.sizeStart          = 0.025f;
+        pec.desc.sizeEnd            = 0.055f;
+        pec.desc.maxParticles       = 64u;
         world.AddComponent<ParticleEmitterComponent>(sparkleEmitter, pec);
     }
 
@@ -406,7 +427,10 @@ void SeedDemoWorld(EditorHost& host)
     // 每帧读 override 进 push constant → 球做绿色呼吸脉动。位置贴在 Glow Box 上方。
     {
         auto* tc = world.GetComponent<TransformComponent>(slimeDoll);
-        if (tc != nullptr) { tc->position = glm::vec3(0.8f, 1.6f, 0.5f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(0.8f, 1.6f, 0.5f);
+        }
 
         // Renderable —— sphere mesh + 动画专属材质。pAnimatedMaterial 为空（pbr
         // 模板未注册等极端情况）时退化为不挂 Renderable，仅保留 Animator 段。
@@ -443,7 +467,10 @@ void SeedDemoWorld(EditorHost& host)
 
         constexpr float baseY = 1.4f;
         auto*           tc    = world.GetComponent<TransformComponent>(clipCube);
-        if (tc != nullptr) { tc->position = glm::vec3(-0.8f, baseY, 0.5f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(-0.8f, baseY, 0.5f);
+        }
 
         if (host.assets.pToonMaterial != nullptr)
         {
@@ -460,9 +487,10 @@ void SeedDemoWorld(EditorHost& host)
         // bob 用 Bezier ease-in-out（cubic-bezier(0.42,0,0.58,1)）：cube 在浮动顶/底缓动、
         // 中段加速 → 有机、非机械线性。借此端到端展示 InterpMode::Bezier 时序缓动落到
         // clip → ClipAnimator → 本地 Transform → 渲染的真实路径（dogfood-checklist item 35）。
-        const glm::vec2 easeOut(0.42f, 0.0f);  // 段起点出柄（时间方向延后起步）
-        const glm::vec2 easeIn(-0.42f, 0.0f);  // 段终点入柄（时间方向提前收尾）
-        auto bezKey = [](float t, float v, glm::vec2 inT, glm::vec2 outT) {
+        const glm::vec2 easeOut(0.42f, 0.0f); // 段起点出柄（时间方向延后起步）
+        const glm::vec2 easeIn(-0.42f, 0.0f); // 段终点入柄（时间方向提前收尾）
+        auto            bezKey = [](float t, float v, glm::vec2 inT, glm::vec2 outT)
+        {
             Anim::Keyframe k;
             k.time       = t;
             k.value      = glm::vec4(v, 0.0f, 0.0f, 0.0f);
@@ -471,7 +499,8 @@ void SeedDemoWorld(EditorHost& host)
             k.outTangent = outT;
             return k;
         };
-        auto vec3Key = [](float t, glm::vec3 v) {
+        auto vec3Key = [](float t, glm::vec3 v)
+        {
             Anim::Keyframe k;
             k.time  = t;
             k.value = glm::vec4(v, 0.0f);
@@ -510,7 +539,10 @@ void SeedDemoWorld(EditorHost& host)
     // 仅作 Inspector 样本。
     {
         auto* tc = world.GetComponent<TransformComponent>(testFighter);
-        if (tc != nullptr) { tc->position = glm::vec3(-8.0f, 0.5f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(-8.0f, 0.5f, 0.0f);
+        }
 
         DemoGame::HealthComponent health{};
         health.hp    = 75;
@@ -524,7 +556,10 @@ void SeedDemoWorld(EditorHost& host)
     // 能完整 AddBody（不出现 "single component" 警告）。
     {
         auto* tc = world.GetComponent<TransformComponent>(staticCircle);
-        if (tc != nullptr) { tc->position = glm::vec3(8.0f, -0.5f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(8.0f, -0.5f, 0.0f);
+        }
 
         RigidBodyComponent rb{};
         rb.type          = BodyType::Static;
@@ -543,7 +578,10 @@ void SeedDemoWorld(EditorHost& host)
     // 4 顶点凸四边形（梯形），验证 Polygon shape schema 段在 Inspector 渲染。
     {
         auto* tc = world.GetComponent<TransformComponent>(staticPolygon);
-        if (tc != nullptr) { tc->position = glm::vec3(8.5f, -0.5f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(8.5f, -0.5f, 0.0f);
+        }
 
         RigidBodyComponent rb{};
         rb.type          = BodyType::Static;
@@ -552,11 +590,11 @@ void SeedDemoWorld(EditorHost& host)
         world.AddComponent<RigidBodyComponent>(staticPolygon, rb);
 
         PolygonDesc pd{};
-        pd.count = 4u;
+        pd.count       = 4u;
         pd.vertices[0] = glm::vec2{-0.4f, -0.3f};
-        pd.vertices[1] = glm::vec2{ 0.4f, -0.3f};
-        pd.vertices[2] = glm::vec2{ 0.3f,  0.3f};
-        pd.vertices[3] = glm::vec2{-0.3f,  0.3f};
+        pd.vertices[1] = glm::vec2{0.4f, -0.3f};
+        pd.vertices[2] = glm::vec2{0.3f, 0.3f};
+        pd.vertices[3] = glm::vec2{-0.3f, 0.3f};
 
         ColliderComponent cc{};
         cc.shape    = pd;
@@ -570,7 +608,10 @@ void SeedDemoWorld(EditorHost& host)
     // 渲染 + isLoop 字段。
     {
         auto* tc = world.GetComponent<TransformComponent>(staticEdgeChain);
-        if (tc != nullptr) { tc->position = glm::vec3(9.0f, -0.5f, 0.0f); }
+        if (tc != nullptr)
+        {
+            tc->position = glm::vec3(9.0f, -0.5f, 0.0f);
+        }
 
         RigidBodyComponent rb{};
         rb.type          = BodyType::Static;
@@ -579,12 +620,12 @@ void SeedDemoWorld(EditorHost& host)
         world.AddComponent<RigidBodyComponent>(staticEdgeChain, rb);
 
         EdgeChainDesc ed{};
-        ed.count = 4u;
-        ed.vertices[0] = glm::vec2{-0.5f,  0.0f};
-        ed.vertices[1] = glm::vec2{-0.2f,  0.3f};
-        ed.vertices[2] = glm::vec2{ 0.2f,  0.3f};
-        ed.vertices[3] = glm::vec2{ 0.5f,  0.0f};
-        ed.isLoop = false;
+        ed.count       = 4u;
+        ed.vertices[0] = glm::vec2{-0.5f, 0.0f};
+        ed.vertices[1] = glm::vec2{-0.2f, 0.3f};
+        ed.vertices[2] = glm::vec2{0.2f, 0.3f};
+        ed.vertices[3] = glm::vec2{0.5f, 0.0f};
+        ed.isLoop      = false;
 
         ColliderComponent cc{};
         cc.shape    = ed;
@@ -594,9 +635,9 @@ void SeedDemoWorld(EditorHost& host)
     }
 
     // ---- 构建父子层级 ---------------------------------------------------
-    EditorHierarchy::LinkAsLastChild(world, root,     camera);
-    EditorHierarchy::LinkAsLastChild(world, root,     sun);
-    EditorHierarchy::LinkAsLastChild(world, root,     geometry);
+    EditorHierarchy::LinkAsLastChild(world, root, camera);
+    EditorHierarchy::LinkAsLastChild(world, root, sun);
+    EditorHierarchy::LinkAsLastChild(world, root, geometry);
     EditorHierarchy::LinkAsLastChild(world, geometry, ground);
     EditorHierarchy::LinkAsLastChild(world, geometry, backdrop);
     EditorHierarchy::LinkAsLastChild(world, geometry, platformLeft);
@@ -624,19 +665,20 @@ void SeedDemoWorld(EditorHost& host)
 // 行（Y 自下而上）= metallic [0.0, 0.5, 1.0]；列（X 自左向右）= roughness
 // [0.1, 0.5, 0.9]。两组共 18 球，与 InitializeEditorAssets 内 lazy bake 的
 // 18 个 MaterialInstance 一一对应（路径键 warm_m{0..2}r{0..2} / white_m{0..2}r{0..2}）。
-void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
+void SeedPbrShowcaseWorld(Orange::Engine::World&    targetWorld,
                           const EditorAssetContext& assets)
 {
     using ::Orange::Engine::Entity;
-    using ::Orange::Engine::Scene::NameComponent;
-    using ::Orange::Engine::Scene::TransformComponent;
     using ::Orange::Engine::Render::Camera;
     using ::Orange::Engine::Render::DirectionalLight;
     using ::Orange::Engine::Render::EnvironmentComponent;
     using ::Orange::Engine::Render::RenderableComponent;
+    using ::Orange::Engine::Scene::NameComponent;
+    using ::Orange::Engine::Scene::TransformComponent;
 
     auto& world = targetWorld;
-    auto make = [&](const char* name) -> Entity {
+    auto  make  = [&](const char* name) -> Entity
+    {
         Entity e = world.CreateEntity();
         world.AddComponent<NameComponent>(e, NameComponent{name});
         world.AddComponent<TransformComponent>(e, TransformComponent{});
@@ -654,9 +696,9 @@ void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
     // 并排球阵的宽度。
     {
         Camera cam = Camera::Perspective(glm::radians(40.0f), 1.0f, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 0.3f, 8.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        cam.view   = glm::lookAt(glm::vec3(0.0f, 0.3f, 8.0f),
+                                 glm::vec3(0.0f, 0.0f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent<Camera>(camera, cam);
     }
 
@@ -671,9 +713,9 @@ void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
                     glm::vec3(0.4f, -1.0f, 0.3f));
         }
         DirectionalLight dl{};
-        dl.color       = glm::vec3(1.0f, 0.95f, 0.85f);  // 偏白暖色，furnace 球阵不偏色
+        dl.color       = glm::vec3(1.0f, 0.95f, 0.85f); // 偏白暖色，furnace 球阵不偏色
         dl.intensity   = 1.2f;
-        dl.castsShadow = false;  // showcase 无地面，不需要阴影
+        dl.castsShadow = false; // showcase 无地面，不需要阴影
         world.AddComponent<DirectionalLight>(sun, dl);
     }
 
@@ -693,43 +735,43 @@ void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
     auto spawnSphereGrid =
         [&](Entity parent, const char* variantKey, float groupCenterX,
             std::size_t materialBaseIndex)
+    {
+        for (std::size_t row = 0; row < 3; ++row)
         {
-            for (std::size_t row = 0; row < 3; ++row)
+            for (std::size_t col = 0; col < 3; ++col)
             {
-                for (std::size_t col = 0; col < 3; ++col)
+                char name[64];
+                std::snprintf(name, sizeof(name), "%s m%zur%zu",
+                              variantKey, row, col);
+                Entity sphere = make(name);
+
+                auto* tc = world.GetComponent<TransformComponent>(sphere);
+                if (tc != nullptr)
                 {
-                    char name[64];
-                    std::snprintf(name, sizeof(name), "%s m%zur%zu",
-                                  variantKey, row, col);
-                    Entity sphere = make(name);
-
-                    auto* tc = world.GetComponent<TransformComponent>(sphere);
-                    if (tc != nullptr)
-                    {
-                        tc->position = glm::vec3(
-                            groupCenterX + (static_cast<float>(col) - 1.0f) * kSphereSpacing,
-                            (static_cast<float>(row) - 1.0f) * kSphereSpacing,
-                            0.0f);
-                    }
-
-                    RenderableComponent rc{};
-                    rc.mesh    = assets.sphereMeshHandle;
-                    rc.visible = true;
-                    rc.castsShadow = false;
-                    const std::size_t matIdx = materialBaseIndex + row * 3 + col;
-                    if (matIdx < assets.pbrShowcaseMaterials.size())
-                    {
-                        rc.materialInstance = assets.pbrShowcaseMaterials[matIdx].get();
-                    }
-                    world.AddComponent<RenderableComponent>(sphere, rc);
-
-                    EditorHierarchy::LinkAsLastChild(world, parent, sphere);
+                    tc->position = glm::vec3(
+                        groupCenterX + (static_cast<float>(col) - 1.0f) * kSphereSpacing,
+                        (static_cast<float>(row) - 1.0f) * kSphereSpacing,
+                        0.0f);
                 }
-            }
-        };
 
-    spawnSphereGrid(warmGroup,  "warm",  -kGroupOffset, /*matBase=*/0);
-    spawnSphereGrid(whiteGroup, "white",  kGroupOffset, /*matBase=*/9);
+                RenderableComponent rc{};
+                rc.mesh                  = assets.sphereMeshHandle;
+                rc.visible               = true;
+                rc.castsShadow           = false;
+                const std::size_t matIdx = materialBaseIndex + row * 3 + col;
+                if (matIdx < assets.pbrShowcaseMaterials.size())
+                {
+                    rc.materialInstance = assets.pbrShowcaseMaterials[matIdx].get();
+                }
+                world.AddComponent<RenderableComponent>(sphere, rc);
+
+                EditorHierarchy::LinkAsLastChild(world, parent, sphere);
+            }
+        }
+    };
+
+    spawnSphereGrid(warmGroup, "warm", -kGroupOffset, /*matBase=*/0);
+    spawnSphereGrid(whiteGroup, "white", kGroupOffset, /*matBase=*/9);
 
     EditorHierarchy::LinkAsLastChild(world, root, camera);
     EditorHierarchy::LinkAsLastChild(world, root, sun);

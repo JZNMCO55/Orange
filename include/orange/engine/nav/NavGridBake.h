@@ -18,13 +18,13 @@
 namespace Orange::Engine::Nav
 {
 
-// 从物理世界烘焙网格可行走性：对每个 cell，用其世界 AABB 查
-// PhysicsWorld::OverlapAABB；命中任一（solidMask 过滤的）body → 标该 cell
-// 阻挡，否则可走。OverlapAABB 是宽相（broad-phase）查询，可能过报 —— 对导航
-// 烘焙即"保守阻挡"（宁可多标墙，不漏标可穿），可接受。
-ORANGE_ENGINE_API void BakeWalkableFromPhysics(NavGrid& grid, const Physics::PhysicsWorld& physics,
-                                               std::uint32_t solidMask = 0xFFFFFFFFu);
+    // 从物理世界烘焙网格可行走性：对每个 cell，用其世界 AABB 查
+    // PhysicsWorld::OverlapAABB；命中任一（solidMask 过滤的）body → 标该 cell
+    // 阻挡，否则可走。OverlapAABB 是宽相（broad-phase）查询，可能过报 —— 对导航
+    // 烘焙即"保守阻挡"（宁可多标墙，不漏标可穿），可接受。
+    ORANGE_ENGINE_API void BakeWalkableFromPhysics(NavGrid& grid, const Physics::PhysicsWorld& physics,
+                                                   std::uint32_t solidMask = 0xFFFFFFFFu);
 
-}  // namespace Orange::Engine::Nav
+} // namespace Orange::Engine::Nav
 
-#endif  // ORANGE_ENGINE_NAV_NAV_GRID_BAKE_H
+#endif // ORANGE_ENGINE_NAV_NAV_GRID_BAKE_H

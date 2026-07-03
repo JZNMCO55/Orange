@@ -8,7 +8,10 @@
 #include <functional>
 #include <string>
 
-namespace Orange::Engine { class World; }
+namespace Orange::Engine
+{
+    class World;
+}
 struct EditorHost;
 
 // ---------------------------------------------------------------------------
@@ -34,8 +37,8 @@ public:
 
     CreateEntityCommand(EditorHost& host, CreatorFn creator);
 
-    void Execute() override;
-    void Undo()    override;
+    void        Execute() override;
+    void        Undo() override;
     const char* GetType() const override { return "create_entity"; }
     const char* GetLabel() const override { return "Create Entity"; }
 
@@ -57,11 +60,11 @@ public:
                   std::string            oldName,
                   std::string            newName);
 
-    void Execute() override;
-    void Undo()    override;
+    void        Execute() override;
+    void        Undo() override;
     const char* GetType() const override { return "rename_entity"; }
     const char* GetLabel() const override { return "Rename Entity"; }
-    bool Merge(ICommand& newer) override;
+    bool        Merge(ICommand& newer) override;
 
 private:
     EditorHost*            mpHost;
@@ -91,8 +94,8 @@ public:
                                  std::string            oldBackendName,
                                  std::string            newBackendName);
 
-    void Execute() override;
-    void Undo()    override;
+    void        Execute() override;
+    void        Undo() override;
     const char* GetType() const override { return "switch_animator_backend"; }
     const char* GetLabel() const override { return "Switch Animator Backend"; }
 
@@ -103,4 +106,4 @@ private:
     std::string            mNewBackend;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_ENTITYCOMMANDS_H
+#endif // ORANGE_EDITOR_COMMAND_ENTITYCOMMANDS_H

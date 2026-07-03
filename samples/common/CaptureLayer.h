@@ -19,86 +19,82 @@
 namespace OrangeSamples
 {
 
-class CaptureLayer final : public Orange::Engine::Layer
-{
-public:
-    CaptureLayer(Orange::Engine::Render::Pipeline& pipeline,
-                 Orange::Engine::AppHost&         host,
-                 std::filesystem::path            outPath,
-                 int                              captureFrame = 60)
-        : Orange::Engine::Layer("CaptureLayer")
-        , mpPipeline(&pipeline)
-        , mpHost(&host)
-        , mOutPath(std::move(outPath))
-        , mCaptureFrame(captureFrame)
+    class CaptureLayer final : public Orange::Engine::Layer
     {
-    }
-
-    void OnUpdate(const Orange::Engine::FrameContext& /*frame*/) override
-    {
-        ++mCurrentFrame;
-        if (mCurrentFrame == mCaptureFrame)
+    public:
+        CaptureLayer(Orange::Engine::Render::Pipeline& pipeline,
+                     Orange::Engine::AppHost&          host,
+                     std::filesystem::path             outPath,
+                     int                               captureFrame = 60)
+            : Orange::Engine::Layer("CaptureLayer"), mpPipeline(&pipeline), mpHost(&host), mOutPath(std::move(outPath)), mCaptureFrame(captureFrame)
         {
-            mpPipeline->RequestCapture(mOutPath);
         }
-        // 多等几帧让 capture 真正落盘——Pipeline 内部 readback + stb_image_write
-        // 编 png 在 ~30ms 量级，给 60Hz 多 2 帧足够。
-        else if (mCurrentFrame == mCaptureFrame + 3)
-        {
-            mpHost->RequestExit();
-        }
-    }
 
-private:
-    Orange::Engine::Render::Pipeline* mpPipeline{nullptr};
-    Orange::Engine::AppHost*          mpHost{nullptr};
-    std::filesystem::path             mOutPath;
-    int                               mCaptureFrame{60};
-    int                               mCurrentFrame{0};
-};
-
-// CLI helper：从 argv 解析 capture 相关 flag。
-//   --capture <path>     截图落点；空字符串 = 不截图（交互模式）；
-//   --frames N           截图发生在第 N 帧（默认 60）；
-//   --scenario <name>    脚本化场景：idle / walk / jump。具体含义由
-//                        sample 端解读——CaptureLayer 自身不消费 scenario，
-//                        只把它存下来给 sample 内部的 ScenarioLayer 用。
-struct CaptureCliOptions
-{
-    std::filesystem::path outPath;
-    int                   captureFrame{60};
-    std::string           scenario;
-};
-
-inline CaptureCliOptions ParseCaptureCli(int argc, char** argv)
-{
-    CaptureCliOptions opts;
-    for (int i = 1; i < argc; ++i)
-    {
-        const std::string a = argv[i];
-        if (a == "--capture" && i + 1 < argc)
+        void OnUpdate(const Orange::Engine::FrameContext& /*frame*/) override
         {
-            opts.outPath = argv[++i];
-        }
-        else if (a == "--frames" && i + 1 < argc)
-        {
-            try
+            ++mCurrentFrame;
+            if (mCurrentFrame == mCaptureFrame)
             {
-                opts.captureFrame = std::stoi(argv[++i]);
+                mpPipeline->RequestCapture(mOutPath);
             }
-            catch (...)
+            // 多等几帧让 capture 真正落盘——Pipeline 内部 readback + stb_image_write
+            // 编 png 在 ~30ms 量级，给 60Hz 多 2 帧足够。
+            else if (mCurrentFrame == mCaptureFrame + 3)
             {
-                opts.captureFrame = 60;
+                mpHost->RequestExit();
             }
         }
-        else if (a == "--scenario" && i + 1 < argc)
+
+    private:
+        Orange::Engine::Render::Pipeline* mpPipeline{nullptr};
+        Orange::Engine::AppHost*          mpHost{nullptr};
+        std::filesystem::path             mOutPath;
+        int                               mCaptureFrame{60};
+        int                               mCurrentFrame{0};
+    };
+
+    // CLI helper：从 argv 解析 capture 相关 flag。
+    //   --capture <path>     截图落点；空字符串 = 不截图（交互模式）；
+    //   --frames N           截图发生在第 N 帧（默认 60）；
+    //   --scenario <name>    脚本化场景：idle / walk / jump。具体含义由
+    //                        sample 端解读——CaptureLayer 自身不消费 scenario，
+    //                        只把它存下来给 sample 内部的 ScenarioLayer 用。
+    struct CaptureCliOptions
+    {
+        std::filesystem::path outPath;
+        int                   captureFrame{60};
+        std::string           scenario;
+    };
+
+    inline CaptureCliOptions ParseCaptureCli(int argc, char** argv)
+    {
+        CaptureCliOptions opts;
+        for (int i = 1; i < argc; ++i)
         {
-            opts.scenario = argv[++i];
+            const std::string a = argv[i];
+            if (a == "--capture" && i + 1 < argc)
+            {
+                opts.outPath = argv[++i];
+            }
+            else if (a == "--frames" && i + 1 < argc)
+            {
+                try
+                {
+                    opts.captureFrame = std::stoi(argv[++i]);
+                }
+                catch (...)
+                {
+                    opts.captureFrame = 60;
+                }
+            }
+            else if (a == "--scenario" && i + 1 < argc)
+            {
+                opts.scenario = argv[++i];
+            }
         }
+        return opts;
     }
-    return opts;
-}
 
-}  // namespace OrangeSamples
+} // namespace OrangeSamples
 
-#endif  // ORANGE_ENGINE_SAMPLES_COMMON_CAPTURE_LAYER_H
+#endif // ORANGE_ENGINE_SAMPLES_COMMON_CAPTURE_LAYER_H

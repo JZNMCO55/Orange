@@ -61,223 +61,223 @@
 namespace Orange::Engine
 {
 
-class World;
+    class World;
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
 namespace Orange::Engine::Asset
 {
 
-class AssetRegistry;
+    class AssetRegistry;
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
 namespace Orange::Engine::Physics
 {
 
-class PhysicsWorld;
+    class PhysicsWorld;
 
-}  // namespace Orange::Engine::Physics
+} // namespace Orange::Engine::Physics
 
 namespace Orange::Engine::Animation
 {
 
-class AnimatorRegistry;
+    class AnimatorRegistry;
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
 namespace Orange::Engine::Scene
 {
 
-class WorldPartition;
+    class WorldPartition;
 
-// Save / Load 的可选依赖打包。每条都是"持有 AssetHandle / backend 资源
-// 的组件需要时才用得到"——传空时序列化层对相应组件走 graceful 退化，
-// 不视为 fatal（详见各字段注释）。
-//
-// 用 designated initializer（C++20）调用：
-//
-//     auto opt = LoadOptions{
-//         .assetRegistry    = &reg,
-//         .physicsWorld     = &world,
-//         .animatorRegistry = &animReg,
-//         .extraSerializers = std::span{gameEntries},
-//     };
-//     Scene::Load(path, world, opt);
-struct SaveOptions
-{
-    // 反查"AssetHandle → 资源路径"。空 → 持有 AssetHandle 的组件落
-    // 空字符串 + warn。
-    const Asset::AssetRegistry* assetRegistry{nullptr};
-
-    // 按名字注册的 MaterialInstance 表（name → non-owning pointer）。
-    // 供 RenderableComponent 把 materialInstance* 反查为 id 字符串写入 JSON。
-    // 空 → materialInstance 写出空 id + warn。
-    // 生命周期须覆盖 Save 调用期间。
-    const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
-
-    // 游戏侧 / 编辑器侧自定义组件序列化器。条目 name 不得与内置组件名
-    // 重复（重复时 Save 立即返回 AlreadyExists）。
-    // span 指向的数据生命周期须覆盖 Save 调用期间。
-    std::span<const ComponentSerializerEntry> extraSerializers{};
-
-    // Save 前是否普遍补全实体的稳定身份 guid（A2 选项 B / ADR-018）。开时
-    // 把"guid 零散分配"规整成"guid 普遍存在"，让 Hierarchy 的 guid 主键有
-    // 普遍可写的被引用 guid。默认开——纯 additive，旧调用方不受影响。
+    // Save / Load 的可选依赖打包。每条都是"持有 AssetHandle / backend 资源
+    // 的组件需要时才用得到"——传空时序列化层对相应组件走 graceful 退化，
+    // 不视为 fatal（详见各字段注释）。
     //
-    // 注意：补 guid 需要 mutate world，只有**非 const 入口** Save(World&, ...)
-    // 会执行（见下方重载注释）；const 入口 Save(const World&, ...) 物理上无法
-    // mutate，本字段在 const 入口被忽略（行为与升级前完全一致）。
-    bool ensureGuids{true};
-};
+    // 用 designated initializer（C++20）调用：
+    //
+    //     auto opt = LoadOptions{
+    //         .assetRegistry    = &reg,
+    //         .physicsWorld     = &world,
+    //         .animatorRegistry = &animReg,
+    //         .extraSerializers = std::span{gameEntries},
+    //     };
+    //     Scene::Load(path, world, opt);
+    struct SaveOptions
+    {
+        // 反查"AssetHandle → 资源路径"。空 → 持有 AssetHandle 的组件落
+        // 空字符串 + warn。
+        const Asset::AssetRegistry* assetRegistry{nullptr};
 
-struct LoadOptions
-{
-    // 解析"资源路径 → AssetHandle"（典型：RenderableComponent.mesh）。
-    // 空 → 相关 handle 留空 + warn。
-    Asset::AssetRegistry* assetRegistry{nullptr};
+        // 按名字注册的 MaterialInstance 表（name → non-owning pointer）。
+        // 供 RenderableComponent 把 materialInstance* 反查为 id 字符串写入 JSON。
+        // 空 → materialInstance 写出空 id + warn。
+        // 生命周期须覆盖 Save 调用期间。
+        const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
 
-    // 反序列化 RigidBody + Collider 时，用它注册 backend body（一次性
-    // 把 rigid + collider 一并提交给 PhysicsWorld::AddBody）。空 → 组
-    // 件仍 attach 但不绑定 backend，BodyHandle 留 Invalid。
-    Physics::PhysicsWorld* physicsWorld{nullptr};
+        // 游戏侧 / 编辑器侧自定义组件序列化器。条目 name 不得与内置组件名
+        // 重复（重复时 Save 立即返回 AlreadyExists）。
+        // span 指向的数据生命周期须覆盖 Save 调用期间。
+        std::span<const ComponentSerializerEntry> extraSerializers{};
 
-    // 反序列化 AnimatorComponent 时按 backend name 调 Create() 拿 IAnimator
-    // 实例。空 / 未注册 → component 仍 attach 但 animator unique_ptr 为
-    // nullptr。注：scene 仅持久化 backend 名字，具体的 skeleton / channel
-    // 配置由 game 端在注册 factory 时 capture，不下钻到 schema。
-    const Animation::AnimatorRegistry* animatorRegistry{nullptr};
+        // Save 前是否普遍补全实体的稳定身份 guid（A2 选项 B / ADR-018）。开时
+        // 把"guid 零散分配"规整成"guid 普遍存在"，让 Hierarchy 的 guid 主键有
+        // 普遍可写的被引用 guid。默认开——纯 additive，旧调用方不受影响。
+        //
+        // 注意：补 guid 需要 mutate world，只有**非 const 入口** Save(World&, ...)
+        // 会执行（见下方重载注释）；const 入口 Save(const World&, ...) 物理上无法
+        // mutate，本字段在 const 入口被忽略（行为与升级前完全一致）。
+        bool ensureGuids{true};
+    };
 
-    // 与 SaveOptions::namedMaterialInstances 相同表；Load 路径按 id 正向
-    // 查找 MaterialInstance*，赋给 RenderableComponent::materialInstance。
-    const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
+    struct LoadOptions
+    {
+        // 解析"资源路径 → AssetHandle"（典型：RenderableComponent.mesh）。
+        // 空 → 相关 handle 留空 + warn。
+        Asset::AssetRegistry* assetRegistry{nullptr};
 
-    // namedMaterialInstances 查不到某个 materialInstanceId 时的兜底解析器，
-    // 原样透传给内部 LoadContext（见 LoadContext::materialResolver 的设计动机）。
-    // 编辑器把它接到 EnsureMaterialInstance，让 DCC 导入的 .material 在新
-    // session 重新打开场景时仍能从磁盘 lazy-create 恢复，与 mesh 的磁盘加载
-    // 对称。空 → 维持旧行为（查表失败留 null）。
-    std::function<Render::MaterialInstance*(const std::string& materialId)>
-        materialResolver{};
+        // 反序列化 RigidBody + Collider 时，用它注册 backend body（一次性
+        // 把 rigid + collider 一并提交给 PhysicsWorld::AddBody）。空 → 组
+        // 件仍 attach 但不绑定 backend，BodyHandle 留 Invalid。
+        Physics::PhysicsWorld* physicsWorld{nullptr};
 
-    // 游戏侧 / 编辑器侧自定义组件序列化器，同 SaveOptions::extraSerializers。
-    std::span<const ComponentSerializerEntry> extraSerializers{};
+        // 反序列化 AnimatorComponent 时按 backend name 调 Create() 拿 IAnimator
+        // 实例。空 / 未注册 → component 仍 attach 但 animator unique_ptr 为
+        // nullptr。注：scene 仅持久化 backend 名字，具体的 skeleton / channel
+        // 配置由 game 端在注册 factory 时 capture，不下钻到 schema。
+        const Animation::AnimatorRegistry* animatorRegistry{nullptr};
 
-    // 若非空：Load 路径在 attach 完所有 component 后，给本次新建且**没有**
-    // LayerComponent 的 entity 强制挂上 LayerComponent{assignLayerId}。
-    // LoadSplit 用它把"来自 layer X 的 source 文件" 自动归属到 X。
-    // 单文件 Load 不需要时留空，保持向后兼容。
-    std::string assignLayerId{};
-};
+        // 与 SaveOptions::namedMaterialInstances 相同表；Load 路径按 id 正向
+        // 查找 MaterialInstance*，赋给 RenderableComponent::materialInstance。
+        const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
 
-// 把 `world` 写到 `path`。覆盖目标文件。
-//
-// 两个重载共享同一份序列化核心，区别只在"能否 Save 前补 guid"：
-//   * 非 const 入口 Save(World&, ...)：当 options.ensureGuids 为 true（默认）时
-//     先 EnsureEntityGuids(world)（普遍补全稳定身份 guid，A2 选项 B / ADR-018），
-//     再走只读核心。编辑器 / 工具 / 游戏存盘的常规路径——传非 const World 即享
-//     guid 主键升级。
-//   * const 入口 Save(const World&, ...)：物理上无法 mutate world，故**不**补
-//     guid（ensureGuids 被忽略），行为与历史完全一致——只把当前已有的 guid 当
-//     主键写出，无 guid 的实体的 Hierarchy 引用回退顺序 int。const 数据 / 测试
-//     fixture / 不愿被 Save 改动的 world 走这条。
-ORANGE_ENGINE_API Result<void, ResultCode> Save(World& world,
-                                                std::string_view path,
-                                                const SaveOptions& options = {});
+        // namedMaterialInstances 查不到某个 materialInstanceId 时的兜底解析器，
+        // 原样透传给内部 LoadContext（见 LoadContext::materialResolver 的设计动机）。
+        // 编辑器把它接到 EnsureMaterialInstance，让 DCC 导入的 .material 在新
+        // session 重新打开场景时仍能从磁盘 lazy-create 恢复，与 mesh 的磁盘加载
+        // 对称。空 → 维持旧行为（查表失败留 null）。
+        std::function<Render::MaterialInstance*(const std::string& materialId)>
+            materialResolver{};
 
-ORANGE_ENGINE_API Result<void, ResultCode> Save(const World& world,
-                                                std::string_view path,
-                                                const SaveOptions& options = {});
+        // 游戏侧 / 编辑器侧自定义组件序列化器，同 SaveOptions::extraSerializers。
+        std::span<const ComponentSerializerEntry> extraSerializers{};
 
-// 从 `path` 读取 scene 数据，把所有实体 + 组件追加到 `world` 上。
-// 不清空 world——调用方若需要"完全替换当前关卡"，自己先构造一个新
-// World 再把读取结果合进去。
-//
-// 失败语义：
-//   * 文件不存在 / IO 错误     → IoError
-//   * JSON 解析失败             → InvalidArgument（World 不被改动）
-//   * schemaVersion 不兼容      → SchemaMismatch（World 不被改动）
-//   * 必填字段缺失 / 类型错误   → InvalidArgument（World 不被改动）
-//
-// 未识别的 component 名 → 仅记录 warning 后继续（forward-compat）。
-//
-// fromString=true 时 `path` 直接是 JSON 文本（内存路径，供 LoadFromString
-// 复用本实现，避免临时文件）。outCreated 非空时回填本次新建的全部 Entity
-// （子树 clone 的选中 + undo-delete 追踪用）。两参默认值保持旧调用方不变。
-ORANGE_ENGINE_API Result<void, ResultCode> Load(std::string_view path,
-                                                World& world,
-                                                const LoadOptions& options = {},
-                                                bool fromString = false,
-                                                std::vector<Entity>* outCreated = nullptr);
+        // 若非空：Load 路径在 attach 完所有 component 后，给本次新建且**没有**
+        // LayerComponent 的 entity 强制挂上 LayerComponent{assignLayerId}。
+        // LoadSplit 用它把"来自 layer X 的 source 文件" 自动归属到 X。
+        // 单文件 Load 不需要时留空，保持向后兼容。
+        std::string assignLayerId{};
+    };
 
-// 把 `world` 中以 `roots` 为根的子树（每个 root + 其全部后代）序列化为 JSON
-// 文本（不落盘）。Duplicate / Copy-Paste / delete-undo 的共同基建：配
-// LoadFromString 即可"复制一棵子树并把内部引用重映射到新实体"。复用 Save
-// 核心（同一份 per-component 序列化器）。失败语义同 Save。
-ORANGE_ENGINE_API Result<std::string, ResultCode> SaveSubtreeToString(
-    const World& world,
-    std::span<const Entity> roots,
-    const SaveOptions& options = {});
+    // 把 `world` 写到 `path`。覆盖目标文件。
+    //
+    // 两个重载共享同一份序列化核心，区别只在"能否 Save 前补 guid"：
+    //   * 非 const 入口 Save(World&, ...)：当 options.ensureGuids 为 true（默认）时
+    //     先 EnsureEntityGuids(world)（普遍补全稳定身份 guid，A2 选项 B / ADR-018），
+    //     再走只读核心。编辑器 / 工具 / 游戏存盘的常规路径——传非 const World 即享
+    //     guid 主键升级。
+    //   * const 入口 Save(const World&, ...)：物理上无法 mutate world，故**不**补
+    //     guid（ensureGuids 被忽略），行为与历史完全一致——只把当前已有的 guid 当
+    //     主键写出，无 guid 的实体的 Hierarchy 引用回退顺序 int。const 数据 / 测试
+    //     fixture / 不愿被 Save 改动的 world 走这条。
+    ORANGE_ENGINE_API Result<void, ResultCode> Save(World&             world,
+                                                    std::string_view   path,
+                                                    const SaveOptions& options = {});
 
-// 从内存 JSON 文本追加加载到 `world`（语义同 Load 的追加 + 持久 ID 重映射）。
-// outCreated 非空时回填新建的 Entity。失败语义同 Load。
-ORANGE_ENGINE_API Result<void, ResultCode> LoadFromString(
-    std::string_view blob,
-    World& world,
-    const LoadOptions& options = {},
-    std::vector<Entity>* outCreated = nullptr);
+    ORANGE_ENGINE_API Result<void, ResultCode> Save(const World&       world,
+                                                    std::string_view   path,
+                                                    const SaveOptions& options = {});
 
-// ---------------------------------------------------------------------------
-// SaveSplit / LoadSplit —— 多文件 + manifest 序列化。
-//
-// 与单文件 Save / Load 关系：
-//   * **完全独立**的 API；不破坏 v1.1 schema、不替换原 Save / Load。
-//   * 调用方按"想要 per-layer 落盘"显式选这条路径；编辑器侧 v0.6 之后
-//     会优先走 SaveSplit，减少多人编辑时的 VCS 冲突（Orange-Wiki
-//     `concepts/gameplay/game-world-editor.md` §陷阱 4）。
-//
-// manifest 文件格式（独立 schema namespace `scene/manifest 1.0`）：
-//
-//   {
-//     "schemaVersion": { "namespace": "scene/manifest", "major": 1, "minor": 0 },
-//     "layers": [
-//       { "id": "background", "displayName": "Background", "visible": true,
-//         "source": "background.scene.json" },
-//       { "id": "foreground", "displayName": "Foreground", "visible": true,
-//         "source": "foreground.scene.json" }
-//     ]
-//   }
-//
-// per-layer .scene.json 文件复用 `scene/world` schema（当前 1.2）；仅
-// 包含归属于该 layer 的 entity（实体内仍写 LayerComponent.id，确保
-// "单文件 Load 也能恢复 layer 信息"）。
-//
-// source 路径 解析规则：以 `manifestPath` 所在目录为 base 解析相对路径。
-//
-// 失败语义：
-//   * 任一 per-layer 文件 Save / Load 失败 → 整体返回失败；Load 走
-//     internal rollback（已建实体回收）；Save 不保证回滚已写盘的中间
-//     文件（与单文件 Save 同款约束——caller 应在临时目录写完再 rename）。
-//
-// `WorldPartition` 双向角色：
-//   * Save 端：partition 提供 layer 列表 + 元数据（id / displayName /
-//     visible / source）；GAP-2026-05-17 Save 路径会按 partition 的
-//     layer 顺序遍历，每条 source 写一个 .scene.json。
-//   * Load 端：partition 在 Load 完成后被 ResetLayers 灌入 manifest
-//     里的 layer 列表（保留顺序），并且每条 LayerComponent.layerId 自
-//     动按 source 归属。
-// ---------------------------------------------------------------------------
+    // 从 `path` 读取 scene 数据，把所有实体 + 组件追加到 `world` 上。
+    // 不清空 world——调用方若需要"完全替换当前关卡"，自己先构造一个新
+    // World 再把读取结果合进去。
+    //
+    // 失败语义：
+    //   * 文件不存在 / IO 错误     → IoError
+    //   * JSON 解析失败             → InvalidArgument（World 不被改动）
+    //   * schemaVersion 不兼容      → SchemaMismatch（World 不被改动）
+    //   * 必填字段缺失 / 类型错误   → InvalidArgument（World 不被改动）
+    //
+    // 未识别的 component 名 → 仅记录 warning 后继续（forward-compat）。
+    //
+    // fromString=true 时 `path` 直接是 JSON 文本（内存路径，供 LoadFromString
+    // 复用本实现，避免临时文件）。outCreated 非空时回填本次新建的全部 Entity
+    // （子树 clone 的选中 + undo-delete 追踪用）。两参默认值保持旧调用方不变。
+    ORANGE_ENGINE_API Result<void, ResultCode> Load(std::string_view     path,
+                                                    World&               world,
+                                                    const LoadOptions&   options    = {},
+                                                    bool                 fromString = false,
+                                                    std::vector<Entity>* outCreated = nullptr);
 
-ORANGE_ENGINE_API Result<void, ResultCode> SaveSplit(const World& world,
-                                                     const WorldPartition& partition,
-                                                     std::string_view manifestPath,
-                                                     const SaveOptions& options = {});
+    // 把 `world` 中以 `roots` 为根的子树（每个 root + 其全部后代）序列化为 JSON
+    // 文本（不落盘）。Duplicate / Copy-Paste / delete-undo 的共同基建：配
+    // LoadFromString 即可"复制一棵子树并把内部引用重映射到新实体"。复用 Save
+    // 核心（同一份 per-component 序列化器）。失败语义同 Save。
+    ORANGE_ENGINE_API Result<std::string, ResultCode> SaveSubtreeToString(
+        const World&            world,
+        std::span<const Entity> roots,
+        const SaveOptions&      options = {});
 
-ORANGE_ENGINE_API Result<void, ResultCode> LoadSplit(std::string_view manifestPath,
-                                                     World& world,
-                                                     WorldPartition& partition,
-                                                     const LoadOptions& options = {});
+    // 从内存 JSON 文本追加加载到 `world`（语义同 Load 的追加 + 持久 ID 重映射）。
+    // outCreated 非空时回填新建的 Entity。失败语义同 Load。
+    ORANGE_ENGINE_API Result<void, ResultCode> LoadFromString(
+        std::string_view     blob,
+        World&               world,
+        const LoadOptions&   options    = {},
+        std::vector<Entity>* outCreated = nullptr);
 
-}  // namespace Orange::Engine::Scene
+    // ---------------------------------------------------------------------------
+    // SaveSplit / LoadSplit —— 多文件 + manifest 序列化。
+    //
+    // 与单文件 Save / Load 关系：
+    //   * **完全独立**的 API；不破坏 v1.1 schema、不替换原 Save / Load。
+    //   * 调用方按"想要 per-layer 落盘"显式选这条路径；编辑器侧 v0.6 之后
+    //     会优先走 SaveSplit，减少多人编辑时的 VCS 冲突（Orange-Wiki
+    //     `concepts/gameplay/game-world-editor.md` §陷阱 4）。
+    //
+    // manifest 文件格式（独立 schema namespace `scene/manifest 1.0`）：
+    //
+    //   {
+    //     "schemaVersion": { "namespace": "scene/manifest", "major": 1, "minor": 0 },
+    //     "layers": [
+    //       { "id": "background", "displayName": "Background", "visible": true,
+    //         "source": "background.scene.json" },
+    //       { "id": "foreground", "displayName": "Foreground", "visible": true,
+    //         "source": "foreground.scene.json" }
+    //     ]
+    //   }
+    //
+    // per-layer .scene.json 文件复用 `scene/world` schema（当前 1.2）；仅
+    // 包含归属于该 layer 的 entity（实体内仍写 LayerComponent.id，确保
+    // "单文件 Load 也能恢复 layer 信息"）。
+    //
+    // source 路径 解析规则：以 `manifestPath` 所在目录为 base 解析相对路径。
+    //
+    // 失败语义：
+    //   * 任一 per-layer 文件 Save / Load 失败 → 整体返回失败；Load 走
+    //     internal rollback（已建实体回收）；Save 不保证回滚已写盘的中间
+    //     文件（与单文件 Save 同款约束——caller 应在临时目录写完再 rename）。
+    //
+    // `WorldPartition` 双向角色：
+    //   * Save 端：partition 提供 layer 列表 + 元数据（id / displayName /
+    //     visible / source）；GAP-2026-05-17 Save 路径会按 partition 的
+    //     layer 顺序遍历，每条 source 写一个 .scene.json。
+    //   * Load 端：partition 在 Load 完成后被 ResetLayers 灌入 manifest
+    //     里的 layer 列表（保留顺序），并且每条 LayerComponent.layerId 自
+    //     动按 source 归属。
+    // ---------------------------------------------------------------------------
 
-#endif  // ORANGE_ENGINE_SCENE_SCENE_SERIALIZATION_H
+    ORANGE_ENGINE_API Result<void, ResultCode> SaveSplit(const World&          world,
+                                                         const WorldPartition& partition,
+                                                         std::string_view      manifestPath,
+                                                         const SaveOptions&    options = {});
+
+    ORANGE_ENGINE_API Result<void, ResultCode> LoadSplit(std::string_view   manifestPath,
+                                                         World&             world,
+                                                         WorldPartition&    partition,
+                                                         const LoadOptions& options = {});
+
+} // namespace Orange::Engine::Scene
+
+#endif // ORANGE_ENGINE_SCENE_SCENE_SERIALIZATION_H

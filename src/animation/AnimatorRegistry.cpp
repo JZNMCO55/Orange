@@ -12,84 +12,84 @@
 namespace Orange::Engine::Animation
 {
 
-struct AnimatorRegistry::Impl
-{
-    std::unordered_map<std::string, FactoryFn> backends;
-};
-
-AnimatorRegistry::AnimatorRegistry()
-    : mpImpl(std::make_unique<Impl>())
-{
-}
-
-AnimatorRegistry::~AnimatorRegistry() = default;
-
-AnimatorRegistry::AnimatorRegistry(AnimatorRegistry&&) noexcept            = default;
-AnimatorRegistry& AnimatorRegistry::operator=(AnimatorRegistry&&) noexcept = default;
-
-Result<void, ResultCode>
-AnimatorRegistry::RegisterBackend(std::string_view name, FactoryFn factory)
-{
-    if (!mpImpl)
+    struct AnimatorRegistry::Impl
     {
-        return ResultCode::NotInitialized;
+        std::unordered_map<std::string, FactoryFn> backends;
+    };
+
+    AnimatorRegistry::AnimatorRegistry()
+        : mpImpl(std::make_unique<Impl>())
+    {
     }
-    if (!factory)
-    {
-        return ResultCode::InvalidArgument;
-    }
-    std::string key{name};
-    if (mpImpl->backends.find(key) != mpImpl->backends.end())
-    {
-        return ResultCode::AlreadyExists;
-    }
-    mpImpl->backends.emplace(std::move(key), std::move(factory));
-    return {};
-}
 
-std::unique_ptr<IAnimator>
-AnimatorRegistry::Create(std::string_view name) const
-{
-    if (!mpImpl)
-    {
-        return nullptr;
-    }
-    const auto it = mpImpl->backends.find(std::string(name));
-    if (it == mpImpl->backends.end())
-    {
-        return nullptr;
-    }
-    return it->second();  // factory 自身决定是否返 nullptr
-}
+    AnimatorRegistry::~AnimatorRegistry() = default;
 
-bool AnimatorRegistry::HasBackend(std::string_view name) const noexcept
-{
-    if (!mpImpl)
-    {
-        return false;
-    }
-    return mpImpl->backends.find(std::string(name)) != mpImpl->backends.end();
-}
+    AnimatorRegistry::AnimatorRegistry(AnimatorRegistry&&) noexcept            = default;
+    AnimatorRegistry& AnimatorRegistry::operator=(AnimatorRegistry&&) noexcept = default;
 
-std::size_t AnimatorRegistry::BackendCount() const noexcept
-{
-    return mpImpl ? mpImpl->backends.size() : 0;
-}
-
-std::vector<std::string> AnimatorRegistry::BackendNames() const
-{
-    if (!mpImpl)
+    Result<void, ResultCode>
+    AnimatorRegistry::RegisterBackend(std::string_view name, FactoryFn factory)
     {
+        if (!mpImpl)
+        {
+            return ResultCode::NotInitialized;
+        }
+        if (!factory)
+        {
+            return ResultCode::InvalidArgument;
+        }
+        std::string key{name};
+        if (mpImpl->backends.find(key) != mpImpl->backends.end())
+        {
+            return ResultCode::AlreadyExists;
+        }
+        mpImpl->backends.emplace(std::move(key), std::move(factory));
         return {};
     }
-    std::vector<std::string> names;
-    names.reserve(mpImpl->backends.size());
-    for (const auto& kv : mpImpl->backends)
-    {
-        names.push_back(kv.first);
-    }
-    std::sort(names.begin(), names.end());
-    return names;
-}
 
-}  // namespace Orange::Engine::Animation
+    std::unique_ptr<IAnimator>
+    AnimatorRegistry::Create(std::string_view name) const
+    {
+        if (!mpImpl)
+        {
+            return nullptr;
+        }
+        const auto it = mpImpl->backends.find(std::string(name));
+        if (it == mpImpl->backends.end())
+        {
+            return nullptr;
+        }
+        return it->second(); // factory 自身决定是否返 nullptr
+    }
+
+    bool AnimatorRegistry::HasBackend(std::string_view name) const noexcept
+    {
+        if (!mpImpl)
+        {
+            return false;
+        }
+        return mpImpl->backends.find(std::string(name)) != mpImpl->backends.end();
+    }
+
+    std::size_t AnimatorRegistry::BackendCount() const noexcept
+    {
+        return mpImpl ? mpImpl->backends.size() : 0;
+    }
+
+    std::vector<std::string> AnimatorRegistry::BackendNames() const
+    {
+        if (!mpImpl)
+        {
+            return {};
+        }
+        std::vector<std::string> names;
+        names.reserve(mpImpl->backends.size());
+        for (const auto& kv : mpImpl->backends)
+        {
+            names.push_back(kv.first);
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
+} // namespace Orange::Engine::Animation

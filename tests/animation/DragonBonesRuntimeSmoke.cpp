@@ -23,43 +23,43 @@ namespace DBB = Orange::Engine::Animation::DragonBonesBackend;
 namespace
 {
 
-void TestConstructAdvanceDestroy()
-{
-    DBB::DragonBonesContext ctx;
-
-    // ctor 必须把 NoopEventDispatcher 挂上 + DragonBones runtime 实例化。
-    // 任一返 nullptr 都说明 runtime 没真链进来 / ctor 链断了。
-    assert(ctx.EventDispatcher() != nullptr);
-    assert(ctx.Clock() != nullptr);
-
-    // 推进 1 秒 + 跨 0 步长（边界）+ 负 dt（被 context 自己拦掉）。
-    ctx.AdvanceTime(1.0f / 60.0f);
-    ctx.AdvanceTime(0.0f);
-    ctx.AdvanceTime(-1.0f);   // 负 dt：no-op
-
-    // 推一大段时间也不崩：runtime 内部 WorldClock 不依赖单调递增 dt
-    // 真按 frame rate 走，只是累加。
-    for (int i = 0; i < 1000; ++i)
+    void TestConstructAdvanceDestroy()
     {
+        DBB::DragonBonesContext ctx;
+
+        // ctor 必须把 NoopEventDispatcher 挂上 + DragonBones runtime 实例化。
+        // 任一返 nullptr 都说明 runtime 没真链进来 / ctor 链断了。
+        assert(ctx.EventDispatcher() != nullptr);
+        assert(ctx.Clock() != nullptr);
+
+        // 推进 1 秒 + 跨 0 步长（边界）+ 负 dt（被 context 自己拦掉）。
         ctx.AdvanceTime(1.0f / 60.0f);
+        ctx.AdvanceTime(0.0f);
+        ctx.AdvanceTime(-1.0f); // 负 dt：no-op
+
+        // 推一大段时间也不崩：runtime 内部 WorldClock 不依赖单调递增 dt
+        // 真按 frame rate 走，只是累加。
+        for (int i = 0; i < 1000; ++i)
+        {
+            ctx.AdvanceTime(1.0f / 60.0f);
+        }
     }
-}
 
-void TestMultipleContexts()
-{
-    // 多实例并存：每个 context 持自己的 dispatcher / runtime / clock，
-    // 互不污染。
-    DBB::DragonBonesContext a;
-    DBB::DragonBonesContext b;
+    void TestMultipleContexts()
+    {
+        // 多实例并存：每个 context 持自己的 dispatcher / runtime / clock，
+        // 互不污染。
+        DBB::DragonBonesContext a;
+        DBB::DragonBonesContext b;
 
-    assert(a.EventDispatcher() != b.EventDispatcher());
-    assert(a.Clock() != b.Clock());
+        assert(a.EventDispatcher() != b.EventDispatcher());
+        assert(a.Clock() != b.Clock());
 
-    a.AdvanceTime(1.0f / 60.0f);
-    b.AdvanceTime(1.0f / 60.0f);
-}
+        a.AdvanceTime(1.0f / 60.0f);
+        b.AdvanceTime(1.0f / 60.0f);
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {

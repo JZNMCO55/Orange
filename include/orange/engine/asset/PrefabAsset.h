@@ -30,28 +30,28 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API PrefabAsset
-{
-public:
-    PrefabAsset() = default;
-
-    PrefabAsset(std::string prefabName, std::string templateBlob)
-        : mPrefabName(std::move(prefabName)), mTemplateBlob(std::move(templateBlob))
+    class ORANGE_ENGINE_API PrefabAsset
     {
-    }
+    public:
+        PrefabAsset() = default;
 
-    // 人类可读的 prefab 名（资产浏览器显示用，非身份键——身份键是资源路径）。
-    const std::string& PrefabName() const noexcept { return mPrefabName; }
+        PrefabAsset(std::string prefabName, std::string templateBlob)
+            : mPrefabName(std::move(prefabName)), mTemplateBlob(std::move(templateBlob))
+        {
+        }
 
-    // 模板 blob：SaveSubtreeToString 产出的 scene/world JSON 原文。实例化时
-    // 直接喂给 Scene::LoadFromString，零二次解析。
-    const std::string& TemplateBlob() const noexcept { return mTemplateBlob; }
+        // 人类可读的 prefab 名（资产浏览器显示用，非身份键——身份键是资源路径）。
+        const std::string& PrefabName() const noexcept { return mPrefabName; }
 
-private:
-    std::string mPrefabName;
-    std::string mTemplateBlob;
-};
+        // 模板 blob：SaveSubtreeToString 产出的 scene/world JSON 原文。实例化时
+        // 直接喂给 Scene::LoadFromString，零二次解析。
+        const std::string& TemplateBlob() const noexcept { return mTemplateBlob; }
 
-}  // namespace Orange::Engine::Asset
+    private:
+        std::string mPrefabName;
+        std::string mTemplateBlob;
+    };
 
-#endif  // ORANGE_ENGINE_ASSET_PREFAB_ASSET_H
+} // namespace Orange::Engine::Asset
+
+#endif // ORANGE_ENGINE_ASSET_PREFAB_ASSET_H

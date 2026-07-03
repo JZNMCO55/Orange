@@ -19,33 +19,33 @@ namespace Anim = ::Orange::Engine::Animation;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool Near(float a, float b, float eps = 1e-4f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-// 造一条 Float track，给定 (time, value, interp) 列表（值放 vec4.x）。
-Anim::AnimationTrack MakeFloatTrack(std::initializer_list<Anim::Keyframe> ks)
-{
-    Anim::AnimationTrack t;
-    t.valueType = Anim::TrackValueType::Float;
-    t.keys      = std::vector<Anim::Keyframe>(ks);
-    return t;
-}
+    // 造一条 Float track，给定 (time, value, interp) 列表（值放 vec4.x）。
+    Anim::AnimationTrack MakeFloatTrack(std::initializer_list<Anim::Keyframe> ks)
+    {
+        Anim::AnimationTrack t;
+        t.valueType = Anim::TrackValueType::Float;
+        t.keys      = std::vector<Anim::Keyframe>(ks);
+        return t;
+    }
 
-Anim::Keyframe Key(float time, float v, Anim::InterpMode interp,
-                   glm::vec2 inT = glm::vec2(0.0f), glm::vec2 outT = glm::vec2(0.0f))
-{
-    Anim::Keyframe k;
-    k.time       = time;
-    k.value      = glm::vec4(v, 0.0f, 0.0f, 0.0f);
-    k.interp     = interp;
-    k.inTangent  = inT;
-    k.outTangent = outT;
-    return k;
-}
+    Anim::Keyframe Key(float time, float v, Anim::InterpMode interp,
+                       glm::vec2 inT = glm::vec2(0.0f), glm::vec2 outT = glm::vec2(0.0f))
+    {
+        Anim::Keyframe k;
+        k.time       = time;
+        k.value      = glm::vec4(v, 0.0f, 0.0f, 0.0f);
+        k.interp     = interp;
+        k.inTangent  = inT;
+        k.outTangent = outT;
+        return k;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -54,7 +54,7 @@ int main()
     // ===== 1. 空 track → 零 =====
     {
         Anim::AnimationTrack empty;
-        const glm::vec4 v = Anim::SampleTrack(empty, 0.5f);
+        const glm::vec4      v = Anim::SampleTrack(empty, 0.5f);
         assert(Near(v.x, 0.0f) && Near(v.y, 0.0f) && Near(v.z, 0.0f) && Near(v.w, 0.0f) &&
                "空 track 采样应返回 (0,0,0,0)");
         std::fprintf(stdout, "  [PASS] 空 track → 零\n");
@@ -104,8 +104,8 @@ int main()
 
     // ===== 6. Bezier 正出切线 → 中点高于线性（ease-out 抬升）=====
     {
-        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.0f, 1.0f)),
-                                  Key(2.0f, 80.0f, InterpMode::Bezier)});
+        auto        tr  = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.0f, 1.0f)),
+                                          Key(2.0f, 80.0f, InterpMode::Bezier)});
         const float mid = Anim::SampleTrack(tr, 1.0f).x;
         assert(mid > 40.0f && "Bezier outTangent.y>0 → 中点高于线性中点 40（缓动抬升）");
         std::fprintf(stdout, "  [PASS] Bezier 正切线抬升中点（mid=%.2f > 40）\n", mid);
@@ -115,9 +115,9 @@ int main()
     // 关键：两端切线值方向 .y 全 0 —— 旧 Hermite-MVP 只看 .y，会退化成线性中点 50；
     // 新模型用 .x 反解时间 → 慢启动，时间分数 0.5 处值仍落后（< 50）。这是旧实现做不到的。
     {
-        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.42f, 0.0f)),
-                                  Key(2.0f, 100.0f, InterpMode::Bezier)});
-        const float mid = Anim::SampleTrack(tr, 1.0f).x;  // 时间分数 u=0.5
+        auto        tr  = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.42f, 0.0f)),
+                                          Key(2.0f, 100.0f, InterpMode::Bezier)});
+        const float mid = Anim::SampleTrack(tr, 1.0f).x; // 时间分数 u=0.5
         assert(mid < 50.0f &&
                "ease-in（时间柄 .x>0、值柄 .y=0）中点应低于线性 50（慢启动；旧 MVP 退化线性）");
         std::fprintf(stdout, "  [PASS] Bezier ease-in 时序缓动（mid=%.2f < 50）\n", mid);
@@ -125,8 +125,8 @@ int main()
 
     // ===== 6c. ease-out（cubic-bezier(0,0,0.58,1)）：快启动 → 中点高于线性 =====
     {
-        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier),
-                                  Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.42f, 0.0f), {})});
+        auto        tr  = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier),
+                                          Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.42f, 0.0f), {})});
         const float mid = Anim::SampleTrack(tr, 1.0f).x;
         assert(mid > 50.0f &&
                "ease-out（下一帧 inTangent.x=-0.42、.y=0）中点应高于线性 50（快启动）");
@@ -135,11 +135,11 @@ int main()
 
     // ===== 6d. ease-in-out 对称（cubic-bezier(0.42,0,0.58,1)）：中点精确 50、两侧对称 =====
     {
-        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.42f, 0.0f)),
-                                  Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.42f, 0.0f), {})});
-        const float q1  = Anim::SampleTrack(tr, 0.5f).x;  // u=0.25
-        const float mid = Anim::SampleTrack(tr, 1.0f).x;  // u=0.5
-        const float q3  = Anim::SampleTrack(tr, 1.5f).x;  // u=0.75
+        auto        tr  = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.42f, 0.0f)),
+                                          Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.42f, 0.0f), {})});
+        const float q1  = Anim::SampleTrack(tr, 0.5f).x; // u=0.25
+        const float mid = Anim::SampleTrack(tr, 1.0f).x; // u=0.5
+        const float q3  = Anim::SampleTrack(tr, 1.5f).x; // u=0.75
         assert(Near(mid, 50.0f, 0.5f) && "对称缓动中点精确 50");
         assert(q1 < 50.0f && q3 > 50.0f && "ease-in-out：前慢（q1<50）后快（q3>50）");
         assert(Near(q1 + q3, 100.0f, 1.0f) && "前后四分点关于中点对称（q1+q3≈100）");
@@ -167,13 +167,13 @@ int main()
     // ===== 6f. 值方向 overshoot（.y 超出 [0,1]）→ 中段越过端点值（anticipation / 回弹）=====
     // squash-stretch 的"juice"：过渡中段值临时冲过目标再回落。值柄 .y>1 由 glm::mix 外插实现。
     {
-        auto tr = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.3f, 1.6f)),
-                                  Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.3f, 1.6f), {})});
+        auto  tr   = MakeFloatTrack({Key(0.0f, 0.0f, InterpMode::Bezier, {}, glm::vec2(0.3f, 1.6f)),
+                                     Key(2.0f, 100.0f, InterpMode::Bezier, glm::vec2(-0.3f, 1.6f), {})});
         float peak = 0.0f;
         for (int i = 0; i <= 40; ++i)
         {
             const float t = 2.0f * static_cast<float>(i) / 40.0f;
-            peak = std::max(peak, Anim::SampleTrack(tr, t).x);
+            peak          = std::max(peak, Anim::SampleTrack(tr, t).x);
         }
         assert(peak > 100.0f && "值方向 overshoot 柄 → 中段峰值越过端点 100（回弹）");
         std::fprintf(stdout, "  [PASS] Bezier 值方向 overshoot 回弹（peak=%.2f > 100）\n", peak);
@@ -195,9 +195,15 @@ int main()
     {
         Anim::AnimationTrack tr;
         tr.valueType = Anim::TrackValueType::Vec3;
-        Anim::Keyframe a; a.time = 0.0f; a.value = glm::vec4(0, 0, 0, 0); a.interp = InterpMode::Linear;
-        Anim::Keyframe b; b.time = 1.0f; b.value = glm::vec4(2, 4, 6, 0); b.interp = InterpMode::Linear;
-        tr.keys = {a, b};
+        Anim::Keyframe a;
+        a.time   = 0.0f;
+        a.value  = glm::vec4(0, 0, 0, 0);
+        a.interp = InterpMode::Linear;
+        Anim::Keyframe b;
+        b.time            = 1.0f;
+        b.value           = glm::vec4(2, 4, 6, 0);
+        b.interp          = InterpMode::Linear;
+        tr.keys           = {a, b};
         const glm::vec4 v = Anim::SampleTrack(tr, 0.5f);
         assert(Near(v.x, 1.0f) && Near(v.y, 2.0f) && Near(v.z, 3.0f) &&
                "Vec3 track t=0.5 → (1,2,3)（各维独立线性）");
@@ -262,8 +268,8 @@ int main()
         Anim::AnimationTrack tr;
         tr.valueType = Anim::TrackValueType::Float;
         Anim::AddKeyframeSorted(tr, Key(2.0f, 20.0f, InterpMode::Linear));
-        Anim::AddKeyframeSorted(tr, Key(0.0f, 0.0f, InterpMode::Linear));   // 插到最前
-        Anim::AddKeyframeSorted(tr, Key(1.0f, 10.0f, InterpMode::Linear));  // 插中间
+        Anim::AddKeyframeSorted(tr, Key(0.0f, 0.0f, InterpMode::Linear));  // 插到最前
+        Anim::AddKeyframeSorted(tr, Key(1.0f, 10.0f, InterpMode::Linear)); // 插中间
         assert(tr.keys.size() == 3 && Anim::IsTrackSorted(tr) && "3 个乱序打键 → 有序");
         assert(Near(tr.keys[0].time, 0.0f) && Near(tr.keys[1].time, 1.0f) &&
                Near(tr.keys[2].time, 2.0f) && "打键后 time 升序排列");
@@ -372,7 +378,7 @@ int main()
         Anim::AddClipEvent(clip, Anim::AnimationEvent{1.0f, "b"});
         Anim::AddClipEvent(clip, Anim::AnimationEvent{0.5f, "a"});
         Anim::AddClipEvent(clip, Anim::AnimationEvent{2.0f, "d"});
-        Anim::AddClipEvent(clip, Anim::AnimationEvent{0.5f, "a2"});  // 同 time 并存
+        Anim::AddClipEvent(clip, Anim::AnimationEvent{0.5f, "a2"}); // 同 time 并存
         assert(clip.events.size() == 4 && "同 time 事件并存");
         // 升序（同 time 保持插入序：a 在 a2 前）。
         assert(Near(clip.events[0].time, 0.5f) && clip.events[0].name == "a");

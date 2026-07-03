@@ -52,4 +52,4 @@ glm::vec3
 ScreenRayToGround(EditorHost& host, glm::vec2 ndc, float aspect,
                   float groundY = 0.0f);
 
-#endif  // ORANGE_EDITOR_EDITOR_PICKING_H
+#endif // ORANGE_EDITOR_EDITOR_PICKING_H

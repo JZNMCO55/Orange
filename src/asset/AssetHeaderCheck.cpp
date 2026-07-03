@@ -17,10 +17,10 @@
 
 namespace Orange::Engine::Asset
 {
-namespace
-{
+    namespace
+    {
 
-[[maybe_unused]] inline constexpr int sAssetHeaderCheckSentinel = 0;
+        [[maybe_unused]] inline constexpr int sAssetHeaderCheckSentinel = 0;
 
-}  // namespace
-}  // namespace Orange::Engine::Asset
+    } // namespace
+} // namespace Orange::Engine::Asset

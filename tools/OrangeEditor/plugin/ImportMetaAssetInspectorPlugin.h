@@ -30,13 +30,13 @@
 namespace Orange::Editor::Plugin
 {
 
-class ImportMetaAssetInspectorPlugin : public IEditorAssetInspectorPlugin
-{
-public:
-    bool CanHandle(const std::string& assetPath) const override;
-    void Draw(EditorHost& host, const std::string& assetPath) override;
-};
+    class ImportMetaAssetInspectorPlugin : public IEditorAssetInspectorPlugin
+    {
+    public:
+        bool CanHandle(const std::string& assetPath) const override;
+        void Draw(EditorHost& host, const std::string& assetPath) override;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_IMPORT_META_ASSET_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_IMPORT_META_ASSET_INSPECTOR_PLUGIN_H

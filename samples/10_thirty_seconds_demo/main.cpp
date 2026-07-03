@@ -77,7 +77,6 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MaterialInstance;
@@ -85,6 +84,7 @@ using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::NameComponent;
 using Orange::Engine::Scene::TransformComponent;
 namespace In   = Orange::Engine::Input;
@@ -94,247 +94,244 @@ namespace Sce  = Orange::Engine::Scene;
 namespace
 {
 
-// ---------- Mesh 工厂：单位立方体（与 sample 04/09 同布局）----------
+    // ---------- Mesh 工厂：单位立方体（与 sample 04/09 同布局）----------
 
-struct CubeFace
-{
-    std::array<VertexPosition3, 4> positions;
-};
-
-constexpr std::array<CubeFace, 6> kCubeFaces = {{
-    {{{{ 0.5f, -0.5f,  0.5f}, { 0.5f, -0.5f, -0.5f}, { 0.5f,  0.5f, -0.5f}, { 0.5f,  0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f,  0.5f}, {-0.5f,  0.5f,  0.5f}, {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f,  0.5f,  0.5f}, { 0.5f,  0.5f,  0.5f}, { 0.5f,  0.5f, -0.5f}, {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f}, { 0.5f, -0.5f, -0.5f}, { 0.5f, -0.5f,  0.5f}, {-0.5f, -0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f,  0.5f}, { 0.5f, -0.5f,  0.5f}, { 0.5f,  0.5f,  0.5f}, {-0.5f,  0.5f,  0.5f}}}},
-    {{{{ 0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f,  0.5f, -0.5f}, { 0.5f,  0.5f, -0.5f}}}},
-}};
-
-constexpr std::array<VertexUV2, 4> kFaceUVs = {{
-    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-}};
-
-std::unique_ptr<MeshAsset> MakeCubeMesh()
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24);
-    uvs.reserve(24);
-    indices.reserve(36);
-
-    for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
+    struct CubeFace
     {
-        const std::uint32_t base = face * 4;
-        for (int i = 0; i < 4; ++i)
-        {
-            positions.push_back(kCubeFaces[face].positions[i]);
-            uvs.push_back(kFaceUVs[i]);
-        }
-        // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
-        // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
+        std::array<VertexPosition3, 4> positions;
+    };
 
-// 按 NameComponent.name 在 World 里反查 entity。SceneLoad 之后 entity
-// 数值与 JSON 里的 "id" 字段无关——内部按 EnTT 重新分配，调用方只能
-// 走 name 反查。
-Entity FindEntityByName(World& world, std::string_view name)
-{
-    auto& reg  = world.Registry();
-    auto  view = reg.view<NameComponent>();
-    for (auto e : view)
+    constexpr std::array<CubeFace, 6> kCubeFaces = {{
+        {{{{0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}}}},
+        {{{{0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}}}},
+    }};
+
+    constexpr std::array<VertexUV2, 4> kFaceUVs = {{
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {1.0f, 1.0f},
+        {0.0f, 1.0f},
+    }};
+
+    std::unique_ptr<MeshAsset> MakeCubeMesh()
     {
-        if (reg.get<NameComponent>(e).name == name)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+
+        for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
         {
-            return World::FromEntt(e);
-        }
-    }
-    return Entity::Invalid();
-}
-
-// ---------- GameplayLayer：input → physics → entity transform sync ----------
-//
-// 单 layer 把 player input + physics step + transform sync 三件事放一
-// 起——demo 范围足够小，拆三 layer 反而繁琐。OnUpdate 顺序：读 input
-// → 写 player velocity → physics.Step → sync 所有 dynamic body 的
-// xy 到 entity transform → 帧末 input.BeginFrame()。
-
-constexpr float kWalkSpeed       = 4.5f;
-constexpr float kJumpVelocity    = 8.0f;
-constexpr float kGroundedYThresh = 0.5f;
-constexpr float kVictoryDistance = 0.6f;
-constexpr float kDemoTimeoutSeconds = 30.0f;
-
-class GameplayLayer : public Layer
-{
-public:
-    GameplayLayer(In::InputContext&   input,
-                  Phys::PhysicsWorld& phys,
-                  World&              world,
-                  Entity              playerEntity,
-                  Entity              goalEntity,
-                  AppHost&            host)
-        : Layer("GameplayLayer")
-        , mInput(input)
-        , mPhys(phys)
-        , mWorld(world)
-        , mPlayer(playerEntity)
-        , mGoal(goalEntity)
-        , mHost(host)
-    {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        float dt = static_cast<float>(frame.time.deltaSeconds);
-        if (dt > 1.0f / 30.0f)
-        {
-            dt = 1.0f / 30.0f;
-        }
-
-        // ---- input → player velocity ----
-        const In::ActionMap* topMap = mInput.Top();
-        bool victory = false;
-        if (topMap != nullptr)
-        {
-            const bool leftHeld  = In::IsHeld    (topMap->GetState("move_left"));
-            const bool rightHeld = In::IsHeld    (topMap->GetState("move_right"));
-            const bool jumpDown  = In::IsTriggered(topMap->GetState("jump"));
-
-            const auto* rb = mWorld.GetComponent<Phys::RigidBodyComponent>(mPlayer);
-            if (rb != nullptr && rb->handle.IsValid())
+            const std::uint32_t base = face * 4;
+            for (int i = 0; i < 4; ++i)
             {
-                const float horizontalDir =
-                    (rightHeld ? 1.0f : 0.0f) - (leftHeld ? 1.0f : 0.0f);
-                auto vel = mPhys.GetLinearVelocity(rb->handle);
-                vel.x = horizontalDir * kWalkSpeed;
-                if (jumpDown && std::fabs(vel.y) < kGroundedYThresh)
-                {
-                    vel.y = kJumpVelocity;
-                }
-                mPhys.SetLinearVelocity(rb->handle, vel);
+                positions.push_back(kCubeFaces[face].positions[i]);
+                uvs.push_back(kFaceUVs[i]);
             }
+            // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
+            // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
         }
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
 
-        // ---- physics step ----
-        mPhys.Step(dt);
-
-        // ---- sync dynamic bodies → entity Transform ----
-        // 主循环需要的就这一个 entity（玩家），但保持遍历范式与 sample 06
-        // 一致——后续若加更多 dynamic body 不需要改循环。
-        auto& reg = mWorld.Registry();
-        auto  view = reg.view<Phys::RigidBodyComponent, TransformComponent>();
+    // 按 NameComponent.name 在 World 里反查 entity。SceneLoad 之后 entity
+    // 数值与 JSON 里的 "id" 字段无关——内部按 EnTT 重新分配，调用方只能
+    // 走 name 反查。
+    Entity FindEntityByName(World& world, std::string_view name)
+    {
+        auto& reg  = world.Registry();
+        auto  view = reg.view<NameComponent>();
         for (auto e : view)
         {
-            const auto& rbComp = reg.get<Phys::RigidBodyComponent>(e);
-            if (!rbComp.handle.IsValid() || rbComp.type != Phys::BodyType::Dynamic)
+            if (reg.get<NameComponent>(e).name == name)
             {
-                continue;
+                return World::FromEntt(e);
             }
-            const auto bxf = mPhys.GetBodyTransform(rbComp.handle);
-            auto& xf = reg.get<TransformComponent>(e);
-            xf.position.x = bxf.position.x;
-            xf.position.y = bxf.position.y;
-            // z 不动——保留 ECS 端 2.5D 高度（虽然本 sample 都在 z=0）。
+        }
+        return Entity::Invalid();
+    }
+
+    // ---------- GameplayLayer：input → physics → entity transform sync ----------
+    //
+    // 单 layer 把 player input + physics step + transform sync 三件事放一
+    // 起——demo 范围足够小，拆三 layer 反而繁琐。OnUpdate 顺序：读 input
+    // → 写 player velocity → physics.Step → sync 所有 dynamic body 的
+    // xy 到 entity transform → 帧末 input.BeginFrame()。
+
+    constexpr float kWalkSpeed          = 4.5f;
+    constexpr float kJumpVelocity       = 8.0f;
+    constexpr float kGroundedYThresh    = 0.5f;
+    constexpr float kVictoryDistance    = 0.6f;
+    constexpr float kDemoTimeoutSeconds = 30.0f;
+
+    class GameplayLayer : public Layer
+    {
+    public:
+        GameplayLayer(In::InputContext&   input,
+                      Phys::PhysicsWorld& phys,
+                      World&              world,
+                      Entity              playerEntity,
+                      Entity              goalEntity,
+                      AppHost&            host)
+            : Layer("GameplayLayer"), mInput(input), mPhys(phys), mWorld(world), mPlayer(playerEntity), mGoal(goalEntity), mHost(host)
+        {
         }
 
-        // ---- victory check ----
-        if (mPlayer.IsValid() && mGoal.IsValid())
+        void OnUpdate(const FrameContext& frame) override
         {
-            const auto* px = mWorld.GetComponent<TransformComponent>(mPlayer);
-            const auto* gx = mWorld.GetComponent<TransformComponent>(mGoal);
-            if (px != nullptr && gx != nullptr)
+            float dt = static_cast<float>(frame.time.deltaSeconds);
+            if (dt > 1.0f / 30.0f)
             {
-                const float dx = px->position.x - gx->position.x;
-                const float dy = px->position.y - gx->position.y;
-                const float dist2 = dx * dx + dy * dy;
-                if (dist2 < kVictoryDistance * kVictoryDistance)
+                dt = 1.0f / 30.0f;
+            }
+
+            // ---- input → player velocity ----
+            const In::ActionMap* topMap  = mInput.Top();
+            bool                 victory = false;
+            if (topMap != nullptr)
+            {
+                const bool leftHeld  = In::IsHeld(topMap->GetState("move_left"));
+                const bool rightHeld = In::IsHeld(topMap->GetState("move_right"));
+                const bool jumpDown  = In::IsTriggered(topMap->GetState("jump"));
+
+                const auto* rb = mWorld.GetComponent<Phys::RigidBodyComponent>(mPlayer);
+                if (rb != nullptr && rb->handle.IsValid())
                 {
-                    victory = true;
+                    const float horizontalDir =
+                        (rightHeld ? 1.0f : 0.0f) - (leftHeld ? 1.0f : 0.0f);
+                    auto vel = mPhys.GetLinearVelocity(rb->handle);
+                    vel.x    = horizontalDir * kWalkSpeed;
+                    if (jumpDown && std::fabs(vel.y) < kGroundedYThresh)
+                    {
+                        vel.y = kJumpVelocity;
+                    }
+                    mPhys.SetLinearVelocity(rb->handle, vel);
                 }
             }
+
+            // ---- physics step ----
+            mPhys.Step(dt);
+
+            // ---- sync dynamic bodies → entity Transform ----
+            // 主循环需要的就这一个 entity（玩家），但保持遍历范式与 sample 06
+            // 一致——后续若加更多 dynamic body 不需要改循环。
+            auto& reg  = mWorld.Registry();
+            auto  view = reg.view<Phys::RigidBodyComponent, TransformComponent>();
+            for (auto e : view)
+            {
+                const auto& rbComp = reg.get<Phys::RigidBodyComponent>(e);
+                if (!rbComp.handle.IsValid() || rbComp.type != Phys::BodyType::Dynamic)
+                {
+                    continue;
+                }
+                const auto bxf = mPhys.GetBodyTransform(rbComp.handle);
+                auto&      xf  = reg.get<TransformComponent>(e);
+                xf.position.x  = bxf.position.x;
+                xf.position.y  = bxf.position.y;
+                // z 不动——保留 ECS 端 2.5D 高度（虽然本 sample 都在 z=0）。
+            }
+
+            // ---- victory check ----
+            if (mPlayer.IsValid() && mGoal.IsValid())
+            {
+                const auto* px = mWorld.GetComponent<TransformComponent>(mPlayer);
+                const auto* gx = mWorld.GetComponent<TransformComponent>(mGoal);
+                if (px != nullptr && gx != nullptr)
+                {
+                    const float dx    = px->position.x - gx->position.x;
+                    const float dy    = px->position.y - gx->position.y;
+                    const float dist2 = dx * dx + dy * dy;
+                    if (dist2 < kVictoryDistance * kVictoryDistance)
+                    {
+                        victory = true;
+                    }
+                }
+            }
+
+            // ---- timeout check ----
+            mElapsed += dt;
+            const bool timeout = mElapsed > kDemoTimeoutSeconds;
+
+            if ((victory || timeout) && !mFinished)
+            {
+                std::fprintf(stdout,
+                             "[10_thirty_seconds_demo] %s after %.2fs — exiting.\n",
+                             victory ? "Victory!" : "Timed out",
+                             static_cast<double>(mElapsed));
+                mFinished = true;
+                mHost.RequestExit();
+            }
+
+            // ---- 帧末把 InputContext 状态机推进一步 ----
+            mInput.BeginFrame();
         }
 
-        // ---- timeout check ----
-        mElapsed += dt;
-        const bool timeout = mElapsed > kDemoTimeoutSeconds;
-
-        if ((victory || timeout) && !mFinished)
+        bool OnEvent(const Platform::WindowEvent& event) override
         {
-            std::fprintf(stdout,
-                         "[10_thirty_seconds_demo] %s after %.2fs — exiting.\n",
-                         victory ? "Victory!" : "Timed out",
-                         static_cast<double>(mElapsed));
-            mFinished = true;
-            mHost.RequestExit();
-        }
-
-        // ---- 帧末把 InputContext 状态机推进一步 ----
-        mInput.BeginFrame();
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* key = std::get_if<Platform::KeyEvent>(&event))
-        {
-            const bool isDown = key->action != Platform::KeyAction::Release;
-            mInput.PostKeyEvent(static_cast<In::KeyCode>(key->key), isDown);
+            if (auto* key = std::get_if<Platform::KeyEvent>(&event))
+            {
+                const bool isDown = key->action != Platform::KeyAction::Release;
+                mInput.PostKeyEvent(static_cast<In::KeyCode>(key->key), isDown);
+                return false;
+            }
             return false;
         }
-        return false;
-    }
 
-private:
-    In::InputContext&   mInput;
-    Phys::PhysicsWorld& mPhys;
-    World&              mWorld;
-    Entity              mPlayer;
-    Entity              mGoal;
-    AppHost&            mHost;
-    float               mElapsed{0.0f};
-    bool                mFinished{false};
-};
+    private:
+        In::InputContext&   mInput;
+        Phys::PhysicsWorld& mPhys;
+        World&              mWorld;
+        Entity              mPlayer;
+        Entity              mGoal;
+        AppHost&            mHost;
+        float               mElapsed{0.0f};
+        bool                mFinished{false};
+    };
 
-// 简单的 RenderLayer——只在 GameplayLayer 之后调一次 Pipeline.Render。
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world) {}
-
-    void OnUpdate(const FrameContext& frame) override
+    // 简单的 RenderLayer——只在 GameplayLayer 之后调一次 Pipeline.Render。
+    class RenderLayer : public Layer
     {
-        mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
-        mPipeline.Render(mWorld);
-    }
+    public:
+        RenderLayer(Pipeline& pipeline, World& world)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world) {}
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        void OnUpdate(const FrameContext& frame) override
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
+            mPipeline.Render(mWorld);
         }
-        return false;
-    }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-};
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
 
-}  // namespace
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+    };
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -345,7 +342,7 @@ int main(int argc, char** argv)
     cfg.window.title  = "OrangeEngine - 10 thirty_seconds_demo";
     cfg.window.width  = 1280;
     cfg.window.height = 720;
-    auto hostResult = AppHost::Create(cfg);
+    auto hostResult   = AppHost::Create(cfg);
     if (hostResult.IsErr())
     {
         std::fprintf(stderr, "AppHost::Create failed (code=%u)\n",
@@ -415,7 +412,7 @@ int main(int argc, char** argv)
 
     // ---- Input ----
     In::InputContext input;
-    auto actionMapResult = In::LoadActionMapFromFile(ORANGE_SAMPLE_10_ACTIONS_PATH);
+    auto             actionMapResult = In::LoadActionMapFromFile(ORANGE_SAMPLE_10_ACTIONS_PATH);
     if (actionMapResult.IsErr())
     {
         std::fprintf(stderr,
@@ -435,7 +432,7 @@ int main(int argc, char** argv)
         Sce::LoadOptions opt{};
         opt.assetRegistry = &assets;
         opt.physicsWorld  = &physWorld;
-        auto loadResult = Sce::Load(ORANGE_SAMPLE_10_SCENE_PATH, world, opt);
+        auto loadResult   = Sce::Load(ORANGE_SAMPLE_10_SCENE_PATH, world, opt);
         if (loadResult.IsErr())
         {
             std::fprintf(stderr,
@@ -450,12 +447,12 @@ int main(int argc, char** argv)
     }
 
     // ---- 反查 entities + 挂 MaterialInstance ----
-    Entity playerEntity   = FindEntityByName(world, "player");
-    Entity goalEntity     = FindEntityByName(world, "goal");
-    Entity groundEntity   = FindEntityByName(world, "ground");
-    Entity platAEntity    = FindEntityByName(world, "platform_a");
-    Entity platBEntity    = FindEntityByName(world, "platform_b");
-    Entity platCEntity    = FindEntityByName(world, "platform_c");
+    Entity playerEntity = FindEntityByName(world, "player");
+    Entity goalEntity   = FindEntityByName(world, "goal");
+    Entity groundEntity = FindEntityByName(world, "ground");
+    Entity platAEntity  = FindEntityByName(world, "platform_a");
+    Entity platBEntity  = FindEntityByName(world, "platform_b");
+    Entity platCEntity  = FindEntityByName(world, "platform_c");
     if (!playerEntity.IsValid() || !goalEntity.IsValid())
     {
         std::fprintf(stderr, "Scene 缺 player / goal entity\n");
@@ -464,7 +461,8 @@ int main(int argc, char** argv)
 
     auto attachMaterial = [&](Entity e, MaterialInstance* mat)
     {
-        if (!e.IsValid()) return;
+        if (!e.IsValid())
+            return;
         if (auto* r = world.GetComponent<RenderableComponent>(e))
         {
             r->materialInstance = mat;
@@ -472,10 +470,10 @@ int main(int argc, char** argv)
     };
     attachMaterial(playerEntity, playerMat.get());
     attachMaterial(groundEntity, groundMat.get());
-    attachMaterial(platAEntity,  platformMat.get());
-    attachMaterial(platBEntity,  platformMat.get());
-    attachMaterial(platCEntity,  platformMat.get());
-    attachMaterial(goalEntity,   goalMat.get());
+    attachMaterial(platAEntity, platformMat.get());
+    attachMaterial(platBEntity, platformMat.get());
+    attachMaterial(platCEntity, platformMat.get());
+    attachMaterial(goalEntity, goalMat.get());
 
     // 平台顶面高光条（仅 Transform + Renderable，不进物理）—— 借 emissive
     // 模板做"踩面提示"，让玩家从相机视角一眼看出哪条边是落脚平面。
@@ -488,15 +486,14 @@ int main(int argc, char** argv)
     // ---- Camera entity（schema v1 暂不把 Camera 当 component） ----
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
         // 50° FOV + 稍高稍近的位置：广角下相机看出来的"平台向左下倾斜"
         // 透视失真在 50° 收敛回正；锚点对着关卡中部偏上 (-0.5, 1.6)，让
         // 起点 (-6,1) 与终点 (3.8, 2.95) 都落在画面里且不挤压。
         Camera cam = Camera::Perspective(glm::radians(50.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(-0.5f, 2.4f, 9.5f),
-                               glm::vec3(-0.5f, 1.6f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        cam.view   = glm::lookAt(glm::vec3(-0.5f, 2.4f, 9.5f),
+                                 glm::vec3(-0.5f, 1.6f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 

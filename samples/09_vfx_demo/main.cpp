@@ -65,9 +65,9 @@
 #include <utility>
 
 #if defined(_WIN32)
-    #define NOMINMAX
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 using namespace Orange::Engine;
@@ -79,7 +79,6 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::IRenderPass;
@@ -94,293 +93,293 @@ using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::RenderGraphBuilder;
 using Orange::Engine::Render::RenderPassContext;
 using Orange::Engine::Render::VfxSystem;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// 立方体几何——与 04_3d_mesh_with_bloom 同布局：6 面 × 4 顶点，每面
-// 自带本地 UV (0,0)..(1,1)。dissolve / emissive 都按 UV 采样阈值 / 强度。
-struct CubeFace
-{
-    std::array<VertexPosition3, 4> positions;
-};
-
-constexpr std::array<CubeFace, 6> kCubeFaces = {{
-    {{{{ 0.5f, -0.5f,  0.5f},
-       { 0.5f, -0.5f, -0.5f},
-       { 0.5f,  0.5f, -0.5f},
-       { 0.5f,  0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f},
-       {-0.5f, -0.5f,  0.5f},
-       {-0.5f,  0.5f,  0.5f},
-       {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f,  0.5f,  0.5f},
-       { 0.5f,  0.5f,  0.5f},
-       { 0.5f,  0.5f, -0.5f},
-       {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f},
-       { 0.5f, -0.5f, -0.5f},
-       { 0.5f, -0.5f,  0.5f},
-       {-0.5f, -0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f,  0.5f},
-       { 0.5f, -0.5f,  0.5f},
-       { 0.5f,  0.5f,  0.5f},
-       {-0.5f,  0.5f,  0.5f}}}},
-    {{{{ 0.5f, -0.5f, -0.5f},
-       {-0.5f, -0.5f, -0.5f},
-       {-0.5f,  0.5f, -0.5f},
-       { 0.5f,  0.5f, -0.5f}}}},
-}};
-
-constexpr std::array<VertexUV2, 4> kFaceUVs = {{
-    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-}};
-
-std::unique_ptr<MeshAsset> MakeCubeMesh()
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24);
-    uvs.reserve(24);
-    indices.reserve(36);
-
-    for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
+    // 立方体几何——与 04_3d_mesh_with_bloom 同布局：6 面 × 4 顶点，每面
+    // 自带本地 UV (0,0)..(1,1)。dissolve / emissive 都按 UV 采样阈值 / 强度。
+    struct CubeFace
     {
-        const std::uint32_t base = face * 4;
-        for (int i = 0; i < 4; ++i)
+        std::array<VertexPosition3, 4> positions;
+    };
+
+    constexpr std::array<CubeFace, 6> kCubeFaces = {{
+        {{{{0.5f, -0.5f, 0.5f},
+           {0.5f, -0.5f, -0.5f},
+           {0.5f, 0.5f, -0.5f},
+           {0.5f, 0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f},
+           {-0.5f, -0.5f, 0.5f},
+           {-0.5f, 0.5f, 0.5f},
+           {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, 0.5f, 0.5f},
+           {0.5f, 0.5f, 0.5f},
+           {0.5f, 0.5f, -0.5f},
+           {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f},
+           {0.5f, -0.5f, -0.5f},
+           {0.5f, -0.5f, 0.5f},
+           {-0.5f, -0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, 0.5f},
+           {0.5f, -0.5f, 0.5f},
+           {0.5f, 0.5f, 0.5f},
+           {-0.5f, 0.5f, 0.5f}}}},
+        {{{{0.5f, -0.5f, -0.5f},
+           {-0.5f, -0.5f, -0.5f},
+           {-0.5f, 0.5f, -0.5f},
+           {0.5f, 0.5f, -0.5f}}}},
+    }};
+
+    constexpr std::array<VertexUV2, 4> kFaceUVs = {{
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {1.0f, 1.0f},
+        {0.0f, 1.0f},
+    }};
+
+    std::unique_ptr<MeshAsset> MakeCubeMesh()
+    {
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+
+        for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
         {
-            positions.push_back(kCubeFaces[face].positions[i]);
-            uvs.push_back(kFaceUVs[i]);
+            const std::uint32_t base = face * 4;
+            for (int i = 0; i < 4; ++i)
+            {
+                positions.push_back(kCubeFaces[face].positions[i]);
+                uvs.push_back(kFaceUVs[i]);
+            }
+            // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
+            // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
         }
-        // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
-        // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// 把"shaders/<x>.spv"相对路径锚定到 .exe 同目录——CWD 与 .exe 目录可
-// 能不一致（典型：从 repo 根 cd 进 /tmp 跑 build/bin/Debug/...exe）。
-// 与 src/render/BuiltinMaterials.cpp 内的 GetExecutableDir 同思路。
-std::filesystem::path GetSampleExecutableDir()
-{
+    // 把"shaders/<x>.spv"相对路径锚定到 .exe 同目录——CWD 与 .exe 目录可
+    // 能不一致（典型：从 repo 根 cd 进 /tmp 跑 build/bin/Debug/...exe）。
+    // 与 src/render/BuiltinMaterials.cpp 内的 GetExecutableDir 同思路。
+    std::filesystem::path GetSampleExecutableDir()
+    {
 #if defined(_WIN32)
-    wchar_t buffer[MAX_PATH];
-    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (len == 0 || len == MAX_PATH)
-    {
-        return std::filesystem::current_path();
-    }
-    return std::filesystem::path(std::wstring(buffer, len)).parent_path();
+        wchar_t     buffer[MAX_PATH];
+        const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        if (len == 0 || len == MAX_PATH)
+        {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path(std::wstring(buffer, len)).parent_path();
 #else
-    return std::filesystem::current_path();
+        return std::filesystem::current_path();
 #endif
-}
-
-std::string ResolveSampleShaderPath(const char* relative)
-{
-    return (GetSampleExecutableDir() / relative).string();
-}
-
-// 自定义 IRenderPass 演示——往 HDR 顶部细带处加性写一条 cyan 光带，
-// 证明 Pipeline::InsertPass 真把 game-side pass 串进帧路径。pass 自管
-// HDR 的 layout 翻转（与 GodRaysPass 同模式：ShaderReadOnly →
-// ColorAttachment → 写一段 → 翻回 ShaderReadOnly）。
-class TintOverlayPass : public IRenderPass
-{
-public:
-    explicit TintOverlayPass(AssetRegistry& assets) : mpAssets(&assets) {}
-
-    const char* Name() const noexcept override { return "tint_overlay"; }
-
-    void Setup(RenderGraphBuilder& builder) override
-    {
-        if (builder.pDevice == nullptr)
-        {
-            return;  // Pipeline 尚未 Initialize 时 graceful 退化
-        }
-        if (mPipeline)
-        {
-            return;  // 已建好，幂等 Setup（resize 不重建——pipeline 与
-                     // viewport 解耦，BeginRendering 时按 ctx.width 写）
-        }
-        auto& rhi = *builder.pDevice;
-
-        // 顶点 shader 复用引擎的 fullscreen.vert.spv（big-triangle）。
-        // 路径锚定到 .exe 目录——CWD 可能与 .exe 目录不一致。
-        const std::string vsPath = ResolveSampleShaderPath("shaders/orange_engine/fullscreen.vert.spv");
-        const std::string fsPath = ResolveSampleShaderPath("shaders/sample_09/tint_overlay.frag.spv");
-
-        auto vsLoad = mpAssets->Load<ShaderAsset>(vsPath);
-        auto fsLoad = mpAssets->Load<ShaderAsset>(fsPath);
-        if (vsLoad.IsErr() || fsLoad.IsErr())
-        {
-            std::fprintf(stderr,
-                         "TintOverlayPass: 加载 SPIR-V 失败 (vs=%d / fs=%d)\n",
-                         vsLoad.IsErr() ? 1 : 0, fsLoad.IsErr() ? 1 : 0);
-            return;
-        }
-        const auto* vs = mpAssets->Get(vsLoad.Value());
-        const auto* fs = mpAssets->Get(fsLoad.Value());
-        if (vs == nullptr || fs == nullptr || vs->Empty() || fs->Empty())
-        {
-            return;
-        }
-
-        Orange::Rhi::ShaderModuleDesc smv{};
-        smv.mStage      = Orange::Rhi::ShaderStage::Vertex;
-        smv.mpCode      = vs->SpirV().data();
-        smv.mCodeSize   = vs->ByteSize();
-        smv.mpDebugName = "sample_09.tint_overlay.vs";
-        mVs = rhi.CreateShaderModule(smv);
-
-        Orange::Rhi::ShaderModuleDesc smf{};
-        smf.mStage      = Orange::Rhi::ShaderStage::Fragment;
-        smf.mpCode      = fs->SpirV().data();
-        smf.mCodeSize   = fs->ByteSize();
-        smf.mpDebugName = "sample_09.tint_overlay.fs";
-        mFs = rhi.CreateShaderModule(smf);
-        if (!mVs || !mFs)
-        {
-            return;
-        }
-
-        Orange::Rhi::GraphicsPipelineDesc pd{};
-        pd.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex,   mVs.get(), "main"});
-        pd.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment, mFs.get(), "main"});
-        pd.mInputAssembly.mTopology       = Orange::Rhi::PrimitiveTopology::TriangleList;
-        pd.mRasterizer.mCullMode          = Orange::Rhi::CullMode::None;
-        pd.mDepthStencil.mDepthTestEnable  = false;
-        pd.mDepthStencil.mDepthWriteEnable = false;
-        // 加性 blend：tint 按 srcAlpha=ONE/dstAlpha=ONE 累加到既有 HDR。
-        Orange::Rhi::ColorBlendAttachmentDesc blend{};
-        blend.mBlendEnable         = true;
-        blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
-        blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
-        blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
-        blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
-        blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
-        blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
-        blend.mColorWriteMask      = Orange::Rhi::ColorWriteMask::All;
-        pd.mColorBlend.mAttachments.push_back(blend);
-        pd.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::RGBA16Float);
-        pd.mpDebugName = "sample_09.tint_overlay";
-        mPipeline = rhi.CreateGraphicsPipeline(pd);
     }
 
-    void Execute(RenderPassContext& ctx) override
+    std::string ResolveSampleShaderPath(const char* relative)
     {
-        if (!mPipeline || ctx.pCmdList == nullptr || ctx.pHdrColorView == nullptr)
+        return (GetSampleExecutableDir() / relative).string();
+    }
+
+    // 自定义 IRenderPass 演示——往 HDR 顶部细带处加性写一条 cyan 光带，
+    // 证明 Pipeline::InsertPass 真把 game-side pass 串进帧路径。pass 自管
+    // HDR 的 layout 翻转（与 GodRaysPass 同模式：ShaderReadOnly →
+    // ColorAttachment → 写一段 → 翻回 ShaderReadOnly）。
+    class TintOverlayPass : public IRenderPass
+    {
+    public:
+        explicit TintOverlayPass(AssetRegistry& assets) : mpAssets(&assets) {}
+
+        const char* Name() const noexcept override { return "tint_overlay"; }
+
+        void Setup(RenderGraphBuilder& builder) override
         {
-            return;
+            if (builder.pDevice == nullptr)
+            {
+                return; // Pipeline 尚未 Initialize 时 graceful 退化
+            }
+            if (mPipeline)
+            {
+                return; // 已建好，幂等 Setup（resize 不重建——pipeline 与
+                        // viewport 解耦，BeginRendering 时按 ctx.width 写）
+            }
+            auto& rhi = *builder.pDevice;
+
+            // 顶点 shader 复用引擎的 fullscreen.vert.spv（big-triangle）。
+            // 路径锚定到 .exe 目录——CWD 可能与 .exe 目录不一致。
+            const std::string vsPath = ResolveSampleShaderPath("shaders/orange_engine/fullscreen.vert.spv");
+            const std::string fsPath = ResolveSampleShaderPath("shaders/sample_09/tint_overlay.frag.spv");
+
+            auto vsLoad = mpAssets->Load<ShaderAsset>(vsPath);
+            auto fsLoad = mpAssets->Load<ShaderAsset>(fsPath);
+            if (vsLoad.IsErr() || fsLoad.IsErr())
+            {
+                std::fprintf(stderr,
+                             "TintOverlayPass: 加载 SPIR-V 失败 (vs=%d / fs=%d)\n",
+                             vsLoad.IsErr() ? 1 : 0, fsLoad.IsErr() ? 1 : 0);
+                return;
+            }
+            const auto* vs = mpAssets->Get(vsLoad.Value());
+            const auto* fs = mpAssets->Get(fsLoad.Value());
+            if (vs == nullptr || fs == nullptr || vs->Empty() || fs->Empty())
+            {
+                return;
+            }
+
+            Orange::Rhi::ShaderModuleDesc smv{};
+            smv.mStage      = Orange::Rhi::ShaderStage::Vertex;
+            smv.mpCode      = vs->SpirV().data();
+            smv.mCodeSize   = vs->ByteSize();
+            smv.mpDebugName = "sample_09.tint_overlay.vs";
+            mVs             = rhi.CreateShaderModule(smv);
+
+            Orange::Rhi::ShaderModuleDesc smf{};
+            smf.mStage      = Orange::Rhi::ShaderStage::Fragment;
+            smf.mpCode      = fs->SpirV().data();
+            smf.mCodeSize   = fs->ByteSize();
+            smf.mpDebugName = "sample_09.tint_overlay.fs";
+            mFs             = rhi.CreateShaderModule(smf);
+            if (!mVs || !mFs)
+            {
+                return;
+            }
+
+            Orange::Rhi::GraphicsPipelineDesc pd{};
+            pd.mShaderStages.push_back({Orange::Rhi::ShaderStage::Vertex, mVs.get(), "main"});
+            pd.mShaderStages.push_back({Orange::Rhi::ShaderStage::Fragment, mFs.get(), "main"});
+            pd.mInputAssembly.mTopology        = Orange::Rhi::PrimitiveTopology::TriangleList;
+            pd.mRasterizer.mCullMode           = Orange::Rhi::CullMode::None;
+            pd.mDepthStencil.mDepthTestEnable  = false;
+            pd.mDepthStencil.mDepthWriteEnable = false;
+            // 加性 blend：tint 按 srcAlpha=ONE/dstAlpha=ONE 累加到既有 HDR。
+            Orange::Rhi::ColorBlendAttachmentDesc blend{};
+            blend.mBlendEnable         = true;
+            blend.mSrcColorBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mDstColorBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mColorBlendOp        = Orange::Rhi::BlendOp::Add;
+            blend.mSrcAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mDstAlphaBlendFactor = Orange::Rhi::BlendFactor::One;
+            blend.mAlphaBlendOp        = Orange::Rhi::BlendOp::Add;
+            blend.mColorWriteMask      = Orange::Rhi::ColorWriteMask::All;
+            pd.mColorBlend.mAttachments.push_back(blend);
+            pd.mRenderTargets.mColorFormats.push_back(Orange::Rhi::TextureFormat::RGBA16Float);
+            pd.mpDebugName = "sample_09.tint_overlay";
+            mPipeline      = rhi.CreateGraphicsPipeline(pd);
         }
-        auto& cmd = *ctx.pCmdList;
-        auto& hdrTex = ctx.pHdrColorView->GetTexture();
 
-        // AfterMainPass 阶段进入时 HDR 在 ShaderReadOnly（粒子 pass 末
-        // 尾翻回的）。pass 翻回 ColorAttachment 写自己的 tint，再翻回
-        // ShaderReadOnly 维持调用方 invariant。
-        cmd.TransitionTexture(hdrTex,
-                              Orange::Rhi::TextureLayout::ShaderReadOnly,
-                              Orange::Rhi::TextureLayout::ColorAttachment);
-
-        Orange::Rhi::ColorAttachment att{};
-        att.mpView   = ctx.pHdrColorView;
-        att.mLoadOp  = Orange::Rhi::LoadOp::Load;
-        att.mStoreOp = Orange::Rhi::StoreOp::Store;
-
-        Orange::Rhi::RenderingDesc rd{};
-        rd.mRenderArea.mWidth  = ctx.width;
-        rd.mRenderArea.mHeight = ctx.height;
-        rd.mColorAttachments.push_back(att);
-        cmd.BeginRendering(rd);
-
-        Orange::Rhi::RHIViewport vp{};
-        vp.mWidth    = static_cast<float>(ctx.width);
-        vp.mHeight   = static_cast<float>(ctx.height);
-        vp.mMinDepth = 0.0f;
-        vp.mMaxDepth = 1.0f;
-        cmd.SetViewport(vp);
-        Orange::Rhi::RHIScissor sc{};
-        sc.mWidth  = ctx.width;
-        sc.mHeight = ctx.height;
-        cmd.SetScissor(sc);
-
-        cmd.BindGraphicsPipeline(*mPipeline);
-        cmd.Draw(3, 1, 0, 0);
-        cmd.EndRendering();
-
-        cmd.TransitionTexture(hdrTex,
-                              Orange::Rhi::TextureLayout::ColorAttachment,
-                              Orange::Rhi::TextureLayout::ShaderReadOnly);
-    }
-
-private:
-    AssetRegistry*                                mpAssets{nullptr};
-    std::unique_ptr<Orange::Rhi::RHIShaderModule> mVs;
-    std::unique_ptr<Orange::Rhi::RHIShaderModule> mFs;
-    std::unique_ptr<Orange::Rhi::RHIPipeline>     mPipeline;
-};
-
-class VfxLayer : public Layer
-{
-public:
-    VfxLayer(Pipeline& pipeline, VfxSystem& vfx, World& world, Entity dissolveCube)
-        : Layer("VfxLayer")
-        , mPipeline(pipeline)
-        , mVfx(vfx)
-        , mWorld(world)
-        , mDissolveCube(dissolveCube)
-    {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        // dissolve cube 慢转一下，让消融纹理在不同朝向上都能看到。
-        if (auto* xf = mWorld.GetComponent<TransformComponent>(mDissolveCube))
+        void Execute(RenderPassContext& ctx) override
         {
-            const float angle = static_cast<float>(frame.time.totalSeconds) * 0.6f;
-            xf->rotation = glm::angleAxis(angle, glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f)));
+            if (!mPipeline || ctx.pCmdList == nullptr || ctx.pHdrColorView == nullptr)
+            {
+                return;
+            }
+            auto& cmd    = *ctx.pCmdList;
+            auto& hdrTex = ctx.pHdrColorView->GetTexture();
+
+            // AfterMainPass 阶段进入时 HDR 在 ShaderReadOnly（粒子 pass 末
+            // 尾翻回的）。pass 翻回 ColorAttachment 写自己的 tint，再翻回
+            // ShaderReadOnly 维持调用方 invariant。
+            cmd.TransitionTexture(hdrTex,
+                                  Orange::Rhi::TextureLayout::ShaderReadOnly,
+                                  Orange::Rhi::TextureLayout::ColorAttachment);
+
+            Orange::Rhi::ColorAttachment att{};
+            att.mpView   = ctx.pHdrColorView;
+            att.mLoadOp  = Orange::Rhi::LoadOp::Load;
+            att.mStoreOp = Orange::Rhi::StoreOp::Store;
+
+            Orange::Rhi::RenderingDesc rd{};
+            rd.mRenderArea.mWidth  = ctx.width;
+            rd.mRenderArea.mHeight = ctx.height;
+            rd.mColorAttachments.push_back(att);
+            cmd.BeginRendering(rd);
+
+            Orange::Rhi::RHIViewport vp{};
+            vp.mWidth    = static_cast<float>(ctx.width);
+            vp.mHeight   = static_cast<float>(ctx.height);
+            vp.mMinDepth = 0.0f;
+            vp.mMaxDepth = 1.0f;
+            cmd.SetViewport(vp);
+            Orange::Rhi::RHIScissor sc{};
+            sc.mWidth  = ctx.width;
+            sc.mHeight = ctx.height;
+            cmd.SetScissor(sc);
+
+            cmd.BindGraphicsPipeline(*mPipeline);
+            cmd.Draw(3, 1, 0, 0);
+            cmd.EndRendering();
+
+            cmd.TransitionTexture(hdrTex,
+                                  Orange::Rhi::TextureLayout::ColorAttachment,
+                                  Orange::Rhi::TextureLayout::ShaderReadOnly);
         }
 
-        // 把 elapsed 时间喂给 Pipeline——dissolve frag 通过 light UBO 的
-        // uFrameInfo.x 读到，自驱 dissolve_t pingpong。
-        mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
+    private:
+        AssetRegistry*                                mpAssets{nullptr};
+        std::unique_ptr<Orange::Rhi::RHIShaderModule> mVs;
+        std::unique_ptr<Orange::Rhi::RHIShaderModule> mFs;
+        std::unique_ptr<Orange::Rhi::RHIPipeline>     mPipeline;
+    };
 
-        // Sim 在 Render 之前推进——VfxSystem 不接管 sim 时序。
-        mVfx.Tick(mWorld, static_cast<float>(frame.time.deltaSeconds));
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
+    class VfxLayer : public Layer
     {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+    public:
+        VfxLayer(Pipeline& pipeline, VfxSystem& vfx, World& world, Entity dissolveCube)
+            : Layer("VfxLayer"), mPipeline(pipeline), mVfx(vfx), mWorld(world), mDissolveCube(dissolveCube)
         {
-            mPipeline.OnResize(resize->width, resize->height);
         }
-        return false;
-    }
 
-private:
-    Pipeline&  mPipeline;
-    VfxSystem& mVfx;
-    World&     mWorld;
-    Entity     mDissolveCube;
-};
+        void OnUpdate(const FrameContext& frame) override
+        {
+            // dissolve cube 慢转一下，让消融纹理在不同朝向上都能看到。
+            if (auto* xf = mWorld.GetComponent<TransformComponent>(mDissolveCube))
+            {
+                const float angle = static_cast<float>(frame.time.totalSeconds) * 0.6f;
+                xf->rotation      = glm::angleAxis(angle, glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f)));
+            }
 
-}  // namespace
+            // 把 elapsed 时间喂给 Pipeline——dissolve frag 通过 light UBO 的
+            // uFrameInfo.x 读到，自驱 dissolve_t pingpong。
+            mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
+
+            // Sim 在 Render 之前推进——VfxSystem 不接管 sim 时序。
+            mVfx.Tick(mWorld, static_cast<float>(frame.time.deltaSeconds));
+            mPipeline.Render(mWorld);
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        Pipeline&  mPipeline;
+        VfxSystem& mVfx;
+        World&     mWorld;
+        Entity     mDissolveCube;
+    };
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -480,17 +479,17 @@ int main(int argc, char** argv)
         desc.lifetimeMin        = 1.4f;
         desc.lifetimeMax        = 2.2f;
         desc.spawnOffsetMin     = {-0.05f, 0.0f};
-        desc.spawnOffsetMax     = { 0.05f, 0.0f};
+        desc.spawnOffsetMax     = {0.05f, 0.0f};
         desc.initialVelocityMin = {-1.2f, 2.6f};
-        desc.initialVelocityMax = { 1.2f, 4.4f};
-        desc.gravity            = { 0.0f, -6.0f};
+        desc.initialVelocityMax = {1.2f, 4.4f};
+        desc.gravity            = {0.0f, -6.0f};
         // Alpha 大幅过 1 让 bloom 拾取；粒子尺寸做大避免 Karis 平均把
         // 单像素 firefly 直接抑掉（bloom downsample 的天然行为）。
-        desc.colorStart         = { 1.0f, 0.85f, 0.35f, 4.0f};
-        desc.colorEnd           = { 0.95f, 0.20f, 0.05f, 0.0f};
-        desc.sizeStart          = 0.18f;
-        desc.sizeEnd            = 0.28f;
-        desc.maxParticles       = 256;
+        desc.colorStart   = {1.0f, 0.85f, 0.35f, 4.0f};
+        desc.colorEnd     = {0.95f, 0.20f, 0.05f, 0.0f};
+        desc.sizeStart    = 0.18f;
+        desc.sizeEnd      = 0.28f;
+        desc.maxParticles = 256;
         world.AddComponent<ParticleEmitterComponent>(emitterEntity, {desc, true});
     }
 
@@ -513,17 +512,16 @@ int main(int argc, char** argv)
 
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 0.5f, 6.5f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 0.5f, 6.5f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 
     Pipeline pipeline;
-    auto initResult = pipeline.Initialize(host->GetWindow(), assets);
+    auto     initResult = pipeline.Initialize(host->GetWindow(), assets);
     if (initResult.IsErr())
     {
         std::fprintf(stderr,

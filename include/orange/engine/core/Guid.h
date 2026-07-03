@@ -25,35 +25,35 @@
 namespace Orange::Engine::Core
 {
 
-struct ORANGE_ENGINE_API Guid
-{
-    std::uint64_t high{0};
-    std::uint64_t low{0};
+    struct ORANGE_ENGINE_API Guid
+    {
+        std::uint64_t high{0};
+        std::uint64_t low{0};
 
-    // 全 0 = 未分配（Invalid）。
-    constexpr bool IsValid() const noexcept { return high != 0 || low != 0; }
+        // 全 0 = 未分配（Invalid）。
+        constexpr bool IsValid() const noexcept { return high != 0 || low != 0; }
 
-    // 产出一个随机的 non-zero 128-bit GUID。线程安全（每线程独立 RNG）。
-    static Guid Generate();
+        // 产出一个随机的 non-zero 128-bit GUID。线程安全（每线程独立 RNG）。
+        static Guid Generate();
 
-    // 32 个十六进制字符（high 16 + low 16，无分隔），与 FromString 互逆。
-    std::string ToString() const;
+        // 32 个十六进制字符（high 16 + low 16，无分隔），与 FromString 互逆。
+        std::string ToString() const;
 
-    // 解析 ToString() 形态（恰好 32 个 hex 字符）。成功写入 out 并返回 true；
-    // 长度 / 字符不合法返回 false（不改 out）。
-    static bool FromString(std::string_view text, Guid& out);
-};
+        // 解析 ToString() 形态（恰好 32 个 hex 字符）。成功写入 out 并返回 true；
+        // 长度 / 字符不合法返回 false（不改 out）。
+        static bool FromString(std::string_view text, Guid& out);
+    };
 
-constexpr bool operator==(const Guid& a, const Guid& b) noexcept
-{
-    return a.high == b.high && a.low == b.low;
-}
+    constexpr bool operator==(const Guid& a, const Guid& b) noexcept
+    {
+        return a.high == b.high && a.low == b.low;
+    }
 
-constexpr bool operator!=(const Guid& a, const Guid& b) noexcept
-{
-    return !(a == b);
-}
+    constexpr bool operator!=(const Guid& a, const Guid& b) noexcept
+    {
+        return !(a == b);
+    }
 
-}  // namespace Orange::Engine::Core
+} // namespace Orange::Engine::Core
 
-#endif  // ORANGE_ENGINE_CORE_GUID_H
+#endif // ORANGE_ENGINE_CORE_GUID_H

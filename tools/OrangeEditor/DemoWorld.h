@@ -29,7 +29,7 @@ void SeedDemoWorld(EditorHost& host);
 // 调用前置：InitializeEditorAssets 必须先跑（assets 内 sphereMeshHandle +
 // pbrShowcaseMaterials 都已 lazy-bake 完成）。直接传 targetWorld 而非通过
 // host.scene.pWorld，便于 caller 在 temp World 内构造再 Save 落盘。
-void SeedPbrShowcaseWorld(Orange::Engine::World& targetWorld,
+void SeedPbrShowcaseWorld(Orange::Engine::World&    targetWorld,
                           const EditorAssetContext& assets);
 
-#endif  // ORANGE_EDITOR_DEMO_WORLD_H
+#endif // ORANGE_EDITOR_DEMO_WORLD_H

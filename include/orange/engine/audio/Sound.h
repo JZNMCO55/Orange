@@ -16,8 +16,8 @@
 namespace Orange::Engine::Audio
 {
 
-using Sound = Orange::Engine::Asset::SoundAsset;
+    using Sound = Orange::Engine::Asset::SoundAsset;
 
-}  // namespace Orange::Engine::Audio
+} // namespace Orange::Engine::Audio
 
-#endif  // ORANGE_ENGINE_AUDIO_SOUND_H
+#endif // ORANGE_ENGINE_AUDIO_SOUND_H

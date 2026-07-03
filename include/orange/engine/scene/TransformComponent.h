@@ -24,13 +24,13 @@
 namespace Orange::Engine::Scene
 {
 
-struct TransformComponent
-{
-    glm::vec3 position{0.0f, 0.0f, 0.0f};
-    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};  // (w, x, y, z) —— glm 默认 (w,x,y,z) 构造序
-    glm::vec3 scale{1.0f, 1.0f, 1.0f};
-};
+    struct TransformComponent
+    {
+        glm::vec3 position{0.0f, 0.0f, 0.0f};
+        glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f}; // (w, x, y, z) —— glm 默认 (w,x,y,z) 构造序
+        glm::vec3 scale{1.0f, 1.0f, 1.0f};
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_TRANSFORM_COMPONENT_H
+#endif // ORANGE_ENGINE_SCENE_TRANSFORM_COMPONENT_H

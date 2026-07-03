@@ -21,21 +21,21 @@ using Rig::RigState;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-3f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-3f)
     {
-        std::fprintf(stderr, "[CameraRigTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
+
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[CameraRigTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
 } // namespace
 
@@ -58,20 +58,20 @@ int main()
 
     // —— shake 只叠视觉偏移，不污染 follow 真相 ——
     {
-        CameraRig2D rig;
+        CameraRig2D       rig;
         Rig::FollowParams fp{};
-        fp.smoothTime = 0.0f;   // snap → follow 恒 == target
+        fp.smoothTime = 0.0f; // snap → follow 恒 == target
         rig.follow.SetParams(fp);
         rig.SnapTo({0.0f, 0.0f});
         Rig::ShakeParams sp{};
         sp.maxTranslation = {0.5f, 0.5f};
-        sp.traumaDecay = 0.0f;  // 不衰减，保持满 trauma
-        sp.maxRoll = 0.0f;
+        sp.traumaDecay    = 0.0f; // 不衰减，保持满 trauma
+        sp.maxRoll        = 0.0f;
         rig.shake.SetParams(sp);
         rig.shake.SetTrauma(1.0f);
 
         const glm::vec2 target{3.0f, 3.0f};
-        float maxDev = 0.0f;
+        float           maxDev = 0.0f;
         for (int i = 0; i < 200; ++i)
         {
             const RigState s = rig.Update(target, 1.0f / 60.0f);
@@ -90,12 +90,13 @@ int main()
 
     // —— zoom 合成 + 转发 ——
     {
-        CameraRig2D rig;
+        CameraRig2D     rig;
         Rig::ZoomParams zp{};
-        zp.smoothTime = 0.0f;   // snap zoom
-        zp.minZoom = 0.1f; zp.maxZoom = 10.0f;
+        zp.smoothTime = 0.0f; // snap zoom
+        zp.minZoom    = 0.1f;
+        zp.maxZoom    = 10.0f;
         rig.zoom.SetParams(zp);
-        rig.SetTargetZoom(3.0f);                 // 便利转发
+        rig.SetTargetZoom(3.0f); // 便利转发
         Check(Near(rig.zoom.GetTargetZoom(), 3.0f), "rig: SetTargetZoom 转发到 zoom 子控制器");
         const RigState s = rig.Update({0.0f, 0.0f}, 1.0f / 60.0f);
         Check(Near(s.zoom, 3.0f), "rig: State.zoom == zoom 子控制器当前值");
@@ -105,7 +106,7 @@ int main()
     // —— AddTrauma 转发 ——
     {
         CameraRig2D rig;
-        rig.AddTrauma(2.0f);  // 超 1 钳制发生在子控制器
+        rig.AddTrauma(2.0f); // 超 1 钳制发生在子控制器
         Check(Near(rig.shake.GetTrauma(), 1.0f), "rig: AddTrauma 转发到 shake 子控制器 (钳到 1)");
     }
 

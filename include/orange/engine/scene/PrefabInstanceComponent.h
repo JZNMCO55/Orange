@@ -54,16 +54,16 @@
 namespace Orange::Engine::Scene
 {
 
-struct PrefabInstanceComponent
-{
-    std::string sourcePrefabPath;
-    Core::Guid  instanceId;
-    bool        isInstanceRoot{false};
-    Core::Guid  templateEntityGuid;  // 对应模板实体的 GUID；空 = 未知 / 旧数据
-    // 显式 override 字段路径集（"componentName/fieldPath" 扁平串）；空 = 无记录。
-    std::vector<std::string> overriddenPaths;
-};
+    struct PrefabInstanceComponent
+    {
+        std::string sourcePrefabPath;
+        Core::Guid  instanceId;
+        bool        isInstanceRoot{false};
+        Core::Guid  templateEntityGuid; // 对应模板实体的 GUID；空 = 未知 / 旧数据
+        // 显式 override 字段路径集（"componentName/fieldPath" 扁平串）；空 = 无记录。
+        std::vector<std::string> overriddenPaths;
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_PREFAB_INSTANCE_COMPONENT_H
+#endif // ORANGE_ENGINE_SCENE_PREFAB_INSTANCE_COMPONENT_H

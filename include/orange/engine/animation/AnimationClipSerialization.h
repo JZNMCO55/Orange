@@ -29,36 +29,36 @@
 namespace Orange::Engine::Animation
 {
 
-// schema 标识（reader 端期望值；major 硬墙、minor 向后兼容）。
-// minor 1（2026-06-02）：新增 events 数组（旧 minor 0 文件无此字段 → 读为空，CanRead
-// 接受 file.minor<=reader.minor）。
-// minor 2（2026-06-11）：新增 TrackValueType::Quat（value.xyzw 解释为四元数，最短弧
-// slerp 采样）——DCC（glTF）node rotation 走 quat 轨道避 gimbal。旧 minor 0/1 文件无
-// Quat 轨道，读路径 graceful（不会出现该 valueType 串）；新写出含 Quat 串的文件被旧
-// minor 1 reader 读时 valueType fail-soft 落 Float（数据仍读出，仅类型语义降级）。
-inline constexpr std::string_view kAnimationClipSchemaNamespace = "animation/Clip";
-inline constexpr std::uint16_t    kAnimationClipSchemaMajor     = 1;
-inline constexpr std::uint16_t    kAnimationClipSchemaMinor     = 2;
+    // schema 标识（reader 端期望值；major 硬墙、minor 向后兼容）。
+    // minor 1（2026-06-02）：新增 events 数组（旧 minor 0 文件无此字段 → 读为空，CanRead
+    // 接受 file.minor<=reader.minor）。
+    // minor 2（2026-06-11）：新增 TrackValueType::Quat（value.xyzw 解释为四元数，最短弧
+    // slerp 采样）——DCC（glTF）node rotation 走 quat 轨道避 gimbal。旧 minor 0/1 文件无
+    // Quat 轨道，读路径 graceful（不会出现该 valueType 串）；新写出含 Quat 串的文件被旧
+    // minor 1 reader 读时 valueType fail-soft 落 Float（数据仍读出，仅类型语义降级）。
+    inline constexpr std::string_view kAnimationClipSchemaNamespace = "animation/Clip";
+    inline constexpr std::uint16_t    kAnimationClipSchemaMajor     = 1;
+    inline constexpr std::uint16_t    kAnimationClipSchemaMinor     = 2;
 
-// enum ↔ 字符串（序列化稳定名；同样供编辑器 combo 标签复用）。
-ORANGE_ENGINE_API std::string_view ToString(TrackValueType type) noexcept;
-ORANGE_ENGINE_API std::string_view ToString(InterpMode mode) noexcept;
-// 解析失败（未知串）返回 false 且不改 out —— 调用方保留预填默认值。
-ORANGE_ENGINE_API bool TrackValueTypeFromString(std::string_view text, TrackValueType& out) noexcept;
-ORANGE_ENGINE_API bool InterpModeFromString(std::string_view text, InterpMode& out) noexcept;
+    // enum ↔ 字符串（序列化稳定名；同样供编辑器 combo 标签复用）。
+    ORANGE_ENGINE_API std::string_view ToString(TrackValueType type) noexcept;
+    ORANGE_ENGINE_API std::string_view ToString(InterpMode mode) noexcept;
+    // 解析失败（未知串）返回 false 且不改 out —— 调用方保留预填默认值。
+    ORANGE_ENGINE_API bool TrackValueTypeFromString(std::string_view text, TrackValueType& out) noexcept;
+    ORANGE_ENGINE_API bool InterpModeFromString(std::string_view text, InterpMode& out) noexcept;
 
-// clip → JSON 文本（含 schemaVersion）。indent<0 输出紧凑无缩进。
-ORANGE_ENGINE_API std::string AnimationClipToJson(const AnimationClip& clip, int indent = 2);
+    // clip → JSON 文本（含 schemaVersion）。indent<0 输出紧凑无缩进。
+    ORANGE_ENGINE_API std::string AnimationClipToJson(const AnimationClip& clip, int indent = 2);
 
-// JSON 文本 → clip。schemaVersion 缺失 / namespace 不匹配 / major 不兼容 →
-// Err(ParseError)。未知 enum 串按 fail-soft（落默认值）不报错。
-ORANGE_ENGINE_API Result<AnimationClip, ParseError> AnimationClipFromJson(std::string_view jsonText);
+    // JSON 文本 → clip。schemaVersion 缺失 / namespace 不匹配 / major 不兼容 →
+    // Err(ParseError)。未知 enum 串按 fail-soft（落默认值）不报错。
+    ORANGE_ENGINE_API Result<AnimationClip, ParseError> AnimationClipFromJson(std::string_view jsonText);
 
-// 文件 I/O 便利封装。
-ORANGE_ENGINE_API Result<void, ResultCode>          SaveAnimationClip(const AnimationClip& clip,
-                                                                      std::string_view path);
-ORANGE_ENGINE_API Result<AnimationClip, ParseError> LoadAnimationClip(std::string_view path);
+    // 文件 I/O 便利封装。
+    ORANGE_ENGINE_API Result<void, ResultCode> SaveAnimationClip(const AnimationClip& clip,
+                                                                 std::string_view     path);
+    ORANGE_ENGINE_API Result<AnimationClip, ParseError> LoadAnimationClip(std::string_view path);
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
-#endif  // ORANGE_ENGINE_ANIMATION_ANIMATION_CLIP_SERIALIZATION_H
+#endif // ORANGE_ENGINE_ANIMATION_ANIMATION_CLIP_SERIALIZATION_H

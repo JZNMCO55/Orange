@@ -52,145 +52,148 @@
 namespace Orange::Engine::Animation
 {
 
-class ORANGE_ENGINE_API ProceduralAnimator final : public IAnimator
-{
-public:
-    // target 可为 nullptr——半构造态，Tick 仍合法（不写 mi），调用方
-    // 之后 SetTarget 把 target 接上即可继续工作；elapsed 不重置。
-    explicit ProceduralAnimator(Render::MaterialInstance* target = nullptr) noexcept;
-    ~ProceduralAnimator() override;
-
-    ProceduralAnimator(const ProceduralAnimator&)            = delete;
-    ProceduralAnimator& operator=(const ProceduralAnimator&) = delete;
-    ProceduralAnimator(ProceduralAnimator&&)                 = delete;
-    ProceduralAnimator& operator=(ProceduralAnimator&&)      = delete;
-
-    // 切换驱动目标。target == nullptr → 暂停写入（Tick 仍推 elapsed）。
-    void                       SetTarget(Render::MaterialInstance* target) noexcept;
-    Render::MaterialInstance*  GetTarget() const noexcept;
-
-    // 注册一条 channel：每 Tick 用 elapsed 调 fn 算出当前值，写到 target
-    // 的 SetUniform(name, value)。T ∈ {float, int32_t, vec2, vec3, vec4, mat4}；
-    // 其它 T 在实例化时直接失败（MaterialInstance 没对应 SetUniform 重载）。
-    //
-    // 同名 channel 重复 Add 不会去重——按"后写覆盖前写"的天然语义即可
-    // （MaterialInstance::SetUniform 自身就这么定）。如果调用方想替换 fn，
-    // 调 ClearChannels 再重 Add。
-    template <typename T>
-    void AddChannel(std::string_view name, std::function<T(float)> fn);
-
-    // 数据驱动 channel（B2.1）：把一条 AnimationTrack 的关键帧采样曲线包成
-    // channel，与上面的 lambda channel **并存于同一容器**（runtime/Tick 零改）。
-    // 按 track.valueType 分派到对应 AddChannel<T>（取采样 vec4 的前 N 维）。
-    // track 按值拷贝进 channel —— 调用方无需保活原 track。Tick 时每帧
-    // SampleTrack(track, elapsed) → SetUniform。这是让 ProceduralAnimator 从
-    // "曲线是 C++ lambda" 升级到 "曲线是可编辑/可序列化数据" 的接入点。
-    void AddDataChannel(std::string_view name, const AnimationTrack& track);
-
-    // 把一整个 AnimationClip 的所有 track 作为数据 channel 注册（B2.2）：每条
-    // track 以其 targetName 为 uniform 名调 AddDataChannel。让**同一份**授权
-    // clip（.anim）既能经 ClipAnimator 驱动 Transform，也能经本路径驱动 material
-    // uniform —— 双后端消费同一数据。clip.loop/duration 不在此消费（ProceduralAnimator
-    // 自管 elapsed、IsFinished 恒 false）；调用方按需自己处理时长语义。
-    void AddClipChannels(const AnimationClip& clip);
-
-    // 清空所有 channel。elapsed 不重置——这是"换皮"路径（同一 procedural
-    // 时序、不同 channel 集），与 SkeletalAnimator::Play 的 fade 心智不同。
-    void ClearChannels() noexcept;
-
-    // IAnimator
-    // 推进 elapsed += max(0, dt)，再扫所有 channel 调 fn(elapsed) → SetUniform。
-    void             Tick(float dt) override;
-    // procedural 没有"自然结束"——永远返回 false。调用方按需自己用 elapsed
-    // 阈值判定。
-    bool             IsFinished() const noexcept override;
-    std::string_view BackendName() const noexcept override;
-
-    // 当前累计时间（秒）。供调试 / 与外部时间源同步。
-    float       ElapsedSeconds() const noexcept;
-    std::size_t ChannelCount() const noexcept;
-
-    // v0.7 c4：列出已注册 channel 的 name 清单。返回值按注册顺序，供
-    // 编辑器 Inspector 的 Procedural Animator channel 配置面板枚举显示。
-    // by-value 返回避免暴露内部 vector<unique_ptr<IChannel>> 布局。
-    std::vector<std::string> ChannelNames() const;
-
-    // v0.7 c4：按 index 拿单条 channel 的 name（编辑器 UI 逐行渲染时
-    // 比 ChannelNames() 整 vector 拷贝更便宜）。越界返回空 string_view；
-    // 返回的 view 与 channel 对象生命周期同步。
-    std::string_view ChannelNameAt(std::size_t index) const noexcept;
-
-    // 把 elapsed 拨回某个值。用于"重启 channel 时序"——典型场景：换状
-    // 态时让 dissolve 从头开始。仅改 elapsed，不影响 channel 列表。
-    void ResetElapsed(float seconds = 0.0f) noexcept;
-
-private:
-    // 类型擦除的 channel：把"时间 → SetUniform"这一对压成一个虚表入口。
-    struct IChannel
+    class ORANGE_ENGINE_API ProceduralAnimator final : public IAnimator
     {
-        std::string name;
-        explicit IChannel(std::string n) : name(std::move(n)) {}
-        virtual ~IChannel() = default;
+    public:
+        // target 可为 nullptr——半构造态，Tick 仍合法（不写 mi），调用方
+        // 之后 SetTarget 把 target 接上即可继续工作；elapsed 不重置。
+        explicit ProceduralAnimator(Render::MaterialInstance* target = nullptr) noexcept;
+        ~ProceduralAnimator() override;
 
-        virtual void Apply(Render::MaterialInstance& mi, float t) const = 0;
+        ProceduralAnimator(const ProceduralAnimator&)            = delete;
+        ProceduralAnimator& operator=(const ProceduralAnimator&) = delete;
+        ProceduralAnimator(ProceduralAnimator&&)                 = delete;
+        ProceduralAnimator& operator=(ProceduralAnimator&&)      = delete;
+
+        // 切换驱动目标。target == nullptr → 暂停写入（Tick 仍推 elapsed）。
+        void                      SetTarget(Render::MaterialInstance* target) noexcept;
+        Render::MaterialInstance* GetTarget() const noexcept;
+
+        // 注册一条 channel：每 Tick 用 elapsed 调 fn 算出当前值，写到 target
+        // 的 SetUniform(name, value)。T ∈ {float, int32_t, vec2, vec3, vec4, mat4}；
+        // 其它 T 在实例化时直接失败（MaterialInstance 没对应 SetUniform 重载）。
+        //
+        // 同名 channel 重复 Add 不会去重——按"后写覆盖前写"的天然语义即可
+        // （MaterialInstance::SetUniform 自身就这么定）。如果调用方想替换 fn，
+        // 调 ClearChannels 再重 Add。
+        template <typename T>
+        void AddChannel(std::string_view name, std::function<T(float)> fn);
+
+        // 数据驱动 channel（B2.1）：把一条 AnimationTrack 的关键帧采样曲线包成
+        // channel，与上面的 lambda channel **并存于同一容器**（runtime/Tick 零改）。
+        // 按 track.valueType 分派到对应 AddChannel<T>（取采样 vec4 的前 N 维）。
+        // track 按值拷贝进 channel —— 调用方无需保活原 track。Tick 时每帧
+        // SampleTrack(track, elapsed) → SetUniform。这是让 ProceduralAnimator 从
+        // "曲线是 C++ lambda" 升级到 "曲线是可编辑/可序列化数据" 的接入点。
+        void AddDataChannel(std::string_view name, const AnimationTrack& track);
+
+        // 把一整个 AnimationClip 的所有 track 作为数据 channel 注册（B2.2）：每条
+        // track 以其 targetName 为 uniform 名调 AddDataChannel。让**同一份**授权
+        // clip（.anim）既能经 ClipAnimator 驱动 Transform，也能经本路径驱动 material
+        // uniform —— 双后端消费同一数据。clip.loop/duration 不在此消费（ProceduralAnimator
+        // 自管 elapsed、IsFinished 恒 false）；调用方按需自己处理时长语义。
+        void AddClipChannels(const AnimationClip& clip);
+
+        // 清空所有 channel。elapsed 不重置——这是"换皮"路径（同一 procedural
+        // 时序、不同 channel 集），与 SkeletalAnimator::Play 的 fade 心智不同。
+        void ClearChannels() noexcept;
+
+        // IAnimator
+        // 推进 elapsed += max(0, dt)，再扫所有 channel 调 fn(elapsed) → SetUniform。
+        void Tick(float dt) override;
+        // procedural 没有"自然结束"——永远返回 false。调用方按需自己用 elapsed
+        // 阈值判定。
+        bool             IsFinished() const noexcept override;
+        std::string_view BackendName() const noexcept override;
+
+        // 当前累计时间（秒）。供调试 / 与外部时间源同步。
+        float       ElapsedSeconds() const noexcept;
+        std::size_t ChannelCount() const noexcept;
+
+        // v0.7 c4：列出已注册 channel 的 name 清单。返回值按注册顺序，供
+        // 编辑器 Inspector 的 Procedural Animator channel 配置面板枚举显示。
+        // by-value 返回避免暴露内部 vector<unique_ptr<IChannel>> 布局。
+        std::vector<std::string> ChannelNames() const;
+
+        // v0.7 c4：按 index 拿单条 channel 的 name（编辑器 UI 逐行渲染时
+        // 比 ChannelNames() 整 vector 拷贝更便宜）。越界返回空 string_view；
+        // 返回的 view 与 channel 对象生命周期同步。
+        std::string_view ChannelNameAt(std::size_t index) const noexcept;
+
+        // 把 elapsed 拨回某个值。用于"重启 channel 时序"——典型场景：换状
+        // 态时让 dissolve 从头开始。仅改 elapsed，不影响 channel 列表。
+        void ResetElapsed(float seconds = 0.0f) noexcept;
+
+    private:
+        // 类型擦除的 channel：把"时间 → SetUniform"这一对压成一个虚表入口。
+        struct IChannel
+        {
+            std::string name;
+            explicit IChannel(std::string n) : name(std::move(n)) {}
+            virtual ~IChannel() = default;
+
+            virtual void Apply(Render::MaterialInstance& mi, float t) const = 0;
+        };
+
+        template <typename T>
+        struct TypedChannel final : IChannel
+        {
+            std::function<T(float)> fn;
+            TypedChannel(std::string n, std::function<T(float)> f)
+                : IChannel(std::move(n)), fn(std::move(f))
+            {
+            }
+            void Apply(Render::MaterialInstance& mi, float t) const override
+            {
+                // 这里依赖 MaterialInstance 提供的 SetUniform 重载集——T 不在
+                // 重载集合里，编译失败。
+                mi.SetUniform(name, fn(t));
+            }
+        };
+
+        Render::MaterialInstance*              mpTarget{nullptr};
+        float                                  mElapsedSeconds{0.0f};
+        std::vector<std::unique_ptr<IChannel>> mChannels;
     };
 
     template <typename T>
-    struct TypedChannel final : IChannel
+    void ProceduralAnimator::AddChannel(std::string_view name, std::function<T(float)> fn)
     {
-        std::function<T(float)> fn;
-        TypedChannel(std::string n, std::function<T(float)> f)
-            : IChannel(std::move(n))
-            , fn(std::move(f))
-        {
-        }
-        void Apply(Render::MaterialInstance& mi, float t) const override
-        {
-            // 这里依赖 MaterialInstance 提供的 SetUniform 重载集——T 不在
-            // 重载集合里，编译失败。
-            mi.SetUniform(name, fn(t));
-        }
-    };
-
-    Render::MaterialInstance*              mpTarget{nullptr};
-    float                                  mElapsedSeconds{0.0f};
-    std::vector<std::unique_ptr<IChannel>> mChannels;
-};
-
-template <typename T>
-void ProceduralAnimator::AddChannel(std::string_view name, std::function<T(float)> fn)
-{
-    mChannels.emplace_back(std::make_unique<TypedChannel<T>>(std::string{name}, std::move(fn)));
-}
-
-inline void ProceduralAnimator::AddDataChannel(std::string_view name, const AnimationTrack& track)
-{
-    const std::string n{name};
-    switch (track.valueType)
-    {
-        case TrackValueType::Float:
-            AddChannel<float>(n, [track](float t) { return SampleTrack(track, t).x; });
-            break;
-        case TrackValueType::Vec2:
-            AddChannel<glm::vec2>(n, [track](float t) { return glm::vec2(SampleTrack(track, t)); });
-            break;
-        case TrackValueType::Vec3:
-            AddChannel<glm::vec3>(n, [track](float t) { return glm::vec3(SampleTrack(track, t)); });
-            break;
-        case TrackValueType::Vec4:
-            AddChannel<glm::vec4>(n, [track](float t) { return SampleTrack(track, t); });
-            break;
+        mChannels.emplace_back(std::make_unique<TypedChannel<T>>(std::string{name}, std::move(fn)));
     }
-}
 
-inline void ProceduralAnimator::AddClipChannels(const AnimationClip& clip)
-{
-    for (const AnimationTrack& track : clip.tracks)
+    inline void ProceduralAnimator::AddDataChannel(std::string_view name, const AnimationTrack& track)
     {
-        AddDataChannel(track.targetName, track);
+        const std::string n{name};
+        switch (track.valueType)
+        {
+            case TrackValueType::Float:
+                AddChannel<float>(n, [track](float t)
+                                  { return SampleTrack(track, t).x; });
+                break;
+            case TrackValueType::Vec2:
+                AddChannel<glm::vec2>(n, [track](float t)
+                                      { return glm::vec2(SampleTrack(track, t)); });
+                break;
+            case TrackValueType::Vec3:
+                AddChannel<glm::vec3>(n, [track](float t)
+                                      { return glm::vec3(SampleTrack(track, t)); });
+                break;
+            case TrackValueType::Vec4:
+                AddChannel<glm::vec4>(n, [track](float t)
+                                      { return SampleTrack(track, t); });
+                break;
+        }
     }
-}
 
-}  // namespace Orange::Engine::Animation
+    inline void ProceduralAnimator::AddClipChannels(const AnimationClip& clip)
+    {
+        for (const AnimationTrack& track : clip.tracks)
+        {
+            AddDataChannel(track.targetName, track);
+        }
+    }
 
-#endif  // ORANGE_ENGINE_ANIMATION_PROCEDURAL_ANIMATOR_H
+} // namespace Orange::Engine::Animation
+
+#endif // ORANGE_ENGINE_ANIMATION_PROCEDURAL_ANIMATOR_H

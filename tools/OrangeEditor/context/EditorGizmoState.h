@@ -30,9 +30,9 @@ struct EditorGizmoState
 {
     enum class Mode : std::uint8_t
     {
-        Translate = 0,  // W
-        Rotate    = 1,  // E
-        Scale     = 2,  // R
+        Translate = 0, // W
+        Rotate    = 1, // E
+        Scale     = 2, // R
     };
 
     enum class Axis : std::uint8_t
@@ -41,7 +41,7 @@ struct EditorGizmoState
         X      = 1,
         Y      = 2,
         Z      = 3,
-        Center = 4,  // Scale gizmo 中心 uniform-scale handle；其他 mode 不用
+        Center = 4, // Scale gizmo 中心 uniform-scale handle；其他 mode 不用
     };
 
     // 变换参考系（gap 报告 §3 P0）。X 键切换。默认 World = 历史行为（零回归）。
@@ -115,17 +115,17 @@ struct EditorGizmoState
     struct GroupDragSnapshot
     {
         Orange::Engine::Entity entity;
-        glm::vec3              position = glm::vec3(0.0f);   // 拖动起点 local position（命令 oldVal）
+        glm::vec3              position = glm::vec3(0.0f); // 拖动起点 local position（命令 oldVal）
         glm::quat              rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
         glm::vec3              scale    = glm::vec3(1.0f);
         // A1 层级：拖动起点的 **world** position。群组 translate 的 groupDelta
         // 是世界位移，follower 新世界 = worldStart + groupDelta，再经各自
         // parentWorld 转 local 写回。root/原点父：worldStart==position → 零回归。
-        glm::vec3              worldStart = glm::vec3(0.0f);
+        glm::vec3 worldStart = glm::vec3(0.0f);
         // A1 层级：拖动起点的 **world** rotation。群组 rotate 的 deltaQ 在世界
         // 空间累乘，follower 新世界 rot = deltaQ * worldRot，再经各自父 worldRot
         // 转 local 写回。root/原点父：worldRot==rotation → 零回归。
-        glm::quat              worldRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::quat worldRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     };
     std::vector<GroupDragSnapshot> dragStartAdditional;
 
@@ -150,7 +150,7 @@ struct EditorGizmoState
     glm::vec3 dragStartMouseScreen = glm::vec3(0.0f, 0.0f, 0.0f);
 
     bool IsDragging() const noexcept { return draggingAxis != Axis::None; }
-    bool IsHovered()  const noexcept { return hoveredAxis  != Axis::None; }
+    bool IsHovered() const noexcept { return hoveredAxis != Axis::None; }
 };
 
-#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_GIZMO_STATE_H
+#endif // ORANGE_EDITOR_CONTEXT_EDITOR_GIZMO_STATE_H

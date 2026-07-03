@@ -37,53 +37,62 @@
 namespace Orange::Engine::Input
 {
 
-enum class ActionType : std::uint8_t
-{
-    Button = 0,  // 唯一支持的类型
-};
-
-enum class ActionState : std::uint8_t
-{
-    Idle     = 0,
-    Pressed  = 1,
-    Held     = 2,
-    Released = 3,
-};
-
-// 单条物理 binding——指向某个具体输入源 + 该源的具体 button id。
-// type 决定 codeOrButton 的解读方式：
-//   * Key      → codeOrButton 与 KeyCode 等价
-//   * Mouse    → 与 MouseButton 等价
-//   * Gamepad  → 与 GamepadButton 等价（当前不真消费）
-struct ORANGE_ENGINE_API ActionBinding
-{
-    enum class Source : std::uint8_t
+    enum class ActionType : std::uint8_t
     {
-        Key     = 0,
-        Mouse   = 1,
-        Gamepad = 2,
+        Button = 0, // 唯一支持的类型
     };
 
-    Source       source{Source::Key};
-    std::int32_t codeOrButton{0};
-};
+    enum class ActionState : std::uint8_t
+    {
+        Idle     = 0,
+        Pressed  = 1,
+        Held     = 2,
+        Released = 3,
+    };
 
-struct ORANGE_ENGINE_API Action
-{
-    std::string                name;
-    ActionType                 type{ActionType::Button};
-    std::vector<ActionBinding> bindings;
+    // 单条物理 binding——指向某个具体输入源 + 该源的具体 button id。
+    // type 决定 codeOrButton 的解读方式：
+    //   * Key      → codeOrButton 与 KeyCode 等价
+    //   * Mouse    → 与 MouseButton 等价
+    //   * Gamepad  → 与 GamepadButton 等价（当前不真消费）
+    struct ORANGE_ENGINE_API ActionBinding
+    {
+        enum class Source : std::uint8_t
+        {
+            Key     = 0,
+            Mouse   = 1,
+            Gamepad = 2,
+        };
 
-    // 当前帧状态——由 InputContext::Tick 推进，调用方读。
-    ActionState                state{ActionState::Idle};
-};
+        Source       source{Source::Key};
+        std::int32_t codeOrButton{0};
+    };
 
-// 便利谓词：状态是否处于 "刚刚发生" 类（Pressed / Released），
-// 或处于 "持续" 类（Held）。游戏代码通常按这两类语义查询。
-inline bool IsTriggered(ActionState s) noexcept { return s == ActionState::Pressed; }
-inline bool IsHeld     (ActionState s) noexcept { return s == ActionState::Pressed || s == ActionState::Held; }
-inline bool IsReleased (ActionState s) noexcept { return s == ActionState::Released; }
+    struct ORANGE_ENGINE_API Action
+    {
+        std::string                name;
+        ActionType                 type{ActionType::Button};
+        std::vector<ActionBinding> bindings;
 
-}  // namespace Orange::Engine::Input
+        // 当前帧状态——由 InputContext::Tick 推进，调用方读。
+        ActionState state{ActionState::Idle};
+    };
 
-#endif  // ORANGE_ENGINE_INPUT_ACTION_H
+    // 便利谓词：状态是否处于 "刚刚发生" 类（Pressed / Released），
+    // 或处于 "持续" 类（Held）。游戏代码通常按这两类语义查询。
+    inline bool IsTriggered(ActionState s) noexcept
+    {
+        return s == ActionState::Pressed;
+    }
+    inline bool IsHeld(ActionState s) noexcept
+    {
+        return s == ActionState::Pressed || s == ActionState::Held;
+    }
+    inline bool IsReleased(ActionState s) noexcept
+    {
+        return s == ActionState::Released;
+    }
+
+} // namespace Orange::Engine::Input
+
+#endif // ORANGE_ENGINE_INPUT_ACTION_H

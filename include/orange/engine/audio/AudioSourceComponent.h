@@ -32,27 +32,27 @@
 namespace Orange::Engine::Audio
 {
 
-struct AudioSourceComponent
-{
-    // 关联的声音资源；Invalid handle 表示"未配音"，PlayMode 应静默跳过。
-    Asset::AssetHandle<Asset::SoundAsset> sound{};
+    struct AudioSourceComponent
+    {
+        // 关联的声音资源；Invalid handle 表示"未配音"，PlayMode 应静默跳过。
+        Asset::AssetHandle<Asset::SoundAsset> sound{};
 
-    // Play Mode 进入瞬间自动 Start。false 时由游戏侧脚本 / 编辑器侧
-    // Inspector 试播按钮显式触发。
-    bool playOnAwake{false};
+        // Play Mode 进入瞬间自动 Start。false 时由游戏侧脚本 / 编辑器侧
+        // Inspector 试播按钮显式触发。
+        bool playOnAwake{false};
 
-    // 是否循环。miniaudio 的 ma_sound_set_looping(true) 路径。
-    bool loop{false};
+        // 是否循环。miniaudio 的 ma_sound_set_looping(true) 路径。
+        bool loop{false};
 
-    // 标量音量乘子（0..1+；超出 1 由 miniaudio 处理，可能 clip，调用方自
-    // 保）。0 表示静音但 instance 仍在跑（节省"播放-暂停-再播"切换成本）。
-    float volume{1.0f};
+        // 标量音量乘子（0..1+；超出 1 由 miniaudio 处理，可能 clip，调用方自
+        // 保）。0 表示静音但 instance 仍在跑（节省"播放-暂停-再播"切换成本）。
+        float volume{1.0f};
 
-    // 音高乘子（1.0 = 原速；0.5 = 半速半音高；2.0 = 双倍）。miniaudio 通过
-    // 重采样实现，pitch != 1 时 CPU 开销略升。
-    float pitch{1.0f};
-};
+        // 音高乘子（1.0 = 原速；0.5 = 半速半音高；2.0 = 双倍）。miniaudio 通过
+        // 重采样实现，pitch != 1 时 CPU 开销略升。
+        float pitch{1.0f};
+    };
 
-}  // namespace Orange::Engine::Audio
+} // namespace Orange::Engine::Audio
 
-#endif  // ORANGE_ENGINE_AUDIO_AUDIO_SOURCE_COMPONENT_H
+#endif // ORANGE_ENGINE_AUDIO_AUDIO_SOURCE_COMPONENT_H

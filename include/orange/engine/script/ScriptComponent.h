@@ -32,48 +32,48 @@
 namespace Orange::Engine::Script
 {
 
-// ScriptComponent 的 schema 版本。序列化语义随 component 自身字段演进，与
-// scene/world 顶层 schema 解耦（顶层只负责 component 的有无与 forward-compat
-// 跳过）。出厂版本冻结：只加新字段 + bump minor，已 shipped 字段语义不改。
-// 1.0 → 1.1：additive 加 fieldOverrides 数组（B1.3）。
-inline const SchemaVersion& ScriptComponentSchemaVersion()
-{
-    static const SchemaVersion kVersion{"component/Script", 1, 1};
-    return kVersion;
-}
+    // ScriptComponent 的 schema 版本。序列化语义随 component 自身字段演进，与
+    // scene/world 顶层 schema 解耦（顶层只负责 component 的有无与 forward-compat
+    // 跳过）。出厂版本冻结：只加新字段 + bump minor，已 shipped 字段语义不改。
+    // 1.0 → 1.1：additive 加 fieldOverrides 数组（B1.3）。
+    inline const SchemaVersion& ScriptComponentSchemaVersion()
+    {
+        static const SchemaVersion kVersion{"component/Script", 1, 1};
+        return kVersion;
+    }
 
-// authored 值的类型标签：值统一以字符串持久化，运行期在 C# 边界按本 tag 解析
-// 后用 System.Reflection 设脚本对象的 public 字段。落盘时存 int 形态（见
-// ScriptFieldOverride::type），读回时校验范围越界 graceful 取 Float。
-enum class ScriptFieldType
-{
-    Float,   // 0
-    Int,     // 1
-    Bool,    // 2
-    String,  // 3
-};
+    // authored 值的类型标签：值统一以字符串持久化，运行期在 C# 边界按本 tag 解析
+    // 后用 System.Reflection 设脚本对象的 public 字段。落盘时存 int 形态（见
+    // ScriptFieldOverride::type），读回时校验范围越界 graceful 取 Float。
+    enum class ScriptFieldType
+    {
+        Float,  // 0
+        Int,    // 1
+        Bool,   // 2
+        String, // 3
+    };
 
-// 一条 tweakable 字段覆盖。value 始终是字符串形态：Float→如 "2.5"、
-// Int→"3"、Bool→"true"/"false"、String→原文。统一字符串的理由：
-//   * 最简 native↔managed ABI（一条 const char* 过界，无需多套 marshal）；
-//   * 零浮点精度坑（不在 C++/C# 两侧各自 parse-print 损精度）；
-//   * JSON 落盘可读、可手改。
-struct ScriptFieldOverride
-{
-    std::string     name;                          // 目标 public 字段名
-    ScriptFieldType type = ScriptFieldType::Float; // authored 值的类型标签
-    std::string     value;                         // 字符串形态的 authored 值
-};
+    // 一条 tweakable 字段覆盖。value 始终是字符串形态：Float→如 "2.5"、
+    // Int→"3"、Bool→"true"/"false"、String→原文。统一字符串的理由：
+    //   * 最简 native↔managed ABI（一条 const char* 过界，无需多套 marshal）；
+    //   * 零浮点精度坑（不在 C++/C# 两侧各自 parse-print 损精度）；
+    //   * JSON 落盘可读、可手改。
+    struct ScriptFieldOverride
+    {
+        std::string     name;                          // 目标 public 字段名
+        ScriptFieldType type = ScriptFieldType::Float; // authored 值的类型标签
+        std::string     value;                         // 字符串形态的 authored 值
+    };
 
-struct ScriptComponent
-{
-    std::string assemblyPath;
-    std::string typeName;
+    struct ScriptComponent
+    {
+        std::string assemblyPath;
+        std::string typeName;
 
-    // Inspector tweakable：authored 值列表。实例化后、OnStart 前注入脚本对象。
-    std::vector<ScriptFieldOverride> fieldOverrides;
-};
+        // Inspector tweakable：authored 值列表。实例化后、OnStart 前注入脚本对象。
+        std::vector<ScriptFieldOverride> fieldOverrides;
+    };
 
-}  // namespace Orange::Engine::Script
+} // namespace Orange::Engine::Script
 
-#endif  // ORANGE_ENGINE_SCRIPT_SCRIPTCOMPONENT_H
+#endif // ORANGE_ENGINE_SCRIPT_SCRIPTCOMPONENT_H

@@ -27,86 +27,84 @@
 namespace Orange::Engine::Test
 {
 
-// ---- 标量 / 向量近似（返回 bool，直接喂 assert）------------------------------
+    // ---- 标量 / 向量近似（返回 bool，直接喂 assert）------------------------------
 
-inline bool FloatEq(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-inline bool InRange(float v, float lo, float hi)
-{
-    return v >= lo && v <= hi;
-}
-
-inline bool Vec3Near(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
-{
-    return FloatEq(a.x, b.x, eps) && FloatEq(a.y, b.y, eps)
-        && FloatEq(a.z, b.z, eps);
-}
-
-inline bool Vec4Near(const glm::vec4& a, const glm::vec4& b, float eps = 1e-4f)
-{
-    return FloatEq(a.x, b.x, eps) && FloatEq(a.y, b.y, eps)
-        && FloatEq(a.z, b.z, eps) && FloatEq(a.w, b.w, eps);
-}
-
-// 四元数近似：含 ±q 同向（q 与 -q 表示同一旋转），故用 |dot| 接近 1 判定。
-inline bool QuatNear(const glm::quat& a, const glm::quat& b, float eps = 1e-4f)
-{
-    const float d = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
-    return std::fabs(d) >= 1.0f - eps;
-}
-
-// ---- EnTT 直读（World::Registry() 暴露底层 registry，见 World.h）-------------
-
-// 统计 world 里挂有组件 T 的实体数（集合大小语义）。
-template <class T>
-std::size_t CountComponents(World& world)
-{
-    std::size_t n = 0;
-    for (auto e : world.Registry().view<T>())
+    inline bool FloatEq(float a, float b, float eps = 1e-4f)
     {
-        (void)e;
-        ++n;
+        return std::fabs(a - b) <= eps;
     }
-    return n;
-}
 
-// entity 上是否挂有组件 T（存在性语义；包装 World::HasComponent 统一入口）。
-template <class T>
-bool HasComponent(World& world, Entity entity)
-{
-    return world.HasComponent<T>(entity);
-}
-
-// "恰好一个"用例：取 world 里第一个挂 T 的实体的组件指针；无则 nullptr。
-template <class T>
-const T* FirstComponent(World& world)
-{
-    auto& reg = world.Registry();
-    for (auto e : reg.view<T>())
+    inline bool InRange(float v, float lo, float hi)
     {
-        return &reg.get<T>(e);
+        return v >= lo && v <= hi;
     }
-    return nullptr;
-}
 
-// 集合包含语义：world 中是否存在某个 T 满足谓词 pred(const T&)。
-template <class T, class Pred>
-bool AnyComponent(World& world, Pred pred)
-{
-    auto& reg = world.Registry();
-    for (auto e : reg.view<T>())
+    inline bool Vec3Near(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
     {
-        if (pred(reg.get<T>(e)))
+        return FloatEq(a.x, b.x, eps) && FloatEq(a.y, b.y, eps) && FloatEq(a.z, b.z, eps);
+    }
+
+    inline bool Vec4Near(const glm::vec4& a, const glm::vec4& b, float eps = 1e-4f)
+    {
+        return FloatEq(a.x, b.x, eps) && FloatEq(a.y, b.y, eps) && FloatEq(a.z, b.z, eps) && FloatEq(a.w, b.w, eps);
+    }
+
+    // 四元数近似：含 ±q 同向（q 与 -q 表示同一旋转），故用 |dot| 接近 1 判定。
+    inline bool QuatNear(const glm::quat& a, const glm::quat& b, float eps = 1e-4f)
+    {
+        const float d = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+        return std::fabs(d) >= 1.0f - eps;
+    }
+
+    // ---- EnTT 直读（World::Registry() 暴露底层 registry，见 World.h）-------------
+
+    // 统计 world 里挂有组件 T 的实体数（集合大小语义）。
+    template <class T>
+    std::size_t CountComponents(World& world)
+    {
+        std::size_t n = 0;
+        for (auto e : world.Registry().view<T>())
         {
-            return true;
+            (void)e;
+            ++n;
         }
+        return n;
     }
-    return false;
-}
 
-}  // namespace Orange::Engine::Test
+    // entity 上是否挂有组件 T（存在性语义；包装 World::HasComponent 统一入口）。
+    template <class T>
+    bool HasComponent(World& world, Entity entity)
+    {
+        return world.HasComponent<T>(entity);
+    }
 
-#endif  // ORANGE_ENGINE_TESTS_SUPPORT_ENGINE_TEST_ASSERT_H
+    // "恰好一个"用例：取 world 里第一个挂 T 的实体的组件指针；无则 nullptr。
+    template <class T>
+    const T* FirstComponent(World& world)
+    {
+        auto& reg = world.Registry();
+        for (auto e : reg.view<T>())
+        {
+            return &reg.get<T>(e);
+        }
+        return nullptr;
+    }
+
+    // 集合包含语义：world 中是否存在某个 T 满足谓词 pred(const T&)。
+    template <class T, class Pred>
+    bool AnyComponent(World& world, Pred pred)
+    {
+        auto& reg = world.Registry();
+        for (auto e : reg.view<T>())
+        {
+            if (pred(reg.get<T>(e)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+} // namespace Orange::Engine::Test
+
+#endif // ORANGE_ENGINE_TESTS_SUPPORT_ENGINE_TEST_ASSERT_H

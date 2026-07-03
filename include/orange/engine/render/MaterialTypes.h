@@ -23,36 +23,36 @@
 namespace Orange::Engine::Render
 {
 
-// uniform 标量 / 向量 / 矩阵 类型枚举。Mat4 是当前最大宽度（16 floats =
-// 64 字节），MaterialInstance 内部 uniform value 存储按 64 字节定长
-// 对齐——加新类型时如果突破这个上限要同步调整 PIMPL 里的 blob 容量。
-enum class MaterialUniformType : std::uint8_t
-{
-    Float,
-    Vec2,
-    Vec3,
-    Vec4,
-    Int,
-    Mat4,
-};
+    // uniform 标量 / 向量 / 矩阵 类型枚举。Mat4 是当前最大宽度（16 floats =
+    // 64 字节），MaterialInstance 内部 uniform value 存储按 64 字节定长
+    // 对齐——加新类型时如果突破这个上限要同步调整 PIMPL 里的 blob 容量。
+    enum class MaterialUniformType : std::uint8_t
+    {
+        Float,
+        Vec2,
+        Vec3,
+        Vec4,
+        Int,
+        Mat4,
+    };
 
-// 单个 uniform 的声明记录。`name` 与 GLSL / SPIR-V 中的 uniform 标识符
-// 一一对应；MaterialInstance::SetUniform 按 name 查找。
-struct MaterialUniformDesc
-{
-    std::string         name;
-    MaterialUniformType type{MaterialUniformType::Float};
-};
+    // 单个 uniform 的声明记录。`name` 与 GLSL / SPIR-V 中的 uniform 标识符
+    // 一一对应；MaterialInstance::SetUniform 按 name 查找。
+    struct MaterialUniformDesc
+    {
+        std::string         name;
+        MaterialUniformType type{MaterialUniformType::Float};
+    };
 
-// 单个 texture 绑定槽的声明记录。`binding` 是 descriptor-set binding
-// index（直接喂给 OrangeRender 的 descriptor
-// 路径），`name` 仅作为 debug / 序列化用途。
-struct MaterialTextureSlotDesc
-{
-    std::uint32_t binding{0};
-    std::string   name;
-};
+    // 单个 texture 绑定槽的声明记录。`binding` 是 descriptor-set binding
+    // index（直接喂给 OrangeRender 的 descriptor
+    // 路径），`name` 仅作为 debug / 序列化用途。
+    struct MaterialTextureSlotDesc
+    {
+        std::uint32_t binding{0};
+        std::string   name;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_MATERIAL_TYPES_H
+#endif // ORANGE_ENGINE_RENDER_MATERIAL_TYPES_H

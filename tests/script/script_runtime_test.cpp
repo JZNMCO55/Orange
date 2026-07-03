@@ -56,16 +56,16 @@ namespace Script = Orange::Engine::Script;
 namespace
 {
 
-const std::string kFixturesAssembly = ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH;
-const std::string kFixturesRuntimeConfig = ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH;
-const std::string kSdkAssembly = ORANGE_SCRIPT_SDK_ASSEMBLY_PATH;
+    const std::string kFixturesAssembly      = ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH;
+    const std::string kFixturesRuntimeConfig = ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH;
+    const std::string kSdkAssembly           = ORANGE_SCRIPT_SDK_ASSEMBLY_PATH;
 
-bool ApproxEqual(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool ApproxEqual(float a, float b, float eps = 1e-4f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -75,9 +75,9 @@ int main()
     std::fprintf(stdout, "  sdk assembly      = %s\n", kSdkAssembly.c_str());
 
     // --- 建 World + 实体（带 Transform 在原点） ---
-    World world;
+    World  world;
     Entity entity = world.CreateEntity();
-    world.AddComponent(entity, TransformComponent{});  // position 默认 (0,0,0)
+    world.AddComponent(entity, TransformComponent{}); // position 默认 (0,0,0)
     assert(world.IsValid(entity));
     {
         const auto* t = world.GetComponent<TransformComponent>(entity);
@@ -88,7 +88,7 @@ int main()
     // --- 未初始化时 CreateInstance → NotInitialized（不启动运行时） ---
     {
         ScriptRuntime cold;
-        auto r = cold.CreateInstance(kFixturesAssembly, "OrangeFixtures.Mover, ScriptFixtures", entity);
+        auto          r = cold.CreateInstance(kFixturesAssembly, "OrangeFixtures.Mover, ScriptFixtures", entity);
         assert(r.IsErr());
         assert(r.Error() == ResultCode::NotInitialized);
         std::fprintf(stdout, "  [PASS] create before init -> NotInitialized\n");
@@ -138,11 +138,11 @@ int main()
         if (!ApproxEqual(t->position.y, 100.0f))
         {
             std::fprintf(stderr,
-                "  [FAIL] OnStart 后 position.y = %f（期望 100，证明 OnStart 调一次）\n",
-                t->position.y);
+                         "  [FAIL] OnStart 后 position.y = %f（期望 100，证明 OnStart 调一次）\n",
+                         t->position.y);
             return 1;
         }
-        assert(ApproxEqual(t->position.x, 0.0f));  // 还没 OnUpdate
+        assert(ApproxEqual(t->position.x, 0.0f)); // 还没 OnUpdate
         std::fprintf(stdout, "  [PASS] OnStart called once: position.y = %f\n", t->position.y);
     }
 
@@ -156,7 +156,7 @@ int main()
         if (!ApproxEqual(t->position.x, 1.0f))
         {
             std::fprintf(stderr,
-                "  [FAIL] OnUpdate 后 position.x = %f（期望 1.0）\n", t->position.x);
+                         "  [FAIL] OnUpdate 后 position.x = %f（期望 1.0）\n", t->position.x);
             return 1;
         }
         std::fprintf(stdout, "  [PASS] OnUpdate moved entity: position.x = %f\n", t->position.x);
@@ -176,14 +176,14 @@ int main()
     // World 已 SetCurrentWorld(&world)，绑定函数在该 World 上 decode + 校验。
     {
         const std::uint64_t validScriptId = Script::EncodeEntityId(entity);
-        const std::uint64_t fakeScriptId = 0xDEADBEEFull;       // 不存在的实体
-        const std::uint64_t noneScriptId = 0;                   // id 0 = none
+        const std::uint64_t fakeScriptId  = 0xDEADBEEFull; // 不存在的实体
+        const std::uint64_t noneScriptId  = 0;             // id 0 = none
 
         assert(Script::Orange_Entity_IsValid(validScriptId) == 1);
         assert(Script::Orange_Entity_IsValid(fakeScriptId) == 0);
         assert(Script::Orange_Entity_IsValid(noneScriptId) == 0);
         std::fprintf(stdout,
-            "  [PASS] Entity_IsValid: valid=1, fake=0, none=0\n");
+                     "  [PASS] Entity_IsValid: valid=1, fake=0, none=0\n");
 
         // Entity codec round-trip：encode → decode 回到同一实体。
         const Entity decoded = Script::DecodeEntityId(validScriptId);
@@ -192,14 +192,14 @@ int main()
         std::fprintf(stdout, "  [PASS] Entity id codec round-trip\n");
 
         // 销毁实体后 IsValid 应转 false（端到端等价验证）。
-        World probe;
+        World  probe;
         Entity victim = probe.CreateEntity();
         rt.SetCurrentWorld(&probe);
         const std::uint64_t victimId = Script::EncodeEntityId(victim);
         assert(Script::Orange_Entity_IsValid(victimId) == 1);
         probe.DestroyEntity(victim);
         assert(Script::Orange_Entity_IsValid(victimId) == 0);
-        rt.SetCurrentWorld(&world);  // 还原
+        rt.SetCurrentWorld(&world); // 还原
         std::fprintf(stdout, "  [PASS] Entity_IsValid false after destroy\n");
     }
 
@@ -213,8 +213,8 @@ int main()
         if (!ApproxEqual(t->position.z, 7.0f))
         {
             std::fprintf(stderr,
-                "  [FAIL] OnDestroy 后 position.z = %f（期望 7，证明 OnDestroy 调一次）\n",
-                t->position.z);
+                         "  [FAIL] OnDestroy 后 position.z = %f（期望 7，证明 OnDestroy 调一次）\n",
+                         t->position.z);
             return 1;
         }
         // x 仍是 2（OnDestroy 不动 x），y 仍是 100 —— 各回调互不串扰。

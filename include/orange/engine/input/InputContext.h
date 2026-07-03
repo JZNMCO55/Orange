@@ -41,67 +41,67 @@
 namespace Orange::Engine::Input
 {
 
-class ORANGE_ENGINE_API InputContext
-{
-public:
-    InputContext() = default;
-    ~InputContext() = default;
+    class ORANGE_ENGINE_API InputContext
+    {
+    public:
+        InputContext()  = default;
+        ~InputContext() = default;
 
-    InputContext(const InputContext&)            = delete;
-    InputContext& operator=(const InputContext&) = delete;
+        InputContext(const InputContext&)            = delete;
+        InputContext& operator=(const InputContext&) = delete;
 
-    InputContext(InputContext&&) noexcept            = default;
-    InputContext& operator=(InputContext&&) noexcept = default;
+        InputContext(InputContext&&) noexcept            = default;
+        InputContext& operator=(InputContext&&) noexcept = default;
 
-    // 把一个 map 压入栈顶；map 按值存（context 持所有权）。
-    // 返回新栈顶索引（可用于诊断 / 与 Pop 配对）。
-    std::size_t Push(ActionMap map);
+        // 把一个 map 压入栈顶；map 按值存（context 持所有权）。
+        // 返回新栈顶索引（可用于诊断 / 与 Pop 配对）。
+        std::size_t Push(ActionMap map);
 
-    // 弹出栈顶；空栈时 no-op。返回当前栈大小（弹后）。
-    std::size_t Pop();
+        // 弹出栈顶；空栈时 no-op。返回当前栈大小（弹后）。
+        std::size_t Pop();
 
-    // 当前栈顶 / 栈大小。空栈时 Top 返 nullptr。
-    ActionMap*       Top() noexcept;
-    const ActionMap* Top() const noexcept;
-    std::size_t      Depth() const noexcept;
-    bool             Empty() const noexcept;
+        // 当前栈顶 / 栈大小。空栈时 Top 返 nullptr。
+        ActionMap*       Top() noexcept;
+        const ActionMap* Top() const noexcept;
+        std::size_t      Depth() const noexcept;
+        bool             Empty() const noexcept;
 
-    // 帧边界——把栈顶 map 的状态推进一步。其它 map 不动（被冻结）。
-    void BeginFrame() noexcept;
+        // 帧边界——把栈顶 map 的状态推进一步。其它 map 不动（被冻结）。
+        void BeginFrame() noexcept;
 
-    // 物理事件 → 仅栈顶 map。空栈时 no-op，避免事件丢到无处可去。
-    void PostKeyEvent(KeyCode key, bool isDown);
-    void PostMouseButton(MouseButton button, bool isDown);
+        // 物理事件 → 仅栈顶 map。空栈时 no-op，避免事件丢到无处可去。
+        void PostKeyEvent(KeyCode key, bool isDown);
+        void PostMouseButton(MouseButton button, bool isDown);
 
-private:
-    std::vector<ActionMap> mStack;
-};
+    private:
+        std::vector<ActionMap> mStack;
+    };
 
-// JSON 加载：从已经解析好的 reader 读 actions[] 数组，构造 ActionMap。
-//
-// Schema（v1）：
-//     {
-//       "schema_version": { "namespace": "input.action_map", "major": 1, "minor": 0 },
-//       "actions": [
-//         { "name": "jump",  "bindings": ["key:Space"] },
-//         { "name": "shoot", "bindings": ["mouse:Left", "key:LeftControl"] }
-//       ]
-//     }
-//
-// binding 字符串语法：
-//     "key:<KeyCode 名>"        e.g. "key:Space" / "key:W"
-//     "mouse:<Left|Right|Middle>"
-//     "gamepad:<South|East|...>"   (当前不消费，留 hook)
-//
-// 失败码：InvalidArgument（schema_version 缺失 / actions 不是数组 /
-// binding 字符串解析失败）。
-ORANGE_ENGINE_API
-Result<ActionMap, ResultCode> LoadActionMapFromJson(const JsonReader& reader);
+    // JSON 加载：从已经解析好的 reader 读 actions[] 数组，构造 ActionMap。
+    //
+    // Schema（v1）：
+    //     {
+    //       "schema_version": { "namespace": "input.action_map", "major": 1, "minor": 0 },
+    //       "actions": [
+    //         { "name": "jump",  "bindings": ["key:Space"] },
+    //         { "name": "shoot", "bindings": ["mouse:Left", "key:LeftControl"] }
+    //       ]
+    //     }
+    //
+    // binding 字符串语法：
+    //     "key:<KeyCode 名>"        e.g. "key:Space" / "key:W"
+    //     "mouse:<Left|Right|Middle>"
+    //     "gamepad:<South|East|...>"   (当前不消费，留 hook)
+    //
+    // 失败码：InvalidArgument（schema_version 缺失 / actions 不是数组 /
+    // binding 字符串解析失败）。
+    ORANGE_ENGINE_API
+    Result<ActionMap, ResultCode> LoadActionMapFromJson(const JsonReader& reader);
 
-// 直接从磁盘 .json 文件加载。文件不存在 / 解析失败 → 错误码透传。
-ORANGE_ENGINE_API
-Result<ActionMap, ResultCode> LoadActionMapFromFile(std::string_view path);
+    // 直接从磁盘 .json 文件加载。文件不存在 / 解析失败 → 错误码透传。
+    ORANGE_ENGINE_API
+    Result<ActionMap, ResultCode> LoadActionMapFromFile(std::string_view path);
 
-}  // namespace Orange::Engine::Input
+} // namespace Orange::Engine::Input
 
-#endif  // ORANGE_ENGINE_INPUT_INPUT_CONTEXT_H
+#endif // ORANGE_ENGINE_INPUT_INPUT_CONTEXT_H

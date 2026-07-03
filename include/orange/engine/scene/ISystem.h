@@ -24,35 +24,35 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Scene
 {
 
-class ISystem
-{
-public:
-    virtual ~ISystem() = default;
+    class ISystem
+    {
+    public:
+        virtual ~ISystem() = default;
 
-    ISystem() = default;
-    ISystem(const ISystem&) = delete;
-    ISystem& operator=(const ISystem&) = delete;
-    ISystem(ISystem&&) noexcept = delete;
-    ISystem& operator=(ISystem&&) noexcept = delete;
+        ISystem()                              = default;
+        ISystem(const ISystem&)                = delete;
+        ISystem& operator=(const ISystem&)     = delete;
+        ISystem(ISystem&&) noexcept            = delete;
+        ISystem& operator=(ISystem&&) noexcept = delete;
 
-    // 对应 World 把自己挂载 / 卸载 system 的两个生命周期点。允许子
-    // 类在 OnAttach 里登记 component 索引、预分配缓存；OnDetach 释
-    // 放本 system 自己持有的资源（不应反向卸载 World 上的 component）。
-    virtual void OnAttach(::Orange::Engine::World& /*world*/) {}
-    virtual void OnDetach(::Orange::Engine::World& /*world*/) {}
+        // 对应 World 把自己挂载 / 卸载 system 的两个生命周期点。允许子
+        // 类在 OnAttach 里登记 component 索引、预分配缓存；OnDetach 释
+        // 放本 system 自己持有的资源（不应反向卸载 World 上的 component）。
+        virtual void OnAttach(::Orange::Engine::World& /*world*/) {}
+        virtual void OnDetach(::Orange::Engine::World& /*world*/) {}
 
-    // 每帧调用一次。`world` 是被本 system 操作的目标；`frame` 是只
-    // 读快照（dt / 帧序号 / framebuffer 尺寸等）。
-    virtual void OnUpdate(::Orange::Engine::World& world,
-                          const FrameContext& frame) = 0;
-};
+        // 每帧调用一次。`world` 是被本 system 操作的目标；`frame` 是只
+        // 读快照（dt / 帧序号 / framebuffer 尺寸等）。
+        virtual void OnUpdate(::Orange::Engine::World& world,
+                              const FrameContext&      frame) = 0;
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_I_SYSTEM_H
+#endif // ORANGE_ENGINE_SCENE_I_SYSTEM_H

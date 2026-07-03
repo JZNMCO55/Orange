@@ -40,133 +40,133 @@
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
-}  // namespace Orange::Engine::Asset
+    class AssetRegistry;
+} // namespace Orange::Engine::Asset
 
 namespace Orange::Engine::Render
 {
 
-// 自定义 shader 模板的描述符。所有字段都必须由调用方显式声明——引擎
-// 不在运行时反射 SPIR-V 自动推导 uniform / texture 槽。
-struct ShaderTemplateDesc
-{
-    // 模板的唯一名。FindTemplate / CreateInstance 按这个 name 索引；
-    // 重名注册返回 ResultCode::AlreadyExists，表内不被覆盖。
-    std::string name;
+    // 自定义 shader 模板的描述符。所有字段都必须由调用方显式声明——引擎
+    // 不在运行时反射 SPIR-V 自动推导 uniform / texture 槽。
+    struct ShaderTemplateDesc
+    {
+        // 模板的唯一名。FindTemplate / CreateInstance 按这个 name 索引；
+        // 重名注册返回 ResultCode::AlreadyExists，表内不被覆盖。
+        std::string name;
 
-    // 顶点 / 片段 SPIR-V 路径。可以是绝对路径或工作目录相对路径——
-    // RegisterTemplate 直接拿原 path 喂 AssetRegistry::Load<ShaderAsset>，
-    // dedup 也按这个 path 做（内置 toon/rim_light 走 .exe-相对路径解析，
-    // 自定义 shader 由调用方自己决定路径风格）。
-    std::filesystem::path vertexSpirvPath;
-    std::filesystem::path fragmentSpirvPath;
+        // 顶点 / 片段 SPIR-V 路径。可以是绝对路径或工作目录相对路径——
+        // RegisterTemplate 直接拿原 path 喂 AssetRegistry::Load<ShaderAsset>，
+        // dedup 也按这个 path 做（内置 toon/rim_light 走 .exe-相对路径解析，
+        // 自定义 shader 由调用方自己决定路径风格）。
+        std::filesystem::path vertexSpirvPath;
+        std::filesystem::path fragmentSpirvPath;
 
-    // uniform / texture 槽布局，与 GLSL push_constant block 字段或
-    // descriptor binding 一一对应。
-    std::vector<MaterialUniformDesc>     uniforms;
-    std::vector<MaterialTextureSlotDesc> textureSlots;
+        // uniform / texture 槽布局，与 GLSL push_constant block 字段或
+        // descriptor binding 一一对应。
+        std::vector<MaterialUniformDesc>     uniforms;
+        std::vector<MaterialTextureSlotDesc> textureSlots;
 
-    // 顶点 shader 是否消费 tangent 属性（location 3）。仅切线空间法线贴图的
-    // 模板（如 pbr）需置 true，使 Pipeline::FillVertexInputLayout 声明 location 3
-    // tangent 输入；其余模板默认 false。RegisterTemplate 把它原样拷进
-    // Material.usesTangentVertex（与 BuiltinMaterials 内置路径对齐——数据驱动
-    // 模板 JSON 若漏写此字段，pbr.vert.spv 会出现 location 3 layout 失配的
-    // validation error）。
-    bool usesTangentVertex{false};
-};
+        // 顶点 shader 是否消费 tangent 属性（location 3）。仅切线空间法线贴图的
+        // 模板（如 pbr）需置 true，使 Pipeline::FillVertexInputLayout 声明 location 3
+        // tangent 输入；其余模板默认 false。RegisterTemplate 把它原样拷进
+        // Material.usesTangentVertex（与 BuiltinMaterials 内置路径对齐——数据驱动
+        // 模板 JSON 若漏写此字段，pbr.vert.spv 会出现 location 3 layout 失配的
+        // validation error）。
+        bool usesTangentVertex{false};
+    };
 
-class ORANGE_ENGINE_API MaterialSystem
-{
-public:
-    // 构造时绑定 registry 引用并存为成员；registry 必须活到 system 析构。
-    explicit MaterialSystem(Asset::AssetRegistry& registry);
-    ~MaterialSystem();
+    class ORANGE_ENGINE_API MaterialSystem
+    {
+    public:
+        // 构造时绑定 registry 引用并存为成员；registry 必须活到 system 析构。
+        explicit MaterialSystem(Asset::AssetRegistry& registry);
+        ~MaterialSystem();
 
-    MaterialSystem(const MaterialSystem&)            = delete;
-    MaterialSystem& operator=(const MaterialSystem&) = delete;
+        MaterialSystem(const MaterialSystem&)            = delete;
+        MaterialSystem& operator=(const MaterialSystem&) = delete;
 
-    MaterialSystem(MaterialSystem&&) noexcept;
-    MaterialSystem& operator=(MaterialSystem&&) noexcept;
+        MaterialSystem(MaterialSystem&&) noexcept;
+        MaterialSystem& operator=(MaterialSystem&&) noexcept;
 
-    // 注册一个新的模板。
-    //   * desc.name 重复 → 返回 AlreadyExists，表内不被覆盖；
-    //   * SPIR-V 加载失败 → 仍把 template 落地（uniform / texture 描述符
-    //     保留，shader handle 用无效 handle，与 BuiltinMaterials::LoadToon
-    //     失败语义一致）但返回 IoError，调用方可以 ignore；
-    //   * 成功 → 返回 Ok，FindTemplate 后续命中。
-    Result<void, ResultCode> RegisterTemplate(const ShaderTemplateDesc& desc);
+        // 注册一个新的模板。
+        //   * desc.name 重复 → 返回 AlreadyExists，表内不被覆盖；
+        //   * SPIR-V 加载失败 → 仍把 template 落地（uniform / texture 描述符
+        //     保留，shader handle 用无效 handle，与 BuiltinMaterials::LoadToon
+        //     失败语义一致）但返回 IoError，调用方可以 ignore；
+        //   * 成功 → 返回 Ok，FindTemplate 后续命中。
+        Result<void, ResultCode> RegisterTemplate(const ShaderTemplateDesc& desc);
 
-    // 按名取得模板。未注册 → 返回 nullptr。返回的指针在 system 活着期间
-    // 稳定（unordered_map 节点存储不会因 rehash 失效）。
-    const Material* FindTemplate(std::string_view name) const noexcept;
+        // 按名取得模板。未注册 → 返回 nullptr。返回的指针在 system 活着期间
+        // 稳定（unordered_map 节点存储不会因 rehash 失效）。
+        const Material* FindTemplate(std::string_view name) const noexcept;
 
-    // 创建一个绑定到指定模板的 MaterialInstance。
-    //   * name 未注册 → 返回 nullptr；
-    //   * 成功 → 返回拥有式 unique_ptr，调用方负责让它在 system 之前析构
-    //     （MaterialInstance 析构不依赖 Material，但仍是良好实践）。
-    std::unique_ptr<MaterialInstance> CreateInstance(std::string_view name);
+        // 创建一个绑定到指定模板的 MaterialInstance。
+        //   * name 未注册 → 返回 nullptr；
+        //   * 成功 → 返回拥有式 unique_ptr，调用方负责让它在 system 之前析构
+        //     （MaterialInstance 析构不依赖 Material，但仍是良好实践）。
+        std::unique_ptr<MaterialInstance> CreateInstance(std::string_view name);
 
-    std::size_t TemplateCount() const noexcept;
+        std::size_t TemplateCount() const noexcept;
 
-    // 枚举所有已注册模板的名字。返回拷贝（值类型 vector<string>），调用
-    // 方持有的副本不会被后续 RegisterTemplate 的 rehash 影响——string_view
-    // 版本曾被考虑但因 unordered_map 的 key 在 rehash 时仍可能让 view
-    // 悬挂被 reject，0.x 阶段优先稳。
-    //
-    // 顺序未定义：内部是 unordered_map，遍历顺序与插入顺序无关。调用方
-    // （如 Editor Inspector Combo 控件）若需稳定顺序，自行 sort。
-    //
-    // 不在帧内热路径——本接口典型消费方是 Editor UI / 资源序列化，与
-    // FindTemplate / CreateInstance 同节奏；不强调零分配。
-    std::vector<std::string> GetTemplateNames() const;
+        // 枚举所有已注册模板的名字。返回拷贝（值类型 vector<string>），调用
+        // 方持有的副本不会被后续 RegisterTemplate 的 rehash 影响——string_view
+        // 版本曾被考虑但因 unordered_map 的 key 在 rehash 时仍可能让 view
+        // 悬挂被 reject，0.x 阶段优先稳。
+        //
+        // 顺序未定义：内部是 unordered_map，遍历顺序与插入顺序无关。调用方
+        // （如 Editor Inspector Combo 控件）若需稳定顺序，自行 sort。
+        //
+        // 不在帧内热路径——本接口典型消费方是 Editor UI / 资源序列化，与
+        // FindTemplate / CreateInstance 同节奏；不强调零分配。
+        std::vector<std::string> GetTemplateNames() const;
 
-    // 便利方法：把引擎内置 6 个模板（textured / toon / rim_light /
-    // dissolve / emissive / pbr）通过 BuiltinMaterials::Load* 工厂注册进
-    // system。SPIR-V 路径走 .exe-相对（GetExecutableDir + shaders/
-    // orange_engine/<name>.spv），失败仍把 template 落地但 shader handle
-    // 为无效——与 RegisterTemplate 半残语义一致。
-    //
-    // 重复调用幂等吗？不——第二次会因为 name 已存在返回 AlreadyExists。
-    // 调用方按需在 system 生命周期早期调一次。
-    Result<void, ResultCode> RegisterBuiltins();
+        // 便利方法：把引擎内置 6 个模板（textured / toon / rim_light /
+        // dissolve / emissive / pbr）通过 BuiltinMaterials::Load* 工厂注册进
+        // system。SPIR-V 路径走 .exe-相对（GetExecutableDir + shaders/
+        // orange_engine/<name>.spv），失败仍把 template 落地但 shader handle
+        // 为无效——与 RegisterTemplate 半残语义一致。
+        //
+        // 重复调用幂等吗？不——第二次会因为 name 已存在返回 AlreadyExists。
+        // 调用方按需在 system 生命周期早期调一次。
+        Result<void, ResultCode> RegisterBuiltins();
 
-    // 扫描目录下所有 `*.template.json` 文件，按 schema v1.0 解析成
-    // `ShaderTemplateDesc` 后调 `RegisterTemplate` 注册。schema:
-    //
-    //   {
-    //     "schemaVersion": {"namespace":"render/shader_template","major":1,"minor":2},
-    //     "templateName":  "<unique-name>",
-    //     "vertexSpv":     "<path-to-vert.spv>",
-    //     "fragmentSpv":   "<path-to-frag.spv>",
-    //     "uniforms":      [{"name":"<uniform-name>","type":"mat4|vec2|vec3|vec4|float|int"}],
-    //     "textureSlots":  [{"binding":<uint>,"name":"<slot-name>"}],
-    //     "usesTangentVertex": <bool, 可选, 默认 false>   // minor 2 起；pbr 须 true
-    //   }
-    //
-    // minor 向后兼容（additive）：解析只校验 major==1，旧 minor 文件省略
-    // usesTangentVertex 时取默认 false。
-    //
-    // SPIR-V 路径解析约定（T1 阶段）：相对路径以 GetExecutableDir() 为
-    // 基（与 BuiltinMaterials 同款），让 .template.json 写 "shaders/
-    // orange_engine/<name>.spv" 即指向 build/bin/$<CONFIG>/shaders/
-    // orange_engine/ 下的 CMake 编译产物。绝对路径原样喂 AssetRegistry。
-    //
-    // 失败容忍：单个文件解析失败 / schema 不兼容 / RegisterTemplate 返
-    // 错 → log + 继续扫下一个文件；不中断整目录扫描。返回值反映"是否
-    // 全部成功"——失败时调用方可按 log 排查具体哪条出问题。
-    //
-    // 目录不存在 → 返回 NotFound + log warning；不阻塞调用方（编辑器
-    // 仍可启动，只是 Material Combo 无候选）。
-    //
-    // 不在帧内热路径 —— 启动期一次性调用，文件 IO + JSON 解析允许阻塞。
-    Result<void, ResultCode> RegisterTemplatesFromDirectory(
-        const std::filesystem::path& dir);
+        // 扫描目录下所有 `*.template.json` 文件，按 schema v1.0 解析成
+        // `ShaderTemplateDesc` 后调 `RegisterTemplate` 注册。schema:
+        //
+        //   {
+        //     "schemaVersion": {"namespace":"render/shader_template","major":1,"minor":2},
+        //     "templateName":  "<unique-name>",
+        //     "vertexSpv":     "<path-to-vert.spv>",
+        //     "fragmentSpv":   "<path-to-frag.spv>",
+        //     "uniforms":      [{"name":"<uniform-name>","type":"mat4|vec2|vec3|vec4|float|int"}],
+        //     "textureSlots":  [{"binding":<uint>,"name":"<slot-name>"}],
+        //     "usesTangentVertex": <bool, 可选, 默认 false>   // minor 2 起；pbr 须 true
+        //   }
+        //
+        // minor 向后兼容（additive）：解析只校验 major==1，旧 minor 文件省略
+        // usesTangentVertex 时取默认 false。
+        //
+        // SPIR-V 路径解析约定（T1 阶段）：相对路径以 GetExecutableDir() 为
+        // 基（与 BuiltinMaterials 同款），让 .template.json 写 "shaders/
+        // orange_engine/<name>.spv" 即指向 build/bin/$<CONFIG>/shaders/
+        // orange_engine/ 下的 CMake 编译产物。绝对路径原样喂 AssetRegistry。
+        //
+        // 失败容忍：单个文件解析失败 / schema 不兼容 / RegisterTemplate 返
+        // 错 → log + 继续扫下一个文件；不中断整目录扫描。返回值反映"是否
+        // 全部成功"——失败时调用方可按 log 排查具体哪条出问题。
+        //
+        // 目录不存在 → 返回 NotFound + log warning；不阻塞调用方（编辑器
+        // 仍可启动，只是 Material Combo 无候选）。
+        //
+        // 不在帧内热路径 —— 启动期一次性调用，文件 IO + JSON 解析允许阻塞。
+        Result<void, ResultCode> RegisterTemplatesFromDirectory(
+            const std::filesystem::path& dir);
 
-private:
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
-};
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_MATERIAL_SYSTEM_H
+#endif // ORANGE_ENGINE_RENDER_MATERIAL_SYSTEM_H

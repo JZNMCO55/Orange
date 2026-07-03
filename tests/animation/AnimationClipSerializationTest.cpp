@@ -17,24 +17,24 @@ namespace Anim = ::Orange::Engine::Animation;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-5f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool Near(float a, float b, float eps = 1e-5f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-Anim::Keyframe MakeKey(float time, glm::vec4 value, Anim::InterpMode interp,
-                       glm::vec2 inT = glm::vec2(0.0f), glm::vec2 outT = glm::vec2(0.0f))
-{
-    Anim::Keyframe k;
-    k.time       = time;
-    k.value      = value;
-    k.interp     = interp;
-    k.inTangent  = inT;
-    k.outTangent = outT;
-    return k;
-}
+    Anim::Keyframe MakeKey(float time, glm::vec4 value, Anim::InterpMode interp,
+                           glm::vec2 inT = glm::vec2(0.0f), glm::vec2 outT = glm::vec2(0.0f))
+    {
+        Anim::Keyframe k;
+        k.time       = time;
+        k.value      = value;
+        k.interp     = interp;
+        k.inTangent  = inT;
+        k.outTangent = outT;
+        return k;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -109,7 +109,7 @@ int main()
     // ===== 3. 空 clip round-trip（0 track）=====
     {
         Anim::AnimationClip empty;
-        empty.name = "empty";
+        empty.name  = "empty";
         auto parsed = Anim::AnimationClipFromJson(Anim::AnimationClipToJson(empty));
         assert(parsed.IsOk() && parsed.Value().tracks.empty() && "空 clip 也应 round-trip");
         std::fprintf(stdout, "  [PASS] 空 clip round-trip\n");
@@ -168,8 +168,8 @@ int main()
         t.keys.push_back(MakeKey(1.0f, glm::vec4(2, 0, 0, 0), InterpMode::Linear));
         clip.tracks.push_back(t);
 
-        const std::string path = "clip_serialization_test_tmp.anim";
-        auto saveRes = Anim::SaveAnimationClip(clip, path);
+        const std::string path    = "clip_serialization_test_tmp.anim";
+        auto              saveRes = Anim::SaveAnimationClip(clip, path);
         assert(saveRes.IsOk() && "Save 应成功");
 
         auto loadRes = Anim::LoadAnimationClip(path);

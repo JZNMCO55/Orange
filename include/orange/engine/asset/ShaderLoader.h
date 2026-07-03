@@ -33,20 +33,20 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API ShaderLoader final : public IAssetLoader<ShaderAsset>
-{
-public:
-    static constexpr std::uint32_t kSpirVMagic = 0x07230203U;
+    class ORANGE_ENGINE_API ShaderLoader final : public IAssetLoader<ShaderAsset>
+    {
+    public:
+        static constexpr std::uint32_t kSpirVMagic = 0x07230203U;
 
-    ShaderLoader() = default;
-    ~ShaderLoader() override = default;
+        ShaderLoader()           = default;
+        ~ShaderLoader() override = default;
 
-    Result<std::unique_ptr<ShaderAsset>, ResultCode> Load(std::string_view path) override;
+        Result<std::unique_ptr<ShaderAsset>, ResultCode> Load(std::string_view path) override;
 
-    // 暴露给单元测试的纯函数；不依赖磁盘 IO，方便覆盖各种后缀。
-    static ShaderStage StageFromPath(std::string_view path) noexcept;
-};
+        // 暴露给单元测试的纯函数；不依赖磁盘 IO，方便覆盖各种后缀。
+        static ShaderStage StageFromPath(std::string_view path) noexcept;
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_SHADER_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_SHADER_LOADER_H

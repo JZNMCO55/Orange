@@ -32,70 +32,70 @@
 namespace Orange::Engine::Animation
 {
 
-class ORANGE_ENGINE_API BlendSpaceAnimator final : public IAnimator
-{
-public:
-    // space 按值拷入并被 animator 拥有（自包含、可独立测试，与 ClipAnimator 按值持
-    // clip 同一心智）。target 可为 nullptr——半构造态，Tick 仍推进 phase、只是不写
-    // 任何字段，之后 SetTarget 接上即可。构造时若 target 非空，捕获其当前姿势作
-    // baseline（各样本 clip 未驱动字段的基值）。
-    explicit BlendSpaceAnimator(BlendSpace1D space = {}, Scene::TransformComponent* target = nullptr);
-    ~BlendSpaceAnimator() override;
+    class ORANGE_ENGINE_API BlendSpaceAnimator final : public IAnimator
+    {
+    public:
+        // space 按值拷入并被 animator 拥有（自包含、可独立测试，与 ClipAnimator 按值持
+        // clip 同一心智）。target 可为 nullptr——半构造态，Tick 仍推进 phase、只是不写
+        // 任何字段，之后 SetTarget 接上即可。构造时若 target 非空，捕获其当前姿势作
+        // baseline（各样本 clip 未驱动字段的基值）。
+        explicit BlendSpaceAnimator(BlendSpace1D space = {}, Scene::TransformComponent* target = nullptr);
+        ~BlendSpaceAnimator() override;
 
-    BlendSpaceAnimator(const BlendSpaceAnimator&)            = delete;
-    BlendSpaceAnimator& operator=(const BlendSpaceAnimator&) = delete;
-    BlendSpaceAnimator(BlendSpaceAnimator&&)                 = delete;
-    BlendSpaceAnimator& operator=(BlendSpaceAnimator&&)      = delete;
+        BlendSpaceAnimator(const BlendSpaceAnimator&)            = delete;
+        BlendSpaceAnimator& operator=(const BlendSpaceAnimator&) = delete;
+        BlendSpaceAnimator(BlendSpaceAnimator&&)                 = delete;
+        BlendSpaceAnimator& operator=(BlendSpaceAnimator&&)      = delete;
 
-    // 切换写目标。非 nullptr 时捕获其当前姿势作 baseline（供样本 clip 未驱动的字段）。
-    // nullptr → 暂停写入（Tick 仍推进 phase）。
-    void                       SetTarget(Scene::TransformComponent* target);
-    Scene::TransformComponent* GetTarget() const noexcept;
+        // 切换写目标。非 nullptr 时捕获其当前姿势作 baseline（供样本 clip 未驱动的字段）。
+        // nullptr → 暂停写入（Tick 仍推进 phase）。
+        void                       SetTarget(Scene::TransformComponent* target);
+        Scene::TransformComponent* GetTarget() const noexcept;
 
-    // 混合参数（连续输入，如角色 speed）。落在样本参数轴外 → clamp 到端点样本。
-    void  SetBlendParameter(float x) noexcept;
-    float BlendParameter() const noexcept;
+        // 混合参数（连续输入，如角色 speed）。落在样本参数轴外 → clamp 到端点样本。
+        void  SetBlendParameter(float x) noexcept;
+        float BlendParameter() const noexcept;
 
-    // 归一化步态相位 [0,1)（loop）/ [0,1]（非 loop）。由 Tick 推进；只读访问器供调试 /
-    // 编辑器进度显示。
-    float Phase() const noexcept;
+        // 归一化步态相位 [0,1)（loop）/ [0,1]（非 loop）。由 Tick 推进；只读访问器供调试 /
+        // 编辑器进度显示。
+        float Phase() const noexcept;
 
-    // 播放速率倍数（默认 1.0）。Tick 按 dt*speed 推进 phase。
-    void  SetSpeed(float speed) noexcept;
-    float Speed() const noexcept;
+        // 播放速率倍数（默认 1.0）。Tick 按 dt*speed 推进 phase。
+        void  SetSpeed(float speed) noexcept;
+        float Speed() const noexcept;
 
-    // 循环：loop（默认）→ phase 到 1 回卷到 0，IsFinished 永远 false；非 loop → phase
-    // clamp 到 [0,1]，到 1 视作 finished。
-    void  SetLoop(bool loop) noexcept;
-    bool  IsLooping() const noexcept;
+        // 循环：loop（默认）→ phase 到 1 回卷到 0，IsFinished 永远 false；非 loop → phase
+        // clamp 到 [0,1]，到 1 视作 finished。
+        void SetLoop(bool loop) noexcept;
+        bool IsLooping() const noexcept;
 
-    // 播放控制。Play/Pause 只切 mPlaying（Tick 据此决定是否推进）。Stop 复位 phase=0。
-    void  Play() noexcept;
-    void  Pause() noexcept;
-    void  Stop() noexcept;
-    bool  IsPlaying() const noexcept;
+        // 播放控制。Play/Pause 只切 mPlaying（Tick 据此决定是否推进）。Stop 复位 phase=0。
+        void Play() noexcept;
+        void Pause() noexcept;
+        void Stop() noexcept;
+        bool IsPlaying() const noexcept;
 
-    const BlendSpace1D& Space() const noexcept;
+        const BlendSpace1D& Space() const noexcept;
 
-    // IAnimator
-    // mPlaying 且 dt>=0 时：按当前参数的混合时长归一化推进 phase，再对 blend space
-    // 求值写 target。否则不动。
-    void             Tick(float dt) override;
-    // loop → 永远 false；非 loop → phase >= 1。
-    bool             IsFinished() const noexcept override;
-    std::string_view BackendName() const noexcept override;
+        // IAnimator
+        // mPlaying 且 dt>=0 时：按当前参数的混合时长归一化推进 phase，再对 blend space
+        // 求值写 target。否则不动。
+        void Tick(float dt) override;
+        // loop → 永远 false；非 loop → phase >= 1。
+        bool             IsFinished() const noexcept override;
+        std::string_view BackendName() const noexcept override;
 
-private:
-    BlendSpace1D               mSpace;
-    Scene::TransformComponent* mpTarget{nullptr};
-    Scene::TransformComponent  mBaseline;  // SetTarget 时捕获（未驱动字段基值）；无 target 用默认
-    float                      mBlendParam{0.0f};
-    float                      mPhase{0.0f};
-    float                      mSpeed{1.0f};
-    bool                       mPlaying{true};
-    bool                       mLoop{true};
-};
+    private:
+        BlendSpace1D               mSpace;
+        Scene::TransformComponent* mpTarget{nullptr};
+        Scene::TransformComponent  mBaseline; // SetTarget 时捕获（未驱动字段基值）；无 target 用默认
+        float                      mBlendParam{0.0f};
+        float                      mPhase{0.0f};
+        float                      mSpeed{1.0f};
+        bool                       mPlaying{true};
+        bool                       mLoop{true};
+    };
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
-#endif  // ORANGE_ENGINE_ANIMATION_BLEND_SPACE_ANIMATOR_H
+#endif // ORANGE_ENGINE_ANIMATION_BLEND_SPACE_ANIMATOR_H

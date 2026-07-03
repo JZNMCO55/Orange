@@ -66,79 +66,86 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> pos = {
-        {-0.6f, -0.6f, 0.0f}, {0.6f, -0.6f, 0.0f},
-        {0.6f, 0.6f, 0.0f},   {-0.6f, 0.6f, 0.0f},
-    };
-    std::vector<VertexUV2> uv = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<VertexNormal3> nrm = {
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};  // CCW 正面朝向(对齐 Pipeline FrontFace::CCW)
-    return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
-                                       std::move(nrm), std::move(idx));
-}
-
-// 渲染一帧并返回中心像素 luminance。withEnv: 是否挂 EnvironmentComponent(空 cubemap)。
-float RenderAndReadCenter(Pipeline& pipeline, AssetHandle<MeshAsset> mesh,
-                          MaterialInstance* inst, bool withEnv, const char* label,
-                          bool withLight = true)
-{
-    World world;
-    Entity camE = world.CreateEntity();
-    // 透视相机 + 明确 lookAt:eye(0,0,3) 看向原点 → quad/sphere 都正面框入,
-    // 消除 ortho 近/远裁剪 + 取景歧义。
-    Camera cam = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
-    cam.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
-                           glm::vec3(0.0f, 0.0f, 0.0f),
-                           glm::vec3(0.0f, 1.0f, 0.0f));
-    world.AddComponent(camE, cam);
-
-    if (withLight)
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
     {
-        Entity lightE = world.CreateEntity();
-        TransformComponent lt{};
-        lt.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, 0.0f, -1.0f));
-        world.AddComponent(lightE, lt);
-        world.AddComponent(lightE, DirectionalLight{});
+        std::vector<VertexPosition3> pos = {
+            {-0.6f, -0.6f, 0.0f},
+            {0.6f, -0.6f, 0.0f},
+            {0.6f, 0.6f, 0.0f},
+            {-0.6f, 0.6f, 0.0f},
+        };
+        std::vector<VertexUV2> uv = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<VertexNormal3> nrm = {
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3}; // CCW 正面朝向(对齐 Pipeline FrontFace::CCW)
+        return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
+                                           std::move(nrm), std::move(idx));
     }
 
-    if (withEnv)
+    // 渲染一帧并返回中心像素 luminance。withEnv: 是否挂 EnvironmentComponent(空 cubemap)。
+    float RenderAndReadCenter(Pipeline& pipeline, AssetHandle<MeshAsset> mesh,
+                              MaterialInstance* inst, bool withEnv, const char* label,
+                              bool withLight = true)
     {
-        Entity envE = world.CreateEntity();
-        EnvironmentComponent env{};  // cubemap 空（与 pbr_showcase 场景一致）
-        env.intensity = 1.2f;
-        world.AddComponent(envE, env);
+        World  world;
+        Entity camE = world.CreateEntity();
+        // 透视相机 + 明确 lookAt:eye(0,0,3) 看向原点 → quad/sphere 都正面框入,
+        // 消除 ortho 近/远裁剪 + 取景歧义。
+        Camera cam = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        cam.view   = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                 glm::vec3(0.0f, 0.0f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
+        world.AddComponent(camE, cam);
+
+        if (withLight)
+        {
+            Entity             lightE = world.CreateEntity();
+            TransformComponent lt{};
+            lt.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, 0.0f, -1.0f));
+            world.AddComponent(lightE, lt);
+            world.AddComponent(lightE, DirectionalLight{});
+        }
+
+        if (withEnv)
+        {
+            Entity               envE = world.CreateEntity();
+            EnvironmentComponent env{}; // cubemap 空（与 pbr_showcase 场景一致）
+            env.intensity = 1.2f;
+            world.AddComponent(envE, env);
+        }
+
+        Entity e = world.CreateEntity();
+        world.AddComponent(e, TransformComponent{});
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = inst;
+        world.AddComponent(e, rc);
+
+        pipeline.Render(world);
+
+        float       px[4] = {0, 0, 0, 0};
+        const bool  ok    = pipeline.DebugReadbackPixel(128, 128, px);
+        const float lum   = px[0] + px[1] + px[2];
+        std::fprintf(stderr, "  [%s] 中心 RGBA=(%.3f,%.3f,%.3f,%.3f) lum=%.3f ok=%d\n",
+                     label, px[0], px[1], px[2], px[3], lum, ok ? 1 : 0);
+        // 回归门:编辑器模板路径(RegisterTemplatesFromDirectory)下 PBR 必须被画
+        // 出来且被打亮。若 pbr 模板缺 set1/tangent 声明(GAP-2026-05-25 回归),
+        // shader 采样未绑 descriptor → 管线非法 → 中心读到背景/黑 → lum 极低。
+        assert(ok && "DebugReadbackPixel 失败");
+        assert(lum > 0.05f && "PBR(编辑器模板路径)渲染全黑 —— set1/tangent 未绑回归");
+        return lum;
     }
 
-    Entity e = world.CreateEntity();
-    world.AddComponent(e, TransformComponent{});
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = inst;
-    world.AddComponent(e, rc);
-
-    pipeline.Render(world);
-
-    float px[4] = {0, 0, 0, 0};
-    const bool ok = pipeline.DebugReadbackPixel(128, 128, px);
-    const float lum = px[0] + px[1] + px[2];
-    std::fprintf(stderr, "  [%s] 中心 RGBA=(%.3f,%.3f,%.3f,%.3f) lum=%.3f ok=%d\n",
-                 label, px[0], px[1], px[2], px[3], lum, ok ? 1 : 0);
-    // 回归门:编辑器模板路径(RegisterTemplatesFromDirectory)下 PBR 必须被画
-    // 出来且被打亮。若 pbr 模板缺 set1/tangent 声明(GAP-2026-05-25 回归),
-    // shader 采样未绑 descriptor → 管线非法 → 中心读到背景/黑 → lum 极低。
-    assert(ok && "DebugReadbackPixel 失败");
-    assert(lum > 0.05f && "PBR(编辑器模板路径)渲染全黑 —— set1/tangent 未绑回归");
-    return lum;
-}
-
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -147,7 +154,7 @@ int main()
     Orange::Renderer::RenderDeviceDesc deviceDesc{};
     deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
     deviceDesc.mEnableValidation = true;
-    auto pDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
+    auto pDevice                 = Orange::Renderer::RenderDevice::Create(deviceDesc);
     if (!pDevice)
     {
         std::fprintf(stderr, "[PbrSceneBlackReproTest] 无 Vulkan,跳过\n");
@@ -173,7 +180,8 @@ int main()
         if (rb.IsErr())
         {
             std::fprintf(stderr, "[PbrSceneBlackReproTest] RegisterTemplatesFromDirectory 失败 "
-                                 "(code=%u) dir=%s\n", static_cast<unsigned>(rb.Error()),
+                                 "(code=%u) dir=%s\n",
+                         static_cast<unsigned>(rb.Error()),
                          tdir.string().c_str());
             return 1;
         }
@@ -186,7 +194,7 @@ int main()
     auto warm = matSys.CreateInstance("pbr");
     assert(warm);
     warm->SetUniform("uBaseColor", glm::vec4(1.0f, 0.78f, 0.34f, 1.0f));
-    warm->SetUniform("uMRA", glm::vec4(0.0f, 0.1f, 1.0f, 0.0f));  // metallic=0 roughness=0.1 ao=1
+    warm->SetUniform("uMRA", glm::vec4(0.0f, 0.1f, 1.0f, 0.0f)); // metallic=0 roughness=0.1 ao=1
 
     Pipeline pipeline;
     {
@@ -206,7 +214,7 @@ int main()
 
     // 对照:无 Environment vs 有 Environment(空 cubemap)。
     const float lumNoEnv   = RenderAndReadCenter(pipeline, mesh, warm.get(), false, "warm-noEnv");
-    const float lumWithEnv = RenderAndReadCenter(pipeline, mesh, warm.get(), true,  "warm-withEnv");
+    const float lumWithEnv = RenderAndReadCenter(pipeline, mesh, warm.get(), true, "warm-withEnv");
 
     std::fprintf(stderr, "  => lumNoEnv=%.3f lumWithEnv=%.3f\n", lumNoEnv, lumWithEnv);
 
@@ -248,7 +256,10 @@ int main()
     }
 
     pipeline.Shutdown();
-    if (Orange::Failed(pDevice->WaitIdle())) { return 1; }
+    if (Orange::Failed(pDevice->WaitIdle()))
+    {
+        return 1;
+    }
 
     std::fprintf(stdout, "[PbrSceneBlackReproTest] done\n");
     return 0;

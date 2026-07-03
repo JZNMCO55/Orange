@@ -24,28 +24,28 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Scene
 {
-class WorldPartition;
+    class WorldPartition;
 }
 
 namespace Orange::Engine::Physics
 {
 
-class PhysicsWorld;
+    class PhysicsWorld;
 
-// 遍历 `world` 内所有挂 RigidBodyComponent 的 entity，根据 entity 所在
-// layer 的 visible 状态调 `physics.SetBodyEnabled(handle, visible)`。
-// RigidBodyComponent.handle 必须 valid（未注册 / 注册失败的 entity 默
-// 认 enabled=true，不受本函数影响）。
-ORANGE_ENGINE_API void ApplyLayerVisibility(
-    const ::Orange::Engine::World&                  world,
-    const ::Orange::Engine::Scene::WorldPartition&  partition,
-    PhysicsWorld&                                   physics);
+    // 遍历 `world` 内所有挂 RigidBodyComponent 的 entity，根据 entity 所在
+    // layer 的 visible 状态调 `physics.SetBodyEnabled(handle, visible)`。
+    // RigidBodyComponent.handle 必须 valid（未注册 / 注册失败的 entity 默
+    // 认 enabled=true，不受本函数影响）。
+    ORANGE_ENGINE_API void ApplyLayerVisibility(
+        const ::Orange::Engine::World&                 world,
+        const ::Orange::Engine::Scene::WorldPartition& partition,
+        PhysicsWorld&                                  physics);
 
-}  // namespace Orange::Engine::Physics
+} // namespace Orange::Engine::Physics
 
-#endif  // ORANGE_ENGINE_PHYSICS_LAYER_VISIBILITY_SYNC_H
+#endif // ORANGE_ENGINE_PHYSICS_LAYER_VISIBILITY_SYNC_H

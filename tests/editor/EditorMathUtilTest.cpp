@@ -11,8 +11,11 @@ using Orange::Editor::Util::SnapToStep;
 
 namespace
 {
-bool Eq(float a, float b) { return std::fabs(a - b) < 1e-5f; }
-}
+    bool Eq(float a, float b)
+    {
+        return std::fabs(a - b) < 1e-5f;
+    }
+} // namespace
 
 int main()
 {

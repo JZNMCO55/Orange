@@ -69,7 +69,6 @@ using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
@@ -81,164 +80,212 @@ using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
 using Orange::Engine::Render::SpotLight;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// UV-sphere（lat/lon），与 13_pbr_direct 同构造。ComputeSmoothNormals 得平滑法线。
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    // UV-sphere（lat/lon），与 13_pbr_direct 同构造。ComputeSmoothNormals 得平滑法线。
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            const float u    = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi  = u * glm::two_pi<float>();
-            positions.push_back({radius * sinT * std::cos(phi),
-                                 radius * cosT,
-                                 radius * sinT * std::sin(phi)});
-            uvs.push_back({u, 1.0f - v});
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
+            {
+                const float u   = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi = u * glm::two_pi<float>();
+                positions.push_back({radius * sinT * std::cos(phi),
+                                     radius * cosT,
+                                     radius * sinT * std::sin(phi)});
+                uvs.push_back({u, 1.0f - v});
+            }
         }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            const std::uint32_t a = i * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-// XZ 平面地面 quad（法线 +Y 朝上）。winding 取从上方看 CCW，对齐 Pipeline
-// FrontFace::CCW + CullMode::Back，使顶面为正面（俯视相机可见）。
-std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
-{
-    const float h = halfExtent;
-    std::vector<VertexPosition3> positions = {
-        {-h, 0.0f,  h}, { h, 0.0f,  h}, { h, 0.0f, -h}, {-h, 0.0f, -h},
+    // XZ 平面地面 quad（法线 +Y 朝上）。winding 取从上方看 CCW，对齐 Pipeline
+    // FrontFace::CCW + CullMode::Back，使顶面为正面（俯视相机可见）。
+    std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
+    {
+        const float                  h         = halfExtent;
+        std::vector<VertexPosition3> positions = {
+            {-h, 0.0f, h},
+            {h, 0.0f, h},
+            {h, 0.0f, -h},
+            {-h, 0.0f, -h},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles(); // winding → +Y 法线
+        return pMesh;
+    }
+
+    class RenderLayer : public Layer
+    {
+    public:
+        // capturePath 非空时进入"截图模式"：预热几帧让 shadow 资源 / pipeline
+        // 就绪后 RequestCapture 一帧 PNG，再 RequestClose 自动退出 —— 供 CI /
+        // 文档无人值守出图（RequestCapture 仅 window 模式生效）。空 → 正常交互。
+        RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
+                    std::string capturePath)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
+              mCapturePath(std::move(capturePath)) {}
+
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            if (!mCapturePath.empty() && mFrame == kCaptureFrame)
+            {
+                mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
+            }
+            mPipeline.Render(mWorld);
+            if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
+            {
+                mWindow.RequestClose(); // 截图已写出，退出
+            }
+            ++mFrame;
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        static constexpr std::uint64_t kCaptureFrame = 32; // 预热 32 帧再截（够 TAA 时序收敛）
+        Pipeline&                      mPipeline;
+        World&                         mWorld;
+        Platform::Window&              mWindow;
+        std::string                    mCapturePath;
+        std::uint64_t                  mFrame{0};
     };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();  // winding → +Y 法线
-    return pMesh;
-}
 
-class RenderLayer : public Layer
-{
-public:
-    // capturePath 非空时进入"截图模式"：预热几帧让 shadow 资源 / pipeline
-    // 就绪后 RequestCapture 一帧 PNG，再 RequestClose 自动退出 —— 供 CI /
-    // 文档无人值守出图（RequestCapture 仅 window 模式生效）。空 → 正常交互。
-    RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
-                std::string capturePath)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
-          mCapturePath(std::move(capturePath)) {}
-
-    void OnUpdate(const FrameContext& /*frame*/) override
+    // 在 (x, z) 放一个落在地面上的球 occluder（半径 r，球心 y=r），返回该 entity。
+    Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
+                       MaterialInstance* inst, float x, float z, float r)
     {
-        if (!mCapturePath.empty() && mFrame == kCaptureFrame)
-        {
-            mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
-        }
-        mPipeline.Render(mWorld);
-        if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
-        {
-            mWindow.RequestClose();  // 截图已写出，退出
-        }
-        ++mFrame;
+        Entity             e = world.CreateEntity();
+        TransformComponent xf{};
+        xf.position = {x, r, z};
+        world.AddComponent(e, xf);
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = inst;
+        rc.castsShadow      = true; // 三类光源的 shadow pass 都收它作 caster
+        world.AddComponent(e, rc);
+        return e;
     }
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
-        {
-            mPipeline.OnResize(resize->width, resize->height);
-        }
-        return false;
-    }
-
-private:
-    static constexpr std::uint64_t kCaptureFrame = 32;  // 预热 32 帧再截（够 TAA 时序收敛）
-    Pipeline&         mPipeline;
-    World&            mWorld;
-    Platform::Window& mWindow;
-    std::string       mCapturePath;
-    std::uint64_t     mFrame{0};
-};
-
-// 在 (x, z) 放一个落在地面上的球 occluder（半径 r，球心 y=r），返回该 entity。
-Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
-                   MaterialInstance* inst, float x, float z, float r)
-{
-    Entity e = world.CreateEntity();
-    TransformComponent xf{};
-    xf.position = {x, r, z};
-    world.AddComponent(e, xf);
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = inst;
-    rc.castsShadow      = true;  // 三类光源的 shadow pass 都收它作 caster
-    world.AddComponent(e, rc);
-    return e;
-}
-
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv)
 {
     // `--capture <path>`：渲一帧 PNG 后自动退（CI / 文档无人值守出图）。
     // `--no-ssao`：关闭 SSAO（做 before/after 对比）。
     std::string capturePath;
-    bool        disableSsao = false;
-    bool        disableSsr  = false;
-    bool        disablePcss = false;
-    bool        disableGtao = false;
+    bool        disableSsao    = false;
+    bool        disableSsr     = false;
+    bool        disablePcss    = false;
+    bool        disableGtao    = false;
     bool        disableContact = false;
-    bool        disableDof = false;
-    bool        disableTaa = false;
-    bool        disableGrade = false;
-    bool        disableLens = false;
+    bool        disableDof     = false;
+    bool        disableTaa     = false;
+    bool        disableGrade   = false;
+    bool        disableLens    = false;
     bool        disableSharpen = false;
     // GAP-2026-05-11 G3 PointLight halo toggle —— --halo 让 PointLight 挂
     // emissive sphere（Pipeline 自动 record），可见光晕由 BloomPass 自然散
     // 光；不传 flag 时不画 halo（与 G3 落地前视觉一致）。
-    bool        enableHalo = false;
+    bool enableHalo = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
-        if (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
-        else if (a == "--no-ssao")            { disableSsao = true; }
-        else if (a == "--no-ssr")             { disableSsr = true; }
-        else if (a == "--no-pcss")            { disablePcss = true; }
-        else if (a == "--no-gtao")            { disableGtao = true; }
-        else if (a == "--no-contact")         { disableContact = true; }
-        else if (a == "--no-dof")             { disableDof = true; }
-        else if (a == "--no-taa")             { disableTaa = true; }
-        else if (a == "--no-grade")           { disableGrade = true; }
-        else if (a == "--no-lens")            { disableLens = true; }
-        else if (a == "--no-sharpen")         { disableSharpen = true; }
-        else if (a == "--halo")               { enableHalo = true; }
+        if (a == "--capture" && i + 1 < argc)
+        {
+            capturePath = argv[i + 1];
+            ++i;
+        }
+        else if (a == "--no-ssao")
+        {
+            disableSsao = true;
+        }
+        else if (a == "--no-ssr")
+        {
+            disableSsr = true;
+        }
+        else if (a == "--no-pcss")
+        {
+            disablePcss = true;
+        }
+        else if (a == "--no-gtao")
+        {
+            disableGtao = true;
+        }
+        else if (a == "--no-contact")
+        {
+            disableContact = true;
+        }
+        else if (a == "--no-dof")
+        {
+            disableDof = true;
+        }
+        else if (a == "--no-taa")
+        {
+            disableTaa = true;
+        }
+        else if (a == "--no-grade")
+        {
+            disableGrade = true;
+        }
+        else if (a == "--no-lens")
+        {
+            disableLens = true;
+        }
+        else if (a == "--no-sharpen")
+        {
+            disableSharpen = true;
+        }
+        else if (a == "--halo")
+        {
+            enableHalo = true;
+        }
     }
 
     AppConfig cfg{};
@@ -264,7 +311,7 @@ int main(int argc, char** argv)
     }
 
     auto sphereRes = assets.Insert<MeshAsset>("builtin/sphere", MakeSphereMesh(0.8f, 32, 16));
-    auto floorRes  = assets.Insert<MeshAsset>("builtin/floor",  MakeFloorMesh(8.0f));
+    auto floorRes  = assets.Insert<MeshAsset>("builtin/floor", MakeFloorMesh(8.0f));
     if (sphereRes.IsErr() || floorRes.IsErr())
     {
         std::fprintf(stderr, "Insert<MeshAsset> failed\n");
@@ -280,14 +327,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    World world;
+    World                                          world;
     std::vector<std::unique_ptr<MaterialInstance>> instances;
 
     auto makePbr = [&](glm::vec4 baseColor, float metallic, float roughness)
         -> MaterialInstance*
     {
         auto inst = materials.CreateInstance("pbr");
-        if (!inst) { return nullptr; }
+        if (!inst)
+        {
+            return nullptr;
+        }
         inst->SetUniform("uBaseColor", baseColor);
         inst->SetUniform("uMRA", glm::vec4(metallic, roughness, 1.0f, 0.0f));
         instances.push_back(std::move(inst));
@@ -295,7 +345,7 @@ int main(int argc, char** argv)
     };
 
     // 地面：中性偏白、非金属、中等粗糙——既能清晰接收三类阴影，又不抢戏。
-    MaterialInstance* floorMat = makePbr(glm::vec4(0.82f, 0.82f, 0.85f, 1.0f), 0.0f, 0.7f);
+    MaterialInstance* floorMat  = makePbr(glm::vec4(0.82f, 0.82f, 0.85f, 1.0f), 0.0f, 0.7f);
     MaterialInstance* sphereMat = makePbr(glm::vec4(0.9f, 0.9f, 0.92f, 1.0f), 0.05f, 0.45f);
     if (!floorMat || !sphereMat)
     {
@@ -306,7 +356,7 @@ int main(int argc, char** argv)
     // 地面 entity（接收阴影；自身不投影 → castsShadow=false 避免无谓自遮挡）。
     {
         Entity e = world.CreateEntity();
-        world.AddComponent(e, TransformComponent{});  // 原点，XZ 平面 y=0
+        world.AddComponent(e, TransformComponent{}); // 原点，XZ 平面 y=0
         RenderableComponent rc;
         rc.mesh             = floor;
         rc.materialInstance = floorMat;
@@ -315,15 +365,15 @@ int main(int argc, char** argv)
     }
 
     // 三球 occluder：左区（spot）/ 中（directional 主秀）/ 右区（point）。
-    SpawnSphere(world, sphere, sphereMat, -3.5f, 0.0f, 0.8f);  // 左：spot 罩
-    SpawnSphere(world, sphere, sphereMat,  0.0f, 0.0f, 0.8f);  // 中：directional
-    SpawnSphere(world, sphere, sphereMat,  3.5f, 0.0f, 0.8f);  // 右：point 旁
+    SpawnSphere(world, sphere, sphereMat, -3.5f, 0.0f, 0.8f); // 左：spot 罩
+    SpawnSphere(world, sphere, sphereMat, 0.0f, 0.0f, 0.8f);  // 中：directional
+    SpawnSphere(world, sphere, sphereMat, 3.5f, 0.0f, 0.8f);  // 右：point 旁
 
     // ---- 三种光源（全部 castsShadow）-------------------------------------
 
     // DirectionalLight：全局暖白主光，右上前斜下 → 三球各拖一道平行硬阴影。
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.45f, -1.0f, -0.35f));
         world.AddComponent(e, xf);
@@ -336,7 +386,7 @@ int main(int argc, char** argv)
 
     // SpotLight：左区正上方朝下 -Y，冷蓝锥光罩住左球 + 投透视阴影。
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.position = {-3.5f, 5.0f, 0.0f};
         xf.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, -1.0f, 0.0f));
@@ -354,7 +404,7 @@ int main(int argc, char** argv)
     // PointLight：右区贴近右球（右上前），暖橙 radial 照明 + 全向阴影。
     // --halo 时挂 emissive sphere 让光源本身可见（GAP-2026-05-11 G3）。
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.position = {3.5f, 2.6f, 2.4f};
         world.AddComponent(e, xf);
@@ -367,22 +417,21 @@ int main(int argc, char** argv)
         {
             pl.haloEnabled   = true;
             pl.haloRadius    = 0.25f;
-            pl.haloIntensity = 0.5f;   // light intensity=40 比较高，halo 乘子
-                                       //  降到 0.5 让球体不刺眼但 bloom 散光
-                                       //  依然显眼
+            pl.haloIntensity = 0.5f; // light intensity=40 比较高，halo 乘子
+                                     //  降到 0.5 让球体不刺眼但 bloom 散光
+                                     //  依然显眼
         }
         world.AddComponent(e, pl);
     }
 
     // Camera：前上方俯视，地面 + 三球 + 三类阴影全部入画。
     {
-        Entity e = world.CreateEntity();
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 6.0f, 9.5f),
-                               glm::vec3(0.0f, 0.4f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        Entity      e      = world.CreateEntity();
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 6.0f, 9.5f),
+                                         glm::vec3(0.0f, 0.4f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(e, cam);
     }
 
@@ -398,7 +447,7 @@ int main(int argc, char** argv)
     // 球↔地面接触处 + 球体下半的凹处会变暗，接触感更强。默认走 GTAO
     //（horizon-based，更准更平滑）；`--no-gtao` 退回半球 kernel SSAO 做对比。
     {
-        auto ssao = std::make_unique<Orange::Engine::Render::SsaoPass>();
+        auto ssao      = std::make_unique<Orange::Engine::Render::SsaoPass>();
         ssao->enabled  = !disableSsao;
         ssao->radius   = 0.6f;
         ssao->strength = 1.0f;
@@ -408,7 +457,7 @@ int main(int argc, char** argv)
     }
     // SSR：`--no-ssr` 关闭。地面会反射出上方的球体（湿表面/光泽感）。
     {
-        auto ssr = std::make_unique<Orange::Engine::Render::SsrPass>();
+        auto ssr         = std::make_unique<Orange::Engine::Render::SsrPass>();
         ssr->enabled     = !disableSsr;
         ssr->maxDistance = 14.0f;
         ssr->maxSteps    = 40.0f;
@@ -419,9 +468,9 @@ int main(int argc, char** argv)
     // 接触阴影：`--no-contact` 关闭做对比。补 shadow map 在球↔地面接触处因
     // depthBias 抬起留下的漏光缝隙，接触线更"咬合"。
     {
-        auto cs = std::make_unique<Orange::Engine::Render::ContactShadowPass>();
+        auto cs       = std::make_unique<Orange::Engine::Render::ContactShadowPass>();
         cs->enabled   = !disableContact;
-        cs->length    = 0.15f;   // 接触尺度（短）：只补接触线缝隙，不当粗阴影
+        cs->length    = 0.15f; // 接触尺度（短）：只补接触线缝隙，不当粗阴影
         cs->maxSteps  = 16.0f;
         cs->thickness = 0.3f;
         cs->bias      = 0.015f;
@@ -431,7 +480,7 @@ int main(int argc, char** argv)
     // 景深：对焦在三球（相机 (0,6,9.5) 看向原点，球深度 ~10）；远处地面 + 近处
     // 地面虚化。`--no-dof` 关闭做对比。
     {
-        auto dof = std::make_unique<Orange::Engine::Render::DofPass>();
+        auto dof           = std::make_unique<Orange::Engine::Render::DofPass>();
         dof->enabled       = !disableDof;
         dof->focusDistance = 10.0f;
         dof->focusRange    = 5.0f;
@@ -442,26 +491,26 @@ int main(int argc, char** argv)
     // 噪点去噪。静态相机下数帧即收敛干净。`--no-taa` 关闭做对比（边缘锯齿 +
     // 屏幕空间噪点显现）。
     {
-        auto taa = std::make_unique<Orange::Engine::Render::TaaPass>();
+        auto taa      = std::make_unique<Orange::Engine::Render::TaaPass>();
         taa->enabled  = !disableTaa;
         taa->feedback = 0.9f;
         chain.AddPass(std::move(taa));
     }
     // 色彩分级：暖调 + 轻微提对比/增艳的电影感定调。`--no-grade` 关闭做对比。
     {
-        auto grade = std::make_unique<Orange::Engine::Render::ColorGradePass>();
+        auto grade         = std::make_unique<Orange::Engine::Render::ColorGradePass>();
         grade->enabled     = !disableGrade;
         grade->exposure    = 0.15f;
         grade->contrast    = 1.1f;
         grade->saturation  = 1.15f;
-        grade->temperature = 0.25f;   // 暖
+        grade->temperature = 0.25f; // 暖
         grade->tint        = 0.0f;
         chain.AddPass(std::move(grade));
     }
     // 锐化（CAS）：恢复 TAA resolve 软化的高频细节。`--no-sharpen` 关闭做对比
     //（关掉后配合 TAA 画面更软）。Pipeline 内部录制在 TAA 之后、motion blur 之前。
     {
-        auto sharpen = std::make_unique<Orange::Engine::Render::SharpenPass>();
+        auto sharpen       = std::make_unique<Orange::Engine::Render::SharpenPass>();
         sharpen->enabled   = !disableSharpen;
         sharpen->sharpness = 0.4f;
         chain.AddPass(std::move(sharpen));
@@ -469,7 +518,7 @@ int main(int argc, char** argv)
     // 镜头效果（色散 + 暗角）：最后的"镜头"阶段，边缘轻微色散 + 暗角聚焦中心，
     // 给三球场景加一点电影镜头质感。`--no-lens` 关闭做对比。
     {
-        auto lens = std::make_unique<Orange::Engine::Render::LensPass>();
+        auto lens                 = std::make_unique<Orange::Engine::Render::LensPass>();
         lens->enabled             = !disableLens;
         lens->chromaticAberration = 0.003f;
         lens->vignetteIntensity   = 0.35f;

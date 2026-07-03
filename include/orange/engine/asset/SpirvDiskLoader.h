@@ -27,10 +27,10 @@
 namespace Orange::Engine::Asset
 {
 
-// 见文件头说明。失败返回空向量。
-ORANGE_ENGINE_API std::vector<std::uint32_t>
-LoadSpirvFromExecutableDir(std::string_view relativePath) noexcept;
+    // 见文件头说明。失败返回空向量。
+    ORANGE_ENGINE_API std::vector<std::uint32_t>
+                      LoadSpirvFromExecutableDir(std::string_view relativePath) noexcept;
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_SPIRV_DISK_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_SPIRV_DISK_LOADER_H

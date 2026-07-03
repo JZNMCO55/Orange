@@ -31,92 +31,92 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Script
 {
 
-// 托管脚本实例的不透明句柄。内部包装托管 GCHandle 的 IntPtr（指针宽度的
-// 整数）；0 表示无效 / 实例化失败。调用方不解读其位模式。
-struct ScriptInstanceHandle
-{
-    std::uint64_t value = 0;
+    // 托管脚本实例的不透明句柄。内部包装托管 GCHandle 的 IntPtr（指针宽度的
+    // 整数）；0 表示无效 / 实例化失败。调用方不解读其位模式。
+    struct ScriptInstanceHandle
+    {
+        std::uint64_t value = 0;
 
-    bool IsValid() const noexcept { return value != 0; }
-};
+        bool IsValid() const noexcept { return value != 0; }
+    };
 
-// 一个 ScriptRuntime 实例对应一次 CoreCLR 初始化 + 托管 glue 引导。重资源，
-// 不可拷贝（持有 ScriptHost）；可移动。
-class ORANGE_ENGINE_API ScriptRuntime
-{
-public:
-    ScriptRuntime();
-    ~ScriptRuntime();
+    // 一个 ScriptRuntime 实例对应一次 CoreCLR 初始化 + 托管 glue 引导。重资源，
+    // 不可拷贝（持有 ScriptHost）；可移动。
+    class ORANGE_ENGINE_API ScriptRuntime
+    {
+    public:
+        ScriptRuntime();
+        ~ScriptRuntime();
 
-    ScriptRuntime(const ScriptRuntime&) = delete;
-    ScriptRuntime& operator=(const ScriptRuntime&) = delete;
-    ScriptRuntime(ScriptRuntime&&) noexcept;
-    ScriptRuntime& operator=(ScriptRuntime&&) noexcept;
+        ScriptRuntime(const ScriptRuntime&)            = delete;
+        ScriptRuntime& operator=(const ScriptRuntime&) = delete;
+        ScriptRuntime(ScriptRuntime&&) noexcept;
+        ScriptRuntime& operator=(ScriptRuntime&&) noexcept;
 
-    // 起 CoreCLR + 取托管 glue（ScriptRuntime.cs）的 5 个
-    // [UnmanagedCallersOnly] 入口 + 调 Bootstrap 把 C++ 绑定函数指针表推给
-    // 托管侧。
-    //   * runtimeConfigPath —— 托管 glue 程序集旁的 *.runtimeconfig.json，
-    //     用于 hostfxr 定位运行时框架（UTF-8 路径）；
-    //   * sdkAssemblyPath   —— OrangeScriptSDK.dll 的路径（托管 glue 所在
-    //     程序集；CreateInstance 时 game assembly 同目录自动解析）。
-    // 重复 Initialize 返回 AlreadyInitialized。任何失败返回 Err 不崩。
-    Result<void> Initialize(const std::string& runtimeConfigPath,
-                            const std::string& sdkAssemblyPath);
+        // 起 CoreCLR + 取托管 glue（ScriptRuntime.cs）的 5 个
+        // [UnmanagedCallersOnly] 入口 + 调 Bootstrap 把 C++ 绑定函数指针表推给
+        // 托管侧。
+        //   * runtimeConfigPath —— 托管 glue 程序集旁的 *.runtimeconfig.json，
+        //     用于 hostfxr 定位运行时框架（UTF-8 路径）；
+        //   * sdkAssemblyPath   —— OrangeScriptSDK.dll 的路径（托管 glue 所在
+        //     程序集；CreateInstance 时 game assembly 同目录自动解析）。
+        // 重复 Initialize 返回 AlreadyInitialized。任何失败返回 Err 不崩。
+        Result<void> Initialize(const std::string& runtimeConfigPath,
+                                const std::string& sdkAssemblyPath);
 
-    // 设当前脚本 World：绑定函数 decode scriptId 后在该 World 上取组件。
-    // 脚本在 Play tick 单线程跑，MVP 用普通 static 持有，调脚本回调前设好。
-    // 传 nullptr 清空上下文。
-    void SetCurrentWorld(World* world) noexcept;
+        // 设当前脚本 World：绑定函数 decode scriptId 后在该 World 上取组件。
+        // 脚本在 Play tick 单线程跑，MVP 用普通 static 持有，调脚本回调前设好。
+        // 传 nullptr 清空上下文。
+        void SetCurrentWorld(World* world) noexcept;
 
-    // 实例化一个托管 OrangeScript 子类并绑定到 entity：
-    //   * assemblyPath —— game assembly（含脚本类型）的 UTF-8 路径；
-    //   * typeName     —— assembly-qualified 类型全名，如
-    //                     "OrangeFixtures.Mover, ScriptFixtures"；
-    //   * entity       —— 脚本所属实体（内部 EncodeEntityId 注入托管侧）。
-    // 成功返回有效 ScriptInstanceHandle（托管侧 GCHandle 保活）；失败
-    // （未初始化 / 加载不到 assembly / 找不到类型 / 构造抛异常）返回 Err。
-    Result<ScriptInstanceHandle> CreateInstance(const std::string& assemblyPath,
-                                                const std::string& typeName,
-                                                Entity entity);
+        // 实例化一个托管 OrangeScript 子类并绑定到 entity：
+        //   * assemblyPath —— game assembly（含脚本类型）的 UTF-8 路径；
+        //   * typeName     —— assembly-qualified 类型全名，如
+        //                     "OrangeFixtures.Mover, ScriptFixtures"；
+        //   * entity       —— 脚本所属实体（内部 EncodeEntityId 注入托管侧）。
+        // 成功返回有效 ScriptInstanceHandle（托管侧 GCHandle 保活）；失败
+        // （未初始化 / 加载不到 assembly / 找不到类型 / 构造抛异常）返回 Err。
+        Result<ScriptInstanceHandle> CreateInstance(const std::string& assemblyPath,
+                                                    const std::string& typeName,
+                                                    Entity             entity);
 
-    // 生命周期回调。脚本异常在托管边界已 catch，这些调用恒不抛。无效句柄
-    // 静默忽略（不崩）。InvokeUpdate 的 dt 单位秒。
-    void InvokeStart(ScriptInstanceHandle handle);
-    void InvokeUpdate(ScriptInstanceHandle handle, float dt);
-    void InvokeDestroy(ScriptInstanceHandle handle);
+        // 生命周期回调。脚本异常在托管边界已 catch，这些调用恒不抛。无效句柄
+        // 静默忽略（不崩）。InvokeUpdate 的 dt 单位秒。
+        void InvokeStart(ScriptInstanceHandle handle);
+        void InvokeUpdate(ScriptInstanceHandle handle, float dt);
+        void InvokeDestroy(ScriptInstanceHandle handle);
 
-    // 释放托管 GCHandle（解保活，允许 GC 回收实例）。Release 后句柄失效。
-    void Release(ScriptInstanceHandle handle);
+        // 释放托管 GCHandle（解保活，允许 GC 回收实例）。Release 后句柄失效。
+        void Release(ScriptInstanceHandle handle);
 
-    // 按 authored 值写脚本对象的一个 public 实例字段（B1.3 tweakable）。
-    //   * handle    —— 目标脚本实例句柄；
-    //   * fieldName —— public 字段名；
-    //   * fieldType —— ScriptFieldType 的 int 值（0=Float / 1=Int / 2=Bool /
-    //     3=String）。本头**不**得 include ScriptComponent.h（跨模块），故这里
-    //     用 int 而非枚举；调用方传 static_cast<int>(ScriptFieldType)；
-    //   * valueUtf8 —— 字符串形态的值；托管侧按 fieldType 解析后用
-    //     System.Reflection 设字段（再 Convert.ChangeType 适配字段真实类型）。
-    // 未初始化 / 无效句柄 / 字段不存在 / 解析失败均返回 Err，绝不崩。
-    Result<void> SetInstanceField(ScriptInstanceHandle handle,
-                                  const std::string& fieldName,
-                                  int fieldType,
-                                  const std::string& valueUtf8);
+        // 按 authored 值写脚本对象的一个 public 实例字段（B1.3 tweakable）。
+        //   * handle    —— 目标脚本实例句柄；
+        //   * fieldName —— public 字段名；
+        //   * fieldType —— ScriptFieldType 的 int 值（0=Float / 1=Int / 2=Bool /
+        //     3=String）。本头**不**得 include ScriptComponent.h（跨模块），故这里
+        //     用 int 而非枚举；调用方传 static_cast<int>(ScriptFieldType)；
+        //   * valueUtf8 —— 字符串形态的值；托管侧按 fieldType 解析后用
+        //     System.Reflection 设字段（再 Convert.ChangeType 适配字段真实类型）。
+        // 未初始化 / 无效句柄 / 字段不存在 / 解析失败均返回 Err，绝不崩。
+        Result<void> SetInstanceField(ScriptInstanceHandle handle,
+                                      const std::string&   fieldName,
+                                      int                  fieldType,
+                                      const std::string&   valueUtf8);
 
-    // 是否已成功 Initialize。
-    bool IsInitialized() const noexcept;
+        // 是否已成功 Initialize。
+        bool IsInitialized() const noexcept;
 
-private:
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
-};
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
+    };
 
-}  // namespace Orange::Engine::Script
+} // namespace Orange::Engine::Script
 
-#endif  // ORANGE_ENGINE_SCRIPT_SCRIPTRUNTIME_H
+#endif // ORANGE_ENGINE_SCRIPT_SCRIPTRUNTIME_H

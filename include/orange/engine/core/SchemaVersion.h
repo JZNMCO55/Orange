@@ -30,59 +30,55 @@
 namespace Orange::Engine
 {
 
-class ORANGE_ENGINE_API SchemaVersion
-{
-public:
-    SchemaVersion() = default;
-
-    SchemaVersion(std::string_view namespaceName,
-                  std::uint16_t major,
-                  std::uint16_t minor);
-
-    const std::string& Namespace() const noexcept { return mNamespace; }
-    std::uint64_t      NamespaceHash() const noexcept { return mNamespaceHash; }
-    std::uint16_t      Major() const noexcept { return mMajor; }
-    std::uint16_t      Minor() const noexcept { return mMinor; }
-
-    bool IsValid() const noexcept { return !mNamespace.empty(); }
-
-    // namespace 的 hash 是否相等。刻意只比 hash——hot path 不需要字符串
-    // 等值比较。
-    bool NamespaceMatches(const SchemaVersion& other) const noexcept
+    class ORANGE_ENGINE_API SchemaVersion
     {
-        return mNamespaceHash == other.mNamespaceHash;
-    }
+    public:
+        SchemaVersion() = default;
 
-    // Reader 端兼容性检查：
-    //   `*this`  ——引擎代码期望的 SchemaVersion（即"reader"）
-    //   `actual` ——从文件中读出的 SchemaVersion
-    // 当且仅当 reader 可以安全消费该文件时返回 true。
-    bool CanRead(const SchemaVersion& actual) const noexcept
-    {
-        return NamespaceMatches(actual)
-            && mMajor == actual.mMajor
-            && mMinor >= actual.mMinor;
-    }
+        SchemaVersion(std::string_view namespaceName,
+                      std::uint16_t    major,
+                      std::uint16_t    minor);
 
-    friend bool operator==(const SchemaVersion& a, const SchemaVersion& b) noexcept
-    {
-        return a.mNamespaceHash == b.mNamespaceHash
-            && a.mMajor == b.mMajor
-            && a.mMinor == b.mMinor;
-    }
+        const std::string& Namespace() const noexcept { return mNamespace; }
+        std::uint64_t      NamespaceHash() const noexcept { return mNamespaceHash; }
+        std::uint16_t      Major() const noexcept { return mMajor; }
+        std::uint16_t      Minor() const noexcept { return mMinor; }
 
-    friend bool operator!=(const SchemaVersion& a, const SchemaVersion& b) noexcept
-    {
-        return !(a == b);
-    }
+        bool IsValid() const noexcept { return !mNamespace.empty(); }
 
-private:
-    std::string   mNamespace;
-    std::uint64_t mNamespaceHash{0};
-    std::uint16_t mMajor{0};
-    std::uint16_t mMinor{0};
-};
+        // namespace 的 hash 是否相等。刻意只比 hash——hot path 不需要字符串
+        // 等值比较。
+        bool NamespaceMatches(const SchemaVersion& other) const noexcept
+        {
+            return mNamespaceHash == other.mNamespaceHash;
+        }
 
-}  // namespace Orange::Engine
+        // Reader 端兼容性检查：
+        //   `*this`  ——引擎代码期望的 SchemaVersion（即"reader"）
+        //   `actual` ——从文件中读出的 SchemaVersion
+        // 当且仅当 reader 可以安全消费该文件时返回 true。
+        bool CanRead(const SchemaVersion& actual) const noexcept
+        {
+            return NamespaceMatches(actual) && mMajor == actual.mMajor && mMinor >= actual.mMinor;
+        }
 
-#endif  // ORANGE_ENGINE_CORE_SCHEMA_VERSION_H
+        friend bool operator==(const SchemaVersion& a, const SchemaVersion& b) noexcept
+        {
+            return a.mNamespaceHash == b.mNamespaceHash && a.mMajor == b.mMajor && a.mMinor == b.mMinor;
+        }
+
+        friend bool operator!=(const SchemaVersion& a, const SchemaVersion& b) noexcept
+        {
+            return !(a == b);
+        }
+
+    private:
+        std::string   mNamespace;
+        std::uint64_t mNamespaceHash{0};
+        std::uint16_t mMajor{0};
+        std::uint16_t mMinor{0};
+    };
+
+} // namespace Orange::Engine
+
+#endif // ORANGE_ENGINE_CORE_SCHEMA_VERSION_H

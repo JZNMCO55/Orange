@@ -33,9 +33,9 @@
 #include <orange/engine/scene/WorldTransformComponent.h>
 
 #include <glm/geometric.hpp>
-#include <glm/gtc/quaternion.hpp>   // glm::quat / glm::slerp（动画 quat 轨道断言）
+#include <glm/gtc/quaternion.hpp> // glm::quat / glm::slerp（动画 quat 轨道断言）
 #include <glm/mat4x4.hpp>
-#include <glm/trigonometric.hpp>    // glm::radians
+#include <glm/trigonometric.hpp> // glm::radians
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
@@ -61,406 +61,404 @@ namespace fs = std::filesystem;
 namespace
 {
 
-std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
-{
-    auto registry = std::make_unique<AssetNS::AssetRegistry>();
-    auto rm = registry->RegisterLoader<AssetNS::MeshAsset>(
-        std::make_unique<AssetNS::MeshLoader>());
-    assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
-    return registry;
-}
-
-// 写一个 5-node 层级 .gltf：RootGroup（无 mesh，translation (1,2,3)）→
-// {ChildA(mesh 0), ChildB(mesh 1), SunLight(directional), Lamp(point)}。
-// 两个 mesh 各 1 primitive，共享同一 buffer。灯光走 KHR_lights_punctual。
-void WriteSceneHierarchyGltf(const std::string& path)
-{
-    // positions=(0,0,0)(1,0,0)(1,1,0)(0,1,0) 48B + indices 0,1,2,0,2,3（12B）。
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写层级 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
-        "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
-        "    {\"name\": \"Sun\",  \"type\": \"directional\", "
-        "\"color\": [1.0, 0.9, 0.8], \"intensity\": 2.5},\n"
-        "    {\"name\": \"Bulb\", \"type\": \"point\", "
-        "\"color\": [0.2, 0.4, 1.0], \"intensity\": 5.0, \"range\": 8.0}\n"
-        "  ]}},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"RootGroup\", \"translation\": [1.0, 2.0, 3.0], "
-        "\"children\": [1, 2, 3, 4]},\n"
-        "    {\"name\": \"ChildA\", \"translation\": [0.5, 0.0, 0.0], \"mesh\": 0},\n"
-        "    {\"name\": \"ChildB\", \"translation\": [-0.5, 0.0, 0.0], \"mesh\": 1},\n"
-        "    {\"name\": \"SunLight\", "
-        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}},\n"
-        "    {\"name\": \"Lamp\", \"translation\": [2.0, 1.0, 0.0], "
-        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 1}}}\n"
-        "  ],\n"
-        "  \"meshes\": [\n"
-        "    {\"name\": \"Crate\",  \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1}]},\n"
-        "    {\"name\": \"Barrel\", \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 第二个 fixture：覆盖真实 Blender 导出的风险路径 ——
-//   * node 用 "matrix"（列主序 4x4）而非 TRS → 验 glm::decompose 路径
-//   * 3 层深嵌套（L1→L2→L3）→ 验 world 变换穿 2 层祖先累积
-//   * spot light → 验 SpotLight 锥角映射 + 方向编码
-void WriteMatrixAndDeepNestGltf(const std::string& path)
-{
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写 matrix/深嵌套 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
-        "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
-        "    {\"name\": \"Torch\", \"type\": \"spot\", \"color\": [1.0, 0.5, 0.0], "
-        "\"intensity\": 3.0, \"range\": 12.0, "
-        "\"spot\": {\"innerConeAngle\": 0.2, \"outerConeAngle\": 0.5}}\n"
-        "  ]}},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0, 3, 4]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"L1\", \"translation\": [10.0, 0.0, 0.0], \"children\": [1]},\n"
-        "    {\"name\": \"L2\", \"translation\": [0.0, 5.0, 0.0], \"children\": [2]},\n"
-        "    {\"name\": \"L3\", \"translation\": [0.0, 0.0, 2.0], \"mesh\": 0},\n"
-        // 列主序 translate(3,4,5)*scale(2,2,2)：col0(2,0,0,0) col1(0,2,0,0)
-        // col2(0,0,2,0) col3(3,4,5,1)。
-        "    {\"name\": \"MatrixNode\", \"matrix\": "
-        "[2,0,0,0, 0,2,0,0, 0,0,2,0, 3,4,5,1], \"mesh\": 0},\n"
-        "    {\"name\": \"SpotNode\", "
-        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
-        "  ],\n"
-        "  \"meshes\": [\n"
-        "    {\"name\": \"M\", \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 第三个 fixture：mesh instancing —— 2 个 node 引用**同一** cgltf mesh。
-// 验证 importer 按指针去重：只写一个 .mesh，两个 entity 的 Renderable 指向同一
-// mesh 路径（真实 DCC 场景大量用实例化，如 10 棵同款树共享一个 mesh）。
-void WriteInstancedMeshGltf(const std::string& path)
-{
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写实例化 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0, 1]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"InstA\", \"translation\": [0.0, 0.0, 0.0], \"mesh\": 0},\n"
-        "    {\"name\": \"InstB\", \"translation\": [3.0, 0.0, 0.0], \"mesh\": 0}\n"
-        "  ],\n"
-        "  \"meshes\": [\n"
-        "    {\"name\": \"Tree\", \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 第五个 fixture：**无 scenes 数组**的 glTF（spec 允许省略 scene/scenes）。
-// 验证 importer 的 fallback 分支：无 scene 定义时退回"所有 parent-less node 当根"。
-void WriteNoScenesGltf(const std::string& path)
-{
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写无 scenes .gltf fixture 应成功");
-    // 故意不写 "scene" / "scenes" key。
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"Lone\", \"translation\": [4.0, 0.0, 0.0], \"mesh\": 0}\n"
-        "  ],\n"
-        "  \"meshes\": [\n"
-        "    {\"name\": \"Solo\", \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 第六个 fixture：**旋转父下的 directional 灯**（lights-only，无 mesh/buffer）——
-// 验 A1.1 后 importer 的 R-bridging 与"光源消费者读 world rotation"配套。父 RotParent
-// 绕 +Y 转 90°（glTF quat [x,y,z,w]=[0, √½, 0, √½]）→ 子 ChildSun（directional，无自身
-// rotation）。glTF 灯沿 node 本地 -Z，父把 (0,0,-1) 转到世界 (-1,0,0)。importer 只写
-// local rotation（-Z→-Y 桥接），引擎 PropagateWorldTransforms 累积父旋转后，消费者
-// 同款公式算出的世界光向应 = (-1,0,0)。旧的"world 光向直接编码进 local"会在这里被父
-// 旋转二次应用得到错误方向 → 本例锁住修正。
-void WriteRotatedParentLightGltf(const std::string& path)
-{
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写旋转父灯光 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
-        "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
-        "    {\"name\": \"Sun\", \"type\": \"directional\", "
-        "\"color\": [1.0, 1.0, 1.0], \"intensity\": 1.0}\n"
-        "  ]}},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"RotParent\", "
-        "\"rotation\": [0.0, 0.70710678, 0.0, 0.70710678], \"children\": [1]},\n"
-        "    {\"name\": \"ChildSun\", "
-        "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
-        "  ]\n"
-        "}\n";
-}
-
-// 第七个 fixture：**per-mesh PBR material**（G2）—— 覆盖：
-//   * 单 material mesh（SoloNode 引用 mesh 0，1 primitive → material "Red"）
-//   * 多 material mesh（MultiNode 引用 mesh 1，2 primitive → material "Red" / "Blue"）
-//   * material 去重：material "Red" 被 mesh 0 + mesh 1 的 primitive 0 共用 →
-//     全局只写一个 <basename>_Red.material（不是每次新建）。
-// 期望产物：2 个 .material（Red + Blue）；SoloNode 的 Renderable.materialInstanceId
-// 指向 Red.material；MultiNode 的 SubMeshMaterials slots = [Red.material, Blue.material]。
-void WriteMaterialSceneGltf(const std::string& path)
-{
-    // positions 48B（accessor 0）+ idxA 12B（6 idx，accessor 1）+ idxB 6B
-    // （3 idx，accessor 2）。bufferView 0 = pos[0,48)，1 = idxA[48,60)，
-    // 2 = idxB[60,66)。mesh 1 两 primitive 各用一个 index accessor + material。
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写 material 场景 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0, 1]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"SoloNode\",  \"mesh\": 0},\n"
-        "    {\"name\": \"MultiNode\", \"mesh\": 1}\n"
-        "  ],\n"
-        "  \"materials\": [\n"
-        "    {\"name\": \"Red\",  \"pbrMetallicRoughness\": "
-        "{\"baseColorFactor\": [1.0, 0.0, 0.0, 1.0], "
-        "\"metallicFactor\": 0.1, \"roughnessFactor\": 0.7}},\n"
-        "    {\"name\": \"Blue\", \"pbrMetallicRoughness\": "
-        "{\"baseColorFactor\": [0.0, 0.0, 1.0, 1.0], "
-        "\"metallicFactor\": 0.9, \"roughnessFactor\": 0.2}}\n"
-        "  ],\n"
-        "  \"meshes\": [\n"
-        // mesh 0：单 primitive，material 0（Red）。
-        "    {\"name\": \"Solo\", \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1, \"material\": 0}]},\n"
-        // mesh 1：两 primitive，material 0（Red）+ material 1（Blue）。
-        "    {\"name\": \"Multi\", \"primitives\": [\n"
-        "      {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0},\n"
-        "      {\"attributes\": {\"POSITION\": 0}, \"indices\": 2, \"material\": 1}\n"
-        "    ]}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"},\n"
-        "    {\"bufferView\": 2, \"componentType\": 5123, \"count\": 3, "
-        "\"type\": \"SCALAR\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 60, \"byteLength\": 6}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 66, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 第八个 fixture：**glTF cameras**（G3）—— camera-only，无 mesh/buffer。覆盖：
-//   * 透视相机（全参 yfov/aspectRatio/znear/zfar）
-//   * 透视相机（仅 yfov/znear，缺 aspectRatio/zfar → 验导入侧默认 16:9 / far 1000）
-//   * 正交相机（xmag/ymag/znear/zfar → 半宽高映 left/right/bottom/top）
-// 验 node.camera → Render::Camera component，投影矩阵烘焙正确（与 Camera::Perspective /
-// Orthographic 工厂逐元素对位）+ Save→Load round-trip 保住 projection。
-void WriteCameraSceneGltf(const std::string& path)
-{
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写相机场景 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0, 1, 2]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"PerspCam\", \"translation\": [0.0, 1.0, 5.0], \"camera\": 0},\n"
-        "    {\"name\": \"PerspDefaultCam\", \"camera\": 1},\n"
-        "    {\"name\": \"OrthoCam\", \"camera\": 2}\n"
-        "  ],\n"
-        "  \"cameras\": [\n"
-        "    {\"name\": \"Persp\", \"type\": \"perspective\", \"perspective\": "
-        "{\"yfov\": 0.6981317, \"aspectRatio\": 1.5, \"znear\": 0.1, \"zfar\": 100.0}},\n"
-        "    {\"name\": \"PerspDefault\", \"type\": \"perspective\", \"perspective\": "
-        "{\"yfov\": 0.5, \"znear\": 0.2}},\n"
-        "    {\"name\": \"Ortho\", \"type\": \"orthographic\", \"orthographic\": "
-        "{\"xmag\": 4.0, \"ymag\": 3.0, \"znear\": 0.1, \"zfar\": 50.0}}\n"
-        "  ]\n"
-        "}\n";
-}
-
-// 第九个 fixture：**node TRS animation**（DCC→clip 桥）—— 单 node（带 mesh）被一条
-// translation channel + 一条 rotation channel 驱动（2 帧，LINEAR）。验 importer 把
-// cgltf animation 解析成 AnimationClip 挂 AnimatorComponent(ClipAnimator)：
-//   * translation → "position" Vec3 轨道：(0,0,0) @t0 → (2,0,0) @t1
-//   * rotation    → "rotation.quat" Quat 轨道：identity @t0 → 90°Y @t1（最短弧 slerp）
-//   * duration = 1.0；Seek(0.5) → position (1,0,0) + rotation 45°Y
-// buffer 布局（base64，4-byte 对齐，由 tests 内联生成脚本算出）：
-//   acc0 pos VEC3×4 [0,48) / acc1 idx u16×6 [48,60) / acc2 time f32×2 [60,68) /
-//   acc3 trans VEC3×2 [68,92) / acc4 rot VEC4×2 [92,124)。
-void WriteAnimatedNodeGltf(const std::string& path)
-{
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAA"
-        "AAAAAAAAAAAAAIA/AAAAAPMENT8AAAAA8wQ1Pw==";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写动画 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0]}],\n"
-        "  \"nodes\": [\n"
-        "    {\"name\": \"Spinner\", \"mesh\": 0}\n"
-        "  ],\n"
-        "  \"meshes\": [\n"
-        "    {\"name\": \"Quad\", \"primitives\": [{\"attributes\": "
-        "{\"POSITION\": 0}, \"indices\": 1}]}\n"
-        "  ],\n"
-        "  \"animations\": [\n"
-        "    {\"name\": \"Spin\",\n"
-        "     \"samplers\": [\n"
-        "       {\"input\": 2, \"output\": 3, \"interpolation\": \"LINEAR\"},\n"
-        "       {\"input\": 2, \"output\": 4, \"interpolation\": \"LINEAR\"}\n"
-        "     ],\n"
-        "     \"channels\": [\n"
-        "       {\"sampler\": 0, \"target\": {\"node\": 0, \"path\": \"translation\"}},\n"
-        "       {\"sampler\": 1, \"target\": {\"node\": 0, \"path\": \"rotation\"}}\n"
-        "     ]}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"},\n"
-        "    {\"bufferView\": 2, \"componentType\": 5126, \"count\": 2, "
-        "\"type\": \"SCALAR\", \"min\": [0.0], \"max\": [1.0]},\n"
-        "    {\"bufferView\": 3, \"componentType\": 5126, \"count\": 2, "
-        "\"type\": \"VEC3\"},\n"
-        "    {\"bufferView\": 4, \"componentType\": 5126, \"count\": 2, "
-        "\"type\": \"VEC4\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 60, \"byteLength\": 8},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 68, \"byteLength\": 24},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 92, \"byteLength\": 32}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 124, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
-Entity FindByName(World& world, const std::string& name)
-{
-    Entity found = Entity::Invalid();
-    auto view = world.Registry().view<SceneNS::NameComponent>();
-    for (auto e : view)
+    std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
     {
-        const Entity ent = World::FromEntt(e);
-        const auto* nc = world.GetComponent<SceneNS::NameComponent>(ent);
-        if (nc != nullptr && nc->name == name)
-        {
-            found = ent;
-            break;
-        }
+        auto registry = std::make_unique<AssetNS::AssetRegistry>();
+        auto rm       = registry->RegisterLoader<AssetNS::MeshAsset>(
+            std::make_unique<AssetNS::MeshLoader>());
+        assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
+        return registry;
     }
-    return found;
-}
 
-}  // namespace
+    // 写一个 5-node 层级 .gltf：RootGroup（无 mesh，translation (1,2,3)）→
+    // {ChildA(mesh 0), ChildB(mesh 1), SunLight(directional), Lamp(point)}。
+    // 两个 mesh 各 1 primitive，共享同一 buffer。灯光走 KHR_lights_punctual。
+    void WriteSceneHierarchyGltf(const std::string& path)
+    {
+        // positions=(0,0,0)(1,0,0)(1,1,0)(0,1,0) 48B + indices 0,1,2,0,2,3（12B）。
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写层级 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
+               "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
+               "    {\"name\": \"Sun\",  \"type\": \"directional\", "
+               "\"color\": [1.0, 0.9, 0.8], \"intensity\": 2.5},\n"
+               "    {\"name\": \"Bulb\", \"type\": \"point\", "
+               "\"color\": [0.2, 0.4, 1.0], \"intensity\": 5.0, \"range\": 8.0}\n"
+               "  ]}},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"RootGroup\", \"translation\": [1.0, 2.0, 3.0], "
+               "\"children\": [1, 2, 3, 4]},\n"
+               "    {\"name\": \"ChildA\", \"translation\": [0.5, 0.0, 0.0], \"mesh\": 0},\n"
+               "    {\"name\": \"ChildB\", \"translation\": [-0.5, 0.0, 0.0], \"mesh\": 1},\n"
+               "    {\"name\": \"SunLight\", "
+               "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}},\n"
+               "    {\"name\": \"Lamp\", \"translation\": [2.0, 1.0, 0.0], "
+               "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 1}}}\n"
+               "  ],\n"
+               "  \"meshes\": [\n"
+               "    {\"name\": \"Crate\",  \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1}]},\n"
+               "    {\"name\": \"Barrel\", \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 第二个 fixture：覆盖真实 Blender 导出的风险路径 ——
+    //   * node 用 "matrix"（列主序 4x4）而非 TRS → 验 glm::decompose 路径
+    //   * 3 层深嵌套（L1→L2→L3）→ 验 world 变换穿 2 层祖先累积
+    //   * spot light → 验 SpotLight 锥角映射 + 方向编码
+    void WriteMatrixAndDeepNestGltf(const std::string& path)
+    {
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写 matrix/深嵌套 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
+               "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
+               "    {\"name\": \"Torch\", \"type\": \"spot\", \"color\": [1.0, 0.5, 0.0], "
+               "\"intensity\": 3.0, \"range\": 12.0, "
+               "\"spot\": {\"innerConeAngle\": 0.2, \"outerConeAngle\": 0.5}}\n"
+               "  ]}},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0, 3, 4]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"L1\", \"translation\": [10.0, 0.0, 0.0], \"children\": [1]},\n"
+               "    {\"name\": \"L2\", \"translation\": [0.0, 5.0, 0.0], \"children\": [2]},\n"
+               "    {\"name\": \"L3\", \"translation\": [0.0, 0.0, 2.0], \"mesh\": 0},\n"
+               // 列主序 translate(3,4,5)*scale(2,2,2)：col0(2,0,0,0) col1(0,2,0,0)
+               // col2(0,0,2,0) col3(3,4,5,1)。
+               "    {\"name\": \"MatrixNode\", \"matrix\": "
+               "[2,0,0,0, 0,2,0,0, 0,0,2,0, 3,4,5,1], \"mesh\": 0},\n"
+               "    {\"name\": \"SpotNode\", "
+               "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
+               "  ],\n"
+               "  \"meshes\": [\n"
+               "    {\"name\": \"M\", \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 第三个 fixture：mesh instancing —— 2 个 node 引用**同一** cgltf mesh。
+    // 验证 importer 按指针去重：只写一个 .mesh，两个 entity 的 Renderable 指向同一
+    // mesh 路径（真实 DCC 场景大量用实例化，如 10 棵同款树共享一个 mesh）。
+    void WriteInstancedMeshGltf(const std::string& path)
+    {
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写实例化 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0, 1]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"InstA\", \"translation\": [0.0, 0.0, 0.0], \"mesh\": 0},\n"
+               "    {\"name\": \"InstB\", \"translation\": [3.0, 0.0, 0.0], \"mesh\": 0}\n"
+               "  ],\n"
+               "  \"meshes\": [\n"
+               "    {\"name\": \"Tree\", \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 第五个 fixture：**无 scenes 数组**的 glTF（spec 允许省略 scene/scenes）。
+    // 验证 importer 的 fallback 分支：无 scene 定义时退回"所有 parent-less node 当根"。
+    void WriteNoScenesGltf(const std::string& path)
+    {
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写无 scenes .gltf fixture 应成功");
+        // 故意不写 "scene" / "scenes" key。
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"Lone\", \"translation\": [4.0, 0.0, 0.0], \"mesh\": 0}\n"
+               "  ],\n"
+               "  \"meshes\": [\n"
+               "    {\"name\": \"Solo\", \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 第六个 fixture：**旋转父下的 directional 灯**（lights-only，无 mesh/buffer）——
+    // 验 A1.1 后 importer 的 R-bridging 与"光源消费者读 world rotation"配套。父 RotParent
+    // 绕 +Y 转 90°（glTF quat [x,y,z,w]=[0, √½, 0, √½]）→ 子 ChildSun（directional，无自身
+    // rotation）。glTF 灯沿 node 本地 -Z，父把 (0,0,-1) 转到世界 (-1,0,0)。importer 只写
+    // local rotation（-Z→-Y 桥接），引擎 PropagateWorldTransforms 累积父旋转后，消费者
+    // 同款公式算出的世界光向应 = (-1,0,0)。旧的"world 光向直接编码进 local"会在这里被父
+    // 旋转二次应用得到错误方向 → 本例锁住修正。
+    void WriteRotatedParentLightGltf(const std::string& path)
+    {
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写旋转父灯光 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"extensionsUsed\": [\"KHR_lights_punctual\"],\n"
+               "  \"extensions\": {\"KHR_lights_punctual\": {\"lights\": [\n"
+               "    {\"name\": \"Sun\", \"type\": \"directional\", "
+               "\"color\": [1.0, 1.0, 1.0], \"intensity\": 1.0}\n"
+               "  ]}},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"RotParent\", "
+               "\"rotation\": [0.0, 0.70710678, 0.0, 0.70710678], \"children\": [1]},\n"
+               "    {\"name\": \"ChildSun\", "
+               "\"extensions\": {\"KHR_lights_punctual\": {\"light\": 0}}}\n"
+               "  ]\n"
+               "}\n";
+    }
+
+    // 第七个 fixture：**per-mesh PBR material**（G2）—— 覆盖：
+    //   * 单 material mesh（SoloNode 引用 mesh 0，1 primitive → material "Red"）
+    //   * 多 material mesh（MultiNode 引用 mesh 1，2 primitive → material "Red" / "Blue"）
+    //   * material 去重：material "Red" 被 mesh 0 + mesh 1 的 primitive 0 共用 →
+    //     全局只写一个 <basename>_Red.material（不是每次新建）。
+    // 期望产物：2 个 .material（Red + Blue）；SoloNode 的 Renderable.materialInstanceId
+    // 指向 Red.material；MultiNode 的 SubMeshMaterials slots = [Red.material, Blue.material]。
+    void WriteMaterialSceneGltf(const std::string& path)
+    {
+        // positions 48B（accessor 0）+ idxA 12B（6 idx，accessor 1）+ idxB 6B
+        // （3 idx，accessor 2）。bufferView 0 = pos[0,48)，1 = idxA[48,60)，
+        // 2 = idxB[60,66)。mesh 1 两 primitive 各用一个 index accessor + material。
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写 material 场景 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0, 1]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"SoloNode\",  \"mesh\": 0},\n"
+               "    {\"name\": \"MultiNode\", \"mesh\": 1}\n"
+               "  ],\n"
+               "  \"materials\": [\n"
+               "    {\"name\": \"Red\",  \"pbrMetallicRoughness\": "
+               "{\"baseColorFactor\": [1.0, 0.0, 0.0, 1.0], "
+               "\"metallicFactor\": 0.1, \"roughnessFactor\": 0.7}},\n"
+               "    {\"name\": \"Blue\", \"pbrMetallicRoughness\": "
+               "{\"baseColorFactor\": [0.0, 0.0, 1.0, 1.0], "
+               "\"metallicFactor\": 0.9, \"roughnessFactor\": 0.2}}\n"
+               "  ],\n"
+               "  \"meshes\": [\n"
+               // mesh 0：单 primitive，material 0（Red）。
+               "    {\"name\": \"Solo\", \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1, \"material\": 0}]},\n"
+               // mesh 1：两 primitive，material 0（Red）+ material 1（Blue）。
+               "    {\"name\": \"Multi\", \"primitives\": [\n"
+               "      {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0},\n"
+               "      {\"attributes\": {\"POSITION\": 0}, \"indices\": 2, \"material\": 1}\n"
+               "    ]}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"},\n"
+               "    {\"bufferView\": 2, \"componentType\": 5123, \"count\": 3, "
+               "\"type\": \"SCALAR\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 60, \"byteLength\": 6}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 66, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 第八个 fixture：**glTF cameras**（G3）—— camera-only，无 mesh/buffer。覆盖：
+    //   * 透视相机（全参 yfov/aspectRatio/znear/zfar）
+    //   * 透视相机（仅 yfov/znear，缺 aspectRatio/zfar → 验导入侧默认 16:9 / far 1000）
+    //   * 正交相机（xmag/ymag/znear/zfar → 半宽高映 left/right/bottom/top）
+    // 验 node.camera → Render::Camera component，投影矩阵烘焙正确（与 Camera::Perspective /
+    // Orthographic 工厂逐元素对位）+ Save→Load round-trip 保住 projection。
+    void WriteCameraSceneGltf(const std::string& path)
+    {
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写相机场景 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0, 1, 2]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"PerspCam\", \"translation\": [0.0, 1.0, 5.0], \"camera\": 0},\n"
+               "    {\"name\": \"PerspDefaultCam\", \"camera\": 1},\n"
+               "    {\"name\": \"OrthoCam\", \"camera\": 2}\n"
+               "  ],\n"
+               "  \"cameras\": [\n"
+               "    {\"name\": \"Persp\", \"type\": \"perspective\", \"perspective\": "
+               "{\"yfov\": 0.6981317, \"aspectRatio\": 1.5, \"znear\": 0.1, \"zfar\": 100.0}},\n"
+               "    {\"name\": \"PerspDefault\", \"type\": \"perspective\", \"perspective\": "
+               "{\"yfov\": 0.5, \"znear\": 0.2}},\n"
+               "    {\"name\": \"Ortho\", \"type\": \"orthographic\", \"orthographic\": "
+               "{\"xmag\": 4.0, \"ymag\": 3.0, \"znear\": 0.1, \"zfar\": 50.0}}\n"
+               "  ]\n"
+               "}\n";
+    }
+
+    // 第九个 fixture：**node TRS animation**（DCC→clip 桥）—— 单 node（带 mesh）被一条
+    // translation channel + 一条 rotation channel 驱动（2 帧，LINEAR）。验 importer 把
+    // cgltf animation 解析成 AnimationClip 挂 AnimatorComponent(ClipAnimator)：
+    //   * translation → "position" Vec3 轨道：(0,0,0) @t0 → (2,0,0) @t1
+    //   * rotation    → "rotation.quat" Quat 轨道：identity @t0 → 90°Y @t1（最短弧 slerp）
+    //   * duration = 1.0；Seek(0.5) → position (1,0,0) + rotation 45°Y
+    // buffer 布局（base64，4-byte 对齐，由 tests 内联生成脚本算出）：
+    //   acc0 pos VEC3×4 [0,48) / acc1 idx u16×6 [48,60) / acc2 time f32×2 [60,68) /
+    //   acc3 trans VEC3×2 [68,92) / acc4 rot VEC4×2 [92,124)。
+    void WriteAnimatedNodeGltf(const std::string& path)
+    {
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAA"
+            "AAAAAAAAAAAAAIA/AAAAAPMENT8AAAAA8wQ1Pw==";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写动画 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0]}],\n"
+               "  \"nodes\": [\n"
+               "    {\"name\": \"Spinner\", \"mesh\": 0}\n"
+               "  ],\n"
+               "  \"meshes\": [\n"
+               "    {\"name\": \"Quad\", \"primitives\": [{\"attributes\": "
+               "{\"POSITION\": 0}, \"indices\": 1}]}\n"
+               "  ],\n"
+               "  \"animations\": [\n"
+               "    {\"name\": \"Spin\",\n"
+               "     \"samplers\": [\n"
+               "       {\"input\": 2, \"output\": 3, \"interpolation\": \"LINEAR\"},\n"
+               "       {\"input\": 2, \"output\": 4, \"interpolation\": \"LINEAR\"}\n"
+               "     ],\n"
+               "     \"channels\": [\n"
+               "       {\"sampler\": 0, \"target\": {\"node\": 0, \"path\": \"translation\"}},\n"
+               "       {\"sampler\": 1, \"target\": {\"node\": 0, \"path\": \"rotation\"}}\n"
+               "     ]}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"},\n"
+               "    {\"bufferView\": 2, \"componentType\": 5126, \"count\": 2, "
+               "\"type\": \"SCALAR\", \"min\": [0.0], \"max\": [1.0]},\n"
+               "    {\"bufferView\": 3, \"componentType\": 5126, \"count\": 2, "
+               "\"type\": \"VEC3\"},\n"
+               "    {\"bufferView\": 4, \"componentType\": 5126, \"count\": 2, "
+               "\"type\": \"VEC4\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 60, \"byteLength\": 8},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 68, \"byteLength\": 24},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 92, \"byteLength\": 32}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 124, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
+    Entity FindByName(World& world, const std::string& name)
+    {
+        Entity found = Entity::Invalid();
+        auto   view  = world.Registry().view<SceneNS::NameComponent>();
+        for (auto e : view)
+        {
+            const Entity ent = World::FromEntt(e);
+            const auto*  nc  = world.GetComponent<SceneNS::NameComponent>(ent);
+            if (nc != nullptr && nc->name == name)
+            {
+                found = ent;
+                break;
+            }
+        }
+        return found;
+    }
+
+} // namespace
 
 int main()
 {
@@ -481,7 +479,7 @@ int main()
     const std::string gltfPath = (srcDir / "scene_hier.gltf").generic_string();
     WriteSceneHierarchyGltf(gltfPath);
 
-    auto registry = MakeImportRegistry();
+    auto                         registry = MakeImportRegistry();
     const ImportNS::ImportResult r =
         ImportNS::RunGltfSceneImportToRegistry(gltfPath, *registry);
     assert(r.status == ImportNS::ImportStatus::Success &&
@@ -496,7 +494,7 @@ int main()
                  r.destPath.c_str(), r.message.c_str());
 
     // ===== 每 mesh 单独 .mesh（不塌平）=====
-    const fs::path modelDir = fs::path("assets/Models/scene_hier");
+    const fs::path modelDir   = fs::path("assets/Models/scene_hier");
     const fs::path crateMesh  = modelDir / "scene_hier_Crate.mesh";
     const fs::path barrelMesh = modelDir / "scene_hier_Barrel.mesh";
     assert(fs::exists(crateMesh) && "mesh 0 应单独写 scene_hier_Crate.mesh");
@@ -506,15 +504,19 @@ int main()
 
     // ===== Scene::Load round-trip：实体数 / 父子关系 / transform / renderable =====
     {
-        World world;
+        World                world;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = registry.get();
-        auto loadRes = SceneNS::Load(r.destPath, world, opts);
+        auto loadRes       = SceneNS::Load(r.destPath, world, opts);
         assert(loadRes.IsOk() && "产出的 .scene.json 应能被 Scene::Load 加载");
 
         // 5 个实体（RootGroup + ChildA + ChildB + SunLight + Lamp）。
         std::size_t named = 0;
-        for (auto e : world.Registry().view<SceneNS::NameComponent>()) { (void)e; ++named; }
+        for (auto e : world.Registry().view<SceneNS::NameComponent>())
+        {
+            (void)e;
+            ++named;
+        }
         assert(named == 5 && "应有 5 个实体（保留 node 树，含 group 根 + 2 灯光 node）");
 
         const Entity root   = FindByName(world, "RootGroup");
@@ -654,14 +656,14 @@ int main()
             std::ofstream ofs(scenePath, std::ios::binary | std::ios::trunc);
             ofs << "MANUAL_EDIT_MARKER";
         }
-        auto reg = MakeImportRegistry();
+        auto                         reg = MakeImportRegistry();
         const ImportNS::ImportResult r2 =
             ImportNS::RunGltfSceneImportToRegistry(gltfPath, *reg);
         assert(r2.status == ImportNS::ImportStatus::Success &&
                "重导未改源应 Success（hash 短路）");
         assert(r2.message.find("unchanged") != std::string::npos &&
                "重导未改源应走 hash 短路（message 含 unchanged）");
-        std::ifstream ifs(scenePath, std::ios::binary);
+        std::ifstream     ifs(scenePath, std::ios::binary);
         const std::string content((std::istreambuf_iterator<char>(ifs)),
                                   std::istreambuf_iterator<char>());
         assert(content == "MANUAL_EDIT_MARKER" &&
@@ -675,26 +677,30 @@ int main()
         const std::string mPath = (srcDir / "matrix_deep.gltf").generic_string();
         WriteMatrixAndDeepNestGltf(mPath);
 
-        auto reg2 = MakeImportRegistry();
+        auto                         reg2 = MakeImportRegistry();
         const ImportNS::ImportResult r2 =
             ImportNS::RunGltfSceneImportToRegistry(mPath, *reg2);
         assert(r2.status == ImportNS::ImportStatus::Success && "matrix/深嵌套 导入应 Success");
         assert(fs::exists(r2.destPath) && "matrix_deep.scene.json 应落盘");
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg2.get();
-        auto lr = SceneNS::Load(r2.destPath, w, opts);
+        auto lr            = SceneNS::Load(r2.destPath, w, opts);
         assert(lr.IsOk() && "matrix_deep scene 应能 Load");
 
         std::size_t cnt = 0;
-        for (auto e : w.Registry().view<SceneNS::NameComponent>()) { (void)e; ++cnt; }
+        for (auto e : w.Registry().view<SceneNS::NameComponent>())
+        {
+            (void)e;
+            ++cnt;
+        }
         assert(cnt == 5 && "应有 5 实体（L1/L2/L3/MatrixNode/SpotNode）");
 
         // L3：importer 写 **local** = (0,0,2)；其 world 由引擎累积穿 2 层祖先
         // L1(10,0,0)→L2(0,5,0)→L3(0,0,2) = (10,5,2)（下方 end-to-end 验）。
-        const Entity l3 = FindByName(w, "L3");
-        const auto* l3T = w.GetComponent<SceneNS::TransformComponent>(l3);
+        const Entity l3  = FindByName(w, "L3");
+        const auto*  l3T = w.GetComponent<SceneNS::TransformComponent>(l3);
         assert(l3T != nullptr &&
                std::fabs(l3T->position.x - 0.0f) < 1e-3f &&
                std::fabs(l3T->position.y - 0.0f) < 1e-3f &&
@@ -711,8 +717,8 @@ int main()
 
         // MatrixNode：has_matrix 列主序 translate(3,4,5)*scale(2,2,2) →
         // decompose position (3,4,5) + scale (2,2,2)。
-        const Entity mn = FindByName(w, "MatrixNode");
-        const auto* mnT = w.GetComponent<SceneNS::TransformComponent>(mn);
+        const Entity mn  = FindByName(w, "MatrixNode");
+        const auto*  mnT = w.GetComponent<SceneNS::TransformComponent>(mn);
         assert(mnT != nullptr &&
                std::fabs(mnT->position.x - 3.0f) < 1e-3f &&
                std::fabs(mnT->position.y - 4.0f) < 1e-3f &&
@@ -725,15 +731,15 @@ int main()
 
         // SpotNode：SpotLight，cone 角映射 + 方向编码（无 rotation → (0,0,-1)）。
         namespace RenderNS = ::Orange::Engine::Render;
-        const Entity spot = FindByName(w, "SpotNode");
-        const auto* sl = w.GetComponent<RenderNS::SpotLight>(spot);
+        const Entity spot  = FindByName(w, "SpotNode");
+        const auto*  sl    = w.GetComponent<RenderNS::SpotLight>(spot);
         assert(sl != nullptr && "SpotNode 应有 SpotLight component");
         assert(std::fabs(sl->intensity - 3.0f / 683.0f) < 1e-4f &&
                std::fabs(sl->range - 12.0f) < 1e-4f &&
                std::fabs(sl->innerConeAngle - 0.2f) < 1e-4f &&
                std::fabs(sl->outerConeAngle - 0.5f) < 1e-4f &&
                "SpotLight intensity(÷683)/range/cone 应 = glTF (3÷683/12/0.2/0.5)");
-        const auto* spotT = w.GetComponent<SceneNS::TransformComponent>(spot);
+        const auto*     spotT   = w.GetComponent<SceneNS::TransformComponent>(spot);
         const glm::vec3 spotDir = RenderNS::ComputeSpotLightWorldDir(spotT->rotation);
         assert(std::fabs(spotDir.z - (-1.0f)) < 1e-3f &&
                std::fabs(spotDir.x) < 1e-3f && std::fabs(spotDir.y) < 1e-3f &&
@@ -749,7 +755,7 @@ int main()
         const std::string iPath = (srcDir / "instanced.gltf").generic_string();
         WriteInstancedMeshGltf(iPath);
 
-        auto reg = MakeImportRegistry();
+        auto                         reg = MakeImportRegistry();
         const ImportNS::ImportResult ri =
             ImportNS::RunGltfSceneImportToRegistry(iPath, *reg);
         assert(ri.status == ImportNS::ImportStatus::Success && "实例化导入应 Success");
@@ -757,16 +763,16 @@ int main()
         assert(ri.message.find("meshes=1") != std::string::npos &&
                "2 node 共用同一 mesh → 只写 1 个 .mesh（按指针去重）");
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg.get();
-        auto lr = SceneNS::Load(ri.destPath, w, opts);
+        auto lr            = SceneNS::Load(ri.destPath, w, opts);
         assert(lr.IsOk() && "实例化 scene 应能 Load");
 
-        const Entity a = FindByName(w, "InstA");
-        const Entity b = FindByName(w, "InstB");
-        const auto* aR = w.GetComponent<::Orange::Engine::Render::RenderableComponent>(a);
-        const auto* bR = w.GetComponent<::Orange::Engine::Render::RenderableComponent>(b);
+        const Entity a  = FindByName(w, "InstA");
+        const Entity b  = FindByName(w, "InstB");
+        const auto*  aR = w.GetComponent<::Orange::Engine::Render::RenderableComponent>(a);
+        const auto*  bR = w.GetComponent<::Orange::Engine::Render::RenderableComponent>(b);
         assert(aR != nullptr && bR != nullptr &&
                aR->mesh.IsValid() && bR->mesh.IsValid() &&
                "两实例都应有有效 Renderable");
@@ -776,7 +782,10 @@ int main()
         std::size_t meshFiles = 0;
         for (const auto& de : fs::directory_iterator(fs::path("assets/Models/instanced")))
         {
-            if (de.path().extension() == ".mesh") { ++meshFiles; }
+            if (de.path().extension() == ".mesh")
+            {
+                ++meshFiles;
+            }
         }
         assert(meshFiles == 1 && "实例化只应产出 1 个 .mesh 文件（不是 2 份）");
 
@@ -789,24 +798,28 @@ int main()
         const std::string mutPath = (srcDir / "mutate.gltf").generic_string();
         // v1：5 实体的层级场景。
         WriteSceneHierarchyGltf(mutPath);
-        auto reg1 = MakeImportRegistry();
-        const auto rv1 = ImportNS::RunGltfSceneImportToRegistry(mutPath, *reg1);
+        auto       reg1 = MakeImportRegistry();
+        const auto rv1  = ImportNS::RunGltfSceneImportToRegistry(mutPath, *reg1);
         assert(rv1.status == ImportNS::ImportStatus::Success && "v1 导入应 Success");
         // v2：把同一源文件覆盖成 2 实体的实例化场景（源 hash 变）。
         WriteInstancedMeshGltf(mutPath);
-        auto reg2 = MakeImportRegistry();
-        const auto rv2 = ImportNS::RunGltfSceneImportToRegistry(mutPath, *reg2);
+        auto       reg2 = MakeImportRegistry();
+        const auto rv2  = ImportNS::RunGltfSceneImportToRegistry(mutPath, *reg2);
         assert(rv2.status == ImportNS::ImportStatus::Success && "v2 导入应 Success");
         assert(rv2.message.find("unchanged") == std::string::npos &&
                "源改了 → 不应 over-skip（hash 不匹配应真重导，而非永远跳过）");
         // 重导后 scene.json 反映 v2（2 实体，而非 v1 残留的 5）。
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg2.get();
-        auto lr = SceneNS::Load(rv2.destPath, w, opts);
+        auto lr            = SceneNS::Load(rv2.destPath, w, opts);
         assert(lr.IsOk() && "v2 scene 应能 Load");
         std::size_t cnt = 0;
-        for (auto e : w.Registry().view<SceneNS::NameComponent>()) { (void)e; ++cnt; }
+        for (auto e : w.Registry().view<SceneNS::NameComponent>())
+        {
+            (void)e;
+            ++cnt;
+        }
         assert(cnt == 2 && "重导后应是 v2 的 2 实体（确认真重导覆盖了 v1）");
         std::fprintf(stdout,
                      "  [PASS] hash-skip 正确性：源改了真重导（5→2 实体），不 over-skip\n");
@@ -816,15 +829,15 @@ int main()
     {
         const std::string nsPath = (srcDir / "no_scenes.gltf").generic_string();
         WriteNoScenesGltf(nsPath);
-        auto reg = MakeImportRegistry();
-        const auto rn = ImportNS::RunGltfSceneImportToRegistry(nsPath, *reg);
+        auto       reg = MakeImportRegistry();
+        const auto rn  = ImportNS::RunGltfSceneImportToRegistry(nsPath, *reg);
         assert(rn.status == ImportNS::ImportStatus::Success &&
                "无 scenes 的 glTF 应走 fallback 成功导入（不崩）");
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg.get();
-        auto lr = SceneNS::Load(rn.destPath, w, opts);
+        auto lr            = SceneNS::Load(rn.destPath, w, opts);
         assert(lr.IsOk() && "no_scenes scene 应能 Load");
         const Entity lone = FindByName(w, "Lone");
         assert(w.IsValid(lone) && "fallback 应把 parent-less node 'Lone' 当根导入");
@@ -842,15 +855,15 @@ int main()
     {
         const std::string rpPath = (srcDir / "rot_parent_light.gltf").generic_string();
         WriteRotatedParentLightGltf(rpPath);
-        auto reg = MakeImportRegistry();
-        const auto rp = ImportNS::RunGltfSceneImportToRegistry(rpPath, *reg);
+        auto       reg = MakeImportRegistry();
+        const auto rp  = ImportNS::RunGltfSceneImportToRegistry(rpPath, *reg);
         assert(rp.status == ImportNS::ImportStatus::Success &&
                "旋转父灯光 scene 应导入 Success");
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg.get();
-        auto lr = SceneNS::Load(rp.destPath, w, opts);
+        auto lr            = SceneNS::Load(rp.destPath, w, opts);
         assert(lr.IsOk() && "旋转父灯光 scene 应能 Load");
 
         const Entity sun = FindByName(w, "ChildSun");
@@ -882,7 +895,7 @@ int main()
         const std::string mPath = (srcDir / "mat_scene.gltf").generic_string();
         WriteMaterialSceneGltf(mPath);
 
-        auto reg = MakeImportRegistry();
+        auto                         reg = MakeImportRegistry();
         const ImportNS::ImportResult rm =
             ImportNS::RunGltfSceneImportToRegistry(mPath, *reg);
         assert(rm.status == ImportNS::ImportStatus::Success && "material 场景导入应 Success");
@@ -893,14 +906,17 @@ int main()
 
         // ----- .material 文件落盘 + 去重：恰好 2 个 .material（Red + Blue）-----
         const fs::path matModelDir = fs::path("assets/Models/mat_scene");
-        const fs::path redMat  = matModelDir / "mat_scene_Red.material";
-        const fs::path blueMat = matModelDir / "mat_scene_Blue.material";
+        const fs::path redMat      = matModelDir / "mat_scene_Red.material";
+        const fs::path blueMat     = matModelDir / "mat_scene_Blue.material";
         assert(fs::exists(redMat) && "Red material 应写出 mat_scene_Red.material");
         assert(fs::exists(blueMat) && "Blue material 应写出 mat_scene_Blue.material");
         std::size_t matFiles = 0;
         for (const auto& de : fs::directory_iterator(matModelDir))
         {
-            if (de.path().extension() == ".material") { ++matFiles; }
+            if (de.path().extension() == ".material")
+            {
+                ++matFiles;
+            }
         }
         assert(matFiles == 2 &&
                "恰好 2 个 .material（Red 被两 mesh 共用，全局去重不重复写）");
@@ -910,7 +926,7 @@ int main()
         // ----- 原始 scene.json 文本断言：material id 用 .material 路径 -----
         // Save 把 sentinel materialInstance 经 namedMaterialInstances 反查成
         // .material 路径写进 materialInstanceId / subMeshMaterials slots。
-        std::ifstream ifs(rm.destPath, std::ios::binary);
+        std::ifstream     ifs(rm.destPath, std::ios::binary);
         const std::string json((std::istreambuf_iterator<char>(ifs)),
                                std::istreambuf_iterator<char>());
         assert(json.find("mat_scene_Red.material") != std::string::npos &&
@@ -928,21 +944,25 @@ int main()
         //       instance），断言单 material 实体 materialInstance 非空 + 多
         //       material 实体 SubMeshMaterials slots 各段材质正确 -----
         std::vector<std::unique_ptr<RenderNS::MaterialInstance>> owned;
-        std::map<std::string, RenderNS::MaterialInstance*> byPath;
-        auto resolver = [&](const std::string& matId) -> RenderNS::MaterialInstance* {
+        std::map<std::string, RenderNS::MaterialInstance*>       byPath;
+        auto                                                     resolver = [&](const std::string& matId) -> RenderNS::MaterialInstance*
+        {
             auto it = byPath.find(matId);
-            if (it != byPath.end()) { return it->second; }
+            if (it != byPath.end())
+            {
+                return it->second;
+            }
             owned.push_back(std::make_unique<RenderNS::MaterialInstance>(nullptr));
             RenderNS::MaterialInstance* raw = owned.back().get();
-            byPath[matId] = raw;
+            byPath[matId]                   = raw;
             return raw;
         };
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry    = reg.get();
         opts.materialResolver = resolver;
-        auto lr = SceneNS::Load(rm.destPath, w, opts);
+        auto lr               = SceneNS::Load(rm.destPath, w, opts);
         assert(lr.IsOk() && "material 场景应能 Load");
 
         // SoloNode：单 material → Renderable.materialInstance 非空（= Red sentinel）。
@@ -997,24 +1017,28 @@ int main()
         const std::string cPath = (srcDir / "camera_scene.gltf").generic_string();
         WriteCameraSceneGltf(cPath);
 
-        auto reg = MakeImportRegistry();
+        auto                         reg = MakeImportRegistry();
         const ImportNS::ImportResult rc =
             ImportNS::RunGltfSceneImportToRegistry(cPath, *reg);
         assert(rc.status == ImportNS::ImportStatus::Success && "相机场景导入应 Success");
         assert(rc.message.find("cameras=3") != std::string::npos &&
                "result message 应含 cameras=3（3 个相机 node 被计数）");
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg.get();
-        auto lr = SceneNS::Load(rc.destPath, w, opts);
+        auto lr            = SceneNS::Load(rc.destPath, w, opts);
         assert(lr.IsOk() && "相机场景应能 Load（Camera component round-trip）");
 
         // 逐元素比较投影矩阵（serialization round-trip 后用 1e-4 容差）。
-        auto projMatches = [](const glm::mat4& a, const glm::mat4& b) -> bool {
+        auto projMatches = [](const glm::mat4& a, const glm::mat4& b) -> bool
+        {
             for (int c = 0; c < 4; ++c)
                 for (int r = 0; r < 4; ++r)
-                    if (std::fabs(a[c][r] - b[c][r]) > 1e-4f) { return false; }
+                    if (std::fabs(a[c][r] - b[c][r]) > 1e-4f)
+                    {
+                        return false;
+                    }
             return true;
         };
 
@@ -1037,7 +1061,7 @@ int main()
 
         // PerspDefaultCam：缺 aspectRatio/zfar → 导入侧默认 16:9 / far 1000。
         const Entity perspDef = FindByName(w, "PerspDefaultCam");
-        const auto* pdc = w.GetComponent<Camera>(perspDef);
+        const auto*  pdc      = w.GetComponent<Camera>(perspDef);
         assert(pdc != nullptr && "PerspDefaultCam 应有 Camera component");
         const glm::mat4 expectDef =
             Camera::Perspective(0.5f, 16.0f / 9.0f, 0.2f, 1000.0f).projection;
@@ -1046,7 +1070,7 @@ int main()
 
         // OrthoCam：xmag 4 / ymag 3 → Orthographic(-4,4,-3,3, 0.1, 50)（半宽高映盒子）。
         const Entity ortho = FindByName(w, "OrthoCam");
-        const auto* oc = w.GetComponent<Camera>(ortho);
+        const auto*  oc    = w.GetComponent<Camera>(ortho);
         assert(oc != nullptr && "OrthoCam 应有 Camera component");
         const glm::mat4 expectOrtho =
             Camera::Orthographic(-4.0f, 4.0f, -3.0f, 3.0f, 0.1f, 50.0f).projection;
@@ -1066,7 +1090,7 @@ int main()
         const std::string aPath = (srcDir / "animated_node.gltf").generic_string();
         WriteAnimatedNodeGltf(aPath);
 
-        auto reg = MakeImportRegistry();
+        auto                         reg = MakeImportRegistry();
         const ImportNS::ImportResult ra =
             ImportNS::RunGltfSceneImportToRegistry(aPath, *reg);
         assert(ra.status == ImportNS::ImportStatus::Success && "动画场景导入应 Success");
@@ -1078,10 +1102,10 @@ int main()
 
         // Save→Load round-trip：Scene::Load 重建 ClipAnimator（消费内联 clipJson）+
         // SetTarget 到本 entity Transform。取出 ClipAnimator，Seek 后断言插值数值。
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg.get();
-        auto lr = SceneNS::Load(ra.destPath, w, opts);
+        auto lr            = SceneNS::Load(ra.destPath, w, opts);
         assert(lr.IsOk() && "动画场景应能 Load（AnimatorComponent/clipJson round-trip）");
 
         const Entity spinner = FindByName(w, "Spinner");

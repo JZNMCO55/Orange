@@ -8,74 +8,74 @@
 namespace Orange::Engine::Render
 {
 
-void PostProcessChain::AddPass(std::unique_ptr<IPostProcessPass> pass)
-{
-    if (!pass)
+    void PostProcessChain::AddPass(std::unique_ptr<IPostProcessPass> pass)
     {
-        return;
+        if (!pass)
+        {
+            return;
+        }
+        mPasses.push_back(std::move(pass));
     }
-    mPasses.push_back(std::move(pass));
-}
 
-void PostProcessChain::RemoveAt(std::size_t index)
-{
-    if (index >= mPasses.size())
+    void PostProcessChain::RemoveAt(std::size_t index)
     {
-        return;
+        if (index >= mPasses.size())
+        {
+            return;
+        }
+        mPasses.erase(mPasses.begin() + static_cast<std::ptrdiff_t>(index));
     }
-    mPasses.erase(mPasses.begin() + static_cast<std::ptrdiff_t>(index));
-}
 
-void PostProcessChain::Clear() noexcept
-{
-    mPasses.clear();
-}
-
-std::size_t PostProcessChain::PassCount() const noexcept
-{
-    return mPasses.size();
-}
-
-IPostProcessPass* PostProcessChain::PassAt(std::size_t index) noexcept
-{
-    if (index >= mPasses.size())
+    void PostProcessChain::Clear() noexcept
     {
+        mPasses.clear();
+    }
+
+    std::size_t PostProcessChain::PassCount() const noexcept
+    {
+        return mPasses.size();
+    }
+
+    IPostProcessPass* PostProcessChain::PassAt(std::size_t index) noexcept
+    {
+        if (index >= mPasses.size())
+        {
+            return nullptr;
+        }
+        return mPasses[index].get();
+    }
+
+    const IPostProcessPass* PostProcessChain::PassAt(std::size_t index) const noexcept
+    {
+        if (index >= mPasses.size())
+        {
+            return nullptr;
+        }
+        return mPasses[index].get();
+    }
+
+    IPostProcessPass* PostProcessChain::FindByName(std::string_view name) noexcept
+    {
+        for (auto& p : mPasses)
+        {
+            if (p && std::string_view(p->Name()) == name)
+            {
+                return p.get();
+            }
+        }
         return nullptr;
     }
-    return mPasses[index].get();
-}
 
-const IPostProcessPass* PostProcessChain::PassAt(std::size_t index) const noexcept
-{
-    if (index >= mPasses.size())
+    const IPostProcessPass* PostProcessChain::FindByName(std::string_view name) const noexcept
     {
+        for (const auto& p : mPasses)
+        {
+            if (p && std::string_view(p->Name()) == name)
+            {
+                return p.get();
+            }
+        }
         return nullptr;
     }
-    return mPasses[index].get();
-}
 
-IPostProcessPass* PostProcessChain::FindByName(std::string_view name) noexcept
-{
-    for (auto& p : mPasses)
-    {
-        if (p && std::string_view(p->Name()) == name)
-        {
-            return p.get();
-        }
-    }
-    return nullptr;
-}
-
-const IPostProcessPass* PostProcessChain::FindByName(std::string_view name) const noexcept
-{
-    for (const auto& p : mPasses)
-    {
-        if (p && std::string_view(p->Name()) == name)
-        {
-            return p.get();
-        }
-    }
-    return nullptr;
-}
-
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render

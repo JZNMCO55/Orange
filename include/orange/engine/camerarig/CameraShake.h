@@ -23,55 +23,55 @@
 namespace Orange::Engine::CameraRig
 {
 
-// 相机抖动参数。默认值给一个"中等爆炸"档 (满 trauma 时抖 0.5 世界单位、1 秒衰减完)。
-struct ShakeParams
-{
-    // 满强度 (shake=1) 时的最大平移偏移 (世界单位，per-axis)。
-    glm::vec2 maxTranslation{0.5f, 0.5f};
-    // 满强度时的最大 roll (弧度)；2.5D 相机可用，纯 2D 置 0。
-    float         maxRoll = 0.0f;
-    // trauma 每秒线性衰减量 (1.0 = 满到 0 需 1 秒)。<=0 → 不衰减 (需手动清)。
-    float         traumaDecay = 1.0f;
-    // 抖动频率 (Hz)，决定值噪声推进速度。越大越"高频神经质"。
-    float         frequency = 25.0f;
-    // 强度曲线指数：shake = trauma^exponent。2~3 常用 (越大尾巴收得越快)。
-    float         traumaExponent = 2.0f;
-    // 值噪声相位种子 (不同实例给不同 seed → 抖动不同步)。
-    std::uint32_t seed = 1u;
-};
+    // 相机抖动参数。默认值给一个"中等爆炸"档 (满 trauma 时抖 0.5 世界单位、1 秒衰减完)。
+    struct ShakeParams
+    {
+        // 满强度 (shake=1) 时的最大平移偏移 (世界单位，per-axis)。
+        glm::vec2 maxTranslation{0.5f, 0.5f};
+        // 满强度时的最大 roll (弧度)；2.5D 相机可用，纯 2D 置 0。
+        float maxRoll = 0.0f;
+        // trauma 每秒线性衰减量 (1.0 = 满到 0 需 1 秒)。<=0 → 不衰减 (需手动清)。
+        float traumaDecay = 1.0f;
+        // 抖动频率 (Hz)，决定值噪声推进速度。越大越"高频神经质"。
+        float frequency = 25.0f;
+        // 强度曲线指数：shake = trauma^exponent。2~3 常用 (越大尾巴收得越快)。
+        float traumaExponent = 2.0f;
+        // 值噪声相位种子 (不同实例给不同 seed → 抖动不同步)。
+        std::uint32_t seed = 1u;
+    };
 
-// 一帧的抖动输出：平移偏移 + roll，叠加到相机位置 / 朝向上。
-struct ShakeOffset
-{
-    glm::vec2 translation{0.0f, 0.0f};
-    float     roll = 0.0f;
-};
+    // 一帧的抖动输出：平移偏移 + roll，叠加到相机位置 / 朝向上。
+    struct ShakeOffset
+    {
+        glm::vec2 translation{0.0f, 0.0f};
+        float     roll = 0.0f;
+    };
 
-// 基于 trauma 的相机抖动控制器。
-class ORANGE_ENGINE_API CameraShake2D
-{
-public:
-    CameraShake2D() = default;
-    explicit CameraShake2D(const ShakeParams& params) : mParams(params) {}
+    // 基于 trauma 的相机抖动控制器。
+    class ORANGE_ENGINE_API CameraShake2D
+    {
+    public:
+        CameraShake2D() = default;
+        explicit CameraShake2D(const ShakeParams& params) : mParams(params) {}
 
-    void               SetParams(const ShakeParams& params) { mParams = params; }
-    const ShakeParams& GetParams() const noexcept { return mParams; }
+        void               SetParams(const ShakeParams& params) { mParams = params; }
+        const ShakeParams& GetParams() const noexcept { return mParams; }
 
-    // 灌 trauma (受伤 / 爆炸 / 落地冲击等触发)；累加后钳到 [0,1]。负值当 0 (不减 trauma)。
-    void AddTrauma(float amount) noexcept;
-    // 直接置 trauma (钳 [0,1])；SetTrauma(0) = 立即停抖。
-    void SetTrauma(float trauma) noexcept;
-    float GetTrauma() const noexcept { return mTrauma; }
+        // 灌 trauma (受伤 / 爆炸 / 落地冲击等触发)；累加后钳到 [0,1]。负值当 0 (不减 trauma)。
+        void AddTrauma(float amount) noexcept;
+        // 直接置 trauma (钳 [0,1])；SetTrauma(0) = 立即停抖。
+        void  SetTrauma(float trauma) noexcept;
+        float GetTrauma() const noexcept { return mTrauma; }
 
-    // 推进一帧 (dt 秒)：累计时间前进、trauma 衰减，返回当前抖动偏移。
-    // trauma=0 时返回零偏移 (无抖动)。dt<=0 时不推进时间 / 不衰减，仍按当前时间返回偏移。
-    ShakeOffset Update(float dt) noexcept;
+        // 推进一帧 (dt 秒)：累计时间前进、trauma 衰减，返回当前抖动偏移。
+        // trauma=0 时返回零偏移 (无抖动)。dt<=0 时不推进时间 / 不衰减，仍按当前时间返回偏移。
+        ShakeOffset Update(float dt) noexcept;
 
-private:
-    ShakeParams mParams{};
-    float       mTrauma = 0.0f;
-    float       mTime   = 0.0f;  // 累计时间 (驱动值噪声相位)
-};
+    private:
+        ShakeParams mParams{};
+        float       mTrauma = 0.0f;
+        float       mTime   = 0.0f; // 累计时间 (驱动值噪声相位)
+    };
 
 } // namespace Orange::Engine::CameraRig
 

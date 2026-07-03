@@ -28,7 +28,7 @@
 // 的实现在 .cpp（取 ofbx 声明那一侧），头里只暴露纯数据 + 顶点 / 法线 / 矩阵共轭 API。
 // ---------------------------------------------------------------------------
 
-#include <orange/engine/asset/MeshAsset.h>  // VertexPosition3 / VertexNormal3
+#include <orange/engine/asset/MeshAsset.h> // VertexPosition3 / VertexNormal3
 
 #include <glm/mat4x4.hpp>
 
@@ -36,73 +36,79 @@
 
 namespace ofbx
 {
-struct GlobalSettings;
+    struct GlobalSettings;
 }
 
 namespace Orange::Editor::Import
 {
 
-struct AxisConverter
-{
-    // 旋转矩阵按行存（rowX / rowY / rowZ 是输出各分量对输入的线性组合）。
-    float rowX[3]{1.0f, 0.0f, 0.0f};
-    float rowY[3]{0.0f, 1.0f, 0.0f};
-    float rowZ[3]{0.0f, 0.0f, 1.0f};
-    float unitScale{1.0f};  // FBX 单位 → 米
-
-    ::Orange::Engine::Asset::VertexPosition3 Position(double x, double y,
-                                                      double z) const
+    struct AxisConverter
     {
-        const float fx = static_cast<float>(x);
-        const float fy = static_cast<float>(y);
-        const float fz = static_cast<float>(z);
-        ::Orange::Engine::Asset::VertexPosition3 p;
-        p.x = (rowX[0] * fx + rowX[1] * fy + rowX[2] * fz) * unitScale;
-        p.y = (rowY[0] * fx + rowY[1] * fy + rowY[2] * fz) * unitScale;
-        p.z = (rowZ[0] * fx + rowZ[1] * fy + rowZ[2] * fz) * unitScale;
-        return p;
-    }
+        // 旋转矩阵按行存（rowX / rowY / rowZ 是输出各分量对输入的线性组合）。
+        float rowX[3]{1.0f, 0.0f, 0.0f};
+        float rowY[3]{0.0f, 1.0f, 0.0f};
+        float rowZ[3]{0.0f, 0.0f, 1.0f};
+        float unitScale{1.0f}; // FBX 单位 → 米
 
-    ::Orange::Engine::Asset::VertexNormal3 Normal(double x, double y,
-                                                  double z) const
-    {
-        const float fx = static_cast<float>(x);
-        const float fy = static_cast<float>(y);
-        const float fz = static_cast<float>(z);
-        ::Orange::Engine::Asset::VertexNormal3 n;
-        n.x = rowX[0] * fx + rowX[1] * fy + rowX[2] * fz;
-        n.y = rowY[0] * fx + rowY[1] * fy + rowY[2] * fz;
-        n.z = rowZ[0] * fx + rowZ[1] * fy + rowZ[2] * fz;
-        const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-        if (len > 1e-8f)
+        ::Orange::Engine::Asset::VertexPosition3 Position(double x, double y,
+                                                          double z) const
         {
-            n.x /= len;
-            n.y /= len;
-            n.z /= len;
+            const float                              fx = static_cast<float>(x);
+            const float                              fy = static_cast<float>(y);
+            const float                              fz = static_cast<float>(z);
+            ::Orange::Engine::Asset::VertexPosition3 p;
+            p.x = (rowX[0] * fx + rowX[1] * fy + rowX[2] * fz) * unitScale;
+            p.y = (rowY[0] * fx + rowY[1] * fy + rowY[2] * fz) * unitScale;
+            p.z = (rowZ[0] * fx + rowZ[1] * fy + rowZ[2] * fz) * unitScale;
+            return p;
         }
-        return n;
-    }
 
-    // 换轴的 3x3 旋转 R（齐次 4x4，平移 0）。scene importer 对 node local
-    // transform 做基变换共轭 R·M·R⁻¹ 时取它（不含 unitScale —— 共轭是纯旋转的
-    // 相似变换，平移分量另行按 R 旋转 + unitScale 缩放，见 ConjugateNodeLocal）。
-    glm::mat4 RotationMat4() const
-    {
-        glm::mat4 r(1.0f);
-        // glm 列主序：r[col][row]。R 的第 row 行 = rowX/rowY/rowZ。
-        r[0][0] = rowX[0]; r[1][0] = rowX[1]; r[2][0] = rowX[2];
-        r[0][1] = rowY[0]; r[1][1] = rowY[1]; r[2][1] = rowY[2];
-        r[0][2] = rowZ[0]; r[1][2] = rowZ[1]; r[2][2] = rowZ[2];
-        return r;
-    }
-};
+        ::Orange::Engine::Asset::VertexNormal3 Normal(double x, double y,
+                                                      double z) const
+        {
+            const float                            fx = static_cast<float>(x);
+            const float                            fy = static_cast<float>(y);
+            const float                            fz = static_cast<float>(z);
+            ::Orange::Engine::Asset::VertexNormal3 n;
+            n.x             = rowX[0] * fx + rowX[1] * fy + rowX[2] * fz;
+            n.y             = rowY[0] * fx + rowY[1] * fy + rowY[2] * fz;
+            n.z             = rowZ[0] * fx + rowZ[1] * fy + rowZ[2] * fz;
+            const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+            if (len > 1e-8f)
+            {
+                n.x /= len;
+                n.y /= len;
+                n.z /= len;
+            }
+            return n;
+        }
 
-// 从 GlobalSettings 构造换轴器。UpAxis 决定换轴矩阵；unitScale = importScale
-// （默认 1.0 = 信任已烘米；真 cm 文件传 ≈0.01）。实现在 FbxAxisConverter.cpp
-// （取 ofbx 声明那一侧），会日志打印文件的 UnitScaleFactor 供调用方判断该传什么。
-AxisConverter MakeAxisConverter(const ofbx::GlobalSettings* settings,
-                                float importScale = 1.0f);
+        // 换轴的 3x3 旋转 R（齐次 4x4，平移 0）。scene importer 对 node local
+        // transform 做基变换共轭 R·M·R⁻¹ 时取它（不含 unitScale —— 共轭是纯旋转的
+        // 相似变换，平移分量另行按 R 旋转 + unitScale 缩放，见 ConjugateNodeLocal）。
+        glm::mat4 RotationMat4() const
+        {
+            glm::mat4 r(1.0f);
+            // glm 列主序：r[col][row]。R 的第 row 行 = rowX/rowY/rowZ。
+            r[0][0] = rowX[0];
+            r[1][0] = rowX[1];
+            r[2][0] = rowX[2];
+            r[0][1] = rowY[0];
+            r[1][1] = rowY[1];
+            r[2][1] = rowY[2];
+            r[0][2] = rowZ[0];
+            r[1][2] = rowZ[1];
+            r[2][2] = rowZ[2];
+            return r;
+        }
+    };
 
-}  // namespace Orange::Editor::Import
+    // 从 GlobalSettings 构造换轴器。UpAxis 决定换轴矩阵；unitScale = importScale
+    // （默认 1.0 = 信任已烘米；真 cm 文件传 ≈0.01）。实现在 FbxAxisConverter.cpp
+    // （取 ofbx 声明那一侧），会日志打印文件的 UnitScaleFactor 供调用方判断该传什么。
+    AxisConverter MakeAxisConverter(const ofbx::GlobalSettings* settings,
+                                    float                       importScale = 1.0f);
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_FBX_AXIS_CONVERTER_H
+} // namespace Orange::Editor::Import
+
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_FBX_AXIS_CONVERTER_H

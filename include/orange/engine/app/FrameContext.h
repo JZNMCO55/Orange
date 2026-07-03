@@ -26,19 +26,19 @@
 namespace Orange::Engine
 {
 
-namespace Platform
-{
-class Window;
-}
+    namespace Platform
+    {
+        class Window;
+    }
 
-struct FrameContext
-{
-    TimeStamp        time{};
-    std::uint32_t    framebufferWidth{0};
-    std::uint32_t    framebufferHeight{0};
-    Platform::Window* pWindow{nullptr};
-};
+    struct FrameContext
+    {
+        TimeStamp         time{};
+        std::uint32_t     framebufferWidth{0};
+        std::uint32_t     framebufferHeight{0};
+        Platform::Window* pWindow{nullptr};
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
-#endif  // ORANGE_ENGINE_APP_FRAME_CONTEXT_H
+#endif // ORANGE_ENGINE_APP_FRAME_CONTEXT_H

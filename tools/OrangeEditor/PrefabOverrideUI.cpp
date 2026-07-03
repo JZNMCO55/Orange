@@ -1,7 +1,7 @@
 #include "PrefabOverrideUI.h"
 
 #include "EditorHost.h"
-#include "render/ThumbnailService.h"  // Invalidate（apply 重写 .prefab 后失效旧缩略图）
+#include "render/ThumbnailService.h" // Invalidate（apply 重写 .prefab 后失效旧缩略图）
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/PrefabAsset.h>
@@ -52,280 +52,365 @@
 namespace Orange::Editor::Prefab
 {
 
-namespace
-{
-
-namespace EScene = Orange::Engine::Scene;
-using Orange::Engine::Entity;
-using Orange::Engine::World;
-using Orange::Engine::Asset::AssetHandle;
-using Orange::Engine::Asset::PrefabAsset;
-
-// 当帧 override 叶子集缓存（BeginFrameForEntity 填，IsFieldOverridden /
-// SyncRecordedOverrides 读）。module-level static：Inspector 单线程绘制、同一
-// 时刻只在看一个实体的字段，无并发。非 prefab 实例 → sCacheValid=false。
-Entity                             sCacheEntity = Entity::Invalid();
-bool                               sCacheValid  = false;
-std::vector<EScene::OverrideField> sCacheOverrides;
-
-// prop.name 的 '.' → '/'（nested prop 与序列化叶子路径对齐）。
-std::string NormalizePropPath(std::string_view propName)
-{
-    std::string out(propName);
-    std::replace(out.begin(), out.end(), '.', '/');
-    return out;
-}
-
-// fieldPath 是否落在 "propPath" 前缀下：相等（标量）或以 "propPath/" 开头
-// （Vec/Quat 子叶子）。
-bool LeafUnderProp(const std::string& fieldPath, const std::string& propPath)
-{
-    if (fieldPath == propPath) { return true; }
-    return fieldPath.size() > propPath.size()
-        && fieldPath.compare(0, propPath.size(), propPath) == 0
-        && fieldPath[propPath.size()] == '/';
-}
-
-}  // anonymous namespace
-
-bool IsPrefabInstance(EditorHost& host, Entity entity)
-{
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return false; }
-    const auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
-    return link != nullptr && link->templateEntityGuid.IsValid();
-}
-
-const PrefabAsset* ResolveTemplate(EditorHost& host, Entity entity)
-{
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return nullptr; }
-    const auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
-    if (link == nullptr || link->sourcePrefabPath.empty()) { return nullptr; }
-
-    auto* pReg = host.assets.pAssets.get();
-    if (pReg == nullptr) { return nullptr; }
-    auto loaded = pReg->Load<PrefabAsset>(link->sourcePrefabPath);
-    if (loaded.IsErr()) { return nullptr; }
-    return pReg->Get<PrefabAsset>(loaded.Value());
-}
-
-void BeginFrameForEntity(EditorHost& host, Entity entity)
-{
-    sCacheEntity = entity;
-    sCacheValid  = false;
-    sCacheOverrides.clear();
-
-    if (!IsPrefabInstance(host, entity)) { return; }
-
-    const PrefabAsset* tmpl = ResolveTemplate(host, entity);
-    if (tmpl == nullptr) { return; }
-
-    auto* pWorld = host.scene.pWorld.get();
-    sCacheOverrides = EScene::ComputeInstanceOverrides(*pWorld, entity, *tmpl);
-    sCacheValid     = true;
-}
-
-bool IsFieldOverridden(std::string_view componentName, std::string_view propName)
-{
-    if (!sCacheValid) { return false; }
-    const std::string propPath = NormalizePropPath(propName);
-    for (const auto& f : sCacheOverrides)
+    namespace
     {
-        if (f.componentName == componentName && LeafUnderProp(f.fieldPath, propPath))
+
+        namespace EScene = Orange::Engine::Scene;
+        using Orange::Engine::Entity;
+        using Orange::Engine::World;
+        using Orange::Engine::Asset::AssetHandle;
+        using Orange::Engine::Asset::PrefabAsset;
+
+        // 当帧 override 叶子集缓存（BeginFrameForEntity 填，IsFieldOverridden /
+        // SyncRecordedOverrides 读）。module-level static：Inspector 单线程绘制、同一
+        // 时刻只在看一个实体的字段，无并发。非 prefab 实例 → sCacheValid=false。
+        Entity                             sCacheEntity = Entity::Invalid();
+        bool                               sCacheValid  = false;
+        std::vector<EScene::OverrideField> sCacheOverrides;
+
+        // prop.name 的 '.' → '/'（nested prop 与序列化叶子路径对齐）。
+        std::string NormalizePropPath(std::string_view propName)
         {
-            return true;
+            std::string out(propName);
+            std::replace(out.begin(), out.end(), '.', '/');
+            return out;
         }
-    }
-    return false;
-}
 
-bool SyncRecordedOverrides(EditorHost& host, Entity entity)
-{
-    // 强制重算当帧最新 diff —— 调用点在 DrawEntityViaSchemas 末尾（字段编辑命令
-    // 已落地），帧首 BeginFrameForEntity 的缓存是"编辑前"的，这里必须重算才能
-    // 捕获本帧改动。BeginFrameForEntity 同时刷新 module 缓存，供下一帧蓝条用。
-    BeginFrameForEntity(host, entity);
-    if (!sCacheValid) { return false; }
-
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return false; }
-    auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
-    if (link == nullptr) { return false; }
-
-    // 目标集 = 当前真实 diff 的扁平串集合（MakeOverridePath 规范化）。
-    std::vector<std::string> desired;
-    desired.reserve(sCacheOverrides.size());
-    for (const auto& f : sCacheOverrides)
-    {
-        desired.push_back(EScene::MakeOverridePath(f.componentName, f.fieldPath));
-    }
-    std::sort(desired.begin(), desired.end());
-    desired.erase(std::unique(desired.begin(), desired.end()), desired.end());
-
-    // 与现有 overriddenPaths 比对：相等则 no-op（避免每帧标脏 / 改组件）。
-    std::vector<std::string> current = link->overriddenPaths;
-    std::sort(current.begin(), current.end());
-    current.erase(std::unique(current.begin(), current.end()), current.end());
-    if (current == desired) { return false; }
-
-    link->overriddenPaths = std::move(desired);
-    return true;
-}
-
-bool RevertField(EditorHost& host, Entity entity,
-                 std::string_view componentName, std::string_view propName)
-{
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return false; }
-    if (!IsPrefabInstance(host, entity)) { return false; }
-
-    const PrefabAsset* tmpl = ResolveTemplate(host, entity);
-    if (tmpl == nullptr) { return false; }
-
-    // 该 prop 下被 override 的全部序列化叶子（标量 = 1 条；Vec/Quat = 多条）。
-    // 用当帧最新 diff（调用方右键弹出前已 BeginFrameForEntity；缓存非本 entity
-    // 则即时重算）。
-    if (!sCacheValid || sCacheEntity != entity) { BeginFrameForEntity(host, entity); }
-    const std::string propPath = NormalizePropPath(propName);
-    std::vector<std::string> leaves;
-    for (const auto& f : sCacheOverrides)
-    {
-        if (f.componentName == componentName && LeafUnderProp(f.fieldPath, propPath))
+        // fieldPath 是否落在 "propPath" 前缀下：相等（标量）或以 "propPath/" 开头
+        // （Vec/Quat 子叶子）。
+        bool LeafUnderProp(const std::string& fieldPath, const std::string& propPath)
         {
-            leaves.push_back(f.fieldPath);
+            if (fieldPath == propPath)
+            {
+                return true;
+            }
+            return fieldPath.size() > propPath.size() && fieldPath.compare(0, propPath.size(), propPath) == 0 && fieldPath[propPath.size()] == '/';
         }
-    }
-    if (leaves.empty()) { return false; }  // 该字段无 override，无需 revert
 
-    // 逐叶子 revert（引擎原语：以实例为底、仅该叶子贴模板值、回写该 component +
-    // ClearOverridePath 清该 path 记录）。Vec/Quat 的多个分量叶子各自 revert。
-    bool anyOk = false;
-    for (const std::string& leaf : leaves)
+    } // anonymous namespace
+
+    bool IsPrefabInstance(EditorHost& host, Entity entity)
     {
-        if (EScene::RevertInstanceOverridePath(*pWorld, entity, *tmpl,
-                                               componentName, leaf))
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
         {
-            anyOk = true;
+            return false;
         }
+        const auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
+        return link != nullptr && link->templateEntityGuid.IsValid();
     }
 
-    // revert 改了字段值（含可能的 Transform.rotation）→ invalidate Euler 缓存，
-    // 下一帧 Quat case 从最新 quat 重算 Euler 显示。
-    host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
-
-    // 重算缓存：蓝条立即去掉该字段（overriddenPaths 也已被引擎 Clear 该 path）。
-    BeginFrameForEntity(host, entity);
-    return anyOk;
-}
-
-bool RevertAllFields(EditorHost& host, Entity entity)
-{
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return false; }
-    if (!IsPrefabInstance(host, entity)) { return false; }
-
-    const PrefabAsset* tmpl = ResolveTemplate(host, entity);
-    if (tmpl == nullptr) { return false; }
-
-    // 当前真实 override 叶子集（强制重算，避免 stale 缓存）。
-    BeginFrameForEntity(host, entity);
-    if (!sCacheValid || sCacheOverrides.empty()) { return false; }
-
-    // 逐叶子 revert（拷贝快照——RevertInstanceOverridePath 会改 overriddenPaths，
-    // 不能边迭代边改 module 缓存指向的同一 vector）。
-    const std::vector<EScene::OverrideField> snapshot = sCacheOverrides;
-    bool anyOk = false;
-    for (const auto& f : snapshot)
+    const PrefabAsset* ResolveTemplate(EditorHost& host, Entity entity)
     {
-        if (EScene::RevertInstanceOverridePath(*pWorld, entity, *tmpl,
-                                               f.componentName, f.fieldPath))
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
         {
-            anyOk = true;
+            return nullptr;
         }
-    }
-    host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
-    BeginFrameForEntity(host, entity);  // 重算缓存（蓝条应全清）
-    return anyOk;
-}
+        const auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
+        if (link == nullptr || link->sourcePrefabPath.empty())
+        {
+            return nullptr;
+        }
 
-bool ApplyInstanceToPrefab(EditorHost& host, Entity entity)
-{
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return false; }
-    if (!IsPrefabInstance(host, entity)) { return false; }
-
-    const auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
-    if (link == nullptr || link->sourcePrefabPath.empty()) { return false; }
-    const std::string prefabPath = link->sourcePrefabPath;
-
-    // 现有 prefabName（重写时保留人类可读名；取不到用路径兜底）。先取——
-    // ApplyInstanceToTemplate 之后再 Load 会拿到新 blob，但 prefabName 不变。
-    std::string prefabName = prefabPath;
-    if (const PrefabAsset* t = ResolveTemplate(host, entity); t != nullptr)
-    {
-        prefabName = t->PrefabName();
+        auto* pReg = host.assets.pAssets.get();
+        if (pReg == nullptr)
+        {
+            return nullptr;
+        }
+        auto loaded = pReg->Load<PrefabAsset>(link->sourcePrefabPath);
+        if (loaded.IsErr())
+        {
+            return nullptr;
+        }
+        return pReg->Get<PrefabAsset>(loaded.Value());
     }
 
-    // ① 实例当前态 → 新模板 blob（引擎原语；guid 映回 templateEntityGuid 保 A2.2
-    //    锚不断；清本实例 overriddenPaths）。调用方应传实例**根**——内部从传入
-    //    实体序列化子树为根。
-    auto blobRes = EScene::ApplyInstanceToTemplate(*pWorld, entity);
-    if (blobRes.IsErr())
+    void BeginFrameForEntity(EditorHost& host, Entity entity)
     {
-        ORANGE_LOG_ERROR("Apply to Prefab '{}' 失败 —— 重建模板 blob (code={})",
-                         prefabPath, static_cast<unsigned>(blobRes.Error()));
+        sCacheEntity = entity;
+        sCacheValid  = false;
+        sCacheOverrides.clear();
+
+        if (!IsPrefabInstance(host, entity))
+        {
+            return;
+        }
+
+        const PrefabAsset* tmpl = ResolveTemplate(host, entity);
+        if (tmpl == nullptr)
+        {
+            return;
+        }
+
+        auto* pWorld    = host.scene.pWorld.get();
+        sCacheOverrides = EScene::ComputeInstanceOverrides(*pWorld, entity, *tmpl);
+        sCacheValid     = true;
+    }
+
+    bool IsFieldOverridden(std::string_view componentName, std::string_view propName)
+    {
+        if (!sCacheValid)
+        {
+            return false;
+        }
+        const std::string propPath = NormalizePropPath(propName);
+        for (const auto& f : sCacheOverrides)
+        {
+            if (f.componentName == componentName && LeafUnderProp(f.fieldPath, propPath))
+            {
+                return true;
+            }
+        }
         return false;
     }
 
-    // ② 重写 .prefab.json（纯 IO；不进命令栈，见头注释）。
-    auto saveRc = Orange::Engine::Asset::PrefabLoader::Save(
-        prefabPath, prefabName, blobRes.Value());
-    if (saveRc.IsErr())
+    bool SyncRecordedOverrides(EditorHost& host, Entity entity)
     {
-        ORANGE_LOG_ERROR("Apply to Prefab '{}' 写盘失败 (code={})",
-                         prefabPath, static_cast<unsigned>(saveRc.Error()));
-        return false;
-    }
-
-    // ③ 失效 AssetRegistry 里缓存的旧 PrefabAsset（Load 按 path dedup，不 Unload
-    //    会一直返回旧 blob）。Unload 后下一次 ResolveTemplate 的 Load 重新从盘读
-    //    新模板。失败缩略图同步失效。
-    if (auto* pReg = host.assets.pAssets.get(); pReg != nullptr)
-    {
-        auto h = pReg->Load<PrefabAsset>(prefabPath);
-        if (h.IsOk()) { pReg->Unload<PrefabAsset>(h.Value()); }
-    }
-    if (host.thumbnails)
-    {
-        host.thumbnails->Invalidate(prefabPath);
-    }
-
-    ORANGE_LOG_INFO("Apply to Prefab '{}' 成功（已重写模板 + 失效缓存）", prefabPath);
-    return true;
-}
-
-bool RefreshInstanceFromPrefab(EditorHost& host, Entity entity)
-{
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr || !pWorld->IsValid(entity)) { return false; }
-    if (!IsPrefabInstance(host, entity)) { return false; }
-
-    const PrefabAsset* tmpl = ResolveTemplate(host, entity);
-    if (tmpl == nullptr) { return false; }
-
-    // 用持久化 overriddenPaths 当显式 override 集，从模板重拉非 override 字段
-    // （引擎原语）。不进命令栈（缺 typed in-place 逆写原语做精确多字段 Undo；
-    // 与 apply 对齐，作显式用户动作）。改了 Transform 时 invalidate Euler 缓存。
-    const bool ok =
-        EScene::RefreshInstanceWithRecordedOverrides(*pWorld, entity, *tmpl);
-    host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
-    if (ok)
-    {
-        // refresh 后重算缓存（蓝条立即反映新 override 集；overriddenPaths 不变）。
+        // 强制重算当帧最新 diff —— 调用点在 DrawEntityViaSchemas 末尾（字段编辑命令
+        // 已落地），帧首 BeginFrameForEntity 的缓存是"编辑前"的，这里必须重算才能
+        // 捕获本帧改动。BeginFrameForEntity 同时刷新 module 缓存，供下一帧蓝条用。
         BeginFrameForEntity(host, entity);
-    }
-    return ok;
-}
+        if (!sCacheValid)
+        {
+            return false;
+        }
 
-}  // namespace Orange::Editor::Prefab
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
+        {
+            return false;
+        }
+        auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
+        if (link == nullptr)
+        {
+            return false;
+        }
+
+        // 目标集 = 当前真实 diff 的扁平串集合（MakeOverridePath 规范化）。
+        std::vector<std::string> desired;
+        desired.reserve(sCacheOverrides.size());
+        for (const auto& f : sCacheOverrides)
+        {
+            desired.push_back(EScene::MakeOverridePath(f.componentName, f.fieldPath));
+        }
+        std::sort(desired.begin(), desired.end());
+        desired.erase(std::unique(desired.begin(), desired.end()), desired.end());
+
+        // 与现有 overriddenPaths 比对：相等则 no-op（避免每帧标脏 / 改组件）。
+        std::vector<std::string> current = link->overriddenPaths;
+        std::sort(current.begin(), current.end());
+        current.erase(std::unique(current.begin(), current.end()), current.end());
+        if (current == desired)
+        {
+            return false;
+        }
+
+        link->overriddenPaths = std::move(desired);
+        return true;
+    }
+
+    bool RevertField(EditorHost& host, Entity entity,
+                     std::string_view componentName, std::string_view propName)
+    {
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
+        {
+            return false;
+        }
+        if (!IsPrefabInstance(host, entity))
+        {
+            return false;
+        }
+
+        const PrefabAsset* tmpl = ResolveTemplate(host, entity);
+        if (tmpl == nullptr)
+        {
+            return false;
+        }
+
+        // 该 prop 下被 override 的全部序列化叶子（标量 = 1 条；Vec/Quat = 多条）。
+        // 用当帧最新 diff（调用方右键弹出前已 BeginFrameForEntity；缓存非本 entity
+        // 则即时重算）。
+        if (!sCacheValid || sCacheEntity != entity)
+        {
+            BeginFrameForEntity(host, entity);
+        }
+        const std::string        propPath = NormalizePropPath(propName);
+        std::vector<std::string> leaves;
+        for (const auto& f : sCacheOverrides)
+        {
+            if (f.componentName == componentName && LeafUnderProp(f.fieldPath, propPath))
+            {
+                leaves.push_back(f.fieldPath);
+            }
+        }
+        if (leaves.empty())
+        {
+            return false;
+        } // 该字段无 override，无需 revert
+
+        // 逐叶子 revert（引擎原语：以实例为底、仅该叶子贴模板值、回写该 component +
+        // ClearOverridePath 清该 path 记录）。Vec/Quat 的多个分量叶子各自 revert。
+        bool anyOk = false;
+        for (const std::string& leaf : leaves)
+        {
+            if (EScene::RevertInstanceOverridePath(*pWorld, entity, *tmpl,
+                                                   componentName, leaf))
+            {
+                anyOk = true;
+            }
+        }
+
+        // revert 改了字段值（含可能的 Transform.rotation）→ invalidate Euler 缓存，
+        // 下一帧 Quat case 从最新 quat 重算 Euler 显示。
+        host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+
+        // 重算缓存：蓝条立即去掉该字段（overriddenPaths 也已被引擎 Clear 该 path）。
+        BeginFrameForEntity(host, entity);
+        return anyOk;
+    }
+
+    bool RevertAllFields(EditorHost& host, Entity entity)
+    {
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
+        {
+            return false;
+        }
+        if (!IsPrefabInstance(host, entity))
+        {
+            return false;
+        }
+
+        const PrefabAsset* tmpl = ResolveTemplate(host, entity);
+        if (tmpl == nullptr)
+        {
+            return false;
+        }
+
+        // 当前真实 override 叶子集（强制重算，避免 stale 缓存）。
+        BeginFrameForEntity(host, entity);
+        if (!sCacheValid || sCacheOverrides.empty())
+        {
+            return false;
+        }
+
+        // 逐叶子 revert（拷贝快照——RevertInstanceOverridePath 会改 overriddenPaths，
+        // 不能边迭代边改 module 缓存指向的同一 vector）。
+        const std::vector<EScene::OverrideField> snapshot = sCacheOverrides;
+        bool                                     anyOk    = false;
+        for (const auto& f : snapshot)
+        {
+            if (EScene::RevertInstanceOverridePath(*pWorld, entity, *tmpl,
+                                                   f.componentName, f.fieldPath))
+            {
+                anyOk = true;
+            }
+        }
+        host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        BeginFrameForEntity(host, entity); // 重算缓存（蓝条应全清）
+        return anyOk;
+    }
+
+    bool ApplyInstanceToPrefab(EditorHost& host, Entity entity)
+    {
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
+        {
+            return false;
+        }
+        if (!IsPrefabInstance(host, entity))
+        {
+            return false;
+        }
+
+        const auto* link = pWorld->GetComponent<EScene::PrefabInstanceComponent>(entity);
+        if (link == nullptr || link->sourcePrefabPath.empty())
+        {
+            return false;
+        }
+        const std::string prefabPath = link->sourcePrefabPath;
+
+        // 现有 prefabName（重写时保留人类可读名；取不到用路径兜底）。先取——
+        // ApplyInstanceToTemplate 之后再 Load 会拿到新 blob，但 prefabName 不变。
+        std::string prefabName = prefabPath;
+        if (const PrefabAsset* t = ResolveTemplate(host, entity); t != nullptr)
+        {
+            prefabName = t->PrefabName();
+        }
+
+        // ① 实例当前态 → 新模板 blob（引擎原语；guid 映回 templateEntityGuid 保 A2.2
+        //    锚不断；清本实例 overriddenPaths）。调用方应传实例**根**——内部从传入
+        //    实体序列化子树为根。
+        auto blobRes = EScene::ApplyInstanceToTemplate(*pWorld, entity);
+        if (blobRes.IsErr())
+        {
+            ORANGE_LOG_ERROR("Apply to Prefab '{}' 失败 —— 重建模板 blob (code={})",
+                             prefabPath, static_cast<unsigned>(blobRes.Error()));
+            return false;
+        }
+
+        // ② 重写 .prefab.json（纯 IO；不进命令栈，见头注释）。
+        auto saveRc = Orange::Engine::Asset::PrefabLoader::Save(
+            prefabPath, prefabName, blobRes.Value());
+        if (saveRc.IsErr())
+        {
+            ORANGE_LOG_ERROR("Apply to Prefab '{}' 写盘失败 (code={})",
+                             prefabPath, static_cast<unsigned>(saveRc.Error()));
+            return false;
+        }
+
+        // ③ 失效 AssetRegistry 里缓存的旧 PrefabAsset（Load 按 path dedup，不 Unload
+        //    会一直返回旧 blob）。Unload 后下一次 ResolveTemplate 的 Load 重新从盘读
+        //    新模板。失败缩略图同步失效。
+        if (auto* pReg = host.assets.pAssets.get(); pReg != nullptr)
+        {
+            auto h = pReg->Load<PrefabAsset>(prefabPath);
+            if (h.IsOk())
+            {
+                pReg->Unload<PrefabAsset>(h.Value());
+            }
+        }
+        if (host.thumbnails)
+        {
+            host.thumbnails->Invalidate(prefabPath);
+        }
+
+        ORANGE_LOG_INFO("Apply to Prefab '{}' 成功（已重写模板 + 失效缓存）", prefabPath);
+        return true;
+    }
+
+    bool RefreshInstanceFromPrefab(EditorHost& host, Entity entity)
+    {
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr || !pWorld->IsValid(entity))
+        {
+            return false;
+        }
+        if (!IsPrefabInstance(host, entity))
+        {
+            return false;
+        }
+
+        const PrefabAsset* tmpl = ResolveTemplate(host, entity);
+        if (tmpl == nullptr)
+        {
+            return false;
+        }
+
+        // 用持久化 overriddenPaths 当显式 override 集，从模板重拉非 override 字段
+        // （引擎原语）。不进命令栈（缺 typed in-place 逆写原语做精确多字段 Undo；
+        // 与 apply 对齐，作显式用户动作）。改了 Transform 时 invalidate Euler 缓存。
+        const bool ok =
+            EScene::RefreshInstanceWithRecordedOverrides(*pWorld, entity, *tmpl);
+        host.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
+        if (ok)
+        {
+            // refresh 后重算缓存（蓝条立即反映新 override 集；overriddenPaths 不变）。
+            BeginFrameForEntity(host, entity);
+        }
+        return ok;
+    }
+
+} // namespace Orange::Editor::Prefab

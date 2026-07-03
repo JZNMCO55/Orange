@@ -23,18 +23,18 @@
 namespace Orange::Engine::Noise
 {
 
-// value noise（2D）：hash 格点值 + 五次 fade 双线性插值。返回 [0,1]。
-ORANGE_ENGINE_API float ValueNoise2D(float x, float y, std::uint32_t seed = 0);
+    // value noise（2D）：hash 格点值 + 五次 fade 双线性插值。返回 [0,1]。
+    ORANGE_ENGINE_API float ValueNoise2D(float x, float y, std::uint32_t seed = 0);
 
-// Perlin gradient noise（2D/3D）：hash 格点梯度 + fade 插值。返回约 [-1,1]。
-ORANGE_ENGINE_API float PerlinNoise2D(float x, float y, std::uint32_t seed = 0);
-ORANGE_ENGINE_API float PerlinNoise3D(float x, float y, float z, std::uint32_t seed = 0);
+    // Perlin gradient noise（2D/3D）：hash 格点梯度 + fade 插值。返回约 [-1,1]。
+    ORANGE_ENGINE_API float PerlinNoise2D(float x, float y, std::uint32_t seed = 0);
+    ORANGE_ENGINE_API float PerlinNoise3D(float x, float y, float z, std::uint32_t seed = 0);
 
-// fBm（fractal Brownian motion，2D）：叠加 octaves 层 Perlin，每层频率
-// *lacunarity、振幅 *gain，按总振幅归一化。返回约 [-1,1]。octaves<1 视为 1。
-ORANGE_ENGINE_API float Fbm2D(float x, float y, int octaves, float lacunarity, float gain,
-                              std::uint32_t seed = 0);
+    // fBm（fractal Brownian motion，2D）：叠加 octaves 层 Perlin，每层频率
+    // *lacunarity、振幅 *gain，按总振幅归一化。返回约 [-1,1]。octaves<1 视为 1。
+    ORANGE_ENGINE_API float Fbm2D(float x, float y, int octaves, float lacunarity, float gain,
+                                  std::uint32_t seed = 0);
 
-}  // namespace Orange::Engine::Noise
+} // namespace Orange::Engine::Noise
 
-#endif  // ORANGE_ENGINE_NOISE_NOISE_H
+#endif // ORANGE_ENGINE_NOISE_NOISE_H

@@ -51,19 +51,19 @@ using Orange::Engine::Script::ScriptSystem;
 namespace
 {
 
-const std::string kFixturesAssembly = ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH;
-const std::string kFixturesRuntimeConfig = ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH;
-const std::string kSdkAssembly = ORANGE_SCRIPT_SDK_ASSEMBLY_PATH;
+    const std::string kFixturesAssembly      = ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH;
+    const std::string kFixturesRuntimeConfig = ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH;
+    const std::string kSdkAssembly           = ORANGE_SCRIPT_SDK_ASSEMBLY_PATH;
 
-// Mover 的 assembly-qualified 类型全名（与 script_runtime_test 一致）。
-const std::string kMoverType = "OrangeFixtures.Mover, ScriptFixtures";
+    // Mover 的 assembly-qualified 类型全名（与 script_runtime_test 一致）。
+    const std::string kMoverType = "OrangeFixtures.Mover, ScriptFixtures";
 
-bool ApproxEqual(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool ApproxEqual(float a, float b, float eps = 1e-4f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -72,7 +72,7 @@ int main()
 
     // --- 唯一一次真正的 runtime 启动 ---
     ScriptRuntime rt;
-    auto initResult = rt.Initialize(kFixturesRuntimeConfig, kSdkAssembly);
+    auto          initResult = rt.Initialize(kFixturesRuntimeConfig, kSdkAssembly);
     if (initResult.IsErr())
     {
         std::fprintf(stderr, "  [FAIL] Initialize -> Err (%s)\n",
@@ -83,9 +83,9 @@ int main()
     std::fprintf(stdout, "  [PASS] Initialize ok\n");
 
     // --- 建 World + 实体（带 Transform 在原点 + ScriptComponent 指向 Mover） ---
-    World world;
+    World  world;
     Entity entity = world.CreateEntity();
-    world.AddComponent(entity, TransformComponent{});  // position 默认 (0,0,0)
+    world.AddComponent(entity, TransformComponent{}); // position 默认 (0,0,0)
     {
         ScriptComponent sc;
         sc.assemblyPath = kFixturesAssembly;
@@ -121,8 +121,8 @@ int main()
         if (scripts.ActiveInstanceCount() != 1)
         {
             std::fprintf(stderr,
-                "  [FAIL] StartWorld 后活实例数 = %zu（期望 1：坏类型实体应被跳过）\n",
-                scripts.ActiveInstanceCount());
+                         "  [FAIL] StartWorld 后活实例数 = %zu（期望 1：坏类型实体应被跳过）\n",
+                         scripts.ActiveInstanceCount());
             return 1;
         }
         std::fprintf(stdout, "  [PASS] StartWorld instantiated 1 (bad-type entity skipped)\n");
@@ -134,7 +134,7 @@ int main()
             if (!ApproxEqual(t->position.y, 100.0f))
             {
                 std::fprintf(stderr,
-                    "  [FAIL] OnStart 后 position.y = %f（期望 100）\n", t->position.y);
+                             "  [FAIL] OnStart 后 position.y = %f（期望 100）\n", t->position.y);
                 return 1;
             }
             // 还没 Tick：x / z 仍 0。
@@ -154,7 +154,7 @@ int main()
             if (!ApproxEqual(t->position.x, 2.0f))
             {
                 std::fprintf(stderr,
-                    "  [FAIL] 两次 Tick 后 position.x = %f（期望 2.0）\n", t->position.x);
+                             "  [FAIL] 两次 Tick 后 position.x = %f（期望 2.0）\n", t->position.x);
                 return 1;
             }
             // OnStart 的 y 不被 Tick 干扰。
@@ -171,7 +171,7 @@ int main()
             if (!ApproxEqual(t->position.z, 7.0f))
             {
                 std::fprintf(stderr,
-                    "  [FAIL] OnDestroy 后 position.z = %f（期望 7）\n", t->position.z);
+                             "  [FAIL] OnDestroy 后 position.z = %f（期望 7）\n", t->position.z);
                 return 1;
             }
             // x / y 不被 OnDestroy 干扰 —— 三个回调互不串扰。
@@ -186,7 +186,7 @@ int main()
     // 不崩进程即视为兜底生效（GCHandle 不泄漏由 runtime 侧 Release 保证；这里
     // 只验证 ScriptSystem 析构路径会触达 Release）。新建 World 复用同一 rt。
     {
-        World world2;
+        World  world2;
         Entity e2 = world2.CreateEntity();
         world2.AddComponent(e2, TransformComponent{});
         {
@@ -213,9 +213,9 @@ int main()
 
     // (a) 带 override 的实体 —— 单独 World 隔离活实例计数。
     {
-        World world3;
+        World  world3;
         Entity e3 = world3.CreateEntity();
-        world3.AddComponent(e3, TransformComponent{});  // 原点
+        world3.AddComponent(e3, TransformComponent{}); // 原点
         {
             ScriptComponent sc;
             sc.assemblyPath = kFixturesAssembly;
@@ -237,19 +237,20 @@ int main()
             if (!ApproxEqual(t->position.x, 10.0f))
             {
                 std::fprintf(stderr,
-                    "  [FAIL] override Speed=2.5 后 4 帧 position.x = %f（期望 10.0；"
-                    "若得 4.0 说明 override 未生效）\n", t->position.x);
+                             "  [FAIL] override Speed=2.5 后 4 帧 position.x = %f（期望 10.0；"
+                             "若得 4.0 说明 override 未生效）\n",
+                             t->position.x);
                 return 1;
             }
         }
         scripts3.StopWorld(world3);
         std::fprintf(stdout,
-            "  [PASS] fieldOverrides applied: Speed=2.5 -> position.x = 10.0\n");
+                     "  [PASS] fieldOverrides applied: Speed=2.5 -> position.x = 10.0\n");
     }
 
     // (b) 对照：不带 override，默认 Speed=1.0 —— 4 帧后 x == 4.0。
     {
-        World world4;
+        World  world4;
         Entity e4 = world4.CreateEntity();
         world4.AddComponent(e4, TransformComponent{});
         {
@@ -273,14 +274,14 @@ int main()
             if (!ApproxEqual(t->position.x, 4.0f))
             {
                 std::fprintf(stderr,
-                    "  [FAIL] 无 override 默认 Speed=1.0 后 4 帧 position.x = %f（期望 4.0）\n",
-                    t->position.x);
+                             "  [FAIL] 无 override 默认 Speed=1.0 后 4 帧 position.x = %f（期望 4.0）\n",
+                             t->position.x);
                 return 1;
             }
         }
         scripts4.StopWorld(world4);
         std::fprintf(stdout,
-            "  [PASS] no override default: Speed=1.0 -> position.x = 4.0\n");
+                     "  [PASS] no override default: Speed=1.0 -> position.x = 4.0\n");
     }
 
     std::fprintf(stdout, "[script_system_test] all tests passed.\n");

@@ -15,39 +15,51 @@
 // ---------------------------------------------------------------------------
 namespace
 {
-Orange::Engine::World* ResolveWorld(EditorHost* pHost)
-{
-    if (pHost == nullptr) { return nullptr; }
-    return pHost->scene.pWorld.get();
-}
-}  // anonymous namespace
+    Orange::Engine::World* ResolveWorld(EditorHost* pHost)
+    {
+        if (pHost == nullptr)
+        {
+            return nullptr;
+        }
+        return pHost->scene.pWorld.get();
+    }
+} // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // CreateEntityCommand
 // ---------------------------------------------------------------------------
 
 CreateEntityCommand::CreateEntityCommand(EditorHost& host, CreatorFn creator)
-    : mpHost(&host)
-    , mCreatorFn(std::move(creator))
-    , mCreated(Orange::Engine::Entity::Invalid())
-{}
+    : mpHost(&host), mCreatorFn(std::move(creator)), mCreated(Orange::Engine::Entity::Invalid())
+{
+}
 
 void CreateEntityCommand::Execute()
 {
     auto* pWorld = ResolveWorld(mpHost);
-    if (pWorld == nullptr) { return; }   // 漏 Clear 的安全降级
+    if (pWorld == nullptr)
+    {
+        return;
+    } // 漏 Clear 的安全降级
     mCreated = mCreatorFn(*pWorld);
 }
 
 void CreateEntityCommand::Undo()
 {
-    if (!mCreated.IsValid()) { return; }
+    if (!mCreated.IsValid())
+    {
+        return;
+    }
     auto* pWorld = ResolveWorld(mpHost);
-    if (pWorld == nullptr) { return; }
+    if (pWorld == nullptr)
+    {
+        return;
+    }
     // World::IsValid 走 registry.valid()（含 EnTT version 检查），能甄别
     // 虽然句柄非零但已被销毁的死实体 —— Entity::IsValid 只检查哨兵 null，
     // 不足以防止对死实体调 DestroySubtree（double-destroy → EnTT assert）。
-    if (!pWorld->IsValid(mCreated)) {
+    if (!pWorld->IsValid(mCreated))
+    {
         mCreated = Orange::Engine::Entity::Invalid();
         return;
     }
@@ -63,17 +75,18 @@ RenameCommand::RenameCommand(EditorHost&            host,
                              Orange::Engine::Entity entity,
                              std::string            oldName,
                              std::string            newName)
-    : mpHost(&host)
-    , mEntity(entity)
-    , mOldName(std::move(oldName))
-    , mNewName(std::move(newName))
-{}
+    : mpHost(&host), mEntity(entity), mOldName(std::move(oldName)), mNewName(std::move(newName))
+{
+}
 
 void RenameCommand::Execute()
 {
-    using NC = Orange::Engine::Scene::NameComponent;
+    using NC     = Orange::Engine::Scene::NameComponent;
     auto* pWorld = ResolveWorld(mpHost);
-    if (pWorld == nullptr) { return; }
+    if (pWorld == nullptr)
+    {
+        return;
+    }
     if (auto* nc = pWorld->GetComponent<NC>(mEntity))
     {
         nc->name = mNewName;
@@ -82,9 +95,12 @@ void RenameCommand::Execute()
 
 void RenameCommand::Undo()
 {
-    using NC = Orange::Engine::Scene::NameComponent;
+    using NC     = Orange::Engine::Scene::NameComponent;
     auto* pWorld = ResolveWorld(mpHost);
-    if (pWorld == nullptr) { return; }
+    if (pWorld == nullptr)
+    {
+        return;
+    }
     if (auto* nc = pWorld->GetComponent<NC>(mEntity))
     {
         nc->name = mOldName;
@@ -94,7 +110,10 @@ void RenameCommand::Undo()
 bool RenameCommand::Merge(ICommand& newer)
 {
     auto& n = static_cast<RenameCommand&>(newer);
-    if (n.mEntity != mEntity) { return false; }
+    if (n.mEntity != mEntity)
+    {
+        return false;
+    }
     mNewName = std::move(n.mNewName);
     return true;
 }
@@ -108,36 +127,49 @@ SwitchAnimatorBackendCommand::SwitchAnimatorBackendCommand(
     Orange::Engine::Entity entity,
     std::string            oldBackendName,
     std::string            newBackendName)
-    : mpHost(&host)
-    , mEntity(entity)
-    , mOldBackend(std::move(oldBackendName))
-    , mNewBackend(std::move(newBackendName))
-{}
+    : mpHost(&host), mEntity(entity), mOldBackend(std::move(oldBackendName)), mNewBackend(std::move(newBackendName))
+{
+}
 
 namespace
 {
-// 共享重建 helper：把 entity 上的 AnimatorComponent.animator 重置为 registry
-// 按 backend 名 factory 新建的实例。任一环（host/world/registry/entity/component）
-// 为空 → no-op，与其他命令的"漏 Clear 安全降级"纪律一致。
-void RebuildAnimatorBackend(EditorHost* pHost,
-                            Orange::Engine::Entity entity,
-                            const std::string& backendName)
-{
-    using AC = Orange::Engine::Animation::AnimatorComponent;
-    if (pHost == nullptr) { return; }
-    auto* pWorld    = pHost->scene.pWorld.get();
-    auto* pRegistry = pHost->assets.pAnimators.get();
-    if (pWorld == nullptr || pRegistry == nullptr) { return; }
-    if (!entity.IsValid() || !pWorld->IsValid(entity)) { return; }
-    auto* ac = pWorld->GetComponent<AC>(entity);
-    if (ac == nullptr) { return; }
-    // factory 未注册 → 保留旧 animator 不变（视为 no-op；plugin UI 不让用户
-    // 在 BackendNames 之外的项里 Combo，理论上不会走到此分支，但仍守住）。
-    auto newAnimator = pRegistry->Create(backendName);
-    if (!newAnimator) { return; }
-    ac->animator = std::move(newAnimator);
-}
-}  // anonymous namespace
+    // 共享重建 helper：把 entity 上的 AnimatorComponent.animator 重置为 registry
+    // 按 backend 名 factory 新建的实例。任一环（host/world/registry/entity/component）
+    // 为空 → no-op，与其他命令的"漏 Clear 安全降级"纪律一致。
+    void RebuildAnimatorBackend(EditorHost*            pHost,
+                                Orange::Engine::Entity entity,
+                                const std::string&     backendName)
+    {
+        using AC = Orange::Engine::Animation::AnimatorComponent;
+        if (pHost == nullptr)
+        {
+            return;
+        }
+        auto* pWorld    = pHost->scene.pWorld.get();
+        auto* pRegistry = pHost->assets.pAnimators.get();
+        if (pWorld == nullptr || pRegistry == nullptr)
+        {
+            return;
+        }
+        if (!entity.IsValid() || !pWorld->IsValid(entity))
+        {
+            return;
+        }
+        auto* ac = pWorld->GetComponent<AC>(entity);
+        if (ac == nullptr)
+        {
+            return;
+        }
+        // factory 未注册 → 保留旧 animator 不变（视为 no-op；plugin UI 不让用户
+        // 在 BackendNames 之外的项里 Combo，理论上不会走到此分支，但仍守住）。
+        auto newAnimator = pRegistry->Create(backendName);
+        if (!newAnimator)
+        {
+            return;
+        }
+        ac->animator = std::move(newAnimator);
+    }
+} // anonymous namespace
 
 void SwitchAnimatorBackendCommand::Execute()
 {

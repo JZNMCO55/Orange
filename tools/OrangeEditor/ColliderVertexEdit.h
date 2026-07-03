@@ -23,23 +23,23 @@ struct EditorHost;
 namespace Orange::Editor
 {
 
-// 处理 collider 顶点编辑交互 + 绘制 handle。
-//
-// 入参（与 ScenePanel 内 gizmo / picking 调用约定一致）：
-//   * imageOrigin / imageSize —— viewport ImGui::Image 在屏幕坐标系的左上角
-//                                与尺寸（NDC ↔ 屏幕像素映射用）
-//   * aspect                  —— 当前面板宽高比（BuildEditorCamera 取 projection）
-//
-// 返回值：
-//   * true  —— 本帧 collider edit 子模式 active（caller 应跳过内置 gizmo +
-//              viewport picking，避免鼠标双重消费）
-//   * false —— 未激活（host.colliderEdit.active == false 或 entity / collider
-//              已失效自动 Reset）；caller 走正常 gizmo / picking 路径
-bool HandleColliderVertexEdit(EditorHost& host,
-                              glm::vec2   imageOrigin,
-                              glm::vec2   imageSize,
-                              float       aspect);
+    // 处理 collider 顶点编辑交互 + 绘制 handle。
+    //
+    // 入参（与 ScenePanel 内 gizmo / picking 调用约定一致）：
+    //   * imageOrigin / imageSize —— viewport ImGui::Image 在屏幕坐标系的左上角
+    //                                与尺寸（NDC ↔ 屏幕像素映射用）
+    //   * aspect                  —— 当前面板宽高比（BuildEditorCamera 取 projection）
+    //
+    // 返回值：
+    //   * true  —— 本帧 collider edit 子模式 active（caller 应跳过内置 gizmo +
+    //              viewport picking，避免鼠标双重消费）
+    //   * false —— 未激活（host.colliderEdit.active == false 或 entity / collider
+    //              已失效自动 Reset）；caller 走正常 gizmo / picking 路径
+    bool HandleColliderVertexEdit(EditorHost& host,
+                                  glm::vec2   imageOrigin,
+                                  glm::vec2   imageSize,
+                                  float       aspect);
 
-}  // namespace Orange::Editor
+} // namespace Orange::Editor
 
-#endif  // ORANGE_EDITOR_COLLIDER_VERTEX_EDIT_H
+#endif // ORANGE_EDITOR_COLLIDER_VERTEX_EDIT_H

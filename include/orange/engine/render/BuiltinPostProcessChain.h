@@ -24,8 +24,8 @@
 namespace Orange::Engine::Render::BuiltinPostProcessChain
 {
 
-ORANGE_ENGINE_API PostProcessChain CreateDefault();
+    ORANGE_ENGINE_API PostProcessChain CreateDefault();
 
-}  // namespace Orange::Engine::Render::BuiltinPostProcessChain
+} // namespace Orange::Engine::Render::BuiltinPostProcessChain
 
-#endif  // ORANGE_ENGINE_RENDER_BUILTIN_POST_PROCESS_CHAIN_H
+#endif // ORANGE_ENGINE_RENDER_BUILTIN_POST_PROCESS_CHAIN_H

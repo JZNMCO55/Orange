@@ -19,17 +19,17 @@
 namespace Orange::Engine::Nav
 {
 
-// A* 网格寻路。返回从 start 到 goal 的路径路点（各经过 cell 的中心世界坐标，
-// 含起终 cell）。无路 / start 或 goal 越界或阻挡 → 返回空 vector。
-// allowDiagonal=true 走 8-邻接（八方向，对角禁切角）；false 走 4-邻接。
-ORANGE_ENGINE_API std::vector<glm::vec2> FindPath(const NavGrid& grid, glm::vec2 startWorld,
-                                                  glm::vec2 goalWorld, bool allowDiagonal = true);
+    // A* 网格寻路。返回从 start 到 goal 的路径路点（各经过 cell 的中心世界坐标，
+    // 含起终 cell）。无路 / start 或 goal 越界或阻挡 → 返回空 vector。
+    // allowDiagonal=true 走 8-邻接（八方向，对角禁切角）；false 走 4-邻接。
+    ORANGE_ENGINE_API std::vector<glm::vec2> FindPath(const NavGrid& grid, glm::vec2 startWorld,
+                                                      glm::vec2 goalWorld, bool allowDiagonal = true);
 
-// line-of-sight 弦拉平滑（string pulling）：去掉能被直线（穿过可走 cell）跨越
-// 的中间路点，把锯齿路径化简为更少的直线段。空 / 单点 / 双点原样返回。
-ORANGE_ENGINE_API std::vector<glm::vec2> SimplifyPath(const NavGrid& grid,
-                                                      const std::vector<glm::vec2>& path);
+    // line-of-sight 弦拉平滑（string pulling）：去掉能被直线（穿过可走 cell）跨越
+    // 的中间路点，把锯齿路径化简为更少的直线段。空 / 单点 / 双点原样返回。
+    ORANGE_ENGINE_API std::vector<glm::vec2> SimplifyPath(const NavGrid&                grid,
+                                                          const std::vector<glm::vec2>& path);
 
-}  // namespace Orange::Engine::Nav
+} // namespace Orange::Engine::Nav
 
-#endif  // ORANGE_ENGINE_NAV_PATHFINDING_H
+#endif // ORANGE_ENGINE_NAV_PATHFINDING_H

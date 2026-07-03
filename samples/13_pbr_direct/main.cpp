@@ -61,7 +61,6 @@ using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MaterialInstance;
@@ -70,91 +69,96 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// 球体 mesh 工厂：lat/lon UV-sphere，复用 12_layer_partition_demo 同构造。
-// 共享顶点路径下 ComputeSmoothNormalsFromTriangles 自然得到近似
-// normalize(position) 的平滑法线（球面平凡）。
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    // 球体 mesh 工厂：lat/lon UV-sphere，复用 12_layer_partition_demo 同构造。
+    // 共享顶点路径下 ComputeSmoothNormalsFromTriangles 自然得到近似
+    // normalize(position) 的平滑法线（球面平凡）。
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            const float u    = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi  = u * glm::two_pi<float>();
-            const float sinP = std::sin(phi);
-            const float cosP = std::cos(phi);
-            positions.push_back({radius * sinT * cosP,
-                                 radius * cosT,
-                                 radius * sinT * sinP});
-            uvs.push_back({u, 1.0f - v});
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
+            {
+                const float u    = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi  = u * glm::two_pi<float>();
+                const float sinP = std::sin(phi);
+                const float cosP = std::cos(phi);
+                positions.push_back({radius * sinT * cosP,
+                                     radius * cosT,
+                                     radius * sinT * sinP});
+                uvs.push_back({u, 1.0f - v});
+            }
         }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            const std::uint32_t a = i       * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i       * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
-    {
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    void OnUpdate(const FrameContext& /*frame*/) override
+    class RenderLayer : public Layer
     {
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+    public:
+        RenderLayer(Pipeline& pipeline, World& world)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
         {
-            mPipeline.OnResize(resize->width, resize->height);
         }
-        return false;
-    }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-};
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            mPipeline.Render(mWorld);
+        }
 
-constexpr std::array<float, 3> kMetallicSteps  = {0.0f, 0.5f, 1.0f};
-constexpr std::array<float, 3> kRoughnessSteps = {0.1f, 0.5f, 0.9f};
-// 暖橙：在 metallic=1 行金属高光自带 baseColor 着色，肉眼可识别"非白"高光。
-constexpr glm::vec4            kBaseColor{1.0f, 0.78f, 0.34f, 1.0f};
-constexpr float                kSphereSpacing  = 1.4f;
-constexpr float                kSphereRadius   = 0.5f;
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
 
-}  // namespace
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+    };
+
+    constexpr std::array<float, 3> kMetallicSteps  = {0.0f, 0.5f, 1.0f};
+    constexpr std::array<float, 3> kRoughnessSteps = {0.1f, 0.5f, 0.9f};
+    // 暖橙：在 metallic=1 行金属高光自带 baseColor 着色，肉眼可识别"非白"高光。
+    constexpr glm::vec4 kBaseColor{1.0f, 0.78f, 0.34f, 1.0f};
+    constexpr float     kSphereSpacing = 1.4f;
+    constexpr float     kSphereRadius  = 0.5f;
+
+} // namespace
 
 int main(int /*argc*/, char** /*argv*/)
 {
@@ -203,10 +207,8 @@ int main(int /*argc*/, char** /*argv*/)
     std::vector<std::unique_ptr<MaterialInstance>> instances;
     instances.reserve(kMetallicSteps.size() * kRoughnessSteps.size());
 
-    const float xOffset = -kSphereSpacing
-                        * static_cast<float>(kRoughnessSteps.size() - 1) * 0.5f;
-    const float yOffset = -kSphereSpacing
-                        * static_cast<float>(kMetallicSteps.size() - 1) * 0.5f;
+    const float xOffset = -kSphereSpacing * static_cast<float>(kRoughnessSteps.size() - 1) * 0.5f;
+    const float yOffset = -kSphereSpacing * static_cast<float>(kMetallicSteps.size() - 1) * 0.5f;
 
     for (std::size_t row = 0; row < kMetallicSteps.size(); ++row)
     {
@@ -227,7 +229,7 @@ int main(int /*argc*/, char** /*argv*/)
                                        0.0f));
             instances.push_back(std::move(inst));
 
-            Entity entity = world.CreateEntity();
+            Entity             entity = world.CreateEntity();
             TransformComponent xf{};
             xf.position = {
                 xOffset + static_cast<float>(col) * kSphereSpacing,
@@ -239,7 +241,7 @@ int main(int /*argc*/, char** /*argv*/)
             RenderableComponent r;
             r.mesh             = sphereHandle;
             r.materialInstance = instances.back().get();
-            r.castsShadow      = false;  // 球阵无地面，shadow 路径不需要
+            r.castsShadow      = false; // 球阵无地面，shadow 路径不需要
             world.AddComponent(entity, r);
         }
     }
@@ -263,12 +265,11 @@ int main(int /*argc*/, char** /*argv*/)
     // Camera：正前方略上斜俯视球阵，让 3×3 全部入画。
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(40.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 0.3f, 6.5f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(40.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 0.3f, 6.5f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 

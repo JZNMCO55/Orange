@@ -8,28 +8,28 @@
 namespace Orange::Engine::Animation
 {
 
-std::size_t TickAnimators(World& world, float dt)
-{
-    std::size_t ticked = 0;
-    // 直接走 registry view —— AnimatorComponent 是 move-only（持
-    // unique_ptr<IAnimator>），view 拿引用不拷贝。半构造态（animator ==
-    // nullptr，典型：Scene::Load 时 backend name 解析失败）跳过、不计数。
-    auto& registry = world.Registry();
-    for (auto e : registry.view<AnimatorComponent>())
+    std::size_t TickAnimators(World& world, float dt)
     {
-        auto& ac = registry.get<AnimatorComponent>(e);
-        if (ac.animator != nullptr)
+        std::size_t ticked = 0;
+        // 直接走 registry view —— AnimatorComponent 是 move-only（持
+        // unique_ptr<IAnimator>），view 拿引用不拷贝。半构造态（animator ==
+        // nullptr，典型：Scene::Load 时 backend name 解析失败）跳过、不计数。
+        auto& registry = world.Registry();
+        for (auto e : registry.view<AnimatorComponent>())
         {
-            ac.animator->Tick(dt);
-            ++ticked;
+            auto& ac = registry.get<AnimatorComponent>(e);
+            if (ac.animator != nullptr)
+            {
+                ac.animator->Tick(dt);
+                ++ticked;
+            }
         }
+        return ticked;
     }
-    return ticked;
-}
 
-void AnimationSystem::OnUpdate(World& world, const FrameContext& frame)
-{
-    TickAnimators(world, static_cast<float>(frame.time.deltaSeconds));
-}
+    void AnimationSystem::OnUpdate(World& world, const FrameContext& frame)
+    {
+        TickAnimators(world, static_cast<float>(frame.time.deltaSeconds));
+    }
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation

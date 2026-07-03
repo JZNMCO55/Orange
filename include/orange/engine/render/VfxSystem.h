@@ -42,87 +42,87 @@
 
 namespace Orange::Engine
 {
-class World;
-}  // namespace Orange::Engine
+    class World;
+} // namespace Orange::Engine
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
-}  // namespace Orange::Engine::Asset
+    class AssetRegistry;
+} // namespace Orange::Engine::Asset
 
 namespace Orange::Engine::Render
 {
 
-class ORANGE_ENGINE_API VfxSystem
-{
-public:
-    VfxSystem();
-    ~VfxSystem();
+    class ORANGE_ENGINE_API VfxSystem
+    {
+    public:
+        VfxSystem();
+        ~VfxSystem();
 
-    VfxSystem(const VfxSystem&)            = delete;
-    VfxSystem& operator=(const VfxSystem&) = delete;
+        VfxSystem(const VfxSystem&)            = delete;
+        VfxSystem& operator=(const VfxSystem&) = delete;
 
-    VfxSystem(VfxSystem&&) noexcept;
-    VfxSystem& operator=(VfxSystem&&) noexcept;
+        VfxSystem(VfxSystem&&) noexcept;
+        VfxSystem& operator=(VfxSystem&&) noexcept;
 
-    // 在指定 RenderDevice 上初始化粒子绘制资源（pipeline、instance buffer
-    // FIF slices、内置 SPIR-V 加载）。`pRenderDevice` 是 OrangeRender 的
-    // RenderDevice*（不透明）；`framesInFlight` 通常与 Pipeline 同值（典
-    // 型 2）。`assets` 用于加载内置 additive_billboard SPIR-V。
-    //
-    // 重复 Initialize 返回 AlreadyInitialized；未 Initialize 时 Tick 仍
-    // 可跑（纯 CPU sim 不依赖 GPU），但 DrawParticles 是 no-op。
-    Result<void, ResultCode> Initialize(void*                     pRenderDevice,
-                                        std::uint32_t             framesInFlight,
-                                        Asset::AssetRegistry&     assets);
+        // 在指定 RenderDevice 上初始化粒子绘制资源（pipeline、instance buffer
+        // FIF slices、内置 SPIR-V 加载）。`pRenderDevice` 是 OrangeRender 的
+        // RenderDevice*（不透明）；`framesInFlight` 通常与 Pipeline 同值（典
+        // 型 2）。`assets` 用于加载内置 additive_billboard SPIR-V。
+        //
+        // 重复 Initialize 返回 AlreadyInitialized；未 Initialize 时 Tick 仍
+        // 可跑（纯 CPU sim 不依赖 GPU），但 DrawParticles 是 no-op。
+        Result<void, ResultCode> Initialize(void*                 pRenderDevice,
+                                            std::uint32_t         framesInFlight,
+                                            Asset::AssetRegistry& assets);
 
-    // 释放 GPU 资源。Pipeline.Shutdown 之前调一次。幂等。
-    void Shutdown();
+        // 释放 GPU 资源。Pipeline.Shutdown 之前调一次。幂等。
+        void Shutdown();
 
-    bool IsInitialized() const noexcept;
+        bool IsInitialized() const noexcept;
 
-    // 推进所有 emitter 一帧。`dt` < 0 当 0 处理。Entity 已销毁的池在
-    // 下次 Tick 时被自动回收（通过 world.IsValid 校验）。
-    void Tick(const World& world, float dt);
+        // 推进所有 emitter 一帧。`dt` < 0 当 0 处理。Entity 已销毁的池在
+        // 下次 Tick 时被自动回收（通过 world.IsValid 校验）。
+        void Tick(const World& world, float dt);
 
-    // 把粒子绘制录制进 Pipeline 给的 cmd list。参数全部不透明：
-    //   * pCmdList     —— OrangeRender Rhi::RHICommandList*。已 Begin
-    //     且当前在 ColorAttachment HDR target 的 BeginRendering 段中
-    //     （Pipeline 主 pass 末尾，调用方负责进 / 出渲染段）。
-    //   * pHdrColorView —— OrangeRender Rhi::RHITextureView*；当前 HDR
-    //     scene color 的 default view。VfxSystem 用它 BeginRendering
-    //     新一段（LoadOp::Load 保留主 pass 内容）。
-    //   * pDepthView   —— 主 pass 的 depth attachment view（粒子 pass
-    //     仍 read 它做 depth test，不写 depth）。可空——空时粒子不参与
-    //     depth test。
-    //   * viewProjMatrixData —— 16 个 float（mat4，列主序，与 Pipeline
-    //     主 pass 同一个 viewProj）。
-    //   * frameIndex   —— 单调递增帧序号；VfxSystem 取 modulo
-    //     framesInFlight 选 instance buffer slice。
-    //   * hdrWidth / hdrHeight —— 当前 HDR target 尺寸（像素）。
-    //
-    // 未 Initialize / 无粒子 → no-op。
-    void DrawParticles(void*               pCmdList,
-                       void*               pHdrColorView,
-                       void*               pDepthView,
-                       const float*        viewProjMatrixData,
-                       std::uint64_t       frameIndex,
-                       std::uint32_t       hdrWidth,
-                       std::uint32_t       hdrHeight);
+        // 把粒子绘制录制进 Pipeline 给的 cmd list。参数全部不透明：
+        //   * pCmdList     —— OrangeRender Rhi::RHICommandList*。已 Begin
+        //     且当前在 ColorAttachment HDR target 的 BeginRendering 段中
+        //     （Pipeline 主 pass 末尾，调用方负责进 / 出渲染段）。
+        //   * pHdrColorView —— OrangeRender Rhi::RHITextureView*；当前 HDR
+        //     scene color 的 default view。VfxSystem 用它 BeginRendering
+        //     新一段（LoadOp::Load 保留主 pass 内容）。
+        //   * pDepthView   —— 主 pass 的 depth attachment view（粒子 pass
+        //     仍 read 它做 depth test，不写 depth）。可空——空时粒子不参与
+        //     depth test。
+        //   * viewProjMatrixData —— 16 个 float（mat4，列主序，与 Pipeline
+        //     主 pass 同一个 viewProj）。
+        //   * frameIndex   —— 单调递增帧序号；VfxSystem 取 modulo
+        //     framesInFlight 选 instance buffer slice。
+        //   * hdrWidth / hdrHeight —— 当前 HDR target 尺寸（像素）。
+        //
+        // 未 Initialize / 无粒子 → no-op。
+        void DrawParticles(void*         pCmdList,
+                           void*         pHdrColorView,
+                           void*         pDepthView,
+                           const float*  viewProjMatrixData,
+                           std::uint64_t frameIndex,
+                           std::uint32_t hdrWidth,
+                           std::uint32_t hdrHeight);
 
-    // 诊断 / 测试用：当前所有发射器累计的活粒子数（VfxSystemTest 验
-    // 收 spawn / 回收语义靠这个）。
-    std::size_t TotalLiveParticleCount() const noexcept;
+        // 诊断 / 测试用：当前所有发射器累计的活粒子数（VfxSystemTest 验
+        // 收 spawn / 回收语义靠这个）。
+        std::size_t TotalLiveParticleCount() const noexcept;
 
-    // 诊断 / 测试用：指定 entity 的 emitter 池里当前活粒子数。entity
-    // 没有池 / entity 无效 → 0。
-    std::size_t LiveParticleCount(Entity emitterEntity) const noexcept;
+        // 诊断 / 测试用：指定 entity 的 emitter 池里当前活粒子数。entity
+        // 没有池 / entity 无效 → 0。
+        std::size_t LiveParticleCount(Entity emitterEntity) const noexcept;
 
-private:
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
-};
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_VFX_SYSTEM_H
+#endif // ORANGE_ENGINE_RENDER_VFX_SYSTEM_H

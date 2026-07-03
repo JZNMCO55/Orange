@@ -21,21 +21,21 @@
 namespace Orange::Editor::Plugin
 {
 
-class ColliderEditInspectorPlugin : public IEditorInspectorPlugin
-{
-public:
-    // 按 schema.typeName == "Collider" 匹配（与 RegisterColliderComponentSchema
-    // 内 ComponentSchemaBuilder<CC>("Collider", ...) 字面量一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class ColliderEditInspectorPlugin : public IEditorInspectorPlugin
+    {
+    public:
+        // 按 schema.typeName == "Collider" 匹配（与 RegisterColliderComponentSchema
+        // 内 ComponentSchemaBuilder<CC>("Collider", ...) 字面量一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // 段末追加 "Edit Vertices in Viewport" / "Exit Vertex Edit" 按钮；
-    // 非 Polygon / EdgeChain shape 显示 disabled 提示。
-    void ParseEnd(EditorHost&                                            host,
-                  Orange::Engine::Entity                                 entity,
-                  const Orange::Editor::Schema::ComponentSchema&         schema,
-                  void*                                                  component) override;
-};
+        // 段末追加 "Edit Vertices in Viewport" / "Exit Vertex Edit" 按钮；
+        // 非 Polygon / EdgeChain shape 显示 disabled 提示。
+        void ParseEnd(EditorHost&                                    host,
+                      Orange::Engine::Entity                         entity,
+                      const Orange::Editor::Schema::ComponentSchema& schema,
+                      void*                                          component) override;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_COLLIDER_EDIT_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_COLLIDER_EDIT_INSPECTOR_PLUGIN_H

@@ -47,69 +47,69 @@
 // OrangeRender 公共面前向声明 —— 仅用于参数类型，公共头不 `#include`。
 namespace Orange::Rhi
 {
-class RHIDevice;
-class RHICommandList;
-enum class TextureFormat : std::uint32_t;
-}
+    class RHIDevice;
+    class RHICommandList;
+    enum class TextureFormat : std::uint32_t;
+} // namespace Orange::Rhi
 
 namespace Orange::Engine::Render
 {
 
-class Pipeline;
+    class Pipeline;
 
-class ORANGE_ENGINE_API DebugDrawScene
-{
-public:
-    DebugDrawScene();
-    ~DebugDrawScene();
+    class ORANGE_ENGINE_API DebugDrawScene
+    {
+    public:
+        DebugDrawScene();
+        ~DebugDrawScene();
 
-    DebugDrawScene(const DebugDrawScene&)            = delete;
-    DebugDrawScene& operator=(const DebugDrawScene&) = delete;
+        DebugDrawScene(const DebugDrawScene&)            = delete;
+        DebugDrawScene& operator=(const DebugDrawScene&) = delete;
 
-    // 线段：from → to 一条 colored line。颜色按 packed ABGR 编码。
-    void AddLine(const glm::vec3& from, const glm::vec3& to,
-                 std::uint32_t colorABGR);
-
-    // Axis-Aligned Bounding Box：12 条 wireframe 线段构成。`min` / `max`
-    // 必须 `min.x ≤ max.x` 等三轴成立；否则视觉退化为退化盒子但不 crash。
-    void AddAabb(const glm::vec3& min, const glm::vec3& max,
-                 std::uint32_t colorABGR);
-
-    // Wireframe 球：用 XY / XZ / YZ 三个大圆近似可视化。`segments` 是单
-    // 圆分段数（默认 12，共 36 条线）；< 4 静默截到 4。
-    void AddSphere(const glm::vec3& center, float radius,
-                   std::uint32_t colorABGR, int segments = 12);
-
-    // 填充三角形（实心，不走 wireframe；不背面剔除）。
-    void AddTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+        // 线段：from → to 一条 colored line。颜色按 packed ABGR 编码。
+        void AddLine(const glm::vec3& from, const glm::vec3& to,
                      std::uint32_t colorABGR);
 
-    // 全局开关。disabled 时 Add* 静默丢，Pipeline 跳过 Flush。
-    void SetEnabled(bool enabled) noexcept;
-    bool IsEnabled() const noexcept;
+        // Axis-Aligned Bounding Box：12 条 wireframe 线段构成。`min` / `max`
+        // 必须 `min.x ≤ max.x` 等三轴成立；否则视觉退化为退化盒子但不 crash。
+        void AddAabb(const glm::vec3& min, const glm::vec3& max,
+                     std::uint32_t colorABGR);
 
-    // Pipeline 对接 RHI 后转 true；Initialize 失败 / 未调用 / 已 Shutdown
-    // 时为 false。消费者通常无需检测——Add* 自身对未 Initialize 静默。
-    bool IsInitialized() const noexcept;
+        // Wireframe 球：用 XY / XZ / YZ 三个大圆近似可视化。`segments` 是单
+        // 圆分段数（默认 12，共 36 条线）；< 4 静默截到 4。
+        void AddSphere(const glm::vec3& center, float radius,
+                       std::uint32_t colorABGR, int segments = 12);
 
-private:
-    friend class Pipeline;
+        // 填充三角形（实心，不走 wireframe；不背面剔除）。
+        void AddTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+                         std::uint32_t colorABGR);
 
-    // Backend 接口仅供 `Pipeline` 调用。参数为 OrangeRender 公共面类型
-    // （前向声明）；消费者不直接调用本组方法。
-    Result<void, ResultCode> InitializeBackend_(
-        ::Orange::Rhi::RHIDevice&      device,
-        ::Orange::Rhi::TextureFormat   colorFormat,
-        std::uint32_t                  framesInFlight);
-    void ShutdownBackend_() noexcept;
-    void SetViewProjBackend_(const glm::mat4& viewProj);
-    void FlushBackend_(::Orange::Rhi::RHICommandList& cmd);
-    bool IsEmptyBackend_() const noexcept;
+        // 全局开关。disabled 时 Add* 静默丢，Pipeline 跳过 Flush。
+        void SetEnabled(bool enabled) noexcept;
+        bool IsEnabled() const noexcept;
 
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
-};
+        // Pipeline 对接 RHI 后转 true；Initialize 失败 / 未调用 / 已 Shutdown
+        // 时为 false。消费者通常无需检测——Add* 自身对未 Initialize 静默。
+        bool IsInitialized() const noexcept;
 
-}  // namespace Orange::Engine::Render
+    private:
+        friend class Pipeline;
 
-#endif  // ORANGE_ENGINE_RENDER_DEBUG_DRAW_SCENE_H
+        // Backend 接口仅供 `Pipeline` 调用。参数为 OrangeRender 公共面类型
+        // （前向声明）；消费者不直接调用本组方法。
+        Result<void, ResultCode> InitializeBackend_(
+            ::Orange::Rhi::RHIDevice&    device,
+            ::Orange::Rhi::TextureFormat colorFormat,
+            std::uint32_t                framesInFlight);
+        void ShutdownBackend_() noexcept;
+        void SetViewProjBackend_(const glm::mat4& viewProj);
+        void FlushBackend_(::Orange::Rhi::RHICommandList& cmd);
+        bool IsEmptyBackend_() const noexcept;
+
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
+    };
+
+} // namespace Orange::Engine::Render
+
+#endif // ORANGE_ENGINE_RENDER_DEBUG_DRAW_SCENE_H

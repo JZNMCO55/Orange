@@ -86,13 +86,13 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::MaterialInstance;
 using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Save::AutosaveScheduler;
 using Orange::Engine::Save::ResolveSaveSlotPath;
 using Orange::Engine::Save::SaveableComponent;
@@ -109,483 +109,528 @@ namespace Sce = Orange::Engine::Scene;
 namespace
 {
 
-// ---------------------------------------------------------------------------
-// Mesh 工厂：单位立方体（与 sample 04 / 09 / 10 同布局）
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Mesh 工厂：单位立方体（与 sample 04 / 09 / 10 同布局）
+    // ---------------------------------------------------------------------------
 
-struct CubeFace
-{
-    std::array<VertexPosition3, 4> positions;
-};
-
-constexpr std::array<CubeFace, 6> kCubeFaces = {{
-    {{{{ 0.5f, -0.5f,  0.5f}, { 0.5f, -0.5f, -0.5f}, { 0.5f,  0.5f, -0.5f}, { 0.5f,  0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f,  0.5f}, {-0.5f,  0.5f,  0.5f}, {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f,  0.5f,  0.5f}, { 0.5f,  0.5f,  0.5f}, { 0.5f,  0.5f, -0.5f}, {-0.5f,  0.5f, -0.5f}}}},
-    {{{{-0.5f, -0.5f, -0.5f}, { 0.5f, -0.5f, -0.5f}, { 0.5f, -0.5f,  0.5f}, {-0.5f, -0.5f,  0.5f}}}},
-    {{{{-0.5f, -0.5f,  0.5f}, { 0.5f, -0.5f,  0.5f}, { 0.5f,  0.5f,  0.5f}, {-0.5f,  0.5f,  0.5f}}}},
-    {{{{ 0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f,  0.5f, -0.5f}, { 0.5f,  0.5f, -0.5f}}}},
-}};
-
-constexpr std::array<VertexUV2, 4> kFaceUVs = {{
-    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-}};
-
-std::unique_ptr<MeshAsset> MakeCubeMesh()
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24); uvs.reserve(24); indices.reserve(36);
-    for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
+    struct CubeFace
     {
-        const std::uint32_t base = face * 4;
-        for (int i = 0; i < 4; ++i)
+        std::array<VertexPosition3, 4> positions;
+    };
+
+    constexpr std::array<CubeFace, 6> kCubeFaces = {{
+        {{{{0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}}}},
+        {{{{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}}}},
+        {{{{-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}}}},
+        {{{{0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}}}},
+    }};
+
+    constexpr std::array<VertexUV2, 4> kFaceUVs = {{
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {1.0f, 1.0f},
+        {0.0f, 1.0f},
+    }};
+
+    std::unique_ptr<MeshAsset> MakeCubeMesh()
+    {
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+        for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
         {
-            positions.push_back(kCubeFaces[face].positions[i]);
-            uvs.push_back(kFaceUVs[i]);
-        }
-        // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
-        // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
-        indices.push_back(base + 0); indices.push_back(base + 1); indices.push_back(base + 2);
-        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 3);
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// 按 NameComponent.name 反查 entity（sample 通用 helper）。
-Entity FindEntityByName(World& world, std::string_view name)
-{
-    auto& reg  = world.Registry();
-    auto  view = reg.view<NameComponent>();
-    for (auto e : view)
-    {
-        if (reg.get<NameComponent>(e).name == name)
-        {
-            return World::FromEntt(e);
-        }
-    }
-    return Entity::Invalid();
-}
-
-// ---------------------------------------------------------------------------
-// 玩家进度（savable）—— 本 sample 唯一注册到 SaveGameRegistry 的 component。
-//
-// 字段：
-//   * tokensCollected：累计收集的 token 数；视觉上 i < tokensCollected 的
-//     token entity 被隐藏（visible=false）
-//   * playerX / playerY：玩家在 XY 平面上的位置；Save 时由 main loop sync
-//     自 player Transform，Load 时 ApplyProgressToWorld 写回 Transform
-// ---------------------------------------------------------------------------
-
-struct PlayerProgress
-{
-    std::int32_t tokensCollected{0};
-    float        playerX{-5.0f};
-    float        playerY{0.0f};
-};
-
-const SchemaVersion kProgressSchema{"game/PlayerProgress", 1, 0};
-
-constexpr int  kTokenCount        = 3;
-constexpr float kPlayerSpeed       = 4.5f;
-constexpr float kCollectDistance   = 0.6f;
-constexpr double kAutosaveInterval = 30.0;
-constexpr double kAutosaveThrottle = 5.0;
-
-// ---------------------------------------------------------------------------
-// World 反查：拿到当前唯一的 PlayerProgress 实体（约定 sample 内只有一份）。
-// ---------------------------------------------------------------------------
-Entity FindProgressEntity(World& world)
-{
-    // 取唯一一个挂 SaveableComponent + PlayerProgress 的 entity。
-    // 用 begin() != end() 判定 + 解引用，避免 for-range loop 里
-    // `return` 触发 MSVC C4702 unreachable code 警告（与 SaveGameSystemTest
-    // 同模式）。
-    auto& reg  = world.Registry();
-    auto  view = reg.view<SaveableComponent, PlayerProgress>();
-    if (view.begin() != view.end())
-    {
-        return World::FromEntt(*view.begin());
-    }
-    return Entity::Invalid();
-}
-
-void DestroyAllSaveableEntities(World& world)
-{
-    auto& reg = world.Registry();
-    auto  view = reg.view<const SaveableComponent>();
-    std::vector<Entity> toDestroy;
-    toDestroy.reserve(view.size());
-    for (auto e : view) { toDestroy.push_back(World::FromEntt(e)); }
-    for (auto e : toDestroy) { world.DestroyEntity(e); }
-}
-
-// 把 player Transform 的位置读到 PlayerProgress.playerX/Y —— Save 前调一次。
-void SyncProgressFromWorld(World& world, Entity player, Entity progressEntity)
-{
-    if (!player.IsValid() || !progressEntity.IsValid()) { return; }
-    auto* pTx  = world.GetComponent<TransformComponent>(player);
-    auto* prog = world.GetComponent<PlayerProgress>(progressEntity);
-    if (pTx == nullptr || prog == nullptr) { return; }
-    prog->playerX = pTx->position.x;
-    prog->playerY = pTx->position.y;
-}
-
-// 把 PlayerProgress 写回 World：玩家位置 + token 可见性。Load 后调一次。
-void ApplyProgressToWorld(World& world,
-                          Entity player,
-                          const std::array<Entity, kTokenCount>& tokens,
-                          Entity progressEntity)
-{
-    if (!progressEntity.IsValid()) { return; }
-    const auto* prog = world.GetComponent<PlayerProgress>(progressEntity);
-    if (prog == nullptr) { return; }
-
-    if (auto* pTx = world.GetComponent<TransformComponent>(player))
-    {
-        pTx->position.x = prog->playerX;
-        pTx->position.y = prog->playerY;
-    }
-    for (int i = 0; i < kTokenCount; ++i)
-    {
-        if (!tokens[i].IsValid()) { continue; }
-        if (auto* r = world.GetComponent<RenderableComponent>(tokens[i]))
-        {
-            r->visible = (i >= prog->tokensCollected);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 启动 / F9 重载：尝试 SaveGameSystem.Load slot1；失败则 fresh-start 创建
-// 一个挂 SaveableComponent + PlayerProgress 的 entity。返回该 entity。
-// ---------------------------------------------------------------------------
-Entity LoadOrCreateProgressEntity(World& world,
-                                  const SaveGameSystem& sys,
-                                  const std::filesystem::path& slotPath)
-{
-    DestroyAllSaveableEntities(world);
-
-    if (std::filesystem::exists(slotPath))
-    {
-        auto rc = sys.Load(slotPath.string(), world);
-        if (rc.IsOk())
-        {
-            Entity loaded = FindProgressEntity(world);
-            if (loaded.IsValid())
+            const std::uint32_t base = face * 4;
+            for (int i = 0; i < 4; ++i)
             {
-                std::fprintf(stdout, "[save_load_demo] 加载 slot1 成功\n");
-                return loaded;
+                positions.push_back(kCubeFaces[face].positions[i]);
+                uvs.push_back(kFaceUVs[i]);
+            }
+            // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
+            // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
+        }
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    // 按 NameComponent.name 反查 entity（sample 通用 helper）。
+    Entity FindEntityByName(World& world, std::string_view name)
+    {
+        auto& reg  = world.Registry();
+        auto  view = reg.view<NameComponent>();
+        for (auto e : view)
+        {
+            if (reg.get<NameComponent>(e).name == name)
+            {
+                return World::FromEntt(e);
             }
         }
-        else
+        return Entity::Invalid();
+    }
+
+    // ---------------------------------------------------------------------------
+    // 玩家进度（savable）—— 本 sample 唯一注册到 SaveGameRegistry 的 component。
+    //
+    // 字段：
+    //   * tokensCollected：累计收集的 token 数；视觉上 i < tokensCollected 的
+    //     token entity 被隐藏（visible=false）
+    //   * playerX / playerY：玩家在 XY 平面上的位置；Save 时由 main loop sync
+    //     自 player Transform，Load 时 ApplyProgressToWorld 写回 Transform
+    // ---------------------------------------------------------------------------
+
+    struct PlayerProgress
+    {
+        std::int32_t tokensCollected{0};
+        float        playerX{-5.0f};
+        float        playerY{0.0f};
+    };
+
+    const SchemaVersion kProgressSchema{"game/PlayerProgress", 1, 0};
+
+    constexpr int    kTokenCount       = 3;
+    constexpr float  kPlayerSpeed      = 4.5f;
+    constexpr float  kCollectDistance  = 0.6f;
+    constexpr double kAutosaveInterval = 30.0;
+    constexpr double kAutosaveThrottle = 5.0;
+
+    // ---------------------------------------------------------------------------
+    // World 反查：拿到当前唯一的 PlayerProgress 实体（约定 sample 内只有一份）。
+    // ---------------------------------------------------------------------------
+    Entity FindProgressEntity(World& world)
+    {
+        // 取唯一一个挂 SaveableComponent + PlayerProgress 的 entity。
+        // 用 begin() != end() 判定 + 解引用，避免 for-range loop 里
+        // `return` 触发 MSVC C4702 unreachable code 警告（与 SaveGameSystemTest
+        // 同模式）。
+        auto& reg  = world.Registry();
+        auto  view = reg.view<SaveableComponent, PlayerProgress>();
+        if (view.begin() != view.end())
         {
-            std::fprintf(stderr,
-                         "[save_load_demo] 加载 slot1 失败 (code=%u) —— fall back fresh start\n",
-                         static_cast<unsigned>(rc.Error()));
+            return World::FromEntt(*view.begin());
+        }
+        return Entity::Invalid();
+    }
+
+    void DestroyAllSaveableEntities(World& world)
+    {
+        auto&               reg  = world.Registry();
+        auto                view = reg.view<const SaveableComponent>();
+        std::vector<Entity> toDestroy;
+        toDestroy.reserve(view.size());
+        for (auto e : view)
+        {
+            toDestroy.push_back(World::FromEntt(e));
+        }
+        for (auto e : toDestroy)
+        {
+            world.DestroyEntity(e);
         }
     }
 
-    // Fresh start
-    Entity ent = world.CreateEntity();
-    world.Registry().emplace_or_replace<SaveableComponent>(World::ToEntt(ent));
-    world.AddComponent(ent, PlayerProgress{});
-    std::fprintf(stdout, "[save_load_demo] fresh start（slot1 不存在）\n");
-    return ent;
-}
-
-// ---------------------------------------------------------------------------
-// SaveGameRegistry 注册 —— 集中放在一个 helper 里让 main 干净。
-// ---------------------------------------------------------------------------
-SaveGameRegistry MakeSaveRegistry()
-{
-    SaveGameRegistry reg;
-    auto rc = reg.Register<PlayerProgress>(
-        "PlayerProgress", kProgressSchema,
-        [](JsonWriter& w, std::string_view path, const PlayerProgress& c)
-        {
-            const std::string b(path);
-            w.WriteInt  (b + "/tokensCollected", c.tokensCollected);
-            w.WriteFloat(b + "/playerX",         static_cast<double>(c.playerX));
-            w.WriteFloat(b + "/playerY",         static_cast<double>(c.playerY));
-        },
-        [](const JsonReader& r, std::string_view path, PlayerProgress& c) -> bool
-        {
-            const std::string b(path);
-            std::int64_t tokens = 0;
-            double       x      = 0.0;
-            double       y      = 0.0;
-            if (!r.ReadInt  (b + "/tokensCollected", tokens)) { return false; }
-            if (!r.ReadFloat(b + "/playerX",         x))      { return false; }
-            if (!r.ReadFloat(b + "/playerY",         y))      { return false; }
-            c.tokensCollected = static_cast<std::int32_t>(tokens);
-            c.playerX         = static_cast<float>(x);
-            c.playerY         = static_cast<float>(y);
-            return true;
-        });
-    if (rc.IsErr())
+    // 把 player Transform 的位置读到 PlayerProgress.playerX/Y —— Save 前调一次。
+    void SyncProgressFromWorld(World& world, Entity player, Entity progressEntity)
     {
-        std::fprintf(stderr, "[save_load_demo] SaveGameRegistry.Register 失败\n");
-    }
-    return reg;
-}
-
-// ---------------------------------------------------------------------------
-// GameplayLayer：input → 玩家移动 → token 收集 → save/load 触发器。
-// ---------------------------------------------------------------------------
-
-class GameplayLayer : public Layer
-{
-public:
-    GameplayLayer(In::InputContext& input,
-                  World& world,
-                  Entity playerEntity,
-                  std::array<Entity, kTokenCount> tokenEntities,
-                  Entity progressEntity,
-                  const SaveGameSystem& sys,
-                  const SlotManager& slotMgr,
-                  std::filesystem::path slot1Path)
-        : Layer("GameplayLayer")
-        , mInput(input)
-        , mWorld(world)
-        , mPlayer(playerEntity)
-        , mTokens(tokenEntities)
-        , mProgress(progressEntity)
-        , mSys(sys)
-        , mSlotMgr(slotMgr)
-        , mSlot1Path(std::move(slot1Path))
-        , mAutosave(MakeAutosaveConfig(),
-                    [this]
-                    {
-                        DoAutosave();
-                    })
-    {
-        // 初始一次：把（可能是从 slot1 加载来的）progress 同步到世界
-        ApplyProgressToWorld(mWorld, mPlayer, mTokens, mProgress);
+        if (!player.IsValid() || !progressEntity.IsValid())
+        {
+            return;
+        }
+        auto* pTx  = world.GetComponent<TransformComponent>(player);
+        auto* prog = world.GetComponent<PlayerProgress>(progressEntity);
+        if (pTx == nullptr || prog == nullptr)
+        {
+            return;
+        }
+        prog->playerX = pTx->position.x;
+        prog->playerY = pTx->position.y;
     }
 
-    void OnUpdate(const FrameContext& frame) override
+    // 把 PlayerProgress 写回 World：玩家位置 + token 可见性。Load 后调一次。
+    void ApplyProgressToWorld(World&                                 world,
+                              Entity                                 player,
+                              const std::array<Entity, kTokenCount>& tokens,
+                              Entity                                 progressEntity)
     {
-        const float dt = static_cast<float>(frame.time.deltaSeconds);
-        const In::ActionMap* topMap = mInput.Top();
-        if (topMap == nullptr) { mInput.BeginFrame(); return; }
-
-        // ---- 玩家移动 ----
-        const float vx = (In::IsHeld(topMap->GetState("move_right")) ? 1.0f : 0.0f)
-                       - (In::IsHeld(topMap->GetState("move_left"))  ? 1.0f : 0.0f);
-        const float vy = (In::IsHeld(topMap->GetState("move_up"))    ? 1.0f : 0.0f)
-                       - (In::IsHeld(topMap->GetState("move_down"))  ? 1.0f : 0.0f);
-        if (auto* pTx = mWorld.GetComponent<TransformComponent>(mPlayer))
+        if (!progressEntity.IsValid())
         {
-            pTx->position.x += vx * kPlayerSpeed * dt;
-            pTx->position.y += vy * kPlayerSpeed * dt;
+            return;
+        }
+        const auto* prog = world.GetComponent<PlayerProgress>(progressEntity);
+        if (prog == nullptr)
+        {
+            return;
         }
 
-        // ---- token 收集 ----
-        TryCollectTokens();
-
-        // ---- Save / Load 快捷键 ----
-        if (In::IsTriggered(topMap->GetState("save_quick")))
+        if (auto* pTx = world.GetComponent<TransformComponent>(player))
         {
-            DoManualSave();
+            pTx->position.x = prog->playerX;
+            pTx->position.y = prog->playerY;
         }
-        if (In::IsTriggered(topMap->GetState("load_quick")))
-        {
-            DoManualLoad();
-        }
-        if (In::IsTriggered(topMap->GetState("list_slots")))
-        {
-            DoListSlots();
-        }
-
-        // ---- Autosave ----
-        mAutosave.Update(static_cast<double>(dt));
-
-        mInput.BeginFrame();
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* key = std::get_if<Platform::KeyEvent>(&event))
-        {
-            const bool isDown = key->action != Platform::KeyAction::Release;
-            mInput.PostKeyEvent(static_cast<In::KeyCode>(key->key), isDown);
-            return false;
-        }
-        return false;
-    }
-
-private:
-    static AutosaveScheduler::Config MakeAutosaveConfig()
-    {
-        AutosaveScheduler::Config c{};
-        c.intervalSeconds   = kAutosaveInterval;
-        c.minSecondsBetween = kAutosaveThrottle;
-        return c;
-    }
-
-    void TryCollectTokens()
-    {
-        auto* prog = mWorld.GetComponent<PlayerProgress>(mProgress);
-        auto* pTx  = mWorld.GetComponent<TransformComponent>(mPlayer);
-        if (prog == nullptr || pTx == nullptr) { return; }
-
         for (int i = 0; i < kTokenCount; ++i)
         {
-            if (i < prog->tokensCollected) { continue; }   // 已被收集
-            if (!mTokens[i].IsValid())     { continue; }
-            const auto* tTx = mWorld.GetComponent<TransformComponent>(mTokens[i]);
-            if (tTx == nullptr) { continue; }
-            const float dx = pTx->position.x - tTx->position.x;
-            const float dy = pTx->position.y - tTx->position.y;
-            if (dx * dx + dy * dy < kCollectDistance * kCollectDistance)
+            if (!tokens[i].IsValid())
             {
-                // 仅按"距离最近未收集 token 是这个"才生效，避免乱序——
-                // 简单方案：如果第 i 个不是当前最低未收集 index 就跳过。
-                if (i != prog->tokensCollected) { continue; }
-                prog->tokensCollected = i + 1;
-                if (auto* r = mWorld.GetComponent<RenderableComponent>(mTokens[i]))
-                {
-                    r->visible = false;
-                }
-                std::fprintf(stdout, "[save_load_demo] 收集到 token %d (%d/%d)\n",
-                             i, prog->tokensCollected, kTokenCount);
+                continue;
+            }
+            if (auto* r = world.GetComponent<RenderableComponent>(tokens[i]))
+            {
+                r->visible = (i >= prog->tokensCollected);
             }
         }
     }
 
-    void DoManualSave()
+    // ---------------------------------------------------------------------------
+    // 启动 / F9 重载：尝试 SaveGameSystem.Load slot1；失败则 fresh-start 创建
+    // 一个挂 SaveableComponent + PlayerProgress 的 entity。返回该 entity。
+    // ---------------------------------------------------------------------------
+    Entity LoadOrCreateProgressEntity(World&                       world,
+                                      const SaveGameSystem&        sys,
+                                      const std::filesystem::path& slotPath)
     {
-        SyncProgressFromWorld(mWorld, mPlayer, mProgress);
+        DestroyAllSaveableEntities(world);
 
-        SlotMetadata meta{};
-        meta.displayName = "Quick Save";
-        if (auto* prog = mWorld.GetComponent<PlayerProgress>(mProgress))
+        if (std::filesystem::exists(slotPath))
         {
-            meta.summary = "tokens " + std::to_string(prog->tokensCollected)
-                         + "/" + std::to_string(kTokenCount);
+            auto rc = sys.Load(slotPath.string(), world);
+            if (rc.IsOk())
+            {
+                Entity loaded = FindProgressEntity(world);
+                if (loaded.IsValid())
+                {
+                    std::fprintf(stdout, "[save_load_demo] 加载 slot1 成功\n");
+                    return loaded;
+                }
+            }
+            else
+            {
+                std::fprintf(stderr,
+                             "[save_load_demo] 加载 slot1 失败 (code=%u) —— fall back fresh start\n",
+                             static_cast<unsigned>(rc.Error()));
+            }
         }
 
-        auto rc = mSlotMgr.Save(mSys, mWorld, "slot1", meta);
-        if (rc.IsOk())
-        {
-            std::fprintf(stdout, "[save_load_demo] [F5] slot1 已保存\n");
-            mAutosave.Reset();   // 手动存档后，autosave 计时器清零
-        }
-        else
-        {
-            std::fprintf(stderr, "[save_load_demo] [F5] slot1 保存失败 (code=%u)\n",
-                         static_cast<unsigned>(rc.Error()));
-        }
+        // Fresh start
+        Entity ent = world.CreateEntity();
+        world.Registry().emplace_or_replace<SaveableComponent>(World::ToEntt(ent));
+        world.AddComponent(ent, PlayerProgress{});
+        std::fprintf(stdout, "[save_load_demo] fresh start（slot1 不存在）\n");
+        return ent;
     }
 
-    void DoManualLoad()
+    // ---------------------------------------------------------------------------
+    // SaveGameRegistry 注册 —— 集中放在一个 helper 里让 main 干净。
+    // ---------------------------------------------------------------------------
+    SaveGameRegistry MakeSaveRegistry()
     {
-        if (!std::filesystem::exists(mSlot1Path))
-        {
-            std::fprintf(stdout, "[save_load_demo] [F9] slot1 不存在 —— 跳过\n");
-            return;
-        }
-        // 重做 LoadOrCreate 流程：销毁现有 saveable + Load slot1。失败时
-        // fresh start —— 与启动路径一致，保证按下 F9 永远把世界拉回某个
-        // 一致状态。
-        mProgress = LoadOrCreateProgressEntity(mWorld, mSys, mSlot1Path);
-        ApplyProgressToWorld(mWorld, mPlayer, mTokens, mProgress);
-        mAutosave.Reset();
-        std::fprintf(stdout, "[save_load_demo] [F9] slot1 已加载\n");
-    }
-
-    void DoListSlots()
-    {
-        auto rc = mSlotMgr.ListSlots();
+        SaveGameRegistry reg;
+        auto             rc = reg.Register<PlayerProgress>(
+            "PlayerProgress", kProgressSchema,
+            [](JsonWriter& w, std::string_view path, const PlayerProgress& c)
+            {
+                const std::string b(path);
+                w.WriteInt(b + "/tokensCollected", c.tokensCollected);
+                w.WriteFloat(b + "/playerX", static_cast<double>(c.playerX));
+                w.WriteFloat(b + "/playerY", static_cast<double>(c.playerY));
+            },
+            [](const JsonReader& r, std::string_view path, PlayerProgress& c) -> bool
+            {
+                const std::string b(path);
+                std::int64_t      tokens = 0;
+                double            x      = 0.0;
+                double            y      = 0.0;
+                if (!r.ReadInt(b + "/tokensCollected", tokens))
+                {
+                    return false;
+                }
+                if (!r.ReadFloat(b + "/playerX", x))
+                {
+                    return false;
+                }
+                if (!r.ReadFloat(b + "/playerY", y))
+                {
+                    return false;
+                }
+                c.tokensCollected = static_cast<std::int32_t>(tokens);
+                c.playerX         = static_cast<float>(x);
+                c.playerY         = static_cast<float>(y);
+                return true;
+            });
         if (rc.IsErr())
         {
-            std::fprintf(stderr, "[save_load_demo] [F1] ListSlots 失败 (code=%u)\n",
-                         static_cast<unsigned>(rc.Error()));
-            return;
+            std::fprintf(stderr, "[save_load_demo] SaveGameRegistry.Register 失败\n");
         }
-        const auto& list = rc.Value();
-        std::fprintf(stdout, "[save_load_demo] [F1] %zu 个 slot:\n", list.size());
-        for (const auto& m : list)
-        {
-            std::fprintf(stdout,
-                         "    - %-12s  saved=%lld  display='%s'  summary='%s'%s\n",
-                         m.slotName.c_str(),
-                         static_cast<long long>(m.savedAtUnixSeconds),
-                         m.displayName.c_str(),
-                         m.summary.c_str(),
-                         m.isAutosave ? "  [autosave]" : "");
-        }
+        return reg;
     }
 
-    void DoAutosave()
+    // ---------------------------------------------------------------------------
+    // GameplayLayer：input → 玩家移动 → token 收集 → save/load 触发器。
+    // ---------------------------------------------------------------------------
+
+    class GameplayLayer : public Layer
     {
-        SyncProgressFromWorld(mWorld, mPlayer, mProgress);
-        SlotMetadata meta{};
-        meta.displayName = "Autosave";
-        meta.isAutosave  = true;
-        if (auto* prog = mWorld.GetComponent<PlayerProgress>(mProgress))
+    public:
+        GameplayLayer(In::InputContext&               input,
+                      World&                          world,
+                      Entity                          playerEntity,
+                      std::array<Entity, kTokenCount> tokenEntities,
+                      Entity                          progressEntity,
+                      const SaveGameSystem&           sys,
+                      const SlotManager&              slotMgr,
+                      std::filesystem::path           slot1Path)
+            : Layer("GameplayLayer"), mInput(input), mWorld(world), mPlayer(playerEntity), mTokens(tokenEntities), mProgress(progressEntity), mSys(sys), mSlotMgr(slotMgr), mSlot1Path(std::move(slot1Path)), mAutosave(MakeAutosaveConfig(),
+                                                                                                                                                                                                                        [this]
+                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                            DoAutosave();
+                                                                                                                                                                                                                        })
         {
-            meta.summary = "tokens " + std::to_string(prog->tokensCollected)
-                         + "/" + std::to_string(kTokenCount);
+            // 初始一次：把（可能是从 slot1 加载来的）progress 同步到世界
+            ApplyProgressToWorld(mWorld, mPlayer, mTokens, mProgress);
         }
-        auto rc = mSlotMgr.Save(mSys, mWorld, "autosave", meta);
-        if (rc.IsOk())
+
+        void OnUpdate(const FrameContext& frame) override
         {
-            std::fprintf(stdout, "[save_load_demo] [autosave] 已写出 autosave\n");
+            const float          dt     = static_cast<float>(frame.time.deltaSeconds);
+            const In::ActionMap* topMap = mInput.Top();
+            if (topMap == nullptr)
+            {
+                mInput.BeginFrame();
+                return;
+            }
+
+            // ---- 玩家移动 ----
+            const float vx = (In::IsHeld(topMap->GetState("move_right")) ? 1.0f : 0.0f) - (In::IsHeld(topMap->GetState("move_left")) ? 1.0f : 0.0f);
+            const float vy = (In::IsHeld(topMap->GetState("move_up")) ? 1.0f : 0.0f) - (In::IsHeld(topMap->GetState("move_down")) ? 1.0f : 0.0f);
+            if (auto* pTx = mWorld.GetComponent<TransformComponent>(mPlayer))
+            {
+                pTx->position.x += vx * kPlayerSpeed * dt;
+                pTx->position.y += vy * kPlayerSpeed * dt;
+            }
+
+            // ---- token 收集 ----
+            TryCollectTokens();
+
+            // ---- Save / Load 快捷键 ----
+            if (In::IsTriggered(topMap->GetState("save_quick")))
+            {
+                DoManualSave();
+            }
+            if (In::IsTriggered(topMap->GetState("load_quick")))
+            {
+                DoManualLoad();
+            }
+            if (In::IsTriggered(topMap->GetState("list_slots")))
+            {
+                DoListSlots();
+            }
+
+            // ---- Autosave ----
+            mAutosave.Update(static_cast<double>(dt));
+
+            mInput.BeginFrame();
         }
-        else
+
+        bool OnEvent(const Platform::WindowEvent& event) override
         {
-            std::fprintf(stderr,
-                         "[save_load_demo] [autosave] 失败 (code=%u)\n",
-                         static_cast<unsigned>(rc.Error()));
+            if (auto* key = std::get_if<Platform::KeyEvent>(&event))
+            {
+                const bool isDown = key->action != Platform::KeyAction::Release;
+                mInput.PostKeyEvent(static_cast<In::KeyCode>(key->key), isDown);
+                return false;
+            }
+            return false;
         }
-    }
 
-    In::InputContext&                       mInput;
-    World&                                  mWorld;
-    Entity                                  mPlayer;
-    std::array<Entity, kTokenCount>         mTokens;
-    Entity                                  mProgress;
-    const SaveGameSystem&                   mSys;
-    const SlotManager&                      mSlotMgr;
-    std::filesystem::path                   mSlot1Path;
-    AutosaveScheduler                       mAutosave;
-};
+    private:
+        static AutosaveScheduler::Config MakeAutosaveConfig()
+        {
+            AutosaveScheduler::Config c{};
+            c.intervalSeconds   = kAutosaveInterval;
+            c.minSecondsBetween = kAutosaveThrottle;
+            return c;
+        }
 
-// 简单的 RenderLayer —— Pipeline.Render 串到 frame 末尾。
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world) {}
+        void TryCollectTokens()
+        {
+            auto* prog = mWorld.GetComponent<PlayerProgress>(mProgress);
+            auto* pTx  = mWorld.GetComponent<TransformComponent>(mPlayer);
+            if (prog == nullptr || pTx == nullptr)
+            {
+                return;
+            }
 
-    void OnUpdate(const FrameContext& frame) override
+            for (int i = 0; i < kTokenCount; ++i)
+            {
+                if (i < prog->tokensCollected)
+                {
+                    continue;
+                } // 已被收集
+                if (!mTokens[i].IsValid())
+                {
+                    continue;
+                }
+                const auto* tTx = mWorld.GetComponent<TransformComponent>(mTokens[i]);
+                if (tTx == nullptr)
+                {
+                    continue;
+                }
+                const float dx = pTx->position.x - tTx->position.x;
+                const float dy = pTx->position.y - tTx->position.y;
+                if (dx * dx + dy * dy < kCollectDistance * kCollectDistance)
+                {
+                    // 仅按"距离最近未收集 token 是这个"才生效，避免乱序——
+                    // 简单方案：如果第 i 个不是当前最低未收集 index 就跳过。
+                    if (i != prog->tokensCollected)
+                    {
+                        continue;
+                    }
+                    prog->tokensCollected = i + 1;
+                    if (auto* r = mWorld.GetComponent<RenderableComponent>(mTokens[i]))
+                    {
+                        r->visible = false;
+                    }
+                    std::fprintf(stdout, "[save_load_demo] 收集到 token %d (%d/%d)\n",
+                                 i, prog->tokensCollected, kTokenCount);
+                }
+            }
+        }
+
+        void DoManualSave()
+        {
+            SyncProgressFromWorld(mWorld, mPlayer, mProgress);
+
+            SlotMetadata meta{};
+            meta.displayName = "Quick Save";
+            if (auto* prog = mWorld.GetComponent<PlayerProgress>(mProgress))
+            {
+                meta.summary = "tokens " + std::to_string(prog->tokensCollected) + "/" + std::to_string(kTokenCount);
+            }
+
+            auto rc = mSlotMgr.Save(mSys, mWorld, "slot1", meta);
+            if (rc.IsOk())
+            {
+                std::fprintf(stdout, "[save_load_demo] [F5] slot1 已保存\n");
+                mAutosave.Reset(); // 手动存档后，autosave 计时器清零
+            }
+            else
+            {
+                std::fprintf(stderr, "[save_load_demo] [F5] slot1 保存失败 (code=%u)\n",
+                             static_cast<unsigned>(rc.Error()));
+            }
+        }
+
+        void DoManualLoad()
+        {
+            if (!std::filesystem::exists(mSlot1Path))
+            {
+                std::fprintf(stdout, "[save_load_demo] [F9] slot1 不存在 —— 跳过\n");
+                return;
+            }
+            // 重做 LoadOrCreate 流程：销毁现有 saveable + Load slot1。失败时
+            // fresh start —— 与启动路径一致，保证按下 F9 永远把世界拉回某个
+            // 一致状态。
+            mProgress = LoadOrCreateProgressEntity(mWorld, mSys, mSlot1Path);
+            ApplyProgressToWorld(mWorld, mPlayer, mTokens, mProgress);
+            mAutosave.Reset();
+            std::fprintf(stdout, "[save_load_demo] [F9] slot1 已加载\n");
+        }
+
+        void DoListSlots()
+        {
+            auto rc = mSlotMgr.ListSlots();
+            if (rc.IsErr())
+            {
+                std::fprintf(stderr, "[save_load_demo] [F1] ListSlots 失败 (code=%u)\n",
+                             static_cast<unsigned>(rc.Error()));
+                return;
+            }
+            const auto& list = rc.Value();
+            std::fprintf(stdout, "[save_load_demo] [F1] %zu 个 slot:\n", list.size());
+            for (const auto& m : list)
+            {
+                std::fprintf(stdout,
+                             "    - %-12s  saved=%lld  display='%s'  summary='%s'%s\n",
+                             m.slotName.c_str(),
+                             static_cast<long long>(m.savedAtUnixSeconds),
+                             m.displayName.c_str(),
+                             m.summary.c_str(),
+                             m.isAutosave ? "  [autosave]" : "");
+            }
+        }
+
+        void DoAutosave()
+        {
+            SyncProgressFromWorld(mWorld, mPlayer, mProgress);
+            SlotMetadata meta{};
+            meta.displayName = "Autosave";
+            meta.isAutosave  = true;
+            if (auto* prog = mWorld.GetComponent<PlayerProgress>(mProgress))
+            {
+                meta.summary = "tokens " + std::to_string(prog->tokensCollected) + "/" + std::to_string(kTokenCount);
+            }
+            auto rc = mSlotMgr.Save(mSys, mWorld, "autosave", meta);
+            if (rc.IsOk())
+            {
+                std::fprintf(stdout, "[save_load_demo] [autosave] 已写出 autosave\n");
+            }
+            else
+            {
+                std::fprintf(stderr,
+                             "[save_load_demo] [autosave] 失败 (code=%u)\n",
+                             static_cast<unsigned>(rc.Error()));
+            }
+        }
+
+        In::InputContext&               mInput;
+        World&                          mWorld;
+        Entity                          mPlayer;
+        std::array<Entity, kTokenCount> mTokens;
+        Entity                          mProgress;
+        const SaveGameSystem&           mSys;
+        const SlotManager&              mSlotMgr;
+        std::filesystem::path           mSlot1Path;
+        AutosaveScheduler               mAutosave;
+    };
+
+    // 简单的 RenderLayer —— Pipeline.Render 串到 frame 末尾。
+    class RenderLayer : public Layer
     {
-        mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
-        mPipeline.Render(mWorld);
-    }
+    public:
+        RenderLayer(Pipeline& pipeline, World& world)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world) {}
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        void OnUpdate(const FrameContext& frame) override
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            mPipeline.SetFrameTime(static_cast<float>(frame.time.totalSeconds));
+            mPipeline.Render(mWorld);
         }
-        return false;
-    }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-};
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
 
-}  // namespace
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+    };
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -596,7 +641,7 @@ int main(int argc, char** argv)
     cfg.window.title  = "OrangeEngine - 11 save_load_demo (F5=Save F9=Load F1=List)";
     cfg.window.width  = 1280;
     cfg.window.height = 720;
-    auto hostResult = AppHost::Create(cfg);
+    auto hostResult   = AppHost::Create(cfg);
     if (hostResult.IsErr())
     {
         std::fprintf(stderr, "AppHost::Create failed (code=%u)\n",
@@ -634,7 +679,7 @@ int main(int argc, char** argv)
 
     // ---- Input ----
     In::InputContext input;
-    auto actionRes = In::LoadActionMapFromFile(ORANGE_SAMPLE_11_ACTIONS_PATH);
+    auto             actionRes = In::LoadActionMapFromFile(ORANGE_SAMPLE_11_ACTIONS_PATH);
     if (actionRes.IsErr())
     {
         std::fprintf(stderr, "LoadActionMapFromFile failed (path=%s, code=%u)\n",
@@ -660,8 +705,8 @@ int main(int argc, char** argv)
     }
 
     // ---- 反查 entities 并 attach materials ----
-    Entity playerEntity = FindEntityByName(world, "player");
-    Entity groundEntity = FindEntityByName(world, "ground");
+    Entity                          playerEntity = FindEntityByName(world, "player");
+    Entity                          groundEntity = FindEntityByName(world, "ground");
     std::array<Entity, kTokenCount> tokens{};
     for (int i = 0; i < kTokenCount; ++i)
     {
@@ -674,22 +719,28 @@ int main(int argc, char** argv)
     }
     auto attachMat = [&](Entity e, MaterialInstance* mat)
     {
-        if (!e.IsValid()) return;
-        if (auto* r = world.GetComponent<RenderableComponent>(e)) { r->materialInstance = mat; }
+        if (!e.IsValid())
+            return;
+        if (auto* r = world.GetComponent<RenderableComponent>(e))
+        {
+            r->materialInstance = mat;
+        }
     };
     attachMat(playerEntity, playerMat.get());
     attachMat(groundEntity, groundMat.get());
-    for (auto e : tokens) { attachMat(e, tokenMat.get()); }
+    for (auto e : tokens)
+    {
+        attachMat(e, tokenMat.get());
+    }
 
     // ---- Camera ----
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(50.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 1.5f, 9.0f),
-                               glm::vec3(0.0f, 0.5f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(50.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 1.5f, 9.0f),
+                                         glm::vec3(0.0f, 0.5f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 

@@ -36,40 +36,40 @@ struct EditorHost;
 namespace Orange::Editor
 {
 
-bool ApplyAssetDropToEntity(EditorHost&                 host,
-                            Orange::Engine::Entity      target,
-                            const std::string&          assetPath);
+    bool ApplyAssetDropToEntity(EditorHost&            host,
+                                Orange::Engine::Entity target,
+                                const std::string&     assetPath);
 
-// 把一个 .mesh / .obj 资源在指定世界位置创建成一个新实体（拖资源到 viewport
-// 空白处时用 —— 对齐 Unity / Lumix 拖模型进空场景生成 GameObject）。新实体挂
-// Name(<stem>) + Transform(position) + Renderable(mesh + 材质)；多材质 mesh 一并
-// 挂 SubMeshMaterialsComponent。走 CreateEntityCommand 命令栈（可 Undo / Redo
-// ——材质在 factory 内由**预解析**的 MaterialInstance* 构建，redo 重放一致）。
-// 非 mesh 扩展名 / mesh 加载失败 / world 缺失 → 返回 Invalid + log warn，不创建。
-// 返回创建出的实体（caller 可据此设选中）。
-Orange::Engine::Entity
-CreateEntityFromMeshAsset(EditorHost&        host,
-                          const std::string& meshPath,
-                          const glm::vec3&   position);
+    // 把一个 .mesh / .obj 资源在指定世界位置创建成一个新实体（拖资源到 viewport
+    // 空白处时用 —— 对齐 Unity / Lumix 拖模型进空场景生成 GameObject）。新实体挂
+    // Name(<stem>) + Transform(position) + Renderable(mesh + 材质)；多材质 mesh 一并
+    // 挂 SubMeshMaterialsComponent。走 CreateEntityCommand 命令栈（可 Undo / Redo
+    // ——材质在 factory 内由**预解析**的 MaterialInstance* 构建，redo 重放一致）。
+    // 非 mesh 扩展名 / mesh 加载失败 / world 缺失 → 返回 Invalid + log warn，不创建。
+    // 返回创建出的实体（caller 可据此设选中）。
+    Orange::Engine::Entity
+    CreateEntityFromMeshAsset(EditorHost&        host,
+                              const std::string& meshPath,
+                              const glm::vec3&   position);
 
-// 把一个（已设到 entity 的 Renderable 上的）mesh 的多材质 slot 同步到
-// SubMeshMaterialsComponent —— 多 material mesh（MeshAsset::HasSubMeshes()）回读
-// 同名 `.meta` 的 subMeshMaterials，按 slot 经 EnsureMaterialInstance 挂
-// SubMeshMaterialsComponent + slot 0 兜底 Renderable.materialInstance；单 material
-// mesh / 空 path / 无 .meta 映射则撤掉残留组件。
-//
-// 调用方（两条都需"设 mesh 后"调本函数，保证 viewport drop 与 Inspector 设
-// mesh 字段行为一致）：
-//   * ApplyAssetDropToEntity 的 mesh 分支（drop 到实体）——内部调用
-//   * SchemaInspector 的 Renderable.mesh AssetRef 字段 apply（Inspector 设/DnD/Pick）
-//
-// 前置：caller 已把 meshPath 对应 mesh 设到 entity 的 Renderable.mesh（本函数
-// 不设 mesh，只按 meshPath 回读 .meta + 同步 sub-mesh 材质）。meshPath 为空 =
-// 清 mesh，撤掉组件。命令 apply 内调用 → undo/redo 重放时按当时 mesh 重新派生。
-void SyncSubMeshMaterialsForMesh(EditorHost&            host,
-                                 Orange::Engine::Entity entity,
-                                 const std::string&     meshPath);
+    // 把一个（已设到 entity 的 Renderable 上的）mesh 的多材质 slot 同步到
+    // SubMeshMaterialsComponent —— 多 material mesh（MeshAsset::HasSubMeshes()）回读
+    // 同名 `.meta` 的 subMeshMaterials，按 slot 经 EnsureMaterialInstance 挂
+    // SubMeshMaterialsComponent + slot 0 兜底 Renderable.materialInstance；单 material
+    // mesh / 空 path / 无 .meta 映射则撤掉残留组件。
+    //
+    // 调用方（两条都需"设 mesh 后"调本函数，保证 viewport drop 与 Inspector 设
+    // mesh 字段行为一致）：
+    //   * ApplyAssetDropToEntity 的 mesh 分支（drop 到实体）——内部调用
+    //   * SchemaInspector 的 Renderable.mesh AssetRef 字段 apply（Inspector 设/DnD/Pick）
+    //
+    // 前置：caller 已把 meshPath 对应 mesh 设到 entity 的 Renderable.mesh（本函数
+    // 不设 mesh，只按 meshPath 回读 .meta + 同步 sub-mesh 材质）。meshPath 为空 =
+    // 清 mesh，撤掉组件。命令 apply 内调用 → undo/redo 重放时按当时 mesh 重新派生。
+    void SyncSubMeshMaterialsForMesh(EditorHost&            host,
+                                     Orange::Engine::Entity entity,
+                                     const std::string&     meshPath);
 
-}  // namespace Orange::Editor
+} // namespace Orange::Editor
 
-#endif  // ORANGE_EDITOR_EDITOR_ASSET_DROP_HANDLER_H
+#endif // ORANGE_EDITOR_EDITOR_ASSET_DROP_HANDLER_H

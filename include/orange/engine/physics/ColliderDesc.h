@@ -26,37 +26,37 @@
 namespace Orange::Engine::Physics
 {
 
-struct CircleDesc
-{
-    float     radius{1.0f};
-    glm::vec2 center{0.0f, 0.0f};  // local offset (本地坐标系中心点)
-};
+    struct CircleDesc
+    {
+        float     radius{1.0f};
+        glm::vec2 center{0.0f, 0.0f}; // local offset (本地坐标系中心点)
+    };
 
-struct BoxDesc
-{
-    glm::vec2 halfExtents{0.5f, 0.5f};  // 半宽 / 半高
-    glm::vec2 center{0.0f, 0.0f};
-};
+    struct BoxDesc
+    {
+        glm::vec2 halfExtents{0.5f, 0.5f}; // 半宽 / 半高
+        glm::vec2 center{0.0f, 0.0f};
+    };
 
-struct PolygonDesc
-{
-    // Box2D 3.x 单 polygon shape 上限是 8 顶点（b2_maxPolygonVertices）。
-    static constexpr std::uint32_t kMaxVertices = 8;
+    struct PolygonDesc
+    {
+        // Box2D 3.x 单 polygon shape 上限是 8 顶点（b2_maxPolygonVertices）。
+        static constexpr std::uint32_t kMaxVertices = 8;
 
-    std::array<glm::vec2, kMaxVertices> vertices{};
-    std::uint32_t                       count{0};  // 实际使用的顶点数
-};
+        std::array<glm::vec2, kMaxVertices> vertices{};
+        std::uint32_t                       count{0}; // 实际使用的顶点数
+    };
 
-struct EdgeChainDesc
-{
-    // 多段折线的顶点上限。超出由调用方拆分多个 ColliderComponent 处理。
-    static constexpr std::uint32_t kMaxVertices = 16;
+    struct EdgeChainDesc
+    {
+        // 多段折线的顶点上限。超出由调用方拆分多个 ColliderComponent 处理。
+        static constexpr std::uint32_t kMaxVertices = 16;
 
-    std::array<glm::vec2, kMaxVertices> vertices{};
-    std::uint32_t                       count{0};
-    bool                                isLoop{false};  // true = 闭环（首尾自动连）
-};
+        std::array<glm::vec2, kMaxVertices> vertices{};
+        std::uint32_t                       count{0};
+        bool                                isLoop{false}; // true = 闭环（首尾自动连）
+    };
 
-}  // namespace Orange::Engine::Physics
+} // namespace Orange::Engine::Physics
 
-#endif  // ORANGE_ENGINE_PHYSICS_COLLIDER_DESC_H
+#endif // ORANGE_ENGINE_PHYSICS_COLLIDER_DESC_H

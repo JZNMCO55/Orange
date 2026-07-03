@@ -73,33 +73,33 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API MeshLoader final : public IAssetLoader<MeshAsset>
-{
-public:
-    // 'O','R','M','E' 按 little-endian 读出：内存字节序 0x4F,0x52,0x4D,0x45
-    // 反推 uint32 = 0x454D524F。
-    static constexpr std::uint32_t kMagic = 0x454D524FU;
-    // Load 支持的最小 / 最大 version。Save 总是写 kLatestVersion。
-    static constexpr std::uint32_t kVersionV1     = 1;
-    static constexpr std::uint32_t kVersionV2     = 2;
-    static constexpr std::uint32_t kVersionV3     = 3;
-    static constexpr std::uint32_t kVersionV4     = 4;
-    static constexpr std::uint32_t kVersionV5     = 5;
-    static constexpr std::uint32_t kLatestVersion = kVersionV5;
+    class ORANGE_ENGINE_API MeshLoader final : public IAssetLoader<MeshAsset>
+    {
+    public:
+        // 'O','R','M','E' 按 little-endian 读出：内存字节序 0x4F,0x52,0x4D,0x45
+        // 反推 uint32 = 0x454D524F。
+        static constexpr std::uint32_t kMagic = 0x454D524FU;
+        // Load 支持的最小 / 最大 version。Save 总是写 kLatestVersion。
+        static constexpr std::uint32_t kVersionV1     = 1;
+        static constexpr std::uint32_t kVersionV2     = 2;
+        static constexpr std::uint32_t kVersionV3     = 3;
+        static constexpr std::uint32_t kVersionV4     = 4;
+        static constexpr std::uint32_t kVersionV5     = 5;
+        static constexpr std::uint32_t kLatestVersion = kVersionV5;
 
-    MeshLoader() = default;
-    ~MeshLoader() override = default;
+        MeshLoader()           = default;
+        ~MeshLoader() override = default;
 
-    Result<std::unique_ptr<MeshAsset>, ResultCode> Load(std::string_view path) override;
+        Result<std::unique_ptr<MeshAsset>, ResultCode> Load(std::string_view path) override;
 
-    // 把 MeshAsset 序列化到磁盘 .mesh 文件（v5 格式）。caller 保证目标
-    // 目录已存在；本函数不创建目录。HasUVs() / HasNormals() /
-    // HasTangents() 决定是否写对应可选段；SubMeshes() 决定 sub-mesh 段。
-    // 失败码：IoError（无法写文件） / InvalidArgument（顶点数据不一致）。
-    static Result<void, ResultCode> Save(std::string_view path,
-                                         const MeshAsset& mesh);
-};
+        // 把 MeshAsset 序列化到磁盘 .mesh 文件（v5 格式）。caller 保证目标
+        // 目录已存在；本函数不创建目录。HasUVs() / HasNormals() /
+        // HasTangents() 决定是否写对应可选段；SubMeshes() 决定 sub-mesh 段。
+        // 失败码：IoError（无法写文件） / InvalidArgument（顶点数据不一致）。
+        static Result<void, ResultCode> Save(std::string_view path,
+                                             const MeshAsset& mesh);
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_MESH_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_MESH_LOADER_H

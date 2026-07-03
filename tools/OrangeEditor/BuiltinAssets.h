@@ -30,7 +30,7 @@
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
@@ -91,4 +91,4 @@ EnsureMaterialInstance(EditorHost& host, const std::string& materialPath);
 Orange::Engine::Render::MaterialInstance*
 EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPath);
 
-#endif  // ORANGE_EDITOR_BUILTIN_ASSETS_H
+#endif // ORANGE_EDITOR_BUILTIN_ASSETS_H

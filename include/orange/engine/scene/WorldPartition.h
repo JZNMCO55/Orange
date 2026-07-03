@@ -42,132 +42,132 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Scene
 {
 
-// 一条 layer 的元数据。**仅 manifest 持有**——entity 上的
-// LayerComponent 只引用 id，不复制这些字段。
-struct LayerInfo
-{
-    std::string id;            // 唯一 key；与 LayerComponent.layerId 对应
-    std::string displayName;   // 编辑器 UI 显示；空字符串视为"等同 id"
-    bool        visible{true}; // false → Render / Physics 跳过本 layer 的 entity
+    // 一条 layer 的元数据。**仅 manifest 持有**——entity 上的
+    // LayerComponent 只引用 id，不复制这些字段。
+    struct LayerInfo
+    {
+        std::string id;            // 唯一 key；与 LayerComponent.layerId 对应
+        std::string displayName;   // 编辑器 UI 显示；空字符串视为"等同 id"
+        bool        visible{true}; // false → Render / Physics 跳过本 layer 的 entity
 
-    // 多文件序列化时该 layer 的 source 文件相对路径（manifest 所在目录
-    // 为 base）。单文件模式下留空字符串。Load 路径用它决定从哪个文件
-    // 反序列化本 layer 的 entity；Save 路径反向写出。
-    std::string source;
-};
+        // 多文件序列化时该 layer 的 source 文件相对路径（manifest 所在目录
+        // 为 base）。单文件模式下留空字符串。Load 路径用它决定从哪个文件
+        // 反序列化本 layer 的 entity；Save 路径反向写出。
+        std::string source;
+    };
 
-class ORANGE_ENGINE_API WorldPartition
-{
-public:
-    WorldPartition();
-    ~WorldPartition();
+    class ORANGE_ENGINE_API WorldPartition
+    {
+    public:
+        WorldPartition();
+        ~WorldPartition();
 
-    WorldPartition(const WorldPartition&)            = delete;
-    WorldPartition& operator=(const WorldPartition&) = delete;
+        WorldPartition(const WorldPartition&)            = delete;
+        WorldPartition& operator=(const WorldPartition&) = delete;
 
-    WorldPartition(WorldPartition&&) noexcept;
-    WorldPartition& operator=(WorldPartition&&) noexcept;
+        WorldPartition(WorldPartition&&) noexcept;
+        WorldPartition& operator=(WorldPartition&&) noexcept;
 
-    // 默认 layer id —— 常量字符串 "default"。构造时自动注册，
-    // RemoveLayer 拒绝删除。
-    static std::string_view DefaultLayerId() noexcept;
+        // 默认 layer id —— 常量字符串 "default"。构造时自动注册，
+        // RemoveLayer 拒绝删除。
+        static std::string_view DefaultLayerId() noexcept;
 
-    // ---- Layer manifest CRUD ----
+        // ---- Layer manifest CRUD ----
 
-    // 添加一条 layer。返回 false 表示 id 已存在（不覆盖原条目）。
-    // 空 id 不被接受（return false）；其余字段允许空。
-    bool AddLayer(LayerInfo info);
+        // 添加一条 layer。返回 false 表示 id 已存在（不覆盖原条目）。
+        // 空 id 不被接受（return false）；其余字段允许空。
+        bool AddLayer(LayerInfo info);
 
-    // 删除 layer。返回 false 表示 id 不存在或试图删除 default。
-    // 注意：本函数不动 World 内任何 LayerComponent.layerId；调用方若需
-    // 让被删 layer 的 entity 改归 default，应在调用后自行遍历 World 重写
-    // LayerComponent。设计上故意不在此处做隐式 mutate，避免 partition
-    // 反向耦合 World 生命周期。
-    bool RemoveLayer(std::string_view id);
+        // 删除 layer。返回 false 表示 id 不存在或试图删除 default。
+        // 注意：本函数不动 World 内任何 LayerComponent.layerId；调用方若需
+        // 让被删 layer 的 entity 改归 default，应在调用后自行遍历 World 重写
+        // LayerComponent。设计上故意不在此处做隐式 mutate，避免 partition
+        // 反向耦合 World 生命周期。
+        bool RemoveLayer(std::string_view id);
 
-    // 整体替换 manifest（顺序 + 内容）。常用于从 manifest 文件加载之后
-    // 一次性灌入。会覆盖现有所有条目；调用后 default layer 仍然由本类
-    // 自动补回（若入参里没有）。
-    void ResetLayers(std::vector<LayerInfo> layers);
+        // 整体替换 manifest（顺序 + 内容）。常用于从 manifest 文件加载之后
+        // 一次性灌入。会覆盖现有所有条目；调用后 default layer 仍然由本类
+        // 自动补回（若入参里没有）。
+        void ResetLayers(std::vector<LayerInfo> layers);
 
-    // 把 id 对应的 layer 在 manifest 顺序里移动 delta 步（正=向后 / UI 下移，
-    // 负=向前 / UI 上移）。目标下标 clamp 到 [0, count-1]，其余条目相对序
-    // 保持。返回 false 表示 id 不存在、delta==0、或已在边界无法移动。
-    // 仅改顺序，不动任何 layer 字段或 entity 归属；Editor UI 的 up/down
-    // 按钮即调本函数（delta = ±1）。GetLayers() 顺序即随之变化。
-    bool MoveLayer(std::string_view id, int delta);
+        // 把 id 对应的 layer 在 manifest 顺序里移动 delta 步（正=向后 / UI 下移，
+        // 负=向前 / UI 上移）。目标下标 clamp 到 [0, count-1]，其余条目相对序
+        // 保持。返回 false 表示 id 不存在、delta==0、或已在边界无法移动。
+        // 仅改顺序，不动任何 layer 字段或 entity 归属；Editor UI 的 up/down
+        // 按钮即调本函数（delta = ±1）。GetLayers() 顺序即随之变化。
+        bool MoveLayer(std::string_view id, int delta);
 
-    bool HasLayer(std::string_view id) const noexcept;
-    const LayerInfo* GetLayer(std::string_view id) const noexcept;
-    LayerInfo*       GetLayer(std::string_view id) noexcept;
+        bool             HasLayer(std::string_view id) const noexcept;
+        const LayerInfo* GetLayer(std::string_view id) const noexcept;
+        LayerInfo*       GetLayer(std::string_view id) noexcept;
 
-    // 顺序保持插入序——Editor UI 直接按这个序展示。
-    const std::vector<LayerInfo>& GetLayers() const noexcept { return mLayers; }
+        // 顺序保持插入序——Editor UI 直接按这个序展示。
+        const std::vector<LayerInfo>& GetLayers() const noexcept { return mLayers; }
 
-    std::size_t LayerCount() const noexcept { return mLayers.size(); }
+        std::size_t LayerCount() const noexcept { return mLayers.size(); }
 
-    // ---- Visibility ----
+        // ---- Visibility ----
 
-    // 不存在的 layer id 视为 visible=true（避免缺数据时整片场景消失）。
-    bool IsLayerVisible(std::string_view id) const noexcept;
-    void SetLayerVisible(std::string_view id, bool visible);
+        // 不存在的 layer id 视为 visible=true（避免缺数据时整片场景消失）。
+        bool IsLayerVisible(std::string_view id) const noexcept;
+        void SetLayerVisible(std::string_view id, bool visible);
 
-    // ---- Entity → layer 查询 ----
+        // ---- Entity → layer 查询 ----
 
-    // 读 entity 的 LayerComponent.layerId；没挂 / 空字符串 → DefaultLayerId()。
-    // entity invalid 时返回 DefaultLayerId() + 静默（不视为 error）。
-    std::string_view GetLayerOf(const World& world, Entity entity) const;
+        // 读 entity 的 LayerComponent.layerId；没挂 / 空字符串 → DefaultLayerId()。
+        // entity invalid 时返回 DefaultLayerId() + 静默（不视为 error）。
+        std::string_view GetLayerOf(const World& world, Entity entity) const;
 
-    // entity 应否被渲染 / 物理 tick。等价于
-    // `IsLayerVisible(GetLayerOf(world, entity))`，让消费者只调一次。
-    // 另外叠加 per-entity hidden override（见下）：hidden 实体直接 false，
-    // 不再看它所在 layer。
-    bool IsEntityVisible(const World& world, Entity entity) const;
+        // entity 应否被渲染 / 物理 tick。等价于
+        // `IsLayerVisible(GetLayerOf(world, entity))`，让消费者只调一次。
+        // 另外叠加 per-entity hidden override（见下）：hidden 实体直接 false，
+        // 不再看它所在 layer。
+        bool IsEntityVisible(const World& world, Entity entity) const;
 
-    // ---- Per-entity render hidden override（临时隐藏 / editor-hide） ----
-    //
-    // 与 layer.visible 正交的、按单个 entity 的渲染隐藏开关。语义是
-    // "暂时别画这一个"，独立于它所在 layer 的可见性，也独立于运行时
-    // enabled——典型用途是编辑器里临时藏掉挡视线的物件。
-    //
-    // 关键纪律：这个集合 **不序列化**（SceneSerialization 只写 layer
-    // manifest，不碰 hidden set）。所以它是 session / view 级状态，Open
-    // 场景重建 partition 时自然清空；运行时 game 永远是空集 → 零开销零
-    // 影响。RenderScene 已逐 entity 调 IsEntityVisible，所以隐藏一个
-    // entity 不需要改 render 路径。
-    void SetEntityHidden(Entity entity, bool hidden);
-    bool IsEntityHidden(Entity entity) const noexcept;
+        // ---- Per-entity render hidden override（临时隐藏 / editor-hide） ----
+        //
+        // 与 layer.visible 正交的、按单个 entity 的渲染隐藏开关。语义是
+        // "暂时别画这一个"，独立于它所在 layer 的可见性，也独立于运行时
+        // enabled——典型用途是编辑器里临时藏掉挡视线的物件。
+        //
+        // 关键纪律：这个集合 **不序列化**（SceneSerialization 只写 layer
+        // manifest，不碰 hidden set）。所以它是 session / view 级状态，Open
+        // 场景重建 partition 时自然清空；运行时 game 永远是空集 → 零开销零
+        // 影响。RenderScene 已逐 entity 调 IsEntityVisible，所以隐藏一个
+        // entity 不需要改 render 路径。
+        void SetEntityHidden(Entity entity, bool hidden);
+        bool IsEntityHidden(Entity entity) const noexcept;
 
-    // 全部取消隐藏 + 当前隐藏数。编辑器"Unhide All (N)"逃生口用：批量藏了
-    // 很多实体后，逐个 unhide 太繁；一键清空。N==0 时菜单项 disable。
-    void        ClearEntityHidden() noexcept;
-    std::size_t HiddenEntityCount() const noexcept;
+        // 全部取消隐藏 + 当前隐藏数。编辑器"Unhide All (N)"逃生口用：批量藏了
+        // 很多实体后，逐个 unhide 太繁；一键清空。N==0 时菜单项 disable。
+        void        ClearEntityHidden() noexcept;
+        std::size_t HiddenEntityCount() const noexcept;
 
-    // 把 entity 挂到指定 layer（添加或修改 LayerComponent）。layerId 在
-    // manifest 里不存在不阻塞——只是接受字符串，warn 由调用方关心；
-    // 这条 API 故意保持薄，便于 deserialization 不依赖 manifest 已加载完。
-    void SetLayerOf(World& world, Entity entity, std::string_view layerId);
+        // 把 entity 挂到指定 layer（添加或修改 LayerComponent）。layerId 在
+        // manifest 里不存在不阻塞——只是接受字符串，warn 由调用方关心；
+        // 这条 API 故意保持薄，便于 deserialization 不依赖 manifest 已加载完。
+        void SetLayerOf(World& world, Entity entity, std::string_view layerId);
 
-private:
-    // layer 顺序 + 数据；查找用 mIndex（O(1)）。
-    std::vector<LayerInfo>                       mLayers;
-    std::unordered_map<std::string, std::size_t> mIndex;
+    private:
+        // layer 顺序 + 数据；查找用 mIndex（O(1)）。
+        std::vector<LayerInfo>                       mLayers;
+        std::unordered_map<std::string, std::size_t> mIndex;
 
-    // per-entity 渲染隐藏集（见 SetEntityHidden）。不序列化、运行时为空。
-    // 用 vector 而非 set：隐藏的 entity 数量天然少（编辑器临时藏几个），
-    // 线性查足够，且不引入 Entity 的 hash 依赖。
-    std::vector<Entity>                          mHiddenEntities;
+        // per-entity 渲染隐藏集（见 SetEntityHidden）。不序列化、运行时为空。
+        // 用 vector 而非 set：隐藏的 entity 数量天然少（编辑器临时藏几个），
+        // 线性查足够，且不引入 Entity 的 hash 依赖。
+        std::vector<Entity> mHiddenEntities;
 
-    void EnsureDefault();
-    void RebuildIndex();
-};
+        void EnsureDefault();
+        void RebuildIndex();
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_WORLD_PARTITION_H
+#endif // ORANGE_ENGINE_SCENE_WORLD_PARTITION_H

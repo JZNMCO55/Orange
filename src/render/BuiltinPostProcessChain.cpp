@@ -13,15 +13,15 @@
 namespace Orange::Engine::Render::BuiltinPostProcessChain
 {
 
-PostProcessChain CreateDefault()
-{
-    PostProcessChain chain;
-    chain.AddPass(std::make_unique<HdrPass>());
-    chain.AddPass(std::make_unique<BloomPass>());
-    chain.AddPass(std::make_unique<GodRaysPass>());     // enabled = false 默认
-    chain.AddPass(std::make_unique<TonemapPass>());
-    chain.AddPass(std::make_unique<LutPass>());
-    return chain;
-}
+    PostProcessChain CreateDefault()
+    {
+        PostProcessChain chain;
+        chain.AddPass(std::make_unique<HdrPass>());
+        chain.AddPass(std::make_unique<BloomPass>());
+        chain.AddPass(std::make_unique<GodRaysPass>()); // enabled = false 默认
+        chain.AddPass(std::make_unique<TonemapPass>());
+        chain.AddPass(std::make_unique<LutPass>());
+        return chain;
+    }
 
-}  // namespace Orange::Engine::Render::BuiltinPostProcessChain
+} // namespace Orange::Engine::Render::BuiltinPostProcessChain

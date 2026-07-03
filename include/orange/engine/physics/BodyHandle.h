@@ -18,12 +18,13 @@
 namespace Orange::Engine::Physics
 {
 
-// phantom tag —— 仅作类型区分，不需要任何成员
-struct PhysicsBodyTag
-{};
+    // phantom tag —— 仅作类型区分，不需要任何成员
+    struct PhysicsBodyTag
+    {
+    };
 
-using BodyHandle = ::Orange::Engine::TypedHandle<PhysicsBodyTag>;
+    using BodyHandle = ::Orange::Engine::TypedHandle<PhysicsBodyTag>;
 
-}  // namespace Orange::Engine::Physics
+} // namespace Orange::Engine::Physics
 
-#endif  // ORANGE_ENGINE_PHYSICS_BODY_HANDLE_H
+#endif // ORANGE_ENGINE_PHYSICS_BODY_HANDLE_H

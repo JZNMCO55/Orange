@@ -19,10 +19,10 @@
 
 namespace Orange::Engine::Core
 {
-namespace
-{
+    namespace
+    {
 
-[[maybe_unused]] inline constexpr int sCoreHeaderCheckSentinel = 0;
+        [[maybe_unused]] inline constexpr int sCoreHeaderCheckSentinel = 0;
 
-}  // namespace
-}  // namespace Orange::Engine::Core
+    } // namespace
+} // namespace Orange::Engine::Core

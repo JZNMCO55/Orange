@@ -18,165 +18,179 @@
 #include <mutex>
 
 #if defined(ORANGE_ENGINE_WITH_SPDLOG)
-    #include <memory>
+#include <memory>
 
-    #include <spdlog/spdlog.h>
-    #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #endif
 
 namespace Orange::Engine::Log
 {
-namespace
-{
-
-std::atomic<Level> sLevel{Level::Info};
-std::mutex         sStderrMutex;
-
-// v0.8 应用层 sink hook —— OrangeEditor Console 面板用。pointer + userData
-// 由 SetLogSink 同步加载到本对内（fn 在 mutex 保护下读，避免线程间撕裂）。
-std::mutex     sSinkMutex;
-LogSinkFn      sSinkFn{nullptr};
-void*          spSinkUserData{nullptr};
-
-const char* LevelTag(Level level) noexcept
-{
-    switch (level)
+    namespace
     {
-        case Level::Trace:    return "trace";
-        case Level::Debug:    return "debug";
-        case Level::Info:     return "info";
-        case Level::Warn:     return "warn";
-        case Level::Error:    return "error";
-        case Level::Critical: return "critical";
-        case Level::Off:      return "off";
-    }
-    return "info";
-}
+
+        std::atomic<Level> sLevel{Level::Info};
+        std::mutex         sStderrMutex;
+
+        // v0.8 应用层 sink hook —— OrangeEditor Console 面板用。pointer + userData
+        // 由 SetLogSink 同步加载到本对内（fn 在 mutex 保护下读，避免线程间撕裂）。
+        std::mutex sSinkMutex;
+        LogSinkFn  sSinkFn{nullptr};
+        void*      spSinkUserData{nullptr};
+
+        const char* LevelTag(Level level) noexcept
+        {
+            switch (level)
+            {
+                case Level::Trace:
+                    return "trace";
+                case Level::Debug:
+                    return "debug";
+                case Level::Info:
+                    return "info";
+                case Level::Warn:
+                    return "warn";
+                case Level::Error:
+                    return "error";
+                case Level::Critical:
+                    return "critical";
+                case Level::Off:
+                    return "off";
+            }
+            return "info";
+        }
 
 #if defined(ORANGE_ENGINE_WITH_SPDLOG)
 
-std::shared_ptr<spdlog::logger> sLogger;
+        std::shared_ptr<spdlog::logger> sLogger;
 
-spdlog::level::level_enum ToSpdlog(Level level) noexcept
-{
-    switch (level)
-    {
-        case Level::Trace:    return spdlog::level::trace;
-        case Level::Debug:    return spdlog::level::debug;
-        case Level::Info:     return spdlog::level::info;
-        case Level::Warn:     return spdlog::level::warn;
-        case Level::Error:    return spdlog::level::err;
-        case Level::Critical: return spdlog::level::critical;
-        case Level::Off:      return spdlog::level::off;
-    }
-    return spdlog::level::info;
-}
+        spdlog::level::level_enum ToSpdlog(Level level) noexcept
+        {
+            switch (level)
+            {
+                case Level::Trace:
+                    return spdlog::level::trace;
+                case Level::Debug:
+                    return spdlog::level::debug;
+                case Level::Info:
+                    return spdlog::level::info;
+                case Level::Warn:
+                    return spdlog::level::warn;
+                case Level::Error:
+                    return spdlog::level::err;
+                case Level::Critical:
+                    return spdlog::level::critical;
+                case Level::Off:
+                    return spdlog::level::off;
+            }
+            return spdlog::level::info;
+        }
 
-void EnsureLogger()
-{
-    if (sLogger)
-    {
-        return;
-    }
-    sLogger = spdlog::stdout_color_mt("orange_engine");
-    sLogger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
-    sLogger->set_level(ToSpdlog(sLevel.load(std::memory_order_relaxed)));
-}
+        void EnsureLogger()
+        {
+            if (sLogger)
+            {
+                return;
+            }
+            sLogger = spdlog::stdout_color_mt("orange_engine");
+            sLogger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
+            sLogger->set_level(ToSpdlog(sLevel.load(std::memory_order_relaxed)));
+        }
 
 #endif
 
-void WriteFallback(Level level, std::string_view message) noexcept
-{
-    std::lock_guard<std::mutex> guard(sStderrMutex);
-    std::fprintf(stderr,
-                 "[%s] %.*s\n",
-                 LevelTag(level),
-                 static_cast<int>(message.size()),
-                 message.data());
-}
+        void WriteFallback(Level level, std::string_view message) noexcept
+        {
+            std::lock_guard<std::mutex> guard(sStderrMutex);
+            std::fprintf(stderr,
+                         "[%s] %.*s\n",
+                         LevelTag(level),
+                         static_cast<int>(message.size()),
+                         message.data());
+        }
 
-}  // namespace
+    } // namespace
 
-void Initialize()
-{
+    void Initialize()
+    {
 #if defined(ORANGE_ENGINE_WITH_SPDLOG)
-    EnsureLogger();
+        EnsureLogger();
 #endif
-}
+    }
 
-void Shutdown()
-{
+    void Shutdown()
+    {
 #if defined(ORANGE_ENGINE_WITH_SPDLOG)
-    if (sLogger)
-    {
-        spdlog::drop("orange_engine");
-        sLogger.reset();
-    }
+        if (sLogger)
+        {
+            spdlog::drop("orange_engine");
+            sLogger.reset();
+        }
 #endif
-}
+    }
 
-void SetLevel(Level level) noexcept
-{
-    sLevel.store(level, std::memory_order_relaxed);
+    void SetLevel(Level level) noexcept
+    {
+        sLevel.store(level, std::memory_order_relaxed);
 #if defined(ORANGE_ENGINE_WITH_SPDLOG)
-    if (sLogger)
-    {
-        sLogger->set_level(ToSpdlog(level));
-    }
+        if (sLogger)
+        {
+            sLogger->set_level(ToSpdlog(level));
+        }
 #endif
-}
-
-Level GetLevel() noexcept
-{
-    return sLevel.load(std::memory_order_relaxed);
-}
-
-bool IsEnabled(Level level) noexcept
-{
-    return static_cast<int>(level) >= static_cast<int>(sLevel.load(std::memory_order_relaxed));
-}
-
-void Write(Level level, std::string_view message) noexcept
-{
-    if (!IsEnabled(level))
-    {
-        return;
     }
 
-    // 应用层 sink hook 并行执行（不替代主输出路径，避免某 sink 死循环 / 缓存
-    // 满让所有日志丢失）。snapshot 指针后再调用，让 SetLogSink / ClearLogSink
-    // 在调用期间是 thread-safe 的。
+    Level GetLevel() noexcept
+    {
+        return sLevel.load(std::memory_order_relaxed);
+    }
+
+    bool IsEnabled(Level level) noexcept
+    {
+        return static_cast<int>(level) >= static_cast<int>(sLevel.load(std::memory_order_relaxed));
+    }
+
+    void Write(Level level, std::string_view message) noexcept
+    {
+        if (!IsEnabled(level))
+        {
+            return;
+        }
+
+        // 应用层 sink hook 并行执行（不替代主输出路径，避免某 sink 死循环 / 缓存
+        // 满让所有日志丢失）。snapshot 指针后再调用，让 SetLogSink / ClearLogSink
+        // 在调用期间是 thread-safe 的。
+        {
+            std::lock_guard<std::mutex> guard(sSinkMutex);
+            if (sSinkFn != nullptr)
+            {
+                sSinkFn(level, message, spSinkUserData);
+            }
+        }
+
+#if defined(ORANGE_ENGINE_WITH_SPDLOG)
+        EnsureLogger();
+        if (sLogger)
+        {
+            sLogger->log(ToSpdlog(level), std::string_view{message});
+            return;
+        }
+#endif
+        WriteFallback(level, message);
+    }
+
+    void SetLogSink(LogSinkFn fn, void* userData) noexcept
     {
         std::lock_guard<std::mutex> guard(sSinkMutex);
-        if (sSinkFn != nullptr)
-        {
-            sSinkFn(level, message, spSinkUserData);
-        }
+        sSinkFn        = fn;
+        spSinkUserData = userData;
     }
 
-#if defined(ORANGE_ENGINE_WITH_SPDLOG)
-    EnsureLogger();
-    if (sLogger)
+    void ClearLogSink() noexcept
     {
-        sLogger->log(ToSpdlog(level), std::string_view{message});
-        return;
+        std::lock_guard<std::mutex> guard(sSinkMutex);
+        sSinkFn        = nullptr;
+        spSinkUserData = nullptr;
     }
-#endif
-    WriteFallback(level, message);
-}
 
-void SetLogSink(LogSinkFn fn, void* userData) noexcept
-{
-    std::lock_guard<std::mutex> guard(sSinkMutex);
-    sSinkFn        = fn;
-    spSinkUserData = userData;
-}
-
-void ClearLogSink() noexcept
-{
-    std::lock_guard<std::mutex> guard(sSinkMutex);
-    sSinkFn        = nullptr;
-    spSinkUserData = nullptr;
-}
-
-}  // namespace Orange::Engine::Log
+} // namespace Orange::Engine::Log

@@ -59,24 +59,27 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> positions = {
-        {-0.5f, -0.5f, 0.0f},
-        { 0.5f, -0.5f, 0.0f},
-        { 0.5f,  0.5f, 0.0f},
-        {-0.5f,  0.5f, 0.0f},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
-}
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
+    {
+        std::vector<VertexPosition3> positions = {
+            {-0.5f, -0.5f, 0.0f},
+            {0.5f, -0.5f, 0.0f},
+            {0.5f, 0.5f, 0.0f},
+            {-0.5f, 0.5f, 0.0f},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        return std::make_unique<MeshAsset>(std::move(positions),
+                                           std::move(uvs),
+                                           std::move(indices));
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -84,7 +87,7 @@ int main()
 
     // ---- 1. Pipeline 未 Initialize 的 introspection -----------------
     {
-        Pipeline pipeline;
+        Pipeline      pipeline;
         std::uint32_t w = 9999;
         std::uint32_t h = 9999;
         pipeline.GetHdrTargetSize(w, h);
@@ -105,7 +108,7 @@ int main()
     winDesc.width   = kInitialW;
     winDesc.height  = kInitialH;
     winDesc.visible = false;
-    auto winResult = Window::Create(winDesc);
+    auto winResult  = Window::Create(winDesc);
     if (winResult.IsErr())
     {
         std::fprintf(stderr,
@@ -174,17 +177,17 @@ int main()
                      "  [PASS] Initialize 后 HDR target = %ux%u（与 framebuffer 对齐）\n",
                      hdrW, hdrH);
     }
-    assert(pipeline.TemplatePipelineCount() == 0);  // 还没 Render
+    assert(pipeline.TemplatePipelineCount() == 0); // 还没 Render
 
     // debug-view mode 公共 API 往返（默认 Lit + Set/Get 一致，零回归基线）。
     {
         using Orange::Engine::Render::DebugViewMode;
-        assert(pipeline.GetDebugViewMode() == DebugViewMode::Lit);  // 默认
+        assert(pipeline.GetDebugViewMode() == DebugViewMode::Lit); // 默认
         pipeline.SetDebugViewMode(DebugViewMode::Wireframe);
         assert(pipeline.GetDebugViewMode() == DebugViewMode::Wireframe);
         pipeline.SetDebugViewMode(DebugViewMode::Normals);
         assert(pipeline.GetDebugViewMode() == DebugViewMode::Normals);
-        pipeline.SetDebugViewMode(DebugViewMode::Lit);  // 复位，避免影响后续
+        pipeline.SetDebugViewMode(DebugViewMode::Lit); // 复位，避免影响后续
         assert(pipeline.GetDebugViewMode() == DebugViewMode::Lit);
         std::fprintf(stdout, "  [PASS] debug-view mode API 往返（默认 Lit + Set/Get）\n");
     }
@@ -205,7 +208,7 @@ int main()
 
     // ---- 4. Render 含 drawable+camera 的 World ----------------------
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
 
@@ -217,7 +220,7 @@ int main()
         world.AddComponent(e, rc);
 
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == 1);  // textured 模板编一次
+        assert(pipeline.TemplatePipelineCount() == 1); // textured 模板编一次
 
         std::uint32_t hdrW = 0;
         std::uint32_t hdrH = 0;
@@ -257,7 +260,7 @@ int main()
 
     // ---- 6. Resize 后再 Render drawable —— 验证 descriptor set 已重新指向新 view
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
 

@@ -19,26 +19,23 @@
 //   * mApply 是捕获 World* + Entity 的 lambda，CommandStack 的生命周期
 //     绑定 World（切 World 时 Clear()），不会出现悬空引用。
 
-template<typename T>
+template <typename T>
 class SetFieldValueCommand : public ICommand
 {
 public:
     using ApplyFn = std::function<void(const T&)>;
 
     SetFieldValueCommand(Orange::Engine::Entity entity,
-                         std::string           fieldKey,
-                         T                     oldValue,
-                         T                     newValue,
-                         ApplyFn               apply)
-        : mEntity(entity)
-        , mFieldKey(std::move(fieldKey))
-        , mOldValue(std::move(oldValue))
-        , mNewValue(std::move(newValue))
-        , mApply(std::move(apply))
-    {}
+                         std::string            fieldKey,
+                         T                      oldValue,
+                         T                      newValue,
+                         ApplyFn                apply)
+        : mEntity(entity), mFieldKey(std::move(fieldKey)), mOldValue(std::move(oldValue)), mNewValue(std::move(newValue)), mApply(std::move(apply))
+    {
+    }
 
     void Execute() override { mApply(mNewValue); }
-    void Undo()    override { mApply(mOldValue); }
+    void Undo() override { mApply(mOldValue); }
 
     // 返回 fieldKey 本身作为类型标识 —— 让 CommandStack 的 coalesce 匹配
     // 精确到字段粒度，避免不同 T 的 SetFieldValueCommand 跨类型 Merge。
@@ -47,7 +44,10 @@ public:
     bool Merge(ICommand& newer) override
     {
         auto& n = static_cast<SetFieldValueCommand<T>&>(newer);
-        if (n.mEntity != mEntity || n.mFieldKey != mFieldKey) { return false; }
+        if (n.mEntity != mEntity || n.mFieldKey != mFieldKey)
+        {
+            return false;
+        }
         mNewValue = std::move(n.mNewValue);
         return true;
     }
@@ -60,4 +60,4 @@ private:
     ApplyFn                mApply;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_SETFIELDVALUECOMMAND_H
+#endif // ORANGE_EDITOR_COMMAND_SETFIELDVALUECOMMAND_H

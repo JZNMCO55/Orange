@@ -49,7 +49,7 @@
 enum class MergeMode : std::uint8_t
 {
     Disable = 0,
-    Ends    = 1,  // 默认
+    Ends    = 1, // 默认
     All     = 2,
 };
 
@@ -129,19 +129,19 @@ public:
 
 private:
     std::vector<std::unique_ptr<ICommand>> mStack;
-    int mIndex = -1;  // 最后已执行命令的下标；-1 = 栈空 / 全部已撤销
+    int                                    mIndex = -1; // 最后已执行命令的下标；-1 = 栈空 / 全部已撤销
 
     // 进行中 group 的 pending 缓冲。mInGroup == false 时本字段保持空。
     // 用裸 vector 而非 unique_ptr<CommandGroup>——避免 header 暴露
     // CommandGroup 完整定义（CommandGroup 是 .cpp 内 anonymous namespace
     // 的实现细节）。
     std::vector<std::unique_ptr<ICommand>> mPendingGroup;
-    const char* mGroupName = nullptr;
-    MergeMode   mGroupMode = MergeMode::Ends;
-    bool        mInGroup   = false;
+    const char*                            mGroupName = nullptr;
+    MergeMode                              mGroupMode = MergeMode::Ends;
+    bool                                   mInGroup   = false;
 
     // "栈有效变更" 通知钩子；空表示无注册方，调用点直接跳过。详见 SetOnChanged。
     std::function<void()> mOnChanged;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_COMMANDSTACK_H
+#endif // ORANGE_EDITOR_COMMAND_COMMANDSTACK_H

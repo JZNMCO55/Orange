@@ -88,7 +88,6 @@ using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
@@ -98,183 +97,202 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::PostProcessComponent;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// UV-sphere（与 sample 16 / 18 同构造）
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    // UV-sphere（与 sample 16 / 18 同构造）
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            const float u   = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi = u * glm::two_pi<float>();
-            positions.push_back({radius * sinT * std::cos(phi),
-                                 radius * cosT,
-                                 radius * sinT * std::sin(phi)});
-            uvs.push_back({u, 1.0f - v});
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
+            {
+                const float u   = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi = u * glm::two_pi<float>();
+                positions.push_back({radius * sinT * std::cos(phi),
+                                     radius * cosT,
+                                     radius * sinT * std::sin(phi)});
+                uvs.push_back({u, 1.0f - v});
+            }
         }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            const std::uint32_t a = i * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-// 大 XZ 平面 ground（halfExtent=50 → 100×100 单位）
-std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
-{
-    const float h = halfExtent;
-    std::vector<VertexPosition3> positions = {
-        {-h, 0.0f,  h}, { h, 0.0f,  h}, { h, 0.0f, -h}, {-h, 0.0f, -h},
+    // 大 XZ 平面 ground（halfExtent=50 → 100×100 单位）
+    std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
+    {
+        const float                  h         = halfExtent;
+        std::vector<VertexPosition3> positions = {
+            {-h, 0.0f, h},
+            {h, 0.0f, h},
+            {h, 0.0f, -h},
+            {-h, 0.0f, -h},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    // 相机位置预设：4 个关键 z 位置，对应 GAP 留待后续 "盒内 / 盒外 / 过渡带"
+    // 3+1 张对照图。--motion 不启用时按 mPositionZ 单一位置出图（capture 友好）。
+    enum class Position
+    {
+        Outside    = 0, // z=-8 ，两盒外，看 Global 中性底
+        BoxA       = 1, // z=3  ，盒 A 中心，看高对比 grading
+        Transition = 2, // z=6.5，box-a 边界外 blendDistance smoothstep ~74% 区
+        BoxB       = 3, // z=13 ，盒 B 中心，看冷色温 grading
     };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+
+    float PositionToZ(Position p)
+    {
+        switch (p)
+        {
+            case Position::Outside:
+                return -8.0f;
+            case Position::BoxA:
+                return 3.0f;
+            // box-a 外边界 z=6（box center z=3 + extent.z=3），距离 0.5 → smoothstep
+            // (0, 1.5, 0.5) ≈ 0.26，weight = 1 - 0.26 = 0.74 → 看 box-a grading 74%
+            // 强度部分淡入（vs outside=纯 Global / box-a=100% grading 中间态）。
+            case Position::Transition:
+                return 6.5f;
+            case Position::BoxB:
+                return 13.0f;
+        }
+        return -8.0f;
+    }
+
+    const char* PositionName(Position p)
+    {
+        switch (p)
+        {
+            case Position::Outside:
+                return "outside";
+            case Position::BoxA:
+                return "box-a";
+            case Position::Transition:
+                return "transition";
+            case Position::BoxB:
+                return "box-b";
+        }
+        return "outside";
+    }
+
+    class RenderLayer : public Layer
+    {
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
+                    std::string capturePath, bool motionEnabled, float positionZ,
+                    Entity cameraEntity)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
+              mCapturePath(std::move(capturePath)),
+              mMotionEnabled(motionEnabled),
+              mPositionZ(positionZ),
+              mCameraEntity(cameraEntity) {}
+
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            // 相机推进：--motion 时 6 秒内沿 z 从 -8 推到 +18（双盒外→盒 A→过渡
+            // →盒 B→盒外）；非 motion 时停在 mPositionZ。
+            float camZ = mPositionZ;
+            if (mMotionEnabled)
+            {
+                const float t = std::clamp(static_cast<float>(mFrame) / 360.0f, 0.0f, 1.0f);
+                camZ          = glm::mix(-8.0f, 18.0f, t);
+            }
+            auto& cam = mWorld.Registry().get<Camera>(World::ToEntt(mCameraEntity));
+            cam.view  = glm::lookAt(glm::vec3(0.0f, 2.0f, camZ),
+                                    glm::vec3(0.0f, 1.0f, camZ + 6.0f),
+                                    glm::vec3(0.0f, 1.0f, 0.0f));
+
+            if (!mCapturePath.empty() && mFrame == kCaptureFrame)
+            {
+                mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
+            }
+            mPipeline.Render(mWorld);
+            if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
+            {
+                mWindow.RequestClose();
+            }
+            ++mFrame;
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        static constexpr std::uint64_t kCaptureFrame = 8; // 无 TAA 预热几帧即可
+        Pipeline&                      mPipeline;
+        World&                         mWorld;
+        Platform::Window&              mWindow;
+        std::string                    mCapturePath;
+        bool                           mMotionEnabled{false};
+        float                          mPositionZ{-8.0f};
+        Entity                         mCameraEntity{};
+        std::uint64_t                  mFrame{0};
     };
-    std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-// 相机位置预设：4 个关键 z 位置，对应 GAP 留待后续 "盒内 / 盒外 / 过渡带"
-// 3+1 张对照图。--motion 不启用时按 mPositionZ 单一位置出图（capture 友好）。
-enum class Position
-{
-    Outside    = 0,  // z=-8 ，两盒外，看 Global 中性底
-    BoxA       = 1,  // z=3  ，盒 A 中心，看高对比 grading
-    Transition = 2,  // z=6.5，box-a 边界外 blendDistance smoothstep ~74% 区
-    BoxB       = 3,  // z=13 ，盒 B 中心，看冷色温 grading
-};
-
-float PositionToZ(Position p)
-{
-    switch (p)
+    // 在 (x, z) 放一个落地球 caster（半径 r，球心 y=r），用作相机推进时的视觉
+    // 标尺 + 让 SSAO / 阴影有"被遮挡几何"可作用。
+    Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
+                       MaterialInstance* inst, float x, float z, float r)
     {
-        case Position::Outside:    return -8.0f;
-        case Position::BoxA:       return  3.0f;
-        // box-a 外边界 z=6（box center z=3 + extent.z=3），距离 0.5 → smoothstep
-        // (0, 1.5, 0.5) ≈ 0.26，weight = 1 - 0.26 = 0.74 → 看 box-a grading 74%
-        // 强度部分淡入（vs outside=纯 Global / box-a=100% grading 中间态）。
-        case Position::Transition: return  6.5f;
-        case Position::BoxB:       return 13.0f;
-    }
-    return -8.0f;
-}
-
-const char* PositionName(Position p)
-{
-    switch (p)
-    {
-        case Position::Outside:    return "outside";
-        case Position::BoxA:       return "box-a";
-        case Position::Transition: return "transition";
-        case Position::BoxB:       return "box-b";
-    }
-    return "outside";
-}
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
-                std::string capturePath, bool motionEnabled, float positionZ,
-                Entity cameraEntity)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
-          mCapturePath(std::move(capturePath)),
-          mMotionEnabled(motionEnabled),
-          mPositionZ(positionZ),
-          mCameraEntity(cameraEntity) {}
-
-    void OnUpdate(const FrameContext& /*frame*/) override
-    {
-        // 相机推进：--motion 时 6 秒内沿 z 从 -8 推到 +18（双盒外→盒 A→过渡
-        // →盒 B→盒外）；非 motion 时停在 mPositionZ。
-        float camZ = mPositionZ;
-        if (mMotionEnabled)
-        {
-            const float t = std::clamp(static_cast<float>(mFrame) / 360.0f, 0.0f, 1.0f);
-            camZ = glm::mix(-8.0f, 18.0f, t);
-        }
-        auto& cam = mWorld.Registry().get<Camera>(World::ToEntt(mCameraEntity));
-        cam.view = glm::lookAt(glm::vec3(0.0f, 2.0f, camZ),
-                               glm::vec3(0.0f, 1.0f, camZ + 6.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
-
-        if (!mCapturePath.empty() && mFrame == kCaptureFrame)
-        {
-            mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
-        }
-        mPipeline.Render(mWorld);
-        if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
-        {
-            mWindow.RequestClose();
-        }
-        ++mFrame;
+        Entity             e = world.CreateEntity();
+        TransformComponent xf{};
+        xf.position = {x, r, z};
+        world.AddComponent(e, xf);
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = inst;
+        rc.castsShadow      = true;
+        world.AddComponent(e, rc);
+        return e;
     }
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
-        {
-            mPipeline.OnResize(resize->width, resize->height);
-        }
-        return false;
-    }
-
-private:
-    static constexpr std::uint64_t kCaptureFrame = 8;  // 无 TAA 预热几帧即可
-    Pipeline&         mPipeline;
-    World&            mWorld;
-    Platform::Window& mWindow;
-    std::string       mCapturePath;
-    bool              mMotionEnabled{false};
-    float             mPositionZ{-8.0f};
-    Entity            mCameraEntity{};
-    std::uint64_t     mFrame{0};
-};
-
-// 在 (x, z) 放一个落地球 caster（半径 r，球心 y=r），用作相机推进时的视觉
-// 标尺 + 让 SSAO / 阴影有"被遮挡几何"可作用。
-Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
-                   MaterialInstance* inst, float x, float z, float r)
-{
-    Entity e = world.CreateEntity();
-    TransformComponent xf{};
-    xf.position = {x, r, z};
-    world.AddComponent(e, xf);
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = inst;
-    rc.castsShadow      = true;
-    world.AddComponent(e, rc);
-    return e;
-}
-
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -284,18 +302,42 @@ int main(int argc, char** argv)
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
-        if      (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
-        else if (a == "--motion")                  { motionEnabled = true; }
+        if (a == "--capture" && i + 1 < argc)
+        {
+            capturePath = argv[i + 1];
+            ++i;
+        }
+        else if (a == "--motion")
+        {
+            motionEnabled = true;
+        }
         else if (a == "--position" && i + 1 < argc)
         {
-            const std::string v = argv[i + 1]; ++i;
-            if      (v == "outside")    { position = Position::Outside; }
-            else if (v == "box-a")      { position = Position::BoxA; }
-            else if (v == "transition") { position = Position::Transition; }
-            else if (v == "box-b")      { position = Position::BoxB; }
-            else { std::fprintf(stderr,
-                "Unknown --position value '%s' (want outside|box-a|transition|box-b)\n",
-                v.c_str()); return 1; }
+            const std::string v = argv[i + 1];
+            ++i;
+            if (v == "outside")
+            {
+                position = Position::Outside;
+            }
+            else if (v == "box-a")
+            {
+                position = Position::BoxA;
+            }
+            else if (v == "transition")
+            {
+                position = Position::Transition;
+            }
+            else if (v == "box-b")
+            {
+                position = Position::BoxB;
+            }
+            else
+            {
+                std::fprintf(stderr,
+                             "Unknown --position value '%s' (want outside|box-a|transition|box-b)\n",
+                             v.c_str());
+                return 1;
+            }
         }
     }
 
@@ -327,7 +369,7 @@ int main(int argc, char** argv)
     }
 
     auto sphereRes = assets.Insert<MeshAsset>("builtin/sphere", MakeSphereMesh(0.6f, 32, 16));
-    auto floorRes  = assets.Insert<MeshAsset>("builtin/floor",  MakeFloorMesh(50.0f));
+    auto floorRes  = assets.Insert<MeshAsset>("builtin/floor", MakeFloorMesh(50.0f));
     if (sphereRes.IsErr() || floorRes.IsErr())
     {
         std::fprintf(stderr, "Insert<MeshAsset> failed\n");
@@ -343,14 +385,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    World world;
+    World                                          world;
     std::vector<std::unique_ptr<MaterialInstance>> instances;
 
     auto makePbr = [&](glm::vec4 baseColor, float metallic, float roughness)
         -> MaterialInstance*
     {
         auto inst = materials.CreateInstance("pbr");
-        if (!inst) { return nullptr; }
+        if (!inst)
+        {
+            return nullptr;
+        }
         inst->SetUniform("uBaseColor", baseColor);
         inst->SetUniform("uMRA", glm::vec4(metallic, roughness, 1.0f, 0.0f));
         instances.push_back(std::move(inst));
@@ -379,14 +424,14 @@ int main(int argc, char** argv)
 
     // 5 个 sphere 沿 +Z 摆作路径标记 / 视觉参照物。半径 0.6 + 球心 y=r。
     SpawnSphere(world, sphere, sphereMat, -1.5f, -3.0f, 0.6f);
-    SpawnSphere(world, sphere, sphereMat,  1.5f,  3.0f, 0.6f);
-    SpawnSphere(world, sphere, sphereMat, -1.5f,  8.0f, 0.6f);
-    SpawnSphere(world, sphere, sphereMat,  1.5f, 13.0f, 0.6f);
+    SpawnSphere(world, sphere, sphereMat, 1.5f, 3.0f, 0.6f);
+    SpawnSphere(world, sphere, sphereMat, -1.5f, 8.0f, 0.6f);
+    SpawnSphere(world, sphere, sphereMat, 1.5f, 13.0f, 0.6f);
     SpawnSphere(world, sphere, sphereMat, -1.5f, 18.0f, 0.6f);
 
     // 单一 directional light：偏暖太阳光，从右上斜下
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.45f, -1.0f, -0.2f));
         world.AddComponent(e, xf);
@@ -408,13 +453,13 @@ int main(int argc, char** argv)
     //    saturation=1/temperature=0），让盒外是"未加滤镜"的 PBR 基线，
     //    盒内的 grading 偏移最戏剧化。
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.position = {0.0f, 0.0f, 0.0f};
         world.AddComponent(e, xf);
         PostProcessComponent pp{};
-        pp.mode         = PostProcessComponent::Mode::Global;
-        pp.priority     = 0.0f;
+        pp.mode     = PostProcessComponent::Mode::Global;
+        pp.priority = 0.0f;
         // Global 底刻意全留默认值：SSAO on / grading off / vignette off
         world.AddComponent(e, pp);
     }
@@ -422,19 +467,19 @@ int main(int argc, char** argv)
     // ② Local 盒 A（高对比 grading）：相机 z ≈ 3 时画面 contrast↑/sat↑ + 强
     //    vignette → "戏剧化光影盒"。
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.position = {0.0f, 1.0f, 3.0f};
         world.AddComponent(e, xf);
         PostProcessComponent pp{};
-        pp.mode             = PostProcessComponent::Mode::Local;
-        pp.localExtent      = {3.0f, 2.5f, 3.0f};
-        pp.priority         = 1.0f;
-        pp.blendDistance    = 1.5f;
-        pp.gradeEnabled     = true;
-        pp.gradeContrast    = 2.0f;
-        pp.gradeSaturation  = 1.8f;
-        pp.gradeExposure    = 0.2f;
+        pp.mode                   = PostProcessComponent::Mode::Local;
+        pp.localExtent            = {3.0f, 2.5f, 3.0f};
+        pp.priority               = 1.0f;
+        pp.blendDistance          = 1.5f;
+        pp.gradeEnabled           = true;
+        pp.gradeContrast          = 2.0f;
+        pp.gradeSaturation        = 1.8f;
+        pp.gradeExposure          = 0.2f;
         pp.lensEnabled            = true;
         pp.lensVignetteIntensity  = 0.6f;
         pp.lensVignetteSmoothness = 0.4f;
@@ -444,19 +489,19 @@ int main(int argc, char** argv)
     // ③ Local 盒 B（冷色温 + 中等 vignette）：相机 z ≈ 13 时画面 temperature↓
     //    （偏蓝）+ tint↑（偏品红）→ "夜冷感盒"。
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.position = {0.0f, 1.0f, 13.0f};
         world.AddComponent(e, xf);
         PostProcessComponent pp{};
-        pp.mode             = PostProcessComponent::Mode::Local;
-        pp.localExtent      = {3.0f, 2.5f, 3.0f};
-        pp.priority         = 1.0f;
-        pp.blendDistance    = 1.5f;
-        pp.gradeEnabled        = true;
-        pp.gradeTemperature    = -0.7f;
-        pp.gradeTint           =  0.2f;
-        pp.gradeSaturation     =  0.9f;   // 略降饱和加冷感
+        pp.mode                   = PostProcessComponent::Mode::Local;
+        pp.localExtent            = {3.0f, 2.5f, 3.0f};
+        pp.priority               = 1.0f;
+        pp.blendDistance          = 1.5f;
+        pp.gradeEnabled           = true;
+        pp.gradeTemperature       = -0.7f;
+        pp.gradeTint              = 0.2f;
+        pp.gradeSaturation        = 0.9f; // 略降饱和加冷感
         pp.lensEnabled            = true;
         pp.lensVignetteIntensity  = 0.35f;
         pp.lensVignetteSmoothness = 0.5f;
@@ -467,13 +512,12 @@ int main(int argc, char** argv)
     // 按 motion / position 重算（确保单一相机数据源 = layer 设置的位置）。
     Entity cameraEntity;
     {
-        cameraEntity = world.CreateEntity();
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(60.0f), aspect, 0.5f, 80.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 2.0f, PositionToZ(position)),
-                               glm::vec3(0.0f, 1.0f, PositionToZ(position) + 6.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        cameraEntity       = world.CreateEntity();
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(60.0f), aspect, 0.5f, 80.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 2.0f, PositionToZ(position)),
+                                         glm::vec3(0.0f, 1.0f, PositionToZ(position) + 6.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(cameraEntity, cam);
     }
 

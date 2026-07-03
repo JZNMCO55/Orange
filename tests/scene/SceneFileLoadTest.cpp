@@ -30,9 +30,12 @@ namespace Scene = Orange::Engine::Scene;
 namespace
 {
 
-bool FloatEq(float a, float b) { return std::fabs(a - b) < 1e-4f; }
+    bool FloatEq(float a, float b)
+    {
+        return std::fabs(a - b) < 1e-4f;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -42,11 +45,11 @@ int main()
         std::string(ORANGE_ENGINE_REPO_ASSETS_DIR) + "/scenes/light_family_shadows.scene.json";
 
     World         world;
-    AssetRegistry assets;  // mesh/material 缺 loader → Renderable graceful 留空，不阻断
+    AssetRegistry assets; // mesh/material 缺 loader → Renderable graceful 留空，不阻断
 
     Scene::LoadOptions opt;
     opt.assetRegistry = &assets;
-    auto rc = Scene::Load(scenePath, world, opt);
+    auto rc           = Scene::Load(scenePath, world, opt);
     if (rc.IsErr())
     {
         std::fprintf(stderr, "[SceneFileLoadTest] Scene::Load 失败 (code=%u) path=%s\n",
@@ -58,9 +61,21 @@ int main()
 
     // 三种光源各恰好 1 盏。
     std::uint32_t nDir = 0, nSpot = 0, nPoint = 0;
-    for (auto e : reg.view<DirectionalLight>()) { (void)e; ++nDir; }
-    for (auto e : reg.view<SpotLight>())        { (void)e; ++nSpot; }
-    for (auto e : reg.view<PointLight>())       { (void)e; ++nPoint; }
+    for (auto e : reg.view<DirectionalLight>())
+    {
+        (void)e;
+        ++nDir;
+    }
+    for (auto e : reg.view<SpotLight>())
+    {
+        (void)e;
+        ++nSpot;
+    }
+    for (auto e : reg.view<PointLight>())
+    {
+        (void)e;
+        ++nPoint;
+    }
     std::fprintf(stderr, "  lights: directional=%u spot=%u point=%u\n", nDir, nSpot, nPoint);
     assert(nDir == 1 && "DirectionalLight 数量不符");
     assert(nSpot == 1 && "SpotLight 数量不符 —— 组件键 / schema 解析失败？");
@@ -68,8 +83,8 @@ int main()
 
     // SpotLight 关键字段 round-trip（与 scene 文件值一致）。
     {
-        auto view = reg.view<SpotLight>();
-        const auto& sl = view.get<SpotLight>(view.front());
+        auto        view = reg.view<SpotLight>();
+        const auto& sl   = view.get<SpotLight>(view.front());
         assert(sl.castsShadow == true);
         assert(FloatEq(sl.range, 14.0f));
         assert(FloatEq(sl.innerConeAngle, 0.30f));
@@ -80,8 +95,8 @@ int main()
 
     // PointLight 关键字段。
     {
-        auto view = reg.view<PointLight>();
-        const auto& pl = view.get<PointLight>(view.front());
+        auto        view = reg.view<PointLight>();
+        const auto& pl   = view.get<PointLight>(view.front());
         assert(pl.castsShadow == true);
         assert(FloatEq(pl.range, 10.0f));
         assert(FloatEq(pl.intensity, 45.0f));
@@ -90,8 +105,8 @@ int main()
 
     // DirectionalLight castsShadow（direction 字段经 migrator 转 Transform.rotation）。
     {
-        auto view = reg.view<DirectionalLight>();
-        const auto& dl = view.get<DirectionalLight>(view.front());
+        auto        view = reg.view<DirectionalLight>();
+        const auto& dl   = view.get<DirectionalLight>(view.front());
         assert(dl.castsShadow == true);
         std::fprintf(stderr, "  [PASS] DirectionalLight 字段\n");
     }

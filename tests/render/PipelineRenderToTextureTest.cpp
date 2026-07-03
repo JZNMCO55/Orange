@@ -74,118 +74,124 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-// 正面朝相机（z+）的全屏 quad；CCW 正面（对齐 Pipeline FrontFace::CCW），
-// 带法线供 PBR 着色。
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> pos = {
-        {-0.9f, -0.9f, 0.0f}, {0.9f, -0.9f, 0.0f},
-        {0.9f, 0.9f, 0.0f},   {-0.9f, 0.9f, 0.0f},
-    };
-    std::vector<VertexUV2> uv = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<VertexNormal3> nrm = {
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
-    return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
-                                       std::move(nrm), std::move(idx));
-}
-
-// 构造一个"相机 + 方向光 + 亮色 PBR quad"的 world，保证中心像素被打亮。
-void BuildLitQuadWorld(World& world, AssetHandle<MeshAsset> mesh,
-                       MaterialInstance* inst)
-{
-    Entity camE = world.CreateEntity();
-    Camera cam  = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
-    cam.view    = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
-                              glm::vec3(0.0f, 0.0f, 0.0f),
-                              glm::vec3(0.0f, 1.0f, 0.0f));
-    world.AddComponent(camE, cam);
-
-    Entity lightE = world.CreateEntity();
-    TransformComponent lt{};
-    lt.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, 0.0f, -1.0f));
-    world.AddComponent(lightE, lt);
-    world.AddComponent(lightE, DirectionalLight{});
-
-    Entity e = world.CreateEntity();
-    world.AddComponent(e, TransformComponent{});
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = inst;
-    world.AddComponent(e, rc);
-}
-
-// 把外部 BGRA8 target 中心像素读回成归一化 RGBA（[0,1]）。target 当前应处于
-// ShaderReadOnly（RenderToTexture 成功后的状态）。仿 Pipeline::DebugReadbackPixel，
-// 但作用于调用方持有的外部 RT（用 device 的 RHI 直接录一条 transient cmd）。
-bool ReadbackCenter(Orange::Renderer::RenderDevice& device,
-                    Orange::Rhi::RHITexture& target,
-                    std::uint32_t width, std::uint32_t height,
-                    float outRGBA[4])
-{
-    auto& rhi = device.GetRhiDevice();
-    const std::uint64_t bytes =
-        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * 4u;
-
-    Orange::Rhi::BufferDesc bd{};
-    bd.mSize        = bytes;
-    bd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
-    bd.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuToCpu;
-    auto readback = rhi.CreateBuffer(bd);
-    if (!readback)
+    // 正面朝相机（z+）的全屏 quad；CCW 正面（对齐 Pipeline FrontFace::CCW），
+    // 带法线供 PBR 着色。
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
     {
-        return false;
+        std::vector<VertexPosition3> pos = {
+            {-0.9f, -0.9f, 0.0f},
+            {0.9f, -0.9f, 0.0f},
+            {0.9f, 0.9f, 0.0f},
+            {-0.9f, 0.9f, 0.0f},
+        };
+        std::vector<VertexUV2> uv = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<VertexNormal3> nrm = {
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
+        return std::make_unique<MeshAsset>(std::move(pos), std::move(uv),
+                                           std::move(nrm), std::move(idx));
     }
 
-    auto cmd = rhi.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
-    if (!cmd || cmd->Begin() != Orange::ResultCode::Success)
+    // 构造一个"相机 + 方向光 + 亮色 PBR quad"的 world，保证中心像素被打亮。
+    void BuildLitQuadWorld(World& world, AssetHandle<MeshAsset> mesh,
+                           MaterialInstance* inst)
     {
-        return false;
-    }
-    cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::ShaderReadOnly,
-                           Orange::Rhi::TextureLayout::TransferSrc);
-    {
-        Orange::Rhi::BufferTextureCopyRegion r{};
-        r.mBufferOffset = 0;
-        r.mMipLevel     = 0;
-        r.mArrayLayer   = 0;
-        r.mWidth        = width;
-        r.mHeight       = height;
-        r.mDepth        = 1;
-        cmd->CopyTextureToBuffer(target, *readback, r);
-    }
-    cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::TransferSrc,
-                           Orange::Rhi::TextureLayout::ShaderReadOnly);
-    if (cmd->End() != Orange::ResultCode::Success
-        || rhi.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
-    {
-        return false;
-    }
-    device.WaitIdle();
+        Entity camE = world.CreateEntity();
+        Camera cam  = Camera::Perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        cam.view    = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                  glm::vec3(0.0f, 0.0f, 0.0f),
+                                  glm::vec3(0.0f, 1.0f, 0.0f));
+        world.AddComponent(camE, cam);
 
-    const void* mapped = readback->Map();
-    if (mapped == nullptr)
-    {
-        return false;
-    }
-    const auto* p = static_cast<const std::uint8_t*>(mapped);
-    const std::uint64_t cx  = width / 2u;
-    const std::uint64_t cy  = height / 2u;
-    const std::uint64_t idx = (cy * width + cx) * 4u;
-    // BGRA8Unorm → 字节序 B, G, R, A。
-    outRGBA[2] = p[idx + 0] / 255.0f;  // B
-    outRGBA[1] = p[idx + 1] / 255.0f;  // G
-    outRGBA[0] = p[idx + 2] / 255.0f;  // R
-    outRGBA[3] = p[idx + 3] / 255.0f;  // A
-    readback->Unmap();
-    return true;
-}
+        Entity             lightE = world.CreateEntity();
+        TransformComponent lt{};
+        lt.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.0f, 0.0f, -1.0f));
+        world.AddComponent(lightE, lt);
+        world.AddComponent(lightE, DirectionalLight{});
 
-}  // namespace
+        Entity e = world.CreateEntity();
+        world.AddComponent(e, TransformComponent{});
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = inst;
+        world.AddComponent(e, rc);
+    }
+
+    // 把外部 BGRA8 target 中心像素读回成归一化 RGBA（[0,1]）。target 当前应处于
+    // ShaderReadOnly（RenderToTexture 成功后的状态）。仿 Pipeline::DebugReadbackPixel，
+    // 但作用于调用方持有的外部 RT（用 device 的 RHI 直接录一条 transient cmd）。
+    bool ReadbackCenter(Orange::Renderer::RenderDevice& device,
+                        Orange::Rhi::RHITexture&        target,
+                        std::uint32_t width, std::uint32_t height,
+                        float outRGBA[4])
+    {
+        auto&               rhi = device.GetRhiDevice();
+        const std::uint64_t bytes =
+            static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * 4u;
+
+        Orange::Rhi::BufferDesc bd{};
+        bd.mSize        = bytes;
+        bd.mUsage       = Orange::Rhi::BufferUsage::Transfer;
+        bd.mMemoryUsage = Orange::Rhi::MemoryUsage::GpuToCpu;
+        auto readback   = rhi.CreateBuffer(bd);
+        if (!readback)
+        {
+            return false;
+        }
+
+        auto cmd = rhi.CreateCommandList(Orange::Rhi::CommandQueueType::Graphics);
+        if (!cmd || cmd->Begin() != Orange::ResultCode::Success)
+        {
+            return false;
+        }
+        cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::ShaderReadOnly,
+                               Orange::Rhi::TextureLayout::TransferSrc);
+        {
+            Orange::Rhi::BufferTextureCopyRegion r{};
+            r.mBufferOffset = 0;
+            r.mMipLevel     = 0;
+            r.mArrayLayer   = 0;
+            r.mWidth        = width;
+            r.mHeight       = height;
+            r.mDepth        = 1;
+            cmd->CopyTextureToBuffer(target, *readback, r);
+        }
+        cmd->TransitionTexture(target, Orange::Rhi::TextureLayout::TransferSrc,
+                               Orange::Rhi::TextureLayout::ShaderReadOnly);
+        if (cmd->End() != Orange::ResultCode::Success || rhi.SubmitCommandList(*cmd) != Orange::ResultCode::Success)
+        {
+            return false;
+        }
+        device.WaitIdle();
+
+        const void* mapped = readback->Map();
+        if (mapped == nullptr)
+        {
+            return false;
+        }
+        const auto*         p   = static_cast<const std::uint8_t*>(mapped);
+        const std::uint64_t cx  = width / 2u;
+        const std::uint64_t cy  = height / 2u;
+        const std::uint64_t idx = (cy * width + cx) * 4u;
+        // BGRA8Unorm → 字节序 B, G, R, A。
+        outRGBA[2] = p[idx + 0] / 255.0f; // B
+        outRGBA[1] = p[idx + 1] / 255.0f; // G
+        outRGBA[0] = p[idx + 2] / 255.0f; // R
+        outRGBA[3] = p[idx + 3] / 255.0f; // A
+        readback->Unmap();
+        return true;
+    }
+
+} // namespace
 
 int main()
 {
@@ -200,7 +206,7 @@ int main()
     {
         Pipeline pipeline;
         World    world;
-        auto r = pipeline.RenderToTexture(world, nullptr, kRttW, kRttH);
+        auto     r = pipeline.RenderToTexture(world, nullptr, kRttW, kRttH);
         assert(r.IsErr());
         assert(r.Error() == ResultCode::NotInitialized);
         std::fprintf(stdout, "  [PASS] 未 Initialize → NotInitialized\n");
@@ -209,7 +215,7 @@ int main()
     Orange::Renderer::RenderDeviceDesc deviceDesc{};
     deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
     deviceDesc.mEnableValidation = true;
-    auto pDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
+    auto pDevice                 = Orange::Renderer::RenderDevice::Create(deviceDesc);
     if (!pDevice)
     {
         std::fprintf(stderr,
@@ -236,7 +242,7 @@ int main()
     auto pbrInst = matSys.CreateInstance("pbr");
     assert(pbrInst);
     pbrInst->SetUniform("uBaseColor", glm::vec4(0.9f, 0.4f, 0.2f, 1.0f));
-    pbrInst->SetUniform("uMRA", glm::vec4(0.0f, 0.5f, 1.0f, 0.0f));  // metallic=0 rough=0.5 ao=1
+    pbrInst->SetUniform("uMRA", glm::vec4(0.0f, 0.5f, 1.0f, 0.0f)); // metallic=0 rough=0.5 ao=1
 
     Pipeline pipeline;
     {
@@ -269,12 +275,10 @@ int main()
 
     // ---- 2. 外部 BGRA8 target（usage 含 TransferSrc 以便 readback）-------
     Orange::Rhi::TextureDesc td{};
-    td.mWidth  = kRttW;
-    td.mHeight = kRttH;
-    td.mFormat = Orange::Rhi::TextureFormat::BGRA8Unorm;  // == kSwapchainColorFormat
-    td.mUsage  = Orange::Rhi::TextureUsage::RenderTarget
-               | Orange::Rhi::TextureUsage::Sampled
-               | Orange::Rhi::TextureUsage::TransferSrc;
+    td.mWidth   = kRttW;
+    td.mHeight  = kRttH;
+    td.mFormat  = Orange::Rhi::TextureFormat::BGRA8Unorm; // == kSwapchainColorFormat
+    td.mUsage   = Orange::Rhi::TextureUsage::RenderTarget | Orange::Rhi::TextureUsage::Sampled | Orange::Rhi::TextureUsage::TransferSrc;
     auto target = pDevice->GetRhiDevice().CreateTexture(td);
     assert(target);
 
@@ -295,9 +299,9 @@ int main()
         assert(r.IsOk());
         std::fprintf(stdout, "  [PASS] RenderToTexture 返回 Ok\n");
 
-        float px[4] = {0, 0, 0, 0};
-        const bool readOk = ReadbackCenter(*pDevice, *target, kRttW, kRttH, px);
-        const float lum   = px[0] + px[1] + px[2];
+        float       px[4]  = {0, 0, 0, 0};
+        const bool  readOk = ReadbackCenter(*pDevice, *target, kRttW, kRttH, px);
+        const float lum    = px[0] + px[1] + px[2];
         std::fprintf(stderr,
                      "  [readback] 外部 target 中心 RGBA=(%.3f,%.3f,%.3f,%.3f) lum=%.3f ok=%d\n",
                      px[0], px[1], px[2], px[3], lum, readOk ? 1 : 0);
@@ -319,11 +323,11 @@ int main()
         std::uint32_t hdrW = 0;
         std::uint32_t hdrH = 0;
         pipeline.GetHdrTargetSize(hdrW, hdrH);
-        assert(hdrW == kViewportW && hdrH == kViewportH);  // viewport 尺寸未被 scratch 顶掉
+        assert(hdrW == kViewportW && hdrH == kViewportH); // viewport 尺寸未被 scratch 顶掉
 
-        float px[4] = {0, 0, 0, 0};
-        const bool ok = pipeline.DebugReadbackPixel(kViewportW / 2u, kViewportH / 2u, px);
-        const float lum = px[0] + px[1] + px[2];
+        float       px[4] = {0, 0, 0, 0};
+        const bool  ok    = pipeline.DebugReadbackPixel(kViewportW / 2u, kViewportH / 2u, px);
+        const float lum   = px[0] + px[1] + px[2];
         std::fprintf(stderr, "  [viewport] 中心 RGBA=(%.3f,%.3f,%.3f,%.3f) lum=%.3f ok=%d\n",
                      px[0], px[1], px[2], px[3], lum, ok ? 1 : 0);
         assert(ok && "viewport DebugReadbackPixel 失败");
@@ -340,9 +344,9 @@ int main()
         auto r = pipeline.RenderToTexture(world, target.get(), kRttW, kRttH);
         assert(r.IsOk());
 
-        float px[4] = {0, 0, 0, 0};
-        const bool readOk = ReadbackCenter(*pDevice, *target, kRttW, kRttH, px);
-        const float lum   = px[0] + px[1] + px[2];
+        float       px[4]  = {0, 0, 0, 0};
+        const bool  readOk = ReadbackCenter(*pDevice, *target, kRttW, kRttH, px);
+        const float lum    = px[0] + px[1] + px[2];
         assert(readOk && lum > 0.05f);
         std::fprintf(stdout, "  [PASS] 第二次 RenderToTexture（scratch 复用）仍非黑 lum=%.3f\n", lum);
     }

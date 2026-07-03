@@ -39,17 +39,17 @@
 
 namespace Orange::Renderer
 {
-class RenderDevice;
+    class RenderDevice;
 }
 namespace Orange::Rhi
 {
-class RHIDescriptorPool;
-class RHIDescriptorSet;
-class RHIDescriptorSetLayout;
-class RHIPipeline;
-class RHIShaderModule;
-class RHITexture;
-}
+    class RHIDescriptorPool;
+    class RHIDescriptorSet;
+    class RHIDescriptorSetLayout;
+    class RHIPipeline;
+    class RHIShaderModule;
+    class RHITexture;
+} // namespace Orange::Rhi
 
 class EditorGridAuxPassProvider final : public Orange::Engine::Render::IAuxPassProvider
 {
@@ -80,7 +80,7 @@ public:
     // 显隐开关（默认关）。关闭时 RenderAuxPass silent skip，仍保留 GPU 资
     // 源 —— 切换频繁时避免重复 PSO / descriptor 重建开销。
     void SetEnabled(bool enabled) noexcept { mEnabled = enabled; }
-    bool IsEnabled() const noexcept        { return mEnabled; }
+    bool IsEnabled() const noexcept { return mEnabled; }
 
     // IAuxPassProvider 实现。详见 IAuxPassProvider.h 调用约定。
     void RenderAuxPass(Orange::Engine::Render::AuxPassContext& ctx) override;
@@ -91,4 +91,4 @@ private:
     bool                  mEnabled{false};
 };
 
-#endif  // ORANGE_EDITOR_RENDER_EDITOR_GRID_AUX_PASS_PROVIDER_H
+#endif // ORANGE_EDITOR_RENDER_EDITOR_GRID_AUX_PASS_PROVIDER_H

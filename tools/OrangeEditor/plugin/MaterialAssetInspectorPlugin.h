@@ -19,23 +19,23 @@
 namespace Orange::Editor::Plugin
 {
 
-class MaterialAssetInspectorPlugin : public IEditorAssetInspectorPlugin
-{
-public:
-    // 按 path 末尾 ".material" 后缀比较匹配。空 path / 短 path 返回 false。
-    bool CanHandle(const std::string& assetPath) const override;
+    class MaterialAssetInspectorPlugin : public IEditorAssetInspectorPlugin
+    {
+    public:
+        // 按 path 末尾 ".material" 后缀比较匹配。空 path / 短 path 返回 false。
+        bool CanHandle(const std::string& assetPath) const override;
 
-    // 接管 Inspector 整段，调用原 DrawMaterialSubMode 路径。
-    void Draw(EditorHost& host, const std::string& assetPath) override;
-};
+        // 接管 Inspector 整段，调用原 DrawMaterialSubMode 路径。
+        void Draw(EditorHost& host, const std::string& assetPath) override;
+    };
 
-// 把当前正在编辑的 .material（host.assets.editingMaterialPath）以当前编辑态
-// 写回磁盘并清 editingMaterialDirty。canonical 材质保存路径——Material Inspector
-// 的 Save 按钮 + 关窗未保存确认（EditorRenderLayer）共用，避免两条 save 路径漂移。
-// editingMaterialPath 为空（未在编辑任何材质）时 no-op 返回 false。
-// GAP-2026-05-29-editor-material-asset-dirty-tracking facet 1。
-bool SaveEditingMaterialToDisk(EditorHost& host);
+    // 把当前正在编辑的 .material（host.assets.editingMaterialPath）以当前编辑态
+    // 写回磁盘并清 editingMaterialDirty。canonical 材质保存路径——Material Inspector
+    // 的 Save 按钮 + 关窗未保存确认（EditorRenderLayer）共用，避免两条 save 路径漂移。
+    // editingMaterialPath 为空（未在编辑任何材质）时 no-op 返回 false。
+    // GAP-2026-05-29-editor-material-asset-dirty-tracking facet 1。
+    bool SaveEditingMaterialToDisk(EditorHost& host);
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_MATERIAL_ASSET_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_MATERIAL_ASSET_INSPECTOR_PLUGIN_H

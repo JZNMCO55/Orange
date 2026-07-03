@@ -15,23 +15,23 @@
 namespace Orange::Engine::Physics
 {
 
-void ApplyLayerVisibility(const Orange::Engine::World&                  world,
-                          const Orange::Engine::Scene::WorldPartition&  partition,
-                          PhysicsWorld&                                 physics)
-{
-    auto& registry = const_cast<Orange::Engine::World&>(world).Registry();
-    auto view = registry.view<RigidBodyComponent>();
-    for (auto e : view)
+    void ApplyLayerVisibility(const Orange::Engine::World&                 world,
+                              const Orange::Engine::Scene::WorldPartition& partition,
+                              PhysicsWorld&                                physics)
     {
-        const auto& rb = view.get<RigidBodyComponent>(e);
-        if (!rb.handle.IsValid())
+        auto& registry = const_cast<Orange::Engine::World&>(world).Registry();
+        auto  view     = registry.view<RigidBodyComponent>();
+        for (auto e : view)
         {
-            continue;
+            const auto& rb = view.get<RigidBodyComponent>(e);
+            if (!rb.handle.IsValid())
+            {
+                continue;
+            }
+            const auto entity  = Orange::Engine::World::FromEntt(e);
+            const bool visible = partition.IsEntityVisible(world, entity);
+            physics.SetBodyEnabled(rb.handle, visible);
         }
-        const auto entity = Orange::Engine::World::FromEntt(e);
-        const bool visible = partition.IsEntityVisible(world, entity);
-        physics.SetBodyEnabled(rb.handle, visible);
     }
-}
 
-}  // namespace Orange::Engine::Physics
+} // namespace Orange::Engine::Physics

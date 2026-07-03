@@ -28,18 +28,18 @@
 namespace Orange::Engine::Animation
 {
 
-class ORANGE_ENGINE_API AnimationClipLoader final : public Asset::IAssetLoader<AnimationClip>
-{
-public:
-    AnimationClipLoader()           = default;
-    ~AnimationClipLoader() override = default;
+    class ORANGE_ENGINE_API AnimationClipLoader final : public Asset::IAssetLoader<AnimationClip>
+    {
+    public:
+        AnimationClipLoader()           = default;
+        ~AnimationClipLoader() override = default;
 
-    // 从 path 读 .anim，解出 AnimationClip。失败码透传 AnimationClipFromJson
-    // 的 ParseError.code：NotFound / IoError（读不到）、SchemaMismatch（schema
-    // 缺失 / 不兼容）、InvalidArgument（JSON 坏）。
-    Result<std::unique_ptr<AnimationClip>, ResultCode> Load(std::string_view path) override;
-};
+        // 从 path 读 .anim，解出 AnimationClip。失败码透传 AnimationClipFromJson
+        // 的 ParseError.code：NotFound / IoError（读不到）、SchemaMismatch（schema
+        // 缺失 / 不兼容）、InvalidArgument（JSON 坏）。
+        Result<std::unique_ptr<AnimationClip>, ResultCode> Load(std::string_view path) override;
+    };
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
-#endif  // ORANGE_ENGINE_ANIMATION_ANIMATION_CLIP_LOADER_H
+#endif // ORANGE_ENGINE_ANIMATION_ANIMATION_CLIP_LOADER_H

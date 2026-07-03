@@ -55,31 +55,31 @@
 
 namespace Orange::Engine::Asset
 {
-class TextureAsset;
+    class TextureAsset;
 }
 
 namespace Orange::Engine::Render
 {
 
-// World 全局 IBL 环境（一个 World 一个，Pipeline first-found 取用）。
-struct EnvironmentComponent
-{
-    // HDR 环境贴图资产（典型为 equirect / 已是 cubemap 视情况）。Pipeline
-    // 在场景加载完毕后通过 `IblBaker` 把它烘焙成 irradiance + prefiltered
-    // specular cubemap，再喂给 `Pipeline::SetIblTextures`。c6 阶段该 handle
-    // 通常为 invalid——HDR loader 在 c7 落地；invalid 时 Pipeline 退化到
-    // dummy IBL（与未挂 component 视觉等价）。
-    Asset::AssetHandle<Asset::TextureAsset> cubemap{};
+    // World 全局 IBL 环境（一个 World 一个，Pipeline first-found 取用）。
+    struct EnvironmentComponent
+    {
+        // HDR 环境贴图资产（典型为 equirect / 已是 cubemap 视情况）。Pipeline
+        // 在场景加载完毕后通过 `IblBaker` 把它烘焙成 irradiance + prefiltered
+        // specular cubemap，再喂给 `Pipeline::SetIblTextures`。c6 阶段该 handle
+        // 通常为 invalid——HDR loader 在 c7 落地；invalid 时 Pipeline 退化到
+        // dummy IBL（与未挂 component 视觉等价）。
+        Asset::AssetHandle<Asset::TextureAsset> cubemap{};
 
-    // 线性 RGB 色调乘子。1,1,1 = 无修正；0,0,0 = 关掉 IBL 贡献。Pipeline
-    // 端打包成 `tint * intensity` 写入 LightUbo，shader 端各 IBL 项乘一次。
-    glm::vec3 tint{1.0f, 1.0f, 1.0f};
+        // 线性 RGB 色调乘子。1,1,1 = 无修正；0,0,0 = 关掉 IBL 贡献。Pipeline
+        // 端打包成 `tint * intensity` 写入 LightUbo，shader 端各 IBL 项乘一次。
+        glm::vec3 tint{1.0f, 1.0f, 1.0f};
 
-    // 标量强度乘子。1 = 烘焙原始亮度；> 1 = 加亮（适用 LDR HDRI 想拉夸张
-    // 场景）；< 1 = 减亮（夜景 / 阴天）。可负但无物理意义。
-    float intensity{1.0f};
-};
+        // 标量强度乘子。1 = 烘焙原始亮度；> 1 = 加亮（适用 LDR HDRI 想拉夸张
+        // 场景）；< 1 = 减亮（夜景 / 阴天）。可负但无物理意义。
+        float intensity{1.0f};
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_ENVIRONMENT_COMPONENT_H
+#endif // ORANGE_ENGINE_RENDER_ENVIRONMENT_COMPONENT_H

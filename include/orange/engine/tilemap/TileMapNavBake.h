@@ -17,10 +17,10 @@
 namespace Orange::Engine::Tilemap
 {
 
-// 从 tilemap 生成 NavGrid：实心 tile → 阻挡（不可走）cell、其余 → 可走；网格
-// width / height / cellSize / origin 对齐 tilemap（一 tile 一 cell）。
-ORANGE_ENGINE_API Nav::NavGrid BuildNavGridFromTileMap(const TileMap& map, const TileSet& tileset);
+    // 从 tilemap 生成 NavGrid：实心 tile → 阻挡（不可走）cell、其余 → 可走；网格
+    // width / height / cellSize / origin 对齐 tilemap（一 tile 一 cell）。
+    ORANGE_ENGINE_API Nav::NavGrid BuildNavGridFromTileMap(const TileMap& map, const TileSet& tileset);
 
-}  // namespace Orange::Engine::Tilemap
+} // namespace Orange::Engine::Tilemap
 
-#endif  // ORANGE_ENGINE_TILEMAP_TILE_MAP_NAV_BAKE_H
+#endif // ORANGE_ENGINE_TILEMAP_TILE_MAP_NAV_BAKE_H

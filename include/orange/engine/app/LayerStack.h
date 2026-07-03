@@ -30,46 +30,46 @@
 namespace Orange::Engine
 {
 
-class Layer;
+    class Layer;
 
-class ORANGE_ENGINE_API LayerStack
-{
-public:
-    using LayerPtr  = std::unique_ptr<Layer>;
-    using Container = std::vector<LayerPtr>;
+    class ORANGE_ENGINE_API LayerStack
+    {
+    public:
+        using LayerPtr  = std::unique_ptr<Layer>;
+        using Container = std::vector<LayerPtr>;
 
-    LayerStack();
-    ~LayerStack();
+        LayerStack();
+        ~LayerStack();
 
-    LayerStack(const LayerStack&)            = delete;
-    LayerStack& operator=(const LayerStack&) = delete;
-    LayerStack(LayerStack&&)                 = delete;
-    LayerStack& operator=(LayerStack&&)      = delete;
+        LayerStack(const LayerStack&)            = delete;
+        LayerStack& operator=(const LayerStack&) = delete;
+        LayerStack(LayerStack&&)                 = delete;
+        LayerStack& operator=(LayerStack&&)      = delete;
 
-    Layer* PushLayer(LayerPtr layer);
-    Layer* PushOverlay(LayerPtr overlay);
+        Layer* PushLayer(LayerPtr layer);
+        Layer* PushOverlay(LayerPtr overlay);
 
-    LayerPtr PopLayer(Layer* layer);
-    LayerPtr PopOverlay(Layer* overlay);
+        LayerPtr PopLayer(Layer* layer);
+        LayerPtr PopOverlay(Layer* overlay);
 
-    std::size_t Size() const noexcept { return mLayers.size(); }
-    bool        Empty() const noexcept { return mLayers.empty(); }
+        std::size_t Size() const noexcept { return mLayers.size(); }
+        bool        Empty() const noexcept { return mLayers.empty(); }
 
-    Container::iterator       begin() noexcept { return mLayers.begin(); }
-    Container::iterator       end() noexcept { return mLayers.end(); }
-    Container::const_iterator begin() const noexcept { return mLayers.begin(); }
-    Container::const_iterator end() const noexcept { return mLayers.end(); }
+        Container::iterator       begin() noexcept { return mLayers.begin(); }
+        Container::iterator       end() noexcept { return mLayers.end(); }
+        Container::const_iterator begin() const noexcept { return mLayers.begin(); }
+        Container::const_iterator end() const noexcept { return mLayers.end(); }
 
-    Container::reverse_iterator       rbegin() noexcept { return mLayers.rbegin(); }
-    Container::reverse_iterator       rend() noexcept { return mLayers.rend(); }
-    Container::const_reverse_iterator rbegin() const noexcept { return mLayers.rbegin(); }
-    Container::const_reverse_iterator rend() const noexcept { return mLayers.rend(); }
+        Container::reverse_iterator       rbegin() noexcept { return mLayers.rbegin(); }
+        Container::reverse_iterator       rend() noexcept { return mLayers.rend(); }
+        Container::const_reverse_iterator rbegin() const noexcept { return mLayers.rbegin(); }
+        Container::const_reverse_iterator rend() const noexcept { return mLayers.rend(); }
 
-private:
-    Container   mLayers;
-    std::size_t mLayerInsertIndex{0};
-};
+    private:
+        Container   mLayers;
+        std::size_t mLayerInsertIndex{0};
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
-#endif  // ORANGE_ENGINE_APP_LAYER_STACK_H
+#endif // ORANGE_ENGINE_APP_LAYER_STACK_H

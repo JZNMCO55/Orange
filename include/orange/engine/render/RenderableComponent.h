@@ -28,20 +28,20 @@
 namespace Orange::Engine::Render
 {
 
-class MaterialInstance;
+    class MaterialInstance;
 
-struct RenderableComponent
-{
-    Asset::AssetHandle<Asset::MeshAsset> mesh{};
-    MaterialInstance*                    materialInstance{nullptr};
-    bool                                 visible{true};
-    // 是否参与 shadow pass 投影。缺省 true：所有 drawable 都投。set
-    // false 用于"光源 marker / debug gizmo / UI overlay"等不应在地面
-    // 留下黑影的可视化几何——主 pass 仍正常绘制，只是 shadow caster
-    // pass 跳过本 entity。
-    bool                                 castsShadow{true};
-};
+    struct RenderableComponent
+    {
+        Asset::AssetHandle<Asset::MeshAsset> mesh{};
+        MaterialInstance*                    materialInstance{nullptr};
+        bool                                 visible{true};
+        // 是否参与 shadow pass 投影。缺省 true：所有 drawable 都投。set
+        // false 用于"光源 marker / debug gizmo / UI overlay"等不应在地面
+        // 留下黑影的可视化几何——主 pass 仍正常绘制，只是 shadow caster
+        // pass 跳过本 entity。
+        bool castsShadow{true};
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_RENDERABLE_COMPONENT_H
+#endif // ORANGE_ENGINE_RENDER_RENDERABLE_COMPONENT_H

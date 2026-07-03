@@ -34,31 +34,31 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API PrefabLoader final : public IAssetLoader<PrefabAsset>
-{
-public:
-    // schema 常量。Load 校验 namespace 必须 bit-for-bit 匹配 + major == 1；
-    // minor 向后兼容由 SchemaVersion::CanRead 处理。
-    static constexpr std::string_view kSchemaNamespace = "prefab/asset";
-    static constexpr std::uint16_t     kSchemaMajor     = 1;
-    static constexpr std::uint16_t     kSchemaMinor     = 0;
+    class ORANGE_ENGINE_API PrefabLoader final : public IAssetLoader<PrefabAsset>
+    {
+    public:
+        // schema 常量。Load 校验 namespace 必须 bit-for-bit 匹配 + major == 1；
+        // minor 向后兼容由 SchemaVersion::CanRead 处理。
+        static constexpr std::string_view kSchemaNamespace = "prefab/asset";
+        static constexpr std::uint16_t    kSchemaMajor     = 1;
+        static constexpr std::uint16_t    kSchemaMinor     = 0;
 
-    PrefabLoader()           = default;
-    ~PrefabLoader() override = default;
+        PrefabLoader()           = default;
+        ~PrefabLoader() override = default;
 
-    // 从 path 读 .prefab.json，解出 PrefabAsset。
-    // 失败码：NotFound / IoError（文件读不到）、InvalidArgument（JSON 坏 /
-    // 必填字段缺失）、SchemaMismatch（namespace / major 不兼容）。
-    Result<std::unique_ptr<PrefabAsset>, ResultCode> Load(std::string_view path) override;
+        // 从 path 读 .prefab.json，解出 PrefabAsset。
+        // 失败码：NotFound / IoError（文件读不到）、InvalidArgument（JSON 坏 /
+        // 必填字段缺失）、SchemaMismatch（namespace / major 不兼容）。
+        Result<std::unique_ptr<PrefabAsset>, ResultCode> Load(std::string_view path) override;
 
-    // 把 (name, templateBlob) 写成 prefab/asset 1.0 的 .prefab.json 到 path。
-    // caller 保证目标目录已存在；本函数不创建目录。
-    // 失败码：IoError（无法写文件）。
-    static Result<void, ResultCode> Save(std::string_view path,
-                                         std::string_view prefabName,
-                                         std::string_view templateBlob);
-};
+        // 把 (name, templateBlob) 写成 prefab/asset 1.0 的 .prefab.json 到 path。
+        // caller 保证目标目录已存在；本函数不创建目录。
+        // 失败码：IoError（无法写文件）。
+        static Result<void, ResultCode> Save(std::string_view path,
+                                             std::string_view prefabName,
+                                             std::string_view templateBlob);
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_PREFAB_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_PREFAB_LOADER_H

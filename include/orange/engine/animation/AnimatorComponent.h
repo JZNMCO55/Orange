@@ -24,11 +24,11 @@
 namespace Orange::Engine::Animation
 {
 
-struct AnimatorComponent
-{
-    std::unique_ptr<IAnimator> animator;
-};
+    struct AnimatorComponent
+    {
+        std::unique_ptr<IAnimator> animator;
+    };
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
-#endif  // ORANGE_ENGINE_ANIMATION_ANIMATOR_COMPONENT_H
+#endif // ORANGE_ENGINE_ANIMATION_ANIMATOR_COMPONENT_H

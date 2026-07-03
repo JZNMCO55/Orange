@@ -37,32 +37,32 @@
 namespace Orange::Editor::Widgets
 {
 
-// id：ImGui::BeginTable 的 strID（必须 caller 提供唯一 id，否则同帧多个
-// table 会合并）。typical "##props.<typeName>"。
-// labelColTextWidth：本段所有 prop.label 中最长那个的 CalcTextSize.x。
-// 函数内部加上 FramePadding * 2 + ItemSpacing 作为列实际宽。
-// 返回 false 时 caller 必须**不**调 EndPropertyTable（与 ImGui::BeginTable
-// 同语义）。
-bool BeginPropertyTable(const char* id, float labelColTextWidth);
+    // id：ImGui::BeginTable 的 strID（必须 caller 提供唯一 id，否则同帧多个
+    // table 会合并）。typical "##props.<typeName>"。
+    // labelColTextWidth：本段所有 prop.label 中最长那个的 CalcTextSize.x。
+    // 函数内部加上 FramePadding * 2 + ItemSpacing 作为列实际宽。
+    // 返回 false 时 caller 必须**不**调 EndPropertyTable（与 ImGui::BeginTable
+    // 同语义）。
+    bool BeginPropertyTable(const char* id, float labelColTextWidth);
 
-// 推进到下一行，写左列 label（AlignTextToFramePadding 与右列控件中线对
-// 齐），然后跳到右列 + SetNextItemWidth(-FLT_MIN)。下一行 caller 紧跟
-// 一个 ImGui 控件即可。
-//
-// tooltip 非空时 hover 左列 label 触发 SetTooltip；用户对 "鼠标移到字段
-// 名上看说明" 的预期比 "鼠标停在控件上看说明" 更稳定（控件可能在拖动 /
-// 编辑状态，hover 行为被打断）。
-//
-// overridden=true（C1.1 prefab override 蓝条）：在左列 cell 左缘画一道蓝色
-// 竖条，并用 Selectable 承载 label（使其有 ID，让 caller 能在其上挂右键
-// "Revert" 菜单）；几何用 label cell 自身 item rect（列 0 内取，稳定）。
-// default false 时走原 TextUnformatted 路径，普通字段零行为变化。
-void PropertyLabel(const char* label, const char* tooltip = nullptr,
-                   bool overridden = false);
+    // 推进到下一行，写左列 label（AlignTextToFramePadding 与右列控件中线对
+    // 齐），然后跳到右列 + SetNextItemWidth(-FLT_MIN)。下一行 caller 紧跟
+    // 一个 ImGui 控件即可。
+    //
+    // tooltip 非空时 hover 左列 label 触发 SetTooltip；用户对 "鼠标移到字段
+    // 名上看说明" 的预期比 "鼠标停在控件上看说明" 更稳定（控件可能在拖动 /
+    // 编辑状态，hover 行为被打断）。
+    //
+    // overridden=true（C1.1 prefab override 蓝条）：在左列 cell 左缘画一道蓝色
+    // 竖条，并用 Selectable 承载 label（使其有 ID，让 caller 能在其上挂右键
+    // "Revert" 菜单）；几何用 label cell 自身 item rect（列 0 内取，稳定）。
+    // default false 时走原 TextUnformatted 路径，普通字段零行为变化。
+    void PropertyLabel(const char* label, const char* tooltip = nullptr,
+                       bool overridden = false);
 
-void EndPropertyTable();
+    void EndPropertyTable();
 
-}  // namespace Orange::Editor::Widgets
+} // namespace Orange::Editor::Widgets
 
 // 三色 X/Y/Z 标签 + 3 个 DragFloat 的组合控件，对齐 Unity Transform 的
 // 配色（X 红 / Y 绿 / Z 蓝）。比裸 DragFloat3 多视觉占用：每分量前一
@@ -80,9 +80,9 @@ void EndPropertyTable();
 //
 // 返回值：任一分量被改 → true，调用方一般写回 component 字段即可。
 bool DragVec3Colored(const char* idSuffix, float v[3],
-                     float speed = 0.1f,
-                     float vMin  = 0.0f,
-                     float vMax  = 0.0f,
-                     const char* fmt = "%.3f");
+                     float       speed = 0.1f,
+                     float       vMin  = 0.0f,
+                     float       vMax  = 0.0f,
+                     const char* fmt   = "%.3f");
 
-#endif  // ORANGE_EDITOR_EDITOR_WIDGETS_H
+#endif // ORANGE_EDITOR_EDITOR_WIDGETS_H

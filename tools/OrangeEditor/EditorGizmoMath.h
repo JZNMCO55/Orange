@@ -31,69 +31,69 @@
 namespace OrangeEditor::Internal::GizmoMath
 {
 
-// world → 屏幕坐标。返回 nullopt = 点在相机后方（clip.w <= ~0）或除法
-// 退化；caller 应跳过绘制 / hit-test 该点。
-struct ScreenProjection
-{
-    glm::vec2 screen;
-    float     clipW;  // > 0 表示位于相机前方；caller 一般只关心 screen
-};
+    // world → 屏幕坐标。返回 nullopt = 点在相机后方（clip.w <= ~0）或除法
+    // 退化；caller 应跳过绘制 / hit-test 该点。
+    struct ScreenProjection
+    {
+        glm::vec2 screen;
+        float     clipW; // > 0 表示位于相机前方；caller 一般只关心 screen
+    };
 
-std::optional<ScreenProjection>
-ProjectWorldToScreen(const glm::vec3& worldPos,
-                     const glm::mat4& viewProj,
+    std::optional<ScreenProjection>
+    ProjectWorldToScreen(const glm::vec3& worldPos,
+                         const glm::mat4& viewProj,
+                         glm::vec2        imageOrigin,
+                         glm::vec2        imageSize) noexcept;
+
+    // 屏幕坐标 → world ray。复用 EditorPicking.cpp 同款反投影。返回 nullopt
+    // = invViewProj 退化（w ≈ 0）/ ray 长度退化 / image 尺寸非法。
+    struct WorldRay
+    {
+        glm::vec3 origin;
+        glm::vec3 dir; // 单位向量
+    };
+
+    std::optional<WorldRay>
+    ScreenToWorldRay(glm::vec2        mouseScreen,
                      glm::vec2        imageOrigin,
-                     glm::vec2        imageSize) noexcept;
+                     glm::vec2        imageSize,
+                     const glm::mat4& invViewProj) noexcept;
 
-// 屏幕坐标 → world ray。复用 EditorPicking.cpp 同款反投影。返回 nullopt
-// = invViewProj 退化（w ≈ 0）/ ray 长度退化 / image 尺寸非法。
-struct WorldRay
-{
-    glm::vec3 origin;
-    glm::vec3 dir;  // 单位向量
-};
+    // 2D 点到线段最短距离（gizmo handle 屏幕空间 hit-test 用）。
+    float
+    PointSegmentDistance2D(glm::vec2 p, glm::vec2 a, glm::vec2 b) noexcept;
 
-std::optional<WorldRay>
-ScreenToWorldRay(glm::vec2        mouseScreen,
-                 glm::vec2        imageOrigin,
-                 glm::vec2        imageSize,
-                 const glm::mat4& invViewProj) noexcept;
+    // mouse ray 与 axis 线（无限延伸）的最近点（在 axis 上的那一点）。
+    // 公式（D / A 单位向量，假设）：
+    //   w = O - P, b = dot(D, A), denom = 1 - b*b
+    //   t = (dot(A,w) - b * dot(D,w)) / denom
+    // 退化（denom 接近 0 = ray 与 axis 几乎平行）返回 nullopt。
+    std::optional<glm::vec3>
+    ClosestPointOnAxisToRay(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
+                            const glm::vec3& axisOrigin, const glm::vec3& axisDir) noexcept;
 
-// 2D 点到线段最短距离（gizmo handle 屏幕空间 hit-test 用）。
-float
-PointSegmentDistance2D(glm::vec2 p, glm::vec2 a, glm::vec2 b) noexcept;
+    // ray-plane intersection（plane 通过 planeOrigin，法向量 planeNormal）。
+    // 返回 ray 上的 t（origin + t * dir）；ray 与 plane 几乎平行（|dot(dir,
+    // normal)| < eps）或 t < 0（plane 在相机后方）返回 nullopt。
+    std::optional<float>
+    RayPlaneIntersect(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
+                      const glm::vec3& planeOrigin, const glm::vec3& planeNormal) noexcept;
 
-// mouse ray 与 axis 线（无限延伸）的最近点（在 axis 上的那一点）。
-// 公式（D / A 单位向量，假设）：
-//   w = O - P, b = dot(D, A), denom = 1 - b*b
-//   t = (dot(A,w) - b * dot(D,w)) / denom
-// 退化（denom 接近 0 = ray 与 axis 几乎平行）返回 nullopt。
-std::optional<glm::vec3>
-ClosestPointOnAxisToRay(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
-                        const glm::vec3& axisOrigin, const glm::vec3& axisDir) noexcept;
+    // 在 worldPos 所在深度求"屏幕 targetScreenPx 像素 ≈ 多少世界单位"。
+    // 用相机右向量（从 view 矩阵第一行抽出）作为 1 单位探针，保证探针方向
+    // 与视线垂直 —— 这样 pxPerUnit 与 world 轴朝向 / 相机轨道角度无关，
+    // 避免"world X 接近视线方向时 foreshortening 让 pxPerUnit 趋近 0、
+    // gizmo handle / 圆环骤然放大"的视觉抖动。
+    // 返回 nullopt 当 worldPos 投影失败 / camera right 探针投影失败 /
+    // pxPerUnit 退化（< 1e-3）—— caller 应回退到固定 fallback（如 1.0）。
+    std::optional<float>
+    ComputeWorldUnitsForScreenLength(const glm::vec3& worldPos,
+                                     const glm::mat4& view,
+                                     const glm::mat4& viewProj,
+                                     glm::vec2        imageOrigin,
+                                     glm::vec2        imageSize,
+                                     float            targetScreenPx) noexcept;
 
-// ray-plane intersection（plane 通过 planeOrigin，法向量 planeNormal）。
-// 返回 ray 上的 t（origin + t * dir）；ray 与 plane 几乎平行（|dot(dir,
-// normal)| < eps）或 t < 0（plane 在相机后方）返回 nullopt。
-std::optional<float>
-RayPlaneIntersect(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
-                  const glm::vec3& planeOrigin, const glm::vec3& planeNormal) noexcept;
+} // namespace OrangeEditor::Internal::GizmoMath
 
-// 在 worldPos 所在深度求"屏幕 targetScreenPx 像素 ≈ 多少世界单位"。
-// 用相机右向量（从 view 矩阵第一行抽出）作为 1 单位探针，保证探针方向
-// 与视线垂直 —— 这样 pxPerUnit 与 world 轴朝向 / 相机轨道角度无关，
-// 避免"world X 接近视线方向时 foreshortening 让 pxPerUnit 趋近 0、
-// gizmo handle / 圆环骤然放大"的视觉抖动。
-// 返回 nullopt 当 worldPos 投影失败 / camera right 探针投影失败 /
-// pxPerUnit 退化（< 1e-3）—— caller 应回退到固定 fallback（如 1.0）。
-std::optional<float>
-ComputeWorldUnitsForScreenLength(const glm::vec3& worldPos,
-                                 const glm::mat4& view,
-                                 const glm::mat4& viewProj,
-                                 glm::vec2        imageOrigin,
-                                 glm::vec2        imageSize,
-                                 float            targetScreenPx) noexcept;
-
-}  // namespace OrangeEditor::Internal::GizmoMath
-
-#endif  // ORANGE_EDITOR_EDITOR_GIZMO_MATH_H
+#endif // ORANGE_EDITOR_EDITOR_GIZMO_MATH_H

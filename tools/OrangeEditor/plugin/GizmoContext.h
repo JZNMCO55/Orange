@@ -29,23 +29,23 @@ struct ImDrawList;
 namespace Orange::Editor::Plugin
 {
 
-struct GizmoContext
-{
-    // viewport 的 view * projection 合成矩阵（caller 每帧从 BuildEditor
-    // Camera 拿）。plugin 用 GizmoMath::ProjectWorldToScreen 投影 world
-    // 点到屏幕。
-    glm::mat4 viewProj;
+    struct GizmoContext
+    {
+        // viewport 的 view * projection 合成矩阵（caller 每帧从 BuildEditor
+        // Camera 拿）。plugin 用 GizmoMath::ProjectWorldToScreen 投影 world
+        // 点到屏幕。
+        glm::mat4 viewProj;
 
-    // viewport image item 在屏幕坐标系内的左上角 / 尺寸（用于 NDC → 屏
-    // 幕像素的位姿映射）。
-    glm::vec2 imageOrigin;
-    glm::vec2 imageSize;
+        // viewport image item 在屏幕坐标系内的左上角 / 尺寸（用于 NDC → 屏
+        // 幕像素的位姿映射）。
+        glm::vec2 imageOrigin;
+        glm::vec2 imageSize;
 
-    // 要往哪个 ImDrawList 提交线段 / 多边形（典型 = ImGui::GetWindowDraw
-    // List() 返回值；caller 在调度前拿好，避免 plugin 自己额外引 ImGui 头）。
-    ImDrawList* drawList = nullptr;
-};
+        // 要往哪个 ImDrawList 提交线段 / 多边形（典型 = ImGui::GetWindowDraw
+        // List() 返回值；caller 在调度前拿好，避免 plugin 自己额外引 ImGui 头）。
+        ImDrawList* drawList = nullptr;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_GIZMO_CONTEXT_H
+#endif // ORANGE_EDITOR_PLUGIN_GIZMO_CONTEXT_H

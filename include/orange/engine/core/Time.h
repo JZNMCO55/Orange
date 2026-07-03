@@ -18,57 +18,57 @@
 namespace Orange::Engine
 {
 
-using DeltaSeconds = float;
-using FrameIndex = std::uint64_t;
+    using DeltaSeconds = float;
+    using FrameIndex   = std::uint64_t;
 
-struct TimeStamp
-{
-    DeltaSeconds deltaSeconds{0.0f};
-    DeltaSeconds totalSeconds{0.0f};
-    FrameIndex   frameIndex{0};
-};
-
-// FixedStepAccumulator 用于推动确定性的更新循环（如 physics、固定 tick
-// gameplay）。典型用法：
-//
-//   accumulator.Add(frame.deltaSeconds);
-//   while (accumulator.ShouldStep())
-//   {
-//       physicsWorld.Step(accumulator.StepSeconds());
-//       accumulator.ConsumeStep();
-//   }
-//
-// 这里刻意不对单帧最大步数设上限——所谓 "spiral of death" 的限制是策略
-// 决定，应由调用方（如 Physics 模块）持有。
-class FixedStepAccumulator
-{
-public:
-    explicit constexpr FixedStepAccumulator(DeltaSeconds stepSeconds) noexcept
-        : mStep(stepSeconds)
+    struct TimeStamp
     {
-    }
+        DeltaSeconds deltaSeconds{0.0f};
+        DeltaSeconds totalSeconds{0.0f};
+        FrameIndex   frameIndex{0};
+    };
 
-    constexpr void Add(DeltaSeconds delta) noexcept { mAccum += delta; }
-
-    constexpr bool ShouldStep() const noexcept { return mAccum >= mStep; }
-
-    constexpr void ConsumeStep() noexcept { mAccum -= mStep; }
-
-    constexpr void Reset() noexcept { mAccum = 0.0f; }
-
-    constexpr DeltaSeconds StepSeconds() const noexcept { return mStep; }
-    constexpr DeltaSeconds Accumulated() const noexcept { return mAccum; }
-
-    constexpr float InterpolationAlpha() const noexcept
+    // FixedStepAccumulator 用于推动确定性的更新循环（如 physics、固定 tick
+    // gameplay）。典型用法：
+    //
+    //   accumulator.Add(frame.deltaSeconds);
+    //   while (accumulator.ShouldStep())
+    //   {
+    //       physicsWorld.Step(accumulator.StepSeconds());
+    //       accumulator.ConsumeStep();
+    //   }
+    //
+    // 这里刻意不对单帧最大步数设上限——所谓 "spiral of death" 的限制是策略
+    // 决定，应由调用方（如 Physics 模块）持有。
+    class FixedStepAccumulator
     {
-        return (mStep > 0.0f) ? (mAccum / mStep) : 0.0f;
-    }
+    public:
+        explicit constexpr FixedStepAccumulator(DeltaSeconds stepSeconds) noexcept
+            : mStep(stepSeconds)
+        {
+        }
 
-private:
-    DeltaSeconds mStep;
-    DeltaSeconds mAccum{0.0f};
-};
+        constexpr void Add(DeltaSeconds delta) noexcept { mAccum += delta; }
 
-}  // namespace Orange::Engine
+        constexpr bool ShouldStep() const noexcept { return mAccum >= mStep; }
 
-#endif  // ORANGE_ENGINE_CORE_TIME_H
+        constexpr void ConsumeStep() noexcept { mAccum -= mStep; }
+
+        constexpr void Reset() noexcept { mAccum = 0.0f; }
+
+        constexpr DeltaSeconds StepSeconds() const noexcept { return mStep; }
+        constexpr DeltaSeconds Accumulated() const noexcept { return mAccum; }
+
+        constexpr float InterpolationAlpha() const noexcept
+        {
+            return (mStep > 0.0f) ? (mAccum / mStep) : 0.0f;
+        }
+
+    private:
+        DeltaSeconds mStep;
+        DeltaSeconds mAccum{0.0f};
+    };
+
+} // namespace Orange::Engine
+
+#endif // ORANGE_ENGINE_CORE_TIME_H

@@ -33,23 +33,26 @@
 
 namespace Orange::Engine
 {
-class World;
-namespace Render { class DebugDrawScene; }
-}
+    class World;
+    namespace Render
+    {
+        class DebugDrawScene;
+    }
+} // namespace Orange::Engine
 
 namespace Orange::Editor
 {
 
-// 遍历 world 内所有有 ColliderComponent + TransformComponent 的 entity，
-// 把对应几何 shape 以 wireframe 形式 push 到 dbg。
-//
-// selectedEntity 与 additionalSelectedEntities 内的 entity 走 "selected"
-// 高亮色；其它走 "unselected" 常规色。
-void DrawColliders(Orange::Engine::Render::DebugDrawScene& dbg,
-                   Orange::Engine::World&                  world,
-                   Orange::Engine::Entity                  selectedEntity,
-                   const std::vector<Orange::Engine::Entity>& additionalSelectedEntities);
+    // 遍历 world 内所有有 ColliderComponent + TransformComponent 的 entity，
+    // 把对应几何 shape 以 wireframe 形式 push 到 dbg。
+    //
+    // selectedEntity 与 additionalSelectedEntities 内的 entity 走 "selected"
+    // 高亮色；其它走 "unselected" 常规色。
+    void DrawColliders(Orange::Engine::Render::DebugDrawScene&    dbg,
+                       Orange::Engine::World&                     world,
+                       Orange::Engine::Entity                     selectedEntity,
+                       const std::vector<Orange::Engine::Entity>& additionalSelectedEntities);
 
-}  // namespace Orange::Editor
+} // namespace Orange::Editor
 
-#endif  // ORANGE_EDITOR_COLLIDER_DEBUG_DRAW_H
+#endif // ORANGE_EDITOR_COLLIDER_DEBUG_DRAW_H

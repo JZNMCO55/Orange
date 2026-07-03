@@ -27,31 +27,31 @@
 namespace Orange::Engine::Animation
 {
 
-class ORANGE_ENGINE_API IAnimator
-{
-public:
-    virtual ~IAnimator() = default;
+    class ORANGE_ENGINE_API IAnimator
+    {
+    public:
+        virtual ~IAnimator() = default;
 
-    IAnimator() = default;
+        IAnimator() = default;
 
-    IAnimator(const IAnimator&)            = delete;
-    IAnimator& operator=(const IAnimator&) = delete;
-    IAnimator(IAnimator&&)                 = delete;
-    IAnimator& operator=(IAnimator&&)      = delete;
+        IAnimator(const IAnimator&)            = delete;
+        IAnimator& operator=(const IAnimator&) = delete;
+        IAnimator(IAnimator&&)                 = delete;
+        IAnimator& operator=(IAnimator&&)      = delete;
 
-    // 推进动画时间。dt = 本帧间隔（秒）。后端按需更新内部 elapsed clock /
-    // pose / uniform 值。dt < 0 由后端自行决定（典型：clamp 到 0；不强制）。
-    virtual void Tick(float dt) = 0;
+        // 推进动画时间。dt = 本帧间隔（秒）。后端按需更新内部 elapsed clock /
+        // pose / uniform 值。dt < 0 由后端自行决定（典型：clamp 到 0；不强制）。
+        virtual void Tick(float dt) = 0;
 
-    // 当前动画是否已自然结束（非 looping clip 走完最后一帧）。looping 后端
-    // 永远返回 false。AnimationStateMachine 用它判断"clip done"型自动过渡。
-    virtual bool IsFinished() const noexcept = 0;
+        // 当前动画是否已自然结束（非 looping clip 走完最后一帧）。looping 后端
+        // 永远返回 false。AnimationStateMachine 用它判断"clip done"型自动过渡。
+        virtual bool IsFinished() const noexcept = 0;
 
-    // backend 标识符（"skeletal_dragonbones" / "procedural" / 游戏自注册的
-    // 名字等）。AnimatorRegistry 按这个名索引；调用方 / 调试日志按这个名识别。
-    virtual std::string_view BackendName() const noexcept = 0;
-};
+        // backend 标识符（"skeletal_dragonbones" / "procedural" / 游戏自注册的
+        // 名字等）。AnimatorRegistry 按这个名索引；调用方 / 调试日志按这个名识别。
+        virtual std::string_view BackendName() const noexcept = 0;
+    };
 
-}  // namespace Orange::Engine::Animation
+} // namespace Orange::Engine::Animation
 
-#endif  // ORANGE_ENGINE_ANIMATION_I_ANIMATOR_H
+#endif // ORANGE_ENGINE_ANIMATION_I_ANIMATOR_H

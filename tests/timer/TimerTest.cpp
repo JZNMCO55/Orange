@@ -24,21 +24,21 @@ using T::CountdownTimer;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-4f)
     {
-        std::fprintf(stderr, "[TimerTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
+
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[TimerTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
 } // namespace
 

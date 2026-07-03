@@ -31,254 +31,259 @@ using namespace Orange::Engine::Asset;
 
 namespace
 {
-namespace fs = std::filesystem;
+    namespace fs = std::filesystem;
 
-fs::path TempDir()
-{
-    auto root = fs::temp_directory_path() / "orange_engine_mesh_tangent_test";
-    fs::create_directories(root);
-    return root;
-}
-
-bool Approx(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-template <typename T>
-void AppendPod(std::vector<std::uint8_t>& bytes, const T& value)
-{
-    const auto* src = reinterpret_cast<const std::uint8_t*>(&value);
-    bytes.insert(bytes.end(), src, src + sizeof(T));
-}
-
-void AppendBytes(std::vector<std::uint8_t>& bytes, const void* data, std::size_t count)
-{
-    const auto* src = static_cast<const std::uint8_t*>(data);
-    bytes.insert(bytes.end(), src, src + count);
-}
-
-void WriteAll(const fs::path& path, const std::vector<std::uint8_t>& bytes)
-{
-    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-    stream.write(reinterpret_cast<const char*>(bytes.data()),
-                 static_cast<std::streamsize>(bytes.size()));
-}
-
-// 单位 quad（XY 平面，法线 +Z，UV 0..1）—— 已知 tangent 应为 +X。
-MeshAsset MakeQuad()
-{
-    std::vector<VertexPosition3> pos = {
-        {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
-        {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
-    };
-    std::vector<VertexUV2> uv = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<VertexNormal3> nrm = {
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-        {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
-    return MeshAsset(std::move(pos), std::move(uv), std::move(nrm), std::move(idx));
-}
-
-// 校验单个 tangent：单位长 + 与对应法线正交 + w=±1。
-void AssertValidTangent(const VertexTangent4& t, const VertexNormal3& n)
-{
-    const float len = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
-    assert(Approx(len, 1.0f) && "tangent 必须单位长");
-    const float dotNT = t.x * n.x + t.y * n.y + t.z * n.z;
-    assert(Approx(dotNT, 0.0f) && "tangent 必须与 normal 正交");
-    assert((Approx(t.w, 1.0f) || Approx(t.w, -1.0f)) && "w 必须 ±1");
-}
-
-// ---- 1. 计算 + v4 round-trip --------------------------------------------
-void TestComputeAndRoundTrip(const fs::path& root)
-{
-    MeshAsset quad = MakeQuad();
-    assert(!quad.HasTangents());
-    quad.ComputeTangentsFromTriangles();
-    assert(quad.HasTangents());
-    assert(quad.Tangents().size() == quad.VertexCount());
-
-    for (std::size_t v = 0; v < quad.VertexCount(); ++v)
+    fs::path TempDir()
     {
-        AssertValidTangent(quad.Tangents()[v], quad.Normals()[v]);
+        auto root = fs::temp_directory_path() / "orange_engine_mesh_tangent_test";
+        fs::create_directories(root);
+        return root;
     }
-    // 已知 quad → tangent +X，w +1。
-    const VertexTangent4& t0 = quad.Tangents()[0];
-    assert(Approx(t0.x, 1.0f) && Approx(t0.y, 0.0f) && Approx(t0.z, 0.0f));
-    assert(Approx(t0.w, 1.0f));
 
-    const fs::path meshPath = root / "quad_v4.mesh";
-    auto saveRes = MeshLoader::Save(meshPath.generic_string(), quad);
-    assert(saveRes.IsOk());
-
-    MeshLoader loader;
-    auto loadRes = loader.Load(meshPath.generic_string());
-    assert(loadRes.IsOk());
-    const MeshAsset& loaded = *loadRes.Value();
-    assert(loaded.HasTangents());
-    assert(loaded.Tangents().size() == quad.Tangents().size());
-    for (std::size_t v = 0; v < loaded.Tangents().size(); ++v)
+    bool Approx(float a, float b, float eps = 1e-4f)
     {
-        const auto& a = quad.Tangents()[v];
-        const auto& b = loaded.Tangents()[v];
-        assert(Approx(a.x, b.x) && Approx(a.y, b.y)
-               && Approx(a.z, b.z) && Approx(a.w, b.w)
-               && "tangent 必须 round-trip 一致");
+        return std::fabs(a - b) <= eps;
     }
-    std::printf("[ok] compute + v4 round-trip\n");
-}
 
-// ---- 2. v4-hasTangents=0 fallback ---------------------------------------
-void TestFallbackOnSavedWithoutTangents(const fs::path& root)
-{
-    MeshAsset quad = MakeQuad();  // 不调 ComputeTangents → 不带 tangent
-    assert(!quad.HasTangents());
-
-    const fs::path meshPath = root / "quad_no_tan.mesh";
-    auto saveRes = MeshLoader::Save(meshPath.generic_string(), quad);
-    assert(saveRes.IsOk());
-
-    MeshLoader loader;
-    auto loadRes = loader.Load(meshPath.generic_string());
-    assert(loadRes.IsOk());
-    const MeshAsset& loaded = *loadRes.Value();
-    // loader 端 fallback 应已补算（有 UV + normal）。
-    assert(loaded.HasTangents() && "缺 tangent + 有 UV/normal → loader 应补算");
-    for (std::size_t v = 0; v < loaded.Tangents().size(); ++v)
+    template <typename T>
+    void AppendPod(std::vector<std::uint8_t>& bytes, const T& value)
     {
-        AssertValidTangent(loaded.Tangents()[v], loaded.Normals()[v]);
+        const auto* src = reinterpret_cast<const std::uint8_t*>(&value);
+        bytes.insert(bytes.end(), src, src + sizeof(T));
     }
-    std::printf("[ok] v4 hasTangents=0 -> loader fallback\n");
-}
 
-// ---- 3. migrator：手写 v3 / v1 文件在 v4 loader 下 ------------------------
-void TestV3FileLoadsUnderV4Loader(const fs::path& root)
-{
-    // 手写 v3：magic + ver3 + counts + pos + idx + hasUVs + uvs + hasNormals + normals
-    std::vector<std::uint8_t> bytes;
-    AppendPod(bytes, MeshLoader::kMagic);
-    AppendPod(bytes, MeshLoader::kVersionV3);
+    void AppendBytes(std::vector<std::uint8_t>& bytes, const void* data, std::size_t count)
+    {
+        const auto* src = static_cast<const std::uint8_t*>(data);
+        bytes.insert(bytes.end(), src, src + count);
+    }
 
-    const VertexPosition3 pos[4] = {
-        {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
-    const VertexUV2 uv[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    const VertexNormal3 nrm[4] = {
-        {0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
-    const std::uint32_t idx[6] = {0, 1, 2, 0, 2, 3};
+    void WriteAll(const fs::path& path, const std::vector<std::uint8_t>& bytes)
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(bytes.data()),
+                     static_cast<std::streamsize>(bytes.size()));
+    }
 
-    AppendPod(bytes, std::uint32_t{4});  // vertexCount
-    AppendPod(bytes, std::uint32_t{6});  // indexCount
-    AppendBytes(bytes, pos, sizeof(pos));
-    AppendBytes(bytes, idx, sizeof(idx));
-    AppendPod(bytes, std::uint8_t{1});   // hasUVs
-    AppendBytes(bytes, uv, sizeof(uv));
-    AppendPod(bytes, std::uint8_t{1});   // hasNormals
-    AppendBytes(bytes, nrm, sizeof(nrm));
+    // 单位 quad（XY 平面，法线 +Z，UV 0..1）—— 已知 tangent 应为 +X。
+    MeshAsset MakeQuad()
+    {
+        std::vector<VertexPosition3> pos = {
+            {0.0f, 0.0f, 0.0f},
+            {1.0f, 0.0f, 0.0f},
+            {1.0f, 1.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+        };
+        std::vector<VertexUV2> uv = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<VertexNormal3> nrm = {
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> idx = {0, 1, 2, 0, 2, 3};
+        return MeshAsset(std::move(pos), std::move(uv), std::move(nrm), std::move(idx));
+    }
 
-    const fs::path meshPath = root / "quad_v3.mesh";
-    WriteAll(meshPath, bytes);
+    // 校验单个 tangent：单位长 + 与对应法线正交 + w=±1。
+    void AssertValidTangent(const VertexTangent4& t, const VertexNormal3& n)
+    {
+        const float len = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
+        assert(Approx(len, 1.0f) && "tangent 必须单位长");
+        const float dotNT = t.x * n.x + t.y * n.y + t.z * n.z;
+        assert(Approx(dotNT, 0.0f) && "tangent 必须与 normal 正交");
+        assert((Approx(t.w, 1.0f) || Approx(t.w, -1.0f)) && "w 必须 ±1");
+    }
 
-    MeshLoader loader;
-    auto loadRes = loader.Load(meshPath.generic_string());
-    assert(loadRes.IsOk() && "v3 文件必须在 v4 loader 下成功 Load");
-    const MeshAsset& loaded = *loadRes.Value();
-    assert(loaded.HasNormals());
-    assert(loaded.HasTangents() && "v3（无 tangent 段）应触发 fallback 补算");
-    std::printf("[ok] v3 file migrates under v4 loader\n");
-}
+    // ---- 1. 计算 + v4 round-trip --------------------------------------------
+    void TestComputeAndRoundTrip(const fs::path& root)
+    {
+        MeshAsset quad = MakeQuad();
+        assert(!quad.HasTangents());
+        quad.ComputeTangentsFromTriangles();
+        assert(quad.HasTangents());
+        assert(quad.Tangents().size() == quad.VertexCount());
 
-void TestV1FileLoadsNoTangent(const fs::path& root)
-{
-    // 手写 v1：仅 magic + ver1 + counts + pos + idx（无 UV → 切线无定义）
-    std::vector<std::uint8_t> bytes;
-    AppendPod(bytes, MeshLoader::kMagic);
-    AppendPod(bytes, MeshLoader::kVersionV1);
-    const VertexPosition3 pos[3] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
-    const std::uint32_t idx[3] = {0, 1, 2};
-    AppendPod(bytes, std::uint32_t{3});
-    AppendPod(bytes, std::uint32_t{3});
-    AppendBytes(bytes, pos, sizeof(pos));
-    AppendBytes(bytes, idx, sizeof(idx));
+        for (std::size_t v = 0; v < quad.VertexCount(); ++v)
+        {
+            AssertValidTangent(quad.Tangents()[v], quad.Normals()[v]);
+        }
+        // 已知 quad → tangent +X，w +1。
+        const VertexTangent4& t0 = quad.Tangents()[0];
+        assert(Approx(t0.x, 1.0f) && Approx(t0.y, 0.0f) && Approx(t0.z, 0.0f));
+        assert(Approx(t0.w, 1.0f));
 
-    const fs::path meshPath = root / "tri_v1.mesh";
-    WriteAll(meshPath, bytes);
+        const fs::path meshPath = root / "quad_v4.mesh";
+        auto           saveRes  = MeshLoader::Save(meshPath.generic_string(), quad);
+        assert(saveRes.IsOk());
 
-    MeshLoader loader;
-    auto loadRes = loader.Load(meshPath.generic_string());
-    assert(loadRes.IsOk() && "v1 文件必须在 v4 loader 下成功 Load");
-    const MeshAsset& loaded = *loadRes.Value();
-    assert(loaded.HasNormals() && "v1 缺 normal → loader 补算 smooth normal");
-    assert(!loaded.HasUVs());
-    assert(!loaded.HasTangents() && "无 UV → 切线无定义，HasTangents 应为 false");
-    std::printf("[ok] v1 file loads, no UV -> no tangent\n");
-}
+        MeshLoader loader;
+        auto       loadRes = loader.Load(meshPath.generic_string());
+        assert(loadRes.IsOk());
+        const MeshAsset& loaded = *loadRes.Value();
+        assert(loaded.HasTangents());
+        assert(loaded.Tangents().size() == quad.Tangents().size());
+        for (std::size_t v = 0; v < loaded.Tangents().size(); ++v)
+        {
+            const auto& a = quad.Tangents()[v];
+            const auto& b = loaded.Tangents()[v];
+            assert(Approx(a.x, b.x) && Approx(a.y, b.y) && Approx(a.z, b.z) && Approx(a.w, b.w) && "tangent 必须 round-trip 一致");
+        }
+        std::printf("[ok] compute + v4 round-trip\n");
+    }
 
-// ---- 4. 无 UV mesh：ComputeTangents 清空 ---------------------------------
-void TestNoUvMeshHasNoTangent()
-{
-    std::vector<VertexPosition3> pos = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
-    std::vector<std::uint32_t> idx = {0, 1, 2};
-    MeshAsset mesh(std::move(pos), std::move(idx));
-    mesh.ComputeSmoothNormalsFromTriangles();  // 有 normal 但无 UV
-    mesh.ComputeTangentsFromTriangles();
-    assert(!mesh.HasTangents() && "无 UV → ComputeTangents 必须清空");
-    std::printf("[ok] no-UV mesh has no tangent\n");
-}
+    // ---- 2. v4-hasTangents=0 fallback ---------------------------------------
+    void TestFallbackOnSavedWithoutTangents(const fs::path& root)
+    {
+        MeshAsset quad = MakeQuad(); // 不调 ComputeTangents → 不带 tangent
+        assert(!quad.HasTangents());
 
-// ---- 5a. v5 sub-mesh round-trip：2 段，各自 offset / count / slot --------
-void TestSubMeshRoundTrip(const fs::path& root)
-{
-    MeshAsset quad = MakeQuad();  // 4 顶点 / 6 索引（2 三角形）
-    std::vector<SubMesh> subMeshes = {
-        {0u, 3u, 0u},  // 第 1 个三角形 → material slot 0
-        {3u, 3u, 1u},  // 第 2 个三角形 → material slot 1
-    };
-    quad.SetSubMeshes(subMeshes);
-    assert(quad.HasSubMeshes());
+        const fs::path meshPath = root / "quad_no_tan.mesh";
+        auto           saveRes  = MeshLoader::Save(meshPath.generic_string(), quad);
+        assert(saveRes.IsOk());
 
-    const fs::path meshPath = root / "quad_submesh_v5.mesh";
-    auto saveRes = MeshLoader::Save(meshPath.generic_string(), quad);
-    assert(saveRes.IsOk());
+        MeshLoader loader;
+        auto       loadRes = loader.Load(meshPath.generic_string());
+        assert(loadRes.IsOk());
+        const MeshAsset& loaded = *loadRes.Value();
+        // loader 端 fallback 应已补算（有 UV + normal）。
+        assert(loaded.HasTangents() && "缺 tangent + 有 UV/normal → loader 应补算");
+        for (std::size_t v = 0; v < loaded.Tangents().size(); ++v)
+        {
+            AssertValidTangent(loaded.Tangents()[v], loaded.Normals()[v]);
+        }
+        std::printf("[ok] v4 hasTangents=0 -> loader fallback\n");
+    }
 
-    MeshLoader loader;
-    auto loadRes = loader.Load(meshPath.generic_string());
-    assert(loadRes.IsOk());
-    const MeshAsset& loaded = *loadRes.Value();
-    assert(loaded.HasSubMeshes() && "v5 sub-mesh 段应被读回");
-    assert(loaded.SubMeshes().size() == 2);
-    assert(loaded.SubMeshes()[0].indexOffset == 0u);
-    assert(loaded.SubMeshes()[0].indexCount == 3u);
-    assert(loaded.SubMeshes()[0].materialSlot == 0u);
-    assert(loaded.SubMeshes()[1].indexOffset == 3u);
-    assert(loaded.SubMeshes()[1].indexCount == 3u);
-    assert(loaded.SubMeshes()[1].materialSlot == 1u);
-    std::printf("[ok] v5 sub-mesh round-trip\n");
-}
+    // ---- 3. migrator：手写 v3 / v1 文件在 v4 loader 下 ------------------------
+    void TestV3FileLoadsUnderV4Loader(const fs::path& root)
+    {
+        // 手写 v3：magic + ver3 + counts + pos + idx + hasUVs + uvs + hasNormals + normals
+        std::vector<std::uint8_t> bytes;
+        AppendPod(bytes, MeshLoader::kMagic);
+        AppendPod(bytes, MeshLoader::kVersionV3);
 
-// ---- 5b. 不设 sub-mesh 的 Save（v5 subMeshCount=0）→ Load 无 sub-mesh -----
-void TestNoSubMeshSavesEmpty(const fs::path& root)
-{
-    MeshAsset quad = MakeQuad();  // 无 sub-mesh
-    assert(!quad.HasSubMeshes());
+        const VertexPosition3 pos[4] = {
+            {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
+        const VertexUV2     uv[4]  = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        const VertexNormal3 nrm[4] = {
+            {0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+        const std::uint32_t idx[6] = {0, 1, 2, 0, 2, 3};
 
-    const fs::path meshPath = root / "quad_no_submesh_v5.mesh";
-    auto saveRes = MeshLoader::Save(meshPath.generic_string(), quad);
-    assert(saveRes.IsOk());
+        AppendPod(bytes, std::uint32_t{4}); // vertexCount
+        AppendPod(bytes, std::uint32_t{6}); // indexCount
+        AppendBytes(bytes, pos, sizeof(pos));
+        AppendBytes(bytes, idx, sizeof(idx));
+        AppendPod(bytes, std::uint8_t{1}); // hasUVs
+        AppendBytes(bytes, uv, sizeof(uv));
+        AppendPod(bytes, std::uint8_t{1}); // hasNormals
+        AppendBytes(bytes, nrm, sizeof(nrm));
 
-    MeshLoader loader;
-    auto loadRes = loader.Load(meshPath.generic_string());
-    assert(loadRes.IsOk());
-    const MeshAsset& loaded = *loadRes.Value();
-    assert(!loaded.HasSubMeshes() && "不设 sub-mesh 的 Save 后应无 sub-mesh");
-    assert(loaded.SubMeshes().empty());
-    std::printf("[ok] no sub-mesh -> v5 subMeshCount=0 round-trip\n");
-}
+        const fs::path meshPath = root / "quad_v3.mesh";
+        WriteAll(meshPath, bytes);
 
-}  // namespace
+        MeshLoader loader;
+        auto       loadRes = loader.Load(meshPath.generic_string());
+        assert(loadRes.IsOk() && "v3 文件必须在 v4 loader 下成功 Load");
+        const MeshAsset& loaded = *loadRes.Value();
+        assert(loaded.HasNormals());
+        assert(loaded.HasTangents() && "v3（无 tangent 段）应触发 fallback 补算");
+        std::printf("[ok] v3 file migrates under v4 loader\n");
+    }
+
+    void TestV1FileLoadsNoTangent(const fs::path& root)
+    {
+        // 手写 v1：仅 magic + ver1 + counts + pos + idx（无 UV → 切线无定义）
+        std::vector<std::uint8_t> bytes;
+        AppendPod(bytes, MeshLoader::kMagic);
+        AppendPod(bytes, MeshLoader::kVersionV1);
+        const VertexPosition3 pos[3] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+        const std::uint32_t   idx[3] = {0, 1, 2};
+        AppendPod(bytes, std::uint32_t{3});
+        AppendPod(bytes, std::uint32_t{3});
+        AppendBytes(bytes, pos, sizeof(pos));
+        AppendBytes(bytes, idx, sizeof(idx));
+
+        const fs::path meshPath = root / "tri_v1.mesh";
+        WriteAll(meshPath, bytes);
+
+        MeshLoader loader;
+        auto       loadRes = loader.Load(meshPath.generic_string());
+        assert(loadRes.IsOk() && "v1 文件必须在 v4 loader 下成功 Load");
+        const MeshAsset& loaded = *loadRes.Value();
+        assert(loaded.HasNormals() && "v1 缺 normal → loader 补算 smooth normal");
+        assert(!loaded.HasUVs());
+        assert(!loaded.HasTangents() && "无 UV → 切线无定义，HasTangents 应为 false");
+        std::printf("[ok] v1 file loads, no UV -> no tangent\n");
+    }
+
+    // ---- 4. 无 UV mesh：ComputeTangents 清空 ---------------------------------
+    void TestNoUvMeshHasNoTangent()
+    {
+        std::vector<VertexPosition3> pos = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+        std::vector<std::uint32_t>   idx = {0, 1, 2};
+        MeshAsset                    mesh(std::move(pos), std::move(idx));
+        mesh.ComputeSmoothNormalsFromTriangles(); // 有 normal 但无 UV
+        mesh.ComputeTangentsFromTriangles();
+        assert(!mesh.HasTangents() && "无 UV → ComputeTangents 必须清空");
+        std::printf("[ok] no-UV mesh has no tangent\n");
+    }
+
+    // ---- 5a. v5 sub-mesh round-trip：2 段，各自 offset / count / slot --------
+    void TestSubMeshRoundTrip(const fs::path& root)
+    {
+        MeshAsset            quad      = MakeQuad(); // 4 顶点 / 6 索引（2 三角形）
+        std::vector<SubMesh> subMeshes = {
+            {0u, 3u, 0u}, // 第 1 个三角形 → material slot 0
+            {3u, 3u, 1u}, // 第 2 个三角形 → material slot 1
+        };
+        quad.SetSubMeshes(subMeshes);
+        assert(quad.HasSubMeshes());
+
+        const fs::path meshPath = root / "quad_submesh_v5.mesh";
+        auto           saveRes  = MeshLoader::Save(meshPath.generic_string(), quad);
+        assert(saveRes.IsOk());
+
+        MeshLoader loader;
+        auto       loadRes = loader.Load(meshPath.generic_string());
+        assert(loadRes.IsOk());
+        const MeshAsset& loaded = *loadRes.Value();
+        assert(loaded.HasSubMeshes() && "v5 sub-mesh 段应被读回");
+        assert(loaded.SubMeshes().size() == 2);
+        assert(loaded.SubMeshes()[0].indexOffset == 0u);
+        assert(loaded.SubMeshes()[0].indexCount == 3u);
+        assert(loaded.SubMeshes()[0].materialSlot == 0u);
+        assert(loaded.SubMeshes()[1].indexOffset == 3u);
+        assert(loaded.SubMeshes()[1].indexCount == 3u);
+        assert(loaded.SubMeshes()[1].materialSlot == 1u);
+        std::printf("[ok] v5 sub-mesh round-trip\n");
+    }
+
+    // ---- 5b. 不设 sub-mesh 的 Save（v5 subMeshCount=0）→ Load 无 sub-mesh -----
+    void TestNoSubMeshSavesEmpty(const fs::path& root)
+    {
+        MeshAsset quad = MakeQuad(); // 无 sub-mesh
+        assert(!quad.HasSubMeshes());
+
+        const fs::path meshPath = root / "quad_no_submesh_v5.mesh";
+        auto           saveRes  = MeshLoader::Save(meshPath.generic_string(), quad);
+        assert(saveRes.IsOk());
+
+        MeshLoader loader;
+        auto       loadRes = loader.Load(meshPath.generic_string());
+        assert(loadRes.IsOk());
+        const MeshAsset& loaded = *loadRes.Value();
+        assert(!loaded.HasSubMeshes() && "不设 sub-mesh 的 Save 后应无 sub-mesh");
+        assert(loaded.SubMeshes().empty());
+        std::printf("[ok] no sub-mesh -> v5 subMeshCount=0 round-trip\n");
+    }
+
+} // namespace
 
 int main()
 {

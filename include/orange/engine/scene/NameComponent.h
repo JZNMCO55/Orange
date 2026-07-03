@@ -19,11 +19,11 @@
 namespace Orange::Engine::Scene
 {
 
-struct NameComponent
-{
-    std::string name;
-};
+    struct NameComponent
+    {
+        std::string name;
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_NAME_COMPONENT_H
+#endif // ORANGE_ENGINE_SCENE_NAME_COMPONENT_H

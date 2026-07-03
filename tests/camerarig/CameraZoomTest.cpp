@@ -24,21 +24,21 @@ using Rig::ZoomParams;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-3f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-3f)
     {
-        std::fprintf(stderr, "[CameraZoomTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
+
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[CameraZoomTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
 } // namespace
 
@@ -62,19 +62,20 @@ int main()
     {
         ZoomParams p{};
         p.smoothTime = 0.3f;
-        p.minZoom = 0.1f;
-        p.maxZoom = 100.0f;
+        p.minZoom    = 0.1f;
+        p.maxZoom    = 100.0f;
         CameraZoom2D z(p, 1.0f);
         z.SetTargetZoom(5.0f);
-        const float dt = 1.0f / 60.0f;
-        float prev = 1.0f;
-        float maxReached = 1.0f;
+        const float dt         = 1.0f / 60.0f;
+        float       prev       = 1.0f;
+        float       maxReached = 1.0f;
         for (int i = 0; i < 240; ++i)
         {
             const float v = z.Update(dt);
             Check(v >= prev - 1e-4f, "zoom smoothdamp: 单调逼近 (不回退)");
             prev = v;
-            if (v > maxReached) maxReached = v;
+            if (v > maxReached)
+                maxReached = v;
         }
         Check(Near(prev, 5.0f, 0.02f), "zoom smoothdamp: 收敛到目标");
         Check(maxReached <= 5.0f + 0.02f, "zoom smoothdamp: 不显著过冲");
@@ -93,11 +94,12 @@ int main()
     {
         ZoomParams p{};
         p.smoothTime = 0.3f;
-        p.maxSpeed = 2.0f;
-        p.maxZoom = 1000.0f;
+        p.maxSpeed   = 2.0f;
+        p.maxZoom    = 1000.0f;
         CameraZoom2D z(p, 1.0f);
         z.SetTargetZoom(1000.0f);
-        for (int i = 0; i < 60; ++i) z.Update(1.0f / 60.0f); // 1 秒
+        for (int i = 0; i < 60; ++i)
+            z.Update(1.0f / 60.0f); // 1 秒
         const float v = z.GetZoom();
         // 1 秒 @ maxSpeed=2 → 走 ~2 单位量级，远非瞬移到 1000。
         Check(v > 1.5f && v < 5.0f, "zoom maxSpeed: 1 秒内近似钳速逼近 (非瞬移)");
@@ -107,8 +109,8 @@ int main()
     {
         ZoomParams p{};
         p.smoothTime = 0.0f;
-        p.minZoom = 5.0f;
-        p.maxZoom = 1.0f; // min>max
+        p.minZoom    = 5.0f;
+        p.maxZoom    = 1.0f; // min>max
         CameraZoom2D z(p);
         z.SetTargetZoom(50.0f);
         Check(Near(z.Update(1.0f / 60.0f), 50.0f), "degenerate: min>max 退化不钳");

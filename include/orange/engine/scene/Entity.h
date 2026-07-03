@@ -27,43 +27,43 @@
 namespace Orange::Engine
 {
 
-class Entity
-{
-public:
-    using ValueType = std::uint64_t;
-    static constexpr ValueType kInvalidValue = std::numeric_limits<ValueType>::max();
+    class Entity
+    {
+    public:
+        using ValueType                          = std::uint64_t;
+        static constexpr ValueType kInvalidValue = std::numeric_limits<ValueType>::max();
 
-    constexpr Entity() noexcept = default;
-    constexpr explicit Entity(ValueType value) noexcept : mValue(value) {}
+        constexpr Entity() noexcept = default;
+        constexpr explicit Entity(ValueType value) noexcept : mValue(value) {}
 
-    constexpr ValueType Value() const noexcept { return mValue; }
-    constexpr bool      IsValid() const noexcept { return mValue != kInvalidValue; }
-    constexpr explicit  operator bool() const noexcept { return IsValid(); }
+        constexpr ValueType Value() const noexcept { return mValue; }
+        constexpr bool      IsValid() const noexcept { return mValue != kInvalidValue; }
+        constexpr explicit  operator bool() const noexcept { return IsValid(); }
 
-    static constexpr Entity Invalid() noexcept { return Entity{kInvalidValue}; }
+        static constexpr Entity Invalid() noexcept { return Entity{kInvalidValue}; }
 
-    friend constexpr bool operator==(Entity a, Entity b) noexcept { return a.mValue == b.mValue; }
-    friend constexpr bool operator!=(Entity a, Entity b) noexcept { return a.mValue != b.mValue; }
-    friend constexpr bool operator< (Entity a, Entity b) noexcept { return a.mValue <  b.mValue; }
+        friend constexpr bool operator==(Entity a, Entity b) noexcept { return a.mValue == b.mValue; }
+        friend constexpr bool operator!=(Entity a, Entity b) noexcept { return a.mValue != b.mValue; }
+        friend constexpr bool operator<(Entity a, Entity b) noexcept { return a.mValue < b.mValue; }
 
-private:
-    ValueType mValue{kInvalidValue};
-};
+    private:
+        ValueType mValue{kInvalidValue};
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
 namespace std
 {
 
-template <>
-struct hash<::Orange::Engine::Entity>
-{
-    std::size_t operator()(const ::Orange::Engine::Entity& e) const noexcept
+    template <>
+    struct hash<::Orange::Engine::Entity>
     {
-        return std::hash<::Orange::Engine::Entity::ValueType>{}(e.Value());
-    }
-};
+        std::size_t operator()(const ::Orange::Engine::Entity& e) const noexcept
+        {
+            return std::hash<::Orange::Engine::Entity::ValueType>{}(e.Value());
+        }
+    };
 
-}  // namespace std
+} // namespace std
 
-#endif  // ORANGE_ENGINE_SCENE_ENTITY_H
+#endif // ORANGE_ENGINE_SCENE_ENTITY_H

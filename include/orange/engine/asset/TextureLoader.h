@@ -40,20 +40,20 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API TextureLoader final : public IAssetLoader<TextureAsset>
-{
-public:
-    // 'O','R','T','X' 按 little-endian 读出：内存字节序 0x4F,0x52,0x54,0x58
-    // 反推 uint32 = 0x5854524F。
-    static constexpr std::uint32_t kMagic = 0x5854524FU;
-    static constexpr std::uint32_t kSupportedVersion = 1;
+    class ORANGE_ENGINE_API TextureLoader final : public IAssetLoader<TextureAsset>
+    {
+    public:
+        // 'O','R','T','X' 按 little-endian 读出：内存字节序 0x4F,0x52,0x54,0x58
+        // 反推 uint32 = 0x5854524F。
+        static constexpr std::uint32_t kMagic            = 0x5854524FU;
+        static constexpr std::uint32_t kSupportedVersion = 1;
 
-    TextureLoader() = default;
-    ~TextureLoader() override = default;
+        TextureLoader()           = default;
+        ~TextureLoader() override = default;
 
-    Result<std::unique_ptr<TextureAsset>, ResultCode> Load(std::string_view path) override;
-};
+        Result<std::unique_ptr<TextureAsset>, ResultCode> Load(std::string_view path) override;
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_TEXTURE_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_TEXTURE_LOADER_H

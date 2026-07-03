@@ -24,30 +24,30 @@
 // arrays。
 // ---------------------------------------------------------------------------
 
-#include "ImportDispatcher.h"  // ImportResult / MaterialRegisterFn
+#include "ImportDispatcher.h" // ImportResult / MaterialRegisterFn
 
 struct EditorHost;
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 namespace Orange::Editor::Import
 {
 
-// Headless 核心实现（GAP-2026-05-27 G1）：只依赖 AssetRegistry&，不出现
-// EditorHost。本头单独存在让 cgltf CGLTF_IMPLEMENTATION 仅在 GltfImporter.cpp
-// 一处 expand。onMaterialWritten 在写出 .material sidecar 后回调（GUI 路径注入
-// EnsureMaterialInstance；headless 传空 = 不注册编辑器缓存，材质文件仍照常写盘）。
-ImportResult RunGltfImportToRegistry(std::string_view srcPath,
-                                     ::Orange::Engine::Asset::AssetRegistry& registry,
-                                     const MaterialRegisterFn& onMaterialWritten = {});
+    // Headless 核心实现（GAP-2026-05-27 G1）：只依赖 AssetRegistry&，不出现
+    // EditorHost。本头单独存在让 cgltf CGLTF_IMPLEMENTATION 仅在 GltfImporter.cpp
+    // 一处 expand。onMaterialWritten 在写出 .material sidecar 后回调（GUI 路径注入
+    // EnsureMaterialInstance；headless 传空 = 不注册编辑器缓存，材质文件仍照常写盘）。
+    ImportResult RunGltfImportToRegistry(std::string_view                        srcPath,
+                                         ::Orange::Engine::Asset::AssetRegistry& registry,
+                                         const MaterialRegisterFn&               onMaterialWritten = {});
 
-// GUI 包装：委托到 RunGltfImportToRegistry，注入把刚写出的 .material 注册进
-// host 编辑器缓存的 EnsureMaterialInstance 回调。
-ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host);
+    // GUI 包装：委托到 RunGltfImportToRegistry，注入把刚写出的 .material 注册进
+    // host 编辑器缓存的 EnsureMaterialInstance 回调。
+    ImportResult RunGltfImport(std::string_view srcPath, EditorHost& host);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_GLTF_IMPORTER_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_GLTF_IMPORTER_H

@@ -58,18 +58,18 @@
 namespace Orange::Editor::AnimFsm
 {
 
-// 读取 .anim_fsm 文件。失败场景（返回 std::nullopt + stderr 记录）：
-//   * 文件不存在 / JSON 解析失败
-//   * schemaVersion 缺失 / namespace 不匹配 / major 不匹配（前向兼容 minor）
-//   * states[] 段有同名 state
-//
-// v1.0 文件兼容：缺 parameters / transitions[].conditions 视为空。
-std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path);
+    // 读取 .anim_fsm 文件。失败场景（返回 std::nullopt + stderr 记录）：
+    //   * 文件不存在 / JSON 解析失败
+    //   * schemaVersion 缺失 / namespace 不匹配 / major 不匹配（前向兼容 minor）
+    //   * states[] 段有同名 state
+    //
+    // v1.0 文件兼容：缺 parameters / transitions[].conditions 视为空。
+    std::optional<EditableStateMachine> ReadAnimFsmFile(const std::string& path);
 
-// 写 .anim_fsm 文件。永远以 v1.1 schema 写盘（即使 parameters / conditions
-// 为空也写空数组 —— reader 兼容路径与之等价）。失败 → stderr 记录 + 返回 false。
-bool WriteAnimFsmFile(const std::string& path, const EditableStateMachine& data);
+    // 写 .anim_fsm 文件。永远以 v1.1 schema 写盘（即使 parameters / conditions
+    // 为空也写空数组 —— reader 兼容路径与之等价）。失败 → stderr 记录 + 返回 false。
+    bool WriteAnimFsmFile(const std::string& path, const EditableStateMachine& data);
 
-}  // namespace Orange::Editor::AnimFsm
+} // namespace Orange::Editor::AnimFsm
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_ANIM_FSM_FILE_IO_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_ANIM_FSM_FILE_IO_H

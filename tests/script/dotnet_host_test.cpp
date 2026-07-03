@@ -35,76 +35,76 @@ using Orange::Engine::Script::ScriptHost;
 namespace
 {
 
-// 托管 OrangeProbe.Probe.Run 的原生签名：[UnmanagedCallersOnly] int Run(int)。
-using ProbeRunFn = int (*)(int);
+    // 托管 OrangeProbe.Probe.Run 的原生签名：[UnmanagedCallersOnly] int Run(int)。
+    using ProbeRunFn = int (*)(int);
 
-const std::string kAssemblyPath = ORANGE_PROBE_ASSEMBLY_PATH;
-const std::string kRuntimeConfigPath = ORANGE_PROBE_RUNTIMECONFIG_PATH;
+    const std::string kAssemblyPath      = ORANGE_PROBE_ASSEMBLY_PATH;
+    const std::string kRuntimeConfigPath = ORANGE_PROBE_RUNTIMECONFIG_PATH;
 
-// 错误路径 1：未 Initialize 直接取函数 → NotInitialized（不启动运行时）。
-void TestNotInitialized()
-{
-    ScriptHost host;
-    auto r = host.GetManagedFunction(
-        kAssemblyPath, "OrangeProbe.Probe, HostProbe", "Run");
-    assert(r.IsErr());
-    assert(r.Error() == ResultCode::NotInitialized);
-    std::fprintf(stdout, "  [PASS] get function before init -> NotInitialized\n");
-}
+    // 错误路径 1：未 Initialize 直接取函数 → NotInitialized（不启动运行时）。
+    void TestNotInitialized()
+    {
+        ScriptHost host;
+        auto       r = host.GetManagedFunction(
+            kAssemblyPath, "OrangeProbe.Probe, HostProbe", "Run");
+        assert(r.IsErr());
+        assert(r.Error() == ResultCode::NotInitialized);
+        std::fprintf(stdout, "  [PASS] get function before init -> NotInitialized\n");
+    }
 
-// 错误路径 2：坏 runtimeconfig 路径 → Err 而非崩。在任何成功启动前调用——
-// hostfxr 在读 config 文件阶段即失败，不会真正加载 runtime。
-void TestBadRuntimeConfig()
-{
-    ScriptHost host;
-    auto r = host.Initialize("Z:/definitely/missing/Bad.runtimeconfig.json");
-    assert(r.IsErr());
-    assert(!host.IsInitialized());
-    std::fprintf(stdout, "  [PASS] bad runtimeconfig -> Err (%s)\n",
-                 Orange::Engine::ToString(r.Error()));
-}
+    // 错误路径 2：坏 runtimeconfig 路径 → Err 而非崩。在任何成功启动前调用——
+    // hostfxr 在读 config 文件阶段即失败，不会真正加载 runtime。
+    void TestBadRuntimeConfig()
+    {
+        ScriptHost host;
+        auto       r = host.Initialize("Z:/definitely/missing/Bad.runtimeconfig.json");
+        assert(r.IsErr());
+        assert(!host.IsInitialized());
+        std::fprintf(stdout, "  [PASS] bad runtimeconfig -> Err (%s)\n",
+                     Orange::Engine::ToString(r.Error()));
+    }
 
-// 正常路径 + 复用同一 host 的错误路径：
-//   * init → 取函数指针 → 调用 → 断言 fn(41) == 42；
-//   * 同一已初始化 host 上重复 Initialize → AlreadyInitialized（早返回，不碰 hostfxr）；
-//   * 同一已初始化 host 上取坏 assembly → Err 而非崩。
-// 这是进程内唯一一次真正的 runtime 启动。
-void TestHappyPathAndReuse()
-{
-    ScriptHost host;
-    assert(!host.IsInitialized());
+    // 正常路径 + 复用同一 host 的错误路径：
+    //   * init → 取函数指针 → 调用 → 断言 fn(41) == 42；
+    //   * 同一已初始化 host 上重复 Initialize → AlreadyInitialized（早返回，不碰 hostfxr）；
+    //   * 同一已初始化 host 上取坏 assembly → Err 而非崩。
+    // 这是进程内唯一一次真正的 runtime 启动。
+    void TestHappyPathAndReuse()
+    {
+        ScriptHost host;
+        assert(!host.IsInitialized());
 
-    auto initResult = host.Initialize(kRuntimeConfigPath);
-    assert(initResult.IsOk());
-    assert(host.IsInitialized());
+        auto initResult = host.Initialize(kRuntimeConfigPath);
+        assert(initResult.IsOk());
+        assert(host.IsInitialized());
 
-    auto fnResult = host.GetManagedFunction(
-        kAssemblyPath, "OrangeProbe.Probe, HostProbe", "Run");
-    assert(fnResult.IsOk());
+        auto fnResult = host.GetManagedFunction(
+            kAssemblyPath, "OrangeProbe.Probe, HostProbe", "Run");
+        assert(fnResult.IsOk());
 
-    ManagedFunctionPtr raw = fnResult.Value();
-    assert(raw != nullptr);
+        ManagedFunctionPtr raw = fnResult.Value();
+        assert(raw != nullptr);
 
-    auto run = reinterpret_cast<ProbeRunFn>(raw);
-    const int out = run(41);
-    assert(out == 42);
-    std::fprintf(stdout, "  [PASS] happy path: Run(41) == %d\n", out);
+        auto      run = reinterpret_cast<ProbeRunFn>(raw);
+        const int out = run(41);
+        assert(out == 42);
+        std::fprintf(stdout, "  [PASS] happy path: Run(41) == %d\n", out);
 
-    // 重复 Initialize：门面早返回 AlreadyInitialized，不重启运行时。
-    auto second = host.Initialize(kRuntimeConfigPath);
-    assert(second.IsErr());
-    assert(second.Error() == ResultCode::AlreadyInitialized);
-    std::fprintf(stdout, "  [PASS] double initialize -> AlreadyInitialized\n");
+        // 重复 Initialize：门面早返回 AlreadyInitialized，不重启运行时。
+        auto second = host.Initialize(kRuntimeConfigPath);
+        assert(second.IsErr());
+        assert(second.Error() == ResultCode::AlreadyInitialized);
+        std::fprintf(stdout, "  [PASS] double initialize -> AlreadyInitialized\n");
 
-    // 坏 assembly：runtime 已起，GetManagedFunction 解析失败 → Err 而非崩。
-    auto bad = host.GetManagedFunction(
-        "Z:/missing/NoSuch.dll", "No.Such.Type, NoSuch", "Run");
-    assert(bad.IsErr());
-    std::fprintf(stdout, "  [PASS] bad assembly -> Err (%s)\n",
-                 Orange::Engine::ToString(bad.Error()));
-}
+        // 坏 assembly：runtime 已起，GetManagedFunction 解析失败 → Err 而非崩。
+        auto bad = host.GetManagedFunction(
+            "Z:/missing/NoSuch.dll", "No.Such.Type, NoSuch", "Run");
+        assert(bad.IsErr());
+        std::fprintf(stdout, "  [PASS] bad assembly -> Err (%s)\n",
+                     Orange::Engine::ToString(bad.Error()));
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {

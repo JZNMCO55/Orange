@@ -25,63 +25,63 @@
 namespace Orange::Engine::Log
 {
 
-enum class Level : int
-{
-    Trace = 0,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Critical,
-    Off,
-};
-
-ORANGE_ENGINE_API void  Initialize();
-ORANGE_ENGINE_API void  Shutdown();
-ORANGE_ENGINE_API void  SetLevel(Level level) noexcept;
-ORANGE_ENGINE_API Level GetLevel() noexcept;
-ORANGE_ENGINE_API bool  IsEnabled(Level level) noexcept;
-
-// 底层 sink。一般请使用 ORANGE_LOG_* 宏 / Format()。
-ORANGE_ENGINE_API void Write(Level level, std::string_view message) noexcept;
-
-// 应用层 sink hook（OrangeEditor v0.8 Console 面板等消费者用）：把每条
-// 日志原文 + level 转给注册 callback，让消费方自己缓存 / 过滤 / 渲染。
-// 与 backend 输出**并行**（spdlog / stderr fallback 仍然照常写），不替
-// 代主输出路径。userData 透传，callback 内部可挂自定义 context。
-// callback 必须 thread-safe（日志可能从任意线程调用）。
-// 设置 nullptr / 调 ClearLogSink 卸载。
-using LogSinkFn = void (*)(Level level, std::string_view message, void* userData);
-ORANGE_ENGINE_API void SetLogSink(LogSinkFn fn, void* userData) noexcept;
-ORANGE_ENGINE_API void ClearLogSink() noexcept;
-
-template <typename... Args>
-inline void Format(Level level, std::format_string<Args...> fmt, Args&&... args)
-{
-    if (!IsEnabled(level))
+    enum class Level : int
     {
-        return;
-    }
-    std::string message = std::format(fmt, std::forward<Args>(args)...);
-    Write(level, std::string_view{message});
-}
+        Trace = 0,
+        Debug,
+        Info,
+        Warn,
+        Error,
+        Critical,
+        Off,
+    };
 
-inline void Format(Level level, std::string_view text) noexcept
-{
-    if (!IsEnabled(level))
+    ORANGE_ENGINE_API void  Initialize();
+    ORANGE_ENGINE_API void  Shutdown();
+    ORANGE_ENGINE_API void  SetLevel(Level level) noexcept;
+    ORANGE_ENGINE_API Level GetLevel() noexcept;
+    ORANGE_ENGINE_API bool  IsEnabled(Level level) noexcept;
+
+    // 底层 sink。一般请使用 ORANGE_LOG_* 宏 / Format()。
+    ORANGE_ENGINE_API void Write(Level level, std::string_view message) noexcept;
+
+    // 应用层 sink hook（OrangeEditor v0.8 Console 面板等消费者用）：把每条
+    // 日志原文 + level 转给注册 callback，让消费方自己缓存 / 过滤 / 渲染。
+    // 与 backend 输出**并行**（spdlog / stderr fallback 仍然照常写），不替
+    // 代主输出路径。userData 透传，callback 内部可挂自定义 context。
+    // callback 必须 thread-safe（日志可能从任意线程调用）。
+    // 设置 nullptr / 调 ClearLogSink 卸载。
+    using LogSinkFn = void (*)(Level level, std::string_view message, void* userData);
+    ORANGE_ENGINE_API void SetLogSink(LogSinkFn fn, void* userData) noexcept;
+    ORANGE_ENGINE_API void ClearLogSink() noexcept;
+
+    template <typename... Args>
+    inline void Format(Level level, std::format_string<Args...> fmt, Args&&... args)
     {
-        return;
+        if (!IsEnabled(level))
+        {
+            return;
+        }
+        std::string message = std::format(fmt, std::forward<Args>(args)...);
+        Write(level, std::string_view{message});
     }
-    Write(level, text);
-}
 
-}  // namespace Orange::Engine::Log
+    inline void Format(Level level, std::string_view text) noexcept
+    {
+        if (!IsEnabled(level))
+        {
+            return;
+        }
+        Write(level, text);
+    }
 
-#define ORANGE_LOG_TRACE(...)    ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Trace,    __VA_ARGS__)
-#define ORANGE_LOG_DEBUG(...)    ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Debug,    __VA_ARGS__)
-#define ORANGE_LOG_INFO(...)     ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Info,     __VA_ARGS__)
-#define ORANGE_LOG_WARN(...)     ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Warn,     __VA_ARGS__)
-#define ORANGE_LOG_ERROR(...)    ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Error,    __VA_ARGS__)
+} // namespace Orange::Engine::Log
+
+#define ORANGE_LOG_TRACE(...) ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Trace, __VA_ARGS__)
+#define ORANGE_LOG_DEBUG(...) ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Debug, __VA_ARGS__)
+#define ORANGE_LOG_INFO(...) ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Info, __VA_ARGS__)
+#define ORANGE_LOG_WARN(...) ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Warn, __VA_ARGS__)
+#define ORANGE_LOG_ERROR(...) ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Error, __VA_ARGS__)
 #define ORANGE_LOG_CRITICAL(...) ::Orange::Engine::Log::Format(::Orange::Engine::Log::Level::Critical, __VA_ARGS__)
 
-#endif  // ORANGE_ENGINE_CORE_LOG_H
+#endif // ORANGE_ENGINE_CORE_LOG_H

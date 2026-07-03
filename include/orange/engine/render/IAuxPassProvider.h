@@ -48,63 +48,63 @@
 // editor / 游戏端实现时按需 include OR 头消费 ctx 字段。
 namespace Orange::Rhi
 {
-class RHICommandList;
-class RHITexture;
-class RHISampler;
-class RHIShaderModule;
-// 前向声明枚举（带底层类型）—— 与 DebugDrawScene.h 同款 header-isolation 安全
-// 模式（公共头不 #include <orange/rhi/...>，仅声明）。
-enum class TextureFormat : std::uint32_t;
-}  // namespace Orange::Rhi
+    class RHICommandList;
+    class RHITexture;
+    class RHISampler;
+    class RHIShaderModule;
+    // 前向声明枚举（带底层类型）—— 与 DebugDrawScene.h 同款 header-isolation 安全
+    // 模式（公共头不 #include <orange/rhi/...>，仅声明）。
+    enum class TextureFormat : std::uint32_t;
+} // namespace Orange::Rhi
 
 namespace Orange::Engine::Render
 {
 
-// 单帧辅助 pass 的上下文 —— Pipeline 在主 pass 完成后填好喂给
-// IAuxPassProvider::RenderAuxPass。所有指针由 Pipeline 拥有，调用结束
-// 后字段失效。
-struct ORANGE_ENGINE_API AuxPassContext
-{
-    Orange::Rhi::RHICommandList* pCmd          = nullptr;
-    // hdrColor 进入时 ShaderReadOnly；provider 自行 transition + Begin/End
-    // Rendering；离开时必须 ShaderReadOnly。
-    Orange::Rhi::RHITexture*     pHdrColor     = nullptr;
-    // sceneDepth 可能 DepthStencilAttachment 或 ShaderReadOnly（取决于
-    // 上游是否 transition）；按 sceneDepthIsShaderReadOnly 判定当前状态。
-    Orange::Rhi::RHITexture*     pSceneDepth   = nullptr;
-    // 复用 Pipeline 内 hdrSampler 用于采 sceneDepth（避免 provider 自创
-    // 重复资源）。
-    Orange::Rhi::RHISampler*     pHdrSampler   = nullptr;
-    std::uint32_t                hdrWidth      = 0;
-    std::uint32_t                hdrHeight     = 0;
-    glm::mat4                    invViewProj   = glm::mat4(1.0f);
-    glm::mat4                    viewProj      = glm::mat4(1.0f);
-    bool                         sceneDepthIsShaderReadOnly = false;
+    // 单帧辅助 pass 的上下文 —— Pipeline 在主 pass 完成后填好喂给
+    // IAuxPassProvider::RenderAuxPass。所有指针由 Pipeline 拥有，调用结束
+    // 后字段失效。
+    struct ORANGE_ENGINE_API AuxPassContext
+    {
+        Orange::Rhi::RHICommandList* pCmd = nullptr;
+        // hdrColor 进入时 ShaderReadOnly；provider 自行 transition + Begin/End
+        // Rendering；离开时必须 ShaderReadOnly。
+        Orange::Rhi::RHITexture* pHdrColor = nullptr;
+        // sceneDepth 可能 DepthStencilAttachment 或 ShaderReadOnly（取决于
+        // 上游是否 transition）；按 sceneDepthIsShaderReadOnly 判定当前状态。
+        Orange::Rhi::RHITexture* pSceneDepth = nullptr;
+        // 复用 Pipeline 内 hdrSampler 用于采 sceneDepth（避免 provider 自创
+        // 重复资源）。
+        Orange::Rhi::RHISampler* pHdrSampler                = nullptr;
+        std::uint32_t            hdrWidth                   = 0;
+        std::uint32_t            hdrHeight                  = 0;
+        glm::mat4                invViewProj                = glm::mat4(1.0f);
+        glm::mat4                viewProj                   = glm::mat4(1.0f);
+        bool                     sceneDepthIsShaderReadOnly = false;
 
-    // hdrColor / sceneDepth 的实际 TextureFormat（Pipeline 从 RT desc 取，权威）。
-    // provider 创建匹配的 PSO 时用，避免 hardcode 引擎 HDR target 格式常量——
-    // engine 单点改 HDR 格式后所有 provider 自动跟进（GAP-2026-05-24）。
-    Orange::Rhi::TextureFormat   hdrColorFormat{};
-    Orange::Rhi::TextureFormat   sceneDepthFormat{};
-    // 引擎内置 fullscreen.vert（big-triangle，gl_VertexIndex → 全屏覆盖）已编译
-    // 的 RHIShaderModule，供 provider 直接传给 fullscreen PSO 创建，免各自维护
-    // sibling copy + 重复 spv 编译路径（GAP-2026-05-24）。生命周期 = Pipeline 持有。
-    Orange::Rhi::RHIShaderModule* pFullscreenVs = nullptr;
-};
+        // hdrColor / sceneDepth 的实际 TextureFormat（Pipeline 从 RT desc 取，权威）。
+        // provider 创建匹配的 PSO 时用，避免 hardcode 引擎 HDR target 格式常量——
+        // engine 单点改 HDR 格式后所有 provider 自动跟进（GAP-2026-05-24）。
+        Orange::Rhi::TextureFormat hdrColorFormat{};
+        Orange::Rhi::TextureFormat sceneDepthFormat{};
+        // 引擎内置 fullscreen.vert（big-triangle，gl_VertexIndex → 全屏覆盖）已编译
+        // 的 RHIShaderModule，供 provider 直接传给 fullscreen PSO 创建，免各自维护
+        // sibling copy + 重复 spv 编译路径（GAP-2026-05-24）。生命周期 = Pipeline 持有。
+        Orange::Rhi::RHIShaderModule* pFullscreenVs = nullptr;
+    };
 
-// 辅助 pass 钩子接口。注册到 Pipeline 后每帧主 pass 完成、后处理之前
-// 调用 RenderAuxPass(ctx)。
-//
-// 多 provider 支持留待后续——v1.3.0 单 provider，注册第二个会覆盖前者。
-class ORANGE_ENGINE_API IAuxPassProvider
-{
-public:
-    virtual ~IAuxPassProvider() = default;
+    // 辅助 pass 钩子接口。注册到 Pipeline 后每帧主 pass 完成、后处理之前
+    // 调用 RenderAuxPass(ctx)。
+    //
+    // 多 provider 支持留待后续——v1.3.0 单 provider，注册第二个会覆盖前者。
+    class ORANGE_ENGINE_API IAuxPassProvider
+    {
+    public:
+        virtual ~IAuxPassProvider() = default;
 
-    // 单次 aux pass 渲染入口。约定见本头文件开头"调用约定"段。
-    virtual void RenderAuxPass(AuxPassContext& ctx) = 0;
-};
+        // 单次 aux pass 渲染入口。约定见本头文件开头"调用约定"段。
+        virtual void RenderAuxPass(AuxPassContext& ctx) = 0;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_I_AUX_PASS_PROVIDER_H
+#endif // ORANGE_ENGINE_RENDER_I_AUX_PASS_PROVIDER_H

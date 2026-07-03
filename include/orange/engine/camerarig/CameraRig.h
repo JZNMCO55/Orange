@@ -23,43 +23,43 @@
 namespace Orange::Engine::CameraRig
 {
 
-// 一帧合成的相机完整状态。
-struct RigState
-{
-    glm::vec2 position{0.0f, 0.0f};  // 含 shake 偏移的相机中心 (世界坐标)
-    float     roll = 0.0f;           // shake 的 roll (弧度；2.5D 用)
-    float     zoom = 1.0f;           // 当前 zoom
-};
-
-// 组合相机装置。三个子控制器公共暴露，直接配置 / 查询。
-class CameraRig2D
-{
-public:
-    CameraFollow2D follow;
-    CameraShake2D  shake;
-    CameraZoom2D   zoom;
-
-    // 一帧：follow 追 target → 叠加 shake 偏移 → zoom 平滑。返回相机完整状态。
-    RigState Update(const glm::vec2& targetPos, float dt)
+    // 一帧合成的相机完整状态。
+    struct RigState
     {
-        const glm::vec2   base = follow.Update(targetPos, dt);
-        const ShakeOffset s    = shake.Update(dt);
-        const float       z    = zoom.Update(dt);
-        RigState out{};
-        out.position = base + s.translation;  // shake 只叠加视觉偏移
-        out.roll     = s.roll;
-        out.zoom     = z;
-        return out;
-    }
+        glm::vec2 position{0.0f, 0.0f}; // 含 shake 偏移的相机中心 (世界坐标)
+        float     roll = 0.0f;          // shake 的 roll (弧度；2.5D 用)
+        float     zoom = 1.0f;          // 当前 zoom
+    };
 
-    // —— 便利转发 (常用触发，免消费者深入子控制器) ——
-    void AddTrauma(float amount) noexcept { shake.AddTrauma(amount); }     // 触发抖动 (受击/爆炸)
-    void SetTargetZoom(float target) noexcept { zoom.SetTargetZoom(target); } // 目标缩放
-    // 硬置相机到某点 (follow 瞬移 + 清 follow 速度)，用于初始化 / 传送。
-    void SnapTo(const glm::vec2& pos) noexcept { follow.SetPosition(pos); }
-    // 当前 follow 中心 (不含 shake 偏移的 gameplay 真相位置)。
-    const glm::vec2& GetFollowPosition() const noexcept { return follow.GetPosition(); }
-};
+    // 组合相机装置。三个子控制器公共暴露，直接配置 / 查询。
+    class CameraRig2D
+    {
+    public:
+        CameraFollow2D follow;
+        CameraShake2D  shake;
+        CameraZoom2D   zoom;
+
+        // 一帧：follow 追 target → 叠加 shake 偏移 → zoom 平滑。返回相机完整状态。
+        RigState Update(const glm::vec2& targetPos, float dt)
+        {
+            const glm::vec2   base = follow.Update(targetPos, dt);
+            const ShakeOffset s    = shake.Update(dt);
+            const float       z    = zoom.Update(dt);
+            RigState          out{};
+            out.position = base + s.translation; // shake 只叠加视觉偏移
+            out.roll     = s.roll;
+            out.zoom     = z;
+            return out;
+        }
+
+        // —— 便利转发 (常用触发，免消费者深入子控制器) ——
+        void AddTrauma(float amount) noexcept { shake.AddTrauma(amount); }        // 触发抖动 (受击/爆炸)
+        void SetTargetZoom(float target) noexcept { zoom.SetTargetZoom(target); } // 目标缩放
+        // 硬置相机到某点 (follow 瞬移 + 清 follow 速度)，用于初始化 / 传送。
+        void SnapTo(const glm::vec2& pos) noexcept { follow.SetPosition(pos); }
+        // 当前 follow 中心 (不含 shake 偏移的 gameplay 真相位置)。
+        const glm::vec2& GetFollowPosition() const noexcept { return follow.GetPosition(); }
+    };
 
 } // namespace Orange::Engine::CameraRig
 

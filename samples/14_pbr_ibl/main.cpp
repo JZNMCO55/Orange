@@ -85,7 +85,6 @@ using Orange::Engine::Asset::TextureFormat;
 using Orange::Engine::Asset::TextureLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::EnvironmentComponent;
@@ -97,125 +96,130 @@ using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
 using Orange::Engine::Render::TonemapOperator;
 using Orange::Engine::Render::TonemapPass;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// 球体 mesh —— 与 13_pbr_direct 同款 lat/lon UV-sphere（共享路径下
-// ComputeSmoothNormalsFromTriangles 给出 normalize(pos) 近似平滑法线）。
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    // 球体 mesh —— 与 13_pbr_direct 同款 lat/lon UV-sphere（共享路径下
+    // ComputeSmoothNormalsFromTriangles 给出 normalize(pos) 近似平滑法线）。
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            const float u    = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi  = u * glm::two_pi<float>();
-            const float sinP = std::sin(phi);
-            const float cosP = std::cos(phi);
-            positions.push_back({radius * sinT * cosP,
-                                 radius * cosT,
-                                 radius * sinT * sinP});
-            uvs.push_back({u, 1.0f - v});
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
+            {
+                const float u    = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi  = u * glm::two_pi<float>();
+                const float sinP = std::sin(phi);
+                const float cosP = std::cos(phi);
+                positions.push_back({radius * sinT * cosP,
+                                     radius * cosT,
+                                     radius * sinT * sinP});
+                uvs.push_back({u, 1.0f - v});
+            }
         }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            const std::uint32_t a = i       * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i       * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// 程序化生成 1×1 全白 RGBA32Float TextureAsset —— furnace test 用。
-// 不走 stb / 文件路径，避免依赖磁盘上的白炉资产。
-std::unique_ptr<TextureAsset> MakeFurnaceWhiteEquirect()
-{
-    // 单像素 RGBA = (1, 1, 1, 1) 浮点，16 bytes
-    std::vector<std::uint8_t> bytes(16);
-    const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::memcpy(bytes.data(), white, sizeof(white));
-    return std::make_unique<TextureAsset>(1u, 1u, TextureFormat::R32G32B32A32_Float,
-                                          std::move(bytes));
-}
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, AppHost* host = nullptr,
-                std::filesystem::path capturePath = {}, int exitAfterFrames = -1)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world),
-          mpHost(host), mCapturePath(std::move(capturePath)),
-          mExitAfterFrames(exitAfterFrames)
-    {
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    void OnUpdate(const FrameContext& /*frame*/) override
+    // 程序化生成 1×1 全白 RGBA32Float TextureAsset —— furnace test 用。
+    // 不走 stb / 文件路径，避免依赖磁盘上的白炉资产。
+    std::unique_ptr<TextureAsset> MakeFurnaceWhiteEquirect()
     {
-        // capture 模式：第 mExitAfterFrames - 1 帧请求 capture（capture 走
-        // Render 内部 Stage A 末尾 CopyTextureToBuffer + 本帧 WaitIdle 后
-        // FinalizeCapture 把 PNG 写盘），下一帧（== mExitAfterFrames）RequestExit。
-        if (!mCapturePath.empty() && mFrameIndex == mExitAfterFrames - 1)
-        {
-            mPipeline.RequestCapture(mCapturePath);
-        }
-        mPipeline.Render(mWorld);
-        if (mpHost && mExitAfterFrames >= 0 && mFrameIndex >= mExitAfterFrames)
-        {
-            mpHost->RequestExit();
-        }
-        ++mFrameIndex;
+        // 单像素 RGBA = (1, 1, 1, 1) 浮点，16 bytes
+        std::vector<std::uint8_t> bytes(16);
+        const float               white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        std::memcpy(bytes.data(), white, sizeof(white));
+        return std::make_unique<TextureAsset>(1u, 1u, TextureFormat::R32G32B32A32_Float,
+                                              std::move(bytes));
     }
 
-    bool OnEvent(const Platform::WindowEvent& event) override
+    class RenderLayer : public Layer
     {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, AppHost* host = nullptr,
+                    std::filesystem::path capturePath = {}, int exitAfterFrames = -1)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world),
+              mpHost(host), mCapturePath(std::move(capturePath)),
+              mExitAfterFrames(exitAfterFrames)
         {
-            mPipeline.OnResize(resize->width, resize->height);
         }
-        return false;
-    }
 
-private:
-    Pipeline&             mPipeline;
-    World&                mWorld;
-    AppHost*              mpHost{nullptr};
-    std::filesystem::path mCapturePath{};
-    int                   mExitAfterFrames{-1};
-    int                   mFrameIndex{0};
-};
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            // capture 模式：第 mExitAfterFrames - 1 帧请求 capture（capture 走
+            // Render 内部 Stage A 末尾 CopyTextureToBuffer + 本帧 WaitIdle 后
+            // FinalizeCapture 把 PNG 写盘），下一帧（== mExitAfterFrames）RequestExit。
+            if (!mCapturePath.empty() && mFrameIndex == mExitAfterFrames - 1)
+            {
+                mPipeline.RequestCapture(mCapturePath);
+            }
+            mPipeline.Render(mWorld);
+            if (mpHost && mExitAfterFrames >= 0 && mFrameIndex >= mExitAfterFrames)
+            {
+                mpHost->RequestExit();
+            }
+            ++mFrameIndex;
+        }
 
-constexpr std::array<float, 3> kMetallicSteps  = {0.0f, 0.5f, 1.0f};
-constexpr std::array<float, 3> kRoughnessSteps = {0.1f, 0.5f, 0.9f};
-// 暖橙：metallic=1 行金属高光自带 baseColor 着色，肉眼可识别"非白"高光；
-// IBL 在金属球上呈现 baseColor-tinted 环境反射。
-constexpr glm::vec4            kBaseColor{1.0f, 0.78f, 0.34f, 1.0f};
-constexpr float                kSphereSpacing = 1.4f;
-constexpr float                kSphereRadius  = 0.5f;
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
 
-constexpr std::string_view kDefaultEnvPath = "assets/environments/default_outdoor.hdr";
-constexpr std::string_view kFurnaceEnvKey  = "builtin/furnace_white_1x1";
+    private:
+        Pipeline&             mPipeline;
+        World&                mWorld;
+        AppHost*              mpHost{nullptr};
+        std::filesystem::path mCapturePath{};
+        int                   mExitAfterFrames{-1};
+        int                   mFrameIndex{0};
+    };
 
-}  // namespace
+    constexpr std::array<float, 3> kMetallicSteps  = {0.0f, 0.5f, 1.0f};
+    constexpr std::array<float, 3> kRoughnessSteps = {0.1f, 0.5f, 0.9f};
+    // 暖橙：metallic=1 行金属高光自带 baseColor 着色，肉眼可识别"非白"高光；
+    // IBL 在金属球上呈现 baseColor-tinted 环境反射。
+    constexpr glm::vec4 kBaseColor{1.0f, 0.78f, 0.34f, 1.0f};
+    constexpr float     kSphereSpacing = 1.4f;
+    constexpr float     kSphereRadius  = 0.5f;
+
+    constexpr std::string_view kDefaultEnvPath = "assets/environments/default_outdoor.hdr";
+    constexpr std::string_view kFurnaceEnvKey  = "builtin/furnace_white_1x1";
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -225,11 +229,11 @@ int main(int argc, char** argv)
     //   --capture <path>           第 (exit-after - 1) 帧 RequestCapture 写 PNG 落盘
     //   --exit-after <N>           第 N 帧后 RequestExit（无人值守视觉验证）
     //   其它参数 silent ignore（与 sample 1-13 一致）
-    bool                  furnaceMode      = false;
+    bool                  furnaceMode = false;
     std::filesystem::path capturePath{};
-    int                   exitAfterFrames  = -1;
-    TonemapOperator       tonemapOp        = TonemapOperator::ACES_Narkowicz;
-    std::string_view      tonemapOpLabel   = "aces";
+    int                   exitAfterFrames = -1;
+    TonemapOperator       tonemapOp       = TonemapOperator::ACES_Narkowicz;
+    std::string_view      tonemapOpLabel  = "aces";
     for (int i = 1; i < argc; ++i)
     {
         const std::string_view arg{argv[i]};
@@ -250,10 +254,26 @@ int main(int argc, char** argv)
             // `--tonemap=<op>` 单 token 形式（与 sample 18 `--tint=<rgb>` 一致），
             // 比 `--tonemap <op>` 双 token 在 shell capture 脚本里更省心。
             const std::string_view opName = arg.substr(10);
-            if      (opName == "aces")     { tonemapOp = TonemapOperator::ACES_Narkowicz; tonemapOpLabel = "aces"; }
-            else if (opName == "agx")      { tonemapOp = TonemapOperator::AgX;            tonemapOpLabel = "agx"; }
-            else if (opName == "reinhard") { tonemapOp = TonemapOperator::Reinhard;       tonemapOpLabel = "reinhard"; }
-            else if (opName == "linear")   { tonemapOp = TonemapOperator::Linear;         tonemapOpLabel = "linear"; }
+            if (opName == "aces")
+            {
+                tonemapOp      = TonemapOperator::ACES_Narkowicz;
+                tonemapOpLabel = "aces";
+            }
+            else if (opName == "agx")
+            {
+                tonemapOp      = TonemapOperator::AgX;
+                tonemapOpLabel = "agx";
+            }
+            else if (opName == "reinhard")
+            {
+                tonemapOp      = TonemapOperator::Reinhard;
+                tonemapOpLabel = "reinhard";
+            }
+            else if (opName == "linear")
+            {
+                tonemapOp      = TonemapOperator::Linear;
+                tonemapOpLabel = "linear";
+            }
             else
             {
                 std::fprintf(stderr, "[14_pbr_ibl] WARNING: 未知 --tonemap=%.*s，退回默认 aces。\n",
@@ -268,8 +288,8 @@ int main(int argc, char** argv)
 
     AppConfig cfg{};
     cfg.window.title  = furnaceMode
-                      ? "OrangeEngine - 14 pbr_ibl (--furnace)"
-                      : "OrangeEngine - 14 pbr_ibl";
+                            ? "OrangeEngine - 14 pbr_ibl (--furnace)"
+                            : "OrangeEngine - 14 pbr_ibl";
     cfg.window.width  = 1280;
     cfg.window.height = 720;
 
@@ -328,13 +348,13 @@ int main(int argc, char** argv)
             // 不阻断 sample：BakeIblFromWorld 会 fallback 到 dummy IBL，视觉等价
             // 13_pbr_direct（金属球反射黑、无环境填充）。明显提示一下让用户知道。
             std::fprintf(stderr,
-                "[14_pbr_ibl] WARNING: 加载 %.*s 失败（code=%u）。\n"
-                "             请按 assets/environments/README.md 步骤从 PolyHaven\n"
-                "             下载 1K CC0 HDRI 并重命名放入 assets/environments/\n"
-                "             default_outdoor.hdr。本次启动将走 dummy IBL fallback，\n"
-                "             视觉接近 samples/13_pbr_direct（金属球反射黑）。\n",
-                static_cast<int>(kDefaultEnvPath.size()), kDefaultEnvPath.data(),
-                static_cast<unsigned>(loadRes.Error()));
+                         "[14_pbr_ibl] WARNING: 加载 %.*s 失败（code=%u）。\n"
+                         "             请按 assets/environments/README.md 步骤从 PolyHaven\n"
+                         "             下载 1K CC0 HDRI 并重命名放入 assets/environments/\n"
+                         "             default_outdoor.hdr。本次启动将走 dummy IBL fallback，\n"
+                         "             视觉接近 samples/13_pbr_direct（金属球反射黑）。\n",
+                         static_cast<int>(kDefaultEnvPath.size()), kDefaultEnvPath.data(),
+                         static_cast<unsigned>(loadRes.Error()));
         }
         else
         {
@@ -355,10 +375,8 @@ int main(int argc, char** argv)
     std::vector<std::unique_ptr<MaterialInstance>> instances;
     instances.reserve(kMetallicSteps.size() * kRoughnessSteps.size());
 
-    const float xOffset = -kSphereSpacing
-                        * static_cast<float>(kRoughnessSteps.size() - 1) * 0.5f;
-    const float yOffset = -kSphereSpacing
-                        * static_cast<float>(kMetallicSteps.size() - 1) * 0.5f;
+    const float xOffset = -kSphereSpacing * static_cast<float>(kRoughnessSteps.size() - 1) * 0.5f;
+    const float yOffset = -kSphereSpacing * static_cast<float>(kMetallicSteps.size() - 1) * 0.5f;
 
     for (std::size_t row = 0; row < kMetallicSteps.size(); ++row)
     {
@@ -382,7 +400,7 @@ int main(int argc, char** argv)
                                        0.0f));
             instances.push_back(std::move(inst));
 
-            Entity entity = world.CreateEntity();
+            Entity             entity = world.CreateEntity();
             TransformComponent xf{};
             xf.position = {
                 xOffset + static_cast<float>(col) * kSphereSpacing,
@@ -406,7 +424,7 @@ int main(int argc, char** argv)
     Entity envEntity = world.CreateEntity();
     {
         EnvironmentComponent env{};
-        env.cubemap   = envHandle;     // furnace 模式 → 1×1 白；否则 → .hdr 加载结果
+        env.cubemap   = envHandle; // furnace 模式 → 1×1 白；否则 → .hdr 加载结果
         env.tint      = glm::vec3{1.0f, 1.0f, 1.0f};
         env.intensity = 1.0f;
         world.AddComponent(envEntity, env);
@@ -431,12 +449,11 @@ int main(int argc, char** argv)
     // Camera：与 13_pbr_direct 同款视角（球阵居中，略上斜俯视）。
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(40.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 0.3f, 6.5f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(40.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 0.3f, 6.5f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 

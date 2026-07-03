@@ -17,7 +17,7 @@
 // if(EXISTS) 门控（干净 checkout 缺 fixture 时跳过该段，仍测 importer 可链 + ext
 // 路由）。
 
-#include "ImportDispatcher.h"  // include path 由 CMake 加 tools/OrangeEditor/import
+#include "ImportDispatcher.h" // include path 由 CMake 加 tools/OrangeEditor/import
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -42,28 +42,31 @@ namespace fs       = std::filesystem;
 namespace
 {
 
-std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
-{
-    auto registry = std::make_unique<AssetNS::AssetRegistry>();
-    auto rm = registry->RegisterLoader<AssetNS::MeshAsset>(
-        std::make_unique<AssetNS::MeshLoader>());
-    assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
-    auto rt = registry->RegisterLoader<AssetNS::TextureAsset>(
-        std::make_unique<AssetNS::TextureLoader>());
-    assert(rt.IsOk() && "RegisterLoader<TextureAsset> 应成功");
-    return registry;
-}
+    std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
+    {
+        auto registry = std::make_unique<AssetNS::AssetRegistry>();
+        auto rm       = registry->RegisterLoader<AssetNS::MeshAsset>(
+            std::make_unique<AssetNS::MeshLoader>());
+        assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
+        auto rt = registry->RegisterLoader<AssetNS::TextureAsset>(
+            std::make_unique<AssetNS::TextureLoader>());
+        assert(rt.IsOk() && "RegisterLoader<TextureAsset> 应成功");
+        return registry;
+    }
 
-bool FileContains(const std::string& path, const std::string& needle)
-{
-    std::ifstream ifs(path, std::ios::binary);
-    if (!ifs.is_open()) { return false; }
-    const std::string content((std::istreambuf_iterator<char>(ifs)),
-                              std::istreambuf_iterator<char>());
-    return content.find(needle) != std::string::npos;
-}
+    bool FileContains(const std::string& path, const std::string& needle)
+    {
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs.is_open())
+        {
+            return false;
+        }
+        const std::string content((std::istreambuf_iterator<char>(ifs)),
+                                  std::istreambuf_iterator<char>());
+        return content.find(needle) != std::string::npos;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -93,8 +96,8 @@ int main()
 
     // ===== 2. 缺失文件 → SourceReadFailed（不崩）=====
     {
-        auto registry = MakeImportRegistry();
-        const ImportNS::ImportResult r = ImportNS::ImportFbxMeshToRegistry(
+        auto                         registry = MakeImportRegistry();
+        const ImportNS::ImportResult r        = ImportNS::ImportFbxMeshToRegistry(
             (testRoot / "does_not_exist.fbx").generic_string(), *registry);
         assert(r.status == ImportNS::ImportStatus::SourceReadFailed &&
                "不存在的 .fbx 应返回 SourceReadFailed（不崩）");
@@ -115,7 +118,7 @@ int main()
 
     // ===== 3. 导入 cube_two_material.fbx → .mesh + 2 .material + .meta =====
     {
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportFbxMeshToRegistry(fixturePath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -134,7 +137,7 @@ int main()
 
         // ----- 几何：读回 .mesh，验顶点 / 索引 / AABB（轴 + 单位缩放）-----
         AssetNS::MeshLoader loader;
-        auto loadRes = loader.Load(r.destPath);
+        auto                loadRes = loader.Load(r.destPath);
         assert(loadRes.IsOk() && "MeshLoader::Load 应读回导入的 .mesh");
         const auto& mesh = *loadRes.Value();
         assert(!mesh.Positions().empty() && "读回 mesh 顶点数应 > 0");
@@ -144,7 +147,13 @@ int main()
         assert(mesh.Indices().size() == 36 && "cube 应有 36 个索引（12 三角）");
         // 索引合法：最大索引 < 顶点数。
         std::uint32_t maxIdx = 0;
-        for (auto idx : mesh.Indices()) { if (idx > maxIdx) { maxIdx = idx; } }
+        for (auto idx : mesh.Indices())
+        {
+            if (idx > maxIdx)
+            {
+                maxIdx = idx;
+            }
+        }
         assert(static_cast<std::size_t>(maxIdx) < mesh.Positions().size() &&
                "索引应全部落在顶点数组范围内");
 
@@ -158,9 +167,12 @@ int main()
         float maxB[3] = {-1e9f, -1e9f, -1e9f};
         for (const auto& p : mesh.Positions())
         {
-            minB[0] = std::min(minB[0], p.x); maxB[0] = std::max(maxB[0], p.x);
-            minB[1] = std::min(minB[1], p.y); maxB[1] = std::max(maxB[1], p.y);
-            minB[2] = std::min(minB[2], p.z); maxB[2] = std::max(maxB[2], p.z);
+            minB[0] = std::min(minB[0], p.x);
+            maxB[0] = std::max(maxB[0], p.x);
+            minB[1] = std::min(minB[1], p.y);
+            maxB[1] = std::max(maxB[1], p.y);
+            minB[2] = std::min(minB[2], p.z);
+            maxB[2] = std::max(maxB[2], p.z);
         }
         for (int axis = 0; axis < 3; ++axis)
         {
@@ -192,9 +204,9 @@ int main()
         // "绿 sub-mesh 的法线全沿引擎 ±Y" 锁住旋转真发生且方向对。
         // 绿 slot 的 sub-mesh 区间从 .mesh sub-mesh 段拿。
         {
-            const auto& subsForAxis = mesh.SubMeshes();
+            const auto&   subsForAxis = mesh.SubMeshes();
             std::uint32_t greenOffset = 0, greenCount = 0;
-            bool foundGreen = false;
+            bool          foundGreen = false;
             for (const auto& s : subsForAxis)
             {
                 if (s.materialSlot == 1)
@@ -211,7 +223,7 @@ int main()
             for (std::uint32_t i = greenOffset; i < greenOffset + greenCount; ++i)
             {
                 const std::uint32_t vi = idxs[i];
-                const auto& n = norms[vi];
+                const auto&         n  = norms[vi];
                 // 引擎 +Y/-Y：|y| 主导，x/z 近 0。证 Blender Z-up 顶/底面 → 引擎 ±Y。
                 assert(std::fabs(n.y) > 0.9f &&
                        "绿面（Blender Z-up 顶/底）法线在引擎应沿 ±Y（轴转换正确）");
@@ -237,9 +249,9 @@ int main()
         assert(mesh.HasSubMeshes() && "2 材质 → HasSubMeshes()==true");
         const auto& subs = mesh.SubMeshes();
         assert(subs.size() >= 2 && "应有 >= 2 段 sub-mesh");
-        std::uint64_t covered = 0;
-        std::uint32_t expectOffset = 0;
-        std::uint32_t maxSlot = 0;
+        std::uint64_t     covered      = 0;
+        std::uint32_t     expectOffset = 0;
+        std::uint32_t     maxSlot      = 0;
         std::vector<bool> slotSeen;
         for (const auto& s : subs)
         {
@@ -252,7 +264,10 @@ int main()
                 slotSeen.resize(s.materialSlot + 1, false);
             }
             slotSeen[s.materialSlot] = true;
-            if (s.materialSlot > maxSlot) { maxSlot = s.materialSlot; }
+            if (s.materialSlot > maxSlot)
+            {
+                maxSlot = s.materialSlot;
+            }
         }
         for (std::uint32_t sl = 0; sl <= maxSlot; ++sl)
         {
@@ -299,12 +314,13 @@ int main()
         // 删上一轮产物绕 hash 短路。
         const std::string stemMesh =
             (fs::path("assets/Models") / "cube_two_material" /
-             "cube_two_material.mesh").generic_string();
+             "cube_two_material.mesh")
+                .generic_string();
         fs::remove(stemMesh, ec);
         fs::remove(stemMesh + ".meta", ec);
         fs::remove(fs::path(stemMesh).parent_path() / "cube_two_material.fbx", ec);
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::DispatchToRegistry(fixturePath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -317,9 +333,10 @@ int main()
     {
         const std::string meshPath =
             (fs::path("assets/Models") / "cube_two_material" /
-             "cube_two_material.mesh").generic_string();
+             "cube_two_material.mesh")
+                .generic_string();
         assert(fs::exists(meshPath) && "上一轮 .mesh 应在位");
-        std::ifstream f1(meshPath, std::ios::binary);
+        std::ifstream                   f1(meshPath, std::ios::binary);
         const std::vector<std::uint8_t> firstBytes(
             (std::istreambuf_iterator<char>(f1)),
             std::istreambuf_iterator<char>());
@@ -329,12 +346,12 @@ int main()
         fs::remove(meshPath + ".meta", ec);
         fs::remove(fs::path(meshPath).parent_path() / "cube_two_material.fbx", ec);
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportFbxMeshToRegistry(fixturePath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
                "第二次 FBX 导入应 Success");
-        std::ifstream f2(meshPath, std::ios::binary);
+        std::ifstream                   f2(meshPath, std::ios::binary);
         const std::vector<std::uint8_t> secondBytes(
             (std::istreambuf_iterator<char>(f2)),
             std::istreambuf_iterator<char>());

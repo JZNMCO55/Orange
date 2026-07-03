@@ -91,64 +91,70 @@ struct EditorHost;
 
 namespace Orange::Editor::Schema
 {
-struct ComponentSchema;
+    struct ComponentSchema;
 }
 
 namespace Orange::Editor::Plugin
 {
 
-class IEditorInspectorPlugin
-{
-public:
-    virtual ~IEditorInspectorPlugin() = default;
-
-    IEditorInspectorPlugin()                                              = default;
-    IEditorInspectorPlugin(const IEditorInspectorPlugin&)                 = delete;
-    IEditorInspectorPlugin& operator=(const IEditorInspectorPlugin&)      = delete;
-    IEditorInspectorPlugin(IEditorInspectorPlugin&&)                      = delete;
-    IEditorInspectorPlugin& operator=(IEditorInspectorPlugin&&)           = delete;
-
-    // 本 plugin 是否处理某 component schema 段。返回 true 时 SchemaInspector
-    // 调度本 plugin 的 ParseBegin / ParseEnd 钩子；false 时本 plugin 跳过。
-    //
-    // plugin 自己决定过滤策略——推荐按 `schema.typeName` 字符串比较。
-    virtual bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const = 0;
-
-    // 在默认 schema 字段渲染**之前**调用。
-    //
-    // 返回值：
-    //   * true  —— plugin 接管整段，SchemaInspector 跳过默认字段渲染。常用
-    //              于"完全自定义 component UI"的场景（少见）
-    //   * false —— 默认渲染正常进行；本钩子只在段首追加额外 UI（典型：
-    //              section banner / 状态指示 / 缩略图）
-    //
-    // 默认 implementation 返回 false（不接管），仅在派生类需要重写时覆盖。
-    virtual bool ParseBegin(EditorHost&                                            host,
-                            Orange::Engine::Entity                                 entity,
-                            const Orange::Editor::Schema::ComponentSchema&         schema,
-                            void*                                                  component)
+    class IEditorInspectorPlugin
     {
-        (void)host; (void)entity; (void)schema; (void)component;
-        return false;
-    }
+    public:
+        virtual ~IEditorInspectorPlugin() = default;
 
-    // 在默认 schema 字段渲染**之后**调用（即使 ParseBegin 返回 true 接管整
-    // 段，ParseEnd 仍会被调到——让"plugin 自渲染主区 + 通过 ParseEnd 追加
-    // footer"的组合可行）。
-    //
-    // 典型用例：在 component 段最末追加"应用 preset"按钮 / mini-preview /
-    // 资源缩略图 / playback 控件。
-    //
-    // 默认 implementation 是 no-op。
-    virtual void ParseEnd(EditorHost&                                            host,
-                          Orange::Engine::Entity                                 entity,
-                          const Orange::Editor::Schema::ComponentSchema&         schema,
-                          void*                                                  component)
-    {
-        (void)host; (void)entity; (void)schema; (void)component;
-    }
-};
+        IEditorInspectorPlugin()                                         = default;
+        IEditorInspectorPlugin(const IEditorInspectorPlugin&)            = delete;
+        IEditorInspectorPlugin& operator=(const IEditorInspectorPlugin&) = delete;
+        IEditorInspectorPlugin(IEditorInspectorPlugin&&)                 = delete;
+        IEditorInspectorPlugin& operator=(IEditorInspectorPlugin&&)      = delete;
 
-}  // namespace Orange::Editor::Plugin
+        // 本 plugin 是否处理某 component schema 段。返回 true 时 SchemaInspector
+        // 调度本 plugin 的 ParseBegin / ParseEnd 钩子；false 时本 plugin 跳过。
+        //
+        // plugin 自己决定过滤策略——推荐按 `schema.typeName` 字符串比较。
+        virtual bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const = 0;
 
-#endif  // ORANGE_EDITOR_PLUGIN_I_EDITOR_INSPECTOR_PLUGIN_H
+        // 在默认 schema 字段渲染**之前**调用。
+        //
+        // 返回值：
+        //   * true  —— plugin 接管整段，SchemaInspector 跳过默认字段渲染。常用
+        //              于"完全自定义 component UI"的场景（少见）
+        //   * false —— 默认渲染正常进行；本钩子只在段首追加额外 UI（典型：
+        //              section banner / 状态指示 / 缩略图）
+        //
+        // 默认 implementation 返回 false（不接管），仅在派生类需要重写时覆盖。
+        virtual bool ParseBegin(EditorHost&                                    host,
+                                Orange::Engine::Entity                         entity,
+                                const Orange::Editor::Schema::ComponentSchema& schema,
+                                void*                                          component)
+        {
+            (void)host;
+            (void)entity;
+            (void)schema;
+            (void)component;
+            return false;
+        }
+
+        // 在默认 schema 字段渲染**之后**调用（即使 ParseBegin 返回 true 接管整
+        // 段，ParseEnd 仍会被调到——让"plugin 自渲染主区 + 通过 ParseEnd 追加
+        // footer"的组合可行）。
+        //
+        // 典型用例：在 component 段最末追加"应用 preset"按钮 / mini-preview /
+        // 资源缩略图 / playback 控件。
+        //
+        // 默认 implementation 是 no-op。
+        virtual void ParseEnd(EditorHost&                                    host,
+                              Orange::Engine::Entity                         entity,
+                              const Orange::Editor::Schema::ComponentSchema& schema,
+                              void*                                          component)
+        {
+            (void)host;
+            (void)entity;
+            (void)schema;
+            (void)component;
+        }
+    };
+
+} // namespace Orange::Editor::Plugin
+
+#endif // ORANGE_EDITOR_PLUGIN_I_EDITOR_INSPECTOR_PLUGIN_H

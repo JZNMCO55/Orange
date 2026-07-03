@@ -23,32 +23,32 @@
 
 namespace Orange::Engine::Asset
 {
-class SkeletonAsset;
+    class SkeletonAsset;
 }
 
 namespace Orange::Editor::Plugin
 {
 
-class DragonBonesAssetInspectorPlugin : public IEditorAssetInspectorPlugin
-{
-public:
-    DragonBonesAssetInspectorPlugin();
-    ~DragonBonesAssetInspectorPlugin() override;
+    class DragonBonesAssetInspectorPlugin : public IEditorAssetInspectorPlugin
+    {
+    public:
+        DragonBonesAssetInspectorPlugin();
+        ~DragonBonesAssetInspectorPlugin() override;
 
-    // 按 path 末尾 "_ske.json" / "_ske.dbbin" 后缀比较匹配。
-    bool CanHandle(const std::string& assetPath) const override;
+        // 按 path 末尾 "_ske.json" / "_ske.dbbin" 后缀比较匹配。
+        bool CanHandle(const std::string& assetPath) const override;
 
-    // 接管 Inspector 整段：显示 metadata + armature TreeNode。
-    void Draw(EditorHost& host, const std::string& assetPath) override;
+        // 接管 Inspector 整段：显示 metadata + armature TreeNode。
+        void Draw(EditorHost& host, const std::string& assetPath) override;
 
-private:
-    // editing 副本：切换 path 时 reload。失败保持 mpAsset = nullptr。
-    std::string                                                          mCachedPath;
-    std::unique_ptr<const ::Orange::Engine::Asset::SkeletonAsset>        mpAsset;
-    bool                                                                 mLoadAttempted{false};
-    bool                                                                 mLoadFailed{false};
-};
+    private:
+        // editing 副本：切换 path 时 reload。失败保持 mpAsset = nullptr。
+        std::string                                                   mCachedPath;
+        std::unique_ptr<const ::Orange::Engine::Asset::SkeletonAsset> mpAsset;
+        bool                                                          mLoadAttempted{false};
+        bool                                                          mLoadFailed{false};
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_DRAGON_BONES_ASSET_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_DRAGON_BONES_ASSET_INSPECTOR_PLUGIN_H

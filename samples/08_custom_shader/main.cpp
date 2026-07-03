@@ -63,7 +63,6 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MaterialSystem;
@@ -74,147 +73,151 @@ using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShaderTemplateDesc;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// ---------------------------- mesh 工厂（与 sample 07 同形态，独立一份）
+    // ---------------------------- mesh 工厂（与 sample 07 同形态，独立一份）
 
-std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
-{
-    std::vector<VertexPosition3> positions = {
-        {-halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f,  halfSize},
-        {-halfSize, 0.0f,  halfSize},
+    std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
+    {
+        std::vector<VertexPosition3> positions = {
+            {-halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, halfSize},
+            {-halfSize, 0.0f, halfSize},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions),
+                                                                         std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lonSegments, std::uint32_t latSegments)
+    {
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+
+        for (std::uint32_t lat = 0; lat <= latSegments; ++lat)
+        {
+            const float v     = static_cast<float>(lat) / static_cast<float>(latSegments);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t lon = 0; lon <= lonSegments; ++lon)
+            {
+                const float u    = static_cast<float>(lon) / static_cast<float>(lonSegments);
+                const float phi  = u * glm::two_pi<float>();
+                const float sinP = std::sin(phi);
+                const float cosP = std::cos(phi);
+                positions.push_back({radius * sinT * cosP,
+                                     radius * cosT,
+                                     radius * sinT * sinP});
+                uvs.push_back({u, 1.0f - v});
+            }
+        }
+
+        for (std::uint32_t lat = 0; lat < latSegments; ++lat)
+        {
+            for (std::uint32_t lon = 0; lon < lonSegments; ++lon)
+            {
+                const std::uint32_t a = lat * (lonSegments + 1) + lon;
+                const std::uint32_t b = (lat + 1) * (lonSegments + 1) + lon;
+                const std::uint32_t c = (lat + 1) * (lonSegments + 1) + (lon + 1);
+                const std::uint32_t d = lat * (lonSegments + 1) + (lon + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
+        }
+
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    // ---------------------------------------------------------------------------
+
+    class RenderLayer : public Layer
+    {
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, Entity light)
+            : Layer("RenderLayer"),
+              mPipeline(pipeline),
+              mWorld(world),
+              mLight(light)
+        {
+        }
+
+        void OnUpdate(const FrameContext& frame) override
+        {
+            // 光源方向慢转（0.4 rad/s），让 sphere 在 plane 上的影子跟着转——
+            // 验证自定义 shader 物体仍能正确投影。
+            if (auto* lightXf = mWorld.GetComponent<TransformComponent>(mLight))
+            {
+                const float t     = frame.time.totalSeconds * 0.4f;
+                const float cx    = std::cos(t);
+                const float cz    = std::sin(t);
+                lightXf->rotation = Orange::Engine::Render::
+                    MakeDirectionalLightRotationFromDir(
+                        glm::vec3(cx * 0.6f, -1.0f, cz * 0.6f));
+            }
+
+            // 把当前帧时间喂给 Pipeline，让 LightUbo.frameInfo.x = time，
+            // fresnel.frag 据此跑脉动。
+            mPipeline.SetFrameTime(frame.time.totalSeconds);
+
+            // 每 0.5 秒落一张 PNG 到 captures/sample_08/000.png 起编号 ——
+            // debug-only：fresnel pulseSpeed = 1.8 rad/s，full pulse 周期 ≈ 3.5 s，
+            // 0.5 s 步长能采到一个周期内 7 个均匀相位（每张差大约 51° 相位）。
+            constexpr float kCaptureInterval = 0.5f;
+            if (frame.time.totalSeconds >= mNextCaptureTime)
+            {
+                char fileName[64];
+                std::snprintf(fileName, sizeof(fileName),
+                              "captures/sample_08/%03u.png", mCaptureIndex);
+                mPipeline.RequestCapture(fileName);
+                ++mCaptureIndex;
+                mNextCaptureTime = frame.time.totalSeconds + kCaptureInterval;
+            }
+
+            mPipeline.Render(mWorld);
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        Pipeline&     mPipeline;
+        World&        mWorld;
+        Entity        mLight;
+        float         mNextCaptureTime{0.0f}; // 第 1 张在 t≈0 时刻
+        std::uint32_t mCaptureIndex{0};
     };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lonSegments, std::uint32_t latSegments)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-
-    for (std::uint32_t lat = 0; lat <= latSegments; ++lat)
-    {
-        const float v     = static_cast<float>(lat) / static_cast<float>(latSegments);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t lon = 0; lon <= lonSegments; ++lon)
-        {
-            const float u    = static_cast<float>(lon) / static_cast<float>(lonSegments);
-            const float phi  = u * glm::two_pi<float>();
-            const float sinP = std::sin(phi);
-            const float cosP = std::cos(phi);
-            positions.push_back({radius * sinT * cosP,
-                                 radius * cosT,
-                                 radius * sinT * sinP});
-            uvs.push_back({u, 1.0f - v});
-        }
-    }
-
-    for (std::uint32_t lat = 0; lat < latSegments; ++lat)
-    {
-        for (std::uint32_t lon = 0; lon < lonSegments; ++lon)
-        {
-            const std::uint32_t a = lat       * (lonSegments + 1) + lon;
-            const std::uint32_t b = (lat + 1) * (lonSegments + 1) + lon;
-            const std::uint32_t c = (lat + 1) * (lonSegments + 1) + (lon + 1);
-            const std::uint32_t d = lat       * (lonSegments + 1) + (lon + 1);
-            indices.push_back(a);
-            indices.push_back(c);
-            indices.push_back(b);
-            indices.push_back(a);
-            indices.push_back(d);
-            indices.push_back(c);
-        }
-    }
-
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// ---------------------------------------------------------------------------
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, Entity light)
-        : Layer("RenderLayer"),
-          mPipeline(pipeline),
-          mWorld(world),
-          mLight(light)
-    {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        // 光源方向慢转（0.4 rad/s），让 sphere 在 plane 上的影子跟着转——
-        // 验证自定义 shader 物体仍能正确投影。
-        if (auto* lightXf = mWorld.GetComponent<TransformComponent>(mLight))
-        {
-            const float t  = frame.time.totalSeconds * 0.4f;
-            const float cx = std::cos(t);
-            const float cz = std::sin(t);
-            lightXf->rotation = Orange::Engine::Render::
-                MakeDirectionalLightRotationFromDir(
-                    glm::vec3(cx * 0.6f, -1.0f, cz * 0.6f));
-        }
-
-        // 把当前帧时间喂给 Pipeline，让 LightUbo.frameInfo.x = time，
-        // fresnel.frag 据此跑脉动。
-        mPipeline.SetFrameTime(frame.time.totalSeconds);
-
-        // 每 0.5 秒落一张 PNG 到 captures/sample_08/000.png 起编号 ——
-        // debug-only：fresnel pulseSpeed = 1.8 rad/s，full pulse 周期 ≈ 3.5 s，
-        // 0.5 s 步长能采到一个周期内 7 个均匀相位（每张差大约 51° 相位）。
-        constexpr float kCaptureInterval = 0.5f;
-        if (frame.time.totalSeconds >= mNextCaptureTime)
-        {
-            char fileName[64];
-            std::snprintf(fileName, sizeof(fileName),
-                          "captures/sample_08/%03u.png", mCaptureIndex);
-            mPipeline.RequestCapture(fileName);
-            ++mCaptureIndex;
-            mNextCaptureTime = frame.time.totalSeconds + kCaptureInterval;
-        }
-
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
-        {
-            mPipeline.OnResize(resize->width, resize->height);
-        }
-        return false;
-    }
-
-private:
-    Pipeline&     mPipeline;
-    World&        mWorld;
-    Entity        mLight;
-    float         mNextCaptureTime{0.0f};   // 第 1 张在 t≈0 时刻
-    std::uint32_t mCaptureIndex{0};
-};
-
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -243,7 +246,7 @@ int main()
         return 1;
     }
 
-    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane",  MakePlaneMesh(2.5f));
+    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane", MakePlaneMesh(2.5f));
     auto sphereRes = assets.Insert<MeshAsset>("builtin/sphere", MakeSphereMesh(0.7f, 32, 16));
     if (planeRes.IsErr() || sphereRes.IsErr())
     {
@@ -276,10 +279,10 @@ int main()
     //   Pipeline 当前不打包 per-instance uniform 故 hardcode 在 .frag 里——
     //   等 Material UBO 上线再让 ShaderTemplateDesc 列举它们。
     fresnelDesc.uniforms = {
-        {"uMVP",   MaterialUniformType::Mat4},
+        {"uMVP", MaterialUniformType::Mat4},
         {"uModel", MaterialUniformType::Mat4},
     };
-    fresnelDesc.textureSlots = {};  // fresnel shader 不绑额外纹理（shadowMap 走 set 0 引擎合同）
+    fresnelDesc.textureSlots = {}; // fresnel shader 不绑额外纹理（shadowMap 走 set 0 引擎合同）
     if (auto rt = materials.RegisterTemplate(fresnelDesc); rt.IsErr())
     {
         std::fprintf(stderr,
@@ -342,18 +345,17 @@ int main()
     // 时间脉动易于辨认。
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(50.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(2.5f, 2.0f, 4.5f),
-                               glm::vec3(0.0f, 1.2f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(50.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(2.5f, 2.0f, 4.5f),
+                                         glm::vec3(0.0f, 1.2f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 
     // ---------- Pipeline ----------
     Pipeline pipeline;
-    auto initResult = pipeline.Initialize(host->GetWindow(), assets);
+    auto     initResult = pipeline.Initialize(host->GetWindow(), assets);
     if (initResult.IsErr())
     {
         std::fprintf(stderr,

@@ -33,48 +33,48 @@
 namespace Orange::Engine
 {
 
-class ORANGE_ENGINE_API AppHost
-{
-public:
-    static Result<std::unique_ptr<AppHost>, ResultCode> Create(const AppConfig& config);
+    class ORANGE_ENGINE_API AppHost
+    {
+    public:
+        static Result<std::unique_ptr<AppHost>, ResultCode> Create(const AppConfig& config);
 
-    AppHost(const AppHost&)            = delete;
-    AppHost& operator=(const AppHost&) = delete;
-    AppHost(AppHost&&)                 = delete;
-    AppHost& operator=(AppHost&&)      = delete;
+        AppHost(const AppHost&)            = delete;
+        AppHost& operator=(const AppHost&) = delete;
+        AppHost(AppHost&&)                 = delete;
+        AppHost& operator=(AppHost&&)      = delete;
 
-    ~AppHost();
+        ~AppHost();
 
-    // 跑主循环。返回值约定：0 表示正常退出，非 0 留给后续阶段表示异
-    // 常退出码（当前永远返回 0）。
-    int Run();
+        // 跑主循环。返回值约定：0 表示正常退出，非 0 留给后续阶段表示异
+        // 常退出码（当前永远返回 0）。
+        int Run();
 
-    // 任意 Layer / 外部线程都可以调用，下一帧顶部检测后退出循环。
-    void RequestExit() noexcept;
+        // 任意 Layer / 外部线程都可以调用，下一帧顶部检测后退出循环。
+        void RequestExit() noexcept;
 
-    // Layer / overlay 注入入口。返回的裸指针非拥有，仅作身份引用，
-    // 用于后续 PopLayer / PopOverlay。
-    Layer* PushLayer(std::unique_ptr<Layer> layer);
-    Layer* PushOverlay(std::unique_ptr<Layer> overlay);
+        // Layer / overlay 注入入口。返回的裸指针非拥有，仅作身份引用，
+        // 用于后续 PopLayer / PopOverlay。
+        Layer* PushLayer(std::unique_ptr<Layer> layer);
+        Layer* PushOverlay(std::unique_ptr<Layer> overlay);
 
-    // 按 stack 正向遍历，依次调每个 Layer 的 OnImGui()。这是把引擎托管的
-    // ImGui overlay 接到 LayerStack 的标准胶水：消费者 `pipeline.EnableImGui()`
-    // 后，把本方法接到 `pipeline.SetImGuiSubmit([h]{ h->DispatchImGui(); })`，
-    // Pipeline 每帧在 ImGui NewFrame 与 Render 之间回调它，各 Layer 的
-    // OnImGui 便得到提交时机。AppHost 自身不持 ImGui 状态、不依赖任何
-    // 第三方头——纯转发，签名零 ImGui 类型。
-    void DispatchImGui();
+        // 按 stack 正向遍历，依次调每个 Layer 的 OnImGui()。这是把引擎托管的
+        // ImGui overlay 接到 LayerStack 的标准胶水：消费者 `pipeline.EnableImGui()`
+        // 后，把本方法接到 `pipeline.SetImGuiSubmit([h]{ h->DispatchImGui(); })`，
+        // Pipeline 每帧在 ImGui NewFrame 与 Render 之间回调它，各 Layer 的
+        // OnImGui 便得到提交时机。AppHost 自身不持 ImGui 状态、不依赖任何
+        // 第三方头——纯转发，签名零 ImGui 类型。
+        void DispatchImGui();
 
-    Platform::Window& GetWindow() noexcept;
-    LayerStack&       GetLayerStack() noexcept;
+        Platform::Window& GetWindow() noexcept;
+        LayerStack&       GetLayerStack() noexcept;
 
-private:
-    AppHost();
+    private:
+        AppHost();
 
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
-};
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
-#endif  // ORANGE_ENGINE_APP_APP_HOST_H
+#endif // ORANGE_ENGINE_APP_APP_HOST_H

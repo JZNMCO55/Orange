@@ -22,21 +22,21 @@
 namespace Orange::Editor::Plugin
 {
 
-class AnimatorMiniPreviewPlugin : public IEditorInspectorPlugin
-{
-public:
-    // 按 schema.typeName == "Animator" 字符串比较匹配（与 RegisterAnimator
-    // ComponentSchema 内的 typeName 字面量保持一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class AnimatorMiniPreviewPlugin : public IEditorInspectorPlugin
+    {
+    public:
+        // 按 schema.typeName == "Animator" 字符串比较匹配（与 RegisterAnimator
+        // ComponentSchema 内的 typeName 字面量保持一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // ParseEnd 在默认字段渲染之后追加一行分隔符 + "Mini-Preview" 标签 +
-    // 状态文本（Running / Finished，配色绿 / 灰）。完全只读，不入命令栈。
-    void ParseEnd(EditorHost&                                            host,
-                  Orange::Engine::Entity                                 entity,
-                  const Orange::Editor::Schema::ComponentSchema&         schema,
-                  void*                                                  component) override;
-};
+        // ParseEnd 在默认字段渲染之后追加一行分隔符 + "Mini-Preview" 标签 +
+        // 状态文本（Running / Finished，配色绿 / 灰）。完全只读，不入命令栈。
+        void ParseEnd(EditorHost&                                    host,
+                      Orange::Engine::Entity                         entity,
+                      const Orange::Editor::Schema::ComponentSchema& schema,
+                      void*                                          component) override;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_ANIMATOR_MINI_PREVIEW_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_ANIMATOR_MINI_PREVIEW_PLUGIN_H

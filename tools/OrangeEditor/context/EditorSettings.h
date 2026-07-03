@@ -51,18 +51,18 @@ struct EditorSettings
     float gizmoLineWidthScaleHighlight     = 5.5f;
 
     // ---- Gizmo handle 屏幕长度 / hit threshold（3 gizmo 共享） --------------
-    float gizmoHandleScreenLengthPx        = 90.0f;
-    float gizmoHitThresholdPx              = 8.0f;
+    float gizmoHandleScreenLengthPx = 90.0f;
+    float gizmoHitThresholdPx       = 8.0f;
 
     // ---- Gizmo 配色（线性 RGB + A） ----------------------------------------
     // 默认值 = v0.4 期 hardcode IM_COL32 转 0..1 浮点。
     // X = 红 / Y = 绿 / Z = 蓝（Lumix / Unity / Godot 工业惯例）。
-    glm::vec4 gizmoColorXIdle              {0.863f, 0.235f, 0.235f, 1.0f};
-    glm::vec4 gizmoColorXHighlight         {1.000f, 0.706f, 0.471f, 1.0f};
-    glm::vec4 gizmoColorYIdle              {0.235f, 0.784f, 0.235f, 1.0f};
-    glm::vec4 gizmoColorYHighlight         {0.706f, 1.000f, 0.471f, 1.0f};
-    glm::vec4 gizmoColorZIdle              {0.235f, 0.471f, 0.941f, 1.0f};
-    glm::vec4 gizmoColorZHighlight         {0.549f, 0.784f, 1.000f, 1.0f};
+    glm::vec4 gizmoColorXIdle{0.863f, 0.235f, 0.235f, 1.0f};
+    glm::vec4 gizmoColorXHighlight{1.000f, 0.706f, 0.471f, 1.0f};
+    glm::vec4 gizmoColorYIdle{0.235f, 0.784f, 0.235f, 1.0f};
+    glm::vec4 gizmoColorYHighlight{0.706f, 1.000f, 0.471f, 1.0f};
+    glm::vec4 gizmoColorZIdle{0.235f, 0.471f, 0.941f, 1.0f};
+    glm::vec4 gizmoColorZHighlight{0.549f, 0.784f, 1.000f, 1.0f};
 
     // ---- 视口显示开关（编辑器偏好，退出时随 settings 持久化） --------------
     // 迁自 ScenePanel.cpp 的 file-static（v0.8 整骨遗留的"暂不持久化"状态）。
@@ -80,17 +80,17 @@ struct EditorSettings
     // 引擎 `Save::AutosaveScheduler`（纯时间逻辑 + 节流），编辑器只接线。
     // schema minor 2 新增；老 editor_settings.json 缺字段时保留 struct 默认值。
     bool  autosaveEnabled            = true;
-    float autosaveIntervalSeconds    = 180.0f;  // 周期触发（秒）；clamp ≥10
-    float autosaveMinIntervalSeconds = 30.0f;   // 节流：两次写入最小间隔（秒）
+    float autosaveIntervalSeconds    = 180.0f; // 周期触发（秒）；clamp ≥10
+    float autosaveMinIntervalSeconds = 30.0f;  // 节流：两次写入最小间隔（秒）
 
     // ---- Gizmo snap（gap 报告 §3 P0；schema minor 4） --------------------
     // 拖动 gizmo 时把结果量化到步长。默认关 = 对现有 gizmo 零回归（snap 关时
     // 走原连续拖动路径）。translate=世界网格(米) / rotate=角度(度) / scale=比例步。
     // 量化走 EditorMathUtil::SnapToStep。老文件缺字段走默认。
-    bool  snapEnabled        = false;
-    float snapTranslateStep  = 0.5f;   // 世界米
-    float snapRotateStepDeg  = 15.0f;  // 度
-    float snapScaleStep      = 0.1f;   // 比例
+    bool  snapEnabled       = false;
+    float snapTranslateStep = 0.5f;  // 世界米
+    float snapRotateStepDeg = 15.0f; // 度
+    float snapScaleStep     = 0.1f;  // 比例
 
     // ---- 相机书签 / saved views（gap 报告 §4 #4） ------------------------
     // 快照 viewport 轨道相机的 7 个视图参数（不含 dragging / 灵敏度等 live 输入
@@ -106,16 +106,16 @@ struct EditorSettings
         float     fovYDegrees = 45.0f;
         float     zNear       = 0.1f;
         float     zFar        = 100.0f;
-        bool      valid       = false;  // false = 该槽未保存过，Go 置灰
+        bool      valid       = false; // false = 该槽未保存过，Go 置灰
     };
-    static constexpr int kCameraBookmarkSlots = 4;
+    static constexpr int                             kCameraBookmarkSlots = 4;
     std::array<CameraBookmark, kCameraBookmarkSlots> cameraBookmarks{};
 
     // ---- 最近场景（File → Open Recent，schema minor 5）-------------------
     // 最近打开 / 另存的 .scene.json 路径，front = 最近。持久化进 editor_settings
     // .json（固定 kMaxRecentScenes 槽序列化，空串占位 = 未用）。对齐各编辑器
     // File → Open Recent。
-    static constexpr int kMaxRecentScenes = 10;
+    static constexpr int     kMaxRecentScenes = 10;
     std::vector<std::string> recentScenes;
 
     // 把一个场景路径加进最近列表（去重后置顶 + cap kMaxRecentScenes）。空 path
@@ -127,8 +127,8 @@ struct EditorSettings
 // 反射库）。.material / .scene 等的 Read / Write 都是同款模式。schema
 // v1.0 minor=0，未来加字段时升 minor + 老文件缺字段走默认值。
 void ReadEditorSettings(const Orange::Engine::JsonReader& in,
-                        EditorSettings& out);
+                        EditorSettings&                   out);
 void WriteEditorSettings(Orange::Engine::JsonWriter& out,
-                         const EditorSettings& settings);
+                         const EditorSettings&       settings);
 
-#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_SETTINGS_H
+#endif // ORANGE_EDITOR_CONTEXT_EDITOR_SETTINGS_H

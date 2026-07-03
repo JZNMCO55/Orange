@@ -84,32 +84,32 @@ struct EditorHost;
 namespace Orange::Editor::Plugin
 {
 
-class IEditorAssetInspectorPlugin
-{
-public:
-    virtual ~IEditorAssetInspectorPlugin() = default;
+    class IEditorAssetInspectorPlugin
+    {
+    public:
+        virtual ~IEditorAssetInspectorPlugin() = default;
 
-    IEditorAssetInspectorPlugin()                                                   = default;
-    IEditorAssetInspectorPlugin(const IEditorAssetInspectorPlugin&)                 = delete;
-    IEditorAssetInspectorPlugin& operator=(const IEditorAssetInspectorPlugin&)      = delete;
-    IEditorAssetInspectorPlugin(IEditorAssetInspectorPlugin&&)                      = delete;
-    IEditorAssetInspectorPlugin& operator=(IEditorAssetInspectorPlugin&&)           = delete;
+        IEditorAssetInspectorPlugin()                                              = default;
+        IEditorAssetInspectorPlugin(const IEditorAssetInspectorPlugin&)            = delete;
+        IEditorAssetInspectorPlugin& operator=(const IEditorAssetInspectorPlugin&) = delete;
+        IEditorAssetInspectorPlugin(IEditorAssetInspectorPlugin&&)                 = delete;
+        IEditorAssetInspectorPlugin& operator=(IEditorAssetInspectorPlugin&&)      = delete;
 
-    // 本 plugin 是否处理当前选中资源路径。返回 true 时 InspectorPanel 调度
-    // 本 plugin 的 Draw 钩子接管整段；false 时本 plugin 跳过、继续遍历下一
-    // 条 plugin。
-    //
-    // plugin 自己决定过滤策略——推荐按扩展名后缀比较（与 Lumix
-    // AssetBrowser::IPlugin 风格一致）。空 path（"" / 未选中资源）应返回
-    // false，让默认实体 Inspector 路径接管。
-    virtual bool CanHandle(const std::string& assetPath) const = 0;
+        // 本 plugin 是否处理当前选中资源路径。返回 true 时 InspectorPanel 调度
+        // 本 plugin 的 Draw 钩子接管整段；false 时本 plugin 跳过、继续遍历下一
+        // 条 plugin。
+        //
+        // plugin 自己决定过滤策略——推荐按扩展名后缀比较（与 Lumix
+        // AssetBrowser::IPlugin 风格一致）。空 path（"" / 未选中资源）应返回
+        // false，让默认实体 Inspector 路径接管。
+        virtual bool CanHandle(const std::string& assetPath) const = 0;
 
-    // 完全接管 Inspector 区域绘制。plugin 负责本次 Inspector 内所有 ImGui
-    // 调用（不包含 ImGui::Begin / ImGui::End——那由 InspectorPanel 主流程
-    // 持有）。返回后 InspectorPanel 跳过默认实体 Inspector。
-    virtual void Draw(EditorHost& host, const std::string& assetPath) = 0;
-};
+        // 完全接管 Inspector 区域绘制。plugin 负责本次 Inspector 内所有 ImGui
+        // 调用（不包含 ImGui::Begin / ImGui::End——那由 InspectorPanel 主流程
+        // 持有）。返回后 InspectorPanel 跳过默认实体 Inspector。
+        virtual void Draw(EditorHost& host, const std::string& assetPath) = 0;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_I_EDITOR_ASSET_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_I_EDITOR_ASSET_INSPECTOR_PLUGIN_H

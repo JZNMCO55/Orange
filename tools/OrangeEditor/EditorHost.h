@@ -68,19 +68,19 @@
 // EditorHost.h 的编辑器 TU（尤其避免 vulkan.h → windows.h min/max 宏污染）。
 namespace Orange::Editor::Render
 {
-class ThumbnailService;
+    class ThumbnailService;
 }
 
 struct EditorHost
 {
-    EditorSelection    selection;
-    EditorSceneContext scene;
-    EditorAssetContext assets;
-    EditorCameraState  camera;
-    EditorGizmoState   gizmo;
+    EditorSelection         selection;
+    EditorSceneContext      scene;
+    EditorAssetContext      assets;
+    EditorCameraState       camera;
+    EditorGizmoState        gizmo;
     EditorColliderEditState colliderEdit;
-    EditorSettings     settings;
-    EditorKeybindings  keybindings;
+    EditorSettings          settings;
+    EditorKeybindings       keybindings;
 
     // Edit 模式动画 clip 预览状态（Inspector 的 Play/Pause/scrub → 单 animator
     // 的 edit-time tick）。纯 view 态不序列化；与 PlayState::Play 全量 tick 互斥。
@@ -93,8 +93,8 @@ struct EditorHost
     // entity 子树剪贴板（mEntityClipboard，在 EditorRenderLayer）是另一层级，互不干扰。
     struct ComponentValueClipboard
     {
-        std::string                             typeName;   // 源组件类型；Paste 校验
-        std::vector<std::function<void(void*)>> restorers;  // 各 property 值快照
+        std::string                             typeName;  // 源组件类型；Paste 校验
+        std::vector<std::function<void(void*)>> restorers; // 各 property 值快照
         bool                                    valid = false;
     };
     ComponentValueClipboard componentClipboard;
@@ -201,4 +201,4 @@ struct EditorHost
     std::unique_ptr<Orange::Editor::Render::ThumbnailService> thumbnails;
 };
 
-#endif  // ORANGE_EDITOR_EDITOR_HOST_H
+#endif // ORANGE_EDITOR_EDITOR_HOST_H

@@ -62,17 +62,20 @@
 
 // 前向声明：DrawTimelineToolbar 形参用到 ClipAnimator&，但本头不需要其完整
 // 定义（实现 TU panels/AnimationTimelinePanel.cpp 自行 include ClipAnimator.h）。
-namespace Orange::Engine::Animation { class ClipAnimator; }
+namespace Orange::Engine::Animation
+{
+    class ClipAnimator;
+}
 
 class EditorRenderLayer : public Orange::Engine::Layer
 {
 public:
-    EditorRenderLayer(Orange::Engine::AppHost&             appHost,
-                      Orange::Renderer::RenderDevice&      renderDevice,
-                      Orange::Renderer::IRenderer&         renderer,
-                      VkDescriptorPool                     descriptorPool,
-                      VkDevice                             device,
-                      EditorHost&                          editorHost);
+    EditorRenderLayer(Orange::Engine::AppHost&        appHost,
+                      Orange::Renderer::RenderDevice& renderDevice,
+                      Orange::Renderer::IRenderer&    renderer,
+                      VkDescriptorPool                descriptorPool,
+                      VkDevice                        device,
+                      EditorHost&                     editorHost);
     ~EditorRenderLayer() override;
 
     void OnUpdate(const Orange::Engine::FrameContext& frame) override;
@@ -81,7 +84,7 @@ public:
 private:
     // ---- EditorRenderLayer.cpp -----------------------------------------
     static void BuildDefaultLayoutOnce(ImGuiID dockspaceId);
-    void DrawMainMenuBar();
+    void        DrawMainMenuBar();
     // v0.6.5 c0：独立顶部 toolbar（紧贴 main menu bar 下方），实现在
     // panels/ToolbarPanel.cpp。承载 Save / Play / Pause / Stop / [State]
     // transport controls，居中布局参 Cocos Creator 3.8.8。必须在
@@ -207,12 +210,12 @@ private:
     //              + 后续 plugin registry）。两者均由 main 拥有，layer 持
     //              非拥有引用。EditorHost 命名匹配 Lumix StudioApp / Godot
     //              EditorNode 的工业惯例：editor 自己的 application hub。
-    Orange::Engine::AppHost&         mAppHost;
-    Orange::Renderer::RenderDevice&  mRenderDevice;
-    Orange::Renderer::IRenderer&     mRenderer;
-    VkDescriptorPool                 mDescriptorPool;  // owned by main, not by layer
-    VkDevice                         mDevice;
-    EditorHost&                      mHost;            // owned by main, not by layer
+    Orange::Engine::AppHost&        mAppHost;
+    Orange::Renderer::RenderDevice& mRenderDevice;
+    Orange::Renderer::IRenderer&    mRenderer;
+    VkDescriptorPool                mDescriptorPool; // owned by main, not by layer
+    VkDevice                        mDevice;
+    EditorHost&                     mHost; // owned by main, not by layer
 
     // ---- Scene 面板 off-screen 渲染状态 ----------------------------------
     std::unique_ptr<Orange::Engine::Render::Pipeline> mpScenePipeline;
@@ -230,22 +233,22 @@ private:
     // 直接读写本对象 enable 状态。生命周期对齐 mpScenePipeline（同 layer 析
     // 构序：声明顺序 == 析构反序，provider 在 pipeline 后声明 → 先析构
     // pipeline 摘掉注册再析构 provider 释放 GPU 资源）。
-    std::unique_ptr<EditorGridAuxPassProvider>                mpEditorGridProvider;
+    std::unique_ptr<EditorGridAuxPassProvider> mpEditorGridProvider;
     // GAP-2026-05-15 落地：编辑器轨道相机的 Camera 实例化缓存，每帧
     // DrawScenePanel 重算后 push 给 mpScenePipeline.SetEditorCameraOverride。
     // 必须是稳定地址（pipeline 持非拥有 const* 跨帧），所以做成 layer 成员
     // 而不是栈局部变量。
-    Orange::Engine::Render::Camera                    mEditorCameraOverride{};
-    VkSampler                                         mSceneSampler{VK_NULL_HANDLE};
-    VkDescriptorSet                                   mSceneDescSet{VK_NULL_HANDLE};
-    bool                                              mSceneDescSetDirty{true};
-    std::uint32_t                                     mScenePanelWidth{0};
-    std::uint32_t                                     mScenePanelHeight{0};
+    Orange::Engine::Render::Camera mEditorCameraOverride{};
+    VkSampler                      mSceneSampler{VK_NULL_HANDLE};
+    VkDescriptorSet                mSceneDescSet{VK_NULL_HANDLE};
+    bool                           mSceneDescSetDirty{true};
+    std::uint32_t                  mScenePanelWidth{0};
+    std::uint32_t                  mScenePanelHeight{0};
     // 一次性失败保险（Initialize 失败后不再每帧 retry / spam log）。
-    bool                                              mScenePipelineFailed{false};
+    bool mScenePipelineFailed{false};
     // 单调递增的编辑器运行时间（秒），每帧累加 deltaSeconds，无论 Play/Edit
     // 状态均推进——供 dissolve 等时间驱动 shader 在 Edit 模式下也能预览动画。
-    float                                             mEditorTime{0.0f};
+    float mEditorTime{0.0f};
 
     // 上一帧 GLFW framebuffer size 缓存 —— OnUpdate 每帧 query 当前
     // framebuffer，与缓存比对发现变化即调 `mRenderer.OnResize(...)` 通知
@@ -259,16 +262,16 @@ private:
     // (b) 在某些 Vulkan driver 配置下不报 OUT_OF_DATE（driver 自动 scale /
     // blit 容错过头）→ swap-chain 永远不重建 → 渲染到旧 size image →
     // present 到新 size surface 出现"image 在 surface 左上角 + 剩余空白"。
-    std::uint32_t                                     mLastFramebufferWidth{0};
-    std::uint32_t                                     mLastFramebufferHeight{0};
+    std::uint32_t mLastFramebufferWidth{0};
+    std::uint32_t mLastFramebufferHeight{0};
     // v0.8 EditorSettings：是否显示 Settings 浮动面板（默认不显示，由 View
     // 菜单 / 主 toolbar 切换）。
-    bool                                              mShowSettingsPanel{false};
+    bool mShowSettingsPanel{false};
     // v0.9 Profiler：是否显示 Profiler 面板（默认不显示，由 View 菜单切换）。
-    bool                                              mShowProfilerPanel{false};
+    bool mShowProfilerPanel{false};
     // v1.3.1 Render Settings：是否显示 Render Settings 浮动面板（默认不显示，
     // 由 View 菜单切换）。GAP-2026-05-28-editor-render-settings-panel。
-    bool                                              mShowRenderSettingsPanel{false};
+    bool mShowRenderSettingsPanel{false};
 
     // v1.3.1 ShadowConfig 编辑器档默认值 —— 历史上 ScenePanel.cpp 在
     // EnsureScenePipeline 首次成功后 hardcode 一行 SetShadowConfig(2048 +
@@ -279,7 +282,7 @@ private:
     // normalBias / cascadeCount=3 默认 / debugCascadeTint=false 默认），与
     // ShadowConfig 字段声明顺序对齐（mapResolution 第 1 / pcssLightSize 第 5）。
     // mapResolution=2048 + pcssLightSize=12 = 与历史 hardcode 完全等价的默认。
-    Orange::Engine::Render::ShadowConfig              mShadowConfig{
+    Orange::Engine::Render::ShadowConfig mShadowConfig{
         .mapResolution = 2048,
         .pcssLightSize = 12.0f,
     };
@@ -291,28 +294,28 @@ private:
     // chain reset 时自动失效——layer 析构反序确保 chain 在本指针被访问前未释放）。
     // EnsureScenePipeline 失败 / chain reset 路径下保持 nullptr，UI 段做 null
     // 守卫早退。
-    Orange::Engine::Render::TonemapPass*              mpTonemapPassRef{nullptr};
+    Orange::Engine::Render::TonemapPass* mpTonemapPassRef{nullptr};
     // v1.1 T2：File→Import... 菜单点击时置 true，下次 ApplyPendingImports
     // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
     // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。
-    bool                                              mPendingImportDialog{false};
+    bool mPendingImportDialog{false};
     // File→Import glTF Scene... 菜单（GAP-2026-05-28 G1/G3）：点击置 true，下次
     // ApplyPendingImports 帧首弹 ShowImportFileDialog 拿 .gltf/.glb 路径 → 走
     // scene-level 导入（保留层级 + 每 mesh 不塌平 + 灯光），产出 .scene.json 后
     // 用完即清 flag。区别于 mPendingImportDialog（asset import，塌平成单 mesh）。
-    bool                                              mPendingImportSceneDialog{false};
+    bool mPendingImportSceneDialog{false};
     // File → Open Recent：点最近场景项时设为目标路径 + 触发 SceneOp::Open，
     // ApplyPendingSceneOp 的 Open 分支非空时用它（跳过文件对话框）；用完清空。
-    std::string                                       mPendingOpenScenePath;
+    std::string mPendingOpenScenePath;
     // v0.9 Profiler 帧耗时 ring buffer —— PlotLines 喂数据用。capped 大小 +
     // 写指针 + 当前长度三件套。push 新值时按 ring 节奏覆盖最老值。
-    static constexpr std::size_t                      kProfilerFrameRingCap = 128;
-    std::array<float, kProfilerFrameRingCap>          mProfilerFrameMs{};
-    std::size_t                                       mProfilerFrameWriteIdx{0};
-    std::size_t                                       mProfilerFrameCount{0};
+    static constexpr std::size_t             kProfilerFrameRingCap = 128;
+    std::array<float, kProfilerFrameRingCap> mProfilerFrameMs{};
+    std::size_t                              mProfilerFrameWriteIdx{0};
+    std::size_t                              mProfilerFrameCount{0};
     // v0.8 Keybinding rebind 状态：empty = 不在 rebind；非空 = 等当前 slot
     // 名（"gizmoTranslate" 等）下次按键写回。Esc 取消。
-    std::string                                       mRebindActive;
+    std::string mRebindActive;
 
     // v0.8 Console 面板日志接入（Core::Log → SetLogSink → 本 ring buffer）。
     // sink callback 在任意线程触发，写 buffer 必须持 mutex。读路径（Draw
@@ -323,18 +326,18 @@ public:
     {
         Orange::Engine::Log::Level level;
         std::string                message;
-        std::string                timestamp;  // 入队时刻本地 "HH:MM:SS"
+        std::string                timestamp; // 入队时刻本地 "HH:MM:SS"
     };
 
 private:
     static constexpr std::size_t kLogBufferCap = 1024;
-    std::deque<LogEntry>                              mLogEntries;
-    std::mutex                                        mLogMutex;
+    std::deque<LogEntry>         mLogEntries;
+    std::mutex                   mLogMutex;
     // Console 面板 filter 状态（level 下拉 + 文本框 search）。
-    int                                               mConsoleMinLevel{0};  // Level::Trace 起
-    char                                              mConsoleSearchBuf[128]{};
-    bool                                              mConsoleAutoScroll{true};
-    bool                                              mConsoleShowTimestamp{true};
+    int  mConsoleMinLevel{0}; // Level::Trace 起
+    char mConsoleSearchBuf[128]{};
+    bool mConsoleAutoScroll{true};
+    bool mConsoleShowTimestamp{true};
 
     // 静态 sink callback —— 由 main 注册到 Core::Log。userdata 是 this 指针。
 public:
@@ -344,14 +347,14 @@ public:
 
     // v0.6 c1：上一帧推到 GLFW 的窗口 title 缓存。UpdateWindowTitle 算
     // 新 title 与本字段比对，仅在不同时调 glfwSetWindowTitle。
-    std::string                                       mLastWindowTitle;
+    std::string mLastWindowTitle;
 
     // v1.0.1 c4：上一帧主 viewport 尺寸 —— BuildDefaultLayoutOnce 比对
     // 当前帧 viewport size 与本字段，宽 / 高任一方向相对收缩超阈值时
     // 强制重建默认 dock layout（典型场景：maximize → restore，dock 子节点
     // 按上一帧绝对像素维持会把中央 Scene 挤到 0 宽）。初值 {0,0} 让首帧
     // 走原 "尚未 split" 重建路径。
-    ImVec2                                            mLastViewportSize{0.0f, 0.0f};
+    ImVec2 mLastViewportSize{0.0f, 0.0f};
 
     // ---- Play Mode simulation 运行时（Edit 态均为 nullptr）--------------
     // Play → Stop 时统一销毁（PhysicsWorld reset 即销毁所有 b2 body；
@@ -383,7 +386,7 @@ public:
 
     // Entity Tree 名称过滤（hierarchy gap §4 quick-win #5）：大小写不敏感子串，
     // 空 = 不过滤；非空时仅显示名字匹配 **或子树含匹配** 的节点（保留祖先链）。
-    char                                mEntityTreeFilterBuf[128]{};
+    char mEntityTreeFilterBuf[128]{};
 
     // Entity Tree 可见节点的 DFS 扁平序（hierarchy gap P1 Shift 范围选）：
     // DrawEntityNodeRecursive 每帧把"实际渲染（过滤后 + 未折叠）的节点"按 DFS
@@ -395,15 +398,21 @@ public:
     // Entity 剪贴板（Ctrl+C/V，消费子树序列化基建）：Ctrl+C 把 primary 子树
     // SaveSubtreeToString 存进来，Ctrl+V 用 LoadFromString 粘贴（可多次）。
     // 进程内 in-memory blob；空 = 剪贴板空。
-    std::string                         mEntityClipboard;
+    std::string mEntityClipboard;
 
     // 编辑器侧实体锁定（hierarchy gap §3 P1，防误编辑）：锁定实体不可被
     // viewport pick / tree-click 选中、不可拖拽 reparent；右键菜单 Lock/Unlock
     // 切换。session-only（不序列化）。规模小，vector + 线性查即可。
     std::vector<Orange::Engine::Entity> mLockedEntities;
-    bool IsEntityLocked(Orange::Engine::Entity e) const
+    bool                                IsEntityLocked(Orange::Engine::Entity e) const
     {
-        for (const auto le : mLockedEntities) { if (le == e) { return true; } }
+        for (const auto le : mLockedEntities)
+        {
+            if (le == e)
+            {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -415,9 +424,9 @@ public:
     //   未决前不推进 scheduler（避免覆盖待恢复文件）。
     // mAutosaveRecoverOrigin：残留 autosave 对应的原 scene 路径（可空=未命名）。
     std::unique_ptr<Orange::Engine::Save::AutosaveScheduler> mpAutosave;
-    bool        mAutosaveInitChecked{false};
-    bool        mPendingAutosaveRecovery{false};
-    std::string mAutosaveRecoverOrigin;
+    bool                                                     mAutosaveInitChecked{false};
+    bool                                                     mPendingAutosaveRecovery{false};
+    std::string                                              mAutosaveRecoverOrigin;
 };
 
-#endif  // ORANGE_EDITOR_EDITOR_RENDER_LAYER_H
+#endif // ORANGE_EDITOR_EDITOR_RENDER_LAYER_H

@@ -21,15 +21,15 @@
 namespace Orange::Engine::Asset
 {
 
-class ORANGE_ENGINE_API SoundLoader final : public IAssetLoader<SoundAsset>
-{
-public:
-    SoundLoader()           = default;
-    ~SoundLoader() override = default;
+    class ORANGE_ENGINE_API SoundLoader final : public IAssetLoader<SoundAsset>
+    {
+    public:
+        SoundLoader()           = default;
+        ~SoundLoader() override = default;
 
-    Result<std::unique_ptr<SoundAsset>, ResultCode> Load(std::string_view path) override;
-};
+        Result<std::unique_ptr<SoundAsset>, ResultCode> Load(std::string_view path) override;
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_SOUND_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_SOUND_LOADER_H

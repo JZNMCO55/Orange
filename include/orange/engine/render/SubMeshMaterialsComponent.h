@@ -29,15 +29,15 @@
 namespace Orange::Engine::Render
 {
 
-class MaterialInstance;
+    class MaterialInstance;
 
-struct SubMeshMaterialsComponent
-{
-    // 下标 = mesh sub-mesh 的 materialSlot；元素 = 该 slot 用的 material
-    // 实例（非拥有指针，可为 nullptr 表示该 slot 回退默认材质）。
-    std::vector<MaterialInstance*> slots;
-};
+    struct SubMeshMaterialsComponent
+    {
+        // 下标 = mesh sub-mesh 的 materialSlot；元素 = 该 slot 用的 material
+        // 实例（非拥有指针，可为 nullptr 表示该 slot 回退默认材质）。
+        std::vector<MaterialInstance*> slots;
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_SUB_MESH_MATERIALS_COMPONENT_H
+#endif // ORANGE_ENGINE_RENDER_SUB_MESH_MATERIALS_COMPONENT_H

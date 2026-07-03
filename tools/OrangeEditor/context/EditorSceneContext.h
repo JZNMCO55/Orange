@@ -55,10 +55,10 @@ enum class PlayState : std::uint8_t
 enum class PlayOp : std::uint8_t
 {
     None = 0,
-    EnterPlay,    // Edit  → Play （建 snapshot + 启动 simulation）
-    Pause,        // Play  → Paused
-    Resume,       // Paused → Play
-    Stop,         // Play / 已 Paused → Edit （销毁 simulation + 还原 snapshot）
+    EnterPlay, // Edit  → Play （建 snapshot + 启动 simulation）
+    Pause,     // Play  → Paused
+    Resume,    // Paused → Play
+    Stop,      // Play / 已 Paused → Edit （销毁 simulation + 还原 snapshot）
 };
 
 // v0.6 c2：未保存改动确认对话框的"待执行动作"。
@@ -77,9 +77,9 @@ enum class PlayOp : std::uint8_t
 enum class PendingCloseAction : std::uint8_t
 {
     None = 0,
-    Exit,       // Esc / 窗口 × → RequestExit
-    NewScene,   // File>New → pendingSceneOp = New
-    OpenScene,  // File>Open → pendingSceneOp = Open
+    Exit,      // Esc / 窗口 × → RequestExit
+    NewScene,  // File>New → pendingSceneOp = New
+    OpenScene, // File>Open → pendingSceneOp = Open
 };
 
 struct EditorSceneContext
@@ -122,8 +122,8 @@ struct EditorSceneContext
     // EditorRenderLayer::ApplyPendingPlayOp 统一处理。playSnapshotPath
     // 保存 Edit→Play 时的 World 序列化文件路径，Stop 时从该路径反序列化
     // 恢复（用 temp dir 下唯一文件名，editor 退出时清理）。
-    PlayState   playState        = PlayState::Edit;
-    PlayOp      pendingPlayOp    = PlayOp::None;
+    PlayState   playState     = PlayState::Edit;
+    PlayOp      pendingPlayOp = PlayOp::None;
     std::string playSnapshotPath;
 
     // v0.6 c2：未保存确认 popup 状态。pendingCloseAction != None 时下一
@@ -139,4 +139,4 @@ struct EditorSceneContext
     std::string requestedOpenScenePath;
 };
 
-#endif  // ORANGE_EDITOR_CONTEXT_EDITOR_SCENE_CONTEXT_H
+#endif // ORANGE_EDITOR_CONTEXT_EDITOR_SCENE_CONTEXT_H

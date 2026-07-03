@@ -69,7 +69,6 @@ using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MaterialInstance;
@@ -78,6 +77,7 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::LayerComponent;
 using Orange::Engine::Scene::LayerInfo;
 using Orange::Engine::Scene::TransformComponent;
@@ -87,237 +87,260 @@ namespace Phys = Orange::Engine::Physics;
 namespace
 {
 
-constexpr const char* kBackgroundLayerId = "background";
-constexpr const char* kForegroundLayerId = "foreground";
+    constexpr const char* kBackgroundLayerId = "background";
+    constexpr const char* kForegroundLayerId = "foreground";
 
-// 翻转间隔：3 秒一次切换；视觉上 visible 3s → hidden 3s → ... 循环。
-constexpr float kToggleIntervalSeconds = 3.0f;
+    // 翻转间隔：3 秒一次切换；视觉上 visible 3s → hidden 3s → ... 循环。
+    constexpr float kToggleIntervalSeconds = 3.0f;
 
-// ---------- mesh 工厂（与其它 sample 同布局，含 UV）----------
-std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
-{
-    std::vector<VertexPosition3> positions = {
-        {-halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f,  halfSize},
-        {-halfSize, 0.0f,  halfSize},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-std::unique_ptr<MeshAsset> MakeCubeMesh(float halfSize)
-{
-    const float h = halfSize;
-    // 六面 24 顶点（每面 4 个）+ UV，让 textured / dissolve 等 UV-aware
-    // material 在 cube 上有合理 mapping。
-    std::vector<VertexPosition3> positions = {
-        // +X
-        { h, -h, -h}, { h,  h, -h}, { h,  h,  h}, { h, -h,  h},
-        // -X
-        {-h, -h,  h}, {-h,  h,  h}, {-h,  h, -h}, {-h, -h, -h},
-        // +Y
-        {-h,  h, -h}, {-h,  h,  h}, { h,  h,  h}, { h,  h, -h},
-        // -Y
-        {-h, -h,  h}, {-h, -h, -h}, { h, -h, -h}, { h, -h,  h},
-        // +Z
-        {-h, -h,  h}, { h, -h,  h}, { h,  h,  h}, {-h,  h,  h},
-        // -Z
-        { h, -h, -h}, {-h, -h, -h}, {-h,  h, -h}, { h,  h, -h},
-    };
-    std::vector<VertexUV2> uvs;
-    uvs.reserve(positions.size());
-    for (std::size_t f = 0; f < 6; ++f)
+    // ---------- mesh 工厂（与其它 sample 同布局，含 UV）----------
+    std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
     {
-        uvs.push_back({0.0f, 0.0f});
-        uvs.push_back({1.0f, 0.0f});
-        uvs.push_back({1.0f, 1.0f});
-        uvs.push_back({0.0f, 1.0f});
+        std::vector<VertexPosition3> positions = {
+            {-halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, halfSize},
+            {-halfSize, 0.0f, halfSize},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions),
+                                                                         std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
-    std::vector<std::uint32_t> indices;
-    indices.reserve(36);
-    for (std::uint32_t face = 0; face < 6; ++face)
-    {
-        const std::uint32_t base = face * 4;
-        // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
-        // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
-        indices.push_back(base + 0); indices.push_back(base + 1); indices.push_back(base + 2);
-        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 3);
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    std::unique_ptr<MeshAsset> MakeCubeMesh(float halfSize)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
+        const float h = halfSize;
+        // 六面 24 顶点（每面 4 个）+ UV，让 textured / dissolve 等 UV-aware
+        // material 在 cube 上有合理 mapping。
+        std::vector<VertexPosition3> positions = {
+            // +X
+            {h, -h, -h},
+            {h, h, -h},
+            {h, h, h},
+            {h, -h, h},
+            // -X
+            {-h, -h, h},
+            {-h, h, h},
+            {-h, h, -h},
+            {-h, -h, -h},
+            // +Y
+            {-h, h, -h},
+            {-h, h, h},
+            {h, h, h},
+            {h, h, -h},
+            // -Y
+            {-h, -h, h},
+            {-h, -h, -h},
+            {h, -h, -h},
+            {h, -h, h},
+            // +Z
+            {-h, -h, h},
+            {h, -h, h},
+            {h, h, h},
+            {-h, h, h},
+            // -Z
+            {h, -h, -h},
+            {-h, -h, -h},
+            {-h, h, -h},
+            {h, h, -h},
+        };
+        std::vector<VertexUV2> uvs;
+        uvs.reserve(positions.size());
+        for (std::size_t f = 0; f < 6; ++f)
         {
-            const float u    = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi  = u * glm::two_pi<float>();
-            const float sinP = std::sin(phi);
-            const float cosP = std::cos(phi);
-            positions.push_back({radius * sinT * cosP,
-                                 radius * cosT,
-                                 radius * sinT * sinP});
-            uvs.push_back({u, 1.0f - v});
+            uvs.push_back({0.0f, 0.0f});
+            uvs.push_back({1.0f, 0.0f});
+            uvs.push_back({1.0f, 1.0f});
+            uvs.push_back({0.0f, 1.0f});
         }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
+        std::vector<std::uint32_t> indices;
+        indices.reserve(36);
+        for (std::uint32_t face = 0; face < 6; ++face)
         {
-            const std::uint32_t a = i       * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i       * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            const std::uint32_t base = face * 4;
+            // CCW winding 与 Pipeline FrontFace=CCW + CullMode=Back 对齐
+            // （参 GAP-2026-05-22-samples-cube-mesh-winding-bug）。
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
         }
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// ---------- VisibilityToggleLayer ----------
-//
-// 每帧累计 dt；超过 kToggleIntervalSeconds 时翻转 foreground.visible，
-// 然后调一次 ApplyLayerVisibility 把状态同步到 PhysicsWorld。
-class VisibilityToggleLayer : public Layer
-{
-public:
-    VisibilityToggleLayer(WorldPartition& partition,
-                          const World& world,
-                          Phys::PhysicsWorld& physics)
-        : Layer("VisibilityToggleLayer")
-        , mPartition(partition)
-        , mWorld(world)
-        , mPhysics(physics)
-    {
-        // 启动期同步一次——保证 foreground.visible 与 partition manifest
-        // 的 initial 状态一致下发到所有 body 上。
-        Phys::ApplyLayerVisibility(mWorld, mPartition, mPhysics);
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    void OnUpdate(const FrameContext& frame) override
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        mAccum += frame.time.deltaSeconds;
-        if (mAccum < kToggleIntervalSeconds)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            return;
-        }
-        mAccum -= kToggleIntervalSeconds;
-
-        const bool wasVisible = mPartition.IsLayerVisible(kForegroundLayerId);
-        const bool now        = !wasVisible;
-        mPartition.SetLayerVisible(kForegroundLayerId, now);
-        Phys::ApplyLayerVisibility(mWorld, mPartition, mPhysics);
-
-        std::fprintf(stdout,
-                     "[layer_partition_demo] toggled foreground.visible -> %s\n",
-                     now ? "true" : "false");
-        std::fflush(stdout);
-    }
-
-private:
-    WorldPartition&     mPartition;
-    const World&        mWorld;
-    Phys::PhysicsWorld& mPhysics;
-    float               mAccum{0.0f};
-};
-
-// ---------- PhysicsLayer：标准 Step + sync 路径 ----------
-class PhysicsLayer : public Layer
-{
-public:
-    PhysicsLayer(Phys::PhysicsWorld& phys, World& ecs,
-                 std::vector<std::pair<Entity, Phys::BodyHandle>> dynamicBodies)
-        : Layer("PhysicsLayer")
-        , mPhys(phys)
-        , mEcs(ecs)
-        , mDynamicBodies(std::move(dynamicBodies))
-    {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        float dt = frame.time.deltaSeconds;
-        if (dt > 1.0f / 30.0f)
-        {
-            dt = 1.0f / 30.0f;
-        }
-        mPhys.Step(dt);
-
-        for (auto& [entity, body] : mDynamicBodies)
-        {
-            if (!body.IsValid())
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
             {
-                continue;
-            }
-            const auto bxf = mPhys.GetBodyTransform(body);
-            if (auto* xf = mEcs.GetComponent<TransformComponent>(entity))
-            {
-                xf->position.x = bxf.position.x;
-                xf->position.y = bxf.position.y;
+                const float u    = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi  = u * glm::two_pi<float>();
+                const float sinP = std::sin(phi);
+                const float cosP = std::cos(phi);
+                positions.push_back({radius * sinT * cosP,
+                                     radius * cosT,
+                                     radius * sinT * sinP});
+                uvs.push_back({u, 1.0f - v});
             }
         }
-    }
-
-private:
-    Phys::PhysicsWorld&                              mPhys;
-    World&                                           mEcs;
-    std::vector<std::pair<Entity, Phys::BodyHandle>> mDynamicBodies;
-};
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
-    {
-    }
-
-    void OnUpdate(const FrameContext& /*frame*/) override
-    {
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
-        return false;
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-};
+    // ---------- VisibilityToggleLayer ----------
+    //
+    // 每帧累计 dt；超过 kToggleIntervalSeconds 时翻转 foreground.visible，
+    // 然后调一次 ApplyLayerVisibility 把状态同步到 PhysicsWorld。
+    class VisibilityToggleLayer : public Layer
+    {
+    public:
+        VisibilityToggleLayer(WorldPartition&     partition,
+                              const World&        world,
+                              Phys::PhysicsWorld& physics)
+            : Layer("VisibilityToggleLayer"), mPartition(partition), mWorld(world), mPhysics(physics)
+        {
+            // 启动期同步一次——保证 foreground.visible 与 partition manifest
+            // 的 initial 状态一致下发到所有 body 上。
+            Phys::ApplyLayerVisibility(mWorld, mPartition, mPhysics);
+        }
 
-}  // namespace
+        void OnUpdate(const FrameContext& frame) override
+        {
+            mAccum += frame.time.deltaSeconds;
+            if (mAccum < kToggleIntervalSeconds)
+            {
+                return;
+            }
+            mAccum -= kToggleIntervalSeconds;
+
+            const bool wasVisible = mPartition.IsLayerVisible(kForegroundLayerId);
+            const bool now        = !wasVisible;
+            mPartition.SetLayerVisible(kForegroundLayerId, now);
+            Phys::ApplyLayerVisibility(mWorld, mPartition, mPhysics);
+
+            std::fprintf(stdout,
+                         "[layer_partition_demo] toggled foreground.visible -> %s\n",
+                         now ? "true" : "false");
+            std::fflush(stdout);
+        }
+
+    private:
+        WorldPartition&     mPartition;
+        const World&        mWorld;
+        Phys::PhysicsWorld& mPhysics;
+        float               mAccum{0.0f};
+    };
+
+    // ---------- PhysicsLayer：标准 Step + sync 路径 ----------
+    class PhysicsLayer : public Layer
+    {
+    public:
+        PhysicsLayer(Phys::PhysicsWorld& phys, World& ecs,
+                     std::vector<std::pair<Entity, Phys::BodyHandle>> dynamicBodies)
+            : Layer("PhysicsLayer"), mPhys(phys), mEcs(ecs), mDynamicBodies(std::move(dynamicBodies))
+        {
+        }
+
+        void OnUpdate(const FrameContext& frame) override
+        {
+            float dt = frame.time.deltaSeconds;
+            if (dt > 1.0f / 30.0f)
+            {
+                dt = 1.0f / 30.0f;
+            }
+            mPhys.Step(dt);
+
+            for (auto& [entity, body] : mDynamicBodies)
+            {
+                if (!body.IsValid())
+                {
+                    continue;
+                }
+                const auto bxf = mPhys.GetBodyTransform(body);
+                if (auto* xf = mEcs.GetComponent<TransformComponent>(entity))
+                {
+                    xf->position.x = bxf.position.x;
+                    xf->position.y = bxf.position.y;
+                }
+            }
+        }
+
+    private:
+        Phys::PhysicsWorld&                              mPhys;
+        World&                                           mEcs;
+        std::vector<std::pair<Entity, Phys::BodyHandle>> mDynamicBodies;
+    };
+
+    class RenderLayer : public Layer
+    {
+    public:
+        RenderLayer(Pipeline& pipeline, World& world)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
+        {
+        }
+
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            mPipeline.Render(mWorld);
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+    };
+
+} // namespace
 
 int main(int /*argc*/, char** /*argv*/)
 {
@@ -343,8 +366,8 @@ int main(int /*argc*/, char** /*argv*/)
         return 1;
     }
 
-    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane",  MakePlaneMesh(3.0f));
-    auto cubeRes   = assets.Insert<MeshAsset>("builtin/cube",   MakeCubeMesh(0.4f));
+    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane", MakePlaneMesh(3.0f));
+    auto cubeRes   = assets.Insert<MeshAsset>("builtin/cube", MakeCubeMesh(0.4f));
     auto sphereRes = assets.Insert<MeshAsset>("builtin/sphere", MakeSphereMesh(0.5f, 32, 16));
     if (planeRes.IsErr() || cubeRes.IsErr() || sphereRes.IsErr())
     {
@@ -378,16 +401,16 @@ int main(int /*argc*/, char** /*argv*/)
     // 走 SaveSplit / LoadSplit 路径，留空也行，但顺手填上让"manifest
     // 写盘后什么样"对验收者直观。
     partition.AddLayer(LayerInfo{
-        .id = kBackgroundLayerId,
+        .id          = kBackgroundLayerId,
         .displayName = "Background",
-        .visible = true,
-        .source = "background.scene.json",
+        .visible     = true,
+        .source      = "background.scene.json",
     });
     partition.AddLayer(LayerInfo{
-        .id = kForegroundLayerId,
+        .id          = kForegroundLayerId,
         .displayName = "Foreground",
-        .visible = true,
-        .source = "foreground.scene.json",
+        .visible     = true,
+        .source      = "foreground.scene.json",
     });
 
     // ---------- background layer entities ----------
@@ -438,12 +461,11 @@ int main(int /*argc*/, char** /*argv*/)
 
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(2.5f, 2.5f, 5.0f),
-                               glm::vec3(0.0f, 0.5f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(2.5f, 2.5f, 5.0f),
+                                         glm::vec3(0.0f, 0.5f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
     partition.SetLayerOf(world, camEntity, kBackgroundLayerId);
@@ -457,9 +479,9 @@ int main(int /*argc*/, char** /*argv*/)
         rb.type            = Phys::BodyType::Static;
         rb.initialPosition = {0.0f, -0.75f};
         Phys::ColliderComponent col;
-        col.shape       = Phys::BoxDesc{{50.0f, 0.25f}, {0.0f, 0.0f}};
-        col.friction    = 0.6f;
-        col.restitution = 0.0f;
+        col.shape                   = Phys::BoxDesc{{50.0f, 0.25f}, {0.0f, 0.0f}};
+        col.friction                = 0.6f;
+        col.restitution             = 0.0f;
         Phys::BodyHandle groundBody = physWorld.AddBody(rb, col);
         if (!groundBody.IsValid())
         {
@@ -478,13 +500,13 @@ int main(int /*argc*/, char** /*argv*/)
     // 二者既挂 RenderableComponent（视觉）也挂 RigidBodyComponent
     // （物理）+ LayerComponent{"foreground"}。
     std::vector<std::pair<Entity, Phys::BodyHandle>> foregroundBodies;
-    const std::array<glm::vec3, 2> spawnPositions = {
+    const std::array<glm::vec3, 2>                   spawnPositions = {
         glm::vec3{0.6f, 4.0f, 0.0f},
         glm::vec3{1.5f, 5.0f, 0.0f},
     };
     for (const auto& spawn : spawnPositions)
     {
-        Entity boxEntity = world.CreateEntity();
+        Entity             boxEntity = world.CreateEntity();
         TransformComponent xf{};
         xf.position = spawn;
         world.AddComponent(boxEntity, xf);

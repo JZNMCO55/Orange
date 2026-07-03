@@ -24,45 +24,45 @@ struct EditorHost;
 
 namespace Orange::Engine::Render
 {
-class Pipeline;
+    class Pipeline;
 }
 
 namespace Orange::Editor::Mcp
 {
 
-// get_editor_log 的一行日志（编辑器 Console ring buffer 的投影）。level 是
-// Orange::Engine::Log::Level 的 int 值（0=Trace 起）。
-struct McpLogLine
-{
-    int         level;
-    std::string timestamp;
-    std::string message;
-};
+    // get_editor_log 的一行日志（编辑器 Console ring buffer 的投影）。level 是
+    // Orange::Engine::Log::Level 的 int 值（0=Trace 起）。
+    struct McpLogLine
+    {
+        int         level;
+        std::string timestamp;
+        std::string message;
+    };
 
-// 日志读取回调：编辑器层（EditorRenderLayer）注入，读其 mLogEntries ring buffer，
-// 返回最近不超过 maxLines 条、level>=minLevel 的日志（旧→新）。空回调 =
-// get_editor_log 返回空数组（无日志接入时的降级）。在主线程帧末被调用。
-using McpLogReader = std::function<std::vector<McpLogLine>(int maxLines, int minLevel)>;
+    // 日志读取回调：编辑器层（EditorRenderLayer）注入，读其 mLogEntries ring buffer，
+    // 返回最近不超过 maxLines 条、level>=minLevel 的日志（旧→新）。空回调 =
+    // get_editor_log 返回空数组（无日志接入时的降级）。在主线程帧末被调用。
+    using McpLogReader = std::function<std::vector<McpLogLine>(int maxLines, int minLevel)>;
 
-// 执行一条 MCP 命令。requestJson = 单行 NDJSON 请求；返回单行 NDJSON 响应。
-// 永不抛异常（内部全兜底）。
-//
-// viewportPipeline = 编辑器当前 viewport 离屏 Pipeline（EditorRenderLayer 的
-// mpScenePipeline），供 capture_viewport 回读像素；其它命令不用，可为 nullptr。
-// logReader = 注入的日志读取回调（get_editor_log 用），可为空。
-std::string ExecuteMcpCommand(const std::string&                  requestJson,
-                              EditorHost&                         host,
-                              Orange::Engine::Render::Pipeline*   viewportPipeline,
-                              const McpLogReader&                 logReader = {});
+    // 执行一条 MCP 命令。requestJson = 单行 NDJSON 请求；返回单行 NDJSON 响应。
+    // 永不抛异常（内部全兜底）。
+    //
+    // viewportPipeline = 编辑器当前 viewport 离屏 Pipeline（EditorRenderLayer 的
+    // mpScenePipeline），供 capture_viewport 回读像素；其它命令不用，可为 nullptr。
+    // logReader = 注入的日志读取回调（get_editor_log 用），可为空。
+    std::string ExecuteMcpCommand(const std::string&                requestJson,
+                                  EditorHost&                       host,
+                                  Orange::Engine::Render::Pipeline* viewportPipeline,
+                                  const McpLogReader&               logReader = {});
 
-// undo-group 护栏 —— 每帧（命令 drain 前）在主线程调用，与队列是否有命令无关。
-// 若 begin_undo_group 开着的组满足任一闭合条件就自动 EndGroup + 清会话态：
-//   * 开组已超过 30s（AI 忘调 end_undo_group）；
-//   * 开组的那个 MCP 客户端已断开 / 被新连接替换；
-//   * 命令栈已被场景切换（New/Open/Stop）Clear（InGroup() 变 false）。
-// 防 AI 忘关把命令栈长期卡在组内（ADR-020 §4.E 超时 / 断连护栏）。无开组时 no-op。
-void TickMcpUndoGroupGuard(EditorHost& host);
+    // undo-group 护栏 —— 每帧（命令 drain 前）在主线程调用，与队列是否有命令无关。
+    // 若 begin_undo_group 开着的组满足任一闭合条件就自动 EndGroup + 清会话态：
+    //   * 开组已超过 30s（AI 忘调 end_undo_group）；
+    //   * 开组的那个 MCP 客户端已断开 / 被新连接替换；
+    //   * 命令栈已被场景切换（New/Open/Stop）Clear（InGroup() 变 false）。
+    // 防 AI 忘关把命令栈长期卡在组内（ADR-020 §4.E 超时 / 断连护栏）。无开组时 no-op。
+    void TickMcpUndoGroupGuard(EditorHost& host);
 
-}  // namespace Orange::Editor::Mcp
+} // namespace Orange::Editor::Mcp
 
-#endif  // ORANGE_EDITOR_MCP_MCP_COMMAND_HANDLER_H
+#endif // ORANGE_EDITOR_MCP_MCP_COMMAND_HANDLER_H

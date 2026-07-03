@@ -79,7 +79,6 @@ using Orange::Engine::Asset::ShaderAsset;
 using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MakeDirectionalLightRotationFromDir;
@@ -89,159 +88,183 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
 
-// UV-sphere（与 sample 16 同构造）
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    // UV-sphere（与 sample 16 同构造）
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            const float u   = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi = u * glm::two_pi<float>();
-            positions.push_back({radius * sinT * std::cos(phi),
-                                 radius * cosT,
-                                 radius * sinT * std::sin(phi)});
-            uvs.push_back({u, 1.0f - v});
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
+            {
+                const float u   = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi = u * glm::two_pi<float>();
+                positions.push_back({radius * sinT * std::cos(phi),
+                                     radius * cosT,
+                                     radius * sinT * std::sin(phi)});
+                uvs.push_back({u, 1.0f - v});
+            }
         }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            const std::uint32_t a = i * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-// 大 XZ 平面 ground（halfExtent=50 → 100×100 单位）—— 故意远 > ±10 box，让 C1
-// fallback (--no-csm) 在远处直接漏阴影 / CSM 默认路径远处仍有阴影的对比戏剧化。
-std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
-{
-    const float h = halfExtent;
-    std::vector<VertexPosition3> positions = {
-        {-h, 0.0f,  h}, { h, 0.0f,  h}, { h, 0.0f, -h}, {-h, 0.0f, -h},
+    // 大 XZ 平面 ground（halfExtent=50 → 100×100 单位）—— 故意远 > ±10 box，让 C1
+    // fallback (--no-csm) 在远处直接漏阴影 / CSM 默认路径远处仍有阴影的对比戏剧化。
+    std::unique_ptr<MeshAsset> MakeFloorMesh(float halfExtent)
+    {
+        const float                  h         = halfExtent;
+        std::vector<VertexPosition3> positions = {
+            {-h, 0.0f, h},
+            {h, 0.0f, h},
+            {h, 0.0f, -h},
+            {-h, 0.0f, -h},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    class RenderLayer : public Layer
+    {
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
+                    std::string capturePath, bool motionEnabled, Entity cameraEntity)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
+              mCapturePath(std::move(capturePath)),
+              mMotionEnabled(motionEnabled),
+              mCameraEntity(cameraEntity) {}
+
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            // 运动相机：每帧改 Camera.view（sin-wave 左右 + 前后摇摆）。capture 模式
+            // 在 kCaptureFrame 那一帧的位置可复现（mFrame 是单调递增）；交互模式肉眼
+            // 看 shadow edge 跟 caster 稳定不抖 = texel snap anti-shimmer 工作。
+            if (mMotionEnabled)
+            {
+                const float t     = static_cast<float>(mFrame) * (1.0f / 60.0f); // 假设 ~60fps
+                const float swayX = std::sin(t * 0.7f) * 6.0f;
+                const float swayZ = std::cos(t * 0.5f) * 4.0f;
+                auto&       cam   = mWorld.Registry().get<Camera>(World::ToEntt(mCameraEntity));
+                cam.view          = glm::lookAt(glm::vec3(swayX, 3.5f, -6.0f + swayZ),
+                                                glm::vec3(swayX * 0.3f, 0.5f, 30.0f),
+                                                glm::vec3(0.0f, 1.0f, 0.0f));
+            }
+
+            if (!mCapturePath.empty() && mFrame == kCaptureFrame)
+            {
+                mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
+            }
+            mPipeline.Render(mWorld);
+            if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
+            {
+                mWindow.RequestClose();
+            }
+            ++mFrame;
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        static constexpr std::uint64_t kCaptureFrame = 8; // 无 TAA，少预热几帧即可
+        Pipeline&                      mPipeline;
+        World&                         mWorld;
+        Platform::Window&              mWindow;
+        std::string                    mCapturePath;
+        bool                           mMotionEnabled{false};
+        Entity                         mCameraEntity{};
+        std::uint64_t                  mFrame{0};
     };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions), std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, Platform::Window& window,
-                std::string capturePath, bool motionEnabled, Entity cameraEntity)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mWindow(window),
-          mCapturePath(std::move(capturePath)),
-          mMotionEnabled(motionEnabled),
-          mCameraEntity(cameraEntity) {}
-
-    void OnUpdate(const FrameContext& /*frame*/) override
+    // 在 (x, z) 放一个落在地面上的球 caster（半径 r，球心 y=r）。
+    Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
+                       MaterialInstance* inst, float x, float z, float r)
     {
-        // 运动相机：每帧改 Camera.view（sin-wave 左右 + 前后摇摆）。capture 模式
-        // 在 kCaptureFrame 那一帧的位置可复现（mFrame 是单调递增）；交互模式肉眼
-        // 看 shadow edge 跟 caster 稳定不抖 = texel snap anti-shimmer 工作。
-        if (mMotionEnabled)
-        {
-            const float t = static_cast<float>(mFrame) * (1.0f / 60.0f);   // 假设 ~60fps
-            const float swayX = std::sin(t * 0.7f) * 6.0f;
-            const float swayZ = std::cos(t * 0.5f) * 4.0f;
-            auto& cam = mWorld.Registry().get<Camera>(World::ToEntt(mCameraEntity));
-            cam.view = glm::lookAt(glm::vec3(swayX, 3.5f, -6.0f + swayZ),
-                                   glm::vec3(swayX * 0.3f, 0.5f, 30.0f),
-                                   glm::vec3(0.0f, 1.0f, 0.0f));
-        }
-
-        if (!mCapturePath.empty() && mFrame == kCaptureFrame)
-        {
-            mPipeline.RequestCapture(std::filesystem::path(mCapturePath));
-        }
-        mPipeline.Render(mWorld);
-        if (!mCapturePath.empty() && mFrame >= kCaptureFrame + 1)
-        {
-            mWindow.RequestClose();
-        }
-        ++mFrame;
+        Entity             e = world.CreateEntity();
+        TransformComponent xf{};
+        xf.position = {x, r, z};
+        world.AddComponent(e, xf);
+        RenderableComponent rc;
+        rc.mesh             = mesh;
+        rc.materialInstance = inst;
+        rc.castsShadow      = true;
+        world.AddComponent(e, rc);
+        return e;
     }
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
-        {
-            mPipeline.OnResize(resize->width, resize->height);
-        }
-        return false;
-    }
-
-private:
-    static constexpr std::uint64_t kCaptureFrame = 8;  // 无 TAA，少预热几帧即可
-    Pipeline&         mPipeline;
-    World&            mWorld;
-    Platform::Window& mWindow;
-    std::string       mCapturePath;
-    bool              mMotionEnabled{false};
-    Entity            mCameraEntity{};
-    std::uint64_t     mFrame{0};
-};
-
-// 在 (x, z) 放一个落在地面上的球 caster（半径 r，球心 y=r）。
-Entity SpawnSphere(World& world, AssetHandle<MeshAsset> mesh,
-                   MaterialInstance* inst, float x, float z, float r)
-{
-    Entity e = world.CreateEntity();
-    TransformComponent xf{};
-    xf.position = {x, r, z};
-    world.AddComponent(e, xf);
-    RenderableComponent rc;
-    rc.mesh             = mesh;
-    rc.materialInstance = inst;
-    rc.castsShadow      = true;
-    world.AddComponent(e, rc);
-    return e;
-}
-
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv)
 {
     std::string capturePath;
     bool        forceSingleCascade = false;
-    float       pcssLightSize       = 0.0f;
-    bool        tintEnabled         = false;
-    bool        motionEnabled       = false;
+    float       pcssLightSize      = 0.0f;
+    bool        tintEnabled        = false;
+    bool        motionEnabled      = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
-        if (a == "--capture" && i + 1 < argc) { capturePath = argv[i + 1]; ++i; }
-        else if (a == "--no-csm")             { forceSingleCascade = true; }
-        else if (a == "--tint")               { tintEnabled = true; }
-        else if (a == "--motion")             { motionEnabled = true; }
+        if (a == "--capture" && i + 1 < argc)
+        {
+            capturePath = argv[i + 1];
+            ++i;
+        }
+        else if (a == "--no-csm")
+        {
+            forceSingleCascade = true;
+        }
+        else if (a == "--tint")
+        {
+            tintEnabled = true;
+        }
+        else if (a == "--motion")
+        {
+            motionEnabled = true;
+        }
         else if (a == "--pcss" && i + 1 < argc)
         {
             pcssLightSize = static_cast<float>(std::atof(argv[i + 1]));
@@ -253,8 +276,14 @@ int main(int argc, char** argv)
     {
         std::string title = "OrangeEngine - 18 csm_large_scene (";
         title += forceSingleCascade ? "C1 fallback cascadeCount=1" : "CSM cascadeCount=3";
-        if (tintEnabled)   { title += " | tint"; }
-        if (motionEnabled) { title += " | motion"; }
+        if (tintEnabled)
+        {
+            title += " | tint";
+        }
+        if (motionEnabled)
+        {
+            title += " | motion";
+        }
         title += ")";
         cfg.window.title = title;
     }
@@ -281,7 +310,7 @@ int main(int argc, char** argv)
     // 球 caster 半径 1.0（远小于 cascade 0 extent，便于看锐边）；ground 半边
     // 50 单位（100×100，远 > ±10 box 让 C1 fallback 漏阴影戏剧化）。
     auto sphereRes = assets.Insert<MeshAsset>("builtin/sphere", MakeSphereMesh(1.0f, 32, 16));
-    auto floorRes  = assets.Insert<MeshAsset>("builtin/floor",  MakeFloorMesh(50.0f));
+    auto floorRes  = assets.Insert<MeshAsset>("builtin/floor", MakeFloorMesh(50.0f));
     if (sphereRes.IsErr() || floorRes.IsErr())
     {
         std::fprintf(stderr, "Insert<MeshAsset> failed\n");
@@ -297,14 +326,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    World world;
+    World                                          world;
     std::vector<std::unique_ptr<MaterialInstance>> instances;
 
     auto makePbr = [&](glm::vec4 baseColor, float metallic, float roughness)
         -> MaterialInstance*
     {
         auto inst = materials.CreateInstance("pbr");
-        if (!inst) { return nullptr; }
+        if (!inst)
+        {
+            return nullptr;
+        }
         inst->SetUniform("uBaseColor", baseColor);
         inst->SetUniform("uMRA", glm::vec4(metallic, roughness, 1.0f, 0.0f));
         instances.push_back(std::move(inst));
@@ -337,16 +369,16 @@ int main(int argc, char** argv)
     //   z=22  → 应落 cascade 1
     //   z=40  → 应落 cascade 1/2 边界
     //   z=70  → 应落 cascade 2（远，C1 fallback 直接漏）
-    SpawnSphere(world, sphere, sphereMat, -1.5f,  3.0f, 1.0f);
-    SpawnSphere(world, sphere, sphereMat,  1.5f, 10.0f, 1.0f);
+    SpawnSphere(world, sphere, sphereMat, -1.5f, 3.0f, 1.0f);
+    SpawnSphere(world, sphere, sphereMat, 1.5f, 10.0f, 1.0f);
     SpawnSphere(world, sphere, sphereMat, -1.5f, 22.0f, 1.0f);
-    SpawnSphere(world, sphere, sphereMat,  1.5f, 40.0f, 1.0f);
+    SpawnSphere(world, sphere, sphereMat, 1.5f, 40.0f, 1.0f);
     SpawnSphere(world, sphere, sphereMat, -1.5f, 70.0f, 1.0f);
 
     // 单一 directional light：太阳类，从右上前斜下，绕 +Y 倾斜 30° 让阴影沿 -X
     // 拖出长条（不沿轴向，便于看 cascade 分辨率差异）
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.rotation = MakeDirectionalLightRotationFromDir(glm::vec3(0.55f, -1.0f, -0.25f));
         world.AddComponent(e, xf);
@@ -362,13 +394,12 @@ int main(int argc, char** argv)
     // 时 RenderLayer 每帧改 view 矩阵（sway 模式）。
     Entity cameraEntity;
     {
-        cameraEntity = world.CreateEntity();
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(60.0f), aspect, 0.5f, 120.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 3.5f, -6.0f),
-                               glm::vec3(0.0f, 0.5f, 30.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        cameraEntity       = world.CreateEntity();
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(60.0f), aspect, 0.5f, 120.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 3.5f, -6.0f),
+                                         glm::vec3(0.0f, 0.5f, 30.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(cameraEntity, cam);
     }
 
@@ -379,7 +410,7 @@ int main(int argc, char** argv)
                      static_cast<unsigned>(r.Error()));
         return 1;
     }
-    PostProcessChain chain = CreateDefault();   // bloom + tonemap 收尾，无 SSAO/SSR/DoF/TAA
+    PostProcessChain chain = CreateDefault(); // bloom + tonemap 收尾，无 SSAO/SSR/DoF/TAA
     pipeline.SetPostProcessChain(&chain);
     pipeline.SetMaterialSystem(&materials);
 
@@ -390,12 +421,12 @@ int main(int argc, char** argv)
     // 独占 2048×2048）。
     {
         ShadowConfig sc{};
-        sc.mapResolution = 2048;
-        sc.pcfKernelRadius = 1;   // 3×3 PCF 轻软边，仍能看清 cascade 分辨率差异
-        sc.depthBias       = 0.0008f;
-        sc.pcssLightSize   = pcssLightSize;
-        sc.cascadeCount      = forceSingleCascade ? 1u : 3u;
-        sc.debugCascadeTint  = tintEnabled;
+        sc.mapResolution    = 2048;
+        sc.pcfKernelRadius  = 1; // 3×3 PCF 轻软边，仍能看清 cascade 分辨率差异
+        sc.depthBias        = 0.0008f;
+        sc.pcssLightSize    = pcssLightSize;
+        sc.cascadeCount     = forceSingleCascade ? 1u : 3u;
+        sc.debugCascadeTint = tintEnabled;
         pipeline.SetShadowConfig(sc);
     }
     // 一点环境补光防阴影区全黑

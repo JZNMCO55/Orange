@@ -10,7 +10,7 @@
 #include <orange/engine/scene/World.h>
 #include <orange/engine/scene/WorldTransformComponent.h>
 
-#include <glm/gtc/quaternion.hpp>  // glm::quat / glm::angleAxis（gtc，稳定）
+#include <glm/gtc/quaternion.hpp> // glm::quat / glm::angleAxis（gtc，稳定）
 
 #include <cassert>
 #include <cmath>
@@ -25,34 +25,34 @@ using ::Orange::Engine::Scene::WorldTransformComponent;
 
 namespace
 {
-glm::vec3 WorldPos(World& w, Entity e)
-{
-    const auto* wt = w.GetComponent<WorldTransformComponent>(e);
-    assert(wt != nullptr && "entity 应有 WorldTransformComponent（pass 跑过）");
-    return glm::vec3(wt->world[3]);  // 第 4 列 = 平移（列主序）
-}
+    glm::vec3 WorldPos(World& w, Entity e)
+    {
+        const auto* wt = w.GetComponent<WorldTransformComponent>(e);
+        assert(wt != nullptr && "entity 应有 WorldTransformComponent（pass 跑过）");
+        return glm::vec3(wt->world[3]); // 第 4 列 = 平移（列主序）
+    }
 
-bool Near(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
-{
-    return std::fabs(a.x - b.x) < eps && std::fabs(a.y - b.y) < eps &&
-           std::fabs(a.z - b.z) < eps;
-}
+    bool Near(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
+    {
+        return std::fabs(a.x - b.x) < eps && std::fabs(a.y - b.y) < eps &&
+               std::fabs(a.z - b.z) < eps;
+    }
 
-TransformComponent MakeTC(const glm::vec3& pos,
-                          const glm::quat& rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                          const glm::vec3& scl = glm::vec3(1.0f))
-{
-    return TransformComponent{pos, rot, scl};
-}
-}  // namespace
+    TransformComponent MakeTC(const glm::vec3& pos,
+                              const glm::quat& rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                              const glm::vec3& scl = glm::vec3(1.0f))
+    {
+        return TransformComponent{pos, rot, scl};
+    }
+} // namespace
 
 int main()
 {
     // ===== 1. 3 层链 A→B→C 平移累积 =====
-    World w;
+    World        w;
     const Entity a = w.CreateEntity();
     w.AddComponent<TransformComponent>(a, MakeTC({1.0f, 0.0f, 0.0f}));
-    w.AddComponent<HierarchyComponent>(a, HierarchyComponent{});  // 根
+    w.AddComponent<HierarchyComponent>(a, HierarchyComponent{}); // 根
 
     const Entity b = w.CreateEntity();
     w.AddComponent<TransformComponent>(b, MakeTC({0.0f, 1.0f, 0.0f}));
@@ -80,8 +80,8 @@ int main()
     // ===== 2. 旋转父：验真矩阵乘（不是简单位置相加）=====
     // 父 P 绕 Y 转 90°，子 Q 在 P 本地 +X (1,0,0)。绕 +Y 转 90° 把 +X 转到 -Z。
     // 故 Q world ≈ (0,0,-1)。
-    World w2;
-    const Entity p = w2.CreateEntity();
+    World           w2;
+    const Entity    p      = w2.CreateEntity();
     const glm::quat rotY90 = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 1, 0));
     w2.AddComponent<TransformComponent>(p, MakeTC({0.0f, 0.0f, 0.0f}, rotY90));
     w2.AddComponent<HierarchyComponent>(p, HierarchyComponent{});
@@ -100,7 +100,7 @@ int main()
 
     // ===== 3. flat entity（无 HierarchyComponent）→ world = local =====
     const Entity d = w.CreateEntity();
-    w.AddComponent<TransformComponent>(d, MakeTC({5.0f, 5.0f, 5.0f}));  // 不挂 Hierarchy
+    w.AddComponent<TransformComponent>(d, MakeTC({5.0f, 5.0f, 5.0f})); // 不挂 Hierarchy
     PropagateWorldTransforms(w);
     assert(Near(WorldPos(w, d), {5.0f, 5.0f, 5.0f}) &&
            "无 Hierarchy 的 flat entity 视为根，world = local (5,5,5)");
@@ -118,7 +118,7 @@ int main()
     // ===== 5. 非均匀 scale 传播：父缩放影响子的世界位置 =====
     // 父 sp scale (2,1,1) 在原点；子 sq 本地 (1,0,0) → sq 世界 = sp 缩放后 = (2,0,0)。
     {
-        World ws;
+        World  ws;
         Entity sp = ws.CreateEntity();
         ws.AddComponent<TransformComponent>(
             sp, MakeTC({0.0f, 0.0f, 0.0f}, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
@@ -139,7 +139,7 @@ int main()
 
     // ===== 6. sibling 独立：同父的两个子各自累积、互不影响 =====
     {
-        World ws;
+        World  ws;
         Entity bp = ws.CreateEntity();
         ws.AddComponent<TransformComponent>(bp, MakeTC({10.0f, 0.0f, 0.0f}));
         ws.AddComponent<HierarchyComponent>(bp, HierarchyComponent{});
@@ -148,11 +148,11 @@ int main()
         Entity c2 = ws.CreateEntity();
         ws.AddComponent<TransformComponent>(c2, MakeTC({0.0f, 2.0f, 0.0f}));
         HierarchyComponent h1;
-        h1.parent = bp;
+        h1.parent      = bp;
         h1.nextSibling = c2;
         ws.AddComponent<HierarchyComponent>(c1, h1);
         HierarchyComponent h2;
-        h2.parent = bp;
+        h2.parent      = bp;
         h2.prevSibling = c1;
         ws.AddComponent<HierarchyComponent>(c2, h2);
         ws.GetComponent<HierarchyComponent>(bp)->firstChild = c1;
@@ -170,8 +170,8 @@ int main()
     // 作用于子的 local 偏移，再叠父平移。父 P 在 (5,0,0) 绕 Y 转 90°；子 C 本地
     // (1,0,0)。绕 +Y 90° 把 (1,0,0) 转到 (0,0,-1)，再叠父平移 → C 世界 (5,0,-1)。
     {
-        World ws;
-        Entity tp = ws.CreateEntity();
+        World           ws;
+        Entity          tp      = ws.CreateEntity();
         const glm::quat rotY90b = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 1, 0));
         ws.AddComponent<TransformComponent>(tp, MakeTC({5.0f, 0.0f, 0.0f}, rotY90b));
         ws.AddComponent<HierarchyComponent>(tp, HierarchyComponent{});
@@ -195,7 +195,7 @@ int main()
     // 但手改场景文件能造出）。无 kMaxHierarchyDepth 守卫时 DFS 会无限递归直至栈溢出。
     // 本例锁住：PropagateWorldTransforms 应正常返回（截断递归、不崩不挂）。
     {
-        World ws;
+        World  ws;
         Entity cr = ws.CreateEntity();
         ws.AddComponent<TransformComponent>(cr, MakeTC({0.0f, 0.0f, 0.0f}));
         Entity ca = ws.CreateEntity();
@@ -209,12 +209,12 @@ int main()
         cyhR.firstChild = ca;
         ws.AddComponent<HierarchyComponent>(cr, cyhR);
         HierarchyComponent cyhA;
-        cyhA.parent = cr;
+        cyhA.parent     = cr;
         cyhA.firstChild = cb;
         ws.AddComponent<HierarchyComponent>(ca, cyhA);
         HierarchyComponent cyhB;
-        cyhB.parent = ca;
-        cyhB.firstChild = ca;  // 环：B 的子又指回 A
+        cyhB.parent     = ca;
+        cyhB.firstChild = ca; // 环：B 的子又指回 A
         ws.AddComponent<HierarchyComponent>(cb, cyhB);
 
         // 不崩不挂即通过（kMaxHierarchyDepth 截断递归）。环中实体在截断前已写过

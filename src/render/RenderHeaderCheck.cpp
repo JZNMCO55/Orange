@@ -26,10 +26,10 @@
 
 namespace Orange::Engine::Render
 {
-namespace
-{
+    namespace
+    {
 
-[[maybe_unused]] inline constexpr int sRenderHeaderCheckSentinel = 0;
+        [[maybe_unused]] inline constexpr int sRenderHeaderCheckSentinel = 0;
 
-}  // namespace
-}  // namespace Orange::Engine::Render
+    } // namespace
+} // namespace Orange::Engine::Render

@@ -38,16 +38,16 @@
 
 namespace Orange::Editor::Plugin
 {
-class AnimFsmAssetInspectorPlugin;
+    class AnimFsmAssetInspectorPlugin;
 }
 
 class AnimFsmAddStateCommand : public ICommand
 {
 public:
     AnimFsmAddStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                           std::string stateName,
-                           float       layoutX,
-                           float       layoutY);
+                           std::string                                          stateName,
+                           float                                                layoutX,
+                           float                                                layoutY);
 
     void        Execute() override;
     void        Undo() override;
@@ -67,7 +67,7 @@ class AnimFsmDeleteStateCommand : public ICommand
 {
 public:
     AnimFsmDeleteStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                              std::string stateName);
+                              std::string                                          stateName);
 
     void        Execute() override;
     void        Undo() override;
@@ -80,19 +80,19 @@ private:
     // Undo 用快照：删除前的 state 副本 + 与本 state 相关的所有 transitions
     // + 在原 transitions[] 内的 index（恢复时按原序插回）。initialState
     // 是否被本命令清空也记录。
-    ::Orange::Editor::AnimFsm::EditableState                      mSavedState;
-    std::vector<::Orange::Editor::AnimFsm::EditableTransition>    mSavedTransitions;
-    std::vector<std::size_t>                                      mSavedTransitionIndices;
-    std::size_t                                                   mSavedStateIndex{0};
-    bool                                                          mWasInitialState{false};
+    ::Orange::Editor::AnimFsm::EditableState                   mSavedState;
+    std::vector<::Orange::Editor::AnimFsm::EditableTransition> mSavedTransitions;
+    std::vector<std::size_t>                                   mSavedTransitionIndices;
+    std::size_t                                                mSavedStateIndex{0};
+    bool                                                       mWasInitialState{false};
 };
 
 class AnimFsmRenameStateCommand : public ICommand
 {
 public:
     AnimFsmRenameStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                              std::string oldName,
-                              std::string newName);
+                              std::string                                          oldName,
+                              std::string                                          newName);
 
     void        Execute() override;
     void        Undo() override;
@@ -109,11 +109,11 @@ class AnimFsmMoveStateCommand : public ICommand
 {
 public:
     AnimFsmMoveStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                            std::string stateName,
-                            float       oldX,
-                            float       oldY,
-                            float       newX,
-                            float       newY);
+                            std::string                                          stateName,
+                            float                                                oldX,
+                            float                                                oldY,
+                            float                                                newX,
+                            float                                                newY);
 
     void        Execute() override;
     void        Undo() override;
@@ -133,8 +133,8 @@ class AnimFsmAddTransitionCommand : public ICommand
 {
 public:
     AnimFsmAddTransitionCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                                std::string fromState,
-                                std::string toState);
+                                std::string                                          fromState,
+                                std::string                                          toState);
 
     void        Execute() override;
     void        Undo() override;
@@ -150,7 +150,7 @@ class AnimFsmDeleteTransitionCommand : public ICommand
 {
 public:
     AnimFsmDeleteTransitionCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                                   std::size_t transitionIndex);
+                                   std::size_t                                          transitionIndex);
 
     void        Execute() override;
     void        Undo() override;
@@ -160,8 +160,8 @@ private:
     Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* mpPlugin;
     std::size_t                                          mIndex;
     // Execute 时保存被删 transition 的副本，Undo 按原 index 插回
-    ::Orange::Editor::AnimFsm::EditableTransition        mSavedTransition;
-    bool                                                 mWasValid{false};
+    ::Orange::Editor::AnimFsm::EditableTransition mSavedTransition;
+    bool                                          mWasValid{false};
 };
 
 // ----- v0.7 c2-7-B: parameter + condition 命令 -----
@@ -170,7 +170,7 @@ class AnimFsmAddParameterCommand : public ICommand
 {
 public:
     AnimFsmAddParameterCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                               ::Orange::Editor::AnimFsm::EditableParameter parameter);
+                               ::Orange::Editor::AnimFsm::EditableParameter         parameter);
 
     void        Execute() override;
     void        Undo() override;
@@ -185,7 +185,7 @@ class AnimFsmDeleteParameterCommand : public ICommand
 {
 public:
     AnimFsmDeleteParameterCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                                  std::size_t parameterIndex);
+                                  std::size_t                                          parameterIndex);
 
     void        Execute() override;
     void        Undo() override;
@@ -208,8 +208,8 @@ class AnimFsmSetInitialStateCommand : public ICommand
 {
 public:
     AnimFsmSetInitialStateCommand(Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-                                  std::string oldInitial,
-                                  std::string newInitial);
+                                  std::string                                          oldInitial,
+                                  std::string                                          newInitial);
 
     void        Execute() override;
     void        Undo() override;
@@ -228,8 +228,8 @@ class AnimFsmSetTransitionConditionsCommand : public ICommand
 {
 public:
     AnimFsmSetTransitionConditionsCommand(
-        Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin* pPlugin,
-        std::size_t                                          transitionIndex,
+        Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin*      pPlugin,
+        std::size_t                                               transitionIndex,
         std::vector<::Orange::Editor::AnimFsm::EditableCondition> oldConditions,
         std::vector<::Orange::Editor::AnimFsm::EditableCondition> newConditions);
 
@@ -238,10 +238,10 @@ public:
     const char* GetType() const override { return "anim_fsm_set_transition_conditions"; }
 
 private:
-    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin*       mpPlugin;
-    std::size_t                                                mIndex;
-    std::vector<::Orange::Editor::AnimFsm::EditableCondition>  mOldConditions;
-    std::vector<::Orange::Editor::AnimFsm::EditableCondition>  mNewConditions;
+    Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin*      mpPlugin;
+    std::size_t                                               mIndex;
+    std::vector<::Orange::Editor::AnimFsm::EditableCondition> mOldConditions;
+    std::vector<::Orange::Editor::AnimFsm::EditableCondition> mNewConditions;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H
+#endif // ORANGE_EDITOR_COMMAND_ANIM_FSM_COMMANDS_H

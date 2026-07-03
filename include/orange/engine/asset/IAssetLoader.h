@@ -35,21 +35,21 @@
 namespace Orange::Engine::Asset
 {
 
-template <typename T>
-class IAssetLoader
-{
-public:
-    virtual ~IAssetLoader() = default;
+    template <typename T>
+    class IAssetLoader
+    {
+    public:
+        virtual ~IAssetLoader() = default;
 
-    IAssetLoader()                                     = default;
-    IAssetLoader(const IAssetLoader&)                  = delete;
-    IAssetLoader& operator=(const IAssetLoader&)       = delete;
-    IAssetLoader(IAssetLoader&&) noexcept              = delete;
-    IAssetLoader& operator=(IAssetLoader&&) noexcept   = delete;
+        IAssetLoader()                                   = default;
+        IAssetLoader(const IAssetLoader&)                = delete;
+        IAssetLoader& operator=(const IAssetLoader&)     = delete;
+        IAssetLoader(IAssetLoader&&) noexcept            = delete;
+        IAssetLoader& operator=(IAssetLoader&&) noexcept = delete;
 
-    virtual Result<std::unique_ptr<T>, ResultCode> Load(std::string_view path) = 0;
-};
+        virtual Result<std::unique_ptr<T>, ResultCode> Load(std::string_view path) = 0;
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_I_ASSET_LOADER_H
+#endif // ORANGE_ENGINE_ASSET_I_ASSET_LOADER_H

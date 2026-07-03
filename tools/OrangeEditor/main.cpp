@@ -78,7 +78,7 @@
 #include "VulkanLoaderShim.h"
 #include "import/ImportDispatcher.h"
 #include "import/FbxSceneImporter.h"
-#include "mcp/McpServer.h"  // MCP 实时协同桥后台 socket 线程（--mcp-port）
+#include "mcp/McpServer.h" // MCP 实时协同桥后台 socket 线程（--mcp-port）
 #include "import/GltfSceneImporter.h"
 #include "branding/EditorWindowIcon.h"
 #include "demo_game/HealthComponent.h"
@@ -101,7 +101,7 @@
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
 
-#include <glm/gtc/matrix_transform.hpp>  // glm::lookAt（编辑器相机用）
+#include <glm/gtc/matrix_transform.hpp> // glm::lookAt（编辑器相机用）
 #include <glm/gtc/quaternion.hpp>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
@@ -123,7 +123,7 @@
 #include <windows.h>
 
 #include <imgui.h>
-#include <imgui_internal.h>  // DockBuilder* API（仅在编辑器侧首帧建默认布局用）
+#include <imgui_internal.h> // DockBuilder* API（仅在编辑器侧首帧建默认布局用）
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 
@@ -140,188 +140,200 @@
 namespace
 {
 
-// 编辑器默认 UI 字体 size 的**设计基准**（@ 100% DPI / content scale 1.0）。
-// 实际加载到 atlas 的字号是 kDesignFontSizePx * contentScale（见 ImGui Init
-// 段，通过 glfwGetWindowContentScale 拿主显示器缩放）。同步 style.ScaleAllSizes
-// 让 padding / spacing 一起按 DPI 缩放，避免在低物理像素 / 低缩放屏上 panel
-// 内 widget 撑爆 dock cell。注意：本路径仅做全局 DPI 兜底；Inspector / Panel
-// 内部 widget 列宽 / minSize 的比例化属架构整骨范畴，由对应 milestone 根治。
-constexpr float kDesignFontSizePx = 18.0f;
+    // 编辑器默认 UI 字体 size 的**设计基准**（@ 100% DPI / content scale 1.0）。
+    // 实际加载到 atlas 的字号是 kDesignFontSizePx * contentScale（见 ImGui Init
+    // 段，通过 glfwGetWindowContentScale 拿主显示器缩放）。同步 style.ScaleAllSizes
+    // 让 padding / spacing 一起按 DPI 缩放，避免在低物理像素 / 低缩放屏上 panel
+    // 内 widget 撑爆 dock cell。注意：本路径仅做全局 DPI 兜底；Inspector / Panel
+    // 内部 widget 列宽 / minSize 的比例化属架构整骨范畴，由对应 milestone 根治。
+    constexpr float kDesignFontSizePx = 18.0f;
 
-// 启动期自定位仓库根（与 Lumix / Godot 同款方案）：用户从 build/bin/Debug
-// 双击 .exe / IDE F5 / 任意 cwd 启动时，把 cwd 切回包含真实 assets/ 的仓
-// 库根。否则 fs::current_path() = 启动者所在目录，所有 "assets/..." 相
-// 对路径都找错位置（v0.5 B1 验收 retro：用户 cwd=build/bin/Debug 时只能
-// 看到 build 产物自创建的 assets/ 子集 meshes + materials/builtin，而看不
-// 到仓库根真实 assets/ 里的 scenes / configs）。
-//
-// 仓库根标记：**同时**存在 `assets/` 与 `src/` 两个目录。
-//   * 不能只看 `assets/` —— build/bin/Debug 下 DemoWorld lazy-bake 会写出
-//     assets/ 子集（materials/builtin + meshes），无法区分仓库根与 build 产物。
-//   * 早先用单个文件 `assets/scenes/demo.scene.json` 作标记 —— **脆弱**：用户按
-//     dogfood 指示把该场景改名 / 挪开后，标记消失 → 不 chdir → cwd 停在
-//     build/bin/Debug → 相对路径字体（codicon.ttf）加载失败 → ImGui 在初始化期
-//     （无 frame）走 ErrorLog→Begin 触发 IM_ASSERT(WithinFrameScope) 崩溃。
-//   * `src/` 目录只在仓库根、绝不在 build 产物里，且与任何用户可改名的场景文件
-//     无关 —— `assets/ && src/` 同时存在 = 仓库根的稳健签名。
-void ChdirToRepoRoot()
-{
-    namespace fs = std::filesystem;
-    wchar_t exePathW[MAX_PATH] = {};
-    const DWORD len = GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
-    if (len == 0 || len == MAX_PATH) { return; }
-
-    fs::path dir = fs::path(exePathW).parent_path();
-    constexpr int kMaxWalkUp = 8;
-    for (int i = 0; i < kMaxWalkUp; ++i)
+    // 启动期自定位仓库根（与 Lumix / Godot 同款方案）：用户从 build/bin/Debug
+    // 双击 .exe / IDE F5 / 任意 cwd 启动时，把 cwd 切回包含真实 assets/ 的仓
+    // 库根。否则 fs::current_path() = 启动者所在目录，所有 "assets/..." 相
+    // 对路径都找错位置（v0.5 B1 验收 retro：用户 cwd=build/bin/Debug 时只能
+    // 看到 build 产物自创建的 assets/ 子集 meshes + materials/builtin，而看不
+    // 到仓库根真实 assets/ 里的 scenes / configs）。
+    //
+    // 仓库根标记：**同时**存在 `assets/` 与 `src/` 两个目录。
+    //   * 不能只看 `assets/` —— build/bin/Debug 下 DemoWorld lazy-bake 会写出
+    //     assets/ 子集（materials/builtin + meshes），无法区分仓库根与 build 产物。
+    //   * 早先用单个文件 `assets/scenes/demo.scene.json` 作标记 —— **脆弱**：用户按
+    //     dogfood 指示把该场景改名 / 挪开后，标记消失 → 不 chdir → cwd 停在
+    //     build/bin/Debug → 相对路径字体（codicon.ttf）加载失败 → ImGui 在初始化期
+    //     （无 frame）走 ErrorLog→Begin 触发 IM_ASSERT(WithinFrameScope) 崩溃。
+    //   * `src/` 目录只在仓库根、绝不在 build 产物里，且与任何用户可改名的场景文件
+    //     无关 —— `assets/ && src/` 同时存在 = 仓库根的稳健签名。
+    void ChdirToRepoRoot()
     {
-        std::error_code ec;
-        if (fs::is_directory(dir / "assets", ec) && fs::is_directory(dir / "src", ec))
+        namespace fs                   = std::filesystem;
+        wchar_t     exePathW[MAX_PATH] = {};
+        const DWORD len                = GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
+        if (len == 0 || len == MAX_PATH)
         {
-            fs::current_path(dir, ec);
             return;
         }
-        const fs::path parent = dir.parent_path();
-        if (parent == dir) { return; }
-        dir = parent;
-    }
-}
 
-// Headless 资产导入 CLI（GAP-2026-05-27 G1）。在任何 GLFW / Vulkan / ImGui
-// init 之前由 main 判 argv 调用：用 CreateImportAssetRegistry 建一个最小
-// AssetRegistry（仅 Mesh + Texture loader，零 GPU / GUI 依赖）→ DispatchToRegistry
-// 导入 srcPath → 打印 ImportResult。返回进程退出码（成功 0 / 失败非 0）。
-//
-// 用法：OrangeEditor import-mesh <path>（import 亦接受）。产物落 assets/Models/
-// <stem>/（与 GUI 导入一致；ChdirToRepoRoot 已把 cwd 切到仓库根）。
-// gltf material 注册回调留空 —— headless 不需要编辑器 namedMaterialInstances
-// 缓存，.material / .mesh / .meta 仍照常写盘。
-// 从 argv[startIdx..] 解析可选 `--scale <f>`（FBX 单位 → 米的显式缩放；见
-// FbxAxisConverter.h 的单位歧义说明）。缺省 / 非正数返回 1.0（信任已烘米）。
-// 仅 FBX 导入消费；obj / gltf / texture 忽略。
-float ParseImportScaleFlag(int argc, char** argv, int startIdx)
-{
-    for (int i = startIdx; i + 1 < argc; ++i)
-    {
-        if (argv[i] != nullptr && std::strcmp(argv[i], "--scale") == 0 &&
-            argv[i + 1] != nullptr)
+        fs::path      dir        = fs::path(exePathW).parent_path();
+        constexpr int kMaxWalkUp = 8;
+        for (int i = 0; i < kMaxWalkUp; ++i)
         {
-            const float s = static_cast<float>(std::strtod(argv[i + 1], nullptr));
-            if (s > 0.0f) { return s; }
+            std::error_code ec;
+            if (fs::is_directory(dir / "assets", ec) && fs::is_directory(dir / "src", ec))
+            {
+                fs::current_path(dir, ec);
+                return;
+            }
+            const fs::path parent = dir.parent_path();
+            if (parent == dir)
+            {
+                return;
+            }
+            dir = parent;
         }
     }
-    return 1.0f;
-}
 
-// 从 argv 解析可选 `--mcp-port <n>`（MCP 实时协同桥监听端口，ADR-020）。缺省 /
-// 非法 / 越界返回 0 = 不启动 socket 线程、零监听、零行为变化（NF-5 安全默认）。
-// 有效端口范围 1..65535。
-std::uint16_t ParseMcpPortFlag(int argc, char** argv)
-{
-    for (int i = 1; i + 1 < argc; ++i)
+    // Headless 资产导入 CLI（GAP-2026-05-27 G1）。在任何 GLFW / Vulkan / ImGui
+    // init 之前由 main 判 argv 调用：用 CreateImportAssetRegistry 建一个最小
+    // AssetRegistry（仅 Mesh + Texture loader，零 GPU / GUI 依赖）→ DispatchToRegistry
+    // 导入 srcPath → 打印 ImportResult。返回进程退出码（成功 0 / 失败非 0）。
+    //
+    // 用法：OrangeEditor import-mesh <path>（import 亦接受）。产物落 assets/Models/
+    // <stem>/（与 GUI 导入一致；ChdirToRepoRoot 已把 cwd 切到仓库根）。
+    // gltf material 注册回调留空 —— headless 不需要编辑器 namedMaterialInstances
+    // 缓存，.material / .mesh / .meta 仍照常写盘。
+    // 从 argv[startIdx..] 解析可选 `--scale <f>`（FBX 单位 → 米的显式缩放；见
+    // FbxAxisConverter.h 的单位歧义说明）。缺省 / 非正数返回 1.0（信任已烘米）。
+    // 仅 FBX 导入消费；obj / gltf / texture 忽略。
+    float ParseImportScaleFlag(int argc, char** argv, int startIdx)
     {
-        if (argv[i] != nullptr && std::strcmp(argv[i], "--mcp-port") == 0 &&
-            argv[i + 1] != nullptr)
+        for (int i = startIdx; i + 1 < argc; ++i)
         {
-            const long p = std::strtol(argv[i + 1], nullptr, 10);
-            if (p > 0 && p <= 65535) { return static_cast<std::uint16_t>(p); }
+            if (argv[i] != nullptr && std::strcmp(argv[i], "--scale") == 0 &&
+                argv[i + 1] != nullptr)
+            {
+                const float s = static_cast<float>(std::strtod(argv[i + 1], nullptr));
+                if (s > 0.0f)
+                {
+                    return s;
+                }
+            }
         }
+        return 1.0f;
     }
-    return 0;
-}
 
-int RunHeadlessImport(const char* srcPath, float importScale)
-{
-    if (srcPath == nullptr || srcPath[0] == '\0')
+    // 从 argv 解析可选 `--mcp-port <n>`（MCP 实时协同桥监听端口，ADR-020）。缺省 /
+    // 非法 / 越界返回 0 = 不启动 socket 线程、零监听、零行为变化（NF-5 安全默认）。
+    // 有效端口范围 1..65535。
+    std::uint16_t ParseMcpPortFlag(int argc, char** argv)
     {
-        std::fprintf(stderr, "[OrangeEditor] import: missing source path\n"
-                             "usage: OrangeEditor import-mesh <path> [--scale <f>]\n");
-        return 2;
+        for (int i = 1; i + 1 < argc; ++i)
+        {
+            if (argv[i] != nullptr && std::strcmp(argv[i], "--mcp-port") == 0 &&
+                argv[i + 1] != nullptr)
+            {
+                const long p = std::strtol(argv[i + 1], nullptr, 10);
+                if (p > 0 && p <= 65535)
+                {
+                    return static_cast<std::uint16_t>(p);
+                }
+            }
+        }
+        return 0;
     }
 
-    auto registry = CreateImportAssetRegistry();
-    if (registry == nullptr)
+    int RunHeadlessImport(const char* srcPath, float importScale)
     {
-        std::fprintf(stderr, "[OrangeEditor] import: CreateImportAssetRegistry failed\n");
-        return 3;
+        if (srcPath == nullptr || srcPath[0] == '\0')
+        {
+            std::fprintf(stderr, "[OrangeEditor] import: missing source path\n"
+                                 "usage: OrangeEditor import-mesh <path> [--scale <f>]\n");
+            return 2;
+        }
+
+        auto registry = CreateImportAssetRegistry();
+        if (registry == nullptr)
+        {
+            std::fprintf(stderr, "[OrangeEditor] import: CreateImportAssetRegistry failed\n");
+            return 3;
+        }
+
+        const auto result =
+            Orange::Editor::Import::DispatchToRegistry(srcPath, *registry, {}, importScale);
+
+        const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
+        std::fprintf(ok ? stdout : stderr,
+                     "[OrangeEditor] import '%s' -> '%s': %s (status=%d)\n",
+                     srcPath, result.destPath.c_str(), result.message.c_str(),
+                     static_cast<int>(result.status));
+        return ok ? 0 : 1;
     }
 
-    const auto result =
-        Orange::Editor::Import::DispatchToRegistry(srcPath, *registry, {}, importScale);
-
-    const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
-    std::fprintf(ok ? stdout : stderr,
-                 "[OrangeEditor] import '%s' -> '%s': %s (status=%d)\n",
-                 srcPath, result.destPath.c_str(), result.message.c_str(),
-                 static_cast<int>(result.status));
-    return ok ? 0 : 1;
-}
-
-// Headless scene-level 导入 CLI（glTF：GAP-2026-05-28；FBX：承接单 mesh
-// FbxImporter）。区别于 import-mesh（整文件塌平成单 mesh），本路径保留源 DCC 的
-// transform 层级 + 每 mesh 单独 .mesh，产出 assets/scenes/<basename>.scene.json
-// （可直接 File→Open / 双击打开）。
-//
-// 用法：OrangeEditor import-scene <path.gltf|.glb|.fbx>。按扩展名路由：
-//   .gltf/.glb → RunGltfSceneImportToRegistry（cgltf，含 material / lights）
-//   .fbx       → RunFbxSceneImportToRegistry（OpenFBX，含 material；轴转换共轭）
-// 产物：
-//   assets/Models/<basename>/<basename>_<meshname>.mesh（每 mesh 一个）
-//   assets/scenes/<basename>.scene.json（node 树 → Entity 层级）
-int RunHeadlessSceneImport(const char* srcPath, float importScale)
-{
-    if (srcPath == nullptr || srcPath[0] == '\0')
+    // Headless scene-level 导入 CLI（glTF：GAP-2026-05-28；FBX：承接单 mesh
+    // FbxImporter）。区别于 import-mesh（整文件塌平成单 mesh），本路径保留源 DCC 的
+    // transform 层级 + 每 mesh 单独 .mesh，产出 assets/scenes/<basename>.scene.json
+    // （可直接 File→Open / 双击打开）。
+    //
+    // 用法：OrangeEditor import-scene <path.gltf|.glb|.fbx>。按扩展名路由：
+    //   .gltf/.glb → RunGltfSceneImportToRegistry（cgltf，含 material / lights）
+    //   .fbx       → RunFbxSceneImportToRegistry（OpenFBX，含 material；轴转换共轭）
+    // 产物：
+    //   assets/Models/<basename>/<basename>_<meshname>.mesh（每 mesh 一个）
+    //   assets/scenes/<basename>.scene.json（node 树 → Entity 层级）
+    int RunHeadlessSceneImport(const char* srcPath, float importScale)
     {
-        std::fprintf(stderr, "[OrangeEditor] import-scene: missing source path\n"
-                             "usage: OrangeEditor import-scene <path.gltf|.glb|.fbx> [--scale <f>]\n");
-        return 2;
+        if (srcPath == nullptr || srcPath[0] == '\0')
+        {
+            std::fprintf(stderr, "[OrangeEditor] import-scene: missing source path\n"
+                                 "usage: OrangeEditor import-scene <path.gltf|.glb|.fbx> [--scale <f>]\n");
+            return 2;
+        }
+
+        auto registry = CreateImportAssetRegistry();
+        if (registry == nullptr)
+        {
+            std::fprintf(stderr, "[OrangeEditor] import-scene: CreateImportAssetRegistry failed\n");
+            return 3;
+        }
+
+        // 按扩展名分派：.fbx 走 FbxSceneImporter，其余（.gltf/.glb）走 Gltf 路径。
+        namespace Import = Orange::Editor::Import;
+        const std::string srcStr(srcPath);
+        const auto        dotPos = srcStr.rfind('.');
+        const std::string ext =
+            (dotPos != std::string::npos) ? srcStr.substr(dotPos + 1) : std::string();
+        // importScale 仅 FBX 路径消费（FBX 单位歧义）；gltf 单位明确（米），忽略。
+        const Import::ImportResult result =
+            (Import::ClassifyByExt(ext) == Import::ImportKind::FbxMesh)
+                ? Import::RunFbxSceneImportToRegistry(srcPath, *registry, importScale)
+                : Import::RunGltfSceneImportToRegistry(srcPath, *registry);
+
+        const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
+        std::fprintf(ok ? stdout : stderr,
+                     "[OrangeEditor] import-scene '%s' -> '%s': %s (status=%d)\n",
+                     srcPath, result.destPath.c_str(), result.message.c_str(),
+                     static_cast<int>(result.status));
+        return ok ? 0 : 1;
     }
 
-    auto registry = CreateImportAssetRegistry();
-    if (registry == nullptr)
-    {
-        std::fprintf(stderr, "[OrangeEditor] import-scene: CreateImportAssetRegistry failed\n");
-        return 3;
-    }
+    // main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
+    // 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
+    //   EditorHost            → EditorHost.h（顶层 hub，聚合 4 sub-context + cmdStack）
+    //   context/Editor*       → 4 个 sub-context（selection / scene / assets / camera）
+    //   EditorHierarchy       → EditorHierarchy.{h,cpp}
+    //   VulkanLoaderShim      → VulkanLoaderShim.{h,cpp}（含 ImguiVulkanLoader /
+    //                           Make/DestroyImguiDescriptorPool / ShowSceneFileDialog）
+    //   BuiltinAssets         → BuiltinAssets.{h,cpp}（mesh 工厂 / InitializeEditorAssets
+    //                           / BuildNamedMaterialInstances —— v1.0.1 c11 从
+    //                           DemoWorld 拆出，与 demo 内容职责分离）
+    //   DemoWorld             → DemoWorld.{h,cpp}（SeedDemoWorld /
+    //                           SeedPbrShowcaseWorld 仅 demo 场景填充）
+    //   EditorCameraControl   → EditorCameraControl.{h,cpp}
+    //   EditorWidgets         → EditorWidgets.{h,cpp}（DragVec3Colored）
+    //   EditorRenderLayer     → EditorRenderLayer.{h,cpp} + panels/*.cpp（按面板
+    //                           切到独立 TU）
 
-    // 按扩展名分派：.fbx 走 FbxSceneImporter，其余（.gltf/.glb）走 Gltf 路径。
-    namespace Import = Orange::Editor::Import;
-    const std::string srcStr(srcPath);
-    const auto dotPos = srcStr.rfind('.');
-    const std::string ext =
-        (dotPos != std::string::npos) ? srcStr.substr(dotPos + 1) : std::string();
-    // importScale 仅 FBX 路径消费（FBX 单位歧义）；gltf 单位明确（米），忽略。
-    const Import::ImportResult result =
-        (Import::ClassifyByExt(ext) == Import::ImportKind::FbxMesh)
-            ? Import::RunFbxSceneImportToRegistry(srcPath, *registry, importScale)
-            : Import::RunGltfSceneImportToRegistry(srcPath, *registry);
-
-    const bool ok = (result.status == Orange::Editor::Import::ImportStatus::Success);
-    std::fprintf(ok ? stdout : stderr,
-                 "[OrangeEditor] import-scene '%s' -> '%s': %s (status=%d)\n",
-                 srcPath, result.destPath.c_str(), result.message.c_str(),
-                 static_cast<int>(result.status));
-    return ok ? 0 : 1;
-}
-
-// main.cpp 现在仅承担引擎 / Vulkan / ImGui 启动 + push layer + 关停序列。
-// 业务逻辑已按 commit 1 / 2 / 3 + v0.2.5 整骨拆出：
-//   EditorHost            → EditorHost.h（顶层 hub，聚合 4 sub-context + cmdStack）
-//   context/Editor*       → 4 个 sub-context（selection / scene / assets / camera）
-//   EditorHierarchy       → EditorHierarchy.{h,cpp}
-//   VulkanLoaderShim      → VulkanLoaderShim.{h,cpp}（含 ImguiVulkanLoader /
-//                           Make/DestroyImguiDescriptorPool / ShowSceneFileDialog）
-//   BuiltinAssets         → BuiltinAssets.{h,cpp}（mesh 工厂 / InitializeEditorAssets
-//                           / BuildNamedMaterialInstances —— v1.0.1 c11 从
-//                           DemoWorld 拆出，与 demo 内容职责分离）
-//   DemoWorld             → DemoWorld.{h,cpp}（SeedDemoWorld /
-//                           SeedPbrShowcaseWorld 仅 demo 场景填充）
-//   EditorCameraControl   → EditorCameraControl.{h,cpp}
-//   EditorWidgets         → EditorWidgets.{h,cpp}（DragVec3Colored）
-//   EditorRenderLayer     → EditorRenderLayer.{h,cpp} + panels/*.cpp（按面板
-//                           切到独立 TU）
-
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -363,13 +375,14 @@ int main(int argc, char** argv)
     cfg.window.title  = "OrangeEditor v0.0.3";
     cfg.window.width  = 1600;
     cfg.window.height = 900;
-    auto hostRes = AppHost::Create(cfg);
-    if (hostRes.IsErr()) {
+    auto hostRes      = AppHost::Create(cfg);
+    if (hostRes.IsErr())
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] AppHost::Create failed (code={})",
                          static_cast<unsigned>(hostRes.Error()));
         return 1;
     }
-    auto host = std::move(hostRes).Value();
+    auto  host       = std::move(hostRes).Value();
     auto* glfwWindow = static_cast<GLFWwindow*>(host->GetWindow().GetGlfwWindowHandle());
 
     // 运行期窗口 icon —— 与 OrangeEditor.rc 嵌进 exe 的 ICO 资源双重保险。
@@ -430,18 +443,20 @@ int main(int argc, char** argv)
     Orange::Renderer::RenderDeviceDesc rdDesc{};
     rdDesc.mBackend          = Orange::Renderer::BackendType::Default;
     rdDesc.mEnableValidation = true;
-    auto pRenderDevice = Orange::Renderer::RenderDevice::Create(rdDesc);
-    if (pRenderDevice == nullptr) {
+    auto pRenderDevice       = Orange::Renderer::RenderDevice::Create(rdDesc);
+    if (pRenderDevice == nullptr)
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] RenderDevice::Create failed");
         return 1;
     }
 
-    auto pRenderer = Orange::Renderer::CreateRenderer();
+    auto                           pRenderer = Orange::Renderer::CreateRenderer();
     Orange::Renderer::RendererDesc rendererDesc{};
     rendererDesc.mpDevice             = &pRenderDevice->GetRhiDevice();
     rendererDesc.mpNativeWindowHandle = glfwWindow;
     rendererDesc.mFramesInFlight      = 2;
-    if (Orange::Failed(pRenderer->Initialize(rendererDesc))) {
+    if (Orange::Failed(pRenderer->Initialize(rendererDesc)))
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] Renderer::Initialize failed");
         return 1;
     }
@@ -451,10 +466,11 @@ int main(int argc, char** argv)
     // loader fn 是 OrangeRender 内 volk 已加载的 vkGetInstanceProcAddr，
     // 编辑器 ImGui + descriptor pool 创建全部走这一份 loader，与 OrangeRender
     // 共用 instance dispatch 状态。
-    const auto handles = Orange::Renderer::Interop::GetVulkanDeviceHandles(*pRenderDevice);
-    auto pfnGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+    const auto handles                = Orange::Renderer::Interop::GetVulkanDeviceHandles(*pRenderDevice);
+    auto       pfnGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         Orange::Renderer::Interop::GetVulkanGetInstanceProcAddr());
-    if (pfnGetInstanceProcAddr == nullptr) {
+    if (pfnGetInstanceProcAddr == nullptr)
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] Interop::GetVulkanGetInstanceProcAddr 返回 null —— "
                          "非 Vulkan 后端或 RenderDevice 尚未 Initialize");
         return 1;
@@ -464,11 +480,13 @@ int main(int argc, char** argv)
         Orange::Renderer::FrameTimeInfo dummy{};
         dummy.mTotalTimeSeconds = 0.0;
         dummy.mDeltaTimeSeconds = 0.0f;
-        if (Orange::Failed(pRenderer->BeginFrame(dummy))) {
+        if (Orange::Failed(pRenderer->BeginFrame(dummy)))
+        {
             ORANGE_LOG_ERROR("[OrangeEditor] dummy BeginFrame failed");
             return 1;
         }
-        if (Orange::Failed(pRenderer->EndFrame())) {
+        if (Orange::Failed(pRenderer->EndFrame()))
+        {
             ORANGE_LOG_ERROR("[OrangeEditor] dummy EndFrame failed");
             return 1;
         }
@@ -502,8 +520,9 @@ int main(int argc, char** argv)
     // WindowRounding 已被 ApplyToImGui 设为 0，本段仅强制
     // ImGuiCol_WindowBg.w = 1.0f 防止多视口透明导致 detached window 看穿
     // 桌面（ImGui 多视口默认偏好半透）。
-    if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
-        ImGuiStyle& style = ImGui::GetStyle();
+    if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0)
+    {
+        ImGuiStyle& style                 = ImGui::GetStyle();
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 
@@ -572,12 +591,13 @@ int main(int argc, char** argv)
         // 下面的 `== nullptr` fallback 链根本到不了。先 exists 检查把缺失降级为
         // 返回 null，让 msyh → segoeui → ImGui 默认字体的兜底链正常工作。
         std::error_code fontEc;
-        ImFont* fontMain =
+        ImFont*         fontMain =
             std::filesystem::exists("C:\\Windows\\Fonts\\msyh.ttc", fontEc)
-                ? io.Fonts->AddFontFromFileTTF(
+                        ? io.Fonts->AddFontFromFileTTF(
                       "C:\\Windows\\Fonts\\msyh.ttc", fontPx, nullptr, cjkRanges)
-                : nullptr;
-        if (fontMain == nullptr) {
+                        : nullptr;
+        if (fontMain == nullptr)
+        {
             ORANGE_LOG_WARN("[OrangeEditor] msyh.ttc 加载失败，回退 segoeui.ttf "
                             "(ASCII only, 中文会显示成 '?')");
             fontMain =
@@ -586,7 +606,8 @@ int main(int argc, char** argv)
                           "C:\\Windows\\Fonts\\segoeui.ttf", fontPx)
                     : nullptr;
         }
-        if (fontMain == nullptr) {
+        if (fontMain == nullptr)
+        {
             ImFontConfig fontCfg;
             fontCfg.SizePixels = fontPx;
             io.Fonts->AddFontDefault(&fontCfg);
@@ -629,8 +650,8 @@ int main(int argc, char** argv)
         // 工程教训：调字体 metrics 的几何精度撞 ImGui 内部 layout 算法
         // 不会赢——按钮居中靠 auto-size 比靠 fixed-size + glyph offset 稳；
         // 但**仅纵向** GlyphOffset 仍是 ImGui icon font 集成的标准 hack。
-        static const ImWchar kCodiconsRange[] = { 0xea60, 0xf102, 0 };
-        ImFontConfig codiconsCfg;
+        static const ImWchar kCodiconsRange[] = {0xea60, 0xf102, 0};
+        ImFontConfig         codiconsCfg;
         codiconsCfg.MergeMode        = true;
         codiconsCfg.PixelSnapH       = true;
         codiconsCfg.GlyphMinAdvanceX = fontPx;
@@ -640,14 +661,18 @@ int main(int argc, char** argv)
         // 跳过合并，icon 显示为 '?'（不致命），绝不进 ImGui 缺失字体的 assert 路径。
         const char*     kCodiconPath = "tools/OrangeEditor/theme/codicons/codicon.ttf";
         std::error_code codiconEc;
-        if (std::filesystem::exists(kCodiconPath, codiconEc)) {
+        if (std::filesystem::exists(kCodiconPath, codiconEc))
+        {
             ImFont* fontCodicons = io.Fonts->AddFontFromFileTTF(
                 kCodiconPath, fontPx, &codiconsCfg, kCodiconsRange);
-            if (fontCodicons == nullptr) {
+            if (fontCodicons == nullptr)
+            {
                 ORANGE_LOG_WARN("[OrangeEditor] codicon.ttf 加载失败 —— Codicons icon "
                                 "将显示为 '?' 占位（不致命）");
             }
-        } else {
+        }
+        else
+        {
             ORANGE_LOG_WARN("[OrangeEditor] codicon.ttf 未找到（{}）—— 跳过 Codicons "
                             "合并，icon 显示为 '?'（不致命；常见原因 cwd 非仓库根）",
                             kCodiconPath);
@@ -657,7 +682,8 @@ int main(int argc, char** argv)
     // GLFW backend —— install_callbacks=true 让 ImGui 自动装 GLFW key /
     // mouse / focus 回调；与 AppHost 共享同一 window，事件分发上 ImGui
     // 拦在 AppHost 之前（GLFW 回调链顺序）
-    if (!ImGui_ImplGlfw_InitForVulkan(glfwWindow, true)) {
+    if (!ImGui_ImplGlfw_InitForVulkan(glfwWindow, true))
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] ImGui_ImplGlfw_InitForVulkan failed");
         return 1;
     }
@@ -674,31 +700,36 @@ int main(int argc, char** argv)
         pfnGetInstanceProcAddr(vkInstance, "vkGetDeviceProcAddr"));
 
     ImguiVulkanLoaderCtx loaderCtx{pfnGetInstanceProcAddr, pfnGetDeviceProcAddr, vkInstance, vkDevice};
-    if (!ImGui_ImplVulkan_LoadFunctions(&ImguiVulkanLoader, &loaderCtx)) {
+    if (!ImGui_ImplVulkan_LoadFunctions(&ImguiVulkanLoader, &loaderCtx))
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] ImGui_ImplVulkan_LoadFunctions failed");
         return 1;
     }
 
     VkDescriptorPool imguiDescPool =
         MakeImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice);
-    if (imguiDescPool == VK_NULL_HANDLE) { return 1; }
+    if (imguiDescPool == VK_NULL_HANDLE)
+    {
+        return 1;
+    }
 
     ImGui_ImplVulkan_InitInfo vkInfo{};
-    vkInfo.Instance        = vkInstance;
-    vkInfo.PhysicalDevice  = vkPhysicalDevice;
-    vkInfo.Device          = vkDevice;
-    vkInfo.QueueFamily     = handles.graphicsQueueFamilyIndex;
-    vkInfo.Queue           = vkQueue;
-    vkInfo.DescriptorPool  = imguiDescPool;
-    vkInfo.MinImageCount   = sci.minImageCount;
-    vkInfo.ImageCount      = sci.imageCount;
-    vkInfo.MSAASamples     = VK_SAMPLE_COUNT_1_BIT;
+    vkInfo.Instance            = vkInstance;
+    vkInfo.PhysicalDevice      = vkPhysicalDevice;
+    vkInfo.Device              = vkDevice;
+    vkInfo.QueueFamily         = handles.graphicsQueueFamilyIndex;
+    vkInfo.Queue               = vkQueue;
+    vkInfo.DescriptorPool      = imguiDescPool;
+    vkInfo.MinImageCount       = sci.minImageCount;
+    vkInfo.ImageCount          = sci.imageCount;
+    vkInfo.MSAASamples         = VK_SAMPLE_COUNT_1_BIT;
     vkInfo.UseDynamicRendering = true;
     vkInfo.PipelineRenderingCreateInfo.sType =
         VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     vkInfo.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
     vkInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFmt;
-    if (!ImGui_ImplVulkan_Init(&vkInfo)) {
+    if (!ImGui_ImplVulkan_Init(&vkInfo))
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] ImGui_ImplVulkan_Init failed");
         DestroyImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice, imguiDescPool);
         return 1;
@@ -839,7 +870,8 @@ int main(int argc, char** argv)
     // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地
     // 址；editorHost 与 cmdStack 同生命周期（main 栈帧），lambda 不会悬挂。
     editorHost.cmdStack.SetOnChanged(
-        [pHost = &editorHost]{ pHost->scene.dirty = true; });
+        [pHost = &editorHost]
+        { pHost->scene.dirty = true; });
 
     // namedMaterialInstances 集中到 EditorAssetContext 自身（v0.8 整骨消除
     // L15）。BuildNamedMaterialInstances 直接写到 context 字段；schema AssetRef
@@ -856,9 +888,10 @@ int main(int argc, char** argv)
         // 启动期 namedMaterialInstances 是 one-shot snapshot，不含 DCC 导入的
         // assets/<Type>/*.material；接 resolver 让查表失败时按磁盘 lazy-create
         // 兜底，修复"导入模型保存后重启编辑器，material 显示 None"。
-        demoLoadOpts.materialResolver       =
-            [&editorHost](const std::string& id) { return ::EnsureMaterialInstance(editorHost, id); };
-        demoLoadOpts.extraSerializers       = editorHost.extraSerializers;
+        demoLoadOpts.materialResolver =
+            [&editorHost](const std::string& id)
+        { return ::EnsureMaterialInstance(editorHost, id); };
+        demoLoadOpts.extraSerializers = editorHost.extraSerializers;
         if (auto res = Scene::Load("assets/scenes/demo.scene.json",
                                    *editorHost.scene.pWorld, demoLoadOpts);
             res.IsErr())
@@ -873,10 +906,17 @@ int main(int argc, char** argv)
             // Layer Panel 看到完整列表（visible 默认 true，dirty 不变）。
             auto& reg = editorHost.scene.pWorld->Registry();
             using LC  = ::Orange::Engine::Scene::LayerComponent;
-            for (auto e : reg.view<LC>()) {
+            for (auto e : reg.view<LC>())
+            {
                 const auto& lc = reg.get<LC>(e);
-                if (lc.layerId.empty()) { continue; }
-                if (editorHost.scene.partition.HasLayer(lc.layerId)) { continue; }
+                if (lc.layerId.empty())
+                {
+                    continue;
+                }
+                if (editorHost.scene.partition.HasLayer(lc.layerId))
+                {
+                    continue;
+                }
                 ::Orange::Engine::Scene::LayerInfo info;
                 info.id          = lc.layerId;
                 info.displayName = lc.layerId;
@@ -902,14 +942,14 @@ int main(int argc, char** argv)
     // Save 完成后把 pWorld 指针恢复到原 demo world。tempWorld 析构时
     // RenderableComponent (POD) 不会 delete materialInstance 裸指针，无 dangling。
     {
-        namespace fs = std::filesystem;
+        namespace fs              = std::filesystem;
         const char* kShowcasePath = "assets/scenes/pbr_showcase.scene.json";
         if (!fs::exists(kShowcasePath))
         {
             World tempWorld;
             SeedPbrShowcaseWorld(tempWorld, editorHost.assets);
 
-            auto namedMap = BuildNamedMaterialInstances(editorHost.assets);
+            auto               namedMap = BuildNamedMaterialInstances(editorHost.assets);
             Scene::SaveOptions saveOpts{};
             saveOpts.assetRegistry          = editorHost.assets.pAssets.get();
             saveOpts.namedMaterialInstances = &namedMap;
@@ -932,7 +972,7 @@ int main(int argc, char** argv)
     // ---- Layer 注入 -----------------------------------------------------
     auto* pEditorLayerRaw = host->PushLayer(std::make_unique<EditorRenderLayer>(
         *host, *pRenderDevice, *pRenderer, imguiDescPool, vkDevice, editorHost));
-    auto* pEditorLayer = static_cast<EditorRenderLayer*>(pEditorLayerRaw);
+    auto* pEditorLayer    = static_cast<EditorRenderLayer*>(pEditorLayerRaw);
 
     // v0.6 c2：窗口 × 拦截。AppHost::Run 的循环结构是
     // `while (!ShouldClose && !exitRequested)`，先 check 后 OnUpdate ——
@@ -954,7 +994,7 @@ int main(int argc, char** argv)
     // 指针：non-capturing lambda 可按名引用静态变量、仍能转成 GLFW C 回调函数指针。
     static EditorHost* spEditorHost = &editorHost;
     glfwSetWindowCloseCallback(glfwWindow, [](GLFWwindow* w)
-    {
+                               {
         EditorHost* pHost = spEditorHost;
         if (pHost == nullptr) { return; }
         // 未保存确认拦截 = 场景 dirty 或材质有未写盘改动（facet 1：与 EditorRenderLayer
@@ -968,8 +1008,7 @@ int main(int argc, char** argv)
             {
                 pHost->scene.pendingCloseAction = PendingCloseAction::Exit;
             }
-        }
-    });
+        } });
 
     // v1.1 T2：OS 文件 drag-drop 路由。GLFW drop callback 在 glfwPollEvents
     // 主线程同步触发；ImGui_ImplGlfw_InitForVulkan(install_callbacks=true)
@@ -978,14 +1017,13 @@ int main(int argc, char** argv)
     // EditorHost.pendingImports；真正的 Dispatch 在 EditorRenderLayer::
     // ApplyPendingImports 帧末 drain（与 dialog 模态阻塞节奏一致）。
     glfwSetDropCallback(glfwWindow, [](GLFWwindow*, int count, const char** paths)
-    {
+                        {
         EditorHost* pHost = spEditorHost;
         if (pHost == nullptr || paths == nullptr) { return; }
         for (int i = 0; i < count; ++i)
         {
             if (paths[i] != nullptr) { pHost->pendingImports.emplace_back(paths[i]); }
-        }
-    });
+        } });
 
     // v0.8 Console 接 Core::Log：PushLayer 之后注册 sink，让 Core::Log
     // 写入路径并行 push 到 Editor Console ring buffer。layer 的析构（host
@@ -1055,13 +1093,16 @@ int main(int argc, char** argv)
     // ImGui_ImplVulkan_Shutdown 之前（backend 销毁后 RemoveTexture 失效）。
     // WaitIdle 已排空 GPU 工作，RemoveTexture 安全。editorHost 值成员析构发生
     // 在 main 返回时（晚于此），届时 thumbnails 已 reset，二次 Shutdown 幂等。
-    if (editorHost.thumbnails) { editorHost.thumbnails->Shutdown(); }
-    pRenderer->SetSwapchainOverlayCallback({});  // layer dtor 之外手工提前清
+    if (editorHost.thumbnails)
+    {
+        editorHost.thumbnails->Shutdown();
+    }
+    pRenderer->SetSwapchainOverlayCallback({}); // layer dtor 之外手工提前清
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    host.reset();   // → AppHost dtor → LayerStack dtor → EditorRenderLayer dtor
-                    //   （overlay callback 已提前清，dtor 再清一次是幂等的）
+    host.reset(); // → AppHost dtor → LayerStack dtor → EditorRenderLayer dtor
+                  //   （overlay callback 已提前清，dtor 再清一次是幂等的）
     DestroyImguiDescriptorPool(pfnGetInstanceProcAddr, vkInstance, vkDevice, imguiDescPool);
     pRenderer->Shutdown();
     pRenderer.reset();

@@ -45,65 +45,65 @@
 namespace Orange::Editor::ShaderMeta
 {
 
-using ::Orange::Engine::Render::MaterialUniformType;
+    using ::Orange::Engine::Render::MaterialUniformType;
 
-// 单字段 widget 类型。
-enum class UniformWidget : std::uint8_t
-{
-    Default,    // 按 type 选缺省 widget（DragFloat / InputInt / ColorEdit 等）
-    Hidden,     // 不渲染（Pipeline 自动 push 的字段如 uMVP / uModel）
-    Color,      // vec3 → ColorEdit3；vec4 → ColorEdit4
-    Slider,     // float / int + range → SliderFloat / SliderInt
-    Drag,       // float 系列 → DragFloat
-    Components, // vec4 拆 4 子字段独立 widget（uMRA = Metallic/Roughness/AO/Reserved）
-};
+    // 单字段 widget 类型。
+    enum class UniformWidget : std::uint8_t
+    {
+        Default,    // 按 type 选缺省 widget（DragFloat / InputInt / ColorEdit 等）
+        Hidden,     // 不渲染（Pipeline 自动 push 的字段如 uMVP / uModel）
+        Color,      // vec3 → ColorEdit3；vec4 → ColorEdit4
+        Slider,     // float / int + range → SliderFloat / SliderInt
+        Drag,       // float 系列 → DragFloat
+        Components, // vec4 拆 4 子字段独立 widget（uMRA = Metallic/Roughness/AO/Reserved）
+    };
 
-// `components` 模式下的单子字段元数据。
-struct ComponentMetadata
-{
-    std::string                              label;
-    UniformWidget                            widget{UniformWidget::Default};
-    std::optional<std::pair<float, float>>   range;
-    std::optional<float>                     step;
-    std::string                              tooltip;
-};
+    // `components` 模式下的单子字段元数据。
+    struct ComponentMetadata
+    {
+        std::string                            label;
+        UniformWidget                          widget{UniformWidget::Default};
+        std::optional<std::pair<float, float>> range;
+        std::optional<float>                   step;
+        std::string                            tooltip;
+    };
 
-// 单个 uniform 的完整 UI 元数据。
-struct UniformMetadata
-{
-    std::string                              name;          // GLSL uniform 标识符
-    MaterialUniformType                      type{MaterialUniformType::Float};
-    UniformWidget                            widget{UniformWidget::Default};
-    std::string                              displayName;   // UI 标签（空则用 name）
-    std::string                              tooltip;
-    std::optional<std::pair<float, float>>   range;
-    std::optional<float>                     step;
-    std::vector<ComponentMetadata>           components;    // 仅 widget==Components 时有效
+    // 单个 uniform 的完整 UI 元数据。
+    struct UniformMetadata
+    {
+        std::string                            name; // GLSL uniform 标识符
+        MaterialUniformType                    type{MaterialUniformType::Float};
+        UniformWidget                          widget{UniformWidget::Default};
+        std::string                            displayName; // UI 标签（空则用 name）
+        std::string                            tooltip;
+        std::optional<std::pair<float, float>> range;
+        std::optional<float>                   step;
+        std::vector<ComponentMetadata>         components; // 仅 widget==Components 时有效
 
-    // 默认值（向 MaterialInstance 注入的初始 override）。mat4 最多 16 float；
-    // 调用方按 type 决定读前 N 个。schema 内未声明时 hasDefault=false。
-    std::array<float, 16>                    defaultValue{};
-    bool                                     hasDefault{false};
-};
+        // 默认值（向 MaterialInstance 注入的初始 override）。mat4 最多 16 float；
+        // 调用方按 type 决定读前 N 个。schema 内未声明时 hasDefault=false。
+        std::array<float, 16> defaultValue{};
+        bool                  hasDefault{false};
+    };
 
-// 整个 .template.json 的元数据视图。
-struct ShaderTemplateMeta
-{
-    std::string                  templateName;
-    std::vector<UniformMetadata> uniforms;
-};
+    // 整个 .template.json 的元数据视图。
+    struct ShaderTemplateMeta
+    {
+        std::string                  templateName;
+        std::vector<UniformMetadata> uniforms;
+    };
 
-// 读取单个 .template.json 文件。失败 / 不存在 / schemaVersion 不兼容 →
-// nullopt + stderr 记录。v1.0 文件正常解析（editor / default 字段视作缺
-// 失，对应 widget=Default + hasDefault=false）。
-std::optional<ShaderTemplateMeta> LoadShaderTemplateMeta(
-    const std::filesystem::path& jsonPath);
+    // 读取单个 .template.json 文件。失败 / 不存在 / schemaVersion 不兼容 →
+    // nullopt + stderr 记录。v1.0 文件正常解析（editor / default 字段视作缺
+    // 失，对应 widget=Default + hasDefault=false）。
+    std::optional<ShaderTemplateMeta> LoadShaderTemplateMeta(
+        const std::filesystem::path& jsonPath);
 
-// 扫描目录下所有 `*.template.json`，按字典序返回元数据列表。失败的文件
-// 跳过 + log，与 MaterialSystem::RegisterTemplatesFromDirectory 同款。
-std::vector<ShaderTemplateMeta> LoadAllShaderTemplateMetas(
-    const std::filesystem::path& dir);
+    // 扫描目录下所有 `*.template.json`，按字典序返回元数据列表。失败的文件
+    // 跳过 + log，与 MaterialSystem::RegisterTemplatesFromDirectory 同款。
+    std::vector<ShaderTemplateMeta> LoadAllShaderTemplateMetas(
+        const std::filesystem::path& dir);
 
-}  // namespace Orange::Editor::ShaderMeta
+} // namespace Orange::Editor::ShaderMeta
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_SHADER_TEMPLATE_META_IO_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_SHADER_TEMPLATE_META_IO_H

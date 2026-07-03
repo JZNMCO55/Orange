@@ -17,13 +17,12 @@ public:
     LambdaCommand(const char*           type,
                   std::function<void()> executeFn,
                   std::function<void()> undoFn)
-        : mType(type)
-        , mExecuteFn(std::move(executeFn))
-        , mUndoFn(std::move(undoFn))
-    {}
+        : mType(type), mExecuteFn(std::move(executeFn)), mUndoFn(std::move(undoFn))
+    {
+    }
 
-    void Execute() override { mExecuteFn(); }
-    void Undo()    override { mUndoFn(); }
+    void        Execute() override { mExecuteFn(); }
+    void        Undo() override { mUndoFn(); }
     const char* GetType() const override { return mType; }
 
 private:
@@ -32,4 +31,4 @@ private:
     std::function<void()> mUndoFn;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_LAMBDACOMMAND_H
+#endif // ORANGE_EDITOR_COMMAND_LAMBDACOMMAND_H

@@ -7,7 +7,7 @@
 #include "../EditorRenderLayer.h"
 
 #include "../CoplanarDetector.h"
-#include "../PrefabOverrideUI.h"  // C1.1 prefab 实例 banner（Apply / Revert All / Refresh）
+#include "../PrefabOverrideUI.h" // C1.1 prefab 实例 banner（Apply / Revert All / Refresh）
 #include "../schema/ComponentSchemaRegistry.h"
 #include "../schema/SchemaInspector.h"
 #include "../theme/EditorTheme.h"
@@ -60,14 +60,16 @@ void EditorRenderLayer::DrawInspectorPanel()
         }
     }
 
-    if (mHost.scene.pWorld == nullptr || !mHost.selection.selectedEntity.IsValid()) {
+    if (mHost.scene.pWorld == nullptr || !mHost.selection.selectedEntity.IsValid())
+    {
         ImGui::TextDisabled("(select an entity)");
         ImGui::End();
         return;
     }
     // Entity::IsValid() 只检查是否为哨兵 null 值；Undo 可能已销毁该实体但
     // 未清掉句柄。World::IsValid 走 registry.valid()，可正确甄别死实体。
-    if (!mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity)) {
+    if (!mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity))
+    {
         mHost.selection.selectedEntity            = Orange::Engine::Entity::Invalid();
         mHost.selection.transformEulerCacheEntity = Orange::Engine::Entity::Invalid();
         ImGui::TextDisabled("(select an entity)");
@@ -92,12 +94,19 @@ void EditorRenderLayer::DrawInspectorPanel()
 
         auto& world = *mHost.scene.pWorld;
         // 选区内某 schema 的持有数（primary + 有效 additional）。
-        auto countHaving = [&](const auto& schema) -> std::size_t {
-            if (schema.has == nullptr) { return 0; }
+        auto countHaving = [&](const auto& schema) -> std::size_t
+        {
+            if (schema.has == nullptr)
+            {
+                return 0;
+            }
             std::size_t n = schema.has(world, e) ? 1u : 0u;
             for (const auto a : mHost.selection.additionalSelectedEntities)
             {
-                if (world.IsValid(a) && schema.has(world, a)) { ++n; }
+                if (world.IsValid(a) && schema.has(world, a))
+                {
+                    ++n;
+                }
             }
             return n;
         };
@@ -107,18 +116,27 @@ void EditorRenderLayer::DrawInspectorPanel()
         for (const auto& schema : Orange::Editor::Schema::ComponentSchemaRegistry::Instance().All())
         {
             const std::size_t n = countHaving(schema);
-            if (n == 0) { continue; }
+            if (n == 0)
+            {
+                continue;
+            }
             const char* nm = (schema.displayName != nullptr)
-                           ? schema.displayName
-                           : (schema.typeName ? schema.typeName : "?");
+                                 ? schema.displayName
+                                 : (schema.typeName ? schema.typeName : "?");
             if (n == selCount)
             {
-                if (!commonList.empty()) { commonList += ", "; }
+                if (!commonList.empty())
+                {
+                    commonList += ", ";
+                }
                 commonList += nm;
             }
             else
             {
-                if (!partialList.empty()) { partialList += ", "; }
+                if (!partialList.empty())
+                {
+                    partialList += ", ";
+                }
                 partialList += nm;
                 partialList += " (" + std::to_string(n) + "/" + std::to_string(selCount) + ")";
             }
@@ -216,7 +234,8 @@ void EditorRenderLayer::DrawInspectorPanel()
 
     // Play / Paused 期间所有 component 字段只读（灰显但可见）。
     const bool canEdit = (mHost.scene.playState == PlayState::Edit);
-    if (!canEdit) {
+    if (!canEdit)
+    {
         ImGui::TextDisabled("[ Read-only in Play / Paused ]");
         ImGui::Separator();
     }
@@ -246,22 +265,30 @@ void EditorRenderLayer::DrawInspectorPanel()
     ImGui::Separator();
     const std::string addComponentLabel =
         std::string(Orange::Editor::Theme::Icon::GetAdd()) + " Add Component";
-    if (ImGui::Button(addComponentLabel.c_str())) {
+    if (ImGui::Button(addComponentLabel.c_str()))
+    {
         ImGui::OpenPopup("##add_component");
     }
-    if (ImGui::BeginPopup("##add_component")) {
+    if (ImGui::BeginPopup("##add_component"))
+    {
         auto* pWorld = mHost.scene.pWorld.get();
         if (pWorld != nullptr)
         {
-            for (const auto& schema : schemaReg.All()) {
-                if (schema.add == nullptr) { continue; }        // 未挂 Addable
-                if (schema.has != nullptr && schema.has(*pWorld, e)) {
-                    continue;                                    // 已挂
+            for (const auto& schema : schemaReg.All())
+            {
+                if (schema.add == nullptr)
+                {
+                    continue;
+                } // 未挂 Addable
+                if (schema.has != nullptr && schema.has(*pWorld, e))
+                {
+                    continue; // 已挂
                 }
                 const char* label = (schema.displayName != nullptr)
-                                  ? schema.displayName
-                                  : (schema.typeName ? schema.typeName : "?");
-                if (ImGui::MenuItem(label)) {
+                                        ? schema.displayName
+                                        : (schema.typeName ? schema.typeName : "?");
+                if (ImGui::MenuItem(label))
+                {
                     schema.add(mHost, e);
                     mHost.cmdStack.Clear();
                 }

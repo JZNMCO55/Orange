@@ -30,26 +30,26 @@
 namespace Orange::Editor::Plugin
 {
 
-class AudioSourceInspectorPlugin : public IEditorInspectorPlugin
-{
-public:
-    // 按 schema.typeName == "AudioSource" 字符串比较（与 RegisterAudioSource
-    // ComponentSchema 内字面量保持一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class AudioSourceInspectorPlugin : public IEditorInspectorPlugin
+    {
+    public:
+        // 按 schema.typeName == "AudioSource" 字符串比较（与 RegisterAudioSource
+        // ComponentSchema 内字面量保持一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // 段末追加 Play / Stop 试播按钮；无 sound 时按钮 disabled；
-    // host.audioEngine 未初始化（无声卡）时显示 TextDisabled 提示。
-    void ParseEnd(EditorHost&                                            host,
-                  Orange::Engine::Entity                                 entity,
-                  const Orange::Editor::Schema::ComponentSchema&         schema,
-                  void*                                                  component) override;
+        // 段末追加 Play / Stop 试播按钮；无 sound 时按钮 disabled；
+        // host.audioEngine 未初始化（无声卡）时显示 TextDisabled 提示。
+        void ParseEnd(EditorHost&                                    host,
+                      Orange::Engine::Entity                         entity,
+                      const Orange::Editor::Schema::ComponentSchema& schema,
+                      void*                                          component) override;
 
-private:
-    // 试播实例 —— 跨帧持久，让"按 Play → 持续播放 → 按 Stop / 改字段重
-    // 触发"路径有 instance 可控。空 unique_ptr 视为"无活跃试播"。
-    std::unique_ptr<Orange::Engine::Audio::SoundInstance> mpTestInstance;
-};
+    private:
+        // 试播实例 —— 跨帧持久，让"按 Play → 持续播放 → 按 Stop / 改字段重
+        // 触发"路径有 instance 可控。空 unique_ptr 视为"无活跃试播"。
+        std::unique_ptr<Orange::Engine::Audio::SoundInstance> mpTestInstance;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_AUDIO_SOURCE_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_AUDIO_SOURCE_INSPECTOR_PLUGIN_H

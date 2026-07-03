@@ -3,10 +3,10 @@
 namespace Orange::Engine
 {
 
-Layer::Layer(std::string_view name) : mName(name)
-{
-}
+    Layer::Layer(std::string_view name) : mName(name)
+    {
+    }
 
-Layer::~Layer() = default;
+    Layer::~Layer() = default;
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine

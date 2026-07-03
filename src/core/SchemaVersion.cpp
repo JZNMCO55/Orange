@@ -9,14 +9,11 @@
 namespace Orange::Engine
 {
 
-SchemaVersion::SchemaVersion(std::string_view namespaceName,
-                             std::uint16_t major,
-                             std::uint16_t minor)
-    : mNamespace(namespaceName)
-    , mNamespaceHash(Fnv1a64(namespaceName))
-    , mMajor(major)
-    , mMinor(minor)
-{
-}
+    SchemaVersion::SchemaVersion(std::string_view namespaceName,
+                                 std::uint16_t    major,
+                                 std::uint16_t    minor)
+        : mNamespace(namespaceName), mNamespaceHash(Fnv1a64(namespaceName)), mMajor(major), mMinor(minor)
+    {
+    }
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine

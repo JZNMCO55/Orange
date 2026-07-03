@@ -11,9 +11,9 @@
 
 #include "orange/engine/animation/BlendSpaceAnimator.h"
 
-#include <glm/geometric.hpp>       // glm::length
-#include <glm/gtc/quaternion.hpp>  // glm::angleAxis
-#include <glm/trigonometric.hpp>   // glm::radians
+#include <glm/geometric.hpp>      // glm::length
+#include <glm/gtc/quaternion.hpp> // glm::angleAxis
+#include <glm/trigonometric.hpp>  // glm::radians
 
 #include <cassert>
 #include <cmath>
@@ -27,73 +27,73 @@ namespace Scene = ::Orange::Engine::Scene;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool Near(float a, float b, float eps = 1e-4f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-bool NearV3(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
-{
-    return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
-}
+    bool NearV3(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
+    {
+        return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
+    }
 
-bool NearQuat(const glm::quat& a, const glm::quat& b, float eps = 1e-4f)
-{
-    return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps) && Near(a.w, b.w, eps);
-}
+    bool NearQuat(const glm::quat& a, const glm::quat& b, float eps = 1e-4f)
+    {
+        return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps) && Near(a.w, b.w, eps);
+    }
 
-Anim::Keyframe LinKey(float time, glm::vec4 value)
-{
-    Anim::Keyframe k;
-    k.time   = time;
-    k.value  = value;
-    k.interp = Anim::InterpMode::Linear;
-    return k;
-}
+    Anim::Keyframe LinKey(float time, glm::vec4 value)
+    {
+        Anim::Keyframe k;
+        k.time   = time;
+        k.value  = value;
+        k.interp = Anim::InterpMode::Linear;
+        return k;
+    }
 
-Anim::AnimationTrack PosYTrack(std::vector<Anim::Keyframe> keys)
-{
-    Anim::AnimationTrack t;
-    t.targetName = "position.y";
-    t.valueType  = Anim::TrackValueType::Float;
-    t.keys       = std::move(keys);
-    return t;
-}
+    Anim::AnimationTrack PosYTrack(std::vector<Anim::Keyframe> keys)
+    {
+        Anim::AnimationTrack t;
+        t.targetName = "position.y";
+        t.valueType  = Anim::TrackValueType::Float;
+        t.keys       = std::move(keys);
+        return t;
+    }
 
-// 常量 clip：position.y 恒为 y（两端同值），用于验证参数轴混合（与 phase 无关）。
-Anim::AnimationClip ConstPosY(float y, float dur = 1.0f)
-{
-    Anim::AnimationClip c;
-    c.duration = dur;
-    c.tracks.push_back(PosYTrack({LinKey(0.0f, glm::vec4(y, 0, 0, 0)),
-                                  LinKey(dur, glm::vec4(y, 0, 0, 0))}));
-    return c;
-}
+    // 常量 clip：position.y 恒为 y（两端同值），用于验证参数轴混合（与 phase 无关）。
+    Anim::AnimationClip ConstPosY(float y, float dur = 1.0f)
+    {
+        Anim::AnimationClip c;
+        c.duration = dur;
+        c.tracks.push_back(PosYTrack({LinKey(0.0f, glm::vec4(y, 0, 0, 0)),
+                                      LinKey(dur, glm::vec4(y, 0, 0, 0))}));
+        return c;
+    }
 
-// 斜坡 clip：position.y 在 dur 内从 y0 线性到 y1，用于验证 phase-normalized 时间。
-Anim::AnimationClip RampPosY(float y0, float y1, float dur = 1.0f)
-{
-    Anim::AnimationClip c;
-    c.duration = dur;
-    c.tracks.push_back(PosYTrack({LinKey(0.0f, glm::vec4(y0, 0, 0, 0)),
-                                  LinKey(dur, glm::vec4(y1, 0, 0, 0))}));
-    return c;
-}
+    // 斜坡 clip：position.y 在 dur 内从 y0 线性到 y1，用于验证 phase-normalized 时间。
+    Anim::AnimationClip RampPosY(float y0, float y1, float dur = 1.0f)
+    {
+        Anim::AnimationClip c;
+        c.duration = dur;
+        c.tracks.push_back(PosYTrack({LinKey(0.0f, glm::vec4(y0, 0, 0, 0)),
+                                      LinKey(dur, glm::vec4(y1, 0, 0, 0))}));
+        return c;
+    }
 
-Scene::TransformComponent MakePose(float posY, const glm::quat& rot = glm::quat(1, 0, 0, 0))
-{
-    Scene::TransformComponent p;
-    p.position = glm::vec3(0.0f, posY, 0.0f);
-    p.rotation = rot;
-    return p;
-}
+    Scene::TransformComponent MakePose(float posY, const glm::quat& rot = glm::quat(1, 0, 0, 0))
+    {
+        Scene::TransformComponent p;
+        p.position = glm::vec3(0.0f, posY, 0.0f);
+        p.rotation = rot;
+        return p;
+    }
 
-glm::quat RotZ(float degrees)
-{
-    return glm::angleAxis(glm::radians(degrees), glm::vec3(0.0f, 0.0f, 1.0f));
-}
+    glm::quat RotZ(float degrees)
+    {
+        return glm::angleAxis(glm::radians(degrees), glm::vec3(0.0f, 0.0f, 1.0f));
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -105,8 +105,8 @@ int main()
 
     // ===== 1. BlendPoses：端点 / 中点 / 权重归一化 / N=3 / rotation nlerp =====
     {
-        const Scene::TransformComponent poseA = MakePose(0.0f);
-        const Scene::TransformComponent poseB = MakePose(10.0f);
+        const Scene::TransformComponent poseA    = MakePose(0.0f);
+        const Scene::TransformComponent poseB    = MakePose(10.0f);
         const Scene::TransformComponent poses[2] = {poseA, poseB};
         Scene::TransformComponent       out;
 
@@ -165,7 +165,7 @@ int main()
         space.samples.push_back(BlendSample1D{5.0f, ConstPosY(5.0f)});   // walk
         space.samples.push_back(BlendSample1D{10.0f, ConstPosY(10.0f)}); // run
 
-        const Scene::TransformComponent baseline;  // 默认 identity
+        const Scene::TransformComponent baseline; // 默认 identity
         Scene::TransformComponent       out;
 
         // 精确命中样本点。
@@ -225,9 +225,9 @@ int main()
 
     // ===== 4. ApplyAdditivePose：差量 position + 差量旋转 slerp =====
     {
-        const Scene::TransformComponent base    = MakePose(10.0f);
+        const Scene::TransformComponent base     = MakePose(10.0f);
         const Scene::TransformComponent additive = MakePose(3.0f);
-        const Scene::TransformComponent ref     = MakePose(1.0f);
+        const Scene::TransformComponent ref      = MakePose(1.0f);
         Scene::TransformComponent       out;
 
         Anim::ApplyAdditivePose(base, additive, ref, 1.0f, out);
@@ -236,9 +236,9 @@ int main()
         assert(Near(out.position.y, 11.0f) && "weight=0.5 → 10+0.5*(3-1)=11");
 
         // rotation：base identity + additive 90°Z + ref identity + weight=1 → out ≈ 90°Z。
-        const Scene::TransformComponent baseR    = MakePose(0.0f, glm::quat(1, 0, 0, 0));
+        const Scene::TransformComponent baseR     = MakePose(0.0f, glm::quat(1, 0, 0, 0));
         const Scene::TransformComponent additiveR = MakePose(0.0f, RotZ(90.0f));
-        const Scene::TransformComponent refR     = MakePose(0.0f, glm::quat(1, 0, 0, 0));
+        const Scene::TransformComponent refR      = MakePose(0.0f, glm::quat(1, 0, 0, 0));
         Anim::ApplyAdditivePose(baseR, additiveR, refR, 1.0f, out);
         const glm::vec3 dir = out.rotation * glm::vec3(1.0f, 0.0f, 0.0f);
         assert(NearV3(dir, glm::vec3(0.0f, 1.0f, 0.0f), 1e-3f) &&
@@ -276,7 +276,7 @@ int main()
         Anim::BlendSpaceAnimator animator2(space, &tc);
         animator2.SetLoop(false);
         animator2.SetBlendParameter(5.0f);
-        animator2.Tick(5.0f);  // phase = 5/1 clamp 1.0
+        animator2.Tick(5.0f); // phase = 5/1 clamp 1.0
         assert(Near(animator2.Phase(), 1.0f) && "非 loop → phase clamp 到 1");
         assert(animator2.IsFinished() && "非 loop phase>=1 → finished");
 
@@ -331,9 +331,9 @@ int main()
 
         // animator：SetBlendParameter(NaN) + Tick 不崩。
         Scene::TransformComponent tc;
-        Anim::BlendSpaceAnimator animator(space, &tc);
+        Anim::BlendSpaceAnimator  animator(space, &tc);
         animator.SetBlendParameter(kNan);
-        animator.Tick(0.1f);  // 修复前此处经 BlendedClipDuration1D + EvaluateBlendSpace1D 越界崩
+        animator.Tick(0.1f); // 修复前此处经 BlendedClipDuration1D + EvaluateBlendSpace1D 越界崩
         assert(tc.position.y == tc.position.y && "NaN 参数 Tick 输出非 NaN（不崩）");
         std::fprintf(stdout, "  [PASS] NaN 参数防护（1D/2D/animator 不越界不崩）\n");
     }
@@ -351,7 +351,7 @@ int main()
         space.samples.push_back({0.0f, clipNoDur});
 
         Scene::TransformComponent tc;
-        Anim::BlendSpaceAnimator animator(space, &tc);
+        Anim::BlendSpaceAnimator  animator(space, &tc);
         animator.SetBlendParameter(0.0f);
         animator.Tick(0.5f);
         // 自动补 duration=1.0 → phase 推进 0.5、采样 t=0.5 → ramp posY=5（非冻结的 0）。

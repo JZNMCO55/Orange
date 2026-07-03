@@ -67,113 +67,113 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-// ABGR packed：低 8 位 R，高 8 位 A（0xAA_BB_GG_RR）。
-constexpr std::uint32_t kRed    = 0xFF0000FFu;  // R=FF
-constexpr std::uint32_t kGreen  = 0xFF00FF00u;  // G=FF
-constexpr std::uint32_t kBlue   = 0xFFFF0000u;  // B=FF
-constexpr std::uint32_t kWhite  = 0xFFFFFFFFu;
-constexpr std::uint32_t kOrange = 0xFF1A78FFu;  // R=FF G=78 B=1A — 暖橙
+    // ABGR packed：低 8 位 R，高 8 位 A（0xAA_BB_GG_RR）。
+    constexpr std::uint32_t kRed    = 0xFF0000FFu; // R=FF
+    constexpr std::uint32_t kGreen  = 0xFF00FF00u; // G=FF
+    constexpr std::uint32_t kBlue   = 0xFFFF0000u; // B=FF
+    constexpr std::uint32_t kWhite  = 0xFFFFFFFFu;
+    constexpr std::uint32_t kOrange = 0xFF1A78FFu; // R=FF G=78 B=1A — 暖橙
 
-// 6 面 24 顶点立方体（与 sample 04 同款，简化版只保留单一材质 UV 全 1）。
-std::unique_ptr<MeshAsset> MakeUnitCubeMesh()
-{
-    constexpr float h = 0.5f;
-    std::array<std::array<VertexPosition3, 4>, 6> faces = {{
-        {{ { h, -h,  h}, { h, -h, -h}, { h,  h, -h}, { h,  h,  h} }},  // +X
-        {{ {-h, -h, -h}, {-h, -h,  h}, {-h,  h,  h}, {-h,  h, -h} }},  // -X
-        {{ {-h,  h,  h}, { h,  h,  h}, { h,  h, -h}, {-h,  h, -h} }},  // +Y
-        {{ {-h, -h, -h}, { h, -h, -h}, { h, -h,  h}, {-h, -h,  h} }},  // -Y
-        {{ {-h, -h,  h}, { h, -h,  h}, { h,  h,  h}, {-h,  h,  h} }},  // +Z
-        {{ { h, -h, -h}, {-h, -h, -h}, {-h,  h, -h}, { h,  h, -h} }},  // -Z
-    }};
-
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24);
-    uvs.reserve(24);
-    indices.reserve(36);
-
-    for (const auto& face : faces)
+    // 6 面 24 顶点立方体（与 sample 04 同款，简化版只保留单一材质 UV 全 1）。
+    std::unique_ptr<MeshAsset> MakeUnitCubeMesh()
     {
-        const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
-        for (int i = 0; i < 4; ++i)
+        constexpr float                               h     = 0.5f;
+        std::array<std::array<VertexPosition3, 4>, 6> faces = {{
+            {{{h, -h, h}, {h, -h, -h}, {h, h, -h}, {h, h, h}}},     // +X
+            {{{-h, -h, -h}, {-h, -h, h}, {-h, h, h}, {-h, h, -h}}}, // -X
+            {{{-h, h, h}, {h, h, h}, {h, h, -h}, {-h, h, -h}}},     // +Y
+            {{{-h, -h, -h}, {h, -h, -h}, {h, -h, h}, {-h, -h, h}}}, // -Y
+            {{{-h, -h, h}, {h, -h, h}, {h, h, h}, {-h, h, h}}},     // +Z
+            {{{h, -h, -h}, {-h, -h, -h}, {-h, h, -h}, {h, h, -h}}}, // -Z
+        }};
+
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+
+        for (const auto& face : faces)
         {
-            positions.push_back(face[i]);
-            uvs.push_back({0.0f, 0.0f});
+            const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
+            for (int i = 0; i < 4; ++i)
+            {
+                positions.push_back(face[i]);
+                uvs.push_back({0.0f, 0.0f});
+            }
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 1);
+            indices.push_back(base + 0);
+            indices.push_back(base + 3);
+            indices.push_back(base + 2);
         }
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 1);
-        indices.push_back(base + 0);
-        indices.push_back(base + 3);
-        indices.push_back(base + 2);
+
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, Entity cube)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mCube(cube) {}
-
-    void OnUpdate(const FrameContext& frame) override
+    class RenderLayer : public Layer
     {
-        // cube 绕非主轴匀速旋转 —— sample 04 同款节奏。
-        if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, Entity cube)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mCube(cube) {}
+
+        void OnUpdate(const FrameContext& frame) override
         {
-            const float     angle = frame.time.totalSeconds * 0.6f;
-            const glm::vec3 axis  = glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f));
-            xf->rotation          = glm::angleAxis(angle, axis);
+            // cube 绕非主轴匀速旋转 —— sample 04 同款节奏。
+            if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+            {
+                const float     angle = frame.time.totalSeconds * 0.6f;
+                const glm::vec3 axis  = glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f));
+                xf->rotation          = glm::angleAxis(angle, axis);
+            }
+
+            // 提交本帧 debug 几何。
+            if (auto* dbg = mPipeline.GetDebugDrawScene())
+            {
+                // 1. AABB（紧贴 cube 外，1.05 倍放大）
+                const glm::vec3 aabbHalf{0.525f};
+                dbg->AddAabb(-aabbHalf, aabbHalf, kGreen);
+
+                // 2. wireframe sphere（半径 1.0，包住 cube + AABB）
+                dbg->AddSphere(glm::vec3(0.0f), 1.0f, kWhite, 16);
+
+                // 3. 坐标轴 3 条线（从原点 → 单位向量）
+                dbg->AddLine(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), kRed);
+                dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), kGreen);
+                dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), kBlue);
+
+                // 4. 一个填充三角形（cube 正上方 1.5 单位的橙色标记）
+                dbg->AddTriangle(glm::vec3(-0.2f, 1.5f, 0.0f),
+                                 glm::vec3(0.2f, 1.5f, 0.0f),
+                                 glm::vec3(0.0f, 1.8f, 0.0f),
+                                 kOrange);
+            }
+
+            mPipeline.Render(mWorld);
         }
 
-        // 提交本帧 debug 几何。
-        if (auto* dbg = mPipeline.GetDebugDrawScene())
+        bool OnEvent(const Platform::WindowEvent& event) override
         {
-            // 1. AABB（紧贴 cube 外，1.05 倍放大）
-            const glm::vec3 aabbHalf{0.525f};
-            dbg->AddAabb(-aabbHalf, aabbHalf, kGreen);
-
-            // 2. wireframe sphere（半径 1.0，包住 cube + AABB）
-            dbg->AddSphere(glm::vec3(0.0f), 1.0f, kWhite, 16);
-
-            // 3. 坐标轴 3 条线（从原点 → 单位向量）
-            dbg->AddLine(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), kRed);
-            dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), kGreen);
-            dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), kBlue);
-
-            // 4. 一个填充三角形（cube 正上方 1.5 单位的橙色标记）
-            dbg->AddTriangle(glm::vec3(-0.2f, 1.5f, 0.0f),
-                             glm::vec3( 0.2f, 1.5f, 0.0f),
-                             glm::vec3( 0.0f, 1.8f, 0.0f),
-                             kOrange);
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
         }
 
-        mPipeline.Render(mWorld);
-    }
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+        Entity    mCube;
+    };
 
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
-        {
-            mPipeline.OnResize(resize->width, resize->height);
-        }
-        return false;
-    }
-
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-    Entity    mCube;
-};
-
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -250,17 +250,16 @@ int main()
 
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(2.8f, 2.0f, 3.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(2.8f, 2.0f, 3.0f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 
     Pipeline pipeline;
-    auto initResult = pipeline.Initialize(host->GetWindow(), assets);
+    auto     initResult = pipeline.Initialize(host->GetWindow(), assets);
     if (initResult.IsErr())
     {
         std::fprintf(stderr, "Pipeline::Initialize failed (code=%u)\n",

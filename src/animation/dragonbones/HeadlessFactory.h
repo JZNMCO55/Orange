@@ -18,43 +18,43 @@
 namespace Orange::Engine::Animation::DragonBonesBackend
 {
 
-class HeadlessFactory final : public dragonBones::BaseFactory
-{
-public:
-    // BaseFactory 默认 ctor 用 _jsonParser；本类显式让 BinaryDataParser
-    // 也可用：parseDragonBonesData 默认走 JSONDataParser，调用方需要
-    // 二进制 .dbbin 路径时通过 dataParser 参数传 BinaryDataParser。
-    explicit HeadlessFactory(dragonBones::DragonBones* runtime);
-    ~HeadlessFactory() override = default;
+    class HeadlessFactory final : public dragonBones::BaseFactory
+    {
+    public:
+        // BaseFactory 默认 ctor 用 _jsonParser；本类显式让 BinaryDataParser
+        // 也可用：parseDragonBonesData 默认走 JSONDataParser，调用方需要
+        // 二进制 .dbbin 路径时通过 dataParser 参数传 BinaryDataParser。
+        explicit HeadlessFactory(dragonBones::DragonBones* runtime);
+        ~HeadlessFactory() override = default;
 
-    HeadlessFactory(const HeadlessFactory&)            = delete;
-    HeadlessFactory& operator=(const HeadlessFactory&) = delete;
+        HeadlessFactory(const HeadlessFactory&)            = delete;
+        HeadlessFactory& operator=(const HeadlessFactory&) = delete;
 
-protected:
-    // _buildTextureAtlasData：本期不调（暂不做贴图）；保留实现
-    // 以满足纯虚要求 + 防御未来误调。textureAtlasData != nullptr 时按
-    // upstream 例约定"已有 atlas 数据，本函数挂 GPU 贴图"——本侧无
-    // GPU 路径，原值返回不动；nullptr 时返回 borrowObject<HeadlessTextureAtlasData>。
-    dragonBones::TextureAtlasData* _buildTextureAtlasData(
-        dragonBones::TextureAtlasData* textureAtlasData,
-        void*                          textureAtlas) const override;
+    protected:
+        // _buildTextureAtlasData：本期不调（暂不做贴图）；保留实现
+        // 以满足纯虚要求 + 防御未来误调。textureAtlasData != nullptr 时按
+        // upstream 例约定"已有 atlas 数据，本函数挂 GPU 贴图"——本侧无
+        // GPU 路径，原值返回不动；nullptr 时返回 borrowObject<HeadlessTextureAtlasData>。
+        dragonBones::TextureAtlasData* _buildTextureAtlasData(
+            dragonBones::TextureAtlasData* textureAtlasData,
+            void*                          textureAtlas) const override;
 
-    // _buildArmature：从对象池借 Armature + 创建 HeadlessArmatureProxy，
-    // armature->init 把 proxy 接上。返回的 Armature 由调用方（buildArmature）
-    // 推进生命周期；HeadlessArmatureProxy 由 Armature 持有，dispose 时一
-    // 起释放（dbClear → 我们自己 delete proxy）——见 cpp 实现。
-    dragonBones::Armature* _buildArmature(
-        const dragonBones::BuildArmaturePackage& dataPackage) const override;
+        // _buildArmature：从对象池借 Armature + 创建 HeadlessArmatureProxy，
+        // armature->init 把 proxy 接上。返回的 Armature 由调用方（buildArmature）
+        // 推进生命周期；HeadlessArmatureProxy 由 Armature 持有，dispose 时一
+        // 起释放（dbClear → 我们自己 delete proxy）——见 cpp 实现。
+        dragonBones::Armature* _buildArmature(
+            const dragonBones::BuildArmaturePackage& dataPackage) const override;
 
-    // _buildSlot：从对象池借 HeadlessSlot；rawDisplay / meshDisplay 都传
-    // nullptr（Slot::init 接受 void* nullable）。HeadlessSlot 的 _initDisplay
-    // 全部 no-op，所以传 nullptr 完全合法。
-    dragonBones::Slot* _buildSlot(
-        const dragonBones::BuildArmaturePackage& dataPackage,
-        const dragonBones::SlotData*             slotData,
-        dragonBones::Armature*                   armature) const override;
-};
+        // _buildSlot：从对象池借 HeadlessSlot；rawDisplay / meshDisplay 都传
+        // nullptr（Slot::init 接受 void* nullable）。HeadlessSlot 的 _initDisplay
+        // 全部 no-op，所以传 nullptr 完全合法。
+        dragonBones::Slot* _buildSlot(
+            const dragonBones::BuildArmaturePackage& dataPackage,
+            const dragonBones::SlotData*             slotData,
+            dragonBones::Armature*                   armature) const override;
+    };
 
-}  // namespace Orange::Engine::Animation::DragonBonesBackend
+} // namespace Orange::Engine::Animation::DragonBonesBackend
 
-#endif  // ORANGE_ENGINE_SRC_ANIMATION_DRAGONBONES_HEADLESS_FACTORY_H
+#endif // ORANGE_ENGINE_SRC_ANIMATION_DRAGONBONES_HEADLESS_FACTORY_H

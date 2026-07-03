@@ -28,47 +28,47 @@
 namespace Orange::Engine::Asset
 {
 
-// 单个 armature 的元数据快照——loader 解析时一次性收集；运行期不再变更。
-struct ORANGE_ENGINE_API ArmatureMeta
-{
-    std::string              name;            // armature 名字（factory.buildArmature 用）
-    std::vector<std::string> boneNames;       // index 与 runtime bone vector 顺序对齐
-    std::vector<std::string> animationNames;  // 可播放动画名清单
-};
+    // 单个 armature 的元数据快照——loader 解析时一次性收集；运行期不再变更。
+    struct ORANGE_ENGINE_API ArmatureMeta
+    {
+        std::string              name;           // armature 名字（factory.buildArmature 用）
+        std::vector<std::string> boneNames;      // index 与 runtime bone vector 顺序对齐
+        std::vector<std::string> animationNames; // 可播放动画名清单
+    };
 
-class ORANGE_ENGINE_API SkeletonAsset
-{
-public:
-    SkeletonAsset();  // 空 skeleton，仅供占位 / 错误路径返回
-    SkeletonAsset(std::string dragonBonesName, std::vector<ArmatureMeta> armatures);
-    ~SkeletonAsset();
+    class ORANGE_ENGINE_API SkeletonAsset
+    {
+    public:
+        SkeletonAsset(); // 空 skeleton，仅供占位 / 错误路径返回
+        SkeletonAsset(std::string dragonBonesName, std::vector<ArmatureMeta> armatures);
+        ~SkeletonAsset();
 
-    SkeletonAsset(const SkeletonAsset&)            = delete;
-    SkeletonAsset& operator=(const SkeletonAsset&) = delete;
+        SkeletonAsset(const SkeletonAsset&)            = delete;
+        SkeletonAsset& operator=(const SkeletonAsset&) = delete;
 
-    SkeletonAsset(SkeletonAsset&&) noexcept;
-    SkeletonAsset& operator=(SkeletonAsset&&) noexcept;
+        SkeletonAsset(SkeletonAsset&&) noexcept;
+        SkeletonAsset& operator=(SkeletonAsset&&) noexcept;
 
-    // factory 内 DragonBonesData 缓存键。SkeletalAnimator 用它 +
-    // armatureName 调 context.BuildArmature 查回真 armature data。
-    std::string_view DragonBonesName() const noexcept;
+        // factory 内 DragonBonesData 缓存键。SkeletalAnimator 用它 +
+        // armatureName 调 context.BuildArmature 查回真 armature data。
+        std::string_view DragonBonesName() const noexcept;
 
-    // 本 skeleton 文件含的所有 armature 元数据。索引顺序 = .json 内
-    // armature[] 数组顺序（runtime parse 维持稳定）。
-    std::span<const ArmatureMeta> Armatures() const noexcept;
+        // 本 skeleton 文件含的所有 armature 元数据。索引顺序 = .json 内
+        // armature[] 数组顺序（runtime parse 维持稳定）。
+        std::span<const ArmatureMeta> Armatures() const noexcept;
 
-    // 按名查找 armature 元数据；找不到 → nullptr。便利 helper，调用方
-    // 也可以自己遍历 Armatures()。
-    const ArmatureMeta* FindArmature(std::string_view name) const noexcept;
+        // 按名查找 armature 元数据；找不到 → nullptr。便利 helper，调用方
+        // 也可以自己遍历 Armatures()。
+        const ArmatureMeta* FindArmature(std::string_view name) const noexcept;
 
-    // 骨架是否承载有效内容。loader 失败时返回的 stub asset 在此为 false。
-    bool Empty() const noexcept;
+        // 骨架是否承载有效内容。loader 失败时返回的 stub asset 在此为 false。
+        bool Empty() const noexcept;
 
-private:
-    std::string               mDragonBonesName;
-    std::vector<ArmatureMeta> mArmatures;
-};
+    private:
+        std::string               mDragonBonesName;
+        std::vector<ArmatureMeta> mArmatures;
+    };
 
-}  // namespace Orange::Engine::Asset
+} // namespace Orange::Engine::Asset
 
-#endif  // ORANGE_ENGINE_ASSET_SKELETON_ASSET_H
+#endif // ORANGE_ENGINE_ASSET_SKELETON_ASSET_H

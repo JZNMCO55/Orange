@@ -24,11 +24,11 @@
 namespace Orange::Engine::Scene
 {
 
-struct WorldTransformComponent
-{
-    glm::mat4 world{1.0f};
-};
+    struct WorldTransformComponent
+    {
+        glm::mat4 world{1.0f};
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_WORLD_TRANSFORM_COMPONENT_H
+#endif // ORANGE_ENGINE_SCENE_WORLD_TRANSFORM_COMPONENT_H

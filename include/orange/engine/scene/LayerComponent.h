@@ -32,11 +32,11 @@
 namespace Orange::Engine::Scene
 {
 
-struct LayerComponent
-{
-    std::string layerId;
-};
+    struct LayerComponent
+    {
+        std::string layerId;
+    };
 
-}  // namespace Orange::Engine::Scene
+} // namespace Orange::Engine::Scene
 
-#endif  // ORANGE_ENGINE_SCENE_LAYER_COMPONENT_H
+#endif // ORANGE_ENGINE_SCENE_LAYER_COMPONENT_H

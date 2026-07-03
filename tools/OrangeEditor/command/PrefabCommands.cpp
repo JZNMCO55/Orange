@@ -15,28 +15,36 @@
 // ---------------------------------------------------------------------------
 namespace
 {
-Orange::Engine::World* ResolveWorld(EditorHost* pHost)
-{
-    if (pHost == nullptr) { return nullptr; }
-    return pHost->scene.pWorld.get();
-}
-}  // anonymous namespace
+    Orange::Engine::World* ResolveWorld(EditorHost* pHost)
+    {
+        if (pHost == nullptr)
+        {
+            return nullptr;
+        }
+        return pHost->scene.pWorld.get();
+    }
+} // anonymous namespace
 
 InstantiatePrefabCommand::InstantiatePrefabCommand(
     EditorHost&                                                            host,
     Orange::Engine::Asset::AssetHandle<Orange::Engine::Asset::PrefabAsset> handle)
-    : mpHost(&host)
-    , mHandle(handle)
-    , mRootPtr(std::make_shared<Orange::Engine::Entity>(
-          Orange::Engine::Entity::Invalid()))
-{}
+    : mpHost(&host), mHandle(handle), mRootPtr(std::make_shared<Orange::Engine::Entity>(
+                                          Orange::Engine::Entity::Invalid()))
+{
+}
 
 void InstantiatePrefabCommand::Execute()
 {
     auto* pWorld = ResolveWorld(mpHost);
-    if (pWorld == nullptr) { return; }   // 漏 Clear 的安全降级
+    if (pWorld == nullptr)
+    {
+        return;
+    } // 漏 Clear 的安全降级
     auto* pReg = mpHost->assets.pAssets.get();
-    if (pReg == nullptr) { return; }
+    if (pReg == nullptr)
+    {
+        return;
+    }
 
     // LoadOptions 填全 4 字段（抄 delete-undo 的 undo lambda 填法）——让模板
     // blob 里的 Renderable / Animator 等组件能正确认领资源；漏填会让实例化出来
@@ -55,15 +63,21 @@ void InstantiatePrefabCommand::Execute()
     auto r = Orange::Engine::Scene::InstantiatePrefab(*pWorld, *pReg, mHandle, opt);
     if (r.IsOk())
     {
-        *mRootPtr = r.Value();   // 回写最新实例根 id（redo 是新 EnTT id）
+        *mRootPtr = r.Value(); // 回写最新实例根 id（redo 是新 EnTT id）
     }
 }
 
 void InstantiatePrefabCommand::Undo()
 {
-    if (!mRootPtr->IsValid()) { return; }
+    if (!mRootPtr->IsValid())
+    {
+        return;
+    }
     auto* pWorld = ResolveWorld(mpHost);
-    if (pWorld == nullptr) { return; }
+    if (pWorld == nullptr)
+    {
+        return;
+    }
     // World::IsValid 走 registry.valid()（含 EnTT version 检查），甄别"句柄非
     // 零但已被销毁"的死实体，避免对死实体调 DestroySubtree（double-destroy →
     // EnTT assert）。

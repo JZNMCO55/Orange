@@ -89,59 +89,59 @@
 namespace Orange::Engine
 {
 
-class World;
+    class World;
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
 namespace Orange::Engine::Save
 {
 
-class SaveGameRegistry;
+    class SaveGameRegistry;
 
-class ORANGE_ENGINE_API SaveGameSystem
-{
-public:
-    // registry 必须在 SaveGameSystem 整个生命周期内保持有效——注册表
-    // 的所有权 / 生命周期由调用方管理（典型方案：与 SaveGameSystem 同
-    // 域的全局对象，启动期注册一次后只读）。
-    explicit SaveGameSystem(const SaveGameRegistry& registry) noexcept;
+    class ORANGE_ENGINE_API SaveGameSystem
+    {
+    public:
+        // registry 必须在 SaveGameSystem 整个生命周期内保持有效——注册表
+        // 的所有权 / 生命周期由调用方管理（典型方案：与 SaveGameSystem 同
+        // 域的全局对象，启动期注册一次后只读）。
+        explicit SaveGameSystem(const SaveGameRegistry& registry) noexcept;
 
-    SaveGameSystem(const SaveGameSystem&)            = delete;
-    SaveGameSystem& operator=(const SaveGameSystem&) = delete;
+        SaveGameSystem(const SaveGameSystem&)            = delete;
+        SaveGameSystem& operator=(const SaveGameSystem&) = delete;
 
-    // 把 `world` 中所有挂 `SaveableComponent` 的 entity 写到 `path`。
-    //
-    // 失败语义：
-    //   * 路径无法创建 / IO 错误      → IoError（原文件不变）
-    //   * 注册侧 callback 异常         → 不捕获（与 Core::Serialization
-    //                                    其它路径一致，让进程级处理器
-    //                                    决定）
-    //   * 其余路径全部 → Ok，目标文件被原子替换为新内容
-    Result<void, ResultCode> Save(const World& world, std::string_view path) const;
+        // 把 `world` 中所有挂 `SaveableComponent` 的 entity 写到 `path`。
+        //
+        // 失败语义：
+        //   * 路径无法创建 / IO 错误      → IoError（原文件不变）
+        //   * 注册侧 callback 异常         → 不捕获（与 Core::Serialization
+        //                                    其它路径一致，让进程级处理器
+        //                                    决定）
+        //   * 其余路径全部 → Ok，目标文件被原子替换为新内容
+        Result<void, ResultCode> Save(const World& world, std::string_view path) const;
 
-    // 从 `path` 读取存档，把 entity + component 追加到 `world`。
-    //
-    // 不清空 world——若调用方想"完全替换当前进度"，先构造一个新 World
-    // 再合并。
-    //
-    // 失败语义（World 不被部分修改）：
-    //   * 文件不存在 / 读取失败                  → IoError
-    //   * header magic / 版本 / 长度不匹配       → IoError
-    //   * payload CRC 不匹配                     → InvalidArgument
-    //   * JSON 解析失败                          → InvalidArgument
-    //   * 顶层 schemaVersion 不兼容              → SchemaMismatch
-    //   * 任意 component 的 schemaVersion 不兼容 → SchemaMismatch
-    //   * 注册侧 read 返回 false                 → InvalidArgument
-    //   * 必填字段缺失 / 类型错                  → InvalidArgument
-    //
-    // 未识别的 component 名（registry 没注册）→ silent skip，不视为
-    // fatal（forward-compat：旧引擎读新存档不崩）。
-    Result<void, ResultCode> Load(std::string_view path, World& world) const;
+        // 从 `path` 读取存档，把 entity + component 追加到 `world`。
+        //
+        // 不清空 world——若调用方想"完全替换当前进度"，先构造一个新 World
+        // 再合并。
+        //
+        // 失败语义（World 不被部分修改）：
+        //   * 文件不存在 / 读取失败                  → IoError
+        //   * header magic / 版本 / 长度不匹配       → IoError
+        //   * payload CRC 不匹配                     → InvalidArgument
+        //   * JSON 解析失败                          → InvalidArgument
+        //   * 顶层 schemaVersion 不兼容              → SchemaMismatch
+        //   * 任意 component 的 schemaVersion 不兼容 → SchemaMismatch
+        //   * 注册侧 read 返回 false                 → InvalidArgument
+        //   * 必填字段缺失 / 类型错                  → InvalidArgument
+        //
+        // 未识别的 component 名（registry 没注册）→ silent skip，不视为
+        // fatal（forward-compat：旧引擎读新存档不崩）。
+        Result<void, ResultCode> Load(std::string_view path, World& world) const;
 
-private:
-    const SaveGameRegistry& mRegistry;
-};
+    private:
+        const SaveGameRegistry& mRegistry;
+    };
 
-}  // namespace Orange::Engine::Save
+} // namespace Orange::Engine::Save
 
-#endif  // ORANGE_ENGINE_SAVE_SAVE_GAME_SYSTEM_H
+#endif // ORANGE_ENGINE_SAVE_SAVE_GAME_SYSTEM_H

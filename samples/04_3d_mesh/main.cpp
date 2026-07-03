@@ -64,146 +64,146 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-// 每个面 4 顶点，按 "从外侧看 outward CCW" 的顺序 BL → BR → TR → TL
-// 列出。配合下方 (0, 1, 2, 0, 2, 3) 的索引模板，得到 world-CCW per
-// triangle，与 Pipeline 主 pass FrontFace::CCW + CullMode::Back 对齐
-// （朝外面是 front, 朝内面被 cull）。
-struct CubeFace
-{
-    std::array<VertexPosition3, 4> positions;
-};
-
-constexpr std::array<CubeFace, 6> kCubeFaces = {{
-    // +X 面（右）：从 +X 外侧看，BL 在 (-Z) 侧低位
-    {{{
-        { 0.5f, -0.5f,  0.5f},
-        { 0.5f, -0.5f, -0.5f},
-        { 0.5f,  0.5f, -0.5f},
-        { 0.5f,  0.5f,  0.5f},
-    }}},
-    // -X 面（左）
-    {{{
-        {-0.5f, -0.5f, -0.5f},
-        {-0.5f, -0.5f,  0.5f},
-        {-0.5f,  0.5f,  0.5f},
-        {-0.5f,  0.5f, -0.5f},
-    }}},
-    // +Y 面（顶）
-    {{{
-        {-0.5f,  0.5f,  0.5f},
-        { 0.5f,  0.5f,  0.5f},
-        { 0.5f,  0.5f, -0.5f},
-        {-0.5f,  0.5f, -0.5f},
-    }}},
-    // -Y 面（底）
-    {{{
-        {-0.5f, -0.5f, -0.5f},
-        { 0.5f, -0.5f, -0.5f},
-        { 0.5f, -0.5f,  0.5f},
-        {-0.5f, -0.5f,  0.5f},
-    }}},
-    // +Z 面（前，相机方向）
-    {{{
-        {-0.5f, -0.5f,  0.5f},
-        { 0.5f, -0.5f,  0.5f},
-        { 0.5f,  0.5f,  0.5f},
-        {-0.5f,  0.5f,  0.5f},
-    }}},
-    // -Z 面（后）
-    {{{
-        { 0.5f, -0.5f, -0.5f},
-        {-0.5f, -0.5f, -0.5f},
-        {-0.5f,  0.5f, -0.5f},
-        { 0.5f,  0.5f, -0.5f},
-    }}},
-}};
-
-constexpr std::array<VertexUV2, 4> kFaceUVs = {{
-    {0.0f, 0.0f},  // BL
-    {1.0f, 0.0f},  // BR
-    {1.0f, 1.0f},  // TR
-    {0.0f, 1.0f},  // TL
-}};
-
-std::unique_ptr<MeshAsset> MakeCubeMesh()
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    positions.reserve(24);
-    uvs.reserve(24);
-    indices.reserve(36);
-
-    for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
+    // 每个面 4 顶点，按 "从外侧看 outward CCW" 的顺序 BL → BR → TR → TL
+    // 列出。配合下方 (0, 1, 2, 0, 2, 3) 的索引模板，得到 world-CCW per
+    // triangle，与 Pipeline 主 pass FrontFace::CCW + CullMode::Back 对齐
+    // （朝外面是 front, 朝内面被 cull）。
+    struct CubeFace
     {
-        const std::uint32_t base = face * 4;
-        for (int i = 0; i < 4; ++i)
+        std::array<VertexPosition3, 4> positions;
+    };
+
+    constexpr std::array<CubeFace, 6> kCubeFaces = {{
+        // +X 面（右）：从 +X 外侧看，BL 在 (-Z) 侧低位
+        {{{
+            {0.5f, -0.5f, 0.5f},
+            {0.5f, -0.5f, -0.5f},
+            {0.5f, 0.5f, -0.5f},
+            {0.5f, 0.5f, 0.5f},
+        }}},
+        // -X 面（左）
+        {{{
+            {-0.5f, -0.5f, -0.5f},
+            {-0.5f, -0.5f, 0.5f},
+            {-0.5f, 0.5f, 0.5f},
+            {-0.5f, 0.5f, -0.5f},
+        }}},
+        // +Y 面（顶）
+        {{{
+            {-0.5f, 0.5f, 0.5f},
+            {0.5f, 0.5f, 0.5f},
+            {0.5f, 0.5f, -0.5f},
+            {-0.5f, 0.5f, -0.5f},
+        }}},
+        // -Y 面（底）
+        {{{
+            {-0.5f, -0.5f, -0.5f},
+            {0.5f, -0.5f, -0.5f},
+            {0.5f, -0.5f, 0.5f},
+            {-0.5f, -0.5f, 0.5f},
+        }}},
+        // +Z 面（前，相机方向）
+        {{{
+            {-0.5f, -0.5f, 0.5f},
+            {0.5f, -0.5f, 0.5f},
+            {0.5f, 0.5f, 0.5f},
+            {-0.5f, 0.5f, 0.5f},
+        }}},
+        // -Z 面（后）
+        {{{
+            {0.5f, -0.5f, -0.5f},
+            {-0.5f, -0.5f, -0.5f},
+            {-0.5f, 0.5f, -0.5f},
+            {0.5f, 0.5f, -0.5f},
+        }}},
+    }};
+
+    constexpr std::array<VertexUV2, 4> kFaceUVs = {{
+        {0.0f, 0.0f}, // BL
+        {1.0f, 0.0f}, // BR
+        {1.0f, 1.0f}, // TR
+        {0.0f, 1.0f}, // TL
+    }};
+
+    std::unique_ptr<MeshAsset> MakeCubeMesh()
+    {
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        positions.reserve(24);
+        uvs.reserve(24);
+        indices.reserve(36);
+
+        for (std::uint32_t face = 0; face < kCubeFaces.size(); ++face)
         {
-            positions.push_back(kCubeFaces[face].positions[i]);
-            uvs.push_back(kFaceUVs[i]);
+            const std::uint32_t base = face * 4;
+            for (int i = 0; i < 4; ++i)
+            {
+                positions.push_back(kCubeFaces[face].positions[i]);
+                uvs.push_back(kFaceUVs[i]);
+            }
+            // (0, 1, 2, 0, 2, 3) per face：world-CCW per triangle，与
+            // Pipeline 主 pass FrontFace=CCW + CullMode=Back 约定匹配。
+            // 历史注释曾写 "world-CW + Y-flip → NDC-CCW"，但 v1.0.1
+            // 编辑器 cube fix 证明 Pipeline 实际按 world-CCW 走 front face；
+            // 旧 CW 的 sample cube 会把朝外面剔除只剩内壁（参 GAP-2026-05-22-
+            // samples-cube-mesh-winding-bug）。
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
         }
-        // (0, 1, 2, 0, 2, 3) per face：world-CCW per triangle，与
-        // Pipeline 主 pass FrontFace=CCW + CullMode=Back 约定匹配。
-        // 历史注释曾写 "world-CW + Y-flip → NDC-CCW"，但 v1.0.1
-        // 编辑器 cube fix 证明 Pipeline 实际按 world-CCW 走 front face；
-        // 旧 CW 的 sample cube 会把朝外面剔除只剩内壁（参 GAP-2026-05-22-
-        // samples-cube-mesh-winding-bug）。
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        // 程序化 mesh 工厂在返回前补算 smooth normal（GAP-2026-05-17）。
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    // 程序化 mesh 工厂在返回前补算 smooth normal（GAP-2026-05-17）。
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world, Entity cube)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mCube(cube)
+    class RenderLayer : public Layer
     {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        // 绕一条非主轴匀速旋转——让三个面交替露出来，比单纯绕 Y 轴
-        // 更能直观验证 "3D 实体在转"。
-        if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+    public:
+        RenderLayer(Pipeline& pipeline, World& world, Entity cube)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world), mCube(cube)
         {
-            const float          angle = frame.time.totalSeconds * 0.7f;
-            const glm::vec3      axis  = glm::normalize(glm::vec3(0.4f, 1.0f, 0.2f));
-            xf->rotation = glm::angleAxis(angle, axis);
         }
-        mPipeline.Render(mWorld);
-    }
 
-    // 接住 framebuffer-resize：让 Pipeline 喂给 OrangeRender 触发
-    // swap-chain 重建，避免拖拽窗口后下一帧死锁。返回 false 让事件继
-    // 续向后传给其它 layer / overlay。
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        void OnUpdate(const FrameContext& frame) override
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            // 绕一条非主轴匀速旋转——让三个面交替露出来，比单纯绕 Y 轴
+            // 更能直观验证 "3D 实体在转"。
+            if (auto* xf = mWorld.GetComponent<TransformComponent>(mCube))
+            {
+                const float     angle = frame.time.totalSeconds * 0.7f;
+                const glm::vec3 axis  = glm::normalize(glm::vec3(0.4f, 1.0f, 0.2f));
+                xf->rotation          = glm::angleAxis(angle, axis);
+            }
+            mPipeline.Render(mWorld);
         }
-        return false;
-    }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-    Entity    mCube;
-};
+        // 接住 framebuffer-resize：让 Pipeline 喂给 OrangeRender 触发
+        // swap-chain 重建，避免拖拽窗口后下一帧死锁。返回 false 让事件继
+        // 续向后传给其它 layer / overlay。
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
 
-}  // namespace
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+        Entity    mCube;
+    };
+
+} // namespace
 
 int main()
 {
@@ -264,7 +264,7 @@ int main()
     World world;
 
     Entity cubeEntity = world.CreateEntity();
-    world.AddComponent(cubeEntity, TransformComponent{});  // 默认放原点；rotation 在 OnUpdate 里更新
+    world.AddComponent(cubeEntity, TransformComponent{}); // 默认放原点；rotation 在 OnUpdate 里更新
     {
         RenderableComponent r;
         r.mesh             = meshHandle;
@@ -274,9 +274,8 @@ int main()
 
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
         // 看向原点，eye 偏离三个轴让正方体一开始就同时露出 +X / +Y / +Z 三面
         cam.view = glm::lookAt(glm::vec3(2.5f, 1.7f, 3.0f),
                                glm::vec3(0.0f, 0.0f, 0.0f),
@@ -285,7 +284,7 @@ int main()
     }
 
     Pipeline pipeline;
-    auto initResult = pipeline.Initialize(host->GetWindow(), assets);
+    auto     initResult = pipeline.Initialize(host->GetWindow(), assets);
     if (initResult.IsErr())
     {
         std::fprintf(stderr,
@@ -297,6 +296,6 @@ int main()
     host->PushLayer(std::make_unique<RenderLayer>(pipeline, world, cubeEntity));
 
     const int rc = host->Run();
-    pipeline.Shutdown();   // 必须早于 host 析构（Window 还活着时释放渲染资源）
+    pipeline.Shutdown(); // 必须早于 host 析构（Window 还活着时释放渲染资源）
     return rc;
 }

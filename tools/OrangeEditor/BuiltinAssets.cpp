@@ -5,7 +5,7 @@
 #include "BuiltinAssets.h"
 
 #include "MaterialFileIO.h"
-#include "ShaderTemplateMetaIO.h"  // v1.2.6 patch · lazy create 时应用 default uniforms
+#include "ShaderTemplateMetaIO.h" // v1.2.6 patch · lazy create 时应用 default uniforms
 
 #include <orange/engine/core/Log.h>
 
@@ -45,74 +45,74 @@
 namespace
 {
 
-// 内联的"叮"声 16-bit PCM WAV 生成 —— 与 samples/common/BeepWav.h 同算法，
-// 复制一份避免跨目录 include（samples/common 不在编辑器 target include
-// path 上）。生成的字节直接写盘 → assets/sounds/beep.wav，与 mesh
-// lazy bake 同模式。
-inline void AppendU32LE(std::vector<std::uint8_t>& buf, std::uint32_t v)
-{
-    buf.push_back(static_cast<std::uint8_t>(v & 0xFF));
-    buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
-    buf.push_back(static_cast<std::uint8_t>((v >> 16) & 0xFF));
-    buf.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFF));
-}
-inline void AppendU16LE(std::vector<std::uint8_t>& buf, std::uint16_t v)
-{
-    buf.push_back(static_cast<std::uint8_t>(v & 0xFF));
-    buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
-}
-inline void AppendBytes(std::vector<std::uint8_t>& buf, const char* s, std::size_t n)
-{
-    for (std::size_t i = 0; i < n; ++i)
+    // 内联的"叮"声 16-bit PCM WAV 生成 —— 与 samples/common/BeepWav.h 同算法，
+    // 复制一份避免跨目录 include（samples/common 不在编辑器 target include
+    // path 上）。生成的字节直接写盘 → assets/sounds/beep.wav，与 mesh
+    // lazy bake 同模式。
+    inline void AppendU32LE(std::vector<std::uint8_t>& buf, std::uint32_t v)
     {
-        buf.push_back(static_cast<std::uint8_t>(s[i]));
+        buf.push_back(static_cast<std::uint8_t>(v & 0xFF));
+        buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
+        buf.push_back(static_cast<std::uint8_t>((v >> 16) & 0xFF));
+        buf.push_back(static_cast<std::uint8_t>((v >> 24) & 0xFF));
     }
-}
-std::vector<std::uint8_t> MakeBeepWavBytes(float        frequencyHz = 880.0f,
-                                           int          durationMs  = 180,
-                                           std::uint32_t sampleRate = 44100,
-                                           float        volume      = 0.5f)
-{
-    const std::uint16_t channels      = 1;
-    const std::uint16_t bitsPerSample = 16;
-    const std::uint16_t blockAlign    = channels * (bitsPerSample / 8);
-    const std::uint32_t byteRate      = sampleRate * blockAlign;
-    const std::uint32_t numSamples    =
-        static_cast<std::uint32_t>(static_cast<std::uint64_t>(sampleRate) *
-                                   static_cast<std::uint64_t>(durationMs) / 1000ULL);
-    const std::uint32_t dataSize      = numSamples * blockAlign;
-    const std::uint32_t fmtChunkSize  = 16;
-    const std::uint32_t riffSize      = 4 + (8 + fmtChunkSize) + (8 + dataSize);
-
-    std::vector<std::uint8_t> buf;
-    buf.reserve(8 + riffSize);
-    AppendBytes(buf, "RIFF", 4);
-    AppendU32LE(buf, riffSize);
-    AppendBytes(buf, "WAVE", 4);
-    AppendBytes(buf, "fmt ", 4);
-    AppendU32LE(buf, fmtChunkSize);
-    AppendU16LE(buf, 1);
-    AppendU16LE(buf, channels);
-    AppendU32LE(buf, sampleRate);
-    AppendU32LE(buf, byteRate);
-    AppendU16LE(buf, blockAlign);
-    AppendU16LE(buf, bitsPerSample);
-    AppendBytes(buf, "data", 4);
-    AppendU32LE(buf, dataSize);
-
-    const float twoPi = 6.28318530717958647692f;
-    for (std::uint32_t i = 0; i < numSamples; ++i)
+    inline void AppendU16LE(std::vector<std::uint8_t>& buf, std::uint16_t v)
     {
-        const float t        = static_cast<float>(i) / static_cast<float>(sampleRate);
-        const float envelope = 1.0f - static_cast<float>(i) / static_cast<float>(numSamples);
-        const float sample   = std::sin(t * twoPi * frequencyHz) * volume * envelope;
-        const std::int16_t s = static_cast<std::int16_t>(sample * 32767.0f);
-        AppendU16LE(buf, static_cast<std::uint16_t>(s));
+        buf.push_back(static_cast<std::uint8_t>(v & 0xFF));
+        buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFF));
     }
-    return buf;
-}
+    inline void AppendBytes(std::vector<std::uint8_t>& buf, const char* s, std::size_t n)
+    {
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            buf.push_back(static_cast<std::uint8_t>(s[i]));
+        }
+    }
+    std::vector<std::uint8_t> MakeBeepWavBytes(float         frequencyHz = 880.0f,
+                                               int           durationMs  = 180,
+                                               std::uint32_t sampleRate  = 44100,
+                                               float         volume      = 0.5f)
+    {
+        const std::uint16_t channels      = 1;
+        const std::uint16_t bitsPerSample = 16;
+        const std::uint16_t blockAlign    = channels * (bitsPerSample / 8);
+        const std::uint32_t byteRate      = sampleRate * blockAlign;
+        const std::uint32_t numSamples =
+            static_cast<std::uint32_t>(static_cast<std::uint64_t>(sampleRate) *
+                                       static_cast<std::uint64_t>(durationMs) / 1000ULL);
+        const std::uint32_t dataSize     = numSamples * blockAlign;
+        const std::uint32_t fmtChunkSize = 16;
+        const std::uint32_t riffSize     = 4 + (8 + fmtChunkSize) + (8 + dataSize);
 
-}  // anonymous namespace
+        std::vector<std::uint8_t> buf;
+        buf.reserve(8 + riffSize);
+        AppendBytes(buf, "RIFF", 4);
+        AppendU32LE(buf, riffSize);
+        AppendBytes(buf, "WAVE", 4);
+        AppendBytes(buf, "fmt ", 4);
+        AppendU32LE(buf, fmtChunkSize);
+        AppendU16LE(buf, 1);
+        AppendU16LE(buf, channels);
+        AppendU32LE(buf, sampleRate);
+        AppendU32LE(buf, byteRate);
+        AppendU16LE(buf, blockAlign);
+        AppendU16LE(buf, bitsPerSample);
+        AppendBytes(buf, "data", 4);
+        AppendU32LE(buf, dataSize);
+
+        const float twoPi = 6.28318530717958647692f;
+        for (std::uint32_t i = 0; i < numSamples; ++i)
+        {
+            const float        t        = static_cast<float>(i) / static_cast<float>(sampleRate);
+            const float        envelope = 1.0f - static_cast<float>(i) / static_cast<float>(numSamples);
+            const float        sample   = std::sin(t * twoPi * frequencyHz) * volume * envelope;
+            const std::int16_t s        = static_cast<std::int16_t>(sample * 32767.0f);
+            AppendU16LE(buf, static_cast<std::uint16_t>(s));
+        }
+        return buf;
+    }
+
+} // anonymous namespace
 
 std::unique_ptr<Orange::Engine::Asset::MeshAsset>
 MakePlaneMesh(float halfSize)
@@ -123,17 +123,20 @@ MakePlaneMesh(float halfSize)
 
     std::vector<VertexPosition3> positions = {
         {-halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f,  halfSize},
-        {-halfSize, 0.0f,  halfSize},
+        {halfSize, 0.0f, -halfSize},
+        {halfSize, 0.0f, halfSize},
+        {-halfSize, 0.0f, halfSize},
     };
     std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {1.0f, 1.0f},
+        {0.0f, 1.0f},
     };
     std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
+    auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions),
+                                                                     std::move(uvs),
+                                                                     std::move(indices));
     // GAP-2026-05-17：lazy bake 路径写盘前补算 smooth normal —— 让
     // 首次产出的 assets/meshes/plane.mesh 直接是 v3 带 normal 版本；
     // 既有 v2 文件不会被改写，Load 时由 MeshLoader fallback 补算，
@@ -161,7 +164,7 @@ MakeCubeMesh(float halfSize)
     using ::Orange::Engine::Asset::VertexPosition3;
     using ::Orange::Engine::Asset::VertexUV2;
 
-    const float h = halfSize;
+    const float                  h = halfSize;
     std::vector<VertexPosition3> positions;
     std::vector<VertexUV2>       uvs;
     std::vector<VertexNormal3>   normals;
@@ -173,14 +176,21 @@ MakeCubeMesh(float halfSize)
 
     auto addFace = [&](VertexPosition3 a, VertexPosition3 b,
                        VertexPosition3 c, VertexPosition3 d,
-                       VertexNormal3 faceNormal) {
+                       VertexNormal3 faceNormal)
+    {
         const std::uint32_t base = static_cast<std::uint32_t>(positions.size());
-        positions.push_back(a); positions.push_back(b);
-        positions.push_back(c); positions.push_back(d);
-        uvs.push_back({0.0f, 0.0f}); uvs.push_back({1.0f, 0.0f});
-        uvs.push_back({1.0f, 1.0f}); uvs.push_back({0.0f, 1.0f});
-        normals.push_back(faceNormal); normals.push_back(faceNormal);
-        normals.push_back(faceNormal); normals.push_back(faceNormal);
+        positions.push_back(a);
+        positions.push_back(b);
+        positions.push_back(c);
+        positions.push_back(d);
+        uvs.push_back({0.0f, 0.0f});
+        uvs.push_back({1.0f, 0.0f});
+        uvs.push_back({1.0f, 1.0f});
+        uvs.push_back({0.0f, 1.0f});
+        normals.push_back(faceNormal);
+        normals.push_back(faceNormal);
+        normals.push_back(faceNormal);
+        normals.push_back(faceNormal);
         // v1.0.1 c7：triangle winding 修复 —— 原 0-2-1 / 0-3-2 是 CW
         // （从 face 外侧朝内看顺时针），主 pass FrontFace = CCW + CullMode
         // = Back 把"朝外的 face"全部剔除，只渲染朝内壁的面 → "cube
@@ -191,19 +201,23 @@ MakeCubeMesh(float halfSize)
         // 修法：改为 CCW 0-1-2 / 0-2-3，让 face 的两个三角形按 (a→b→c) +
         // (a→c→d) 绕 face normal 反方向（即从 normal 朝向看 CCW）排列，
         // 主 pass 正确把"朝外"识别为 front face 通过 cull 测试。
-        indices.push_back(base + 0); indices.push_back(base + 1); indices.push_back(base + 2);
-        indices.push_back(base + 0); indices.push_back(base + 2); indices.push_back(base + 3);
+        indices.push_back(base + 0);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base + 0);
+        indices.push_back(base + 2);
+        indices.push_back(base + 3);
     };
 
     // 6 面 + 显式朝外 face normal。winding 已修为 CCW（与 Vulkan 标准
     // FrontFace = CounterClockwise 约定一致），主 pass Back-face cull 正确
     // 保留朝外面、剔除朝内面。
-    addFace({ h,-h, h}, { h,-h,-h}, { h, h,-h}, { h, h, h}, { 1.0f, 0.0f, 0.0f});  // +X
-    addFace({-h,-h,-h}, {-h,-h, h}, {-h, h, h}, {-h, h,-h}, {-1.0f, 0.0f, 0.0f});  // -X
-    addFace({-h, h, h}, { h, h, h}, { h, h,-h}, {-h, h,-h}, { 0.0f, 1.0f, 0.0f});  // +Y (top)
-    addFace({-h,-h,-h}, { h,-h,-h}, { h,-h, h}, {-h,-h, h}, { 0.0f,-1.0f, 0.0f});  // -Y (bottom)
-    addFace({-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h}, { 0.0f, 0.0f, 1.0f});  // +Z
-    addFace({ h,-h,-h}, {-h,-h,-h}, {-h, h,-h}, { h, h,-h}, { 0.0f, 0.0f,-1.0f});  // -Z
+    addFace({h, -h, h}, {h, -h, -h}, {h, h, -h}, {h, h, h}, {1.0f, 0.0f, 0.0f});      // +X
+    addFace({-h, -h, -h}, {-h, -h, h}, {-h, h, h}, {-h, h, -h}, {-1.0f, 0.0f, 0.0f}); // -X
+    addFace({-h, h, h}, {h, h, h}, {h, h, -h}, {-h, h, -h}, {0.0f, 1.0f, 0.0f});      // +Y (top)
+    addFace({-h, -h, -h}, {h, -h, -h}, {h, -h, h}, {-h, -h, h}, {0.0f, -1.0f, 0.0f}); // -Y (bottom)
+    addFace({-h, -h, h}, {h, -h, h}, {h, h, h}, {-h, h, h}, {0.0f, 0.0f, 1.0f});      // +Z
+    addFace({h, -h, -h}, {-h, -h, -h}, {-h, h, -h}, {h, h, -h}, {0.0f, 0.0f, -1.0f}); // -Z
 
     return std::make_unique<MeshAsset>(std::move(positions),
                                        std::move(uvs),
@@ -224,7 +238,7 @@ MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     std::vector<VertexPosition3> positions;
     std::vector<VertexUV2>       uvs;
     std::vector<std::uint32_t>   indices;
-    const float kPi = 3.14159265358979323846f;
+    const float                  kPi = 3.14159265358979323846f;
     for (std::uint32_t i = 0; i <= lat; ++i)
     {
         const float v     = static_cast<float>(i) / static_cast<float>(lat);
@@ -247,12 +261,16 @@ MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
         for (std::uint32_t j = 0; j < lon; ++j)
         {
-            const std::uint32_t a = i       * (lon + 1) + j;
+            const std::uint32_t a = i * (lon + 1) + j;
             const std::uint32_t b = (i + 1) * (lon + 1) + j;
             const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i       * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
+            const std::uint32_t d = i * (lon + 1) + (j + 1);
+            indices.push_back(a);
+            indices.push_back(c);
+            indices.push_back(b);
+            indices.push_back(a);
+            indices.push_back(d);
+            indices.push_back(c);
         }
     }
     auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
@@ -329,7 +347,7 @@ void InitializeEditorAssets(EditorHost& host)
 {
     using Orange::Engine::Asset::AssetRegistry;
     using Orange::Engine::Asset::MeshAsset;
-    using Orange::Engine::Asset::MeshLoader;  // bakeIfMissingThenLoad 下面用 MeshLoader::Save
+    using Orange::Engine::Asset::MeshLoader; // bakeIfMissingThenLoad 下面用 MeshLoader::Save
     using Orange::Engine::Asset::ShaderAsset;
     using Orange::Engine::Asset::ShaderLoader;
     using Orange::Engine::Render::MaterialSystem;
@@ -399,7 +417,7 @@ void InitializeEditorAssets(EditorHost& host)
     // 不在 InitializeEditorAssets 内 fall back 到 Insert("editor/cube",...)
     // 路径——那是 G1 之前的兼容残留，G1 ✅ 后所有 mesh 引用必须走磁盘路径。
     auto bakeIfMissingThenLoad = [&](const std::string& path,
-                                     auto buildFn) -> Orange::Engine::Asset::AssetHandle<MeshAsset>
+                                     auto               buildFn) -> Orange::Engine::Asset::AssetHandle<MeshAsset>
     {
         if (!std::filesystem::exists(path))
         {
@@ -435,14 +453,17 @@ void InitializeEditorAssets(EditorHost& host)
         return lr.Value();
     };
 
-    host.assets.cubeMeshHandle  = bakeIfMissingThenLoad(
-        "assets/meshes/cube.mesh",  [] { return MakeCubeMesh(0.5f); });
+    host.assets.cubeMeshHandle = bakeIfMissingThenLoad(
+        "assets/meshes/cube.mesh", []
+        { return MakeCubeMesh(0.5f); });
     host.assets.planeMeshHandle = bakeIfMissingThenLoad(
-        "assets/meshes/plane.mesh", [] { return MakePlaneMesh(2.5f); });
+        "assets/meshes/plane.mesh", []
+        { return MakePlaneMesh(2.5f); });
     // PBR showcase 用的 sphere mesh —— 与 sample 13_pbr_direct / 14_pbr_ibl
     // 同款半径 0.5、lon 32 / lat 16 lat/lon tessellation。
     host.assets.sphereMeshHandle = bakeIfMissingThenLoad(
-        "assets/meshes/sphere.mesh", [] { return MakeSphereMesh(0.5f, 32u, 16u); });
+        "assets/meshes/sphere.mesh", []
+        { return MakeSphereMesh(0.5f, 32u, 16u); });
 
     // 内置 beep.wav lazy bake —— 与 mesh lazy bake 同模式：检测
     // assets/sounds/beep.wav 缺失则用 BeepWav helper 程序生成 16-bit PCM
@@ -486,7 +507,7 @@ void InitializeEditorAssets(EditorHost& host)
     // 编辑器启动；整体 IoError 仅 log 不阻塞。
     {
         const std::filesystem::path templatesDir = "assets/shaders/templates";
-        auto rb = host.assets.pMaterials->RegisterTemplatesFromDirectory(templatesDir);
+        auto                        rb           = host.assets.pMaterials->RegisterTemplatesFromDirectory(templatesDir);
         if (rb.IsErr())
         {
             ORANGE_LOG_WARN("[OrangeEditor] MaterialSystem::RegisterTemplatesFromDirectory "
@@ -504,7 +525,7 @@ void InitializeEditorAssets(EditorHost& host)
     // 路径足够简单。namedMaterialInstances 仍是 host.assets 自己拥有 +
     // BuildNamedMaterialInstances 返回 path→ptr 映射。
     auto bakeAndLoadMaterial = [&](const std::string& path,
-                                   std::string_view fallbackTemplate)
+                                   std::string_view   fallbackTemplate)
         -> std::unique_ptr<::Orange::Engine::Render::MaterialInstance>
     {
         // 文件不存在：用 fallbackTemplate 写一份默认 v1.1（uniforms /
@@ -543,23 +564,23 @@ void InitializeEditorAssets(EditorHost& host)
     // 地面 / 备用 textured 实例（路径风格 ID，namedMaterialInstances 用同款 key）
     host.assets.pFloorMaterial = bakeAndLoadMaterial(
         "assets/materials/builtin/floor.material", "textured");
-    host.assets.pWallMaterial  = bakeAndLoadMaterial(
-        "assets/materials/builtin/wall.material",  "textured");
+    host.assets.pWallMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/wall.material", "textured");
 
     // v0.1.5 内置材质（失败时 unique_ptr 为 nullptr，Renderable 降级）
-    host.assets.pToonMaterial     = bakeAndLoadMaterial(
-        "assets/materials/builtin/toon.material",      "toon");
+    host.assets.pToonMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/toon.material", "toon");
     host.assets.pRimLightMaterial = bakeAndLoadMaterial(
         "assets/materials/builtin/rim_light.material", "rim_light");
     host.assets.pDissolveMaterial = bakeAndLoadMaterial(
-        "assets/materials/builtin/dissolve.material",  "dissolve");
-    host.assets.pPbrMaterial      = bakeAndLoadMaterial(
-        "assets/materials/builtin/pbr.material",       "pbr");
+        "assets/materials/builtin/dissolve.material", "dissolve");
+    host.assets.pPbrMaterial = bakeAndLoadMaterial(
+        "assets/materials/builtin/pbr.material", "pbr");
 
     // 编辑器默认 / 光物体材质
     host.assets.pDefaultRenderableMaterial = bakeAndLoadMaterial(
-        "assets/materials/builtin/default.material",      "textured");
-    host.assets.pLightObjectMaterial       = bakeAndLoadMaterial(
+        "assets/materials/builtin/default.material", "textured");
+    host.assets.pLightObjectMaterial = bakeAndLoadMaterial(
         "assets/materials/builtin/light_object.material", "emissive");
 
     // 程序化动画史莱姆专属材质 —— 必须用 pbr 模板（160B push constant，
@@ -577,9 +598,9 @@ void InitializeEditorAssets(EditorHost& host)
     if (host.assets.pAnimatedMaterial != nullptr)
     {
         host.assets.pAnimatedMaterial->SetUniform("uBaseColor",
-            glm::vec4(0.12f, 0.75f, 0.40f, 1.0f));  // 史莱姆绿初值
+                                                  glm::vec4(0.12f, 0.75f, 0.40f, 1.0f)); // 史莱姆绿初值
         host.assets.pAnimatedMaterial->SetUniform("uMRA",
-            glm::vec4(0.0f, 0.55f, 1.0f, 0.0f));    // 非金属 + 中等粗糙 + ao=1
+                                                  glm::vec4(0.0f, 0.55f, 1.0f, 0.0f)); // 非金属 + 中等粗糙 + ao=1
     }
     else
     {
@@ -608,8 +629,8 @@ void InitializeEditorAssets(EditorHost& host)
             float       baseColor[4];
         };
         const VariantDef kVariants[2] = {
-            {"warm",  {1.00f, 0.78f, 0.34f, 1.0f}},  // 暖橙 (13_pbr_direct)
-            {"white", {1.00f, 1.00f, 1.00f, 1.0f}},  // 白 (14_pbr_ibl furnace)
+            {"warm", {1.00f, 0.78f, 0.34f, 1.0f}},  // 暖橙 (13_pbr_direct)
+            {"white", {1.00f, 1.00f, 1.00f, 1.0f}}, // 白 (14_pbr_ibl furnace)
         };
 
         host.assets.pbrShowcaseMaterials.reserve(18);
@@ -635,16 +656,16 @@ void InitializeEditorAssets(EditorHost& host)
                         ::Orange::Editor::Material::MaterialFileData data;
                         data.templateName = "pbr";
                         ::Orange::Editor::Material::UniformOverrideValue uBC;
-                        uBC.name = "uBaseColor";
-                        uBC.type = ::Orange::Engine::Render::MaterialUniformType::Vec4;
+                        uBC.name  = "uBaseColor";
+                        uBC.type  = ::Orange::Engine::Render::MaterialUniformType::Vec4;
                         uBC.value = glm::vec4(variant.baseColor[0],
                                               variant.baseColor[1],
                                               variant.baseColor[2],
                                               variant.baseColor[3]);
                         data.uniforms.push_back(uBC);
                         ::Orange::Editor::Material::UniformOverrideValue uMRA;
-                        uMRA.name = "uMRA";
-                        uMRA.type = ::Orange::Engine::Render::MaterialUniformType::Vec4;
+                        uMRA.name  = "uMRA";
+                        uMRA.type  = ::Orange::Engine::Render::MaterialUniformType::Vec4;
                         uMRA.value = glm::vec4(kMetallicSteps[row],
                                                kRoughnessSteps[col],
                                                1.0f,
@@ -679,7 +700,7 @@ void InitializeEditorAssets(EditorHost& host)
     host.assets.pAnimators = std::make_unique<Orange::Engine::Animation::AnimatorRegistry>();
     {
         auto* pAnimTarget = host.assets.pAnimatedMaterial.get();
-        auto factory = [pAnimTarget]()
+        auto  factory     = [pAnimTarget]()
             -> std::unique_ptr<Orange::Engine::Animation::IAnimator>
         {
             auto anim = std::make_unique<
@@ -687,7 +708,8 @@ void InitializeEditorAssets(EditorHost& host)
             // 绿色史莱姆呼吸：绿色分量在亮暗间脉动，红蓝低位微调营造果冻质感。
             anim->AddChannel<glm::vec4>(
                 "uBaseColor",
-                [](float t) {
+                [](float t)
+                {
                     const float pulse = 0.5f + 0.5f * std::sin(t * 2.2f);
                     return glm::vec4(0.08f + 0.10f * pulse,
                                      0.45f + 0.45f * pulse,
@@ -716,19 +738,19 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
     // Scene Save/Load 路径 RenderableComponent.materialInstanceId 字段值
     // 同款迁移；ReadRenderable 内有 mapping fallback 容旧 ID。
     if (assets.pFloorMaterial)
-        m["assets/materials/builtin/floor.material"]        = assets.pFloorMaterial.get();
+        m["assets/materials/builtin/floor.material"] = assets.pFloorMaterial.get();
     if (assets.pWallMaterial)
-        m["assets/materials/builtin/wall.material"]         = assets.pWallMaterial.get();
+        m["assets/materials/builtin/wall.material"] = assets.pWallMaterial.get();
     if (assets.pToonMaterial)
-        m["assets/materials/builtin/toon.material"]         = assets.pToonMaterial.get();
+        m["assets/materials/builtin/toon.material"] = assets.pToonMaterial.get();
     if (assets.pPbrMaterial)
-        m["assets/materials/builtin/pbr.material"]          = assets.pPbrMaterial.get();
+        m["assets/materials/builtin/pbr.material"] = assets.pPbrMaterial.get();
     if (assets.pRimLightMaterial)
-        m["assets/materials/builtin/rim_light.material"]    = assets.pRimLightMaterial.get();
+        m["assets/materials/builtin/rim_light.material"] = assets.pRimLightMaterial.get();
     if (assets.pDissolveMaterial)
-        m["assets/materials/builtin/dissolve.material"]     = assets.pDissolveMaterial.get();
+        m["assets/materials/builtin/dissolve.material"] = assets.pDissolveMaterial.get();
     if (assets.pDefaultRenderableMaterial)
-        m["assets/materials/builtin/default.material"]      = assets.pDefaultRenderableMaterial.get();
+        m["assets/materials/builtin/default.material"] = assets.pDefaultRenderableMaterial.get();
     if (assets.pLightObjectMaterial)
         m["assets/materials/builtin/light_object.material"] = assets.pLightObjectMaterial.get();
     // 程序化动画史莱姆材质 —— editor/ 前缀虚拟 id（无磁盘文件，不进 Asset
@@ -742,8 +764,7 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
     // PBR showcase 18 个 material —— 与 pbr_showcase.scene.json 的 Renderable
     // materialInstanceId 字段一一对应。InitializeEditorAssets 内 pbrShowcaseMaterials
     // 与 pbrShowcaseMaterialPaths 同 index 维护。
-    for (std::size_t i = 0; i < assets.pbrShowcaseMaterials.size()
-                         && i < assets.pbrShowcaseMaterialPaths.size(); ++i)
+    for (std::size_t i = 0; i < assets.pbrShowcaseMaterials.size() && i < assets.pbrShowcaseMaterialPaths.size(); ++i)
     {
         if (assets.pbrShowcaseMaterials[i])
         {
@@ -759,7 +780,10 @@ BuildNamedMaterialInstances(const EditorAssetContext& assets)
     // 重叠。
     for (const auto& [p, ptr] : assets.userMaterials)
     {
-        if (ptr && m.find(p) == m.end()) { m[p] = ptr.get(); }
+        if (ptr && m.find(p) == m.end())
+        {
+            m[p] = ptr.get();
+        }
     }
     return m;
 }
@@ -777,8 +801,11 @@ EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPa
 {
     // 1) 先查既有（含 8 内置 + PBR showcase 18 + userMaterials 已 lazy 过的）
     const auto named = BuildNamedMaterialInstances(assets);
-    auto it = named.find(materialPath);
-    if (it != named.end()) { return it->second; }
+    auto       it    = named.find(materialPath);
+    if (it != named.end())
+    {
+        return it->second;
+    }
 
     // 2) 不在 map → lazy create 兜底（v1.2.2 同款路径，提到 helper 让
     //    Inspector / DnD apply 两处都能复用，避免 v1.2.3 验收 bug 复现）。
@@ -792,7 +819,8 @@ EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPa
     if (!dataOpt.has_value() || dataOpt->templateName.empty())
     {
         ORANGE_LOG_WARN("EnsureMaterialInstance: .material 解析失败或 "
-                        "templateName 缺失 '{}'", materialPath);
+                        "templateName 缺失 '{}'",
+                        materialPath);
         return nullptr;
     }
     auto inst = assets.pMaterials->CreateInstance(dataOpt->templateName);
@@ -823,9 +851,18 @@ EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPa
         {
             for (const auto& u : metaOpt->uniforms)
             {
-                if (!u.hasDefault) { continue; }
-                if (u.widget == Meta::UniformWidget::Hidden) { continue; }
-                if (inst->HasUniformOverride(u.name)) { continue; }
+                if (!u.hasDefault)
+                {
+                    continue;
+                }
+                if (u.widget == Meta::UniformWidget::Hidden)
+                {
+                    continue;
+                }
+                if (inst->HasUniformOverride(u.name))
+                {
+                    continue;
+                }
                 using ::Orange::Engine::Render::MaterialUniformType;
                 switch (u.type)
                 {
@@ -834,21 +871,21 @@ EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPa
                         break;
                     case MaterialUniformType::Int:
                         inst->SetUniform(u.name,
-                            static_cast<std::int32_t>(u.defaultValue[0]));
+                                         static_cast<std::int32_t>(u.defaultValue[0]));
                         break;
                     case MaterialUniformType::Vec2:
                         inst->SetUniform(u.name,
-                            glm::vec2(u.defaultValue[0], u.defaultValue[1]));
+                                         glm::vec2(u.defaultValue[0], u.defaultValue[1]));
                         break;
                     case MaterialUniformType::Vec3:
                         inst->SetUniform(u.name,
-                            glm::vec3(u.defaultValue[0], u.defaultValue[1],
-                                      u.defaultValue[2]));
+                                         glm::vec3(u.defaultValue[0], u.defaultValue[1],
+                                                   u.defaultValue[2]));
                         break;
                     case MaterialUniformType::Vec4:
                         inst->SetUniform(u.name,
-                            glm::vec4(u.defaultValue[0], u.defaultValue[1],
-                                      u.defaultValue[2], u.defaultValue[3]));
+                                         glm::vec4(u.defaultValue[0], u.defaultValue[1],
+                                                   u.defaultValue[2], u.defaultValue[3]));
                         break;
                     case MaterialUniformType::Mat4:
                         // mat4 default 罕见（uMVP / uModel 一律 hidden 不
@@ -860,7 +897,7 @@ EnsureMaterialInstance(EditorAssetContext& assets, const std::string& materialPa
         }
     }
 
-    auto* rawPtr = inst.get();
+    auto* rawPtr                       = inst.get();
     assets.userMaterials[materialPath] = std::move(inst);
     // v1.2.5 patch · 同步更新 namedMaterialInstances cache —— 否则 schema
     // AssetRef materialGet 反查（RegisterBuiltinSchemas.cpp:359 走 cache

@@ -18,7 +18,7 @@
 // target（与 FbxImporter 一致）。
 // ---------------------------------------------------------------------------
 
-#include "../MaterialFileIO.h"  // Material::MaterialFileData
+#include "../MaterialFileIO.h" // Material::MaterialFileData
 
 #include <cstdint>
 #include <filesystem>
@@ -29,32 +29,32 @@
 
 namespace ofbx
 {
-struct Material;
+    struct Material;
 }
 
 namespace Orange::Editor::Import
 {
 
-// 从 FBX material 的某类贴图取源文件磁盘路径（相对 fbxDir 解析）。FBX 贴图记两
-// 种文件名：绝对 filename（导出机器路径，常失效）+ 相对 relativeFileName。优先
-// 相对路径相对 fbxDir 解析，其次绝对 filename 直接试，都不存在返回空。
-std::string ResolveFbxTexture(const ofbx::Material* mat,
-                              int textureType,  // ofbx::Texture::TextureType
-                              const std::filesystem::path& fbxDir);
+    // 从 FBX material 的某类贴图取源文件磁盘路径（相对 fbxDir 解析）。FBX 贴图记两
+    // 种文件名：绝对 filename（导出机器路径，常失效）+ 相对 relativeFileName。优先
+    // 相对路径相对 fbxDir 解析，其次绝对 filename 直接试，都不存在返回空。
+    std::string ResolveFbxTexture(const ofbx::Material*        mat,
+                                  int                          textureType, // ofbx::Texture::TextureType
+                                  const std::filesystem::path& fbxDir);
 
-// FBX material → pbr 模板 scalar uniform（不含贴图）。贴图源由调用方在 import
-// 阶段经真实 ImportTexture 落盘后单独回填 —— 避免把未落盘的源路径误写进 .material。
-// resolver 非空时也填贴图（保留与历史 BuildFbxMaterialFileData(resolver) 等价的
-// 一步式路径，供单元测试 / 简单场景用）。
-Material::MaterialFileData BuildFbxMaterialFileData(
-    const ofbx::Material* mat, const std::filesystem::path& fbxDir,
-    const std::function<std::string(const std::string&)>& resolver);
+    // FBX material → pbr 模板 scalar uniform（不含贴图）。贴图源由调用方在 import
+    // 阶段经真实 ImportTexture 落盘后单独回填 —— 避免把未落盘的源路径误写进 .material。
+    // resolver 非空时也填贴图（保留与历史 BuildFbxMaterialFileData(resolver) 等价的
+    // 一步式路径，供单元测试 / 简单场景用）。
+    Material::MaterialFileData BuildFbxMaterialFileData(
+        const ofbx::Material* mat, const std::filesystem::path& fbxDir,
+        const std::function<std::string(const std::string&)>& resolver);
 
-// material 的三类贴图源路径（binding → 磁盘源路径）。在 ofbx scene destroy 之前
-// 解析（destroy 后 Material* 悬空）。
-std::vector<std::pair<std::uint32_t, std::string>> StageFbxTextureSources(
-    const ofbx::Material* mat, const std::filesystem::path& fbxDir);
+    // material 的三类贴图源路径（binding → 磁盘源路径）。在 ofbx scene destroy 之前
+    // 解析（destroy 后 Material* 悬空）。
+    std::vector<std::pair<std::uint32_t, std::string>> StageFbxTextureSources(
+        const ofbx::Material* mat, const std::filesystem::path& fbxDir);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_FBX_MATERIAL_PARSE_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_FBX_MATERIAL_PARSE_H

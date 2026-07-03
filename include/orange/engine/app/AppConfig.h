@@ -16,16 +16,16 @@
 namespace Orange::Engine
 {
 
-struct AppConfig
-{
-    Platform::WindowDesc window{};
+    struct AppConfig
+    {
+        Platform::WindowDesc window{};
 
-    // 把呈现帧率限制在显示器刷新率上。当前没有别的 pacing 模式，所以
-    // 这个字段更像是描述性配置；待 swap-chain 在渲染器侧接通后会实际
-    // 生效。
-    bool vsync{true};
-};
+        // 把呈现帧率限制在显示器刷新率上。当前没有别的 pacing 模式，所以
+        // 这个字段更像是描述性配置；待 swap-chain 在渲染器侧接通后会实际
+        // 生效。
+        bool vsync{true};
+    };
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine
 
-#endif  // ORANGE_ENGINE_APP_APP_CONFIG_H
+#endif // ORANGE_ENGINE_APP_APP_CONFIG_H

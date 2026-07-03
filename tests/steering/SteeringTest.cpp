@@ -25,26 +25,26 @@ using S::WanderState;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-float Len(const glm::vec2& v)
-{
-    return std::sqrt(v.x * v.x + v.y * v.y);
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-4f)
     {
-        std::fprintf(stderr, "[SteeringTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
+
+    float Len(const glm::vec2& v)
+    {
+        return std::sqrt(v.x * v.x + v.y * v.y);
+    }
+
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[SteeringTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
 } // namespace
 
@@ -74,9 +74,9 @@ int main()
 
     // —— Seek 闭环收敛：Agent 反复 Seek 能逼近 target ——
     {
-        Agent a{};
+        Agent           a{};
         const glm::vec2 target{50.0f, 0.0f};
-        float minDist = Len(target - a.position);
+        float           minDist = Len(target - a.position);
         for (int i = 0; i < 300; ++i)
         {
             a.Integrate(S::Seek(a.position, a.velocity, target, p), p, 0.05f);
@@ -99,7 +99,7 @@ int main()
     // "永远绕 target 振荡不停"——故稳健地只断言 Arrive 的收敛 (线性 arrive 首过冲属正常，
     // 不做过冲量断言以免脆弱)。 ——
     {
-        Agent a{};
+        Agent           a{};
         const glm::vec2 target{30.0f, 0.0f};
         for (int i = 0; i < 500; ++i)
         {
@@ -126,7 +126,7 @@ int main()
         const glm::vec2 vel{0, 0};
         const glm::vec2 targetPos{10.0f, 0.0f};
         const glm::vec2 targetVel{0.0f, 10.0f}; // 目标向 +Y 移动
-        const glm::vec2 fPursue = S::Pursue(pos, vel, targetPos, targetVel, p, 1.0f);
+        const glm::vec2 fPursue  = S::Pursue(pos, vel, targetPos, targetVel, p, 1.0f);
         const glm::vec2 fSeekNow = S::Seek(pos, vel, targetPos, p); // 只朝当前位置
         Check(fPursue.y > 0.1f, "Pursue：力有 +Y 分量 (瞄向目标前方)");
         Check(Near(fSeekNow.y, 0.0f), "对比：Seek 当前位置无 Y 分量");
@@ -134,14 +134,14 @@ int main()
 
     // —— Wander：确定性 + 有界 + angle 被扰动 ——
     {
-        const glm::vec2 pos{0, 0};
-        const glm::vec2 vel{5.0f, 0.0f};
+        const glm::vec2              pos{0, 0};
+        const glm::vec2              vel{5.0f, 0.0f};
         ::Orange::Engine::Noise::Rng rngA{5};
         ::Orange::Engine::Noise::Rng rngB{5};
-        WanderState sa{};
-        WanderState sb{};
-        const glm::vec2 fa = S::Wander(pos, vel, sa, rngA, 3.0f, 2.0f, 0.5f, p);
-        const glm::vec2 fb = S::Wander(pos, vel, sb, rngB, 3.0f, 2.0f, 0.5f, p);
+        WanderState                  sa{};
+        WanderState                  sb{};
+        const glm::vec2              fa = S::Wander(pos, vel, sa, rngA, 3.0f, 2.0f, 0.5f, p);
+        const glm::vec2              fb = S::Wander(pos, vel, sb, rngB, 3.0f, 2.0f, 0.5f, p);
         Check(Near(fa.x, fb.x) && Near(fa.y, fb.y), "Wander：同 seed+state 力完全相同");
         Check(Near(sa.angle, sb.angle), "Wander：angle 同步演进");
         Check(!Near(sa.angle, 0.0f), "Wander：angle 被 jitter 扰动");

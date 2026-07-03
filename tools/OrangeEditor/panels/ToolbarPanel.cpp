@@ -35,23 +35,23 @@
 #include "../theme/EditorTheme.h"
 
 #include <imgui.h>
-#include <imgui_internal.h>  // BeginViewportSideBar（公开但 internal 命名）
+#include <imgui_internal.h> // BeginViewportSideBar（公开但 internal 命名）
 
 #include <algorithm>
 
 void EditorRenderLayer::DrawMainToolbar()
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
-    if (viewport == nullptr) { return; }
+    if (viewport == nullptr)
+    {
+        return;
+    }
 
     const float frameH   = ImGui::GetFrameHeight();
     const float toolbarH = frameH * 1.2f;
 
     const ImGuiWindowFlags flags =
-          ImGuiWindowFlags_NoDecoration
-        | ImGuiWindowFlags_NoScrollbar
-        | ImGuiWindowFlags_NoSavedSettings
-        | ImGuiWindowFlags_MenuBar;
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
 
     // BeginViewportSideBar 内部已调 Begin()，无论是否返回 true 都必须
     // End() 配对（ImGui Begin/End 通用规则）。
@@ -65,10 +65,10 @@ void EditorRenderLayer::DrawMainToolbar()
         // 在 1em cell 内 advance 居中（c4 修复用户反馈 "icon 偏左上"）。
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
 
-        const PlayState ps = mHost.scene.playState;
-        const char* stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
-                               : (ps == PlayState::Play)   ? "[Play]"
-                                                           : "[Paused]";
+        const PlayState ps         = mHost.scene.playState;
+        const char*     stateLabel = (ps == PlayState::Edit)   ? "[Edit]"
+                                     : (ps == PlayState::Play) ? "[Play]"
+                                                               : "[Paused]";
 
         // v0.6.5 c4：按钮 label 切 Codicons icon，size 用 ImVec2(0, 0)
         // **自动尺寸**——ImGui 按 `icon_advance + 2 * framePadding` 算宽，
@@ -77,27 +77,32 @@ void EditorRenderLayer::DrawMainToolbar()
         // 让 glyph 在 cell 内位置失控（视觉偏右），auto-size 路线更稳。
         // 副作用：4 按钮宽度由 icon advance 决定，Codicons 多数 1em advance
         // 视觉一致，偶尔不一致可接受。
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float framePadX = style.FramePadding.x * 2.0f;
-        const float itemSpc   = style.ItemSpacing.x;
+        const ImGuiStyle& style     = ImGui::GetStyle();
+        const float       framePadX = style.FramePadding.x * 2.0f;
+        const float       itemSpc   = style.ItemSpacing.x;
 
         // playGroupW 改按 icon advance 算（CalcTextSize 与实际 button 宽
         // 一致）。SaveBtn 宽同款 CalcTextSize，但靠左不参与 group 居中。
         const ImVec2 btnSize{0.0f, 0.0f};
-        const float btnPlayW  = ImGui::CalcTextSize(
-            Orange::Editor::Theme::Icon::GetPlay()).x  + framePadX;
+        const float  btnPlayW = ImGui::CalcTextSize(
+                                   Orange::Editor::Theme::Icon::GetPlay())
+                                   .x +
+                               framePadX;
         const float btnPauseW = ImGui::CalcTextSize(
-            Orange::Editor::Theme::Icon::GetPause()).x + framePadX;
-        const float btnStopW  = ImGui::CalcTextSize(
-            Orange::Editor::Theme::Icon::GetStop()).x  + framePadX;
+                                    Orange::Editor::Theme::Icon::GetPause())
+                                    .x +
+                                framePadX;
+        const float btnStopW = ImGui::CalcTextSize(
+                                   Orange::Editor::Theme::Icon::GetStop())
+                                   .x +
+                               framePadX;
 
         // 三态 label 取最长 + framePad 保证切换不抖动；用 (std::max)(...)
         // 圆括号绕开 windows.h max 宏污染（与 EditorRenderLayer.cpp 同款手法）。
-        const float stateW = (std::max)(
-            ImGui::CalcTextSize("[Edit]").x,
-            (std::max)(ImGui::CalcTextSize("[Play]").x,
-                       ImGui::CalcTextSize("[Paused]").x))
-            + framePadX;
+        const float stateW = (std::max)(ImGui::CalcTextSize("[Edit]").x,
+                                        (std::max)(ImGui::CalcTextSize("[Play]").x,
+                                                   ImGui::CalcTextSize("[Paused]").x)) +
+                             framePadX;
         const float playGroupW = btnPlayW + btnPauseW + btnStopW + 2.0f * itemSpc;
 
         // ---- Save 靠左 ---------------------------------------------
@@ -105,56 +110,72 @@ void EditorRenderLayer::DrawMainToolbar()
         // 比"位置，用 AccentPrimary 实色填充；非 dirty 时保留 c2 默认
         // 灰）。
         const bool dirty = mHost.scene.dirty;
-        if (dirty) {
+        if (dirty)
+        {
             ImGui::PushStyleColor(ImGuiCol_Button,
-                Orange::Editor::Theme::Color::GetAccentPrimary());
+                                  Orange::Editor::Theme::Color::GetAccentPrimary());
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-                Orange::Editor::Theme::Color::GetAccentHovered());
+                                  Orange::Editor::Theme::Color::GetAccentHovered());
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,
-                Orange::Editor::Theme::Color::GetAccentActive());
+                                  Orange::Editor::Theme::Color::GetAccentActive());
         }
         ImGui::BeginDisabled(!dirty);
-        if (ImGui::Button(Orange::Editor::Theme::Icon::GetSave(), btnSize)) {
+        if (ImGui::Button(Orange::Editor::Theme::Icon::GetSave(), btnSize))
+        {
             mHost.scene.pendingSceneOp = SceneOp::Save;
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Save (Ctrl+S)"); }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Save (Ctrl+S)");
+        }
         ImGui::EndDisabled();
-        if (dirty) { ImGui::PopStyleColor(3); }
+        if (dirty)
+        {
+            ImGui::PopStyleColor(3);
+        }
 
         // ---- Play / Pause / Stop 居中 ------------------------------
         // SameLine(absX) 用绝对 X 不依赖 cursor，Save 按钮宽度变化不影响
         // 中央 group 位置。GetWindowWidth 是 toolbar window 自身的总宽，
         // 不含 ScrollBar（NoScrollbar flag 保证）。
-        const float winW         = ImGui::GetWindowWidth();
-        const float playCenterX  = (winW - playGroupW) * 0.5f;
+        const float winW        = ImGui::GetWindowWidth();
+        const float playCenterX = (winW - playGroupW) * 0.5f;
         ImGui::SameLine(playCenterX);
 
-        const bool canPlay  = (ps == PlayState::Edit  || ps == PlayState::Paused);
+        const bool canPlay  = (ps == PlayState::Edit || ps == PlayState::Paused);
         const bool canPause = (ps == PlayState::Play);
-        const bool canStop  = (ps == PlayState::Play  || ps == PlayState::Paused);
+        const bool canStop  = (ps == PlayState::Play || ps == PlayState::Paused);
 
         // Play 按钮 idle 时 icon 着绿（success alert）让"就绪可点"状态
         // 跳出来；hover/active 时背景走 c2 默认灰过渡，icon 仍绿保持视
         // 觉一致。disabled 时 EndDisabled 路径自动 dim alpha，绿色也变浅。
         ImGui::BeginDisabled(!canPlay);
         ImGui::PushStyleColor(ImGuiCol_Text,
-            Orange::Editor::Theme::Color::GetAlertSuccess());
-        if (ImGui::Button(Orange::Editor::Theme::Icon::GetPlay(), btnSize)) {
+                              Orange::Editor::Theme::Color::GetAlertSuccess());
+        if (ImGui::Button(Orange::Editor::Theme::Icon::GetPlay(), btnSize))
+        {
             mHost.scene.pendingPlayOp = (ps == PlayState::Paused) ? PlayOp::Resume
                                                                   : PlayOp::EnterPlay;
         }
         ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Play"); }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Play");
+        }
         ImGui::EndDisabled();
         ImGui::SameLine();
         // Pause icon 保留默认文字色 —— pause 不属于 alert 范畴（既非
         // success 也非 error），保留中性 brand 灰避免与 Play 绿 / Stop
         // 红混淆。
         ImGui::BeginDisabled(!canPause);
-        if (ImGui::Button(Orange::Editor::Theme::Icon::GetPause(), btnSize)) {
+        if (ImGui::Button(Orange::Editor::Theme::Icon::GetPause(), btnSize))
+        {
             mHost.scene.pendingPlayOp = PlayOp::Pause;
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Pause"); }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Pause");
+        }
         ImGui::EndDisabled();
         ImGui::SameLine();
         // Stop 按钮 idle 时 icon 着红（error alert）让"停止 / 退出 Play
@@ -162,12 +183,16 @@ void EditorRenderLayer::DrawMainToolbar()
         // 仍红。
         ImGui::BeginDisabled(!canStop);
         ImGui::PushStyleColor(ImGuiCol_Text,
-            Orange::Editor::Theme::Color::GetAlertError());
-        if (ImGui::Button(Orange::Editor::Theme::Icon::GetStop(), btnSize)) {
+                              Orange::Editor::Theme::Color::GetAlertError());
+        if (ImGui::Button(Orange::Editor::Theme::Icon::GetStop(), btnSize))
+        {
             mHost.scene.pendingPlayOp = PlayOp::Stop;
         }
         ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Stop"); }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Stop");
+        }
         ImGui::EndDisabled();
 
         // ---- [State] 靠右 -----------------------------------------
@@ -176,7 +201,7 @@ void EditorRenderLayer::DrawMainToolbar()
         ImGui::SameLine(winW - stateW - style.WindowPadding.x);
         ImGui::TextDisabled("%s", stateLabel);
 
-        ImGui::PopStyleVar();  // ButtonTextAlign
+        ImGui::PopStyleVar(); // ButtonTextAlign
         ImGui::EndMenuBar();
     }
     ImGui::End();

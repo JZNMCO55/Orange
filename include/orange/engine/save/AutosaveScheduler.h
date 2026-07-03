@@ -35,67 +35,67 @@
 namespace Orange::Engine::Save
 {
 
-class ORANGE_ENGINE_API AutosaveScheduler
-{
-public:
-    // 触发回调签名 —— 无参无返回。Game 自己捕获所需的 SlotManager /
-    // World / 当前 slot 名等 context。回调内抛异常**不**被 scheduler
-    // 捕获——交给上层处理器决定。
-    using TriggerCallback = std::function<void()>;
-
-    struct Config
+    class ORANGE_ENGINE_API AutosaveScheduler
     {
-        // 定时触发周期（秒）。0 = 关闭定时触发，仅靠 RequestAutosave
-        // 显式驱动。
-        double intervalSeconds{300.0};
+    public:
+        // 触发回调签名 —— 无参无返回。Game 自己捕获所需的 SlotManager /
+        // World / 当前 slot 名等 context。回调内抛异常**不**被 scheduler
+        // 捕获——交给上层处理器决定。
+        using TriggerCallback = std::function<void()>;
 
-        // 两次触发之间的最小间隔（秒）。无论是定时还是手动 request 触
-        // 发，距上一次成功触发不到这个时间都会被推迟。0 = 无节流。
-        double minSecondsBetween{30.0};
+        struct Config
+        {
+            // 定时触发周期（秒）。0 = 关闭定时触发，仅靠 RequestAutosave
+            // 显式驱动。
+            double intervalSeconds{300.0};
+
+            // 两次触发之间的最小间隔（秒）。无论是定时还是手动 request 触
+            // 发，距上一次成功触发不到这个时间都会被推迟。0 = 无节流。
+            double minSecondsBetween{30.0};
+        };
+
+        AutosaveScheduler(Config config, TriggerCallback callback) noexcept;
+
+        AutosaveScheduler(const AutosaveScheduler&)            = delete;
+        AutosaveScheduler& operator=(const AutosaveScheduler&) = delete;
+
+        // 推进调度器；触发条件满足时同步调用 callback。
+        //
+        // 触发顺序（同 Update 内多源同时满足时仅触发一次）：
+        //   1) 若距上一次触发 ≥ minSecondsBetween：
+        //      a) 定时：intervalSeconds > 0 且累计时间 ≥ intervalSeconds → 触发
+        //      b) 手动 pending request → 触发
+        // 触发后清零累计时间 + 清 pending flag。
+        //
+        // deltaSeconds < 0 视为 0；deltaSeconds 极大值（如游戏挂起后恢复）
+        // 不会让 callback 连发——同一 Update 最多触发一次。
+        void Update(double deltaSeconds);
+
+        // 请求一次自动存档。throttle 未解除时挂起；下次 Update 时若 throttle
+        // 已过则立刻触发。多次调用等价于一次（不累计）。
+        void RequestAutosave() noexcept;
+
+        // 清零"距上次触发的累计时间" + 清 pending flag。典型场景：玩家
+        // 手动存档完成后调一下，避免手动存档后立刻再 autosave。
+        void Reset() noexcept;
+
+        // 距离上次触发已经累计了多少秒。Game UI 可以据此显示"距离下次自动
+        // 存档还剩 X 秒"。从未触发过则为最近一次 Reset 以来的累计；构造后
+        // 从 0 开始。
+        double SecondsSinceLastFire() const noexcept { return mElapsedSinceLastFire; }
+
+        // 是否有挂起的手动 RequestAutosave 等待 throttle 解除。
+        bool HasPendingRequest() const noexcept { return mPendingRequest; }
+
+        const Config& GetConfig() const noexcept { return mConfig; }
+
+    private:
+        Config          mConfig;
+        TriggerCallback mCallback;
+        double          mElapsedSinceLastFire{0.0};
+        bool            mPendingRequest{false};
     };
 
-    AutosaveScheduler(Config config, TriggerCallback callback) noexcept;
+} // namespace Orange::Engine::Save
 
-    AutosaveScheduler(const AutosaveScheduler&)            = delete;
-    AutosaveScheduler& operator=(const AutosaveScheduler&) = delete;
-
-    // 推进调度器；触发条件满足时同步调用 callback。
-    //
-    // 触发顺序（同 Update 内多源同时满足时仅触发一次）：
-    //   1) 若距上一次触发 ≥ minSecondsBetween：
-    //      a) 定时：intervalSeconds > 0 且累计时间 ≥ intervalSeconds → 触发
-    //      b) 手动 pending request → 触发
-    // 触发后清零累计时间 + 清 pending flag。
-    //
-    // deltaSeconds < 0 视为 0；deltaSeconds 极大值（如游戏挂起后恢复）
-    // 不会让 callback 连发——同一 Update 最多触发一次。
-    void Update(double deltaSeconds);
-
-    // 请求一次自动存档。throttle 未解除时挂起；下次 Update 时若 throttle
-    // 已过则立刻触发。多次调用等价于一次（不累计）。
-    void RequestAutosave() noexcept;
-
-    // 清零"距上次触发的累计时间" + 清 pending flag。典型场景：玩家
-    // 手动存档完成后调一下，避免手动存档后立刻再 autosave。
-    void Reset() noexcept;
-
-    // 距离上次触发已经累计了多少秒。Game UI 可以据此显示"距离下次自动
-    // 存档还剩 X 秒"。从未触发过则为最近一次 Reset 以来的累计；构造后
-    // 从 0 开始。
-    double SecondsSinceLastFire() const noexcept { return mElapsedSinceLastFire; }
-
-    // 是否有挂起的手动 RequestAutosave 等待 throttle 解除。
-    bool HasPendingRequest() const noexcept { return mPendingRequest; }
-
-    const Config& GetConfig() const noexcept { return mConfig; }
-
-private:
-    Config          mConfig;
-    TriggerCallback mCallback;
-    double          mElapsedSinceLastFire{0.0};
-    bool            mPendingRequest{false};
-};
-
-}  // namespace Orange::Engine::Save
-
-#endif  // ORANGE_ENGINE_SAVE_AUTOSAVE_SCHEDULER_H
+#endif // ORANGE_ENGINE_SAVE_AUTOSAVE_SCHEDULER_H

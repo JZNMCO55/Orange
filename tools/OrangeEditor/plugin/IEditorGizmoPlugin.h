@@ -89,69 +89,73 @@ struct EditorHost;
 
 namespace Orange::Editor::Schema
 {
-struct ComponentSchema;
+    struct ComponentSchema;
 }
 
 namespace Orange::Editor::Plugin
 {
 
-// 前向声明：v0.4 gizmo milestone 定义此结构（见头注释"GizmoContext 前向声
-// 明纪律"）。本期注册任何 IEditorGizmoPlugin 派生类合法但调用 Draw / HitTest
-// 时需要 v0.4 提供的 GizmoContext 实例——v0.2.5 不存在该调用点。
-struct GizmoContext;
+    // 前向声明：v0.4 gizmo milestone 定义此结构（见头注释"GizmoContext 前向声
+    // 明纪律"）。本期注册任何 IEditorGizmoPlugin 派生类合法但调用 Draw / HitTest
+    // 时需要 v0.4 提供的 GizmoContext 实例——v0.2.5 不存在该调用点。
+    struct GizmoContext;
 
-class IEditorGizmoPlugin
-{
-public:
-    virtual ~IEditorGizmoPlugin() = default;
-
-    IEditorGizmoPlugin()                                            = default;
-    IEditorGizmoPlugin(const IEditorGizmoPlugin&)                   = delete;
-    IEditorGizmoPlugin& operator=(const IEditorGizmoPlugin&)        = delete;
-    IEditorGizmoPlugin(IEditorGizmoPlugin&&)                        = delete;
-    IEditorGizmoPlugin& operator=(IEditorGizmoPlugin&&)             = delete;
-
-    // 本 plugin 是否为某 component schema 绘制 gizmo / 参与 hit-test。
-    // 返回 true 时 SceneView overlay 调度本 plugin 的 Draw / HitTest 钩子。
-    //
-    // plugin 自决过滤策略——推荐按 `schema.typeName` 字符串比较（与
-    // IEditorInspectorPlugin::CanHandle 同款约定）。
-    virtual bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const = 0;
-
-    // 在 viewport overlay 上绘制 gizmo（线段 / billboard / icon 等）。
-    //
-    // 调用时机（v0.4 预期）：当前 selected entity 上挂着本 plugin CanHandle
-    // 的 component 时，每帧调用一次。plugin 通过 ctx 拿 viewport 状态 +
-    // overlay 绘制句柄。
-    //
-    // 纯虚——本钩子是 gizmo plugin 的存在意义，必须实现。
-    virtual void Draw(EditorHost&                                            host,
-                      Orange::Engine::Entity                                 entity,
-                      const Orange::Editor::Schema::ComponentSchema&         schema,
-                      void*                                                  component,
-                      const GizmoContext&                                    ctx) = 0;
-
-    // 鼠标 picking ray 对 gizmo 几何的命中检测。
-    //
-    // 返回值：
-    //   * true  —— gizmo 被命中。plugin 负责把"哪个 handle 命中 / 拖动起点"
-    //              等信息写进 ctx（v0.4 决定具体写入位置——可能是 ctx
-    //              内可写字段、可能是 EditorSelection 内附加槽位）
-    //   * false —— 未命中。caller 继续询问下一个 plugin
-    //
-    // 默认 implementation 返回 false——gizmo plugin 可选地参与 hit-test。
-    // 不需要 hit-test 的纯装饰类 gizmo（如静态状态指示图标）继承默认即可。
-    virtual bool HitTest(EditorHost&                                            host,
-                         Orange::Engine::Entity                                 entity,
-                         const Orange::Editor::Schema::ComponentSchema&         schema,
-                         void*                                                  component,
-                         const GizmoContext&                                    ctx)
+    class IEditorGizmoPlugin
     {
-        (void)host; (void)entity; (void)schema; (void)component; (void)ctx;
-        return false;
-    }
-};
+    public:
+        virtual ~IEditorGizmoPlugin() = default;
 
-}  // namespace Orange::Editor::Plugin
+        IEditorGizmoPlugin()                                     = default;
+        IEditorGizmoPlugin(const IEditorGizmoPlugin&)            = delete;
+        IEditorGizmoPlugin& operator=(const IEditorGizmoPlugin&) = delete;
+        IEditorGizmoPlugin(IEditorGizmoPlugin&&)                 = delete;
+        IEditorGizmoPlugin& operator=(IEditorGizmoPlugin&&)      = delete;
 
-#endif  // ORANGE_EDITOR_PLUGIN_I_EDITOR_GIZMO_PLUGIN_H
+        // 本 plugin 是否为某 component schema 绘制 gizmo / 参与 hit-test。
+        // 返回 true 时 SceneView overlay 调度本 plugin 的 Draw / HitTest 钩子。
+        //
+        // plugin 自决过滤策略——推荐按 `schema.typeName` 字符串比较（与
+        // IEditorInspectorPlugin::CanHandle 同款约定）。
+        virtual bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const = 0;
+
+        // 在 viewport overlay 上绘制 gizmo（线段 / billboard / icon 等）。
+        //
+        // 调用时机（v0.4 预期）：当前 selected entity 上挂着本 plugin CanHandle
+        // 的 component 时，每帧调用一次。plugin 通过 ctx 拿 viewport 状态 +
+        // overlay 绘制句柄。
+        //
+        // 纯虚——本钩子是 gizmo plugin 的存在意义，必须实现。
+        virtual void Draw(EditorHost&                                    host,
+                          Orange::Engine::Entity                         entity,
+                          const Orange::Editor::Schema::ComponentSchema& schema,
+                          void*                                          component,
+                          const GizmoContext&                            ctx) = 0;
+
+        // 鼠标 picking ray 对 gizmo 几何的命中检测。
+        //
+        // 返回值：
+        //   * true  —— gizmo 被命中。plugin 负责把"哪个 handle 命中 / 拖动起点"
+        //              等信息写进 ctx（v0.4 决定具体写入位置——可能是 ctx
+        //              内可写字段、可能是 EditorSelection 内附加槽位）
+        //   * false —— 未命中。caller 继续询问下一个 plugin
+        //
+        // 默认 implementation 返回 false——gizmo plugin 可选地参与 hit-test。
+        // 不需要 hit-test 的纯装饰类 gizmo（如静态状态指示图标）继承默认即可。
+        virtual bool HitTest(EditorHost&                                    host,
+                             Orange::Engine::Entity                         entity,
+                             const Orange::Editor::Schema::ComponentSchema& schema,
+                             void*                                          component,
+                             const GizmoContext&                            ctx)
+        {
+            (void)host;
+            (void)entity;
+            (void)schema;
+            (void)component;
+            (void)ctx;
+            return false;
+        }
+    };
+
+} // namespace Orange::Editor::Plugin
+
+#endif // ORANGE_EDITOR_PLUGIN_I_EDITOR_GIZMO_PLUGIN_H

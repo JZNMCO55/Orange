@@ -26,21 +26,21 @@ using Rig::ShakeParams;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-4f)
     {
-        std::fprintf(stderr, "[CameraShakeTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
+
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[CameraShakeTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
 } // namespace
 
@@ -62,18 +62,20 @@ int main()
     // —— trauma 衰减：随时间线性减、到 0 停 ——
     {
         ShakeParams p{};
-        p.traumaDecay = 1.0f;  // 1 秒衰减完
+        p.traumaDecay = 1.0f; // 1 秒衰减完
         CameraShake2D s(p);
         s.SetTrauma(1.0f);
-        for (int i = 0; i < 30; ++i) s.Update(1.0f / 60.0f); // 0.5 秒
+        for (int i = 0; i < 30; ++i)
+            s.Update(1.0f / 60.0f); // 0.5 秒
         Check(std::fabs(s.GetTrauma() - 0.5f) < 0.02f, "decay: 0.5 秒后 trauma≈0.5");
-        for (int i = 0; i < 60; ++i) s.Update(1.0f / 60.0f); // 再 1 秒 → 早已到 0
+        for (int i = 0; i < 60; ++i)
+            s.Update(1.0f / 60.0f); // 再 1 秒 → 早已到 0
         Check(Near(s.GetTrauma(), 0.0f), "decay: 足够时间后 trauma 到 0 并停");
     }
 
     // —— trauma=0 → 零偏移 ——
     {
-        CameraShake2D s;
+        CameraShake2D     s;
         const ShakeOffset o = s.Update(1.0f / 60.0f);
         Check(Near(o.translation.x, 0.0f) && Near(o.translation.y, 0.0f) && Near(o.roll, 0.0f),
               "zero-trauma: 无 trauma 时零偏移");
@@ -83,8 +85,8 @@ int main()
     {
         ShakeParams p{};
         p.maxTranslation = {0.5f, 0.5f};
-        p.traumaDecay = 0.0f;   // 不衰减，保持满 trauma 采样
-        p.maxRoll = 0.0f;
+        p.traumaDecay    = 0.0f; // 不衰减，保持满 trauma 采样
+        p.maxRoll        = 0.0f;
         CameraShake2D s(p);
         s.SetTrauma(1.0f);
         float maxAbsX = 0.0f;
@@ -92,9 +94,11 @@ int main()
         for (int i = 0; i < 300; ++i)
         {
             const ShakeOffset o = s.Update(1.0f / 60.0f);
-            maxAbsX = std::max(maxAbsX, std::fabs(o.translation.x));
-            if (std::fabs(o.translation.x) > p.maxTranslation.x + 1e-4f) bounded = false;
-            if (std::fabs(o.translation.y) > p.maxTranslation.y + 1e-4f) bounded = false;
+            maxAbsX             = std::max(maxAbsX, std::fabs(o.translation.x));
+            if (std::fabs(o.translation.x) > p.maxTranslation.x + 1e-4f)
+                bounded = false;
+            if (std::fabs(o.translation.y) > p.maxTranslation.y + 1e-4f)
+                bounded = false;
             Check(Near(o.roll, 0.0f), "roll: maxRoll=0 时 roll 恒 0");
         }
         Check(bounded, "bounded: |translation| 不超 maxTranslation");
@@ -105,7 +109,7 @@ int main()
     {
         ShakeParams p{};
         p.traumaDecay = 0.0f;
-        p.seed = 7u;
+        p.seed        = 7u;
         CameraShake2D hi(p), lo(p);
         hi.SetTrauma(1.0f);
         lo.SetTrauma(0.5f);
@@ -127,7 +131,7 @@ int main()
     {
         ShakeParams p{};
         p.traumaDecay = 0.0f;
-        p.seed = 42u;
+        p.seed        = 42u;
         CameraShake2D a(p), b(p);
         a.SetTrauma(0.8f);
         b.SetTrauma(0.8f);

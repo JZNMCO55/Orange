@@ -14,22 +14,25 @@
 namespace Orange::Editor::Util
 {
 
-// 大小写不敏感子串匹配。needle 为空 → true（视为"不过滤"，便于搜索框空串时
-// 显示全部）。用 std::search + tolower 比较器，不预先 lowercase 整串（无分配）。
-inline bool ContainsCaseInsensitive(std::string_view haystack,
-                                    std::string_view needle)
-{
-    if (needle.empty()) { return true; }
-    const auto it = std::search(
-        haystack.begin(), haystack.end(),
-        needle.begin(), needle.end(),
-        [](char a, char b) {
-            return std::tolower(static_cast<unsigned char>(a))
-                 == std::tolower(static_cast<unsigned char>(b));
-        });
-    return it != haystack.end();
-}
+    // 大小写不敏感子串匹配。needle 为空 → true（视为"不过滤"，便于搜索框空串时
+    // 显示全部）。用 std::search + tolower 比较器，不预先 lowercase 整串（无分配）。
+    inline bool ContainsCaseInsensitive(std::string_view haystack,
+                                        std::string_view needle)
+    {
+        if (needle.empty())
+        {
+            return true;
+        }
+        const auto it = std::search(
+            haystack.begin(), haystack.end(),
+            needle.begin(), needle.end(),
+            [](char a, char b)
+            {
+                return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+            });
+        return it != haystack.end();
+    }
 
-}  // namespace Orange::Editor::Util
+} // namespace Orange::Editor::Util
 
-#endif  // ORANGE_EDITOR_EDITOR_TEXT_UTIL_H
+#endif // ORANGE_EDITOR_EDITOR_TEXT_UTIL_H

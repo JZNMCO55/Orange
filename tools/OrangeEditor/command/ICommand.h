@@ -33,4 +33,4 @@ public:
     virtual bool Merge(ICommand& /*newer*/) { return false; }
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_ICOMMAND_H
+#endif // ORANGE_EDITOR_COMMAND_ICOMMAND_H

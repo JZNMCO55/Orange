@@ -10,10 +10,10 @@
 
 namespace Orange::Engine::Platform
 {
-namespace
-{
+    namespace
+    {
 
-[[maybe_unused]] inline constexpr int sPlatformHeaderCheckSentinel = 0;
+        [[maybe_unused]] inline constexpr int sPlatformHeaderCheckSentinel = 0;
 
-}  // namespace
-}  // namespace Orange::Engine::Platform
+    } // namespace
+} // namespace Orange::Engine::Platform

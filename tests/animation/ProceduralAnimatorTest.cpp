@@ -27,239 +27,260 @@ namespace Rd  = Orange::Engine::Render;
 namespace
 {
 
-// 构造一个有 "noise_amp"(float) + "tint"(vec3) 两个 uniform 的 Material。
-// shader handle 不填——本测不渲染，Material 只用作 MaterialInstance 的
-// uniform 描述源（SetUniform 按 name 在 uniforms[] 里查）。
-Rd::Material MakeTwoSlotMaterial()
-{
-    Rd::Material m;
-    m.name = "test/proc";
-    m.uniforms = {
-        {"noise_amp", Rd::MaterialUniformType::Float},
-        {"tint",      Rd::MaterialUniformType::Vec3},
-    };
-    return m;
-}
-
-void TestFloatChannelDrivesUniform()
-{
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
-
-    Ani::ProceduralAnimator anim(&mi);
-    anim.AddChannel<float>("noise_amp",
-                           [](float t) { return std::sin(t * 2.0f); });
-    assert(anim.ChannelCount() == 1);
-
-    // Tick(0)：fn(0) = sin(0) = 0
-    anim.Tick(0.0f);
-    auto v0 = mi.GetUniformFloat("noise_amp");
-    assert(v0.has_value());
-    assert(std::fabs(*v0) < 1e-5f);
-
-    // Tick(1.0)：累计到 1.0；fn(1.0) = sin(2.0) ≈ 0.9093
-    anim.Tick(1.0f);
-    auto v1 = mi.GetUniformFloat("noise_amp");
-    assert(v1.has_value());
-    const float expected1 = std::sin(2.0f);
-    if (std::fabs(*v1 - expected1) > 1e-4f)
+    // 构造一个有 "noise_amp"(float) + "tint"(vec3) 两个 uniform 的 Material。
+    // shader handle 不填——本测不渲染，Material 只用作 MaterialInstance 的
+    // uniform 描述源（SetUniform 按 name 在 uniforms[] 里查）。
+    Rd::Material MakeTwoSlotMaterial()
     {
-        std::fprintf(stderr, "[ProceduralAnimatorTest] noise_amp@t=1: got %.5f expected %.5f\n",
-                     *v1, expected1);
+        Rd::Material m;
+        m.name     = "test/proc";
+        m.uniforms = {
+            {"noise_amp", Rd::MaterialUniformType::Float},
+            {"tint", Rd::MaterialUniformType::Vec3},
+        };
+        return m;
     }
-    assert(std::fabs(*v1 - expected1) <= 1e-4f);
 
-    // 再 Tick(0.5)：累计到 1.5；fn(1.5) = sin(3.0) ≈ 0.1411
-    anim.Tick(0.5f);
-    auto v2 = mi.GetUniformFloat("noise_amp");
-    const float expected2 = std::sin(3.0f);
-    assert(std::fabs(*v2 - expected2) <= 1e-4f);
+    void TestFloatChannelDrivesUniform()
+    {
+        auto                 material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance mi(&material);
 
-    assert(std::fabs(anim.ElapsedSeconds() - 1.5f) < 1e-5f);
-}
+        Ani::ProceduralAnimator anim(&mi);
+        anim.AddChannel<float>("noise_amp",
+                               [](float t)
+                               { return std::sin(t * 2.0f); });
+        assert(anim.ChannelCount() == 1);
 
-void TestMultipleChannelsIndependent()
-{
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
+        // Tick(0)：fn(0) = sin(0) = 0
+        anim.Tick(0.0f);
+        auto v0 = mi.GetUniformFloat("noise_amp");
+        assert(v0.has_value());
+        assert(std::fabs(*v0) < 1e-5f);
 
-    Ani::ProceduralAnimator anim(&mi);
-    anim.AddChannel<float>("noise_amp",
-                           [](float t) { return t * 2.0f; });
-    anim.AddChannel<glm::vec3>("tint",
-                               [](float t) {
-                                   return glm::vec3{t, -t, 0.5f};
-                               });
-    assert(anim.ChannelCount() == 2);
+        // Tick(1.0)：累计到 1.0；fn(1.0) = sin(2.0) ≈ 0.9093
+        anim.Tick(1.0f);
+        auto v1 = mi.GetUniformFloat("noise_amp");
+        assert(v1.has_value());
+        const float expected1 = std::sin(2.0f);
+        if (std::fabs(*v1 - expected1) > 1e-4f)
+        {
+            std::fprintf(stderr, "[ProceduralAnimatorTest] noise_amp@t=1: got %.5f expected %.5f\n",
+                         *v1, expected1);
+        }
+        assert(std::fabs(*v1 - expected1) <= 1e-4f);
 
-    anim.Tick(0.25f);
+        // 再 Tick(0.5)：累计到 1.5；fn(1.5) = sin(3.0) ≈ 0.1411
+        anim.Tick(0.5f);
+        auto        v2        = mi.GetUniformFloat("noise_amp");
+        const float expected2 = std::sin(3.0f);
+        assert(std::fabs(*v2 - expected2) <= 1e-4f);
 
-    auto fv = mi.GetUniformFloat("noise_amp");
-    auto v3 = mi.GetUniformVec3("tint");
-    assert(fv.has_value());
-    assert(v3.has_value());
+        assert(std::fabs(anim.ElapsedSeconds() - 1.5f) < 1e-5f);
+    }
 
-    assert(std::fabs(*fv - 0.5f) <= 1e-5f);          // 0.25 * 2
-    assert(std::fabs(v3->x - 0.25f) <= 1e-5f);
-    assert(std::fabs(v3->y + 0.25f) <= 1e-5f);
-    assert(std::fabs(v3->z - 0.5f)  <= 1e-5f);
-}
+    void TestMultipleChannelsIndependent()
+    {
+        auto                 material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance mi(&material);
 
-void TestNullTargetSafe()
-{
-    Ani::ProceduralAnimator anim(nullptr);
-    anim.AddChannel<float>("noise_amp", [](float t) { return t; });
+        Ani::ProceduralAnimator anim(&mi);
+        anim.AddChannel<float>("noise_amp",
+                               [](float t)
+                               { return t * 2.0f; });
+        anim.AddChannel<glm::vec3>("tint",
+                                   [](float t)
+                                   {
+                                       return glm::vec3{t, -t, 0.5f};
+                                   });
+        assert(anim.ChannelCount() == 2);
 
-    // 不崩，elapsed 正常推进。
-    anim.Tick(0.5f);
-    anim.Tick(0.25f);
-    assert(std::fabs(anim.ElapsedSeconds() - 0.75f) < 1e-5f);
+        anim.Tick(0.25f);
 
-    // SetTarget 接上一个真 mi 后，下一次 Tick 应能写出当前 elapsed。
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
-    anim.SetTarget(&mi);
-    anim.Tick(0.0f);  // dt=0：elapsed 不变 = 0.75，fn(0.75) = 0.75
-    auto v = mi.GetUniformFloat("noise_amp");
-    assert(v.has_value());
-    assert(std::fabs(*v - 0.75f) <= 1e-5f);
-}
+        auto fv = mi.GetUniformFloat("noise_amp");
+        auto v3 = mi.GetUniformVec3("tint");
+        assert(fv.has_value());
+        assert(v3.has_value());
 
-void TestResetAndClear()
-{
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
-    Ani::ProceduralAnimator anim(&mi);
-    anim.AddChannel<float>("noise_amp", [](float t) { return t; });
-    anim.Tick(2.0f);
-    assert(std::fabs(anim.ElapsedSeconds() - 2.0f) < 1e-5f);
+        assert(std::fabs(*fv - 0.5f) <= 1e-5f); // 0.25 * 2
+        assert(std::fabs(v3->x - 0.25f) <= 1e-5f);
+        assert(std::fabs(v3->y + 0.25f) <= 1e-5f);
+        assert(std::fabs(v3->z - 0.5f) <= 1e-5f);
+    }
 
-    anim.ResetElapsed();
-    assert(anim.ElapsedSeconds() == 0.0f);
-    anim.Tick(0.1f);
-    auto v = mi.GetUniformFloat("noise_amp");
-    assert(v.has_value());
-    assert(std::fabs(*v - 0.1f) <= 1e-5f);
+    void TestNullTargetSafe()
+    {
+        Ani::ProceduralAnimator anim(nullptr);
+        anim.AddChannel<float>("noise_amp", [](float t)
+                               { return t; });
 
-    anim.ClearChannels();
-    assert(anim.ChannelCount() == 0);
-    // 清空之后 Tick 不再写新值（旧覆盖保留）；不崩。
-    anim.Tick(1.0f);
-    auto v2 = mi.GetUniformFloat("noise_amp");
-    assert(v2.has_value());
-    assert(std::fabs(*v2 - 0.1f) <= 1e-5f);  // 没被覆盖
-}
+        // 不崩，elapsed 正常推进。
+        anim.Tick(0.5f);
+        anim.Tick(0.25f);
+        assert(std::fabs(anim.ElapsedSeconds() - 0.75f) < 1e-5f);
 
-void TestIAnimatorContract()
-{
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
-    Ani::ProceduralAnimator anim(&mi);
+        // SetTarget 接上一个真 mi 后，下一次 Tick 应能写出当前 elapsed。
+        auto                 material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance mi(&material);
+        anim.SetTarget(&mi);
+        anim.Tick(0.0f); // dt=0：elapsed 不变 = 0.75，fn(0.75) = 0.75
+        auto v = mi.GetUniformFloat("noise_amp");
+        assert(v.has_value());
+        assert(std::fabs(*v - 0.75f) <= 1e-5f);
+    }
 
-    // procedural 永远 not finished
-    assert(!anim.IsFinished());
-    anim.Tick(1000.0f);
-    assert(!anim.IsFinished());
-    assert(anim.BackendName() == "procedural");
+    void TestResetAndClear()
+    {
+        auto                    material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance    mi(&material);
+        Ani::ProceduralAnimator anim(&mi);
+        anim.AddChannel<float>("noise_amp", [](float t)
+                               { return t; });
+        anim.Tick(2.0f);
+        assert(std::fabs(anim.ElapsedSeconds() - 2.0f) < 1e-5f);
 
-    // 负 dt → no-op（不前进）
-    const float before = anim.ElapsedSeconds();
-    anim.Tick(-1.0f);
-    assert(anim.ElapsedSeconds() == before);
-}
+        anim.ResetElapsed();
+        assert(anim.ElapsedSeconds() == 0.0f);
+        anim.Tick(0.1f);
+        auto v = mi.GetUniformFloat("noise_amp");
+        assert(v.has_value());
+        assert(std::fabs(*v - 0.1f) <= 1e-5f);
 
-// B2.1：AddDataChannel 把 AnimationTrack 的关键帧采样曲线驱动 uniform
-//（数据 channel 与 lambda channel 并存、同一 Tick）。
-void TestDataChannelFromTrack()
-{
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
-    Ani::ProceduralAnimator anim(&mi);
+        anim.ClearChannels();
+        assert(anim.ChannelCount() == 0);
+        // 清空之后 Tick 不再写新值（旧覆盖保留）；不崩。
+        anim.Tick(1.0f);
+        auto v2 = mi.GetUniformFloat("noise_amp");
+        assert(v2.has_value());
+        assert(std::fabs(*v2 - 0.1f) <= 1e-5f); // 没被覆盖
+    }
 
-    // Float track：t=0→0, t=2→100（线性）。
-    Ani::AnimationTrack ftrack;
-    ftrack.valueType = Ani::TrackValueType::Float;
-    Ani::Keyframe fk0; fk0.time = 0.0f; fk0.value = glm::vec4(0.0f);
-    fk0.interp = Ani::InterpMode::Linear;
-    Ani::Keyframe fk1; fk1.time = 2.0f; fk1.value = glm::vec4(100.0f, 0, 0, 0);
-    fk1.interp = Ani::InterpMode::Linear;
-    ftrack.keys = {fk0, fk1};
+    void TestIAnimatorContract()
+    {
+        auto                    material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance    mi(&material);
+        Ani::ProceduralAnimator anim(&mi);
 
-    // Vec3 track：t=0→(0,0,0), t=2→(2,4,6)（线性）。
-    Ani::AnimationTrack vtrack;
-    vtrack.valueType = Ani::TrackValueType::Vec3;
-    Ani::Keyframe vk0; vk0.time = 0.0f; vk0.value = glm::vec4(0.0f);
-    vk0.interp = Ani::InterpMode::Linear;
-    Ani::Keyframe vk1; vk1.time = 2.0f; vk1.value = glm::vec4(2, 4, 6, 0);
-    vk1.interp = Ani::InterpMode::Linear;
-    vtrack.keys = {vk0, vk1};
+        // procedural 永远 not finished
+        assert(!anim.IsFinished());
+        anim.Tick(1000.0f);
+        assert(!anim.IsFinished());
+        assert(anim.BackendName() == "procedural");
 
-    anim.AddDataChannel("noise_amp", ftrack);
-    anim.AddDataChannel("tint", vtrack);
-    assert(anim.ChannelCount() == 2);
+        // 负 dt → no-op（不前进）
+        const float before = anim.ElapsedSeconds();
+        anim.Tick(-1.0f);
+        assert(anim.ElapsedSeconds() == before);
+    }
 
-    // Tick 到 elapsed=1.0（两 track 区间中点）→ noise_amp=50, tint=(1,2,3)。
-    anim.Tick(1.0f);
-    auto fv = mi.GetUniformFloat("noise_amp");
-    auto vv = mi.GetUniformVec3("tint");
-    assert(fv.has_value() && std::fabs(*fv - 50.0f) <= 1e-3f &&
-           "Float 数据 channel t=1 → 线性中点 50");
-    assert(vv.has_value() &&
-           std::fabs(vv->x - 1.0f) <= 1e-3f &&
-           std::fabs(vv->y - 2.0f) <= 1e-3f &&
-           std::fabs(vv->z - 3.0f) <= 1e-3f &&
-           "Vec3 数据 channel t=1 → (1,2,3)");
+    // B2.1：AddDataChannel 把 AnimationTrack 的关键帧采样曲线驱动 uniform
+    //（数据 channel 与 lambda channel 并存、同一 Tick）。
+    void TestDataChannelFromTrack()
+    {
+        auto                    material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance    mi(&material);
+        Ani::ProceduralAnimator anim(&mi);
 
-    // clamp：Tick 过末 key（elapsed=3.0 > duration 2.0）→ 末 key 值。
-    anim.Tick(2.0f);
-    auto fv2 = mi.GetUniformFloat("noise_amp");
-    assert(fv2.has_value() && std::fabs(*fv2 - 100.0f) <= 1e-3f &&
-           "数据 channel 超末 key → clamp 到末值 100");
-}
+        // Float track：t=0→0, t=2→100（线性）。
+        Ani::AnimationTrack ftrack;
+        ftrack.valueType = Ani::TrackValueType::Float;
+        Ani::Keyframe fk0;
+        fk0.time   = 0.0f;
+        fk0.value  = glm::vec4(0.0f);
+        fk0.interp = Ani::InterpMode::Linear;
+        Ani::Keyframe fk1;
+        fk1.time    = 2.0f;
+        fk1.value   = glm::vec4(100.0f, 0, 0, 0);
+        fk1.interp  = Ani::InterpMode::Linear;
+        ftrack.keys = {fk0, fk1};
 
-// B2.2：AddClipChannels 把整个 AnimationClip 的所有 track 按 targetName 注册成
-// uniform channel —— 同一份 clip 数据驱动 material uniform（与 ClipAnimator 驱动
-// Transform 对称）。
-void TestAddClipChannels()
-{
-    auto material = MakeTwoSlotMaterial();
-    Rd::MaterialInstance mi(&material);
-    Ani::ProceduralAnimator anim(&mi);
+        // Vec3 track：t=0→(0,0,0), t=2→(2,4,6)（线性）。
+        Ani::AnimationTrack vtrack;
+        vtrack.valueType = Ani::TrackValueType::Vec3;
+        Ani::Keyframe vk0;
+        vk0.time   = 0.0f;
+        vk0.value  = glm::vec4(0.0f);
+        vk0.interp = Ani::InterpMode::Linear;
+        Ani::Keyframe vk1;
+        vk1.time    = 2.0f;
+        vk1.value   = glm::vec4(2, 4, 6, 0);
+        vk1.interp  = Ani::InterpMode::Linear;
+        vtrack.keys = {vk0, vk1};
 
-    Ani::AnimationClip clip;
-    clip.duration = 2.0f;
+        anim.AddDataChannel("noise_amp", ftrack);
+        anim.AddDataChannel("tint", vtrack);
+        assert(anim.ChannelCount() == 2);
 
-    // track.targetName 充当 uniform 名 —— 对应 MakeTwoSlotMaterial 的两个槽。
-    Ani::AnimationTrack ftrack;
-    ftrack.targetName = "noise_amp";
-    ftrack.valueType  = Ani::TrackValueType::Float;
-    Ani::Keyframe fk0; fk0.time = 0.0f; fk0.value = glm::vec4(0.0f);
-    Ani::Keyframe fk1; fk1.time = 2.0f; fk1.value = glm::vec4(100.0f, 0, 0, 0);
-    ftrack.keys = {fk0, fk1};
-    clip.tracks.push_back(ftrack);
+        // Tick 到 elapsed=1.0（两 track 区间中点）→ noise_amp=50, tint=(1,2,3)。
+        anim.Tick(1.0f);
+        auto fv = mi.GetUniformFloat("noise_amp");
+        auto vv = mi.GetUniformVec3("tint");
+        assert(fv.has_value() && std::fabs(*fv - 50.0f) <= 1e-3f &&
+               "Float 数据 channel t=1 → 线性中点 50");
+        assert(vv.has_value() &&
+               std::fabs(vv->x - 1.0f) <= 1e-3f &&
+               std::fabs(vv->y - 2.0f) <= 1e-3f &&
+               std::fabs(vv->z - 3.0f) <= 1e-3f &&
+               "Vec3 数据 channel t=1 → (1,2,3)");
 
-    Ani::AnimationTrack vtrack;
-    vtrack.targetName = "tint";
-    vtrack.valueType  = Ani::TrackValueType::Vec3;
-    Ani::Keyframe vk0; vk0.time = 0.0f; vk0.value = glm::vec4(0.0f);
-    Ani::Keyframe vk1; vk1.time = 2.0f; vk1.value = glm::vec4(2, 4, 6, 0);
-    vtrack.keys = {vk0, vk1};
-    clip.tracks.push_back(vtrack);
+        // clamp：Tick 过末 key（elapsed=3.0 > duration 2.0）→ 末 key 值。
+        anim.Tick(2.0f);
+        auto fv2 = mi.GetUniformFloat("noise_amp");
+        assert(fv2.has_value() && std::fabs(*fv2 - 100.0f) <= 1e-3f &&
+               "数据 channel 超末 key → clamp 到末值 100");
+    }
 
-    anim.AddClipChannels(clip);
-    assert(anim.ChannelCount() == 2 && "clip 两 track → 两 channel");
+    // B2.2：AddClipChannels 把整个 AnimationClip 的所有 track 按 targetName 注册成
+    // uniform channel —— 同一份 clip 数据驱动 material uniform（与 ClipAnimator 驱动
+    // Transform 对称）。
+    void TestAddClipChannels()
+    {
+        auto                    material = MakeTwoSlotMaterial();
+        Rd::MaterialInstance    mi(&material);
+        Ani::ProceduralAnimator anim(&mi);
 
-    anim.Tick(1.0f);  // 区间中点
-    auto fv = mi.GetUniformFloat("noise_amp");
-    auto vv = mi.GetUniformVec3("tint");
-    assert(fv.has_value() && std::fabs(*fv - 50.0f) <= 1e-3f &&
-           "clip channel: noise_amp t=1 → 50");
-    assert(vv.has_value() && std::fabs(vv->x - 1.0f) <= 1e-3f &&
-           std::fabs(vv->y - 2.0f) <= 1e-3f && std::fabs(vv->z - 3.0f) <= 1e-3f &&
-           "clip channel: tint t=1 → (1,2,3)");
-}
+        Ani::AnimationClip clip;
+        clip.duration = 2.0f;
 
-}  // namespace
+        // track.targetName 充当 uniform 名 —— 对应 MakeTwoSlotMaterial 的两个槽。
+        Ani::AnimationTrack ftrack;
+        ftrack.targetName = "noise_amp";
+        ftrack.valueType  = Ani::TrackValueType::Float;
+        Ani::Keyframe fk0;
+        fk0.time  = 0.0f;
+        fk0.value = glm::vec4(0.0f);
+        Ani::Keyframe fk1;
+        fk1.time    = 2.0f;
+        fk1.value   = glm::vec4(100.0f, 0, 0, 0);
+        ftrack.keys = {fk0, fk1};
+        clip.tracks.push_back(ftrack);
+
+        Ani::AnimationTrack vtrack;
+        vtrack.targetName = "tint";
+        vtrack.valueType  = Ani::TrackValueType::Vec3;
+        Ani::Keyframe vk0;
+        vk0.time  = 0.0f;
+        vk0.value = glm::vec4(0.0f);
+        Ani::Keyframe vk1;
+        vk1.time    = 2.0f;
+        vk1.value   = glm::vec4(2, 4, 6, 0);
+        vtrack.keys = {vk0, vk1};
+        clip.tracks.push_back(vtrack);
+
+        anim.AddClipChannels(clip);
+        assert(anim.ChannelCount() == 2 && "clip 两 track → 两 channel");
+
+        anim.Tick(1.0f); // 区间中点
+        auto fv = mi.GetUniformFloat("noise_amp");
+        auto vv = mi.GetUniformVec3("tint");
+        assert(fv.has_value() && std::fabs(*fv - 50.0f) <= 1e-3f &&
+               "clip channel: noise_amp t=1 → 50");
+        assert(vv.has_value() && std::fabs(vv->x - 1.0f) <= 1e-3f &&
+               std::fabs(vv->y - 2.0f) <= 1e-3f && std::fabs(vv->z - 3.0f) <= 1e-3f &&
+               "clip channel: tint t=1 → (1,2,3)");
+    }
+
+} // namespace
 
 int main()
 {

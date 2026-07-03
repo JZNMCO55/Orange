@@ -25,24 +25,24 @@
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
-}  // namespace Orange::Engine::Asset
+    class AssetRegistry;
+} // namespace Orange::Engine::Asset
 
 namespace Orange::Engine::Render::BuiltinShadowShaders
 {
 
-// 顶点 + 片段 SPIR-V handle 对。Pipeline 在编 RHI Pipeline 时各取一个。
-struct ShaderPair
-{
-    Asset::AssetHandle<Asset::ShaderAsset> vertex;
-    Asset::AssetHandle<Asset::ShaderAsset> fragment;
-};
+    // 顶点 + 片段 SPIR-V handle 对。Pipeline 在编 RHI Pipeline 时各取一个。
+    struct ShaderPair
+    {
+        Asset::AssetHandle<Asset::ShaderAsset> vertex;
+        Asset::AssetHandle<Asset::ShaderAsset> fragment;
+    };
 
-// 加载内置 shadow_caster 模板。失败语义同 BuiltinMaterials::LoadToon——
-// SPIR-V 不存在 / 解析失败时 ShaderPair 仍返回，但对应字段是无效 handle。
-// 调用方按 `pair.vertex.IsValid()` 判定。
-ORANGE_ENGINE_API ShaderPair LoadShadowCaster(Asset::AssetRegistry& registry);
+    // 加载内置 shadow_caster 模板。失败语义同 BuiltinMaterials::LoadToon——
+    // SPIR-V 不存在 / 解析失败时 ShaderPair 仍返回，但对应字段是无效 handle。
+    // 调用方按 `pair.vertex.IsValid()` 判定。
+    ORANGE_ENGINE_API ShaderPair LoadShadowCaster(Asset::AssetRegistry& registry);
 
-}  // namespace Orange::Engine::Render::BuiltinShadowShaders
+} // namespace Orange::Engine::Render::BuiltinShadowShaders
 
-#endif  // ORANGE_ENGINE_RENDER_BUILTIN_SHADOW_SHADERS_H
+#endif // ORANGE_ENGINE_RENDER_BUILTIN_SHADOW_SHADERS_H

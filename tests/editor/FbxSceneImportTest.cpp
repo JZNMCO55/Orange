@@ -63,34 +63,34 @@ namespace fs = std::filesystem;
 namespace
 {
 
-std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
-{
-    auto registry = std::make_unique<AssetNS::AssetRegistry>();
-    auto rm = registry->RegisterLoader<AssetNS::MeshAsset>(
-        std::make_unique<AssetNS::MeshLoader>());
-    assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
-    return registry;
-}
-
-// 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
-Entity FindByName(World& world, const std::string& name)
-{
-    Entity found = Entity::Invalid();
-    auto view = world.Registry().view<SceneNS::NameComponent>();
-    for (auto e : view)
+    std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
     {
-        const Entity ent = World::FromEntt(e);
-        const auto* nc = world.GetComponent<SceneNS::NameComponent>(ent);
-        if (nc != nullptr && nc->name == name)
-        {
-            found = ent;
-            break;
-        }
+        auto registry = std::make_unique<AssetNS::AssetRegistry>();
+        auto rm       = registry->RegisterLoader<AssetNS::MeshAsset>(
+            std::make_unique<AssetNS::MeshLoader>());
+        assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
+        return registry;
     }
-    return found;
-}
 
-}  // namespace
+    // 在 Load 回来的 World 里按名字找实体（名字唯一）。找不到返回 Invalid。
+    Entity FindByName(World& world, const std::string& name)
+    {
+        Entity found = Entity::Invalid();
+        auto   view  = world.Registry().view<SceneNS::NameComponent>();
+        for (auto e : view)
+        {
+            const Entity ent = World::FromEntt(e);
+            const auto*  nc  = world.GetComponent<SceneNS::NameComponent>(ent);
+            if (nc != nullptr && nc->name == name)
+            {
+                found = ent;
+                break;
+            }
+        }
+        return found;
+    }
+
+} // namespace
 
 int main()
 {
@@ -108,8 +108,8 @@ int main()
 
     // ===== 1. 缺失文件 → SourceReadFailed（不崩）=====
     {
-        auto registry = MakeImportRegistry();
-        const ImportNS::ImportResult r = ImportNS::RunFbxSceneImportToRegistry(
+        auto                         registry = MakeImportRegistry();
+        const ImportNS::ImportResult r        = ImportNS::RunFbxSceneImportToRegistry(
             (testRoot / "does_not_exist.fbx").generic_string(), *registry);
         assert(r.status == ImportNS::ImportStatus::SourceReadFailed &&
                "不存在的 .fbx 应返回 SourceReadFailed（不崩）");
@@ -129,7 +129,7 @@ int main()
     }
 
     // ===== 2. 导入层级 FBX → .scene.json + 2 .mesh（每 mesh node 单独不塌平）=====
-    auto registry = MakeImportRegistry();
+    auto                         registry = MakeImportRegistry();
     const ImportNS::ImportResult r =
         ImportNS::RunFbxSceneImportToRegistry(fixturePath, *registry);
     assert(r.status == ImportNS::ImportStatus::Success &&
@@ -143,15 +143,18 @@ int main()
 
     // 每 mesh node 单独 .mesh（Parent + Child 两个 cube → 2 个 .mesh，不塌平）。
     {
-        std::size_t meshFiles = 0;
-        const fs::path modelDir = fs::path(r.destPath).parent_path().parent_path() /
+        std::size_t    meshFiles = 0;
+        const fs::path modelDir  = fs::path(r.destPath).parent_path().parent_path() /
                                   fs::path("Models") /
                                   fs::path(fixturePath).stem();
         // 更稳妥：直接扫 assets/Models/<stem>/。
         const fs::path md = fs::path("assets/Models") / fs::path(fixturePath).stem();
         for (const auto& de : fs::directory_iterator(md))
         {
-            if (de.path().extension() == ".mesh") { ++meshFiles; }
+            if (de.path().extension() == ".mesh")
+            {
+                ++meshFiles;
+            }
         }
         assert(meshFiles == 2 &&
                "Parent + Child 两 mesh node → 2 个独立 .mesh（不塌平）");
@@ -160,15 +163,19 @@ int main()
 
     // ===== 3. Scene::Load round-trip：层级 + node local transform 共轭轴转换 =====
     {
-        World world;
+        World                world;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = registry.get();
-        auto loadRes = SceneNS::Load(r.destPath, world, opts);
+        auto loadRes       = SceneNS::Load(r.destPath, world, opts);
         assert(loadRes.IsOk() && "产出的 .scene.json 应能被 Scene::Load 加载");
 
         // 实体数：Parent + Child = 2。
         std::size_t named = 0;
-        for (auto e : world.Registry().view<SceneNS::NameComponent>()) { (void)e; ++named; }
+        for (auto e : world.Registry().view<SceneNS::NameComponent>())
+        {
+            (void)e;
+            ++named;
+        }
         assert(named == 2 && "应有 2 个实体（Parent + Child，保留 node 树）");
 
         const Entity parent = FindByName(world, "Parent");
@@ -190,8 +197,8 @@ int main()
 
         // ---- 两 mesh node 都有 Renderable + 各自独立 mesh handle ----
         namespace RenderNS = ::Orange::Engine::Render;
-        const auto* pR = world.GetComponent<RenderNS::RenderableComponent>(parent);
-        const auto* cR = world.GetComponent<RenderNS::RenderableComponent>(child);
+        const auto* pR     = world.GetComponent<RenderNS::RenderableComponent>(parent);
+        const auto* cR     = world.GetComponent<RenderNS::RenderableComponent>(child);
         assert(pR != nullptr && pR->mesh.IsValid() && "Parent 应有有效 Renderable");
         assert(cR != nullptr && cR->mesh.IsValid() && "Child 应有有效 Renderable");
         assert(pR->mesh.Value() != cR->mesh.Value() &&
@@ -273,14 +280,14 @@ int main()
             std::ofstream ofs(scenePath, std::ios::binary | std::ios::trunc);
             ofs << "MANUAL_EDIT_MARKER";
         }
-        auto reg = MakeImportRegistry();
+        auto                         reg = MakeImportRegistry();
         const ImportNS::ImportResult r2 =
             ImportNS::RunFbxSceneImportToRegistry(fixturePath, *reg);
         assert(r2.status == ImportNS::ImportStatus::Success &&
                "重导未改源应 Success（hash 短路）");
         assert(r2.message.find("unchanged") != std::string::npos &&
                "重导未改源应走 hash 短路（message 含 unchanged）");
-        std::ifstream ifs(scenePath, std::ios::binary);
+        std::ifstream     ifs(scenePath, std::ios::binary);
         const std::string content((std::istreambuf_iterator<char>(ifs)),
                                   std::istreambuf_iterator<char>());
         assert(content == "MANUAL_EDIT_MARKER" &&
@@ -301,16 +308,16 @@ int main()
                       fs::copy_options::overwrite_existing, ec);
         assert(!ec && "复制 fixture 到新 basename 应成功");
 
-        auto reg = MakeImportRegistry();
-        const ImportNS::ImportResult rs = ImportNS::RunFbxSceneImportToRegistry(
+        auto                         reg = MakeImportRegistry();
+        const ImportNS::ImportResult rs  = ImportNS::RunFbxSceneImportToRegistry(
             scaledFbx.generic_string(), *reg, 0.5f);
         assert(rs.status == ImportNS::ImportStatus::Success &&
                "importScale=0.5 导入应 Success");
 
-        World w;
+        World                w;
         SceneNS::LoadOptions opts;
         opts.assetRegistry = reg.get();
-        auto lr = SceneNS::Load(rs.destPath, w, opts);
+        auto lr            = SceneNS::Load(rs.destPath, w, opts);
         assert(lr.IsOk() && "scaled scene 应能 Load");
 
         const Entity parent = FindByName(w, "Parent");
@@ -375,7 +382,7 @@ int main()
         }
         else
         {
-            auto reg = MakeImportRegistry();
+            auto                         reg = MakeImportRegistry();
             const ImportNS::ImportResult rc =
                 ImportNS::RunFbxSceneImportToRegistry(camFixture, *reg);
             assert(rc.status == ImportNS::ImportStatus::Success &&
@@ -385,15 +392,19 @@ int main()
             std::fprintf(stdout, "  [PASS] camera 导入产出 scene (%s)\n",
                          rc.message.c_str());
 
-            World w;
+            World                w;
             SceneNS::LoadOptions opts;
             opts.assetRegistry = reg.get();
-            auto lr = SceneNS::Load(rc.destPath, w, opts);
+            auto lr            = SceneNS::Load(rc.destPath, w, opts);
             assert(lr.IsOk() && "相机场景应能 Load（Camera component round-trip）");
 
             // 恰好 1 个 Camera component；RefCube mesh 与相机共存。
             std::size_t camCount = 0;
-            for (auto e : w.Registry().view<Camera>()) { (void)e; ++camCount; }
+            for (auto e : w.Registry().view<Camera>())
+            {
+                (void)e;
+                ++camCount;
+            }
             assert(camCount == 1 && "应恰好 1 个 Camera component");
 
             const Entity cam     = FindByName(w, "Cam");

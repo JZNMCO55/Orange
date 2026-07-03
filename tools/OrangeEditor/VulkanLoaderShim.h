@@ -41,14 +41,14 @@ PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData);
 // CombinedImageSampler，FREE_DESCRIPTOR_SET 模式）。失败返回
 // VK_NULL_HANDLE 并 log；不抛异常。
 VkDescriptorPool MakeImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr,
-                                          VkInstance               instance,
-                                          VkDevice                 device);
+                                         VkInstance                instance,
+                                         VkDevice                  device);
 
 // MakeImguiDescriptorPool 的对应关停。pool == VK_NULL_HANDLE → no-op。
 void DestroyImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr,
-                                 VkInstance               instance,
-                                 VkDevice                 device,
-                                 VkDescriptorPool         pool);
+                                VkInstance                instance,
+                                VkDevice                  device,
+                                VkDescriptorPool          pool);
 
 // Windows native file dialog（IFileOpenDialog / IFileSaveDialog）包装。
 // 过滤器固定 `.scene.json`；路径以 UTF-8 写回 outPath；用户取消 / 失败
@@ -66,4 +66,4 @@ bool ShowManifestFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
 // 用户选中的源文件绝对路径，后续由 ImportDispatcher::Dispatch 路由。
 bool ShowImportFileDialog(void* parentHwnd, std::string& outPath);
 
-#endif  // ORANGE_EDITOR_VULKAN_LOADER_SHIM_H
+#endif // ORANGE_EDITOR_VULKAN_LOADER_SHIM_H

@@ -33,84 +33,84 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Scene
 {
-class WorldPartition;
+    class WorldPartition;
 }
 
 namespace Orange::Engine::Render
 {
 
-class MaterialInstance;
+    class MaterialInstance;
 
-struct Drawable
-{
-    glm::mat4                            worldMatrix{1.0f};
-    Asset::AssetHandle<Asset::MeshAsset> mesh{};
-    // 非拥有 MaterialInstance 指针，由 RenderableComponent 透传。Pipeline
-    // 后续按本字段路由 per-template Pipeline 缓存；nullptr 走 fallback。
-    MaterialInstance*                    materialInstance{nullptr};
-    // 单 mesh 多 material 的 slot → material 映射，由 SubMeshMaterialsComponent
-    // 透传（非拥有指针）。空 = 该 entity 没挂多材质组件，渲染端用
-    // materialInstance 兜底画整 mesh；非空 = 按 mesh sub-mesh 的 materialSlot
-    // 索引本列表选材质，越界 / nullptr 仍回退 materialInstance。
-    std::vector<MaterialInstance*>       subMeshMaterials;
-    // 由 RenderableComponent.castsShadow 透传：false 时 Pipeline shadow
-    // pass 跳过本 drawable，主 pass 仍正常绘制。
-    bool                                 castsShadow{true};
-};
-
-class ORANGE_ENGINE_API RenderScene
-{
-public:
-    RenderScene() = default;
-
-    // 重置内部状态：drawable 列表清空、相机标记为未设置。Pipeline 在
-    // 每帧 Collect 之前先 Clear 一次，避免跨帧残留。
-    void Clear() noexcept;
-
-    // 扫 `world`，把第一个挂 Camera 组件的实体作为本帧主相机；并把
-    // 所有同时具备 TransformComponent + RenderableComponent 且
-    // visible=true 的实体翻成 Drawable 推入列表。`world` 当中没有
-    // Camera 时 HasCamera() 为 false——调用方应据此决定是否仍然下发
-    // 渲染。
-    //
-    // `partition` 非空时再加一层 "layer.visible" 过滤——对每个 drawable
-    // 候选 entity 查 `partition->IsEntityVisible(world, e)`，false 即跳
-    // 过。partition 空 → 不参与 layer 过滤（行为退化为旧版本）。
-    void Collect(const ::Orange::Engine::World& world,
-                 const ::Orange::Engine::Scene::WorldPartition* partition = nullptr);
-
-    // 主相机访问。仅在 HasCamera() == true 时调用 MainCamera()，否
-    // 则返回值未定义（默认构造的 Camera）。
-    bool          HasCamera()  const noexcept { return mHasCamera; }
-    const Camera& MainCamera() const noexcept { return mCamera; }
-
-    // 覆写 main camera（编辑器 viewport 路径用）：Collect 之后调用，把
-    // mCamera 替换成编辑器轨道相机的 view/projection；HasCamera 顺便置
-    // true。这是 GAP-2026-05-15-camera-editor-vs-runtime-separation 落地
-    // 的"engine-side EditorCameraContext"——编辑器无需再 mutate ECS 内的
-    // Render::Camera 组件，Frustum gizmo 等 plugin 读 ECS Camera 取到的
-    // 是游戏侧原始数据。
-    void OverrideMainCamera(const Camera& cam) noexcept
+    struct Drawable
     {
-        mCamera    = cam;
-        mHasCamera = true;
-    }
+        glm::mat4                            worldMatrix{1.0f};
+        Asset::AssetHandle<Asset::MeshAsset> mesh{};
+        // 非拥有 MaterialInstance 指针，由 RenderableComponent 透传。Pipeline
+        // 后续按本字段路由 per-template Pipeline 缓存；nullptr 走 fallback。
+        MaterialInstance* materialInstance{nullptr};
+        // 单 mesh 多 material 的 slot → material 映射，由 SubMeshMaterialsComponent
+        // 透传（非拥有指针）。空 = 该 entity 没挂多材质组件，渲染端用
+        // materialInstance 兜底画整 mesh；非空 = 按 mesh sub-mesh 的 materialSlot
+        // 索引本列表选材质，越界 / nullptr 仍回退 materialInstance。
+        std::vector<MaterialInstance*> subMeshMaterials;
+        // 由 RenderableComponent.castsShadow 透传：false 时 Pipeline shadow
+        // pass 跳过本 drawable，主 pass 仍正常绘制。
+        bool castsShadow{true};
+    };
 
-    const std::vector<Drawable>& Drawables() const noexcept { return mDrawables; }
-    std::size_t                  DrawableCount() const noexcept { return mDrawables.size(); }
-    bool                         Empty() const noexcept { return mDrawables.empty(); }
+    class ORANGE_ENGINE_API RenderScene
+    {
+    public:
+        RenderScene() = default;
 
-private:
-    Camera                mCamera{};
-    bool                  mHasCamera{false};
-    std::vector<Drawable> mDrawables;
-};
+        // 重置内部状态：drawable 列表清空、相机标记为未设置。Pipeline 在
+        // 每帧 Collect 之前先 Clear 一次，避免跨帧残留。
+        void Clear() noexcept;
 
-}  // namespace Orange::Engine::Render
+        // 扫 `world`，把第一个挂 Camera 组件的实体作为本帧主相机；并把
+        // 所有同时具备 TransformComponent + RenderableComponent 且
+        // visible=true 的实体翻成 Drawable 推入列表。`world` 当中没有
+        // Camera 时 HasCamera() 为 false——调用方应据此决定是否仍然下发
+        // 渲染。
+        //
+        // `partition` 非空时再加一层 "layer.visible" 过滤——对每个 drawable
+        // 候选 entity 查 `partition->IsEntityVisible(world, e)`，false 即跳
+        // 过。partition 空 → 不参与 layer 过滤（行为退化为旧版本）。
+        void Collect(const ::Orange::Engine::World&                 world,
+                     const ::Orange::Engine::Scene::WorldPartition* partition = nullptr);
 
-#endif  // ORANGE_ENGINE_RENDER_RENDER_SCENE_H
+        // 主相机访问。仅在 HasCamera() == true 时调用 MainCamera()，否
+        // 则返回值未定义（默认构造的 Camera）。
+        bool          HasCamera() const noexcept { return mHasCamera; }
+        const Camera& MainCamera() const noexcept { return mCamera; }
+
+        // 覆写 main camera（编辑器 viewport 路径用）：Collect 之后调用，把
+        // mCamera 替换成编辑器轨道相机的 view/projection；HasCamera 顺便置
+        // true。这是 GAP-2026-05-15-camera-editor-vs-runtime-separation 落地
+        // 的"engine-side EditorCameraContext"——编辑器无需再 mutate ECS 内的
+        // Render::Camera 组件，Frustum gizmo 等 plugin 读 ECS Camera 取到的
+        // 是游戏侧原始数据。
+        void OverrideMainCamera(const Camera& cam) noexcept
+        {
+            mCamera    = cam;
+            mHasCamera = true;
+        }
+
+        const std::vector<Drawable>& Drawables() const noexcept { return mDrawables; }
+        std::size_t                  DrawableCount() const noexcept { return mDrawables.size(); }
+        bool                         Empty() const noexcept { return mDrawables.empty(); }
+
+    private:
+        Camera                mCamera{};
+        bool                  mHasCamera{false};
+        std::vector<Drawable> mDrawables;
+    };
+
+} // namespace Orange::Engine::Render
+
+#endif // ORANGE_ENGINE_RENDER_RENDER_SCENE_H

@@ -19,7 +19,7 @@
 // 也跑。.gltf 路径走 Avocado fixture + `if(EXISTS)` 门控（CMake 注入
 // ORANGE_ENGINE_GLTF_FIXTURE 时编 + 跑，否则该段编译期短路）。
 
-#include "ImportDispatcher.h"  // include path 由 CMake 加 tools/OrangeEditor/import
+#include "ImportDispatcher.h" // include path 由 CMake 加 tools/OrangeEditor/import
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -44,343 +44,392 @@ namespace fs       = std::filesystem;
 namespace
 {
 
-// 建一个仅注册 Mesh + Texture loader 的最小 AssetRegistry —— 等价于
-// BuiltinAssets::CreateImportAssetRegistry，但不编 BuiltinAssets.cpp（避免拖
-// MaterialSystem / ShaderLoader 等编辑器态进测试）。
-std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
-{
-    auto registry = std::make_unique<AssetNS::AssetRegistry>();
-    auto rm = registry->RegisterLoader<AssetNS::MeshAsset>(
-        std::make_unique<AssetNS::MeshLoader>());
-    assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
-    auto rt = registry->RegisterLoader<AssetNS::TextureAsset>(
-        std::make_unique<AssetNS::TextureLoader>());
-    assert(rt.IsOk() && "RegisterLoader<TextureAsset> 应成功");
-    return registry;
-}
-
-// 写一个最小立方体 .obj（8 顶点 + 12 三角面，含 vt / vn）到给定路径。
-// 立方体导入后去重的 unified vertex 数量取决于 face-vertex 三元组（pos,uv,nrm）
-// 的唯一组合数——这里 6 面各 4 顶点 / 每面唯一 normal + 共享 uv 网格，故断言
-// 用 ">0 且与第二次导入字节一致" 这种结构 / 确定性断言，而不是写死精确数量
-// （避免与 importer dedup 细节耦合）。
-void WriteMinimalCubeObj(const std::string& path)
-{
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写 .obj fixture 应成功");
-    // 单位立方体，中心在原点。8 个 position。
-    ofs << "# minimal cube for HeadlessMeshImportTest\n";
-    ofs << "v -0.5 -0.5 -0.5\n";
-    ofs << "v  0.5 -0.5 -0.5\n";
-    ofs << "v  0.5  0.5 -0.5\n";
-    ofs << "v -0.5  0.5 -0.5\n";
-    ofs << "v -0.5 -0.5  0.5\n";
-    ofs << "v  0.5 -0.5  0.5\n";
-    ofs << "v  0.5  0.5  0.5\n";
-    ofs << "v -0.5  0.5  0.5\n";
-    // texcoords。
-    ofs << "vt 0.0 0.0\n";
-    ofs << "vt 1.0 0.0\n";
-    ofs << "vt 1.0 1.0\n";
-    ofs << "vt 0.0 1.0\n";
-    // 6 个 face normal。
-    ofs << "vn  0.0  0.0 -1.0\n";  // -Z
-    ofs << "vn  0.0  0.0  1.0\n";  // +Z
-    ofs << "vn -1.0  0.0  0.0\n";  // -X
-    ofs << "vn  1.0  0.0  0.0\n";  // +X
-    ofs << "vn  0.0 -1.0  0.0\n";  // -Y
-    ofs << "vn  0.0  1.0  0.0\n";  // +Y
-    // 6 个 quad face（每面引用同一 normal + 4 个 uv 角），各拆 2 三角形。
-    // 格式 v/vt/vn（1-based）。
-    // -Z 面（1,2,3,4）
-    ofs << "f 1/1/1 2/2/1 3/3/1\n";
-    ofs << "f 1/1/1 3/3/1 4/4/1\n";
-    // +Z 面（5,6,7,8）
-    ofs << "f 5/1/2 6/2/2 7/3/2\n";
-    ofs << "f 5/1/2 7/3/2 8/4/2\n";
-    // -X 面（1,4,8,5）
-    ofs << "f 1/1/3 4/2/3 8/3/3\n";
-    ofs << "f 1/1/3 8/3/3 5/4/3\n";
-    // +X 面（2,6,7,3）
-    ofs << "f 2/1/4 6/2/4 7/3/4\n";
-    ofs << "f 2/1/4 7/3/4 3/4/4\n";
-    // -Y 面（1,5,6,2）
-    ofs << "f 1/1/5 5/2/5 6/3/5\n";
-    ofs << "f 1/1/5 6/3/5 2/4/5\n";
-    // +Y 面（4,3,7,8）
-    ofs << "f 4/1/6 3/2/6 7/3/6\n";
-    ofs << "f 4/1/6 7/3/6 8/4/6\n";
-}
-
-// 写一个**无 UV** 的立方体 .obj（含 v / vn，无 vt；face 用 `v//vn` 格式）。
-// 用于验证 tangent fallback 端到端路径：缺 UV → importer 跳过 MikkTSpace →
-// 写出 .mesh（hasTangents=0 + 全零 UV 占位 + normal）→ Load 端 Lengyel
-// （ComputeTangentsFromTriangles）对全零 UV 每三角 det=0 跳过、每顶点落
-// ArbitraryTangent，产出与法线正交的有效 TBN（GAP-2026-05-25 gap ②）。
-void WriteCubeObjNoUV(const std::string& path)
-{
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写无 UV .obj fixture 应成功");
-    ofs << "# cube without UV for tangent-fallback end-to-end test\n";
-    ofs << "v -0.5 -0.5 -0.5\n";
-    ofs << "v  0.5 -0.5 -0.5\n";
-    ofs << "v  0.5  0.5 -0.5\n";
-    ofs << "v -0.5  0.5 -0.5\n";
-    ofs << "v -0.5 -0.5  0.5\n";
-    ofs << "v  0.5 -0.5  0.5\n";
-    ofs << "v  0.5  0.5  0.5\n";
-    ofs << "v -0.5  0.5  0.5\n";
-    ofs << "vn  0.0  0.0 -1.0\n";  // -Z
-    ofs << "vn  0.0  0.0  1.0\n";  // +Z
-    ofs << "vn -1.0  0.0  0.0\n";  // -X
-    ofs << "vn  1.0  0.0  0.0\n";  // +X
-    ofs << "vn  0.0 -1.0  0.0\n";  // -Y
-    ofs << "vn  0.0  1.0  0.0\n";  // +Y
-    // face 格式 v//vn（无 vt）。每面拆 2 三角。
-    ofs << "f 1//1 2//1 3//1\n";  ofs << "f 1//1 3//1 4//1\n";  // -Z
-    ofs << "f 5//2 6//2 7//2\n";  ofs << "f 5//2 7//2 8//2\n";  // +Z
-    ofs << "f 1//3 4//3 8//3\n";  ofs << "f 1//3 8//3 5//3\n";  // -X
-    ofs << "f 2//4 6//4 7//4\n";  ofs << "f 2//4 7//4 3//4\n";  // +X
-    ofs << "f 1//5 5//5 6//5\n";  ofs << "f 1//5 6//5 2//5\n";  // -Y
-    ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";  // +Y
-}
-
-// 读整个文件为字节，做确定性比较用。
-std::vector<std::uint8_t> ReadAllBytes(const std::string& path)
-{
-    std::ifstream ifs(path, std::ios::binary);
-    assert(ifs.is_open() && "读 .mesh 字节应成功");
-    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(ifs),
-                                     std::istreambuf_iterator<char>());
-}
-
-// .meta 文件文本里应含某子串（粗粒度断言 sourcePath / sourceHash 字段已写出，
-// 不重新跑 JSON 解析——MetaSidecar 自身有专门的字段语义，本测试只锁 "sidecar
-// 存在且含关键字段名"）。
-bool FileContains(const std::string& path, const std::string& needle)
-{
-    std::ifstream ifs(path, std::ios::binary);
-    if (!ifs.is_open()) { return false; }
-    const std::string content((std::istreambuf_iterator<char>(ifs)),
-                              std::istreambuf_iterator<char>());
-    return content.find(needle) != std::string::npos;
-}
-
-// 写一个最小的"双 material" 内嵌 .gltf fixture：一个 quad（4 顶点）拆成 2 个
-// triangle primitive，各引用一个独立 material（slot 0 红 / slot 1 绿）。顶点 /
-// 索引数据走 base64 data: URI 的单一 buffer（cgltf_load_buffers 自动解码），无
-// 外部 .bin 依赖，干净 checkout 也能跑。导入后应产出：mesh 带 2 段 sub-mesh、
-// 2 个 .material、materialSlot 覆盖 {0,1}。
-//
-// buffer 布局（小端 float / uint16，共 60 字节）：
-//   positions: 4 × vec3 = 48 字节（offset 0）
-//   indices  : prim0 {0,1,2} + prim1 {0,2,3} = 6 × uint16 = 12 字节（offset 48）
-// base64 由 Python 预生成硬编码（避免测试里再实现 base64 编码器）。
-void WriteTwoMaterialGltf(const std::string& path)
-{
-    // positions=(0,0,0)(1,0,0)(1,1,0)(0,1,0)；indices=0,1,2,0,2,3 的 base64。
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写 .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0]}],\n"
-        "  \"nodes\": [{\"mesh\": 0}],\n"
-        "  \"meshes\": [{\"primitives\": [\n"
-        "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0},\n"
-        "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 2, \"material\": 1}\n"
-        "  ]}],\n"
-        "  \"materials\": [\n"
-        "    {\"name\": \"RedMat\",   \"pbrMetallicRoughness\": "
-        "{\"baseColorFactor\": [1.0, 0.0, 0.0, 1.0]}},\n"
-        "    {\"name\": \"GreenMat\", \"pbrMetallicRoughness\": "
-        "{\"baseColorFactor\": [0.0, 1.0, 0.0, 1.0]}}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 3, "
-        "\"type\": \"SCALAR\"},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 3, "
-        "\"type\": \"SCALAR\", \"byteOffset\": 6}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 自包含**单 material** .gltf fixture（1 primitive，1 material）。验证单材质
-// mesh 导入侧也把材质写进 .meta subMeshMaterials（供 drop 时自动设
-// Renderable.materialInstance），不再像历史那样单材质留空。
-void WriteSingleMaterialGltf(const std::string& path)
-{
-    // 同 two-material buffer：4 个 position（48B）+ 6 个 uint16 索引(0,1,2,0,2,3，12B）。
-    static const char* kBufferB64 =
-        "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
-        "AAABAAIAAAACAAMA";
-
-    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写单 material .gltf fixture 应成功");
-    ofs <<
-        "{\n"
-        "  \"asset\": {\"version\": \"2.0\"},\n"
-        "  \"scene\": 0,\n"
-        "  \"scenes\": [{\"nodes\": [0]}],\n"
-        "  \"nodes\": [{\"mesh\": 0}],\n"
-        "  \"meshes\": [{\"primitives\": [\n"
-        "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0}\n"
-        "  ]}],\n"
-        "  \"materials\": [\n"
-        "    {\"name\": \"SoloMat\", \"pbrMetallicRoughness\": "
-        "{\"baseColorFactor\": [0.2, 0.4, 0.8, 1.0]}}\n"
-        "  ],\n"
-        "  \"accessors\": [\n"
-        "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
-        "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
-        "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
-        "\"type\": \"SCALAR\"}\n"
-        "  ],\n"
-        "  \"bufferViews\": [\n"
-        "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
-        "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
-        "  ],\n"
-        "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
-        "\"data:application/octet-stream;base64," << kBufferB64 << "\"}]\n"
-        "}\n";
-}
-
-// 写一个带 .mtl 单材质的立方体 .obj（+ 同目录 .mtl）。验证 OBJ .mtl 材质导入：
-// 单材质 → 生成 .material（scalar：Kd/Ns/Ke）+ 写 .meta subMeshMaterials。
-void WriteCubeObjWithMtl(const std::string& objPath, const std::string& mtlName)
-{
-    const fs::path objFsPath(objPath);
-    const fs::path mtlFsPath = objFsPath.parent_path() / mtlName;
+    // 建一个仅注册 Mesh + Texture loader 的最小 AssetRegistry —— 等价于
+    // BuiltinAssets::CreateImportAssetRegistry，但不编 BuiltinAssets.cpp（避免拖
+    // MaterialSystem / ShaderLoader 等编辑器态进测试）。
+    std::unique_ptr<AssetNS::AssetRegistry> MakeImportRegistry()
     {
-        std::ofstream mtl(mtlFsPath, std::ios::binary | std::ios::trunc);
-        assert(mtl.is_open() && "写 .mtl fixture 应成功");
-        mtl << "newmtl SoloMat\n";
-        mtl << "Kd 0.80 0.30 0.10\n";   // 暖橙基色 → uBaseColor
-        mtl << "Ns 60.0\n";             // Phong 高光指数 → roughness
-        mtl << "Ke 0.0 0.5 1.0\n";      // 蓝绿自发光 → uEmissive（验 emissive 通道）
+        auto registry = std::make_unique<AssetNS::AssetRegistry>();
+        auto rm       = registry->RegisterLoader<AssetNS::MeshAsset>(
+            std::make_unique<AssetNS::MeshLoader>());
+        assert(rm.IsOk() && "RegisterLoader<MeshAsset> 应成功");
+        auto rt = registry->RegisterLoader<AssetNS::TextureAsset>(
+            std::make_unique<AssetNS::TextureLoader>());
+        assert(rt.IsOk() && "RegisterLoader<TextureAsset> 应成功");
+        return registry;
     }
-    std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写带 mtl 的 .obj fixture 应成功");
-    ofs << "mtllib " << mtlName << "\n";
-    ofs << "v -0.5 -0.5 -0.5\n";
-    ofs << "v  0.5 -0.5 -0.5\n";
-    ofs << "v  0.5  0.5 -0.5\n";
-    ofs << "v -0.5  0.5 -0.5\n";
-    ofs << "v -0.5 -0.5  0.5\n";
-    ofs << "v  0.5 -0.5  0.5\n";
-    ofs << "v  0.5  0.5  0.5\n";
-    ofs << "v -0.5  0.5  0.5\n";
-    ofs << "vn  0.0  0.0 -1.0\n";  ofs << "vn  0.0  0.0  1.0\n";
-    ofs << "vn -1.0  0.0  0.0\n";  ofs << "vn  1.0  0.0  0.0\n";
-    ofs << "vn  0.0 -1.0  0.0\n";  ofs << "vn  0.0  1.0  0.0\n";
-    ofs << "usemtl SoloMat\n";
-    ofs << "f 1//1 2//1 3//1\n";  ofs << "f 1//1 3//1 4//1\n";
-    ofs << "f 5//2 6//2 7//2\n";  ofs << "f 5//2 7//2 8//2\n";
-    ofs << "f 1//3 4//3 8//3\n";  ofs << "f 1//3 8//3 5//3\n";
-    ofs << "f 2//4 6//4 7//4\n";  ofs << "f 2//4 7//4 3//4\n";
-    ofs << "f 1//5 5//5 6//5\n";  ofs << "f 1//5 6//5 2//5\n";
-    ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";
-}
 
-// 写一个**两材质** OBJ（usemtl 分两组：前 3 面 MatA / 后 3 面 MatB）。验证 OBJ
-// 多材质导入 → per-face 拆 sub-mesh（2 段）+ 2 个 .material。
-void WriteCubeObjWithTwoMtl(const std::string& objPath, const std::string& mtlName)
-{
-    const fs::path mtlFsPath = fs::path(objPath).parent_path() / mtlName;
+    // 写一个最小立方体 .obj（8 顶点 + 12 三角面，含 vt / vn）到给定路径。
+    // 立方体导入后去重的 unified vertex 数量取决于 face-vertex 三元组（pos,uv,nrm）
+    // 的唯一组合数——这里 6 面各 4 顶点 / 每面唯一 normal + 共享 uv 网格，故断言
+    // 用 ">0 且与第二次导入字节一致" 这种结构 / 确定性断言，而不是写死精确数量
+    // （避免与 importer dedup 细节耦合）。
+    void WriteMinimalCubeObj(const std::string& path)
     {
-        std::ofstream mtl(mtlFsPath, std::ios::binary | std::ios::trunc);
-        assert(mtl.is_open() && "写双材质 .mtl fixture 应成功");
-        mtl << "newmtl MatA\n";
-        mtl << "Kd 1.0 0.2 0.1\n";  // 红
-        mtl << "Ns 30.0\n";
-        mtl << "newmtl MatB\n";
-        mtl << "Kd 0.1 0.3 1.0\n";  // 蓝
-        mtl << "Ke 0.0 0.4 0.8\n";  // 自发光
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写 .obj fixture 应成功");
+        // 单位立方体，中心在原点。8 个 position。
+        ofs << "# minimal cube for HeadlessMeshImportTest\n";
+        ofs << "v -0.5 -0.5 -0.5\n";
+        ofs << "v  0.5 -0.5 -0.5\n";
+        ofs << "v  0.5  0.5 -0.5\n";
+        ofs << "v -0.5  0.5 -0.5\n";
+        ofs << "v -0.5 -0.5  0.5\n";
+        ofs << "v  0.5 -0.5  0.5\n";
+        ofs << "v  0.5  0.5  0.5\n";
+        ofs << "v -0.5  0.5  0.5\n";
+        // texcoords。
+        ofs << "vt 0.0 0.0\n";
+        ofs << "vt 1.0 0.0\n";
+        ofs << "vt 1.0 1.0\n";
+        ofs << "vt 0.0 1.0\n";
+        // 6 个 face normal。
+        ofs << "vn  0.0  0.0 -1.0\n"; // -Z
+        ofs << "vn  0.0  0.0  1.0\n"; // +Z
+        ofs << "vn -1.0  0.0  0.0\n"; // -X
+        ofs << "vn  1.0  0.0  0.0\n"; // +X
+        ofs << "vn  0.0 -1.0  0.0\n"; // -Y
+        ofs << "vn  0.0  1.0  0.0\n"; // +Y
+        // 6 个 quad face（每面引用同一 normal + 4 个 uv 角），各拆 2 三角形。
+        // 格式 v/vt/vn（1-based）。
+        // -Z 面（1,2,3,4）
+        ofs << "f 1/1/1 2/2/1 3/3/1\n";
+        ofs << "f 1/1/1 3/3/1 4/4/1\n";
+        // +Z 面（5,6,7,8）
+        ofs << "f 5/1/2 6/2/2 7/3/2\n";
+        ofs << "f 5/1/2 7/3/2 8/4/2\n";
+        // -X 面（1,4,8,5）
+        ofs << "f 1/1/3 4/2/3 8/3/3\n";
+        ofs << "f 1/1/3 8/3/3 5/4/3\n";
+        // +X 面（2,6,7,3）
+        ofs << "f 2/1/4 6/2/4 7/3/4\n";
+        ofs << "f 2/1/4 7/3/4 3/4/4\n";
+        // -Y 面（1,5,6,2）
+        ofs << "f 1/1/5 5/2/5 6/3/5\n";
+        ofs << "f 1/1/5 6/3/5 2/4/5\n";
+        // +Y 面（4,3,7,8）
+        ofs << "f 4/1/6 3/2/6 7/3/6\n";
+        ofs << "f 4/1/6 7/3/6 8/4/6\n";
     }
-    std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写双材质 .obj fixture 应成功");
-    ofs << "mtllib " << mtlName << "\n";
-    ofs << "v -0.5 -0.5 -0.5\n";  ofs << "v  0.5 -0.5 -0.5\n";
-    ofs << "v  0.5  0.5 -0.5\n";  ofs << "v -0.5  0.5 -0.5\n";
-    ofs << "v -0.5 -0.5  0.5\n";  ofs << "v  0.5 -0.5  0.5\n";
-    ofs << "v  0.5  0.5  0.5\n";  ofs << "v -0.5  0.5  0.5\n";
-    ofs << "vn  0.0  0.0 -1.0\n";  ofs << "vn  0.0  0.0  1.0\n";
-    ofs << "vn -1.0  0.0  0.0\n";  ofs << "vn  1.0  0.0  0.0\n";
-    ofs << "vn  0.0 -1.0  0.0\n";  ofs << "vn  0.0  1.0  0.0\n";
-    // MatA：前 3 面（-Z / +Z / -X，共 6 三角）。
-    ofs << "usemtl MatA\n";
-    ofs << "f 1//1 2//1 3//1\n";  ofs << "f 1//1 3//1 4//1\n";
-    ofs << "f 5//2 6//2 7//2\n";  ofs << "f 5//2 7//2 8//2\n";
-    ofs << "f 1//3 4//3 8//3\n";  ofs << "f 1//3 8//3 5//3\n";
-    // MatB：后 3 面（+X / -Y / +Y）。
-    ofs << "usemtl MatB\n";
-    ofs << "f 2//4 6//4 7//4\n";  ofs << "f 2//4 7//4 3//4\n";
-    ofs << "f 1//5 5//5 6//5\n";  ofs << "f 1//5 6//5 2//5\n";
-    ofs << "f 4//6 3//6 7//6\n";  ofs << "f 4//6 7//6 8//6\n";
-}
 
-// 写一个最小可解的 2×2 24-bit 未压缩 TGA（stb_image 支持），给 OBJ map_Kd 用。
-void WriteMinimalTga(const std::string& path)
-{
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    assert(f.is_open() && "写 TGA fixture 应成功");
-    // TGA 头 18 字节：imageType=2（未压缩 true-color），width=2,height=2,bpp=24。
-    const unsigned char hdr[18] = {
-        0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 24, 0};
-    f.write(reinterpret_cast<const char*>(hdr), 18);
-    const unsigned char px[3] = {0, 0, 255};  // BGR = 红
-    for (int i = 0; i < 4; ++i) { f.write(reinterpret_cast<const char*>(px), 3); }
-}
-
-// 写一个带 map_Kd 贴图的单材质 .obj（+ .mtl + .tga 同目录）。验证 OBJ 贴图导入。
-void WriteCubeObjWithTexturedMtl(const std::string& objPath,
-                                 const std::string& mtlName,
-                                 const std::string& texName)
-{
-    const fs::path dir = fs::path(objPath).parent_path();
-    WriteMinimalTga((dir / texName).generic_string());
+    // 写一个**无 UV** 的立方体 .obj（含 v / vn，无 vt；face 用 `v//vn` 格式）。
+    // 用于验证 tangent fallback 端到端路径：缺 UV → importer 跳过 MikkTSpace →
+    // 写出 .mesh（hasTangents=0 + 全零 UV 占位 + normal）→ Load 端 Lengyel
+    // （ComputeTangentsFromTriangles）对全零 UV 每三角 det=0 跳过、每顶点落
+    // ArbitraryTangent，产出与法线正交的有效 TBN（GAP-2026-05-25 gap ②）。
+    void WriteCubeObjNoUV(const std::string& path)
     {
-        std::ofstream mtl((dir / mtlName), std::ios::binary | std::ios::trunc);
-        assert(mtl.is_open() && "写带贴图 .mtl 应成功");
-        mtl << "newmtl TexMat\n";
-        mtl << "Kd 1.0 1.0 1.0\n";
-        mtl << "map_Kd " << texName << "\n";
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写无 UV .obj fixture 应成功");
+        ofs << "# cube without UV for tangent-fallback end-to-end test\n";
+        ofs << "v -0.5 -0.5 -0.5\n";
+        ofs << "v  0.5 -0.5 -0.5\n";
+        ofs << "v  0.5  0.5 -0.5\n";
+        ofs << "v -0.5  0.5 -0.5\n";
+        ofs << "v -0.5 -0.5  0.5\n";
+        ofs << "v  0.5 -0.5  0.5\n";
+        ofs << "v  0.5  0.5  0.5\n";
+        ofs << "v -0.5  0.5  0.5\n";
+        ofs << "vn  0.0  0.0 -1.0\n"; // -Z
+        ofs << "vn  0.0  0.0  1.0\n"; // +Z
+        ofs << "vn -1.0  0.0  0.0\n"; // -X
+        ofs << "vn  1.0  0.0  0.0\n"; // +X
+        ofs << "vn  0.0 -1.0  0.0\n"; // -Y
+        ofs << "vn  0.0  1.0  0.0\n"; // +Y
+        // face 格式 v//vn（无 vt）。每面拆 2 三角。
+        ofs << "f 1//1 2//1 3//1\n";
+        ofs << "f 1//1 3//1 4//1\n"; // -Z
+        ofs << "f 5//2 6//2 7//2\n";
+        ofs << "f 5//2 7//2 8//2\n"; // +Z
+        ofs << "f 1//3 4//3 8//3\n";
+        ofs << "f 1//3 8//3 5//3\n"; // -X
+        ofs << "f 2//4 6//4 7//4\n";
+        ofs << "f 2//4 7//4 3//4\n"; // +X
+        ofs << "f 1//5 5//5 6//5\n";
+        ofs << "f 1//5 6//5 2//5\n"; // -Y
+        ofs << "f 4//6 3//6 7//6\n";
+        ofs << "f 4//6 7//6 8//6\n"; // +Y
     }
-    std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
-    assert(ofs.is_open() && "写带贴图 .obj 应成功");
-    ofs << "mtllib " << mtlName << "\n";
-    ofs << "v -0.5 -0.5 -0.5\n";  ofs << "v  0.5 -0.5 -0.5\n";
-    ofs << "v  0.5  0.5 -0.5\n";  ofs << "v -0.5  0.5 -0.5\n";
-    ofs << "v -0.5 -0.5  0.5\n";  ofs << "v  0.5 -0.5  0.5\n";
-    ofs << "v  0.5  0.5  0.5\n";  ofs << "v -0.5  0.5  0.5\n";
-    ofs << "vt 0.0 0.0\n";  ofs << "vt 1.0 0.0\n";
-    ofs << "vt 1.0 1.0\n";  ofs << "vt 0.0 1.0\n";
-    ofs << "vn  0.0  0.0 -1.0\n";  ofs << "vn  0.0  0.0  1.0\n";
-    ofs << "vn -1.0  0.0  0.0\n";  ofs << "vn  1.0  0.0  0.0\n";
-    ofs << "vn  0.0 -1.0  0.0\n";  ofs << "vn  0.0  1.0  0.0\n";
-    ofs << "usemtl TexMat\n";
-    ofs << "f 1/1/1 2/2/1 3/3/1\n";  ofs << "f 1/1/1 3/3/1 4/4/1\n";
-    ofs << "f 5/1/2 6/2/2 7/3/2\n";  ofs << "f 5/1/2 7/3/2 8/4/2\n";
-    ofs << "f 1/1/3 4/2/3 8/3/3\n";  ofs << "f 1/1/3 8/3/3 5/4/3\n";
-    ofs << "f 2/1/4 6/2/4 7/3/4\n";  ofs << "f 2/1/4 7/3/4 3/4/4\n";
-    ofs << "f 1/1/5 5/2/5 6/3/5\n";  ofs << "f 1/1/5 6/3/5 2/4/5\n";
-    ofs << "f 4/1/6 3/2/6 7/3/6\n";  ofs << "f 4/1/6 7/3/6 8/4/6\n";
-}
 
-}  // namespace
+    // 读整个文件为字节，做确定性比较用。
+    std::vector<std::uint8_t> ReadAllBytes(const std::string& path)
+    {
+        std::ifstream ifs(path, std::ios::binary);
+        assert(ifs.is_open() && "读 .mesh 字节应成功");
+        return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(ifs),
+                                         std::istreambuf_iterator<char>());
+    }
+
+    // .meta 文件文本里应含某子串（粗粒度断言 sourcePath / sourceHash 字段已写出，
+    // 不重新跑 JSON 解析——MetaSidecar 自身有专门的字段语义，本测试只锁 "sidecar
+    // 存在且含关键字段名"）。
+    bool FileContains(const std::string& path, const std::string& needle)
+    {
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs.is_open())
+        {
+            return false;
+        }
+        const std::string content((std::istreambuf_iterator<char>(ifs)),
+                                  std::istreambuf_iterator<char>());
+        return content.find(needle) != std::string::npos;
+    }
+
+    // 写一个最小的"双 material" 内嵌 .gltf fixture：一个 quad（4 顶点）拆成 2 个
+    // triangle primitive，各引用一个独立 material（slot 0 红 / slot 1 绿）。顶点 /
+    // 索引数据走 base64 data: URI 的单一 buffer（cgltf_load_buffers 自动解码），无
+    // 外部 .bin 依赖，干净 checkout 也能跑。导入后应产出：mesh 带 2 段 sub-mesh、
+    // 2 个 .material、materialSlot 覆盖 {0,1}。
+    //
+    // buffer 布局（小端 float / uint16，共 60 字节）：
+    //   positions: 4 × vec3 = 48 字节（offset 0）
+    //   indices  : prim0 {0,1,2} + prim1 {0,2,3} = 6 × uint16 = 12 字节（offset 48）
+    // base64 由 Python 预生成硬编码（避免测试里再实现 base64 编码器）。
+    void WriteTwoMaterialGltf(const std::string& path)
+    {
+        // positions=(0,0,0)(1,0,0)(1,1,0)(0,1,0)；indices=0,1,2,0,2,3 的 base64。
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写 .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0]}],\n"
+               "  \"nodes\": [{\"mesh\": 0}],\n"
+               "  \"meshes\": [{\"primitives\": [\n"
+               "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0},\n"
+               "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 2, \"material\": 1}\n"
+               "  ]}],\n"
+               "  \"materials\": [\n"
+               "    {\"name\": \"RedMat\",   \"pbrMetallicRoughness\": "
+               "{\"baseColorFactor\": [1.0, 0.0, 0.0, 1.0]}},\n"
+               "    {\"name\": \"GreenMat\", \"pbrMetallicRoughness\": "
+               "{\"baseColorFactor\": [0.0, 1.0, 0.0, 1.0]}}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 3, "
+               "\"type\": \"SCALAR\"},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 3, "
+               "\"type\": \"SCALAR\", \"byteOffset\": 6}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 自包含**单 material** .gltf fixture（1 primitive，1 material）。验证单材质
+    // mesh 导入侧也把材质写进 .meta subMeshMaterials（供 drop 时自动设
+    // Renderable.materialInstance），不再像历史那样单材质留空。
+    void WriteSingleMaterialGltf(const std::string& path)
+    {
+        // 同 two-material buffer：4 个 position（48B）+ 6 个 uint16 索引(0,1,2,0,2,3，12B）。
+        static const char* kBufferB64 =
+            "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAAA"
+            "AAABAAIAAAACAAMA";
+
+        std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写单 material .gltf fixture 应成功");
+        ofs << "{\n"
+               "  \"asset\": {\"version\": \"2.0\"},\n"
+               "  \"scene\": 0,\n"
+               "  \"scenes\": [{\"nodes\": [0]}],\n"
+               "  \"nodes\": [{\"mesh\": 0}],\n"
+               "  \"meshes\": [{\"primitives\": [\n"
+               "    {\"attributes\": {\"POSITION\": 0}, \"indices\": 1, \"material\": 0}\n"
+               "  ]}],\n"
+               "  \"materials\": [\n"
+               "    {\"name\": \"SoloMat\", \"pbrMetallicRoughness\": "
+               "{\"baseColorFactor\": [0.2, 0.4, 0.8, 1.0]}}\n"
+               "  ],\n"
+               "  \"accessors\": [\n"
+               "    {\"bufferView\": 0, \"componentType\": 5126, \"count\": 4, "
+               "\"type\": \"VEC3\", \"min\": [0,0,0], \"max\": [1,1,0]},\n"
+               "    {\"bufferView\": 1, \"componentType\": 5123, \"count\": 6, "
+               "\"type\": \"SCALAR\"}\n"
+               "  ],\n"
+               "  \"bufferViews\": [\n"
+               "    {\"buffer\": 0, \"byteOffset\": 0,  \"byteLength\": 48},\n"
+               "    {\"buffer\": 0, \"byteOffset\": 48, \"byteLength\": 12}\n"
+               "  ],\n"
+               "  \"buffers\": [{\"byteLength\": 60, \"uri\": "
+               "\"data:application/octet-stream;base64,"
+            << kBufferB64 << "\"}]\n"
+                             "}\n";
+    }
+
+    // 写一个带 .mtl 单材质的立方体 .obj（+ 同目录 .mtl）。验证 OBJ .mtl 材质导入：
+    // 单材质 → 生成 .material（scalar：Kd/Ns/Ke）+ 写 .meta subMeshMaterials。
+    void WriteCubeObjWithMtl(const std::string& objPath, const std::string& mtlName)
+    {
+        const fs::path objFsPath(objPath);
+        const fs::path mtlFsPath = objFsPath.parent_path() / mtlName;
+        {
+            std::ofstream mtl(mtlFsPath, std::ios::binary | std::ios::trunc);
+            assert(mtl.is_open() && "写 .mtl fixture 应成功");
+            mtl << "newmtl SoloMat\n";
+            mtl << "Kd 0.80 0.30 0.10\n"; // 暖橙基色 → uBaseColor
+            mtl << "Ns 60.0\n";           // Phong 高光指数 → roughness
+            mtl << "Ke 0.0 0.5 1.0\n";    // 蓝绿自发光 → uEmissive（验 emissive 通道）
+        }
+        std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写带 mtl 的 .obj fixture 应成功");
+        ofs << "mtllib " << mtlName << "\n";
+        ofs << "v -0.5 -0.5 -0.5\n";
+        ofs << "v  0.5 -0.5 -0.5\n";
+        ofs << "v  0.5  0.5 -0.5\n";
+        ofs << "v -0.5  0.5 -0.5\n";
+        ofs << "v -0.5 -0.5  0.5\n";
+        ofs << "v  0.5 -0.5  0.5\n";
+        ofs << "v  0.5  0.5  0.5\n";
+        ofs << "v -0.5  0.5  0.5\n";
+        ofs << "vn  0.0  0.0 -1.0\n";
+        ofs << "vn  0.0  0.0  1.0\n";
+        ofs << "vn -1.0  0.0  0.0\n";
+        ofs << "vn  1.0  0.0  0.0\n";
+        ofs << "vn  0.0 -1.0  0.0\n";
+        ofs << "vn  0.0  1.0  0.0\n";
+        ofs << "usemtl SoloMat\n";
+        ofs << "f 1//1 2//1 3//1\n";
+        ofs << "f 1//1 3//1 4//1\n";
+        ofs << "f 5//2 6//2 7//2\n";
+        ofs << "f 5//2 7//2 8//2\n";
+        ofs << "f 1//3 4//3 8//3\n";
+        ofs << "f 1//3 8//3 5//3\n";
+        ofs << "f 2//4 6//4 7//4\n";
+        ofs << "f 2//4 7//4 3//4\n";
+        ofs << "f 1//5 5//5 6//5\n";
+        ofs << "f 1//5 6//5 2//5\n";
+        ofs << "f 4//6 3//6 7//6\n";
+        ofs << "f 4//6 7//6 8//6\n";
+    }
+
+    // 写一个**两材质** OBJ（usemtl 分两组：前 3 面 MatA / 后 3 面 MatB）。验证 OBJ
+    // 多材质导入 → per-face 拆 sub-mesh（2 段）+ 2 个 .material。
+    void WriteCubeObjWithTwoMtl(const std::string& objPath, const std::string& mtlName)
+    {
+        const fs::path mtlFsPath = fs::path(objPath).parent_path() / mtlName;
+        {
+            std::ofstream mtl(mtlFsPath, std::ios::binary | std::ios::trunc);
+            assert(mtl.is_open() && "写双材质 .mtl fixture 应成功");
+            mtl << "newmtl MatA\n";
+            mtl << "Kd 1.0 0.2 0.1\n"; // 红
+            mtl << "Ns 30.0\n";
+            mtl << "newmtl MatB\n";
+            mtl << "Kd 0.1 0.3 1.0\n"; // 蓝
+            mtl << "Ke 0.0 0.4 0.8\n"; // 自发光
+        }
+        std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写双材质 .obj fixture 应成功");
+        ofs << "mtllib " << mtlName << "\n";
+        ofs << "v -0.5 -0.5 -0.5\n";
+        ofs << "v  0.5 -0.5 -0.5\n";
+        ofs << "v  0.5  0.5 -0.5\n";
+        ofs << "v -0.5  0.5 -0.5\n";
+        ofs << "v -0.5 -0.5  0.5\n";
+        ofs << "v  0.5 -0.5  0.5\n";
+        ofs << "v  0.5  0.5  0.5\n";
+        ofs << "v -0.5  0.5  0.5\n";
+        ofs << "vn  0.0  0.0 -1.0\n";
+        ofs << "vn  0.0  0.0  1.0\n";
+        ofs << "vn -1.0  0.0  0.0\n";
+        ofs << "vn  1.0  0.0  0.0\n";
+        ofs << "vn  0.0 -1.0  0.0\n";
+        ofs << "vn  0.0  1.0  0.0\n";
+        // MatA：前 3 面（-Z / +Z / -X，共 6 三角）。
+        ofs << "usemtl MatA\n";
+        ofs << "f 1//1 2//1 3//1\n";
+        ofs << "f 1//1 3//1 4//1\n";
+        ofs << "f 5//2 6//2 7//2\n";
+        ofs << "f 5//2 7//2 8//2\n";
+        ofs << "f 1//3 4//3 8//3\n";
+        ofs << "f 1//3 8//3 5//3\n";
+        // MatB：后 3 面（+X / -Y / +Y）。
+        ofs << "usemtl MatB\n";
+        ofs << "f 2//4 6//4 7//4\n";
+        ofs << "f 2//4 7//4 3//4\n";
+        ofs << "f 1//5 5//5 6//5\n";
+        ofs << "f 1//5 6//5 2//5\n";
+        ofs << "f 4//6 3//6 7//6\n";
+        ofs << "f 4//6 7//6 8//6\n";
+    }
+
+    // 写一个最小可解的 2×2 24-bit 未压缩 TGA（stb_image 支持），给 OBJ map_Kd 用。
+    void WriteMinimalTga(const std::string& path)
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        assert(f.is_open() && "写 TGA fixture 应成功");
+        // TGA 头 18 字节：imageType=2（未压缩 true-color），width=2,height=2,bpp=24。
+        const unsigned char hdr[18] = {
+            0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 24, 0};
+        f.write(reinterpret_cast<const char*>(hdr), 18);
+        const unsigned char px[3] = {0, 0, 255}; // BGR = 红
+        for (int i = 0; i < 4; ++i)
+        {
+            f.write(reinterpret_cast<const char*>(px), 3);
+        }
+    }
+
+    // 写一个带 map_Kd 贴图的单材质 .obj（+ .mtl + .tga 同目录）。验证 OBJ 贴图导入。
+    void WriteCubeObjWithTexturedMtl(const std::string& objPath,
+                                     const std::string& mtlName,
+                                     const std::string& texName)
+    {
+        const fs::path dir = fs::path(objPath).parent_path();
+        WriteMinimalTga((dir / texName).generic_string());
+        {
+            std::ofstream mtl((dir / mtlName), std::ios::binary | std::ios::trunc);
+            assert(mtl.is_open() && "写带贴图 .mtl 应成功");
+            mtl << "newmtl TexMat\n";
+            mtl << "Kd 1.0 1.0 1.0\n";
+            mtl << "map_Kd " << texName << "\n";
+        }
+        std::ofstream ofs(objPath, std::ios::binary | std::ios::trunc);
+        assert(ofs.is_open() && "写带贴图 .obj 应成功");
+        ofs << "mtllib " << mtlName << "\n";
+        ofs << "v -0.5 -0.5 -0.5\n";
+        ofs << "v  0.5 -0.5 -0.5\n";
+        ofs << "v  0.5  0.5 -0.5\n";
+        ofs << "v -0.5  0.5 -0.5\n";
+        ofs << "v -0.5 -0.5  0.5\n";
+        ofs << "v  0.5 -0.5  0.5\n";
+        ofs << "v  0.5  0.5  0.5\n";
+        ofs << "v -0.5  0.5  0.5\n";
+        ofs << "vt 0.0 0.0\n";
+        ofs << "vt 1.0 0.0\n";
+        ofs << "vt 1.0 1.0\n";
+        ofs << "vt 0.0 1.0\n";
+        ofs << "vn  0.0  0.0 -1.0\n";
+        ofs << "vn  0.0  0.0  1.0\n";
+        ofs << "vn -1.0  0.0  0.0\n";
+        ofs << "vn  1.0  0.0  0.0\n";
+        ofs << "vn  0.0 -1.0  0.0\n";
+        ofs << "vn  0.0  1.0  0.0\n";
+        ofs << "usemtl TexMat\n";
+        ofs << "f 1/1/1 2/2/1 3/3/1\n";
+        ofs << "f 1/1/1 3/3/1 4/4/1\n";
+        ofs << "f 5/1/2 6/2/2 7/3/2\n";
+        ofs << "f 5/1/2 7/3/2 8/4/2\n";
+        ofs << "f 1/1/3 4/2/3 8/3/3\n";
+        ofs << "f 1/1/3 8/3/3 5/4/3\n";
+        ofs << "f 2/1/4 6/2/4 7/3/4\n";
+        ofs << "f 2/1/4 7/3/4 3/4/4\n";
+        ofs << "f 1/1/5 5/2/5 6/3/5\n";
+        ofs << "f 1/1/5 6/3/5 2/4/5\n";
+        ofs << "f 4/1/6 3/2/6 7/3/6\n";
+        ofs << "f 4/1/6 7/3/6 8/4/6\n";
+    }
+
+} // namespace
 
 int main()
 {
@@ -389,7 +438,7 @@ int main()
     const fs::path testRoot =
         fs::temp_directory_path() / "orange_headless_mesh_import_test";
     std::error_code ec;
-    fs::remove_all(testRoot, ec);  // 清上次残留，保证确定性
+    fs::remove_all(testRoot, ec); // 清上次残留，保证确定性
     fs::create_directories(testRoot, ec);
     assert(!ec && "建临时测试根目录应成功");
     fs::current_path(testRoot, ec);
@@ -431,7 +480,7 @@ int main()
 
         // MeshLoader 直接读回（不经 registry，验 .mesh 二进制本身合法）。
         AssetNS::MeshLoader loader;
-        auto loadRes = loader.Load(meshPath);
+        auto                loadRes = loader.Load(meshPath);
         assert(loadRes.IsOk() && "MeshLoader::Load 应成功读回导入的 .mesh");
         const auto& mesh = *loadRes.Value();
         assert(!mesh.Positions().empty() && "读回 mesh 顶点数应 > 0");
@@ -440,7 +489,13 @@ int main()
         assert(mesh.Indices().size() == 36 && "立方体应有 36 个索引（12 三角）");
         // 索引最大值 < 顶点数（合法 indexed mesh）。
         std::uint32_t maxIdx = 0;
-        for (auto idx : mesh.Indices()) { if (idx > maxIdx) { maxIdx = idx; } }
+        for (auto idx : mesh.Indices())
+        {
+            if (idx > maxIdx)
+            {
+                maxIdx = idx;
+            }
+        }
         assert(static_cast<std::size_t>(maxIdx) < mesh.Positions().size() &&
                "索引应全部落在顶点数组范围内");
 
@@ -457,7 +512,7 @@ int main()
         // 同时删掉源 copy 让重导走完整路径。
         fs::remove(fs::path(meshPath).parent_path() / "cube.obj", ec);
 
-        auto registry2 = MakeImportRegistry();
+        auto                         registry2 = MakeImportRegistry();
         const ImportNS::ImportResult r2 =
             ImportNS::ImportObjMeshToRegistry(objPath, *registry2);
         assert(r2.status == ImportNS::ImportStatus::Success &&
@@ -474,7 +529,7 @@ int main()
         fs::remove(meshPath, ec);
         fs::remove(metaPath, ec);
         fs::remove(fs::path(meshPath).parent_path() / "cube.obj", ec);
-        auto registry3 = MakeImportRegistry();
+        auto                         registry3 = MakeImportRegistry();
         const ImportNS::ImportResult r3 =
             ImportNS::DispatchToRegistry(objPath, *registry3);
         assert(r3.status == ImportNS::ImportStatus::Success &&
@@ -489,7 +544,7 @@ int main()
         const std::string gltfPath = ORANGE_ENGINE_GLTF_FIXTURE;
         if (fs::exists(gltfPath))
         {
-            auto registry = MakeImportRegistry();
+            auto                         registry = MakeImportRegistry();
             const ImportNS::ImportResult r =
                 ImportNS::ImportGltfMeshToRegistry(gltfPath, *registry);
             assert(r.status == ImportNS::ImportStatus::Success &&
@@ -500,7 +555,7 @@ int main()
                    "gltf .meta sidecar 应存在");
 
             AssetNS::MeshLoader loader;
-            auto loadRes = loader.Load(r.destPath);
+            auto                loadRes = loader.Load(r.destPath);
             assert(loadRes.IsOk() && "MeshLoader::Load 应读回 gltf 导出的 .mesh");
             const auto& mesh = *loadRes.Value();
             assert(!mesh.Positions().empty() && !mesh.Indices().empty() &&
@@ -534,7 +589,7 @@ int main()
             (srcDir / "two_material.gltf").generic_string();
         WriteTwoMaterialGltf(gltfPath);
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportGltfMeshToRegistry(gltfPath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -557,16 +612,16 @@ int main()
 
         // 读回 .mesh：sub-mesh >= 2，slot 覆盖 [0..N-1] 连续，区间无重叠无空隙。
         AssetNS::MeshLoader loader;
-        auto loadRes = loader.Load(r.destPath);
+        auto                loadRes = loader.Load(r.destPath);
         assert(loadRes.IsOk() && "MeshLoader::Load 应读回多 material .mesh");
         const auto& mesh = *loadRes.Value();
         const auto& subs = mesh.SubMeshes();
         assert(subs.size() >= 2 && "多 material mesh 应有 >= 2 段 sub-mesh");
 
-        std::uint32_t maxSlot = 0;
+        std::uint32_t     maxSlot = 0;
         std::vector<bool> slotSeen;
-        std::uint64_t coveredIndices = 0;
-        std::uint32_t expectOffset = 0;
+        std::uint64_t     coveredIndices = 0;
+        std::uint32_t     expectOffset   = 0;
         for (const auto& s : subs)
         {
             if (s.materialSlot >= slotSeen.size())
@@ -574,7 +629,10 @@ int main()
                 slotSeen.resize(s.materialSlot + 1, false);
             }
             slotSeen[s.materialSlot] = true;
-            if (s.materialSlot > maxSlot) { maxSlot = s.materialSlot; }
+            if (s.materialSlot > maxSlot)
+            {
+                maxSlot = s.materialSlot;
+            }
             // 按 importer 输出顺序，区间连续拼接（offset == 累计前缀）。
             assert(s.indexOffset == expectOffset &&
                    "sub-mesh indexOffset 应紧接上一段（不重叠不留空）");
@@ -613,7 +671,7 @@ int main()
         const std::string objPath = (srcDir / "cube_nouv.obj").generic_string();
         WriteCubeObjNoUV(objPath);
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportObjMeshToRegistry(objPath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -621,7 +679,7 @@ int main()
         assert(!r.destPath.empty() && "destPath 应非空");
 
         AssetNS::MeshLoader loader;
-        auto loadRes = loader.Load(r.destPath);
+        auto                loadRes = loader.Load(r.destPath);
         assert(loadRes.IsOk() && "无 UV mesh 应能 Load 读回");
         const auto& mesh = *loadRes.Value();
         assert(!mesh.Positions().empty() && "读回顶点 > 0");
@@ -636,16 +694,16 @@ int main()
                "tangent 与顶点一一对应");
 
         // 逐顶点验 TBN 有效性：切线单位长 + 与 normal 正交 + w=±1（非 NaN）。
-        const auto& tans = mesh.Tangents();
+        const auto& tans  = mesh.Tangents();
         const auto& norms = mesh.Normals();
         for (std::size_t i = 0; i < tans.size(); ++i)
         {
-            const auto& t = tans[i];
+            const auto& t   = tans[i];
             const float len = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
             assert(std::isfinite(len) && "切线分量必须有限（无 NaN/Inf）");
             assert(std::fabs(len - 1.0f) < 1e-3f && "Lengyel 兜底切线应单位长");
             assert(std::fabs(std::fabs(t.w) - 1.0f) < 1e-3f && "handedness w=±1");
-            const auto& n = norms[i];
+            const auto& n     = norms[i];
             const float dotTN = t.x * n.x + t.y * n.y + t.z * n.z;
             assert(std::fabs(dotTN) < 1e-2f &&
                    "切线应与法线正交（Gram-Schmidt 后 |dot(T,N)|≈0）");
@@ -668,7 +726,7 @@ int main()
         const std::string gltfPath = (srcDir / "solo_material.gltf").generic_string();
         WriteSingleMaterialGltf(gltfPath);
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportGltfMeshToRegistry(gltfPath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -690,7 +748,7 @@ int main()
 
         // mesh 本身无 sub-mesh（单材质退化路径）。
         AssetNS::MeshLoader loader;
-        auto loadRes = loader.Load(r.destPath);
+        auto                loadRes = loader.Load(r.destPath);
         assert(loadRes.IsOk() && "单 material .mesh 应能 Load");
         assert(!loadRes.Value()->HasSubMeshes() &&
                "单 material → 无 sub-mesh（HasSubMeshes()==false）");
@@ -713,7 +771,7 @@ int main()
         const std::string objPath = (srcDir / "mtl_cube.obj").generic_string();
         WriteCubeObjWithMtl(objPath, "mtl_cube.mtl");
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportObjMeshToRegistry(objPath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -756,7 +814,7 @@ int main()
         const std::string objPath = (srcDir / "two_mtl_cube.obj").generic_string();
         WriteCubeObjWithTwoMtl(objPath, "two_mtl_cube.mtl");
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportObjMeshToRegistry(objPath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&
@@ -779,14 +837,17 @@ int main()
 
         // .mesh 拆 2 个 sub-mesh：连续 + 覆盖全索引。
         AssetNS::MeshLoader loader;
-        auto loadRes = loader.Load(r.destPath);
+        auto                loadRes = loader.Load(r.destPath);
         assert(loadRes.IsOk() && "多材质 .mesh 应能 Load");
         const auto& mesh = *loadRes.Value();
         assert(mesh.HasSubMeshes() && "多材质 OBJ → HasSubMeshes()==true");
         const auto& subs = mesh.SubMeshes();
         assert(subs.size() == 2 && "恰 2 个 sub-mesh 段");
         std::uint64_t covered = 0;
-        for (const auto& sm : subs) { covered += sm.indexCount; }
+        for (const auto& sm : subs)
+        {
+            covered += sm.indexCount;
+        }
         assert(covered == mesh.Indices().size() &&
                "sub-mesh 覆盖全部索引");
         assert(subs[0].indexOffset == 0 && "slot 0 从索引 0 起");
@@ -808,7 +869,7 @@ int main()
         const std::string objPath = (srcDir / "tex_cube.obj").generic_string();
         WriteCubeObjWithTexturedMtl(objPath, "tex_cube.mtl", "tex_cube_kd.tga");
 
-        auto registry = MakeImportRegistry();
+        auto                         registry = MakeImportRegistry();
         const ImportNS::ImportResult r =
             ImportNS::ImportObjMeshToRegistry(objPath, *registry);
         assert(r.status == ImportNS::ImportStatus::Success &&

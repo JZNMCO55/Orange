@@ -29,38 +29,37 @@
 namespace Orange::Engine::Asset
 {
 
-enum class ShaderStage : std::uint32_t
-{
-    Unknown = 0,
-    Vertex,
-    Fragment,
-    Compute,
-};
-
-class ORANGE_ENGINE_API ShaderAsset
-{
-public:
-    ShaderAsset() = default;
-
-    ShaderAsset(ShaderStage stage, std::vector<std::uint32_t> spirv)
-        : mStage(stage)
-        , mSpirV(std::move(spirv))
+    enum class ShaderStage : std::uint32_t
     {
-    }
+        Unknown = 0,
+        Vertex,
+        Fragment,
+        Compute,
+    };
 
-    ShaderStage Stage() const noexcept { return mStage; }
-    const std::vector<std::uint32_t>& SpirV() const noexcept { return mSpirV; }
+    class ORANGE_ENGINE_API ShaderAsset
+    {
+    public:
+        ShaderAsset() = default;
 
-    std::size_t WordCount() const noexcept { return mSpirV.size(); }
-    std::size_t ByteSize()  const noexcept { return mSpirV.size() * sizeof(std::uint32_t); }
+        ShaderAsset(ShaderStage stage, std::vector<std::uint32_t> spirv)
+            : mStage(stage), mSpirV(std::move(spirv))
+        {
+        }
 
-    bool Empty() const noexcept { return mSpirV.empty(); }
+        ShaderStage                       Stage() const noexcept { return mStage; }
+        const std::vector<std::uint32_t>& SpirV() const noexcept { return mSpirV; }
 
-private:
-    ShaderStage mStage{ShaderStage::Unknown};
-    std::vector<std::uint32_t> mSpirV;
-};
+        std::size_t WordCount() const noexcept { return mSpirV.size(); }
+        std::size_t ByteSize() const noexcept { return mSpirV.size() * sizeof(std::uint32_t); }
 
-}  // namespace Orange::Engine::Asset
+        bool Empty() const noexcept { return mSpirV.empty(); }
 
-#endif  // ORANGE_ENGINE_ASSET_SHADER_ASSET_H
+    private:
+        ShaderStage                mStage{ShaderStage::Unknown};
+        std::vector<std::uint32_t> mSpirV;
+    };
+
+} // namespace Orange::Engine::Asset
+
+#endif // ORANGE_ENGINE_ASSET_SHADER_ASSET_H

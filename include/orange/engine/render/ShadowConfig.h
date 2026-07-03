@@ -27,53 +27,53 @@
 namespace Orange::Engine::Render
 {
 
-struct ShadowConfig
-{
-    // 阴影贴图边长（正方形）。1024 / 2048 / 4096 是常见档位；非 2 的幂
-    // 也能用，但部分硬件分块布局会浪费带宽。
-    std::uint32_t mapResolution{1024};
+    struct ShadowConfig
+    {
+        // 阴影贴图边长（正方形）。1024 / 2048 / 4096 是常见档位；非 2 的幂
+        // 也能用，但部分硬件分块布局会浪费带宽。
+        std::uint32_t mapResolution{1024};
 
-    // PCF box filter 的半径（采样次数 = (2r+1)^2）。
-    //   * 0 = 1×1（无 PCF，纯硬阴影 —— 仍走 sampler2DShadow 路径，但单
-    //     样本，性能上等价于无 PCF）；
-    //   * 1 = 3×3（默认，9 次采样）；
-    //   * 2 = 5×5（25 次采样，更柔但 fragment 成本明显涨）。
-    std::uint32_t pcfKernelRadius{1};
+        // PCF box filter 的半径（采样次数 = (2r+1)^2）。
+        //   * 0 = 1×1（无 PCF，纯硬阴影 —— 仍走 sampler2DShadow 路径，但单
+        //     样本，性能上等价于无 PCF）；
+        //   * 1 = 3×3（默认，9 次采样）；
+        //   * 2 = 5×5（25 次采样，更柔但 fragment 成本明显涨）。
+        std::uint32_t pcfKernelRadius{1};
 
-    // 深度偏移：避免 z-fighting 引起的 shadow acne。值的尺度与场景的
-    // light-space 深度范围耦合——PCG 主光投影 50 单位深度时 0.005 是
-    // 合适的；scene scale 不同（厘米 / 公里）需要按比例调整。
-    float depthBias{0.005f};
+        // 深度偏移：避免 z-fighting 引起的 shadow acne。值的尺度与场景的
+        // light-space 深度范围耦合——PCG 主光投影 50 单位深度时 0.005 是
+        // 合适的；scene scale 不同（厘米 / 公里）需要按比例调整。
+        float depthBias{0.005f};
 
-    // 法线偏移：沿表面法线推一段，进一步抑制 acne。配合 depthBias 使
-    // 用，对斜面阴影特别有效。
-    float normalBias{0.01f};
+        // 法线偏移：沿表面法线推一段，进一步抑制 acne。配合 depthBias 使
+        // 用，对斜面阴影特别有效。
+        float normalBias{0.01f};
 
-    // PCSS 软阴影的光源半影尺度（shadow map texel 单位）。
-    //   * 0（默认）= 关闭 PCSS，走固定半径 PCF（= pcfKernelRadius，行为不变）；
-    //   * > 0 = 开启 percentage-closer soft shadows：受影体离遮挡面越远半影越
-    //     宽（接触处硬、远处软），lightSize 同时作 blocker search 半径与最大
-    //     filter 半径。8~16 在 1024 分辨率下是可见的柔和档位。
-    // 仅 directional + spot 阴影消费（point cubemap 仍走固定 PCF）。
-    float pcssLightSize{0.0f};
+        // PCSS 软阴影的光源半影尺度（shadow map texel 单位）。
+        //   * 0（默认）= 关闭 PCSS，走固定半径 PCF（= pcfKernelRadius，行为不变）；
+        //   * > 0 = 开启 percentage-closer soft shadows：受影体离遮挡面越远半影越
+        //     宽（接触处硬、远处软），lightSize 同时作 blocker search 半径与最大
+        //     filter 半径。8~16 在 1024 分辨率下是可见的柔和档位。
+        // 仅 directional + spot 阴影消费（point cubemap 仍走固定 PCF）。
+        float pcssLightSize{0.0f};
 
-    // CSM（Cascaded Shadow Maps）级联数（GAP-2026-05-27-cascaded-shadow-maps）。
-    //   * 1 = 单 cascade，退化为历史 ±10 ortho box 行为（零回归调试用）；
-    //   * 3（默认 C2 起）/ 4 = 真 CSM：按相机视锥分段，每段独立 light-space
-    //     ortho，近段高分辨率近景锐 / 远段覆盖大范围。资源上限 kMaxCascades = 4。
-    // 仅 directional 阴影消费；spot/point 各自独立 shadow map / cubemap。
-    // PCSS 与 cascade 交互：远 cascade 的 ortho 覆盖范围更大，pcssLightSize
-    // 按 per-cascade 尺度（cascadePcssScales[i] = orthoExtent_0 / orthoExtent_i）
-    // 缩放，保 world-space 半影宽度跨 cascade 大致一致。
-    std::uint32_t cascadeCount{3};
+        // CSM（Cascaded Shadow Maps）级联数（GAP-2026-05-27-cascaded-shadow-maps）。
+        //   * 1 = 单 cascade，退化为历史 ±10 ortho box 行为（零回归调试用）；
+        //   * 3（默认 C2 起）/ 4 = 真 CSM：按相机视锥分段，每段独立 light-space
+        //     ortho，近段高分辨率近景锐 / 远段覆盖大范围。资源上限 kMaxCascades = 4。
+        // 仅 directional 阴影消费；spot/point 各自独立 shadow map / cubemap。
+        // PCSS 与 cascade 交互：远 cascade 的 ortho 覆盖范围更大，pcssLightSize
+        // 按 per-cascade 尺度（cascadePcssScales[i] = orthoExtent_0 / orthoExtent_i）
+        // 缩放，保 world-space 半影宽度跨 cascade 大致一致。
+        std::uint32_t cascadeCount{3};
 
-    // CSM cascade 染色 overlay（GAP-2026-05-27-cascaded-shadow-maps sample 18
-    // polish）：true 时 pbr.frag 在最终输出上 mix 一层 per-cascade tint（cascade
-    // 0=红 / 1=绿 / 2=蓝 / 3=黄），让 cascade 边界直观可见——CSM 调试 / sample
-    // 18 视觉演示用，shipping 永远 false。
-    bool debugCascadeTint{false};
-};
+        // CSM cascade 染色 overlay（GAP-2026-05-27-cascaded-shadow-maps sample 18
+        // polish）：true 时 pbr.frag 在最终输出上 mix 一层 per-cascade tint（cascade
+        // 0=红 / 1=绿 / 2=蓝 / 3=黄），让 cascade 边界直观可见——CSM 调试 / sample
+        // 18 视觉演示用，shipping 永远 false。
+        bool debugCascadeTint{false};
+    };
 
-}  // namespace Orange::Engine::Render
+} // namespace Orange::Engine::Render
 
-#endif  // ORANGE_ENGINE_RENDER_SHADOW_CONFIG_H
+#endif // ORANGE_ENGINE_RENDER_SHADOW_CONFIG_H

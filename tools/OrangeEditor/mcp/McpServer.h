@@ -23,44 +23,44 @@
 namespace Orange::Editor::Mcp
 {
 
-struct McpBridge;
+    struct McpBridge;
 
-class McpServer
-{
-public:
-    McpServer() = default;
-    ~McpServer();
+    class McpServer
+    {
+    public:
+        McpServer() = default;
+        ~McpServer();
 
-    McpServer(const McpServer&)            = delete;
-    McpServer& operator=(const McpServer&) = delete;
+        McpServer(const McpServer&)            = delete;
+        McpServer& operator=(const McpServer&) = delete;
 
-    // 启动监听线程。bridge 必须在 McpServer 之后析构（典型：两者都挂在 main 的
-    // EditorHost / 栈上，McpServer 先 Stop+join 再让 EditorHost 析构）。
-    // 返回 false = 监听 socket 建立失败（WSAStartup / bind / listen 出错），此时
-    // 不启动线程、编辑器照常运行（仅 MCP 不可用）。
-    bool Start(std::uint16_t port, McpBridge& bridge);
+        // 启动监听线程。bridge 必须在 McpServer 之后析构（典型：两者都挂在 main 的
+        // EditorHost / 栈上，McpServer 先 Stop+join 再让 EditorHost 析构）。
+        // 返回 false = 监听 socket 建立失败（WSAStartup / bind / listen 出错），此时
+        // 不启动线程、编辑器照常运行（仅 MCP 不可用）。
+        bool Start(std::uint16_t port, McpBridge& bridge);
 
-    // 停止监听线程：置 bridge.running=false、关闭 listen / client socket 解除
-    // accept/recv 阻塞、notify 唤醒等响应的线程、join。幂等。
-    void Stop();
+        // 停止监听线程：置 bridge.running=false、关闭 listen / client socket 解除
+        // accept/recv 阻塞、notify 唤醒等响应的线程、join。幂等。
+        void Stop();
 
-    bool IsRunning() const { return mRunning.load(); }
+        bool IsRunning() const { return mRunning.load(); }
 
-private:
-    void ThreadMain();
+    private:
+        void ThreadMain();
 
-    McpBridge*        mpBridge = nullptr;
-    std::thread       mThread;
-    std::atomic<bool> mRunning{false};
+        McpBridge*        mpBridge = nullptr;
+        std::thread       mThread;
+        std::atomic<bool> mRunning{false};
 
-    // INVALID_SOCKET 在 winsock 是 (SOCKET)(~0)；用 uintptr_t 同值哨兵，避免
-    // 在头里拖 winsock。
-    static constexpr std::uintptr_t kInvalidSocket = static_cast<std::uintptr_t>(~0ull);
-    std::atomic<std::uintptr_t> mListenSocket{kInvalidSocket};
-    std::atomic<std::uintptr_t> mClientSocket{kInvalidSocket};
-    std::uint16_t               mPort = 0;
-};
+        // INVALID_SOCKET 在 winsock 是 (SOCKET)(~0)；用 uintptr_t 同值哨兵，避免
+        // 在头里拖 winsock。
+        static constexpr std::uintptr_t kInvalidSocket = static_cast<std::uintptr_t>(~0ull);
+        std::atomic<std::uintptr_t>     mListenSocket{kInvalidSocket};
+        std::atomic<std::uintptr_t>     mClientSocket{kInvalidSocket};
+        std::uint16_t                   mPort = 0;
+    };
 
-}  // namespace Orange::Editor::Mcp
+} // namespace Orange::Editor::Mcp
 
-#endif  // ORANGE_EDITOR_MCP_MCP_SERVER_H
+#endif // ORANGE_EDITOR_MCP_MCP_SERVER_H

@@ -17,18 +17,18 @@
 
 // cgltf 单 header IMPLEMENTATION 仅本 TU expand；warning 关掉同 GltfImporter.cpp。
 #if defined(_MSC_VER)
-#  pragma warning(push)
-#  pragma warning(disable: 4244)
-#  pragma warning(disable: 4267)
-#  pragma warning(disable: 4505)
-#  pragma warning(disable: 4996)
-#  pragma warning(disable: 4100)
-#  pragma warning(disable: 4456)
+#pragma warning(push)
+#pragma warning(disable : 4244)
+#pragma warning(disable : 4267)
+#pragma warning(disable : 4505)
+#pragma warning(disable : 4996)
+#pragma warning(disable : 4100)
+#pragma warning(disable : 4456)
 #endif
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 #if defined(_MSC_VER)
-#  pragma warning(pop)
+#pragma warning(pop)
 #endif
 
 #include <cassert>
@@ -38,7 +38,7 @@
 #include <vector>
 
 #ifndef ORANGE_ENGINE_GLTF_FIXTURE
-#  error "ORANGE_ENGINE_GLTF_FIXTURE 必须由 CMake 注入 .gltf 路径"
+#error "ORANGE_ENGINE_GLTF_FIXTURE 必须由 CMake 注入 .gltf 路径"
 #endif
 
 using Orange::Editor::Import::GenerateMikkTSpaceTangents;
@@ -50,19 +50,19 @@ using Orange::Engine::Asset::VertexUV2;
 namespace
 {
 
-const cgltf_accessor* FindAttr(const cgltf_primitive& prim, cgltf_attribute_type wanted)
-{
-    for (cgltf_size i = 0; i < prim.attributes_count; ++i)
+    const cgltf_accessor* FindAttr(const cgltf_primitive& prim, cgltf_attribute_type wanted)
     {
-        if (prim.attributes[i].type == wanted && prim.attributes[i].index == 0)
+        for (cgltf_size i = 0; i < prim.attributes_count; ++i)
         {
-            return prim.attributes[i].data;
+            if (prim.attributes[i].type == wanted && prim.attributes[i].index == 0)
+            {
+                return prim.attributes[i].data;
+            }
         }
+        return nullptr;
     }
-    return nullptr;
-}
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -94,14 +94,20 @@ int main()
         for (cgltf_size pi = 0; pi < mesh.primitives_count; ++pi)
         {
             const cgltf_primitive& prim = mesh.primitives[pi];
-            if (prim.type != cgltf_primitive_type_triangles) { continue; }
+            if (prim.type != cgltf_primitive_type_triangles)
+            {
+                continue;
+            }
             const cgltf_accessor* posAcc = FindAttr(prim, cgltf_attribute_type_position);
             const cgltf_accessor* nrmAcc = FindAttr(prim, cgltf_attribute_type_normal);
             const cgltf_accessor* uvAcc  = FindAttr(prim, cgltf_attribute_type_texcoord);
-            if (posAcc == nullptr || nrmAcc == nullptr || uvAcc == nullptr) { continue; }
+            if (posAcc == nullptr || nrmAcc == nullptr || uvAcc == nullptr)
+            {
+                continue;
+            }
 
-            const std::uint32_t baseIdx = static_cast<std::uint32_t>(positions.size());
-            const cgltf_size vtxCount = posAcc->count;
+            const std::uint32_t baseIdx  = static_cast<std::uint32_t>(positions.size());
+            const cgltf_size    vtxCount = posAcc->count;
             for (cgltf_size v = 0; v < vtxCount; ++v)
             {
                 float p[3] = {0, 0, 0}, n[3] = {0, 1, 0}, t[2] = {0, 0};
@@ -117,7 +123,7 @@ int main()
                 for (cgltf_size i = 0; i < prim.indices->count; ++i)
                 {
                     indices.push_back(baseIdx + static_cast<std::uint32_t>(
-                        cgltf_accessor_read_index(prim.indices, i)));
+                                                    cgltf_accessor_read_index(prim.indices, i)));
                 }
             }
         }
@@ -129,33 +135,32 @@ int main()
     assert(!positions.empty() && !indices.empty() && "fixture 应含三角几何");
 
     std::vector<VertexTangent4> tangents;
-    const bool ok = GenerateMikkTSpaceTangents(positions, uvs, normals, indices, tangents);
+    const bool                  ok = GenerateMikkTSpaceTangents(positions, uvs, normals, indices, tangents);
     assert(ok && "真实模型（有 UV + normal）必须成功生成切线");
 
     // re-weld 后全覆盖 + 数组一致。
     assert(tangents.size() == positions.size() && "每个（re-weld 后）顶点都有切线");
-    assert(uvs.size() == positions.size() && normals.size() == positions.size()
-           && "re-weld 后 pos/uv/normal 等长");
+    assert(uvs.size() == positions.size() && normals.size() == positions.size() && "re-weld 后 pos/uv/normal 等长");
     assert((indices.size() % 3) == 0 && "三角索引完整");
 
     // 逐顶点检查：单位长切线 + 手性 ±1；统计切线⊥法线程度。
-    float maxAbsDotTN = 0.0f;
+    float  maxAbsDotTN = 0.0f;
     double sumAbsDotTN = 0.0;
     for (std::size_t i = 0; i < tangents.size(); ++i)
     {
-        const VertexTangent4& t = tangents[i];
-        const float len = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
+        const VertexTangent4& t   = tangents[i];
+        const float           len = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
         assert(std::fabs(len - 1.0f) < 1e-2f && "切线单位长");
         assert(std::fabs(std::fabs(t.w) - 1.0f) < 1e-2f && "handedness w = ±1");
 
         // 归一化法线后点积——mikktspace basic 切线与顶点法线正交，|dot|≈0。
-        const VertexNormal3& n = normals[i];
-        const float nlen = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        const VertexNormal3& n    = normals[i];
+        const float          nlen = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
         if (nlen > 1e-6f)
         {
             const float dot = (t.x * n.x + t.y * n.y + t.z * n.z) / nlen;
-            const float ad = std::fabs(dot);
-            maxAbsDotTN = (ad > maxAbsDotTN) ? ad : maxAbsDotTN;
+            const float ad  = std::fabs(dot);
+            maxAbsDotTN     = (ad > maxAbsDotTN) ? ad : maxAbsDotTN;
             sumAbsDotTN += ad;
         }
     }

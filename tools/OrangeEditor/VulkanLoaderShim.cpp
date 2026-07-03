@@ -16,10 +16,10 @@
 // Common Item Dialog（COM）。NOMINMAX / WIN32_LEAN_AND_MEAN 避免污染
 // std::min / max 等符号 + 减少 windows.h 拉的"无关海洋"。
 #ifndef NOMINMAX
-#  define NOMINMAX
+#define NOMINMAX
 #endif
 #ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #include <shobjidl.h>
@@ -67,17 +67,25 @@ PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData)
     // 注意：仅对这两个**被 promote 的**命令做替换。其它 KHR 命令（如
     // vkAcquireNextImageKHR、vkCreateSwapchainKHR）是真扩展、未被 promote，
     // 不能做同样替换。
-    if (ctx->pfnGetDeviceProcAddr != nullptr && ctx->vkDevice != VK_NULL_HANDLE) {
+    if (ctx->pfnGetDeviceProcAddr != nullptr && ctx->vkDevice != VK_NULL_HANDLE)
+    {
         const char* coreName = nullptr;
-        if (std::strcmp(funcName, "vkCmdBeginRenderingKHR") == 0) {
+        if (std::strcmp(funcName, "vkCmdBeginRenderingKHR") == 0)
+        {
             coreName = "vkCmdBeginRendering";
-        } else if (std::strcmp(funcName, "vkCmdEndRenderingKHR") == 0) {
+        }
+        else if (std::strcmp(funcName, "vkCmdEndRenderingKHR") == 0)
+        {
             coreName = "vkCmdEndRendering";
         }
-        if (coreName != nullptr) {
+        if (coreName != nullptr)
+        {
             PFN_vkVoidFunction core =
                 ctx->pfnGetDeviceProcAddr(ctx->vkDevice, coreName);
-            if (core != nullptr) { return core; }
+            if (core != nullptr)
+            {
+                return core;
+            }
             // 兜底：万一驱动只导出 KHR 名字（极不常见），最后再回 instance
             // proc addr 试一次。
         }
@@ -90,54 +98,64 @@ PFN_vkVoidFunction ImguiVulkanLoader(const char* funcName, void* userData)
 // `vkCreateDescriptorPool`，与 ImGui 共用同一条 loader 解析路径；不再调
 // 静态 vulkan-1.lib stub 的 `vkGetInstanceProcAddr`。
 VkDescriptorPool MakeImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr,
-                                          VkInstance               instance,
-                                          VkDevice                 device)
+                                         VkInstance                instance,
+                                         VkDevice                  device)
 {
     auto vkGetDeviceProcAddrFn =
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
             pfnGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
-    if (vkGetDeviceProcAddrFn == nullptr) {
+    if (vkGetDeviceProcAddrFn == nullptr)
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] resolve vkGetDeviceProcAddr failed");
         return VK_NULL_HANDLE;
     }
     auto vkCreateDescriptorPoolFn =
         reinterpret_cast<PFN_vkCreateDescriptorPool>(
             vkGetDeviceProcAddrFn(device, "vkCreateDescriptorPool"));
-    if (vkCreateDescriptorPoolFn == nullptr) {
+    if (vkCreateDescriptorPoolFn == nullptr)
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] resolve vkCreateDescriptorPool failed");
         return VK_NULL_HANDLE;
     }
 
     constexpr VkDescriptorPoolSize sizes[] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
     };
     VkDescriptorPoolCreateInfo desc{};
-    desc.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    desc.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    desc.maxSets       = 1000;
-    desc.poolSizeCount = sizeof(sizes) / sizeof(sizes[0]);
-    desc.pPoolSizes    = sizes;
+    desc.sType            = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    desc.flags            = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    desc.maxSets          = 1000;
+    desc.poolSizeCount    = sizeof(sizes) / sizeof(sizes[0]);
+    desc.pPoolSizes       = sizes;
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    if (vkCreateDescriptorPoolFn(device, &desc, nullptr, &pool) != VK_SUCCESS) {
+    if (vkCreateDescriptorPoolFn(device, &desc, nullptr, &pool) != VK_SUCCESS)
+    {
         ORANGE_LOG_ERROR("[OrangeEditor] vkCreateDescriptorPool failed");
     }
     return pool;
 }
 
 void DestroyImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr,
-                                 VkInstance               instance,
-                                 VkDevice                 device,
-                                 VkDescriptorPool         pool)
+                                VkInstance                instance,
+                                VkDevice                  device,
+                                VkDescriptorPool          pool)
 {
-    if (pool == VK_NULL_HANDLE) { return; }
+    if (pool == VK_NULL_HANDLE)
+    {
+        return;
+    }
     auto vkGetDeviceProcAddrFn =
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
             pfnGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
-    if (vkGetDeviceProcAddrFn == nullptr) { return; }
+    if (vkGetDeviceProcAddrFn == nullptr)
+    {
+        return;
+    }
     auto vkDestroyDescriptorPoolFn =
         reinterpret_cast<PFN_vkDestroyDescriptorPool>(
             vkGetDeviceProcAddrFn(device, "vkDestroyDescriptorPool"));
-    if (vkDestroyDescriptorPoolFn != nullptr) {
+    if (vkDestroyDescriptorPoolFn != nullptr)
+    {
         vkDestroyDescriptorPoolFn(device, pool, nullptr);
     }
 }
@@ -159,26 +177,27 @@ void DestroyImguiDescriptorPool(PFN_vkGetInstanceProcAddr pfnGetInstanceProcAddr
 namespace
 {
 
-// 共享 IFileDialog 模板 —— ShowSceneFileDialog / ShowManifestFileDialog
-// 只过滤器与默认扩展名不同，其余 COM 流程完全一致。
-//
-// 必须在独立 STA（apartment-threaded）线程里跑 IFileDialog::Show。
-// 原因：OrangeRender Vulkan 初始化时（驱动层 dxgkernel / DXGI / WIC）
-// 会把 main thread 的 COM apartment 设成 **MTA**。而 IFileDialog::Show
-// 在 MTA 下会**永久 hang 死**——COM 内部 marshaling 要靠 STA 消息泵
-// 驱动 dialog 渲染，MTA 没有泵就一直等。直接在 main thread 调
-// CoInitializeEx(APARTMENTTHREADED) 会返回 RPC_E_CHANGED_MODE，无法
-// 改回 STA。Windows 推荐做法是把 dialog 放到独立 STA worker 线程，
-// 主线程 join 等结果——dialog 本身就是模态阻塞，UX 上无差异。
-bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
-                        const COMDLG_FILTERSPEC* filters, std::size_t filterCount,
-                        const wchar_t* defaultExt, const wchar_t* title,
-                        std::string& outPath)
-{
-    bool ok = false;
-    std::string resultPath;
+    // 共享 IFileDialog 模板 —— ShowSceneFileDialog / ShowManifestFileDialog
+    // 只过滤器与默认扩展名不同，其余 COM 流程完全一致。
+    //
+    // 必须在独立 STA（apartment-threaded）线程里跑 IFileDialog::Show。
+    // 原因：OrangeRender Vulkan 初始化时（驱动层 dxgkernel / DXGI / WIC）
+    // 会把 main thread 的 COM apartment 设成 **MTA**。而 IFileDialog::Show
+    // 在 MTA 下会**永久 hang 死**——COM 内部 marshaling 要靠 STA 消息泵
+    // 驱动 dialog 渲染，MTA 没有泵就一直等。直接在 main thread 调
+    // CoInitializeEx(APARTMENTTHREADED) 会返回 RPC_E_CHANGED_MODE，无法
+    // 改回 STA。Windows 推荐做法是把 dialog 放到独立 STA worker 线程，
+    // 主线程 join 等结果——dialog 本身就是模态阻塞，UX 上无差异。
+    bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
+                            const COMDLG_FILTERSPEC* filters, std::size_t filterCount,
+                            const wchar_t* defaultExt, const wchar_t* title,
+                            std::string& outPath)
+    {
+        bool        ok = false;
+        std::string resultPath;
 
-    std::thread worker([&]() {
+        std::thread worker([&]()
+                           {
         // worker 线程：init STA → dialog → uninit。主线程的 MTA 不受影响。
         const HRESULT hrCo = CoInitializeEx(nullptr,
                                             COINIT_APARTMENTTHREADED
@@ -241,21 +260,23 @@ bool ShowFileDialogImpl(bool isSave, void* parentHwnd,
                              static_cast<unsigned long>(hr));
         }
 
-        if (hrCo == S_OK) { CoUninitialize(); }
-    });
-    worker.join();
+        if (hrCo == S_OK) { CoUninitialize(); } });
+        worker.join();
 
-    if (ok) { outPath = std::move(resultPath); }
-    return ok;
-}
+        if (ok)
+        {
+            outPath = std::move(resultPath);
+        }
+        return ok;
+    }
 
-}  // namespace
+} // namespace
 
 bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
 {
     const COMDLG_FILTERSPEC filterSpec[] = {
-        { L"Scene Files (*.scene.json)", L"*.scene.json" },
-        { L"All Files (*.*)",            L"*.*" },
+        {L"Scene Files (*.scene.json)", L"*.scene.json"},
+        {L"All Files (*.*)", L"*.*"},
     };
     return ShowFileDialogImpl(isSave, parentHwnd, filterSpec, 2,
                               L"scene.json",
@@ -266,8 +287,8 @@ bool ShowSceneFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
 bool ShowManifestFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
 {
     const COMDLG_FILTERSPEC filterSpec[] = {
-        { L"Scene Manifest (*.scene.manifest.json)", L"*.scene.manifest.json" },
-        { L"All Files (*.*)",                        L"*.*" },
+        {L"Scene Manifest (*.scene.manifest.json)", L"*.scene.manifest.json"},
+        {L"All Files (*.*)", L"*.*"},
     };
     return ShowFileDialogImpl(isSave, parentHwnd, filterSpec, 2,
                               L"scene.manifest.json",
@@ -281,12 +302,12 @@ bool ShowImportFileDialog(void* parentHwnd, std::string& outPath)
     // 1 = All Supported，让用户拖任意支持格式都能直接看到。defaultExt
     // 留空（import 不存盘到固定扩展名，纯 open 路径）。
     const COMDLG_FILTERSPEC filterSpec[] = {
-        { L"All Supported (*.obj;*.gltf;*.glb;*.fbx;*.png;*.jpg;*.jpeg;*.tga;*.hdr)",
-          L"*.obj;*.gltf;*.glb;*.fbx;*.png;*.jpg;*.jpeg;*.tga;*.hdr" },
-        { L"Mesh (*.obj;*.gltf;*.glb;*.fbx)", L"*.obj;*.gltf;*.glb;*.fbx" },
-        { L"Image (*.png;*.jpg;*.jpeg;*.tga)", L"*.png;*.jpg;*.jpeg;*.tga" },
-        { L"HDR Image (*.hdr)",              L"*.hdr" },
-        { L"All Files (*.*)",                L"*.*" },
+        {L"All Supported (*.obj;*.gltf;*.glb;*.fbx;*.png;*.jpg;*.jpeg;*.tga;*.hdr)",
+         L"*.obj;*.gltf;*.glb;*.fbx;*.png;*.jpg;*.jpeg;*.tga;*.hdr"},
+        {L"Mesh (*.obj;*.gltf;*.glb;*.fbx)", L"*.obj;*.gltf;*.glb;*.fbx"},
+        {L"Image (*.png;*.jpg;*.jpeg;*.tga)", L"*.png;*.jpg;*.jpeg;*.tga"},
+        {L"HDR Image (*.hdr)", L"*.hdr"},
+        {L"All Files (*.*)", L"*.*"},
     };
     return ShowFileDialogImpl(/*isSave=*/false, parentHwnd,
                               filterSpec, sizeof(filterSpec) / sizeof(filterSpec[0]),

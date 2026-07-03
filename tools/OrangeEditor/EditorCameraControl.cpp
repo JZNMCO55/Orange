@@ -23,7 +23,7 @@
 
 void UpdateEditorCameraFromInput(EditorHost& host)
 {
-    auto& ec = host.camera;
+    auto&          ec = host.camera;
     const ImGuiIO& io = ImGui::GetIO();
 
     const bool hovered = ImGui::IsWindowHovered();
@@ -48,7 +48,7 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     // 正确反映"按下 LMB 那一刻"。
     // collider 顶点编辑子模式 active 时相机 LMB 完全冻结（同 gizmo drag 互斥），
     // 把 LMB 让给顶点选 / 拖 / 加 / 删（GAP-2026-05-21）。
-    const bool gizmoBusy = host.gizmo.IsDragging() || host.colliderEdit.active;
+    const bool gizmoBusy  = host.gizmo.IsDragging() || host.colliderEdit.active;
     const bool gizmoHover = host.gizmo.IsHovered();
 
     // LMB 轨道旋转 —— capture-on-press 状态机：
@@ -60,9 +60,7 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     {
         ec.dragging = false;
     }
-    if (!ec.dragging && hovered
-        && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
-        && !gizmoHover && !gizmoBusy)
+    if (!ec.dragging && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !gizmoHover && !gizmoBusy)
     {
         ec.dragging = true;
     }
@@ -70,12 +68,14 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     {
         const ImVec2 d = io.MouseDelta;
         // 拖右 → azimuth 减小 → 相机向左绕轨道 → 场景向右转，与鼠标方向一致
-        ec.azimuth  -= d.x * ec.lookSensitivity;
+        ec.azimuth -= d.x * ec.lookSensitivity;
         // 屏幕 Y 向下为正；拖下 → d.y > 0 → elevation 减小 → 相机下沉 → 视角上仰
         ec.elevation += d.y * ec.lookSensitivity;
-        constexpr float kMaxElev = 1.5533430343f;   // glm::radians(89°)
-        if (ec.elevation >  kMaxElev) ec.elevation =  kMaxElev;
-        if (ec.elevation < -kMaxElev) ec.elevation = -kMaxElev;
+        constexpr float kMaxElev = 1.5533430343f; // glm::radians(89°)
+        if (ec.elevation > kMaxElev)
+            ec.elevation = kMaxElev;
+        if (ec.elevation < -kMaxElev)
+            ec.elevation = -kMaxElev;
     }
 
     // MMB 平移 pivot（capture-on-press，同 LMB orbit 状态机语义）。MMB 未被
@@ -85,8 +85,7 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     {
         ec.panning = false;
     }
-    if (!ec.panning && hovered
-        && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && !gizmoBusy)
+    if (!ec.panning && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && !gizmoBusy)
     {
         ec.panning = true;
     }
@@ -98,7 +97,7 @@ void UpdateEditorCameraFromInput(EditorHost& host)
         const glm::vec3 offset(cosE * std::sin(ec.azimuth),
                                std::sin(ec.elevation),
                                cosE * std::cos(ec.azimuth));
-        const glm::vec3 fwd   = -glm::normalize(offset);  // 相机 → pivot
+        const glm::vec3 fwd   = -glm::normalize(offset); // 相机 → pivot
         const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
         const glm::vec3 up    = glm::cross(right, fwd);
         // grab-pan：拖右(d.x>0)→内容右移→pivot 左移；拖下(d.y>0，屏幕 y-down)→
@@ -116,15 +115,14 @@ void UpdateEditorCameraFromInput(EditorHost& host)
     {
         ec.flying = false;
     }
-    if (!ec.flying && hovered
-        && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !gizmoBusy)
+    if (!ec.flying && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !gizmoBusy)
     {
         ec.flying = true;
     }
     if (ec.flying)
     {
         // 当前（旋转前）相机世界位置——look-in-place 锚点。
-        const float cosE0 = std::cos(ec.elevation);
+        const float     cosE0 = std::cos(ec.elevation);
         const glm::vec3 off0(ec.radius * cosE0 * std::sin(ec.azimuth),
                              ec.radius * std::sin(ec.elevation),
                              ec.radius * cosE0 * std::cos(ec.azimuth));
@@ -132,14 +130,16 @@ void UpdateEditorCameraFromInput(EditorHost& host)
 
         // RMB 拖动看（与 LMB orbit 同方向，但锚定相机位置不动）。
         const ImVec2 d = io.MouseDelta;
-        ec.azimuth   -= d.x * ec.lookSensitivity;
+        ec.azimuth -= d.x * ec.lookSensitivity;
         ec.elevation += d.y * ec.lookSensitivity;
-        constexpr float kMaxElev = 1.5533430343f;   // glm::radians(89°)
-        if (ec.elevation >  kMaxElev) ec.elevation =  kMaxElev;
-        if (ec.elevation < -kMaxElev) ec.elevation = -kMaxElev;
+        constexpr float kMaxElev = 1.5533430343f; // glm::radians(89°)
+        if (ec.elevation > kMaxElev)
+            ec.elevation = kMaxElev;
+        if (ec.elevation < -kMaxElev)
+            ec.elevation = -kMaxElev;
 
         // 旋转后保持相机位置不动：pivot = camPos - newOffset（look-in-place）。
-        const float cosE1 = std::cos(ec.elevation);
+        const float     cosE1 = std::cos(ec.elevation);
         const glm::vec3 off1(ec.radius * cosE1 * std::sin(ec.azimuth),
                              ec.radius * std::sin(ec.elevation),
                              ec.radius * cosE1 * std::cos(ec.azimuth));
@@ -148,20 +148,39 @@ void UpdateEditorCameraFromInput(EditorHost& host)
         // WASD/QE 沿视向飞行（仅无文本输入焦点时，避免抢键）。
         if (!io.WantTextInput)
         {
-            const glm::vec3 fwd   = -glm::normalize(off1);  // 相机 → 视线前方
+            const glm::vec3 fwd   = -glm::normalize(off1); // 相机 → 视线前方
             const glm::vec3 right = glm::normalize(
                 glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
             const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-            const float dt = (io.DeltaTime > 0.0f && io.DeltaTime < 0.2f)
-                                 ? io.DeltaTime : 0.016f;
-            const float speed = ec.flySpeed * (io.KeyShift ? 3.0f : 1.0f) * dt;
-            glm::vec3 move(0.0f);
-            if (ImGui::IsKeyDown(ImGuiKey_W)) { move += fwd; }
-            if (ImGui::IsKeyDown(ImGuiKey_S)) { move -= fwd; }
-            if (ImGui::IsKeyDown(ImGuiKey_D)) { move += right; }
-            if (ImGui::IsKeyDown(ImGuiKey_A)) { move -= right; }
-            if (ImGui::IsKeyDown(ImGuiKey_E)) { move += worldUp; }
-            if (ImGui::IsKeyDown(ImGuiKey_Q)) { move -= worldUp; }
+            const float     dt    = (io.DeltaTime > 0.0f && io.DeltaTime < 0.2f)
+                                        ? io.DeltaTime
+                                        : 0.016f;
+            const float     speed = ec.flySpeed * (io.KeyShift ? 3.0f : 1.0f) * dt;
+            glm::vec3       move(0.0f);
+            if (ImGui::IsKeyDown(ImGuiKey_W))
+            {
+                move += fwd;
+            }
+            if (ImGui::IsKeyDown(ImGuiKey_S))
+            {
+                move -= fwd;
+            }
+            if (ImGui::IsKeyDown(ImGuiKey_D))
+            {
+                move += right;
+            }
+            if (ImGui::IsKeyDown(ImGuiKey_A))
+            {
+                move -= right;
+            }
+            if (ImGui::IsKeyDown(ImGuiKey_E))
+            {
+                move += worldUp;
+            }
+            if (ImGui::IsKeyDown(ImGuiKey_Q))
+            {
+                move -= worldUp;
+            }
             if (glm::length(move) > 1e-5f)
             {
                 ec.pivot += glm::normalize(move) * speed;
@@ -177,15 +196,18 @@ void UpdateEditorCameraFromInput(EditorHost& host)
         if (ec.flying)
         {
             ec.flySpeed *= std::pow(1.1f, io.MouseWheel);
-            if (ec.flySpeed < 0.1f)   ec.flySpeed = 0.1f;
-            if (ec.flySpeed > 200.0f) ec.flySpeed = 200.0f;
+            if (ec.flySpeed < 0.1f)
+                ec.flySpeed = 0.1f;
+            if (ec.flySpeed > 200.0f)
+                ec.flySpeed = 200.0f;
         }
         else
         {
             ec.radius -= io.MouseWheel * ec.zoomSensitivity;
             // 下限从 0.5 降到 0.02 —— 让 Frame Selected 聚焦到 Avocado 这种
             // 0.04 单位级小模型后，滚轮仍能贴近观察而不被 clamp 弹远。
-            if (ec.radius < 0.02f) ec.radius = 0.02f;
+            if (ec.radius < 0.02f)
+                ec.radius = 0.02f;
         }
     }
 }
@@ -200,137 +222,163 @@ BuildEditorCamera(const EditorCameraState& ec, float aspect)
     // 会被近裁直到再次 Frame（gap）。随 radius 推导后，zoom 改 radius 时近 / 远
     // 面自动跟随；关注的几何总在 distance≈radius 处，恒落在 [radius*0.01,
     // radius*50+100] 内不被裁，ratio≈5000 深度精度对 24-bit depth 充足。
-    const float nearPlane = std::max(0.01f, ec.radius * 0.01f);
-    const float farPlane  = ec.radius * 50.0f + 100.0f;
-    Camera cam = Camera::Perspective(glm::radians(ec.fovYDegrees),
-                                     safeAspect, nearPlane, farPlane);
-    const float cosElev = std::cos(ec.elevation);
+    const float     nearPlane = std::max(0.01f, ec.radius * 0.01f);
+    const float     farPlane  = ec.radius * 50.0f + 100.0f;
+    Camera          cam       = Camera::Perspective(glm::radians(ec.fovYDegrees),
+                                                    safeAspect, nearPlane, farPlane);
+    const float     cosElev   = std::cos(ec.elevation);
     const glm::vec3 offset(
         ec.radius * cosElev * std::sin(ec.azimuth),
         ec.radius * std::sin(ec.elevation),
         ec.radius * cosElev * std::cos(ec.azimuth));
     const glm::vec3 position = ec.pivot + offset;
-    cam.view = glm::lookAt(position, ec.pivot, glm::vec3(0.0f, 1.0f, 0.0f));
+    cam.view                 = glm::lookAt(position, ec.pivot, glm::vec3(0.0f, 1.0f, 0.0f));
     return cam;
 }
 
 namespace
 {
 
-// world matrix 合成（与 EditorPicking.cpp / src/render/RenderScene.cpp 同款；
-// 渲染器以外模块不引私有头，按 invariant 自包含复述）。
-glm::mat4
-ComposeWorldMatrix(const Orange::Engine::Scene::TransformComponent& xform) noexcept
-{
-    glm::mat4 m = glm::translate(glm::mat4(1.0f), xform.position);
-    m *= glm::mat4_cast(xform.rotation);
-    m  = glm::scale(m, xform.scale);
-    return m;
-}
+    // world matrix 合成（与 EditorPicking.cpp / src/render/RenderScene.cpp 同款；
+    // 渲染器以外模块不引私有头，按 invariant 自包含复述）。
+    glm::mat4
+    ComposeWorldMatrix(const Orange::Engine::Scene::TransformComponent& xform) noexcept
+    {
+        glm::mat4 m = glm::translate(glm::mat4(1.0f), xform.position);
+        m *= glm::mat4_cast(xform.rotation);
+        m = glm::scale(m, xform.scale);
+        return m;
+    }
 
-}  // anonymous namespace
+} // anonymous namespace
 
 namespace
 {
 
-// 把一组 entity 的世界 bounds 合并后塞进相机视野 —— FrameSelected（选区）与
-// FrameAll（全场景）共用。entities 空 / 全无效 → 不动相机、返回 false。
-bool FrameEntitiesCamera(EditorHost&                                host,
-                         const std::vector<Orange::Engine::Entity>& entities)
-{
-    using namespace Orange::Engine;
-    if (host.scene.pWorld == nullptr || entities.empty()) { return false; }
-
-    auto&     ec    = host.camera;
-    auto&     world = *host.scene.pWorld;
-    glm::vec3 wmn(std::numeric_limits<float>::max());
-    glm::vec3 wmx(std::numeric_limits<float>::lowest());
-    bool      any = false;
-
-    // 累加一个 entity 的世界 bounds：有 Renderable mesh → 世界 AABB（local 8
-    // 角点过 world matrix，与 picking 同款粗 AABB）；否则（灯光 / 空 entity）→
-    // 该 entity 的 Transform 位置作退化点。无 Transform → 不贡献。
-    auto accumulate = [&](Entity e) {
-        if (!world.IsValid(e)) { return; }
-        const auto* pXform = world.GetComponent<Scene::TransformComponent>(e);
-        if (pXform == nullptr) { return; }
-        bool        addedMesh = false;
-        const auto* pRC = world.GetComponent<Render::RenderableComponent>(e);
-        if (pRC != nullptr && host.assets.pAssets != nullptr)
+    // 把一组 entity 的世界 bounds 合并后塞进相机视野 —— FrameSelected（选区）与
+    // FrameAll（全场景）共用。entities 空 / 全无效 → 不动相机、返回 false。
+    bool FrameEntitiesCamera(EditorHost&                                host,
+                             const std::vector<Orange::Engine::Entity>& entities)
+    {
+        using namespace Orange::Engine;
+        if (host.scene.pWorld == nullptr || entities.empty())
         {
-            const auto* pMesh = host.assets.pAssets->Get(pRC->mesh);
-            if (pMesh != nullptr && !pMesh->Empty())
+            return false;
+        }
+
+        auto&     ec    = host.camera;
+        auto&     world = *host.scene.pWorld;
+        glm::vec3 wmn(std::numeric_limits<float>::max());
+        glm::vec3 wmx(std::numeric_limits<float>::lowest());
+        bool      any = false;
+
+        // 累加一个 entity 的世界 bounds：有 Renderable mesh → 世界 AABB（local 8
+        // 角点过 world matrix，与 picking 同款粗 AABB）；否则（灯光 / 空 entity）→
+        // 该 entity 的 Transform 位置作退化点。无 Transform → 不贡献。
+        auto accumulate = [&](Entity e)
+        {
+            if (!world.IsValid(e))
             {
-                const auto& positions = pMesh->Positions();
-                if (!positions.empty())
+                return;
+            }
+            const auto* pXform = world.GetComponent<Scene::TransformComponent>(e);
+            if (pXform == nullptr)
+            {
+                return;
+            }
+            bool        addedMesh = false;
+            const auto* pRC       = world.GetComponent<Render::RenderableComponent>(e);
+            if (pRC != nullptr && host.assets.pAssets != nullptr)
+            {
+                const auto* pMesh = host.assets.pAssets->Get(pRC->mesh);
+                if (pMesh != nullptr && !pMesh->Empty())
                 {
-                    glm::vec3 mn(std::numeric_limits<float>::max());
-                    glm::vec3 mx(std::numeric_limits<float>::lowest());
-                    for (const auto& p : positions)
+                    const auto& positions = pMesh->Positions();
+                    if (!positions.empty())
                     {
-                        mn.x = std::min(mn.x, p.x);  mx.x = std::max(mx.x, p.x);
-                        mn.y = std::min(mn.y, p.y);  mx.y = std::max(mx.y, p.y);
-                        mn.z = std::min(mn.z, p.z);  mx.z = std::max(mx.z, p.z);
+                        glm::vec3 mn(std::numeric_limits<float>::max());
+                        glm::vec3 mx(std::numeric_limits<float>::lowest());
+                        for (const auto& p : positions)
+                        {
+                            mn.x = std::min(mn.x, p.x);
+                            mx.x = std::max(mx.x, p.x);
+                            mn.y = std::min(mn.y, p.y);
+                            mx.y = std::max(mx.y, p.y);
+                            mn.z = std::min(mn.z, p.z);
+                            mx.z = std::max(mx.z, p.z);
+                        }
+                        const glm::mat4 worldMat   = ComposeWorldMatrix(*pXform);
+                        const glm::vec3 corners[8] = {
+                            {mn.x, mn.y, mn.z},
+                            {mx.x, mn.y, mn.z},
+                            {mn.x, mx.y, mn.z},
+                            {mx.x, mx.y, mn.z},
+                            {mn.x, mn.y, mx.z},
+                            {mx.x, mn.y, mx.z},
+                            {mn.x, mx.y, mx.z},
+                            {mx.x, mx.y, mx.z},
+                        };
+                        for (const auto& c : corners)
+                        {
+                            const glm::vec3 w = glm::vec3(worldMat * glm::vec4(c, 1.0f));
+                            wmn               = glm::min(wmn, w);
+                            wmx               = glm::max(wmx, w);
+                        }
+                        addedMesh = true;
                     }
-                    const glm::mat4 worldMat = ComposeWorldMatrix(*pXform);
-                    const glm::vec3 corners[8] = {
-                        {mn.x, mn.y, mn.z}, {mx.x, mn.y, mn.z},
-                        {mn.x, mx.y, mn.z}, {mx.x, mx.y, mn.z},
-                        {mn.x, mn.y, mx.z}, {mx.x, mn.y, mx.z},
-                        {mn.x, mx.y, mx.z}, {mx.x, mx.y, mx.z},
-                    };
-                    for (const auto& c : corners)
-                    {
-                        const glm::vec3 w = glm::vec3(worldMat * glm::vec4(c, 1.0f));
-                        wmn = glm::min(wmn, w);
-                        wmx = glm::max(wmx, w);
-                    }
-                    addedMesh = true;
                 }
             }
-        }
-        if (!addedMesh)
+            if (!addedMesh)
+            {
+                wmn = glm::min(wmn, pXform->position);
+                wmx = glm::max(wmx, pXform->position);
+            }
+            any = true;
+        };
+
+        for (const auto e : entities)
         {
-            wmn = glm::min(wmn, pXform->position);
-            wmx = glm::max(wmx, pXform->position);
+            accumulate(e);
         }
-        any = true;
-    };
+        if (!any)
+        {
+            return false;
+        }
 
-    for (const auto e : entities) { accumulate(e); }
-    if (!any) { return false; }
+        const glm::vec3 center  = (wmn + wmx) * 0.5f;
+        const float     sphereR = glm::length(wmx - wmn) * 0.5f;
 
-    const glm::vec3 center  = (wmn + wmx) * 0.5f;
-    const float     sphereR = glm::length(wmx - wmn) * 0.5f;
+        ec.pivot = center;
 
-    ec.pivot = center;
-
-    if (sphereR > 1e-6f)
-    {
-        // 把包围球塞进垂直 FOV：sinHalfFov = R / dist → dist = R / sin(fov/2)。
-        // ×1.25 留边距。视口通常横宽（水平 FOV ≥ 垂直），垂直是约束方向。
-        const float halfFov = glm::radians(ec.fovYDegrees) * 0.5f;
-        const float sinHalf = std::max(0.01f, std::sin(halfFov));
-        ec.radius = (sphereR / sinHalf) * 1.25f;
-        // near/far 不再在此持久化——改由 BuildEditorCamera 每帧按 radius 推导
-        // （见该函数注释），故只需把 radius 调到能完整看到包围球的距离，跨
-        // 0.04 单位（Avocado）~ 165 单位（Duck）的 near/far bracket 自动跟随。
+        if (sphereR > 1e-6f)
+        {
+            // 把包围球塞进垂直 FOV：sinHalfFov = R / dist → dist = R / sin(fov/2)。
+            // ×1.25 留边距。视口通常横宽（水平 FOV ≥ 垂直），垂直是约束方向。
+            const float halfFov = glm::radians(ec.fovYDegrees) * 0.5f;
+            const float sinHalf = std::max(0.01f, std::sin(halfFov));
+            ec.radius           = (sphereR / sinHalf) * 1.25f;
+            // near/far 不再在此持久化——改由 BuildEditorCamera 每帧按 radius 推导
+            // （见该函数注释），故只需把 radius 调到能完整看到包围球的距离，跨
+            // 0.04 单位（Avocado）~ 165 单位（Duck）的 near/far bracket 自动跟随。
+        }
+        else
+        {
+            // 无几何（灯光 / 空 entity）：给个温和默认距离，不动 near/far。
+            ec.radius = std::max(ec.radius, 4.0f);
+        }
+        return true;
     }
-    else
-    {
-        // 无几何（灯光 / 空 entity）：给个温和默认距离，不动 near/far。
-        ec.radius = std::max(ec.radius, 4.0f);
-    }
-    return true;
-}
 
-}  // anonymous namespace
+} // anonymous namespace
 
 bool FrameSelectedCamera(EditorHost& host)
 {
     using namespace Orange::Engine;
     const Entity sel = host.selection.selectedEntity;
-    if (!sel.IsValid()) { return false; }
+    if (!sel.IsValid())
+    {
+        return false;
+    }
 
     // 多选 Frame（hierarchy gap 报告 §4 quick-win #3）：把整个选区（primary +
     // additional set）的世界 bounds 合并。单选时仅一个 entity → 与原行为一致。
@@ -346,23 +394,35 @@ bool FrameSelectedCamera(EditorHost& host)
 bool FrameAllCamera(EditorHost& host)
 {
     using namespace Orange::Engine;
-    if (host.scene.pWorld == nullptr) { return false; }
+    if (host.scene.pWorld == nullptr)
+    {
+        return false;
+    }
 
     // 全场景 Frame（Home 键 / View 菜单）：合并所有带 Transform 的 entity 世界
     // bounds（有 mesh 的算世界 AABB、无 mesh 的算位置点），把相机拉到能看全场景
     // 的距离。空场景 → false。对齐 Unity/Unreal "Frame All / Home"。
     std::vector<Entity> ents;
-    auto view = host.scene.pWorld->Registry()
+    auto                view = host.scene.pWorld->Registry()
                     .view<Orange::Engine::Scene::TransformComponent>();
-    for (auto e : view) { ents.push_back(World::FromEntt(e)); }
+    for (auto e : view)
+    {
+        ents.push_back(World::FromEntt(e));
+    }
     return FrameEntitiesCamera(host, ents);
 }
 
 bool FrameEntityCamera(EditorHost& host, Orange::Engine::Entity entity)
 {
     using namespace Orange::Engine;
-    if (host.scene.pWorld == nullptr || !entity.IsValid()) { return false; }
-    if (!host.scene.pWorld->IsValid(entity)) { return false; }
+    if (host.scene.pWorld == nullptr || !entity.IsValid())
+    {
+        return false;
+    }
+    if (!host.scene.pWorld->IsValid(entity))
+    {
+        return false;
+    }
     // 单 entity 走与 FrameSelectedCamera 完全相同的 FrameEntitiesCamera 路径——
     // 不读 / 不改 selection。
     const std::vector<Entity> ents{entity};

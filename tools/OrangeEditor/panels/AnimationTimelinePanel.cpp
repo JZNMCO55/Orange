@@ -59,409 +59,485 @@
 namespace
 {
 
-namespace Anim = Orange::Engine::Animation;
-namespace Theme = Orange::Editor::Theme;
+    namespace Anim  = Orange::Engine::Animation;
+    namespace Theme = Orange::Editor::Theme;
 
-using Anim::AnimationClip;
-using Anim::AnimationEvent;
-using Anim::AnimationTrack;
-using Anim::ClipAnimator;
-using Anim::Keyframe;
+    using Anim::AnimationClip;
+    using Anim::AnimationEvent;
+    using Anim::AnimationTrack;
+    using Anim::ClipAnimator;
+    using Anim::Keyframe;
 
-// ---- 几何常量（派生自字号 / content region，非 hardcode 像素字面量）------
-// 行高 / 关键帧菱形半径 / 命中容差都按当前字号缩放，跟随 DPI scale，避免
-// 写死像素（与 lint SetNextItemWidth 像素字面量规则同源纪律：用语义量推导）。
-float RowHeight()
-{
-    // 1.8 倍正文行高：留出菱形 + 上下 padding。GetTextLineHeightWithSpacing
-    // 已含 ImGui item spacing，按 DPI 缩放。
-    return ImGui::GetTextLineHeightWithSpacing() * 1.8f;
-}
-
-float KeyRadius()
-{
-    // 关键帧菱形半径：约 0.3 个字高，clamp 出一个不至于太小的下界。
-    return ImGui::GetFontSize() * 0.32f;
-}
-
-float HitRadius()
-{
-    // 命中容差略大于绘制半径，便于点中（与 ColliderVertexEdit 同款手法）。
-    return KeyRadius() * 1.8f;
-}
-
-// 左侧轨道标签列宽——按一段示意文本宽度派生（禁像素字面量；与 Console
-// 面板用 CalcTextSize 派生列宽同款）。
-float LabelColumnWidth()
-{
-    return ImGui::CalcTextSize("position.uniform  ").x;
-}
-
-// 把 clip 时间 t（秒）映射到时间轴区域内的屏幕 x 像素。
-float TimeToScreenX(float t, float trackX0, float trackW, float duration)
-{
-    if (duration <= 0.0f) { return trackX0; }
-    const float u = std::clamp(t / duration, 0.0f, 1.0f);
-    return trackX0 + u * trackW;
-}
-
-// 反映射：时间轴区域内屏幕 x → clip 时间（秒），clamp 到 [0,duration]。
-float ScreenXToTime(float screenX, float trackX0, float trackW, float duration)
-{
-    if (trackW <= 0.0f || duration <= 0.0f) { return 0.0f; }
-    const float u = std::clamp((screenX - trackX0) / trackW, 0.0f, 1.0f);
-    return u * duration;
-}
-
-// 取当前选中实体的 ClipAnimator（仅 backend=="clip" 时非空）。任一环空返回 nullptr。
-ClipAnimator* ResolveSelectedClipAnimator(EditorHost& host)
-{
-    using AC = Anim::AnimatorComponent;
-    auto* pWorld = host.scene.pWorld.get();
-    if (pWorld == nullptr) { return nullptr; }
-    const Orange::Engine::Entity e = host.selection.selectedEntity;
-    if (!e.IsValid() || !pWorld->IsValid(e)) { return nullptr; }
-    auto* ac = pWorld->GetComponent<AC>(e);
-    if (ac == nullptr || !ac->animator) { return nullptr; }
-    return dynamic_cast<ClipAnimator*>(ac->animator.get());
-}
-
-// timeline 面板的 per-frame 选中态（哪条轨 / 哪个 key 被选 + 拖动状态）。
-// 纯 view 态，挂 file-scope static——单一面板单一实例，不序列化、不跨实体
-// 持久（切实体时 owner 不同自然失效，下面用 owner entity 校验）。
-struct TimelineSelection
-{
-    Orange::Engine::Entity owner = Orange::Engine::Entity::Invalid();
-    // 选中的 keyframe：trackIndex / keyIndex（kInvalid = 无选中）。
-    std::size_t selTrack = static_cast<std::size_t>(-1);
-    std::size_t selKey   = static_cast<std::size_t>(-1);
-    // 选中的事件 index（kInvalid = 无选中）。
-    std::size_t selEvent = static_cast<std::size_t>(-1);
-    // 正在拖动的 key（拖动期间用稳定 merge key 合并命令）。
-    bool        draggingKey   = false;
-    std::size_t dragTrack     = static_cast<std::size_t>(-1);
-    std::size_t dragKey       = static_cast<std::size_t>(-1);
-    // 正在拖动的事件 marker。
-    bool        draggingEvent = false;
-    std::size_t dragEventIdx  = static_cast<std::size_t>(-1);
-    // 单调递增的拖动会话 id：每次开始拖 key / event 自增一次，作命令 merge key
-    // 的稳定后缀。不能用 dragKey/dragEventIdx 作 merge key——它们在拖动中会因
-    // 升序重排而变（同一次拖动跨帧 key 不再合并），且 track-only 的旧 merge key
-    // 会把"同一轨先后拖两个不同 key"误并成一条 Undo（bug-hunt 发现）。会话 id
-    // 在一次拖动内稳定、跨拖动唯一，既能合并单次拖动的逐帧命令、又能区分两次拖动。
-    std::uint64_t dragSession  = 0;
-
-    void ResetIfOwnerChanged(Orange::Engine::Entity e)
+    // ---- 几何常量（派生自字号 / content region，非 hardcode 像素字面量）------
+    // 行高 / 关键帧菱形半径 / 命中容差都按当前字号缩放，跟随 DPI scale，避免
+    // 写死像素（与 lint SetNextItemWidth 像素字面量规则同源纪律：用语义量推导）。
+    float RowHeight()
     {
-        if (owner != e)
+        // 1.8 倍正文行高：留出菱形 + 上下 padding。GetTextLineHeightWithSpacing
+        // 已含 ImGui item spacing，按 DPI 缩放。
+        return ImGui::GetTextLineHeightWithSpacing() * 1.8f;
+    }
+
+    float KeyRadius()
+    {
+        // 关键帧菱形半径：约 0.3 个字高，clamp 出一个不至于太小的下界。
+        return ImGui::GetFontSize() * 0.32f;
+    }
+
+    float HitRadius()
+    {
+        // 命中容差略大于绘制半径，便于点中（与 ColliderVertexEdit 同款手法）。
+        return KeyRadius() * 1.8f;
+    }
+
+    // 左侧轨道标签列宽——按一段示意文本宽度派生（禁像素字面量；与 Console
+    // 面板用 CalcTextSize 派生列宽同款）。
+    float LabelColumnWidth()
+    {
+        return ImGui::CalcTextSize("position.uniform  ").x;
+    }
+
+    // 把 clip 时间 t（秒）映射到时间轴区域内的屏幕 x 像素。
+    float TimeToScreenX(float t, float trackX0, float trackW, float duration)
+    {
+        if (duration <= 0.0f)
         {
-            *this = TimelineSelection{};
-            owner = e;
+            return trackX0;
         }
+        const float u = std::clamp(t / duration, 0.0f, 1.0f);
+        return trackX0 + u * trackW;
     }
-    void ClearKeySel()
+
+    // 反映射：时间轴区域内屏幕 x → clip 时间（秒），clamp 到 [0,duration]。
+    float ScreenXToTime(float screenX, float trackX0, float trackW, float duration)
     {
-        selTrack = selKey = static_cast<std::size_t>(-1);
-    }
-    void ClearEventSel() { selEvent = static_cast<std::size_t>(-1); }
-};
-
-TimelineSelection sTimelineSel;
-constexpr std::size_t kInvalidIdx = static_cast<std::size_t>(-1);
-
-// 面板视图模式：dopesheet（key 时间编辑）vs curve（key 值/缓动编辑，B2.4）。
-// transport 行的切换按钮在两者间切，curve 模式复用同一选中实体 / track / 命令栈。
-enum class TimelineMode
-{
-    Dopesheet,
-    Curve,
-};
-
-TimelineMode sTimelineMode = TimelineMode::Dopesheet;
-
-// curve 模式专属拖动态：正在拖某 key 的哪个 Bezier 切线手柄。两套句柄
-// （out = 控制本 key 出发段的缓动起手柄；in = 控制落到本 key 的段的收手柄）。
-enum class CurveHandle
-{
-    None,
-    Out,  // k.outTangent（从本 key (0,0) 出发的控制柄 c1）
-    In,   // k.inTangent（落到本 key (1,1) 的控制柄 c2 偏移）
-};
-
-struct CurveDragState
-{
-    bool        dragging = false;
-    std::size_t track    = kInvalidIdx;
-    std::size_t key      = kInvalidIdx;
-    CurveHandle handle   = CurveHandle::None;
-};
-
-CurveDragState sCurveDrag;
-
-// 提交一次 clip 编辑：拷 oldClip→在 newClip 上已被调用方改好→RecomputeDuration
-// → 压 SetAnimationClipCommand。mergeKey 决定是否与后续命令合并（拖动用稳定
-// key，离散编辑用唯一 key），label 是 Undo 菜单展示名。
-void PushClipEdit(EditorHost& host, ClipAnimator& clip, AnimationClip newClip,
-                  std::string mergeKey, std::string label)
-{
-    AnimationClip oldClip = clip.Clip();  // 当前快照（do/undo 对称基线）
-    Anim::RecomputeClipDuration(newClip);
-    host.cmdStack.Push(std::make_unique<SetAnimationClipCommand>(
-        host, host.selection.selectedEntity, std::move(oldClip),
-        std::move(newClip), std::move(mergeKey), std::move(label)));
-}
-
-// 空态提示：无选中 / 选中实体没有 clip backend 的友好提示。
-void DrawEmptyState(EditorHost& host)
-{
-    if (!host.selection.selectedEntity.IsValid())
-    {
-        ImGui::TextDisabled("未选中实体。");
-        ImGui::TextDisabled("在 Hierarchy / Scene 选中带 Animator(Clip) 的实体后，"
-                            "此处显示其动画时间轴。");
-        return;
-    }
-    ImGui::TextDisabled("选中实体没有 clip 动画后端。");
-    ImGui::TextDisabled("给它 Add Component → Animator(Clip)，并在 Inspector "
-                        "引用一个 .anim 资产或直接在此打键创作。");
-}
-
-// 顶部 transport 行：▶/⏸ 预览（复用 host.animPreview）+ loop + speed + 当前
-// 时间 / 总长 readout。返回当前 duration（供下方布局用）。
-float DrawTransportRow(EditorHost& host, ClipAnimator& clip)
-{
-    const Orange::Engine::Entity e = host.selection.selectedEntity;
-    const bool canPreview = (host.scene.playState == PlayState::Edit);
-
-    const bool isPreviewTarget =
-        host.animPreview.previewEntity.IsValid()
-        && host.animPreview.previewEntity == e;
-    const bool isPlaying = isPreviewTarget && host.animPreview.previewPlaying;
-
-    ImGui::BeginDisabled(!canPreview);
-
-    // ▶：把预览指向本 entity + 启动（复用 B2.6——EditorRenderLayer Edit 模式
-    // OnUpdate 据 previewPlaying 每帧 Tick 单 animator，不在此另起 tick 路径）。
-    if (ImGui::Button(isPlaying ? Theme::Icon::GetPause() : Theme::Icon::GetPlay()))
-    {
-        if (isPlaying)
+        if (trackW <= 0.0f || duration <= 0.0f)
         {
-            clip.Pause();
-            if (isPreviewTarget) { host.animPreview.previewPlaying = false; }
+            return 0.0f;
         }
-        else
+        const float u = std::clamp((screenX - trackX0) / trackW, 0.0f, 1.0f);
+        return u * duration;
+    }
+
+    // 取当前选中实体的 ClipAnimator（仅 backend=="clip" 时非空）。任一环空返回 nullptr。
+    ClipAnimator* ResolveSelectedClipAnimator(EditorHost& host)
+    {
+        using AC     = Anim::AnimatorComponent;
+        auto* pWorld = host.scene.pWorld.get();
+        if (pWorld == nullptr)
         {
-            host.animPreview.previewEntity  = e;
-            host.animPreview.previewPlaying = true;
-            clip.Play();
+            return nullptr;
         }
-    }
-    ImGui::SameLine();
-    // ⏹ Stop：归位 t0 + 停预览（与 ▶ 区分；Pause 留 pose、Stop 回起点）。
-    if (ImGui::Button(Theme::Icon::GetStop()))
-    {
-        clip.Stop();  // mPlaying=false + elapsed=0 + 立即应用 t0 pose
-        if (isPreviewTarget) { host.animPreview.previewPlaying = false; }
-    }
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    // loop：直接桥接 ClipAnimator（与 Inspector loop checkbox 同语义）。
-    bool loop = clip.IsLooping();
-    if (ImGui::Checkbox("Loop", &loop)) { clip.SetLoop(loop); }
-
-    ImGui::SameLine();
-    // speed：预览速率（不改 clip 数据，不进命令栈——纯 runtime 倍率）。
-    float speed = clip.Speed();
-    ImGui::SetNextItemWidth(ImGui::CalcTextSize("0.000x").x * 2.0f);
-    if (ImGui::DragFloat("##anim_speed", &speed, 0.01f, -4.0f, 4.0f, "%.2fx"))
-    {
-        clip.SetSpeed(speed);
+        const Orange::Engine::Entity e = host.selection.selectedEntity;
+        if (!e.IsValid() || !pWorld->IsValid(e))
+        {
+            return nullptr;
+        }
+        auto* ac = pWorld->GetComponent<AC>(e);
+        if (ac == nullptr || !ac->animator)
+        {
+            return nullptr;
+        }
+        return dynamic_cast<ClipAnimator*>(ac->animator.get());
     }
 
-    const float duration = Anim::ComputeClipDuration(clip.Clip());
-    ImGui::SameLine();
-    ImGui::TextDisabled("t = %.3fs / %.3fs", clip.ElapsedSeconds(), duration);
-
-    // 视图模式切换：Dopesheet（key 时间）↔ Curve（key 值 / 缓动，B2.4）。同一选中
-    // 实体 / track / 命令栈，仅换可视化与编辑维度。
-    ImGui::SameLine();
-    if (ImGui::Button(sTimelineMode == TimelineMode::Dopesheet ? "Curve >" : "< Dopesheet"))
+    // timeline 面板的 per-frame 选中态（哪条轨 / 哪个 key 被选 + 拖动状态）。
+    // 纯 view 态，挂 file-scope static——单一面板单一实例，不序列化、不跨实体
+    // 持久（切实体时 owner 不同自然失效，下面用 owner entity 校验）。
+    struct TimelineSelection
     {
-        sTimelineMode = (sTimelineMode == TimelineMode::Dopesheet) ? TimelineMode::Curve
-                                                                   : TimelineMode::Dopesheet;
+        Orange::Engine::Entity owner = Orange::Engine::Entity::Invalid();
+        // 选中的 keyframe：trackIndex / keyIndex（kInvalid = 无选中）。
+        std::size_t selTrack = static_cast<std::size_t>(-1);
+        std::size_t selKey   = static_cast<std::size_t>(-1);
+        // 选中的事件 index（kInvalid = 无选中）。
+        std::size_t selEvent = static_cast<std::size_t>(-1);
+        // 正在拖动的 key（拖动期间用稳定 merge key 合并命令）。
+        bool        draggingKey = false;
+        std::size_t dragTrack   = static_cast<std::size_t>(-1);
+        std::size_t dragKey     = static_cast<std::size_t>(-1);
+        // 正在拖动的事件 marker。
+        bool        draggingEvent = false;
+        std::size_t dragEventIdx  = static_cast<std::size_t>(-1);
+        // 单调递增的拖动会话 id：每次开始拖 key / event 自增一次，作命令 merge key
+        // 的稳定后缀。不能用 dragKey/dragEventIdx 作 merge key——它们在拖动中会因
+        // 升序重排而变（同一次拖动跨帧 key 不再合并），且 track-only 的旧 merge key
+        // 会把"同一轨先后拖两个不同 key"误并成一条 Undo（bug-hunt 发现）。会话 id
+        // 在一次拖动内稳定、跨拖动唯一，既能合并单次拖动的逐帧命令、又能区分两次拖动。
+        std::uint64_t dragSession = 0;
+
+        void ResetIfOwnerChanged(Orange::Engine::Entity e)
+        {
+            if (owner != e)
+            {
+                *this = TimelineSelection{};
+                owner = e;
+            }
+        }
+        void ClearKeySel()
+        {
+            selTrack = selKey = static_cast<std::size_t>(-1);
+        }
+        void ClearEventSel() { selEvent = static_cast<std::size_t>(-1); }
+    };
+
+    TimelineSelection     sTimelineSel;
+    constexpr std::size_t kInvalidIdx = static_cast<std::size_t>(-1);
+
+    // 面板视图模式：dopesheet（key 时间编辑）vs curve（key 值/缓动编辑，B2.4）。
+    // transport 行的切换按钮在两者间切，curve 模式复用同一选中实体 / track / 命令栈。
+    enum class TimelineMode
+    {
+        Dopesheet,
+        Curve,
+    };
+
+    TimelineMode sTimelineMode = TimelineMode::Dopesheet;
+
+    // curve 模式专属拖动态：正在拖某 key 的哪个 Bezier 切线手柄。两套句柄
+    // （out = 控制本 key 出发段的缓动起手柄；in = 控制落到本 key 的段的收手柄）。
+    enum class CurveHandle
+    {
+        None,
+        Out, // k.outTangent（从本 key (0,0) 出发的控制柄 c1）
+        In,  // k.inTangent（落到本 key (1,1) 的控制柄 c2 偏移）
+    };
+
+    struct CurveDragState
+    {
+        bool        dragging = false;
+        std::size_t track    = kInvalidIdx;
+        std::size_t key      = kInvalidIdx;
+        CurveHandle handle   = CurveHandle::None;
+    };
+
+    CurveDragState sCurveDrag;
+
+    // 提交一次 clip 编辑：拷 oldClip→在 newClip 上已被调用方改好→RecomputeDuration
+    // → 压 SetAnimationClipCommand。mergeKey 决定是否与后续命令合并（拖动用稳定
+    // key，离散编辑用唯一 key），label 是 Undo 菜单展示名。
+    void PushClipEdit(EditorHost& host, ClipAnimator& clip, AnimationClip newClip,
+                      std::string mergeKey, std::string label)
+    {
+        AnimationClip oldClip = clip.Clip(); // 当前快照（do/undo 对称基线）
+        Anim::RecomputeClipDuration(newClip);
+        host.cmdStack.Push(std::make_unique<SetAnimationClipCommand>(
+            host, host.selection.selectedEntity, std::move(oldClip),
+            std::move(newClip), std::move(mergeKey), std::move(label)));
     }
 
-    if (!canPreview)
+    // 空态提示：无选中 / 选中实体没有 clip backend 的友好提示。
+    void DrawEmptyState(EditorHost& host)
     {
-        ImGui::TextDisabled("(预览 / scrub 仅 Edit 模式可用；Play 模式由全量 tick 驱动)");
+        if (!host.selection.selectedEntity.IsValid())
+        {
+            ImGui::TextDisabled("未选中实体。");
+            ImGui::TextDisabled("在 Hierarchy / Scene 选中带 Animator(Clip) 的实体后，"
+                                "此处显示其动画时间轴。");
+            return;
+        }
+        ImGui::TextDisabled("选中实体没有 clip 动画后端。");
+        ImGui::TextDisabled("给它 Add Component → Animator(Clip)，并在 Inspector "
+                            "引用一个 .anim 资产或直接在此打键创作。");
     }
-    return duration;
-}
 
-// 当前 playhead 时刻对某 track 打键：采当前 SampleTrack 值（保持视觉连续——
-// 新键值 = 当前曲线在该时刻的值）→ UpsertKeyframe → 压命令栈（离散编辑、唯一 key）。
-void KeyTrackAtPlayhead(EditorHost& host, ClipAnimator& clip,
-                        const AnimationTrack& track)
-{
-    const float t = clip.ElapsedSeconds();
-    AnimationClip newClip = clip.Clip();
-    AnimationTrack* tr = Anim::FindTrack(newClip, track.targetName);
-    if (tr == nullptr) { return; }
-
-    Keyframe key;
-    key.time   = t;
-    key.value  = Anim::SampleTrack(*tr, t);  // 当前时刻曲线值，打键不跳变
-    key.interp = Anim::InterpMode::Linear;
-    Anim::UpsertKeyframe(newClip, track.targetName, tr->valueType, key);
-
-    char mergeKey[128];
-    std::snprintf(mergeKey, sizeof(mergeKey), "anim_key_insert:%s",
-                  track.targetName.c_str());
-    PushClipEdit(host, clip, std::move(newClip), mergeKey, "Insert Keyframe");
-}
-
-// 删除选中 key（离散编辑、唯一 key）。
-void DeleteSelectedKey(EditorHost& host, ClipAnimator& clip)
-{
-    if (sTimelineSel.selTrack == kInvalidIdx || sTimelineSel.selKey == kInvalidIdx) { return; }
-    AnimationClip newClip = clip.Clip();
-    if (sTimelineSel.selTrack >= newClip.tracks.size()) { return; }
-    AnimationTrack& tr = newClip.tracks[sTimelineSel.selTrack];
-    if (!Anim::RemoveKeyframe(tr, sTimelineSel.selKey)) { return; }
-    PushClipEdit(host, clip, std::move(newClip), "anim_key_delete", "Delete Keyframe");
-    sTimelineSel.ClearKeySel();
-}
-
-// ---- 曲线编辑器（B2.4）几何 + 切线手柄数学 ------------------------------
-//
-// 取 track 当前用于绘制 / 编辑的标量分量索引（0=x / 1=y / 2=z / 3=w）。多分量
-// track（Vec2/3/4）目前画首个驱动分量的曲线作主曲线 + 编辑它的缓动（spec 现状：
-// track 是单值序列就画单曲线；多分量共享同一标量时序缓动，故编辑任一分量的切线即
-// 改整段时序）。Float track 恒取 .x。切线（inTangent/outTangent）是整段共享的 2D
-// 控制柄，与具体 value 分量无关——值方向 .y 抬升按"被绘制分量"的值跨度可视化。
-int TrackPrimaryComponent(const AnimationTrack& tr)
-{
-    // 选值跨度最大的标量分量作主曲线显示。rotation.euler 这类多分量 track 真实动画
-    // 常落在 .y（如绕 Y 自旋 0→360），恒返回 0 会画出 .x 的平直线（无意义、误导）。
-    // Float track（position.y 等）只有 .x 承载值（.y/.z/.w 恒 0），自然选回 0。切线是
-    // 整段共享的 2D 控制柄（编辑任一分量即改共享时序缓动），故按"最有信息量的分量"
-    // 显示不破坏编辑语义。
-    if (tr.keys.size() < 2) { return 0; }
-    int   best      = 0;
-    float bestRange = -1.0f;
-    for (int c = 0; c < 4; ++c)
+    // 顶部 transport 行：▶/⏸ 预览（复用 host.animPreview）+ loop + speed + 当前
+    // 时间 / 总长 readout。返回当前 duration（供下方布局用）。
+    float DrawTransportRow(EditorHost& host, ClipAnimator& clip)
     {
-        float lo = tr.keys.front().value[c];
+        const Orange::Engine::Entity e          = host.selection.selectedEntity;
+        const bool                   canPreview = (host.scene.playState == PlayState::Edit);
+
+        const bool isPreviewTarget =
+            host.animPreview.previewEntity.IsValid() && host.animPreview.previewEntity == e;
+        const bool isPlaying = isPreviewTarget && host.animPreview.previewPlaying;
+
+        ImGui::BeginDisabled(!canPreview);
+
+        // ▶：把预览指向本 entity + 启动（复用 B2.6——EditorRenderLayer Edit 模式
+        // OnUpdate 据 previewPlaying 每帧 Tick 单 animator，不在此另起 tick 路径）。
+        if (ImGui::Button(isPlaying ? Theme::Icon::GetPause() : Theme::Icon::GetPlay()))
+        {
+            if (isPlaying)
+            {
+                clip.Pause();
+                if (isPreviewTarget)
+                {
+                    host.animPreview.previewPlaying = false;
+                }
+            }
+            else
+            {
+                host.animPreview.previewEntity  = e;
+                host.animPreview.previewPlaying = true;
+                clip.Play();
+            }
+        }
+        ImGui::SameLine();
+        // ⏹ Stop：归位 t0 + 停预览（与 ▶ 区分；Pause 留 pose、Stop 回起点）。
+        if (ImGui::Button(Theme::Icon::GetStop()))
+        {
+            clip.Stop(); // mPlaying=false + elapsed=0 + 立即应用 t0 pose
+            if (isPreviewTarget)
+            {
+                host.animPreview.previewPlaying = false;
+            }
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        // loop：直接桥接 ClipAnimator（与 Inspector loop checkbox 同语义）。
+        bool loop = clip.IsLooping();
+        if (ImGui::Checkbox("Loop", &loop))
+        {
+            clip.SetLoop(loop);
+        }
+
+        ImGui::SameLine();
+        // speed：预览速率（不改 clip 数据，不进命令栈——纯 runtime 倍率）。
+        float speed = clip.Speed();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize("0.000x").x * 2.0f);
+        if (ImGui::DragFloat("##anim_speed", &speed, 0.01f, -4.0f, 4.0f, "%.2fx"))
+        {
+            clip.SetSpeed(speed);
+        }
+
+        const float duration = Anim::ComputeClipDuration(clip.Clip());
+        ImGui::SameLine();
+        ImGui::TextDisabled("t = %.3fs / %.3fs", clip.ElapsedSeconds(), duration);
+
+        // 视图模式切换：Dopesheet（key 时间）↔ Curve（key 值 / 缓动，B2.4）。同一选中
+        // 实体 / track / 命令栈，仅换可视化与编辑维度。
+        ImGui::SameLine();
+        if (ImGui::Button(sTimelineMode == TimelineMode::Dopesheet ? "Curve >" : "< Dopesheet"))
+        {
+            sTimelineMode = (sTimelineMode == TimelineMode::Dopesheet) ? TimelineMode::Curve
+                                                                       : TimelineMode::Dopesheet;
+        }
+
+        if (!canPreview)
+        {
+            ImGui::TextDisabled("(预览 / scrub 仅 Edit 模式可用；Play 模式由全量 tick 驱动)");
+        }
+        return duration;
+    }
+
+    // 当前 playhead 时刻对某 track 打键：采当前 SampleTrack 值（保持视觉连续——
+    // 新键值 = 当前曲线在该时刻的值）→ UpsertKeyframe → 压命令栈（离散编辑、唯一 key）。
+    void KeyTrackAtPlayhead(EditorHost& host, ClipAnimator& clip,
+                            const AnimationTrack& track)
+    {
+        const float     t       = clip.ElapsedSeconds();
+        AnimationClip   newClip = clip.Clip();
+        AnimationTrack* tr      = Anim::FindTrack(newClip, track.targetName);
+        if (tr == nullptr)
+        {
+            return;
+        }
+
+        Keyframe key;
+        key.time   = t;
+        key.value  = Anim::SampleTrack(*tr, t); // 当前时刻曲线值，打键不跳变
+        key.interp = Anim::InterpMode::Linear;
+        Anim::UpsertKeyframe(newClip, track.targetName, tr->valueType, key);
+
+        char mergeKey[128];
+        std::snprintf(mergeKey, sizeof(mergeKey), "anim_key_insert:%s",
+                      track.targetName.c_str());
+        PushClipEdit(host, clip, std::move(newClip), mergeKey, "Insert Keyframe");
+    }
+
+    // 删除选中 key（离散编辑、唯一 key）。
+    void DeleteSelectedKey(EditorHost& host, ClipAnimator& clip)
+    {
+        if (sTimelineSel.selTrack == kInvalidIdx || sTimelineSel.selKey == kInvalidIdx)
+        {
+            return;
+        }
+        AnimationClip newClip = clip.Clip();
+        if (sTimelineSel.selTrack >= newClip.tracks.size())
+        {
+            return;
+        }
+        AnimationTrack& tr = newClip.tracks[sTimelineSel.selTrack];
+        if (!Anim::RemoveKeyframe(tr, sTimelineSel.selKey))
+        {
+            return;
+        }
+        PushClipEdit(host, clip, std::move(newClip), "anim_key_delete", "Delete Keyframe");
+        sTimelineSel.ClearKeySel();
+    }
+
+    // ---- 曲线编辑器（B2.4）几何 + 切线手柄数学 ------------------------------
+    //
+    // 取 track 当前用于绘制 / 编辑的标量分量索引（0=x / 1=y / 2=z / 3=w）。多分量
+    // track（Vec2/3/4）目前画首个驱动分量的曲线作主曲线 + 编辑它的缓动（spec 现状：
+    // track 是单值序列就画单曲线；多分量共享同一标量时序缓动，故编辑任一分量的切线即
+    // 改整段时序）。Float track 恒取 .x。切线（inTangent/outTangent）是整段共享的 2D
+    // 控制柄，与具体 value 分量无关——值方向 .y 抬升按"被绘制分量"的值跨度可视化。
+    int TrackPrimaryComponent(const AnimationTrack& tr)
+    {
+        // 选值跨度最大的标量分量作主曲线显示。rotation.euler 这类多分量 track 真实动画
+        // 常落在 .y（如绕 Y 自旋 0→360），恒返回 0 会画出 .x 的平直线（无意义、误导）。
+        // Float track（position.y 等）只有 .x 承载值（.y/.z/.w 恒 0），自然选回 0。切线是
+        // 整段共享的 2D 控制柄（编辑任一分量即改共享时序缓动），故按"最有信息量的分量"
+        // 显示不破坏编辑语义。
+        if (tr.keys.size() < 2)
+        {
+            return 0;
+        }
+        int   best      = 0;
+        float bestRange = -1.0f;
+        for (int c = 0; c < 4; ++c)
+        {
+            float lo = tr.keys.front().value[c];
+            float hi = lo;
+            for (const Keyframe& k : tr.keys)
+            {
+                lo = std::min(lo, k.value[c]);
+                hi = std::max(hi, k.value[c]);
+            }
+            const float range = hi - lo;
+            if (range > bestRange)
+            {
+                bestRange = range;
+                best      = c;
+            }
+        }
+        return best;
+    }
+
+    // 取 track 的值范围（被绘制分量在所有 key 上的 min/max），用于纵轴映射。空 / 单值
+    // 退化时给一个对称小区间避免除零。pad 留出上下边距让曲线不贴边。
+    void TrackValueRange(const AnimationTrack& tr, int comp, float& outMin, float& outMax)
+    {
+        if (tr.keys.empty())
+        {
+            outMin = -1.0f;
+            outMax = 1.0f;
+            return;
+        }
+        float lo = tr.keys.front().value[comp];
         float hi = lo;
         for (const Keyframe& k : tr.keys)
         {
-            lo = std::min(lo, k.value[c]);
-            hi = std::max(hi, k.value[c]);
+            lo = std::min(lo, k.value[comp]);
+            hi = std::max(hi, k.value[comp]);
         }
-        const float range = hi - lo;
-        if (range > bestRange) { bestRange = range; best = c; }
+        // 还要把 Bezier 值方向 overshoot（切线 .y 超出 [0,1]）的控制柄纳入范围，否则
+        // overshoot 手柄会画到视图外拖不到。逐相邻段把控制点的值估进 min/max。
+        for (std::size_t i = 0; i + 1 < tr.keys.size(); ++i)
+        {
+            const Keyframe& k0 = tr.keys[i];
+            const Keyframe& k1 = tr.keys[i + 1];
+            if (k0.interp != Anim::InterpMode::Bezier)
+            {
+                continue;
+            }
+            const float span = k1.value[comp] - k0.value[comp];
+            const float c1   = k0.value[comp] + k0.outTangent.y * span; // out 手柄值
+            const float c2   = k1.value[comp] + k1.inTangent.y * span;  // in 手柄值
+            lo               = std::min({lo, c1, c2});
+            hi               = std::max({hi, c1, c2});
+        }
+        if (hi - lo < 1e-4f)
+        {
+            lo -= 1.0f;
+            hi += 1.0f;
+        } // 平直曲线给个对称区间
+        const float pad = (hi - lo) * 0.12f;
+        outMin          = lo - pad;
+        outMax          = hi + pad;
     }
-    return best;
-}
 
-// 取 track 的值范围（被绘制分量在所有 key 上的 min/max），用于纵轴映射。空 / 单值
-// 退化时给一个对称小区间避免除零。pad 留出上下边距让曲线不贴边。
-void TrackValueRange(const AnimationTrack& tr, int comp, float& outMin, float& outMax)
-{
-    if (tr.keys.empty()) { outMin = -1.0f; outMax = 1.0f; return; }
-    float lo = tr.keys.front().value[comp];
-    float hi = lo;
-    for (const Keyframe& k : tr.keys)
+    // 值 → 屏幕 y：值大的在上方（y 小），按 [valMin,valMax] 线性映射到 [areaY1, areaY0]。
+    float ValueToScreenY(float v, float areaY0, float areaH, float valMin, float valMax)
     {
-        lo = std::min(lo, k.value[comp]);
-        hi = std::max(hi, k.value[comp]);
+        if (valMax - valMin < 1e-6f)
+        {
+            return areaY0 + areaH * 0.5f;
+        }
+        const float u = (v - valMin) / (valMax - valMin);
+        return areaY0 + (1.0f - std::clamp(u, -0.5f, 1.5f)) * areaH; // 留一点越界余量画 overshoot
     }
-    // 还要把 Bezier 值方向 overshoot（切线 .y 超出 [0,1]）的控制柄纳入范围，否则
-    // overshoot 手柄会画到视图外拖不到。逐相邻段把控制点的值估进 min/max。
-    for (std::size_t i = 0; i + 1 < tr.keys.size(); ++i)
+
+    // 反映射：屏幕 y → 值。
+    float ScreenYToValue(float y, float areaY0, float areaH, float valMin, float valMax)
     {
-        const Keyframe& k0 = tr.keys[i];
-        const Keyframe& k1 = tr.keys[i + 1];
-        if (k0.interp != Anim::InterpMode::Bezier) { continue; }
-        const float span = k1.value[comp] - k0.value[comp];
-        const float c1 = k0.value[comp] + k0.outTangent.y * span;  // out 手柄值
-        const float c2 = k1.value[comp] + k1.inTangent.y * span;   // in 手柄值
-        lo = std::min({lo, c1, c2});
-        hi = std::max({hi, c1, c2});
+        if (areaH <= 0.0f)
+        {
+            return valMin;
+        }
+        const float u = 1.0f - (y - areaY0) / areaH;
+        return valMin + u * (valMax - valMin);
     }
-    if (hi - lo < 1e-4f) { lo -= 1.0f; hi += 1.0f; }  // 平直曲线给个对称区间
-    const float pad = (hi - lo) * 0.12f;
-    outMin = lo - pad;
-    outMax = hi + pad;
-}
 
-// 值 → 屏幕 y：值大的在上方（y 小），按 [valMin,valMax] 线性映射到 [areaY1, areaY0]。
-float ValueToScreenY(float v, float areaY0, float areaH, float valMin, float valMax)
-{
-    if (valMax - valMin < 1e-6f) { return areaY0 + areaH * 0.5f; }
-    const float u = (v - valMin) / (valMax - valMin);
-    return areaY0 + (1.0f - std::clamp(u, -0.5f, 1.5f)) * areaH;  // 留一点越界余量画 overshoot
-}
+    // 把某 key 的 Bezier 切线手柄换算到屏幕坐标。约定（与 CubicBezierEase 一致）：
+    // 段 k0→k1 的单位方框 (0,0)=(k0.time,k0.value)、(1,1)=(k1.time,k1.value)；
+    //   out 手柄（k0 出发，控制点 c1 = k0.outTangent）：
+    //     time  = k0.time  + outTangent.x · (k1.time  - k0.time)
+    //     value = k0.value + outTangent.y · (k1.value - k0.value)
+    //   in 手柄（落到 k1，控制点 c2 = (1,1)+k1.inTangent）：
+    //     time  = k1.time  + inTangent.x · (k1.time  - k0.time)
+    //     value = k1.value + inTangent.y · (k1.value - k0.value)
+    // dt/dv 是该段的 time / value 跨度。返回手柄的 (time, value)。
+    struct HandleTV
+    {
+        float time;
+        float value;
+    };
 
-// 反映射：屏幕 y → 值。
-float ScreenYToValue(float y, float areaY0, float areaH, float valMin, float valMax)
-{
-    if (areaH <= 0.0f) { return valMin; }
-    const float u = 1.0f - (y - areaY0) / areaH;
-    return valMin + u * (valMax - valMin);
-}
+    HandleTV OutHandleTV(const Keyframe& k0, int comp, float dt, float dv)
+    {
+        return {k0.time + k0.outTangent.x * dt, k0.value[comp] + k0.outTangent.y * dv};
+    }
+    HandleTV InHandleTV(const Keyframe& k1, int comp, float dt, float dv)
+    {
+        return {k1.time + k1.inTangent.x * dt, k1.value[comp] + k1.inTangent.y * dv};
+    }
 
-// 把某 key 的 Bezier 切线手柄换算到屏幕坐标。约定（与 CubicBezierEase 一致）：
-// 段 k0→k1 的单位方框 (0,0)=(k0.time,k0.value)、(1,1)=(k1.time,k1.value)；
-//   out 手柄（k0 出发，控制点 c1 = k0.outTangent）：
-//     time  = k0.time  + outTangent.x · (k1.time  - k0.time)
-//     value = k0.value + outTangent.y · (k1.value - k0.value)
-//   in 手柄（落到 k1，控制点 c2 = (1,1)+k1.inTangent）：
-//     time  = k1.time  + inTangent.x · (k1.time  - k0.time)
-//     value = k1.value + inTangent.y · (k1.value - k0.value)
-// dt/dv 是该段的 time / value 跨度。返回手柄的 (time, value)。
-struct HandleTV { float time; float value; };
+    // 逆运算：把手柄落点 (time,value) 反推回切线 (x,y)。dt/dv 是段跨度。
+    // 时间方向 .x 由 CubicBezierEase 内部夹到 [0,1] 保 X 单调，这里也夹（out 取
+    // [0,1]、in 取 [-1,0]，与"in 指回前一帧"约定一致）；值方向 .y 不夹（允许 overshoot）。
+    // dt<=0（段退化）时不改 .x（除零保护）；dv≈0（值平直段）时不改 .y。
+    glm::vec2 SolveOutTangent(const Keyframe& k0, int comp, float handleTime, float handleValue,
+                              float dt, float dv)
+    {
+        glm::vec2 t = k0.outTangent;
+        if (dt > 1e-6f)
+        {
+            t.x = std::clamp((handleTime - k0.time) / dt, 0.0f, 1.0f);
+        }
+        if (std::fabs(dv) > 1e-6f)
+        {
+            t.y = (handleValue - k0.value[comp]) / dv;
+        }
+        return t;
+    }
+    glm::vec2 SolveInTangent(const Keyframe& k1, int comp, float handleTime, float handleValue,
+                             float dt, float dv)
+    {
+        glm::vec2 t = k1.inTangent;
+        if (dt > 1e-6f)
+        {
+            t.x = std::clamp((handleTime - k1.time) / dt, -1.0f, 0.0f);
+        }
+        if (std::fabs(dv) > 1e-6f)
+        {
+            t.y = (handleValue - k1.value[comp]) / dv;
+        }
+        return t;
+    }
 
-HandleTV OutHandleTV(const Keyframe& k0, int comp, float dt, float dv)
-{
-    return {k0.time + k0.outTangent.x * dt, k0.value[comp] + k0.outTangent.y * dv};
-}
-HandleTV InHandleTV(const Keyframe& k1, int comp, float dt, float dv)
-{
-    return {k1.time + k1.inTangent.x * dt, k1.value[comp] + k1.inTangent.y * dv};
-}
+    // 给 key 切到 Bezier 时一组合理的默认平滑切线（CSS ease-in-out 同款时序、值方向不
+    // 抬升）。这样右键切 Bezier 后曲线立刻有可拖的手柄而非退化成线性。
+    void AssignSmoothBezierDefault(Keyframe& k)
+    {
+        k.outTangent = glm::vec2(0.42f, 0.0f);
+        k.inTangent  = glm::vec2(-0.42f, 0.0f);
+    }
 
-// 逆运算：把手柄落点 (time,value) 反推回切线 (x,y)。dt/dv 是段跨度。
-// 时间方向 .x 由 CubicBezierEase 内部夹到 [0,1] 保 X 单调，这里也夹（out 取
-// [0,1]、in 取 [-1,0]，与"in 指回前一帧"约定一致）；值方向 .y 不夹（允许 overshoot）。
-// dt<=0（段退化）时不改 .x（除零保护）；dv≈0（值平直段）时不改 .y。
-glm::vec2 SolveOutTangent(const Keyframe& k0, int comp, float handleTime, float handleValue,
-                          float dt, float dv)
-{
-    glm::vec2 t = k0.outTangent;
-    if (dt > 1e-6f) { t.x = std::clamp((handleTime - k0.time) / dt, 0.0f, 1.0f); }
-    if (std::fabs(dv) > 1e-6f) { t.y = (handleValue - k0.value[comp]) / dv; }
-    return t;
-}
-glm::vec2 SolveInTangent(const Keyframe& k1, int comp, float handleTime, float handleValue,
-                         float dt, float dv)
-{
-    glm::vec2 t = k1.inTangent;
-    if (dt > 1e-6f) { t.x = std::clamp((handleTime - k1.time) / dt, -1.0f, 0.0f); }
-    if (std::fabs(dv) > 1e-6f) { t.y = (handleValue - k1.value[comp]) / dv; }
-    return t;
-}
-
-// 给 key 切到 Bezier 时一组合理的默认平滑切线（CSS ease-in-out 同款时序、值方向不
-// 抬升）。这样右键切 Bezier 后曲线立刻有可拖的手柄而非退化成线性。
-void AssignSmoothBezierDefault(Keyframe& k)
-{
-    k.outTangent = glm::vec2(0.42f, 0.0f);
-    k.inTangent  = glm::vec2(-0.42f, 0.0f);
-}
-
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // EditorRenderLayer::DrawAnimationPanel —— 面板入口
@@ -520,43 +596,43 @@ void EditorRenderLayer::DrawAnimationPanel()
     }
 
     // ---- 键盘快捷键：K 打选中轨道键 / Del 删选中 key（仅面板聚焦时）-------
-    const bool panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    const AnimationClip& curClip = clip.Clip();
+    const bool           panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    const AnimationClip& curClip      = clip.Clip();
 
     // ---- timeline 主体绘制 ------------------------------------------------
     // 用 ImDrawList 自绘标尺 + 轨道行 + 关键帧 + playhead，覆盖一个 InvisibleButton
     // 区域捕获点击 / 拖拽（与 ScenePanel / ColliderVertexEdit 自绘 + hit-test 同款）。
-    const float labelW   = LabelColumnWidth();
-    const ImVec2 avail    = ImGui::GetContentRegionAvail();
-    const float trackAreaW = std::max(avail.x - labelW, ImGui::GetFontSize() * 4.0f);
+    const float  labelW     = LabelColumnWidth();
+    const ImVec2 avail      = ImGui::GetContentRegionAvail();
+    const float  trackAreaW = std::max(avail.x - labelW, ImGui::GetFontSize() * 4.0f);
 
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImU32 colRuler     = ImGui::GetColorU32(Theme::Color::GetSeparator());
-    const ImU32 colRowBg      = ImGui::GetColorU32(Theme::Color::GetBackgroundSecondary());
-    const ImU32 colRowAltBg   = ImGui::GetColorU32(Theme::Color::GetControlBg());
-    const ImU32 colKey        = ImGui::GetColorU32(Theme::Color::GetTextSecondary());
-    const ImU32 colKeySel     = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
-    const ImU32 colPlayhead   = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
-    const ImU32 colEvent      = ImGui::GetColorU32(Theme::Color::GetAlertWarn());
-    const ImU32 colEventSel   = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
+    ImDrawList* dl          = ImGui::GetWindowDrawList();
+    const ImU32 colRuler    = ImGui::GetColorU32(Theme::Color::GetSeparator());
+    const ImU32 colRowBg    = ImGui::GetColorU32(Theme::Color::GetBackgroundSecondary());
+    const ImU32 colRowAltBg = ImGui::GetColorU32(Theme::Color::GetControlBg());
+    const ImU32 colKey      = ImGui::GetColorU32(Theme::Color::GetTextSecondary());
+    const ImU32 colKeySel   = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
+    const ImU32 colPlayhead = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
+    const ImU32 colEvent    = ImGui::GetColorU32(Theme::Color::GetAlertWarn());
+    const ImU32 colEventSel = ImGui::GetColorU32(Theme::Color::GetAccentPrimary());
 
-    const float rowH    = RowHeight();
-    const float keyR    = KeyRadius();
-    const float hitR    = HitRadius();
+    const float rowH = RowHeight();
+    const float keyR = KeyRadius();
+    const float hitR = HitRadius();
 
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const float trackX0 = origin.x + labelW;
+    const ImVec2 origin  = ImGui::GetCursorScreenPos();
+    const float  trackX0 = origin.x + labelW;
 
     // 事件 marker 行 + 标尺行高度。
-    const float rulerH  = rowH;       // 顶部时间标尺 + 事件 marker 共用一行
+    const float       rulerH     = rowH; // 顶部时间标尺 + 事件 marker 共用一行
     const std::size_t trackCount = curClip.tracks.size();
-    const float bodyH   = rulerH + rowH * static_cast<float>(std::max<std::size_t>(trackCount, 1));
+    const float       bodyH      = rulerH + rowH * static_cast<float>(std::max<std::size_t>(trackCount, 1));
 
     // 覆盖整块 timeline 的 InvisibleButton——吃掉 ImGui 默认 item 行为，自己解析
     // 点击落在哪条轨 / 哪个 key / 标尺。必须先于自绘调用，拿到 hovered/active。
     ImGui::InvisibleButton("##anim_timeline_canvas", ImVec2(avail.x, bodyH));
-    const bool canvasHovered = ImGui::IsItemHovered();
-    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const bool   canvasHovered = ImGui::IsItemHovered();
+    const ImVec2 mouse         = ImGui::GetIO().MousePos;
 
     // 背景：标尺行 + 各轨道行交替底色。
     dl->AddRectFilled(ImVec2(origin.x, origin.y),
@@ -592,11 +668,11 @@ void EditorRenderLayer::DrawAnimationPanel()
     // 命中半径内点击选中；选中后可拖动改 time / Del 删（在下方键盘段处理）。
     for (std::size_t ei = 0; ei < curClip.events.size(); ++ei)
     {
-        const AnimationEvent& ev = curClip.events[ei];
-        const float x = TimeToScreenX(ev.time, trackX0, trackAreaW, duration);
-        const float cy = origin.y + rulerH * 0.5f;
-        const bool selected = (sTimelineSel.selEvent == ei);
-        const ImU32 c = selected ? colEventSel : colEvent;
+        const AnimationEvent& ev       = curClip.events[ei];
+        const float           x        = TimeToScreenX(ev.time, trackX0, trackAreaW, duration);
+        const float           cy       = origin.y + rulerH * 0.5f;
+        const bool            selected = (sTimelineSel.selEvent == ei);
+        const ImU32           c        = selected ? colEventSel : colEvent;
         dl->AddTriangleFilled(ImVec2(x - keyR, cy - keyR),
                               ImVec2(x + keyR, cy - keyR),
                               ImVec2(x, cy + keyR), c);
@@ -609,9 +685,9 @@ void EditorRenderLayer::DrawAnimationPanel()
     // ---- 各轨道：标签 + 关键帧菱形 ---------------------------------------
     for (std::size_t ti = 0; ti < trackCount; ++ti)
     {
-        const AnimationTrack& tr = curClip.tracks[ti];
-        const float rowY  = origin.y + rulerH + rowH * static_cast<float>(ti);
-        const float keyCy = rowY + rowH * 0.5f;
+        const AnimationTrack& tr    = curClip.tracks[ti];
+        const float           rowY  = origin.y + rulerH + rowH * static_cast<float>(ti);
+        const float           keyCy = rowY + rowH * 0.5f;
 
         // 轨道标签（左列）——用 ImDrawList 直绘，不占 ImGui item（整块已是
         // InvisibleButton）。
@@ -622,9 +698,9 @@ void EditorRenderLayer::DrawAnimationPanel()
         // 关键帧菱形。
         for (std::size_t ki = 0; ki < tr.keys.size(); ++ki)
         {
-            const float kx = TimeToScreenX(tr.keys[ki].time, trackX0, trackAreaW, duration);
-            const bool selected = (sTimelineSel.selTrack == ti && sTimelineSel.selKey == ki);
-            const ImU32 c = selected ? colKeySel : colKey;
+            const float kx       = TimeToScreenX(tr.keys[ki].time, trackX0, trackAreaW, duration);
+            const bool  selected = (sTimelineSel.selTrack == ti && sTimelineSel.selKey == ki);
+            const ImU32 c        = selected ? colKeySel : colKey;
             // 菱形（45° 方块）：四个顶点。
             dl->AddQuadFilled(ImVec2(kx, keyCy - keyR), ImVec2(kx + keyR, keyCy),
                               ImVec2(kx, keyCy + keyR), ImVec2(kx - keyR, keyCy), c);
@@ -652,10 +728,13 @@ void EditorRenderLayer::DrawAnimationPanel()
             // 命中 key？（遍历各轨各 key，取屏幕距离最近且在命中半径内的）
             for (std::size_t ti = 0; ti < trackCount && !hitSomething; ++ti)
             {
-                const AnimationTrack& tr = curClip.tracks[ti];
-                const float rowY  = origin.y + rulerH + rowH * static_cast<float>(ti);
-                const float keyCy = rowY + rowH * 0.5f;
-                if (std::fabs(mouse.y - keyCy) > rowH * 0.5f) { continue; }
+                const AnimationTrack& tr    = curClip.tracks[ti];
+                const float           rowY  = origin.y + rulerH + rowH * static_cast<float>(ti);
+                const float           keyCy = rowY + rowH * 0.5f;
+                if (std::fabs(mouse.y - keyCy) > rowH * 0.5f)
+                {
+                    continue;
+                }
                 for (std::size_t ki = 0; ki < tr.keys.size(); ++ki)
                 {
                     const float kx =
@@ -668,8 +747,8 @@ void EditorRenderLayer::DrawAnimationPanel()
                         sTimelineSel.draggingKey = true;
                         sTimelineSel.dragTrack   = ti;
                         sTimelineSel.dragKey     = ki;
-                        ++sTimelineSel.dragSession;  // 新拖动会话（merge key 用）
-                        hitSomething      = true;
+                        ++sTimelineSel.dragSession; // 新拖动会话（merge key 用）
+                        hitSomething = true;
                         break;
                     }
                 }
@@ -691,8 +770,8 @@ void EditorRenderLayer::DrawAnimationPanel()
                             sTimelineSel.ClearKeySel();
                             sTimelineSel.draggingEvent = true;
                             sTimelineSel.dragEventIdx  = ei;
-                            ++sTimelineSel.dragSession;  // 新拖动会话（merge key 用）
-                            hitSomething        = true;
+                            ++sTimelineSel.dragSession; // 新拖动会话（merge key 用）
+                            hitSomething = true;
                             break;
                         }
                     }
@@ -715,10 +794,9 @@ void EditorRenderLayer::DrawAnimationPanel()
         {
             if (sTimelineSel.dragTrack < curClip.tracks.size())
             {
-                const float newT = ScreenXToTime(mouse.x, trackX0, trackAreaW, duration);
+                const float   newT    = ScreenXToTime(mouse.x, trackX0, trackAreaW, duration);
                 AnimationClip newClip = clip.Clip();
-                if (sTimelineSel.dragTrack < newClip.tracks.size()
-                    && sTimelineSel.dragKey < newClip.tracks[sTimelineSel.dragTrack].keys.size())
+                if (sTimelineSel.dragTrack < newClip.tracks.size() && sTimelineSel.dragKey < newClip.tracks[sTimelineSel.dragTrack].keys.size())
                 {
                     // 拖动后该 key 可能换索引（排序维持升序）—— MoveKeyframeTime
                     // 在副本上做，push 后从 clip 回查新索引（newClip 已被 move 走，
@@ -751,12 +829,12 @@ void EditorRenderLayer::DrawAnimationPanel()
         // 拖动后回查新索引）。
         if (sTimelineSel.draggingEvent && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
         {
-            const float newT = ScreenXToTime(mouse.x, trackX0, trackAreaW, duration);
+            const float   newT    = ScreenXToTime(mouse.x, trackX0, trackAreaW, duration);
             AnimationClip newClip = clip.Clip();
             if (sTimelineSel.dragEventIdx < newClip.events.size())
             {
                 AnimationEvent ev = newClip.events[sTimelineSel.dragEventIdx];
-                ev.time = newT;
+                ev.time           = newT;
                 Anim::RemoveClipEvent(newClip, sTimelineSel.dragEventIdx);
                 Anim::AddClipEvent(newClip, ev);
                 char evMergeKey[128];
@@ -765,13 +843,17 @@ void EditorRenderLayer::DrawAnimationPanel()
                 PushClipEdit(mHost, clip, std::move(newClip), evMergeKey,
                              "Move Event");
                 // 回查新索引（events 升序，取 time 最近的）。
-                std::size_t bestIdx = kInvalidIdx;
-                float bestDist = 1e-3f;
-                const AnimationClip& after = clip.Clip();
+                std::size_t          bestIdx  = kInvalidIdx;
+                float                bestDist = 1e-3f;
+                const AnimationClip& after    = clip.Clip();
                 for (std::size_t i = 0; i < after.events.size(); ++i)
                 {
                     const float d = std::fabs(after.events[i].time - newT);
-                    if (d <= bestDist) { bestDist = d; bestIdx = i; }
+                    if (d <= bestDist)
+                    {
+                        bestDist = d;
+                        bestIdx  = i;
+                    }
                 }
                 if (bestIdx != kInvalidIdx)
                 {
@@ -797,8 +879,7 @@ void EditorRenderLayer::DrawAnimationPanel()
         const AnimationClip& kbClip = clip.Clip();
         if (ImGui::IsKeyPressed(ImGuiKey_Delete, false))
         {
-            if (sTimelineSel.selEvent != kInvalidIdx
-                && sTimelineSel.selEvent < kbClip.events.size())
+            if (sTimelineSel.selEvent != kInvalidIdx && sTimelineSel.selEvent < kbClip.events.size())
             {
                 AnimationClip newClip = kbClip;
                 if (Anim::RemoveClipEvent(newClip, sTimelineSel.selEvent))
@@ -818,13 +899,14 @@ void EditorRenderLayer::DrawAnimationPanel()
         {
             const std::size_t ti =
                 (sTimelineSel.selTrack != kInvalidIdx && sTimelineSel.selTrack < kbClip.tracks.size())
-                    ? sTimelineSel.selTrack : 0;
+                    ? sTimelineSel.selTrack
+                    : 0;
             KeyTrackAtPlayhead(mHost, clip, kbClip.tracks[ti]);
         }
     }
 
     // ---- 底部工具行：加轨道 / 删选中轨道 / 加事件 / 打键按钮 -------------
-    ImGui::Dummy(ImVec2(0.0f, bodyH));  // 占位，让下面控件落在 timeline 下方
+    ImGui::Dummy(ImVec2(0.0f, bodyH)); // 占位，让下面控件落在 timeline 下方
     ImGui::Separator();
 
     ImGui::BeginDisabled(!canEdit);
@@ -844,15 +926,28 @@ void EditorRenderLayer::DrawTimelineToolbar(Orange::Engine::Animation::ClipAnima
 
     // 加轨道：下拉选 targetName（Transform 字段约定名）→ UpsertTrack。
     static const char* kTrackNames[] = {
-        "position", "position.x", "position.y", "position.z",
-        "rotation", "scale", "scale.x", "scale.y", "scale.z", "scale.uniform",
+        "position",
+        "position.x",
+        "position.y",
+        "position.z",
+        "rotation",
+        "scale",
+        "scale.x",
+        "scale.y",
+        "scale.z",
+        "scale.uniform",
     };
     static const Anim::TrackValueType kTrackTypes[] = {
-        Anim::TrackValueType::Vec3, Anim::TrackValueType::Float,
-        Anim::TrackValueType::Float, Anim::TrackValueType::Float,
-        Anim::TrackValueType::Vec3, Anim::TrackValueType::Vec3,
-        Anim::TrackValueType::Float, Anim::TrackValueType::Float,
-        Anim::TrackValueType::Float, Anim::TrackValueType::Float,
+        Anim::TrackValueType::Vec3,
+        Anim::TrackValueType::Float,
+        Anim::TrackValueType::Float,
+        Anim::TrackValueType::Float,
+        Anim::TrackValueType::Vec3,
+        Anim::TrackValueType::Vec3,
+        Anim::TrackValueType::Float,
+        Anim::TrackValueType::Float,
+        Anim::TrackValueType::Float,
+        Anim::TrackValueType::Float,
     };
     static int sAddTrackIdx = 0;
 
@@ -893,7 +988,8 @@ void EditorRenderLayer::DrawTimelineToolbar(Orange::Engine::Animation::ClipAnima
     {
         const std::size_t ti =
             (sTimelineSel.selTrack != kInvalidIdx && sTimelineSel.selTrack < curClip.tracks.size())
-                ? sTimelineSel.selTrack : 0;
+                ? sTimelineSel.selTrack
+                : 0;
         KeyTrackAtPlayhead(mHost, clip, curClip.tracks[ti]);
     }
     ImGui::EndDisabled();
@@ -902,7 +998,7 @@ void EditorRenderLayer::DrawTimelineToolbar(Orange::Engine::Animation::ClipAnima
     // 加事件：在 playhead 时刻加一个空名事件。
     if (ImGui::Button("Add Event"))
     {
-        AnimationClip newClip = curClip;
+        AnimationClip  newClip = curClip;
         AnimationEvent ev;
         ev.time = clip.ElapsedSeconds();
         ev.name = "event";
@@ -913,7 +1009,7 @@ void EditorRenderLayer::DrawTimelineToolbar(Orange::Engine::Animation::ClipAnima
     // 选中事件重命名 InputText（在工具行下方一行，便于改 event.name）。
     if (sTimelineSel.selEvent != kInvalidIdx && sTimelineSel.selEvent < curClip.events.size())
     {
-        char nameBuf[128];
+        char               nameBuf[128];
         const std::string& curName = curClip.events[sTimelineSel.selEvent].name;
         std::snprintf(nameBuf, sizeof(nameBuf), "%s", curName.c_str());
         ImGui::SetNextItemWidth(LabelColumnWidth() * 1.5f);
@@ -943,10 +1039,10 @@ void EditorRenderLayer::DrawTimelineToolbar(Orange::Engine::Animation::ClipAnima
 // 弹菜单切 InterpMode（Step / Linear / Bezier）。
 // ---------------------------------------------------------------------------
 void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator& clip,
-                                        float duration)
+                                        float                                    duration)
 {
     const AnimationClip& curClip = clip.Clip();
-    const bool canEdit = (mHost.scene.playState == PlayState::Edit);
+    const bool           canEdit = (mHost.scene.playState == PlayState::Edit);
 
     if (curClip.tracks.empty())
     {
@@ -958,7 +1054,8 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
     // ---- 选哪条 track 画：track 选择下拉（沿用选中 track，可在此切）-----------
     std::size_t curTrack =
         (sTimelineSel.selTrack != kInvalidIdx && sTimelineSel.selTrack < curClip.tracks.size())
-            ? sTimelineSel.selTrack : 0;
+            ? sTimelineSel.selTrack
+            : 0;
     {
         const char* preview = curClip.tracks[curTrack].targetName.c_str();
         ImGui::SetNextItemWidth(LabelColumnWidth());
@@ -969,11 +1066,14 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
                 const bool sel = (ti == curTrack);
                 if (ImGui::Selectable(curClip.tracks[ti].targetName.c_str(), sel))
                 {
-                    sTimelineSel.ClearKeySel();   // 切 track 清旧 key 选中（含 selTrack）
-                    sTimelineSel.selTrack = ti;   // 重设为新 track（曲线视图按它画）
-                    curTrack = ti;
+                    sTimelineSel.ClearKeySel(); // 切 track 清旧 key 选中（含 selTrack）
+                    sTimelineSel.selTrack = ti; // 重设为新 track（曲线视图按它画）
+                    curTrack              = ti;
                 }
-                if (sel) { ImGui::SetItemDefaultFocus(); }
+                if (sel)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
             }
             ImGui::EndCombo();
         }
@@ -982,13 +1082,13 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
     }
 
     const AnimationTrack& track = curClip.tracks[curTrack];
-    const int comp = TrackPrimaryComponent(track);
+    const int             comp  = TrackPrimaryComponent(track);
 
     // ---- 画布几何（全派生，无像素字面量）------------------------------------
-    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImDrawList*  dl     = ImGui::GetWindowDrawList();
     const ImVec2 avail  = ImGui::GetContentRegionAvail();
     const float  bodyH  = std::max(avail.y - RowHeight() * 1.5f, ImGui::GetFontSize() * 8.0f);
-    const float  leftW  = LabelColumnWidth() * 0.6f;  // 纵轴值标签列
+    const float  leftW  = LabelColumnWidth() * 0.6f; // 纵轴值标签列
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float  areaX0 = origin.x + leftW;
     const float  areaY0 = origin.y;
@@ -1034,21 +1134,26 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
     drawValueLabel(valMin);
 
     // 时间 → 屏幕 x（沿用 dopesheet 的 TimeToScreenX，统一 time→x 语义）。
-    auto timeX = [&](float t) { return TimeToScreenX(t, areaX0, areaW, duration); };
-    auto valY  = [&](float v) { return ValueToScreenY(v, areaY0, areaH, valMin, valMax); };
+    auto timeX = [&](float t)
+    { return TimeToScreenX(t, areaX0, areaW, duration); };
+    auto valY = [&](float v)
+    { return ValueToScreenY(v, areaY0, areaH, valMin, valMax); };
 
     // ---- 曲线折线：用 SampleTrack 密集采样（display==playback 的正确性核心）----
     // 采样数按画布宽派生（约每 2px 一个采样点），最少 32 段。
     if (duration > 0.0f && track.keys.size() >= 1)
     {
         const int samples = std::max(32, static_cast<int>(areaW * 0.5f));
-        ImVec2 prev(0.0f, 0.0f);
+        ImVec2    prev(0.0f, 0.0f);
         for (int i = 0; i <= samples; ++i)
         {
-            const float t = duration * static_cast<float>(i) / static_cast<float>(samples);
-            const float v = Anim::SampleTrack(track, t)[comp];
+            const float  t = duration * static_cast<float>(i) / static_cast<float>(samples);
+            const float  v = Anim::SampleTrack(track, t)[comp];
             const ImVec2 p(timeX(t), valY(v));
-            if (i > 0) { dl->AddLine(prev, p, colCurve, 1.5f); }
+            if (i > 0)
+            {
+                dl->AddLine(prev, p, colCurve, 1.5f);
+            }
             prev = p;
         }
     }
@@ -1058,18 +1163,18 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
     for (std::size_t ki = 0; ki < track.keys.size(); ++ki)
     {
         const Keyframe& k = track.keys[ki];
-        const ImVec2 kp(timeX(k.time), valY(k.value[comp]));
-        const bool   selected = (sTimelineSel.selTrack == curTrack && sTimelineSel.selKey == ki);
-        const ImU32  kc = selected ? colKeySel : colKey;
+        const ImVec2    kp(timeX(k.time), valY(k.value[comp]));
+        const bool      selected = (sTimelineSel.selTrack == curTrack && sTimelineSel.selKey == ki);
+        const ImU32     kc       = selected ? colKeySel : colKey;
 
         // out 手柄：当前 key 是某 Bezier 段的起点（k.interp==Bezier 且有后继）。
         if (k.interp == Anim::InterpMode::Bezier && ki + 1 < track.keys.size())
         {
             const Keyframe& k1 = track.keys[ki + 1];
-            const float dt = k1.time - k.time;
-            const float dv = k1.value[comp] - k.value[comp];
-            const HandleTV h = OutHandleTV(k, comp, dt, dv);
-            const ImVec2 hp(timeX(h.time), valY(h.value));
+            const float     dt = k1.time - k.time;
+            const float     dv = k1.value[comp] - k.value[comp];
+            const HandleTV  h  = OutHandleTV(k, comp, dt, dv);
+            const ImVec2    hp(timeX(h.time), valY(h.value));
             dl->AddLine(kp, hp, colHandle, 1.0f);
             dl->AddCircleFilled(hp, keyR * 0.7f, colHandle);
         }
@@ -1077,10 +1182,10 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
         if (ki > 0 && track.keys[ki - 1].interp == Anim::InterpMode::Bezier)
         {
             const Keyframe& k0 = track.keys[ki - 1];
-            const float dt = k.time - k0.time;
-            const float dv = k.value[comp] - k0.value[comp];
-            const HandleTV h = InHandleTV(k, comp, dt, dv);
-            const ImVec2 hp(timeX(h.time), valY(h.value));
+            const float     dt = k.time - k0.time;
+            const float     dv = k.value[comp] - k0.value[comp];
+            const HandleTV  h  = InHandleTV(k, comp, dt, dv);
+            const ImVec2    hp(timeX(h.time), valY(h.value));
             dl->AddLine(kp, hp, colHandle, 1.0f);
             dl->AddCircleFilled(hp, keyR * 0.7f, colHandle);
         }
@@ -1113,16 +1218,16 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
                 if (k.interp == Anim::InterpMode::Bezier && ki + 1 < track.keys.size())
                 {
                     const Keyframe& k1 = track.keys[ki + 1];
-                    const float dt = k1.time - k.time;
-                    const float dv = k1.value[comp] - k.value[comp];
-                    const HandleTV h = OutHandleTV(k, comp, dt, dv);
-                    const ImVec2 hp(timeX(h.time), valY(h.value));
+                    const float     dt = k1.time - k.time;
+                    const float     dv = k1.value[comp] - k.value[comp];
+                    const HandleTV  h  = OutHandleTV(k, comp, dt, dv);
+                    const ImVec2    hp(timeX(h.time), valY(h.value));
                     if (std::fabs(mouse.x - hp.x) <= hitR && std::fabs(mouse.y - hp.y) <= hitR)
                     {
-                        sCurveDrag = {true, curTrack, ki, CurveHandle::Out};
+                        sCurveDrag            = {true, curTrack, ki, CurveHandle::Out};
                         sTimelineSel.selTrack = curTrack;
                         sTimelineSel.selKey   = ki;
-                        hit = true;
+                        hit                   = true;
                         break;
                     }
                 }
@@ -1130,16 +1235,16 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
                 if (ki > 0 && track.keys[ki - 1].interp == Anim::InterpMode::Bezier)
                 {
                     const Keyframe& k0 = track.keys[ki - 1];
-                    const float dt = k.time - k0.time;
-                    const float dv = k.value[comp] - k0.value[comp];
-                    const HandleTV h = InHandleTV(k, comp, dt, dv);
-                    const ImVec2 hp(timeX(h.time), valY(h.value));
+                    const float     dt = k.time - k0.time;
+                    const float     dv = k.value[comp] - k0.value[comp];
+                    const HandleTV  h  = InHandleTV(k, comp, dt, dv);
+                    const ImVec2    hp(timeX(h.time), valY(h.value));
                     if (std::fabs(mouse.x - hp.x) <= hitR && std::fabs(mouse.y - hp.y) <= hitR)
                     {
-                        sCurveDrag = {true, curTrack, ki, CurveHandle::In};
+                        sCurveDrag            = {true, curTrack, ki, CurveHandle::In};
                         sTimelineSel.selTrack = curTrack;
                         sTimelineSel.selKey   = ki;
-                        hit = true;
+                        hit                   = true;
                         break;
                     }
                 }
@@ -1151,12 +1256,12 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
                 for (std::size_t ki = 0; ki < track.keys.size(); ++ki)
                 {
                     const Keyframe& k = track.keys[ki];
-                    const ImVec2 kp(timeX(k.time), valY(k.value[comp]));
+                    const ImVec2    kp(timeX(k.time), valY(k.value[comp]));
                     if (std::fabs(mouse.x - kp.x) <= hitR && std::fabs(mouse.y - kp.y) <= hitR)
                     {
                         sTimelineSel.selTrack = curTrack;
                         sTimelineSel.selKey   = ki;
-                        hit = true;
+                        hit                   = true;
                         break;
                     }
                 }
@@ -1175,30 +1280,29 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
             AnimationClip newClip = clip.Clip();
             if (sCurveDrag.track < newClip.tracks.size())
             {
-                AnimationTrack& tr = newClip.tracks[sCurveDrag.track];
-                const std::size_t ki = sCurveDrag.key;
-                const float handleTime  = ScreenXToTime(mouse.x, areaX0, areaW, duration);
-                const float handleValue = ScreenYToValue(mouse.y, areaY0, areaH, valMin, valMax);
+                AnimationTrack&   tr          = newClip.tracks[sCurveDrag.track];
+                const std::size_t ki          = sCurveDrag.key;
+                const float       handleTime  = ScreenXToTime(mouse.x, areaX0, areaW, duration);
+                const float       handleValue = ScreenYToValue(mouse.y, areaY0, areaH, valMin, valMax);
 
                 bool changed = false;
-                if (sCurveDrag.handle == CurveHandle::Out
-                    && ki < tr.keys.size() && ki + 1 < tr.keys.size())
+                if (sCurveDrag.handle == CurveHandle::Out && ki < tr.keys.size() && ki + 1 < tr.keys.size())
                 {
-                    Keyframe& k0 = tr.keys[ki];
-                    Keyframe& k1 = tr.keys[ki + 1];
+                    Keyframe&   k0 = tr.keys[ki];
+                    Keyframe&   k1 = tr.keys[ki + 1];
                     const float dt = k1.time - k0.time;
                     const float dv = k1.value[comp] - k0.value[comp];
-                    k0.outTangent = SolveOutTangent(k0, comp, handleTime, handleValue, dt, dv);
-                    changed = true;
+                    k0.outTangent  = SolveOutTangent(k0, comp, handleTime, handleValue, dt, dv);
+                    changed        = true;
                 }
                 else if (sCurveDrag.handle == CurveHandle::In && ki < tr.keys.size() && ki > 0)
                 {
-                    Keyframe& k1 = tr.keys[ki];
-                    Keyframe& k0 = tr.keys[ki - 1];
+                    Keyframe&   k1 = tr.keys[ki];
+                    Keyframe&   k0 = tr.keys[ki - 1];
                     const float dt = k1.time - k0.time;
                     const float dv = k1.value[comp] - k0.value[comp];
-                    k1.inTangent = SolveInTangent(k1, comp, handleTime, handleValue, dt, dv);
-                    changed = true;
+                    k1.inTangent   = SolveInTangent(k1, comp, handleTime, handleValue, dt, dv);
+                    changed        = true;
                 }
 
                 if (changed)
@@ -1223,7 +1327,7 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
             for (std::size_t ki = 0; ki < track.keys.size(); ++ki)
             {
                 const Keyframe& k = track.keys[ki];
-                const ImVec2 kp(timeX(k.time), valY(k.value[comp]));
+                const ImVec2    kp(timeX(k.time), valY(k.value[comp]));
                 if (std::fabs(mouse.x - kp.x) <= hitR && std::fabs(mouse.y - kp.y) <= hitR)
                 {
                     sTimelineSel.selTrack = curTrack;
@@ -1246,9 +1350,8 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
     if (freshTrack != nullptr && ImGui::BeginPopup("##curve_key_interp"))
     {
         const AnimationTrack& popupTrack = *freshTrack;
-        const std::size_t ki = sTimelineSel.selKey;
-        const bool valid = (sTimelineSel.selTrack == curTrack && ki != kInvalidIdx
-                            && ki < popupTrack.keys.size());
+        const std::size_t     ki         = sTimelineSel.selKey;
+        const bool            valid      = (sTimelineSel.selTrack == curTrack && ki != kInvalidIdx && ki < popupTrack.keys.size());
         ImGui::TextDisabled("Interpolation");
         ImGui::Separator();
         auto setMode = [&](Anim::InterpMode mode, const char* label)
@@ -1257,14 +1360,12 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
             if (ImGui::MenuItem(label, nullptr, active, valid && !active))
             {
                 AnimationClip newClip = clip.Clip();
-                if (sTimelineSel.selTrack < newClip.tracks.size()
-                    && ki < newClip.tracks[sTimelineSel.selTrack].keys.size())
+                if (sTimelineSel.selTrack < newClip.tracks.size() && ki < newClip.tracks[sTimelineSel.selTrack].keys.size())
                 {
                     Keyframe& nk = newClip.tracks[sTimelineSel.selTrack].keys[ki];
-                    nk.interp = mode;
+                    nk.interp    = mode;
                     // 切到 Bezier 且当前切线全零 → 给个平滑默认，否则曲线退化无手柄可拖。
-                    if (mode == Anim::InterpMode::Bezier
-                        && nk.outTangent == glm::vec2(0.0f) && nk.inTangent == glm::vec2(0.0f))
+                    if (mode == Anim::InterpMode::Bezier && nk.outTangent == glm::vec2(0.0f) && nk.inTangent == glm::vec2(0.0f))
                     {
                         AssignSmoothBezierDefault(nk);
                     }
@@ -1281,14 +1382,12 @@ void EditorRenderLayer::DrawCurveEditor(Orange::Engine::Animation::ClipAnimator&
 
     // ---- 占位推进 cursor + 底部提示（与 dopesheet 的 Dummy 同款）------------
     ImGui::Dummy(ImVec2(0.0f, bodyH));
-    if (freshTrack != nullptr && sTimelineSel.selKey != kInvalidIdx
-        && sTimelineSel.selTrack == curTrack
-        && sTimelineSel.selKey < freshTrack->keys.size())
+    if (freshTrack != nullptr && sTimelineSel.selKey != kInvalidIdx && sTimelineSel.selTrack == curTrack && sTimelineSel.selKey < freshTrack->keys.size())
     {
-        const Keyframe& sk = freshTrack->keys[sTimelineSel.selKey];
-        const char* modeName = (sk.interp == Anim::InterpMode::Step)   ? "Step"
-                               : (sk.interp == Anim::InterpMode::Linear) ? "Linear"
-                                                                         : "Bezier";
+        const Keyframe& sk       = freshTrack->keys[sTimelineSel.selKey];
+        const char*     modeName = (sk.interp == Anim::InterpMode::Step)     ? "Step"
+                                   : (sk.interp == Anim::InterpMode::Linear) ? "Linear"
+                                                                             : "Bezier";
         ImGui::TextDisabled("选中 key  t=%.3f  value=%.3f  interp=%s", sk.time,
                             sk.value[comp], modeName);
         if (sk.interp != Anim::InterpMode::Bezier)

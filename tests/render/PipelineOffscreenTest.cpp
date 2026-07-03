@@ -60,24 +60,27 @@ using Orange::Engine::Scene::TransformComponent;
 namespace
 {
 
-std::unique_ptr<MeshAsset> MakeQuadMesh()
-{
-    std::vector<VertexPosition3> positions = {
-        {-0.5f, -0.5f, 0.0f},
-        { 0.5f, -0.5f, 0.0f},
-        { 0.5f,  0.5f, 0.0f},
-        {-0.5f,  0.5f, 0.0f},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    return std::make_unique<MeshAsset>(std::move(positions),
-                                       std::move(uvs),
-                                       std::move(indices));
-}
+    std::unique_ptr<MeshAsset> MakeQuadMesh()
+    {
+        std::vector<VertexPosition3> positions = {
+            {-0.5f, -0.5f, 0.0f},
+            {0.5f, -0.5f, 0.0f},
+            {0.5f, 0.5f, 0.0f},
+            {-0.5f, 0.5f, 0.0f},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        return std::make_unique<MeshAsset>(std::move(positions),
+                                           std::move(uvs),
+                                           std::move(indices));
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -100,7 +103,7 @@ int main()
     Orange::Renderer::RenderDeviceDesc deviceDesc{};
     deviceDesc.mBackend          = Orange::Renderer::BackendType::Default;
     deviceDesc.mEnableValidation = true;
-    auto pDevice = Orange::Renderer::RenderDevice::Create(deviceDesc);
+    auto pDevice                 = Orange::Renderer::RenderDevice::Create(deviceDesc);
     if (!pDevice)
     {
         std::fprintf(stderr,
@@ -153,7 +156,7 @@ int main()
         // 取 native VkImageView / VkImage：消费者侧 ImGui::Image 链路必走的两步。
         void* viewHandle  = Orange::Renderer::Interop::GetVulkanImageView(*tex);
         void* imageHandle = Orange::Renderer::Interop::GetVulkanImage(*tex);
-        assert(viewHandle  != nullptr);
+        assert(viewHandle != nullptr);
         assert(imageHandle != nullptr);
         std::fprintf(stdout,
                      "  [PASS] InitializeOffscreen 后 GetOffscreenColor 非空，"
@@ -178,13 +181,13 @@ int main()
         pipeline.Render(empty);
         const auto* tex = pipeline.GetOffscreenColor();
         assert(tex != nullptr);
-        assert(pipeline.TemplatePipelineCount() == 0);  // 无 drawable → 无模板编译
+        assert(pipeline.TemplatePipelineCount() == 0); // 无 drawable → 无模板编译
         std::fprintf(stdout, "  [PASS] Render 空 World 不崩、viewportColor 维持\n");
     }
 
     // ---- 4. Render 含 drawable+camera 的 World ---------------------
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
 
@@ -196,7 +199,7 @@ int main()
         world.AddComponent(e, rc);
 
         pipeline.Render(world);
-        assert(pipeline.TemplatePipelineCount() == 1);  // textured 模板编译一次
+        assert(pipeline.TemplatePipelineCount() == 1); // textured 模板编译一次
 
         const auto* tex = pipeline.GetOffscreenColor();
         assert(tex != nullptr);
@@ -218,7 +221,7 @@ int main()
         std::uint32_t hdrW = 0;
         std::uint32_t hdrH = 0;
         pipeline.GetHdrTargetSize(hdrW, hdrH);
-        assert(hdrW == kInitialW);  // 还没 Render，尺寸未生效
+        assert(hdrW == kInitialW); // 还没 Render，尺寸未生效
         assert(hdrH == kInitialH);
 
         World empty;
@@ -239,7 +242,7 @@ int main()
 
     // ---- 6. Resize 后再 Render drawable 确认 descriptor set 仍有效 --
     {
-        World world;
+        World  world;
         Entity camE = world.CreateEntity();
         world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
 

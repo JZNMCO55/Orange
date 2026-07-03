@@ -7,8 +7,8 @@
 
 #include "../ColliderDebugDraw.h"
 #include "../ColliderVertexEdit.h"
-#include "../EditorAssetDropHandler.h"  // v1.2.3 patch · viewport ORANGE_ASSET DnD
-#include "../EditorPrefabActions.h"  // prefab 拖入实例化（drop 先判 .prefab.json）
+#include "../EditorAssetDropHandler.h" // v1.2.3 patch · viewport ORANGE_ASSET DnD
+#include "../EditorPrefabActions.h"    // prefab 拖入实例化（drop 先判 .prefab.json）
 #include "../EditorCameraControl.h"
 #include "../EditorPicking.h"
 #include "../EditorRotateGizmo.h"
@@ -16,18 +16,18 @@
 #include "../EditorTranslateGizmo.h"
 #include "../plugin/GizmoContext.h"
 #include "../plugin/IEditorGizmoPlugin.h"
-#include "../render/ThumbnailService.h"  // mHost.thumbnails->SetPipeline（完整类型）
+#include "../render/ThumbnailService.h" // mHost.thumbnails->SetPipeline（完整类型）
 #include "../schema/ComponentSchema.h"
 #include "../schema/ComponentSchemaRegistry.h"
 
-#include <orange/engine/asset/AssetRegistry.h>   // 统计 overlay 取 mesh 三角数
+#include <orange/engine/asset/AssetRegistry.h> // 统计 overlay 取 mesh 三角数
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/render/BuiltinPostProcessChain.h>
-#include <orange/engine/render/Pipeline.h>  // DebugViewMode
-#include <orange/engine/render/RenderableComponent.h>  // 统计 overlay
+#include <orange/engine/render/Pipeline.h>            // DebugViewMode
+#include <orange/engine/render/RenderableComponent.h> // 统计 overlay
 #include <orange/engine/render/ShadowConfig.h>
 #include <orange/engine/render/DebugDrawScene.h>
-#include <orange/engine/scene/NameComponent.h>  // 统计 overlay 选中名
+#include <orange/engine/scene/NameComponent.h> // 统计 overlay 选中名
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 #include <orange/renderer/VulkanInterop.h>
@@ -55,8 +55,8 @@
 // Overdraw 后续接入（见 GAP-2026-05-30-debug-render-views-engine-side）。
 namespace
 {
-int sViewportDebugViewMode = 0;
-}  // namespace
+    int sViewportDebugViewMode = 0;
+} // namespace
 
 void EditorRenderLayer::DrawScenePanel()
 {
@@ -142,30 +142,44 @@ void EditorRenderLayer::DrawScenePanel()
     // 的可点 + 可发现入口，对齐 Unity 左上变换工具栏。激活态高亮。
     ImGui::SameLine();
     {
-        using GMode  = EditorGizmoState::Mode;
-        using GSpace = EditorGizmoState::Space;
-        auto modeButton = [&](const char* label, GMode m, const char* tip) {
+        using GMode     = EditorGizmoState::Mode;
+        using GSpace    = EditorGizmoState::Space;
+        auto modeButton = [&](const char* label, GMode m, const char* tip)
+        {
             const bool active = (mHost.gizmo.mode == m);
-            if (active) {
+            if (active)
+            {
                 ImGui::PushStyleColor(
                     ImGuiCol_Button,
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
             }
-            if (ImGui::SmallButton(label)) { mHost.gizmo.mode = m; }
-            if (active) { ImGui::PopStyleColor(); }
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", tip); }
+            if (ImGui::SmallButton(label))
+            {
+                mHost.gizmo.mode = m;
+            }
+            if (active)
+            {
+                ImGui::PopStyleColor();
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("%s", tip);
+            }
             ImGui::SameLine();
         };
-        modeButton("Move",   GMode::Translate, "平移 gizmo（快捷键 W）");
-        modeButton("Rotate", GMode::Rotate,    "旋转 gizmo（快捷键 E）");
-        modeButton("Scale",  GMode::Scale,     "缩放 gizmo（快捷键 R）");
+        modeButton("Move", GMode::Translate, "平移 gizmo（快捷键 W）");
+        modeButton("Rotate", GMode::Rotate, "旋转 gizmo（快捷键 E）");
+        modeButton("Scale", GMode::Scale, "缩放 gizmo（快捷键 R）");
         const char* spaceLabel =
             (mHost.gizmo.space == GSpace::Local) ? "Local" : "World";
-        if (ImGui::SmallButton(spaceLabel)) {
+        if (ImGui::SmallButton(spaceLabel))
+        {
             mHost.gizmo.space = (mHost.gizmo.space == GSpace::Local)
-                ? GSpace::World : GSpace::Local;
+                                    ? GSpace::World
+                                    : GSpace::Local;
         }
-        if (ImGui::IsItemHovered()) {
+        if (ImGui::IsItemHovered())
+        {
             ImGui::SetTooltip("Gizmo 参考系 World ⇄ Local 切换（快捷键 X）\n"
                               "作用 translate / rotate 轴向；scale 始终 local");
         }
@@ -181,12 +195,17 @@ void EditorRenderLayer::DrawScenePanel()
     // FramePadding / arrow 按钮宽由 main.cpp ScaleAllSizes(dpiScale) 同步缩放。
     // 用 (std::max)(...) 圆括号包装绕开 windows.h max 宏污染（本 TU 通过
     // imgui_impl_vulkan / VulkanInterop 间接拉 windows.h，没 #define NOMINMAX）。
-    auto comboItemWidth = [&](std::initializer_list<const char*> items) {
-        const ImGuiStyle& s = ImGui::GetStyle();
-        float maxW = 0.0f;
-        for (const char* it : items) {
+    auto comboItemWidth = [&](std::initializer_list<const char*> items)
+    {
+        const ImGuiStyle& s    = ImGui::GetStyle();
+        float             maxW = 0.0f;
+        for (const char* it : items)
+        {
             const float w = ImGui::CalcTextSize(it).x;
-            if (w > maxW) { maxW = w; }
+            if (w > maxW)
+            {
+                maxW = w;
+            }
         }
         // arrow button 宽 ≈ FrameHeight；framePadding 左右各一份。
         return maxW + s.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
@@ -195,7 +214,7 @@ void EditorRenderLayer::DrawScenePanel()
     {
         ImGui::BeginDisabled();
         const char* kViewModes[] = {"Persp"};
-        int curView = 0;
+        int         curView      = 0;
         ImGui::SetNextItemWidth(comboItemWidth({"Persp", "2D Lock"}));
         ImGui::Combo("##ViewMode", &curView, kViewModes, IM_ARRAYSIZE(kViewModes));
         ImGui::EndDisabled();
@@ -267,7 +286,8 @@ void EditorRenderLayer::DrawScenePanel()
         (region.y > 1.0f) ? static_cast<std::uint32_t>(region.y) : 0u;
 
     bool drewImage = false;
-    if (EnsureScenePipeline(panelW, panelH) && mHost.scene.pWorld != nullptr) {
+    if (EnsureScenePipeline(panelW, panelH) && mHost.scene.pWorld != nullptr)
+    {
         // v0.6 c4：每帧 wire partition 给 Pipeline —— Pipeline 内部按
         // partition.IsEntityVisible(world, e) 过滤 drawable + shadow caster；
         // hide 的 layer 立即从 viewport 消失，无需 mutate ECS。
@@ -313,18 +333,25 @@ void EditorRenderLayer::DrawScenePanel()
                 constexpr std::uint32_t kRed   = 0xFF0000FFu;
                 constexpr std::uint32_t kGreen = 0xFF00FF00u;
                 constexpr std::uint32_t kBlue  = 0xFFFF0000u;
-                constexpr std::uint32_t kHi    = 0xFF00FFFFu;  // 选中实体高亮黄
+                constexpr std::uint32_t kHi    = 0xFF00FFFFu; // 选中实体高亮黄
                 dbg->AddLine(glm::vec3(0.0f), glm::vec3(1.5f, 0.0f, 0.0f), kRed);
                 dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 1.5f, 0.0f), kGreen);
                 dbg->AddLine(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.5f), kBlue);
 
                 // 选中 entities 位置 wireframe sphere —— primary + additional
                 // 都画，让多选可视化。
-                auto drawSelected = [&](Orange::Engine::Entity e) {
-                    if (!e.IsValid()) { return; }
+                auto drawSelected = [&](Orange::Engine::Entity e)
+                {
+                    if (!e.IsValid())
+                    {
+                        return;
+                    }
                     auto* xf = mHost.scene.pWorld->GetComponent<
                         Orange::Engine::Scene::TransformComponent>(e);
-                    if (xf == nullptr) { return; }
+                    if (xf == nullptr)
+                    {
+                        return;
+                    }
                     dbg->AddSphere(xf->position, 0.5f, kHi, 16);
                 };
                 drawSelected(mHost.selection.selectedEntity);
@@ -348,13 +375,14 @@ void EditorRenderLayer::DrawScenePanel()
         // 空，之后 RemoveTexture(旧 descriptor) + AddTexture(新) 才安全。
         mpScenePipeline->Render(*mHost.scene.pWorld);
         RebindSceneDescriptorSetIfNeeded();
-        if (mSceneDescSet != VK_NULL_HANDLE) {
+        if (mSceneDescSet != VK_NULL_HANDLE)
+        {
             ImGui::Image(reinterpret_cast<ImTextureID>(mSceneDescSet),
                          ImVec2(static_cast<float>(panelW),
                                 static_cast<float>(panelH)));
             drewImage = true;
 
-            const ImVec2 itemMin  = ImGui::GetItemRectMin();
+            const ImVec2    itemMin = ImGui::GetItemRectMin();
             const glm::vec2 imageOrigin(itemMin.x, itemMin.y);
             const glm::vec2 imageSize(static_cast<float>(panelW),
                                       static_cast<float>(panelH));
@@ -365,21 +393,22 @@ void EditorRenderLayer::DrawScenePanel()
             // hover 高亮反馈留 v1.x minor 拉动。需绑定到 ImGui::Image item，
             // 故 BeginDragDropTarget 紧跟其后调（gizmo 等后续 widget 不影
             // 响，因为 DnD 已绑定到 Image 的 ItemID）。
-            if (ImGui::BeginDragDropTarget()) {
+            if (ImGui::BeginDragDropTarget())
+            {
                 if (const ImGuiPayload* p =
                         ImGui::AcceptDragDropPayload("ORANGE_ASSET"))
                 {
                     const std::size_t plen = (p->DataSize > 0)
-                        ? static_cast<std::size_t>(p->DataSize) - 1 : 0;
+                                                 ? static_cast<std::size_t>(p->DataSize) - 1
+                                                 : 0;
                     const std::string assetPath(
                         static_cast<const char*>(p->Data), plen);
                     // **务必先判 prefab**：.prefab.json 走实例化为新根（不需
                     // PickEntityAt，命令栈可 undo）。否则落进 ApplyAssetDropToEntity
                     // 的"不识别扩展名"分支静默 warn 失败。
                     const bool isPrefab =
-                        assetPath.size() >= 12
-                        && assetPath.compare(assetPath.size() - 12, 12,
-                                             ".prefab.json") == 0;
+                        assetPath.size() >= 12 && assetPath.compare(assetPath.size() - 12, 12,
+                                                                    ".prefab.json") == 0;
                     if (isPrefab)
                     {
                         Orange::Editor::Prefab::InstantiatePrefabFromPath(
@@ -388,9 +417,9 @@ void EditorRenderLayer::DrawScenePanel()
                     else if (!assetPath.empty() && panelW > 0 && panelH > 0)
                     {
                         const ImVec2 mp = ImGui::GetMousePos();
-                        const float lx = mp.x - itemMin.x;
-                        const float ly = mp.y - itemMin.y;
-                        const float ndcX =
+                        const float  lx = mp.x - itemMin.x;
+                        const float  ly = mp.y - itemMin.y;
+                        const float  ndcX =
                             (lx / static_cast<float>(panelW)) * 2.0f - 1.0f;
                         const float ndcY =
                             (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
@@ -439,44 +468,53 @@ void EditorRenderLayer::DrawScenePanel()
                 auto* pStatsWorld = mHost.scene.pWorld.get();
                 if (pStatsWorld != nullptr)
                 {
-                    const std::size_t entityCount = pStatsWorld->Size();
-                    std::size_t   visRenderables = 0;
-                    std::uint64_t triCount       = 0;
-                    auto statsView = pStatsWorld->Registry()
-                        .view<TransformComponent, RenderableComponent>();
+                    const std::size_t entityCount    = pStatsWorld->Size();
+                    std::size_t       visRenderables = 0;
+                    std::uint64_t     triCount       = 0;
+                    auto              statsView      = pStatsWorld->Registry()
+                                         .view<TransformComponent, RenderableComponent>();
                     for (auto e : statsView)
                     {
                         const auto& rc = statsView.get<RenderableComponent>(e);
-                        if (!rc.visible || mHost.assets.pAssets == nullptr) { continue; }
+                        if (!rc.visible || mHost.assets.pAssets == nullptr)
+                        {
+                            continue;
+                        }
                         const auto* pMesh = mHost.assets.pAssets->Get(rc.mesh);
-                        if (pMesh == nullptr || pMesh->Empty()) { continue; }
+                        if (pMesh == nullptr || pMesh->Empty())
+                        {
+                            continue;
+                        }
                         ++visRenderables;
                         triCount += pMesh->Indices().size() / 3;
                     }
-                    std::string selName = "(none)";
-                    const Entity sel = mHost.selection.selectedEntity;
+                    std::string  selName = "(none)";
+                    const Entity sel     = mHost.selection.selectedEntity;
                     if (sel.IsValid() && pStatsWorld->IsValid(sel))
                     {
                         const auto* nc = pStatsWorld->GetComponent<NameComponent>(sel);
-                        if (nc != nullptr && !nc->name.empty()) { selName = nc->name; }
+                        if (nc != nullptr && !nc->name.empty())
+                        {
+                            selName = nc->name;
+                        }
                     }
                     // gizmo 模式 + 参考系（X 键切 World/Local 之前无视觉反馈）。
                     const char* gizModeName =
-                        (mHost.gizmo.mode == EditorGizmoState::Mode::Rotate) ? "Rotate"
-                      : (mHost.gizmo.mode == EditorGizmoState::Mode::Scale)  ? "Scale"
-                                                                            : "Move";
+                        (mHost.gizmo.mode == EditorGizmoState::Mode::Rotate)  ? "Rotate"
+                        : (mHost.gizmo.mode == EditorGizmoState::Mode::Scale) ? "Scale"
+                                                                              : "Move";
                     const char* gizSpaceName =
                         (mHost.gizmo.space == EditorGizmoState::Space::Local) ? "Local"
-                                                                             : "World";
+                                                                              : "World";
                     char buf[224];
                     std::snprintf(buf, sizeof(buf),
-                        "Entities %zu  |  Renderables %zu  |  Tris %llu\n"
-                        "Selected: %s\nGizmo: %s [%s]",
-                        entityCount, visRenderables,
-                        static_cast<unsigned long long>(triCount), selName.c_str(),
-                        gizModeName, gizSpaceName);
+                                  "Entities %zu  |  Renderables %zu  |  Tris %llu\n"
+                                  "Selected: %s\nGizmo: %s [%s]",
+                                  entityCount, visRenderables,
+                                  static_cast<unsigned long long>(triCount), selName.c_str(),
+                                  gizModeName, gizSpaceName);
 
-                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    ImDrawList*  dl = ImGui::GetWindowDrawList();
                     const ImVec2 pad(8.0f, 5.0f);
                     const ImVec2 anchor(imageOrigin.x + 8.0f, imageOrigin.y + 8.0f);
                     const ImVec2 ts = ImGui::CalcTextSize(buf);
@@ -508,8 +546,7 @@ void EditorRenderLayer::DrawScenePanel()
             // RMB 按住（飞行导航）时不响应 W/E/R 切 gizmo mode —— 让 WASD 给
             // 相机飞行用，避免 W 既切 translate gizmo 又前进的冲突。
             const bool flyNavActive = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-            if (!colliderEditing && !mHost.gizmo.IsDragging()
-                && !ImGui::IsAnyItemActive() && !flyNavActive)
+            if (!colliderEditing && !mHost.gizmo.IsDragging() && !ImGui::IsAnyItemActive() && !flyNavActive)
             {
                 // v0.8 keybinding：从 EditorKeybindings 读绑定的 key（默认
                 // W/E/R，可在 Settings 面板内 rebind）。
@@ -556,17 +593,14 @@ void EditorRenderLayer::DrawScenePanel()
                 // pendingDuplicate=bool true），与 Hierarchy 同帧重复 set 无害，
                 // 实际删除/复制走各自既有可撤销路径。独立 if（不入上面 else-if 链）。
                 // World::IsValid 补一道防操作死实体（Undo 可能已销毁）。
-                if (mHost.selection.selectedEntity.IsValid()
-                    && mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity)
-                    && !mHost.selection.renamingEntity.IsValid())
+                if (mHost.selection.selectedEntity.IsValid() && mHost.scene.pWorld->IsValid(mHost.selection.selectedEntity) && !mHost.selection.renamingEntity.IsValid())
                 {
                     if (ImGui::IsKeyPressed(mHost.keybindings.deleteEntity, false))
                     {
                         mHost.selection.pendingDelete =
                             mHost.selection.selectedEntity;
                     }
-                    if (ImGui::GetIO().KeyCtrl
-                        && ImGui::IsKeyPressed(ImGuiKey_D, false))
+                    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false))
                     {
                         mHost.selection.pendingDuplicate = true;
                     }
@@ -575,21 +609,21 @@ void EditorRenderLayer::DrawScenePanel()
 
             bool gizmoActive = false;
             if (!colliderEditing)
-            switch (mHost.gizmo.mode)
-            {
-                case EditorGizmoState::Mode::Translate:
-                    gizmoActive = DrawAndHandleTranslateGizmo(
-                        mHost, imageOrigin, imageSize, aspect);
-                    break;
-                case EditorGizmoState::Mode::Rotate:
-                    gizmoActive = DrawAndHandleRotateGizmo(
-                        mHost, imageOrigin, imageSize, aspect);
-                    break;
-                case EditorGizmoState::Mode::Scale:
-                    gizmoActive = DrawAndHandleScaleGizmo(
-                        mHost, imageOrigin, imageSize, aspect);
-                    break;
-            }
+                switch (mHost.gizmo.mode)
+                {
+                    case EditorGizmoState::Mode::Translate:
+                        gizmoActive = DrawAndHandleTranslateGizmo(
+                            mHost, imageOrigin, imageSize, aspect);
+                        break;
+                    case EditorGizmoState::Mode::Rotate:
+                        gizmoActive = DrawAndHandleRotateGizmo(
+                            mHost, imageOrigin, imageSize, aspect);
+                        break;
+                    case EditorGizmoState::Mode::Scale:
+                        gizmoActive = DrawAndHandleScaleGizmo(
+                            mHost, imageOrigin, imageSize, aspect);
+                        break;
+                }
 
             // ---- c4：IEditorGizmoPlugin 调度（v0.2.5 c12 抽象首批真实消费）
             //
@@ -606,10 +640,7 @@ void EditorRenderLayer::DrawScenePanel()
             // 调用约定见 plugin/IEditorGizmoPlugin.h 头注释"调用约定"段第 1
             // 条："对 selected entity 遍历 host.gizmoPlugins 调 CanHandle，
             // 对所有返回 true 的 plugin 依次调 Draw"。
-            if (mHost.gizmo.visible
-                && mHost.scene.playState == PlayState::Edit
-                && mHost.selection.selectedEntity.IsValid()
-                && !mHost.gizmoPlugins.empty())
+            if (mHost.gizmo.visible && mHost.scene.playState == PlayState::Edit && mHost.selection.selectedEntity.IsValid() && !mHost.gizmoPlugins.empty())
             {
                 const auto      cam      = BuildEditorCamera(mHost.camera, aspect);
                 const glm::mat4 viewProj = cam.projection * cam.view;
@@ -623,11 +654,20 @@ void EditorRenderLayer::DrawScenePanel()
                 auto& reg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
                 for (auto& pPlugin : mHost.gizmoPlugins)
                 {
-                    if (pPlugin == nullptr) { continue; }
+                    if (pPlugin == nullptr)
+                    {
+                        continue;
+                    }
                     for (const auto& schema : reg.All())
                     {
-                        if (!pPlugin->CanHandle(schema)) { continue; }
-                        if (schema.has == nullptr || schema.get == nullptr) { continue; }
+                        if (!pPlugin->CanHandle(schema))
+                        {
+                            continue;
+                        }
+                        if (schema.has == nullptr || schema.get == nullptr)
+                        {
+                            continue;
+                        }
                         if (!schema.has(*mHost.scene.pWorld,
                                         mHost.selection.selectedEntity))
                         {
@@ -635,7 +675,10 @@ void EditorRenderLayer::DrawScenePanel()
                         }
                         void* component = schema.get(*mHost.scene.pWorld,
                                                      mHost.selection.selectedEntity);
-                        if (component == nullptr) { continue; }
+                        if (component == nullptr)
+                        {
+                            continue;
+                        }
                         pPlugin->Draw(mHost, mHost.selection.selectedEntity,
                                       schema, component, ctx);
                     }
@@ -657,23 +700,19 @@ void EditorRenderLayer::DrawScenePanel()
             // gizmoActive gate：本帧 gizmo 处理了 LMB（hover handle 或正在
             // 拖动）→ 跳过 picking。否则 gizmo 拖动结束时的 LMB-release 会
             // 同时触发 picking，把选中实体改成 gizmo 下方的物体，破坏 UX。
-            if (!colliderEditing
-                && !gizmoActive
-                && ImGui::IsItemHovered()
-                && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+            if (!colliderEditing && !gizmoActive && ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
             {
-                const ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
+                const ImVec2    drag              = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f);
                 constexpr float kClickThresholdPx = 4.0f;
-                if (drag.x * drag.x + drag.y * drag.y
-                        <= kClickThresholdPx * kClickThresholdPx)
+                if (drag.x * drag.x + drag.y * drag.y <= kClickThresholdPx * kClickThresholdPx)
                 {
                     const ImVec2 mousePos = ImGui::GetMousePos();
-                    const float lx = mousePos.x - itemMin.x;
-                    const float ly = mousePos.y - itemMin.y;
+                    const float  lx       = mousePos.x - itemMin.x;
+                    const float  ly       = mousePos.y - itemMin.y;
                     // 屏幕坐标 → NDC：Vulkan NDC y-down 与 ImGui 屏幕 y-down
                     // 同向，不再额外翻转
-                    const float ndcX = (lx / static_cast<float>(panelW)) * 2.0f - 1.0f;
-                    const float ndcY = (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
+                    const float                  ndcX = (lx / static_cast<float>(panelW)) * 2.0f - 1.0f;
+                    const float                  ndcY = (ly / static_cast<float>(panelH)) * 2.0f - 1.0f;
                     const Orange::Engine::Entity picked =
                         PickEntityAt(mHost, glm::vec2(ndcX, ndcY), aspect);
                     // 锁定实体不可 pick 选中（防误编辑，hierarchy gap §3 P1）：
@@ -686,9 +725,7 @@ void EditorRenderLayer::DrawScenePanel()
                     // 多选语义一致）；普通单击 = 切 primary + 清 additional（点空白
                     // = 全清）；Ctrl+空白 / Ctrl+当前 primary = 保持不变（no-op）。
                     const ImGuiIO& pickIo = ImGui::GetIO();
-                    if (pickIo.KeyCtrl && picked.IsValid() && !pickedLocked
-                        && mHost.selection.selectedEntity.IsValid()
-                        && picked != mHost.selection.selectedEntity)
+                    if (pickIo.KeyCtrl && picked.IsValid() && !pickedLocked && mHost.selection.selectedEntity.IsValid() && picked != mHost.selection.selectedEntity)
                     {
                         mHost.selection.ToggleAdditional(picked);
                     }
@@ -712,7 +749,8 @@ void EditorRenderLayer::DrawScenePanel()
         }
     }
 
-    if (!drewImage) {
+    if (!drewImage)
+    {
         ImGui::TextDisabled("scene viewport 未就绪 —— 面板太小或 Pipeline 初始化失败");
         const auto& ec = mHost.camera;
         ImGui::Text("viewport %.0fx%.0f  aspect=%.2f", region.x, region.y, aspect);
@@ -731,15 +769,27 @@ void EditorRenderLayer::CreateScenePanelSampler()
 {
     auto* pfnGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         Orange::Renderer::Interop::GetVulkanGetInstanceProcAddr());
-    if (pfnGetInstanceProcAddr == nullptr) { return; }
+    if (pfnGetInstanceProcAddr == nullptr)
+    {
+        return;
+    }
     const auto handles = Orange::Renderer::Interop::GetVulkanDeviceHandles(mRenderDevice);
-    if (handles.vkInstance == nullptr || handles.vkDevice == nullptr) { return; }
+    if (handles.vkInstance == nullptr || handles.vkDevice == nullptr)
+    {
+        return;
+    }
     auto pfnGetDeviceProcAddrFn = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
         pfnGetInstanceProcAddr(static_cast<VkInstance>(handles.vkInstance), "vkGetDeviceProcAddr"));
-    if (pfnGetDeviceProcAddrFn == nullptr) { return; }
+    if (pfnGetDeviceProcAddrFn == nullptr)
+    {
+        return;
+    }
     auto pfnCreate = reinterpret_cast<PFN_vkCreateSampler>(
         pfnGetDeviceProcAddrFn(static_cast<VkDevice>(handles.vkDevice), "vkCreateSampler"));
-    if (pfnCreate == nullptr) { return; }
+    if (pfnCreate == nullptr)
+    {
+        return;
+    }
 
     VkSamplerCreateInfo s{};
     s.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -751,7 +801,8 @@ void EditorRenderLayer::CreateScenePanelSampler()
     s.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     s.minLod       = 0.0f;
     s.maxLod       = 0.0f;
-    if (pfnCreate(static_cast<VkDevice>(handles.vkDevice), &s, nullptr, &mSceneSampler) != VK_SUCCESS) {
+    if (pfnCreate(static_cast<VkDevice>(handles.vkDevice), &s, nullptr, &mSceneSampler) != VK_SUCCESS)
+    {
         mSceneSampler = VK_NULL_HANDLE;
         ORANGE_LOG_ERROR("[OrangeEditor] vkCreateSampler (scene panel) 失败");
     }
@@ -759,18 +810,31 @@ void EditorRenderLayer::CreateScenePanelSampler()
 
 void EditorRenderLayer::DestroyScenePanelSampler()
 {
-    if (mSceneSampler == VK_NULL_HANDLE) { return; }
+    if (mSceneSampler == VK_NULL_HANDLE)
+    {
+        return;
+    }
     auto* pfnGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         Orange::Renderer::Interop::GetVulkanGetInstanceProcAddr());
-    if (pfnGetInstanceProcAddr == nullptr) { return; }
+    if (pfnGetInstanceProcAddr == nullptr)
+    {
+        return;
+    }
     const auto handles = Orange::Renderer::Interop::GetVulkanDeviceHandles(mRenderDevice);
-    if (handles.vkDevice == nullptr) { return; }
+    if (handles.vkDevice == nullptr)
+    {
+        return;
+    }
     auto pfnGetDeviceProcAddrFn = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
         pfnGetInstanceProcAddr(static_cast<VkInstance>(handles.vkInstance), "vkGetDeviceProcAddr"));
-    if (pfnGetDeviceProcAddrFn == nullptr) { return; }
+    if (pfnGetDeviceProcAddrFn == nullptr)
+    {
+        return;
+    }
     auto pfnDestroy = reinterpret_cast<PFN_vkDestroySampler>(
         pfnGetDeviceProcAddrFn(static_cast<VkDevice>(handles.vkDevice), "vkDestroySampler"));
-    if (pfnDestroy != nullptr) {
+    if (pfnDestroy != nullptr)
+    {
         pfnDestroy(static_cast<VkDevice>(handles.vkDevice), mSceneSampler, nullptr);
     }
     mSceneSampler = VK_NULL_HANDLE;
@@ -790,13 +854,26 @@ void EditorRenderLayer::DestroyScenePanelSampler()
 //     不再 retry（避免每帧重复输出 error log），UI 退化到占位文案。
 bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t height)
 {
-    if (mScenePipelineFailed)              { return false; }
-    if (width == 0 || height == 0)         { return false; }
-    if (mHost.assets.pAssets == nullptr)         { return false; }
-    if (mSceneSampler == VK_NULL_HANDLE)   { return false; }
+    if (mScenePipelineFailed)
+    {
+        return false;
+    }
+    if (width == 0 || height == 0)
+    {
+        return false;
+    }
+    if (mHost.assets.pAssets == nullptr)
+    {
+        return false;
+    }
+    if (mSceneSampler == VK_NULL_HANDLE)
+    {
+        return false;
+    }
 
     // lazy init
-    if (mpScenePipeline == nullptr) {
+    if (mpScenePipeline == nullptr)
+    {
         mpScenePipeline = std::make_unique<Orange::Engine::Render::Pipeline>();
 
         // v1.3.0 中性化：engine 公共 API 默认值是中性的（dummy IBL ambient
@@ -816,7 +893,8 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
 
         auto r = mpScenePipeline->InitializeOffscreen(
             mRenderDevice, *mHost.assets.pAssets, width, height);
-        if (r.IsErr()) {
+        if (r.IsErr())
+        {
             ORANGE_LOG_ERROR("[OrangeEditor] Pipeline::InitializeOffscreen 失败 (code={}) —— "
                              "Scene 视口退化为占位文案",
                              static_cast<unsigned>(r.Error()));
@@ -824,7 +902,10 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
             mScenePipelineFailed = true;
             // 缩略图服务失去 Pipeline：清空注入，pending 不再烘（GetOrRequest
             // 回退文本 icon）。
-            if (mHost.thumbnails) { mHost.thumbnails->SetPipeline(nullptr); }
+            if (mHost.thumbnails)
+            {
+                mHost.thumbnails->SetPipeline(nullptr);
+            }
             return false;
         }
         // 默认 PostProcessChain —— 仅 HDR pipeline 必需的 BuiltinPostProcessChain
@@ -845,7 +926,7 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         // SyncPostProcessFromWorld（src/render/Pipeline.cpp:2064）压过 chain。
         mpScenePostProcessChain = std::make_unique<
             Orange::Engine::Render::PostProcessChain>(
-                Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
+            Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
         mpScenePipeline->SetPostProcessChain(mpScenePostProcessChain.get());
 
         // v1.3.3 GAP-2026-05-27-tonemap-operator-selection：缓存 chain 内
@@ -903,7 +984,8 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
             mHost.thumbnails->SetPipeline(mpScenePipeline.get());
         }
     }
-    else if (width != mScenePanelWidth || height != mScenePanelHeight) {
+    else if (width != mScenePanelWidth || height != mScenePanelHeight)
+    {
         mpScenePipeline->ResizeOffscreen(width, height);
         mScenePanelWidth  = width;
         mScenePanelHeight = height;
@@ -920,25 +1002,39 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
 // AddTexture(新) 路径轮换；其余情况复用。
 void EditorRenderLayer::RebindSceneDescriptorSetIfNeeded()
 {
-    if (mpScenePipeline == nullptr) { return; }
-    if (mSceneSampler == VK_NULL_HANDLE) { return; }
+    if (mpScenePipeline == nullptr)
+    {
+        return;
+    }
+    if (mSceneSampler == VK_NULL_HANDLE)
+    {
+        return;
+    }
 
     const auto* tex = mpScenePipeline->GetOffscreenColor();
-    if (tex == nullptr) { return; }
+    if (tex == nullptr)
+    {
+        return;
+    }
 
-    if (mSceneDescSet != VK_NULL_HANDLE && !mSceneDescSetDirty) {
-        return;  // 复用
+    if (mSceneDescSet != VK_NULL_HANDLE && !mSceneDescSetDirty)
+    {
+        return; // 复用
     }
 
     // 旧 set 释放 —— Pipeline.RenderOffscreen 末尾的 WaitIdle 已经把上
     // 一帧 ImGui 采样旧 view 的 GPU 工作排空，free 安全。
-    if (mSceneDescSet != VK_NULL_HANDLE) {
+    if (mSceneDescSet != VK_NULL_HANDLE)
+    {
         ImGui_ImplVulkan_RemoveTexture(mSceneDescSet);
         mSceneDescSet = VK_NULL_HANDLE;
     }
 
     auto* rawView = Orange::Renderer::Interop::GetVulkanImageView(*tex);
-    if (rawView == nullptr) { return; }
+    if (rawView == nullptr)
+    {
+        return;
+    }
     mSceneDescSet = ImGui_ImplVulkan_AddTexture(
         mSceneSampler,
         static_cast<VkImageView>(rawView),

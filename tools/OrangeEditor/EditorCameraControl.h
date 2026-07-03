@@ -57,4 +57,4 @@ bool FrameEntityCamera(EditorHost& host, Orange::Engine::Entity entity);
 // FrameEntitiesCamera）。
 bool FrameAllCamera(EditorHost& host);
 
-#endif  // ORANGE_EDITOR_EDITOR_CAMERA_CONTROL_H
+#endif // ORANGE_EDITOR_EDITOR_CAMERA_CONTROL_H

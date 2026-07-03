@@ -35,34 +35,34 @@ using Ease = ::Orange::Engine::Tween::EaseType;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) <= eps;
-}
-
-int gChecks = 0;
-void Check(bool cond, const char* what)
-{
-    ++gChecks;
-    if (!cond)
+    bool Near(float a, float b, float eps = 1e-4f)
     {
-        std::fprintf(stderr, "[ParticleSystemTest] FAILED: %s\n", what);
-        assert(cond);
+        return std::fabs(a - b) <= eps;
     }
-}
 
-float Len(const glm::vec2& v)
-{
-    return std::sqrt(v.x * v.x + v.y * v.y);
-}
+    int  gChecks = 0;
+    void Check(bool cond, const char* what)
+    {
+        ++gChecks;
+        if (!cond)
+        {
+            std::fprintf(stderr, "[ParticleSystemTest] FAILED: %s\n", what);
+            assert(cond);
+        }
+    }
 
-bool SameParticle(const Particle& a, const Particle& b)
-{
-    return Near(a.position.x, b.position.x) && Near(a.position.y, b.position.y) &&
-           Near(a.velocity.x, b.velocity.x) && Near(a.velocity.y, b.velocity.y) &&
-           Near(a.age, b.age) && Near(a.lifetime, b.lifetime) &&
-           Near(a.rotation, b.rotation) && Near(a.angularVelocity, b.angularVelocity);
-}
+    float Len(const glm::vec2& v)
+    {
+        return std::sqrt(v.x * v.x + v.y * v.y);
+    }
+
+    bool SameParticle(const Particle& a, const Particle& b)
+    {
+        return Near(a.position.x, b.position.x) && Near(a.position.y, b.position.y) &&
+               Near(a.velocity.x, b.velocity.x) && Near(a.velocity.y, b.velocity.y) &&
+               Near(a.age, b.age) && Near(a.lifetime, b.lifetime) &&
+               Near(a.rotation, b.rotation) && Near(a.angularVelocity, b.angularVelocity);
+    }
 
 } // namespace
 
@@ -71,11 +71,11 @@ int main()
     // —— Particle 查询：NormalizedAge / SizeAt / ColorAt / lifetime<=0 守卫 ——
     {
         Particle p{};
-        p.lifetime = 2.0f;
-        p.sizeBegin = 4.0f;
-        p.sizeEnd = 0.0f;
+        p.lifetime   = 2.0f;
+        p.sizeBegin  = 4.0f;
+        p.sizeEnd    = 0.0f;
         p.colorBegin = glm::vec4{1.0f, 1.0f, 1.0f, 1.0f};
-        p.colorEnd = glm::vec4{1.0f, 1.0f, 1.0f, 0.0f};
+        p.colorEnd   = glm::vec4{1.0f, 1.0f, 1.0f, 0.0f};
 
         p.age = 0.0f;
         Check(Near(p.NormalizedAge(), 0.0f), "NormalizedAge: age0 → 0");
@@ -122,7 +122,7 @@ int main()
     // —— Point 形状精确在原点 (含 SetOrigin) ——
     {
         ParticleSystem sys(16, 7);
-        EmitterConfig cfg{}; // 默认 Point
+        EmitterConfig  cfg{}; // 默认 Point
         sys.SetConfig(cfg);
         sys.SetOrigin(glm::vec2{7.0f, -2.0f});
         sys.Emit(8);
@@ -137,9 +137,9 @@ int main()
     // —— 方向速度：spread=0 → 严格沿 directionAngle (+X) ——
     {
         ParticleSystem sys(32, 3);
-        EmitterConfig cfg{};
+        EmitterConfig  cfg{};
         cfg.directionAngle = 0.0f; // +X
-        cfg.spreadAngle = 0.0f;
+        cfg.spreadAngle    = 0.0f;
         cfg.speedMin = cfg.speedMax = 5.0f;
         sys.SetConfig(cfg);
         sys.Emit(20);
@@ -153,8 +153,8 @@ int main()
     // —— Disk 形状：全在半径内 ——
     {
         ParticleSystem sys(300, 42);
-        EmitterConfig cfg{};
-        cfg.shape = EmitShape::Disk;
+        EmitterConfig  cfg{};
+        cfg.shape       = EmitShape::Disk;
         cfg.shapeRadius = 5.0f;
         sys.SetConfig(cfg);
         sys.Emit(300);
@@ -173,8 +173,8 @@ int main()
     // —— Box 形状：全在半尺寸内 ——
     {
         ParticleSystem sys(300, 99);
-        EmitterConfig cfg{};
-        cfg.shape = EmitShape::Box;
+        EmitterConfig  cfg{};
+        cfg.shape           = EmitShape::Box;
         cfg.shapeHalfExtent = glm::vec2{3.0f, 2.0f};
         sys.SetConfig(cfg);
         sys.Emit(300);
@@ -194,9 +194,9 @@ int main()
     // —— 重力积分：半隐式欧拉 v==g·dt、pos==v·dt ——
     {
         ParticleSystem sys(4, 5);
-        EmitterConfig cfg{};
+        EmitterConfig  cfg{};
         cfg.speedMin = cfg.speedMax = 0.0f; // 零初速
-        cfg.gravity = glm::vec2{0.0f, -10.0f};
+        cfg.gravity                 = glm::vec2{0.0f, -10.0f};
         cfg.lifetimeMin = cfg.lifetimeMax = 100.0f;
         sys.SetConfig(cfg);
         sys.Emit(1);
@@ -212,11 +212,11 @@ int main()
     // —— 阻尼：v *= exp(-damping·dt) ——
     {
         ParticleSystem sys(4, 6);
-        EmitterConfig cfg{};
+        EmitterConfig  cfg{};
         cfg.directionAngle = 0.0f;
-        cfg.spreadAngle = 0.0f;
+        cfg.spreadAngle    = 0.0f;
         cfg.speedMin = cfg.speedMax = 10.0f;
-        cfg.damping = 5.0f;
+        cfg.damping                 = 5.0f;
         cfg.lifetimeMin = cfg.lifetimeMax = 100.0f;
         sys.SetConfig(cfg);
         sys.Emit(1);
@@ -229,7 +229,7 @@ int main()
     // —— 寿命淘汰：均匀寿命全体在越过寿命那帧清零 ——
     {
         ParticleSystem sys(100, 8);
-        EmitterConfig cfg{};
+        EmitterConfig  cfg{};
         cfg.lifetimeMin = cfg.lifetimeMax = 1.0f;
         cfg.speedMin = cfg.speedMax = 0.0f;
         sys.SetConfig(cfg);
@@ -245,7 +245,7 @@ int main()
     // —— swap-remove：混合寿命两批，短命死、长命存活且身份正确 ——
     {
         ParticleSystem sys(100, 11);
-        EmitterConfig shortLived{};
+        EmitterConfig  shortLived{};
         shortLived.lifetimeMin = shortLived.lifetimeMax = 1.0f;
         shortLived.speedMin = shortLived.speedMax = 0.0f;
         sys.SetConfig(shortLived);
@@ -276,8 +276,8 @@ int main()
     // —— 连续发射：emitRate 按 dt 累积整数 + 保留小数余量 ——
     {
         ParticleSystem sys(1000, 13);
-        EmitterConfig cfg{};
-        cfg.emitRate = 100.0f;
+        EmitterConfig  cfg{};
+        cfg.emitRate    = 100.0f;
         cfg.lifetimeMin = cfg.lifetimeMax = 1000.0f; // 测试期不死
         cfg.speedMin = cfg.speedMax = 0.0f;
         sys.SetConfig(cfg);
@@ -293,9 +293,9 @@ int main()
     // —— dt<=0 不动：不发射、不积分、不老化 ——
     {
         ParticleSystem sys(16, 21);
-        EmitterConfig cfg{};
+        EmitterConfig  cfg{};
         cfg.emitRate = 1000.0f;
-        cfg.gravity = glm::vec2{0.0f, -50.0f};
+        cfg.gravity  = glm::vec2{0.0f, -50.0f};
         sys.SetConfig(cfg);
         sys.Emit(5);
         sys.Update(0.0f);
@@ -309,18 +309,18 @@ int main()
     // —— 确定性：同 seed+config+调用序 → 逐粒子完全相同 (穿越大量死亡) ——
     {
         EmitterConfig cfg{};
-        cfg.shape = EmitShape::Disk;
-        cfg.shapeRadius = 4.0f;
-        cfg.spreadAngle = 3.14159265f; // 全向
-        cfg.speedMin = 2.0f;
-        cfg.speedMax = 8.0f;
-        cfg.lifetimeMin = 0.1f;
-        cfg.lifetimeMax = 0.3f; // 短命 → 更新中大量死亡
-        cfg.gravity = glm::vec2{0.0f, -9.8f};
-        cfg.damping = 1.5f;
-        cfg.sizeJitter = 0.3f;
-        cfg.rotationMin = 0.0f;
-        cfg.rotationMax = 6.28f;
+        cfg.shape              = EmitShape::Disk;
+        cfg.shapeRadius        = 4.0f;
+        cfg.spreadAngle        = 3.14159265f; // 全向
+        cfg.speedMin           = 2.0f;
+        cfg.speedMax           = 8.0f;
+        cfg.lifetimeMin        = 0.1f;
+        cfg.lifetimeMax        = 0.3f; // 短命 → 更新中大量死亡
+        cfg.gravity            = glm::vec2{0.0f, -9.8f};
+        cfg.damping            = 1.5f;
+        cfg.sizeJitter         = 0.3f;
+        cfg.rotationMin        = 0.0f;
+        cfg.rotationMax        = 6.28f;
         cfg.angularVelocityMin = -1.0f;
         cfg.angularVelocityMax = 1.0f;
 

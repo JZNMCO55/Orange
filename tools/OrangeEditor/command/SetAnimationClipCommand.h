@@ -35,12 +35,12 @@ struct EditorHost;
 class SetAnimationClipCommand : public ICommand
 {
 public:
-    SetAnimationClipCommand(EditorHost&                                host,
-                            Orange::Engine::Entity                     entity,
-                            Orange::Engine::Animation::AnimationClip   oldClip,
-                            Orange::Engine::Animation::AnimationClip   newClip,
-                            std::string                                mergeKey,
-                            std::string                                label);
+    SetAnimationClipCommand(EditorHost&                              host,
+                            Orange::Engine::Entity                   entity,
+                            Orange::Engine::Animation::AnimationClip oldClip,
+                            Orange::Engine::Animation::AnimationClip newClip,
+                            std::string                              mergeKey,
+                            std::string                              label);
 
     void        Execute() override;
     void        Undo() override;
@@ -59,8 +59,8 @@ private:
     Orange::Engine::Animation::AnimationClip mNewClip;
     // GetType 配对键：同 key 才考虑 merge。拖动类用稳定 key（同一 key 连续
     // 帧合并成一条），离散编辑用唯一 key（永不 merge）。
-    std::string                              mMergeKey;
-    std::string                              mLabel;
+    std::string mMergeKey;
+    std::string mLabel;
 };
 
-#endif  // ORANGE_EDITOR_COMMAND_SETANIMATIONCLIPCOMMAND_H
+#endif // ORANGE_EDITOR_COMMAND_SETANIMATIONCLIPCOMMAND_H

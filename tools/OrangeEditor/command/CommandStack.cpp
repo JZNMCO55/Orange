@@ -7,114 +7,136 @@
 namespace
 {
 
-// CommandGroup —— 原子化打包多条 ICommand 的 ICommand 子类。
-//
-// 由 CommandStack::EndGroup 构造：
-//   * Execute() 顺序执行子命令（构造时的 push_back 顺序）；
-//   * Undo() 反序撤销（先 push 进来的最后 undo）；
-//   * GetType() 返回组名——CommandStack 的 EndGroup 入栈 merge 路径靠它
-//     做同名判别；
-//   * Merge(other) 把 other 的子命令并入 self——按 sub-command GetType 配
-//     对，找到匹配的就调 sub-command Merge；不匹配的 append 到 self 末
-//     尾。语义：两组同名 EndGroup 连续触发时，self 内的字段编辑都被 other
-//     的最新值覆盖（mNewValue 滚到最新），栈上仍是单条 group 条目。
-//
-// 命名约定：组名（mName）字符串字面量静态生命周期，由 CommandStack 持有
-// 不复制。CommandGroup 仅引用——若调用方传入临时 std::string::c_str() 则
-// caller 自己负责。
-class CommandGroup final : public ICommand
-{
-public:
-    CommandGroup(const char*                            name,
-                 std::vector<std::unique_ptr<ICommand>> children)
-        : mName(name != nullptr ? name : "?")
-        , mChildren(std::move(children))
-    {}
-
-    void Execute() override
+    // CommandGroup —— 原子化打包多条 ICommand 的 ICommand 子类。
+    //
+    // 由 CommandStack::EndGroup 构造：
+    //   * Execute() 顺序执行子命令（构造时的 push_back 顺序）；
+    //   * Undo() 反序撤销（先 push 进来的最后 undo）；
+    //   * GetType() 返回组名——CommandStack 的 EndGroup 入栈 merge 路径靠它
+    //     做同名判别；
+    //   * Merge(other) 把 other 的子命令并入 self——按 sub-command GetType 配
+    //     对，找到匹配的就调 sub-command Merge；不匹配的 append 到 self 末
+    //     尾。语义：两组同名 EndGroup 连续触发时，self 内的字段编辑都被 other
+    //     的最新值覆盖（mNewValue 滚到最新），栈上仍是单条 group 条目。
+    //
+    // 命名约定：组名（mName）字符串字面量静态生命周期，由 CommandStack 持有
+    // 不复制。CommandGroup 仅引用——若调用方传入临时 std::string::c_str() 则
+    // caller 自己负责。
+    class CommandGroup final : public ICommand
     {
-        for (auto& cmd : mChildren)
+    public:
+        CommandGroup(const char*                            name,
+                     std::vector<std::unique_ptr<ICommand>> children)
+            : mName(name != nullptr ? name : "?"), mChildren(std::move(children))
         {
-            if (cmd != nullptr) { cmd->Execute(); }
         }
-    }
 
-    void Undo() override
-    {
-        // 反序 undo：保证字段在多 sub-command 之间的依赖关系正确（如 add
-        // entity 命令必须先于在该 entity 上的 SetField 命令，undo 时反过
-        // 来）。本期所有 sub-command 都是 SetFieldValueCommand 类型，子
-        // 命令之间无相互依赖；预留反序逻辑给后续可能引入的复合命令。
-        for (auto it = mChildren.rbegin(); it != mChildren.rend(); ++it)
+        void Execute() override
         {
-            auto& cmd = *it;
-            if (cmd != nullptr) { cmd->Undo(); }
-        }
-    }
-
-    const char* GetType() const override { return mName; }
-
-    bool Merge(ICommand& newer) override
-    {
-        // 仅同类型（其它 CommandGroup）才尝试 merge。本类的 GetType ==
-        // mName 唯一性已由 CommandStack 在入栈前判别（同名 group 才进 Merge
-        // 路径），这里再加一层 dynamic_cast 防呆：跨类型误调直接拒绝。
-        auto* g = dynamic_cast<CommandGroup*>(&newer);
-        if (g == nullptr) { return false; }
-
-        // 把 g 的子命令按 GetType 在 self 内找配对项。匹配则 sub-Merge；不
-        // 匹配则 append 到 self 末尾。注意：sub-Merge 失败（子命令自身拒绝
-        // 合并，如 SetFieldValueCommand 的 entity / fieldKey 不匹配）也走
-        // append 路径——保留 g 的该子命令到 self 末尾，避免丢效果。
-        //
-        // 复杂度 O(n*m)：n = self 子命令数，m = g 子命令数。group 内典型
-        // 子命令 ≤ 一双数（多字段 gizmo 拖动），不构成 hot path。
-        for (auto& newerCmd : g->mChildren)
-        {
-            if (newerCmd == nullptr) { continue; }
-            bool merged = false;
-            for (auto& existing : mChildren)
+            for (auto& cmd : mChildren)
             {
-                if (existing == nullptr) { continue; }
-                if (std::string_view(existing->GetType())
-                    == std::string_view(newerCmd->GetType())
-                    && existing->Merge(*newerCmd))
+                if (cmd != nullptr)
                 {
-                    merged = true;
-                    break;
+                    cmd->Execute();
                 }
             }
-            if (!merged)
+        }
+
+        void Undo() override
+        {
+            // 反序 undo：保证字段在多 sub-command 之间的依赖关系正确（如 add
+            // entity 命令必须先于在该 entity 上的 SetField 命令，undo 时反过
+            // 来）。本期所有 sub-command 都是 SetFieldValueCommand 类型，子
+            // 命令之间无相互依赖；预留反序逻辑给后续可能引入的复合命令。
+            for (auto it = mChildren.rbegin(); it != mChildren.rend(); ++it)
             {
-                mChildren.push_back(std::move(newerCmd));
+                auto& cmd = *it;
+                if (cmd != nullptr)
+                {
+                    cmd->Undo();
+                }
             }
         }
-        // 不论 sub-Merge 是否全成，整 group Merge 返回 true——表示"newer
-        // 已被 self 吸收"。CommandStack 入栈路径需要这个返回值决定不再
-        // push newer，避免栈重复。
+
+        const char* GetType() const override { return mName; }
+
+        bool Merge(ICommand& newer) override
+        {
+            // 仅同类型（其它 CommandGroup）才尝试 merge。本类的 GetType ==
+            // mName 唯一性已由 CommandStack 在入栈前判别（同名 group 才进 Merge
+            // 路径），这里再加一层 dynamic_cast 防呆：跨类型误调直接拒绝。
+            auto* g = dynamic_cast<CommandGroup*>(&newer);
+            if (g == nullptr)
+            {
+                return false;
+            }
+
+            // 把 g 的子命令按 GetType 在 self 内找配对项。匹配则 sub-Merge；不
+            // 匹配则 append 到 self 末尾。注意：sub-Merge 失败（子命令自身拒绝
+            // 合并，如 SetFieldValueCommand 的 entity / fieldKey 不匹配）也走
+            // append 路径——保留 g 的该子命令到 self 末尾，避免丢效果。
+            //
+            // 复杂度 O(n*m)：n = self 子命令数，m = g 子命令数。group 内典型
+            // 子命令 ≤ 一双数（多字段 gizmo 拖动），不构成 hot path。
+            for (auto& newerCmd : g->mChildren)
+            {
+                if (newerCmd == nullptr)
+                {
+                    continue;
+                }
+                bool merged = false;
+                for (auto& existing : mChildren)
+                {
+                    if (existing == nullptr)
+                    {
+                        continue;
+                    }
+                    if (std::string_view(existing->GetType()) == std::string_view(newerCmd->GetType()) && existing->Merge(*newerCmd))
+                    {
+                        merged = true;
+                        break;
+                    }
+                }
+                if (!merged)
+                {
+                    mChildren.push_back(std::move(newerCmd));
+                }
+            }
+            // 不论 sub-Merge 是否全成，整 group Merge 返回 true——表示"newer
+            // 已被 self 吸收"。CommandStack 入栈路径需要这个返回值决定不再
+            // push newer，避免栈重复。
+            return true;
+        }
+
+    private:
+        const char*                            mName;
+        std::vector<std::unique_ptr<ICommand>> mChildren;
+    };
+
+    // 工具：与栈顶（或更早条目）同名 group 的 in-place merge。
+    // 调用方保证 stack[idx] 是 CommandGroup 且 name 与 incoming group 相同。
+    // merge 成功后重新 Execute stack[idx]，让 mNewValue 滚到最新值。
+    bool MergeIntoExistingGroup(std::vector<std::unique_ptr<ICommand>>& stack,
+                                int                                     idx,
+                                std::unique_ptr<ICommand>&              incoming)
+    {
+        if (idx < 0 || idx >= static_cast<int>(stack.size()))
+        {
+            return false;
+        }
+        if (stack[idx] == nullptr || incoming == nullptr)
+        {
+            return false;
+        }
+        if (!stack[idx]->Merge(*incoming))
+        {
+            return false;
+        }
+        stack[idx]->Execute();
         return true;
     }
 
-private:
-    const char*                            mName;
-    std::vector<std::unique_ptr<ICommand>> mChildren;
-};
-
-// 工具：与栈顶（或更早条目）同名 group 的 in-place merge。
-// 调用方保证 stack[idx] 是 CommandGroup 且 name 与 incoming group 相同。
-// merge 成功后重新 Execute stack[idx]，让 mNewValue 滚到最新值。
-bool MergeIntoExistingGroup(std::vector<std::unique_ptr<ICommand>>& stack,
-                            int                                     idx,
-                            std::unique_ptr<ICommand>&              incoming)
-{
-    if (idx < 0 || idx >= static_cast<int>(stack.size())) { return false; }
-    if (stack[idx] == nullptr || incoming == nullptr)    { return false; }
-    if (!stack[idx]->Merge(*incoming))                    { return false; }
-    stack[idx]->Execute();
-    return true;
-}
-
-}  // anonymous namespace
+} // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // CommandStack
@@ -125,7 +147,10 @@ CommandStack::~CommandStack() = default;
 
 void CommandStack::Push(std::unique_ptr<ICommand> cmd)
 {
-    if (cmd == nullptr) { return; }
+    if (cmd == nullptr)
+    {
+        return;
+    }
 
     // ---- 组内分支 -------------------------------------------------------
     //
@@ -139,16 +164,19 @@ void CommandStack::Push(std::unique_ptr<ICommand> cmd)
     if (mInGroup)
     {
         cmd->Execute();
-        if (!mPendingGroup.empty()
-            && mPendingGroup.back() != nullptr
-            && std::string_view(mPendingGroup.back()->GetType()) == cmd->GetType()
-            && mPendingGroup.back()->Merge(*cmd))
+        if (!mPendingGroup.empty() && mPendingGroup.back() != nullptr && std::string_view(mPendingGroup.back()->GetType()) == cmd->GetType() && mPendingGroup.back()->Merge(*cmd))
         {
-            if (mOnChanged) { mOnChanged(); }
+            if (mOnChanged)
+            {
+                mOnChanged();
+            }
             return;
         }
         mPendingGroup.push_back(std::move(cmd));
-        if (mOnChanged) { mOnChanged(); }
+        if (mOnChanged)
+        {
+            mOnChanged();
+        }
         return;
     }
 
@@ -167,12 +195,13 @@ void CommandStack::Push(std::unique_ptr<ICommand> cmd)
     // 尝试与栈顶同类命令 coalesce：
     //   1. GetType() 相同 —— 进一步调 Merge
     //   2. Merge 返回 true   —— 合并成功，重新执行栈顶命令，不 push 新条目
-    if (mIndex >= 0
-        && std::string_view(mStack[mIndex]->GetType()) == cmd->GetType()
-        && mStack[mIndex]->Merge(*cmd))
+    if (mIndex >= 0 && std::string_view(mStack[mIndex]->GetType()) == cmd->GetType() && mStack[mIndex]->Merge(*cmd))
     {
         mStack[mIndex]->Execute();
-        if (mOnChanged) { mOnChanged(); }
+        if (mOnChanged)
+        {
+            mOnChanged();
+        }
         return;
     }
 
@@ -188,7 +217,10 @@ void CommandStack::Push(std::unique_ptr<ICommand> cmd)
         --mIndex;
     }
 
-    if (mOnChanged) { mOnChanged(); }
+    if (mOnChanged)
+    {
+        mOnChanged();
+    }
 }
 
 void CommandStack::BeginGroup(const char* name, MergeMode mode)
@@ -196,7 +228,7 @@ void CommandStack::BeginGroup(const char* name, MergeMode mode)
     // 嵌套 BeginGroup —— release 期 forgiving：把已有 pending 命令一同并
     // 入新组，避免 caller 漏调 EndGroup 卡死状态。debug 期断言提醒。
     assert(!mInGroup && "Nested BeginGroup is not supported");
-    (void)0;  // assert 上方已显式断言；release 走 forgiving 行为下文
+    (void)0; // assert 上方已显式断言；release 走 forgiving 行为下文
 
     mInGroup   = true;
     mGroupName = (name != nullptr) ? name : "Group";
@@ -209,7 +241,10 @@ void CommandStack::BeginGroup(const char* name, MergeMode mode)
 void CommandStack::EndGroup()
 {
     assert(mInGroup && "EndGroup without matching BeginGroup");
-    if (!mInGroup) { return; }
+    if (!mInGroup)
+    {
+        return;
+    }
     mInGroup = false;
 
     // 空组直接丢弃（typical：caller BeginGroup 后没产生任何编辑，比如用
@@ -225,7 +260,7 @@ void CommandStack::EndGroup()
     // true 期间由 BeginGroup 设置；mPendingGroup move 出去后清空。
     std::unique_ptr<ICommand> grouped =
         std::make_unique<CommandGroup>(mGroupName, std::move(mPendingGroup));
-    mPendingGroup.clear();  // move 后 source 可能保持已分配 capacity，显式 clear
+    mPendingGroup.clear(); // move 后 source 可能保持已分配 capacity，显式 clear
 
     // 先截断 redo 历史（与 Push 无组路径对齐）：insertion point 之后的命令在
     // 任何新条目（无论 merge 进既有 group 还是新 push）落地后都不再可达。若放到
@@ -245,13 +280,19 @@ void CommandStack::EndGroup()
     if (mGroupMode != MergeMode::Disable && mIndex >= 0)
     {
         const std::string_view groupedName = grouped->GetType();
-        const int searchEnd = (mGroupMode == MergeMode::All) ? 0 : mIndex;
+        const int              searchEnd   = (mGroupMode == MergeMode::All) ? 0 : mIndex;
         for (int i = mIndex; i >= searchEnd; --i)
         {
-            if (mStack[i] == nullptr) { continue; }
+            if (mStack[i] == nullptr)
+            {
+                continue;
+            }
             if (std::string_view(mStack[i]->GetType()) != groupedName)
             {
-                if (mGroupMode == MergeMode::Ends) { break; }  // 仅栈顶检查
+                if (mGroupMode == MergeMode::Ends)
+                {
+                    break;
+                } // 仅栈顶检查
                 continue;
             }
             if (MergeIntoExistingGroup(mStack, i, grouped))
@@ -259,7 +300,10 @@ void CommandStack::EndGroup()
                 merged = true;
                 break;
             }
-            if (mGroupMode == MergeMode::Ends) { break; }
+            if (mGroupMode == MergeMode::Ends)
+            {
+                break;
+            }
         }
     }
 
@@ -281,7 +325,10 @@ void CommandStack::EndGroup()
 
     // 非空 EndGroup（无论 merged 还是新 push）都视为一次有效变更。空组上方
     // 已 early return，不会到达这里。
-    if (mOnChanged) { mOnChanged(); }
+    if (mOnChanged)
+    {
+        mOnChanged();
+    }
 }
 
 bool CommandStack::InGroup() const
@@ -291,18 +338,30 @@ bool CommandStack::InGroup() const
 
 void CommandStack::Undo()
 {
-    if (!CanUndo()) { return; }
+    if (!CanUndo())
+    {
+        return;
+    }
     mStack[mIndex]->Undo();
     --mIndex;
-    if (mOnChanged) { mOnChanged(); }
+    if (mOnChanged)
+    {
+        mOnChanged();
+    }
 }
 
 void CommandStack::Redo()
 {
-    if (!CanRedo()) { return; }
+    if (!CanRedo())
+    {
+        return;
+    }
     ++mIndex;
     mStack[mIndex]->Execute();
-    if (mOnChanged) { mOnChanged(); }
+    if (mOnChanged)
+    {
+        mOnChanged();
+    }
 }
 
 void CommandStack::Clear()
@@ -336,13 +395,19 @@ const char* CommandStack::PeekUndoLabel() const
 {
     // 下一次 Undo 作用在 mStack[mIndex]（见 Undo()）——空栈 / 全撤销时
     // CanUndo 为 false，返回 nullptr。
-    if (!CanUndo()) { return nullptr; }
+    if (!CanUndo())
+    {
+        return nullptr;
+    }
     return mStack[static_cast<std::size_t>(mIndex)]->GetLabel();
 }
 
 const char* CommandStack::PeekRedoLabel() const
 {
     // 下一次 Redo 作用在 mStack[mIndex + 1]（见 Redo()）。
-    if (!CanRedo()) { return nullptr; }
+    if (!CanRedo())
+    {
+        return nullptr;
+    }
     return mStack[static_cast<std::size_t>(mIndex + 1)]->GetLabel();
 }

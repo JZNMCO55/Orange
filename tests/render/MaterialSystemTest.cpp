@@ -37,9 +37,9 @@
 #include <vector>
 
 #if defined(_WIN32)
-    #define NOMINMAX
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 using Orange::Engine::ResultCode;
@@ -55,355 +55,363 @@ using Orange::Engine::Render::ShaderTemplateDesc;
 namespace
 {
 
-// 与 BuiltinMaterials.cpp 内部 GetExecutableDir 同思路——把内置 shader
-// 的真实绝对路径解析出来，作为自定义模板的 SPIR-V 占位路径，这样
-// AssetRegistry::Load<ShaderAsset> 能真正命中文件、产生有效 handle，
-// 验证"自定义 desc 注册"路径走通。
-std::filesystem::path GetExecutableDir()
-{
+    // 与 BuiltinMaterials.cpp 内部 GetExecutableDir 同思路——把内置 shader
+    // 的真实绝对路径解析出来，作为自定义模板的 SPIR-V 占位路径，这样
+    // AssetRegistry::Load<ShaderAsset> 能真正命中文件、产生有效 handle，
+    // 验证"自定义 desc 注册"路径走通。
+    std::filesystem::path GetExecutableDir()
+    {
 #if defined(_WIN32)
-    wchar_t buffer[MAX_PATH];
-    const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (len == 0 || len == MAX_PATH)
-    {
+        wchar_t     buffer[MAX_PATH];
+        const DWORD len = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        if (len == 0 || len == MAX_PATH)
+        {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path(std::wstring(buffer, len)).parent_path();
+#else
         return std::filesystem::current_path();
-    }
-    return std::filesystem::path(std::wstring(buffer, len)).parent_path();
-#else
-    return std::filesystem::current_path();
 #endif
-}
+    }
 
-std::filesystem::path BuiltinShaderPath(const char* relative)
-{
-    return GetExecutableDir() / relative;
-}
+    std::filesystem::path BuiltinShaderPath(const char* relative)
+    {
+        return GetExecutableDir() / relative;
+    }
 
-// 1. 默认 MaterialSystem 空表 + FindTemplate 行为
-void TestEmptyConstruction()
-{
-    AssetRegistry registry;
-    MaterialSystem matSys(registry);
+    // 1. 默认 MaterialSystem 空表 + FindTemplate 行为
+    void TestEmptyConstruction()
+    {
+        AssetRegistry  registry;
+        MaterialSystem matSys(registry);
 
-    assert(matSys.TemplateCount() == 0);
-    assert(matSys.FindTemplate("toon")        == nullptr);
-    assert(matSys.FindTemplate("rim_light")   == nullptr);
-    assert(matSys.FindTemplate("nonexistent") == nullptr);
-    assert(matSys.FindTemplate("")            == nullptr);
+        assert(matSys.TemplateCount() == 0);
+        assert(matSys.FindTemplate("toon") == nullptr);
+        assert(matSys.FindTemplate("rim_light") == nullptr);
+        assert(matSys.FindTemplate("nonexistent") == nullptr);
+        assert(matSys.FindTemplate("") == nullptr);
 
-    std::fprintf(stdout, "  [PASS] MaterialSystem 空表与 FindTemplate 默认行为\n");
-}
+        std::fprintf(stdout, "  [PASS] MaterialSystem 空表与 FindTemplate 默认行为\n");
+    }
 
-// 2. RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr
-void TestRegisterBuiltins()
-{
-    AssetRegistry registry;
-    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
-    assert(reg.IsOk());
+    // 2. RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr
+    void TestRegisterBuiltins()
+    {
+        AssetRegistry registry;
+        auto          reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        assert(reg.IsOk());
 
-    MaterialSystem matSys(registry);
-    auto result = matSys.RegisterBuiltins();
-    assert(result.IsOk());
-    // textured / toon / rim_light / dissolve / emissive / pbr 六件内置模板。
-    assert(matSys.TemplateCount() == 6);
+        MaterialSystem matSys(registry);
+        auto           result = matSys.RegisterBuiltins();
+        assert(result.IsOk());
+        // textured / toon / rim_light / dissolve / emissive / pbr 六件内置模板。
+        assert(matSys.TemplateCount() == 6);
 
-    const Material* textured = matSys.FindTemplate("textured");
-    const Material* toon     = matSys.FindTemplate("toon");
-    const Material* rim      = matSys.FindTemplate("rim_light");
-    const Material* dissolve = matSys.FindTemplate("dissolve");
-    const Material* emissive = matSys.FindTemplate("emissive");
-    const Material* pbr      = matSys.FindTemplate("pbr");
-    assert(textured != nullptr);
-    assert(toon     != nullptr);
-    assert(rim      != nullptr);
-    assert(dissolve != nullptr);
-    assert(emissive != nullptr);
-    assert(pbr      != nullptr);
-    assert(textured->name == "textured");
-    assert(toon->name     == "toon");
-    assert(rim->name      == "rim_light");
-    assert(dissolve->name == "dissolve");
-    assert(emissive->name == "emissive");
-    assert(pbr->name      == "pbr");
-    assert(textured->vertexShader.IsValid());
-    assert(textured->fragmentShader.IsValid());
-    assert(toon->vertexShader.IsValid());
-    assert(toon->fragmentShader.IsValid());
-    assert(rim->vertexShader.IsValid());
-    assert(rim->fragmentShader.IsValid());
-    assert(dissolve->vertexShader.IsValid());
-    assert(dissolve->fragmentShader.IsValid());
-    assert(emissive->vertexShader.IsValid());
-    assert(emissive->fragmentShader.IsValid());
-    assert(pbr->vertexShader.IsValid());
-    assert(pbr->fragmentShader.IsValid());
+        const Material* textured = matSys.FindTemplate("textured");
+        const Material* toon     = matSys.FindTemplate("toon");
+        const Material* rim      = matSys.FindTemplate("rim_light");
+        const Material* dissolve = matSys.FindTemplate("dissolve");
+        const Material* emissive = matSys.FindTemplate("emissive");
+        const Material* pbr      = matSys.FindTemplate("pbr");
+        assert(textured != nullptr);
+        assert(toon != nullptr);
+        assert(rim != nullptr);
+        assert(dissolve != nullptr);
+        assert(emissive != nullptr);
+        assert(pbr != nullptr);
+        assert(textured->name == "textured");
+        assert(toon->name == "toon");
+        assert(rim->name == "rim_light");
+        assert(dissolve->name == "dissolve");
+        assert(emissive->name == "emissive");
+        assert(pbr->name == "pbr");
+        assert(textured->vertexShader.IsValid());
+        assert(textured->fragmentShader.IsValid());
+        assert(toon->vertexShader.IsValid());
+        assert(toon->fragmentShader.IsValid());
+        assert(rim->vertexShader.IsValid());
+        assert(rim->fragmentShader.IsValid());
+        assert(dissolve->vertexShader.IsValid());
+        assert(dissolve->fragmentShader.IsValid());
+        assert(emissive->vertexShader.IsValid());
+        assert(emissive->fragmentShader.IsValid());
+        assert(pbr->vertexShader.IsValid());
+        assert(pbr->fragmentShader.IsValid());
 
-    // textured / toon / rim_light push-constant 收为 {uMVP, uModel} = 2 项；
-    // textured 多带一个 textureSlot 占位。pbr 扩出 uBaseColor + uMRA + uEmissive
-    // 三条 vec4，共 5 项（uMVP / uModel / uBaseColor / uMRA / uEmissive）；
-    // textureSlots 自 GAP-2026-05-25 A2/G1 起为 set 1 的贴图槽（baseColor /
-    // normal / metalRough / ao，binding 0..3），emissive 通道落地后加 binding 4
-    // emissive，共 5 槽，Pipeline 按 MaterialInstance 绑定（未绑喂 default 贴图）。
-    assert(textured->uniforms.size()     == 2);
-    assert(textured->textureSlots.size() == 1);
-    assert(toon->uniforms.size() == 2);
-    assert(rim->uniforms.size()  == 2);
-    assert(pbr->uniforms.size()     == 5);
-    assert(pbr->textureSlots.size() == 5);
-    assert(pbr->textureSlots[0].binding == 0 && pbr->textureSlots[0].name == "uBaseColorTex");
-    assert(pbr->textureSlots[1].binding == 1 && pbr->textureSlots[1].name == "uNormalTex");
-    assert(pbr->textureSlots[2].binding == 2 && pbr->textureSlots[2].name == "uMetalRoughTex");
-    assert(pbr->textureSlots[3].binding == 3 && pbr->textureSlots[3].name == "uAoTex");
-    assert(pbr->textureSlots[4].binding == 4 && pbr->textureSlots[4].name == "uEmissiveTex");
+        // textured / toon / rim_light push-constant 收为 {uMVP, uModel} = 2 项；
+        // textured 多带一个 textureSlot 占位。pbr 扩出 uBaseColor + uMRA + uEmissive
+        // 三条 vec4，共 5 项（uMVP / uModel / uBaseColor / uMRA / uEmissive）；
+        // textureSlots 自 GAP-2026-05-25 A2/G1 起为 set 1 的贴图槽（baseColor /
+        // normal / metalRough / ao，binding 0..3），emissive 通道落地后加 binding 4
+        // emissive，共 5 槽，Pipeline 按 MaterialInstance 绑定（未绑喂 default 贴图）。
+        assert(textured->uniforms.size() == 2);
+        assert(textured->textureSlots.size() == 1);
+        assert(toon->uniforms.size() == 2);
+        assert(rim->uniforms.size() == 2);
+        assert(pbr->uniforms.size() == 5);
+        assert(pbr->textureSlots.size() == 5);
+        assert(pbr->textureSlots[0].binding == 0 && pbr->textureSlots[0].name == "uBaseColorTex");
+        assert(pbr->textureSlots[1].binding == 1 && pbr->textureSlots[1].name == "uNormalTex");
+        assert(pbr->textureSlots[2].binding == 2 && pbr->textureSlots[2].name == "uMetalRoughTex");
+        assert(pbr->textureSlots[3].binding == 3 && pbr->textureSlots[3].name == "uAoTex");
+        assert(pbr->textureSlots[4].binding == 4 && pbr->textureSlots[4].name == "uEmissiveTex");
 
-    // usesTangentVertex：只有 pbr（切线空间法线贴图）置 true，其余默认 false。
-    // 内置路径的真值——下面 parity 测试会把它与数据驱动 JSON 路径对齐。
-    assert(pbr->usesTangentVertex      == true);
-    assert(toon->usesTangentVertex     == false);
-    assert(textured->usesTangentVertex == false);
-    assert(rim->usesTangentVertex      == false);
-    assert(dissolve->usesTangentVertex == false);
-    assert(emissive->usesTangentVertex == false);
+        // usesTangentVertex：只有 pbr（切线空间法线贴图）置 true，其余默认 false。
+        // 内置路径的真值——下面 parity 测试会把它与数据驱动 JSON 路径对齐。
+        assert(pbr->usesTangentVertex == true);
+        assert(toon->usesTangentVertex == false);
+        assert(textured->usesTangentVertex == false);
+        assert(rim->usesTangentVertex == false);
+        assert(dissolve->usesTangentVertex == false);
+        assert(emissive->usesTangentVertex == false);
 
-    std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr\n");
-}
+        std::fprintf(stdout, "  [PASS] RegisterBuiltins 注册 textured + toon + rim_light + dissolve + emissive + pbr\n");
+    }
 
-// 3. 自定义 ShaderTemplateDesc 注册
-void TestRegisterCustomTemplate()
-{
-    AssetRegistry registry;
-    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
-    assert(reg.IsOk());
+    // 3. 自定义 ShaderTemplateDesc 注册
+    void TestRegisterCustomTemplate()
+    {
+        AssetRegistry registry;
+        auto          reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        assert(reg.IsOk());
 
-    MaterialSystem matSys(registry);
+        MaterialSystem matSys(registry);
 
-    ShaderTemplateDesc desc;
-    desc.name              = "test_template";
-    desc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
-    desc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
-    desc.uniforms = {
-        {"uColor",  MaterialUniformType::Vec3 },
-        {"uAlpha",  MaterialUniformType::Float},
-        {"uMatrix", MaterialUniformType::Mat4 },
-    };
-    desc.textureSlots = {
-        {0, "uMainTex"},
-    };
+        ShaderTemplateDesc desc;
+        desc.name              = "test_template";
+        desc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
+        desc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
+        desc.uniforms          = {
+            {"uColor", MaterialUniformType::Vec3},
+            {"uAlpha", MaterialUniformType::Float},
+            {"uMatrix", MaterialUniformType::Mat4},
+        };
+        desc.textureSlots = {
+            {0, "uMainTex"},
+        };
 
-    auto result = matSys.RegisterTemplate(desc);
-    assert(result.IsOk());
-    assert(matSys.TemplateCount() == 1);
+        auto result = matSys.RegisterTemplate(desc);
+        assert(result.IsOk());
+        assert(matSys.TemplateCount() == 1);
 
-    const Material* mat = matSys.FindTemplate("test_template");
-    assert(mat != nullptr);
-    assert(mat->name == "test_template");
-    assert(mat->uniforms.size()     == 3);
-    assert(mat->textureSlots.size() == 1);
-    assert(mat->textureSlots[0].binding == 0u);
-    assert(mat->textureSlots[0].name    == "uMainTex");
-    // SPIR-V 真实存在 → handle 应该有效
-    assert(mat->vertexShader.IsValid());
-    assert(mat->fragmentShader.IsValid());
+        const Material* mat = matSys.FindTemplate("test_template");
+        assert(mat != nullptr);
+        assert(mat->name == "test_template");
+        assert(mat->uniforms.size() == 3);
+        assert(mat->textureSlots.size() == 1);
+        assert(mat->textureSlots[0].binding == 0u);
+        assert(mat->textureSlots[0].name == "uMainTex");
+        // SPIR-V 真实存在 → handle 应该有效
+        assert(mat->vertexShader.IsValid());
+        assert(mat->fragmentShader.IsValid());
 
-    std::fprintf(stdout, "  [PASS] 自定义 ShaderTemplateDesc 注册路径\n");
-}
+        std::fprintf(stdout, "  [PASS] 自定义 ShaderTemplateDesc 注册路径\n");
+    }
 
-// 4. 重名注册返回 AlreadyExists、表内不被覆盖
-void TestDuplicateNameRejected()
-{
-    AssetRegistry registry;
-    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
-    assert(reg.IsOk());
+    // 4. 重名注册返回 AlreadyExists、表内不被覆盖
+    void TestDuplicateNameRejected()
+    {
+        AssetRegistry registry;
+        auto          reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        assert(reg.IsOk());
 
-    MaterialSystem matSys(registry);
-    matSys.RegisterBuiltins();
+        MaterialSystem matSys(registry);
+        matSys.RegisterBuiltins();
 
-    // 再次注册一个同名 "toon" 的自定义 desc，但 uniforms 故意不同——
-    // 如果错误路径覆盖了原表，FindTemplate("toon") 后 uniforms.size 就
-    // 会变成 1 而不是原本的 5。
-    ShaderTemplateDesc dupDesc;
-    dupDesc.name              = "toon";
-    dupDesc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
-    dupDesc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
-    dupDesc.uniforms = {
-        {"uOverride", MaterialUniformType::Float},
-    };
+        // 再次注册一个同名 "toon" 的自定义 desc，但 uniforms 故意不同——
+        // 如果错误路径覆盖了原表，FindTemplate("toon") 后 uniforms.size 就
+        // 会变成 1 而不是原本的 5。
+        ShaderTemplateDesc dupDesc;
+        dupDesc.name              = "toon";
+        dupDesc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
+        dupDesc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
+        dupDesc.uniforms          = {
+            {"uOverride", MaterialUniformType::Float},
+        };
 
-    auto result = matSys.RegisterTemplate(dupDesc);
-    assert(result.IsErr());
-    assert(result.Error() == ResultCode::AlreadyExists);
-    // textured + toon + rim_light + dissolve + emissive + pbr 六件内置模板。
-    assert(matSys.TemplateCount() == 6);
+        auto result = matSys.RegisterTemplate(dupDesc);
+        assert(result.IsErr());
+        assert(result.Error() == ResultCode::AlreadyExists);
+        // textured + toon + rim_light + dissolve + emissive + pbr 六件内置模板。
+        assert(matSys.TemplateCount() == 6);
 
-    const Material* toon = matSys.FindTemplate("toon");
-    assert(toon != nullptr);
-    assert(toon->uniforms.size() == 2);  // 没被 dupDesc 覆盖（Task 07 后 schema = uMVP+uModel）
+        const Material* toon = matSys.FindTemplate("toon");
+        assert(toon != nullptr);
+        assert(toon->uniforms.size() == 2); // 没被 dupDesc 覆盖（Task 07 后 schema = uMVP+uModel）
 
-    std::fprintf(stdout, "  [PASS] 重名注册返回 AlreadyExists 且不覆盖原表\n");
-}
+        std::fprintf(stdout, "  [PASS] 重名注册返回 AlreadyExists 且不覆盖原表\n");
+    }
 
-// 5. CreateInstance 路径
-void TestCreateInstance()
-{
-    AssetRegistry registry;
-    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
-    assert(reg.IsOk());
+    // 5. CreateInstance 路径
+    void TestCreateInstance()
+    {
+        AssetRegistry registry;
+        auto          reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        assert(reg.IsOk());
 
-    MaterialSystem matSys(registry);
-    matSys.RegisterBuiltins();
+        MaterialSystem matSys(registry);
+        matSys.RegisterBuiltins();
 
-    auto toonInst = matSys.CreateInstance("toon");
-    assert(toonInst != nullptr);
-    const Material* boundMat = toonInst->GetMaterial();
-    assert(boundMat != nullptr);
-    assert(boundMat->name == "toon");
+        auto toonInst = matSys.CreateInstance("toon");
+        assert(toonInst != nullptr);
+        const Material* boundMat = toonInst->GetMaterial();
+        assert(boundMat != nullptr);
+        assert(boundMat->name == "toon");
 
-    auto rimInst = matSys.CreateInstance("rim_light");
-    assert(rimInst != nullptr);
-    assert(rimInst->GetMaterial()->name == "rim_light");
+        auto rimInst = matSys.CreateInstance("rim_light");
+        assert(rimInst != nullptr);
+        assert(rimInst->GetMaterial()->name == "rim_light");
 
-    auto missingInst = matSys.CreateInstance("nonexistent");
-    assert(missingInst == nullptr);
+        auto missingInst = matSys.CreateInstance("nonexistent");
+        assert(missingInst == nullptr);
 
-    auto emptyInst = matSys.CreateInstance("");
-    assert(emptyInst == nullptr);
+        auto emptyInst = matSys.CreateInstance("");
+        assert(emptyInst == nullptr);
 
-    std::fprintf(stdout, "  [PASS] CreateInstance 命中 / 不命中路径\n");
-}
+        std::fprintf(stdout, "  [PASS] CreateInstance 命中 / 不命中路径\n");
+    }
 
-// 6.5 GetTemplateNames：默认空、RegisterBuiltins 后 6 项、自定义注册后 7 项
-void TestGetTemplateNames()
-{
-    AssetRegistry registry;
-    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
-    assert(reg.IsOk());
+    // 6.5 GetTemplateNames：默认空、RegisterBuiltins 后 6 项、自定义注册后 7 项
+    void TestGetTemplateNames()
+    {
+        AssetRegistry registry;
+        auto          reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        assert(reg.IsOk());
 
-    MaterialSystem matSys(registry);
-    assert(matSys.GetTemplateNames().empty());
+        MaterialSystem matSys(registry);
+        assert(matSys.GetTemplateNames().empty());
 
-    matSys.RegisterBuiltins();
-    std::vector<std::string> names = matSys.GetTemplateNames();
-    assert(names.size() == 6);
-    // 不假定顺序——unordered_map 遍历无序。排序后比对内容。
-    std::sort(names.begin(), names.end());
-    assert(names[0] == "dissolve");
-    assert(names[1] == "emissive");
-    assert(names[2] == "pbr");
-    assert(names[3] == "rim_light");
-    assert(names[4] == "textured");
-    assert(names[5] == "toon");
+        matSys.RegisterBuiltins();
+        std::vector<std::string> names = matSys.GetTemplateNames();
+        assert(names.size() == 6);
+        // 不假定顺序——unordered_map 遍历无序。排序后比对内容。
+        std::sort(names.begin(), names.end());
+        assert(names[0] == "dissolve");
+        assert(names[1] == "emissive");
+        assert(names[2] == "pbr");
+        assert(names[3] == "rim_light");
+        assert(names[4] == "textured");
+        assert(names[5] == "toon");
 
-    // 自定义注册后 1 + 6 = 7 项，且新名出现在列表里
-    ShaderTemplateDesc desc;
-    desc.name              = "user_custom";
-    desc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
-    desc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
-    auto regResult = matSys.RegisterTemplate(desc);
-    assert(regResult.IsOk());
+        // 自定义注册后 1 + 6 = 7 项，且新名出现在列表里
+        ShaderTemplateDesc desc;
+        desc.name              = "user_custom";
+        desc.vertexSpirvPath   = BuiltinShaderPath("shaders/orange_engine/toon.vert.spv");
+        desc.fragmentSpirvPath = BuiltinShaderPath("shaders/orange_engine/toon.frag.spv");
+        auto regResult         = matSys.RegisterTemplate(desc);
+        assert(regResult.IsOk());
 
-    names = matSys.GetTemplateNames();
-    assert(names.size() == 7);
-    const bool hasCustom =
-        std::find(names.begin(), names.end(), std::string("user_custom")) != names.end();
-    assert(hasCustom);
+        names = matSys.GetTemplateNames();
+        assert(names.size() == 7);
+        const bool hasCustom =
+            std::find(names.begin(), names.end(), std::string("user_custom")) != names.end();
+        assert(hasCustom);
 
-    std::fprintf(stdout, "  [PASS] GetTemplateNames 默认空 + builtin 6 + 自定义 7\n");
-}
+        std::fprintf(stdout, "  [PASS] GetTemplateNames 默认空 + builtin 6 + 自定义 7\n");
+    }
 
-// 6. CreateInstance 拿到的 MaterialInstance 上 SetUniform 真正命中 toon
-//    的 uniform 名 —— 验证 Task 01 silent-ignore 与 Task 04 system-managed
-//    Material 引用贯通
-void TestInstanceUniformRouting()
-{
-    AssetRegistry registry;
-    auto reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
-    assert(reg.IsOk());
+    // 6. CreateInstance 拿到的 MaterialInstance 上 SetUniform 真正命中 toon
+    //    的 uniform 名 —— 验证 Task 01 silent-ignore 与 Task 04 system-managed
+    //    Material 引用贯通
+    void TestInstanceUniformRouting()
+    {
+        AssetRegistry registry;
+        auto          reg = registry.RegisterLoader<ShaderAsset>(std::make_unique<ShaderLoader>());
+        assert(reg.IsOk());
 
-    MaterialSystem matSys(registry);
-    matSys.RegisterBuiltins();
+        MaterialSystem matSys(registry);
+        matSys.RegisterBuiltins();
 
-    auto inst = matSys.CreateInstance("toon");
-    assert(inst != nullptr);
+        auto inst = matSys.CreateInstance("toon");
+        assert(inst != nullptr);
 
-    // toon 的 uniform → 命中（Task 07 后 schema 收缩为 uMVP / uModel）
-    inst->SetUniform("uMVP", glm::mat4(1.0f));
-    assert(inst->HasUniformOverride("uMVP"));
+        // toon 的 uniform → 命中（Task 07 后 schema 收缩为 uMVP / uModel）
+        inst->SetUniform("uMVP", glm::mat4(1.0f));
+        assert(inst->HasUniformOverride("uMVP"));
 
-    // 不在 schema 里的字段（旧 toon 字段 / rim_light 字段）→ 在 toon
-    // instance 上是 no-op
-    inst->SetUniform("uShadowThreshold", 0.5f);
-    inst->SetUniform("uRimColor",        glm::vec3(1.0f));
-    inst->SetUniform("uRimIntensity",    1.0f);
-    assert(!inst->HasUniformOverride("uShadowThreshold"));
-    assert(!inst->HasUniformOverride("uRimColor"));
-    assert(!inst->HasUniformOverride("uRimIntensity"));
+        // 不在 schema 里的字段（旧 toon 字段 / rim_light 字段）→ 在 toon
+        // instance 上是 no-op
+        inst->SetUniform("uShadowThreshold", 0.5f);
+        inst->SetUniform("uRimColor", glm::vec3(1.0f));
+        inst->SetUniform("uRimIntensity", 1.0f);
+        assert(!inst->HasUniformOverride("uShadowThreshold"));
+        assert(!inst->HasUniformOverride("uRimColor"));
+        assert(!inst->HasUniformOverride("uRimIntensity"));
 
-    std::fprintf(stdout, "  [PASS] system-managed instance 的 uniform 路由\n");
-}
+        std::fprintf(stdout, "  [PASS] system-managed instance 的 uniform 路由\n");
+    }
 
-// 7. 数据驱动模板漂移防护：RegisterTemplatesFromDirectory（真实
-//    assets/shaders/templates/*.template.json）产出的 Material 关键字段必须
-//    与 RegisterBuiltins（BuiltinMaterials 内置路径）对齐。锁住"以后给
-//    Material 加渲染状态字段又忘了同步进 JSON schema / 模板文件"整类 bug——
-//    本测试因 pbr.template.json 漏写 usesTangentVertex（→ location 3 layout
-//    失配 validation error）而新增。
-void TestTemplateJsonParity()
-{
+    // 7. 数据驱动模板漂移防护：RegisterTemplatesFromDirectory（真实
+    //    assets/shaders/templates/*.template.json）产出的 Material 关键字段必须
+    //    与 RegisterBuiltins（BuiltinMaterials 内置路径）对齐。锁住"以后给
+    //    Material 加渲染状态字段又忘了同步进 JSON schema / 模板文件"整类 bug——
+    //    本测试因 pbr.template.json 漏写 usesTangentVertex（→ location 3 layout
+    //    失配 validation error）而新增。
+    void TestTemplateJsonParity()
+    {
 #ifdef ORANGE_ENGINE_REPO_ASSETS_DIR
-    namespace fs = std::filesystem;
-    const fs::path templatesDir = fs::path(ORANGE_ENGINE_REPO_ASSETS_DIR) /
-                                  "shaders" / "templates";
-    if (!fs::exists(templatesDir))
-    {
-        std::fprintf(stdout, "  [SKIP] templates 目录不存在: %s\n",
-                     templatesDir.string().c_str());
-        return;
-    }
+        namespace fs                = std::filesystem;
+        const fs::path templatesDir = fs::path(ORANGE_ENGINE_REPO_ASSETS_DIR) /
+                                      "shaders" / "templates";
+        if (!fs::exists(templatesDir))
+        {
+            std::fprintf(stdout, "  [SKIP] templates 目录不存在: %s\n",
+                         templatesDir.string().c_str());
+            return;
+        }
 
-    // 内置路径。
-    AssetRegistry builtinReg;
-    assert(builtinReg.RegisterLoader<ShaderAsset>(
-               std::make_unique<ShaderLoader>()).IsOk());
-    MaterialSystem builtinSys(builtinReg);
-    assert(builtinSys.RegisterBuiltins().IsOk());
+        // 内置路径。
+        AssetRegistry builtinReg;
+        assert(builtinReg.RegisterLoader<ShaderAsset>(
+                             std::make_unique<ShaderLoader>())
+                   .IsOk());
+        MaterialSystem builtinSys(builtinReg);
+        assert(builtinSys.RegisterBuiltins().IsOk());
 
-    // 数据驱动 JSON 路径（真实模板目录）。
-    AssetRegistry jsonReg;
-    assert(jsonReg.RegisterLoader<ShaderAsset>(
-               std::make_unique<ShaderLoader>()).IsOk());
-    MaterialSystem jsonSys(jsonReg);
-    auto jr = jsonSys.RegisterTemplatesFromDirectory(templatesDir.string());
-    (void)jr;  // 半残（SPIR-V 缺失）也落表，按字段对比即可。
+        // 数据驱动 JSON 路径（真实模板目录）。
+        AssetRegistry jsonReg;
+        assert(jsonReg.RegisterLoader<ShaderAsset>(
+                          std::make_unique<ShaderLoader>())
+                   .IsOk());
+        MaterialSystem jsonSys(jsonReg);
+        auto           jr = jsonSys.RegisterTemplatesFromDirectory(templatesDir.string());
+        (void)jr; // 半残（SPIR-V 缺失）也落表，按字段对比即可。
 
-    // 对每个内置模板名：若 JSON 路径也有同名模板，usesTangentVertex 必须一致。
-    bool comparedPbr = false;
-    for (const std::string& name : builtinSys.GetTemplateNames())
-    {
-        const Material* b = builtinSys.FindTemplate(name);
-        const Material* j = jsonSys.FindTemplate(name);
-        if (b == nullptr || j == nullptr) { continue; }
-        assert(b->usesTangentVertex == j->usesTangentVertex &&
-               "数据驱动模板 usesTangentVertex 应与内置路径一致（schema 漂移防护）");
-        if (name == "pbr") { comparedPbr = true; }
-    }
-    // pbr 必须两路径都存在且都为 true（本测试针对的真 bug）。
-    const Material* pbrJson = jsonSys.FindTemplate("pbr");
-    assert(pbrJson != nullptr && "数据驱动路径应有 pbr 模板");
-    assert(pbrJson->usesTangentVertex == true &&
-           "pbr.template.json 必须声明 usesTangentVertex=true（否则 pbr.vert "
-           "location 3 layout 失配 validation error）");
-    assert(comparedPbr && "应已对 pbr 做内置 vs JSON parity 比对");
+        // 对每个内置模板名：若 JSON 路径也有同名模板，usesTangentVertex 必须一致。
+        bool comparedPbr = false;
+        for (const std::string& name : builtinSys.GetTemplateNames())
+        {
+            const Material* b = builtinSys.FindTemplate(name);
+            const Material* j = jsonSys.FindTemplate(name);
+            if (b == nullptr || j == nullptr)
+            {
+                continue;
+            }
+            assert(b->usesTangentVertex == j->usesTangentVertex &&
+                   "数据驱动模板 usesTangentVertex 应与内置路径一致（schema 漂移防护）");
+            if (name == "pbr")
+            {
+                comparedPbr = true;
+            }
+        }
+        // pbr 必须两路径都存在且都为 true（本测试针对的真 bug）。
+        const Material* pbrJson = jsonSys.FindTemplate("pbr");
+        assert(pbrJson != nullptr && "数据驱动路径应有 pbr 模板");
+        assert(pbrJson->usesTangentVertex == true &&
+               "pbr.template.json 必须声明 usesTangentVertex=true（否则 pbr.vert "
+               "location 3 layout 失配 validation error）");
+        assert(comparedPbr && "应已对 pbr 做内置 vs JSON parity 比对");
 
-    std::fprintf(stdout,
-                 "  [PASS] 模板 JSON 路径 usesTangentVertex 与内置路径 parity"
-                 "（pbr=true 已锁）\n");
+        std::fprintf(stdout,
+                     "  [PASS] 模板 JSON 路径 usesTangentVertex 与内置路径 parity"
+                     "（pbr=true 已锁）\n");
 #else
-    std::fprintf(stdout,
-                 "  [SKIP] 模板 parity 测试未编入（无 ORANGE_ENGINE_REPO_ASSETS_DIR）\n");
+        std::fprintf(stdout,
+                     "  [SKIP] 模板 parity 测试未编入（无 ORANGE_ENGINE_REPO_ASSETS_DIR）\n");
 #endif
-}
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {

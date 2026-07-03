@@ -48,69 +48,69 @@
 namespace Orange::Editor::Import
 {
 
-// .meta v1 实际承载的数据。当前只有 Texture 一种 import 走 .meta（T3/T4
-// 接入后 Mesh 也走同样模板）；为了不在 T1 阶段提前抽象，先保留 Texture
-// 专用结构，T3 时按需引入 `MeshMetaV1` 同款结构 + 共享 helper（hash /
-// schemaVersion 等）。
-struct TextureImportParams
-{
-    // v1 占位。v1.2+ 在此扩展：
-    //   - 是否 sRGB（albedo 默认 true，normal/roughness 默认 false）
-    //   - normalmap green invert（DirectX vs OpenGL 法线坐标系）
-    //   - import-time 缩放（2K → 1K 节省 VRAM）
-    //   - mipmap mode（运行时生 vs import 时预生）
-    // 字段加进来时 schema minor bump + reader 给缺失字段填默认。
-};
+    // .meta v1 实际承载的数据。当前只有 Texture 一种 import 走 .meta（T3/T4
+    // 接入后 Mesh 也走同样模板）；为了不在 T1 阶段提前抽象，先保留 Texture
+    // 专用结构，T3 时按需引入 `MeshMetaV1` 同款结构 + 共享 helper（hash /
+    // schemaVersion 等）。
+    struct TextureImportParams
+    {
+        // v1 占位。v1.2+ 在此扩展：
+        //   - 是否 sRGB（albedo 默认 true，normal/roughness 默认 false）
+        //   - normalmap green invert（DirectX vs OpenGL 法线坐标系）
+        //   - import-time 缩放（2K → 1K 节省 VRAM）
+        //   - mipmap mode（运行时生 vs import 时预生）
+        // 字段加进来时 schema minor bump + reader 给缺失字段填默认。
+    };
 
-struct TextureMetaV1
-{
-    std::string         sourcePath;
-    std::uint64_t       sourceHash{0};
-    std::uint64_t       handleId{0};
-    TextureImportParams importParams;
-    // 多 material mesh 导入产物：按 material slot 顺序排列的 .material 落盘
-    // 路径（slot i 用第 i 项；某 slot 的 primitive 无 material 时该项为空）。
-    // 仅多 material gltf 导入会填它；drop .mesh 到 entity 时回读它挂
-    // SubMeshMaterialsComponent。单 material / texture / obj 导入留空——
-    // schema minor 维持 0、.meta 字节与历史一致；非空时 minor bump 到 1 并
-    // 写出 "subMeshMaterials" 段（已发版本字段语义不变，新字段走 minor bump
-    // + reader 容忍缺失，符合 CLAUDE.md serialization 纪律）。
-    std::vector<std::string> subMeshMaterials;
-};
+    struct TextureMetaV1
+    {
+        std::string         sourcePath;
+        std::uint64_t       sourceHash{0};
+        std::uint64_t       handleId{0};
+        TextureImportParams importParams;
+        // 多 material mesh 导入产物：按 material slot 顺序排列的 .material 落盘
+        // 路径（slot i 用第 i 项；某 slot 的 primitive 无 material 时该项为空）。
+        // 仅多 material gltf 导入会填它；drop .mesh 到 entity 时回读它挂
+        // SubMeshMaterialsComponent。单 material / texture / obj 导入留空——
+        // schema minor 维持 0、.meta 字节与历史一致；非空时 minor bump 到 1 并
+        // 写出 "subMeshMaterials" 段（已发版本字段语义不变，新字段走 minor bump
+        // + reader 容忍缺失，符合 CLAUDE.md serialization 纪律）。
+        std::vector<std::string> subMeshMaterials;
+    };
 
-// 计算文件 FNV-1a 64-bit hash。文件不存在 / 不可读 → nullopt。
-// FNV-1a 选型理由：30 行内自实现零 vendor，性能（~500MB/s 单线程）
-// 对 import 流程足够（资产 hash 不是 hot path）；未来撞上性能瓶颈
-// 切 xxh3 不破坏 .meta schema（同样 64-bit hex string 落盘）。
-std::optional<std::uint64_t> ComputeFileHashFnv1a(std::string_view path);
+    // 计算文件 FNV-1a 64-bit hash。文件不存在 / 不可读 → nullopt。
+    // FNV-1a 选型理由：30 行内自实现零 vendor，性能（~500MB/s 单线程）
+    // 对 import 流程足够（资产 hash 不是 hot path）；未来撞上性能瓶颈
+    // 切 xxh3 不破坏 .meta schema（同样 64-bit hex string 落盘）。
+    std::optional<std::uint64_t> ComputeFileHashFnv1a(std::string_view path);
 
-// 64-bit hash → "0x" 前缀的 16 位小写 hex 字符串。
-std::string HashToHexString(std::uint64_t hash);
+    // 64-bit hash → "0x" 前缀的 16 位小写 hex 字符串。
+    std::string HashToHexString(std::uint64_t hash);
 
-// "0x..." 16 位 hex → 64-bit hash。格式错误 → nullopt。
-std::optional<std::uint64_t> HexStringToHash(std::string_view hex);
+    // "0x..." 16 位 hex → 64-bit hash。格式错误 → nullopt。
+    std::optional<std::uint64_t> HexStringToHash(std::string_view hex);
 
-// 读 .meta 文件。文件不存在 / JSON 解析失败 / schemaVersion 不属于
-// editor/import/texture namespace → nullopt + ORANGE_LOG_*。v1.0
-// 文件正常返回；v1.x 高 minor 也接受（前向兼容）。
-std::optional<TextureMetaV1> ReadTextureMeta(std::string_view path);
+    // 读 .meta 文件。文件不存在 / JSON 解析失败 / schemaVersion 不属于
+    // editor/import/texture namespace → nullopt + ORANGE_LOG_*。v1.0
+    // 文件正常返回；v1.x 高 minor 也接受（前向兼容）。
+    std::optional<TextureMetaV1> ReadTextureMeta(std::string_view path);
 
-// 写 .meta 文件。永远以 v1.0 schema 写盘。失败 → ORANGE_LOG_ERROR
-// + 返回 false。
-bool WriteTextureMeta(std::string_view path, const TextureMetaV1& meta);
+    // 写 .meta 文件。永远以 v1.0 schema 写盘。失败 → ORANGE_LOG_ERROR
+    // + 返回 false。
+    bool WriteTextureMeta(std::string_view path, const TextureMetaV1& meta);
 
-// 资产路径 → .meta sidecar 路径约定：同目录、同 basename、追加 ".meta"
-// 后缀。例：`assets/Textures/foo.png` → `assets/Textures/foo.png.meta`。
-// 与 Lumix / Godot / Unity 行业惯例对齐。
-std::string MetaPathFor(std::string_view assetPath);
+    // 资产路径 → .meta sidecar 路径约定：同目录、同 basename、追加 ".meta"
+    // 后缀。例：`assets/Textures/foo.png` → `assets/Textures/foo.png.meta`。
+    // 与 Lumix / Godot / Unity 行业惯例对齐。
+    std::string MetaPathFor(std::string_view assetPath);
 
-// "目标 asset 路径已有 .meta 且 sourceHash 与 newHash 匹配" 的便利查询。
-// T5 增量重 import：importer 计算源文件 hash 后，调本 helper 比对目标 .meta
-// 里记录的旧 hash —— 一致即跳过 copy / Save / Load 全套，直接复用现有
-// 资产（log INFO "unchanged，skipping reimport"）。
-// 不存在 .meta / hash 不一致 / 解析失败 → 返回 false（走完整 import 路径）。
-bool MetaSourceHashMatches(std::string_view destAssetPath, std::uint64_t newHash);
+    // "目标 asset 路径已有 .meta 且 sourceHash 与 newHash 匹配" 的便利查询。
+    // T5 增量重 import：importer 计算源文件 hash 后，调本 helper 比对目标 .meta
+    // 里记录的旧 hash —— 一致即跳过 copy / Save / Load 全套，直接复用现有
+    // 资产（log INFO "unchanged，skipping reimport"）。
+    // 不存在 .meta / hash 不一致 / 解析失败 → 返回 false（走完整 import 路径）。
+    bool MetaSourceHashMatches(std::string_view destAssetPath, std::uint64_t newHash);
 
-}  // namespace Orange::Editor::Import
+} // namespace Orange::Editor::Import
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_META_SIDECAR_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_IMPORT_META_SIDECAR_H

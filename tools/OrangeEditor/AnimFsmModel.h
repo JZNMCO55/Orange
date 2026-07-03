@@ -33,77 +33,77 @@
 namespace Orange::Editor::AnimFsm
 {
 
-// 单条 state 的可序列化表示（v1.0+）。
-//   name      —— state 唯一标识；运行时翻译时 AnimationStateMachine.AddState
-//                喂这个 name 作为索引；同名 state 在同一 FSM 内不允许
-//                （reader 端 c2-2 检查 + reject）
-//   clipName  —— 触发该 state 时 backend 想播放的 clip / 通道名（c3 落
-//                DragonBones 浏览后这里有机会改为 AssetRef）。c2 期允许空
-//   layoutX/Y —— 节点在图编辑器画布上的位置；**不**消费在运行时，只为
-//                下次打开 .anim_fsm 时恢复编辑器布局
-struct EditableState
-{
-    std::string name;
-    std::string clipName;
-    float       layoutX{0.0f};
-    float       layoutY{0.0f};
-};
+    // 单条 state 的可序列化表示（v1.0+）。
+    //   name      —— state 唯一标识；运行时翻译时 AnimationStateMachine.AddState
+    //                喂这个 name 作为索引；同名 state 在同一 FSM 内不允许
+    //                （reader 端 c2-2 检查 + reject）
+    //   clipName  —— 触发该 state 时 backend 想播放的 clip / 通道名（c3 落
+    //                DragonBones 浏览后这里有机会改为 AssetRef）。c2 期允许空
+    //   layoutX/Y —— 节点在图编辑器画布上的位置；**不**消费在运行时，只为
+    //                下次打开 .anim_fsm 时恢复编辑器布局
+    struct EditableState
+    {
+        std::string name;
+        std::string clipName;
+        float       layoutX{0.0f};
+        float       layoutY{0.0f};
+    };
 
-// 单条 condition 的可序列化表示（v1.1 新增）。与引擎 ConditionExpr 一一对应。
-//   paramName —— 引用 parameters[] 内的某条 EditableParameter.name；reader
-//                端跨引用检查（不命中跳过 + 警告，与 transition 端点同节奏）
-//   op        —— 引擎 ConditionOp enum；序列化为字符串（"if" / "ifNot" /
-//                "greater" / ...）保证 schema 跨版本可读
-//   threshold —— 与 op 配合；If/IfNot 不消费此字段，Greater/Less/Equal/...
-//                按数值比较（bool/int/float widening 走引擎 AsFloat 路径）
-struct EditableCondition
-{
-    std::string                                paramName;
-    ::Orange::Engine::Animation::ConditionOp   op{::Orange::Engine::Animation::ConditionOp::If};
-    std::variant<bool, std::int32_t, float>    threshold;
-};
+    // 单条 condition 的可序列化表示（v1.1 新增）。与引擎 ConditionExpr 一一对应。
+    //   paramName —— 引用 parameters[] 内的某条 EditableParameter.name；reader
+    //                端跨引用检查（不命中跳过 + 警告，与 transition 端点同节奏）
+    //   op        —— 引擎 ConditionOp enum；序列化为字符串（"if" / "ifNot" /
+    //                "greater" / ...）保证 schema 跨版本可读
+    //   threshold —— 与 op 配合；If/IfNot 不消费此字段，Greater/Less/Equal/...
+    //                按数值比较（bool/int/float widening 走引擎 AsFloat 路径）
+    struct EditableCondition
+    {
+        std::string                              paramName;
+        ::Orange::Engine::Animation::ConditionOp op{::Orange::Engine::Animation::ConditionOp::If};
+        std::variant<bool, std::int32_t, float>  threshold;
+    };
 
-// 单条 transition 的可序列化表示（v1.1 扩展 conditions 字段）。
-//   fromState / toState —— 必须是同一 FSM 内 states[] 已注册的 name
-//   conditions          —— v1.1 新增：多条 EditableCondition AND 组合
-//                          （空 vector = 无条件 transition，立即 fire）。
-//                          reader 端兼容 v1.0（缺 conditions 字段时视为空）
-struct EditableTransition
-{
-    std::string                    fromState;
-    std::string                    toState;
-    std::vector<EditableCondition> conditions;
-};
+    // 单条 transition 的可序列化表示（v1.1 扩展 conditions 字段）。
+    //   fromState / toState —— 必须是同一 FSM 内 states[] 已注册的 name
+    //   conditions          —— v1.1 新增：多条 EditableCondition AND 组合
+    //                          （空 vector = 无条件 transition，立即 fire）。
+    //                          reader 端兼容 v1.0（缺 conditions 字段时视为空）
+    struct EditableTransition
+    {
+        std::string                    fromState;
+        std::string                    toState;
+        std::vector<EditableCondition> conditions;
+    };
 
-// 单条 parameter 的可序列化表示（v1.1 新增）。
-//   name         —— parameter 唯一标识；引用方 EditableCondition.paramName
-//                   按 name 索引
-//   type         —— 引擎 ParameterType enum；序列化为字符串（"bool" /
-//                   "int" / "float" / "trigger"）
-//   defaultValue —— 编辑器加载 .anim_fsm 时按此初始化运行时 parameter；
-//                   variant 索引按 type 选（Bool/Trigger → index 0 bool，
-//                   Int → index 1 int32_t, Float → index 2 float）
-struct EditableParameter
-{
-    std::string                                 name;
-    ::Orange::Engine::Animation::ParameterType  type{::Orange::Engine::Animation::ParameterType::Bool};
-    std::variant<bool, std::int32_t, float>     defaultValue;
-};
+    // 单条 parameter 的可序列化表示（v1.1 新增）。
+    //   name         —— parameter 唯一标识；引用方 EditableCondition.paramName
+    //                   按 name 索引
+    //   type         —— 引擎 ParameterType enum；序列化为字符串（"bool" /
+    //                   "int" / "float" / "trigger"）
+    //   defaultValue —— 编辑器加载 .anim_fsm 时按此初始化运行时 parameter；
+    //                   variant 索引按 type 选（Bool/Trigger → index 0 bool，
+    //                   Int → index 1 int32_t, Float → index 2 float）
+    struct EditableParameter
+    {
+        std::string                                name;
+        ::Orange::Engine::Animation::ParameterType type{::Orange::Engine::Animation::ParameterType::Bool};
+        std::variant<bool, std::int32_t, float>    defaultValue;
+    };
 
-// .anim_fsm 文件的运行时表示（编辑器持有 + 落盘 / 加载的根对象）。
-//   states        —— 当前 FSM 全部 state；顺序 = 编辑器加节点顺序
-//   transitions   —— 当前 FSM 全部 transition；顺序 = 编辑器加边顺序
-//                    = runtime AddTransition 求值顺序
-//   parameters    —— v1.1 新增：FSM 全部 parameter；reader v1.0 兼容视为空
-//   initialState  —— 启动状态名
-struct EditableStateMachine
-{
-    std::vector<EditableState>      states;
-    std::vector<EditableTransition> transitions;
-    std::vector<EditableParameter>  parameters;
-    std::string                     initialState;
-};
+    // .anim_fsm 文件的运行时表示（编辑器持有 + 落盘 / 加载的根对象）。
+    //   states        —— 当前 FSM 全部 state；顺序 = 编辑器加节点顺序
+    //   transitions   —— 当前 FSM 全部 transition；顺序 = 编辑器加边顺序
+    //                    = runtime AddTransition 求值顺序
+    //   parameters    —— v1.1 新增：FSM 全部 parameter；reader v1.0 兼容视为空
+    //   initialState  —— 启动状态名
+    struct EditableStateMachine
+    {
+        std::vector<EditableState>      states;
+        std::vector<EditableTransition> transitions;
+        std::vector<EditableParameter>  parameters;
+        std::string                     initialState;
+    };
 
-}  // namespace Orange::Editor::AnimFsm
+} // namespace Orange::Editor::AnimFsm
 
-#endif  // ORANGE_ENGINE_TOOLS_EDITOR_ANIM_FSM_MODEL_H
+#endif // ORANGE_ENGINE_TOOLS_EDITOR_ANIM_FSM_MODEL_H

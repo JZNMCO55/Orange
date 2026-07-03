@@ -25,151 +25,151 @@ using Orange::Engine::Render::RenderPassContext;
 namespace
 {
 
-// 最小可观测 IRenderPass 实现：构造时 ++setupCount / 析构时 ++destroyCount /
-// Setup 调用时 ++setupCount2 / Execute 调用时 ++executeCount。让测试能
-// 验证 lifecycle 与 dispatch 都正确。
-struct ObservedPass : public IRenderPass
-{
-    std::string  name;
-    int*         pSetupCount{nullptr};
-    int*         pExecuteCount{nullptr};
-    int*         pDestroyCount{nullptr};
-
-    ObservedPass(std::string n,
-                 int* setupCount, int* executeCount, int* destroyCount)
-        : name(std::move(n))
-        , pSetupCount(setupCount)
-        , pExecuteCount(executeCount)
-        , pDestroyCount(destroyCount)
+    // 最小可观测 IRenderPass 实现：构造时 ++setupCount / 析构时 ++destroyCount /
+    // Setup 调用时 ++setupCount2 / Execute 调用时 ++executeCount。让测试能
+    // 验证 lifecycle 与 dispatch 都正确。
+    struct ObservedPass : public IRenderPass
     {
-    }
+        std::string name;
+        int*        pSetupCount{nullptr};
+        int*        pExecuteCount{nullptr};
+        int*        pDestroyCount{nullptr};
 
-    ~ObservedPass() override
-    {
-        if (pDestroyCount) ++(*pDestroyCount);
-    }
+        ObservedPass(std::string n,
+                     int* setupCount, int* executeCount, int* destroyCount)
+            : name(std::move(n)), pSetupCount(setupCount), pExecuteCount(executeCount), pDestroyCount(destroyCount)
+        {
+        }
 
-    const char* Name() const noexcept override { return name.c_str(); }
+        ~ObservedPass() override
+        {
+            if (pDestroyCount)
+                ++(*pDestroyCount);
+        }
 
-    void Setup(RenderGraphBuilder& builder) override
-    {
-        if (pSetupCount) ++(*pSetupCount);
-        // 验证 builder 字段可被读取——值不强制；只是确认 API 可用。
-        (void)builder.Kind();
-        // 触发 Read / Write 占位接口；0.x Pipeline 忽略，但 API 应当能调通。
-        const int sentinel = 0;
-        builder.Read(&sentinel);
-        builder.Write(&sentinel);
-    }
+        const char* Name() const noexcept override { return name.c_str(); }
 
-    void Execute(RenderPassContext& /*ctx*/) override
-    {
-        if (pExecuteCount) ++(*pExecuteCount);
-    }
-};
+        void Setup(RenderGraphBuilder& builder) override
+        {
+            if (pSetupCount)
+                ++(*pSetupCount);
+            // 验证 builder 字段可被读取——值不强制；只是确认 API 可用。
+            (void)builder.Kind();
+            // 触发 Read / Write 占位接口；0.x Pipeline 忽略，但 API 应当能调通。
+            const int sentinel = 0;
+            builder.Read(&sentinel);
+            builder.Write(&sentinel);
+        }
 
-void TestEmptyPipeline()
-{
-    Pipeline p;
-    assert(p.InsertedPassCount(PipelineStage::AfterShadow)      == 0);
-    assert(p.InsertedPassCount(PipelineStage::AfterMainPass)    == 0);
-    assert(p.InsertedPassCount(PipelineStage::AfterPostProcess) == 0);
+        void Execute(RenderPassContext& /*ctx*/) override
+        {
+            if (pExecuteCount)
+                ++(*pExecuteCount);
+        }
+    };
 
-    std::fprintf(stdout, "  [PASS] empty pipeline -> 0 inserted passes\n");
-}
-
-void TestInsertTriggersSetup()
-{
-    int setupCount = 0;
-    int executeCount = 0;
-    int destroyCount = 0;
-
+    void TestEmptyPipeline()
     {
         Pipeline p;
-        p.InsertPass(PipelineStage::AfterMainPass,
-                     std::make_unique<ObservedPass>(
-                         "test_pass", &setupCount, &executeCount, &destroyCount));
+        assert(p.InsertedPassCount(PipelineStage::AfterShadow) == 0);
+        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
+        assert(p.InsertedPassCount(PipelineStage::AfterPostProcess) == 0);
 
-        // InsertPass 立即触发一次 Setup。
-        assert(setupCount == 1);
-        assert(executeCount == 0);  // 没 Render，没 Execute
-        assert(destroyCount == 0);
-        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 1);
+        std::fprintf(stdout, "  [PASS] empty pipeline -> 0 inserted passes\n");
     }
 
-    // Pipeline 析构 → pass unique_ptr 析构 → ObservedPass dtor 触发。
-    assert(destroyCount == 1);
-    assert(setupCount == 1);
-    assert(executeCount == 0);
+    void TestInsertTriggersSetup()
+    {
+        int setupCount   = 0;
+        int executeCount = 0;
+        int destroyCount = 0;
 
-    std::fprintf(stdout, "  [PASS] InsertPass -> Setup; ~Pipeline -> ~Pass\n");
-}
+        {
+            Pipeline p;
+            p.InsertPass(PipelineStage::AfterMainPass,
+                         std::make_unique<ObservedPass>(
+                             "test_pass", &setupCount, &executeCount, &destroyCount));
 
-void TestStageIsolation()
-{
-    int s_after_shadow = 0;
-    int s_after_main   = 0;
-    int s_after_post   = 0;
-    int e0 = 0, e1 = 0, e2 = 0;
-    int d0 = 0, d1 = 0, d2 = 0;
+            // InsertPass 立即触发一次 Setup。
+            assert(setupCount == 1);
+            assert(executeCount == 0); // 没 Render，没 Execute
+            assert(destroyCount == 0);
+            assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 1);
+        }
 
-    Pipeline p;
-    p.InsertPass(PipelineStage::AfterShadow,
-                 std::make_unique<ObservedPass>("shadow_pass", &s_after_shadow, &e0, &d0));
-    p.InsertPass(PipelineStage::AfterMainPass,
-                 std::make_unique<ObservedPass>("main_pass",   &s_after_main,   &e1, &d1));
-    p.InsertPass(PipelineStage::AfterPostProcess,
-                 std::make_unique<ObservedPass>("post_pass",   &s_after_post,   &e2, &d2));
+        // Pipeline 析构 → pass unique_ptr 析构 → ObservedPass dtor 触发。
+        assert(destroyCount == 1);
+        assert(setupCount == 1);
+        assert(executeCount == 0);
 
-    assert(p.InsertedPassCount(PipelineStage::AfterShadow)      == 1);
-    assert(p.InsertedPassCount(PipelineStage::AfterMainPass)    == 1);
-    assert(p.InsertedPassCount(PipelineStage::AfterPostProcess) == 1);
+        std::fprintf(stdout, "  [PASS] InsertPass -> Setup; ~Pipeline -> ~Pass\n");
+    }
 
-    // RemovePassesAt 仅清单一 stage，不影响其它 stage。
-    p.RemovePassesAt(PipelineStage::AfterMainPass);
-    assert(p.InsertedPassCount(PipelineStage::AfterShadow)      == 1);
-    assert(p.InsertedPassCount(PipelineStage::AfterMainPass)    == 0);
-    assert(p.InsertedPassCount(PipelineStage::AfterPostProcess) == 1);
-    assert(d1 == 1);  // 被 RemovePassesAt 析构
-    assert(d0 == 0);
-    assert(d2 == 0);
+    void TestStageIsolation()
+    {
+        int s_after_shadow = 0;
+        int s_after_main   = 0;
+        int s_after_post   = 0;
+        int e0 = 0, e1 = 0, e2 = 0;
+        int d0 = 0, d1 = 0, d2 = 0;
 
-    std::fprintf(stdout, "  [PASS] stages are isolated; RemovePassesAt only clears one stage\n");
-}
+        Pipeline p;
+        p.InsertPass(PipelineStage::AfterShadow,
+                     std::make_unique<ObservedPass>("shadow_pass", &s_after_shadow, &e0, &d0));
+        p.InsertPass(PipelineStage::AfterMainPass,
+                     std::make_unique<ObservedPass>("main_pass", &s_after_main, &e1, &d1));
+        p.InsertPass(PipelineStage::AfterPostProcess,
+                     std::make_unique<ObservedPass>("post_pass", &s_after_post, &e2, &d2));
 
-void TestMultiplePassesPerStage()
-{
-    int s = 0, e = 0, d = 0;
+        assert(p.InsertedPassCount(PipelineStage::AfterShadow) == 1);
+        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 1);
+        assert(p.InsertedPassCount(PipelineStage::AfterPostProcess) == 1);
 
-    Pipeline p;
-    p.InsertPass(PipelineStage::AfterMainPass,
-                 std::make_unique<ObservedPass>("a", &s, &e, &d));
-    p.InsertPass(PipelineStage::AfterMainPass,
-                 std::make_unique<ObservedPass>("b", &s, &e, &d));
-    p.InsertPass(PipelineStage::AfterMainPass,
-                 std::make_unique<ObservedPass>("c", &s, &e, &d));
+        // RemovePassesAt 仅清单一 stage，不影响其它 stage。
+        p.RemovePassesAt(PipelineStage::AfterMainPass);
+        assert(p.InsertedPassCount(PipelineStage::AfterShadow) == 1);
+        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
+        assert(p.InsertedPassCount(PipelineStage::AfterPostProcess) == 1);
+        assert(d1 == 1); // 被 RemovePassesAt 析构
+        assert(d0 == 0);
+        assert(d2 == 0);
 
-    assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 3);
-    assert(s == 3);  // 每个 pass 都被 Setup 一次
-    assert(d == 0);
+        std::fprintf(stdout, "  [PASS] stages are isolated; RemovePassesAt only clears one stage\n");
+    }
 
-    p.ClearInsertedPasses();
-    assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
-    assert(d == 3);  // 三个 pass 都析构
+    void TestMultiplePassesPerStage()
+    {
+        int s = 0, e = 0, d = 0;
 
-    std::fprintf(stdout, "  [PASS] multiple passes per stage; ClearInsertedPasses -> all destructed\n");
-}
+        Pipeline p;
+        p.InsertPass(PipelineStage::AfterMainPass,
+                     std::make_unique<ObservedPass>("a", &s, &e, &d));
+        p.InsertPass(PipelineStage::AfterMainPass,
+                     std::make_unique<ObservedPass>("b", &s, &e, &d));
+        p.InsertPass(PipelineStage::AfterMainPass,
+                     std::make_unique<ObservedPass>("c", &s, &e, &d));
 
-void TestNullptrPassSilentIgnore()
-{
-    Pipeline p;
-    p.InsertPass(PipelineStage::AfterMainPass, nullptr);
-    assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
+        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 3);
+        assert(s == 3); // 每个 pass 都被 Setup 一次
+        assert(d == 0);
 
-    std::fprintf(stdout, "  [PASS] nullptr InsertPass silent-ignored\n");
-}
+        p.ClearInsertedPasses();
+        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
+        assert(d == 3); // 三个 pass 都析构
 
-}  // namespace
+        std::fprintf(stdout, "  [PASS] multiple passes per stage; ClearInsertedPasses -> all destructed\n");
+    }
+
+    void TestNullptrPassSilentIgnore()
+    {
+        Pipeline p;
+        p.InsertPass(PipelineStage::AfterMainPass, nullptr);
+        assert(p.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
+
+        std::fprintf(stdout, "  [PASS] nullptr InsertPass silent-ignored\n");
+    }
+
+} // namespace
 
 int main()
 {

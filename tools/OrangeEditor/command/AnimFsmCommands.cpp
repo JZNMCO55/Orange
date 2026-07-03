@@ -14,19 +14,20 @@
 namespace
 {
 
-using ::Orange::Editor::AnimFsm::EditableState;
-using ::Orange::Editor::AnimFsm::EditableStateMachine;
-using ::Orange::Editor::AnimFsm::EditableTransition;
-using ::Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin;
+    using ::Orange::Editor::AnimFsm::EditableState;
+    using ::Orange::Editor::AnimFsm::EditableStateMachine;
+    using ::Orange::Editor::AnimFsm::EditableTransition;
+    using ::Orange::Editor::Plugin::AnimFsmAssetInspectorPlugin;
 
-// 找指定 state 在 states[] 内的位置。未命中返回 states.end()。
-auto FindStateIt(EditableStateMachine& fsm, const std::string& name)
-{
-    return std::find_if(fsm.states.begin(), fsm.states.end(),
-        [&name](const EditableState& s) { return s.name == name; });
-}
+    // 找指定 state 在 states[] 内的位置。未命中返回 states.end()。
+    auto FindStateIt(EditableStateMachine& fsm, const std::string& name)
+    {
+        return std::find_if(fsm.states.begin(), fsm.states.end(),
+                            [&name](const EditableState& s)
+                            { return s.name == name; });
+    }
 
-}  // anonymous namespace
+} // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // AnimFsmAddStateCommand
@@ -37,15 +38,16 @@ AnimFsmAddStateCommand::AnimFsmAddStateCommand(
     std::string                  stateName,
     float                        layoutX,
     float                        layoutY)
-    : mpPlugin(pPlugin)
-    , mStateName(std::move(stateName))
-    , mLayoutX(layoutX)
-    , mLayoutY(layoutY)
-{}
+    : mpPlugin(pPlugin), mStateName(std::move(stateName)), mLayoutX(layoutX), mLayoutY(layoutY)
+{
+}
 
 void AnimFsmAddStateCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     // 重名防御（UI 应已 prevent；命令侧再防御一次避免 redo 路径意外）
@@ -75,11 +77,17 @@ void AnimFsmAddStateCommand::Execute()
 
 void AnimFsmAddStateCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     auto it = FindStateIt(fsm, mStateName);
-    if (it != fsm.states.end()) { fsm.states.erase(it); }
+    if (it != fsm.states.end())
+    {
+        fsm.states.erase(it);
+    }
 
     if (mDidSetInitialState && fsm.initialState == mStateName)
     {
@@ -102,13 +110,16 @@ void AnimFsmAddStateCommand::Undo()
 AnimFsmDeleteStateCommand::AnimFsmDeleteStateCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     std::string                  stateName)
-    : mpPlugin(pPlugin)
-    , mStateName(std::move(stateName))
-{}
+    : mpPlugin(pPlugin), mStateName(std::move(stateName))
+{
+}
 
 void AnimFsmDeleteStateCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     auto it = FindStateIt(fsm, mStateName);
@@ -138,14 +149,18 @@ void AnimFsmDeleteStateCommand::Execute()
     fsm.states.erase(it);
     fsm.transitions.erase(
         std::remove_if(fsm.transitions.begin(), fsm.transitions.end(),
-            [this](const EditableTransition& t) {
-                return t.fromState == mStateName || t.toState == mStateName;
-            }),
+                       [this](const EditableTransition& t)
+                       {
+                           return t.fromState == mStateName || t.toState == mStateName;
+                       }),
         fsm.transitions.end());
 
     // 如果删的是 initialState，清空 initialState（Undo 时恢复）
     mWasInitialState = (fsm.initialState == mStateName);
-    if (mWasInitialState) { fsm.initialState.clear(); }
+    if (mWasInitialState)
+    {
+        fsm.initialState.clear();
+    }
 
     // 联动选中
     if (mpPlugin->GetSelectedStateName() == mStateName)
@@ -161,7 +176,10 @@ void AnimFsmDeleteStateCommand::Execute()
 
 void AnimFsmDeleteStateCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     // 把 state 插回原 index（如越界则 push_back 兜底）
@@ -180,7 +198,10 @@ void AnimFsmDeleteStateCommand::Undo()
             mSavedTransitions[i]);
     }
 
-    if (mWasInitialState) { fsm.initialState = mStateName; }
+    if (mWasInitialState)
+    {
+        fsm.initialState = mStateName;
+    }
 
     // 对称清选中：Undo 把 transitions 插回会再次重排索引，选中态同样可能漂移。
     mpPlugin->ClearSelectedTransition();
@@ -196,60 +217,61 @@ AnimFsmRenameStateCommand::AnimFsmRenameStateCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     std::string                  oldName,
     std::string                  newName)
-    : mpPlugin(pPlugin)
-    , mOldName(std::move(oldName))
-    , mNewName(std::move(newName))
-{}
+    : mpPlugin(pPlugin), mOldName(std::move(oldName)), mNewName(std::move(newName))
+{
+}
 
 namespace
 {
 
-// 把 fsm 内所有引用 srcName 的字段改为 dstName。Return：实际改动数量
-// （诊断用；命令本身不消费）。
-std::size_t RenameStateInFsm(EditableStateMachine& fsm,
-                             const std::string&    srcName,
-                             const std::string&    dstName)
-{
-    std::size_t changed = 0;
-    for (auto& s : fsm.states)
+    // 把 fsm 内所有引用 srcName 的字段改为 dstName。Return：实际改动数量
+    // （诊断用；命令本身不消费）。
+    std::size_t RenameStateInFsm(EditableStateMachine& fsm,
+                                 const std::string&    srcName,
+                                 const std::string&    dstName)
     {
-        if (s.name == srcName)
+        std::size_t changed = 0;
+        for (auto& s : fsm.states)
         {
-            s.name = dstName;
+            if (s.name == srcName)
+            {
+                s.name = dstName;
+                ++changed;
+            }
+        }
+        for (auto& t : fsm.transitions)
+        {
+            if (t.fromState == srcName)
+            {
+                t.fromState = dstName;
+                ++changed;
+            }
+            if (t.toState == srcName)
+            {
+                t.toState = dstName;
+                ++changed;
+            }
+        }
+        if (fsm.initialState == srcName)
+        {
+            fsm.initialState = dstName;
             ++changed;
         }
+        return changed;
     }
-    for (auto& t : fsm.transitions)
-    {
-        if (t.fromState == srcName)
-        {
-            t.fromState = dstName;
-            ++changed;
-        }
-        if (t.toState == srcName)
-        {
-            t.toState = dstName;
-            ++changed;
-        }
-    }
-    if (fsm.initialState == srcName)
-    {
-        fsm.initialState = dstName;
-        ++changed;
-    }
-    return changed;
-}
 
-}  // anonymous namespace
+} // anonymous namespace
 
 void AnimFsmRenameStateCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     // 重名防御：new 已存在（且不是 self）→ skip
-    if (mNewName != mOldName
-        && FindStateIt(fsm, mNewName) != fsm.states.end())
+    if (mNewName != mOldName && FindStateIt(fsm, mNewName) != fsm.states.end())
     {
         ORANGE_LOG_WARN("[AnimFsmRenameState] new name '{}' 已存在，跳过",
                         mNewName);
@@ -267,7 +289,10 @@ void AnimFsmRenameStateCommand::Execute()
 
 void AnimFsmRenameStateCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     RenameStateInFsm(fsm, mNewName, mOldName);
@@ -282,10 +307,16 @@ void AnimFsmRenameStateCommand::Undo()
 bool AnimFsmRenameStateCommand::Merge(ICommand& newer)
 {
     auto* p = dynamic_cast<AnimFsmRenameStateCommand*>(&newer);
-    if (p == nullptr || p->mpPlugin != mpPlugin) { return false; }
+    if (p == nullptr || p->mpPlugin != mpPlugin)
+    {
+        return false;
+    }
     // 仅链式 rename 合并：newer.mOldName 必须等于本命令的 mNewName。
     // 这样 stack 内最终保留 (mOldName -> p->mNewName) 的单条 Undo。
-    if (p->mOldName != mNewName) { return false; }
+    if (p->mOldName != mNewName)
+    {
+        return false;
+    }
     // 关键：CommandStack 在 Merge 返回 true 后会 **re-Execute** 本命令
     // （见 CommandStack::Push），re-Execute 以 mOldName 为重命名起点。但此刻
     // FSM 已是旧 mNewName（本命令上一次 Execute 的结果），直接把 mNewName
@@ -309,20 +340,22 @@ AnimFsmMoveStateCommand::AnimFsmMoveStateCommand(
     float                        oldY,
     float                        newX,
     float                        newY)
-    : mpPlugin(pPlugin)
-    , mStateName(std::move(stateName))
-    , mOldX(oldX)
-    , mOldY(oldY)
-    , mNewX(newX)
-    , mNewY(newY)
-{}
+    : mpPlugin(pPlugin), mStateName(std::move(stateName)), mOldX(oldX), mOldY(oldY), mNewX(newX), mNewY(newY)
+{
+}
 
 void AnimFsmMoveStateCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
-    auto it = FindStateIt(fsm, mStateName);
-    if (it == fsm.states.end()) { return; }
+    auto                  it  = FindStateIt(fsm, mStateName);
+    if (it == fsm.states.end())
+    {
+        return;
+    }
     it->layoutX = mNewX;
     it->layoutY = mNewY;
     mpPlugin->MarkDirty();
@@ -330,10 +363,16 @@ void AnimFsmMoveStateCommand::Execute()
 
 void AnimFsmMoveStateCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
-    auto it = FindStateIt(fsm, mStateName);
-    if (it == fsm.states.end()) { return; }
+    auto                  it  = FindStateIt(fsm, mStateName);
+    if (it == fsm.states.end())
+    {
+        return;
+    }
     it->layoutX = mOldX;
     it->layoutY = mOldY;
     mpPlugin->MarkDirty();
@@ -342,9 +381,7 @@ void AnimFsmMoveStateCommand::Undo()
 bool AnimFsmMoveStateCommand::Merge(ICommand& newer)
 {
     auto* p = dynamic_cast<AnimFsmMoveStateCommand*>(&newer);
-    if (p == nullptr
-        || p->mpPlugin    != mpPlugin
-        || p->mStateName  != mStateName)
+    if (p == nullptr || p->mpPlugin != mpPlugin || p->mStateName != mStateName)
     {
         return false;
     }
@@ -363,19 +400,20 @@ AnimFsmAddTransitionCommand::AnimFsmAddTransitionCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     std::string                  fromState,
     std::string                  toState)
-    : mpPlugin(pPlugin)
-    , mFromState(std::move(fromState))
-    , mToState(std::move(toState))
-{}
+    : mpPlugin(pPlugin), mFromState(std::move(fromState)), mToState(std::move(toState))
+{
+}
 
 void AnimFsmAddTransitionCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     // 端点防御：必须存在于 states[]（UI 应已 prevent，但命令侧再防御）
-    if (FindStateIt(fsm, mFromState) == fsm.states.end()
-        || FindStateIt(fsm, mToState)   == fsm.states.end())
+    if (FindStateIt(fsm, mFromState) == fsm.states.end() || FindStateIt(fsm, mToState) == fsm.states.end())
     {
         ORANGE_LOG_WARN("[AnimFsmAddTransition] 端点 '{}' / '{}' 不存在，跳过",
                         mFromState, mToState);
@@ -392,7 +430,10 @@ void AnimFsmAddTransitionCommand::Execute()
 
 void AnimFsmAddTransitionCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
 
     // Execute push_back 到末尾；Undo 从末尾找最后一条匹配 from->to 移除
@@ -416,13 +457,16 @@ void AnimFsmAddTransitionCommand::Undo()
 AnimFsmDeleteTransitionCommand::AnimFsmDeleteTransitionCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     std::size_t                  transitionIndex)
-    : mpPlugin(pPlugin)
-    , mIndex(transitionIndex)
-{}
+    : mpPlugin(pPlugin), mIndex(transitionIndex)
+{
+}
 
 void AnimFsmDeleteTransitionCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.transitions.size())
     {
@@ -432,17 +476,19 @@ void AnimFsmDeleteTransitionCommand::Execute()
         return;
     }
     mSavedTransition = fsm.transitions[mIndex];
-    fsm.transitions.erase(fsm.transitions.begin()
-                          + static_cast<std::ptrdiff_t>(mIndex));
+    fsm.transitions.erase(fsm.transitions.begin() + static_cast<std::ptrdiff_t>(mIndex));
     mWasValid = true;
     mpPlugin->MarkDirty();
 }
 
 void AnimFsmDeleteTransitionCommand::Undo()
 {
-    if (mpPlugin == nullptr || !mWasValid) { return; }
-    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
-    const std::size_t insertAt = std::min(mIndex, fsm.transitions.size());
+    if (mpPlugin == nullptr || !mWasValid)
+    {
+        return;
+    }
+    EditableStateMachine& fsm      = mpPlugin->GetEditingFsm();
+    const std::size_t     insertAt = std::min(mIndex, fsm.transitions.size());
     fsm.transitions.insert(
         fsm.transitions.begin() + static_cast<std::ptrdiff_t>(insertAt),
         mSavedTransition);
@@ -453,19 +499,22 @@ void AnimFsmDeleteTransitionCommand::Undo()
 // AnimFsmAddParameterCommand
 // ---------------------------------------------------------------------------
 
-using ::Orange::Editor::AnimFsm::EditableParameter;
 using ::Orange::Editor::AnimFsm::EditableCondition;
+using ::Orange::Editor::AnimFsm::EditableParameter;
 
 AnimFsmAddParameterCommand::AnimFsmAddParameterCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     EditableParameter            parameter)
-    : mpPlugin(pPlugin)
-    , mParameter(std::move(parameter))
-{}
+    : mpPlugin(pPlugin), mParameter(std::move(parameter))
+{
+}
 
 void AnimFsmAddParameterCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     // 重名防御
     for (const auto& p : fsm.parameters)
@@ -483,7 +532,10 @@ void AnimFsmAddParameterCommand::Execute()
 
 void AnimFsmAddParameterCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     for (auto it = fsm.parameters.begin(); it != fsm.parameters.end(); ++it)
     {
@@ -503,13 +555,16 @@ void AnimFsmAddParameterCommand::Undo()
 AnimFsmDeleteParameterCommand::AnimFsmDeleteParameterCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     std::size_t                  parameterIndex)
-    : mpPlugin(pPlugin)
-    , mIndex(parameterIndex)
-{}
+    : mpPlugin(pPlugin), mIndex(parameterIndex)
+{
+}
 
 void AnimFsmDeleteParameterCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.parameters.size())
     {
@@ -526,9 +581,12 @@ void AnimFsmDeleteParameterCommand::Execute()
 
 void AnimFsmDeleteParameterCommand::Undo()
 {
-    if (mpPlugin == nullptr || !mWasValid) { return; }
-    EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
-    const std::size_t insertAt = std::min(mIndex, fsm.parameters.size());
+    if (mpPlugin == nullptr || !mWasValid)
+    {
+        return;
+    }
+    EditableStateMachine& fsm      = mpPlugin->GetEditingFsm();
+    const std::size_t     insertAt = std::min(mIndex, fsm.parameters.size());
     fsm.parameters.insert(fsm.parameters.begin() + static_cast<std::ptrdiff_t>(insertAt),
                           mSaved);
     mpPlugin->MarkDirty();
@@ -542,21 +600,26 @@ AnimFsmSetInitialStateCommand::AnimFsmSetInitialStateCommand(
     AnimFsmAssetInspectorPlugin* pPlugin,
     std::string                  oldInitial,
     std::string                  newInitial)
-    : mpPlugin(pPlugin)
-    , mOldInitial(std::move(oldInitial))
-    , mNewInitial(std::move(newInitial))
-{}
+    : mpPlugin(pPlugin), mOldInitial(std::move(oldInitial)), mNewInitial(std::move(newInitial))
+{
+}
 
 void AnimFsmSetInitialStateCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     mpPlugin->GetEditingFsm().initialState = mNewInitial;
     mpPlugin->MarkDirty();
 }
 
 void AnimFsmSetInitialStateCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     mpPlugin->GetEditingFsm().initialState = mOldInitial;
     mpPlugin->MarkDirty();
 }
@@ -566,19 +629,20 @@ void AnimFsmSetInitialStateCommand::Undo()
 // ---------------------------------------------------------------------------
 
 AnimFsmSetTransitionConditionsCommand::AnimFsmSetTransitionConditionsCommand(
-    AnimFsmAssetInspectorPlugin*           pPlugin,
-    std::size_t                            transitionIndex,
-    std::vector<EditableCondition>         oldConditions,
-    std::vector<EditableCondition>         newConditions)
-    : mpPlugin(pPlugin)
-    , mIndex(transitionIndex)
-    , mOldConditions(std::move(oldConditions))
-    , mNewConditions(std::move(newConditions))
-{}
+    AnimFsmAssetInspectorPlugin*   pPlugin,
+    std::size_t                    transitionIndex,
+    std::vector<EditableCondition> oldConditions,
+    std::vector<EditableCondition> newConditions)
+    : mpPlugin(pPlugin), mIndex(transitionIndex), mOldConditions(std::move(oldConditions)), mNewConditions(std::move(newConditions))
+{
+}
 
 void AnimFsmSetTransitionConditionsCommand::Execute()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.transitions.size())
     {
@@ -592,7 +656,10 @@ void AnimFsmSetTransitionConditionsCommand::Execute()
 
 void AnimFsmSetTransitionConditionsCommand::Undo()
 {
-    if (mpPlugin == nullptr) { return; }
+    if (mpPlugin == nullptr)
+    {
+        return;
+    }
     EditableStateMachine& fsm = mpPlugin->GetEditingFsm();
     if (mIndex >= fsm.transitions.size())
     {

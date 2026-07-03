@@ -17,9 +17,9 @@
 // 与渲染器 [-2..2] 单位空间不在同一量级——sample 端 KSkeletonScale =
 // 1/200 缩成 ~3.8×2.9 单位的人形，刚好在 plane 上居中可视。
 
-#include "animation/dragonbones/DragonBonesContext.h"  // src/
+#include "animation/dragonbones/DragonBonesContext.h" // src/
 
-#include "CaptureLayer.h"  // samples/common/
+#include "CaptureLayer.h" // samples/common/
 
 #include <orange/engine/animation/SkeletalAnimator.h>
 #include <orange/engine/app/AppConfig.h>
@@ -70,7 +70,6 @@ using Orange::Engine::Asset::SkeletonLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MaterialInstance;
@@ -79,6 +78,7 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 namespace DBB = Orange::Engine::Animation::DragonBonesBackend;
 namespace Ani = Orange::Engine::Animation;
@@ -87,148 +87,155 @@ namespace
 {
 
 #ifndef ORANGE_ENGINE_SKELETON_DATA_DIR
-#  error "ORANGE_ENGINE_SKELETON_DATA_DIR must be defined by CMake"
+#error "ORANGE_ENGINE_SKELETON_DATA_DIR must be defined by CMake"
 #endif
 
-// Skeleton 像素 → 渲染单位的缩放系数。mecha AABB ≈ 757×577 px → 缩成
-// ~3.8×2.9 单位，与 sample 07 的 plane halfSize=2.5 / cube 量级一致。
-constexpr float kSkeletonScale = 1.0f / 200.0f;
+    // Skeleton 像素 → 渲染单位的缩放系数。mecha AABB ≈ 757×577 px → 缩成
+    // ~3.8×2.9 单位，与 sample 07 的 plane halfSize=2.5 / cube 量级一致。
+    constexpr float kSkeletonScale = 1.0f / 200.0f;
 
-// DragonBones 默认 y 轴 down（屏幕坐标）；本侧渲染器 y 轴 up——可视
-// 化时把 y 取反，让 mecha 站立而不是头朝下。
-constexpr float kYAxisFlip = -1.0f;
+    // DragonBones 默认 y 轴 down（屏幕坐标）；本侧渲染器 y 轴 up——可视
+    // 化时把 y 取反，让 mecha 站立而不是头朝下。
+    constexpr float kYAxisFlip = -1.0f;
 
-std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
-{
-    std::vector<VertexPosition3> positions = {
-        {-halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f,  halfSize},
-        {-halfSize, 0.0f,  halfSize},
-    };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-    };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
+    std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
     {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
-        {
-            const float u    = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi  = u * glm::two_pi<float>();
-            const float sinP = std::sin(phi);
-            const float cosP = std::cos(phi);
-            positions.push_back({radius * sinT * cosP,
-                                 radius * cosT,
-                                 radius * sinT * sinP});
-            uvs.push_back({u, 1.0f - v});
-        }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
-        {
-            const std::uint32_t a = i       * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i       * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
-        }
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-class SkeletonLayer : public Layer
-{
-public:
-    SkeletonLayer(Ani::SkeletalAnimator& animator,
-                  World&                 world,
-                  std::vector<Entity>    jointEntities)
-        : Layer("SkeletonLayer")
-        , mAnimator(animator)
-        , mWorld(world)
-        , mJointEntities(std::move(jointEntities))
-    {
+        std::vector<VertexPosition3> positions = {
+            {-halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, halfSize},
+            {-halfSize, 0.0f, halfSize},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions),
+                                                                         std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-    void OnUpdate(const FrameContext& frame) override
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
     {
-        float dt = frame.time.deltaSeconds;
-        if (dt > 1.0f / 30.0f) { dt = 1.0f / 30.0f; }
-        mAnimator.Tick(dt);
-
-        // Pose 与 SkeletonAsset.boneNames 同 sortedBones 顺序——本期 joint
-        // marker 数组按这个顺序构造，下标一一对应。
-        const auto pose = mAnimator.Pose();
-        const std::size_t n = std::min(pose.size(), mJointEntities.size());
-        for (std::size_t i = 0; i < n; ++i)
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
         {
-            // Pose 内是 ToMat4 嵌入的 2D affine：tx 在 m[3][0]、ty 在 m[3][1]。
-            // 缩放 + Y 翻转，z=0（mecha 是 2D 骨架，让人形在 X-Y 平面）。
-            const float wx = pose[i][3][0] * kSkeletonScale;
-            const float wy = pose[i][3][1] * kSkeletonScale * kYAxisFlip;
-            if (auto* xf = mWorld.GetComponent<TransformComponent>(mJointEntities[i]))
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
             {
-                xf->position = glm::vec3{wx, wy, 0.0f};
+                const float u    = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi  = u * glm::two_pi<float>();
+                const float sinP = std::sin(phi);
+                const float cosP = std::cos(phi);
+                positions.push_back({radius * sinT * cosP,
+                                     radius * cosT,
+                                     radius * sinT * sinP});
+                uvs.push_back({u, 1.0f - v});
             }
         }
-    }
-
-private:
-    Ani::SkeletalAnimator&  mAnimator;
-    World&                  mWorld;
-    std::vector<Entity>     mJointEntities;
-};
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
-    {
-    }
-
-    void OnUpdate(const FrameContext& /*frame*/) override
-    {
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+        for (std::uint32_t i = 0; i < lat; ++i)
         {
-            mPipeline.OnResize(resize->width, resize->height);
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
         }
-        return false;
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
     }
 
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-};
+    class SkeletonLayer : public Layer
+    {
+    public:
+        SkeletonLayer(Ani::SkeletalAnimator& animator,
+                      World&                 world,
+                      std::vector<Entity>    jointEntities)
+            : Layer("SkeletonLayer"), mAnimator(animator), mWorld(world), mJointEntities(std::move(jointEntities))
+        {
+        }
 
-}  // namespace
+        void OnUpdate(const FrameContext& frame) override
+        {
+            float dt = frame.time.deltaSeconds;
+            if (dt > 1.0f / 30.0f)
+            {
+                dt = 1.0f / 30.0f;
+            }
+            mAnimator.Tick(dt);
+
+            // Pose 与 SkeletonAsset.boneNames 同 sortedBones 顺序——本期 joint
+            // marker 数组按这个顺序构造，下标一一对应。
+            const auto        pose = mAnimator.Pose();
+            const std::size_t n    = std::min(pose.size(), mJointEntities.size());
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                // Pose 内是 ToMat4 嵌入的 2D affine：tx 在 m[3][0]、ty 在 m[3][1]。
+                // 缩放 + Y 翻转，z=0（mecha 是 2D 骨架，让人形在 X-Y 平面）。
+                const float wx = pose[i][3][0] * kSkeletonScale;
+                const float wy = pose[i][3][1] * kSkeletonScale * kYAxisFlip;
+                if (auto* xf = mWorld.GetComponent<TransformComponent>(mJointEntities[i]))
+                {
+                    xf->position = glm::vec3{wx, wy, 0.0f};
+                }
+            }
+        }
+
+    private:
+        Ani::SkeletalAnimator& mAnimator;
+        World&                 mWorld;
+        std::vector<Entity>    mJointEntities;
+    };
+
+    class RenderLayer : public Layer
+    {
+    public:
+        RenderLayer(Pipeline& pipeline, World& world)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
+        {
+        }
+
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            mPipeline.Render(mWorld);
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
+    };
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -265,9 +272,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const std::string skelPath = std::string(ORANGE_ENGINE_SKELETON_DATA_DIR)
-                               + "/mecha_1004d_show_ske.json";
-    auto skelHandle = assets.Load<SkeletonAsset>(skelPath);
+    const std::string skelPath   = std::string(ORANGE_ENGINE_SKELETON_DATA_DIR) + "/mecha_1004d_show_ske.json";
+    auto              skelHandle = assets.Load<SkeletonAsset>(skelPath);
     if (skelHandle.IsErr())
     {
         std::fprintf(stderr, "Load<SkeletonAsset> failed (code=%u): %s\n",
@@ -289,7 +295,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "No armature in SkeletonAsset\n");
         return 1;
     }
-    const std::string armatureName = armatures[0].name;
+    const std::string     armatureName = armatures[0].name;
     Ani::SkeletalAnimator animator(dbCtx, *skel, armatureName);
     if (animator.BoneCount() == 0)
     {
@@ -304,7 +310,7 @@ int main(int argc, char** argv)
     }
 
     // ---------- mesh / material ----------
-    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane",  MakePlaneMesh(3.0f));
+    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane", MakePlaneMesh(3.0f));
     auto sphereRes = assets.Insert<MeshAsset>("builtin/joint_marker",
                                               MakeSphereMesh(0.05f, 12, 8));
     if (planeRes.IsErr() || sphereRes.IsErr())
@@ -321,8 +327,8 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "RegisterBuiltins failed\n");
         return 1;
     }
-    auto planeInstance  = materials.CreateInstance("textured");
-    auto jointInstance  = materials.CreateInstance("rim_light");
+    auto planeInstance = materials.CreateInstance("textured");
+    auto jointInstance = materials.CreateInstance("rim_light");
     if (!planeInstance || !jointInstance)
     {
         std::fprintf(stderr, "CreateInstance failed\n");
@@ -351,14 +357,14 @@ int main(int argc, char** argv)
     jointEntities.reserve(animator.BoneCount());
     for (std::size_t i = 0; i < animator.BoneCount(); ++i)
     {
-        Entity e = world.CreateEntity();
+        Entity             e = world.CreateEntity();
         TransformComponent xf{};
         xf.position = {0.0f, 0.0f, 0.0f};
         world.AddComponent(e, xf);
         RenderableComponent r;
         r.mesh             = sphereHandle;
         r.materialInstance = jointInstance.get();
-        r.castsShadow      = false;  // joint 太多，关掉 shadow 减负
+        r.castsShadow      = false; // joint 太多，关掉 shadow 减负
         world.AddComponent(e, r);
         jointEntities.push_back(e);
     }
@@ -382,12 +388,11 @@ int main(int argc, char** argv)
     // 位，camera Z=6 让人形占画面 1/2 高度。
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-        cam.view = glm::lookAt(glm::vec3(0.0f, 0.5f, 6.0f),
-                               glm::vec3(0.0f, 0.0f, 0.0f),
-                               glm::vec3(0.0f, 1.0f, 0.0f));
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        cam.view           = glm::lookAt(glm::vec3(0.0f, 0.5f, 6.0f),
+                                         glm::vec3(0.0f, 0.0f, 0.0f),
+                                         glm::vec3(0.0f, 1.0f, 0.0f));
         world.AddComponent(camEntity, cam);
     }
 

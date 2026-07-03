@@ -15,8 +15,8 @@
 namespace Orange::Editor::Schema
 {
 
-void RegisterBuiltinSchemas();
+    void RegisterBuiltinSchemas();
 
-}  // namespace Orange::Editor::Schema
+} // namespace Orange::Editor::Schema
 
-#endif  // ORANGE_EDITOR_SCHEMA_REGISTER_BUILTIN_SCHEMAS_H
+#endif // ORANGE_EDITOR_SCHEMA_REGISTER_BUILTIN_SCHEMAS_H

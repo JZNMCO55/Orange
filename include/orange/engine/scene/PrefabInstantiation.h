@@ -28,50 +28,50 @@
 
 namespace Orange::Engine
 {
-class World;
+    class World;
 }
 
 namespace Orange::Engine::Asset
 {
-class AssetRegistry;
+    class AssetRegistry;
 }
 
 namespace Orange::Engine::Scene
 {
 
-struct LoadOptions;
+    struct LoadOptions;
 
-struct InstantiateOptions
-{
-    // 实例根挂到哪个父实体下。MVP **只支持 Invalid**（实例作为新根）：
-    // 非 Invalid 时 InstantiatePrefab 返回 InvalidArgument。
+    struct InstantiateOptions
+    {
+        // 实例根挂到哪个父实体下。MVP **只支持 Invalid**（实例作为新根）：
+        // 非 Invalid 时 InstantiatePrefab 返回 InvalidArgument。
+        //
+        // 为什么不在引擎层支持任意 parent：把实例根插进某父的兄弟链需要改写
+        // HierarchyComponent 的 parent/firstChild/sibling 链——这是 hierarchy 图
+        // 操作，引擎刻意不做（见 HierarchyComponent.h 注释 + EditorHierarchy）。
+        // 编辑器消费 session 会在拿到实例根后用 EditorHierarchy::ReparentTo 完成
+        // 挂载，那一层才持有图操作逻辑。
+        Engine::Entity parent{Engine::Entity::Invalid()};
+
+        // 透传给 Scene::LoadFromString 的 LoadOptions（assetRegistry /
+        // materialResolver 等，让模板里的 Renderable 等组件能正确认领资源）。
+        // 空 → LoadFromString 用默认 LoadOptions。
+        const Scene::LoadOptions* loadOptions{nullptr};
+    };
+
+    // 把 prefab 实例化到 world。返回实例根实体。
     //
-    // 为什么不在引擎层支持任意 parent：把实例根插进某父的兄弟链需要改写
-    // HierarchyComponent 的 parent/firstChild/sibling 链——这是 hierarchy 图
-    // 操作，引擎刻意不做（见 HierarchyComponent.h 注释 + EditorHierarchy）。
-    // 编辑器消费 session 会在拿到实例根后用 EditorHierarchy::ReparentTo 完成
-    // 挂载，那一层才持有图操作逻辑。
-    Engine::Entity parent{Engine::Entity::Invalid()};
+    // 失败语义：
+    //   * prefab handle 无效 / Get<PrefabAsset> 取不到 → InvalidArgument
+    //   * options.parent 非 Invalid（MVP 不支持）→ InvalidArgument
+    //   * LoadFromString 失败（模板 blob 坏）→ 透传其 ResultCode
+    //   * 模板为空（0 实体）→ InvalidArgument（没有可作为根的实体）
+    ORANGE_ENGINE_API Result<Entity, ResultCode> InstantiatePrefab(
+        World&                                 world,
+        Asset::AssetRegistry&                  registry,
+        Asset::AssetHandle<Asset::PrefabAsset> prefab,
+        const InstantiateOptions&              options = {});
 
-    // 透传给 Scene::LoadFromString 的 LoadOptions（assetRegistry /
-    // materialResolver 等，让模板里的 Renderable 等组件能正确认领资源）。
-    // 空 → LoadFromString 用默认 LoadOptions。
-    const Scene::LoadOptions* loadOptions{nullptr};
-};
+} // namespace Orange::Engine::Scene
 
-// 把 prefab 实例化到 world。返回实例根实体。
-//
-// 失败语义：
-//   * prefab handle 无效 / Get<PrefabAsset> 取不到 → InvalidArgument
-//   * options.parent 非 Invalid（MVP 不支持）→ InvalidArgument
-//   * LoadFromString 失败（模板 blob 坏）→ 透传其 ResultCode
-//   * 模板为空（0 实体）→ InvalidArgument（没有可作为根的实体）
-ORANGE_ENGINE_API Result<Entity, ResultCode> InstantiatePrefab(
-    World& world,
-    Asset::AssetRegistry& registry,
-    Asset::AssetHandle<Asset::PrefabAsset> prefab,
-    const InstantiateOptions& options = {});
-
-}  // namespace Orange::Engine::Scene
-
-#endif  // ORANGE_ENGINE_SCENE_PREFAB_INSTANTIATION_H
+#endif // ORANGE_ENGINE_SCENE_PREFAB_INSTANTIATION_H

@@ -21,43 +21,43 @@
 namespace Orange::Engine::Audio
 {
 
-class AudioEngine;
+    class AudioEngine;
 
-class ORANGE_ENGINE_API SoundInstance
-{
-public:
-    SoundInstance() noexcept;     // 无效实例
-    ~SoundInstance();
+    class ORANGE_ENGINE_API SoundInstance
+    {
+    public:
+        SoundInstance() noexcept; // 无效实例
+        ~SoundInstance();
 
-    SoundInstance(const SoundInstance&)            = delete;
-    SoundInstance& operator=(const SoundInstance&) = delete;
+        SoundInstance(const SoundInstance&)            = delete;
+        SoundInstance& operator=(const SoundInstance&) = delete;
 
-    SoundInstance(SoundInstance&&) noexcept;
-    SoundInstance& operator=(SoundInstance&&) noexcept;
+        SoundInstance(SoundInstance&&) noexcept;
+        SoundInstance& operator=(SoundInstance&&) noexcept;
 
-    // 是否绑定了一个真 ma_sound——AudioEngine.CreateInstance 失败 / 默认
-    // 构造的 SoundInstance 都是 false。无效 instance 上调 Start/Stop 等
-    // 全部 no-op、不崩。
-    bool IsValid() const noexcept;
+        // 是否绑定了一个真 ma_sound——AudioEngine.CreateInstance 失败 / 默认
+        // 构造的 SoundInstance 都是 false。无效 instance 上调 Start/Stop 等
+        // 全部 no-op、不崩。
+        bool IsValid() const noexcept;
 
-    void Start();
-    void Stop();
-    void SetVolume(float volume);
-    bool IsPlaying() const noexcept;
+        void Start();
+        void Stop();
+        void SetVolume(float volume);
+        bool IsPlaying() const noexcept;
 
-    // 把播放头拨回起点 + 立即 Start——sample / 游戏代码用来"重触发"
-    // 同一个 SoundInstance（如脚步声 / 跳跃声）。比每次重新 CreateInstance
-    // 省一次 decoder + ma_sound 初始化。
-    void Restart();
+        // 把播放头拨回起点 + 立即 Start——sample / 游戏代码用来"重触发"
+        // 同一个 SoundInstance（如脚步声 / 跳跃声）。比每次重新 CreateInstance
+        // 省一次 decoder + ma_sound 初始化。
+        void Restart();
 
-private:
-    struct Impl;
-    std::unique_ptr<Impl> mpImpl;
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> mpImpl;
 
-    explicit SoundInstance(std::unique_ptr<Impl> impl) noexcept;
-    friend class AudioEngine;
-};
+        explicit SoundInstance(std::unique_ptr<Impl> impl) noexcept;
+        friend class AudioEngine;
+    };
 
-}  // namespace Orange::Engine::Audio
+} // namespace Orange::Engine::Audio
 
-#endif  // ORANGE_ENGINE_AUDIO_SOUND_INSTANCE_H
+#endif // ORANGE_ENGINE_AUDIO_SOUND_INSTANCE_H

@@ -9,19 +9,19 @@
 namespace DemoGame
 {
 
-struct HealthComponent
-{
-    int hp{100};
-    int maxHp{100};
-};
+    struct HealthComponent
+    {
+        int hp{100};
+        int maxHp{100};
+    };
 
-// 在 ComponentSchemaRegistry 注册 Inspector schema（hp / maxHp 两个 int 字段）。
-// main 启动期调用一次。
-void RegisterHealthComponentSchema();
+    // 在 ComponentSchemaRegistry 注册 Inspector schema（hp / maxHp 两个 int 字段）。
+    // main 启动期调用一次。
+    void RegisterHealthComponentSchema();
 
-// 返回可填入 extraSerializers 的 ComponentSerializerEntry（const ref，lifetime = program）。
-const Orange::Engine::Scene::ComponentSerializerEntry& GetHealthSerializerEntry();
+    // 返回可填入 extraSerializers 的 ComponentSerializerEntry（const ref，lifetime = program）。
+    const Orange::Engine::Scene::ComponentSerializerEntry& GetHealthSerializerEntry();
 
-}  // namespace DemoGame
+} // namespace DemoGame
 
-#endif  // ORANGE_EDITOR_DEMO_GAME_HEALTH_COMPONENT_H
+#endif // ORANGE_EDITOR_DEMO_GAME_HEALTH_COMPONENT_H

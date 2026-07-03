@@ -15,7 +15,7 @@
 // 用 PhysicsLayer 做 Step + sync，置于 RenderLayer 之前——保证 Render 取到
 // 的 Transform 已是本帧物理解出的最新位置。
 
-#include "CaptureLayer.h"  // samples/common/
+#include "CaptureLayer.h" // samples/common/
 
 #include <orange/engine/app/AppConfig.h>
 #include <orange/engine/app/AppHost.h>
@@ -65,7 +65,6 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::BloomPass;
-using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Render::Camera;
 using Orange::Engine::Render::DirectionalLight;
 using Orange::Engine::Render::MaterialInstance;
@@ -74,156 +73,160 @@ using Orange::Engine::Render::Pipeline;
 using Orange::Engine::Render::PostProcessChain;
 using Orange::Engine::Render::RenderableComponent;
 using Orange::Engine::Render::ShadowConfig;
+using Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault;
 using Orange::Engine::Scene::TransformComponent;
 namespace Phys = Orange::Engine::Physics;
 
 namespace
 {
 
-// ---------- mesh 工厂（与 sample 07 同布局）----------
-std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
-{
-    std::vector<VertexPosition3> positions = {
-        {-halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f, -halfSize},
-        { halfSize, 0.0f,  halfSize},
-        {-halfSize, 0.0f,  halfSize},
+    // ---------- mesh 工厂（与 sample 07 同布局）----------
+    std::unique_ptr<MeshAsset> MakePlaneMesh(float halfSize)
+    {
+        std::vector<VertexPosition3> positions = {
+            {-halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, -halfSize},
+            {halfSize, 0.0f, halfSize},
+            {-halfSize, 0.0f, halfSize},
+        };
+        std::vector<VertexUV2> uvs = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f},
+        };
+        std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
+        auto                       pMesh   = std::make_unique<MeshAsset>(std::move(positions),
+                                                                         std::move(uvs),
+                                                                         std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
+    {
+        std::vector<VertexPosition3> positions;
+        std::vector<VertexUV2>       uvs;
+        std::vector<std::uint32_t>   indices;
+        for (std::uint32_t i = 0; i <= lat; ++i)
+        {
+            const float v     = static_cast<float>(i) / static_cast<float>(lat);
+            const float theta = v * glm::pi<float>();
+            const float sinT  = std::sin(theta);
+            const float cosT  = std::cos(theta);
+            for (std::uint32_t j = 0; j <= lon; ++j)
+            {
+                const float u    = static_cast<float>(j) / static_cast<float>(lon);
+                const float phi  = u * glm::two_pi<float>();
+                const float sinP = std::sin(phi);
+                const float cosP = std::cos(phi);
+                positions.push_back({radius * sinT * cosP,
+                                     radius * cosT,
+                                     radius * sinT * sinP});
+                uvs.push_back({u, 1.0f - v});
+            }
+        }
+        for (std::uint32_t i = 0; i < lat; ++i)
+        {
+            for (std::uint32_t j = 0; j < lon; ++j)
+            {
+                const std::uint32_t a = i * (lon + 1) + j;
+                const std::uint32_t b = (i + 1) * (lon + 1) + j;
+                const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
+                const std::uint32_t d = i * (lon + 1) + (j + 1);
+                indices.push_back(a);
+                indices.push_back(c);
+                indices.push_back(b);
+                indices.push_back(a);
+                indices.push_back(d);
+                indices.push_back(c);
+            }
+        }
+        auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
+                                                 std::move(uvs),
+                                                 std::move(indices));
+        pMesh->ComputeSmoothNormalsFromTriangles();
+        return pMesh;
+    }
+
+    // ---------- 物理 ↔ ECS sync ----------
+    //
+    // PhysicsLayer 持 PhysicsWorld + 一个 dynamic body handle / entity 对——
+    // 每帧 Step + 把 body XY position 同步回 entity Transform。
+    // Z 维度由本侧手动保留：sample 让 ball 在 z=0 的 2D 平面上动，
+    // 视觉上仍占 3D plane 中央。
+    class PhysicsLayer : public Layer
+    {
+    public:
+        PhysicsLayer(Phys::PhysicsWorld& world, World& ecs,
+                     Entity ballEntity, Phys::BodyHandle ballBody)
+            : Layer("PhysicsLayer"), mPhys(world), mEcs(ecs), mBallEntity(ballEntity), mBallBody(ballBody)
+        {
+        }
+
+        void OnUpdate(const FrameContext& frame) override
+        {
+            // dt 上限 1/30 秒，避免窗口切回前台时的"长帧"导致一帧推太远。
+            float dt = frame.time.deltaSeconds;
+            if (dt > 1.0f / 30.0f)
+            {
+                dt = 1.0f / 30.0f;
+            }
+            mPhys.Step(dt);
+
+            const auto bxf = mPhys.GetBodyTransform(mBallBody);
+            if (auto* xf = mEcs.GetComponent<TransformComponent>(mBallEntity))
+            {
+                // 物理 XY ↔ 渲染 XY；Z 不动（sample 让球在 Z=0 平面上动）。
+                xf->position.x = bxf.position.x;
+                xf->position.y = bxf.position.y;
+            }
+
+            // 兜底：球掉出视野（y < -10）时拉回原始高度，让 demo 持续可视。
+            if (bxf.position.y < -10.0f)
+            {
+                Phys::BodyTransform reset{};
+                reset.position = {0.0f, 4.0f};
+                mPhys.SetBodyTransform(mBallBody, reset);
+                mPhys.SetLinearVelocity(mBallBody, {0.0f, 0.0f});
+            }
+        }
+
+    private:
+        Phys::PhysicsWorld& mPhys;
+        World&              mEcs;
+        Entity              mBallEntity;
+        Phys::BodyHandle    mBallBody;
     };
-    std::vector<VertexUV2> uvs = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
+
+    class RenderLayer : public Layer
+    {
+    public:
+        RenderLayer(Pipeline& pipeline, World& world)
+            : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
+        {
+        }
+
+        void OnUpdate(const FrameContext& /*frame*/) override
+        {
+            mPipeline.Render(mWorld);
+        }
+
+        bool OnEvent(const Platform::WindowEvent& event) override
+        {
+            if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
+            {
+                mPipeline.OnResize(resize->width, resize->height);
+            }
+            return false;
+        }
+
+    private:
+        Pipeline& mPipeline;
+        World&    mWorld;
     };
-    std::vector<std::uint32_t> indices = {0, 2, 1, 0, 3, 2};
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
 
-std::unique_ptr<MeshAsset> MakeSphereMesh(float radius, std::uint32_t lon, std::uint32_t lat)
-{
-    std::vector<VertexPosition3> positions;
-    std::vector<VertexUV2>       uvs;
-    std::vector<std::uint32_t>   indices;
-    for (std::uint32_t i = 0; i <= lat; ++i)
-    {
-        const float v     = static_cast<float>(i) / static_cast<float>(lat);
-        const float theta = v * glm::pi<float>();
-        const float sinT  = std::sin(theta);
-        const float cosT  = std::cos(theta);
-        for (std::uint32_t j = 0; j <= lon; ++j)
-        {
-            const float u    = static_cast<float>(j) / static_cast<float>(lon);
-            const float phi  = u * glm::two_pi<float>();
-            const float sinP = std::sin(phi);
-            const float cosP = std::cos(phi);
-            positions.push_back({radius * sinT * cosP,
-                                 radius * cosT,
-                                 radius * sinT * sinP});
-            uvs.push_back({u, 1.0f - v});
-        }
-    }
-    for (std::uint32_t i = 0; i < lat; ++i)
-    {
-        for (std::uint32_t j = 0; j < lon; ++j)
-        {
-            const std::uint32_t a = i       * (lon + 1) + j;
-            const std::uint32_t b = (i + 1) * (lon + 1) + j;
-            const std::uint32_t c = (i + 1) * (lon + 1) + (j + 1);
-            const std::uint32_t d = i       * (lon + 1) + (j + 1);
-            indices.push_back(a); indices.push_back(c); indices.push_back(b);
-            indices.push_back(a); indices.push_back(d); indices.push_back(c);
-        }
-    }
-    auto pMesh = std::make_unique<MeshAsset>(std::move(positions),
-                                             std::move(uvs),
-                                             std::move(indices));
-    pMesh->ComputeSmoothNormalsFromTriangles();
-    return pMesh;
-}
-
-// ---------- 物理 ↔ ECS sync ----------
-//
-// PhysicsLayer 持 PhysicsWorld + 一个 dynamic body handle / entity 对——
-// 每帧 Step + 把 body XY position 同步回 entity Transform。
-// Z 维度由本侧手动保留：sample 让 ball 在 z=0 的 2D 平面上动，
-// 视觉上仍占 3D plane 中央。
-class PhysicsLayer : public Layer
-{
-public:
-    PhysicsLayer(Phys::PhysicsWorld& world, World& ecs,
-                 Entity ballEntity, Phys::BodyHandle ballBody)
-        : Layer("PhysicsLayer")
-        , mPhys(world)
-        , mEcs(ecs)
-        , mBallEntity(ballEntity)
-        , mBallBody(ballBody)
-    {
-    }
-
-    void OnUpdate(const FrameContext& frame) override
-    {
-        // dt 上限 1/30 秒，避免窗口切回前台时的"长帧"导致一帧推太远。
-        float dt = frame.time.deltaSeconds;
-        if (dt > 1.0f / 30.0f)
-        {
-            dt = 1.0f / 30.0f;
-        }
-        mPhys.Step(dt);
-
-        const auto bxf = mPhys.GetBodyTransform(mBallBody);
-        if (auto* xf = mEcs.GetComponent<TransformComponent>(mBallEntity))
-        {
-            // 物理 XY ↔ 渲染 XY；Z 不动（sample 让球在 Z=0 平面上动）。
-            xf->position.x = bxf.position.x;
-            xf->position.y = bxf.position.y;
-        }
-
-        // 兜底：球掉出视野（y < -10）时拉回原始高度，让 demo 持续可视。
-        if (bxf.position.y < -10.0f)
-        {
-            Phys::BodyTransform reset{};
-            reset.position = {0.0f, 4.0f};
-            mPhys.SetBodyTransform(mBallBody, reset);
-            mPhys.SetLinearVelocity(mBallBody, {0.0f, 0.0f});
-        }
-    }
-
-private:
-    Phys::PhysicsWorld& mPhys;
-    World&              mEcs;
-    Entity              mBallEntity;
-    Phys::BodyHandle    mBallBody;
-};
-
-class RenderLayer : public Layer
-{
-public:
-    RenderLayer(Pipeline& pipeline, World& world)
-        : Layer("RenderLayer"), mPipeline(pipeline), mWorld(world)
-    {
-    }
-
-    void OnUpdate(const FrameContext& /*frame*/) override
-    {
-        mPipeline.Render(mWorld);
-    }
-
-    bool OnEvent(const Platform::WindowEvent& event) override
-    {
-        if (auto* resize = std::get_if<Platform::WindowResizeEvent>(&event))
-        {
-            mPipeline.OnResize(resize->width, resize->height);
-        }
-        return false;
-    }
-
-private:
-    Pipeline& mPipeline;
-    World&    mWorld;
-};
-
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -254,7 +257,7 @@ int main(int argc, char** argv)
     // plane halfSize=1.5（旧版 3.0）：缩小让球（半径 0.5）成为画面主体；
     // 旧版 6×6 棋盘把球挤成画面中央一个小点，加上 camera 俯视角让球
     // 看似"埋在 plane 中"。
-    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane",  MakePlaneMesh(1.5f));
+    auto planeRes  = assets.Insert<MeshAsset>("builtin/plane", MakePlaneMesh(1.5f));
     auto sphereRes = assets.Insert<MeshAsset>("builtin/sphere", MakeSphereMesh(0.5f, 32, 16));
     if (planeRes.IsErr() || sphereRes.IsErr())
     {
@@ -270,7 +273,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "RegisterBuiltins failed\n");
         return 1;
     }
-    auto planeInstance  = materials.CreateInstance("textured");
+    auto planeInstance = materials.CreateInstance("textured");
     // 球用 toon：从 45° 俯视看 rim_light 的"暗内 + 边亮"会被读成"plane
     // 上一个洞"，cell shading 的硬阶过渡反而给球一个清晰可辨的实体。
     auto sphereInstance = materials.CreateInstance("toon");
@@ -314,7 +317,7 @@ int main(int argc, char** argv)
     //   * (0, -0.5, 0) ——plane 顶面中心，应贴在 plane 表面上。
     // 若两 marker 视觉位置与"ball 物理位置 / plane 表面"对齐，说明
     // 视觉上的"球漂浮"是 perspective 错觉而非 ECS 渲染 bug。
-// 主光：接近正上方（仅 0.2 / 0.3 的 X / Z 偏移）+ warm 白。这样：
+    // 主光：接近正上方（仅 0.2 / 0.3 的 X / Z 偏移）+ warm 白。这样：
     //   * 球上半完整映入 toon warm 段，camera 看到的球面以亮色为主；
     //   * 阴影正好落在球正下方稍偏 plane 中段、跟球分得开。
     Entity lightEntity = world.CreateEntity();
@@ -334,9 +337,8 @@ int main(int argc, char** argv)
     // 透视相机：从前上方看场景。
     Entity camEntity = world.CreateEntity();
     {
-        const float aspect = static_cast<float>(cfg.window.width)
-                           / static_cast<float>(cfg.window.height);
-        Camera cam = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        const float aspect = static_cast<float>(cfg.window.width) / static_cast<float>(cfg.window.height);
+        Camera      cam    = Camera::Perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
         // 中等角度（约 30° 俯 + 一点侧偏）：camera (1.5, 1.5, 3.5) lookAt
         // (0, 0.1, 0)。比 45° 俯视更接近"水平眼睛位"——球占画面更主体、
         // toon 三段分布在球可见面上更均匀（不会出现"中心 cool / 边沿
@@ -348,7 +350,7 @@ int main(int argc, char** argv)
     }
 
     // ---------- 物理 ----------
-    Phys::PhysicsWorld physWorld;  // 默认 gravity (0, -9.81)、4 substep
+    Phys::PhysicsWorld physWorld; // 默认 gravity (0, -9.81)、4 substep
 
     // 静态 ground：BoxDesc 大半 50×0.25，位置 (0, -0.75)——刚好让顶面
     // 在 y=-0.5（与视觉 plane 重合）。half-extents.y = 0.25。
@@ -361,7 +363,7 @@ int main(int argc, char** argv)
         col.shape       = Phys::BoxDesc{{50.0f, 0.25f}, {0.0f, 0.0f}};
         col.friction    = 0.6f;
         col.restitution = 0.0f;
-        groundBody = physWorld.AddBody(rb, col);
+        groundBody      = physWorld.AddBody(rb, col);
         if (!groundBody.IsValid())
         {
             std::fprintf(stderr, "PhysicsWorld.AddBody(ground) failed\n");
@@ -385,7 +387,7 @@ int main(int argc, char** argv)
         col.density     = 1.0f;
         col.friction    = 0.6f;
         col.restitution = 0.35f;
-        ballBody = physWorld.AddBody(rb, col);
+        ballBody        = physWorld.AddBody(rb, col);
         if (!ballBody.IsValid())
         {
             std::fprintf(stderr, "PhysicsWorld.AddBody(ball) failed\n");

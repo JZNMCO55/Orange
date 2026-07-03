@@ -9,26 +9,40 @@
 namespace Orange::Engine
 {
 
-const char* ToString(ResultCode code) noexcept
-{
-    switch (code)
+    const char* ToString(ResultCode code) noexcept
     {
-        case ResultCode::Ok:                  return "Ok";
-        case ResultCode::Unknown:             return "Unknown";
-        case ResultCode::InvalidArgument:     return "InvalidArgument";
-        case ResultCode::OutOfRange:          return "OutOfRange";
-        case ResultCode::NotFound:            return "NotFound";
-        case ResultCode::AlreadyExists:       return "AlreadyExists";
-        case ResultCode::IoError:             return "IoError";
-        case ResultCode::PermissionDenied:    return "PermissionDenied";
-        case ResultCode::Unsupported:         return "Unsupported";
-        case ResultCode::SchemaMismatch:      return "SchemaMismatch";
-        case ResultCode::OutOfMemory:         return "OutOfMemory";
-        case ResultCode::NotInitialized:      return "NotInitialized";
-        case ResultCode::AlreadyInitialized:  return "AlreadyInitialized";
-        case ResultCode::InternalError:       return "InternalError";
+        switch (code)
+        {
+            case ResultCode::Ok:
+                return "Ok";
+            case ResultCode::Unknown:
+                return "Unknown";
+            case ResultCode::InvalidArgument:
+                return "InvalidArgument";
+            case ResultCode::OutOfRange:
+                return "OutOfRange";
+            case ResultCode::NotFound:
+                return "NotFound";
+            case ResultCode::AlreadyExists:
+                return "AlreadyExists";
+            case ResultCode::IoError:
+                return "IoError";
+            case ResultCode::PermissionDenied:
+                return "PermissionDenied";
+            case ResultCode::Unsupported:
+                return "Unsupported";
+            case ResultCode::SchemaMismatch:
+                return "SchemaMismatch";
+            case ResultCode::OutOfMemory:
+                return "OutOfMemory";
+            case ResultCode::NotInitialized:
+                return "NotInitialized";
+            case ResultCode::AlreadyInitialized:
+                return "AlreadyInitialized";
+            case ResultCode::InternalError:
+                return "InternalError";
+        }
+        return "ResultCode(?)";
     }
-    return "ResultCode(?)";
-}
 
-}  // namespace Orange::Engine
+} // namespace Orange::Engine

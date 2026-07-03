@@ -18,10 +18,10 @@
 namespace Orange::Engine::Save
 {
 
-struct SaveableComponent
-{
-};
+    struct SaveableComponent
+    {
+    };
 
-}  // namespace Orange::Engine::Save
+} // namespace Orange::Engine::Save
 
-#endif  // ORANGE_ENGINE_SAVE_SAVEABLE_COMPONENT_H
+#endif // ORANGE_ENGINE_SAVE_SAVEABLE_COMPONENT_H

@@ -8,58 +8,55 @@
 namespace Orange::Engine::Save
 {
 
-AutosaveScheduler::AutosaveScheduler(Config config, TriggerCallback callback) noexcept
-    : mConfig(config)
-    , mCallback(std::move(callback))
-{
-}
-
-void AutosaveScheduler::Update(double deltaSeconds)
-{
-    if (deltaSeconds < 0.0)
+    AutosaveScheduler::AutosaveScheduler(Config config, TriggerCallback callback) noexcept
+        : mConfig(config), mCallback(std::move(callback))
     {
-        deltaSeconds = 0.0;
-    }
-    mElapsedSinceLastFire += deltaSeconds;
-
-    // 检查是否在 throttle 窗口内。0 节流意味着任何时候都允许触发。
-    const bool throttleClear = (mConfig.minSecondsBetween <= 0.0)
-                            || (mElapsedSinceLastFire >= mConfig.minSecondsBetween);
-    if (!throttleClear)
-    {
-        return;
     }
 
-    // 触发条件：定时（interval > 0 且累计时间够）或挂起的手动请求。
-    const bool intervalDue = (mConfig.intervalSeconds > 0.0)
-                          && (mElapsedSinceLastFire >= mConfig.intervalSeconds);
-    const bool requestDue  = mPendingRequest;
-
-    if (!intervalDue && !requestDue)
+    void AutosaveScheduler::Update(double deltaSeconds)
     {
-        return;
+        if (deltaSeconds < 0.0)
+        {
+            deltaSeconds = 0.0;
+        }
+        mElapsedSinceLastFire += deltaSeconds;
+
+        // 检查是否在 throttle 窗口内。0 节流意味着任何时候都允许触发。
+        const bool throttleClear = (mConfig.minSecondsBetween <= 0.0) || (mElapsedSinceLastFire >= mConfig.minSecondsBetween);
+        if (!throttleClear)
+        {
+            return;
+        }
+
+        // 触发条件：定时（interval > 0 且累计时间够）或挂起的手动请求。
+        const bool intervalDue = (mConfig.intervalSeconds > 0.0) && (mElapsedSinceLastFire >= mConfig.intervalSeconds);
+        const bool requestDue  = mPendingRequest;
+
+        if (!intervalDue && !requestDue)
+        {
+            return;
+        }
+
+        // 触发 —— 先清状态再调 callback，避免 callback 内部触发 RequestAutosave
+        // 导致 pending flag 被错误清掉。
+        mElapsedSinceLastFire = 0.0;
+        mPendingRequest       = false;
+
+        if (mCallback)
+        {
+            mCallback();
+        }
     }
 
-    // 触发 —— 先清状态再调 callback，避免 callback 内部触发 RequestAutosave
-    // 导致 pending flag 被错误清掉。
-    mElapsedSinceLastFire = 0.0;
-    mPendingRequest       = false;
-
-    if (mCallback)
+    void AutosaveScheduler::RequestAutosave() noexcept
     {
-        mCallback();
+        mPendingRequest = true;
     }
-}
 
-void AutosaveScheduler::RequestAutosave() noexcept
-{
-    mPendingRequest = true;
-}
+    void AutosaveScheduler::Reset() noexcept
+    {
+        mElapsedSinceLastFire = 0.0;
+        mPendingRequest       = false;
+    }
 
-void AutosaveScheduler::Reset() noexcept
-{
-    mElapsedSinceLastFire = 0.0;
-    mPendingRequest       = false;
-}
-
-}  // namespace Orange::Engine::Save
+} // namespace Orange::Engine::Save

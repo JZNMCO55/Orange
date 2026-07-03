@@ -31,44 +31,44 @@ namespace Scene = ::Orange::Engine::Scene;
 namespace
 {
 
-bool Near(float a, float b, float eps = 1e-4f)
-{
-    return std::fabs(a - b) < eps;
-}
+    bool Near(float a, float b, float eps = 1e-4f)
+    {
+        return std::fabs(a - b) < eps;
+    }
 
-Anim::Keyframe Key(float time, float v)
-{
-    Anim::Keyframe k;
-    k.time   = time;
-    k.value  = glm::vec4(v, 0.0f, 0.0f, 0.0f);
-    k.interp = Anim::InterpMode::Linear;
-    return k;
-}
+    Anim::Keyframe Key(float time, float v)
+    {
+        Anim::Keyframe k;
+        k.time   = time;
+        k.value  = glm::vec4(v, 0.0f, 0.0f, 0.0f);
+        k.interp = Anim::InterpMode::Linear;
+        return k;
+    }
 
-// 复刻 SetAnimationClipCommand 的 do/undo：do = SetClip(newClip)、undo =
-// SetClip(oldClip)，二者都保持 SourceAssetPath（SetClip 不动它）。
-struct ClipEdit
-{
-    Anim::AnimationClip oldClip;
-    Anim::AnimationClip newClip;
+    // 复刻 SetAnimationClipCommand 的 do/undo：do = SetClip(newClip)、undo =
+    // SetClip(oldClip)，二者都保持 SourceAssetPath（SetClip 不动它）。
+    struct ClipEdit
+    {
+        Anim::AnimationClip oldClip;
+        Anim::AnimationClip newClip;
 
-    void Do(Anim::ClipAnimator& anim) const { anim.SetClip(newClip); }
-    void Undo(Anim::ClipAnimator& anim) const { anim.SetClip(oldClip); }
-};
+        void Do(Anim::ClipAnimator& anim) const { anim.SetClip(newClip); }
+        void Undo(Anim::ClipAnimator& anim) const { anim.SetClip(oldClip); }
+    };
 
-// 拷当前 clip → 在副本上调原语（调用方填）→ RecomputeDuration → 返回 ClipEdit。
-template <typename Mutate>
-ClipEdit MakeEdit(const Anim::ClipAnimator& anim, Mutate mutate)
-{
-    ClipEdit e;
-    e.oldClip = anim.Clip();
-    e.newClip = anim.Clip();
-    mutate(e.newClip);
-    Anim::RecomputeClipDuration(e.newClip);
-    return e;
-}
+    // 拷当前 clip → 在副本上调原语（调用方填）→ RecomputeDuration → 返回 ClipEdit。
+    template <typename Mutate>
+    ClipEdit MakeEdit(const Anim::ClipAnimator& anim, Mutate mutate)
+    {
+        ClipEdit e;
+        e.oldClip = anim.Clip();
+        e.newClip = anim.Clip();
+        mutate(e.newClip);
+        Anim::RecomputeClipDuration(e.newClip);
+        return e;
+    }
 
-}  // namespace
+} // namespace
 
 int main()
 {
@@ -87,12 +87,11 @@ int main()
         clip.tracks[0].keys.push_back(Key(2.0f, 10.0f));
 
         Scene::TransformComponent tc;
-        ClipAnimator anim(clip, &tc);
+        ClipAnimator              anim(clip, &tc);
 
         const std::size_t before = anim.Clip().tracks[0].keys.size();
-        ClipEdit e = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::UpsertKeyframe(c, "position.x", TrackValueType::Float, Key(1.0f, 5.0f));
-        });
+        ClipEdit          e      = MakeEdit(anim, [](AnimationClip& c)
+                                            { Anim::UpsertKeyframe(c, "position.x", TrackValueType::Float, Key(1.0f, 5.0f)); });
         e.Do(anim);
         assert(anim.Clip().tracks[0].keys.size() == before + 1 && "打键后 key+1");
         // 中间帧值正确 + 升序维持。
@@ -100,7 +99,7 @@ int main()
 
         e.Undo(anim);
         assert(anim.Clip().tracks[0].keys.size() == before && "Undo 回到打键前");
-        e.Do(anim);  // Redo 等价
+        e.Do(anim); // Redo 等价
         assert(anim.Clip().tracks[0].keys.size() == before + 1 && "Redo 恢复");
         std::fprintf(stdout, "  [PASS] 打键 do/undo 对称\n");
     }
@@ -116,13 +115,12 @@ int main()
         Anim::RecomputeClipDuration(clip);
 
         Scene::TransformComponent tc;
-        ClipAnimator anim(clip, &tc);
+        ClipAnimator              anim(clip, &tc);
         assert(Near(anim.Clip().duration, 2.0f) && "初始 duration=2");
 
         // 把末键从 t=2 拖到 t=5 → duration 应重算到 5。
-        ClipEdit e = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::MoveKeyframeTime(c.tracks[0], 1, 5.0f);
-        });
+        ClipEdit e = MakeEdit(anim, [](AnimationClip& c)
+                              { Anim::MoveKeyframeTime(c.tracks[0], 1, 5.0f); });
         e.Do(anim);
         assert(Near(anim.Clip().duration, 5.0f) && "拖键后 duration 重算到 5");
         assert(Near(anim.Clip().tracks[0].keys[1].time, 5.0f) && "末键 time=5");
@@ -144,11 +142,12 @@ int main()
         clip.tracks[0].keys.push_back(Key(2.0f, 1.0f));
 
         Scene::TransformComponent tc;
-        ClipAnimator anim(clip, &tc);
+        ClipAnimator              anim(clip, &tc);
 
-        ClipEdit e = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::RemoveKeyframe(c.tracks[0], 1);  // 删中间键
-        });
+        ClipEdit e = MakeEdit(anim, [](AnimationClip& c)
+                              {
+                                  Anim::RemoveKeyframe(c.tracks[0], 1); // 删中间键
+                              });
         e.Do(anim);
         assert(anim.Clip().tracks[0].keys.size() == 2 && "删键后 key=2");
         e.Undo(anim);
@@ -165,11 +164,10 @@ int main()
         clip.tracks[0].valueType  = TrackValueType::Float;
 
         Scene::TransformComponent tc;
-        ClipAnimator anim(clip, &tc);
+        ClipAnimator              anim(clip, &tc);
 
-        ClipEdit addEdit = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::UpsertTrack(c, "rotation", TrackValueType::Vec3);
-        });
+        ClipEdit addEdit = MakeEdit(anim, [](AnimationClip& c)
+                                    { Anim::UpsertTrack(c, "rotation", TrackValueType::Vec3); });
         addEdit.Do(anim);
         assert(anim.Clip().tracks.size() == 2 && "加轨道后 2 条");
         assert(Anim::FindTrack(anim.Clip(), "rotation") != nullptr && "新轨道存在");
@@ -178,9 +176,8 @@ int main()
 
         // 删轨道：先把 add 应用回去再删它。
         addEdit.Do(anim);
-        ClipEdit removeEdit = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::RemoveTrack(c, "position.x");
-        });
+        ClipEdit removeEdit = MakeEdit(anim, [](AnimationClip& c)
+                                       { Anim::RemoveTrack(c, "position.x"); });
         removeEdit.Do(anim);
         assert(anim.Clip().tracks.size() == 1 && "删轨道后 1 条");
         assert(Anim::FindTrack(anim.Clip(), "position.x") == nullptr && "被删轨道不存在");
@@ -199,29 +196,27 @@ int main()
         clip.tracks[0].keys.push_back(Key(3.0f, 10.0f));
 
         Scene::TransformComponent tc;
-        ClipAnimator anim(clip, &tc);
+        ClipAnimator              anim(clip, &tc);
 
-        ClipEdit addEv = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::AddClipEvent(c, Anim::AnimationEvent{1.5f, "hit"});
-        });
+        ClipEdit addEv = MakeEdit(anim, [](AnimationClip& c)
+                                  { Anim::AddClipEvent(c, Anim::AnimationEvent{1.5f, "hit"}); });
         addEv.Do(anim);
         assert(anim.Clip().events.size() == 1 && "加事件后 1 个");
         assert(anim.Clip().events[0].name == "hit" && "事件名正确");
 
         // 拖事件改时间：删旧 + 加新（面板拖动逻辑）。
-        ClipEdit moveEv = MakeEdit(anim, [](AnimationClip& c) {
+        ClipEdit moveEv = MakeEdit(anim, [](AnimationClip& c)
+                                   {
             Anim::RemoveClipEvent(c, 0);
-            Anim::AddClipEvent(c, Anim::AnimationEvent{2.5f, "hit"});
-        });
+            Anim::AddClipEvent(c, Anim::AnimationEvent{2.5f, "hit"}); });
         moveEv.Do(anim);
         assert(Near(anim.Clip().events[0].time, 2.5f) && "事件拖到 t=2.5");
         moveEv.Undo(anim);
         assert(Near(anim.Clip().events[0].time, 1.5f) && "Undo 回 t=1.5");
 
         // 删事件。
-        ClipEdit delEv = MakeEdit(anim, [](AnimationClip& c) {
-            Anim::RemoveClipEvent(c, 0);
-        });
+        ClipEdit delEv = MakeEdit(anim, [](AnimationClip& c)
+                                  { Anim::RemoveClipEvent(c, 0); });
         delEv.Do(anim);
         assert(anim.Clip().events.empty() && "删事件后空");
         delEv.Undo(anim);
@@ -237,16 +232,14 @@ int main()
         clip.tracks.push_back({});
         clip.tracks[0].targetName = "position";
         clip.tracks[0].valueType  = TrackValueType::Vec3;
-        clip.tracks[0].keys.push_back(Anim::Keyframe{0.0f, glm::vec4(1, 2, 3, 0),
-                                                     Anim::InterpMode::Linear, {}, {}});
-        clip.tracks[0].keys.push_back(Anim::Keyframe{2.0f, glm::vec4(4, 5, 6, 0),
-                                                     Anim::InterpMode::Step, {}, {}});
+        clip.tracks[0].keys.push_back(Anim::Keyframe{0.0f, glm::vec4(1, 2, 3, 0), Anim::InterpMode::Linear, {}, {}});
+        clip.tracks[0].keys.push_back(Anim::Keyframe{2.0f, glm::vec4(4, 5, 6, 0), Anim::InterpMode::Step, {}, {}});
         clip.events.push_back(Anim::AnimationEvent{1.0f, "footstep"});
         Anim::RecomputeClipDuration(clip);
 
         // 模拟面板"Save to .anim"：写盘。
-        const std::string path = "timeline_roundtrip_test.anim";
-        auto saveR = Anim::SaveAnimationClip(clip, path);
+        const std::string path  = "timeline_roundtrip_test.anim";
+        auto              saveR = Anim::SaveAnimationClip(clip, path);
         assert(saveR.IsOk() && "SaveAnimationClip 成功");
 
         // 重新加载，逐字段比对保真（编辑后写回 .anim 再开仍在）。

@@ -35,72 +35,72 @@
 namespace Orange::Engine::Platform
 {
 
-struct WindowDesc
-{
-    std::string   title{"OrangeEngine"};
-    std::uint32_t width{1280};
-    std::uint32_t height{720};
-    bool          resizable{true};
-    bool          visible{true};
-};
+    struct WindowDesc
+    {
+        std::string   title{"OrangeEngine"};
+        std::uint32_t width{1280};
+        std::uint32_t height{720};
+        bool          resizable{true};
+        bool          visible{true};
+    };
 
-class ORANGE_ENGINE_API Window
-{
-public:
-    using EventCallback = std::function<void(const WindowEvent&)>;
+    class ORANGE_ENGINE_API Window
+    {
+    public:
+        using EventCallback = std::function<void(const WindowEvent&)>;
 
-    // 这里只前向声明；完整定义在 src/platform/glfw/Window.cpp 中，是
-    // 私有实现细节。之所以提到 `public`，是因为该 TU 中的 GLFW 回调
-    // shim 需要在文件作用域里引用 `Window::Impl*` 来分发事件，而不必
-    // 走类内方法。持有一个不完整类型的指针并不算泄漏。
-    struct Impl;
+        // 这里只前向声明；完整定义在 src/platform/glfw/Window.cpp 中，是
+        // 私有实现细节。之所以提到 `public`，是因为该 TU 中的 GLFW 回调
+        // shim 需要在文件作用域里引用 `Window::Impl*` 来分发事件，而不必
+        // 走类内方法。持有一个不完整类型的指针并不算泄漏。
+        struct Impl;
 
-    static Result<std::unique_ptr<Window>, ResultCode> Create(const WindowDesc& desc);
+        static Result<std::unique_ptr<Window>, ResultCode> Create(const WindowDesc& desc);
 
-    Window(const Window&)            = delete;
-    Window& operator=(const Window&) = delete;
-    Window(Window&&)                 = delete;
-    Window& operator=(Window&&)      = delete;
+        Window(const Window&)            = delete;
+        Window& operator=(const Window&) = delete;
+        Window(Window&&)                 = delete;
+        Window& operator=(Window&&)      = delete;
 
-    ~Window();
+        ~Window();
 
-    // 抽干进程内每一个 Window 上累积的平台事件。语义上等同
-    // glfwPollEvents()；同一帧内重复调用是幂等的。
-    static void PollEvents() noexcept;
+        // 抽干进程内每一个 Window 上累积的平台事件。语义上等同
+        // glfwPollEvents()；同一帧内重复调用是幂等的。
+        static void PollEvents() noexcept;
 
-    bool ShouldClose() const noexcept;
-    void RequestClose() noexcept;
+        bool ShouldClose() const noexcept;
+        void RequestClose() noexcept;
 
-    std::uint32_t      GetWidth() const noexcept;
-    std::uint32_t      GetHeight() const noexcept;
-    const std::string& GetTitle() const noexcept;
+        std::uint32_t      GetWidth() const noexcept;
+        std::uint32_t      GetHeight() const noexcept;
+        const std::string& GetTitle() const noexcept;
 
-    // 像素单位的 framebuffer 尺寸。HiDPI 显示器上和 GetWidth/Height
-    // 不一致；渲染器应按这个尺寸去开 swap-chain。
-    void GetFramebufferSize(std::uint32_t& width, std::uint32_t& height) const noexcept;
+        // 像素单位的 framebuffer 尺寸。HiDPI 显示器上和 GetWidth/Height
+        // 不一致；渲染器应按这个尺寸去开 swap-chain。
+        void GetFramebufferSize(std::uint32_t& width, std::uint32_t& height) const noexcept;
 
-    void SetTitle(std::string_view title);
-    void SetEventCallback(EventCallback callback);
+        void SetTitle(std::string_view title);
+        void SetEventCallback(EventCallback callback);
 
-    // 给渲染器 surface factory 用的 native handle。
-    // * `GetNativeWindowHandle()` 在 Windows 上返回 HWND 转 void*——
-    //   Win32 原生路径，Direct3D / 第三方 D3D 拓扑要的是它。
-    // * `GetNativeDisplayHandle()` 给 X11/Wayland 预留；Win32 上恒为
-    //   nullptr。
-    // * `GetGlfwWindowHandle()` 把底层 `GLFWwindow*` 以 void* 透出去。
-    //   OrangeRender / 任何用 GLFW 帮忙建 Vulkan surface 的消费者要
-    //   的是这个。返回 void* 是刻意为之的类型擦除——公共头不暴露
-    //   GLFW 类型，调用方自己 reinterpret 回 `GLFWwindow*`。
-    void* GetNativeWindowHandle() const noexcept;
-    void* GetNativeDisplayHandle() const noexcept;
-    void* GetGlfwWindowHandle() const noexcept;
+        // 给渲染器 surface factory 用的 native handle。
+        // * `GetNativeWindowHandle()` 在 Windows 上返回 HWND 转 void*——
+        //   Win32 原生路径，Direct3D / 第三方 D3D 拓扑要的是它。
+        // * `GetNativeDisplayHandle()` 给 X11/Wayland 预留；Win32 上恒为
+        //   nullptr。
+        // * `GetGlfwWindowHandle()` 把底层 `GLFWwindow*` 以 void* 透出去。
+        //   OrangeRender / 任何用 GLFW 帮忙建 Vulkan surface 的消费者要
+        //   的是这个。返回 void* 是刻意为之的类型擦除——公共头不暴露
+        //   GLFW 类型，调用方自己 reinterpret 回 `GLFWwindow*`。
+        void* GetNativeWindowHandle() const noexcept;
+        void* GetNativeDisplayHandle() const noexcept;
+        void* GetGlfwWindowHandle() const noexcept;
 
-private:
-    Window();
+    private:
+        Window();
 
-    std::unique_ptr<Impl> mpImpl;
-};
+        std::unique_ptr<Impl> mpImpl;
+    };
 
-}  // namespace Orange::Engine::Platform
+} // namespace Orange::Engine::Platform
 
-#endif  // ORANGE_ENGINE_PLATFORM_WINDOW_H
+#endif // ORANGE_ENGINE_PLATFORM_WINDOW_H

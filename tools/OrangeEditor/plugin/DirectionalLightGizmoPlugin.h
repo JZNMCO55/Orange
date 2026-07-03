@@ -27,25 +27,25 @@
 namespace Orange::Editor::Plugin
 {
 
-class DirectionalLightGizmoPlugin : public IEditorGizmoPlugin
-{
-public:
-    // 按 schema.typeName == "DirectionalLight" 字符串比较匹配（与
-    // RegisterDirectionalLightComponentSchema 内 typeName 字面量保持一致）。
-    bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
+    class DirectionalLightGizmoPlugin : public IEditorGizmoPlugin
+    {
+    public:
+        // 按 schema.typeName == "DirectionalLight" 字符串比较匹配（与
+        // RegisterDirectionalLightComponentSchema 内 typeName 字面量保持一致）。
+        bool CanHandle(const Orange::Editor::Schema::ComponentSchema& schema) const override;
 
-    // 画 entity world 位置 → entity + normalize(direction) * handleLength
-    // 的黄色 3D 箭头（屏幕长度自适应，与 Translate/Rotate gizmo 同款 ~90 px）。
-    void Draw(EditorHost&                                            host,
-              Orange::Engine::Entity                                 entity,
-              const Orange::Editor::Schema::ComponentSchema&         schema,
-              void*                                                  component,
-              const GizmoContext&                                    ctx) override;
+        // 画 entity world 位置 → entity + normalize(direction) * handleLength
+        // 的黄色 3D 箭头（屏幕长度自适应，与 Translate/Rotate gizmo 同款 ~90 px）。
+        void Draw(EditorHost&                                    host,
+                  Orange::Engine::Entity                         entity,
+                  const Orange::Editor::Schema::ComponentSchema& schema,
+                  void*                                          component,
+                  const GizmoContext&                            ctx) override;
 
-    // HitTest 走基类默认（false）——本 plugin 是纯装饰 overlay，不参与
-    // mouse picking。继承默认即可，不重写。
-};
+        // HitTest 走基类默认（false）——本 plugin 是纯装饰 overlay，不参与
+        // mouse picking。继承默认即可，不重写。
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_DIRECTIONAL_LIGHT_GIZMO_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_DIRECTIONAL_LIGHT_GIZMO_PLUGIN_H

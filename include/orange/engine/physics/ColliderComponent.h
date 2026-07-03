@@ -33,25 +33,25 @@
 namespace Orange::Engine::Physics
 {
 
-struct ColliderComponent
-{
-    std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc> shape{CircleDesc{}};
+    struct ColliderComponent
+    {
+        std::variant<CircleDesc, BoxDesc, PolygonDesc, EdgeChainDesc> shape{CircleDesc{}};
 
-    float density{1.0f};
-    float friction{0.3f};
-    float restitution{0.0f};
-    bool  isSensor{false};
+        float density{1.0f};
+        float friction{0.3f};
+        float restitution{0.0f};
+        bool  isSensor{false};
 
-    // collision filtering（碰撞过滤位）。两 collider 碰撞当且仅当
-    //   (A.categoryBits & B.maskBits) != 0 && (B.categoryBits & A.maskBits) != 0
-    // 用 std::uint32_t（非 uint64）表达：uint32 整个值域都能精确落进 JSON 整数，
-    // 避开 uint64 高位在序列化时丢精度的风险。默认 category=1 / mask=all →
-    // 与所有 body 碰撞 = 未设置过滤时的零变化行为。扩宽到 Box2D 的 uint64
-    // b2Filter 由 Box2DBridge 隐式完成。
-    std::uint32_t categoryBits{0x0001u};       // 本 collider 所属碰撞类（位）
-    std::uint32_t maskBits{0xFFFFFFFFu};        // 本 collider 愿与哪些类碰撞（位）
-};
+        // collision filtering（碰撞过滤位）。两 collider 碰撞当且仅当
+        //   (A.categoryBits & B.maskBits) != 0 && (B.categoryBits & A.maskBits) != 0
+        // 用 std::uint32_t（非 uint64）表达：uint32 整个值域都能精确落进 JSON 整数，
+        // 避开 uint64 高位在序列化时丢精度的风险。默认 category=1 / mask=all →
+        // 与所有 body 碰撞 = 未设置过滤时的零变化行为。扩宽到 Box2D 的 uint64
+        // b2Filter 由 Box2DBridge 隐式完成。
+        std::uint32_t categoryBits{0x0001u}; // 本 collider 所属碰撞类（位）
+        std::uint32_t maskBits{0xFFFFFFFFu}; // 本 collider 愿与哪些类碰撞（位）
+    };
 
-}  // namespace Orange::Engine::Physics
+} // namespace Orange::Engine::Physics
 
-#endif  // ORANGE_ENGINE_PHYSICS_COLLIDER_COMPONENT_H
+#endif // ORANGE_ENGINE_PHYSICS_COLLIDER_COMPONENT_H

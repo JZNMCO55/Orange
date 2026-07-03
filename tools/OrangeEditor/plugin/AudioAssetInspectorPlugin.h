@@ -19,21 +19,21 @@
 namespace Orange::Editor::Plugin
 {
 
-class AudioAssetInspectorPlugin : public IEditorAssetInspectorPlugin
-{
-public:
-    // 按 path 末尾 .wav / .ogg / .mp3 / .flac 后缀比较（与 Asset 浏览器
-    // 内 ".wav/.ogg/.mp3" 扩展名映射保持一致）。
-    bool CanHandle(const std::string& assetPath) const override;
+    class AudioAssetInspectorPlugin : public IEditorAssetInspectorPlugin
+    {
+    public:
+        // 按 path 末尾 .wav / .ogg / .mp3 / .flac 后缀比较（与 Asset 浏览器
+        // 内 ".wav/.ogg/.mp3" 扩展名映射保持一致）。
+        bool CanHandle(const std::string& assetPath) const override;
 
-    // 接管 Inspector：显示 Path / Size / Preview Play / Stop 按钮 +
-    // "Pick to AudioSource.sound" 选中提示。
-    void Draw(EditorHost& host, const std::string& assetPath) override;
+        // 接管 Inspector：显示 Path / Size / Preview Play / Stop 按钮 +
+        // "Pick to AudioSource.sound" 选中提示。
+        void Draw(EditorHost& host, const std::string& assetPath) override;
 
-private:
-    std::unique_ptr<Orange::Engine::Audio::SoundInstance> mpPreviewInstance;
-};
+    private:
+        std::unique_ptr<Orange::Engine::Audio::SoundInstance> mpPreviewInstance;
+    };
 
-}  // namespace Orange::Editor::Plugin
+} // namespace Orange::Editor::Plugin
 
-#endif  // ORANGE_EDITOR_PLUGIN_AUDIO_ASSET_INSPECTOR_PLUGIN_H
+#endif // ORANGE_EDITOR_PLUGIN_AUDIO_ASSET_INSPECTOR_PLUGIN_H
