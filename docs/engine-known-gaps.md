@@ -3281,3 +3281,31 @@ prefab 之外，报告列的层级编辑空白本轮已基本补完（均编辑�
   - **collider category/mask + 查询 QueryFilter ✅ 2026-07-01**（follow-up，碰撞分层）：`ColliderComponent` 加 uint32 `categoryBits{1}`/`maskBits{all}`（默认碰撞一切 = 零行为变化，走 `b2ShapeDef.filter`）；`QueryFilter{categoryBits,maskBits}` 加进 6 个空间查询作可选默认尾参。序列化走 `WriteInt/GetInt` int64 整数路径（避 JSON double 精度，0xFFFFFFFF 位精确）+ scene schema 1.18→1.19 additive 回退读。让游戏侧按类过滤（接地只打地面 / 软体只和地形 / 查询自动排除自身）。
   - **剩（可选后续）**：**编辑器 Inspector schema 未暴露 `categoryBits`/`maskBits`**（`RegisterBuiltinSchemas.cpp` 的 Collider builder 未登记这俩字段 → Inspector / OE-MCP set_field / prefab override diff 看不到；但 `Scene::Save/Load` 手写路径正确 round-trip，**无数据丢失**，纯 authoring 一致性缺口，dogfood 时补，需先确认 schema 支持 uint 整数字段类型）；shape 粒度句柄（当前 1 body = 1 shape，返回 body 粒度足够）。**消费侧：OrangeGames 首游用它替换 `LevelBox` analytic workaround —— 2026-07-01 本 session 已跨仓迁移（用户特批），见 OrangeGames spike-01 提交；手感待真机 dogfood。**
 - **关联**：OrangeGames `prototypes/spike-01-blob/NOTES-loopA.md`；首游 Spike 1 移动地基依赖（接地 / corner / 软体碰撞）。
+
+## GAP-2026-07-03-editor-imgui-on-d3d12-integration
+
+- **发现方**：OrangeRender c7 分支 D3D12Interop 首版落地（2026-07-03）。
+- **一句话定性**：OrangeEditor 缺 ImGui-on-D3D12 集成路径，导致 OrangeRender 的 `D3D12Interop.h`（ImGui-on-DX12 原生句柄出口）无法端到端验证。
+
+### 触发场景
+
+OrangeRender c7 分支交付了 D3D12 后端功能对等 + 后端中立 Renderer + `D3D12Interop.h` 首版（handle 出口：`GetD3D12DeviceHandles` / `GetD3D12CommandList` / `GetD3D12Resource`）。OR 侧只能验"句柄非空 + 跨后端安全"（`d3d12_interop` ctest）——**真 ImGui 是否在 D3D12 上渲染只能由编辑器验**。按生态既定边界，OrangeRender **故意不依赖 ImGui**（`swapchain_overlay` sample 用三角形作 stand-in），ImGui 集成是编辑器的活。
+
+### 缺什么
+
+OrangeEditor 加一条 **ImGui-on-D3D12** 路径（与现有 `ImGui_ImplVulkan`（走 `VulkanInterop.h`）并列）：
+
+- 用 `ORANGE_WITH_D3D12=ON` 构建 OrangeRender + 选 `RHIBackendType::D3D12` / `Renderer BackendType::D3D12`。
+- `ImGui_ImplDX12_Init`：`ID3D12Device*` + `ID3D12CommandQueue*` 取自 `Interop::GetD3D12DeviceHandles`；帧数 = 编辑器传的 `mFramesInFlight`；RTV 格式 = `DXGI_FORMAT_B8G8R8A8_UNORM`（D3D12 swapchain 固定 BGRA8）。
+- 逐帧：在 swapchain overlay 回调内经 `Interop::GetD3D12CommandList` 取 `ID3D12GraphicsCommandList*` 喂 `ImGui_ImplDX12_RenderDrawData`。
+- **纹理显示（`ImGui::Image` 显示离屏 RT）**：编辑器在**自己拥有的 ImGui SRV descriptor heap** 里，从 `Interop::GetD3D12Resource` 拿到的 `ID3D12Resource*` `CreateShaderResourceView`，用该 SRV 的 GPU 句柄当 `ImTextureID`（OrangeRender 无法预建 SRV——heap 所有权在编辑器）。
+- 注意：ImGui DX12 后端在 v1.91 前后对 SRV heap 管理 API 有较大变化（旧版手传 font CPU/GPU 句柄；新版用 `ImGui_ImplDX12_InitInfo` + SrvDescriptorHeap + alloc/free 回调）——按编辑器实际 ImGui 版本接。
+
+### 期望验收
+
+OrangeEditor 在 D3D12 后端下：ImGui 面板正常渲染 + 交互；Scene 面板经 `ImGui::Image` 显示离屏 RT 正确；D3D12 debug layer / validation 静默。这即 `D3D12Interop` 的端到端 dogfood。
+
+### 状态
+
+- **登记**（2026-07-03）。**无急迫性**：编辑器当前在 Vulkan 上跑得好，无 D3D12 消费需求；这是"将来真要出 D3D12 编辑器 / 验 D3D12Interop"时的事，**不阻塞 c7 代码合并**。落地节奏独立 session 评审。
+- 依赖：OrangeRender c7 分支 `D3D12Interop.h`（commit `6c54576`）；c7 尚未合 main，届时需 OR 侧 `ORANGE_WITH_D3D12=ON` 构建。
