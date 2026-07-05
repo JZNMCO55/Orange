@@ -280,7 +280,7 @@ OrangeEditor 开发时采用**双参考**策略：
 
 ### 1. Invariant lint —— `scripts/check_invariants.py`
 
-机器化执行 CLAUDE.md 的硬纪律：header isolation / 公共头无裸 `nlohmann::json` / 代码注释无 `Task NN` `Phase N` / OrangeEditor 无 `DrawInspectorXxx` hardcode（v0.2.5 后切 error）。
+机器化执行 CLAUDE.md 的硬纪律：header isolation / 公共头无裸 `nlohmann::json` / 代码注释无 `Task NN` `Phase N` / OrangeEditor 无 `DrawInspectorXxx` hardcode（v0.2.5 后切 error）/ 子系统便利聚合头 `<orange/engine/<name>.h>` 完整性（aggregator-completeness：子系统新增公共头必须同步登记进聚合头 + 对应 `src/<mod>/<Mod>HeaderCheck.cpp`）。
 
 **何时跑**：
 - **每次 milestone 开工前**：跑一次确认 baseline 干净（如脏先修，不在本 milestone 内捎带）
@@ -384,12 +384,18 @@ Rules:
 ```
 CMakeLists.txt                          # top-level build (Phase 1 / Task 02)
 include/orange/engine/                  # public API; namespace Orange::Engine
-  OrangeEngine.h                          # umbrella header
-  OrangeEngineExport.h                    # ORANGE_ENGINE_API macro
-  OrangeEngineVersion.h                   # generated
-  core/  platform/  app/  asset/  scene/
-  render/  animation/  physics/  audio/  input/
-  save/                                   # Phase 5.5
+  prelude.h                               # 精选便利头（CoreMinimal 风格 curated；非全引擎 umbrella）
+  <subsystem>.h                           # 各子系统便利聚合头（app.h / render.h / physics.h …）：
+                                          #   一次性引入 <orange/engine/<name>/*> 全部公共头。仅按
+                                          #   子系统粒度聚合（刻意不做 139 头全引擎 umbrella，避编译
+                                          #   时间陷阱）。完整性由 check_invariants.py 的
+                                          #   aggregator-completeness 规则机器强制；单头子系统
+                                          #   （fsm/event/timer/steering/spline/spatial/container）无聚合头
+  # OrangeEngineExport.h（ORANGE_ENGINE_API 宏）/ OrangeEngineVersion.h 由 CMake
+  # 生成到 build tree 的 generated/orange/engine/（不在源码树），install 时落到同一 layout
+  core/  platform/  app/  asset/  scene/  render/  animation/  physics/
+  audio/  input/  camerarig/  nav/  noise/  particle/  save/  script/
+  tilemap/  tween/  spline/  spatial/  fsm/  event/  timer/  steering/  container/
 src/                                    # private implementation
   core/  platform/  app/  asset/  scene/
   render/                                 # ★ unique OrangeRender consumer

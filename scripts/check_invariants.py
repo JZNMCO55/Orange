@@ -427,8 +427,45 @@ def rule_editor_no_bare_text_button(path: Path, lines: list[str]) -> Iterable[Vi
             )
 
 
+# 子系统聚合头完整性：`include/orange/engine/<name>.h` 若与同名子目录 `<name>/`
+# 并存，即视为该子系统的便利聚合头（convenience / umbrella header），必须
+# `#include` 该目录下每一个公共头——否则消费者经聚合头会静默漏掉后来新增的
+# 头。`prelude.h` 这类无同名子目录的顶层头是精选头（curated），不在此列。
+AGGREGATOR_NAME_RE = re.compile(r"^include/orange/engine/([a-z0-9_]+)\.h$")
+AGGREGATOR_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](orange/engine/[^>"]+)[>"]')
+
+
+def rule_aggregator_completeness(path: Path, lines: list[str]) -> Iterable[Violation]:
+    rel_path = rel(path)
+    m = AGGREGATOR_NAME_RE.match(rel_path)
+    if not m:
+        return
+    name = m.group(1)
+    subdir = REPO_ROOT / "include" / "orange" / "engine" / name
+    if not subdir.is_dir():
+        return  # 无同名子目录（如 prelude.h）—— 精选头，不强制完整性
+    expected = {
+        f"orange/engine/{name}/{p.name}"
+        for p in subdir.iterdir()
+        if p.is_file() and p.suffix in (".h", ".hpp")
+    }
+    included: set[str] = set()
+    for line in lines:
+        mm = AGGREGATOR_INCLUDE_RE.match(line)
+        if mm:
+            included.add(mm.group(1))
+    for miss in sorted(expected - included):
+        yield Violation(
+            "aggregator-completeness",
+            rel_path,
+            1,
+            f"子系统聚合头缺 `#include <{miss}>`：{name}/ 下新增公共头必须在聚合头登记",
+        )
+
+
 RULES: list[Rule] = [
     Rule("header-isolation", "公共头与第三方头隔离（box2d / dragonBones / miniaudio / orange/* / vulkan）", rule_header_isolation),
+    Rule("aggregator-completeness", "子系统聚合头 <orange/engine/<name>.h> 必须包含同名目录下全部公共头", rule_aggregator_completeness),
     Rule("no-bare-json-in-public-headers", "公共头禁止裸 nlohmann::json", rule_no_bare_json_in_public_headers),
     Rule("no-task-references", "代码注释禁止引用 Task NN / Phase N", rule_no_task_references),
     Rule("editor-no-hardcode", "OrangeEditor 禁止 DrawInspectorXxx hardcode（v0.2.5 后强制）", rule_editor_no_hardcode),

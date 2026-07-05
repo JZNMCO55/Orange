@@ -44,6 +44,9 @@ include(cmake/Dependencies.cmake)
 add_library(orange_engine STATIC
     src/EngineStub.cpp
 
+    # 便利聚合头（prelude + 各子系统 <orange/engine/<name>.h>）自包含性检查 TU。
+    src/PublicHeaderAggregateCheck.cpp
+
     # Core
     src/core/CoreHeaderCheck.cpp
     src/core/Log.cpp
