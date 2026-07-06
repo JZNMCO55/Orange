@@ -384,12 +384,20 @@ if (ORANGE_EDITOR_INSTALL)
         INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     )
 
-    # 公共 API 头 —— per-game editor 瘦 main 只需这两个。装到独立子目录
-    # include/orange_editor/（与 lib 的 INSTALL_INTERFACE include 对齐）。
-    install(FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h"
-            "${CMAKE_CURRENT_SOURCE_DIR}/EditorAppConfig.h"
+    # 公共 API 头 —— 装**整棵**编辑器头树（保留子目录结构）到 include/orange_editor/
+    # （与 lib 的 INSTALL_INTERFACE include 对齐）。
+    #
+    # 为什么整树而非仅 EditorApp.h/EditorAppConfig.h：瘦 main 确实只需那两个，但
+    # M4 手感组件化让 per-game editor（OG）要用 `schema/ComponentSchemaRegistry.h`
+    # 的 ComponentSchemaBuilder 注册自家游戏组件 Inspector schema——该头 include
+    # `../EditorHost.h`，后者又拖 context/ + command/ + plugin/ 一串编辑器内部头。
+    # 故 schema 扩展点的公共面 = 编辑器头树整体。相对 include（"../EditorHost.h"）
+    # 靠保留子目录结构在 include/orange_editor/ 内自洽解析。这是 roadmap 开放
+    # 问题#4"编辑器头公共面粒度"的取舍：全量导出起步，后续可挑子集收敛。
+    # 只装 *.h（.rc / .cpp / vendor 源不装）。
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/orange_editor"
+        FILES_MATCHING PATTERN "*.h"
     )
 
     # 编辑器内置 SPIR-V（grid + fullscreen）—— 用 FILES 因变量含 $<CONFIG>

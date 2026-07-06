@@ -15,9 +15,15 @@
 
 #include <orange/engine/game/IGameModule.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
+
+namespace Orange::Engine
+{
+    class World;
+}
 
 namespace Orange::Editor
 {
@@ -50,6 +56,21 @@ namespace Orange::Editor
         //（RegisterRenderPasses / CollectSerializers）+ Play 生命周期。空 =
         // 原版无模块编辑器。move-only（IGameModule 不可拷贝）。
         std::vector<std::unique_ptr<Orange::Engine::Game::IGameModule>> modules;
+
+        // 游戏组件 Inspector schema 注册钩子（M4 手感组件化）。RunEditorApp 在
+        // 内置 schema 注册之后调一次；per-game editor 在此用
+        // `Orange::Editor::Schema::ComponentSchemaBuilder<C>(...).Field<...>().Register()`
+        // 把自家组件（如 SlimeTuningComponent）注册进全局 ComponentSchemaRegistry，
+        // 令 Inspector 能画字段 + Add-Component 菜单能加。ADR-021 定 schema 是
+        // 编辑器层概念（不进 IGameModule），故经本钩子而非模块接口。空 = 无。
+        std::function<void()> onRegisterSchemas;
+
+        // Edit-mode 世界 seed 钩子（M4 手感组件化的 authoring 入口）。RunEditorApp
+        // 建好 World、无 config.startupScene 时调一次，让 per-game editor 往 Edit
+        // World 种玩法实体（如带 SlimeTuningComponent 默认值的 Slime entity），
+        // 供用户在 Inspector 选中调参、Play 时游戏模块读取。空 = 不 seed（走
+        // startupScene 或纯空世界）。
+        std::function<void(Orange::Engine::World&)> onSeedWorld;
     };
 
 } // namespace Orange::Editor

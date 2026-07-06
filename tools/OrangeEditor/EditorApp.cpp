@@ -808,6 +808,14 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
     Orange::Editor::Schema::RegisterBuiltinSchemas();
     DemoGame::RegisterHealthComponentSchema();
 
+    // M4 手感组件化：per-game editor 在此注册自家游戏组件 Inspector schema
+    //（ComponentSchemaBuilder 写进全局 ComponentSchemaRegistry）。ADR-021 定
+    // schema 是编辑器层概念、不进 IGameModule，故经 config 钩子。空 config no-op。
+    if (config.onRegisterSchemas)
+    {
+        config.onRegisterSchemas();
+    }
+
     EditorHost editorHost;
     editorHost.scene.pWorld = std::make_unique<Orange::Engine::World>();
     InitializeEditorAssets(editorHost);
@@ -1024,6 +1032,15 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
             {
                 ORANGE_LOG_WARN("[OrangeEditor] 启动场景加载失败：{} —— 起空世界",
                                 startupScene);
+            }
+
+            // M4 手感组件化：per-game editor 空世界 → 调 onSeedWorld 种玩法实体
+            //（authoring 入口，如带 SlimeTuningComponent 默认值的 Slime entity），
+            // 供用户在 Inspector 调参、Play 时游戏模块读取。此刻 schema +
+            // extraSerializers 均已就绪，seed 的组件可正常显示 + round-trip。
+            if (isPerGameEditor && config.onSeedWorld && editorHost.scene.pWorld != nullptr)
+            {
+                config.onSeedWorld(*editorHost.scene.pWorld);
             }
         }
 
