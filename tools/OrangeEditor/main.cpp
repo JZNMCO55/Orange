@@ -866,6 +866,26 @@ int main(int argc, char** argv)
     editorHost.gizmoPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::CameraFrustumGizmoPlugin>());
 
+    // ---- PIE 游戏模块注册（ADR-021 / M2.2）--------------------------------
+    // 编辑器即「宿主」：per-game editor（M4 起 SlimeEditor.exe）在**此处**
+    // editorHost.gameModules.AddModule(std::make_unique<SlimeGameModule>()) 注入
+    // 自家 IGameModule。原版 OrangeEditor 无游戏模块，gameModules 恒空——护栏令
+    // 全部扇出 no-op、零行为变化（M3 EditorAppConfig 落地后改为按 config.modules
+    // 注入，消灭 per-game main 分叉）。
+    //
+    // 两段注册期扇出：
+    //   * RegisterRenderPasses：viewport Pipeline 是 ScenePanel 首帧 lazy 创建，
+    //     故延到 EnsureScenePipeline 里扇出（见 ScenePanel.cpp），不在此。
+    //   * CollectSerializers：把各模块的 scene 序列化器 merge 进 extraSerializers，
+    //     令含游戏组件的场景可 Save/Load round-trip。**必须在下方启动场景 Load
+    //     之前**完成（extraSerializers 首次消费在 demo Load）。
+    {
+        auto moduleSerializers = editorHost.gameModules.CollectSerializers();
+        editorHost.extraSerializers.insert(editorHost.extraSerializers.end(),
+                                           moduleSerializers.begin(),
+                                           moduleSerializers.end());
+    }
+
     // 把 CommandStack 的"栈有效变更"钩子绑到 scene.dirty——任何 Push / Undo /
     // Redo / EndGroup 后 File>Save 菜单立刻亮起。pHost 捕获本地 editorHost 地
     // 址；editorHost 与 cmdStack 同生命周期（main 栈帧），lambda 不会悬挂。

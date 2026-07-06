@@ -218,8 +218,25 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     //      本帧 DrawScenePanel → Pipeline::Render 看到最新状态）-----
     if (mHost.scene.playState == PlayState::Play && mHost.scene.pWorld != nullptr)
     {
-        // Physics step → 把 dynamic body 新位姿写回 ECS Transform
-        if (mpPhysicsWorld != nullptr)
+        // PIE 游戏模块 Tick（ADR-021 / M2.2）—— **先于**宿主 physics step
+        // 扇出（开放问题①暂定序：module Tick → physics → vfx → anim → audio）。
+        // 模块自管固定步长（spike-01 现状），dt 为宿主帧 dt。空 host（无注册
+        // 模块）时护栏 no-op、零行为变化。ctx 各指针 Edit→Play 已装配（pPhysics
+        // 见 S3、pPipeline 为 viewport 离屏 Pipeline）。
+        {
+            Orange::Engine::Game::GameModuleContext gmCtx{};
+            gmCtx.pWorld    = mHost.scene.pWorld.get();
+            gmCtx.pPhysics  = mpPhysicsWorld.get();
+            gmCtx.pAssets   = mHost.assets.pAssets.get();
+            gmCtx.pPipeline = mpScenePipeline.get();
+            mHost.gameModules.Tick(gmCtx, dt);
+        }
+
+        // Physics step → 把 dynamic body 新位姿写回 ECS Transform。
+        // 任一模块 WantsOwnPhysicsStep 时宿主让位——不自动 Step（模块在自己
+        // 的 accumulator 内 Step 同一 PhysicsWorld），写回也交模块（ADR-021
+        // 开放问题①）。原版 OrangeEditor 无模块 → 恒 false → 照常自动 step。
+        if (mpPhysicsWorld != nullptr && !mHost.gameModules.AnyWantsOwnPhysicsStep())
         {
             // v0.6 c4：每帧 Step 之前同步 layer.visible → body enabled。
             // hidden layer 的 dynamic body 不参与积分 / 不产生 contact，匹配
@@ -561,6 +578,21 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 
 bool EditorRenderLayer::OnEvent(const Orange::Engine::Platform::WindowEvent& event)
 {
+    // PIE 输入路由（ADR-021 / M2.2）—— Play 期把窗口事件转发给游戏模块宿主
+    // （键鼠喂模块自己的 InputContext）。host 内部护栏只在 mInPlay 时转发，故
+    // 此处只需按编辑器 playState 粗 gate；空 host（无注册模块）时全 no-op。
+    // 转发不消费事件（不 return），编辑器仍照常处理下方 Esc 等——M2.2 阶段
+    // 编辑器与模块并行收事件即可。
+    // ⚠️ defer 到 M4（随真实 SlimeGameModule + 游戏相机落地）：
+    //   * 细粒度 gate「仅 Scene 视口聚焦才路由」，避免 Inspector 文本输入漏进
+    //     游戏（当前无 focus 信号，粗 gate 在空 host 下无害）；
+    //   * Play 期切 World 内游戏相机、Edit 期编辑器相机（当前无游戏相机概念可
+    //     切，硬接半版本会回归编辑器现行稳定轨道相机，故 defer）。
+    if (mHost.scene.playState == PlayState::Play)
+    {
+        mHost.gameModules.OnEvent(event);
+    }
+
     // ImGui_ImplGlfw_InitForVulkan(true) 时 install_callbacks=true，
     // ImGui 会自己装 GLFW 回调拿到所有事件 —— 这里**不**再转发
     // KeyEvent，避免双触发。仅把 Esc 作为编辑器的全局退出快捷键拦
@@ -1883,6 +1915,20 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             }
 
             mHost.scene.playState = PlayState::Play;
+
+            // S5: PIE 游戏模块 EnterPlay（ADR-021 / M2.2）—— 注册序列（S2 快照 /
+            // S3 physics / audio / S4 vfx）全部就绪后扇出，模块在 OnEnterPlay 里
+            // 建运行期状态（Blob 复位 / control point 建 body 等），可向 ctx.pPhysics
+            // 加自己的 body。空 host 时护栏 no-op。Stop 走 host.ExitPlay 逆序对偶。
+            {
+                Orange::Engine::Game::GameModuleContext gmCtx{};
+                gmCtx.pWorld    = mHost.scene.pWorld.get();
+                gmCtx.pPhysics  = mpPhysicsWorld.get();
+                gmCtx.pAssets   = mHost.assets.pAssets.get();
+                gmCtx.pPipeline = mpScenePipeline.get();
+                mHost.gameModules.EnterPlay(gmCtx);
+            }
+
             ORANGE_LOG_INFO("[play] Edit → Play");
             break;
         }
@@ -1914,6 +1960,20 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             }
             const char* prevLabel =
                 (mHost.scene.playState == PlayState::Play) ? "Play" : "Paused";
+
+            // S5 拆卸：PIE 游戏模块 ExitPlay（ADR-021 / M2.2）—— **先于**宿主
+            // S4/S3 拆卸扇出（与 EnterPlay 装配序逆序对偶：模块最后 Enter、
+            // 最先 Exit），此刻 ctx.pPhysics / pPipeline 仍存活，模块可安全拆卸
+            // 自己的运行期状态。随后 World 从 S2 快照还原，模块 OnEnterPlay 建
+            // 的 ECS 改动一并丢弃。空 host 时护栏 no-op。
+            {
+                Orange::Engine::Game::GameModuleContext gmCtx{};
+                gmCtx.pWorld    = mHost.scene.pWorld.get();
+                gmCtx.pPhysics  = mpPhysicsWorld.get();
+                gmCtx.pAssets   = mHost.assets.pAssets.get();
+                gmCtx.pPipeline = mpScenePipeline.get();
+                mHost.gameModules.ExitPlay(gmCtx);
+            }
 
             // S4 拆卸：先断开 Pipeline → VfxSystem 引用，再 Shutdown / reset
             if (mpScenePipeline != nullptr)

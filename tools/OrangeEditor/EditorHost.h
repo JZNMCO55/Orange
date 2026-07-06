@@ -55,6 +55,7 @@
 #include "plugin/IEditorInspectorPlugin.h"
 
 #include <orange/engine/audio/AudioEngine.h>
+#include <orange/engine/game/GameModuleHost.h>
 #include <orange/engine/scene/ComponentSerializerEntry.h>
 
 #include <functional>
@@ -158,6 +159,17 @@ struct EditorHost
     // 存储用 value（非 unique_ptr）—— ComponentSerializerEntry 只含函数
     // 指针 + string_view，自身无资源所有权，拷贝语义安全。
     std::vector<Orange::Engine::Scene::ComponentSerializerEntry> extraSerializers;
+
+    // PIE 双语言玩法宿主（ADR-021 / M2）—— 编辑器就是「宿主」，持有一组
+    // IGameModule 并挂进 Play 状态机（ApplyPendingPlayOp）。原版 OrangeEditor
+    // 恒空（无注册模块，护栏令所有扇出 no-op、零行为变化）；per-game editor
+    // （M4 起 SlimeEditor）在 main 启动装配段 AddModule 注入自家 SlimeGameModule。
+    // 与 extraSerializers / plugin 注册表并列挂在 host 上，不塞进 mega-class。
+    //   * 注册期：Pipeline 创建时 RegisterRenderPasses；启动期 CollectSerializers
+    //     merge 进上面的 extraSerializers（令游戏组件 scene round-trip）。
+    //   * Play 生命周期：EnterPlay / Tick / OnEvent / ExitPlay 由 EditorRenderLayer
+    //     的 Play 路径扇出（护栏保证配对）。
+    Orange::Engine::Game::GameModuleHost gameModules;
 
     // v1.1 T2：OS 文件 drop 到主窗口时的入站队列。main.cpp 的
     // glfwSetDropCallback 把绝对路径 push 进来；EditorRenderLayer::OnUpdate

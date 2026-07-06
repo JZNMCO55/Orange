@@ -121,13 +121,16 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 2. `include/orange/engine/game/GameModuleHost.h`（header-only）+ `game.h` 聚合 —— 可复用扇出驱动：注册期 `RegisterRenderPasses`/`CollectSerializers`/`AnyWantsOwnPhysicsStep`；Play 生命周期 `EnterPlay`(正序)/`Tick`/`OnEvent`/`ExitPlay`(逆序)，带 play-state 护栏（未 EnterPlay 的 Tick/OnEvent/ExitPlay no-op，重复 EnterPlay no-op）。编辑器宿主与发布 runtime 宿主共用。
 3. 验收：`game_module_host_test`（headless，Pipeline 默认构造测 InsertPass 扇出）3/3；lint（含 game.h aggregator-completeness）+ drift 干净。
 
-**M2.2 编辑器接线（剩余，属编辑器代码，与 M3 lib 化同期做更自然）**：
+**M2.2 编辑器接线 ✅ 2026-07-06**（属编辑器代码，与 M3 lib 化同期）：
 
-1. `ApplyPendingPlayOp` 增 game module S 步（EnterPlay 末注册序列后调 host.EnterPlay；Stop 对偶 host.ExitPlay）；Play tick 段调 `host.Tick()`（顺序：module Tick 先于宿主 physics step，`AnyWantsOwnPhysicsStep` 时让位——开放问题①落地）；
-2. 视口聚焦输入路由：`WindowEvent` 转发 `host.OnEvent`（失焦回编辑器 fly-cam/gizmo）；Play 期用 World 内游戏相机、Edit 期用编辑器相机；
-3. EditorHost 挂 `GameModuleHost`（沿 plugin 注册表先例）；注册期在编辑器启动装配段调用。
-- **验收**：Enter/Stop 生命周期 dogfood（Play 看 module tick、Stop 还原）；输入路由 + 相机切换 dogfood。
-- **纪律**：注册走 extraSerializers 既有机制，禁止 mega-class 加游戏分支（ADR-001）。
+1. ✅ `EditorHost` 挂 `GameModuleHost gameModules`（值成员，沿 plugin 注册表先例，不塞 mega-class）；main 启动装配段留**模块注册站点**（原版 OrangeEditor 无模块 → gameModules 恒空 → 护栏令全部扇出 no-op、零行为变化；per-game editor M4 起在此 `AddModule`）。
+2. ✅ 注册期扇出：`CollectSerializers` merge 进 `editorHost.extraSerializers`（启动场景 Load 之前）；`RegisterRenderPasses` 因 viewport Pipeline 是 ScenePanel 首帧 lazy 创建，挂在 `EnsureScenePipeline` 创建块（Edit 态常驻，pass 无数据自早退）。
+3. ✅ `ApplyPendingPlayOp`：EnterPlay 末（S2 快照/S3 physics/audio/S4 vfx 就绪后）调 `host.EnterPlay(ctx)` = S5；Stop 首（拆卸前，逆序对偶）调 `host.ExitPlay(ctx)`。ctx = `{pWorld, pPhysics(mpPhysicsWorld), pAssets, pPipeline(mpScenePipeline)}`。
+4. ✅ Play tick：`host.Tick(ctx,dt)` **先于**宿主 physics step；`AnyWantsOwnPhysicsStep()` 时宿主让位（gate 掉 `mpPhysicsWorld->Step`+写回，开放问题①落地）。
+5. ✅ 输入路由：`OnEvent` Play-gated 转发 `WindowEvent` → `host.OnEvent`（不消费，编辑器并行收）。
+- **本阶段验收（已过）**：编辑器**编译 + 链接绿**（EditorHost.h 触发多 TU 重编）、shader/资产齐全、gameModules 空态零回归；invariant lint 干净。
+- **defer 到 M4**（随真实 SlimeGameModule + 游戏相机落地，dogfood-gated）：① Enter/Stop 生命周期 + module tick 的行为 dogfood（当前无模块可看）；② 输入路由细粒度 gate「仅 Scene 视口聚焦才路由」（避免 Inspector 输入漏进游戏，当前无 focus 信号）；③ **Play 期切 World 内游戏相机 / Edit 期编辑器相机**（当前无游戏相机概念可切，硬接半版本会回归编辑器现行稳定轨道相机，故 defer——耦合 camera-editor-vs-runtime GAP）。
+- **纪律**：注册走 extraSerializers 既有机制，禁止 mega-class 加游戏分支（ADR-001）——已遵守（gameModules 挂 host、无 mega-class 游戏分支）。
 
 ### M3 · editor lib 化 + SDK 导出（OE，**L**，预计拆 2-3 session）
 

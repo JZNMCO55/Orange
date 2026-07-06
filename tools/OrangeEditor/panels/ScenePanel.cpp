@@ -983,6 +983,14 @@ bool EditorRenderLayer::EnsureScenePipeline(std::uint32_t width, std::uint32_t h
         {
             mHost.thumbnails->SetPipeline(mpScenePipeline.get());
         }
+
+        // PIE 游戏模块注册期扇出（ADR-021 / M2.2）—— viewport Pipeline 刚
+        // InitializeOffscreen 成功，此刻一次性 RegisterRenderPasses 把各模块的
+        // 自定义 IRenderPass（典型 SlimeMetaballPass 走 AfterMainPass，靠 M1 离屏
+        // InsertPass 接通）常驻插入。Edit 态就注册、pass 无数据时自己 Execute 早退。
+        // 原版 OrangeEditor gameModules 空 → no-op。放在 lazy 创建块内只调一次；
+        // 后续 resize 走下面复用分支，不重复注册（pass 生命周期随 Pipeline）。
+        mHost.gameModules.RegisterRenderPasses(*mpScenePipeline);
     }
     else if (width != mScenePanelWidth || height != mScenePanelHeight)
     {
