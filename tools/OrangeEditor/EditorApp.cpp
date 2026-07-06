@@ -336,11 +336,10 @@ namespace
 
 } // namespace
 
-// M3 机械搬迁：本函数体 = 原 OrangeEditor main() 全量（含 headless import CLI
-// 分支 + 启动装配 + 主循环 + 关停），逐字节不变。exe 端 main.cpp 仅转发 argc/argv。
-// EditorAppConfig 参数化（projectRoot/configDir/assetRoot/IGameModule 注入）+
-// ChdirToRepoRoot cwd 副作用消除 + imgui.ini 显式 SetIniFilename 留 M3 step2。
-int Orange::Editor::RunEditorApp(int argc, char** argv)
+// M3 step2：EditorAppConfig 参数化。config 空（默认）= 原版 OrangeEditor 行为
+// （projectRoot 空 → 推导仓库根 + chdir）；per-game editor 填 projectRoot +
+// modules 注入。headless import CLI 分支忽略 config。
+int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
 {
     using namespace Orange::Engine;
 
@@ -353,10 +352,31 @@ int Orange::Editor::RunEditorApp(int argc, char** argv)
 #endif
 
     // 必须在任何相对路径 IO（Scene::Load / asset lazy-bake / shader 编译
-    // 缓存等）之前完成 chdir，否则 build/bin/Debug 启动场景会产生 stale
+    // 缓存等）之前完成 cwd 定位，否则 build/bin/Debug 启动场景会产生 stale
     // build 产物 assets/ 子树污染。headless import 路径同样依赖它把产物落到
     // 仓库根 assets/Models/。
-    ChdirToRepoRoot();
+    //
+    // M3 step2：config.projectRoot 非空（per-game editor / consumer 路径，如
+    // SlimeEditor 指向 OG 仓根）= 显式 chdir 到它——**config-driven，不再靠脆弱的
+    // "向上找 assets/&&src/ 标记"探测**（该探测被改名 demo 场景破坏过、酿 codicon
+    // 崩溃，见 reference_orangeeditor_cwd_marker_and_font_crash）。空（原版
+    // OrangeEditor）= 回退 ChdirToRepoRoot 保持现行为。注：本步把 cwd 定位显式化，
+    // 彻底 absolute-path 化（消灭 cwd 依赖本身）是后续 polish、非 M4 前置。
+    if (!config.projectRoot.empty())
+    {
+        std::error_code chdirEc;
+        std::filesystem::current_path(config.projectRoot, chdirEc);
+        if (chdirEc)
+        {
+            ORANGE_LOG_WARN("[OrangeEditor] chdir 到 projectRoot 失败：{}（code={}）—— "
+                            "相对路径资产可能解析失败",
+                            config.projectRoot, chdirEc.value());
+        }
+    }
+    else
+    {
+        ChdirToRepoRoot();
+    }
 
     // Headless 资产导入分支（GAP-2026-05-27 G1）：在**任何** GLFW / Vulkan /
     // ImGui init 之前判 argv，命中即走纯 CPU 导入路径后直接退出，全程不碰 GUI。
@@ -377,7 +397,8 @@ int Orange::Editor::RunEditorApp(int argc, char** argv)
 
     // ---- AppHost（窗口 + 主循环）---------------------------------------
     AppConfig cfg{};
-    cfg.window.title  = "OrangeEditor v0.0.3";
+    // M3 step2：窗口标题 config-driven（per-game editor 传 "SlimeEditor" 等）。
+    cfg.window.title  = config.windowTitle.empty() ? "OrangeEditor v0.0.3" : config.windowTitle;
     cfg.window.width  = 1600;
     cfg.window.height = 900;
     auto hostRes      = AppHost::Create(cfg);
@@ -661,10 +682,35 @@ int Orange::Editor::RunEditorApp(int argc, char** argv)
         codiconsCfg.PixelSnapH       = true;
         codiconsCfg.GlyphMinAdvanceX = fontPx;
         codiconsCfg.GlyphOffset.y    = std::floor(fontPx * 0.15f);
-        // 同主字体：先查文件存在（codicon.ttf 是**相对路径**，cwd 非仓库根时
-        // 必缺失——正是 ChdirToRepoRoot 标记被改名场景破坏后的崩溃现场）。缺失时
-        // 跳过合并，icon 显示为 '?'（不致命），绝不进 ImGui 缺失字体的 assert 路径。
-        const char*     kCodiconPath = "tools/OrangeEditor/theme/codicons/codicon.ttf";
+        // 同主字体：先查文件存在（cwd 非仓库根时相对路径必缺失——正是
+        // ChdirToRepoRoot 标记被改名场景破坏后的崩溃现场）。缺失时跳过合并，
+        // icon 显示为 '?'（不致命），绝不进 ImGui 缺失字体的 assert 路径。
+        //
+        // M3 step2：codicon 优先 **exe-相对**（installed consumer 布局：
+        // OrangeEditorConfig 的 copy-helper 把 codicon.ttf 拷到 exe 旁
+        // theme/codicons/），回退 repo-root-相对（in-tree 开发 cwd=仓库根）。
+        // 原 hardcode repo-root 路径对 per-game editor（SlimeEditor 不在
+        // OrangeEngine 源树旁）失效——与 editor shader 的 exe-相对加载约定一致。
+        std::string codiconStr;
+        {
+            wchar_t         exeW[MAX_PATH] = {};
+            const DWORD     n              = GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+            std::error_code exEc;
+            if (n != 0 && n != MAX_PATH)
+            {
+                const std::filesystem::path exeRel =
+                    std::filesystem::path(exeW).parent_path() / "theme" / "codicons" / "codicon.ttf";
+                if (std::filesystem::exists(exeRel, exEc))
+                {
+                    codiconStr = exeRel.string();
+                }
+            }
+            if (codiconStr.empty())
+            {
+                codiconStr = "tools/OrangeEditor/theme/codicons/codicon.ttf";
+            }
+        }
+        const char*     kCodiconPath = codiconStr.c_str();
         std::error_code codiconEc;
         if (std::filesystem::exists(kCodiconPath, codiconEc))
         {
@@ -871,12 +917,16 @@ int Orange::Editor::RunEditorApp(int argc, char** argv)
     editorHost.gizmoPlugins.push_back(
         std::make_unique<Orange::Editor::Plugin::CameraFrustumGizmoPlugin>());
 
-    // ---- PIE 游戏模块注册（ADR-021 / M2.2）--------------------------------
-    // 编辑器即「宿主」：per-game editor（M4 起 SlimeEditor.exe）在**此处**
-    // editorHost.gameModules.AddModule(std::make_unique<SlimeGameModule>()) 注入
-    // 自家 IGameModule。原版 OrangeEditor 无游戏模块，gameModules 恒空——护栏令
-    // 全部扇出 no-op、零行为变化（M3 EditorAppConfig 落地后改为按 config.modules
-    // 注入，消灭 per-game main 分叉）。
+    // ---- PIE 游戏模块注入 + 注册期扇出（ADR-021 / M2.2 + M3 step2）--------
+    // 编辑器即「宿主」：per-game editor（SlimeEditor.exe）在自己的瘦 main 里填
+    // config.modules（`cfg.modules.push_back(std::make_unique<SlimeGameModule>())`），
+    // RunEditorApp 在此把它们 AddModule 进宿主（所有权转移）。原版 OrangeEditor
+    // 传空 config → gameModules 恒空 → 护栏令全部扇出 no-op、零行为变化。
+    for (auto& m : config.modules)
+    {
+        editorHost.gameModules.AddModule(std::move(m));
+    }
+    config.modules.clear(); // 所有权已移交宿主，清空避免悬空 unique_ptr 误用
     //
     // 两段注册期扇出：
     //   * RegisterRenderPasses：viewport Pipeline 是 ScenePanel 首帧 lazy 创建，
@@ -917,36 +967,63 @@ int Orange::Editor::RunEditorApp(int argc, char** argv)
             [&editorHost](const std::string& id)
         { return ::EnsureMaterialInstance(editorHost, id); };
         demoLoadOpts.extraSerializers = editorHost.extraSerializers;
-        if (auto res = Scene::Load("assets/scenes/demo.scene.json",
-                                   *editorHost.scene.pWorld, demoLoadOpts);
-            res.IsErr())
+
+        // M3 step2：启动场景 config-driven。
+        //   * config.startupScene 非空 → 加载它；
+        //   * 空 + 有游戏模块（per-game editor）→ 起**空世界**，游戏模块 Play 时
+        //     自 seed 关卡（spike-01 现状：模块代码生成关卡，无 .scene.json），
+        //     绝不 SeedDemoWorld（那是引擎 demo 内容，不属游戏）；
+        //   * 空 + 无模块（原版 OrangeEditor）→ 试 demo.scene.json 否则 SeedDemoWorld。
+        const bool        isPerGameEditor = editorHost.gameModules.ModuleCount() > 0;
+        const std::string startupScene =
+            !config.startupScene.empty() ? config.startupScene
+            : isPerGameEditor            ? std::string{}
+                                         : std::string{"assets/scenes/demo.scene.json"};
+
+        bool sceneLoaded = false;
+        if (!startupScene.empty())
         {
-            SeedDemoWorld(editorHost);
-        }
-        else
-        {
-            editorHost.scene.currentScenePath = "assets/scenes/demo.scene.json";
-            // v0.6 c4：单文件 Load 不读 manifest，扫一遍 World 把出现过的
-            // LayerComponent.layerId 自动 AddLayer，让用户重启后仍能在
-            // Layer Panel 看到完整列表（visible 默认 true，dirty 不变）。
-            auto& reg = editorHost.scene.pWorld->Registry();
-            using LC  = ::Orange::Engine::Scene::LayerComponent;
-            for (auto e : reg.view<LC>())
+            if (auto res = Scene::Load(startupScene, *editorHost.scene.pWorld, demoLoadOpts);
+                res.IsOk())
             {
-                const auto& lc = reg.get<LC>(e);
-                if (lc.layerId.empty())
+                sceneLoaded                       = true;
+                editorHost.scene.currentScenePath = startupScene;
+                // v0.6 c4：单文件 Load 不读 manifest，扫一遍 World 把出现过的
+                // LayerComponent.layerId 自动 AddLayer，让用户重启后仍能在
+                // Layer Panel 看到完整列表（visible 默认 true，dirty 不变）。
+                auto& reg = editorHost.scene.pWorld->Registry();
+                using LC  = ::Orange::Engine::Scene::LayerComponent;
+                for (auto e : reg.view<LC>())
                 {
-                    continue;
+                    const auto& lc = reg.get<LC>(e);
+                    if (lc.layerId.empty())
+                    {
+                        continue;
+                    }
+                    if (editorHost.scene.partition.HasLayer(lc.layerId))
+                    {
+                        continue;
+                    }
+                    ::Orange::Engine::Scene::LayerInfo info;
+                    info.id          = lc.layerId;
+                    info.displayName = lc.layerId;
+                    info.visible     = true;
+                    editorHost.scene.partition.AddLayer(std::move(info));
                 }
-                if (editorHost.scene.partition.HasLayer(lc.layerId))
-                {
-                    continue;
-                }
-                ::Orange::Engine::Scene::LayerInfo info;
-                info.id          = lc.layerId;
-                info.displayName = lc.layerId;
-                info.visible     = true;
-                editorHost.scene.partition.AddLayer(std::move(info));
+            }
+        }
+        // 加载失败 / 空场景的兜底：仅原版 OrangeEditor（demo.scene.json 路径）
+        // seed 引擎 demo；per-game editor / config 显式场景失败 → 保持空世界。
+        if (!sceneLoaded)
+        {
+            if (!isPerGameEditor && config.startupScene.empty())
+            {
+                SeedDemoWorld(editorHost);
+            }
+            else if (!startupScene.empty())
+            {
+                ORANGE_LOG_WARN("[OrangeEditor] 启动场景加载失败：{} —— 起空世界",
+                                startupScene);
             }
         }
 
@@ -969,7 +1046,9 @@ int Orange::Editor::RunEditorApp(int argc, char** argv)
     {
         namespace fs              = std::filesystem;
         const char* kShowcasePath = "assets/scenes/pbr_showcase.scene.json";
-        if (!fs::exists(kShowcasePath))
+        // M3 step2：仅原版 OrangeEditor 惰性生成引擎 demo showcase；per-game
+        // editor（有游戏模块）跳过——绝不往消费者仓 assets/ 写引擎 demo 内容。
+        if (editorHost.gameModules.ModuleCount() == 0 && !fs::exists(kShowcasePath))
         {
             World tempWorld;
             SeedPbrShowcaseWorld(tempWorld, editorHost.assets);

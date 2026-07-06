@@ -205,6 +205,21 @@ target_link_libraries(orange_editor PUBLIC
     Vulkan::Vulkan
     glfw)
 
+# Build-tree 命名空间别名 —— 让同一 build tree 内的 in-tree 消费者（本仓
+# OrangeEditor.exe，将来 per-game editor 若走 add_subdirectory）与安装后经
+# find_package(OrangeEditor) 看到的 OrangeEditor::orange_editor 同名，避免接口
+# 偷偷漂移。无条件创建（与引擎 OrangeEngine::orange_engine ALIAS 同款）。
+add_library(OrangeEditor::orange_editor ALIAS orange_editor)
+
+# orange_editor 的公共 API 面极小 —— per-game editor 瘦 main 只 #include
+# EditorApp.h + EditorAppConfig.h（两者直接在 tools/OrangeEditor/ 根）。给 lib
+# 加 PUBLIC include：in-tree 走 BUILD_INTERFACE（源树目录，本 exe 早已隐式可
+# 见），安装后走 INSTALL_INTERFACE（include/orange_editor，仅装那两个头，见
+# 文件末 install 块）。上方 vendor include 仍是 PRIVATE，不外泄给消费者。
+target_include_directories(orange_editor PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+    "$<INSTALL_INTERFACE:include/orange_editor>")
+
 # ---------------------------------------------------------------------------
 # OrangeEditor.exe —— 瘦 main（仅转发 argc/argv 进 orange_editor::RunEditorApp）。
 # Windows resource：把 orange-editor-logo.ico 嵌进 exe。MSVC / CMake 自动识别
@@ -320,3 +335,119 @@ add_custom_target(orange_editor_shaders ALL
         "${ORANGE_EDITOR_FULLSCREEN_VS_SPV}"
         "${ORANGE_EDITOR_GRID_FS_SPV}")
 add_dependencies(OrangeEditor orange_editor_shaders)
+# lib 也依赖 shader 编译目标 —— orange_editor_shaders 本已是 ALL（全量 build
+# 必编），此依赖是双保险：即便只 build lib（`--target orange_editor`）也触发
+# spv 编出，保证下方 install(FILES ${...SPV}) 的输入在 `cmake --install` 时已存在。
+# per-game editor 消费者不编 shader，靠 install + Config copy-helper 拿 spv。
+add_dependencies(orange_editor orange_editor_shaders)
+
+# ---------------------------------------------------------------------------
+# 安装 / 导出规则 —— 让 per-game editor（OG SlimeEditor.exe，M4 起）能
+# `find_package(OrangeEditor CONFIG)` + 链 OrangeEditor::orange_editor 建自己的
+# 编辑器 exe，复用 orange_editor lib 承载的全部 ~1100 行 main() 装配逻辑，只写
+# 各自 3 行瘦 main。整块纯附加，不影响现有 in-tree build。
+#
+# 默认跟随引擎的 ORANGE_ENGINE_INSTALL：in-tree 时编辑器由 root
+# add_subdirectory 拉入、其 project(OrangeEditor) 令本目录 PROJECT_IS_TOP_LEVEL
+# 为假，故不能拿它当默认——改跟随引擎 install 开关，保证 `cmake --install` 引擎
+# 时编辑器 lib + Config 一同装出。standalone consumer（editor_build_smoke，编辑器
+# 为 top-level）下 ORANGE_ENGINE_INSTALL 未定义，退回 PROJECT_IS_TOP_LEVEL。
+#
+# 安装版图（GNUInstallDirs，与引擎同 prefix）：
+#   <prefix>/lib/                                       —— orange_editor 静态归档
+#   <prefix>/include/orange_editor/                     —— EditorApp.h + EditorAppConfig.h
+#   <prefix>/lib/cmake/OrangeEditor/                    —— Targets / Config / 版本文件
+#   <prefix>/share/OrangeEditor/shaders/orange_editor/  —— grid/fullscreen SPIR-V
+#   <prefix>/share/OrangeEditor/theme/codicons/         —— codicon 字体 + LICENSE
+# ---------------------------------------------------------------------------
+if (DEFINED ORANGE_ENGINE_INSTALL)
+    set(_orange_editor_install_default "${ORANGE_ENGINE_INSTALL}")
+else ()
+    set(_orange_editor_install_default "${PROJECT_IS_TOP_LEVEL}")
+endif ()
+option(ORANGE_EDITOR_INSTALL
+    "Generate install / export rules for OrangeEditor (lib + Config for per-game editors)"
+    "${_orange_editor_install_default}")
+
+if (ORANGE_EDITOR_INSTALL)
+    include(GNUInstallDirs)
+    set(ORANGE_EDITOR_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/OrangeEditor")
+
+    # lib + export set。orange_editor PUBLIC 链的 OrangeEngine:: / Vulkan:: /
+    # glfw 全是 imported / alias target（非本工程本地 target），无需进本 export
+    # set；消费者侧由 OrangeEditorConfig 的 find_dependency 链重新解析。
+    install(TARGETS orange_editor
+        EXPORT   OrangeEditorTargets
+        ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+
+    # 公共 API 头 —— per-game editor 瘦 main 只需这两个。装到独立子目录
+    # include/orange_editor/（与 lib 的 INSTALL_INTERFACE include 对齐）。
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/EditorAppConfig.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/orange_editor"
+    )
+
+    # 编辑器内置 SPIR-V（grid + fullscreen）—— 用 FILES 因变量含 $<CONFIG>
+    # genex（install(DIRECTORY) 不吃 genex）。消费者靠 Config 的
+    # orange_editor_copy_editor_shaders() 拷到自己 .exe 旁 shaders/orange_editor/。
+    install(FILES
+            "${ORANGE_EDITOR_FULLSCREEN_VS_SPV}"
+            "${ORANGE_EDITOR_GRID_FS_SPV}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/OrangeEditor/shaders/orange_editor"
+    )
+
+    # codicon 图标字体（+ 许可）—— 编辑器 runtime 按 ".exe 相对
+    # theme/codicons/codicon.ttf" 加载（EditorApp.cpp exe-相对优先）。消费者靠
+    # Config 的 orange_editor_copy_theme() 拷到自己 .exe 旁 theme/。
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/theme/codicons/codicon.ttf"
+            "${CMAKE_CURRENT_SOURCE_DIR}/theme/codicons/LICENSE-codicons.txt"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/OrangeEditor/theme/codicons"
+    )
+
+    install(EXPORT OrangeEditorTargets
+        FILE        OrangeEditorTargets.cmake
+        NAMESPACE   OrangeEditor::
+        DESTINATION "${ORANGE_EDITOR_INSTALL_CMAKE_DIR}"
+    )
+
+    # -----------------------------------------------------------------------
+    # OrangeEditorConfig.cmake + 版本文件
+    #
+    # 版本用 OrangeEditor 自己 project() 声明的版本（OrangeEditor_VERSION =
+    # 1.3.0），**不是**引擎的 PROJECT_VERSION —— in-tree add_subdirectory 时
+    # 顶层 CMAKE_PROJECT_VERSION 是引擎的 0.1.0，而 <PROJECT-NAME>_VERSION 恒为
+    # 本 project(OrangeEditor VERSION ...) 声明值，故显式用后者避歧义。
+    #
+    # SameMinorVersion：消费者 find_package(OrangeEditor 1.3 ...) 接受 1.3.x、
+    # 拒绝 1.4.x，与引擎 Config 同档兼容策略。
+    #
+    # 模板在引擎仓根 cmake/OrangeEditorConfig.cmake.in（与 OrangeEngineConfig
+    # 同目录）；从 tools/OrangeEditor/ 向上两级到达，in-tree / standalone 两种
+    # configure 语境下 CMAKE_CURRENT_SOURCE_DIR 都稳定指对。
+    # -----------------------------------------------------------------------
+    include(CMakePackageConfigHelpers)
+
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/OrangeEditorConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEditorConfig.cmake"
+        INSTALL_DESTINATION "${ORANGE_EDITOR_INSTALL_CMAKE_DIR}"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEditorConfigVersion.cmake"
+        VERSION       ${OrangeEditor_VERSION}
+        COMPATIBILITY SameMinorVersion
+    )
+
+    install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEditorConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/cmake/OrangeEditorConfigVersion.cmake"
+        DESTINATION "${ORANGE_EDITOR_INSTALL_CMAKE_DIR}"
+    )
+endif ()

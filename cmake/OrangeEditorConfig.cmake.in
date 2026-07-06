@@ -1,0 +1,82 @@
+@PACKAGE_INIT@
+
+# OrangeEditor 的 package config —— 通过
+# `find_package(OrangeEditor 1.3 CONFIG REQUIRED)` 被 per-game editor
+# （OG SlimeEditor.exe）消费时执行。
+#
+# orange_editor 以 STATIC lib 形式发布，PUBLIC 链
+# OrangeEngine::orange_engine + OrangeEngine::imgui + Vulkan::Vulkan + glfw。
+# STATIC 库把这些依赖以 INTERFACE / LINK_ONLY 形式传播给下游，消费者侧必须能
+# 定位到对应的 imported target，否则最终 exe 的 link 阶段会在符号解析时失败。
+# 故下面 find_dependency 覆盖 orange_editor 的 PUBLIC 链接面：
+#   * OrangeEngine —— 级联拉起引擎 Config 全链（OrangeRender / glm / EnTT /
+#     nlohmann_json / box2d / Vulkan + OrangeEngine::imgui alias 重建 +
+#     OrangeEngine_SHADER_DIR + orange_engine_copy_builtin_shaders helper），
+#     editor 经它传递性拿到引擎全部公共依赖与内置 shader 拷贝能力。
+#   * Vulkan / glfw3 —— editor 自身 TU（VulkanLoaderShim.cpp 等）直接链。引擎
+#     Config 已解析过它们，这里显式再解析一次无害（cache hit），让 editor 的
+#     直接依赖意图清晰、不依赖引擎 Config 的传递细节。
+#
+# 版本 `1.3`：OrangeEditor 按独立 semver 演进（当前 1.3.x），与引擎 0.1.x
+# 解耦。ConfigVersion 用 SameMinorVersion，1.3 系列内 ABI 允许波动。
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(OrangeEngine 0.1 CONFIG)
+find_dependency(Vulkan)
+find_dependency(glfw3 CONFIG)
+
+# 引入 install(EXPORT ...) 生成的 namespaced imported target
+# `OrangeEditor::orange_editor`（NAMESPACE OrangeEditor:: 已提供短名，消费者
+# 直接 `target_link_libraries(SlimeEditor PRIVATE OrangeEditor::orange_editor)`）。
+# 其 INTERFACE_LINK_LIBRARIES 里的 OrangeEngine:: / Vulkan:: / glfw 由上面的
+# find_dependency 先行解析，故本 include 必须在其后。
+include("${CMAKE_CURRENT_LIST_DIR}/OrangeEditorTargets.cmake")
+
+# ---------------------------------------------------------------------------
+# 编辑器内置资产路径 + 拷贝 helper
+#
+# per-game editor 的 .exe 旁默认没有编辑器内置 SPIR-V shader（grid /
+# fullscreen）与 codicon 图标字体——它们装在 SDK 的 share/OrangeEditor/ 下。
+# 编辑器 runtime 按 ".exe 相对 shaders/orange_editor/*.spv" 与 ".exe 相对
+# theme/codicons/codicon.ttf" 加载，故提供两个 helper 让消费者 exe 在
+# POST_BUILD 把它们拷到自己 .exe 旁，运行时相对路径即可命中：
+#   * OrangeEditor_SHADER_DIR / OrangeEditor_THEME_DIR —— 已安装资产目录绝对路径
+#   * orange_editor_copy_editor_shaders(<target>) —— 拷编辑器 SPIR-V
+#   * orange_editor_copy_theme(<target>)          —— 拷 theme（含 codicon 字体）
+#
+# 典型用法（per-game editor CMakeLists）：
+#     add_executable(SlimeEditor main.cpp)
+#     target_link_libraries(SlimeEditor PRIVATE OrangeEditor::orange_editor)
+#     orange_engine_copy_builtin_shaders(SlimeEditor)  # 引擎内置 shader（引擎 Config 提供）
+#     orange_editor_copy_editor_shaders(SlimeEditor)   # 编辑器内置 shader
+#     orange_editor_copy_theme(SlimeEditor)            # codicon 图标字体
+# ---------------------------------------------------------------------------
+set_and_check(OrangeEditor_SHADER_DIR
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/OrangeEditor/shaders/orange_editor")
+set_and_check(OrangeEditor_THEME_DIR
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/OrangeEditor/theme")
+
+function(orange_editor_copy_editor_shaders target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:${target}>/shaders/orange_editor"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${OrangeEditor_SHADER_DIR}"
+                "$<TARGET_FILE_DIR:${target}>/shaders/orange_editor"
+        COMMENT "OrangeEditor: 拷贝内置 SPIR-V 到 ${target} 输出目录"
+        VERBATIM)
+endfunction()
+
+function(orange_editor_copy_theme target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:${target}>/theme"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${OrangeEditor_THEME_DIR}"
+                "$<TARGET_FILE_DIR:${target}>/theme"
+        COMMENT "OrangeEditor: 拷贝 theme（codicon 图标字体）到 ${target} 输出目录"
+        VERBATIM)
+endfunction()
+
+check_required_components(OrangeEditor)
