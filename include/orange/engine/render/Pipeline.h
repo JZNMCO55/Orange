@@ -128,11 +128,19 @@ namespace Orange::Engine::Render
         // 保证 device 活到 `Shutdown()` 之前；典型路径是宿主（编辑器）自己
         // 创建 `RenderDevice` 给 ImGui Vulkan backend 用，同一份借给 Pipeline。
         //
-        // S1 范围（当前实现）：本路径**只**跑主 pass（含 shadow），bloom /
-        // tonemap / godrays / `RequestCapture` / `InsertPass` 一律走 fallback
-        // 或 silent-ignore——HDR 域 raw color 经一次 passthrough 直写到
-        // viewportColor。若编辑器需要 LDR / tonemap 视觉效果，后续子任务再
-        // 把后处理接进来；S1 目标是先把"渲染 → 拿 native view"链路打通。
+        // 离屏路径能力（现状，已随后续子任务持续接入，非最初 S1 的"只跑主
+        // pass"）：shadow → sky → normal-prepass → 主 pass → 粒子 → SSAO / SSR /
+        // contact-shadow / DoF / bloom / god-rays / TAA / sharpen / motion-blur /
+        // color-grade / lens → aux-provider → debug-draw → passthrough → viewport
+        // 均已接（编辑器视口 WYSIWYG）。
+        //   * `InsertPass`：`AfterShadow` + `AfterMainPass` 两档已在离屏路径派发
+        //     （M1，与 window 逐调用同前置状态；典型 SlimeMetaballPass 走
+        //     `AfterMainPass` 写进 HDR 后喂 bloom）。`AfterPostProcess` 仍 window-
+        //     only —— 该档语义绑 stage-B swap-chain（pass 走 `renderer.SubmitItem`，
+        //     见 IRenderPass.h），离屏路径无 swap-chain 阶段、无等价物。
+        //   * stage-B `tonemap`（HDR→LDR ACES 合成）+ `RequestCapture`：仍 window-
+        //     only；离屏经 passthrough 把 HDR raw color（bloom 已在 passthrough 合成）
+        //     直写 viewportColor，不做主 tonemap 曲线。
         //
         // `width × height` 必须 > 0；为 0 返回 `InvalidArgument`。后续运行期
         // 调 `ResizeOffscreen` 改尺寸。

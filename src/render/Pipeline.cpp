@@ -2171,6 +2171,33 @@ namespace Orange::Engine::Render
                 impl.RecordPointShadowPass();
             }
 
+            // game-side AfterShadow inserted passes（离屏路径，M1 镜像 window 模式
+            // 同款 hook）—— shadow map 已写完、主 pass 还没开始。前置 GPU 状态与
+            // window 路径逐调用一致（RecordShadowPass / Spot / Point），故 pass 看到
+            // 的 hdrColor / sceneDepth layout 与 window 相同；pass 自管 transitions。
+            if (ok)
+            {
+                auto& v = impl.insertedPasses[StageIndex(PipelineStage::AfterShadow)];
+                if (!v.empty())
+                {
+                    RenderPassContext ctx{};
+                    ctx.pRenderer       = impl.renderer.get();
+                    ctx.pDevice         = &impl.renderDevice->GetRhiDevice();
+                    ctx.pCmdList        = impl.offscreenCmd.get();
+                    ctx.pHdrColorView   = impl.hdrColor ? impl.hdrColor->GetDefaultView() : nullptr;
+                    ctx.pSceneDepthView = impl.sceneDepth ? impl.sceneDepth->GetDefaultView() : nullptr;
+                    ctx.pSharedPool     = nullptr;
+                    ctx.pViewProjData   = glm::value_ptr(viewProj);
+                    ctx.width           = impl.hdrWidth;
+                    ctx.height          = impl.hdrHeight;
+                    ctx.frameIndex      = impl.frameIndex;
+                    for (auto& p : v)
+                    {
+                        p->Execute(ctx);
+                    }
+                }
+            }
+
             // sky pass：主 pass 之前画背景。两种分支：
             //   (a) bakedEnvCube 有 → cubemap sky（采 EnvironmentComponent.cubemap）
             //   (b) bakedEnvCube 无 + skyEnabled → procedural sky（3 色 gradient
@@ -2231,6 +2258,35 @@ namespace Orange::Engine::Render
                     impl.frameIndex,
                     impl.hdrWidth,
                     impl.hdrHeight);
+            }
+
+            // game-side AfterMainPass inserted passes（离屏路径，M1 镜像 window 模式）
+            // —— main + 粒子已写完 HDR、下方 post 链（bloom / godrays 等）还没跑。
+            // 前置状态与 window 路径逐调用一致（RecordOffscreenPass → DrawParticles），
+            // 故 pass 看到的 HDR layout 与 window 相同（典型 SlimeMetaballPass：想写就
+            // 自己 transition 回 ColorAttachment + Load + 翻回 ShaderReadOnly，与
+            // GodRaysPass 同模式）；写进 HDR 后天然喂下方 bloom（编辑器视口 WYSIWYG）。
+            if (ok)
+            {
+                auto& v = impl.insertedPasses[StageIndex(PipelineStage::AfterMainPass)];
+                if (!v.empty())
+                {
+                    RenderPassContext ctx{};
+                    ctx.pRenderer       = impl.renderer.get();
+                    ctx.pDevice         = &impl.renderDevice->GetRhiDevice();
+                    ctx.pCmdList        = impl.offscreenCmd.get();
+                    ctx.pHdrColorView   = impl.hdrColor ? impl.hdrColor->GetDefaultView() : nullptr;
+                    ctx.pSceneDepthView = impl.sceneDepth ? impl.sceneDepth->GetDefaultView() : nullptr;
+                    ctx.pSharedPool     = nullptr;
+                    ctx.pViewProjData   = glm::value_ptr(viewProj);
+                    ctx.width           = impl.hdrWidth;
+                    ctx.height          = impl.hdrHeight;
+                    ctx.frameIndex      = impl.frameIndex;
+                    for (auto& p : v)
+                    {
+                        p->Execute(ctx);
+                    }
+                }
             }
 
             // SSAO / SSR：主 pass + 粒子之后、grid / aux 之前 —— 直接合成进

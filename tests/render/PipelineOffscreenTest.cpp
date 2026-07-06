@@ -24,9 +24,11 @@
 #include <orange/engine/asset/ShaderAsset.h>
 #include <orange/engine/asset/ShaderLoader.h>
 #include <orange/engine/render/Camera.h>
+#include <orange/engine/render/IRenderPass.h>
 #include <orange/engine/render/MaterialInstance.h>
 #include <orange/engine/render/MaterialSystem.h>
 #include <orange/engine/render/Pipeline.h>
+#include <orange/engine/render/RenderPassContext.h>
 #include <orange/engine/render/RenderableComponent.h>
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/TransformComponent.h>
@@ -52,13 +54,36 @@ using Orange::Engine::Asset::ShaderLoader;
 using Orange::Engine::Asset::VertexPosition3;
 using Orange::Engine::Asset::VertexUV2;
 using Orange::Engine::Render::Camera;
+using Orange::Engine::Render::IRenderPass;
 using Orange::Engine::Render::MaterialSystem;
 using Orange::Engine::Render::Pipeline;
+using Orange::Engine::Render::PipelineStage;
 using Orange::Engine::Render::RenderableComponent;
+using Orange::Engine::Render::RenderGraphBuilder;
+using Orange::Engine::Render::RenderPassContext;
 using Orange::Engine::Scene::TransformComponent;
 
 namespace
 {
+
+    // 最小计数 pass：Execute 被调时 ++counter，不录任何 GPU 命令（空 Execute
+    // 在 cmd 录制流里安全）。用于验证离屏 Render 是否真派发 InsertPass hook。
+    struct CountingPass : public IRenderPass
+    {
+        int* pExecuteCount{nullptr};
+
+        explicit CountingPass(int* executeCount) : pExecuteCount(executeCount) {}
+
+        const char* Name() const noexcept override { return "counting_pass"; }
+
+        void Setup(RenderGraphBuilder& /*builder*/) override {}
+
+        void Execute(RenderPassContext& /*ctx*/) override
+        {
+            if (pExecuteCount)
+                ++(*pExecuteCount);
+        }
+    };
 
     std::unique_ptr<MeshAsset> MakeQuadMesh()
     {
@@ -208,6 +233,50 @@ int main()
         std::fprintf(stdout,
                      "  [PASS] Render 单 drawable 后 cache=%zu / view=%p\n",
                      pipeline.TemplatePipelineCount(), viewHandle);
+    }
+
+    // ---- 4.5 离屏 Render 派发 InsertPass hook（M1）-----------------
+    // AfterShadow + AfterMainPass 两档应在离屏路径被 Execute；AfterPostProcess
+    // 绑 stage-B swap-chain（离屏无此阶段），故离屏**不**派发它——此断言锁住
+    // 该 window-only 契约（见 Pipeline.h 离屏能力注释 / IRenderPass.h）。
+    {
+        int execAfterShadow = 0;
+        int execAfterMain   = 0;
+        int execAfterPost   = 0;
+
+        pipeline.InsertPass(PipelineStage::AfterShadow,
+                            std::make_unique<CountingPass>(&execAfterShadow));
+        pipeline.InsertPass(PipelineStage::AfterMainPass,
+                            std::make_unique<CountingPass>(&execAfterMain));
+        pipeline.InsertPass(PipelineStage::AfterPostProcess,
+                            std::make_unique<CountingPass>(&execAfterPost));
+
+        World  world;
+        Entity camE = world.CreateEntity();
+        world.AddComponent(camE, Camera::Orthographic(-1, 1, -1, 1, 0, 1));
+
+        Entity e = world.CreateEntity();
+        world.AddComponent(e, TransformComponent{});
+        RenderableComponent rc;
+        rc.mesh             = meshHandle;
+        rc.materialInstance = texInst.get();
+        world.AddComponent(e, rc);
+
+        pipeline.Render(world);
+
+        assert(execAfterShadow == 1); // shadow pass 后派发
+        assert(execAfterMain == 1);   // main + 粒子后派发
+        assert(execAfterPost == 0);   // window-only：离屏不派发
+
+        // 清掉计数 pass，避免影响后续 resize 段。
+        pipeline.ClearInsertedPasses();
+        assert(pipeline.InsertedPassCount(PipelineStage::AfterShadow) == 0);
+        assert(pipeline.InsertedPassCount(PipelineStage::AfterMainPass) == 0);
+
+        std::fprintf(stdout,
+                     "  [PASS] 离屏派发 InsertPass：AfterShadow=%d AfterMainPass=%d "
+                     "AfterPostProcess=%d（后者 window-only）\n",
+                     execAfterShadow, execAfterMain, execAfterPost);
     }
 
     // ---- 5. ResizeOffscreen → 下一帧重建 HDR + viewport ------------

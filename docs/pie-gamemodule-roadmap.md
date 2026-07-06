@@ -24,7 +24,7 @@
 
 ### 缺口（本 roadmap 要补的）
 
-1. 🔴 **离屏路径不执行 InsertPass**（唯一硬技术阻塞）：`Pipeline.h:131-135` S1 契约明示离屏只跑主 pass、InsertPass silent-ignore；三处 `IRenderPass::Execute`（`Pipeline.cpp:3259/3350/3647`）全在 window-mode 分支。史莱姆 SDF 进编辑器视口会消失。对比：bloom 已接离屏（`Pipeline.cpp:1966`）。
+1. ~~🔴 **离屏路径不执行 InsertPass**（唯一硬技术阻塞）：`Pipeline.h:131-135` S1 契约明示离屏只跑主 pass、InsertPass silent-ignore；三处 `IRenderPass::Execute`（`Pipeline.cpp:3259/3350/3647`）全在 window-mode 分支。史莱姆 SDF 进编辑器视口会消失。对比：bloom 已接离屏（`Pipeline.cpp:1966`）。~~ → **✅ M1 已修**（AfterShadow + AfterMainPass 两档接入离屏；AfterPostProcess 因绑 swap-chain 保持 window-only）。
 2. **无游戏模块概念**：EnterPlay 只装配引擎内置系统；无自定义 system/schema/pass 的模块注册入口；引擎无统一 SystemScheduler（`ISystem.h:14-17` 明示暂缺，各子系统 tick 由消费者手动串——本 roadmap 沿用该模式，不引入调度器）。
 3. **编辑器 exe 形态**：74 个 .cpp 直编进 exe（`tools/OrangeEditor/CMakeLists.txt:102-195`）+ 约 1100 行巨型 main；无 lib、不 install。路径依赖 = `ChdirToRepoRoot()` cwd 副作用（`main.cpp:167-194`）+ 5 处相对路径（codicon `main.cpp:662` / `editor_settings.json:776` / imgui.ini 无 `SetIniFilename` / 启动场景 / editor shader）。
 4. **C# 侧编辑器断线**：`ORANGE_ENGINE_WITH_DOTNET` 默认 OFF 且编辑器 CMake 不感知；EnterPlay 无脚本 S 步；实况 = net8.0 + Default ALC（ADR-017 的可卸载 ALC 被 de-scope，M8 兑现）；SDK 导出面无 nethost 再分发/`OrangeScriptSDK.dll` install（M10 补）。
@@ -105,11 +105,13 @@ public:
 
 ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roadmap B1 修订。
 
-### M1 · 离屏路径接通 InsertPass（OE，S）
+### M1 · 离屏路径接通 InsertPass（OE，S）✅ 2026-07-06
 
-- **交付**：`RenderOffscreen` 执行三档 InsertPass hook；更新 `Pipeline.h` S1 契约注释；核实与离屏 bloom/tonemap 的执行顺序与 window 路径一致（AfterMainPass 叠 HDR 后喂 bloom 的语义不变）。`RenderToTexture`（缩略图）维持不跑，文档写明。
-- **验收**：headless/golden 测试证明离屏路径 pass 有执行痕迹；window 路径零回归（既有 golden 全绿）。
-- **风险**：离屏 RT 的 layout/y-flip/色彩空间差异（SlimeMetaballPass 自管 layout transition）——先用最小测试 pass 验通，再在 M4 上真 pass。
+- **交付（实际）**：`RenderOffscreen` 接 **AfterShadow + AfterMainPass 两档** InsertPass hook（`src/render/Pipeline.cpp`，镜像 window 路径同款 ctx 构造）；更新 `Pipeline.h` 离屏能力注释（顺带修正它已过时的"只跑主 pass"——bloom/godrays/SSAO 等实际早已接入离屏）。
+  - **三档→两档的实况修正**：`AfterPostProcess` 语义绑 stage-B swap-chain（pass 走 `renderer.SubmitItem`，见 `IRenderPass.h:25`），而 `RenderOffscreen` 无 swap-chain 阶段（passthrough 直写 viewportColor）——**无离屏等价物，保持 window-only**。SlimeMetaballPass 用的是 `AfterMainPass`，不受影响。
+  - **layout parity 论证**：两个 hook 的前置 GPU 状态与 window 路径**逐调用一致**（`RecordShadowPass/Spot/Point` → hook；`RecordOffscreenPass → DrawParticles` → hook），故结构镜像即保证 layout 一致，window 能跑的 pass 在离屏必能跑（含 y-flip：同一 `viewProj`）。
+- **验收（已过）**：`pipeline_offscreen_test` 加 CountingPass 断言，真 Vulkan（RTX 5070 Ti）跑出 `AfterShadow=1 AfterMainPass=1 AfterPostProcess=0`；render 相关 ctest 25/25 全绿（golden PBR/shadow/thumbnail/bloom 零回归）；invariant lint 干净。
+- **提交**：见本 session commit（OE 代码 + 本文档同 repo）。
 
 ### M2 · IGameModule 接口 + Play 生命周期挂接（OE，M）
 
