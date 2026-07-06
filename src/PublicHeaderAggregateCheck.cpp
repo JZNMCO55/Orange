@@ -17,6 +17,7 @@
 #include "orange/engine/audio.h"
 #include "orange/engine/camerarig.h"
 #include "orange/engine/core.h"
+#include "orange/engine/game.h"
 #include "orange/engine/input.h"
 #include "orange/engine/nav.h"
 #include "orange/engine/noise.h"

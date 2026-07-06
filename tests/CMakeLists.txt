@@ -560,6 +560,10 @@ orange_engine_add_test(bloom_chain_test            render/BloomChainTest.cpp)
 orange_engine_add_test(vfx_system_test             render/VfxSystemTest.cpp)
 orange_engine_add_test(insert_pass_test            render/InsertPassTest.cpp)
 
+# Game module 宿主（PIE 双语言宿主接口，ADR-021）—— headless，Pipeline 默认
+# 构造测 InsertPass 扇出，不接 GPU。
+orange_engine_add_test(game_module_host_test       game/GameModuleHostTest.cpp)
+
 # Material：.material 文件 v1.1 schema helper（MaterialFileIO）。
 # 不走 orange_engine_add_test：helper 源码在 tools/OrangeEditor/ 不属于引擎 lib，
 # 测试 exe 直接编译它 + 加 include path 取 helper 头。本测试 standalone build

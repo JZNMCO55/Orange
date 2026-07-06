@@ -115,13 +115,19 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 
 ### M2 · IGameModule 接口 + Play 生命周期挂接（OE，M）
 
-- **交付**：
-  1. `include/orange/engine/game/IGameModule.h` + `GameModuleContext`（按 §2 草案定稿）；
-  2. `ApplyPendingPlayOp` 增加 game module S 步（EnterPlay 末注册序列之后调 `OnEnterPlay`；Stop 对偶 `OnExitPlay`）；Play tick 段调 `Tick()`（顺序：module Tick 先于宿主 physics step，module 可经 `WantsOwnPhysicsStep` 声明接管——开放问题①在此裁定）；
-  3. 视口聚焦时输入路由：`WindowEvent` 转发给 module 的 `OnEvent`（失焦回编辑器 fly-cam/gizmo）；Play 期视口用 World 内游戏相机、Edit 期用编辑器相机；
-  4. EditorHost 挂 module 注册表（沿 plugin 注册表先例）；模块的 schema/serializer/pass 注册在编辑器启动装配段调用。
-- **验收**：假 module（测试 fixture）单测：Enter/Stop 生命周期次序正确、Stop 后 World 还原、注册期在 Edit 态生效；输入路由 + 相机切换 dogfood（登记 dogfood-checklist）。
-- **纪律**：注册走 schema-first / extraSerializers 既有机制，禁止 mega-class 加游戏分支（ADR-001）。
+**M2.1 引擎接口 + 宿主核心 ✅ 2026-07-06**（headless，不碰编辑器）：
+
+1. `include/orange/engine/game/IGameModule.h` —— `IGameModule` 接口 + `GameModuleContext`。**对 §2 草案的实况修正**：删掉 `RegisterSchemas`（schema 是编辑器 Inspector 侧概念，引擎 runtime 无 schema registry；游戏组件 Inspector 注册留编辑器层 M3/M5）；保留引擎级面 = `RegisterRenderPasses(Pipeline&)` + `ComponentSerializers()`（返回 `std::span<const Scene::ComponentSerializerEntry>`，宿主收集填进 `Scene::Save/LoadOptions.extraSerializers`）+ 生命周期 `OnEnterPlay/Tick/OnEvent/OnExitPlay` + `WantsOwnPhysicsStep`（开放问题①）。
+2. `include/orange/engine/game/GameModuleHost.h`（header-only）+ `game.h` 聚合 —— 可复用扇出驱动：注册期 `RegisterRenderPasses`/`CollectSerializers`/`AnyWantsOwnPhysicsStep`；Play 生命周期 `EnterPlay`(正序)/`Tick`/`OnEvent`/`ExitPlay`(逆序)，带 play-state 护栏（未 EnterPlay 的 Tick/OnEvent/ExitPlay no-op，重复 EnterPlay no-op）。编辑器宿主与发布 runtime 宿主共用。
+3. 验收：`game_module_host_test`（headless，Pipeline 默认构造测 InsertPass 扇出）3/3；lint（含 game.h aggregator-completeness）+ drift 干净。
+
+**M2.2 编辑器接线（剩余，属编辑器代码，与 M3 lib 化同期做更自然）**：
+
+1. `ApplyPendingPlayOp` 增 game module S 步（EnterPlay 末注册序列后调 host.EnterPlay；Stop 对偶 host.ExitPlay）；Play tick 段调 `host.Tick()`（顺序：module Tick 先于宿主 physics step，`AnyWantsOwnPhysicsStep` 时让位——开放问题①落地）；
+2. 视口聚焦输入路由：`WindowEvent` 转发 `host.OnEvent`（失焦回编辑器 fly-cam/gizmo）；Play 期用 World 内游戏相机、Edit 期用编辑器相机；
+3. EditorHost 挂 `GameModuleHost`（沿 plugin 注册表先例）；注册期在编辑器启动装配段调用。
+- **验收**：Enter/Stop 生命周期 dogfood（Play 看 module tick、Stop 还原）；输入路由 + 相机切换 dogfood。
+- **纪律**：注册走 extraSerializers 既有机制，禁止 mega-class 加游戏分支（ADR-001）。
 
 ### M3 · editor lib 化 + SDK 导出（OE，**L**，预计拆 2-3 session）
 
