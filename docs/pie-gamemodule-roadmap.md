@@ -134,12 +134,12 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 
 ### M3 · editor lib 化 + SDK 导出（OE，**L**，预计拆 2-3 session）
 
-**M3 step1 · 机械 lib 拆分 ✅ 2026-07-06（build-verified，GUI 运行时 dogfood-gated）**：
+**M3 step1 · 机械 lib 拆分 ✅ 2026-07-06（build + 运行时 + 视觉三重验证，GUI dogfood gate 已关）**：
 - `orange_editor` STATIC lib target 建成，承载全部编辑器子系统 + 应用装配；`OrangeEditor.exe` 退化为**瘦 main**（3 行，仅 `return Orange::Editor::RunEditorApp(argc, argv);`）。
 - 原 ~1114 行 `main.cpp` 全量下沉为 lib TU `EditorApp.cpp` 的 `Orange::Editor::RunEditorApp`（含 headless import CLI 分支 + 启动装配 + 主循环 + 关停），**逐字节不变**——ChdirToRepoRoot / codicon / editor_settings / imgui.ini / 启动场景 / editor shader 5 处路径逻辑一律未动，故运行时行为应与改前一致（step2 才参数化）。`.rc` 资源留 exe，vendor C 源（mikktspace/OpenFBX）+ /W0 豁免随 .cpp 进 lib。
 - link：引擎/imgui/vulkan/glfw 由 PRIVATE 升 **PUBLIC**（STATIC lib 不嵌依赖对象码，exe/per-game editor 经链 orange_editor 传递性解析符号）。
 - **验证**：in-tree 全量构建绿（`orange_editor.lib` + `OrangeEditor.exe` 均产出、0 error、lint 干净）；headless import CLI 端到端跑通（`main→RunEditorApp→ChdirToRepoRoot→argv 解析→usage→exit2`，证 exe→lib 入口链）；tests 直接编译单个编辑器 .cpp 源不受影响、root VS_STARTUP_PROJECT/add_subdirectory 仍指 exe。
-- **⚠️ 仍缺（dogfood-gated）**：GUI 编辑器真机启动 + 渲染 + codicon 字体 / imgui.ini 布局 / editor_settings / 启动场景 / editor shader 全对（roadmap 点名的 5 处 cwd 前科；机械搬迁未改这些逻辑，风险低但需真跑确认）。
+- **GUI 真机 dogfood ✅**：启动编辑器 → 日志确认 `loaded editor_settings.json` + `world entities=20`（SeedDemoWorld 兜底，demo.scene.json 本地被删）+ `ImGui dock + multi-viewport ready`，无 crash/assert；截图视觉确认 **5 处 cwd 路径全对**——codicon 图标（工具栏 ▶⏸⏹+勾选框）/ imgui.ini 布局 / editor_settings / 启动场景（3D 视口渲染 20 实体含 PBR+bloom）/ editor shader（grid 渲染），中文字体也正常。**GUI 零回归证实**。
 
 **M3 step2 · 参数化 + 导出（剩余，dogfood-gated，建议独立 session）**：
   1. `EditorAppConfig`：projectRoot / configDir / assetRoot / IGameModule 列表显式注入（`RunEditorApp` 改签名吃 config）；`ChdirToRepoRoot()` 降级为"无配置时的默认值推导"，消灭 cwd 全局副作用；imgui.ini 显式 `SetIniFilename`；main 里 ~230 行 RenderDevice/Renderer/ImGui 初始化已随 EditorApp.cpp 进 lib（step1 完成），step2 只做参数化；
