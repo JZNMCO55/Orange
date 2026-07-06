@@ -2207,13 +2207,13 @@ OrangeGames 经 `find_package(OrangeEngine CONFIG)` 消费引擎跑首个窗口�
 - **发现方**：OrangeGames Spike 1 scaffold session 讨论 editor ↔ game 工作流时
 - **发现日期**：2026-05-27
 - **一句话定性**：引擎 / 编辑器**无 play-in-editor (PIE)**——OrangeEditor 只**编辑数据**（scene / material / prefab，schema-first），无法在编辑器内**加载并运行游戏玩法代码**。当前游戏代码是独立 `find_package(OrangeEngine)` 消费的 exe（如 `OrangeGames/prototypes/spike-01-blob`），与编辑器是两个进程、互不加载；引擎既无**脚本运行时**也无**游戏模块热加载**（roadmap 已把 `Hot reload / C# 脚本` 列为 v1.x 长尾、未开工）。所以"在编辑器里摆好关卡 → 点 Play 立刻在视口试玩"这条迭代闭环不存在。
-- **状态**：**仅登记，未实现**。~~用户 2026-05-27 拍板现在不排期~~ → **2026-06-02 用户改判：纳入排期，列为重点 epic**（见 `docs/maturity-roadmap.md` **B1**）。属大型 XL epic，先决 ADR = 玩法逻辑形态（脚本运行时 vs C++ 模块热加载），前置 = workspace 项目模型 + A2 EntityGUID（world clone）。建议 A 地基（A1 transform 传播 + A2 EntityGUID）做完后开。
+- **状态**：**仅登记，未实现**。~~用户 2026-05-27 拍板现在不排期~~ → **2026-06-02 用户改判：纳入排期，列为重点 epic**（见 `docs/maturity-roadmap.md` **B1**）。属大型 XL epic，~~先决 ADR = 玩法逻辑形态（脚本运行时 vs C++ 模块热加载），前置 = workspace 项目模型 + A2 EntityGUID（world clone）~~ → **2026-07-06 总路线已拍板 = ADR-021 accepted**（双语言 IGameModule 双宿主；执行计划 roadmap M0-M10 见 `docs/pie-gamemodule-roadmap.md`；详见文末"2026-07-06 拍板与实况修正"节）。
 
 ### 触发场景
 
 Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会越来越需要"点 Play 在编辑器内试玩"——这是 Unity / Godot（脚本运行时热加载）、Unreal（C++ 模块 Live Coding + PIE）的核心迭代闭环。没有 PIE 时，每次试玩都得切到独立游戏 exe、重编、重启、走回测试点，与手感 / 关卡迭代的连续性严重相悖。graybox / 纯手感 spike 阶段**不需要**（spike 自己的 exe 够用），所以非当前阻塞。
 
-### 缺什么 / 两条主路线（待评审拍板）
+### 缺什么 / 两条主路线（~~待评审拍板~~ ✅ 2026-07-06 已拍板，见文末）
 
 让编辑器能**实例化并 tick 游戏侧 World + 系统**。两条事实标准路线：
 
@@ -2239,6 +2239,15 @@ Ori-like 首游进入"在编辑器摆关卡 / prefab + 调氛围"阶段后，会
 - 大件，非 critical path，但是 editor ↔ game 闭环的关键长杆。优先级 **P3+（成熟后拉动）**。
 - 与 [[GAP-2026-05-27-consumer-imgui-tuning-hook]]（消费者 ImGui hook）正交但同属"让游戏真正用上引擎 / 编辑器"一束；PIE 的 workspace 前置也与那条同期更自然。
 - roadmap 的 `C# 脚本` 长尾条目若推进，是路线 (a) 的落点；若选 (b) 则属新架构方向，需独立 ADR。
+
+### 2026-07-06 拍板与实况修正（ADR-021）
+
+触发 = 用户要把 OG 史莱姆（纯 C++）放进编辑器操作，且明确"C++ 和 C# 都支持"。总路线 = **IGameModule 统一生命周期接口 + 双宿主**（[ADR-021](../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-021-pie-gamemodule-dual-language-hosting.md)），执行计划 = `docs/pie-gamemodule-roadmap.md`（M0-M10）。对本条目登记内容的裁决与修正：
+
+- **两条主路线**：不二选一——统一在 IGameModule 之下。路线 (b) 的 C++ 先行但形态修正为「编辑器 lib 化 + per-game editor 静态链入」起步（M2-M4），**DLL 热加载推迟到 M7**（STATIC 引擎拓扑下 DLL 是 MSVC 雷区，届时 ADR-023 拍 SHARED vs 双静态）；路线 (a) 的 C# = B1 既有 ScriptSystem 收编为同一接口第二实现（M5）。
+- **四项共需基础设施的实况核实**（2026-07-06 探查）：① system/component 被编辑器发现 = 未做 → M2 注册期接口；② PIE 状态机 + world clone = **已全量存在**（`ApplyPendingPlayOp` + 落盘快照 + `PlaySnapshotGuidTest` 锁身份，登记时的假设已过时）；③ 输入/相机切换 = 未做 → M2；④ workspace 前置 = **从硬前置降级**为 `EditorAppConfig` 参数注入（M3），完整项目模型留 M6。
+- **新发现第 5 项硬阻塞**：编辑器离屏视口路径不执行 `InsertPass`（`Pipeline.h:131-135` S1 契约 silent-ignore）——OG 史莱姆 SDF pass 进视口会消失，列 **M1** 先行修。
+- 期望验收不变，由 M4（C++ 史莱姆）与 M5（C# Mover）分别闭环。
 
 ---
 
