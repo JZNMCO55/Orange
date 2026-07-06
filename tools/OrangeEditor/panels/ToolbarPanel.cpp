@@ -103,7 +103,13 @@ void EditorRenderLayer::DrawMainToolbar()
                                         (std::max)(ImGui::CalcTextSize("[Play]").x,
                                                    ImGui::CalcTextSize("[Paused]").x)) +
                              framePadX;
-        const float playGroupW = btnPlayW + btnPauseW + btnStopW + 2.0f * itemSpc;
+        // M9.2 新增：Step 按钮（文字 label，避免给 codicon 加新 glyph）+ 时间缩放
+        // combo；两者一并计入居中 group 宽度，避免与 Save / [State] 溢出重叠。
+        const char* stepLabel  = ">|";
+        const float btnStepW   = ImGui::CalcTextSize(stepLabel).x + framePadX;
+        const float timeComboW = ImGui::CalcTextSize("0.1x").x + framePadX + frameH;
+        const float playGroupW =
+            btnPlayW + btnPauseW + btnStopW + btnStepW + timeComboW + 4.0f * itemSpc;
 
         // ---- Save 靠左 ---------------------------------------------
         // dirty 时 accent 橙高亮（§D5.1 落地：Save dirty 是"小面积高对
@@ -194,6 +200,48 @@ void EditorRenderLayer::DrawMainToolbar()
             ImGui::SetTooltip("Stop");
         }
         ImGui::EndDisabled();
+        ImGui::SameLine();
+
+        // ---- Step（M9.2 帧步进）：仅 Paused 态可点，单步一个固定 sim 帧 ----
+        // 设 ctx.pendingStep，帧末 EditorRenderLayer 消费。文字 label 而非 icon，
+        // 与 ButtonTextAlign 居中样式共存无碍。
+        const bool canStep = (ps == PlayState::Paused);
+        ImGui::BeginDisabled(!canStep);
+        if (ImGui::Button(stepLabel, btnSize))
+        {
+            mHost.scene.pendingStep = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Step (advance one fixed frame; Paused only)");
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+
+        // ---- 时间缩放 combo（M9.2）：0.1 / 0.5 / 1.0x slow-mo；写 ctx.playTimeScale ----
+        // 三档固定值，按当前值反查选中项（浮点近似比较）。1.0x 为默认。
+        {
+            static const char* const kScaleLabels[] = {"0.1x", "0.5x", "1.0x"};
+            static const float       kScaleValues[] = {0.1f, 0.5f, 1.0f};
+            int                      scaleIdx       = 2; // 默认 1.0x
+            for (int i = 0; i < 3; ++i)
+            {
+                const float v = mHost.scene.playTimeScale;
+                if (v > kScaleValues[i] - 0.001f && v < kScaleValues[i] + 0.001f)
+                {
+                    scaleIdx = i;
+                }
+            }
+            ImGui::SetNextItemWidth(timeComboW);
+            if (ImGui::Combo("##timescale", &scaleIdx, kScaleLabels, 3))
+            {
+                mHost.scene.playTimeScale = kScaleValues[scaleIdx];
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Play speed (time scale)");
+            }
+        }
 
         // ---- [State] 靠右 -----------------------------------------
         // 同款绝对 X 跳转；预留 WindowPadding.x 距离右边距，与 menu bar

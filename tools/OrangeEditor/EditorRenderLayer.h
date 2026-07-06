@@ -101,6 +101,12 @@ private:
     // 避免后续帧对死实体做 DestroySubtree / GetComponent 等操作崩溃。
     void ValidateEntityHandles();
     void ApplyPendingSceneOp();
+    // M9.2：推进一帧 simulation（module Tick → physics → vfx → anim → audio）。
+    // 从 OnUpdate 的 Play 态内联 tick body 抽出，供 Play 态每帧调用（simDt =
+    // dt * playTimeScale）+ Paused 态单步复用（simDt = 固定步长），两条路径行为
+    // 一致。pWorld 为空时早退。抽 helper 的另一动因：MCP handler 只碰 context，
+    // 帧步进/时间缩放状态放 context，tick 逻辑仍留 layer。
+    void StepSimulationOnce(float simDt);
     void ApplyPendingPlayOp();
     // v1.1 T2：drain EditorHost.pendingImports —— File→Import dialog 路径
     // 由 mPendingImportDialog flag 在帧首先弹出文件对话框拿路径 push 进

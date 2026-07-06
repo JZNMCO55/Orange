@@ -171,6 +171,109 @@ EditorRenderLayer::~EditorRenderLayer()
 // OnUpdate / OnEvent
 // ---------------------------------------------------------------------------
 
+// M9.2：推进一帧 simulation。simDt 是本步时间步（Play 态 = dt * playTimeScale，
+// Paused 单步 = 固定步长）。Play 态每帧调、Paused 态单步复用，两条路径行为一致。
+// 扇出序（ADR-021 开放问题①暂定）：module Tick → physics → vfx → anim → audio。
+// pWorld 未装配时早退。
+void EditorRenderLayer::StepSimulationOnce(float simDt)
+{
+    if (mHost.scene.pWorld == nullptr)
+    {
+        return;
+    }
+
+    // PIE 游戏模块 Tick（ADR-021 / M2.2）—— **先于**宿主 physics step 扇出。
+    // 模块自管固定步长（spike-01 现状），simDt 为宿主帧步。空 host（无注册模块）时
+    // 护栏 no-op、零行为变化。ctx 各指针 Edit→Play 已装配（pPhysics 见 S3、pPipeline
+    // 为 viewport 离屏 Pipeline）。
+    {
+        Orange::Engine::Game::GameModuleContext gmCtx{};
+        gmCtx.pWorld    = mHost.scene.pWorld.get();
+        gmCtx.pPhysics  = mpPhysicsWorld.get();
+        gmCtx.pAssets   = mHost.assets.pAssets.get();
+        gmCtx.pPipeline = mpScenePipeline.get();
+        mHost.gameModules.Tick(gmCtx, simDt);
+    }
+
+    // Physics step → 把 dynamic body 新位姿写回 ECS Transform。
+    // 任一模块 WantsOwnPhysicsStep 时宿主让位——不自动 Step（模块在自己的
+    // accumulator 内 Step 同一 PhysicsWorld），写回也交模块（ADR-021 开放问题①）。
+    // 原版 OrangeEditor 无模块 → 恒 false → 照常自动 step。
+    if (mpPhysicsWorld != nullptr && !mHost.gameModules.AnyWantsOwnPhysicsStep())
+    {
+        // v0.6 c4：每帧 Step 之前同步 layer.visible → body enabled。
+        // hidden layer 的 dynamic body 不参与积分 / 不产生 contact，匹配
+        // "hide 一个 layer 整个 layer 不要参与物理"的 UX 预期。
+        // partition 由 EditorSceneContext 值成员持有，始终 valid。
+        Orange::Engine::Physics::ApplyLayerVisibility(
+            *mHost.scene.pWorld, mHost.scene.partition, *mpPhysicsWorld);
+        mpPhysicsWorld->Step(simDt);
+        auto& reg = mHost.scene.pWorld->Registry();
+        using TC  = Orange::Engine::Scene::TransformComponent;
+        using namespace Orange::Engine::Physics;
+        for (auto e : reg.view<RigidBodyComponent>())
+        {
+            auto& rb = reg.get<RigidBodyComponent>(e);
+            if (rb.type == BodyType::Static)
+            {
+                continue;
+            }
+            if (!mpPhysicsWorld->IsValid(rb.handle))
+            {
+                continue;
+            }
+            const BodyTransform xf = mpPhysicsWorld->GetBodyTransform(rb.handle);
+            auto*               tc = reg.try_get<TC>(e);
+            if (tc != nullptr)
+            {
+                tc->position.x = xf.position.x;
+                tc->position.y = xf.position.y;
+                // 2D 物理只有 Z 轴旋转，直接从角度重建 quat
+                tc->rotation = glm::quat(glm::vec3(0.0f, 0.0f, xf.angle));
+            }
+        }
+    }
+
+    // Particle emitter tick
+    if (mpVfxSystem != nullptr)
+    {
+        mpVfxSystem->Tick(*mHost.scene.pWorld, simDt);
+        // 诊断：每秒打一次粒子计数，确认 sim 是否正常运行
+        static float sDiagTimer = 0.0f;
+        sDiagTimer += simDt;
+        if (sDiagTimer >= 1.0f)
+        {
+            sDiagTimer = 0.0f;
+            ORANGE_LOG_DEBUG("[vfx-diag] live particles: {}",
+                             mpVfxSystem->TotalLiveParticleCount());
+        }
+    }
+
+    // Animator tick —— 走引擎层 Animation::TickAnimators（单一真相源，游戏侧
+    // 消费同一入口；DRY）。遍历所有 AnimatorComponent，对非空 animator 调 Tick。
+    Orange::Engine::Animation::TickAnimators(*mHost.scene.pWorld, simDt);
+
+    // Audio: 同步 component 字段 → 已实例化的 SoundInstance（用户在 Play 期改
+    // volume / pitch / loop slider 时声音实时跟随）。pitch / loop 公共面尚未暴露，
+    // 先仅 sync volume。
+    if (mHost.audioEngine.IsInitialized())
+    {
+        using namespace Orange::Engine::Audio;
+        auto& reg = mHost.scene.pWorld->Registry();
+        for (auto e : reg.view<AudioSourceComponent>())
+        {
+            auto&                  as = reg.get<AudioSourceComponent>(e);
+            Orange::Engine::Entity eWrap{static_cast<std::uint64_t>(
+                static_cast<std::uint32_t>(e))};
+            auto                   it = mEntityToSoundInstance.find(eWrap);
+            if (it != mEntityToSoundInstance.end() && it->second && it->second->IsValid())
+            {
+                it->second->SetVolume(as.volume);
+            }
+        }
+    }
+}
+
 void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
 {
     // ---- 每帧 framebuffer 同步 → 通知 OrangeRender swap-chain rebuild --
@@ -202,7 +305,8 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
         }
     }
 
-    // 无论 Play/Edit 状态都推进编辑器时间，供 dissolve 等时间驱动 shader 预览
+    // 无论 Play/Edit 状态都推进编辑器时间，供 dissolve 等时间驱动 shader 预览。
+    // mEditorTime 保持**未缩放**——shader 预览不受游戏 playTimeScale 影响（M9.2）。
     const float dt = static_cast<float>(frame.time.deltaSeconds);
     mEditorTime += dt;
 
@@ -214,102 +318,24 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
         mpScenePipeline->SetFrameTime(mEditorTime);
     }
 
-    // ---- Play 态 simulation tick（在 ImGui 帧开始前推进，保证
-    //      本帧 DrawScenePanel → Pipeline::Render 看到最新状态）-----
-    if (mHost.scene.playState == PlayState::Play && mHost.scene.pWorld != nullptr)
+    // ---- simulation tick 推进（在 ImGui 帧开始前，保证本帧 DrawScenePanel →
+    //      Pipeline::Render 看到最新状态）----------------------------------
+    // Play 态：每帧推进一个缩放步长（M9.2 时间缩放）。
+    // Paused 态：仅当收到单步请求（Toolbar Step 按钮 / MCP step）时推进一个固定步长。
+    if (mHost.scene.playState == PlayState::Play)
     {
-        // PIE 游戏模块 Tick（ADR-021 / M2.2）—— **先于**宿主 physics step
-        // 扇出（开放问题①暂定序：module Tick → physics → vfx → anim → audio）。
-        // 模块自管固定步长（spike-01 现状），dt 为宿主帧 dt。空 host（无注册
-        // 模块）时护栏 no-op、零行为变化。ctx 各指针 Edit→Play 已装配（pPhysics
-        // 见 S3、pPipeline 为 viewport 离屏 Pipeline）。
-        {
-            Orange::Engine::Game::GameModuleContext gmCtx{};
-            gmCtx.pWorld    = mHost.scene.pWorld.get();
-            gmCtx.pPhysics  = mpPhysicsWorld.get();
-            gmCtx.pAssets   = mHost.assets.pAssets.get();
-            gmCtx.pPipeline = mpScenePipeline.get();
-            mHost.gameModules.Tick(gmCtx, dt);
-        }
-
-        // Physics step → 把 dynamic body 新位姿写回 ECS Transform。
-        // 任一模块 WantsOwnPhysicsStep 时宿主让位——不自动 Step（模块在自己
-        // 的 accumulator 内 Step 同一 PhysicsWorld），写回也交模块（ADR-021
-        // 开放问题①）。原版 OrangeEditor 无模块 → 恒 false → 照常自动 step。
-        if (mpPhysicsWorld != nullptr && !mHost.gameModules.AnyWantsOwnPhysicsStep())
-        {
-            // v0.6 c4：每帧 Step 之前同步 layer.visible → body enabled。
-            // hidden layer 的 dynamic body 不参与积分 / 不产生 contact，匹配
-            // "hide 一个 layer 整个 layer 不要参与物理"的 UX 预期。
-            // partition 由 EditorSceneContext 值成员持有，始终 valid。
-            Orange::Engine::Physics::ApplyLayerVisibility(
-                *mHost.scene.pWorld, mHost.scene.partition, *mpPhysicsWorld);
-            mpPhysicsWorld->Step(dt);
-            auto& reg = mHost.scene.pWorld->Registry();
-            using TC  = Orange::Engine::Scene::TransformComponent;
-            using namespace Orange::Engine::Physics;
-            for (auto e : reg.view<RigidBodyComponent>())
-            {
-                auto& rb = reg.get<RigidBodyComponent>(e);
-                if (rb.type == BodyType::Static)
-                {
-                    continue;
-                }
-                if (!mpPhysicsWorld->IsValid(rb.handle))
-                {
-                    continue;
-                }
-                const BodyTransform xf = mpPhysicsWorld->GetBodyTransform(rb.handle);
-                auto*               tc = reg.try_get<TC>(e);
-                if (tc != nullptr)
-                {
-                    tc->position.x = xf.position.x;
-                    tc->position.y = xf.position.y;
-                    // 2D 物理只有 Z 轴旋转，直接从角度重建 quat
-                    tc->rotation = glm::quat(glm::vec3(0.0f, 0.0f, xf.angle));
-                }
-            }
-        }
-
-        // Particle emitter tick
-        if (mpVfxSystem != nullptr)
-        {
-            mpVfxSystem->Tick(*mHost.scene.pWorld, dt);
-            // 诊断：每秒打一次粒子计数，确认 sim 是否正常运行
-            static float sDiagTimer = 0.0f;
-            sDiagTimer += dt;
-            if (sDiagTimer >= 1.0f)
-            {
-                sDiagTimer = 0.0f;
-                ORANGE_LOG_DEBUG("[vfx-diag] live particles: {}",
-                                 mpVfxSystem->TotalLiveParticleCount());
-            }
-        }
-
-        // Animator tick —— 走引擎层 Animation::TickAnimators（单一真相源，
-        // 游戏侧消费同一入口；DRY）。行为与此前内联循环一致：遍历所有
-        // AnimatorComponent，对非空 animator 调 Tick(dt)。
-        Orange::Engine::Animation::TickAnimators(*mHost.scene.pWorld, dt);
-
-        // Audio: 同步 component 字段 → 已实例化的 SoundInstance（用户在
-        // Play 期改 volume / pitch / loop slider 时声音实时跟随）。pitch /
-        // loop 公共面尚未暴露，先仅 sync volume。
-        if (mHost.audioEngine.IsInitialized())
-        {
-            using namespace Orange::Engine::Audio;
-            auto& reg = mHost.scene.pWorld->Registry();
-            for (auto e : reg.view<AudioSourceComponent>())
-            {
-                auto&                  as = reg.get<AudioSourceComponent>(e);
-                Orange::Engine::Entity eWrap{static_cast<std::uint64_t>(
-                    static_cast<std::uint32_t>(e))};
-                auto                   it = mEntityToSoundInstance.find(eWrap);
-                if (it != mEntityToSoundInstance.end() && it->second && it->second->IsValid())
-                {
-                    it->second->SetVolume(as.volume);
-                }
-            }
-        }
+        const float scaledDt = dt * std::clamp(mHost.scene.playTimeScale, 0.05f, 4.0f);
+        StepSimulationOnce(scaledDt);
+    }
+    else if (mHost.scene.playState == PlayState::Paused && mHost.scene.pendingStep)
+    {
+        // 单步固定 60Hz 步长——不随 playTimeScale 缩放，让"单步"始终是一个确定的
+        // sim 帧，便于逐帧调物理手感。已知限制：自管 accumulator 的模块（见
+        // StepSimulationOnce 内 AnyWantsOwnPhysicsStep）内部按自己的步长决定实际
+        // 步数，"恰一步"可能与其步长不完全一致。
+        constexpr float kFixedStep = 1.0f / 60.0f;
+        StepSimulationOnce(kFixedStep);
+        mHost.scene.pendingStep = false;
     }
 
     // ---- Edit 态动画 clip 预览 tick（B2.6）------------------------------
@@ -1755,6 +1781,9 @@ void EditorRenderLayer::ApplyPendingPlayOp()
         return;
     }
     mHost.scene.pendingPlayOp = PlayOp::None;
+    // 任何 play-mode 迁移都丢弃尚未消费的单步请求（M9.2）——避免"Paused 时点 Step
+    // 又同帧 Resume/Stop"留下的 pendingStep 在下次进 Paused 时误触发一次单步。
+    mHost.scene.pendingStep = false;
 
     switch (op)
     {

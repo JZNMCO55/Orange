@@ -202,11 +202,11 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 
 全部小件、彼此独立，适合当 filler：
 
-1. **内存快照**：EnterPlay 落盘 `Save(path)` 换 `SaveSubtreeToString`、Stop 用 `LoadFromString`（API 现成）；`PlaySnapshotGuidTest` 改跑内存路径；
-2. **帧步进**：Paused 态 Step 按钮（tick 恰一个固定步长，物理手感游戏调试刚需）+ 时间缩放（0.1×/0.5×/1×）；
-3. **Game/Scene 双视口**：Game 面板（游戏相机）与 Scene 面板（编辑器相机自由飞，Play 期可旁观）并存；离屏 Pipeline 多实例有 ThumbnailService 先例，成本在面板与输入路由归属；
-4. **Play 期调参回写**：放开 Inspector 数值字段（Play 期即时生效、Stop 丢弃）+ "Copy current values" 手动带回 Edit 态——史莱姆手感调参完全体；
-5. **OE-MCP 对齐**：补 `step()` / 时间缩放 / Play 期读 gameplay 状态 tool，让自动化 dogfood 驱动完整 PIE 回路。
+1. **内存快照**：EnterPlay 落盘 `Save(path)` 换 `SaveSubtreeToString`、Stop 用 `LoadFromString`（API 现成）；`PlaySnapshotGuidTest` 改跑内存路径；⚠️ 坑：`SaveSubtreeToString` 是 const 入口不补 guid，直接换会砸 `PlaySnapshotGuidTest`——须先 `EnsureEntityGuids` 或加非 const `SaveToString` 重载 + roots 枚举（defer，探查见 2026-07-07 session）。
+2. **帧步进 + 时间缩放 ✅ 2026-07-07**：Paused 态 Step 按钮（tick 恰一个固定 60Hz 步长，物理手感调试刚需）+ 时间缩放 combo（0.1×/0.5×/1× slow-mo）。落地：`EditorSceneContext` 加 `pendingStep`/`playTimeScale`（放 context 供 Toolbar + MCP 共写，非 layer 私有）；`EditorRenderLayer` 把 Play tick body 抽 `StepSimulationOnce(simDt)`，Play 态喂 `dt*clamp(playTimeScale)`、Paused+pendingStep 喂固定 1/60；`mEditorTime` 保持未缩放（shader 预览不缩放）；ApplyPendingPlayOp 清 stale pendingStep。**验证**：OrangeEditor 编译绿 + ctest 117/117 + MCP smoke（见 M9.5）。已知限制：自管 accumulator 模块（Slime）"恰一步"与其内部步长不完全一致。
+3. **Game/Scene 双视口**（L，defer）：Game 面板（游戏相机）与 Scene 面板（编辑器相机自由飞，Play 期可旁观）并存；⚠️ ThumbnailService **非**多实例先例（借单 Pipeline + `RenderToTexture` 无后处理 + 帧外 WaitIdle），实时第二视口要第二完整 Pipeline（显存翻倍）+ M2 输入路由，成本高——建议 defer 到 M2 输入路由落定后（探查见 2026-07-07 session）。
+4. **Play 期调参回写**（defer）：放开 Inspector 数值字段（Play 期即时生效、Stop 丢弃）+ "Copy current values" 手动带回 Edit 态——史莱姆手感调参完全体；⚠️ 坑：`InspectorPanel.cpp` 的 Play-gate 是单闸同时管数值 tweak（Play-safe）与结构 mutate（Play 危险），须 schema 层标 Play-safe 而非一刀切放开 + 绕 cmdStack（探查见 2026-07-07 session，留后续）。
+5. **OE-MCP 对齐 ✅ 2026-07-07**：补 `step()` / `set_time_scale(scale)` tool（C++ `HandleStep`/`HandleSetTimeScale` + dispatch + Python `server.py` 两 tool），让自动化 dogfood 驱动逐帧 PIE 回路。**MCP smoke 端到端验证**（`OrangeEditor.exe --mcp-port`）：set_time_scale 生效 + clamp(999→4.0/0.001→0.05) + 缺参报错；step 在 Edit 报错「requires Paused」；play→pause→step(queued:true)→再 step 仍 Paused→stop→Edit 全过、编辑器不崩。**价值**：未来自动 dogfood 可 MCP 逐帧步进 + slow-mo 精确捕捉史莱姆转场态（解今晚"转场态截图蒙不中"）。剩 Play 期读 gameplay 状态 tool（现 `get_entity` 已可 Play 期读 ECS）defer。
 
 ### M10 · 打包发布管线（OE+OG，M→L，三级渐进，ship 哪级用哪级）
 

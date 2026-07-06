@@ -126,6 +126,18 @@ struct EditorSceneContext
     PlayOp      pendingPlayOp = PlayOp::None;
     std::string playSnapshotPath;
 
+    // M9.2 帧步进：Paused 态下的单步请求。ToolbarPanel 的 Step 按钮 / MCP step
+    // tool 置 true，帧末 EditorRenderLayer 消费——推进一个固定步长的 sim 后清零。
+    // 与 pendingPlayOp 同款"帧末 layer 消费"节奏。放 context 而非 layer 私有：
+    // MCP handler 只拿得到 EditorHost&，够不到 layer 成员。
+    bool pendingStep = false;
+
+    // M9.2 时间缩放：Play/Paused 期 sim tick 的 dt 乘子（0.1/0.5/1.0 三档 slow-mo）。
+    // 只缩放游戏 simulation（module / physics / vfx / anim / audio），**不**缩放
+    // 编辑器 shader 预览时间（mEditorTime 保持未缩放）。layer 消费时 clamp 到
+    // [0.05, 4.0]。同样放 context 供 Toolbar 按钮 + MCP tool 共写。
+    float playTimeScale = 1.0f;
+
     // v0.6 c2：未保存确认 popup 状态。pendingCloseAction != None 时下一
     // 帧 EditorRenderLayer 弹 modal popup；用户选 Save/Discard/Cancel 后
     // 决定怎么走 pendingCloseAction（执行 / 重置）。

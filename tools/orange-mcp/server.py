@@ -479,6 +479,28 @@ def stop() -> dict[str, Any]:
 
 
 @mcp.tool()
+def step() -> dict[str, Any]:
+    """Paused 态单步推进一个固定 sim 帧（60Hz 固定步长），用于逐帧调物理手感。
+
+    需当前在 Paused（先 pause）；非 Paused 报错。单步不随 time scale 缩放——始终是一个
+    确定的 sim 帧。已知限制：自管固定步长的游戏模块内部按自己步长决定实际步数，
+    "恰一步"可能与其步长不完全一致。下一帧帧末执行。
+    """
+    return _conn.send("step")
+
+
+@mcp.tool()
+def set_time_scale(scale: float) -> dict[str, Any]:
+    """设 Play/Paused 期的时间缩放（slow-mo），返回 {timeScale}（clamp 后实际值）。
+
+    典型 0.1 / 0.5 / 1.0（对应 Toolbar 下拉三档）；实际 clamp 到 [0.05, 4.0]。只缩放游戏
+    simulation（物理 / 粒子 / 动画 / 音频 / 游戏模块），**不**缩放编辑器 shader 预览时间。
+    任何模式可设，下次 tick 生效。非命令栈。
+    """
+    return _conn.send("set_time_scale", {"scale": scale})
+
+
+@mcp.tool()
 def list_assets(kind: str = "", pathPrefix: str = "") -> dict[str, Any]:
     """枚举 assets/ 下的资产文件，返回 {count, truncated, assets[]}；每项 {path, kind}。
 

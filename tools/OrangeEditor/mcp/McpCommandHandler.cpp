@@ -2076,6 +2076,46 @@ namespace Orange::Editor::Mcp
             return DumpLine(w);
         }
 
+        // ---- op: step --------------------------------------------------------------
+        // M9.2 帧步进：Paused 态单步一个固定 sim 帧。设 ctx.pendingStep，帧末
+        // EditorRenderLayer 推进后清零（与 pendingPlayOp 同款帧末消费）。非 Paused 报错。
+        // 非命令栈（sim 推进不进 undo）。
+        std::string HandleStep(std::int64_t id, EditorHost& host)
+        {
+            if (host.scene.playState != PlayState::Paused)
+            {
+                return MakeError(id, "step requires Paused (call pause first)");
+            }
+            host.scene.pendingStep = true;
+
+            JsonWriter w;
+            w.WriteInt("id", id);
+            w.WriteBool("ok", true);
+            w.WriteBool("result/queued", true); // 帧末执行单步
+            return DumpLine(w);
+        }
+
+        // ---- op: set_time_scale ----------------------------------------------------
+        // M9.2 时间缩放：设 Play/Paused 期 sim 时间缩放（0.1/0.5/1.0 slow-mo，clamp
+        // 到 [0.05,4.0]）。只缩放游戏 sim，不缩放编辑器 shader 预览。任何模式可设
+        // （下次 tick 生效）。非命令栈。args: scale
+        std::string HandleSetTimeScale(std::int64_t id, EditorHost& host, const JsonReader& req)
+        {
+            double scaleD = 1.0;
+            if (!req.ReadFloat("args/scale", scaleD))
+            {
+                return MakeError(id, "missing 'scale'");
+            }
+            const float clamped = std::min(std::max(static_cast<float>(scaleD), 0.05f), 4.0f);
+            host.scene.playTimeScale = clamped;
+
+            JsonWriter w;
+            w.WriteInt("id", id);
+            w.WriteBool("ok", true);
+            w.WriteFloat("result/timeScale", clamped);
+            return DumpLine(w);
+        }
+
         // 扩展名 / 文件名 → AssetKind 名（与编辑器 Asset Browser AssetCategoryOf 一致）。
         // 非资产文件（.meta 等）返回空串。
         const char* AssetKindByPath(const std::filesystem::path& p)
@@ -3222,6 +3262,14 @@ namespace Orange::Editor::Mcp
             if (op == "play" || op == "pause" || op == "resume" || op == "stop")
             {
                 return HandleSetPlayOp(id, host, op);
+            }
+            if (op == "step")
+            {
+                return HandleStep(id, host);
+            }
+            if (op == "set_time_scale")
+            {
+                return HandleSetTimeScale(id, host, r);
             }
             if (op == "list_assets")
             {
