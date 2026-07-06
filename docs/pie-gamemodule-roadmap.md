@@ -148,14 +148,18 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 - **验收剩项（M4 消费时验）**：OG SlimeEditor find_package 链 editor lib 的 install smoke（仿 `editor_build_smoke.cmake` 的对称件）。
 - **scope 红线**：**不**拆 AudioEngine/ThumbnailService 做 headless lib——editor lib 第一版允许依赖 Vulkan/ImGui，headless 测试 seam 维持 `EditorAssetContext` 现状。
 
-### M4 · 史莱姆进编辑器（umbrella bump → OG，M）
+### M4 · 史莱姆进编辑器（umbrella bump → OG）—— **core ✅ 2026-07-06（dogfood 验证）**
 
-- **交付**：
-  1. spike-01 抽 `SlimeGameModule`：引擎装配移交宿主，玩法状态从 `SpikeLayer` 成员迁入 module；`RegisterRenderPasses` 注册 SlimeMetaballPass；输入沿 `In::ActionMap`，事件改经 `OnEvent`；
-  2. **手感旋钮组件化**：BlobParams/手感常量做成 schema 注册的 ECS 组件 → Inspector 实时调参（PIE 对史莱姆的最大即时价值，正中 2026-07-05 dogfood 手感迭代痛点）；
-  3. `SlimeEditor.exe`（瘦 main：EditorAppConfig 注入 module）+ `Slime.exe`（瘦 runtime main，保持 window 模式可独立跑）双 target；顺手删 builtin shader 的 build-tree 拷贝 workaround（install GAP 已修）。
-- **验收**：编辑器 Play → 史莱姆可操控、SDF 在离屏视口显示（M1 成果的真实消费）、Stop 还原；Inspector 拖手感参数不重编生效；`Slime.exe` 行为与改造前 spike-01 无回归。
-- **说明**：第一版关卡仍是模块代码生成（spike-01 无 .scene.json），视口内关卡盒走 debug-draw（离屏已支持）；关卡 ECS/tilemap 化是独立后续，不阻塞本 epic。
+- **core 交付（已过 dogfood）**：
+  1. ✅ spike-01 抽 `SlimeGameModule`（`spike01::SlimeGameModule : IGameModule`，OG `18efb28`）：SpikeLayer 全量非 ECS 玩法状态迁入 module；`RegisterRenderPasses`=InsertPass(AfterMainPass) 接 SlimeMetaballPass（**消费 M1 离屏 InsertPass——史莱姆 SDF 在编辑器离屏视口显示**）；`WantsOwnPhysicsStep=true`（自管 60Hz accumulator）；`OnEnterPlay` 用 `ctx.pPhysics` 建关卡静态 body + control point（`gravityScale=0` 免疫宿主世界重力，PhysicsWorld 无 SetGravity 故 per-body 是唯一方案）+ Blob.Reset；`Tick`=原 OnUpdate 去 Render；`OnEvent` 去 resize；`OnExitPlay` 拆 body + 禁 SDF pass。
+  3. ✅ `SlimeEditor.exe`（瘦 main 经 `EditorAppConfig.modules` 注入 SlimeGameModule + `find_package(OrangeEditor 1.3)` 消费 SDK）；引擎/editor/slime shaders + codicon 经 SDK copy-helper 拷 exe 旁（取代 spike `ORANGE_ENGINE_SHADER_DIR` workaround）。与 spike-01-blob standalone 共用 SlimeGameModule + SlimeMetaballPass。
+- **验收（已过）**：真机 dogfood 截图——编辑器 **Play → 绿色 SDF 史莱姆（双眼+辉光）在视口渲染**（M1→M4 整栈端到端）、状态 `[Edit]→[Play]`、**Stop → 史莱姆消失还原空态**（`[play] Play→Edit`，内存回落=资源释放），全程无崩溃。
+- **M4 剩项（defer）**：
+  2. **手感旋钮组件化**：BlobParams/FeelParams 做成 schema 注册 ECS 组件 → Inspector 实时调参（PIE 对史莱姆最大即时价值，正中 2026-07-05 dogfood 手感痛点）——需编辑器侧游戏组件 schema 注册路径，是独立子件（模块现内置 param）；
+  - **Slime.exe 瘦 runtime target**（当前 spike-01-blob.exe 仍是 standalone；专属瘦 runtime = M10 收敛同源）；
+  - **输入操控 dogfood**（键盘进不去 GLFW 窗口靠自动化，本轮验的是史莱姆 idle 渲染+Play/Stop；手感操控待真人键盘 dogfood）；
+  - **窗口标题** cosmetic（`UpdateWindowTitle` 硬编码 "OrangeEditor" 后缀，SlimeEditor 标题未随 config.windowTitle——小坑）。
+- **说明**：第一版关卡是模块代码生成（spike-01 无 .scene.json）；关卡 ECS/tilemap 化独立后续，不阻塞本 epic。
 
 ### M5 · C# 第二宿主接线（OE，M）
 
