@@ -95,12 +95,19 @@ find_package(glfw3 CONFIG REQUIRED)
 # OrangeEditor exe
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# orange_editor STATIC lib（M3 lib 化）—— 承载全部编辑器子系统 + 应用装配
+# （EditorApp.cpp = Orange::Editor::RunEditorApp）。瘦 OrangeEditor.exe 与
+# per-game editor（M4 起 SlimeEditor.exe）都只链本 lib + 各自 3 行瘦 main，
+# 避免复制 ~1100 行 main() 装配逻辑。
+#
 # MikkTSpace（vendor/mikktspace/mikktspace.c）以 C 编译——C 语言在顶层
 # project(... LANGUAGES C CXX) 启用（见根 CMakeLists 注释）。纯 C 编译让
 # genTangSpaceDefault 天然 C linkage，与 MeshTangentGen.cpp 经 mikktspace.h
 # `extern "C"` 的引用精确匹配。其 warning 见下方 set_source_files_properties /W0。
-add_executable(OrangeEditor
-    main.cpp
+# ---------------------------------------------------------------------------
+add_library(orange_editor STATIC
+    EditorApp.cpp
     BuiltinAssets.cpp
     DemoWorld.cpp
     ColliderDebugDraw.cpp
@@ -187,29 +194,38 @@ add_executable(OrangeEditor
     plugin/SpotLightGizmoPlugin.cpp
     demo_game/HealthComponent.cpp
     branding/EditorWindowIcon.cpp
-    # Windows resource：把 orange-editor-logo.ico 嵌进 exe。MSVC / CMake 自
-    # 动识别 .rc 后缀、调 rc.exe 编出 .res、link 到 exe；非 MSVC（Linux /
-    # Clang on Linux）下会被自动忽略——本仓库当前 Windows-only 不影响。
-    # 重建 ICO：跑 `python tools/OrangeEditor/branding/build_icon.py`。
-    branding/OrangeEditor.rc
 )
-# OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共
-# link 自动传递；不重复 explicit link，避免 static initializer 顺序冲突。
-target_link_libraries(OrangeEditor PRIVATE
+# OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共 link 自动
+# 传递；不重复 explicit link，避免 static initializer 顺序冲突。**PUBLIC** 让
+# exe 与 per-game editor 经链 orange_editor 传递性拿到 引擎 / imgui / vulkan /
+# glfw —— STATIC lib 不嵌依赖对象码，最终 exe link 仍需自行解析全部符号。
+target_link_libraries(orange_editor PUBLIC
     OrangeEngine::orange_engine
     OrangeEngine::imgui
     Vulkan::Vulkan
     glfw)
 
+# ---------------------------------------------------------------------------
+# OrangeEditor.exe —— 瘦 main（仅转发 argc/argv 进 orange_editor::RunEditorApp）。
+# Windows resource：把 orange-editor-logo.ico 嵌进 exe。MSVC / CMake 自动识别
+# .rc 后缀、调 rc.exe 编出 .res、link 到 exe；非 MSVC（Linux / Clang on Linux）
+# 下自动忽略——本仓当前 Windows-only 不影响。资源留 **exe**（不进 STATIC lib）。
+# 重建 ICO：跑 `python tools/OrangeEditor/branding/build_icon.py`。
+# ---------------------------------------------------------------------------
+add_executable(OrangeEditor
+    main.cpp
+    branding/OrangeEditor.rc)
+target_link_libraries(OrangeEditor PRIVATE orange_editor)
+
 # v1.1 T3：tinyobjloader 单 header（MIT）vendored 到 `vendor/tinyobjloader/`，
 # 与 vendor/stb 同款 in-tree single-header 模式（不走 submodule，体积可控
-# ~467KB 单文件）。include path 只暴露给 OrangeEditor target —— 引擎 runtime
-# 不消费 tinyobjloader（ADR-008 invariant "importer 全部在 tools/OrangeEditor/
-# import/，不污染 src/asset/"）。
+# ~467KB 单文件）。include path 只暴露给 orange_editor（PRIVATE，importer TU
+# 在 lib 内）—— 引擎 runtime 不消费 tinyobjloader（ADR-008 invariant "importer
+# 全部在 tools/OrangeEditor/import/，不污染 src/asset/"）。
 # CMAKE_CURRENT_LIST_DIR 是 tools/OrangeEditor/，向上两级就是 engine repo
 # 根，无论 in-tree 还是 standalone consumer build 模式都稳定指对。
 # v1.1 T4：cgltf 单 header（MIT）同样 in-tree 模式接入。
-target_include_directories(OrangeEditor PRIVATE
+target_include_directories(orange_editor PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../vendor/tinyobjloader"
     "${CMAKE_CURRENT_LIST_DIR}/../../vendor/cgltf"
     "${CMAKE_CURRENT_LIST_DIR}/../../vendor/mikktspace"
@@ -233,10 +249,14 @@ else ()
 endif ()
 
 # 与 sample / engine 同档的编译器 warning 级别 —— 编辑器作为长期演化
-# 的 first-class target，不享受任何"宽松 warning"豁免。
+# 的 first-class target，不享受任何"宽松 warning"豁免。lib（子系统全量）+
+# exe（瘦 main）同档。
 if (MSVC)
+    target_compile_options(orange_editor PRIVATE /W4 /WX /permissive-)
     target_compile_options(OrangeEditor PRIVATE /W4 /WX /permissive-)
 else ()
+    target_compile_options(orange_editor PRIVATE
+        -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(OrangeEditor PRIVATE
         -Wall -Wextra -Wpedantic -Werror)
 endif ()
