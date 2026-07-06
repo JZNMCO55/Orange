@@ -155,7 +155,7 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
   3. ✅ `SlimeEditor.exe`（瘦 main 经 `EditorAppConfig.modules` 注入 SlimeGameModule + `find_package(OrangeEditor 1.3)` 消费 SDK）；引擎/editor/slime shaders + codicon 经 SDK copy-helper 拷 exe 旁（取代 spike `ORANGE_ENGINE_SHADER_DIR` workaround）。与 spike-01-blob standalone 共用 SlimeGameModule + SlimeMetaballPass。
 - **验收（已过）**：真机 dogfood 截图——编辑器 **Play → 绿色 SDF 史莱姆（双眼+辉光）在视口渲染**（M1→M4 整栈端到端）、状态 `[Edit]→[Play]`、**Stop → 史莱姆消失还原空态**（`[play] Play→Edit`，内存回落=资源释放），全程无崩溃。
 - **M4 剩项（defer）**：
-  2. **手感旋钮组件化**：BlobParams/FeelParams 做成 schema 注册 ECS 组件 → Inspector 实时调参（PIE 对史莱姆最大即时价值，正中 2026-07-05 dogfood 手感痛点）——需编辑器侧游戏组件 schema 注册路径，是独立子件（模块现内置 param）；
+  2. ✅ **手感旋钮组件化 2026-07-06**（OE `6776f9c` + OG `de809c0`）：`SlimeTuningComponent{blobRadius/jumpSpeed/maxRunSpeed/riseGravity/fallGravity}` 做成 schema 注册 ECS 组件 → 编辑器 Inspector 可调、Play 时 `SlimeGameModule::ApplyTuningOverrides` 读取生效（不重编）。**暴露路径**：EditorAppConfig 加 `onRegisterSchemas`/`onSeedWorld` 回调 + orange_editor **全树头导出**（ComponentSchemaBuilder 拖 EditorHost.h，公共面=编辑器头树，开放问题#4 全量起步）。**dogfood 验证**：SlimeEditor→Entity Tree "Slime" 实体→Inspector 渲染 "Slime Tuning" 5 字段（游戏组件经 SDK schema 显示，**核心达成**）+ Play 组件被读取渲染无破；live 值→大小视觉待手动（ImGui DragFloat 合成鼠标在自动化 harness 不可靠，用户拖 slider 即验）。剩：Play 期即时回写(M9)/blobRadius 外全字段实机手感调参。
   - **Slime.exe 瘦 runtime target**（当前 spike-01-blob.exe 仍是 standalone；专属瘦 runtime = M10 收敛同源）；
   - **输入操控 dogfood**（键盘进不去 GLFW 窗口靠自动化，本轮验的是史莱姆 idle 渲染+Play/Stop；手感操控待真人键盘 dogfood）；
   - **窗口标题** cosmetic（`UpdateWindowTitle` 硬编码 "OrangeEditor" 后缀，SlimeEditor 标题未随 config.windowTitle——小坑）。
