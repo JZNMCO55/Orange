@@ -17,6 +17,11 @@
     <AssemblyName>OrangeScriptSDK</AssemblyName>
     <RootNamespace>Orange</RootNamespace>
     <LangVersion>latest</LangVersion>
+    <!-- 让本库自身也产出 OrangeScriptSDK.runtimeconfig.json —— 编辑器/发布宿主
+         （ScriptGameModule，PIE M5）直接用它作 hostfxr_initialize_for_runtime_config
+         的 runtimeconfig 定位 .NET 框架，无需再依赖某个 app 工程（如测试用的
+         ScriptFixtures）的 runtimeconfig。库工程默认不产出，故显式开启。 -->
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
   </PropertyGroup>
 
 </Project>

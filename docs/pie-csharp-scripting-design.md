@@ -1,7 +1,9 @@
 # Phase B1 设计提案：Play-in-Editor + C# 脚本运行时
 
-> 状态：**设计提案（未实现）**。用户 2026-06-02 拍板「PIE 重点 + 脚本语言用 C#」后的地基调研。
-> 本文是**提案不是决策**——落地前应升 ADR 由用户裁定关键选型（运行时 host、binding 方式）。
+> 状态：**已落地**（2026-07-06）。本提案的选型经 [ADR-017](../../Orange-Wiki/case-studies/orange-engine/decisions/)（CoreCLR/nethost host）+ [ADR-021](../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-021-pie-gamemodule-dual-language-hosting.md)（IGameModule 双宿主）裁定并实现：
+> B1.0 host spike / B1.1 binding / B1.2 ScriptComponent+ScriptSystem / B1.3 fieldOverrides tweakable 均落地（headless ctest）；
+> **PIE roadmap M5** 把 ScriptSystem 包成内置 `ScriptGameModule`（IGameModule 第二实现）接进编辑器 Play 生命周期——C# 脚本在 OrangeEditor Play 里真驱动实体、Stop 还原（编辑器真机 dogfood 验证）。可卸载 ALC 热重载留 M8。
+> 执行计划全文见 [`docs/pie-gamemodule-roadmap.md`](pie-gamemodule-roadmap.md)。下文保留原始提案（未实现语气）作设计留痕。
 > 参考：Wiki [`concepts/gameplay/scripting-system.md`](../../Orange-Wiki/wiki/concepts/gameplay/scripting-system.md)
 > （六种架构模式 + 选型 + 热重载陷阱）；Unity 的 C# via Mono/IL2CPP 是 C# 脚本引擎的范本。
 

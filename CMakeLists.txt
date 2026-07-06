@@ -834,7 +834,11 @@ if (ORANGE_ENGINE_WITH_DOTNET)
         src/script/dotnet/ScriptHost.cpp
         src/script/dotnet/ScriptBindings.cpp
         src/script/dotnet/ScriptRuntime.cpp
-        src/script/ScriptSystem.cpp)
+        src/script/ScriptSystem.cpp
+        # ScriptGameModule 把 ScriptRuntime + ScriptSystem 包成内置 IGameModule
+        # （ADR-021 第二宿主实现）。同样只用 ScriptRuntime 公共门面、零 CLR 头，
+        # 但依赖 ScriptRuntime 故一并门控在 WITH_DOTNET。
+        src/script/ScriptGameModule.cpp)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/script/dotnet/ScriptHost.cpp"
         PROPERTIES INCLUDE_DIRECTORIES "${ORANGE_ENGINE_DOTNET_HOST_NATIVE_DIR}")

@@ -98,7 +98,7 @@ public:
 
 ## 3. Roadmap
 
-依赖链：`M1 ∥ M2 → M3 → M4 → M5`；M4 之后四条独立支线 `M6→M7`、`M8`、`M9`、`M10`。
+依赖链：`M1 ∥ M2 → M3 → M4 → M5`（**M0-M5 全 ✅ 2026-07-06**）；M5 之后四条独立支线 `M6→M7`、`M8`、`M9`、`M10`。
 每阶段一个 session 起步（M3 预计 2-3 个），per-session 单子仓纪律全程适用；M3→M4 之间 umbrella bump。
 
 ### M0 · 决策与计划落盘（Wiki+OE 纯文档，S）✅ 2026-07-06
@@ -161,10 +161,16 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
   - **窗口标题** cosmetic（`UpdateWindowTitle` 硬编码 "OrangeEditor" 后缀，SlimeEditor 标题未随 config.windowTitle——小坑）。
 - **说明**：第一版关卡是模块代码生成（spike-01 无 .scene.json）；关卡 ECS/tilemap 化独立后续，不阻塞本 epic。
 
-### M5 · C# 第二宿主接线（OE，M）
+### M5 · C# 第二宿主接线（OE，M）—— ✅ 2026-07-06（编辑器真机 dogfood 验证）
 
-- **交付**：ScriptSystem 包成内置 IGameModule 实现（或等价接线，按 `docs/pie-csharp-scripting-design.md` 的 EnterPlay S4 设计）挂进同一生命周期；编辑器构建 `ORANGE_ENGINE_WITH_DOTNET=ON` 接通（含 CMake 感知）；ScriptComponent Add-Component + Inspector tweakable（C# `System.Reflection` 反射 public field 喂 schema，引擎 C++ 侧仍零反射库）。
-- **验收**：C# Mover 脚本在编辑器 Play 里驱动实体、Stop 还原（maturity-roadmap B1 dogfood 项闭环）；接口无 C++ 特化泄漏（两实现并存即验证）。
+- **实况修正（探查发现）**：ScriptComponent 的**编辑器侧** authoring 面在 B1.2/B1.3 已全量落地——内置引擎 serializer（`src/scene/ComponentSerializers.cpp`，含脚本的场景任何构建都 round-trip）+ schema 注册 `RegisterScriptComponentSchema`（Add-Component 菜单 + assemblyPath/typeName 字段，`schema/RegisterBuiltinSchemas.cpp`）+ bespoke Inspector plugin（`plugin/ScriptFieldOverridesInspectorPlugin.cpp`，fieldOverrides 动态列表）+ MCP `set_script_field`。故 M5 真正缺口 = **在编辑器 Play 里真跑 C# 脚本的生命周期接线**（此前编辑器无任何 ScriptRuntime/ScriptSystem 实例，带 ScriptComponent 的实体 Play 时什么都不做）。
+- **交付（实际）**：
+  1. ✅ **`ScriptGameModule`**（引擎内置 IGameModule 第二实现，`include/orange/engine/game/ScriptGameModule.h` PIMPL façade + `src/script/ScriptGameModule.cpp` dotnet-gated）：把 `ScriptRuntime` + `ScriptSystem` 包成语言无关的 IGameModule。`OnEnterPlay`=（World 有 ScriptComponent 才）惰性起 CoreCLR + `ScriptSystem::StartWorld`；`Tick`=`ScriptSystem::Tick`；`OnExitPlay`=`StopWorld`。**惰性 init**：无脚本组件的 Play 不付 CoreCLR 启动代价；CoreCLR 跨 Play/Stop 复用（每进程一次，可卸载 ALC 是 M8）。相对 assemblyPath 回退 exe/scripts 解析（带脚本场景免写死绝对路径）。加入 `game.h` 聚合头。
+  2. ✅ **编辑器 `ORANGE_ENGINE_WITH_DOTNET` 接通**（含 CMake 感知）：`tools/OrangeEditor/CMakeLists.txt` 的 dotnet 块——`ORANGE_EDITOR_WITH_DOTNET` define + dotnet build OrangeScriptSDK + demo fixtures + POST_BUILD 部署 nethost.dll（exe 旁）/ OrangeScriptSDK.dll+runtimeconfig / ScriptFixtures.dll（exe/scripts/）。`EditorApp.cpp` 在原版编辑器装配段注册内置 ScriptGameModule（exe-相对定位 SDK）——**原版 OrangeEditor 也能跑 C# 脚本**。用 `cfgHadGameModules` 解耦 `isPerGameEditor`/showcase 判定，令内置 ScriptGameModule 不污染原版启动场景行为。
+  3. ✅ **OrangeScriptSDK 自宿主**：`OrangeScriptSDK.csproj` 加 `GenerateRuntimeConfigurationFiles=true`，库自身产出 runtimeconfig，宿主直接用它 bootstrap hostfxr（不再依赖某 app 工程的 runtimeconfig）。
+  4. ✅ **ScriptComponent Add-Component + Inspector tweakable**：已存在（见实况修正）；fieldOverrides 经 `SetInstanceField` 的 **C# `System.Reflection`** 在 OnStart 前注入脚本 public 字段（引擎 C++ 侧零反射库，ADR-017 纪律）。**Inspector 从 assembly 反射 public field 自动填字段清单**（免手打字段名）留后续增强——`ScriptFieldOverridesInspectorPlugin::ParseEnd` 已有扩展钩子。
+- **验收（已过，编辑器真机 dogfood）**：`OrangeEditor.exe --mcp-port` 建带 `ScriptComponent(assemblyPath=ScriptFixtures.dll, typeName=OrangeFixtures.Bob)` 的可渲染实体 → **Play → C# `Bob` 脚本正弦驱动实体 Transform**（position `[0,1.5,0]` → `[0.36,2.50,0]` → `[0.45,0.70,0]`，两时刻不同=持续动画）→ **Stop → 还原 `[0,1.5,0]`**（Play 快照）。**CoreCLR 在完整编辑器进程（Vulkan+ImGui+GLFW）内起来不崩**（日志 `[ScriptGameModule] CoreCLR 脚本运行时就绪` + `[play] Edit→Play→Edit` 干净）。ctest 117/117 零回归。**接口无 C++ 特化泄漏**：ScriptGameModule（C# 后端）与 SlimeGameModule（C++）经同一 IGameModule 生命周期并存驱动即验证。
+- **纪律**：全程 OE 单仓（per-session）；schema/serializer 是编辑器/引擎既有机制，无 mega-class 游戏分支。
 
 ### M6 · workspace / 项目模型（OE，M，ADR-022）
 
@@ -238,8 +244,8 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 |---|---|
 | B1.0 形态拍板（2026-06-02 脚本/C# 单轨） | **ADR-021 修订为双宿主**；ADR-017 收编为第二实现 |
 | B1.1 workspace（原"硬前置"） | **降级** M3 参数注入起步；完整项目模型 = M6 |
-| B1.2 游戏侧 system/component 被编辑器发现 | M2（注册期接口）+ M4（首个真消费者） |
+| B1.2 游戏侧 system/component 被编辑器发现 | M2（注册期接口）+ M4（首个真消费者）+ **M5 ✅ C# ScriptComponent** |
 | B1.3 Play/Pause/Stop 状态机 | 已全量存在（实况修正）；M2 只做挂接 |
 | B1.4 输入/相机 edit↔play 切换 | M2 |
 | B1.4' 完整热重载（collectible ALC） | M8 |
-| B1.5 运行时落地 | M2-M5（双宿主）+ M10（发布 runtime） |
+| B1.5 运行时落地 | M2-M5（双宿主，**C# 侧 ✅ M5 编辑器 Play 驱动**）+ M10（发布 runtime） |

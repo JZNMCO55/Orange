@@ -69,6 +69,11 @@
 #include <orange/engine/scene/TransformComponent.h>
 #include <orange/engine/scene/World.h>
 #include <orange/engine/scene/WorldPartition.h>
+#if defined(ORANGE_EDITOR_WITH_DOTNET)
+// PIE M5：C# 第二宿主（ADR-021）。仅 dotnet 构建下引入 —— 头本身 always-compile
+// 的 PIMPL façade（不暴露 CLR 类型），但类的定义 dotnet-gated，故门控构造点。
+#    include <orange/engine/game/ScriptGameModule.h>
+#endif
 
 // 编辑器内部模块（拆分后的本地 header；不进 include/ 公共面）
 #include "EditorApp.h" // RunEditorApp 声明（M3：exe 瘦 main 经此转发进 lib）
@@ -193,6 +198,22 @@ namespace
             dir = parent;
         }
     }
+
+#if defined(ORANGE_EDITOR_WITH_DOTNET)
+    // 当前 exe 所在目录（绝对路径）；失败返回空。PIE M5：解析 exe-相对的 C# 脚本
+    // SDK 部署路径（nethost.dll 在 exe 目录、OrangeScriptSDK.dll / runtimeconfig 在
+    // exe/scripts/，见 tools/OrangeEditor/CMakeLists.txt 的 dotnet 部署块）。
+    std::filesystem::path EditorExeDir()
+    {
+        wchar_t     exePathW[MAX_PATH] = {};
+        const DWORD len                = GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
+        if (len == 0 || len == MAX_PATH)
+        {
+            return {};
+        }
+        return std::filesystem::path(exePathW).parent_path();
+    }
+#endif
 
     // Headless 资产导入 CLI（GAP-2026-05-27 G1）。在任何 GLFW / Vulkan / ImGui
     // init 之前由 main 判 argv 调用：用 CreateImportAssetRegistry 建一个最小
@@ -930,11 +951,35 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
     // config.modules（`cfg.modules.push_back(std::make_unique<SlimeGameModule>())`），
     // RunEditorApp 在此把它们 AddModule 进宿主（所有权转移）。原版 OrangeEditor
     // 传空 config → gameModules 恒空 → 护栏令全部扇出 no-op、零行为变化。
+    // 是否为 per-game editor（config 注入了游戏模块）—— **在**加内置 ScriptGameModule
+    // **之前**捕获。内置 ScriptGameModule（M5）是引擎级 C# 宿主能力、不是 per-game
+    // 模块，绝不能让它把原版 OrangeEditor 误判成 per-game editor（那会改启动场景 /
+    // showcase 行为）。故下方启动场景 / showcase 分支一律用本 flag，不再看 ModuleCount。
+    const bool cfgHadGameModules = !config.modules.empty();
     for (auto& m : config.modules)
     {
         editorHost.gameModules.AddModule(std::move(m));
     }
     config.modules.clear(); // 所有权已移交宿主，清空避免悬空 unique_ptr 误用
+
+#if defined(ORANGE_EDITOR_WITH_DOTNET)
+    // PIE M5：注册内置 ScriptGameModule（C# 第二宿主，ADR-021）。挂进同一
+    // gameModules → EnterPlay/Tick/ExitPlay 复用 SlimeGameModule 同款生命周期扇出，
+    // 两实现并存即证明 IGameModule 接口无 C++ 特化泄漏（M5 验收）。带 ScriptComponent
+    // 的实体 Play 时经它实例化 C# 脚本 + OnStart/OnUpdate/OnDestroy 驱动、Stop 由
+    // Play 快照还原。无脚本组件则模块完全惰性（不付 CoreCLR 启动代价）。
+    // 部署路径 exe-相对：runtimeconfig + OrangeScriptSDK.dll 在 exe/scripts/。
+    {
+        const std::filesystem::path scriptsDir = EditorExeDir() / "scripts";
+        const std::string           sdkDll = (scriptsDir / "OrangeScriptSDK.dll").string();
+        const std::string           rtCfg =
+            (scriptsDir / "OrangeScriptSDK.runtimeconfig.json").string();
+        editorHost.gameModules.AddModule(
+            std::make_unique<Orange::Engine::Game::ScriptGameModule>(rtCfg, sdkDll));
+        ORANGE_LOG_INFO("[OrangeEditor] C# 脚本宿主已注册（ScriptGameModule；sdk={}）",
+                        sdkDll);
+    }
+#endif
     //
     // 两段注册期扇出：
     //   * RegisterRenderPasses：viewport Pipeline 是 ScenePanel 首帧 lazy 创建，
@@ -982,7 +1027,7 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
         //     自 seed 关卡（spike-01 现状：模块代码生成关卡，无 .scene.json），
         //     绝不 SeedDemoWorld（那是引擎 demo 内容，不属游戏）；
         //   * 空 + 无模块（原版 OrangeEditor）→ 试 demo.scene.json 否则 SeedDemoWorld。
-        const bool        isPerGameEditor = editorHost.gameModules.ModuleCount() > 0;
+        const bool        isPerGameEditor = cfgHadGameModules;
         const std::string startupScene =
             !config.startupScene.empty() ? config.startupScene
             : isPerGameEditor            ? std::string{}
@@ -1065,7 +1110,7 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
         const char* kShowcasePath = "assets/scenes/pbr_showcase.scene.json";
         // M3 step2：仅原版 OrangeEditor 惰性生成引擎 demo showcase；per-game
         // editor（有游戏模块）跳过——绝不往消费者仓 assets/ 写引擎 demo 内容。
-        if (editorHost.gameModules.ModuleCount() == 0 && !fs::exists(kShowcasePath))
+        if (!cfgHadGameModules && !fs::exists(kShowcasePath))
         {
             World tempWorld;
             SeedPbrShowcaseWorld(tempWorld, editorHost.assets);

@@ -342,6 +342,80 @@ add_dependencies(OrangeEditor orange_editor_shaders)
 add_dependencies(orange_editor orange_editor_shaders)
 
 # ---------------------------------------------------------------------------
+# C# 脚本宿主接通（PIE roadmap M5，ADR-021 第二宿主）—— 仅在引擎开启
+# ORANGE_ENGINE_WITH_DOTNET 时激活（in-tree 路径；standalone editor_build_smoke
+# 不定义该引擎 option，整块跳过）。
+#
+# 引擎侧 orange_engine 已在 WITH_DOTNET 下编进 CoreCLR host + ScriptGameModule，
+# 编辑器只需三件事让 C# 脚本在 Play 里真跑：
+#   1. 给 orange_editor 定义 ORANGE_EDITOR_WITH_DOTNET —— EditorApp.cpp 据此
+#      构造 + 注册内置 ScriptGameModule 进 gameModules（原版编辑器也能跑 C#）；
+#   2. 编 C# 脚本 SDK（OrangeScriptSDK + runtimeconfig）+ demo fixtures（含 Bob）；
+#   3. 部署到 exe 旁：nethost.dll → exe 目录（进程启动期 DLL 搜索路径需要，因
+#      orange_engine 链 nethost.lib）；OrangeScriptSDK.dll / runtimeconfig /
+#      ScriptFixtures.dll → exe/scripts/（ScriptGameModule 按 exe-相对解析）。
+# ---------------------------------------------------------------------------
+if (ORANGE_ENGINE_WITH_DOTNET)
+    target_compile_definitions(orange_editor PRIVATE ORANGE_EDITOR_WITH_DOTNET=1)
+
+    # dotnet CLI（idempotent：tests 子目录可能已 find 过同名 cache 变量）。
+    find_program(ORANGE_ENGINE_DOTNET_EXE NAMES dotnet
+        HINTS "$ENV{DOTNET_ROOT}" "C:/Program Files/dotnet")
+    if (NOT ORANGE_ENGINE_DOTNET_EXE)
+        message(FATAL_ERROR
+            "OrangeEditor: ORANGE_ENGINE_WITH_DOTNET=ON 但 PATH / DOTNET_ROOT 下没找到 "
+            "dotnet —— 编 C# 脚本 SDK + fixtures 需要它。")
+    endif ()
+
+    set(_ed_csharp_root "${CMAKE_CURRENT_LIST_DIR}/../../csharp")
+    # 编到编辑器专属 -o 目录（与 tests 的 csharp/*/bin 隔离，避免 add_custom_command
+    # OUTPUT 撞车 + 各自增量）。ScriptFixtures 的 ProjectReference 顺带把
+    # OrangeScriptSDK.dll + runtimeconfig 带进同目录，故编 fixtures 一步齐活；
+    # 仍显式先编 SDK 保证 OrangeScriptSDK.runtimeconfig.json 一定产出。
+    set(_ed_csharp_out "${CMAKE_CURRENT_BINARY_DIR}/csharp_deploy/$<CONFIG>")
+    set(_ed_sdk_proj "${_ed_csharp_root}/OrangeScriptSDK/OrangeScriptSDK.csproj")
+    set(_ed_fixtures_proj "${_ed_csharp_root}/ScriptFixtures/ScriptFixtures.csproj")
+    set(_ed_fixtures_dll "${_ed_csharp_out}/ScriptFixtures.dll")
+    set(_ed_sdk_dll "${_ed_csharp_out}/OrangeScriptSDK.dll")
+    set(_ed_sdk_cfg "${_ed_csharp_out}/OrangeScriptSDK.runtimeconfig.json")
+
+    add_custom_command(
+        OUTPUT "${_ed_fixtures_dll}" "${_ed_sdk_dll}" "${_ed_sdk_cfg}"
+        COMMAND "${ORANGE_ENGINE_DOTNET_EXE}" build "${_ed_sdk_proj}"
+                -c $<CONFIG> -o "${_ed_csharp_out}" --nologo
+        COMMAND "${ORANGE_ENGINE_DOTNET_EXE}" build "${_ed_fixtures_proj}"
+                -c $<CONFIG> -o "${_ed_csharp_out}" --nologo
+        DEPENDS
+            "${_ed_csharp_root}/OrangeScriptSDK/OrangeScript.cs"
+            "${_ed_csharp_root}/OrangeScriptSDK/ScriptRuntime.cs"
+            "${_ed_csharp_root}/OrangeScriptSDK/EngineInterop.cs"
+            "${_ed_csharp_root}/OrangeScriptSDK/Entity.cs"
+            "${_ed_csharp_root}/OrangeScriptSDK/OrangeScriptSDK.csproj"
+            "${_ed_csharp_root}/ScriptFixtures/Mover.cs"
+            "${_ed_csharp_root}/ScriptFixtures/Tweakable.cs"
+            "${_ed_csharp_root}/ScriptFixtures/Bob.cs"
+            "${_ed_csharp_root}/ScriptFixtures/ScriptFixtures.csproj"
+        COMMENT "OrangeEditor: 编 C# 脚本 SDK + demo fixtures（PIE M5 dotnet 宿主）"
+        VERBATIM)
+    add_custom_target(orange_editor_csharp_deploy ALL DEPENDS "${_ed_fixtures_dll}")
+    add_dependencies(OrangeEditor orange_editor_csharp_deploy)
+
+    # 部署：nethost.dll → exe 目录；SDK/runtimeconfig/demo 程序集 → exe/scripts/。
+    # ORANGE_ENGINE_DOTNET_NETHOST_DLL 由根 CMake 的 dotnet 块 FORCE 进 cache。
+    add_custom_command(TARGET OrangeEditor POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${ORANGE_ENGINE_DOTNET_NETHOST_DLL}"
+                "$<TARGET_FILE_DIR:OrangeEditor>"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:OrangeEditor>/scripts"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_ed_sdk_dll}" "${_ed_sdk_cfg}" "${_ed_fixtures_dll}"
+                "$<TARGET_FILE_DIR:OrangeEditor>/scripts"
+        COMMENT "OrangeEditor: 部署 nethost.dll + C# 脚本 SDK/runtimeconfig/demo 到 exe 旁"
+        VERBATIM)
+endif ()
+
+# ---------------------------------------------------------------------------
 # 安装 / 导出规则 —— 让 per-game editor（OG SlimeEditor.exe，M4 起）能
 # `find_package(OrangeEditor CONFIG)` + 链 OrangeEditor::orange_editor 建自己的
 # 编辑器 exe，复用 orange_editor lib 承载的全部 ~1100 行 main() 装配逻辑，只写

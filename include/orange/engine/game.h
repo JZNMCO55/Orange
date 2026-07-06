@@ -7,5 +7,6 @@
 
 #include <orange/engine/game/GameModuleHost.h>
 #include <orange/engine/game/IGameModule.h>
+#include <orange/engine/game/ScriptGameModule.h>
 
 #endif // ORANGE_ENGINE_GAME_H
