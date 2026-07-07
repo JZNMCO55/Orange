@@ -500,6 +500,18 @@ if (ORANGE_EDITOR_INSTALL)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/OrangeEditor/theme/codicons"
     )
 
+    # C# 脚本运行时再分发（M10 级别 1 · point 3）—— 仅当引擎 WITH_DOTNET：把 nethost.dll
+    # + OrangeScriptSDK.dll + runtimeconfig 装进 SDK share/OrangeEditor/dotnet/，供
+    # per-game editor（SlimeEditor）的 orange_editor_copy_dotnet_runtime() helper 拷到自己
+    # exe 旁。dotnet-enabled SDK 下 orange_editor PUBLIC 链 nethost，consumer exe 启动即需它。
+    # ScriptFixtures（demo Bob）不再分发——那是引擎侧 demo，真游戏带自家脚本。
+    if (ORANGE_ENGINE_WITH_DOTNET)
+        install(FILES "${ORANGE_ENGINE_DOTNET_NETHOST_DLL}"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/OrangeEditor/dotnet")
+        install(FILES "${_ed_sdk_dll}" "${_ed_sdk_cfg}"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/OrangeEditor/dotnet/scripts")
+    endif ()
+
     install(EXPORT OrangeEditorTargets
         FILE        OrangeEditorTargets.cmake
         NAMESPACE   OrangeEditor::

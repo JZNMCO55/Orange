@@ -79,4 +79,34 @@ function(orange_editor_copy_theme target)
         VERBATIM)
 endfunction()
 
+# ---- C# 脚本运行时再分发（M10 级别 1 · point 3）----
+# 引擎 WITH_DOTNET build 出的 orange_editor 内置 ScriptGameModule（PIE M5），PUBLIC 链
+# nethost —— 故 per-game editor exe 启动期就需要 nethost.dll 在 DLL 搜索路径（否则
+# "cannot open shared object file: nethost.dll" 起不来），运行 C# 脚本时还需
+# OrangeScriptSDK.dll + runtimeconfig。这些装在 SDK share/OrangeEditor/dotnet/（仅当引擎
+# WITH_DOTNET 才装）。helper 按"SDK 是否装了 nethost.dll"运行期分流：
+#   * 装了（dotnet-enabled SDK）→ 拷 nethost.dll 到 exe 旁 + SDK/runtimeconfig 到 exe/scripts/；
+#   * 没装（纯 C++ SDK）→ no-op，让消费者可无条件调用（纯 C++ 游戏零负担）。
+set(OrangeEditor_DOTNET_DIR
+    "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/OrangeEditor/dotnet")
+if (EXISTS "${OrangeEditor_DOTNET_DIR}/nethost.dll")
+    function(orange_editor_copy_dotnet_runtime target)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${OrangeEditor_DOTNET_DIR}/nethost.dll"
+                    "$<TARGET_FILE_DIR:${target}>"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "$<TARGET_FILE_DIR:${target}>/scripts"
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                    "${OrangeEditor_DOTNET_DIR}/scripts"
+                    "$<TARGET_FILE_DIR:${target}>/scripts"
+            COMMENT "OrangeEditor: 拷贝 C# 运行时（nethost + SDK/runtimeconfig）到 ${target} 输出目录"
+            VERBATIM)
+    endfunction()
+else ()
+    function(orange_editor_copy_dotnet_runtime target)
+        # 纯 C++ SDK：无 dotnet 运行时可拷，no-op。
+    endfunction()
+endif ()
+
 check_required_components(OrangeEditor)
