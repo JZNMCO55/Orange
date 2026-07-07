@@ -472,6 +472,18 @@ target_include_directories(editor_settings_test PRIVATE
 orange_engine_set_compiler_options(editor_settings_test)
 add_test(NAME editor_settings_test COMMAND editor_settings_test)
 
+# ProjectFile（tools/OrangeEditor）—— .orangeproject 工程清单 JSON 往返 + 可选字段
+# 缺省 + schema namespace 校验。helper 源不属引擎 lib，直接编进测试 exe + 加 include
+# path（同 editor_settings_test 模式）。仅依赖 Core::Serialization + glm，零 ImGui。
+add_executable(project_file_round_trip_test
+    project/ProjectFileRoundTripTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/project/ProjectFile.cpp")
+target_link_libraries(project_file_round_trip_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(project_file_round_trip_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(project_file_round_trip_test)
+add_test(NAME project_file_round_trip_test COMMAND project_file_round_trip_test)
+
 # EditorTextUtil（tools/OrangeEditor）—— header-only Util::ContainsCaseInsensitive
 # （Console + Asset 搜索共用谓词）。纯 std 头，仅需 include path（无 helper .cpp）。
 add_executable(editor_text_util_test editor/EditorTextUtilTest.cpp)

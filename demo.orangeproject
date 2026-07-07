@@ -1,0 +1,6 @@
+{
+  "schemaVersion": { "namespace": "orange/project", "major": 1, "minor": 0 },
+  "name": "Orange Engine Demo",
+  "assetRoots": ["."],
+  "startupScene": "assets/scenes/pbr_showcase.scene.json"
+}
