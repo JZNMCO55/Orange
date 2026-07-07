@@ -325,6 +325,24 @@ namespace Orange::Engine::Scene
         return SaveImpl(world, path, options, {});
     }
 
+    Result<std::string, ResultCode> SaveToString(World& world, const SaveOptions& options)
+    {
+        // 非 const 入口，与 Save(World&) 对称：ensureGuids 时先普遍补全 guid（A2 选项 B /
+        // ADR-018），让内存快照（PIE Play）与磁盘 Save 走同一份 guid 主键升级。补完再委托
+        // 只读核心——空 filter = 整 world，outString 非空 = 写内存不落盘。
+        if (options.ensureGuids)
+        {
+            EnsureEntityGuids(world);
+        }
+        std::string out;
+        auto        res = SaveImpl(world, {}, options, {}, &out);
+        if (res.IsErr())
+        {
+            return res.Error();
+        }
+        return out;
+    }
+
     Result<std::string, ResultCode> SaveSubtreeToString(const World&            world,
                                                         std::span<const Entity> roots,
                                                         const SaveOptions&      options)

@@ -119,12 +119,13 @@ struct EditorSceneContext
 
     // Play Mode 状态机：playState 是当前模式（Edit / Play / Paused），
     // pendingPlayOp 是用户菜单点击的待执行迁移；帧末
-    // EditorRenderLayer::ApplyPendingPlayOp 统一处理。playSnapshotPath
-    // 保存 Edit→Play 时的 World 序列化文件路径，Stop 时从该路径反序列化
-    // 恢复（用 temp dir 下唯一文件名，editor 退出时清理）。
+    // EditorRenderLayer::ApplyPendingPlayOp 统一处理。playSnapshotBlob
+    // 保存 Edit→Play 时的 World 序列化 JSON 文本（内存快照，M9 PIE——不再
+    // 落 temp 文件；Stop 时经 LoadFromString 从该串还原）。非空即表示"当前
+    // 处于 Play 且持有可还原快照"；Stop 还原后清空。
     PlayState   playState     = PlayState::Edit;
     PlayOp      pendingPlayOp = PlayOp::None;
-    std::string playSnapshotPath;
+    std::string playSnapshotBlob;
 
     // M9.2 帧步进：Paused 态下的单步请求。ToolbarPanel 的 Step 按钮 / MCP step
     // tool 置 true，帧末 EditorRenderLayer 消费——推进一个固定步长的 sim 后清零。

@@ -189,6 +189,21 @@ namespace Orange::Engine::Scene
                                                     std::string_view   path,
                                                     const SaveOptions& options = {});
 
+    // 把整个 `world`（全部活实体 + 组件）序列化为 JSON 文本（不落盘）。
+    //
+    // 与 Save(World&, path) 是"落盘 vs 内存"的对偶：非 const 入口，故 options.ensureGuids
+    // 为 true（默认）时同样先 EnsureEntityGuids 普遍补全 guid，再走只读核心——保证内存
+    // 快照与磁盘快照走**同一份 guid 主键升级路径**（Hierarchy 的 guid 主键有可写的被引
+    // 用 guid）。编辑器 Play-in-Editor 用它把 Edit→Play 的 World 快照进内存串，Stop 时
+    // 经 LoadFromString 还原，免去 temp 文件 IO（M9 PIE 内存快照）。
+    //
+    // 与 SaveSubtreeToString 的区别：后者取 const World + 显式 roots 只写子树、不补 guid
+    // （子树 clone 走 ReassignEntityGuids 换新身份）；本函数写整 world 且补 guid（跨 Play
+    // 快照/还原身份不漂移，锁在 PlaySnapshotGuidTest）。失败语义同 Save。
+    ORANGE_ENGINE_API Result<std::string, ResultCode> SaveToString(
+        World&             world,
+        const SaveOptions& options = {});
+
     // 从 `path` 读取 scene 数据，把所有实体 + 组件追加到 `world` 上。
     // 不清空 world——调用方若需要"完全替换当前关卡"，自己先构造一个新
     // World 再把读取结果合进去。

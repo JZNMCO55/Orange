@@ -1814,35 +1814,28 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             }
             mHost.animPreview.Clear();
 
-            // S2: World 快照落盘 —— Stop 时从此路径还原，保证 Play 期
+            // S2: World 内存快照 —— Stop 时从此 JSON 串还原，保证 Play 期
             //     对 ECS 的所有修改（物理驱动 Transform / 粒子spawn）都
             //     能被丢弃，回到 Play 前的编辑状态。
+            //     M9 PIE：快照进内存（SaveToString）而非 temp 文件——省一次
+            //     Save+Load 的磁盘 IO；多实例天然隔离（各自 host 私有串，不再
+            //     靠 pid 文件名防撞）。SaveToString 是非 const 入口，同样补全
+            //     guid（与旧磁盘 Save 路径身份行为一致，锁在 PlaySnapshotGuidTest）。
             {
-                namespace fs = std::filesystem;
-                // 文件名带进程 id —— 兑现 EditorSceneContext.h "temp dir 下唯一
-                // 文件名" 的承诺：多编辑器实例同时 Play 时各自快照不互相覆盖
-                // （否则一个实例 Stop 会从另一个的快照还原错 World）。Stop 时
-                // remove + editor 退出清理；崩溃残留按 pid 隔离，不污染新实例。
-                mHost.scene.playSnapshotPath =
-                    (fs::temp_directory_path() /
-                     ("OrangeEditor_play_snapshot_" + std::to_string(GetCurrentProcessId()) + ".scene.json"))
-                        .string();
-
                 Orange::Engine::Scene::SaveOptions saveOpts;
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
                 saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
                 saveOpts.extraSerializers       = mHost.extraSerializers;
-                const auto rc                   = Orange::Engine::Scene::Save(
-                    *mHost.scene.pWorld, mHost.scene.playSnapshotPath, saveOpts);
+                auto rc = Orange::Engine::Scene::SaveToString(*mHost.scene.pWorld, saveOpts);
                 if (rc.IsErr())
                 {
-                    ORANGE_LOG_ERROR("[OrangeEditor] Play 快照落盘失败: {} (code={}) —— "
+                    ORANGE_LOG_ERROR("[OrangeEditor] Play 内存快照失败 (code={}) —— "
                                      "取消进入 Play",
-                                     mHost.scene.playSnapshotPath,
                                      static_cast<unsigned>(rc.Error()));
-                    mHost.scene.playSnapshotPath.clear();
+                    mHost.scene.playSnapshotBlob.clear();
                     break; // 快照失败则保持 Edit，不进 Play
                 }
+                mHost.scene.playSnapshotBlob = std::move(rc.Value());
             }
 
             // S3: PhysicsWorld 接入 —— 遍历所有同时挂 RigidBody +
@@ -2029,7 +2022,7 @@ void EditorRenderLayer::ApplyPendingPlayOp()
             //     Inspector Animator 段会看到空 backend 名
             //   - 不传 physicsWorld：Edit 态不需要运行时 backend，handle 留
             //     Invalid 是正确的 Edit 态初值
-            if (!mHost.scene.playSnapshotPath.empty())
+            if (!mHost.scene.playSnapshotBlob.empty())
             {
                 auto pNew = std::make_unique<Orange::Engine::World>();
 
@@ -2042,8 +2035,9 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                     [this](const std::string& id)
                 { return ::EnsureMaterialInstance(mHost, id); };
                 loadOpts.extraSerializers = mHost.extraSerializers;
-                const auto rc             = Orange::Engine::Scene::Load(
-                    mHost.scene.playSnapshotPath, *pNew, loadOpts);
+                // M9 PIE：从内存快照串还原（LoadFromString）而非 temp 文件。
+                const auto rc = Orange::Engine::Scene::LoadFromString(
+                    mHost.scene.playSnapshotBlob, *pNew, loadOpts);
                 if (rc.IsErr())
                 {
                     ORANGE_LOG_ERROR("[OrangeEditor] Play 快照还原失败 (code={})，"
@@ -2054,8 +2048,7 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 {
                     mHost.scene.pWorld = std::move(pNew);
                 }
-                std::filesystem::remove(mHost.scene.playSnapshotPath);
-                mHost.scene.playSnapshotPath.clear();
+                mHost.scene.playSnapshotBlob.clear();
             }
 
             mHost.scene.playState = PlayState::Edit;

@@ -2,22 +2,22 @@
 // docs/a2-entity-guid-stable-identity-design.md §3 / ADR-018）。
 //
 // 锁住的不变量：编辑器 EnterPlay 进 Play 时把 editing world 经
-// Scene::Save(World&, path)（非 const 入口，SaveOptions.ensureGuids 默认 true）
-// 落盘成快照，Stop 时经 Scene::Load(path, newWorld) 还原成一个**全新 World 实例**
-// 替换 editing world。本测试用磁盘 temp 文件精确复刻 EditorRenderLayer
-// EnterPlay / Stop 的那条 Save→Load 路径，断言：
+// Scene::SaveToString(World&)（非 const 入口，SaveOptions.ensureGuids 默认 true）
+// 序列化成内存快照串，Stop 时经 Scene::LoadFromString(blob, newWorld) 还原成一个
+// **全新 World 实例** 替换 editing world。本测试用内存快照串精确复刻 EditorRenderLayer
+// EnterPlay / Stop 的那条 SaveToString→LoadFromString 路径（M9 PIE 内存快照），断言：
 //
-//   * 快照落盘前 editing world 实体可能尚无 GuidComponent（用户从零搭的实体），
-//     Save(World&) 非 const 入口会 EnsureEntityGuids 普遍补全；
+//   * 快照序列化前 editing world 实体可能尚无 GuidComponent（用户从零搭的实体），
+//     SaveToString(World&) 非 const 入口会 EnsureEntityGuids 普遍补全；
 //   * Stop 还原出的 runtime/edit world 里，用 editing world 各实体的 guid 经
 //     Scene::FindEntityByGuid 都能命中——即同一逻辑实体跨 Play snapshot/restore
 //     身份不漂移（不像 clone 路径那样走 ReassignEntityGuids 换新身份）；
 //   * 命中实体的 Transform / Name / 父子层级与原实体一致；
 //   * 反复进出 Play（含 Play 期修改 ECS 后被快照还原丢弃）guid 仍稳定。
 //
-// 纯序列化 + World，无 Vulkan / GUI；走真实磁盘 Save/Load 路径（与 EnterPlay 字面
-// 一致），不引入编辑器 TU 依赖。EnterPlay 的物理 / 音频 / VFX 接入是运行时 backend，
-// 与 guid 身份正交，故不在本测试范围。
+// 纯序列化 + World，无 Vulkan / GUI；走真实内存 SaveToString/LoadFromString 路径
+// （与 EnterPlay 字面一致），不引入编辑器 TU 依赖。EnterPlay 的物理 / 音频 / VFX 接入
+// 是运行时 backend，与 guid 身份正交，故不在本测试范围。
 
 #include <orange/engine/core/Guid.h>
 #include <orange/engine/scene/Entity.h>
@@ -31,7 +31,6 @@
 
 #include <cassert>
 #include <cstdio>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,31 +48,23 @@ namespace Scene = Orange::Engine::Scene;
 namespace
 {
 
-    // 快照临时路径——对齐 EditorRenderLayer EnterPlay 的"temp dir 下唯一文件名"
-    // 约定。stem 用 suffix 区分两个用例，避免互相覆盖；各用例用完即 remove。
-    std::string MakeSnapshotPath(const char* suffix)
-    {
-        namespace fs = std::filesystem;
-        return (fs::temp_directory_path() /
-                (std::string("OrangeEngine_play_snapshot_guid_test_") + suffix + ".scene.json"))
-            .string();
-    }
-
-    // 模拟 EnterPlay 的"World 快照落盘"：非 const Save(World&) 入口 + 默认
-    // SaveOptions（ensureGuids=true），会就地给 editing world 普遍补全 guid。
-    void TakePlaySnapshot(World& editingWorld, const std::string& path)
+    // 模拟 EnterPlay 的"World 内存快照"：非 const SaveToString(World&) 入口 + 默认
+    // SaveOptions（ensureGuids=true），会就地给 editing world 普遍补全 guid，返回
+    // 快照 JSON 串（编辑器存进 EditorSceneContext.playSnapshotBlob）。
+    std::string TakePlaySnapshot(World& editingWorld)
     {
         Orange::Engine::Scene::SaveOptions saveOpts; // ensureGuids 默认 true
-        const auto                         rc = Scene::Save(editingWorld, path, saveOpts);
+        auto                               rc = Scene::SaveToString(editingWorld, saveOpts);
         assert(rc.IsOk());
+        return std::move(rc.Value());
     }
 
-    // 模拟 Stop 的"从快照还原成全新 World"：Load 到一个新建 World 实例（编辑器
-    // 用它替换 mHost.scene.pWorld）。返回还原后的 World。
-    std::unique_ptr<World> RestoreFromSnapshot(const std::string& path)
+    // 模拟 Stop 的"从快照还原成全新 World"：LoadFromString 到一个新建 World 实例
+    // （编辑器用它替换 mHost.scene.pWorld）。返回还原后的 World。
+    std::unique_ptr<World> RestoreFromSnapshot(const std::string& blob)
     {
         auto       pNew = std::make_unique<World>();
-        const auto rc   = Scene::Load(path, *pNew);
+        const auto rc   = Scene::LoadFromString(blob, *pNew);
         assert(rc.IsOk());
         return pNew;
     }
@@ -121,9 +112,8 @@ namespace
             editing.AddComponent<HierarchyComponent>(childB, bh);
         }
 
-        // 进 Play：快照落盘（非 const Save 入口补 guid）。
-        const std::string snapPath = MakeSnapshotPath("roundtrip");
-        TakePlaySnapshot(editing, snapPath);
+        // 进 Play：内存快照（非 const SaveToString 入口补 guid）。
+        const std::string snap = TakePlaySnapshot(editing);
 
         // editing world 现在每个实体都被补了 guid（Save 路径 EnsureEntityGuids 的效果）。
         const auto* gp = editing.GetComponent<GuidComponent>(parent);
@@ -136,7 +126,7 @@ namespace
         const Guid guidChildB = gb->guid;
 
         // Stop：从快照还原成全新 World（编辑器用它替换 editing world）。
-        std::unique_ptr<World> restored = RestoreFromSnapshot(snapPath);
+        std::unique_ptr<World> restored = RestoreFromSnapshot(snap);
 
         // 核心不变量：原 editing world 的 guid 在还原 world 里都能命中同一逻辑实体。
         const Entity rParent = Scene::FindEntityByGuid(*restored, guidParent);
@@ -177,7 +167,6 @@ namespace
             assert(hb->prevSibling == rChildA);
         }
 
-        std::filesystem::remove(snapPath);
         std::printf("  [ok] Play snapshot round-trip 保 guid 稳定 + Transform/Name/层级一致\n");
     }
 
@@ -194,15 +183,13 @@ namespace
                                   glm::quat{1.0f, 0.0f, 0.0f, 0.0f},
                                   glm::vec3{1.0f, 1.0f, 1.0f}});
 
-        const std::string snapPath = MakeSnapshotPath("repeat");
-
-        // 第 1 次进 Play：补 guid + 落盘。
-        TakePlaySnapshot(editing, snapPath);
-        const Guid guid0 = editing.GetComponent<GuidComponent>(e)->guid;
+        // 第 1 次进 Play：补 guid + 内存快照。
+        std::string snap = TakePlaySnapshot(editing);
+        const Guid  guid0 = editing.GetComponent<GuidComponent>(e)->guid;
         assert(guid0.IsValid());
 
         // 第 1 次 Stop：还原。命中同一逻辑实体。
-        std::unique_ptr<World> world1 = RestoreFromSnapshot(snapPath);
+        std::unique_ptr<World> world1 = RestoreFromSnapshot(snap);
         const Entity           e1     = Scene::FindEntityByGuid(*world1, guid0);
         assert(e1.IsValid());
         assert(world1->GetComponent<NameComponent>(e1)->name == "Solo");
@@ -214,19 +201,18 @@ namespace
 
         // 第 2 次进 Play：在 world1 上再快照。guid 幂等——已有 guid 不被 EnsureEntityGuids
         // 换新，所以快照里仍是 guid0。
-        TakePlaySnapshot(*world1, snapPath);
+        snap = TakePlaySnapshot(*world1);
         const Guid guid1 = world1->GetComponent<GuidComponent>(e1)->guid;
         assert(guid1 == guid0); // 跨多次 Play 不漂移
 
         // 第 2 次 Stop：还原。仍能用最初的 guid0 命中。
-        std::unique_ptr<World> world2 = RestoreFromSnapshot(snapPath);
+        std::unique_ptr<World> world2 = RestoreFromSnapshot(snap);
         const Entity           e2     = Scene::FindEntityByGuid(*world2, guid0);
         assert(e2.IsValid());
         assert(world2->GetComponent<NameComponent>(e2)->name == "Solo");
         // 第 2 次快照前改过的 Transform 被持久化进第 2 次快照，故还原可见。
         assert(world2->GetComponent<TransformComponent>(e2)->position == glm::vec3(42.0f, 0.0f, 0.0f));
 
-        std::filesystem::remove(snapPath);
         std::printf("  [ok] 反复进出 Play guid 不漂移（同一逻辑实体稳定可寻）\n");
     }
 
