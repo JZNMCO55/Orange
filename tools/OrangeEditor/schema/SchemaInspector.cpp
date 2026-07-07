@@ -25,8 +25,13 @@
 #include "AssetRefSideEffects.h" // PrepareAssetRefWrite / FinishAssetRefWrite（GUI 与 MCP 共用）
 #include "ComponentSchemaRegistry.h"
 
+#include <orange/engine/core/Guid.h>
+#include <orange/engine/core/Log.h>              // M9 carry-back：ORANGE_LOG_*
 #include <orange/engine/physics/ColliderDesc.h>
 #include <orange/engine/scene/Entity.h>
+#include <orange/engine/scene/EntityGuid.h>      // M9 carry-back：FindEntityByGuid
+#include <orange/engine/scene/GuidComponent.h>   // M9 carry-back：按 guid 匹配 live↔scratch
+#include <orange/engine/scene/SceneSerialization.h> // M9 carry-back：Load/SaveToString 快照
 #include <orange/engine/scene/World.h>
 
 #include <glm/vec2.hpp>
@@ -303,6 +308,114 @@ namespace Orange::Editor::Schema
             }
         }
 
+        // 普通数值字段编辑的统一提交：值已由 caller 写进 component（prop.set 已调）。
+        //   * liveTuning=false（Edit 常规路径）→ 开 multi-edit group + Push
+        //     SetFieldValueCommand + 多选广播（标准 undo 路径）。
+        //   * liveTuning=true（Play/Paused 期 playSafe 字段即时调参，M9 PIE）→ 到此为止：
+        //     不 Push / 不开 group / 不广播——Play 改动 Stop 时被快照还原丢弃，undo 无
+        //     意义（详见 PropertyAttributes::playSafe）。值已生效，下一帧被读到。
+        // 仅普通 get/set 数值字段（Float/Int/UInt/Bool/Vec2/3/4/Enum）走本路径；Quat /
+        // AssetRef / Polygon 等自带 case 内联提交，不复用本 helper。
+        template <typename T>
+        void CommitFieldEdit(EditorHost&               host,
+                             Orange::Engine::Entity    entity,
+                             const ComponentSchema&    schema,
+                             const PropertyDescriptor& prop,
+                             const std::string&        fieldKey,
+                             const T&                  oldVal,
+                             const T&                  newVal,
+                             bool                      liveTuning)
+        {
+            if (liveTuning)
+            {
+                return;
+            }
+            EnsureMultiEditGroup(host);
+            host.cmdStack.Push(std::make_unique<SetFieldValueCommand<T>>(
+                entity, fieldKey, oldVal, newVal,
+                MakeFieldApply<T>(&host, entity, &schema, prop.set)));
+            BroadcastFieldToSelection<T>(host, schema, prop, fieldKey, newVal);
+        }
+
+        // M9 carry-back：把 schema 内所有 PlaySafe 数值字段的值从 src component（live
+        // Play world）拷到 dst component（快照 scratch world 的同类型组件实例）。只处理
+        // live-tuning 支持的数值类型（与 DrawProperty CommitFieldEdit 覆盖面一致）——
+        // 其它类型的 PlaySafe（若有）跳过。返回是否拷了至少一个字段。
+        bool CopyPlaySafeFields(const ComponentSchema& schema, const void* src, void* dst)
+        {
+            bool any = false;
+            for (const auto& prop : schema.properties)
+            {
+                if (!prop.attribs.playSafe || prop.get == nullptr || prop.set == nullptr)
+                {
+                    continue;
+                }
+                switch (prop.type)
+                {
+                    case PropertyType::Float:
+                    {
+                        float v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    case PropertyType::Int:
+                    case PropertyType::Enum:
+                    {
+                        int v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    case PropertyType::UInt:
+                    {
+                        unsigned int v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    case PropertyType::Bool:
+                    {
+                        bool v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    case PropertyType::Vec2:
+                    {
+                        glm::vec2 v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    case PropertyType::Vec3:
+                    {
+                        glm::vec3 v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    case PropertyType::Vec4:
+                    {
+                        glm::vec4 v{};
+                        prop.get(src, &v);
+                        prop.set(dst, &v);
+                        any = true;
+                        break;
+                    }
+                    default:
+                        break; // 非数值类型的 PlaySafe 不 carry-back
+                }
+            }
+            return any;
+        }
+
         // RemoveComponent-undo 基建：移除组件前，按 schema 字段把当前值快照成一组
         // "restorer" 闭包（每个闭包持有该字段的值副本 + setter，给定新组件指针即把
         // 该字段写回）。undo 时先 schema.add 重建默认组件、再跑所有 restorer 还原
@@ -479,6 +592,14 @@ namespace Orange::Editor::Schema
                 return;
             }
 
+            // M9 PIE Play 期回写：Play/Paused 期默认整字段只读（fieldDisabled）；标了
+            // playSafe 的字段解禁且走 live-tuning（liveTuning）——编辑即时写 component、
+            // 绕过 cmdStack（见 CommitFieldEdit / PropertyAttributes::playSafe）。Edit 期
+            // 两者皆 false，行为与升级前完全一致。
+            const bool inPlay        = (host.scene.playState != PlayState::Edit);
+            const bool liveTuning    = inPlay && prop.attribs.playSafe;
+            const bool fieldDisabled = inPlay && !prop.attribs.playSafe;
+
             // C1.1 prefab override 蓝条：该字段相对模板被 override 时，在 label 行左缘
             // 画一道蓝色竖条（Unity prefab override 蓝条同款）。查询走 PrefabOverrideUI
             // 当帧缓存（BeginFrameForEntity 已在 DrawEntityViaSchemas 入口算过）——非
@@ -495,6 +616,11 @@ namespace Orange::Editor::Schema
             // 右键 popup（BeginPopupContextItem("##revert_field")）的 ID 也落在 prop
             // 名命名空间下，避免相邻 override 字段的 popup id 撞车（右键 A 弹出 B 菜单）。
             ImGui::PushID(prop.name != nullptr ? prop.name : "?");
+
+            // 非 playSafe 字段在 Play/Paused 期灰显只读（复刻升级前"整段 disable"的
+            // 视觉）；playSafe 字段 fieldDisabled=false 保持可编辑。BeginDisabled 覆盖
+            // label（含 override revert 右键）+ 控件，EndDisabled 在 switch 之后。
+            ImGui::BeginDisabled(fieldDisabled);
 
             // 左列 label + 右列 SetNextItemWidth(-FLT_MIN)；tooltip 挂在 label 上
             // 而非控件上（控件拖拽 / 编辑状态时 hover 会被打断；label hover 更稳定）。
@@ -532,11 +658,8 @@ namespace Orange::Editor::Schema
                     if (ImGui::DragFloat("##v", &newVal, prop.attribs.dragSpeed, minV, maxV))
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<float>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<float>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<float>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<float>(host, entity, schema, prop, fieldKey,
+                                               oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -550,11 +673,8 @@ namespace Orange::Editor::Schema
                     if (ImGui::DragInt("##v", &newVal, prop.attribs.dragSpeed, minV, maxV))
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<int>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<int>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<int>(host, entity, schema, prop, fieldKey,
+                                             oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -574,11 +694,8 @@ namespace Orange::Editor::Schema
                                           prop.attribs.dragSpeed, &minV, &maxV))
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<unsigned int>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<unsigned int>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<unsigned int>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<unsigned int>(host, entity, schema, prop, fieldKey,
+                                                      oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -590,11 +707,8 @@ namespace Orange::Editor::Schema
                     if (ImGui::Checkbox("##v", &newVal))
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<bool>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<bool>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<bool>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<bool>(host, entity, schema, prop, fieldKey,
+                                              oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -609,11 +723,8 @@ namespace Orange::Editor::Schema
                                           prop.attribs.dragSpeed, minV, maxV))
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec2>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<glm::vec2>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<glm::vec2>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<glm::vec2>(host, entity, schema, prop, fieldKey,
+                                                   oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -638,11 +749,8 @@ namespace Orange::Editor::Schema
                     if (changed)
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec3>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<glm::vec3>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<glm::vec3>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<glm::vec3>(host, entity, schema, prop, fieldKey,
+                                                   oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -666,11 +774,8 @@ namespace Orange::Editor::Schema
                     if (changed)
                     {
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<glm::vec4>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<glm::vec4>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<glm::vec4>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<glm::vec4>(host, entity, schema, prop, fieldKey,
+                                                   oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -777,11 +882,8 @@ namespace Orange::Editor::Schema
                     {
                         newVal = displayIdx;
                         prop.set(component, &newVal);
-                        EnsureMultiEditGroup(host);
-                        host.cmdStack.Push(std::make_unique<SetFieldValueCommand<int>>(
-                            entity, fieldKey, oldVal, newVal,
-                            MakeFieldApply<int>(&host, entity, &schema, prop.set)));
-                        BroadcastFieldToSelection<int>(host, schema, prop, fieldKey, newVal);
+                        CommitFieldEdit<int>(host, entity, schema, prop, fieldKey,
+                                             oldVal, newVal, liveTuning);
                     }
                     break;
                 }
@@ -1386,6 +1488,8 @@ namespace Orange::Editor::Schema
                 }
             }
 
+            ImGui::EndDisabled(); // 配对 fieldDisabled 的 BeginDisabled（PushID 之后）
+
             // multi-edit 关组：见 CloseMultiEditGroupIfDone 注释——本文件开的 group 在
             // 拖动 / 编辑结束（全局无 active item）时收束。放在 switch 之后、PopID 之前，
             // 此刻字段控件已绘制完（DragFloatN 已处理本帧 mouse-release、ActiveId 归 0）。
@@ -1407,6 +1511,100 @@ namespace Orange::Editor::Schema
     CaptureComponentValues(EditorHost& host, const ComponentSchema& schema, const void* component)
     {
         return CaptureComponentState(host, schema, component);
+    }
+
+    void CarryBackPlaySafeValues(EditorHost& host)
+    {
+        namespace Scene = Orange::Engine::Scene;
+        using Orange::Engine::Entity;
+        using Orange::Engine::World;
+
+        if (host.scene.playState == PlayState::Edit)
+        {
+            return; // 仅 Play/Paused 有意义（Edit 期直接改字段即持久）
+        }
+        if (host.scene.playSnapshotBlob.empty())
+        {
+            return; // 无快照可回写
+        }
+        auto* pLive = host.scene.pWorld.get();
+        if (pLive == nullptr)
+        {
+            return;
+        }
+
+        // 1) 把 Play 快照 blob 还原成 scratch world（与 Stop 还原同款 LoadOptions，
+        //    保证 mesh/material/animator round-trip 无损——carry-back 只覆盖 PlaySafe
+        //    字段，其余必须原样保留）。
+        World             scratch;
+        Scene::LoadOptions lo;
+        lo.assetRegistry          = host.assets.pAssets.get();
+        lo.animatorRegistry       = host.assets.pAnimators.get();
+        lo.namedMaterialInstances = &host.assets.namedMaterialInstances;
+        lo.materialResolver =
+            [&host](const std::string& id)
+        { return ::EnsureMaterialInstance(host, id); };
+        lo.extraSerializers = host.extraSerializers;
+        if (Scene::LoadFromString(host.scene.playSnapshotBlob, scratch, lo).IsErr())
+        {
+            ORANGE_LOG_ERROR("[OrangeEditor] Copy tuned values 失败：快照 blob 无法还原");
+            return;
+        }
+
+        // 2) 对每个带 guid 的 live 实体，按 guid 找 scratch 对应实体，把每个 schema
+        //    的 PlaySafe 数值字段从 live 拷进 scratch（simulation 不写 PlaySafe 字段，
+        //    故 live 值 == 用户在 Play 期调好的值）。
+        auto&     reg     = ComponentSchemaRegistry::Instance();
+        auto&     liveReg = pLive->Registry();
+        int       patched = 0;
+        for (auto enttE : liveReg.view<Scene::GuidComponent>())
+        {
+            const Orange::Engine::Core::Guid guid = liveReg.get<Scene::GuidComponent>(enttE).guid;
+            if (!guid.IsValid())
+            {
+                continue;
+            }
+            const Entity liveEnt    = World::FromEntt(enttE);
+            const Entity scratchEnt = Scene::FindEntityByGuid(scratch, guid);
+            if (!scratchEnt.IsValid())
+            {
+                continue;
+            }
+            for (const auto& schema : reg.All())
+            {
+                if (schema.has == nullptr || schema.get == nullptr)
+                {
+                    continue;
+                }
+                if (!schema.has(*pLive, liveEnt) || !schema.has(scratch, scratchEnt))
+                {
+                    continue;
+                }
+                void* srcC = schema.get(*pLive, liveEnt);
+                void* dstC = schema.get(scratch, scratchEnt);
+                if (srcC != nullptr && dstC != nullptr && CopyPlaySafeFields(schema, srcC, dstC))
+                {
+                    ++patched;
+                }
+            }
+        }
+
+        // 3) scratch 回存成新快照 blob（与 EnterPlay 同款 SaveOptions）。Stop 时从该
+        //    blob 还原 → PlaySafe 调参值带回 Edit 态。
+        Scene::SaveOptions so;
+        so.assetRegistry          = host.assets.pAssets.get();
+        so.namedMaterialInstances = &host.assets.namedMaterialInstances;
+        so.extraSerializers       = host.extraSerializers;
+        auto rc                   = Scene::SaveToString(scratch, so);
+        if (rc.IsErr())
+        {
+            ORANGE_LOG_ERROR("[OrangeEditor] Copy tuned values 失败：scratch 回存快照失败");
+            return;
+        }
+        host.scene.playSnapshotBlob = std::move(rc.Value());
+        ORANGE_LOG_INFO("[OrangeEditor] Copy tuned values：{} 个组件的 PlaySafe 字段已回写进 "
+                        "Play 快照（Stop 时带回 Edit）",
+                        patched);
     }
 
     void DrawComponentSchemaSection(EditorHost&            host,
@@ -1432,6 +1630,11 @@ namespace Orange::Editor::Schema
         {
             return;
         }
+
+        // M9 PIE：Play/Paused 期结构性组件操作（Remove / Paste Values）一律禁——
+        // 这些改动破坏 simulation 不变量且不会被 Play 快照还原正确对偶。Copy Values
+        // 是只读快照，Play 期无害保留。字段级 playSafe 调参在 DrawProperty 内单独放行。
+        const bool inPlay = (host.scene.playState != PlayState::Edit);
 
         bool requestRemove = false;
         bool requestCopy   = false;
@@ -1462,7 +1665,7 @@ namespace Orange::Editor::Schema
         // 值（new），命令 Execute 应用 new、Undo 应用 old。restorers 取 component
         // 指针，命令内经 schema.get + entity 重新解引（防 component 地址迁移 /
         // 切场景；与 MakeFieldApply 同款 defensive 路径）。
-        if (requestPaste && canPaste)
+        if (requestPaste && canPaste && !inPlay)
         {
             auto                         oldState = CaptureComponentState(host, schema, component);
             auto                         newState = host.componentClipboard.restorers; // 复制，剪贴板保留
@@ -1667,7 +1870,7 @@ namespace Orange::Editor::Schema
             }
         }
 
-        if (requestRemove && schema.remove != nullptr)
+        if (requestRemove && schema.remove != nullptr && !inPlay)
         {
             // Transform Euler 缓存与 selectedEntity 联动；任意 component 被
             // Remove 都顺手 invalidate（Quat case 下一帧从最新 quat 重算 Euler）。

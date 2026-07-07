@@ -56,9 +56,11 @@ namespace Orange::Editor::Schema
                         "场景中只有第一个 DirectionalLight 参与光照与阴影；其余 DirLight 会被忽略。")
                 .Field<&DL::color>("color", "Color")
                 .Color()
+                .PlaySafe() // 纯 render 输入，Play 期即时调光安全（M9 PIE）
                 .Field<&DL::intensity>("intensity", "Intensity")
                 .Range(0.0f, 1000.0f)
                 .DragSpeed(0.05f)
+                .PlaySafe()
                 .Field<&DL::castsShadow>("castsShadow", "Casts Shadow")
                 .Tooltip("本光源整体是否参与投影计算（全局开关）。\n"
                          "关闭后场景中不会有任何阴影，即便 Renderable 上勾了 Casts Shadow。\n"
@@ -78,12 +80,15 @@ namespace Orange::Editor::Schema
             ComponentSchemaBuilder<PL>("PointLight", "Point Light")
                 .Field<&PL::color>("color", "Color")
                 .Color()
+                .PlaySafe() // 纯 render 输入，Play 期即时调光安全（M9 PIE）
                 .Field<&PL::intensity>("intensity", "Intensity")
                 .Range(0.0f, 1000.0f)
                 .DragSpeed(0.05f)
+                .PlaySafe()
                 .Field<&PL::range>("range", "Range (m)")
                 .Range(0.01f, 1000.0f)
                 .DragSpeed(0.1f)
+                .PlaySafe()
                 .Tooltip("光照影响距离上限（米）。超出此距离贡献被 smoothstep 截断到 0。\n"
                          "Pipeline 用 range 做 culling + shader 内 distance fade。\n"
                          "典型室内点光 5–10m，路灯 30–100m。")
@@ -124,9 +129,11 @@ namespace Orange::Editor::Schema
                         "identity rotation 表示锥光向下（-Y），与 Directional / Point 同款约定。")
                 .Field<&SL::color>("color", "Color")
                 .Color()
+                .PlaySafe() // 纯 render 输入，Play 期即时调光安全（M9 PIE）
                 .Field<&SL::intensity>("intensity", "Intensity")
                 .Range(0.0f, 1000.0f)
                 .DragSpeed(0.05f)
+                .PlaySafe()
                 .Field<&SL::range>("range", "Range (m)")
                 .Range(0.01f, 1000.0f)
                 .DragSpeed(0.1f)

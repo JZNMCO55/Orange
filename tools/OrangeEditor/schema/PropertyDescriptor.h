@@ -165,6 +165,21 @@ namespace Orange::Editor::Schema
         // 显示"。两个都可同时用（少见但合法）。
         bool readOnly = false;
 
+        // Play 期即时可调（M9 PIE Play 期回写）。默认 false = 沿用"Play/Paused 期
+        // 整个 Inspector 只读"的保守闸。true → 该字段在 Play/Paused 期**仍可编辑**：
+        //   * 编辑即时写进 component（下一帧 module/render 读到，实时看效果）；
+        //   * **绕过 cmdStack**——不 Push SetFieldValueCommand / 不开 multi-edit group
+        //     / 不广播多选：Play 期改动语义上会被 Stop 的快照还原丢弃，undo 无意义；
+        //   * 若要把调好的值带回 Edit 态，用 Inspector Play 横幅的 "Copy tuned values"
+        //     按钮（把当前 playSafe 字段值回写进 Play 快照，Stop 时随还原带回）。
+        //
+        // 仅标给"纯数据、无结构副作用、simulation 不写"的调参旋钮（灯光强度 / 颜色 /
+        // 手感 tuning 组件等）。**禁止**标给 simulation 驱动字段（Transform.position 会
+        // 与物理打架）或结构字段（AssetRef / EntityRef——改它们有副作用）。当前只有
+        // 普通数值 case（Float/Int/UInt/Bool/Vec2/Vec3/Vec4/Enum）实现 live-tuning
+        // 绕栈；其他 PropertyType 上标 playSafe 仅解除 disable、写入仍走命令栈。
+        bool playSafe = false;
+
         // 条件可见谓词。nullptr = 总显示（默认）；非 nullptr → SchemaInspector
         // 在渲染本字段的"任何 UI（含 GroupSeparator）"之前调一次，返回 false
         // 时本字段**整体**跳过（不画 SeparatorText / 不画控件 / 不查 tooltip）。

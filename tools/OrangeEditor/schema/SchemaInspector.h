@@ -14,9 +14,10 @@
 //   * DrawEntityViaSchemas —— 遍历 registry 已注册所有 schema，对当前
 //     entity 已挂的每个 component 调 DrawComponentSchemaSection
 //
-// 整段 Inspector 编辑都在 host.scene.playState == Edit 时启用；Play /
-// Paused 期间不在此 disable，由 caller（InspectorPanel）外侧用
-// `ImGui::BeginDisabled(!canEdit)` 统一包裹。
+// Play/Paused 期编辑闸（M9 PIE 起）：不再由 caller 整段 BeginDisabled 一刀切，改为
+// DrawProperty 内**按字段**裁定——默认字段 Play 期灰显只读；标了 PlaySafe 的调参字
+// 段仍可编辑且走 live-tuning（即时写、绕 cmdStack）。结构性组件操作（Add/Remove/
+// Paste）仍 Edit-only（DrawComponentSchemaSection + InspectorPanel 内 gate）。
 
 #include "ComponentSchema.h"
 
@@ -48,6 +49,14 @@ namespace Orange::Editor::Schema
     // 遍历 registry 已注册的所有 schema，对 entity 已挂的 component 画段。
     // 注册顺序 = 显示顺序。未挂的 schema 直接跳过（不画空段）。
     void DrawEntityViaSchemas(EditorHost& host, Orange::Engine::Entity entity);
+
+    // M9 PIE "Copy tuned values → Edit"：把 live Play world 里所有实体的 PlaySafe
+    // 字段当前值，按 entity guid 回写进 Play 快照（host.scene.playSnapshotBlob）——
+    // Stop 还原时这些调参值随快照带回 Edit 态，其余（simulation 驱动的 Transform 等）
+    // 仍还原到 Play 前。做法：Load 快照 blob 到 scratch world → 按 guid 匹配把 live 的
+    // PlaySafe 数值字段拷进 scratch → SaveToString 回存 blob。仅 Play/Paused 且快照非
+    // 空时有效，否则 no-op。只处理 live-tuning 支持的数值字段（与 DrawProperty 一致）。
+    void CarryBackPlaySafeValues(EditorHost& host);
 
 } // namespace Orange::Editor::Schema
 

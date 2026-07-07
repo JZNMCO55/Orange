@@ -232,20 +232,34 @@ void EditorRenderLayer::DrawInspectorPanel()
         }
     }
 
-    // Play / Paused 期间所有 component 字段只读（灰显但可见）。
+    // Play / Paused 期编辑闸（M9 PIE Play 期回写）：不再整段 BeginDisabled 一刀切。
+    // 默认字段在 Play/Paused 期由 SchemaInspector 按字段灰显只读；标了 PlaySafe 的调参
+    // 字段例外——可即时编辑、Stop 时随快照丢弃。想把调好的值带回 Edit 态，点下方
+    // "Copy tuned values → Edit"（把当前所有实体的 PlaySafe 字段回写进 Play 快照）。
     const bool canEdit = (mHost.scene.playState == PlayState::Edit);
     if (!canEdit)
     {
-        ImGui::TextDisabled("[ Read-only in Play / Paused ]");
+        ImGui::TextDisabled("[ Play/Paused：仅 PlaySafe 调参字段可编辑，改动 Stop 时丢弃 ]");
+        ImGui::BeginDisabled(mHost.scene.playSnapshotBlob.empty());
+        if (ImGui::Button("Copy tuned values \xE2\x86\x92 Edit"))
+        {
+            Orange::Editor::Schema::CarryBackPlaySafeValues(mHost);
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("把当前所有实体的 PlaySafe 字段值回写进 Play 快照；\n"
+                              "Stop 还原时这些调参值随之带回 Edit 态（其余状态仍还原到 Play 前）。");
+        }
         ImGui::Separator();
     }
-    ImGui::BeginDisabled(!canEdit);
 
     // 所有 schema 段按注册顺序逐段渲染（schema.has 内部已 guard 未挂的 entity，
     // 不会画空段）。注册顺序见 schema/RegisterBuiltinSchemas.cpp，与 v0.1
     // 期 Inspector 内 component header 顺序一致：Name → Transform → Hierarchy
     // → DirectionalLight → Renderable → RigidBody → Collider → ParticleEmitter
-    // → Animator。
+    // → Animator。**不再**外侧 BeginDisabled——Play 期字段级 disable / PlaySafe
+    // 放行全部由 DrawProperty 内按字段裁定（M9 PIE）。
     Orange::Editor::Schema::DrawEntityViaSchemas(mHost, e);
 
     // ---- + Add Component -------------------------------------------------
@@ -261,6 +275,10 @@ void EditorRenderLayer::DrawInspectorPanel()
     // 跳过的 component（schema 未挂 Addable）：
     //   * Name / Hierarchy —— 由 entity 创建路径 / Entity Tree DnD 自动管理
     //   * Animator         —— IAnimator 抽象类，需要具体子类实例
+    // Add Component 是结构性操作，Play/Paused 期禁（改组件布局破坏 simulation
+    // 不变量且不被快照还原对偶）。字段级 PlaySafe 调参已在上方 DrawEntityViaSchemas
+    // 内单独放行，不受此闸影响。
+    ImGui::BeginDisabled(!canEdit);
     auto& schemaReg = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
     ImGui::Separator();
     const std::string addComponentLabel =

@@ -421,6 +421,16 @@ namespace Orange::Editor::Schema
             return *this;
         }
 
+        // 给最近一次 Field 标记为 Play 期即时可调（M9 PIE）。SchemaInspector 在
+        // Play/Paused 期解除该字段的只读闸并让编辑绕过 cmdStack 即时生效（详见
+        // PropertyAttributes::playSafe）。仅标纯数据调参旋钮，禁标 simulation /
+        // 结构字段。
+        ComponentSchemaBuilder& PlaySafe()
+        {
+            mSchema.properties.back().attribs.playSafe = true;
+            return *this;
+        }
+
         // 注册一个**纯 header 段**：只有 GroupSeparator 文本，无可编辑控件。
         // 等价于 v0.1 hardcode 内 `ImGui::Text("Shape: Polygon (...)")` 这类
         // "信息行"——schema 通用 PropertyDescriptor 必须有 type + get/set，所
