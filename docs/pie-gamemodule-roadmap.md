@@ -193,11 +193,11 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
   5. File→Open Project + 最近项目 + `--project` 参数直开。
 - **验收**：引擎 demo 包成 `.orangeproject` 后任意 cwd 打开零回归；OG 建 `slime.orangeproject`，SlimeEditor 经它解析资产、删 POST_BUILD 拷贝 workaround。
 
-### M7 · DLL 游戏模块宿主（OE+OG，**XL**，ADR-023 先行）
+### M7 · DLL 游戏模块宿主（OE+OG，**XL**，ADR-023 ✅ accepted 2026-07-07 · 引擎 SHARED 化）
 
 共享 `OrangeEditor.exe` 运行时 `LoadLibrary(game.dll)`——"一个编辑器切多项目" + 改 C++ 不重启编辑器。接口不变，纯换宿主实现。
 
-- **前置决策（ADR-023）**：引擎 SHARED 化（推荐：一次付清，`orange_engine.dll` 单份全局状态；成本 = MSVC 导出标注或 `WINDOWS_EXPORT_ALL_SYMBOLS`〔64K 符号上限风险〕）vs 双静态 + 严格边界纪律（改动小但纪律成本永久化：ENTT_API 共享 type context、跨界分配、RHI 对象传递逐点审）。**等 M4 用出真实痛点、有实据再拍。**
+- **前置决策（ADR-023）✅ accepted 2026-07-07 — 用户拍板「引擎 SHARED 化」**：`orange_engine.dll` 单份全局状态，editor.exe + game.dll 共享，收敛 ImGui `GImGui` / `Core::Log` / EnTT 进程级单例。配套：**OrangeRender 静态链入 `orange_engine.dll` 并参与其导出**（决策 2-A）；符号导出走已铺满的精确 `ORANGE_ENGINE_API` 标注（187/91，不用 `WINDOWS_EXPORT_ALL_SYMBOLS`，64K 已规避）；**dual-config 发布边界**——SHARED 只覆盖编辑器/DLL 宿主链路，发布 `Slime.exe` 仍 STATIC 单 exe（游戏+引擎+渲染器全静态链进单 exe，回单份引擎）。**关键修正**：探查（两 Explore agent 扫跨 DLL 边界全局态）推翻「双静态是 MSVC 雷区」——双静态 type 一致性可控（serializer 字符串 key + schema 注册方本地 `type_index` + 类型擦除 + MSVC `type_info` 按名字比较），OrangeRender 多后端也没引入新进程级全局（RHIBFactory 无状态、后端 per-instance）；选 SHARED 是「成本已前置 vs 永久锁死纪律」权衡、非可行性。**两条正交硬工作**（game.dll schema 注册通道 + 卸载前注销/registry 清空）无论静/动都要做、计入本交付。**三段跨仓分期**：本 session 定 ADR → 独立 OR session 调 OR 链接形态（可能连 c7 合 main）→ 独立 OE session SHARED 化 + DLL 宿主机制。全文见 [ADR-023](../../Orange-Wiki/case-studies/orange-engine/decisions/ADR-023-pie-dll-host-engine-shared.md)。
 - **交付**：ADR-023 + （若 SHARED）引擎 SHARED 化全量回归；DLL 宿主机制（shadow copy DLL+PDB 绕 MSVC 锁 → `extern "C"` 单入口 `OrangeCreateGameModule` → 注册期调用）；**session 级热重载**：Stop → 注销 pass/schema/serializer（注销机制是新工作，现状只有 `RemovePassesAt`）→ FreeLibrary → 重编 → LoadLibrary → 重注册 → EnterPlay，场景状态从 PIE 快照天然还原；DLL file watcher + 状态栏"模块已过期"提示；OG 的 `slime.orangeproject` 模块引用切 DLL，SlimeEditor target 降级备用。
 - **验收**：共享 OrangeEditor 开 slime 项目 → Play → Stop → 改一行手感代码重编 DLL → 编辑器不重启重载再 Play 生效。
 - **明确不做**：Play 中途活状态热替换（Live++ 级），性价比不成立。
@@ -238,7 +238,7 @@ ADR-021 + 本文档 + `engine-known-gaps.md` PIE GAP 拍板更新 + maturity-roa
 | M3 scope 膨胀（headless lib 化诱惑） | 红线写死：第一版 editor lib 允许依赖 Vulkan/ImGui |
 | 物理 step 所有权冲突（宿主 step vs 模块自管 accumulator） | M2 以 `WantsOwnPhysicsStep` 类声明位裁定（开放问题①） |
 | 编辑器视口键盘焦点/ImGui 捕获影响手感 | M2 输入路由设计点名处理；M4 真机 dogfood 验收 |
-| M7 引擎 SHARED 化（全 roadmap 最重单件） | 推迟到 M4 出实据后 ADR-023 拍板；64K 符号上限提前测 |
+| M7 引擎 SHARED 化（全 roadmap 最重单件） | ✅ ADR-023 已拍板引擎 SHARED（2026-07-07）；标注成本已前置（`ORANGE_ENGINE_API` 187/91 铺满、模板/POD 对 SHARED 有利）、64K 已规避；主成本转为跨仓协调 OrangeRender 链接形态（决策 2-A，独立 OR session） |
 | M3 期间主干功能开发被阻塞 | M1/M2 先行不动编辑器结构；lib 化按"先机械搬迁后参数化"两步走 |
 
 ## 5. 开放问题（各阶段裁定，不阻塞 M0）
