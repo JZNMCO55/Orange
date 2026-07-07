@@ -19,10 +19,12 @@
 #include "../render/ThumbnailService.h" // mHost.thumbnails->SetPipeline（完整类型）
 #include "../schema/ComponentSchema.h"
 #include "../schema/ComponentSchemaRegistry.h"
+#include "../theme/EditorTheme.h" // M9.3 Game 视口无相机提示走 Color::GetAlertWarn token
 
 #include <orange/engine/asset/AssetRegistry.h> // 统计 overlay 取 mesh 三角数
 #include <orange/engine/asset/MeshAsset.h>
 #include <orange/engine/render/BuiltinPostProcessChain.h>
+#include <orange/engine/render/Camera.h> // M9.3 Game 视口检测 World 是否有游戏相机
 #include <orange/engine/render/Pipeline.h>            // DebugViewMode
 #include <orange/engine/render/RenderableComponent.h> // 统计 overlay
 #include <orange/engine/render/ShadowConfig.h>
@@ -1048,4 +1050,184 @@ void EditorRenderLayer::RebindSceneDescriptorSetIfNeeded()
         static_cast<VkImageView>(rawView),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     mSceneDescSetDirty = false;
+}
+
+// ===========================================================================
+// M9.3 Game 面板（第二离屏 pipeline，从 World 的 Camera 组件出画）
+// ===========================================================================
+
+// 按 Game 面板 content region 尺寸初始化 / 重建第二个离屏 pipeline。与
+// EnsureScenePipeline 平行，差异：**不**挂 EditorGridAuxPassProvider（Game 视口
+// 无编辑器网格）、**不**注入 mHost.thumbnails（缩略图只走 scene pipeline）。
+// 返回 true 时 mpGamePipeline 可用。
+bool EditorRenderLayer::EnsureGamePipeline(std::uint32_t width, std::uint32_t height)
+{
+    if (mGamePipelineFailed)
+    {
+        return false;
+    }
+    if (width == 0 || height == 0)
+    {
+        return false;
+    }
+    if (mHost.assets.pAssets == nullptr)
+    {
+        return false;
+    }
+    if (mSceneSampler == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+
+    // lazy init
+    if (mpGamePipeline == nullptr)
+    {
+        mpGamePipeline = std::make_unique<Orange::Engine::Render::Pipeline>();
+
+        // 与 scene pipeline 同款中性化 override（暗面 ~50% baseColor + 中性灰
+        // clear），Initialize 之前一次到位（之后调要走 cmd 重填多一次 GPU stall）。
+        mpGamePipeline->SetDummyIblAmbient(0.5f, 0.5f, 0.5f);
+        mpGamePipeline->SetSceneClearColor(0.12f, 0.12f, 0.13f);
+
+        auto r = mpGamePipeline->InitializeOffscreen(
+            mRenderDevice, *mHost.assets.pAssets, width, height);
+        if (r.IsErr())
+        {
+            ORANGE_LOG_ERROR("[OrangeEditor] Pipeline::InitializeOffscreen 失败 (code={}) —— "
+                             "Game 视口退化为占位文案",
+                             static_cast<unsigned>(r.Error()));
+            mpGamePipeline.reset();
+            mGamePipelineFailed = true;
+            return false;
+        }
+
+        // 默认 PostProcessChain（HDR + Bloom + GodRays(disabled) + Tonemap + LUT），
+        // 与 scene 同款——漏接会让 emissive 硬 clamp + PBR 偏暗。
+        mpGamePostProcessChain = std::make_unique<
+            Orange::Engine::Render::PostProcessChain>(
+            Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
+        mpGamePipeline->SetPostProcessChain(mpGamePostProcessChain.get());
+
+        // 首帧 push 一次编辑器档 shadow 配置，让 initial shadow target 按分辨率建。
+        mpGamePipeline->SetShadowConfig(mShadowConfig);
+
+        // Game 视口刻意**不**挂 EditorGridAuxPassProvider（无编辑器网格），
+        // 也**不**注入 mHost.thumbnails（缩略图只用 scene pipeline）。
+
+        mGamePanelWidth  = width;
+        mGamePanelHeight = height;
+
+        // PIE 游戏模块 pass 注册（ADR-021 / M2.2）—— 与 scene pipeline 同款，
+        // 让 SlimeMetaballPass 等自定义 pass 在 Game 视口也渲染。lazy 块内只调
+        // 一次，后续 resize 走下面复用分支不重复注册（pass 生命周期随 Pipeline）。
+        mHost.gameModules.RegisterRenderPasses(*mpGamePipeline);
+    }
+    else if (width != mGamePanelWidth || height != mGamePanelHeight)
+    {
+        mpGamePipeline->ResizeOffscreen(width, height);
+        mGamePanelWidth  = width;
+        mGamePanelHeight = height;
+        // 旧 viewportColor view 在下一次 Pipeline.Render 内重建后失效，
+        // descriptor set 也要相应失效；标记下来，等本帧 Render 后重绑。
+        mGameDescSetDirty = true;
+    }
+
+    return true;
+}
+
+// 与 RebindSceneDescriptorSetIfNeeded 平行：在 EnsureGamePipeline + Pipeline.Render
+// 之后调，确保 mGameDescSet 指向最新 game viewportColor view，复用 mSceneSampler。
+void EditorRenderLayer::RebindGameDescriptorSetIfNeeded()
+{
+    if (mpGamePipeline == nullptr)
+    {
+        return;
+    }
+    if (mSceneSampler == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    const auto* tex = mpGamePipeline->GetOffscreenColor();
+    if (tex == nullptr)
+    {
+        return;
+    }
+
+    if (mGameDescSet != VK_NULL_HANDLE && !mGameDescSetDirty)
+    {
+        return; // 复用
+    }
+
+    // 旧 set 释放 —— Pipeline.RenderOffscreen 末尾 WaitIdle 已把上一帧 ImGui
+    // 采样旧 view 的 GPU 工作排空，free 安全。
+    if (mGameDescSet != VK_NULL_HANDLE)
+    {
+        ImGui_ImplVulkan_RemoveTexture(mGameDescSet);
+        mGameDescSet = VK_NULL_HANDLE;
+    }
+
+    auto* rawView = Orange::Renderer::Interop::GetVulkanImageView(*tex);
+    if (rawView == nullptr)
+    {
+        return;
+    }
+    mGameDescSet = ImGui_ImplVulkan_AddTexture(
+        mSceneSampler,
+        static_cast<VkImageView>(rawView),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    mGameDescSetDirty = false;
+}
+
+// Game 面板：从 World 的 Camera 组件（游戏相机）渲染同一 World。纯展示——
+// 无工具栏 / gizmo / picking / DnD。Scene 面板自由飞观察，本面板看真实游戏机位。
+void EditorRenderLayer::DrawGamePanel()
+{
+    ImGui::Begin("Game");
+
+    ImGui::TextDisabled("游戏相机视图（World 的 Camera 组件）");
+
+    // World 是否有游戏相机 —— 首个挂 Camera 组件的实体即主相机（见
+    // RenderScene::Collect 用 view<Camera>().front()）。无相机时 Pipeline
+    // HasCamera()==false → 把离屏 color 清黑，渲染仍安全，只是画面为空。
+    const bool hasGameCam =
+        mHost.scene.pWorld != nullptr &&
+        !mHost.scene.pWorld->Registry().view<Orange::Engine::Render::Camera>().empty();
+    if (!hasGameCam)
+    {
+        ImGui::TextColored(
+            Orange::Editor::Theme::Color::GetAlertWarn(),
+            "场景无 Camera 组件 —— Game 视图为空。给一个实体加 Camera 组件即为游戏相机。");
+    }
+
+    const ImVec2        region = ImGui::GetContentRegionAvail();
+    const std::uint32_t panelW =
+        (region.x > 1.0f) ? static_cast<std::uint32_t>(region.x) : 0u;
+    const std::uint32_t panelH =
+        (region.y > 1.0f) ? static_cast<std::uint32_t>(region.y) : 0u;
+
+    if (EnsureGamePipeline(panelW, panelH) && mHost.scene.pWorld != nullptr)
+    {
+        // 每帧 wire partition（同 scene，非拥有指针与 EditorSceneContext 同生命周期）。
+        mpGamePipeline->SetWorldPartition(&mHost.scene.partition);
+        // Game 视口不覆写相机 → 用 World 的 Camera 组件（游戏相机）。
+        mpGamePipeline->SetEditorCameraOverride(nullptr);
+        // sky / shadow 与 scene 保持一致；跳过 debugview / grid / debugdraw /
+        // colliders —— 那些是编辑器 overlay，Game 视口是游戏画面。
+        mpGamePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
+        mpGamePipeline->SetShadowConfig(mShadowConfig);
+
+        // Pipeline.Render 内部 WaitIdle —— 返回时 GPU 已空，RemoveTexture(旧) +
+        // AddTexture(新) 才安全。
+        mpGamePipeline->Render(*mHost.scene.pWorld);
+        RebindGameDescriptorSetIfNeeded();
+        if (mGameDescSet != VK_NULL_HANDLE)
+        {
+            ImGui::Image(reinterpret_cast<ImTextureID>(mGameDescSet),
+                         ImVec2(static_cast<float>(panelW),
+                                static_cast<float>(panelH)));
+        }
+    }
+
+    ImGui::End();
 }

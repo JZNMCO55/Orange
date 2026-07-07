@@ -164,6 +164,12 @@ EditorRenderLayer::~EditorRenderLayer()
     // 已 dead，descriptor set 同时 free，避免 use-after-free）。Pipeline
     // 仍可安全 Shutdown —— 它走 mRenderDevice.WaitIdle + RHI 资源释放。
     mpScenePipeline.reset();
+    // M9.3 Game pipeline 平行释放 —— 与 scene 同款：**不**在此调
+    // ImGui_ImplVulkan_RemoveTexture(mGameDescSet)，因为 ImGui_ImplVulkan_Shutdown
+    // 在 main() 已先于 layer dtor 执行，ImGui 内部 pool 已 dead、descriptor set
+    // 同时 free，此刻再 Remove 会 use-after-free。Pipeline.reset 走 WaitIdle + RHI
+    // 资源释放即安全（Game 视口无 aux pass provider，无需先摘注册）。
+    mpGamePipeline.reset();
     // Sampler 直接走 loader 销毁；main() 的关停序列保证 vkDevice 还活着。
     DestroyScenePanelSampler();
 }
@@ -519,6 +525,9 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // Animation（v0.5 c2 起 Animation 加入底部 tab 容器，与 Cocos Creator 3.6.0
     // 底部布局对齐；本期仅占位，状态机图编辑由 v0.7 实施）。
     DrawScenePanel();
+    // M9.3：Game 视口紧跟 Scene 之后画 —— 两者都是离屏 Render（内部各自
+    // WaitIdle），必须在下方"唯一安全帧外点"缩略图烘焙块之前完成。
+    DrawGamePanel();
     DrawEntityTreePanel();
     DrawInspectorPanel();
     DrawLayersPanel();
@@ -707,6 +716,10 @@ void EditorRenderLayer::BuildDefaultLayoutOnce(ImGuiID dockspaceId)
     ImGui::DockBuilderDockWindow("Console", bottom);
     ImGui::DockBuilderDockWindow("Animation", bottom);
     ImGui::DockBuilderDockWindow("Scene", center);
+    // M9.3：Game 视口（游戏相机）与 Scene 视口（编辑器自由飞相机）同节点 tab
+    // 共存（Unity Scene/Game 同款默认）；用户可拖出独立 dock 并排旁观。Scene
+    // 后 dock → 默认 active tab 是 Scene（编辑器主视图），Game 需切 tab 查看。
+    ImGui::DockBuilderDockWindow("Game", center);
 
     ImGui::DockBuilderFinish(dockspaceId);
 }

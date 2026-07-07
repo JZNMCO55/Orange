@@ -193,6 +193,12 @@ private:
     void DestroyScenePanelSampler();
     bool EnsureScenePipeline(std::uint32_t width, std::uint32_t height);
     void RebindSceneDescriptorSetIfNeeded();
+    // M9.3 Game 视口：与 Scene 面板并列的第二个离屏 pipeline，渲染同一 World
+    // 但**不覆写相机**——用 World 的 Camera 组件（游戏相机）。sampler 复用
+    // mSceneSampler（同款 linear-clamp），无独立 sampler。实现同在 ScenePanel.cpp。
+    void DrawGamePanel();
+    bool EnsureGamePipeline(std::uint32_t width, std::uint32_t height);
+    void RebindGameDescriptorSetIfNeeded();
 
     // ---- panels/EntityTreePanel.cpp ------------------------------------
     void DrawEntityTreePanel();
@@ -258,6 +264,21 @@ private:
     std::uint32_t                  mScenePanelHeight{0};
     // 一次性失败保险（Initialize 失败后不再每帧 retry / spam log）。
     bool mScenePipelineFailed{false};
+
+    // ---- M9.3 Game 面板 off-screen 渲染状态（与上面 Scene 面板平行）--------
+    // 第二个离屏 pipeline，渲染同一 World 但**不**调 SetEditorCameraOverride——
+    // 用 World 的 Camera 组件（游戏相机）出画，让 Scene 自由飞观察、Game 看真实
+    // 游戏机位。刻意不带 EditorGridAuxPassProvider（Game 视口无编辑器网格）、不
+    // 注入 thumbnails（缩略图只走 scene pipeline）。sampler 复用 mSceneSampler。
+    // 生命周期与 mpScenePipeline 对齐（同 layer 析构）。
+    std::unique_ptr<Orange::Engine::Render::Pipeline>         mpGamePipeline;
+    std::unique_ptr<Orange::Engine::Render::PostProcessChain> mpGamePostProcessChain;
+    VkDescriptorSet                                           mGameDescSet{VK_NULL_HANDLE};
+    bool                                                      mGameDescSetDirty{false};
+    std::uint32_t                                             mGamePanelWidth{0};
+    std::uint32_t                                             mGamePanelHeight{0};
+    bool                                                      mGamePipelineFailed{false};
+
     // 单调递增的编辑器运行时间（秒），每帧累加 deltaSeconds，无论 Play/Edit
     // 状态均推进——供 dissolve 等时间驱动 shader 在 Edit 模式下也能预览动画。
     float mEditorTime{0.0f};
