@@ -160,6 +160,12 @@ struct EditorHost
     // 指针 + string_view，自身无资源所有权，拷贝语义安全。
     std::vector<Orange::Engine::Scene::ComponentSerializerEntry> extraSerializers;
 
+    // M7 热重载：extraSerializers 里内置（非 DLL 模块）条目的数量——装配时在
+    // gameModules.CollectSerializers merge **之前**记录。DLL 热重载后 module
+    // serializer 的函数指针指向已卸载的旧 dll，须 resize 回本值 + 重新 append
+    // CollectSerializers（不假设内置条目在 vector 里的具体布局）。
+    std::size_t builtinSerializerCount{0};
+
     // PIE 双语言玩法宿主（ADR-021 / M2）—— 编辑器就是「宿主」，持有一组
     // IGameModule 并挂进 Play 状态机（ApplyPendingPlayOp）。原版 OrangeEditor
     // 恒空（无注册模块，护栏令所有扇出 no-op、零行为变化）；per-game editor

@@ -52,14 +52,20 @@ namespace Orange::Engine::Game
         // 原始 dll 路径（热重载时宿主重新 Load 用）。
         const std::filesystem::path& SourcePath() const noexcept { return mSourcePath; }
 
+        // 原 dll 自加载以来是否被重编（last_write_time 变新）。编辑器 file watcher
+        // 轮询它 → 状态栏提示"模块已过期"+ 一键热重载。源文件此刻读不到（正被
+        // 重编覆盖等）返 false，避免误报。
+        bool IsSourceStale() const;
+
     private:
         GameModuleLibrary() = default;
 
-        void*                     mHModule{nullptr}; // HMODULE，void* 保持公共头无 windows.h
-        IGameModule*              mpModule{nullptr};
-        OrangeDestroyGameModuleFn mpDestroy{nullptr};
-        std::filesystem::path     mSourcePath; // 原 dll
-        std::filesystem::path     mShadowPath; // 临时副本（析构删）
+        void*                           mHModule{nullptr}; // HMODULE，void* 保持公共头无 windows.h
+        IGameModule*                    mpModule{nullptr};
+        OrangeDestroyGameModuleFn       mpDestroy{nullptr};
+        std::filesystem::path           mSourcePath;       // 原 dll
+        std::filesystem::path           mShadowPath;       // 临时副本（析构删）
+        std::filesystem::file_time_type mSourceWriteTime{}; // Load 时原 dll 的 mtime（IsSourceStale 基准）
     };
 
 } // namespace Orange::Engine::Game

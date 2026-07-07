@@ -96,6 +96,19 @@ namespace Orange::Engine::Game
             return mOwnedLibraries.size();
         }
 
+        // 任一 DLL 库的原 dll 自加载以来被重编（file watcher）→ 编辑器提示"模块已过期"。
+        bool AnyLibraryStale() const
+        {
+            for (const auto& lib : mOwnedLibraries)
+            {
+                if (lib && lib->IsSourceStale())
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // 热重载一个 DLL 模块库（M7 session 级热重载，ADR-023）。libIndex = DLL
         // 库序（0-based，对应 AddModuleLibrary 顺序，非 mModules 混合序）。流程：
         //   卸载前摘该模块的 pass（否则 FreeLibrary 后 Pipeline 悬垂 pass → 崩）→

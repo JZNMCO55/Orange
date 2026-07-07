@@ -143,6 +143,12 @@ struct EditorSceneContext
     // [0.05, 4.0]。同样放 context 供 Toolbar 按钮 + MCP tool 共写。
     float playTimeScale = 1.0f;
 
+    // M7：DLL 游戏模块热重载请求。ToolbarPanel 的 Reload 按钮置 true，帧末
+    // EditorRenderLayer::ApplyPendingModuleReload 消费——重载所有 DLL 库 + re-merge
+    // serializer。与 pendingStep 同款帧末节奏；仅 Edit 态生效。放 context 供
+    // （未来）MCP 复用（handler 只拿得到 EditorHost&）。
+    bool pendingReloadModules = false;
+
     // v0.6 c2：未保存确认 popup 状态。pendingCloseAction != None 时下一
     // 帧 EditorRenderLayer 弹 modal popup；用户选 Save/Discard/Cancel 后
     // 决定怎么走 pendingCloseAction（执行 / 重置）。

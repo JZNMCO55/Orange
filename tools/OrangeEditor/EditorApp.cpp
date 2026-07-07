@@ -1034,6 +1034,8 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
     //     令含游戏组件的场景可 Save/Load round-trip。**必须在下方启动场景 Load
     //     之前**完成（extraSerializers 首次消费在 demo Load）。
     {
+        // 记录内置 serializer 数（module merge 前）——DLL 热重载 re-merge 的基准。
+        editorHost.builtinSerializerCount = editorHost.extraSerializers.size();
         auto moduleSerializers = editorHost.gameModules.CollectSerializers();
         editorHost.extraSerializers.insert(editorHost.extraSerializers.end(),
                                            moduleSerializers.begin(),

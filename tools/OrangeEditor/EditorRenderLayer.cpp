@@ -563,6 +563,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     // renamingEntity / euler 缓存清理也在此发生，下一帧才用新状态画。
     ApplyPendingSceneOp();
     ApplyPendingPlayOp();
+    ApplyPendingModuleReload();
     ApplyPendingImports();
     // MCP 命令帧末 drain（与上面三条 pending-op 同位）。无 --mcp-port 启动时
     // mHost.mcp 队列恒空，这里只做一次快速空检查，零额外开销。
@@ -2264,6 +2265,48 @@ void EditorRenderLayer::ApplyPendingPlayOp()
 // dialog 在独立 STA worker 线程跑，主线程 join 等结果——dialog 本身
 // 就是模态阻塞 UX。
 // ---------------------------------------------------------------------------
+void EditorRenderLayer::ApplyPendingModuleReload()
+{
+    if (!mHost.scene.pendingReloadModules)
+    {
+        return;
+    }
+    mHost.scene.pendingReloadModules = false;
+
+    // gate：仅 Edit 态 + viewport Pipeline 就绪。Play/Paused 中重载会砸运行态（原语
+    // 也有护栏）；Pipeline 未创建时 pass 尚未注册，无从摘/插。
+    if (mHost.scene.playState != PlayState::Edit || mpScenePipeline == nullptr)
+    {
+        return;
+    }
+
+    // 逐库热重载：原语摘 pass → 卸载旧 dll → 重 Load 新 shadow → 重注册 pass。
+    const std::size_t n  = mHost.gameModules.LibraryCount();
+    std::size_t       ok = 0;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        if (mHost.gameModules.ReloadLibrary(i, *mpScenePipeline) != nullptr)
+        {
+            ++ok;
+        }
+        else
+        {
+            ORANGE_LOG_ERROR("[OrangeEditor] DLL 游戏模块热重载失败（库 {}）—— 模块已失效", i);
+        }
+    }
+
+    // re-merge serializer：module serializer 的函数指针指向刚卸载的旧 dll，已失效。
+    // resize 回内置数（装配时记录）+ 重新 append 新库的 CollectSerializers。
+    if (mHost.builtinSerializerCount <= mHost.extraSerializers.size())
+    {
+        mHost.extraSerializers.resize(mHost.builtinSerializerCount);
+    }
+    auto fresh = mHost.gameModules.CollectSerializers();
+    mHost.extraSerializers.insert(mHost.extraSerializers.end(), fresh.begin(), fresh.end());
+
+    ORANGE_LOG_INFO("[OrangeEditor] DLL 游戏模块热重载完成：{}/{} 库成功", ok, n);
+}
+
 void EditorRenderLayer::ApplyPendingImports()
 {
     if (mPendingImportDialog)

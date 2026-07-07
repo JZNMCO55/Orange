@@ -105,11 +105,14 @@ void EditorRenderLayer::DrawMainToolbar()
                              framePadX;
         // M9.2 新增：Step 按钮（文字 label，避免给 codicon 加新 glyph）+ 时间缩放
         // combo；两者一并计入居中 group 宽度，避免与 Save / [State] 溢出重叠。
-        const char* stepLabel  = ">|";
-        const float btnStepW   = ImGui::CalcTextSize(stepLabel).x + framePadX;
-        const float timeComboW = ImGui::CalcTextSize("0.1x").x + framePadX + frameH;
-        const float playGroupW =
-            btnPlayW + btnPauseW + btnStopW + btnStepW + timeComboW + 4.0f * itemSpc;
+        const char* stepLabel   = ">|";
+        const float btnStepW    = ImGui::CalcTextSize(stepLabel).x + framePadX;
+        // M7：DLL 模块热重载按钮（文字 label，避免给 codicon 加新 glyph）。
+        const char* reloadLabel = "[R]";
+        const float btnReloadW  = ImGui::CalcTextSize(reloadLabel).x + framePadX;
+        const float timeComboW  = ImGui::CalcTextSize("0.1x").x + framePadX + frameH;
+        const float playGroupW  = btnPlayW + btnPauseW + btnStopW + btnStepW + btnReloadW +
+                                 timeComboW + 5.0f * itemSpc;
 
         // ---- Save 靠左 ---------------------------------------------
         // dirty 时 accent 橙高亮（§D5.1 落地：Save dirty 是"小面积高对
@@ -214,6 +217,35 @@ void EditorRenderLayer::DrawMainToolbar()
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip("Step (advance one fixed frame; Paused only)");
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+
+        // ---- Reload（M7 DLL 热重载）：Edit 态 + 有 DLL 模块才可点。原 dll 被重编时
+        // （AnyLibraryStale）按钮着 accent 橙提示"已过期，可重载"。点击置
+        // pendingReloadModules，帧末 ApplyPendingModuleReload 摘 pass→卸载→重 Load→重
+        // 注册 + re-merge serializer。纯静态模块（LibraryCount==0）时按钮置灰。
+        const bool hasDllModule = (mHost.gameModules.LibraryCount() > 0);
+        const bool canReload    = (ps == PlayState::Edit) && hasDllModule;
+        const bool moduleStale  = hasDllModule && mHost.gameModules.AnyLibraryStale();
+        ImGui::BeginDisabled(!canReload);
+        if (moduleStale)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                                  Orange::Editor::Theme::Color::GetAccentPrimary());
+        }
+        if (ImGui::Button(reloadLabel, btnSize))
+        {
+            mHost.scene.pendingReloadModules = true;
+        }
+        if (moduleStale)
+        {
+            ImGui::PopStyleColor();
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(moduleStale ? "Reload game module DLL (changed on disk)"
+                                          : "Reload game module DLL (Edit only)");
         }
         ImGui::EndDisabled();
         ImGui::SameLine();

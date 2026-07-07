@@ -8,6 +8,7 @@
 #include <orange/engine/render/IRenderPass.h>
 #include <orange/engine/render/Pipeline.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -134,7 +135,21 @@ int main(int argc, char** argv)
         host.ExitPlay(ctx);
     }
 
+    // 7) file watcher 原语：IsSourceStale 检测原 dll 重编（mtime 变新 → 编辑器提示过期）。
+    {
+        auto lib = GameModuleLibrary::Load(dll);
+        if (!lib) return Fail("stale 测试 Load 返回 null");
+        if (lib->IsSourceStale()) return Fail("刚加载不应 stale");
+
+        // 模拟重编：把原 dll 的 mtime 推到未来（不改内容，不影响并存加载）。
+        std::error_code ec;
+        const auto future = std::filesystem::last_write_time(dll, ec) + std::chrono::seconds(10);
+        std::filesystem::last_write_time(dll, future, ec);
+        if (ec) return Fail("设置 dll mtime 失败");
+        if (!lib->IsSourceStale()) return Fail("mtime 推新后应 stale");
+    }
+
     std::printf("[DllGameModuleTest] PASS: load/use/unload/reload/并存/错误路径/"
-                "宿主集成/热重载+pass注销 全过\n");
+                "宿主集成/热重载+pass注销/stale检测 全过\n");
     return EXIT_SUCCESS;
 }

@@ -114,6 +114,10 @@ private:
     // 帧步进/时间缩放状态放 context，tick 逻辑仍留 layer。
     void StepSimulationOnce(float simDt);
     void ApplyPendingPlayOp();
+
+    // M7：帧末消费 scene.pendingReloadModules —— 热重载所有 DLL 游戏模块库
+    // （摘 pass→卸载→重 Load→重注册）+ re-merge module serializer。仅 Edit 态。
+    void ApplyPendingModuleReload();
     // v1.1 T2：drain EditorHost.pendingImports —— File→Import dialog 路径
     // 由 mPendingImportDialog flag 在帧首先弹出文件对话框拿路径 push 进
     // 队列，然后与 OS drag-drop 同款逐条 ImportDispatcher::Dispatch。dialog

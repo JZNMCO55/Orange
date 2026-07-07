@@ -47,6 +47,10 @@ namespace Orange::Engine::Game
             return nullptr;
         }
 
+        // 原 dll 的 mtime —— IsSourceStale 的重编检测基准（shadow-copy 前记录，原文件不动）。
+        const auto srcWriteTime = std::filesystem::last_write_time(dllPath, ec);
+        ec.clear();
+
         // shadow-copy 原 dll（+ 存在的 pdb）到临时唯一路径，避免 LoadLibrary 锁住原
         // 文件、挡热重编。
         const auto shadow = MakeShadowPath(dllPath);
@@ -104,8 +108,9 @@ namespace Orange::Engine::Game
         lib->mHModule     = h;
         lib->mpModule     = mod;
         lib->mpDestroy    = destroy;
-        lib->mSourcePath  = dllPath;
-        lib->mShadowPath  = shadow;
+        lib->mSourcePath     = dllPath;
+        lib->mShadowPath     = shadow;
+        lib->mSourceWriteTime = srcWriteTime;
         ORANGE_LOG_INFO("[GameModuleLibrary] 已加载游戏模块 '{}'（{}）", mod->Name(), dllPath.string());
         return lib;
     }
@@ -147,5 +152,17 @@ namespace Orange::Engine::Game
     GameModuleLibrary::~GameModuleLibrary() = default;
 
 #endif
+
+    // 跨平台（纯 std::filesystem）：原 dll 的当前 mtime 是否晚于加载时基准。
+    bool GameModuleLibrary::IsSourceStale() const
+    {
+        std::error_code ec;
+        const auto      now = std::filesystem::last_write_time(mSourcePath, ec);
+        if (ec)
+        {
+            return false; // 源此刻读不到（正被重编覆盖 / 不存在）→ 不误报过期
+        }
+        return now > mSourceWriteTime;
+    }
 
 } // namespace Orange::Engine::Game
