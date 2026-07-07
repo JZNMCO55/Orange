@@ -22,6 +22,7 @@
 #include "import/GltfSceneImporter.h"
 #include "import/MetaSidecar.h"
 #include "plugin/MaterialAssetInspectorPlugin.h" // SaveEditingMaterialToDisk（关窗确认存材质）
+#include "project/ProjectConfig.h"               // M6：ApplyProjectFileToConfig（Open Project 解析清单）
 #include "render/ThumbnailService.h"             // 材质球缩略图（FlushPending + GetOrRequestThumbnail）
 #include "theme/EditorTheme.h"
 
@@ -944,6 +945,44 @@ void EditorRenderLayer::DrawMainMenuBar()
             }
         }
         ImGui::Separator();
+        // M6：mid-session 切项目。"Open Project..." 走文件对话框选 .orangeproject，
+        // 帧末 ApplyPendingSceneOp 的 OpenProject 分支 chdir + 加载启动场景。
+        // NOTE: Open Project 暂不走未保存确认 popup（避免新增 PendingCloseAction
+        // 分支）；后续可补。
+        if (ImGui::MenuItem("Open Project..."))
+        {
+            mPendingOpenProjectPath.clear(); // 走对话框（清 recent 残留）
+            mHost.scene.pendingSceneOp = SceneOp::OpenProject;
+        }
+        // Open Recent Project 子菜单：最近打开的 .orangeproject（front = 最近）。
+        // 镜像上面 "Open Recent"（场景）子菜单：basename 显示 + "##recentproj<idx>"
+        // 唯一 ID + hover tooltip 显全路径。空列表时整个子菜单 disabled。
+        {
+            const auto& recentProj = mHost.settings.recentProjects;
+            if (ImGui::BeginMenu("Open Recent Project", !recentProj.empty()))
+            {
+                int recentProjIdx = 0;
+                for (const std::string& pp : recentProj)
+                {
+                    const auto        slash = pp.find_last_of("/\\");
+                    const std::string shortName =
+                        (slash == std::string::npos) ? pp : pp.substr(slash + 1);
+                    const std::string label =
+                        shortName + "##recentproj" + std::to_string(recentProjIdx++);
+                    if (ImGui::MenuItem(label.c_str()))
+                    {
+                        mPendingOpenProjectPath    = pp;
+                        mHost.scene.pendingSceneOp = SceneOp::OpenProject;
+                    }
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::SetTooltip("%s", pp.c_str());
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        }
+        ImGui::Separator();
         // v1.1 T2：Import 外部 DCC 资产入口（与 Asset Browser OS drag-drop
         // 双路并存，参 ADR-008 议题 A3）。点击只标 flag，dialog 在 OnUpdate
         // 的 ApplyPendingImports 帧首弹出（与 ApplyPendingSceneOp 同款节奏，
@@ -1288,6 +1327,68 @@ void EditorRenderLayer::ResetEntityLocalState()
     mHost.animPreview.Clear();
 }
 
+// SceneOp::Open 与 SceneOp::OpenProject 共用的场景加载核心：把 path 的场景加载
+// 进一个全新 World 并接管（含 partition 重建 + layerId 扫描 + currentScenePath /
+// dirty / entity 局部态 / 命令栈复位）。失败（Scene::Load 报错）返回 false 且完全
+// 不动当前 World。最近列表登记（AddRecentScene / AddRecentProject）语义不同，留给
+// 各 caller 自行处理。
+bool EditorRenderLayer::LoadSceneIntoFreshWorld(const std::string& path)
+{
+    auto pNew = std::make_unique<Orange::Engine::World>();
+
+    Orange::Engine::Scene::LoadOptions openLoadOpts;
+    openLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
+    openLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
+    openLoadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
+    // 查表失败时按 .material 路径从磁盘 lazy-create 兜底，修复导入的
+    // material 在新 session 重开场景时 Inspector 显示 None。
+    openLoadOpts.materialResolver =
+        [this](const std::string& id)
+    { return ::EnsureMaterialInstance(mHost, id); };
+    openLoadOpts.extraSerializers = mHost.extraSerializers;
+    auto rc                       = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
+    if (rc.IsErr())
+    {
+        ORANGE_LOG_ERROR("[OrangeEditor] Scene::Load failed: {} (code={})",
+                         path,
+                         static_cast<unsigned>(rc.Error()));
+        return false; // 保留原 world
+    }
+    mHost.scene.pWorld = std::move(pNew);
+    // v0.6 c4：单文件 Load 不读 manifest（partition 元数据没被持久
+    // 化）；scene 里只有 LayerComponent.layerId。重建一个空 partition，
+    // 再扫一遍 world 把出现过的 layerId 自动 AddLayer（visible 默认
+    // true）—— 用户重启后仍能看到完整 layer 列表，已删 layer 上残
+    // 留的 entity 也能被 partition 兜底视为 default 之外的合法 layer。
+    mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
+    {
+        auto& reg = mHost.scene.pWorld->Registry();
+        using LC  = Orange::Engine::Scene::LayerComponent;
+        for (auto e : reg.view<LC>())
+        {
+            const auto& lc = reg.get<LC>(e);
+            if (lc.layerId.empty())
+            {
+                continue;
+            }
+            if (mHost.scene.partition.HasLayer(lc.layerId))
+            {
+                continue;
+            }
+            Orange::Engine::Scene::LayerInfo info;
+            info.id          = lc.layerId;
+            info.displayName = lc.layerId;
+            info.visible     = true;
+            mHost.scene.partition.AddLayer(std::move(info));
+        }
+    }
+    mHost.scene.currentScenePath = path;
+    mHost.scene.dirty            = false;
+    ResetEntityLocalState();
+    mHost.cmdStack.Clear();
+    return true;
+}
+
 // 帧末统一 apply 用户菜单点击的场景操作。dialog 阻塞期 ImGui 主循环
 // 等待，可接受 —— 编辑器无实时帧率要求。失败 / 取消都仅 stderr 记
 // 录，不弹 modal，与项目"日志走 stderr，等 Core::Log 接入再改"的过
@@ -1338,60 +1439,89 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             {
                 break;
             }
-            auto pNew = std::make_unique<Orange::Engine::World>();
-
-            Orange::Engine::Scene::LoadOptions openLoadOpts;
-            openLoadOpts.assetRegistry          = mHost.assets.pAssets.get();
-            openLoadOpts.animatorRegistry       = mHost.assets.pAnimators.get();
-            openLoadOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
-            // 查表失败时按 .material 路径从磁盘 lazy-create 兜底，修复导入的
-            // material 在新 session 重开场景时 Inspector 显示 None。
-            openLoadOpts.materialResolver =
-                [this](const std::string& id)
-            { return ::EnsureMaterialInstance(mHost, id); };
-            openLoadOpts.extraSerializers = mHost.extraSerializers;
-            auto rc                       = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
-            if (rc.IsErr())
+            if (!LoadSceneIntoFreshWorld(path))
             {
-                ORANGE_LOG_ERROR("[OrangeEditor] Scene::Load failed: {} (code={})",
-                                 path,
-                                 static_cast<unsigned>(rc.Error()));
-                break; // 保留原 world
+                break; // 保留原 world（错误已在 helper 内 log）
             }
-            mHost.scene.pWorld = std::move(pNew);
-            // v0.6 c4：单文件 Load 不读 manifest（partition 元数据没被持久
-            // 化）；scene 里只有 LayerComponent.layerId。重建一个空 partition，
-            // 再扫一遍 world 把出现过的 layerId 自动 AddLayer（visible 默认
-            // true）—— 用户重启后仍能看到完整 layer 列表，已删 layer 上残
-            // 留的 entity 也能被 partition 兜底视为 default 之外的合法 layer。
-            mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
+            mHost.settings.AddRecentScene(path); // File → Open Recent
+            ORANGE_LOG_INFO("[OrangeEditor] opened scene: {}", path);
+            break;
+        }
+        case SceneOp::OpenProject:
+        {
+            // M6：mid-session 切换整个项目。Open Recent Project 经
+            // mPendingOpenProjectPath 注入（跳过对话框）；"Open Project..." 走对话框。
+            std::string path;
+            if (!mPendingOpenProjectPath.empty())
             {
-                auto& reg = mHost.scene.pWorld->Registry();
-                using LC  = Orange::Engine::Scene::LayerComponent;
-                for (auto e : reg.view<LC>())
+                path = mPendingOpenProjectPath;
+                mPendingOpenProjectPath.clear();
+            }
+            else if (!ShowProjectFileDialog(hwnd, path))
+            {
+                break;
+            }
+
+            // 解析清单到一个全新的 EditorAppConfig（全空字段 → 取清单全部
+            // projectRoot / startupScene / windowTitle）。坏清单 → 保持当前项目不动。
+            Orange::Editor::EditorAppConfig cfg;
+            if (!Orange::Editor::Project::ApplyProjectFileToConfig(path, cfg))
+            {
+                ORANGE_LOG_ERROR("[OrangeEditor] Open Project 加载清单失败：{} —— 保持当前项目",
+                                 path);
+                break;
+            }
+
+            // chdir 到工程根，让工程内相对资产 / 场景路径解析（与启动期
+            // config.projectRoot chdir 同款语义）。失败仅警告不阻断——绝对
+            // startupScene 仍可能解析成功。
+            if (!cfg.projectRoot.empty())
+            {
+                std::error_code chdirEc;
+                std::filesystem::current_path(cfg.projectRoot, chdirEc);
+                if (chdirEc)
                 {
-                    const auto& lc = reg.get<LC>(e);
-                    if (lc.layerId.empty())
-                    {
-                        continue;
-                    }
-                    if (mHost.scene.partition.HasLayer(lc.layerId))
-                    {
-                        continue;
-                    }
-                    Orange::Engine::Scene::LayerInfo info;
-                    info.id          = lc.layerId;
-                    info.displayName = lc.layerId;
-                    info.visible     = true;
-                    mHost.scene.partition.AddLayer(std::move(info));
+                    ORANGE_LOG_WARN("[OrangeEditor] chdir 到 projectRoot 失败：{}（code={}）—— "
+                                    "相对路径资产可能解析失败",
+                                    cfg.projectRoot, chdirEc.value());
                 }
             }
-            mHost.scene.currentScenePath = path;
-            mHost.settings.AddRecentScene(path); // File → Open Recent
-            mHost.scene.dirty = false;
-            ResetEntityLocalState();
-            mHost.cmdStack.Clear();
-            ORANGE_LOG_INFO("[OrangeEditor] opened scene: {}", path);
+
+            // 有启动场景 → 加载到全新 World；无 / 加载失败 → 空世界（镜像
+            // SceneOp::New 的空世界重置）。
+            bool loaded = false;
+            if (!cfg.startupScene.empty())
+            {
+                loaded = LoadSceneIntoFreshWorld(cfg.startupScene);
+                if (!loaded)
+                {
+                    ORANGE_LOG_WARN("[OrangeEditor] 工程启动场景加载失败：{} —— 起空世界",
+                                    cfg.startupScene);
+                }
+            }
+            if (!loaded)
+            {
+                mHost.scene.pWorld    = std::make_unique<Orange::Engine::World>();
+                mHost.scene.partition = Orange::Engine::Scene::WorldPartition{};
+                mHost.scene.currentScenePath.clear();
+                mHost.scene.dirty = false;
+                ResetEntityLocalState();
+                mHost.cmdStack.Clear();
+            }
+
+            // 最近工程列表用绝对路径（稳定去重，同 recentScenes 归一）。
+            {
+                std::error_code  absEc;
+                const std::string absPath =
+                    std::filesystem::absolute(std::filesystem::path(path), absEc).string();
+                mHost.settings.AddRecentProject(absEc ? path : absPath);
+            }
+
+            // TODO 窗口标题 mid-session 更新：UpdateWindowTitle 每帧按当前场景名
+            // 重算标题（不含项目名），mid-session 无干净的项目名注入点；此处仅 log
+            // 新项目名，标题会随启动场景切换自动更新。
+            ORANGE_LOG_INFO("[OrangeEditor] 切换到项目 '{}'（projectRoot='{}' startupScene='{}'）",
+                            cfg.windowTitle, cfg.projectRoot, cfg.startupScene);
             break;
         }
         case SceneOp::Save:

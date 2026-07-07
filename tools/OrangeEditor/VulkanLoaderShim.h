@@ -66,4 +66,9 @@ bool ShowManifestFileDialog(bool isSave, void* parentHwnd, std::string& outPath)
 // 用户选中的源文件绝对路径，后续由 ImportDispatcher::Dispatch 路由。
 bool ShowImportFileDialog(void* parentHwnd, std::string& outPath);
 
+// M6：mid-session 切项目入口。过滤 `.orangeproject` 工程清单，模式固定 open
+//（非 save）。outPath 写用户选中的工程文件路径，随后由 ApplyProjectFileToConfig
+// 解析并把编辑器切到该项目（chdir + 加载启动场景）。
+bool ShowProjectFileDialog(void* parentHwnd, std::string& outPath);
+
 #endif // ORANGE_EDITOR_VULKAN_LOADER_SHIM_H

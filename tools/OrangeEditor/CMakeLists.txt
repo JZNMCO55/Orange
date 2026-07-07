@@ -135,6 +135,8 @@ add_library(orange_editor STATIC
     # .orangeproject 工程清单模型（PIE 工程模型）—— headless-clean（仅 Core::
     # Serialization + glm），也被单独编进 project_file_round_trip_test。
     project/ProjectFile.cpp
+    # .orangeproject → EditorAppConfig 路径解析桥（--project + per-game editor 共用）。
+    project/ProjectConfig.cpp
     panels/AnimationTimelinePanel.cpp
     panels/EntityTreePanel.cpp
     panels/InspectorPanel.cpp

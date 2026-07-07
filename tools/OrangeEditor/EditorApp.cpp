@@ -103,7 +103,8 @@
 #include "plugin/PointLightGizmoPlugin.h"
 #include "plugin/PostProcessVolumeGizmoPlugin.h"
 #include "plugin/SpotLightGizmoPlugin.h"
-#include "project/ProjectFile.h" // M6：.orangeproject 清单驱动 EditorAppConfig
+#include "project/ProjectConfig.h" // M6：.orangeproject → EditorAppConfig 路径解析桥
+#include "project/ProjectFile.h"   // M6：.orangeproject 清单驱动 EditorAppConfig
 #include "render/ThumbnailService.h"
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
@@ -280,56 +281,6 @@ namespace
         return {};
     }
 
-    // 把 `.orangeproject` 清单解析结果填进 EditorAppConfig（M6 核心）。只填空字段，
-    // 不覆盖调用方（per-game editor）已显式设的值——`--project` 是给原版 OrangeEditor
-    // 用的，per-game editor 走编译期 config 注入，二者不叠加。
-    //
-    // 路径解析（ADR-022）：主项目根 = 清单所在目录 / assetRoots[0]，规整成绝对路径
-    // 作 projectRoot（RunEditorApp 随后 chdir 过去，任意 cwd 启动都能解析相对资产）。
-    // startupScene 相对主根、chdir 后解析；windowTitle 取项目名（缺省用文件名 stem）。
-    // 失败（文件不存在 / 解析错 / schema 不匹配）→ 记 error + 返回 false，调用方回退
-    // 原版编辑器路径（不因坏清单而崩）。
-    bool ApplyProjectFileToConfig(const std::string&               projectFilePath,
-                                  Orange::Editor::EditorAppConfig& config)
-    {
-        namespace fs  = std::filesystem;
-        auto        pr = Orange::Editor::Project::LoadProjectFile(projectFilePath);
-        if (pr.IsErr())
-        {
-            ORANGE_LOG_ERROR("[OrangeEditor] --project 加载失败：{}（code={}）—— 回退原版编辑器",
-                             projectFilePath,
-                             static_cast<unsigned>(pr.Error()));
-            return false;
-        }
-        const Orange::Editor::Project::ProjectFile& proj = pr.Value();
-
-        std::error_code ec;
-        const fs::path  projPath = fs::absolute(fs::path(projectFilePath), ec);
-        const fs::path  projDir  = projPath.parent_path();
-        // assetRoots 恒非空（ProjectFile 缺失兜底 { "." }）。主根 = projDir / roots[0]。
-        fs::path primaryRoot = fs::weakly_canonical(projDir / fs::path(proj.assetRoots.front()), ec);
-        if (ec || primaryRoot.empty())
-        {
-            primaryRoot = projDir / fs::path(proj.assetRoots.front()); // 规整失败兜底
-        }
-
-        if (config.projectRoot.empty())
-        {
-            config.projectRoot = primaryRoot.string();
-        }
-        if (config.startupScene.empty())
-        {
-            config.startupScene = proj.startupScene; // 相对主根，chdir 后解析
-        }
-        if (config.windowTitle.empty())
-        {
-            config.windowTitle = !proj.name.empty() ? proj.name : projPath.stem().string();
-        }
-        ORANGE_LOG_INFO("[OrangeEditor] --project 加载 '{}'：projectRoot='{}' startupScene='{}'",
-                        config.windowTitle, config.projectRoot, config.startupScene);
-        return true;
-    }
-
     int RunHeadlessImport(const char* srcPath, float importScale)
     {
         if (srcPath == nullptr || srcPath[0] == '\0')
@@ -446,7 +397,7 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
         const std::string projectFlag = ParseProjectFlag(argc, argv);
         if (!projectFlag.empty())
         {
-            ApplyProjectFileToConfig(projectFlag, config);
+            Orange::Editor::Project::ApplyProjectFileToConfig(projectFlag, config);
         }
     }
 

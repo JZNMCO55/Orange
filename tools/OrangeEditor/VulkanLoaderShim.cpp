@@ -315,3 +315,15 @@ bool ShowImportFileDialog(void* parentHwnd, std::string& outPath)
                               L"Import Asset",
                               outPath);
 }
+
+bool ShowProjectFileDialog(void* parentHwnd, std::string& outPath)
+{
+    const COMDLG_FILTERSPEC filterSpec[] = {
+        {L"Orange Project (*.orangeproject)", L"*.orangeproject"},
+        {L"All Files (*.*)", L"*.*"},
+    };
+    return ShowFileDialogImpl(/*isSave=*/false, parentHwnd, filterSpec, 2,
+                              L"orangeproject",
+                              L"Open Project",
+                              outPath);
+}

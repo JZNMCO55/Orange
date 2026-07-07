@@ -33,6 +33,10 @@ enum class SceneOp : std::uint8_t
     // 是显式新入口（File>Save Split As / Open Split），不替换原路径。
     SaveSplitAs,
     OpenSplit,
+    // M6：mid-session 切换整个项目（.orangeproject）—— chdir 到工程根 + 加载其
+    // 启动场景。与 Open（单场景）的区别：Open 只 swap World；OpenProject 还换
+    // cwd 并按清单重定位 projectRoot / startupScene / 项目名。
+    OpenProject,
 };
 
 // Play 模式三态：

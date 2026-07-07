@@ -101,6 +101,12 @@ private:
     // 避免后续帧对死实体做 DestroySubtree / GetComponent 等操作崩溃。
     void ValidateEntityHandles();
     void ApplyPendingSceneOp();
+    // SceneOp::Open / SceneOp::OpenProject 共享的"把磁盘场景加载进一个全新 World
+    // 并接管"逻辑：建 fresh World → Scene::Load（同款 LoadOptions）→ 重建
+    // partition + 扫 layerId → swap pWorld / currentScenePath / dirty=false +
+    // ResetEntityLocalState + cmdStack.Clear。失败返回 false 且不动当前 World。
+    // 最近列表登记（AddRecentScene / AddRecentProject）留给各 caller，语义不同。
+    bool LoadSceneIntoFreshWorld(const std::string& path);
     // M9.2：推进一帧 simulation（module Tick → physics → vfx → anim → audio）。
     // 从 OnUpdate 的 Play 态内联 tick body 抽出，供 Play 态每帧调用（simDt =
     // dt * playTimeScale）+ Paused 态单步复用（simDt = 固定步长），两条路径行为
@@ -313,6 +319,10 @@ private:
     // File → Open Recent：点最近场景项时设为目标路径 + 触发 SceneOp::Open，
     // ApplyPendingSceneOp 的 Open 分支非空时用它（跳过文件对话框）；用完清空。
     std::string mPendingOpenScenePath;
+    // File → Open Recent Project：点最近工程项时设为目标 .orangeproject 路径 +
+    // 触发 SceneOp::OpenProject，ApplyPendingSceneOp 的 OpenProject 分支非空时用它
+    //（跳过文件对话框）；用完清空。"Open Project..." 走对话框时留空。
+    std::string mPendingOpenProjectPath;
     // v0.9 Profiler 帧耗时 ring buffer —— PlotLines 喂数据用。capped 大小 +
     // 写指针 + 当前长度三件套。push 新值时按 ring 节奏覆盖最老值。
     static constexpr std::size_t             kProfilerFrameRingCap = 128;

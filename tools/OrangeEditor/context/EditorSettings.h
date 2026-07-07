@@ -121,6 +121,16 @@ struct EditorSettings
     // 把一个场景路径加进最近列表（去重后置顶 + cap kMaxRecentScenes）。空 path
     // no-op。Open / SaveAs 成功后调。
     void AddRecentScene(const std::string& path);
+
+    // ---- 最近工程（File → Open Recent Project，schema minor 6）------------
+    // 最近打开的 .orangeproject 路径，front = 最近。与 recentScenes 同款持久化
+    // （固定 kMaxRecentProjects 槽，空串占位 = 未用）。M6 mid-session 切项目。
+    static constexpr int     kMaxRecentProjects = 10;
+    std::vector<std::string> recentProjects;
+
+    // 把一个工程路径加进最近列表（去重后置顶 + cap kMaxRecentProjects）。空 path
+    // no-op。Open Project 成功后调。
+    void AddRecentProject(const std::string& path);
 };
 
 // JSON 持久化：与项目内 Core::Serialization 同节奏（手写 Read / Write，无

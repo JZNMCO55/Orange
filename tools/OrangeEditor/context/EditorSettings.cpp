@@ -53,6 +53,33 @@ void EditorSettings::AddRecentScene(const std::string& path)
     }
 }
 
+void EditorSettings::AddRecentProject(const std::string& path)
+{
+    if (path.empty())
+    {
+        return;
+    }
+    // 复用 NormalizeScenePathKey：归一逻辑与"场景"无关（绝对化 + 折叠 ./.. + 正斜杠），
+    // 工程路径同款去重需求（相对 vs 绝对、分隔符差异不该产生重复项）。
+    const std::string key = NormalizeScenePathKey(path);
+    for (auto it = recentProjects.begin(); it != recentProjects.end();)
+    {
+        if (NormalizeScenePathKey(*it) == key)
+        {
+            it = recentProjects.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    recentProjects.insert(recentProjects.begin(), key); // 存归一化形式 + 最近置顶
+    if (static_cast<int>(recentProjects.size()) > kMaxRecentProjects)
+    {
+        recentProjects.resize(static_cast<std::size_t>(kMaxRecentProjects));
+    }
+}
+
 namespace
 {
 
@@ -163,13 +190,24 @@ void ReadEditorSettings(const JsonReader& in, EditorSettings& out)
             out.recentScenes.push_back(p);
         }
     }
+
+    // schema minor 6：最近工程。缺段（minor ≤5）→ recentProjects 留空。
+    out.recentProjects.clear();
+    for (int i = 0; i < EditorSettings::kMaxRecentProjects; ++i)
+    {
+        std::string p;
+        if (in.ReadString("recentProjects/" + std::to_string(i), p) && !p.empty())
+        {
+            out.recentProjects.push_back(p);
+        }
+    }
 }
 
 void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
 {
     out.WriteString("schemaVersion/namespace", "editor/settings");
     out.WriteInt("schemaVersion/major", 1);
-    out.WriteInt("schemaVersion/minor", 5); // minor 5：+最近场景（4：gizmo snap / 3：相机书签 / 2：autosave / 1：视口开关）
+    out.WriteInt("schemaVersion/minor", 6); // minor 6：+最近工程（5：最近场景 / 4：gizmo snap / 3：相机书签 / 2：autosave / 1：视口开关）
 
     out.WriteFloat("gizmo/lineWidth/translateIdle", s.gizmoLineWidthTranslateIdle);
     out.WriteFloat("gizmo/lineWidth/translateHighlight", s.gizmoLineWidthTranslateHighlight);
@@ -223,5 +261,14 @@ void WriteEditorSettings(JsonWriter& out, const EditorSettings& s)
             (i < static_cast<int>(s.recentScenes.size())) ? s.recentScenes[i]
                                                           : std::string{};
         out.WriteString("recentScenes/" + std::to_string(i), val);
+    }
+
+    // 最近工程（固定 kMaxRecentProjects 槽，空串占位 = 未用）。
+    for (int i = 0; i < EditorSettings::kMaxRecentProjects; ++i)
+    {
+        const std::string val =
+            (i < static_cast<int>(s.recentProjects.size())) ? s.recentProjects[i]
+                                                            : std::string{};
+        out.WriteString("recentProjects/" + std::to_string(i), val);
     }
 }

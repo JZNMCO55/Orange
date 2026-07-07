@@ -82,6 +82,9 @@ namespace
         bm0.valid                   = true;
         s.cameraBookmarks[2].valid  = true;
         s.cameraBookmarks[2].radius = 4.0f;
+        // 最近场景 / 最近工程（schema minor 5 / 6）：设几条，验证顺序 + 内容往返。
+        s.recentScenes   = {"a/scene1.scene.json", "b/scene2.scene.json"};
+        s.recentProjects = {"proj/one.orangeproject", "proj/two.orangeproject"};
 
         JsonWriter writer;
         WriteEditorSettings(writer, s);
@@ -131,6 +134,13 @@ namespace
         assert(out.cameraBookmarks[2].valid == true);
         assert(FloatEq(out.cameraBookmarks[2].radius, 4.0f));
         assert(out.cameraBookmarks[3].valid == false);
+
+        // 最近场景 / 最近工程：数量 + 顺序往返（Write 存归一化路径，Read 原样回读；
+        // 此处只校验条数与相对顺序保持——不与原始串逐字比，因 Write 直接落 s 里已存串）。
+        assert(out.recentScenes.size() == s.recentScenes.size());
+        assert(out.recentProjects.size() == s.recentProjects.size());
+        assert(out.recentProjects[0] == s.recentProjects[0]);
+        assert(out.recentProjects[1] == s.recentProjects[1]);
 
         std::fprintf(stdout, "  [PASS] EditorSettings round-trip\n");
     }
