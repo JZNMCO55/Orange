@@ -93,6 +93,16 @@ namespace Orange::Engine::Game
             (void)pipeline;
         }
 
+        // RegisterRenderPasses 的对偶：把注册的 pass 从 pipeline 摘除。DLL 宿主
+        // 的 session 级热重载 / 项目切换时，宿主在**卸载 game.dll 前**调——pass
+        // 对象的 vtable 与代码都在 dll 内，若 FreeLibrary 后 Pipeline 仍持有该
+        // pass，之后每帧 Execute 或 Pipeline 析构会跳进已卸载的 dll 代码 → 崩溃。
+        // 默认 no-op（无 pass 的模块 / 静态链模块无需实现）。
+        virtual void UnregisterRenderPasses(Render::Pipeline& pipeline)
+        {
+            (void)pipeline;
+        }
+
         // 交出游戏组件的 scene 序列化器。返回的 span 指向模块自己持有的静态 /
         // 成员存储，须活到宿主不再 Save/Load 为止。宿主收集所有模块的条目，
         // 填进 Scene::Save/LoadOptions.extraSerializers。默认无。

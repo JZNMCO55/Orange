@@ -24,7 +24,9 @@
 #include <orange/engine/game/GameModuleLibrary.h>
 #include <orange/engine/game/IGameModule.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -86,6 +88,51 @@ namespace Orange::Engine::Game
             mModules.clear();
             mOwnedStatic.clear();
             mOwnedLibraries.clear();
+        }
+
+        // 数：当前持有的 DLL 模块库数（ReloadLibrary 的 libIndex 上界；不含静态模块）。
+        std::size_t LibraryCount() const noexcept
+        {
+            return mOwnedLibraries.size();
+        }
+
+        // 热重载一个 DLL 模块库（M7 session 级热重载，ADR-023）。libIndex = DLL
+        // 库序（0-based，对应 AddModuleLibrary 顺序，非 mModules 混合序）。流程：
+        //   卸载前摘该模块的 pass（否则 FreeLibrary 后 Pipeline 悬垂 pass → 崩）→
+        //   销毁旧库（dll 内销毁模块 + FreeLibrary）→ 从原 dll 路径重 Load（新
+        //   shadow copy 拿重编后的代码）→ 重注册 pass。
+        // 须在 Edit 态调（Play 中热重载会砸运行态，护栏拦返 nullptr）。返回新模块
+        // 裸指针；失败（在 Play / 越界 / 空 slot / 重 Load 失败）返 nullptr——重 Load
+        // 失败时该库 slot 已移除、旧 pass 已摘、mModules 裸指针已断，调用方据此
+        // 提示"模块失效"并重新枚举。serializer / schema 由调用方 reload 后重新
+        // CollectSerializers / 重注册（本类只管 pass + 库生命周期）。
+        IGameModule* ReloadLibrary(std::size_t libIndex, Render::Pipeline& pipeline)
+        {
+            if (mInPlay || libIndex >= mOwnedLibraries.size() || !mOwnedLibraries[libIndex])
+            {
+                return nullptr;
+            }
+            IGameModule* const          oldModule  = mOwnedLibraries[libIndex]->Module();
+            const std::filesystem::path sourcePath = mOwnedLibraries[libIndex]->SourcePath();
+
+            // 卸载前摘 pass + 从驱动视图断引用（pass 代码在即将 FreeLibrary 的 dll 内）。
+            oldModule->UnregisterRenderPasses(pipeline);
+            mModules.erase(std::remove(mModules.begin(), mModules.end(), oldModule), mModules.end());
+
+            // 销毁旧库（dll 内销毁模块 + FreeLibrary），再从原路径重 Load 新 shadow。
+            mOwnedLibraries[libIndex].reset();
+            auto fresh = GameModuleLibrary::Load(sourcePath);
+            if (!fresh || fresh->Module() == nullptr)
+            {
+                mOwnedLibraries.erase(mOwnedLibraries.begin() + static_cast<std::ptrdiff_t>(libIndex));
+                return nullptr;
+            }
+
+            IGameModule* const newModule = fresh->Module();
+            mOwnedLibraries[libIndex]     = std::move(fresh);
+            mModules.push_back(newModule);
+            newModule->RegisterRenderPasses(pipeline);
+            return newModule;
         }
 
         // ---- 注册期扇出（宿主启动即调）----------------------------------

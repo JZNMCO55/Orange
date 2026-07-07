@@ -5,6 +5,8 @@
 
 #include <orange/engine/game/GameModuleHost.h>
 #include <orange/engine/game/GameModuleLibrary.h>
+#include <orange/engine/render/IRenderPass.h>
+#include <orange/engine/render/Pipeline.h>
 
 #include <cstdio>
 #include <cstring>
@@ -94,6 +96,45 @@ int main(int argc, char** argv)
         // host 出作用域析构：mOwnedLibraries 各析构安全卸载，不崩。
     }
 
-    std::printf("[DllGameModuleTest] PASS: load/use/unload/reload/并存/错误路径/宿主集成 全过\n");
+    // 6) 热重载 + render pass 注销对偶（M7 session 级热重载核心）：ReloadLibrary
+    //    卸载前摘 pass、重 Load 新 shadow、重注册；pass 数不累积（旧 1 注销 + 新 1
+    //    注册 = 1，非 2）。Pipeline 持的 TestPass 代码在 test.dll 内——声明序 host
+    //    先 / pipeline 后，令析构时 pipeline 先清 pass（此时 dll 未 FreeLibrary，安全）、
+    //    host 后 FreeLibrary，避免悬垂 vtable。
+    {
+        using Orange::Engine::Render::PipelineStage;
+        GameModuleHost                   host;
+        Orange::Engine::Render::Pipeline pipeline; // headless 默认构造（同 GameModuleHostTest）
+
+        if (host.AddModuleLibrary(GameModuleLibrary::Load(dll)) == nullptr)
+            return Fail("reload 前 AddModuleLibrary 返回 null");
+        if (host.LibraryCount() != 1) return Fail("AddModuleLibrary 后 LibraryCount 应为 1");
+
+        host.RegisterRenderPasses(pipeline);
+        if (pipeline.InsertedPassCount(PipelineStage::AfterMainPass) != 1)
+            return Fail("注册后 AfterMainPass pass 数应为 1");
+
+        Orange::Engine::Game::IGameModule* reloaded = host.ReloadLibrary(0, pipeline);
+        if (reloaded == nullptr) return Fail("ReloadLibrary 返回 null");
+        if (std::strcmp(reloaded->Name(), "TestGameModule") != 0)
+            return Fail("热重载后 Name 跨 DLL 虚调用不匹配");
+        if (pipeline.InsertedPassCount(PipelineStage::AfterMainPass) != 1)
+            return Fail("热重载后 pass 数应仍为 1（旧注销 + 新注册，不累积）");
+        if (host.ModuleCount() != 1 || host.LibraryCount() != 1)
+            return Fail("热重载后 Module/LibraryCount 应仍为 1");
+
+        // Play 态护栏：EnterPlay 后 ReloadLibrary 拒绝（返 null，不动库/pass）。
+        Orange::Engine::Game::GameModuleContext ctx{};
+        host.EnterPlay(ctx);
+        if (host.ReloadLibrary(0, pipeline) != nullptr)
+            return Fail("Play 态 ReloadLibrary 应拒绝返 null");
+        if (host.LibraryCount() != 1) return Fail("Play 态被拒的 reload 不应动库");
+        if (pipeline.InsertedPassCount(PipelineStage::AfterMainPass) != 1)
+            return Fail("Play 态被拒的 reload 不应动 pass");
+        host.ExitPlay(ctx);
+    }
+
+    std::printf("[DllGameModuleTest] PASS: load/use/unload/reload/并存/错误路径/"
+                "宿主集成/热重载+pass注销 全过\n");
     return EXIT_SUCCESS;
 }
