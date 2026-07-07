@@ -615,8 +615,10 @@ namespace Orange::Engine::Scene
                 }
             }
 
-            writer.WriteString(Join(componentPath, "mesh"), meshPath);
-            writer.WriteString(Join(componentPath, "materialInstanceId"), materialId);
+            // M6：real 资产路径 / material id → 虚拟路径落 JSON（内存里 meshPath / materialId
+            // 仍是 real；空串不虚拟化）。读端 ReadRenderable 有对称的 FromVirtual。
+            writer.WriteString(Join(componentPath, "mesh"), ToVirtual(ctx, meshPath));
+            writer.WriteString(Join(componentPath, "materialInstanceId"), ToVirtual(ctx, materialId));
             writer.WriteBool(Join(componentPath, "visible"), r->visible);
             writer.WriteBool(Join(componentPath, "castsShadow"), r->castsShadow);
         }
@@ -632,6 +634,9 @@ namespace Orange::Engine::Scene
             {
                 return false;
             }
+            // M6：虚拟路径 → real（新 1.20 的 project:// 转回真路径；旧文件 plain 无 scheme
+            // 恒等透传，故下面 editor/cube 老路径映射仍命中）。虚拟化在读端最前一步解开。
+            meshPath = FromVirtual(ctx, meshPath);
 
             // GAP-2026-05-16 G4：旧版 demo / save_load_demo 等 .scene.json 内
             // RenderableComponent.mesh 用过命名 ID "editor/cube" / "editor/plane"
@@ -683,6 +688,8 @@ namespace Orange::Engine::Scene
             // GetString 返回空字符串，materialInstance 留 nullptr（与旧行为一致）。
             std::string materialId =
                 reader.GetString(Join(componentPath, "materialInstanceId"), "");
+            // M6：虚拟路径 → real（先解虚拟，再走 builtin/ 前缀 remap + 查表；内存态 id 是 real）。
+            materialId = FromVirtual(ctx, materialId);
             // GAP-2026-05-16 G4：与 mesh path mapping 对偶——namedMaterialInstances
             // key 从 "builtin/X" 迁移到 "assets/materials/builtin/X.material" 后，
             // 老 .scene.json 内 materialInstanceId 字段值也需要透明 mapping。
@@ -838,7 +845,8 @@ namespace Orange::Engine::Scene
                         "Scene save: SubMeshMaterialsComponent slot material not found in "
                         "namedMaterialInstances; writing empty id for that slot.");
                 }
-                writer.WriteString(slotsPath + "/" + std::to_string(i), id);
+                // M6：slot material id（real）→ 虚拟路径落 JSON（空 slot 空串不虚拟化）。
+                writer.WriteString(slotsPath + "/" + std::to_string(i), ToVirtual(ctx, id));
             }
         }
 
@@ -856,7 +864,9 @@ namespace Orange::Engine::Scene
             {
                 // 缺字段 / 类型不符的 slot 当空 id（→ nullptr，回退默认材质），不
                 // 整盘拒绝 Load——与 Renderable.materialInstance 缺省 nullptr 同款宽松。
-                std::string               id       = reader.GetString(slotsPath + "/" + std::to_string(i), "");
+                std::string id = reader.GetString(slotsPath + "/" + std::to_string(i), "");
+                // M6：虚拟路径 → real，再交给 MaterialIdToInstance（内部 builtin/ remap + 查表）。
+                id                                 = FromVirtual(ctx, id);
                 Render::MaterialInstance* resolved = MaterialIdToInstance(id, ctx);
                 if (!id.empty() && resolved == nullptr)
                 {
@@ -1140,7 +1150,8 @@ namespace Orange::Engine::Scene
 
             const float tint[3] = {env->tint.x, env->tint.y, env->tint.z};
 
-            writer.WriteString(Join(componentPath, "cubemap"), cubemapPath);
+            // M6：real cubemap 路径 → 虚拟路径落 JSON（空串不虚拟化）。
+            writer.WriteString(Join(componentPath, "cubemap"), ToVirtual(ctx, cubemapPath));
             writer.WriteFloatArray(Join(componentPath, "tint"), tint, 3);
             writer.WriteFloat(Join(componentPath, "intensity"), env->intensity);
         }
@@ -1160,6 +1171,8 @@ namespace Orange::Engine::Scene
                     return false;
                 }
             }
+            // M6：虚拟路径 → real（在 AssetRegistry::Load 之前解开；旧文件 plain 恒等透传）。
+            cubemapPath = FromVirtual(ctx, cubemapPath);
 
             if (!cubemapPath.empty())
             {
@@ -1758,7 +1771,8 @@ namespace Orange::Engine::Scene
                     "AssetRegistry was supplied to Save(); writing empty path.");
             }
 
-            writer.WriteString(Join(componentPath, "sound"), soundPath);
+            // M6：real sound 路径 → 虚拟路径落 JSON（空串不虚拟化）。
+            writer.WriteString(Join(componentPath, "sound"), ToVirtual(ctx, soundPath));
             writer.WriteBool(Join(componentPath, "playOnAwake"), a->playOnAwake);
             writer.WriteBool(Join(componentPath, "loop"), a->loop);
             writer.WriteFloat(Join(componentPath, "volume"), a->volume);
@@ -1779,6 +1793,8 @@ namespace Orange::Engine::Scene
             {
                 return false;
             }
+            // M6：虚拟路径 → real（在 AssetRegistry::Load 之前解开；旧文件 plain 恒等透传）。
+            soundPath = FromVirtual(ctx, soundPath);
             if (!soundPath.empty())
             {
                 if (ctx.assetRegistry != nullptr)
@@ -1854,7 +1870,9 @@ namespace Orange::Engine::Scene
                 {
                     // 资产化 clip：scene 只存 .anim 引用，clip 数据由资产文件持有
                     //（与 RenderableComponent.mesh 同款，避免双源真相）。
-                    writer.WriteString(Join(componentPath, "clipSource"), src);
+                    // M6：real .anim 路径 → 虚拟路径落 JSON（读端解析在 SceneSerialization 的
+                    // Load Pass 2，对称）。clipJson（内联 clip 数据）不是路径，不虚拟化。
+                    writer.WriteString(Join(componentPath, "clipSource"), ToVirtual(ctx, src));
                 }
                 else
                 {

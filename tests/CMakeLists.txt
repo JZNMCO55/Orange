@@ -484,6 +484,18 @@ target_include_directories(project_file_round_trip_test PRIVATE
 orange_engine_set_compiler_options(project_file_round_trip_test)
 add_test(NAME project_file_round_trip_test COMMAND project_file_round_trip_test)
 
+# AssetPathMount（tools/OrangeEditor）—— 资产虚拟路径 scheme（project:// / engine://）
+# 解析 / 虚拟化（M6 路径虚拟化）。纯标准库逻辑，AssetPathMount.cpp 直接编进测试 exe +
+# 加 include path（同 project_file_round_trip_test 模式）。零 ImGui / Vulkan。
+add_executable(asset_path_mount_test
+    project/AssetPathMountTest.cpp
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor/project/AssetPathMount.cpp")
+target_link_libraries(asset_path_mount_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(asset_path_mount_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/OrangeEditor")
+orange_engine_set_compiler_options(asset_path_mount_test)
+add_test(NAME asset_path_mount_test COMMAND asset_path_mount_test)
+
 # EditorTextUtil（tools/OrangeEditor）—— header-only Util::ContainsCaseInsensitive
 # （Console + Asset 搜索共用谓词）。纯 std 头，仅需 include path（无 helper .cpp）。
 add_executable(editor_text_util_test editor/EditorTextUtilTest.cpp)

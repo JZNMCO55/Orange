@@ -25,6 +25,35 @@ namespace Orange::Engine::Physics
 namespace Orange::Engine::Scene
 {
 
+    // ---------------------------------------------------------------------------
+    // 资产路径虚拟化 / 反虚拟化辅助（M6 路径虚拟化）。
+    //
+    // 契约（详见 ComponentSerializerEntry.h 的字段注释）：虚拟路径（project:// 等
+    // scheme）**只**存在于 scene JSON；内存态（AssetRegistry key / material id）始终是
+    // real（cwd 相对）路径。故写端 real→virtual、读端 virtual→real，二者严格对称——
+    // 任一侧漏包装都会破坏 round-trip（写虚拟却读不回真、或反之丢资产）。
+    //
+    // 两处 ctx 转换器空 = 恒等 = 零回归。空字符串（未设资产）一律原样透传，不虚拟化
+    // （避免把 "" 变成 "project://"）。放在共享私有头里让 ComponentSerializers.cpp 与
+    // SceneSerialization.cpp（clipSource 的读在后者的 Load Pass 2）都能复用同一份。
+    inline std::string ToVirtual(const SaveContext& ctx, std::string_view real)
+    {
+        if (real.empty() || !ctx.assetPathToVirtual)
+        {
+            return std::string(real);
+        }
+        return ctx.assetPathToVirtual(real);
+    }
+
+    inline std::string FromVirtual(const LoadContext& ctx, std::string_view stored)
+    {
+        if (stored.empty() || !ctx.assetPathResolve)
+        {
+            return std::string(stored);
+        }
+        return ctx.assetPathResolve(stored);
+    }
+
     const std::vector<ComponentSerializerEntry>& GetBuiltinComponentSerializers();
 
     // ---------------------------------------------------------------------------

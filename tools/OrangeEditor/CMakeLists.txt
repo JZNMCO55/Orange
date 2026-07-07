@@ -137,6 +137,9 @@ add_library(orange_editor STATIC
     project/ProjectFile.cpp
     # .orangeproject → EditorAppConfig 路径解析桥（--project + per-game editor 共用）。
     project/ProjectConfig.cpp
+    # 资产虚拟路径 scheme（project:// / engine://）解析 / 虚拟化（M6 路径虚拟化）——
+    # headless-clean（仅标准库），也被单独编进 asset_path_mount_test。
+    project/AssetPathMount.cpp
     panels/AnimationTimelinePanel.cpp
     panels/EntityTreePanel.cpp
     panels/InspectorPanel.cpp

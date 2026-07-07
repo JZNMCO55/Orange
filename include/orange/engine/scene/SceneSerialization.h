@@ -129,6 +129,12 @@ namespace Orange::Engine::Scene
         // 会执行（见下方重载注释）；const 入口 Save(const World&, ...) 物理上无法
         // mutate，本字段在 const 入口被忽略（行为与升级前完全一致）。
         bool ensureGuids{true};
+
+        // real → virtual 资产路径转换器，原样拷进内部 SaveContext（见其字段注释 +
+        // ComponentSerializers 的写端包装）。契约：虚拟路径（project://）只存在于 scene
+        // JSON，内存态始终 real。编辑器把它接到 VirtualizeProjectPath，使存盘路径与项目
+        // 根解耦。空 = 恒等 = 零回归（写出 real 路径不变）。
+        std::function<std::string(std::string_view realPath)> assetPathToVirtual{};
     };
 
     struct LoadOptions
@@ -168,6 +174,12 @@ namespace Orange::Engine::Scene
         // LoadSplit 用它把"来自 layer X 的 source 文件" 自动归属到 X。
         // 单文件 Load 不需要时留空，保持向后兼容。
         std::string assignLayerId{};
+
+        // virtual → real 资产路径解析器，原样拷进内部 LoadContext（见其字段注释 +
+        // ComponentSerializers 的读端解析）。编辑器把它接到 ResolveVirtualPath：新 1.20
+        // 文件的 project:// 虚拟路径转回 real、旧 1.19 文件的 plain 路径恒等透传。
+        // 空 = 恒等 = 零回归（用 stored 路径不变）。
+        std::function<std::string(std::string_view storedPath)> assetPathResolve{};
     };
 
     // 把 `world` 写到 `path`。覆盖目标文件。

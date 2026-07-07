@@ -22,6 +22,7 @@
 #include "import/GltfSceneImporter.h"
 #include "import/MetaSidecar.h"
 #include "plugin/MaterialAssetInspectorPlugin.h" // SaveEditingMaterialToDisk（关窗确认存材质）
+#include "project/AssetPathMount.h"              // M6：scene Save/Load 资产路径虚拟化（project://）
 #include "project/ProjectConfig.h"               // M6：ApplyProjectFileToConfig（Open Project 解析清单）
 #include "render/ThumbnailService.h"             // 材质球缩略图（FlushPending + GetOrRequestThumbnail）
 #include "theme/EditorTheme.h"
@@ -1359,6 +1360,11 @@ bool EditorRenderLayer::LoadSceneIntoFreshWorld(const std::string& path)
         [this](const std::string& id)
     { return ::EnsureMaterialInstance(mHost, id); };
     openLoadOpts.extraSerializers = mHost.extraSerializers;
+    // M6：scene 里的 project:// 虚拟路径 → real（旧 1.19 plain 路径恒等透传）。engineResourceRoot
+    // 传空——scene 资产走 project://，engine:// 不用于 scene 资产。
+    openLoadOpts.assetPathResolve =
+        [](std::string_view stored)
+    { return Orange::Editor::Project::ResolveVirtualPath(stored, ""); };
     auto rc                       = Orange::Engine::Scene::Load(path, *pNew, openLoadOpts);
     if (rc.IsErr())
     {
@@ -1555,6 +1561,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
                 saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
                 saveOpts.extraSerializers       = mHost.extraSerializers;
+                // M6：real 资产路径 → project:// 虚拟路径落 JSON（内存态不变）。
+                saveOpts.assetPathToVirtual =
+                    [](std::string_view real)
+                { return Orange::Editor::Project::VirtualizeProjectPath(real); };
                 auto rc                         = Orange::Engine::Scene::Save(
                     *mHost.scene.pWorld, mHost.scene.currentScenePath, saveOpts);
                 if (rc.IsErr())
@@ -1584,6 +1594,10 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             saveAsOpts.assetRegistry          = mHost.assets.pAssets.get();
             saveAsOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
             saveAsOpts.extraSerializers       = mHost.extraSerializers;
+            // M6：real 资产路径 → project:// 虚拟路径落 JSON（内存态不变）。
+            saveAsOpts.assetPathToVirtual =
+                [](std::string_view real)
+            { return Orange::Editor::Project::VirtualizeProjectPath(real); };
             auto rc                           = Orange::Engine::Scene::Save(*mHost.scene.pWorld, path, saveAsOpts);
             if (rc.IsErr())
             {
@@ -1632,6 +1646,11 @@ void EditorRenderLayer::ApplyPendingSceneOp()
             saveOpts.assetRegistry          = mHost.assets.pAssets.get();
             saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
             saveOpts.extraSerializers       = mHost.extraSerializers;
+            // M6：real 资产路径 → project:// 虚拟路径落 JSON（SaveSplit 内部把 options
+            // 透传给每个 per-layer SaveImpl，故 virtualizer 覆盖所有 layer 文件）。
+            saveOpts.assetPathToVirtual =
+                [](std::string_view real)
+            { return Orange::Editor::Project::VirtualizeProjectPath(real); };
             const auto rc                   = Orange::Engine::Scene::SaveSplit(
                 *mHost.scene.pWorld, mHost.scene.partition, manifestPath, saveOpts);
             if (rc.IsErr())
@@ -1671,6 +1690,11 @@ void EditorRenderLayer::ApplyPendingSceneOp()
                 [this](const std::string& id)
             { return ::EnsureMaterialInstance(mHost, id); };
             splitLoadOpts.extraSerializers = mHost.extraSerializers;
+            // M6：project:// 虚拟路径 → real（LoadSplit 把 resolver 透传给每个 per-layer
+            // Load；旧 1.19 plain 路径恒等透传）。
+            splitLoadOpts.assetPathResolve =
+                [](std::string_view stored)
+            { return Orange::Editor::Project::ResolveVirtualPath(stored, ""); };
             // LoadSplit 内部按 manifest.layers 顺序遍历每条 source，
             // 并通过 LoadOptions.assignLayerId 给本次新建且没挂
             // LayerComponent 的 entity 自动按归属 layer 兜底——不必再
@@ -1755,6 +1779,11 @@ void EditorRenderLayer::DoAutosave()
     saveOpts.assetRegistry          = mHost.assets.pAssets.get();
     saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
     saveOpts.extraSerializers       = mHost.extraSerializers;
+    // M6：real 资产路径 → project:// 虚拟路径落 JSON（autosave 与手动 Save 同款，
+    // 保证恢复路径一致）。
+    saveOpts.assetPathToVirtual =
+        [](std::string_view real)
+    { return Orange::Editor::Project::VirtualizeProjectPath(real); };
     const auto rc                   = Orange::Engine::Scene::Save(
         *mHost.scene.pWorld, AutosaveScenePathStr(), saveOpts);
     if (rc.IsErr())
@@ -1859,6 +1888,10 @@ void EditorRenderLayer::DrawAutosaveRecoveryPopup()
                 [this](const std::string& id)
             { return ::EnsureMaterialInstance(mHost, id); };
             loadOpts.extraSerializers = mHost.extraSerializers;
+            // M6：project:// 虚拟路径 → real（旧 1.19 plain 路径恒等透传）。
+            loadOpts.assetPathResolve =
+                [](std::string_view stored)
+            { return Orange::Editor::Project::ResolveVirtualPath(stored, ""); };
             const auto rc             = Orange::Engine::Scene::Load(
                 AutosaveScenePathStr(), *pNew, loadOpts);
             if (rc.IsErr())
@@ -1969,6 +2002,11 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 saveOpts.assetRegistry          = mHost.assets.pAssets.get();
                 saveOpts.namedMaterialInstances = &mHost.assets.namedMaterialInstances;
                 saveOpts.extraSerializers       = mHost.extraSerializers;
+                // M6：Play 内存快照也虚拟化——Stop 还原走对称 resolver（下方 loadOpts），
+                // 虚拟化的快照必须能被解回 real。
+                saveOpts.assetPathToVirtual =
+                    [](std::string_view real)
+                { return Orange::Editor::Project::VirtualizeProjectPath(real); };
                 auto rc = Orange::Engine::Scene::SaveToString(*mHost.scene.pWorld, saveOpts);
                 if (rc.IsErr())
                 {
@@ -2178,6 +2216,10 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                     [this](const std::string& id)
                 { return ::EnsureMaterialInstance(mHost, id); };
                 loadOpts.extraSerializers = mHost.extraSerializers;
+                // M6：Stop 还原的对称 resolver —— 把 EnterPlay 虚拟化的快照 project:// 解回 real。
+                loadOpts.assetPathResolve =
+                    [](std::string_view stored)
+                { return Orange::Editor::Project::ResolveVirtualPath(stored, ""); };
                 // M9 PIE：从内存快照串还原（LoadFromString）而非 temp 文件。
                 const auto rc = Orange::Engine::Scene::LoadFromString(
                     mHost.scene.playSnapshotBlob, *pNew, loadOpts);

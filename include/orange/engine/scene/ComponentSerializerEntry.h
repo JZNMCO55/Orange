@@ -85,6 +85,13 @@ namespace Orange::Engine::Scene
         // 供 RenderableComponent::Write 把 materialInstance* 反查为 id 字符串。
         // 空 → 持有 materialInstance 的组件写出空 id + warn。
         const std::unordered_map<std::string, Render::MaterialInstance*>* namedMaterialInstances{nullptr};
+
+        // real → virtual 资产路径转换器（M6 路径虚拟化）。契约：虚拟路径（project:// /
+        // engine:// 等 scheme）**只**存在于 scene JSON；内存里的 AssetRegistry key /
+        // namedMaterialInstances key / material id 始终是 real（cwd 相对）路径。Write 端
+        // 在 WriteString 落盘前把 real 转 virtual，别处内存态一律不变。
+        // 空 = 恒等 = 零回归（写出 real 路径不变，与升级前行为完全一致）。
+        std::function<std::string(std::string_view realPath)> assetPathToVirtual{};
     };
 
     // Load 路径透传给每个组件 Read 函数的上下文。
@@ -119,6 +126,13 @@ namespace Orange::Engine::Scene
         // 加全局 std::hash 特化（侵入公共面）；空 / 非法 guid 的实体不入表。
         // 空 → 读端无 guid 索引可用，互引用全回退顺序 int（读旧文件 / guid 缺失）。
         const std::unordered_map<std::string, Entity>* guidToEntity{nullptr};
+
+        // virtual → real 资产路径解析器（M6 路径虚拟化）。与 SaveContext::assetPathToVirtual
+        // 对偶：Read 端 ReadString 拿到 stored 路径后、在 assetRegistry->Load / material
+        // 查表 / materialResolver 之前转回内存用的 real 路径。scene JSON 里可能是 project://
+        // 虚拟路径（新 1.20 文件）或 plain 相对路径（旧 1.19 文件），resolver 都转成 real。
+        // 空 = 恒等 = 零回归（用 stored 路径不变，旧 1.19 plain 路径经恒等透传照旧 Load）。
+        std::function<std::string(std::string_view storedPath)> assetPathResolve{};
     };
 
     // 区分 Pass 1（纯数据，无 backend 依赖）与 Pass 2（需先建 backend 再 attach）。

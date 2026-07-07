@@ -3,6 +3,7 @@
 #include "../BuiltinAssets.h"   // EnsureMaterialInstance（按 path 取 live instance）
 #include "../EditorHierarchy.h" // DestroySubtree（清 prefab 实例子树）
 #include "../EditorHost.h"
+#include "../project/AssetPathMount.h" // M6：scene 缩略图加载解 project:// 虚拟路径
 
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/asset/MeshAsset.h>
@@ -982,6 +983,11 @@ namespace Orange::Editor::Render
             [this](const std::string& id)
         { return ::EnsureMaterialInstance(mHost, id); };
         lo.extraSerializers = mHost.extraSerializers;
+        // M6：新 1.20 scene 的 project:// 虚拟路径 → real，缩略图才能加载 mesh / material
+        //（旧 1.19 plain 路径恒等透传）。与 EditorRenderLayer 的 Open Scene 同款。
+        lo.assetPathResolve =
+            [](std::string_view stored)
+        { return Orange::Editor::Project::ResolveVirtualPath(stored, ""); };
 
         std::vector<Entity> created;
         const auto          loadRes =

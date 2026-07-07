@@ -116,9 +116,15 @@ namespace Orange::Engine::Scene
         // collider category/mask 位过滤）。同款 optional 字段路径，旧 1.18 及更早文件无这两个
         // 键时 ReadColliderDesc 回退默认（category=1 / mask=0xFFFFFFFF = 与所有 body 碰撞），
         // 向后兼容；两值以 JSON 整数（int64 路径）落盘，整个 uint32 值域位精确，其余字段语义不变。
+        // 1.19 → 1.20：资产路径虚拟化（project:// / engine://，M6）。写端把内存里的 real（cwd
+        // 相对）资产路径 / material id 转成虚拟路径落 JSON，读端转回 real——虚拟路径只存在于
+        // 文件、内存态始终 real。**不改任何字段名 / 结构**，仅字符串值形态（"assets/x" ↔
+        // "project://assets/x"）。旧 1.19 老文件仍可读：plain 路径无 scheme，经 resolver 恒等
+        // 透传，Load 行为与升级前完全一致（reader minor 20 ≥ 文件 minor 19，CanRead 放行）。
         const SchemaVersion& SceneSchemaVersion()
         {
-            static const SchemaVersion kVersion{"scene/world", 1, 19};
+            // 1.20：资产路径虚拟化（project:// / engine://，M6）；1.19 老文件仍可读（plain 路径经 resolver 恒等透传）
+            static const SchemaVersion kVersion{"scene/world", 1, 20};
             return kVersion;
         }
 
@@ -226,7 +232,8 @@ namespace Orange::Engine::Scene
                 }
             }
 
-            const SaveContext ctx{world, idMap, options.assetRegistry, options.namedMaterialInstances};
+            const SaveContext ctx{world, idMap, options.assetRegistry,
+                                  options.namedMaterialInstances, options.assetPathToVirtual};
 
             // 2) 名字冲突检测：extra 不允许与内置 component 同名。
             const auto& serializers = GetBuiltinComponentSerializers();
@@ -501,7 +508,8 @@ namespace Orange::Engine::Scene
                               options.animatorRegistry,
                               options.namedMaterialInstances,
                               options.materialResolver,
-                              &guidToEntity};
+                              &guidToEntity,
+                              options.assetPathResolve};
 
         const auto& serializers = GetBuiltinComponentSerializers();
 
@@ -713,6 +721,10 @@ namespace Orange::Engine::Scene
                         ReadAnimatorClipSource(reader, animPath, clipSource) && !clipSource.empty();
                     if (hasSource)
                     {
+                        // M6：clipSource 可能是 project:// 虚拟路径（新 1.20）或 plain（旧文件）
+                        // → 先转回内存用的 real 路径，再 Load / SetSourceAssetPath（下游内存态
+                        // 始终 real；此处的读端与 WriteAnimator 的写端 ToVirtual 严格对称）。
+                        clipSource = FromVirtual(ctx, clipSource);
                         if (options.assetRegistry != nullptr)
                         {
                             auto handleRes =
@@ -1052,6 +1064,9 @@ namespace Orange::Engine::Scene
                 .materialResolver       = options.materialResolver,
                 .extraSerializers       = options.extraSerializers,
                 .assignLayerId          = layer.id,
+                // M6：把虚拟路径 resolver 透传到每个 per-layer Load，否则 split 场景的
+                // 各 layer 文件里的 project:// 路径无从解析（漏传即丢资产）。
+                .assetPathResolve       = options.assetPathResolve,
             };
 
             const std::filesystem::path layerPath   = ResolveSource(baseDir, layer.source);

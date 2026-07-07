@@ -42,6 +42,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 
 using Orange::Engine::Entity;
 using Orange::Engine::ResultCode;
@@ -523,6 +524,87 @@ namespace
 
         RemoveIfExists(path);
         std::fprintf(stdout, "  [PASS] renderable graceful when no AssetRegistry supplied\n");
+    }
+
+    // M6 · 资产路径虚拟化 scene-level 往返 + 1.19 向后兼容证明。
+    //
+    // 锁住核心不变量：写端 assetPathToVirtual 把 real mesh 路径转 project:// 落 JSON、
+    // 读端 assetPathResolve 转回 real 再喂 AssetRegistry::Load —— 最终 handle 反查回 real
+    // 路径不丢；且旧 1.19 plain 路径 blob 经同一 resolver 恒等透传照旧加载（向后兼容）。
+    // 转换器用内联 lambda（与编辑器 AssetPathMount 同逻辑，但不引入 editor 依赖，保持
+    // 本测试 engine-only；AssetPathMount 函数本身在 asset_path_mount_test 单独验证）。
+    void TestAssetPathVirtualizationRoundTrip()
+    {
+        auto virtualize = [](std::string_view real) -> std::string
+        {
+            if (real.empty() || real.find("://") != std::string_view::npos)
+            {
+                return std::string(real);
+            }
+            return "project://" + std::string(real);
+        };
+        auto resolve = [](std::string_view stored) -> std::string
+        {
+            constexpr std::string_view proj = "project://";
+            if (stored.size() >= proj.size() && stored.compare(0, proj.size(), proj) == 0)
+            {
+                return std::string(stored.substr(proj.size()));
+            }
+            return std::string(stored); // plain / 空 → 恒等（1.19 向后兼容路径）
+        };
+
+        AssetRegistry srcReg;
+        auto          handle = InsertSyntheticMesh(srcReg, "assets/x.mesh");
+
+        World               source;
+        Entity              e = source.CreateEntity();
+        RenderableComponent r;
+        r.mesh = handle;
+        source.AddComponent(e, r);
+
+        // (1) Save 不带 virtualizer → plain 路径（模拟 1.19 文件形态；schema 本身已 1.20）。
+        auto plainBlob = SceneSerialization::SaveToString(
+            source, SceneSerialization::SaveOptions{.assetRegistry = &srcReg});
+        assert(plainBlob.IsOk());
+        assert(plainBlob.Value().find("\"assets/x.mesh\"") != std::string::npos);
+        assert(plainBlob.Value().find("project://") == std::string::npos);
+
+        // (2) Save 带 virtualizer → project:// 虚拟路径。
+        auto virtualBlob = SceneSerialization::SaveToString(
+            source, SceneSerialization::SaveOptions{.assetRegistry      = &srcReg,
+                                                    .assetPathToVirtual = virtualize});
+        assert(virtualBlob.IsOk());
+        assert(virtualBlob.Value().find("project://assets/x.mesh") != std::string::npos);
+
+        // 断言 mesh 反查回 real "assets/x.mesh" 的公共小工具（Load 后取唯一 Renderable）。
+        auto loadAndCheckMesh = [&](const std::string& blob)
+        {
+            AssetRegistry dstReg;
+            (void)InsertSyntheticMesh(dstReg, "assets/x.mesh");
+            World loaded;
+            auto  rc = SceneSerialization::LoadFromString(
+                blob, loaded,
+                SceneSerialization::LoadOptions{.assetRegistry    = &dstReg,
+                                                 .assetPathResolve = resolve});
+            assert(rc.IsOk());
+            Entity le = Entity::Invalid();
+            for (auto ent : loaded.Registry().view<RenderableComponent>())
+            {
+                le = World::FromEntt(ent);
+            }
+            const auto* lr = loaded.GetComponent<RenderableComponent>(le);
+            assert(lr != nullptr && lr->mesh.IsValid());
+            // 到达 AssetRegistry::Load 的路径必须是 real —— 反查回 "assets/x.mesh"。
+            assert(dstReg.PathOf<MeshAsset>(lr->mesh) == "assets/x.mesh");
+        };
+
+        // (3) Load 虚拟 blob + resolver → mesh 最终解析回 real（虚拟化真被解开）。
+        loadAndCheckMesh(virtualBlob.Value());
+        // (4) Load plain blob（模拟 1.19 老文件）+ resolver → 恒等透传，同样加载成功。
+        loadAndCheckMesh(plainBlob.Value());
+
+        std::fprintf(stdout,
+                     "  [PASS] M6 asset-path virtualization round-trip + 1.19 backward compat\n");
     }
 
     void TestDirectionalLightRoundTrip()
@@ -1783,6 +1865,7 @@ int main()
     TestMixedKnownAndUnknownComponents();
     TestRenderableRoundTripWithRegistry();
     TestRenderableWithoutRegistryGraceful();
+    TestAssetPathVirtualizationRoundTrip();
     TestDirectionalLightRoundTrip();
     TestRigidBodyColliderRoundTripWithPhysicsWorld();
     TestRigidBodyColliderWithoutPhysicsWorldGraceful();
