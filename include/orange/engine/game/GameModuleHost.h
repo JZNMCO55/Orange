@@ -8,12 +8,20 @@
 // RegisterRenderPasses / 收集 serializers；Play 生命周期扇出 EnterPlay /
 // Tick / OnEvent / ExitPlay。ExitPlay 按**逆序**扇出（后进先出，析构式对称）。
 //
+// 模块两种来源，统一驱动（M7 DLL 宿主，ADR-023）：
+//   * 静态模块（AddModule）：per-game editor 静态链入的 IGameModule，宿主经
+//     unique_ptr<IGameModule> 拥有。
+//   * DLL 模块（AddModuleLibrary）：从 game.dll 动态加载的 IGameModule，宿主经
+//     unique_ptr<GameModuleLibrary> 拥有——GameModuleLibrary 析构时先在 dll 内
+//     销毁模块、再 FreeLibrary（vtable 安全）。
+// 驱动视图 mModules 存两类模块的裸 IGameModule*（非拥有），扇出无差别遍历。
+//
 // 本类只做扇出 + play-state 护栏，不碰 Pipeline / World 的具体类型（全部
-// 透传引用），故 header-only：Tick 前必须 EnterPlay，重复 EnterPlay / 未
-// EnterPlay 的 Tick / ExitPlay 均被护栏 no-op，避免宿主状态机 bug 传导成
-// 模块的双初始化 / 空跑。
+// 透传引用）。Tick 前必须 EnterPlay，重复 EnterPlay / 未 EnterPlay 的 Tick /
+// ExitPlay 均被护栏 no-op。ClearModules 须在 Edit 态（非 Play）调。
 // ---------------------------------------------------------------------------
 
+#include <orange/engine/game/GameModuleLibrary.h>
 #include <orange/engine/game/IGameModule.h>
 
 #include <cstddef>
@@ -27,7 +35,7 @@ namespace Orange::Engine::Game
     class GameModuleHost
     {
     public:
-        // 注册一个模块，返回非拥有裸指针（供宿主后续喂数据；所有权留 host）。
+        // 注册一个静态模块，返回非拥有裸指针（供宿主后续喂数据；所有权留 host）。
         // nullptr 静默忽略，返回 nullptr。
         IGameModule* AddModule(std::unique_ptr<IGameModule> module)
         {
@@ -36,7 +44,22 @@ namespace Orange::Engine::Game
                 return nullptr;
             }
             IGameModule* raw = module.get();
-            mModules.push_back(std::move(module));
+            mModules.push_back(raw);
+            mOwnedStatic.push_back(std::move(module));
+            return raw;
+        }
+
+        // 注册一个 DLL 模块库（M7）。lib 无效 / 其 Module() 空则静默忽略返 nullptr。
+        // 宿主拥有 GameModuleLibrary，其析构序保证 dll 卸载安全（见 GameModuleLibrary）。
+        IGameModule* AddModuleLibrary(std::unique_ptr<GameModuleLibrary> lib)
+        {
+            if (!lib || lib->Module() == nullptr)
+            {
+                return nullptr;
+            }
+            IGameModule* raw = lib->Module();
+            mModules.push_back(raw);
+            mOwnedLibraries.push_back(std::move(lib));
             return raw;
         }
 
@@ -50,11 +73,26 @@ namespace Orange::Engine::Game
             return mInPlay;
         }
 
+        // 卸载全部模块（清空注册 —— 供项目切换 / 宿主拆卸）。须在 Edit 态调：
+        // Play 中直接清会跳过 OnExitPlay，故先护栏拦（调用方应先 ExitPlay）。
+        // 先清驱动视图（非拥有）、再销毁静态模块、最后销毁 DLL 库（每个 lib 析构
+        // = dll 内销毁模块 + FreeLibrary）。
+        void ClearModules()
+        {
+            if (mInPlay)
+            {
+                return;
+            }
+            mModules.clear();
+            mOwnedStatic.clear();
+            mOwnedLibraries.clear();
+        }
+
         // ---- 注册期扇出（宿主启动即调）----------------------------------
 
         void RegisterRenderPasses(Render::Pipeline& pipeline)
         {
-            for (auto& m : mModules)
+            for (IGameModule* m : mModules)
             {
                 m->RegisterRenderPasses(pipeline);
             }
@@ -66,7 +104,7 @@ namespace Orange::Engine::Game
         std::vector<Scene::ComponentSerializerEntry> CollectSerializers() const
         {
             std::vector<Scene::ComponentSerializerEntry> out;
-            for (auto& m : mModules)
+            for (const IGameModule* m : mModules)
             {
                 for (const auto& e : m->ComponentSerializers())
                 {
@@ -79,7 +117,7 @@ namespace Orange::Engine::Game
         // 任一模块自管物理 step 即返回 true（宿主据此让位自动 step）。
         bool AnyWantsOwnPhysicsStep() const noexcept
         {
-            for (auto& m : mModules)
+            for (const IGameModule* m : mModules)
             {
                 if (m->WantsOwnPhysicsStep())
                 {
@@ -99,7 +137,7 @@ namespace Orange::Engine::Game
                 return;
             }
             mInPlay = true;
-            for (auto& m : mModules)
+            for (IGameModule* m : mModules)
             {
                 m->OnEnterPlay(ctx);
             }
@@ -112,7 +150,7 @@ namespace Orange::Engine::Game
             {
                 return;
             }
-            for (auto& m : mModules)
+            for (IGameModule* m : mModules)
             {
                 m->Tick(ctx, dt);
             }
@@ -125,7 +163,7 @@ namespace Orange::Engine::Game
             {
                 return;
             }
-            for (auto& m : mModules)
+            for (IGameModule* m : mModules)
             {
                 m->OnEvent(event);
             }
@@ -146,8 +184,13 @@ namespace Orange::Engine::Game
         }
 
     private:
-        std::vector<std::unique_ptr<IGameModule>> mModules;
-        bool                                      mInPlay{false};
+        // 驱动视图（非拥有裸指针，扇出无差别遍历静态 + DLL 模块）。
+        std::vector<IGameModule*> mModules;
+        // 所有权：静态模块 + DLL 模块库。析构逆声明序——先库后静态、都在 mModules 之后，
+        // 保证 mModules 裸指针在其指向对象销毁前已不再被扇出（析构期不扇出）。
+        std::vector<std::unique_ptr<IGameModule>>       mOwnedStatic;
+        std::vector<std::unique_ptr<GameModuleLibrary>> mOwnedLibraries;
+        bool                                            mInPlay{false};
     };
 
 } // namespace Orange::Engine::Game

@@ -3,6 +3,7 @@
 //
 // test game.dll 路径经 argv[1] 传入（CMake 用 $<TARGET_FILE:test_game_module> 填）。
 
+#include <orange/engine/game/GameModuleHost.h>
 #include <orange/engine/game/GameModuleLibrary.h>
 
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 
+using Orange::Engine::Game::GameModuleHost;
 using Orange::Engine::Game::GameModuleLibrary;
 
 namespace
@@ -62,6 +64,36 @@ int main(int argc, char** argv)
         if (lib) return Fail("缺失 dll 应返回 null");
     }
 
-    std::printf("[DllGameModuleTest] PASS: load/use/unload/reload/并存/错误路径 全过\n");
+    // 5) 宿主集成：GameModuleHost 拥有 DLL 库并无差别驱动生命周期；ClearModules /
+    //    host 析构安全卸载（先 dll 内销毁模块、再 FreeLibrary）。
+    {
+        Orange::Engine::Game::GameModuleContext ctx{}; // 全 null；TestGameModule 各回调 no-op
+
+        GameModuleHost host;
+        if (host.ModuleCount() != 0) return Fail("host 初始 ModuleCount 非 0");
+
+        auto* raw = host.AddModuleLibrary(GameModuleLibrary::Load(dll));
+        if (raw == nullptr) return Fail("AddModuleLibrary 返回 null");
+        if (host.ModuleCount() != 1) return Fail("AddModuleLibrary 后 ModuleCount 应为 1");
+
+        // 驱动 Play 生命周期（护栏 + 扇出，ctx 全 null 由 no-op 默认吞）。
+        host.EnterPlay(ctx);
+        if (!host.IsInPlay()) return Fail("EnterPlay 后应在 Play");
+        host.Tick(ctx, 0.016f);
+        host.ExitPlay(ctx);
+        if (host.IsInPlay()) return Fail("ExitPlay 后不应在 Play");
+
+        // Edit 态 ClearModules 安全卸载（销毁 GameModuleLibrary → dll 内销毁 + FreeLibrary）。
+        host.ClearModules();
+        if (host.ModuleCount() != 0) return Fail("ClearModules 后 ModuleCount 应为 0");
+
+        // 混合静态 + DLL 模块并存 + host 析构自动安全卸载。
+        host.AddModuleLibrary(GameModuleLibrary::Load(dll));
+        host.AddModuleLibrary(GameModuleLibrary::Load(dll));
+        if (host.ModuleCount() != 2) return Fail("并存两 DLL 库 ModuleCount 应为 2");
+        // host 出作用域析构：mOwnedLibraries 各析构安全卸载，不崩。
+    }
+
+    std::printf("[DllGameModuleTest] PASS: load/use/unload/reload/并存/错误路径/宿主集成 全过\n");
     return EXIT_SUCCESS;
 }
