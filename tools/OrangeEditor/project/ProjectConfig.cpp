@@ -47,6 +47,27 @@ namespace Orange::Editor::Project
         {
             config.windowTitle = !proj.name.empty() ? proj.name : projPath.stem().string();
         }
+        // M7：把 kind="dll" 的 gameModules ref 解析为绝对路径填 config.dllGameModulePaths
+        //（RunEditorApp 启动装配段用 GameModuleLibrary::Load 加载 + AddModuleLibrary）。
+        // 相对 ref 按主项目根解析（游戏 dll 通常与项目 / exe 同根）；绝对 ref 原样。
+        // "static" / "csharp" 由别处消费，此处只挑 dll。本步在 chdir 前，故解析成绝对。
+        for (const ProjectGameModuleRef& mod : proj.gameModules)
+        {
+            if (mod.kind != "dll" || mod.ref.empty())
+            {
+                continue;
+            }
+            fs::path dllPath(mod.ref);
+            if (dllPath.is_relative())
+            {
+                fs::path resolved = fs::weakly_canonical(primaryRoot / dllPath, ec);
+                dllPath           = (ec || resolved.empty()) ? (primaryRoot / fs::path(mod.ref)) : resolved;
+                ec.clear();
+            }
+            config.dllGameModulePaths.push_back(dllPath.string());
+            ORANGE_LOG_INFO("[OrangeEditor] 项目声明 DLL 游戏模块：{}", dllPath.string());
+        }
+
         ORANGE_LOG_INFO("[OrangeEditor] 项目 '{}' 加载：projectRoot='{}' startupScene='{}'",
                         config.windowTitle, config.projectRoot, config.startupScene);
         return true;

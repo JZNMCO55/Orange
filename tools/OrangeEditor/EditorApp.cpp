@@ -991,6 +991,23 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
     }
     config.modules.clear(); // 所有权已移交宿主，清空避免悬空 unique_ptr 误用
 
+    // M7：动态加载项目声明的 DLL 游戏模块（.orangeproject kind="dll"）——
+    // GameModuleLibrary::Load(shadow-copy + LoadLibrary) → AddModuleLibrary，宿主拥有
+    // GameModuleLibrary，析构序保证 dll 卸载安全。加载失败记 log 不致命（其它模块照常）。
+    // 与静态 modules / ScriptGameModule 并存，注册期扇出 + Play 生命周期无差别驱动。
+    for (const std::string& dllPath : config.dllGameModulePaths)
+    {
+        auto lib = Orange::Engine::Game::GameModuleLibrary::Load(dllPath);
+        if (lib)
+        {
+            editorHost.gameModules.AddModuleLibrary(std::move(lib));
+        }
+        else
+        {
+            ORANGE_LOG_ERROR("[OrangeEditor] DLL 游戏模块加载失败，跳过：{}", dllPath);
+        }
+    }
+
 #if defined(ORANGE_EDITOR_WITH_DOTNET)
     // PIE M5：注册内置 ScriptGameModule（C# 第二宿主，ADR-021）。挂进同一
     // gameModules → EnterPlay/Tick/ExitPlay 复用 SlimeGameModule 同款生命周期扇出，

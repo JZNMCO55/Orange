@@ -57,6 +57,13 @@ namespace Orange::Editor
         // 原版无模块编辑器。move-only（IGameModule 不可拷贝）。
         std::vector<std::unique_ptr<Orange::Engine::Game::IGameModule>> modules;
 
+        // DLL 游戏模块路径（M7 DLL 宿主，ADR-023）。RunEditorApp 启动装配段用
+        // GameModuleLibrary::Load 逐个动态加载 + AddModuleLibrary 进宿主（宿主拥有
+        // GameModuleLibrary，析构时先 dll 内销毁模块再 FreeLibrary）。路径应为绝对——
+        // ApplyProjectFileToConfig 从 .orangeproject 的 kind="dll" gameModules 把 ref
+        // 按 projectRoot 相对解析为绝对。空 = 无 DLL 模块。与静态 modules 并存无差别驱动。
+        std::vector<std::string> dllGameModulePaths;
+
         // 游戏组件 Inspector schema 注册钩子（M4 手感组件化）。RunEditorApp 在
         // 内置 schema 注册之后调一次；per-game editor 在此用
         // `Orange::Editor::Schema::ComponentSchemaBuilder<C>(...).Field<...>().Register()`
