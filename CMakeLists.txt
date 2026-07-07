@@ -258,6 +258,9 @@ add_library(orange_engine
     src/save/SaveGameSystem.cpp
     src/save/SavePath.cpp
     src/save/SlotManager.cpp
+
+    # Game（PIE 玩法宿主）：IGameModule / GameModuleHost 头-only；DLL 加载原语有 .cpp
+    src/game/GameModuleLibrary.cpp
 )
 
 # ---------------------------------------------------------------------------

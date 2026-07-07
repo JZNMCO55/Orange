@@ -6,6 +6,7 @@
 // 扇出驱动。完整性由 check_invariants.py 的 aggregator-completeness 机器强制。
 
 #include <orange/engine/game/GameModuleHost.h>
+#include <orange/engine/game/GameModuleLibrary.h>
 #include <orange/engine/game/IGameModule.h>
 #include <orange/engine/game/ScriptGameModule.h>
 

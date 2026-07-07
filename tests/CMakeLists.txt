@@ -1013,3 +1013,26 @@ if (ORANGE_ENGINE_INSTALL)
             -P "${CMAKE_CURRENT_SOURCE_DIR}/install/editor_build_smoke.cmake"
     )
 endif ()
+
+# ---------------------------------------------------------------------------
+# DllGameModuleTest —— M7 DLL 游戏模块宿主机制回归门。
+#
+# 建最小 test game.dll（MODULE：TestGameModule + ORANGE_EXPORT_GAME_MODULE 宏导出
+# OrangeCreateGameModule / OrangeDestroyGameModule），测试 exe 经
+# GameModuleLibrary::Load 加载 → 验 Name → 卸载 → 重载。覆盖：vtable/FreeLibrary
+# 析构顺序（先 dll 内销毁再卸载）、shadow-copy 热重载、多实例并存、缺失 dll 错误路径。
+# dll 路径经 $<TARGET_FILE:test_game_module> 传给测试 argv[1]。
+# ---------------------------------------------------------------------------
+add_library(test_game_module MODULE game/TestGameModule.cpp)
+target_link_libraries(test_game_module PRIVATE OrangeEngine::orange_engine)
+set_target_properties(test_game_module PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+add_executable(dll_game_module_test game/DllGameModuleTest.cpp)
+target_link_libraries(dll_game_module_test PRIVATE OrangeEngine::orange_engine)
+target_include_directories(dll_game_module_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+orange_engine_set_compiler_options(dll_game_module_test)
+add_dependencies(dll_game_module_test test_game_module)
+add_test(NAME dll_game_module_test
+         COMMAND dll_game_module_test "$<TARGET_FILE:test_game_module>")
