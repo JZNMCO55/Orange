@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- script_reload_test 的行为变体 fixture V2（PIE M8 热重载）。与 ScriptFixtures
+       同命名空间 OrangeFixtures + 同类型名 Hop，但每帧位移不同（+2 vs V1 的 +1）。
+       dotnet build 产出 ScriptFixturesV2.dll（+ 顺带 OrangeScriptSDK.dll）。热重载
+       测试把某实体的脚本从 V1 dll 换到本 dll，reload 后行为改变即证明新代码被加载。
+       与 ScriptFixtures 同款设置（net8.0 / GenerateRuntimeConfigurationFiles）。 -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ScriptFixturesV2</AssemblyName>
+    <RootNamespace>OrangeFixtures</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OrangeScriptSDK\OrangeScriptSDK.csproj" />
+  </ItemGroup>
+
+</Project>

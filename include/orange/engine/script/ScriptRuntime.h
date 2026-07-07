@@ -109,6 +109,34 @@ namespace Orange::Engine::Script
                                       int                  fieldType,
                                       const std::string&   valueUtf8);
 
+        // --- M8 热重载：状态快照 / 回灌 / 卸载 -----------------------------------
+        // 见 ScriptSystem::ReloadWorld —— 这四件由它编排。
+
+        // 反射读脚本实例的 public 字段存进托管侧快照字典（按 entity）。reload 后经
+        // RestoreState 回灌，令运行时改过的 tweakable 字段跨热重载保留。成功返回 true。
+        // 无效句柄 / 未初始化返回 false（不崩）。
+        bool SnapshotState(Entity entity, ScriptInstanceHandle handle);
+
+        // 把先前 SnapshotState 存的字段值回灌进新实例（覆盖 authored 默认）。无对应
+        // 快照 / 写回失败返回 false。
+        bool RestoreState(Entity entity, ScriptInstanceHandle handle);
+
+        // 卸载当前游戏程序集的可卸载 collectible ALC（.NET 端热重载核心）：断托管侧
+        // 唯一强引用 → Unload → 轮询 GC。**调用方须在此之前 Release 所有脚本句柄**。
+        // 弱引用在若干轮 GC 内消亡返回 Ok；未消亡返回 Err（InternalError）。未加载任何
+        // 游戏 ALC 时返回 Ok。
+        //
+        // **功能不依赖同步回收**：无论 Ok/Err，调用后托管侧已断引用，下次 CreateInstance
+        // 会建新 ALC 载新代码 —— ReloadWorld 收到 Err 只 warn 不中断。**已知宿主限制**：
+        // 本宿主 C++ 经 reverse-P/Invoke 驱动 glue，实测加载 collectible 程序集时进程内
+        // 有 reverse-P/Invoke 栈帧会令 CoreCLR 持久 GC-root 该 ALC，故同步弱引用消亡通常
+        // 达不到（返回 Err），旧 ALC 内存延后回收。功能性热重载（卸旧引用/载新代码/回灌
+        // 状态）不受影响。详见 M8 探查记录。
+        Result<void> UnloadGameAssemblies();
+
+        // 清空托管侧状态快照字典（reload 收尾）。未初始化时 no-op。
+        void ClearSnapshots();
+
         // 是否已成功 Initialize。
         bool IsInitialized() const noexcept;
 

@@ -881,8 +881,11 @@ if (ORANGE_ENGINE_WITH_DOTNET)
                 -c $<CONFIG> --nologo -v quiet
         DEPENDS "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Mover.cs"
                 "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Tweakable.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Accumulator.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/ScriptFixtures/Hop.cs"
                 "${_orange_fixtures_proj}"
                 "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/ScriptRuntime.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/GameLoadContext.cs"
                 "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/EngineInterop.cs"
                 "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/Entity.cs"
                 "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/OrangeScript.cs"
@@ -940,6 +943,53 @@ if (ORANGE_ENGINE_WITH_DOTNET)
                 "$<TARGET_FILE_DIR:script_system_test>"
         VERBATIM)
     add_test(NAME script_system_test COMMAND script_system_test)
+
+    # -----------------------------------------------------------------------
+    # script_reload_test（PIE M8）—— C# collectible ALC 热重载端到端验证：
+    #   1) 卸载确认（CreateInstance→Release→UnloadGameAssemblies 返回 Ok）；
+    #   2) 状态保持（ScriptSystem::ReloadWorld 保留运行时 public 字段）；
+    #   3) 行为更新（Hop 从 V1 程序集 +1/帧 热重载切到 V2 程序集 +2/帧）。
+    #
+    # 复用 orange_engine_script_fixtures 产出的 ScriptFixtures（含 Mover /
+    # Accumulator / Hop）+ 额外一份**预编**的 ScriptFixturesV2（同类型名 Hop 但
+    # +2/帧）。用预编变体、不在测试里调编译器 —— 保确定性。
+    # -----------------------------------------------------------------------
+    set(_orange_fixtures_v2_proj
+        "${CMAKE_SOURCE_DIR}/csharp/ScriptFixturesV2/ScriptFixturesV2.csproj")
+    set(_orange_fixtures_v2_out_dir
+        "${CMAKE_SOURCE_DIR}/csharp/ScriptFixturesV2/bin/$<CONFIG>/net8.0")
+    set(_orange_fixtures_v2_dll "${_orange_fixtures_v2_out_dir}/ScriptFixturesV2.dll")
+
+    add_custom_command(
+        OUTPUT  "${_orange_fixtures_v2_dll}"
+        COMMAND "${ORANGE_ENGINE_DOTNET_EXE}" build "${_orange_fixtures_v2_proj}"
+                -c $<CONFIG> --nologo -v quiet
+        DEPENDS "${CMAKE_SOURCE_DIR}/csharp/ScriptFixturesV2/Hop.cs"
+                "${_orange_fixtures_v2_proj}"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/OrangeScript.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/Entity.cs"
+                "${CMAKE_SOURCE_DIR}/csharp/OrangeScriptSDK/OrangeScriptSDK.csproj"
+        COMMENT "OrangeEngine: 构建托管脚本行为变体 fixture V2（ScriptFixturesV2）"
+        VERBATIM)
+    add_custom_target(orange_engine_script_fixtures_v2 ALL
+        DEPENDS "${_orange_fixtures_v2_dll}")
+
+    add_executable(script_reload_test script/script_reload_test.cpp)
+    add_dependencies(script_reload_test orange_engine_script_fixtures orange_engine_script_fixtures_v2)
+    target_link_libraries(script_reload_test PRIVATE OrangeEngine::orange_engine)
+    target_compile_definitions(script_reload_test PRIVATE
+        "ORANGE_SCRIPTFIXTURES_ASSEMBLY_PATH=\"${_orange_fixtures_dll}\""
+        "ORANGE_SCRIPTFIXTURES_RUNTIMECONFIG_PATH=\"${_orange_fixtures_cfg}\""
+        "ORANGE_SCRIPT_SDK_ASSEMBLY_PATH=\"${_orange_fixtures_sdk_dll}\""
+        "ORANGE_SCRIPTFIXTURES_V2_ASSEMBLY_PATH=\"${_orange_fixtures_v2_dll}\"")
+    orange_engine_set_compiler_options(script_reload_test)
+    # nethost.dll 必须在测试 exe 的 DLL 搜索路径上（get_hostfxr_path 经它解析）。
+    add_custom_command(TARGET script_reload_test POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${ORANGE_ENGINE_DOTNET_NETHOST_DLL}"
+                "$<TARGET_FILE_DIR:script_reload_test>"
+        VERBATIM)
+    add_test(NAME script_reload_test COMMAND script_reload_test)
 endif ()
 
 # ---------------------------------------------------------------------------

@@ -118,6 +118,10 @@ private:
     // M7：帧末消费 scene.pendingReloadModules —— 热重载所有 DLL 游戏模块库
     // （摘 pass→卸载→重 Load→重注册）+ re-merge module serializer。仅 Edit 态。
     void ApplyPendingModuleReload();
+
+    // M8：帧末消费 scene.pendingReloadScripts —— C# 脚本热重载（ScriptGameModule::
+    // ReloadScripts 保运行时状态换新代码）。仅 Play/Paused 态（区别 M7 DLL Edit-only）。
+    void ApplyPendingScriptReload();
     // v1.1 T2：drain EditorHost.pendingImports —— File→Import dialog 路径
     // 由 mPendingImportDialog flag 在帧首先弹出文件对话框拿路径 push 进
     // 队列，然后与 OS drag-drop 同款逐条 ImportDispatcher::Dispatch。dialog

@@ -56,6 +56,16 @@ namespace Orange::Engine::Script
         // Play tick：对所有活脚本实例调 OnUpdate(dt)。dt 单位秒。无活实例时 no-op。
         void Tick(World& world, float dt);
 
+        // Play 中热重载（M8）：保留运行时状态 + 换新代码，不走 stop 语义。
+        //   ① 逐个 SnapshotState（存 public 字段运行时值）；
+        //   ② 逐个 Release（**不** OnDestroy —— reload 非 stop）+ 清 map；
+        //   ③ UnloadGameAssemblies（卸载旧 collectible ALC；须先 ② Release 完）；
+        //   ④ 等同 StartWorld 主体重实例化（CreateInstance 进新 ALC → 注入 authored
+        //      fieldOverrides → RestoreState 回灌运行时快照〔覆盖 authored〕→ OnStart）；
+        //   ⑤ ClearSnapshots。
+        // 前置：StartWorld 已调（有活实例才有意义；空 map 时退化为纯卸载 + 重建）。
+        void ReloadWorld(World& world);
+
         // 退 Play：对所有活脚本实例调 OnDestroy + Release，清空内部 map。
         void StopWorld(World& world);
 

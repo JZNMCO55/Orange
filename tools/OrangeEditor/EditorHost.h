@@ -72,6 +72,14 @@ namespace Orange::Editor::Render
     class ThumbnailService;
 }
 
+// M8：ScriptGameModule 的 typed handle 前向声明。编辑器捕获内置 ScriptGameModule
+// 裸指针（非拥有，所有权在 gameModules），供帧末脚本热重载调 IsScriptStale /
+// ReloadScripts。前向声明足够（此处只需不完整类型；方法调用站点 include 头）。
+namespace Orange::Engine::Game
+{
+    class ScriptGameModule;
+}
+
 struct EditorHost
 {
     EditorSelection         selection;
@@ -176,6 +184,12 @@ struct EditorHost
     //   * Play 生命周期：EnterPlay / Tick / OnEvent / ExitPlay 由 EditorRenderLayer
     //     的 Play 路径扇出（护栏保证配对）。
     Orange::Engine::Game::GameModuleHost gameModules;
+
+    // M8：内置 ScriptGameModule 的 typed handle（非拥有，指向 gameModules 里那份）。
+    // EditorApp 构造 ScriptGameModule 时捕获 .get()；null = 无 dotnet / 未注册。
+    // 供帧末脚本热重载（IsScriptStale 轮询 + ReloadScripts）——脚本 reload 需 typed
+    // 调用，IGameModule 基类无此接口（脚本热重载是 C# 特有，不污染语言无关接口）。
+    Orange::Engine::Game::ScriptGameModule* mpScriptModule = nullptr;
 
     // v1.1 T2：OS 文件 drop 到主窗口时的入站队列。main.cpp 的
     // glfwSetDropCallback 把绝对路径 push 进来；EditorRenderLayer::OnUpdate

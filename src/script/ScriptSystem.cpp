@@ -109,6 +109,82 @@ namespace Orange::Engine::Script
         }
     }
 
+    void ScriptSystem::ReloadWorld(World& world)
+    {
+        // 绑定函数 decode scriptId 后在该 World 上取 / 写组件 —— 全程先设好。
+        mpRuntime->SetCurrentWorld(&world);
+
+        // ① 快照每个活实例的运行时状态（public 字段），供 reload 后回灌。
+        for (auto& [entity, handle] : mInstances)
+        {
+            mpRuntime->SnapshotState(entity, handle);
+        }
+
+        // ② 逐个 Release（不 OnDestroy —— reload 非 stop 语义）+ 清 map。**必须**在
+        //    UnloadGameAssemblies 之前 Free 所有 GCHandle，否则实例把 collectible ALC
+        //    pin 住卸不掉。
+        for (auto& [entity, handle] : mInstances)
+        {
+            mpRuntime->Release(handle);
+        }
+        mInstances.clear();
+
+        // ③ 卸载旧游戏程序集（collectible ALC）。失败（可能泄漏）记 warn 但继续 ——
+        //    重新加载仍会建新 ALC，旧的泄漏不阻塞热重载本身。
+        auto unloadResult = mpRuntime->UnloadGameAssemblies();
+        if (unloadResult.IsErr())
+        {
+            ORANGE_LOG_WARN(
+                "ScriptSystem::ReloadWorld: UnloadGameAssemblies 未完成（可能泄漏）；仍继续重载。");
+        }
+
+        // ④ 重实例化（等同 StartWorld 主体，多一步 RestoreState 回灌运行时快照）。
+        auto& registry = world.Registry();
+        auto  view     = registry.view<ScriptComponent>();
+        for (auto enttEntity : view)
+        {
+            const Entity           entity = World::FromEntt(enttEntity);
+            const ScriptComponent& sc     = view.get<ScriptComponent>(enttEntity);
+
+            auto instanceResult = mpRuntime->CreateInstance(sc.assemblyPath, sc.typeName, entity);
+            if (instanceResult.IsErr())
+            {
+                ORANGE_LOG_WARN(
+                    "ScriptSystem::ReloadWorld: failed to re-instantiate script type '{}' from "
+                    "assembly '{}'; skipping it.",
+                    sc.typeName, sc.assemblyPath);
+                continue;
+            }
+
+            const ScriptInstanceHandle handle = instanceResult.Value();
+            mInstances.emplace(entity, handle);
+
+            // 先注入 authored 默认值（同 StartWorld），再用运行时快照覆盖 —— 令
+            // reload 保留 live 状态而非退回 authored。
+            for (const ScriptFieldOverride& ov : sc.fieldOverrides)
+            {
+                auto setResult = mpRuntime->SetInstanceField(
+                    handle, ov.name, static_cast<int>(ov.type), ov.value);
+                if (setResult.IsErr())
+                {
+                    ORANGE_LOG_WARN(
+                        "ScriptSystem::ReloadWorld: failed to apply field override '{}' = '{}' "
+                        "on script type '{}'; skipping that override.",
+                        ov.name, ov.value, sc.typeName);
+                }
+            }
+
+            // 回灌运行时快照（覆盖 authored 默认）。无对应快照（新实体 / 该字段是新增）
+            // 时静默跳过 —— 走 authored / 脚本默认值。
+            mpRuntime->RestoreState(entity, handle);
+
+            mpRuntime->InvokeStart(handle);
+        }
+
+        // ⑤ 清快照字典 —— 本轮 reload 已消费。
+        mpRuntime->ClearSnapshots();
+    }
+
     void ScriptSystem::StopWorld(World& world)
     {
         mpRuntime->SetCurrentWorld(&world);

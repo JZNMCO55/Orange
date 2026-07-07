@@ -15,6 +15,8 @@
 #include <orange/engine/script/ScriptSystem.h>
 
 #include <filesystem>
+#include <system_error>
+#include <unordered_map>
 #include <utility>
 
 namespace Orange::Engine::Game
@@ -39,6 +41,11 @@ namespace Orange::Engine::Game
         bool initialized = false; // CoreCLR 起成功
         bool initFailed  = false; // 起失败——不再每次 Play 重试刷屏
         bool started     = false; // StartWorld 已调、待 StopWorld 配对
+
+        // 热重载 file-watcher 基准（M8）：resolved 游戏程序集全路径 → 记录时 mtime。
+        // StartWorld / ReloadScripts 后刷新；IsScriptStale 逐个比对（读不到返 false
+        // 防误报，镜像 GameModuleLibrary::IsSourceStale）。
+        std::unordered_map<std::string, std::filesystem::file_time_type> scriptTimestamps;
 
         explicit Impl(std::string rtConfig, std::string sdk)
             : runtimeConfigPath(std::move(rtConfig)), sdkAssemblyPath(std::move(sdk)),
@@ -109,6 +116,50 @@ namespace Orange::Engine::Game
             auto view = world.Registry().view<Script::ScriptComponent>();
             return view.begin() != view.end();
         }
+
+        // 记录当前（已 resolve 的）游戏程序集集合的 mtime 基准。StartWorld /
+        // ReloadScripts 后调，作为 IsScriptStale 的重编检测锚点。读不到的文件跳过。
+        void RecordScriptTimestamps(World& world)
+        {
+            namespace fs = std::filesystem;
+            scriptTimestamps.clear();
+            auto& registry = world.Registry();
+            for (auto e : registry.view<Script::ScriptComponent>())
+            {
+                const auto& sc = registry.get<Script::ScriptComponent>(e);
+                if (sc.assemblyPath.empty() || scriptTimestamps.count(sc.assemblyPath) != 0)
+                {
+                    continue;
+                }
+                std::error_code ec;
+                const auto      t = fs::last_write_time(sc.assemblyPath, ec);
+                if (!ec)
+                {
+                    scriptTimestamps.emplace(sc.assemblyPath, t);
+                }
+            }
+        }
+
+        // 记录在案的任一游戏程序集是否已被重编（mtime 晚于基准）。读不到（正被覆盖 /
+        // 不存在）不误报（跳过该文件）。镜像 GameModuleLibrary::IsSourceStale。
+        bool IsStale() const
+        {
+            namespace fs = std::filesystem;
+            for (const auto& [path, baseline] : scriptTimestamps)
+            {
+                std::error_code ec;
+                const auto      now = fs::last_write_time(path, ec);
+                if (ec)
+                {
+                    continue; // 此刻读不到 → 不误报
+                }
+                if (now > baseline)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
     };
 
     ScriptGameModule::ScriptGameModule(std::string runtimeConfigPath, std::string sdkAssemblyPath)
@@ -140,6 +191,8 @@ namespace Orange::Engine::Game
 
         mpImpl->ResolveAssemblyPaths(world);
         mpImpl->scripts.StartWorld(world);
+        // 记录 resolved 程序集 mtime 基准，供 IsScriptStale 检测 Play 中重编。
+        mpImpl->RecordScriptTimestamps(world);
         mpImpl->started = true;
     }
 
@@ -162,7 +215,32 @@ namespace Orange::Engine::Game
         {
             mpImpl->scripts.StopWorld(*ctx.pWorld);
         }
+        mpImpl->scriptTimestamps.clear();
         mpImpl->started = false;
+    }
+
+    bool ScriptGameModule::IsScriptStale() const
+    {
+        // 未 Play / 无脚本（未记录基准）时恒 false。
+        if (!mpImpl->started)
+        {
+            return false;
+        }
+        return mpImpl->IsStale();
+    }
+
+    void ScriptGameModule::ReloadScripts(GameModuleContext& ctx)
+    {
+        // 仅 Play 中（已起脚本）有意义。ResolveAssemblyPaths 已在 OnEnterPlay 把
+        // 组件路径就地改写为 resolved 全路径，故这里直接复用（重编覆盖的是同一路径）。
+        if (!mpImpl->started || ctx.pWorld == nullptr)
+        {
+            return;
+        }
+        World& world = *ctx.pWorld;
+        mpImpl->scripts.ReloadWorld(world);
+        // 刷新 mtime 基准 —— 否则刚重载完 IsScriptStale 仍报 stale（回到旧基准）。
+        mpImpl->RecordScriptTimestamps(world);
     }
 
 } // namespace Orange::Engine::Game

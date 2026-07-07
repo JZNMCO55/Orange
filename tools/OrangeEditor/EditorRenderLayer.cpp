@@ -38,6 +38,7 @@
 #include <orange/engine/audio/AudioEngine.h>
 #include <orange/engine/audio/AudioSourceComponent.h>
 #include <orange/engine/audio/SoundInstance.h>
+#include <orange/engine/game/ScriptGameModule.h> // M8：mpScriptModule->ReloadScripts 需完整定义
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/core/Log.h>
 #include <orange/engine/core/Memory.h>
@@ -564,6 +565,7 @@ void EditorRenderLayer::OnUpdate(const Orange::Engine::FrameContext& frame)
     ApplyPendingSceneOp();
     ApplyPendingPlayOp();
     ApplyPendingModuleReload();
+    ApplyPendingScriptReload();
     ApplyPendingImports();
     // MCP 命令帧末 drain（与上面三条 pending-op 同位）。无 --mcp-port 启动时
     // mHost.mcp 队列恒空，这里只做一次快速空检查，零额外开销。
@@ -2305,6 +2307,35 @@ void EditorRenderLayer::ApplyPendingModuleReload()
     mHost.extraSerializers.insert(mHost.extraSerializers.end(), fresh.begin(), fresh.end());
 
     ORANGE_LOG_INFO("[OrangeEditor] DLL 游戏模块热重载完成：{}/{} 库成功", ok, n);
+}
+
+void EditorRenderLayer::ApplyPendingScriptReload()
+{
+    if (!mHost.scene.pendingReloadScripts)
+    {
+        return;
+    }
+    mHost.scene.pendingReloadScripts = false;
+
+    // gate：仅 Play/Paused（脚本已 StartWorld 才有可 reload 的实例）+ mpScriptModule 存在。
+    // 区别 M7 DLL reload（Edit-only，pass vtable teardown 在 Play 中不安全）：C# 脚本
+    // reload 可在 Play 中——无 native 指针进游戏程序集，卸旧载新 + 回灌运行时状态安全
+    // （M8 ADR-017 amend）。
+    if ((mHost.scene.playState != PlayState::Play && mHost.scene.playState != PlayState::Paused)
+        || mHost.mpScriptModule == nullptr)
+    {
+        return;
+    }
+
+    // ctx 与 StepSimulationOnce / EnterPlay 同款装配。
+    Orange::Engine::Game::GameModuleContext gmCtx{};
+    gmCtx.pWorld    = mHost.scene.pWorld.get();
+    gmCtx.pPhysics  = mpPhysicsWorld.get();
+    gmCtx.pAssets   = mHost.assets.pAssets.get();
+    gmCtx.pPipeline = mpScenePipeline.get();
+    mHost.mpScriptModule->ReloadScripts(gmCtx);
+
+    ORANGE_LOG_INFO("[OrangeEditor] C# 脚本热重载完成（运行时状态保留）");
 }
 
 void EditorRenderLayer::ApplyPendingImports()

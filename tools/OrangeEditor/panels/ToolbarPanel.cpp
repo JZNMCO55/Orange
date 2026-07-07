@@ -34,6 +34,8 @@
 #include "../EditorHost.h"
 #include "../theme/EditorTheme.h"
 
+#include <orange/engine/game/ScriptGameModule.h> // M8：mpScriptModule->IsScriptStale
+
 #include <imgui.h>
 #include <imgui_internal.h> // BeginViewportSideBar（公开但 internal 命名）
 
@@ -221,31 +223,46 @@ void EditorRenderLayer::DrawMainToolbar()
         ImGui::EndDisabled();
         ImGui::SameLine();
 
-        // ---- Reload（M7 DLL 热重载）：Edit 态 + 有 DLL 模块才可点。原 dll 被重编时
-        // （AnyLibraryStale）按钮着 accent 橙提示"已过期，可重载"。点击置
-        // pendingReloadModules，帧末 ApplyPendingModuleReload 摘 pass→卸载→重 Load→重
-        // 注册 + re-merge serializer。纯静态模块（LibraryCount==0）时按钮置灰。
-        const bool hasDllModule = (mHost.gameModules.LibraryCount() > 0);
-        const bool canReload    = (ps == PlayState::Edit) && hasDllModule;
-        const bool moduleStale  = hasDllModule && mHost.gameModules.AnyLibraryStale();
+        // ---- Reload（M7 DLL + M8 C# 脚本热重载）------------------------------
+        // M7 DLL：Edit 态 + 有 DLL 模块，原 dll 被重编（AnyLibraryStale）时 accent 橙提示
+        //   → pendingReloadModules（摘 pass→卸载→重 Load→重注册 + re-merge serializer）。
+        // M8 脚本：Play/Paused 态 + 有 ScriptGameModule + 脚本过期（IsScriptStale）→
+        //   pendingReloadScripts（保运行时状态换新代码）。脚本可 Play 中 reload——区别
+        //   DLL 的 Edit-only（DLL pass vtable teardown 在 Play 中不安全）。两者共用 [R]。
+        const bool hasDllModule    = (mHost.gameModules.LibraryCount() > 0);
+        const bool canReloadDll    = (ps == PlayState::Edit) && hasDllModule;
+        const bool dllStale        = canReloadDll && mHost.gameModules.AnyLibraryStale();
+        const bool hasScriptModule = (mHost.mpScriptModule != nullptr);
+        const bool scriptStale     = (ps != PlayState::Edit) && hasScriptModule &&
+                                 mHost.mpScriptModule->IsScriptStale();
+        const bool canReload = canReloadDll || scriptStale;
+        const bool showStale = dllStale || scriptStale;
         ImGui::BeginDisabled(!canReload);
-        if (moduleStale)
+        if (showStale)
         {
             ImGui::PushStyleColor(ImGuiCol_Text,
                                   Orange::Editor::Theme::Color::GetAccentPrimary());
         }
         if (ImGui::Button(reloadLabel, btnSize))
         {
-            mHost.scene.pendingReloadModules = true;
+            if (ps == PlayState::Edit)
+            {
+                mHost.scene.pendingReloadModules = true;
+            }
+            else
+            {
+                mHost.scene.pendingReloadScripts = true;
+            }
         }
-        if (moduleStale)
+        if (showStale)
         {
             ImGui::PopStyleColor();
         }
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip(moduleStale ? "Reload game module DLL (changed on disk)"
-                                          : "Reload game module DLL (Edit only)");
+            ImGui::SetTooltip(scriptStale ? "Reload C# scripts (changed on disk; Play OK)"
+                              : dllStale   ? "Reload game module DLL (changed on disk)"
+                                           : "Reload game module DLL (Edit only)");
         }
         ImGui::EndDisabled();
         ImGui::SameLine();

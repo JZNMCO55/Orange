@@ -1020,8 +1020,10 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
         const std::string           sdkDll = (scriptsDir / "OrangeScriptSDK.dll").string();
         const std::string           rtCfg =
             (scriptsDir / "OrangeScriptSDK.runtimeconfig.json").string();
-        editorHost.gameModules.AddModule(
-            std::make_unique<Orange::Engine::Game::ScriptGameModule>(rtCfg, sdkDll));
+        auto scriptModule =
+            std::make_unique<Orange::Engine::Game::ScriptGameModule>(rtCfg, sdkDll);
+        editorHost.mpScriptModule = scriptModule.get(); // M8：typed handle 供脚本热重载
+        editorHost.gameModules.AddModule(std::move(scriptModule));
         ORANGE_LOG_INFO("[OrangeEditor] C# 脚本宿主已注册（ScriptGameModule；sdk={}）",
                         sdkDll);
     }

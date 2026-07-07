@@ -149,6 +149,12 @@ struct EditorSceneContext
     // （未来）MCP 复用（handler 只拿得到 EditorHost&）。
     bool pendingReloadModules = false;
 
+    // M8：C# 脚本热重载请求。ToolbarPanel 的 [R] 按钮在 Play/Paused 态（脚本可 Play
+    // 中 reload——区别 M7 DLL 的 Edit-only）置 true，帧末 EditorRenderLayer::
+    // ApplyPendingScriptReload 消费——ScriptGameModule::ReloadScripts（保运行时状态换
+    // 新代码）。放 context 供 Toolbar +（未来）MCP 共写，同 pendingReloadModules。
+    bool pendingReloadScripts = false;
+
     // v0.6 c2：未保存确认 popup 状态。pendingCloseAction != None 时下一
     // 帧 EditorRenderLayer 弹 modal popup；用户选 Save/Discard/Cancel 后
     // 决定怎么走 pendingCloseAction（执行 / 重置）。

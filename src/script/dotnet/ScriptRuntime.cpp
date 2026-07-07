@@ -51,6 +51,14 @@ namespace Orange::Engine::Script
         //   SetInstanceField(IntPtr h, IntPtr fieldNameUtf8, int fieldType,
         //                    IntPtr valueUtf8) -> int（1 成功 / 0 失败）
         using SetInstanceFieldFn = int (*)(void*, const char*, int, const char*);
+        //   SnapshotInstanceState(ulong entityId, IntPtr h) -> int（1 成功 / 0 失败）
+        using SnapshotStateFn = int (*)(std::uint64_t, void*);
+        //   RestoreInstanceState(ulong entityId, IntPtr h) -> int
+        using RestoreStateFn = int (*)(std::uint64_t, void*);
+        //   UnloadGameAssemblies() -> int（0 卸载完成 / 非 0 可能泄漏）
+        using UnloadGameAssembliesFn = int (*)();
+        //   ClearSnapshots()
+        using ClearSnapshotsFn = void (*)();
 
         // 把 ScriptInstanceHandle 的不透明 uint64 与托管 GCHandle 的 IntPtr（void*）
         // 互转。MVP 直接把指针位模式塞进 uint64（64-bit 平台指针 ≤ 64 位）。
@@ -82,6 +90,11 @@ namespace Orange::Engine::Script
         InvokeDestroyFn    invokeDestroyFn    = nullptr;
         ReleaseFn          releaseFn          = nullptr;
         SetInstanceFieldFn setInstanceFieldFn = nullptr;
+
+        SnapshotStateFn        snapshotStateFn        = nullptr;
+        RestoreStateFn         restoreStateFn         = nullptr;
+        UnloadGameAssembliesFn unloadGameAssembliesFn = nullptr;
+        ClearSnapshotsFn       clearSnapshotsFn       = nullptr;
 
         bool initialized = false;
     };
@@ -128,20 +141,28 @@ namespace Orange::Engine::Script
             return true;
         };
 
-        void* bootstrap        = nullptr;
-        void* createInstance   = nullptr;
-        void* invokeStart      = nullptr;
-        void* invokeUpdate     = nullptr;
-        void* invokeDestroy    = nullptr;
-        void* release          = nullptr;
-        void* setInstanceField = nullptr;
+        void* bootstrap             = nullptr;
+        void* createInstance        = nullptr;
+        void* invokeStart           = nullptr;
+        void* invokeUpdate          = nullptr;
+        void* invokeDestroy         = nullptr;
+        void* release               = nullptr;
+        void* setInstanceField      = nullptr;
+        void* snapshotState         = nullptr;
+        void* restoreState          = nullptr;
+        void* unloadGameAssemblies  = nullptr;
+        void* clearSnapshots        = nullptr;
         if (!getFn("Bootstrap", &bootstrap) ||
             !getFn("CreateInstance", &createInstance) ||
             !getFn("InvokeStart", &invokeStart) ||
             !getFn("InvokeUpdate", &invokeUpdate) ||
             !getFn("InvokeDestroy", &invokeDestroy) ||
             !getFn("Release", &release) ||
-            !getFn("SetInstanceField", &setInstanceField))
+            !getFn("SetInstanceField", &setInstanceField) ||
+            !getFn("SnapshotInstanceState", &snapshotState) ||
+            !getFn("RestoreInstanceState", &restoreState) ||
+            !getFn("UnloadGameAssemblies", &unloadGameAssemblies) ||
+            !getFn("ClearSnapshots", &clearSnapshots))
         {
             return ResultCode::InternalError;
         }
@@ -153,6 +174,11 @@ namespace Orange::Engine::Script
         mpImpl->invokeDestroyFn    = reinterpret_cast<InvokeDestroyFn>(invokeDestroy);
         mpImpl->releaseFn          = reinterpret_cast<ReleaseFn>(release);
         mpImpl->setInstanceFieldFn = reinterpret_cast<SetInstanceFieldFn>(setInstanceField);
+
+        mpImpl->snapshotStateFn        = reinterpret_cast<SnapshotStateFn>(snapshotState);
+        mpImpl->restoreStateFn         = reinterpret_cast<RestoreStateFn>(restoreState);
+        mpImpl->unloadGameAssembliesFn = reinterpret_cast<UnloadGameAssembliesFn>(unloadGameAssemblies);
+        mpImpl->clearSnapshotsFn       = reinterpret_cast<ClearSnapshotsFn>(clearSnapshots);
 
         // 把 C++ 绑定函数指针表推给托管侧（C# EngineInterop 存为函数指针）。
         mpImpl->bootstrapFn(GetScriptBindingTable());
@@ -259,6 +285,57 @@ namespace Orange::Engine::Script
             return ResultCode::NotFound;
         }
         return Result<void>{};
+    }
+
+    // ---------------------------------------------------------------------------
+    // M8 热重载：SnapshotState / RestoreState / UnloadGameAssemblies / ClearSnapshots
+    // —— 转调对应托管入口。entity 在本层 EncodeEntityId 成 scriptId（与 CreateInstance
+    // 注入托管侧的句柄同款编码），作为托管快照字典的键；故 ScriptSystem 只需传 Entity，
+    // 不必接触绑定层的 EncodeEntityId（保持 src/script/ 门面纯净）。
+    // ---------------------------------------------------------------------------
+    bool ScriptRuntime::SnapshotState(Entity entity, ScriptInstanceHandle handle)
+    {
+        if (!mpImpl->initialized || !handle.IsValid() || mpImpl->snapshotStateFn == nullptr)
+        {
+            return false;
+        }
+        const std::uint64_t scriptId = EncodeEntityId(entity);
+        return mpImpl->snapshotStateFn(scriptId, HandleToPtr(handle)) == 1;
+    }
+
+    bool ScriptRuntime::RestoreState(Entity entity, ScriptInstanceHandle handle)
+    {
+        if (!mpImpl->initialized || !handle.IsValid() || mpImpl->restoreStateFn == nullptr)
+        {
+            return false;
+        }
+        const std::uint64_t scriptId = EncodeEntityId(entity);
+        return mpImpl->restoreStateFn(scriptId, HandleToPtr(handle)) == 1;
+    }
+
+    Result<void> ScriptRuntime::UnloadGameAssemblies()
+    {
+        if (!mpImpl->initialized || mpImpl->unloadGameAssembliesFn == nullptr)
+        {
+            return ResultCode::NotInitialized;
+        }
+        const int rc = mpImpl->unloadGameAssembliesFn();
+        if (rc != 0)
+        {
+            // 托管侧已标 stderr（"卸载未完成，可能泄漏"）。非 0 = 弱引用在轮询上限内
+            // 仍存活 —— 映射成 InternalError，调用方按 warn 继续（不阻塞热重载）。
+            return ResultCode::InternalError;
+        }
+        return Result<void>{};
+    }
+
+    void ScriptRuntime::ClearSnapshots()
+    {
+        if (!mpImpl->initialized || mpImpl->clearSnapshotsFn == nullptr)
+        {
+            return;
+        }
+        mpImpl->clearSnapshotsFn();
     }
 
     bool ScriptRuntime::IsInitialized() const noexcept

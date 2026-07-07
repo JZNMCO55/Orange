@@ -64,6 +64,15 @@ namespace Orange::Engine::Game
         void Tick(GameModuleContext& ctx, float dt) override;
         void OnExitPlay(GameModuleContext& ctx) override;
 
+        // 热重载支持（M8，镜像 M7 GameModuleLibrary::IsSourceStale）：
+        //   * IsScriptStale —— OnEnterPlay 时记录的游戏程序集集合里，是否有任一文件
+        //     的 mtime 晚于记录基准（= 被重编）。读不到文件返 false 防误报。未 Play /
+        //     无脚本时返 false。宿主 file-watcher 轮询它决定是否提示重载。
+        //   * ReloadScripts —— 保留运行时状态换新代码（ScriptSystem::ReloadWorld）+
+        //     刷新 mtime 基准。仅在 Play 中（已 OnEnterPlay 且起过脚本）有效。
+        bool IsScriptStale() const;
+        void ReloadScripts(GameModuleContext& ctx);
+
     private:
         struct Impl;
         std::unique_ptr<Impl> mpImpl;
