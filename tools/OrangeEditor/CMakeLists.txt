@@ -203,13 +203,14 @@ add_library(orange_editor STATIC
     demo_game/HealthComponent.cpp
     branding/EditorWindowIcon.cpp
 )
-# OrangeRender::orange_render 由 OrangeEngine::orange_engine 的公共 link 自动
-# 传递；不重复 explicit link，避免 static initializer 顺序冲突。**PUBLIC** 让
-# exe 与 per-game editor 经链 orange_editor 传递性拿到 引擎 / imgui / vulkan /
-# glfw —— STATIC lib 不嵌依赖对象码，最终 exe link 仍需自行解析全部符号。
+# OrangeRender::orange_render 与 OrangeEngine::imgui 均由 OrangeEngine::orange_engine
+# 的公共 link 自动传递；不重复 explicit link。imgui 尤其**不能**再显式直链：SHARED
+# 构建下 orange_engine.dll 内含唯一一份 imgui（IMGUI_API 导出），editor.exe 直链
+# OrangeEngine::imgui 会得到第二份静态 imgui/GImGui → context 分裂（ADR-023）。经
+# orange_engine 传递则 SHARED 下走 dllimport 拿 dll 内那份、STATIC 下拿同一份静态码。
+# **PUBLIC** 让 exe 与 per-game editor 经链 orange_editor 传递性拿到引擎 / imgui。
 target_link_libraries(orange_editor PUBLIC
     OrangeEngine::orange_engine
-    OrangeEngine::imgui
     Vulkan::Vulkan
     glfw)
 

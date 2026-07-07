@@ -39,9 +39,14 @@ include(cmake/CompilerOptions.cmake)
 include(cmake/Dependencies.cmake)
 
 # ---------------------------------------------------------------------------
-# OrangeEngine 静态库
+# OrangeEngine 库
+#
+# 链接形态遵循 `BUILD_SHARED_LIBS`：默认 OFF → STATIC（发布单 exe 全静态链）；
+# `-DBUILD_SHARED_LIBS=ON` → SHARED（orange_engine.dll，editor.exe + game.dll
+# 共享单份引擎，收敛 ImGui GImGui / Core::Log / EnTT 进程级单例，见 ADR-023）。
+# ORANGE_ENGINE_API 导出宏由下方 generate_export_header 按此开关自动切换。
 # ---------------------------------------------------------------------------
-add_library(orange_engine STATIC
+add_library(orange_engine
     src/EngineStub.cpp
 
     # 便利聚合头（prelude + 各子系统 <orange/engine/<name>.h>）自包含性检查 TU。
@@ -928,6 +933,27 @@ target_compile_features(orange_engine PUBLIC cxx_std_20)
 
 orange_engine_set_compiler_options(orange_engine)
 
+# SHARED 构建下的两处必要处理（STATIC 默认路径宏为空、全静态单份，无需任一）：
+# (1) C4251/C4275：导出的公共类含 std::vector / std::string / std::unique_ptr 等 STL
+#     成员会触发 MSVC "需 dll-interface" 警告，叠加 /WX 直接失败。生态内 editor.exe /
+#     *.dll 全用同一 MSVC + 同一 /MD 运行时（ADR-023），STL 布局跨边界一致，此警告为
+#     受控场景误报；PUBLIC 抑制使引擎自身与 dllimport 消费者一致静默。
+# (2) ImGui GImGui 跨 DLL：让 imgui 只活在 orange_engine.dll 内并导出（IMGUI_API=
+#     dllexport），editor.exe / game.dll 经 dllimport 拿同一份 → 单一 GImGui / allocator，
+#     消灭「exe 一份 + dll 一份 context 分裂」（ADR-023 选 SHARED 的首要动机）。
+#     orange_engine_imgui 与 orange_engine 的 TU 都编进同一 dll → 都用 dllexport（PRIVATE）；
+#     仅对外部消费者用 dllimport（INTERFACE）。orange_engine_imgui 不设 INTERFACE，避免
+#     其 dllimport 经 PUBLIC 链回 orange_engine 自身与 PRIVATE dllexport 撞车。
+if (BUILD_SHARED_LIBS)
+    target_compile_options(orange_engine PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/wd4251 /wd4275>)
+    if (MSVC)
+        target_compile_definitions(orange_engine_imgui PRIVATE "IMGUI_API=__declspec(dllexport)")
+        target_compile_definitions(orange_engine
+            PRIVATE   "IMGUI_API=__declspec(dllexport)"
+            INTERFACE "IMGUI_API=__declspec(dllimport)")
+    endif ()
+endif ()
+
 # 头文件中含中文注释；MSVC 默认按系统代码页（中文 Windows 上常见
 # code page 936 / GBK）读取源文件，会在 include 我们公共头时把多字
 # 节序列误判为常量内换行（C2001 / C1075）。`/utf-8` 必须以 PUBLIC
@@ -1095,7 +1121,14 @@ endif ()
 # ---------------------------------------------------------------------------
 option(ORANGE_ENGINE_BUILD_TESTS "Build OrangeEngine unit / smoke tests" OFF)
 
-if (ORANGE_ENGINE_BUILD_TESTS)
+# tests / samples 中部分 TU 越界 include 引擎 src/ 内部头、调用未标 ORANGE_ENGINE_API
+# 的符号（如 DragonBonesContext / ReadColliderDesc）。SHARED 构建下这些内部符号不从
+# orange_engine.dll 导出 → 链接失败。SHARED 是 PIE DLL 宿主链路的产 DLL 配置，仓内
+# test/sample 验证走默认 STATIC dev 配置，故 SHARED 下整体跳过。
+if (ORANGE_ENGINE_BUILD_TESTS AND BUILD_SHARED_LIBS)
+    message(STATUS "OrangeEngine: BUILD_SHARED_LIBS=ON —— tests 越界访问未从 DLL 导出的引擎内部符号，已跳过；测试请用默认 STATIC 构建跑。")
+endif ()
+if (ORANGE_ENGINE_BUILD_TESTS AND NOT BUILD_SHARED_LIBS)
     enable_testing()
     add_subdirectory(tests)
 endif ()
@@ -1115,7 +1148,8 @@ option(ORANGE_ENGINE_BUILD_SAMPLES
     "Build samples/* end-to-end demos"
     "${PROJECT_IS_TOP_LEVEL}")
 
-if (ORANGE_ENGINE_BUILD_SAMPLES)
+# 同 tests：samples 部分越界引擎内部符号，SHARED 下不可链接，故仅 STATIC 构建编。
+if (ORANGE_ENGINE_BUILD_SAMPLES AND NOT BUILD_SHARED_LIBS)
     add_subdirectory(samples)
 endif ()
 
