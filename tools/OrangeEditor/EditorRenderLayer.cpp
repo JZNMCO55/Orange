@@ -2271,6 +2271,10 @@ void EditorRenderLayer::ApplyPendingScriptReload()
         return;
     }
 
+    // ScriptGameModule 方法调用只在 dotnet-enabled 构建存在符号（引擎 WITH_DOTNET
+    // 才编 ScriptGameModule）。纯 C++ SDK（如 SHARED 编辑器 dotnet=OFF）下 mpScriptModule
+    // 恒 null、上面已早退，故本段编译剔除避免链接 unresolved（ReloadScripts dllimport）。
+#if defined(ORANGE_EDITOR_WITH_DOTNET)
     // ctx 与 StepSimulationOnce / EnterPlay 同款装配。
     Orange::Engine::Game::GameModuleContext gmCtx{};
     gmCtx.pWorld    = mHost.scene.pWorld.get();
@@ -2280,6 +2284,7 @@ void EditorRenderLayer::ApplyPendingScriptReload()
     mHost.mpScriptModule->ReloadScripts(gmCtx);
 
     ORANGE_LOG_INFO("[OrangeEditor] C# 脚本热重载完成（运行时状态保留）");
+#endif
 }
 
 void EditorRenderLayer::ApplyPendingImports()

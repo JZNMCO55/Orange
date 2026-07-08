@@ -232,9 +232,15 @@ void EditorRenderLayer::DrawMainToolbar()
         const bool hasDllModule    = (mHost.gameModules.LibraryCount() > 0);
         const bool canReloadDll    = (ps == PlayState::Edit) && hasDllModule;
         const bool dllStale        = canReloadDll && mHost.gameModules.AnyLibraryStale();
-        const bool hasScriptModule = (mHost.mpScriptModule != nullptr);
-        const bool scriptStale     = (ps != PlayState::Edit) && hasScriptModule &&
+        // IsScriptStale 只在 dotnet-enabled 构建有符号；纯 C++ SDK（SHARED 编辑器
+        // dotnet=OFF）下 mpScriptModule 恒 null，scriptStale 恒 false（免链接 unresolved +
+        // 免 hasScriptModule 未使用告警）。
+#if defined(ORANGE_EDITOR_WITH_DOTNET)
+        const bool scriptStale     = (ps != PlayState::Edit) && (mHost.mpScriptModule != nullptr) &&
                                  mHost.mpScriptModule->IsScriptStale();
+#else
+        const bool scriptStale     = false;
+#endif
         const bool canReload = canReloadDll || scriptStale;
         const bool showStale = dllStale || scriptStale;
         ImGui::BeginDisabled(!canReload);
