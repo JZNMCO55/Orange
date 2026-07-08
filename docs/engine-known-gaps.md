@@ -3318,3 +3318,26 @@ OrangeEditor 在 D3D12 后端下：ImGui 面板正常渲染 + 交互；Scene 面
 
 - **登记**（2026-07-03）。**无急迫性**：编辑器当前在 Vulkan 上跑得好，无 D3D12 消费需求；这是"将来真要出 D3D12 编辑器 / 验 D3D12Interop"时的事，**不阻塞 c7 代码合并**。落地节奏独立 session 评审。
 - 依赖：OrangeRender c7 分支 `D3D12Interop.h`（commit `6c54576`）；c7 尚未合 main，届时需 OR 侧 `ORANGE_WITH_D3D12=ON` 构建。
+
+## GAP-2026-07-08-bloom-upsample-blocky-artifacts
+
+- **发现方**：OG spike-01 史莱姆透光质感 dogfood（2026-07-08，真人截图复核）。
+- **一句话定性**：bloom 后处理在大面积亮区周围出现方块状（马赛克感）伪影，疑为降采样链上采样滤波不足 / mip 链分辨率过低。
+
+### 触发场景
+
+SlimeMetaballPass 输出 HDR 亮区（发光眼 eyeGain≈3.0、金斑、底部光池，值 >1 喂 bloom）后，编辑器视口里亮区周围的 bloom 光晕呈现可见的矩形块状边界（用户描述"马赛克的感觉"），在暗背景 + 平滑渐变区域尤其明显。史莱姆 shader 本身全部是解析平滑函数（smoothstep 椭圆 / 值噪声），不产生矩形伪影，定性为后处理链问题。
+
+### 缺什么（初判，待引擎 session 复核）
+
+- bloom 降采样/上采样链的滤波质量：疑用 bilinear 直采或低 mip 数上采样，缺 tent/Kawase 式加权上采样；
+- 亮度阈值截断（threshold≈0.72）在半分辨率下逐 texel 硬切也会放大块感。
+
+### 期望验收
+
+发光体（emissive 球 / 史莱姆眼）在暗背景下的 bloom 光晕平滑无块状边界；1080p 与 4K 视口均无可见 mip 方块。
+
+### 状态
+
+- **登记**（2026-07-08）。发现 session 按纪律只登记不改引擎；OG 侧已尽量降低对 bloom 的依赖（体色压在阈值下、加性光收敛），残余伪影等引擎侧修复。
+- **2026-07-08 同日只读复核（用户特许跨仓 session）**：引擎 bloom 链实现复核**未发现问题**——`bloom_downsample.frag.glsl`（COD:AW 13-tap + Karis）、`bloom_upsample.frag.glsl`（9-tap tent + additive）、`PipelineBloom.cpp`（逐 mip viewport/scissor 正确）、`hdrSampler`（Linear + ClampToEdge）均正确。且用户截图中的块状伪影是**偏暗方块**——加性 bloom 只加亮不变暗，物证不符。改判主因为 OG slime shader 值噪声（value noise）低频轴对齐格子感（格子尺度 ~70-80px 与伪影吻合），已在 OG 侧修（quintic + 八度旋转）。**待用户复验**：若修后块感消失即在本条目补"撤回原因"收案；若仍在，再按原初判在引擎侧排查（优先怀疑 sampler 经 c7 dedup 路径拿错、及 RGBA16F 半精度带状）。
