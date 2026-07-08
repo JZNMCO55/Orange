@@ -106,6 +106,7 @@
 #include "project/ProjectConfig.h" // M6：.orangeproject → EditorAppConfig 路径解析桥
 #include "project/ProjectFile.h"   // M6：.orangeproject 清单驱动 EditorAppConfig
 #include "render/ThumbnailService.h"
+#include "schema/ComponentSchemaRegistry.h" // M7 §②：DLL schema proc 传入 Instance()
 #include "schema/RegisterBuiltinSchemas.h"
 #include "theme/EditorTheme.h"
 
@@ -1005,6 +1006,27 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
         else
         {
             ORANGE_LOG_ERROR("[OrangeEditor] DLL 游戏模块加载失败，跳过：{}", dllPath);
+        }
+    }
+
+    // M7 §②：DLL 游戏组件 schema 注册通道 —— 逐库调其可选的 OrangeRegisterEditorSchemas
+    // proc，把游戏组件 schema 注册进**编辑器的** ComponentSchemaRegistry（Inspector /
+    // Add-Component 菜单据此 authoring DLL 组件）。纯运行时 dll 无此 proc，静默跳过。
+    // 与内置 schema 同一 registry，热重载时经 ApplyPendingModuleReload 注销 + 重注册。
+    {
+        const std::size_t libCount = editorHost.gameModules.LibraryCount();
+        for (std::size_t i = 0; i < libCount; ++i)
+        {
+            auto* lib = editorHost.gameModules.LibraryAt(i);
+            if (lib == nullptr)
+            {
+                continue;
+            }
+            if (auto proc = lib->RegisterSchemasProc())
+            {
+                proc(&Orange::Editor::Schema::ComponentSchemaRegistry::Instance());
+                ORANGE_LOG_INFO("[OrangeEditor] DLL 游戏模块 schema 已注册（库 {}）", i);
+            }
         }
     }
 

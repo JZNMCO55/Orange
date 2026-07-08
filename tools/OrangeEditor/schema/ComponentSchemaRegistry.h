@@ -32,6 +32,10 @@
 // 需要 EditorHost 的完整定义；ComponentSchema.h 仅前向声明 EditorHost。
 #include "../EditorHost.h"
 
+#include <orange/engine/core/Log.h>
+
+#include <cassert>
+#include <cstddef>
 #include <deque>
 #include <type_traits>
 #include <typeindex>
@@ -45,12 +49,35 @@ namespace Orange::Editor::Schema
     class ComponentSchemaRegistry
     {
     public:
+        // 编辑器进程级单例（out-of-line，仅编辑器 exe 定义 —— game.dll **不**引用它，
+        // DLL 只操作编辑器经 schema proc 传入的 registry 引用，见 Builder::RegisterInto）。
         static ComponentSchemaRegistry& Instance();
 
         // 注册一个 ComponentSchema。同 type_index 重复注册会断言（开发期 bug，
         // 内置 + 游戏侧重名）；schema 通过移动入栈，按注册顺序追加到 mSchemas
         // 末尾——遍历顺序 = 注册顺序 = Inspector 内 component header 顺序。
-        void Register(std::type_index typeIdx, ComponentSchema schema);
+        //
+        // inline（header-only）：让 game.dll 的 OrangeRegisterEditorSchemas 能在自己
+        // 二进制内编译出这段代码、操作编辑器传入的 registry 引用，无需链 orange_editor
+        // 的 .cpp（跨 DLL 边界 schema 注册通道，M7 §②）。
+        void Register(std::type_index typeIdx, ComponentSchema schema)
+        {
+            // 重复注册视为开发期 bug——任何同类型的两次 Register 都意味着
+            // RegisterBuiltinSchemas 或游戏侧扩展点逻辑错误。debug 期 assert；
+            // release 期保留首次注册条目（不覆盖），并记 log。
+            if (auto it = mByType.find(typeIdx); it != mByType.end())
+            {
+                ORANGE_LOG_ERROR("[OrangeEditor] ComponentSchemaRegistry: 重复注册 '{}' —— "
+                                 "保留首次注册条目",
+                                 schema.typeName ? schema.typeName : "(nullptr)");
+                assert(false && "ComponentSchemaRegistry duplicate registration");
+                return;
+            }
+            schema.typeIndex        = typeIdx; // 让存储的 schema 自带类型 id（Unregister 重建索引用）
+            const std::size_t index = mSchemas.size();
+            mSchemas.push_back(std::move(schema));
+            mByType.emplace(typeIdx, index);
+        }
 
         template <typename C>
         void Register(ComponentSchema schema)
@@ -58,10 +85,45 @@ namespace Orange::Editor::Schema
             Register(std::type_index(typeid(C)), std::move(schema));
         }
 
+        // 注销一个已注册 schema（M7 game.dll 卸载前调 —— 摘掉即将随 FreeLibrary 消失的
+        // DLL 代码的 PropertyDescriptor 函数指针）。找不到静默 no-op。deque 中删中间元素
+        // 会位移后续索引，故删除后按存活 schema 的 typeIndex 重建整张 mByType。
+        //
+        // 调用方约定：注销前编辑器已 cmdStack.Clear()（in-flight 命令 lambda 可能捕获
+        // 了被删 schema 的 PropertyDescriptor），且注销发生在 Edit 态。
+        void Unregister(std::type_index typeIdx)
+        {
+            auto it = mByType.find(typeIdx);
+            if (it == mByType.end())
+            {
+                return;
+            }
+            mSchemas.erase(mSchemas.begin() + static_cast<std::ptrdiff_t>(it->second));
+            mByType.clear();
+            for (std::size_t i = 0; i < mSchemas.size(); ++i)
+            {
+                mByType.emplace(mSchemas[i].typeIndex, i);
+            }
+        }
+
+        template <typename C>
+        void Unregister()
+        {
+            Unregister(std::type_index(typeid(C)));
+        }
+
         // 找不到返回 nullptr。返回 const* —— schema 注册后不可变（mutate 会让
         // 已 in-flight 的命令 lambda 捕获过期 PropertyDescriptor 引用，破坏
-        // Undo/Redo 一致性）。
-        const ComponentSchema* Find(std::type_index typeIdx) const;
+        // Undo/Redo 一致性）。inline 理由同 Register。
+        const ComponentSchema* Find(std::type_index typeIdx) const
+        {
+            auto it = mByType.find(typeIdx);
+            if (it == mByType.end())
+            {
+                return nullptr;
+            }
+            return &mSchemas[it->second];
+        }
 
         template <typename C>
         const ComponentSchema* Find() const
@@ -516,14 +578,24 @@ namespace Orange::Editor::Schema
             return *this;
         }
 
-        // 终结：把构造好的 schema 推进全局 registry。注意：不能用 `&&` 引用
+        // 终结：把构造好的 schema 推进指定 registry。注意：不能用 `&&` 引用
         // 限定——builder 的 attribute 链式调用全部返回 `Builder&` (lvalue)，
         // 在 lvalue 上调 `&&` 方法需要显式 std::move，破坏 fluent 体感。
-        // 因此 Register 是普通成员；调用方约定上"每个 builder 只 Register
-        // 一次"，重复调用会进入 registry 重复注册路径触发 assert/log。
+        // 因此是普通成员；调用方约定上"每个 builder 只 Register 一次"，重复调用
+        // 会进入 registry 重复注册路径触发 assert/log。
+        //
+        // RegisterInto(reg)：M7 game.dll schema 通道——DLL 的 OrangeRegisterEditorSchemas
+        // 收到编辑器传入的 registry 引用，把游戏组件 schema 注册进**编辑器的** registry
+        // （而非 DLL 本地 Instance() 副本，那样 Inspector 看不到）。Register() 是
+        // RegisterInto(Instance()) 的便捷别名，内置 schema 注册走它。
+        void RegisterInto(ComponentSchemaRegistry& reg)
+        {
+            reg.Register<C>(std::move(mSchema));
+        }
+
         void Register()
         {
-            ComponentSchemaRegistry::Instance().Register<C>(std::move(mSchema));
+            RegisterInto(ComponentSchemaRegistry::Instance());
         }
 
     private:

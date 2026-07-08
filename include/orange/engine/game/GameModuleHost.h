@@ -96,6 +96,17 @@ namespace Orange::Engine::Game
             return mOwnedLibraries.size();
         }
 
+        // 取第 libIndex 个 DLL 模块库（编辑器 schema 通道用——拿其 Register/Unregister
+        // SchemasProc 在加载后 / 热重载卸载前调）。越界 / 空 slot 返 nullptr。
+        GameModuleLibrary* LibraryAt(std::size_t libIndex) const noexcept
+        {
+            if (libIndex >= mOwnedLibraries.size())
+            {
+                return nullptr;
+            }
+            return mOwnedLibraries[libIndex].get();
+        }
+
         // 任一 DLL 库的原 dll 自加载以来被重编（file watcher）→ 编辑器提示"模块已过期"。
         bool AnyLibraryStale() const
         {

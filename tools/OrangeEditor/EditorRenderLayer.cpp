@@ -25,6 +25,7 @@
 #include "project/AssetPathMount.h"              // M6：scene Save/Load 资产路径虚拟化（project://）
 #include "project/ProjectConfig.h"               // M6：ApplyProjectFileToConfig（Open Project 解析清单）
 #include "render/ThumbnailService.h"             // 材质球缩略图（FlushPending + GetOrRequestThumbnail）
+#include "schema/ComponentSchemaRegistry.h"       // M7 §②：DLL 模块热重载注销 / 重注册 schema
 #include "theme/EditorTheme.h"
 
 #include <orange/engine/asset/AssetHandle.h>
@@ -2188,14 +2189,51 @@ void EditorRenderLayer::ApplyPendingModuleReload()
         return;
     }
 
+    // M7 §②：卸载前注销所有 DLL 库的 schema —— 其 PropertyDescriptor 函数指针指向
+    // 即将随 FreeLibrary 消失的 dll 代码，重载后重注册。cmdStack.Clear() 一次：in-flight
+    // 命令 lambda 可能捕获了 DLL schema 的 PropertyDescriptor（Edit 态清空 undo/redo 安全）。
+    auto& schemaReg   = Orange::Editor::Schema::ComponentSchemaRegistry::Instance();
+    bool  anyDllSchema = false;
+    const std::size_t n = mHost.gameModules.LibraryCount();
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        auto* lib = mHost.gameModules.LibraryAt(i);
+        if (lib != nullptr && lib->UnregisterSchemasProc() != nullptr)
+        {
+            anyDllSchema = true;
+        }
+    }
+    if (anyDllSchema)
+    {
+        mHost.cmdStack.Clear();
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            auto* lib = mHost.gameModules.LibraryAt(i);
+            if (lib != nullptr)
+            {
+                if (auto unreg = lib->UnregisterSchemasProc())
+                {
+                    unreg(&schemaReg);
+                }
+            }
+        }
+    }
+
     // 逐库热重载：原语摘 pass → 卸载旧 dll → 重 Load 新 shadow → 重注册 pass。
-    const std::size_t n  = mHost.gameModules.LibraryCount();
-    std::size_t       ok = 0;
+    std::size_t ok = 0;
     for (std::size_t i = 0; i < n; ++i)
     {
         if (mHost.gameModules.ReloadLibrary(i, *mpScenePipeline) != nullptr)
         {
             ++ok;
+            // 重注册新库的 schema（DLL 组件 Inspector authoring 恢复）。
+            if (auto* lib = mHost.gameModules.LibraryAt(i))
+            {
+                if (auto reg = lib->RegisterSchemasProc())
+                {
+                    reg(&schemaReg);
+                }
+            }
         }
         else
         {

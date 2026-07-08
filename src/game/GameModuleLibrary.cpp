@@ -104,10 +104,19 @@ namespace Orange::Engine::Game
             return nullptr;
         }
 
+        // 可选：编辑器 schema 注册 / 注销 proc（DLL 组件 Inspector authoring，M7 §②）。
+        // 缺失（纯运行时 dll）不致命——留 null，编辑器静默跳过。
+        auto registerSchemas = reinterpret_cast<OrangeRegisterEditorSchemasFn>(
+            reinterpret_cast<void*>(::GetProcAddress(h, "OrangeRegisterEditorSchemas")));
+        auto unregisterSchemas = reinterpret_cast<OrangeUnregisterEditorSchemasFn>(
+            reinterpret_cast<void*>(::GetProcAddress(h, "OrangeUnregisterEditorSchemas")));
+
         auto lib          = std::unique_ptr<GameModuleLibrary>(new GameModuleLibrary());
         lib->mHModule     = h;
         lib->mpModule     = mod;
         lib->mpDestroy    = destroy;
+        lib->mpRegisterSchemas   = registerSchemas;
+        lib->mpUnregisterSchemas = unregisterSchemas;
         lib->mSourcePath     = dllPath;
         lib->mShadowPath     = shadow;
         lib->mSourceWriteTime = srcWriteTime;

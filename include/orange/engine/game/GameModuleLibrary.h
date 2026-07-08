@@ -32,6 +32,15 @@ namespace Orange::Engine::Game
     {
         using OrangeCreateGameModuleFn  = IGameModule* (*)();
         using OrangeDestroyGameModuleFn = void (*)(IGameModule*);
+
+        // 可选的编辑器 schema 注册 / 注销入口（DLL 组件 Inspector authoring，M7 §②）。
+        // 参数 void* = 不透明的编辑器 ComponentSchemaRegistry 指针：引擎层刻意不知其
+        // 真实类型（header isolation——game/ 不得依赖编辑器头）；编辑器把
+        // &ComponentSchemaRegistry::Instance() 传入，DLL 侧 reinterpret_cast 回真实类型
+        // 后把游戏组件 schema 注册进**编辑器的** registry。纯运行时 game.dll 可不导出
+        // 这对入口（proc 为 null，宿主静默跳过）。
+        using OrangeRegisterEditorSchemasFn   = void (*)(void*);
+        using OrangeUnregisterEditorSchemasFn = void (*)(void*);
     }
 
     class ORANGE_ENGINE_API GameModuleLibrary
@@ -57,12 +66,26 @@ namespace Orange::Engine::Game
         // 重编覆盖等）返 false，避免误报。
         bool IsSourceStale() const;
 
+        // 可选的编辑器 schema 注册 / 注销 proc（DLL 未导出则为 null，纯运行时模块）。
+        // 编辑器加载后调 RegisterSchemasProc()(&registry)、FreeLibrary 前调
+        // UnregisterSchemasProc()(&registry)。引擎层只透传裸函数指针，不知其语义。
+        OrangeRegisterEditorSchemasFn RegisterSchemasProc() const noexcept
+        {
+            return mpRegisterSchemas;
+        }
+        OrangeUnregisterEditorSchemasFn UnregisterSchemasProc() const noexcept
+        {
+            return mpUnregisterSchemas;
+        }
+
     private:
         GameModuleLibrary() = default;
 
         void*                           mHModule{nullptr}; // HMODULE，void* 保持公共头无 windows.h
         IGameModule*                    mpModule{nullptr};
         OrangeDestroyGameModuleFn       mpDestroy{nullptr};
+        OrangeRegisterEditorSchemasFn   mpRegisterSchemas{nullptr};   // 可选（null=纯运行时 dll）
+        OrangeUnregisterEditorSchemasFn mpUnregisterSchemas{nullptr}; // 可选
         std::filesystem::path           mSourcePath;       // 原 dll
         std::filesystem::path           mShadowPath;       // 临时副本（析构删）
         std::filesystem::file_time_type mSourceWriteTime{}; // Load 时原 dll 的 mtime（IsSourceStale 基准）
@@ -74,6 +97,18 @@ namespace Orange::Engine::Game
 // game.dll 侧：在游戏模块某个 .cpp 里写一行导出工厂 + 析构：
 //   ORANGE_EXPORT_GAME_MODULE(spike01::SlimeGameModule)
 // 模块类须可默认构造。析构在 dll 内 delete → 跨 DLL 堆 / vtable 安全。
+//
+// 可选（M7 §② DLL 组件 Inspector authoring）：若游戏组件想在共享 OrangeEditor 里
+// 被 Inspector authoring，在 dll 内另写一对 C 导出（编译需接编辑器 schema 头，非引擎
+// 头，故不做成引擎宏——游戏侧按需自写）：
+//   extern "C" __declspec(dllexport) void OrangeRegisterEditorSchemas(void* pRegistry) {
+//       auto& reg = *static_cast<Orange::Editor::Schema::ComponentSchemaRegistry*>(pRegistry);
+//       ComponentSchemaBuilder<MyComp>("MyComp","My Comp").Field<...>(...).RegisterInto(reg);
+//   }
+//   extern "C" __declspec(dllexport) void OrangeUnregisterEditorSchemas(void* pRegistry) {
+//       static_cast<...ComponentSchemaRegistry*>(pRegistry)->Unregister<MyComp>();
+//   }
+// 编辑器加载后调 register(&Instance())、热重载 FreeLibrary 前调 unregister(&Instance())。
 // ---------------------------------------------------------------------------
 #if defined(_WIN32)
     #define ORANGE_GAME_MODULE_EXPORT __declspec(dllexport)

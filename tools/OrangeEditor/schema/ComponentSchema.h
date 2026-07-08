@@ -22,6 +22,8 @@
 #include <orange/engine/scene/Entity.h>
 #include <orange/engine/scene/World.h>
 
+#include <typeindex>
+#include <typeinfo>
 #include <vector>
 
 // EditorHost 前向声明 —— AddFn 签名引用它，但 ComponentSchema.h 本身不需要
@@ -38,6 +40,12 @@ namespace Orange::Editor::Schema
         // 类型 id（编译期字面量）。同时充当 SetFieldValueCommand fieldKey 的
         // 前缀 —— SchemaInspector 拼接 "typeName.propName" 作为 coalesce key。
         const char* typeName = nullptr;
+
+        // 该 schema 对应的 component 类型 id。Register 时由 registry 填入（std::type_index
+        // 无默认构造，先以 typeid(void) 占位）。M7 game.dll schema 注销走它：DLL 卸载前
+        // Unregister(typeIndex) 从 registry 摘掉该 DLL 贡献的 schema（其 PropertyDescriptor
+        // 函数指针指向即将 FreeLibrary 的 dll 代码），并按存活 schema 的 typeIndex 重建索引。
+        std::type_index typeIndex = std::type_index(typeid(void));
 
         // 用户可见的 component header label（CollapsingHeader 标题）。
         const char* displayName = nullptr;
