@@ -588,6 +588,10 @@ orange_engine_add_test(insert_pass_test            render/InsertPassTest.cpp)
 # 构造测 InsertPass 扇出，不接 GPU。
 orange_engine_add_test(game_module_host_test       game/GameModuleHostTest.cpp)
 
+# PlayAssembly（PIE M10）—— 编辑器 / 发布 runtime 共用的 Play 装配同源 helper
+# 行为契约门：真 Box2D body 装配 + StepSimulation 扇出 / preStepHook / 物理让位。
+orange_engine_add_test(play_assembly_test          game/PlayAssemblyTest.cpp)
+
 # Material：.material 文件 v1.1 schema helper（MaterialFileIO）。
 # 不走 orange_engine_add_test：helper 源码在 tools/OrangeEditor/ 不属于引擎 lib，
 # 测试 exe 直接编译它 + 加 include path 取 helper 头。本测试 standalone build

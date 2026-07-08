@@ -261,6 +261,11 @@ add_library(orange_engine
 
     # Game（PIE 玩法宿主）：IGameModule / GameModuleHost 头-only；DLL 加载原语有 .cpp
     src/game/GameModuleLibrary.cpp
+    # PlayAssembly：编辑器宿主与发布 runtime 宿主共用的 Play 装配同源 helper（M10）
+    src/game/PlayAssembly.cpp
+
+    # Runtime（PIE 发布瘦宿主，M10 级别 1）：RuntimeHost::Run 建窗 + 主循环 + 装配同源
+    src/runtime/RuntimeHost.cpp
 )
 
 # ---------------------------------------------------------------------------

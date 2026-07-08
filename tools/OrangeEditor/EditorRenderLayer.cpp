@@ -38,6 +38,7 @@
 #include <orange/engine/audio/AudioEngine.h>
 #include <orange/engine/audio/AudioSourceComponent.h>
 #include <orange/engine/audio/SoundInstance.h>
+#include <orange/engine/game/PlayAssembly.h>      // M10：Play 装配同源 helper（与发布 runtime 宿主共用）
 #include <orange/engine/game/ScriptGameModule.h> // M8：mpScriptModule->ReloadScripts 需完整定义
 #include <orange/engine/asset/AssetRegistry.h>
 #include <orange/engine/core/Log.h>
@@ -191,76 +192,28 @@ void EditorRenderLayer::StepSimulationOnce(float simDt)
         return;
     }
 
-    // PIE 游戏模块 Tick（ADR-021 / M2.2）—— **先于**宿主 physics step 扇出。
-    // 模块自管固定步长（spike-01 现状），simDt 为宿主帧步。空 host（无注册模块）时
-    // 护栏 no-op、零行为变化。ctx 各指针 Edit→Play 已装配（pPhysics 见 S3、pPipeline
-    // 为 viewport 离屏 Pipeline）。
-    {
-        Orange::Engine::Game::GameModuleContext gmCtx{};
-        gmCtx.pWorld    = mHost.scene.pWorld.get();
-        gmCtx.pPhysics  = mpPhysicsWorld.get();
-        gmCtx.pAssets   = mHost.assets.pAssets.get();
-        gmCtx.pPipeline = mpScenePipeline.get();
-        mHost.gameModules.Tick(gmCtx, simDt);
-    }
+    // module Tick → physics → vfx → animators 扇出走引擎层 PlayAssembly 同源
+    // helper（与发布 runtime 宿主共用，消灭"编辑器能跑、发布行为不同"漂移）。
+    // ctx 各指针 Edit→Play 已装配（pPhysics 见 S3、pPipeline 为 viewport 离屏
+    // Pipeline）。preStepHook 注入编辑器独有的 layer 可见性同步——在 physics->Step
+    // 之前对 body enable/disable（partition 是编辑器概念，runtime 无、传空）。
+    Orange::Engine::Game::GameModuleContext gmCtx{};
+    gmCtx.pWorld    = mHost.scene.pWorld.get();
+    gmCtx.pPhysics  = mpPhysicsWorld.get();
+    gmCtx.pAssets   = mHost.assets.pAssets.get();
+    gmCtx.pPipeline = mpScenePipeline.get();
 
-    // Physics step → 把 dynamic body 新位姿写回 ECS Transform。
-    // 任一模块 WantsOwnPhysicsStep 时宿主让位——不自动 Step（模块在自己的
-    // accumulator 内 Step 同一 PhysicsWorld），写回也交模块（ADR-021 开放问题①）。
-    // 原版 OrangeEditor 无模块 → 恒 false → 照常自动 step。
-    if (mpPhysicsWorld != nullptr && !mHost.gameModules.AnyWantsOwnPhysicsStep())
-    {
-        // v0.6 c4：每帧 Step 之前同步 layer.visible → body enabled。
-        // hidden layer 的 dynamic body 不参与积分 / 不产生 contact，匹配
-        // "hide 一个 layer 整个 layer 不要参与物理"的 UX 预期。
-        // partition 由 EditorSceneContext 值成员持有，始终 valid。
-        Orange::Engine::Physics::ApplyLayerVisibility(
-            *mHost.scene.pWorld, mHost.scene.partition, *mpPhysicsWorld);
-        mpPhysicsWorld->Step(simDt);
-        auto& reg = mHost.scene.pWorld->Registry();
-        using TC  = Orange::Engine::Scene::TransformComponent;
-        using namespace Orange::Engine::Physics;
-        for (auto e : reg.view<RigidBodyComponent>())
+    Orange::Engine::Game::StepSimulation(
+        mHost.gameModules, gmCtx, *mHost.scene.pWorld, mpPhysicsWorld.get(),
+        mpVfxSystem.get(), simDt,
+        // v0.6 c4：每帧 Step 之前同步 layer.visible → body enabled。hidden layer
+        // 的 dynamic body 不参与积分 / 不产生 contact（"hide 整个 layer 不参与物理"
+        // UX 预期）。partition 由 EditorSceneContext 值成员持有，始终 valid。
+        [this]()
         {
-            auto& rb = reg.get<RigidBodyComponent>(e);
-            if (rb.type == BodyType::Static)
-            {
-                continue;
-            }
-            if (!mpPhysicsWorld->IsValid(rb.handle))
-            {
-                continue;
-            }
-            const BodyTransform xf = mpPhysicsWorld->GetBodyTransform(rb.handle);
-            auto*               tc = reg.try_get<TC>(e);
-            if (tc != nullptr)
-            {
-                tc->position.x = xf.position.x;
-                tc->position.y = xf.position.y;
-                // 2D 物理只有 Z 轴旋转，直接从角度重建 quat
-                tc->rotation = glm::quat(glm::vec3(0.0f, 0.0f, xf.angle));
-            }
-        }
-    }
-
-    // Particle emitter tick
-    if (mpVfxSystem != nullptr)
-    {
-        mpVfxSystem->Tick(*mHost.scene.pWorld, simDt);
-        // 诊断：每秒打一次粒子计数，确认 sim 是否正常运行
-        static float sDiagTimer = 0.0f;
-        sDiagTimer += simDt;
-        if (sDiagTimer >= 1.0f)
-        {
-            sDiagTimer = 0.0f;
-            ORANGE_LOG_DEBUG("[vfx-diag] live particles: {}",
-                             mpVfxSystem->TotalLiveParticleCount());
-        }
-    }
-
-    // Animator tick —— 走引擎层 Animation::TickAnimators（单一真相源，游戏侧
-    // 消费同一入口；DRY）。遍历所有 AnimatorComponent，对非空 animator 调 Tick。
-    Orange::Engine::Animation::TickAnimators(*mHost.scene.pWorld, simDt);
+            Orange::Engine::Physics::ApplyLayerVisibility(
+                *mHost.scene.pWorld, mHost.scene.partition, *mpPhysicsWorld);
+        });
 
     // Audio: 同步 component 字段 → 已实例化的 SoundInstance（用户在 Play 期改
     // volume / pitch / loop slider 时声音实时跟随）。pitch / loop 公共面尚未暴露，
@@ -2022,72 +1975,25 @@ void EditorRenderLayer::ApplyPendingPlayOp()
                 mHost.scene.playSnapshotBlob = std::move(rc.Value());
             }
 
-            // S3: PhysicsWorld 接入 —— 遍历所有同时挂 RigidBody +
-            //     Collider 的 entity，从 TransformComponent 填 initial
-            //     pos / angle，注册进 PhysicsWorld，handle 反写回 ECS。
+            // S3: PhysicsWorld 接入 —— 建 PhysicsWorld 后走引擎层 PlayAssembly
+            //     同源 helper（与发布 runtime 宿主共用）：遍历同时挂 RigidBody +
+            //     Collider 的 entity 填 initial pos / angle → AddBody → handle 反写。
             {
                 mpPhysicsWorld =
                     std::make_unique<Orange::Engine::Physics::PhysicsWorld>();
-                auto& reg = mHost.scene.pWorld->Registry();
-                using TC  = Orange::Engine::Scene::TransformComponent;
-                using namespace Orange::Engine::Physics;
-                for (auto e : reg.view<RigidBodyComponent, ColliderComponent>())
-                {
-                    auto&       rb = reg.get<RigidBodyComponent>(e);
-                    auto&       cc = reg.get<ColliderComponent>(e);
-                    const auto* tc = reg.try_get<TC>(e);
-                    if (tc != nullptr)
-                    {
-                        rb.initialPosition =
-                            glm::vec2(tc->position.x, tc->position.y);
-                        // glm::eulerAngles 返回 (pitch, yaw, roll) 弧度；
-                        // 2D 平面物理只用 Z 轴旋转（roll）
-                        const glm::vec3 euler = glm::eulerAngles(tc->rotation);
-                        rb.initialAngle       = euler.z;
-                    }
-                    const BodyHandle h = mpPhysicsWorld->AddBody(rb, cc);
-                    rb.handle          = h;
-                }
+                Orange::Engine::Game::PopulatePhysicsFromWorld(*mHost.scene.pWorld,
+                                                               *mpPhysicsWorld);
             }
 
             // Audio: Edit→Play 实例化所有挂 AudioSourceComponent 的实体的
-            //     SoundInstance；playOnAwake=true 即刻 Start。loop /
-            //     volume 通过 SoundInstance 公共面应用（pitch 公共面未暴露，
-            //     mpImpl 内 ma_sound_set_pitch 由 Audio 模块下一版本扩展时
-            //     接通；本期 pitch 字段持久化但运行时无效）。
-            if (mHost.audioEngine.IsInitialized())
+            //     SoundInstance（PlayAssembly 同源 helper）；playOnAwake=true 即刻
+            //     Start，volume 应用。pitch / loop 公共面未暴露（本期 pitch 字段持久化
+            //     但运行时无效）。宿主侧 gate IsInitialized + pAssets 非空。
+            if (mHost.audioEngine.IsInitialized() && mHost.assets.pAssets != nullptr)
             {
-                using namespace Orange::Engine::Audio;
-                using namespace Orange::Engine::Asset;
-                auto& reg     = mHost.scene.pWorld->Registry();
-                auto* pAssets = mHost.assets.pAssets.get();
-                for (auto e : reg.view<AudioSourceComponent>())
-                {
-                    auto& as = reg.get<AudioSourceComponent>(e);
-                    if (!as.sound.IsValid() || pAssets == nullptr)
-                    {
-                        continue;
-                    }
-                    const auto* pSoundAsset = pAssets->Get<SoundAsset>(as.sound);
-                    if (pSoundAsset == nullptr)
-                    {
-                        continue;
-                    }
-                    auto inst = mHost.audioEngine.CreateInstance(*pSoundAsset);
-                    if (!inst.IsValid())
-                    {
-                        continue;
-                    }
-                    inst.SetVolume(as.volume);
-                    if (as.playOnAwake)
-                    {
-                        inst.Start();
-                    }
-                    Orange::Engine::Entity eWrap{static_cast<std::uint64_t>(
-                        static_cast<std::uint32_t>(e))};
-                    mEntityToSoundInstance[eWrap] = std::make_unique<
-                        SoundInstance>(std::move(inst));
-                }
+                Orange::Engine::Game::InstantiateAudioSources(
+                    *mHost.scene.pWorld, mHost.audioEngine, *mHost.assets.pAssets,
+                    mEntityToSoundInstance);
             }
 
             // S4: VfxSystem 接入 —— 需要 Pipeline 已就绪（Scene 面板
