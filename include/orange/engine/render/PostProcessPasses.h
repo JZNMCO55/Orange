@@ -48,6 +48,11 @@ namespace Orange::Engine::Render
         // 与原 color 混合的强度。0.5 = 50% 原色 + 50% bloom。
         float intensity{0.5f};
 
+        // bright-pass 后的亮源钳制上限（逐分量 min）。HDR 环境贴图的极亮源
+        //（夜景路灯动辄数百量级 radiance）不钳制会在 mip 链扩散成巨型白团
+        // 光晕。默认 12：常规 emissive（1~8）不受影响，只压超亮源；<=0 不钳。
+        float clampMax{12.0f};
+
         const char* Name() const noexcept override;
         void        Setup(PostProcessSetupContext& ctx) override;
         void        Execute(PostProcessExecuteContext& ctx) override;

@@ -6,11 +6,33 @@
 
 #include "orange/engine/core/Profiler.h"
 
+#include <glm/matrix.hpp>
+#include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
 namespace Orange::Engine::Render
 {
+
+    // 正交相机的 invViewProj 射线重建退化：unproject 出的远平面点相对相机方向
+    // 逐像素恒同，cubemap 天空整屏采同一方向 = 无结构单色（2D 机位黑天根因）。
+    // 检测到正交投影（w 行无 -view-z 项）时，改用同 view 的虚拟透视（60° 纵向
+    // FOV，Camera::Perspective 的 Vulkan 约定矩阵）生成天空射线。
+    glm::mat4 Pipeline::Impl::MakeSkyInvViewProj(const Camera&    cam,
+                                                 const glm::mat4& invViewProj) const
+    {
+        if (cam.projection[2][3] != 0.0f) // 透视：w 行含 -view-z
+        {
+            return invViewProj;
+        }
+        const float aspect =
+            (hdrHeight > 0)
+                ? static_cast<float>(hdrWidth) / static_cast<float>(hdrHeight)
+                : 1.0f;
+        const glm::mat4 skyProj =
+            Camera::Perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f).projection;
+        return glm::inverse(skyProj * cam.view);
+    }
 
     bool Pipeline::Impl::EnsureSkyDescSet()
     {

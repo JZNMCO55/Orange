@@ -219,10 +219,12 @@ namespace Orange::Engine::Render
             struct PushDown
             {
                 float threshold;
-                float pad0, pad1, pad2;
+                float clampMax; // 亮源钳制上限（仅 bright-pass 跳生效；<=0 不钳）
+                float pad1, pad2;
             };
             PushDown pcData{};
             pcData.threshold = (i == 0) ? bloomDesc.threshold : 0.0f;
+            pcData.clampMax  = bloomDesc.clampMax;
             cmd.SetPushConstants(Orange::Rhi::ShaderStage::Fragment,
                                  0, static_cast<std::uint32_t>(sizeof(pcData)), &pcData);
 

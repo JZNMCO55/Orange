@@ -336,6 +336,9 @@ private:
     // EnsureScenePipeline 失败 / chain reset 路径下保持 nullptr，UI 段做 null
     // 守卫早退。
     Orange::Engine::Render::TonemapPass* mpTonemapPassRef{nullptr};
+    // Game chain 的 TonemapPass 缓存（同上非拥有惯例）：Render Settings 只编辑
+    // scene chain，DrawGamePanel 每帧镜像 op/exposure 保证双视口色调一致。
+    Orange::Engine::Render::TonemapPass* mpGameTonemapPassRef{nullptr};
     // v1.1 T2：File→Import... 菜单点击时置 true，下次 ApplyPendingImports
     // 帧首弹 ShowImportFileDialog 拿路径 push 到 host.pendingImports；走
     // 完即清 flag。drag-drop 路径不经此 flag（callback 直接 push 队列）。

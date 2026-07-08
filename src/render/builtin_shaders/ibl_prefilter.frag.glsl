@@ -41,6 +41,10 @@ layout(push_constant) uniform PushConstants
 
 const float kPi = 3.14159265358979323846;
 
+// firefly 抑制：极亮 HDR texel（夜景路灯动辄数百量级 radiance）被单个 IS
+// 样本命中会在粗糙 mip 留下亮斑点。逐样本钳制——反射里灯仍亮但不再出斑。
+const float kMaxSampleRadiance = 24.0;
+
 float RadicalInverseVdC(uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
@@ -114,7 +118,9 @@ void main()
         {
             // mip 0（roughness ≈ 0）下，IS 公式分母趋零，textureLod mip 0
             // 直接采样 envCube；这里仍走 weighted 平均，N=1024 数值稳定。
-            prefilteredColor += textureLod(uEnvCube, L, 0.0).rgb * NoL;
+            vec3 li = min(textureLod(uEnvCube, L, 0.0).rgb,
+                          vec3(kMaxSampleRadiance));
+            prefilteredColor += li * NoL;
             totalWeight      += NoL;
         }
     }

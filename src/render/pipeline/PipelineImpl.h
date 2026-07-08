@@ -1305,6 +1305,10 @@ namespace Orange::Engine::Render
         // bakedEnvCube 重建后分配 / 重写 skySet。
         bool EnsureSkyDescSet();
 
+        // sky 射线重建用 invViewProj：透视相机原样返回；正交相机（典型 2D 机位）
+        // 换同 view 的虚拟透视——正交 invVP 逐像素方向恒同，天空盒会退化成单色。
+        glm::mat4 MakeSkyInvViewProj(const Camera& cam, const glm::mat4& invViewProj) const;
+
         // 录制 sky-dome pass（主 pass 之前）。
         bool RecordSkyPass(const glm::mat4& invViewProj, const glm::vec3& cameraPos,
                            const glm::vec3& tint, float intensity);

@@ -23,7 +23,7 @@ layout(set = 0, binding = 0) uniform sampler2D uSource;
 layout(push_constant, std430) uniform Push
 {
     float uThreshold;     //  4 字节  —— bright-pass 阈值，0 表示不做 bright-pass
-    float uPad0;          //  8
+    float uClampMax;      //  8      —— 亮源钳制上限（bright-pass 跳生效；<=0 不钳）
     float uPad1;          // 12
     float uPad2;          // 16  （std430 对齐 16 字节边界）
 } pc;
@@ -93,6 +93,13 @@ void main()
 
         // bright-pass：每分量减阈值，clamp 到 0+。
         result = max(result - vec3(pc.uThreshold), vec3(0.0));
+
+        // 亮源钳制：HDR 环境里的极亮源（夜景路灯等百量级 radiance）不封顶
+        // 会在 mip 链扩散成巨型光晕；钳到 uClampMax 保留"发光"但止住白团。
+        if (pc.uClampMax > 0.0)
+        {
+            result = min(result, vec3(pc.uClampMax));
+        }
     }
     else
     {

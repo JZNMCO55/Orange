@@ -2223,14 +2223,16 @@ namespace Orange::Engine::Render
                                              : glm::vec3(1.0f, 0.95f, 0.85f);
                 float     sunIntensity = (activeLight != nullptr) ? activeLight->intensity : 1.0f;
 
+                const glm::mat4 skyInvViewProj =
+                    impl.MakeSkyInvViewProj(impl.scene.MainCamera(), invViewProj);
                 if (impl.bakedEnvCube)
                 {
-                    skyDrew = impl.RecordSkyPass(invViewProj, cameraWorldPos,
+                    skyDrew = impl.RecordSkyPass(skyInvViewProj, cameraWorldPos,
                                                  envTint, envIntensity);
                 }
                 else
                 {
-                    skyDrew = impl.RecordProceduralSkyPass(invViewProj, cameraWorldPos,
+                    skyDrew = impl.RecordProceduralSkyPass(skyInvViewProj, cameraWorldPos,
                                                            sunDir, sunColor, sunIntensity);
                 }
             }
@@ -3329,7 +3331,9 @@ namespace Orange::Engine::Render
                 bool skyDrew = false;
                 if (offscreenOk && impl.skyEnabled)
                 {
-                    const glm::mat4 invViewProjSky = glm::inverse(viewProj);
+                    const glm::mat4 invViewProjSky =
+                        impl.MakeSkyInvViewProj(impl.scene.MainCamera(),
+                                                glm::inverse(viewProj));
                     glm::vec3       sunDir         = (activeLight != nullptr)
                                                          ? -glm::normalize(activeLightDir)
                                                          : glm::normalize(glm::vec3(0.4f, 1.0f, 0.3f));

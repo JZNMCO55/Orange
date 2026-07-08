@@ -1122,6 +1122,19 @@ bool EditorRenderLayer::EnsureGamePipeline(std::uint32_t width, std::uint32_t he
             Orange::Engine::Render::BuiltinPostProcessChain::CreateDefault());
         mpGamePipeline->SetPostProcessChain(mpGamePostProcessChain.get());
 
+        // 缓存 game chain 的 TonemapPass —— Render Settings 只编辑 scene chain，
+        // DrawGamePanel 每帧镜像 op/exposure（防双视口色调分叉）。
+        mpGameTonemapPassRef = nullptr;
+        for (std::size_t i = 0; i < mpGamePostProcessChain->PassCount(); ++i)
+        {
+            if (auto* tp = dynamic_cast<Orange::Engine::Render::TonemapPass*>(
+                    mpGamePostProcessChain->PassAt(i)))
+            {
+                mpGameTonemapPassRef = tp;
+                break;
+            }
+        }
+
         // 首帧 push 一次编辑器档 shadow 配置，让 initial shadow target 按分辨率建。
         mpGamePipeline->SetShadowConfig(mShadowConfig);
 
@@ -1230,6 +1243,13 @@ void EditorRenderLayer::DrawGamePanel()
         // colliders —— 那些是编辑器 overlay，Game 视口是游戏画面。
         mpGamePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
         mpGamePipeline->SetShadowConfig(mShadowConfig);
+        // tonemap 镜像：Render Settings 面板只编辑 scene chain 的 TonemapPass，
+        // 这里每帧同步 op/exposure —— 双视口色调一致（WYSIWYG）。
+        if (mpTonemapPassRef != nullptr && mpGameTonemapPassRef != nullptr)
+        {
+            mpGameTonemapPassRef->op       = mpTonemapPassRef->op;
+            mpGameTonemapPassRef->exposure = mpTonemapPassRef->exposure;
+        }
 
         // Pipeline.Render 内部 WaitIdle —— 返回时 GPU 已空，RemoveTexture(旧) +
         // AddTexture(新) 才安全。
