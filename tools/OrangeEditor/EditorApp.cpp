@@ -529,8 +529,13 @@ int Orange::Editor::RunEditorApp(int argc, char** argv, EditorAppConfig config)
 
     auto                           pRenderer = Orange::Renderer::CreateRenderer();
     Orange::Renderer::RendererDesc rendererDesc{};
-    rendererDesc.mpDevice             = &pRenderDevice->GetRhiDevice();
-    rendererDesc.mpNativeWindowHandle = glfwWindow;
+    rendererDesc.mpDevice = &pRenderDevice->GetRhiDevice();
+    // SHARED 拓扑下 orange_render.dll 自持的 GLFW 副本未初始化，GLFWwindow* 在渲染器侧
+    // 不可用——传 Win32 HWND 走 vkCreateWin32SurfaceKHR 直接路径。经引擎 Window 取
+    //（glfwGetWin32Window 在创建窗口的那份 GLFW 内执行）；非 Windows 回退 GLFWwindow*。
+    void* nativeWindowHandle          = host->GetWindow().GetNativeWindowHandle();
+    rendererDesc.mpNativeWindowHandle = nativeWindowHandle != nullptr ? nativeWindowHandle
+                                                                      : static_cast<void*>(glfwWindow);
     rendererDesc.mFramesInFlight      = 2;
     if (Orange::Failed(pRenderer->Initialize(rendererDesc)))
     {

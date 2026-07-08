@@ -165,8 +165,13 @@ namespace Orange::Engine::Render
         }
 
         Orange::Renderer::RendererDesc rendererDesc{};
-        rendererDesc.mpDevice             = &impl.renderDevice->GetRhiDevice();
-        rendererDesc.mpNativeWindowHandle = window.GetGlfwWindowHandle();
+        rendererDesc.mpDevice = &impl.renderDevice->GetRhiDevice();
+        // SHARED 拓扑下渲染器 DLL 的 GLFW 副本未初始化——优先传 Win32 HWND 走
+        // surface 直接路径；非 Windows 平台回退 GLFWwindow*（单模块拓扑可用）。
+        void* nativeWindowHandle          = window.GetNativeWindowHandle();
+        rendererDesc.mpNativeWindowHandle = nativeWindowHandle != nullptr
+                                                ? nativeWindowHandle
+                                                : window.GetGlfwWindowHandle();
         rendererDesc.mFramesInFlight      = 2;
 
         if (Orange::Failed(impl.renderer->Initialize(rendererDesc)))
