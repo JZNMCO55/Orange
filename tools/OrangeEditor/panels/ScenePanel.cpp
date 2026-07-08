@@ -296,16 +296,29 @@ void EditorRenderLayer::DrawScenePanel()
         // pointer 非拥有，partition 与 EditorSceneContext 同生命周期，
         // 始终 valid，无需 null 检查。
         mpScenePipeline->SetWorldPartition(&mHost.scene.partition);
-        mpScenePipeline->SetEditorCameraOverride(&mEditorCameraOverride);
+        // Play 视角锁定：Play/Paused 且世界有游戏相机（Camera 组件）时，Scene 视口
+        // 让位给游戏相机（2D 项目 = 锁游戏机位），编辑器叠加层（grid / debug /
+        // colliders）与背景（sky / 清屏色）一并让位——游戏模块 OnEnterPlay 可自设
+        // 背景不被每帧重申覆盖。Stop 回 Edit 后本函数每帧重申自动还原编辑器状态。
+        const bool playCameraLock =
+            mHost.scene.playState != PlayState::Edit &&
+            !mHost.scene.pWorld->Registry().view<Orange::Engine::Render::Camera>().empty();
+        mpScenePipeline->SetEditorCameraOverride(playCameraLock ? nullptr
+                                                                : &mEditorCameraOverride);
         // viewport toolbar toggle → Pipeline 状态：每帧 push（开销极小，
         // 避免在 toggle 改变时维护额外 dirty 标记）。
         // v1.3.0 grid 真迁出：toggle 直接写编辑器自家 provider 的 enable 状态
         //（不再走 engine 公共 API），engine 端无任何 grid 资源残留。
         if (mpEditorGridProvider)
         {
-            mpEditorGridProvider->SetEnabled(mHost.settings.viewportGridEnabled);
+            mpEditorGridProvider->SetEnabled(!playCameraLock &&
+                                             mHost.settings.viewportGridEnabled);
         }
-        mpScenePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
+        if (!playCameraLock)
+        {
+            mpScenePipeline->SetSkyEnabled(mHost.settings.viewportSkyEnabled);
+            mpScenePipeline->SetSceneClearColor(0.12f, 0.12f, 0.13f);
+        }
         // debug-view mode（toolbar combo）每帧 push。0=Lit / 1=Normals。
         mpScenePipeline->SetDebugViewMode(
             sViewportDebugViewMode == 1   ? Orange::Engine::Render::DebugViewMode::Normals
@@ -325,10 +338,11 @@ void EditorRenderLayer::DrawScenePanel()
         if (auto* dbg = mpScenePipeline->GetDebugDrawScene())
         {
             const bool anyDebugGeom =
-                mHost.settings.viewportDebugDrawEnabled || mHost.settings.viewportCollidersEnabled;
+                !playCameraLock && (mHost.settings.viewportDebugDrawEnabled ||
+                                    mHost.settings.viewportCollidersEnabled);
             dbg->SetEnabled(anyDebugGeom);
 
-            if (mHost.settings.viewportDebugDrawEnabled)
+            if (anyDebugGeom && mHost.settings.viewportDebugDrawEnabled)
             {
                 // 原点 3 轴坐标（X 红 / Y 绿 / Z 蓝，长度 1.5）—— ABGR
                 // packed：低 8 位 R，高 8 位 A。
@@ -363,7 +377,7 @@ void EditorRenderLayer::DrawScenePanel()
                 }
             }
 
-            if (mHost.settings.viewportCollidersEnabled)
+            if (anyDebugGeom && mHost.settings.viewportCollidersEnabled)
             {
                 Orange::Editor::DrawColliders(
                     *dbg,
